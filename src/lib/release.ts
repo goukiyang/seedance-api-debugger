@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '设置模板可以改名、更新和删除；模块上下文新增稳定五位版本码；生成按钮移到主图上方，结果卡移除交付详情。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '新增人物生成工具和参考区入口；素材窗口可从我的素材库删除并撤销；生成图片单击只选中，下方悬停显示恢复设置按钮。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

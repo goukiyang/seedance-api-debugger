@@ -5,7 +5,7 @@ import { useProductDialog } from '@/components/useProductDialog';
 import { ContextClipboardActions } from '@/components/ContextClipboardActions';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Clipboard, Copy, Download, Eye, ImagePlus, Settings, X, RefreshCw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
+import { Clipboard, Copy, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
 import { ContextVersionLabel, useModuleContextVersion } from './context-version-label';
 import { uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
@@ -686,6 +686,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const [reproductionGlobalContext, setReproductionGlobalContext] = useState<string | null>(null);
   const [reproductionContextConfigured, setReproductionContextConfigured] = useState(false);
   const [appliedSource, setAppliedSource] = useState<{ taskId: string; label: string; signature: string; modified: boolean } | null>(null);
+  const [selectedResultId, setSelectedResultId] = useState<string | null>(null);
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [persistedDraftSignature, setPersistedDraftSignature] = useState<string | null>(null);
   const [draftRestoring, setDraftRestoring] = useState(false);
@@ -1636,8 +1637,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           <div className={styles.resultMedia} data-reaction-surface>{task.asset ? <>
             {task.asset.id && <ContentReactions contentKey={`asset:${task.asset.id}`} overlay />}
             <ResultImageCover src={task.asset.thumbnail_url || undefined} alt={`生成结果 ${task.ordinal}`}
-              disabledReason={restoreDisabledReason(task)} applied={sourceApplied && appliedSource?.taskId === task.id}
-              onRestore={() => restoreTask(task)} onPreview={() => openTaskPreview(task)} />
+              selected={selectedResultId === task.id} applied={sourceApplied && appliedSource?.taskId === task.id}
+              onSelect={() => setSelectedResultId(task.id)} onPreview={() => openTaskPreview(task)} />
             {downloadMode && <input className={styles.select} type="checkbox" aria-label={`选择第 ${task.ordinal} 张图片`} checked={selected.includes(task.id)} onChange={event => {
               if (event.target.checked && selected.length >= 8) { setError('每次最多下载 8 张'); return; }
               setSelected(current => event.target.checked ? [...current, task.id] : current.filter(id => id !== task.id));
@@ -1646,6 +1647,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
             <span role="status">{studioTaskPhase(task)}</span>
             {['download', 'recover'].includes(task.delivery?.phase || '') && Number(task.delivery?.expectedBytes) > 0 && task.delivery?.receivedBytes != null && <span>{Math.min(100, Math.floor(task.delivery.receivedBytes / task.delivery.expectedBytes! * 100))}% 字节已接收</span>}
           </div>}<button type="button" className={styles.deleteResult} disabled={deleting || downloadBusy} title="删除生成记录" aria-label={`删除第 ${task.ordinal} 张生成记录`} onClick={() => { setDeleteError(''); setDeleteTarget(task); }}><Trash2 size={17} /></button></div>
+          <div className={styles.restoreFooter}>{task.asset && <button type="button" className={styles.restoreResult} disabled={Boolean(restoreDisabledReason(task))} title={restoreDisabledReason(task) || '恢复这张图片的完整设置，不生成图片'} onClick={event => {
+            event.stopPropagation();
+            void (async () => {
+              if ((unpersistedDraft || moduleContext !== savedModuleContext || fixedDirty || dirty || automaticDirty) && !(await confirm('当前未保存的设置将被这张图片的历史设置替换，继续恢复？', { title: '恢复设置', confirmLabel: '恢复设置' }))) return;
+              const reason = restoreTask(task); if (reason) setError(reason);
+            })();
+          }}><RotateCcw size={15} />恢复设置</button>}</div>
           <div className={styles.resultHeading}>
             <p className={styles.prompt}>{name} · {task.ordinal}</p>
             <span className={styles.resultOwner} aria-label="生成者"><UserIdentityBadge user={task.owner} size="sm" className="asset-card-user" /></span>
@@ -1681,6 +1689,21 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       title={imageSourceTarget === 'banner' ? '替换封面' : imageSourceTarget === 'fixed' ? '添加固定参考图' : imageSourceTarget === 'auxiliary' ? '添加参考图' : referenceLimit === 1 && images.length ? '替换主图' : '添加主图'}
       confirmLabel={imageSourceTarget === 'banner' ? '替换封面' : imageSourceTarget === 'fixed' ? '添加到固定参考区' : imageSourceTarget === 'auxiliary' ? '添加到参考区' : referenceLimit === 1 && images.length ? '替换主图' : '添加到主图'}
       purpose={imageSourceTarget}
+      avatarTarget={imageSourceTarget==='reference'||imageSourceTarget==='auxiliary' ? {kind:'image-module',id:module.id,revision:module.revision,currentAssetIds:[...images,...auxiliaryImages].flatMap(image=>image.id?[image.id]:[]),capacity:Math.max(0,imageSourceTarget==='auxiliary'?currentAuxiliaryCap-auxiliaryImages.length:currentReferenceCap-images.length),sourceSignature:JSON.stringify([module.id,module.revision,generationDraft,imageSourceTarget,images,auxiliaryImages])} : undefined}
+      onAvatarConfirm={async (_ids, assets) => {
+        if (submitting || pendingSubmission || uploading || bannerUploading || draftRestoring || !draftLoaded) throw new Error('当前草稿尚未就绪，请稍后返回');
+        const picked=(assets||[]).filter(a=>a.type==='image'&&a.originalUrl);
+        if(picked.length!==1||_ids.length!==1)throw new Error('人物返回只允许一张图片');
+        if([...images,...auxiliaryImages].some(i=>i.id===picked[0].id))return;
+        const primary=imageSourceTarget==='reference';
+        if(!primary&&imageSourceTarget!=='auxiliary')throw new Error('目标参考区已改变');
+        if(primary?images.length>=currentReferenceCap:auxiliaryImages.length>=currentAuxiliaryCap)throw new Error('参考区已满，没有替换已有图片');
+        const nextImages=primary?[...images,...picked]:images, nextAuxiliary=primary?auxiliaryImages:[...auxiliaryImages,...picked];
+        const nextPolicy={...referencePolicy,primaryIds:nextImages.flatMap(i=>i.id?[i.id]:[])};
+        const payload={schemaVersion:2,prompt,count,referenceLimit,referencePolicy:nextPolicy,aspectRatio,resolution,images:[...nextImages,...nextAuxiliary].map(i=>({id:i.id})),context:contextEditable?moduleContext:undefined,fixedReferences:fixedEditable?fixedReferences.map(i=>({id:i.id,note:i.note})):undefined,styleGroupIds:styleGroups.map(g=>g.id),model:moduleModel,quality,reproduceSourceTaskId:reproduceSourceTaskId||null,revision:moduleRevision};
+        try{localStorage.setItem(draftKey,JSON.stringify(payload));}catch{throw new Error('人物图片尚未存入本机草稿，未完成回填，请勿关闭原页面');}
+        setImages(nextImages);setAuxiliaryImages(nextAuxiliary);
+      }}
       portalContainer={imageSourceTarget === 'fixed' ? moduleDialog.current : undefined}
       currentCount={imageSourceTarget === 'banner' ? 0 : imageSourceTarget === 'fixed' ? fixedReferences.length : imageSourceTarget === 'auxiliary' ? auxiliaryImages.length : images.length}
       currentAssetIds={imageSourceTarget === 'banner' ? [] : (imageSourceTarget === 'fixed' ? fixedReferences : imageSourceTarget === 'auxiliary' ? auxiliaryImages : images).flatMap(image => image.id ? [image.id] : [])}

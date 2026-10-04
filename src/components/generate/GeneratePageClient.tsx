@@ -25,7 +25,7 @@ import {
 import { formatProviderUsdCharge } from '@/lib/costs/currency';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { externalFallbackPath, isExternalUser } from '@/lib/access/external-role';
-import { showVideoCardManagementUi } from '@/lib/navigation';
+import { isNavItemVisible, showVideoCardManagementUi } from '@/lib/navigation';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import {
   normalizeGenerationDefaults,
@@ -306,7 +306,7 @@ interface GenerateSurfaceConfig {
   titleLead: string;
   titleAccent: string;
   subtitle: string;
-  heroLinks: Array<{ href: string; label: string; adminOnly?: boolean; externalHidden?: boolean }>;
+  heroLinks: Array<{ href: string; label: string; adminOnly?: boolean; externalHidden?: boolean; imageStudioOnly?: boolean }>;
   notice?: string;
   submitDisabledReason?: string;
   modelLabel: string;
@@ -326,6 +326,7 @@ const GENERATE_SURFACE_CONFIG: Record<GenerateSurface, GenerateSurfaceConfig> = 
       { href: '/generate/enhance', label: '视频超分', adminOnly: true },
       { href: '/projects', label: '查看我的项目' },
       { href: '/generate/ip', label: 'IP生成' },
+      { href: '/tools/avatar-studio', label: '人物生成', imageStudioOnly: true },
     ],
     modelLabel: 'Seedance 2.0',
   },
@@ -336,6 +337,7 @@ const GENERATE_SURFACE_CONFIG: Record<GenerateSurface, GenerateSurfaceConfig> = 
     subtitle: '可以生成IP授权视频',
     heroLinks: [
       { href: '/generate', label: '普通生成', externalHidden: true },
+      { href: '/tools/avatar-studio', label: '人物生成', imageStudioOnly: true },
       { href: '/generate/enhance', label: '视频超分', adminOnly: true },
       { href: '/projects', label: '查看我的项目' },
     ],
@@ -2085,6 +2087,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
               {surfaceConfig.heroLinks
                 .filter((link) => !link.adminOnly || currentUser?.role === 'admin')
                 .filter((link) => !link.externalHidden || !isExternalUser(currentUser))
+                .filter((link) => isNavItemVisible(link,currentUser))
                 .map((link) => (
                 <Link href={link.href} className="composer-hero-action composer-hero-action-secondary" key={link.href}>
                   {link.label}

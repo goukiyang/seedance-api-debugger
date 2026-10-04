@@ -10,6 +10,7 @@ import { cancelPageExit, getPageExitRisk, refreshPage } from '@/lib/hooks/page-e
 import styles from './CreditRequestDialog.module.css';
 
 export default function ReleaseNotice() {
+  const laterKey=`sd2:release:later:video-api-debugger:${release.channel}`;
   const { user } = useAppSession();
   const pathname = usePathname();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -32,17 +33,17 @@ export default function ReleaseNotice() {
       const data = await response.json();
       if (data.channel !== release.channel || !/^\d+\.\d+\.\d+$/.test(data.version)) throw new Error('unknown');
       let dismissed = false;
-      try { dismissed = localStorage.getItem('sd2:release:later') === data.version; } catch { /* Storage may be unavailable. */ }
+      try { dismissed = localStorage.getItem(laterKey) === data.version || localStorage.getItem('sd2:release:later') === data.version; } catch { /* Storage may be unavailable. */ }
       if (newerRelease(data.version, release.version)) {
         if (manual || !dismissed) setTarget(data);
         setMessage(`可更新至 v${data.version}`);
       } else if (data.version === release.version) {
         setMessage('当前已是最新版本');
-        try { localStorage.removeItem('sd2:release:later'); } catch { /* Optional persistence. */ }
+        try { localStorage.removeItem(laterKey);localStorage.removeItem('sd2:release:later'); } catch { /* Optional persistence. */ }
       } else setMessage('暂无法确认更新，请稍后重试');
     } catch { if (manual) setMessage('检查失败，请重试'); }
     finally { inFlight.current = false; setChecking(false); }
-  }, []);
+  }, [laterKey]);
   useEffect(() => {
     const checkVisible = () => { if (document.visibilityState === 'visible') void check(); };
     checkVisible(); const timer = setInterval(checkVisible, 300000);
@@ -51,7 +52,7 @@ export default function ReleaseNotice() {
     return () => { clearInterval(timer); window.removeEventListener('focus', checkVisible); document.removeEventListener('visibilitychange', checkVisible); };
   }, [check]);
   useEffect(() => { if (target) dialog.current?.showModal(); }, [target]);
-  const later = () => { cancelPageExit(); try { if (target) localStorage.setItem('sd2:release:later', target.version); } catch { /* Optional persistence. */ } setTarget(null); setRisk(null); setRefreshError(''); };
+  const later = () => { cancelPageExit(); try { if (target) localStorage.setItem(laterKey, target.version); } catch { /* Optional persistence. */ } setTarget(null); setRisk(null); setRefreshError(''); };
   useEffect(() => {
     if (!target || !risk) return;
     const timer = setInterval(() => {

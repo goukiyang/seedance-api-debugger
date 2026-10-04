@@ -10,6 +10,7 @@ import { canRequestTaskThumbnail, shouldExposeTaskThumbnailUrl } from '@/lib/vid
 import { videoDeliveryStageForTask, type VideoDeliveryStage } from '@/lib/video/delivery-status';
 import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
 import { studioHiddenAssetUrls, studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
+import { removedLibraryAssetIds } from '@/lib/assets/library-removal';
 import { estimateNormalVideoCharge, loadNormalVideoChargeRates, type NormalVideoChargeEstimate } from '@/lib/costs/normal-video-charge';
 
 export const dynamic = 'force-dynamic';
@@ -619,6 +620,8 @@ async function loadAssetItems(options: {
   const where: PrismaTypes.AssetWhereInput = {
     status: options.status === 'hidden' ? { in: ['hidden', 'deleted'] } : 'active',
   };
+  const removedIds = await removedLibraryAssetIds(options.userId);
+  if (removedIds.length && options.status !== 'hidden') where.id = { notIn: removedIds };
   const hiddenUrls = await studioHiddenAssetUrls(options.user);
   if (hiddenUrls.length) where.original_url = { notIn: hiddenUrls };
   if (options.type === 'image') where.type = 'image';
@@ -663,7 +666,7 @@ async function loadAssetItems(options: {
         ? Prisma.sql`AND asset."owner_id" = ${options.ownerUserId}`
         : Prisma.empty;
     const keywordFilter = options.keyword ? Prisma.sql`AND asset."file_name" LIKE ${`%${options.keyword}%`}` : Prisma.empty;
-    const privacyFilter = hiddenUrls.length ? Prisma.sql`AND asset."original_url" NOT IN (${Prisma.join(hiddenUrls)})` : Prisma.empty;
+    const privacyFilter = Prisma.sql`${hiddenUrls.length ? Prisma.sql`AND asset."original_url" NOT IN (${Prisma.join(hiddenUrls)})` : Prisma.empty} ${removedIds.length && options.status !== 'hidden' ? Prisma.sql`AND asset."id" NOT IN (${Prisma.join(removedIds)})` : Prisma.empty}`;
     const generatedFilter = Prisma.sql`AND EXISTS (
       SELECT 1 FROM "ImageStudioTask" generated_task
       WHERE generated_task."asset_id" = asset."id" AND generated_task."status" = 'succeeded'

@@ -8,6 +8,7 @@ import NotificationBell from './NotificationBell';
 import CreditRequestDialog from './CreditRequestDialog';
 import { isNavItemVisible, topbarQuickItems } from '@/lib/navigation';
 import { release } from '@/lib/release';
+import ToolsMenu from './ToolsMenu';
 
 export interface ComposerCreditSummary {
   available?: number;
@@ -53,7 +54,7 @@ export default function ComposerTopbar({
         <nav className="composer-topbar-nav" aria-label="快捷入口">
           {topbarQuickItems
             .filter((item) => isNavItemVisible(item, user))
-            .map((item) => (
+            .map((item) => item.label === '工具' ? <ToolsMenu key="tools" user={user} /> : (
             <Link
               key={item.href}
               href={item.href}

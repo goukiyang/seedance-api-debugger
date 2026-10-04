@@ -81,3 +81,5 @@
   .footer { padding: 12px 14px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; } .selection { width: 100%; min-height: 0; } .selectedThumb { width: 48px; height: 48px; } .footerActions { justify-content: flex-end; } .footerActions .primary { flex: 1; }
 }
 @media (max-width: 340px) { .grid { grid-template-columns: minmax(0, 1fr); } .segments button { padding: 7px; } .tabs { gap: 13px; } }
+.removeButton { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 32px; border: 0; border-top: 1px solid var(--border-color, #dce1e6); background: transparent; color: var(--text-secondary, #66717c); cursor: pointer; }
+.removeButton:hover { color: #c84949; background: rgba(200, 73, 73, .06); }

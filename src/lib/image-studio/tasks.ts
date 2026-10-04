@@ -19,6 +19,7 @@ import { getStudioModuleStyleIds, parseStudioStyleIds, resolveStudioStyleReferen
 import { studioVisibleAssetWhere } from './protected-assets';
 import { defaultStudioReferencePolicy, getStudioModuleReferencePolicy, mapStudioReferencePolicy, parseStudioReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
 import { DEFAULT_STUDIO_PRIMARY_MAX } from './limits';
+import type { AvatarCandidate } from '@/lib/avatar-random/types';
 
 export class StudioError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -119,12 +120,13 @@ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] 
   catch { throw new StudioError('历史固定参考图快照无效', 409); }
 }
 
-export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>) {
+export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }) {
   const input = parseStudioRequest(body);
   const moduleId = body.moduleId;
+  if (avatar && (moduleId !== undefined || input.draft !== undefined || input.reproduceFromTaskId || avatar.candidates.length !== input.count)) throw new StudioError('人物任务不能继承模板设置');
   if (moduleId !== undefined && !validStudioModuleId(moduleId, ownerId)) throw new StudioError('模块编号无效');
   const batchId = createHash('sha256').update(`${ownerId}:${input.requestId}`).digest('hex');
-  const fingerprint = createHash('sha256').update(JSON.stringify({ ...input, requestId: undefined, ...(moduleId ? { moduleId } : {}) })).digest('hex');
+  const fingerprint = createHash('sha256').update(JSON.stringify({ ...input, requestId: undefined, ...(moduleId ? { moduleId } : {}), ...(avatar ? { avatar: avatar.candidates } : {}) })).digest('hex');
   const previous = await prisma.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
   if (previous) {
     if (previous.fingerprint !== fingerprint) throw new StudioError('提交编号已用于其他请求，请重新提交', 409);
@@ -167,12 +169,13 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (input.quality !== undefined && !(IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[requestedModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] as readonly string[] | undefined)?.includes(input.quality)) throw new StudioError('当前模型不支持所选图片质量');
     const generation = resolveStudioModuleGenerationConfig({ ...workspace, ...(input.model ? { model: input.model } : {}), ...(input.quality !== undefined ? { quality: input.quality } : {}) }, settings);
     const imageApi = await getImageGenerationSettingsForModel(generation.model, tx);
+    if(avatar && (input.referenceIds.length ? !imageApi.supports_image_to_image : !imageApi.supports_text_to_image)) throw new StudioError('当前图片通道不支持本次文字或原图参考生成',409);
     if (!isStudioImageGenerationProvider(imageApi.provider) || !isImageGenerationApiReady(imageApi)) {
       throw new StudioError(generation.model.startsWith('gemini-') ? 'Banana 专用通道尚未配置，请管理员在后台 API 设置填写专用 Key' : '图片专用 API 尚未配置', 503);
     }
     const price = generation.prices[generation.model];
     if (price === null || !Number.isInteger(price) || price < 0 || price > 100000) throw new StudioError('管理员尚未设置当前模块的有效生成积分', 409);
-    let snapshotGlobalContext = user.role === 'admin' && input.draft?.globalContext !== undefined ? input.draft.globalContext : settings.context;
+    let snapshotGlobalContext = avatar ? '' : user.role === 'admin' && input.draft?.globalContext !== undefined ? input.draft.globalContext : settings.context;
     let snapshotModuleContext = input.draft?.moduleContext !== undefined ? input.draft.moduleContext : workspace?.context || '';
     let templateFixedReferences: StudioFixedReference[] = [];
     let styleGroupIds: string[] = [];
@@ -281,7 +284,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       }
     }
     let referencePolicy: StudioReferencePolicy;
-    if (input.draft?.referencePolicy) referencePolicy = input.draft.referencePolicy;
+    if (avatar) referencePolicy = { ...defaultStudioReferencePolicy(referenceIds), useFixedReferences: false };
+    else if (input.draft?.referencePolicy) referencePolicy = input.draft.referencePolicy;
     else if (reproduceFromTaskId && historicalSnapshot?.referencePolicy !== undefined) {
       try { referencePolicy = mapStudioReferencePolicy(historicalSnapshot.referencePolicy, referenceIds); }
       catch { throw new StudioError('历史参考图角色设置无效，请按当前模块重新选择参考图', 409); }
@@ -403,12 +407,14 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     });
     for (let i = 0; i < input.count; i++) {
       const id = `${batchId}-${i}`;
+      const candidate = avatar?.candidates[i];
+      const taskPrompt = candidate?.prompt || input.prompt;
       const freeze = price > 0 ? await allocateTaskCredits(tx, user, price, id) : null;
       await tx.imageStudioTask.create({ data: {
         id, batch_id: batchId, owner_id: ownerId, module_id: moduleId as string | undefined, source_preset_id: sourcePresetId, ordinal: i + 1, fingerprint,
-        prompt: input.prompt, context, revision: settings.revision, model: generation.model,
+        prompt: taskPrompt, context, revision: settings.revision, model: generation.model,
         quality: generation.quality,
-        provider_cost_usd: IMAGE_STUDIO_MODEL_COST_USD[generation.model as keyof typeof IMAGE_STUDIO_MODEL_COST_USD], snapshot_json: snapshot,
+        provider_cost_usd: IMAGE_STUDIO_MODEL_COST_USD[generation.model as keyof typeof IMAGE_STUDIO_MODEL_COST_USD], snapshot_json: candidate ? JSON.stringify({ ...JSON.parse(snapshot), prompt: taskPrompt, avatar: candidate }) : snapshot,
         aspect_ratio: aspectRatio, output_size: outputSize,
         reference_ids: JSON.stringify(orderedReferenceIds), unit_credits: price, freeze_snapshot: freeze?.snapshot,
       } });
@@ -420,6 +426,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         metadata_json: JSON.stringify({ allocations: freeze.allocations }),
       } });
     }
+    if (avatar?.onQueued) await avatar.onQueued(tx, batchId);
   }, { timeout: 15000 }));
   return batchId;
 }

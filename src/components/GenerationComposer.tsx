@@ -2236,6 +2236,8 @@ export function GenerationComposer({
         currentCount={workspace.assets.length}
         currentAssetIds={workspace.assets.map((asset) => asset.assetId)}
         currentReferenceImageIds={currentReferenceImageIds}
+        avatarTarget={workspace.workspace ? { kind: 'workspace', id: workspace.workspace.id, currentAssetIds: workspace.assets.map(a=>a.assetId), capacity: Math.max(0,(generationMode==='first_last_frame'?2:seedanceReferenceMediaCapabilities(selectedModel).imageLimit)-imageReferenceAssets.length), imageLimit: generationMode==='first_last_frame'?2:seedanceReferenceMediaCapabilities(selectedModel).imageLimit, sourceSignature: JSON.stringify([workspace.workspace.id,generationMode,selectedModel,prompt,workspace.assets.map(a=>[a.assetId,a.role,a.referenceImageId])]), role: generationMode==='first_last_frame'?(workspace.assets.some(a=>a.role==='first_frame')?'last_frame':'first_frame'):'reference_image' } : undefined}
+        onAvatarApplied={workspace.refresh}
         onClose={() => { handleMentionPickerClose('history'); handleMentionPickerClose('album'); }}
         onUploadFile={workspace.uploadAssetToHistory}
         onConfirm={handleAddUploadedAssets}

@@ -19,6 +19,7 @@ export type PickerItem = {
   duration: number | null;
   createdAt: string;
   source: 'uploaded' | 'generated' | 'other';
+  canRemoveFromLibrary?: boolean;
 };
 export type PickerAlbum = { id: string; name: string; scope: PickerScope; project: { id: string; name: string } | null; count: number };
 export type PickerResponse = { items: PickerItem[]; albums: PickerAlbum[]; total: number; page: number; hasMore: boolean; notice?: string };

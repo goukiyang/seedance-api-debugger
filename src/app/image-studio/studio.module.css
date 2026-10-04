@@ -279,3 +279,7 @@
   .templateWorkbench .module { scroll-margin-top: calc(var(--composer-topbar-height, 48px) + 132px); }
 }
 @media (max-width: 800px) { .primaryMaterials .materialGrid { max-width: 360px; } }
+.restoreFooter { min-height: 38px; display: flex; align-items: center; justify-content: flex-end; }
+.restoreFooter .restoreResult { opacity: 0; pointer-events: none; padding: 5px 9px; font-size: 13px; }
+.result:hover .restoreResult, .result:focus-within .restoreResult { opacity: 1; pointer-events: auto; }
+@media (hover: none) { .restoreFooter .restoreResult { opacity: 1; pointer-events: auto; } }

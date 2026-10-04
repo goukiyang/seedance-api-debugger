@@ -2002,7 +2002,18 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
         </main>
       </div>
 
-      {pickerOpen && activeDraft && <UploadedImagePicker open target="assets" title="添加模板素材" confirmLabel="添加到模板素材区" purpose={`video-template-${pickerSlotKey || 'all'}`} currentCount={activeDraft.assets.length} currentAssetIds={assetIds} maxSelection={pickerSelectionCapacity} acceptedTypes={pickerSlot?.types} onClose={() => { setPickerOpen(false); setPickerSlotKey(null); }} onUploadFile={uploadFile} onConfirm={async (_ids, selected) => addAssets(selected || [], pickerSlotKey)} />}
+      {pickerOpen && activeDraft && <UploadedImagePicker open target="assets" title="添加模板素材" confirmLabel="添加到模板素材区" purpose={`video-template-${pickerSlotKey || 'all'}`} currentCount={activeDraft.assets.length} currentAssetIds={assetIds} maxSelection={pickerSelectionCapacity} acceptedTypes={pickerSlot?.types}
+        avatarTarget={{kind:'video-draft',id:activeDraft.id,revision:activeDraft.revision,slotKey:pickerSlotKey,capacity:pickerSelectionCapacity,currentAssetIds:assetIds,sourceSignature:JSON.stringify([activeDraft,pickerSlotKey])}}
+        onAvatarApplied={async()=>{
+          const before=draftRef.current;if(!before)throw new Error('原模块已关闭，图片仍保留');
+          const signature=JSON.stringify(before);
+          const body=await requestJson<StudioDraftDto|{draft:StudioDraftDto}>(`${API}/drafts/${encodeURIComponent(before.id)}`);
+          if(currentUserId.current!==userId||JSON.stringify(draftRef.current)!==signature)throw new Error('原模块有新编辑，未覆盖；图片仍保留在我的素材');
+          const latest='draft' in body?body.draft:body;
+          const merged={...before,assets:latest.assets,revision:latest.revision,updatedAt:latest.updatedAt};
+          savedSignature.current=JSON.stringify(latest);setCurrentDraft(merged);saveRecovery(userId,merged);
+        }}
+        onClose={() => { setPickerOpen(false); setPickerSlotKey(null); }} onUploadFile={uploadFile} onConfirm={async (_ids, selected) => addAssets(selected || [], pickerSlotKey)} />}
 
       {templateEdit && (
         <div ref={templateEditBackdropRef} className={styles.dialogBackdrop} role="presentation" onClick={(event) => event.stopPropagation()}>

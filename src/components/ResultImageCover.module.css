@@ -4,7 +4,7 @@
 .cover:hover .hint, .cover:focus-visible .hint { opacity: 1; }
 .cover:focus-visible { outline: 2px solid #79daca; outline-offset: -3px; }
 .cover::after { content: ''; position: absolute; inset: 0; pointer-events: none; }
-.cover[data-applied]::after { box-shadow: inset 0 0 0 2px #79daca; }
+.cover[data-selected]::after { box-shadow: inset 0 0 0 2px #79daca; }
 .cover:active::after { box-shadow: inset 0 0 0 3px #e1fff8; }
 .applied { position: absolute; right: 8px; bottom: 8px; display: flex; align-items: center; gap: 4px; padding: 4px 6px; border-radius: 4px; color: #c9fff1; background: #163e35; font-size: 12px; pointer-events: none; }
 .feedback, .repeat { position: absolute; bottom: 36px; left: 8px; right: 8px; padding: 6px 8px; border-radius: 4px; background: #20292d; color: #eef3f1; font-size: 12px; white-space: normal; overflow-wrap: anywhere; pointer-events: none; }

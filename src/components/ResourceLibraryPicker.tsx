@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Folder, Grid2X2, ImageIcon, Maximize, Minimize, Music, Play, RotateCcw, Search, Upload, Video, X, ZoomIn, Menu } from 'lucide-react';
+import { Folder, Grid2X2, ImageIcon, Maximize, Minimize, Music, Play, RotateCcw, Search, Upload, Video, X, ZoomIn, Menu, Trash2 } from 'lucide-react';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import MediaPreview from '@/components/MediaPreview';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
@@ -10,12 +10,15 @@ import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useAppSession } from '@/lib/context/AppSessionContext';
+import { useProductDialog } from '@/components/useProductDialog';
 import { readJsonResponse } from '@/lib/http/json-response';
 import type { UploadProgressHandler, UploadProgressSnapshot, UploadedAssetPayload } from '@/lib/http/file-upload';
 import type { AssetType } from '@/types';
 import type { PickerAlbum, PickerItem, PickerResponse, PickerScope } from '@/lib/assets/picker-types';
 import type { UploadedAssetSelection, UploadedImagePickerConfirmResult } from '@/components/UploadedImagePicker';
 import styles from './ResourceLibraryPicker.module.css';
+import type { AvatarReturnTarget } from '@/lib/avatar-random/handoff';
+import { isNavItemVisible } from '@/lib/navigation';
 
 export interface ResourceLibraryPickerProps {
   open: boolean;
@@ -35,6 +38,9 @@ export interface ResourceLibraryPickerProps {
   onUploadFile: (file: File, onProgress?: UploadProgressHandler) => Promise<string | UploadedAssetPayload>;
   onConfirm: (ids: string[], assets?: UploadedAssetSelection[]) => Promise<UploadedImagePickerConfirmResult>;
   onConfirmSelection?: (items: PickerItem[]) => Promise<UploadedImagePickerConfirmResult>;
+  avatarTarget?: AvatarReturnTarget;
+  onAvatarApplied?: () => Promise<void>;
+  onAvatarConfirm?: ResourceLibraryPickerProps['onConfirm'];
 }
 type Preferences = { view: 'library' | 'favorites' | 'recent'; scope: PickerScope; source: string; type: string; query: string; sort: string; album: string; project: string; scroll: number; pages: number };
 const defaults: Preferences = { view: 'library', scope: 'mine', source: 'all', type: 'all', query: '', sort: 'newest', album: '', project: '', scroll: 0, pages: 1 };
@@ -51,8 +57,52 @@ function Thumbnail({ item }: { item: PickerItem }) {
   return <img src={item.thumbnailUrl} alt={item.fileName} loading="lazy" onError={() => setFailed(true)} />;
 }
 
-export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'image-studio' : 'assets', title = '添加参考素材', confirmLabel = '添加到参考区', purpose = 'reference', maxSelection, typeLimits, acceptedTypes, currentCount, currentAssetIds, currentReferenceImageIds = [], portalContainer, onClose, onUploadFile, onConfirm, onConfirmSelection }: ResourceLibraryPickerProps) {
+export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'image-studio' : 'assets', title = '添加参考素材', confirmLabel = '添加到参考区', purpose = 'reference', maxSelection, typeLimits, acceptedTypes, currentCount, currentAssetIds, currentReferenceImageIds = [], portalContainer, onClose, onUploadFile, onConfirm, onConfirmSelection, avatarTarget, onAvatarApplied, onAvatarConfirm }: ResourceLibraryPickerProps) {
   const { user } = useAppSession();
+  const { confirm: askConfirm, productDialog } = useProductDialog();
+  const [removedItem, setRemovedItem] = useState<Pick<PickerItem,'assetId'|'identity'|'fileName'|'canRemoveFromLibrary'> | null>(null);
+  const avatarWindow = useRef<Window|null>(null), avatarTicket = useRef('');
+  const returnKey=user&&avatarTarget?`sd2:avatar-return:v1:${user.id}:${avatarTarget.kind}:${avatarTarget.id}:${purpose}`:'';
+  const [returnAvailable,setReturnAvailable]=useState(false);
+  const avatarCurrent = useRef({avatarTarget,onAvatarApplied,onAvatarConfirm,returnKey,currentAssetIds}); avatarCurrent.current={avatarTarget,onAvatarApplied,onAvatarConfirm,returnKey,currentAssetIds};
+  useEffect(()=>{avatarTicket.current='';setReturnAvailable(false);if(returnKey){const ticket=stored<string>(returnKey,'');if(typeof ticket==='string'&&/^[a-zA-Z0-9-]{1,100}$/.test(ticket)){avatarTicket.current=ticket;setReturnAvailable(true);}}},[returnKey]);
+  useEffect(()=>{setRemovedItem(null);if(!user)return;const saved=stored<Pick<PickerItem,'assetId'|'identity'|'fileName'|'canRemoveFromLibrary'>|null>(`sd2:library-undo:${user.id}`,null);if(saved&&typeof saved.assetId==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(saved.assetId)&&typeof saved.fileName==='string'&&typeof saved.identity==='string')setRemovedItem({...saved,canRemoveFromLibrary:true});},[user?.id]);
+  useEffect(()=>{
+    const receive=async(event:MessageEvent)=>{
+      if(event.origin!==location.origin||avatarWindow.current&&event.source!==avatarWindow.current||event.data?.type!=='sd2:avatar-return'||event.data.ticketId!==avatarTicket.current||locked.current||!active.current)return;
+      const current=avatarCurrent.current;
+      if(!current.avatarTarget)return;
+      locked.current=true;setBusy(true);setError('');
+      try{
+        const receiptKey=`${current.returnKey}:receipt:${avatarTicket.current}`;
+        const receipt=stored<{assetId?:string;claimToken?:string}>(receiptKey,{});
+        if(receipt.assetId&&receipt.claimToken&&current.currentAssetIds.includes(receipt.assetId)){
+          const ack=await fetch('/api/avatar-studio/handoff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'ack',id:avatarTicket.current,...receipt})});if(!ack.ok)throw new Error('原回填已保存，但确认未完成，请重试确认');
+        }else{
+          const response=await fetch('/api/avatar-studio/handoff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'apply',id:avatarTicket.current,signature:current.avatarTarget.sourceSignature})});const data=await readJsonResponse<{error?:string;localDraft?:boolean;assetId?:string;claimToken?:string;applied?:boolean}>(response);if(!response.ok)throw new Error(data.error||'回填未确认');
+          if(data.localDraft&&data.assetId&&data.claimToken){
+            const metadata=await fetch(`/api/assets/picker?target=image-studio&scope=mine&types=image&keys=asset:${encodeURIComponent(data.assetId)}`);const payload=await readJsonResponse<PickerResponse>(metadata);const item=payload.items.find(i=>i.assetId===data.assetId);if(!metadata.ok||!item)throw new Error('图片暂不可读取，请在我的素材中重新选择');
+            if(avatarCurrent.current.avatarTarget?.sourceSignature!==current.avatarTarget.sourceSignature)throw new Error('原页面已修改，未覆盖新编辑');
+            if(!current.onAvatarConfirm)throw new Error('原页面不支持安全回填，请手动选择素材');
+            localStorage.setItem(receiptKey,JSON.stringify({assetId:data.assetId,claimToken:data.claimToken}));
+            const result=await current.onAvatarConfirm([data.assetId],[{id:data.assetId,type:'image',originalUrl:item.originalUrl,thumbnailUrl:item.thumbnailUrl,fileName:item.fileName,width:item.width,height:item.height}]);const problem=failure(result);if(problem)throw new Error(problem);
+            const ack=await fetch('/api/avatar-studio/handoff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'ack',id:avatarTicket.current,assetId:data.assetId,claimToken:data.claimToken})});if(!ack.ok)throw new Error('图片草稿已保存，但返回确认未完成，请重试确认');
+          }else {if(avatarCurrent.current.avatarTarget?.sourceSignature!==current.avatarTarget.sourceSignature)throw new Error('原页面已修改，图片已保留，未刷新覆盖新编辑');await current.onAvatarApplied?.();}
+        }
+        localStorage.removeItem(current.returnKey);setReturnAvailable(false);avatarWindow.current?.postMessage({type:'sd2:avatar-applied',ticketId:avatarTicket.current},location.origin);setNotice('人物图片已添加，没有启动生成。');onClose();}
+      catch(e){setError(e instanceof Error?e.message:'回填未确认');}
+      finally{locked.current=false;setBusy(false);}
+    };
+    window.addEventListener('message',receive);return()=>window.removeEventListener('message',receive);
+  },[onClose,onConfirm]);
+  const openAvatar=async()=>{
+    if(!avatarTarget||locked.current)return;
+    const windowRef=window.open('about:blank','_blank');if(!windowRef){setError('浏览器未打开人物工具，请允许本次新窗口');return;}
+    avatarWindow.current=windowRef;locked.current=true;setBusy(true);setError('');
+    try{const response=await fetch('/api/avatar-studio/handoff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'create',target:avatarTarget})});const data=await readJsonResponse<{id?:string;error?:string}>(response);if(!response.ok||!data.id)throw new Error(data.error||'来路保存失败');localStorage.setItem(returnKey,data.id);avatarTicket.current=data.id;setReturnAvailable(true);windowRef.location.href=`/tools/avatar-studio?ticket=${encodeURIComponent(data.id)}`;}
+    catch(e){windowRef.close();setError(e instanceof Error?e.message:'人物工具打开失败');}
+    finally{locked.current=false;setBusy(false);}
+  };
   const typesKey = (imageOnly ? ['image'] : acceptedTypes || ['image', 'video', 'audio']).join(',');
   const types = useMemo(() => typesKey.split(',') as AssetType[], [typesKey]);
   const prefsKey = user ? `sd2:resource-picker:v1:${user.id}:${target}:${purpose}` : '';
@@ -134,6 +184,19 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     const issue = canSelect(next); if (issue) { setError(issue); return; } setSelected(next); setError('');
   };
   const change = (patch: Partial<Preferences>) => { restoring.current = false; body.current?.scrollTo({ top: 0 }); setPrefs(p => ({ ...p, ...patch, scroll: 0, pages: 1 })); };
+  const removeItem = async (item: Pick<PickerItem,'assetId'|'identity'|'fileName'|'canRemoveFromLibrary'>, restore = false) => {
+    if (!item.canRemoveFromLibrary || !item.assetId || locked.current) return;
+    if (!restore && !(await askConfirm(`从我的素材库删除“${item.fileName}”？可以撤销。底层文件、已经添加到任务或图集的引用、已共享内容仍保留；这不是彻底删除。`, { title: '删除素材', confirmLabel: '从我的素材库删除', danger: true }))) return;
+    locked.current = true; setBusy(true); setError('');
+    try {
+      const response = await fetch('/api/assets/library/removal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetId: item.assetId, removed: !restore }) });
+      const data = await readJsonResponse<{ error?: string }>(response);
+      if (!response.ok) throw new Error(data.error || '操作未确认');
+      if (!restore) { setItems(old => old.filter(i => i.assetId !== item.assetId)); setSelected(old => old.filter(i => i.assetId !== item.assetId)); imports.current.delete(item.identity); }
+      setRemovedItem(restore ? null : item);if(user){try{if(restore)localStorage.removeItem(`sd2:library-undo:${user.id}`);else localStorage.setItem(`sd2:library-undo:${user.id}`,JSON.stringify({assetId:item.assetId,identity:item.identity,fileName:item.fileName,canRemoveFromLibrary:true}));}catch{setNotice('删除已确认；本机无法记住撤销入口，请在关闭窗口前撤销。');}} setEpoch(v => v + 1);
+    } catch (e) { setError(e instanceof Error ? e.message : '操作失败'); }
+    finally { locked.current = false; setBusy(false); }
+  };
   const loadMore = async () => {
     if (loading) return; const token = sequence.current; setLoading(true);
     try { const data = await fetchPage(page + 1); if (token !== sequence.current) return; setItems(old => [...old, ...data.items.filter(i => !old.some(o => o.identity === i.identity))]); setPage(data.page); setHasMore(data.hasMore); setPrefs(p => ({ ...p, pages: data.page })); }
@@ -245,6 +308,8 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
       onDrop={e => { e.preventDefault(); e.stopPropagation(); void upload(Array.from(e.dataTransfer.files)); }}
       onPaste={e => { const files = Array.from(e.clipboardData.items).filter(i => i.kind === 'file' && i.type.startsWith('image/')).map(i => i.getAsFile()).filter((f): f is File => !!f); if (files.length) { e.preventDefault(); e.stopPropagation(); void upload(files); } }}>
       <header className={styles.header}><h2>{title}</h2><div className={styles.commands}>
+        {avatarTarget && types.includes('image') && isNavItemVisible({label:'人物生成',href:'/tools/avatar-studio',imageStudioOnly:true},user) && <button type="button" disabled={busy||avatarTarget.capacity<1} onClick={()=>void openAvatar()}><ImageIcon size={18}/><span>生成人物</span></button>}
+        {returnAvailable&&avatarTarget&&<button type="button" disabled={busy} onClick={()=>{avatarWindow.current=window.open(`/tools/avatar-studio?ticket=${encodeURIComponent(avatarTicket.current)}`,'_blank');}}>继续上次人物回填</button>}
         <button type="button" disabled={busy || maxSelection === 0} onClick={() => input.current?.click()}><Upload size={18} /><span>上传素材</span></button>
         <button type="button" title={expanded ? '收起窗口' : '展开窗口'} aria-label={expanded ? '收起窗口' : '展开窗口'} onClick={() => setExpanded(v => !v)}>{expanded ? <Minimize size={18} /> : <Maximize size={18} />}</button>
         <button type="button" aria-label="关闭素材库" title="关闭素材库" onClick={close}><X size={20} /></button>
@@ -265,6 +330,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         </div>
         {uploadLabel && <UploadProgressIndicator busy label={progress?.label || '准备上传'} detail={uploadLabel} percent={progress?.percent} />}
         {notice && <div role="status" className={styles.notice}>{notice}</div>}
+        {removedItem && <div role="status" className={styles.notice}>已从我的素材库删除，文件和已有引用保留。<button type="button" disabled={busy} onClick={() => void removeItem(removedItem, true)}>撤销删除</button></div>}
         {error && <div role="alert" className={styles.error}>{error}<button type="button" disabled={busy} onClick={() => setEpoch(v => v + 1)}>重新读取</button></div>}
         {!!failedFiles.length && <div className={styles.error}>{failedFiles.map(f => f.name).join('、')}<button type="button" disabled={busy} onClick={() => void upload(failedFiles)}>重试失败文件</button></div>}
         <div ref={body} className={styles.body} aria-busy={loading} onScroll={e => { const scroll = e.currentTarget.scrollTop; if (!restoring.current) setPrefs(p => ({ ...p, scroll })); }} onWheel={() => { restoring.current = false; }} onTouchStart={() => { restoring.current = false; }}>
@@ -276,6 +342,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
             <ContentReactions contentKey={item.key} overlay imageSharing={false} onChange={(_state, action) => { if (action === 'favorite' && prefs.view === 'favorites') setEpoch(v => v + 1); }} />
             </div>
             <div className={styles.meta}><div className={styles.cardTools}><span>{item.type === 'image' ? <ImageIcon size={14} /> : item.type === 'video' ? <Video size={14} /> : <Music size={14} />}{labels[item.type]}</span></div><strong title={item.fileName}>{item.fileName}</strong><small>{item.source === 'generated' ? '生成' : item.source === 'uploaded' ? '上传' : '图集'}{item.width && item.height ? ` · ${item.width} × ${item.height}` : ''} · <RelativeTime value={item.createdAt} /></small>{item.unavailableReason && <small className={styles.compatibility}>{item.unavailableReason}</small>}</div>
+            {item.canRemoveFromLibrary && <button type="button" className={styles.removeButton} disabled={busy} onClick={() => void removeItem(item)}><Trash2 size={15} />删除</button>}
           </article>; })}</div>
           {loading && <div className={styles.empty} role="status">正在读取素材</div>}{!loading && !items.length && <div className={styles.empty}>{prefs.view === 'recent' ? '本机还没有符合筛选的最近选用素材' : '没有符合筛选的可用素材'}</div>}
           <div className={styles.more}><span>{total} 个素材</span>{hasMore && <button type="button" disabled={loading} onClick={() => void loadMore()}>加载更多</button>}</div>
@@ -287,5 +354,6 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
       </footer>
     </div>
     {preview && (preview.type === 'image' ? <ZoomableImagePreview contentKey={preview.key} src={preview.originalUrl} alt={preview.fileName} fileName={preview.fileName} onClose={() => setPreview(null)} /> : <MediaPreview contentKey={preview.key} src={preview.originalUrl} type={preview.type} title={preview.fileName} poster={preview.thumbnailUrl || undefined} onClose={() => setPreview(null)} />)}
+    {productDialog}
   </div>, container);
 }

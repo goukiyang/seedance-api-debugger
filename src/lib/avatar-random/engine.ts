@@ -1,0 +1,140 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { catalog, identityFields } from './catalog';
+import { AVATAR_COMPILER_VERSION, AVATAR_RULE_VERSION, type AvatarRules, type AvatarConstraints, type AvatarDNA, type AvatarField, type AvatarCandidate, type AvatarDetail } from './types';
+import { StudioError } from '@/lib/image-studio/tasks';
+
+export function parseAvatarRules(value: unknown): AvatarRules {
+  const raw = value as AvatarRules;
+  if (!raw || typeof raw.description !== 'string' || raw.description.length > 3000 || ![1, 2, 3, 4].includes(raw.people) || ![1, 2, 4].includes(raw.candidates) || !['conservative', 'standard', 'bold'].includes(raw.intensity)) throw new StudioError('人物设置无效');
+  const choices: Record<string, string> = {}, locks: Record<string, AvatarField> = {};
+  if (!raw.choices || !raw.locks || typeof raw.choices !== 'object' || typeof raw.locks !== 'object') throw new StudioError('人物条件无效');
+  for (const [key, val] of Object.entries(raw.choices)) { if (!(key in catalog) || typeof val !== 'string' || val.length > 120) throw new StudioError('人物条件无效'); if (val) choices[key] = val; }
+  for (const [key, field] of Object.entries(raw.locks)) { if (!(key in catalog) || !field || typeof field.value !== 'string' || !field.value || field.value.length > 120 || !['user','config','inferred','random'].includes(field.source)) throw new StudioError('锁定条件无效'); locks[key] = { value: field.value, source: field.source, locked: true, manualLock: true, ...(typeof field.evidence==='string'?{evidence:field.evidence.slice(0,300)}:{}) }; }
+  const choiceSources = Object.fromEntries(Object.keys(choices).map(key=>[key,raw.choiceSources?.[key]==='config'?'config':'user'])) as AvatarRules['choiceSources'];
+  const choiceEditedAt = Object.fromEntries(Object.keys(choices).map(key=>[key,Number.isSafeInteger(raw.choiceEditedAt?.[key])?raw.choiceEditedAt![key]:0]));
+  return { description: raw.description.trim(), choices, locks, choiceSources, choiceEditedAt, descriptionEditedAt: Number.isSafeInteger(raw.descriptionEditedAt) ? raw.descriptionEditedAt : 0, intensity: raw.intensity, people: raw.people, candidates: raw.candidates, ...(typeof raw.configId === 'string' && raw.configId.length <= 100 ? { configId: raw.configId, configRevision: raw.configRevision } : {}) };
+}
+export function emptyConstraints(description = ''): AvatarConstraints { return { description, explicit: {}, details: [], scopes: [], background: '', unrecognized: [], conflicts: [], parserVersion: '1.0.0' }; }
+export function validateConstraints(value: unknown, description: string): AvatarConstraints {
+  const raw = value as AvatarConstraints;
+  if (!raw || typeof raw !== 'object') throw new StudioError('描述解析无效');
+  const list = (v: unknown) => { if (!Array.isArray(v) || v.length > 40 || v.some(s => typeof s !== 'string' || s.length > 300)) throw new StudioError('描述解析格式无效'); return v as string[]; };
+  const fields = (v: unknown): Record<string, AvatarField> => {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) throw new StudioError('描述条件无效');
+    return Object.fromEntries(Object.entries(v).map(([key, f]) => {
+      const field = f as AvatarField;
+      if (!(key in catalog) || !field || typeof field.value !== 'string' || field.value.length > 120 || !field.value && !field.excluded?.length || typeof field.evidence !== 'string' || !description.includes(field.evidence) || !field.evidence) throw new StudioError('描述条件没有对应原文，无法确认');
+      return [key, { value: field.value, source: 'user', locked: true, evidence: field.evidence, excluded: field.excluded === undefined ? [] : list(field.excluded) }];
+    }));
+  };
+  const details = (v: unknown): AvatarDetail[] => {
+    if (!Array.isArray(v) || v.length > 12) throw new StudioError('特征解析无效');
+    return v.map(d => {
+      if (!d || typeof d.value !== 'string' || d.value.length > 120 || !['natural', 'trace', 'accessory'].includes(d.kind) || typeof d.position !== 'string' || d.position.length > 80 || !['left', 'right', 'none'].includes(d.side) || !['main', 'secondary', 'micro'].includes(d.prominence) || typeof d.evidence !== 'string' || !d.evidence || !description.includes(d.evidence)) throw new StudioError('特征位置或原文无法确认');
+      return { value:d.value, kind:d.kind, position:d.position, side:d.side, prominence:d.prominence, evidence:d.evidence, source: 'user', locked: true };
+    });
+  };
+  if (typeof raw.background !== 'string' || raw.background.length > 300) throw new StudioError('背景解析无效');
+  let members: AvatarConstraints['members'];
+  if (raw.members !== undefined) {
+    if (!Array.isArray(raw.members) || raw.members.length > 4) throw new StudioError('多人描述无效');
+    members = raw.members.map(m => ({ explicit: fields(m.explicit), details: details(m.details), relationship: typeof m.relationship === 'string' ? m.relationship.slice(0, 200) : '' }));
+  }
+  return { description, explicit: fields(raw.explicit), details: details(raw.details), scopes: list(raw.scopes).filter(s => ['ordinary', 'office', 'protagonist', 'family'].includes(s)), background: raw.background, unrecognized: list(raw.unrecognized), conflicts: list(raw.conflicts), parserVersion: '1.0.0', ...(members ? { members } : {}) };
+}
+
+export function randomAvatar(rules: AvatarRules, constraints: AvatarConstraints, seed: string, previous?: AvatarDNA, only?: string, styling = false, used: AvatarDNA[] = []): AvatarDNA {
+  const fields: Record<string, AvatarField> = {}; const warnings: string[] = []; let counter = 0;
+  const draw = (pool: string[]) => pool[createHash('sha256').update(`${AVATAR_RULE_VERSION}:${seed}:${counter++}`).digest().readUInt32BE(0) % pool.length];
+  for (const [key, initialPool] of Object.entries(catalog)) {
+    let explicit = constraints.explicit[key];
+    const choice = rules.choices[key];
+    if (explicit && choice && explicit.value !== choice && rules.choiceSources?.[key] !== 'config' && (rules.choiceEditedAt?.[key] || 0) > (rules.descriptionEditedAt || 0)) explicit = undefined;
+    const userChoice = choice && rules.choiceSources?.[key] !== 'config';
+    const fixed = explicit?.value ? explicit.value : userChoice ? choice : rules.locks[key]?.value || choice;
+    if (fixed && explicit?.excluded?.includes(fixed)) throw new StudioError(`固定条件与排除要求冲突：${fixed}`);
+    if (previous && (only ? only !== key : styling && identityFields.includes(key))) {
+      const inAgeRange=key==='age'&&fixed&&/^\d{1,2}-\d{1,2}$/.test(fixed)&&Number(previous.fields[key].value)>=Number(fixed.split('-')[0])&&Number(previous.fields[key].value)<=Number(fixed.split('-')[1]);
+      if (fixed && fixed !== previous.fields[key].value && !inAgeRange && (only || styling)) throw new StudioError('本次只修改所选字段；其他条件已变化，请先恢复原草稿或选择换一个人');
+      fields[key] = { ...previous.fields[key] }; continue;
+    }
+    if (fixed) {
+      if (rules.locks[key] && fixed !== rules.locks[key].value && (explicit?.value || userChoice)) warnings.push(`${rules.locks[key].value}已被本次明确要求${fixed}替换；锁定生效值同步更新`);
+      fields[key] = explicit?.value ? { ...explicit, manualLock: !!rules.locks[key], locked:true } : userChoice ? {value:choice,source:'user',locked:!!rules.locks[key],manualLock:!!rules.locks[key]} : rules.locks[key] ? {...rules.locks[key]} : {value:choice,source:'config',locked:false};
+      if (key==='age' && /^\d{1,2}-\d{1,2}$/.test(fields[key].value)) { const [min,max]=fields[key].value.split('-').map(Number); if(min<1||max>99||max<min)throw new StudioError('年龄范围无效'); const lockedAge=Number(rules.locks.age?.value); fields[key]={...fields[key],value:Number.isInteger(lockedAge)&&lockedAge>=min&&lockedAge<=max?String(lockedAge):draw(Array.from({length:max-min+1},(_,i)=>String(min+i)))}; }
+      continue;
+    }
+    let pool = [...initialPool];
+    if (!only && !styling && ['face_shape','eye_shape','hair_length'].includes(key)) { const different = pool.filter(v=>!used.some(d=>d.fields[key].value===v)); if(different.length)pool=different; }
+    if (constraints.scopes.includes('office') && key === 'clothing') pool = ['素色通勤衬衫', '简洁商务外套', '简洁针织衫'];
+    if (constraints.scopes.includes('office') && key === 'age') pool = ['25', '30', '35', '42', '50'];
+    if(constraints.scopes.includes('office')&&key==='glasses')pool.push('黑框眼镜','细框眼镜');
+    if(constraints.scopes.includes('office')&&key==='accessory')pool.push('手表','手表');
+    if(Number(fields.age?.value)<16&&key==='clothing')pool=['简洁日常衣服','素色休闲上衣'];
+    if (Number(fields.age?.value) < 16 && key === 'feature') pool = ['无明显标记', '少量雀斑', '自然酒窝'];
+    if (fields.hair_length?.value === '光头' && ['bangs', 'parting', 'hair_shape', 'hair_texture'].includes(key)) pool = ['不适用'];
+    if (fields.hair_length?.value === '光头' && key==='hair_color') pool=['无头发'];
+    if (key==='jaw' && fields.face_shape.value==='圆脸') pool=['柔和下颌'];
+    if (key==='skin_detail' && Number(fields.age.value)>=55) pool=['自然皮肤纹理与轻微年龄细纹'];
+    if (rules.intensity === 'conservative' && ['feature', 'accessory'].includes(key)) pool = initialPool.slice(0, 3);
+    if (rules.intensity === 'bold' && key === 'hair_color' && fields.hair_length?.value!=='光头' && !constraints.scopes.includes('ordinary') && !constraints.scopes.includes('office')) pool.push('银灰发', '暗红发');
+    pool=pool.filter(v=>!explicit?.excluded?.includes(v));
+    if (!pool.length) throw new StudioError('排除要求下没有可用选项，请调整条件');
+    fields[key] = { value: draw(pool), source: constraints.scopes.length && ['clothing', 'age'].includes(key) ? 'inferred' : 'random', locked: false };
+  }
+  if (fields.hair_length.value === '光头' && [fields.bangs.value, fields.parting.value].some(v => v !== '不适用' && v !== '无刘海')) throw new StudioError('光头与刘海或分发要求冲突，请调整');
+  if (/^\d{1,2}-\d{1,2}$/.test(fields.age.value)) { const [min,max]=fields.age.value.split('-').map(Number); if(min<1||max>99||max<min)throw new StudioError('年龄范围无效');fields.age={...fields.age,value:draw(Array.from({length:max-min+1},(_,i)=>String(min+i)))}; }
+  const age = fields.age.value;
+  if (!/^\d{1,2}$/.test(age) || Number(age) < 1 || Number(age) > 99) throw new StudioError('年龄请使用1到99岁的准确数值；范围需先解析并确认');
+  const budget = constraints.scopes.includes('protagonist') ? 3 : 2;
+  const details = previous && (only || styling) ? previous.details.filter(d=>!['feature','glasses','accessory'].some(k=>(only ? k===only : !identityFields.includes(k)) && previous.fields[k].value===d.value)) : [...constraints.details];
+  for (const key of ['feature', 'glasses', 'accessory']) {
+    const field = fields[key];
+    if (['无明显标记', '不戴眼镜', '无饰品'].includes(field.value)) continue;
+    if (details.some(d => d.value === field.value)) continue;
+    if (field.source === 'random' && (!previous||!only||key===only) && details.filter(d => d.prominence !== 'micro').length >= budget) { fields[key] = { ...field, value: catalog[key][0] }; continue; }
+    const location: Record<string,{position:string;side:'left'|'right'|'none';kind:'natural'|'trace'|'accessory'}> = { '右眉浅旧伤':{position:'眉部',side:'right',kind:'trace'},'左侧脸颊小痣':{position:'脸颊',side:'left',kind:'natural'},'手表':{position:'手腕',side:'none',kind:'accessory'},'小耳钉':{position:'耳垂',side:'none',kind:'accessory'},'细项链':{position:'颈部',side:'none',kind:'accessory'} };
+    details.push({ ...field, kind: key === 'feature' ? 'natural' : 'accessory', side: 'none', position: key === 'feature' ? '脸部（位置未指定）' : key === 'glasses' ? '眼部' : '随饰品对应位置', ...location[field.value], prominence: details.some(d => d.prominence === 'main') ? 'secondary' : 'main' });
+  }
+  for(const [key,field] of Object.entries(fields)){const excluded=constraints.explicit[key]?.excluded;if(excluded?.length)fields[key]={...field,excluded};}
+  if(details.filter(d=>d.prominence!=='micro').length>budget) warnings.push('明确指定的特征超过默认预算，已全部保留；不会再增加随机记忆点');
+  if(Number(fields.age.value)<16 && details.some(d=>d.kind==='trace')) warnings.push('儿童的明确伤痕要求已保留，请人工确认适用性');
+  return { fields, details, seed, ruleVersion: AVATAR_RULE_VERSION, featureBudget: budget, samplingContext:{used:used.map(d=>Object.fromEntries(Object.entries(d.fields).map(([k,f])=>[k,f.value]))),action:only?`tweak:${only}`:styling?'styling':'new'}, warnings };
+}
+export function compileAvatar(members: AvatarDNA[], constraints: AvatarConstraints, styling: boolean) {
+  const descriptions = members.map((dna, index) => {
+    const f = dna.fields;
+    const structure = Object.entries(f).filter(([key]) => identityFields.includes(key) && !['gender', 'age', 'feature'].includes(key)).map(([, val]) => val.value).join('，');
+    const style = ['hair_length', 'hair_shape', 'hair_texture', 'hair_color', 'bangs', 'parting', 'expression', 'clothing'].map(key => f[key].value).filter(v => v !== '不适用').join('，');
+    return `${members.length > 1 ? `从画面左到右第${index + 1}人，` : ''}${f.age.value}岁的${f.gender.value}，${structure}。${style}。${f.glasses.value}，${f.accessory.value}。${dna.details.map(d => `${d.side === 'left' ? '人物自身左侧' : d.side === 'right' ? '人物自身右侧' : ''}${d.position}：${d.value}`).join('；') || '不增加明显特征饰品'}。${Object.values(f).flatMap(v=>v.excluded||[]).map(v=>`不要${v}`).join('；')}。${constraints.members?.[index]?.relationship || ''}`;
+  }).join('\n');
+  const standard = `${descriptions}\n${constraints.background || '简洁自然的人像摄影环境，背景弱化，不抢人物。'}自然皮肤纹理，不使用网红模板脸，不做过度精修。${members.some(d => d.fields.accessory.value === '手表') ? '构图包含手腕与手表。' : '以人物头肩为画面主体。'}\n描述中已解析的条件按以上生效值执行，不增加未列出的标记。`;
+  return { standardDescription: standard, prompt: `${styling ? '以所附原图中的人物为身份基准，保持人脸结构与核心标记，仅按下面的造型要求编辑。身份可能产生漂移，不另换人物。\n' : ''}${standard}\n画面中恰好${members.length}个人，每个人完整可辨，不重复脸，不额外增加人物。` };
+}
+export function adaptAvatarPrompt(candidate: AvatarCandidate, model: string): AvatarCandidate {
+  const instruction = model.startsWith('gemini-') ? '生成一张符合以下人物描述的图片。参考图仅用于明确要求保持的身份。' : '写实人物摄影。严格遵循以下人物属性、人数、位置与参考图身份约束。';
+  return {...candidate,prompt:`${instruction}\n${compileAvatar(candidate.members,candidate.constraints,!!candidate.baselineAssetId).prompt}`};
+}
+export function createAvatarCandidates(rules: AvatarRules, constraints: AvatarConstraints, previous?: AvatarCandidate, action = 'new', only?: string, history: AvatarCandidate[] = []): AvatarCandidate[] {
+  if (constraints.unrecognized.length || constraints.conflicts.length) throw new StudioError([...constraints.conflicts, ...constraints.unrecognized.map(s => `尚未识别：${s}`)].join('；'));
+  const styling = action === 'styling';
+  if (only && !(only in catalog)) throw new StudioError('重抽字段无效');
+  const result: AvatarCandidate[] = [], used = new Set<string>();
+  const signatureOf=(members:AvatarDNA[])=>JSON.stringify(members.map(d=>Object.fromEntries(Object.entries(d.fields).filter(([key,f])=>identityFields.includes(key)&&!f.locked&&['random','inferred'].includes(f.source)).map(([key,f])=>[key,f.value]))));
+  const oldSignatures = history.map(c => signatureOf(c.members));
+  for (let i = 0; i < (only || styling ? 1 : rules.candidates); i++) {
+    let candidate: AvatarCandidate | undefined;
+    for (let attempt = 0; attempt < 32; attempt++) {
+      const members = Array.from({ length: rules.people }, (_, member) => randomAvatar(rules, { ...constraints, explicit: { ...constraints.explicit, ...constraints.members?.[member]?.explicit }, details: [...constraints.details, ...constraints.members?.[member]?.details || []] }, randomUUID(), previous?.members[member], only, styling, result.flatMap(c=>c.members)));
+      const signature = signatureOf(members);
+      if (!only && !styling && (used.has(signature) || attempt < 8 && oldSignatures.includes(signature))) continue;
+      used.add(signature);
+      const keepIdentity = styling || !!only && !identityFields.includes(only);
+      const effectiveRules={...rules,locks:Object.fromEntries(Object.entries(rules.locks).map(([key,f])=>[key,{...f,value:members[0].fields[key].value}]))};
+      candidate = { characterId: keepIdentity && previous ? previous.characterId : randomUUID(), members, ...compileAvatar(members, constraints, styling), compilerVersion: AVATAR_COMPILER_VERSION, rules:effectiveRules, constraints, ...(keepIdentity ? { baselineAssetId: previous?.baselineAssetId } : {}) }; break;
+    }
+    if (!candidate) throw new StudioError('固定条件下无法产生不同人物，请减少候选数或解除部分锁定');
+    result.push(candidate);
+  }
+  return result;
+}

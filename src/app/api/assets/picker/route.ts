@@ -8,6 +8,7 @@ import { getAlbumAccess } from '@/lib/reference-albums/permissions';
 import { studioHiddenAssetUrls, studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
 import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
 import type { PickerAlbum, PickerItem, PickerScope } from '@/lib/assets/picker-types';
+import { removedLibraryAssetIds } from '@/lib/assets/library-removal';
 
 export const dynamic = 'force-dynamic';
 const scopes: PickerScope[] = ['mine', 'project', 'shared', 'public'];
@@ -36,6 +37,7 @@ export async function GET(request: NextRequest) {
     const limit = 40;
     const projects = await getAccessibleProjectIds(user);
     const hidden = await studioHiddenAssetUrls(user);
+    const removed = new Set(await removedLibraryAssetIds(user.id));
     const visibleRefs = await studioVisibleReferenceWhere(user);
     const now = new Date();
     const candidates = await prisma.referenceAlbum.findMany({
@@ -126,6 +128,7 @@ export async function GET(request: NextRequest) {
     const source = p.get('source');
     const dedup = new Map<string, PickerItem>();
     for (const item of items) {
+      if (item.assetId && removed.has(item.assetId) && scope === 'mine') continue;
       if (source && source !== 'all' && item.source !== source) continue;
       if (p.get('view') === 'favorites' && !favoriteKeys.has(item.key) && !favoriteKeys.has(`reference_image:${item.referenceImageId}`)) continue;
       if (p.has('keys') && !keys.includes(item.key) && !keys.includes(`reference_image:${item.referenceImageId}`)) continue;
@@ -141,7 +144,7 @@ export async function GET(request: NextRequest) {
       if (!item.assetId) return [item];
       const asset = byId.get(item.assetId!);
       if (!asset) return [];
-      return [{ ...item, width: asset.width, height: asset.height, duration: duration(asset.metadata_json),
+      return [{ ...item, canRemoveFromLibrary: scope === 'mine' && asset.owner_id === user.id, width: asset.width, height: asset.height, duration: duration(asset.metadata_json),
         originalUrl: item.referenceImageId ? `/api/reference-images/${item.referenceImageId}/content?variant=preview` : url(asset.original_url),
         thumbnailUrl: item.referenceImageId ? `/api/reference-images/${item.referenceImageId}/content?variant=thumbnail` : asset.thumbnail_url ? url(asset.thumbnail_url) : asset.type === 'image' ? url(asset.original_url) : null }];
     });
