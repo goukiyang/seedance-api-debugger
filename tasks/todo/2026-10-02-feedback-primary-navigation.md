@@ -893,3 +893,5 @@ Git/发布：源码在codex/avatar-generator-20261005聚焦提交，必须等pus
 正式归档已完成：执行者确认全部命令会话结束、证据冻结后停止；完整95份记录/脚本/日志已复制至正式根`docs/materials/2026-10-05-active-reaction-icons/`。九份关键报告/diff与源副本字节一致，diff另与精确部署前后Git树一致；报告/候选/运行/公网版本、commit、BUILD及新CSS哈希相符，789源码只有上述四份应用文件变化。[完整交付与逐命令结果](../../docs/materials/2026-10-05-active-reaction-icons/delivery.json)、[冻结清单](../../docs/materials/2026-10-05-active-reaction-icons/delivery-integrity.json)已可访问；固定索引能按点赞/收藏/激活检索，凭据模式检查无命中，辅助文件没有全部重复计算哈希。
 
 遗留警告与过程差异不隐去：原有img/Hook/CSS构建警告仍在，构建退出0且没有本次新增业务代码。初步远端refs读取发生在push尚未结束时，只作历史日志；真正切换前使用push结束后的`remote-refs-final`与解引用核对，不把初步旧refs当已推送。完整报告保留无写入的apply_patch定位失败、猜测入口不存在及其修正，不改变最终产物。守门员实施侧finish退出0，工具按关键词列L3/live-action-needs-explicit-authorization；本轮已有明确代码/Git/安全发布授权，该提示不扩展为浏览器或业务验收许可，真实效果仍待手动。未启用额外审核或功能测试，本轮无自身分级误判。
+
+正式记录检查例外：将原样`source.diff`作为新文本文件暂存时，`git diff --cached --check`把第85行统一补丁的空白上下文前缀视为trailing whitespace；这是补丁格式，不是应用代码空白。为保持已冻结diff与真实部署Git树字节一致，不修剪该前缀。应用源码原diff检查已通过；正式记录差异检查排除原样`.diff`证据，其余记录检查通过，不将包含该格式提示的整项检查称为全通过。
