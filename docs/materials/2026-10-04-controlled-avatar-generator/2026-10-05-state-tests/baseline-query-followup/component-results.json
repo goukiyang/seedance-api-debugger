@@ -1,0 +1,52 @@
+{
+  "version": "0.42.2",
+  "commit": "ad65015c14b20577b8e19ab77239cd7e10458d7c",
+  "evidenceLevel": "isolated real AvatarStudio + real ProductDialog + real AppSessionProvider; synthetic localhost API/data/images only",
+  "newSpend": 0,
+  "externalRequests": [],
+  "componentInputs": [
+    "src/components/useDialogDismiss.ts",
+    "src/components/ProductDialog.module.css",
+    "src/components/useProductDialog.tsx",
+    "src/components/RelativeTime.module.css",
+    "src/components/RelativeTime.tsx",
+    "src/lib/media/copy-image.ts",
+    "src/components/ZoomableImagePreview.module.css",
+    "src/lib/context/AppSessionContext.tsx",
+    "src/components/content-reactions/reactions.module.css",
+    "src/components/content-reactions/ImageShareButton.tsx",
+    "src/components/content-reactions/ContentReactions.tsx",
+    "src/lib/hooks/use-media-preview-state.ts",
+    "src/lib/http/upload-progress.ts",
+    "src/lib/hooks/use-image-read-progress.ts",
+    "src/components/ZoomableImagePreview.tsx",
+    "src/lib/hooks/page-exit-guard.ts",
+    "src/lib/http/json-response.ts",
+    "src/lib/avatar-random/catalog.ts",
+    "src/lib/avatar-random/types.ts",
+    "src/lib/avatar-random/layout.ts",
+    "src/lib/image-studio/ratios.ts",
+    "src/lib/image-generation/resolution.ts",
+    "src/lib/image-studio/model-catalog.ts",
+    "src/app/tools/avatar-studio/studio.module.css",
+    "src/app/tools/avatar-studio/studio.tsx"
+  ],
+  "cases": [
+    {
+      "group": 10,
+      "name": "late query from old plan does not mix into newly restored plan",
+      "status": "FAIL",
+      "error": "page.goto: Timeout 4000ms exceeded.\nCall log:\n\u001b[2m  - navigating to \"http://127.0.0.1:59923/\", waiting until \"load\"\u001b[22m\n",
+      "ms": 23432
+    }
+  ],
+  "passed": 0,
+  "failed": 1,
+  "requestSummary": {},
+  "limitations": [
+    "No production business calls, cookies, tokens, DB or models",
+    "Synthetic image is only a local placeholder; real image and paid credit proof reused from parent",
+    "Pure parser/layout cases reused from existing 27-case actual log, not rerun here",
+    "Server prepare/submit billing invariants source-reviewed, not exercised against production"
+  ]
+}

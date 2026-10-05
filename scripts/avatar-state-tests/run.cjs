@@ -1,0 +1,125 @@
+// Local-only transport fixtures around the real component, dialogs and session provider.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const http = require('node:http');
+const { execFileSync } = require('node:child_process');
+const esbuild = require('esbuild');
+const root = path.resolve(__dirname, '../..');
+const evidence = path.resolve(process.env.AVATAR_STATE_EVIDENCE || path.join(root, 'docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline'));
+const runtime = process.env.PLAYWRIGHT_CORE_PATH || '/Users/gouki-youdoo/.npm/_npx/e41f203b7505f1fb/node_modules/playwright-core';
+const { chromium } = require(runtime);
+const key = 'sd2:avatar-studio:v1:fixture-owner';
+const model = 'gpt-image-2.5-sunburst';
+const results = [], unsafe = [], requests = [];
+let browser, server, output;
+const clone = value => JSON.parse(JSON.stringify(value));
+function plan(id = 'sheet-fixture', layout = 'contact-sheet', count = 4) {
+  const rules = { layout, description: '', choices: {}, locks: {}, intensity: 'standard', people: 1, candidates: count };
+  const fields = Object.fromEntries(['gender','age','face_shape','hair_length','hair_color','glasses','feature','accessory','skin_tone','temperament','body_type'].map(k => [k, { value: k === 'age' ? '30' : k === 'gender' ? '男性' : '不限', source: 'random', locked: false }]));
+  // The fixture supplies API data, not a second implementation of the page.
+  return { id, layout, candidates: Array.from({length:count}, (_,i) => ({characterId:`person-${i}`,members:[{fields,details:[],seed:String(i),ruleVersion:'1.0.0',featureBudget:2}],standardDescription:`合成人物${i}`,prompt:`合成人物${i}`,compilerVersion:'1.1.0',rules:clone(rules),constraints:{description:'',explicit:{},details:[],scopes:[],background:'',conflicts:[],unrecognized:[],parserVersion:'1.0.2'}})),sheetPrompt:'合成四宫格提示词',model,quality:'auto',resolution:'1K',aspectRatio:'1:1',settingsRevision:24,unitCredits:5,referenceIds:[],createdAt:'2026-10-05T00:00:00Z',imageReady:true };
+}
+function task(status, id='fixture-task', ordinal=1) { return {id,ordinal,status,error:status==='failed'?'合成明确失败':null,asset:status==='succeeded'?{id:'fixture-asset',original_url:'/fixture-image.png',thumbnail_url:'/fixture-thumb.png'}:null}; }
+function record(p, id='fixture-result', taskId='fixture-task') { return {id,kind:'result',name:id,revision:1,deletedAt:null,createdAt:'2026-10-05T00:00:00Z',updatedAt:'2026-10-05T00:00:00Z',planId:p.id,taskId,layout:p.layout,sheetCandidates:p.candidates}; }
+const parse = (state, extra={}) => ({state,message:`合成解析状态：${state}`,cost:'unknown',canRecheck:false,...extra});
+function state(p=plan(), tasks=[]) { return { p, tasks, records:[record(p)], parse:parse('not-started'), available:100, actions:[], queries:[], credits:0, onQuery:null, onHistory:null, submitError:null, pendingLookupError:false }; }
+async function fixture(s, saved={}, pending) {
+  const context = await browser.newContext({serviceWorkers:'block',viewport:{width:1440,height:1000}});
+  await context.addInitScript(({key,saved,pending}) => {
+    if (!localStorage.getItem('fixture-seeded')) {
+      localStorage.setItem(key,JSON.stringify(saved));
+      if(pending)localStorage.setItem(`${key}:pending`,pending);
+      localStorage.setItem('fixture-seeded','1');
+    }
+  }, {key,saved,pending});
+  const page = await context.newPage();
+  page.setDefaultTimeout(4000);
+  page.setDefaultNavigationTimeout(30000);
+  await page.clock.install();
+  const errors=[];
+  page.on('pageerror', e => errors.push(e.message));
+  await context.route('**/*', async route => {
+    const request=route.request(), url=new URL(request.url());
+    if(url.origin!==output.origin){unsafe.push({origin:url.origin});return route.abort('blockedbyclient');}
+    const body=request.postDataJSON();
+    const json=(data,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
+    if(!url.pathname.startsWith('/api/'))return route.continue();
+    requests.push({path:url.pathname,method:request.method(),action:body?.action||null});
+    if(url.pathname==='/api/auth/me')return json({user:{id:'fixture-owner',name:'合成账号',role:'user',account_type:'internal'}});
+    if(url.pathname==='/api/me/credits'){s.credits++;return json({available:s.available,frozen_credits:0,monthly_used:0});}
+    if(url.pathname==='/api/content-reactions/state')return json({states:Object.fromEntries(body.keys.map(k=>[k,{key:k,version:1,liked:false,bookmarked:false,likeCount:0,bookmarkCount:0}]))});
+    if(url.pathname!=='/api/avatar-studio'){unsafe.push({path:url.pathname});return route.abort('blockedbyclient');}
+    if(request.method()==='GET'){
+      if(url.searchParams.has('plan')){
+        const id=url.searchParams.get('plan');s.queries.push(id);
+        if(s.pendingLookupError)return json({error:'合成查询暂不可用'},503);
+        if(s.onQuery){const response=await s.onQuery(id,s.queries.length);if(response)return json(response);}
+        return json({plan:clone(s.p),tasks:clone(s.tasks)});
+      }
+      if(s.onHistory){const response=await s.onHistory(url);if(response)return json(response);}
+      return json(history(s,url.searchParams.get('kind')));
+    }
+    s.actions.push(clone(body));
+    switch(body.action){
+      case 'parse-status':return json({parse:s.parse});
+      case 'parse-recheck':s.parse=parse('succeeded',{cost:'response-received'});return json({parse:s.parse});
+      case 'prepare':s.p=plan(`fixture-prepared-${s.actions.length}`,body.rules.layout,body.rules.candidates);s.p.candidates.forEach(c=>c.rules=clone(body.rules));return json({plan:s.p});
+      case 'quote':s.p={...clone(s.p),id:`fixture-quote-${s.actions.length}`,layout:body.layout,model:body.model,quality:body.quality,resolution:body.resolution};s.p.candidates.forEach(c=>c.rules.layout=body.layout);return json({plan:s.p});
+      case 'submit':if(s.submitError==='network')return route.abort('failed');if(s.submitError)return json({error:`合成提交${s.submitError}`},s.submitError);s.available=95;s.tasks=[task('queued')];return json({batchId:s.p.id});
+      case 'restore':s.p={...clone(s.p),id:'fixture-restored',quality:'high',resolution:'2K',referenceIds:['historical-reference'],warnings:['原参考图保留，需更新报价']};return json({plan:s.p,sourceTask:task('succeeded')});
+      case 'retry':return json({error:'本场景不允许自动重试'},400);
+      default:unsafe.push({action:body.action});return route.abort('blockedbyclient');
+    }
+  });
+  page.on('dialog', d=>d.type()==='beforeunload'?d.accept():d.dismiss());
+  await page.goto(output.origin);
+  try { await page.getByRole('button',{name:'生成四宫格',exact:true}).or(page.getByRole('button',{name:'生成独立头像',exact:true})).waitFor(); }
+  catch(e){console.error(JSON.stringify({fixtureBootErrors:errors,body:await page.locator('body').innerText()}));await context.close();throw Object.assign(e,{fixtureBlocked:true});}
+  await page.waitForFunction(()=>!document.querySelector('fieldset')?.disabled);
+  return {page,s,errors,close:()=>context.close()};
+}
+function history(s, kind='result') {return {records:s.records.filter(r=>r.kind===kind),recentConfigs:[],recordTasks:Object.fromEntries(s.tasks.map(t=>[t.id,clone(t)])),nextCursor:null,settings:{model,revision:24,prices:{[model]:5}}};}
+const saved = p => ({rules:p.candidates[0].rules,planId:p.id,model:p.model,quality:p.quality,resolution:p.resolution,index:0,tab:'result'});
+async function click(page,name){await page.getByRole('button',{name,exact:true}).click();}
+async function text(page,value){await page.getByText(value,{exact:false}).first().waitFor();}
+async function disabled(page,name){assert.equal(await page.getByRole('button',{name,exact:true}).isDisabled(),true);}
+async function count(s,action,n){assert.equal(s.actions.filter(a=>a.action===action).length,n);}
+async function poll(page,fn){await page.waitForFunction(fn);}
+async function advance(page,ms=5100){await page.clock.runFor(ms);}
+async function test(group,name,fn){if(process.env.AVATAR_STATE_FILTER&&!new RegExp(process.env.AVATAR_STATE_FILTER).test(name))return;const start=Date.now();try{await fn();results.push({group,name,status:'PASS',ms:Date.now()-start});}catch(e){if(e.fixtureBlocked)throw e;results.push({group,name,status:'FAIL',error:e.message,ms:Date.now()-start});}console.log(JSON.stringify(results.at(-1)));}
+async function main(){
+  fs.mkdirSync(evidence,{recursive:true});const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sd2-avatar-state-'));
+  const bundle=await esbuild.build({entryPoints:[path.join(__dirname,'entry.tsx')],bundle:true,write:true,outfile:path.join(dir,'fixture.js'),format:'iife',platform:'browser',jsx:'automatic',loader:{'.module.css':'local-css'},define:{'process.env':'{}','process.env.NODE_ENV':'"development"'},metafile:true,tsconfig:path.join(root,'tsconfig.json')});
+  assert.ok(!Object.keys(bundle.metafile.inputs).some(p=>/prisma|avatar-random\/(service|store)|image-studio\/tasks/.test(p)),'fixture must not import server/model/database code');
+  server=http.createServer((req,res)=>{
+    if(req.url==='/'){res.setHeader('Content-Type','text/html');res.end('<!doctype html><html lang="zh"><meta charset="utf-8"><title>AvatarStudio isolated synthetic fixture</title><link rel="stylesheet" href="/fixture.css"><body><div id="root"></div><script src="/fixture.js"></script></body></html>');}
+    else if(['/fixture.js','/fixture.css'].includes(req.url)){res.setHeader('Content-Type',req.url.endsWith('css')?'text/css':'application/javascript');res.end(fs.readFileSync(path.join(dir,req.url)));}
+    else if(['/fixture-image.png','/fixture-thumb.png'].includes(req.url)){res.setHeader('Content-Type','image/png');res.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64'));}
+    else {res.statusCode=404;res.end();}
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));output={origin:`http://127.0.0.1:${server.address().port}`};
+  browser=await chromium.launch({headless:true,args:['--disable-background-networking','--disable-component-update','--no-first-run','--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1']});
+  await test(1,'empty description: default one-image confirmation, cancel costs zero',async()=>{const f=await fixture(state());try{const {page,s}=f;await click(page,'生成四宫格');await text(page,'1张真实四宫格');await text(page,'共冻结5点');assert.equal(s.actions.find(a=>a.action==='prepare').rules.layout,'contact-sheet');await click(page,'取消');await count(s,'submit',0);await count(s,'parse-status',0);assert.deepEqual(f.errors,[]);}finally{await f.close();}});
+  for(const status of [parse('pending'),parse('failed',{retryToken:'synthetic-retry'}),parse('unknown',{retryToken:'synthetic-retry'}),parse('failed',{canRecheck:true,failure:{stage:'validation',field:'explicit.gender'}})])await test(4,`parse ${status.state}, recheck=${status.canRecheck}`,async()=>{const f=await fixture(state());try{const {page,s}=f;s.parse=status;await page.locator('textarea').fill('合成描述，不是真实用户原文');await click(page,'生成四宫格');if(status.canRecheck){await text(page,'1张真实四宫格');await click(page,'取消');await click(page,'免费重检原回复');await text(page,'没有重新调用文字模型');await count(s,'parse-recheck',1);}else{await text(page,status.message);await count(s,'prepare',0);if(status.retryToken){await click(page,'确认后重新解析一次');await text(page,'可能再次产生费用');await click(page,'取消');await count(s,'prepare',0);}}await count(s,'submit',0);}finally{await f.close();}});
+  for(const n of [1,2,4])await test(5,`independent ${n} candidates quote and no silent submission`,async()=>{const p=plan('independent-existing','independent',n),s=state(p);const f=await fixture(s,saved(p));try{const {page}=f;await text(page,`${n}张，共${n*5}点`);if(n===4){await click(page,'四宫格（1张）');await text(page,'排版已变');await click(page,'重新报价并按原人物出图');assert.equal(s.actions.find(a=>a.action==='quote').layout,'contact-sheet');await text(page,'共冻结5点');await click(page,'取消');}else{await click(page,'生成独立头像');await text(page,`共冻结${n*5}点`);await click(page,'取消');}await count(s,'submit',0);}finally{await f.close();}});
+  await test(6,'queued to running to succeeded updates main/history/thumbnail; settlement refresh once',async()=>{const p=plan(),s=state(p,[task('queued')]),f=await fixture(s,saved(p));try{const {page}=f;await text(page,'排队中');const initial=s.credits;s.tasks=[task('running')];await advance(page);await text(page,'生成中');assert.equal(s.credits,initial);s.tasks=[task('succeeded')];s.available=95;await advance(page);await page.getByRole('button',{name:'选择人物图片'}).waitFor();await text(page,'图片已保存，待人工确认');assert.ok(await page.locator('article img[src="/fixture-thumb.png"]').count());await text(page,'95');assert.equal(s.credits,initial+1);await advance(page,11000);assert.equal(s.credits,initial+1);await count(s,'submit',0);assert.deepEqual(f.errors,[]);}finally{await f.close();}});
+  await test(6,'confirmed synthetic submit refreshes shared credits without repeated polling refresh',async()=>{const s=state(),f=await fixture(s);try{const {page}=f;await click(page,'生成四宫格');await click(page,'生成图片');await text(page,'排队中');await text(page,'95');await count(s,'submit',1);assert.equal(s.credits,2);}finally{await f.close();}});
+  await test(7,'failed without image retains draft, no automatic retry',async()=>{const p=plan(),s=state(p,[task('failed')]),f=await fixture(s,{...saved(p),rules:{...p.candidates[0].rules,description:'合成草稿'}});try{const {page}=f;await text(page,'生成失败');assert.equal(await page.locator('textarea').inputValue(),'合成草稿');assert.equal(await page.getByRole('button',{name:'选择人物图片'}).count(),0);await advance(page,15000);await count(s,'retry',0);await count(s,'submit',0);}finally{await f.close();}});
+  await test(7,'partial independent success plus unknown keeps successful image and blocks resend',async()=>{const p=plan('partial-existing','independent',2),s=state(p,[task('succeeded','fixture-task',1),task('uncertain','unknown-task',2)]),f=await fixture(s,saved(p));try{const {page}=f;await page.getByRole('button',{name:'选择人物图片'}).waitFor();await text(page,'已完成 1/2 张');await disabled(page,'生成独立头像');assert.equal(await page.getByRole('button',{name:'只重试失败项'}).count(),0);await click(page,'查看候选2人物信息');await text(page,'受理未知，请先查询');assert.equal(await page.getByRole('button',{name:'选择人物图片'}).count(),0);await click(page,'查看候选1人物信息');await page.getByRole('button',{name:'选择人物图片'}).waitFor();await count(s,'submit',0);await count(s,'retry',0);}finally{await f.close();}});
+  await test(8,'uncertain blocks generate and restore, only queries original',async()=>{const p=plan(),s=state(p,[task('uncertain')]),f=await fixture(s,saved(p));try{const {page}=f;await disabled(page,'生成四宫格');await click(page,'恢复草稿');await text(page,'原提交尚未确认');await count(s,'restore',0);await click(page,'查询原提交，不重复生成');assert.ok(s.queries.every(id=>id===p.id));await count(s,'submit',0);}finally{await f.close();}});
+  await test(8,'unknown independent submission also blocks draft-tweak bypass',async()=>{const p=plan('independent-pending','independent',1),s=state(p),f=await fixture(s,saved(p),p.id);try{const {page}=f;await disabled(page,'生成独立头像');await disabled(page,'只重抽发型');await count(s,'prepare',0);}finally{await f.close();}});
+  for(const failure of [400,500,'network'])await test(9,`submit ${failure} preserves appropriate pending and only recovers by query`,async()=>{const s=state();s.submitError=failure;const f=await fixture(s);try{const {page}=f;await click(page,'生成四宫格');await click(page,'生成图片');await page.getByRole('alert').waitFor();const pending=await page.evaluate(key=>localStorage.getItem(`${key}:pending`),key);assert.equal(Boolean(pending),failure!==400);await count(s,'submit',1);if(failure!==400){await disabled(page,'生成四宫格');await click(page,'查询原提交，不重复生成');await count(s,'submit',1);}assert.ok(await page.evaluate(key=>JSON.parse(localStorage.getItem(key)).planId,key));}finally{await f.close();}});
+  await test(10,'late query from old plan does not mix into newly restored plan',async()=>{const p=plan('old-plan'),s=state(p,[task('queued')]),f=await fixture(s,saved(p));let release,notify;const received=new Promise(resolve=>{notify=resolve;});try{const {page}=f;await text(page,'排队中');s.onQuery=()=>new Promise(resolve=>{release=()=>resolve({plan:p,tasks:[task('succeeded','old-task')]});notify();});await advance(page);await Promise.race([received,new Promise((_,reject)=>setTimeout(()=>reject(new Error('fixture did not observe the deferred query')),4000))]);await click(page,'恢复草稿');await text(page,'已恢复完整人物');release();await page.waitForTimeout(50);assert.equal(await page.locator('a[href*="old-task"]').count(),0);assert.ok(await page.locator('a[href*="fixture-task"]').count());}finally{release?.();await f.close();}});
+  await test(10,'same-plan out-of-order query must not regress succeeded to queued',async()=>{const p=plan(),s=state(p,[task('queued')]),f=await fixture(s,saved(p));let release;try{const {page}=f;let q=0;s.onQuery=()=>{q++;if(q===1)return new Promise(resolve=>{release=()=>resolve({plan:p,tasks:[task('queued')]});});return {plan:p,tasks:[task('succeeded')]};};await advance(page);await advance(page);await page.getByRole('button',{name:'选择人物图片'}).waitFor();release();await page.waitForTimeout(50);assert.equal(await page.getByRole('button',{name:'选择人物图片'}).count(),1,'late queued reply overwrote successful main result');}finally{release?.();await f.close();}});
+  await test(11,'reload existing plan does not re-submit',async()=>{const p=plan(),s=state(p,[task('succeeded')]),f=await fixture(s,saved(p));try{const {page}=f;await page.getByRole('button',{name:'选择人物图片'}).waitFor();await page.reload();await page.getByRole('button',{name:'选择人物图片'}).waitFor();await count(s,'submit',0);await count(s,'prepare',0);}finally{await f.close();}});
+  await test(11,'pending submit survives reload; no task yet never auto-generates',async()=>{const p=plan(),s=state(p),f=await fixture(s,saved(p),p.id);try{const {page}=f;await disabled(page,'生成四宫格');await click(page,'查询原提交，不重复生成');await page.reload();await disabled(page,'生成四宫格');await count(s,'submit',0);await count(s,'prepare',0);assert.equal(await page.evaluate(key=>localStorage.getItem(`${key}:pending`),key),p.id);}finally{await f.close();}});
+  await test(11,'pending lookup failure still has a working manual original-query action',async()=>{const p=plan(),s=state(p);s.pendingLookupError=true;const f=await fixture(s,saved(p),p.id);try{const {page}=f;await text(page,'上次人物草稿暂不可读取');await disabled(page,'生成四宫格');const before=s.queries.length;s.pendingLookupError=false;s.tasks=[task('succeeded')];await click(page,'查询原提交，不重复生成');await page.waitForTimeout(100);assert.equal(s.queries.length,before+1,'pending recovery button did not query without loaded plan');await page.getByRole('button',{name:'选择人物图片'}).waitFor();await count(s,'submit',0);}finally{await f.close();}});
+  await test(12,'restore history keeps parameters; selecting/preview/cancel creates no generation',async()=>{const p=plan(),s=state(p,[task('succeeded')]),f=await fixture(s,saved(p));try{const {page}=f;await page.getByRole('button',{name:'选择人物图片'}).waitFor();await click(page,'选择人物图片');await count(s,'restore',0);await click(page,'预览整图');await page.keyboard.press('Escape');await click(page,'恢复草稿');await text(page,'已恢复完整人物');assert.equal(await page.locator('section[aria-label="人物条件"] label').filter({hasText:/^质量/}).locator('select').inputValue(),'high');assert.equal(await page.locator('section[aria-label="人物条件"] label').filter({hasText:/^分辨率/}).locator('select').inputValue(),'2K');await count(s,'restore',1);await click(page,'重新报价并按原人物出图');await text(page,'共冻结5点');await click(page,'取消');await count(s,'submit',0);const draft=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),key);assert.equal(draft.quality,'high');assert.equal(draft.resolution,'2K');}finally{await f.close();}});
+  const summary={version:require(path.join(root,'package.json')).version,commit:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),evidenceLevel:'isolated real AvatarStudio + real ProductDialog + real AppSessionProvider; synthetic localhost API/data/images only',newSpend:0,externalRequests:unsafe,componentInputs:Object.keys(bundle.metafile.inputs).filter(p=>p.startsWith('src/')),cases:results,passed:results.filter(r=>r.status==='PASS').length,failed:results.filter(r=>r.status==='FAIL').length,requestSummary:requests.reduce((a,r)=>{const k=`${r.method} ${r.path} ${r.action||''}`;a[k]=(a[k]||0)+1;return a;},{}),limitations:['No production business calls, cookies, tokens, DB or models','Synthetic image is only a local placeholder; real image and paid credit proof reused from parent','Pure parser/layout cases reused from existing 27-case actual log, not rerun here','Server prepare/submit billing invariants source-reviewed, not exercised against production']};
+  fs.writeFileSync(path.join(evidence,'component-results.json'),JSON.stringify(summary,null,2)+'\n');console.log(JSON.stringify({passed:summary.passed,failed:summary.failed,externalRequests:unsafe.length,evidence}));
+  if(unsafe.length)throw new Error('unexpected external/uncontrolled network attempted');
+  if(summary.failed)throw new Error(`${summary.failed} bounded component scenarios failed; see component-results.json`);
+}
+main().catch(e=>{console.error(e);process.exitCode=1;}).finally(async()=>{await browser?.close();await new Promise(resolve=>server?server.close(resolve):resolve());});
