@@ -1,7 +1,7 @@
 'use client';
 import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 import { RelativeTime } from '@/components/RelativeTime';
-import ContentReactions from '@/components/content-reactions/ContentReactions';
+import TemplateFavoriteTitle from '@/components/content-reactions/TemplateFavoriteTitle';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -425,12 +425,11 @@ export function TemplateLibraryClient() {
 
               <div className="template-library-preview-title">
                 <span className="template-library-kicker">{selectedView.scenario}</span>
-                <h2>{selectedView.template.name}</h2>
+                <TemplateFavoriteTitle contentKey={selectedView.template.status === 'active' ? `legacy_template:${selectedView.template.id}` : undefined}><h2 title={selectedView.template.name}>{selectedView.template.name}</h2></TemplateFavoriteTitle>
                 <p>{cleanText(selectedView.template.description) || '适合按固定角色、标志、风格和规则生成一致的视频。'}</p>
               </div>
 
               <div className="template-library-preview-actions">
-                {selectedView.template.status === 'active' && <ContentReactions contentKey={`legacy_template:${selectedView.template.id}`} />}
                 <button type="button" className="is-primary" onClick={handleUseTemplate}>
                   <PlayCircle size={17} aria-hidden="true" />
                   使用此模板

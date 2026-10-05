@@ -2,6 +2,7 @@
 
 import { useProductDialog } from '@/components/useProductDialog';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
+import TemplateFavoriteTitle from '@/components/content-reactions/TemplateFavoriteTitle';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type SetStateAction } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -1690,12 +1691,12 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                 {templateError && <div className={styles.calloutError}>{templateError}<button type="button" className={styles.quietButton} onClick={() => void loadTemplates()}>重试</button></div>}
                 <div className={styles.list}>
                   {templates.map((template) => (
-                    <div key={`${template.source}:${template.id}`} style={{ display: 'grid', minWidth: 0 }}><button type="button" className={styles.listItem} aria-current={template.id === routedTemplateId && template.source === routedTemplateSource} onClick={() => void openTemplateDetail(template)}>
+                    <div key={`${template.source}:${template.id}`} className={styles.templateListItem}><button type="button" className={styles.listItem} aria-current={template.id === routedTemplateId && template.source === routedTemplateSource} onClick={() => void openTemplateDetail(template)}>
                       <span className={styles.listItemTitle}>{template.name || '未命名模板'}</span>
                       <span className={styles.listItemMeta}><span>{template.groupName || '未分组'}</span><span>V{template.version?.number || '草稿'}</span><span className={`${styles.status} ${statusClass(template.status)}`}>{template.status === 'published' ? '可用' : template.status === 'archived' ? '已停用' : '草稿'}</span></span>
                       {template.owner && <span className={styles.owner}><UserIdentityBadge size="sm" user={{ name: template.owner.displayName, avatar_url: template.owner.avatarUrl }} /></span>}
                     </button>
-                    {template.status !== 'archived' && <ContentReactions contentKey={`${template.source === 'legacy' ? 'legacy_template' : 'video_template'}:${template.id}`} />}
+                    {template.status !== 'archived' && <ContentReactions contentKey={`${template.source === 'legacy' ? 'legacy_template' : 'video_template'}:${template.id}`} favoriteOnly />}
                     </div>
                   ))}
                   {!templateBusy && templates.length === 0 && <div className={styles.emptyState}><Film size={21} /><strong>还没有可用模板</strong><span>可以先新建空白模块，写下提示词并保存。</span></div>}
@@ -1707,10 +1708,10 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                 <div className={styles.sectionHeading}><h2>我的模块</h2><button className={styles.iconButton} type="button" title="刷新模块" aria-label="刷新模块" onClick={() => void loadDrafts()}><FolderOpen size={15} /></button></div>
                 <div className={styles.list}>
                   {drafts.map((item) => (
-                    <div key={item.id} style={{ display: 'grid', minWidth: 0 }}><button type="button" className={styles.listItem} aria-current={item.id === routedDraftId} onClick={() => navigate({ type: 'video', view: 'templates', draftId: item.id, moduleId: item.id, runId: null, templateId: null, templateSource: null })}>
+                    <div key={item.id} className={styles.templateListItem}><div className={styles.templateListContent}><button type="button" className={styles.listItem} aria-current={item.id === routedDraftId} onClick={() => navigate({ type: 'video', view: 'templates', draftId: item.id, moduleId: item.id, runId: null, templateId: null, templateSource: null })}>
                       <span className={styles.listItemTitle}>{item.name || '未命名模块'}</span>
                       <span className={styles.listItemMeta}><span>{item.groupName || '未分组'}</span><span>修订 {item.revision}</span></span>
-                    </button><span className={styles.recordTime}><RelativeTime value={item.updatedAt} /></span><ContentReactions contentKey={`video_draft:${item.id}`} /></div>
+                    </button><span className={styles.recordTime}><RelativeTime value={item.updatedAt} /></span></div><ContentReactions contentKey={`video_draft:${item.id}`} favoriteOnly /></div>
                   ))}
                   {!draftBusy && drafts.length === 0 && <span className={styles.saveState}>保存的模块会显示在这里。</span>}
                 </div>
@@ -1777,11 +1778,10 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                 {recoveryAvailable && !conflict && <div className={styles.callout}><span>上次输入已保留。</span><button className={styles.quietButton} type="button" onClick={restoreLocalDraft}>恢复上一次</button></div>}
                 <div className={styles.contentHeader}>
                   <div>
-                    <h2>{activeDraft.name || '未命名模块'}</h2>
+                    <TemplateFavoriteTitle contentKey={!activeDraft.id.startsWith('local-') ? `video_draft:${activeDraft.id}` : undefined}><h2 title={activeDraft.name || '未命名模块'}>{activeDraft.name || '未命名模块'}</h2></TemplateFavoriteTitle>
                     <p>{activeDraft.template ? `${activeDraft.template.templateName} · 固定版本 V${activeDraft.template.versionNumber || '未知'}` : '空白模块'} · 修订 {activeDraft.revision}</p>
                   </div>
                   <div className={styles.headerActions}>
-                    {!activeDraft.id.startsWith('local-') && <ContentReactions contentKey={`video_draft:${activeDraft.id}`} />}
                     <button type="button" className={styles.quietButton} onClick={() => setContextEditor({ draftId: activeDraft.id })}><Settings size={15} />模块上下文</button>
                     <button className={styles.quietButton} type="button" disabled={working || savingDraftIds.current.has(activeDraft.id)} onClick={() => void saveDraft(activeDraft, true)}><Save size={15} />保存</button>
                     {capabilities?.canCreatePrivateTemplates && <button className={styles.quietButton} type="button" onClick={() => {
@@ -2066,9 +2066,8 @@ function TemplateOverview({
   return (
     <>
       <div className={styles.contentHeader}>
-        <div><h2>{template.name || '未命名模板'}</h2><p>{template.description || '暂无说明'} · {template.groupName || '未分组'} · {isLegacy ? '旧版模板' : template.version ? `版本 V${template.version.number}` : '尚未发布'}</p></div>
+        <div className={styles.templateHeading}><TemplateFavoriteTitle contentKey={template.status !== 'archived' ? `${template.source === 'legacy' ? 'legacy_template' : 'video_template'}:${template.id}` : undefined}><h2 title={template.name || '未命名模板'}>{template.name || '未命名模板'}</h2></TemplateFavoriteTitle><p>{template.description || '暂无说明'} · {template.groupName || '未分组'} · {isLegacy ? '旧版模板' : template.version ? `版本 V${template.version.number}` : '尚未发布'}</p></div>
         <div className={styles.headerActions}>
-          {template.status !== 'archived' && <ContentReactions contentKey={`${template.source === 'legacy' ? 'legacy_template' : 'video_template'}:${template.id}`} />}
           <button className={styles.quietButton} type="button" onClick={onBack}>返回模板列表</button>
           {!isLegacy && template.canManage && <button className={styles.quietButton} type="button" onClick={onEdit}><Settings size={15} />模块上下文</button>}
           {!isLegacy && template.canPublish && <button className={styles.primaryButton} type="button" disabled={busy || !recipe} title={!recipe ? '模板配方尚未完成' : '发布当前版本'} onClick={onPublish}>发布版本</button>}

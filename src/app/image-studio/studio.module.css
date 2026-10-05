@@ -31,10 +31,10 @@
 .module { border-top: 1px solid #465057; padding: 28px 0; scroll-margin-top: 90px; }
 .module[data-active=true] { border-top-color: #79daca; }
 .page .moduleName { width: min(300px, 100%); font-size: 20px; font-weight: 800; }
-.page .moduleNameDisplay { justify-content: flex-start; width: min(420px, 100%); padding: 0; border: 0; background: transparent; color: #eef0f2; font-size: 22px; font-weight: 800; text-align: left; }
+.page .moduleNameDisplay { display: block; width: auto; max-width: 420px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; border: 0; background: transparent; color: #eef0f2; font-size: 22px; font-weight: 800; text-align: left; }
 .page .moduleNameDisplay:hover { background: transparent; color: #b9f7e8; }
 .module .header { align-items: center; flex-wrap: wrap; }
-.moduleTitleRow { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.moduleTitleRow { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; flex-wrap: nowrap; }
 .moduleSharing { flex: 0 0 auto; padding: 6px 9px !important; font-size: 12px !important; }
 .module .counts { align-items: center; }
 .moduleGroupControl { display: inline-flex; align-items: center; gap: 6px; color: #adb6bd; font-size: 13px; }

@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { RotateCcw } from 'lucide-react';
+import Link from 'next/link';
+import { Bookmark, RotateCcw } from 'lucide-react';
 import ImageStudio from '@/app/image-studio/studio';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import VideoTemplateWorkbench from './VideoTemplateWorkbench';
@@ -258,6 +259,7 @@ export default function TemplateStudioShell({
           <h1>模板工作台</h1>
         </div>
         <div className={styles.headerActions}>
+          <Link className={styles.quietButton} href="/assets?view=favorites&category=template"><Bookmark size={16} />我的收藏</Link>
           {hasRememberedLocation && (
             <button
               className={styles.quietButton}

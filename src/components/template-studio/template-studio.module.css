@@ -98,6 +98,13 @@
 .viewTabs button { min-height: 36px; padding-inline: 12px; color: var(--muted); font-weight: 650; }
 .viewTabs .activeView { color: var(--text); background: var(--panel-raised); border-color: var(--line); }
 .headerActions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.headerActions a.quietButton { text-decoration: none; }
+.templateListItem { display: flex; align-items: flex-start; min-width: 0; gap: 4px; }
+.templateListItem > button { flex: 1 1 auto; min-width: 0; }
+.templateListContent { flex: 1 1 auto; min-width: 0; }
+.templateListContent > button { width: 100%; }
+.templateListItem > :global([data-content-reactions]) { flex: 0 0 auto; margin-top: 10px; }
+.templateHeading, .contentHeader > div:first-child { min-width: 0; max-width: 100%; }
 .primaryButton { min-height: 40px; padding-inline: 14px; border-color: oklch(0.67 0.12 166); color: var(--accent-ink); background: var(--accent); font-weight: 750; }
 .primaryButton:hover:not(:disabled) { background: oklch(0.83 0.105 166); }
 .primaryButton:active:not(:disabled) { background: oklch(0.73 0.11 166); }
