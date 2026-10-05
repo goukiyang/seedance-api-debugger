@@ -106,6 +106,7 @@ const cutoutPage = read('src/app/cutout/page.tsx');
 assertContains(cutoutPage, "user?.role === 'admin'", 'cutout page admin gate');
 
 const cutoutRoute = read('src/app/api/cutout/[[...path]]/route.ts');
-assertContains(cutoutRoute, 'AI 抠图工具暂时只对管理员开放', 'cutout proxy admin-only gate');
+assertContains(cutoutRoute, 'proxyCutout', 'cutout route delegates to shared proxy');
+assertContains(read('src/lib/cutout/proxy.ts'), 'AI 抠图工具暂时只对管理员开放', 'cutout proxy admin-only gate');
 
 console.log('enhance-video-entry smoke passed');

@@ -1,0 +1,810 @@
+.page {
+  width: min(100%, 1680px);
+  margin: 0 auto;
+  padding: 20px 24px 40px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.82fr) minmax(0, 1.18fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.column {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.section {
+  min-width: 0;
+  padding: 0 0 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.sectionHeading,
+.sectionTitle,
+.toolbar,
+.buttonRow,
+.historyActions,
+.resultActions,
+.sourceHeading,
+.assetLine,
+.jobHeading,
+.jobMeta,
+.sliderTopline,
+.modeTabs,
+.strategyTabs,
+.pager {
+  display: flex;
+  align-items: center;
+}
+
+.sectionHeading,
+.sourceHeading,
+.jobHeading {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sectionHeading {
+  margin-bottom: 14px;
+}
+
+.sectionTitle {
+  min-width: 0;
+  gap: 9px;
+}
+
+.sectionTitle h2,
+.sectionHeading h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.sectionTitle p,
+.sectionHeading p,
+.subtleText,
+.fieldHint,
+.sourceHint,
+.emptyHint,
+.jobMeta,
+.imageCaption,
+.resultDetail {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.sectionHeading p {
+  margin-top: 3px;
+}
+
+.iconButton,
+.quietButton,
+.secondaryButton,
+.primaryButton,
+.dangerButton,
+.textButton,
+.presetButton,
+.modeTab,
+.strategyTab,
+.pagerButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  font: inherit;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.iconButton,
+.quietButton,
+.secondaryButton,
+.dangerButton,
+.presetButton,
+.modeTab,
+.strategyTab,
+.pagerButton {
+  min-height: 34px;
+  padding: 6px 10px;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.iconButton {
+  width: 34px;
+  padding: 0;
+}
+
+.textButton {
+  min-height: 30px;
+  padding: 4px 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--tone-info-text);
+  font-size: 12px;
+}
+
+.primaryButton {
+  min-height: 40px;
+  padding: 8px 14px;
+  border-color: var(--tone-success-border);
+  background: var(--tone-success-bg);
+  color: var(--tone-success-text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.dangerButton {
+  color: var(--tone-danger-text);
+}
+
+.iconButton:hover:not(:disabled),
+.quietButton:hover:not(:disabled),
+.secondaryButton:hover:not(:disabled),
+.dangerButton:hover:not(:disabled),
+.presetButton:hover:not(:disabled),
+.modeTab:hover:not(:disabled),
+.strategyTab:hover:not(:disabled),
+.pagerButton:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.primaryButton:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+
+.textButton:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.iconButton:disabled,
+.quietButton:disabled,
+.secondaryButton:disabled,
+.primaryButton:disabled,
+.dangerButton:disabled,
+.textButton:disabled,
+.presetButton:disabled,
+.modeTab:disabled,
+.strategyTab:disabled,
+.pagerButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.modeTabs,
+.strategyTabs {
+  width: fit-content;
+  max-width: 100%;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-input);
+}
+
+.modeTab,
+.strategyTab {
+  min-height: 32px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.modeActive,
+.strategyActive {
+  border-color: var(--border-color);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sourceDropzone {
+  display: flex;
+  min-height: 132px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 18px;
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  text-align: center;
+}
+
+.sourceDropActive {
+  border-color: var(--tone-info-border);
+  background: var(--tone-info-bg);
+}
+
+.sourceDropzone strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sourceDropzone span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.hiddenInput {
+  display: none;
+}
+
+.sourceHeading {
+  margin: 12px 0 8px;
+}
+
+.sourceHeading strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceStage,
+.imageStage {
+  position: relative;
+  display: flex;
+  min-height: 160px;
+  max-height: 460px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-input);
+  background-image: linear-gradient(45deg, var(--bg-hover) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--bg-hover) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--bg-hover) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--bg-hover) 75%);
+  background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+  background-size: 12px 12px;
+}
+
+.sourceImage,
+.resultImage {
+  display: block;
+  width: 100%;
+  max-height: 440px;
+  object-fit: contain;
+  cursor: zoom-in;
+}
+
+.sourceImage {
+  width: auto;
+  max-width: 100%;
+}
+
+.sourceHint {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.assetLine {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-top: 10px;
+}
+
+.assetLine span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.settingsPanel {
+  min-width: 0;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-color);
+}
+
+.presetList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.presetButton {
+  min-height: 30px;
+  padding: 5px 9px;
+}
+
+.presetActive {
+  border-color: var(--tone-info-border);
+  background: var(--tone-info-bg);
+  color: var(--tone-info-text);
+}
+
+.controlLabel {
+  display: block;
+  margin: 10px 0 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.selectControl,
+.numberInput,
+.textInput {
+  min-width: 0;
+  min-height: 36px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.selectControl {
+  width: 100%;
+}
+
+.sliderList,
+.advancedSliderList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  margin-top: 16px;
+}
+
+.sliderField {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.sliderTopline {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sliderTopline output {
+  min-width: 32px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.sliderField input[type='range'] {
+  width: 100%;
+  accent-color: oklch(0.72 0.12 160);
+}
+
+.fieldHint {
+  min-height: 2.9em;
+}
+
+.advancedSettings {
+  margin-top: 16px;
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.advancedSettings summary {
+  padding: 11px 0;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.advancedBody {
+  padding: 0 0 14px;
+}
+
+.toggleGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px 12px;
+}
+
+.toggleField {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.toggleField input,
+.checkField input {
+  accent-color: oklch(0.72 0.12 160);
+}
+
+.advancedSliderList {
+  margin-top: 16px;
+}
+
+.advancedSliderList .sliderField {
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+.strategyCopy {
+  max-width: 620px;
+  margin: 8px 0 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.fieldGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.fieldLabel {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.numberInput,
+.textInput {
+  width: 100%;
+}
+
+.statusNotice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--tone-info-border);
+  border-radius: 5px;
+  background: var(--tone-info-bg);
+  color: var(--tone-info-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.statusError {
+  border-color: var(--tone-danger-border);
+  background: var(--tone-danger-bg);
+  color: var(--tone-danger-text);
+}
+
+.statusWarning {
+  border-color: var(--tone-warning-border);
+  background: var(--tone-warning-bg);
+  color: var(--tone-warning-text);
+}
+
+.primaryActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.primaryActions .primaryButton {
+  min-width: 160px;
+}
+
+.historyToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.historyList {
+  display: grid;
+  border-top: 1px solid var(--border-color);
+}
+
+.historyRow {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 9px 0;
+  border: 0;
+  border-bottom: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.historyRow:hover,
+.historySelected {
+  background: color-mix(in oklab, var(--bg-hover), transparent 45%);
+}
+
+.historyThumb {
+  display: flex;
+  width: 64px;
+  aspect-ratio: 16 / 10;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-align: center;
+}
+
+.historyThumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.historyInfo {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.historyInfo strong {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobMeta {
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.statusSucceeded {
+  background: var(--tone-success-bg);
+  color: var(--tone-success-text);
+}
+
+.statusFailed {
+  background: var(--tone-danger-bg);
+  color: var(--tone-danger-text);
+}
+
+.statusRunning {
+  background: var(--tone-info-bg);
+  color: var(--tone-info-text);
+}
+
+.pager {
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.resultHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-bottom: 14px;
+}
+
+.resultGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.resultTile {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  background: var(--bg-panel);
+}
+
+.resultTileHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.resultTileHeader strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.imageFrame {
+  display: flex;
+  min-height: 140px;
+  max-height: 320px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 3px;
+  background-color: var(--bg-input);
+  background-image: linear-gradient(45deg, var(--bg-hover) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--bg-hover) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--bg-hover) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--bg-hover) 75%);
+  background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+  background-size: 12px 12px;
+}
+
+.imageFrame .resultImage {
+  max-height: 310px;
+}
+
+.imageCaption {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 7px;
+}
+
+.resultActions {
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  margin-top: 8px;
+}
+
+.splitList {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.splitRow {
+  display: grid;
+  grid-template-columns: auto 54px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  min-width: 0;
+  padding: 7px 0;
+  border-top: 1px solid var(--border-color);
+}
+
+.splitThumb {
+  display: block;
+  width: 54px;
+  height: 54px;
+  object-fit: contain;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-input);
+  cursor: zoom-in;
+}
+
+.splitName {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkField {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.operationBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.emptyHint {
+  padding: 12px 0;
+}
+
+.zoomLayer {
+  z-index: 1200;
+}
+
+.timeText {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+@media (max-width: 1020px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .column {
+    gap: 18px;
+  }
+
+  .historyList {
+    max-height: 420px;
+    overflow: auto;
+  }
+}
+
+@media (max-width: 600px) {
+  .page {
+    padding: 14px 12px 28px;
+  }
+
+  .sliderList,
+  .advancedSliderList,
+  .toggleGrid,
+  .fieldGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fieldHint {
+    min-height: 0;
+  }
+
+  .historyRow {
+    grid-template-columns: 56px minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .historyThumb {
+    width: 56px;
+  }
+
+  .splitRow {
+    grid-template-columns: auto 44px minmax(0, 1fr);
+  }
+
+  .splitThumb {
+    width: 44px;
+    height: 44px;
+  }
+
+  .splitRow > :last-child {
+    grid-column: 3;
+    justify-self: start;
+  }
+
+  .primaryActions .primaryButton {
+    flex: 1 1 100%;
+  }
+}

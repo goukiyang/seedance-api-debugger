@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '新增模板批量生成、暂停与批次找回，可保存到所选目录或分包下载。演化内容可选递进或递减。生成完成可提醒或开启提示音，人物结果与历史图片支持放大预览。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '升级原有AI抠图：六项调节、角色框选、画笔细修、拆分合并与历史找回。提交前检查业务授权，未接入时明确提示，不会空转或重复提交任务。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);
