@@ -221,6 +221,7 @@
 .resultOwner :global(.user-identity-name) { color: #dce2e7; }
 .resultActions button { padding: 5px 8px; font-size: 13px; }
 .resultCommands { display: flex; flex: 1; flex-wrap: wrap; align-items: center; gap: 6px; opacity: 1; }
+.resultCommands > button:not(.recoveryAction) { flex: 0 0 32px; width: 32px; height: 32px; padding: 0; }
 .resultCommands:has(.recoveryAction), .resultCommands[data-needs-action="true"] { opacity: 1; }
 .page .recoveryAction { background: #79daca; color: #102721; border-color: #79daca; font-weight: 750; }
 .page .recoveryAction:hover:not(:disabled) { background: #98e7d9; }
@@ -279,7 +280,7 @@
   .templateWorkbench .module { scroll-margin-top: calc(var(--composer-topbar-height, 48px) + 132px); }
 }
 @media (max-width: 800px) { .primaryMaterials .materialGrid { max-width: 360px; } }
-.restoreFooter { min-height: 38px; display: flex; align-items: center; justify-content: flex-end; }
-.restoreFooter .restoreResult { opacity: 0; pointer-events: none; padding: 5px 9px; font-size: 13px; }
+.resultCommands .restoreResult { position: relative; opacity: 0; pointer-events: none; }
 .result:hover .restoreResult, .result:focus-within .restoreResult { opacity: 1; pointer-events: auto; }
-@media (hover: none) { .restoreFooter .restoreResult { opacity: 1; pointer-events: auto; } }
+.restoreResult:hover .resolutionTooltip, .restoreResult:focus-visible .resolutionTooltip { display: block; }
+@media (hover: none) { .resultCommands .restoreResult { opacity: 1; pointer-events: auto; } }
