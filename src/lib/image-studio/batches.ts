@@ -10,6 +10,7 @@ import { STUDIO_BATCH_LIMITS, type StudioBatchView } from './batch-contract';
 import { studioAssetUrl } from './media';
 import { studioVisibleAssetWhere } from './protected-assets';
 import { resolveStudioStyleReferences } from './style-groups';
+import type { StudioReferencePolicy } from './reference-policy';
 
 const PREFIX = 'studio_batch_v1:';
 const ITEM_PREFIX = 'studio_batch_item_v1:';
@@ -55,15 +56,15 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
     if (existing) { if (parse(existing.value_json).fingerprint !== fingerprint) throw new StudioError('提交编号已用于其他批次', 409); return; }
     const active = await tx.platformSetting.count({ where: { key: { startsWith: `${PREFIX}${ownerId}:` }, OR: ['preparing', 'ready', 'paused', 'blocked'].map(state => ({ value_json: { contains: `"state":"${state}"` } })) } });
     if (active >= STUDIO_BATCH_LIMITS.activeBatches) throw new StudioError('最多保留 5 个未结束批次，请先处理原批次', 429);
-    const module = await tx.imageStudioModule.findFirst({ where: { id: body.moduleId as string, owner_id: ownerId }, select: { name: true, model: true } });
-    if (!module) throw new StudioError('模板不存在或无权使用', 404);
+    const workspace = await tx.imageStudioModule.findFirst({ where: { id: body.moduleId as string, owner_id: ownerId }, select: { name: true, model: true } });
+    if (!workspace) throw new StudioError('模板不存在或无权使用', 404);
     const settings = await getImageStudioSettings();
-    const unitCredits = settings.prices[input.model || resolveStudioModuleGenerationConfig(module, settings).model];
+    const unitCredits = settings.prices[input.model || resolveStudioModuleGenerationConfig(workspace, settings).model];
     if (unitCredits == null || unitCredits * items.length > Number(body.budget)) throw new StudioError('最高预算不足以覆盖本批预计点数');
-    const assetIds = [...new Set(items.flatMap(item => item.assetId ? [item.assetId] : []))];
+    const assetIds = Array.from(new Set(items.flatMap(item => item.assetId ? [item.assetId] : [])));
     const assets = await tx.asset.findMany({ where: { id: { in: assetIds }, owner_id: ownerId, status: 'active', type: 'image' }, select: { id: true, file_size: true } });
     if (assets.length !== assetIds.length || assets.some(asset => !asset.file_size || asset.file_size > STUDIO_BATCH_LIMITS.fileBytes) || assets.reduce((sum, asset) => sum + (asset.file_size || 0), 0) > STUDIO_BATCH_LIMITS.totalBytes) throw new StudioError('素材不可用或超过本批大小上限');
-    const batch: BatchRecord = { version: 1, id, ownerId, requestId: input.requestId, fingerprint, moduleId: body.moduleId as string, moduleName: module.name, state: 'preparing', note: '', createdAt: new Date().toISOString(), total: items.length, budget: Number(body.budget), committedCredits: 0, unitCredits, prepared: 0, input: shared, items };
+    const batch: BatchRecord = { version: 1, id, ownerId, requestId: input.requestId, fingerprint, moduleId: body.moduleId as string, moduleName: workspace.name, state: 'preparing', note: '', createdAt: new Date().toISOString(), total: items.length, budget: Number(body.budget), committedCredits: 0, unitCredits, prepared: 0, input: shared, items };
     await tx.platformSetting.create({ data: { key: key(ownerId, id), value_json: JSON.stringify(batch), updated_by: ownerId } });
     created = true;
   }, { timeout: 15000 });
@@ -76,7 +77,7 @@ async function prepareBatch(owner: string, id: string) {
   try {
     for (const item of initial.items) {
       if (item.prepared) continue;
-      const policy = initial.input.draft && (initial.input.draft as { referencePolicy?: { primaryIds: string[] } }).referencePolicy;
+      const policy = (initial.input.draft as { referencePolicy?: StudioReferencePolicy } | undefined)?.referencePolicy;
       const references = item.assetId ? [item.assetId, ...(initial.input.referenceIds as string[]).filter(ref => !policy?.primaryIds.includes(ref))] : initial.input.referenceIds;
       const draft = initial.input.draft as Record<string, unknown> | undefined;
       const itemInput = { ...initial.input, requestId: `${id.slice(0, 48)}-${item.ordinal}`, referenceIds: references,
@@ -122,7 +123,8 @@ export async function studioBatchView(owner: string, id: string, includeItems = 
   const statuses = batch.items.map(item => item.cancelled ? 'cancelled' : item.taskId ? tasks.find(task => task.id === item.taskId)?.status || 'uncertain' : 'pending');
   const active = statuses.filter(state => ['running', 'queued'].includes(state)).length;
   const pending = statuses.filter(state => state === 'pending').length;
-  return { id: batch.id, requestId: batch.requestId, moduleId: batch.moduleId, moduleName: batch.moduleName, state: batch.state === 'ready' && !active && !pending ? 'complete' : batch.state, note: batch.note, total: batch.total, generated: statuses.filter(state => state === 'succeeded').length, failed: statuses.filter(state => state === 'failed').length, uncertain: statuses.filter(state => state === 'uncertain').length, active, pending, prepared: batch.prepared, budget: batch.budget, committedCredits: batch.committedCredits, unitCredits: batch.unitCredits, createdAt: batch.createdAt,
+  const uncertain = statuses.filter(state => state === 'uncertain').length;
+  return { id: batch.id, requestId: batch.requestId, moduleId: batch.moduleId, moduleName: batch.moduleName, state: !active && !pending && uncertain ? 'uncertain' : batch.state === 'ready' && !active && !pending ? 'complete' : batch.state, note: batch.note, total: batch.total, generated: statuses.filter(state => state === 'succeeded').length, failed: statuses.filter(state => state === 'failed').length, uncertain, active, pending, prepared: batch.prepared, budget: batch.budget, committedCredits: batch.committedCredits, unitCredits: batch.unitCredits, createdAt: batch.createdAt,
     ...(includeItems ? { items: batch.items.map((item, index) => {
       const task = tasks.find(task => task.id === item.taskId);
       const asset = assets.find(asset => asset.id === task?.asset_id);
@@ -199,7 +201,7 @@ export async function dispatchStudioBatches() {
         const transientIds = (snapshot.transientReferenceImages || []).map((reference: { id: string }) => reference.id);
         const visibleReferences = await tx.asset.count({ where: { id: { in: transientIds }, owner_id: batch.ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(user, tx)] } });
         if (visibleReferences !== new Set(transientIds).size) throw new StudioError('本批参考图已不可用，未派发新任务');
-        const allIds = [...new Set((snapshot.referenceImages || []).map((reference: { id: string }) => reference.id))] as string[];
+        const allIds = Array.from(new Set<string>((snapshot.referenceImages || []).map((reference: { id: string }) => reference.id)));
         const assets = await tx.asset.findMany({ where: { id: { in: allIds }, status: 'active', type: 'image' }, select: { id: true, owner_id: true, hash: true } });
         if (assets.length !== allIds.length || assets.some(asset => asset.owner_id !== snapshot.authorizedReferenceOwners?.[asset.id] || snapshot.referenceImages.find((reference: { id: string }) => reference.id === asset.id)?.hash !== asset.hash)) throw new StudioError('本批素材归属或内容已变化，未派发新任务');
         if (snapshot.styleGroupIds?.length) await resolveStudioStyleReferences(user, snapshot.styleGroupIds, tx);

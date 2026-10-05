@@ -35,6 +35,7 @@ export async function GET(request: NextRequest) {
       'Content-Type': 'image/png', 'Content-Disposition': `attachment; filename="${files[0].name}"`, 'Cache-Control': 'private, no-store',
     } });
     const zip = new ZipFile();
+    const output = zip.outputStream as Readable;
     const prefix = batch ? `batch-${batch.id.slice(0, 12)}/` : '';
     // yazl opens the next entry lazily: at most one bounded image is buffered.
     for (const file of files) zip.addReadStreamLazy(`${prefix}${file.name}`, { compress: false, size: file.size }, callback => {
@@ -45,10 +46,12 @@ export async function GET(request: NextRequest) {
     });
     if (batch) zip.addBuffer(Buffer.from(JSON.stringify({ batch: batch.id, createdAt: batch.createdAt, generated: batch.generated, total: batch.total, providedForDownload: files.length,
       items: batch.items?.map(item => ({ ordinal: item.ordinal, source: item.sourceName, task: item.taskId, generation: item.status, file: files.find(file => file.taskId === item.taskId)?.name || null, save: files.some(file => file.taskId === item.taskId) ? 'provided-for-download-not-confirmed-on-device' : 'not-in-this-package' })) }, null, 2)), `${prefix}results.json`);
-    zip.on('error', error => zip.outputStream.destroy(error));
-    request.signal.addEventListener('abort', () => zip.outputStream.destroy(new Error('下载已取消')), { once: true });
+    zip.on('error', error => output.destroy(error));
+    const abort = () => output.destroy(new Error('下载已取消'));
+    request.signal.addEventListener('abort', abort, { once: true });
+    output.once('close', () => request.signal.removeEventListener('abort', abort));
     zip.end();
-    return new Response(Readable.toWeb(zip.outputStream as Readable) as ReadableStream, { headers: {
+    return new Response(Readable.toWeb(output) as ReadableStream, { headers: {
       'Content-Type': 'application/zip', 'Content-Disposition': 'attachment; filename="generated-images.zip"', 'Cache-Control': 'private, no-store',
     } });
   } catch { return NextResponse.json({ error: '图片包准备失败，请重试；已有图片不会丢失' }, { status: 503 }); }

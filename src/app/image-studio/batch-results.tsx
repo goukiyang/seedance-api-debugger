@@ -115,7 +115,7 @@ export function BatchResults({ id, userId, outputDirectory, compact = false }: {
       const name = `batch-${id.slice(0, 12)}-part-${index + 1}.zip`, url = URL.createObjectURL(blob);
       setZipReady({ url, name });
       const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; anchor.click();
-      setProvided(previous => [...new Set([...previous, ...packages[index].map(item => item.ordinal)])]);
+      setProvided(previous => Array.from(new Set([...previous, ...packages[index].map(item => item.ordinal)])));
     } catch (error) { setSaveError(error instanceof Error ? error.message : '下载准备失败，已有图片仍保留'); }
     finally { saveLock.current = false; setSaveBusy(false); }
   }

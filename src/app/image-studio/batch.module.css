@@ -19,7 +19,11 @@
 .item input[type='checkbox'], .delivery input[type='checkbox'] { width: 16px; height: 16px; }
 .item p, .results p { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
 .delivery { display: grid; gap: 8px; padding: 12px 0; border-block: 1px solid var(--border, #d8dce1); }
-.dialog { width: min(900px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 20px; border: 1px solid #d8dce1; border-radius: 8px; background: var(--surface, #f9fafb); }
+.dialog { width: min(900px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 20px; border: 1px solid var(--border-color, #465057); border-radius: 8px; background: var(--bg-panel, #171c1f); color: var(--text-primary, #eef0f2); }
+.dialog button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 6px 9px; border: 1px solid var(--border-color, #465057); border-radius: 6px; background: var(--bg-input, #151a1d); color: inherit; cursor: pointer; }
+.dialog button:disabled { opacity: .5; cursor: default; }
+.dialog .primary { background: #79daca; color: #102721; }
+.historyItem > button { display: flex; flex-direction: column; align-items: flex-start; width: 100%; }
 .dialog::backdrop { background: rgb(25 32 37 / 45%); }
 .dialog h2 { font-size: 20px; }
 .historyItem { display: flex; flex-direction: column; align-items: flex-start; width: 100%; gap: 8px; padding: 12px; margin-top: 8px; text-align: left; }

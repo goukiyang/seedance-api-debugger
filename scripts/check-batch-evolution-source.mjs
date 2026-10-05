@@ -27,6 +27,7 @@ const reminder = read('src/components/GenerationCompletion.tsx');
 assert(!/new Notification|requestPermission|serviceWorker|favicon/.test(reminder));
 assert(reminder.includes("audio?.state === 'running'") && reminder.includes('await audio.resume()'));
 assert(reminder.includes('prefers-reduced-motion') && reminder.includes('document.hidden'));
+assert(reminder.includes("tasks.every(task => ['succeeded', 'failed'].includes(task.status))") && reminder.includes('batch.uncertain === 0'), 'Unknown results must remain under observation, not completed receipts');
 assert(read('src/app/tools/avatar-studio/studio.tsx').includes('onDoubleClick'));
 assert(read('src/lib/release.ts').includes('packageInfo.version'));
 console.log(JSON.stringify({ staticSourceChecks: 'passed', batchProjectionFields: publicFields, functionalAcceptance: 'not-run' }, null, 2));

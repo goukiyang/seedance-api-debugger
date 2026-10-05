@@ -9,6 +9,7 @@ type Kind = 'images' | 'avatar' | 'batch';
 type Watch = { owner: string; id: string; kind: Kind; count: number; receipt: string };
 type Preferences = { background: boolean; sound: boolean };
 const jobs = new Map<string, Watch>();
+const memoryReceipts = new Set<string>();
 const defaults: Preferences = { background: true, sound: false };
 let owner: string | null = null, route = '', generation = 0, polling = false;
 let audio: AudioContext | null = null;
@@ -21,11 +22,12 @@ function preferences(id: string): Preferences {
 function clearTitle() {
   if (titleTimer) clearInterval(titleTimer);
   titleTimer = null;
-  if (originalTitle !== null) document.title = originalTitle;
+  if (originalTitle !== null && [originalTitle, `已完成 · ${originalTitle}`, `生成已结束 · ${originalTitle}`].includes(document.title)) document.title = originalTitle;
   originalTitle = null;
 }
 function completed(id: string): string[] {
-  try { const value = JSON.parse(localStorage.getItem(receiptKey(id)) || '[]'); return Array.isArray(value) ? value.filter(item => typeof item === 'string').slice(-200) : []; } catch { return []; }
+  const memory = Array.from(memoryReceipts).filter(item => item.startsWith(`${id}:`)).map(item => item.slice(id.length + 1));
+  try { const value = JSON.parse(localStorage.getItem(receiptKey(id)) || '[]'); return Array.from(new Set([...memory, ...(Array.isArray(value) ? value.filter(item => typeof item === 'string').slice(-200) : [])])); } catch { return memory; }
 }
 export function watchGenerationCompletion(ownerId: string, id: string, kind: Kind, count: number) {
   if (ownerId !== owner || jobs.size >= 32 || !/^[a-zA-Z0-9-]{1,100}$/.test(id) || count < 1 || count > 100) return;
@@ -70,18 +72,20 @@ async function poll() {
         let terminal = false, success = false;
         if (job.kind === 'batch') {
           const batch = data.batch;
-          terminal = batch && ['complete', 'cancelled'].includes(batch.state) && batch.active === 0 && batch.pending === 0;
+          terminal = batch && ['complete', 'cancelled'].includes(batch.state) && batch.active === 0 && batch.pending === 0 && batch.uncertain === 0;
           success = terminal && batch.generated === batch.total && batch.failed === 0 && batch.uncertain === 0;
         } else {
           const tasks = data.tasks;
-          terminal = Array.isArray(tasks) && tasks.length === job.count && tasks.every(task => ['succeeded', 'failed', 'uncertain'].includes(task.status));
+          terminal = Array.isArray(tasks) && tasks.length === job.count && tasks.every(task => ['succeeded', 'failed'].includes(task.status));
           success = terminal && tasks.every((task: { status: string }) => task.status === 'succeeded');
         }
         if (!terminal) continue;
         jobs.delete(job.receipt);
         const deliver = () => {
           if (owner !== job.owner || generation !== expectedGeneration || completed(job.owner).includes(job.receipt)) return;
-          try { localStorage.setItem(receiptKey(job.owner), JSON.stringify([...completed(job.owner), job.receipt].slice(-200))); } catch { /* In-memory watch deletion still prevents repeated polls. */ }
+          memoryReceipts.add(`${job.owner}:${job.receipt}`);
+          if (memoryReceipts.size > 200) memoryReceipts.delete(memoryReceipts.values().next().value!);
+          try { localStorage.setItem(receiptKey(job.owner), JSON.stringify(Array.from(new Set([...completed(job.owner), job.receipt])).slice(-200))); } catch { /* In-memory watch deletion still prevents repeated polls. */ }
           notify(success, preferences(job.owner));
         };
         if (navigator.locks) await navigator.locks.request(`sd2-completion:${job.owner}`, deliver); else deliver();
