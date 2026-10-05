@@ -9,6 +9,14 @@ function object(value: unknown, path: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return fail(path, '描述回复应为对象');
   return value as Record<string, unknown>;
 }
+function explicitField(value: unknown, path: string) {
+  if (Array.isArray(value)) {
+    if (value.length !== 1) return fail(path, '同一人物条件返回空数组或多个值，不能替你挑选或丢弃要求');
+    value = value[0];
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return fail(path, '人物条件缺少完整的值和原文证据，不能把空值或裸值当作已确认要求；原回复保留，可确认后重新解析');
+  return object(value, path);
+}
 function keys(value: Record<string, unknown>, allowed: string[], path: string) {
   if (Object.keys(value).some(key => !allowed.includes(key))) fail(`${path}.unknown`, '描述回复包含未支持字段，不能忽略明确要求');
 }
@@ -40,7 +48,7 @@ export function validateDescriptionConstraints(value: unknown, description: stri
     const entries = v === null ? {} : object(v, path);
     return Object.fromEntries(Object.entries(entries).map(([key, value]) => {
       if (!Object.hasOwn(catalog, key)) return fail(`${path}.unknown`, '描述回复包含未支持的人物条件');
-      const field = object(value, `${path}.${key}`);
+      const field = explicitField(value, `${path}.${key}`);
       keys(field, ['value', 'evidence', 'excluded', 'source', 'locked', 'manualLock'], `${path}.${key}`);
       const excluded = field.excluded === undefined ? [] : list(field.excluded, `${path}.${key}.excluded`);
       const actual = key === 'age' && typeof field.value === 'number' && Number.isInteger(field.value)
@@ -75,7 +83,7 @@ export function validateDescriptionConstraints(value: unknown, description: stri
       return { explicit: fields(m.explicit, `members[${i}].explicit`), details: details(m.details, `members[${i}].details`), relationship: m.relationship ? evidence(m.relationship, `members[${i}].relationship`) : '' };
     });
   })();
-  const result: AvatarConstraints = { description, explicit: fields(raw.explicit, 'explicit'), details: details(raw.details, 'details'), scopes, background, unrecognized: list(raw.unrecognized, 'unrecognized'), conflicts: list(raw.conflicts, 'conflicts'), parserVersion: '1.0.1', ...(members ? { members } : {}) };
+  const result: AvatarConstraints = { description, explicit: fields(raw.explicit, 'explicit'), details: details(raw.details, 'details'), scopes, background, unrecognized: list(raw.unrecognized, 'unrecognized'), conflicts: list(raw.conflicts, 'conflicts'), parserVersion: '1.0.2', ...(members ? { members } : {}) };
   if (description && !Object.keys(result.explicit).length && !result.details.length && !scopes.length && !background && !members?.length && !result.unrecognized.length && !result.conflicts.length) fail('response', '没有可确认的描述要求，不能把空回复当作解析成功');
   return result;
 }
