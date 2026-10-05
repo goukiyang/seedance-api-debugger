@@ -73,13 +73,14 @@ async function main() {
       const reply = (body: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
       if (url.pathname === '/api/auth/me') return reply({ success: true, user: { id: 'fixture-admin', role: 'admin', username: 'fixture' } });
       if (url.pathname.endsWith('/capabilities')) return reply({ success: true, models: [{ id: 'birefnet', available: true }, { id: 'missing', available: false }], worker: { online: true }, dispatch: { available: true }, limits: { max_upload_mb: 15 }, integration: { configured: ready, authorized: ready, ready, message: ready ? '抠图服务已就绪' : '当前账户尚未绑定业务授权，不能提交任务' } });
-      if (url.pathname.endsWith('/jobs/history')) return reply({ items: [], total: 0, limit: 12, offset: 0 });
+      if (url.pathname.endsWith('/jobs/history')) return reply({ items: failSubmission ? [{ job_id: 'fixture-history', kind: 'cutout', status: 'succeeded', created_at: Date.now()/1000, result: { result_url: '/api/cutout/v1/results/fixture-history/result.png' } }] : [], total: failSubmission ? 1 : 0, limit: 12, offset: 0 });
       if (url.pathname.endsWith('/assets')) return reply({ asset_id: 'fixture-asset', width: 400, height: 240 }, 201);
       if (url.pathname.endsWith('/jobs') && req.method() === 'POST') {
         if (failSubmission) return route.abort('connectionfailed');
         return reply({ job_id: 'fixture-job', kind: 'cutout', status: 'queued', created_at: Date.now()/1000 }, 202);
       }
       if (url.pathname.endsWith('/jobs/fixture-job')) return reply({ job_id: 'fixture-job', kind: 'cutout', status: 'succeeded', created_at: Date.now()/1000, result: { filename: 'result.png', result_url: '/api/cutout/v1/results/fixture-job/result.png', mask_url: '/api/cutout/v1/results/fixture-job/mask.png', crop: { x: 0, y: 0, width: 400, height: 240 } } });
+      if (url.pathname.endsWith('/jobs/fixture-history')) return reply({ job_id: 'fixture-history', kind: 'cutout', status: 'succeeded', created_at: Date.now()/1000, result: { result_url: '/api/cutout/v1/results/fixture-history/result.png' } });
       if (url.pathname.includes('/results/')) return route.fulfill({ status: 200, contentType: 'image/png', body: result });
       return reply({ success: true });
     });
@@ -168,6 +169,9 @@ async function main() {
     const countBeforeReload = submissions().length;
     await page.reload(); await page.getByRole('button', { name: '重试确认提交', exact: true }).waitFor();
     check(submissions().length === countBeforeReload, 'uncertain draft restored without automatic POST');
+    await page.locator('[role="button"][aria-disabled]').click();
+    await page.waitForFunction(() => document.querySelector('img[alt="抠图结果"]')?.getAttribute('src')?.includes('fixture-history'));
+    check(submissions().length === countBeforeReload && await page.getByRole('button', { name: '重试确认提交', exact: true }).isVisible(), 'uncertain submission permits read-only history without losing retry identity');
     failSubmission = false;
     await page.getByRole('button', { name: '重试确认提交', exact: true }).click();
     await page.getByRole('button', { name: '重试确认提交', exact: true }).waitFor({ state: 'hidden' });

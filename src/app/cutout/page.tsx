@@ -548,7 +548,7 @@ export default function CutoutPage() {
   };
 
   const selectHistoryJob = async (job: CutoutJob) => {
-    if (actionLock.current || pendingSubmissionRef.current || getPageExitRisk().busy.length) return;
+    if (actionLock.current || getPageExitRisk().busy.length) return;
     if ((repairDirty || localRepair) && !await confirm('切换记录会关闭当前未应用的修图。服务器结果不会被删除。', { title: '切换记录', confirmLabel: '切换' })) return;
     chooseJob(job);
     setRepairTarget(null);
@@ -982,7 +982,7 @@ export default function CutoutPage() {
               {history.map((job) => {
                 const thumbnail = jobThumbnail(job);
                 return (
-                  <div key={job.job_id} role="button" tabIndex={0} className={`${styles.historyRow} ${selectedJobId === job.job_id ? styles.historySelected : ''}`} onClick={() => void selectHistoryJob(job)} onKeyDown={event => { if (event.target !== event.currentTarget) return; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void selectHistoryJob(job); } }} aria-disabled={isBusy || Boolean(pendingSubmission)}>
+                  <div key={job.job_id} role="button" tabIndex={0} className={`${styles.historyRow} ${selectedJobId === job.job_id ? styles.historySelected : ''}`} onClick={() => void selectHistoryJob(job)} onKeyDown={event => { if (event.target !== event.currentTarget) return; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void selectHistoryJob(job); } }} aria-disabled={isBusy}>
                     <span className={styles.historyThumb}>
                       {thumbnail ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={thumbnail} alt="" /> : '暂无截图'}
                     </span>
