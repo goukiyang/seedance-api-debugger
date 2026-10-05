@@ -11,7 +11,7 @@ type Preferences = { background: boolean; sound: boolean };
 const jobs = new Map<string, Watch>();
 const memoryReceipts = new Set<string>();
 const defaults: Preferences = { background: true, sound: false };
-let owner: string | null = null, route = '', generation = 0, polling = false;
+let owner: string | null = null, generation = 0, polling = false;
 let audio: AudioContext | null = null;
 let titleTimer: ReturnType<typeof setInterval> | null = null, originalTitle: string | null = null;
 const prefKey = (id: string) => `sd2:completion:v1:${id}`;
@@ -96,15 +96,16 @@ async function poll() {
 export function GenerationCompletionRuntime() {
   const { user } = useAppSession(); const pathname = usePathname();
   useEffect(() => {
-    if (owner !== (user?.id || null) || route !== pathname) { generation++; jobs.clear(); clearTitle(); }
+    if (owner !== (user?.id || null)) { generation++; jobs.clear(); clearTitle(); }
     if (owner !== (user?.id || null) && audio) { void audio.close(); audio = null; }
-    owner = user?.id || null; route = pathname;
+    owner = user?.id || null;
     const visible = () => { if (!document.hidden) { clearTitle(); void poll(); } };
     let timer: ReturnType<typeof setTimeout>, active = true;
     const schedule = () => { if (active) timer = setTimeout(() => { void poll().finally(schedule); }, document.hidden ? 15000 : 5000); };
     schedule(); document.addEventListener('visibilitychange', visible); window.addEventListener('focus', visible);
     return () => { active = false; clearTimeout(timer); document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible); generation++; jobs.clear(); clearTitle(); };
-  }, [user?.id, pathname]);
+  }, [user?.id]);
+  useEffect(() => { clearTitle(); }, [pathname]);
   return null;
 }
 export function GenerationCompletionSettings({ ownerId }: { ownerId: string }) {
@@ -122,6 +123,6 @@ export function GenerationCompletionSettings({ ownerId }: { ownerId: string }) {
     <label><input type="checkbox" checked={prefs.background} onChange={event => save({ ...prefs, background: event.target.checked })} />后台标签提醒</label>
     <label><input type="checkbox" checked={prefs.sound} onChange={event => event.target.checked ? void enableSound() : save({ ...prefs, sound: false })} />提示音</label>
     {prefs.sound && (!audioReady || audio?.state !== 'running') && <button type="button" onClick={() => void enableSound()}><Volume2 size={15} />解锁提示音</button>}
-    <small>只提醒本页发起的生成；关闭网页或手机锁屏后不保证提醒。</small>{message && <p role="status">{message}</p>}
+    <small>只提醒本次打开网站后发起的生成；关闭网页或手机锁屏后不保证提醒。</small>{message && <p role="status">{message}</p>}
   </details>;
 }
