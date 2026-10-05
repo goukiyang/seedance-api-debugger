@@ -1,0 +1,17 @@
+{
+  "commit":"907a7a2b4d2a16c60206900045170bd4e3fd7cad",
+  "sourceReview":"sole implementation lead; no reviewer thread",
+  "productBoundary":["avatar page state/recovery only","package version0.42.3","single-source release summary"],
+  "unchanged":["credit rules/shared AppSession","API/auth/permissions","Provider/model integrations","queue/worker","schema/lockfile","G3 toolbar"],
+  "guards":"per-plan sequence + existing planRef/alive protects old-query mutations; latest accepted query installs a missing plan but preserves an already edited same-ID plan; pending/uncertain blocks both tweak controls and prepare centrally; manual recovery queries preserved planRef only",
+  "tests":{"kernelRuns":1,"kernelCases":8,"constraintGroups":6,"fixedSeedsPerGroup":12,"componentRunnerInvocations":7,"validStableBaselineCases":23,"validStableBaseline":{"passed":19,"productFindings":3,"fixtureGap":1},"repairVerificationCases":23,"repairPassed":23,"repairFailures":0,"repairExternalRequests":0,"otherInvocations":"two invalid startup attempts (one interrupted), one clock/locator calibration, two isolated navigation-timeout followups; not product passes/failures","reused27CaseLog":"../2026-10-05-implementation/g1-g3-0.42.1/sd2-avatar-0.42.1-regression.log","reusedParserSourceUnchanged":"git diff 2c895ee ad65015 for parser/contract/regression/API/worker source empty"},
+  "testedComponentSha256":"ed1ca9f5e24193bfdd7499b6192e84c949d32332f67bdc0ee87bb44308052886",
+  "repairTestReportCommitNote":"测试时HEAD ad65015 + dirty修复，实际version0.42.3；最终提交907a7a2。原repaired/component-results.json保留不篡改。测试组件输入SHA与907a7a2 Git blob及发布candidate源码完全一致。Only report-on-failure exit handling was added to the runner afterward; assertions/component were unchanged.",
+  "releaseNotice":"unchanged SemVer detection, internal-account summary policy, short bold enlarged title, later dedupe, manual reopen and page-exit draft protection reused. No automatic real-browser reminder test.",
+  "original400":"specific field unknown; later singleton explicit.gender evidence is separate; matching original description unavailable",
+  "feeEvidence":"All local API replies/balances/tasks/images synthetic. No local ledger simulation offered as live billing proof. Parent prior one real 5-credit task and subsequent read-only DOM6240/real images reused; refunds/partial charge untested.",
+  "networkEvidence":"Local controlled requests only. Parent rvdh reproduced chrome-extension://invalid/ error, not SD2 API; truncated historic network and unmatched aborted requests not fully attributed.",
+  "archiveNote":"First archive inspection ran before archive process finished and correctly reported truncated input; no candidate/live action followed that inspection. After process and upload completed, full tar list and final local/server SHA matched121b624ed38e3ec2dc898530fd84c4067b278857114ff2785a05e53938134145; candidate accepts only this final digest.",
+  "scopeExpansion":false,
+  "classificationMisjudgment":false
+}

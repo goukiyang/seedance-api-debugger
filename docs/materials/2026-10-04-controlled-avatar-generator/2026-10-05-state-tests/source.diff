@@ -1,0 +1,854 @@
+diff --git a/docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline-query-followup/component-results.json b/docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline-query-followup/component-results.json
+new file mode 100644
+index 0000000..d24ef47
+--- /dev/null
++++ b/docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline-query-followup/component-results.json
+@@ -0,0 +1,52 @@
++{
++  "version": "0.42.2",
++  "commit": "ad65015c14b20577b8e19ab77239cd7e10458d7c",
++  "evidenceLevel": "isolated real AvatarStudio + real ProductDialog + real AppSessionProvider; synthetic localhost API/data/images only",
++  "newSpend": 0,
++  "externalRequests": [],
++  "componentInputs": [
++    "src/components/useDialogDismiss.ts",
++    "src/components/ProductDialog.module.css",
++    "src/components/useProductDialog.tsx",
++    "src/components/RelativeTime.module.css",
++    "src/components/RelativeTime.tsx",
++    "src/lib/media/copy-image.ts",
++    "src/components/ZoomableImagePreview.module.css",
++    "src/lib/context/AppSessionContext.tsx",
++    "src/components/content-reactions/reactions.module.css",
++    "src/components/content-reactions/ImageShareButton.tsx",
++    "src/components/content-reactions/ContentReactions.tsx",
++    "src/lib/hooks/use-media-preview-state.ts",
++    "src/lib/http/upload-progress.ts",
++    "src/lib/hooks/use-image-read-progress.ts",
++    "src/components/ZoomableImagePreview.tsx",
++    "src/lib/hooks/page-exit-guard.ts",
++    "src/lib/http/json-response.ts",
++    "src/lib/avatar-random/catalog.ts",
++    "src/lib/avatar-random/types.ts",
++    "src/lib/avatar-random/layout.ts",
++    "src/lib/image-studio/ratios.ts",
++    "src/lib/image-generation/resolution.ts",
++    "src/lib/image-studio/model-catalog.ts",
++    "src/app/tools/avatar-studio/studio.module.css",
++    "src/app/tools/avatar-studio/studio.tsx"
++  ],
++  "cases": [
++    {
++      "group": 10,
++      "name": "late query from old plan does not mix into newly restored plan",
++      "status": "FAIL",
++      "error": "page.goto: Timeout 4000ms exceeded.\nCall log:\n\u001b[2m  - navigating to \"http://127.0.0.1:59923/\", waiting until \"load\"\u001b[22m\n",
++      "ms": 23432
++    }
++  ],
++  "passed": 0,
++  "failed": 1,
++  "requestSummary": {},
++  "limitations": [
++    "No production business calls, cookies, tokens, DB or models",
++    "Synthetic image is only a local placeholder; real image and paid credit proof reused from parent",
++    "Pure parser/layout cases reused from existing 27-case actual log, not rerun here",
++    "Server prepare/submit billing invariants source-reviewed, not exercised against production"
++  ]
++}
+diff --git a/docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline-review.json b/docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline-review.json
+new file mode 100644
+index 0000000..4fd450e
+--- /dev/null
++++ b/docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline-review.json
+@@ -0,0 +1,30 @@
++{
++  "phase": "Stable 0.42.2 review complete before product edits",
++  "version": "0.42.2",
++  "commit": "ad65015c14b20577b8e19ab77239cd7e10458d7c",
++  "newSpend": 0,
++  "productionMutations": 0,
++  "scenarios": [
++    {"group":1,"status":"PASS","evidence":"real kernel/layout plus real component synthetic default and cancelled one-image 5-point confirmation; parent already proved real 1024 square output"},
++    {"group":2,"status":"PASS","evidence":"real randomAvatar/compileAvatar, six combinations x12 fixed seeds; five accepted constraint combinations retain unfixed variation; conflicts rejected"},
++    {"group":3,"status":"PASS_REUSED","evidence":"unchanged 0.42.1 actual 27-case log; singleton/null/multiple/missing evidence and zero-callback free recheck. git diff 2c895ee HEAD for parser/contract/script empty"},
++    {"group":4,"status":"PASS","evidence":"real component synthetic pending/failed/unknown/canRecheck, explicit retry confirmation cancellation, no uncontrolled calls"},
++    {"group":5,"status":"PASS","evidence":"real layout 1 vs1/2/4 and immutable prior snapshot; real UI mode/quote/cancel; parent real read-only 4 images20points to1image5points"},
++    {"group":6,"status":"PASS","evidence":"real component queued-running-succeeded main/history/thumb, one settlement credits request and submit refresh. Credit values are synthetic, not ledger proof; reuse parent real6240 result"},
++    {"group":7,"status":"PASS","evidence":"failed retains synthetic draft/no retry; partial succeeded+uncertain keeps successful image and stops resend; Provider refund/partial charge untested"},
++    {"group":8,"status":"PRODUCT_FAIL","evidence":"primary generate and restore correctly blocked, but independent draft tweak remains enabled during pending submission"},
++    {"group":9,"status":"PASS","evidence":"synthetic400 removes pending,500/network retains pending, manual original query never resubmits"},
++    {"group":10,"status":"PRODUCT_FAIL","evidence":"same-plan older queued response demonstrably removes successful main image. Different-plan response protected by planRef source guard; isolated different-plan case not proven due fixture navigation/scheduling failures"},
++    {"group":11,"status":"PRODUCT_FAIL","evidence":"normal reload/pending reload no submit; first plan lookup503 leaves plan null and manual query silently no-ops (if(plan))"},
++    {"group":12,"status":"PASS","evidence":"real component synthetic restore preserves high/2K, image selection no restore, preview/Esc, cancelled quote no submit; server historical refs/immutable restore source checked; parent real preview/Esc reused"}
++  ],
++  "findings": [
++    {"id":"S2-1","severity":"high","file":"src/app/tools/avatar-studio/studio.tsx","cause":"prepare/tweak lacks blocked guard; buttons only check sheet/busy/locks","fix":"guard prepare and both tweak controls while original acceptance pending/uncertain"},
++    {"id":"S2-2","severity":"medium","file":"src/app/tools/avatar-studio/studio.tsx","cause":"queryPlan checks alive/plan ID but not same-plan request order","fix":"per-plan query sequence rejects superseded responses"},
++    {"id":"S2-3","severity":"high","file":"src/app/tools/avatar-studio/studio.tsx","cause":"manual original-query uses plan state which is null after lookup failure, instead of preserved planRef","fix":"query preserved original ID and adopt its plan when successfully recovered, never submit"}
++  ],
++  "repairBoundary":"Only avatar page state guards/recovery and release metadata. No API, Provider, credit rules, shared context, worker, schema or dependencies.",
++  "harnessNotes":"Two startup attempts invalid (one interrupted; missing Next process.env shim). One initial clock/locator calibration run not a product verdict. Valid baseline component run19PASS/4FAIL: three genuine findings, one deferred-query setup failure. Two isolated followups failed local navigation before API traffic; preserve as evidence gap, not SD2 failure. Navigation timeout and deterministic event latch will be corrected in harness for repair verification.",
++  "parentRealEvidence":"klih read-only real page + rvdh diagnostic. chrome-extension://invalid/ ERR_FAILED was reproduced by parent; old truncated network buffers/aborted entries are not fully attributed. Do not claim console/network clean.",
++  "limits":["No real extra text/image model calls","No production DB/credit/task writes","No original private description available; no reconstructed input","Real Provider refund/partial billing and new paid outcomes not tested","G3 uses unchanged prior source/build/public evidence; no template-wide visuals"]
++}
+diff --git a/docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline/component-results.json b/docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline/component-results.json
+new file mode 100644
+index 0000000..42ee8bf
+--- /dev/null
++++ b/docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline/component-results.json
+@@ -0,0 +1,198 @@
++{
++  "version": "0.42.2",
++  "commit": "ad65015c14b20577b8e19ab77239cd7e10458d7c",
++  "evidenceLevel": "isolated real AvatarStudio + real ProductDialog + real AppSessionProvider; synthetic localhost API/data/images only",
++  "newSpend": 0,
++  "externalRequests": [],
++  "componentInputs": [
++    "src/components/useDialogDismiss.ts",
++    "src/components/ProductDialog.module.css",
++    "src/components/useProductDialog.tsx",
++    "src/components/RelativeTime.module.css",
++    "src/components/RelativeTime.tsx",
++    "src/lib/media/copy-image.ts",
++    "src/components/ZoomableImagePreview.module.css",
++    "src/lib/context/AppSessionContext.tsx",
++    "src/components/content-reactions/reactions.module.css",
++    "src/components/content-reactions/ImageShareButton.tsx",
++    "src/components/content-reactions/ContentReactions.tsx",
++    "src/lib/hooks/use-media-preview-state.ts",
++    "src/lib/http/upload-progress.ts",
++    "src/lib/hooks/use-image-read-progress.ts",
++    "src/components/ZoomableImagePreview.tsx",
++    "src/lib/hooks/page-exit-guard.ts",
++    "src/lib/http/json-response.ts",
++    "src/lib/avatar-random/catalog.ts",
++    "src/lib/avatar-random/types.ts",
++    "src/lib/avatar-random/layout.ts",
++    "src/lib/image-studio/ratios.ts",
++    "src/lib/image-generation/resolution.ts",
++    "src/lib/image-studio/model-catalog.ts",
++    "src/app/tools/avatar-studio/studio.module.css",
++    "src/app/tools/avatar-studio/studio.tsx"
++  ],
++  "cases": [
++    {
++      "group": 1,
++      "name": "empty description: default one-image confirmation, cancel costs zero",
++      "status": "PASS",
++      "ms": 5934
++    },
++    {
++      "group": 4,
++      "name": "parse pending, recheck=false",
++      "status": "PASS",
++      "ms": 256
++    },
++    {
++      "group": 4,
++      "name": "parse failed, recheck=false",
++      "status": "PASS",
++      "ms": 267
++    },
++    {
++      "group": 4,
++      "name": "parse unknown, recheck=false",
++      "status": "PASS",
++      "ms": 280
++    },
++    {
++      "group": 4,
++      "name": "parse failed, recheck=true",
++      "status": "PASS",
++      "ms": 1051
++    },
++    {
++      "group": 5,
++      "name": "independent 1 candidates quote and no silent submission",
++      "status": "PASS",
++      "ms": 234
++    },
++    {
++      "group": 5,
++      "name": "independent 2 candidates quote and no silent submission",
++      "status": "PASS",
++      "ms": 217
++    },
++    {
++      "group": 5,
++      "name": "independent 4 candidates quote and no silent submission",
++      "status": "PASS",
++      "ms": 332
++    },
++    {
++      "group": 6,
++      "name": "queued to running to succeeded updates main/history/thumbnail; settlement refresh once",
++      "status": "PASS",
++      "ms": 351
++    },
++    {
++      "group": 6,
++      "name": "confirmed synthetic submit refreshes shared credits without repeated polling refresh",
++      "status": "PASS",
++      "ms": 293
++    },
++    {
++      "group": 7,
++      "name": "failed without image retains draft, no automatic retry",
++      "status": "PASS",
++      "ms": 134
++    },
++    {
++      "group": 7,
++      "name": "partial independent success plus unknown keeps successful image and blocks resend",
++      "status": "PASS",
++      "ms": 201
++    },
++    {
++      "group": 8,
++      "name": "uncertain blocks generate and restore, only queries original",
++      "status": "PASS",
++      "ms": 200
++    },
++    {
++      "group": 8,
++      "name": "unknown independent submission also blocks draft-tweak bypass",
++      "status": "FAIL",
++      "error": "Expected values to be strictly equal:\n\nfalse !== true\n",
++      "ms": 131
++    },
++    {
++      "group": 9,
++      "name": "submit 400 preserves appropriate pending and only recovers by query",
++      "status": "PASS",
++      "ms": 261
++    },
++    {
++      "group": 9,
++      "name": "submit 500 preserves appropriate pending and only recovers by query",
++      "status": "PASS",
++      "ms": 274
++    },
++    {
++      "group": 9,
++      "name": "submit network preserves appropriate pending and only recovers by query",
++      "status": "PASS",
++      "ms": 317
++    },
++    {
++      "group": 10,
++      "name": "late query from old plan does not mix into newly restored plan",
++      "status": "FAIL",
++      "error": "The expression evaluated to a falsy value:\n\n  assert.ok(release)\n",
++      "ms": 310
++    },
++    {
++      "group": 10,
++      "name": "same-plan out-of-order query must not regress succeeded to queued",
++      "status": "FAIL",
++      "error": "late queued reply overwrote successful main result\n\n0 !== 1\n",
++      "ms": 217
++    },
++    {
++      "group": 11,
++      "name": "reload existing plan does not re-submit",
++      "status": "PASS",
++      "ms": 201
++    },
++    {
++      "group": 11,
++      "name": "pending submit survives reload; no task yet never auto-generates",
++      "status": "PASS",
++      "ms": 220
++    },
++    {
++      "group": 11,
++      "name": "pending lookup failure still has a working manual original-query action",
++      "status": "FAIL",
++      "error": "pending recovery button did not query without loaded plan\n\n1 !== 2\n",
++      "ms": 748
++    },
++    {
++      "group": 12,
++      "name": "restore history keeps parameters; selecting/preview/cancel creates no generation",
++      "status": "PASS",
++      "ms": 7137
++    }
++  ],
++  "passed": 19,
++  "failed": 4,
++  "requestSummary": {
++    "GET /api/auth/me ": 25,
++    "GET /api/me/credits ": 37,
++    "GET /api/avatar-studio ": 79,
++    "POST /api/avatar-studio prepare": 8,
++    "POST /api/avatar-studio parse-status": 7,
++    "POST /api/avatar-studio parse-recheck": 1,
++    "POST /api/avatar-studio quote": 2,
++    "POST /api/content-reactions/state ": 4,
++    "POST /api/avatar-studio submit": 4,
++    "POST /api/avatar-studio restore": 1
++  },
++  "limitations": [
++    "No production business calls, cookies, tokens, DB or models",
++    "Synthetic image is only a local placeholder; real image and paid credit proof reused from parent",
++    "Pure parser/layout cases reused from existing 27-case actual log, not rerun here",
++    "Server prepare/submit billing invariants source-reviewed, not exercised against production"
++  ]
++}
+diff --git a/docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline/kernel-results.json b/docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline/kernel-results.json
+new file mode 100644
+index 0000000..a42e406
+--- /dev/null
++++ b/docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline/kernel-results.json
+@@ -0,0 +1,60 @@
++{
++  "scope": "synthetic controlled constraints; real random/compile/layout core",
++  "externalModelCalls": 0,
++  "dbCalls": 0,
++  "seedSet": "state-test-fixed-0..11",
++  "cases": [
++    {
++      "group": 2,
++      "name": "fixed gender",
++      "status": "PASS",
++      "samples": 12,
++      "unfixedDistinct": 12
++    },
++    {
++      "group": 2,
++      "name": "age range 25-35",
++      "status": "PASS",
++      "samples": 12,
++      "unfixedDistinct": 12
++    },
++    {
++      "group": 2,
++      "name": "no glasses and short hair",
++      "status": "PASS",
++      "samples": 12,
++      "unfixedDistinct": 12
++    },
++    {
++      "group": 2,
++      "name": "combined fixed conditions",
++      "status": "PASS",
++      "samples": 12,
++      "unfixedDistinct": 12
++    },
++    {
++      "group": 2,
++      "name": "locked fields remain unchanged",
++      "status": "PASS",
++      "samples": 12,
++      "unfixedDistinct": 12
++    },
++    {
++      "group": 2,
++      "name": "conflicts rejected before output",
++      "status": "PASS",
++      "samples": 12
++    },
++    {
++      "group": 1,
++      "name": "real kernel: default four DNA compile to one square image",
++      "status": "PASS"
++    },
++    {
++      "group": 5,
++      "name": "real layout core: 1 vs 1/2/4 counts/quotes, old snapshot immutable",
++      "status": "PASS"
++    }
++  ],
++  "passed": 8
++}
+diff --git a/docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/repaired/component-results.json b/docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/repaired/component-results.json
+new file mode 100644
+index 0000000..a454a9f
+--- /dev/null
++++ b/docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/repaired/component-results.json
+@@ -0,0 +1,194 @@
++{
++  "version": "0.42.3",
++  "commit": "ad65015c14b20577b8e19ab77239cd7e10458d7c",
++  "evidenceLevel": "isolated real AvatarStudio + real ProductDialog + real AppSessionProvider; synthetic localhost API/data/images only",
++  "newSpend": 0,
++  "externalRequests": [],
++  "componentInputs": [
++    "src/components/useDialogDismiss.ts",
++    "src/components/ProductDialog.module.css",
++    "src/components/useProductDialog.tsx",
++    "src/components/RelativeTime.module.css",
++    "src/components/RelativeTime.tsx",
++    "src/lib/media/copy-image.ts",
++    "src/components/ZoomableImagePreview.module.css",
++    "src/lib/context/AppSessionContext.tsx",
++    "src/components/content-reactions/reactions.module.css",
++    "src/components/content-reactions/ImageShareButton.tsx",
++    "src/components/content-reactions/ContentReactions.tsx",
++    "src/lib/hooks/use-media-preview-state.ts",
++    "src/lib/http/upload-progress.ts",
++    "src/lib/hooks/use-image-read-progress.ts",
++    "src/components/ZoomableImagePreview.tsx",
++    "src/lib/hooks/page-exit-guard.ts",
++    "src/lib/http/json-response.ts",
++    "src/lib/avatar-random/catalog.ts",
++    "src/lib/avatar-random/types.ts",
++    "src/lib/avatar-random/layout.ts",
++    "src/lib/image-studio/ratios.ts",
++    "src/lib/image-generation/resolution.ts",
++    "src/lib/image-studio/model-catalog.ts",
++    "src/app/tools/avatar-studio/studio.module.css",
++    "src/app/tools/avatar-studio/studio.tsx"
++  ],
++  "cases": [
++    {
++      "group": 1,
++      "name": "empty description: default one-image confirmation, cancel costs zero",
++      "status": "PASS",
++      "ms": 7067
++    },
++    {
++      "group": 4,
++      "name": "parse pending, recheck=false",
++      "status": "PASS",
++      "ms": 818
++    },
++    {
++      "group": 4,
++      "name": "parse failed, recheck=false",
++      "status": "PASS",
++      "ms": 262
++    },
++    {
++      "group": 4,
++      "name": "parse unknown, recheck=false",
++      "status": "PASS",
++      "ms": 296
++    },
++    {
++      "group": 4,
++      "name": "parse failed, recheck=true",
++      "status": "PASS",
++      "ms": 1079
++    },
++    {
++      "group": 5,
++      "name": "independent 1 candidates quote and no silent submission",
++      "status": "PASS",
++      "ms": 301
++    },
++    {
++      "group": 5,
++      "name": "independent 2 candidates quote and no silent submission",
++      "status": "PASS",
++      "ms": 229
++    },
++    {
++      "group": 5,
++      "name": "independent 4 candidates quote and no silent submission",
++      "status": "PASS",
++      "ms": 461
++    },
++    {
++      "group": 6,
++      "name": "queued to running to succeeded updates main/history/thumbnail; settlement refresh once",
++      "status": "PASS",
++      "ms": 492
++    },
++    {
++      "group": 6,
++      "name": "confirmed synthetic submit refreshes shared credits without repeated polling refresh",
++      "status": "PASS",
++      "ms": 254
++    },
++    {
++      "group": 7,
++      "name": "failed without image retains draft, no automatic retry",
++      "status": "PASS",
++      "ms": 145
++    },
++    {
++      "group": 7,
++      "name": "partial independent success plus unknown keeps successful image and blocks resend",
++      "status": "PASS",
++      "ms": 301
++    },
++    {
++      "group": 8,
++      "name": "uncertain blocks generate and restore, only queries original",
++      "status": "PASS",
++      "ms": 231
++    },
++    {
++      "group": 8,
++      "name": "unknown independent submission also blocks draft-tweak bypass",
++      "status": "PASS",
++      "ms": 131
++    },
++    {
++      "group": 9,
++      "name": "submit 400 preserves appropriate pending and only recovers by query",
++      "status": "PASS",
++      "ms": 262
++    },
++    {
++      "group": 9,
++      "name": "submit 500 preserves appropriate pending and only recovers by query",
++      "status": "PASS",
++      "ms": 536
++    },
++    {
++      "group": 9,
++      "name": "submit network preserves appropriate pending and only recovers by query",
++      "status": "PASS",
++      "ms": 401
++    },
++    {
++      "group": 10,
++      "name": "late query from old plan does not mix into newly restored plan",
++      "status": "PASS",
++      "ms": 303
++    },
++    {
++      "group": 10,
++      "name": "same-plan out-of-order query must not regress succeeded to queued",
++      "status": "PASS",
++      "ms": 227
++    },
++    {
++      "group": 11,
++      "name": "reload existing plan does not re-submit",
++      "status": "PASS",
++      "ms": 454
++    },
++    {
++      "group": 11,
++      "name": "pending submit survives reload; no task yet never auto-generates",
++      "status": "PASS",
++      "ms": 287
++    },
++    {
++      "group": 11,
++      "name": "pending lookup failure still has a working manual original-query action",
++      "status": "PASS",
++      "ms": 266
++    },
++    {
++      "group": 12,
++      "name": "restore history keeps parameters; selecting/preview/cancel creates no generation",
++      "status": "PASS",
++      "ms": 947
++    }
++  ],
++  "passed": 23,
++  "failed": 0,
++  "requestSummary": {
++    "GET /api/auth/me ": 25,
++    "GET /api/me/credits ": 38,
++    "GET /api/avatar-studio ": 81,
++    "POST /api/avatar-studio prepare": 8,
++    "POST /api/avatar-studio parse-status": 7,
++    "POST /api/avatar-studio parse-recheck": 1,
++    "POST /api/avatar-studio quote": 2,
++    "POST /api/content-reactions/state ": 7,
++    "POST /api/avatar-studio submit": 4,
++    "POST /api/avatar-studio restore": 2
++  },
++  "limitations": [
++    "No production business calls, cookies, tokens, DB or models",
++    "Synthetic image is only a local placeholder; real image and paid credit proof reused from parent",
++    "Pure parser/layout cases reused from existing 27-case actual log, not rerun here",
++    "Server prepare/submit billing invariants source-reviewed, not exercised against production"
++  ]
++}
+diff --git a/package.json b/package.json
+index a984bfe..b567f84 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "video-api-debugger",
+-  "version": "0.42.2",
++  "version": "0.42.3",
+   "private": true,
+   "scripts": {
+     "dev": "NEXT_DIST_DIR=.next-dev next dev",
+diff --git a/scripts/avatar-state-tests/entry.tsx b/scripts/avatar-state-tests/entry.tsx
+new file mode 100644
+index 0000000..82cb4f8
+--- /dev/null
++++ b/scripts/avatar-state-tests/entry.tsx
+@@ -0,0 +1,16 @@
++import { useEffect, useState } from 'react';
++import { createRoot } from 'react-dom/client';
++import AvatarStudio from '../../src/app/tools/avatar-studio/studio';
++import { AppSessionProvider, useAppSession } from '../../src/lib/context/AppSessionContext';
++
++function Fixture() {
++  const { credits, refreshUser, refreshCredits } = useAppSession();
++  const [ready, setReady] = useState(false);
++  useEffect(() => { void (async () => {
++    await refreshUser(); await refreshCredits(); setReady(true);
++  })(); }, [refreshUser, refreshCredits]);
++  return <><output aria-label="模拟余额">{credits?.available ?? '未确认'}</output>
++    {ready && <AvatarStudio ownerId="fixture-owner" />}</>;
++}
++
++createRoot(document.getElementById('root')!).render(<AppSessionProvider><Fixture /></AppSessionProvider>);
+diff --git a/scripts/avatar-state-tests/kernel.cjs b/scripts/avatar-state-tests/kernel.cjs
+new file mode 100644
+index 0000000..3849265
+--- /dev/null
++++ b/scripts/avatar-state-tests/kernel.cjs
+@@ -0,0 +1,58 @@
++const assert = require('node:assert/strict');
++const fs = require('node:fs');
++const path = require('node:path');
++const os = require('node:os');
++const esbuild = require('esbuild');
++const ts = require('typescript');
++const root = path.resolve(__dirname,'../..');
++async function main() {
++  // Keep the real error type but exclude task/DB/Provider module initialization.
++  const taskPath=path.join(root,'src/lib/image-studio/tasks.ts');
++  const taskSource=fs.readFileSync(taskPath,'utf8');
++  const ast=ts.createSourceFile(taskPath,taskSource,ts.ScriptTarget.Latest,true);
++  const errorClass=ast.statements.find(n=>ts.isClassDeclaration(n)&&n.name?.text==='StudioError');
++  assert.ok(errorClass);
++  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sd2-avatar-kernel-'));
++  const bundle=await esbuild.build({entryPoints:[path.join(root,'src/lib/avatar-random/engine.ts'),path.join(root,'src/lib/avatar-random/description-contract.ts'),path.join(root,'src/lib/avatar-random/layout.ts')],outdir:dir,bundle:true,platform:'node',format:'cjs',tsconfig:path.join(root,'tsconfig.json'),metafile:true,plugins:[{name:'error-only-task-boundary',setup(build){build.onResolve({filter:/^@\/lib\/image-studio\/tasks$/},()=>({path:'error-only',namespace:'isolated'}));build.onLoad({filter:/.*/,namespace:'isolated'},()=>({contents:errorClass.getText(ast),loader:'ts'}));}}]});
++  assert.ok(!Object.keys(bundle.metafile.inputs).some(p=>/prisma|credits\/policy|integrations\//.test(p)));
++  const {randomAvatar,compileAvatar,createAvatarCandidates,parseAvatarRules,emptyConstraints}=require(path.join(dir,'engine.js'));
++  const {validateDescriptionConstraints}=require(path.join(dir,'description-contract.js'));
++  const {withAvatarLayout,avatarOutputCount}=require(path.join(dir,'layout.js'));
++  const base={layout:'independent',description:'',choices:{},locks:{},intensity:'standard',people:1,candidates:4};
++  const fields=(explicit, description)=>validateDescriptionConstraints({explicit,details:[],scopes:[],background:'',unrecognized:[],conflicts:[]},description);
++  const cases=[];
++  function samples(name,rules,constraints,check,previous) {
++    const signatures=new Set();
++    for(let i=0;i<12;i++){
++      const dna=randomAvatar(parseAvatarRules(rules),constraints,`state-test-fixed-${i}`,previous);
++      check(dna);const compiled=compileAvatar([dna],constraints,false);
++      assert.ok(compiled.prompt.includes('画面中恰好1个人'));
++      assert.ok(compiled.standardDescription.includes(`${dna.fields.age.value}岁的${dna.fields.gender.value}`));
++      signatures.add(JSON.stringify(Object.fromEntries(Object.entries(dna.fields).filter(([,f])=>!f.locked&&f.source==='random').map(([k,f])=>[k,f.value]))));
++    }
++    assert.ok(signatures.size>1,'unfixed fields must still vary');
++    cases.push({group:2,name,status:'PASS',samples:12,unfixedDistinct:signatures.size});
++  }
++  samples('fixed gender',base,fields({gender:{value:'女性',evidence:'女性'}},'女性'),d=>assert.equal(d.fields.gender.value,'女性'));
++  samples('age range 25-35',{...base,choices:{age:'25-35'}},emptyConstraints(),d=>assert.ok(Number(d.fields.age.value)>=25&&Number(d.fields.age.value)<=35));
++  samples('no glasses and short hair',base,fields({glasses:{value:'不戴眼镜',evidence:'不戴眼镜',excluded:['黑框眼镜','细框眼镜']},hair_length:{value:'短发',evidence:'短发'}},'不戴眼镜，短发'),d=>{assert.equal(d.fields.glasses.value,'不戴眼镜');assert.equal(d.fields.hair_length.value,'短发');assert.ok(!d.details.some(x=>/眼镜/.test(x.value)));});
++  samples('combined fixed conditions',{...base,choices:{age:'25-35'}},fields({gender:{value:'男性',evidence:'男性'},glasses:{value:'不戴眼镜',evidence:'不戴眼镜'},hair_length:{value:'长发',evidence:'长发'}},'男性，不戴眼镜，长发'),d=>{assert.equal(d.fields.gender.value,'男性');assert.equal(d.fields.hair_length.value,'长发');assert.equal(d.fields.glasses.value,'不戴眼镜');assert.ok(Number(d.fields.age.value)>=25&&Number(d.fields.age.value)<=35);});
++  const previous=randomAvatar(base,emptyConstraints(),'locked-baseline');
++  samples('locked fields remain unchanged',{...base,locks:{gender:previous.fields.gender,face_shape:previous.fields.face_shape,age:previous.fields.age}},emptyConstraints(),d=>{for(const key of ['gender','face_shape','age']){assert.equal(d.fields[key].value,previous.fields[key].value);assert.equal(d.fields[key].locked,true);}},previous);
++  for(let i=0;i<12;i++){
++    assert.throws(()=>createAvatarCandidates(base,{...emptyConstraints(),conflicts:['合成明确冲突']}));
++    assert.throws(()=>randomAvatar({...base,choices:{gender:'男性'}},fields({gender:{value:'',evidence:'不要男性',excluded:['男性']}},'不要男性'),`conflict-${i}`));
++  }
++  cases.push({group:2,name:'conflicts rejected before output',status:'PASS',samples:12});
++  const candidates=createAvatarCandidates(base,emptyConstraints());
++  const old={id:'legacy',candidates,model:'synthetic',quality:'auto',resolution:'1K',aspectRatio:'1:1',settingsRevision:1,unitCredits:5,referenceIds:[],createdAt:'2026-10-05T00:00:00Z'};
++  const before=JSON.stringify(old);const sheet=withAvatarLayout(old,'contact-sheet');
++  assert.equal(avatarOutputCount(sheet),1);assert.equal(sheet.aspectRatio,'1:1');assert.equal(sheet.candidates.length,4);assert.equal(new Set(sheet.candidates.map(c=>c.characterId)).size,4);assert.equal(sheet.unitCredits*avatarOutputCount(sheet),5);assert.equal(JSON.stringify(old),before);
++  assert.ok(sheet.sheetPrompt.includes('左上格'));assert.ok(sheet.sheetPrompt.includes('右下格'));assert.ok(!sheet.sheetPrompt.includes('画面中恰好1个人'));
++  for(const count of [1,2,4]){const independent=withAvatarLayout({...sheet,candidates:candidates.slice(0,count)},'independent');assert.equal(avatarOutputCount(independent),count);assert.equal(independent.unitCredits*avatarOutputCount(independent),count*5);}
++  cases.push({group:1,name:'real kernel: default four DNA compile to one square image',status:'PASS'});
++  cases.push({group:5,name:'real layout core: 1 vs 1/2/4 counts/quotes, old snapshot immutable',status:'PASS'});
++  const report={scope:'synthetic controlled constraints; real random/compile/layout core',externalModelCalls:0,dbCalls:0,seedSet:'state-test-fixed-0..11',cases,passed:cases.length};
++  const dest=path.resolve(process.env.AVATAR_STATE_EVIDENCE||path.join(root,'docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline'));fs.mkdirSync(dest,{recursive:true});fs.writeFileSync(path.join(dest,'kernel-results.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report));
++}
++main().catch(e=>{console.error(e);process.exitCode=1;});
+diff --git a/scripts/avatar-state-tests/run.cjs b/scripts/avatar-state-tests/run.cjs
+new file mode 100644
+index 0000000..040605a
+--- /dev/null
++++ b/scripts/avatar-state-tests/run.cjs
+@@ -0,0 +1,125 @@
++// Local-only transport fixtures around the real component, dialogs and session provider.
++const assert = require('node:assert/strict');
++const fs = require('node:fs');
++const os = require('node:os');
++const path = require('node:path');
++const http = require('node:http');
++const { execFileSync } = require('node:child_process');
++const esbuild = require('esbuild');
++const root = path.resolve(__dirname, '../..');
++const evidence = path.resolve(process.env.AVATAR_STATE_EVIDENCE || path.join(root, 'docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline'));
++const runtime = process.env.PLAYWRIGHT_CORE_PATH || '/Users/gouki-youdoo/.npm/_npx/e41f203b7505f1fb/node_modules/playwright-core';
++const { chromium } = require(runtime);
++const key = 'sd2:avatar-studio:v1:fixture-owner';
++const model = 'gpt-image-2.5-sunburst';
++const results = [], unsafe = [], requests = [];
++let browser, server, output;
++const clone = value => JSON.parse(JSON.stringify(value));
++function plan(id = 'sheet-fixture', layout = 'contact-sheet', count = 4) {
++  const rules = { layout, description: '', choices: {}, locks: {}, intensity: 'standard', people: 1, candidates: count };
++  const fields = Object.fromEntries(['gender','age','face_shape','hair_length','hair_color','glasses','feature','accessory','skin_tone','temperament','body_type'].map(k => [k, { value: k === 'age' ? '30' : k === 'gender' ? '男性' : '不限', source: 'random', locked: false }]));
++  // The fixture supplies API data, not a second implementation of the page.
++  return { id, layout, candidates: Array.from({length:count}, (_,i) => ({characterId:`person-${i}`,members:[{fields,details:[],seed:String(i),ruleVersion:'1.0.0',featureBudget:2}],standardDescription:`合成人物${i}`,prompt:`合成人物${i}`,compilerVersion:'1.1.0',rules:clone(rules),constraints:{description:'',explicit:{},details:[],scopes:[],background:'',conflicts:[],unrecognized:[],parserVersion:'1.0.2'}})),sheetPrompt:'合成四宫格提示词',model,quality:'auto',resolution:'1K',aspectRatio:'1:1',settingsRevision:24,unitCredits:5,referenceIds:[],createdAt:'2026-10-05T00:00:00Z',imageReady:true };
++}
++function task(status, id='fixture-task', ordinal=1) { return {id,ordinal,status,error:status==='failed'?'合成明确失败':null,asset:status==='succeeded'?{id:'fixture-asset',original_url:'/fixture-image.png',thumbnail_url:'/fixture-thumb.png'}:null}; }
++function record(p, id='fixture-result', taskId='fixture-task') { return {id,kind:'result',name:id,revision:1,deletedAt:null,createdAt:'2026-10-05T00:00:00Z',updatedAt:'2026-10-05T00:00:00Z',planId:p.id,taskId,layout:p.layout,sheetCandidates:p.candidates}; }
++const parse = (state, extra={}) => ({state,message:`合成解析状态：${state}`,cost:'unknown',canRecheck:false,...extra});
++function state(p=plan(), tasks=[]) { return { p, tasks, records:[record(p)], parse:parse('not-started'), available:100, actions:[], queries:[], credits:0, onQuery:null, onHistory:null, submitError:null, pendingLookupError:false }; }
++async function fixture(s, saved={}, pending) {
++  const context = await browser.newContext({serviceWorkers:'block',viewport:{width:1440,height:1000}});
++  await context.addInitScript(({key,saved,pending}) => {
++    if (!localStorage.getItem('fixture-seeded')) {
++      localStorage.setItem(key,JSON.stringify(saved));
++      if(pending)localStorage.setItem(`${key}:pending`,pending);
++      localStorage.setItem('fixture-seeded','1');
++    }
++  }, {key,saved,pending});
++  const page = await context.newPage();
++  page.setDefaultTimeout(4000);
++  page.setDefaultNavigationTimeout(30000);
++  await page.clock.install();
++  const errors=[];
++  page.on('pageerror', e => errors.push(e.message));
++  await context.route('**/*', async route => {
++    const request=route.request(), url=new URL(request.url());
++    if(url.origin!==output.origin){unsafe.push({origin:url.origin});return route.abort('blockedbyclient');}
++    const body=request.postDataJSON();
++    const json=(data,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
++    if(!url.pathname.startsWith('/api/'))return route.continue();
++    requests.push({path:url.pathname,method:request.method(),action:body?.action||null});
++    if(url.pathname==='/api/auth/me')return json({user:{id:'fixture-owner',name:'合成账号',role:'user',account_type:'internal'}});
++    if(url.pathname==='/api/me/credits'){s.credits++;return json({available:s.available,frozen_credits:0,monthly_used:0});}
++    if(url.pathname==='/api/content-reactions/state')return json({states:Object.fromEntries(body.keys.map(k=>[k,{key:k,version:1,liked:false,bookmarked:false,likeCount:0,bookmarkCount:0}]))});
++    if(url.pathname!=='/api/avatar-studio'){unsafe.push({path:url.pathname});return route.abort('blockedbyclient');}
++    if(request.method()==='GET'){
++      if(url.searchParams.has('plan')){
++        const id=url.searchParams.get('plan');s.queries.push(id);
++        if(s.pendingLookupError)return json({error:'合成查询暂不可用'},503);
++        if(s.onQuery){const response=await s.onQuery(id,s.queries.length);if(response)return json(response);}
++        return json({plan:clone(s.p),tasks:clone(s.tasks)});
++      }
++      if(s.onHistory){const response=await s.onHistory(url);if(response)return json(response);}
++      return json(history(s,url.searchParams.get('kind')));
++    }
++    s.actions.push(clone(body));
++    switch(body.action){
++      case 'parse-status':return json({parse:s.parse});
++      case 'parse-recheck':s.parse=parse('succeeded',{cost:'response-received'});return json({parse:s.parse});
++      case 'prepare':s.p=plan(`fixture-prepared-${s.actions.length}`,body.rules.layout,body.rules.candidates);s.p.candidates.forEach(c=>c.rules=clone(body.rules));return json({plan:s.p});
++      case 'quote':s.p={...clone(s.p),id:`fixture-quote-${s.actions.length}`,layout:body.layout,model:body.model,quality:body.quality,resolution:body.resolution};s.p.candidates.forEach(c=>c.rules.layout=body.layout);return json({plan:s.p});
++      case 'submit':if(s.submitError==='network')return route.abort('failed');if(s.submitError)return json({error:`合成提交${s.submitError}`},s.submitError);s.available=95;s.tasks=[task('queued')];return json({batchId:s.p.id});
++      case 'restore':s.p={...clone(s.p),id:'fixture-restored',quality:'high',resolution:'2K',referenceIds:['historical-reference'],warnings:['原参考图保留，需更新报价']};return json({plan:s.p,sourceTask:task('succeeded')});
++      case 'retry':return json({error:'本场景不允许自动重试'},400);
++      default:unsafe.push({action:body.action});return route.abort('blockedbyclient');
++    }
++  });
++  page.on('dialog', d=>d.type()==='beforeunload'?d.accept():d.dismiss());
++  await page.goto(output.origin);
++  try { await page.getByRole('button',{name:'生成四宫格',exact:true}).or(page.getByRole('button',{name:'生成独立头像',exact:true})).waitFor(); }
++  catch(e){console.error(JSON.stringify({fixtureBootErrors:errors,body:await page.locator('body').innerText()}));await context.close();throw Object.assign(e,{fixtureBlocked:true});}
++  await page.waitForFunction(()=>!document.querySelector('fieldset')?.disabled);
++  return {page,s,errors,close:()=>context.close()};
++}
++function history(s, kind='result') {return {records:s.records.filter(r=>r.kind===kind),recentConfigs:[],recordTasks:Object.fromEntries(s.tasks.map(t=>[t.id,clone(t)])),nextCursor:null,settings:{model,revision:24,prices:{[model]:5}}};}
++const saved = p => ({rules:p.candidates[0].rules,planId:p.id,model:p.model,quality:p.quality,resolution:p.resolution,index:0,tab:'result'});
++async function click(page,name){await page.getByRole('button',{name,exact:true}).click();}
++async function text(page,value){await page.getByText(value,{exact:false}).first().waitFor();}
++async function disabled(page,name){assert.equal(await page.getByRole('button',{name,exact:true}).isDisabled(),true);}
++async function count(s,action,n){assert.equal(s.actions.filter(a=>a.action===action).length,n);}
++async function poll(page,fn){await page.waitForFunction(fn);}
++async function advance(page,ms=5100){await page.clock.runFor(ms);}
++async function test(group,name,fn){if(process.env.AVATAR_STATE_FILTER&&!new RegExp(process.env.AVATAR_STATE_FILTER).test(name))return;const start=Date.now();try{await fn();results.push({group,name,status:'PASS',ms:Date.now()-start});}catch(e){if(e.fixtureBlocked)throw e;results.push({group,name,status:'FAIL',error:e.message,ms:Date.now()-start});}console.log(JSON.stringify(results.at(-1)));}
++async function main(){
++  fs.mkdirSync(evidence,{recursive:true});const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sd2-avatar-state-'));
++  const bundle=await esbuild.build({entryPoints:[path.join(__dirname,'entry.tsx')],bundle:true,write:true,outfile:path.join(dir,'fixture.js'),format:'iife',platform:'browser',jsx:'automatic',loader:{'.module.css':'local-css'},define:{'process.env':'{}','process.env.NODE_ENV':'"development"'},metafile:true,tsconfig:path.join(root,'tsconfig.json')});
++  assert.ok(!Object.keys(bundle.metafile.inputs).some(p=>/prisma|avatar-random\/(service|store)|image-studio\/tasks/.test(p)),'fixture must not import server/model/database code');
++  server=http.createServer((req,res)=>{
++    if(req.url==='/'){res.setHeader('Content-Type','text/html');res.end('<!doctype html><html lang="zh"><meta charset="utf-8"><title>AvatarStudio isolated synthetic fixture</title><link rel="stylesheet" href="/fixture.css"><body><div id="root"></div><script src="/fixture.js"></script></body></html>');}
++    else if(['/fixture.js','/fixture.css'].includes(req.url)){res.setHeader('Content-Type',req.url.endsWith('css')?'text/css':'application/javascript');res.end(fs.readFileSync(path.join(dir,req.url)));}
++    else if(['/fixture-image.png','/fixture-thumb.png'].includes(req.url)){res.setHeader('Content-Type','image/png');res.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64'));}
++    else {res.statusCode=404;res.end();}
++  });
++  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));output={origin:`http://127.0.0.1:${server.address().port}`};
++  browser=await chromium.launch({headless:true,args:['--disable-background-networking','--disable-component-update','--no-first-run','--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1']});
++  await test(1,'empty description: default one-image confirmation, cancel costs zero',async()=>{const f=await fixture(state());try{const {page,s}=f;await click(page,'生成四宫格');await text(page,'1张真实四宫格');await text(page,'共冻结5点');assert.equal(s.actions.find(a=>a.action==='prepare').rules.layout,'contact-sheet');await click(page,'取消');await count(s,'submit',0);await count(s,'parse-status',0);assert.deepEqual(f.errors,[]);}finally{await f.close();}});
++  for(const status of [parse('pending'),parse('failed',{retryToken:'synthetic-retry'}),parse('unknown',{retryToken:'synthetic-retry'}),parse('failed',{canRecheck:true,failure:{stage:'validation',field:'explicit.gender'}})])await test(4,`parse ${status.state}, recheck=${status.canRecheck}`,async()=>{const f=await fixture(state());try{const {page,s}=f;s.parse=status;await page.locator('textarea').fill('合成描述，不是真实用户原文');await click(page,'生成四宫格');if(status.canRecheck){await text(page,'1张真实四宫格');await click(page,'取消');await click(page,'免费重检原回复');await text(page,'没有重新调用文字模型');await count(s,'parse-recheck',1);}else{await text(page,status.message);await count(s,'prepare',0);if(status.retryToken){await click(page,'确认后重新解析一次');await text(page,'可能再次产生费用');await click(page,'取消');await count(s,'prepare',0);}}await count(s,'submit',0);}finally{await f.close();}});
++  for(const n of [1,2,4])await test(5,`independent ${n} candidates quote and no silent submission`,async()=>{const p=plan('independent-existing','independent',n),s=state(p);const f=await fixture(s,saved(p));try{const {page}=f;await text(page,`${n}张，共${n*5}点`);if(n===4){await click(page,'四宫格（1张）');await text(page,'排版已变');await click(page,'重新报价并按原人物出图');assert.equal(s.actions.find(a=>a.action==='quote').layout,'contact-sheet');await text(page,'共冻结5点');await click(page,'取消');}else{await click(page,'生成独立头像');await text(page,`共冻结${n*5}点`);await click(page,'取消');}await count(s,'submit',0);}finally{await f.close();}});
++  await test(6,'queued to running to succeeded updates main/history/thumbnail; settlement refresh once',async()=>{const p=plan(),s=state(p,[task('queued')]),f=await fixture(s,saved(p));try{const {page}=f;await text(page,'排队中');const initial=s.credits;s.tasks=[task('running')];await advance(page);await text(page,'生成中');assert.equal(s.credits,initial);s.tasks=[task('succeeded')];s.available=95;await advance(page);await page.getByRole('button',{name:'选择人物图片'}).waitFor();await text(page,'图片已保存，待人工确认');assert.ok(await page.locator('article img[src="/fixture-thumb.png"]').count());await text(page,'95');assert.equal(s.credits,initial+1);await advance(page,11000);assert.equal(s.credits,initial+1);await count(s,'submit',0);assert.deepEqual(f.errors,[]);}finally{await f.close();}});
++  await test(6,'confirmed synthetic submit refreshes shared credits without repeated polling refresh',async()=>{const s=state(),f=await fixture(s);try{const {page}=f;await click(page,'生成四宫格');await click(page,'生成图片');await text(page,'排队中');await text(page,'95');await count(s,'submit',1);assert.equal(s.credits,2);}finally{await f.close();}});
++  await test(7,'failed without image retains draft, no automatic retry',async()=>{const p=plan(),s=state(p,[task('failed')]),f=await fixture(s,{...saved(p),rules:{...p.candidates[0].rules,description:'合成草稿'}});try{const {page}=f;await text(page,'生成失败');assert.equal(await page.locator('textarea').inputValue(),'合成草稿');assert.equal(await page.getByRole('button',{name:'选择人物图片'}).count(),0);await advance(page,15000);await count(s,'retry',0);await count(s,'submit',0);}finally{await f.close();}});
++  await test(7,'partial independent success plus unknown keeps successful image and blocks resend',async()=>{const p=plan('partial-existing','independent',2),s=state(p,[task('succeeded','fixture-task',1),task('uncertain','unknown-task',2)]),f=await fixture(s,saved(p));try{const {page}=f;await page.getByRole('button',{name:'选择人物图片'}).waitFor();await text(page,'已完成 1/2 张');await disabled(page,'生成独立头像');assert.equal(await page.getByRole('button',{name:'只重试失败项'}).count(),0);await click(page,'查看候选2人物信息');await text(page,'受理未知，请先查询');assert.equal(await page.getByRole('button',{name:'选择人物图片'}).count(),0);await click(page,'查看候选1人物信息');await page.getByRole('button',{name:'选择人物图片'}).waitFor();await count(s,'submit',0);await count(s,'retry',0);}finally{await f.close();}});
++  await test(8,'uncertain blocks generate and restore, only queries original',async()=>{const p=plan(),s=state(p,[task('uncertain')]),f=await fixture(s,saved(p));try{const {page}=f;await disabled(page,'生成四宫格');await click(page,'恢复草稿');await text(page,'原提交尚未确认');await count(s,'restore',0);await click(page,'查询原提交，不重复生成');assert.ok(s.queries.every(id=>id===p.id));await count(s,'submit',0);}finally{await f.close();}});
++  await test(8,'unknown independent submission also blocks draft-tweak bypass',async()=>{const p=plan('independent-pending','independent',1),s=state(p),f=await fixture(s,saved(p),p.id);try{const {page}=f;await disabled(page,'生成独立头像');await disabled(page,'只重抽发型');await count(s,'prepare',0);}finally{await f.close();}});
++  for(const failure of [400,500,'network'])await test(9,`submit ${failure} preserves appropriate pending and only recovers by query`,async()=>{const s=state();s.submitError=failure;const f=await fixture(s);try{const {page}=f;await click(page,'生成四宫格');await click(page,'生成图片');await page.getByRole('alert').waitFor();const pending=await page.evaluate(key=>localStorage.getItem(`${key}:pending`),key);assert.equal(Boolean(pending),failure!==400);await count(s,'submit',1);if(failure!==400){await disabled(page,'生成四宫格');await click(page,'查询原提交，不重复生成');await count(s,'submit',1);}assert.ok(await page.evaluate(key=>JSON.parse(localStorage.getItem(key)).planId,key));}finally{await f.close();}});
++  await test(10,'late query from old plan does not mix into newly restored plan',async()=>{const p=plan('old-plan'),s=state(p,[task('queued')]),f=await fixture(s,saved(p));let release,notify;const received=new Promise(resolve=>{notify=resolve;});try{const {page}=f;await text(page,'排队中');s.onQuery=()=>new Promise(resolve=>{release=()=>resolve({plan:p,tasks:[task('succeeded','old-task')]});notify();});await advance(page);await Promise.race([received,new Promise((_,reject)=>setTimeout(()=>reject(new Error('fixture did not observe the deferred query')),4000))]);await click(page,'恢复草稿');await text(page,'已恢复完整人物');release();await page.waitForTimeout(50);assert.equal(await page.locator('a[href*="old-task"]').count(),0);assert.ok(await page.locator('a[href*="fixture-task"]').count());}finally{release?.();await f.close();}});
++  await test(10,'same-plan out-of-order query must not regress succeeded to queued',async()=>{const p=plan(),s=state(p,[task('queued')]),f=await fixture(s,saved(p));let release;try{const {page}=f;let q=0;s.onQuery=()=>{q++;if(q===1)return new Promise(resolve=>{release=()=>resolve({plan:p,tasks:[task('queued')]});});return {plan:p,tasks:[task('succeeded')]};};await advance(page);await advance(page);await page.getByRole('button',{name:'选择人物图片'}).waitFor();release();await page.waitForTimeout(50);assert.equal(await page.getByRole('button',{name:'选择人物图片'}).count(),1,'late queued reply overwrote successful main result');}finally{release?.();await f.close();}});
++  await test(11,'reload existing plan does not re-submit',async()=>{const p=plan(),s=state(p,[task('succeeded')]),f=await fixture(s,saved(p));try{const {page}=f;await page.getByRole('button',{name:'选择人物图片'}).waitFor();await page.reload();await page.getByRole('button',{name:'选择人物图片'}).waitFor();await count(s,'submit',0);await count(s,'prepare',0);}finally{await f.close();}});
++  await test(11,'pending submit survives reload; no task yet never auto-generates',async()=>{const p=plan(),s=state(p),f=await fixture(s,saved(p),p.id);try{const {page}=f;await disabled(page,'生成四宫格');await click(page,'查询原提交，不重复生成');await page.reload();await disabled(page,'生成四宫格');await count(s,'submit',0);await count(s,'prepare',0);assert.equal(await page.evaluate(key=>localStorage.getItem(`${key}:pending`),key),p.id);}finally{await f.close();}});
++  await test(11,'pending lookup failure still has a working manual original-query action',async()=>{const p=plan(),s=state(p);s.pendingLookupError=true;const f=await fixture(s,saved(p),p.id);try{const {page}=f;await text(page,'上次人物草稿暂不可读取');await disabled(page,'生成四宫格');const before=s.queries.length;s.pendingLookupError=false;s.tasks=[task('succeeded')];await click(page,'查询原提交，不重复生成');await page.waitForTimeout(100);assert.equal(s.queries.length,before+1,'pending recovery button did not query without loaded plan');await page.getByRole('button',{name:'选择人物图片'}).waitFor();await count(s,'submit',0);}finally{await f.close();}});
++  await test(12,'restore history keeps parameters; selecting/preview/cancel creates no generation',async()=>{const p=plan(),s=state(p,[task('succeeded')]),f=await fixture(s,saved(p));try{const {page}=f;await page.getByRole('button',{name:'选择人物图片'}).waitFor();await click(page,'选择人物图片');await count(s,'restore',0);await click(page,'预览整图');await page.keyboard.press('Escape');await click(page,'恢复草稿');await text(page,'已恢复完整人物');assert.equal(await page.locator('section[aria-label="人物条件"] label').filter({hasText:/^质量/}).locator('select').inputValue(),'high');assert.equal(await page.locator('section[aria-label="人物条件"] label').filter({hasText:/^分辨率/}).locator('select').inputValue(),'2K');await count(s,'restore',1);await click(page,'重新报价并按原人物出图');await text(page,'共冻结5点');await click(page,'取消');await count(s,'submit',0);const draft=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),key);assert.equal(draft.quality,'high');assert.equal(draft.resolution,'2K');}finally{await f.close();}});
++  const summary={version:require(path.join(root,'package.json')).version,commit:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),evidenceLevel:'isolated real AvatarStudio + real ProductDialog + real AppSessionProvider; synthetic localhost API/data/images only',newSpend:0,externalRequests:unsafe,componentInputs:Object.keys(bundle.metafile.inputs).filter(p=>p.startsWith('src/')),cases:results,passed:results.filter(r=>r.status==='PASS').length,failed:results.filter(r=>r.status==='FAIL').length,requestSummary:requests.reduce((a,r)=>{const k=`${r.method} ${r.path} ${r.action||''}`;a[k]=(a[k]||0)+1;return a;},{}),limitations:['No production business calls, cookies, tokens, DB or models','Synthetic image is only a local placeholder; real image and paid credit proof reused from parent','Pure parser/layout cases reused from existing 27-case actual log, not rerun here','Server prepare/submit billing invariants source-reviewed, not exercised against production']};
++  fs.writeFileSync(path.join(evidence,'component-results.json'),JSON.stringify(summary,null,2)+'\n');console.log(JSON.stringify({passed:summary.passed,failed:summary.failed,externalRequests:unsafe.length,evidence}));
++  if(unsafe.length)throw new Error('unexpected external/uncontrolled network attempted');
++  if(summary.failed)throw new Error(`${summary.failed} bounded component scenarios failed; see component-results.json`);
++}
++main().catch(e=>{console.error(e);process.exitCode=1;}).finally(async()=>{await browser?.close();await new Promise(resolve=>server?server.close(resolve):resolve());});
+diff --git a/src/app/tools/avatar-studio/studio.tsx b/src/app/tools/avatar-studio/studio.tsx
+index 82a720a..78f12ab 100644
+--- a/src/app/tools/avatar-studio/studio.tsx
++++ b/src/app/tools/avatar-studio/studio.tsx
+@@ -31,13 +31,17 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
+   const [recentConfigs,setRecentConfigs]=useState<AvatarRecord[]>([]),[sourceTask,setSourceTask]=useState<Task|null>(null),[storedSignature,setStoredSignature]=useState('');
+   const editing = useRef<AvatarRecord | null>(null), lock = useRef(false), alive = useRef(true);
+   const settledTaskPhases = useRef(new Set<string>());
++  const querySequences = useRef(new Map<string, number>());
+   const planRef=useRef<string|null>(null), filterRef=useRef({tab,deleted}); filterRef.current={tab,deleted};
+   const draftSignature=JSON.stringify({rules,planId:plan?.id,index,model,quality,resolution,advanced,tab,deleted});
+   usePageExitRisk({ unsaved: ready&&storedSignature===draftSignature ? [] : ['人物工作现场尚未保存'], busy: busy ? ['人物操作处理中'] : [], revision: draftSignature });
+   const load = useCallback(async (append = false, nextCursor?: string | null) => { const filter={...filterRef.current};const params=new URLSearchParams({kind:filter.tab,deleted:filter.deleted?'1':'0'});if(nextCursor)params.set('cursor',nextCursor);const data = await api<Payload>(undefined, `?${params}`); if (!alive.current||filterRef.current.tab!==filter.tab||filterRef.current.deleted!==filter.deleted) return; setRecords(old => append ? [...old, ...data.records.filter(r=>!old.some(o=>o.id===r.id))] : data.records);setRecordTasks(old=>append?{...old,...data.recordTasks}:data.recordTasks);setRecentConfigs(data.recentConfigs); setCursor(data.nextCursor || null); setPrices(data.settings.prices); return data; }, []);
+   const queryPlan = useCallback(async (id: string) => {
++    const sequence = (querySequences.current.get(id) || 0) + 1;
++    querySequences.current.set(id, sequence);
+     const data = await api<{ plan: AvatarPlan; tasks: Task[];sourceTask?:Task|null }>(undefined, `?plan=${encodeURIComponent(id)}`);
+-    if (!alive.current||planRef.current!==id) return data;
++    if (!alive.current||planRef.current!==id||querySequences.current.get(id)!==sequence) return data;
++    setPlan(old => old?.id===id ? old : data.plan);
+     setTasks(data.tasks);setSourceTask(data.sourceTask||null);
+     const latestTasks = data.sourceTask ? [...data.tasks, data.sourceTask] : data.tasks;
+     setRecordTasks(old => ({ ...old, ...Object.fromEntries(latestTasks.map(task => [task.id, task])) }));
+@@ -90,6 +94,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
+     catch (e) { if ((e as {status?:number}).status && (e as {status:number}).status<500) {setPending(false);localStorage.removeItem(`${key}:pending`);} await queryPlan(next.id).catch(() => undefined); throw e; }
+   }
+   async function prepare(action = 'new', field?: string, reroll = false, retryToken?:string) { await run(async () => {
++    if(blocked)throw new Error('原提交尚未确认，请先查询原任务；不能微调或新建人物');
+     let approved=false;
+     if (rules.description.trim()) {
+       setStage('检查描述解析');
+@@ -143,7 +148,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
+         {!draftSheet&&<div className={styles.controls} aria-label="不同候选数量">{[1,2,4].map(n=><button key={n} type="button" aria-pressed={rules.candidates===n} onClick={()=>setRules(r=>({...r,candidates:n as 1|2|4}))}>{n}位候选</button>)}</div>}
+         <span className={styles.price}>{prices[model] == null ? '此模型尚未设置价格' : draftSheet?`1张四宫格，共${prices[model]}点；4位不同人物，每格1人，整图1:1`:`${rules.candidates}张，共${prices[model]! * rules.candidates}点；${rules.people}人/张`}</span>
+         <button type="button" className={styles.primary} disabled={!ready||busy||blocked||management} onClick={()=>void prepare()}>{busy?stage||'处理中':draftSheet?'生成四宫格':'生成独立头像'}</button>
+-        {blocked && <button type="button" className={styles.quiet} onClick={()=>void run(async()=>{if(plan)await queryPlan(plan.id);})}>查询原提交，不重复生成</button>}
++        {blocked && <button type="button" className={styles.quiet} onClick={()=>void run(async()=>{const id=planRef.current;if(!id)throw new Error('原计划编号暂不可读取，请保留草稿后重新打开页面；未重复提交');await queryPlan(id);})}>查询原提交，不重复生成</button>}
+         <div className={styles.controls}><button type="button" disabled={busy} onClick={()=>void saveRules()}><Save size={15}/>保存规则</button>{editing.current && <button type="button" disabled={busy} onClick={()=>void saveRules(true)}>另存为</button>}</div>
+         {!!recentConfigs.length&&<section><small>最近配置</small>{recentConfigs.map(r=><button type="button" className={styles.quiet} key={r.id} onClick={()=>void restore(r)}>{r.name}</button>)}</section>}
+       </section>
+@@ -157,7 +162,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
+         {sheet&&<p className={styles.price}>需保存或调整某一个人，请切到独立头像，按原人物重新报价出图；不会自动裁切或自动生成。</p>}
+         {task?.error&&<p className={styles.error}>{task.error}</p>}{tasks.length>0&&<p className={styles.price}>已完成 {tasks.filter(t=>t.status==='succeeded').length}/{plan?avatarOutputCount(plan):0} 张。图片已保存不代表人物要求已符合。</p>}
+       </section>
+-      <aside className={styles.detail} aria-label="当前人物信息"><h2>{sheet?['左上格人物','右上格人物','左下格人物','右下格人物'][index]:'当前人物'}</h2>{current ? <><p>{current.members.map(d=>`${d.fields.gender.value} · ${d.fields.age.value}岁 · ${d.fields.face_shape.value} · ${d.fields.hair_length.value}`).join('；')}</p><small>{sheet?'四宫格保留四份人物条件；整图不能作为某一个人的身份基准。':'保持同人使用原图参考，模型仍可能改变面部；基准图不会自动替换。'}</small>{[...quickFields,'face_shape'].map(field=>{const f=current.members[0].fields[field];return <div key={field} className={styles.field}><span>{fieldLabels[field]}</span><select aria-label={`微调${fieldLabels[field]}`} value={rules.choices[field]||f.value} onChange={e=>setChoice(field,e.target.value)}>{Array.from(new Set([f.value,...catalog[field]])).map(v=><option key={v}>{v}</option>)}</select><button type="button" aria-label={`锁定${fieldLabels[field]}`} title={`锁定${fieldLabels[field]}，${f.source==='user'?'用户指定':f.source==='random'?'随机生成':'继承或推断'}`} aria-pressed={!!rules.locks[field]} onClick={()=>setRules(r=>{const locks={...r.locks};if(locks[field])delete locks[field];else locks[field]={...f,locked:true,manualLock:true};return {...r,locks};})}>{rules.locks[field]?<Lock size={14}/>:<Unlock size={14}/>}</button><button type="button" disabled={busy||sheet||draftSheet||!!rules.locks[field]||f.locked} title={`只重抽${fieldLabels[field]}，不出图`} aria-label={`只重抽${fieldLabels[field]}`} onClick={()=>void prepare('tweak',field,true)}><Dice5 size={15}/></button></div>;})}<div className={styles.controls}>{[...quickFields,'face_shape'].filter(field=>rules.choices[field]&&rules.choices[field]!==current.members[0].fields[field].value).map(field=><button type="button" className={styles.quiet} key={field} disabled={sheet||draftSheet} onClick={()=>void prepare('tweak',field)}>微调{fieldLabels[field]}</button>)}</div><details><summary>完整人物信息</summary>{current.members.map((dna,i)=><div key={dna.seed}><strong>人物 {i+1}</strong><p>明显特征 {dna.details.filter(d=>d.prominence!=='micro').length} / 默认预算 {dna.featureBudget}</p>{Object.entries(dna.fields).map(([key,f])=><p key={key}>{fieldLabels[key]||key}：{f.value} · {f.source==='user'?'用户指定':f.source==='config'?'配置继承':f.source==='inferred'?'范围推断':'随机生成'}{f.locked?' · 已固定':''}</p>)}</div>)}</details><details><summary>人物描述与提示词</summary><div className={styles.prompt}>{activePrompt}</div><button className={styles.quiet} type="button" onClick={()=>void navigator.clipboard.writeText(activePrompt).catch(()=>setError('复制失败，请手动选择文本'))}><Copy size={15}/>复制提示词</button><small>随机规则 {current.members[0].ruleVersion}，图片模型不提供可复现的生图种子。</small></details>{currentRecord&&<label>人物符合度<select value={currentRecord.qualityStatus||'unreviewed'} onChange={e=>void run(()=>mutate(currentRecord,'quality',{record:{qualityStatus:e.target.value}}))}><option value="unreviewed">未人工确认</option><option value="matches">符合要求</option><option value="mismatch">不符合要求</option></select></label>}</> : <small>生成后查看人物信息</small>}</aside>
++      <aside className={styles.detail} aria-label="当前人物信息"><h2>{sheet?['左上格人物','右上格人物','左下格人物','右下格人物'][index]:'当前人物'}</h2>{current ? <><p>{current.members.map(d=>`${d.fields.gender.value} · ${d.fields.age.value}岁 · ${d.fields.face_shape.value} · ${d.fields.hair_length.value}`).join('；')}</p><small>{sheet?'四宫格保留四份人物条件；整图不能作为某一个人的身份基准。':'保持同人使用原图参考，模型仍可能改变面部；基准图不会自动替换。'}</small>{[...quickFields,'face_shape'].map(field=>{const f=current.members[0].fields[field];return <div key={field} className={styles.field}><span>{fieldLabels[field]}</span><select aria-label={`微调${fieldLabels[field]}`} value={rules.choices[field]||f.value} onChange={e=>setChoice(field,e.target.value)}>{Array.from(new Set([f.value,...catalog[field]])).map(v=><option key={v}>{v}</option>)}</select><button type="button" aria-label={`锁定${fieldLabels[field]}`} title={`锁定${fieldLabels[field]}，${f.source==='user'?'用户指定':f.source==='random'?'随机生成':'继承或推断'}`} aria-pressed={!!rules.locks[field]} onClick={()=>setRules(r=>{const locks={...r.locks};if(locks[field])delete locks[field];else locks[field]={...f,locked:true,manualLock:true};return {...r,locks};})}>{rules.locks[field]?<Lock size={14}/>:<Unlock size={14}/>}</button><button type="button" disabled={busy||blocked||sheet||draftSheet||!!rules.locks[field]||f.locked} title={`只重抽${fieldLabels[field]}，不出图`} aria-label={`只重抽${fieldLabels[field]}`} onClick={()=>void prepare('tweak',field,true)}><Dice5 size={15}/></button></div>;})}<div className={styles.controls}>{[...quickFields,'face_shape'].filter(field=>rules.choices[field]&&rules.choices[field]!==current.members[0].fields[field].value).map(field=><button type="button" className={styles.quiet} key={field} disabled={busy||blocked||sheet||draftSheet} onClick={()=>void prepare('tweak',field)}>微调{fieldLabels[field]}</button>)}</div><details><summary>完整人物信息</summary>{current.members.map((dna,i)=><div key={dna.seed}><strong>人物 {i+1}</strong><p>明显特征 {dna.details.filter(d=>d.prominence!=='micro').length} / 默认预算 {dna.featureBudget}</p>{Object.entries(dna.fields).map(([key,f])=><p key={key}>{fieldLabels[key]||key}：{f.value} · {f.source==='user'?'用户指定':f.source==='config'?'配置继承':f.source==='inferred'?'范围推断':'随机生成'}{f.locked?' · 已固定':''}</p>)}</div>)}</details><details><summary>人物描述与提示词</summary><div className={styles.prompt}>{activePrompt}</div><button className={styles.quiet} type="button" onClick={()=>void navigator.clipboard.writeText(activePrompt).catch(()=>setError('复制失败，请手动选择文本'))}><Copy size={15}/>复制提示词</button><small>随机规则 {current.members[0].ruleVersion}，图片模型不提供可复现的生图种子。</small></details>{currentRecord&&<label>人物符合度<select value={currentRecord.qualityStatus||'unreviewed'} onChange={e=>void run(()=>mutate(currentRecord,'quality',{record:{qualityStatus:e.target.value}}))}><option value="unreviewed">未人工确认</option><option value="matches">符合要求</option><option value="mismatch">不符合要求</option></select></label>}</> : <small>生成后查看人物信息</small>}</aside>
+     </fieldset>}
+     <section className={styles.records}><div className={styles.heading}><div className={styles.controls}>{(['config','character','result'] as const).map(t=><button type="button" key={t} aria-pressed={tab===t} onClick={()=>setTab(t)}>{t==='config'?'随机规则':t==='character'?'保存的人物':'生成历史'}</button>)}</div><label><input type="checkbox" checked={deleted} onChange={e=>setDeleted(e.target.checked)} style={{width:'auto'}}/> 最近删除</label></div>
+       {visibleRecords.map(r=>{const t=tasks.find(task=>task.id===r.taskId)||(sourceTask?.id===r.taskId?sourceTask:recordTasks[r.taskId||'']);return <article className={styles.record} key={r.id}>{t?.asset?<img src={t.asset.thumbnail_url||t.asset.original_url} alt={r.name}/>:r.assetId?<img src={`/api/image-studio/assets/${r.assetId}?thumbnail=1`} alt={r.name}/>:<span className={styles.recordCover}><UserRound size={24}/></span>}<div className={styles.recordText}><strong>{r.name}</strong><small><RelativeTime value={r.createdAt}/> · {r.kind==='result'?(t?statusLabel[t.status]:'状态未读取'):r.kind==='config'?`配置第${r.revision}版`:'已保存人物'}</small></div><div className={styles.controls}>{r.deletedAt?<button type="button" disabled={busy} onClick={()=>void run(()=>mutate(r,'undelete'))}>撤销删除</button>:<><button type="button" disabled={busy} onClick={()=>void restore(r)}>{r.kind==='config'?'使用/编辑':'恢复草稿'}</button>{r.kind==='config'&&<><button type="button" onClick={()=>void run(async()=>{await askName('配置名称',r.name,{title:'重命名',onSubmit:async name=>mutate(r,'rename',{name})});})}>重命名</button><button type="button" onClick={()=>void run(async()=>{await api({action:'save',name:`${r.name}副本`,record:{kind:'config',rules:r.rules}});await load();})}>复制</button></>}{r.kind==='result'&&t?.asset&&<ContentReactions contentKey={`asset:${t.asset.id}`} imageSharing={false}/>}<button type="button" disabled={busy} onClick={()=>void run(async()=>{if(await confirm(`删除“${r.name}”？可撤销，不删除已有图片、资产或其他历史。`,{title:'删除记录',confirmLabel:'删除',danger:true}))await mutate(r,'delete');})}><Trash2 size={15}/>删除</button></>}</div></article>;})}
+diff --git a/src/lib/release.ts b/src/lib/release.ts
+index ed2f623..41d6c1c 100644
+--- a/src/lib/release.ts
++++ b/src/lib/release.ts
+@@ -1,6 +1,6 @@
+ import packageInfo from '../../package.json';
+ 
+-export const release = { version: packageInfo.version, channel: 'production', summary: '修复人物生成完成后历史卡仍显示排队、缺少缩略图的问题；提交与任务结束时同步刷新点数余额，不重复生成或扣费。单张四宫格和恢复设置操作行保持可用。' };
++export const release = { version: packageInfo.version, channel: 'production', summary: '人物任务查询失败后可继续查询原提交；受理未知时不能微调或重复生成，较早返回的旧状态不再盖掉成功图片。保留单张四宫格、历史缩略图和余额同步。' };
+ export function newerRelease(remote: string, local: string) {
+   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
+   const a = parse(remote), b = parse(local);

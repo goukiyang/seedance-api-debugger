@@ -1,0 +1,38 @@
+{
+  "result":"S1有限状态复盘与S2必要修复交付完成；已部署0.42.3，新补丁生产功能待用户手动验收。",
+  "tasks":[
+    {"id":"S1","name":"12组人物状态定向测试","standard":"稳定0.42.2先汇总复盘；真实随机约束内核+真实组件本地隔离；复用未变证据；0新增费用","status":"已完成","evidence":"baseline-review.json + baseline/kernel-results.json + baseline/component-results.json + repaired/component-results.json"},
+    {"id":"S2","name":"必要修复与安全交付","standard":"统一最小修复/复测/代码复核/候选/聚焦Git/回退/public检查","status":"已完成；生产交互待手动验收","evidence":"source.diff + source-review.json + build log + switch.log + runtime-proof.json + public proofs"}
+  ],
+  "version":"0.42.3",
+  "commit":"907a7a2b4d2a16c60206900045170bd4e3fd7cad",
+  "build":"FsqpYuy1_T1uLBWVvKz96",
+  "url":"https://sd2.youdooart.com/tools/avatar-studio",
+  "tests":{"kernelRuns":1,"kernelCasesPassed":8,"constraintGroups":6,"fixedSamplesPerGroup":12,"componentRunnerInvocations":7,"validBaseline":{"cases":23,"pass":19,"confirmedProductFindings":3,"fixtureGap":1},"finalRepair":{"cases":23,"pass":23,"fail":0,"uncontrolledRequests":0},"nonProductAttempts":"2无效启动尝试（其中1次中断），1次时钟/选择器校正，2次定向导航超时；不冒充产品失败或通过","reused27":"../2026-10-05-implementation/g1-g3-0.42.1/sd2-avatar-0.42.1-regression.log","newSpend":0,"externalModelCalls":0,"productionBusinessRequests":0,"productionDataWrites":0},
+  "twelveGroups":[
+    {"id":1,"scope":"空描述默认真实一图参数","result":"真实随机/编译/layout内核：4DNA、1输出、整图1:1；真实组件合成一图5点确认/取消；复用parent先前真图"},
+    {"id":2,"scope":"人物条件限制","result":"固定性别、年龄25-35、无眼镜/发型、组合、锁、冲突拒绝；真实内核6组各12固定seed，未固定项有差异；不是原用户描述"},
+    {"id":3,"scope":"结构fail-closed及免费重检","result":"复用未变27项真实运行证据：单对象数组、null/多对象/缺证据拒绝、免费重检0模型callback；不重复跑数"},
+    {"id":4,"scope":"解析pending/failed/unknown/canRecheck","result":"真实组件本地替身：阻断、费用说明、取消重解析、免费重检入口通过；后台状态/CAS复用27项"},
+    {"id":5,"scope":"四宫格1与独立1/2/4模式/报价/快照","result":"真实layout与组件合成模式切换重新报价/取消；旧快照不改写；复用parent真实只读1图5点/4图20点"},
+    {"id":6,"scope":"排队/生成/成功与余额刷新","result":"真实组件模拟queued-running-succeeded：主图/历史/缩略图同步，提交刷新和终态去重通过；合成余额不是账本，真实6240复用parent"},
+    {"id":7,"scope":"失败与部分成功","result":"失败无图保留草稿/不自动重试；独立成功+未知保持成功图、未知不冒充成功且阻止重发；真实Provider退款/部分扣费未验"},
+    {"id":8,"scope":"受理未知/提交未知","result":"发现微调绕过，已修两入口和prepare中央保护；主生成/恢复阻断且只查原任务通过"},
+    {"id":9,"scope":"提交400/500/断网","result":"本地替身：400清待确认；500/网络异常保留待确认与草稿；手动恢复不重新提交，通过"},
+    {"id":10,"scope":"乱序和切换计划晚返回","result":"发现同plan旧queued覆盖成功图，已加每plan查询序号；同plan与切换plan两项最终通过；当前tasks优先历史load保持既有机制"},
+    {"id":11,"scope":"刷新重开计划/待确认提交","result":"不重复submit；首查失败后的手动查询从planRef恢复并显示已有成功图，通过；只查询不付费"},
+    {"id":12,"scope":"历史恢复/取消/只读","result":"实际组件合成恢复保留high/2K与完整plan；选择图片不restore，预览/Esc、取消费用确认0submit通过。后台模型/refs不可变恢复沿用源码证据，不写生产记录"}
+  ],
+  "testProvenance":"测试时HEAD ad65015 + dirty修复（实际version0.42.3）；最终907a7a2。原repaired JSON保留不篡改。组件输入SHA ed1ca9f5e24193bfdd7499b6192e84c949d32332f67bdc0ee87bb44308052886 与最终Git blob/candidate源码完全一致。未再次整套测试。",
+  "parentPublishedFollowup":{"source":"parent报回；lead未操作用户浏览器/未重复测","session":"ttpl","tab":576242838,"checkedAt":"2026-10-05T05:03Z","DOMVersion":"0.42.3","available":6240,"samePriorTask":true,"originalPixels":"1024x1024","thumbnailPixels":"640x640","history":"成功","scene":"空描述/左上格/1图5点保持","businessActions":0,"sessionStopped":true,"formalEvidence":"parent维护正式根real-page-evidence publishedFollowup，lead不改正式记录","limit":"只读页面与旧任务保持已确认，不冒充真实失败/未知/费用重试验收"},
+  "changes":{"src/app/tools/avatar-studio/studio.tsx":"每plan序号阻止旧状态覆盖；查询成功恢复缺失plan；pending/uncertain微调入口及prepare阻断；手动查询保存的原ID","package.json":"唯一版本0.42.3","src/lib/release.ts":"对应本次恢复/未知提交/乱序修复摘要","scripts/avatar-state-tests/entry.tsx":"真实AvatarStudio+真实共享Session组件fixture入口","scripts/avatar-state-tests/run.cjs":"真实组件23个有界场景、localhost替身/外网拒绝/清理/JSON报告","scripts/avatar-state-tests/kernel.cjs":"真实随机/编译/layout内核；仅隔离StudioError依赖初始化，不载入DB/Provider","fiveCommittedEvidenceJsonFiles":"稳定复盘、内核、组件基线/导航缺口/修复实际报告。全部11个Git文件见changed-files.txt"},
+  "checks":{"candidate":"隔离release源码、线上既有deps/client，不安装；NEXT_DIST_DIR=.next-prod-candidate npm run build成功，内置Lint/类型通过；有既有CSS/autoprefixer/Hook/img警告，不称零警告","runtime":"786源码/配置文件与candidate一致，deployedcommit/BUILD一致，持久软链接保留","public":"release/health/config/login均200、origin server-42-193；本机独立release与static检查一致","static":{"file":"static/chunks/8079-6a93ecb9481bfc86.js","status":200,"sha256":"4666ba56b9a09aa978dd36c9b9c79dac9426b417217b53b65ca1b52c153269c6","matchesCandidate":true},"fixtureProcesses":"所有自有runner/隔离headless Chromium/fixture HTTP server已关闭；最终ps限定匹配无进程","releaseWindow":"真实预约/上传前确认/切换前确认；server flock和源码/BUILD漂移保护；05:00:16.886Z完成登记","worker":"active/running PID259902保持，未重启/未强杀/未排空付费任务","web":"active/running PID395732，旧PID356325；仅web受保护切换"},
+  "git":{"branch":"codex/avatar-generator-20261005","remote":"origin","branchRemote":"907a7a2b4d2a16c60206900045170bd4e3fd7cad","releaseTag":"release/0.42.3-avatar-state-repair-20261005","releasePeeled":"907a7a2b4d2a16c60206900045170bd4e3fd7cad","rollbackTag":"rollback/2026-10-05-before-avatar-state-repair-0.42.3","rollbackPeeled":"ad65015c14b20577b8e19ab77239cd7e10458d7c","remoteVerified":true,"productDirty":false,"remainingUntracked":"保留原缓存/旧交接证据及本次发布补充证据；未stage/revert正式根他人改动"},
+  "rollback":{"version":"0.42.2","source":"/srv/video-api-debugger/releases/ad65015c14b20577b8e19ab77239cd7e10458d7c-avatar-rollback","buildPath":"/srv/video-api-debugger/app/.next-prod-prev-avatar-907a7a2","build":"nS8nR1E0dMsv12y2vj6jr","verified":true,"older":".42.1/.42.0/.41.1/.41.0旧build及可用source保护不变，见runtime-proof.json","automaticProtection":"switch.sh任何切换错误自动恢复旧源码/build，不覆盖持久数据"},
+  "archive":{"path":"/tmp/sd2-avatar-907a7a2b4d2a16c60206900045170bd4e3fd7cad.tar.gz","sha256":"121b624ed38e3ec2dc898530fd84c4067b278857114ff2785a05e53938134145","localAndServerMatch":true,"tarEntries":1425,"secretsAndRuntimeExcluded":true},
+  "summary":"匿名/api/release summary为空属于既有internal账号策略；release.ts摘要非空，已登录internal更新入口按原机制可取。不扩大鉴权、不伪称匿名摘要一致；旧客户端弹窗未本轮真实自动验收。",
+  "limits":["无新增收费/外部模型或Provider调用/生产DB写入/任务造假/积分修改/用户浏览器操作","local fixture合成状态不等于真实Provider各失败/部分扣费结果","parent先前真图及klih/rvdh只读证据复用，不代替本次修复后的生产交互验收","原首次400字段未知；原描述缺失，不拼造原文","G3沿用未改的源码/构建/公网证据，不扩大模板工具栏视觉测试","parent扩展invalid地址复现证据支持该次ERR_FAILED归属；旧truncated网络/未捕获aborted不称完整clean","正式根工单/todo/index/截图与本次正式归档由parent维护，本目录为worktree可访问交付证据入口"],
+  "scopeExpansion":false,
+  "classificationMisjudgment":false,
+  "evidenceFiles":["baseline-review.json","source-review.json","baseline/kernel-results.json","baseline/component-results.json","baseline-query-followup/component-results.json","repaired/component-results.json","source.diff","changed-files.txt","sd2-avatar-state-repair-server-build-907a7a2b4d2a16c60206900045170bd4e3fd7cad.log","switch.log","runtime-proof.json","sd2-avatar-state-repair-public-proof.json","independent-public-proof.json","candidate.sh","switch.sh","runtime-proof.cjs","release-window.mjs"]
+}

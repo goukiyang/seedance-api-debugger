@@ -1,0 +1,17 @@
+{
+  "checkedAt": "2026-10-05T05:00:56.844Z",
+  "release": {
+    "version": "0.42.3",
+    "channel": "production",
+    "summary": ""
+  },
+  "status": 200,
+  "origin": "server-42-193",
+  "static": {
+    "file": "static/chunks/8079-6a93ecb9481bfc86.js",
+    "status": 200,
+    "sha256": "4666ba56b9a09aa978dd36c9b9c79dac9426b417217b53b65ca1b52c153269c6",
+    "matchesCandidate": true
+  },
+  "summaryPolicy": "anonymous summary intentionally empty; internal signed-in summary unchanged"
+}

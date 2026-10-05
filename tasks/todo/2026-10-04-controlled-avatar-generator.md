@@ -314,3 +314,41 @@ G1新真实反馈（2026-10-05用户原话，文字无附件）：“描述解�
 - 源码分支、`release/0.42.2-avatar-paid-refresh-20261005`及`rollback/2026-10-05-before-avatar-paid-refresh-0.42.2`已推送，父线程ls-remote独立确认branch/release peeled为ad65015，rollback peeled为2c895ee。服务器回退源码`/srv/video-api-debugger/releases/2c895eef1d5e15e5349f326e68038c76c42c81b8-avatar-rollback`与构建`/srv/video-api-debugger/app/.next-prod-prev-avatar-ad65015`保留；原0.42.0/0.41.*不删。生产源仍为隔离worktree，不部署正式根旧代码。
 - 正式根已归档[三文件作用与发布报告](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-implementation/paid-refresh-0.42.2/delivery.json)、[完整本轮源码diff](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-implementation/paid-refresh-0.42.2/source.diff)、[公网产物](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-implementation/paid-refresh-0.42.2/sd2-avatar-paid-refresh-public-proof.json)及构建/运行/切换原件。关键源码diff与Git精确一致、报告正式副本与worktree字节一致；新安全回执JSON和图片入口可读，原图SHA已核，辅助日志/截图不重复逐项哈希。
 - 更新摘要沿用既有internal账号可见策略，匿名/public release摘要为空是既有隐私行为；源码及弹窗口径核对一致，不改变鉴权，也不称内部旧客户端弹窗已实际验过。整份原描述、最初400具体字段与G3按钮交互仍按各自原缺口保留；刷新补丁已部署，剩余功能由用户手动验收。等价守门完成，本轮无新增分级/归类误判；历史记录保留。
+
+## 15. 多状态有限范围测试（2026-10-05）
+
+用户原话：“帮我多测几种不同状态，和有限范围测试”。明确授权本轮人物工具定向测试，不扩展成全站/全模型/多账号或生产破坏性测试。开工公网仍0.42.2，实际源码ad65015；测试版本保持稳定，发现问题先整批汇总再统一修复/复测。本轮新增付费次数默认0，异步询问用户是否允许最多另2次、总图片费用不超过10点；未明确答复不执行收费调用，不据此重试原描述文字模型。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| S1 | 多状态定向测试 | 核对约定状态、费用边界和恢复操作，汇总问题 | 已完成：12组有限场景，8项真实内核、23项隔离页面复测及5项线上可撤销检查；费用/原文/退款缺口保留 |
+| S2 | 问题修复与交付 | 必要修复统一复测，有改动则安全发布 | 已完成：3项修复及统一复测，v0.42.3受保护发布/Git/回退通过，实际新页保留原成功图片和6240余额；故障及收费新流程未生产复演 |
+
+范围和最低证据：
+
+- 1 空描述默认四宫格；2 合成明确条件/否定校验；3 单对象数组、空/多对象/null/缺证据拒绝与免费重检；4 解析pending/failed/unknown/canRecheck；5 四宫格1图与独立1/2/4图报价、排版切换；6 排队→生成中→成功、历史/缩略图/余额同步和去重；7 生成失败保留草稿、不自动重试；8 受理未知仅查询原任务、阻止重发；9 提交400/500/网络异常的pending与恢复；10 请求乱序/切换计划晚返回不串结果；11 刷新/重开恢复不重复提交；12 历史恢复/取消确认/只读操作不收费且参数保留。已有未受影响的27项内存证据可复用，新增状态按其缺口补测，不以重复计数冒充新增覆盖。
+- lead拥有同一实际worktree内测试脚本、真实AvatarStudio组件的隔离fixture/必要修复与证据；parent拥有正式记录、真实Chrome专属会话及可选收费，避免同页双控制。测试fixture只允许本地受控接口，外部网络/生产Provider/生产数据库写入禁止；不能另写假页面只证明模拟自己。可安全拆逻辑/UI独立包时按真实工具容量并行，缺worker入口如实记录，不创建用户侧栏任务或自动审核。
+- parent真实页面仅验证既有成功图片、预览关闭、人物格切换及排版提示等可撤销操作；修改的临时界面选择恢复原值，不重置或覆盖用户输入，不点击收费提交、不恢复/删除生产记录。旧图片与扣点证据复用第14节。专属Agent Window证据不冒称原xiaobo/Default草稿已验，账号/版本/会话占用在开工重新确认。
+- 停止边界：需要新增费用未获明确批准、真实任务故意失败/造假/数据删除、跨账号/权限、凭据或更大架构改变、正式源码漂移、安全回退不足时暂停对应项。原描述仍未提供，不用合成文字冒充原错误整份重检。测试脚本/资料提交不抬应用版本；真实产品修复才按已发布版本PATCH并执行既有安全发布。
+- 正式证据继续归档到docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/，在资料索引登记。输出12组实际结果、复用项、模拟范围、真实页面、发现问题及未覆盖项；不能把模拟故障通过写成实际Provider故障已复演。
+
+阶段结果：parent在v0.42.2专属Chrome Agent Window完成5个真实、不新增费用的检查：原成功图/历史、预览加载及Esc关闭、切独立模式后的重新报价提示/保留旧图、四格人物信息切换、还原选择后刷新保留原任务/单图5点/左上人物。余额6240→6240，原图1024²与缩略图640²加载，所有临时选择恢复，session klih已停止，无用户tab借用。[安全真实页证据](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/real-page-evidence.json)可访问。网络末200条为部分证据，4个POST仅反应状态读取200；30个请求中断存在刷新前情，另invalid/资源失败和3条控制台ERR_FAILED来源未确认，不宣称控制台清洁或盲改。有限范围同时涵盖人物条件限制：lead用真实随机内核有限seed检查性别、年龄区间、不戴眼镜/发型、组合、锁和冲突；不收费、不用假候选冒充内核结果，仍在进行中。
+
+资源错误来源补查：另一次有界专属session rvdh仅访问原页面、等待原图1024与余额6240，未点任何业务操作。网络GET失败与唯一控制台error均明确来自`chrome-extension://invalid/`，错误ERR_FAILED，本次重现为浏览器扩展地址而非sd2业务接口，不改网站或权限。该次85条网络仍标部分捕获，13个无URL的请求中断不归因；旧3条不能逐条追溯，不能称所有历史日志均已定位或控制台无错误。rvdh已停止，细节见同JSON diagnosticFollowup。
+
+### 同版复盘与整批修复
+
+- 固定v0.42.2/ad65015上有效页面基线23项为19通过、3项真实产品问题、1项本地fixture事件等待缺口；另有两次启动无效尝试、一次时钟/定位校准、两次本地导航超时，不计为产品通过或收费失败。先形成baseline-review.json统一复盘，再修复本批3项；原失败及工具缺口均保留，不修改历史结果。
+- S2-1：提交尚未确认时主生成与恢复被拦，但独立头像“只重抽/微调”仍可绕过；修复prepare中央校验和两个按钮禁用，未知受理时仅查询原提交。S2-2：同计划较早查询的queued晚返回能覆盖已成功图片；新增每计划查询序号，过期响应不更新当前结果。S2-3：首次计划查询503后plan为空，手动“查询原提交”原先静默无操作；改用已保留planRef查询，成功后补回原计划，不提交新任务。
+- 应用修复提交907a7a2b4d2a16c60206900045170bd4e3fd7cad仅改AvatarStudio状态/恢复、package版本0.42.3及唯一release摘要；不改API/鉴权/积分规则/Provider/worker/schema/依赖锁/G3工具行。新增scripts/avatar-state-tests三份隔离脚本与安全结果，真实组件/弹窗/共享会话被本地API替身包裹，不是另写仿制页面；外部网络被拒绝，生产数据库及模型调用均0。
+- 统一复测23/23通过；真实随机/编译/排版内核8项通过，其中6组条件各12个固定seed，含性别、25-35岁、无眼镜/短发、组合条件、锁与冲突，5个有效组均保留未固定条件的差异。原27项解析/排版证据与未变源码复用，不把复用说成本轮新增27次。受控余额与1像素替身图只证明页面行为，不冒充真实扣点/退款或实际四格图片；第14节真实1张5点结果及本轮线上6240不变证据复用。
+- repaired/component-results.json的commit字段记录测试时HEAD ad65015、version为未提交工作区0.42.3；source-review明确测试组件与最终907a7a2 Git对象字节一致，原报告保持原样，不能用旧HEAD伪称测错版本。后续runner只补失败退出处理，断言/组件不变。
+- 本轮新增图片/文字模型收费次数0。原描述未收到，不补造最初400原因或整份回复免费重检；没有生产故意失败/部分成功/退款试验、多账号/全模型或旧客户端升级弹窗实演。专项通过后停止扩测，实际人工人物符合度仍由用户确认。
+
+### 发布与最终对账
+
+- v0.42.3、应用907a7a2b4d2a16c60206900045170bd4e3fd7cad、BUILD FsqpYuy1_T1uLBWVvKz96已部署到[正式人物生成](https://sd2.youdooart.com/tools/avatar-studio)，新修复的生产故障交互仍待用户手动验收。候选NEXT_DIST_DIR=.next-prod-candidate npm run build及内置类型/lint通过，原CSS/autoprefixer/Hook/img非阻塞警告保留；786个源码/配置文件与候选一致，生产commit/BUILD匹配。公网release/health/config/login均200、来源server-42-193，头像JS的SHA与候选相同。只重启web（active/running PID395732），图片worker仍PID259902，持久storage/uploads/videos链接及旧版本回退均保留。
+- parent独立核对正式公网0.42.3和远端refs：源码分支与release/0.42.3-avatar-state-repair-20261005 peeled为907a7a2，rollback/2026-10-05-before-avatar-state-repair-0.42.3 peeled为ad65015。当前回退源码/srv/video-api-debugger/releases/ad65015c14b20577b8e19ab77239cd7e10458d7c-avatar-rollback与构建/srv/video-api-debugger/app/.next-prod-prev-avatar-907a7a2（旧BUILD nS8nR1E0dMsv12y2vj6jr）已核；保护切换不覆盖密钥、数据库和用户素材。此前0.42.1/0.42.0/0.41.*不删除。
+- parent新专属session ttpl仅打开新版本页面，未点业务按钮：实际DOM v0.42.3、可用6240、同一原付费任务ID、1024²原图/640²缩略图均已加载，历史成功、空描述/左上人物/1张5点及弹窗关闭保留。session已停止、无借用用户tab；这是新产物与既有结果的最低只读复查，不重跑前5项或制造生产故障，见real-page-evidence.json publishedFollowup。lead自有runner/headless Chromium/HTTP fixture均已关闭；未留待执行生成。
+- 正式根已保存[完整交付报告及逐文件作用](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/delivery.json)、[12组基线复盘](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline-review.json)、[23项修复复测](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/repaired/component-results.json)、[8项条件/排版内核](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline/kernel-results.json)、[统一源码diff](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/source.diff)、[服务器运行](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/runtime-proof.json)和同目录构建/切换/公网原件，资料索引及主todo/lessons更新。源码diff与Git精确一致，关键JSON可读/报告源副本一致；辅助日志不重复逐项哈希，原日志/嵌套diff空白保持原件，不借格式整理改证据。
+- 守门完成：限定人物页面状态恢复、0新增费用、受控本地故障/不写生产数据、单lead受保护发布，未改Provider/积分/权限/schema/依赖或其他模块。无新增分级/归类误判；历史误判与G1原文/G3原交互缺口不覆盖。正式根既有29行素材性能计划、私有图片与其他未跟踪资料保留，不使用其旧应用源码部署。更新机制复用既有版本入口与摘要策略，旧客户端弹窗未实演，不以版本号冒充已验。

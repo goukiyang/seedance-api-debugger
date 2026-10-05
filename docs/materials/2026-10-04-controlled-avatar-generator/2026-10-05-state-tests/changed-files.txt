@@ -1,0 +1,11 @@
+docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline-query-followup/component-results.json
+docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline-review.json
+docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline/component-results.json
+docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline/kernel-results.json
+docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/repaired/component-results.json
+package.json
+scripts/avatar-state-tests/entry.tsx
+scripts/avatar-state-tests/kernel.cjs
+scripts/avatar-state-tests/run.cjs
+src/app/tools/avatar-studio/studio.tsx
+src/lib/release.ts

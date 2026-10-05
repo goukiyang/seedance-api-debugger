@@ -1,0 +1,35 @@
+{
+  "commit": "907a7a2b4d2a16c60206900045170bd4e3fd7cad",
+  "version": "0.42.3",
+  "build": "FsqpYuy1_T1uLBWVvKz96",
+  "checkedAt": "2026-10-05T04:59:22.977Z",
+  "checks": [
+    {
+      "pathname": "/api/release",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/api/health",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/api/config",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/login",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "route": "/tools/avatar-studio/page",
+      "file": "static/chunks/8079-6a93ecb9481bfc86.js",
+      "status": 200,
+      "sha256": "4666ba56b9a09aa978dd36c9b9c79dac9426b417217b53b65ca1b52c153269c6",
+      "matchesCandidate": true
+    }
+  ]
+}

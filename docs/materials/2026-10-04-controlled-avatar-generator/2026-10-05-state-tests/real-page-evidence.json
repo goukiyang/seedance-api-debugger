@@ -1,0 +1,153 @@
+{
+  "evidenceVersion": "1.1.0",
+  "project": "video-api-debugger",
+  "date": "2026-10-05",
+  "completedAt": "2026-10-05T04:38:22Z",
+  "target": "https://sd2.youdooart.com/tools/avatar-studio",
+  "release": "0.42.2",
+  "sourceCommit": "ad65015c14b20577b8e19ab77239cd7e10458d7c",
+  "route": {
+    "tool": "BrowserSkill",
+    "browserInstance": "124ceaf5",
+    "session": "klih",
+    "tab": 576242827,
+    "dedicatedAgentWindow": true,
+    "otherSessionsAtStart": 0,
+    "userTabsBorrowed": 0,
+    "userTabsOnTargetAtStart": 0,
+    "businessAccountMatched": true,
+    "profileDirectoryVerified": false,
+    "sessionStopped": true
+  },
+  "paidBoundary": {
+    "newModelCalls": 0,
+    "newPaidImageSubmissions": 0,
+    "startingAvailableCredits": 6240,
+    "endingAvailableCredits": 6240,
+    "scope": "No Generate, Prepare, Retry, Restore, Delete, Like or Favorite action was clicked."
+  },
+  "cases": [
+    {
+      "id": "live-success",
+      "status": "PASS",
+      "evidence": "Existing successful image and history reloaded on the correct release; form-ready and image/credit readiness were checked separately.",
+      "taskId": "491b45f83e0aebd354c0a278421b929bdbc45404532c2f826df70cc8050af2bc-0",
+      "originalSize": "1024x1024",
+      "thumbnailSize": "640x640",
+      "historyStatus": "Image saved, awaiting manual fidelity confirmation"
+    },
+    {
+      "id": "live-preview-escape",
+      "status": "PASS",
+      "evidence": "Native Preview Full Image click opened the product dialog; loading completed and the image became visible; Escape closed the top dialog and returned to the unchanged page."
+    },
+    {
+      "id": "live-layout-change",
+      "status": "PASS",
+      "evidence": "Independent mode displayed the re-quote warning and 4 images / 20 credits while retaining the existing contact sheet. Returning to contact-sheet mode restored 1 image / 5 credits. No quote was submitted."
+    },
+    {
+      "id": "live-person-cell-selection",
+      "status": "PASS",
+      "evidence": "Cell 4 changed the detail heading to Bottom Right Person. Cell 1 restored Top Left Person. The same whole-image download remained available."
+    },
+    {
+      "id": "live-refresh-persistence",
+      "status": "PASS",
+      "evidence": "A purposeful reload after restoring temporary choices retained the original task, empty description, top-left cell, contact-sheet quote and successful history; original and thumbnail loaded, credits returned to 6240, no modal remained."
+    }
+  ],
+  "restoredState": {
+    "descriptionEmpty": true,
+    "layout": "contact-sheet",
+    "quoteImages": 1,
+    "quotedCredits": 5,
+    "cellIndex": 0,
+    "model": "gpt-image-2.5-sunburst",
+    "quality": "auto",
+    "resolution": "1K",
+    "originalTaskUnchanged": true,
+    "modalClosed": true
+  },
+  "diagnostics": {
+    "network": {
+      "entriesReviewed": 200,
+      "partialCapture": true,
+      "httpErrorsInReviewedEntries": 0,
+      "postResponsesInReviewedEntries": 4,
+      "postPath": "/api/content-reactions/state",
+      "postStatus": 200,
+      "postMeaning": "Read existing reaction states; not a reaction mutation or image generation.",
+      "abortedRequests": 30,
+      "abortedContext": "The session intentionally performed reloads. Aborts are not automatically classified as task failures.",
+      "otherFailures": 2,
+      "otherFailureCode": "net::ERR_FAILED",
+      "otherFailureHostAndPath": "invalid/",
+      "sourceSchemeRetained": false
+    },
+    "console": {
+      "entriesReviewed": 3,
+      "partialCapture": false,
+      "errorEntries": 3,
+      "message": "Failed to load resource: net::ERR_FAILED",
+      "exceptionStackCaptured": false
+    },
+    "limit": "Resource failures were observed, but their origin was not established. Do not claim a clean console or attribute them to an extension/application without evidence. The tested image and interactions completed successfully."
+  },
+  "diagnosticFollowup": {
+    "purpose": "One bounded read-only rerun to establish the origin of the resource failure, not a repeat generation.",
+    "session": "rvdh",
+    "tab": 576242832,
+    "newPaidRequests": 0,
+    "sessionStopped": true,
+    "imageWidth": 1024,
+    "availableCredits": 6240,
+    "networkEntries": 85,
+    "networkPartialCapture": true,
+    "failedGetOrigin": "chrome-extension://invalid/",
+    "failedGetCode": "net::ERR_FAILED",
+    "consoleEntries": 1,
+    "consolePartialCapture": false,
+    "consoleErrorOrigin": "chrome-extension://invalid/",
+    "consoleErrorText": "Failed to load resource: net::ERR_FAILED",
+    "otherAbortedEntriesWithNoUrl": 13,
+    "conclusion": "The reproduced resource failure is a browser-extension URL, not an sd2 business endpoint. No app repair or permission change is justified by this evidence.",
+    "limit": "This identifies the reproduced symptom, not every historical console line or all aborted requests; the network capture remains partial."
+  },
+  "publishedFollowup": {
+    "checkedAt": "2026-10-05T05:03:18Z",
+    "release": "0.42.3",
+    "sourceCommit": "907a7a2b4d2a16c60206900045170bd4e3fd7cad",
+    "publicRelease": { "status": 200, "origin": "server-42-193", "version": "0.42.3" },
+    "remoteRefsVerified": { "branchAndReleaseCommit": "907a7a2b4d2a16c60206900045170bd4e3fd7cad", "rollbackCommit": "ad65015c14b20577b8e19ab77239cd7e10458d7c" },
+    "session": "ttpl",
+    "tab": 576242838,
+    "dedicatedAgentWindow": true,
+    "otherSessionsAtStart": 0,
+    "sessionStopped": true,
+    "businessActionsClicked": 0,
+    "newPaidRequests": 0,
+    "availableCredits": 6240,
+    "taskId": "491b45f83e0aebd354c0a278421b929bdbc45404532c2f826df70cc8050af2bc-0",
+    "originalSize": [1024, 1024],
+    "thumbnailSize": [640, 640],
+    "historySaved": true,
+    "descriptionEmpty": true,
+    "cellTopLeft": true,
+    "oneImageFiveCredits": true,
+    "productDialogClosed": true,
+    "purpose": "One minimal read-only confirmation of newly published artifact and retained existing result; not a repeat of the five interaction checks or a new generation.",
+    "limit": "No production fault injection, refund test, new paid submission, or old-client upgrade dialog exercise."
+  },
+  "reuse": {
+    "paidImageAndBilling": "../2026-10-05-paid-verification/receipt.json",
+    "privateActualImage": "../2026-10-05-paid-verification/contact-sheet-result.png",
+    "priorRealPageScreenshot": "../2026-10-05-paid-verification/post-refresh-page.png"
+  },
+  "limits": [
+    "No new paid generation or text-model request was authorized or made in this evidence run.",
+    "Queued, running, failed and uncertain provider outcomes were not fabricated on production; they belong to separate isolated tests.",
+    "The original failing description remains unavailable.",
+    "No whole-site, multi-account, destructive, provider-fault, or exact facial-DNA fidelity acceptance was performed."
+  ]
+}
