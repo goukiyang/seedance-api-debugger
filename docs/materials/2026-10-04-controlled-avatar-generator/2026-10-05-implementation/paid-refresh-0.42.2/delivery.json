@@ -1,0 +1,52 @@
+{
+  "status":"已部署；parent已用既有成功任务完成独立免费只读页面复核，余额/主图/历史成功状态和真实缩略图同步正常。lead未做收费/浏览器/业务API或DB验收",
+  "version":"0.42.2",
+  "commit":"ad65015c14b20577b8e19ab77239cd7e10458d7c",
+  "build":"nS8nR1E0dMsv12y2vj6jr",
+  "publishedAt":"2026-10-05T04:14:02.818Z",
+  "url":"https://sd2.youdooart.com/tools/avatar-studio",
+  "scope":[{"id":"G1刷新修复","standard":"当前任务最新状态/缩略图同步到历史，提交及结束时刷新共享余额，保持原参数/草稿/幂等，无新生成或自动重试；web-only安全发布","state":"源码/构建/Git/发布检查完成；parent免费只读复核当前成功任务显示通过，未再次复演收费提交或终态过程"}],
+  "files":{
+    "src/app/tools/avatar-studio/studio.tsx":"queryPlan按task.id合并最新任务到recordTasks；历史优先当前tasks/sourceTask，避免旧load覆盖。调用既有useAppSession.refreshCredits({force:true})，提交返回后一次刷新；首次读到终态时刷新，task.id+status去重，不每5秒查余额。保留planRef/alive/草稿及原生成确认，不新增生成或自动重试",
+    "package.json":"唯一版本源0.42.2，无依赖/锁文件变动",
+    "src/lib/release.ts":"更新摘要对应历史状态、缩略图及余额同步修复，沿用既有更新提示/稍后去重/手动检查/草稿保护"
+  },
+  "checks":{
+    "sourceReview":"source-review.json；lead自复核，parent另只读核对ad65015三文件diff；3文件26新增/5删除，git diff --check通过",
+    "build":"服务器独立源码 /srv/video-api-debugger/releases/ad65015c14b20577b8e19ab77239cd7e10458d7c，NEXT_DIST_DIR=.next-prod-candidate npm run build exit0；内置编译/类型/lint/页面构建完成，原img/Hook/CSS非阻塞警告保留；未安装依赖、未原地构建live",
+    "compiled":"候选实际avatar路由包含新force刷新代码的static/chunks/473-46bff9dcb921754b.js；BUILD nS8nR1E0dMsv12y2vj6jr",
+    "runtime":"runtime-proof.json：783产品源码文件与候选一致；commit/version/BUILD相符；双服务active/running，web新PID356325，image原PID259902未变",
+    "public":"sd2-avatar-paid-refresh-public-proof.json：release/health/config/login200，origin server-42-193；avatar JS公网与候选SHA256 d9aad6e1d9c6a4c7f4d76dfc83b6ccdd6842fe60843a712b44acd3960cfd8508一致；本机curl另核0.42.2及来源",
+    "notRun":"不重跑27项原用例，不自动全站/浏览器/收费/业务任务/DB功能验收；parent独立新会话只读查看已成功任务，没有再次生成/重试/恢复，也未重新复演收费终态过程",
+    "anonymousSummary":"独立/public release版本0.42.2但summary为空，属于既有src/app/api/release/route.ts隐私策略：仅session.account_type为internal返回release.summary，响应private,no-store并Vary:Cookie。ReleaseNotice同源fetch默认带当前Cookie，且仅internal账号显示target.summary；静态源码口径一致，lead未作带登录态API/弹窗实测，不称匿名摘要与内部摘要完全一致"
+  },
+  "git":{
+    "branch":"codex/avatar-generator-20261005",
+    "remoteHead":"origin分支已push并ls-remote核为ad65015c14b20577b8e19ab77239cd7e10458d7c",
+    "releaseTag":"release/0.42.2-avatar-paid-refresh-20261005 → ad65015（已push并远端核对）",
+    "rollbackTag":"rollback/2026-10-05-before-avatar-paid-refresh-0.42.2 → 2c895ee（已push并远端核对）",
+    "archive":"/tmp/sd2-avatar-ad65015c14b20577b8e19ab77239cd7e10458d7c.tar.gz",
+    "archiveSHA256":"3491d2115ada76b70ad8271a8125f4cf3cba0f5fd661c0f148c388cbdb95bf7c",
+    "worktree":"产品文件无脏改；既有未跟踪缓存/资料及本轮证据保留，不revert/stage父线程资料或正式根工单"
+  },
+  "rollback":{
+    "version":"0.42.1",
+    "commit":"2c895eef1d5e15e5349f326e68038c76c42c81b8",
+    "source":"/srv/video-api-debugger/releases/2c895eef1d5e15e5349f326e68038c76c42c81b8-avatar-rollback",
+    "build":"/srv/video-api-debugger/app/.next-prod-prev-avatar-ad65015",
+    "BUILD_ID":"BaWLKa1vTqBaQDtynG4MU",
+    "older":"0.42.0/0.41.1/0.41.0源码/构建/标签原回退保留，详细实查runtime-proof.json"
+  },
+  "protection":{
+    "releaseWindow":"avatar-paid-refresh-20261005-ad65015；上传前预约、切换前复核、server flock及基于0.42.1源783文件漂移拒绝；闭环预约超5分钟后仅在确认无外来发布记录时刷新并登记完成。parent paid-verification为同工单结果证据，不是发布抢占",
+    "worker":"源文件白名单仅人物TSX/release及root版本，不加载新worker模块，不重启/强杀worker；切换前后同一PID259902",
+    "persistentData":"storage/public/uploads/public/videos软链接及/data目录保留；排除.env/密钥/DB/运行数据/依赖/dist/.next*，没有生产数据库写入、迁移或文件删除",
+    "startupRecovery":"传输尚未结束时一次启动因候选脚本未存在安全退出，未创建候选/触及live；确认完整上传后唯一有据重启候选，SHA均通过。编译及切换本身一次成功，不抬新版本"
+  },
+  "parentPaidEvidence":"由parent完成唯一收费检测，已有一个5点成功图片任务并得到真实1024×1024四人PNG；正式原图/账本/安全回执归档由parent维护。lead未重复调用，也不把父线程结果冒充自验",
+  "parentReadonlyVerification":{"source":"parent最新回执，BrowserSkill专属session cgcq已停止","actual":"同一taskId下载链接与原491b...bc-0精确匹配；DOM v0.42.2、可用6240；主1024×1024图complete，历史为图片已保存/待人工确认，640×640真实缩略图complete且src为同一asset；post-refresh-page.png同屏显示余额/版本/成功历史和缩略图","actions":"未点击生成/重试/恢复，未发第二次收费；lead未使用浏览器。正式截图/索引/结果由parent归档，截图正式路径未在该回执中提供，未编造"},
+  "remaining":["新提交/轮询终态全过程未再次收费复演；当前已成功任务的只读显示同步由parent确认", "内部账号实际更新弹窗摘要未由lead用登录态验证；匿名空摘要策略已静态核对，不扩大鉴权或重发", "原描述仍缺，不从回复拼造，真实整份回复校验仍未补做", "最初400具体字段仍未知，不作无边界追查"],
+  "evidence":{"diff":"source.diff（已交付0.42.1→0.42.2三文件完整diff）","buildLog":"sd2-avatar-paid-refresh-server-build-ad65015c14b20577b8e19ab77239cd7e10458d7c.log","switch":"switch.log","runtime":"runtime-proof.json","public":"sd2-avatar-paid-refresh-public-proof.json","record":"本目录为worktree可访问证据入口，正式根工单/索引/截图及聚焦资料commit由parent归档"},
+  "gatekeeper":"范围/来源/快照/费用/数据/权限/回退保护自复核，无新增分级误判；未派worker或审核线程",
+  "confidence":"97%：代码、候选、Git及公开产物完整；parent独立免费页面已确认当前余额/主图/历史与缩略图。未再次收费复演提交/终态全过程，内部弹窗摘要未由lead登录态实测"
+}

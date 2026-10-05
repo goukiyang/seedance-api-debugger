@@ -1,0 +1,105 @@
+{
+  "evidenceVersion": "1.0.0",
+  "project": "video-api-debugger",
+  "receivedDate": "2026-10-05",
+  "authorization": "User explicitly requested one paid verification; no automatic paid retries.",
+  "target": "https://sd2.youdooart.com/tools/avatar-studio",
+  "loadedRelease": {
+    "version": "0.42.1",
+    "commit": "2c895eef1d5e15e5349f326e68038c76c42c81b8",
+    "buildId": "BaWLKa1vTqBaQDtynG4MU"
+  },
+  "input": {
+    "description": "",
+    "mode": "default random contact sheet",
+    "originalFailingDescriptionAvailable": false,
+    "textModelCalls": 0
+  },
+  "task": {
+    "id": "491b45f83e0aebd354c0a278421b929bdbc45404532c2f826df70cc8050af2bc-0",
+    "batchId": "491b45f83e0aebd354c0a278421b929bdbc45404532c2f826df70cc8050af2bc",
+    "status": "succeeded",
+    "model": "gpt-image-2.5-sunburst",
+    "quality": "auto",
+    "resolution": "1K",
+    "aspectRatio": "1:1",
+    "outputSize": "1024x1024",
+    "layout": "contact-sheet",
+    "dnaCells": 4,
+    "tasksInBatch": 1,
+    "paidImageSubmissions": 1,
+    "createdAt": "2026-10-05T03:55:07.346Z",
+    "finishedAt": "2026-10-05T03:55:57.509Z",
+    "durationMs": 50163
+  },
+  "billing": {
+    "quotedCredits": 5,
+    "actualDeductedCredits": 5,
+    "freezeEvents": 1,
+    "successDeductionEvents": 1,
+    "freezeAt": "2026-10-05T03:55:07.350Z",
+    "successDeductionAt": "2026-10-05T03:55:57.518Z",
+    "remainingFrozenForThisTask": 0,
+    "note": "Freeze and success deduction are stages of the same 5-credit charge, not a 10-credit charge. Provider USD cost was not established."
+  },
+  "image": {
+    "originalFilename": "contact-sheet-result.png",
+    "source": "Authenticated native download of this successful task; no independent model generation.",
+    "path": "contact-sheet-result.png",
+    "sha256": "ca22fa635152a4ce8954409b82a8c7ab7bbce5e867df201b8bc92b372addf552",
+    "format": "PNG RGB",
+    "width": 1024,
+    "height": 1024,
+    "readability": "File decoded and visually inspected.",
+    "visualResult": "One actual 2x2 image with four visibly different people, one portrait per cell. All four cells are nonblank.",
+    "privateLocalOnly": true
+  },
+  "pageEvidence": {
+    "path": "avatar-result-page.png",
+    "source": "BrowserSkill screenshot of the result in the dedicated Agent Window.",
+    "width": 1908,
+    "height": 806,
+    "readability": "PNG decoded and visually inspected; full grid is proven by the downloaded image, not this partially scrolled viewport.",
+    "privateLocalOnly": true
+  },
+  "checks": {
+    "browser": "Dedicated BrowserSkill Agent Window; business account verified against the user screenshot; no user tab borrowed.",
+    "profileGap": "Default/xiaobo profile directory not independently established; original browser draft was not available.",
+    "taskAndBilling": "Read-only SQLite query scoped to the exact task and its credit events; no database updates.",
+    "imageVisibleInBrowser": true,
+    "downloadSucceeded": true,
+    "sessionStopped": "oytu"
+  },
+  "followUp": {
+    "version": "0.42.2",
+    "commit": "ad65015c14b20577b8e19ab77239cd7e10458d7c",
+    "buildId": "nS8nR1E0dMsv12y2vj6jr",
+    "deployedAt": "2026-10-05T04:14:02.818Z",
+    "deploymentEvidence": "../2026-10-05-implementation/paid-refresh-0.42.2/delivery.json",
+    "scope": "Avatar-page history/task synchronization and reuse of shared credit refresh; no billing-rule change.",
+    "browserReadOnlyRecheck": {
+      "sameTaskDownload": "/api/image-studio/download?id=491b45f83e0aebd354c0a278421b929bdbc45404532c2f826df70cc8050af2bc-0",
+      "loadedVersion": "0.42.2",
+      "availableCredits": 6240,
+      "originalImageLoaded": true,
+      "originalImageWidth": 1024,
+      "originalImageHeight": 1024,
+      "historyStatus": "Image saved, awaiting manual fidelity confirmation",
+      "historyThumbnailLoaded": true,
+      "historyThumbnailWidth": 640,
+      "historyThumbnailHeight": 640,
+      "historyThumbnailSource": "/api/image-studio/assets/studio-491b45f83e0aebd354c0a278421b929bdbc45404532c2f826df70cc8050af2bc-0?thumbnail=1",
+      "screenshot": "post-refresh-page.png",
+      "screenshotReadability": "PNG visually inspected; version, balance, history status and correct thumbnail visible together.",
+      "screenshotPrivateLocalOnly": true,
+      "sessionStopped": "cgcq",
+      "additionalPaidRequests": 0
+    },
+    "verificationLimit": "The existing successful task was read after loading the new client. No new paid running-to-completed transition was replayed."
+  },
+  "remainingGaps": [
+    "The original failing description was not supplied; its complete saved-reply recheck was not performed.",
+    "History status/thumbnail and header balance stayed stale in the tested v0.42.1. Follow-up v0.42.2 shows the correct existing-task result and credit balance; a new paid transition was intentionally not replayed.",
+    "No whole-site functional acceptance, additional paid request, or exact facial-DNA fidelity assessment was performed."
+  ]
+}

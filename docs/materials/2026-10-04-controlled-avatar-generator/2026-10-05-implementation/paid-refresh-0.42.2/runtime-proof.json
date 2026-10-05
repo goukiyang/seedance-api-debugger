@@ -1,0 +1,65 @@
+{
+  "commit": "ad65015c14b20577b8e19ab77239cd7e10458d7c",
+  "version": "0.42.2",
+  "build": "nS8nR1E0dMsv12y2vj6jr",
+  "checkedAt": "2026-10-05T04:15:04.760Z",
+  "sourceMatchesCandidate": true,
+  "checkedSourceFiles": 783,
+  "services": [
+    {
+      "id": "sd2-gray.service",
+      "MainPID": "356325",
+      "WorkingDirectory": "/srv/video-api-debugger/app",
+      "ActiveState": "active",
+      "SubState": "running"
+    },
+    {
+      "id": "sd2-image-studio.service",
+      "MainPID": "259902",
+      "WorkingDirectory": "/srv/video-api-debugger/app",
+      "ActiveState": "active",
+      "SubState": "running"
+    }
+  ],
+  "workerUnchanged": true,
+  "links": [
+    {
+      "path": "storage",
+      "target": "/data/video-api-debugger/var-lib/storage"
+    },
+    {
+      "path": "public/uploads",
+      "target": "/data/video-api-debugger/var-lib/uploads"
+    },
+    {
+      "path": "public/videos",
+      "target": "/data/video-api-debugger/var-lib/videos"
+    }
+  ],
+  "drainAbsent": true,
+  "rollback": [
+    {
+      "version": "0.42.1",
+      "source": "/srv/video-api-debugger/releases/2c895eef1d5e15e5349f326e68038c76c42c81b8-avatar-rollback",
+      "build": "/srv/video-api-debugger/app/.next-prod-prev-avatar-ad65015",
+      "id": "BaWLKa1vTqBaQDtynG4MU"
+    },
+    {
+      "version": "0.42.0",
+      "source": "/srv/video-api-debugger/releases/82fe2cb8aba5bbda7c4007249b0a6884f813d438-avatar-rollback",
+      "build": "/srv/video-api-debugger/app/.next-prod-prev-avatar-2c895ee",
+      "id": "ZFdnS_3WyEES4aw7_V_vA"
+    },
+    {
+      "version": "0.41.1",
+      "source": "/srv/video-api-debugger/releases/2b1c4cfea7d0eeb9e99e0cf0b712056742c59536-avatar-rollback",
+      "build": "/srv/video-api-debugger/app/.next-prod-prev-avatar-82fe2cb",
+      "id": "TVyNICHldwYntu2SSA7Po"
+    },
+    {
+      "version": "0.41.0",
+      "build": "/srv/video-api-debugger/app/.next-prod-prev-avatar-2b1c4cf",
+      "id": "HCmFzUDsnr43fQC62KZlg"
+    }
+  ]
+}

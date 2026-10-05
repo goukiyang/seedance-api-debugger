@@ -1,0 +1,17 @@
+{
+  "version":"0.42.2",
+  "commit":"ad65015c14b20577b8e19ab77239cd7e10458d7c",
+  "scope":"G1人物页已有成功任务后的历史/余额显示同步补丁",
+  "sourceFiles":["src/app/tools/avatar-studio/studio.tsx","src/lib/release.ts","package.json"],
+  "review": {
+    "taskRefresh":"既有queryPlan GET结果按真实task.id合并recordTasks；当前tasks/sourceTask优先用于同任务历史卡，防止较旧历史load结果盖回排队中或丢缩略图",
+    "creditsOnSubmit":"现有submit调用返回或报错后复用refreshCredits({force:true})一次；不新增submit、生成或自动重试",
+    "creditsOnSettlement":"首次读取succeeded/failed/uncertain阶段刷新；task.id+status集合去重，多次5秒查询同一终态不重复请求余额；uncertain后转成功/失败可再刷新一次",
+    "safety":"planRef/alive检查保留，迟到的不同plan或离开页面结果不更新本页状态或触发余额刷新；不更改参数/DNA/草稿签名/付费确认/幂等提交",
+    "sharedContext":"仅调用原useAppSession，未改shared context、计费/权限/Provider/worker/schema/锁文件",
+    "version":"package唯一来源0.42.2；已有SemVer提醒、稍后去重/手动重查/草稿保护不改，摘要写本次历史与余额同步",
+    "checks":"git diff --check及bash -n通过；服务器候选构建另记实际日志。不重复27项原专项，不作浏览器/业务API/DB/付费验收"
+  },
+  "parentEvidence":"parent唯一真实收费生成已成功：1张1024平方PNG四宫格、1任务5点；parent维护正式原图/账本/索引，lead不重做取证，不冒充已自行调用/验收",
+  "remaining":"parent发布后用既有任务进行只读页面/余额/历史复核；对应原描述缺口及最初400具体未知保留，未从回复拼造原文"
+}

@@ -1,0 +1,5 @@
+{"switchSourceBaselineMatches":true,"checkedFiles":783}
+{"webOnlyPatch":true,"changedSource":["src/app/tools/avatar-studio/studio.tsx","src/lib/release.ts"]}
+{"switchSourceBaselineMatches":true,"checkedFiles":783}
+{"commit":"ad65015c14b20577b8e19ab77239cd7e10458d7c","version":"0.42.2","build":"nS8nR1E0dMsv12y2vj6jr","checkedAt":"2026-10-05T04:14:02.818Z","checks":[{"pathname":"/api/release","status":200,"origin":"server-42-193"},{"pathname":"/api/health","status":200,"origin":"server-42-193"},{"pathname":"/api/config","status":200,"origin":"server-42-193"},{"pathname":"/login","status":200,"origin":"server-42-193"},{"route":"/tools/avatar-studio/page","file":"static/chunks/473-46bff9dcb921754b.js","status":200,"sha256":"d9aad6e1d9c6a4c7f4d76dfc83b6ccdd6842fe60843a712b44acd3960cfd8508","matchesCandidate":true}]}
+SWITCH_SUCCESS commit=ad65015c14b20577b8e19ab77239cd7e10458d7c build=nS8nR1E0dMsv12y2vj6jr previousBuild=BaWLKa1vTqBaQDtynG4MU rollbackSource=/srv/video-api-debugger/releases/2c895eef1d5e15e5349f326e68038c76c42c81b8-avatar-rollback rollbackBuild=/srv/video-api-debugger/app/.next-prod-prev-avatar-ad65015

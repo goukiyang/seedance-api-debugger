@@ -3,7 +3,7 @@
 项目：video-api-debugger
 文档版本：1.1.0
 正式目录：/Volumes/Data/Projects/video-api-debugger
-状态：2026-10-05应用v0.42.1已部署；G1定位到的格式/恢复修复已上线，整份回复需原草稿免费重检；G2/G3实现部署完成，待用户手动验收，见第13节
+状态：2026-10-05应用v0.42.2已部署；单次付费检测已实际出一张四宫格并扣5点，余额/历史刷新已修复并只读复查；原描述仍缺，见第14节。G1-G3历史保留第13节
 最后更新：2026-10-05（北京时间）
 正式版本来源：实施时重新读取正式站/api/release及服务器部署标记；不使用历史工作树直接覆盖线上
 本轮范围：实施人物生成V1与站内嫁接、导入窗口删除；还原生成图下方悬停显示的恢复设置按钮，图片单击只选中；聚焦提交与安全发布
@@ -283,3 +283,34 @@ G1新真实反馈（2026-10-05用户原话，文字无附件）：“描述解�
 - Git应用分支和release/0.42.1-avatar-recovery-toolbar-20261005已推送，peeled tag与最终commit一致；rollback/2026-10-05-before-restore-toolbar-0.42.1指向82fe2cb。服务器保留0.42.0源码`/srv/video-api-debugger/releases/82fe2cb8aba5bbda7c4007249b0a6884f813d438-avatar-rollback`及构建`/srv/video-api-debugger/app/.next-prod-prev-avatar-2c895ee`；0.41.1及0.41.0回退证据不删除。实际预约/源码漂移/锁/候选/保护切换与登记见报告，不用正式根旧应用源码部署。
 - 正式根已归档g1-g2-0.42.0和g1-g3-0.42.1两个证据目录，保留旧0.41.*和失败候选证据；主todo/资料索引/lessons更新。用户G3截图原件仅本机归档，不公开Git。原29行todo卡顿计划和其他无关资料未提交或回滚。等价守门完成；版本状态推断误判有，已纠正写全局日志，原P3误判记录保留。
 - 归档格式检查区分原始证据：新写工单/索引/lessons/登记与JSON/脚本检查通过；完整归档diff检查报告原始HTTP头CRLF、构建进度末尾空格和嵌套diff上下文空行，不裁剪或改写这些原件。源码diff检查及关键归档与Git精确比对已通过，不以清理证据空白冒充源码修复。
+
+## 14. 用户明确付费检测（2026-10-05）
+
+用户原话：“付费检测，你要做”。这是本次明确的真实收费验证授权，替代此前本轮不发收费请求的限制；不是长期不限额授权或全站测试授权。只做一次必要图片生成，当前实际页面报价为gpt-image-2.5-sunburst/auto/1K、单张1:1四宫格5点；失败或受理未知不自动追加付费重试。原描述免费重检不调用文字模型；缺原描述时不编造原文或冒称整份解析已通过。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| V1 | 真实付费出图检测 | 完成原草稿免费重检、一次按报价出图，核对任务、费用和实际四宫格图片 | 受阻（仅原文重检）：单次真实出图、四宫格及5点扣费已通过；未收到原描述，无法检验整份原回复，不再付费生成 |
+| V2 | 修正结果刷新 | 历史状态、缩略图和余额同步，安全发布 | 已完成：v0.42.2发布及同一成功任务只读复查；没有再发收费请求，新的收费提交/终态全过程未复演 |
+
+- 当前正式版本0.42.1、源码2c895ee、BUILD BaWLKa1vTqBaQDtynG4MU，原G1-G3对账保留；测试本身不升级版本、不重启服务或改积分规则。必要生产任务/冻结/交付由正常已授权业务流程产生，不直接改写数据库。
+- 路线：CUA新预检再次超时；ClickOps自身健康，auto-connect连接关闭；本机terminal向Chrome发Apple Events被-1743拒绝，停止该层操作，不绕过。独立BrowserSkill既有Chrome扩展连接124ceaf5正常，原有浏览器用户页签无SD2且session数0，建立当前任务专属Agent Window oytu，不借用/刷新其他用户页签。实际业务账号与用户截图姓名匹配，飞书已有授权的同账号常规登录完成，未索取/读取密码、cookie或token，未新增OAuth权限。
+- 浏览器身份边界：运行Google Chrome进程与已连接Chrome扩展已证；该实例未能核实Default/xiaobo目录，不能称原Chrome页签或原草稿已验。真实页面版本0.42.1、管理员本人账号、图片模型/参数/单图5点已核对；刷新一次后以新状态继续。新Agent页面描述为空、无原草稿，已向用户请求原文，尚未收到；不得把默认随机验证当原描述全检。
+- 证据与图片正式归档目录为docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-paid-verification/；只保留必要安全状态、任务/费用和关键图片，不将账号私有图片、完整描述或页面凭据自动公开Git。准备/确认与真正提交、任务成功与实际四格内容分开核对，不重复生成。
+
+### 本次付费结果与跟进
+
+- 实际仅点击一次图片提交，任务`491b45f83e0aebd354c0a278421b929bdbc45404532c2f826df70cc8050af2bc-0`成功；2026-10-05北京时间11:55:07提交、11:55:57完成，约50.163秒。gpt-image-2.5-sunburst、auto、1K、1:1，批次仅1个图片任务、4份人物DNA。空描述默认随机未调用文字模型，不把此结果当原描述解析已通过。
+- 页面加载原图1024×1024；原生下载的[真实四宫格](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-paid-verification/contact-sheet-result.png)解码并目视确认2×2、四位不同人物、每格1人、四格非空。关键图片SHA256为ca22fa635152a4ce8954409b82a8c7ab7bbce5e867df201b8bc92b372addf552。没有裁切拼接或用独立工具补造图。
+- 针对该任务的只读账本独立确认一次冻结5点、一次成功扣除5点，余额6245→6240、冻结5→0；不是两次收费10点。供应商美元费用未获取，不猜。任务和费用安全摘要见[付费检测回执](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-paid-verification/receipt.json)。[结果页面截图](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-paid-verification/avatar-result-page.png)含账号及余额，本机私人归档，不自动公开Git；下载原图才是完整四格证据。
+- 检测同时确认v0.42.1的页面刷新缺口：主结果已完成，历史仍排队中且缺缩略图，顶部余额仍显示6245。源码根因是计划轮询只更新tasks、未同步历史recordTasks，人物页未通知共享余额刷新。新增V2为已授权生成故障的局部修复，由原实施lead复用现有AppSession刷新入口，源码/构建/聚焦Git/回退/发布由其唯一负责；主控只归档及核对已存在任务，不发第二次收费生成。
+- 出图检测专属BrowserSkill session oytu已停止；无借用用户页签、未读凭据、未直接写库。V2源码实际交付须按0.42.1后的PATCH新版本，不把纯检测当应用升级，也不改写本回执中的真实受测版本。
+
+### 刷新修复发布与最终Review
+
+- 当前正式v0.42.2，应用`ad65015c14b20577b8e19ab77239cd7e10458d7c`，BUILD `nS8nR1E0dMsv12y2vj6jr`，2026-10-05北京时间12:14:02发布；[正式人物生成](https://sd2.youdooart.com/tools/avatar-studio)。仅改`src/app/tools/avatar-studio/studio.tsx`（最新任务同步历史、优先当前结果、防旧load覆盖；提交及首次终态复用共享余额force刷新并去重）、`package.json`（唯一版本0.42.2）、`src/lib/release.ts`（本次真实更新摘要）。未安装依赖、改锁文件/schema/Provider/权限/计费规则或增加自动生成。
+- 服务器隔离源码、`.next-prod-candidate`构建及内置编译/类型/lint通过，原非阻塞警告保留；公网release/health/config/login均200且来源server-42-193，实际avatar静态JS SHA匹配候选。父线程另核服务器`.deployed-commit`及live BUILD与此提交一致，web active/running、ExecMainStatus0、PID356325。仅重启web，图片worker仍PID259902，持久数据目录保留。
+- 新BrowserSkill专属session cgcq仅访问页面、读取既有成功任务并已停止：实际DOM v0.42.2、可用6240；下载taskId精确对应原唯一付费任务，1024×1024原图加载成功；历史显示“图片已保存，待人工确认”，同一asset的640×640缩略图加载成功。[复查截图](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-paid-verification/post-refresh-page.png)同屏显示版本、余额、历史成功及缩略图，含身份，仅本机保留。[安全回执followUp](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-paid-verification/receipt.json)保存范围与限制。没有点击生成、重试、恢复或再扣点；不声称新收费提交至终态的自动刷新全过程再次实际演练，也不代表全站验收。
+- 源码分支、`release/0.42.2-avatar-paid-refresh-20261005`及`rollback/2026-10-05-before-avatar-paid-refresh-0.42.2`已推送，父线程ls-remote独立确认branch/release peeled为ad65015，rollback peeled为2c895ee。服务器回退源码`/srv/video-api-debugger/releases/2c895eef1d5e15e5349f326e68038c76c42c81b8-avatar-rollback`与构建`/srv/video-api-debugger/app/.next-prod-prev-avatar-ad65015`保留；原0.42.0/0.41.*不删。生产源仍为隔离worktree，不部署正式根旧代码。
+- 正式根已归档[三文件作用与发布报告](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-implementation/paid-refresh-0.42.2/delivery.json)、[完整本轮源码diff](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-implementation/paid-refresh-0.42.2/source.diff)、[公网产物](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-implementation/paid-refresh-0.42.2/sd2-avatar-paid-refresh-public-proof.json)及构建/运行/切换原件。关键源码diff与Git精确一致、报告正式副本与worktree字节一致；新安全回执JSON和图片入口可读，原图SHA已核，辅助日志/截图不重复逐项哈希。
+- 更新摘要沿用既有internal账号可见策略，匿名/public release摘要为空是既有隐私行为；源码及弹窗口径核对一致，不改变鉴权，也不称内部旧客户端弹窗已实际验过。整份原描述、最初400具体字段与G3按钮交互仍按各自原缺口保留；刷新补丁已部署，剩余功能由用户手动验收。等价守门完成，本轮无新增分级/归类误判；历史记录保留。
