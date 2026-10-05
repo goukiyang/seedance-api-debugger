@@ -1,0 +1,10 @@
+active
+738a7fcbbe78b5fbe17f3418764c47dcae977a22
+by14yomS4fR8tZH8zSdLVMainPID=618612
+WorkingDirectory=/srv/video-api-debugger/app
+User=gouki
+active
+259902
+/data/video-api-debugger/var-lib/storage
+/data/video-api-debugger/var-lib/uploads
+/data/video-api-debugger/var-lib/videos

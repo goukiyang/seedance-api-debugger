@@ -1,0 +1,70 @@
+{
+  "version": "0.43.0",
+  "scope": "real service/parser/contract/engine/compiler with controlled in-memory boundary adapters only",
+  "cases": [
+    {
+      "name": "real prepare empty skips text model and quotes one image/four DNA",
+      "status": "PASS"
+    },
+    {
+      "name": "real prepare nonempty cannot implicitly buy analysis even if approved",
+      "status": "PASS"
+    },
+    {
+      "name": "one model response supplies summary, explicit, negative and soft; cache reused",
+      "status": "PASS"
+    },
+    {
+      "name": "analysis is account isolated and prepare requires matching parser binding",
+      "status": "PASS"
+    },
+    {
+      "name": "semantic unresolved cache visible; repeated prepare/free recheck never calls model",
+      "status": "PASS"
+    },
+    {
+      "name": "description, choices, locks and image parameter edits reject old submitted quote",
+      "status": "PASS"
+    },
+    {
+      "name": "real submit exact matching draft remains one image task path",
+      "status": "PASS"
+    },
+    {
+      "name": "aliases and generic facial-hair negation reach actual sampled DNA and prompt",
+      "status": "PASS"
+    },
+    {
+      "name": "explicit beard applies even for women/children; default random does not add it",
+      "status": "FAIL",
+      "error": "描述条件没有对应的原文片段，无法确认"
+    },
+    {
+      "name": "legacy missing new field compiles/requotes without mutating saved DNA",
+      "status": "PASS"
+    },
+    {
+      "name": "metadata covers every sampled field, stable value IDs/weights and truthful source restrictions",
+      "status": "PASS"
+    },
+    {
+      "name": "unknown parser acceptance cannot retry a new request; saved receipt free recovery only",
+      "status": "PASS"
+    },
+    {
+      "name": "same description edits still invalidate quote; unordered object keys do not",
+      "status": "PASS"
+    }
+  ],
+  "passed": 12,
+  "failed": 1,
+  "syntheticTextRequests": 2,
+  "syntheticImageSubmits": 1,
+  "productionDbWrites": 0,
+  "realPaidCalls": 0,
+  "externalNetwork": "not present in loaded fixture modules",
+  "limitations": [
+    "Synthetic upstream requests and in-memory writes are not real paid acceptance or production DB evidence",
+    "submitStudioBatch billing/idempotency unchanged; existing evidence and source review used"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "reviewer": "implementation lead; not independent acceptance",
+  "scope": "Actual source diff, new catalog metadata/intent helpers, real local tests and adapted deployment scripts",
+  "sourceContractsFrozen": true,
+  "blockingSourceFindings": [],
+  "checked": [
+    "prepare has no approved-model path: nonempty descriptions require existing ready analysis plus current description ID/parser version",
+    "new analysis requires complete summary/soft/clarifications and contiguous original evidence; historical receipts remain compatible",
+    "structural cache validity and semantic readiness are separate; unresolved/conflict caches remain visible and cannot trigger automatic paid retries",
+    "pending/unknown parser and image states recover original request only; receipt recheck performs no new model call",
+    "client analysis binding includes owner/description revision/parser version; server owner derives from existing session",
+    "server submission verifies matching rules/model/quality/resolution; parameter requotes recompile original DNA",
+    "account-local workspace persistence cannot save pre-initialization old-owner data to the new-owner key",
+    "existing results/running task snapshots survive prepare/cancel and do not automatically resubmit on restore",
+    "default sheet stays four distinct people, one person per cell, one task/one image quote; reference source semantics unchanged",
+    "new beard field is optional for historical DNA, original authored values; no dataset/weights/images imported or third-party license claimed",
+    "existing release update notice uses numeric SemVer and actual production release, manual refresh and page-exit guard; unchanged",
+    "deploy excludes persistent/env/database/build paths, detects source drift, preserves rollback build and never restarts the image worker"
+  ],
+  "verificationGaps": [
+    "Local broad tsc cannot use the symlinked node_modules Prisma client as authoritative: preexisting model mismatch and historical untracked evidence imports. Isolated server-matched candidate build must pass its built-in type checks before live switch.",
+    "No real paid model/image quality or billing acceptance performed by lead. Parent owns budget and real browser acceptance.",
+    "Text model currently has no exposed price estimator; configured model/tariff not claimed as verified."
+  ],
+  "reviewCorrections": [
+    "First unified run: description-contract type narrowing corrected",
+    "First review: owner-isolated initialization/persistence and async restore guards strengthened; dedicated late-response case added",
+    "Test-only corrections: evidence fixture mismatch, first cold-browser timeout, and deferred-owner-analysis wait-order deadlock"
+  ],
+  "classificationMisjudgment": "none"
+}

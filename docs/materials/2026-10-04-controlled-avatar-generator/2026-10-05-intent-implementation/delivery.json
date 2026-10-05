@@ -1,0 +1,79 @@
+{
+  "result": "Authorized implementation, unified free verification, focused remote Git and safe server deployment complete; real paid acceptance not performed",
+  "taskStatus": {
+    "E1": {"name":"完整意图分析、生成流程与词库实现", "standard":"源码及定向无收费测试完成，统一验证与复查", "status":"已完成"},
+    "E2": {"name":"Git 回退保护与安全发布", "standard":"远端可回档，正式站版本、构建和健康一致", "status":"已完成"}
+  },
+  "version": "0.43.0",
+  "branch": "codex/avatar-generator-20261005",
+  "commit": "1788cd7646920ee6f2d22b12d52911b80f3c5dd0",
+  "buildId": "E2gAzzLAUgFI3azlMSYKt",
+  "entry": "https://sd2.youdooart.com/tools/avatar-studio",
+  "releaseTag": "v0.43.0",
+  "rollback": {
+    "tag":"rollback/avatar-intent-20261005-v0.42.3",
+    "commit":"907a7a2b4d2a16c60206900045170bd4e3fd7cad",
+    "version":"0.42.3",
+    "buildId":"FsqpYuy1_T1uLBWVvKz96",
+    "serverSource":"/srv/video-api-debugger/releases/907a7a2b4d2a16c60206900045170bd4e3fd7cad-intent-rollback",
+    "serverBuild":"/srv/video-api-debugger/app/.next-prod-prev-avatar-1788cd7",
+    "automaticRollback":"switch.sh traps failed source switch/start/public verification, restoring prior source/build; not exercised intentionally"
+  },
+  "server": {
+    "host":"42.193.221.253", "app":"/srv/video-api-debugger/app", "release":"/srv/video-api-debugger/releases/1788cd7646920ee6f2d22b12d52911b80f3c5dd0",
+    "webService":"sd2-gray.service", "workerService":"sd2-image-studio.service", "workerPidUnchanged":259902,
+    "sourceArchiveSha256":"2569c429e038180eab3a0ce2fc8d6a0281a5af56472f207f2b0543001a834843",
+    "rollbackArchiveSha256":"2836812a22dd77e1c52c4d20fcaa35e1ccf2b31d96926312132817c29f5e574f",
+    "publicStatic":"/_next/static/chunks/1889-19df2b146fc64248.js",
+    "publicStaticSha256":"7e9b11a65bf216ec4ee7460cee6df3d8cfcc174e1d66bdfbe496702a2a81112e",
+    "excluded":".env*, DB/SQLite, node_modules, builds, storage, uploads, videos and deployed markers; preserved persistent symlinks",
+    "releaseCoordination":"Shared registry start/renew reservation confirmed before upload/switch, deploy.lock held during server actions, finish recorded"
+  },
+  "changedFiles": {
+    "package.json":"Unique SemVer 0.43.0; lockfile unchanged",
+    "src/lib/release.ts":"User-visible upgrade summary; existing compliant ReleaseNotice unchanged",
+    "src/lib/avatar-random/types.ts":"Versioned parser/rules/compiler, optional historical-compatible intent and DNA catalog fields",
+    "src/lib/avatar-random/catalog.ts":"Explicit weights, normalized aliases/exclusions and original beard options on existing catalog",
+    "src/lib/avatar-random/catalog-metadata.ts":"Stable Chinese field/value IDs, weights, conflicts/ranges, prompt targets and reference/original/license status",
+    "src/lib/avatar-random/intent.ts":"Readable understanding/effective conditions, semantic readiness checks and canonical draft signature",
+    "src/lib/avatar-random/description-contract.ts":"One response summary plus constraints, strict original evidence and new/historical contracts",
+    "src/lib/avatar-random/description-parser.ts":"Visible semantic clarification state, version binding, free receipts and original-request-only unknown/pending recovery",
+    "src/lib/avatar-random/engine.ts":"Versioned weighted sampling, soft/explicit precedence, beard prompt output and legacy DNA optional compatibility",
+    "src/lib/avatar-random/service.ts":"Prepare cannot buy analysis; requires cached ready analysis; submit binds actual rules and image parameters",
+    "src/app/api/avatar-studio/route.ts":"Explicit analyze action, owner-bound old image query, matching-input requote/submit guards",
+    "src/app/tools/avatar-studio/studio.tsx":"Analyze then generate, readable conditions, stale-reply/quote guards, account persistence and previous image/running-plan retention",
+    "scripts/avatar-studio-regression.ts":"Existing 27 actual parser scenarios updated for current contracts and unknown retry prohibition",
+    "scripts/avatar-state-tests/entry.tsx":"Real component test fixture exposes bounded synthetic owner change",
+    "scripts/avatar-state-tests/run.cjs":"29 real-component scenarios with controlled localhost transport only and external network rejection",
+    "scripts/avatar-state-tests/intent-kernel.cjs":"13 actual engine/parser/service/metadata scenarios, synthetic persistence/provider boundaries only"
+  },
+  "verification": {
+    "totalFreeCases":77, "parser":27, "legacyKernel":8, "intentKernel":13, "components":29,
+    "realPaidCalls":0, "productionDbWrites":0, "externalComponentRequests":0,
+    "commands": [
+      {"command":"node --import tsx scripts/avatar-studio-regression.ts", "result":"verify-3 exit 0, 27 PASS"},
+      {"command":"AVATAR_STATE_EVIDENCE=<verify-3> node scripts/avatar-state-tests/kernel.cjs", "result":"exit 0, 8 PASS"},
+      {"command":"AVATAR_STATE_EVIDENCE=<verify-3> node scripts/avatar-state-tests/intent-kernel.cjs", "result":"exit 0, 13 PASS, syntheticTextRequests 2, syntheticImageSubmits 1; no real spend/DB"},
+      {"command":"AVATAR_STATE_EVIDENCE=<verify-3> node scripts/avatar-state-tests/run.cjs", "result":"exit 0, 29 PASS, external requests 0; isolated headless browser, not parent Chrome"},
+      {"command":"node node_modules/typescript/bin/tsc --noEmit --incremental false", "result":"verify-1 exit 2: local symlinked outdated Prisma client and historical evidence TS imports; two current narrowing errors corrected. Authoritative isolated server next build passed type checks"},
+      {"command":"git diff --check; git diff --cached --check", "result":"exit 0"},
+      {"command":"git commit -m feat(avatar): explicit intent analysis and guarded generation flow; git push origin codex/avatar-generator-20261005 refs/tags/v0.43.0 refs/tags/rollback/avatar-intent-20261005-v0.42.3; git ls-remote origin <exact refs>", "result":"commit/push successful; branch, release and rollback peeled commit refs confirmed remotely"},
+      {"command":"bash archive.sh <exact commit>; release-window.mjs start/confirm/renew/finish <commit> <runId>; scp filtered archives", "result":"archives exclude runtime/secret paths; reservation confirmed; server archive hashes match"},
+      {"command":"ssh root@42.193.221.253 bash /tmp/sd2-avatar-intent-candidate-1788cd7.sh <commit> <sha> <base> <baseSha>", "result":"786 baseline source files match; NEXT_DIST_DIR=.next-prod-candidate npm run build exit 0, built-in lint/types pass, BUILD/routes/compiled intent markers verified"},
+      {"command":"ssh root@42.193.221.253 bash /tmp/sd2-avatar-intent-switch-1788cd7.sh <commit> <base>", "result":"web-only patch whitelist, second drift check, protected rsync and build switch, rollback protection, public proofs, unchanged worker PID; exit 0"},
+      {"command":"curl -fsS -D <headers> https://sd2.youdooart.com/api/release; systemctl is-active; cat .deployed-commit; cat .next-prod/BUILD_ID; public release/health/config/login/static checks", "result":"0.43.0, production, server origin; HTTP 200 and matching static SHA256, exact deployed commit/build; persistent symlinks intact"}
+    ]
+  },
+  "feesAndAcceptance": {
+    "text":"Existing configured default text model called once only after confirmation. Upstream fees may occur; no text price estimate/API or avatar credit-debit path. Actual configured model/tariff remain unverified. Cached revalidation and queries perform zero new model calls.",
+    "image":"Live settings determine real unitCredits; one default 2x2 sheet is one real image. This lead obtained no real quote and must not reuse synthetic 5-point test quote or historical quotes as current pricing.",
+    "parent":"Owns real old-client update-notice observation and paid acceptance. Latest explicit user authorization covers minimum A2: exactly one text analysis, one real sheet, image maximum 5 credits, no paid automatic retry. Earlier waiting state retained only in historical stage evidence; lead still no paid test.",
+    "state":"已部署，待用户手动验收；真实收费验收未执行"
+  },
+  "remainingUnverified": ["Real text semantic quality", "Real image pixels and billing/settlement", "Real old-client upgrade popup by parent", "Actual configured text model/tariff", "Deliberate live rollback rehearsal"],
+  "boundaries": {"authCreditsProviderSchemaWorkerSharedUnchanged":true, "lockfileUnchanged":true, "dependenciesInstalled":false, "datasetsCopied":false, "realChromeUsed":false, "formalRootDocsEdited":false, "credentialsReadOrOutput":false},
+  "evidence": {"diff":"source.diff", "review":"source-review.json", "finalTests":"verify-3/", "firstFindings":"verify-1/findings.json", "build":"server-build.log", "candidate":"server-candidate.log", "switch":"server-switch.log", "public":"server-public-proof.json", "independentPublicStatic":"independent-public-static.sha256", "exactLiveSource":"server-source-proof.json", "remoteRefs":"remote-refs.txt", "finalRuntime":"server-final-state.txt", "stage":"stage-status.json"},
+  "finalProofCorrection":"Additional live-source proof initially counted protected prisma/dev.db as an extra source filename. Reapplied the deployment DB exclusion without reading database contents; all 789 source/config files then matched exact release. No production source correction or DB mutation was made.",
+  "guardrail":"Authorized bounded avatar application change and protected release; no new fees/DB/schema/auth changes. Independent real functional acceptance deliberately separate.",
+  "classificationMisjudgment":"none"
+}

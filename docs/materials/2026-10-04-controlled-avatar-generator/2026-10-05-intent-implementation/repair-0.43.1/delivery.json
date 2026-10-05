@@ -1,0 +1,105 @@
+{
+  "status": "deployed; parent reports original receipt free recheck and one paid image acceptance complete; no further paid calls",
+  "version": "0.43.1",
+  "commit": "738a7fcbbe78b5fbe17f3418764c47dcae977a22",
+  "buildId": "by14yomS4fR8tZH8zSdLV",
+  "entry": "https://sd2.youdooart.com/tools/avatar-studio",
+  "scope": "One minimal correction after published 0.43.0 failed actual A2 analysis; no sample-text hardcode or broader refactor",
+  "tasks": [
+    {"id":"E1","name":"回执复盘与最小兼容修复","standard":"实际回复有据可查，要求不丢失，整批验证与复查通过","status":"complete","proof":"stage-status.json, verify-2, source-review.json, source.diff"},
+    {"id":"E2","name":"Git 回退保护与安全发布","standard":"新旧标签不可变，线上源码、构建、版本一致","status":"complete","proof":"remote-refs.txt, server-candidate.log, server-switch.log, server-source-proof.json, server-public-proof.json"}
+  ],
+  "rootCause": {
+    "structural": "Actual saved background is a one-string array containing exact original evidence. Old scalar-only validator rejects it.",
+    "semantic": "Redundant same-value/same-evidence beard detail is classified as a wound trace and adds location absent from the original text.",
+    "fullReview": "All six explicit conditions and negative glasses exclusions are supported by original evidence; summary covers requirements; no unresolved/conflict/clarification conditions. Complete raw read, not only the first failing field."
+  },
+  "changedFiles": [
+    {"path":"package.json","change":"PATCH 0.43.1, no dependencies or lock changes"},
+    {"path":"src/lib/release.ts","change":"User-visible patch summary from unique release source"},
+    {"path":"src/lib/avatar-random/types.ts","change":"Parser version 1.1.1; catalog/compiler/rule versions unchanged"},
+    {"path":"src/lib/avatar-random/description-contract.ts","change":"Lossless singleton background normalization retaining original-evidence validation; narrowly normalize redundant bare-catalog beard details without invented location; clone lists to avoid raw mutation; clarify model output types"},
+    {"path":"src/lib/avatar-random/description-parser.ts","change":"Saved 1.1.0 intent receipts retain strict intent fields when freely rechecked under 1.1.1"},
+    {"path":"scripts/avatar-studio-regression.ts","change":"Actual-shape fixtures, rejection/evidence/immutability guards, authored location/wound retention and optional private raw replay"},
+    {"path":"scripts/avatar-state-tests/intent-kernel.cjs","change":"Actual saved raw through real service/prepare/compiler under controlled local boundaries, four distinct DNA and zero additional real requests"}
+  ],
+  "diff": {"patch":"source.diff","integratedFrom907a7a2":"integrated-source.diff","patchStat":"7 files, 48 insertions, 8 deletions"},
+  "privateReceipt": {
+    "database":"/data/video-api-debugger/var-lib/dev.db",
+    "scope":"sqlite3 -readonly -json; only PlatformSetting avatar parse-attempt/parse-response/parse keys for exact description hash; 2 rows; no Musk settings/config values selected",
+    "descriptionHash":"12b105edbe3b849bd1b9081718580c8324d0ba0ae0cd62aca0fafadd0ec83501",
+    "rawContentSha256":"cfe13e56d731ea9c1084180a3c4ad90954205d1348482ee5b0f61527933ddd29",
+    "localOnly":"storage/avatar-intent-receipt-20261005/rows.private.json; directory 700, file 600, Git ignored, excluded from deployment",
+    "parentCopy":"Parent reports exact mode-600 copy/cmp match in formal-root paid-acceptance records; lead does not edit formal root"
+  },
+  "verification": {
+    "batch":"verify-2; complete batch after all changes then source Review",
+    "executed":{"parser":48,"intentKernel":14,"legacyKernel":8,"total":70,"failed":0,"actualPrivateRawReplay":true},
+    "reused":{"realComponentCases":29,"evidence":"../verify-3/component-results.json","reason":"UI and account/draft/quote/task boundaries unchanged; no duplicate parent browser work"},
+    "commands":[
+      "AVATAR_PRIVATE_RECEIPT=storage/avatar-intent-receipt-20261005/rows.private.json node --import tsx scripts/avatar-studio-regression.ts",
+      "AVATAR_PRIVATE_RECEIPT=storage/avatar-intent-receipt-20261005/rows.private.json AVATAR_STATE_EVIDENCE=<repair-0.43.1/verify-2> node scripts/avatar-state-tests/intent-kernel.cjs",
+      "AVATAR_STATE_EVIDENCE=<repair-0.43.1/verify-2> node scripts/avatar-state-tests/kernel.cjs",
+      "git diff --check; git diff --cached --check",
+      "NEXT_DIST_DIR=.next-prod-candidate npm run build (isolated exact-commit server release)"
+    ],
+    "serverBuild":"PASS including built-in type/lint checks; existing unrelated warnings recorded in server-build.log",
+    "localBroadTsc":"Not rerun: previously evidenced stale local Prisma client and old untracked evidence imports; exact server build provides authoritative type check without dependency/schema changes",
+    "review":"Same lead source Review, no blocking findings; not independent review or real paid acceptance"
+  },
+  "git": {
+    "branch":"codex/avatar-generator-20261005",
+    "remote":"origin",
+    "commands":"Focused git add of exact 7 paths; git commit; git push branch/new release and rollback tags; git ls-remote --heads/--tags; git status --short --branch",
+    "releaseTag":"v0.43.1 -> 738a7fcbbe78b5fbe17f3418764c47dcae977a22",
+    "rollbackTag":"rollback/avatar-intent-background-20261005-v0.43.0 -> 1788cd7646920ee6f2d22b12d52911b80f3c5dd0",
+    "oldTag":"v0.43.0 unchanged -> 1788cd7646920ee6f2d22b12d52911b80f3c5dd0",
+    "result":"All remote refs confirmed; tracked worktree clean; existing untracked evidence/builds preserved; no force or tag replacement"
+  },
+  "deployment": {
+    "reservationRun":"avatar-intent-background-20261005-738a7fc",
+    "releaseWindow":"Registered, confirmed before candidate and switch, renewed, finished; server deploy.lock held",
+    "archive":"/tmp/sd2-avatar-738a7fcbbe78b5fbe17f3418764c47dcae977a22.tar.gz",
+    "archiveSha256":"2f1ec03d17102861dcb64bd1b1829bd2d97d8e4e5341d216a27c4890722f9e2e",
+    "candidateCommand":"ssh root@42.193.221.253 'bash /tmp/sd2-avatar-background-candidate-738a7fc.sh 738a7fcbbe78b5fbe17f3418764c47dcae977a22 2f1ec03d17102861dcb64bd1b1829bd2d97d8e4e5341d216a27c4890722f9e2e 1788cd7646920ee6f2d22b12d52911b80f3c5dd0 2569c429e038180eab3a0ce2fc8d6a0281a5af56472f207f2b0543001a834843'",
+    "switchCommand":"ssh root@42.193.221.253 'bash /tmp/sd2-avatar-background-switch-738a7fc.sh 738a7fcbbe78b5fbe17f3418764c47dcae977a22 1788cd7646920ee6f2d22b12d52911b80f3c5dd0'",
+    "protection":"Exact-source drift and deployed-commit/build guards twice, archive hash verification, isolated candidate, bounded whitelist, runtime exclusions/symlink preservation, previous source/build retained, failure rollback trap; only web restarted",
+    "rollbackSource":"/srv/video-api-debugger/releases/1788cd7646920ee6f2d22b12d52911b80f3c5dd0-intent-rollback",
+    "rollbackBuild":"/srv/video-api-debugger/app/.next-prod-prev-avatar-738a7fc",
+    "rollbackBuildId":"E2gAzzLAUgFI3azlMSYKt",
+    "rollbackExecuted":false,
+    "public":"release/health/config/login HTTP 200, X-SD2-Origin server-42-193; actual version 0.43.1; static hash matches candidate",
+    "staticSha256":"d9a3a6245e224af03562b8df37d5efc8b46c08d6c4e07a10dee0d292bbc29afa",
+    "sourceProof":"789 source/config files match exact release; .deployed-commit/version/BUILD_ID consistent",
+    "workerPid":"259902 unchanged",
+    "runtimeSymlinks":"storage/uploads/videos point to original persistent /data/video-api-debugger/var-lib paths"
+  },
+  "feesAndAcceptance": {
+    "lead":{"realModelCalls":0,"realImageSubmits":0,"productionDbWrites":0},
+    "parentLatestReported":{"originalTextCalls":1,"imageSubmits":1,"available":6225,"frozen":0},
+    "textTariff":"Unknown; fixed original one call only. No inferred fee from observed 6235 -> 6230 balance change; parent owns exact ledger attribution.",
+    "nextAction":"No further paid calls, tests or deployment. Parent owns formal-root archiving and record commit.",
+    "liveQuote":"Not requested by lead; controlled local quote is not a real provider/production quote",
+    "notVerifiedByLead":["Parent real acceptance was not independently repeated by lead", "Old-client update dialog and exact Default physical profile were not evidenced by parent", "Text monetary tariff remains unknown"],
+    "parentAcceptance": {
+      "source":"Parent direct report after real v0.43.1 acceptance; lead did not repeat browser, model, image or ledger operations",
+      "freeRecheck":"Unique original saved reply freely rechecked successfully; no second paid analysis",
+      "taskId":"265f7dde9c940abd065730b582c1384439ec2f658ea544a87bca93ad57084e7c-0",
+      "image":"One successful native-download 1024x1024 PNG, 2x2 contact sheet, one person per cell; short hair, stubble, no glasses, daily clothes and clean background",
+      "uiDnaAges":[35,39,32,36],
+      "ageRange":"All four displayed DNA ages within requested 30-40; not a claim of exact visual age measurement",
+      "exactTaskLedger":[
+        {"localTime":"17:34:23","action":"freeze","points":5,"availableBefore":6230,"availableAfter":6230,"frozenAfter":5},
+        {"localTime":"17:35:11","action":"successful charge","points":5,"availableBefore":6230,"availableAfter":6225,"frozenBefore":5,"frozenAfter":0}
+      ],
+      "duplicateCharge":false,
+      "refreshPersistence":"Analysis, draft, new and old successful history, same-task download and available balance 6225 retained",
+      "browserSession":"Parent reports hpqv proactively stopped; lead did not control it",
+      "unproven":["Old-client upgrade dialog", "Exact Default physical profile", "Text monetary tariff"],
+      "formalEvidence":"Parent owns formal-root original evidence/archive and record commit; no new formal-root edits by lead"
+    },
+    "screenshotLimit":"Initial parent screenshot is scrolled to image/version/balance; parse error proven by parent DOM and receipt, not that screenshot"
+  },
+  "boundary": "No auth/credits/provider/schema/worker/shared module/dependency/lock/env changes; no production DB writes or browser takeover; formal-root records parent-only",
+  "classificationMisjudgment":"none"
+}

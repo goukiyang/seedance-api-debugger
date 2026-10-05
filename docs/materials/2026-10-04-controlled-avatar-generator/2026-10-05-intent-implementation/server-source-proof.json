@@ -1,0 +1,9 @@
+{
+  "sourceMatchesExactRelease": true,
+  "checkedFiles": 789,
+  "excluded": "Runtime databases/env not source; no contents read",
+  "commit": "1788cd7646920ee6f2d22b12d52911b80f3c5dd0",
+  "buildId": "E2gAzzLAUgFI3azlMSYKt",
+  "version": "0.43.0",
+  "workerPid": "259902"
+}

@@ -1,0 +1,17 @@
+{
+  "artifactVersion": "0.43.0",
+  "phase": "first unified Verify and source Review",
+  "parser": { "exit": 0, "passed": 27 },
+  "kernel": { "exit": 0, "passed": 8 },
+  "intentKernel": { "exit": 1, "passed": 12, "failed": 1, "cause": "test-only fixture retained temperament evidence from another description; correct synthetic soft field" },
+  "components": { "exit": 1, "passed": 26, "failed": 1, "externalRequests": 0, "cause": "cold initial isolated browser startup timed out; bounded fixture waits adjusted, no production browser touched" },
+  "localTypecheck": { "exit": 2, "errors": 179, "currentChangeErrors": 2, "currentCause": "reassigned unknown value prevented TypeScript narrowing; use validated const plus normalized const", "environmentGap": "node_modules points to v12-full-todo and its generated Prisma client lacks deployed template models; stale evidence TS files also included; authoritative candidate build will use production-matching client" },
+  "sourceReviewCorrections": [
+    "Owner change must reset local state, block saving before that owner's initialization, and reject late query/analysis results",
+    "Missing optional beard in historical DNA must remain absent without new random sampling; explicit newly requested beard can be applied",
+    "Preserve old image and track old running plan status when switching draft; quote cancellation must not erase previous output"
+  ],
+  "paidCalls": 0,
+  "productionDbWrites": 0,
+  "review": "lead self-review, not an independent reviewer or real paid acceptance"
+}

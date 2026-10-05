@@ -1,0 +1,37 @@
+{
+  "stage": "deployed-awaiting-parent-paid-acceptance",
+  "buildId": "E2gAzzLAUgFI3azlMSYKt",
+  "commit": "1788cd7646920ee6f2d22b12d52911b80f3c5dd0",
+  "remoteConfirmed": {"branch":"codex/avatar-generator-20261005", "releaseTag":"v0.43.0", "rollbackTag":"rollback/avatar-intent-20261005-v0.42.3", "rollbackCommit":"907a7a2b4d2a16c60206900045170bd4e3fd7cad"},
+  "releaseVersion": "0.43.0",
+  "completedPackages": [
+    "Explicit single-call analysis with readable summary and explicit/negative/soft/random/clarification conditions",
+    "Semantic readiness, private receipts, original evidence, free recheck, pending/unknown original-request recovery",
+    "Account/description/parser/draft binding, stale quote rejection, parameter requote without new DNA",
+    "Previous images and running task snapshots retained, account-isolated workspace restore",
+    "Versioned existing catalog with original beard values, stable field/value IDs and source/license metadata",
+    "Bounded real-component and real-kernel local tests with transport-only synthetic boundaries"
+  ],
+  "currentKeyItems": [
+    "verify-3 unified batch passed parser 27/27, legacy kernel 8/8, intent kernel 13/13 and real components 29/29; external requests 0",
+    "Source review complete, no blocking findings. Source contracts frozen.",
+    "Live production rechecked: 907a7a2 / 0.42.3, BUILD FsqpYuy1_T1uLBWVvKz96, deploy lock available, worker PID 259902.",
+    "Release-window start/renew/finish recorded. Exact-commit archives verified; 786 original live source files matched before switch.",
+    "Isolated server build including lint/types succeeded. Public release/health/config/login and new avatar static SHA256 match 0.43.0 / E2gAzzLAUgFI3azlMSYKt / 1788cd7. Worker PID 259902 unchanged; runtime symlinks and original build retained."
+  ],
+  "remaining": [
+    "Parent-owned real browser update-notice observation and functional/manual acceptance",
+    "Parent-owned authorized minimum A2 paid acceptance: exactly one text analysis and one sheet, image maximum 5 credits, no paid automatic retry; text tariff remains unknown"
+  ],
+  "uiEntry": "https://sd2.youdooart.com/tools/avatar-studio",
+  "uiSequence": "Nonempty description: analyze description -> inspect understanding/conditions -> generate contact sheet -> confirm image quote. Empty description skips the text model.",
+  "fees": {
+    "leadRealPaidCalls": 0,
+    "leadProductionDbWrites": 0,
+    "paidAcceptanceOwner": "parent/supervisor only; latest explicit user authorization covers minimum A2, one text call and one sheet, maximum image cost 5 credits, no paid automatic retry",
+    "text": "One explicitly confirmed request through the existing configured default text model. Provider costs may occur. No avatar text-price/estimate endpoint or credit charge is implemented; actual configured model and tariff have not been read or verified. Saved-receipt recheck and status queries make zero new text-model calls.",
+    "image": "Existing live settings determine the actual quote. Default 2x2 sheet is one task and one real image, not four image charges. No fresh real quote has been obtained by this lead; synthetic test quotes are not commercial evidence."
+  },
+  "notDone": ["No real browser/profile use", "No real paid generation", "No production DB mutation", "No dependency installation", "No formal-root document edits"],
+  "evidence": {"firstFindings":"verify-1/findings.json", "secondComponents":"verify-2/component-results.json", "currentRun":"verify-3/"}
+}

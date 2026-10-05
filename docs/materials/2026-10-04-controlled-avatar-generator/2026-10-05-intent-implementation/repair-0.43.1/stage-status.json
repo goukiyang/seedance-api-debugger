@@ -1,0 +1,37 @@
+{
+  "stage":"0.43.1-deployed-awaiting-parent-free-original-receipt-recheck",
+  "liveVersion":"0.43.1",
+  "liveCommit":"738a7fcbbe78b5fbe17f3418764c47dcae977a22",
+  "liveBuildId":"by14yomS4fR8tZH8zSdLV",
+  "leadHandoffComplete":true,
+  "sourceProof":{"checkedFiles":789,"sourceMatchesExactRelease":true,"evidence":"server-source-proof.json"},
+  "candidateBuildId":"by14yomS4fR8tZH8zSdLV",
+  "deploymentProgress":"Protected switch successful. Public release/health/config/login HTTP 200 and origin server-42-193. Avatar static SHA matches candidate. Previous 0.43.0 source/build retained, worker PID 259902 unchanged. No lead model/image calls or production DB writes.",
+  "commit":"738a7fcbbe78b5fbe17f3418764c47dcae977a22",
+  "remoteConfirmed":{"branch":"codex/avatar-generator-20261005","releaseTag":"v0.43.1","rollbackTag":"rollback/avatar-intent-background-20261005-v0.43.0","oldTagUnchanged":"v0.43.0 -> 1788cd7"},
+  "verification":{"executedCases":70,"parser":48,"actualPrivateReceiptReplay":true,"intentKernel":14,"legacyKernel":8,"reusedUnchangedComponents":29,"failures":0,"realModelCalls":0,"realImageSubmits":0,"productionDbWrites":0},
+  "parentNextAction":"After 0.43.1 publication refresh current UI and click 免费重检原回复. Do not start a new analysis. Only after original receipt is ready prepare/confirm the existing image quote within parent-authorized ceiling.",
+  "completedRepair":"Bounded background singleton normalization, evidence-identical bare-catalog duplicate-beard semantics, immutable string-list validation, and explicit background/detail prompt types. Parser 1.1.1 retains strict 1.1.0 saved intent validation; package 0.43.1 and patch summary updated.",
+  "releasedVersion":"0.43.0",
+  "releasedCommit":"1788cd7646920ee6f2d22b12d52911b80f3c5dd0",
+  "plannedPatch":"0.43.1; published v0.43.0 tag remains immutable",
+  "actualReceipt": {
+    "readOnlyDb":"/data/video-api-debugger/var-lib/dev.db",
+    "queryScope":"PlatformSetting only avatar parse-attempt/parse-response/parse keys for the exact description hash; no Musk settings selected",
+    "rows":2, "attemptState":"failed", "failureField":"background", "parserVersion":"1.1.0", "cost":"response-received", "hasSavedResponse":true,
+    "rawContentSha256":"cfe13e56d731ea9c1084180a3c4ad90954205d1348482ee5b0f61527933ddd29",
+    "rawPrivateLocation":"storage/avatar-intent-receipt-20261005/rows.private.json; ignored by Git, local mode 600, parent-only evidence, never archived for deployment",
+    "structure":"summary string; explicit six evidence-bearing objects (gender, age, hair_length, glasses, clothing, facial_hair); soft empty object; details one object; scopes one string; background one-element string array; unrecognized/conflicts/clarifications empty arrays",
+    "completeness":"All top-level fields present. All six evidence fragments and singleton background are contiguous original text. Summary covers all user conditions. No hidden unknown or unresolved conditions."
+  },
+  "allFindings":[
+    {"kind":"blocking structural mismatch", "finding":"background is a singleton array of an original string, not a scalar string. Old validation aborts here.", "fix":"Only losslessly unwrap an exactly one-string array; retain original-text and size checks; reject multi/empty/nested/object/numeric alternatives without picking or discarding."},
+    {"kind":"semantic issue", "finding":"Same beard value and same original evidence appear in explicit.facial_hair and details. Detail is classified trace and supplies a model-invented jaw/upper-lip placement not present in that evidence.", "fix":"Only for an exact evidence/value-matched duplicate whose evidence itself denotes a bare catalog beard value, use natural classification, position-unspecified and side none. Retain explicit field, original evidence, value, exclusions and prominence. Explicitly authored side/location and unrelated wounds remain unchanged."},
+    {"kind":"no further blocker", "finding":"Age 30-40, male, short hair, no glasses plus both exclusion values, ordinary clothes and clean background are coherent. No conflicts/unrecognized/clarifications; summary contains every requirement."}
+  ],
+  "plannedVerification":"Actual private saved raw replay in memory with zero model calls, authored public same-shape fixtures and invalid-wrapper/evidence guard matrix, actual kernel compilation, then unified Review and isolated server build. Reuse unchanged component/legacy results from 1788cd7, not repeat parent browser tests.",
+  "fees":{"leadRealModelCalls":0,"leadImageSubmits":0,"productionDbWrites":0,"parentObservedBalanceAtFailure":6235,"parentLatestObservedBalance":6230,"parentLatestFrozen":0,"parentOriginalTextCalls":1,"parentImageSubmits":0,"balanceAttribution":"Difference not attributed to this round; parent will check exact task ledger. Upstream text monetary cost remains unknown"},
+  "parentEvidenceUpdate":"Parent copied exact private rows into formal-root paid-acceptance evidence, mode 600 and cmp match. Initial scrolled screenshot shows old image/version/balance; error is proven by parent DOM, not that screenshot. Parent exclusively keeps drbh/tab576242911 old 0.43.0 account page for update detection.",
+  "lookupCorrection":"app/prisma/dev.db is a 0-byte build placeholder, not live production DB; its readonly query failed with no table. Reconfirmed nonempty persistent production DB path without reading environment or config values.",
+  "remaining":["Parent checks actual old-client update notice", "Parent free-rechecks original saved reply, then explicitly confirms image quote within authorized ceiling; no new paid analysis"]
+}

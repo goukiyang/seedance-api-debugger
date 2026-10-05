@@ -1,0 +1,127 @@
+{
+  "evidenceVersion": "1.1.0",
+  "project": "video-api-debugger",
+  "receivedDate": "2026-10-05",
+  "authorization": "User explicitly requested implementation and paid acceptance. Supervisor chose the smallest announced scope: one text analysis, one image at most five credits, no automatic paid retries. No extra authorization is inferred from silence.",
+  "target": "https://sd2.youdooart.com/tools/avatar-studio",
+  "loadedRelease": {
+    "version": "0.43.1",
+    "commit": "738a7fcbbe78b5fbe17f3418764c47dcae977a22",
+    "buildId": "by14yomS4fR8tZH8zSdLV"
+  },
+  "firstPublishedAttempt": {
+    "version": "0.43.0",
+    "commit": "1788cd7646920ee6f2d22b12d52911b80f3c5dd0",
+    "buildId": "E2gAzzLAUgFI3azlMSYKt",
+    "state": "actual saved reply rejected with HTTP 422; no image submitted at that stage"
+  },
+  "input": {
+    "sample": "A2",
+    "description": "30至40岁男性，短发，有短胡茬，不戴眼镜，日常衣服，背景干净。",
+    "synthetic": true,
+    "originalFailingDescriptionAvailable": false
+  },
+  "textAnalysis": {
+    "confirmedAnalyzeActions": 1,
+    "upstreamCalls": 1,
+    "upstreamCallEvidence": "One confirmed analyze action; a saved model reply is reported by the product. Existing createMuskChatCompletion has one fetch and no retry loop.",
+    "state": "ready-after-free-saved-reply-recheck",
+    "firstFailure": {
+      "httpStatus": 422,
+      "field": "background",
+      "visibleMessage": "描述解析未通过校验：背景回复格式无效（background）。原回复与草稿保留，可免费重新检查；没有提交图片任务。"
+    },
+    "visibleSummary": "生成一名30至40岁的男性，留短发和短胡茬，不戴眼镜，穿日常衣服，置于干净简洁的背景中。未指定的脸型、五官、肤色、发色、表情等保持自然随机。",
+    "effectiveConditions": "男性；30-40；短发；不戴眼镜，排除黑框眼镜、细框眼镜；简洁日常衣服；淡胡茬；背景干净",
+    "supplierCurrencyCost": null,
+    "supplierCostStatus": "Unknown; the existing integration does not expose an exact avatar text price. This is not claimed free.",
+    "newTextCallsRemainingInScope": 0,
+    "savedReplyRechecksPerformed": 1,
+    "recheckRelease": "0.43.1",
+    "newModelCallsDuringRecheck": 0,
+    "rawReply": {
+      "privateLocalFile": "rows.private.json",
+      "source": "Lead's exact-description, read-only PlatformSetting query; two rows only, no Musk setting values read",
+      "copyCheck": "Formal-root copy is byte-identical to the worktree original and valid JSON; preserved mode 600",
+      "contentSha256": "cfe13e56d731ea9c1084180a3c4ad90954205d1348482ee5b0f61527933ddd29",
+      "reportedShape": "background is one string in an array; six evidence-bearing explicit objects, one detail and one scope; summary covers the description, unresolved lists empty",
+      "otherReviewedIssue": "An exact beard/evidence duplicate detail was classified as a trace and given an invented facial placement. Repair must preserve the user's beard condition and normalize only this exact duplicate, not discard original evidence.",
+      "privateLocalOnly": true
+    }
+  },
+  "images": {
+    "submittedTasks": 1,
+    "acceptedQuoteCredits": 5,
+    "actualDeductedCredits": 5,
+    "imageCreditsLimit": 5,
+    "taskId": "265f7dde9c940abd065730b582c1384439ec2f658ea544a87bca93ad57084e7c-0",
+    "state": "succeeded",
+    "newImage": {
+      "file": "contact-sheet-result.png",
+      "download": "Native BrowserSkill download from this exact task's authenticated product download link",
+      "format": "png",
+      "width": 1024,
+      "height": 1024,
+      "sha256": "5f7ba6273e56d3e870af5351fa83690a25ac43a1b25179793ff22fc98b5eb2d7",
+      "privateLocalOnly": true,
+      "visualReview": "Nonblank 2x2 contact sheet, one adult male-presenting person per cell, distinct facial and clothing features, short hair, visible stubble, no eyewear, daily clothes and clean backgrounds. Not a guarantee of identity or exact age from pixels.",
+      "uiDna": [
+        {"cell":"top-left","gender":"男性","age":35,"face":"方脸","hair":"短发","glasses":"不戴眼镜"},
+        {"cell":"top-right","gender":"男性","age":39,"face":"长脸","hair":"短发","glasses":"不戴眼镜"},
+        {"cell":"bottom-left","gender":"男性","age":32,"face":"心形脸","hair":"短发","glasses":"不戴眼镜"},
+        {"cell":"bottom-right","gender":"男性","age":36,"face":"椭圆脸","hair":"短发","glasses":"不戴眼镜"}
+      ]
+    },
+    "ledgerEvidence": "task-ledger.txt; live admin points page filtered by the exact task_id; two rows only",
+    "ledger": [
+      {"time":"2026-10-05 17:34:23 GMT+8","type":"freeze","credits":5,"balanceBefore":6230,"balanceAfter":6230,"frozenBefore":0,"frozenAfter":5},
+      {"time":"2026-10-05 17:35:11 GMT+8","type":"successful charge","credits":5,"balanceBefore":6230,"balanceAfter":6225,"frozenBefore":5,"frozenAfter":0}
+    ],
+    "retries": 0,
+    "duplicateCharge": false,
+    "note": "One image submission after successful free recheck. Freeze and settlement are not two charges. Old successful image/history preserved but not substituted for the new result."
+  },
+  "accountObservations": {
+    "availableBeforeAnalysis": 6235,
+    "availableAfterAnalysisFailure": 6235,
+    "availableBeforeImage": 6230,
+    "availableAfterImage": 6225,
+    "taskFrozenAfterSettlement": 0,
+    "intermediateChangeAttribution": "6235 to 6230 occurred before this image submit and is not attributed to this test; this task's exact ledger proves its own five-credit charge.",
+    "note": "Do not use historical 6240 or initial 6235 to infer this task's total fee; supplier text cash fee remains unknown."
+  },
+  "browser": {
+    "surface": "BrowserSkill dedicated Agent Window; business identity matched prior authorized acceptance, no user tab borrowed",
+    "profileGap": "The exact Default/xiaobo directory was not independently established; no original user tab/draft acceptance is claimed.",
+    "versionRefresh": "Initial ucsm actual analysis on 0.43.0; hpqv loaded 0.43.1, free recheck and image; after returning from exact-task ledger and one reload, hydrated draft, analysis, new image/history, thumbnail and balance persisted",
+    "session": "hpqv",
+    "earlierSession": "ucsm; explicitly stopped",
+    "sessionStopped": true,
+    "originalTaskAndHistoryRetained": true,
+    "draftRetained": true,
+    "screenshot": "result-page.png",
+    "screenshotCoverage": "Current readable scrolled viewport shows 0.43.1, 6225, lower half of new grid, cell controls, result actions and history thumbnail. Full grid is proved by native downloaded image, not this cropped viewport.",
+    "firstFailureScreenshot": "analysis-background-error.png; error banner above viewport, exact failure from DOM only",
+    "refreshEvidence": ["reloaded-grid1.txt","reloaded-grid2.txt","grid3.txt","grid4.txt"],
+    "sameTaskDownloadAfterRefresh": true,
+    "privateLocalOnly": true,
+    "network": "Observed one 422 POST to /api/avatar-studio for the analysis; unrelated prefetch ERR_ABORTED and bounded-buffer truncation are not claimed clean."
+  },
+  "releaseTransition": {
+    "oldVersionObserved": "0.42.3",
+    "oldSession": "zlji",
+    "state": "incomplete-tool-evidence",
+    "reason": "The isolated old-page session ceased to exist before update-popup observation. Session inventory confirmed none active; this does not establish a product update failure."
+  },
+  "nextStep": "No more paid calls in this scope. v0.43.1 implementation and minimal A2 paid acceptance complete; remaining interactions await user manual acceptance.",
+  "manualProductionDatabaseWrites": 0,
+  "normalBusinessWrites": "Authorized analysis/free validation/image submission generated normal attempt, response, parse, task and settlement records. No direct database mutation was used.",
+  "remainingGaps": [
+    "Actual configured text model and currency tariff are not established.",
+    "Original failing user description was not supplied.",
+    "Real old-client upgrade-popup behavior not observed; owned sessions disappeared, which does not prove a product failure.",
+    "Exact physical Default/xiaobo profile directory not independently established.",
+    "A1/A3 were not paid-tested; other states use scoped isolated checks, not claimed real provider evidence.",
+    "Low-risk wording observations: model summary says one person, while four-person quote and output are explicit; beard appears twice in the visible requirement list."
+  ]
+}

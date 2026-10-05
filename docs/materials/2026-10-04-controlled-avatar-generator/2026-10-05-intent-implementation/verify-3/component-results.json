@@ -1,0 +1,232 @@
+{
+  "version": "0.43.0",
+  "commit": "907a7a2b4d2a16c60206900045170bd4e3fd7cad",
+  "evidenceLevel": "isolated real AvatarStudio + real ProductDialog + real AppSessionProvider; synthetic localhost API/data/images only",
+  "newSpend": 0,
+  "externalRequests": [],
+  "componentInputs": [
+    "src/components/useDialogDismiss.ts",
+    "src/components/ProductDialog.module.css",
+    "src/components/useProductDialog.tsx",
+    "src/components/RelativeTime.module.css",
+    "src/components/RelativeTime.tsx",
+    "src/lib/media/copy-image.ts",
+    "src/components/ZoomableImagePreview.module.css",
+    "src/lib/context/AppSessionContext.tsx",
+    "src/components/content-reactions/reactions.module.css",
+    "src/components/content-reactions/ImageShareButton.tsx",
+    "src/components/content-reactions/ContentReactions.tsx",
+    "src/lib/hooks/use-media-preview-state.ts",
+    "src/lib/http/upload-progress.ts",
+    "src/lib/hooks/use-image-read-progress.ts",
+    "src/components/ZoomableImagePreview.tsx",
+    "src/lib/hooks/page-exit-guard.ts",
+    "src/lib/http/json-response.ts",
+    "src/lib/avatar-random/catalog.ts",
+    "src/lib/avatar-random/types.ts",
+    "src/lib/avatar-random/intent.ts",
+    "src/lib/avatar-random/layout.ts",
+    "src/lib/image-studio/ratios.ts",
+    "src/lib/image-generation/resolution.ts",
+    "src/lib/image-studio/model-catalog.ts",
+    "src/app/tools/avatar-studio/studio.module.css",
+    "src/app/tools/avatar-studio/studio.tsx"
+  ],
+  "cases": [
+    {
+      "group": 1,
+      "name": "empty description: default one-image confirmation, cancel costs zero",
+      "status": "PASS",
+      "ms": 116158
+    },
+    {
+      "group": 4,
+      "name": "parse pending, recheck=false",
+      "status": "PASS",
+      "ms": 2921
+    },
+    {
+      "group": 4,
+      "name": "parse failed, recheck=false",
+      "status": "PASS",
+      "ms": 560
+    },
+    {
+      "group": 4,
+      "name": "parse unknown, recheck=false",
+      "status": "PASS",
+      "ms": 394
+    },
+    {
+      "group": 4,
+      "name": "parse failed, recheck=true",
+      "status": "PASS",
+      "ms": 347
+    },
+    {
+      "group": 13,
+      "name": "nonempty draft explicitly analyzes once, shows understanding, then quotes image separately",
+      "status": "PASS",
+      "ms": 1064
+    },
+    {
+      "group": 13,
+      "name": "semantic unresolved cache remains visible, no hidden success or automatic new model attempt",
+      "status": "PASS",
+      "ms": 305
+    },
+    {
+      "group": 13,
+      "name": "model quality resolution recompile quotes preserve prepared DNA, cancellation keeps old image",
+      "status": "PASS",
+      "ms": 823
+    },
+    {
+      "group": 13,
+      "name": "shortcut and lock edits reuse analysis without a second model call",
+      "status": "PASS",
+      "ms": 769
+    },
+    {
+      "group": 13,
+      "name": "late paid-analysis reply cannot cross owner/draft boundary or save old draft into new account",
+      "status": "PASS",
+      "ms": 389
+    },
+    {
+      "group": 13,
+      "name": "late status reply for edited draft cannot overwrite new description",
+      "status": "PASS",
+      "ms": 158
+    },
+    {
+      "group": 5,
+      "name": "independent 1 candidates quote and no silent submission",
+      "status": "PASS",
+      "ms": 309
+    },
+    {
+      "group": 5,
+      "name": "independent 2 candidates quote and no silent submission",
+      "status": "PASS",
+      "ms": 324
+    },
+    {
+      "group": 5,
+      "name": "independent 4 candidates quote and no silent submission",
+      "status": "PASS",
+      "ms": 281
+    },
+    {
+      "group": 6,
+      "name": "queued to running to succeeded updates main/history/thumbnail; settlement refresh once",
+      "status": "PASS",
+      "ms": 209
+    },
+    {
+      "group": 6,
+      "name": "confirmed synthetic submit refreshes shared credits without repeated polling refresh",
+      "status": "PASS",
+      "ms": 319
+    },
+    {
+      "group": 7,
+      "name": "failed without image retains draft, no automatic retry",
+      "status": "PASS",
+      "ms": 173
+    },
+    {
+      "group": 7,
+      "name": "partial independent success plus unknown keeps successful image and blocks resend",
+      "status": "PASS",
+      "ms": 283
+    },
+    {
+      "group": 8,
+      "name": "uncertain blocks generate and restore, only queries original",
+      "status": "PASS",
+      "ms": 258
+    },
+    {
+      "group": 8,
+      "name": "unknown independent submission also blocks draft-tweak bypass",
+      "status": "PASS",
+      "ms": 151
+    },
+    {
+      "group": 9,
+      "name": "submit 400 preserves appropriate pending and only recovers by query",
+      "status": "PASS",
+      "ms": 315
+    },
+    {
+      "group": 9,
+      "name": "submit 500 preserves appropriate pending and only recovers by query",
+      "status": "PASS",
+      "ms": 371
+    },
+    {
+      "group": 9,
+      "name": "submit network preserves appropriate pending and only recovers by query",
+      "status": "PASS",
+      "ms": 570
+    },
+    {
+      "group": 10,
+      "name": "late query from old plan does not mix into newly restored plan",
+      "status": "PASS",
+      "ms": 492
+    },
+    {
+      "group": 10,
+      "name": "same-plan out-of-order query must not regress succeeded to queued",
+      "status": "PASS",
+      "ms": 237
+    },
+    {
+      "group": 11,
+      "name": "reload existing plan does not re-submit",
+      "status": "PASS",
+      "ms": 1051
+    },
+    {
+      "group": 11,
+      "name": "pending submit survives reload; no task yet never auto-generates",
+      "status": "PASS",
+      "ms": 407
+    },
+    {
+      "group": 11,
+      "name": "pending lookup failure still has a working manual original-query action",
+      "status": "PASS",
+      "ms": 277
+    },
+    {
+      "group": 12,
+      "name": "restore history keeps parameters; selecting/preview/cancel creates no generation",
+      "status": "PASS",
+      "ms": 2889
+    }
+  ],
+  "passed": 29,
+  "failed": 0,
+  "requestSummary": {
+    "GET /api/auth/me ": 31,
+    "GET /api/me/credits ": 45,
+    "GET /api/avatar-studio ": 97,
+    "POST /api/avatar-studio prepare": 8,
+    "POST /api/avatar-studio parse-status": 16,
+    "POST /api/avatar-studio parse-recheck": 1,
+    "POST /api/avatar-studio analyze": 3,
+    "POST /api/content-reactions/state ": 7,
+    "POST /api/avatar-studio quote": 5,
+    "POST /api/avatar-studio submit": 4,
+    "POST /api/avatar-studio restore": 2
+  },
+  "limitations": [
+    "No production business calls, cookies, tokens, DB or models",
+    "Synthetic image is only a local placeholder; real image and paid credit proof reused from parent",
+    "Pure parser/layout cases reused from existing 27-case actual log, not rerun here",
+    "Server prepare/submit billing invariants source-reviewed, not exercised against production"
+  ]
+}

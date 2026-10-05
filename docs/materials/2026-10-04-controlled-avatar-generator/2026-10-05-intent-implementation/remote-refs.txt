@@ -1,0 +1,5 @@
+1788cd7646920ee6f2d22b12d52911b80f3c5dd0	refs/heads/codex/avatar-generator-20261005
+e900cc7f1984104af0bdd02e8879601ff1cdf355	refs/tags/rollback/avatar-intent-20261005-v0.42.3
+907a7a2b4d2a16c60206900045170bd4e3fd7cad	refs/tags/rollback/avatar-intent-20261005-v0.42.3^{}
+827efa64c7e2f4dfcdfd7749935c766e6447adff	refs/tags/v0.43.0
+1788cd7646920ee6f2d22b12d52911b80f3c5dd0	refs/tags/v0.43.0^{}
