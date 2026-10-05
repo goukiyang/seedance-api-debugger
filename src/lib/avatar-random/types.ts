@@ -1,6 +1,6 @@
 export const AVATAR_RULE_VERSION = '1.1.0';
 export const AVATAR_COMPILER_VERSION = '1.2.0';
-export const AVATAR_PARSER_VERSION = '1.1.0';
+export const AVATAR_PARSER_VERSION = '1.1.1';
 export type AvatarLayout = 'independent' | 'contact-sheet';
 export type FieldSource = 'user' | 'config' | 'inferred' | 'random';
 export type AvatarField = { value: string; source: FieldSource; locked: boolean; manualLock?: boolean; evidence?: string; excluded?: string[] };

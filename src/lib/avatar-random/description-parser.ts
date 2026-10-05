@@ -90,7 +90,7 @@ export async function resolveDescription(description: string, options: { approve
   if (output === null) throw new AvatarDescriptionError({ ...statusFor(id, raw, Date.now()), canRecheck: false, state: 'unknown', message: '模型回复未能保存或已不可读取，费用结果未确认；不会自动再调用。' }, 503);
   let parsed: AvatarConstraints;
   try {
-    parsed = validateDescriptionConstraints(decodeDescriptionOutput(output), description, attempt.parserVersion === AVATAR_PARSER_VERSION);
+    parsed = validateDescriptionConstraints(decodeDescriptionOutput(output), description, attempt.parserVersion === AVATAR_PARSER_VERSION || attempt.parserVersion === '1.1.0');
   } catch (e) {
     if (e instanceof AvatarDescriptionError) throw e;
     const field = e instanceof DescriptionContractError ? e.field : 'response';
