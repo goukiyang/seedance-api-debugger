@@ -1,0 +1,6 @@
+03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d	refs/heads/codex/avatar-generator-20261005
+dee5bc50f6fc025300677db3e4df056323b82227	refs/tags/rollback/avatar-mobile-back-20261005-v0.43.1
+738a7fcbbe78b5fbe17f3418764c47dcae977a22	refs/tags/rollback/avatar-mobile-back-20261005-v0.43.1^{}
+738a7fcbbe78b5fbe17f3418764c47dcae977a22	refs/tags/v0.43.1^{}
+c92a45dc45f06037e334260a7916041effc476ca	refs/tags/v0.43.2
+03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d	refs/tags/v0.43.2^{}

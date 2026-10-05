@@ -1,0 +1,36 @@
+{
+  "entries": [
+    {
+      "line": 4900,
+      "text": "- 2026-10-05T10:45:07.653Z｜video-api-debugger｜部署开始：runId avatar-intent-mobile-20261005-03aa5e8，分支 codex/avatar-generator-20261005，commit 03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d，目标 https://sd2.youdooart.com，备注 v0.43.2 手机返回关闭大图、人物描述主输入与可选补充条件；web-only；费用0；保留0.43.1源码/build回退；不做功能验收",
+      "timestamp": "2026-10-05T10:45:07.653Z",
+      "projectName": "video-api-debugger",
+      "action": "部署开始",
+      "runId": "avatar-intent-mobile-20261005-03aa5e8"
+    },
+    {
+      "line": 4901,
+      "text": "- 2026-10-05T10:48:33.667Z｜video-api-debugger｜部署开始：runId avatar-intent-mobile-20261005-03aa5e8，分支 codex/avatar-generator-20261005，commit 03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d，目标 https://sd2.youdooart.com，备注 v0.43.2 手机返回关闭大图、人物描述主输入与可选补充条件；web-only；费用0；保留0.43.1源码/build回退；不做功能验收",
+      "timestamp": "2026-10-05T10:48:33.667Z",
+      "projectName": "video-api-debugger",
+      "action": "部署开始",
+      "runId": "avatar-intent-mobile-20261005-03aa5e8"
+    },
+    {
+      "line": 4902,
+      "text": "- 2026-10-05T10:52:50.023Z｜video-api-debugger｜部署开始：runId avatar-intent-mobile-20261005-03aa5e8，分支 codex/avatar-generator-20261005，commit 03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d，目标 https://sd2.youdooart.com，备注 v0.43.2 手机返回关闭大图、人物描述主输入与可选补充条件；web-only；费用0；保留0.43.1源码/build回退；不做功能验收",
+      "timestamp": "2026-10-05T10:52:50.023Z",
+      "projectName": "video-api-debugger",
+      "action": "部署开始",
+      "runId": "avatar-intent-mobile-20261005-03aa5e8"
+    },
+    {
+      "line": 4903,
+      "text": "- 2026-10-05T10:54:45.670Z｜video-api-debugger｜部署完成：runId avatar-intent-mobile-20261005-03aa5e8，分支 codex/avatar-generator-20261005，commit 03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d，目标 https://sd2.youdooart.com，备注 v0.43.2 手机返回关闭大图、人物描述主输入与可选补充条件；费用0；已部署，待用户手动验收；正式根记录由parent登记",
+      "timestamp": "2026-10-05T10:54:45.670Z",
+      "projectName": "video-api-debugger",
+      "action": "部署完成",
+      "runId": "avatar-intent-mobile-20261005-03aa5e8"
+    }
+  ]
+}

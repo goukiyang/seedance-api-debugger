@@ -1,0 +1,6 @@
+/tmp/sd2-mobile-03aa5e8/sd2-avatar-03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d.tar.gz: OK
+/tmp/sd2-mobile-03aa5e8/sd2-avatar-738a7fcbbe78b5fbe17f3418764c47dcae977a22.tar.gz: OK
+{"sourceBaselineMatches":true,"checkedFiles":789}
+{"integratedReleaseCompiled":true,"files":[".next-prod-candidate/server/app/api/release/route.js",".next-prod-candidate/server/chunks/7234.js"]}
+{"version":"0.43.2","buildId":"P1gkdWek_f9tKM4EH-y6C","routesPresent":true,"avatarOptionalChunks":["static/chunks/6205-e1b57e97831e8d20.js"],"mobilePreviewChunks":["static/chunks/9017-73cbd9aab2d5412a.js"]}
+CANDIDATE_BUILD_SUCCESS 03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d

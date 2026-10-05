@@ -1,0 +1,87 @@
+{
+  "project": "video-api-debugger",
+  "status": "已部署，待用户手动验收",
+  "version": "0.43.2",
+  "commit": "03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d",
+  "buildId": "P1gkdWek_f9tKM4EH-y6C",
+  "entry": "https://sd2.youdooart.com/tools/avatar-studio",
+  "source": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "formalRoot": "/Volumes/Data/Projects/video-api-debugger; parent-only todo/index/archive registration, not deployed",
+  "tasks": [
+    {"id":"B1","name":"手机返回关闭大图","standard":"返回先关预览不离页、原有关闭方式保留","implementation":"complete and deployed","acceptance":"pending user manual mobile acceptance","evidence":"source.diff, source-review.json, server-candidate.log, server-public-proof.json"},
+    {"id":"B2","name":"安全发布","standard":"构建、版本、回退及公网检查完成","implementation":"deployment checks complete; sequencing exception recorded below","acceptance":"deployment proof only, not functional acceptance","evidence":"server-build.log, remote-refs.txt, server-switch.log, server-source-proof.json, server-public-proof.json"},
+    {"id":"C1","name":"文案为主、其他条件可选","standard":"仅填人物描述可分析/生成，未指定可随机，实际采用范围可读且主动补充选项保留","implementation":"complete and deployed; existing empty-choice capability retained, UI misunderstanding corrected","acceptance":"pending user manual description-only analysis/image acceptance","evidence":"source.diff, source-review.json, server-candidate.log, server-public-proof.json"}
+  ],
+  "changedFiles": [
+    {"path":"src/components/ZoomableImagePreview.tsx","change":"Shared one-entry image back dismissal retaining Next state; all original close controls preserved; explicit close waits for owned back, deduplicated; active/inactive reuse and StrictMode-safe cleanup; non-top same-URL return protection"},
+    {"path":"src/app/tools/avatar-studio/studio.tsx","change":"Main description input; optional quick/supplemental controls with description/random default; clarification action shows actual need and focuses existing input; six quick controls preserved"},
+    {"path":"src/app/tools/avatar-studio/studio.module.css","change":"Borderless semantic optional group; compact row alignment and full-width choice control for long default text"},
+    {"path":"package.json","change":"PATCH 0.43.2 only; no dependencies or lock changes"},
+    {"path":"src/lib/release.ts","change":"Actual integrated user-visible update summary; package remains unique version source; existing ReleaseNotice unchanged"}
+  ],
+  "diff": {"file":"source.diff","stat":"5 files, 159 insertions, 13 deletions","compare":"738a7fcbbe78b5fbe17f3418764c47dcae977a22 -> 03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d"},
+  "auxiliaryFiles": ["candidate.sh", "switch.sh", "release-window.mjs", "source-proof.mjs", "phase-state.json", "source-review.json", "source.diff", "server-build.log", "server-candidate.log", "server-switch.log", "remote-refs.txt", "server-source-proof.json", "server-public-proof.json", "server-health-headers.txt", "public-config.headers", "public-login.headers", "public-release.headers", "public-release.json", "release-window-finish.log", "release-window-proof.json", "git-final-status.txt", "delivery.json"],
+  "verification": {
+    "batch":"Complete B1+C1 modifications, then integrated diff/script checks and exact-commit isolated production candidate; same-lead source Review; no functional tests",
+    "diffChecks":"git diff --check; git diff --cached --check; PASS",
+    "scriptChecks":"bash -n candidate.sh switch.sh; node --check source-proof.mjs; node --check release-window.mjs; PASS; candidate archive-path correction subsequently executed successfully",
+    "build":"NEXT_DIST_DIR=.next-prod-candidate npm run build in /srv/video-api-debugger/releases/03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d; PASS including built-in type/lint and intended routes/chunks; BUILD_ID P1gkdWek_f9tKM4EH-y6C",
+    "sourceReview":"source-review.json; same lead; no blocking source findings; not independent acceptance",
+    "sourceProof":"789 source/config files match exact release; deployed commit/version/build all match",
+    "public":"release/health/config/login HTTP200 with X-SD2-Origin server-42-193; B1+C1 actual chunks HTTP200 and hash equal candidate",
+    "notRun":["browser or screenshot acceptance", "mobile device back acceptance", "functional/automatic regression suites", "model analysis or image submission", "business API calls", "database writes/migrations", "old-client release popup acceptance", "new-description visual result"]
+  },
+  "commandsActuallyRun": [
+    "git status --short --branch; git status --short --untracked-files=no; git remote -v; git rev-parse HEAD; git show --format=fuller --stat HEAD",
+    "git diff --check; git diff --cached --check; git diff --cached --stat; git diff -- exact five paths > source.diff",
+    "bash -n candidate.sh switch.sh; node --check source-proof.mjs; node --check release-window.mjs",
+    "git add exact five paths; git commit -m 'fix(avatar): make description primary and dismiss image preview on back'",
+    "bash ../2026-10-05-intent-implementation/archive.sh 03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d; same command for 738a7fcbbe78b5fbe17f3418764c47dcae977a22",
+    "node release-window.mjs start/renew/finish 03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d avatar-intent-mobile-20261005-03aa5e8",
+    "scp archives/candidate.sh/switch.sh/source-proof.mjs gouki@42.193.221.253:/tmp/ failed on existing root-owned archive/candidate/switch names; partial source-proof.mjs upload only; no live changes",
+    "ssh gouki@42.193.221.253 'mkdir /tmp/sd2-mobile-03aa5e8'; scp exact archives and helpers gouki@42.193.221.253:/tmp/sd2-mobile-03aa5e8/ succeeded",
+    "ssh gouki@42.193.221.253 'bash /tmp/sd2-mobile-03aa5e8/candidate.sh 03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d 44b2fa94ef93a03b675ac95ba9094311f103b7f97fa2f000947358bc4e372ee3 738a7fcbbe78b5fbe17f3418764c47dcae977a22 e3ebc8f57c39777b152642d0e93948871e33e20f9bf1582e6c81964f86d5f000 /tmp/sd2-mobile-03aa5e8'",
+    "git tag -a v0.43.2 <commit>; git tag -a rollback/avatar-mobile-back-20261005-v0.43.1 <previous>; git push origin codex/avatar-generator-20261005 v0.43.2 rollback/avatar-mobile-back-20261005-v0.43.1",
+    "git ls-remote --heads --tags origin target branch/release/rollback/previous tags; final refs PASS, initial read while push pending still old",
+    "ssh root@42.193.221.253 'bash /tmp/sd2-mobile-03aa5e8/switch.sh 03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d 738a7fcbbe78b5fbe17f3418764c47dcae977a22'",
+    "ssh root node/ps exact own switch-process SIGTERM attempt after sequencing defect noticed; no process matched, no stop/rollback occurred",
+    "ssh gouki@42.193.221.253 'node /tmp/sd2-mobile-03aa5e8/source-proof.mjs 03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d'; scp public proof and build log",
+    "ssh gouki systemctl is-active sd2-gray.service sd2-image-studio.service; cat live BUILD_ID; curl -sS -D - http://127.0.0.1:3302/api/config -o /tmp/sd2-local-config-mobile.json",
+    "curl -fsS -D <evidence headers> https://sd2.youdooart.com/api/config -o /tmp/sd2-public-config-mobile.json; /login -o /tmp/sd2-login-mobile.html; /api/release -o public-release.json"
+  ],
+  "finalEvidenceCheck": "Node JSON/source/build/version/public/links/remote recovery refs cross-check PASS; release-window-proof.json confirms finish entry; final git diff --check PASS. This checks deployment evidence, not business behavior.",
+  "git": {
+    "branch":"codex/avatar-generator-20261005",
+    "remote":"origin https://github.com/goukiyang/seedance-api-debugger.git",
+    "releaseTag":"v0.43.2 -> 03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d",
+    "rollbackTag":"rollback/avatar-mobile-back-20261005-v0.43.1 -> 738a7fcbbe78b5fbe17f3418764c47dcae977a22",
+    "previousTag":"v0.43.1 unchanged -> 738a7fcbbe78b5fbe17f3418764c47dcae977a22",
+    "final":"remote branch/tag refs confirmed; no ahead; tracked clean; unrelated untracked materials and builds preserved; evidence untracked pending parent formal-root archive"
+  },
+  "deployment": {
+    "guard":"release-window reservation verified, renewed, finish note explicitly B1/C1; candidate/switch deploy.lock; old-source drift checked before build and twice before source switch; exact archive hashes; whitelist excludes worker code; static public hashes",
+    "guardLimit":"Local reservation and server flock are cooperative; no claim of immutable physical prevention against other privileged deployers",
+    "archiveSha256":"44b2fa94ef93a03b675ac95ba9094311f103b7f97fa2f000947358bc4e372ee3",
+    "rollbackArchiveSha256":"e3ebc8f57c39777b152642d0e93948871e33e20f9bf1582e6c81964f86d5f000",
+    "release":"/srv/video-api-debugger/releases/03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d",
+    "rollbackSource":"/srv/video-api-debugger/releases/738a7fcbbe78b5fbe17f3418764c47dcae977a22-intent-rollback",
+    "rollbackBuild":"/srv/video-api-debugger/app/.next-prod-prev-avatar-03aa5e8",
+    "rollbackBuildId":"by14yomS4fR8tZH8zSdLV",
+    "rollbackExecuted":false,
+    "data":"storage/uploads/videos original /data/video-api-debugger/var-lib symlinks preserved; runtime writable directory checks passed; env/DB/node_modules/build/storage/uploads/videos excluded from source archive/sync",
+    "worker":"sd2-image-studio.service PID259902 active and unchanged; only web service restarted",
+    "admin":"gouki used for inspections/upload/candidate. Existing authorized root used only protected web switch because gouki has no sd2 systemctl sudo capability. No permission/config changes"
+  },
+  "warnings": [
+    "Execution sequencing defect: switch was started while push process output still pending; first remote probe returned old refs, but was not used to gate switch. Final push/remote branch/new and rollback tags later confirmed. No data or source/build loss observed; all final recovery evidence present. Cannot claim remote verification preceded switch.",
+    "External preview unmount may leave one same-URL history entry; reused on reopening instead of unsafe cleanup back. Real device behavior not tested.",
+    "Native modal above image is not dismissed by this B1 change; image same-URL history guard re-arms. Use native modal's existing close controls before image back-dismissal.",
+    "New effectGenerationRef.current cleanup lint warning deliberately uses latest generation to cancel StrictMode cleanup; no build error. Existing CSS/img/hook warnings retained.",
+    "No required quick-field failure reproduced; C1 corrects UI/default semantics, preserves existing optional backend path. New real text analysis/image output not executed.",
+    "Update popup checked in source only. Anonymous /api/release summary remains empty by existing internal-account policy; not changed or treated as failed deploy."
+  ],
+  "fees": {"total":0,"modelCalls":0,"imageSubmits":0,"productionDbWrites":0},
+  "boundaries":"No formal-root record edits, dependency/lock/env/auth/credits/provider/schema/parser/worker changes, force push, tag replacement, old-domain deployment, browser or business API acceptance",
+  "classificationMisjudgment":"none; execution ordering defect recorded separately",
+  "next":"Parent copies evidence to formal-root fixed material record; user manually accepts mobile return and description-only generation. No additional calls or testing by lead."
+}

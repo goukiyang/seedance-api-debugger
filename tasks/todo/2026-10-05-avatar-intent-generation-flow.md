@@ -1,20 +1,20 @@
 # 人物输入与生成链路重梳
 
 项目：video-api-debugger
-文档版本：1.1.0
+文档版本：1.2.0
 正式目录：/Volumes/Data/Projects/video-api-debugger
 正式版本来源：生产/api/release、应用package.json与部署提交共同核对
-当前应用：v0.43.1，738a7fcbbe78b5fbe17f3418764c47dcae977a22，BUILD by14yomS4fR8tZH8zSdLV；服务器与公网产物一致
+当前应用：v0.43.2，03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d，BUILD P1gkdWek_f9tKM4EH-y6C；服务器与公网产物一致
 实际应用目录：/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005
-状态：E1/E2完成，v0.43.1已部署；E3最小付费验收完成，文字调用1次、原回复免费复检1次、真实四宫格1张实扣5点，刷新恢复通过；文字现金费及旧客户端更新弹窗实演未证实
-风险/验证等级：前轮L1方案与只读核对已结束；本轮主链实现L3，费用/受理未知保护单独守门
+状态：前批E1-E3最小范围完成；本轮B1/C1已实现并部署v0.43.2，待用户手动验收，B2发布检查已完成；费用0，无自动功能验收；历史费用与证据保留
+风险/验证等级：前轮L1方案与只读核对已结束；前批主链实现L3；本轮B1/C1为L2界面及导航修复，发布与费用边界单独守门
 最后更新：2026-10-05（北京时间）
 
 [主Todo](../todo.md)；[原需求/历史工单](2026-10-04-controlled-avatar-generator.md)；[资料索引](../../docs/materials/index.md#头像受控随机生成器-v1-需求2026-10-04)。
 
 ## 1. 目标与范围
 
-第1至7节保留前轮方案阶段事实；最新实施授权、实际完成和费用证据以第8节为准。用户要求根据输入框的新含义重梳生成链路，随后补充DiceBear、MAAD-Face、CelebA、Avataaars的来源建议，要求正式写入「开源数据与词库来源」。前轮仅完成判断与记录，不把讨论或已创建规划模板冒充应用代码已修改。
+第1至7节保留前轮方案阶段事实；第8节为前批链路实施与付费证据，第9节为本轮返回/可选条件交付。用户要求根据输入框的新含义重梳生成链路，随后补充DiceBear、MAAD-Face、CelebA、Avataaars的来源建议，要求正式写入「开源数据与词库来源」。前轮仅完成判断与记录，不把讨论或已创建规划模板冒充应用代码已修改。
 
 输入框表达“想要什么样的人”，不是要求用户填固定字段的表单。系统先理解并保留明确要求，再在允许范围内补齐未指定人物特征，最后生成图片。仍是受控人物生成器，不扩成任意主题通用生图器。保留现有三栏、快捷条件、锁定、配置、不同人/同人造型、历史、收藏、下载及恢复。
 
@@ -150,3 +150,35 @@ Git Plan：本轮正式根`codex/mediakit-video-enhance`仅聚焦文档推origin
 返回人物页并刷新，加载完成后理解/原文/四宫格/新旧成功历史/缩略图/6225恢复；下载链接仍同一新任务，四格切换只看各自条件，没有新增分析或生成。当前四格按钮使用人物占位，不是假裁切头像。专属hpqv浏览器会话已明确停止，没有借用用户页签。[安全回执及账本/恢复DOM](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-intent-paid-acceptance/receipt.json)、[当前页截图](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-intent-paid-acceptance/result-page.png)本机可访问；截图卷动只显示部分主图和底部控件，整图效果以原生下载为证。图片/身份/原始模型回复及DOM仅本机私人保存，不公开Git。
 
 遗留：A1/A3未作新增付费测试；用户最初失败原文未提供，不能称精确复现其explicit.gender故障；实际文字模型及现金费、精确Default物理profile、旧客户端升级弹窗实演未证实。模型理解摘要用“一名”、明确要求中胡茬重复显示为低风险文案观察，实际报价/四份条件/生成仍为四人，保留待后续同范围优化，不新增收费。无鉴权/点数/Provider/schema/依赖/锁文件改动，无人工生产数据库写入，只有已授权分析/生成的正常业务记录。守门员发现并纠正一次重复等待付费批准，已写全局误判记录；本轮实施与最小付费验收完成，其他生产交互待用户手动验收。
+
+## 9. 手机返回与描述主依据（2026-10-05）
+
+用户新增原话：“手机版本。打开了大图以后。点返回按键。默认是把大图关闭”；随后补充：“人像的生成部分。只要我在对话框里面输入了对人物的描述。你应该按逻辑来讲，就按照我的输入内容去分析。我要的范围是什么？其他的选项是可选项而不是一个必选项。”无新附件，项目归属已确认为video-api-debugger。
+
+本轮目标：手机系统/浏览器返回在大图打开时先关当前预览，随后正常返回；人物生成以自然语言描述为主，其他人物条件可选，不要求先填性别/年龄等才能理解。已输入的明确/否定/范围/软方向被保留，未指定部分允许受控随机，不把“没指定”冒称“未识别”。主动选择、历史配置及锁不能被无声清空；同字段先前已确认的最新主动编辑规则不因一句可选要求被机械废除，冲突/采用值必须如实可读。收费确认仍有效：不因键入/粘贴/返回/刷新自动调用模型或生成，文字分析与图片报价分别主动确认。本轮费用0，不复用前批付费授权新增模型验收。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| B1 | 手机返回关闭大图 | 返回先关预览，不离开当前页；原有关闭方式保留 | 进行中：已实现并部署，待用户手机手动验收 |
+| B2 | 安全发布 | 构建、版本、回退及公网检查完成 | 已完成发布检查；执行顺序缺口已记录 |
+| C1 | 文案为主、其他条件可选 | 仅填人物描述可分析/生成，未指定可随机，实际采用范围可读且主动补充选项保留 | 进行中：已实现并部署，待用户手动验收 |
+
+开工实际应用738a7fc/v0.43.1，公网release已核，actual code worktree tracked clean，旧候选/证据保持未跟踪。正式根是固定记录所在地，旧源码不部署。一个内部B1执行者负责共用`ZoomableImagePreview.tsx`及必要局部history辅助；用户新增C1后由唯一lead接管人物入口、整批集成、版本/Git/安全发布，B1执行者撤销版本/发布职责，避免同批抢号或覆盖。父级仅正式记录、授权、来源及最终核对，不重复实施，不派独立审核线程。正式根既有29行资产性能计划与私有图片不提交。
+
+源码初核：人物页及`MediaPreview`的图片分支复用`ZoomableImagePreview`，当前关闭链处理遮罩/Esc/按钮，无popstate；只补图片预览，不扩视频/音频或所有弹窗。人物`emptyRules`的choices/locks已可为空，quick select默认“不限”，描述标签为“可选”；现有首次非空描述主动分析，600ms只读缓存状态，prepare检查已就绪分析，不已证明“必须填快捷选项”。进一步判断真实缺口，不能仅换标签冒充故障已复现，也不为可选需求重建随机系统。
+
+方案依据：[MDN popstate](https://developer.mozilla.org/en-US/docs/Web/API/Window/popstate_event)说明历史遍历事件在history/URL已变化后发生，pushState本身不触发它；[Next.js 14导航/原生History](https://nextjs.org/docs/14/app/building-your-application/routing/linking-and-navigating)为项目版本对应参考。采用原生History与既有关闭组件少量适配、不加依赖；需核安装Next实际app-router的pushState/restore实现，保留路由state，不能仅preventDefault声称防离页。临时预览状态仅本标签，关闭后不得永久拦后退；连续开关、换图、异步关闭及StrictMode不得重复历史项/误离页。来源已查，不等于真实手机验证。
+
+验证与发布：L2界面/导航兼容修复，候选构建的内置类型/lint、源码差异及关闭入口统一核对为发布必需检查；项目默认用户手动功能验收，不运行手机浏览器/截图/自动回归/真实生成/业务API/数据库写入。仅最小必要源码自查，不用构建或公网版本冒充返回行为/文案效果已验收。沿用既有更新检测/手动重查并核真实摘要，唯一PATCH候选预期0.43.2，发布前重锁当前版本/源码漂移及发布占用；exact commit archive、候选构建、源码/prev-build回退、服务/公网/静态匹配、worker与持久数据保护必须完成。安装依赖、权限/鉴权/点数/Provider/schema变化、付费或缺少回退时停止对应动作。
+
+Git Plan：源码只在codex/avatar-generator-20261005聚焦提交推送及新release/rollback标签，旧标签不替换；正式根codex/mediakit-video-enhance只提交本轮固定记录和安全JSON/diff，主Todo精确暂存本轮入口。新[证据目录](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-mobile-preview-back/)由实际code worktree形成后复制到正式根并登记；未形成的报告不提前称存在。相关旧需求、恢复同行截图、原四宫格、前批发布/验收原件见本文件第7/8节，沿用私人本机入口，不公开媒体/身份或原始回复。
+
+整批交付：v0.43.2 / `03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d` / BUILD `P1gkdWek_f9tKM4EH-y6C`已部署到[正式人物页](https://sd2.youdooart.com/tools/avatar-studio)，待用户手动验收。实际5文件：`ZoomableImagePreview.tsx`接返回/关闭统一逻辑及临时history生命周期；`avatar-studio/studio.tsx`将描述作为主输入、补充分组标可选、默认按描述/未指定随机，并让待澄清操作聚焦描述；`studio.module.css`适配分组和长选项；`package.json`唯一版本升PATCH；`release.ts`更新实际摘要。159行新增/13行删除；未改解析器、字段合并优先级、费用确认、词库、Provider、点数、权限、schema、依赖或锁文件。
+
+发布检查：整批修改后执行diff及发布脚本语法核对，exact commit独立生产候选构建通过内置类型/lint；存在已记录的新生命周期ref提示及旧CSS/img/hook警告，不冒称零警告。789份源码与实际发布提交一致；服务器Web进程及公网release/health/config/login HTTP200，来源server-42-193；人物入口两份实际静态资源分别包含C1与B1且哈希等于候选。`v0.43.2`、源码分支与`rollback/avatar-mobile-back-20261005-v0.43.1`已远端核对，旧v0.43.1标签未替换，源码/BUILD `by14yomS4fR8tZH8zSdLV`回退点保留、未实际回滚。只有Web重启，图片worker PID259902未变；原持久目录及env/DB保护保持，没有读出凭据或人工生产写入。发布占用已finish并登记全局版本表。
+
+守门员与执行缺口：切换曾在Git push结果仍等待时启动，第一次远端读取仍旧值，未用该结果阻断切换；之后push及全部新/回退引用已核对。未观察到源码/数据丢失，但不能声称远端确认早于切换。今后同链路必须实际等待push完成并核对目标引用后才切换，不能仅发起推送；这是执行顺序问题，不作分类误判，classificationMisjudgment为无。
+
+手动验收缺口：尚未执行手机返回、快速开关、账号切换、新文案真实分析/出图或旧客户端升级弹窗。异常外部卸载可能留一条同页history记录，再开可复用；为避免误离页，cleanup不主动异步后退。图片上方原生弹窗沿用自己的关闭入口，不由本改动越层关闭；history写入失败时原关闭控件保留但不能保证返回保护。没复现“快捷字段必填”的后台故障，本轮纠正入口与默认语义，保留既有空字段路径，不声称新文案出图已验收。既有安全现场/主动补充/编辑时间优先/升级检测/手动重查保留，弹窗只核源码。本轮0模型调用、0图片提交、0费用。
+
+正式归档：[完整逐文件交付与命令/风险](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-mobile-preview-back/delivery.json)、[统一源码diff](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-mobile-preview-back/source.diff)、[源码Review](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-mobile-preview-back/source-review.json)、[公网新产物证据](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-mobile-preview-back/server-public-proof.json)及构建/切换/远端日志已从code worktree复制到正式根同目录。关键报告与diff复制一致性复核，安全JSON/diff/必要远端及日志登记Git；原脚本、重复headers和旧私有媒体本机保留，不公开用户身份/图片/原回复。主Todo及资料索引已接同一原文入口，不新建孤立说明。

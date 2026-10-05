@@ -1,0 +1,27 @@
+{
+  "commit": "03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d",
+  "version": "0.43.2",
+  "buildId": "P1gkdWek_f9tKM4EH-y6C",
+  "reviewer": "same lead, source Review after integrated candidate build; not independent or functional acceptance",
+  "result": "no blocking source findings",
+  "B1": {
+    "paths": ["src/components/ZoomableImagePreview.tsx"],
+    "nextSource": "installed Next 14.2.5 app-router.js:105-108, 432-479; clone full current state preserving __NA and __PRIVATE_NEXTJS_INTERNALS_TREE; same URL entry",
+    "closePaths": "button, outside pointer, keyboard outside, shared Escape all use one dismiss callback; latest parent callback and one pending owned back; duplicate close ignored",
+    "lifecycleCorrection": "real parent conditional unmount and native ImageShareButton/useProductDialog overlay paths found. Own marker retired to inactive by replaceState only; same-URL inactive entry reused; generation microtask avoids StrictMode cleanup duplicate push. Non-top same-URL popstate re-arms image entry and releases closeRequested; no navigation from cleanup",
+    "limitations": ["External abandonment can retain one same-URL history entry; History API cannot delete arbitrary previous entries. Reopening reuses a currently owned inactive entry instead of stacking", "When a native dialog is above the image, return does not close a lower layer; same-URL guard re-arms until upper dialog dismissed by its existing controls", "history write failure leaves existing close controls available but back protection cannot be guaranteed", "Real mobile back, rapid interaction, account/context switches and overlay behavior not exercised"]
+  },
+  "C1": {
+    "paths": ["src/app/tools/avatar-studio/studio.tsx", "src/app/tools/avatar-studio/studio.module.css"],
+    "finding": "No required quick-field gate found. Existing emptyRules choices/locks empty; parseAvatarRules accepts empty containers; prepare only checks successful explicit description analysis; randomAvatar fills unspecified catalog fields",
+    "change": "Main description label; optional native fieldset for six still-accessible quick controls; description/random default; existing advanced disclosure preserved; row layout accommodates long default text without changing panel width. Clarification primary action focuses existing description and surfaces actual parse state instead of silently returning from analyze",
+    "preserved": "Explicit, negative, range and soft conditions, conflicts/unrecognized requirements, effectiveConditions display, latest active edit precedence, manual text cost confirmation, separate image quote, zero automatic paid analysis, empty-description controlled random, DNA/quad/history/config/locks/tweak/same-person/favorites/account drafts/request recovery unchanged",
+    "notClaimed": "No reproduced required-choice failure or new-description image acceptance"
+  },
+  "releaseNotice": "Existing SemVer numeric comparison, five-minute/focus/visibility checks, manual account recheck, later per project/channel/version dedupe and unsaved/busy guards kept. Title 发现新版本 has five visible characters, weight 700 size20. Summary updated from package version source; anonymous release summary intentionally blank by existing internal-account API policy. Popup not exercised",
+  "verification": {"diffCheck": "PASS", "deploymentScriptSyntax": "PASS", "candidate": "PASS including built-in type/lint; intended route and separate B1/C1 chunks found", "functionalTests": "not authorized, not run"},
+  "warnings": ["New ZoomableImagePreview effectGenerationRef.current cleanup warning is intentional latest-generation comparison for StrictMode cancellation; copying a frozen generation snapshot as the comparison target would defeat cancellation", "Existing globals.css mixed start/flex-start compatibility warnings and pre-existing img/hook warnings remain; no warning cleanup scope expansion"],
+  "scope": "Only five expected source files, 159 insertions/13 deletions; no dependencies/lock/env/auth/credits/provider/schema/parser/worker changes; existing untracked materials preserved",
+  "fees": 0,
+  "classificationMisjudgment": "none"
+}

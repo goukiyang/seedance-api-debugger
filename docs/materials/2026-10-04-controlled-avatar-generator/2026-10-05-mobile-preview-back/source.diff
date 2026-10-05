@@ -1,0 +1,283 @@
+diff --git a/package.json b/package.json
+index f3a4492..dd94aed 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "video-api-debugger",
+-  "version": "0.43.1",
++  "version": "0.43.2",
+   "private": true,
+   "scripts": {
+     "dev": "NEXT_DIST_DIR=.next-dev next dev",
+diff --git a/src/app/tools/avatar-studio/studio.module.css b/src/app/tools/avatar-studio/studio.module.css
+index b946da3..a496548 100644
+--- a/src/app/tools/avatar-studio/studio.module.css
++++ b/src/app/tools/avatar-studio/studio.module.css
+@@ -8,6 +8,11 @@
+ .page textarea { resize: vertical; min-height: 104px; }
+ .page button, .page a { font-size: 13px; }
+ .quick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
++.optional { border: 0; margin: 0; padding: 0; min-width: 0; }
++.optional legend { padding: 0 0 8px; font-size: 13px; color: var(--text-secondary); }
++.optional .quick { grid-template-columns: minmax(0, 1fr); }
++.optional label { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: center; }
++.optional select { font-size: 12px; }
+ .controls { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+ .controls button, .quiet { border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary); border-radius: 6px; min-height: 32px; padding: 6px 10px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+ .controls button[aria-pressed=true] { background: var(--bg-tertiary); border-color: var(--text-secondary); }
+diff --git a/src/app/tools/avatar-studio/studio.tsx b/src/app/tools/avatar-studio/studio.tsx
+index 6a76ba3..889a400 100644
+--- a/src/app/tools/avatar-studio/studio.tsx
++++ b/src/app/tools/avatar-studio/studio.tsx
+@@ -34,6 +34,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
+   const liveDraft=useRef({ownerId,rules,model,quality,resolution,analysisBinding});liveDraft.current={ownerId,rules,model,quality,resolution,analysisBinding};
+   const activeParse=parseBinding===analysisBinding?parseStatus:null;
+   const needsAnalysis=!!rules.description.trim()&&activeParse?.state!=='succeeded';
++  const descriptionInput=useRef<HTMLTextAreaElement>(null);
+   const [recentConfigs,setRecentConfigs]=useState<AvatarRecord[]>([]),[sourceTask,setSourceTask]=useState<Task|null>(null),[storedSignature,setStoredSignature]=useState('');
+   const [previousImageTask,setPreviousImageTask]=useState<Task|null>(null);
+   const [runningPlans,setRunningPlans]=useState<string[]>([]);
+@@ -200,14 +201,14 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
+       <section className={styles.input} aria-label="人物条件">
+         <div className={styles.controls} aria-label="图片排版"><button type="button" aria-pressed={draftSheet} onClick={()=>setRules(r=>({...r,layout:'contact-sheet',people:1,candidates:4}))}>四宫格（1张）</button><button type="button" aria-pressed={!draftSheet} onClick={()=>setRules(r=>({...r,layout:'independent'}))}>独立头像</button></div>
+         {!draftSheet&&<div className={styles.controls}><button type="button" aria-pressed={rules.people === 1} onClick={() => setRules(r => ({...r,people:1}))}>单人头像</button><button type="button" aria-pressed={rules.people > 1} onClick={() => setRules(r => ({...r,people:2}))}>多人</button>{rules.people > 1 && <select aria-label="每张图片人数" value={rules.people} onChange={e=>setRules(r=>({...r,people:Number(e.target.value) as 2|3|4}))}>{[2,3,4].map(n=><option key={n} value={n}>{n}人</option>)}</select>}</div>}
+-        <label>描述你想要的人物（可选）<textarea value={rules.description} maxLength={3000} placeholder="上班族，短发，沉稳，右眉有一道浅疤" onChange={e=>setRules(r=>({...r,description:e.target.value,descriptionEditedAt:Date.now()}))}/></label>
+-        <div className={styles.quick}>{quickFields.map(field=><label key={field}>{fieldLabels[field]}{field==='age' ? <input type="text" inputMode="numeric" maxLength={5} placeholder="不限 / 25-35" value={rules.choices[field]||''} onChange={e=>setChoice(field,e.target.value)}/> : <select value={rules.choices[field]||''} onChange={e=>setChoice(field,e.target.value)}><option value="">不限</option>{Array.from(new Set(catalog[field])).map(v=><option key={v}>{v}</option>)}</select>}</label>)}</div>
+-        <details open={advanced} onToggle={e=>setAdvanced(e.currentTarget.open)}><summary>更多选项</summary><div className={styles.input}>{['face_shape','hair_color','skin_tone','temperament','body_type','facial_hair'].map(field=><label key={field}>{fieldLabels[field]}<select value={rules.choices[field]||''} onChange={e=>setChoice(field,e.target.value)}><option value="">不限</option>{Array.from(new Set(catalog[field])).map(v=><option key={v}>{v}</option>)}</select></label>)}<label>随机强度<select value={rules.intensity} onChange={e=>setRules(r=>({...r,intensity:e.target.value as AvatarRules['intensity']}))}><option value="conservative">保守</option><option value="standard">标准</option><option value="bold">大胆</option></select></label></div></details>
++        <label>描述你想要的人物<textarea ref={descriptionInput} value={rules.description} maxLength={3000} placeholder="上班族，短发，沉稳，右眉有一道浅疤" onChange={e=>setRules(r=>({...r,description:e.target.value,descriptionEditedAt:Date.now()}))}/></label>
++        <fieldset className={styles.optional}><legend>补充条件（可选）</legend><div className={styles.quick}>{quickFields.map(field=><label key={field}>{fieldLabels[field]}{field==='age' ? <input type="text" inputMode="numeric" maxLength={5} placeholder="按描述 / 随机" value={rules.choices[field]||''} onChange={e=>setChoice(field,e.target.value)}/> : <select value={rules.choices[field]||''} onChange={e=>setChoice(field,e.target.value)}><option value="">按描述 / 未指定随机</option>{Array.from(new Set(catalog[field])).map(v=><option key={v}>{v}</option>)}</select>}</label>)}</div></fieldset>
++        <details open={advanced} onToggle={e=>setAdvanced(e.currentTarget.open)}><summary>更多补充条件（可选）</summary><div className={styles.input}>{['face_shape','hair_color','skin_tone','temperament','body_type','facial_hair'].map(field=><label key={field}>{fieldLabels[field]}<select value={rules.choices[field]||''} onChange={e=>setChoice(field,e.target.value)}><option value="">按描述 / 未指定随机</option>{Array.from(new Set(catalog[field])).map(v=><option key={v}>{v}</option>)}</select></label>)}<label>随机强度<select value={rules.intensity} onChange={e=>setRules(r=>({...r,intensity:e.target.value as AvatarRules['intensity']}))}><option value="conservative">保守</option><option value="standard">标准</option><option value="bold">大胆</option></select></label></div></details>
+         <label>图片模型<select value={model} onChange={e=>{setModel(e.target.value);setQuality('auto');setResolution('1K');}}>{!IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number])&&<option value={model}>原模型已不可用</option>}{IMAGE_STUDIO_MODELS.map(m=><option key={m} value={m}>{IMAGE_STUDIO_MODEL_LABELS[m]}</option>)}</select></label>
+         <div className={styles.quick}><label>质量<select value={quality} onChange={e=>setQuality(e.target.value)}>{(IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model as typeof IMAGE_STUDIO_MODELS[number]]||[quality]).map(q=><option key={q}>{q}</option>)}</select></label><label>分辨率<select value={resolution} onChange={e=>setResolution(e.target.value)}>{(IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[model as typeof IMAGE_STUDIO_MODELS[number]]||[resolution]).map(q=><option key={q}>{q}</option>)}</select></label></div>
+         {!draftSheet&&<div className={styles.controls} aria-label="不同候选数量">{[1,2,4].map(n=><button key={n} type="button" aria-pressed={rules.candidates===n} onClick={()=>setRules(r=>({...r,candidates:n as 1|2|4}))}>{n}位候选</button>)}</div>}
+         <span className={styles.price}>{prices[model] == null ? '此模型尚未设置价格' : draftSheet?`1张四宫格，共${prices[model]}点；4位不同人物，每格1人，整图1:1`:`${rules.candidates}张，共${prices[model]! * rules.candidates}点；${rules.people}人/张`}</span>
+-        <button type="button" className={styles.primary} disabled={!ready||busy||blocked||management} onClick={()=>void(needsAnalysis?analyze():prepare())}>{busy?stage||'处理中':needsAnalysis?'分析文案':draftSheet?'生成四宫格':'生成独立头像'}</button>
++        <button type="button" className={styles.primary} disabled={!ready||busy||blocked||management} onClick={()=>{if(activeParse?.state==='needs-clarification'){descriptionInput.current?.focus();setNotice(activeParse.message);return;}void(needsAnalysis?analyze():prepare());}}>{busy?stage||'处理中':activeParse?.state==='needs-clarification'?'调整人物描述':needsAnalysis?'分析文案':draftSheet?'生成四宫格':'生成独立头像'}</button>
+         {blocked && <button type="button" className={styles.quiet} onClick={()=>void run(async()=>{const id=planRef.current;if(!id)throw new Error('原计划编号暂不可读取，请保留草稿后重新打开页面；未重复提交');await queryPlan(id);})}>查询原提交，不重复生成</button>}
+         <div className={styles.controls}><button type="button" disabled={busy} onClick={()=>void saveRules()}><Save size={15}/>保存规则</button>{editing.current && <button type="button" disabled={busy} onClick={()=>void saveRules(true)}>另存为</button>}</div>
+         {!!recentConfigs.length&&<section><small>最近配置</small>{recentConfigs.map(r=><button type="button" className={styles.quiet} key={r.id} onClick={()=>void restore(r)}>{r.name}</button>)}</section>}
+diff --git a/src/components/ZoomableImagePreview.tsx b/src/components/ZoomableImagePreview.tsx
+index 98e96ff..dd28a88 100644
+--- a/src/components/ZoomableImagePreview.tsx
++++ b/src/components/ZoomableImagePreview.tsx
+@@ -1,7 +1,7 @@
+ 'use client';
+ 
+ import { useCallback, useEffect, useId, useRef, useState } from 'react';
+-import type { CSSProperties, PointerEvent, ReactNode } from 'react';
++import type { CSSProperties, PointerEvent, ReactNode, RefObject } from 'react';
+ import { createPortal } from 'react-dom';
+ import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, Check, Copy, Image as ImageIcon, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
+ import { copyImage } from '@/lib/media/copy-image';
+@@ -58,6 +58,145 @@ const DRAG_THRESHOLD = 5;
+ 
+ type IntrinsicSize = { width: number; height: number };
+ 
++const IMAGE_PREVIEW_HISTORY_STATE_KEY = '__sd2ImagePreviewHistoryEntry';
++let imagePreviewHistorySequence = 0;
++
++type ImagePreviewHistorySession = {
++  token: string;
++  url: string;
++  ownsEntry: boolean;
++};
++
++type ImagePreviewHistoryMarker = {
++  token: string;
++  url: string;
++  active: boolean;
++};
++
++function getImagePreviewHistoryMarker(): ImagePreviewHistoryMarker | null {
++  const state = window.history.state;
++  if (!state || typeof state !== 'object' || Array.isArray(state)) return null;
++  const marker = state[IMAGE_PREVIEW_HISTORY_STATE_KEY];
++  if (!marker || typeof marker !== 'object'
++    || typeof marker.token !== 'string'
++    || typeof marker.url !== 'string'
++    || typeof marker.active !== 'boolean') return null;
++  return marker as ImagePreviewHistoryMarker;
++}
++
++function hasActiveImagePreviewHistoryEntry(token: string) {
++  const marker = getImagePreviewHistoryMarker();
++  return marker?.active === true && marker.token === token;
++}
++
++function writeImagePreviewHistoryMarker(marker: ImagePreviewHistoryMarker, replace = false) {
++  const state = window.history.state;
++  if (!state || typeof state !== 'object' || Array.isArray(state)) return false;
++  try {
++    const nextState = { ...state, [IMAGE_PREVIEW_HISTORY_STATE_KEY]: marker };
++    if (replace) window.history.replaceState(nextState, '');
++    else window.history.pushState(nextState, '');
++    return true;
++  } catch {
++    return false;
++  }
++}
++
++function useImagePreviewHistoryDismiss<T extends HTMLElement>(open: boolean, dialogRef: RefObject<T>, onClose: () => void) {
++  const instanceId = useId();
++  const onCloseRef = useRef(onClose);
++  const sessionRef = useRef<ImagePreviewHistorySession | null>(null);
++  const effectGenerationRef = useRef(0);
++  const closeRequestedRef = useRef(false);
++  const closeCalledRef = useRef(false);
++  onCloseRef.current = onClose;
++
++  const closeOnce = useCallback(() => {
++    if (closeCalledRef.current) return;
++    closeCalledRef.current = true;
++    if (sessionRef.current) sessionRef.current.ownsEntry = false;
++    onCloseRef.current();
++  }, []);
++
++  useEffect(() => {
++    const generation = ++effectGenerationRef.current;
++    if (!open) {
++      const inactiveSession = sessionRef.current;
++      if (inactiveSession?.ownsEntry
++        && inactiveSession.url === window.location.href
++        && hasActiveImagePreviewHistoryEntry(inactiveSession.token)) {
++        writeImagePreviewHistoryMarker({ token: inactiveSession.token, url: inactiveSession.url, active: false }, true);
++      }
++      sessionRef.current = null;
++      closeRequestedRef.current = false;
++      closeCalledRef.current = false;
++      return undefined;
++    }
++
++    closeRequestedRef.current = false;
++    closeCalledRef.current = false;
++    let session = sessionRef.current;
++    if (!session || !session.ownsEntry || !hasActiveImagePreviewHistoryEntry(session.token)) {
++      const token = `${instanceId}:${++imagePreviewHistorySequence}`;
++      const url = window.location.href;
++      const existingMarker = getImagePreviewHistoryMarker();
++      const reuseEntry = existingMarker?.active === false && existingMarker.url === url;
++      const ownsEntry = writeImagePreviewHistoryMarker({ token, url, active: true }, reuseEntry);
++      session = { token, url, ownsEntry };
++      sessionRef.current = session;
++    }
++
++    const handlePopState = () => {
++      const activeSession = sessionRef.current;
++      if (!activeSession?.ownsEntry || closeCalledRef.current) return;
++      if (hasActiveImagePreviewHistoryEntry(activeSession.token)) return;
++      if (!isTopmostDialogLayer(dialogRef.current)) {
++        if (activeSession.url === window.location.href) {
++          activeSession.ownsEntry = writeImagePreviewHistoryMarker({ token: activeSession.token, url: activeSession.url, active: true });
++        } else {
++          activeSession.ownsEntry = false;
++        }
++        closeRequestedRef.current = false;
++        return;
++      }
++      closeOnce();
++    };
++
++    window.addEventListener('popstate', handlePopState);
++    return () => {
++      window.removeEventListener('popstate', handlePopState);
++      // Let StrictMode replay this effect before marking its history entry inactive.
++      queueMicrotask(() => {
++        if (effectGenerationRef.current !== generation) return;
++        const activeSession = sessionRef.current;
++        if (!activeSession?.ownsEntry
++          || activeSession.url !== window.location.href
++          || !hasActiveImagePreviewHistoryEntry(activeSession.token)) return;
++        if (writeImagePreviewHistoryMarker({ token: activeSession.token, url: activeSession.url, active: false }, true)) {
++          activeSession.ownsEntry = false;
++        }
++      });
++    };
++  }, [closeOnce, dialogRef, instanceId, open]);
++
++  return useCallback(() => {
++    if (closeCalledRef.current || closeRequestedRef.current) return;
++    const session = sessionRef.current;
++    if (session?.ownsEntry
++      && session.url === window.location.href
++      && hasActiveImagePreviewHistoryEntry(session.token)) {
++      closeRequestedRef.current = true;
++      try {
++        window.history.back();
++        return;
++      } catch {
++        closeRequestedRef.current = false;
++      }
++    }
++    closeOnce();
++  }, [closeOnce]);
++}
++
+ function safeImageLabel(title?: string, fileName?: string) {
+   const trimmedTitle = title?.trim();
+   if (trimmedTitle && /^(?:生成结果|图片预览)\s+\d{1,5}$/.test(trimmedTitle)) return trimmedTitle;
+@@ -221,12 +360,13 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
+   const [copyState, setCopyState] = useState<{ src: string; busy?: boolean; message?: string; success?: boolean } | null>(null);
+   const [dimensionsBySource, setDimensionsBySource] = useState<Record<string, IntrinsicSize>>({});
+   const dimensionsTooltipId = useId();
++  const dismissPreview = useImagePreviewHistoryDismiss(Boolean(portalRoot), backdropRef, onClose);
+ 
+   useDialogDismiss({
+     open: Boolean(portalRoot),
+     dialogRef: backdropRef,
+     dismissSurfaceRef: backdropRef,
+-    onDismiss: onClose,
++    onDismiss: dismissPreview,
+     initialFocusRef: backdropRef,
+     isDismissTarget: (target) => {
+       if (target === backdropRef.current || target === stageRef.current) return true;
+@@ -592,7 +732,7 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
+       }
+       setDragging(Boolean(remaining && scale > 1));
+       if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+-      if (closeFromBackground && isTopmostDialogLayer(backdropRef.current)) onClose();
++      if (closeFromBackground && isTopmostDialogLayer(backdropRef.current)) dismissPreview();
+       return;
+     }
+     const drag = dragRef.current;
+@@ -603,8 +743,8 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
+         event.currentTarget.releasePointerCapture(drag.pointerId);
+       }
+     }
+-    if (closeFromBackground && isTopmostDialogLayer(backdropRef.current)) onClose();
+-  }, [onClose, scale]);
++    if (closeFromBackground && isTopmostDialogLayer(backdropRef.current)) dismissPreview();
++  }, [dismissPreview, scale]);
+ 
+   const comparisonLayoutLabel = comparisonAxis === 'horizontal' ? '左右' : '上下';
+   const handleImageReady = useCallback((imageSrc: string) => (size: IntrinsicSize) => {
+@@ -643,7 +783,7 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
+       tabIndex={-1}
+       onClick={(event) => {
+         event.stopPropagation();
+-        if (event.detail === 0 && event.target === event.currentTarget && isTopmostDialogLayer(backdropRef.current)) onClose();
++        if (event.detail === 0 && event.target === event.currentTarget && isTopmostDialogLayer(backdropRef.current)) dismissPreview();
+       }}
+       onPointerDown={(event) => event.stopPropagation()}
+       onPointerMove={(event) => event.stopPropagation()}
+@@ -717,7 +857,7 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
+           <button type="button" onClick={() => { interactedRef.current = true; previewState.reset(); resetView(); }} title="还原" aria-label="还原图片大小">
+             <RotateCcw size={16} />
+           </button>
+-          <button type="button" onClick={onClose} title="关闭" aria-label="关闭预览">
++          <button type="button" onClick={dismissPreview} title="关闭" aria-label="关闭预览">
+             <X size={16} />
+           </button>
+         </div>
+diff --git a/src/lib/release.ts b/src/lib/release.ts
+index 446c772..541b5af 100644
+--- a/src/lib/release.ts
++++ b/src/lib/release.ts
+@@ -1,6 +1,6 @@
+ import packageInfo from '../../package.json';
+ 
+-export const release = { version: packageInfo.version, channel: 'production', summary: '修复人物文案背景格式校验，已保存回复可免费重检，不必重新收费分析。胡茬不再误标为伤痕或猜具体位置；原文条件、旧图和历史继续保留。' };
++export const release = { version: packageInfo.version, channel: 'production', summary: '手机返回先关闭大图，保留当前页面。人物描述作为主输入，其他条件可选；未指定的外观随机补齐，主动选择仍可补充要求。' };
+ export function newerRelease(remote: string, local: string) {
+   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
+   const a = parse(remote), b = parse(local);

@@ -1,0 +1,15 @@
+{
+  "sourceMatchesExactRelease": true,
+  "checkedFiles": 789,
+  "commit": "03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d",
+  "version": "0.43.2",
+  "buildId": "P1gkdWek_f9tKM4EH-y6C",
+  "workerPid": "259902",
+  "runtime": {
+    "storage": "/data/video-api-debugger/var-lib/storage",
+    "public/uploads": "/data/video-api-debugger/var-lib/uploads",
+    "public/videos": "/data/video-api-debugger/var-lib/videos"
+  },
+  "excluded": "No credentials, env or database contents read",
+  "checkedAt": "2026-10-05T10:54:13.660Z"
+}

@@ -1,0 +1,28 @@
+{
+  "project": "video-api-debugger",
+  "source": "worktrees/avatar-generator-20261005",
+  "version": "0.43.2",
+  "tasks": [
+    {"id":"B1","name":"手机返回关闭大图","standard":"返回先关预览不离页、原有关闭方式保留","status":"implementation-complete; manual-acceptance-pending"},
+    {"id":"B2","name":"安全发布","standard":"构建、版本、回退及公网检查完成","status":"deployment-checks-complete; sequencing-warning-recorded"},
+    {"id":"C1","name":"文案为主、其他条件可选","standard":"仅填人物描述可分析/生成，未指定可随机，实际采用范围可读且主动补充选项保留","status":"implementation-complete; manual-acceptance-pending"}
+  ],
+  "facts": {
+    "requiredChoiceBlock": "not found; choices and locks may be empty; missing fields randomized by existing engine",
+    "C1": "main description label; optional semantic fieldset for six quick fields; defaults follow description or random; clarification primary action focuses existing description rather than silently repeating analysis",
+    "priority": "existing latest active description/quick edit precedence preserved",
+    "parser": "unchanged; explicit, negative, range and soft constraints already supported; missing appearance fields not treated as parser failure",
+    "acceptance": "manual only; no functional, browser, regression, provider or business API execution"
+  },
+  "fees": 0,
+  "sourceCommit": "03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d",
+  "buildId": "P1gkdWek_f9tKM4EH-y6C",
+  "finalStatus": "已部署，待用户手动验收",
+  "deploymentSequencingWarning": "Switch command began while git push process output was still pending. First ls-remote still returned old branch; this was not enforced as a stop gate. Push later completed successfully; final branch/release/rollback refs confirmed. An exact-own-switch SIGTERM attempt found no running switch process after successful switch and made no changes. No rollback was executed. Cannot claim pre-switch remote confirmation succeeded; actual defect recorded, final recovery refs verified.",
+  "worker": "Hilbert confirmed stopped; parent closed agent; no running command; lead sole owner",
+  "B1Lifecycle": "Owned active/inactive same-URL markers; StrictMode microtask cancellation; top-layer check and same-URL rearm; all explicit close paths wait for one owned traversal. External unmount retires marker without back; same-URL inactive entry reused. An externally abandoned duplicate history entry may remain, because History API has no arbitrary-entry deletion; no cleanup navigation.",
+  "modelCalls": 0,
+  "productionDataWrites": 0,
+  "risk": "B1 L2 shared preview interaction; C1 L1 labels plus L2 clarification focus; protected production deployment separately verified",
+  "classificationMisjudgment": "none"
+}

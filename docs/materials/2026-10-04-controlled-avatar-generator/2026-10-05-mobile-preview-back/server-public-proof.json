@@ -1,0 +1,46 @@
+{
+  "commit": "03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d",
+  "version": "0.43.2",
+  "build": "P1gkdWek_f9tKM4EH-y6C",
+  "checkedAt": "2026-10-05T10:52:54.409Z",
+  "checks": [
+    {
+      "pathname": "/api/release",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/api/health",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/api/config",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/login",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "route": "/tools/avatar-studio/page",
+      "file": "static/chunks/6205-e1b57e97831e8d20.js",
+      "status": 200,
+      "sha256": "973e8bc6416b7821c81003e0ef8ae5f58563132bb9ddc72d00cfb13f635171f3",
+      "matchesCandidate": true,
+      "containsOptionalConditions": true,
+      "containsMobileBack": false
+    },
+    {
+      "route": "/tools/avatar-studio/page",
+      "file": "static/chunks/9017-73cbd9aab2d5412a.js",
+      "status": 200,
+      "sha256": "a769b7acfba346dbeb5647803d3d14f7b99426e8fce239fa5808ec54cfb92925",
+      "matchesCandidate": true,
+      "containsOptionalConditions": false,
+      "containsMobileBack": true
+    }
+  ]
+}

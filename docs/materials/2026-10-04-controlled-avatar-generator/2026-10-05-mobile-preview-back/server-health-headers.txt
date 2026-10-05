@@ -1,0 +1,11 @@
+active
+active
+P1gkdWek_f9tKM4EH-y6CHTTP/1.1 200 OK
+vary: RSC, Next-Router-State-Tree, Next-Router-Prefetch
+cache-control: no-store, max-age=0
+content-type: application/json
+Date: Mon, 05 Oct 2026 10:54:14 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+Transfer-Encoding: chunked
+
