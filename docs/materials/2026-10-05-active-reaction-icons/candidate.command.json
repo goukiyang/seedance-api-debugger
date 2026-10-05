@@ -1,0 +1,15 @@
+{
+  "command": "ssh",
+  "args": [
+    "-o",
+    "BatchMode=yes",
+    "gouki@42.193.221.253",
+    "bash /tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/candidate.sh 3fae527e7cdeb07fb4e20cdf85966a3892ef2132 ae28e17ad41ff27bdc28a8b7540ff82035d54409e503a84a33f020bb9129e133 0941beacd2cf71b1d02f1111470d804f4996b3f4 72fa9939d6a18e10c772c1f676c844179e03ee135af01567b7e318c964b56689 D7veEEW5tSA1MsaVkxWwm /tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5"
+  ],
+  "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "startedAt": "2026-10-05T14:06:05.864Z",
+  "finishedAt": "2026-10-05T14:08:00.554Z",
+  "exitCode": 0,
+  "signal": null,
+  "log": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005/docs/materials/2026-10-05-active-reaction-icons/candidate.log"
+}

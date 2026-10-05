@@ -1,0 +1,15 @@
+{
+  "command": "ssh",
+  "args": [
+    "-o",
+    "BatchMode=yes",
+    "gouki@42.193.221.253",
+    "test ! -e /tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5 && mkdir /tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5 && test \"$(stat -c %U /tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5)\" = gouki"
+  ],
+  "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "startedAt": "2026-10-05T14:04:01.544Z",
+  "finishedAt": "2026-10-05T14:04:01.855Z",
+  "exitCode": 0,
+  "signal": null,
+  "log": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005/docs/materials/2026-10-05-active-reaction-icons/upload-directory.log"
+}

@@ -1,0 +1,1027 @@
+{
+  "project": "video-api-debugger",
+  "date": "2026-10-05",
+  "scope": "E1/E2 only; not D1 continuation",
+  "sourceWorkspace": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "formalRootRecordsOwner": "Parent only; formal-root source/todo/index untouched by this executor",
+  "tasks": [
+    {
+      "id": "E1",
+      "task": "Active like/favorite overlay icons remain visible",
+      "standard": "Only activated like/favorite icons stay visible without hover/focus; other contextual, keyboard, status, touch and inline behavior retained",
+      "status": "Implemented and deployed; pending user manual acceptance",
+      "evidence": [
+        "source.diff",
+        "source-review.json",
+        "candidate.json",
+        "public.json"
+      ]
+    },
+    {
+      "id": "E2",
+      "task": "Safely release 0.43.4",
+      "standard": "Candidate/CSS proof, remote rollback refs, runtime/public checks and persistence protection complete",
+      "status": "Completed",
+      "evidence": [
+        "build.log",
+        "remote-refs-proof.json",
+        "switch.log",
+        "runtime.json",
+        "server-source.json",
+        "independent-public.json"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "file": "package.json",
+      "change": "Single application version source changed from 0.43.3 to PATCH 0.43.4; no lockfile/dependency changes."
+    },
+    {
+      "file": "src/lib/release.ts",
+      "change": "One truthful update summary for persistent active reaction icons; existing numeric SemVer/update/refresh machinery unchanged."
+    },
+    {
+      "file": "src/components/content-reactions/reactions.module.css",
+      "change": "Only active marked reaction buttons persist. Inactive/share buttons preserve contextual visibility; hover/focus/status/touch/disabled remain scoped; position, dimensions and slots unchanged."
+    },
+    {
+      "file": "src/components/content-reactions/ContentReactions.tsx",
+      "change": "Only two data-reaction-action attributes on existing like/favorite buttons. No state, handler, API, cache, count or permission change."
+    }
+  ],
+  "applicationWriteSet": [
+    "package.json",
+    "src/lib/release.ts",
+    "src/components/content-reactions/reactions.module.css",
+    "src/components/content-reactions/ContentReactions.tsx"
+  ],
+  "helperWriteSet": [
+    "archive.sh",
+    "candidate.sh",
+    "switch.sh",
+    "source-proof.mjs",
+    "release-window.mjs",
+    "run-command.mjs"
+  ],
+  "evidenceGenerationHelper": "finalize-evidence.mjs (local evidence only; not added to deployment commit)",
+  "version": "0.43.4",
+  "commit": "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+  "branch": "codex/avatar-generator-20261005",
+  "buildId": "d3AOx5AwMdobt6iDbMTL0",
+  "target": "https://sd2.youdooart.com/assets",
+  "releaseTag": "v0.43.4",
+  "rollbackTag": "rollback/active-reaction-icons-20261005-v0.43.3",
+  "remoteRefs": {
+    "pushExitCode": 0,
+    "pushCompletedAt": "2026-10-05T14:09:25.220Z",
+    "refsStartedAt": "2026-10-05T14:09:55.887Z",
+    "refsVerifiedAt": "2026-10-05T14:09:56.935Z",
+    "refs": {
+      "refs/heads/codex/avatar-generator-20261005": "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+      "refs/tags/release/v0.43.3-avatar-one-click-final": "f3d5ac404b0713718db54a0f26a4604d56d3e2f1",
+      "refs/tags/release/v0.43.3-avatar-one-click-final^{}": "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+      "refs/tags/rollback/active-reaction-icons-20261005-v0.43.3": "1b8da0075575490cfb14977118091bc01f1c9c52",
+      "refs/tags/rollback/active-reaction-icons-20261005-v0.43.3^{}": "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+      "refs/tags/v0.43.3": "66c4b7be042b683c7bfd804403742c3c2264af1c",
+      "refs/tags/v0.43.3^{}": "f8fb58431555082ddc842611be05531aad92c783",
+      "refs/tags/v0.43.4": "a17b57b42004253ddbdadc31bfbcddf8941b4a24",
+      "refs/tags/v0.43.4^{}": "3fae527e7cdeb07fb4e20cdf85966a3892ef2132"
+    },
+    "expected": {
+      "refs/heads/codex/avatar-generator-20261005": "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+      "refs/tags/v0.43.4^{}": "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+      "refs/tags/rollback/active-reaction-icons-20261005-v0.43.3^{}": "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+      "refs/tags/release/v0.43.3-avatar-one-click-final^{}": "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+      "refs/tags/v0.43.3^{}": "f8fb58431555082ddc842611be05531aad92c783"
+    },
+    "verifiedAfterPush": true
+  },
+  "archives": {
+    "runId": "sd2-active-reaction-icons-20261005-2201-0dde1ca5",
+    "localDirectory": "/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5",
+    "serverDirectory": "/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5",
+    "sourceSha256": "ae28e17ad41ff27bdc28a8b7540ff82035d54409e503a84a33f020bb9129e133",
+    "rollbackSha256": "72fa9939d6a18e10c772c1f676c844179e03ee135af01567b7e318c964b56689",
+    "source": "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+    "rollback": "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+    "excluded": [
+      ".env*",
+      "node_modules",
+      ".next*",
+      "storage",
+      "public/uploads",
+      "public/videos",
+      "*.db*",
+      "*.sqlite*"
+    ],
+    "method": "Exact git archive of focused commit and current live base; filtered and hashed; no untracked files included"
+  },
+  "candidate": {
+    "exitCode": 0,
+    "dist": "/srv/video-api-debugger/releases/3fae527e7cdeb07fb4e20cdf85966a3892ef2132/.next-prod-candidate",
+    "buildId": "d3AOx5AwMdobt6iDbMTL0",
+    "builtinTypeAndLint": "Completed with successful build exit 0",
+    "css": [
+      {
+        "file": "static/css/cb63982acf8b32ce.css",
+        "sha256": "83934bd0ac4c56e09525bbf3b31e02b1e6025fade27eba1238839b780f2c0fbe",
+        "bytes": 44551,
+        "selectors": [
+          {
+            "selector": ".reactions_overlayControls__cUGHH:has(button[data-reaction-action][aria-pressed=true])",
+            "declarations": {
+              "opacity": "1"
+            }
+          },
+          {
+            "selector": ".reactions_controls__r9ARa.reactions_overlayControls__cUGHH button[data-reaction-action][aria-pressed=true]",
+            "declarations": {
+              "opacity": "1",
+              "pointer-events": "auto"
+            }
+          },
+          {
+            "selector": ".reactions_controls__r9ARa.reactions_overlayControls__cUGHH button[data-reaction-action][aria-pressed=true]:disabled,.reactions_controls__r9ARa.reactions_overlayControls__cUGHH:where(:hover,:focus-within,:has(.reactions_busy__nZwu4),:has(.reactions_error__0GfYS)) button:disabled,:where([data-reaction-surface]:hover,[data-reaction-surface]:focus-within) .reactions_controls__r9ARa.reactions_overlayControls__cUGHH button:disabled",
+            "declarations": {
+              "opacity": ".45"
+            }
+          },
+          {
+            "selector": ".reactions_overlayControls__cUGHH:focus-within,.reactions_overlayControls__cUGHH:has(.reactions_busy__nZwu4),.reactions_overlayControls__cUGHH:has(.reactions_error__0GfYS),.reactions_overlayControls__cUGHH:has(button[data-reaction-action][aria-pressed=true]),.reactions_overlayControls__cUGHH:hover,[data-reaction-surface]:focus-within .reactions_overlayControls__cUGHH,[data-reaction-surface]:hover .reactions_overlayControls__cUGHH",
+            "declarations": {
+              "background": "rgba(12,17,19,.76)"
+            }
+          }
+        ],
+        "routes": [
+          "/assets/page",
+          "/template-studio/page"
+        ]
+      }
+    ],
+    "warnings": {
+      "countOfDiagnosticLines": 109,
+      "lines": [
+        "<w> [webpack.cache.PackFileCacheStrategy] Skipped not serializable cache item 'Compilation/modules|/srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!/srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!/data/video-api-debugger/releases/3fae527e7cdeb07fb4e20cdf85966a3892ef2132/src/app/globals.css': No serializer registered for Warning",
+        "<w> while serializing webpack/lib/cache/PackFileCacheStrategy.PackContentItems -> webpack/lib/NormalModule -> Array { 11 items } -> webpack/lib/ModuleWarning -> Warning",
+        "Warning",
+        "(355:3) autoprefixer: end value has mixed support, consider using flex-end instead",
+        "Warning",
+        "(4346:3) autoprefixer: start value has mixed support, consider using flex-start instead",
+        "Warning",
+        "(4395:3) autoprefixer: start value has mixed support, consider using flex-start instead",
+        "Warning",
+        "(6872:3) autoprefixer: start value has mixed support, consider using flex-start instead",
+        "Warning",
+        "(8601:3) autoprefixer: end value has mixed support, consider using flex-end instead",
+        "Warning",
+        "(9106:3) autoprefixer: start value has mixed support, consider using flex-start instead",
+        "Warning",
+        "(10573:3) autoprefixer: end value has mixed support, consider using flex-end instead",
+        "Warning",
+        "(10836:3) autoprefixer: end value has mixed support, consider using flex-end instead",
+        "Warning",
+        "(11561:3) autoprefixer: end value has mixed support, consider using flex-end instead",
+        "Warning",
+        "(15871:3) autoprefixer: start value has mixed support, consider using flex-start instead",
+        "Warning",
+        "(16007:3) autoprefixer: start value has mixed support, consider using flex-start instead",
+        "139:6  Warning: React Hook useEffect has missing dependencies: 'load' and 'page'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps",
+        "400:21  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "574:6  Warning: React Hook useEffect has a missing dependency: 'refresh'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps",
+        "98:58  Warning: The ref value 'sequence.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'sequence.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps",
+        "574:21  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "709:23  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "92:10  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "608:27  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "616:17  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "637:24  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "656:35  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "657:37  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "91:32  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "85:52  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "86:52  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "90:29  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "312:6  Warning: React Hook useEffect has a missing dependency: 'openPresetLibrary'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps",
+        "907:6  Warning: React Hook useCallback has an unnecessary dependency: 'userId'. Either exclude it or remove the dependency array.  react-hooks/exhaustive-deps",
+        "1035:6  Warning: React Hook useEffect has missing dependencies: 'generationDraft' and 'restoreTemporaryDraft'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps",
+        "1044:6  Warning: React Hook useEffect has missing dependencies: 'aspectRatio', 'auxiliaryImages', 'count', 'fixedReferences', 'images', 'moduleContext', 'moduleModel', 'prompt', 'quality', 'referenceLimit', 'referencePolicy', 'resolution', and 'styleGroups'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps",
+        "1432:6  Warning: React Hook useCallback has a missing dependency: 'confirm'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps",
+        "1550:65  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "51:106  Warning: React Hook useEffect has a missing dependency: 'draft'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps",
+        "51:107  Warning: React Hook useEffect has a complex expression in the dependency array. Extract it to a separate variable so it can be statically checked.  react-hooks/exhaustive-deps",
+        "141:67  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "146:26  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "169:68  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "64:78  Warning: The ref value 'mutations.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'mutations.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps",
+        "414:10  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "502:6  Warning: React Hook useEffect has a missing dependency: 'loadProject'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps",
+        "1987:21  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "2203:27  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "2297:27  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "88:235  Warning: React Hook useEffect has a missing dependency: 'plan'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps",
+        "260:183  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "262:345  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "274:205  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "274:285  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "410:19  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "842:6  Warning: React Hook useMemo has unnecessary dependencies: 'duration' and 'ratio'. Either exclude them or remove the dependency array.  react-hooks/exhaustive-deps",
+        "261:6  Warning: React Hook useCallback has a missing dependency: 'previewState'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps",
+        "265:6  Warning: React Hook useCallback has a missing dependency: 'previewState'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps",
+        "96:10  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "63:11  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "79:11  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "63:6  Warning: React Hook useEffect has a missing dependency: 'risk'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps",
+        "63:15  Warning: React Hook useEffect has a complex expression in the dependency array. Extract it to a separate variable so it can be statically checked.  react-hooks/exhaustive-deps",
+        "64:104  Warning: React Hook useEffect has a missing dependency: 'risk?.unsaved.length'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps",
+        "64:105  Warning: React Hook useEffect has a complex expression in the dependency array. Extract it to a separate variable so it can be statically checked.  react-hooks/exhaustive-deps",
+        "57:10  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "69:478  Warning: React Hook useEffect has a missing dependency: 'user'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps",
+        "140:29  Warning: The ref value 'sequence.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'sequence.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps",
+        "140:48  Warning: The ref value 'session.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'session.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps",
+        "141:6  Warning: React Hook useEffect has missing dependencies: 'recentKey' and 'user'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps",
+        "170:29  Warning: The ref value 'sequence.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'sequence.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps",
+        "171:6  Warning: React Hook useEffect has missing dependencies: 'prefs.album', 'prefs.pages', 'prefs.project', and 'prefs.scope'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps",
+        "404:25  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "72:7  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "311:17  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "113:5  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "82:9  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "93:13  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "72:10  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "170:33  Warning: The ref value 'effectGenerationRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'effectGenerationRef.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps",
+        "320:38  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "471:6  Warning: React Hook useEffect has a missing dependency: 'previewState'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps",
+        "816:17  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "50:28  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "152:94  Warning: The ref value 'lifetime.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'lifetime.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps",
+        "152:114  Warning: The ref value 'sequence.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'sequence.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps",
+        "152:151  Warning: The ref value 'previewNavigationSequence.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'previewNavigationSequence.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps",
+        "208:29  Warning: The ref value 'lifetime.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'lifetime.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps",
+        "208:49  Warning: The ref value 'sequence.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'sequence.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps",
+        "725:6  Warning: React Hook useEffect has a missing dependency: 'pollingRun'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps",
+        "1746:41  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "2113:10  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "141:6  Warning: React Hook useCallback has an unnecessary dependency: 'detailWorkspaceMode'. Either exclude it or remove the dependency array.  react-hooks/exhaustive-deps",
+        "325:25  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "396:21  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "418:21  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "449:25  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "465:23  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "365:25  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "411:19  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element",
+        "486:59  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element"
+      ],
+      "fullLog": "build.log",
+      "disposition": "Existing global autoprefixer/cache and img/hook warnings retained; no unrelated source edits; no type/lint build-blocking errors"
+    }
+  },
+  "rollback": {
+    "commit": "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+    "version": "0.43.3",
+    "buildId": "D7veEEW5tSA1MsaVkxWwm",
+    "sourceDirectory": "/srv/video-api-debugger/releases/0941beacd2cf71b1d02f1111470d804f4996b3f4-active-reaction-icons-rollback",
+    "buildDirectory": "/srv/video-api-debugger/app/.next-prod-prev-active-reaction-icons-3fae527",
+    "sourceAndBuildRetained": true,
+    "errorRollbackTrap": "Preserves/restores old source, .deployed-commit and live build on sync/restart/public verification failure; defined but not deliberately triggered",
+    "rollbackDrill": "Not performed; no production fault injection"
+  },
+  "deployment": {
+    "switchExitCode": 0,
+    "sourceDriftBeforeCandidate": {
+      "checkedFiles": 789,
+      "changed": [],
+      "commit": "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+      "checkedAt": "2026-10-05T14:06:07.738Z"
+    },
+    "sourceDriftBeforeSwitch": {
+      "checkedFiles": 789,
+      "changed": [],
+      "commit": "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+      "checkedAt": "2026-10-05T14:11:03.775Z"
+    },
+    "exactApplicationWhitelist": {
+      "checkedFiles": 789,
+      "changed": [
+        "src/components/content-reactions/ContentReactions.tsx",
+        "src/components/content-reactions/reactions.module.css",
+        "src/lib/release.ts",
+        "package.json"
+      ],
+      "commit": "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+      "checkedAt": "2026-10-05T14:06:07.889Z"
+    },
+    "serverSourceMatchesCandidate": {
+      "checkedFiles": 789,
+      "changed": [],
+      "commit": "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+      "checkedAt": "2026-10-05T14:11:06.357Z"
+    },
+    "publicProof": "public.json",
+    "independentPublicProof": "independent-public.json",
+    "loopbackReleaseConfigHealthLogin": "server-closure.log",
+    "webOnlyRestart": true,
+    "protectedSwitch": {
+      "reason": "gouki sudo policy allows only ArtReview helpers, not sd2 web service management; reuse authorized protected root web-only switch",
+      "scriptSha256": "13d743575d4b2793dccd9f5a69a6330135d5c682923fd16e7a38c4acdb063153",
+      "owner": "root",
+      "permissions": "0700",
+      "permissionConfigurationChanges": 0
+    },
+    "runtime": {
+      "base": "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+      "commit": "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+      "oldBuild": "D7veEEW5tSA1MsaVkxWwm",
+      "buildId": "d3AOx5AwMdobt6iDbMTL0",
+      "rollbackBuild": "/srv/video-api-debugger/app/.next-prod-prev-active-reaction-icons-3fae527",
+      "rollbackSource": "/srv/video-api-debugger/releases/0941beacd2cf71b1d02f1111470d804f4996b3f4-active-reaction-icons-rollback",
+      "workerPid": 259902,
+      "workerRestarted": false,
+      "persistentLinks": {
+        "storage": "/data/video-api-debugger/var-lib/storage",
+        "public/uploads": "/data/video-api-debugger/var-lib/uploads",
+        "public/videos": "/data/video-api-debugger/var-lib/videos"
+      },
+      "businessCalls": 0,
+      "paidCalls": 0,
+      "databaseWrites": 0
+    }
+  },
+  "guard": {
+    "start": "Parent guardian start already completed; executor source/baseline/window checks recorded",
+    "finishExitCode": 0,
+    "finishProof": "guardian-finish.json",
+    "mechanicalEvidenceTier": "L3-visible-runtime",
+    "mechanicalWarnings": [
+      "live-action-needs-explicit-authorization"
+    ],
+    "interpretation": "Keyword-derived real-client/L3/authorization checklist is not browser/business-test permission. This task has explicit code/Git/protected release authorization, and explicit manual-only functional acceptance. Runtime evidence is deployment proof only; real-result remains pending.",
+    "registryFinish": "release-window-finish.log",
+    "executorClassificationMisjudgment": false
+  },
+  "checks": [
+    {
+      "name": "archives",
+      "command": "bash",
+      "args": [
+        "docs/materials/2026-10-05-active-reaction-icons/archive.sh",
+        "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+        "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+        "sd2-active-reaction-icons-20261005-2201-0dde1ca5"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:02:34.616Z",
+      "finishedAt": "2026-10-05T14:05:05.601Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "archives.log"
+    },
+    {
+      "name": "baseline-public",
+      "command": "node",
+      "args": [
+        "--input-type=module",
+        "-e",
+        "const r=await fetch('https://sd2.youdooart.com/api/release',{cache:'no-store'}); const data=await r.json();if(r.status!==200||data.version!=='0.43.3'||r.headers.get('x-sd2-origin')!=='server-42-193')throw Error('Live baseline mismatch');console.log(JSON.stringify({status:r.status,origin:r.headers.get('x-sd2-origin'),release:data,checkedAt:new Date().toISOString()}));"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:03:03.165Z",
+      "finishedAt": "2026-10-05T14:03:03.369Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "baseline-public.log"
+    },
+    {
+      "name": "baseline",
+      "command": "ssh",
+      "args": [
+        "-o",
+        "BatchMode=yes",
+        "gouki@42.193.221.253",
+        "printf \"COMMIT=\"; cat /srv/video-api-debugger/app/.deployed-commit; printf \"BUILD=\"; cat /srv/video-api-debugger/app/.next-prod/BUILD_ID; printf \"\\nVERSION=\"; node -p \"require(\\\"/srv/video-api-debugger/app/package.json\\\").version\"; systemctl is-active sd2-gray.service sd2-image-studio.service; systemctl show sd2-image-studio.service -p MainPID; readlink /srv/video-api-debugger/app/storage; readlink /srv/video-api-debugger/app/public/uploads; readlink /srv/video-api-debugger/app/public/videos; curl -fsS http://127.0.0.1:3302/api/release"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:01:02.832Z",
+      "finishedAt": "2026-10-05T14:01:04.239Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "baseline.log"
+    },
+    {
+      "name": "candidate-evidence",
+      "command": "scp",
+      "args": [
+        "-o",
+        "BatchMode=yes",
+        "gouki@42.193.221.253:/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/baseline-source.json",
+        "gouki@42.193.221.253:/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/source-boundary.json",
+        "gouki@42.193.221.253:/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/candidate-source.json",
+        "gouki@42.193.221.253:/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/candidate.json",
+        "gouki@42.193.221.253:/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/build.log",
+        "docs/materials/2026-10-05-active-reaction-icons/"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:08:39.363Z",
+      "finishedAt": "2026-10-05T14:08:41.692Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "candidate-evidence.log"
+    },
+    {
+      "name": "candidate",
+      "command": "ssh",
+      "args": [
+        "-o",
+        "BatchMode=yes",
+        "gouki@42.193.221.253",
+        "bash /tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/candidate.sh 3fae527e7cdeb07fb4e20cdf85966a3892ef2132 ae28e17ad41ff27bdc28a8b7540ff82035d54409e503a84a33f020bb9129e133 0941beacd2cf71b1d02f1111470d804f4996b3f4 72fa9939d6a18e10c772c1f676c844179e03ee135af01567b7e318c964b56689 D7veEEW5tSA1MsaVkxWwm /tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:06:05.864Z",
+      "finishedAt": "2026-10-05T14:08:00.554Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "candidate.log"
+    },
+    {
+      "name": "commit",
+      "command": "git",
+      "args": [
+        "commit",
+        "-m",
+        "fix: keep active reaction overlay icons visible"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:01:48.146Z",
+      "finishedAt": "2026-10-05T14:01:50.543Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "commit.log"
+    },
+    {
+      "name": "committed-source",
+      "command": "node",
+      "args": [
+        "docs/materials/2026-10-05-active-reaction-icons/source-proof.mjs",
+        "source",
+        ".",
+        "unused",
+        "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+        "docs/materials/2026-10-05-active-reaction-icons/committed-source.json"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:02:33.432Z",
+      "finishedAt": "2026-10-05T14:02:33.778Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "committed-source.log"
+    },
+    {
+      "name": "diff-check",
+      "command": "git",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T13:59:48.075Z",
+      "finishedAt": "2026-10-05T13:59:48.092Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "diff-check.log"
+    },
+    {
+      "name": "final-git-status",
+      "command": "git",
+      "args": [
+        "status",
+        "--short",
+        "--branch"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:13:13.015Z",
+      "finishedAt": "2026-10-05T14:13:16.254Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "final-git-status.log"
+    },
+    {
+      "name": "final-source-diff",
+      "command": "git",
+      "args": [
+        "diff",
+        "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+        "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+        "--",
+        "package.json",
+        "src/lib/release.ts",
+        "src/components/content-reactions/reactions.module.css",
+        "src/components/content-reactions/ContentReactions.tsx"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:02:35.765Z",
+      "finishedAt": "2026-10-05T14:02:38.620Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "final-source-diff.log"
+    },
+    {
+      "name": "guardian-finish",
+      "command": "node",
+      "args": [
+        "/Volumes/Data/Projects/project-guardian/bin/project-guardian.js",
+        "finish",
+        "--cwd",
+        "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+        "--intent",
+        "E1/E2：点过赞或收藏的左上角激活图标固定显示，不因鼠标移开消失。共享CSS与必要真实标记，安全发布0.43.4；仅候选构建、source/CSS哈希和服务检查，用户手动验收，不做浏览器或业务功能测试。",
+        "--json"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:12:30.669Z",
+      "finishedAt": "2026-10-05T14:12:36.239Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "guardian-finish.log"
+    },
+    {
+      "name": "independent-public",
+      "command": "node",
+      "args": [
+        "--input-type=module",
+        "-e",
+        "import fs from 'node:fs';import crypto from 'node:crypto';const e='docs/materials/2026-10-05-active-reaction-icons/';const expected=JSON.parse(fs.readFileSync(e+'candidate.json'));const releaseResponse=await fetch('https://sd2.youdooart.com/api/release',{cache:'no-store',signal:AbortSignal.timeout(15000)});const release=await releaseResponse.json();if(releaseResponse.status!==200||release.version!==expected.version||releaseResponse.headers.get('x-sd2-origin')!=='server-42-193')throw Error('Public version/origin mismatch');const css=[];for(const entry of expected.css){const r=await fetch('https://sd2.youdooart.com/_next/'+entry.file,{cache:'no-store',signal:AbortSignal.timeout(15000)});const hash=crypto.createHash('sha256').update(Buffer.from(await r.arrayBuffer())).digest('hex');if(r.status!==200||hash!==entry.sha256)throw Error('Public CSS hash mismatch');css.push({file:entry.file,status:r.status,sha256:hash,matchesCandidate:true});}const proof={commit:expected.commit,version:release.version,candidateBuild:expected.buildId,origin:releaseResponse.headers.get('x-sd2-origin'),css,checkedAt:new Date().toISOString(),evidenceLimit:'Anonymous HTTP/CSS hash proof; not visual or functional acceptance'};fs.writeFileSync(e+'independent-public.json',JSON.stringify(proof,null,2));console.log(JSON.stringify(proof));"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:13:12.264Z",
+      "finishedAt": "2026-10-05T14:13:12.792Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "independent-public.log"
+    },
+    {
+      "name": "prepare-permissions",
+      "command": "ssh",
+      "args": [
+        "-o",
+        "BatchMode=yes",
+        "gouki@42.193.221.253",
+        "test -w /srv/video-api-debugger/releases && test -w /srv/video-api-debugger/deploy.lock && printf \"RELEASE_DIRECTORY_AND_LOCK_WRITABLE\\n\""
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:04:41.290Z",
+      "finishedAt": "2026-10-05T14:04:41.627Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "prepare-permissions.log"
+    },
+    {
+      "name": "protected-switch-prepare",
+      "command": "ssh",
+      "args": [
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=12",
+        "root@42.193.221.253",
+        "set -e; test ! -e /root/sd2-active-reaction-icons-20261005-2201-0dde1ca5-switch.sh; install -m 700 -o root -g root /srv/video-api-debugger/releases/3fae527e7cdeb07fb4e20cdf85966a3892ef2132/docs/materials/2026-10-05-active-reaction-icons/switch.sh /root/sd2-active-reaction-icons-20261005-2201-0dde1ca5-switch.sh; printf \"%s  %s\\n\" 13d743575d4b2793dccd9f5a69a6330135d5c682923fd16e7a38c4acdb063153 /root/sd2-active-reaction-icons-20261005-2201-0dde1ca5-switch.sh | sha256sum -c -; test \"$(stat -c %U /root/sd2-active-reaction-icons-20261005-2201-0dde1ca5-switch.sh)\" = root; printf \"PROTECTED_WEB_SWITCH_READY\\n\""
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:10:48.064Z",
+      "finishedAt": "2026-10-05T14:10:48.345Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "protected-switch-prepare.log"
+    },
+    {
+      "name": "push",
+      "command": "git",
+      "args": [
+        "push",
+        "--atomic",
+        "origin",
+        "3fae527e7cdeb07fb4e20cdf85966a3892ef2132:refs/heads/codex/avatar-generator-20261005",
+        "refs/tags/v0.43.4",
+        "refs/tags/rollback/active-reaction-icons-20261005-v0.43.3"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:08:43.456Z",
+      "finishedAt": "2026-10-05T14:09:25.220Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "push.log"
+    },
+    {
+      "name": "release-tag",
+      "command": "git",
+      "args": [
+        "tag",
+        "-a",
+        "v0.43.4",
+        "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+        "-m",
+        "Active like and favorite overlay icons remain visible; validated production candidate d3AOx5AwMdobt6iDbMTL0"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:08:41.727Z",
+      "finishedAt": "2026-10-05T14:08:41.986Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "release-tag.log"
+    },
+    {
+      "name": "release-window-candidate",
+      "command": "node",
+      "args": [
+        "docs/materials/2026-10-05-active-reaction-icons/release-window.mjs",
+        "renew",
+        "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+        "sd2-active-reaction-icons-20261005-2201-0dde1ca5"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:05:48.872Z",
+      "finishedAt": "2026-10-05T14:05:49.764Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "release-window-candidate.log"
+    },
+    {
+      "name": "release-window-finish",
+      "command": "node",
+      "args": [
+        "docs/materials/2026-10-05-active-reaction-icons/release-window.mjs",
+        "finish",
+        "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+        "sd2-active-reaction-icons-20261005-2201-0dde1ca5"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:12:31.821Z",
+      "finishedAt": "2026-10-05T14:12:32.567Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "release-window-finish.log"
+    },
+    {
+      "name": "release-window-start",
+      "command": "node",
+      "args": [
+        "docs/materials/2026-10-05-active-reaction-icons/release-window.mjs",
+        "start",
+        "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+        "sd2-active-reaction-icons-20261005-2201-0dde1ca5"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:02:33.866Z",
+      "finishedAt": "2026-10-05T14:02:34.474Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "release-window-start.log"
+    },
+    {
+      "name": "release-window-switch",
+      "command": "node",
+      "args": [
+        "docs/materials/2026-10-05-active-reaction-icons/release-window.mjs",
+        "renew",
+        "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+        "sd2-active-reaction-icons-20261005-2201-0dde1ca5"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:10:22.740Z",
+      "finishedAt": "2026-10-05T14:10:23.543Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "release-window-switch.log"
+    },
+    {
+      "name": "remote-refs-final",
+      "command": "git",
+      "args": [
+        "ls-remote",
+        "origin",
+        "refs/heads/codex/avatar-generator-20261005",
+        "refs/tags/v0.43.4",
+        "refs/tags/v0.43.4^{}",
+        "refs/tags/rollback/active-reaction-icons-20261005-v0.43.3",
+        "refs/tags/rollback/active-reaction-icons-20261005-v0.43.3^{}",
+        "refs/tags/v0.43.3",
+        "refs/tags/v0.43.3^{}",
+        "refs/tags/release/v0.43.3-avatar-one-click-final",
+        "refs/tags/release/v0.43.3-avatar-one-click-final^{}"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:09:55.887Z",
+      "finishedAt": "2026-10-05T14:09:56.935Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "remote-refs-final.log"
+    },
+    {
+      "name": "remote-refs-validate",
+      "command": "node",
+      "args": [
+        "--input-type=module",
+        "-e",
+        "import fs from 'node:fs';const e='docs/materials/2026-10-05-active-reaction-icons/';const p=JSON.parse(fs.readFileSync(e+'push.command.json'));const q=JSON.parse(fs.readFileSync(e+'remote-refs-final.command.json'));if(p.exitCode!==0||q.exitCode!==0||q.startedAt<=p.finishedAt)throw Error('Push completion/ref-check ordering failure');const refs=Object.fromEntries(fs.readFileSync(e+'remote-refs-final.log','utf8').trim().split('\\n').map(line=>{const [sha,ref]=line.split(/\\s+/);return[ref,sha]}));const expected={'refs/heads/codex/avatar-generator-20261005':'3fae527e7cdeb07fb4e20cdf85966a3892ef2132','refs/tags/v0.43.4^{}':'3fae527e7cdeb07fb4e20cdf85966a3892ef2132','refs/tags/rollback/active-reaction-icons-20261005-v0.43.3^{}':'0941beacd2cf71b1d02f1111470d804f4996b3f4','refs/tags/release/v0.43.3-avatar-one-click-final^{}':'0941beacd2cf71b1d02f1111470d804f4996b3f4','refs/tags/v0.43.3^{}':'f8fb58431555082ddc842611be05531aad92c783'};for(const [ref,sha]of Object.entries(expected))if(refs[ref]!==sha)throw Error('Remote ref mismatch '+ref);const proof={pushExitCode:p.exitCode,pushCompletedAt:p.finishedAt,refsStartedAt:q.startedAt,refsVerifiedAt:q.finishedAt,refs,expected,verifiedAfterPush:true};fs.writeFileSync(e+'remote-refs-proof.json',JSON.stringify(proof,null,2));console.log(JSON.stringify(proof));"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:10:22.396Z",
+      "finishedAt": "2026-10-05T14:10:22.614Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "remote-refs-validate.log"
+    },
+    {
+      "name": "remote-refs",
+      "command": "git",
+      "args": [
+        "ls-remote",
+        "origin",
+        "refs/heads/codex/avatar-generator-20261005",
+        "refs/tags/v0.43.4",
+        "refs/tags/v0.43.4^{}",
+        "refs/tags/rollback/active-reaction-icons-20261005-v0.43.3",
+        "refs/tags/rollback/active-reaction-icons-20261005-v0.43.3^{}",
+        "refs/tags/v0.43.3",
+        "refs/tags/v0.43.3^{}",
+        "refs/tags/release/v0.43.3-avatar-one-click-final",
+        "refs/tags/release/v0.43.3-avatar-one-click-final^{}"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:09:19.830Z",
+      "finishedAt": "2026-10-05T14:09:20.944Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "remote-refs.log"
+    },
+    {
+      "name": "remote-tag-precheck",
+      "command": "git",
+      "args": [
+        "ls-remote",
+        "origin",
+        "refs/heads/codex/avatar-generator-20261005",
+        "refs/tags/v0.43.4",
+        "refs/tags/v0.43.4^{}",
+        "refs/tags/rollback/active-reaction-icons-20261005-v0.43.3",
+        "refs/tags/rollback/active-reaction-icons-20261005-v0.43.3^{}"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:01:38.601Z",
+      "finishedAt": "2026-10-05T14:01:41.905Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "remote-tag-precheck.log"
+    },
+    {
+      "name": "rollback-tag",
+      "command": "git",
+      "args": [
+        "tag",
+        "-a",
+        "rollback/active-reaction-icons-20261005-v0.43.3",
+        "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+        "-m",
+        "Rollback before active reaction icons: v0.43.3 build D7veEEW5tSA1MsaVkxWwm"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:08:42.051Z",
+      "finishedAt": "2026-10-05T14:08:43.393Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "rollback-tag.log"
+    },
+    {
+      "name": "script-syntax",
+      "command": "bash",
+      "args": [
+        "-n",
+        "docs/materials/2026-10-05-active-reaction-icons/archive.sh",
+        "docs/materials/2026-10-05-active-reaction-icons/candidate.sh",
+        "docs/materials/2026-10-05-active-reaction-icons/switch.sh"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:01:08.202Z",
+      "finishedAt": "2026-10-05T14:01:08.290Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "script-syntax.log"
+    },
+    {
+      "name": "server-closure",
+      "command": "ssh",
+      "args": [
+        "-o",
+        "BatchMode=yes",
+        "gouki@42.193.221.253",
+        "set -e; test \"$(cat /srv/video-api-debugger/app/.deployed-commit)\" = 3fae527e7cdeb07fb4e20cdf85966a3892ef2132; test \"$(cat /srv/video-api-debugger/app/.next-prod/BUILD_ID)\" = d3AOx5AwMdobt6iDbMTL0; test \"$(cat /srv/video-api-debugger/app/.next-prod-prev-active-reaction-icons-3fae527/BUILD_ID)\" = D7veEEW5tSA1MsaVkxWwm; systemctl is-active sd2-gray.service sd2-image-studio.service; systemctl show sd2-image-studio.service -p MainPID; node --input-type=module - <<'JS'\nconst checks=[];for(const pathname of [\"/api/release\",\"/api/config\",\"/api/health\",\"/login\"]){const r=await fetch(\"http://127.0.0.1:3302\"+pathname,{signal:AbortSignal.timeout(15000)});if(r.status!==200)throw Error(pathname+\" \"+r.status);if(pathname===\"/api/release\"){const v=await r.json();if(v.version!==\"0.43.4\")throw Error(\"Local version mismatch\");checks.push({pathname,status:r.status,version:v.version});}else if(pathname===\"/api/health\"){const v=await r.json();if(!v.ok)throw Error(\"Local health failed\");checks.push({pathname,status:r.status,ok:v.ok});}else{await r.arrayBuffer();checks.push({pathname,status:r.status});}}console.log(JSON.stringify({localHttpChecks:checks,checkedAt:new Date().toISOString()}));\nJS"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:12:30.028Z",
+      "finishedAt": "2026-10-05T14:12:30.551Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "server-closure.log"
+    },
+    {
+      "name": "service-permissions",
+      "command": "ssh",
+      "args": [
+        "-o",
+        "BatchMode=yes",
+        "gouki@42.193.221.253",
+        "sudo -n -l"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:01:06.020Z",
+      "finishedAt": "2026-10-05T14:01:06.366Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "service-permissions.log"
+    },
+    {
+      "name": "source-proof",
+      "command": "node",
+      "args": [
+        "docs/materials/2026-10-05-active-reaction-icons/source-proof.mjs",
+        "source",
+        ".",
+        "unused",
+        "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+        "docs/materials/2026-10-05-active-reaction-icons/local-source.json"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T13:59:48.445Z",
+      "finishedAt": "2026-10-05T13:59:49.012Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "source-proof.log"
+    },
+    {
+      "name": "switch-evidence",
+      "command": "scp",
+      "args": [
+        "-o",
+        "BatchMode=yes",
+        "gouki@42.193.221.253:/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/pre-switch-source.json",
+        "gouki@42.193.221.253:/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/pre-switch-boundary.json",
+        "gouki@42.193.221.253:/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/pre-switch-candidate.json",
+        "gouki@42.193.221.253:/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/server-source.json",
+        "gouki@42.193.221.253:/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/public.json",
+        "gouki@42.193.221.253:/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/runtime.json",
+        "docs/materials/2026-10-05-active-reaction-icons/"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:12:28.973Z",
+      "finishedAt": "2026-10-05T14:12:31.627Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "switch-evidence.log"
+    },
+    {
+      "name": "switch",
+      "command": "ssh",
+      "args": [
+        "-o",
+        "BatchMode=yes",
+        "root@42.193.221.253",
+        "set -e; printf \"%s  %s\\n\" 13d743575d4b2793dccd9f5a69a6330135d5c682923fd16e7a38c4acdb063153 /root/sd2-active-reaction-icons-20261005-2201-0dde1ca5-switch.sh | sha256sum -c -; bash /root/sd2-active-reaction-icons-20261005-2201-0dde1ca5-switch.sh 3fae527e7cdeb07fb4e20cdf85966a3892ef2132 0941beacd2cf71b1d02f1111470d804f4996b3f4 D7veEEW5tSA1MsaVkxWwm /tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:11:03.308Z",
+      "finishedAt": "2026-10-05T14:11:06.956Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "switch.log"
+    },
+    {
+      "name": "tracked-clean",
+      "command": "git",
+      "args": [
+        "diff",
+        "--exit-code",
+        "HEAD"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:08:40.190Z",
+      "finishedAt": "2026-10-05T14:08:41.624Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "tracked-clean.log"
+    },
+    {
+      "name": "upload-directory",
+      "command": "ssh",
+      "args": [
+        "-o",
+        "BatchMode=yes",
+        "gouki@42.193.221.253",
+        "test ! -e /tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5 && mkdir /tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5 && test \"$(stat -c %U /tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5)\" = gouki"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:04:01.544Z",
+      "finishedAt": "2026-10-05T14:04:01.855Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "upload-directory.log"
+    },
+    {
+      "name": "upload",
+      "command": "scp",
+      "args": [
+        "-o",
+        "BatchMode=yes",
+        "/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/source-3fae527e7cdeb07fb4e20cdf85966a3892ef2132.tar.gz",
+        "/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/rollback-0941beacd2cf71b1d02f1111470d804f4996b3f4.tar.gz",
+        "docs/materials/2026-10-05-active-reaction-icons/candidate.sh",
+        "gouki@42.193.221.253:/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/"
+      ],
+      "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+      "startedAt": "2026-10-05T14:05:21.998Z",
+      "finishedAt": "2026-10-05T14:05:28.000Z",
+      "exitCode": 0,
+      "signal": null,
+      "log": "upload.log"
+    }
+  ],
+  "additionalToolChecks": [
+    {
+      "command": "node --check source-proof.mjs",
+      "exitCode": 0
+    },
+    {
+      "command": "node --check release-window.mjs",
+      "exitCode": 0
+    },
+    {
+      "command": "node --check run-command.mjs",
+      "exitCode": 0
+    }
+  ],
+  "inspectionNotes": [
+    "An initial combined apply_patch verification failed before edits due to a shortened TSX line; corrected using the full existing line; final diff is the authoritative write set.",
+    "A guessed release-reservation-guard.mjs read returned file-not-found; actual existing recent-activity and registry APIs were read and reused.",
+    "remote-refs.log is a preliminary read made while push was still running and showed old refs; it was discarded as release authority. remote-refs-final.log ran after actual push exit 0, verified all peeled refs, and is the only switch prerequisite.",
+    "local-source.json is a pre-commit dirty-source inspection with base commit label; committed-source.json and candidate/server/public proofs identify the final exact commit."
+  ],
+  "cost": 0,
+  "businessCalls": 0,
+  "businessApiWrites": 0,
+  "paidCalls": 0,
+  "databaseWrites": 0,
+  "migrations": 0,
+  "dependencyInstalls": 0,
+  "browserRuns": 0,
+  "functionalTests": 0,
+  "agentsDispatched": 0,
+  "otherTaskMessages": 0,
+  "preserved": [
+    "All pre-existing untracked build/evidence/private storage files",
+    "All four previous feature source implementations",
+    "Image worker PID 259902 and service without restart",
+    "Original storage/uploads/videos symlinks; env/node_modules/runtime/build/data protected by archive/sync exclusions",
+    "Old v0.43.3 candidate tag and final one-click release tag; no tag overwrite or force push",
+    "Existing automatic update detection, later dedupe, manual recheck and safe refresh implementation"
+  ],
+  "acceptance": {
+    "deploymentChecks": "Completed",
+    "actualVisualAndBusinessResult": "Pending user manual acceptance",
+    "notPerformed": [
+      "Browser/DOM/screenshot checks",
+      "Real like/favorite/share writes",
+      "Paid media/LLM calls",
+      "Automated functional regression",
+      "Update dialog interaction test",
+      "Production rollback drill"
+    ],
+    "evidenceLimit": "Source cascade review and exact CSS/source/build/HTTP hashes prove the delivered artifact, not rendered icon visibility or user workflow success"
+  },
+  "ownedExecSessions": {
+    "ids": [
+      53446,
+      78700,
+      38744,
+      96489,
+      92065,
+      93106,
+      49692,
+      96012,
+      81616,
+      55089,
+      67892,
+      55639,
+      87188
+    ],
+    "ended": true,
+    "remaining": 0
+  },
+  "risks": [
+    "Manual visual/interaction acceptance outstanding",
+    "Unrelated existing build warnings retained"
+  ],
+  "outsideAllowedScope": false,
+  "parentArchive": "Evidence is frozen in worktree docs/materials/2026-10-05-active-reaction-icons; parent will copy and register in formal root; executor does not claim formal-root archiving complete",
+  "generatedAt": "2026-10-05T14:16:24.199Z",
+  "evidenceFreeze": "Final evidence integrity manifest and read-only file permissions; no later writes planned"
+}

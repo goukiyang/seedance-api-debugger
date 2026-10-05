@@ -1,0 +1,15 @@
+{
+  "command": "bash",
+  "args": [
+    "docs/materials/2026-10-05-active-reaction-icons/archive.sh",
+    "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+    "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+    "sd2-active-reaction-icons-20261005-2201-0dde1ca5"
+  ],
+  "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "startedAt": "2026-10-05T14:02:34.616Z",
+  "finishedAt": "2026-10-05T14:05:05.601Z",
+  "exitCode": 0,
+  "signal": null,
+  "log": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005/docs/materials/2026-10-05-active-reaction-icons/archives.log"
+}

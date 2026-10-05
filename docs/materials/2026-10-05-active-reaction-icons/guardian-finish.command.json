@@ -1,0 +1,18 @@
+{
+  "command": "node",
+  "args": [
+    "/Volumes/Data/Projects/project-guardian/bin/project-guardian.js",
+    "finish",
+    "--cwd",
+    "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+    "--intent",
+    "E1/E2：点过赞或收藏的左上角激活图标固定显示，不因鼠标移开消失。共享CSS与必要真实标记，安全发布0.43.4；仅候选构建、source/CSS哈希和服务检查，用户手动验收，不做浏览器或业务功能测试。",
+    "--json"
+  ],
+  "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "startedAt": "2026-10-05T14:12:30.669Z",
+  "finishedAt": "2026-10-05T14:12:36.239Z",
+  "exitCode": 0,
+  "signal": null,
+  "log": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005/docs/materials/2026-10-05-active-reaction-icons/guardian-finish.log"
+}

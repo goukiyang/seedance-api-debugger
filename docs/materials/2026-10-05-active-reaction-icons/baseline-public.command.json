@@ -1,0 +1,14 @@
+{
+  "command": "node",
+  "args": [
+    "--input-type=module",
+    "-e",
+    "const r=await fetch('https://sd2.youdooart.com/api/release',{cache:'no-store'}); const data=await r.json();if(r.status!==200||data.version!=='0.43.3'||r.headers.get('x-sd2-origin')!=='server-42-193')throw Error('Live baseline mismatch');console.log(JSON.stringify({status:r.status,origin:r.headers.get('x-sd2-origin'),release:data,checkedAt:new Date().toISOString()}));"
+  ],
+  "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "startedAt": "2026-10-05T14:03:03.165Z",
+  "finishedAt": "2026-10-05T14:03:03.369Z",
+  "exitCode": 0,
+  "signal": null,
+  "log": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005/docs/materials/2026-10-05-active-reaction-icons/baseline-public.log"
+}

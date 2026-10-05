@@ -1,0 +1,19 @@
+{
+  "command": "git",
+  "args": [
+    "diff",
+    "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+    "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+    "--",
+    "package.json",
+    "src/lib/release.ts",
+    "src/components/content-reactions/reactions.module.css",
+    "src/components/content-reactions/ContentReactions.tsx"
+  ],
+  "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "startedAt": "2026-10-05T14:02:35.765Z",
+  "finishedAt": "2026-10-05T14:02:38.620Z",
+  "exitCode": 0,
+  "signal": null,
+  "log": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005/docs/materials/2026-10-05-active-reaction-icons/final-source-diff.log"
+}

@@ -1,0 +1,17 @@
+{
+  "command": "ssh",
+  "args": [
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=12",
+    "root@42.193.221.253",
+    "set -e; test ! -e /root/sd2-active-reaction-icons-20261005-2201-0dde1ca5-switch.sh; install -m 700 -o root -g root /srv/video-api-debugger/releases/3fae527e7cdeb07fb4e20cdf85966a3892ef2132/docs/materials/2026-10-05-active-reaction-icons/switch.sh /root/sd2-active-reaction-icons-20261005-2201-0dde1ca5-switch.sh; printf \"%s  %s\\n\" 13d743575d4b2793dccd9f5a69a6330135d5c682923fd16e7a38c4acdb063153 /root/sd2-active-reaction-icons-20261005-2201-0dde1ca5-switch.sh | sha256sum -c -; test \"$(stat -c %U /root/sd2-active-reaction-icons-20261005-2201-0dde1ca5-switch.sh)\" = root; printf \"PROTECTED_WEB_SWITCH_READY\\n\""
+  ],
+  "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "startedAt": "2026-10-05T14:10:48.064Z",
+  "finishedAt": "2026-10-05T14:10:48.345Z",
+  "exitCode": 0,
+  "signal": null,
+  "log": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005/docs/materials/2026-10-05-active-reaction-icons/protected-switch-prepare.log"
+}

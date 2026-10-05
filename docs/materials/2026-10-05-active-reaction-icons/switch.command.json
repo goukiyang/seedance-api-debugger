@@ -1,0 +1,15 @@
+{
+  "command": "ssh",
+  "args": [
+    "-o",
+    "BatchMode=yes",
+    "root@42.193.221.253",
+    "set -e; printf \"%s  %s\\n\" 13d743575d4b2793dccd9f5a69a6330135d5c682923fd16e7a38c4acdb063153 /root/sd2-active-reaction-icons-20261005-2201-0dde1ca5-switch.sh | sha256sum -c -; bash /root/sd2-active-reaction-icons-20261005-2201-0dde1ca5-switch.sh 3fae527e7cdeb07fb4e20cdf85966a3892ef2132 0941beacd2cf71b1d02f1111470d804f4996b3f4 D7veEEW5tSA1MsaVkxWwm /tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5"
+  ],
+  "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "startedAt": "2026-10-05T14:11:03.308Z",
+  "finishedAt": "2026-10-05T14:11:06.956Z",
+  "exitCode": 0,
+  "signal": null,
+  "log": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005/docs/materials/2026-10-05-active-reaction-icons/switch.log"
+}

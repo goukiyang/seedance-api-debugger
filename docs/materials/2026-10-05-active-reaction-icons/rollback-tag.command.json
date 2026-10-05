@@ -1,0 +1,17 @@
+{
+  "command": "git",
+  "args": [
+    "tag",
+    "-a",
+    "rollback/active-reaction-icons-20261005-v0.43.3",
+    "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+    "-m",
+    "Rollback before active reaction icons: v0.43.3 build D7veEEW5tSA1MsaVkxWwm"
+  ],
+  "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "startedAt": "2026-10-05T14:08:42.051Z",
+  "finishedAt": "2026-10-05T14:08:43.393Z",
+  "exitCode": 0,
+  "signal": null,
+  "log": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005/docs/materials/2026-10-05-active-reaction-icons/rollback-tag.log"
+}

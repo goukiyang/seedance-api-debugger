@@ -1,0 +1,17 @@
+{
+  "command": "node",
+  "args": [
+    "docs/materials/2026-10-05-active-reaction-icons/source-proof.mjs",
+    "source",
+    ".",
+    "unused",
+    "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+    "docs/materials/2026-10-05-active-reaction-icons/local-source.json"
+  ],
+  "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "startedAt": "2026-10-05T13:59:48.445Z",
+  "finishedAt": "2026-10-05T13:59:49.012Z",
+  "exitCode": 0,
+  "signal": null,
+  "log": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005/docs/materials/2026-10-05-active-reaction-icons/source-proof.log"
+}

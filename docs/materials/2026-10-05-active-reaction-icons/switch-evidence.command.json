@@ -1,0 +1,20 @@
+{
+  "command": "scp",
+  "args": [
+    "-o",
+    "BatchMode=yes",
+    "gouki@42.193.221.253:/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/pre-switch-source.json",
+    "gouki@42.193.221.253:/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/pre-switch-boundary.json",
+    "gouki@42.193.221.253:/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/pre-switch-candidate.json",
+    "gouki@42.193.221.253:/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/server-source.json",
+    "gouki@42.193.221.253:/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/public.json",
+    "gouki@42.193.221.253:/tmp/sd2-active-reaction-icons-20261005-2201-0dde1ca5/runtime.json",
+    "docs/materials/2026-10-05-active-reaction-icons/"
+  ],
+  "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "startedAt": "2026-10-05T14:12:28.973Z",
+  "finishedAt": "2026-10-05T14:12:31.627Z",
+  "exitCode": 0,
+  "signal": null,
+  "log": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005/docs/materials/2026-10-05-active-reaction-icons/switch-evidence.log"
+}

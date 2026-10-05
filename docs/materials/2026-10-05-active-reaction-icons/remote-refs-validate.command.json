@@ -1,0 +1,14 @@
+{
+  "command": "node",
+  "args": [
+    "--input-type=module",
+    "-e",
+    "import fs from 'node:fs';const e='docs/materials/2026-10-05-active-reaction-icons/';const p=JSON.parse(fs.readFileSync(e+'push.command.json'));const q=JSON.parse(fs.readFileSync(e+'remote-refs-final.command.json'));if(p.exitCode!==0||q.exitCode!==0||q.startedAt<=p.finishedAt)throw Error('Push completion/ref-check ordering failure');const refs=Object.fromEntries(fs.readFileSync(e+'remote-refs-final.log','utf8').trim().split('\\n').map(line=>{const [sha,ref]=line.split(/\\s+/);return[ref,sha]}));const expected={'refs/heads/codex/avatar-generator-20261005':'3fae527e7cdeb07fb4e20cdf85966a3892ef2132','refs/tags/v0.43.4^{}':'3fae527e7cdeb07fb4e20cdf85966a3892ef2132','refs/tags/rollback/active-reaction-icons-20261005-v0.43.3^{}':'0941beacd2cf71b1d02f1111470d804f4996b3f4','refs/tags/release/v0.43.3-avatar-one-click-final^{}':'0941beacd2cf71b1d02f1111470d804f4996b3f4','refs/tags/v0.43.3^{}':'f8fb58431555082ddc842611be05531aad92c783'};for(const [ref,sha]of Object.entries(expected))if(refs[ref]!==sha)throw Error('Remote ref mismatch '+ref);const proof={pushExitCode:p.exitCode,pushCompletedAt:p.finishedAt,refsStartedAt:q.startedAt,refsVerifiedAt:q.finishedAt,refs,expected,verifiedAfterPush:true};fs.writeFileSync(e+'remote-refs-proof.json',JSON.stringify(proof,null,2));console.log(JSON.stringify(proof));"
+  ],
+  "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "startedAt": "2026-10-05T14:10:22.396Z",
+  "finishedAt": "2026-10-05T14:10:22.614Z",
+  "exitCode": 0,
+  "signal": null,
+  "log": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005/docs/materials/2026-10-05-active-reaction-icons/remote-refs-validate.log"
+}

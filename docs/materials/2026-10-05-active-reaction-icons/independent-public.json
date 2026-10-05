@@ -1,0 +1,16 @@
+{
+  "commit": "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+  "version": "0.43.4",
+  "candidateBuild": "d3AOx5AwMdobt6iDbMTL0",
+  "origin": "server-42-193",
+  "css": [
+    {
+      "file": "static/css/cb63982acf8b32ce.css",
+      "status": 200,
+      "sha256": "83934bd0ac4c56e09525bbf3b31e02b1e6025fade27eba1238839b780f2c0fbe",
+      "matchesCandidate": true
+    }
+  ],
+  "checkedAt": "2026-10-05T14:13:12.547Z",
+  "evidenceLimit": "Anonymous HTTP/CSS hash proof; not visual or functional acceptance"
+}

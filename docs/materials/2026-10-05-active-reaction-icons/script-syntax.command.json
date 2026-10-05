@@ -1,0 +1,15 @@
+{
+  "command": "bash",
+  "args": [
+    "-n",
+    "docs/materials/2026-10-05-active-reaction-icons/archive.sh",
+    "docs/materials/2026-10-05-active-reaction-icons/candidate.sh",
+    "docs/materials/2026-10-05-active-reaction-icons/switch.sh"
+  ],
+  "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "startedAt": "2026-10-05T14:01:08.202Z",
+  "finishedAt": "2026-10-05T14:01:08.290Z",
+  "exitCode": 0,
+  "signal": null,
+  "log": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005/docs/materials/2026-10-05-active-reaction-icons/script-syntax.log"
+}

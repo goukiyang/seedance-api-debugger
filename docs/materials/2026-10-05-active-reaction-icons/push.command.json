@@ -1,0 +1,17 @@
+{
+  "command": "git",
+  "args": [
+    "push",
+    "--atomic",
+    "origin",
+    "3fae527e7cdeb07fb4e20cdf85966a3892ef2132:refs/heads/codex/avatar-generator-20261005",
+    "refs/tags/v0.43.4",
+    "refs/tags/rollback/active-reaction-icons-20261005-v0.43.3"
+  ],
+  "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "startedAt": "2026-10-05T14:08:43.456Z",
+  "finishedAt": "2026-10-05T14:09:25.220Z",
+  "exitCode": 0,
+  "signal": null,
+  "log": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005/docs/materials/2026-10-05-active-reaction-icons/push.log"
+}

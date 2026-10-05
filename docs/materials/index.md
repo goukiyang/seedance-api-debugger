@@ -185,6 +185,12 @@ L1：加载动效独立打样，已完成。完成标准：可交互比较各状
 
 2026-10-05追加“不要反复确认/生成按钮放参考图下方、补充文案上方”，随后明确随机人物“写了正文，就按正文理解直接出”（用户当前对话文字，无新附件/原文件名，资料v1.1.0；替代本条先前仅模板移位范围）：video-api-debugger；关键词：D1/D2/D3、生成图片、按钮位置、参考图、补充文案、正文理解、一键出图、直接提交。完整原话、实际模板共用入口、费用/未知受理/未保存保护、源码及React来源、发布检查与手动验收边界见[同一工单v1.1.0 D1/D2节](../../tasks/todo/2026-10-02-feedback-primary-navigation.md#d1d2图片生成按钮位置与重复确认2026-10-05)；人物普通分析/报价分层确认由一次显式生成替代，输入本身不生成、变价/缓存/失败/未知及旧草稿保护见[人物工单v1.3.0第10节](../../tasks/todo/2026-10-05-avatar-intent-generation-flow.md#10-人物正文一键出图2026-10-05)。已部署v0.43.3/0941beac/BUILD D7veEEW5tSA1MsaVkxWwm，D1/D3已源实现、D2发布检查完成，实际布局/一键出图待用户手动验收。最终候选内置类型/lint、789源码、3新chunk与公网版本/回退/远端先核后切通过，worker未重启；费用0，无新增付费/浏览器验收。正式根[逐文件交付](2026-10-05-generation-toolbar/delivery.json)、[最终统一diff](2026-10-05-generation-toolbar/unified.diff)、[源码自查](2026-10-05-generation-toolbar/source-review.json)、[公网证据](2026-10-05-generation-toolbar/server-public-proof.json)同目录归档，关键报告/diff复制一致性核对；旧候选source.diff单独保留，辅助headers/脚本本机不逐项哈希。原始v0.43.3标签保留初候选，实际release/v0.43.3-avatar-one-click-final指最终0941，细节见工单。沿用上方R1原图及原校验，仅作为旧提醒参考，不当新布局/一键效果证据、不公开媒体或原模型回复。
 
+### 激活点赞收藏图标常显（2026-10-05）
+
+资料名称：激活点赞收藏图标常显需求；接收2026-10-05；来源为用户当前对话文字，原文件名不适用，无新附件；项目video-api-debugger；关键词：E1/E2、左上角、点赞、收藏、激活、悬停、ContentReactions。完整原话：“点过赞的或者收藏的左上角的激活图标固定，不因为鼠标没移上去而消失”。资料v1.0.0，为新增显示规则，不替代既有点赞归属/收藏私密/权限或数据要求。
+
+用途：只在媒体卡共用覆盖层使真实已激活图标常显，未激活按钮仍按原悬停/聚焦/触屏规则；完整范围、源码根因与进度见[同一工单v1.2.0 E1/E2](../../tasks/todo/2026-10-02-feedback-primary-navigation.md#e1e2激活点赞收藏图标常显2026-10-05)。正文与当前源码可读性已核，无新用户文件需要复制；已部署v0.43.4/3fae527/BUILD d3AOx5AwMdobt6iDbMTL0，E2候选内置检查及公网新共享CSS/版本/服务、回退/远端先核后切通过。仅四份应用文件，无数据API/DB/权限改动；费用0，worker未重启，真实鼠标移开及取消/触屏效果待用户手动验收，不以CSS/构建检查冒称实演。正式证据目录为`/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-05-active-reaction-icons/`：[完整报告](2026-10-05-active-reaction-icons/delivery.json)、[统一源diff](2026-10-05-active-reaction-icons/source.diff)、[源码自查](2026-10-05-active-reaction-icons/source-review.json)、[候选](2026-10-05-active-reaction-icons/candidate.json)、[公网新CSS](2026-10-05-active-reaction-icons/public.json)、[远端refs](2026-10-05-active-reaction-icons/remote-refs-proof.json)、[运行与回退](2026-10-05-active-reaction-icons/runtime.json)。执行者已停止，冻结完整95份文件已复制至正式根，九份关键报告/diff字节一致且版本/BUILD相符，diff对应真实部署前后Git树；辅助日志/脚本按风险复用，不逐项哈希。资料v1.0.0及来源不变，无替代私有原图/先前人物工单，原构建警告与初步refs日志差异见完整报告，不公开私有媒体或凭据。
+
 ### 弹窗位置反馈
 
 2026-10-03用户明确要求“弹窗不要弹角落，要弹就弹在触发按键范围附近”，归属video-api-debugger；关键词：P1、角落、按钮附近、确认框、命名框、小屏、键盘。复用上方R1原件v1，来源和原文件名不变、无替代版本；截图左上角弹窗为定位参考。文件未变，复用可读性/完整性校验。[既有工单P1](../../tasks/todo/2026-10-02-feedback-primary-navigation.md#p1统一弹窗定位2026-10-03)记录范围与进度；原图仅本地不公开。

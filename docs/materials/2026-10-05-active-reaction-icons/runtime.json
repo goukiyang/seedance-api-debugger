@@ -1,0 +1,18 @@
+{
+  "base": "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+  "commit": "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+  "oldBuild": "D7veEEW5tSA1MsaVkxWwm",
+  "buildId": "d3AOx5AwMdobt6iDbMTL0",
+  "rollbackBuild": "/srv/video-api-debugger/app/.next-prod-prev-active-reaction-icons-3fae527",
+  "rollbackSource": "/srv/video-api-debugger/releases/0941beacd2cf71b1d02f1111470d804f4996b3f4-active-reaction-icons-rollback",
+  "workerPid": 259902,
+  "workerRestarted": false,
+  "persistentLinks": {
+    "storage": "/data/video-api-debugger/var-lib/storage",
+    "public/uploads": "/data/video-api-debugger/var-lib/uploads",
+    "public/videos": "/data/video-api-debugger/var-lib/videos"
+  },
+  "businessCalls": 0,
+  "paidCalls": 0,
+  "databaseWrites": 0
+}

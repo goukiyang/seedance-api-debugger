@@ -3,13 +3,13 @@
 | 字段 | 内容 |
 |---|---|
 | 项目 | video-api-debugger |
-| 工单版本 | v1.1.0 |
+| 工单版本 | v1.2.0 |
 | 正式版本来源 | package.json、src/lib/release.ts、生产/api/release；开工v0.36.2，发布前重新锁定 |
 | 正式资料目录 | /Volumes/Data/Projects/video-api-debugger |
-| 实施/部署源 | 历史批次来源见对应章节；本轮D1/D2/D3为/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005，codex/avatar-generator-20261005；开工03aa5e8/v0.43.2，tracked clean；正式根旧src不部署 |
+| 实施/部署源 | 历史批次来源见对应章节；本轮E1/E2为/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005，codex/avatar-generator-20261005；开工0941beac/v0.43.3，tracked clean；正式根旧src不部署 |
 | 目标 | https://sd2.youdooart.com/template-studio?type=image；I4确切入口https://sd2.youdooart.com/generate |
-| 状态 | I1-I5及N1/N2历史已部署；R1图片生成重复确认历史v0.36.5已部署、待用户手动验收；G1上游HTTP 502内部原因未知，未修复；本轮D1/D3已实现部署v0.43.3，待用户手动验收，D2发布检查已完成；费用0 |
-| 风险/验证等级 | 真实debug+UI守门员L3，生产切换按L4保护；旧general/L0不采纳；禁止主动浏览器/业务验收与独立审核线程 |
+| 状态 | 历史I1-I5/N1/N2/R1/D1/D3已部署，实际效果待用户手动验收；G1上游HTTP 502内部原因未知，未修复；本轮E1已实现部署v0.43.4、待用户手动验收，E2发布检查已完成；费用0 |
+| 风险/验证等级 | 历史debug/人物主链按原章节L3；本轮共享显示源码L1，生产发布另做窗口与回退保护；禁止主动浏览器/业务验收与独立审核线程 |
 | 创建/最后更新 | 创建2026-10-03；最后更新2026-10-05，北京时间；文件名保留2026-10-02反馈日期 |
 
 ## 目标与完整原文
@@ -856,3 +856,40 @@ Git/发布：源码在codex/avatar-generator-20261005聚焦提交，必须等pus
 整批最终已部署v0.43.3 / 0941beacd2cf71b1d02f1111470d804f4996b3f4 / BUILD D7veEEW5tSA1MsaVkxWwm，D1/D3真实效果待用户手动验收、D2发布检查完成。候选首次类型问题修成等价比较，最终exact commit服务器候选build内置类型/lint通过；不覆盖旧v0.43.3候选标签，实际发布标签release/v0.43.3-avatar-one-click-final与分支均指0941，rollback指03aa5e8，push与refs先核再切。两个入口三份新chunk公网200/hash对应候选，789源码/BUILD对应正式产物，web/worker active且worker PID259902未重启，持久数据/环境原样、源码与旧构建回退点保留。匿名入口仍登录保护，未证明登录后布局/一键收费效果；已有升级提示仅核源码，不当实演。源/脚本问题与警告详见[人物同批最终记录](2026-10-05-avatar-intent-generation-flow.md#10-人物正文一键出图2026-10-05)。
 
 正式根同目录归[交付及逐文件命令](../../docs/materials/2026-10-05-generation-toolbar/delivery.json)、[最终统一diff](../../docs/materials/2026-10-05-generation-toolbar/unified.diff)、[时序费用源码自查](../../docs/materials/2026-10-05-generation-toolbar/source-review.json)及[公网新产物](../../docs/materials/2026-10-05-generation-toolbar/server-public-proof.json)，主Todo/资料索引同步。费用0，无模型/生成/浏览器/截图或自动功能回归，没有权限/点数/Provider/schema/依赖变化；真实冲突、变价、未知受理及旧草稿保护不撤销。守门员清单无阻塞，本轮无自身分级误判；归档/推送不包括原无关29行资产计划、私有用户图片或原回复。
+
+## E1/E2激活点赞收藏图标常显（2026-10-05）
+
+用户原话：“点过赞的或者收藏的左上角的激活图标固定，不因为鼠标没移上去而消失”。来源为当前本项目对话文字，无新附件。已明确实施与常规Git/安全发布，直接执行，不增加确认步骤；不是点赞/收藏数据重构、业务验收或付费调用授权。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| E1 | 固定激活图标 | 鼠标移开后，已点赞或收藏图标仍显示 | 进行中：已实现部署v0.43.4，待用户手动验收 |
+| E2 | 发布更新 | 构建、回退和公网检查完成 | 已完成 |
+
+已确认产品规则：媒体卡左上角真实已点赞或收藏的按钮各自常显，只激活其中一个不使所有未激活/分享按钮永久显示；取消相应操作后恢复原来的悬停/键盘聚焦显示。保留按钮原位置、固定尺寸和间距，不把两种激活状态叠在同一位置；触屏沿用原常显，忙碌/错误/重试与disabled样式和键盘访问保持，普通非覆盖层工具栏不受影响。
+
+代码根因：`src/components/content-reactions/reactions.module.css`的`.overlayControls`本身为`opacity: 0; pointer-events: none`；已有`:has(button[aria-pressed="true"])`只给父层加底色，真正让父层显示的选择器只覆盖hover/focus/busy/error，所以鼠标移开后激活按钮也随父层消失。直接让父层显示又会连未激活/分享按钮一起显示，需在同一覆盖层补齐父子显示规则。`ContentReactions.tsx`已经用真实服务端状态设置liked/favorited按钮`aria-pressed`及图标填充，不更改这些数据、账户隔离缓存、请求版本与幂等处理。
+
+实际共享使用处已读：`src/app/image-studio/studio.tsx`图片工作台、`src/app/assets/page.tsx`资源卡、`src/components/content-reactions/ContentCollections.tsx`内容合集；同一共享CSS覆盖，不按截图硬编码。既有全站点赞收藏LF01-LF06历史规则在源码工作区`tasks/todo.md`，收藏不公开人数/用户、点赞归属与权限均保持；本次不迁移或写数据库，不重复测试历史反应链路。正文E1/E2不与人物工单历史E1-E3混淆。
+
+方案复用现有CSS/`aria-pressed`/`:has`机制，无需新库；已阅读[MDN :has()官方示例](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Selectors/:has)的父子匹配和优先级说明，及[Chrome官方按aria-pressed选择父层的实际CSS示例](https://developer.chrome.com/blog/has-m105)。这里只参考公开实现方式，不安装/复制组件包，不声称已测所有旧浏览器。
+
+实施源锁定`/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005`、`codex/avatar-generator-20261005`、0941beacd2cf71b1d02f1111470d804f4996b3f4/v0.43.3，开工tracked clean；公网版本0.43.3/BUILD D7veEEW5tSA1MsaVkxWwm。沿用匹配的唯一implementer Boole负责不可合理拆分的共享显示修改、整批版本与安全发布；父级只正式记录/归档与目标Review，不同时改CSS、不派审核线程。允许应用文件为共享reactions.module.css、唯一版本package.json PATCH候选0.43.4、release.ts用户摘要；仅真实需要才增TSX最小标记，其他源保持。禁止改API、数据/权限、账户缓存、Provider/点数/生成、上传、worker、依赖/lock/env/schema或生产DB。
+
+整批源完成后统一检查：diff边界、CSS层叠自行Review（无激活/只点赞/只收藏/两者/取消、hover/focus/touch/busy/error/disabled及非覆盖层）、exact commit服务器隔离候选build内置类型/lint、Git先push exit0与远端分支/新发布/回退标签解引用、再安全切换。不写照抄实现的测试、不执行浏览器/截图/自动功能回归、真实点赞/收藏写入或模型调用。源码逻辑核对不冒称真实页面行为通过；用户手动验收E1效果。
+
+发布按当前server规则重锁实际commit/build及窗口占用，无漂移才用archive/独立候选；排除env/全部build/持久资产与DB，保护当前源码与构建回退、Web-only不重启图片worker。只有候选构建及本次共享CSS标记/静态hash通过才发正式标签，避免重复前批失败候选标签问题；不覆盖旧v0.43.3。切换后查源站/公网config/release/login、新共享CSS公网可达及匹配、服务健康与worker不变，不借旧头像JS证明此CSS改动。新证据目录`docs/materials/2026-10-05-active-reaction-icons/`由执行者形成并冻结后复制到正式根，登记关键报告/diff/版本一致性；辅助可重建文件不逐项哈希。
+
+守门员start已核路径、授权、Git与display-only目标，无阻塞；源显示修正L1，生产发布独立窗口/回退保护。工具的本地测试建议不覆盖本项目手动验收规则；无收费/外发私有媒体/权限扩张，本轮暂无自身分级误判。主Todo仅提交本轮E1/E2入口，无关29行资产计划保留。
+
+最终实现与发布：v0.43.4 / `3fae527e7cdeb07fb4e20cdf85966a3892ef2132` / BUILD `d3AOx5AwMdobt6iDbMTL0`已在正式服务器生效。应用四文件：reactions.module.css补齐父层激活显示、子按钮各自显示、上下文/触屏和disabled优先级；ContentReactions.tsx仅两处`data-reaction-action`标记，避免嵌套分享按钮的`aria-pressed`误触常显，不改状态/handler/事件隔离；package.json唯一PATCH0.43.4；release.ts用户更新摘要，已有升级比较/提醒逻辑不改。父级实际diff目标Review核对四种激活组合、取消及键盘/忙碌/错误/禁用/触屏/inline，无源码阻塞；不是浏览器功能验收。
+
+服务器候选`NEXT_DIST_DIR=.next-prod-candidate npm run build`退出0，包含内置lint/types；候选14:08:00UTC完成后才创建发布标签。源码branch/v0.43.4均解引用3fae527；`rollback/active-reaction-icons-20261005-v0.43.3`解引用0941，历史v0.43.3及实际最终标签未覆盖。push退出0于14:09:25UTC，refs于14:09:56UTC已核，再于14:11:03UTC切换，顺序证据完整。发布窗口认领及finish正常，无并发源漂移。原worker PID259902不变、web/worker active，storage/uploads/videos仍原持久目录，无业务API/DB写入/付费调用。
+
+新编译CSS `static/css/cb63982acf8b32ce.css`同时归属于`/assets/page`和`/template-studio/page`，含本次专用激活选择器；公网200且SHA256 `83934bd0ac4c56e09525bbf3b31e02b1e6025fade27eba1238839b780f2c0fbe`与候选/运行文件一致。源站与公网release/config/health/login均200，新版本/BUILD匹配；只证明正式新产物可获取，不证明登录后真实hover效果。回退源码保留在`/srv/video-api-debugger/releases/0941beacd2cf71b1d02f1111470d804f4996b3f4-active-reaction-icons-rollback`、回退构建在`.next-prod-prev-active-reaction-icons-3fae527`；未重启生成worker，不重做前批付费验收。
+
+关键证据入口为同批[源码自查](../../docs/materials/2026-10-05-active-reaction-icons/source-review.json)、[统一源diff](../../docs/materials/2026-10-05-active-reaction-icons/source.diff)、[候选](../../docs/materials/2026-10-05-active-reaction-icons/candidate.json)、[公网新CSS](../../docs/materials/2026-10-05-active-reaction-icons/public.json)、[远端先核后切](../../docs/materials/2026-10-05-active-reaction-icons/remote-refs-proof.json)、[运行与回退](../../docs/materials/2026-10-05-active-reaction-icons/runtime.json)。执行者冻结后归入正式根同名资料目录并核对关键报告/diff复制一致性，辅助日志/脚本不逐项哈希；归档不包含私有媒体、凭据或无关脏改。功能遗留仅E1真实页面鼠标移开、取消及触屏显示待用户手动验收；费用0，范围与授权无新增，升级弹窗本次仅复用源码，不冒称已实演。
+
+正式归档已完成：执行者确认全部命令会话结束、证据冻结后停止；完整95份记录/脚本/日志已复制至正式根`docs/materials/2026-10-05-active-reaction-icons/`。九份关键报告/diff与源副本字节一致，diff另与精确部署前后Git树一致；报告/候选/运行/公网版本、commit、BUILD及新CSS哈希相符，789源码只有上述四份应用文件变化。[完整交付与逐命令结果](../../docs/materials/2026-10-05-active-reaction-icons/delivery.json)、[冻结清单](../../docs/materials/2026-10-05-active-reaction-icons/delivery-integrity.json)已可访问；固定索引能按点赞/收藏/激活检索，凭据模式检查无命中，辅助文件没有全部重复计算哈希。
+
+遗留警告与过程差异不隐去：原有img/Hook/CSS构建警告仍在，构建退出0且没有本次新增业务代码。初步远端refs读取发生在push尚未结束时，只作历史日志；真正切换前使用push结束后的`remote-refs-final`与解引用核对，不把初步旧refs当已推送。完整报告保留无写入的apply_patch定位失败、猜测入口不存在及其修正，不改变最终产物。守门员实施侧finish退出0，工具按关键词列L3/live-action-needs-explicit-authorization；本轮已有明确代码/Git/安全发布授权，该提示不扩展为浏览器或业务验收许可，真实效果仍待手动。未启用额外审核或功能测试，本轮无自身分级误判。

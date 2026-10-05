@@ -1,0 +1,15 @@
+{
+  "command": "ssh",
+  "args": [
+    "-o",
+    "BatchMode=yes",
+    "gouki@42.193.221.253",
+    "set -e; test \"$(cat /srv/video-api-debugger/app/.deployed-commit)\" = 3fae527e7cdeb07fb4e20cdf85966a3892ef2132; test \"$(cat /srv/video-api-debugger/app/.next-prod/BUILD_ID)\" = d3AOx5AwMdobt6iDbMTL0; test \"$(cat /srv/video-api-debugger/app/.next-prod-prev-active-reaction-icons-3fae527/BUILD_ID)\" = D7veEEW5tSA1MsaVkxWwm; systemctl is-active sd2-gray.service sd2-image-studio.service; systemctl show sd2-image-studio.service -p MainPID; node --input-type=module - <<'JS'\nconst checks=[];for(const pathname of [\"/api/release\",\"/api/config\",\"/api/health\",\"/login\"]){const r=await fetch(\"http://127.0.0.1:3302\"+pathname,{signal:AbortSignal.timeout(15000)});if(r.status!==200)throw Error(pathname+\" \"+r.status);if(pathname===\"/api/release\"){const v=await r.json();if(v.version!==\"0.43.4\")throw Error(\"Local version mismatch\");checks.push({pathname,status:r.status,version:v.version});}else if(pathname===\"/api/health\"){const v=await r.json();if(!v.ok)throw Error(\"Local health failed\");checks.push({pathname,status:r.status,ok:v.ok});}else{await r.arrayBuffer();checks.push({pathname,status:r.status});}}console.log(JSON.stringify({localHttpChecks:checks,checkedAt:new Date().toISOString()}));\nJS"
+  ],
+  "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "startedAt": "2026-10-05T14:12:30.028Z",
+  "finishedAt": "2026-10-05T14:12:30.551Z",
+  "exitCode": 0,
+  "signal": null,
+  "log": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005/docs/materials/2026-10-05-active-reaction-icons/server-closure.log"
+}

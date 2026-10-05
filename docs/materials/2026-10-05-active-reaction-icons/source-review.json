@@ -1,0 +1,27 @@
+{
+  "scope": "E1/E2 shared overlay active reaction icons; source cascade review only",
+  "applicationWriteSet": ["src/components/content-reactions/reactions.module.css", "src/components/content-reactions/ContentReactions.tsx", "package.json", "src/lib/release.ts"],
+  "componentChange": "Only two data-reaction-action attributes on existing like/favorite buttons; state, aria-pressed, handlers, count, disabled and cache/API behavior unchanged. Share uses aria-pressed too, so its lack of this marker intentionally excludes it from persistent visibility.",
+  "review": [
+    {"liked": false, "favorited": false, "idleWithoutContext": "Parent opacity 0; all buttons opacity 0 and pointer-events none."},
+    {"liked": true, "favorited": false, "idleWithoutContext": "Parent opacity 1; only like is visible/clickable; favorite and share stay opacity 0 in their unchanged slots."},
+    {"liked": false, "favorited": true, "idleWithoutContext": "Parent opacity 1; only favorite is visible/clickable; like and share stay opacity 0 in their unchanged slots."},
+    {"liked": true, "favorited": true, "idleWithoutContext": "Parent opacity 1; both reaction buttons visible/clickable; share remains contextual."},
+    {"state": "hover or focus-within on overlay/media", "result": "Existing parent reveal retained; contextual rule reveals all buttons. Opacity does not remove tab stops; keyboard focus triggers focus-within."},
+    {"state": "busy or error including share", "result": "Existing :has status parent reveal retained; all buttons visible; error retry visible; disabled opacity .45 retained."},
+    {"state": "inactive disabled while another reaction active", "result": "Base overlay hide selector (0,2,1) occurs after base disabled selector of equal specificity, so inactive disabled buttons do not leak into view."},
+    {"state": "active disabled", "result": "Active-disabled selector (0,5,1) overrides active selector (0,4,1), giving opacity .45; native disabled behavior unchanged."},
+    {"state": "touch/coarse pointer", "result": "Media query keeps all overlay controls visible. Removed opacity !important to retain disabled .45; no positions, dimensions or slots changed."},
+    {"state": "cancel reaction", "result": "True state remains owner; cleared aria-pressed stops persistent reveal. Hover/focus/busy/error/touch remain valid contextual visibility."},
+    {"state": "inline non-overlay and share", "result": "New rules require both controls and overlayControls; inline unaffected. Share is excluded from persistent-active selector, but still revealed by original context, busy/error and touch."}
+  ],
+  "unchanged": ["all data/API/cache/idempotency/likeCount", "avatar one-click generation", "template toolbar position", "mobile full-preview back", "version detection, SemVer comparison, later dedupe and safe refresh", "position and button dimensions", "dependencies and lockfile", "persistent production data and image worker"],
+  "releaseWhitelistIncludesAllFourFiles": true,
+  "functionalTests": 0,
+  "browserRuns": 0,
+  "businessApiWrites": 0,
+  "paidCalls": 0,
+  "cost": 0,
+  "visualAcceptance": "Not performed; source review and compiled CSS hashes do not prove rendered layout. Pending user manual acceptance.",
+  "parentTargetReview": "Parent independently reviewed actual four-file diff and reported no blocking source cascade issue; no reviewer dispatched."
+}

@@ -1,0 +1,14 @@
+{
+  "command": "git",
+  "args": [
+    "diff",
+    "--exit-code",
+    "HEAD"
+  ],
+  "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "startedAt": "2026-10-05T14:08:40.190Z",
+  "finishedAt": "2026-10-05T14:08:41.624Z",
+  "exitCode": 0,
+  "signal": null,
+  "log": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005/docs/materials/2026-10-05-active-reaction-icons/tracked-clean.log"
+}

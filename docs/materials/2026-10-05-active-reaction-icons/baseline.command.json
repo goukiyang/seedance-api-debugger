@@ -1,0 +1,15 @@
+{
+  "command": "ssh",
+  "args": [
+    "-o",
+    "BatchMode=yes",
+    "gouki@42.193.221.253",
+    "printf \"COMMIT=\"; cat /srv/video-api-debugger/app/.deployed-commit; printf \"BUILD=\"; cat /srv/video-api-debugger/app/.next-prod/BUILD_ID; printf \"\\nVERSION=\"; node -p \"require(\\\"/srv/video-api-debugger/app/package.json\\\").version\"; systemctl is-active sd2-gray.service sd2-image-studio.service; systemctl show sd2-image-studio.service -p MainPID; readlink /srv/video-api-debugger/app/storage; readlink /srv/video-api-debugger/app/public/uploads; readlink /srv/video-api-debugger/app/public/videos; curl -fsS http://127.0.0.1:3302/api/release"
+  ],
+  "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "startedAt": "2026-10-05T14:01:02.832Z",
+  "finishedAt": "2026-10-05T14:01:04.239Z",
+  "exitCode": 0,
+  "signal": null,
+  "log": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005/docs/materials/2026-10-05-active-reaction-icons/baseline.log"
+}

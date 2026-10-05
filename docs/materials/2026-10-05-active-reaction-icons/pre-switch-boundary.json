@@ -1,0 +1,11 @@
+{
+  "checkedFiles": 789,
+  "changed": [
+    "src/components/content-reactions/ContentReactions.tsx",
+    "src/components/content-reactions/reactions.module.css",
+    "src/lib/release.ts",
+    "package.json"
+  ],
+  "commit": "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+  "checkedAt": "2026-10-05T14:11:03.883Z"
+}

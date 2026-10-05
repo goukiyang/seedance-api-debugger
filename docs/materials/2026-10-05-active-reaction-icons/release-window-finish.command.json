@@ -1,0 +1,15 @@
+{
+  "command": "node",
+  "args": [
+    "docs/materials/2026-10-05-active-reaction-icons/release-window.mjs",
+    "finish",
+    "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+    "sd2-active-reaction-icons-20261005-2201-0dde1ca5"
+  ],
+  "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "startedAt": "2026-10-05T14:12:31.821Z",
+  "finishedAt": "2026-10-05T14:12:32.567Z",
+  "exitCode": 0,
+  "signal": null,
+  "log": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005/docs/materials/2026-10-05-active-reaction-icons/release-window-finish.log"
+}

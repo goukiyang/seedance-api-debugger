@@ -1,0 +1,51 @@
+{
+  "version": "0.43.4",
+  "hashes": {
+    "src/components/content-reactions/reactions.module.css": "9d9faebf5b7112b9c4db7dced7595297722a56ee460016a4383ee44170543d6b",
+    "src/components/content-reactions/ContentReactions.tsx": "483235507a76d942942b268b27f1e5504267463fd95b26e1f2df94f5ece3ded2",
+    "package.json": "9f4946a83543a96b5bcb11d94d941a0004b4a96c0de3373250645b0fee5c3a1a",
+    "src/lib/release.ts": "7a9b39f011f029cfab070d492649c2028fb0fd10a1c72d422332de2918bc3af0"
+  },
+  "evidenceLimit": "Source integrity, not DOM, visual or behavior acceptance",
+  "buildId": "d3AOx5AwMdobt6iDbMTL0",
+  "css": [
+    {
+      "file": "static/css/cb63982acf8b32ce.css",
+      "sha256": "83934bd0ac4c56e09525bbf3b31e02b1e6025fade27eba1238839b780f2c0fbe",
+      "bytes": 44551,
+      "selectors": [
+        {
+          "selector": ".reactions_overlayControls__cUGHH:has(button[data-reaction-action][aria-pressed=true])",
+          "declarations": {
+            "opacity": "1"
+          }
+        },
+        {
+          "selector": ".reactions_controls__r9ARa.reactions_overlayControls__cUGHH button[data-reaction-action][aria-pressed=true]",
+          "declarations": {
+            "opacity": "1",
+            "pointer-events": "auto"
+          }
+        },
+        {
+          "selector": ".reactions_controls__r9ARa.reactions_overlayControls__cUGHH button[data-reaction-action][aria-pressed=true]:disabled,.reactions_controls__r9ARa.reactions_overlayControls__cUGHH:where(:hover,:focus-within,:has(.reactions_busy__nZwu4),:has(.reactions_error__0GfYS)) button:disabled,:where([data-reaction-surface]:hover,[data-reaction-surface]:focus-within) .reactions_controls__r9ARa.reactions_overlayControls__cUGHH button:disabled",
+          "declarations": {
+            "opacity": ".45"
+          }
+        },
+        {
+          "selector": ".reactions_overlayControls__cUGHH:focus-within,.reactions_overlayControls__cUGHH:has(.reactions_busy__nZwu4),.reactions_overlayControls__cUGHH:has(.reactions_error__0GfYS),.reactions_overlayControls__cUGHH:has(button[data-reaction-action][aria-pressed=true]),.reactions_overlayControls__cUGHH:hover,[data-reaction-surface]:focus-within .reactions_overlayControls__cUGHH,[data-reaction-surface]:hover .reactions_overlayControls__cUGHH",
+          "declarations": {
+            "background": "rgba(12,17,19,.76)"
+          }
+        }
+      ],
+      "routes": [
+        "/assets/page",
+        "/template-studio/page"
+      ]
+    }
+  ],
+  "commit": "3fae527e7cdeb07fb4e20cdf85966a3892ef2132",
+  "checkedAt": "2026-10-05T14:11:03.996Z"
+}

@@ -1,0 +1,14 @@
+{
+  "command": "node",
+  "args": [
+    "--input-type=module",
+    "-e",
+    "import fs from 'node:fs';import crypto from 'node:crypto';const e='docs/materials/2026-10-05-active-reaction-icons/';const expected=JSON.parse(fs.readFileSync(e+'candidate.json'));const releaseResponse=await fetch('https://sd2.youdooart.com/api/release',{cache:'no-store',signal:AbortSignal.timeout(15000)});const release=await releaseResponse.json();if(releaseResponse.status!==200||release.version!==expected.version||releaseResponse.headers.get('x-sd2-origin')!=='server-42-193')throw Error('Public version/origin mismatch');const css=[];for(const entry of expected.css){const r=await fetch('https://sd2.youdooart.com/_next/'+entry.file,{cache:'no-store',signal:AbortSignal.timeout(15000)});const hash=crypto.createHash('sha256').update(Buffer.from(await r.arrayBuffer())).digest('hex');if(r.status!==200||hash!==entry.sha256)throw Error('Public CSS hash mismatch');css.push({file:entry.file,status:r.status,sha256:hash,matchesCandidate:true});}const proof={commit:expected.commit,version:release.version,candidateBuild:expected.buildId,origin:releaseResponse.headers.get('x-sd2-origin'),css,checkedAt:new Date().toISOString(),evidenceLimit:'Anonymous HTTP/CSS hash proof; not visual or functional acceptance'};fs.writeFileSync(e+'independent-public.json',JSON.stringify(proof,null,2));console.log(JSON.stringify(proof));"
+  ],
+  "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "startedAt": "2026-10-05T14:13:12.264Z",
+  "finishedAt": "2026-10-05T14:13:12.792Z",
+  "exitCode": 0,
+  "signal": null,
+  "log": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005/docs/materials/2026-10-05-active-reaction-icons/independent-public.log"
+}
