@@ -2,6 +2,7 @@
 
 ## 当前入口
 
+- [系统功能盘点与导航分类 NAV1](todo/2026-10-05-system-navigation-inventory.md)：2026-10-05，清单v1.0.0；按正式v0.42.3/907a7a2源码区分工具、模式、模型、旧入口及待接入项；六个用户任务域和独立后台为建议。仅清单与规划，导航未实施、不功能验收、不部署。
 - [人物输入与生成链路重梳 / 开源数据与词库来源 L1/O1](todo/2026-10-05-avatar-intent-generation-flow.md)：2026-10-05，方案v1.0.0及原工单v1.2.0第17节；LLM理解/语义就绪→有效条件→自有DNA/词库→受控随机→单张四宫格，缓存/费用/恢复边界明确。DiceBear/Avataaars作机制与字段参考、不新增依赖；MAAD-Face分类参考须辨明署名/同许可和来源，CelebA不导入商业数据；禁止原始真人数据集图片作产品素材。公开原始许可及固定源码已核，应用/新词库尚未修改，v0.42.3不升级、不部署、费用0。P1-P4/O2-O3待后续明确执行，具体旧文案仍缺；[唯一来源条目](todo/2026-10-04-controlled-avatar-generator.md#17-开源数据与词库来源2026-10-05)、[资料索引](../docs/materials/index.md#头像受控随机生成器-v1-需求2026-10-04)。
 - [模板上下文及设置模板管理 UI1-UI3 / CTX1-CTX4](todo/2026-10-04-template-context-version-code.md)：2026-10-04 v0.40.0已部署；移除交付详情、模板改名/更新/归档、生成按钮移至主图上方、原文稳定五位码及历史标签。源码116ee2a，BUILD irfPSW4cqY4pqCko6De9P；发布检查通过，待用户手动验收。曾因worker SQLite超时回退，未人工重启worker，最终PID稳定；经过、风险、14源码/15公网静态证据与统一diff见工单第11节。[资料索引](../docs/materials/index.md#模板上下文五位版本码2026-10-04)。
 - [设置保存成功关闭统一修正 S1/S2](todo/2026-10-04-settings-save-close.md)：2026-10-04 v0.39.1已部署；图片/视频上下文、模板编辑弹窗及后台 API 设置统一成功退出、失败留输入，多表单与新草稿保护。源码9c8a9ac（codex/settings-save-close-20261004），衔接v0.39.0保留原新版功能，构建/17源码/19新公网静态/4服务检查通过；待用户手动功能验收。[统一diff](todo/2026-10-04-settings-save-close.diff)、[证据](todo/2026-10-04-settings-save-close.evidence.json)。
