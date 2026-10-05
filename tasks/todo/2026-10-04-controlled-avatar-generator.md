@@ -352,3 +352,22 @@ G1新真实反馈（2026-10-05用户原话，文字无附件）：“描述解�
 - parent新专属session ttpl仅打开新版本页面，未点业务按钮：实际DOM v0.42.3、可用6240、同一原付费任务ID、1024²原图/640²缩略图均已加载，历史成功、空描述/左上人物/1张5点及弹窗关闭保留。session已停止、无借用用户tab；这是新产物与既有结果的最低只读复查，不重跑前5项或制造生产故障，见real-page-evidence.json publishedFollowup。lead自有runner/headless Chromium/HTTP fixture均已关闭；未留待执行生成。
 - 正式根已保存[完整交付报告及逐文件作用](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/delivery.json)、[12组基线复盘](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline-review.json)、[23项修复复测](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/repaired/component-results.json)、[8项条件/排版内核](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/baseline/kernel-results.json)、[统一源码diff](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/source.diff)、[服务器运行](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/runtime-proof.json)和同目录构建/切换/公网原件，资料索引及主todo/lessons更新。源码diff与Git精确一致，关键JSON可读/报告源副本一致；辅助日志不重复逐项哈希，原日志/嵌套diff空白保持原件，不借格式整理改证据。
 - 守门完成：限定人物页面状态恢复、0新增费用、受控本地故障/不写生产数据、单lead受保护发布，未改Provider/积分/权限/schema/依赖或其他模块。无新增分级/归类误判；历史误判与G1原文/G3原交互缺口不覆盖。正式根既有29行素材性能计划、私有图片与其他未跟踪资料保留，不使用其旧应用源码部署。更新机制复用既有版本入口与摘要策略，旧客户端弹窗未实演，不以版本号冒充已验。
+
+## 16. 文案意图理解反馈（2026-10-05，仅排查与建议）
+
+用户原话：“输入文案，总是说尚未识别，按道理，不应该是llm帮我识别下我的意图先做分析吗”。这是对现有理解流程的质疑和期望，不等于批准输入时自动收费、忽略未知明确条件或新增无限重解析。本轮先源码排查，未修改应用、未调用模型、未操作浏览器/数据库、未升级或重启；生产公网只读核实仍v0.42.3/server-42-193。已异步请求一段触发问题的原文及“尚未识别”具体内容，尚未收到，不能猜是哪项意图不支持。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| I1 | 排查文案理解流程 | 查清 LLM 何时分析，以及“尚未识别”的来源和必要修复 | 已完成源码排查：通用链路及修复方向已明确；具体原文原因/新流程实施未确认 |
+
+已证实的现有行为（实际应用worktree907a7a2，不用正式根旧源码作线上判断）：
+
+- 输入后600ms调用parse-status只读缓存/尝试状态，不调用LLM。点击生成后，非空描述先检查状态，首次解析通过站内费用确认，再由parseAvatarDescription调用既有createMuskChatCompletion；已解析相同文案复用缓存。不能说没有接LLM，也不能说用户每次打字就已分析。
+- descriptionSystemPrompt要求直接输出可校验固定字段、软范围及特征；没有单独的用户意图摘要/理解结果展示。它允许合理自定义字段值，但范围与位置不确定等要求仍会被列入unrecognized，不是简单关键词识别，也不代表所有自然语言都已支持。
+- engine.createAvatarCandidates发现任一unrecognized或conflicts就抛出“尚未识别：...”并阻止整个候选准备。它和“尚未解析”的not-started状态是两回事；看见“尚未识别”通常是语义未完成列表挡住后续，不应直接归类为未调用模型。用户这段实际LLM回执尚未读取，因此这是源码条件事实，不是本次原文根因确认。
+- description-contract接受非空unrecognized/conflicts列表；resolveDescription验证结构后仍可complete并缓存，inspectDescription对合法缓存返回succeeded；页面隐藏succeeded状态面板。再次prepare复用同一缓存，再被engine阻止，容易反复出现同样提示。格式有效/已收到LLM回复不能冒充“理解完成、可以生成”；这是可证实的流程状态缺口，不能只改提示文字或删除未识别内容。
+
+修复方向（本轮建议，尚未实施）：先把“LLM理解文案”与“图片生成”分开，让用户看到可读的理解摘要、已确认要求、可随机项与真正需要澄清的具体问题；字段结构成功、语义待澄清、可生成分别呈现。能解释的表达应保留到真实受支持条件/提示词，不能因不在菜单里就全部否定；无法确定的重要条件原文保留，只追问该项，不让用户重填整段。相同描述复用避免重复收费，但语义待澄清不能藏成成功，也不能无确认自动再次模型调用。首次独立分析及重新分析的收费/触发方式需明确，当前只读输入检查不静默变为收费自动分析；人物条件原文证据、否定/冲突/多人、未知提交及缓存保护不撤销。
+
+复用查找：已读取LangChain官方开源with_structured_output实际实现中include_raw分支（raw、parsed、parsing_error分开，失败保留原回复，未引入额外模型自动重试），[源码](https://github.com/langchain-ai/langchain/blob/master/libs/partners/openai/langchain_openai/chat_models/base.py)。只借鉴“模型回复/解析结果/错误分层”，不是语义理解已解决的证明，也没有安装Python框架或改现有Next.js/Musk通道；项目已具私有原回复与免费重检，可局部复用，具体改动待实际文案和新主路径明确后实施。费用、权限、生产数据与依赖边界不扩大；无新增分级误判。
