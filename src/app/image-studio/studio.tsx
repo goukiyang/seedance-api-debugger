@@ -42,6 +42,10 @@ import { StudioStyleGroups, type StudioStyleSummary } from './style-groups-view'
 import type { SettingsValue } from './settings-controller';
 import { normalizeStudioRatio, resolveStudioAspectRatio } from '@/lib/image-studio/ratios';
 import { studioFourToOneIssue } from '@/lib/image-generation/resolution';
+import { useStudioBatch } from './use-studio-batch';
+import { BatchResults } from './batch-results';
+import { GenerationCompletionSettings, watchGenerationCompletion } from '@/components/GenerationCompletion';
+import { describedEvolutionDirection, type EvolutionCapability, type EvolutionInput } from '@/lib/image-studio/evolution';
 import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import type { StudioReferencePolicy } from '@/lib/image-studio/reference-policy';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
@@ -606,6 +610,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const [recoverableDraft, setRecoverableDraft] = useState<Record<string, any> | null>(null);
   const [savedAsSignature, setSavedAsSignature] = useState('');
   const [prompt, setPrompt] = useState(module.prompt);
+  const evolution = (module as StudioModule & { evolution?: EvolutionCapability | null }).evolution || null;
+  const [evolutionInput, setEvolutionInput] = useState<EvolutionInput>({ direction: evolution?.defaultDirection || 'increase', manual: false });
+  const bodyDirection = describedEvolutionDirection(prompt);
+  const evolutionConflict = evolution && evolutionInput.manual && bodyDirection && bodyDirection !== evolutionInput.direction ? '正文方向与手选方向冲突，请调整正文或方向' : '';
+  const [resultView, setResultView] = useState<'images' | 'batch'>('images');
   const [count, setCount] = useState(module.count);
   const [referenceLimit, setReferenceLimit] = useState(module.referencePolicy?.primaryMax ?? Math.max(1, Math.min(MAX_REFERENCE_IMAGES, module.referenceLimit || DEFAULT_STUDIO_PRIMARY_MAX)));
   const [primaryMin, setPrimaryMin] = useState(module.referencePolicy?.primaryMin ?? 0);
@@ -615,6 +624,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const [useFixedReferences, setUseFixedReferences] = useState(module.referencePolicy?.useFixedReferences ?? true);
   const [aspectRatio, setAspectRatio] = useState(module.aspectRatio || 'auto');
   const [moduleModel, setModuleModel] = useState(module.model);
+  const batch = useStudioBatch({ userId, moduleId: module.id, unitCredits: settings ? settings.prices?.[moduleModel] ?? null : module.prices[moduleModel] ?? null });
   const [resolution, setResolution] = useState<ImageResolution>(normalizeImageResolution(module.model, module.resolution || defaultImageResolution(module.model)));
   const [quality, setQuality] = useState(module.quality || defaultImageStudioQuality(module.model));
   const [groupName, setGroupName] = useState(module.groupName || '未分组');
@@ -728,7 +738,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const moduleSaveSnapshot = { ...moduleDraft };
   const moduleDirty = JSON.stringify(moduleSaveSnapshot) !== moduleSaved;
   const baseline = moduleSaved ? JSON.parse(moduleSaved) as typeof moduleDraft : moduleDraft;
-  const generationInputs = { prompt, count, referenceLimit, aspectRatio, resolution: normalizeImageResolution(moduleModel, resolution), referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: normalizeImageStudioQuality(moduleModel, quality), referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), styleGroupIds: moduleDraft.styleGroupIds };
+  const generationInputs = { evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, aspectRatio, resolution: normalizeImageResolution(moduleModel, resolution), referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: normalizeImageStudioQuality(moduleModel, quality), referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), styleGroupIds: moduleDraft.styleGroupIds };
   const generationDraft = JSON.stringify(generationInputs);
   const contextVersion = useModuleContextVersion({ moduleId: module.id, raw: moduleContext, taskId: reproduceSourceTaskId,
     editable: contextEditable, enabled: !hidden && draftLoaded && !draftRestoring, composing: contextComposing });
@@ -756,7 +766,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       setAppliedSource(previous => previous ? { ...previous, modified: true } : null);
     }
   }, [appliedSource, restorationSignature]);
-  const defaultGenerationDraft = JSON.stringify({ prompt: baseline.prompt, count: baseline.count, referenceLimit: baseline.referenceLimit, aspectRatio: baseline.aspectRatio, resolution: normalizeImageResolution(baseline.model, baseline.resolution), referenceIds: baseline.referenceIds, model: baseline.model, quality: normalizeImageStudioQuality(baseline.model, baseline.quality), referencePolicy: baseline.referencePolicy, context: savedModuleContext, fixedReferences: fixedReferencePayload(savedFixedReferences), styleGroupIds: baseline.styleGroupIds });
+  const defaultGenerationDraft = JSON.stringify({ evolution: evolution ? { direction: evolution.defaultDirection, manual: false } : undefined, prompt: baseline.prompt, count: baseline.count, referenceLimit: baseline.referenceLimit, aspectRatio: baseline.aspectRatio, resolution: normalizeImageResolution(baseline.model, baseline.resolution), referenceIds: baseline.referenceIds, model: baseline.model, quality: normalizeImageStudioQuality(baseline.model, baseline.quality), referencePolicy: baseline.referencePolicy, context: savedModuleContext, fixedReferences: fixedReferencePayload(savedFixedReferences), styleGroupIds: baseline.styleGroupIds });
   const generationChanged = generationDraft !== defaultGenerationDraft || Boolean(reproduceSourceTaskId);
   const automaticSnapshot = JSON.stringify({ ...baseline, name, groupName, bannerAssetId: banner?.id || null });
   const automaticDirty = automaticSnapshot !== moduleSaved;
@@ -857,6 +867,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     try { const saved = JSON.parse(localStorage.getItem(draftKey) || 'null'); if (saved) setRecoverableDraft(saved); } catch {}
     blockedDraftSignature.current = null;
     setPrompt(baseline.prompt); setCount(baseline.count); setReferenceLimit(baseline.referenceLimit); setAspectRatio(baseline.aspectRatio); setModuleModel(baseline.model);
+    setEvolutionInput({ direction: evolution?.defaultDirection || 'increase', manual: false });
     setQuality(baseline.quality); setResolution(baseline.resolution);
     setImages(module.images.filter(image => baseline.referencePolicy.primaryIds.includes(image.id || '')));
     setAuxiliaryImages(module.images.filter(image => !baseline.referencePolicy.primaryIds.includes(image.id || '')));
@@ -978,6 +989,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         }
         if (sequence !== draftRestoreSequence.current) return false;
         if (typeof saved.prompt === 'string') setPrompt(saved.prompt.slice(0, 20000));
+        if (evolution && saved.evolution && ['increase', 'decrease'].includes(saved.evolution.direction) && typeof saved.evolution.manual === 'boolean') setEvolutionInput({ direction: saved.evolution.direction, manual: saved.evolution.manual });
+        if (saved.resultView === 'images' || saved.resultView === 'batch') setResultView(saved.resultView);
         if (Number.isInteger(saved.count) && saved.count >= 1 && saved.count <= 8) setCount(saved.count);
         if (Number.isInteger(saved.referenceLimit) && saved.referenceLimit >= 1 && saved.referenceLimit <= MAX_REFERENCE_IMAGES) setReferenceLimit(saved.referenceLimit);
         if (typeof saved.model === 'string' && models.includes(saved.model as typeof models[number])) setModuleModel(saved.model);
@@ -1036,13 +1049,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   }, [draftKey, pendingKey, module.saved, module.revision, module.model, isAdmin]);
   useEffect(() => {
     if (!draftLoaded || draftRestoring || (recoverableDraft && blockedDraftSignature.current === generationDraft)) return;
-    try { localStorage.setItem(draftKey, JSON.stringify({ schemaVersion: 2, prompt, count, referenceLimit, referencePolicy, aspectRatio, resolution,
+    try { localStorage.setItem(draftKey, JSON.stringify({ schemaVersion: 2, resultView, evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, referencePolicy, aspectRatio, resolution,
       images: [...images, ...auxiliaryImages].map(image => ({ id: image.id })), context: contextEditable ? moduleContext : undefined,
       fixedReferences: fixedEditable ? fixedReferences.map(image => ({ id: image.id, note: image.note })) : undefined,
       styleGroupIds: styleGroups.map(group => group.id), model: moduleModel, quality, reproduceSourceTaskId: reproduceSourceTaskId || null, revision: moduleRevision }));
       setPersistedDraftSignature(generationDraft); }
     catch { setError('临时草稿未能保存到浏览器，请勿刷新；当前内容仍可生成或另存为。'); }
-  }, [draftLoaded, draftRestoring, recoverableDraft, draftKey, generationDraft, reproduceSourceTaskId, moduleRevision, contextEditable, fixedEditable]);
+  }, [draftLoaded, draftRestoring, recoverableDraft, draftKey, generationDraft, reproduceSourceTaskId, moduleRevision, contextEditable, fixedEditable, resultView]);
 
   useEffect(() => () => { draftRestoreSequence.current += 1; }, []);
 
@@ -1174,19 +1187,32 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     finally { submitLock.current = false; setSubmitting(false); setQueryingSubmission(false); }
   }
 
+  function generationPayload(retryTask?: StudioTask) {
+    const historicalEvolution = (retryTask?.snapshot as (StudioSnapshot & { evolution?: EvolutionInput }) | undefined)?.evolution;
+    return { requestId: crypto.randomUUID(), prompt: retryTask?.prompt ?? prompt,
+      moduleId: module.id, model: retryTask?.model || moduleModel, quality: retryTask?.quality || quality, reproduceFromTaskId: reproduceSourceTaskId || undefined, count: retryTask ? 1 : count, aspectRatio: retryTask?.aspectRatio || aspectRatio, resolution: retryTask?.snapshot?.resolution || resolution, revision: settings!.revision,
+      referenceIds: retryTask?.referenceIds || moduleDraft.referenceIds,
+      ...(historicalEvolution || evolution ? { evolution: historicalEvolution || evolutionInput } : {}),
+      draft: { moduleContext: contextEditable ? moduleContext : undefined, globalContext: isAdmin ? effectiveGlobalContext : undefined,
+        fixedReferences: !reproduceSourceTaskId && fixedEditable ? fixedReferencePayload(fixedReferences) : undefined,
+        styleGroupIds: reproduceSourceTaskId ? undefined : styleGroups.map(group => group.id), referencePolicy } };
+  }
   async function submit(retryTask?: StudioTask) {
+    if (batch.mode === 'batch' && batch.pending && !retryTask) { await batch.query(); return; }
     if (pendingSubmission) { await querySubmission(); return; }
     if (!settings || submitLock.current || moduleDeleteLock.current || quickPresetLock.current || presetSaveLock.current || ratioEditing || draftRestoring) return;
+    if (evolutionConflict) { setError(evolutionConflict); return; }
+    if (batch.mode === 'batch' && !retryTask) {
+      submitLock.current = true; setSubmitting(true);
+      try { await batch.submit(generationPayload()); setResultView('batch'); }
+      finally { submitLock.current = false; setSubmitting(false); }
+      return;
+    }
     if (!pendingSubmission && (images.length < primaryMin || images.length > referenceLimit || auxiliaryCount > auxiliaryLimit || styleImageCount > styleLimit || ordinaryReferenceCount > referenceImageLimit || effectiveReferenceCount > MAX_REFERENCE_IMAGES
       || activeFixedReferences.some(item => item.available === false) || activeStyles.some(group => group.unavailable))) {
       setError('请检查主图数量、辅助参考数量和图片可用性。'); return;
     }
-    const payload = pendingSubmission || { requestId: crypto.randomUUID(), prompt: retryTask?.prompt ?? prompt,
-      moduleId: module.id, model: retryTask?.model || moduleModel, quality: retryTask?.quality || quality, reproduceFromTaskId: reproduceSourceTaskId || undefined, count: retryTask ? 1 : count, aspectRatio: retryTask?.aspectRatio || aspectRatio, resolution: retryTask?.snapshot?.resolution || resolution, revision: settings.revision,
-      referenceIds: retryTask?.referenceIds || moduleDraft.referenceIds,
-      draft: { moduleContext: contextEditable ? moduleContext : undefined, globalContext: isAdmin ? effectiveGlobalContext : undefined,
-        fixedReferences: !reproduceSourceTaskId && fixedEditable ? fixedReferencePayload(fixedReferences) : undefined,
-        styleGroupIds: reproduceSourceTaskId ? undefined : styleGroups.map(group => group.id), referencePolicy } };
+    const payload = generationPayload(retryTask);
     const ratioIssue = studioFourToOneIssue(payload.aspectRatio, settings.modelFourToOne?.[payload.model] === true);
     if (ratioIssue) { setError(ratioIssue); return; }
     try {
@@ -1202,6 +1228,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       else {
         const value = await readResponse(response);
         if (typeof value.batchId !== 'string' || !/^[a-f0-9]{64}$/.test(value.batchId)) throw new Error('提交结果待确认，请查询这次提交。');
+        watchGenerationCompletion(userId, payload.requestId, 'images', payload.count);
         setPendingSubmission(null); try { localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch {} await loadTasks();
       }
     } catch (e) {
@@ -1236,6 +1263,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     const nextResolution = normalizeImageResolution(nextModel, snapshot.resolution || defaultImageResolution(nextModel));
     const nextQuality = normalizeImageStudioQuality(nextModel, typeof snapshot.quality === 'string' ? snapshot.quality : quality);
     setPrompt(snapshot.prompt || '');
+    const restoredEvolution = (snapshot as StudioSnapshot & { evolution?: EvolutionInput }).evolution;
+    const nextEvolution = evolution ? restoredEvolution && ['increase', 'decrease'].includes(restoredEvolution.direction) ? { direction: restoredEvolution.direction, manual: restoredEvolution.manual === true } : { direction: evolution.defaultDirection, manual: false } : undefined;
+    if (nextEvolution) setEvolutionInput(nextEvolution);
     setCount(nextCount); setAspectRatio(nextRatio); setResolution(nextResolution);
     const transient = snapshot.transientReferenceImages || snapshot.referenceImages;
     const primaryIds = snapshot.referencePolicy?.primaryIds || transient.flatMap(image => image.id ? [image.id] : []);
@@ -1262,7 +1292,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       auxiliaryMax: snapshot.referencePolicy?.auxiliaryMax ?? MAX_REFERENCE_IMAGES, styleMax: snapshot.referencePolicy?.styleMax ?? MAX_REFERENCE_IMAGES,
       referenceMax: snapshot.referencePolicy?.referenceMax ?? MAX_REFERENCE_IMAGES, useFixedReferences: snapshot.referencePolicy?.useFixedReferences ?? true };
     const nextImages = [...transient.filter(image => image && primaryIds.includes(image.id || '')), ...transient.filter(image => image && !primaryIds.includes(image.id || ''))];
-    const signature = JSON.stringify({ inputs: { ...generationInputs, prompt: snapshot.prompt || '', count: nextCount, referenceLimit: nextPolicy.primaryMax,
+    const signature = JSON.stringify({ inputs: { ...generationInputs, evolution: nextEvolution, prompt: snapshot.prompt || '', count: nextCount, referenceLimit: nextPolicy.primaryMax,
       aspectRatio: nextRatio, resolution: nextResolution, referenceIds: nextImages.map(image => image.id), model: nextModel, quality: nextQuality, referencePolicy: nextPolicy, context: nextContext },
       source: snapshot.sourceAvailable ? task.id : null, references: snapshot.fixedReferenceImages || [],
       fixedCount: snapshot.fixedReferenceCount ?? snapshot.fixedReferenceImages?.length ?? 0, styles: snapshot.styleGroups || [], globalContext: nextGlobalContext });
@@ -1331,14 +1361,17 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     setCopyFeedback({ id: task.id, text: copied ? '已复制' : '复制失败，请重试' });
     window.setTimeout(() => setCopyFeedback(current => current?.id === task.id ? null : current), copied ? 1800 : 2600);
   }
-  const moduleUnitCredits = settings?.prices?.[moduleModel] ?? module.prices[moduleModel] ?? null;
+  const moduleUnitCredits = settings ? settings.prices?.[moduleModel] ?? null : module.prices[moduleModel] ?? null;
   const providerCostUsd = IMAGE_STUDIO_MODEL_COST_USD[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_COST_USD];
   const selectedProviderReady = settings?.modelReady?.[moduleModel] ?? settings?.providerReady;
   const selectedFourToOne = settings?.modelFourToOne?.[moduleModel] === true;
   const ratioIssue = studioFourToOneIssue(aspectRatio, selectedFourToOne);
   const hasContext = reproduceSourceTaskId ? reproductionContextConfigured : Boolean((isAdmin ? effectiveGlobalContext?.trim() : settings?.contextConfigured) || (contextEditable ? moduleContext.trim() : moduleContextConfigured));
   const ready = Boolean(selectedProviderReady && moduleUnitCredits !== null && settings && !settingsError);
-  const generationFeedback: StudioFeedback | null = queryingSubmission ? { message: '正在查询这次提交，不会再次生成。', tone: 'progress' }
+  const generationFeedback: StudioFeedback | null = batch.mode === 'batch' && batch.pending ? batch.busy ? { message: '正在核对原批次，不会重新提交生成', tone: 'progress' } : null
+    : evolutionConflict ? { message: evolutionConflict, tone: 'warning' }
+    : batch.mode === 'batch' && batch.blocker ? { message: batch.blocker, tone: 'info' }
+    : queryingSubmission ? { message: '正在查询这次提交，不会再次生成。', tone: 'progress' }
     : pendingSubmission ? submitting ? { message: '正在处理当前请求，请稍候再查询。', tone: 'progress' }
       : moduleDeleting ? { message: '正在删除模板，请等待操作结束后再查询。', tone: 'progress' } : null
     : sourceSharingBlocked ? { message: '该模板已停止共享，请换一个可用模板。', tone: 'error' }
@@ -1354,14 +1387,15 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     : moduleUnitCredits === null ? { message: '当前模型尚未设置点数，请换一个模型或联系管理员配置。', tone: 'warning' }
     : activeFixedReferences.some(item => item.available === false) ? { message: '固定参考图已不可用，请关闭、移除或更换。', tone: 'error' }
     : activeStyles.some(group => group.unavailable) ? { message: '已选风格组不可用，请移除或重新选择。', tone: 'error' }
-    : images.length < primaryMin ? { message: `这个模板至少需要 ${primaryMin} 张主图，当前 ${images.length} 张。`, tone: 'warning' }
+    : batch.mode === 'batch' && batch.source === 'folder' && primaryMin > 1 ? { message: `这个模板至少需要 ${primaryMin} 张主图，素材逐图每项只有 1 张；请选择当前正文模式。`, tone: 'warning' }
+    : images.length < primaryMin && !(batch.mode === 'batch' && batch.source === 'folder') ? { message: `这个模板至少需要 ${primaryMin} 张主图，当前 ${images.length} 张。`, tone: 'warning' }
     : images.length > referenceLimit ? { message: `主图最多 ${referenceLimit} 张，请移除多余主图或调整上限。`, tone: 'warning' }
     : styleImageCount > styleLimit ? { message: `风格组最多传入 ${styleLimit} 张图片，当前 ${styleImageCount} 张。请调整上限或移除风格组。`, tone: 'warning' }
     : ordinaryReferenceCount > referenceImageLimit ? { message: `参考图最多 ${referenceImageLimit} 张，当前 ${ordinaryReferenceCount} 张（含启用的模板固定图）。`, tone: 'warning' }
     : auxiliaryCount > auxiliaryLimit ? { message: `辅助参考最多 ${auxiliaryLimit} 张，当前 ${auxiliaryCount} 张（包含模板图和风格组）。`, tone: 'warning' }
     : effectiveReferenceCount > MAX_REFERENCE_IMAGES ? { message: `当前通道最多传入 ${MAX_REFERENCE_IMAGES} 张图片，已选主图 ${images.length} 张、辅助参考 ${auxiliaryCount} 张，请减少辅助参考。`, tone: 'warning' }
-    : !prompt.trim() && !effectiveReferenceCount && !hasContext ? { message: '请填写画面要求，或添加主图。', tone: 'info' }
-    : !Number.isInteger(count) || count < 1 || count > 8 ? { message: '生成张数应为1到8的整数，请修改张数。', tone: 'warning' }
+    : !prompt.trim() && !effectiveReferenceCount && !hasContext && !(batch.mode === 'batch' && batch.source === 'folder') ? { message: '请填写画面要求，或添加主图。', tone: 'info' }
+    : batch.mode === 'single' && (!Number.isInteger(count) || count < 1 || count > 8) ? { message: '生成张数应为1到8的整数，请修改张数。', tone: 'warning' }
     : !ready ? { message: '生成条件尚未就绪，请检查模型和上下文设置。', tone: 'warning' } : null;
   const previewableTasks = tasks.filter(task => Boolean(task.asset?.id));
   function openTaskPreview(task: StudioTask) { setPreview(studioTaskPreviewState(task)); }
@@ -1569,8 +1603,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           void addImages(Array.from(event.target.files || [])); event.target.value = '';
         }} />
         <div className={styles.generationToolbar}>
-          <button type="button" className={`${styles.generate} sd2-loading-surface`} data-busy={submitting || queryingSubmission} disabled={Boolean(generationFeedback)} title={generationFeedback?.message} aria-describedby={generationFeedback ? `generation-blocker-${module.id}` : undefined} onClick={() => void (pendingSubmission ? querySubmission() : submit())}>{queryingSubmission ? '正在查询' : submitting ? '正在提交' : pendingSubmission ? '查询这次提交' : '生成图片'}</button>
-          <p className={styles.muted}>{moduleUnitCredits == null ? '当前模型积分单价尚未设置' : `每张 ${moduleUnitCredits} 积分 · 本次 ${moduleUnitCredits * (Number.isInteger(count) ? count : 0)} 积分`} · 上游成本 {providerCostUsd == null ? '待配置' : `$${providerCostUsd.toFixed(3)} / 张`}</p>
+          <GenerationCompletionSettings ownerId={userId} />
+          <div className={styles.counts} role="group" aria-label="生成方式"><button type="button" aria-pressed={batch.mode === 'single'} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onClick={() => batch.setMode('single')}>单次</button><button type="button" aria-pressed={batch.mode === 'batch'} disabled={submitting || Boolean(pendingSubmission)} onClick={() => batch.setMode('batch')}>批量</button></div>
+          {batch.mode === 'batch' && batch.controls}
+          <button type="button" className={`${styles.generate} sd2-loading-surface`} data-busy={submitting || queryingSubmission || batch.busy} disabled={Boolean(generationFeedback)} title={generationFeedback?.message} aria-describedby={generationFeedback ? `generation-blocker-${module.id}` : undefined} onClick={() => void (pendingSubmission ? querySubmission() : submit())}>{queryingSubmission ? '正在查询' : submitting ? '正在提交' : pendingSubmission || batch.pending ? '查询这次提交' : batch.mode === 'batch' ? '开始批量生成' : '生成图片'}</button>
+          {batch.mode === 'single' && <p className={styles.muted}>{moduleUnitCredits == null ? '当前模型积分单价尚未设置' : `每张 ${moduleUnitCredits} 积分 · 本次 ${moduleUnitCredits * (Number.isInteger(count) ? count : 0)} 积分`} · 上游成本 {providerCostUsd == null ? '待配置' : `$${providerCostUsd.toFixed(3)} / 张`}</p>}
           {generationFeedback && <p id={`generation-blocker-${module.id}`} role="status" className={styles.generationFeedback} data-tone={generationFeedback.tone}>{generationFeedback.message}</p>}
           {settingsError && <button type="button" onClick={async () => { if (!dirty || (await confirm('重新读取会替换未保存的通用设置，是否继续？', { title: '重新读取', confirmLabel: '放弃修改并读取' }))) onReloadSettings(true); }}><RefreshCw size={16} />重新读取设置</button>}
           {sourceSharingBlocked && <p role="alert" className={styles.error}>该模板已停止共享，不能新建任务；已提交任务和历史结果仍保留。</p>}
@@ -1579,13 +1616,15 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           }}>放弃核对</button></p>}
           {!ready && !settingsError && <p className={styles.muted}>{!selectedProviderReady ? '图片服务尚未就绪' : '请管理员完成模型积分设置'}</p>}
         </div>
-        <label className={styles.label} htmlFor={`studio-prompt-${module.id}`}>补充 <span>有图片时选填</span></label>
-        <textarea id={`studio-prompt-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={prompt} maxLength={20000} onChange={event => setPrompt(event.target.value)} placeholder="补充想生成的画面" rows={9} />
-        <label className={styles.label} htmlFor={`studio-count-${module.id}`}>生成张数</label>
+        {evolution && <div className={styles.counts} role="group" aria-label="演化方向">{(['increase', 'decrease'] as const).map(direction => <button type="button" key={direction} aria-pressed={(evolutionInput.manual ? evolutionInput.direction : bodyDirection || evolution.defaultDirection) === direction} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onClick={() => setEvolutionInput({ direction, manual: true })}>{direction === 'increase' ? '递进' : '递减'}</button>)}{evolutionInput.manual && <button type="button" title="按正文和模板默认方向" onClick={() => setEvolutionInput({ direction: evolution.defaultDirection, manual: false })}><RotateCcw size={14} /></button>}</div>}
+        <label className={styles.label} htmlFor={`studio-prompt-${module.id}`}>{evolution ? '演化内容' : '补充'} {!evolution && <span>有图片时选填</span>}</label>
+        <textarea id={`studio-prompt-${module.id}`} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} value={prompt} maxLength={20000} onChange={event => setPrompt(event.target.value)} placeholder={evolution ? '什么发生变化' : '补充想生成的画面'} rows={9} />
+        {evolutionConflict && <p role="alert" className={styles.error}>{evolutionConflict}</p>}
+        {batch.mode === 'single' && <><label className={styles.label} htmlFor={`studio-count-${module.id}`}>生成张数</label>
         <div className={styles.counts}>
           {[1, 2, 4, 8].map(n => <button type="button" disabled={submitting || Boolean(pendingSubmission)} key={n} aria-pressed={count === n} onClick={() => setCount(n)}>{n}</button>)}
           <input id={`studio-count-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} type="number" min={1} max={8} step={1} value={count} onChange={event => setCount(Number(event.target.value))} />
-        </div>
+        </div></>}
         <RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={effectiveReferences.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} fourToOneSupported={selectedFourToOne} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
         <div className={styles.modelQualityRow}>
           <label className={styles.compactField} htmlFor={`studio-model-${module.id}`}><strong>生成模型</strong>
@@ -1625,9 +1664,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       </section>
       <section className={styles.outputs} aria-label="生成结果">
         <header className={styles.header}><h2>生成结果</h2><div className={styles.counts}>
+          <button type="button" aria-pressed={resultView === 'images'} onClick={() => setResultView('images')}>图片</button><button type="button" aria-pressed={resultView === 'batch'} onClick={() => setResultView('batch')}>批次</button>
           {!downloadMode ? <button type="button" disabled={downloadBusy} onClick={() => { setSelected([]); setDownloadMode(true); }}><Download size={16} />下载</button> : <div className={styles.downloadModeBar}><span>已选 {selected.length} 张</span><button type="button" disabled={!selected.length || downloadBusy} onClick={() => void download(selected)}>{downloadBusy ? '准备中' : '确认下载'}</button><button type="button" disabled={downloadBusy} onClick={() => { setSelected([]); setDownloadMode(false); }}>取消</button></div>}
           <button type="button" title="刷新记录" aria-label="刷新记录" className={templateWorkbench ? 'sd2-loading-surface' : undefined} data-busy={templateWorkbench && taskReadAction === 'refresh'} disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks()}><RefreshCw size={16} /></button>
         </div></header>
+        {resultView === 'batch' ? batch.inlineResults ? <p>本批结果已在生成栏展开。</p> : batch.id ? <BatchResults key={`${userId}:${batch.id}`} id={batch.id} userId={userId} outputDirectory={batch.outputDirectory} /> : <p>暂无选中批次，可开始批量生成或从顶部“我的批次”找回。</p> : <>
         {tasksError && <p role="alert" className={styles.error}>{tasksError}{templateWorkbench && <button type="button" disabled={taskReadAction !== 'idle'} onClick={() => void loadTasks(taskRetryCursor)}>重试读取记录</button>}</p>}
         {downloadReady && <p role="status">文件已准备好。<a href={downloadReady.url} download={downloadReady.name}>再次保存</a></p>}
         {loadingTasks && (tasks.length ? <LoadingStatus>正在更新生成记录</LoadingStatus> : <LoadingSkeleton label="正在读取生成记录" grid />)}
@@ -1683,6 +1724,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         </article>)}</div>
         {templateWorkbench && taskReadAction === 'more' && <LoadingStatus>正在读取更多记录</LoadingStatus>}
         {nextCursor && <button type="button" className={templateWorkbench ? 'sd2-loading-surface' : undefined} data-busy={templateWorkbench && taskReadAction === 'more'} disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks(nextCursor)}>加载更多</button>}
+        </>}
       </section>
     </div>
     {assetPickerOpen && <UploadedImagePicker open imageOnly target="image-studio"
@@ -1700,7 +1742,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         if(primary?images.length>=currentReferenceCap:auxiliaryImages.length>=currentAuxiliaryCap)throw new Error('参考区已满，没有替换已有图片');
         const nextImages=primary?[...images,...picked]:images, nextAuxiliary=primary?auxiliaryImages:[...auxiliaryImages,...picked];
         const nextPolicy={...referencePolicy,primaryIds:nextImages.flatMap(i=>i.id?[i.id]:[])};
-        const payload={schemaVersion:2,prompt,count,referenceLimit,referencePolicy:nextPolicy,aspectRatio,resolution,images:[...nextImages,...nextAuxiliary].map(i=>({id:i.id})),context:contextEditable?moduleContext:undefined,fixedReferences:fixedEditable?fixedReferences.map(i=>({id:i.id,note:i.note})):undefined,styleGroupIds:styleGroups.map(g=>g.id),model:moduleModel,quality,reproduceSourceTaskId:reproduceSourceTaskId||null,revision:moduleRevision};
+        const payload={schemaVersion:2,evolution:evolution?evolutionInput:undefined,prompt,count,referenceLimit,referencePolicy:nextPolicy,aspectRatio,resolution,images:[...nextImages,...nextAuxiliary].map(i=>({id:i.id})),context:contextEditable?moduleContext:undefined,fixedReferences:fixedEditable?fixedReferences.map(i=>({id:i.id,note:i.note})):undefined,styleGroupIds:styleGroups.map(g=>g.id),model:moduleModel,quality,reproduceSourceTaskId:reproduceSourceTaskId||null,revision:moduleRevision};
         try{localStorage.setItem(draftKey,JSON.stringify(payload));}catch{throw new Error('人物图片尚未存入本机草稿，未完成回填，请勿关闭原页面');}
         setImages(nextImages);setAuxiliaryImages(nextAuxiliary);
       }}

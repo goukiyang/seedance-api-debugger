@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { evolutionCapability } from './evolution';
 import { resolveModuleContextVersion } from './context-version';
 import { studioPresetArchived } from './preset-lifecycle';
 import { normalizeStudioRatio } from './ratios';
@@ -113,6 +114,7 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     sourcePresetOwnedByViewer: Boolean(sourcePreset && sourcePreset.owner_id === ownerId),
     sourcePresetCanManageSharing: Boolean(sourcePreset && isAdmin && sourcePreset.scope === 'admin' && sourcePreset.owner_id === ownerId && !(await studioPresetArchived(sourcePreset.id))),
     contextEditable: !protectedSource,
+    evolution: evolutionCapability(row),
     fixedReferencesEditable: isAdmin && (!sourcePreset || sourcePreset.owner_id === ownerId),
     fixedReferenceCount: fixedReferences.length,
     styleGroupIds, styleGroups, reproductionState,

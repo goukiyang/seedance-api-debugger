@@ -1,0 +1,32 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+import ts from 'typescript';
+const read = path => fs.readFileSync(path, 'utf8');
+const route = ts.createSourceFile('batches.ts', read('src/app/api/image-studio/batches/route.ts'), ts.ScriptTarget.Latest, true);
+const get = route.statements.filter(ts.isVariableStatement).flatMap(node => node.declarationList.declarations).find(node => node.name.getText(route) === 'GET')?.initializer;
+assert(get, 'Batch GET must exist');
+assert(!/createStudioBatch|updateStudioBatch|dispatchStudioBatches|submitStudioBatch/.test(get.getText(route)), 'GET must only observe');
+assert(ts.isArrowFunction(get) && ts.isCallExpression(get.body) && get.body.expression.getText(route) === 'handle' && get.body.arguments.length === 1, 'GET must not enable write mode');
+const source = ts.createSourceFile('view.ts', read('src/lib/image-studio/batches.ts'), ts.ScriptTarget.Latest, true);
+const view = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'studioBatchView');
+const result = view.body.statements.find(node => ts.isReturnStatement(node)).expression;
+assert(ts.isObjectLiteralExpression(result), 'Batch DTO must be an explicit projection');
+const publicFields = result.properties.filter(node => ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)).map(node => node.name.getText(source));
+assert.deepEqual(publicFields, ['id', 'requestId', 'moduleId', 'moduleName', 'state', 'note', 'total', 'generated', 'failed', 'uncertain', 'active', 'pending', 'prepared', 'budget', 'committedCredits', 'unitCredits', 'createdAt']);
+assert(!/snapshot_json|batch\.input|moduleContext|globalContext|original_url|fixedReferenceImages/.test(result.getText(source)), 'Raw/private snapshot cannot be returned');
+for (const path of ['src/app/api/image-studio/download/route.ts', 'src/app/image-studio/batch-results.tsx']) {
+  const text = read(path);
+  assert(!/\.\.\.batch|snapshot_json|globalContext|moduleContext/.test(text), 'Export must not spread a persistent batch');
+}
+const worker = read('scripts/process-image-studio.ts');
+assert(worker.includes('await dispatchStudioBatches()') && worker.includes('image-studio-drain'));
+assert(read('src/lib/image-studio/tasks.ts').includes('!preparation && active + input.count > 8'));
+assert(read('src/lib/image-studio/batches.ts').includes('>= 8'));
+assert(read('src/app/api/image-studio/download/route.ts').includes('addReadStreamLazy'));
+const reminder = read('src/components/GenerationCompletion.tsx');
+assert(!/new Notification|requestPermission|serviceWorker|favicon/.test(reminder));
+assert(reminder.includes("audio?.state === 'running'") && reminder.includes('await audio.resume()'));
+assert(reminder.includes('prefers-reduced-motion') && reminder.includes('document.hidden'));
+assert(read('src/app/tools/avatar-studio/studio.tsx').includes('onDoubleClick'));
+assert(read('src/lib/release.ts').includes('packageInfo.version'));
+console.log(JSON.stringify({ staticSourceChecks: 'passed', batchProjectionFields: publicFields, functionalAcceptance: 'not-run' }, null, 2));

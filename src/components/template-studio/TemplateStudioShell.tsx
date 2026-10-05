@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Bookmark, RotateCcw } from 'lucide-react';
 import ImageStudio from '@/app/image-studio/studio';
+import { StudioBatchHistory } from '@/app/image-studio/batch-results';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import VideoTemplateWorkbench from './VideoTemplateWorkbench';
 import styles from './template-studio.module.css';
@@ -259,6 +260,7 @@ export default function TemplateStudioShell({
           <h1>模板工作台</h1>
         </div>
         <div className={styles.headerActions}>
+          {activeType === 'image' && <StudioBatchHistory key={userId} userId={userId} />}
           <Link className={styles.quietButton} href="/assets?view=favorites&category=template"><Bookmark size={16} />我的收藏</Link>
           {hasRememberedLocation && (
             <button

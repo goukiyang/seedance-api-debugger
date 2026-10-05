@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { resolveModuleContextVersion } from './context-version';
 import { archivedPresetKey, studioPresetArchived } from './preset-lifecycle';
 import { prisma } from '@/lib/prisma';
+import { evolutionCapability, type EvolutionCapability } from './evolution';
 import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from './limits';
 import { IMAGE_STUDIO_MODELS, defaultImageResolution, normalizeImageStudioQuality, normalizeImageResolution } from './model-catalog';
 import { normalizeStudioRatio } from './ratios';
@@ -159,14 +160,16 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
       throw new StudioModuleError(target ? '模板已在其他页面更新，请重新读取后修改' : '只能修改自己的模板', target ? 409 : 403);
     }
     let priorPresetId: string | null = null;
+    let inheritedEvolution: EvolutionCapability | null = null;
     if (sourceModuleId) {
-      const sourceModule = await tx.imageStudioModule.findFirst({ where: { id: sourceModuleId, owner_id: userId }, select: { id: true, source_preset_id: true } });
+      const sourceModule = await tx.imageStudioModule.findFirst({ where: { id: sourceModuleId, owner_id: userId }, select: { id: true, context: true, source_preset_id: true } });
       if (!sourceModule) throw new StudioModuleError('模板来源模块不存在或无权使用', 403);
       if (!isAdmin && sourceModule.source_preset_id) {
         const original = await tx.imageStudioPreset.findUnique({ where: { id: sourceModule.source_preset_id }, select: { owner_id: true } });
         if (!original || original.owner_id !== userId) throw new StudioModuleError('共享模板的内部配置只能由创建者另存', 403);
       }
       priorPresetId = sourceModule.source_preset_id;
+      inheritedEvolution = evolutionCapability(sourceModule);
     }
     const presetFixedReferences = fixedReferences === undefined
       ? sourceModuleId ? await getStudioModuleFixedReferences(userId, sourceModuleId, tx) : []
@@ -193,7 +196,9 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
         if (!isAdmin && original.owner_id !== userId) throw new StudioModuleError('共享模板的内部配置只能由创建者另存', 403);
       }
       effectiveContext = snapshot.moduleContext;
+      if (snapshot.evolution && ['increase', 'decrease'].includes(snapshot.evolution.direction)) inheritedEvolution = { version: 1, defaultDirection: snapshot.evolution.direction };
     }
+    if (inheritedEvolution && !evolutionCapability({ context: effectiveContext })) effectiveContext += `\n[studio:evolution:v1:${inheritedEvolution.defaultDirection}]`;
     const data = { name, group_name: groupName, prompt, context: effectiveContext, model, quality, resolution, count, reference_limit: referenceLimit, aspect_ratio: aspectRatio, banner_asset_id: bannerAssetId, reference_ids: JSON.stringify(ids) };
     let created;
     if (target) {

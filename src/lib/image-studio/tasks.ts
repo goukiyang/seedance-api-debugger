@@ -21,6 +21,7 @@ import { defaultStudioReferencePolicy, getStudioModuleReferencePolicy, mapStudio
 import { DEFAULT_STUDIO_PRIMARY_MAX } from './limits';
 import type { AvatarCandidate, AvatarLayout } from '@/lib/avatar-random/types';
 import { validateSheetCandidates } from '@/lib/avatar-random/layout';
+import { evolutionCapability, parseEvolution, resolveEvolution, evolutionInstructions } from './evolution';
 
 export class StudioError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -90,6 +91,8 @@ export function parseStudioRequest(body: Record<string, unknown>) {
   if (!Array.isArray(body.referenceIds) || body.referenceIds.length > MAX_REFERENCE_IMAGES || body.referenceIds.some(id => typeof id !== 'string' || id.length > 100)) throw new StudioError(`最多使用 ${MAX_REFERENCE_IMAGES} 张有效参考图`);
   const referenceIds = body.referenceIds as string[];
   const draft = parseStudioTaskDraft(body.draft, referenceIds);
+  let evolution;
+  try { evolution = parseEvolution(body.evolution); } catch (error) { throw new StudioError((error as Error).message); }
   let aspectRatio: string | undefined;
   try { if (body.aspectRatio !== undefined) aspectRatio = normalizeStudioRatio(body.aspectRatio); }
   catch (error) { throw new StudioError((error as Error).message); }
@@ -106,7 +109,7 @@ export function parseStudioRequest(body: Record<string, unknown>) {
   if (moduleRevision !== undefined && (!Number.isInteger(moduleRevision) || moduleRevision < 0)) throw new StudioError('模块已更新，请刷新后重试', 409);
   const reproduceFromTaskId = body.reproduceFromTaskId === undefined ? undefined : body.reproduceFromTaskId;
   if (reproduceFromTaskId !== undefined && (typeof reproduceFromTaskId !== 'string' || reproduceFromTaskId.length > 120)) throw new StudioError('历史生成记录无效', 400);
-  return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), moduleRevision, reproduceFromTaskId, referenceIds, ...(draft !== undefined ? { draft } : {}), ...(aspectRatio !== undefined ? { aspectRatio } : {}), ...(resolution !== undefined ? { resolution } : {}), ...(model !== undefined ? { model: model as typeof IMAGE_STUDIO_MODELS[number] } : {}), ...(quality !== undefined ? { quality: quality as string } : {}) };
+  return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), moduleRevision, reproduceFromTaskId, referenceIds, ...(evolution ? { evolution } : {}), ...(draft !== undefined ? { draft } : {}), ...(aspectRatio !== undefined ? { aspectRatio } : {}), ...(resolution !== undefined ? { resolution } : {}), ...(model !== undefined ? { model: model as typeof IMAGE_STUDIO_MODELS[number] } : {}), ...(quality !== undefined ? { quality: quality as string } : {}) };
 }
 
 function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] {
@@ -121,7 +124,7 @@ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] 
   catch { throw new StudioError('历史固定参考图快照无效', 409); }
 }
 
-export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }) {
+export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void> }) {
   const input = parseStudioRequest(body);
   const moduleId = body.moduleId;
   const sheet = avatar?.layout === 'contact-sheet';
@@ -335,11 +338,18 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const roleInstructions = primaryReferenceIds.length
       ? '主图承担画面主要内容，模板中未特别指定对象的主要处理要求默认指向主图。多张主图的具体分工以模板和本次要求为准，不默认融合，也不将后续主图降为辅助参考。普通参考、模板固定图和风格组仅提供明确指定的辅助信息，不得擅自用其中的主体替换主图主体。素材备注只约束对应素材的用途，不改变主图与辅助参考的角色。'
       : '本次没有主图，按文字要求生成。辅助参考仅提供指定的辅助信息，不自动将其中的主体当作生成主体。';
-    const context = [baseContext.trim(), referenceInstructions ? `${roleInstructions}\n\n参考图顺序与作用（编号与实际发送次序一致）：\n${referenceInstructions}` : '',
+    const historicalEvolution = historicalSnapshot?.evolution;
+    const evolutionRequest = input.evolution || (historicalEvolution ? parseEvolution({ direction: (historicalEvolution as { direction: string }).direction, manual: (historicalEvolution as { manual: boolean }).manual }) : undefined);
+    const capability = evolutionCapability({ id: workspace?.id, context: snapshotModuleContext });
+    if (evolutionRequest && !capability && !historicalEvolution) throw new StudioError('当前模板不支持演化方向');
+    let evolution;
+    try { if (evolutionRequest) evolution = resolveEvolution(evolutionRequest, input.prompt, capability || { version: 1, defaultDirection: 'increase' }); }
+    catch (error) { throw new StudioError((error as Error).message); }
+    const context = [baseContext.trim(), evolution ? evolutionInstructions(evolution) : '', referenceInstructions ? `${roleInstructions}\n\n参考图顺序与作用（编号与实际发送次序一致）：\n${referenceInstructions}` : '',
       styleNoteInstructions ? `风格组补充说明：\n${styleNoteInstructions}` : '']
       .filter(Boolean).join('\n\n---\n');
     const active = await tx.imageStudioTask.count({ where: { owner_id: ownerId, status: { in: ['queued', 'running'] } } });
-    if (active + input.count > 8) throw new StudioError('最多同时生成 8 张，请等待当前任务完成', 429);
+    if (!preparation && active + input.count > 8) throw new StudioError('最多同时生成 8 张，请等待当前任务完成', 429);
     const visibleTransient = await tx.asset.count({ where: { id: { in: uniqueTransientIds }, owner_id: ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity, tx)] } });
     if (visibleTransient !== uniqueTransientIds.length) throw new StudioError('本次参考图已不可用或无权查看', 403);
     const actualReferenceIds = Array.from(new Set(orderedReferenceIds));
@@ -393,6 +403,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       reproducedFromTaskId: reproduceFromTaskId || null,
       moduleName: workspace?.name || null,
       prompt: input.prompt,
+      ...(evolution ? { evolution } : {}),
       model: generation.model,
       quality: generation.quality,
       prices: generation.prices,
@@ -412,15 +423,17 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       const id = `${batchId}-${i}`;
       const candidate = sheet ? undefined : avatar?.candidates[i];
       const taskPrompt = candidate?.prompt || input.prompt;
-      const freeze = price > 0 ? await allocateTaskCredits(tx, user, price, id) : null;
-      await tx.imageStudioTask.create({ data: {
+      const freeze = !preparation && price > 0 ? await allocateTaskCredits(tx, user, price, id) : null;
+      const taskData: Prisma.ImageStudioTaskUncheckedCreateInput = {
         id, batch_id: batchId, owner_id: ownerId, module_id: moduleId as string | undefined, source_preset_id: sourcePresetId, ordinal: i + 1, fingerprint,
         prompt: taskPrompt, context, revision: settings.revision, model: generation.model,
         quality: generation.quality,
         provider_cost_usd: IMAGE_STUDIO_MODEL_COST_USD[generation.model as keyof typeof IMAGE_STUDIO_MODEL_COST_USD], snapshot_json: sheet ? JSON.stringify({ ...JSON.parse(snapshot), avatarLayout: 'contact-sheet', avatar: { layout: 'contact-sheet', cells: avatar!.candidates } }) : candidate ? JSON.stringify({ ...JSON.parse(snapshot), prompt: taskPrompt, avatar: candidate }) : snapshot,
         aspect_ratio: aspectRatio, output_size: outputSize,
         reference_ids: JSON.stringify(orderedReferenceIds), unit_credits: price, freeze_snapshot: freeze?.snapshot,
-      } });
+      };
+      if (preparation) await preparation.save(tx, taskData);
+      else await tx.imageStudioTask.create({ data: taskData });
       if (freeze) await tx.creditLedger.create({ data: {
         user_id: ownerId, type: 'task_freeze', amount: -price,
         balance_before: freeze.balance_before, balance_after: freeze.balance_after,
@@ -628,6 +641,8 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json'
   const unitCredits = typeof parsed.unitCredits === 'number' && Number.isFinite(parsed.unitCredits) ? parsed.unitCredits : null;
   return {
     prompt: typeof parsed.prompt === 'string' ? parsed.prompt : task.prompt,
+    evolution: parsed.evolution && typeof parsed.evolution === 'object' && ['increase', 'decrease'].includes(String((parsed.evolution as Record<string, unknown>).direction))
+      ? { direction: (parsed.evolution as Record<string, unknown>).direction, manual: (parsed.evolution as Record<string, unknown>).manual === true } : null,
     model: typeof parsed.model === 'string' ? parsed.model : task.model,
     quality: typeof parsed.quality === 'string' ? parsed.quality : task.quality,
     count,

@@ -50,6 +50,7 @@
 .records { margin-top: 22px; border-top: 1px solid var(--border-color); padding-top: 14px; }
 .record { display: flex; gap: 12px; padding: 12px 0; align-items: center; border-bottom: 1px solid var(--border-color); flex-wrap: wrap; }
 .record img, .recordCover { width: 64px; height: 64px; flex-shrink: 0; object-fit: cover; background: var(--bg-secondary); }
+.record button.recordCover { padding: 0; overflow: hidden; border: 0; cursor: zoom-in; }
 .recordText { flex: 1; min-width: 160px; display: flex; flex-direction: column; gap: 4px; }
 .recordText small { color: var(--text-secondary); }
 .empty { padding: 24px 0; color: var(--text-secondary); }
