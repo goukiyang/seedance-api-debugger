@@ -1,11 +1,12 @@
-export const AVATAR_RULE_VERSION = '1.0.0';
-export const AVATAR_COMPILER_VERSION = '1.1.0';
+export const AVATAR_RULE_VERSION = '1.1.0';
+export const AVATAR_COMPILER_VERSION = '1.2.0';
+export const AVATAR_PARSER_VERSION = '1.1.0';
 export type AvatarLayout = 'independent' | 'contact-sheet';
 export type FieldSource = 'user' | 'config' | 'inferred' | 'random';
 export type AvatarField = { value: string; source: FieldSource; locked: boolean; manualLock?: boolean; evidence?: string; excluded?: string[] };
 export type AvatarDetail = AvatarField & { kind: 'natural' | 'trace' | 'accessory'; position: string; side: 'left' | 'right' | 'none'; prominence: 'main' | 'secondary' | 'micro' };
-export type AvatarDNA = { fields: Record<string, AvatarField>; details: AvatarDetail[]; seed: string; ruleVersion: string; featureBudget: number; samplingContext?: { used: Record<string, string>[]; action: string }; warnings?: string[] };
-export type AvatarConstraints = { description: string; explicit: Record<string, AvatarField>; scopes: string[]; background: string; unrecognized: string[]; conflicts: string[]; parserVersion: string; details: AvatarDetail[]; members?: Array<{ explicit: Record<string, AvatarField>; details: AvatarDetail[]; relationship: string }> };
+export type AvatarDNA = { fields: Record<string, AvatarField>; details: AvatarDetail[]; seed: string; ruleVersion: string; catalogVersion?: string; featureBudget: number; samplingContext?: { used: Record<string, string>[]; action: string }; warnings?: string[] };
+export type AvatarConstraints = { description: string; explicit: Record<string, AvatarField>; soft?: Record<string, AvatarField>; summary?: string; clarifications?: string[]; scopes: string[]; background: string; unrecognized: string[]; conflicts: string[]; parserVersion: string; details: AvatarDetail[]; members?: Array<{ explicit: Record<string, AvatarField>; details: AvatarDetail[]; relationship: string }> };
 export type AvatarRules = { layout?: AvatarLayout; description: string; choices: Record<string, string>; locks: Record<string, AvatarField>; choiceSources?: Record<string, FieldSource>; descriptionEditedAt?: number; choiceEditedAt?: Record<string, number>; intensity: 'conservative' | 'standard' | 'bold'; people: 1 | 2 | 3 | 4; candidates: 1 | 2 | 4; configId?: string; configRevision?: number };
 export type AvatarCandidate = { characterId: string; members: AvatarDNA[]; standardDescription: string; prompt: string; compilerVersion: string; rules: AvatarRules; constraints: AvatarConstraints; baselineAssetId?: string };
 export type AvatarPlan = { layout?: AvatarLayout; sheetPrompt?: string; id: string; candidates: AvatarCandidate[]; model: string; quality: string; resolution: string; aspectRatio: string; settingsRevision: number; unitCredits: number | null; referenceIds: string[]; createdAt: string; imageReady?: boolean; sourceTaskId?: string; restoredFrom?: string; imageSeedSupport?: 'unsupported'; warnings?: string[] };

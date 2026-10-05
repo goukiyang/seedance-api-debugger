@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { AvatarConstraints } from './types';
 import { decodeDescriptionOutput, DescriptionContractError, validateDescriptionConstraints } from './description-contract';
+import { intentIssues, intentView } from './intent';
+import { AVATAR_PARSER_VERSION } from './types';
 
-export type DescriptionStatus = { descriptionId: string; state: 'not-started' | 'pending' | 'succeeded' | 'failed' | 'unknown'; message: string; canRecheck: boolean; retryToken?: string; requestId?: string; failure?: { code: string; stage: string; field?: string }; cost: 'not-started' | 'unknown' | 'response-received' };
-type Attempt = { version: 2; requestId: string; state: 'pending' | 'received' | 'succeeded' | 'failed' | 'unknown'; createdAt: string; updatedAt: string; responseId?: string; failure?: DescriptionStatus['failure']; cost: DescriptionStatus['cost'] };
+export type DescriptionStatus = { descriptionId: string; parserVersion?: string; constraints?: AvatarConstraints; understanding?: ReturnType<typeof intentView>; state: 'not-started' | 'pending' | 'succeeded' | 'needs-clarification' | 'failed' | 'unknown'; message: string; canRecheck: boolean; retryToken?: string; requestId?: string; failure?: { code: string; stage: string; field?: string }; cost: 'not-started' | 'unknown' | 'response-received' };
+type Attempt = { version: 2; parserVersion?: string; requestId: string; state: 'pending' | 'received' | 'succeeded' | 'failed' | 'unknown'; createdAt: string; updatedAt: string; responseId?: string; failure?: DescriptionStatus['failure']; cost: DescriptionStatus['cost'] };
 export type DescriptionStore = {
   readCache(): Promise<AvatarConstraints | null>;
   readAttempt(): Promise<string | null>;
@@ -25,7 +27,7 @@ function statusFor(id: string, raw: string | null, now: number): DescriptionStat
   const pending = a.state === 'pending' && Number.isFinite(Date.parse(a.createdAt || '')) && now - Date.parse(a.createdAt!) < 120000;
   if (pending) return { descriptionId: id, state: 'pending', message: '正在解析人物描述，尚未提交图片任务；查询不会重新调用模型。', canRecheck: false, requestId: a.requestId, cost: 'unknown' };
   const unknown = a.version !== 2 || a.state === 'pending' || a.state === 'unknown' || a.state === 'received' || a.state === 'succeeded';
-  return { descriptionId: id, state: unknown ? 'unknown' : 'failed', canRecheck: !!a.responseId, requestId: a.requestId, retryToken: token(raw), cost: a.cost || 'unknown', failure: a.failure,
+  return { descriptionId: id, state: unknown ? 'unknown' : 'failed', canRecheck: !!a.responseId, requestId: a.requestId, ...(!unknown && !a.responseId ? { retryToken: token(raw) } : {}), cost: a.cost || 'unknown', failure: a.failure,
     message: unknown ? '上次描述解析的结果未确认，不能确定是否已产生文字模型费用；没有提交人物图片任务。'
       : a.responseId ? '文字模型已经回复，但人物要求尚未通过校验。原回复已保留，可重新检查，不调用模型。'
         : '文字模型请求已返回失败，尚未提交图片任务；不能据此保证上次没有产生模型费用。' };
@@ -38,7 +40,7 @@ async function receiptState(id: string, raw: string | null, store: DescriptionSt
 export async function inspectDescription(description: string, store: DescriptionStore, now = Date.now()): Promise<DescriptionStatus> {
   const cached = await store.readCache();
   if (cached) {
-    try { validateDescriptionConstraints(cached, description); return { descriptionId: descriptionId(description), state: 'succeeded', canRecheck: false, cost: 'response-received', message: '已有可用的描述解析；继续将复用，不再次调用文字模型。' }; }
+    try { const parsed = validateDescriptionConstraints(cached, description), issues = intentIssues(parsed); return { descriptionId: descriptionId(description), parserVersion: AVATAR_PARSER_VERSION, constraints: parsed, understanding: intentView(parsed), state: issues.length ? 'needs-clarification' : 'succeeded', canRecheck: issues.length > 0, cost: 'response-received', message: issues.length ? '已理解部分要求，还有条件需要补充或调整；原回复保留，不会自动再次调用模型。' : '文案已分析，可以生成；快捷条件和锁会一起核对，不再次调用文字模型。' }; }
     catch (e) { return { ...(await receiptState(descriptionId(description), await store.readAttempt(), store, now)), descriptionId: descriptionId(description), state: 'failed', cost: 'response-received', message: '已有解析不符合当前校验要求，原内容保留；不会自动重新调用模型。', failure: { code: 'cached_contract_invalid', stage: 'validation', ...(e instanceof DescriptionContractError ? { field: e.field } : {}) } }; }
   }
   return receiptState(descriptionId(description), await store.readAttempt(), store, now);
@@ -52,7 +54,7 @@ export async function resolveDescription(description: string, options: { approve
   }
   let raw = await store.readAttempt();
   const state = await receiptState(id, raw, store);
-  if (options.retryToken !== undefined && (!options.approved || state.state === 'pending' || options.retryToken !== state.retryToken)) throw new AvatarDescriptionError(state);
+  if (options.retryToken !== undefined && (!options.approved || state.state === 'pending' || state.state === 'unknown' || state.canRecheck || options.retryToken !== state.retryToken)) throw new AvatarDescriptionError(state);
   if (!options.retryToken && raw) {
     if (!state.canRecheck) throw new AvatarDescriptionError(state);
   }
@@ -60,7 +62,7 @@ export async function resolveDescription(description: string, options: { approve
   if (!raw || options.retryToken) {
     if (!options.approved || options.recheck) throw new AvatarDescriptionError(state, 400);
     const time = new Date().toISOString();
-    const attempt: Attempt = { version: 2, requestId: randomUUID(), state: 'pending', createdAt: time, updatedAt: time, cost: 'unknown' };
+    const attempt: Attempt = { version: 2, parserVersion: AVATAR_PARSER_VERSION, requestId: randomUUID(), state: 'pending', createdAt: time, updatedAt: time, cost: 'unknown' };
     const next = JSON.stringify(attempt);
     const claimed = raw ? await store.replaceAttempt(raw, next) : await store.createAttempt(next);
     if (!claimed) throw new AvatarDescriptionError(statusFor(id, await store.readAttempt(), Date.now()));
@@ -88,7 +90,7 @@ export async function resolveDescription(description: string, options: { approve
   if (output === null) throw new AvatarDescriptionError({ ...statusFor(id, raw, Date.now()), canRecheck: false, state: 'unknown', message: '模型回复未能保存或已不可读取，费用结果未确认；不会自动再调用。' }, 503);
   let parsed: AvatarConstraints;
   try {
-    parsed = validateDescriptionConstraints(decodeDescriptionOutput(output), description);
+    parsed = validateDescriptionConstraints(decodeDescriptionOutput(output), description, attempt.parserVersion === AVATAR_PARSER_VERSION);
   } catch (e) {
     if (e instanceof AvatarDescriptionError) throw e;
     const field = e instanceof DescriptionContractError ? e.field : 'response';

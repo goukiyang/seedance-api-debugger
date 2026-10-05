@@ -11,8 +11,9 @@ import { adaptAvatarPrompt, createAvatarCandidates, emptyConstraints, parseAvata
 import { avatarKey, avatarPlanKey, avatarRecordKey, readAvatar } from './store';
 import type { AvatarConstraints, AvatarCandidate, AvatarPlan, AvatarRecord } from './types';
 import { descriptionSystemPrompt } from './description-contract';
-import { descriptionId, inspectDescription, resolveDescription, type DescriptionStore } from './description-parser';
+import { AvatarDescriptionError, descriptionId, inspectDescription, resolveDescription, type DescriptionStore } from './description-parser';
 import { avatarLayout, avatarOutputCount, withAvatarLayout } from './layout';
+import { avatarRulesSignature } from './intent';
 
 function descriptionStore(owner: string, description: string): DescriptionStore {
   const id = descriptionId(description), key = avatarKey(owner, 'parse-attempt', id);
@@ -56,7 +57,13 @@ export async function prepareAvatarPlan(owner: string, body: Record<string, unkn
   if (action !== 'new' && !current) throw new StudioError('请先恢复一个可用的人物');
   if (action === 'tweak' && (typeof body.field !== 'string' || !(body.field in catalog) || rules.description !== current!.rules.description)) throw new StudioError('微调只修改所选字段；描述已变化，请先恢复草稿或选择换一个人');
   if (current && action!=='new' && rules.people!==current.members.length) throw new StudioError('微调或换造型不能改变人数，请选择换一个人');
-  const constraints = await parseAvatarDescription(owner, rules.description, body.approveTextModel === true, typeof body.parseRetryToken === 'string' ? body.parseRetryToken : undefined, body.recheckDescription === true);
+  if (rules.description) {
+    const parse = await avatarDescriptionStatus(owner, rules.description);
+    if (parse.state !== 'succeeded') throw new AvatarDescriptionError(parse);
+    if (body.descriptionId !== parse.descriptionId || body.parserVersion !== parse.parserVersion) throw new StudioError('文案分析已变化，请先查询当前分析结果；本次不调用模型', 409);
+  }
+  // Preparing a quote must never implicitly purchase a text-model request.
+  const constraints = await parseAvatarDescription(owner, rules.description, false);
   if (constraints.members?.length && !(avatarLayout(rules)==='contact-sheet' ? [1,4].includes(constraints.members.length) : constraints.members.length === rules.people)) throw new StudioError('描述中的人物数量与排版不一致；四宫格可指定一套共同条件或四位人物，独立图按每张人数设置');
   const settings = await getImageStudioSettings();
   const model = typeof body.model === 'string' && IMAGE_STUDIO_MODELS.includes(body.model as typeof IMAGE_STUDIO_MODELS[number]) ? body.model : settings.model;
@@ -87,9 +94,10 @@ export async function prepareAvatarPlan(owner: string, body: Record<string, unkn
   await prisma.platformSetting.create({ data: { key: avatarPlanKey(owner, plan), value_json: JSON.stringify(plan), updated_by: owner } });
   return plan;
 }
-export async function submitAvatarPlan(owner: string, id: string, expectedLayout?: unknown) {
+export async function submitAvatarPlan(owner: string, id: string, expectedLayout?: unknown, draft?: Record<string, unknown>) {
   const plan = await readAvatar<AvatarPlan>(owner, 'plan', id);
   if (!plan) throw new StudioError('人物草稿不存在', 404);
+  if (!draft?.rules || avatarRulesSignature(parseAvatarRules(draft.rules)) !== avatarRulesSignature(plan.candidates[0].rules) || draft.model !== plan.model || draft.quality !== plan.quality || draft.resolution !== plan.resolution) throw new StudioError('人物条件或图片参数已变化，请重新分析或报价；不能用旧报价出图', 409);
   const layout = avatarLayout(plan), count = avatarOutputCount(plan);
   if (expectedLayout !== undefined && expectedLayout !== layout) throw new StudioError('排版已变化，请重新报价；不能按旧计划直接提交新排版', 409);
   if (layout === 'contact-sheet' && (!plan.sheetPrompt || plan.aspectRatio !== '1:1')) throw new StudioError('四宫格快照不完整，请重新准备人物');

@@ -16,6 +16,7 @@ import { createHash } from 'node:crypto';
 import { getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider } from '@/lib/integrations/image-generation';
 import { IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
 import { avatarLayout, withAvatarLayout } from '@/lib/avatar-random/layout';
+import { avatarRulesSignature } from '@/lib/avatar-random/intent';
 
 async function sourceTask(owner:string,id?:string) {
   if(!id)return null;
@@ -39,6 +40,8 @@ async function run(action: (owner: string) => Promise<unknown>) {
   }
 }
 export async function GET(req: NextRequest) { return run(async owner => {
+  const imageTaskId=req.nextUrl.searchParams.get('imageTask');
+  if(imageTaskId){if(!/^[a-zA-Z0-9-]{1,100}$/.test(imageTaskId))throw new StudioError('图片记录无效');return {sourceTask:await sourceTask(owner,imageTaskId)};}
   const planId = req.nextUrl.searchParams.get('plan');
   const recordId=req.nextUrl.searchParams.get('record');
   if(recordId){const record=await readAvatar<AvatarRecord>(owner,'record',recordId);if(!record||record.deletedAt)throw new StudioError('记录已失效',404);return {record};}
@@ -58,13 +61,18 @@ export async function POST(req: NextRequest) { return run(async owner => {
   const body = await req.json();
   if (!body || typeof body !== 'object'||Array.isArray(body)) throw new StudioError('请求无效');
   if (body.action === 'parse-status') return { parse: await avatarDescriptionStatus(owner, body.description) };
+  if (body.action === 'analyze') {
+    if (typeof body.description !== 'string' || !body.description.trim() || body.description.length > 3000 || !Number.isSafeInteger(body.draftRevision) || body.draftRevision < 0) throw new StudioError('文案或当前草稿无效');
+    await parseAvatarDescription(owner, body.description.trim(), body.approveTextModel === true, typeof body.parseRetryToken === 'string' ? body.parseRetryToken : undefined);
+    return { parse: await avatarDescriptionStatus(owner, body.description), binding: { ownerId: owner, description: body.description.trim(), draftRevision: body.draftRevision } };
+  }
   if (body.action === 'parse-recheck') {
     if (typeof body.description !== 'string' || body.description.length > 3000) throw new StudioError('人物描述无效');
     await parseAvatarDescription(owner, body.description.trim(), false, undefined, true);
     return { parse: await avatarDescriptionStatus(owner, body.description) };
   }
   if (body.action === 'prepare') return { plan: await prepareAvatarPlan(owner, body) };
-  if (body.action === 'submit') return { batchId: await submitAvatarPlan(owner, body.id, body.layout) };
+  if (body.action === 'submit') return { batchId: await submitAvatarPlan(owner, body.id, body.layout, body) };
   if (body.action === 'restore') {
     const record = await readAvatar<AvatarRecord>(owner, 'record', body.id);
     if (!record || (!record.candidate && !record.sheetCandidates) || record.deletedAt) throw new StudioError('人物记录已不可用');
@@ -78,6 +86,8 @@ export async function POST(req: NextRequest) { return run(async owner => {
   }
   if(body.action==='quote'){
     const previous=await readAvatar<AvatarPlan>(owner,'plan',body.id);if(!previous)throw new StudioError('人物草稿不存在');
+    if (!body.rules || avatarRulesSignature(parseAvatarRules(body.rules), false) !== avatarRulesSignature(previous.candidates[0].rules, false)) throw new StudioError('人物条件已变化，不能沿用旧人物报价；请按当前条件准备人物', 409);
+    if ((body.layout || avatarLayout(previous)) === avatarLayout(previous) && avatarRulesSignature(parseAvatarRules(body.rules)) !== avatarRulesSignature(previous.candidates[0].rules)) throw new StudioError('人数或候选数量已变化，请按当前条件准备人物', 409);
     if (body.layout !== undefined && !['independent','contact-sheet'].includes(body.layout)) throw new StudioError('人物排版无效');
     const layout=body.layout || avatarLayout(previous);
     const settings=await getImageStudioSettings();

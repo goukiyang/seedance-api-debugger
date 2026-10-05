@@ -6,7 +6,7 @@ import { emptyRules, type AvatarCandidate, type AvatarConstraints, type AvatarPl
 import { avatarKey, avatarPlanKey, avatarRecordKey, avatarReadKeys } from '../src/lib/avatar-random/storage-keys';
 
 const description = '30岁，短发';
-const valid = { explicit: { age: { value: 30, evidence: '30岁' } }, details: [], scopes: [], background: '', unrecognized: [], conflicts: [] };
+const valid = { summary:'希望是30岁的短发人物',soft:{},clarifications:[],explicit: { age: { value: 30, evidence: '30岁' } }, details: [], scopes: [], background: '', unrecognized: [], conflicts: [] };
 function memory() {
   let raw: string | null = null, cache: AvatarConstraints | null = null;
   const responses = new Map<string, string>();
@@ -37,17 +37,17 @@ async function main() {
   const unknown=await inspectDescription(description,legacy.store);assert.equal(unknown.state,'unknown');assert.equal(await legacy.store.readAttempt(),old);
   await assert.rejects(resolveDescription(description,{approved:true},legacy.store,call));assert.equal(calls,1);cases++;
   const timeout=memory();await assert.rejects(resolveDescription(description,{approved:true},timeout.store,async()=>{throw Object.assign(new Error('timeout'),{code:'musk_api_timeout'});}));
-  const lost=await inspectDescription(description,timeout.store);assert.equal(lost.state,'unknown');assert.equal(lost.cost,'unknown');assert.ok(lost.retryToken);
-  await resolveDescription(description,{approved:true,retryToken:lost.retryToken},timeout.store,call);assert.equal(calls,2);cases++;
+  const lost=await inspectDescription(description,timeout.store);assert.equal(lost.state,'unknown');assert.equal(lost.cost,'unknown');assert.equal(lost.retryToken,undefined);
+  await assert.rejects(resolveDescription(description,{approved:true,retryToken:'unknown-cannot-retry'},timeout.store,call));assert.equal(calls,1);cases++;
   const race=memory();let raceCalls=0;let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});
   const inFlight=resolveDescription(description,{approved:true},race.store,async()=>{raceCalls++;await gate;return {content:JSON.stringify(valid)};});
   await new Promise(resolve=>setImmediate(resolve));await assert.rejects(resolveDescription(description,{approved:true},race.store,call));release();await inFlight;assert.equal(raceCalls,1);cases++;
   const receipt=memory();const requestId='saved-request';receipt.setRaw(JSON.stringify({version:2,state:'pending',requestId,createdAt:new Date().toISOString()}));receipt.responses.set(requestId,JSON.stringify(valid));
-  assert.equal((await inspectDescription(description,receipt.store)).canRecheck,true);await resolveDescription(description,{approved:false,recheck:true},receipt.store,call);assert.equal(calls,2);cases++;
+  assert.equal((await inspectDescription(description,receipt.store)).canRecheck,true);await resolveDescription(description,{approved:false,recheck:true},receipt.store,call);assert.equal(calls,1);cases++;
   const persistence=memory();const complete=persistence.store.complete;persistence.store.complete=async()=>{throw new Error('disk');};
   await assert.rejects(resolveDescription(description,{approved:true},persistence.store,call),e=>e instanceof AvatarDescriptionError&&e.parse.failure?.stage==='persistence'&&e.parse.canRecheck);
   assert.equal((await inspectDescription(description,persistence.store)).state,'unknown');
-  persistence.store.complete=complete;await resolveDescription(description,{approved:false,recheck:true},persistence.store,call);assert.equal(calls,3);cases++;
+  persistence.store.complete=complete;await resolveDescription(description,{approved:false,recheck:true},persistence.store,call);assert.equal(calls,2);cases++;
   const cells=Array.from({length:4},(_,i)=>({characterId:`person-${i}`,members:[{fields:{},details:[],seed:String(i),ruleVersion:'1.0.0',featureBudget:2}],standardDescription:`不同人物条件${i}`,prompt:'画面中恰好1个人',compilerVersion:'1.0.0',rules:emptyRules,constraints:unresolved} satisfies AvatarCandidate));
   const oldPlan:AvatarPlan={id:'old-plan',candidates:cells,model:'test',quality:'auto',resolution:'1K',aspectRatio:'1:1',settingsRevision:24,unitCredits:5,referenceIds:[],createdAt:'2026-10-05T00:00:00Z'};
   assert.equal(avatarLayout(oldPlan),'independent');assert.equal(avatarOutputCount(oldPlan),4);const sheet=withAvatarLayout(oldPlan,'contact-sheet');assert.equal(avatarOutputCount(sheet),1);assert.equal(sheet.unitCredits!*avatarOutputCount(sheet),5);assert.ok(sheet.sheetPrompt?.includes('左下格'));assert.ok(!sheet.sheetPrompt?.includes('画面中恰好1个人'));assert.deepEqual(sheet.candidates.map(c=>c.characterId),cells.map(c=>c.characterId));assert.equal(avatarOutputCount(withAvatarLayout(sheet,'independent')),4);cases++;
