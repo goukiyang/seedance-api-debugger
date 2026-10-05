@@ -1,0 +1,6 @@
+Command: node --import tsx scripts/avatar-studio-regression.ts
+Working directory: /Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005
+Source commit: 82fe2cb8aba5bbda7c4007249b0a6884f813d438
+Exit code: 0
+Actual stdout:
+{"ok":true,"cases":18,"modelCalls":"in-memory only; no HTTP, DB, image generation or credits","original400":"specific failed field not available"}

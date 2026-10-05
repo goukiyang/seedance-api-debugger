@@ -1,0 +1,102 @@
+{
+  "status": "已部署，待用户手动验收；G1实际整份回复重检仍缺对应原文，不称不出图问题已全部解决",
+  "project": "video-api-debugger",
+  "version": "0.42.1",
+  "commit": "2c895eef1d5e15e5349f326e68038c76c42c81b8",
+  "build": "BaWLKa1vTqBaQDtynG4MU",
+  "branch": "codex/avatar-generator-20261005",
+  "url": "https://sd2.youdooart.com/tools/avatar-studio",
+  "publishedAt": "2026-10-05T02:45:14.221Z",
+  "scope": [
+    {"id":"P1","task":"人物生成工具","standard":"方案D、受控随机、人物/配置/历史及真实出图接通","state":"原0.41.1实现保留，G1/G2按后续明确要求修正；真实出图待手动验收"},
+    {"id":"P2","task":"与现有系统嫁接","standard":"工具/参考区入口、单图返回、幂等与草稿槽位保护","state":"原实现保留，组图可作为整张参考返回；回填持久ack/CAS与单图语义未撤销，未重新功能验收"},
+    {"id":"P3","task":"导入窗口删除素材","standard":"本人Asset/video_task/reference_image库内软隐藏、确认、撤销与归属保护","state":"原0.41.1三类型及隔离兼容标记保留；本次不改，不自动删除生产素材"},
+    {"id":"P4","task":"提交与上线","standard":"候选构建、远端提交/标签、回退保护与公网产物一致","state":"已完成发布检查，待手动验收"},
+    {"id":"P5","task":"生成图片恢复设置交互","standard":"图片单击只选中、明确按钮恢复、不生成、hover/键盘可访问","state":"原行为保留，G3补齐同一操作行，待手动验收"},
+    {"id":"G1","task":"排查点击生成没有出图","standard":"定位提交前失败，保留安全回执、状态与不重复费用的恢复闭环","state":"明确格式修复和失败恢复已部署；27项非收费专项通过；真实整份decode/validate缺匹配原文，未声称通过或实际出图成功"},
+    {"id":"G2","task":"默认四拼一排版","standard":"一张实际2×2四宫格、四份不同DNA、一任务、一图计费，独立候选可选","state":"0.42.0已部署，0.42.1保留；真实图像内容待用户手动验收"},
+    {"id":"G3","task":"恢复设置并入操作行","standard":"下载/复制/预览/恢复同一行，不新增独立行或占位行","state":"源码、AST、编译CSS与公网JS/CSS已核对，0.42.1已部署；实际画面/交互待用户手动验收"}
+  ],
+  "coverageA1A7": {
+    "A1":"来源、锁、明确/否定/冲突契约保留；新增layout口径和严格解析契约，单对象数组只拆一层，不挑多值或删空值逃过校验",
+    "A2":"原关联随机/预算/seed/批次差异和局部重抽保留；四宫格保留四份人物DNA，公共约束与成员约束不静默冲掉",
+    "A3":"原DNA→标准描述→模型适配保留；四宫格按四份标准描述编译一次整图prompt，正方形2×2，每格一人",
+    "A4":"配置/Character/Generation原管理和完整恢复保留；组图计划/记录隔离sheet-plan/sheet-record，Generation不假装第一位单人身份",
+    "A5":"复用原图片队列、积分和资产；组图count1一次任务/冻结，独立模式保留1/2/4；未改变积分规则，未开发发收费请求",
+    "A6":"方案D/菜单/视频页/参考入口/安全回填/工作现场原实现保留；解析阶段/免费重检/显式收费重试与组图模式和张数费用可见",
+    "A7":"版本单一来源、既有更新提醒复用；提交push/tag、真实发布预约、隔离候选构建、受保护切换及公网/回退证据完成"
+  },
+  "changedFilesSince0411": {
+    "package.json":"应用版本0.42.1；无新增依赖，锁文件不改",
+    "scripts/avatar-studio-regression.ts":"仅内存非收费27项专项，含18项原G1/G2及9项最新形状/免费重检保护",
+    "src/app/api/avatar-studio/route.ts":"解析状态/免费重检；模式报价、完整快照恢复、组图单人身份操作保护",
+    "src/app/image-studio/studio.module.css":"移除独立restoreFooter，恢复图标固定32px，整卡hover/键盘/触摸规则",
+    "src/app/image-studio/studio.tsx":"恢复按钮进入现有resultCommands；保持stopPropagation、未保存保护、图片仅选中",
+    "src/app/tools/avatar-studio/studio.module.css":"结果选中/状态信息边界和溢出约束，不用CSS伪装四张图拼成一张",
+    "src/app/tools/avatar-studio/studio.tsx":"默认真实组图模式、人数/张数/费用、独立方式、整图操作及描述失败恢复",
+    "src/lib/avatar-random/description-contract.ts":"安全JSON解码、严格字段/原文校验；最新仅解包一层单对象数组，拒绝空/多值/null/scalar/缺证据",
+    "src/lib/avatar-random/description-parser.ts":"attempt CAS、保存私有回执、成功/失败/未知区分，免费重检与显式授权重试防自动重复费用",
+    "src/lib/avatar-random/engine.ts":"layout/四份DNA与公共/成员约束；复用严格描述契约与原受控随机",
+    "src/lib/avatar-random/layout.ts":"旧缺layout为独立模式；四宫格输出数1、四份单人DNA校验和单整图prompt",
+    "src/lib/avatar-random/service.ts":"私有解析回执存储；prepare/submit一张组图、四DNA快照、不同模式指纹兼容",
+    "src/lib/avatar-random/storage-keys.ts":"新组图plan/record私有隔离键，旧0.41.1回退不能误读并按四图计费或存错单人身份",
+    "src/lib/avatar-random/store.ts":"新旧分区兼容读取，组图记录不伪造candidate单人字段，旧记录不迁移不清空",
+    "src/lib/avatar-random/types.ts":"layout/组图快照类型；默认每格1人/四DNA/真实一张，旧历史缺字段兼容",
+    "src/lib/image-studio/tasks.ts":"0.42.0接组图count1/1:1/四cell快照及布局指纹；0.42.1不改该worker加载模块",
+    "src/lib/release.ts":"从package唯一版本源生成摘要，覆盖描述失败免费重检、默认一张四宫格与恢复按钮同一行"
+  },
+  "actualChecks": {
+    "targeted":"node --import tsx scripts/avatar-studio-regression.ts：exit0，27项；只有内存callback，无HTTP、DB、图像生成或积分调用",
+    "previous18":"../g1-g2-0.42.0/sd2-avatar-g1-g2-regression.log：真实18项日志保留，不回写旧证据",
+    "realReply":"sd2-avatar-real-reply-validation.json：只读SQLite查询对应requestID及同账号存量描述hash；回复存在，但无对应原文；完整真实校验未执行，未替换描述/写cache/attempt或调用模型",
+    "g3Static":"g3-static-proof.json：AST确认唯一恢复入口在resultCommands，无独立行，图片onSelect仅setSelectedResultId，stopPropagation及32px/hover/focus/touch规则保留",
+    "diff":"git diff --check 2b1c4cf HEAD：exit0；17文件，494新增/130删除",
+    "candidate":"服务器独立release源码 NEXT_DIST_DIR=.next-prod-candidate npm run build：exit0；含Next内置编译/类型/lint/页面检查；原img/Hook/CSS非阻塞警告保留",
+    "compiled":"compiled-proof.json：validator1.0.2与真实template toolbar CSS已编入；没有restoreFooter",
+    "source":"runtime-proof.json：783份产品源文件与最终候选SHA一致，commit/版本/BUILD相符",
+    "public":"sd2-avatar-g3-public-proof.json：release/health/config/login均200，origin server-42-193；template操作行JS/CSS公网SHA与候选一致；本机curl独立复核0.42.1和来源",
+    "updateNotice":"静态复核既有ReleaseNotice：SemVer严格升版、启动/前台/间隔检查、标题<=8字且20px粗体、版本另列、稍后去重、手动重查和草稿/进行中保护；用户实际旧会话未操作，不称功能验收通过"
+  },
+  "realFailure": {
+    "requestId":"a5c81fab-6851-4bfa-b2b9-0e0149d08190",
+    "state":"failed",
+    "field":"explicit.gender",
+    "shape":"数组长度1，元素对象只有value/evidence/excluded；value字符串长度2，evidence字符串长度1，excluded空数组",
+    "fix":"只拆一层无歧义结构包装，原回复不改；随后所有字段/证据/否定/冲突/多人校验继续执行。免费重检不调用模型",
+    "gap":"对应原描述未保存于服务器该回执，也未在同账号服务端存量对象中找到一致hash；浏览器草稿未读取。完整真实回复是否还有后续失败字段未知，需对应原描述的纯校验或用户主动免费重检",
+    "original400":"上午首次400原字段/回复未知，不能把本次最新形状认定为首次400根因"
+  },
+  "git": {
+    "remote":"origin/codex/avatar-generator-20261005已核为2c895eef1d5e15e5349f326e68038c76c42c81b8",
+    "releaseTag":"release/0.42.1-avatar-recovery-toolbar-20261005（已推送及ls-remote核对）",
+    "rollbackTag":"rollback/2026-10-05-before-restore-toolbar-0.42.1 → 82fe2cb（已推送及ls-remote核对）",
+    "priorRelease":"release/0.42.0-avatar-contact-sheet-20261005 → 82fe2cb；旧0.41.0/.1标签保留",
+    "archiveSHA256":"af4038e6ae34d836018a8d714db29cfcbe2ca524b08ce3359a47497064de6454",
+    "archive":"/tmp/sd2-avatar-2c895eef1d5e15e5349f326e68038c76c42c81b8.tar.gz",
+    "clean":"产品源码无脏改；既有未跟踪资料与本地失效候选缓存保留，不stage/revert"
+  },
+  "deployment": {
+    "reservation":"avatar-g1-g3-20261005-2c895ee；上传前真实预约、切换前重核、服务器flock及源码漂移拒绝；最终Git标签等待后预约过5分钟，仅在确认无外来记录/当前产物未变后刷新闭环预约并登记完成",
+    "registry":"/Volumes/Data/Projects/project-version-registry.md",
+    "candidateSource":"/srv/video-api-debugger/releases/2c895eef1d5e15e5349f326e68038c76c42c81b8",
+    "app":"/srv/video-api-debugger/app",
+    "web":"sd2-gray.service active/running，PID280589，已重启",
+    "image":"sd2-image-studio.service active/running，PID259902；0.42.0自然排空后重启；0.42.1为白名单web-only补丁，worker PID未变，无强杀或新任务打断",
+    "data":"storage/public/uploads/public/videos软链接/data持久目录均保留；排除全部.env/密钥/DB/运行数据/node_modules/.next*/dist；无生产DB写命令、迁移或删除",
+    "rollback0420":{"source":"/srv/video-api-debugger/releases/82fe2cb8aba5bbda7c4007249b0a6884f813d438-avatar-rollback","build":"/srv/video-api-debugger/app/.next-prod-prev-avatar-2c895ee","BUILD_ID":"ZFdnS_3WyEES4aw7_V_vA"},
+    "rollback0411":{"source":"/srv/video-api-debugger/releases/2b1c4cfea7d0eeb9e99e0cf0b712056742c59536-avatar-rollback","build":"/srv/video-api-debugger/app/.next-prod-prev-avatar-82fe2cb","BUILD_ID":"TVyNICHldwYntu2SSA7Po"},
+    "rollback0410":{"build":"/srv/video-api-debugger/app/.next-prod-prev-avatar-2b1c4cf","BUILD_ID":"HCmFzUDsnr43fQC62KZlg","source":"原0.41.0release归档及远端release/rollback tag保留，详细见原P1-P5证据"}
+  },
+  "evidence": {
+    "unifiedDiff":"source.diff（0.41.1→最终0.42.1）；full-source.diff（原线上116ee2a→最终0.42.1，完整P1-P5+G1-G3整合diff）",
+    "allChangedFiles":"all-changed-files.txt（原线上116ee2a→最终0.42.1完整文件清单）；changedFilesSince0411列本次G1-G3的17个文件及具体作用",
+    "patchDiff":"patch-0.42.1.diff（已公开0.42.0→0.42.1）",
+    "previous0420":"../g1-g2-0.42.0/：18项实跑、首次候选类型错误日志、修正后服务器成功构建、双服务安全排空切换及公开产物证明",
+    "previousP1P5":"../delivery.json、../report.md、../patch-0.41.1/delivery.json及full-source.diff；不重写旧证据",
+    "userScreenshot":"正式根docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-restore-action-row/codex-clipboard-d538df10-c2b4-4507-9f80-93d16ac6a08d.png由supervisor归档；仅要求参考，不是修复后截图验收",
+    "formalArchive":"本目录为正式根可访问worktree入口；supervisor负责正式资料索引/todo归档，lead未改正式根工单/索引"
+  },
+  "remaining": ["实际完整回复纯校验：需要与requestID一致的原描述，当前缺失；没有用合成文本冒充真实全检", "上午首次400具体失败字段仍未知", "真实付费出图、四格人物差异/共同约束及模型语义均由用户手动验收；没有开发收费验证", "G3实际画面、hover/focus/touch及完整历史恢复、P1-P5各功能/更新提醒均未浏览器验收"],
+  "gatekeeper": "范围/归属/幂等/原始快照/费用重试/回退/生产数据边界自复核；无新增审核线程、依赖安装、权限扩大或生产覆盖。此前P3覆盖及版本状态误判记录保留，本轮未新增分类误判。",
+  "confidence": "93%（源码/非收费专项/真实发布证据充分；缺对应原文和用户真实收费结果，不能称功能已验收）"
+}

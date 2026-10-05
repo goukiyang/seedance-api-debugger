@@ -1,0 +1,10 @@
+{
+  "restoreActionCount": 1,
+  "insideExistingCommands": true,
+  "noStandaloneRow": true,
+  "imageClickOnlySelection": true,
+  "stopPropagation": true,
+  "stableIconPx": 32,
+  "wholeCardHoverKeyboardTouchRules": true,
+  "visualAcceptance": "not performed; user manual"
+}

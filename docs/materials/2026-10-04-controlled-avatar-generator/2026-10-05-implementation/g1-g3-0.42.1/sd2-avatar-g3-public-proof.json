@@ -1,0 +1,50 @@
+{
+  "commit": "2c895eef1d5e15e5349f326e68038c76c42c81b8",
+  "version": "0.42.1",
+  "build": "BaWLKa1vTqBaQDtynG4MU",
+  "checkedAt": "2026-10-05T02:45:14.221Z",
+  "checks": [
+    {
+      "pathname": "/api/release",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/api/health",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/api/config",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/login",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "route": "/template-studio/page",
+      "file": "static/css/128c2d393fbd39e5.css",
+      "status": 200,
+      "sha256": "e05fe68ae29d3ca4afcdcd38a98b5edadf16f6d9588a6cc202c90404b9ce7b3d",
+      "matchesCandidate": true
+    },
+    {
+      "route": "/template-studio/page",
+      "file": "static/chunks/app/template-studio/page-f4540490f498fdf2.js",
+      "status": 200,
+      "sha256": "822e2c0fe9e5ad438b925db2a05f654f84673aeaa4b2d8380c7bd1d084d0d8d5",
+      "matchesCandidate": true
+    },
+    {
+      "route": "/template-studio/page",
+      "file": "static/css/128c2d393fbd39e5.css",
+      "status": 200,
+      "sha256": "e05fe68ae29d3ca4afcdcd38a98b5edadf16f6d9588a6cc202c90404b9ce7b3d",
+      "matchesCandidate": true,
+      "noRestoreFooter": true
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "checkedAt": "2026-10-05T02:26:07.106Z",
+  "version": "0.42.0",
+  "commit": "82fe2cb8aba5bbda7c4007249b0a6884f813d438",
+  "build": "ZFdnS_3WyEES4aw7_V_vA",
+  "sourceMatchesCandidate": true,
+  "checkedFiles": 783,
+  "services": [
+    {
+      "name": "sd2-gray.service",
+      "MainPID": "259805",
+      "ActiveState": "active",
+      "SubState": "running"
+    },
+    {
+      "name": "sd2-image-studio.service",
+      "MainPID": "259902",
+      "ActiveState": "active",
+      "SubState": "running"
+    }
+  ],
+  "links": {
+    "storage": "/data/video-api-debugger/var-lib/storage",
+    "public/uploads": "/data/video-api-debugger/var-lib/uploads",
+    "public/videos": "/data/video-api-debugger/var-lib/videos"
+  },
+  "drainRemoved": true,
+  "rollbackSource": "/srv/video-api-debugger/releases/2b1c4cfea7d0eeb9e99e0cf0b712056742c59536-avatar-rollback",
+  "rollbackBuild": "/srv/video-api-debugger/app/.next-prod-prev-avatar-82fe2cb",
+  "rollbackBuildId": "TVyNICHldwYntu2SSA7Po"
+}

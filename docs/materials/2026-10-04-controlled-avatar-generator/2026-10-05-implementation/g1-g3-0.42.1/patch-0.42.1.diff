@@ -1,0 +1,134 @@
+diff --git a/package.json b/package.json
+index c2d01ad..27c36d7 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "video-api-debugger",
+-  "version": "0.42.0",
++  "version": "0.42.1",
+   "private": true,
+   "scripts": {
+     "dev": "NEXT_DIST_DIR=.next-dev next dev",
+diff --git a/scripts/avatar-studio-regression.ts b/scripts/avatar-studio-regression.ts
+index a65ba4a..72730e6 100644
+--- a/scripts/avatar-studio-regression.ts
++++ b/scripts/avatar-studio-regression.ts
+@@ -54,6 +54,13 @@ async function main() {
+   assert.throws(()=>compileContactSheet(cells.slice(0,2)));assert.throws(()=>withAvatarLayout({...oldPlan,referenceIds:['whole-image']},'contact-sheet'));assert.throws(()=>compileContactSheet(cells.map(c=>({...c,baselineAssetId:'single-person'}))));cases++;
+   for(const submitted of [false,true]){const p={...sheet,id:'sheet-private',...(submitted?{sourceTaskId:'paid-task'}:{})};const database=new Map([[avatarPlanKey('account',p),p]]);assert.equal(database.get(avatarKey('account','plan',p.id)),undefined);assert.equal(avatarReadKeys('account','plan',p.id).map(k=>database.get(k)).find(Boolean),p);assert.ok(!avatarReadKeys('other-account','plan',p.id).some(k=>database.has(k)));}cases++;
+   const generation={id:'sheet-result',layout:'contact-sheet' as const,rules:emptyRules};assert.notEqual(avatarRecordKey('account',generation),avatarKey('account','record',generation.id));assert.equal(avatarPlanKey('account',oldPlan),avatarKey('account','plan',oldPlan.id));cases++;
++  // Synthetic text reproduces only the confirmed singleton-object wrapper, not private input/output.
++  const wrapped={...valid,explicit:{gender:[{value:'男性',evidence:'男',excluded:[]}]}};
++  const normalized=validateDescriptionConstraints(wrapped,'男，短发');assert.equal(normalized.explicit.gender.value,'男性');assert.equal(normalized.explicit.gender.evidence,'男');assert.ok(Array.isArray(wrapped.explicit.gender));cases++;
++  for(const value of [null,'男性',[],[{value:'男性',evidence:'男'},{value:'女性',evidence:'女'}],[{value:'男性'}],[{value:'男性',evidence:'不存在的原文'}]]){assert.throws(()=>validateDescriptionConstraints({...valid,explicit:{gender:value}},'男，短发'));cases++;}
++  const negative=validateDescriptionConstraints({...wrapped,explicit:{gender:[{value:'',evidence:'不要男性',excluded:['男性']}]},conflicts:['要求冲突'],unrecognized:['要求未知'],members:[{explicit:{age:[{value:30,evidence:'30岁'}]},details:[],relationship:''}]},'不要男性，30岁');assert.deepEqual(negative.explicit.gender.excluded,['男性']);assert.deepEqual(negative.conflicts,['要求冲突']);assert.deepEqual(negative.unrecognized,['要求未知']);assert.equal(negative.members![0].explicit.age.value,'30');cases++;
++  const saved=memory();saved.setRaw(JSON.stringify({version:2,state:'failed',requestId:'singleton-receipt',responseId:'singleton-receipt',createdAt:new Date().toISOString(),cost:'response-received',failure:{field:'explicit.gender',stage:'validation'}}));saved.responses.set('singleton-receipt',JSON.stringify(wrapped));let recheckCalls=0;
++  const recovered=await resolveDescription('男，短发',{approved:false,recheck:true},saved.store,async()=>{recheckCalls++;throw new Error('must not call model');});assert.equal(recheckCalls,0);assert.equal(recovered.explicit.gender.value,'男性');assert.equal((await inspectDescription('男，短发',saved.store)).state,'succeeded');cases++;
+   console.log(JSON.stringify({ok:true,cases,modelCalls:'in-memory only; no HTTP, DB, image generation or credits',original400:'specific failed field not available'}));
+ }
+ void main().catch(e=>{console.error(e);process.exitCode=1;});
+diff --git a/src/app/image-studio/studio.module.css b/src/app/image-studio/studio.module.css
+index 3de188f..6ac59c3 100644
+--- a/src/app/image-studio/studio.module.css
++++ b/src/app/image-studio/studio.module.css
+@@ -221,6 +221,7 @@
+ .resultOwner :global(.user-identity-name) { color: #dce2e7; }
+ .resultActions button { padding: 5px 8px; font-size: 13px; }
+ .resultCommands { display: flex; flex: 1; flex-wrap: wrap; align-items: center; gap: 6px; opacity: 1; }
++.resultCommands > button:not(.recoveryAction) { flex: 0 0 32px; width: 32px; height: 32px; padding: 0; }
+ .resultCommands:has(.recoveryAction), .resultCommands[data-needs-action="true"] { opacity: 1; }
+ .page .recoveryAction { background: #79daca; color: #102721; border-color: #79daca; font-weight: 750; }
+ .page .recoveryAction:hover:not(:disabled) { background: #98e7d9; }
+@@ -279,7 +280,7 @@
+   .templateWorkbench .module { scroll-margin-top: calc(var(--composer-topbar-height, 48px) + 132px); }
+ }
+ @media (max-width: 800px) { .primaryMaterials .materialGrid { max-width: 360px; } }
+-.restoreFooter { min-height: 38px; display: flex; align-items: center; justify-content: flex-end; }
+-.restoreFooter .restoreResult { opacity: 0; pointer-events: none; padding: 5px 9px; font-size: 13px; }
++.resultCommands .restoreResult { position: relative; opacity: 0; pointer-events: none; }
+ .result:hover .restoreResult, .result:focus-within .restoreResult { opacity: 1; pointer-events: auto; }
+-@media (hover: none) { .restoreFooter .restoreResult { opacity: 1; pointer-events: auto; } }
++.restoreResult:hover .resolutionTooltip, .restoreResult:focus-visible .resolutionTooltip { display: block; }
++@media (hover: none) { .resultCommands .restoreResult { opacity: 1; pointer-events: auto; } }
+diff --git a/src/app/image-studio/studio.tsx b/src/app/image-studio/studio.tsx
+index d6130c9..1834209 100644
+--- a/src/app/image-studio/studio.tsx
++++ b/src/app/image-studio/studio.tsx
+@@ -1647,13 +1647,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+             <span role="status">{studioTaskPhase(task)}</span>
+             {['download', 'recover'].includes(task.delivery?.phase || '') && Number(task.delivery?.expectedBytes) > 0 && task.delivery?.receivedBytes != null && <span>{Math.min(100, Math.floor(task.delivery.receivedBytes / task.delivery.expectedBytes! * 100))}% 字节已接收</span>}
+           </div>}<button type="button" className={styles.deleteResult} disabled={deleting || downloadBusy} title="删除生成记录" aria-label={`删除第 ${task.ordinal} 张生成记录`} onClick={() => { setDeleteError(''); setDeleteTarget(task); }}><Trash2 size={17} /></button></div>
+-          <div className={styles.restoreFooter}>{task.asset && <button type="button" className={styles.restoreResult} disabled={Boolean(restoreDisabledReason(task))} title={restoreDisabledReason(task) || '恢复这张图片的完整设置，不生成图片'} onClick={event => {
+-            event.stopPropagation();
+-            void (async () => {
+-              if ((unpersistedDraft || moduleContext !== savedModuleContext || fixedDirty || dirty || automaticDirty) && !(await confirm('当前未保存的设置将被这张图片的历史设置替换，继续恢复？', { title: '恢复设置', confirmLabel: '恢复设置' }))) return;
+-              const reason = restoreTask(task); if (reason) setError(reason);
+-            })();
+-          }}><RotateCcw size={15} />恢复设置</button>}</div>
+           <div className={styles.resultHeading}>
+             <p className={styles.prompt}>{name} · {task.ordinal}</p>
+             <span className={styles.resultOwner} aria-label="生成者"><UserIdentityBadge user={task.owner} size="sm" className="asset-card-user" /></span>
+@@ -1677,6 +1670,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+             {task.asset && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制图片" aria-label="复制图片" onClick={() => void copyTaskImage(task)}><Clipboard size={15} /></button>}
+             {task.asset && <button type="button" className={styles.viewResult} title="查看图片" aria-label="查看图片" aria-describedby={`studio-preview-${task.id}`} onClick={event => { event.stopPropagation(); openTaskPreview(task); }} onDoubleClick={event => event.stopPropagation()}><Eye size={15} /><span id={`studio-preview-${task.id}`} role="tooltip" className={styles.resolutionTooltip}>查看图片</span></button>}
+             {isAdmin && task.snapshot?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制上下文" aria-label="复制上下文" onClick={() => void copyTaskContext(task)}><Copy size={15} /></button>}
++            {task.asset && <button type="button" className={styles.restoreResult} disabled={Boolean(restoreDisabledReason(task))} title={restoreDisabledReason(task) || '恢复这张图片的完整设置，不生成图片'} aria-label="恢复设置" aria-describedby={`studio-restore-${task.id}`} onClick={event => {
++              event.stopPropagation();
++              void (async () => {
++                if ((unpersistedDraft || moduleContext !== savedModuleContext || fixedDirty || dirty || automaticDirty) && !(await confirm('当前未保存的设置将被这张图片的历史设置替换，继续恢复？', { title: '恢复设置', confirmLabel: '恢复设置' }))) return;
++                const reason = restoreTask(task); if (reason) setError(reason);
++              })();
++            }}><RotateCcw size={15} /><span id={`studio-restore-${task.id}`} role="tooltip" className={styles.resolutionTooltip}>恢复设置</span></button>}
+           </div>
+           </div>{copyFeedback?.id === task.id && <span className={styles.copyFeedback} role="status" aria-live="polite">{copyFeedback.text}</span>}{task.error && <p className={styles.error}>{task.error}</p>}
+           {task.delivery?.checkpointRetained && task.status === 'uncertain' && <p className={styles.muted}>恢复资料暂留供协查，已退款任务不能自动领取原图。请联系管理员。</p>}
+diff --git a/src/lib/avatar-random/description-contract.ts b/src/lib/avatar-random/description-contract.ts
+index ec2500d..ae50271 100644
+--- a/src/lib/avatar-random/description-contract.ts
++++ b/src/lib/avatar-random/description-contract.ts
+@@ -9,6 +9,14 @@ function object(value: unknown, path: string): Record<string, unknown> {
+   if (!value || typeof value !== 'object' || Array.isArray(value)) return fail(path, '描述回复应为对象');
+   return value as Record<string, unknown>;
+ }
++function explicitField(value: unknown, path: string) {
++  if (Array.isArray(value)) {
++    if (value.length !== 1) return fail(path, '同一人物条件返回空数组或多个值，不能替你挑选或丢弃要求');
++    value = value[0];
++  }
++  if (!value || typeof value !== 'object' || Array.isArray(value)) return fail(path, '人物条件缺少完整的值和原文证据，不能把空值或裸值当作已确认要求；原回复保留，可确认后重新解析');
++  return object(value, path);
++}
+ function keys(value: Record<string, unknown>, allowed: string[], path: string) {
+   if (Object.keys(value).some(key => !allowed.includes(key))) fail(`${path}.unknown`, '描述回复包含未支持字段，不能忽略明确要求');
+ }
+@@ -40,7 +48,7 @@ export function validateDescriptionConstraints(value: unknown, description: stri
+     const entries = v === null ? {} : object(v, path);
+     return Object.fromEntries(Object.entries(entries).map(([key, value]) => {
+       if (!Object.hasOwn(catalog, key)) return fail(`${path}.unknown`, '描述回复包含未支持的人物条件');
+-      const field = object(value, `${path}.${key}`);
++      const field = explicitField(value, `${path}.${key}`);
+       keys(field, ['value', 'evidence', 'excluded', 'source', 'locked', 'manualLock'], `${path}.${key}`);
+       const excluded = field.excluded === undefined ? [] : list(field.excluded, `${path}.${key}.excluded`);
+       const actual = key === 'age' && typeof field.value === 'number' && Number.isInteger(field.value)
+@@ -75,7 +83,7 @@ export function validateDescriptionConstraints(value: unknown, description: stri
+       return { explicit: fields(m.explicit, `members[${i}].explicit`), details: details(m.details, `members[${i}].details`), relationship: m.relationship ? evidence(m.relationship, `members[${i}].relationship`) : '' };
+     });
+   })();
+-  const result: AvatarConstraints = { description, explicit: fields(raw.explicit, 'explicit'), details: details(raw.details, 'details'), scopes, background, unrecognized: list(raw.unrecognized, 'unrecognized'), conflicts: list(raw.conflicts, 'conflicts'), parserVersion: '1.0.1', ...(members ? { members } : {}) };
++  const result: AvatarConstraints = { description, explicit: fields(raw.explicit, 'explicit'), details: details(raw.details, 'details'), scopes, background, unrecognized: list(raw.unrecognized, 'unrecognized'), conflicts: list(raw.conflicts, 'conflicts'), parserVersion: '1.0.2', ...(members ? { members } : {}) };
+   if (description && !Object.keys(result.explicit).length && !result.details.length && !scopes.length && !background && !members?.length && !result.unrecognized.length && !result.conflicts.length) fail('response', '没有可确认的描述要求，不能把空回复当作解析成功');
+   return result;
+ }
+diff --git a/src/lib/release.ts b/src/lib/release.ts
+index 039c83a..14fa481 100644
+--- a/src/lib/release.ts
++++ b/src/lib/release.ts
+@@ -1,6 +1,6 @@
+ import packageInfo from '../../package.json';
+ 
+-export const release = { version: packageInfo.version, channel: 'production', summary: '人物描述解析失败后保留草稿，已有回复可免费重检，结果未知时不自动重试；默认生成一张四宫格图片，四格为不同人物，按一张计费，也可选择独立头像。' };
++export const release = { version: packageInfo.version, channel: 'production', summary: '修复人物描述回复多包一层数组导致的解析失败，已有回复可免费重检；恢复设置并入下载、复制、预览同一行，悬停或聚焦时显示。默认单张四宫格保持可用。' };
+ export function newerRelease(remote: string, local: string) {
+   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
+   const a = parse(remote), b = parse(local);

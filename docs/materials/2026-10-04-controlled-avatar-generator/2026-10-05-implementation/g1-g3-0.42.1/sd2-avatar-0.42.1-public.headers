@@ -1,0 +1,11 @@
+HTTP/1.1 200 Connection established
+
+HTTP/2 200 
+server: nginx/1.24.0 (Ubuntu)
+date: Mon, 05 Oct 2026 02:46:41 GMT
+content-type: application/json
+vary: RSC, Next-Router-State-Tree, Next-Router-Prefetch
+vary: Cookie
+cache-control: private, no-store
+x-sd2-origin: server-42-193
+
