@@ -1,0 +1,18 @@
+{
+  "commit": "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+  "version": "0.43.3",
+  "buildId": "D7veEEW5tSA1MsaVkxWwm",
+  "route": "/template-studio/page",
+  "compiledToolbarChunks": [
+    "static/chunks/9017-73cbd9aab2d5412a.js",
+    "static/chunks/app/template-studio/page-aaf0d1dcb95a7c2a.js"
+  ],
+  "compiledPromptChunks": [
+    "static/chunks/app/template-studio/page-aaf0d1dcb95a7c2a.js"
+  ],
+  "avatarRoute": "/tools/avatar-studio/page",
+  "avatarChunks": [
+    "static/chunks/1509-687509d09b5d5be9.js"
+  ],
+  "checkedAt": "2026-10-05T13:14:18.735Z"
+}

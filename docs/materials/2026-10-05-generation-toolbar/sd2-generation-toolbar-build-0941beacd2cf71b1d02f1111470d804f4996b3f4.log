@@ -1,0 +1,554 @@
+
+> video-api-debugger@0.43.3 build
+> next build
+
+  ▲ Next.js 14.2.5
+
+   Creating an optimized production build ...
+<w> [webpack.cache.PackFileCacheStrategy] Skipped not serializable cache item 'Compilation/modules|/srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!/srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!/data/video-api-debugger/releases/0941beacd2cf71b1d02f1111470d804f4996b3f4/src/app/globals.css': No serializer registered for Warning
+<w> while serializing webpack/lib/cache/PackFileCacheStrategy.PackContentItems -> webpack/lib/NormalModule -> Array { 11 items } -> webpack/lib/ModuleWarning -> Warning
+ ⚠ Compiled with warnings
+
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+Warning
+
+(355:3) autoprefixer: end value has mixed support, consider using flex-end instead
+
+Import trace for requested module:
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+./src/app/globals.css
+
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+Warning
+
+(4346:3) autoprefixer: start value has mixed support, consider using flex-start instead
+
+Import trace for requested module:
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+./src/app/globals.css
+
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+Warning
+
+(4395:3) autoprefixer: start value has mixed support, consider using flex-start instead
+
+Import trace for requested module:
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+./src/app/globals.css
+
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+Warning
+
+(6872:3) autoprefixer: start value has mixed support, consider using flex-start instead
+
+Import trace for requested module:
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+./src/app/globals.css
+
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+Warning
+
+(8601:3) autoprefixer: end value has mixed support, consider using flex-end instead
+
+Import trace for requested module:
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+./src/app/globals.css
+
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+Warning
+
+(9106:3) autoprefixer: start value has mixed support, consider using flex-start instead
+
+Import trace for requested module:
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+./src/app/globals.css
+
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+Warning
+
+(10573:3) autoprefixer: end value has mixed support, consider using flex-end instead
+
+Import trace for requested module:
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+./src/app/globals.css
+
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+Warning
+
+(10836:3) autoprefixer: end value has mixed support, consider using flex-end instead
+
+Import trace for requested module:
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+./src/app/globals.css
+
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+Warning
+
+(11561:3) autoprefixer: end value has mixed support, consider using flex-end instead
+
+Import trace for requested module:
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+./src/app/globals.css
+
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+Warning
+
+(15871:3) autoprefixer: start value has mixed support, consider using flex-start instead
+
+Import trace for requested module:
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+./src/app/globals.css
+
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+Warning
+
+(16007:3) autoprefixer: start value has mixed support, consider using flex-start instead
+
+Import trace for requested module:
+./src/app/globals.css.webpack[javascript/auto]!=!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[2]!../../../../srv/video-api-debugger/app/node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[13].oneOf[12].use[3]!./src/app/globals.css
+./src/app/globals.css
+
+   Linting and checking validity of types ...
+
+./src/app/admin/feedback/AdminFeedbackClient.tsx
+139:6  Warning: React Hook useEffect has missing dependencies: 'load' and 'page'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps
+400:21  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/app/admin/users/AdminUsersClient.tsx
+574:6  Warning: React Hook useEffect has a missing dependency: 'refresh'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/app/admin/users/quotas/QuotaManager.tsx
+98:58  Warning: The ref value 'sequence.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'sequence.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+
+./src/app/collections/ReferenceAlbumsClient.tsx
+574:21  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+709:23  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/app/collections/[id]/ReferenceAlbumDetailClient.tsx
+92:10  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/app/cutout/page.tsx
+608:27  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+616:17  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+637:24  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+656:35  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+657:37  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/app/image-studio/reference-grid.tsx
+91:32  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/app/image-studio/studio.tsx
+85:52  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+86:52  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+90:29  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+312:6  Warning: React Hook useEffect has a missing dependency: 'openPresetLibrary'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+907:6  Warning: React Hook useCallback has an unnecessary dependency: 'userId'. Either exclude it or remove the dependency array.  react-hooks/exhaustive-deps
+1035:6  Warning: React Hook useEffect has missing dependencies: 'generationDraft' and 'restoreTemporaryDraft'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps
+1044:6  Warning: React Hook useEffect has missing dependencies: 'aspectRatio', 'auxiliaryImages', 'count', 'fixedReferences', 'images', 'moduleContext', 'moduleModel', 'prompt', 'quality', 'referenceLimit', 'referencePolicy', 'resolution', and 'styleGroups'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps
+1432:6  Warning: React Hook useCallback has a missing dependency: 'confirm'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+1550:65  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/app/image-studio/style-groups-view.tsx
+51:106  Warning: React Hook useEffect has a missing dependency: 'draft'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+51:107  Warning: React Hook useEffect has a complex expression in the dependency array. Extract it to a separate variable so it can be statically checked.  react-hooks/exhaustive-deps
+141:67  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+146:26  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+169:68  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/app/image-studio/use-result-attention.ts
+64:78  Warning: The ref value 'mutations.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'mutations.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+
+./src/app/projects/[id]/page.tsx
+414:10  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+502:6  Warning: React Hook useEffect has a missing dependency: 'loadProject'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/app/tasks/[id]/page.tsx
+1987:21  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+2203:27  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+2297:27  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/app/tools/avatar-studio/studio.tsx
+88:235  Warning: React Hook useEffect has a missing dependency: 'plan'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+260:183  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+262:345  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+274:205  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+274:285  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/FeedbackWidget.tsx
+410:19  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/GenerationComposer.tsx
+842:6  Warning: React Hook useMemo has unnecessary dependencies: 'duration' and 'ratio'. Either exclude them or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/MediaPreview.tsx
+261:6  Warning: React Hook useCallback has a missing dependency: 'previewState'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+265:6  Warning: React Hook useCallback has a missing dependency: 'previewState'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/ReferenceAlbumPicker.tsx
+96:10  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/ReferenceThumb.tsx
+63:11  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+79:11  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/ReleaseNotice.tsx
+63:6  Warning: React Hook useEffect has a missing dependency: 'risk'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+63:15  Warning: React Hook useEffect has a complex expression in the dependency array. Extract it to a separate variable so it can be statically checked.  react-hooks/exhaustive-deps
+64:104  Warning: React Hook useEffect has a missing dependency: 'risk?.unsaved.length'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+64:105  Warning: React Hook useEffect has a complex expression in the dependency array. Extract it to a separate variable so it can be statically checked.  react-hooks/exhaustive-deps
+
+./src/components/ResourceLibraryPicker.tsx
+57:10  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+69:478  Warning: React Hook useEffect has a missing dependency: 'user'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+140:29  Warning: The ref value 'sequence.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'sequence.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+140:48  Warning: The ref value 'session.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'session.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+141:6  Warning: React Hook useEffect has missing dependencies: 'recentKey' and 'user'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps
+170:29  Warning: The ref value 'sequence.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'sequence.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+171:6  Warning: React Hook useEffect has missing dependencies: 'prefs.album', 'prefs.pages', 'prefs.project', and 'prefs.scope'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/SeedanceAssetPanel.tsx
+404:25  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/SeedanceAssetSelector.tsx
+72:7  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+311:17  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/TaskVideoThumbnail.tsx
+113:5  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/ThumbnailCard.tsx
+82:9  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+93:13  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/UploadedImagePickerAlbums.tsx
+72:10  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/ZoomableImagePreview.tsx
+170:33  Warning: The ref value 'effectGenerationRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'effectGenerationRef.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+320:38  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+471:6  Warning: React Hook useEffect has a missing dependency: 'previewState'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+816:17  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/content-reactions/ContentCollections.tsx
+50:28  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+152:94  Warning: The ref value 'lifetime.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'lifetime.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+152:114  Warning: The ref value 'sequence.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'sequence.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+152:151  Warning: The ref value 'previewNavigationSequence.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'previewNavigationSequence.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+208:29  Warning: The ref value 'lifetime.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'lifetime.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+208:49  Warning: The ref value 'sequence.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'sequence.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+
+./src/components/template-studio/VideoTemplateWorkbench.tsx
+725:6  Warning: React Hook useEffect has a missing dependency: 'pollingRun'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+1746:41  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+2113:10  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/templates/AdminTemplatesClient.tsx
+141:6  Warning: React Hook useCallback has an unnecessary dependency: 'detailWorkspaceMode'. Either exclude it or remove the dependency array.  react-hooks/exhaustive-deps
+325:25  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/templates/TemplateBoundImagePicker.tsx
+396:21  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+418:21  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/templates/TemplateContextCardsPanel.tsx
+449:25  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+465:23  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/templates/TemplateLibraryClient.tsx
+365:25  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+411:19  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+486:59  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+info  - Need to disable some ESLint rules? Learn more here: https://nextjs.org/docs/basic-features/eslint#disabling-rules
+   Collecting page data ...
+   Generating static pages (0/86) ...
+   Generating static pages (21/86) 
+   Generating static pages (42/86) 
+   Generating static pages (64/86) 
+ ✓ Generating static pages (86/86)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                                    Size     First Load JS
+┌ ƒ /                                                          176 B          87.5 kB
+├ ○ /_not-found                                                881 B          88.2 kB
+├ ƒ /account                                                   1.27 kB        95.4 kB
+├ ƒ /admin                                                     119 kB          222 kB
+├ ƒ /admin/agent-runs                                          184 B          94.3 kB
+├ ƒ /admin/agent-runs/[id]                                     1.48 kB        95.6 kB
+├ ƒ /admin/agent-runs/template-prompts                         5.65 kB        99.8 kB
+├ ƒ /admin/agent-runs/template-prompts/[id]                    5.31 kB        99.5 kB
+├ ƒ /admin/costs                                               10.3 kB         113 kB
+├ ƒ /admin/exceptions                                          176 B          87.5 kB
+├ ƒ /admin/feedback                                            7.85 kB         106 kB
+├ ƒ /admin/image-studio                                        4.76 kB        98.9 kB
+├ ƒ /admin/integrations                                        157 B           121 kB
+├ ƒ /admin/integrations/aimediakit                             156 B           121 kB
+├ ƒ /admin/outputs                                             10.7 kB         113 kB
+├ ƒ /admin/points                                              5.14 kB        99.3 kB
+├ ƒ /admin/pricing                                             176 B          87.5 kB
+├ ƒ /admin/projects                                            8.08 kB         102 kB
+├ ƒ /admin/resources                                           176 B          87.5 kB
+├ ƒ /admin/tasks                                               176 B          87.5 kB
+├ ƒ /admin/templates                                           161 B           123 kB
+├ ƒ /admin/templates/[id]                                      161 B           123 kB
+├ ƒ /admin/templates/[id]/cards/[cardId]                       161 B           123 kB
+├ ƒ /admin/users                                               14 kB           116 kB
+├ ƒ /admin/users/quotas                                        8.88 kB         111 kB
+├ ƒ /api/admin/costs/export                                    0 B                0 B
+├ ƒ /api/admin/costs/import-official-charges                   0 B                0 B
+├ ƒ /api/admin/costs/official-charge                           0 B                0 B
+├ ƒ /api/admin/costs/provider-balance                          0 B                0 B
+├ ƒ /api/admin/costs/provider-balance/sync                     0 B                0 B
+├ ƒ /api/admin/credits/adjust                                  0 B                0 B
+├ ƒ /api/admin/credits/bulk-grant                              0 B                0 B
+├ ƒ /api/admin/credits/ledger                                  0 B                0 B
+├ ƒ /api/admin/credits/periodic                                0 B                0 B
+├ ƒ /api/admin/credits/policy                                  0 B                0 B
+├ ƒ /api/admin/feedback                                        0 B                0 B
+├ ƒ /api/admin/feedback/[id]                                   0 B                0 B
+├ ƒ /api/admin/feedback/[id]/pdf                               0 B                0 B
+├ ƒ /api/admin/feedback/archive                                0 B                0 B
+├ ƒ /api/admin/feedback/export-pdf                             0 B                0 B
+├ ƒ /api/admin/generation-dashboard                            0 B                0 B
+├ ƒ /api/admin/generation-dashboard/export                     0 B                0 B
+├ ƒ /api/admin/image-studio/download                           0 B                0 B
+├ ƒ /api/admin/image-studio/tasks                              0 B                0 B
+├ ƒ /api/admin/integrations/aimediakit                         0 B                0 B
+├ ƒ /api/admin/integrations/banana-image                       0 B                0 B
+├ ƒ /api/admin/integrations/codex                              0 B                0 B
+├ ƒ /api/admin/integrations/h3                                 0 B                0 B
+├ ƒ /api/admin/integrations/h3/queue                           0 B                0 B
+├ ƒ /api/admin/integrations/image-generation                   0 B                0 B
+├ ƒ /api/admin/integrations/musk                               0 B                0 B
+├ ƒ /api/admin/integrations/volcengine-ip                      0 B                0 B
+├ ƒ /api/admin/outputs                                         0 B                0 B
+├ ƒ /api/admin/outputs/tasks/[id]/hide                         0 B                0 B
+├ ƒ /api/admin/outputs/tasks/[id]/restore                      0 B                0 B
+├ ƒ /api/admin/projects/merge                                  0 B                0 B
+├ ƒ /api/admin/projects/merge/preview                          0 B                0 B
+├ ƒ /api/admin/reference-album-submissions                     0 B                0 B
+├ ƒ /api/admin/reference-album-submissions/[id]                0 B                0 B
+├ ƒ /api/admin/template-studio/runs                            0 B                0 B
+├ ƒ /api/admin/template-studio/runs/[id]                       0 B                0 B
+├ ƒ /api/admin/uploads/recent                                  0 B                0 B
+├ ƒ /api/admin/users                                           0 B                0 B
+├ ƒ /api/admin/users/[id]                                      0 B                0 B
+├ ƒ /api/admin/users/[id]/disable                              0 B                0 B
+├ ƒ /api/admin/users/[id]/enable                               0 B                0 B
+├ ƒ /api/admin/users/bulk-profile                              0 B                0 B
+├ ƒ /api/admin/users/merge                                     0 B                0 B
+├ ƒ /api/agent/runs/[id]                                       0 B                0 B
+├ ƒ /api/agent/template-plans                                  0 B                0 B
+├ ƒ /api/album-shares/[id]                                     0 B                0 B
+├ ƒ /api/approvals                                             0 B                0 B
+├ ƒ /api/approvals/[id]                                        0 B                0 B
+├ ƒ /api/assets/[id]                                           0 B                0 B
+├ ƒ /api/assets/[id]/provider-delete                           0 B                0 B
+├ ƒ /api/assets/create-from-url                                0 B                0 B
+├ ƒ /api/assets/generate                                       0 B                0 B
+├ ƒ /api/assets/history                                        0 B                0 B
+├ ƒ /api/assets/history/[id]                                   0 B                0 B
+├ ƒ /api/assets/library                                        0 B                0 B
+├ ƒ /api/assets/library/bulk-move                              0 B                0 B
+├ ƒ /api/assets/library/removal                                0 B                0 B
+├ ƒ /api/assets/list                                           0 B                0 B
+├ ƒ /api/assets/multipart/abort                                0 B                0 B
+├ ƒ /api/assets/multipart/complete                             0 B                0 B
+├ ƒ /api/assets/multipart/sign-part                            0 B                0 B
+├ ƒ /api/assets/multipart/start                                0 B                0 B
+├ ƒ /api/assets/picker                                         0 B                0 B
+├ ƒ /api/assets/upload                                         0 B                0 B
+├ ƒ /api/assets/upload-and-create                              0 B                0 B
+├ ƒ /api/assets/upload-complete                                0 B                0 B
+├ ƒ /api/assets/upload-proxy                                   0 B                0 B
+├ ƒ /api/assets/upload-ticket                                  0 B                0 B
+├ ƒ /api/auth/feishu/authorize                                 0 B                0 B
+├ ƒ /api/auth/feishu/authorize-url                             0 B                0 B
+├ ƒ /api/auth/feishu/callback                                  0 B                0 B
+├ ƒ /api/auth/feishu/cli-login                                 0 B                0 B
+├ ƒ /api/auth/feishu/login-by-code                             0 B                0 B
+├ ƒ /api/auth/login                                            0 B                0 B
+├ ƒ /api/auth/logout                                           0 B                0 B
+├ ƒ /api/auth/me                                               0 B                0 B
+├ ƒ /api/auth/register/request-code                            0 B                0 B
+├ ƒ /api/auth/register/verify                                  0 B                0 B
+├ ƒ /api/avatar-studio                                         0 B                0 B
+├ ƒ /api/avatar-studio/handoff                                 0 B                0 B
+├ ƒ /api/codex/assets/upload                                   0 B                0 B
+├ ƒ /api/codex/config                                          0 B                0 B
+├ ƒ /api/codex/video/create                                    0 B                0 B
+├ ƒ /api/codex/video/draft-upgrade                             0 B                0 B
+├ ƒ /api/collections                                           0 B                0 B
+├ ƒ /api/collections/[id]                                      0 B                0 B
+├ ƒ /api/collections/[id]/load                                 0 B                0 B
+├ ƒ /api/config                                                0 B                0 B
+├ ƒ /api/content-reactions                                     0 B                0 B
+├ ƒ /api/content-reactions/content                             0 B                0 B
+├ ƒ /api/content-reactions/media                               0 B                0 B
+├ ƒ /api/content-reactions/state                               0 B                0 B
+├ ƒ /api/cutout/[[...path]]                                    0 B                0 B
+├ ƒ /api/feedback                                              0 B                0 B
+├ ƒ /api/feedback/upload                                       0 B                0 B
+├ ƒ /api/feishu/credit-actions                                 0 B                0 B
+├ ƒ /api/feishu/requirements                                   0 B                0 B
+├ ƒ /api/feishu/requirements/[id]/confirm                      0 B                0 B
+├ ƒ /api/health                                                0 B                0 B
+├ ƒ /api/image-shares                                          0 B                0 B
+├ ƒ /api/image-studio/assets/[assetId]                         0 B                0 B
+├ ƒ /api/image-studio/attention                                0 B                0 B
+├ ƒ /api/image-studio/context-version                          0 B                0 B
+├ ƒ /api/image-studio/download                                 0 B                0 B
+├ ƒ /api/image-studio/modules                                  0 B                0 B
+├ ƒ /api/image-studio/presets                                  0 B                0 B
+├ ƒ /api/image-studio/ratios                                   0 B                0 B
+├ ƒ /api/image-studio/settings                                 0 B                0 B
+├ ƒ /api/image-studio/style-groups                             0 B                0 B
+├ ƒ /api/image-studio/style-groups/[groupId]/assets/[assetId]  0 B                0 B
+├ ƒ /api/image-studio/style-groups/[groupId]/cover             0 B                0 B
+├ ƒ /api/image-studio/tasks                                    0 B                0 B
+├ ƒ /api/image-studio/template-assets/[assetId]                0 B                0 B
+├ ƒ /api/image-studio/upload-access                            0 B                0 B
+├ ƒ /api/ip/tasks/[id]/cancel                                  0 B                0 B
+├ ƒ /api/ip/tasks/create                                       0 B                0 B
+├ ƒ /api/ip/tasks/request-status                               0 B                0 B
+├ ƒ /api/ip/video/list                                         0 B                0 B
+├ ƒ /api/ip/video/status/[id]                                  0 B                0 B
+├ ƒ /api/me/credit-requests                                    0 B                0 B
+├ ƒ /api/me/credits                                            0 B                0 B
+├ ƒ /api/me/credits/ledger                                     0 B                0 B
+├ ƒ /api/me/preferences/generation                             0 B                0 B
+├ ƒ /api/notifications                                         0 B                0 B
+├ ƒ /api/notifications/[id]                                    0 B                0 B
+├ ƒ /api/project-invites/[token]/join                          0 B                0 B
+├ ƒ /api/projects                                              0 B                0 B
+├ ƒ /api/projects/[id]                                         0 B                0 B
+├ ƒ /api/projects/[id]/budget                                  0 B                0 B
+├ ƒ /api/projects/[id]/costs/export                            0 B                0 B
+├ ƒ /api/projects/[id]/invites                                 0 B                0 B
+├ ƒ /api/projects/[id]/members                                 0 B                0 B
+├ ƒ /api/projects/[id]/members/[userId]                        0 B                0 B
+├ ƒ /api/projects/[id]/review-card                             0 B                0 B
+├ ƒ /api/projects/[id]/video-cards                             0 B                0 B
+├ ƒ /api/provider/seedance/callback                            0 B                0 B
+├ ƒ /api/reference-album-folders                               0 B                0 B
+├ ƒ /api/reference-album-folders/[id]                          0 B                0 B
+├ ƒ /api/reference-albums                                      0 B                0 B
+├ ƒ /api/reference-albums/[id]                                 0 B                0 B
+├ ƒ /api/reference-albums/[id]/images                          0 B                0 B
+├ ƒ /api/reference-albums/[id]/public-submissions              0 B                0 B
+├ ƒ /api/reference-albums/[id]/shares                          0 B                0 B
+├ ƒ /api/reference-albums/[id]/shares/revoke-all               0 B                0 B
+├ ƒ /api/reference-images/[id]                                 0 B                0 B
+├ ƒ /api/reference-images/[id]/content                         0 B                0 B
+├ ƒ /api/reference-images/[id]/share-album                     0 B                0 B
+├ ƒ /api/release                                               0 B                0 B
+├ ƒ /api/review-cards                                          0 B                0 B
+├ ƒ /api/tasks/[id]                                            0 B                0 B
+├ ƒ /api/tasks/[id]/draft-upgrade                              0 B                0 B
+├ ƒ /api/tasks/[id]/project                                    0 B                0 B
+├ ƒ /api/tasks/[id]/reuse                                      0 B                0 B
+├ ƒ /api/tasks/create                                          0 B                0 B
+├ ƒ /api/tasks/enhance-video/create                            0 B                0 B
+├ ƒ /api/tasks/estimate                                        0 B                0 B
+├ ƒ /api/template-studio-video-handoff                         0 B                0 B
+├ ƒ /api/template-studio/capabilities                          0 B                0 B
+├ ƒ /api/template-studio/context                               0 B                0 B
+├ ƒ /api/template-studio/drafts                                0 B                0 B
+├ ƒ /api/template-studio/drafts/[id]                           0 B                0 B
+├ ƒ /api/template-studio/runs                                  0 B                0 B
+├ ƒ /api/template-studio/runs/[id]                             0 B                0 B
+├ ƒ /api/template-studio/runs/[id]/handoff                     0 B                0 B
+├ ƒ /api/template-studio/templates                             0 B                0 B
+├ ƒ /api/template-studio/templates/[id]                        0 B                0 B
+├ ƒ /api/templates                                             0 B                0 B
+├ ƒ /api/templates/[id]                                        0 B                0 B
+├ ƒ /api/templates/[id]/context-cards                          0 B                0 B
+├ ƒ /api/templates/config-builder/generate                     0 B                0 B
+├ ƒ /api/templates/config-builder/save                         0 B                0 B
+├ ƒ /api/templates/module-builder/generate                     0 B                0 B
+├ ƒ /api/templates/module-builder/library                      0 B                0 B
+├ ƒ /api/templates/module-builder/reject                       0 B                0 B
+├ ƒ /api/templates/module-builder/rules                        0 B                0 B
+├ ƒ /api/templates/module-builder/save                         0 B                0 B
+├ ƒ /api/tools/ultimate-canvas/bootstrap                       0 B                0 B
+├ ƒ /api/tools/ultimate-canvas/document                        0 B                0 B
+├ ƒ /api/tools/ultimate-canvas/flows                           0 B                0 B
+├ ƒ /api/tools/ultimate-canvas/flows/[id]/runs                 0 B                0 B
+├ ƒ /api/tools/ultimate-canvas/flows/runs                      0 B                0 B
+├ ƒ /api/tools/ultimate-canvas/flows/runs/[runId]              0 B                0 B
+├ ƒ /api/tools/ultimate-canvas/generate                        0 B                0 B
+├ ƒ /api/tools/ultimate-canvas/localization-health             0 B                0 B
+├ ƒ /api/tools/ultimate-canvas/quote                           0 B                0 B
+├ ƒ /api/tools/ultimate-canvas/styles                          0 B                0 B
+├ ƒ /api/tools/ultimate-canvas/styles/apply                    0 B                0 B
+├ ƒ /api/tools/ultimate-canvas/styles/generate                 0 B                0 B
+├ ƒ /api/tools/ultimate-canvas/styles/results                  0 B                0 B
+├ ƒ /api/tools/ultimate-canvas/text-settings                   0 B                0 B
+├ ƒ /api/tools/ultimate-canvas/upload                          0 B                0 B
+├ ƒ /api/tools/ultimate-canvas/video-submission                0 B                0 B
+├ ƒ /api/video-cards/[id]                                      0 B                0 B
+├ ƒ /api/video-cards/[id]/branches                             0 B                0 B
+├ ƒ /api/video-cards/[id]/branches/[branchId]                  0 B                0 B
+├ ƒ /api/video-cards/[id]/merge                                0 B                0 B
+├ ƒ /api/video-cards/[id]/split                                0 B                0 B
+├ ƒ /api/video-cards/[id]/tasks                                0 B                0 B
+├ ƒ /api/video/bulk-download                                   0 B                0 B
+├ ƒ /api/video/create                                          0 B                0 B
+├ ƒ /api/video/download/[id]                                   0 B                0 B
+├ ƒ /api/video/list                                            0 B                0 B
+├ ƒ /api/video/play/[id]                                       0 B                0 B
+├ ƒ /api/video/retry/[id]                                      0 B                0 B
+├ ƒ /api/video/status/[id]                                     0 B                0 B
+├ ƒ /api/video/thumbnail/[id]                                  0 B                0 B
+├ ƒ /api/workspace                                             0 B                0 B
+├ ƒ /api/workspace/assets                                      0 B                0 B
+├ ƒ /api/workspace/assets/[assetId]                            0 B                0 B
+├ ƒ /api/workspace/assets/reorder                              0 B                0 B
+├ ƒ /api/workspace/validate                                    0 B                0 B
+├ ○ /approvals                                                 6.52 kB         105 kB
+├ ○ /assets                                                    26.8 kB         160 kB
+├ ƒ /auth/feishu/callback                                      1.54 kB        95.7 kB
+├ ○ /collections                                               6.35 kB         111 kB
+├ ƒ /collections/[id]                                          5.87 kB         137 kB
+├ ○ /config                                                    2.33 kB        96.5 kB
+├ ○ /cutout                                                    4.77 kB        98.9 kB
+├ ƒ /dashboard                                                 184 B          94.3 kB
+├ ƒ /generate                                                  190 B           218 kB
+├ ƒ /generate/enhance                                          7.69 kB         110 kB
+├ ○ /generate/ip                                               187 B           218 kB
+├ ○ /generate/quick                                            176 B          87.5 kB
+├ ○ /help                                                      176 B          87.5 kB
+├ ƒ /image-studio                                              176 B          87.5 kB
+├ ƒ /join/[token]                                              1.13 kB        95.3 kB
+├ ƒ /login                                                     2.24 kB        96.4 kB
+├ ƒ /notifications                                             5.54 kB        99.7 kB
+├ ○ /points                                                    5.1 kB         96.1 kB
+├ ○ /projects                                                  12.3 kB         106 kB
+├ ƒ /projects/[id]                                             16.8 kB         136 kB
+├ ƒ /projects/[id]/video-cards/[cardId]                        13.1 kB         116 kB
+├ ○ /register                                                  2.88 kB          97 kB
+├ ○ /tasks                                                     12.4 kB         115 kB
+├ ƒ /tasks/[id]                                                22.6 kB         145 kB
+├ ƒ /template-generate                                         8.96 kB         210 kB
+├ ƒ /template-studio                                           74.7 kB         212 kB
+├ ƒ /templates                                                 10 kB           128 kB
+├ ƒ /tools/avatar-studio                                       165 B           136 kB
+├ ƒ /tools/avatar-studio/configs                               164 B           136 kB
+├ ƒ /tools/ultimate-canvas                                     6.29 kB         119 kB
+├ ƒ /uploads/[...path]                                         0 B                0 B
+├ ƒ /video-cards/[id]                                          176 B          87.5 kB
+├ ○ /videos                                                    176 B          87.5 kB
+├ ƒ /videos/[...path]                                          0 B                0 B
+└ ƒ /workbench                                                 176 B          87.5 kB
++ First Load JS shared by all                                  87.3 kB
+  ├ chunks/1890-7faa2453eb06933f.js                            31.7 kB
+  ├ chunks/8344c0af-421bfd77be53e753.js                        53.6 kB
+  └ other shared chunks (total)                                2.02 kB
+
+
+ƒ Middleware                                                   27.6 kB
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

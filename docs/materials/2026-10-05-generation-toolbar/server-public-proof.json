@@ -1,0 +1,68 @@
+{
+  "commit": "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+  "version": "0.43.3",
+  "build": "D7veEEW5tSA1MsaVkxWwm",
+  "workerPid": "unchanged",
+  "checks": [
+    {
+      "pathname": "/api/release",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/api/health",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/api/config",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/login",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/template-studio?type=image",
+      "status": 200,
+      "finalPath": "/login",
+      "authRedirect": true
+    },
+    {
+      "pathname": "/tools/avatar-studio",
+      "status": 200,
+      "finalPath": "/login",
+      "authRedirect": true
+    },
+    {
+      "route": "/template-studio/page",
+      "file": "static/chunks/9017-73cbd9aab2d5412a.js",
+      "status": 200,
+      "sha256": "a769b7acfba346dbeb5647803d3d14f7b99426e8fce239fa5808ec54cfb92925",
+      "matchesCandidate": true,
+      "containsGenerationButton": true,
+      "containsSupplementPrompt": false
+    },
+    {
+      "route": "/template-studio/page",
+      "file": "static/chunks/app/template-studio/page-aaf0d1dcb95a7c2a.js",
+      "status": 200,
+      "sha256": "1c43ddfd15d29f01b3a6b5ce0d0da7b650745ab3c2e440809c693308edf3da84",
+      "matchesCandidate": true,
+      "containsGenerationButton": true,
+      "containsSupplementPrompt": true
+    },
+    {
+      "route": "/tools/avatar-studio/page",
+      "file": "static/chunks/1509-687509d09b5d5be9.js",
+      "status": 200,
+      "sha256": "ecfdbf5ab6735754fd1f97babc2af04c892be644818f05e114498203401156d5",
+      "matchesCandidate": true,
+      "containsOneClickChange": true
+    }
+  ],
+  "checkedAt": "2026-10-05T13:16:38.905Z",
+  "evidenceLimit": "HTTP and static build proof only; no logged-in DOM or visual acceptance"
+}

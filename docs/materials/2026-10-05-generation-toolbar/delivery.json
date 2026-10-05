@@ -1,0 +1,93 @@
+{
+  "project": "video-api-debugger",
+  "batch": "D1/D2/D3",
+  "status": "已部署，待用户手动验收",
+  "tasks": [
+    {"id": "D1", "name": "调整按钮与重复确认", "criterion": "按钮在参考图下方、补充文案上方，费用可见、正常操作不反复确认", "status": "源码实现和发布已完成；布局及操作效果未实测", "evidence": ["source.diff", "local-source-proof.json", "server-public-proof.json"]},
+    {"id": "D2", "name": "发布更新", "criterion": "构建、回退保护及公网新版本核对完成", "status": "已完成", "evidence": ["remote-refs-final.txt", "server-switch.log", "server-source-proof.json", "server-public-proof.json"]},
+    {"id": "D3", "name": "人物正文一键出图", "criterion": "一次显式点击自动理解并按正文生成，无多层确认，保留费用、未知状态及旧稿保护", "status": "源码实现、时序/费用/绑定自查和发布已完成；真实生成效果未实测", "evidence": ["source.diff", "source-review.json", "server-public-proof.json"]}
+  ],
+  "release": {
+    "version": "0.43.3",
+    "commit": "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+    "buildId": "D7veEEW5tSA1MsaVkxWwm",
+    "branch": "codex/avatar-generator-20261005",
+    "releaseTag": "release/v0.43.3-avatar-one-click-final",
+    "rollbackTag": "rollback/generation-toolbar-20261005-v0.43.2",
+    "rollbackCommit": "03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d",
+    "rollbackBuildId": "P1gkdWek_f9tKM4EH-y6C",
+    "preservedHistoricalCandidateTag": "v0.43.3 -> f8fb58431555082ddc842611be05531aad92c783; first candidate failed types, never switched live; tag not overwritten",
+    "push": "Final atomic push exited 0; branch, final release peeled ref and rollback peeled ref verified before live switch",
+    "trackedWorktreeStatus": "Clean and aligned with origin; generated delivery/diff/evidence remain local for parent formal-root archival; unrelated old untracked material retained",
+    "urls": ["https://sd2.youdooart.com/template-studio?type=image", "https://sd2.youdooart.com/tools/avatar-studio"],
+    "summary": "生成图片按钮移到参考图下方、补充文案上方；人物正文一次点击自动理解并提交图片，费用和未确认状态保护保留。"
+  },
+  "files": {
+    "package.json": "Version only: 0.43.3; dependencies and lock unchanged",
+    "src/lib/release.ts": "Actual D1/D3 update summary; existing update detection/deferred/manual-check behavior retained",
+    "src/app/image-studio/studio.tsx": "Move complete existing toolbar without handler/CSS changes; ordinary image-studio submit was already confirmation-free",
+    "src/app/tools/avatar-studio/studio.tsx": "One locked explicit-click pipeline passes returned parse directly into prepare/submit; full live draft and owner epochs, quote/count guard, single text request, saved-response recheck, unknown recovery and pre-POST persistence retained",
+    "docs/materials/2026-10-05-generation-toolbar/archive.sh": "Exact commit source/rollback archives, runtime exclusions, scoped archive validator and task-owned resume",
+    "docs/materials/2026-10-05-generation-toolbar/candidate.sh": "Reuse proven isolated candidate-build route with both compiled routes and preserved rollback baseline",
+    "docs/materials/2026-10-05-generation-toolbar/switch.sh": "Source/build/base guards, four-app-file change whitelist, rollback trap, protected web-only switch and public resource hashes",
+    "docs/materials/2026-10-05-generation-toolbar/source-proof.mjs": "D1 source order and real version summary checks, not rendered layout acceptance",
+    "docs/materials/2026-10-05-generation-toolbar/release-window.mjs": "Own reservation validation and actual D1/D3 deployment registry summary",
+    "docs/materials/2026-10-05-generation-toolbar/source-review.json": "Concrete source sequence, cost/binding/unknown/old-draft self-review and React snapshot evidence",
+    "docs/materials/2026-10-05-generation-toolbar/delivery.json": "Final evidence and explicit manual-acceptance gap; formal-root records owned by parent"
+  },
+  "verification": {
+    "functionalAcceptance": "Not run as instructed. No browser, screenshots, automatic regression, business generation API request or actual paid one-click result",
+    "localTypeAndLint": "Local tsc/next lint stalled on shared external-volume dependencies with no final diagnostics; stopped exit 143, not passed",
+    "finalCandidate": "NEXT_DIST_DIR=.next-prod-candidate npm run build on exact final release exited 0, including TypeScript and lint checks; routes/template/avatar compiled",
+    "warnings": "Build warnings retained in full build log: existing avatar polling effect missing plan dependency and existing img markup warnings, plus other project hook/img warnings. Not suppressed or claimed resolved",
+    "sourceReview": "source-review.json explicitly validates API-returned parse (not reading stale activeParse after setState), one run lock, all-await draft/owner invalidation, count/unit-credit changes stop, pending/unknown query only, exact pending ID saved before POST, cached/free recheck boundaries and non-new draft/confirmation semantics",
+    "public": "Version 0.43.3; release/config/health/login HTTP 200 with server-42-193 origin. Both target route chunks match candidate SHA256. Anonymous target page requests redirect to login, not logged-in DOM verification. Anonymous release summary intentionally redacted",
+    "server": "789 source files match exact final release; .deployed-commit and live BUILD_ID match final candidate; web active; image worker active, unchanged PID 259902",
+    "persistence": "storage -> /data/video-api-debugger/var-lib/storage; public/uploads -> /data/video-api-debugger/var-lib/uploads; public/videos -> /data/video-api-debugger/var-lib/videos; required directories writable. No production data overwrite or DB command",
+    "guard": "guardian-finish.json exited 0; L3-visible-runtime checklist, no blockingWarnings. It is a checklist, not paid/DOM proof; real-result layer remains manual per user/project instruction",
+    "classificationMisjudgment": "无；initial guard keyword interpretation of a negated functional-test intent was corrected without executing tests",
+    "releaseWindow": "Same stable run ID reserved before switch. Final close reservation expired, so foreign recent activity checked empty and own reservation renewed for registration only. Finish exit 0; registry deployment-complete line 2026-10-05T13:22:51.679Z",
+    "sessions": "All owned exec sessions completed; no command left running"
+  },
+  "commandsActuallyRun": [
+    {"command": "git diff --check; source-proof.mjs; focused source review", "result": "Source freeze and concrete sequence/cost/binding review completed; source proof is not functional acceptance"},
+    {"command": "local npx tsc --noEmit and next lint", "result": "Stopped exit 143 with no final diagnostic; exact-commit server build supplies type/lint result"},
+    {"command": "bash docs/materials/2026-10-05-generation-toolbar/archive.sh <exact commit> <rollback commit> [resume]", "result": "Final archives validated; source runtime exclusions verified"},
+    {"command": "git commit; git push --atomic origin <branch> <final release tag> <rollback tag>; git ls-remote --heads/--tags", "result": "Commit/push exit 0 and final refs verified before switch; earlier v0.43.3 candidate tag preserved"},
+    {"command": "scp exact archives and scripts to gouki@42.193.221.253:/tmp/sd2-one-click-upload-0941bea-20261005/", "result": "Exit 0, unique upload directory"},
+    {"command": "ssh gouki@42.193.221.253 bash candidate.sh <final commit> <source SHA> <base commit> <rollback SHA> <old build> <upload dir>", "result": "First candidate failed union/string includes type check. Targeted two-line runtime-equivalent some comparison corrected; final candidate exit 0"},
+    {"command": "Protected root switch script SHA verified, then bash /root/sd2-one-click-switch-0941bea-20261005.sh <final commit> <base commit> <old build>", "result": "Exit 0; source/build/rollback guards before web-only stop/start; switch success; no expanded permissions"},
+    {"command": "ssh gouki read-only exact-release source/deployed-build/systemctl/persistent-links proof", "result": "Exit 0; server-source-proof.json"},
+    {"command": "curl -fsS -D - public /api/config, /api/release, /login; ssh gouki curl -fsS -D - localhost:3302/api/config; switch HTTP/chunk proof", "result": "Exit 0; current public version, origin and candidate hashes match"},
+    {"command": "project-guardian.js finish --cwd <source worktree> --intent <actual UI/deploy scope> --json; release-window.mjs finish <final commit> <stable run ID>", "result": "Exit 0; guard checklist and actual registry deployment-complete record saved"},
+    {"command": "git status --short --branch --untracked-files=no; git diff --stat <base> <final>", "result": "Tracked tree clean, aligned origin; 10 committed files, 513 insertions and 68 deletions; unrelated untracked preserved"}
+  ],
+  "recovery": {
+    "sourceArchiveSha256": "7836686d30456a065d85d3fbe67149faf885f32cc62ca77a9955e0c6dcf6b092",
+    "rollbackArchiveSha256": "ef13028d580b4e04e5499094d01cb11aef6164b73078627c0e80e8133ee46047",
+    "rollbackSource": "/srv/video-api-debugger/releases/03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d-generation-toolbar-rollback",
+    "rollbackBuild": "/srv/video-api-debugger/app/.next-prod-prev-generation-toolbar-0941bea",
+    "policy": "No in-place live build; isolated final candidate, retained old source/build and switch failure restoration. Recovery path checked, not deliberately live-rolled-back"
+  },
+  "costAndScope": {
+    "textModelCalls": 0,
+    "imageGenerationCalls": 0,
+    "generationCost": 0,
+    "businessApiProbes": 0,
+    "browserOperations": 0,
+    "highRiskChanges": "No backend parser/engine/provider/credits/auth/schema/DB/dependencies/lock/env/cookies/worker changes; only protected authorized web switch uses root",
+    "scopeExpansion": "无",
+    "manualAcceptanceGap": "User must test actual first-description one-click generation, cache/free recheck, true conflicts, parameter/owner edits while waiting, changed-price stop, unknown submission recovery and rendered toolbar placement. Build/source/hash evidence does not demonstrate these effects",
+    "upstreamFee": "Text-model amount not provided; UI truthfully discloses possible additional unknown upstream cost"
+  },
+  "evidence": [
+    "source.diff", "unified.diff", "source-review.json", "local-source-proof.json",
+    "archive-final.log", "push-final.log", "remote-refs-final.txt",
+    "server-candidate-final.log", "sd2-generation-toolbar-build-0941beacd2cf71b1d02f1111470d804f4996b3f4.log",
+    "sd2-generation-toolbar-candidate-0941beacd2cf71b1d02f1111470d804f4996b3f4.json",
+    "server-switch.log", "server-public-proof.json", "server-source-proof.json",
+    "public-config.headers", "public-release.json", "public-login.headers", "server-local-config.headers",
+    "guardian-finish.json", "release-window-switch-proof.json", "release-window-close-renew.log", "release-window-finish.log"
+  ],
+  "handoff": "Parent exclusively updates formal-root tasks/docs index and archives this same-batch evidence folder; lead did not modify formal-root records or old source"
+}

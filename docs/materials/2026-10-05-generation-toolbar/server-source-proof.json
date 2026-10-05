@@ -1,0 +1,17 @@
+{
+  "commit": "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+  "build": "D7veEEW5tSA1MsaVkxWwm",
+  "version": "0.43.3",
+  "checkedSourceFiles": 789,
+  "sourceMatchesExactRelease": true,
+  "links": {
+    "storage": "/data/video-api-debugger/var-lib/storage",
+    "public/uploads": "/data/video-api-debugger/var-lib/uploads",
+    "public/videos": "/data/video-api-debugger/var-lib/videos"
+  },
+  "requiredDirectoriesWritable": true,
+  "web": "active",
+  "worker": "active",
+  "workerPid": "259902",
+  "checkedAt": "2026-10-05T13:18:14.890Z"
+}

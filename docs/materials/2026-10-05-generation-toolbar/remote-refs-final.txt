@@ -1,0 +1,5 @@
+0941beacd2cf71b1d02f1111470d804f4996b3f4	refs/heads/codex/avatar-generator-20261005
+f3d5ac404b0713718db54a0f26a4604d56d3e2f1	refs/tags/release/v0.43.3-avatar-one-click-final
+0941beacd2cf71b1d02f1111470d804f4996b3f4	refs/tags/release/v0.43.3-avatar-one-click-final^{}
+a19d15ae54c09d6b39445bb2547f8f98ac7126c9	refs/tags/rollback/generation-toolbar-20261005-v0.43.2
+03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d	refs/tags/rollback/generation-toolbar-20261005-v0.43.2^{}

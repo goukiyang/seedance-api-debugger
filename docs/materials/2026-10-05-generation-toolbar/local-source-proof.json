@@ -1,0 +1,15 @@
+{
+  "source": "src/app/image-studio/studio.tsx",
+  "toolbarCount": 1,
+  "order": [
+    "参考图",
+    "materialFooter",
+    "fileInput",
+    "generationToolbar",
+    "补充文案"
+  ],
+  "ordinarySubmit": "direct POST; no confirmation; existing ambiguity guard preserved",
+  "version": "0.43.3",
+  "route": "/template-studio?type=image",
+  "evidenceLimit": "Source structure only; does not assert rendered DOM or visual layout"
+}

@@ -1,0 +1,22 @@
+{
+  "phase": "finish",
+  "evidenceTier": "L3-visible-runtime",
+  "blockingWarnings": [],
+  "ledgerPath": "/Volumes/Data/Projects/project-guardian/ledgers/guardian-ledger.jsonl",
+  "formalRoot": "/Volumes/Data/Projects/video-api-debugger",
+  "applicationSource": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "commit": "0941beacd2cf71b1d02f1111470d804f4996b3f4",
+  "version": "0.43.3",
+  "build": "D7veEEW5tSA1MsaVkxWwm",
+  "checks": [
+    "Actual final source reviewed; one-click ordinary pipeline and cost/draft/unknown guards",
+    "Final candidate and source/public/remote/rollback evidence reused from completed lead",
+    "Formal-root key report and final diff copied and cmp equal",
+    "Original unrelated 29-line todo patch and private media preserved; focused record Git follows"
+  ],
+  "functionalAcceptance": "Not run; user manual acceptance per project rule",
+  "generationCalls": 0,
+  "generationCost": 0,
+  "classificationMisjudgment": "无",
+  "evidenceLimit": "Checklist and deployment/source proof, not paid one-click or rendered layout acceptance"
+}

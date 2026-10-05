@@ -1,0 +1,21 @@
+/tmp/sd2-one-click-upload-0941bea-20261005/source-0941beacd2cf71b1d02f1111470d804f4996b3f4.tar.gz: OK
+/tmp/sd2-one-click-upload-0941bea-20261005/rollback-03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d.tar.gz: OK
+REUSE_SAME_BATCH_ROLLBACK_SOURCE /srv/video-api-debugger/releases/03aa5e8dbb34b48e93e8d1654a3a9063d4c2f82d-generation-toolbar-rollback
+{"liveSourceMatchesRollbackArchive":true,"checkedFiles":789}
+{
+  "source": "src/app/image-studio/studio.tsx",
+  "toolbarCount": 1,
+  "order": [
+    "参考图",
+    "materialFooter",
+    "fileInput",
+    "generationToolbar",
+    "补充文案"
+  ],
+  "ordinarySubmit": "direct POST; no confirmation; existing ambiguity guard preserved",
+  "version": "0.43.3",
+  "route": "/template-studio?type=image",
+  "evidenceLimit": "Source structure only; does not assert rendered DOM or visual layout"
+}
+{"route":"/template-studio/page","compiledToolbarChunks":["static/chunks/9017-73cbd9aab2d5412a.js","static/chunks/app/template-studio/page-aaf0d1dcb95a7c2a.js"],"compiledPromptChunks":["static/chunks/app/template-studio/page-aaf0d1dcb95a7c2a.js"]}
+CANDIDATE_BUILD_SUCCESS commit=0941beacd2cf71b1d02f1111470d804f4996b3f4 build=D7veEEW5tSA1MsaVkxWwm

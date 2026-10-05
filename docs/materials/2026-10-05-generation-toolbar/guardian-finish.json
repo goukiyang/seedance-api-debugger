@@ -1,0 +1,151 @@
+{
+  "phase": "finish",
+  "taskTypes": [
+    "ui",
+    "deploy",
+    "git"
+  ],
+  "conversationProfile": {
+    "rules": [],
+    "taskTypes": [],
+    "completionLayers": [],
+    "stopConditions": [],
+    "requiredReportLayers": [],
+    "agentGuardrail": null
+  },
+  "completionLayers": [
+    "local",
+    "tests",
+    "git",
+    "runtime",
+    "real-result"
+  ],
+  "evidenceTier": "L3-visible-runtime",
+  "requiredLayers": [
+    "local",
+    "tests",
+    "git",
+    "runtime",
+    "real-result"
+  ],
+  "skippedLayers": [],
+  "triggerReasons": [
+    {
+      "source": "keyword",
+      "id": "keyword:ui",
+      "taskTypes": [
+        "ui"
+      ],
+      "summary": "命中关键词：页面。"
+    },
+    {
+      "source": "keyword",
+      "id": "keyword:deploy",
+      "taskTypes": [
+        "deploy"
+      ],
+      "summary": "命中关键词：部署。"
+    },
+    {
+      "source": "keyword",
+      "id": "keyword:git",
+      "taskTypes": [
+        "git"
+      ],
+      "summary": "命中关键词：提交。"
+    }
+  ],
+  "downgradeReasons": [],
+  "canClaimCompleteWithoutHighEvidence": false,
+  "items": [
+    {
+      "id": "local-changes",
+      "label": "说明本地改了什么，避免把分析说成实现。"
+    },
+    {
+      "id": "verification",
+      "label": "列出测试、构建、健康检查或真实日志结果。"
+    },
+    {
+      "id": "git-state",
+      "label": "说明是否 commit、push、tag，以及远端是否可见。"
+    },
+    {
+      "id": "runtime-state",
+      "label": "说明服务、页面、扩展或 App 当前是否加载新版本。"
+    },
+    {
+      "id": "real-surface-evidence",
+      "label": "说明用户真实可见页面、客户端或公网 URL 是否看到结果。"
+    },
+    {
+      "id": "unfinished-work",
+      "label": "明确哪些层没做，为什么没做。"
+    }
+  ],
+  "cwd": "/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005",
+  "routeResolution": null,
+  "project": null,
+  "git": {
+    "isRepo": true,
+    "branch": "codex/avatar-generator-20261005",
+    "isDirty": true,
+    "statusLines": [
+      "## codex/avatar-generator-20261005...origin/codex/avatar-generator-20261005",
+      "?? .next-avatar-candidate/",
+      "?? docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-implementation/",
+      "?? docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-intent-implementation/",
+      "?? docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-mobile-preview-back/",
+      "?? docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/candidate.sh",
+      "?? docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/changed-files.txt",
+      "?? docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/delivery.json",
+      "?? docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/independent-public-proof.json",
+      "?? docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/release-window.mjs",
+      "?? docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/runtime-proof.cjs",
+      "?? docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/runtime-proof.json",
+      "?? docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/sd2-avatar-state-repair-public-proof.json",
+      "?? docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/source-review.json",
+      "?? docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/source.diff",
+      "?? docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/switch.sh",
+      "?? docs/materials/2026-10-05-generation-toolbar/guardian-finish.json",
+      "?? docs/materials/2026-10-05-generation-toolbar/local-source-proof.json",
+      "?? docs/materials/2026-10-05-generation-toolbar/public-config.headers",
+      "?? docs/materials/2026-10-05-generation-toolbar/public-config.json",
+      "?? docs/materials/2026-10-05-generation-toolbar/public-login.headers",
+      "?? docs/materials/2026-10-05-generation-toolbar/public-release.headers",
+      "?? docs/materials/2026-10-05-generation-toolbar/public-release.json",
+      "?? docs/materials/2026-10-05-generation-toolbar/release-window-before-final.json",
+      "?? docs/materials/2026-10-05-generation-toolbar/release-window-before-switch.json",
+      "?? docs/materials/2026-10-05-generation-toolbar/release-window-proof-final.json",
+      "?? docs/materials/2026-10-05-generation-toolbar/release-window-proof.json",
+      "?? docs/materials/2026-10-05-generation-toolbar/release-window-switch-proof.json",
+      "?? docs/materials/2026-10-05-generation-toolbar/remote-refs-final.txt",
+      "?? docs/materials/2026-10-05-generation-toolbar/remote-refs.txt",
+      "?? docs/materials/2026-10-05-generation-toolbar/sd2-generation-toolbar-candidate-0941beacd2cf71b1d02f1111470d804f4996b3f4.json",
+      "?? docs/materials/2026-10-05-generation-toolbar/server-public-proof.json",
+      "?? docs/materials/2026-10-05-generation-toolbar/server-source-proof.json",
+      "?? docs/materials/2026-10-05-generation-toolbar/source.diff",
+      "?? docs/materials/2026-10-05-generation-toolbar/unified.diff",
+      "?? docs/materials/2026-10-05-generation-toolbar/worker-pid-before.txt"
+    ]
+  },
+  "skillGuard": {
+    "phase": "finish",
+    "recommendedSkills": [
+      {
+        "skill": "impeccable",
+        "reason": "前端、页面和视觉任务先过设计质量门，避免 generic/AI 味。"
+      },
+      {
+        "skill": "verification-before-completion",
+        "reason": "闭环和收尾前必须重新跑验证，不能靠旧结果。"
+      }
+    ],
+    "closureChecks": [
+      "visible-result-check",
+      "fresh-verification-output"
+    ],
+    "blockingWarnings": []
+  },
+  "ledgerPath": "/Volumes/Data/Projects/project-guardian/ledgers/guardian-ledger.jsonl"
+}

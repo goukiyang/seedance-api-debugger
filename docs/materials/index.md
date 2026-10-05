@@ -183,6 +183,8 @@ L1：加载动效独立打样，已完成。完成标准：可交互比较各状
 
 [codex-clipboard-f5514b6f-ae53-432d-bb56-8ddb68123c16.png](2026-10-03-feedback-generation-confirm/codex-clipboard-f5514b6f-ae53-432d-bb56-8ddb68123c16.png)：生成图片时“确认生成/新建生成任务”弹窗，说明可能再次产生上游费用。795x751 PNG可读；原件及副本SHA256一致29f2362016356ef7c8b548065296dc564b02188e19982bf5cb6164065465eb3f。不能从截图推断用户改了任何设置。
 
+2026-10-05追加“不要反复确认/生成按钮放参考图下方、补充文案上方”，随后明确随机人物“写了正文，就按正文理解直接出”（用户当前对话文字，无新附件/原文件名，资料v1.1.0；替代本条先前仅模板移位范围）：video-api-debugger；关键词：D1/D2/D3、生成图片、按钮位置、参考图、补充文案、正文理解、一键出图、直接提交。完整原话、实际模板共用入口、费用/未知受理/未保存保护、源码及React来源、发布检查与手动验收边界见[同一工单v1.1.0 D1/D2节](../../tasks/todo/2026-10-02-feedback-primary-navigation.md#d1d2图片生成按钮位置与重复确认2026-10-05)；人物普通分析/报价分层确认由一次显式生成替代，输入本身不生成、变价/缓存/失败/未知及旧草稿保护见[人物工单v1.3.0第10节](../../tasks/todo/2026-10-05-avatar-intent-generation-flow.md#10-人物正文一键出图2026-10-05)。已部署v0.43.3/0941beac/BUILD D7veEEW5tSA1MsaVkxWwm，D1/D3已源实现、D2发布检查完成，实际布局/一键出图待用户手动验收。最终候选内置类型/lint、789源码、3新chunk与公网版本/回退/远端先核后切通过，worker未重启；费用0，无新增付费/浏览器验收。正式根[逐文件交付](2026-10-05-generation-toolbar/delivery.json)、[最终统一diff](2026-10-05-generation-toolbar/unified.diff)、[源码自查](2026-10-05-generation-toolbar/source-review.json)、[公网证据](2026-10-05-generation-toolbar/server-public-proof.json)同目录归档，关键报告/diff复制一致性核对；旧候选source.diff单独保留，辅助headers/脚本本机不逐项哈希。原始v0.43.3标签保留初候选，实际release/v0.43.3-avatar-one-click-final指最终0941，细节见工单。沿用上方R1原图及原校验，仅作为旧提醒参考，不当新布局/一键效果证据、不公开媒体或原模型回复。
+
 ### 弹窗位置反馈
 
 2026-10-03用户明确要求“弹窗不要弹角落，要弹就弹在触发按键范围附近”，归属video-api-debugger；关键词：P1、角落、按钮附近、确认框、命名框、小屏、键盘。复用上方R1原件v1，来源和原文件名不变、无替代版本；截图左上角弹窗为定位参考。文件未变，复用可读性/完整性校验。[既有工单P1](../../tasks/todo/2026-10-02-feedback-primary-navigation.md#p1统一弹窗定位2026-10-03)记录范围与进度；原图仅本地不公开。

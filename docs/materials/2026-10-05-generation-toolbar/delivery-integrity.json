@@ -1,0 +1,10 @@
+{
+  "scope": "Delivery file/reference/source diff integrity only; not functional acceptance",
+  "allEvidenceExists": true,
+  "commitBuildRefsConsistent": true,
+  "actualSourceDiffMatches": true,
+  "sourceDiffSha256": "0c14a7b89690c6d5ed8932493e7625e031a7ed5952d85424586da3ec50c7d550",
+  "serverProofConsistent": true,
+  "registryFinishConfirmed": true,
+  "checkedAt": "2026-10-05T13:26:41.806Z"
+}

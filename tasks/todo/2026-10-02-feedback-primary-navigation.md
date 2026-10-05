@@ -3,14 +3,14 @@
 | 字段 | 内容 |
 |---|---|
 | 项目 | video-api-debugger |
-| 工单版本 | v1.0.1 |
+| 工单版本 | v1.1.0 |
 | 正式版本来源 | package.json、src/lib/release.ts、生产/api/release；开工v0.36.2，发布前重新锁定 |
 | 正式资料目录 | /Volumes/Data/Projects/video-api-debugger |
-| 实施/部署源 | /Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger；codex/canvas-liblib-layout；开工HEAD77e450138d06823ff92369c28bdc64ea9d09949e，干净 |
+| 实施/部署源 | 历史批次来源见对应章节；本轮D1/D2/D3为/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005，codex/avatar-generator-20261005；开工03aa5e8/v0.43.2，tracked clean；正式根旧src不部署 |
 | 目标 | https://sd2.youdooart.com/template-studio?type=image；I4确切入口https://sd2.youdooart.com/generate |
-| 状态 | I1-I5及N1/N2历史已部署；R1图片生成重复确认已部署v0.36.5、待用户手动验收；G1明确上游HTTP 502、内部原因未知，未修复 |
+| 状态 | I1-I5及N1/N2历史已部署；R1图片生成重复确认历史v0.36.5已部署、待用户手动验收；G1上游HTTP 502内部原因未知，未修复；本轮D1/D3已实现部署v0.43.3，待用户手动验收，D2发布检查已完成；费用0 |
 | 风险/验证等级 | 真实debug+UI守门员L3，生产切换按L4保护；旧general/L0不采纳；禁止主动浏览器/业务验收与独立审核线程 |
-| 创建/最后更新 | 2026-10-03，北京时间；文件名保留2026-10-02反馈日期 |
+| 创建/最后更新 | 创建2026-10-03；最后更新2026-10-05，北京时间；文件名保留2026-10-02反馈日期 |
 
 ## 目标与完整原文
 
@@ -828,3 +828,31 @@ git archive上传包SHA256 6b166a2f0685e30001614471ce5c3c0d15659aa410a3e8b9d756e
 应用提交及`rollback/2026-10-04-before-template-quick-context-v0.39.0`标签均已推远端，回退指向部署前138a2c70493ff91a87feab1de4a6aebd76f2c0fa；服务器旧运行构建保留于`/srv/video-api-debugger/app/.next-prod-before-sd2-q12-v0390-54f67d1`。完整[统一diff](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/implementation-v0.39.0.diff)及[发布检查证据](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/deployment-v0.39.0.json)仅存正式根私有目录，不Git上传图片或证据。
 
 按项目用户手动验收约定，不操作浏览器、不自动功能/生成测试或派审核线程；构建/静态可达性不冒充点击流程、刷新恢复或真实生成验证。下一步用户检查另存后出现快捷按钮、刷新仍在、快捷套用与历史原上下文完整复现；旧无关联模板从库中明确加入，旧无完整上下文记录不能完整恢复。旧V1封面/banner样板任务及其状态保持不变，线上封面不替换不铺量。守门员按L3可见页面发布检查处理；工具将“不要自动验收”误命中验收关键词，不据此扩大测试授权，真实功能效果待用户手动确认。本轮无越界，无自身分级误判。
+
+## D1/D2图片生成按钮位置与重复确认（2026-10-05）
+
+用户原话：“能不能别老是让我反复确认；生成图片 按键改放补充文案上方，参考图下方；”。来源为本项目当前对话文字，无新附件。已明确的常规修改、Git和安全发布直接执行，不再追问同一批准；不是永久取消全站确认，也不是新付费模型调用授权。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| D1 | 调整按钮与重复确认 | 生成按钮位于指定位置；同一操作不重复确认，费用变化仍清楚可见 | 进行中：已实现部署v0.43.3，待用户手动验收 |
+| D2 | 发布更新 | 构建、回退及公网检查完成 | 已完成 |
+| D3 | 人物正文一键出图 | 一次显式点击自动理解并按正文生成，无多层确认，费用与未知受理保护保留 | 进行中：已实现部署v0.43.3，待用户手动验收 |
+
+目标锁定：[模板图片工作台](https://sd2.youdooart.com/template-studio?type=image)共用`src/app/image-studio/studio.tsx`的ImageStudioBlock；`/image-studio`已重定向该入口。用户所说“补充文案”是参考图区下方的“补充/有图片时选填”输入，不是人物页的自然语言分析或报价。已核源码当前generationToolbar在素材前，包含唯一生成按钮、本次积分/上游成本、真实阻塞状态、共享限制、未知受理查询和必要恢复提示。移动完整区域到参考图区、素材计数/上传状态以下且补充label以上，桌面/手机同一DOM顺序；不另放第二按钮、不改变图片/文案/参数、模型、张数或现有状态与handler。
+
+重复确认来源与当前事实：本工单R1已经取消历史uncertain/复现时无条件“确认生成”。本轮已读实际submit源码，无普通模板生成confirm；正常点击本来直接提交，不能虚构再删掉一次。保留原请求未确认只查原请求、submitLock及请求号保存/幂等、输入检查；不删主动放弃核对、真实未保存、删除等必要保护，不为省步骤建立永久付费认可缓存。按钮旁保留本次费用，费用/范围变更按既有真实参数处理，不把旧批准扩成新费用。
+
+随后用户明确追加随机人物“写了正文，就按正文理解直接出”。范围相应增加D3，不再只做模板移位；普通人物分析/图片两层确认由一次显式生成动作替代，输入本身不生成，真实费用可见、变价停下、冲突/未知受理/旧草稿保护继续有效。完整原话、字段优先和收费/恢复边界见[人物工单v1.3.0第10节](2026-10-05-avatar-intent-generation-flow.md#10-人物正文一键出图2026-10-05)，不是新付费验收授权。模板D1原目标不删、不将其正常直提交冒称新D3效果。
+
+方案采用现有React/共享toolbar的最小移位，未选新库或安装依赖。参考[React官方状态保持](https://react.dev/learn/preserving-and-resetting-state)的状态归属与渲染树原则，保持现有拥有草稿/请求状态的父组件，仅移动纯操作区；来源已查、对应项目实际代码已读，不把官方示例当本产品实测。继承已有主操作层级、响应式及安全现场保存，移位不清草稿、不重发请求。原R1截图[正式私有原件](../../docs/materials/2026-10-03-feedback-generation-confirm/codex-clipboard-f5514b6f-ae53-432d-bb56-8ddb68123c16.png)仅作历史重复提醒参考，不代表新布局，也不新增公开图片授权；复用原可读性与一致性证据。
+
+执行/验证：当前源码03aa5e8/v0.43.2，正式公网release已核；原内部implementer完成D1移位后已停止、无运行命令、无Git/上线副作用，将三项tracked改动交唯一lead。lead负责人物D3及整批版本和安全发布，父级仅正式记录/归档与目标Review，写集分离，不派额外reviewer。允许两个入口的`studio.tsx`、必要局部CSS、`package.json` PATCH候选0.43.3与`release.ts`摘要；原依赖/锁/env/权限/点数/Provider/schema/worker及生产DB不改。整批完成后只做diff/源码时序费用保护/脚本与exact commit独立候选构建内置检查、发布版本/服务/两个入口目标静态hash/回退及数据保护；不跑浏览器、截图、功能回归、业务API或收费模型。守门员start已核真实路径/Git/目标，工具把“用户手动验收”命中verification不扩大授权，源移位按L1、人物主链L3、生产切换独立守门。
+
+Git/发布：源码在codex/avatar-generator-20261005聚焦提交，必须等push实际exit0并远端branch/release/rollback引用正确后才切换，不重犯前批先切后核的顺序问题。重锁正式服务器commit/build/source漂移与占用，exact archive排除持久数据/密钥/全部build，独立`.next-prod-candidate`成功才切换，保留旧源码/build回退，Web-only不重启图片worker。新源码/公网目标入口chunk需对应本次参考→按钮/费用→补充，不沿用头像静态内容作证明；只证新产物可达，不冒称真实布局/点击已通过。新[证据目录](../../docs/materials/2026-10-05-generation-toolbar/)由源码工作区形成后复制到正式根，最终更新同一索引。主Todo精确暂存本轮入口，旧29行资产计划和私有素材不提交。
+
+源码阶段进展：整批f8fb58431555082ddc842611be05531aad92c783候选v0.43.3已聚焦提交；四份应用文件为两个studio.tsx、package.json和release.ts，另含六份发布脚本/安全源码Review，不改后端、依赖/锁或运行数据。分支与v0.43.3远端解引用同commit，rollback/generation-toolbar-20261005-v0.43.2指03aa5e8，已在切换前核对；当前公网仍0.43.2，未以提交/标签冒称生效。父级目标源码核对普通人物按钮直走prepare，单run锁内使用理解返回值，变价/输入版本/账号/未知保护保留，模板toolbar唯一且已移位。lead最终候选构建和发布证据待完成；本地初轮tsc/lint停在共享外盘依赖等待，exit143，不称通过、不替代候选内置检查。
+
+整批最终已部署v0.43.3 / 0941beacd2cf71b1d02f1111470d804f4996b3f4 / BUILD D7veEEW5tSA1MsaVkxWwm，D1/D3真实效果待用户手动验收、D2发布检查完成。候选首次类型问题修成等价比较，最终exact commit服务器候选build内置类型/lint通过；不覆盖旧v0.43.3候选标签，实际发布标签release/v0.43.3-avatar-one-click-final与分支均指0941，rollback指03aa5e8，push与refs先核再切。两个入口三份新chunk公网200/hash对应候选，789源码/BUILD对应正式产物，web/worker active且worker PID259902未重启，持久数据/环境原样、源码与旧构建回退点保留。匿名入口仍登录保护，未证明登录后布局/一键收费效果；已有升级提示仅核源码，不当实演。源/脚本问题与警告详见[人物同批最终记录](2026-10-05-avatar-intent-generation-flow.md#10-人物正文一键出图2026-10-05)。
+
+正式根同目录归[交付及逐文件命令](../../docs/materials/2026-10-05-generation-toolbar/delivery.json)、[最终统一diff](../../docs/materials/2026-10-05-generation-toolbar/unified.diff)、[时序费用源码自查](../../docs/materials/2026-10-05-generation-toolbar/source-review.json)及[公网新产物](../../docs/materials/2026-10-05-generation-toolbar/server-public-proof.json)，主Todo/资料索引同步。费用0，无模型/生成/浏览器/截图或自动功能回归，没有权限/点数/Provider/schema/依赖变化；真实冲突、变价、未知受理及旧草稿保护不撤销。守门员清单无阻塞，本轮无自身分级误判；归档/推送不包括原无关29行资产计划、私有用户图片或原回复。

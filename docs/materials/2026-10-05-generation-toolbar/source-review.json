@@ -1,0 +1,49 @@
+{
+  "project": "video-api-debugger",
+  "batch": "D1/D2/D3",
+  "version": "0.43.3",
+  "reviewKind": "Lead source self-review, not independent or functional acceptance",
+  "sourceScope": ["package.json", "src/lib/release.ts", "src/app/image-studio/studio.tsx", "src/app/tools/avatar-studio/studio.tsx"],
+  "decisions": {
+    "ordinaryIntent": "One explicit primary generation click authorizes at most one new text understanding request and the displayed image quote. No normal text or image confirmation modal.",
+    "alternateNew": "Change-person / change-group uses the same action=new pipeline with forceNew; no needsAnalysis gate requiring a separate analysis click.",
+    "nonNew": "Styling and original-person quote retain original identity/reference semantics and explicit image confirmation; tweak remains draft-only. Failed text request without a saved reply retains a separate explicit retry confirmation.",
+    "reuse": "Existing single run lock, APIs, parse contracts, settings GET, controlled DNA sampler and submit quote validation reused. No new dependency or backend behavior."
+  },
+  "sequence": [
+    "prepare captures liveDraft once under the single run lock, before any await; input signature includes owner, full rules/metadata/locks, model, quality, resolution, plan ID, candidate index and ready state.",
+    "checkGeneration rejects unknown price, unavailable parameters, unready page and unknown image submission before text understanding.",
+    "Existing read-only GET /api/image-studio/settings checks current modelReady and price before text understanding. Changed price updates visible quote and stops without text or image purchase.",
+    "readParse checks parse-status and returns the actual parse result directly. Succeeded cache returns immediately. Saved reply can receive at most one free parse-recheck. Only not-started or a separately confirmed failed retry token can call analyze with approveTextModel=true once.",
+    "Pending/unknown without a saved reply, failed without explicit retry, needs-clarification and unrecognized/conflicting conditions stop this image operation, preserve text/history and display server parse status. No paid retry loop.",
+    "API returned descriptionId/parserVersion passes directly into prepare. No setParseStatus then stale activeParse read, render wait, effect-triggered generation or React 19 API.",
+    "assertDraft validates monotonic input revision and owner revision after every parse/settings/prepare await and before submit. Changing fields and later changing back still invalidates old work; old errors/parse cannot overwrite a new draft.",
+    "submit checks exact selected image parameters/layout and people, then compares prepared output count and unit credits against click-time visible quote. Any direct-generation quote mismatch updates quote and stops; no automatic quantity/model increase.",
+    "Exact plan/rules/parameters and pending plan ID persist before image POST. Existing idempotent plan ID, query-only unknown-submission recovery and server revision/unit/draft/layout checks remain. New plan retains previous image and tracks older queued/running plans.",
+    "After POST, ownerRevision/planRef guard credits and UI responses. Submitted notice does not claim image completion. Separate original-quote and failed-item retry now capture draft before their API await.",
+    "Typing/600ms inspection/restoration/polling remain read-only. A late background parse-status result cannot overwrite an in-progress explicit pipeline. Restore never calls analyze or submit."
+  ],
+  "cost": {
+    "ourTextModelCalls": 0,
+    "ourImageGenerationCalls": 0,
+    "ourGenerationCost": 0,
+    "userNotice": "Actual output quantity, unit credits and total image credits are shown beside the main button. First understanding of new text may incur upstream text-model cost; amount is unknown, not advertised as free or as a known cash total.",
+    "exceptions": "Cached interpretation and saved-reply recheck do not create another text-model request. Explicit failed-text retry explains possible additional cost and does not itself submit images."
+  },
+  "preserved": ["optional choices", "manual locks", "latest edit precedence", "negative/range/soft conditions", "one contact-sheet image", "old image/history", "draft-only tweak", "same-person image reference", "double-submit lock", "idempotent pending recovery", "strict parser validation", "quote revision guard", "existing SemVer update notice and manual deferred recheck"],
+  "firstPassCorrections": ["Bind original-quote and failed-item retry before API await rather than at submit time", "Persist exact submitted rules/parameters before POST", "Guard credit refresh by owner revision", "Reject mismatched member count", "Fix inherited candidate proof script undefined commit variable and include both route chunks", "Anonymous /api/release intentionally redacts summary; public proof checks version/channel and existing privacy boundary, while exact source proves both actual update-summary items"],
+  "checks": {
+    "sourceOrder": "Existing D1 source-proof script confirms one toolbar after reference/footer/input and before supplement; does not prove rendered layout.",
+    "localTypeAndLintFirstPass": "Local tsc and next lint waited on the shared external-volume dependencies with no final diagnostics. Deliberately stopped before the correction batch, each exit 143; not passed. Final type/lint evidence will be the exact-commit server candidate build's built-in checks.",
+    "serverCandidateFirstPass": "f8fb584 candidate compiled but failed TypeScript: includes expects a narrower catalog union than the persisted string parameter. Targeted correction uses some(option=>option===draft.quality/resolution), preserving the same runtime membership guard. No source/live/build switch occurred. Existing v0.43.3 tag is preserved as failed-candidate history; final release gets a new explicit release tag.",
+    "archiveFirstPass": "Initial archive validation falsely treated src/app/uploads and src/app/videos route code as runtime data. Corrected validator targets actual root storage and public/uploads/public/videos; safe archive bytes reused and source/rollback hashes verified. No runtime data entered either archive.",
+    "functionalAcceptance": "Not executed per project/user instruction. No paid request, business API probe, browser, screenshot or automatic functional regression."
+  },
+  "references": [
+    "https://react.dev/learn/state-as-a-snapshot",
+    "https://react.dev/learn/queueing-a-series-of-state-updates",
+    "https://react.dev/learn/you-might-not-need-an-effect#sending-a-post-request",
+    "https://github.com/react/react/blob/v18.3.1/packages/react/src/ReactHooks.js"
+  ],
+  "limits": ["Source review is not a real paid one-click demonstration", "Strict backend parser can still stop incomplete/conflicting descriptions", "Upstream text-model amount is not provided", "Image readiness can change after preflight; prepare/submit server checks still stop stale quotes", "No root fixed records changed by lead"]
+}
