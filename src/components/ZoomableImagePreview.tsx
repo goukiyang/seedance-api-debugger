@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import type { CSSProperties, PointerEvent, ReactNode } from 'react';
+import type { CSSProperties, PointerEvent, ReactNode, RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, Check, Copy, Image as ImageIcon, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { copyImage } from '@/lib/media/copy-image';
@@ -57,6 +57,145 @@ const SCALE_STEP = 1.2;
 const DRAG_THRESHOLD = 5;
 
 type IntrinsicSize = { width: number; height: number };
+
+const IMAGE_PREVIEW_HISTORY_STATE_KEY = '__sd2ImagePreviewHistoryEntry';
+let imagePreviewHistorySequence = 0;
+
+type ImagePreviewHistorySession = {
+  token: string;
+  url: string;
+  ownsEntry: boolean;
+};
+
+type ImagePreviewHistoryMarker = {
+  token: string;
+  url: string;
+  active: boolean;
+};
+
+function getImagePreviewHistoryMarker(): ImagePreviewHistoryMarker | null {
+  const state = window.history.state;
+  if (!state || typeof state !== 'object' || Array.isArray(state)) return null;
+  const marker = state[IMAGE_PREVIEW_HISTORY_STATE_KEY];
+  if (!marker || typeof marker !== 'object'
+    || typeof marker.token !== 'string'
+    || typeof marker.url !== 'string'
+    || typeof marker.active !== 'boolean') return null;
+  return marker as ImagePreviewHistoryMarker;
+}
+
+function hasActiveImagePreviewHistoryEntry(token: string) {
+  const marker = getImagePreviewHistoryMarker();
+  return marker?.active === true && marker.token === token;
+}
+
+function writeImagePreviewHistoryMarker(marker: ImagePreviewHistoryMarker, replace = false) {
+  const state = window.history.state;
+  if (!state || typeof state !== 'object' || Array.isArray(state)) return false;
+  try {
+    const nextState = { ...state, [IMAGE_PREVIEW_HISTORY_STATE_KEY]: marker };
+    if (replace) window.history.replaceState(nextState, '');
+    else window.history.pushState(nextState, '');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function useImagePreviewHistoryDismiss<T extends HTMLElement>(open: boolean, dialogRef: RefObject<T>, onClose: () => void) {
+  const instanceId = useId();
+  const onCloseRef = useRef(onClose);
+  const sessionRef = useRef<ImagePreviewHistorySession | null>(null);
+  const effectGenerationRef = useRef(0);
+  const closeRequestedRef = useRef(false);
+  const closeCalledRef = useRef(false);
+  onCloseRef.current = onClose;
+
+  const closeOnce = useCallback(() => {
+    if (closeCalledRef.current) return;
+    closeCalledRef.current = true;
+    if (sessionRef.current) sessionRef.current.ownsEntry = false;
+    onCloseRef.current();
+  }, []);
+
+  useEffect(() => {
+    const generation = ++effectGenerationRef.current;
+    if (!open) {
+      const inactiveSession = sessionRef.current;
+      if (inactiveSession?.ownsEntry
+        && inactiveSession.url === window.location.href
+        && hasActiveImagePreviewHistoryEntry(inactiveSession.token)) {
+        writeImagePreviewHistoryMarker({ token: inactiveSession.token, url: inactiveSession.url, active: false }, true);
+      }
+      sessionRef.current = null;
+      closeRequestedRef.current = false;
+      closeCalledRef.current = false;
+      return undefined;
+    }
+
+    closeRequestedRef.current = false;
+    closeCalledRef.current = false;
+    let session = sessionRef.current;
+    if (!session || !session.ownsEntry || !hasActiveImagePreviewHistoryEntry(session.token)) {
+      const token = `${instanceId}:${++imagePreviewHistorySequence}`;
+      const url = window.location.href;
+      const existingMarker = getImagePreviewHistoryMarker();
+      const reuseEntry = existingMarker?.active === false && existingMarker.url === url;
+      const ownsEntry = writeImagePreviewHistoryMarker({ token, url, active: true }, reuseEntry);
+      session = { token, url, ownsEntry };
+      sessionRef.current = session;
+    }
+
+    const handlePopState = () => {
+      const activeSession = sessionRef.current;
+      if (!activeSession?.ownsEntry || closeCalledRef.current) return;
+      if (hasActiveImagePreviewHistoryEntry(activeSession.token)) return;
+      if (!isTopmostDialogLayer(dialogRef.current)) {
+        if (activeSession.url === window.location.href) {
+          activeSession.ownsEntry = writeImagePreviewHistoryMarker({ token: activeSession.token, url: activeSession.url, active: true });
+        } else {
+          activeSession.ownsEntry = false;
+        }
+        closeRequestedRef.current = false;
+        return;
+      }
+      closeOnce();
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      // Let StrictMode replay this effect before marking its history entry inactive.
+      queueMicrotask(() => {
+        if (effectGenerationRef.current !== generation) return;
+        const activeSession = sessionRef.current;
+        if (!activeSession?.ownsEntry
+          || activeSession.url !== window.location.href
+          || !hasActiveImagePreviewHistoryEntry(activeSession.token)) return;
+        if (writeImagePreviewHistoryMarker({ token: activeSession.token, url: activeSession.url, active: false }, true)) {
+          activeSession.ownsEntry = false;
+        }
+      });
+    };
+  }, [closeOnce, dialogRef, instanceId, open]);
+
+  return useCallback(() => {
+    if (closeCalledRef.current || closeRequestedRef.current) return;
+    const session = sessionRef.current;
+    if (session?.ownsEntry
+      && session.url === window.location.href
+      && hasActiveImagePreviewHistoryEntry(session.token)) {
+      closeRequestedRef.current = true;
+      try {
+        window.history.back();
+        return;
+      } catch {
+        closeRequestedRef.current = false;
+      }
+    }
+    closeOnce();
+  }, [closeOnce]);
+}
 
 function safeImageLabel(title?: string, fileName?: string) {
   const trimmedTitle = title?.trim();
@@ -221,12 +360,13 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
   const [copyState, setCopyState] = useState<{ src: string; busy?: boolean; message?: string; success?: boolean } | null>(null);
   const [dimensionsBySource, setDimensionsBySource] = useState<Record<string, IntrinsicSize>>({});
   const dimensionsTooltipId = useId();
+  const dismissPreview = useImagePreviewHistoryDismiss(Boolean(portalRoot), backdropRef, onClose);
 
   useDialogDismiss({
     open: Boolean(portalRoot),
     dialogRef: backdropRef,
     dismissSurfaceRef: backdropRef,
-    onDismiss: onClose,
+    onDismiss: dismissPreview,
     initialFocusRef: backdropRef,
     isDismissTarget: (target) => {
       if (target === backdropRef.current || target === stageRef.current) return true;
@@ -592,7 +732,7 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
       }
       setDragging(Boolean(remaining && scale > 1));
       if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-      if (closeFromBackground && isTopmostDialogLayer(backdropRef.current)) onClose();
+      if (closeFromBackground && isTopmostDialogLayer(backdropRef.current)) dismissPreview();
       return;
     }
     const drag = dragRef.current;
@@ -603,8 +743,8 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
         event.currentTarget.releasePointerCapture(drag.pointerId);
       }
     }
-    if (closeFromBackground && isTopmostDialogLayer(backdropRef.current)) onClose();
-  }, [onClose, scale]);
+    if (closeFromBackground && isTopmostDialogLayer(backdropRef.current)) dismissPreview();
+  }, [dismissPreview, scale]);
 
   const comparisonLayoutLabel = comparisonAxis === 'horizontal' ? '左右' : '上下';
   const handleImageReady = useCallback((imageSrc: string) => (size: IntrinsicSize) => {
@@ -643,7 +783,7 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
       tabIndex={-1}
       onClick={(event) => {
         event.stopPropagation();
-        if (event.detail === 0 && event.target === event.currentTarget && isTopmostDialogLayer(backdropRef.current)) onClose();
+        if (event.detail === 0 && event.target === event.currentTarget && isTopmostDialogLayer(backdropRef.current)) dismissPreview();
       }}
       onPointerDown={(event) => event.stopPropagation()}
       onPointerMove={(event) => event.stopPropagation()}
@@ -717,7 +857,7 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
           <button type="button" onClick={() => { interactedRef.current = true; previewState.reset(); resetView(); }} title="还原" aria-label="还原图片大小">
             <RotateCcw size={16} />
           </button>
-          <button type="button" onClick={onClose} title="关闭" aria-label="关闭预览">
+          <button type="button" onClick={dismissPreview} title="关闭" aria-label="关闭预览">
             <X size={16} />
           </button>
         </div>

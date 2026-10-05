@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '修复人物文案背景格式校验，已保存回复可免费重检，不必重新收费分析。胡茬不再误标为伤痕或猜具体位置；原文条件、旧图和历史继续保留。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '手机返回先关闭大图，保留当前页面。人物描述作为主输入，其他条件可选；未指定的外观随机补齐，主动选择仍可补充要求。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

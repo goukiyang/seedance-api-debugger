@@ -8,6 +8,11 @@
 .page textarea { resize: vertical; min-height: 104px; }
 .page button, .page a { font-size: 13px; }
 .quick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.optional { border: 0; margin: 0; padding: 0; min-width: 0; }
+.optional legend { padding: 0 0 8px; font-size: 13px; color: var(--text-secondary); }
+.optional .quick { grid-template-columns: minmax(0, 1fr); }
+.optional label { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: center; }
+.optional select { font-size: 12px; }
 .controls { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .controls button, .quiet { border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary); border-radius: 6px; min-height: 32px; padding: 6px 10px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
 .controls button[aria-pressed=true] { background: var(--bg-tertiary); border-color: var(--text-secondary); }
