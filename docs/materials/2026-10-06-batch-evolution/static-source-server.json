@@ -1,0 +1,23 @@
+{
+  "staticSourceChecks": "passed",
+  "batchProjectionFields": [
+    "id",
+    "requestId",
+    "moduleId",
+    "moduleName",
+    "state",
+    "note",
+    "total",
+    "generated",
+    "failed",
+    "uncertain",
+    "active",
+    "pending",
+    "prepared",
+    "budget",
+    "committedCredits",
+    "unitCredits",
+    "createdAt"
+  ],
+  "functionalAcceptance": "not-run"
+}

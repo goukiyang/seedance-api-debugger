@@ -1,0 +1,1611 @@
+diff --git a/package.json b/package.json
+index 81a67b7..09d5567 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "video-api-debugger",
+-  "version": "0.44.1",
++  "version": "0.45.0",
+   "private": true,
+   "scripts": {
+     "dev": "NEXT_DIST_DIR=.next-dev next dev",
+diff --git a/scripts/check-batch-evolution-source.mjs b/scripts/check-batch-evolution-source.mjs
+new file mode 100644
+index 0000000..7c1d63f
+--- /dev/null
++++ b/scripts/check-batch-evolution-source.mjs
+@@ -0,0 +1,34 @@
++import fs from 'node:fs';
++import assert from 'node:assert/strict';
++import ts from 'typescript';
++const read = path => fs.readFileSync(path, 'utf8');
++const route = ts.createSourceFile('batches.ts', read('src/app/api/image-studio/batches/route.ts'), ts.ScriptTarget.Latest, true);
++const get = route.statements.filter(ts.isVariableStatement).flatMap(node => node.declarationList.declarations).find(node => node.name.getText(route) === 'GET')?.initializer;
++assert(get, 'Batch GET must exist');
++assert(!/createStudioBatch|updateStudioBatch|dispatchStudioBatches|submitStudioBatch/.test(get.getText(route)), 'GET must only observe');
++assert(ts.isArrowFunction(get) && ts.isCallExpression(get.body) && get.body.expression.getText(route) === 'handle' && get.body.arguments.length === 1, 'GET must not enable write mode');
++const source = ts.createSourceFile('view.ts', read('src/lib/image-studio/batches.ts'), ts.ScriptTarget.Latest, true);
++const view = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'studioBatchView');
++const result = view.body.statements.find(node => ts.isReturnStatement(node)).expression;
++assert(ts.isObjectLiteralExpression(result), 'Batch DTO must be an explicit projection');
++const publicFields = result.properties.filter(node => ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)).map(node => node.name.getText(source));
++assert.deepEqual(publicFields, ['id', 'requestId', 'moduleId', 'moduleName', 'state', 'note', 'total', 'generated', 'failed', 'uncertain', 'active', 'pending', 'prepared', 'budget', 'committedCredits', 'unitCredits', 'createdAt']);
++assert(!/snapshot_json|batch\.input|moduleContext|globalContext|original_url|fixedReferenceImages/.test(result.getText(source)), 'Raw/private snapshot cannot be returned');
++for (const path of ['src/app/api/image-studio/download/route.ts', 'src/app/image-studio/batch-results.tsx']) {
++  const text = read(path);
++  assert(!/\.\.\.batch|snapshot_json|globalContext|moduleContext/.test(text), 'Export must not spread a persistent batch');
++}
++const worker = read('scripts/process-image-studio.ts');
++assert(worker.includes('await dispatchStudioBatches()') && worker.includes('image-studio-drain'));
++assert(read('src/lib/image-studio/tasks.ts').includes('!preparation && active + input.count > 8'));
++assert(read('src/lib/image-studio/batches.ts').includes('>= 8'));
++assert(read('src/app/api/image-studio/download/route.ts').includes('addReadStreamLazy'));
++const reminder = read('src/components/GenerationCompletion.tsx');
++assert(!/new Notification|requestPermission|serviceWorker|favicon/.test(reminder));
++assert(reminder.includes("audio?.state === 'running'") && reminder.includes('await audio.resume()'));
++assert(reminder.includes('prefers-reduced-motion') && reminder.includes('document.hidden'));
++assert(reminder.includes("tasks.every(task => ['succeeded', 'failed'].includes(task.status))") && reminder.includes('batch.uncertain === 0'), 'Unknown results must remain under observation, not completed receipts');
++assert(reminder.includes('useEffect(() => { clearTitle(); }, [pathname])') && !reminder.includes('[user?.id, pathname]'), 'Route changes clear attention titles, not accepted operation watches');
++assert(read('src/app/tools/avatar-studio/studio.tsx').includes('onDoubleClick'));
++assert(read('src/lib/release.ts').includes('packageInfo.version'));
++console.log(JSON.stringify({ staticSourceChecks: 'passed', batchProjectionFields: publicFields, functionalAcceptance: 'not-run' }, null, 2));
+diff --git a/scripts/process-image-studio.ts b/scripts/process-image-studio.ts
+index 9873eb1..284cf60 100644
+--- a/scripts/process-image-studio.ts
++++ b/scripts/process-image-studio.ts
+@@ -1,6 +1,7 @@
+ import { loadEnvConfig } from '@next/env';
+ import { processStudioTask, recoverStudioTasks } from '../src/lib/image-studio/worker';
+ import { prisma } from '../src/lib/prisma';
++import { dispatchStudioBatches } from '../src/lib/image-studio/batches';
+ import fs from 'node:fs';
+ import path from 'node:path';
+ 
+@@ -13,6 +14,8 @@ async function main() {
+     if (fs.existsSync(path.join(process.cwd(), 'storage', 'image-studio-drain'))) break;
+     await recoverStudioTasks();
+     if (stopping || fs.existsSync(path.join(process.cwd(), 'storage', 'image-studio-drain'))) break;
++    await dispatchStudioBatches();
++    if (stopping || fs.existsSync(path.join(process.cwd(), 'storage', 'image-studio-drain'))) break;
+     await Promise.all([processStudioTask(), processStudioTask()]);
+     if (process.argv.includes('--once')) break;
+     if (!stopping) await new Promise(resolve => setTimeout(resolve, 1500));
+diff --git a/src/app/ClientLayout.tsx b/src/app/ClientLayout.tsx
+index c9bf3da..85cb33b 100644
+--- a/src/app/ClientLayout.tsx
++++ b/src/app/ClientLayout.tsx
+@@ -5,12 +5,14 @@ import { ComposerHeightProvider } from '@/lib/context/ComposerHeightContext';
+ import { InteractionMetricsReporter } from '@/lib/performance/interaction-metrics';
+ import AppShell from '@/components/AppShell';
+ import ReleaseNotice from '@/components/ReleaseNotice';
++import { GenerationCompletionRuntime } from '@/components/GenerationCompletion';
+ 
+ export default function ClientLayout({ children }: { children: React.ReactNode }) {
+   return (
+     <AppSessionProvider>
+       <ComposerHeightProvider>
+         <InteractionMetricsReporter />
++        <GenerationCompletionRuntime />
+         <AppShell>{children}<ReleaseNotice /></AppShell>
+       </ComposerHeightProvider>
+     </AppSessionProvider>
+diff --git a/src/app/api/image-studio/batches/route.ts b/src/app/api/image-studio/batches/route.ts
+new file mode 100644
+index 0000000..76f5c48
+--- /dev/null
++++ b/src/app/api/image-studio/batches/route.ts
+@@ -0,0 +1,50 @@
++import { NextRequest, NextResponse } from 'next/server';
++import { getSession } from '@/lib/auth/session';
++import { canUseCompanyTemplates } from '@/lib/image-studio/access';
++import { createStudioBatch, listStudioBatches, studioBatchView, updateStudioBatch } from '@/lib/image-studio/batches';
++import { StudioError } from '@/lib/image-studio/tasks';
++export const runtime = 'nodejs';
++export const dynamic = 'force-dynamic';
++export const maxDuration = 120;
++async function handle(request: NextRequest, write = false) {
++  const user = await getSession();
++  if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
++  if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用' }, { status: 403 });
++  try {
++    if (write) {
++      if (Number(request.headers.get('content-length') || 0) > 128 * 1024) throw new StudioError('本批提交内容过大');
++      const reader = request.body?.getReader();
++      if (!reader) throw new StudioError('提交内容无效');
++      const chunks: Uint8Array[] = []; let size = 0;
++      try {
++        while (true) {
++          const { value, done } = await reader.read(); if (done) break;
++          size += value.byteLength;
++          if (size > 128 * 1024) { await reader.cancel(); throw new StudioError('本批提交内容过大'); }
++          chunks.push(value);
++        }
++      } finally { reader.releaseLock(); }
++      const raw = Buffer.concat(chunks).toString('utf8');
++      const body = JSON.parse(raw);
++      if (!body || typeof body !== 'object' || Array.isArray(body)) throw new StudioError('提交内容无效');
++      if (request.method === 'PATCH') { await updateStudioBatch(user.id, body); return NextResponse.json({ batch: await studioBatchView(user.id, body.id) }); }
++      const id = await createStudioBatch(user.id, body);
++      return NextResponse.json({ batch: await studioBatchView(user.id, id) }, { status: 202 });
++    }
++    const id = request.nextUrl.searchParams.get('id');
++    const requestId = request.nextUrl.searchParams.get('requestId');
++    if (requestId && !/^[a-zA-Z0-9-]{16,80}$/.test(requestId)) throw new StudioError('提交编号无效');
++    if (id || requestId) {
++      const { createHash } = await import('node:crypto');
++      return NextResponse.json({ batch: await studioBatchView(user.id, id || createHash('sha256').update(`${user.id}:${requestId}`).digest('hex')) }, { headers: { 'Cache-Control': 'no-store' } });
++    }
++    return NextResponse.json(await listStudioBatches(user.id, request.nextUrl.searchParams.get('cursor') || undefined), { headers: { 'Cache-Control': 'no-store' } });
++  } catch (error) {
++    if (error instanceof StudioError) return NextResponse.json({ error: error.message }, { status: error.status });
++    if (error instanceof SyntaxError) return NextResponse.json({ error: '提交内容无效' }, { status: 400 });
++    return NextResponse.json({ error: write ? '操作结果待确认，请查询原批次，不要重复新建' : '批次读取失败，请重试' }, { status: 503 });
++  }
++}
++export const GET = (request: NextRequest) => handle(request);
++export const POST = (request: NextRequest) => handle(request, true);
++export const PATCH = (request: NextRequest) => handle(request, true);
+diff --git a/src/app/api/image-studio/download/route.ts b/src/app/api/image-studio/download/route.ts
+index bb92c2d..3366915 100644
+--- a/src/app/api/image-studio/download/route.ts
++++ b/src/app/api/image-studio/download/route.ts
+@@ -5,6 +5,8 @@ import { getSession } from '@/lib/auth/session';
+ import { prisma } from '@/lib/prisma';
+ import { readStudioImage } from '@/lib/image-studio/media';
+ import { studioVisibleAssetWhere } from '@/lib/image-studio/protected-assets';
++import { STUDIO_BATCH_LIMITS, safeBatchFileName } from '@/lib/image-studio/batch-contract';
++import { studioBatchView } from '@/lib/image-studio/batches';
+ 
+ export const runtime = 'nodejs';
+ export const dynamic = 'force-dynamic';
+@@ -17,20 +19,39 @@ export async function GET(request: NextRequest) {
+   if (tasks.length !== ids.length) return NextResponse.json({ error: '部分图片不可下载或无权访问' }, { status: 403 });
+   try {
+     const visible = await studioVisibleAssetWhere(user);
+-    const files: Array<{ name: string; bytes: Buffer }> = [];
++    const batchId = request.nextUrl.searchParams.get('batchId');
++    const batch = batchId ? await studioBatchView(user.id, batchId) : null;
++    const files: Array<{ name: string; url: string; size: number; taskId: string }> = [];
+     for (const id of ids) {
+       const task = tasks.find(item => item.id === id)!;
+       const asset = await prisma.asset.findFirst({ where: { id: task.asset_id!, owner_id: user.id, status: 'active', AND: [visible] } });
+-      if (!asset) throw new Error('图片文件不可用');
+-      files.push({ name: `image-${task.id.slice(0, 10)}-${task.ordinal}.png`, bytes: await readStudioImage(asset.original_url) });
++      if (!asset || asset.mime_type !== 'image/png' || !asset.file_size || asset.file_size > 96 * 1024 * 1024) throw new Error('图片文件不可用');
++      const item = batch?.items?.find(item => item.taskId === task.id);
++      if (batch && !item) throw new Error('图片不属于本批');
++      files.push({ name: item ? safeBatchFileName(batch!.id, item.ordinal, item.sourceName) : `image-${task.id.slice(0, 10)}-${task.ordinal}.png`, url: asset.original_url, size: asset.file_size, taskId: task.id });
+     }
+-    if (files.length === 1) return new Response(new Uint8Array(files[0].bytes), { headers: {
++    if (files.reduce((sum, file) => sum + file.size, 0) > STUDIO_BATCH_LIMITS.zipBytes) return NextResponse.json({ error: '本包超过 128MB，请减少图片数量后保存' }, { status: 400 });
++    if (files.length === 1 && !batch) return new Response(new Uint8Array(await readStudioImage(files[0].url, request.signal)), { headers: {
+       'Content-Type': 'image/png', 'Content-Disposition': `attachment; filename="${files[0].name}"`, 'Cache-Control': 'private, no-store',
+     } });
+     const zip = new ZipFile();
+-    for (const file of files) zip.addBuffer(file.bytes, file.name);
++    const output = zip.outputStream as Readable;
++    const prefix = batch ? `batch-${batch.id.slice(0, 12)}/` : '';
++    // yazl opens the next entry lazily: at most one bounded image is buffered.
++    for (const file of files) zip.addReadStreamLazy(`${prefix}${file.name}`, { compress: false, size: file.size }, callback => {
++      void readStudioImage(file.url, request.signal).then(bytes => {
++        if (bytes.length !== file.size) throw new Error('图片大小发生变化');
++        callback(null, Readable.from([bytes]));
++      }).catch(error => callback(error, undefined as never));
++    });
++    if (batch) zip.addBuffer(Buffer.from(JSON.stringify({ batch: batch.id, createdAt: batch.createdAt, generated: batch.generated, total: batch.total, providedForDownload: files.length,
++      items: batch.items?.map(item => ({ ordinal: item.ordinal, source: item.sourceName, task: item.taskId, generation: item.status, file: files.find(file => file.taskId === item.taskId)?.name || null, save: files.some(file => file.taskId === item.taskId) ? 'provided-for-download-not-confirmed-on-device' : 'not-in-this-package' })) }, null, 2)), `${prefix}results.json`);
++    zip.on('error', error => output.destroy(error));
++    const abort = () => output.destroy(new Error('下载已取消'));
++    request.signal.addEventListener('abort', abort, { once: true });
++    output.once('close', () => request.signal.removeEventListener('abort', abort));
+     zip.end();
+-    return new Response(Readable.toWeb(zip.outputStream as Readable) as ReadableStream, { headers: {
++    return new Response(Readable.toWeb(output) as ReadableStream, { headers: {
+       'Content-Type': 'application/zip', 'Content-Disposition': 'attachment; filename="generated-images.zip"', 'Cache-Control': 'private, no-store',
+     } });
+   } catch { return NextResponse.json({ error: '图片包准备失败，请重试；已有图片不会丢失' }, { status: 503 }); }
+diff --git a/src/app/image-studio/batch-files.ts b/src/app/image-studio/batch-files.ts
+new file mode 100644
+index 0000000..7566526
+--- /dev/null
++++ b/src/app/image-studio/batch-files.ts
+@@ -0,0 +1,63 @@
++'use client';
++import { STUDIO_BATCH_LIMITS } from '@/lib/image-studio/batch-contract';
++export type BatchFileHandle = { kind: 'file'; name: string; getFile(): Promise<File>; createWritable(): Promise<{ write(data: Blob | string): Promise<void>; close(): Promise<void>; abort(): Promise<void> }> };
++export type BatchDirectoryHandle = { kind: 'directory'; name: string; values(): AsyncIterable<BatchFileHandle | BatchDirectoryHandle>; getDirectoryHandle(name: string, options?: { create: boolean }): Promise<BatchDirectoryHandle>; getFileHandle(name: string, options?: { create: boolean }): Promise<BatchFileHandle>; queryPermission(options: { mode: 'readwrite' }): Promise<string>; requestPermission(options: { mode: 'readwrite' }): Promise<string> };
++export type BatchLocalFile = { file: File; preview: string; assetId?: string };
++type DirectoryWindow = Window & { showDirectoryPicker?: (options: { mode: 'read' | 'readwrite' }) => Promise<BatchDirectoryHandle> };
++export const canSelectBatchDirectory = () => typeof window !== 'undefined' && typeof (window as DirectoryWindow).showDirectoryPicker === 'function';
++export async function selectBatchDirectory(mode: 'read' | 'readwrite') {
++  const picker = (window as DirectoryWindow).showDirectoryPicker;
++  if (!picker) throw new Error('当前浏览器不支持目录权限，请使用图片选择或 ZIP 下载');
++  return picker({ mode });
++}
++export async function readBatchDirectory(directory: BatchDirectoryHandle) {
++  const files: File[] = [], skipped: string[] = [];
++  let scanned = 0;
++  for await (const entry of directory.values()) {
++    if (++scanned > 200) { skipped.push('目录超过 200 个条目，未继续读取；请分成较小文件夹'); break; }
++    if (entry.kind === 'directory') { skipped.push(`${entry.name}：子文件夹不递归读取`); continue; }
++    if (files.length >= STUDIO_BATCH_LIMITS.files) { skipped.push('超过 100 个文件，未继续读取'); break; }
++    try { files.push(await entry.getFile()); } catch { skipped.push(`${entry.name}：无法读取`); }
++  }
++  return { files, skipped };
++}
++export async function previewBatchFiles(files: File[], initialSkipped: string[] = []) {
++  const accepted: BatchLocalFile[] = [], skipped = [...initialSkipped];
++  let totalBytes = 0;
++  for (const file of files.slice(0, STUDIO_BATCH_LIMITS.files)) {
++    const relative = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
++    if (relative && relative.split('/').length > 2) { skipped.push(`${file.name}：子文件夹不递归读取`); continue; }
++    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) { skipped.push(`${file.name}：不是 PNG、JPEG 或 WebP 图片`); continue; }
++    if (!file.size || file.size > STUDIO_BATCH_LIMITS.fileBytes || totalBytes + file.size > STUDIO_BATCH_LIMITS.totalBytes) { skipped.push(`${file.name}：超过单图 30MB 或本批 256MB 上限`); continue; }
++    try {
++      const bitmap = await createImageBitmap(file);
++      const valid = bitmap.width > 0 && bitmap.height > 0 && bitmap.width * bitmap.height <= 40_000_000;
++      bitmap.close();
++      if (!valid) throw new Error('图片尺寸过大');
++      accepted.push({ file, preview: URL.createObjectURL(file) }); totalBytes += file.size;
++    } catch { skipped.push(`${file.name}：坏图或图片尺寸超过 4000 万像素`); }
++  }
++  if (files.length > STUDIO_BATCH_LIMITS.files) skipped.push('超过 100 个文件，超出部分未读取');
++  return { accepted, skipped };
++}
++export async function newBatchOutputDirectory(parent: BatchDirectoryHandle, batchId: string) {
++  const name = `batch-${batchId.slice(0, 12)}-${crypto.randomUUID().slice(0, 8)}`;
++  try { await parent.getDirectoryHandle(name); throw new Error('结果子目录已存在，请重试'); }
++  catch (error) { if (!(error instanceof DOMException) || error.name !== 'NotFoundError') throw error; }
++  return parent.getDirectoryHandle(name, { create: true });
++}
++export async function writeUniqueBatchFile(directory: BatchDirectoryHandle, name: string, data: Blob | string) {
++  let target = name;
++  try {
++    await directory.getFileHandle(target);
++    const dot = name.lastIndexOf('.');
++    target = `${name.slice(0, dot)}-${crypto.randomUUID().slice(0, 8)}${name.slice(dot)}`;
++  } catch (error) { if (!(error instanceof DOMException) || error.name !== 'NotFoundError') throw error; }
++  const handle = await directory.getFileHandle(target, { create: true });
++  const writer = await handle.createWritable();
++  try { await writer.write(data); await writer.close(); } catch (error) { await writer.abort().catch(() => {}); throw error; }
++  const actual = await handle.getFile();
++  const expectedSize = typeof data === 'string' ? new Blob([data]).size : data.size;
++  if (actual.size !== expectedSize) throw new Error('保存大小未确认，请重试保存，不需要重新生成');
++  return target;
++}
+diff --git a/src/app/image-studio/batch-results.tsx b/src/app/image-studio/batch-results.tsx
+new file mode 100644
+index 0000000..b48153d
+--- /dev/null
++++ b/src/app/image-studio/batch-results.tsx
+@@ -0,0 +1,184 @@
++'use client';
++import { useCallback, useEffect, useRef, useState } from 'react';
++import { Download, FolderOpen, Pause, Play, RefreshCw, RotateCcw, Save, X } from 'lucide-react';
++import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
++import { RelativeTime } from '@/components/RelativeTime';
++import { useDialogDismiss } from '@/components/useDialogDismiss';
++import { watchGenerationCompletion } from '@/components/GenerationCompletion';
++import { batchStateLabel, safeBatchFileName, STUDIO_BATCH_LIMITS, type StudioBatchView } from '@/lib/image-studio/batch-contract';
++import { canSelectBatchDirectory, selectBatchDirectory, newBatchOutputDirectory, writeUniqueBatchFile, type BatchDirectoryHandle } from './batch-files';
++import styles from './batch.module.css';
++type Delivery = { saved: Record<number, string>; child: BatchDirectoryHandle | null; lock: boolean; directory: BatchDirectoryHandle | null };
++const deliveries = new Map<string, Delivery>();
++function deliveryFor(key: string, directory?: BatchDirectoryHandle | null) {
++  if (!deliveries.has(key)) {
++    if (deliveries.size >= 100) { const removable = Array.from(deliveries.entries()).find(([, value]) => !value.lock); if (removable) deliveries.delete(removable[0]); }
++    deliveries.set(key, { saved: {}, child: null, lock: false, directory: directory || null });
++  }
++  return deliveries.get(key)!;
++}
++
++export async function readBatchResponse(response: Response) {
++  const data = await response.json();
++  if (!response.ok) throw new Error(data.error || '批次操作失败，请重试');
++  return data;
++}
++export function BatchResults({ id, userId, outputDirectory, compact = false }: { id: string; userId: string; outputDirectory?: BatchDirectoryHandle | null; compact?: boolean }) {
++  const delivery = deliveryFor(`${userId}:${id}`, outputDirectory);
++  const [batch, setBatch] = useState<StudioBatchView | null>(null);
++  const [error, setError] = useState('');
++  const [busy, setBusy] = useState(false);
++  const [reading, setReading] = useState(false);
++  const [saveBusy, setSaveBusy] = useState(false);
++  const [saved, setSaved] = useState<Record<number, string>>(delivery.saved);
++  const [saveError, setSaveError] = useState('');
++  const [provided, setProvided] = useState<number[]>([]);
++  const [zipReady, setZipReady] = useState<{ url: string; name: string } | null>(null);
++  const [directory, setDirectory] = useState(delivery.directory);
++  const [selected, setSelected] = useState<number[]>([]);
++  const [retryBudget, setRetryBudget] = useState('');
++  const [visibleCount, setVisibleCount] = useState(24);
++  const [preview, setPreview] = useState<{ src: string; alt: string } | null>(null);
++  const [autoSave, setAutoSave] = useState(Boolean(outputDirectory));
++  const saveLock = useRef(false), actionLock = useRef(false), reader = useRef(false);
++  const childDirectory = useRef<BatchDirectoryHandle | null>(delivery.child);
++  const scope = useRef(`${userId}:${id}`); scope.current = `${userId}:${id}`;
++  useEffect(() => {
++    if (outputDirectory && outputDirectory !== delivery.directory && !delivery.lock) { delivery.directory = outputDirectory; delivery.child = null; delivery.saved = {}; childDirectory.current = null; setDirectory(outputDirectory); setSaved({}); }
++  }, [outputDirectory, delivery]);
++  useEffect(() => { scope.current = `${userId}:${id}`; return () => { scope.current = ''; }; }, [userId, id]);
++  const load = useCallback(async () => {
++    if (reader.current) return;
++    reader.current = true; setReading(true);
++    const expected = `${userId}:${id}`;
++    try {
++      const data = await readBatchResponse(await fetch(`/api/image-studio/batches?id=${encodeURIComponent(id)}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
++      if (scope.current === expected) { setBatch(data.batch); setSaved({ ...delivery.saved }); setError(''); }
++    } catch (error) { if (scope.current === expected) setError(error instanceof Error ? error.message : '批次读取失败'); }
++    finally { reader.current = false; if (scope.current === expected) setReading(false); }
++  }, [id, userId]);
++  useEffect(() => { void load(); const timer = setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 5000); return () => clearInterval(timer); }, [load]);
++  useEffect(() => () => { if (zipReady) URL.revokeObjectURL(zipReady.url); }, [zipReady]);
++  async function action(action: string) {
++    if (actionLock.current || !batch) return;
++    actionLock.current = true; setBusy(true); setError('');
++    try {
++      const data = await readBatchResponse(await fetch('/api/image-studio/batches', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action, ...(action === 'retry' ? { ordinals: selected, budget: retryBudget === '' ? null : Number(retryBudget) } : {}) }), signal: AbortSignal.timeout(20000) }));
++      if (action === 'retry') watchGenerationCompletion(userId, id, 'batch', batch.total, crypto.randomUUID());
++      setBatch(data.batch); setSelected([]);
++    } catch (error) { setError(error instanceof Error ? error.message : '操作结果待确认，请刷新原批次'); }
++    finally { actionLock.current = false; setBusy(false); }
++  }
++  async function chooseDirectory() {
++    try { const selected = await selectBatchDirectory('readwrite'); setDirectory(selected); childDirectory.current = null; delivery.directory = selected; delivery.child = null; delivery.saved = {}; setSaved({}); setSaveError(''); }
++    catch (error) { if (!(error instanceof DOMException && error.name === 'AbortError')) setSaveError(error instanceof Error ? error.message : '请重新选择保存位置'); }
++  }
++  async function saveImages(automatic = false) {
++    if (!batch || !directory || saveLock.current || delivery.lock) return;
++    saveLock.current = true; delivery.lock = true; setSaveBusy(true); setSaveError('');
++    const nextSaved = { ...delivery.saved }, expected = `${userId}:${id}`;
++    try {
++      if (await directory.queryPermission({ mode: 'readwrite' }) !== 'granted' && (automatic || await directory.requestPermission({ mode: 'readwrite' }) !== 'granted')) throw new Error('目录权限已失效，请重新选择保存位置');
++      if (!delivery.child) delivery.child = await newBatchOutputDirectory(directory, id);
++      childDirectory.current = delivery.child;
++      for (const item of batch.items || []) {
++        if (scope.current !== expected) throw new Error('已离开本批结果，后续本机保存已停止');
++        if (!item.image || nextSaved[item.ordinal]) continue;
++        const response = await fetch(item.image.url, { cache: 'no-store', signal: AbortSignal.timeout(120000) });
++        if (!response.ok) throw new Error(`第 ${item.ordinal} 张读取失败，请重试保存`);
++        const blob = await response.blob();
++        if (scope.current !== expected) throw new Error('已离开本批结果，后续本机保存已停止');
++        if (!blob.type.startsWith('image/png') || !blob.size || blob.size > 96 * 1024 * 1024) throw new Error(`第 ${item.ordinal} 张图片格式或大小未确认`);
++        const fileName = await writeUniqueBatchFile(childDirectory.current, safeBatchFileName(id, item.ordinal, item.sourceName), blob);
++        nextSaved[item.ordinal] = fileName; delivery.saved = { ...nextSaved }; setSaved({ ...nextSaved });
++      }
++      await writeUniqueBatchFile(childDirectory.current, 'results.json', JSON.stringify({ batch: id, createdAt: batch.createdAt, generated: batch.generated, total: batch.total, saved: Object.keys(nextSaved).length,
++        items: batch.items?.map(item => ({ ordinal: item.ordinal, source: item.sourceName, task: item.taskId, generation: item.status, file: nextSaved[item.ordinal] || null, save: nextSaved[item.ordinal] ? 'saved-and-size-checked' : 'not-saved' })) }, null, 2));
++    } catch (error) { setAutoSave(false); setSaveError(error instanceof Error ? error.message : '保存未完成，请重选目录或补保存；不会重新生成'); }
++    finally { saveLock.current = false; delivery.lock = false; setSaveBusy(false); }
++  }
++  useEffect(() => { if (autoSave && directory && !saveBusy && batch?.items?.some(item => item.image && !saved[item.ordinal])) void saveImages(true); }, [autoSave, directory, batch, saved, saveBusy]);
++  const packages: Array<NonNullable<StudioBatchView['items']>> = [];
++  for (const item of batch?.items || []) {
++    if (!item.image || !item.taskId) continue;
++    const previous = packages[packages.length - 1];
++    if (!previous || previous.length >= STUDIO_BATCH_LIMITS.zipImages || previous.reduce((sum, entry) => sum + (entry.image?.fileSize || 0), 0) + item.image.fileSize > STUDIO_BATCH_LIMITS.zipBytes) packages.push([item]);
++    else previous.push(item);
++  }
++  async function downloadPackage(index: number) {
++    if (saveLock.current) return;
++    saveLock.current = true; setSaveBusy(true); setSaveError('');
++    try {
++      const query = new URLSearchParams({ batchId: id }); packages[index].forEach(item => query.append('id', item.taskId!));
++      const response = await fetch(`/api/image-studio/download?${query}`, { signal: AbortSignal.timeout(120000) });
++      if (!response.ok) { await readBatchResponse(response); return; }
++      const blob = await response.blob();
++      if (!blob.size || blob.size > STUDIO_BATCH_LIMITS.zipBytes + 1024 * 1024) throw new Error('下载包过大或未完整准备，请减少图片后再试');
++      const name = `batch-${id.slice(0, 12)}-part-${index + 1}.zip`, url = URL.createObjectURL(blob);
++      setZipReady({ url, name });
++      const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; anchor.click();
++      setProvided(previous => Array.from(new Set([...previous, ...packages[index].map(item => item.ordinal)])));
++    } catch (error) { setSaveError(error instanceof Error ? error.message : '下载准备失败，已有图片仍保留'); }
++    finally { saveLock.current = false; setSaveBusy(false); }
++  }
++  const statusLabel = (state: string) => ({ pending: '等待派发', queued: '已受理，排队中', running: '生成中', succeeded: '已生成', failed: '生成失败', uncertain: '结果待确认', cancelled: '未派发，已取消' } as Record<string, string>)[state] || '状态待确认';
++  return <div className={styles.results} aria-label="批次结果">
++    <div className={styles.actions}><strong>{batch?.moduleName || '本批结果'}</strong><button type="button" title="刷新批次" aria-label="刷新批次" disabled={reading} onClick={() => void load()}><RefreshCw size={16} /></button></div>
++    {error && <p role="alert" className={styles.error}>{error}</p>}
++    {!batch && <p role="status">{reading ? '正在读取原批次' : '尚未读取批次'}，不会重新提交生成。</p>}
++    {batch && <>
++      <p className={styles.summary}>{batchStateLabel(batch.state)} · <RelativeTime value={batch.createdAt} /> · 已生成 {batch.generated}/{batch.total} · 已保存 {Object.keys(saved).length}/{batch.generated} · 失败 {batch.failed} · 待确认 {batch.uncertain}</p>
++      <p>素材已准备 {batch.prepared}/{batch.total} · 在途 {batch.active} · 未派发 {batch.pending} · 已派发预计 {batch.committedCredits} / 预算 {batch.budget} 点</p>
++      {batch.note && <p role="status">{batch.note}</p>}
++      <div className={styles.actions}>
++        {['preparing', 'blocked'].includes(batch.state) && batch.prepared < batch.total && <button type="button" disabled={busy} onClick={() => void action('prepare')}><RefreshCw size={16} />继续准备原批素材</button>}
++        {batch.state === 'ready' && <button type="button" disabled={busy} onClick={() => void action('pause')}><Pause size={16} />暂停未派发</button>}
++        {['paused', 'blocked'].includes(batch.state) && batch.prepared === batch.total && <button type="button" disabled={busy} onClick={() => void action('resume')}><Play size={16} />继续剩余</button>}
++        {!['cancelled', 'complete'].includes(batch.state) && <button type="button" disabled={busy} onClick={() => void action('cancel')}><X size={16} />取消未派发</button>}
++      </div>
++      {batch.uncertain > 0 && <p role="status">结果未知项不会自动重发。请刷新查询原任务，仍未知时联系管理员核对。</p>}
++      {batch.generated > 0 && <div className={styles.delivery}>
++        <div className={styles.actions}>{canSelectBatchDirectory() && <button type="button" disabled={saveBusy} onClick={() => void chooseDirectory()}><FolderOpen size={16} />{directory ? '重新选择保存位置' : '选择结果保存位置'}</button>}
++          {directory && <><label><input type="checkbox" checked={autoSave} onChange={event => setAutoSave(event.target.checked)} />本页打开时自动保存新结果</label><button type="button" className={styles.primary} disabled={saveBusy || Object.keys(saved).length === batch.generated} onClick={() => void saveImages()}><Save size={16} />{saveBusy ? '保存中' : '补保存已有图片'}</button></>}
++          {packages.map((items, index) => <button type="button" key={index} disabled={saveBusy} onClick={() => void downloadPackage(index)}><Download size={16} />下载第 {index + 1} 包 · {items.length} 张</button>)}</div>
++        {directory && <p>保存至所选位置的新批次子目录，不覆盖已有文件。关网页后不会继续写本机。</p>}
++        {provided.length > 0 && <p role="status">已提供 {provided.length} 张下载，尚未确认本机落盘。</p>}
++        {zipReady && <a href={zipReady.url} download={zipReady.name}>再次下载已准备的包</a>}
++        {saveError && <p role="alert" className={styles.error}>{saveError}，只补保存，不重新生成。</p>}
++      </div>}
++      {batch.failed > 0 && <div className={styles.retry}><span>选中失败项 {selected.length} 张，本次重试预计 {selected.length * batch.unitCredits} 点；每项最多重试 3 次</span><label>批次新预算上限<input type="number" min={batch.committedCredits + selected.length * batch.unitCredits} max={10000000} step={1} value={retryBudget} onChange={event => setRetryBudget(event.target.value)} /></label><button type="button" disabled={busy || !selected.length || retryBudget === ''} onClick={() => void action('retry')}><RotateCcw size={16} />重试选中失败项</button></div>}
++      <div className={compact ? styles.compactItems : styles.items}>{batch.items?.slice(0, visibleCount).map(item => <article className={styles.item} key={item.ordinal}>
++        {item.image ? <button type="button" aria-label={`预览第 ${item.ordinal} 张结果`} onClick={() => setPreview({ src: item.image!.url, alt: `第 ${item.ordinal} 张结果` })}><img src={item.image.thumbnail} alt={`第 ${item.ordinal} 张结果`} loading="lazy" /></button> : <div className={styles.placeholder}>暂无截图</div>}
++        <div><strong>{item.ordinal}. {item.sourceName}</strong><p>{statusLabel(item.status)}</p>{item.error && <p className={styles.error}>{item.error}</p>}{saved[item.ordinal] && <p>已保存并核对大小</p>}</div>
++        {item.status === 'failed' && <input type="checkbox" aria-label={`重试第 ${item.ordinal} 项`} checked={selected.includes(item.ordinal)} onChange={event => setSelected(previous => event.target.checked ? [...previous, item.ordinal] : previous.filter(value => value !== item.ordinal))} />}
++      </article>)}</div>
++      {batch.total > visibleCount && <button type="button" onClick={() => setVisibleCount(count => count + 24)}>加载更多 · 已显示 {visibleCount}/{batch.total}</button>}
++    </>}{preview && <ZoomableImagePreview src={preview.src} alt={preview.alt} fileName="batch-image.png" onClose={() => setPreview(null)} />}
++  </div>;
++}
++
++export function StudioBatchHistory({ userId }: { userId: string }) {
++  const [open, setOpen] = useState(false), [batches, setBatches] = useState<StudioBatchView[]>([]), [id, setId] = useState<string | null>(null), [error, setError] = useState(''), [busy, setBusy] = useState(false), [cursor, setCursor] = useState<string | null>(null);
++  const dialog = useRef<HTMLDialogElement>(null), lock = useRef(false);
++  async function load(more = false) {
++    if (lock.current) return;
++    lock.current = true; setBusy(true); setError('');
++    try {
++      const data = await readBatchResponse(await fetch(`/api/image-studio/batches${more && cursor ? `?cursor=${cursor}` : ''}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
++      setBatches(previous => more ? [...previous, ...data.batches] : data.batches); setCursor(data.nextCursor);
++    } catch (error) { setError(error instanceof Error ? error.message : '批次读取失败'); }
++    finally { lock.current = false; setBusy(false); }
++  }
++  useEffect(() => { if (open) { dialog.current?.showModal(); void load(); } }, [open]);
++  useDialogDismiss({ open, dialogRef: dialog, nativeDialog: true, onDismiss: () => setOpen(false) });
++  return <><button type="button" onClick={() => setOpen(true)}><FolderOpen size={16} />我的批次</button>{open && <dialog ref={dialog} className={styles.dialog} aria-labelledby="batch-history-title">
++    <header className={styles.actions}><h2 id="batch-history-title">我的批次</h2><button type="button" aria-label="关闭我的批次" onClick={() => setOpen(false)}><X size={18} /></button></header>
++    {id ? <><button type="button" onClick={() => setId(null)}>返回批次列表</button><BatchResults key={`${userId}:${id}`} id={id} userId={userId} /></> : <>
++      <div className={styles.actions}><button type="button" disabled={busy} onClick={() => void load()}><RefreshCw size={16} />刷新批次</button></div>
++      {error && <p role="alert" className={styles.error}>{error}</p>}
++      {!batches.length && !busy && !error && <p>暂无批次</p>}
++      {batches.map(batch => <article className={styles.historyItem} key={batch.id}><button type="button" onClick={() => setId(batch.id)}><strong>{batch.moduleName}</strong><span>{batchStateLabel(batch.state)} · 已生成 {batch.generated}/{batch.total}</span></button><RelativeTime value={batch.createdAt} /></article>)}
++      {cursor && <button type="button" disabled={busy} onClick={() => void load(true)}>加载更多</button>}
++    </>}
++  </dialog>}</>;
++}
+diff --git a/src/app/image-studio/batch.module.css b/src/app/image-studio/batch.module.css
+new file mode 100644
+index 0000000..41c7958
+--- /dev/null
++++ b/src/app/image-studio/batch.module.css
+@@ -0,0 +1,31 @@
++.controls, .results { display: grid; gap: 12px; min-width: 0; }
++.controls { padding: 12px 0; border-block: 1px solid var(--border, #d8dce1); }
++.actions, .fields, .retry { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
++.fields label, .retry label { display: grid; gap: 6px; font-size: 13px; }
++.fields input, .retry input { width: 130px; min-width: 0; }
++.primary { background: var(--primary, #177b60); color: #f7faf9; }
++.summary { font-weight: 600; }
++.error { color: var(--danger, #b33a44); overflow-wrap: anywhere; }
++.previews { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; max-height: 220px; overflow: auto; }
++.previews img { width: 100%; height: 64px; object-fit: contain; background: #f1f3f4; }
++.previews figure { margin: 0; min-width: 0; }
++.previews figcaption { font-size: 11px; overflow-wrap: anywhere; }
++.items, .compactItems { display: grid; gap: 8px; }
++.item { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; gap: 12px; align-items: center; border-bottom: 1px solid var(--border, #d8dce1); padding: 8px 0; min-width: 0; }
++.item img, .placeholder { width: 88px; height: 72px; object-fit: contain; background: #f1f3f4; }
++.placeholder { display: grid; place-items: center; font-size: 12px; color: #68717a; }
++.item strong { overflow-wrap: anywhere; }
++.item > button { padding: 0; border: 0; width: 88px; height: 72px; cursor: zoom-in; }
++.item input[type='checkbox'], .delivery input[type='checkbox'] { width: 16px; height: 16px; }
++.item p, .results p { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
++.delivery { display: grid; gap: 8px; padding: 12px 0; border-block: 1px solid var(--border, #d8dce1); }
++.dialog { width: min(900px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 20px; border: 1px solid var(--border-color, #465057); border-radius: 8px; background: var(--bg-panel, #171c1f); color: var(--text-primary, #eef0f2); }
++.dialog button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 6px 9px; border: 1px solid var(--border-color, #465057); border-radius: 6px; background: var(--bg-input, #151a1d); color: inherit; cursor: pointer; }
++.dialog button:disabled { opacity: .5; cursor: default; }
++.dialog .primary { background: #79daca; color: #102721; }
++.historyItem > button { display: flex; flex-direction: column; align-items: flex-start; width: 100%; }
++.dialog::backdrop { background: rgb(25 32 37 / 45%); }
++.dialog h2 { font-size: 20px; }
++.historyItem { display: flex; flex-direction: column; align-items: flex-start; width: 100%; gap: 8px; padding: 12px; margin-top: 8px; text-align: left; }
++.historyItem span { font-size: 13px; }
++@media (max-width: 640px) { .item { grid-template-columns: 72px minmax(0, 1fr) auto; gap: 8px; } .item img, .placeholder, .item > button { width: 72px; height: 64px; } .dialog { padding: 12px; } .actions button { min-height: 40px; } }
+diff --git a/src/app/image-studio/studio.tsx b/src/app/image-studio/studio.tsx
+index 31c611a..a0c80bc 100644
+--- a/src/app/image-studio/studio.tsx
++++ b/src/app/image-studio/studio.tsx
+@@ -42,6 +42,10 @@ import { StudioStyleGroups, type StudioStyleSummary } from './style-groups-view'
+ import type { SettingsValue } from './settings-controller';
+ import { normalizeStudioRatio, resolveStudioAspectRatio } from '@/lib/image-studio/ratios';
+ import { studioFourToOneIssue } from '@/lib/image-generation/resolution';
++import { useStudioBatch } from './use-studio-batch';
++import { BatchResults } from './batch-results';
++import { GenerationCompletionSettings, watchGenerationCompletion } from '@/components/GenerationCompletion';
++import { describedEvolutionDirection, type EvolutionCapability, type EvolutionInput } from '@/lib/image-studio/evolution';
+ import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
+ import type { StudioReferencePolicy } from '@/lib/image-studio/reference-policy';
+ import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
+@@ -606,6 +610,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+   const [recoverableDraft, setRecoverableDraft] = useState<Record<string, any> | null>(null);
+   const [savedAsSignature, setSavedAsSignature] = useState('');
+   const [prompt, setPrompt] = useState(module.prompt);
++  const evolution = (module as StudioModule & { evolution?: EvolutionCapability | null }).evolution || null;
++  const [evolutionInput, setEvolutionInput] = useState<EvolutionInput>({ direction: evolution?.defaultDirection || 'increase', manual: false });
++  const bodyDirection = describedEvolutionDirection(prompt);
++  const evolutionConflict = evolution && evolutionInput.manual && bodyDirection && bodyDirection !== evolutionInput.direction ? '正文方向与手选方向冲突，请调整正文或方向' : '';
++  const [resultView, setResultView] = useState<'images' | 'batch'>('images');
+   const [count, setCount] = useState(module.count);
+   const [referenceLimit, setReferenceLimit] = useState(module.referencePolicy?.primaryMax ?? Math.max(1, Math.min(MAX_REFERENCE_IMAGES, module.referenceLimit || DEFAULT_STUDIO_PRIMARY_MAX)));
+   const [primaryMin, setPrimaryMin] = useState(module.referencePolicy?.primaryMin ?? 0);
+@@ -615,6 +624,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+   const [useFixedReferences, setUseFixedReferences] = useState(module.referencePolicy?.useFixedReferences ?? true);
+   const [aspectRatio, setAspectRatio] = useState(module.aspectRatio || 'auto');
+   const [moduleModel, setModuleModel] = useState(module.model);
++  const batch = useStudioBatch({ userId, moduleId: module.id, unitCredits: settings ? settings.prices?.[moduleModel] ?? null : module.prices[moduleModel] ?? null });
+   const [resolution, setResolution] = useState<ImageResolution>(normalizeImageResolution(module.model, module.resolution || defaultImageResolution(module.model)));
+   const [quality, setQuality] = useState(module.quality || defaultImageStudioQuality(module.model));
+   const [groupName, setGroupName] = useState(module.groupName || '未分组');
+@@ -728,7 +738,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+   const moduleSaveSnapshot = { ...moduleDraft };
+   const moduleDirty = JSON.stringify(moduleSaveSnapshot) !== moduleSaved;
+   const baseline = moduleSaved ? JSON.parse(moduleSaved) as typeof moduleDraft : moduleDraft;
+-  const generationInputs = { prompt, count, referenceLimit, aspectRatio, resolution: normalizeImageResolution(moduleModel, resolution), referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: normalizeImageStudioQuality(moduleModel, quality), referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), styleGroupIds: moduleDraft.styleGroupIds };
++  const generationInputs = { evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, aspectRatio, resolution: normalizeImageResolution(moduleModel, resolution), referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: normalizeImageStudioQuality(moduleModel, quality), referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), styleGroupIds: moduleDraft.styleGroupIds };
+   const generationDraft = JSON.stringify(generationInputs);
+   const contextVersion = useModuleContextVersion({ moduleId: module.id, raw: moduleContext, taskId: reproduceSourceTaskId,
+     editable: contextEditable, enabled: !hidden && draftLoaded && !draftRestoring, composing: contextComposing });
+@@ -756,7 +766,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+       setAppliedSource(previous => previous ? { ...previous, modified: true } : null);
+     }
+   }, [appliedSource, restorationSignature]);
+-  const defaultGenerationDraft = JSON.stringify({ prompt: baseline.prompt, count: baseline.count, referenceLimit: baseline.referenceLimit, aspectRatio: baseline.aspectRatio, resolution: normalizeImageResolution(baseline.model, baseline.resolution), referenceIds: baseline.referenceIds, model: baseline.model, quality: normalizeImageStudioQuality(baseline.model, baseline.quality), referencePolicy: baseline.referencePolicy, context: savedModuleContext, fixedReferences: fixedReferencePayload(savedFixedReferences), styleGroupIds: baseline.styleGroupIds });
++  const defaultGenerationDraft = JSON.stringify({ evolution: evolution ? { direction: evolution.defaultDirection, manual: false } : undefined, prompt: baseline.prompt, count: baseline.count, referenceLimit: baseline.referenceLimit, aspectRatio: baseline.aspectRatio, resolution: normalizeImageResolution(baseline.model, baseline.resolution), referenceIds: baseline.referenceIds, model: baseline.model, quality: normalizeImageStudioQuality(baseline.model, baseline.quality), referencePolicy: baseline.referencePolicy, context: savedModuleContext, fixedReferences: fixedReferencePayload(savedFixedReferences), styleGroupIds: baseline.styleGroupIds });
+   const generationChanged = generationDraft !== defaultGenerationDraft || Boolean(reproduceSourceTaskId);
+   const automaticSnapshot = JSON.stringify({ ...baseline, name, groupName, bannerAssetId: banner?.id || null });
+   const automaticDirty = automaticSnapshot !== moduleSaved;
+@@ -857,6 +867,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+     try { const saved = JSON.parse(localStorage.getItem(draftKey) || 'null'); if (saved) setRecoverableDraft(saved); } catch {}
+     blockedDraftSignature.current = null;
+     setPrompt(baseline.prompt); setCount(baseline.count); setReferenceLimit(baseline.referenceLimit); setAspectRatio(baseline.aspectRatio); setModuleModel(baseline.model);
++    setEvolutionInput({ direction: evolution?.defaultDirection || 'increase', manual: false });
+     setQuality(baseline.quality); setResolution(baseline.resolution);
+     setImages(module.images.filter(image => baseline.referencePolicy.primaryIds.includes(image.id || '')));
+     setAuxiliaryImages(module.images.filter(image => !baseline.referencePolicy.primaryIds.includes(image.id || '')));
+@@ -978,6 +989,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+         }
+         if (sequence !== draftRestoreSequence.current) return false;
+         if (typeof saved.prompt === 'string') setPrompt(saved.prompt.slice(0, 20000));
++        if (evolution && saved.evolution && ['increase', 'decrease'].includes(saved.evolution.direction) && typeof saved.evolution.manual === 'boolean') setEvolutionInput({ direction: saved.evolution.direction, manual: saved.evolution.manual });
++        if (saved.resultView === 'images' || saved.resultView === 'batch') setResultView(saved.resultView);
+         if (Number.isInteger(saved.count) && saved.count >= 1 && saved.count <= 8) setCount(saved.count);
+         if (Number.isInteger(saved.referenceLimit) && saved.referenceLimit >= 1 && saved.referenceLimit <= MAX_REFERENCE_IMAGES) setReferenceLimit(saved.referenceLimit);
+         if (typeof saved.model === 'string' && models.includes(saved.model as typeof models[number])) setModuleModel(saved.model);
+@@ -1036,13 +1049,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+   }, [draftKey, pendingKey, module.saved, module.revision, module.model, isAdmin]);
+   useEffect(() => {
+     if (!draftLoaded || draftRestoring || (recoverableDraft && blockedDraftSignature.current === generationDraft)) return;
+-    try { localStorage.setItem(draftKey, JSON.stringify({ schemaVersion: 2, prompt, count, referenceLimit, referencePolicy, aspectRatio, resolution,
++    try { localStorage.setItem(draftKey, JSON.stringify({ schemaVersion: 2, resultView, evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, referencePolicy, aspectRatio, resolution,
+       images: [...images, ...auxiliaryImages].map(image => ({ id: image.id })), context: contextEditable ? moduleContext : undefined,
+       fixedReferences: fixedEditable ? fixedReferences.map(image => ({ id: image.id, note: image.note })) : undefined,
+       styleGroupIds: styleGroups.map(group => group.id), model: moduleModel, quality, reproduceSourceTaskId: reproduceSourceTaskId || null, revision: moduleRevision }));
+       setPersistedDraftSignature(generationDraft); }
+     catch { setError('临时草稿未能保存到浏览器，请勿刷新；当前内容仍可生成或另存为。'); }
+-  }, [draftLoaded, draftRestoring, recoverableDraft, draftKey, generationDraft, reproduceSourceTaskId, moduleRevision, contextEditable, fixedEditable]);
++  }, [draftLoaded, draftRestoring, recoverableDraft, draftKey, generationDraft, reproduceSourceTaskId, moduleRevision, contextEditable, fixedEditable, resultView]);
+ 
+   useEffect(() => () => { draftRestoreSequence.current += 1; }, []);
+ 
+@@ -1174,19 +1187,32 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+     finally { submitLock.current = false; setSubmitting(false); setQueryingSubmission(false); }
+   }
+ 
++  function generationPayload(retryTask?: StudioTask) {
++    const historicalEvolution = (retryTask?.snapshot as (StudioSnapshot & { evolution?: EvolutionInput }) | undefined)?.evolution;
++    return { requestId: crypto.randomUUID(), prompt: retryTask?.prompt ?? prompt,
++      moduleId: module.id, model: retryTask?.model || moduleModel, quality: retryTask?.quality || quality, reproduceFromTaskId: reproduceSourceTaskId || undefined, count: retryTask ? 1 : count, aspectRatio: retryTask?.aspectRatio || aspectRatio, resolution: retryTask?.snapshot?.resolution || resolution, revision: settings!.revision,
++      referenceIds: retryTask?.referenceIds || moduleDraft.referenceIds,
++      ...(historicalEvolution || evolution ? { evolution: historicalEvolution || evolutionInput } : {}),
++      draft: { moduleContext: contextEditable ? moduleContext : undefined, globalContext: isAdmin ? effectiveGlobalContext : undefined,
++        fixedReferences: !reproduceSourceTaskId && fixedEditable ? fixedReferencePayload(fixedReferences) : undefined,
++        styleGroupIds: reproduceSourceTaskId ? undefined : styleGroups.map(group => group.id), referencePolicy } };
++  }
+   async function submit(retryTask?: StudioTask) {
++    if (batch.mode === 'batch' && batch.pending && !retryTask) { await batch.query(); return; }
+     if (pendingSubmission) { await querySubmission(); return; }
+     if (!settings || submitLock.current || moduleDeleteLock.current || quickPresetLock.current || presetSaveLock.current || ratioEditing || draftRestoring) return;
++    if (evolutionConflict) { setError(evolutionConflict); return; }
++    if (batch.mode === 'batch' && !retryTask) {
++      submitLock.current = true; setSubmitting(true);
++      try { await batch.submit(generationPayload()); setResultView('batch'); }
++      finally { submitLock.current = false; setSubmitting(false); }
++      return;
++    }
+     if (!pendingSubmission && (images.length < primaryMin || images.length > referenceLimit || auxiliaryCount > auxiliaryLimit || styleImageCount > styleLimit || ordinaryReferenceCount > referenceImageLimit || effectiveReferenceCount > MAX_REFERENCE_IMAGES
+       || activeFixedReferences.some(item => item.available === false) || activeStyles.some(group => group.unavailable))) {
+       setError('请检查主图数量、辅助参考数量和图片可用性。'); return;
+     }
+-    const payload = pendingSubmission || { requestId: crypto.randomUUID(), prompt: retryTask?.prompt ?? prompt,
+-      moduleId: module.id, model: retryTask?.model || moduleModel, quality: retryTask?.quality || quality, reproduceFromTaskId: reproduceSourceTaskId || undefined, count: retryTask ? 1 : count, aspectRatio: retryTask?.aspectRatio || aspectRatio, resolution: retryTask?.snapshot?.resolution || resolution, revision: settings.revision,
+-      referenceIds: retryTask?.referenceIds || moduleDraft.referenceIds,
+-      draft: { moduleContext: contextEditable ? moduleContext : undefined, globalContext: isAdmin ? effectiveGlobalContext : undefined,
+-        fixedReferences: !reproduceSourceTaskId && fixedEditable ? fixedReferencePayload(fixedReferences) : undefined,
+-        styleGroupIds: reproduceSourceTaskId ? undefined : styleGroups.map(group => group.id), referencePolicy } };
++    const payload = generationPayload(retryTask);
+     const ratioIssue = studioFourToOneIssue(payload.aspectRatio, settings.modelFourToOne?.[payload.model] === true);
+     if (ratioIssue) { setError(ratioIssue); return; }
+     try {
+@@ -1202,6 +1228,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+       else {
+         const value = await readResponse(response);
+         if (typeof value.batchId !== 'string' || !/^[a-f0-9]{64}$/.test(value.batchId)) throw new Error('提交结果待确认，请查询这次提交。');
++        watchGenerationCompletion(userId, payload.requestId, 'images', payload.count);
+         setPendingSubmission(null); try { localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch {} await loadTasks();
+       }
+     } catch (e) {
+@@ -1236,6 +1263,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+     const nextResolution = normalizeImageResolution(nextModel, snapshot.resolution || defaultImageResolution(nextModel));
+     const nextQuality = normalizeImageStudioQuality(nextModel, typeof snapshot.quality === 'string' ? snapshot.quality : quality);
+     setPrompt(snapshot.prompt || '');
++    const restoredEvolution = (snapshot as StudioSnapshot & { evolution?: EvolutionInput }).evolution;
++    const nextEvolution = evolution ? restoredEvolution && ['increase', 'decrease'].includes(restoredEvolution.direction) ? { direction: restoredEvolution.direction, manual: restoredEvolution.manual === true } : { direction: evolution.defaultDirection, manual: false } : undefined;
++    if (nextEvolution) setEvolutionInput(nextEvolution);
+     setCount(nextCount); setAspectRatio(nextRatio); setResolution(nextResolution);
+     const transient = snapshot.transientReferenceImages || snapshot.referenceImages;
+     const primaryIds = snapshot.referencePolicy?.primaryIds || transient.flatMap(image => image.id ? [image.id] : []);
+@@ -1262,7 +1292,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+       auxiliaryMax: snapshot.referencePolicy?.auxiliaryMax ?? MAX_REFERENCE_IMAGES, styleMax: snapshot.referencePolicy?.styleMax ?? MAX_REFERENCE_IMAGES,
+       referenceMax: snapshot.referencePolicy?.referenceMax ?? MAX_REFERENCE_IMAGES, useFixedReferences: snapshot.referencePolicy?.useFixedReferences ?? true };
+     const nextImages = [...transient.filter(image => image && primaryIds.includes(image.id || '')), ...transient.filter(image => image && !primaryIds.includes(image.id || ''))];
+-    const signature = JSON.stringify({ inputs: { ...generationInputs, prompt: snapshot.prompt || '', count: nextCount, referenceLimit: nextPolicy.primaryMax,
++    const signature = JSON.stringify({ inputs: { ...generationInputs, evolution: nextEvolution, prompt: snapshot.prompt || '', count: nextCount, referenceLimit: nextPolicy.primaryMax,
+       aspectRatio: nextRatio, resolution: nextResolution, referenceIds: nextImages.map(image => image.id), model: nextModel, quality: nextQuality, referencePolicy: nextPolicy, context: nextContext },
+       source: snapshot.sourceAvailable ? task.id : null, references: snapshot.fixedReferenceImages || [],
+       fixedCount: snapshot.fixedReferenceCount ?? snapshot.fixedReferenceImages?.length ?? 0, styles: snapshot.styleGroups || [], globalContext: nextGlobalContext });
+@@ -1331,14 +1361,17 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+     setCopyFeedback({ id: task.id, text: copied ? '已复制' : '复制失败，请重试' });
+     window.setTimeout(() => setCopyFeedback(current => current?.id === task.id ? null : current), copied ? 1800 : 2600);
+   }
+-  const moduleUnitCredits = settings?.prices?.[moduleModel] ?? module.prices[moduleModel] ?? null;
++  const moduleUnitCredits = settings ? settings.prices?.[moduleModel] ?? null : module.prices[moduleModel] ?? null;
+   const providerCostUsd = IMAGE_STUDIO_MODEL_COST_USD[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_COST_USD];
+   const selectedProviderReady = settings?.modelReady?.[moduleModel] ?? settings?.providerReady;
+   const selectedFourToOne = settings?.modelFourToOne?.[moduleModel] === true;
+   const ratioIssue = studioFourToOneIssue(aspectRatio, selectedFourToOne);
+   const hasContext = reproduceSourceTaskId ? reproductionContextConfigured : Boolean((isAdmin ? effectiveGlobalContext?.trim() : settings?.contextConfigured) || (contextEditable ? moduleContext.trim() : moduleContextConfigured));
+   const ready = Boolean(selectedProviderReady && moduleUnitCredits !== null && settings && !settingsError);
+-  const generationFeedback: StudioFeedback | null = queryingSubmission ? { message: '正在查询这次提交，不会再次生成。', tone: 'progress' }
++  const generationFeedback: StudioFeedback | null = batch.mode === 'batch' && batch.pending ? batch.busy ? { message: '正在核对原批次，不会重新提交生成', tone: 'progress' } : null
++    : evolutionConflict ? { message: evolutionConflict, tone: 'warning' }
++    : batch.mode === 'batch' && batch.blocker ? { message: batch.blocker, tone: 'info' }
++    : queryingSubmission ? { message: '正在查询这次提交，不会再次生成。', tone: 'progress' }
+     : pendingSubmission ? submitting ? { message: '正在处理当前请求，请稍候再查询。', tone: 'progress' }
+       : moduleDeleting ? { message: '正在删除模板，请等待操作结束后再查询。', tone: 'progress' } : null
+     : sourceSharingBlocked ? { message: '该模板已停止共享，请换一个可用模板。', tone: 'error' }
+@@ -1354,14 +1387,15 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+     : moduleUnitCredits === null ? { message: '当前模型尚未设置点数，请换一个模型或联系管理员配置。', tone: 'warning' }
+     : activeFixedReferences.some(item => item.available === false) ? { message: '固定参考图已不可用，请关闭、移除或更换。', tone: 'error' }
+     : activeStyles.some(group => group.unavailable) ? { message: '已选风格组不可用，请移除或重新选择。', tone: 'error' }
+-    : images.length < primaryMin ? { message: `这个模板至少需要 ${primaryMin} 张主图，当前 ${images.length} 张。`, tone: 'warning' }
++    : batch.mode === 'batch' && batch.source === 'folder' && primaryMin > 1 ? { message: `这个模板至少需要 ${primaryMin} 张主图，素材逐图每项只有 1 张；请选择当前正文模式。`, tone: 'warning' }
++    : images.length < primaryMin && !(batch.mode === 'batch' && batch.source === 'folder') ? { message: `这个模板至少需要 ${primaryMin} 张主图，当前 ${images.length} 张。`, tone: 'warning' }
+     : images.length > referenceLimit ? { message: `主图最多 ${referenceLimit} 张，请移除多余主图或调整上限。`, tone: 'warning' }
+     : styleImageCount > styleLimit ? { message: `风格组最多传入 ${styleLimit} 张图片，当前 ${styleImageCount} 张。请调整上限或移除风格组。`, tone: 'warning' }
+     : ordinaryReferenceCount > referenceImageLimit ? { message: `参考图最多 ${referenceImageLimit} 张，当前 ${ordinaryReferenceCount} 张（含启用的模板固定图）。`, tone: 'warning' }
+     : auxiliaryCount > auxiliaryLimit ? { message: `辅助参考最多 ${auxiliaryLimit} 张，当前 ${auxiliaryCount} 张（包含模板图和风格组）。`, tone: 'warning' }
+     : effectiveReferenceCount > MAX_REFERENCE_IMAGES ? { message: `当前通道最多传入 ${MAX_REFERENCE_IMAGES} 张图片，已选主图 ${images.length} 张、辅助参考 ${auxiliaryCount} 张，请减少辅助参考。`, tone: 'warning' }
+-    : !prompt.trim() && !effectiveReferenceCount && !hasContext ? { message: '请填写画面要求，或添加主图。', tone: 'info' }
+-    : !Number.isInteger(count) || count < 1 || count > 8 ? { message: '生成张数应为1到8的整数，请修改张数。', tone: 'warning' }
++    : !prompt.trim() && !effectiveReferenceCount && !hasContext && !(batch.mode === 'batch' && batch.source === 'folder') ? { message: '请填写画面要求，或添加主图。', tone: 'info' }
++    : batch.mode === 'single' && (!Number.isInteger(count) || count < 1 || count > 8) ? { message: '生成张数应为1到8的整数，请修改张数。', tone: 'warning' }
+     : !ready ? { message: '生成条件尚未就绪，请检查模型和上下文设置。', tone: 'warning' } : null;
+   const previewableTasks = tasks.filter(task => Boolean(task.asset?.id));
+   function openTaskPreview(task: StudioTask) { setPreview(studioTaskPreviewState(task)); }
+@@ -1569,8 +1603,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+           void addImages(Array.from(event.target.files || [])); event.target.value = '';
+         }} />
+         <div className={styles.generationToolbar}>
+-          <button type="button" className={`${styles.generate} sd2-loading-surface`} data-busy={submitting || queryingSubmission} disabled={Boolean(generationFeedback)} title={generationFeedback?.message} aria-describedby={generationFeedback ? `generation-blocker-${module.id}` : undefined} onClick={() => void (pendingSubmission ? querySubmission() : submit())}>{queryingSubmission ? '正在查询' : submitting ? '正在提交' : pendingSubmission ? '查询这次提交' : '生成图片'}</button>
+-          <p className={styles.muted}>{moduleUnitCredits == null ? '当前模型积分单价尚未设置' : `每张 ${moduleUnitCredits} 积分 · 本次 ${moduleUnitCredits * (Number.isInteger(count) ? count : 0)} 积分`} · 上游成本 {providerCostUsd == null ? '待配置' : `$${providerCostUsd.toFixed(3)} / 张`}</p>
++          <GenerationCompletionSettings ownerId={userId} />
++          <div className={styles.counts} role="group" aria-label="生成方式"><button type="button" aria-pressed={batch.mode === 'single'} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onClick={() => batch.setMode('single')}>单次</button><button type="button" aria-pressed={batch.mode === 'batch'} disabled={submitting || Boolean(pendingSubmission)} onClick={() => batch.setMode('batch')}>批量</button></div>
++          {batch.mode === 'batch' && batch.controls}
++          <button type="button" className={`${styles.generate} sd2-loading-surface`} data-busy={submitting || queryingSubmission || batch.busy} disabled={Boolean(generationFeedback)} title={generationFeedback?.message} aria-describedby={generationFeedback ? `generation-blocker-${module.id}` : undefined} onClick={() => void (pendingSubmission ? querySubmission() : submit())}>{queryingSubmission ? '正在查询' : submitting ? '正在提交' : pendingSubmission || batch.pending ? '查询这次提交' : batch.mode === 'batch' ? '开始批量生成' : '生成图片'}</button>
++          {batch.mode === 'single' && <p className={styles.muted}>{moduleUnitCredits == null ? '当前模型积分单价尚未设置' : `每张 ${moduleUnitCredits} 积分 · 本次 ${moduleUnitCredits * (Number.isInteger(count) ? count : 0)} 积分`} · 上游成本 {providerCostUsd == null ? '待配置' : `$${providerCostUsd.toFixed(3)} / 张`}</p>}
+           {generationFeedback && <p id={`generation-blocker-${module.id}`} role="status" className={styles.generationFeedback} data-tone={generationFeedback.tone}>{generationFeedback.message}</p>}
+           {settingsError && <button type="button" onClick={async () => { if (!dirty || (await confirm('重新读取会替换未保存的通用设置，是否继续？', { title: '重新读取', confirmLabel: '放弃修改并读取' }))) onReloadSettings(true); }}><RefreshCw size={16} />重新读取设置</button>}
+           {sourceSharingBlocked && <p role="alert" className={styles.error}>该模板已停止共享，不能新建任务；已提交任务和历史结果仍保留。</p>}
+@@ -1579,13 +1616,15 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+           }}>放弃核对</button></p>}
+           {!ready && !settingsError && <p className={styles.muted}>{!selectedProviderReady ? '图片服务尚未就绪' : '请管理员完成模型积分设置'}</p>}
+         </div>
+-        <label className={styles.label} htmlFor={`studio-prompt-${module.id}`}>补充 <span>有图片时选填</span></label>
+-        <textarea id={`studio-prompt-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={prompt} maxLength={20000} onChange={event => setPrompt(event.target.value)} placeholder="补充想生成的画面" rows={9} />
+-        <label className={styles.label} htmlFor={`studio-count-${module.id}`}>生成张数</label>
++        {evolution && <div className={styles.counts} role="group" aria-label="演化方向">{(['increase', 'decrease'] as const).map(direction => <button type="button" key={direction} aria-pressed={(evolutionInput.manual ? evolutionInput.direction : bodyDirection || evolution.defaultDirection) === direction} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onClick={() => setEvolutionInput({ direction, manual: true })}>{direction === 'increase' ? '递进' : '递减'}</button>)}{evolutionInput.manual && <button type="button" title="按正文和模板默认方向" onClick={() => setEvolutionInput({ direction: evolution.defaultDirection, manual: false })}><RotateCcw size={14} /></button>}</div>}
++        <label className={styles.label} htmlFor={`studio-prompt-${module.id}`}>{evolution ? '演化内容' : '补充'} {!evolution && <span>有图片时选填</span>}</label>
++        <textarea id={`studio-prompt-${module.id}`} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} value={prompt} maxLength={20000} onChange={event => setPrompt(event.target.value)} placeholder={evolution ? '什么发生变化' : '补充想生成的画面'} rows={9} />
++        {evolutionConflict && <p role="alert" className={styles.error}>{evolutionConflict}</p>}
++        {batch.mode === 'single' && <><label className={styles.label} htmlFor={`studio-count-${module.id}`}>生成张数</label>
+         <div className={styles.counts}>
+           {[1, 2, 4, 8].map(n => <button type="button" disabled={submitting || Boolean(pendingSubmission)} key={n} aria-pressed={count === n} onClick={() => setCount(n)}>{n}</button>)}
+           <input id={`studio-count-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} type="number" min={1} max={8} step={1} value={count} onChange={event => setCount(Number(event.target.value))} />
+-        </div>
++        </div></>}
+         <RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={effectiveReferences.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} fourToOneSupported={selectedFourToOne} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
+         <div className={styles.modelQualityRow}>
+           <label className={styles.compactField} htmlFor={`studio-model-${module.id}`}><strong>生成模型</strong>
+@@ -1625,9 +1664,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+       </section>
+       <section className={styles.outputs} aria-label="生成结果">
+         <header className={styles.header}><h2>生成结果</h2><div className={styles.counts}>
++          <button type="button" aria-pressed={resultView === 'images'} onClick={() => setResultView('images')}>图片</button><button type="button" aria-pressed={resultView === 'batch'} onClick={() => setResultView('batch')}>批次</button>
+           {!downloadMode ? <button type="button" disabled={downloadBusy} onClick={() => { setSelected([]); setDownloadMode(true); }}><Download size={16} />下载</button> : <div className={styles.downloadModeBar}><span>已选 {selected.length} 张</span><button type="button" disabled={!selected.length || downloadBusy} onClick={() => void download(selected)}>{downloadBusy ? '准备中' : '确认下载'}</button><button type="button" disabled={downloadBusy} onClick={() => { setSelected([]); setDownloadMode(false); }}>取消</button></div>}
+           <button type="button" title="刷新记录" aria-label="刷新记录" className={templateWorkbench ? 'sd2-loading-surface' : undefined} data-busy={templateWorkbench && taskReadAction === 'refresh'} disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks()}><RefreshCw size={16} /></button>
+         </div></header>
++        {resultView === 'batch' ? batch.inlineResults ? <p>本批结果已在生成栏展开。</p> : batch.id ? <BatchResults key={`${userId}:${batch.id}`} id={batch.id} userId={userId} outputDirectory={batch.outputDirectory} /> : <p>暂无选中批次，可开始批量生成或从顶部“我的批次”找回。</p> : <>
+         {tasksError && <p role="alert" className={styles.error}>{tasksError}{templateWorkbench && <button type="button" disabled={taskReadAction !== 'idle'} onClick={() => void loadTasks(taskRetryCursor)}>重试读取记录</button>}</p>}
+         {downloadReady && <p role="status">文件已准备好。<a href={downloadReady.url} download={downloadReady.name}>再次保存</a></p>}
+         {loadingTasks && (tasks.length ? <LoadingStatus>正在更新生成记录</LoadingStatus> : <LoadingSkeleton label="正在读取生成记录" grid />)}
+@@ -1683,6 +1724,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+         </article>)}</div>
+         {templateWorkbench && taskReadAction === 'more' && <LoadingStatus>正在读取更多记录</LoadingStatus>}
+         {nextCursor && <button type="button" className={templateWorkbench ? 'sd2-loading-surface' : undefined} data-busy={templateWorkbench && taskReadAction === 'more'} disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks(nextCursor)}>加载更多</button>}
++        </>}
+       </section>
+     </div>
+     {assetPickerOpen && <UploadedImagePicker open imageOnly target="image-studio"
+@@ -1700,7 +1742,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+         if(primary?images.length>=currentReferenceCap:auxiliaryImages.length>=currentAuxiliaryCap)throw new Error('参考区已满，没有替换已有图片');
+         const nextImages=primary?[...images,...picked]:images, nextAuxiliary=primary?auxiliaryImages:[...auxiliaryImages,...picked];
+         const nextPolicy={...referencePolicy,primaryIds:nextImages.flatMap(i=>i.id?[i.id]:[])};
+-        const payload={schemaVersion:2,prompt,count,referenceLimit,referencePolicy:nextPolicy,aspectRatio,resolution,images:[...nextImages,...nextAuxiliary].map(i=>({id:i.id})),context:contextEditable?moduleContext:undefined,fixedReferences:fixedEditable?fixedReferences.map(i=>({id:i.id,note:i.note})):undefined,styleGroupIds:styleGroups.map(g=>g.id),model:moduleModel,quality,reproduceSourceTaskId:reproduceSourceTaskId||null,revision:moduleRevision};
++        const payload={schemaVersion:2,evolution:evolution?evolutionInput:undefined,prompt,count,referenceLimit,referencePolicy:nextPolicy,aspectRatio,resolution,images:[...nextImages,...nextAuxiliary].map(i=>({id:i.id})),context:contextEditable?moduleContext:undefined,fixedReferences:fixedEditable?fixedReferences.map(i=>({id:i.id,note:i.note})):undefined,styleGroupIds:styleGroups.map(g=>g.id),model:moduleModel,quality,reproduceSourceTaskId:reproduceSourceTaskId||null,revision:moduleRevision};
+         try{localStorage.setItem(draftKey,JSON.stringify(payload));}catch{throw new Error('人物图片尚未存入本机草稿，未完成回填，请勿关闭原页面');}
+         setImages(nextImages);setAuxiliaryImages(nextAuxiliary);
+       }}
+diff --git a/src/app/image-studio/use-studio-batch.tsx b/src/app/image-studio/use-studio-batch.tsx
+new file mode 100644
+index 0000000..bfbcc79
+--- /dev/null
++++ b/src/app/image-studio/use-studio-batch.tsx
+@@ -0,0 +1,139 @@
++'use client';
++import { useEffect, useRef, useState } from 'react';
++import { FolderOpen, RefreshCw, X } from 'lucide-react';
++import { uploadFileAsAsset } from '@/lib/http/file-upload';
++import { useUnsavedNavigation } from '@/lib/hooks/use-unsaved-navigation';
++import { useProductDialog } from '@/components/useProductDialog';
++import { STUDIO_BATCH_LIMITS } from '@/lib/image-studio/batch-contract';
++import { BatchResults, readBatchResponse } from './batch-results';
++import { canSelectBatchDirectory, selectBatchDirectory, readBatchDirectory, previewBatchFiles, type BatchDirectoryHandle, type BatchLocalFile } from './batch-files';
++import styles from './batch.module.css';
++import { watchGenerationCompletion } from '@/components/GenerationCompletion';
++
++export function useStudioBatch({ userId, moduleId, unitCredits }: { userId: string; moduleId: string; unitCredits: number | null }) {
++  const [mode, setMode] = useState<'single' | 'batch'>('single');
++  const [source, setSource] = useState<'current' | 'folder'>('current');
++  const [quantity, setQuantity] = useState(8), [perFile, setPerFile] = useState(1), [budget, setBudget] = useState('');
++  const [files, setFiles] = useState<BatchLocalFile[]>([]), [skipped, setSkipped] = useState<string[]>([]);
++  const [previewing, setPreviewing] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [progress, setProgress] = useState('');
++  const [id, setId] = useState<string | null>(null), [pending, setPending] = useState<string | null>(null), [outputDirectory, setOutputDirectory] = useState<BatchDirectoryHandle | null>(null);
++  const [loaded, setLoaded] = useState(false), [showResults, setShowResults] = useState(false);
++  const [smallScreen, setSmallScreen] = useState(false);
++  useEffect(() => { const media = matchMedia('(max-width: 640px)'); const update = () => setSmallScreen(media.matches); update(); media.addEventListener('change', update); return () => media.removeEventListener('change', update); }, []);
++  const fileInput = useRef<HTMLInputElement>(null), directoryInput = useRef<HTMLInputElement>(null), lock = useRef(false), fileRef = useRef<BatchLocalFile[]>([]);
++  const scopedKey = `sd2-studio-batch-draft:v1:${userId}:${moduleId}`;
++  const pendingKey = `${scopedKey}:request`;
++  const { confirm } = useProductDialog();
++  const total = source === 'current' ? quantity : files.length * perFile;
++  const estimated = unitCredits == null ? null : unitCredits * total;
++  useUnsavedNavigation(busy || previewing || files.some(file => !file.assetId), confirm, { unsaved: files.some(file => !file.assetId) ? ['尚未上传的本机批量素材，离开后需重新选择'] : [], busy: busy ? ['批次素材或提交正在处理'] : previewing ? ['本机图片正在读取'] : [], revision: `${source}:${files.length}:${busy}` });
++  useEffect(() => {
++    try {
++      const saved = JSON.parse(localStorage.getItem(scopedKey) || 'null');
++      if (saved?.version === 1) {
++        if (saved.mode === 'batch') setMode('batch');
++        if (saved.source === 'folder') setSource('folder');
++        if (Number.isInteger(saved.quantity) && saved.quantity >= 1 && saved.quantity <= STUDIO_BATCH_LIMITS.images) setQuantity(saved.quantity);
++        if (Number.isInteger(saved.perFile) && saved.perFile >= 1 && saved.perFile <= 8) setPerFile(saved.perFile);
++        if (typeof saved.budget === 'string' && /^\d{0,8}$/.test(saved.budget)) setBudget(saved.budget);
++        if (typeof saved.id === 'string' && /^[a-f0-9]{64}$/.test(saved.id)) { setId(saved.id); setShowResults(saved.showResults === true); }
++      }
++      const request = localStorage.getItem(pendingKey);
++      if (request && /^[a-zA-Z0-9-]{16,80}$/.test(request)) { setPending(request); setMode('batch'); }
++    } catch { /* Broken cache never replays generation. */ }
++    setLoaded(true);
++  }, [scopedKey, pendingKey]);
++  useEffect(() => {
++    if (!loaded) return;
++    try { localStorage.setItem(scopedKey, JSON.stringify({ version: 1, mode, source, quantity, perFile, budget, id, showResults })); }
++    catch { setError('批次设置无法在本机记住，已有服务端批次仍可从我的批次找回'); }
++  }, [loaded, scopedKey, mode, source, quantity, perFile, budget, id, showResults]);
++  useEffect(() => { fileRef.current = files; }, [files]);
++  useEffect(() => () => fileRef.current.forEach(file => URL.revokeObjectURL(file.preview)), []);
++  async function previewFiles(selected: File[], initialSkipped: string[] = []) {
++    if (lock.current) return;
++    lock.current = true; setPreviewing(true); setError('');
++    try {
++      const result = await previewBatchFiles(selected, initialSkipped);
++      fileRef.current.forEach(file => URL.revokeObjectURL(file.preview));
++      setFiles(result.accepted); setSkipped(result.skipped);
++    } catch { setError('本机素材读取失败，尚未上传，请重新选择'); }
++    finally { lock.current = false; setPreviewing(false); }
++  }
++  async function chooseSources() {
++    if (!canSelectBatchDirectory()) { directoryInput.current?.click(); return; }
++    try {
++      const directory = await selectBatchDirectory('read');
++      const selected = await readBatchDirectory(directory); await previewFiles(selected.files, selected.skipped);
++    } catch (error) { if (!(error instanceof DOMException && error.name === 'AbortError')) setError('素材目录权限失效或无法读取，请重新选择'); }
++  }
++  async function chooseOutput() {
++    try { setOutputDirectory(await selectBatchDirectory('readwrite')); setError(''); }
++    catch (error) { if (!(error instanceof DOMException && error.name === 'AbortError')) setError('无法获得保存目录权限，请重选或使用 ZIP'); }
++  }
++  async function query() {
++    if (!pending || lock.current) return;
++    lock.current = true; setBusy(true); setError('');
++    try {
++      const result = await readBatchResponse(await fetch(`/api/image-studio/batches?requestId=${encodeURIComponent(pending)}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
++      setId(result.batch.id); setShowResults(true); setPending(null); localStorage.removeItem(pendingKey);
++    } catch { setError('原提交尚未核对，不能确认是否受理。请稍后查询或联系管理员，不会自动再生成'); }
++    finally { lock.current = false; setBusy(false); }
++  }
++  async function submit(payload: Record<string, unknown>) {
++    if (pending) { await query(); return; }
++    if (lock.current || !loaded) return;
++    if (!Number.isInteger(total) || total < 1 || total > STUDIO_BATCH_LIMITS.images || !Number.isInteger(perFile) || perFile < 1 || perFile > 8) { setError('本批总图数须为 1 至 100 张，每张素材最多生成 8 张'); return; }
++    if (estimated == null || budget === '' || !Number.isInteger(Number(budget)) || Number(budget) < estimated || Number(budget) > 10000000) { setError('请填写不少于预计点数的最高预算'); return; }
++    lock.current = true; setBusy(true); setError('');
++    let submittedRequest: string | null = null;
++    try {
++      const sources: Array<{ name: string; assetId?: string }> = [];
++      if (source === 'folder') {
++        for (let index = 0; index < files.length; index++) {
++          const local = files[index]; setProgress(`准备素材 ${index + 1}/${files.length}，开始后才上传`);
++          if (!local.assetId) {
++            const asset = await uploadFileAsAsset(local.file, { onProgress: progress => setProgress(`上传 ${index + 1}/${files.length} · ${local.file.name} · ${progress.label}`) });
++            if (!asset.id) throw new Error('素材上传尚未确认，请重新核对');
++            local.assetId = asset.id; setFiles([...files]);
++          }
++          for (let variant = 0; variant < perFile; variant++) sources.push({ name: `${local.file.name.replace(/\.[^.]+$/, '')}-v${variant + 1}`, assetId: local.assetId });
++        }
++      } else for (let index = 0; index < total; index++) sources.push({ name: `image-${index + 1}` });
++      const requestId = crypto.randomUUID();
++      localStorage.setItem(pendingKey, requestId);
++      if (localStorage.getItem(pendingKey) !== requestId) throw new Error('提交编号未能保存，尚未提交生成');
++      submittedRequest = requestId; setPending(requestId); setProgress('正在持久登记本批素材和设置');
++      const response = await fetch('/api/image-studio/batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, requestId, count: 1, budget: Number(budget), sources }), signal: AbortSignal.timeout(120000) });
++      if (response.status >= 400 && response.status < 500) { setPending(null); localStorage.removeItem(pendingKey); submittedRequest = null; }
++      const result = await readBatchResponse(response);
++      watchGenerationCompletion(userId, result.batch.id, 'batch', total);
++      setId(result.batch.id); setShowResults(true); setPending(null); localStorage.removeItem(pendingKey);
++    } catch (error) { setError(error instanceof Error ? error.message : '批次提交结果未确认'); if (submittedRequest) setPending(submittedRequest); }
++    finally { lock.current = false; setBusy(false); setProgress(''); }
++  }
++  const blocker = mode !== 'batch' ? '' : previewing ? '正在本机读取图片' : busy ? '正在处理本批' : pending ? '' : !loaded ? '正在恢复批次设置' : !Number.isInteger(total) || total < 1 || total > STUDIO_BATCH_LIMITS.images ? '请设置 1 至 100 张图片，素材模式需先选择有效图片' : budget === '' || estimated == null || !Number.isInteger(Number(budget)) || Number(budget) < estimated ? '请填写不少于预计点数的最高预算' : '';
++  const controls = <div className={styles.controls}>
++    <div className={styles.actions} role="group" aria-label="批量来源"><button type="button" aria-pressed={source === 'current'} disabled={busy || Boolean(pending)} onClick={() => setSource('current')}>当前正文</button><button type="button" aria-pressed={source === 'folder'} disabled={busy || Boolean(pending)} onClick={() => setSource('folder')}>素材逐图</button></div>
++    {source === 'folder' && <>
++      <div className={styles.actions}><button type="button" disabled={busy || previewing || Boolean(pending)} onClick={() => void chooseSources()}><FolderOpen size={16} />选择素材文件夹</button><button type="button" disabled={busy || previewing || Boolean(pending)} onClick={() => fileInput.current?.click()}>选择图片</button><span>有效素材 {files.length} 张，选择时只在本机预览</span></div>
++      <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={event => { void previewFiles(Array.from(event.target.files || [])); event.target.value = ''; }} />
++      <input ref={directoryInput} type="file" {...{ webkitdirectory: '', directory: '' }} multiple hidden onChange={event => { void previewFiles(Array.from(event.target.files || [])); event.target.value = ''; }} />
++      <div onPaste={event => { const pasted = Array.from(event.clipboardData.files); if (pasted.length) { event.preventDefault(); void previewFiles(pasted); } }} tabIndex={0} aria-label="批量素材，可粘贴图片">
++        {!!files.length && <div className={styles.previews}>{files.map((local, index) => <figure key={`${index}:${local.file.name}`}><img src={local.preview} alt={local.file.name} /><figcaption>{local.file.name}</figcaption></figure>)}</div>}
++      </div>
++      {!!skipped.length && <details><summary>跳过 {skipped.length} 项</summary>{skipped.map((reason, index) => <p key={index}>{reason}</p>)}</details>}
++      <p>点击开始才上传有效素材。只读取当前层，不监控新文件；重开网页后需重选尚未上传素材。</p>
++    </>}
++    <div className={styles.fields}><label>{source === 'current' ? '本批总图数' : '每张素材生成数'}<input type="number" min={1} max={source === 'current' ? 100 : 8} step={1} value={source === 'current' ? quantity : perFile} disabled={busy || Boolean(pending)} onChange={event => source === 'current' ? setQuantity(Number(event.target.value)) : setPerFile(Number(event.target.value))} /></label><label>最高预算（点）<input type="number" min={estimated ?? 0} max={10000000} step={1} value={budget} disabled={busy || Boolean(pending)} onChange={event => setBudget(event.target.value)} /></label></div>
++    <p>{source === 'folder' ? `${files.length} 张素材 × ${perFile} = ` : ''}本批 {total} 张 · 单图 {unitCredits ?? '待配置'} 点 · 预计 {estimated ?? '待配置'} 点。四宫格和演化多档组合图各算 1 张。</p>
++    <div className={styles.actions}>{canSelectBatchDirectory() && <button type="button" disabled={busy} onClick={() => void chooseOutput()}><FolderOpen size={16} />{outputDirectory ? '已选结果保存位置' : '选择结果保存位置'}</button>}<span>{outputDirectory ? '保存在新批次子目录；页面打开且权限有效时可保存' : '结果通过 ZIP 保存，可在结果区选择目录'}</span></div>
++    <p>后台仅继续素材已准备并登记的条目。预算不足或价格变化停止新派发，与普通任务共享最多 8 张在途。</p>
++    {progress && <p role="status">{progress}</p>}{error && <p role="alert" className={styles.error}>{error}</p>}
++    {id && <button type="button" onClick={() => setShowResults(value => !value)}>{showResults ? '收起本批结果' : '查看本批结果'}</button>}
++    {smallScreen && showResults && id && <BatchResults key={`${userId}:${id}`} userId={userId} id={id} outputDirectory={outputDirectory} compact />}
++    {pending && <p>原提交待核对，只查询同一批次，不会重新生成。<button type="button" disabled={busy} onClick={() => void query()}><RefreshCw size={16} />查询原批次</button></p>}
++    <button type="button" disabled={busy || Boolean(pending)} onClick={() => { setSource('current'); setQuantity(8); setPerFile(1); setBudget(''); fileRef.current.forEach(file => URL.revokeObjectURL(file.preview)); setFiles([]); setSkipped([]); setOutputDirectory(null); }}><X size={16} />重置本批参数</button>
++  </div>;
++  return { mode, setMode, source, busy, previewing, pending, blocker, submit, query, controls, id, outputDirectory, inlineResults: smallScreen && showResults && mode === 'batch', showResults: () => setShowResults(true) };
++}
+diff --git a/src/app/tools/avatar-studio/studio.module.css b/src/app/tools/avatar-studio/studio.module.css
+index 05d1a8c..171e8a5 100644
+--- a/src/app/tools/avatar-studio/studio.module.css
++++ b/src/app/tools/avatar-studio/studio.module.css
+@@ -50,6 +50,7 @@
+ .records { margin-top: 22px; border-top: 1px solid var(--border-color); padding-top: 14px; }
+ .record { display: flex; gap: 12px; padding: 12px 0; align-items: center; border-bottom: 1px solid var(--border-color); flex-wrap: wrap; }
+ .record img, .recordCover { width: 64px; height: 64px; flex-shrink: 0; object-fit: cover; background: var(--bg-secondary); }
++.record button.recordCover { padding: 0; overflow: hidden; border: 0; cursor: zoom-in; }
+ .recordText { flex: 1; min-width: 160px; display: flex; flex-direction: column; gap: 4px; }
+ .recordText small { color: var(--text-secondary); }
+ .empty { padding: 24px 0; color: var(--text-secondary); }
+diff --git a/src/app/tools/avatar-studio/studio.tsx b/src/app/tools/avatar-studio/studio.tsx
+index 1a58866..c30a992 100644
+--- a/src/app/tools/avatar-studio/studio.tsx
++++ b/src/app/tools/avatar-studio/studio.tsx
+@@ -5,6 +5,7 @@ import { ArrowLeft, ArrowRight, Copy, Dice5, Download, Lock, Unlock, Save, Trash
+ import { useProductDialog } from '@/components/useProductDialog';
+ import { RelativeTime } from '@/components/RelativeTime';
+ import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
++import { GenerationCompletionSettings, watchGenerationCompletion } from '@/components/GenerationCompletion';
+ import ContentReactions from '@/components/content-reactions/ContentReactions';
+ import { usePageExitRisk } from '@/lib/hooks/page-exit-guard';
+ import { useAppSession } from '@/lib/context/AppSessionContext';
+@@ -26,7 +27,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
+   const key = `sd2:avatar-studio:v1:${ownerId}`;
+   const [rules, setRules] = useState<AvatarRules>(emptyRules), [plan, setPlan] = useState<AvatarPlan | null>(null), [tasks, setTasks] = useState<Task[]>([]), [records, setRecords] = useState<AvatarRecord[]>([]), [cursor, setCursor] = useState<string | null>(null);
+   const [model, setModel] = useState(IMAGE_STUDIO_MODELS[0] as string), [quality, setQuality] = useState('auto'), [resolution, setResolution] = useState('1K');
+-  const [prices, setPrices] = useState<Record<string, number | null>>({}), [index, setIndex] = useState(0), [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState(''), [ready, setReady] = useState(false), [preview, setPreview] = useState(false), [advanced, setAdvanced] = useState(false), [tab, setTab] = useState<'config' | 'character' | 'result'>(management ? 'config' : 'result'), [deleted, setDeleted] = useState(false), [pending, setPending] = useState(false);
++  const [prices, setPrices] = useState<Record<string, number | null>>({}), [index, setIndex] = useState(0), [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState(''), [ready, setReady] = useState(false), [advanced, setAdvanced] = useState(false), [tab, setTab] = useState<'config' | 'character' | 'result'>(management ? 'config' : 'result'), [deleted, setDeleted] = useState(false), [pending, setPending] = useState(false);
+   const [recordTasks, setRecordTasks] = useState<Record<string, Task>>({});
+   const [parseStatus,setParseStatus]=useState<DescriptionStatus|null>(null),[stage,setStage]=useState(''),[selectedImage,setSelectedImage]=useState(false);
+   const [parseBinding,setParseBinding]=useState('');
+@@ -39,6 +40,13 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
+   const needsAnalysis=!!rules.description.trim()&&activeParse?.state!=='succeeded';
+   const [recentConfigs,setRecentConfigs]=useState<AvatarRecord[]>([]),[sourceTask,setSourceTask]=useState<Task|null>(null),[storedSignature,setStoredSignature]=useState('');
+   const [previousImageTask,setPreviousImageTask]=useState<Task|null>(null);
++  const [imagePreview, setImagePreview] = useState<{ src: string; alt: string } | null>(null);
++  useEffect(() => { setImagePreview(null); }, [ownerId]);
++  function openImage(src: string, alt = '人物结果') { setImagePreview({ src, alt }); }
++  function imageClick(event: React.MouseEvent, src: string, select?: () => void) {
++    select?.();
++    if (event.detail === 0 || matchMedia('(pointer: coarse)').matches) openImage(src);
++  }
+   const [runningPlans,setRunningPlans]=useState<string[]>([]);
+   const editing = useRef<AvatarRecord | null>(null), lock = useRef(false), alive = useRef(true);
+   const initializedOwner=useRef<string|null>(null);
+@@ -178,7 +186,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
+     planRef.current=next.id;setPending(true);
+     setStage('提交图片任务');
+     try {
+-      try { await api({ action: 'submit', id: next.id, layout:avatarLayout(next),rules:next.candidates[0].rules,model:next.model,quality:next.quality,resolution:next.resolution }); }
++      try { await api({ action: 'submit', id: next.id, layout:avatarLayout(next),rules:next.candidates[0].rules,model:next.model,quality:next.quality,resolution:next.resolution }); watchGenerationCompletion(ownerId, next.id, 'avatar', count); }
+       finally { if (alive.current && liveDraft.current.ownerRevision===original.ownerRevision && planRef.current===next.id) await refreshCredits({ force: true }); }
+       if(!alive.current||liveDraft.current.ownerRevision!==original.ownerRevision||planRef.current!==next.id)return true;
+       setPending(false);setNotice('图片任务已提交，正在查询结果；尚未代表已出图。'); await queryPlan(next.id); await load();
+@@ -274,12 +282,13 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
+         <button type="button" className={styles.primary} disabled={!ready||busy||blocked||management} onClick={()=>void prepare()}>{busy?stage||'处理中':draftSheet?'生成四宫格':'生成独立头像'}</button>
+         {blocked && <button type="button" className={styles.quiet} onClick={()=>void run(async()=>{const id=planRef.current;if(!id)throw new Error('原计划编号暂不可读取，请保留草稿后重新打开页面；未重复提交');await queryPlan(id);})}>查询原提交，不重复生成</button>}
+         <div className={styles.controls}><button type="button" disabled={busy} onClick={()=>void saveRules()}><Save size={15}/>保存规则</button>{editing.current && <button type="button" disabled={busy} onClick={()=>void saveRules(true)}>另存为</button>}</div>
++        <GenerationCompletionSettings ownerId={ownerId} />
+         {!!recentConfigs.length&&<section><small>最近配置</small>{recentConfigs.map(r=><button type="button" className={styles.quiet} key={r.id} onClick={()=>void restore(r)}>{r.name}</button>)}</section>}
+       </section>
+-      <section aria-label="人物结果"><div className={styles.preview}>{image ? <button type="button" aria-label="选择人物图片" aria-pressed={selectedImage} onClick={()=>setSelectedImage(true)}><img src={image.original_url} alt={sheet?'整张四宫格人物图片':'当前人物结果'}/></button> : <div className={styles.placeholder}>{task ? statusLabel[task.status]||'状态待确认' : current ? `${sheet?'四位人物的四宫格草稿\n':''}${current.members[0].fields.age.value}岁 · ${current.members[0].fields.gender.value}\n${current.members[0].fields.face_shape.value} · ${current.members[0].fields.hair_length.value}\n人物草稿，尚未出图` : <><UserRound size={48}/><p>暂无人物图片</p></>}</div>}</div>
++      <section aria-label="人物结果"><div className={styles.preview}>{image ? <button type="button" aria-label="选择人物图片，双击或轻点放大" aria-pressed={selectedImage} onClick={event=>imageClick(event,image.original_url,()=>setSelectedImage(true))} onDoubleClick={()=>openImage(image.original_url)}><img src={image.thumbnail_url||image.original_url} alt={sheet?'整张四宫格人物图片':'当前人物结果'}/></button> : <div className={styles.placeholder}>{task ? statusLabel[task.status]||'状态待确认' : current ? `${sheet?'四位人物的四宫格草稿\n':''}${current.members[0].fields.age.value}岁 · ${current.members[0].fields.gender.value}\n${current.members[0].fields.face_shape.value} · ${current.members[0].fields.hair_length.value}\n人物草稿，尚未出图` : <><UserRound size={48}/><p>暂无人物图片</p></>}</div>}</div>
+         {sheet&&<p className={styles.price}>整张四宫格是一张图片；以下选择只查看对应格的人物条件，不是裁切图片。</p>}
+-        <div className={styles.thumbnails}>{plan?.candidates.map((c,i)=>{const t=sheet?undefined:tasks.find(t=>t.ordinal===i+1);return <button type="button" className={styles.thumb} key={c.characterId+String(i)} aria-pressed={index===i} aria-label={`查看${sheet?'格':'候选'}${i+1}人物信息`} onClick={()=>{setIndex(i);setSelectedImage(true);}}>{t?.asset?<img src={t.asset.thumbnail_url||t.asset.original_url} alt={`人物${i+1}`}/>:<UserRound size={28}/>}<small>{sheet?['左上','右上','左下','右下'][i]:t ? statusLabel[t.status]?.split('，')[0]||'状态待确认' : `候选${i+1}草稿`}</small></button>;})}</div>
+-        <div className={styles.controls}>{plan&&plan.candidates.length>1&&<><button type="button" title="上一个" aria-label="上一个" onClick={()=>setIndex(i=>(i+plan.candidates.length-1)%plan.candidates.length)}><ArrowLeft size={16}/></button><button type="button" title="下一个" aria-label="下一个" onClick={()=>setIndex(i=>(i+1)%plan.candidates.length)}><ArrowRight size={16}/></button></>}{image&&<><button type="button" onClick={()=>setPreview(true)}>预览整图</button><a className={styles.quiet} href={`/api/image-studio/download?id=${encodeURIComponent(imageTask!.id)}`}><Download size={15}/>下载</a><ContentReactions contentKey={`asset:${image.id}`} imageSharing={false}/>{!sheet&&task?.asset&&imageTask===task&&<button type="button" disabled={busy} onClick={()=>void run(async()=>{await askName('人物名称','我的人物',{title:'保存人物',confirmLabel:'保存',onSubmit:async name=>{await api({action:'save',name,planId:plan!.id,index,record:{kind:'character'}});await load();}});})}><Save size={15}/>保存这个人</button>}</>}
++        <div className={styles.thumbnails}>{plan?.candidates.map((c,i)=>{const t=tasks.find(t=>t.ordinal===(sheet?1:i+1))||(i===0||sheet?sourceTask:null);return <button type="button" className={styles.thumb} key={c.characterId+String(i)} aria-pressed={index===i} aria-label={`查看${sheet?'格':'候选'}${i+1}人物信息${t?.asset?'，双击或轻点预览整图':''}`} onClick={event=>{setIndex(i);setSelectedImage(true);if(t?.asset)imageClick(event,t.asset.original_url);}} onDoubleClick={()=>{if(t?.asset)openImage(t.asset.original_url);}}>{t?.asset?<img src={t.asset.thumbnail_url||t.asset.original_url} alt={sheet?'已生成的四宫格整图':`已生成人物${i+1}`}/>:<UserRound size={28}/>}<small>{sheet?`${['左上','右上','左下','右下'][i]} · ${t?.asset?'整图':'未出图'}`:t ? statusLabel[t.status]?.split('，')[0]||'状态待确认' : `候选${i+1}草稿`}</small></button>;})}</div>
++        <div className={styles.controls}>{plan&&plan.candidates.length>1&&<><button type="button" title="上一个" aria-label="上一个" onClick={()=>setIndex(i=>(i+plan.candidates.length-1)%plan.candidates.length)}><ArrowLeft size={16}/></button><button type="button" title="下一个" aria-label="下一个" onClick={()=>setIndex(i=>(i+1)%plan.candidates.length)}><ArrowRight size={16}/></button></>}{image&&<><button type="button" onClick={()=>openImage(image.original_url)}>预览整图</button><a className={styles.quiet} href={`/api/image-studio/download?id=${encodeURIComponent(imageTask!.id)}`}><Download size={15}/>下载</a><ContentReactions contentKey={`asset:${image.id}`} imageSharing={false}/>{!sheet&&task?.asset&&imageTask===task&&<button type="button" disabled={busy} onClick={()=>void run(async()=>{await askName('人物名称','我的人物',{title:'保存人物',confirmLabel:'保存',onSubmit:async name=>{await api({action:'save',name,planId:plan!.id,index,record:{kind:'character'}});await load();}});})}><Save size={15}/>保存这个人</button>}</>}
+         {current&&<><button type="button" disabled={busy||blocked} onClick={()=>void prepare('new',undefined,false,true)}>{draftSheet?'换一组人物':'换一个人'}</button><button type="button" disabled={busy||blocked||needsAnalysis||sheet||draftSheet||!image&&!current.baselineAssetId} onClick={()=>void prepare('styling')}>换个造型</button>{(!tasks.length||layoutChanged||model!==plan?.model||quality!==plan?.quality||resolution!==plan?.resolution||current.compilerVersion!==AVATAR_COMPILER_VERSION)&&<button type="button" disabled={busy||blocked||conditionsChanged||needsAnalysis} onClick={()=>void quoteOriginal()}>重新报价并按原人物出图</button>}</>}
+         {ticketId&&image&&<button type="button" className={styles.primary} disabled={busy} onClick={()=>void returnImage()}>使用这张并返回</button>}</div>
+         {tasks.some(t=>t.status==='failed')&&!tasks.some(t=>['queued','running','uncertain'].includes(t.status))&&<button type="button" className={styles.quiet} disabled={busy||conditionsChanged||needsAnalysis} onClick={()=>void run(async()=>{const draft=liveDraft.current;const data=await api<{plan:AvatarPlan}>({action:'retry',id:plan!.id});assertDraft(draft);await submit(data.plan,draft);})}>只重试失败项</button>}
+@@ -290,8 +299,8 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
+       <aside className={styles.detail} aria-label="当前人物信息"><h2>{sheet?['左上格人物','右上格人物','左下格人物','右下格人物'][index]:'当前人物'}</h2>{current ? <><p>{current.members.map(d=>`${d.fields.gender.value} · ${d.fields.age.value}岁 · ${d.fields.face_shape.value} · ${d.fields.hair_length.value}`).join('；')}</p><small>{sheet?'四宫格保留四份人物条件；整图不能作为某一个人的身份基准。':'保持同人使用原图参考，模型仍可能改变面部；基准图不会自动替换。'}</small>{[...quickFields,'face_shape'].map(field=>{const f=current.members[0].fields[field];return <div key={field} className={styles.field}><span>{fieldLabels[field]}</span><select aria-label={`微调${fieldLabels[field]}`} value={rules.choices[field]||f.value} onChange={e=>setChoice(field,e.target.value)}>{Array.from(new Set([f.value,...catalog[field]])).map(v=><option key={v}>{v}</option>)}</select><button type="button" aria-label={`锁定${fieldLabels[field]}`} title={`锁定${fieldLabels[field]}，${f.source==='user'?'用户指定':f.source==='random'?'随机生成':'继承或推断'}`} aria-pressed={!!rules.locks[field]} onClick={()=>setRules(r=>{const locks={...r.locks};if(locks[field])delete locks[field];else locks[field]={...f,locked:true,manualLock:true};return {...r,locks};})}>{rules.locks[field]?<Lock size={14}/>:<Unlock size={14}/>}</button><button type="button" disabled={busy||blocked||sheet||draftSheet||!!rules.locks[field]||f.locked} title={`只重抽${fieldLabels[field]}，不出图`} aria-label={`只重抽${fieldLabels[field]}`} onClick={()=>void prepare('tweak',field,true)}><Dice5 size={15}/></button></div>;})}<div className={styles.controls}>{[...quickFields,'face_shape'].filter(field=>rules.choices[field]&&rules.choices[field]!==current.members[0].fields[field].value).map(field=><button type="button" className={styles.quiet} key={field} disabled={busy||blocked||sheet||draftSheet} onClick={()=>void prepare('tweak',field)}>微调{fieldLabels[field]}</button>)}</div><details><summary>完整人物信息</summary>{current.members.map((dna,i)=><div key={dna.seed}><strong>人物 {i+1}</strong><p>明显特征 {dna.details.filter(d=>d.prominence!=='micro').length} / 默认预算 {dna.featureBudget}</p>{Object.entries(dna.fields).map(([key,f])=><p key={key}>{fieldLabels[key]||key}：{f.value} · {f.source==='user'?'用户指定':f.source==='config'?'配置继承':f.source==='inferred'?'范围推断':'随机生成'}{f.locked?' · 已固定':''}</p>)}</div>)}</details><details><summary>人物描述与提示词</summary><div className={styles.prompt}>{activePrompt}</div><button className={styles.quiet} type="button" onClick={()=>void navigator.clipboard.writeText(activePrompt).catch(()=>setError('复制失败，请手动选择文本'))}><Copy size={15}/>复制提示词</button><small>随机规则 {current.members[0].ruleVersion}，图片模型不提供可复现的生图种子。</small></details>{currentRecord&&<label>人物符合度<select value={currentRecord.qualityStatus||'unreviewed'} onChange={e=>void run(()=>mutate(currentRecord,'quality',{record:{qualityStatus:e.target.value}}))}><option value="unreviewed">未人工确认</option><option value="matches">符合要求</option><option value="mismatch">不符合要求</option></select></label>}</> : <small>生成后查看人物信息</small>}</aside>
+     </fieldset>}
+     <section className={styles.records}><div className={styles.heading}><div className={styles.controls}>{(['config','character','result'] as const).map(t=><button type="button" key={t} aria-pressed={tab===t} onClick={()=>setTab(t)}>{t==='config'?'随机规则':t==='character'?'保存的人物':'生成历史'}</button>)}</div><label><input type="checkbox" checked={deleted} onChange={e=>setDeleted(e.target.checked)} style={{width:'auto'}}/> 最近删除</label></div>
+-      {visibleRecords.map(r=>{const t=tasks.find(task=>task.id===r.taskId)||(sourceTask?.id===r.taskId?sourceTask:recordTasks[r.taskId||'']);return <article className={styles.record} key={r.id}>{t?.asset?<img src={t.asset.thumbnail_url||t.asset.original_url} alt={r.name}/>:r.assetId?<img src={`/api/image-studio/assets/${r.assetId}?thumbnail=1`} alt={r.name}/>:<span className={styles.recordCover}><UserRound size={24}/></span>}<div className={styles.recordText}><strong>{r.name}</strong><small><RelativeTime value={r.createdAt}/> · {r.kind==='result'?(t?statusLabel[t.status]:'状态未读取'):r.kind==='config'?`配置第${r.revision}版`:'已保存人物'}</small></div><div className={styles.controls}>{r.deletedAt?<button type="button" disabled={busy} onClick={()=>void run(()=>mutate(r,'undelete'))}>撤销删除</button>:<><button type="button" disabled={busy} onClick={()=>void restore(r)}>{r.kind==='config'?'使用/编辑':'恢复草稿'}</button>{r.kind==='config'&&<><button type="button" onClick={()=>void run(async()=>{await askName('配置名称',r.name,{title:'重命名',onSubmit:async name=>mutate(r,'rename',{name})});})}>重命名</button><button type="button" onClick={()=>void run(async()=>{await api({action:'save',name:`${r.name}副本`,record:{kind:'config',rules:r.rules}});await load();})}>复制</button></>}{r.kind==='result'&&t?.asset&&<ContentReactions contentKey={`asset:${t.asset.id}`} imageSharing={false}/>}<button type="button" disabled={busy} onClick={()=>void run(async()=>{if(await confirm(`删除“${r.name}”？可撤销，不删除已有图片、资产或其他历史。`,{title:'删除记录',confirmLabel:'删除',danger:true}))await mutate(r,'delete');})}><Trash2 size={15}/>删除</button></>}</div></article>;})}
++      {visibleRecords.map(r=>{const t=tasks.find(task=>task.id===r.taskId)||(sourceTask?.id===r.taskId?sourceTask:recordTasks[r.taskId||'']);return <article className={styles.record} key={r.id}>{t?.asset||r.assetId?<button type="button" className={styles.recordCover} aria-label={`预览${r.name}`} onClick={()=>openImage(t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}`,r.name)} onDoubleClick={()=>openImage(t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}`,r.name)}><img src={t?.asset?.thumbnail_url||t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}?thumbnail=1`} alt={r.name}/></button>:<span className={styles.recordCover}><UserRound size={24}/></span>}<div className={styles.recordText}><strong>{r.name}</strong><small><RelativeTime value={r.createdAt}/> · {r.kind==='result'?(t?statusLabel[t.status]:'状态未读取'):r.kind==='config'?`配置第${r.revision}版`:'已保存人物'}</small></div><div className={styles.controls}>{r.deletedAt?<button type="button" disabled={busy} onClick={()=>void run(()=>mutate(r,'undelete'))}>撤销删除</button>:<><button type="button" disabled={busy} onClick={()=>void restore(r)}>{r.kind==='config'?'使用/编辑':'恢复草稿'}</button>{r.kind==='config'&&<><button type="button" onClick={()=>void run(async()=>{await askName('配置名称',r.name,{title:'重命名',onSubmit:async name=>mutate(r,'rename',{name})});})}>重命名</button><button type="button" onClick={()=>void run(async()=>{await api({action:'save',name:`${r.name}副本`,record:{kind:'config',rules:r.rules}});await load();})}>复制</button></>}{r.kind==='result'&&t?.asset&&<ContentReactions contentKey={`asset:${t.asset.id}`} imageSharing={false}/>}<button type="button" disabled={busy} onClick={()=>void run(async()=>{if(await confirm(`删除“${r.name}”？可撤销，不删除已有图片、资产或其他历史。`,{title:'删除记录',confirmLabel:'删除',danger:true}))await mutate(r,'delete');})}><Trash2 size={15}/>删除</button></>}</div></article>;})}
+       {!visibleRecords.length&&<p className={styles.empty}>暂无{deleted?'已删除':''}{tab==='config'?'配置':tab==='character'?'人物':'生成历史'}</p>}{cursor&&<button type="button" className={styles.quiet} disabled={busy} onClick={()=>void run(async()=>{await load(true,cursor);})}>加载更多</button>}
+-    </section>{preview&&image&&<ZoomableImagePreview src={image.original_url} alt="人物结果" fileName="avatar.png" onClose={()=>setPreview(false)}/>} {productDialog}
++    </section>{imagePreview&&<ZoomableImagePreview src={imagePreview.src} alt={imagePreview.alt} fileName="avatar.png" onClose={()=>setImagePreview(null)}/>} {productDialog}
+   </main>;
+ }
+diff --git a/src/components/GenerationCompletion.module.css b/src/components/GenerationCompletion.module.css
+new file mode 100644
+index 0000000..65452e5
+--- /dev/null
++++ b/src/components/GenerationCompletion.module.css
+@@ -0,0 +1,6 @@
++.settings { font-size: 13px; min-width: 0; }
++.settings summary { cursor: pointer; display: flex; align-items: center; gap: 6px; }
++.settings label { display: inline-flex; align-items: center; gap: 6px; margin: 10px 12px 8px 0; }
++.settings input[type='checkbox'] { width: 16px; height: 16px; margin: 0; }
++.settings small { display: block; color: var(--text-secondary); overflow-wrap: anywhere; }
++.settings button { display: inline-flex; align-items: center; gap: 6px; }
+diff --git a/src/components/GenerationCompletion.tsx b/src/components/GenerationCompletion.tsx
+new file mode 100644
+index 0000000..00a0266
+--- /dev/null
++++ b/src/components/GenerationCompletion.tsx
+@@ -0,0 +1,132 @@
++'use client';
++import { useEffect, useState } from 'react';
++import { usePathname } from 'next/navigation';
++import { Bell, Volume2 } from 'lucide-react';
++import { useAppSession } from '@/lib/context/AppSessionContext';
++import styles from './GenerationCompletion.module.css';
++
++type Kind = 'images' | 'avatar' | 'batch';
++type Watch = { owner: string; id: string; kind: Kind; count: number; receipt: string };
++type Preferences = { background: boolean; sound: boolean };
++const jobs = new Map<string, Watch>();
++const memoryReceipts = new Set<string>();
++const defaults: Preferences = { background: true, sound: false };
++let owner: string | null = null, generation = 0, polling = false;
++let audio: AudioContext | null = null;
++let titleTimer: ReturnType<typeof setInterval> | null = null, originalTitle: string | null = null;
++const prefKey = (id: string) => `sd2:completion:v1:${id}`;
++const receiptKey = (id: string) => `${prefKey(id)}:completed`;
++function preferences(id: string): Preferences {
++  try { const value = JSON.parse(localStorage.getItem(prefKey(id)) || '{}'); return { background: value.background !== false, sound: value.sound === true }; } catch { return defaults; }
++}
++function clearTitle() {
++  if (titleTimer) clearInterval(titleTimer);
++  titleTimer = null;
++  if (originalTitle !== null && [originalTitle, `已完成 · ${originalTitle}`, `生成已结束 · ${originalTitle}`].includes(document.title)) document.title = originalTitle;
++  originalTitle = null;
++}
++function completed(id: string): string[] {
++  const memory = Array.from(memoryReceipts).filter(item => item.startsWith(`${id}:`)).map(item => item.slice(id.length + 1));
++  try { const value = JSON.parse(localStorage.getItem(receiptKey(id)) || '[]'); return Array.from(new Set([...memory, ...(Array.isArray(value) ? value.filter(item => typeof item === 'string').slice(-200) : [])])); } catch { return memory; }
++}
++export function watchGenerationCompletion(ownerId: string, id: string, kind: Kind, count: number, operationId?: string) {
++  if (ownerId !== owner || jobs.size >= 32 || !/^[a-zA-Z0-9-]{1,100}$/.test(id) || count < 1 || count > 100) return;
++  if (operationId && !/^[a-zA-Z0-9-]{1,100}$/.test(operationId)) return;
++  const receipt = `${kind}:${id}${operationId ? `:${operationId}` : ''}`;
++  if (operationId) for (const job of Array.from(jobs.values())) {
++    if (job.owner === ownerId && job.id === id && job.kind === kind) jobs.delete(job.receipt);
++  }
++  if (!completed(ownerId).includes(receipt)) jobs.set(receipt, { owner: ownerId, id, kind, count, receipt });
++}
++function notify(success: boolean, prefs: Preferences) {
++  if (prefs.background && document.hidden) {
++    clearTitle(); originalTitle = document.title;
++    const text = success ? '已完成' : '生成已结束';
++    const steady = () => { if (originalTitle !== null) document.title = `${text} · ${originalTitle}`; };
++    steady();
++    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
++      const started = Date.now(); let turn = 0;
++      titleTimer = setInterval(() => {
++        if (!document.hidden) { clearTitle(); return; }
++        if (Date.now() - started >= 6000 || ++turn >= 6) { if (titleTimer) clearInterval(titleTimer); titleTimer = null; steady(); return; }
++        document.title = turn % 2 ? originalTitle! : `${text} · ${originalTitle}`;
++      }, 1000);
++    }
++  }
++  if (prefs.sound && audio?.state === 'running') {
++    const oscillator = audio.createOscillator(), gain = audio.createGain(), now = audio.currentTime;
++    oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(success ? 660 : 440, now);
++    gain.gain.setValueAtTime(0, now); gain.gain.linearRampToValueAtTime(0.08, now + 0.03); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
++    oscillator.connect(gain); gain.connect(audio.destination); oscillator.start(now); oscillator.stop(now + 0.4);
++    oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
++  }
++}
++async function poll() {
++  if (polling || !owner || !jobs.size) return;
++  polling = true; const expectedOwner = owner, expectedGeneration = generation;
++  try {
++    for (const job of Array.from(jobs.values()).slice(0, 32)) {
++      if (owner !== expectedOwner || generation !== expectedGeneration) break;
++      try {
++        const query = job.kind === 'batch' ? `/api/image-studio/batches?id=${job.id}` : job.kind === 'avatar' ? `/api/avatar-studio?plan=${job.id}` : `/api/image-studio/tasks?requestId=${job.id}`;
++        const response = await fetch(query, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
++        if (!response.ok) continue;
++        const data = await response.json();
++        if (owner !== expectedOwner || generation !== expectedGeneration) break;
++        let terminal = false, success = false;
++        if (job.kind === 'batch') {
++          const batch = data.batch;
++          terminal = batch && ['complete', 'cancelled'].includes(batch.state) && batch.active === 0 && batch.pending === 0 && batch.uncertain === 0;
++          success = terminal && batch.generated === batch.total && batch.failed === 0 && batch.uncertain === 0;
++        } else {
++          const tasks = data.tasks;
++          terminal = Array.isArray(tasks) && tasks.length === job.count && tasks.every(task => ['succeeded', 'failed'].includes(task.status));
++          success = terminal && tasks.every((task: { status: string }) => task.status === 'succeeded');
++        }
++        if (!terminal) continue;
++        jobs.delete(job.receipt);
++        const deliver = () => {
++          if (owner !== job.owner || generation !== expectedGeneration || completed(job.owner).includes(job.receipt)) return;
++          memoryReceipts.add(`${job.owner}:${job.receipt}`);
++          if (memoryReceipts.size > 200) memoryReceipts.delete(memoryReceipts.values().next().value!);
++          try { localStorage.setItem(receiptKey(job.owner), JSON.stringify(Array.from(new Set([...completed(job.owner), job.receipt])).slice(-200))); } catch { /* In-memory watch deletion still prevents repeated polls. */ }
++          notify(success, preferences(job.owner));
++        };
++        if (navigator.locks) await navigator.locks.request(`sd2-completion:${job.owner}`, deliver); else deliver();
++      } catch { /* Observation failures never imply completion or replay generation. */ }
++    }
++  } finally { polling = false; }
++}
++export function GenerationCompletionRuntime() {
++  const { user } = useAppSession(); const pathname = usePathname();
++  useEffect(() => {
++    if (owner !== (user?.id || null)) { generation++; jobs.clear(); clearTitle(); }
++    if (owner !== (user?.id || null) && audio) { void audio.close(); audio = null; }
++    owner = user?.id || null;
++    const visible = () => { if (!document.hidden) { clearTitle(); void poll(); } };
++    let timer: ReturnType<typeof setTimeout>, active = true;
++    const schedule = () => { if (active) timer = setTimeout(() => { void poll().finally(schedule); }, document.hidden ? 15000 : 5000); };
++    schedule(); document.addEventListener('visibilitychange', visible); window.addEventListener('focus', visible);
++    return () => { active = false; clearTimeout(timer); document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible); generation++; jobs.clear(); clearTitle(); };
++  }, [user?.id]);
++  useEffect(() => { clearTitle(); }, [pathname]);
++  return null;
++}
++export function GenerationCompletionSettings({ ownerId }: { ownerId: string }) {
++  const [prefs, setPrefs] = useState(defaults), [audioReady, setAudioReady] = useState(false), [message, setMessage] = useState('');
++  useEffect(() => { setPrefs(preferences(ownerId)); setAudioReady(audio?.state === 'running'); setMessage(''); }, [ownerId]);
++  function save(next: Preferences) { setPrefs(next); try { localStorage.setItem(prefKey(ownerId), JSON.stringify(next)); } catch { setMessage('本机未能记住提醒设置'); } if (!next.background) clearTitle(); }
++  async function enableSound() {
++    try {
++      if (!audio || audio.state === 'closed') audio = new AudioContext();
++      await audio.resume(); const ready = audio.state === 'running'; setAudioReady(ready);
++      save({ ...prefs, sound: ready }); setMessage(ready ? '提示音已启用' : '浏览器尚未允许声音，请再次点击启用');
++    } catch { setAudioReady(false); setMessage('浏览器尚未允许声音，请再次点击启用'); }
++  }
++  return <details className={styles.settings}><summary><Bell size={15} aria-hidden="true" />完成提醒</summary>
++    <label><input type="checkbox" checked={prefs.background} onChange={event => save({ ...prefs, background: event.target.checked })} />后台标签提醒</label>
++    <label><input type="checkbox" checked={prefs.sound} onChange={event => event.target.checked ? void enableSound() : save({ ...prefs, sound: false })} />提示音</label>
++    {prefs.sound && (!audioReady || audio?.state !== 'running') && <button type="button" onClick={() => void enableSound()}><Volume2 size={15} />解锁提示音</button>}
++    <small>只提醒本次打开网站后发起的生成；关闭网页或手机锁屏后不保证提醒。</small>{message && <p role="status">{message}</p>}
++  </details>;
++}
+diff --git a/src/components/template-studio/TemplateStudioShell.tsx b/src/components/template-studio/TemplateStudioShell.tsx
+index 4b36a22..208ae3f 100644
+--- a/src/components/template-studio/TemplateStudioShell.tsx
++++ b/src/components/template-studio/TemplateStudioShell.tsx
+@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
+ import Link from 'next/link';
+ import { Bookmark, RotateCcw } from 'lucide-react';
+ import ImageStudio from '@/app/image-studio/studio';
++import { StudioBatchHistory } from '@/app/image-studio/batch-results';
+ import { useAppSession } from '@/lib/context/AppSessionContext';
+ import VideoTemplateWorkbench from './VideoTemplateWorkbench';
+ import styles from './template-studio.module.css';
+@@ -259,6 +260,7 @@ export default function TemplateStudioShell({
+           <h1>模板工作台</h1>
+         </div>
+         <div className={styles.headerActions}>
++          {activeType === 'image' && <StudioBatchHistory key={userId} userId={userId} />}
+           <Link className={styles.quietButton} href="/assets?view=favorites&category=template"><Bookmark size={16} />我的收藏</Link>
+           {hasRememberedLocation && (
+             <button
+diff --git a/src/lib/image-studio/batch-contract.ts b/src/lib/image-studio/batch-contract.ts
+new file mode 100644
+index 0000000..468ef23
+--- /dev/null
++++ b/src/lib/image-studio/batch-contract.ts
+@@ -0,0 +1,10 @@
++export const STUDIO_BATCH_LIMITS = { images: 100, files: 100, fileBytes: 30 * 1024 * 1024, totalBytes: 256 * 1024 * 1024, activeBatches: 5, zipImages: 8, zipBytes: 128 * 1024 * 1024 } as const;
++export type StudioBatchItemView = { ordinal: number; sourceName: string; taskId: string | null; status: string; error?: string | null; image?: { id: string; url: string; thumbnail: string; fileSize: number } | null };
++export type StudioBatchView = { id: string; requestId: string; moduleId: string; moduleName: string; state: string; note: string; total: number; generated: number; failed: number; uncertain: number; active: number; pending: number; prepared: number; budget: number; committedCredits: number; unitCredits: number; createdAt: string; items?: StudioBatchItemView[] };
++export function safeBatchFileName(batchId: string, ordinal: number, sourceName: string, extension = 'png') {
++  const stem = sourceName.replace(/\.[^.]+$/, '').replace(new RegExp('[^\\p{L}\\p{N}_-]+', 'gu'), '_').slice(0, 60) || 'image';
++  return `${String(ordinal).padStart(3, '0')}-${stem}-${batchId.slice(0, 12)}.${extension}`;
++}
++export function batchStateLabel(state: string) {
++  return ({ preparing: '准备素材', ready: '进行中', paused: '已暂停派发', blocked: '需处理', cancelled: '已取消未派发项', uncertain: '结果待确认', complete: '本批已结束' } as Record<string, string>)[state] || '状态待确认';
++}
+diff --git a/src/lib/image-studio/batches.ts b/src/lib/image-studio/batches.ts
+new file mode 100644
+index 0000000..a938d09
+--- /dev/null
++++ b/src/lib/image-studio/batches.ts
+@@ -0,0 +1,227 @@
++import { createHash } from 'node:crypto';
++import type { Prisma } from '@prisma/client';
++import { prisma } from '@/lib/prisma';
++import { allocateTaskCredits } from '@/lib/credits/policy';
++import { canUseCompanyTemplates, canViewStudioPreset } from './access';
++import { getImageStudioSettings, IMAGE_STUDIO_SETTING_KEY, DEFAULT_STUDIO_PRICES } from './settings';
++import { resolveStudioModuleGenerationConfig } from './modules';
++import { submitStudioBatch, parseStudioRequest, StudioError } from './tasks';
++import { STUDIO_BATCH_LIMITS, type StudioBatchView } from './batch-contract';
++import { studioAssetUrl } from './media';
++import { studioVisibleAssetWhere } from './protected-assets';
++import { resolveStudioStyleReferences } from './style-groups';
++import type { StudioReferencePolicy } from './reference-policy';
++
++const PREFIX = 'studio_batch_v1:';
++const ITEM_PREFIX = 'studio_batch_item_v1:';
++type BatchItem = { ordinal: number; sourceName: string; assetId?: string; taskId: string | null; attempt: number; prepared: boolean; cancelled: boolean };
++type BatchRecord = { version: 1; id: string; ownerId: string; requestId: string; fingerprint: string; moduleId: string; moduleName: string; state: string; note: string; createdAt: string; total: number; budget: number; committedCredits: number; unitCredits: number; prepared: number; input: Record<string, unknown>; items: BatchItem[] };
++const key = (owner: string, id: string) => `${PREFIX}${owner}:${id}`;
++const itemKey = (id: string, ordinal: number) => `${ITEM_PREFIX}${id}:${ordinal}`;
++const idFor = (owner: string, requestId: string) => createHash('sha256').update(`${owner}:${requestId}`).digest('hex');
++const parse = (json: string) => JSON.parse(json) as BatchRecord;
++const boundedBudget = (value: unknown) => Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 10_000_000;
++const validId = (id: unknown): id is string => typeof id === 'string' && /^[a-f0-9]{64}$/.test(id);
++
++async function readOwned(owner: string, id: unknown, tx: Pick<Prisma.TransactionClient, 'platformSetting'> = prisma) {
++  if (!validId(id)) throw new StudioError('批次编号无效');
++  const row = await tx.platformSetting.findUnique({ where: { key: key(owner, id) } });
++  if (!row) throw new StudioError('批次不存在或无权访问', 404);
++  const batch = parse(row.value_json);
++  if (batch.ownerId !== owner || batch.id !== id) throw new StudioError('批次不存在或无权访问', 404);
++  return { row, batch };
++}
++async function writeBatch(tx: Pick<Prisma.TransactionClient, 'platformSetting'>, row: { id: string; value_json: string }, batch: BatchRecord) {
++  const changed = await tx.platformSetting.updateMany({ where: { id: row.id, value_json: row.value_json }, data: { value_json: JSON.stringify(batch) } });
++  if (!changed.count) throw new StudioError('批次已在其他页面更新，请重新读取', 409);
++}
++
++export async function createStudioBatch(ownerId: string, body: Record<string, unknown>) {
++  const input = parseStudioRequest({ ...body, count: 1 });
++  if (typeof body.moduleId !== 'string' || !boundedBudget(body.budget)) throw new StudioError('请选择模板并填写最高预算');
++  const sources = body.sources;
++  if (!Array.isArray(sources) || sources.length < 1 || sources.length > STUDIO_BATCH_LIMITS.images) throw new StudioError(`本批最多 ${STUDIO_BATCH_LIMITS.images} 张图片`);
++  const items: BatchItem[] = sources.map((source, index) => {
++    if (!source || typeof source !== 'object' || Array.isArray(source)) throw new StudioError('素材清单无效');
++    const value = source as Record<string, unknown>;
++    if (typeof value.name !== 'string' || value.name.length > 160 || (value.assetId !== undefined && (typeof value.assetId !== 'string' || value.assetId.length > 100))) throw new StudioError('素材清单无效');
++    return { ordinal: index + 1, sourceName: value.name.replace(/[\\/\x00-\x1f]/g, '_'), ...(value.assetId ? { assetId: value.assetId as string } : {}), taskId: null, attempt: 0, prepared: false, cancelled: false };
++  });
++  const id = idFor(ownerId, input.requestId);
++  const shared = { ...input, moduleId: body.moduleId };
++  const fingerprint = createHash('sha256').update(JSON.stringify({ shared, items, budget: body.budget })).digest('hex');
++  let created = false;
++  await prisma.$transaction(async tx => {
++    const existing = await tx.platformSetting.findUnique({ where: { key: key(ownerId, id) } });
++    if (existing) { if (parse(existing.value_json).fingerprint !== fingerprint) throw new StudioError('提交编号已用于其他批次', 409); return; }
++    const active = await tx.platformSetting.count({ where: { key: { startsWith: `${PREFIX}${ownerId}:` }, OR: ['preparing', 'ready', 'paused', 'blocked'].map(state => ({ value_json: { contains: `"state":"${state}"` } })) } });
++    if (active >= STUDIO_BATCH_LIMITS.activeBatches) throw new StudioError('最多保留 5 个未结束批次，请先处理原批次', 429);
++    const workspace = await tx.imageStudioModule.findFirst({ where: { id: body.moduleId as string, owner_id: ownerId }, select: { name: true, model: true } });
++    if (!workspace) throw new StudioError('模板不存在或无权使用', 404);
++    const settings = await getImageStudioSettings();
++    const unitCredits = settings.prices[input.model || resolveStudioModuleGenerationConfig(workspace, settings).model];
++    if (unitCredits == null || unitCredits * items.length > Number(body.budget)) throw new StudioError('最高预算不足以覆盖本批预计点数');
++    const assetIds = Array.from(new Set(items.flatMap(item => item.assetId ? [item.assetId] : [])));
++    const assets = await tx.asset.findMany({ where: { id: { in: assetIds }, owner_id: ownerId, status: 'active', type: 'image' }, select: { id: true, file_size: true } });
++    if (assets.length !== assetIds.length || assets.some(asset => !asset.file_size || asset.file_size > STUDIO_BATCH_LIMITS.fileBytes) || assets.reduce((sum, asset) => sum + (asset.file_size || 0), 0) > STUDIO_BATCH_LIMITS.totalBytes) throw new StudioError('素材不可用或超过本批大小上限');
++    const batch: BatchRecord = { version: 1, id, ownerId, requestId: input.requestId, fingerprint, moduleId: body.moduleId as string, moduleName: workspace.name, state: 'preparing', note: '', createdAt: new Date().toISOString(), total: items.length, budget: Number(body.budget), committedCredits: 0, unitCredits, prepared: 0, input: shared, items };
++    await tx.platformSetting.create({ data: { key: key(ownerId, id), value_json: JSON.stringify(batch), updated_by: ownerId } });
++    created = true;
++  }, { timeout: 15000 });
++  if (created) await prepareBatch(ownerId, id);
++  return id;
++}
++
++async function prepareBatch(owner: string, id: string) {
++  const initial = (await readOwned(owner, id)).batch;
++  try {
++    for (const item of initial.items) {
++      if (item.prepared) continue;
++      const policy = (initial.input.draft as { referencePolicy?: StudioReferencePolicy } | undefined)?.referencePolicy;
++      const references = item.assetId ? [item.assetId, ...(initial.input.referenceIds as string[]).filter(ref => !policy?.primaryIds.includes(ref))] : initial.input.referenceIds;
++      const draft = initial.input.draft as Record<string, unknown> | undefined;
++      const itemInput = { ...initial.input, requestId: `${id.slice(0, 48)}-${item.ordinal}`, referenceIds: references,
++        ...(item.assetId && draft && policy ? { draft: { ...draft, referencePolicy: { ...policy, primaryIds: [item.assetId] } } } : {}) };
++      await submitStudioBatch(owner, itemInput, undefined, { save: async (tx, task) => {
++        const { row, batch } = await readOwned(owner, id, tx);
++        if (batch.state !== 'preparing') throw new StudioError('批次已停止准备');
++        const current = batch.items[item.ordinal - 1];
++        if (current.prepared) return;
++        if (task.unit_credits !== batch.unitCredits || Number(task.unit_credits) * batch.total > batch.budget) throw new StudioError('价格变化或预算不足，请重新核对后开始新批次');
++        const first = await tx.platformSetting.findUnique({ where: { key: itemKey(id, 1) } });
++        if (first) {
++          const before = JSON.parse((JSON.parse(first.value_json) as Prisma.ImageStudioTaskUncheckedCreateInput).snapshot_json as string);
++          const now = JSON.parse(task.snapshot_json as string);
++          if (['globalContext', 'moduleContext', 'moduleRevision', 'settingsRevision', 'styleGroups', 'fixedReferenceImages'].some(field => JSON.stringify(before[field]) !== JSON.stringify(now[field]))) throw new StudioError('准备期间模板或价格发生变化，未开始生成，请重新核对');
++        }
++        task.id = `${id}-${item.ordinal}-a0`; task.batch_id = id; task.ordinal = item.ordinal;
++        task.context += `\n\n本批条目 ${item.ordinal}/${batch.total}。严格保留原正文中的明确条件；仅对正文未指定且允许随机的细节作不同选择，不照抄本批其他条目、不改变演化档数或组合图排版。`;
++        task.snapshot_json = JSON.stringify({ ...JSON.parse(task.snapshot_json as string), batchId: id, requestId: batch.requestId, persistentBatchId: id, batchOrdinal: item.ordinal });
++        await tx.platformSetting.create({ data: { key: itemKey(id, item.ordinal), value_json: JSON.stringify(task), updated_by: owner } });
++        current.prepared = true; batch.prepared += 1;
++        await writeBatch(tx, row, batch);
++      } });
++    }
++    await prisma.$transaction(async tx => {
++      const { row, batch } = await readOwned(owner, id, tx);
++      if (batch.state === 'preparing' && batch.prepared === batch.total) { batch.state = 'ready'; batch.note = ''; await writeBatch(tx, row, batch); }
++    });
++  } catch (error) {
++    await prisma.$transaction(async tx => {
++      const { row, batch } = await readOwned(owner, id, tx);
++      if (batch.state === 'preparing') { batch.state = 'blocked'; batch.note = error instanceof StudioError ? error.message : '素材准备中断，未派发生成；请取消后重新核对'; await writeBatch(tx, row, batch); }
++    });
++  }
++}
++
++export async function studioBatchView(owner: string, id: string, includeItems = true): Promise<StudioBatchView> {
++  const { batch } = await readOwned(owner, id);
++  const identity = await prisma.user.findUniqueOrThrow({ where: { id: owner }, select: { id: true, role: true, account_type: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
++  const taskIds = batch.items.flatMap(item => item.taskId ? [item.taskId] : []);
++  const tasks = await prisma.imageStudioTask.findMany({ where: { id: { in: taskIds }, owner_id: owner }, select: { id: true, status: true, error: true, asset_id: true, deleted_at: true } });
++  const assets = includeItems ? await prisma.asset.findMany({ where: { id: { in: tasks.flatMap(task => !task.deleted_at && task.asset_id ? [task.asset_id] : []) }, owner_id: owner, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity)] }, select: { id: true, file_size: true } }) : [];
++  const statuses = batch.items.map(item => item.cancelled ? 'cancelled' : item.taskId ? tasks.find(task => task.id === item.taskId)?.status || 'uncertain' : 'pending');
++  const active = statuses.filter(state => ['running', 'queued'].includes(state)).length;
++  const pending = statuses.filter(state => state === 'pending').length;
++  const uncertain = statuses.filter(state => state === 'uncertain').length;
++  return { id: batch.id, requestId: batch.requestId, moduleId: batch.moduleId, moduleName: batch.moduleName, state: !active && !pending && uncertain ? 'uncertain' : batch.state === 'ready' && !active && !pending ? 'complete' : batch.state, note: batch.note, total: batch.total, generated: statuses.filter(state => state === 'succeeded').length, failed: statuses.filter(state => state === 'failed').length, uncertain, active, pending, prepared: batch.prepared, budget: batch.budget, committedCredits: batch.committedCredits, unitCredits: batch.unitCredits, createdAt: batch.createdAt,
++    ...(includeItems ? { items: batch.items.map((item, index) => {
++      const task = tasks.find(task => task.id === item.taskId);
++      const asset = assets.find(asset => asset.id === task?.asset_id);
++      return { ordinal: item.ordinal, sourceName: item.sourceName, taskId: item.taskId, status: statuses[index], error: task?.error, image: asset ? { id: asset.id, url: studioAssetUrl(asset.id), thumbnail: studioAssetUrl(asset.id, true), fileSize: asset.file_size || 0 } : null };
++    }) } : {}) };
++}
++export async function listStudioBatches(owner: string, cursor?: string) {
++  if (cursor && !validId(cursor)) throw new StudioError('批次分页无效');
++  const cursorRow = cursor ? (await readOwned(owner, cursor)).row : undefined;
++  const rows = await prisma.platformSetting.findMany({ where: { key: { startsWith: `${PREFIX}${owner}:` } }, orderBy: [{ created_at: 'desc' }, { id: 'desc' }], take: 13, ...(cursorRow ? { cursor: { id: cursorRow.id }, skip: 1 } : {}) });
++  const selected = rows.slice(0, 12);
++  return { batches: await Promise.all(selected.map(row => studioBatchView(owner, parse(row.value_json).id, false))), nextCursor: rows.length > 12 ? parse(selected[selected.length - 1].value_json).id : null };
++}
++
++export async function updateStudioBatch(owner: string, body: Record<string, unknown>) {
++  const action = body.action;
++  if (!['prepare', 'pause', 'resume', 'cancel', 'retry'].includes(String(action))) throw new StudioError('批次操作无效');
++  const retryIds = body.ordinals;
++  await prisma.$transaction(async tx => {
++    const { row, batch } = await readOwned(owner, body.id, tx);
++    if (action === 'prepare') {
++      if (!['preparing', 'blocked'].includes(batch.state) || batch.prepared === batch.total) throw new StudioError('本批不需要继续准备');
++      batch.state = 'preparing'; batch.note = '';
++    }
++    if (action === 'pause') { if (batch.state === 'preparing') throw new StudioError('素材尚未准备完成，请取消或等待'); batch.state = 'paused'; batch.note = '未派发项已暂停；已受理任务继续，未向上游申请撤销或退款'; }
++    if (action === 'cancel') { batch.state = 'cancelled'; batch.items.forEach(item => { if (!item.taskId) item.cancelled = true; }); batch.note = '只取消未派发项；已受理任务继续，未向上游申请撤销或退款'; }
++    if (action === 'resume') {
++      if (batch.prepared !== batch.total || batch.state === 'cancelled') throw new StudioError('本批不能继续，请重新核对未准备素材');
++      batch.state = 'ready'; batch.note = '';
++    }
++    if (action === 'retry') {
++      if (!Array.isArray(retryIds) || !retryIds.length || retryIds.length > STUDIO_BATCH_LIMITS.images || retryIds.some(value => !Number.isInteger(value) || value < 1 || value > batch.total) || !boundedBudget(body.budget)) throw new StudioError('请选择失败项并填写新预算上限');
++      const selected = batch.items.filter(item => retryIds.includes(item.ordinal));
++      if (selected.some(item => item.attempt >= 3)) throw new StudioError('每项最多重试 3 次，请先核对失败原因；本次未重新生成');
++      if (selected.length !== new Set(retryIds).size || selected.some(item => !item.taskId)) throw new StudioError('所选条目不能重试');
++      const failed = await tx.imageStudioTask.count({ where: { id: { in: selected.map(item => item.taskId!) }, owner_id: owner, status: 'failed' } });
++      if (failed !== selected.length) throw new StudioError('仅能重试已确认失败项；结果未知请先核对，保存失败无需重新生成');
++      if (Number(body.budget) < batch.committedCredits + selected.length * batch.unitCredits) throw new StudioError('新预算不足以覆盖已派发点数与本次重试');
++      batch.budget = Number(body.budget);
++      selected.forEach(item => { item.taskId = null; item.attempt += 1; item.cancelled = false; });
++      batch.state = 'ready'; batch.note = '';
++    }
++    await writeBatch(tx, row, batch);
++  }, { timeout: 15000 });
++  if (action === 'prepare') await prepareBatch(owner, body.id as string);
++}
++
++// Only the existing worker dispatches paid tasks; all GET routes are observation-only.
++export async function dispatchStudioBatches() {
++  const rows = await prisma.platformSetting.findMany({ where: { key: { startsWith: PREFIX }, value_json: { contains: '"state":"ready"' } }, orderBy: { updated_at: 'asc' }, take: 10 });
++  for (const candidate of rows) {
++    const original = parse(candidate.value_json);
++    try {
++      await prisma.$transaction(async tx => {
++        const { row, batch } = await readOwned(original.ownerId, original.id, tx);
++        if (batch.state !== 'ready') return;
++        const item = batch.items.find(item => item.prepared && !item.taskId && !item.cancelled);
++        if (!item) {
++          const active = await tx.imageStudioTask.count({ where: { batch_id: batch.id, owner_id: batch.ownerId, status: { in: ['queued', 'running'] } } });
++          if (!active) { batch.state = 'complete'; await writeBatch(tx, row, batch); }
++          return;
++        }
++        if (await tx.imageStudioTask.count({ where: { owner_id: batch.ownerId, status: { in: ['queued', 'running'] } } }) >= 8) return;
++        const prepared = await tx.platformSetting.findUnique({ where: { key: itemKey(batch.id, item.ordinal) } });
++        if (!prepared) throw new StudioError('素材快照不可用，未派发新任务');
++        const data = JSON.parse(prepared.value_json) as Prisma.ImageStudioTaskUncheckedCreateInput;
++        const user = await tx.user.findUnique({ where: { id: batch.ownerId }, select: { id: true, role: true, account_type: true, status: true, user_profile: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
++        if (!user || user.status !== 'active' || !canUseCompanyTemplates(user)) throw new StudioError('当前账号不能继续生成');
++        if (data.source_preset_id) {
++          const source = await tx.imageStudioPreset.findUnique({ where: { id: data.source_preset_id }, select: { owner_id: true, scope: true, is_shared: true } });
++          if (!source || !canViewStudioPreset(user, source)) throw new StudioError('模板已停止共享，未派发新任务');
++        }
++        const snapshot = JSON.parse(String(data.snapshot_json));
++        const transientIds = (snapshot.transientReferenceImages || []).map((reference: { id: string }) => reference.id);
++        const visibleReferences = await tx.asset.count({ where: { id: { in: transientIds }, owner_id: batch.ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(user, tx)] } });
++        if (visibleReferences !== new Set(transientIds).size) throw new StudioError('本批参考图已不可用，未派发新任务');
++        const allIds = Array.from(new Set<string>((snapshot.referenceImages || []).map((reference: { id: string }) => reference.id)));
++        const assets = await tx.asset.findMany({ where: { id: { in: allIds }, status: 'active', type: 'image' }, select: { id: true, owner_id: true, hash: true } });
++        if (assets.length !== allIds.length || assets.some(asset => asset.owner_id !== snapshot.authorizedReferenceOwners?.[asset.id] || snapshot.referenceImages.find((reference: { id: string }) => reference.id === asset.id)?.hash !== asset.hash)) throw new StudioError('本批素材归属或内容已变化，未派发新任务');
++        if (snapshot.styleGroupIds?.length) await resolveStudioStyleReferences(user, snapshot.styleGroupIds, tx);
++        const settingsRow = await tx.platformSetting.findUnique({ where: { key: IMAGE_STUDIO_SETTING_KEY } });
++        const currentPrice = ({ ...DEFAULT_STUDIO_PRICES, ...(settingsRow ? JSON.parse(settingsRow.value_json).prices : {}) } as Record<string, number | null>)[String(data.model)];
++        if (currentPrice !== data.unit_credits || batch.committedCredits + Number(data.unit_credits) > batch.budget) throw new StudioError('价格变化或预算不足，已停止新派发；请核对后开始新批次');
++        const taskId = `${batch.id}-${item.ordinal}-a${item.attempt}`;
++        const freeze = Number(data.unit_credits) > 0 ? await allocateTaskCredits(tx, user, Number(data.unit_credits), taskId) : null;
++        await tx.imageStudioTask.create({ data: { ...data, id: taskId, freeze_snapshot: freeze?.snapshot } });
++        if (freeze) await tx.creditLedger.create({ data: { user_id: batch.ownerId, type: 'task_freeze', amount: -Number(data.unit_credits), balance_before: freeze.balance_before, balance_after: freeze.balance_after, frozen_before: freeze.frozen_before, frozen_after: freeze.frozen_after, related_task_id: taskId, idempotency_key: `image-studio:freeze:${taskId}`, reason: '图片生成冻结积分', metadata_json: JSON.stringify({ allocations: freeze.allocations }) } });
++        item.taskId = taskId; batch.committedCredits += Number(data.unit_credits);
++        await writeBatch(tx, row, batch);
++      }, { timeout: 15000 });
++    } catch (error) {
++      await prisma.$transaction(async tx => {
++        const { row, batch } = await readOwned(original.ownerId, original.id, tx);
++        if (batch.state !== 'ready') return;
++        batch.state = 'blocked'; batch.note = error instanceof StudioError ? error.message : error instanceof Error && error.message.startsWith('点数不足') ? '可用点数不足，已停止新派发；补足点数后可继续' : '批次派发暂时中断，已受理项保留，请重新读取后继续';
++        await writeBatch(tx, row, batch);
++      });
++    }
++  }
++}
+diff --git a/src/lib/image-studio/evolution.ts b/src/lib/image-studio/evolution.ts
+new file mode 100644
+index 0000000..29790a9
+--- /dev/null
++++ b/src/lib/image-studio/evolution.ts
+@@ -0,0 +1,32 @@
++export type EvolutionDirection = 'increase' | 'decrease';
++export type EvolutionCapability = { version: 1; defaultDirection: EvolutionDirection };
++export type EvolutionInput = { direction: EvolutionDirection; manual: boolean };
++
++// Verified legacy template. A name or unrelated prose is not a capability signal.
++const legacyModules = new Set(['322d566f-cd7b-438d-aac6-dc5d549c37fc']);
++export function evolutionCapability(row: { id?: string; context?: string }): EvolutionCapability | null {
++  const marker = row.context?.match(/\[studio:evolution:v1:(increase|decrease)\]/);
++  if (marker) return { version: 1, defaultDirection: marker[1] as EvolutionDirection };
++  return row.id && legacyModules.has(row.id) ? { version: 1, defaultDirection: 'increase' } : null;
++}
++export function parseEvolution(value: unknown): EvolutionInput | undefined {
++  if (value === undefined || value === null) return undefined;
++  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('演化方向无效');
++  const record = value as Record<string, unknown>;
++  if (!['increase', 'decrease'].includes(String(record.direction)) || typeof record.manual !== 'boolean'
++    || Object.keys(record).some(key => !['direction', 'manual'].includes(key))) throw new Error('演化方向无效');
++  return { direction: record.direction as EvolutionDirection, manual: record.manual };
++}
++export function describedEvolutionDirection(content: string): EvolutionDirection | null {
++  const up = /递进|逐[步级渐].{0,8}(?:增加|增强|加深|复杂|变大|变重)|越来越(?:多|强|深|复杂|大|重)|从(?:轻装到重装|少到多|弱到强|简单到复杂|轻到重)/.test(content);
++  const down = /递减|逐[步级渐].{0,8}(?:减少|减弱|变浅|简化|变小|变轻)|越来越(?:少|弱|浅|简单|小|轻)|从(?:重装到轻装|多到少|强到弱|复杂到简单|重到轻)/.test(content);
++  return up === down ? null : up ? 'increase' : 'decrease';
++}
++export function resolveEvolution(input: EvolutionInput, content: string, capability: EvolutionCapability) {
++  const described = describedEvolutionDirection(content);
++  if (input.manual && described && described !== input.direction) throw new Error('正文方向与手选方向冲突，请调整正文或方向');
++  return { direction: input.manual ? input.direction : described || capability.defaultDirection, manual: input.manual, content };
++}
++export function evolutionInstructions(value: ReturnType<typeof resolveEvolution>) {
++  return `本次演化参数（优先于模板未手选的默认方向）：\n变化内容：${JSON.stringify(value.content)}\n方向：${value.direction === 'increase' ? '递进，同一变化维度逐档增加' : '递减，沿同一组档位反向排列，逐档减少，不另随机一组状态'}。\n原正文对变化的明确要求优先于未手选默认；只改变正文要求变化的部分，其余主体、构图、风格、档数、范围与排版沿模板和参考图。档数不是输出图片数，不套用其他人物模板、不改变计费张数。`;
++}
+diff --git a/src/lib/image-studio/modules.ts b/src/lib/image-studio/modules.ts
+index 258391b..e9264de 100644
+--- a/src/lib/image-studio/modules.ts
++++ b/src/lib/image-studio/modules.ts
+@@ -1,4 +1,5 @@
+ import { prisma } from '@/lib/prisma';
++import { evolutionCapability } from './evolution';
+ import { resolveModuleContextVersion } from './context-version';
+ import { studioPresetArchived } from './preset-lifecycle';
+ import { normalizeStudioRatio } from './ratios';
+@@ -113,6 +114,7 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
+     sourcePresetOwnedByViewer: Boolean(sourcePreset && sourcePreset.owner_id === ownerId),
+     sourcePresetCanManageSharing: Boolean(sourcePreset && isAdmin && sourcePreset.scope === 'admin' && sourcePreset.owner_id === ownerId && !(await studioPresetArchived(sourcePreset.id))),
+     contextEditable: !protectedSource,
++    evolution: evolutionCapability(row),
+     fixedReferencesEditable: isAdmin && (!sourcePreset || sourcePreset.owner_id === ownerId),
+     fixedReferenceCount: fixedReferences.length,
+     styleGroupIds, styleGroups, reproductionState,
+diff --git a/src/lib/image-studio/presets.ts b/src/lib/image-studio/presets.ts
+index 7c3a252..d2472d2 100644
+--- a/src/lib/image-studio/presets.ts
++++ b/src/lib/image-studio/presets.ts
+@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
+ import { resolveModuleContextVersion } from './context-version';
+ import { archivedPresetKey, studioPresetArchived } from './preset-lifecycle';
+ import { prisma } from '@/lib/prisma';
++import { evolutionCapability, type EvolutionCapability } from './evolution';
+ import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from './limits';
+ import { IMAGE_STUDIO_MODELS, defaultImageResolution, normalizeImageStudioQuality, normalizeImageResolution } from './model-catalog';
+ import { normalizeStudioRatio } from './ratios';
+@@ -159,14 +160,16 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
+       throw new StudioModuleError(target ? '模板已在其他页面更新，请重新读取后修改' : '只能修改自己的模板', target ? 409 : 403);
+     }
+     let priorPresetId: string | null = null;
++    let inheritedEvolution: EvolutionCapability | null = null;
+     if (sourceModuleId) {
+-      const sourceModule = await tx.imageStudioModule.findFirst({ where: { id: sourceModuleId, owner_id: userId }, select: { id: true, source_preset_id: true } });
++      const sourceModule = await tx.imageStudioModule.findFirst({ where: { id: sourceModuleId, owner_id: userId }, select: { id: true, context: true, source_preset_id: true } });
+       if (!sourceModule) throw new StudioModuleError('模板来源模块不存在或无权使用', 403);
+       if (!isAdmin && sourceModule.source_preset_id) {
+         const original = await tx.imageStudioPreset.findUnique({ where: { id: sourceModule.source_preset_id }, select: { owner_id: true } });
+         if (!original || original.owner_id !== userId) throw new StudioModuleError('共享模板的内部配置只能由创建者另存', 403);
+       }
+       priorPresetId = sourceModule.source_preset_id;
++      inheritedEvolution = evolutionCapability(sourceModule);
+     }
+     const presetFixedReferences = fixedReferences === undefined
+       ? sourceModuleId ? await getStudioModuleFixedReferences(userId, sourceModuleId, tx) : []
+@@ -193,7 +196,9 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
+         if (!isAdmin && original.owner_id !== userId) throw new StudioModuleError('共享模板的内部配置只能由创建者另存', 403);
+       }
+       effectiveContext = snapshot.moduleContext;
++      if (snapshot.evolution && ['increase', 'decrease'].includes(snapshot.evolution.direction)) inheritedEvolution = { version: 1, defaultDirection: snapshot.evolution.direction };
+     }
++    if (inheritedEvolution && !evolutionCapability({ context: effectiveContext })) effectiveContext += `\n[studio:evolution:v1:${inheritedEvolution.defaultDirection}]`;
+     const data = { name, group_name: groupName, prompt, context: effectiveContext, model, quality, resolution, count, reference_limit: referenceLimit, aspect_ratio: aspectRatio, banner_asset_id: bannerAssetId, reference_ids: JSON.stringify(ids) };
+     let created;
+     if (target) {
+diff --git a/src/lib/image-studio/tasks.ts b/src/lib/image-studio/tasks.ts
+index 7528143..5b19b5c 100644
+--- a/src/lib/image-studio/tasks.ts
++++ b/src/lib/image-studio/tasks.ts
+@@ -21,6 +21,7 @@ import { defaultStudioReferencePolicy, getStudioModuleReferencePolicy, mapStudio
+ import { DEFAULT_STUDIO_PRIMARY_MAX } from './limits';
+ import type { AvatarCandidate, AvatarLayout } from '@/lib/avatar-random/types';
+ import { validateSheetCandidates } from '@/lib/avatar-random/layout';
++import { evolutionCapability, parseEvolution, resolveEvolution, evolutionInstructions } from './evolution';
+ 
+ export class StudioError extends Error {
+   constructor(message: string, public status = 400) { super(message); }
+@@ -90,6 +91,8 @@ export function parseStudioRequest(body: Record<string, unknown>) {
+   if (!Array.isArray(body.referenceIds) || body.referenceIds.length > MAX_REFERENCE_IMAGES || body.referenceIds.some(id => typeof id !== 'string' || id.length > 100)) throw new StudioError(`最多使用 ${MAX_REFERENCE_IMAGES} 张有效参考图`);
+   const referenceIds = body.referenceIds as string[];
+   const draft = parseStudioTaskDraft(body.draft, referenceIds);
++  let evolution;
++  try { evolution = parseEvolution(body.evolution); } catch (error) { throw new StudioError((error as Error).message); }
+   let aspectRatio: string | undefined;
+   try { if (body.aspectRatio !== undefined) aspectRatio = normalizeStudioRatio(body.aspectRatio); }
+   catch (error) { throw new StudioError((error as Error).message); }
+@@ -106,7 +109,7 @@ export function parseStudioRequest(body: Record<string, unknown>) {
+   if (moduleRevision !== undefined && (!Number.isInteger(moduleRevision) || moduleRevision < 0)) throw new StudioError('模块已更新，请刷新后重试', 409);
+   const reproduceFromTaskId = body.reproduceFromTaskId === undefined ? undefined : body.reproduceFromTaskId;
+   if (reproduceFromTaskId !== undefined && (typeof reproduceFromTaskId !== 'string' || reproduceFromTaskId.length > 120)) throw new StudioError('历史生成记录无效', 400);
+-  return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), moduleRevision, reproduceFromTaskId, referenceIds, ...(draft !== undefined ? { draft } : {}), ...(aspectRatio !== undefined ? { aspectRatio } : {}), ...(resolution !== undefined ? { resolution } : {}), ...(model !== undefined ? { model: model as typeof IMAGE_STUDIO_MODELS[number] } : {}), ...(quality !== undefined ? { quality: quality as string } : {}) };
++  return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), moduleRevision, reproduceFromTaskId, referenceIds, ...(evolution ? { evolution } : {}), ...(draft !== undefined ? { draft } : {}), ...(aspectRatio !== undefined ? { aspectRatio } : {}), ...(resolution !== undefined ? { resolution } : {}), ...(model !== undefined ? { model: model as typeof IMAGE_STUDIO_MODELS[number] } : {}), ...(quality !== undefined ? { quality: quality as string } : {}) };
+ }
+ 
+ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] {
+@@ -121,7 +124,7 @@ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[]
+   catch { throw new StudioError('历史固定参考图快照无效', 409); }
+ }
+ 
+-export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }) {
++export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void> }) {
+   const input = parseStudioRequest(body);
+   const moduleId = body.moduleId;
+   const sheet = avatar?.layout === 'contact-sheet';
+@@ -335,11 +338,18 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
+     const roleInstructions = primaryReferenceIds.length
+       ? '主图承担画面主要内容，模板中未特别指定对象的主要处理要求默认指向主图。多张主图的具体分工以模板和本次要求为准，不默认融合，也不将后续主图降为辅助参考。普通参考、模板固定图和风格组仅提供明确指定的辅助信息，不得擅自用其中的主体替换主图主体。素材备注只约束对应素材的用途，不改变主图与辅助参考的角色。'
+       : '本次没有主图，按文字要求生成。辅助参考仅提供指定的辅助信息，不自动将其中的主体当作生成主体。';
+-    const context = [baseContext.trim(), referenceInstructions ? `${roleInstructions}\n\n参考图顺序与作用（编号与实际发送次序一致）：\n${referenceInstructions}` : '',
++    const historicalEvolution = historicalSnapshot?.evolution;
++    const evolutionRequest = input.evolution || (historicalEvolution ? parseEvolution({ direction: (historicalEvolution as { direction: string }).direction, manual: (historicalEvolution as { manual: boolean }).manual }) : undefined);
++    const capability = evolutionCapability({ id: workspace?.id, context: snapshotModuleContext });
++    if (evolutionRequest && !capability && !historicalEvolution) throw new StudioError('当前模板不支持演化方向');
++    let evolution;
++    try { if (evolutionRequest) evolution = resolveEvolution(evolutionRequest, input.prompt, capability || { version: 1, defaultDirection: 'increase' }); }
++    catch (error) { throw new StudioError((error as Error).message); }
++    const context = [baseContext.trim(), evolution ? evolutionInstructions(evolution) : '', referenceInstructions ? `${roleInstructions}\n\n参考图顺序与作用（编号与实际发送次序一致）：\n${referenceInstructions}` : '',
+       styleNoteInstructions ? `风格组补充说明：\n${styleNoteInstructions}` : '']
+       .filter(Boolean).join('\n\n---\n');
+     const active = await tx.imageStudioTask.count({ where: { owner_id: ownerId, status: { in: ['queued', 'running'] } } });
+-    if (active + input.count > 8) throw new StudioError('最多同时生成 8 张，请等待当前任务完成', 429);
++    if (!preparation && active + input.count > 8) throw new StudioError('最多同时生成 8 张，请等待当前任务完成', 429);
+     const visibleTransient = await tx.asset.count({ where: { id: { in: uniqueTransientIds }, owner_id: ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity, tx)] } });
+     if (visibleTransient !== uniqueTransientIds.length) throw new StudioError('本次参考图已不可用或无权查看', 403);
+     const actualReferenceIds = Array.from(new Set(orderedReferenceIds));
+@@ -393,6 +403,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
+       reproducedFromTaskId: reproduceFromTaskId || null,
+       moduleName: workspace?.name || null,
+       prompt: input.prompt,
++      ...(evolution ? { evolution } : {}),
+       model: generation.model,
+       quality: generation.quality,
+       prices: generation.prices,
+@@ -412,15 +423,17 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
+       const id = `${batchId}-${i}`;
+       const candidate = sheet ? undefined : avatar?.candidates[i];
+       const taskPrompt = candidate?.prompt || input.prompt;
+-      const freeze = price > 0 ? await allocateTaskCredits(tx, user, price, id) : null;
+-      await tx.imageStudioTask.create({ data: {
++      const freeze = !preparation && price > 0 ? await allocateTaskCredits(tx, user, price, id) : null;
++      const taskData: Prisma.ImageStudioTaskUncheckedCreateInput = {
+         id, batch_id: batchId, owner_id: ownerId, module_id: moduleId as string | undefined, source_preset_id: sourcePresetId, ordinal: i + 1, fingerprint,
+         prompt: taskPrompt, context, revision: settings.revision, model: generation.model,
+         quality: generation.quality,
+         provider_cost_usd: IMAGE_STUDIO_MODEL_COST_USD[generation.model as keyof typeof IMAGE_STUDIO_MODEL_COST_USD], snapshot_json: sheet ? JSON.stringify({ ...JSON.parse(snapshot), avatarLayout: 'contact-sheet', avatar: { layout: 'contact-sheet', cells: avatar!.candidates } }) : candidate ? JSON.stringify({ ...JSON.parse(snapshot), prompt: taskPrompt, avatar: candidate }) : snapshot,
+         aspect_ratio: aspectRatio, output_size: outputSize,
+         reference_ids: JSON.stringify(orderedReferenceIds), unit_credits: price, freeze_snapshot: freeze?.snapshot,
+-      } });
++      };
++      if (preparation) await preparation.save(tx, taskData);
++      else await tx.imageStudioTask.create({ data: taskData });
+       if (freeze) await tx.creditLedger.create({ data: {
+         user_id: ownerId, type: 'task_freeze', amount: -price,
+         balance_before: freeze.balance_before, balance_after: freeze.balance_after,
+@@ -628,6 +641,8 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json'
+   const unitCredits = typeof parsed.unitCredits === 'number' && Number.isFinite(parsed.unitCredits) ? parsed.unitCredits : null;
+   return {
+     prompt: typeof parsed.prompt === 'string' ? parsed.prompt : task.prompt,
++    evolution: parsed.evolution && typeof parsed.evolution === 'object' && ['increase', 'decrease'].includes(String((parsed.evolution as Record<string, unknown>).direction))
++      ? { direction: (parsed.evolution as Record<string, unknown>).direction, manual: (parsed.evolution as Record<string, unknown>).manual === true } : null,
+     model: typeof parsed.model === 'string' ? parsed.model : task.model,
+     quality: typeof parsed.quality === 'string' ? parsed.quality : task.quality,
+     count,
+diff --git a/src/lib/release.ts b/src/lib/release.ts
+index fe9e0fd..71aaadc 100644
+--- a/src/lib/release.ts
++++ b/src/lib/release.ts
+@@ -1,6 +1,6 @@
+ import packageInfo from '../../package.json';
+ 
+-export const release = { version: packageInfo.version, channel: 'production', summary: '人物生成按完整原描述理解，简短描述不再被预设分类拦住；补充条件可选，四宫格和独立头像都保留原意。' };
++export const release = { version: packageInfo.version, channel: 'production', summary: '新增模板批量生成、暂停与批次找回，可保存到所选目录或分包下载。演化内容可选递进或递减。生成完成可提醒或开启提示音，人物结果与历史图片支持放大预览。' };
+ export function newerRelease(remote: string, local: string) {
+   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
+   const a = parse(remote), b = parse(local);
