@@ -4,6 +4,7 @@ import { Download, FolderOpen, Pause, Play, RefreshCw, RotateCcw, Save, X } from
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
+import { watchGenerationCompletion } from '@/components/GenerationCompletion';
 import { batchStateLabel, safeBatchFileName, STUDIO_BATCH_LIMITS, type StudioBatchView } from '@/lib/image-studio/batch-contract';
 import { canSelectBatchDirectory, selectBatchDirectory, newBatchOutputDirectory, writeUniqueBatchFile, type BatchDirectoryHandle } from './batch-files';
 import styles from './batch.module.css';
@@ -63,6 +64,7 @@ export function BatchResults({ id, userId, outputDirectory, compact = false }: {
     actionLock.current = true; setBusy(true); setError('');
     try {
       const data = await readBatchResponse(await fetch('/api/image-studio/batches', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action, ...(action === 'retry' ? { ordinals: selected, budget: retryBudget === '' ? null : Number(retryBudget) } : {}) }), signal: AbortSignal.timeout(20000) }));
+      if (action === 'retry') watchGenerationCompletion(userId, id, 'batch', batch.total, crypto.randomUUID());
       setBatch(data.batch); setSelected([]);
     } catch (error) { setError(error instanceof Error ? error.message : '操作结果待确认，请刷新原批次'); }
     finally { actionLock.current = false; setBusy(false); }

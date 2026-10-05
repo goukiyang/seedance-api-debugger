@@ -29,9 +29,13 @@ function completed(id: string): string[] {
   const memory = Array.from(memoryReceipts).filter(item => item.startsWith(`${id}:`)).map(item => item.slice(id.length + 1));
   try { const value = JSON.parse(localStorage.getItem(receiptKey(id)) || '[]'); return Array.from(new Set([...memory, ...(Array.isArray(value) ? value.filter(item => typeof item === 'string').slice(-200) : [])])); } catch { return memory; }
 }
-export function watchGenerationCompletion(ownerId: string, id: string, kind: Kind, count: number) {
+export function watchGenerationCompletion(ownerId: string, id: string, kind: Kind, count: number, operationId?: string) {
   if (ownerId !== owner || jobs.size >= 32 || !/^[a-zA-Z0-9-]{1,100}$/.test(id) || count < 1 || count > 100) return;
-  const receipt = `${kind}:${id}`;
+  if (operationId && !/^[a-zA-Z0-9-]{1,100}$/.test(operationId)) return;
+  const receipt = `${kind}:${id}${operationId ? `:${operationId}` : ''}`;
+  if (operationId) for (const job of Array.from(jobs.values())) {
+    if (job.owner === ownerId && job.id === id && job.kind === kind) jobs.delete(job.receipt);
+  }
   if (!completed(ownerId).includes(receipt)) jobs.set(receipt, { owner: ownerId, id, kind, count, receipt });
 }
 function notify(success: boolean, prefs: Preferences) {
