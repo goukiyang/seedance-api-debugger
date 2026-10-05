@@ -1,0 +1,18 @@
+{
+  "version": "0.45.0",
+  "checks": [
+    {
+      "pathname": "/api/config",
+      "status": 200
+    },
+    {
+      "pathname": "/api/release",
+      "status": 200
+    },
+    {
+      "pathname": "/login",
+      "status": 200
+    }
+  ],
+  "functionalAcceptance": "not-run"
+}

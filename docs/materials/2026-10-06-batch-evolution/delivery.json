@@ -1,0 +1,50 @@
+{
+  "project": "video-api-debugger",
+  "version": "0.45.0",
+  "url": "https://sd2.youdooart.com",
+  "sourceCommit": "545d9d6f3bbf9d0299fc1d34ac136b02958536aa",
+  "buildId": "KbJIPWhOPLhIslbk70m-a",
+  "sourceArchiveSha256": "40516eb7dbed05676a609a3b913275907b7e6aff8635007d4f41f876d9a10816",
+  "rollback": {
+    "commit": "f0a142fa94f77eb57165339b475da4eb09233a39",
+    "version": "0.44.1",
+    "buildId": "Nc2Ap5uhxsUEQCkxpRocE",
+    "tag": "rollback/2026-10-06-before-batch-evolution-v0.45.0",
+    "sourceArchiveSha256": "3c2c4de3fa7ec4a0600582eb64b70b8a50e44dd8230011b0e5929059c379da7b",
+    "sourceDirectory": "/srv/video-api-debugger/releases/f0a142fa94f77eb57165339b475da4eb09233a39-batch-evolution-rollback-source",
+    "buildDirectory": "/srv/video-api-debugger/app/.next-prod-prev-batch-545d9d6f3bbf",
+    "worker": "Previous script retained in exact source archive; rollback must drain new worker and restore source/build together. Accepted queued tasks keep existing schema/worker settlement; unaccepted persistent batch entries remain stored, previous worker cannot dispatch them until capability is restored.",
+    "protection": "Cutover error trap restores prior source/build/worker; no production DB, upload, environment or storage replacement"
+  },
+  "git": {
+    "branch": "codex/batch-evolution-20261006",
+    "releaseTag": "release/v0.45.0-batch-evolution",
+    "remoteSourceVerified": true,
+    "remoteRollbackVerified": true,
+    "note": "Later evidence-only commit does not change deployed application sourceCommit or version; git-remote.log captures immutable application and rollback tags before evidence-only commit"
+  },
+  "tasks": [
+    { "id": "BATCH1", "name": "批量生成与交付", "status": "已完成实施并部署，待用户手动验收", "evidence": "持久批次/条目快照、账号隔离、共享8张队列、预算停止、有限失败重试、同页结果/我的批次、目录或有界流式ZIP；app.diff/review.json" },
+    { "id": "EVO1", "name": "演化方向与内容", "status": "已完成实施并部署，待用户手动验收", "evidence": "明确模板能力、递进/递减、复用演化内容textarea、正文优先、就地冲突、prompt/快照/历史/草稿/批次；app.diff/review.json" },
+    { "id": "REL1", "name": "可回退发布", "status": "已完成部署闭环，不代表功能验收", "evidence": "统一最终候选build/lint/type、源码803文件一致、安全drain在途0、worker新进程、public.json10个CSS/JS哈希匹配、远端commit/rollback与窗口登记" },
+    { "id": "NOTIFY1", "name": "生成完成提醒", "status": "已完成实施并部署，待用户手动验收", "evidence": "真实终态、未知继续观察、单操作/整批汇总、有限后台标题与手动解锁声音、站内切页保留watch、账号变化清理、明确失败重试新操作；app.diff/review.json" },
+    { "id": "PREVIEW1", "name": "人物缩略图与大图", "status": "已完成实施并部署，待用户手动验收", "evidence": "人物真实本图/候选/历史绑定共用预览，原单击保留，桌面双击/手机轻点/键盘可达；app.diff/review.json" }
+  ],
+  "actualChecks": [
+    { "command": "NEXT_DIST_DIR=.next-prod-candidate npm run build (local)", "result": "failed: pre-existing shared local dependency runtime lacks recharts and S3 request-presigner; did not install or alter dependencies" },
+    { "command": "first isolated server candidate build and tsc --noEmit --incremental false", "result": "failed: reserved-variable lint, ES5/stream/policy types and missing unchanged ops import in archive; all collected and corrected before unified candidate" },
+    { "command": "intermediate and final exact-commit isolated server NEXT_DIST_DIR=.next-prod-candidate npm run build", "result": "both passed with built-in lint/type; final source/build match above; nonfatal img/hook/CSS warnings retained in full logs" },
+    { "command": "node scripts/check-batch-evolution-source.mjs; git diff --check; bash -n archive.sh candidate.sh switch.sh", "result": "passed; static source/security and shell checks only" },
+    { "command": "release-window renew/finish using explicit registry and project name; exact-commit archive SHA; source-proof/artifact-proof; guarded rsync/cutover", "result": "passed; no foreign active release, reservation confirmed, source and rollback hashes verified, live baseline rechecked before switch" },
+    { "command": "worker drain/stop, readonly running-count, source/build switch, web/worker start and runtime metadata/hash checks", "result": "passed: running=0; worker PID 259902 to 1043189; services active; 803 source files matched release; storage symlinks preserved" },
+    { "command": "origin and public /api/config /api/release /login; public target JS/CSS exact SHA comparison", "result": "passed: all three endpoints 200, public server origin marker, v0.45.0, 10 static resource hashes equal final candidate" },
+    { "command": "git push and git ls-remote --heads/--tags", "result": "application commit and annotated rollback tag verified remotely; no force/reset/clean" }
+  ],
+  "privacyBoundary": "Batch ownership does not grant hidden shared-template permissions. List/detail/export use public field projections and existing asset confidentiality filters; persistent private snapshots are not returned wholesale.",
+  "releaseSummaryBoundary": "Same release/update chain retained. Anonymous release.summary intentionally empty under existing access policy; authenticated internal users receive populated v0.45.0 summary. No new parallel notice or permission widening.",
+  "notRun": ["functional acceptance", "browser/DOM/screenshot testing", "business API acceptance", "paid generation", "test:api", "independent reviewer thread", "feedback diagnostics", "schema migration or direct production DB write"],
+  "feesByExecutor": 0,
+  "feedbackScopeExclusion": "F24-1 through F24-8, NAV2/MAIN1 and the feedback document branch are not included or marked fixed. PREVIEW1 is whole-image preview, not F24-2 direct contact-sheet cell selection. Formal-root document ahead/dirty state remains supervisor-owned.",
+  "remaining": "Per-target manual gaps are in review.json; supervisor alone copies safe evidence and writes formal-root ticket/index/todo. No claim of completed formal-root registration or functional acceptance.",
+  "classificationMisjudgment": "none"
+}

@@ -1,0 +1,14 @@
+{
+  "destination": "docs/materials/2026-10-06-batch-evolution/",
+  "formalRootWriter": "supervisor only",
+  "files": [
+    "delivery.json", "review.json", "progress.json", "changed-files.txt", "app.diff",
+    "build-local.log", "build-server-first.log", "typecheck-first.log", "build-server-intermediate.log", "build-server.log",
+    "candidate-intermediate.json", "candidate.json", "static-source.json", "static-source-server.json",
+    "deployment.log", "runtime.log", "origin.json", "public.json", "release-window.log", "git-remote.log",
+    "archive.sh", "candidate.sh", "switch.sh", "source-proof.mjs", "artifact-proof.mjs", "release-window.mjs",
+    "supervisor-copy-whitelist.json"
+  ],
+  "excluded": ["source archive binary", "environment/credentials/cookies/tokens", "production database or user payload", "uploads/user images", "local filesystem absolute directories", "origin-config response body retained only on server"],
+  "note": "Whitelist is relative and contains implementation/release evidence only. Formal root ticket/index/todo remain supervisor-owned and must not be included in this worktree evidence commit. Actual deployed app source is delivery.json sourceCommit; later evidence-only commit is not a new app release."
+}

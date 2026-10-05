@@ -1,0 +1,5 @@
+545d9d6f3bbf9d0299fc1d34ac136b02958536aa	refs/heads/codex/batch-evolution-20261006
+5ed348dc533a720bb64f209b7d6d9d80ce1475e2	refs/tags/release/v0.45.0-batch-evolution
+545d9d6f3bbf9d0299fc1d34ac136b02958536aa	refs/tags/release/v0.45.0-batch-evolution^{}
+7c021bd268c5b76b3e08173b9aaa1678f1427368	refs/tags/rollback/2026-10-06-before-batch-evolution-v0.45.0
+f0a142fa94f77eb57165339b475da4eb09233a39	refs/tags/rollback/2026-10-06-before-batch-evolution-v0.45.0^{}

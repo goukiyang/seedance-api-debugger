@@ -1,0 +1,23 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+const skill = path.join(os.homedir(), '.codex/skills/release-window-coordination/scripts');
+const { appendRegistryLine } = await import(pathToFileURL(path.join(skill, 'release-registry-append.mjs')));
+const { buildRecentActivityDecision, confirmReservation } = await import(pathToFileURL(path.join(skill, 'release-recent-activity-check.mjs')));
+const [mode, commit, runId, registry] = process.argv.slice(2);
+if (!['start', 'renew', 'check', 'finish', 'failed'].includes(mode) || !/^[a-f0-9]{40}$/.test(commit || '') || !/^[A-Za-z0-9-]+$/.test(runId || '') || !registry) throw Error('Invalid guard arguments');
+const projectName = 'video-api-debugger';
+const decision = buildRecentActivityDecision(fs.readFileSync(registry, 'utf8'), { projectName });
+const foreign = decision.recentActivities.filter(activity => activity.runId !== runId);
+console.log(JSON.stringify({ mode, runId, shouldWait: foreign.length > 0 }));
+if (foreign.length) process.exit(75);
+const write = async action => {
+  const result = await appendRegistryLine({ registry, projectName, action, runId, branch: 'codex/batch-evolution-20261006', commit, targetUrl: 'https://sd2.youdooart.com', note: 'BATCH1 EVO1 REL1 NOTIFY1 PREVIEW1 联合交付；v0.45.0；无依赖升级、权限扩大或迁移；worker安全drain加载；发布检查不代表功能验收，待用户手动验收；真实生成及费用0。' });
+  if (!result.confirmed) throw Error('Registry append not confirmed');
+};
+if (mode === 'start' || mode === 'renew') await write('部署开始');
+const reservation = confirmReservation(fs.readFileSync(registry, 'utf8'), { projectName, runId });
+console.log(JSON.stringify({ reservationConfirmed: reservation.canProceed }));
+if (!reservation.canProceed) throw Error('Release reservation not confirmed');
+if (mode === 'finish' || mode === 'failed') await write(mode === 'finish' ? '部署完成' : '部署失败');
