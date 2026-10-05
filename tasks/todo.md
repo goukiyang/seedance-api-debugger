@@ -2,7 +2,7 @@
 
 ## 当前入口
 
-- [S1 现有抠图全功能升级交接](todo/2026-10-06-ai-cutout-upgrade.md)：2026-10-06，工单v1.0.0已完成；仅功能/运作/缺口与正式附件登记，保留原入口，具体接入由项目agents决定；应用未改，源完整验收仍有缺口，媒体本地归档，公开remote不推。
+- [CUT1/CUT2/CUT3 现有抠图升级](todo/2026-10-06-ai-cutout-upgrade.md)：2026-10-06，已部署v0.46.0/353f339/BUILD UG_Av_AwnF45orH5-oQgI，待用户手动验收。原入口新增六调节、角色框/提示点、画笔、续处理与分页历史；73项隔离检查、候选内置类型/lint及13静态公网匹配完成。CUT1/CUT2仍受真实业务授权未核实所阻，0模型任务/费用/凭证创建/数据覆盖，不声称完整实接或C2/C3通过；CUT3源码/回退点已推送，正式证据和统一diff本机归档，公开Git不带私人原图/结果。
 
 - [人物描述优先与自由表达 AV1](todo/2026-10-05-avatar-intent-generation-flow.md#11-av1描述优先与自由表达2026-10-05)：2026-10-06，已部署v0.44.1/f0a142f/BUILD Nc2Ap5uhxsUEQCkxpRocE，待用户手动验收；简短描述不再因预设分类缺项阻止生成，完整原文进入四宫格与独立头像提示词，其他条件可选。11文件候选内置类型/lint、Git/回退/790源匹配/公网及4静态检查完成；保留费用、未知请求、真实互斥及旧草稿重新报价保护，worker不重启；[交付报告](../docs/materials/2026-10-05-avatar-description-first/delivery.json)与[统一diff](../docs/materials/2026-10-05-avatar-description-first/source.diff)正式归档，0模型/图片/人工DB写，无全站或浏览器功能验收。
 

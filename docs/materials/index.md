@@ -2,9 +2,11 @@
 
 ## SD2现有抠图全功能升级交接（2026-10-06）
 
-- 项目：SD2视频创作平台（video-api-debugger）；来源：用户本轮“已有但原始、没更新”及“只写功能/运作，具体让项目agents解决”，AI Cutout Web固定索引/工单/API/SDK与已有结果；接收2026-10-06（北京时间）。工单v1.0.0，补充旧抠图而非替代原件；原文[正式工单](../../tasks/todo/2026-10-06-ai-cutout-upgrade.md)。关键词：AI抠图、六参数、角色拆切、细修、任务历史、Mac计算、服务器结果、完整API、部分验收。
+- 项目：SD2视频创作平台（video-api-debugger）；来源：用户“已有但原始、没更新”的交接与后续“升级原功能、接入及验证自行安排；权限扩大/付费/生产覆盖停止”授权，AI Cutout Web固定工单/API/SDK/结果及本次实施检查；接收2026-10-06（北京时间）。工单v1.1.0接续v1.0.0，原附件不替换；原文[正式工单](../../tasks/todo/2026-10-06-ai-cutout-upgrade.md)。关键词：CUT1/CUT2/CUT3、AI抠图、六参数、角色框提示点、画笔、历史、幂等恢复、单账号业务绑定、Mac计算、部分实接。
 - [正式附件](2026-10-06-ai-cutout-upgrade/附件来源与校验.json)登记原文件名、源路径、SHA、可读性和版本关系：16角色原图、机械/三视图原图、v0.3.0真实16PNG/mask/总览/ZIP/manifest、旧辅助参数及接口/SDK参考。源原件保留；16角色原用户名 img_v3_0211i_b0bd7403-c9ea-4821-81cf-99310642e60g.jpg，上传名355d707027284cdeb3d9c84b229a82d7.jpg，旧缓存已失效不能补造；附件用途是接入与质量参考，真实结果不代表C2/C3质量通过，无新音视频。关键附件统一解码/JSON/ZIP和复制SHA核对见清单，辅助说明可读不逐项hash。
-- 已有入口升级，功能与运作事实已整理；接入未实施、未测试/部署/外发/创建凭据。SD2公开remote本轮仅本地提交纯文字；附件仅本地，不公开。具体方案由项目agents决定。源网站0.3.0/A1入口PASS，整体PARTIAL_ACCEPTANCE缺项原状保留。
+- 已部署应用v0.46.0/353f339/BUILD UG_Av_AwnF45orH5-oQgI，保留原入口；73项隔离检查、服务器候选类型/lint、16项公网发布检查（含13资源SHA）通过。真实SD2业务授权、生产管理员页面及模型出图未验，CUT1/CUT2未全闭环；单账号绑定限制不冒充多账户owner隔离，原C2/C3缺项保留。公开remote只推源码/回退/发布tag；私人媒体、工单证据本机归档，0费用/真实模型任务/新凭证/数据覆盖。
+- 本次实施资料原名和入口：[source.diff](2026-10-06-ai-cutout-upgrade/实施记录/source.diff)、[build-server.log](2026-10-06-ai-cutout-upgrade/实施记录/build-server.log)、[44项报告](2026-10-06-ai-cutout-upgrade/实施记录/contract-server.json)、[29项组件报告](2026-10-06-ai-cutout-upgrade/实施记录/final-check/browser-check.json)、[candidate.json](2026-10-06-ai-cutout-upgrade/实施记录/candidate.json)、[public.json](2026-10-06-ai-cutout-upgrade/实施记录/public.json)、[public-readonly.json](2026-10-06-ai-cutout-upgrade/实施记录/public-readonly.json)、[runtime.json](2026-10-06-ai-cutout-upgrade/实施记录/runtime.json)、[upstream-public.json](2026-10-06-ai-cutout-upgrade/实施记录/upstream-public.json)。来源本次冻结源码和真实发布只读检查，接收2026-10-06，版本对应应用0.46.0，用于接入和发布复现；JSON/日志可读，关键source.diff与Git生成一致，辅助日志不额外逐项hash。
+- 新增截图原名：`cutout-desktop.png`、`cutout-mobile.png`、`editors-desktop.png`、`editors-mobile.png`；[同目录](2026-10-06-ai-cutout-upgrade/实施记录/final-check/)，来源本轮隔离Playwright+合成PNG+模拟API，PNG可读，辅助截图不逐项hash。用于界面/坐标/画笔交互检查，不当作线上登录态或模型质量结果，不替代旧原图和真实16角色文件；无新音视频。归档版本v1对应本次应用，浏览器报告已明确0外部请求。
 
 ## 最近24小时后台反馈（2026-10-06）
 
