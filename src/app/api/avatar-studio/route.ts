@@ -7,7 +7,7 @@ import { listAvatarRecords, mutateAvatarRecord, readAvatar } from '@/lib/avatar-
 import { avatarDescriptionStatus, parseAvatarDescription, prepareAvatarPlan, submitAvatarPlan } from '@/lib/avatar-random/service';
 import { AvatarDescriptionError } from '@/lib/avatar-random/description-parser';
 import { adaptAvatarPrompt, parseAvatarRules } from '@/lib/avatar-random/engine';
-import type { AvatarPlan, AvatarRecord } from '@/lib/avatar-random/types';
+import { AVATAR_COMPILER_VERSION, type AvatarPlan, type AvatarRecord } from '@/lib/avatar-random/types';
 import { prisma } from '@/lib/prisma';
 import { randomUUID } from 'node:crypto';
 import { avatarPlanKey } from '@/lib/avatar-random/store';
@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) { return run(async owner => {
     if(price===undefined||price===null)throw new StudioError('原模型已失效或没有报价，历史设置仍保留');
     const api=await getImageGenerationSettingsForModel(model);
     let plan:AvatarPlan;
-    try { plan=withAvatarLayout({...previous,sourceTaskId:undefined,model,quality,resolution,id:(layout==='contact-sheet'?'sheet-':'')+createHash('sha256').update(`quote:${owner}:${previous.id}:${settings.revision}:${model}:${quality}:${resolution}:${layout}`).digest('hex'),settingsRevision:settings.revision,unitCredits:price,imageReady:isStudioImageGenerationProvider(api.provider)&&isImageGenerationApiReady(api)&&(previous.referenceIds.length?api.supports_image_to_image:api.supports_text_to_image),candidates:previous.candidates.map(c=>adaptAvatarPrompt(c,model)),createdAt:new Date().toISOString()},layout); }
+    try { plan=withAvatarLayout({...previous,sourceTaskId:undefined,model,quality,resolution,id:(layout==='contact-sheet'?'sheet-':'')+createHash('sha256').update(`quote:${AVATAR_COMPILER_VERSION}:${owner}:${previous.id}:${settings.revision}:${model}:${quality}:${resolution}:${layout}`).digest('hex'),settingsRevision:settings.revision,unitCredits:price,imageReady:isStudioImageGenerationProvider(api.provider)&&isImageGenerationApiReady(api)&&(previous.referenceIds.length?api.supports_image_to_image:api.supports_text_to_image),candidates:previous.candidates.map(c=>adaptAvatarPrompt(c,model)),createdAt:new Date().toISOString()},layout); }
     catch(e){throw new StudioError((e as Error).message);}
     await prisma.platformSetting.upsert({where:{key:avatarPlanKey(owner,plan)},create:{key:avatarPlanKey(owner,plan),value_json:JSON.stringify(plan),updated_by:owner},update:{}});
     return {plan:await readAvatar<AvatarPlan>(owner,'plan',plan.id)};

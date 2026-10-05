@@ -9,7 +9,7 @@ import { normalizeImageResolution } from '@/lib/image-generation/resolution';
 import { catalog, identityFields } from './catalog';
 import { adaptAvatarPrompt, createAvatarCandidates, emptyConstraints, parseAvatarRules } from './engine';
 import { avatarKey, avatarPlanKey, avatarRecordKey, readAvatar } from './store';
-import type { AvatarConstraints, AvatarCandidate, AvatarPlan, AvatarRecord } from './types';
+import { AVATAR_COMPILER_VERSION, type AvatarConstraints, type AvatarCandidate, type AvatarPlan, type AvatarRecord } from './types';
 import { descriptionSystemPrompt } from './description-contract';
 import { AvatarDescriptionError, descriptionId, inspectDescription, resolveDescription, type DescriptionStore } from './description-parser';
 import { avatarLayout, avatarOutputCount, withAvatarLayout } from './layout';
@@ -103,6 +103,7 @@ export async function submitAvatarPlan(owner: string, id: string, expectedLayout
   if (layout === 'contact-sheet' && (!plan.sheetPrompt || plan.aspectRatio !== '1:1')) throw new StudioError('四宫格快照不完整，请重新准备人物');
   const settings = await getImageStudioSettings();
   const alreadyQueued = await prisma.imageStudioTask.findFirst({ where: { owner_id: owner, batch_id: createHash('sha256').update(`${owner}:${plan.id}`).digest('hex') } });
+  if (!alreadyQueued && plan.candidates.some(candidate => candidate.compilerVersion !== AVATAR_COMPILER_VERSION)) throw new StudioError('人物草稿需更新报价以保留完整原描述；不用重填描述或重新分析', 409);
   if (!alreadyQueued && (plan.unitCredits===null||settings.revision !== plan.settingsRevision || settings.prices[plan.model as keyof typeof settings.prices] !== plan.unitCredits)) throw new StudioError('报价已变化，请更新报价后确认费用；人物草稿不需要重新随机', 409);
   const api = await getImageGenerationSettingsForModel(plan.model);
   if (!alreadyQueued && (!isStudioImageGenerationProvider(api.provider) || !isImageGenerationApiReady(api))) throw new StudioError('当前模型生成通道尚未就绪', 503);

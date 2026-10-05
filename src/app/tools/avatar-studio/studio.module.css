@@ -1,22 +1,32 @@
 .page { padding: 16px 20px; color: var(--text-primary); min-width: 0; }
 .heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .heading h1 { font-size: 22px; margin: 0; }
-.layout { display: grid; grid-template-columns: minmax(230px, 290px) minmax(300px, 1fr) minmax(220px, 280px); align-items: start; gap: 24px; border:0; padding:0; margin:0; min-width:0; }
+.layout { display: grid; grid-template-columns: minmax(300px, 360px) minmax(0, 1fr) minmax(220px, 280px); align-items: start; gap: 24px; border:0; padding:0; margin:0; min-width:0; }
 .input, .detail { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
 .input label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.descriptionLabel { font-weight: 600; }
 .page textarea, .page select, .page input { color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px; width: 100%; min-width: 0; }
-.page textarea { resize: vertical; min-height: 104px; }
+.page textarea { resize: vertical; min-height: 148px; line-height: 1.55; font-weight: 400; }
 .page button, .page a { font-size: 13px; }
 .quick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.optional { border: 0; margin: 0; padding: 0; min-width: 0; }
-.optional legend { padding: 0 0 8px; font-size: 13px; color: var(--text-secondary); }
-.optional .quick { grid-template-columns: minmax(0, 1fr); }
-.optional label { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: center; }
-.optional select { font-size: 12px; }
+.optional { border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); margin: 0; padding: 10px 0; min-width: 0; }
+.optional summary { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); align-items: start; gap: 8px 12px; font-size: 13px; }
+.optionalSummary { color: var(--text-secondary); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.optionalFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; padding-top: 12px; }
+.optionalFields label { min-width: 0; }
+.optionalFields select, .optionalFields input { font-size: 12px; }
+.parseStatus { display: flex; flex-direction: column; gap: 5px; padding: 9px 10px; background: var(--bg-secondary); border-radius: 6px; overflow-wrap: anywhere; }
+.parseStatus strong { font-size: 13px; }
+.parseStatus p, .parseSummary p { margin: 0; font-size: 12px; line-height: 1.5; }
+.parseStatus .controls { margin-top: 3px; }
+.parseDetails summary { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 8px; }
+.parseDetails summary span { font-weight: 600; }
+.parseDetails summary small { color: var(--text-secondary); line-height: 1.45; overflow-wrap: anywhere; }
+.parseSummary { display: grid; gap: 6px; padding-top: 8px; overflow-wrap: anywhere; }
 .controls { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .controls button, .quiet { border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary); border-radius: 6px; min-height: 32px; padding: 6px 10px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
 .controls button[aria-pressed=true] { background: var(--bg-tertiary); border-color: var(--text-secondary); }
-.primary { background: var(--primary-color, #337bc1); color: #f8fafc; border: 0; min-height: 42px; border-radius: 6px; padding: 8px 14px; font-weight: 600; cursor: pointer; }
+.page .primary { width: 100%; background: var(--primary-color, #337bc1); color: #f8fafc; border: 0; min-height: 48px; border-radius: 6px; padding: 8px 14px; font-size: 14px; font-weight: 600; cursor: pointer; }
 .page button:disabled { opacity: .5; cursor: not-allowed; }
 .preview { min-height: 330px; aspect-ratio: 1; background: var(--bg-secondary); display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
 .preview img { width: 100%; height: 100%; object-fit: contain; }
@@ -44,5 +54,5 @@
 .recordText small { color: var(--text-secondary); }
 .empty { padding: 24px 0; color: var(--text-secondary); }
 .page details summary { font-size: 13px; cursor: pointer; padding: 4px 0; }
-@media (max-width: 1120px) { .layout { grid-template-columns: minmax(230px, 280px) minmax(300px, 1fr); } .detail { grid-column: 1 / -1; } }
-@media (max-width: 720px) { .page { padding: 12px; } .layout { grid-template-columns: minmax(0, 1fr); gap: 18px; } .preview { min-height: 0; } .detail { grid-column: auto; } .record .controls { width: 100%; } }
+@media (max-width: 1120px) { .layout { grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 20px; } .detail { grid-column: 1 / -1; } }
+@media (max-width: 720px) { .page { padding: 12px; } .layout { grid-template-columns: minmax(0, 1fr); gap: 18px; } .preview { min-height: 0; } .detail { grid-column: auto; } .record .controls { width: 100%; } .optionalFields { grid-template-columns: minmax(0, 1fr); } .optional summary, .parseDetails summary { grid-template-columns: minmax(0, 1fr); gap: 4px; } }

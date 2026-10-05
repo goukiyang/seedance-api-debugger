@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '模板名称右侧只保留收藏；工作台新增我的收藏入口，可查找、使用和取消收藏的模板。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '人物生成按完整原描述理解，简短描述不再被预设分类拦住；补充条件可选，四宫格和独立头像都保留原意。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { AvatarConstraints } from './types';
-import { decodeDescriptionOutput, DescriptionContractError, validateDescriptionConstraints } from './description-contract';
+import { decodeDescriptionOutput, DescriptionContractError, originalDescriptionConstraints, validateDescriptionConstraints } from './description-contract';
 import { intentIssues, intentView } from './intent';
 import { AVATAR_PARSER_VERSION } from './types';
 
@@ -37,21 +37,26 @@ async function receiptState(id: string, raw: string | null, store: DescriptionSt
   if (a?.requestId && await store.readResponse(a.responseId || a.requestId) !== null) return { ...state, canRecheck: true, cost: 'response-received' as const, message: '已保存文字模型回复，可免费重新检查；没有提交人物图片任务。' };
   return state;
 }
+function cachedConstraints(value: AvatarConstraints, description: string) {
+  try { return validateDescriptionConstraints(value, description); }
+  catch (e) {
+    if (!(e instanceof DescriptionContractError)) throw e;
+    return originalDescriptionConstraints(description);
+  }
+}
+function understoodStatus(description: string, parsed: AvatarConstraints): DescriptionStatus {
+  const issues = intentIssues(parsed);
+  return { descriptionId: descriptionId(description), parserVersion: AVATAR_PARSER_VERSION, constraints: parsed, understanding: intentView(parsed), state: issues.length ? 'needs-clarification' : 'succeeded', canRecheck: false, cost: 'response-received', message: issues.length ? `有相互冲突的条件：${issues.join('；')}` : parsed.interpretation === 'original' ? '将按原描述生成，不需要按固定格式补填；本次不重复调用文字模型。' : '将按你的描述生成，未指定的外观自动补齐；补充条件可选。' };
+}
 export async function inspectDescription(description: string, store: DescriptionStore, now = Date.now()): Promise<DescriptionStatus> {
   const cached = await store.readCache();
-  if (cached) {
-    try { const parsed = validateDescriptionConstraints(cached, description), issues = intentIssues(parsed); return { descriptionId: descriptionId(description), parserVersion: AVATAR_PARSER_VERSION, constraints: parsed, understanding: intentView(parsed), state: issues.length ? 'needs-clarification' : 'succeeded', canRecheck: issues.length > 0, cost: 'response-received', message: issues.length ? '已理解部分要求，还有条件需要补充或调整；原回复保留，不会自动再次调用模型。' : '文案已分析，可以生成；快捷条件和锁会一起核对，不再次调用文字模型。' }; }
-    catch (e) { return { ...(await receiptState(descriptionId(description), await store.readAttempt(), store, now)), descriptionId: descriptionId(description), state: 'failed', cost: 'response-received', message: '已有解析不符合当前校验要求，原内容保留；不会自动重新调用模型。', failure: { code: 'cached_contract_invalid', stage: 'validation', ...(e instanceof DescriptionContractError ? { field: e.field } : {}) } }; }
-  }
+  if (cached) return understoodStatus(description, cachedConstraints(cached, description));
   return receiptState(descriptionId(description), await store.readAttempt(), store, now);
 }
 
 export async function resolveDescription(description: string, options: { approved: boolean; retryToken?: string; recheck?: boolean }, store: DescriptionStore, call: () => Promise<{ content: string }>): Promise<AvatarConstraints> {
   const id = descriptionId(description), cached = await store.readCache();
-  if (cached) {
-    try { return validateDescriptionConstraints(cached, description); }
-    catch (e) { if (!options.retryToken && !options.recheck) throw new AvatarDescriptionError({ ...(await inspectDescription(description, store)), message: `已有解析无法确认：${e instanceof Error ? e.message : '格式无效'}。原内容保留，不重新收费调用。` }, 422); }
-  }
+  if (cached) return cachedConstraints(cached, description);
   let raw = await store.readAttempt();
   const state = await receiptState(id, raw, store);
   if (options.retryToken !== undefined && (!options.approved || state.state === 'pending' || state.state === 'unknown' || state.canRecheck || options.retryToken !== state.retryToken)) throw new AvatarDescriptionError(state);
@@ -92,18 +97,16 @@ export async function resolveDescription(description: string, options: { approve
   try {
     parsed = validateDescriptionConstraints(decodeDescriptionOutput(output), description, attempt.parserVersion === AVATAR_PARSER_VERSION || attempt.parserVersion === '1.1.0');
   } catch (e) {
-    if (e instanceof AvatarDescriptionError) throw e;
-    const field = e instanceof DescriptionContractError ? e.field : 'response';
-    const failed: Attempt = { ...attempt, responseId: attempt.responseId || attempt.requestId, cost: 'response-received', state: 'failed', updatedAt: new Date().toISOString(), failure: { code: 'description_contract_invalid', stage: 'validation', field } };
-    await store.replaceAttempt(raw!, JSON.stringify(failed));
-    const info = statusFor(id, await store.readAttempt(), Date.now());
-    throw new AvatarDescriptionError({ ...info, message: `描述解析未通过校验：${e instanceof DescriptionContractError ? e.message : '回复无法确认'}（${field}）。原回复与草稿保留，可免费重新检查；没有提交图片任务。` }, 422);
+    if (!(e instanceof DescriptionContractError)) throw e;
+    // A saved reply with an incompatible schema must not force the user to rewrite.
+    // Keep that receipt, ignore unvalidated fields, and forward the original intent.
+    parsed = originalDescriptionConstraints(description);
   }
   try {
     const next = JSON.stringify({ ...attempt, responseId: attempt.responseId || attempt.requestId, cost: 'response-received', state: 'succeeded', failure: undefined, updatedAt: new Date().toISOString() });
     if (!await store.complete(raw!, next, parsed)) {
       const existing = await store.readCache();
-      if (existing) return validateDescriptionConstraints(existing, description);
+      if (existing) return cachedConstraints(existing, description);
       throw new AvatarDescriptionError(await receiptState(id, await store.readAttempt(), store));
     }
     return parsed;

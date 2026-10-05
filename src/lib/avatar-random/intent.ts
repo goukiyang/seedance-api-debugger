@@ -11,7 +11,8 @@ export function intentIssues(constraints: AvatarConstraints) {
     const common=constraints.explicit[key];
     if(common?.value&&field.value&&common.value!==field.value||common?.excluded?.includes(field.value)||field.excluded?.includes(common?.value||''))conflicts.push(`共同${fieldLabels[key]}条件与某一位人物的要求冲突，请调整描述`);
   }
-  return Array.from(new Set([...constraints.conflicts, ...constraints.unrecognized, ...(constraints.clarifications || []),...conflicts]));
+  // Classification gaps are not contradictory user requirements.
+  return Array.from(new Set(conflicts));
 }
 export function intentView(constraints: AvatarConstraints) {
   const fields = Object.entries(constraints.explicit).map(([key, field]) => `${fieldLabels[key]}：${field.value || '不限'}${field.excluded?.length ? `；排除${field.excluded.join('、')}` : ''}`);
@@ -20,7 +21,7 @@ export function intentView(constraints: AvatarConstraints) {
   return {
     summary: constraints.summary || '已保留原描述中可确认的条件。',
     explicit: [...fields, ...constraints.details.map(detail => detail.value), ...members, ...(constraints.background ? [`背景：${constraints.background}`] : [])],
-    soft: [...Object.entries(constraints.soft || {}).map(([key, field]) => `${fieldLabels[key]}：${field.value}`), ...constraints.scopes.map(scope => scopeLabels[scope])],
+    soft: [...Object.entries(constraints.soft || {}).map(([key, field]) => `${fieldLabels[key]}：${field.value}`), ...constraints.scopes.map(scope => scopeLabels[scope] || scope)],
     randomizable: Object.keys(catalog).filter(key => !constraints.explicit[key]?.value && !constraints.members?.some(member => member.explicit[key]?.value)).map(key => fieldLabels[key]),
     issues: intentIssues(constraints),
   };
