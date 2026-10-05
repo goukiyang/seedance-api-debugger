@@ -1,9 +1,9 @@
 # 头像受控随机生成器 V1
 
 项目：video-api-debugger
-文档版本：1.1.0
+文档版本：1.2.0
 正式目录：/Volumes/Data/Projects/video-api-debugger
-状态：2026-10-05应用v0.42.2已部署；单次付费检测已实际出一张四宫格并扣5点，余额/历史刷新已修复并只读复查；原描述仍缺，见第14节。G1-G3历史保留第13节
+状态：2026-10-05应用v0.42.3已部署；有限状态修复见第15节。输入与生成链路重梳、开源来源及许可边界已补齐，第17节及关联子Todo为新方案、尚未实施；原实际描述仍缺，历史证据保留
 最后更新：2026-10-05（北京时间）
 正式版本来源：实施时重新读取正式站/api/release及服务器部署标记；不使用历史工作树直接覆盖线上
 本轮范围：实施人物生成V1与站内嫁接、导入窗口删除；还原生成图下方悬停显示的恢复设置按钮，图片单击只选中；聚焦提交与安全发布
@@ -371,3 +371,50 @@ G1新真实反馈（2026-10-05用户原话，文字无附件）：“描述解�
 修复方向（本轮建议，尚未实施）：先把“LLM理解文案”与“图片生成”分开，让用户看到可读的理解摘要、已确认要求、可随机项与真正需要澄清的具体问题；字段结构成功、语义待澄清、可生成分别呈现。能解释的表达应保留到真实受支持条件/提示词，不能因不在菜单里就全部否定；无法确定的重要条件原文保留，只追问该项，不让用户重填整段。相同描述复用避免重复收费，但语义待澄清不能藏成成功，也不能无确认自动再次模型调用。首次独立分析及重新分析的收费/触发方式需明确，当前只读输入检查不静默变为收费自动分析；人物条件原文证据、否定/冲突/多人、未知提交及缓存保护不撤销。
 
 复用查找：已读取LangChain官方开源with_structured_output实际实现中include_raw分支（raw、parsed、parsing_error分开，失败保留原回复，未引入额外模型自动重试），[源码](https://github.com/langchain-ai/langchain/blob/master/libs/partners/openai/langchain_openai/chat_models/base.py)。只借鉴“模型回复/解析结果/错误分层”，不是语义理解已解决的证明，也没有安装Python框架或改现有Next.js/Musk通道；项目已具私有原回复与免费重检，可局部复用，具体改动待实际文案和新主路径明确后实施。费用、权限、生产数据与依赖边界不扩大；无新增分级误判。
+
+## 17. 开源数据与词库来源（2026-10-05）
+
+用户补充：上一版未正式写明具体采用的开源来源，建议DiceBear作系统结构/Seed随机参考、MAAD-Face作真人属性体系主参考、CelebA补充查漏、Avataaars参考字段拆分，最终整理自有Avatar DNA；不把CelebA/MAAD-Face原始图片库作为产品素材源，DiceBear各Style许可分别核对。用户要求“帮我看看，要不要补充执行下去”，并要求本标题正式补入工单。本轮先核实并形成推荐选型，不默认安装四个库或进入商业数据复制/收费生成。
+
+结论：应补充，但“四个来源”不是“四个运行依赖”。保留已有`src/lib/avatar-random/`随机内核与词库，先修理解状态，再做来源/字段对照及最小缺项。明确来源能防止自行另选图库/随机框架；引入第三方包并不能解决第16节语义待处理缓存循环。
+
+| 来源 | 正式推荐用途 | 生产采用边界 |
+|---|---|---|
+| DiceBear | 结构、Seed/字段随机、可选组件概率、显式权重与约束参考 | 参考机制，不替换现有内核、不新增HTTP头像依赖、不使用其Style美术；需引用MIT代码时保留版权/许可并固定版本 |
+| MAAD-Face | 真人可见属性分类的主要研究对照来源，筛选必要概念 | 不是可直接导入的商业词库；不下载逐图标注、身份或图像。复制/改编定义或组织结构前核对署名、同许可及来源义务，未清不进入生产 |
+| CelebA | 公开论文层面的基础分类查漏线索 | 从商业数据/标注/频率/训练来源中排除；不能以“不用图片”为由复制其标注或衍生数据，另获明确授权前不导入 |
+| Avataaars | 头发、眼、眉、嘴、饰品、胡须、衣服、肤色等字段组织参考 | 不接SVG人物组件或美术，不替代真人DNA；代码MIT与美术条款分开；现React实现不作为生产依赖 |
+
+### 核实来源与差异
+
+- DiceBear[官方许可](https://www.dicebear.com/licenses/)区分MIT软件与各Style美术许可，不能统称所有资源MIT。[schema固定commit3778ee4的options.json](https://github.com/dicebear/schema/blob/3778ee46fa7cb5cb51b76365fc155bf0ce39b3cd/src/options.json)实际包含seed、组件概率/变体权重及颜色约束相关选项；[definition.json](https://github.com/dicebear/schema/blob/3778ee46fa7cb5cb51b76365fc155bf0ce39b3cd/src/definition.json)是SVG样式定义，不是可以原样套用的真人属性Schema。schema包当时2.0.2、[MIT许可](https://github.com/dicebear/schema/blob/3778ee46fa7cb5cb51b76365fc155bf0ce39b3cd/LICENSE)已读。结构可参考，具体身体/人物冲突仍属本项目规则。
+- 已读DiceBear[Prng.ts](https://github.com/dicebear/dicebear/blob/4db7af08605ecbf1c142b710ad1819473c096895/src/js/core/src/Prng.ts)及[Resolver.ts](https://github.com/dicebear/dicebear/blob/4db7af08605ecbf1c142b710ad1819473c096895/src/js/core/src/Resolver.ts)的字段key取样、权重、概率与缓存分支。该默认分支快照core为11.0.0-rc.2，要求Node>=22，属于预发布，不作为已验证生产选型。其pick会去重，直接套入本项目用重复条目表达权重的catalog会改变分布；不能“借机制”后声称旧Seed仍复现。只作代码参考，未安装、未运行或复制。
+- MAAD-Face[官方README固定commit5915271](https://github.com/pterhoer/MAAD-Face/blob/5915271b855399c830fc4cfd360df19c8f300791/README.md)确认47属性、项目标注CC BY-SA 4.0，图像源VGGFace2且图像版权不转移；[原论文Table III](https://arxiv.org/pdf/2012.01030)确认年龄感/发型/胡须/眼镜/面部等分类，也说明标注来源含CelebA/LFW。本轮只读公开定义、未获取逐图数据。论文正文许可与数据许可不能互相替代；数据集研究标注不能作为生成随机权重或产品默认偏好的事实。
+- [CC BY-SA 4.0官方说明及法律正文入口](https://creativecommons.org/licenses/by-sa/4.0/)允许满足条件的商业使用，但要求署名、标明改动及在适用时同许可分发改编内容；不保证肖像/隐私等其他权利，也不能无分析就说整个应用要开源。“只用标签”不是自动免责。具体何种标签/编排构成受许可材料或改编属于使用方式问题，本轮不提供法律保证；推荐优先独立撰写通用可见外观定义，保留参考来源，不能把实质复制伪称独立创作。
+- CelebA[原作者官方Agreement](https://mmlab.ie.cuhk.edu.hk/projects/CelebA.html)确认40属性及非商业研究限制，商业限制也提到衍生数据，另有限制再分发。建议将“属性补充来源”收窄成公开研究分类线索，不下载、复制标签表/图片、统计分布或作为商业训练素材。查漏后需要的通用外观概念由本项目独立定义，是否构成受限复制仍按实际使用核对。
+- Avataaars[MIT代码许可](https://github.com/fangpenlin/avataaars/blob/93aa902c729b1a9eaf2b5917c6d1ebe9de32af75/LICENSE)、[options/index.tsx](https://github.com/fangpenlin/avataaars/blob/93aa902c729b1a9eaf2b5917c6d1ebe9de32af75/src/options/index.tsx)与[OptionContext.ts](https://github.com/fangpenlin/avataaars/blob/93aa902c729b1a9eaf2b5917c6d1ebe9de32af75/src/options/OptionContext.ts)已读，确认选项分组和值/默认管理；[package.json](https://github.com/fangpenlin/avataaars/blob/93aa902c729b1a9eaf2b5917c6d1ebe9de32af75/package.json)为2.0.0、React peer^17，与本项目React18不直接匹配。仅参考组织，不新增此包；其原美术是作者自定使用条款，不能由React实现MIT反推全部图形MIT。
+
+以上为2026-10-05当时公开源码/许可快照，不是实际接入通过或正式法律意见；后续实施引用固定版本复核，不把默认分支当稳定发布。未下载数据集、模型权重或美术资产。
+
+### 统一Avatar DNA的落地要求
+
+运行路径应为：自然语言 → LLM理解与明确/排除/软条件 → 自有DNA结构/已许可词库 → 权重和冲突校验随机 → 提示词 → AI图片模型。LLM负责理解，不负责随机取代用户条件；词库不能只存在工单里，采用项必须解析、校验、随机、编译全程生效。
+
+- 在现有catalog建立字段对照：已覆盖/需细化/必要新增/不采用/许可待定。现有鼻、唇、颧骨、眉、眼、发型等细分保留；胡须缺项按实际用途补。47/40研究二值标签不是要求产品照搬全部字段，也不能与现有多值/数值范围强制一一对应。
+- 每个采用项记录稳定ID、中文定义/别名、值域、肯定/否定、互斥与依赖、权重/适用条件、提示词落点、来源URL/固定版本、采用方式及许可状态。一般外观概念独立撰写，不把受限标签表换中文就算自有原创；来源有同许可要求的内容单独辨识处理。
+- 不把族群/“吸引力评分”等研究标签自动加入本轮产品默认随机；年龄感不冒充真实年龄，未知标注不等于否定。权重是产品策略，不抄数据集人口比例/标签频率；不新增从真人照片推断敏感属性的功能。
+- 保留明确输入/否定/锁/范围/预算和四格差异；字段、词库或采样变化单独版本化，新旧人物快照兼容，旧历史恢复不能用新版重新随机。Seed复现只针对同版本规则和完整上下文，不承诺AI模型像素一致。
+- 禁止将CelebA、MAAD-Face/VGGFace2原始图片作为本产品素材、参考图或训练输入；生产结果仍由已有AI模型通道生成。不引入DiceBear/Avataaars美术。AI生成不自动证明不存在相似真人、肖像或其他商业风险，不作“版权完全无风险”承诺。
+
+### 后续顺序与本轮对账
+
+先落实文案理解/语义就绪及错误恢复，再对照现有词库补必要字段与显式权重、来源记录，最后统一定向验证。必要来源/许可映射可与理解实现安全隔离准备，但共享Schema/内核由单一lead集成；不先迁移随机框架。新增依赖、受许可资料的实质复制或新付费测试有独立门槛，不能借工单补充默认批准。
+
+[链路重梳与P1-P4/O2-O3执行待办](2026-10-05-avatar-intent-generation-flow.md)保存状态/缓存、字段生效、历史兼容、有限验证、Git与停止条件；原[需求](../../docs/materials/2026-10-04-controlled-avatar-generator/requirements.txt)、[补充](../../docs/materials/2026-10-04-controlled-avatar-generator/supplements.txt)、[真实四宫格原图](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-paid-verification/contact-sheet-result.png)、[恢复同行原截图](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-restore-action-row/codex-clipboard-d538df10-c2b4-4507-9f80-93d16ac6a08d.png)及[有限状态报告](../../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/delivery.json)作为相关已有附件保留正式入口，私有图不新增公开上传。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| L1 | 重梳生成链路 | 输入框含义、各阶段状态、条件生效与失败恢复形成一致流程 | 已完成方案，应用未改 |
+| O1 | 补齐开源来源 | 核实四项来源的用途与许可，写进正式工单及执行待办 | 已完成原始来源/代码核对与记录，未导入库/数据 |
+
+本轮只做文档差异、来源、资料入口和聚焦Git检查，未收费、改源码/数据库、功能验收、升级应用或重启部署。实际应用仍v0.42.3；词库来源和新生成链路实际实现待后续明确执行，不称已上线。守门核对无新增分级/归类误判，法律适用性/原实际文案及新链路真实测试缺口保留。

@@ -2,6 +2,7 @@
 
 ## 当前入口
 
+- [人物输入与生成链路重梳 / 开源数据与词库来源 L1/O1](todo/2026-10-05-avatar-intent-generation-flow.md)：2026-10-05，方案v1.0.0及原工单v1.2.0第17节；LLM理解/语义就绪→有效条件→自有DNA/词库→受控随机→单张四宫格，缓存/费用/恢复边界明确。DiceBear/Avataaars作机制与字段参考、不新增依赖；MAAD-Face分类参考须辨明署名/同许可和来源，CelebA不导入商业数据；禁止原始真人数据集图片作产品素材。公开原始许可及固定源码已核，应用/新词库尚未修改，v0.42.3不升级、不部署、费用0。P1-P4/O2-O3待后续明确执行，具体旧文案仍缺；[唯一来源条目](todo/2026-10-04-controlled-avatar-generator.md#17-开源数据与词库来源2026-10-05)、[资料索引](../docs/materials/index.md#头像受控随机生成器-v1-需求2026-10-04)。
 - [模板上下文及设置模板管理 UI1-UI3 / CTX1-CTX4](todo/2026-10-04-template-context-version-code.md)：2026-10-04 v0.40.0已部署；移除交付详情、模板改名/更新/归档、生成按钮移至主图上方、原文稳定五位码及历史标签。源码116ee2a，BUILD irfPSW4cqY4pqCko6De9P；发布检查通过，待用户手动验收。曾因worker SQLite超时回退，未人工重启worker，最终PID稳定；经过、风险、14源码/15公网静态证据与统一diff见工单第11节。[资料索引](../docs/materials/index.md#模板上下文五位版本码2026-10-04)。
 - [设置保存成功关闭统一修正 S1/S2](todo/2026-10-04-settings-save-close.md)：2026-10-04 v0.39.1已部署；图片/视频上下文、模板编辑弹窗及后台 API 设置统一成功退出、失败留输入，多表单与新草稿保护。源码9c8a9ac（codex/settings-save-close-20261004），衔接v0.39.0保留原新版功能，构建/17源码/19新公网静态/4服务检查通过；待用户手动功能验收。[统一diff](todo/2026-10-04-settings-save-close.diff)、[证据](todo/2026-10-04-settings-save-close.evidence.json)。
 - [头像受控随机生成器 V1](todo/2026-10-04-controlled-avatar-generator.md)：2026-10-05 v0.42.3/907a7a2/BUILD FsqpYuy1_T1uLBWVvKz96已部署；新增12组有限状态测试，23项真实组件隔离复测/8项真实条件内核通过、5项线上可撤销检查完成；修复未知提交微调绕过、旧查询覆盖成功图、首次查失败后手动查询失效。本轮新增费用0，新页复查同原成功图片/历史/缩略图与余额6240保留，新故障生产交互待手动验收。先前唯一真实1024²四位不同人物四宫格任务扣5点，不重发；G1仍缺原描述免费重检/最初400字段未知，G3原恢复同行交互缺口保留，退款/新付费失败未实测。候选/内置检查、公网/回退/Git通过，P1-P5/G1-G3/V1-V2历史见12-14节，S1-S2见15节，不用正式根旧源码部署。[完整测试/发布报告](../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/delivery.json)、[本轮源码diff](../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/source.diff)、[真实页证据](../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-state-tests/real-page-evidence.json)、[安全付费回执](../docs/materials/2026-10-04-controlled-avatar-generator/2026-10-05-paid-verification/receipt.json)、[资料索引](../docs/materials/index.md#头像受控随机生成器-v1-需求2026-10-04)。
@@ -6575,4 +6576,5 @@ flowchart LR
 - `tasks/todo/2026-10-02-template-primary-actions.md`：模板主操作与产品弹窗
 - [模板工作台体验优化工单](todo/2026-10-02-template-workbench-ux.md)：WS1-WS7已获实施授权，当前实现/发布进度以同一原工单及顶部入口为准；历史来源和已有附件保留。
 - `tasks/todo/2026-10-02-unified-resource-library.md`：统一创作资源库功能盘点与整合建议
-- [头像受控随机生成器 V1 工单](todo/2026-10-04-controlled-avatar-generator.md)：2026-10-04规划、2026-10-05批准实施及v0.41.1部署，文档v1.1.0；当前P1-P5与手动验收状态见第12节，原需求及正式交接证据见资料索引。
+- [头像受控随机生成器 V1 工单](todo/2026-10-04-controlled-avatar-generator.md)：文档v1.2.0；原实施及v0.41.*历史见第12节，当前v0.42.3有限状态修复见第15节；第17节补齐开源来源与许可边界，新链路尚未实施。原需求及正式交接证据见资料索引。
+- [人物输入与生成链路重梳](todo/2026-10-05-avatar-intent-generation-flow.md)：2026-10-05，方案v1.0.0；L1/O1方案/来源记录完成，P1-P4/O2-O3实施待办未开始。收尾复核：只有固定记录变更，来源/字段/缓存/费用/历史边界对应目标；不冒充功能验收或法律保证，不自动新增依赖/模型调用/数据集素材。
