@@ -3,12 +3,12 @@
 | 字段 | 内容 |
 |---|---|
 | 项目 | video-api-debugger |
-| 工单版本 | v1.2.0 |
+| 工单版本 | v1.3.0 |
 | 正式版本来源 | package.json、src/lib/release.ts、生产/api/release；开工v0.36.2，发布前重新锁定 |
 | 正式资料目录 | /Volumes/Data/Projects/video-api-debugger |
-| 实施/部署源 | 历史批次来源见对应章节；本轮E1/E2为/Volumes/Data/Projects/video-api-debugger/worktrees/avatar-generator-20261005，codex/avatar-generator-20261005；开工0941beac/v0.43.3，tracked clean；正式根旧src不部署 |
+| 实施/部署源 | 历史批次来源见对应章节；本轮FAV1为/Volumes/Data/Projects/video-api-debugger/worktrees/template-title-favorites-20261005，codex/template-title-favorites-20261005；开工3fae527/v0.43.4，正式根旧src不部署 |
 | 目标 | https://sd2.youdooart.com/template-studio?type=image；I4确切入口https://sd2.youdooart.com/generate |
-| 状态 | 历史I1-I5/N1/N2/R1/D1/D3已部署，实际效果待用户手动验收；G1上游HTTP 502内部原因未知，未修复；本轮E1已实现部署v0.43.4、待用户手动验收，E2发布检查已完成；费用0 |
+| 状态 | 历史批次按各章节保留；G1上游HTTP 502内部原因未知，未修复；本轮FAV1已实现部署v0.44.0，发布检查完成，真实效果待用户手动验收；费用0 |
 | 风险/验证等级 | 历史debug/人物主链按原章节L3；本轮共享显示源码L1，生产发布另做窗口与回退保护；禁止主动浏览器/业务验收与独立审核线程 |
 | 创建/最后更新 | 创建2026-10-03；最后更新2026-10-05，北京时间；文件名保留2026-10-02反馈日期 |
 
@@ -856,6 +856,42 @@ Git/发布：源码在codex/avatar-generator-20261005聚焦提交，必须等pus
 整批最终已部署v0.43.3 / 0941beacd2cf71b1d02f1111470d804f4996b3f4 / BUILD D7veEEW5tSA1MsaVkxWwm，D1/D3真实效果待用户手动验收、D2发布检查完成。候选首次类型问题修成等价比较，最终exact commit服务器候选build内置类型/lint通过；不覆盖旧v0.43.3候选标签，实际发布标签release/v0.43.3-avatar-one-click-final与分支均指0941，rollback指03aa5e8，push与refs先核再切。两个入口三份新chunk公网200/hash对应候选，789源码/BUILD对应正式产物，web/worker active且worker PID259902未重启，持久数据/环境原样、源码与旧构建回退点保留。匿名入口仍登录保护，未证明登录后布局/一键收费效果；已有升级提示仅核源码，不当实演。源/脚本问题与警告详见[人物同批最终记录](2026-10-05-avatar-intent-generation-flow.md#10-人物正文一键出图2026-10-05)。
 
 正式根同目录归[交付及逐文件命令](../../docs/materials/2026-10-05-generation-toolbar/delivery.json)、[最终统一diff](../../docs/materials/2026-10-05-generation-toolbar/unified.diff)、[时序费用源码自查](../../docs/materials/2026-10-05-generation-toolbar/source-review.json)及[公网新产物](../../docs/materials/2026-10-05-generation-toolbar/server-public-proof.json)，主Todo/资料索引同步。费用0，无模型/生成/浏览器/截图或自动功能回归，没有权限/点数/Provider/schema/依赖变化；真实冲突、变价、未知受理及旧草稿保护不撤销。守门员清单无阻塞，本轮无自身分级误判；归档/推送不包括原无关29行资产计划、私有用户图片或原回复。
+
+## FAV1模板标题与收藏闭环（2026-10-05）
+
+用户原话：“模版标题只保留收藏，放在名称右边，不要单独换行；另外要考虑收藏完后，怎么展示问题，要考虑闭环”。来源为本对话及模板工作台截图，原文件名codex-clipboard-d2a7827a-f62f-46fa-b4f2-8f16c99e452b.png；正式原件见[资料索引](../../docs/materials/index.md#模板标题收藏闭环2026-10-05)。旧图是反馈证据，不是实现效果证据。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| FAV1 | 模板收藏与标题整合 | 收藏与名称同行，收藏列表可找回、使用及取消 | 进行中：已实现并部署v0.44.0，发布检查完成，待用户手动验收 |
+
+确认范围：图片模块、图片设置模板及视频模板/模块标题仅保留名称右侧收藏，移走点赞UI及其计数，既有点赞记录不删除。名称与收藏作为同一不拆行的标题组，长名安全截断，编辑名称/收藏事件不互相触发。模板工作台顶部增加“我的收藏”，进入已有/assets?view=favorites&category=template；沿用个人收藏、最近优先、搜索、加载更多、使用模板、取消并撤销、不可用内容及错误重试；不新建平行收藏数据或权限入口。同类旧模板详情与收藏卡标题一并调整，点赞合集保留取消历史点赞能力。
+
+执行：以当前正式v0.43.4/3fae527为源在隔离worktree实施，保护其他任务及正式根脏改。只动前端与版本/摘要；无DB写入、迁移、付费生成、权限扩大，不覆盖历史头像/按钮/激活图标修复。整批实现后仅候选构建内置检查、源码范围Review、Git远端与回退、服务/版本/公网新静态检查；不进行浏览器或功能自动验收，部署后待用户手动验收。
+
+参考：[React Aria ToggleButton](https://react-aria.adobe.com/ToggleButton)官方选择/取消与状态示例，仅借鉴交互语义；复用本项目ContentReactions/ContentCollections，不新增依赖。
+
+### FAV1实现与发布记录
+
+2026-10-05北京时间23:00发布v0.44.0，源码17c55b23f314c5cbe9854a4c3f7ec5b4e78a4861，BUILD 2eaaF0OY1UB1XncX97oQJ。模板工作台顶部“我的收藏”直接打开个人收藏的模板分类；既有最近收藏顺序、搜索、使用、取消/撤销、失效内容处理、账号隔离及刷新恢复均复用，不新增业务请求类型。图片模块/设置模板、视频模板/已存模块、旧模板详情与收藏卡标题统一收藏同行；历史点赞合集保留取消旧点赞。名称过长截断并保留完整名称提示，收藏保存中/失败重试不挤换标题行；真实已收藏才显示选中。
+
+| 文件（相对本轮唯一源码） | 本轮内容 |
+|---|---|
+| src/components/content-reactions/TemplateFavoriteTitle.tsx | 共享同行标题与收藏组合，不嵌套按钮 |
+| src/components/content-reactions/ContentReactions.tsx | 可选favoriteOnly隐藏点赞/分享，默认其他内容不变；保留原请求、真实状态、错误重试与跨页同步 |
+| src/components/content-reactions/reactions.module.css | 收藏同行、长标题安全收缩、选中颜色与就地状态，不改媒体激活覆盖层 |
+| src/app/image-studio/studio.tsx、studio.module.css | 图片模块/设置模板名称旁收藏；原模板共享开关移到右侧配置区，功能保留 |
+| src/components/template-studio/TemplateStudioShell.tsx | 顶部我的收藏直达已有模板收藏列表 |
+| src/components/template-studio/VideoTemplateWorkbench.tsx、template-studio.module.css | 视频模板/模块主标题与目录收藏同行，保持编辑及使用入口 |
+| src/components/templates/TemplateLibraryClient.tsx | 旧模板详情标题同行收藏 |
+| src/components/content-reactions/ContentCollections.tsx | 模板收藏卡名称同行取消收藏，复用取消后的撤销及使用按钮 |
+| package.json、src/lib/release.ts | 唯一版本0.44.0与更新摘要；无依赖/锁文件改动 |
+
+发布检查：git diff --check通过；服务器exact commit候选NEXT_DIST_DIR=.next-prod-candidate npm run build完成编译及内置lint/types（保留既有非阻塞img/hooks警告）。789个运行源码与原版本对应，变更白名单仅12个应用文件；候选包含收藏入口/同行标题CSS。分支、release/v0.44.0-template-favorites及rollback/2026-10-05-before-template-favorites-v0.44.0先推远端核对后切换；发布窗口认领和服务器flock保护。web active，localhost配置与公网release/health/config/login 200，新CSS及3份JS的公网哈希与候选一致；图片worker PID不变。外部/匿名更新摘要仍为空，升级通知复用已有ReleaseNotice，只核源码/产物，不冒充真实升级交互验收。
+
+回退保留：原源码/srv/video-api-debugger/releases/3fae527e7cdeb07fb4e20cdf85966a3892ef2132-template-title-favorites-rollback，原构建/srv/video-api-debugger/app/.next-prod-prev-template-title-favorites-17c55b2；数据/环境/上传目录排除同步，未写数据库、改变权限或触发付费生成。本地gouki默认/tmp同名旧脚本写入被拒，改用本批唯一目录保留旧文件；gouki无站点服务sudo权限，按既有已授权root SSH key路线保护脚本后切换，无新增权限/凭据读取。两项属于发布准备，不是功能故障。无自身分级误判；守门员finish未识别注册项目（project=null），已按实际AGENTS补齐路径、范围、持久数据/回退、版本与公网等价检查，不将工具调用成功说成项目验收通过，禁止自动审查/业务验收的项目规则保持。
+
+正式根资料：[统一源码diff](../../docs/materials/2026-10-05-template-title-favorites/source.diff)、[候选产物](../../docs/materials/2026-10-05-template-title-favorites/candidate.json)、[构建日志](../../docs/materials/2026-10-05-template-title-favorites/build.log)、[公网证据](../../docs/materials/2026-10-05-template-title-favorites/public.json)，原截图保留不公开。按关键程度已核源/回退包传输哈希、公网产物哈希及diff来源；辅助日志不重复逐项哈希。未进行浏览器、截图、真实收藏写入或功能自动回归，实际名称同行、收藏成功→我的收藏→使用→取消/撤销由用户手动验收；无已确认功能故障，不将未验收称通过。
 
 ## E1/E2激活点赞收藏图标常显（2026-10-05）
 

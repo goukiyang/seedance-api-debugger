@@ -1,0 +1,70 @@
+{
+  "commit": "17c55b23f314c5cbe9854a4c3f7ec5b4e78a4861",
+  "version": "0.44.0",
+  "build": "2eaaF0OY1UB1XncX97oQJ",
+  "workerPid": "unchanged",
+  "checks": [
+    {
+      "pathname": "/api/release",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/api/health",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/api/config",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/login",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/template-studio?type=image",
+      "status": 200,
+      "finalPath": "/login",
+      "authRedirect": true
+    },
+    {
+      "pathname": "/assets?view=favorites&category=template",
+      "status": 200,
+      "finalPath": "/assets",
+      "authRedirect": false
+    },
+    {
+      "route": "/template-studio/page",
+      "file": "static/css/c4ef3de081a47fc6.css",
+      "status": 200,
+      "sha256": "9e43a11e61c070e0245e491424216f76eec8ab88d4cc629d342a8551208f76f2",
+      "matchesCandidate": true
+    },
+    {
+      "route": "/template-studio/page",
+      "file": "static/chunks/4881-678e733bab7506cd.js",
+      "status": 200,
+      "sha256": "4416c462915e4295523ea54e29499af1467a91ce578ee08b49e798ff20e916dc",
+      "matchesCandidate": true
+    },
+    {
+      "route": "/template-studio/page",
+      "file": "static/chunks/3134-994b46d3d37c8222.js",
+      "status": 200,
+      "sha256": "6e094f1aa6a2090b355430794d8051743cc93b9189723adb7578be9c14fd724c",
+      "matchesCandidate": true
+    },
+    {
+      "route": "/template-studio/page",
+      "file": "static/chunks/app/template-studio/page-a61ad7eb9c4bf602.js",
+      "status": 200,
+      "sha256": "00e07477b24ce6d36254fdc9892500c9ac88758c170ef4d0c593eeff0cce5268",
+      "matchesCandidate": true
+    }
+  ],
+  "checkedAt": "2026-10-05T14:59:59.812Z",
+  "evidenceLimit": "HTTP and static build proof only; no logged-in DOM or visual acceptance"
+}

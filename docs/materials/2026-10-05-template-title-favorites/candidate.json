@@ -1,0 +1,19 @@
+{
+  "commit": "17c55b23f314c5cbe9854a4c3f7ec5b4e78a4861",
+  "version": "0.44.0",
+  "buildId": "2eaaF0OY1UB1XncX97oQJ",
+  "route": "/template-studio/page",
+  "favoriteChunks": [
+    "static/chunks/4881-678e733bab7506cd.js",
+    "static/chunks/3134-994b46d3d37c8222.js",
+    "static/chunks/app/template-studio/page-a61ad7eb9c4bf602.js"
+  ],
+  "entryChunks": [
+    "static/chunks/app/template-studio/page-a61ad7eb9c4bf602.js"
+  ],
+  "cssFiles": [
+    "static/css/c4ef3de081a47fc6.css"
+  ],
+  "checkedAt": "2026-10-05T14:59:10.706Z",
+  "evidenceLimit": "Compiled artifact checks only, not functional acceptance"
+}

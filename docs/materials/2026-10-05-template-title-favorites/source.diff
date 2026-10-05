@@ -1,0 +1,311 @@
+diff --git a/package.json b/package.json
+index 2239bf4..00d9fc1 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "video-api-debugger",
+-  "version": "0.43.4",
++  "version": "0.44.0",
+   "private": true,
+   "scripts": {
+     "dev": "NEXT_DIST_DIR=.next-dev next dev",
+diff --git a/src/app/image-studio/studio.module.css b/src/app/image-studio/studio.module.css
+index 6ac59c3..3387482 100644
+--- a/src/app/image-studio/studio.module.css
++++ b/src/app/image-studio/studio.module.css
+@@ -31,10 +31,10 @@
+ .module { border-top: 1px solid #465057; padding: 28px 0; scroll-margin-top: 90px; }
+ .module[data-active=true] { border-top-color: #79daca; }
+ .page .moduleName { width: min(300px, 100%); font-size: 20px; font-weight: 800; }
+-.page .moduleNameDisplay { justify-content: flex-start; width: min(420px, 100%); padding: 0; border: 0; background: transparent; color: #eef0f2; font-size: 22px; font-weight: 800; text-align: left; }
++.page .moduleNameDisplay { display: block; width: auto; max-width: 420px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; border: 0; background: transparent; color: #eef0f2; font-size: 22px; font-weight: 800; text-align: left; }
+ .page .moduleNameDisplay:hover { background: transparent; color: #b9f7e8; }
+ .module .header { align-items: center; flex-wrap: wrap; }
+-.moduleTitleRow { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
++.moduleTitleRow { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; flex-wrap: nowrap; }
+ .moduleSharing { flex: 0 0 auto; padding: 6px 9px !important; font-size: 12px !important; }
+ .module .counts { align-items: center; }
+ .moduleGroupControl { display: inline-flex; align-items: center; gap: 6px; color: #adb6bd; font-size: 13px; }
+diff --git a/src/app/image-studio/studio.tsx b/src/app/image-studio/studio.tsx
+index 1a1d162..31c611a 100644
+--- a/src/app/image-studio/studio.tsx
++++ b/src/app/image-studio/studio.tsx
+@@ -29,6 +29,7 @@ function studioUploadProgress(file: File, index: number, count: number, progress
+ import { ZoomableImagePreview, type ImagePreviewMetadata } from '@/components/ZoomableImagePreview';
+ import UserIdentityBadge from '@/components/UserIdentityBadge';
+ import ContentReactions from '@/components/content-reactions/ContentReactions';
++import TemplateFavoriteTitle from '@/components/content-reactions/TemplateFavoriteTitle';
+ import { ResultImageCover } from '@/components/ResultImageCover';
+ import { studioResultVersion } from '@/lib/image-studio/result-attention';
+ import { useResultAttention } from './use-result-attention';
+@@ -560,8 +561,8 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
+       <button type="button" title="重新读取模板库" aria-label="重新读取模板库" disabled={presetManaging || presetApplying || Boolean(quickLinkingId) || presetsLoading} onClick={() => void openPresetLibrary(presetSourceId)}><RefreshCw size={16} /></button>
+       {presetsError && <p role="alert" className={styles.error}>{presetsError}</p>}
+       {presetsLoading ? <p role="status">正在读取模板…</p> : !presets.length ? <p className={styles.muted}>暂无模板</p> : <div className={styles.presetList}>{presets.map(preset => <article key={preset.id} className={styles.presetItem}>
+-        <div><strong>{preset.name}</strong><span>{preset.groupName} · {IMAGE_STUDIO_MODEL_LABELS[preset.model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || preset.model}{!preset.ownedByViewer ? ' · 共享模板，只读' : ''}</span></div>
+-        <div className={styles.presetActions}><ContentReactions contentKey={`image_template:${preset.id}`} />
++        <div><TemplateFavoriteTitle contentKey={`image_template:${preset.id}`}><strong title={preset.name}>{preset.name}</strong></TemplateFavoriteTitle><span>{preset.groupName} · {IMAGE_STUDIO_MODEL_LABELS[preset.model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || preset.model}{!preset.ownedByViewer ? ' · 共享模板，只读' : ''}</span></div>
++        <div className={styles.presetActions}>
+           {preset.canManageSharing && <button type="button" role="switch" aria-checked={preset.isShared} className={styles.presetSharing} disabled={Boolean(presetSharingId) || presetManaging} onClick={() => void togglePresetSharing(preset)}>{preset.isShared ? '共享给同事' : '仅自己可见'}</button>}
+           {preset.ownedByViewer && <><button type="button" title="修改模板名称" aria-label={`修改模板名称：${preset.name}`} disabled={presetManaging || presetApplying || Boolean(quickLinkingId) || Boolean(presetSharingId)} onClick={() => void managePreset(preset, 'rename')}><Pencil size={16} /></button>
+             <button type="button" disabled={!presetSourceId || presetManaging || presetApplying || Boolean(quickLinkingId) || Boolean(presetSharingId)} onClick={() => void managePreset(preset, 'replace')}><Save size={16} />更新设置</button>
+@@ -1466,12 +1467,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+   return <>{productDialog}{(<section ref={section} hidden={hidden} id={`module-${module.id}`} className={styles.module} aria-label={name} data-active={active}
+     onPointerDownCapture={activateDraft} onFocusCapture={activateDraft}>
+     <header className={styles.header}>
+-      <div className={styles.moduleTitleRow}>
+-        {module.saved && <ContentReactions contentKey={`image_module:${module.id}`} />}
+-        {nameEditing ? <input ref={nameInput} className={styles.moduleName} aria-label="模块名称" value={name} maxLength={80} onChange={event => setName(event.target.value)} onBlur={() => setNameEditing(false)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); setNameEditing(false); } }} /> : <button type="button" className={styles.moduleNameDisplay} aria-label={`编辑模块标题：${name}`} onClick={() => setNameEditing(true)}>{name}</button>}
+-        {module.sourcePresetCanManageSharing && module.sourcePresetId && <button type="button" role="switch" aria-checked={module.sourcePresetShared === true} className={`${styles.presetSharing} ${styles.moduleSharing}`} title={templateWorkbench ? '只改变原模板的共享，不会发布当前模块草稿' : undefined} disabled={sharingId === module.sourcePresetId} onClick={() => void onToggleSharing(module)}>{templateWorkbench ? (module.sourcePresetShared === true ? '原模板已共享' : '共享原模板') : (module.sourcePresetShared === true ? '共享给同事' : '仅自己可见')}</button>}
+-      </div>
++      <TemplateFavoriteTitle className={styles.moduleTitleRow} contentKey={module.saved ? `image_module:${module.id}` : undefined}>
++        {nameEditing ? <input ref={nameInput} className={styles.moduleName} aria-label="模块名称" value={name} maxLength={80} onChange={event => setName(event.target.value)} onBlur={() => setNameEditing(false)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); setNameEditing(false); } }} /> : <button type="button" className={styles.moduleNameDisplay} title={name} aria-label={`编辑模块标题：${name}`} onClick={() => setNameEditing(true)}>{name}</button>}
++      </TemplateFavoriteTitle>
+       <div className={styles.counts}>
++        {module.sourcePresetCanManageSharing && module.sourcePresetId && <button type="button" role="switch" aria-checked={module.sourcePresetShared === true} className={`${styles.presetSharing} ${styles.moduleSharing}`} title={templateWorkbench ? '只改变原模板的共享，不会发布当前模块草稿' : undefined} disabled={sharingId === module.sourcePresetId} onClick={() => void onToggleSharing(module)}>{templateWorkbench ? (module.sourcePresetShared === true ? '原模板已共享' : '共享原模板') : (module.sourcePresetShared === true ? '共享给同事' : '仅自己可见')}</button>}
+         <label className={styles.moduleGroupControl}>分组
+           <select aria-label="模块分组" value={groupName} onChange={event => changeGroup(event.target.value)}>
+             {groups.map(group => <option key={group} value={group}>{group}</option>)}
+diff --git a/src/components/content-reactions/ContentCollections.tsx b/src/components/content-reactions/ContentCollections.tsx
+index d783ad0..6ea6734 100644
+--- a/src/components/content-reactions/ContentCollections.tsx
++++ b/src/components/content-reactions/ContentCollections.tsx
+@@ -8,6 +8,7 @@ import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
+ import MediaPreview from '@/components/MediaPreview';
+ import UserIdentityBadge from '@/components/UserIdentityBadge';
+ import ContentReactions, { writeReaction } from './ContentReactions';
++import TemplateFavoriteTitle from './TemplateFavoriteTitle';
+ import type { ContentCategory, ContentKey, ContentSummary, ReactionAction, ReactionListItem, ReactionListResponse, ReactionState } from '@/lib/content-reactions/types';
+ import styles from './reactions.module.css';
+ 
+@@ -423,9 +424,9 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
+         <button className={`${styles.media} ${mediaClassName || ''}`.trim()} type="button" disabled={!item.content} onClick={() => void open(item)} aria-label={item.content ? `打开${item.content.title}` : '内容已不可用'}>{item.content ? <CollectionThumbnail content={item.content} preferPreviewImage={preferPreviewImageThumbnails} /> : '内容已不可用'}</button>
+         {['image', 'video', 'audio'].includes(item.category) && <ContentReactions contentKey={item.key} initialState={item.state} overlay onChange={(state, act, active) => changed(item, state, act, active)} />}
+       </div>
+-      <div className={styles.body}><h3 className={styles.title}>{item.content?.title || '内容已不可用'}</h3>{item.content?.owner && <UserIdentityBadge size="sm" user={item.content.owner} />}
++      <div className={styles.body}>{item.category === 'template' && action === 'favorite' ? <TemplateFavoriteTitle contentKey={item.key} initialState={item.state} onChange={(state, act, active) => changed(item, state, act, active)}><h3 className={styles.title} title={item.content?.title || '内容已不可用'}>{item.content?.title || '内容已不可用'}</h3></TemplateFavoriteTitle> : <h3 className={styles.title}>{item.content?.title || '内容已不可用'}</h3>}{item.content?.owner && <UserIdentityBadge size="sm" user={item.content.owner} />}
+         {item.content?.versionLabel && <span className={styles.muted}>版本：{item.content.versionLabel}</span>}
+-        <div className={styles.actions}>{!['image', 'video', 'audio'].includes(item.category) && <ContentReactions contentKey={item.key} initialState={item.state} onChange={(state, act, active) => changed(item, state, act, active)} />}
++        <div className={styles.actions}>{!['image', 'video', 'audio'].includes(item.category) && !(item.category === 'template' && action === 'favorite') && <ContentReactions contentKey={item.key} initialState={item.state} onChange={(state, act, active) => changed(item, state, act, active)} />}
+           {item.content && <button className={styles.command} type="button" onClick={() => void open(item)}><ExternalLink size={15} /> {item.content.actionLabel}</button>}
+           {item.content?.downloadUrl && <a className={styles.command} title="下载" aria-label="下载" href={item.content.downloadUrl}><Download size={16} /></a>}
+           {item.content && item.category === 'prompt' && <button className={styles.command} title="复制文案" aria-label="复制文案" type="button" onClick={() => void open(item, true)}><Copy size={16} /></button>}
+diff --git a/src/components/content-reactions/ContentReactions.tsx b/src/components/content-reactions/ContentReactions.tsx
+index 3421048..42dba45 100644
+--- a/src/components/content-reactions/ContentReactions.tsx
++++ b/src/components/content-reactions/ContentReactions.tsx
+@@ -91,10 +91,11 @@ export async function writeReaction(userId: string, key: ContentKey, action: Rea
+   }
+ }
+ 
+-export default function ContentReactions({ contentKey, initialState, onChange, disabled = false, overlay = false, imageSharing = true }: {
++export default function ContentReactions({ contentKey, initialState, onChange, disabled = false, overlay = false, imageSharing = true, favoriteOnly = false }: {
+   contentKey: ContentKey; initialState?: ReactionState; disabled?: boolean;
+   overlay?: boolean;
+   imageSharing?: boolean;
++  favoriteOnly?: boolean;
+   onChange?: (state: ReactionState, action: ReactionAction, active: boolean) => void;
+ }) {
+   const { user } = useAppSession();
+@@ -119,12 +120,12 @@ export default function ContentReactions({ contentKey, initialState, onChange, d
+     const active = action === 'like' ? !state.liked : !state.favorited;
+     try { const next = await writeReaction(userId, contentKey, action, active, state); if (next) onChange?.(next, action, active); } catch { /* Error is retained with a retry action. */ }
+   }
+-  return <span className={`${styles.controls} ${overlay ? styles.overlayControls : ''}`} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} data-content-reactions data-overlay={overlay || undefined} aria-busy={entry.busy || undefined}>
+-    <button type="button" data-reaction-action="like" title={state?.liked ? '取消点赞' : '点赞'} aria-label={state?.liked ? '取消点赞' : '点赞'} aria-pressed={state?.liked || false} disabled={disabled || entry.busy || uncertain || !state || (!state.available && !state.liked)} onClick={() => void act('like')}><Heart size={16} fill={state?.liked ? 'currentColor' : 'none'} />{state?.likeCount !== null && state?.likeCount !== undefined && <span>{state.likeCount}</span>}</button>
++  return <span className={`${styles.controls} ${overlay ? styles.overlayControls : ''} ${favoriteOnly ? styles.favoriteOnly : ''}`} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} data-content-reactions data-overlay={overlay || undefined} aria-busy={entry.busy || undefined}>
++    {!favoriteOnly && <button type="button" data-reaction-action="like" title={state?.liked ? '取消点赞' : '点赞'} aria-label={state?.liked ? '取消点赞' : '点赞'} aria-pressed={state?.liked || false} disabled={disabled || entry.busy || uncertain || !state || (!state.available && !state.liked)} onClick={() => void act('like')}><Heart size={16} fill={state?.liked ? 'currentColor' : 'none'} />{state?.likeCount !== null && state?.likeCount !== undefined && <span>{state.likeCount}</span>}</button>}
+     <button type="button" data-reaction-action="favorite" title={state?.favorited ? '取消收藏' : '收藏'} aria-label={state?.favorited ? '取消收藏' : '收藏'} aria-pressed={state?.favorited || false} disabled={disabled || entry.busy || uncertain || !state || (!state.available && !state.favorited)} onClick={() => void act('favorite')}><Bookmark size={16} fill={state?.favorited ? 'currentColor' : 'none'} /></button>
+-    {imageSharing && <ImageShareButton key={`${userId}:${contentKey}`} contentKey={contentKey} userId={userId} disabled={disabled} />}
++    {imageSharing && !favoriteOnly && <ImageShareButton key={`${userId}:${contentKey}`} contentKey={contentKey} userId={userId} disabled={disabled} />}
+     {entry.busy && <span className={styles.busy} role="status"><RefreshCw size={13} className={styles.busyIcon} />保存中</span>}
+-    {(entry.error || uncertain && !entry.busy) && <span className={styles.error} role="status">{entry.error || '上次操作尚未确认，请重试'}<button type="button" disabled={entry.busy} aria-label="重试点赞收藏" title="重试" onClick={() => {
++    {(entry.error || uncertain && !entry.busy) && <span className={styles.error} role="status">{entry.error || '上次操作尚未确认，请重试'}<button type="button" disabled={entry.busy} aria-label={favoriteOnly ? '重试收藏' : '重试点赞收藏'} title="重试" onClick={() => {
+       const retry = state && pending.get(cacheKey(userId, state.key));
+       if (retry && state) void writeReaction(userId, contentKey, retry.action, retry.active, state).then(next => { if (next) onChange?.(next, retry.action, retry.active); }).catch(() => {}); else schedule(userId, contentKey);
+     }}><RefreshCw size={14} /></button></span>}
+diff --git a/src/components/content-reactions/TemplateFavoriteTitle.tsx b/src/components/content-reactions/TemplateFavoriteTitle.tsx
+new file mode 100644
+index 0000000..78b611a
+--- /dev/null
++++ b/src/components/content-reactions/TemplateFavoriteTitle.tsx
+@@ -0,0 +1,19 @@
++'use client';
++
++import type { ReactNode } from 'react';
++import type { ContentKey, ReactionAction, ReactionState } from '@/lib/content-reactions/types';
++import ContentReactions from './ContentReactions';
++import styles from './reactions.module.css';
++
++export default function TemplateFavoriteTitle({ children, contentKey, initialState, onChange, className = '' }: {
++  children: ReactNode;
++  contentKey?: ContentKey;
++  initialState?: ReactionState;
++  onChange?: (state: ReactionState, action: ReactionAction, active: boolean) => void;
++  className?: string;
++}) {
++  return <div className={`${styles.favoriteTitleRow} ${className}`}>
++    {children}
++    {contentKey && <ContentReactions contentKey={contentKey} initialState={initialState} onChange={onChange} favoriteOnly />}
++  </div>;
++}
+diff --git a/src/components/content-reactions/reactions.module.css b/src/components/content-reactions/reactions.module.css
+index 736cc96..b11c1a3 100644
+--- a/src/components/content-reactions/reactions.module.css
++++ b/src/components/content-reactions/reactions.module.css
+@@ -1,6 +1,11 @@
+ .controls { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; vertical-align: middle; }
++.favoriteTitleRow { display: flex; align-items: center; gap: 8px; width: fit-content; max-width: 100%; min-width: 0; flex-wrap: nowrap; }
++.favoriteTitleRow > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++.favoriteOnly { position: relative; flex: 0 0 auto; flex-wrap: nowrap; }
++.favoriteOnly :is(.busy, .error) { position: absolute; top: calc(100% + 5px); left: 0; z-index: 30; width: max-content; max-width: min(260px, 65vw); padding: 6px 8px; border: 1px solid #465057; border-radius: 5px; background: #1c2529; box-shadow: 0 3px 12px #10141680; white-space: normal; overflow-wrap: anywhere; }
+ .controls button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 32px; height: 32px; padding: 4px 7px; border: 1px solid var(--border, #394449); border-radius: 6px; background: transparent; color: inherit; cursor: pointer; font-size: 12px; letter-spacing: 0; }
+ .controls button[aria-pressed="true"] { color: #ff6677; background: #ff66771c; border-color: #ff66775c; }
++.favoriteOnly button[data-reaction-action="favorite"][aria-pressed="true"] { color: #79daca; background: #79daca1c; border-color: #79daca5c; }
+ .controls button:disabled { opacity: .45; cursor: default; }
+ .controls button:focus-visible { outline: 2px solid #70cfbd; outline-offset: 2px; }
+ .error { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #ffb3a7; }
+diff --git a/src/components/template-studio/TemplateStudioShell.tsx b/src/components/template-studio/TemplateStudioShell.tsx
+index 3192681..4b36a22 100644
+--- a/src/components/template-studio/TemplateStudioShell.tsx
++++ b/src/components/template-studio/TemplateStudioShell.tsx
+@@ -2,7 +2,8 @@
+ 
+ import { useEffect, useMemo, useRef, useState } from 'react';
+ import { useRouter, useSearchParams } from 'next/navigation';
+-import { RotateCcw } from 'lucide-react';
++import Link from 'next/link';
++import { Bookmark, RotateCcw } from 'lucide-react';
+ import ImageStudio from '@/app/image-studio/studio';
+ import { useAppSession } from '@/lib/context/AppSessionContext';
+ import VideoTemplateWorkbench from './VideoTemplateWorkbench';
+@@ -258,6 +259,7 @@ export default function TemplateStudioShell({
+           <h1>模板工作台</h1>
+         </div>
+         <div className={styles.headerActions}>
++          <Link className={styles.quietButton} href="/assets?view=favorites&category=template"><Bookmark size={16} />我的收藏</Link>
+           {hasRememberedLocation && (
+             <button
+               className={styles.quietButton}
+diff --git a/src/components/template-studio/VideoTemplateWorkbench.tsx b/src/components/template-studio/VideoTemplateWorkbench.tsx
+index 4a24a4c..ced789d 100644
+--- a/src/components/template-studio/VideoTemplateWorkbench.tsx
++++ b/src/components/template-studio/VideoTemplateWorkbench.tsx
+@@ -2,6 +2,7 @@
+ 
+ import { useProductDialog } from '@/components/useProductDialog';
+ import ContentReactions from '@/components/content-reactions/ContentReactions';
++import TemplateFavoriteTitle from '@/components/content-reactions/TemplateFavoriteTitle';
+ 
+ import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type SetStateAction } from 'react';
+ import { useRouter, useSearchParams } from 'next/navigation';
+@@ -1690,12 +1691,12 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
+                 {templateError && <div className={styles.calloutError}>{templateError}<button type="button" className={styles.quietButton} onClick={() => void loadTemplates()}>重试</button></div>}
+                 <div className={styles.list}>
+                   {templates.map((template) => (
+-                    <div key={`${template.source}:${template.id}`} style={{ display: 'grid', minWidth: 0 }}><button type="button" className={styles.listItem} aria-current={template.id === routedTemplateId && template.source === routedTemplateSource} onClick={() => void openTemplateDetail(template)}>
++                    <div key={`${template.source}:${template.id}`} className={styles.templateListItem}><button type="button" className={styles.listItem} aria-current={template.id === routedTemplateId && template.source === routedTemplateSource} onClick={() => void openTemplateDetail(template)}>
+                       <span className={styles.listItemTitle}>{template.name || '未命名模板'}</span>
+                       <span className={styles.listItemMeta}><span>{template.groupName || '未分组'}</span><span>V{template.version?.number || '草稿'}</span><span className={`${styles.status} ${statusClass(template.status)}`}>{template.status === 'published' ? '可用' : template.status === 'archived' ? '已停用' : '草稿'}</span></span>
+                       {template.owner && <span className={styles.owner}><UserIdentityBadge size="sm" user={{ name: template.owner.displayName, avatar_url: template.owner.avatarUrl }} /></span>}
+                     </button>
+-                    {template.status !== 'archived' && <ContentReactions contentKey={`${template.source === 'legacy' ? 'legacy_template' : 'video_template'}:${template.id}`} />}
++                    {template.status !== 'archived' && <ContentReactions contentKey={`${template.source === 'legacy' ? 'legacy_template' : 'video_template'}:${template.id}`} favoriteOnly />}
+                     </div>
+                   ))}
+                   {!templateBusy && templates.length === 0 && <div className={styles.emptyState}><Film size={21} /><strong>还没有可用模板</strong><span>可以先新建空白模块，写下提示词并保存。</span></div>}
+@@ -1707,10 +1708,10 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
+                 <div className={styles.sectionHeading}><h2>我的模块</h2><button className={styles.iconButton} type="button" title="刷新模块" aria-label="刷新模块" onClick={() => void loadDrafts()}><FolderOpen size={15} /></button></div>
+                 <div className={styles.list}>
+                   {drafts.map((item) => (
+-                    <div key={item.id} style={{ display: 'grid', minWidth: 0 }}><button type="button" className={styles.listItem} aria-current={item.id === routedDraftId} onClick={() => navigate({ type: 'video', view: 'templates', draftId: item.id, moduleId: item.id, runId: null, templateId: null, templateSource: null })}>
++                    <div key={item.id} className={styles.templateListItem}><div className={styles.templateListContent}><button type="button" className={styles.listItem} aria-current={item.id === routedDraftId} onClick={() => navigate({ type: 'video', view: 'templates', draftId: item.id, moduleId: item.id, runId: null, templateId: null, templateSource: null })}>
+                       <span className={styles.listItemTitle}>{item.name || '未命名模块'}</span>
+                       <span className={styles.listItemMeta}><span>{item.groupName || '未分组'}</span><span>修订 {item.revision}</span></span>
+-                    </button><span className={styles.recordTime}><RelativeTime value={item.updatedAt} /></span><ContentReactions contentKey={`video_draft:${item.id}`} /></div>
++                    </button><span className={styles.recordTime}><RelativeTime value={item.updatedAt} /></span></div><ContentReactions contentKey={`video_draft:${item.id}`} favoriteOnly /></div>
+                   ))}
+                   {!draftBusy && drafts.length === 0 && <span className={styles.saveState}>保存的模块会显示在这里。</span>}
+                 </div>
+@@ -1777,11 +1778,10 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
+                 {recoveryAvailable && !conflict && <div className={styles.callout}><span>上次输入已保留。</span><button className={styles.quietButton} type="button" onClick={restoreLocalDraft}>恢复上一次</button></div>}
+                 <div className={styles.contentHeader}>
+                   <div>
+-                    <h2>{activeDraft.name || '未命名模块'}</h2>
++                    <TemplateFavoriteTitle contentKey={!activeDraft.id.startsWith('local-') ? `video_draft:${activeDraft.id}` : undefined}><h2 title={activeDraft.name || '未命名模块'}>{activeDraft.name || '未命名模块'}</h2></TemplateFavoriteTitle>
+                     <p>{activeDraft.template ? `${activeDraft.template.templateName} · 固定版本 V${activeDraft.template.versionNumber || '未知'}` : '空白模块'} · 修订 {activeDraft.revision}</p>
+                   </div>
+                   <div className={styles.headerActions}>
+-                    {!activeDraft.id.startsWith('local-') && <ContentReactions contentKey={`video_draft:${activeDraft.id}`} />}
+                     <button type="button" className={styles.quietButton} onClick={() => setContextEditor({ draftId: activeDraft.id })}><Settings size={15} />模块上下文</button>
+                     <button className={styles.quietButton} type="button" disabled={working || savingDraftIds.current.has(activeDraft.id)} onClick={() => void saveDraft(activeDraft, true)}><Save size={15} />保存</button>
+                     {capabilities?.canCreatePrivateTemplates && <button className={styles.quietButton} type="button" onClick={() => {
+@@ -2066,9 +2066,8 @@ function TemplateOverview({
+   return (
+     <>
+       <div className={styles.contentHeader}>
+-        <div><h2>{template.name || '未命名模板'}</h2><p>{template.description || '暂无说明'} · {template.groupName || '未分组'} · {isLegacy ? '旧版模板' : template.version ? `版本 V${template.version.number}` : '尚未发布'}</p></div>
++        <div className={styles.templateHeading}><TemplateFavoriteTitle contentKey={template.status !== 'archived' ? `${template.source === 'legacy' ? 'legacy_template' : 'video_template'}:${template.id}` : undefined}><h2 title={template.name || '未命名模板'}>{template.name || '未命名模板'}</h2></TemplateFavoriteTitle><p>{template.description || '暂无说明'} · {template.groupName || '未分组'} · {isLegacy ? '旧版模板' : template.version ? `版本 V${template.version.number}` : '尚未发布'}</p></div>
+         <div className={styles.headerActions}>
+-          {template.status !== 'archived' && <ContentReactions contentKey={`${template.source === 'legacy' ? 'legacy_template' : 'video_template'}:${template.id}`} />}
+           <button className={styles.quietButton} type="button" onClick={onBack}>返回模板列表</button>
+           {!isLegacy && template.canManage && <button className={styles.quietButton} type="button" onClick={onEdit}><Settings size={15} />模块上下文</button>}
+           {!isLegacy && template.canPublish && <button className={styles.primaryButton} type="button" disabled={busy || !recipe} title={!recipe ? '模板配方尚未完成' : '发布当前版本'} onClick={onPublish}>发布版本</button>}
+diff --git a/src/components/template-studio/template-studio.module.css b/src/components/template-studio/template-studio.module.css
+index 2b689bb..ed2472b 100644
+--- a/src/components/template-studio/template-studio.module.css
++++ b/src/components/template-studio/template-studio.module.css
+@@ -98,6 +98,13 @@
+ .viewTabs button { min-height: 36px; padding-inline: 12px; color: var(--muted); font-weight: 650; }
+ .viewTabs .activeView { color: var(--text); background: var(--panel-raised); border-color: var(--line); }
+ .headerActions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
++.headerActions a.quietButton { text-decoration: none; }
++.templateListItem { display: flex; align-items: flex-start; min-width: 0; gap: 4px; }
++.templateListItem > button { flex: 1 1 auto; min-width: 0; }
++.templateListContent { flex: 1 1 auto; min-width: 0; }
++.templateListContent > button { width: 100%; }
++.templateListItem > :global([data-content-reactions]) { flex: 0 0 auto; margin-top: 10px; }
++.templateHeading, .contentHeader > div:first-child { min-width: 0; max-width: 100%; }
+ .primaryButton { min-height: 40px; padding-inline: 14px; border-color: oklch(0.67 0.12 166); color: var(--accent-ink); background: var(--accent); font-weight: 750; }
+ .primaryButton:hover:not(:disabled) { background: oklch(0.83 0.105 166); }
+ .primaryButton:active:not(:disabled) { background: oklch(0.73 0.11 166); }
+diff --git a/src/components/templates/TemplateLibraryClient.tsx b/src/components/templates/TemplateLibraryClient.tsx
+index f066419..29f5056 100644
+--- a/src/components/templates/TemplateLibraryClient.tsx
++++ b/src/components/templates/TemplateLibraryClient.tsx
+@@ -1,7 +1,7 @@
+ 'use client';
+ import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
+ import { RelativeTime } from '@/components/RelativeTime';
+-import ContentReactions from '@/components/content-reactions/ContentReactions';
++import TemplateFavoriteTitle from '@/components/content-reactions/TemplateFavoriteTitle';
+ 
+ import { useCallback, useEffect, useMemo, useState } from 'react';
+ import { useRouter } from 'next/navigation';
+@@ -425,12 +425,11 @@ export function TemplateLibraryClient() {
+ 
+               <div className="template-library-preview-title">
+                 <span className="template-library-kicker">{selectedView.scenario}</span>
+-                <h2>{selectedView.template.name}</h2>
++                <TemplateFavoriteTitle contentKey={selectedView.template.status === 'active' ? `legacy_template:${selectedView.template.id}` : undefined}><h2 title={selectedView.template.name}>{selectedView.template.name}</h2></TemplateFavoriteTitle>
+                 <p>{cleanText(selectedView.template.description) || '适合按固定角色、标志、风格和规则生成一致的视频。'}</p>
+               </div>
+ 
+               <div className="template-library-preview-actions">
+-                {selectedView.template.status === 'active' && <ContentReactions contentKey={`legacy_template:${selectedView.template.id}`} />}
+                 <button type="button" className="is-primary" onClick={handleUseTemplate}>
+                   <PlayCircle size={17} aria-hidden="true" />
+                   使用此模板
+diff --git a/src/lib/release.ts b/src/lib/release.ts
+index 3997a6c..7c10ddc 100644
+--- a/src/lib/release.ts
++++ b/src/lib/release.ts
+@@ -1,6 +1,6 @@
+ import packageInfo from '../../package.json';
+ 
+-export const release = { version: packageInfo.version, channel: 'production', summary: '已点赞或收藏的左上角图标持续显示；未激活按钮仍按悬停、聚焦或触控方式显示。' };
++export const release = { version: packageInfo.version, channel: 'production', summary: '模板名称右侧只保留收藏；工作台新增我的收藏入口，可查找、使用和取消收藏的模板。' };
+ export function newerRelease(remote: string, local: string) {
+   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
+   const a = parse(remote), b = parse(local);

@@ -6,6 +6,14 @@
 
 正式原文及设计入口：[既有模板参数工单v1.2.0第12节](../../tasks/todo/2026-10-04-template-context-version-code.md#12-演化模板参数设计建议2026-10-05)，路径`/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-04-template-context-version-code.md`。正文和所引共用生成源码已读，可访问；仅该模板显示、复用补充框及生成按钮、按正文理解不加常规确认，档数/范围/排版/费用不暗改。模板专属原文和实际界面尚未核对，不冒称链路已接通；无图片归档或一致性校验对象，非关键辅助未逐项校验。只固定记录，不改应用、不部署或付费。
 
+## 模板标题收藏闭环（2026-10-05）
+
+- 项目：video-api-debugger；来源：用户本对话文字与模板工作台截图；收到日期：2026-10-05；资料版本：原始反馈v1，无替代原件。
+- 原文件名/资料名：codex-clipboard-d2a7827a-f62f-46fa-b4f2-8f16c99e452b.png；[正式原件](2026-10-05-template-title-favorites/codex-clipboard-d2a7827a-f62f-46fa-b4f2-8f16c99e452b.png)，原来源本机剪贴板附件路径，原件保留；PNG可读，310x113；辅助反馈图不逐项哈希，不作为发布或功能验收证据，原图仅本机。
+- 主题/关键词/用途：模板标题、名称右侧收藏、取消点赞UI、个人收藏找回、使用、取消撤销；截图显示“转写实（推荐）”名称上方独立点赞及收藏。用于FAV1实现和用户手动验收，非导航页分类方案。
+- 用户明确要求和执行状态：[固定FAV1工单](../../tasks/todo/2026-10-02-feedback-primary-navigation.md#fav1模板标题与收藏闭环2026-10-05)。v0.44.0/17c55b2/BUILD 2eaaF0OY1UB1XncX97oQJ已部署，发布检查完成，实际效果待用户手动验收；保留需求原图，不当效果图。
+- 本批交付资料：[统一源码diff](2026-10-05-template-title-favorites/source.diff)、[候选证明](2026-10-05-template-title-favorites/candidate.json)、[完整构建日志](2026-10-05-template-title-favorites/build.log)、[公网产物证明](2026-10-05-template-title-favorites/public.json)，资料版本对应应用0.44.0；来源本轮Git及服务器输出，主题为同行收藏、个人模板收藏闭环、安全发布与回退。关键发布包/回退包传输哈希及公网CSS/JS哈希已核，正文diff与确切提交对应，辅助日志可读不重复逐项哈希；原图及被忽略的构建日志仅本机，资料不含账号或收藏数据，未做功能自动验收。
+
 ## 设置保存成功关闭（2026-10-04）
 
 2026-10-04，video-api-debugger，用户文字要求“写工单，排查项目同情况，一起修改”，无新附件或原文件名；工单版本1.0.0，补充全局保存成功关闭规则，不替代即时保存/应用/主工作台语义。主题：设置、异步保存、成功退出、失败保留、多表单草稿、返回来路。[正式工单](../../tasks/todo/2026-10-04-settings-save-close.md)正文可读；图片/视频上下文、旧模板编辑及后台 API 设置v0.39.1已部署，源码9c8a9ac，BUILD Bh-CIEFvI5EM3Y7NndzrU，保留此前v0.39.0新功能。开源参考 Radix Dialog 与 Ant Design ActionButton 官方文档/实际 Promise 分支，原链接在工单；仅方法借鉴，无新库。[完整差异](../../tasks/todo/2026-10-04-settings-save-close.diff)、[发布证据](../../tasks/todo/2026-10-04-settings-save-close.evidence.json)正式根可访问，构建/17源码/19新公网静态/4服务检查通过；功能待用户手动验收，不用正式根旧应用源码覆盖生产。
