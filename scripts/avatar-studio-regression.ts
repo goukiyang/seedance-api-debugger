@@ -1,0 +1,59 @@
+import assert from 'node:assert/strict';
+import { decodeDescriptionOutput, validateDescriptionConstraints } from '../src/lib/avatar-random/description-contract';
+import { AvatarDescriptionError, inspectDescription, resolveDescription, type DescriptionStore } from '../src/lib/avatar-random/description-parser';
+import { avatarLayout, avatarOutputCount, compileContactSheet, withAvatarLayout } from '../src/lib/avatar-random/layout';
+import { emptyRules, type AvatarCandidate, type AvatarConstraints, type AvatarPlan } from '../src/lib/avatar-random/types';
+import { avatarKey, avatarPlanKey, avatarRecordKey, avatarReadKeys } from '../src/lib/avatar-random/storage-keys';
+
+const description = '30岁，短发';
+const valid = { explicit: { age: { value: 30, evidence: '30岁' } }, details: [], scopes: [], background: '', unrecognized: [], conflicts: [] };
+function memory() {
+  let raw: string | null = null, cache: AvatarConstraints | null = null;
+  const responses = new Map<string, string>();
+  const store: DescriptionStore = {
+    readCache: async () => cache, readAttempt: async () => raw,
+    createAttempt: async next => { if (raw) return false; raw = next; return true; },
+    replaceAttempt: async (expected, next) => { if (expected !== raw) return false; raw = next; return true; },
+    saveResponse: async (id, content) => { responses.set(id, content); }, readResponse: async id => responses.get(id) ?? null,
+    complete: async (expected, next, parsed) => { if (raw !== expected) return false; raw = next; cache = parsed; return true; },
+  };
+  return { store, responses, setRaw: (value: string) => { raw = value; } };
+}
+async function main() {
+  let cases = 0;
+  assert.equal(validateDescriptionConstraints(decodeDescriptionOutput('```json\n'+JSON.stringify(valid)+'\n```'), description).explicit.age.value, '30'); cases++;
+  for (const value of [ { ...valid, extra: true }, { ...valid, explicit: { age: { value: 30, evidence: '' } } }, { ...valid, scopes: ['unsupported'] }, { ...valid, background: '海边' }, { ...valid, explicit: { age: { value: 100, evidence: '30岁' } } } ]) { assert.throws(() => validateDescriptionConstraints(value, description)); cases++; }
+  const unresolved=validateDescriptionConstraints({...valid,conflicts:['年龄冲突'],unrecognized:['要求待确认']},description);assert.equal(unresolved.conflicts.length,1);assert.equal(unresolved.unrecognized.length,1);cases++;
+  const first = memory(); let calls = 0;
+  const call = async () => { calls++; return { content: JSON.stringify(valid) }; };
+  await resolveDescription(description, { approved: true }, first.store, call);
+  await resolveDescription(description, { approved: true }, first.store, call);
+  assert.equal(calls, 1);assert.equal(first.responses.size,1);assert.equal((await inspectDescription(description,first.store)).state,'succeeded');cases++;
+  const bad = memory();let badCalls=0;
+  await assert.rejects(resolveDescription(description,{approved:true},bad.store,async()=>{badCalls++;return {content:'{}'};}),e=>e instanceof AvatarDescriptionError&&e.parse.state==='failed'&&e.parse.failure?.field==='explicit');
+  const failed=await inspectDescription(description,bad.store);assert.equal(failed.canRecheck,true);
+  await assert.rejects(resolveDescription(description,{approved:false,recheck:true},bad.store,async()=>{badCalls++;return {content:JSON.stringify(valid)};}));assert.equal(badCalls,1);cases++;
+  const legacy=memory();const old=JSON.stringify({state:'pending',createdAt:'2026-01-01T00:00:00Z'});legacy.setRaw(old);
+  const unknown=await inspectDescription(description,legacy.store);assert.equal(unknown.state,'unknown');assert.equal(await legacy.store.readAttempt(),old);
+  await assert.rejects(resolveDescription(description,{approved:true},legacy.store,call));assert.equal(calls,1);cases++;
+  const timeout=memory();await assert.rejects(resolveDescription(description,{approved:true},timeout.store,async()=>{throw Object.assign(new Error('timeout'),{code:'musk_api_timeout'});}));
+  const lost=await inspectDescription(description,timeout.store);assert.equal(lost.state,'unknown');assert.equal(lost.cost,'unknown');assert.ok(lost.retryToken);
+  await resolveDescription(description,{approved:true,retryToken:lost.retryToken},timeout.store,call);assert.equal(calls,2);cases++;
+  const race=memory();let raceCalls=0;let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});
+  const inFlight=resolveDescription(description,{approved:true},race.store,async()=>{raceCalls++;await gate;return {content:JSON.stringify(valid)};});
+  await new Promise(resolve=>setImmediate(resolve));await assert.rejects(resolveDescription(description,{approved:true},race.store,call));release();await inFlight;assert.equal(raceCalls,1);cases++;
+  const receipt=memory();const requestId='saved-request';receipt.setRaw(JSON.stringify({version:2,state:'pending',requestId,createdAt:new Date().toISOString()}));receipt.responses.set(requestId,JSON.stringify(valid));
+  assert.equal((await inspectDescription(description,receipt.store)).canRecheck,true);await resolveDescription(description,{approved:false,recheck:true},receipt.store,call);assert.equal(calls,2);cases++;
+  const persistence=memory();const complete=persistence.store.complete;persistence.store.complete=async()=>{throw new Error('disk');};
+  await assert.rejects(resolveDescription(description,{approved:true},persistence.store,call),e=>e instanceof AvatarDescriptionError&&e.parse.failure?.stage==='persistence'&&e.parse.canRecheck);
+  assert.equal((await inspectDescription(description,persistence.store)).state,'unknown');
+  persistence.store.complete=complete;await resolveDescription(description,{approved:false,recheck:true},persistence.store,call);assert.equal(calls,3);cases++;
+  const cells=Array.from({length:4},(_,i)=>({characterId:`person-${i}`,members:[{fields:{},details:[],seed:String(i),ruleVersion:'1.0.0',featureBudget:2}],standardDescription:`不同人物条件${i}`,prompt:'画面中恰好1个人',compilerVersion:'1.0.0',rules:emptyRules,constraints:unresolved} satisfies AvatarCandidate));
+  const oldPlan:AvatarPlan={id:'old-plan',candidates:cells,model:'test',quality:'auto',resolution:'1K',aspectRatio:'1:1',settingsRevision:24,unitCredits:5,referenceIds:[],createdAt:'2026-10-05T00:00:00Z'};
+  assert.equal(avatarLayout(oldPlan),'independent');assert.equal(avatarOutputCount(oldPlan),4);const sheet=withAvatarLayout(oldPlan,'contact-sheet');assert.equal(avatarOutputCount(sheet),1);assert.equal(sheet.unitCredits!*avatarOutputCount(sheet),5);assert.ok(sheet.sheetPrompt?.includes('左下格'));assert.ok(!sheet.sheetPrompt?.includes('画面中恰好1个人'));assert.deepEqual(sheet.candidates.map(c=>c.characterId),cells.map(c=>c.characterId));assert.equal(avatarOutputCount(withAvatarLayout(sheet,'independent')),4);cases++;
+  assert.throws(()=>compileContactSheet(cells.slice(0,2)));assert.throws(()=>withAvatarLayout({...oldPlan,referenceIds:['whole-image']},'contact-sheet'));assert.throws(()=>compileContactSheet(cells.map(c=>({...c,baselineAssetId:'single-person'}))));cases++;
+  for(const submitted of [false,true]){const p={...sheet,id:'sheet-private',...(submitted?{sourceTaskId:'paid-task'}:{})};const database=new Map([[avatarPlanKey('account',p),p]]);assert.equal(database.get(avatarKey('account','plan',p.id)),undefined);assert.equal(avatarReadKeys('account','plan',p.id).map(k=>database.get(k)).find(Boolean),p);assert.ok(!avatarReadKeys('other-account','plan',p.id).some(k=>database.has(k)));}cases++;
+  const generation={id:'sheet-result',layout:'contact-sheet' as const,rules:emptyRules};assert.notEqual(avatarRecordKey('account',generation),avatarKey('account','record',generation.id));assert.equal(avatarPlanKey('account',oldPlan),avatarKey('account','plan',oldPlan.id));cases++;
+  console.log(JSON.stringify({ok:true,cases,modelCalls:'in-memory only; no HTTP, DB, image generation or credits',original400:'specific failed field not available'}));
+}
+void main().catch(e=>{console.error(e);process.exitCode=1;});

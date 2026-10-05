@@ -19,7 +19,8 @@ import { getStudioModuleStyleIds, parseStudioStyleIds, resolveStudioStyleReferen
 import { studioVisibleAssetWhere } from './protected-assets';
 import { defaultStudioReferencePolicy, getStudioModuleReferencePolicy, mapStudioReferencePolicy, parseStudioReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
 import { DEFAULT_STUDIO_PRIMARY_MAX } from './limits';
-import type { AvatarCandidate } from '@/lib/avatar-random/types';
+import type { AvatarCandidate, AvatarLayout } from '@/lib/avatar-random/types';
+import { validateSheetCandidates } from '@/lib/avatar-random/layout';
 
 export class StudioError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -120,13 +121,15 @@ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] 
   catch { throw new StudioError('历史固定参考图快照无效', 409); }
 }
 
-export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }) {
+export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }) {
   const input = parseStudioRequest(body);
   const moduleId = body.moduleId;
-  if (avatar && (moduleId !== undefined || input.draft !== undefined || input.reproduceFromTaskId || avatar.candidates.length !== input.count)) throw new StudioError('人物任务不能继承模板设置');
+  const sheet = avatar?.layout === 'contact-sheet';
+  if (avatar && (moduleId !== undefined || input.draft !== undefined || input.reproduceFromTaskId || (sheet ? input.count !== 1 || input.aspectRatio !== '1:1' : avatar.candidates.length !== input.count))) throw new StudioError('人物任务排版无效或继承了模板设置');
+  if (sheet) { try { validateSheetCandidates(avatar!.candidates, input.referenceIds); } catch (e) { throw new StudioError((e as Error).message); } }
   if (moduleId !== undefined && !validStudioModuleId(moduleId, ownerId)) throw new StudioError('模块编号无效');
   const batchId = createHash('sha256').update(`${ownerId}:${input.requestId}`).digest('hex');
-  const fingerprint = createHash('sha256').update(JSON.stringify({ ...input, requestId: undefined, ...(moduleId ? { moduleId } : {}), ...(avatar ? { avatar: avatar.candidates } : {}) })).digest('hex');
+  const fingerprint = createHash('sha256').update(JSON.stringify({ ...input, requestId: undefined, ...(moduleId ? { moduleId } : {}), ...(avatar ? { avatar: avatar.candidates, ...(sheet ? { avatarLayout: 'contact-sheet' } : {}) } : {}) })).digest('hex');
   const previous = await prisma.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
   if (previous) {
     if (previous.fingerprint !== fingerprint) throw new StudioError('提交编号已用于其他请求，请重新提交', 409);
@@ -407,14 +410,14 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     });
     for (let i = 0; i < input.count; i++) {
       const id = `${batchId}-${i}`;
-      const candidate = avatar?.candidates[i];
+      const candidate = sheet ? undefined : avatar?.candidates[i];
       const taskPrompt = candidate?.prompt || input.prompt;
       const freeze = price > 0 ? await allocateTaskCredits(tx, user, price, id) : null;
       await tx.imageStudioTask.create({ data: {
         id, batch_id: batchId, owner_id: ownerId, module_id: moduleId as string | undefined, source_preset_id: sourcePresetId, ordinal: i + 1, fingerprint,
         prompt: taskPrompt, context, revision: settings.revision, model: generation.model,
         quality: generation.quality,
-        provider_cost_usd: IMAGE_STUDIO_MODEL_COST_USD[generation.model as keyof typeof IMAGE_STUDIO_MODEL_COST_USD], snapshot_json: candidate ? JSON.stringify({ ...JSON.parse(snapshot), prompt: taskPrompt, avatar: candidate }) : snapshot,
+        provider_cost_usd: IMAGE_STUDIO_MODEL_COST_USD[generation.model as keyof typeof IMAGE_STUDIO_MODEL_COST_USD], snapshot_json: sheet ? JSON.stringify({ ...JSON.parse(snapshot), avatarLayout: 'contact-sheet', avatar: { layout: 'contact-sheet', cells: avatar!.candidates } }) : candidate ? JSON.stringify({ ...JSON.parse(snapshot), prompt: taskPrompt, avatar: candidate }) : snapshot,
         aspect_ratio: aspectRatio, output_size: outputSize,
         reference_ids: JSON.stringify(orderedReferenceIds), unit_credits: price, freeze_snapshot: freeze?.snapshot,
       } });

@@ -4,16 +4,18 @@ import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { listStudioTasks, StudioError } from '@/lib/image-studio/tasks';
 import { listAvatarRecords, mutateAvatarRecord, readAvatar } from '@/lib/avatar-random/store';
-import { prepareAvatarPlan, submitAvatarPlan } from '@/lib/avatar-random/service';
+import { avatarDescriptionStatus, parseAvatarDescription, prepareAvatarPlan, submitAvatarPlan } from '@/lib/avatar-random/service';
+import { AvatarDescriptionError } from '@/lib/avatar-random/description-parser';
 import { adaptAvatarPrompt, parseAvatarRules } from '@/lib/avatar-random/engine';
 import type { AvatarPlan, AvatarRecord } from '@/lib/avatar-random/types';
 import { prisma } from '@/lib/prisma';
 import { randomUUID } from 'node:crypto';
-import { avatarKey } from '@/lib/avatar-random/store';
+import { avatarPlanKey } from '@/lib/avatar-random/store';
 import { studioAssetUrl } from '@/lib/image-studio/media';
 import { createHash } from 'node:crypto';
 import { getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider } from '@/lib/integrations/image-generation';
 import { IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
+import { avatarLayout, withAvatarLayout } from '@/lib/avatar-random/layout';
 
 async function sourceTask(owner:string,id?:string) {
   if(!id)return null;
@@ -28,7 +30,13 @@ async function run(action: (owner: string) => Promise<unknown>) {
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   if (user.status !== 'active' || !canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限有图片生成权限的公司账号使用' }, { status: 403 });
   try { return NextResponse.json(await action(user.id), { headers: { 'Cache-Control': 'no-store' } }); }
-  catch (e) { return NextResponse.json({ error: e instanceof StudioError ? e.message : '操作未确认，请重新读取；不要重复新建出图任务' }, { status: e instanceof StudioError ? e.status : 503 }); }
+  catch (e) {
+    if (e instanceof AvatarDescriptionError) {
+      console.warn('[AvatarDescription]', JSON.stringify({ requestId: e.parse.requestId, state: e.parse.state, ...e.parse.failure }));
+      return NextResponse.json({ error: e.message, parse: e.parse }, { status: e.status, headers: { 'Cache-Control': 'private, no-store' } });
+    }
+    return NextResponse.json({ error: e instanceof StudioError ? e.message : '操作未确认，请重新读取；不要重复新建出图任务' }, { status: e instanceof StudioError ? e.status : 503 });
+  }
 }
 export async function GET(req: NextRequest) { return run(async owner => {
   const planId = req.nextUrl.searchParams.get('plan');
@@ -49,21 +57,29 @@ export async function GET(req: NextRequest) { return run(async owner => {
 export async function POST(req: NextRequest) { return run(async owner => {
   const body = await req.json();
   if (!body || typeof body !== 'object'||Array.isArray(body)) throw new StudioError('请求无效');
+  if (body.action === 'parse-status') return { parse: await avatarDescriptionStatus(owner, body.description) };
+  if (body.action === 'parse-recheck') {
+    if (typeof body.description !== 'string' || body.description.length > 3000) throw new StudioError('人物描述无效');
+    await parseAvatarDescription(owner, body.description.trim(), false, undefined, true);
+    return { parse: await avatarDescriptionStatus(owner, body.description) };
+  }
   if (body.action === 'prepare') return { plan: await prepareAvatarPlan(owner, body) };
-  if (body.action === 'submit') return { batchId: await submitAvatarPlan(owner, body.id) };
+  if (body.action === 'submit') return { batchId: await submitAvatarPlan(owner, body.id, body.layout) };
   if (body.action === 'restore') {
     const record = await readAvatar<AvatarRecord>(owner, 'record', body.id);
-    if (!record?.candidate || record.deletedAt) throw new StudioError('人物记录已不可用');
+    if (!record || (!record.candidate && !record.sheetCandidates) || record.deletedAt) throw new StudioError('人物记录已不可用');
     const original=record.planId?await readAvatar<AvatarPlan>(owner,'plan',record.planId):null;
     if(!original)throw new StudioError('原始生成参数快照已不可用，不能伪造默认参数',409);
     const task=record.taskId?await prisma.imageStudioTask.findFirst({where:{id:record.taskId,owner_id:owner}}):null;
     const snapshot=task?.snapshot_json?JSON.parse(task.snapshot_json):null;
-    const plan: AvatarPlan = { ...original,id: randomUUID(), candidates: [record.candidate], ...(snapshot?{model:snapshot.model,quality:snapshot.quality,resolution:snapshot.resolution,aspectRatio:snapshot.aspectRatio,settingsRevision:snapshot.settingsRevision,unitCredits:snapshot.unitCredits,referenceIds:JSON.parse(task!.reference_ids)}:{}), createdAt: new Date().toISOString(),sourceTaskId:record.taskId,restoredFrom:record.id,warnings:['已恢复当时完整设置；原模型和参考图保留，出图前需更新报价并重新校验可用性。'] };
-    await prisma.platformSetting.create({ data: { key: avatarKey(owner, 'plan', plan.id), value_json: JSON.stringify(plan), updated_by: owner } });
+    const plan: AvatarPlan = { ...original,id: `${avatarLayout(original)==='contact-sheet'?'sheet-':''}${randomUUID()}`, candidates: record.sheetCandidates || [record.candidate!], ...(snapshot?{model:snapshot.model,quality:snapshot.quality,resolution:snapshot.resolution,aspectRatio:snapshot.aspectRatio,settingsRevision:snapshot.settingsRevision,unitCredits:snapshot.unitCredits,referenceIds:JSON.parse(task!.reference_ids)}:{}), createdAt: new Date().toISOString(),sourceTaskId:record.taskId,restoredFrom:record.id,warnings:['已恢复当时完整设置；原模型和参考图保留，出图前需更新报价并重新校验可用性。'] };
+    await prisma.platformSetting.create({ data: { key: avatarPlanKey(owner, plan), value_json: JSON.stringify(plan), updated_by: owner } });
     return { plan,sourceTask:await sourceTask(owner,record.taskId) };
   }
   if(body.action==='quote'){
     const previous=await readAvatar<AvatarPlan>(owner,'plan',body.id);if(!previous)throw new StudioError('人物草稿不存在');
+    if (body.layout !== undefined && !['independent','contact-sheet'].includes(body.layout)) throw new StudioError('人物排版无效');
+    const layout=body.layout || avatarLayout(previous);
     const settings=await getImageStudioSettings();
     const model=typeof body.model==='string'?body.model:previous.model;
     if(!IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number]))throw new StudioError('原模型已不可用，请明确选择可用模型；人物草稿保留');
@@ -71,8 +87,10 @@ export async function POST(req: NextRequest) { return run(async owner => {
     const price=settings.prices[model as keyof typeof settings.prices];
     if(price===undefined||price===null)throw new StudioError('原模型已失效或没有报价，历史设置仍保留');
     const api=await getImageGenerationSettingsForModel(model);
-    const plan:AvatarPlan={...previous,model,quality,resolution,id:createHash('sha256').update(`quote:${owner}:${previous.id}:${settings.revision}:${model}:${quality}:${resolution}`).digest('hex'),settingsRevision:settings.revision,unitCredits:price,imageReady:isStudioImageGenerationProvider(api.provider)&&isImageGenerationApiReady(api)&&(previous.referenceIds.length?api.supports_image_to_image:api.supports_text_to_image),candidates:previous.candidates.map(c=>adaptAvatarPrompt(c,model)),createdAt:new Date().toISOString()};
-    await prisma.platformSetting.upsert({where:{key:avatarKey(owner,'plan',plan.id)},create:{key:avatarKey(owner,'plan',plan.id),value_json:JSON.stringify(plan),updated_by:owner},update:{}});
+    let plan:AvatarPlan;
+    try { plan=withAvatarLayout({...previous,sourceTaskId:undefined,model,quality,resolution,id:(layout==='contact-sheet'?'sheet-':'')+createHash('sha256').update(`quote:${owner}:${previous.id}:${settings.revision}:${model}:${quality}:${resolution}:${layout}`).digest('hex'),settingsRevision:settings.revision,unitCredits:price,imageReady:isStudioImageGenerationProvider(api.provider)&&isImageGenerationApiReady(api)&&(previous.referenceIds.length?api.supports_image_to_image:api.supports_text_to_image),candidates:previous.candidates.map(c=>adaptAvatarPrompt(c,model)),createdAt:new Date().toISOString()},layout); }
+    catch(e){throw new StudioError((e as Error).message);}
+    await prisma.platformSetting.upsert({where:{key:avatarPlanKey(owner,plan)},create:{key:avatarPlanKey(owner,plan),value_json:JSON.stringify(plan),updated_by:owner},update:{}});
     return {plan:await readAvatar<AvatarPlan>(owner,'plan',plan.id)};
   }
   if (body.action === 'retry') {
@@ -83,14 +101,15 @@ export async function POST(req: NextRequest) { return run(async owner => {
     const failed = tasks.filter(t => t.status === 'failed');
     if (!failed.length) throw new StudioError('没有可重试的明确失败项');
     const settings = await getImageStudioSettings();
-    const plan = { ...previous, id: createHash('sha256').update(`retry:${owner}:${previous.id}`).digest('hex'), candidates: failed.map(t => previous.candidates[t.ordinal - 1]), settingsRevision: settings.revision, unitCredits: settings.prices[previous.model as keyof typeof settings.prices], createdAt: new Date().toISOString() };
+    const plan = { ...previous, sourceTaskId: undefined, id: (avatarLayout(previous)==='contact-sheet'?'sheet-':'')+createHash('sha256').update(`retry:${owner}:${previous.id}`).digest('hex'), candidates: avatarLayout(previous)==='contact-sheet' ? previous.candidates : failed.map(t => previous.candidates[t.ordinal - 1]), settingsRevision: settings.revision, unitCredits: settings.prices[previous.model as keyof typeof settings.prices], createdAt: new Date().toISOString() };
     if (plan.unitCredits === null) throw new StudioError('当前模型尚未设置报价');
-    await prisma.platformSetting.upsert({where:{key:avatarKey(owner,'plan',plan.id)},create:{key:avatarKey(owner,'plan',plan.id),value_json:JSON.stringify(plan),updated_by:owner},update:{}});
+    await prisma.platformSetting.upsert({where:{key:avatarPlanKey(owner,plan)},create:{key:avatarPlanKey(owner,plan),value_json:JSON.stringify(plan),updated_by:owner},update:{}});
     return { plan:await readAvatar<AvatarPlan>(owner,'plan',plan.id) };
   }
   if (body.action === 'save' && body.record?.kind === 'config') body.record.rules = parseAvatarRules(body.record.rules);
   if (body.action === 'save' && body.record?.kind === 'character') {
     const plan = await readAvatar<AvatarPlan>(owner, 'plan', body.planId);
+    if (plan && avatarLayout(plan)==='contact-sheet') throw new StudioError('整张四宫格不能保存为某一个人的身份基准。请切换独立头像并重新报价出图。');
     const candidate = plan?.candidates[Number(body.index)];
     if (!candidate) throw new StudioError('人物草稿不存在');
     const result = (await listStudioTasks(owner, undefined, undefined, false, undefined, plan!.id)).tasks.find(task => task.ordinal === Number(body.index) + 1 && task.status === 'succeeded') || (Number(body.index)===0 ? await sourceTask(owner,plan!.sourceTaskId):null);

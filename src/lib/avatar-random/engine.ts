@@ -2,45 +2,25 @@ import { createHash, randomUUID } from 'node:crypto';
 import { catalog, identityFields } from './catalog';
 import { AVATAR_COMPILER_VERSION, AVATAR_RULE_VERSION, type AvatarRules, type AvatarConstraints, type AvatarDNA, type AvatarField, type AvatarCandidate, type AvatarDetail } from './types';
 import { StudioError } from '@/lib/image-studio/tasks';
+import { validateDescriptionConstraints } from './description-contract';
 
 export function parseAvatarRules(value: unknown): AvatarRules {
   const raw = value as AvatarRules;
+  if (raw?.layout !== undefined && !['independent', 'contact-sheet'].includes(raw.layout)) throw new StudioError('人物排版无效');
+  if (raw?.layout === 'contact-sheet' && (raw.people !== 1 || raw.candidates !== 4)) throw new StudioError('四宫格固定四位不同人物、每格一人，只生成一张图片');
   if (!raw || typeof raw.description !== 'string' || raw.description.length > 3000 || ![1, 2, 3, 4].includes(raw.people) || ![1, 2, 4].includes(raw.candidates) || !['conservative', 'standard', 'bold'].includes(raw.intensity)) throw new StudioError('人物设置无效');
   const choices: Record<string, string> = {}, locks: Record<string, AvatarField> = {};
   if (!raw.choices || !raw.locks || typeof raw.choices !== 'object' || typeof raw.locks !== 'object') throw new StudioError('人物条件无效');
-  for (const [key, val] of Object.entries(raw.choices)) { if (!(key in catalog) || typeof val !== 'string' || val.length > 120) throw new StudioError('人物条件无效'); if (val) choices[key] = val; }
-  for (const [key, field] of Object.entries(raw.locks)) { if (!(key in catalog) || !field || typeof field.value !== 'string' || !field.value || field.value.length > 120 || !['user','config','inferred','random'].includes(field.source)) throw new StudioError('锁定条件无效'); locks[key] = { value: field.value, source: field.source, locked: true, manualLock: true, ...(typeof field.evidence==='string'?{evidence:field.evidence.slice(0,300)}:{}) }; }
+  for (const [key, val] of Object.entries(raw.choices)) { if (!Object.hasOwn(catalog, key) || typeof val !== 'string' || val.length > 120) throw new StudioError('人物条件无效'); if (val) choices[key] = val; }
+  for (const [key, field] of Object.entries(raw.locks)) { if (!Object.hasOwn(catalog, key) || !field || typeof field.value !== 'string' || !field.value || field.value.length > 120 || !['user','config','inferred','random'].includes(field.source)) throw new StudioError('锁定条件无效'); locks[key] = { value: field.value, source: field.source, locked: true, manualLock: true, ...(typeof field.evidence==='string'?{evidence:field.evidence.slice(0,300)}:{}) }; }
   const choiceSources = Object.fromEntries(Object.keys(choices).map(key=>[key,raw.choiceSources?.[key]==='config'?'config':'user'])) as AvatarRules['choiceSources'];
   const choiceEditedAt = Object.fromEntries(Object.keys(choices).map(key=>[key,Number.isSafeInteger(raw.choiceEditedAt?.[key])?raw.choiceEditedAt![key]:0]));
-  return { description: raw.description.trim(), choices, locks, choiceSources, choiceEditedAt, descriptionEditedAt: Number.isSafeInteger(raw.descriptionEditedAt) ? raw.descriptionEditedAt : 0, intensity: raw.intensity, people: raw.people, candidates: raw.candidates, ...(typeof raw.configId === 'string' && raw.configId.length <= 100 ? { configId: raw.configId, configRevision: raw.configRevision } : {}) };
+  return { layout: raw.layout || 'independent', description: raw.description.trim(), choices, locks, choiceSources, choiceEditedAt, descriptionEditedAt: Number.isSafeInteger(raw.descriptionEditedAt) ? raw.descriptionEditedAt : 0, intensity: raw.intensity, people: raw.people, candidates: raw.candidates, ...(typeof raw.configId === 'string' && raw.configId.length <= 100 ? { configId: raw.configId, configRevision: raw.configRevision } : {}) };
 }
 export function emptyConstraints(description = ''): AvatarConstraints { return { description, explicit: {}, details: [], scopes: [], background: '', unrecognized: [], conflicts: [], parserVersion: '1.0.0' }; }
 export function validateConstraints(value: unknown, description: string): AvatarConstraints {
-  const raw = value as AvatarConstraints;
-  if (!raw || typeof raw !== 'object') throw new StudioError('描述解析无效');
-  const list = (v: unknown) => { if (!Array.isArray(v) || v.length > 40 || v.some(s => typeof s !== 'string' || s.length > 300)) throw new StudioError('描述解析格式无效'); return v as string[]; };
-  const fields = (v: unknown): Record<string, AvatarField> => {
-    if (!v || typeof v !== 'object' || Array.isArray(v)) throw new StudioError('描述条件无效');
-    return Object.fromEntries(Object.entries(v).map(([key, f]) => {
-      const field = f as AvatarField;
-      if (!(key in catalog) || !field || typeof field.value !== 'string' || field.value.length > 120 || !field.value && !field.excluded?.length || typeof field.evidence !== 'string' || !description.includes(field.evidence) || !field.evidence) throw new StudioError('描述条件没有对应原文，无法确认');
-      return [key, { value: field.value, source: 'user', locked: true, evidence: field.evidence, excluded: field.excluded === undefined ? [] : list(field.excluded) }];
-    }));
-  };
-  const details = (v: unknown): AvatarDetail[] => {
-    if (!Array.isArray(v) || v.length > 12) throw new StudioError('特征解析无效');
-    return v.map(d => {
-      if (!d || typeof d.value !== 'string' || d.value.length > 120 || !['natural', 'trace', 'accessory'].includes(d.kind) || typeof d.position !== 'string' || d.position.length > 80 || !['left', 'right', 'none'].includes(d.side) || !['main', 'secondary', 'micro'].includes(d.prominence) || typeof d.evidence !== 'string' || !d.evidence || !description.includes(d.evidence)) throw new StudioError('特征位置或原文无法确认');
-      return { value:d.value, kind:d.kind, position:d.position, side:d.side, prominence:d.prominence, evidence:d.evidence, source: 'user', locked: true };
-    });
-  };
-  if (typeof raw.background !== 'string' || raw.background.length > 300) throw new StudioError('背景解析无效');
-  let members: AvatarConstraints['members'];
-  if (raw.members !== undefined) {
-    if (!Array.isArray(raw.members) || raw.members.length > 4) throw new StudioError('多人描述无效');
-    members = raw.members.map(m => ({ explicit: fields(m.explicit), details: details(m.details), relationship: typeof m.relationship === 'string' ? m.relationship.slice(0, 200) : '' }));
-  }
-  return { description, explicit: fields(raw.explicit), details: details(raw.details), scopes: list(raw.scopes).filter(s => ['ordinary', 'office', 'protagonist', 'family'].includes(s)), background: raw.background, unrecognized: list(raw.unrecognized), conflicts: list(raw.conflicts), parserVersion: '1.0.0', ...(members ? { members } : {}) };
+  try { return validateDescriptionConstraints(value, description); }
+  catch (e) { throw new StudioError(e instanceof Error ? e.message : '描述解析无效'); }
 }
 
 export function randomAvatar(rules: AvatarRules, constraints: AvatarConstraints, seed: string, previous?: AvatarDNA, only?: string, styling = false, used: AvatarDNA[] = []): AvatarDNA {
@@ -121,18 +101,28 @@ export function createAvatarCandidates(rules: AvatarRules, constraints: AvatarCo
   const styling = action === 'styling';
   if (only && !(only in catalog)) throw new StudioError('重抽字段无效');
   const result: AvatarCandidate[] = [], used = new Set<string>();
-  const signatureOf=(members:AvatarDNA[])=>JSON.stringify(members.map(d=>Object.fromEntries(Object.entries(d.fields).filter(([key,f])=>identityFields.includes(key)&&!f.locked&&['random','inferred'].includes(f.source)).map(([key,f])=>[key,f.value]))));
+  const signatureOf=(members:AvatarDNA[])=>JSON.stringify(members.map(d=>Object.fromEntries(Object.entries(d.fields).filter(([key,f])=>identityFields.includes(key)&&(rules.layout==='contact-sheet'||!f.locked&&['random','inferred'].includes(f.source))).map(([key,f])=>[key,f.value]))));
   const oldSignatures = history.map(c => signatureOf(c.members));
   for (let i = 0; i < (only || styling ? 1 : rules.candidates); i++) {
+    let candidateConstraints = rules.layout==='contact-sheet'&&constraints.members?.length===4 ? {...constraints,members:[constraints.members[i]]} : constraints;
+    if (rules.layout==='contact-sheet'&&candidateConstraints.members?.[0]) {
+      const member=candidateConstraints.members[0], explicit={...member.explicit};
+      for (const [key,f] of Object.entries(explicit)) {
+        const shared=constraints.explicit[key];
+        if(shared?.value&&f.value&&shared.value!==f.value||shared?.excluded?.includes(f.value)||f.excluded?.includes(shared?.value||''))throw new StudioError('共同人物条件与某一格的明确要求冲突，请调整描述');
+        explicit[key]={...f,value:f.value||shared?.value||'',excluded:[...new Set([...(shared?.excluded||[]),...(f.excluded||[])])]};
+      }
+      candidateConstraints={...candidateConstraints,members:[{...member,explicit}]};
+    }
     let candidate: AvatarCandidate | undefined;
     for (let attempt = 0; attempt < 32; attempt++) {
-      const members = Array.from({ length: rules.people }, (_, member) => randomAvatar(rules, { ...constraints, explicit: { ...constraints.explicit, ...constraints.members?.[member]?.explicit }, details: [...constraints.details, ...constraints.members?.[member]?.details || []] }, randomUUID(), previous?.members[member], only, styling, result.flatMap(c=>c.members)));
+      const members = Array.from({ length: rules.people }, (_, member) => randomAvatar(rules, { ...candidateConstraints, explicit: { ...candidateConstraints.explicit, ...candidateConstraints.members?.[member]?.explicit }, details: [...candidateConstraints.details, ...candidateConstraints.members?.[member]?.details || []] }, randomUUID(), previous?.members[member], only, styling, result.flatMap(c=>c.members)));
       const signature = signatureOf(members);
       if (!only && !styling && (used.has(signature) || attempt < 8 && oldSignatures.includes(signature))) continue;
       used.add(signature);
       const keepIdentity = styling || !!only && !identityFields.includes(only);
       const effectiveRules={...rules,locks:Object.fromEntries(Object.entries(rules.locks).map(([key,f])=>[key,{...f,value:members[0].fields[key].value}]))};
-      candidate = { characterId: keepIdentity && previous ? previous.characterId : randomUUID(), members, ...compileAvatar(members, constraints, styling), compilerVersion: AVATAR_COMPILER_VERSION, rules:effectiveRules, constraints, ...(keepIdentity ? { baselineAssetId: previous?.baselineAssetId } : {}) }; break;
+      candidate = { characterId: keepIdentity && previous ? previous.characterId : randomUUID(), members, ...compileAvatar(members, candidateConstraints, styling), compilerVersion: AVATAR_COMPILER_VERSION, rules:effectiveRules, constraints:candidateConstraints, ...(keepIdentity ? { baselineAssetId: previous?.baselineAssetId } : {}) }; break;
     }
     if (!candidate) throw new StudioError('固定条件下无法产生不同人物，请减少候选数或解除部分锁定');
     result.push(candidate);
