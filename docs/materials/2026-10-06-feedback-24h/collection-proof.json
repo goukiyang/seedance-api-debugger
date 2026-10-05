@@ -1,0 +1,32 @@
+{
+  "project": "video-api-debugger",
+  "documentVersion": "1.0.1",
+  "site": "https://sd2.youdooart.com",
+  "timezone": "Asia/Shanghai",
+  "startUtc": "2026-10-04T16:50:31+00:00",
+  "endUtc": "2026-10-05T16:50:31+00:00",
+  "durationHours": 24,
+  "source": "authorized read-only production Feedback table query",
+  "sqliteMode": "ro",
+  "queryOnly": true,
+  "allStatuses": true,
+  "limit": null,
+  "backendFeedbackCount": 4,
+  "statusCounts": { "new": 4 },
+  "ids": ["cmuvh84xy004rnz5b2g7q6u9k", "cmuvh92x6004ynz5bgl9hxzlp", "cmuvhb1xo005rnz5b2l1nxbsn", "cmuvhc4wl0060nz5bngkjg9f3"],
+  "chatAdditions": 3,
+  "workOrderTopics": 6,
+  "attachments": [
+    { "feedbackId": "cmuvh92x6004ynz5bgl9hxzlp", "filename": "13e13b3f81ba01f6f65bd2530f8866a21c421db49befb12491519733f240cd07.png", "width": 514, "height": 637, "bytes": 393095, "sha256": "13e13b3f81ba01f6f65bd2530f8866a21c421db49befb12491519733f240cd07", "serverHashMatchesLocal": true, "visuallyReadable": true },
+    { "feedbackId": "cmuvhb1xo005rnz5b2l1nxbsn", "filename": "78975c97891da61e2d6fb66c9b4861382faaf5ef2404b56448a5fdc1252a6e2d.png", "width": 376, "height": 505, "bytes": 71843, "sha256": "78975c97891da61e2d6fb66c9b4861382faaf5ef2404b56448a5fdc1252a6e2d", "serverHashMatchesLocal": true, "visuallyReadable": true },
+    { "feedbackId": "cmuvhc4wl0060nz5bngkjg9f3", "filename": "c4d54525be581d606ba821dcbae562aafcc73d2fe665640a60de38858a492d80.png", "width": 266, "height": 73, "bytes": 4846, "sha256": "c4d54525be581d606ba821dcbae562aafcc73d2fe665640a60de38858a492d80", "serverHashMatchesLocal": true, "visuallyReadable": true }
+  ],
+  "existingTicketExactIdsMatched": 0,
+  "rawDataAndImages": "private local only; not committed or deployed",
+  "productionWrites": 0,
+  "paidRequests": 0,
+  "feedbackStatusChanged": false,
+  "applicationChanged": false,
+  "browserFunctionalAcceptance": false,
+  "jev": "deferred: cloud disabled or not authorized; zero attempts"
+}

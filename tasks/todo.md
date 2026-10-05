@@ -2,6 +2,8 @@
 
 ## 当前入口
 
+- [近24小时反馈工单 FB1/FB2](todo/2026-10-06-feedback-24h.md)：2026-10-06，工单v1.0.1；北京时间10月5日00:50:31至10月6日00:50:31，正式后台只读拉取4条new、归档3张原截图，聊天另补发型、人物结果不混入过度帧模板、等待时对应主图暗30%打底。全局“拉取反馈/诊断”规则已写，F24-1至F24-6均未实施；资料索引已登记，0生成/收费/生产写/部署，后续实施需另行授权。
+
 - [人物描述优先与自由表达 AV1](todo/2026-10-05-avatar-intent-generation-flow.md#11-av1描述优先与自由表达2026-10-05)：2026-10-06，已部署v0.44.1/f0a142f/BUILD Nc2Ap5uhxsUEQCkxpRocE，待用户手动验收；简短描述不再因预设分类缺项阻止生成，完整原文进入四宫格与独立头像提示词，其他条件可选。11文件候选内置类型/lint、Git/回退/790源匹配/公网及4静态检查完成；保留费用、未知请求、真实互斥及旧草稿重新报价保护，worker不重启；[交付报告](../docs/materials/2026-10-05-avatar-description-first/delivery.json)与[统一diff](../docs/materials/2026-10-05-avatar-description-first/source.diff)正式归档，0模型/图片/人工DB写，无全站或浏览器功能验收。
 
 - [模板标题与收藏闭环 FAV1](todo/2026-10-02-feedback-primary-navigation.md#fav1模板标题与收藏闭环2026-10-05)：2026-10-05，v0.44.0/17c55b2/BUILD 2eaaF0OY1UB1XncX97oQJ已部署；图片/视频模板标题仅名称右侧收藏，顶部我的收藏直达模板，复用搜索/使用/取消/撤销。候选内置检查、公网新CSS与3份JS、服务/回退/远端均完成，实际效果待用户手动验收。仅12个前端及版本文件，无DB/权限/模型/依赖变化，费用0；[完整源diff](../docs/materials/2026-10-05-template-title-favorites/source.diff)与[公网证明](../docs/materials/2026-10-05-template-title-favorites/public.json)在正式资料根，旧无关资产计划和其他脏改保留。
