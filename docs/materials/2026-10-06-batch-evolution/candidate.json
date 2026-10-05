@@ -1,0 +1,59 @@
+{
+  "commit": "545d9d6f3bbf9d0299fc1d34ac136b02958536aa",
+  "version": "0.45.0",
+  "build": "KbJIPWhOPLhIslbk70m-a",
+  "mode": "candidate",
+  "checks": [
+    {
+      "file": "static/chunks/app/template-studio/page-6b0894c4469463da.js",
+      "sha256": "a6b6f9db123139d8d1f896c340b52e31bc183e6526506340366d2271386d55de",
+      "matchesArtifact": true
+    },
+    {
+      "file": "static/chunks/5201-6d900a0b2c11faa0.js",
+      "sha256": "19e59653c187b6baee71cd19c6b0ca94630fa3a35cd724d06fda1b67abe825d1",
+      "matchesArtifact": true
+    },
+    {
+      "file": "static/chunks/4881-678e733bab7506cd.js",
+      "sha256": "4416c462915e4295523ea54e29499af1467a91ce578ee08b49e798ff20e916dc",
+      "matchesArtifact": true
+    },
+    {
+      "file": "static/chunks/3134-994b46d3d37c8222.js",
+      "sha256": "6e094f1aa6a2090b355430794d8051743cc93b9189723adb7578be9c14fd724c",
+      "matchesArtifact": true
+    },
+    {
+      "file": "static/chunks/8344c0af-421bfd77be53e753.js",
+      "sha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
+      "matchesArtifact": true
+    },
+    {
+      "file": "static/chunks/9017-73cbd9aab2d5412a.js",
+      "sha256": "a769b7acfba346dbeb5647803d3d14f7b99426e8fce239fa5808ec54cfb92925",
+      "matchesArtifact": true
+    },
+    {
+      "file": "static/chunks/7324-15cb8d6ff268cd99.js",
+      "sha256": "174a82515d7f2dfd5509bc2d62ecc079f82dff2b8b69bcd1ec5e819b7be2c520",
+      "matchesArtifact": true
+    },
+    {
+      "file": "static/css/a1cdd8f47154bef5.css",
+      "sha256": "a2cee6e9d5851aaa5780ffc04c52dacdf18b48c4a89e306883e093a9f418607f",
+      "matchesArtifact": true
+    },
+    {
+      "file": "static/css/5ca39add44893229.css",
+      "sha256": "e376c1bb20da82b244a68da25c778c83123223211f478d0088a3a1201ca7fc9f",
+      "matchesArtifact": true
+    },
+    {
+      "file": "static/css/1ef475f52565e419.css",
+      "sha256": "8fc43b68bd8885092cd796a8f8a78828450a11936b940777b1c2b3deb8d1ba14",
+      "matchesArtifact": true
+    }
+  ],
+  "functionalAcceptance": "not-run; user manual acceptance required"
+}

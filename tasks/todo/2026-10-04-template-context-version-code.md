@@ -281,11 +281,11 @@ CTX1先确定编码语义和安全存储契约；CTX2与CTX3可在边界隔离�
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
-| BATCH1 | 批量生成与结果交付 | 入口、批次记录、续跑、结果查看和保存接通 | 进行中 |
-| EVO1 | 演化方向与内容 | 方向与正文进入生成及历史记录，不新增重复输入框 | 进行中 |
-| REL1 | 合并与发布 | 聚焦提交推送、可回退部署、版本与公网检查完成 | 未开始 |
-| NOTIFY1 | 生成完成提醒 | 标签页提醒、可选提示音、不重复打扰 | 进行中 |
-| PREVIEW1 | 人物结果预览 | 缩略图可见，电脑双击、手机轻点打开大图 | 进行中 |
+| BATCH1 | 批量生成与结果交付 | 入口、批次记录、续跑、结果查看和保存接通 | 已完成实施与部署，待手动验收 |
+| EVO1 | 演化方向与内容 | 方向与正文进入生成及历史记录，不新增重复输入框 | 已完成实施与部署，待手动验收 |
+| REL1 | 合并与发布 | 聚焦提交推送、可回退部署、版本与公网检查完成 | 已完成发布检查，不代表功能验收 |
+| NOTIFY1 | 生成完成提醒 | 标签页提醒、可选提示音、不重复打扰 | 已完成实施与部署，待手动验收 |
+| PREVIEW1 | 人物结果预览 | 缩略图可见，电脑双击、手机轻点打开大图 | 已完成实施与部署，待手动验收 |
 
 实施规则：
 
@@ -293,7 +293,7 @@ CTX1先确定编码语义和安全存储契约；CTX2与CTX3可在边界隔离�
 - BATCH1依第13节：现有生成栏单次/批量、正文直接批量/可选素材逐图、目录预览和有界上传、服务端持久批次/条目/请求身份/快照/预算、安全派发和查询、暂停/续跑、同页批次结果及我的批次。沿用8张在途与原图片计费规则，未知请求不重发，不由GET触发生成；四宫格仍1张。关闭页面只能继续已准备并持久登记的条目，本机目录写入不承诺关闭后后台运行。
 - 保存与生成分别统计；目录写入权限由实际浏览器系统选择器处理，源图与已有文件不覆盖；不支持时有界ZIP及多选降级。生成失败只显式重试失败项，保存失败只补交付现有图，不能再扣生图费用；不监控新文件、不加本机常驻工具或公开分享。
 - EVO1依第12节：仅支持演化的模板显示递进/递减；内容复用补充textarea，标题演化内容、占位什么发生变化。没有第二正文框或激活必选项，正文理解不先强迫手动分析；明确正文优先于未手选默认，真实手选冲突就地提示。必须进入Prompt、批次/任务快照、历史和安全草稿恢复，默认档数/范围/排版不暗改，不误套人物DNA。
-- 2026-10-06追加NOTIFY1：用户希望每次生成完在网页标签图标或名称轻提示，或可设置提示音，并要求用户体验优先。本批设计与实施纳入同一清单：生成区安静设置入口提供完成提醒，后台标签页有限提示、回到前台恢复；提示音默认关闭，由用户主动开启并按账号/项目保存。以真实生成终态为准，单次操作汇总、批量整批结束汇总，部分失败如实表达；历史恢复、轮询重复和旧响应不再次提醒。前台不闪烁，尊重减少动态偏好，路由离开/账号变化清理；不申请系统通知权限、不引入Push或持久已读平台，不承诺网页关闭/手机锁屏后仍通知。
+- 2026-10-06追加NOTIFY1：用户希望每次生成完在网页标签图标或名称轻提示，或可设置提示音，并要求用户体验优先。本批设计与实施纳入同一清单：生成区安静设置入口提供完成提醒，后台标签页有限提示、回到前台恢复；提示音默认关闭，由用户主动开启并按账号/项目保存。以真实生成终态为准，单次操作汇总、批量整批结束汇总，部分失败如实表达；结果未知不当作终态，不提前消费完成提醒；历史恢复、轮询重复和旧响应不再次提醒。前台不闪烁，尊重减少动态偏好；站内换页只清旧标题，保留同账号当前会话发起且已受理的有界任务观察，不恢复全部历史；账号变化或运行层卸载清理观察及旧提示。不申请系统通知权限、不引入Push或持久已读平台，不承诺网页关闭/手机锁屏后仍通知。
 - 2026-10-06追加PREVIEW1：用户反馈人物随机生成缺少可看的缩略图和双击大图。先核对人物真实结果路径，再接入已有结果缩略图及大图查看器；电脑支持双击、手机轻点、键盘可达，保留既有单击行为及手机返回先关闭大图。覆盖人物模块的本次成功图和历史结果，不把DNA文本候选冒称已生成头像，不新建平行相册；点赞/收藏激活图标保持常显，原下载及结果恢复不丢。
 - 本轮不发起真实模型/收费生成，不因历史付费授权扩大预算；不访问用户选定文件夹、不上传其素材、无生产数据覆盖/回写/迁移，不能泄露env/密钥/凭据/身份。代码新功能响应用户今后明确开始而存储批次，不等于本轮人工操作生产数据。新增权限、迁移或依赖等真实范围变更先报supervisor。
 
@@ -309,4 +309,43 @@ CTX1先确定编码语义和安全存储契约；CTX2与CTX3可在边界隔离�
 
 NOTIFY1来源核对：[Chrome自动播放规则](https://developer.chrome.com/blog/autoplay/)、[MDN页面可见性与后台节流](https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API)、[document.title](https://developer.mozilla.org/en-US/docs/Web/API/Document/title)已查；[GoogleChromeLabs/airhorn PR37实际diff](https://github.com/GoogleChromeLabs/airhorn/pull/37.diff)已读，其用户动作后resume思路仅作参考，不安装/复制代码或声称所有浏览器都能响。采用原生标题/可见性/Web Audio配合现有设置的轻量路线，避免为短提示引入新通知依赖；兼容和实际声音仍待用户手动验证。PREVIEW1优先复用原组件，不因预览技能的默认推荐额外安装panzoom。
 
-交付记录：待实现负责人提供完整差异、候选日志、精确版本/commit/build、远端/回退与公网产物证明后，将无敏感信息白名单同步到正式根既有docs/materials目录并登记。当前无代码或功能通过声明，费用0；本节状态后续据实际交付更新。
+交付记录（2026-10-06）：已部署v0.45.0，应用源码545d9d6f3bbf9d0299fc1d34ac136b02958536aa，BUILD KbJIPWhOPLhIslbk70m-a；正式入口https://sd2.youdooart.com/template-studio?type=image，人物页https://sd2.youdooart.com/tools/avatar-studio。应用分支codex/batch-evolution-20261006及release/v0.45.0-batch-evolution可追溯；回退tag rollback/2026-10-06-before-batch-evolution-v0.45.0指向原0.44.1/f0a142f，原源码归档与运行构建保护在delivery.json登记。后续证据提交不改变本次应用源码或版本，不用正式根旧应用/文档分支发布。
+
+正式材料已按安全白名单归入docs/materials/2026-10-06-batch-evolution，保留工作区原件：
+- [完整发布及风险回执](../../docs/materials/2026-10-06-batch-evolution/delivery.json)、[23项实际应用文件](../../docs/materials/2026-10-06-batch-evolution/changed-files.txt)、[统一diff](../../docs/materials/2026-10-06-batch-evolution/app.diff)。diff与交付JSON可读、复制内容与来源SHA-256一致，源码/版本/build对应；未复制源包二进制、数据库、env/凭据、用户图片或反馈原文。
+- [最终候选](../../docs/materials/2026-10-06-batch-evolution/candidate.json)、[公网证明](../../docs/materials/2026-10-06-batch-evolution/public.json)、[源站证明](../../docs/materials/2026-10-06-batch-evolution/origin.json)、[源码复核](../../docs/materials/2026-10-06-batch-evolution/review.json)。candidate/public关键复制内容一致，10项最终CSS/JS哈希与候选相同；辅助日志可读，仅保留必要校验，不逐项重复哈希。中间候选及失败日志保留为过程，不当作最终通过。
+
+实际修改与用途（全部属于上述545d9d6应用源码；正式根旧源码不代表本批实现）：
+| 文件 | 本次内容 |
+|---|---|
+| package.json | 唯一应用版本升为0.45.0，不安装依赖或改锁文件 |
+| scripts/check-batch-evolution-source.mjs | 静态来源、投影、未知提醒与入口核对，不冒称功能测试 |
+| scripts/process-image-studio.ts | 原图片worker接入批次调度 |
+| src/app/ClientLayout.tsx | 接入共享完成观察运行层 |
+| src/app/api/image-studio/batches/route.ts | 账号隔离的批次查询、准备、开始、暂停、继续及显式失败重试 |
+| src/app/api/image-studio/download/route.ts | 已有下载复用，8张/128MB有界流式ZIP |
+| src/app/image-studio/batch-files.ts | 可选素材目录预览及文件类型/数量/大小限制 |
+| src/app/image-studio/batch-results.tsx | 本批结果/我的批次、恢复、保存状态与失败恢复入口 |
+| src/app/image-studio/batch.module.css | 批次与文件预览的稳定尺寸、手机布局 |
+| src/app/image-studio/studio.tsx | 生成栏单次/批量、原补充框演化参数、真实操作提醒接线 |
+| src/app/image-studio/use-studio-batch.tsx | 批次准备/上传/明确开始、原请求恢复及安全偏好 |
+| src/app/tools/avatar-studio/studio.module.css | 历史图片按钮保留稳定缩略图尺寸 |
+| src/app/tools/avatar-studio/studio.tsx | 真结果/候选/历史共用大图预览，双击/轻点及本次生成观察 |
+| src/components/GenerationCompletion.module.css | 安静的完成提醒设置样式 |
+| src/components/GenerationCompletion.tsx | 真实终态汇总、未知继续观察、跨站内路由观察、标签/可选声音及去重 |
+| src/components/template-studio/TemplateStudioShell.tsx | 顶部我的批次入口 |
+| src/lib/image-studio/batch-contract.ts | 100张/文件、单图30MB、素材总256MB及导出分包边界 |
+| src/lib/image-studio/batches.ts | 持久批次/逐项快照、预算、原请求身份、共享8张队列与有限重试 |
+| src/lib/image-studio/evolution.ts | 明确演化能力、正文与手选方向优先级和就地冲突 |
+| src/lib/image-studio/modules.ts | 模板演化能力入口 |
+| src/lib/image-studio/presets.ts | 历史/预设快照中演化参数及安全公开投影 |
+| src/lib/image-studio/tasks.ts | 原任务受理/快照复用、延后派发及演化Prompt接线 |
+| src/lib/release.ts | 本次真实更新摘要，复用原升级提醒及身份摘要边界 |
+
+发布检查：本机原共享依赖缺包，未安装新库，改用服务器现有依赖隔离构建。首轮候选发现lint/类型和归档遗漏的原有gateway导入，汇总后统一修正；中间及最终精确commit候选完整Next build/内置lint/type通过，保留非致命img/hook/CSS提醒。git diff --check、静态投影检查与部署脚本语法通过。窗口预约/重锁、源码803文件一致、候选/live build、源站与公网config/release/login均200及10项目标静态哈希有证据；安全drain在途0，新worker加载（PID259902→1043189），Web/worker健康，持久库/上传/存储/env未覆盖。匿名release.summary为空沿用已有隐私策略，已补内部身份真实摘要，不为匿名开放内部更新文案。
+
+结果界限：上表完成只指实现与发布；未运行功能/浏览器/DOM/截图、业务API验收、test:api、收费生成或独立审核，费用0；未迁移或人工回写生产数据、取得本机目录权限或上传用户素材。生成与本机保存分开，手机ZIP只叫已提供下载；结果未知既不重发也不假报完成。manualRemaining逐项保留在review.json：真实批次/预算/暂停/重试/权限失效保存、目标演化视觉与历史、旧客户端升级保护、后台标签/音频兼容、人物手机返回及大图/原操作，均待用户手动验收；不把代码正确或构建通过当真实效果达标。守门员收尾另核；本轮分级/归类误判记录无。
+
+守门员finish已执行，关键词识别verification/real-client/queue/closure，真实效果层仍受项目手动验收边界约束，工具不据此扩展授权。已核对正式材料27份与来源字节一致、关键diff/交付/candidate/public校验，部署证据与源码对应；没有自己的分级/归类误判。正式根另有其他对话未推送提交和脏改，本批文档记录采用独立codex/batch-evolution-records-20261006分支推送，只带本批记录及安全核心证明，不代推他人工单；完整27份白名单本机保留，原材料源证据另在应用分支bf71a45，不因记录再升级或重启应用。
+
+同轮工单收件：已读正式根[近24小时反馈工单v1.0.2](2026-10-06-feedback-24h.md)与固定todo/资料索引入口，F24-1至F24-8、NAV2/MAIN1继续待办，不改后台反馈状态、不把转交当实施授权。PREVIEW1是人物整图缩略/预览，F24-2仍需四格直接点击/选框；九宫格不同人物/同人多视图、导航排版及脚本入口待明确，其他发型、命名、归属、主图暗底、免提醒均未纳入本次实现。来源64d81cd文档分支不作为应用部署源，4原PNG/feedback.private.json继续本机私有、不Git或部署。本回执不向来源聊天自动发消息。
