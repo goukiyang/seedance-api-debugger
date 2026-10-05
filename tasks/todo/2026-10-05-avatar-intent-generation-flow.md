@@ -212,3 +212,29 @@ Git Plan：源码只在codex/avatar-generator-20261005聚焦提交推送及新re
 完整[逐文件与命令交付](../../docs/materials/2026-10-05-generation-toolbar/delivery.json)、[最终统一diff](../../docs/materials/2026-10-05-generation-toolbar/unified.diff)、[源码时序自查](../../docs/materials/2026-10-05-generation-toolbar/source-review.json)、[公网证明](../../docs/materials/2026-10-05-generation-toolbar/server-public-proof.json)和[源码/持久保护](../../docs/materials/2026-10-05-generation-toolbar/server-source-proof.json)同批归档正式根并接主Todo/资料索引。初候选source.diff与最终unified.diff区分，父级复核最终差异仅合法值相等检查的类型兼容修正；关键报告/diff复制一致性核对，安全记录提交推送、原headers/脚本等辅助资料本机保留，不公开私有媒体。守门员L3清单无blockingWarnings，不作真实功能证据；本轮无自身分级误判。
 
 本轮0文字调用、0图片提交、0费用、0浏览器功能验收。仍待用户手动检查首次正文一键出图、缓存/免费重检、真实冲突、等待时编辑/账号变化、变价停下、未知提交恢复及按钮实排；历史付费样本不能证明本版。文字上游费用金额未知，按钮旁已如实提示，输入本身不会生成。没有未解决发布阻塞，不以已部署冒称实际效果已验收。
+
+## 11. AV1描述优先与自由表达（2026-10-05）
+
+用户明确纠正：只要输入描述，应按其意思理解生成，不能要求按系统预设方式填写。新截图中“反派”被显示为需要补充。此要求补充第9节C1并替代第10节中“未支持/未识别”一律阻断的旧处理：角色、气质、画风、简短描述和无法归类的自然语言都是有效意图；补充条件可选，未指定外观合理补齐。真实互斥明确条件、输出人数/排版、费用及请求未知状态仍保护，不把有效原文丢掉后生成随机人物。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| AV1 | 人物描述优先生成 | 简短描述也能进入生成，未指定条件自行补齐，不强迫填写 | 进行中：已实现部署v0.44.1，待用户手动验收 |
+
+范围为人物页及同一解析/编译/四宫格/独立头像/历史重新报价链；不是改全站鉴权、点数、Provider或数据库。已核正式站v0.44.0、commit17c55b23f314c5cbe9854a4c3f7ec5b4e78a4861、BUILD2eaaF0OY1UB1XncX97oQJ；复用该精确源码工作树，分支codex/avatar-description-first-20261005，正式根旧应用源不部署。原29行资产计划、其他固定记录和私人素材保留。一个内部实现者只写人物UI/CSS，lead负责后端、集成及发布；无自动审核线程。
+
+源码原因已确认：intentIssues把unrecognized/clarifications混成硬错误；compileAvatar未带完整原描述，四宫格仅使用standardDescription；非Gemini额外强制写实。截图对应原始模型回复未读取，不能把某个模型字段值当作线上实证。修复应同时让分类缺项非阻塞、完整原文贯穿标准描述/Prompt，明确条件与后改参数优先、随机值仅填空；保留可理解的真实互斥检查。已保存结构化回复不兼容时只用原描述继续理解，不采信坏字段、不重复调用文字模型；未收到回复或保存未确认仍不得自动重发。历史旧编译草稿通过重新报价保留DNA并使用新编译，不重抽人物、不复用旧编译报价ID。
+
+界面按原描述为主，补充条件折叠但保留原选择；状态就近且简短，原描述转交模式不能冒称结构化分析成功。输入/粘贴本身不收费，正常显式生成沿用一次链路、当前费用可见；费用变化、无报价、重复提交、切账号、编辑中断、未知请求及失败收费重试的已有保护不撤销。本轮没有新的付费调用授权，不复用第8节历史A2授权。
+
+开源依据：[LangChain实际structured-output代码](https://github.com/langchain-ai/langchain/blob/master/libs/partners/openai/langchain_openai/chat_models/base.py)中include_raw保存原回复并独立返回parsed/parsing_error；本轮已读取parser_assign/with_fallbacks分支。只借鉴“原文与字段转换分离”方法，用项目已有存储和组件适配，不安装LangChain、不复制大包；未声称运行过该外部库。
+
+相关新原件：[codex-clipboard-e55ec5aa-faff-4b03-9158-1aea6b1718c3.png](../../docs/materials/2026-10-05-avatar-description-first/codex-clipboard-e55ec5aa-faff-4b03-9158-1aea6b1718c3.png)，原本机剪贴板文件保留；800x573 PNG可读，辅助反馈图不逐项哈希，只本机保存，不作为功能验收或效果图。完整需求与发布资料接[固定资料索引](../../docs/materials/index.md#人物描述优先与自由表达2026-10-05)。当前仅实施阶段，尚未上线本批；整批完成后只候选构建内置检查、源码Review、Git/回退/服务/公网/新静态检查，实际生成效果由用户手动验收。
+
+最终交付（2026-10-06北京时间）：v0.44.1/f0a142fa94f77eb57165339b475da4eb09233a39/BUILD Nc2Ap5uhxsUEQCkxpRocE已部署[正式人物页](https://sd2.youdooart.com/tools/avatar-studio)，待用户手动验收。11应用文件完成分类缺项非阻塞、原文贯穿四宫格/独立编译、可选条件折叠、原回复兼容及旧草稿重新报价；旧重试ID保留不打破幂等。没有强制用户填写性别/年龄等字段，也没有声称任何描述都保证出图；真实互斥、人数/排版、收费未知、账号/草稿/变价和重复提交保护保留。
+
+整批候选构建及内置类型/lint退出0，有既有CSS/img/hook警告；790份运行源与回退提交一致，changed-file白名单为同一11文件。源码分支、release/v0.44.1-avatar-description-first及rollback/avatar-description-first-20261005-v0.44.0已推并远端解引用核对，早于服务切换；包哈希、候选、root保护脚本哈希和来源/BUILD/公网version一致。Web active，public release/health/config/login HTTP200/server-42-193，人物路径匿名重定向登录，4份CSS/JS与候选哈希相同；这些不是登录后视觉或生图验收。只有Web重启，图片worker PID259902未变，原持久软链/写权限与env/DB/上传排除保持。旧源码和BUILD2eaaF0OY1UB1XncX97oQJ保留，未实际回滚；发布窗口已finish。
+
+正式资料：[逐文件与命令交付](../../docs/materials/2026-10-05-avatar-description-first/delivery.json)、[统一源码diff](../../docs/materials/2026-10-05-avatar-description-first/source.diff)、[源码Review](../../docs/materials/2026-10-05-avatar-description-first/source-review.json)、[候选证明](../../docs/materials/2026-10-05-avatar-description-first/candidate.json)、[公网证明](../../docs/materials/2026-10-05-avatar-description-first/public.json)。关键diff与确切Git来源一致，关键源码/回退/公网资源哈希已核，辅助日志/header可读不逐项重复哈希；原图和完整构建日志只本机，不上传私有素材。守门员finish无blockingWarnings，但project/routeResolution为null，按真实项目规则和等价检查解释，不把工具自动分类当作已功能验收。无本轮分级误判、无越界、无依赖/锁/schema/auth/点数/Provider变化；0模型调用、0图片提交、0费用、0人工数据库写。
+
+剩余：用户手动检查“反派”等短描述、选项及最近修改优先、四宫格/独立真实风格与原意、旧草稿重新报价和升级提醒；未全站巡改其他创作模式，本批共用人物链覆盖已注明。发布无未解阻塞，效果未验收不标为功能完成。

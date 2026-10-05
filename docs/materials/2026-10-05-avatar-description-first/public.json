@@ -1,0 +1,64 @@
+{
+  "commit": "f0a142fa94f77eb57165339b475da4eb09233a39",
+  "version": "0.44.1",
+  "build": "Nc2Ap5uhxsUEQCkxpRocE",
+  "workerPid": "unchanged",
+  "checks": [
+    {
+      "pathname": "/api/release",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/api/health",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/api/config",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/login",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "pathname": "/tools/avatar-studio",
+      "status": 200,
+      "finalPath": "/login",
+      "authRedirect": true
+    },
+    {
+      "route": "/tools/avatar-studio/page",
+      "file": "static/css/acf143fe2224836d.css",
+      "status": 200,
+      "sha256": "7be26690ceacd0773d065bdc3b7b9be87bf4688bf1a0c244e33744dac352b8e3",
+      "matchesCandidate": true
+    },
+    {
+      "route": "/tools/avatar-studio/page",
+      "file": "static/css/b533f5fd0272df63.css",
+      "status": 200,
+      "sha256": "c199e94de26aebd50f44b658103bf4dd020ae6b47d332d38fad5415cc70ccd1d",
+      "matchesCandidate": true
+    },
+    {
+      "route": "/tools/avatar-studio/page",
+      "file": "static/css/7f19d5108ed133c8.css",
+      "status": 200,
+      "sha256": "ff602b28b5d84791f204899f760387f2fb5949d32211e585558cf05923a26848",
+      "matchesCandidate": true
+    },
+    {
+      "route": "/tools/avatar-studio/page",
+      "file": "static/chunks/1338-ebb5b5b91cc6eb7c.js",
+      "status": 200,
+      "sha256": "e9e55c562c352a4b5adcea4d6e7526372b1098cd843384d93eb319b277c0b926",
+      "matchesCandidate": true
+    }
+  ],
+  "checkedAt": "2026-10-05T16:04:53.167Z",
+  "evidenceLimit": "HTTP and static build proof only; no logged-in DOM or visual acceptance"
+}

@@ -1,0 +1,17 @@
+{
+  "commit": "f0a142fa94f77eb57165339b475da4eb09233a39",
+  "version": "0.44.1",
+  "buildId": "Nc2Ap5uhxsUEQCkxpRocE",
+  "route": "/tools/avatar-studio/page",
+  "uiChunks": [
+    "static/chunks/1338-ebb5b5b91cc6eb7c.js"
+  ],
+  "cssFiles": [
+    "static/css/acf143fe2224836d.css",
+    "static/css/b533f5fd0272df63.css",
+    "static/css/7f19d5108ed133c8.css"
+  ],
+  "backendMarkers": true,
+  "checkedAt": "2026-10-05T16:03:57.143Z",
+  "evidenceLimit": "Compiled artifact checks only, not functional acceptance"
+}

@@ -1,0 +1,48 @@
+{
+  "task": "AV1",
+  "status": "deployed; user manual acceptance pending",
+  "receivedDate": "2026-10-05",
+  "deliveredDateLocal": "2026-10-06",
+  "version": "0.44.1",
+  "commit": "f0a142fa94f77eb57165339b475da4eb09233a39",
+  "buildId": "Nc2Ap5uhxsUEQCkxpRocE",
+  "url": "https://sd2.youdooart.com/tools/avatar-studio",
+  "sourceWorktree": "/Volumes/Data/Projects/video-api-debugger/worktrees/template-title-favorites-20261005",
+  "formalRecordsRoot": "/Volumes/Data/Projects/video-api-debugger",
+  "files": [
+    {"path": "src/app/tools/avatar-studio/studio.tsx", "change": "description-first input, optional conditions folded, understood state nearby, legacy reprice entry"},
+    {"path": "src/app/tools/avatar-studio/studio.module.css", "change": "responsive description column, compact status and optional fields, primary action emphasis"},
+    {"path": "src/lib/avatar-random/intent.ts", "change": "classification gaps no longer become mandatory clarification; custom scope labels preserved"},
+    {"path": "src/lib/avatar-random/description-contract.ts", "change": "free description accepted beyond preset fields; open scope and original-mode fallback; system prompt no longer demands complete traits or forces photography"},
+    {"path": "src/lib/avatar-random/description-parser.ts", "change": "saved schema-incompatible replies use original description without another model call; receipt/CAS/unknown protections preserved"},
+    {"path": "src/lib/avatar-random/engine.ts", "change": "original text included in both standardDescription and prompt; random suggestions subordinate to intent; adaptation updates both outputs"},
+    {"path": "src/lib/avatar-random/types.ts", "change": "original interpretation marker, parser1.2.0 and compiler1.3.0"},
+    {"path": "src/app/api/avatar-studio/route.ts", "change": "quote identity binds current compiler; original DNA and image costs retained"},
+    {"path": "src/lib/avatar-random/service.ts", "change": "unqueued outdated compiler drafts must reprice rather than submit an old prompt"},
+    {"path": "package.json", "change": "single application patch version0.44.1; no dependencies changed"},
+    {"path": "src/lib/release.ts", "change": "same-version user-visible update summary; existing release notice reused"}
+  ],
+  "publicationChecks": [
+    {"command": "git diff --check", "result": "exit0, complete application batch"},
+    {"command": "bash -n archive.sh candidate.sh switch.sh; node --check release-window.mjs", "result": "each independent syntax command exit0"},
+    {"command": "git push --atomic followed by git ls-remote", "result": "exit0; branch, release tag and rollback tag dereferenced to intended commits before live switch"},
+    {"command": "git archive exact commit and rollback; SHA256 before extraction", "result": "two archives match; no env, dependencies, build, storage, uploaded assets or DB files included"},
+    {"command": "candidate NEXT_DIST_DIR=.next-prod-candidate npm run build", "result": "exit0, internal TypeScript/lint included; existing CSS/img/hook warnings present; avatar UI/API and original-description markers compiled"},
+    {"command": "source hash, changed-file allowlist, protected root script hash, candidate switch", "result": "790 baseline source files match; only11 approved application files changed; root script SHA256822a751417a7e1db1404a88fa3104ca367f537df284b8c4bc1e319975629e804; switch exit0"},
+    {"command": "systemctl is-active sd2-gray.service; live BUILD_ID and deployed-commit", "result": "active, Nc2Ap5uhxsUEQCkxpRocE/f0a142f"},
+    {"command": "localhost api/config; public api/release api/health api/config login; route and CSS/JS hashes", "result": "HTTP200, public origin server-42-193; release0.44.1, anonymous summary empty; four static resources match candidate; unauthenticated avatar route follows login, not logged-in UI acceptance"}
+  ],
+  "rollback": {
+    "tag": "rollback/avatar-description-first-20261005-v0.44.0",
+    "commit": "17c55b23f314c5cbe9854a4c3f7ec5b4e78a4861",
+    "buildId": "2eaaF0OY1UB1XncX97oQJ",
+    "serverSource": "/srv/video-api-debugger/releases/17c55b23f314c5cbe9854a4c3f7ec5b4e78a4861-avatar-description-first-rollback",
+    "serverBuild": "/srv/video-api-debugger/app/.next-prod-prev-avatar-description-first-f0a142f",
+    "actualRollbackExecuted": false
+  },
+  "safety": {"paidCalls": 0, "imageSubmissions": 0, "manualProductionDbWrites": 0, "authPointsProviderSchemaChanges": false, "dependencyChanges": false, "browserAcceptancePerformed": false, "workerRestarted": false, "workerPid": 259902, "runtimeData": "env/DB/uploads/storage exclusions and persistent symlink/write checks preserved", "scopeViolation": "none"},
+  "guardian": {"sourceSelfReview": "completed", "toolFinish": "L3-visible-runtime, blockingWarnings empty; routeResolution/project null, so tool classification is not project or result proof", "equivalentFinish": "target, exact source, Git, rollback, runtime, public artifacts and manual acceptance gap checked", "classificationMisjudgment": "none"},
+  "remaining": ["User manual short-description generation, optional-condition behavior, actual framing/layout and image semantic faithfulness", "Old-client release notice and refresh persistence not browser-tested", "Whole-site creative modes were not broadly audited; this batch covers the shared avatar chain"],
+  "evidence": {"candidate": "candidate.json", "public": "public.json", "review": "source-review.json", "diff": "source.diff", "buildLog": "build.log (local auxiliary)"},
+  "recording": "Screenshot original retained locally, fixed material index and existing avatar work order updated; unrelated dirty asset plan excluded from focused commit."
+}

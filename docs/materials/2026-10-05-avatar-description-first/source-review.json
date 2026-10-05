@@ -1,0 +1,25 @@
+{
+  "task": "AV1",
+  "sourceCommit": "f0a142fa94f77eb57165339b475da4eb09233a39",
+  "baseCommit": "17c55b23f314c5cbe9854a4c3f7ec5b4e78a4861",
+  "version": "0.44.1",
+  "risk": "L3: bounded avatar parser/compiler flow; pricing, auth, provider and DB schema unchanged",
+  "checks": {
+    "classificationGapsDoNotBlock": "intentIssues now returns only derived incompatible explicit conditions, not free-text parser categories",
+    "originalIntentRetained": "compileAvatar includes exact JSON-quoted original description in standardDescription, therefore both independent prompt and contact-sheet compiler receive it",
+    "optionalFieldsDoNotOverrideIntent": "explicit/latest user fields and manual locks are separated from inferred/random suggestions; defaults apply only to unspecified style and framing",
+    "savedReplyFallback": "DescriptionContractError on saved cache/response forwards original text with honest original-mode message; no paid model retry, no invalid extracted fields reused",
+    "unknownReceiptStillProtected": "missing response, pending/unknown request, CAS and persistence errors keep existing uncertainty protections",
+    "legacyQuote": "compiler version is included in new quote identity; adaptation recompiles standardDescription and prompt without resampling DNA; unqueued outdated compiler plans must reprice",
+    "legacyRetry": "retry IDs are unchanged to preserve idempotency; outdated drafts expose the existing reprice entry rather than being silently submitted",
+    "ui": "description first, optional conditions collapsed, chosen values retained in summary, understanding near input; safe account/draft/price/count and submission flow unchanged",
+    "versionNotice": "existing ReleaseNotice uses same package version, numeric comparison, same-channel checks, later persistence, manual retry and user-triggered guarded refresh; external summary remains hidden",
+    "scope": "11 application files, no dependencies, lockfile, auth, points, provider or schema change",
+    "diffWhitespace": "git diff --check exit 0 after entire batch",
+    "releaseScriptSyntax": "bash -n archive/candidate/switch exit 0"
+  },
+  "notPerformed": ["browser control or screenshots", "functional tests", "business API requests", "paid text-model or image generation", "manual production DB writes"],
+  "limits": "Source self-review and publication checks are not proof of actual image quality, UI layout or semantic faithfulness. User manual acceptance remains required.",
+  "guardian": {"equivalentStartCheck": "real project/path/AGENTS, dirty changes preserved, live exact source, branch isolation, manual acceptance, no paid calls, rollback and runtime exclusions checked", "classificationMisjudgment": "none"},
+  "openSource": {"url": "https://github.com/langchain-ai/langchain/blob/master/libs/partners/openai/langchain_openai/chat_models/base.py", "actualCodeRead": "include_raw parser_assign/with_fallbacks branch", "use": "concept only; no dependency installed or code copied"}
+}
