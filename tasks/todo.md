@@ -2,6 +2,8 @@
 
 ## 当前入口
 
+- [S1 现有抠图全功能升级交接](todo/2026-10-06-ai-cutout-upgrade.md)：2026-10-06，工单v1.0.0已完成；仅功能/运作/缺口与正式附件登记，保留原入口，具体接入由项目agents决定；应用未改，源完整验收仍有缺口，媒体本地归档，公开remote不推。
+
 - [人物描述优先与自由表达 AV1](todo/2026-10-05-avatar-intent-generation-flow.md#11-av1描述优先与自由表达2026-10-05)：2026-10-06，已部署v0.44.1/f0a142f/BUILD Nc2Ap5uhxsUEQCkxpRocE，待用户手动验收；简短描述不再因预设分类缺项阻止生成，完整原文进入四宫格与独立头像提示词，其他条件可选。11文件候选内置类型/lint、Git/回退/790源匹配/公网及4静态检查完成；保留费用、未知请求、真实互斥及旧草稿重新报价保护，worker不重启；[交付报告](../docs/materials/2026-10-05-avatar-description-first/delivery.json)与[统一diff](../docs/materials/2026-10-05-avatar-description-first/source.diff)正式归档，0模型/图片/人工DB写，无全站或浏览器功能验收。
 
 - [模板标题与收藏闭环 FAV1](todo/2026-10-02-feedback-primary-navigation.md#fav1模板标题与收藏闭环2026-10-05)：2026-10-05，v0.44.0/17c55b2/BUILD 2eaaF0OY1UB1XncX97oQJ已部署；图片/视频模板标题仅名称右侧收藏，顶部我的收藏直达模板，复用搜索/使用/取消/撤销。候选内置检查、公网新CSS与3份JS、服务/回退/远端均完成，实际效果待用户手动验收。仅12个前端及版本文件，无DB/权限/模型/依赖变化，费用0；[完整源diff](../docs/materials/2026-10-05-template-title-favorites/source.diff)与[公网证明](../docs/materials/2026-10-05-template-title-favorites/public.json)在正式资料根，旧无关资产计划和其他脏改保留。
@@ -6574,6 +6576,8 @@ flowchart LR
 
 
 ## Todo 子文档索引
+
+- `tasks/todo/2026-10-06-ai-cutout-upgrade.md`：SD2现有抠图全功能接入升级工单
 
 - `tasks/todo/2026-10-01-canvas-plan-split.md`：工单：画布按视频提示词格式拆分
 - `tasks/todo/2026-10-01-feedback-template-assets-dialogs.md`：十月一日反馈：模板参考图、资产缩略图与弹窗行为
