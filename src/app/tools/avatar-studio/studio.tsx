@@ -108,7 +108,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     const unit=draft.prices[draft.model];
     if(unit==null||!Number.isInteger(unit)||unit<0)throw new Error('当前模型图片价格尚未就绪，本次未调用文字模型或提交图片。');
     const selected=draft.model as typeof IMAGE_STUDIO_MODELS[number];
-    if(!IMAGE_STUDIO_MODELS.includes(selected)||!IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[selected]?.includes(draft.quality)||!IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[selected]?.includes(draft.resolution))throw new Error('当前图片模型或参数不可用，请先调整；本次未调用文字模型或提交图片。');
+    if(!IMAGE_STUDIO_MODELS.includes(selected)||!IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[selected]?.some(option=>option===draft.quality)||!IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[selected]?.some(option=>option===draft.resolution))throw new Error('当前图片模型或参数不可用，请先调整；本次未调用文字模型或提交图片。');
   }
   async function checkImageSettings(draft: DraftSnapshot) {
     setStage('检查图片价格和通道');

@@ -35,6 +35,8 @@
   "checks": {
     "sourceOrder": "Existing D1 source-proof script confirms one toolbar after reference/footer/input and before supplement; does not prove rendered layout.",
     "localTypeAndLintFirstPass": "Local tsc and next lint waited on the shared external-volume dependencies with no final diagnostics. Deliberately stopped before the correction batch, each exit 143; not passed. Final type/lint evidence will be the exact-commit server candidate build's built-in checks.",
+    "serverCandidateFirstPass": "f8fb584 candidate compiled but failed TypeScript: includes expects a narrower catalog union than the persisted string parameter. Targeted correction uses some(option=>option===draft.quality/resolution), preserving the same runtime membership guard. No source/live/build switch occurred. Existing v0.43.3 tag is preserved as failed-candidate history; final release gets a new explicit release tag.",
+    "archiveFirstPass": "Initial archive validation falsely treated src/app/uploads and src/app/videos route code as runtime data. Corrected validator targets actual root storage and public/uploads/public/videos; safe archive bytes reused and source/rollback hashes verified. No runtime data entered either archive.",
     "functionalAcceptance": "Not executed per project/user instruction. No paid request, business API probe, browser, screenshot or automatic functional regression."
   },
   "references": [

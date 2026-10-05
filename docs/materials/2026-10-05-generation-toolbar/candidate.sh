@@ -19,10 +19,16 @@ flock -n 9 || { printf 'Another server release holds deploy.lock\n'; exit 75; }
 printf '%s  %s/source-%s.tar.gz\n' "$source_sha" "$archive_dir" "$commit" | sha256sum -c -
 printf '%s  %s/rollback-%s.tar.gz\n' "$rollback_sha" "$archive_dir" "$base" | sha256sum -c -
 test ! -e "$release"
-test ! -e "$baseline"
-mkdir "$release" "$baseline"
+mkdir "$release"
 tar -xzf "$archive_dir/source-$commit.tar.gz" -C "$release"
-tar -xzf "$archive_dir/rollback-$base.tar.gz" -C "$baseline"
+if test -e "$baseline"; then
+  test -d "$baseline"
+  test ! -L "$baseline"
+  printf 'REUSE_SAME_BATCH_ROLLBACK_SOURCE %s\n' "$baseline"
+else
+  mkdir "$baseline"
+  tar -xzf "$archive_dir/rollback-$base.tar.gz" -C "$baseline"
+fi
 
 node - "$baseline" "$app" <<'JS'
 const fs=require('fs'),path=require('path'),crypto=require('crypto');
