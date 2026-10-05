@@ -110,7 +110,7 @@ export function createAvatarCandidates(rules: AvatarRules, constraints: AvatarCo
       for (const [key,f] of Object.entries(explicit)) {
         const shared=constraints.explicit[key];
         if(shared?.value&&f.value&&shared.value!==f.value||shared?.excluded?.includes(f.value)||f.excluded?.includes(shared?.value||''))throw new StudioError('共同人物条件与某一格的明确要求冲突，请调整描述');
-        explicit[key]={...f,value:f.value||shared?.value||'',excluded:[...new Set([...(shared?.excluded||[]),...(f.excluded||[])])]};
+        explicit[key]={...f,value:f.value||shared?.value||'',excluded:Array.from(new Set([...(shared?.excluded||[]),...(f.excluded||[])]))};
       }
       candidateConstraints={...candidateConstraints,members:[{...member,explicit}]};
     }
