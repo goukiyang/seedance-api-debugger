@@ -5,8 +5,9 @@ import { useProductDialog } from '@/components/useProductDialog';
 import { saveMainImageReminder, skipMainImageReminder } from './main-image-reminder';
 import { ContextClipboardActions } from '@/components/ContextClipboardActions';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Clipboard, Copy, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
+import Link from 'next/link';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Bookmark, ChevronDown, ChevronRight, Clipboard, Copy, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
 import { ContextVersionLabel, useModuleContextVersion } from './context-version-label';
 import { uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
@@ -66,6 +67,8 @@ type PresetSourceReader = () => PresetSource;
 type StudioFeedback = { message: string; tone: 'progress' | 'info' | 'success' | 'warning' | 'error' };
 type ImagePreviewState = { contentKey?: `asset:${string}`; taskId?: string; src: string; alt: string; title?: string; fileName?: string; width?: number; height?: number; metadata?: ImagePreviewMetadata; comparison?: { src: string; alt: string; fileName?: string; thumbnailSrc?: string } };
 type RatioPreferences = { custom: string[]; busy: boolean; error: string; onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean> };
+type ModuleScrollRequest = { target: 'module' | 'header'; id: string; group: string; token: number; behavior: ScrollBehavior; markViewed: boolean };
+type ModuleNavigationOptions = { ensureLoaded?: boolean; markViewed?: boolean; behavior?: ScrollBehavior };
 const models = IMAGE_STUDIO_MODELS;
 const fixedReferencePayload = (items: FixedStudioReference[]) => items.map(item => ({ assetId: item.id, note: item.note || '' }));
 const DEFAULT_GROUPS = ['未分组', '常用', '角色', '场景', '海报'];
@@ -184,6 +187,12 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
   const viewStorageKey = templateWorkbench ? `sd2-template-studio:image-view:v1:${userId}` : `sd2-studio-view:${userId}`;
   const [restoredViewKey, setRestoredViewKey] = useState('');
   const viewRestored = restoredViewKey === viewStorageKey;
+  const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
+  const [imageGenerationExpanded, setImageGenerationExpanded] = useState(false);
+  const [pendingModuleScroll, setPendingModuleScroll] = useState<ModuleScrollRequest | null>(null);
+  const moduleScrollSequence = useRef(0);
+  const pageRef = useRef<HTMLElement>(null);
+  const mobileModuleNavRef = useRef<HTMLElement>(null);
   useRememberedScroll(`image-studio:${userId}`, viewRestored);
   useEffect(() => {
     const readView = (storage: Storage, key: string) => {
@@ -199,9 +208,17 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
       if (templateWorkbench && !view) view = readView(sessionStorage, `sd2-studio-view:${userId}`);
     } catch { /* Unavailable storage must not block editing. */ }
     if (templateWorkbench) {
-      setSelectedGroup(typeof view?.group === 'string' ? view.group : '');
-      setActive(typeof view?.active === 'string' ? view.active : '');
+      const savedGroup = typeof view?.group === 'string' && view.group.length <= 120 ? view.group : '';
+      const savedActive = typeof view?.active === 'string' && view.active.length <= 200 ? view.active : '';
+      const hasExpandedGroups = Array.isArray(view?.expandedGroups);
+      setSelectedGroup(savedGroup);
+      setActive(savedActive);
       setCoverView(typeof view?.coverView === 'boolean' ? view.coverView : false);
+      const savedGroups = hasExpandedGroups
+        ? view.expandedGroups.filter((group: unknown): group is string => typeof group === 'string' && group.length > 0 && group.length <= 120).slice(0, 100)
+        : savedGroup ? [savedGroup] : [];
+      setExpandedGroups(savedGroups);
+      setImageGenerationExpanded(typeof view?.imageGenerationExpanded === 'boolean' ? view.imageGenerationExpanded : savedGroups.length > 0 || (!hasExpandedGroups && Boolean(savedActive)));
     } else {
       if (typeof view?.group === 'string') setSelectedGroup(view.group);
       if (typeof view?.active === 'string') setActive(view.active);
@@ -212,9 +229,31 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     if (!viewRestored) return;
     try {
       const storage = templateWorkbench ? localStorage : sessionStorage;
-      storage.setItem(viewStorageKey, JSON.stringify({ group: selectedGroup, active, ...(templateWorkbench ? { coverView } : {}) }));
+      storage.setItem(viewStorageKey, JSON.stringify({ group: selectedGroup, active, ...(templateWorkbench ? { coverView, expandedGroups, imageGenerationExpanded } : {}) }));
     } catch {}
-  }, [viewRestored, viewStorageKey, selectedGroup, active, coverView, templateWorkbench]);
+  }, [viewRestored, viewStorageKey, selectedGroup, active, coverView, expandedGroups, imageGenerationExpanded, templateWorkbench]);
+  const updateNavigationOffset = useCallback(() => {
+    const page = pageRef.current;
+    if (!page) return;
+    const nav = mobileModuleNavRef.current;
+    const visible = nav && window.getComputedStyle(nav).display !== 'none';
+    const height = visible ? Math.ceil(nav.getBoundingClientRect().height) : 0;
+    page.style.setProperty('--template-mobile-nav-height', `${height}px`);
+  }, []);
+  useLayoutEffect(() => {
+    if (!templateWorkbench || !pageRef.current) return;
+    const page = pageRef.current;
+    const nav = mobileModuleNavRef.current;
+    updateNavigationOffset();
+    const observer = nav && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateNavigationOffset) : null;
+    if (nav) observer?.observe(nav);
+    window.addEventListener('resize', updateNavigationOffset);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', updateNavigationOffset);
+      page.style.removeProperty('--template-mobile-nav-height');
+    };
+  }, [templateWorkbench, updateNavigationOffset]);
   const [coverPage, setCoverPage] = useState(() => {
     if (typeof window === 'undefined') return 0;
     try {
@@ -298,6 +337,17 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     } catch (cause) { setError(cause instanceof Error ? cause.message : '模块读取失败，请重试'); }
     finally { requested.forEach(id => hydratingIds.current.delete(id)); setHydrating(hydratingIds.current.size > 0); }
   }, []);
+  const navigateToModule = useCallback((group: string, id: string, options: ModuleNavigationOptions = {}) => {
+    setError('');
+    setCoverView(false);
+    setSelectedGroup(group);
+    setActive(id);
+    setExpandedGroups(current => current.includes(group) ? current : [...current, group]);
+    setImageGenerationExpanded(true);
+    if (options.markViewed === false) setRequestedView({ viewerId: userId, moduleId: '', token: 0 });
+    setPendingModuleScroll({ target: 'module', id, group, token: ++moduleScrollSequence.current, behavior: options.behavior || 'smooth', markViewed: templateWorkbench && options.markViewed !== false });
+    if (options.ensureLoaded !== false && !modules.some(module => module.id === id)) void hydrateModules([id]);
+  }, [hydrateModules, modules, templateWorkbench, userId]);
   const routedContentHandled = useRef(false);
   useEffect(() => {
     if (routedContentHandled.current || loading) return;
@@ -308,14 +358,16 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
       const target = directory.find(item => item.id === moduleId);
       if (target) {
         routedContentHandled.current = true;
-        setCoverView(false); setSelectedGroup(target.groupName || '未分组'); setActive(moduleId);
-        void hydrateModules([moduleId]);
+        navigateToModule(target.groupName || '未分组', moduleId, { behavior: 'auto' });
+      } else {
+        routedContentHandled.current = true;
+        setError('指定的图片模板不存在或当前不可用');
       }
     } else if (presetId) {
       routedContentHandled.current = true;
       void openPresetLibrary();
     }
-  }, [directory, loading, hydrateModules]);
+  }, [directory, loading, navigateToModule]);
   async function createModule() {
     if (createLock.current) return;
     createLock.current = true; setCreating(true); setError('');
@@ -323,8 +375,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     try {
       const workspace: StudioModule = await readResponse(await fetch('/api/image-studio/modules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: createId.current, groupName: selectedGroup || '未分组' }) }));
       setModules(current => current.some(item => item.id === workspace.id) ? current : [...current, workspace]);
-      setSelectedGroup(workspace.groupName || '未分组'); setActive(workspace.id); createId.current = null;
-      requestAnimationFrame(() => document.getElementById(`module-${workspace.id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+      navigateToModule(workspace.groupName || '未分组', workspace.id, { ensureLoaded: false, markViewed: false }); createId.current = null;
     } catch (e) { setError(e instanceof Error ? e.message : '新建失败'); }
     finally { createLock.current = false; setCreating(false); }
   }
@@ -371,8 +422,8 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     presetApplyLock.current = true; setPresetApplying(true); setPresetsError('');
     try {
       const created: StudioModule = await readResponse(await fetch('/api/image-studio/presets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'apply', presetId: preset.id }) }));
-      setModules(current => [created, ...current.filter(item => item.id !== created.id)]); setSelectedGroup(created.groupName || '未分组'); setActive(created.id); setPresetDialogOpen(false);
-      requestAnimationFrame(() => document.getElementById(`module-${created.id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+      setModules(current => [created, ...current.filter(item => item.id !== created.id)]); setPresetDialogOpen(false);
+      navigateToModule(created.groupName || '未分组', created.id, { ensureLoaded: false, markViewed: false });
     } catch (e) { setPresetsError(e instanceof Error ? e.message : '应用模板失败'); }
     finally { presetApplyLock.current = false; setPresetApplying(false); }
   }
@@ -435,6 +486,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     (groups[group] ||= []).push(item);
     return groups;
   }, {}), [navigation]);
+  const hasAnyUnread = useMemo(() => navigation.some(item => attention.unread.has(item.id)), [navigation, attention.unread]);
   const updateModuleMetadata = useCallback((id: string, name: string, groupName: string, followGroup = false) => {
     setModules(current => current.map(item => item.id === id && (item.name !== name || item.groupName !== groupName)
       ? { ...item, name, groupName } : item));
@@ -443,6 +495,65 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
   const groups = useMemo(() => Array.from(new Set([...DEFAULT_GROUPS, ...navigation.map(item => item.groupName).filter(Boolean)])), [navigation]);
   const visibleModules = useMemo(() => selectedGroup ? modules.filter(item => item.groupName === selectedGroup) : modules, [modules, selectedGroup]);
   const missingGroupModules = useMemo(() => (groupedModules[selectedGroup] || []).filter(item => !modules.some(module => module.id === item.id)), [groupedModules, selectedGroup, modules]);
+  useLayoutEffect(() => {
+    if (!pendingModuleScroll || coverView) return;
+    if (pendingModuleScroll.target === 'header') {
+      const header = document.getElementById(pendingModuleScroll.id);
+      if (header) {
+        updateNavigationOffset();
+        header.scrollIntoView({ block: 'start', behavior: pendingModuleScroll.behavior });
+      } else setError('无法定位到图片生成区域，请重试');
+      setPendingModuleScroll(current => current?.token === pendingModuleScroll.token ? null : current);
+      return;
+    }
+    const targetModule = modules.find(module => module.id === pendingModuleScroll.id);
+    if (!targetModule) {
+      if (!loading && !hydrating) {
+        setError('所选模板暂时无法读取，请重试');
+        setPendingModuleScroll(current => current?.token === pendingModuleScroll.token ? null : current);
+      }
+      return;
+    }
+    const targetGroup = targetModule.groupName || '未分组';
+    if (targetGroup !== pendingModuleScroll.group) {
+      setSelectedGroup(targetGroup);
+      setExpandedGroups(current => Array.from(new Set([...current, targetGroup])));
+      setImageGenerationExpanded(true);
+      setPendingModuleScroll(current => current?.token === pendingModuleScroll.token ? { ...current, group: targetGroup } : current);
+      return;
+    }
+    if (selectedGroup !== targetGroup) return;
+    const target = document.getElementById(`module-${pendingModuleScroll.id}`);
+    if (!target) {
+      if (!loading && !hydrating) {
+        setError('模板已读取，但无法定位到对应内容，请重新读取后重试');
+        setPendingModuleScroll(current => current?.token === pendingModuleScroll.token ? null : current);
+      }
+      return;
+    }
+    updateNavigationOffset();
+    target.scrollIntoView({ block: 'start', behavior: pendingModuleScroll.behavior });
+    if (pendingModuleScroll.markViewed) setRequestedView({ viewerId: userId, moduleId: pendingModuleScroll.id, token: ++viewSequence.current });
+    setPendingModuleScroll(current => current?.token === pendingModuleScroll.token ? null : current);
+  }, [pendingModuleScroll, modules, loading, hydrating, selectedGroup, coverView, userId, updateNavigationOffset]);
+  useEffect(() => {
+    if (!pendingModuleScroll) return;
+    const token = pendingModuleScroll.token;
+    const cancel = () => setPendingModuleScroll(current => current?.token === token ? null : current);
+    const cancelOnKeydown = (event: KeyboardEvent) => {
+      if (!['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End'].includes(event.key)) return;
+      if ((event.target as HTMLElement | null)?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      cancel();
+    };
+    window.addEventListener('wheel', cancel, { passive: true });
+    window.addEventListener('touchmove', cancel, { passive: true });
+    window.addEventListener('keydown', cancelOnKeydown);
+    return () => {
+      window.removeEventListener('wheel', cancel);
+      window.removeEventListener('touchmove', cancel);
+      window.removeEventListener('keydown', cancelOnKeydown);
+    };
+  }, [pendingModuleScroll]);
   useEffect(() => {
     const firstPage = (groupedModules[selectedGroup] || []).slice(0, 12);
     void hydrateModules(firstPage.filter(item => !modules.some(module => module.id === item.id)).map(item => item.id));
@@ -494,37 +605,80 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
       void loadModules();
     }
   }
-  const navigateToModule = (group: string, id: string) => {
-    setCoverView(false); setSelectedGroup(group); setActive(id);
-    if (templateWorkbench) setRequestedView({ viewerId: userId, moduleId: id, token: ++viewSequence.current });
-    void (async () => {
-      if (!modules.some(module => module.id === id)) await hydrateModules([id]);
-      requestAnimationFrame(() => document.getElementById(`module-${id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
-    })();
+  const resetSidebarExpansion = () => { setExpandedGroups([]); setImageGenerationExpanded(false); };
+  const navigateToImageSection = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    setCoverView(false);
+    setImageGenerationExpanded(true);
+    setRequestedView({ viewerId: userId, moduleId: '', token: 0 });
+    setPendingModuleScroll({ target: 'header', id: 'image-generation', group: selectedGroup, token: ++moduleScrollSequence.current, behavior: 'smooth', markViewed: false });
   };
-  return <>{productDialog}{(<main className={`${styles.page} ${templateWorkbench ? styles.templateWorkbench : ''}`}>
-    <aside className={styles.moduleRail} data-remember-scroll="image-groups" aria-label="分组快捷栏">
-      <div className={styles.moduleRailTitle}>分组快捷栏</div>
-      {Object.entries(groupedModules).map(([group, items]) => <div key={group} className={styles.moduleRailGroup}>
-        <button type="button" className={selectedGroup === group ? styles.moduleRailActive : ''} aria-current={selectedGroup === group ? 'page' : undefined} onClick={() => {
-          setCoverView(false); setSelectedGroup(group); setActive(items[0]?.id || '');
-          if (templateWorkbench && items[0]) setRequestedView({ viewerId: userId, moduleId: items[0].id, token: ++viewSequence.current });
-        }}><span className={styles.navLabel}><span className={styles.navName}>{group}</span>{items.some(item => attention.unread.has(item.id)) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</span><small>{items.length}</small></button>
-        <div className={styles.moduleRailChildren}>{items.map(item => <button key={item.id} type="button" className={`${styles.moduleRailChild} ${!coverView && active === item.id ? styles.moduleRailActive : ''}`} aria-current={!coverView && active === item.id ? 'page' : undefined}
-          onClick={() => navigateToModule(group, item.id)}><span className={styles.navName} title={item.name}>{item.name}</span>{attention.unread.has(item.id) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</button>)}</div>
-      </div>)}
-      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={() => setCoverView(true)}>全部封面{navigation.some(item => attention.unread.has(item.id)) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}<small>{navigation.length}</small></button>
+  const imageSectionOpen = imageGenerationExpanded || hasAnyUnread;
+  return <>{productDialog}{(<main ref={pageRef} className={`${styles.page} ${templateWorkbench ? styles.templateWorkbench : ''}`}>
+    <aside className={styles.moduleRail} data-remember-scroll="image-groups" aria-label={templateWorkbench ? '模板导航' : '分组快捷栏'}>
+      {templateWorkbench ? <>
+        <div className={styles.moduleRailTitle}>模板工作台</div>
+        <Link className={styles.moduleRailMajorLink} href="/assets?view=favorites"><Bookmark size={16} /><span>我的收藏</span></Link>
+        <section className={styles.moduleRailMajor} aria-label="图片生成">
+          <div className={styles.moduleRailMajorHeader}>
+            <a className={`${styles.moduleRailMajorLink} ${styles.moduleRailMajorCurrent}`} href="#image-generation" aria-current="page" onClick={navigateToImageSection}>
+              <ImagePlus size={16} /><span>图片生成</span>{hasAnyUnread && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}
+            </a>
+            <button type="button" className={styles.moduleRailMajorToggle} disabled={hasAnyUnread} aria-expanded={imageSectionOpen} aria-controls="template-image-groups"
+              aria-label={hasAnyUnread ? '有未读生成结果，查看后可折叠图片生成' : `${imageSectionOpen ? '折叠' : '展开'}图片生成`} title={hasAnyUnread ? '有未读生成结果，查看后可折叠' : `${imageSectionOpen ? '折叠' : '展开'}图片生成`}
+              onClick={() => setImageGenerationExpanded(current => !current)}>{imageSectionOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button>
+          </div>
+          <div id="template-image-groups" className={styles.moduleRailSubgroups} hidden={!imageSectionOpen}>
+            {Object.entries(groupedModules).map(([group, items], index) => {
+              const groupHasUnread = items.some(item => attention.unread.has(item.id));
+              const expanded = expandedGroups.includes(group) || groupHasUnread;
+              const listId = `template-module-group-${index}`;
+              return <div key={group} className={styles.moduleRailGroup}>
+                <div className={styles.moduleRailGroupHeader}>
+                  <button type="button" className={`${styles.moduleRailGroupTitle} ${selectedGroup === group ? styles.moduleRailActive : ''}`} aria-current={selectedGroup === group ? 'page' : undefined}
+                    onClick={() => navigateToModule(group, items[0].id, { markViewed: false })}>
+                    <span className={styles.navLabel}><span className={styles.navName}>{group}</span>{groupHasUnread && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</span><small>{items.length}</small>
+                  </button>
+                  <button type="button" className={styles.moduleRailGroupToggle} disabled={groupHasUnread} aria-expanded={expanded} aria-controls={listId}
+                    aria-label={groupHasUnread ? `${group}有未读结果，查看后可折叠` : `${expanded ? '折叠' : '展开'}${group}`} title={groupHasUnread ? '有未读生成结果，查看后可折叠' : `${expanded ? '折叠' : '展开'}${group}`}
+                    onClick={() => setExpandedGroups(current => current.includes(group) ? current.filter(item => item !== group) : [...current, group])}>
+                    {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                  </button>
+                </div>
+                <div id={listId} className={styles.moduleRailChildren} hidden={!expanded}>
+                  {items.map(item => <button key={item.id} type="button" className={`${styles.moduleRailChild} ${!coverView && active === item.id ? styles.moduleRailActive : ''}`} aria-current={!coverView && active === item.id ? 'page' : undefined}
+                    onClick={() => navigateToModule(group, item.id)}><span className={styles.navName} title={item.name}>{item.name}</span>{attention.unread.has(item.id) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</button>)}
+                </div>
+              </div>;
+            })}
+          </div>
+          <div className={styles.moduleRailFooter}><button type="button" title="重置侧栏展开状态" aria-label="重置侧栏展开状态" onClick={resetSidebarExpansion}><RotateCcw size={15} /><span>重置展开状态</span></button></div>
+        </section>
+      </> : <>
+        <div className={styles.moduleRailTitle}>分组快捷栏</div>
+        {Object.entries(groupedModules).map(([group, items]) => <div key={group} className={styles.moduleRailGroup}>
+          <button type="button" className={selectedGroup === group ? styles.moduleRailActive : ''} aria-current={selectedGroup === group ? 'page' : undefined} onClick={() => items[0] && navigateToModule(group, items[0].id, { markViewed: false })}>
+            <span className={styles.navLabel}><span className={styles.navName}>{group}</span>{items.some(item => attention.unread.has(item.id)) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</span><small>{items.length}</small></button>
+          <div className={styles.moduleRailChildren}>{items.map(item => <button key={item.id} type="button" className={`${styles.moduleRailChild} ${!coverView && active === item.id ? styles.moduleRailActive : ''}`} aria-current={!coverView && active === item.id ? 'page' : undefined}
+            onClick={() => navigateToModule(group, item.id)}><span className={styles.navName} title={item.name}>{item.name}</span>{attention.unread.has(item.id) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</button>)}</div>
+        </div>)}
+      </>}
+      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={() => { setPendingModuleScroll(null); setCoverView(true); }}>全部封面{navigation.some(item => attention.unread.has(item.id)) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}<small>{navigation.length}</small></button>
     </aside>
-    {templateWorkbench && <nav className={styles.mobileModuleNav} aria-label="图片模块导航">
+    {templateWorkbench && <nav ref={mobileModuleNavRef} className={styles.mobileModuleNav} aria-label="图片模块导航">
+      <div className={styles.mobileMajorLinks}>
+        <a className={styles.mobileMajorLink} href="#image-generation" aria-current="page" onClick={navigateToImageSection}><ImagePlus size={16} /><span>图片生成</span>{hasAnyUnread && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</a>
+        <Link className={styles.mobileMajorLink} href="/assets?view=favorites"><Bookmark size={16} /><span>我的收藏</span></Link>
+      </div>
       <label className={styles.mobileGroupPicker}><span>分组</span><select aria-label="选择图片分组" value={selectedGroup} onChange={event => {
         const group = event.target.value;
         const first = groupedModules[group]?.[0];
-        if (first) navigateToModule(group, first.id);
+        if (first) navigateToModule(group, first.id, { markViewed: false });
       }}>
         {!Object.keys(groupedModules).length && <option value="">暂无分组</option>}
         {Object.entries(groupedModules).map(([group, items]) => <option key={group} value={group}>{group} ({items.length}){items.some(item => attention.unread.has(item.id)) ? ' · 未读' : ''}</option>)}
       </select></label>
-      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-pressed={coverView} onClick={() => setCoverView(true)}>全部封面{navigation.some(item => attention.unread.has(item.id)) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />} <small>{navigation.length}</small></button>
+      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-pressed={coverView} onClick={() => { setPendingModuleScroll(null); setCoverView(true); }}>全部封面{navigation.some(item => attention.unread.has(item.id)) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />} <small>{navigation.length}</small></button>
       <label className={styles.mobileModulePicker}><span>模块</span><select aria-label="选择图片模块" value={!coverView && groupedModules[selectedGroup]?.some(item => item.id === active) ? active : ''} onChange={event => {
         if (event.target.value) navigateToModule(selectedGroup, event.target.value);
       }}>
@@ -534,7 +688,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
       {!coverView && attention.unread.has(active) && <button type="button" title="读取当前模板的新结果" aria-label="读取当前模板的新结果" onClick={() => navigateToModule(selectedGroup, active)}><Eye size={16} /><span className={styles.unreadDot} /></button>}
     </nav>}
     <div className={styles.content}>
-    <header className={styles.header}><div><h1>{coverView ? (templateWorkbench ? '模块封面' : '模板封面') : templateWorkbench ? '图片模块' : '图片生成'}</h1><p className={styles.muted}>{coverView ? (templateWorkbench ? '所有模块的 3:4 封面预览' : '所有模板的 3:4 封面预览') : `当前分组：${selectedGroup || '未分组'}`}</p></div><div className={styles.counts}>
+    <header id="image-generation" className={`${styles.header} ${styles.generationHeader}`}><div><h1>{coverView ? (templateWorkbench ? '模块封面' : '模板封面') : '图片生成'}</h1><p className={styles.muted}>{coverView ? (templateWorkbench ? '所有模块的 3:4 封面预览' : '所有模板的 3:4 封面预览') : `当前分组：${selectedGroup || '未分组'}`}</p></div><div className={styles.counts}>
       <button type="button" onClick={() => void openPresetLibrary()}>模板库</button>
       {isAdmin && <button type="button" onClick={() => setGlobalSettingsOpen(true)}><Settings size={17} />通用上下文</button>}
       <button type="button" disabled={creating || !modules.length} onClick={() => void createModule()}><Plus size={17} />{creating ? '新建中' : '新建模块'}</button></div></header>

@@ -8,15 +8,34 @@
 .moduleRail::-webkit-scrollbar-thumb { background: #647179; border: 2px solid #151a1d; border-radius: 6px; }
 .moduleRail::-webkit-scrollbar-button { display: none; }
 .moduleRailTitle { margin: 0 6px 14px; color: #a4f2df; font-size: 13px; font-weight: 800; }
+.moduleRailMajor { display: grid; gap: 6px; margin-top: 10px; }
+.moduleRailMajorHeader { display: grid; grid-template-columns: minmax(0, 1fr) 32px; align-items: center; gap: 3px; }
+.page .moduleRail .moduleRailMajorLink { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 38px; padding: 7px 9px; border: 1px solid transparent; border-radius: 6px; color: #c6d0d5; font-size: 13px; text-decoration: none; }
+.moduleRailMajorLink > span:not(.unreadDot) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.moduleRailMajorLink > svg { flex: 0 0 auto; }
+.page .moduleRail .moduleRailMajorLink:hover, .page .moduleRail .moduleRailMajorCurrent { border-color: #367d70; background: #203d38; color: #b9f7e8; }
+.page .moduleRail .moduleRailMajorToggle { width: 32px; height: 32px; padding: 0; justify-content: center; }
+.moduleRailSubgroups { display: grid; gap: 7px; margin-left: 7px; }
+.moduleRailSubgroups[hidden], .moduleRailChildren[hidden] { display: none; }
 .moduleRailGroup { display: grid; gap: 4px; margin-top: 12px; }
 .moduleRailGroup > span { padding: 0 6px 4px; color: #849098; font-size: 11px; font-weight: 700; }
+.moduleRailGroupHeader { display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; gap: 2px; }
+.page .moduleRail .moduleRailGroupTitle { display: flex; justify-content: space-between; gap: 8px; width: 100%; min-width: 0; padding: 6px 6px 6px 8px; }
+.moduleRailGroupTitle .navLabel { flex: 1 1 auto; gap: 2px; }
+.moduleRailGroupTitle > small { flex: 0 0 auto; }
+.page .moduleRail .moduleRailGroupToggle { width: 30px; height: 30px; padding: 0; justify-content: center; }
+.page .moduleRail .moduleRailGroupToggle:disabled, .page .moduleRail .moduleRailMajorToggle:disabled { opacity: .8; cursor: default; }
 .page .moduleRailGroup button { justify-content: space-between; }
 .moduleRailGroup button small { color: #849098; font-size: 11px; }
 .moduleRailChildren { display: grid; gap: 2px; margin: 2px 0 0 10px; border-left: 1px solid #314047; padding-left: 8px; }
 .page .moduleRail .moduleRailChild { width: auto; padding: 5px 6px; color: #aeb9bf; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .page .moduleRail .moduleRailChild:hover { color: #b9f7e8; background: #1b2a2b; }
+.moduleRailFooter { margin: 12px 4px 0; padding-top: 8px; border-top: 1px solid #2d383d; }
+.page .moduleRail .moduleRailFooter button { width: auto; min-height: 32px; padding: 5px 6px; border-color: transparent; color: #9eabb1; font-size: 11px; }
+.page .moduleRail .moduleRailFooter button:hover { color: #c6d0d5; }
 .page .moduleRail button { width: 100%; justify-content: flex-start; padding: 7px 8px; border-color: transparent; background: transparent; color: #c6d0d5; font-size: 13px; text-align: left; }
 .page .moduleRail button:hover, .page .moduleRail .moduleRailActive { background: #203d38; border-color: #367d70; color: #b9f7e8; }
+.templateWorkbench .module, .templateWorkbench .generationHeader { scroll-margin-top: calc(var(--composer-topbar-height, 48px) + var(--template-mobile-nav-height, 0px) + 12px); }
 .header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; }
 .page h1 { font-size: 24px; margin: 0; }
 .page h2 { font-size: 18px; margin: 0; }
@@ -275,13 +294,17 @@
   .page.templateWorkbench { padding: 16px; }
   .templateWorkbench .moduleRail { display: none; }
   .templateWorkbench .mobileModuleNav { position: sticky; top: var(--composer-topbar-height, 48px); z-index: 15; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 8px; margin-bottom: 16px; background: #151a1d; border-bottom: 1px solid #2d383d; }
+  .mobileMajorLinks { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .page .mobileMajorLink { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; max-width: 100%; padding: 7px 10px; border: 1px solid #465057; border-radius: 6px; color: #c6d0d5; background: #202629; font-size: 13px; text-decoration: none; }
+  .page .mobileMajorLink[aria-current="page"] { border-color: #367d70; background: #203d38; color: #b9f7e8; }
+  .mobileMajorLink > span:not(.unreadDot) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mobileMajorLink > svg { flex: 0 0 auto; }
   .mobileModuleNav label { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
   .mobileModuleNav label > span { flex: 0 0 auto; }
   .page .mobileModuleNav select { flex: 1 1 0; min-width: 0; width: 0; max-width: 100%; min-height: 44px; padding: 8px; font-size: 14px; text-overflow: ellipsis; }
   .page .mobileModuleNav button { min-height: 44px; padding: 8px 10px; white-space: nowrap; }
   .page .mobileModuleNav button[aria-pressed=true] { background: #203d38; border-color: #367d70; color: #b9f7e8; }
   .mobileModulePicker { grid-column: 1 / -1; }
-  .templateWorkbench .module { scroll-margin-top: calc(var(--composer-topbar-height, 48px) + 132px); }
 }
 @media (max-width: 800px) { .primaryMaterials .materialGrid { max-width: 360px; } }
 .resultCommands .restoreResult { position: relative; opacity: 0; pointer-events: none; }

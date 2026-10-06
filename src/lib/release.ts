@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '人物新增九宫格、直接选格与本地裁格下载，补充国家、混血和细分发型，生成记录按描述命名。模板记录分开人物来源，等待时显示本次主图，替换主图可关闭提醒并恢复。创作首页按五类整理入口。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '模板侧栏记住展开状态，新结果提醒会展开对应分类，点击标题可定位列表，新增我的收藏和图片生成分类。素材选择器整理范围、来源与排序，单一图片类型不再重复选择，上传素材移到底部。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);
