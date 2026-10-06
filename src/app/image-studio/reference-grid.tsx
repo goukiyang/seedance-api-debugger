@@ -10,9 +10,9 @@ import styles from './studio.module.css';
 
 export type FixedStudioReference = UploadedAssetPayload & { note: string; available?: boolean };
 
-export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onChange, onPreview, disabled, offset = 0, notes, children, compact, labels = 'image', onSaveNote, onChangeRole, materialTiles = false }: {
+export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onChange, onPreview, disabled, offset = 0, notes, children, compact, labels = 'image', onSaveNote, onChangeRole, materialTiles = false, standalone = false }: {
   items: T[]; onChange: (items: T[]) => void; onPreview: (item: T, number: number) => void;
-  disabled?: boolean; offset?: number; notes?: boolean; children?: ReactNode; compact?: boolean; materialTiles?: boolean; labels?: 'image' | 'template' | 'style' | 'primary' | 'auxiliary'; onSaveNote?: (items: T[]) => Promise<boolean>; onChangeRole?: (item: T, index: number) => void;
+  disabled?: boolean; offset?: number; notes?: boolean; children?: ReactNode; compact?: boolean; materialTiles?: boolean; standalone?: boolean; labels?: 'image' | 'template' | 'style' | 'primary' | 'auxiliary'; onSaveNote?: (items: T[]) => Promise<boolean>; onChangeRole?: (item: T, index: number) => void;
 }) {
   const { confirm, productDialog } = useProductDialog();
   const root = useRef<HTMLDivElement>(null);
@@ -51,7 +51,7 @@ export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onC
     onChange(next);
   };
   const reset = () => { drag.current = null; setTargetIndex(null); setSourceIndex(null); };
-  return <>{productDialog}{(<><div ref={root} className={`${styles.references} ${compact ? styles.referencesCompact : ''} ${materialTiles ? styles.materialGrid : ''}`}>
+  return <>{productDialog}{(<><div ref={root} className={`${styles.references} ${compact ? styles.referencesCompact : ''} ${materialTiles ? styles.materialGrid : ''} ${standalone ? styles.standaloneReferences : ''}`}>
     {items.map((item, index) => <div key={`${item.id}-${index}`} data-reference-index={index}
       className={`${styles.referenceItem} ${targetIndex === index ? styles.referenceDropTarget : ''}`}
       data-dragging={sourceIndex === index || undefined}

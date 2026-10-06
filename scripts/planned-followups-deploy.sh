@@ -25,7 +25,7 @@ if test "$mode" = candidate; then
   tar -xzf "$uploaded/$commit.tar.gz" -C "$release"
   if ! test -e "$baseline"; then mkdir "$baseline"; tar -xzf "$uploaded/$base.tar.gz" -C "$baseline"; fi
   node "$uploaded/planned-followups-source-proof.mjs" "$baseline" "$app"
-  test "$(node -p "require('$release/package.json').version")" = 0.50.0
+  test "$(node -p "require('$release/package.json').version")" = 0.51.0
   ln -s "$app/node_modules" "$release/node_modules"
   chown -R gouki:gouki "$release"
   cd "$release"
@@ -116,7 +116,7 @@ printf '%s\n' "$commit" > "$app/.deployed-commit"; chown gouki:gouki "$app/.depl
 systemctl start sd2-gray.service
 healthy=0
 for ((i=0;i<60;i++)); do
-  if curl --fail --silent http://127.0.0.1:3302/api/release | node -e "let s='';process.stdin.on('data',c=>s+=c).on('end',()=>{try{process.exit(JSON.parse(s).version==='0.50.0'?0:1)}catch{process.exit(1)}})"; then healthy=1; break; fi
+  if curl --fail --silent http://127.0.0.1:3302/api/release | node -e "let s='';process.stdin.on('data',c=>s+=c).on('end',()=>{try{process.exit(JSON.parse(s).version==='0.51.0'?0:1)}catch{process.exit(1)}})"; then healthy=1; break; fi
   sleep 1
 done
 test "$healthy" = 1

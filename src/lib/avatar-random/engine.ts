@@ -5,9 +5,11 @@ import { StudioError } from '@/lib/image-studio/tasks';
 import { validateDescriptionConstraints } from './description-contract';
 import { intentIssues } from './intent';
 import { avatarSheetSize, isAvatarSheet } from './layout';
+import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 
 export function parseAvatarRules(value: unknown): AvatarRules {
   const raw = value as AvatarRules;
+  if (raw?.referenceIds !== undefined && (!Array.isArray(raw.referenceIds) || raw.referenceIds.length > MAX_REFERENCE_IMAGES || raw.referenceIds.some(id => typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(id)))) throw new StudioError(`最多使用${MAX_REFERENCE_IMAGES}张有效参考图`);
   if (raw?.layout !== undefined && !['independent', 'contact-sheet', 'contact-sheet-9'].includes(raw.layout)) throw new StudioError('人物排版无效');
   const grid = avatarSheetSize(raw?.layout);
   if (grid && (raw.people !== 1 || raw.candidates !== grid * grid)) throw new StudioError('宫格人数与排版不一致；每格一位不同人物，只生成一张图片');
@@ -18,7 +20,7 @@ export function parseAvatarRules(value: unknown): AvatarRules {
   for (const [key, field] of Object.entries(raw.locks)) { if (!Object.hasOwn(catalog, key) || !field || typeof field.value !== 'string' || !field.value || field.value.length > 120 || !['user','config','inferred','random'].includes(field.source)) throw new StudioError('锁定条件无效'); locks[key] = { value: field.value, source: field.source, locked: true, manualLock: true, ...(typeof field.evidence==='string'?{evidence:field.evidence.slice(0,300)}:{}) }; }
   const choiceSources = Object.fromEntries(Object.keys(choices).map(key=>[key,raw.choiceSources?.[key]==='config'?'config':'user'])) as AvatarRules['choiceSources'];
   const choiceEditedAt = Object.fromEntries(Object.keys(choices).map(key=>[key,Number.isSafeInteger(raw.choiceEditedAt?.[key])?raw.choiceEditedAt![key]:0]));
-  return { layout: raw.layout || 'independent', description: raw.description.trim(), choices, locks, choiceSources, choiceEditedAt, descriptionEditedAt: Number.isSafeInteger(raw.descriptionEditedAt) ? raw.descriptionEditedAt : 0, intensity: raw.intensity, people: raw.people, candidates: raw.candidates, ...(typeof raw.configId === 'string' && raw.configId.length <= 100 ? { configId: raw.configId, configRevision: raw.configRevision } : {}) };
+  return { layout: raw.layout || 'independent', description: raw.description.trim(), referenceIds: Array.from(new Set(raw.referenceIds || [])), choices, locks, choiceSources, choiceEditedAt, descriptionEditedAt: Number.isSafeInteger(raw.descriptionEditedAt) ? raw.descriptionEditedAt : 0, intensity: raw.intensity, people: raw.people, candidates: raw.candidates, ...(typeof raw.configId === 'string' && raw.configId.length <= 100 ? { configId: raw.configId, configRevision: raw.configRevision } : {}) };
 }
 export function emptyConstraints(description = ''): AvatarConstraints { return { description, explicit: {}, details: [], scopes: [], background: '', unrecognized: [], conflicts: [], parserVersion: '1.0.0' }; }
 export function validateConstraints(value: unknown, description: string): AvatarConstraints {
@@ -111,9 +113,12 @@ export function compileAvatar(members: AvatarDNA[], constraints: AvatarConstrain
   return { standardDescription: standard, prompt: `${styling ? '以所附原图中的人物为身份基准，保持人脸结构与核心标记，仅按下面的造型要求编辑。身份可能产生漂移，不另换人物。\n' : ''}${standard}\n画面中恰好${members.length}个人，每个人完整可辨，不重复脸，不额外增加人物。` };
 }
 export function adaptAvatarPrompt(candidate: AvatarCandidate, model: string): AvatarCandidate {
-  const instruction = model.startsWith('gemini-') ? '生成一张符合以下人物描述的图片。参考图仅用于明确要求保持的身份。' : '根据用户原描述生成图片，遵循本次人数、排版和参考图身份约束。';
+  const instruction = model.startsWith('gemini-') ? '生成一张符合以下人物描述的图片。' : '根据用户原描述生成图片，遵循本次人数和排版。';
+  const references = candidate.baselineAssetId
+    ? '实际第1张参考图是已经验证的此人身份基准，保持该人物；其余参考只按正文提供造型、画风等辅助信息，不替换身份。'
+    : candidate.rules.referenceIds?.length ? '参考图按正文提供外观、造型、画风等信息；不自动承诺同一身份，不把整张宫格当作单个人物。明确正文要求优先，未指定项可以借鉴参考图。' : '';
   const compiled = compileAvatar(candidate.members, candidate.constraints, !!candidate.baselineAssetId);
-  return { ...candidate, ...compiled, compilerVersion: AVATAR_COMPILER_VERSION, prompt: `${instruction}\n${compiled.prompt}` };
+  return { ...candidate, ...compiled, compilerVersion: AVATAR_COMPILER_VERSION, prompt: `${instruction}\n${references}\n${compiled.prompt}` };
 }
 export function createAvatarCandidates(rules: AvatarRules, constraints: AvatarConstraints, previous?: AvatarCandidate, action = 'new', only?: string, history: AvatarCandidate[] = []): AvatarCandidate[] {
   if (intentIssues(constraints).length) throw new StudioError(`请先补充或调整：${intentIssues(constraints).join('；')}`);

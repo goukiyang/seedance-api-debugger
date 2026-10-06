@@ -276,6 +276,13 @@
             : item?.favorited === true;
     }
 
+    const favoriteAnimations = new WeakMap();
+    function clearFavoriteAnimation(button) {
+        clearTimeout(favoriteAnimations.get(button));
+        favoriteAnimations.delete(button);
+        button.querySelectorAll('.lk-burst').forEach(burst => burst.remove());
+        delete button.dataset.bloom;
+    }
     function syncFavoriteButton(button, item, active, pending) {
         if (!button.querySelector('.lk-heart')) {
             const heart = element('span', 'lk-heart');
@@ -285,6 +292,7 @@
             button.replaceChildren(heart);
         }
         button.classList.toggle('is-favorited', active);
+        if (!active) clearFavoriteAnimation(button);
         button.setAttribute('aria-pressed', String(active));
         button.setAttribute('aria-label', active ? '取消喜欢' : '喜欢');
         button.title = active ? '取消喜欢' : '喜欢';
@@ -294,6 +302,7 @@
 
     // Bencho Like, MIT (c) 2026 Lorenzo Cabra; geometry matches shared like-button.css.
     function bloomFavorite(button) {
+        clearFavoriteAnimation(button);
         if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
         const heart = button.querySelector('.lk-heart');
         if (!heart) return;
@@ -310,8 +319,10 @@
             burst.append(spoke);
         });
         heart.append(burst);
+        // Flush the canceled beat before starting another one on the same glyph.
+        void heart.offsetWidth;
         button.dataset.bloom = 'true';
-        setTimeout(function () { burst.remove(); delete button.dataset.bloom; }, 900);
+        favoriteAnimations.set(button, setTimeout(function () { clearFavoriteAnimation(button); }, 900));
     }
 
     function buildCard(item) {

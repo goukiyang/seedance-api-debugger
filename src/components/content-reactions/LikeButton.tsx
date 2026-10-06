@@ -34,11 +34,25 @@ function Roll({ value, animate }: { value: number; animate: boolean }) {
 export default function LikeButton({ active, count, showCount, animateCount, disabled, bloom, onClick }: {
   active: boolean; count?: number | null; showCount: boolean; animateCount: boolean; disabled: boolean; bloom: number; onClick: () => void;
 }) {
+  const [settledBloom, setSettledBloom] = useState(0);
+  const [reducedMotion, setReducedMotion] = useState(false);
+  useEffect(() => {
+    const media = matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setReducedMotion(media.matches);
+    update(); media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  useEffect(() => {
+    if (!active || !bloom) return;
+    const timer = setTimeout(() => setSettledBloom(bloom), 900);
+    return () => clearTimeout(timer);
+  }, [active, bloom]);
+  const bursting = active && bloom > 0 && settledBloom !== bloom && !reducedMotion;
   const label = active ? '取消喜欢' : '喜欢';
-  return <button className="sd2-like" type="button" data-reaction-action="like" data-bloom={active && bloom || undefined}
+  return <button className="sd2-like" type="button" data-reaction-action="like" data-bloom={bursting ? bloom : undefined}
     title={count == null ? label : `${label} · 公开喜欢人数 ${format(count)}`} aria-label={count == null ? label : `${label}，公开喜欢人数 ${format(count)}`} aria-pressed={active} disabled={disabled} onClick={onClick}>
-    <span className="lk-heart"><span key={active && bloom ? bloom : 'still'} className="lk-glyph"><Heart size={19} strokeWidth={2.3} fill={active ? 'currentColor' : 'none'} /></span>
-      {active && bloom > 0 && <span className="lk-burst" key={bloom} aria-hidden="true"><span className="lk-bloom" />{colors.map((color, index) => <span key={index} className="lk-spoke" style={{ '--a': `${index * (360 / 7) - 90}deg` } as CSSProperties}><i style={{ '--c': color } as CSSProperties} /><i style={{ '--c': colors[(index + 3) % colors.length] } as CSSProperties} /></span>)}</span>}
+    <span className="lk-heart"><span key={bursting ? `glyph-${bloom}` : 'glyph-still'} className="lk-glyph" onAnimationEnd={event => { if (event.target === event.currentTarget) setSettledBloom(bloom); }}><Heart size={19} strokeWidth={2.3} fill={active ? 'currentColor' : 'none'} /></span>
+      {bursting && <span className="lk-burst" key={`burst-${bloom}`} aria-hidden="true"><span className="lk-bloom" />{colors.map((color, index) => <span key={index} className="lk-spoke" style={{ '--a': `${index * (360 / 7) - 90}deg` } as CSSProperties}><i style={{ '--c': color } as CSSProperties} /><i style={{ '--c': colors[(index + 3) % colors.length] } as CSSProperties} /></span>)}</span>}
     </span>
     {showCount && (count != null ? <Roll value={count} animate={animateCount} /> : <span className="lk-count" aria-hidden="true">-</span>)}
   </button>;

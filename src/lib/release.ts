@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '大图可独立缩放和自由对比，关闭对比时也能直接换图；顶部粘贴替换全文。图片结果按屏幕宽度分页，每页最多三行；模板切换后刷新保留当前位置，窄屏导航定位修正。批量按素材确认数量和点数；抠图统一选图，未绑定账户仍不能提交任务。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '喜欢按钮动画结束不再留下双心，圆形背景更小。人物生成以分格候选为主，参考图、生成和正文在图片下方；可从素材、喜欢、最近或上传中选择参考图，刷新后保留草稿。整图预览、下载和单格裁图仍保留。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

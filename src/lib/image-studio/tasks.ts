@@ -290,7 +290,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       }
     }
     let referencePolicy: StudioReferencePolicy;
-    if (avatar) referencePolicy = { ...defaultStudioReferencePolicy(referenceIds), useFixedReferences: false };
+    if (avatar) referencePolicy = { ...defaultStudioReferencePolicy(referenceIds), primaryIds: avatar.candidates[0]?.baselineAssetId ? [avatar.candidates[0].baselineAssetId] : [], useFixedReferences: false };
     else if (input.draft?.referencePolicy) referencePolicy = input.draft.referencePolicy;
     else if (reproduceFromTaskId && historicalSnapshot?.referencePolicy !== undefined) {
       try { referencePolicy = mapStudioReferencePolicy(historicalSnapshot.referencePolicy, referenceIds); }

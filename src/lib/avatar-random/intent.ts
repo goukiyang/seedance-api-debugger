@@ -43,9 +43,9 @@ function ordered(value: unknown): unknown {
 }
 // Quotes bind to effective inputs, not UI tabs, selected thumbnails or timestamps.
 export function avatarRulesSignature(rules: AvatarRules, includeLayout = true) {
-  const { description, choices, locks, intensity, choiceSources, choiceEditedAt, descriptionEditedAt, people, candidates, layout } = rules;
+  const { description, choices, locks, intensity, choiceSources, choiceEditedAt, descriptionEditedAt, people, candidates, layout, referenceIds } = rules;
   const activeChoices = Object.fromEntries(Object.entries(choices).filter(([, value]) => value));
   const activeSources = Object.fromEntries(Object.keys(activeChoices).map(key => [key, choiceSources?.[key] || 'user']));
   const activeTimes = Object.fromEntries(Object.keys(activeChoices).map(key => [key, choiceEditedAt?.[key] || 0]));
-  return JSON.stringify(ordered({ description: description.trim(), choices: activeChoices, locks, intensity, choiceSources: activeSources, choiceEditedAt: activeTimes, descriptionEditedAt: descriptionEditedAt || 0, ...(includeLayout ? { people, candidates, layout: layout || 'independent' } : {}) }));
+  return JSON.stringify(ordered({ description: description.trim(), referenceIds: Array.from(new Set(referenceIds || [])), choices: activeChoices, locks, intensity, choiceSources: activeSources, choiceEditedAt: activeTimes, descriptionEditedAt: descriptionEditedAt || 0, ...(includeLayout ? { people, candidates, layout: layout || 'independent' } : {}) }));
 }

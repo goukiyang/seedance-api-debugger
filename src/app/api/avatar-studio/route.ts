@@ -4,7 +4,7 @@ import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { listStudioTasks, StudioError } from '@/lib/image-studio/tasks';
 import { listAvatarRecords, mutateAvatarRecord, readAvatar } from '@/lib/avatar-random/store';
-import { avatarDescriptionStatus, parseAvatarDescription, prepareAvatarPlan, submitAvatarPlan } from '@/lib/avatar-random/service';
+import { avatarDescriptionStatus, parseAvatarDescription, prepareAvatarPlan, submitAvatarPlan, validateAvatarReferences } from '@/lib/avatar-random/service';
 import { AvatarDescriptionError } from '@/lib/avatar-random/description-parser';
 import { adaptAvatarPrompt, parseAvatarRules } from '@/lib/avatar-random/engine';
 import { AVATAR_COMPILER_VERSION, type AvatarPlan, type AvatarRecord } from '@/lib/avatar-random/types';
@@ -86,6 +86,7 @@ export async function POST(req: NextRequest) { return run(async owner => {
   }
   if(body.action==='quote'){
     const previous=await readAvatar<AvatarPlan>(owner,'plan',body.id);if(!previous)throw new StudioError('人物草稿不存在');
+    await validateAvatarReferences(owner, previous.referenceIds);
     if (!body.rules || avatarRulesSignature(parseAvatarRules(body.rules), false) !== avatarRulesSignature(previous.candidates[0].rules, false)) throw new StudioError('人物条件已变化，不能沿用旧人物报价；请按当前条件准备人物', 409);
     if ((body.layout || avatarLayout(previous)) === avatarLayout(previous) && avatarRulesSignature(parseAvatarRules(body.rules)) !== avatarRulesSignature(previous.candidates[0].rules)) throw new StudioError('人数或候选数量已变化，请按当前条件准备人物', 409);
     if (body.layout !== undefined && !['independent','contact-sheet','contact-sheet-9'].includes(body.layout)) throw new StudioError('人物排版无效');

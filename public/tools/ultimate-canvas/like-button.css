@@ -6,19 +6,21 @@
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   flex: 0 0 auto; min-width: 44px; height: 44px; box-sizing: border-box;
   padding: 0 18px 0 15px; border: 0; border-radius: 22px;
+  position: relative; isolation: isolate;
   background: var(--fill-slab, #262626); color: var(--fill-on, #ededed);
   font: inherit; font-size: 15px; font-weight: 500; letter-spacing: 0;
   cursor: pointer; -webkit-tap-highlight-color: transparent;
   transition: scale 200ms cubic-bezier(.3, .9, .4, 1);
 }
-.sd2-like:not(:has(.lk-count)) { width: 44px; padding: 0; }
+.sd2-like.sd2-like:not(:has(.lk-count)) { width: 44px; padding: 0; background: transparent; }
+.sd2-like:not(:has(.lk-count))::before { content: ''; position: absolute; inset: 4.4px; border-radius: 50%; background: var(--fill-slab, #262626); z-index: -1; pointer-events: none; }
 .sd2-like:has(.lk-count) { min-width: 78px; }
 .sd2-like:active:not(:disabled) { scale: .95; }
 .sd2-like:focus-visible { outline: 2px solid var(--signal, #70cfbd); outline-offset: 2px; }
 .sd2-like:disabled { opacity: .55; cursor: default; }
 .sd2-like[aria-pressed="true"] .lk-glyph { color: var(--lk-on); }
 .sd2-like .lk-heart { position: relative; display: grid; place-items: center; width: 20px; height: 20px; }
-.sd2-like .lk-glyph { position: relative; z-index: 1; display: grid; }
+.sd2-like .lk-glyph { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; }
 .sd2-like .lk-glyph svg { width: 19px; height: 19px; stroke-width: 2.3; }
 .sd2-like[aria-pressed="true"] .lk-glyph svg { fill: currentColor; }
 .sd2-like[data-bloom] .lk-glyph { animation: lk-heart 760ms cubic-bezier(.3, 1.6, .4, 1) both; }

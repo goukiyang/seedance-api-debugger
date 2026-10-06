@@ -14,6 +14,18 @@ import { descriptionSystemPrompt } from './description-contract';
 import { AvatarDescriptionError, descriptionId, inspectDescription, resolveDescription, type DescriptionStore } from './description-parser';
 import { avatarLayout, avatarOutputCount, withAvatarLayout, isAvatarSheet, avatarSheetLabel } from './layout';
 import { avatarRulesSignature } from './intent';
+import { defaultStudioReferencePolicy, validateStudioReferenceCounts } from '@/lib/image-studio/reference-policy';
+import { studioVisibleAssetWhere } from '@/lib/image-studio/protected-assets';
+
+export async function validateAvatarReferences(owner: string, ids: string[]) {
+  try { validateStudioReferenceCounts(defaultStudioReferencePolicy(ids), ids, 0, 0); }
+  catch (error) { throw new StudioError((error as Error).message); }
+  if (!ids.length) return;
+  const identity = await prisma.user.findUnique({ where: { id: owner }, select: { id: true, role: true, account_type: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
+  if (!identity) throw new StudioError('参考图已不可用或无权使用', 403);
+  const count = await prisma.asset.count({ where: { id: { in: ids }, owner_id: owner, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity)] } });
+  if (count !== new Set(ids).size) throw new StudioError('参考图已不可用或无权使用，请移除或重新选择', 403);
+}
 
 function avatarResultTitle(candidate: AvatarCandidate, layout: AvatarPlan['layout'], index: number) {
   const text = (candidate.rules.description || candidate.constraints.description || candidate.constraints.summary || '').replace(/[\r\n\t]+/g, ' ').trim();
@@ -54,6 +66,7 @@ export async function parseAvatarDescription(owner: string, description: string,
 }
 export async function prepareAvatarPlan(owner: string, body: Record<string, unknown>) {
   const rules = parseAvatarRules(body.rules);
+  await validateAvatarReferences(owner, rules.referenceIds || []);
   if (body.actionType !== undefined && !['new', 'styling', 'tweak'].includes(String(body.actionType))) throw new StudioError('人物操作无效');
   const previousId = typeof body.previousId === 'string' ? body.previousId : null;
   const previous = previousId ? await readAvatar<AvatarPlan>(owner, 'plan', previousId) : null;
@@ -91,10 +104,13 @@ export async function prepareAvatarPlan(owner: string, body: Record<string, unkn
   const history = historyRows.flatMap(r => (JSON.parse(r.value_json) as AvatarPlan).candidates);
   let candidates = createAvatarCandidates(rules, constraints, current, action, typeof body.field === 'string' ? body.field : undefined, history);
   if (keepIdentity&&referenceIds[0]) candidates.forEach(c => c.baselineAssetId = referenceIds[0]);
+  // The verified single-person baseline stays first; optional references cannot replace it.
+  referenceIds.push(...(rules.referenceIds || []).filter(id => !referenceIds.includes(id)));
+  await validateAvatarReferences(owner, referenceIds);
   candidates=candidates.map(c=>adaptAvatarPrompt(c,model));
   const unitCredits = settings.prices[model as keyof typeof settings.prices];
   const api = await getImageGenerationSettingsForModel(model);
-  if(action==='styling'&&!api.supports_image_to_image)throw new StudioError('当前模型通道不支持原图参考，不能承诺保持此人');
+  if(referenceIds.length&&!api.supports_image_to_image)throw new StudioError('当前模型通道不支持参考图，请更换模型或移除可选参考；同人基准不能自动移除');
   const imageReady=unitCredits!==null&&Number.isInteger(unitCredits)&&unitCredits>=0&&isStudioImageGenerationProvider(api.provider)&&isImageGenerationApiReady(api)&&(referenceIds.length?api.supports_image_to_image:api.supports_text_to_image);
   const plan: AvatarPlan = withAvatarLayout({ id: randomUUID(), candidates, model, quality, resolution, aspectRatio: rules.people > 1 ? '3:2' : '1:1', settingsRevision: settings.revision, unitCredits, referenceIds, createdAt: new Date().toISOString(), imageReady, imageSeedSupport:'unsupported',warnings:candidates.flatMap(c=>c.members.flatMap(d=>d.warnings||[])) }, avatarLayout(rules));
   if(isAvatarSheet(plan))plan.id=`sheet-${plan.id}`;
@@ -114,6 +130,7 @@ export async function submitAvatarPlan(owner: string, id: string, expectedLayout
   if (!alreadyQueued && (plan.unitCredits===null||settings.revision !== plan.settingsRevision || settings.prices[plan.model as keyof typeof settings.prices] !== plan.unitCredits)) throw new StudioError('报价已变化，请更新报价后确认费用；人物草稿不需要重新随机', 409);
   const api = await getImageGenerationSettingsForModel(plan.model);
   if (!alreadyQueued && (!isStudioImageGenerationProvider(api.provider) || !isImageGenerationApiReady(api))) throw new StudioError('当前模型生成通道尚未就绪', 503);
+  if (!alreadyQueued) await validateAvatarReferences(owner, plan.referenceIds);
   return submitStudioBatch(owner, { requestId: plan.id, prompt: isAvatarSheet({layout}) ? plan.sheetPrompt : plan.candidates[0].prompt, count, revision: plan.settingsRevision, referenceIds: plan.referenceIds, model: plan.model, quality: plan.quality, resolution: plan.resolution, aspectRatio: plan.aspectRatio }, { candidates: plan.candidates, layout, onQueued: async (tx, batchId) => {
     for (let i = 0; i < count; i++) {
       const candidate = plan.candidates[i], taskId = `${batchId}-${i}`;

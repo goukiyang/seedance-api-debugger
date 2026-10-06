@@ -11,10 +11,11 @@ export function avatarCellLabel(layout: AvatarLayout | undefined, index: number)
 export function avatarOutputCount(plan: Pick<AvatarPlan, 'layout' | 'candidates'>) { return isAvatarSheet(plan) ? 1 : plan.candidates.length; }
 export function validateSheetCandidates(candidates: AvatarCandidate[], references: string[] = [], layout: AvatarLayout = 'contact-sheet') {
   const size = avatarSheetSize(layout), count = size * size;
-  if (!size || candidates.length !== count || candidates.some(c => c.members.length !== 1 || c.baselineAssetId) || references.length || new Set(candidates.map(c => c.characterId)).size !== count) throw new Error(`${avatarSheetLabel(layout)}需要${count}位独立人物、每格一人，不能使用某个人的同人基准图。请切换独立头像或重新准备人物。`);
+  const selected = candidates[0]?.rules.referenceIds || [];
+  if (!size || candidates.length !== count || candidates.some(c => c.members.length !== 1 || c.baselineAssetId || JSON.stringify(c.rules.referenceIds || []) !== JSON.stringify(selected)) || references.length !== selected.length || references.some(id => !selected.includes(id)) || new Set(candidates.map(c => c.characterId)).size !== count) throw new Error(`${avatarSheetLabel(layout)}需要${count}位独立人物、每格一人，不能使用某个人的同人基准图。请切换独立头像或重新准备人物。`);
 }
 export function compileContactSheet(candidates: AvatarCandidate[], layout: AvatarLayout = 'contact-sheet') {
-  validateSheetCandidates(candidates, [], layout);
+  validateSheetCandidates(candidates, candidates[0]?.rules.referenceIds || [], layout);
   const size = avatarSheetSize(layout), count = size * size;
   return `仅生成一张正方形图片，整张图为真实的${size}×${size}${avatarSheetLabel(layout)}。所有格子等大、边界清楚，每格恰好一位不同人物的头像，整张图共${count}位不同人物。不得把多人挤入同一格，不重复同一张脸，不增加第${count + 1}人。不添加姓名、编号或文字。每格分别遵守以下人物条件，不将一格的特征混到其他格。\n${candidates.map((c, i) => `${avatarCellLabel(layout, i)}格：\n${c.standardDescription}`).join('\n\n')}\n最终输出是一张包含上述${count}格的完整图片，不是${count}个文件。`;
 }
@@ -22,5 +23,6 @@ export function withAvatarLayout(plan: AvatarPlan, layout: AvatarLayout): Avatar
   if (layout === 'independent' && (plan.candidates.length < 1 || plan.candidates.length > 4)) throw new Error('独立头像最多4位候选，请重新准备人物。');
   const candidates = plan.candidates.map(c => ({ ...c, rules: { ...c.rules, layout } }));
   if (isAvatarSheet({ layout })) validateSheetCandidates(candidates, plan.referenceIds, layout);
-  return { ...plan, layout, candidates, sheetPrompt: isAvatarSheet({ layout }) ? compileContactSheet(candidates, layout) : undefined, aspectRatio: isAvatarSheet({ layout }) ? '1:1' : candidates[0].members.length > 1 ? '3:2' : '1:1' };
+  const referenceInstruction = plan.referenceIds.length ? '参考图仅按正文提供造型、画风等辅助信息，不作为某个人的同人身份基准。整张宫格不是单个人物，所有格子仍须是不同人物。\n' : '';
+  return { ...plan, layout, candidates, sheetPrompt: isAvatarSheet({ layout }) ? referenceInstruction + compileContactSheet(candidates, layout) : undefined, aspectRatio: isAvatarSheet({ layout }) ? '1:1' : candidates[0].members.length > 1 ? '3:2' : '1:1' };
 }
