@@ -5,6 +5,7 @@ import { AvatarDescriptionError, inspectDescription, resolveDescription, type De
 import { avatarLayout, avatarOutputCount, compileContactSheet, withAvatarLayout } from '../src/lib/avatar-random/layout';
 import { emptyRules, type AvatarCandidate, type AvatarConstraints, type AvatarPlan } from '../src/lib/avatar-random/types';
 import { avatarKey, avatarPlanKey, avatarRecordKey, avatarReadKeys } from '../src/lib/avatar-random/storage-keys';
+import { avatarCellRect, containImageSize } from '../src/lib/avatar-random/sheet-geometry';
 
 const description = '30岁，短发';
 const valid = { summary:'希望是30岁的短发人物',soft:{},clarifications:[],explicit: { age: { value: 30, evidence: '30岁' } }, details: [], scopes: [], background: '', unrecognized: [], conflicts: [] };
@@ -53,6 +54,16 @@ async function main() {
   const oldPlan:AvatarPlan={id:'old-plan',candidates:cells,model:'test',quality:'auto',resolution:'1K',aspectRatio:'1:1',settingsRevision:24,unitCredits:5,referenceIds:[],createdAt:'2026-10-05T00:00:00Z'};
   assert.equal(avatarLayout(oldPlan),'independent');assert.equal(avatarOutputCount(oldPlan),4);const sheet=withAvatarLayout(oldPlan,'contact-sheet');assert.equal(avatarOutputCount(sheet),1);assert.equal(sheet.unitCredits!*avatarOutputCount(sheet),5);assert.ok(sheet.sheetPrompt?.includes('左下格'));assert.ok(!sheet.sheetPrompt?.includes('画面中恰好1个人'));assert.deepEqual(sheet.candidates.map(c=>c.characterId),cells.map(c=>c.characterId));assert.equal(avatarOutputCount(withAvatarLayout(sheet,'independent')),4);cases++;
   assert.throws(()=>compileContactSheet(cells.slice(0,2)));assert.throws(()=>withAvatarLayout({...oldPlan,referenceIds:['whole-image']},'contact-sheet'));assert.throws(()=>compileContactSheet(cells.map(c=>({...c,baselineAssetId:'single-person'}))));cases++;
+  const nineCells=Array.from({length:9},(_,i)=>({...cells[0],characterId:`nine-${i}`,rules:{...emptyRules,layout:'contact-sheet-9' as const,candidates:9 as const}}));
+  const nine=withAvatarLayout({...oldPlan,candidates:nineCells},'contact-sheet-9');
+  assert.throws(()=>withAvatarLayout(nine,'independent'));
+  const legacyFieldsBefore=JSON.stringify(cells.map(c=>c.members[0].fields));
+  assert.deepEqual(sheet.candidates.map(c=>c.members[0].fields),cells.map(c=>c.members[0].fields));assert.equal(JSON.stringify(cells.map(c=>c.members[0].fields)),legacyFieldsBefore);assert.equal(sheet.candidates[0].members[0].fields.nationality,undefined);assert.equal(sheet.candidates[0].members[0].fields.ancestry,undefined);cases++;
+  assert.equal(avatarOutputCount(nine),1);assert.equal(nine.candidates.length,9);assert.ok(nine.sheetPrompt?.includes('3×3'));assert.ok(nine.sheetPrompt?.includes('正中格'));assert.ok(nine.sheetPrompt?.includes('右下格'));cases++;
+  assert.throws(()=>compileContactSheet(cells,'contact-sheet-9'));assert.throws(()=>compileContactSheet(nineCells.map(c=>({...c,characterId:'same'})),'contact-sheet-9'));assert.throws(()=>withAvatarLayout({...nine,referenceIds:['whole-image']},'contact-sheet-9'));cases++;
+  assert.ok(avatarPlanKey('account',nine).includes(':sheet-plan:'));assert.ok(avatarRecordKey('account',{id:'nine-result',layout:'contact-sheet-9'}).includes(':sheet-record:'));cases++;
+  assert.deepEqual(containImageSize(400,400,1200,600),{width:400,height:200});assert.deepEqual(containImageSize(300,600,300,900),{width:200,height:600});
+  assert.deepEqual(avatarCellRect(1024,1024,3,8),{x:682,y:682,width:342,height:342});assert.deepEqual(avatarCellRect(1200,600,2,1),{x:600,y:0,width:600,height:300});assert.throws(()=>avatarCellRect(1024,1024,3,9));cases++;
   for(const submitted of [false,true]){const p={...sheet,id:'sheet-private',...(submitted?{sourceTaskId:'paid-task'}:{})};const database=new Map([[avatarPlanKey('account',p),p]]);assert.equal(database.get(avatarKey('account','plan',p.id)),undefined);assert.equal(avatarReadKeys('account','plan',p.id).map(k=>database.get(k)).find(Boolean),p);assert.ok(!avatarReadKeys('other-account','plan',p.id).some(k=>database.has(k)));}cases++;
   const generation={id:'sheet-result',layout:'contact-sheet' as const,rules:emptyRules};assert.notEqual(avatarRecordKey('account',generation),avatarKey('account','record',generation.id));assert.equal(avatarPlanKey('account',oldPlan),avatarKey('account','plan',oldPlan.id));cases++;
   // Synthetic text reproduces only the confirmed singleton-object wrapper, not private input/output.

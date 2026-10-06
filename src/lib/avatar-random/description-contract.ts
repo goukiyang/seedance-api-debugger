@@ -81,7 +81,7 @@ export function validateDescriptionConstraints(value: unknown, description: stri
   if (typeof background !== 'string' || background.length > 300) return fail('background', '背景回复格式无效');
   if (background && !description.includes(background)) fail('background', '背景须保留原文，不能添加没有要求的背景');
   const members = raw.members === undefined || raw.members === null ? undefined : (() => {
-    if (!Array.isArray(raw.members) || raw.members.length > 4) return fail('members', '多人描述格式无效');
+    if (!Array.isArray(raw.members) || raw.members.length > 9) return fail('members', '多人描述格式无效');
     return raw.members.map((value, i) => { const m = object(value, `members[${i}]`); keys(m, ['explicit', 'details', 'relationship'], 'members');
       if (m.relationship !== undefined && (typeof m.relationship !== 'string' || m.relationship.length > 200)) fail('members.relationship', '人物关系格式无效');
       return { explicit: fields(m.explicit, `members[${i}].explicit`), details: details(m.details, `members[${i}].details`), relationship: m.relationship ? evidence(m.relationship, `members[${i}].relationship`) : '' };

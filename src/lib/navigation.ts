@@ -18,6 +18,7 @@ export const showLegacyVideoWorkbenchEntry = false;
 export const showVideoCardManagementUi = false;
 
 export const shellRoutes = [
+  '/',
   '/workbench',
   '/account',
   '/points',
@@ -64,6 +65,7 @@ const shellRoutePrefixes = [
 ] as const;
 
 export const topbarQuickItems: NavItem[] = [
+  { label: '创作首页', href: '/', match: ['/'] },
   { label: '生成', href: '/generate', match: ['/generate', '/generate/canvas'], externalHidden: true },
   { label: '超分', href: '/generate/enhance', match: ['/generate/enhance'], prefixMatch: true, adminOnly: true },
   { label: '模板工作台', href: '/template-studio', match: ['/template-studio', '/templates', '/template-generate'], prefixMatch: true, externalHidden: true },
@@ -78,6 +80,7 @@ export const userNavGroups: NavGroup[] = [
   {
     title: '创作',
     items: [
+      { label: '创作首页', href: '/', match: ['/'] },
       { label: '生成视频', href: '/generate', match: ['/generate'], externalHidden: true },
       { label: '模板工作台', href: '/template-studio', match: ['/template-studio'], prefixMatch: true, externalHidden: true },
       { label: '视频超分', href: '/generate/enhance', match: ['/generate/enhance'], prefixMatch: true, adminOnly: true },

@@ -15,7 +15,7 @@ import { studioAssetUrl } from '@/lib/image-studio/media';
 import { createHash } from 'node:crypto';
 import { getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider } from '@/lib/integrations/image-generation';
 import { IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
-import { avatarLayout, withAvatarLayout } from '@/lib/avatar-random/layout';
+import { isAvatarSheet, avatarLayout, withAvatarLayout } from '@/lib/avatar-random/layout';
 import { avatarRulesSignature } from '@/lib/avatar-random/intent';
 
 async function sourceTask(owner:string,id?:string) {
@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) { return run(async owner => {
     if(!original)throw new StudioError('原始生成参数快照已不可用，不能伪造默认参数',409);
     const task=record.taskId?await prisma.imageStudioTask.findFirst({where:{id:record.taskId,owner_id:owner}}):null;
     const snapshot=task?.snapshot_json?JSON.parse(task.snapshot_json):null;
-    const plan: AvatarPlan = { ...original,id: `${avatarLayout(original)==='contact-sheet'?'sheet-':''}${randomUUID()}`, candidates: record.sheetCandidates || [record.candidate!], ...(snapshot?{model:snapshot.model,quality:snapshot.quality,resolution:snapshot.resolution,aspectRatio:snapshot.aspectRatio,settingsRevision:snapshot.settingsRevision,unitCredits:snapshot.unitCredits,referenceIds:JSON.parse(task!.reference_ids)}:{}), createdAt: new Date().toISOString(),sourceTaskId:record.taskId,restoredFrom:record.id,warnings:['已恢复当时完整设置；原模型和参考图保留，出图前需更新报价并重新校验可用性。'] };
+    const plan: AvatarPlan = { ...original,id: `${isAvatarSheet(original)?'sheet-':''}${randomUUID()}`, candidates: record.sheetCandidates || [record.candidate!], ...(snapshot?{model:snapshot.model,quality:snapshot.quality,resolution:snapshot.resolution,aspectRatio:snapshot.aspectRatio,settingsRevision:snapshot.settingsRevision,unitCredits:snapshot.unitCredits,referenceIds:JSON.parse(task!.reference_ids)}:{}), createdAt: new Date().toISOString(),sourceTaskId:record.taskId,restoredFrom:record.id,warnings:['已恢复当时完整设置；原模型和参考图保留，出图前需更新报价并重新校验可用性。'] };
     await prisma.platformSetting.create({ data: { key: avatarPlanKey(owner, plan), value_json: JSON.stringify(plan), updated_by: owner } });
     return { plan,sourceTask:await sourceTask(owner,record.taskId) };
   }
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) { return run(async owner => {
     const previous=await readAvatar<AvatarPlan>(owner,'plan',body.id);if(!previous)throw new StudioError('人物草稿不存在');
     if (!body.rules || avatarRulesSignature(parseAvatarRules(body.rules), false) !== avatarRulesSignature(previous.candidates[0].rules, false)) throw new StudioError('人物条件已变化，不能沿用旧人物报价；请按当前条件准备人物', 409);
     if ((body.layout || avatarLayout(previous)) === avatarLayout(previous) && avatarRulesSignature(parseAvatarRules(body.rules)) !== avatarRulesSignature(previous.candidates[0].rules)) throw new StudioError('人数或候选数量已变化，请按当前条件准备人物', 409);
-    if (body.layout !== undefined && !['independent','contact-sheet'].includes(body.layout)) throw new StudioError('人物排版无效');
+    if (body.layout !== undefined && !['independent','contact-sheet','contact-sheet-9'].includes(body.layout)) throw new StudioError('人物排版无效');
     const layout=body.layout || avatarLayout(previous);
     const settings=await getImageStudioSettings();
     const model=typeof body.model==='string'?body.model:previous.model;
@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) { return run(async owner => {
     if(price===undefined||price===null)throw new StudioError('原模型已失效或没有报价，历史设置仍保留');
     const api=await getImageGenerationSettingsForModel(model);
     let plan:AvatarPlan;
-    try { plan=withAvatarLayout({...previous,sourceTaskId:undefined,model,quality,resolution,id:(layout==='contact-sheet'?'sheet-':'')+createHash('sha256').update(`quote:${AVATAR_COMPILER_VERSION}:${owner}:${previous.id}:${settings.revision}:${model}:${quality}:${resolution}:${layout}`).digest('hex'),settingsRevision:settings.revision,unitCredits:price,imageReady:isStudioImageGenerationProvider(api.provider)&&isImageGenerationApiReady(api)&&(previous.referenceIds.length?api.supports_image_to_image:api.supports_text_to_image),candidates:previous.candidates.map(c=>adaptAvatarPrompt(c,model)),createdAt:new Date().toISOString()},layout); }
+    try { plan=withAvatarLayout({...previous,sourceTaskId:undefined,model,quality,resolution,id:(isAvatarSheet({layout})?'sheet-':'')+createHash('sha256').update(`quote:${AVATAR_COMPILER_VERSION}:${owner}:${previous.id}:${settings.revision}:${model}:${quality}:${resolution}:${layout}`).digest('hex'),settingsRevision:settings.revision,unitCredits:price,imageReady:isStudioImageGenerationProvider(api.provider)&&isImageGenerationApiReady(api)&&(previous.referenceIds.length?api.supports_image_to_image:api.supports_text_to_image),candidates:previous.candidates.map(c=>adaptAvatarPrompt(c,model)),createdAt:new Date().toISOString()},layout); }
     catch(e){throw new StudioError((e as Error).message);}
     await prisma.platformSetting.upsert({where:{key:avatarPlanKey(owner,plan)},create:{key:avatarPlanKey(owner,plan),value_json:JSON.stringify(plan),updated_by:owner},update:{}});
     return {plan:await readAvatar<AvatarPlan>(owner,'plan',plan.id)};
@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) { return run(async owner => {
     const failed = tasks.filter(t => t.status === 'failed');
     if (!failed.length) throw new StudioError('没有可重试的明确失败项');
     const settings = await getImageStudioSettings();
-    const plan = { ...previous, sourceTaskId: undefined, id: (avatarLayout(previous)==='contact-sheet'?'sheet-':'')+createHash('sha256').update(`retry:${owner}:${previous.id}`).digest('hex'), candidates: avatarLayout(previous)==='contact-sheet' ? previous.candidates : failed.map(t => previous.candidates[t.ordinal - 1]), settingsRevision: settings.revision, unitCredits: settings.prices[previous.model as keyof typeof settings.prices], createdAt: new Date().toISOString() };
+    const plan = { ...previous, sourceTaskId: undefined, id: (isAvatarSheet(previous)?'sheet-':'')+createHash('sha256').update(`retry:${owner}:${previous.id}`).digest('hex'), candidates: isAvatarSheet(previous) ? previous.candidates : failed.map(t => previous.candidates[t.ordinal - 1]), settingsRevision: settings.revision, unitCredits: settings.prices[previous.model as keyof typeof settings.prices], createdAt: new Date().toISOString() };
     if (plan.unitCredits === null) throw new StudioError('当前模型尚未设置报价');
     await prisma.platformSetting.upsert({where:{key:avatarPlanKey(owner,plan)},create:{key:avatarPlanKey(owner,plan),value_json:JSON.stringify(plan),updated_by:owner},update:{}});
     return { plan:await readAvatar<AvatarPlan>(owner,'plan',plan.id) };
@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) { return run(async owner => {
   if (body.action === 'save' && body.record?.kind === 'config') body.record.rules = parseAvatarRules(body.record.rules);
   if (body.action === 'save' && body.record?.kind === 'character') {
     const plan = await readAvatar<AvatarPlan>(owner, 'plan', body.planId);
-    if (plan && avatarLayout(plan)==='contact-sheet') throw new StudioError('整张四宫格不能保存为某一个人的身份基准。请切换独立头像并重新报价出图。');
+    if (plan && isAvatarSheet(plan)) throw new StudioError('整张宫格不能保存为某一个人的身份基准。请切换独立头像并重新报价出图。');
     const candidate = plan?.candidates[Number(body.index)];
     if (!candidate) throw new StudioError('人物草稿不存在');
     const result = (await listStudioTasks(owner, undefined, undefined, false, undefined, plan!.id)).tasks.find(task => task.ordinal === Number(body.index) + 1 && task.status === 'succeeded') || (Number(body.index)===0 ? await sourceTask(owner,plan!.sourceTaskId):null);

@@ -22,3 +22,5 @@
 textarea.input { resize: vertical; }
 .dialog button { overflow-wrap: anywhere; }
 @media (max-width: 639px) { .dialog { padding: 16px; } .actions button { flex: 1 1 100px; } }
+.checkbox { display: flex; align-items: flex-start; gap: 8px; color: var(--text-primary); font-size: 13px; line-height: 1.5; margin: 12px 0; }
+.checkbox input { width: 16px; height: 16px; flex: 0 0 16px; margin-top: 2px; }

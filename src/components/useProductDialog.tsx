@@ -6,7 +6,7 @@ import { X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import styles from './ProductDialog.module.css';
 
-type Options = { title?: string; confirmLabel?: string; danger?: boolean; maxLength?: number | null; allowEmpty?: boolean; multiline?: boolean; anchor?: HTMLElement | null; onSubmit?: (value: string) => Promise<void> };
+type Options = { title?: string; confirmLabel?: string; danger?: boolean; maxLength?: number | null; allowEmpty?: boolean; multiline?: boolean; anchor?: HTMLElement | null; checkbox?: { label: string; checked?: boolean; onConfirm?: (checked: boolean) => void }; onSubmit?: (value: string, checked: boolean) => Promise<void> };
 type Request = Options & { message: string; value?: string; anchor: HTMLElement | null };
 
 function ProductDialog({ request, onResolve }: { request: Request; onResolve: (value: string | null) => void }) {
@@ -19,6 +19,7 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
   const busy = useRef(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [checked, setChecked] = useState(request.checkbox?.checked === true);
   const dismiss = () => { if (!busy.current) onResolve(null); };
   const [position, setPosition] = useState<{ left: number; top: number; anchored: boolean } | null>(null);
   const naming = request.value !== undefined;
@@ -28,9 +29,9 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
   async function submit() {
     if (!valid || busy.current) return;
     const result = naming ? value.trim() : 'yes';
-    if (!request.onSubmit) { onResolve(result); return; }
+    if (!request.onSubmit) { request.checkbox?.onConfirm?.(checked); onResolve(result); return; }
     busy.current = true; setSaving(true); setError('');
-    try { await request.onSubmit(result); onResolve(result); }
+    try { await request.onSubmit(result, checked); request.checkbox?.onConfirm?.(checked); onResolve(result); }
     catch (cause) { setError(cause instanceof Error ? cause.message : '保存失败，请重试'); }
     finally { busy.current = false; setSaving(false); }
   }
@@ -92,6 +93,7 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
         : <input ref={input as React.RefObject<HTMLInputElement>} disabled={saving} className={styles.input} aria-label={request.message} value={value} onChange={event => setValue(event.target.value)} />)}
       {naming && maxLength !== null && value.trim().length > maxLength && <p role="alert" className={styles.message}>最多 {maxLength} 字，请缩短后再提交。</p>}
       {error && <p role="alert" className={styles.message}>{error}</p>}
+      {request.checkbox && <label className={styles.checkbox}><input type="checkbox" checked={checked} disabled={saving} onChange={event => setChecked(event.target.checked)} />{request.checkbox.label}</label>}
       <footer className={styles.actions}>
         <button ref={cancel} type="button" disabled={saving} className={styles.secondary} onClick={dismiss}>取消</button>
         <button type="submit" className={request.danger ? styles.danger : styles.primary} disabled={!valid || saving}>{saving ? '保存中…' : request.confirmLabel || (naming ? '保存名称' : '继续')}</button>

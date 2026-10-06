@@ -12,14 +12,14 @@ export const catalogSources = {
 export const catalogDefinitions = Object.fromEntries(Object.entries(catalog).map(([key, values]) => [key, {
   id: key, version: AVATAR_CATALOG_VERSION, label: fieldLabels[key],
   definition: key === 'age' ? '生成形象的目标年龄外观，不推断真实人物年龄' : key === 'facial_hair' ? '人物上唇、下巴与脸侧可见胡须的造型，不作为性别或身份判断' : `生成形象的${fieldLabels[key]}外观方向，不用于照片识别或真实身份判断`,
-  adoption: key === 'facial_hair' ? 'necessary-addition' : 'existing-retained', source: 'project',
+  adoption: ['facial_hair', 'nationality', 'ancestry', 'hair_arrangement'].includes(key) ? 'necessary-addition' : 'existing-retained', source: 'project',
   references: key === 'facial_hair' ? ['avataaars:grouping-reference-only', 'maad:research-comparison-only'] : ['dicebear:mechanism-reference-only'],
   // Value identifiers are append-only. Do not reuse an identifier when retiring a value.
   values: values.map((value, index) => ({ id: `${key}.v${index + 1}`, value, definition: `${fieldLabels[key]}采用“${value}”的视觉表现`, aliases: fieldAliases[key]?.[value] || [], weight: optionWeights[key]?.[value] || 1 })),
   exclusions: '原文否定保留；同字段肯定与排除相撞时要求澄清，禁止静默选择',
   range: key === 'age' ? '1..99 integer or inclusive min-max; explicit range precedes random sample' : 'catalog values or evidence-backed bounded custom string',
   conflicts: key === 'facial_hair' ? '无胡须与留胡须互斥；未成年默认不随机胡须；明确条件不按性别删除' : key === 'hair_length' ? '光头与刘海、分发互斥' : '同字段矛盾及显式排除不得被随机覆盖',
-  sampling: key === 'facial_hair' ? '默认女性或16岁以下不随机增加胡须；成人男性按产品权重；明确要求优先' : '权重来自产品策略，不来自人口比例或数据集频率',
+  sampling: ['nationality', 'ancestry'].includes(key) ? '仅使用用户明确输入或原文方向，不根据外貌推断或随机分配真实身份' : key === 'facial_hair' ? '默认女性或16岁以下不随机增加胡须；成人男性按产品权重；明确要求优先' : '权重来自产品策略，不来自人口比例或数据集频率',
   promptTarget: identityFields.includes(key) ? 'compileAvatar.structure' : 'compileAvatar.style-or-explicit-feature',
 } ]));
 export const catalogNonAdoption = ['ethnicity', 'attractiveness-score', 'dataset-identities', 'dataset-images', 'dataset-annotations', 'training-weights'];

@@ -2,6 +2,7 @@
 import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 
 import { useProductDialog } from '@/components/useProductDialog';
+import { saveMainImageReminder, skipMainImageReminder } from './main-image-reminder';
 import { ContextClipboardActions } from '@/components/ContextClipboardActions';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -1449,7 +1450,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     if (uploadFiles.some(file => !['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 20 * 1024 * 1024)) {
       setError('请使用 20MB 以内的 PNG、JPG 或 WebP 图片'); return;
     }
-    if (replacing && !(await confirm(`确认用「${uploadFiles[0].name}」替换当前主图？上传成功前旧主图会保留；取消不会更改当前内容。`, { title: '替换主图', confirmLabel: '替换主图' }))) return;
+    let skipAfterSuccess = false;
+    if (replacing && !skipMainImageReminder(userId) && !(await confirm(`确认用「${uploadFiles[0].name}」替换当前主图？上传成功前旧主图会保留；取消不会更改当前内容。`, { title: '替换主图', confirmLabel: '替换主图', checkbox: { label: '以后替换主图不再提醒', onConfirm: checked => { skipAfterSuccess = checked; } } }))) return;
     uploadLock.current = true; setUploading(true); setError('');
     try {
       for (let index = 0; index < uploadFiles.length; index++) {
@@ -1461,10 +1463,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           setReproduceSourceTaskId(null);
         } else if (auxiliary) setAuxiliaryImages(current => [...current, asset]);
         else setImages(current => replacing ? [asset] : [...current, asset]);
+        if (replacing && skipAfterSuccess) saveMainImageReminder(userId, true);
       }
     } catch (e) { setError(e instanceof Error ? e.message : '上传失败'); }
     finally { uploadLock.current = false; setUploading(false); setUploadProgress(null); }
-  }, [images.length, auxiliaryImages.length, currentReferenceCap, currentAuxiliaryCap, fixedReferences.length, activeFixedCount, submitting, pendingSubmission, fixedEditable, referenceLimit]);
+  }, [userId, confirm, images.length, auxiliaryImages.length, currentReferenceCap, currentAuxiliaryCap, fixedReferences.length, activeFixedCount, submitting, pendingSubmission, fixedEditable, referenceLimit]);
 
   async function uploadBanner(file: File) {
     if (bannerUploading || submitting || pendingSubmission) return;
@@ -1604,6 +1607,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         }} />
         <div className={styles.generationToolbar}>
           <GenerationCompletionSettings ownerId={userId} />
+          <button type="button" title="替换主图提醒设置" aria-label="替换主图提醒设置" onClick={() => void confirm('此设置仅影响替换主图提醒，不影响生成费用、变价或权限确认。', { title: '主图提醒', confirmLabel: '保存设置', checkbox: { label: '每次替换主图前提醒', checked: !skipMainImageReminder(userId) }, onSubmit: async (_value, checked) => saveMainImageReminder(userId, !checked) })}><Settings size={16} /></button>
           <div className={styles.counts} role="group" aria-label="生成方式"><button type="button" aria-pressed={batch.mode === 'single'} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onClick={() => batch.setMode('single')}>单次</button><button type="button" aria-pressed={batch.mode === 'batch'} disabled={submitting || Boolean(pendingSubmission)} onClick={() => batch.setMode('batch')}>批量</button></div>
           {batch.mode === 'batch' && batch.controls}
           <button type="button" className={`${styles.generate} sd2-loading-surface`} data-busy={submitting || queryingSubmission || batch.busy} disabled={Boolean(generationFeedback)} title={generationFeedback?.message} aria-describedby={generationFeedback ? `generation-blocker-${module.id}` : undefined} onClick={() => void (pendingSubmission ? querySubmission() : submit())}>{queryingSubmission ? '正在查询' : submitting ? '正在提交' : pendingSubmission || batch.pending ? '查询这次提交' : batch.mode === 'batch' ? '开始批量生成' : '生成图片'}</button>
@@ -1684,8 +1688,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
               if (event.target.checked && selected.length >= 8) { setError('每次最多下载 8 张'); return; }
               setSelected(current => event.target.checked ? [...current, task.id] : current.filter(id => id !== task.id));
             }} />}
-          </> : <div className={`${styles.taskState} sd2-loading-surface`} data-busy={['queued', 'running'].includes(task.status)}>
-            <span role="status">{studioTaskPhase(task)}</span>
+          </> : <div className={`${styles.taskState} sd2-loading-surface`} data-busy={['queued', 'running'].includes(task.status)} data-main-image={['queued', 'running'].includes(task.status) && Boolean(task.snapshot?.primaryReferenceImages?.[0]?.originalUrl) || undefined}>
+            {['queued', 'running'].includes(task.status) && task.snapshot?.primaryReferenceImages?.[0]?.originalUrl && <img className={styles.waitingMainImage} src={task.snapshot.primaryReferenceImages[0].originalUrl} alt="本次任务主图" onError={event => { event.currentTarget.hidden = true; }} />}
+            <span role="status" className={styles.waitingStatus}>{studioTaskPhase(task)}</span>
             {['download', 'recover'].includes(task.delivery?.phase || '') && Number(task.delivery?.expectedBytes) > 0 && task.delivery?.receivedBytes != null && <span>{Math.min(100, Math.floor(task.delivery.receivedBytes / task.delivery.expectedBytes! * 100))}% 字节已接收</span>}
           </div>}<button type="button" className={styles.deleteResult} disabled={deleting || downloadBusy} title="删除生成记录" aria-label={`删除第 ${task.ordinal} 张生成记录`} onClick={() => { setDeleteError(''); setDeleteTarget(task); }}><Trash2 size={17} /></button></div>
           <div className={styles.resultHeading}>

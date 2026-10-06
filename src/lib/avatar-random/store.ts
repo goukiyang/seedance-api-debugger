@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { StudioError } from '@/lib/image-studio/tasks';
+import { isAvatarSheet } from './layout';
 import type { AvatarRecord } from './types';
 import { avatarKey, avatarReadKeys, avatarRecordKey } from './storage-keys';
 export { avatarKey, avatarPlanKey, avatarRecordKey } from './storage-keys';
@@ -29,7 +30,7 @@ export async function mutateAvatarRecord(owner: string, input: { id?: string; re
   if (input.name !== undefined && (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 80)) throw new StudioError('名称须为1到80字');
   if (!['save', 'rename', 'delete', 'undelete', 'quality'].includes(input.action)) throw new StudioError('操作无效');
   return prisma.$transaction(async tx => {
-    const id = input.id || `${input.record?.rules?.layout==='contact-sheet'?'sheet-':''}${randomUUID()}`, key = avatarRecordKey(owner,{...input.record,id});
+    const id = input.id || `${isAvatarSheet(input.record?.rules || {})?'sheet-':''}${randomUUID()}`, key = avatarRecordKey(owner,{...input.record,id});
     const row = input.id ? await tx.platformSetting.findFirst({where:{key:{in:avatarReadKeys(owner,'record',id)}}}) : null;
     const current = row ? JSON.parse(row.value_json) as AvatarRecord : null;
     if (current && current.revision !== input.revision) throw new StudioError('记录已在另一页修改，请重新读取后保存', 409);
