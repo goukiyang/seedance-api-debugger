@@ -12,7 +12,8 @@ test "$(cat "$app/.next-prod/BUILD_ID")" = "$old_build"
 if test "$mode" = candidate; then
   available=$(df -Pk "$app" | awk 'NR==2 {print $4}')
   old_size=$(du -sk "$app/.next-prod" | awk '{print $1}')
-  test "$available" -gt "$((old_size * 3 + 512000))"
+  # Candidate is moved on the same filesystem, not copied a second time.
+  test "$available" -gt "$((old_size * 2 + 512000))"
   printf '%s  %s/%s.tar.gz\n' "$source_sha" "$uploaded" "$commit" | sha256sum -c -
   printf '%s  %s/%s.tar.gz\n' "$base_sha" "$uploaded" "$base" | sha256sum -c -
   test ! -e "$release"
@@ -36,8 +37,9 @@ for entry in storage public/uploads public/videos; do test -L "$app/$entry"; don
 stage="$app/.next-prod-candidate-followups-$short"
 previous="$app/.next-prod-prev-followups-$short"
 test ! -e "$stage"; test ! -e "$previous"
-mkdir "$stage"
-rsync -a "$release/.next-prod-candidate/" "$stage/"
+test "$(stat -c %d "$release/.next-prod-candidate")" = "$(stat -c %d "$app")"
+test "$(df -Pk "$app" | awk 'NR==2 {print $4}')" -gt 512000
+mv "$release/.next-prod-candidate" "$stage"
 chown -R gouki:gouki "$stage"
 new_build=$(cat "$stage/BUILD_ID")
 old_worker_pid=$(systemctl show sd2-image-studio.service -p MainPID --value)
