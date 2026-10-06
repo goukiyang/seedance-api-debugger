@@ -206,8 +206,14 @@
 .presetSource select { min-width: 0; max-width: 100%; flex: 1 1 160px; }
 .moduleQuickActions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; padding-top: 16px; border-top: 1px solid #2d383d; }
 .moduleQuickActions button { padding: 7px 9px; font-size: 12px; }
+.batchInputPreview { aspect-ratio: 1; background: #161c20; overflow: hidden; }
+.batchInputPreview img { width: 100%; height: 100%; object-fit: contain; opacity: .7; }
+.ratioInfoButton { position: absolute; top: 24px; right: 0; width: 32px; height: 36px; justify-content: center; }
+.ratioHint { display: none; position: absolute; top: 100%; left: 0; z-index: 22; box-sizing: border-box; width: max-content; max-width: min(360px, 100%); margin: 4px 0 0; padding: 8px 10px; border: 1px solid #52616a; border-radius: 6px; background: #192126; color: #d9e2e8; font-size: 12px; }
+.ratioTrigger:focus-visible ~ .ratioHint, .ratioHint[data-open="true"] { display: block; }
+@media (hover: hover) { .ratioPicker:hover .ratioHint { display: block; } }
 .moduleQuickActions .saveReady { border-color: #79daca; color: #a4f2df; }
-.quickPresetRow { display: flex; align-items: center; gap: 8px; flex: 1 1 100%; min-width: 0; }
+.quickPresetRow { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex: 1 1 100%; min-width: 0; order: 2; }
 .quickPresetRow > button { flex: 0 0 auto; }
 .quickPresetChoices { display: flex; gap: 8px; min-width: 0; overflow-x: auto; padding-block: 2px; }
 .quickPresetChoices button { flex: 0 0 auto; max-inline-size: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -225,7 +231,7 @@
 .resultMedia:hover .deleteResult, .resultMedia:focus-within .deleteResult { opacity: 1; }
 .page .danger { color: #ffb4ab; border-color: #a44949; }
 .ratioPicker { position: relative; }
-.page .ratioTrigger { width: 100%; justify-content: space-between; }
+.page .ratioTrigger { width: calc(100% - 38px); justify-content: space-between; }
 .ratioMenu { position: absolute; top: 76px; left: 0; width: 100%; max-height: 300px; overflow-y: auto; z-index: 10; border: 1px solid #465057; background: #171c1f; border-radius: 6px; padding: 6px; box-sizing: border-box; box-shadow: 0 8px 24px #0006; }
 .ratioRow { display: flex; align-items: center; min-height: 38px; }
 .ratioRow > button:first-child { flex: 1; justify-content: space-between; border: 0; background: transparent; }

@@ -36,7 +36,7 @@ function clampNumber(value: unknown, minimum: number, maximum: number, fallback:
   return Math.min(maximum, Math.max(minimum, value));
 }
 
-function isSafeIdentifier(value: unknown, allowContentKey = false): value is string {
+export function isSafeIdentifier(value: unknown, allowContentKey = false): value is string {
   if (typeof value !== 'string') return false;
   const normalized = value.trim();
   if (!normalized || normalized.length > 200
@@ -47,7 +47,7 @@ function isSafeIdentifier(value: unknown, allowContentKey = false): value is str
     && !/\.(?:avif|gif|jpe?g|m4a|mov|mp3|mp4|ogg|png|webm|wav)$/i.test(normalized);
 }
 
-function sourceFingerprint(source?: string) {
+export function sourceFingerprint(source?: string) {
   if (!source || source.length > 4096 || /^(?:data:|blob:)/i.test(source)) return '';
   let normalized = source;
   try {

@@ -4,8 +4,10 @@ import { Download, FolderOpen, Pause, Play, RefreshCw, RotateCcw, Save, X } from
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
+import { useProductDialog } from '@/components/useProductDialog';
 import { watchGenerationCompletion } from '@/components/GenerationCompletion';
 import { batchStateLabel, safeBatchFileName, STUDIO_BATCH_LIMITS, type StudioBatchView } from '@/lib/image-studio/batch-contract';
+import { readBatchResponse } from '@/lib/image-studio/batch-receipt';
 import { canSelectBatchDirectory, selectBatchDirectory, newBatchOutputDirectory, writeUniqueBatchFile, type BatchDirectoryHandle } from './batch-files';
 import styles from './batch.module.css';
 type Delivery = { saved: Record<number, string>; child: BatchDirectoryHandle | null; lock: boolean; directory: BatchDirectoryHandle | null };
@@ -18,12 +20,8 @@ function deliveryFor(key: string, directory?: BatchDirectoryHandle | null) {
   return deliveries.get(key)!;
 }
 
-export async function readBatchResponse(response: Response) {
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || '批次操作失败，请重试');
-  return data;
-}
-export function BatchResults({ id, userId, outputDirectory, compact = false }: { id: string; userId: string; outputDirectory?: BatchDirectoryHandle | null; compact?: boolean }) {
+export function BatchResults({ id, userId, outputDirectory, compact = false, deliveryOnly = false, autoPack = false }: { id: string; userId: string; outputDirectory?: BatchDirectoryHandle | null; compact?: boolean; deliveryOnly?: boolean; autoPack?: boolean }) {
+  const { confirm, productDialog } = useProductDialog();
   const delivery = deliveryFor(`${userId}:${id}`, outputDirectory);
   const [batch, setBatch] = useState<StudioBatchView | null>(null);
   const [error, setError] = useState('');
@@ -36,12 +34,12 @@ export function BatchResults({ id, userId, outputDirectory, compact = false }: {
   const [zipReady, setZipReady] = useState<{ url: string; name: string } | null>(null);
   const [directory, setDirectory] = useState(delivery.directory);
   const [selected, setSelected] = useState<number[]>([]);
-  const [retryBudget, setRetryBudget] = useState('');
   const [visibleCount, setVisibleCount] = useState(24);
   const [preview, setPreview] = useState<{ src: string; alt: string } | null>(null);
   const [autoSave, setAutoSave] = useState(Boolean(outputDirectory));
   const saveLock = useRef(false), actionLock = useRef(false), reader = useRef(false);
   const childDirectory = useRef<BatchDirectoryHandle | null>(delivery.child);
+  const packed = useRef(new Set<string>());
   const scope = useRef(`${userId}:${id}`); scope.current = `${userId}:${id}`;
   useEffect(() => {
     if (outputDirectory && outputDirectory !== delivery.directory && !delivery.lock) { delivery.directory = outputDirectory; delivery.child = null; delivery.saved = {}; childDirectory.current = null; setDirectory(outputDirectory); setSaved({}); }
@@ -52,7 +50,7 @@ export function BatchResults({ id, userId, outputDirectory, compact = false }: {
     reader.current = true; setReading(true);
     const expected = `${userId}:${id}`;
     try {
-      const data = await readBatchResponse(await fetch(`/api/image-studio/batches?id=${encodeURIComponent(id)}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
+      const data = await readBatchResponse(await fetch(`/api/image-studio/batches?id=${encodeURIComponent(id)}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }), true);
       if (scope.current === expected) { setBatch(data.batch); setSaved({ ...delivery.saved }); setError(''); }
     } catch (error) { if (scope.current === expected) setError(error instanceof Error ? error.message : '批次读取失败'); }
     finally { reader.current = false; if (scope.current === expected) setReading(false); }
@@ -62,12 +60,25 @@ export function BatchResults({ id, userId, outputDirectory, compact = false }: {
   async function action(action: string) {
     if (actionLock.current || !batch) return;
     actionLock.current = true; setBusy(true); setError('');
+    const expected = `${userId}:${id}`, ordinals = [...selected], retryBudget = batch.committedCredits + ordinals.length * batch.unitCredits;
     try {
-      const data = await readBatchResponse(await fetch('/api/image-studio/batches', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action, ...(action === 'retry' ? { ordinals: selected, budget: retryBudget === '' ? null : Number(retryBudget) } : {}) }), signal: AbortSignal.timeout(20000) }));
+      const quoteRetry = async () => {
+        if (!batch.model) throw new Error('原批次模型报价无法核对，请先查询原批次；没有重新生成');
+        const current = await readBatchResponse(await fetch('/api/image-studio/settings', { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
+        if (scope.current !== expected || current.prices?.[batch.model] !== batch.unitCredits) throw new Error('本批报价已变化，请重新核对；没有重试生成');
+      };
+      if (action === 'retry') {
+        await quoteRetry();
+        if (!await confirm(`仅重试所选失败${ordinals.length}项，本次预计${ordinals.length * batch.unitCredits}点；已成功结果不再生成。`, { title: '确认重试', confirmLabel: `确认重试 · ${ordinals.length * batch.unitCredits}点`, anchor: null })) return;
+        await quoteRetry();
+      }
+      if (scope.current !== expected) return;
+      const data = await readBatchResponse(await fetch('/api/image-studio/batches', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action, ...(action === 'retry' ? { ordinals, budget: retryBudget } : {}) }), signal: AbortSignal.timeout(20000) }), true);
+      if (scope.current !== expected) return;
       if (action === 'retry') watchGenerationCompletion(userId, id, 'batch', batch.total, crypto.randomUUID());
       setBatch(data.batch); setSelected([]);
-    } catch (error) { setError(error instanceof Error ? error.message : '操作结果待确认，请刷新原批次'); }
-    finally { actionLock.current = false; setBusy(false); }
+    } catch (error) { if (scope.current === expected) setError(error instanceof Error ? error.message : '操作结果待确认，请刷新原批次'); }
+    finally { actionLock.current = false; if (scope.current === expected) setBusy(false); }
   }
   async function chooseDirectory() {
     try { const selected = await selectBatchDirectory('readwrite'); setDirectory(selected); childDirectory.current = null; delivery.directory = selected; delivery.child = null; delivery.saved = {}; setSaved({}); setSaveError(''); }
@@ -106,29 +117,46 @@ export function BatchResults({ id, userId, outputDirectory, compact = false }: {
     else previous.push(item);
   }
   async function downloadPackage(index: number) {
-    if (saveLock.current) return;
+    if (saveLock.current || !packages[index]?.length) return false;
+    const expected = `${userId}:${id}`;
     saveLock.current = true; setSaveBusy(true); setSaveError('');
     try {
       const query = new URLSearchParams({ batchId: id }); packages[index].forEach(item => query.append('id', item.taskId!));
       const response = await fetch(`/api/image-studio/download?${query}`, { signal: AbortSignal.timeout(120000) });
       if (!response.ok) { await readBatchResponse(response); return; }
       const blob = await response.blob();
+      if (scope.current !== expected) return false;
       if (!blob.size || blob.size > STUDIO_BATCH_LIMITS.zipBytes + 1024 * 1024) throw new Error('下载包过大或未完整准备，请减少图片后再试');
       const name = `batch-${id.slice(0, 12)}-part-${index + 1}.zip`, url = URL.createObjectURL(blob);
       setZipReady({ url, name });
       const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; anchor.click();
       setProvided(previous => Array.from(new Set([...previous, ...packages[index].map(item => item.ordinal)])));
-    } catch (error) { setSaveError(error instanceof Error ? error.message : '下载准备失败，已有图片仍保留'); }
+      return true;
+    } catch (error) { if (scope.current === expected) setSaveError(error instanceof Error ? error.message : '下载准备失败，已有图片仍保留'); return false; }
     finally { saveLock.current = false; setSaveBusy(false); }
   }
+  useEffect(() => {
+    if (!autoPack || !batch || batch.active || batch.pending || batch.uncertain || !['complete', 'cancelled'].includes(batch.state) || !packages.length) return;
+    const expected = `${userId}:${id}`;
+    void (async () => {
+      for (let index = 0; index < packages.length; index++) {
+        const key = packages[index].map(item => item.taskId).join('|');
+        if (scope.current !== expected || packed.current.has(key)) continue;
+        packed.current.add(key);
+        if (!await downloadPackage(index)) break;
+      }
+    })();
+  // The terminal result set determines packages; exporting never creates image tasks.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPack, batch?.state, batch?.generated, batch?.active, batch?.pending, batch?.uncertain]);
   const statusLabel = (state: string) => ({ pending: '等待派发', queued: '已受理，排队中', running: '生成中', succeeded: '已生成', failed: '生成失败', uncertain: '结果待确认', cancelled: '未派发，已取消' } as Record<string, string>)[state] || '状态待确认';
   return <div className={styles.results} aria-label="批次结果">
-    <div className={styles.actions}><strong>{batch?.moduleName || '本批结果'}</strong><button type="button" title="刷新批次" aria-label="刷新批次" disabled={reading} onClick={() => void load()}><RefreshCw size={16} /></button></div>
+    <div className={styles.actions}><strong>{batch?.moduleName || '本批结果'}</strong><button type="button" title="刷新批次" aria-label="刷新批次" disabled={reading} onClick={() => void load()}><RefreshCw size={16} /></button>{deliveryOnly && <a href={`/assets?imageBatchId=${encodeURIComponent(id)}`}>本批资产</a>}</div>
     {error && <p role="alert" className={styles.error}>{error}</p>}
     {!batch && <p role="status">{reading ? '正在读取原批次' : '尚未读取批次'}，不会重新提交生成。</p>}
     {batch && <>
       <p className={styles.summary}>{batchStateLabel(batch.state)} · <RelativeTime value={batch.createdAt} /> · 已生成 {batch.generated}/{batch.total} · 已保存 {Object.keys(saved).length}/{batch.generated} · 失败 {batch.failed} · 待确认 {batch.uncertain}</p>
-      <p>素材已准备 {batch.prepared}/{batch.total} · 在途 {batch.active} · 未派发 {batch.pending} · 已派发预计 {batch.committedCredits} / 预算 {batch.budget} 点</p>
+      {!deliveryOnly && <p>素材已准备 {batch.prepared}/{batch.total} · 在途 {batch.active} · 未派发 {batch.pending}</p>}
       {batch.note && <p role="status">{batch.note}</p>}
       <div className={styles.actions}>
         {['preparing', 'blocked'].includes(batch.state) && batch.prepared < batch.total && <button type="button" disabled={busy} onClick={() => void action('prepare')}><RefreshCw size={16} />继续准备原批素材</button>}
@@ -146,20 +174,24 @@ export function BatchResults({ id, userId, outputDirectory, compact = false }: {
         {zipReady && <a href={zipReady.url} download={zipReady.name}>再次下载已准备的包</a>}
         {saveError && <p role="alert" className={styles.error}>{saveError}，只补保存，不重新生成。</p>}
       </div>}
-      {batch.failed > 0 && <div className={styles.retry}><span>选中失败项 {selected.length} 张，本次重试预计 {selected.length * batch.unitCredits} 点；每项最多重试 3 次</span><label>批次新预算上限<input type="number" min={batch.committedCredits + selected.length * batch.unitCredits} max={10000000} step={1} value={retryBudget} onChange={event => setRetryBudget(event.target.value)} /></label><button type="button" disabled={busy || !selected.length || retryBudget === ''} onClick={() => void action('retry')}><RotateCcw size={16} />重试选中失败项</button></div>}
-      <div className={compact ? styles.compactItems : styles.items}>{batch.items?.slice(0, visibleCount).map(item => <article className={styles.item} key={item.ordinal}>
+      {!deliveryOnly && batch.failed > 0 && <div className={styles.retry}><span>选中失败项 {selected.length} 张，本次重试预计 {selected.length * batch.unitCredits} 点；每项最多重试 3 次</span><button type="button" disabled={busy || !selected.length} onClick={() => void action('retry')}><RotateCcw size={16} />重试选中失败项</button></div>}
+      {!deliveryOnly && <div className={compact ? styles.compactItems : styles.items}>{batch.items?.slice(0, visibleCount).map(item => <article className={styles.item} key={item.ordinal}>
         {item.image ? <button type="button" aria-label={`预览第 ${item.ordinal} 张结果`} onClick={() => setPreview({ src: item.image!.url, alt: `第 ${item.ordinal} 张结果` })}><img src={item.image.thumbnail} alt={`第 ${item.ordinal} 张结果`} loading="lazy" /></button> : <div className={styles.placeholder}>暂无截图</div>}
         <div><strong>{item.ordinal}. {item.sourceName}</strong><p>{statusLabel(item.status)}</p>{item.error && <p className={styles.error}>{item.error}</p>}{saved[item.ordinal] && <p>已保存并核对大小</p>}</div>
-        {item.status === 'failed' && <input type="checkbox" aria-label={`重试第 ${item.ordinal} 项`} checked={selected.includes(item.ordinal)} onChange={event => setSelected(previous => event.target.checked ? [...previous, item.ordinal] : previous.filter(value => value !== item.ordinal))} />}
-      </article>)}</div>
-      {batch.total > visibleCount && <button type="button" onClick={() => setVisibleCount(count => count + 24)}>加载更多 · 已显示 {visibleCount}/{batch.total}</button>}
-    </>}{preview && <ZoomableImagePreview src={preview.src} alt={preview.alt} fileName="batch-image.png" onClose={() => setPreview(null)} />}
+        {item.status === 'failed' && <input type="checkbox" disabled={busy} aria-label={`重试第 ${item.ordinal} 项`} checked={selected.includes(item.ordinal)} onChange={event => setSelected(previous => event.target.checked ? [...previous, item.ordinal] : previous.filter(value => value !== item.ordinal))} />}
+      </article>)}</div>}
+      {!deliveryOnly && batch.total > visibleCount && <button type="button" onClick={() => setVisibleCount(count => count + 24)}>加载更多 · 已显示 {visibleCount}/{batch.total}</button>}
+    </>}{preview && <ZoomableImagePreview src={preview.src} alt={preview.alt} fileName="batch-image.png"
+      comparisonCandidates={(batch?.items || []).flatMap(item => item.image ? [{ src: item.image.url, thumbnailSrc: item.image.thumbnail, alt: `生成结果 ${item.ordinal}`, contentKey: `asset:${item.image.id}` as const }] : [])}
+      onClose={() => setPreview(null)} />}
+    {productDialog}
   </div>;
 }
 
-export function StudioBatchHistory({ userId }: { userId: string }) {
+export function StudioBatchHistory({ userId, initialId }: { userId: string; initialId?: string }) {
   const [open, setOpen] = useState(false), [batches, setBatches] = useState<StudioBatchView[]>([]), [id, setId] = useState<string | null>(null), [error, setError] = useState(''), [busy, setBusy] = useState(false), [cursor, setCursor] = useState<string | null>(null);
   const dialog = useRef<HTMLDialogElement>(null), lock = useRef(false);
+  useEffect(() => { if (initialId && /^[a-f0-9]{64}$/.test(initialId)) { setId(initialId); setOpen(true); } }, [initialId]);
   async function load(more = false) {
     if (lock.current) return;
     lock.current = true; setBusy(true); setError('');

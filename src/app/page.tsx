@@ -23,7 +23,7 @@ export default async function Home() {
   return <main className={styles.page}>
     <header className={styles.header}><h1>创作</h1><nav aria-label="创作记录"><Link href="/tasks">我的任务</Link><Link href="/assets">资产</Link></nav></header>
     <div className={styles.entries}>{entries.filter(entry => entry.visible).map(entry => <section key={entry.tone} className={styles.entry} data-kind={entry.tone}>
-      <Link className={styles.visual} href={entry.links[0].href} aria-label={entry.name}><entry.icon size={56} strokeWidth={1.5} aria-hidden="true" /></Link>
+      <Link className={styles.visual} href={entry.links[0].href} aria-label={entry.name}><img src={`/home/${entry.tone}.png`} width={640} height={360} alt={`${entry.name}用途示意（自绘虚拟内容）`} /></Link>
       <div className={styles.content}><h2>{entry.name}</h2><div className={styles.links}>{entry.links.map(link => <Link key={link.href} href={link.href}>{link.name}<ArrowUpRight size={15} aria-hidden="true" /></Link>)}</div>
         {entry.tone === 'templates' && <small>脚本模板入口待确认</small>}
       </div>

@@ -73,6 +73,7 @@ function rememberPersistentScroll(key: string, skipRestore: boolean) {
   window.addEventListener('wheel', stop, { passive: true });
   window.addEventListener('touchstart', stop, { passive: true });
   window.addEventListener('pointerdown', stop, { passive: true });
+  window.addEventListener('sd2:scroll-target', stop);
   window.addEventListener('keydown', onKey);
   window.addEventListener('pagehide', save);
   document.addEventListener('visibilitychange', onVisibility);
@@ -90,6 +91,7 @@ function rememberPersistentScroll(key: string, skipRestore: boolean) {
       flush(); clearTimeout(timer); cancelAnimationFrame(frame);
       window.removeEventListener('wheel', stop); window.removeEventListener('touchstart', stop);
       window.removeEventListener('pointerdown', stop); window.removeEventListener('keydown', onKey);
+      window.removeEventListener('sd2:scroll-target', stop);
       window.removeEventListener('pagehide', save); document.removeEventListener('visibilitychange', onVisibility);
       document.removeEventListener('scroll', scheduleSave, true);
       history.scrollRestoration = previous;
@@ -114,7 +116,7 @@ export function useRememberedScroll(key: string, ready = true, { localFallback =
     let saved: { x: number; y: number; panes: Record<string, { x: number; y: number }> } | null = null;
     try { saved = JSON.parse(sessionStorage.getItem(storageKey) || 'null'); } catch {}
     if (saved && (!Number.isFinite(saved.x) || !Number.isFinite(saved.y))) saved = null;
-    let restoring = Boolean(saved);
+    let restoring = Boolean(saved) && !skipRestore;
     let frame = 0;
     const panes = () => Array.from(document.querySelectorAll<HTMLElement>('[data-remember-scroll]'));
     const save = () => {
@@ -143,6 +145,7 @@ export function useRememberedScroll(key: string, ready = true, { localFallback =
     window.addEventListener('wheel', stop, { passive: true });
     window.addEventListener('touchstart', stop, { passive: true });
     window.addEventListener('pointerdown', stop, { passive: true });
+    window.addEventListener('sd2:scroll-target', stop);
     window.addEventListener('keydown', onKey);
     window.addEventListener('pagehide', save);
     document.addEventListener('scroll', save, { capture: true, passive: true });
@@ -150,6 +153,7 @@ export function useRememberedScroll(key: string, ready = true, { localFallback =
       save(); observer.disconnect(); mutations.disconnect(); clearTimeout(deadline); cancelAnimationFrame(frame);
       window.removeEventListener('wheel', stop); window.removeEventListener('touchstart', stop);
       window.removeEventListener('pointerdown', stop); window.removeEventListener('keydown', onKey);
+      window.removeEventListener('sd2:scroll-target', stop);
       window.removeEventListener('pagehide', save); document.removeEventListener('scroll', save, true);
       history.scrollRestoration = previous;
     };

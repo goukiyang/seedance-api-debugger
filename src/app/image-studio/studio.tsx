@@ -13,6 +13,7 @@ import { uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapsh
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { UploadedImagePicker } from '@/components/UploadedImagePicker';
 import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
+import { scrollToWorkbenchHeader } from '@/lib/navigation/scroll-to-workbench-header';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useUnsavedNavigation } from '@/lib/hooks/use-unsaved-navigation';
@@ -28,7 +29,7 @@ function studioUploadProgress(file: File, index: number, count: number, progress
       ? Math.min(99, Math.floor(progress.loadedBytes / progress.totalBytes * 100)) : undefined,
   };
 }
-import { ZoomableImagePreview, type ImagePreviewMetadata } from '@/components/ZoomableImagePreview';
+import { ZoomableImagePreview, type ImagePreviewMetadata, type ImageComparisonSource } from '@/components/ZoomableImagePreview';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import TemplateFavoriteTitle from '@/components/content-reactions/TemplateFavoriteTitle';
@@ -116,7 +117,14 @@ function singleReferenceComparison(task: StudioTask) {
   const references = task.snapshot?.primaryReferenceImages ?? task.snapshot?.transientReferenceImages ?? task.snapshot?.referenceImages ?? [];
   const reference = references[0];
   const src = reference?.originalUrl || reference?.thumbnailUrl;
-  return src ? { src, thumbnailSrc: reference.thumbnailUrl || src, alt: '主图 1', fileName: reference.fileName || undefined } : undefined;
+  return src ? { src, thumbnailSrc: reference.thumbnailUrl || src, alt: '主图 1', fileName: reference.fileName || undefined, ...(reference.id ? { contentKey: `asset:${reference.id}` as const } : {}) } : undefined;
+}
+
+function taskComparisonCandidates(task?: StudioTask): ImageComparisonSource[] {
+  const snapshot = task?.snapshot;
+  const references = [...(snapshot?.primaryReferenceImages ?? snapshot?.transientReferenceImages ?? snapshot?.referenceImages ?? []),
+    ...(snapshot?.auxiliaryReferenceImages || []), ...(snapshot?.fixedReferenceImages || [])];
+  return references.flatMap((image, index) => image.originalUrl ? [{ src: image.originalUrl, thumbnailSrc: image.thumbnailUrl || undefined, alt: `参考图 ${index + 1}`, ...(image.id ? { contentKey: `asset:${image.id}` as const } : {}) }] : []);
 }
 
 function studioTaskPreviewState(task: StudioTask): ImagePreviewState {
@@ -206,7 +214,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
   const moduleScrollSequence = useRef(0);
   const pageRef = useRef<HTMLElement>(null);
   const mobileModuleNavRef = useRef<HTMLElement>(null);
-  useRememberedScroll(`image-studio:${userId}`, viewRestored);
+  useRememberedScroll(`image-studio:${userId}`, viewRestored, { skipRestore: typeof window !== 'undefined' && Boolean(new URLSearchParams(window.location.search).get('moduleId')) });
   useEffect(() => {
     const readView = (storage: Storage, key: string) => {
       try {
@@ -545,9 +553,11 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
       return;
     }
     updateNavigationOffset();
-    target.scrollIntoView({ block: 'start', behavior: pendingModuleScroll.behavior });
-    if (pendingModuleScroll.markViewed) setRequestedView({ viewerId: userId, moduleId: pendingModuleScroll.id, token: ++viewSequence.current });
-    setPendingModuleScroll(current => current?.token === pendingModuleScroll.token ? null : current);
+    const header = target.querySelector<HTMLElement>('header') || target;
+    return scrollToWorkbenchHeader(header, pageRef.current || target, pendingModuleScroll.behavior, () => {
+      if (pendingModuleScroll.markViewed) setRequestedView({ viewerId: userId, moduleId: pendingModuleScroll.id, token: ++viewSequence.current });
+      setPendingModuleScroll(current => current?.token === pendingModuleScroll.token ? null : current);
+    });
   }, [pendingModuleScroll, modules, loading, hydrating, selectedGroup, coverView, userId, updateNavigationOffset]);
   useEffect(() => {
     if (!pendingModuleScroll) return;
@@ -792,7 +802,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const [useFixedReferences, setUseFixedReferences] = useState(module.referencePolicy?.useFixedReferences ?? true);
   const [aspectRatio, setAspectRatio] = useState(module.aspectRatio || 'auto');
   const [moduleModel, setModuleModel] = useState(module.model);
-  const batch = useStudioBatch({ userId, moduleId: module.id, unitCredits: settings ? settings.prices?.[moduleModel] ?? null : module.prices[moduleModel] ?? null });
   const [resolution, setResolution] = useState<ImageResolution>(normalizeImageResolution(module.model, module.resolution || defaultImageResolution(module.model)));
   const [quality, setQuality] = useState(module.quality || defaultImageStudioQuality(module.model));
   const [groupName, setGroupName] = useState(module.groupName || '未分组');
@@ -918,6 +927,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const baseline = moduleSaved ? JSON.parse(moduleSaved) as typeof moduleDraft : moduleDraft;
   const generationInputs = { evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, aspectRatio, resolution: normalizeImageResolution(moduleModel, resolution), referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: normalizeImageStudioQuality(moduleModel, quality), referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), styleGroupIds: moduleDraft.styleGroupIds };
   const generationDraft = JSON.stringify(generationInputs);
+  const batch = useStudioBatch({ userId, moduleId: module.id, unitCredits: settings ? settings.prices?.[moduleModel] ?? null : module.prices[moduleModel] ?? null,
+    draftSignature: JSON.stringify([generationDraft, effectiveGlobalContext, reproduceSourceTaskId, settings?.revision, module.revision]) });
   const contextVersion = useModuleContextVersion({ moduleId: module.id, raw: moduleContext, taskId: reproduceSourceTaskId,
     editable: contextEditable, enabled: !hidden && draftLoaded && !draftRestoring, composing: contextComposing });
   const contextUnsaved = moduleContext !== savedModuleContext || Boolean(reproduceSourceTaskId && reproduceSourceTaskId !== baseline.reproduceFromTaskId);
@@ -1383,7 +1394,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     if (evolutionConflict) { setError(evolutionConflict); return; }
     if (batch.mode === 'batch' && !retryTask) {
       submitLock.current = true; setSubmitting(true);
-      try { await batch.submit(generationPayload()); setResultView('batch'); }
+      try { if (await batch.submit(generationPayload())) { setResultView('images'); await loadTasks(undefined, 'silent'); } }
       finally { submitLock.current = false; setSubmitting(false); }
       return;
     }
@@ -1700,8 +1711,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           </select>
         </label>
         {!DEFAULT_GROUPS.includes(groupName) && <button type="button" disabled={moduleSaving || automaticDirty} title="删除当前分组" onClick={() => void onDeleteGroup(groupName)}>删除分组</button>}
-        <span role="status" className={styles.muted}>{moduleSaving ? '保存中' : moduleSaveError ? '保存失败' : automaticDirty ? '等待自动保存' : settingsDirty ? '设置未保存' : '已保存'}</span>
-        <span className={styles.contextEntry}><button type="button" disabled={!draftLoaded || draftRestoring} onClick={openModuleDialog}><Settings size={17} />模块上下文</button><ContextVersionLabel {...contextVersion} unsaved={contextUnsaved} /></span>
+        {(moduleSaving || moduleSaveError || automaticDirty || settingsDirty) && <span role="status" className={styles.muted}>{moduleSaving ? '保存中' : moduleSaveError ? '保存失败' : automaticDirty ? '等待自动保存' : '设置未保存'}</span>}
+        <span className={styles.contextEntry}><button type="button" disabled={!draftLoaded || draftRestoring} onClick={openModuleDialog}><Settings size={17} />模块上下文</button></span>
         <button type="button" title={module.id === `default-${userId}` ? (templateWorkbench ? '默认模块需要保留' : '默认模板需要保留') : (templateWorkbench ? '删除模块' : '删除模板')} aria-label={`删除${templateWorkbench ? '模块' : '模板'}：${name}`}
           disabled={module.id === `default-${userId}` || moduleDeleting || moduleSaving || submitting || uploading || bannerUploading || Boolean(pendingSubmission)}
           onClick={() => void deleteModule()}><Trash2 size={17} />{moduleDeleting ? '删除中' : templateWorkbench ? '删除模块' : '删除模板'}</button>
@@ -1791,15 +1802,15 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           void addImages(Array.from(event.target.files || [])); event.target.value = '';
         }} />
         <div className={styles.generationToolbar}>
+          <div className={styles.generationActions}>
+            <div className={styles.generationModes} role="group" aria-label="生成方式"><button type="button" aria-pressed={batch.mode === 'single'} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending) || batch.busy || batch.previewing} onClick={() => batch.setMode('single')}>单次</button><button type="button" aria-pressed={batch.mode === 'batch'} disabled={submitting || Boolean(pendingSubmission) || batch.busy || batch.previewing} onClick={() => batch.setMode('batch')}>批量</button></div>
+            <button type="button" className={`${styles.generate} sd2-loading-surface`} data-busy={submitting || queryingSubmission || batch.busy} disabled={Boolean(generationFeedback)} title={generationFeedback?.message} aria-describedby={generationFeedback ? `generation-blocker-${module.id}` : undefined} onClick={() => void (pendingSubmission ? querySubmission() : submit())}>{queryingSubmission ? '正在查询' : submitting ? '正在提交' : pendingSubmission || batch.pending ? '查询这次提交' : batch.mode === 'batch' ? '开始批量生成' : Number.isInteger(count) && count >= 1 && count <= 8 ? `生成 ${count} 张` : '生成图片'}</button>
+          </div>
           {batch.mode === 'single' && <div className={`${styles.counts} ${styles.generationQuantity}`} role="group" aria-label="单次生成张数">
             <label htmlFor={`studio-count-${module.id}`}>张数</label>
             {[1, 2, 4, 8].map(n => <button type="button" disabled={submitting || Boolean(pendingSubmission)} key={n} aria-pressed={count === n} onClick={() => setCount(n)}>{n}</button>)}
             <input id={`studio-count-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} type="number" min={1} max={8} step={1} value={count} onChange={event => setCount(Number(event.target.value))} />
           </div>}
-          <div className={styles.generationActions}>
-            <div className={styles.generationModes} role="group" aria-label="生成方式"><button type="button" aria-pressed={batch.mode === 'single'} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending) || batch.busy || batch.previewing} onClick={() => batch.setMode('single')}>单次</button><button type="button" aria-pressed={batch.mode === 'batch'} disabled={submitting || Boolean(pendingSubmission) || batch.busy || batch.previewing} onClick={() => batch.setMode('batch')}>批量</button></div>
-            <button type="button" className={`${styles.generate} sd2-loading-surface`} data-busy={submitting || queryingSubmission || batch.busy} disabled={Boolean(generationFeedback)} title={generationFeedback?.message} aria-describedby={generationFeedback ? `generation-blocker-${module.id}` : undefined} onClick={() => void (pendingSubmission ? querySubmission() : submit())}>{queryingSubmission ? '正在查询' : submitting ? '正在提交' : pendingSubmission || batch.pending ? '查询这次提交' : batch.mode === 'batch' ? '开始批量生成' : Number.isInteger(count) && count >= 1 && count <= 8 ? `生成 ${count} 张` : '生成图片'}</button>
-          </div>
           {batch.mode === 'batch' && batch.controls}
           {batch.mode === 'single' && <p className={styles.muted}>{moduleUnitCredits == null ? '当前模型积分单价尚未设置' : `每张 ${moduleUnitCredits} 积分 · 本次 ${moduleUnitCredits * (Number.isInteger(count) ? count : 0)} 积分`} · 上游成本 {providerCostUsd == null ? '待配置' : `$${providerCostUsd.toFixed(3)} / 张`}</p>}
           {generationFeedback && <p id={`generation-blocker-${module.id}`} role="status" className={styles.generationFeedback} data-tone={generationFeedback.tone}>{generationFeedback.message}</p>}
@@ -1835,8 +1846,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         {!IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS]?.some(option => option !== 'auto') && <p className={styles.muted}>当前模型不支持质量档位，按模型默认质量生成。</p>}
         <div className={styles.moduleQuickActions} aria-label="模板快捷设置">
           <div className={styles.quickPresetRow}>
-            <button type="button" onClick={onManagePresets}><FolderCog size={16} />管理模板</button>
-            <button type="button" disabled={presetSaving || Boolean(quickPresetApplying) || draftRestoring || submitting || Boolean(pendingSubmission) || moduleSaving || uploading || bannerUploading} onClick={restoreDefaults}><RefreshCw size={16} />恢复默认</button>
+            <button type="button" title="管理模板" aria-label="管理模板" onClick={onManagePresets}><FolderCog size={16} /></button>
+            <button type="button" title="恢复默认" aria-label="恢复默认" disabled={presetSaving || Boolean(quickPresetApplying) || draftRestoring || submitting || Boolean(pendingSubmission) || moduleSaving || uploading || bannerUploading} onClick={restoreDefaults}><RefreshCw size={16} /></button>
             <div className={styles.quickPresetChoices} aria-label="已保存快捷模板">
               {quickPresets.map(preset => <button type="button" key={preset.id} title={`套用：${preset.name}`} className="sd2-loading-surface" data-busy={quickPresetApplying === preset.id}
                 disabled={!draftLoaded || draftRestoring || presetSaving || Boolean(quickPresetApplying) || submitting || Boolean(pendingSubmission) || uploading || bannerUploading || moduleSaving || moduleDeleting || ratioEditing}
@@ -1857,7 +1868,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           {!downloadMode ? <button type="button" disabled={downloadBusy} onClick={() => { setSelected([]); setDownloadMode(true); }}><Download size={16} />下载</button> : <div className={styles.downloadModeBar}><span>已选 {selected.length} 张</span><button type="button" disabled={!selected.length || downloadBusy} onClick={() => void download(selected)}>{downloadBusy ? '准备中' : '确认下载'}</button><button type="button" disabled={downloadBusy} onClick={() => { setSelected([]); setDownloadMode(false); }}>取消</button></div>}
           <button type="button" title="刷新记录" aria-label="刷新记录" className={templateWorkbench ? 'sd2-loading-surface' : undefined} data-busy={templateWorkbench && taskReadAction === 'refresh'} disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks()}><RefreshCw size={16} /></button>
         </div></header>
-        {resultView === 'batch' ? batch.inlineResults ? <p>本批结果已在生成栏展开。</p> : batch.id ? <BatchResults key={`${userId}:${batch.id}`} id={batch.id} userId={userId} outputDirectory={batch.outputDirectory} /> : <p>暂无选中批次，可开始批量生成或从顶部“我的批次”找回。</p> : <>
+        {batch.id && resultView === 'images' && <BatchResults key={`${userId}:${batch.id}:delivery`} id={batch.id} userId={userId} deliveryOnly autoPack={batch.pack} />}
+        {batch.busy && batch.localPreviews.length > 0 && <div className={styles.grid} aria-label="本批准备素材">{batch.localPreviews.map((src, index) => <article key={src} className={styles.result}><div className={styles.batchInputPreview}><img src={src} alt={`本批主图 ${index + 1}`} /></div><p role="status">准备中</p></article>)}</div>}
+        {resultView === 'batch' ? batch.id ? <BatchResults key={`${userId}:${batch.id}`} id={batch.id} userId={userId} autoPack={batch.pack} /> : <p>暂无选中批次，可开始批量生成或从顶部“我的批次”找回。</p> : <>
         {tasksError && <p role="alert" className={styles.error}>{tasksError}{templateWorkbench && <button type="button" disabled={taskReadAction !== 'idle'} onClick={() => void loadTasks(taskRetryCursor)}>重试读取记录</button>}</p>}
         {downloadReady && <p role="status">文件已准备好。<a href={downloadReady.url} download={downloadReady.name}>再次保存</a></p>}
         {loadingTasks && (tasks.length ? <LoadingStatus>正在更新生成记录</LoadingStatus> : <LoadingSkeleton label="正在读取生成记录" grid />)}
@@ -2048,6 +2061,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         </label>
       </div>
     </dialog>
-    {preview && <ZoomableImagePreview contentKey={preview.contentKey} src={preview.src} alt={preview.alt} title={preview.title} previewKey={preview.taskId || preview.src} fileName={preview.fileName} safeDetails={{ ...preview.metadata, width: preview.width, height: preview.height }} comparison={preview.comparison} hasNavigation={Boolean(preview.taskId && previewableTasks.length > 1)} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onImageLoaded={src => { if (preview.taskId && preview.src === src) observeResultVersion(preview.resultVersion || null); }} onClose={() => { setPreview(null); if (resumeModulePreview.current) { resumeModulePreview.current = false; moduleDialog.current?.showModal(); } }} />}
+    {preview && <ZoomableImagePreview contentKey={preview.contentKey} src={preview.src} alt={preview.alt} title={preview.title} previewKey={preview.taskId || preview.src} sourceVersion={preview.resultVersion || undefined} fileName={preview.fileName} safeDetails={{ ...preview.metadata, width: preview.width, height: preview.height }} comparison={preview.comparison}
+      comparisonCandidates={[...taskComparisonCandidates(tasks.find(task => task.id === preview.taskId)), ...previewableTasks.filter(task => task.batchId === tasks.find(current => current.id === preview.taskId)?.batchId).map(task => ({ src: task.asset!.original_url, thumbnailSrc: task.asset!.thumbnail_url, alt: `生成结果 ${task.ordinal}`, contentKey: `asset:${task.asset!.id}` as const }))]}
+      hasNavigation={Boolean(preview.taskId && previewableTasks.length > 1)} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onImageLoaded={src => { if (preview.taskId && preview.src === src) observeResultVersion(preview.resultVersion || null); }} onClose={() => { setPreview(null); if (resumeModulePreview.current) { resumeModulePreview.current = false; moduleDialog.current?.showModal(); } }} />}
   </section>)}</>;
 }

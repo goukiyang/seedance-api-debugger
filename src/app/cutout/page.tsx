@@ -28,6 +28,10 @@ import {
   type CutoutMode,
 } from '@/lib/cutout/settings';
 import styles from './cutout.module.css';
+import { isSamModelId } from '@/lib/cutout/models';
+import { ResourceLibraryPicker } from '@/components/ResourceLibraryPicker';
+import { uploadFileAsAsset } from '@/lib/http/file-upload';
+import type { PickerItem } from '@/lib/assets/picker-types';
 
 const PAGE_SIZE = 12;
 const RESULT_ROUTE = '/api/cutout/v1/results';
@@ -174,7 +178,7 @@ function normalizeCrop(value: unknown) {
 function integrationCopy(capabilities: CutoutCapabilities | null) {
   const integration = capabilities?.integration;
   if (!integration) return '暂时无法读取抠图服务状态，请重新检查。';
-  if (!integration.configured) return '抠图服务尚未完成接入，任务操作暂不可用。';
+  if (!integration.configured) return '当前账户尚未绑定抠图授权，暂不能提交任务。';
   if (!integration.authorized) return '当前账户尚未获准连接抠图服务，请联系管理员。';
   if (!integration.ready || capabilities?.dispatch?.available === false) {
     return '抠图服务暂不可用，可查看历史；服务恢复后再提交任务。';
@@ -229,6 +233,8 @@ export default function CutoutPage() {
   const [zoom, setZoom] = useState<{ src: string; alt: string } | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [imagePickerOpen, setImagePickerOpen] = useState(false);
+  const sourceSelection = useRef(0);
   const selectedJobIdRef = useRef('');
   const pendingSubmissionRef = useRef<PendingSubmission | null>(null);
   const terminalHandledRef = useRef(new Set<string>());
@@ -486,32 +492,36 @@ export default function CutoutPage() {
     const options: ModelOption[] = [{ id: 'auto', label: '自动选择', available: true }];
     const seen = new Set(['auto']);
     for (const model of capabilities?.models || []) {
-      if (!model?.id || seen.has(model.id) || model.id.toLowerCase().startsWith('sam')) continue;
+      if (!model?.id || seen.has(model.id) || isSamModelId(model.id)) continue;
       seen.add(model.id);
       options.push(model);
     }
-    if (!seen.has(settings.model_preference)) {
+    if (!seen.has(settings.model_preference) && !isSamModelId(settings.model_preference)) {
       options.push({ id: settings.model_preference, label: settings.model_preference, available: false, reason: '当前未提供' });
     }
     return options;
   }, [capabilities?.models, settings.model_preference]);
 
   const acceptFile = useCallback(async (file: File | null, preserveRepair = false) => {
-    if (actionLock.current || isBusy || pendingSubmission || getPageExitRisk().busy.length) return;
-    if ((repairDirty || (!preserveRepair && localRepair) || boxes.length || prompts.length) && !await confirm('更换图片会清除当前未应用的修图和框选。原图、服务器结果不会被修改。', { title: '更换图片', confirmLabel: '继续' })) return;
+    if (actionLock.current || isBusy || pendingSubmission || getPageExitRisk().busy.length) return false;
+    const token = ++sourceSelection.current;
+    if ((repairDirty || (!preserveRepair && localRepair) || boxes.length || prompts.length) && !await confirm('更换图片会清除当前未应用的修图和框选。原图、服务器结果不会被修改。', { title: '更换图片', confirmLabel: '继续' })) return false;
     if (!file) {
       setSource(null); setCachedAsset(null); setBoxes([]); setPrompts([]); setRegionBox(null); setRepairTarget(null); setRepairDirty(false); setLocalRepair(null);
-      return;
+      return true;
     }
     if (!IMAGE_TYPES.has(file.type)) {
       setNotice({ kind: 'error', text: '请使用 PNG、JPG 或 WebP 图片。' });
-      return;
+      return false;
     }
     const limit = (capabilities?.limits?.max_upload_mb || 15) * 1024 * 1024;
     if (file.size > limit) {
       setNotice({ kind: 'error', text: `图片超过当前 ${Math.round(limit / 1024 / 1024)} MB 上限。` });
-      return;
+      return false;
     }
+    try { const image = await createImageBitmap(file); image.close(); }
+    catch { setNotice({ kind: 'error', text: '所选图片未能读取，原图和旧结果仍保留。' }); return false; }
+    if (!mounted.current || sourceSelection.current !== token || actionLock.current || pendingSubmissionRef.current || getPageExitRisk().busy.length) return false;
     setSource({ id: makeId(), kind: 'local', file, name: file.name || 'image.png' });
     setCachedAsset(null);
     setAcceptedSourceId('');
@@ -523,18 +533,31 @@ export default function CutoutPage() {
     setRepairDirty(false);
     setLocalRepair(null);
     setNotice(null);
+    return true;
   }, [boxes.length, capabilities?.limits?.max_upload_mb, confirm, isBusy, localRepair, pendingSubmission, prompts.length, repairDirty]);
+
+  async function selectLibraryImage(items: PickerItem[]) {
+    const item = items[0], token = ++sourceSelection.current;
+    if (!item || item.type !== 'image' || !item.originalUrl) return { success: false, message: '原图不可用，请重新选择' };
+    try {
+      const response = await fetch(item.originalUrl, { cache: 'no-store', signal: AbortSignal.timeout(120000) });
+      if (!response.ok) throw new Error('所选原图无法读取，原图和旧结果保留');
+      const blob = await response.blob();
+      if (!mounted.current || token !== sourceSelection.current || pendingSubmissionRef.current || actionLock.current) return false;
+      return await acceptFile(new File([blob], item.fileName || 'image.png', { type: blob.type.split(';')[0] }));
+    } catch (error) { return { success: false, message: error instanceof Error ? error.message : '图片读取失败，原图保留' }; }
+  }
 
   useEffect(() => {
     if (!isAdmin) return;
     const paste = (event: ClipboardEvent) => {
-      if ((event.target as Element | null)?.closest?.('input,textarea,[contenteditable="true"]')) return;
+      if (imagePickerOpen || (event.target as Element | null)?.closest?.('input,textarea,[contenteditable="true"]')) return;
       const file = Array.from(event.clipboardData?.files || []).find(item => IMAGE_TYPES.has(item.type));
       if (file) { event.preventDefault(); void acceptFile(file); }
     };
     document.addEventListener('paste', paste);
     return () => document.removeEventListener('paste', paste);
-  }, [acceptFile, isAdmin]);
+  }, [acceptFile, isAdmin, imagePickerOpen]);
 
   const onFileInput = (event: ChangeEvent<HTMLInputElement>) => {
     acceptFile(event.currentTarget.files?.[0] || null);
@@ -606,7 +629,9 @@ export default function CutoutPage() {
       setRegionBox(null);
       splitMetaByJobRef.current.set(job.job_id, pending.canvasSize);
       chooseJob(job);
-      setNotice({ kind: 'success', text: '任务已提交，完成后会显示结果。' });
+      setNotice(job.status === 'failed' || job.status === 'canceled'
+        ? { kind: 'warning', text: job.status === 'failed' ? '任务已受理，但处理失败；原图与已有结果保留。' : '任务已受理，但已经取消；原图与已有结果保留。' }
+        : { kind: 'success', text: job.status === 'succeeded' ? '任务已完成。' : '任务已提交，完成后会显示结果。' });
       setJobResult(job);
     } catch (error) {
       const status = typeof error === 'object' && error && 'status' in error ? Number((error as { status?: unknown }).status) : -1;
@@ -818,7 +843,7 @@ export default function CutoutPage() {
   const sourceHeight = sourceSize?.height || 0;
   const selectedImageUrl = result?.result_url ? resultFileUrl(selectedJob!.job_id, result.result_url) : '';
   const resultCrop = normalizeCrop(result?.crop);
-  const samAvailable = Boolean(capabilities?.models?.some(model => model.available && model.id.toLowerCase().startsWith('sam')));
+  const samAvailable = Boolean(capabilities?.models?.some(model => model.available === true && isSamModelId(model.id) && model.id === characterSettings.sam_model_id));
 
   return (
     <main className={styles.page}>
@@ -850,7 +875,7 @@ export default function CutoutPage() {
               <strong>拖入图片，或从剪贴板粘贴</strong>
               <span>支持 PNG、JPG、WebP；按服务端限制校验大小</span>
               <div className={styles.buttonRow}>
-                <button className={styles.secondaryButton} type="button" onClick={() => fileInputRef.current?.click()} disabled={isBusy || Boolean(pendingSubmission)}>
+                <button className={styles.secondaryButton} type="button" onClick={() => setImagePickerOpen(true)} disabled={isBusy || Boolean(pendingSubmission)}>
                   <Upload size={15} aria-hidden="true" />选择图片
                 </button>
                 {source && <button className={styles.quietButton} type="button" onClick={() => acceptFile(null)} disabled={isBusy || Boolean(pendingSubmission)} title="清除当前图片"><X size={15} />清除</button>}
@@ -975,7 +1000,7 @@ export default function CutoutPage() {
               <div className={styles.sectionTitle}><Archive size={17} aria-hidden="true" /><div><h2 id="cutout-history-title">任务记录</h2><p>{historyTotal == null ? '仅显示当前账户可访问的任务。' : `共 ${historyTotal} 条`}</p></div></div>
               <button className={styles.iconButton} type="button" title="刷新记录" aria-label="刷新记录" onClick={() => void loadHistory()} disabled={historyLoading}><RefreshCw size={15} /></button>
             </div>
-            {historyError && <div className={`${styles.statusNotice} ${styles.statusError}`}>{historyError}</div>}
+            {historyError && <div className={`${styles.statusNotice} ${styles.statusError}`}>{capabilities?.integration && !capabilities.integration.configured ? `${integrationCopy(capabilities)} 历史记录暂未读取，已有参数保留。` : historyError}</div>}
             {historyLoading && history.length === 0 ? <p className={styles.emptyHint}>正在读取任务记录…</p> : null}
             {!historyLoading && history.length === 0 && !historyError ? <p className={styles.emptyHint}>还没有任务记录。</p> : null}
             <div className={styles.historyList}>
@@ -1127,6 +1152,10 @@ export default function CutoutPage() {
         </div>
       </div>
       {zoom && <ZoomableImagePreview src={zoom.src} alt={zoom.alt} onClose={() => setZoom(null)} />}
+      <ResourceLibraryPicker open={imagePickerOpen} imageOnly target="workspace" title="选择抠图原图" confirmLabel="使用所选图片" purpose="cutout-source" maxSelection={1} currentCount={0} currentAssetIds={[]}
+        onClose={() => { sourceSelection.current++; setImagePickerOpen(false); }}
+        onUploadFile={(file, onProgress) => uploadFileAsAsset(file, { onProgress })}
+        onConfirm={() => false} onConfirmSelection={selectLibraryImage} />
       {productDialog}
     </main>
   );

@@ -24,7 +24,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   } = useAppSession();
 
   const showShell = useMemo(() => shouldUseNavigationShell(pathname), [pathname]);
-  const topbarOnlyShell = useMemo(() => shouldUseTopbarOnlyShell(pathname), [pathname]);
+  const topbarOnlyShell = useMemo(() => pathname === '/' || shouldUseTopbarOnlyShell(pathname), [pathname]);
   const imageStudioShell = pathname === '/image-studio';
   const templateStudioShell = pathname === '/template-studio';
   const shellBodyClass = templateStudioShell

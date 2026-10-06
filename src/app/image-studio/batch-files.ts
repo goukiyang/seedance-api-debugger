@@ -14,21 +14,26 @@ export async function readBatchDirectory(directory: BatchDirectoryHandle) {
   const files: File[] = [], skipped: string[] = [];
   let scanned = 0;
   for await (const entry of directory.values()) {
-    if (++scanned > 200) { skipped.push('目录超过 200 个条目，未继续读取；请分成较小文件夹'); break; }
+    if (++scanned > 200) throw new Error('目录超过200个条目，请分成较小文件夹；原选择保留');
     if (entry.kind === 'directory') { skipped.push(`${entry.name}：子文件夹不递归读取`); continue; }
-    if (files.length >= STUDIO_BATCH_LIMITS.files) { skipped.push('超过 100 个文件，未继续读取'); break; }
+    if (files.length >= STUDIO_BATCH_LIMITS.files) throw new Error('超过100个文件，请分成较小文件夹；没有截取前100张生成');
     try { files.push(await entry.getFile()); } catch { skipped.push(`${entry.name}：无法读取`); }
   }
   return { files, skipped };
 }
 export async function previewBatchFiles(files: File[], initialSkipped: string[] = []) {
+  if (files.length > STUDIO_BATCH_LIMITS.files) throw new Error('超过100个文件，请减少素材；原选择保留');
   const accepted: BatchLocalFile[] = [], skipped = [...initialSkipped];
   let totalBytes = 0;
-  for (const file of files.slice(0, STUDIO_BATCH_LIMITS.files)) {
+  for (const file of files) {
     const relative = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
     if (relative && relative.split('/').length > 2) { skipped.push(`${file.name}：子文件夹不递归读取`); continue; }
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) { skipped.push(`${file.name}：不是 PNG、JPEG 或 WebP 图片`); continue; }
-    if (!file.size || file.size > STUDIO_BATCH_LIMITS.fileBytes || totalBytes + file.size > STUDIO_BATCH_LIMITS.totalBytes) { skipped.push(`${file.name}：超过单图 30MB 或本批 256MB 上限`); continue; }
+    if (!file.size || file.size > STUDIO_BATCH_LIMITS.fileBytes) { skipped.push(`${file.name}：空文件或超过单图 30MB 上限`); continue; }
+    if (totalBytes + file.size > STUDIO_BATCH_LIMITS.totalBytes) {
+      accepted.forEach(item => URL.revokeObjectURL(item.preview));
+      throw new Error('本批超过256MB，请减少素材；原选择保留，没有截取部分文件生成');
+    }
     try {
       const bitmap = await createImageBitmap(file);
       const valid = bitmap.width > 0 && bitmap.height > 0 && bitmap.width * bitmap.height <= 40_000_000;
@@ -37,7 +42,6 @@ export async function previewBatchFiles(files: File[], initialSkipped: string[] 
       accepted.push({ file, preview: URL.createObjectURL(file) }); totalBytes += file.size;
     } catch { skipped.push(`${file.name}：坏图或图片尺寸超过 4000 万像素`); }
   }
-  if (files.length > STUDIO_BATCH_LIMITS.files) skipped.push('超过 100 个文件，超出部分未读取');
   return { accepted, skipped };
 }
 export async function newBatchOutputDirectory(parent: BatchDirectoryHandle, batchId: string) {

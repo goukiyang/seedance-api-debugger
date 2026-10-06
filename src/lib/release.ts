@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '点赞和收藏合并为一个“喜欢”按钮，原有记录统一到“我的喜欢”；旧收藏保留且仍私密，不加入公开喜欢人数。点击喜欢采用新的心形绽放反馈。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '大图可独立缩放和自由对比；顶部粘贴替换全文；批量按素材确认数量和点数，结果留在当前模板。模板操作和定位调整，抠图统一选图并明确账户授权状态；未绑定账户仍不能提交任务。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

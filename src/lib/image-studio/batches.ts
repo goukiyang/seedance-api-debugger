@@ -125,6 +125,7 @@ export async function studioBatchView(owner: string, id: string, includeItems = 
   const pending = statuses.filter(state => state === 'pending').length;
   const uncertain = statuses.filter(state => state === 'uncertain').length;
   return { id: batch.id, requestId: batch.requestId, moduleId: batch.moduleId, moduleName: batch.moduleName, state: !active && !pending && uncertain ? 'uncertain' : batch.state === 'ready' && !active && !pending ? 'complete' : batch.state, note: batch.note, total: batch.total, generated: statuses.filter(state => state === 'succeeded').length, failed: statuses.filter(state => state === 'failed').length, uncertain, active, pending, prepared: batch.prepared, budget: batch.budget, committedCredits: batch.committedCredits, unitCredits: batch.unitCredits, createdAt: batch.createdAt,
+    ...(typeof batch.input.model === 'string' ? { model: batch.input.model } : {}),
     ...(includeItems ? { items: batch.items.map((item, index) => {
       const task = tasks.find(task => task.id === item.taskId);
       const asset = assets.find(asset => asset.id === task?.asset_id);

@@ -32,6 +32,8 @@ import {
 } from '@/lib/assets/library-cache';
 import { cacheSafeAssetUrl } from '@/lib/assets/library-cache-policy';
 import { useAppSession } from '@/lib/context/AppSessionContext';
+import { canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { StudioBatchHistory } from '@/app/image-studio/batch-results';
 import { costAmountToCnyEstimate, usdToCnyRateText } from '@/lib/costs/currency';
 import type { NormalVideoChargeEstimate } from '@/lib/costs/normal-video-charge';
 import { assetGridProfilerOnRender } from '@/lib/performance/interaction-metrics';
@@ -1911,6 +1913,7 @@ function AssetsPageContent() {
       {isReactionView && <ContentCollections key={assetView} action={explicitView === 'likes' ? 'like' : 'favorite'} mediaClassName={assetStyles.collectionMedia} preferPreviewImageThumbnails />}
       {!isReactionView && <>
       <section className="asset-library-filter-bar">
+        {user && canUseCompanyTemplates(user) && <StudioBatchHistory key={user.id} userId={user.id} initialId={params.get('imageBatchId') || undefined} />}
         {isEnhanceView ? (
           <div className="asset-library-view-chip">
             <Sparkles size={14} aria-hidden="true" />
