@@ -1,0 +1,56 @@
+{
+  "version": "1.0.0",
+  "receivedDate": "2026-10-06",
+  "timeZone": "Asia/Shanghai",
+  "project": "video-api-debugger",
+  "source": "user-provided URL",
+  "url": "https://bencho.dev/blocks/like?c=like&theme=dark",
+  "snippetModuleUrl": "https://bencho.dev/assets/blocks-DFA3nK03.js",
+  "applicationBundleUrl": "https://bencho.dev/assets/index-BfIRTxkq.js",
+  "stylesheetUrl": "https://bencho.dev/assets/index-C2Q6UHIR.css",
+  "licenseUrl": "https://bencho.dev/licence",
+  "license": "MIT",
+  "copyright": "Copyright (c) 2026 Lorenzo Cabra",
+  "method": "TypeScript AST literal extraction, no evaluation of downloaded JavaScript",
+  "extractedDependencies": [
+    "framer-motion",
+    "lucide-react"
+  ],
+  "defaultAppearance": {
+    "height": 44,
+    "corner": 22,
+    "heartSize": 19,
+    "strokeWidth": 2.3,
+    "color": "#e5484d",
+    "effect": "Bloom",
+    "burst": 50
+  },
+  "evidence": {
+    "htmlAndPublicComponentSource": true,
+    "browserVisualOrClick": false,
+    "siteIntegrated": false
+  },
+  "browserGap": "IAB creation timed out and reset kernel; BrowserSkill reports no connected browsers. Unknown tab creation outcome; no retry or user tab takeover.",
+  "files": [
+    {
+      "name": "bencho-like-page.html",
+      "bytes": 11276,
+      "sha256": "812bcb00b0addcb956e07cef1a538472f95dc0fe14cd69dc6f7ab04b1dda4079"
+    },
+    {
+      "name": "Like.reference.tsx",
+      "bytes": 6626,
+      "sha256": "7621dd67560608b89c4586206e54e357f482462e2f4284c6f8212e00c368e0b3"
+    },
+    {
+      "name": "Like.reference.css",
+      "bytes": 4892,
+      "sha256": "ca27a22bcc9f00324df4f4ccb5250209358220d4d226bff44ea356f7f395ef0e"
+    },
+    {
+      "name": "LICENSE.bencho.txt",
+      "bytes": 1078,
+      "sha256": "095f677c5e84dd2c8b3d10fdbc07d2c026e5dc5863090a02a616cdb539aa61b1"
+    }
+  ]
+}

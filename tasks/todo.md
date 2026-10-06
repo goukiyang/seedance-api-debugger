@@ -2,6 +2,8 @@
 
 ## 当前入口
 
+- [ ] 2026-10-06：LIKE1-LIKE3收藏与点赞合并为“喜欢”，采用用户指定Bencho Like UI与动效；[正式工单](todo/2026-10-06-unified-likes.md)。v0.49.0/9adbaa2/BUILD qm5JfAJ6THxzn3X5MOiUZ已部署；LIKE1/LIKE2实现及发布完成，真实历史/视觉/触屏待用户手动验收，LIKE3发布检查完成。本人旧记录并集保留，历史私人收藏仍私密；[统一diff](../docs/materials/2026-10-06-unified-likes/source.diff)、[交付证据](../docs/materials/2026-10-06-unified-likes/delivery.json)、[公网证据](../docs/materials/2026-10-06-unified-likes/public.json)，可回退。
+
 - [生成过程耗时统计 TIME1](todo/2026-10-06-generation-timing.md)：v0.48.0/ecbbc325/BUILD F2D7ZkKByROZ0JjfpqvaX已部署，待用户手动验收；管理中心增加视频、超分、图片的真实耗时/有效样本、模型线路对照及CSV。只读计算、不改生成与计费/schema，0收费任务；构建、类型/lint、服务及15项公网发布检查通过，不冒充效果验收。正式原文及证据归项目主目录。
 
 - [设置保存成功关闭统一修正 S1/S2](todo/2026-10-04-settings-save-close.md)：2026-10-04 v0.39.1已部署；图片/视频上下文、模板编辑弹窗及后台 API 设置统一成功退出、失败留输入，多表单与新草稿保护。源码9c8a9ac（codex/settings-save-close-20261004），衔接v0.39.0保留原新版功能，构建/17源码/19新公网静态/4服务检查通过；待用户手动功能验收。[统一diff](todo/2026-10-04-settings-save-close.diff)、[证据](todo/2026-10-04-settings-save-close.evidence.json)。

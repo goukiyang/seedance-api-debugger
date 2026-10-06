@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- maximum-scale + user-scalable=no turn off pinch. This
+         tag is the half that Android Chrome and most other
+         engines honour; iOS Safari has ignored it since iOS 10,
+         so the WebKit half is done from main.tsx, and body
+         carries `touch-action: pan-x pan-y` for the engines
+         that decide it in CSS. Three layers because no single
+         one of them covers every phone. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <!-- The tab, and the blue headline on a search result —
+         they are the same string and this is the only place it
+         is written. Front-loaded on purpose: Google truncates
+         a title around 60 characters and a phone tab shows
+         about the first twelve, so the name comes first and
+         the description earns whatever is left. -->
+    <!-- The search snippet, and the fallback description for
+         anything that unfurls a link and finds no Open Graph.
+         Under 160 characters, because that is where Google
+         truncates. -->
+    <!-- ── what a shared link looks like ───────────────────────
+         There was none of this, and a page with no og:image is
+         not a page with no picture: every unfurler falls back to
+         whatever icon it can find, which is why a link posted
+         anywhere came up wearing the favicon.
+
+         ABSOLUTE URLs, and that is not optional. Facebook,
+         LinkedIn, Slack and iMessage all refuse a relative
+         og:image — the crawler has no document to resolve it
+         against — so this is the one place in the project that
+         hard-codes the domain.
+
+         1200x630 is the size to give it. Facebook and LinkedIn
+         crop a large card to 1.91:1 and Twitter to 2:1, so a
+         picture at some other ratio is cropped differently on
+         every service; at 1.91:1 they all show close to the
+         whole thing. The file is a centre cut of a 2168x1428
+         original — the orbit page — and the goat sits dead in
+         the middle, so it survives Twitter's 2:1 with room to
+         spare. Everything around it is cards bleeding off the
+         edges, which is what they do on the page too.
+
+         A NEW FILENAME, not a new file at the old name. Every
+         unfurler caches by URL and several of them for days:
+         Facebook and LinkedIn hold the old picture until
+         somebody runs their debugger against the link, and
+         iMessage effectively never lets go. Changing the name
+         is the only version of this that works the same day.
+         The previous cover stays on disk so links already
+         posted keep resolving.
+
+         NO og:url. It is the canonical address, and setting it
+         to the root would make every shared BLOCK — which is a
+         query string, ?c=slide-confirm — unfurl as the home
+         page. Left out, the unfurler shows the address it was
+         actually given. -->
+    <meta property="og:site_name" content="Bencho" />
+    <!-- og:description, not just the plain one above. Most
+         unfurlers fall back to name="description" and some --
+         Slack and Discord among them -- prefer this and show a
+         blank line without it.
+
+         ONE OF THEM. There were two: a short one written first
+         and this fuller one added underneath with the note
+         above, and the first was never taken out. Two
+         og:description tags is a page telling a crawler two
+         things and letting it pick, and the one it picks is
+         the shorter, older copy. Same for twitter below. -->
+    <!-- summary_large_image, or X draws a small square thumbnail
+         beside the text and the cover becomes a crop of its own
+         middle. The four tags below repeat the Open Graph ones
+         because X reads og:* only when its own are absent, and
+         being explicit is cheaper than depending on that. -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <!-- ── the mark, in the tab ────────────────────────────────
+         INLINE, not /favicon.svg, and that is about the bundle.
+         This app also ships as one self-contained bundle.html you
+         can send to somebody and open off a disk — and a root
+         path has nothing to resolve against there, so a linked
+         file is a broken icon in the one format the project goes
+         out of its way to support. A data URI travels with the
+         markup and is correct in all three places: dev server,
+         deployed site, single file.
+
+         The colour follows the BROWSER's theme rather than the
+         site's, via a media query inside the SVG. The tab strip
+         is the surface this is sitting on, and it has a theme of
+         its own that has nothing to do with the page's.
+
+         BASE64 rather than plain percent-encoding, and not for
+         size — it is larger. Vite scans index.html for <style>
+         blocks and hands what it finds to PostCSS, and the media
+         query above is literally the text `<style>…` sitting in
+         an attribute. Percent-encoded, the scanner found it and
+         the build died on "Missed semicolon" in a stylesheet
+         nobody wrote. Base64 puts it out of reach of a scanner
+         that reads markup as text. -->
+    <!-- ── and files a crawler can fetch ───────────────────────
+         Google cannot read a data URI, so for a search result it
+         went looking for a file, found none, and kept showing
+         whatever it had cached — the goat. These two are for it
+         (a square in a multiple of 48, on a white ground, since
+         a result draws the icon in a circle on white) and for
+         anything else that asks for /favicon.ico by habit. They
+         come BEFORE the inline SVG: a browser takes the last
+         icon it can use, so the tab still gets the SVG and its
+         dark-mode colour. -->
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" type="image/png" href="/favicon-192.png" sizes="192x192" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48c3R5bGU+Lmh7ZmlsbDojMTcxODFhfS5ze2ZpbGw6I2ZiZmJmYX1AbWVkaWEocHJlZmVycy1jb2xvci1zY2hlbWU6ZGFyayl7Lmh7ZmlsbDojM2EzYjQwfX08L3N0eWxlPjxwYXRoIGNsYXNzPSJoIiBkPSJNNTkuNTMgOC41TDgxLjE4IDIxQzg3LjUyNjcgMjQuNjY2NyA5MC43IDMwLjE2NjcgOTAuNyAzNy41VjYyLjVDOTAuNyA2OS44MzMzIDg3LjUyNjcgNzUuMzMzMyA4MS4xOCA3OUw1OS41MyA5MS41QzUzLjE3NjcgOTUuMTY2NyA0Ni44MjMzIDk1LjE2NjcgNDAuNDcgOTEuNUwxOC44MiA3OUMxMi40NzMzIDc1LjMzMzMgOS4zIDY5LjgzMzMgOS4zIDYyLjVWMzcuNUM5LjMgMzAuMTY2NyAxMi40NzMzIDI0LjY2NjcgMTguODIgMjFMNDAuNDcgOC41QzQ2LjgyMzMgNC44MzMzMyA1My4xNzY3IDQuODMzMzMgNTkuNTMgOC41WiIvPjxwYXRoIGNsYXNzPSJzIiBkPSJNNTMuODkwOCAxOS41ODMyQzU2LjI1OCAxOS4zNzYyIDU3LjgwNjMgMjAuNjc2OCA1OS43MjUyIDIxLjg0OUw2NC42MjE2IDI0LjgyOTVMNzAuMTk5NiAyOC4xNjUyQzcxLjExNjYgMjguNzIzNCA3Mi40NDY1IDI5LjQ4OTQgNzMuMjQxNCAzMC4xNTFDNzQuMDcwNyAzMC44MzE1IDc0LjcyMzYgMzEuNzAxOSA3NS4xNDQ5IDMyLjY4ODVDNzcuODEyOCAzOC43OTI4IDcyLjA2MjEgNDcuODc4NSA2Ny4yNjY2IDUwLjg3NjJDNTguMTM0NSA1Ni41ODQ5IDUwLjg3OTMgNjIuMzExOCA0OS4zMzIgNzMuNTU0MUM0OC45Mzk4IDc2LjQwMzMgNDkuMjc2NSA3OC44OTUxIDQ2LjAwNzcgODAuMjY0OEM0NC42OTExIDgwLjY0NzEgNDMuNDAyMiA4MC4zNzQ5IDQyLjIzNTYgNzkuNjgyOEMzOC4zMDg0IDc3LjM1MjEgMzQuNDIwNiA3NC45NTM4IDMwLjQ5NyA3Mi42MTU3QzI5LjI2MjggNzEuODgwMyAyNy42MDczIDcwLjk3NzQgMjYuNTc2NCA3MC4wMjIxQzI1LjYxOTkgNjkuMTI1MSAyNC45MjE5IDY3Ljk4NzQgMjQuNTU1NiA2Ni43MjgyQzIzLjkxNjEgNjQuNTcxNyAyNC4xODI4IDYyLjUwMzMgMjQuODIxIDYwLjQwNDFDMjcuMDY0IDUyLjQ5ODQgMzQuMjAzMiA0OS4yNTM1IDQwLjA4MzQgNDQuNDQ0MUM0NS41MzAyIDM5Ljk4OSA0OS4zNDAxIDMzLjc2MDEgNTAuMzMyIDI2LjczNDFDNTAuNTcxMyAyNS4wMzg2IDUwLjQ5MTMgMjIuOTI0NSA1MS4xODg3IDIxLjM3NDRDNTEuNjA0NSAyMC40NTA0IDUyLjk1OTIgMTkuODM0NiA1My44OTA4IDE5LjU4MzJaIi8+PC9zdmc+" />
+
+    <!-- Home screens want an opaque square: iOS composites this
+         over the wallpaper and paints no ground of its own, so a
+         transparent mark would be a goat floating on somebody's
+         photo. Left as a file — it only matters when the site is
+         actually served, which is exactly when files resolve. -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!-- Fonts. Two hosts: the CSS comes from googleapis, the font
+         files from gstatic, so both are worth warming. crossorigin
+         on the second is required — font fetches are CORS, and
+         without it the preconnect opens a connection the font
+         request cannot reuse. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400..700&family=Instrument+Sans:wght@400;500;600&family=Inter:wght@300..700&display=swap"
+    />
+    <script type="module" crossorigin src="/assets/index-BfIRTxkq.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/jsx-runtime-Cltr0gcK.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-C2Q6UHIR.css">
+    <title>Animated Like Button — React Component · Bencho</title>
+    <meta name="description" content="A like button whose heart pops full and throws off a ring of particles while the count rolls like an odometer, only the digits that change turning, and a…" />
+    <link rel="canonical" href="https://bencho.dev/blocks/like" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://bencho.dev/blocks/like" />
+    <meta property="og:title" content="Animated Like Button — React Component · Bencho" />
+    <meta property="og:description" content="A like button whose heart pops full and throws off a ring of particles while the count rolls like an odometer, only the digits that change turning, and a…" />
+    <meta property="og:image" content="https://bencho.dev/share-cover-hex.png" />
+    <meta name="twitter:title" content="Animated Like Button — React Component · Bencho" />
+    <meta name="twitter:description" content="A like button whose heart pops full and throws off a ring of particles while the count rolls like an odometer, only the digits that change turning, and a…" />
+    <meta name="twitter:image" content="https://bencho.dev/share-cover-hex.png" />
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareSourceCode","name":"Like","url":"https://bencho.dev/blocks/like","description":"Press the heart and it pops with a burst while the count rolls up a digit.","programmingLanguage":"TypeScript","runtimePlatform":"React","isPartOf":{"@type":"CollectionPage","name":"Blocks","url":"https://bencho.dev/"}}</script>
+  </head>
+  <body>
+    <noscript><main class="seo-shell"><h1>Like</h1><p>Press the heart and it pops with a burst while the count rolls up a digit.</p><nav><a href="/">All blocks</a> <a href="/finds">Finds</a></nav></main></noscript>
+    <div id="root"></div>
+  </body>
+</html>

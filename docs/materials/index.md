@@ -1,5 +1,9 @@
 # 项目资料索引
 
+## 统一喜欢按钮UI与动效（2026-10-06）
+
+资料v1.1.0；项目video-api-debugger；2026-10-06（Asia/Shanghai）接收，来源为本轮用户文字与指定 https://bencho.dev/blocks/like?c=like&theme=dark ，无新用户媒体附件。名称：统一喜欢按钮UI与动效参考；关键词LIKE1-LIKE3、收藏点赞合并、私人收藏、心形、Bloom粒子、按位数字滚动、减少动态、我的喜欢、旧记录兼容。原文件名：网页index.html及公开snippet模块blocks-DFA3nK03.js（原URL见清单）；归档[原页面HTML](2026-10-06-unified-likes/reference/bencho-like-page.html)、[原组件TSX](2026-10-06-unified-likes/reference/Like.reference.tsx)、[原CSS](2026-10-06-unified-likes/reference/Like.reference.css)、[官方MIT全文](2026-10-06-unified-likes/reference/LICENSE.bencho.txt)、[来源/关键源校验清单](2026-10-06-unified-likes/reference/reference-manifest.json)。结构化提取，没有运行下载脚本；关键原代码/许可可读且SHA-256已记录，辅助说明不另hash。用途为本轮实际接入与后续复现，未取得参考浏览器视觉/点击证据；原组件依赖并不表示已安装。原话、边界、统一任务表及历史私有原图入口见[正式工单](../../tasks/todo/2026-10-06-unified-likes.md)；仅替代分离动作建议，不扩大公开权限或覆盖历史资料。v0.49.0/9adbaa2/BUILD qm5JfAJ6THxzn3X5MOiUZ已部署；源码复用与候选构建、运行来源及公网静态核对完成，不冒充视觉/功能验收。[实际源码统一diff](2026-10-06-unified-likes/source.diff)、[交付证据](2026-10-06-unified-likes/delivery.json)、[候选构建](2026-10-06-unified-likes/candidate.json)、[运行核对](2026-10-06-unified-likes/runtime.json)、[公网证据](2026-10-06-unified-likes/public.json)正式可读；关键源包/静态产物已核SHA，源包及构建日志仅本机保留，不公开Git，私有原图不复制或部署。真实历史/取消/跨页、触屏、减少动态与视觉动效仍待用户手动验收。
+
 ## 生成过程耗时统计（2026-10-06）
 
 来源为本轮侧聊用户原话“我需要做生成过程需要多少时间？的统计功能。”，项目video-api-debugger，2026-10-06（Asia/Shanghai），无原文件名或媒体附件。[TIME1工单](../../tasks/todo/2026-10-06-generation-timing.md)归正式根同名位置；关键词生成等待、平均、中位、90%用时、模型/线路、有效样本、CSV。复用现有视频交付统计与任务时间，不以内容秒数冒充等待耗时；正文可读，辅助不逐项hash。v0.48.0/ecbbc325/BUILD F2D7ZkKByROZ0JjfpqvaX已部署、待手动验收，15项公网发布检查不代替功能验收。源diff、候选/运行/公网/回退JSON及两轮构建日志保留在正式根docs/materials/2026-10-06-generation-timing，原文件名及用途见工单；关键源包与公网资源SHA已核，辅助日志可读、不逐项hash。证据及源包只在本机，不公开上传Git；无提示词、签名URL、凭据、新媒体附件或付费任务。
