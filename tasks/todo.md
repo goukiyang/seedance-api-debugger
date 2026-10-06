@@ -2,6 +2,10 @@
 
 ## 当前入口
 
+- [x] B18工程交付：同v0.50.0已部署60b/BUILD WfltAR1-_emLNggnJQikz，统一隔离及主管同产物10项实页PASS，包含cursor真正新24条仍三行与reset；主管session已停止，源码不再改/测/部署。原17并未全完成，CUT-A2/NAV2/PIN1、真实付费ZIP/物理touch/clipboard缺口及新FB未实施保留；私人JSON/作品截图不推公开Git。
+
+- [ ] 当前60b/Wflt同产物主管最小实页复核PASS：SIDE sticky/URL刷新/明确链接、CMP modeoff换图/两pane/分层返回、PAGE18横竖屏三行/next/刷新/resize恢复；无新生成/上传/费用。数据cursor-more主管补证中，三原受阻及付费ZIP/物理touch/clipboard缺口不变，不能原17整单结项。两张真实作品像素只私有归档，源码/运行冻结，lead不再改源/测试/部署。
+
 - [ ] PAGE18及三review fixes同v0.50.0已保护部署，当前冻结运行60b2001/BUILD WfltAR1-_emLNggnJQikz，完整候选、877源文件及15公网检查通过；SIDE/PAGE18隔离6组、未读10项通过，CMP原6组复用。391回退tag/构建/源码保留，worker未重启。待主管独占真实浏览器同产物最小复核，不冒称原17项全完成；CUT-A2/NAV2/PIN1及真实付费ZIP/触屏/clipboard/像素缺口保留，新CMP同行/左右顺序未实施，未读禁止折叠gate未改。[当前同编号表](todo/2026-10-04-template-context-version-code.md#17-大图自由选择对比对象与同批收尾2026-10-07公开安全回执)。
 
 - [ ] 2026-10-07同一17项v0.50.0批次已保护发布，真实UI核查中：实际built/deployed-source391f741，BUILD vY7OzJRcpu43z04VlqWd_；14组隔离及受类型修正影响7组通过、服务器完整build通过、12公网静态资源200/SHA一致，worker原PID/InvocationID保持。主管Ego68确认正式版本并开始整批核查，source冻结，执行者只记录收尾、不追加测试/改应用/部署。CUT-A2本人绑定、NAV2真实用途图/脚本、PIN1位置仍缺，不能整单结项。[同编号17行表及回退](todo/2026-10-04-template-context-version-code.md#17-大图自由选择对比对象与同批收尾2026-10-07公开安全回执)、[交付](../docs/materials/2026-10-06-batch-simplify-cutout-handoff/implementation-v0.50.0/delivery.json)、[统一diff](../docs/materials/2026-10-06-batch-simplify-cutout-handoff/implementation-v0.50.0/source.diff)。正式根完整外来第17/18节与私有资料未被本公开回执覆盖；三次误判分别留事实，不标无。

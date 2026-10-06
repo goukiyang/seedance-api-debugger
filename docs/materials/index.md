@@ -2,6 +2,10 @@
 
 ## PAGE18及三review fixes（2026-10-07）
 
+最终增量：正式根主管私有JSON已由lead读取，60b/v0.50.0/BUILD Wflt/page92ea来源一致，10项最小实页PASS，包含实际cursor-more新24条仍6张/3行及reset，不是旧缓存假翻页；主管session/必要exec结束，无新生成/上传/付费。此结论关闭下段等待more的中间缺口，原17三受阻及BUX付费ZIP/物理touch/clipboard等未证项保留。本public仅安全摘要，不复制两张真实用户作品或内部对象ID/私有反馈原文；私有原件与正式17+PAGE18完整表均归正式根。
+
+最新主管同60b正常业务账号实页增量：SIDE sticky/URL刷新/明确链接、CMP modeoff直接换图与分层返回、PAGE18横竖屏最多3行/next/刷新/resize恢复统一最小PASS，页面chunk与候选匹配。两张真实私人作品PNG只在正式根材料目录登记，不复制公开Git/部署；无新生成/上传/费用，数据cursor-more由主管另补最小证明。此增量替代下段“等待实页复核”阶段，不改冻结运行60b/Wflt，不冒称原17全完成或消除CUT/NAV/PIN/付费ZIP/物理touch/clipboard缺口；新CMP同行/左右及未读折叠禁用gate仍未实施。
+
 同v0.50.0接续交付，来源唯一lead冻结Git、实际隔离回归及服务器发布检查，归档2026-10-07；关键词PAGE18列数×3/cursor下一页/账号模块恢复/resize锚定、SIDE窄屏sticky/URL刷新/新深链、CMP modeoff预载。实际built/deployed-source60b2001d49745adae9b7f0ef2b77fc04f64936b0，BUILD WfltAR1-_emLNggnJQikz；完整候选/877运行源文件/15公网检查通过，391回退及worker实例保留。原文件名：[candidate.json](2026-10-06-batch-simplify-cutout-handoff/implementation-v0.50.0/reviewfixes-20261007/page18-final/candidate.json)、[runtime.json](2026-10-06-batch-simplify-cutout-handoff/implementation-v0.50.0/reviewfixes-20261007/page18-final/runtime.json)、[public.json](2026-10-06-batch-simplify-cutout-handoff/implementation-v0.50.0/reviewfixes-20261007/page18-final/public.json)分别证明候选/实际运行/公网静态字节，JSON可读且源包/公网SHA实际核，不是认证账号验收。正式根另有统一source.diff、隔离6组/未读10项日志及两张本地合成布局图，原图/私人反馈/账号预检不复制公开Git。旧CMP6组源码不变复用，不重复旧14组；主管独占真实浏览器同冻结产物最小复测，CUT-A2/NAV2/PIN1及真实付费ZIP/clipboard/触屏/像素缺口保留，新CMP同行/左右顺序未实施、未读禁折叠gate未改。[完整安全回执](../../tasks/todo/2026-10-04-template-context-version-code.md#17-大图自由选择对比对象与同批收尾2026-10-07公开安全回执)。
 
 ## 同批v0.50.0发布证据（2026-10-07）
