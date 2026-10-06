@@ -333,7 +333,8 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
             const candidateTask=tasks.find(t=>t.ordinal===(sheet?1:i+1))||(i===0||sheet?sourceTask:null);
             const label=sheet?`${avatarCellLabel(plan.layout,i)} · 人物`:`候选 ${i+1}`;
             return <div key={candidate.characterId+String(i)} className={styles.candidate}>
-              <button type="button" className={styles.thumb} data-candidate-index={i} aria-pressed={index===i} aria-label={`选择${label}`} onClick={()=>setIndex(i)} onKeyDown={event=>{
+              <button type="button" className={styles.thumb} data-candidate-index={i} aria-pressed={index===i} aria-label={`选择${label}${candidateTask?.status==='succeeded'&&candidateTask.asset?'，双击或按Enter预览整图':''}`} onClick={()=>setIndex(i)} onDoubleClick={()=>{if(candidateTask?.status==='succeeded'&&candidateTask.asset)openImage(candidateTask.asset.original_url);}} onKeyDown={event=>{
+                if(event.key==='Enter'&&candidateTask?.status==='succeeded'&&candidateTask.asset){event.preventDefault();setIndex(i);openImage(candidateTask.asset.original_url);return;}
                 const size=sheet?avatarSheetSize(plan.layout):Math.min(4,plan.candidates.length);
                 const offset={ArrowLeft:-1,ArrowRight:1,ArrowUp:-size,ArrowDown:size}[event.key];
                 if(offset===undefined)return;
