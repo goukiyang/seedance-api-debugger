@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '修复直接查看生成图片后仍提醒未读的问题，只有成功查看的对应结果会记为已读，新结果仍保留提醒。侧栏数量增加单位，区分模板总数与未读蓝点。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '管理中心新增视频、超分和图片的生成耗时统计，可按日期查看平均和较慢任务用时，展开模型与线路明细并导出；缺失时间记录明确标注，不与视频时长混淆。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

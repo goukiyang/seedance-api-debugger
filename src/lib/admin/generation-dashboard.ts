@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { getCostLedgerAuditSummary } from '@/lib/costs/audit';
 import { displayUserName } from '@/lib/users/display';
 import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
+import { buildGenerationTimings, videoTimings, type GenerationTimingData } from './generation-timing';
 
 export type DashboardRangeKey = 'all' | '7d' | '30d' | 'month' | 'custom';
 export type DashboardResolutionKey = '480p' | '720p' | '1080p' | 'unknown';
@@ -125,6 +126,7 @@ export type DashboardRecentTask = {
   official_currency: string | null;
   created_at: string;
   completed_at: string | null;
+  timing: ReturnType<typeof videoTimings>;
   owner: DashboardUserSummary | null;
   project: {
     id: string;
@@ -155,6 +157,7 @@ export type GenerationDashboardData = {
     resolution: DashboardResolutionKey | null;
   };
   kpis: DashboardKpis;
+  timing: GenerationTimingData;
   resolution_breakdown: DashboardBreakdownItem[];
   project_breakdown: DashboardBreakdownItem[];
   member_ranking: DashboardBreakdownItem[];
@@ -506,6 +509,8 @@ async function fetchDashboardTasks(where: Prisma.VideoTaskWhereInput) {
       source_label: true,
       local_status: true,
       delivery_status: true,
+      delivery_completed_at: true,
+      public_video_cached_at: true,
       provider: true,
       generation_mode: true,
       provider_task_id: true,
@@ -768,13 +773,19 @@ function buildWarnings(tasks: DashboardTask[], range: DashboardRange, auditSumma
 }
 
 export async function getGenerationDashboardData(query: GenerationDashboardQuery = {}): Promise<GenerationDashboardData> {
+  const imagesIncluded = !query.projectId && !query.resolution;
+  const imageWhere: Prisma.ImageStudioTaskWhereInput = query.ownerUserId ? { owner_id: query.ownerUserId } : {};
+  const imageBounds = imagesIncluded && (query.range === 'all' || !query.range)
+    ? await prisma.imageStudioTask.aggregate({ where: imageWhere, _min: { created_at: true } }) : null;
   const allRangeBounds = query.range === 'all' || !query.range
     ? await prisma.videoTask.aggregate({
         where: buildDashboardScopeWhere(query),
         _min: { created_at: true },
       })
     : null;
-  const range = parseDashboardRange(query, new Date(), { earliestDate: allRangeBounds?._min.created_at });
+  const earliestDates = [allRangeBounds?._min.created_at, imageBounds?._min.created_at].filter((value): value is Date => Boolean(value));
+  const earliestDate = earliestDates.length ? new Date(Math.min(...earliestDates.map(value => value.getTime()))) : null;
+  const range = parseDashboardRange(query, new Date(), { earliestDate });
   const requestedResolution = query.resolution ? normalizeDashboardResolution(query.resolution) : null;
   const where = buildTaskWhere(range, query);
   const trendWhere = buildOutputTrendWhere(range, query);
@@ -787,7 +798,7 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
   if (query.projectId && query.projectId !== 'unassigned') requestWhere.project_id = query.projectId;
   if (query.ownerUserId) requestWhere.user_id = query.ownerUserId;
 
-  const [allTasks, allTrendTasks, auditSummary, providerFailureCount, stalePendingCount] = await Promise.all([
+  const [allTasks, allTrendTasks, auditSummary, providerFailureCount, stalePendingCount, imageTasks] = await Promise.all([
     fetchDashboardTasks(where),
     fetchDashboardTasks(trendWhere),
     getCostLedgerAuditSummary(),
@@ -799,8 +810,13 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
         created_at: { lt: new Date(Date.now() - 30 * 60 * 1000) },
       },
     }),
+    imagesIncluded ? prisma.imageStudioTask.findMany({
+      where: { ...imageWhere, created_at: {
+        gte: startOfDay(localDateFromIso(range.date_from)), lte: endOfDay(localDateFromIso(range.date_to)),
+      } },
+      select: { model: true, status: true, created_at: true, finished_at: true, usage_json: true },
+    }) : Promise.resolve([]),
   ]);
-
   const tasks = allTasks.filter((task) => taskMatchesResolution(task, requestedResolution));
   const trendTasks = allTrendTasks.filter((task) => taskMatchesResolution(task, requestedResolution));
   const officialTotal = new Map<string, number>();
@@ -912,6 +928,7 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
       warning_count: warnings.reduce((sum, warning) => sum + warning.count, 0),
     },
     resolution_breakdown: Array.from(resolutionMap.values()).map(finalizeAccumulator),
+    timing: buildGenerationTimings(tasks, imageTasks, imagesIncluded),
     project_breakdown: Array.from(projectMap.values())
       .map(finalizeAccumulator)
       .sort((a, b) => b.count - a.count || b.points - a.points)
@@ -955,12 +972,17 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
       official_currency: task.provider_cost_currency,
       created_at: task.created_at.toISOString(),
       completed_at: task.completed_at?.toISOString() || null,
+      timing: videoTimings(task),
       owner: ownerSummary(task),
       project: task.project,
       href: `/tasks/${task.id}?return_to=${encodeURIComponent('/admin')}`,
     })),
     data_notes: [
       '顶部 KPI、拆分榜和最近任务按 VideoTask.created_at 计算。',
+      '生成耗时按创建日期归组，仅计算有完整起止记录的成功任务；缺失、时间逆序、失败与未完成不算零秒进入平均。',
+      '任务完成耗时从系统建立生成任务开始，视频到系统发现生成完成（含状态回查延迟），图片到保存完成；不含此前分析和素材上传，不等于纯模型耗时。',
+      '结果可下载耗时要求有保存成功时间。接收与保存包含响应体接收、下载、校验、保存及恢复等待；历史补保存也可能拉长耗时。',
+      '中位数与90%完成用时按有效样本排序后的最近秩计算。图片未记录线路，不适用项目与视频清晰度筛选。',
       '趋势图按成功任务的 VideoTask.completed_at 计算实际产出；失败、排队、未完成和跨月未完成任务不计入对应月份的视频条数。',
       '趋势图里的超分视频条数按 generation_mode=enhance_video 或 provider=volcengine_mediakit 的成功产出单独拆分。',
       '官方成本优先读取 provider_official_amount_micros，回退 provider_official_amount_minor；没有官方金额时显示“待官方确认”。',

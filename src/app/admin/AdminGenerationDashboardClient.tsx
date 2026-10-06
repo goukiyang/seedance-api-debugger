@@ -19,6 +19,7 @@ import {
 } from '@/lib/costs/currency';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import GenerationTimingPanel, { formatElapsed } from './GenerationTimingPanel';
 import type {
   DashboardBreakdownItem,
   DashboardCurrencyTotal,
@@ -638,7 +639,7 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
           </button>
           <Link className="btn btn-primary" href={exportHref}>
             <Download size={15} />
-            导出当前口径
+            导出当前范围
           </Link>
         </div>
       </section>
@@ -672,6 +673,8 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
           <small>点击进入计费与成本复盘</small>
         </Link>
       </section>
+
+      <GenerationTimingPanel data={dashboard.timing} />
 
       <section className="admin-dashboard-panel admin-dashboard-trend-panel">
         <div className="admin-dashboard-section-head">
@@ -892,7 +895,7 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
                 <span>{task.resolution === 'unknown' ? '未记录' : task.resolution} · {task.duration ? `${task.duration}s` : '-'} · {task.ratio || '-'}</span>
                 <span>{taskOfficialCost(task)}</span>
                 <span>{task.actual_cost !== null && task.actual_cost !== undefined ? formatPoint(task.actual_cost) : '未记录'}</span>
-                <span>{statusLabel(task.local_status)}</span>
+                <span>{statusLabel(task.local_status)}<small>耗时 {formatElapsed(task.timing.completion)}</small></span>
               </Link>
             ))
           )}
