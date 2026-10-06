@@ -48,7 +48,8 @@
 - 不得在 `sd2.youdoodesign.com`、design 域名、Mac 本地 Cloudflare Tunnel 或旧 `trycloudflare` 链路上做默认修改、默认部署、默认验证或默认排查。唯一例外是用户明确要求“旧入口 / design 域名 / 回滚 / 迁移核对”时，才可只读确认旧入口状态，并且不得把它的结果当成 `sd2.youdooart.com` 生产结论。
 - `sd2.youdooart.com` 必须直接打开服务器网站，不得用跳转临时代替。飞书 OAuth、回调地址、登录后跳转地址和前端公开域名配置都必须以 `sd2.youdooart.com` 为准；登录后跳回旧域名时，按配置错误处理。
 - 服务器默认是 `42.193.221.253:22`，普通操作用户 `gouki`；线上 nginx 反代到 `127.0.0.1:3302`，systemd 服务名 `sd2-gray.service`，服务器应用目录 `/srv/video-api-debugger/app`，公网响应应能看到 `X-SD2-Origin: server-42-193` 这类服务器来源标记。
-- 最近已发布源码（2026-10-07）：`/Users/gouki-youdoo/.codex/worktrees/cutout-validation-paste-20261006/video-api-debugger`，分支`codex/image-compare-20261006`，v0.51.1，实际built/deployed-source `30e16ef33e478cbbf884b5c1266ea5e98f46d26c`，BUILD `8wHmI-2KqZwqjKsRcfpyr`；纯记录HEAD不改变运行提交。VREF22/NAV22将视频模板图片参考区移到需求框上方，复用图库、缩略图、预览、移除、排序与原草稿/素材用途；只移除顶栏超分快捷入口。合法共享关联的展示查询复用原模板可读权限，文案模型仍只读文字；9文件应用diff、服务器候选内置类型/lint、31公网静态SHA、健康/Git/回退检查完成，0功能/浏览器/收费生成验收。真实界面、共享素材与旧客户端提示待用户手动验收。正式资料`docs/materials/2026-10-07-feedback-24h/vref22-v0.51.1/`与同日反馈工单VREF22/NAV22节；其他待办不自动结项。
+- 最近已发布源码（2026-10-07）：`/Users/gouki-youdoo/.codex/worktrees/cutout-validation-paste-20261006/video-api-debugger`，分支`codex/image-compare-20261006`，v0.51.2，实际built/deployed-source `6a5a8f539ce6af9dcdb6edd05f1d08080cb5a30f`，BUILD `tZEbkDJvoGLXx368EiZ1G`；纯记录HEAD不改变运行提交。VREF23把独立视频页与素材弹窗接到已有共享用户状态，保留两入口及原选用链路，加载/失败/未登录有反馈和重试。3文件应用diff、候选内置类型/lint、878源码一致、29公网静态SHA及健康/Git/回退检查完成，功能/浏览器/收费生成未运行，真实选图及旧客户端提示待用户手动验收。正式资料`docs/materials/2026-10-07-feedback-24h/vref23-v0.51.2/`及同日反馈工单VREF23节；VREF22/NAV22的v0.51.1历史交付/手验缺口与其他待办保留，不自动结项。
+- VREF23保护发布：release/vref23-v0.51.2-20261007与rollback/pre-vref23-v0.51.1-20261007已推送；回退源码`/srv/video-api-debugger/releases/30e16ef33e478cbbf884b5c1266ea5e98f46d26c-vref23-rollback-source`，回退构建`/srv/video-api-debugger/app/.next-prod-prev-vref23-6a5a8f539ce6`、BUILD8wHmI-2KqZwqjKsRcfpyr。只重启web，图片worker PID1043189/实例未变，持久storage/uploads/videos未覆盖；根盘最后余874296KB高于512000KB保护线，后续发布鲜核。普通gouki账号用于常规读取，不能假设其可sudo bash；必要发布沿已有ops/服务器技能登记的root SSH及既有密钥，不改sudoers、凭据或权限。私人记录不公开Git或部署。
 - 上轮v0.51.0的LIKE21/AVUI21运行源b5c8b9f、BUILD w2dFDm8K2jjpZHZ9uQopw保留为历史：喜欢终态/圆背板缩小、头像分格与可选参考链路及双击/Enter预览已部署，仍未功能手验。原19文件/15公网静态证据在`docs/materials/2026-10-07-feedback-24h/ui21-v0.51.0/`，不以本次31资源检查冒称旧功能实测。
 - 本轮v0.51.1保护发布：标签`release/vref22-nav22-v0.51.1-20261007`与`rollback/pre-vref22-nav22-v0.51.0-20261007`已推送；回退源码`/srv/video-api-debugger/releases/b5c8b9f82bebc38a62837e5c289bbb19e7c4fbb5-vref22-rollback-source`，回退构建`/srv/video-api-debugger/app/.next-prod-prev-vref22-30e16ef33e47`。只重启web，图片worker PID1043189/实例不变，storage/uploads/videos原持久目录未覆盖；跨盘保护切换、根盘最后余923124KB大于512000KB保护线，下次发布重新核容量。旧回退不删除；私人截图/工单/索引只在正式根本机保留，不公开Git。
 - 前版60b/v0.50.0/BUILD Wflt的SIDE/CMP/PAGE18限定10项最小实页PASS保留为历史，只对应该产物，不冒称v0.51.0功能验收；其主管浏览器session已停止。原17项+PAGE18完整状态见`tasks/todo/2026-10-04-template-context-version-code.md`第17节，第18节BUX保留。PAGE18按容器列数×最多3行，cursor下批进下一页，账号/模块或批次隔离恢复；resize保可见项、预读最多20批，失效位置安全回退，不无限追加。
@@ -71,6 +72,8 @@
 - `sd2.youdoodesign.com` 的状态只能用于确认旧入口已停用或迁移，不得把它的健康状态当成当前服务器生产站结论。以后排查“线上没生效 / 无法登录 / 生成失败 / 视频下载失败”时，默认先查服务器链路、`sd2-gray.service`、`127.0.0.1:3302` 和 `sd2.youdooart.com`。
 
 ## UI 规则
+
+- 2026-10-07 VREF23用户反馈及源码结论：独立视频生成页使用共享素材选择器时，页面及弹窗必须读取同一已初始化的AppSession；不保留仅页面局部user却让弹窗读空共享user的并行状态。保留账号隔离与原选图/图集回调，登录读取失败给可重试反馈，不删除守卫或重放生成。完整原话、源码因果与手验缺口见同日正式工单VREF23节；不将代码/构建证明冒称用户按钮实测。
 
 - 2026-10-07确认：视频模板需求输入框上方使用生图模板同款参考图区，沿用素材ID、槽位、首尾帧和草稿链路；视频/音频/参数按需展开，不重复图片列表。顶部导航移除“超分”，原功能和其他入口保留。文案模型仍按现有文字能力运行，未确认任务不自动重试，真实功能由用户手动验收；正式原话/资料在根目录同日反馈工单VREF22/NAV22节和资料索引，私人原件不公开Git。
 - 所有生成记录列表、任务记录列表、产出记录列表、项目内生成列表和视频卡生成列表，最左侧第一列必须是视频截图/缩略图。
