@@ -191,8 +191,7 @@ type AssetCardRectSnapshot = {
 const assetViewTabs: Array<{ id: AssetView; label: string; adminOnly?: boolean; tone?: 'enhance' }> = [
   { id: 'history', label: '生产历史' },
   { id: 'project', label: '按项目' },
-  { id: 'favorites', label: '我的收藏' },
-  { id: 'likes', label: '我赞过的' },
+  { id: 'favorites', label: '我的喜欢' },
   { id: 'user', label: '按用户查看', adminOnly: true },
   { id: 'enhance', label: '视频超分', tone: 'enhance' },
 ];
@@ -704,7 +703,7 @@ function AssetsPageContent() {
   useEffect(() => {
     if (!user?.id) { setAssetView('history'); return; }
     if (hasExplicitView) {
-      const tab = assetViewTabs.find(item => item.id === explicitView && (!item.adminOnly || user.role === 'admin'));
+      const tab = assetViewTabs.find(item => item.id === (explicitView === 'likes' ? 'favorites' : explicitView) && (!item.adminOnly || user.role === 'admin'));
       const nextView = tab?.id || 'history';
       setAssetView(nextView); rememberReactionView(nextView);
       return;
@@ -713,7 +712,7 @@ function AssetsPageContent() {
     if (!hasExplicitContent) {
       try {
         const saved = JSON.parse(localStorage.getItem(reactionEntryStorageKey(user.id)) || 'null');
-        if (saved?.version === 1 && (saved.view === 'favorites' || saved.view === 'likes')) nextView = saved.view;
+        if (saved?.version === 1 && (saved.view === 'favorites' || saved.view === 'likes')) nextView = 'favorites';
       } catch {}
     }
     setAssetView(nextView);
@@ -1909,7 +1908,7 @@ function AssetsPageContent() {
       </section>
 
       <ContentLookup />
-      {isReactionView && <ContentCollections key={assetView} action={assetView === 'favorites' ? 'favorite' : 'like'} mediaClassName={assetStyles.collectionMedia} preferPreviewImageThumbnails />}
+      {isReactionView && <ContentCollections key={assetView} action={explicitView === 'likes' ? 'like' : 'favorite'} mediaClassName={assetStyles.collectionMedia} preferPreviewImageThumbnails />}
       {!isReactionView && <>
       <section className="asset-library-filter-bar">
         {isEnhanceView ? (

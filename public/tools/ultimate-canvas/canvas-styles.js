@@ -34,16 +34,16 @@
                 onFavorite: async (item, active) => {
                     try {
                         const result = await hooks.request('/api/content-reactions', {
-                            method: 'PUT', signal: AbortSignal.timeout(15000), payload: { key: item.key, action: 'favorite', active,
+                            method: 'PUT', signal: AbortSignal.timeout(15000), payload: { key: item.key, action: 'like', active,
                                 expectedVersion: item.reactionVersion || 0, requestId: crypto.randomUUID() }
                         });
                         item.reactionVersion = result.state.version;
-                        return result.state.favorited;
+                        return Boolean(result.state.liked || result.state.favorited);
                     } catch (error) {
                         if (error.status === 409) {
                             const result = await json('/api/content-reactions/state', { keys: [item.key] });
                             const state = result.states?.[item.key];
-                            if (state) { item.reactionVersion = state.version; item.favorited = state.favorited; }
+                            if (state) { item.reactionVersion = state.version; item.favorited = Boolean(state.liked || state.favorited); }
                         }
                         throw error;
                     }

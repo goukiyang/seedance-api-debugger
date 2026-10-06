@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Heart, Bookmark, RefreshCw } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import type { ContentKey, ReactionAction, ReactionMutation, ReactionState } from '@/lib/content-reactions/types';
 import styles from './reactions.module.css';
 import ImageShareButton from './ImageShareButton';
+import LikeButton from './LikeButton';
 
 type Entry = { state?: ReactionState; error?: string; busy?: boolean };
 const entries = new Map<string, Entry>();
@@ -96,11 +97,22 @@ export default function ContentReactions({ contentKey, initialState, onChange, d
   overlay?: boolean;
   imageSharing?: boolean;
   favoriteOnly?: boolean;
-  onChange?: (state: ReactionState, action: ReactionAction, active: boolean) => void;
+  onChange?: (state: ReactionState, action: ReactionAction, active: boolean, previous?: ReactionState) => void;
 }) {
   const { user } = useAppSession();
   const [, render] = useState(0);
   const userId = user?.id;
+  const identity = `${userId}:${contentKey}`;
+  const currentIdentity = useRef(identity);
+  currentIdentity.current = identity;
+  const mounted = useRef(false);
+  const [pulse, setPulse] = useState<{ identity: string; version: number; beat: number; active: boolean; count: number | null } | null>(null);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => {
+    if (!pulse) return;
+    const timer = setTimeout(() => setPulse(null), 900);
+    return () => clearTimeout(timer);
+  }, [pulse]);
   useEffect(() => {
     if (!userId) return;
     installChannel();
@@ -115,19 +127,27 @@ export default function ContentReactions({ contentKey, initialState, onChange, d
   const entry = entries.get(cacheKey(userId, contentKey)) || {};
   const state = entry.state;
   const uncertain = Boolean(state && pending.has(cacheKey(userId, state.key)));
-  async function act(action: ReactionAction) {
+  function confirmed(next: ReactionState, active: boolean) {
+    if (!mounted.current || currentIdentity.current !== identity) return;
+    if (active === Boolean(next.liked || next.favorited)) setPulse({ identity, version: next.version, beat: next.version, active, count: next.likeCount });
+    else setPulse(null);
+    onChange?.(next, 'like', active, state);
+  }
+  async function act() {
     if (!state || !userId) return;
-    const active = action === 'like' ? !state.liked : !state.favorited;
-    try { const next = await writeReaction(userId, contentKey, action, active, state); if (next) onChange?.(next, action, active); } catch { /* Error is retained with a retry action. */ }
+    const active = !(state.liked || state.favorited);
+    try { const next = await writeReaction(userId, contentKey, 'like', active, state); if (next) confirmed(next, active); } catch { /* Error is retained with a retry action. */ }
   }
   return <span className={`${styles.controls} ${overlay ? styles.overlayControls : ''} ${favoriteOnly ? styles.favoriteOnly : ''}`} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} data-content-reactions data-overlay={overlay || undefined} aria-busy={entry.busy || undefined}>
-    {!favoriteOnly && <button type="button" data-reaction-action="like" title={state?.liked ? '取消点赞' : '点赞'} aria-label={state?.liked ? '取消点赞' : '点赞'} aria-pressed={state?.liked || false} disabled={disabled || entry.busy || uncertain || !state || (!state.available && !state.liked)} onClick={() => void act('like')}><Heart size={16} fill={state?.liked ? 'currentColor' : 'none'} />{state?.likeCount !== null && state?.likeCount !== undefined && <span>{state.likeCount}</span>}</button>}
-    <button type="button" data-reaction-action="favorite" title={state?.favorited ? '取消收藏' : '收藏'} aria-label={state?.favorited ? '取消收藏' : '收藏'} aria-pressed={state?.favorited || false} disabled={disabled || entry.busy || uncertain || !state || (!state.available && !state.favorited)} onClick={() => void act('favorite')}><Bookmark size={16} fill={state?.favorited ? 'currentColor' : 'none'} /></button>
+    <LikeButton key={identity} active={Boolean(state?.liked || state?.favorited)} count={favoriteOnly ? undefined : state?.likeCount} showCount={!favoriteOnly}
+      disabled={Boolean(disabled || entry.busy || uncertain || !state || (!state.available && !(state.liked || state.favorited)))}
+      animateCount={Boolean(pulse?.identity === identity && pulse.version === state?.version && pulse.count === state?.likeCount)}
+      bloom={pulse?.identity === identity && pulse.version === state?.version && pulse.active ? pulse.beat : 0} onClick={() => void act()} />
     {imageSharing && !favoriteOnly && <ImageShareButton key={`${userId}:${contentKey}`} contentKey={contentKey} userId={userId} disabled={disabled} />}
     {entry.busy && <span className={styles.busy} role="status"><RefreshCw size={13} className={styles.busyIcon} />保存中</span>}
-    {(entry.error || uncertain && !entry.busy) && <span className={styles.error} role="status">{entry.error || '上次操作尚未确认，请重试'}<button type="button" disabled={entry.busy} aria-label={favoriteOnly ? '重试收藏' : '重试点赞收藏'} title="重试" onClick={() => {
+    {(entry.error || uncertain && !entry.busy) && <span className={styles.error} role="status">{entry.error || '上次操作尚未确认，请重试'}<button type="button" disabled={entry.busy} aria-label="重试喜欢" title="重试" onClick={() => {
       const retry = state && pending.get(cacheKey(userId, state.key));
-      if (retry && state) void writeReaction(userId, contentKey, retry.action, retry.active, state).then(next => { if (next) onChange?.(next, retry.action, retry.active); }).catch(() => {}); else schedule(userId, contentKey);
+      if (retry && state) void writeReaction(userId, contentKey, retry.action, retry.active, state).then(next => { if (next) confirmed(next, retry.active); }).catch(() => {}); else schedule(userId, contentKey);
     }}><RefreshCw size={14} /></button></span>}
   </span>;
 }

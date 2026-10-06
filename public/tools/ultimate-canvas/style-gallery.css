@@ -442,34 +442,7 @@
     color: var(--accent-teal, #4ecdc4);
 }
 
-.uc-sg-favorite {
-    display: grid;
-    flex: 0 0 30px;
-    width: 30px;
-    height: 30px;
-    place-items: center;
-    padding: 0;
-    border: 1px solid transparent;
-    border-radius: 5px;
-    background: transparent;
-    color: var(--text-secondary, #a3a3a3);
-    cursor: pointer;
-}
-
-.uc-sg-favorite:hover:not(:disabled) {
-    border-color: var(--border-default, #363636);
-    background: var(--bg-hover, rgb(255 255 255 / 6%));
-    color: var(--text-primary, #f7f7f7);
-}
-
-.uc-sg-favorite.is-favorited {
-    color: #ef8b9b;
-}
-
-.uc-sg-favorite .uc-sg-icon {
-    width: 17px;
-    height: 17px;
-}
+.uc-sg-favorite .uc-sg-icon { width: 19px; height: 19px; }
 
 .uc-sg-favorite.is-favorited .uc-sg-icon svg {
     fill: currentColor;

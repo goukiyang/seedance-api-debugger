@@ -6,8 +6,10 @@ export type ReactionAction = 'like' | 'favorite';
 
 export type ReactionState = {
   key: ContentKey;
+  // Keep legacy flags distinct for private undo and cached clients; UI active = either flag.
   liked: boolean;
   favorited: boolean;
+  // Existing public likes only; private favorites must never be added here.
   likeCount: number | null;
   version: number;
   available: boolean;

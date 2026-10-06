@@ -95,7 +95,7 @@ export async function GET(request: NextRequest) {
       scope === 'mine' && !albumId && !projectId ? prisma.asset.findMany({ where: assetWhere, select: { id: true, type: true, file_name: true, metadata_json: true, created_at: true } }) : Promise.resolve([]),
       prisma.referenceImage.findMany({ where: refWhere, select: { id: true, album_id: true, owner_user_id: true, source_type: true, created_at: true, asset: { select: { id: true, type: true, file_name: true, metadata_json: true, owner_id: true } } } }),
       prisma.imageStudioTask.findMany({ where: { owner_id: user.id, status: 'succeeded', asset_id: { not: null } }, select: { asset_id: true } }),
-      p.get('view') === 'favorites' ? prisma.contentReaction.findMany({ where: { user_id: user.id, favorited: true }, select: { content_key: true } }) : Promise.resolve([]),
+      p.get('view') === 'favorites' ? prisma.contentReaction.findMany({ where: { user_id: user.id, OR: [{ liked: true }, { favorited: true }] }, select: { content_key: true } }) : Promise.resolve([]),
       !imageStudio && types.includes('video') && scope === 'mine' && !albumId && !projectId ? prisma.videoTask.findMany({ where: {
         local_status: 'succeeded', retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] },
         OR: [{ owner_user_id: user.id }, { owner_user_id: null, user_id: user.id }],

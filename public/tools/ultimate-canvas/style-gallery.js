@@ -6,7 +6,7 @@
     const MAX_RESTORE_PAGES = 3;
     const TABS = [
         { id: 'gallery', label: '风格广场' },
-        { id: 'favorites', label: '我的收藏' },
+        { id: 'favorites', label: '我的喜欢' },
         { id: 'recent', label: '最近使用' }
     ];
     const FALLBACKS = {
@@ -277,13 +277,41 @@
     }
 
     function syncFavoriteButton(button, item, active, pending) {
-        setIcon(button, 'Heart');
+        if (!button.querySelector('.lk-heart')) {
+            const heart = element('span', 'lk-heart');
+            const glyph = element('span', 'lk-glyph');
+            setIcon(glyph, 'Heart');
+            heart.append(glyph);
+            button.replaceChildren(heart);
+        }
         button.classList.toggle('is-favorited', active);
         button.setAttribute('aria-pressed', String(active));
-        button.setAttribute('aria-label', active ? '取消收藏' : '加入收藏');
-        button.title = active ? '取消收藏' : '加入收藏';
+        button.setAttribute('aria-label', active ? '取消喜欢' : '喜欢');
+        button.title = active ? '取消喜欢' : '喜欢';
         button.disabled = Boolean(pending || typeof options?.onFavorite !== 'function');
-        if (typeof options?.onFavorite !== 'function') button.title = '收藏功能暂不可用';
+        if (typeof options?.onFavorite !== 'function') button.title = '喜欢暂不可用';
+    }
+
+    // Bencho Like, MIT (c) 2026 Lorenzo Cabra; geometry matches shared like-button.css.
+    function bloomFavorite(button) {
+        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        const heart = button.querySelector('.lk-heart');
+        if (!heart) return;
+        const colors = ['#f48ea7', '#cc8ef5', '#8ce8c3', '#91d2fa', '#f5a524', '#e5484d', '#9fc7fa'];
+        const burst = element('span', 'lk-burst');
+        burst.setAttribute('aria-hidden', 'true');
+        burst.append(element('span', 'lk-bloom'));
+        colors.forEach(function (color, index) {
+            const spoke = element('span', 'lk-spoke');
+            spoke.style.setProperty('--a', `${index * (360 / 7) - 90}deg`);
+            [color, colors[(index + 3) % colors.length]].forEach(function (dotColor) {
+                const dot = element('i'); dot.style.setProperty('--c', dotColor); spoke.append(dot);
+            });
+            burst.append(spoke);
+        });
+        heart.append(burst);
+        button.dataset.bloom = 'true';
+        setTimeout(function () { burst.remove(); delete button.dataset.bloom; }, 900);
     }
 
     function buildCard(item) {
@@ -322,7 +350,7 @@
         title.dataset.sgSelect = id;
         title.title = displayName(item);
         title.setAttribute('aria-label', '查看“' + displayName(item) + '”详情');
-        const favorite = element('button', 'uc-sg-favorite');
+        const favorite = element('button', 'uc-sg-favorite sd2-like');
         favorite.type = 'button';
         favorite.dataset.sgFavorite = id;
         syncFavoriteButton(favorite, item, isFavorited(item), state.favoritePending.has(id));
@@ -351,7 +379,7 @@
         ui.empty.textContent = state.query
             ? '没有找到匹配的风格，试试缩短名称或作者关键词。'
             : state.tab === 'favorites'
-                ? '还没有收藏的风格。'
+                ? '还没有喜欢的风格。'
                 : state.tab === 'recent'
                     ? '最近用过的风格会显示在这里。'
                     : '当前类别还没有可用风格。';
@@ -660,18 +688,19 @@
         if (!item) return;
         const previous = isFavorited(item);
         const desired = !previous;
-        state.favoriteStates[id] = desired;
         state.favoritePending.add(id);
-        syncFavoriteButton(button, item, desired, true);
+        syncFavoriteButton(button, item, previous, true);
         try {
             const result = await options.onFavorite(item, desired);
             if (!root || state !== capturedState) return;
             let confirmed = desired;
             if (typeof result === 'boolean') confirmed = result;
-            else if (result && typeof result.favorited === 'boolean') confirmed = result.favorited;
+            else if (result && typeof result.favorited === 'boolean') confirmed = Boolean(result.liked || result.favorited);
             else if (result && typeof result.active === 'boolean') confirmed = result.active;
             else if (result && typeof result.state === 'boolean') confirmed = result.state;
             state.favoriteStates[id] = confirmed;
+            syncFavoriteButton(button, item, confirmed, true);
+            if (desired && confirmed && !previous) bloomFavorite(button);
             if (!confirmed && state.tab === 'favorites') {
                 state.items = state.items.filter(entry => identity(entry) !== id);
                 if (state.selectedId === id) state.selectedId = '';
@@ -680,7 +709,7 @@
         } catch (error) {
             if (!root || state !== capturedState) return;
             state.favoriteStates[id] = previous;
-            showNotice(error?.message || '收藏没有保存，请重试。');
+            showNotice(error?.message || '喜欢没有保存，请重试。');
         } finally {
             if (root && state === capturedState) {
                 state.favoritePending.delete(id);

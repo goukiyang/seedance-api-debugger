@@ -47,7 +47,7 @@ function CollectionThumbnail({ content, preferPreviewImage }: { content: Content
     : content.thumbnailUrl;
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [thumbnailUrl]);
-  if (failed) return <span>预览暂不可用，收藏仍保留</span>;
+  if (failed) return <span>预览暂不可用，喜欢仍保留</span>;
   if (thumbnailUrl) return <img src={thumbnailUrl} loading="lazy" alt={content.title} onError={() => setFailed(true)} />;
   return content.category === 'audio' ? <Music size={30} /> : <ImageIcon size={30} />;
 }
@@ -162,7 +162,8 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
     let savedCategory: ContentCategory | 'all' = 'all';
     let savedQuery = '';
     try {
-      const saved = JSON.parse(localStorage.getItem(`reaction-filters:${scope}`) || 'null');
+      const fallbackScope = `${encodeURIComponent(userId)}:${action === 'like' ? 'favorite' : 'like'}`;
+      const saved = JSON.parse(localStorage.getItem(`reaction-filters:${scope}`) || localStorage.getItem(`reaction-filters:${fallbackScope}`) || 'null');
       if (saved?.version === 1) {
         if (categories.some(([id]) => id === saved.category)) savedCategory = saved.category;
         if (typeof saved.query === 'string' && saved.query.length <= 160) savedQuery = saved.query;
@@ -174,7 +175,7 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
     if (urlQuery !== null) savedQuery = urlQuery.slice(0, 160);
     setCategory(savedCategory); setQuery(savedQuery); setSearch(savedQuery.trim());
     setPreferencesReady(true);
-  }, [scope, urlCategory, urlQuery, hasContent]);
+  }, [scope, userId, action, urlCategory, urlQuery, hasContent]);
   useEffect(() => {
     if (!preferencesReady) return;
     try { localStorage.setItem(`reaction-filters:${scope}`, JSON.stringify({ version: 1, category, query })); }
@@ -385,10 +386,10 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
       router.push('/generate');
     } catch (e) { if (current()) setError(e instanceof Error ? e.message : '操作失败'); }
   }
-  function changed(item: ReactionListItem, state: ReactionState, changedAction: ReactionAction, active: boolean) {
+  function changed(item: ReactionListItem, state: ReactionState, changedAction: ReactionAction, active: boolean, previous?: ReactionState) {
     if (!mounted.current || currentIdentity.current !== identity) return;
-    if (changedAction === action && !active) {
-      setUndo({ item, state }); setItems(current => current.filter(row => row.key !== item.key));
+    if (!active && !(state.liked || state.favorited)) {
+      setUndo({ item: { ...item, state: previous || item.state }, state }); setItems(current => current.filter(row => row.key !== item.key));
       setTotal(current => Math.max(0, current - 1)); setCounts(current => ({ ...current, all: Math.max(0, current.all - 1), [item.category]: Math.max(0, current[item.category] - 1) }));
     }
   }
@@ -414,19 +415,19 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
     setStorageWarning(cleared ? '' : '筛选已重置，但浏览器未允许清除全部保存记录。');
   }
   if (!preferencesReady) return <p role="status">正在读取…</p>;
-  return <section aria-label={action === 'favorite' ? '我的收藏' : '我赞过的'}>
-    <div className={styles.toolbar}><div className={styles.tabs}>{categories.map(([id, label]) => <button key={id} type="button" aria-pressed={category === id} onClick={() => setCategory(id)}>{label} {counts[id]}</button>)}</div><input type="search" aria-label="搜索收藏内容" placeholder="搜索内容" maxLength={160} value={query} onChange={event => setQuery(event.target.value)} /><span className={styles.muted}>{action === 'favorite' ? '最近收藏' : '最近点赞'} · {total} 项</span><button className={styles.command} type="button" aria-label="刷新列表" title="刷新列表" disabled={loading} onClick={() => { void load(); void revalidatePreview(); }}><RefreshCw size={16} /></button><button className={styles.command} type="button" aria-label="重置筛选和浏览位置（保留收藏）" title="重置筛选和浏览位置（保留收藏）" onClick={resetPreferences}><RotateCcw size={16} /></button></div>
+  return <section aria-label="我的喜欢">
+    <div className={styles.toolbar}><div className={styles.tabs}>{categories.map(([id, label]) => <button key={id} type="button" aria-pressed={category === id} onClick={() => setCategory(id)}>{label} {counts[id]}</button>)}</div><input type="search" aria-label="搜索喜欢的内容" placeholder="搜索内容" maxLength={160} value={query} onChange={event => setQuery(event.target.value)} /><span className={styles.muted}>最近喜欢 · {total} 项</span><button className={styles.command} type="button" aria-label="刷新列表" title="刷新列表" disabled={loading} onClick={() => { void load(); void revalidatePreview(); }}><RefreshCw size={16} /></button><button className={styles.command} type="button" aria-label="重置筛选和浏览位置（保留喜欢）" title="重置筛选和浏览位置（保留喜欢）" onClick={resetPreferences}><RotateCcw size={16} /></button></div>
     {error && <p role="alert">{error}<button className={styles.command} type="button" onClick={() => void load(cursor || undefined)}>重试</button></p>}
     {storageWarning && <p role="status">{storageWarning}</p>}
     {message && <p role="status">{message}</p>}
     <div className={styles.grid}>{items.map((item, index) => <article className={styles.card} key={item.key} data-remember-scroll-anchor={index < MAX_RESTORED_ITEMS ? item.key : undefined}>
       <div className="media-reaction-cover" data-reaction-surface>
         <button className={`${styles.media} ${mediaClassName || ''}`.trim()} type="button" disabled={!item.content} onClick={() => void open(item)} aria-label={item.content ? `打开${item.content.title}` : '内容已不可用'}>{item.content ? <CollectionThumbnail content={item.content} preferPreviewImage={preferPreviewImageThumbnails} /> : '内容已不可用'}</button>
-        {['image', 'video', 'audio'].includes(item.category) && <ContentReactions contentKey={item.key} initialState={item.state} overlay onChange={(state, act, active) => changed(item, state, act, active)} />}
+        {['image', 'video', 'audio'].includes(item.category) && <ContentReactions contentKey={item.key} initialState={item.state} overlay onChange={(state, act, active, previous) => changed(item, state, act, active, previous)} />}
       </div>
-      <div className={styles.body}>{item.category === 'template' && action === 'favorite' ? <TemplateFavoriteTitle contentKey={item.key} initialState={item.state} onChange={(state, act, active) => changed(item, state, act, active)}><h3 className={styles.title} title={item.content?.title || '内容已不可用'}>{item.content?.title || '内容已不可用'}</h3></TemplateFavoriteTitle> : <h3 className={styles.title}>{item.content?.title || '内容已不可用'}</h3>}{item.content?.owner && <UserIdentityBadge size="sm" user={item.content.owner} />}
+      <div className={styles.body}>{item.category === 'template' ? <TemplateFavoriteTitle contentKey={item.key} initialState={item.state} onChange={(state, act, active, previous) => changed(item, state, act, active, previous)}><h3 className={styles.title} title={item.content?.title || '内容已不可用'}>{item.content?.title || '内容已不可用'}</h3></TemplateFavoriteTitle> : <h3 className={styles.title}>{item.content?.title || '内容已不可用'}</h3>}{item.content?.owner && <UserIdentityBadge size="sm" user={item.content.owner} />}
         {item.content?.versionLabel && <span className={styles.muted}>版本：{item.content.versionLabel}</span>}
-        <div className={styles.actions}>{!['image', 'video', 'audio'].includes(item.category) && !(item.category === 'template' && action === 'favorite') && <ContentReactions contentKey={item.key} initialState={item.state} onChange={(state, act, active) => changed(item, state, act, active)} />}
+        <div className={styles.actions}>{!['image', 'video', 'audio', 'template'].includes(item.category) && <ContentReactions contentKey={item.key} initialState={item.state} onChange={(state, act, active, previous) => changed(item, state, act, active, previous)} />}
           {item.content && <button className={styles.command} type="button" onClick={() => void open(item)}><ExternalLink size={15} /> {item.content.actionLabel}</button>}
           {item.content?.downloadUrl && <a className={styles.command} title="下载" aria-label="下载" href={item.content.downloadUrl}><Download size={16} /></a>}
           {item.content && item.category === 'prompt' && <button className={styles.command} title="复制文案" aria-label="复制文案" type="button" onClick={() => void open(item, true)}><Copy size={16} /></button>}
@@ -436,12 +437,12 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
     </article>)}</div>
     {!loading && loaded && !items.length && !error && <p className={styles.status}>暂无符合条件的内容</p>}
     <div ref={sentinel} className={styles.status}>{loading ? '正在读取…' : cursor ? <button className={styles.command} type="button" onClick={() => void load(cursor)}>加载更多</button> : loaded && items.length ? '已显示全部' : null}</div>
-    {undo && <div className={styles.undo} role="status">已取消{action === 'favorite' ? '收藏' : '点赞'}<button className={styles.command} type="button" onClick={async () => { const current = currentOperation(); try {
+    {undo && <div className={styles.undo} role="status">已取消喜欢<button className={styles.command} type="button" onClick={async () => { const current = currentOperation(); try {
       const response = await fetch('/api/content-reactions/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keys: [undo.item.key] }) });
       const data = await response.json();
       if (!current()) return;
       if (!response.ok) throw new Error(data.error || '撤销失败');
-      await writeReaction(userId, undo.item.key, action, true, data.states[undo.item.key]); if (!current()) return; setUndo(null); void load(); } catch (e) { if (current()) setError(e instanceof Error ? e.message : '撤销失败'); } }}><Undo2 size={15} /> 撤销</button><button className={styles.command} type="button" aria-label="关闭撤销提示" onClick={() => setUndo(null)}><X size={14} /></button></div>}
+      const restored = await writeReaction(userId, undo.item.key, undo.item.state.liked ? 'like' : 'favorite', true, data.states[undo.item.key]); if (!restored || !current()) return; if (!(restored.liked || restored.favorited)) throw new Error('撤销尚未确认，请重试'); setUndo(null); void load(); } catch (e) { if (current()) setError(e instanceof Error ? e.message : '撤销失败'); } }}><Undo2 size={15} /> 撤销</button><button className={styles.command} type="button" aria-label="关闭撤销提示" onClick={() => setUndo(null)}><X size={14} /></button></div>}
     {preview && (() => {
       const index = items.findIndex(item => item.key === preview.key);
       const canPrevious = index > 0 && items.slice(0, index).some(isPreviewableItem);

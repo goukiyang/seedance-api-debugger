@@ -19,5 +19,5 @@ export function reactionError(error: unknown) {
   if (error instanceof ReactionError || error instanceof AuthError) return reactionJson({ error: error.message }, error.status);
   if (error instanceof SyntaxError) return reactionJson({ error: '请求格式无效' }, 400);
   console.error('[content-reactions]', error instanceof Error ? error.name : 'unknown');
-  return reactionJson({ error: '点赞收藏暂时不可用，请稍后重试' }, 503);
+  return reactionJson({ error: '喜欢暂时不可用，请稍后重试' }, 503);
 }

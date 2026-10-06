@@ -9,7 +9,7 @@ export default function TemplateFavoriteTitle({ children, contentKey, initialSta
   children: ReactNode;
   contentKey?: ContentKey;
   initialState?: ReactionState;
-  onChange?: (state: ReactionState, action: ReactionAction, active: boolean) => void;
+  onChange?: (state: ReactionState, action: ReactionAction, active: boolean, previous?: ReactionState) => void;
   className?: string;
 }) {
   return <div className={`${styles.favoriteTitleRow} ${className}`}>

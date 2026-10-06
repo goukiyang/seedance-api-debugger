@@ -7,7 +7,7 @@ import { ContextClipboardActions } from '@/components/ContextClipboardActions';
 
 import Link from 'next/link';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Bookmark, ChevronDown, ChevronRight, Clipboard, Copy, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
+import { Heart, ChevronDown, ChevronRight, Clipboard, Copy, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
 import { ContextVersionLabel, useModuleContextVersion } from './context-version-label';
 import { uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
@@ -399,7 +399,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
       const requested = new URLSearchParams(window.location.search).get('presetId');
       const sorted = [...result.presets].sort((a, b) => Number(b.id === requested) - Number(a.id === requested));
       setPresets(sorted);
-      if (requested && !sorted.some(item => item.id === requested)) setPresetsError('收藏的模板已不可用或不再共享');
+      if (requested && !sorted.some(item => item.id === requested)) setPresetsError('喜欢的模板已不可用或不再共享');
     }
     catch (e) { setPresetsError(e instanceof Error ? e.message : '模板读取失败'); }
     finally { setPresetsLoading(false); }
@@ -631,7 +631,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     <aside className={styles.moduleRail} data-remember-scroll="image-groups" aria-label={templateWorkbench ? '模板导航' : '分组快捷栏'}>
       {templateWorkbench ? <>
         <div className={styles.moduleRailTitle}>模板工作台</div>
-        <Link className={styles.moduleRailMajorLink} href="/assets?view=favorites"><Bookmark size={16} /><span>我的收藏</span></Link>
+        <Link className={styles.moduleRailMajorLink} href="/assets?view=favorites"><Heart size={16} /><span>我的喜欢</span></Link>
         <section className={styles.moduleRailMajor} aria-label="图片生成">
           <div className={styles.moduleRailMajorHeader}>
             <a className={`${styles.moduleRailMajorLink} ${styles.moduleRailMajorCurrent}`} href="#image-generation" aria-current="page" onClick={navigateToImageSection}>
@@ -681,7 +681,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     {templateWorkbench && <nav ref={mobileModuleNavRef} className={styles.mobileModuleNav} aria-label="图片模块导航">
       <div className={styles.mobileMajorLinks}>
         <a className={styles.mobileMajorLink} href="#image-generation" aria-current="page" onClick={navigateToImageSection}><ImagePlus size={16} /><span>图片生成</span>{hasAnyUnread && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</a>
-        <Link className={styles.mobileMajorLink} href="/assets?view=favorites"><Bookmark size={16} /><span>我的收藏</span></Link>
+        <Link className={styles.mobileMajorLink} href="/assets?view=favorites"><Heart size={16} /><span>我的喜欢</span></Link>
       </div>
       <label className={styles.mobileGroupPicker}><span>分组</span><select aria-label="选择图片分组" value={selectedGroup} onChange={event => {
         const group = event.target.value;

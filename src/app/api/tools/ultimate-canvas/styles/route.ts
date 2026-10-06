@@ -85,7 +85,7 @@ export async function GET(request: NextRequest) {
         for (let index = 0; index < keys.length; index += REACTION_CHUNK_SIZE) {
           rows.push(...await prisma.contentReaction.findMany({
             where: { user_id: user.id, content_key: { in: keys.slice(index, index + REACTION_CHUNK_SIZE) } },
-            select: { content_key: true, favorited: true, version: true },
+            select: { content_key: true, liked: true, favorited: true, version: true },
           }));
         }
         return rows;
@@ -122,7 +122,7 @@ export async function GET(request: NextRequest) {
         model: preset.model,
         coverUrl,
         author: { name: displayUserName(owner), avatarUrl: owner?.avatar_url || null },
-        favorited: reaction?.favorited || false,
+        favorited: Boolean(reaction?.liked || reaction?.favorited),
         reactionVersion: reaction?.version || 0,
         commercialAllowed: null,
         ...(preset.prompt.trim() ? { description: preset.prompt.trim().slice(0, 400) } : {}),

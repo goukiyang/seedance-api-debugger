@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '管理中心新增视频、超分和图片的生成耗时统计，可按日期查看平均和较慢任务用时，展开模型与线路明细并导出；缺失时间记录明确标注，不与视频时长混淆。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '点赞和收藏合并为一个“喜欢”按钮，原有记录统一到“我的喜欢”；旧收藏保留且仍私密，不加入公开喜欢人数。点击喜欢采用新的心形绽放反馈。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

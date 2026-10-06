@@ -1,0 +1,48 @@
+/* Adapted from Bencho Like (https://bencho.dev/blocks/like).
+ * MIT License - Copyright (c) 2026 Lorenzo Cabra.
+ * Full notice: like-button.LICENSE.txt. No photographs or branding included. */
+.sd2-like.sd2-like {
+  --lk-on: #e5484d;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  flex: 0 0 auto; min-width: 44px; height: 44px; box-sizing: border-box;
+  padding: 0 18px 0 15px; border: 0; border-radius: 22px;
+  background: var(--fill-slab, #262626); color: var(--fill-on, #ededed);
+  font: inherit; font-size: 15px; font-weight: 500; letter-spacing: 0;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: scale 200ms cubic-bezier(.3, .9, .4, 1);
+}
+.sd2-like:not(:has(.lk-count)) { width: 44px; padding: 0; }
+.sd2-like:has(.lk-count) { min-width: 78px; }
+.sd2-like:active:not(:disabled) { scale: .95; }
+.sd2-like:focus-visible { outline: 2px solid var(--signal, #70cfbd); outline-offset: 2px; }
+.sd2-like:disabled { opacity: .55; cursor: default; }
+.sd2-like[aria-pressed="true"] .lk-glyph { color: var(--lk-on); }
+.sd2-like .lk-heart { position: relative; display: grid; place-items: center; width: 20px; height: 20px; }
+.sd2-like .lk-glyph { position: relative; z-index: 1; display: grid; }
+.sd2-like .lk-glyph svg { width: 19px; height: 19px; stroke-width: 2.3; }
+.sd2-like[aria-pressed="true"] .lk-glyph svg { fill: currentColor; }
+.sd2-like[data-bloom] .lk-glyph { animation: lk-heart 760ms cubic-bezier(.3, 1.6, .4, 1) both; }
+.sd2-like .lk-burst { --fly: .5; position: absolute; left: 50%; top: 50%; pointer-events: none; }
+.sd2-like .lk-bloom { position: absolute; left: -17px; top: -17px; width: 34px; height: 34px; box-sizing: border-box; border-radius: 50%; border: 17px solid #cc8ef5; animation: lk-bloom 560ms cubic-bezier(.25, .8, .35, 1) both; }
+.sd2-like .lk-spoke { position: absolute; left: 0; top: 0; rotate: var(--a); }
+.sd2-like .lk-spoke i { position: absolute; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: var(--c); animation: lk-dot 620ms cubic-bezier(.2, .8, .3, 1) 200ms both; }
+.sd2-like .lk-spoke i:first-child { --side: -4px; --far: 0px; }
+.sd2-like .lk-spoke i:last-child { --side: 4px; --far: -5px; width: 4px; height: 4px; margin: -2px 0 0 -2px; }
+.sd2-like .lk-count { display: flex; font-variant-numeric: tabular-nums; line-height: 1; }
+.sd2-like .lk-wheel { position: relative; display: inline-block; width: 1ch; height: 1.25em; overflow: hidden; }
+.sd2-like .lk-digit { display: block; line-height: 1.25em; }
+.sd2-like .lk-comma { line-height: 1.25em; }
+.sd2-like .lk-digit-in, .sd2-like .lk-digit-out { animation-duration: 420ms; animation-timing-function: cubic-bezier(.22, 1, .36, 1); animation-delay: var(--delay); animation-fill-mode: both; }
+.sd2-like .lk-digit-in { animation-name: lk-digit-in; }
+.sd2-like .lk-digit-out { position: absolute; inset: 0; animation-name: lk-digit-out; }
+@keyframes lk-heart { 0%, 28% { scale: 0; } 62% { scale: 1.25; } 100% { scale: 1; } }
+@keyframes lk-bloom { 0% { scale: .15; border-width: 17px; border-color: #e5484d; } 40% { scale: 1; border-width: 17px; border-color: #cc8ef5; } 75% { border-width: 2px; opacity: 1; } 100% { scale: 1.12; border-width: 0; opacity: 0; border-color: #cc8ef5; } }
+@keyframes lk-dot { 0% { translate: 12px var(--side); scale: 1; opacity: 0; } 12% { opacity: 1; } 100% { translate: calc(18px + var(--fly) * 14px + var(--far)) calc(var(--side) * 1.6); scale: 0; opacity: 1; } }
+@keyframes lk-digit-in { from { translate: 0 var(--from); opacity: 0; } to { translate: 0 0; opacity: 1; } }
+@keyframes lk-digit-out { from { translate: 0 0; opacity: 1; } to { translate: 0 var(--to); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .sd2-like { transition: none; }
+  .sd2-like:active:not(:disabled) { scale: 1; }
+  .sd2-like[data-bloom] .lk-glyph, .sd2-like .lk-bloom, .sd2-like .lk-spoke i, .sd2-like .lk-digit { animation: none; }
+  .sd2-like .lk-burst, .sd2-like .lk-digit-out { display: none; }
+}
