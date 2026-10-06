@@ -12,7 +12,7 @@ test "$(cat "$app/.next-prod/BUILD_ID")" = "$old_build"
 if test "$mode" = candidate; then
   available=$(df -Pk "$app" | awk 'NR==2 {print $4}')
   old_size=$(du -sk "$app/.next-prod" | awk '{print $1}')
-  # Candidate is moved on the same filesystem, not copied a second time.
+  # Keep headroom without counting the already allocated live build twice.
   test "$available" -gt "$((old_size * 2 + 512000))"
   printf '%s  %s/%s.tar.gz\n' "$source_sha" "$uploaded" "$commit" | sha256sum -c -
   printf '%s  %s/%s.tar.gz\n' "$base_sha" "$uploaded" "$base" | sha256sum -c -
@@ -37,9 +37,16 @@ for entry in storage public/uploads public/videos; do test -L "$app/$entry"; don
 stage="$app/.next-prod-candidate-followups-$short"
 previous="$app/.next-prod-prev-followups-$short"
 test ! -e "$stage"; test ! -e "$previous"
-test "$(stat -c %d "$release/.next-prod-candidate")" = "$(stat -c %d "$app")"
-test "$(df -Pk "$app" | awk 'NR==2 {print $4}')" -gt 512000
-mv "$release/.next-prod-candidate" "$stage"
+available=$(df -Pk "$app" | awk 'NR==2 {print $4}')
+if test "$(stat -c %d "$release/.next-prod-candidate")" = "$(stat -c %d "$app")"; then
+  test "$available" -gt 512000
+  mv "$release/.next-prod-candidate" "$stage"
+else
+  candidate_size=$(du -sk "$release/.next-prod-candidate" | awk '{print $1}')
+  test "$available" -gt "$((candidate_size + 512000))"
+  mkdir "$stage"
+  rsync -a "$release/.next-prod-candidate/" "$stage/"
+fi
 chown -R gouki:gouki "$stage"
 new_build=$(cat "$stage/BUILD_ID")
 old_worker_pid=$(systemctl show sd2-image-studio.service -p MainPID --value)
