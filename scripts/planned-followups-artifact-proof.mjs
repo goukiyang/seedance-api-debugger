@@ -11,7 +11,7 @@ const files = [...new Set(['/page', '/assets/page', '/cutout/page', '/template-s
   return manifest.pages[route];
 }))].filter(file => /\.(js|css)$/.test(file));
 const text = file => fs.readFileSync(path.join(root, dist, file), 'utf8');
-const markers = ['data-image-preview-pane', '还原两图', '粘贴并替换全文', '当前账户尚未绑定抠图授权', '确认生成', '本批资产', '公开喜欢人数'];
+const markers = ['data-image-preview-pane', 'data-image-preview-preload', '还原两图', '粘贴并替换全文', '当前账户尚未绑定抠图授权', '确认生成', '本批资产', '公开喜欢人数'];
 const selected = new Set();
 for (const marker of markers) {
   const file = files.find(file => file.endsWith('.js') && text(file).includes(marker));
@@ -21,6 +21,9 @@ for (const marker of markers) {
 const comparisonCss = files.find(file => file.endsWith('.css') && text(file).includes('comparePane'));
 if (!comparisonCss) throw Error('Compiled comparison CSS missing');
 selected.add(comparisonCss);
+const stickyCss = files.find(file => file.endsWith('.css') && /body:has\([^)]*templateWorkbench[^)]*\)\{[^}]*overflow-x:clip/.test(text(file)));
+if (!stickyCss) throw Error('Compiled workbench-only body clip missing');
+selected.add(stickyCss);
 const hash = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const assets = [...selected].map(file => ({ url: `/_next/${file}`, sha256: hash(path.join(root, dist, file)) }));
 for (const name of ['video', 'canvas', 'templates', 'avatar', 'cutout']) assets.push({ url: `/home/${name}.png`, sha256: hash(path.join(root, 'public', 'home', name + '.png')) });

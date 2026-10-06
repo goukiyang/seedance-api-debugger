@@ -11,7 +11,9 @@ export function scrollToWorkbenchHeader(target: HTMLElement, layout: HTMLElement
     const topbar = document.querySelector<HTMLElement>('.composer-topbar')?.getBoundingClientRect();
     const navigation = layout.querySelector<HTMLElement>('[aria-label="图片模块导航"]');
     const navRect = navigation && getComputedStyle(navigation).display !== 'none' ? navigation.getBoundingClientRect() : null;
-    const occlusion = Math.max(topbar?.bottom || 0, navRect ? (topbar?.bottom || 0) + navRect.height : 0);
+    const topbarBottom = topbar?.bottom || 0;
+    const occlusion = navRect && navRect.top <= topbarBottom + 1 && navRect.bottom > topbarBottom
+      ? navRect.bottom : topbarBottom;
     const visibleTop = Math.max(occlusion, container?.getBoundingClientRect().top || 0);
     const destination = Math.max(0, (container?.scrollTop ?? window.scrollY) + target.getBoundingClientRect().top - visibleTop);
     if (!Number.isFinite(previous) || Math.abs(destination - previous) > 0.5) {

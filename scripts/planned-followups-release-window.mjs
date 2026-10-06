@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { appendRegistryLine } from '/Users/gouki-youdoo/.codex/skills/release-window-coordination/scripts/release-registry-append.mjs';
 import { buildRecentActivityDecision, confirmReservation } from '/Users/gouki-youdoo/.codex/skills/release-window-coordination/scripts/release-recent-activity-check.mjs';
 const [mode, commit] = process.argv.slice(2);
-const registry = '/Volumes/Data/Projects/project-version-registry.md', runId = 'planned-followups-20261006', projectName = 'video-api-debugger';
+const registry = '/Volumes/Data/Projects/project-version-registry.md', runId = 'planned-followups-reviewfixes-20261007', projectName = 'video-api-debugger';
 if (!['start', 'renew', 'check', 'finish', 'failed'].includes(mode) || !/^[a-f0-9]{40}$/.test(commit || '')) throw Error('Invalid release arguments');
 const decision = buildRecentActivityDecision(fs.readFileSync(registry, 'utf8'), { projectName });
 if (decision.recentActivities.some(activity => activity.runId !== runId)) throw Error('Another release is active');

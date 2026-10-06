@@ -12,8 +12,10 @@ test "$(cat "$app/.next-prod/BUILD_ID")" = "$old_build"
 if test "$mode" = candidate; then
   available=$(df -Pk "$app" | awk 'NR==2 {print $4}')
   old_size=$(du -sk "$app/.next-prod" | awk '{print $1}')
-  # Keep headroom without counting the already allocated live build twice.
-  test "$available" -gt "$((old_size * 2 + 512000))"
+  # Build on the actual release filesystem; reserve one future stage on the app filesystem.
+  release_available=$(df -Pk "$(dirname "$release")" | awk 'NR==2 {print $4}')
+  test "$release_available" -gt "$((old_size * 2 + 512000))"
+  test "$available" -gt "$((old_size + 512000))"
   printf '%s  %s/%s.tar.gz\n' "$source_sha" "$uploaded" "$commit" | sha256sum -c -
   printf '%s  %s/%s.tar.gz\n' "$base_sha" "$uploaded" "$base" | sha256sum -c -
   test ! -e "$release"

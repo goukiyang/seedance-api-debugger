@@ -254,13 +254,11 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, so
         // Keep caller metadata for the same version, but always use the freshly authorized URL.
         const next = { ...image, ...refreshed, alt: image.alt, ...(image.version ? { version: image.version } : {}) };
         const existing = sourcesRef.current[side];
-        if (existing?.src === next.src && existing.version === next.version && imageSourceIdentity(existing) === imageSourceIdentity(next)) {
-          if (side === 'comparison') setComparisonMode(true);
+        if (side === 'current' && existing?.src === next.src && existing.version === next.version && imageSourceIdentity(existing) === imageSourceIdentity(next)) {
           delete requests.current[side]; setPending(value => ({ ...value, [side]: undefined })); resolve(true); return;
         }
         setMessage('');
         setPending(value => ({ ...value, [side]: { source: next, token } }));
-        if (side === 'comparison' && !sourcesRef.current.comparison) setComparisonMode(true);
       })().catch(error => {
         if (requests.current[side] !== request || !alive.current) { resolve(false); return; }
         delete requests.current[side]; setPending(value => ({ ...value, [side]: undefined }));
@@ -509,7 +507,6 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, so
     if (token === undefined || !request || request.token !== token || !alive.current) return;
     delete requests.current[side]; setPending(value => ({ ...value, [side]: undefined }));
     setMessage('图片未能加载，原图保留，请重新选择'); request.reject(new Error('图片未能加载，原图保留，请重新选择'));
-    if (side === 'comparison' && !sourcesRef.current.comparison) setComparisonMode(false);
   }
   function choose(side: Side, image: ImageComparisonSource) { userAction.current++; return requestImage(side, image); }
   async function chooseLocal(side: Side, file: File) {
@@ -605,6 +602,12 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, so
       <div className={styles.compareFrame + ' ' + (comparisonMode ? axis === 'vertical' ? styles.compareVertical : styles.compareHorizontal : styles.singleFrame)} data-image-preview-compare-frame>
         {pane('current')}{comparisonMode && pane('comparison')}
       </div>
+      {!comparisonMode && pending.comparison && <div hidden aria-hidden="true" data-image-preview-preload>
+        <PreviewImage key={pending.comparison.token} src={pending.comparison.source.src} alt="对比图" original={false}
+          className={styles.compareImage} style={{}} hidden
+          onReady={size => ready('comparison', pending.comparison!.source, pending.comparison!.token, size)}
+          onFailure={() => failed('comparison', pending.comparison!.token)} />
+      </div>}
     </div>
   </div>, portalRoot)}
   {portalRoot && pickerSide && <ImageComparisonPicker side={pickerSide} container={portalRoot} candidates={candidates}

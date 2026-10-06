@@ -1,5 +1,7 @@
 .page { position: relative; display: block; padding: 24px 32px 64px 268px; max-width: none; margin: 0; color: #e6e8eb; background: #101315; min-height: calc(100dvh - 73px); }
 .content { min-width: 0; }
+/* Keep document scrolling: overflow-x:hidden also makes body a sticky scroll ancestor. */
+:global(body):has(.templateWorkbench) { overflow-x: clip; }
 .mobileModuleNav { display: none; }
 .moduleRail { position: fixed; left: 0; top: var(--composer-topbar-height, 48px); bottom: 0; z-index: 15; box-sizing: border-box; width: 236px; max-height: none; overflow-y: auto; padding: 18px 14px; border: 0; border-right: 1px solid #2d383d; border-radius: 0; background: #151a1d; scrollbar-width: thin; scrollbar-color: #647179 transparent; scrollbar-gutter: stable; }
 .moduleRail:hover, .moduleRail:focus-within { scrollbar-color: #839098 transparent; }
