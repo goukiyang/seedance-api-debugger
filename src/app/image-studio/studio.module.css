@@ -210,7 +210,7 @@
 .batchInputPreview img { width: 100%; height: 100%; object-fit: contain; opacity: .7; }
 .ratioInfoButton { position: absolute; top: 24px; right: 0; width: 32px; height: 36px; justify-content: center; }
 .ratioHint { display: none; position: absolute; top: 100%; left: 0; z-index: 22; box-sizing: border-box; width: max-content; max-width: min(360px, 100%); margin: 4px 0 0; padding: 8px 10px; border: 1px solid #52616a; border-radius: 6px; background: #192126; color: #d9e2e8; font-size: 12px; }
-.ratioTrigger:focus-visible ~ .ratioHint, .ratioHint[data-open="true"] { display: block; }
+.ratioTrigger:focus ~ .ratioHint, .ratioHint[data-open="true"] { display: block; }
 @media (hover: hover) { .ratioPicker:hover .ratioHint { display: block; } }
 .moduleQuickActions .saveReady { border-color: #79daca; color: #a4f2df; }
 .quickPresetRow { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex: 1 1 100%; min-width: 0; order: 2; }

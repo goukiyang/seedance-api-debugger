@@ -14,14 +14,15 @@ export function scrollToWorkbenchHeader(target: HTMLElement, layout: HTMLElement
     const occlusion = Math.max(topbar?.bottom || 0, navRect ? (topbar?.bottom || 0) + navRect.height : 0);
     const visibleTop = Math.max(occlusion, container?.getBoundingClientRect().top || 0);
     const destination = Math.max(0, (container?.scrollTop ?? window.scrollY) + target.getBoundingClientRect().top - visibleTop);
-    if (Math.abs(destination - previous) > 0.5) {
+    if (!Number.isFinite(previous) || Math.abs(destination - previous) > 0.5) {
       previous = destination; quiet = performance.now();
       if (container) container.scrollTo({ top: destination, behavior });
       else window.scrollTo({ top: destination, behavior });
       behavior = 'auto';
     }
     const pendingImagesAbove = Array.from(layout.querySelectorAll('img')).some(image => !image.complete && image.getBoundingClientRect().top < target.getBoundingClientRect().top);
-    if (!pendingImagesAbove && performance.now() - quiet > 500 || performance.now() - start > 8000) { stop(); onSettled(); }
+    const aligned = Math.abs(target.getBoundingClientRect().top - visibleTop) < 1;
+    if (!pendingImagesAbove && aligned && performance.now() - quiet > 500 || performance.now() - start > 8000) { stop(); onSettled(); }
     else frame = requestAnimationFrame(align);
   };
   const observer = new ResizeObserver(() => { quiet = performance.now(); });

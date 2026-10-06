@@ -522,7 +522,9 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
       const header = document.getElementById(pendingModuleScroll.id);
       if (header) {
         updateNavigationOffset();
-        header.scrollIntoView({ block: 'start', behavior: pendingModuleScroll.behavior });
+        return scrollToWorkbenchHeader(header, pageRef.current || header, pendingModuleScroll.behavior, () => {
+          setPendingModuleScroll(current => current?.token === pendingModuleScroll.token ? null : current);
+        });
       } else setError('无法定位到图片生成区域，请重试');
       setPendingModuleScroll(current => current?.token === pendingModuleScroll.token ? null : current);
       return;
