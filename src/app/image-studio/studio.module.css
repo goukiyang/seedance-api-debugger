@@ -275,6 +275,9 @@
 .empty { display: flex; justify-content: center; align-items: center; min-height: 360px; color: #adb6bd; border-bottom: 1px solid #333b40; }
 .coverGrid { min-width: 0; }
 .pagination { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 18px; color: #adb6bd; font-size: 13px; }
+.resultPagination { flex-wrap: wrap; }
+.resultPagination button { width: 36px; height: 36px; padding: 0; display: inline-flex; justify-content: center; align-items: center; }
+.previousPageIcon { transform: rotate(180deg); }
 .coverGridInner { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 18px; }
 .page .coverCard { display: grid; grid-template-rows: minmax(0, 1fr) 112px; gap: 0; aspect-ratio: 3 / 4; align-items: stretch; padding: 0; overflow: hidden; text-align: left; border-color: #364248; background: #171c1f; }
 .coverVisual { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: stretch; justify-content: center; min-height: 0; overflow: hidden; color: #87949a; background: #0b0e0f; }

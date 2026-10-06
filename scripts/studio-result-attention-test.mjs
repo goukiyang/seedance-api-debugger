@@ -28,14 +28,26 @@ let checks = 0;
 const check = (name, run) => { run(); checks += 1; console.log(`PASS ${name}`); };
 
 check('successful preview image load reaches the existing read signal', () => {
-  const node = find(previewFile, node => ts.isVariableDeclaration(node) && node.name.getText() === 'handleImageReady');
   const observed = [];
-  const ready = evaluate(node.initializer.arguments[0], {
-    setDimensionsBySource: () => {}, comparisonMode: false, src: '/result-a', activeSrc: '/result-a', zoomMode: 'fit',
-    applyZoomMode: () => {}, onImageLoaded: src => observed.push(src),
-  });
-  ready('/result-a')({ width: 32, height: 32 });
+  const globals = {
+    alive: { current: true }, imageSourceIdentity: image => image.src, setSizes: () => {},
+    onImageLoaded: src => observed.push(src),
+  };
+  const ready = evaluate(functionNode(previewFile, 'ready'), globals);
+  ready('current', { src: '/result-a' }, undefined, { width: 32, height: 32 });
+  globals.alive.current = false;
+  ready('current', { src: '/result-a' }, undefined, { width: 32, height: 32 });
   assert.deepEqual(observed, ['/result-a']);
+});
+
+check('fetching a cursor page does not acknowledge hidden results as viewed', () => {
+  const branch = find(studioFile, node => ts.isIfStatement(node) && ts.isBlock(node.thenStatement)
+    && node.thenStatement.statements.some(statement => ts.isExpressionStatement(statement) && ts.isCallExpression(statement.expression)
+      && statement.expression.expression.getText() === 'setViewedResults'));
+  const condition = evaluate(branch.expression, {
+    action: 'refresh', cursor: 'older-results', currentView: { current: { active: true, token: 1 } }, requestedToken: 1,
+  });
+  assert.equal(condition, false);
 });
 
 check('only the exact displayed result version is scheduled, including a zero navigation token', () => {

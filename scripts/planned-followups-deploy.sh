@@ -12,10 +12,12 @@ test "$(cat "$app/.next-prod/BUILD_ID")" = "$old_build"
 if test "$mode" = candidate; then
   available=$(df -Pk "$app" | awk 'NR==2 {print $4}')
   old_size=$(du -sk "$app/.next-prod" | awk '{print $1}')
+  old_cache=0
+  if test -d "$app/.next-prod/cache"; then old_cache=$(du -sk "$app/.next-prod/cache" | awk '{print $1}'); fi
   # Build on the actual release filesystem; reserve one future stage on the app filesystem.
   release_available=$(df -Pk "$(dirname "$release")" | awk 'NR==2 {print $4}')
   test "$release_available" -gt "$((old_size * 2 + 512000))"
-  test "$available" -gt "$((old_size + 512000))"
+  test "$available" -gt "$((old_size - old_cache + 512000))"
   printf '%s  %s/%s.tar.gz\n' "$source_sha" "$uploaded" "$commit" | sha256sum -c -
   printf '%s  %s/%s.tar.gz\n' "$base_sha" "$uploaded" "$base" | sha256sum -c -
   test ! -e "$release"
@@ -45,12 +47,17 @@ if test "$(stat -c %d "$release/.next-prod-candidate")" = "$(stat -c %d "$app")"
   mv "$release/.next-prod-candidate" "$stage"
 else
   candidate_size=$(du -sk "$release/.next-prod-candidate" | awk '{print $1}')
-  test "$available" -gt "$((candidate_size + 512000))"
+  candidate_cache=0
+  if test -d "$release/.next-prod-candidate/cache"; then candidate_cache=$(du -sk "$release/.next-prod-candidate/cache" | awk '{print $1}'); fi
+  test "$available" -gt "$((candidate_size - candidate_cache + 512000))"
   mkdir "$stage"
-  rsync -a "$release/.next-prod-candidate/" "$stage/"
+  # Next's rebuild cache is not needed by next start; retain it on the release disk.
+  rsync -a --exclude='/cache/' "$release/.next-prod-candidate/" "$stage/"
+  test "$(df -Pk "$app" | awk 'NR==2 {print $4}')" -gt 512000
 fi
 chown -R gouki:gouki "$stage"
 new_build=$(cat "$stage/BUILD_ID")
+node "$uploaded/planned-followups-artifact-proof.mjs" "$release" "$stage" "$commit" > "$uploaded/staged.json"
 old_worker_pid=$(systemctl show sd2-image-studio.service -p MainPID --value)
 old_worker_invocation=$(systemctl show sd2-image-studio.service -p InvocationID --value)
 excludes=(--exclude='.env*' --exclude='.git' --exclude=node_modules --exclude='.next*' --exclude=storage --exclude=public --exclude='*.db*' --exclude='*.sqlite*' --exclude='.deployed-*' --exclude='*.log' --include='/src/***' --include='/scripts/***' --include='/ops/***' --include='/prisma/***' --include='/package.json' --include='/package-lock.json' --include='/next.config.js' --include='/tsconfig.json' --include='/next-env.d.ts' --include='/.eslintrc.json' --exclude='*')

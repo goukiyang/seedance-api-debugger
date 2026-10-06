@@ -16,6 +16,7 @@ import { UploadedImagePicker } from '@/components/UploadedImagePicker';
 import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
 import { scrollToWorkbenchHeader } from '@/lib/navigation/scroll-to-workbench-header';
 import { replaceImageModuleLocation } from '@/lib/navigation/image-module-location';
+import { useResultPages } from './use-result-pages';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useUnsavedNavigation } from '@/lib/hooks/use-unsaved-navigation';
@@ -1320,7 +1321,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         if (cursor) loadedMore.current = true;
         setTasksError('');
         void onResultsAvailable();
-        if ((action === 'view' || Boolean(cursor)) && currentView.current.active && currentView.current.token === requestedToken) {
+        if (action === 'view' && currentView.current.active && currentView.current.token === requestedToken) {
           setViewedResults({ scope, token: requestedToken, sequence: ++resultReadSequence.current, versions: result.tasks.flatMap((task: StudioTask) => { const version = studioResultVersion(task); return version ? [version] : []; }) });
         }
       } catch (cause) {
@@ -1610,13 +1611,17 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     : batch.mode === 'single' && (!Number.isInteger(count) || count < 1 || count > 8) ? { message: '生成张数应为1到8的整数，请修改张数。', tone: 'warning' }
     : !ready ? { message: '生成条件尚未就绪，请检查模型和上下文设置。', tone: 'warning' } : null;
   const previewableTasks = tasks.filter(task => studioTaskHasDeliveredAsset(task) && Boolean(task.asset.id));
+  const readNextResultPage = useCallback(async () => { if (nextCursor) await loadTasks(nextCursor); }, [loadTasks, nextCursor]);
+  const resultPages = useResultPages({ items: tasks, storageKey: `sd2-image-studio-result-page:${taskReadScope}`, visible: !hidden && resultView === 'images' && tasks.length > 0,
+    busy: loadingTasks || (templateWorkbench && taskReadAction !== 'idle'), error: Boolean(tasksError), hasMore: Boolean(nextCursor), loadMore: readNextResultPage, currentId: preview?.taskId || selectedResultId });
   function openTaskPreview(task: StudioTask) {
-    if (studioTaskHasDeliveredAsset(task)) setPreview(studioTaskPreviewState(task));
+    if (studioTaskHasDeliveredAsset(task)) { resultPages.goToId(task.id); setPreview(studioTaskPreviewState(task)); }
   }
   function movePreview(direction: -1 | 1) {
     if (!preview?.taskId || previewableTasks.length < 2) return;
     const currentIndex = previewableTasks.findIndex(task => task.id === preview.taskId);
     const nextIndex = currentIndex < 0 ? 0 : (currentIndex + direction + previewableTasks.length) % previewableTasks.length;
+    resultPages.goToId(previewableTasks[nextIndex].id);
     setPreview(studioTaskPreviewState(previewableTasks[nextIndex]));
   }
 
@@ -1894,7 +1899,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         {loadingTasks && (tasks.length ? <LoadingStatus>正在更新生成记录</LoadingStatus> : <LoadingSkeleton label="正在读取生成记录" grid />)}
         {templateWorkbench && taskReadAction === 'refresh' && <LoadingStatus>正在刷新记录，已有图片仍保留</LoadingStatus>}
         {!loadingTasks && !tasks.length && !tasksError && <div className={styles.empty}>暂无生成记录</div>}
-        <div className={styles.grid}>{tasks.map(task => <article key={task.id} className={styles.result}>
+        <div ref={resultPages.gridRef} className={styles.grid} data-result-pages data-page-capacity={resultPages.capacity}>{resultPages.pageItems.map(task => <article key={task.id} className={styles.result} data-result-id={task.id}>
           <div className={`${styles.resultMedia} ${!studioTaskHasDeliveredAsset(task) ? styles.pendingResultMedia : ''}`} data-reaction-surface>{studioTaskHasDeliveredAsset(task) ? <>
             {task.asset.id && <ContentReactions contentKey={`asset:${task.asset.id}`} overlay />}
             <ResultImageCover src={task.asset.thumbnail_url || undefined} alt={`生成结果 ${task.ordinal}`}
@@ -1944,7 +1949,12 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           {task.delivery?.checkpointRetained && task.status === 'uncertain' && <p className={styles.muted}>恢复资料暂留供协查，已退款任务不能自动领取原图。请联系管理员。</p>}
         </article>)}</div>
         {templateWorkbench && taskReadAction === 'more' && <LoadingStatus>正在读取更多记录</LoadingStatus>}
-        {nextCursor && <button type="button" className={templateWorkbench ? 'sd2-loading-surface' : undefined} data-busy={templateWorkbench && taskReadAction === 'more'} disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks(nextCursor)}>加载更多</button>}
+        {tasks.length > 0 && <nav className={`${styles.pagination} ${styles.resultPagination}`} aria-label="图片结果分页">
+          <button type="button" aria-label="上一页图片" title="上一页图片" disabled={resultPages.start === 0 || (resultPages.restoring && !tasksError) || (templateWorkbench && taskReadAction !== 'idle')} onClick={resultPages.previous}><ChevronRight size={17} className={styles.previousPageIcon} /></button>
+          <span role="status">第 {resultPages.page} / {resultPages.pages}{nextCursor ? '+' : ''} 页</span>
+          <button type="button" aria-label="下一页图片" title={resultPages.start + resultPages.capacity >= tasks.length && nextCursor ? '读取下一批并翻页' : '下一页图片'} disabled={!resultPages.canNext || resultPages.restoring || (templateWorkbench && taskReadAction !== 'idle')} onClick={resultPages.next}><ChevronRight size={17} /></button>
+          {(resultPages.start > 0 || tasksError) && <button type="button" aria-label="回到第一页图片" title="回到第一页图片" disabled={(resultPages.restoring && !tasksError) || (templateWorkbench && taskReadAction !== 'idle')} onClick={resultPages.reset}><RotateCcw size={15} /></button>}
+        </nav>}
         </>}
       </section>
     </div>
