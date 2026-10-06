@@ -2,6 +2,7 @@
 
 import { useProductDialog } from '@/components/useProductDialog';
 import { ContextClipboardActions } from '@/components/ContextClipboardActions';
+import { GenerationCompletionSettings } from '@/components/GenerationCompletion';
 
 import { useEffect, useRef } from 'react';
 import { RefreshCw, Save, X } from 'lucide-react';
@@ -10,8 +11,8 @@ import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS } from '@/lib/image-stud
 import type { useStudioSettings } from './use-studio-settings';
 import styles from './studio.module.css';
 
-export function StudioGlobalSettingsDialog({ open, onClose, editor }: {
-  open: boolean; onClose: () => void; editor: ReturnType<typeof useStudioSettings>;
+export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, canEdit }: {
+  open: boolean; onClose: () => void; editor: ReturnType<typeof useStudioSettings>; ownerId: string; canEdit: boolean;
 }) {
   const { confirm, productDialog } = useProductDialog();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -22,16 +23,17 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor }: {
     else dialog.current?.close();
   }, [open]);
   const close = async () => {
-    if (editor.saving) return;
-    if (editor.dirty && !(await confirm('修改尚未保存。关闭后会保留当前草稿，确定关闭吗？', { title: '关闭编辑', confirmLabel: '关闭编辑' }))) return;
+    if (canEdit && editor.saving) return;
+    if (canEdit && editor.dirty && !(await confirm('修改尚未保存。关闭后会保留当前草稿，确定关闭吗？', { title: '关闭编辑', confirmLabel: '关闭编辑' }))) return;
     onClose();
   };
   useDialogDismiss({ open, dialogRef: dialog, nativeDialog: true, onDismiss: close });
   const reload = async () => {
+    if (!canEdit || editor.loading || editor.saving) return;
     if (!editor.dirty || (await confirm('重新读取会替换未保存的通用设置，是否继续？', { title: '重新读取', confirmLabel: '放弃修改并读取' }))) void editor.controller.load(true);
   };
   const save = async () => {
-    if (saveLock.current || editor.saving || editor.loading) return;
+    if (!canEdit || saveLock.current || editor.saving || editor.loading) return;
     saveLock.current = true;
     try {
       if (editor.settings?.context?.trim() && editor.draft && !editor.draft.context.trim()
@@ -40,23 +42,24 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor }: {
     } finally { saveLock.current = false; }
   };
   return <>{productDialog}{(<dialog ref={dialog} className={styles.dialog}>
-    <header className={styles.header}><h2>通用上下文</h2><button type="button" aria-label="关闭设置" onClick={close}><X size={20} /></button></header>
-    {editor.draft && <>
+    <header className={styles.header}><h2>通用设置</h2><button type="button" aria-label="关闭设置" onClick={close}><X size={20} /></button></header>
+    {open && <GenerationCompletionSettings key={ownerId} ownerId={ownerId} />}
+    {canEdit && <>{editor.draft && <>
       <label className={styles.label} htmlFor="studio-context">通用上下文</label>
-      <ContextClipboardActions value={editor.draft.context} textareaRef={contextInput} onPaste={editor.controller.editContext} maxLength={20000} disabled={editor.loading || editor.saving || !open} />
-      <textarea ref={contextInput} id="studio-context" rows={12} maxLength={20000} disabled={editor.loading}
-        value={editor.draft.context} onChange={event => editor.controller.editContext(event.target.value)} />
+      <ContextClipboardActions value={editor.draft.context} textareaRef={contextInput} onPaste={value => { if (canEdit) editor.controller.editContext(value); }} maxLength={20000} disabled={!canEdit || editor.loading || editor.saving || !open} />
+      <textarea ref={contextInput} id="studio-context" rows={12} maxLength={20000} disabled={!canEdit || editor.loading}
+        value={editor.draft.context} onChange={event => { if (canEdit) editor.controller.editContext(event.target.value); }} />
       <p className={styles.label}>通用模型积分规则</p>
       {IMAGE_STUDIO_MODELS.map(model => <label className={styles.label} key={model}>{IMAGE_STUDIO_MODEL_LABELS[model]} 每张积分
-        <input type="number" min={0} max={100000} step={1} disabled={editor.loading}
+        <input type="number" min={0} max={100000} step={1} disabled={!canEdit || editor.loading}
           placeholder={model === 'gemini-3-pro-image-preview' ? '未设置' : '20'} value={editor.draft?.prices[model] ?? ''}
-          onChange={event => editor.controller.editPrice(model, event.target.value === '' ? null : Number(event.target.value))} />
+          onChange={event => { if (canEdit) editor.controller.editPrice(model, event.target.value === '' ? null : Number(event.target.value)); }} />
       </label>)}
-      <button type="button" className={styles.primary} disabled={!editor.dirty || editor.loading || editor.saving} onClick={save}><Save size={16} />{editor.saving ? '正在保存' : '保存设置'}</button>
+      <button type="button" className={styles.primary} disabled={!canEdit || !editor.dirty || editor.loading || editor.saving} onClick={save}><Save size={16} />{editor.saving ? '正在保存' : '保存设置'}</button>
     </>}
     <p role="status">{editor.status || '正在读取通用设置'}</p>
     {editor.error && <div role="alert" className={styles.error}>{editor.error}
-      <button type="button" disabled={editor.loading || editor.saving} onClick={reload}><RefreshCw size={16} />重新读取</button>
-    </div>}
+      <button type="button" disabled={!canEdit || editor.loading || editor.saving} onClick={reload}><RefreshCw size={16} />重新读取</button>
+    </div>}</>}
   </dialog>)}</>;
 }
