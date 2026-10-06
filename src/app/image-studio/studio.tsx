@@ -6,6 +6,7 @@ import { saveMainImageReminder, skipMainImageReminder } from './main-image-remin
 import { ContextClipboardActions } from '@/components/ContextClipboardActions';
 
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Heart, ChevronDown, ChevronRight, Clipboard, Copy, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
 import { ContextVersionLabel, useModuleContextVersion } from './context-version-label';
@@ -14,6 +15,7 @@ import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { UploadedImagePicker } from '@/components/UploadedImagePicker';
 import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
 import { scrollToWorkbenchHeader } from '@/lib/navigation/scroll-to-workbench-header';
+import { replaceImageModuleLocation } from '@/lib/navigation/image-module-location';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useUnsavedNavigation } from '@/lib/hooks/use-unsaved-navigation';
@@ -182,6 +184,8 @@ async function copyStudioText(value: string) {
 }
 
 export default function ImageStudio({ isAdmin, userId, templateWorkbench = false }: { isAdmin: boolean; userId: string; templateWorkbench?: boolean }) {
+  const routeQuery = useSearchParams()?.toString() || '';
+  const routedContentHandled = useRef('');
   const { confirm, prompt: askPresetName, productDialog } = useProductDialog();
   const presetSources = useRef(new Map<string, PresetSourceReader>());
   const registerPresetSource = useCallback((id: string, read: PresetSourceReader | null) => {
@@ -359,6 +363,8 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     finally { requested.forEach(id => hydratingIds.current.delete(id)); setHydrating(hydratingIds.current.size > 0); }
   }, []);
   const navigateToModule = useCallback((group: string, id: string, options: ModuleNavigationOptions = {}) => {
+    replaceImageModuleLocation(id);
+    routedContentHandled.current = `${userId}:${window.location.search}`;
     setError('');
     setCoverView(false);
     setSelectedGroup(group);
@@ -369,26 +375,29 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     setPendingModuleScroll({ target: 'module', id, group, token: ++moduleScrollSequence.current, behavior: options.behavior || 'smooth', markViewed: templateWorkbench && options.markViewed !== false });
     if (options.ensureLoaded !== false && !modules.some(module => module.id === id)) void hydrateModules([id]);
   }, [hydrateModules, modules, templateWorkbench, userId]);
-  const routedContentHandled = useRef(false);
   useEffect(() => {
-    if (routedContentHandled.current || loading) return;
+    if (loading || !viewRestored) return;
+    const routeKey = `${userId}:${window.location.search}`;
+    if (routedContentHandled.current === routeKey) return;
     const params = new URLSearchParams(window.location.search);
     const moduleId = params.get('moduleId');
     const presetId = params.get('presetId');
     if (moduleId) {
       const target = directory.find(item => item.id === moduleId);
       if (target) {
-        routedContentHandled.current = true;
         navigateToModule(target.groupName || '未分组', moduleId, { behavior: 'auto' });
       } else {
-        routedContentHandled.current = true;
+        routedContentHandled.current = routeKey;
         setError('指定的图片模板不存在或当前不可用');
       }
     } else if (presetId) {
-      routedContentHandled.current = true;
+      routedContentHandled.current = routeKey;
       void openPresetLibrary();
+    } else {
+      routedContentHandled.current = routeKey;
+      if (params.get('view') === 'covers') setCoverView(true);
     }
-  }, [directory, loading, navigateToModule]);
+  }, [directory, loading, navigateToModule, routeQuery, userId, viewRestored]);
   async function createModule() {
     if (createLock.current) return;
     createLock.current = true; setCreating(true); setError('');
@@ -633,10 +642,17 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
   const resetSidebarExpansion = () => { setExpandedGroups([]); setImageGenerationExpanded(false); };
   const navigateToImageSection = (event: React.MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
+    replaceImageModuleLocation(null);
+    routedContentHandled.current = `${userId}:${window.location.search}`;
     setCoverView(false);
     setImageGenerationExpanded(true);
     setRequestedView({ viewerId: userId, moduleId: '', token: 0 });
     setPendingModuleScroll({ target: 'header', id: 'image-generation', group: selectedGroup, token: ++moduleScrollSequence.current, behavior: 'smooth', markViewed: false });
+  };
+  const navigateToCovers = () => {
+    replaceImageModuleLocation(null, true);
+    routedContentHandled.current = `${userId}:${window.location.search}`;
+    setPendingModuleScroll(null); setCoverView(true);
   };
   const imageSectionOpen = imageGenerationExpanded || hasAnyUnread;
   return <>{productDialog}{(<main ref={pageRef} className={`${styles.page} ${templateWorkbench ? styles.templateWorkbench : ''}`}>
@@ -688,7 +704,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
             onClick={() => navigateToModule(group, item.id)}><span className={styles.navName} title={item.name}>{item.name}</span>{attention.unread.has(item.id) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</button>)}</div>
         </div>)}
       </>}
-      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={() => { setPendingModuleScroll(null); setCoverView(true); }}>全部封面{navigation.some(item => attention.unread.has(item.id)) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}<small title={`共 ${navigation.length} 个模块`}>{navigation.length}项</small></button>
+      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={navigateToCovers}>全部封面{navigation.some(item => attention.unread.has(item.id)) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}<small title={`共 ${navigation.length} 个模块`}>{navigation.length}项</small></button>
     </aside>
     {templateWorkbench && <nav ref={mobileModuleNavRef} className={styles.mobileModuleNav} aria-label="图片模块导航">
       <div className={styles.mobileMajorLinks}>
@@ -703,7 +719,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
         {!Object.keys(groupedModules).length && <option value="">暂无分组</option>}
         {Object.entries(groupedModules).map(([group, items]) => <option key={group} value={group}>{group} ({items.length}项){items.some(item => attention.unread.has(item.id)) ? ' · 未读' : ''}</option>)}
       </select></label>
-      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-pressed={coverView} onClick={() => { setPendingModuleScroll(null); setCoverView(true); }}>全部封面{navigation.some(item => attention.unread.has(item.id)) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />} <small title={`共 ${navigation.length} 个模块`}>{navigation.length}项</small></button>
+      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-pressed={coverView} onClick={navigateToCovers}>全部封面{navigation.some(item => attention.unread.has(item.id)) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />} <small title={`共 ${navigation.length} 个模块`}>{navigation.length}项</small></button>
       <label className={styles.mobileModulePicker}><span>模块</span><select aria-label="选择图片模块" value={!coverView && groupedModules[selectedGroup]?.some(item => item.id === active) ? active : ''} onChange={event => {
         if (event.target.value) navigateToModule(selectedGroup, event.target.value);
       }}>
@@ -728,7 +744,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     <div hidden={coverView}>
     {modules.map(module => <ImageStudioBlock key={module.id} templateWorkbench={templateWorkbench} module={module} hidden={coverView || Boolean(selectedGroup && module.groupName !== selectedGroup)} onMetadataChange={updateModuleMetadata} groups={groups} onDeleteGroup={deleteGroup} isAdmin={isAdmin} onToggleSharing={toggleModuleSharing} sharingId={presetSharingId}
       onModuleDelete={id => { removedModuleIds.current.add(id); setModules(current => current.filter(item => item.id !== id)); setDirectory(current => current.filter(item => item.id !== id)); setActive(current => current === id ? '' : current); }}
-      userId={userId} settings={settings} globalContextDraft={isAdmin ? globalEditor.draft?.context : undefined} globalSettingsDirty={globalEditor.dirty || globalEditor.saving} settingsError={globalEditor.error} active={!coverView && active === module.id && module.groupName === selectedGroup} onActivate={() => setActive(module.id)}
+      userId={userId} settings={settings} globalContextDraft={isAdmin ? globalEditor.draft?.context : undefined} globalSettingsDirty={globalEditor.dirty || globalEditor.saving} settingsError={globalEditor.error} active={!coverView && active === module.id && module.groupName === selectedGroup} onActivate={() => { replaceImageModuleLocation(module.id); routedContentHandled.current = `${userId}:${window.location.search}`; setActive(module.id); }}
       onManagePresets={() => void openPresetLibrary(module.id)} registerPresetSource={registerPresetSource}
       quickPresetVersion={quickPresetVersion} viewToken={requestedView.viewerId === userId && requestedView.moduleId === module.id ? requestedView.token : 0} onResultsViewed={attention.markViewed} onResultsAvailable={attention.refresh}
       onModuleChange={next => { setModules(current => current.map(item => item.id === next.id ? { ...next, name: item.name, groupName: item.groupName } : item)); }}
