@@ -48,7 +48,9 @@
 - 不得在 `sd2.youdoodesign.com`、design 域名、Mac 本地 Cloudflare Tunnel 或旧 `trycloudflare` 链路上做默认修改、默认部署、默认验证或默认排查。唯一例外是用户明确要求“旧入口 / design 域名 / 回滚 / 迁移核对”时，才可只读确认旧入口状态，并且不得把它的结果当成 `sd2.youdooart.com` 生产结论。
 - `sd2.youdooart.com` 必须直接打开服务器网站，不得用跳转临时代替。飞书 OAuth、回调地址、登录后跳转地址和前端公开域名配置都必须以 `sd2.youdooart.com` 为准；登录后跳回旧域名时，按配置错误处理。
 - 服务器默认是 `42.193.221.253:22`，普通操作用户 `gouki`；线上 nginx 反代到 `127.0.0.1:3302`，systemd 服务名 `sd2-gray.service`，服务器应用目录 `/srv/video-api-debugger/app`，公网响应应能看到 `X-SD2-Origin: server-42-193` 这类服务器来源标记。
-- 最近已发布源码（2026-10-07）：`/Users/gouki-youdoo/.codex/worktrees/cutout-validation-paste-20261006/video-api-debugger`，分支`codex/image-compare-20261006`，v0.51.0，实际built/deployed-source `b5c8b9f82bebc38a62837e5c289bbb19e7c4fbb5`，BUILD `w2dFDm8K2jjpZHZ9uQopw`；纯记录HEAD不改变运行提交。LIKE21/AVUI21共享喜欢动画终态/无计数圆背板20%缩小、人物分格主区及可选参考图→生成→唯一正文已部署，原双击/Enter预览已同批补回；源码19文件、服务器候选内置类型/lint、15公网静态SHA、Git/回退与健康检查完成，0浏览器/业务回归/收费生成，功能及旧客户端更新提醒待用户手动验收。资料在正式根`docs/materials/2026-10-07-feedback-24h/ui21-v0.51.0/`，当前表见同日反馈工单LIKE21/AVUI21节。新明确授权仅替代这两项的前版冻结，不把其他反馈自动结项。
+- 最近已发布源码（2026-10-07）：`/Users/gouki-youdoo/.codex/worktrees/cutout-validation-paste-20261006/video-api-debugger`，分支`codex/image-compare-20261006`，v0.51.1，实际built/deployed-source `30e16ef33e478cbbf884b5c1266ea5e98f46d26c`，BUILD `8wHmI-2KqZwqjKsRcfpyr`；纯记录HEAD不改变运行提交。VREF22/NAV22将视频模板图片参考区移到需求框上方，复用图库、缩略图、预览、移除、排序与原草稿/素材用途；只移除顶栏超分快捷入口。合法共享关联的展示查询复用原模板可读权限，文案模型仍只读文字；9文件应用diff、服务器候选内置类型/lint、31公网静态SHA、健康/Git/回退检查完成，0功能/浏览器/收费生成验收。真实界面、共享素材与旧客户端提示待用户手动验收。正式资料`docs/materials/2026-10-07-feedback-24h/vref22-v0.51.1/`与同日反馈工单VREF22/NAV22节；其他待办不自动结项。
+- 上轮v0.51.0的LIKE21/AVUI21运行源b5c8b9f、BUILD w2dFDm8K2jjpZHZ9uQopw保留为历史：喜欢终态/圆背板缩小、头像分格与可选参考链路及双击/Enter预览已部署，仍未功能手验。原19文件/15公网静态证据在`docs/materials/2026-10-07-feedback-24h/ui21-v0.51.0/`，不以本次31资源检查冒称旧功能实测。
+- 本轮v0.51.1保护发布：标签`release/vref22-nav22-v0.51.1-20261007`与`rollback/pre-vref22-nav22-v0.51.0-20261007`已推送；回退源码`/srv/video-api-debugger/releases/b5c8b9f82bebc38a62837e5c289bbb19e7c4fbb5-vref22-rollback-source`，回退构建`/srv/video-api-debugger/app/.next-prod-prev-vref22-30e16ef33e47`。只重启web，图片worker PID1043189/实例不变，storage/uploads/videos原持久目录未覆盖；跨盘保护切换、根盘最后余923124KB大于512000KB保护线，下次发布重新核容量。旧回退不删除；私人截图/工单/索引只在正式根本机保留，不公开Git。
 - 前版60b/v0.50.0/BUILD Wflt的SIDE/CMP/PAGE18限定10项最小实页PASS保留为历史，只对应该产物，不冒称v0.51.0功能验收；其主管浏览器session已停止。原17项+PAGE18完整状态见`tasks/todo/2026-10-04-template-context-version-code.md`第17节，第18节BUX保留。PAGE18按容器列数×最多3行，cursor下批进下一页，账号/模块或批次隔离恢复；resize保可见项、预读最多20批，失效位置安全回退，不无限追加。
 - CUT-A2本人绑定、NAV2真实用途图/脚本、PIN1真正位置、AUD20-D01人物来源/未读口径漏接、FB07其他布局/折叠/等待图及重复暗底、真实付费BUX结果ZIP/物理触屏/clipboard等缺口仍保留。后续无新明确实施或验收授权时不自动改源、测试、收费或发布；收到同对象新授权按现有流程继续，不要求重复确认。当前实际动画、参考生成效果、裁格CORS、跨账号恢复和旧客户端更新提醒未验证，不使用旧照片或构建冒充。
 - 保护发布：原60b/Wflt源码与构建回退保留，标签`rollback/pre-like21-avui21-v0.50.0-20261007`；中间71de构建另保留，最终发布标签`release/like21-avui21-v0.51.0-final-20261007`。只重启web，图片worker PID1043189与实例不变；源同步排除.env/依赖/构建/storage/上传/视频/数据库，不删用户资料或旧回退。跨盘按实测暂存，根盘最后余966372KB且保护线512000KB，后续重新核容量。正式根私人反馈/作品/资料索引不推公开Git，应用分支只提交安全源码和脱敏运行记录；发布前重新核`.deployed-commit`/BUILD_ID与实际源，服务器`.git`不作为部署来源，不默认git pull或沿用历史worktree。喜欢、耗时及抠图历史沿固定工单与资料索引检索。
@@ -70,6 +72,7 @@
 
 ## UI 规则
 
+- 2026-10-07确认：视频模板需求输入框上方使用生图模板同款参考图区，沿用素材ID、槽位、首尾帧和草稿链路；视频/音频/参数按需展开，不重复图片列表。顶部导航移除“超分”，原功能和其他入口保留。文案模型仍按现有文字能力运行，未确认任务不自动重试，真实功能由用户手动验收；正式原话/资料在根目录同日反馈工单VREF22/NAV22节和资料索引，私人原件不公开Git。
 - 所有生成记录列表、任务记录列表、产出记录列表、项目内生成列表和视频卡生成列表，最左侧第一列必须是视频截图/缩略图。
 - 生成记录列表不得让提示词、日期、状态、项目名或成本信息直接顶到最左侧；视觉扫描入口必须先看到对应视频画面。
 - 视频截图优先使用任务缩略图、首帧、本地视频截图或已有产出预览图；没有可用截图时，也必须保留尺寸稳定的缩略图占位，并明确表现为“暂无截图/预览不可用”，避免列表布局跳动。
