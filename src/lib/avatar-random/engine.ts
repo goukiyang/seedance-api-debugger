@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { AVATAR_CATALOG_VERSION, catalog, fieldLabels, identityFields, normalizeCatalogValue, weightedCatalogPool } from './catalog';
+import { AVATAR_CATALOG_VERSION, catalog, descriptionFirstFields, fieldLabels, identityFields, normalizeCatalogValue, weightedCatalogPool } from './catalog';
 import { AVATAR_COMPILER_VERSION, AVATAR_RULE_VERSION, type AvatarRules, type AvatarConstraints, type AvatarDNA, type AvatarField, type AvatarCandidate, type AvatarDetail } from './types';
 import { StudioError } from '@/lib/image-studio/tasks';
 import { validateDescriptionConstraints } from './description-contract';
@@ -32,7 +32,7 @@ export function randomAvatar(rules: AvatarRules, constraints: AvatarConstraints,
   for (const key of Object.keys(catalog)) {
     let explicit: AvatarField | undefined = constraints.explicit[key];
     const choice = rules.choices[key];
-    if (explicit && choice && explicit.value !== choice && !['nationality', 'ancestry', 'hair_shape', 'hair_texture', 'bangs', 'parting', 'hair_arrangement'].includes(key) && rules.choiceSources?.[key] !== 'config' && (rules.choiceEditedAt?.[key] || 0) > (rules.descriptionEditedAt || 0)) explicit = undefined;
+    if (explicit && choice && explicit.value !== choice && !descriptionFirstFields.includes(key) && rules.choiceSources?.[key] !== 'config' && (rules.choiceEditedAt?.[key] || 0) > (rules.descriptionEditedAt || 0)) explicit = undefined;
     const userChoice = choice && rules.choiceSources?.[key] !== 'config';
     const fixed = explicit?.value ? explicit.value : userChoice ? choice : rules.locks[key]?.value || choice;
     if (fixed && explicit?.excluded?.includes(fixed)) throw new StudioError(`固定条件与排除要求冲突：${fixed}`);
@@ -54,7 +54,10 @@ export function randomAvatar(rules: AvatarRules, constraints: AvatarConstraints,
     const soft = constraints.soft?.[key];
     if (soft?.value && !explicit?.excluded?.includes(soft.value)) { fields[key] = { ...soft, source: 'inferred', locked: false }; continue; }
     // Nationality is not inferred from appearance or assigned randomly.
-    if (['nationality', 'ancestry'].includes(key) && !explicit?.excluded?.length) continue;
+    if (['nationality', 'ancestry'].includes(key)) {
+      if (explicit?.excluded?.length) fields[key] = { ...explicit, value: '', source: 'user', locked: false };
+      continue;
+    }
     let pool = weightedCatalogPool(key);
     if (!only && !styling && ['face_shape','eye_shape','hair_length'].includes(key)) { const different = pool.filter(v=>!used.some(d=>d.fields[key].value===v)); if(different.length)pool=different; }
     if (constraints.scopes.includes('office') && key === 'clothing') pool = ['素色通勤衬衫', '简洁商务外套', '简洁针织衫'];
@@ -91,7 +94,7 @@ export function randomAvatar(rules: AvatarRules, constraints: AvatarConstraints,
     const resolvedLocation = location[field.value] || {kind:key === 'feature' ? 'natural' as const : 'accessory' as const,side:'none' as const,position:key === 'feature' ? '脸部（位置未指定）' : key === 'glasses' ? '眼部' : '随饰品对应位置'};
     details.push({ ...field, ...resolvedLocation, prominence: details.some(d => d.prominence === 'main') ? 'secondary' : 'main' });
   }
-  for(const [key,field] of Object.entries(fields)){const overridden=rules.choices[key]&&!['nationality','ancestry','hair_shape','hair_texture','bangs','parting','hair_arrangement'].includes(key)&&rules.choiceSources?.[key]!=='config'&&(rules.choiceEditedAt?.[key]||0)>(rules.descriptionEditedAt||0);const excluded=overridden?undefined:constraints.explicit[key]?.excluded;if(excluded?.length)fields[key]={...field,excluded};}
+  for(const [key,field] of Object.entries(fields)){const overridden=rules.choices[key]&&!descriptionFirstFields.includes(key)&&rules.choiceSources?.[key]!=='config'&&(rules.choiceEditedAt?.[key]||0)>(rules.descriptionEditedAt||0);const excluded=overridden?undefined:constraints.explicit[key]?.excluded;if(excluded?.length)fields[key]={...field,excluded};}
   if(details.filter(d=>d.prominence!=='micro').length>budget) warnings.push('明确指定的特征超过默认预算，已全部保留；不会再增加随机记忆点');
   if(Number(fields.age.value)<16 && details.some(d=>d.kind==='trace')) warnings.push('儿童的明确伤痕要求已保留，请人工确认适用性');
   return { fields, details, seed, ruleVersion: AVATAR_RULE_VERSION, catalogVersion: AVATAR_CATALOG_VERSION, featureBudget: budget, samplingContext:{used:used.map(d=>Object.fromEntries(Object.entries(d.fields).map(([k,f])=>[k,f.value]))),action:only?`tweak:${only}`:styling?'styling':'new'}, warnings };

@@ -1,4 +1,4 @@
-import { catalog, fieldLabels } from './catalog';
+import { catalog, descriptionFirstFields, fieldLabels } from './catalog';
 import type { AvatarConstraints, AvatarField, AvatarRules } from './types';
 
 export function intentIssues(constraints: AvatarConstraints) {
@@ -22,17 +22,17 @@ export function intentView(constraints: AvatarConstraints) {
     summary: constraints.summary || '已保留原描述中可确认的条件。',
     explicit: [...fields, ...constraints.details.map(detail => detail.value), ...members, ...(constraints.background ? [`背景：${constraints.background}`] : [])],
     soft: [...Object.entries(constraints.soft || {}).map(([key, field]) => `${fieldLabels[key]}：${field.value}`), ...constraints.scopes.map(scope => scopeLabels[scope] || scope)],
-    randomizable: Object.keys(catalog).filter(key => !constraints.explicit[key]?.value && !constraints.members?.some(member => member.explicit[key]?.value)).map(key => fieldLabels[key]),
+    randomizable: Object.keys(catalog).filter(key => !['nationality', 'ancestry'].includes(key) && !constraints.explicit[key]?.value && !constraints.members?.some(member => member.explicit[key]?.value)).map(key => fieldLabels[key]),
     issues: intentIssues(constraints),
   };
 }
 export function effectiveConditions(constraints: AvatarConstraints, rules: AvatarRules) {
   return Object.keys(catalog).flatMap(key=>{
     let explicit:AvatarField|undefined=constraints.explicit[key];const choice=rules.choices[key];
-    if(explicit&&choice&&explicit.value!==choice&&rules.choiceSources?.[key]!=='config'&&(rules.choiceEditedAt?.[key]||0)>(rules.descriptionEditedAt||0))explicit=undefined;
+    if(explicit&&choice&&explicit.value!==choice&&!descriptionFirstFields.includes(key)&&rules.choiceSources?.[key]!=='config'&&(rules.choiceEditedAt?.[key]||0)>(rules.descriptionEditedAt||0))explicit=undefined;
     const value=explicit?.value||(choice&&rules.choiceSources?.[key]!=='config'?choice:rules.locks[key]?.value||choice);
     const excluded=explicit?.excluded||[];
-    return value||excluded.length?[`${fieldLabels[key]}：${value||'允许随机'}${excluded.length?`；排除${excluded.join('、')}`:''}`]:[];
+    return value||excluded.length?[`${fieldLabels[key]}：${value||(['nationality','ancestry'].includes(key)?'未指定':'允许随机')}${excluded.length?`；排除${excluded.join('、')}`:''}`]:[];
   });
 }
 

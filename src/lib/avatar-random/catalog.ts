@@ -23,6 +23,7 @@ export function normalizeCatalogExclusions(key: string, values: string[]) {
 }
 export const fieldLabels: Record<string, string> = { gender: '性别', age: '年龄', hair_length: '发长', glasses: '眼镜', feature: '面部特征', accessory: '饰品', face_shape: '脸型', hair_color: '发色', skin_tone: '肤色', temperament: '气质', body_type: '体型', expression: '表情', clothing: '穿着',face_width:'脸部宽度',face_length:'脸部长度',cheekbone:'颧骨',jaw:'下颌',chin:'下巴',eye_shape:'眼型',eye_size:'眼睛大小',eye_spacing:'眼距',eye_angle:'眼角',eyebrow_shape:'眉型',eyebrow_thickness:'眉毛浓淡',nose_length:'鼻长',nose_bridge_height:'鼻梁',nose_width:'鼻宽',nose_tip:'鼻尖',mouth_width:'嘴宽',upper_lip:'上唇',lower_lip:'下唇',mouth_corner:'嘴角',skin_temperature:'肤色冷暖',skin_detail:'皮肤纹理',hair_shape:'发型轮廓',hair_texture:'头发质地',bangs:'刘海',parting:'分发' };
 export const quickFields = ['gender', 'age', 'hair_length', 'glasses', 'feature', 'accessory'];
+export const descriptionFirstFields: readonly string[] = ['nationality', 'ancestry', 'hair_shape', 'hair_texture', 'bangs', 'parting', 'hair_arrangement'];
 fieldLabels.facial_hair = '胡须';
 fieldLabels.nationality = '国家 / 国籍';
 fieldLabels.ancestry = '背景 / 混血';
