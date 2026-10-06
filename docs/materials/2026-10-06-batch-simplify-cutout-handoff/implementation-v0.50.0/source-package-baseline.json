@@ -1,0 +1,1 @@
+{"commit":"9adbaa2d77798c05d9e8a463337e7feccbe1e66a","sourceFiles":855,"directPublicImports":["public/styles/loading.css","public/tools/ultimate-canvas/like-button.css"],"sha256":"59033a2ff074258d67f6638775a31c551a65573160aa6ef098c958f217440783","bytes":1749551,"excludes":["private docs/materials","tasks","credentials","DB","runtime uploads","dependencies","build output"]}

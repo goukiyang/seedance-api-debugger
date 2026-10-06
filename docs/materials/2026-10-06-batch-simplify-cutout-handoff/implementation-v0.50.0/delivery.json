@@ -1,0 +1,147 @@
+{
+  "version": "0.50.0",
+  "commit": "391f7414f99a3aaccb5b3133432858f5b8bee8d3",
+  "build": "vY7OzJRcpu43z04VlqWd_",
+  "markers": [
+    "data-image-preview-pane",
+    "还原两图",
+    "粘贴并替换全文",
+    "当前账户尚未绑定抠图授权",
+    "确认生成",
+    "本批资产",
+    "公开喜欢人数"
+  ],
+  "assets": [
+    {
+      "url": "/_next/static/chunks/9113-ced9dbb3bffcae1b.js",
+      "sha256": "092cb8e410319c370d37a15c56d73bf6f912503405c0fa6f7624cc71daebb989"
+    },
+    {
+      "url": "/_next/static/chunks/app/template-studio/page-bdb8be263a1d4902.js",
+      "sha256": "fa006cc19e924289e75a41e5d119e93fe602275658f4c17f23ce544c8f5e0098"
+    },
+    {
+      "url": "/_next/static/chunks/app/cutout/page-eeb0cdb0b2552f41.js",
+      "sha256": "e35d9d094cfdd77d83400647ccb01d7c7772c3b71668d1a14f224c1ff9b02c85"
+    },
+    {
+      "url": "/_next/static/chunks/7758-03dd2288e5f53d65.js",
+      "sha256": "960660cf2896df83d24e9dfe59cb87c556148c5495890b1335a37ab13b1eded2"
+    },
+    {
+      "url": "/_next/static/chunks/5694-16a1888f77cb77e2.js",
+      "sha256": "9a16702de2e43b7089d50a33758b9200701493bd51f715cd94c2f0f446417ed5"
+    },
+    {
+      "url": "/_next/static/css/d49f697430cf33e3.css",
+      "sha256": "3799efcc4b639544c200091d6274fa07bcbf2975dae4e5d4eea8705ef6644d63"
+    },
+    {
+      "url": "/home/video.png",
+      "sha256": "a394bf07b0989bcbca37d9efcb6afe8c1020930b520b91dabc3670efd6d13ddf"
+    },
+    {
+      "url": "/home/canvas.png",
+      "sha256": "d485ac4139788373adeb8a2070df034b13c38b0f4003c69c0eaf3f32692f4c3a"
+    },
+    {
+      "url": "/home/templates.png",
+      "sha256": "e5a8a5d127649949ffbb67167ac7421b1eeeeebcb28484c2b824c4632db924c2"
+    },
+    {
+      "url": "/home/avatar.png",
+      "sha256": "0f2c8a47b09960935254fb46340c9cd8a270c02cac377fabaf0f1991a4d097ac"
+    },
+    {
+      "url": "/home/cutout.png",
+      "sha256": "9ca146a239e36e93b29d8b325ca7c497a75f86770731b3918280fe356edba5c0"
+    }
+  ],
+  "homeMedia": "Original virtual illustrations, not real output samples or product screenshots",
+  "acceptance": "Compiled/static provenance only; not authenticated UI or real cutout acceptance",
+  "checkedAt": "2026-10-06T16:21:01.631Z",
+  "changedFiles": [
+    "package-lock.json",
+    "package.json",
+    "public/home/avatar.png",
+    "public/home/canvas.png",
+    "public/home/cutout.png",
+    "public/home/templates.png",
+    "public/home/video.png",
+    "scripts/create-home-art.mjs",
+    "scripts/planned-followups-archive.mjs",
+    "scripts/planned-followups-artifact-proof.mjs",
+    "scripts/planned-followups-browser-smoke.ts",
+    "scripts/planned-followups-contract-smoke.ts",
+    "scripts/planned-followups-deploy.sh",
+    "scripts/planned-followups-release-window.mjs",
+    "scripts/planned-followups-source-proof.mjs",
+    "src/app/assets/page.tsx",
+    "src/app/cutout/page.tsx",
+    "src/app/home.module.css",
+    "src/app/image-studio/batch-files.ts",
+    "src/app/image-studio/batch-results.tsx",
+    "src/app/image-studio/ratio-picker.tsx",
+    "src/app/image-studio/studio.module.css",
+    "src/app/image-studio/studio.tsx",
+    "src/app/image-studio/use-studio-batch.tsx",
+    "src/app/page.tsx",
+    "src/app/tools/avatar-studio/studio.tsx",
+    "src/components/AppShell.tsx",
+    "src/components/ContextClipboardActions.tsx",
+    "src/components/ImageComparisonPicker.module.css",
+    "src/components/ImageComparisonPicker.tsx",
+    "src/components/ZoomableImagePreview.module.css",
+    "src/components/ZoomableImagePreview.tsx",
+    "src/components/useImagePreviewHistoryDismiss.ts",
+    "src/lib/cutout/client.ts",
+    "src/lib/cutout/models.ts",
+    "src/lib/cutout/receipt.ts",
+    "src/lib/hooks/use-media-preview-state.ts",
+    "src/lib/hooks/use-remembered-scroll.ts",
+    "src/lib/image-studio/batch-contract.ts",
+    "src/lib/image-studio/batch-receipt.ts",
+    "src/lib/image-studio/batches.ts",
+    "src/lib/media/image-comparison.ts",
+    "src/lib/navigation/scroll-to-workbench-header.ts",
+    "src/lib/release.ts",
+    "tsconfig.json"
+  ],
+  "sourceTree": "690b0ac4d608552d9a0082b1dfe0b7c8c1da5c3a",
+  "functionalSourceCommit": "bb8587d7b7895f04f8699b318148ddd52fa9cf43",
+  "builtSourceCommit": "391f7414f99a3aaccb5b3133432858f5b8bee8d3",
+  "deployedSourceCommit": "391f7414f99a3aaccb5b3133432858f5b8bee8d3",
+  "rollbackTag": "rollback/sd2-v0.49.0-before-followups-20261006",
+  "rollbackCommit": "9adbaa2d77798c05d9e8a463337e7feccbe1e66a",
+  "rollbackBuild": "qm5JfAJ6THxzn3X5MOiUZ",
+  "rollbackBuildDirectory": "/srv/video-api-debugger/app/.next-prod-prev-followups-391f7414f99a",
+  "rollbackSourceDirectory": "/srv/video-api-debugger/releases/9adbaa2d77798c05d9e8a463337e7feccbe1e66a-followups-rollback-source",
+  "rollbackScript": "/tmp/sd2-followups-eb39d374613e/rollback-live.sh",
+  "worker": {
+    "pid": 1043189,
+    "invocationId": "121606e35406489ea26faa2490c7de65",
+    "retained": true
+  },
+  "web": {
+    "pid": 2187463,
+    "workingDirectory": "/srv/video-api-debugger/app"
+  },
+  "runtimeMatchedFiles": 875,
+  "baselineMatchedFiles": 854,
+  "rootDiskFreeKB": 997388,
+  "misjudgments": [
+    "Supervisor LIKE privacy/count suggestion corrected before implementation",
+    "Supervisor scope narrowed to CMP corrected before build/publish",
+    "Lead same-filesystem assumption corrected before live switch"
+  ],
+  "realBrowserAcceptance": "Supervisor confirmed public v0.50.0 and started Ego68 unified UI checks; source frozen at 391f741 pending complete feedback; no lead real browser action or additional tests",
+  "blocked": [
+    "CUT-A2 account binding configured=false; zero real image task or quality evidence",
+    "NAV2 real usage images/script mapping missing; home media original illustrations only",
+    "PIN1 actual creative pin location unknown"
+  ],
+  "fees": 0,
+  "dependenciesInstalled": 0,
+  "dbMigrations": 0,
+  "credentialReads": 0
+}

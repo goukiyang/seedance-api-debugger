@@ -134,3 +134,41 @@ CTX1先确定编码语义和安全存储契约；CTX2与CTX3可在边界隔离�
 附件：/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/codex-clipboard-26d3afd9-1a27-4df3-b50c-56913ad90d58.png，仅现有布局参考，无新码设计/实施证明。
 回执：按CTX1-CTX4逐项报告真实实现、检查、Git/发布与待手动验收状态，说明应用版本、实际入口、回退点、缺失旧快照处理及未做项；不能将工单完成说成产品完成。
 ```
+
+## 17. 大图自由选择对比对象与同批收尾（2026-10-07公开安全回执）
+
+此为本分支聚焦公开回执；正式根第17/18节完整授权、历史及私有证据保留，不用本副本整份覆盖正式根。
+
+### 最新整批授权清单（2026-10-06，覆盖下方历史范围）
+
+用户最新要求“好好整理下，不要遗漏，一起做完，一起一次性检查验收”：以下17行合入同一个v0.50.0批次，2026-10-07已保护发布，当前为主管真实UI整批核查阶段，尚未整单验收通过。全部应用源码及配套修改后冻结版本，一次统一功能/浏览器/DOM/必要截图及零费用回归Verify→Review；收齐问题整批修正后统一复验。不执行收费生成，不扩权、不覆盖或删除用户数据。第18节BUX1/BUX1-R/BUX1-S及CUTD1交接已完整读取，新增记录diff仅作记录依据，未作为应用补丁或整份覆盖。其原“独立/默认手验”描述为交接时历史，当前以本段整批授权为准。
+
+| 编号 | 任务 | 完成标准 | 当前状态 |
+|---|---|---|---|
+| CMP1 | 大图自由对比 | 两侧自由换图、独立定位/可选联动、成功才替换、迟到保护、账号隔离恢复与分层关闭 | 进行中：已实现/隔离通过/部署，主管正式UI核查中 |
+| PASTE1 | 顶部粘贴替换全文 | 全部共享入口覆盖全文，长度整份拒绝、异步/失权保护、光标末尾；普通键盘粘贴不改 | 进行中：已实现/覆盖及异常隔离通过/部署，待正式UI结论 |
+| CUT-F1/F2 | SAM识别及有效任务回执 | namespace SAM尊重available；无效回执不成功、不清原标识与参数 | 进行中：已实现/协议及模拟通过/部署，非真实账号接通 |
+| CUT-A2 | 指定真实图片接通检查 | 正常本人身份/已有绑定/免费能力下指定原图真实结果；无安全前置则明确受阻 | 受阻：本人实际configured=false，未上传/创建任务，真实图/质量0 |
+| NAV2 | 带图首页与脚本入口收尾 | 合法相关用途图片并注明性质、真实脚本入口、保留原权限入口；原创图示不冒充工具样张；含B2首页布局 | 受阻/部分发布：5张原创功能图示及首页布局已部署，真实用途图及脚本映射未完成 |
+| PIN1 | 置顶误标定位 | 定位真实pin入口才修，真实public分享不改 | 受阻：未找到创作置顶入口；真实公开分享保持原作用 |
+| B1 CUT-PICK | 抠图统一图片选择 | ResourceLibraryPicker选可访问原图/正常本机上传，成功才替换，失败保旧 | 进行中：已接入/模拟成功及失败保旧通过/部署，真实上传未测 |
+| B2 HOME-NAV | 首页去左侧导航 | 仅pathname /隐藏aside、占位及无效手机版开关，其他页面侧栏保留 | 进行中：实现/静态Review/部署完成，待正式UI结论 |
+| B3 META-SAVE | 模块常驻已保存文字收口 | 不显示普通已保存，保存中/错误/真实反馈保留，保存机制不改 | 进行中：实现/静态Review/部署完成，待正式UI结论 |
+| B4 META-CODE | 模块header版本码收口 | header不常驻code，上下文编辑及结果历史的code与复制保留 | 进行中：实现/静态Review/部署完成，待正式UI结论 |
+| B5 GEN-QTY | 张数移到生成键下 | 费用/报价/批量语义不变，生成区仍位于主图/参考图后补充正文前 | 进行中：实现/静态Review/部署完成，待正式UI；不执行收费生成 |
+| B6 RATIO-INFO | 比例说明按需显示 | 比例框hover/focus/手机可读，尺寸计算不变，不常驻重复说明 | 进行中：已实现/聚焦隔离通过/部署，真实触屏待核查 |
+| B7 PRESET-LAYOUT | 设置模板操作整理 | 管理/恢复图标+tooltip，首行保存/另存，下一行快捷模板；脏草稿保护 | 进行中：实现/静态Review/部署完成，待正式UI；无新键盘组合键 |
+| SIDE-FIX | 细项定位 | 深链/刷新/切细项同一header目标，正确滚动容器及遮挡/异步恢复，无固定offset/ID硬编码 | 进行中：已实现/动态布局及遮挡隔离通过/部署，原线上现象待正式复核 |
+| BUX1 | 批量入口及扣点确认 | 文件夹主入口+打包勾选；自动数量/预算；一次真实报价确认 | 进行中：已实现/模拟数价及取消零任务通过/部署，待正式免费路径；收费不测 |
+| BUX1-R | 缩略图/资产/导出闭环 | 当前模板直接出现结果；本批资产/受限ZIP可找到；导出失败不生图 | 进行中：已实现/模拟闭环通过/部署，待正式已有结果核查 |
+| BUX1-S | 兼容及安全恢复 | 原纯文字/多变体保留、未知受理保ID、取消确认零上传零任务、账号恢复隔离 | 进行中：已实现/兼容及未知回执隔离通过/部署；硬预算/限流/防重保持 |
+
+2026-10-07保护发布回执（本段为当前状态，下方Verify阶段保留为历史）：实际构建并部署源`391f7414f99a3aaccb5b3133432858f5b8bee8d3`，v0.50.0，BUILD `vY7OzJRcpu43z04VlqWd_`。先前bb8587d候选BUILD `FHGq10QyqLdA29OhTe6k8`已构建成功但未切换，不是当前产物；391f741重新执行了完整服务器候选构建，编译、类型、lint、86静态页面检查通过。391与bb8587d应用src树同为`690b0ac4d608552d9a0082b1dfe0b7c8c1da5c3a`，仅发布脚本变更；built-source/deployed-source均391，不以ops-only等价冒称省略了本次实际构建。14组隔离组件回归及协议证据复用，类型修正影响范围的7组另通过，不能相加虚报21个独立组；本机构建仍未通过旧共享Prisma客户端检查，未安装/修改依赖或跳过类型检查。
+
+公网检查时间`2026-10-06T16:21:01.631Z`（北京时间2026-10-07 00:21:01.631）：release v0.50.0、config及login HTTP200、来源server-42-193；12个必要静态资源HTTP200且SHA一致，包含直接import的`public/styles/loading.css`，完整同commit包没有临时漏补。新运行875文件、原回退854文件比对一致。公开canvas Like CSS仍由既有鉴权返回307，不冒称匿名字节验收。服务器web active/PID2187463；图像worker前后PID1043189及InvocationID `121606e35406489ea26faa2490c7de65`不变，未重启worker，持久storage/uploads/videos原软链保持。健康、静态字节、版本及源码一致性只证明发布，不是UI动效/业务验收。
+
+远端`codex/image-compare-20261006`已推391；保护tag `rollback/sd2-v0.49.0-before-followups-20261006`指向原生产9adbaa2/v0.49.0/BUILD qm5JfAJ6THxzn3X5MOiUZ，远端已核。原构建实际保留`/srv/video-api-debugger/app/.next-prod-prev-followups-391f7414f99a`，原源码`/srv/video-api-debugger/releases/9adbaa2d77798c05d9e8a463337e7feccbe1e66a-followups-rollback-source`；回退脚本`/tmp/sd2-followups-eb39d374613e/rollback-live.sh`仅准备/语法检查，未执行回退演练。release窗口已结束，未清理历史回退/用户资料。发布时实际stat候选设备64784/app64770，跨盘暂存约440064KB；检查根盘1440704KB可容纳一份复制加512000KB保护余量，切换后997388KB，根盘仍紧张，不能据发布成功消除容量风险。
+
+分级/流程误判：有。除了主管此前LIKE私密计数建议和本轮scope误收窄，实施lead本次另有未先stat就把release/app视为同盘的误判；在切正式源/构建/服务前纠正，分别登记全局日志，未清数据/扩大权限。实际发布脚本按设备号决定同盘移动或跨盘单份暂存并核余量。四处服务器类型错误已一次收齐修正，不改权限语义或跳类型。详细[交付及45文件清单](../../docs/materials/2026-10-06-batch-simplify-cutout-handoff/implementation-v0.50.0/delivery.json)、[统一diff](../../docs/materials/2026-10-06-batch-simplify-cutout-handoff/implementation-v0.50.0/source.diff)、[运行证据](../../docs/materials/2026-10-06-batch-simplify-cutout-handoff/implementation-v0.50.0/runtime-final.json)、[公网证据](../../docs/materials/2026-10-06-batch-simplify-cutout-handoff/implementation-v0.50.0/public-final.json)、[完整构建日志](../../docs/materials/2026-10-06-batch-simplify-cutout-handoff/implementation-v0.50.0/build-server-final.log)。原私人图片及账号preflight仅本机，不公开Git/发布。
+
+主管已确认公网0.50.0并开始Ego68同版本真实UI整批核查。按最新指令，source保持391冻结；执行者仅收口记录，不操作真实浏览器、不追加自动测试/生产任务、不改应用或再部署，等待一次收齐缺陷后统一处理。构建与隔离浏览器会话均已结束，主管Ego68保留验收。CUT-A2仍configured=false且真实图/质量0；NAV2真实用途图/脚本映射与PIN1位置未完成，不随发布结项。

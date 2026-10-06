@@ -1,0 +1,17 @@
+{
+  "kind": "isolated fixed regression; not authenticated production evidence",
+  "passed": [
+    "CMP independent position, <1 drag, cursor wheel, linked no jump, navigation preserves comparison",
+    "CMP failed selection keeps image; late requests do not override; internal blank and topmost Escape",
+    "CMP swap/layout retain view; selected reset vs both reset; phone Back closes only top layer",
+    "CMP mobile controls and temporary local selection without upload",
+    "CMP same-image independence, cursor anchor, single-frame pinch and cross-frame isolation",
+    "CUT account-specific unavailable/history message, no task; ResourceLibraryPicker success and failed selection preserve source",
+    "CUT namespace SAM respects available; invalid acceptance retains parameters/key on retry"
+  ],
+  "failures": [],
+  "externalRequests": [],
+  "productionUploads": 0,
+  "productionTasks": 0,
+  "fees": 0
+}

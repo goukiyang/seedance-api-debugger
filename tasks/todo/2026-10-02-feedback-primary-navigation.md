@@ -319,6 +319,8 @@ capabilities.ts明确文案不扣本站点数、上游文字费用由平台承�
 
 ### C1发布回执
 
+2026-10-07 PASTE1新授权替代原插入行为：顶部共享动作改为“粘贴并替换全文”，普通键盘粘贴不改；长度整份拒绝、空/拒绝读取、相同文本不脏、异步变化/卸载/失权保护及光标末尾均有隔离证据。实际391f741/v0.50.0/BUILD vY7OzJRcpu43z04VlqWd_已保护发布，主管正式UI核查中，不冒称真实操作通过。旧v0.36.7事实保留，详见[同一17项回执](2026-10-04-template-context-version-code.md#17-大图自由选择对比对象与同批收尾2026-10-07公开安全回执)。
+
 v0.36.7运行源码8f481400ecfbbcd8b50d021117e77f933221f731，BUILD hdFoauPtV4mwfhsevAtTe；分支codex/canvas-liblib-layout及rollback/2026-10-03-before-context-clipboard-v0.36.7已推送/远端确认，回退指向上一健康f1f6db05347f0713fc1d5186a4b2e1751b3b4fb0。精确归档排除env、DB、私人素材和运行资产，完整包SHA256 9c5ca8a90f86f137416ba9c7b02700155e43d1cdfdfa489e8105a4677023fa94。
 
 发布检查：源码Review、git diff/cached --check、bash -n/node --check通过；服务器不可变release中NEXT_DIST_DIR=.next-prod-candidate npm run build完成，含lint/types。仅既有img性能警告，未扩大到无关整改。候选含复制/粘贴及更新摘要，旧P1定位标记保留，R1重复生成确认未恢复。活动登记/服务器flock、旧commit和BUILD保护、持久资产排除及可写软链接核对实际执行；只重启sd2-gray，worker PID1241475/单元/启动时间不变。
