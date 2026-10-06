@@ -64,7 +64,7 @@ function studioTaskPhase(task: StudioTask) {
   return ({ queued: '等待生成', provider: '生成中', unknown: '生成结果待确认', download: '原图下载中', recover: '恢复原图中', validate: '图片校验中', save: '保存中', stopped: '原图交付停止', failed: '未能交付图片', ready: studioTaskHasDeliveredAsset(task) ? '已完成' : task.status === 'succeeded' ? '图片已移除' : '生成结果待确认' } as Record<string, string>)[phase || '']
     || (task.status === 'running' ? '生成中' : task.status === 'queued' ? '等待生成' : task.status === 'uncertain' ? '生成结果待确认' : '未能交付图片');
 }
-function StudioWaitingImage({ src }: { src?: string }) {
+function StudioWaitingImage({ src }: { src?: string | null }) {
   const [failed, setFailed] = useState(false);
   return <div className={styles.waitingImageFrame}>
     {src && !failed ? <img className={styles.waitingMainImage} src={src} alt="本次输入主图（模糊预览）" onError={() => setFailed(true)} />
