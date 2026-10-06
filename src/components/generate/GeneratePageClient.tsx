@@ -10,8 +10,8 @@ import { GenerationComposer } from '@/components/GenerationComposer';
 import type { ComposerSelectOption } from '@/components/ComposerActionBar';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
-import type { AccountMenuUser } from '@/components/AccountMenu';
 import ComposerTopbar from '@/components/ComposerTopbar';
+import { useAppSession } from '@/lib/context/AppSessionContext';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import {
@@ -279,17 +279,12 @@ interface VideoBranchOption {
   summary?: { task_count: number; charged_credits: number } | null;
 }
 
-type GeneratePageUser = AccountMenuUser & { id: string };
 type ProjectRemovalAction = 'delete' | 'archive';
 
 type PendingProjectRemoval = {
   project: ProjectOption;
   action: ProjectRemovalAction;
 };
-
-interface AuthMeResponse {
-  user: GeneratePageUser | null;
-}
 
 const PROJECT_STORAGE_KEY = 'generate_project_id';
 const GENERATION_PREFERENCE_STORAGE_PREFIX = 'generation_defaults_v1:';
@@ -500,6 +495,14 @@ function asVideoResolution(value?: string | null): VideoResolution | null {
 
 export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientProps) {
   const { confirm, productDialog } = useProductDialog();
+  const {
+    user: currentUser,
+    loadingUser: loadingSessionUser,
+    hasLoadedUser,
+    userLoadError,
+    refreshUser,
+  } = useAppSession();
+  const loadingUser = !hasLoadedUser || loadingSessionUser;
   const surfaceConfig = GENERATE_SURFACE_CONFIG[surface];
   const isIpSurface = surface === 'ip';
   const projectPickerRef = useRef<HTMLDivElement | null>(null);
@@ -542,8 +545,6 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
   // ---- Credit Summary ----
   const [credits, setCredits] = useState<CreditSummary | null>(null);
-  const [currentUser, setCurrentUser] = useState<GeneratePageUser | null>(null);
-  const [loadingUser, setLoadingUser] = useState(true);
   const [h3VideoConfig, setH3VideoConfig] = useState<H3VideoConfig | null>(null);
   const [h3CapabilitiesReady, setH3CapabilitiesReady] = useState(isIpSurface);
   const [seedanceDraftCapability, setSeedanceDraftCapability] = useState<SeedanceDraftCapability>({
@@ -775,34 +776,14 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   // ============================================================================
 
   useEffect(() => {
-    let cancelled = false;
+    if (!hasLoadedUser && !loadingSessionUser) void refreshUser();
+  }, [hasLoadedUser, loadingSessionUser, refreshUser]);
 
-    fetch('/api/auth/me', { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((data: AuthMeResponse) => {
-        if (!cancelled) {
-          if (!isIpSurface && isExternalUser(data.user)) {
-            window.location.replace(externalFallbackPath());
-            return;
-          }
-          setCurrentUser(data.user || null);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setCurrentUser(null);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoadingUser(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isIpSurface]);
+  useEffect(() => {
+    if (!loadingUser && !isIpSurface && isExternalUser(currentUser)) {
+      window.location.replace(externalFallbackPath());
+    }
+  }, [currentUser, isIpSurface, loadingUser]);
 
   useEffect(() => {
     if (!currentUser?.id) return;
@@ -2499,6 +2480,21 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           >
             按当前内容新建任务
           </button>
+        )}
+
+        {loadingUser && (
+          <p className="composer-prefill-notice is-loading" role="status">正在确认登录状态</p>
+        )}
+        {userLoadError && (
+          <div className="composer-prefill-notice" role="alert">
+            <p>{userLoadError}</p>
+            <button type="button" className="btn btn-secondary" disabled={loadingSessionUser} onClick={() => void refreshUser({ force: true })}>
+              <RefreshCw size={16} />重新检查
+            </button>
+          </div>
+        )}
+        {hasLoadedUser && !loadingSessionUser && !currentUser && !userLoadError && (
+          <p className="composer-prefill-notice">请登录后选择参考素材。<Link href="/login">重新登录</Link></p>
         )}
 
         <GenerationComposer
