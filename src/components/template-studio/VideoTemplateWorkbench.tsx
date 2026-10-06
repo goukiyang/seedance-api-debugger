@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent,
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Archive, ArrowDown, ArrowUp, Check, CircleAlert, Eye, Film, FolderOpen,
-  Image as ImageIcon, ImagePlus, LoaderCircle, Plus, Save, Search, Settings, Sparkles, Trash2, X,
+  Image as ImageIcon, LoaderCircle, Plus, Save, Search, Settings, Sparkles, Trash2, X,
 } from 'lucide-react';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { RelativeTime } from '@/components/RelativeTime';
@@ -47,6 +47,7 @@ import type {
 import styles from './template-studio.module.css';
 import VideoContextEditor from './VideoContextEditor';
 import VideoPromptResult from './VideoPromptResult';
+import VideoDraftReferenceImages from './VideoDraftReferenceImages';
 import { isStudioTextModel, studioTextModelLabel, STUDIO_TEXT_MODELS } from '@/lib/template-studio/text-models';
 
 type Props = { userId: string };
@@ -390,7 +391,9 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   const [resultTab, setResultTab] = useState<ResultTab>('prompt');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSlotKey, setPickerSlotKey] = useState<string | null>(null);
+  const [pickerTypes, setPickerTypes] = useState<StudioAssetInput['type'][] | null>(null);
   const [assetBusy, setAssetBusy] = useState(false);
+  const assetUploadLock = useRef(false);
   const [templateDetail, setTemplateDetail] = useState<StudioTemplateDetailResponse | null>(null);
   const [templateDetailBusy, setTemplateDetailBusy] = useState(false);
   const [templateEdit, setTemplateEdit] = useState<StudioTemplateDto | null>(null);
@@ -1051,6 +1054,8 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
 
   async function addAssets(selection: UploadedAssetSelection[], slotKey: string | null = null): Promise<UploadedImagePickerConfirmResult> {
     if (!activeDraft || selection.length === 0) return { success: false, message: '请先选择要加入的素材。' };
+    if (currentUserId.current !== userId || currentDraftId.current !== activeDraft.id || draftRef.current?.id !== activeDraft.id) return { success: false, message: '当前模块已变化，请重新选择素材。' };
+    if (pickerTypes && selection.some(item => !pickerTypes.includes(item.type))) return { success: false, message: '当前入口不支持所选素材类型，请重新选择。' };
     const slot = activeDraft.recipe?.assetSlots.find((item) => item.key === slotKey) || null;
     if (slotKey && !slot) {
       return { success: false, message: '这个素材槽位已变化，请重新打开模板。' };
@@ -1058,11 +1063,12 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
     if (slot && selection.some((item) => !slot.types.includes(item.type))) {
       return { success: false, message: `${slot.label}不支持所选素材类型，请调整选择后重试。` };
     }
-    const existing = new Set(activeDraft.assets.map((item) => item.assetId));
-    const uniqueSelection = selection.filter((item) => !existing.has(item.id));
-    const alreadyBound = slot ? activeDraft.assets.filter((item) => assetSlotKey(item) === slot.key && item.role === slot.role && slot.types.includes(item.type)).length : 0;
+    const currentAssets = draftRef.current.assets;
+    const existing = new Set(currentAssets.map((item) => item.assetId));
+    const uniqueSelection = selection.filter((item) => { if (existing.has(item.id)) return false; existing.add(item.id); return true; });
+    const alreadyBound = slot ? currentAssets.filter((item) => assetSlotKey(item) === slot.key).length : 0;
     const capacity = Math.max(0, Math.min(
-      12 - activeDraft.assets.length,
+      12 - currentAssets.length,
       slot?.maxItems == null ? Number.MAX_SAFE_INTEGER : slot.maxItems - alreadyBound,
     ));
     if (uniqueSelection.length > capacity) {
@@ -1100,18 +1106,39 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
     if (!imageFile) return;
     event.preventDefault();
     if (!activeDraft) return;
+    if (assetUploadLock.current || assetBusy || working || authExpired) { setNotice('请等待当前操作完成后再添加图片。'); return; }
+    if (activeDraft.assets.length >= 12) { setNotice('素材合计最多 12 个，请先移除素材再添加图片。'); return; }
+    assetUploadLock.current = true;
     setAssetBusy(true);
     setNotice('');
     try {
       const assetId = await uploadFile(imageFile);
-      if (currentUserId.current !== userId || draftRef.current?.id !== activeDraft.id) return;
+      if (currentUserId.current !== userId || currentDraftId.current !== activeDraft.id || draftRef.current?.id !== activeDraft.id) return;
+      if (draftRef.current.assets.length >= 12) { setNotice('素材已达到 12 个上限，图片保留在我的素材中，未加入当前模块。'); return; }
+      if (draftRef.current.assets.some(asset => asset.assetId === assetId)) { setNotice('这张图片已在参考素材中。'); return; }
       updateDraft((current) => ({
         ...current,
         assets: [...current.assets, { assetId, role: 'reference', type: 'image' }],
       }));
       setNotice('已把剪贴板图片加入参考素材。');
     } catch (error) { setNotice(messageForFailure(error)); }
-    finally { setAssetBusy(false); }
+    finally { assetUploadLock.current = false; setAssetBusy(false); }
+  }
+
+  function openAssetPicker(slotKey: string | null, types: StudioAssetInput['type'][]) {
+    setPickerSlotKey(slotKey); setPickerTypes(types); setPickerOpen(true);
+  }
+
+  function changeReferenceImages(ids: string[]) {
+    if (!activeDraft) return;
+    updateDraft(current => {
+      if (current.id !== activeDraft.id) return current;
+      const byId = new Map(current.assets.filter(asset => asset.type === 'image').map(asset => [asset.assetId, asset]));
+      const nextImages = ids.flatMap(id => byId.has(id) ? [byId.get(id)!] : []);
+      // 图片只交换原有图片位置；视频、音频及每张图的槽位/角色不随拖动改写。
+      const assets = current.assets.flatMap(asset => asset.type !== 'image' ? [asset] : nextImages.length ? [nextImages.shift()!] : []);
+      return { ...current, assets };
+    });
   }
 
   function changeAsset(index: number, patch: Partial<StudioAssetInput>) {
@@ -1582,12 +1609,13 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   const recipeSlots = activeDraft?.recipe?.assetSlots || [];
   const pickerSlot = activeDraft?.recipe?.assetSlots.find((item) => item.key === pickerSlotKey) || null;
   const pickerSlotCount = pickerSlot && activeDraft
-    ? activeDraft.assets.filter((item) => assetSlotKey(item) === pickerSlot.key && item.role === pickerSlot.role && pickerSlot.types.includes(item.type)).length
+    ? activeDraft.assets.filter((item) => assetSlotKey(item) === pickerSlot.key).length
     : 0;
   const pickerSelectionCapacity = activeDraft
     ? Math.max(0, Math.min(12 - activeDraft.assets.length, pickerSlot?.maxItems == null ? Number.MAX_SAFE_INTEGER : pickerSlot.maxItems - pickerSlotCount))
     : 0;
   const assetRows = activeDraft?.assets.map((asset, index) => ({ asset, index })) || [];
+  const mediaRows = assetRows.filter(({ asset }) => asset.type !== 'image');
   const renderAssetRow = ({ asset, index }: { asset: StudioAssetInput; index: number }) => {
     const assignedSlotKey = assetSlotKey(asset);
     const matchingSlot = recipeSlots.find((slot) => slot.key === assignedSlotKey) || null;
@@ -1833,27 +1861,30 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                         })}
                       </div>
                     ) : null}
+                    <VideoDraftReferenceImages key={`${userId}:${activeDraft.id}`} userId={userId} draft={activeDraft} busy={assetBusy || working || authExpired}
+                      onAdd={slotKey => openAssetPicker(slotKey, ['image'])} onChange={changeReferenceImages} onBind={bindAssetToSlot}
+                      onRole={(index, role) => changeAsset(index, { role })} />
                     <div className={styles.field}>
                       <label htmlFor="studio-prompt">本次需求</label>
                       <textarea id="studio-prompt" value={activeDraft.prompt} maxLength={12000} onPaste={(event) => { void pasteImage(event); }} onChange={(event) => updateDraft((current) => ({ ...current, prompt: event.target.value }))} placeholder="这次想拍什么？描述主体、场景、动作或镜头" />
                       {activeDraft.recipe?.fields.length ? <span className={styles.fieldHint}>已填写的模板字段会随本次操作保存。</span> : null}
                     </div>
                     <details className={styles.sectionRule}>
-                      <summary>参考素材与视频参数（可选）</summary>
-                      <p className={styles.fieldHint}>文案生成仅使用文字说明，不读取图片内容。素材与参数供后续视频生成使用。</p>
-                    <section className={styles.sectionRule} aria-label="参考素材">
-                      <div className={styles.sectionTitle}><span>素材与模板槽位</span>{recipeSlots.length === 0 && <button className={styles.quietButton} type="button" onClick={() => { setPickerSlotKey(null); setPickerOpen(true); }} disabled={assetBusy || activeDraft.assets.length >= 12}><ImagePlus size={15} />添加素材</button>}</div>
+                      <summary>视频、音频与生成参数（可选）</summary>
+                    <section className={styles.sectionRule} aria-label="视频与音频素材">
+                      <div className={styles.sectionTitle}><span>视频、音频与模板槽位</span>{recipeSlots.length === 0 && <button className={styles.quietButton} type="button" onClick={() => openAssetPicker(null, ['video', 'audio'])} disabled={assetBusy || activeDraft.assets.length >= 12}><Plus size={15} />添加视频或音频</button>}</div>
                       {missingSlots.length > 0 && <div className={`${styles.callout} ${styles.calloutWarning}`}>仍缺少必填素材：{missingSlots.map((slot) => slot.label).join('、')}</div>}
-                      {recipeSlots.map((slot) => {
-                        const slotRows = assetRows.filter(({ asset }) => assetSlotKey(asset) === slot.key);
-                        const isMissing = slot.required && slotRows.length === 0;
+                      {recipeSlots.filter(slot => slot.types.some(type => type !== 'image')).map((slot) => {
+                        const slotRows = mediaRows.filter(({ asset }) => assetSlotKey(asset) === slot.key);
+                        const slotCount = assetRows.filter(({ asset }) => assetSlotKey(asset) === slot.key).length;
+                        const isMissing = slot.required && slotCount === 0;
                         return (
                           <section className={styles.assetSlot} key={slot.key} aria-label={`${slot.label}${slot.required ? '，必填' : ''}`}>
                             <div className={styles.assetSlotHeader}>
-                              <div><strong>{slot.label}</strong><span>{slot.required ? '必填' : '可选'} · {slotRows.length}/{slot.maxItems || '不限'} · {slot.types.map((type) => type === 'image' ? '图片' : type === 'video' ? '视频' : '音频').join('、')}</span></div>
-                              <button className={styles.quietButton} type="button" onClick={() => { setPickerSlotKey(slot.key); setPickerOpen(true); }} disabled={assetBusy || activeDraft.assets.length >= 12 || (slot.maxItems != null && slotRows.length >= slot.maxItems)}><ImagePlus size={15} />添加到此槽位</button>
+                              <div><strong>{slot.label}</strong><span>{slot.required ? '必填' : '可选'} · {slotCount}/{slot.maxItems ?? '不限'} · {slot.types.map((type) => type === 'image' ? '图片' : type === 'video' ? '视频' : '音频').join('、')}</span></div>
+                              <button className={styles.quietButton} type="button" onClick={() => openAssetPicker(slot.key, slot.types.filter(type => type !== 'image'))} disabled={assetBusy || activeDraft.assets.length >= 12 || (slot.maxItems != null && slotCount >= slot.maxItems)}><Plus size={15} />添加视频或音频</button>
                             </div>
-                            {slotRows.length ? <div className={styles.assetList}>{slotRows.map(renderAssetRow)}</div> : <div className={isMissing ? styles.assetSlotMissing : styles.assetSlotEmpty}>{isMissing ? '必填素材尚未添加' : '此槽位还没有素材'}</div>}
+                            {slotRows.length ? <div className={styles.assetList}>{slotRows.map(renderAssetRow)}</div> : <div className={isMissing ? styles.assetSlotMissing : styles.assetSlotEmpty}>{isMissing ? '必填素材尚未添加' : slotCount ? '已绑定图片见输入框上方' : '此槽位还没有素材'}</div>}
                           </section>
                         );
                       })}
@@ -1861,16 +1892,16 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                         <section className={styles.assetSlot} aria-label="未绑定槽位的素材">
                           <div className={styles.assetSlotHeader}>
                             <div><strong>未绑定槽位</strong><span>选择素材后，可在右侧指定用途</span></div>
-                            <button className={styles.quietButton} type="button" onClick={() => { setPickerSlotKey(null); setPickerOpen(true); }} disabled={assetBusy || activeDraft.assets.length >= 12}><ImagePlus size={15} />添加素材</button>
+                            <button className={styles.quietButton} type="button" onClick={() => openAssetPicker(null, ['video', 'audio'])} disabled={assetBusy || activeDraft.assets.length >= 12}><Plus size={15} />添加视频或音频</button>
                           </div>
-                          {assetRows.filter(({ asset }) => !recipeSlots.some((slot) => slot.key === assetSlotKey(asset))).length
-                            ? <div className={styles.assetList}>{assetRows.filter(({ asset }) => !recipeSlots.some((slot) => slot.key === assetSlotKey(asset))).map(renderAssetRow)}</div>
-                            : <div className={styles.assetSlotEmpty}>素材会按 asset ID 校验账号权限；此处不会复制或转移素材所有权。</div>}
+                          {mediaRows.filter(({ asset }) => !recipeSlots.some((slot) => slot.key === assetSlotKey(asset))).length
+                            ? <div className={styles.assetList}>{mediaRows.filter(({ asset }) => !recipeSlots.some((slot) => slot.key === assetSlotKey(asset))).map(renderAssetRow)}</div>
+                            : <div className={styles.assetSlotEmpty}>暂无未绑定的视频或音频</div>}
                         </section>
                       )}
-                      {recipeSlots.length === 0 && (activeDraft.assets.length === 0
-                        ? <div className={styles.assetEmpty}>{assetBusy ? '素材正在加入…' : '还没有添加素材'}</div>
-                        : <div className={styles.assetList}>{assetRows.map(renderAssetRow)}</div>)}
+                      {recipeSlots.length === 0 && (mediaRows.length === 0
+                        ? <div className={styles.assetEmpty}>{assetBusy ? '素材正在加入…' : '暂无视频或音频'}</div>
+                        : <div className={styles.assetList}>{mediaRows.map(renderAssetRow)}</div>)}
                     </section>
                     <section className={styles.sectionRule} aria-label="生成参数">
                       <div className={styles.sectionTitle}><span>生成参数</span><span className={styles.fieldHint}>将随草稿与历史快照保存</span></div>
@@ -2002,7 +2033,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
         </main>
       </div>
 
-      {pickerOpen && activeDraft && <UploadedImagePicker open target="assets" title="添加模板素材" confirmLabel="添加到模板素材区" purpose={`video-template-${pickerSlotKey || 'all'}`} currentCount={activeDraft.assets.length} currentAssetIds={assetIds} maxSelection={pickerSelectionCapacity} acceptedTypes={pickerSlot?.types}
+      {pickerOpen && activeDraft && <UploadedImagePicker key={`${userId}:${activeDraft.id}:${pickerSlotKey}:${pickerTypes?.join(',')}`} open target="assets" title={pickerTypes?.length === 1 && pickerTypes[0] === 'image' ? '添加视频参考图' : '添加视频或音频'} confirmLabel="添加到当前模块" purpose={`video-template-${pickerSlotKey || 'all'}-${pickerTypes?.join('-') || 'all'}`} currentCount={activeDraft.assets.length} currentAssetIds={assetIds} maxSelection={pickerSelectionCapacity} acceptedTypes={pickerTypes || pickerSlot?.types}
         avatarTarget={{kind:'video-draft',id:activeDraft.id,revision:activeDraft.revision,slotKey:pickerSlotKey,capacity:pickerSelectionCapacity,currentAssetIds:assetIds,sourceSignature:JSON.stringify([activeDraft,pickerSlotKey])}}
         onAvatarApplied={async()=>{
           const before=draftRef.current;if(!before)throw new Error('原模块已关闭，图片仍保留');
@@ -2013,7 +2044,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
           const merged={...before,assets:latest.assets,revision:latest.revision,updatedAt:latest.updatedAt};
           savedSignature.current=JSON.stringify(latest);setCurrentDraft(merged);saveRecovery(userId,merged);
         }}
-        onClose={() => { setPickerOpen(false); setPickerSlotKey(null); }} onUploadFile={uploadFile} onConfirm={async (_ids, selected) => addAssets(selected || [], pickerSlotKey)} />}
+        onClose={() => { setPickerOpen(false); setPickerSlotKey(null); setPickerTypes(null); }} onUploadFile={uploadFile} onConfirm={async (_ids, selected) => addAssets(selected || [], pickerSlotKey)} />}
 
       {templateEdit && (
         <div ref={templateEditBackdropRef} className={styles.dialogBackdrop} role="presentation" onClick={(event) => event.stopPropagation()}>

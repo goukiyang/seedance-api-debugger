@@ -67,7 +67,6 @@ const shellRoutePrefixes = [
 export const topbarQuickItems: NavItem[] = [
   { label: '创作首页', href: '/', match: ['/'] },
   { label: '生成', href: '/generate', match: ['/generate', '/generate/canvas'], externalHidden: true },
-  { label: '超分', href: '/generate/enhance', match: ['/generate/enhance'], prefixMatch: true, adminOnly: true },
   { label: '模板工作台', href: '/template-studio', match: ['/template-studio', '/templates', '/template-generate'], prefixMatch: true, externalHidden: true },
   { label: '资产', href: '/assets', match: ['/assets'], prefixMatch: true },
   { label: 'IP生成', href: '/generate/ip', match: ['/generate/ip'], prefixMatch: true },

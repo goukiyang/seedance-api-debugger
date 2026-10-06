@@ -1,10 +1,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { prisma } from '@/lib/prisma';
-import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
+import { sameOriginPublicUrlForSiteUpload, siteUploadPathFromUrl } from '@/lib/assets/site-url';
+import { studioHiddenAssetUrls } from '@/lib/image-studio/protected-assets';
 import { getReferenceImageByIdForAccess, canUseAlbumImage } from '@/lib/reference-albums/permissions';
 import { isPrivateNetworkHost } from '@/lib/media/public-url';
-import { StudioError } from './errors';
+import { StudioError, toStudioValidationError } from './errors';
+import { normalizeAssets } from './validation';
 import type { SessionUser } from '@/lib/auth/session';
 import type { StudioAssetInput } from './types';
 
@@ -53,6 +55,29 @@ async function canReadAsset(user: SessionUser, asset: { id: string; owner_id: st
     if (image && await canUseAlbumImage(user, image)) return true;
   }
   return false;
+}
+
+export async function getStudioReferenceMetadata(user: SessionUser, assetIds: string[]) {
+  let inputs: StudioAssetInput[];
+  try { inputs = normalizeAssets(assetIds.map(assetId => ({ assetId, type: 'image', role: 'reference' }))); }
+  catch (error) { toStudioValidationError(error); }
+  if (!inputs.length) return [];
+  const hiddenUrls = await studioHiddenAssetUrls(user);
+  const rows = await prisma.asset.findMany({
+    where: { id: { in: inputs.map(asset => asset.assetId) }, status: 'active', type: 'image',
+      ...(hiddenUrls.length ? { original_url: { notIn: hiddenUrls } } : {}) },
+    select: { id: true, owner_id: true, original_url: true, thumbnail_url: true, file_name: true },
+  });
+  const items = [];
+  for (const row of rows) {
+    // 与模板绑定复用同一权限判断，不按“本人素材库”的来源范围推断可读性。
+    if (!await canReadAsset(user, row)) continue;
+    const originalUrl = sameOriginPublicUrlForSiteUpload(row.original_url) || row.original_url;
+    const thumbnailUrl = row.thumbnail_url
+      ? sameOriginPublicUrlForSiteUpload(row.thumbnail_url) || row.thumbnail_url : originalUrl;
+    items.push({ id: row.id, originalUrl, thumbnailUrl, fileName: row.file_name });
+  }
+  return items;
 }
 
 export async function authorizeStudioAssets(user: SessionUser, assets: StudioAssetInput[]) {

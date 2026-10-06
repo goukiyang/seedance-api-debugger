@@ -10,9 +10,10 @@ import styles from './studio.module.css';
 
 export type FixedStudioReference = UploadedAssetPayload & { note: string; available?: boolean };
 
-export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onChange, onPreview, disabled, offset = 0, notes, children, compact, labels = 'image', onSaveNote, onChangeRole, materialTiles = false, standalone = false }: {
+export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onChange, onPreview, disabled, offset = 0, notes, children, compact, labels = 'image', onSaveNote, onChangeRole, materialTiles = false, standalone = false, renderDetails, onThumbnailError, loading = false }: {
   items: T[]; onChange: (items: T[]) => void; onPreview: (item: T, number: number) => void;
   disabled?: boolean; offset?: number; notes?: boolean; children?: ReactNode; compact?: boolean; materialTiles?: boolean; standalone?: boolean; labels?: 'image' | 'template' | 'style' | 'primary' | 'auxiliary'; onSaveNote?: (items: T[]) => Promise<boolean>; onChangeRole?: (item: T, index: number) => void;
+  renderDetails?: (item: T, index: number) => ReactNode; onThumbnailError?: (item: T) => void; loading?: boolean;
 }) {
   const { confirm, productDialog } = useProductDialog();
   const root = useRef<HTMLDivElement>(null);
@@ -52,13 +53,13 @@ export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onC
   };
   const reset = () => { drag.current = null; setTargetIndex(null); setSourceIndex(null); };
   return <>{productDialog}{(<><div ref={root} className={`${styles.references} ${compact ? styles.referencesCompact : ''} ${materialTiles ? styles.materialGrid : ''} ${standalone ? styles.standaloneReferences : ''}`}>
-    {items.map((item, index) => <div key={`${item.id}-${index}`} data-reference-index={index}
+    {items.map((item, index) => <div key={renderDetails ? item.id : `${item.id}-${index}`} data-reference-index={index}
       className={`${styles.referenceItem} ${targetIndex === index ? styles.referenceDropTarget : ''}`}
       data-dragging={sourceIndex === index || undefined}
       onPointerDown={event => {
         if (disabled || event.button !== 0 || !(event.target instanceof Element)) return;
         const grip = event.target.closest('[data-sort-grip]');
-        if (event.target.closest('textarea,input,select,a,[data-reference-remove],[data-reference-note]') || (event.pointerType !== 'mouse' && !grip)) return;
+        if (event.target.closest('textarea,input,select,a,[data-reference-remove],[data-reference-note],[data-reference-details]') || (event.pointerType !== 'mouse' && !grip)) return;
         suppressClick.current = false;
         drag.current = { pointer: event.pointerId, index, x: event.clientX, y: event.clientY, moved: false, target: index };
       }}
@@ -88,7 +89,7 @@ export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onC
       onClickCapture={event => { if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false; } }}>
       <div className={styles.reference}>
         <button type="button" className={styles.preview} disabled={!item.originalUrl} aria-label={`预览${label(index)}`} onClick={() => onPreview(item, offset + index + 1)}>
-          {item.thumbnailUrl ? <img decoding="async" draggable={false} src={item.thumbnailUrl} alt={label(index)} /> : <span>图片已不可用</span>}
+          {item.thumbnailUrl ? <img decoding="async" draggable={false} src={item.thumbnailUrl} alt={label(index)} onError={() => onThumbnailError?.(item)} /> : <span>{loading ? '正在读取图片…' : '图片已不可用'}</span>}
         </button>
         <span className={styles.referenceNumber}>{label(index)}</span>
         <button type="button" data-sort-grip className={styles.referenceGrip} disabled={disabled} aria-label={`移动${label(index)}`} title="移动参考图"
@@ -102,6 +103,7 @@ export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onC
       {onChangeRole && <button type="button" data-reference-note className={materialTiles ? styles.materialRole : styles.referenceNoteButton} disabled={disabled}
         title={labels === 'primary' ? '改为辅助参考' : '设为主图'} aria-label={`${label(index)}${labels === 'primary' ? '改为辅助参考' : '设为主图'}`}
         onClick={() => onChangeRole(item, index)}>{labels === 'primary' ? <ArrowDown size={14} /> : <ArrowUp size={14} />}{!materialTiles && (labels === 'primary' ? '设为参考' : '设为主图')}</button>}
+      {renderDetails && <div data-reference-details>{renderDetails(item, index)}</div>}
     </div>)}
     {children}
   </div>
