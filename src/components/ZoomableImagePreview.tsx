@@ -48,6 +48,7 @@ type ZoomableImagePreviewProps = {
   hasNavigation?: boolean;
   onPrevious?: () => void;
   onNext?: () => void;
+  onImageLoaded?: (src: string) => void;
   onClose: () => void;
 };
 
@@ -335,7 +336,7 @@ function PreviewImage({ src, alt, original, className, style, onReady }: { src: 
   </>;
 }
 
-export function ZoomableImagePreview({ src, fileName, title, previewKey, contentKey, metadata, safeDetails, comparison, details, notice, hasNavigation, onPrevious, onNext, onClose }: ZoomableImagePreviewProps) {
+export function ZoomableImagePreview({ src, fileName, title, previewKey, contentKey, metadata, safeDetails, comparison, details, notice, hasNavigation, onPrevious, onNext, onImageLoaded, onClose }: ZoomableImagePreviewProps) {
   const backdropRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -752,7 +753,8 @@ export function ZoomableImagePreview({ src, fileName, title, previewKey, content
       ? current
       : { ...current, [imageSrc]: size });
     if (imageSrc === (comparisonMode ? src : activeSrc) && (zoomMode === 'width' || zoomMode === 'actual')) applyZoomMode(zoomMode, false);
-  }, [activeSrc, applyZoomMode, comparisonMode, src, zoomMode]);
+    onImageLoaded?.(imageSrc);
+  }, [activeSrc, applyZoomMode, comparisonMode, src, zoomMode, onImageLoaded]);
 
   const visibleMetadata = {
     model: safeMetadataValue(safeDetails?.model ?? metadata?.model),

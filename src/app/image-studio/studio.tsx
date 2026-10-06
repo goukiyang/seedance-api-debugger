@@ -77,7 +77,7 @@ type QuickStudioPreset = StudioPreset & { prompt: string; context: string; refer
 type PresetSource = { draft: Record<string, unknown>; blocked: string | null };
 type PresetSourceReader = () => PresetSource;
 type StudioFeedback = { message: string; tone: 'progress' | 'info' | 'success' | 'warning' | 'error' };
-type ImagePreviewState = { contentKey?: `asset:${string}`; taskId?: string; src: string; alt: string; title?: string; fileName?: string; width?: number; height?: number; metadata?: ImagePreviewMetadata; comparison?: { src: string; alt: string; fileName?: string; thumbnailSrc?: string } };
+type ImagePreviewState = { contentKey?: `asset:${string}`; taskId?: string; resultVersion?: string | null; src: string; alt: string; title?: string; fileName?: string; width?: number; height?: number; metadata?: ImagePreviewMetadata; comparison?: { src: string; alt: string; fileName?: string; thumbnailSrc?: string } };
 type RatioPreferences = { custom: string[]; busy: boolean; error: string; onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean> };
 type ModuleScrollRequest = { target: 'module' | 'header'; id: string; group: string; token: number; behavior: ScrollBehavior; markViewed: boolean };
 type ModuleNavigationOptions = { ensureLoaded?: boolean; markViewed?: boolean; behavior?: ScrollBehavior };
@@ -125,6 +125,7 @@ function studioTaskPreviewState(task: StudioTask): ImagePreviewState {
   const quality = IMAGE_STUDIO_QUALITY_LABELS[normalizeImageStudioQuality(task.model, task.quality) as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || task.quality || '自动';
   return {
     taskId: task.id,
+    resultVersion: studioResultVersion(task),
     contentKey: task.asset?.id ? `asset:${task.asset.id}` : undefined,
     src: task.asset?.original_url || '',
     alt: `生成结果 ${task.ordinal}`,
@@ -649,7 +650,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
                 <div className={styles.moduleRailGroupHeader}>
                   <button type="button" className={`${styles.moduleRailGroupTitle} ${selectedGroup === group ? styles.moduleRailActive : ''}`} aria-current={selectedGroup === group ? 'page' : undefined}
                     onClick={() => navigateToModule(group, items[0].id, { markViewed: false })}>
-                    <span className={styles.navLabel}><span className={styles.navName}>{group}</span>{groupHasUnread && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</span><small>{items.length}</small>
+                    <span className={styles.navLabel}><span className={styles.navName}>{group}</span>{groupHasUnread && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</span><small title={`共 ${items.length} 个模块`}>{items.length}项</small>
                   </button>
                   <button type="button" className={styles.moduleRailGroupToggle} disabled={groupHasUnread} aria-expanded={expanded} aria-controls={listId}
                     aria-label={groupHasUnread ? `${group}有未读结果，查看后可折叠` : `${expanded ? '折叠' : '展开'}${group}`} title={groupHasUnread ? '有未读生成结果，查看后可折叠' : `${expanded ? '折叠' : '展开'}${group}`}
@@ -670,12 +671,12 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
         <div className={styles.moduleRailTitle}>分组快捷栏</div>
         {Object.entries(groupedModules).map(([group, items]) => <div key={group} className={styles.moduleRailGroup}>
           <button type="button" className={selectedGroup === group ? styles.moduleRailActive : ''} aria-current={selectedGroup === group ? 'page' : undefined} onClick={() => items[0] && navigateToModule(group, items[0].id, { markViewed: false })}>
-            <span className={styles.navLabel}><span className={styles.navName}>{group}</span>{items.some(item => attention.unread.has(item.id)) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</span><small>{items.length}</small></button>
+            <span className={styles.navLabel}><span className={styles.navName}>{group}</span>{items.some(item => attention.unread.has(item.id)) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</span><small title={`共 ${items.length} 个模块`}>{items.length}项</small></button>
           <div className={styles.moduleRailChildren}>{items.map(item => <button key={item.id} type="button" className={`${styles.moduleRailChild} ${!coverView && active === item.id ? styles.moduleRailActive : ''}`} aria-current={!coverView && active === item.id ? 'page' : undefined}
             onClick={() => navigateToModule(group, item.id)}><span className={styles.navName} title={item.name}>{item.name}</span>{attention.unread.has(item.id) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</button>)}</div>
         </div>)}
       </>}
-      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={() => { setPendingModuleScroll(null); setCoverView(true); }}>全部封面{navigation.some(item => attention.unread.has(item.id)) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}<small>{navigation.length}</small></button>
+      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={() => { setPendingModuleScroll(null); setCoverView(true); }}>全部封面{navigation.some(item => attention.unread.has(item.id)) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}<small title={`共 ${navigation.length} 个模块`}>{navigation.length}项</small></button>
     </aside>
     {templateWorkbench && <nav ref={mobileModuleNavRef} className={styles.mobileModuleNav} aria-label="图片模块导航">
       <div className={styles.mobileMajorLinks}>
@@ -688,9 +689,9 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
         if (first) navigateToModule(group, first.id, { markViewed: false });
       }}>
         {!Object.keys(groupedModules).length && <option value="">暂无分组</option>}
-        {Object.entries(groupedModules).map(([group, items]) => <option key={group} value={group}>{group} ({items.length}){items.some(item => attention.unread.has(item.id)) ? ' · 未读' : ''}</option>)}
+        {Object.entries(groupedModules).map(([group, items]) => <option key={group} value={group}>{group} ({items.length}项){items.some(item => attention.unread.has(item.id)) ? ' · 未读' : ''}</option>)}
       </select></label>
-      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-pressed={coverView} onClick={() => { setPendingModuleScroll(null); setCoverView(true); }}>全部封面{navigation.some(item => attention.unread.has(item.id)) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />} <small>{navigation.length}</small></button>
+      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-pressed={coverView} onClick={() => { setPendingModuleScroll(null); setCoverView(true); }}>全部封面{navigation.some(item => attention.unread.has(item.id)) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />} <small title={`共 ${navigation.length} 个模块`}>{navigation.length}项</small></button>
       <label className={styles.mobileModulePicker}><span>模块</span><select aria-label="选择图片模块" value={!coverView && groupedModules[selectedGroup]?.some(item => item.id === active) ? active : ''} onChange={event => {
         if (event.target.value) navigateToModule(selectedGroup, event.target.value);
       }}>
@@ -846,16 +847,26 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   taskReadScopeRef.current = taskReadScope;
   const taskReadRequest = useRef<{ scope: string; controller: AbortController; action: 'initial' | 'refresh' | 'silent' | 'view' } | null>(null);
   const currentView = useRef({ token: viewToken, active }); currentView.current = { token: viewToken, active };
-  const [viewedResults, setViewedResults] = useState<{ token: number; sequence: number; versions: string[] } | null>(null);
+  const [viewedResults, setViewedResults] = useState<{ scope: string; token: number; sequence: number; versions: string[] } | null>(null);
   const resultReadSequence = useRef(0);
   const readAttemptToken = useRef(0);
   const requestedReadToken = useRef(0);
   useEffect(() => {
-    if (active && viewedResults && viewedResults.token === viewToken && readAttemptToken.current !== viewedResults.sequence) {
+    if (templateWorkbench && !hidden && active && viewedResults?.scope === taskReadScope && viewedResults.token === viewToken && readAttemptToken.current !== viewedResults.sequence) {
       readAttemptToken.current = viewedResults.sequence;
-      void onResultsViewed(module.id, viewedResults.versions);
+      for (let offset = 0; offset < viewedResults.versions.length; offset += 24) {
+        void onResultsViewed(module.id, viewedResults.versions.slice(offset, offset + 24));
+      }
     }
-  }, [active, viewedResults, viewToken, module.id, onResultsViewed]);
+  }, [templateWorkbench, hidden, active, viewedResults, viewToken, taskReadScope, module.id, onResultsViewed]);
+  function observeResultVersion(version: string | null) {
+    if (!templateWorkbench || hidden || document.hidden || !version) return;
+    const token = currentView.current.token;
+    const sequence = ++resultReadSequence.current;
+    setViewedResults(previous => ({ scope: taskReadScope, token, sequence, versions: previous?.scope === taskReadScope
+      && previous.token === token && readAttemptToken.current !== previous.sequence
+      ? Array.from(new Set([...previous.versions, version])) : [version] }));
+  }
   const taskReadLoaded = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [queryingSubmission, setQueryingSubmission] = useState(false);
@@ -1281,7 +1292,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         setTasksError('');
         void onResultsAvailable();
         if ((action === 'view' || Boolean(cursor)) && currentView.current.active && currentView.current.token === requestedToken) {
-          setViewedResults({ token: requestedToken, sequence: ++resultReadSequence.current, versions: result.tasks.flatMap((task: StudioTask) => { const version = studioResultVersion(task); return version ? [version] : []; }) });
+          setViewedResults({ scope, token: requestedToken, sequence: ++resultReadSequence.current, versions: result.tasks.flatMap((task: StudioTask) => { const version = studioResultVersion(task); return version ? [version] : []; }) });
         }
       } catch (cause) {
         if (currentRequest()) setTasksError(cause instanceof Error ? cause.message : '读取记录失败，已有图片仍保留');
@@ -1314,6 +1325,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   useEffect(() => {
     if (!templateWorkbench) return;
     setTasks([]); setSelected([]); setPreview(null); setNextCursor(null); setTasksError('');
+    setViewedResults(null); requestedReadToken.current = 0; readAttemptToken.current = 0;
     setLoadingTasks(true); setTaskReadAction('initial'); loadedMore.current = false; taskReadLoaded.current = false;
     return () => {
       const request = taskReadRequest.current;
@@ -1856,7 +1868,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
             {task.asset.id && <ContentReactions contentKey={`asset:${task.asset.id}`} overlay />}
             <ResultImageCover src={task.asset.thumbnail_url || undefined} alt={`生成结果 ${task.ordinal}`}
               selected={selectedResultId === task.id} applied={sourceApplied && appliedSource?.taskId === task.id}
-              onSelect={() => setSelectedResultId(task.id)} onPreview={() => openTaskPreview(task)} />
+              onSelect={() => setSelectedResultId(task.id)} onPreview={() => openTaskPreview(task)} onViewed={() => observeResultVersion(studioResultVersion(task))} />
             {downloadMode && <input className={styles.select} type="checkbox" aria-label={`选择第 ${task.ordinal} 张图片`} checked={selected.includes(task.id)} onChange={event => {
               if (event.target.checked && selected.length >= 8) { setError('每次最多下载 8 张'); return; }
               setSelected(current => event.target.checked ? [...current, task.id] : current.filter(id => id !== task.id));
@@ -2036,6 +2048,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         </label>
       </div>
     </dialog>
-    {preview && <ZoomableImagePreview contentKey={preview.contentKey} src={preview.src} alt={preview.alt} title={preview.title} previewKey={preview.taskId || preview.src} fileName={preview.fileName} safeDetails={{ ...preview.metadata, width: preview.width, height: preview.height }} comparison={preview.comparison} hasNavigation={Boolean(preview.taskId && previewableTasks.length > 1)} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => { setPreview(null); if (resumeModulePreview.current) { resumeModulePreview.current = false; moduleDialog.current?.showModal(); } }} />}
+    {preview && <ZoomableImagePreview contentKey={preview.contentKey} src={preview.src} alt={preview.alt} title={preview.title} previewKey={preview.taskId || preview.src} fileName={preview.fileName} safeDetails={{ ...preview.metadata, width: preview.width, height: preview.height }} comparison={preview.comparison} hasNavigation={Boolean(preview.taskId && previewableTasks.length > 1)} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onImageLoaded={src => { if (preview.taskId && preview.src === src) observeResultVersion(preview.resultVersion || null); }} onClose={() => { setPreview(null); if (resumeModulePreview.current) { resumeModulePreview.current = false; moduleDialog.current?.showModal(); } }} />}
   </section>)}</>;
 }
