@@ -1,0 +1,66 @@
+{
+  "version": "0.50.0",
+  "commit": "60b2001d49745adae9b7f0ef2b77fc04f64936b0",
+  "build": "WfltAR1-_emLNggnJQikz",
+  "markers": [
+    "data-image-preview-pane",
+    "data-image-preview-preload",
+    "还原两图",
+    "粘贴并替换全文",
+    "当前账户尚未绑定抠图授权",
+    "确认生成",
+    "本批资产",
+    "公开喜欢人数",
+    "data-result-pages",
+    "data-page-capacity",
+    "下一页图片"
+  ],
+  "assets": [
+    {
+      "url": "/_next/static/chunks/9113-d33c985107b6c85c.js",
+      "sha256": "e1cfb9358c983315646dc649449cdf31a2472b8b3fecd2a00394998016fb8d72"
+    },
+    {
+      "url": "/_next/static/chunks/app/template-studio/page-92ea634eddf0924f.js",
+      "sha256": "4450c5f7e116153470ed8d1050d8a6670f12e71384354db8d3549c187e8f6d7b"
+    },
+    {
+      "url": "/_next/static/chunks/app/cutout/page-4bfb525d4d879644.js",
+      "sha256": "3f918d92d3ea4f84ba214a5fcd61b11806feed2c0eb9e76ef9c42a85a426c98a"
+    },
+    {
+      "url": "/_next/static/chunks/7758-2d22e42be56aa655.js",
+      "sha256": "241d6c4776213bdbc371bb825a2a324cc39fd84d5257f51501c995bbf3452c48"
+    },
+    {
+      "url": "/_next/static/chunks/5694-16a1888f77cb77e2.js",
+      "sha256": "9a16702de2e43b7089d50a33758b9200701493bd51f715cd94c2f0f446417ed5"
+    },
+    {
+      "url": "/_next/static/css/9ef6ffef961e8e72.css",
+      "sha256": "92c967a7d2b8657d127942c188be305ee68604efb44705126dd53dae2dd300f0"
+    },
+    {
+      "url": "/home/video.png",
+      "sha256": "a394bf07b0989bcbca37d9efcb6afe8c1020930b520b91dabc3670efd6d13ddf"
+    },
+    {
+      "url": "/home/canvas.png",
+      "sha256": "d485ac4139788373adeb8a2070df034b13c38b0f4003c69c0eaf3f32692f4c3a"
+    },
+    {
+      "url": "/home/templates.png",
+      "sha256": "e5a8a5d127649949ffbb67167ac7421b1eeeeebcb28484c2b824c4632db924c2"
+    },
+    {
+      "url": "/home/avatar.png",
+      "sha256": "0f2c8a47b09960935254fb46340c9cd8a270c02cac377fabaf0f1991a4d097ac"
+    },
+    {
+      "url": "/home/cutout.png",
+      "sha256": "9ca146a239e36e93b29d8b325ca7c497a75f86770731b3918280fe356edba5c0"
+    }
+  ],
+  "homeMedia": "Original virtual illustrations, not real output samples or product screenshots",
+  "acceptance": "Compiled/static provenance only; not authenticated UI or real cutout acceptance"
+}
