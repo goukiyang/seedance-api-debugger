@@ -13,6 +13,7 @@ function visit(relative) {
   }
 }
 for (const entry of ['src', 'scripts', 'ops', 'prisma/schema.prisma', 'prisma/migrations', 'package.json', 'package-lock.json', 'next.config.js', 'tsconfig.json', 'next-env.d.ts', '.eslintrc.json', 'public/home']) visit(entry);
+visit('public/styles/loading.css');
 for (const file of ['index.html', 'style-gallery.js', 'style-gallery.css', 'canvas-styles.js', 'like-button.css', 'like-button.LICENSE.txt']) visit(`public/tools/ultimate-canvas/${file}`);
 const hash = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const different = files.filter(file => !fs.existsSync(path.join(target, file)) || hash(path.join(source, file)) !== hash(path.join(target, file)));

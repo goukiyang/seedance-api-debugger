@@ -1155,7 +1155,7 @@ export default function CutoutPage() {
       <ResourceLibraryPicker open={imagePickerOpen} imageOnly target="workspace" title="选择抠图原图" confirmLabel="使用所选图片" purpose="cutout-source" maxSelection={1} currentCount={0} currentAssetIds={[]}
         onClose={() => { sourceSelection.current++; setImagePickerOpen(false); }}
         onUploadFile={(file, onProgress) => uploadFileAsAsset(file, { onProgress })}
-        onConfirm={() => false} onConfirmSelection={selectLibraryImage} />
+        onConfirm={async () => false} onConfirmSelection={selectLibraryImage} />
       {productDialog}
     </main>
   );

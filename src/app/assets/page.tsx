@@ -1913,7 +1913,7 @@ function AssetsPageContent() {
       {isReactionView && <ContentCollections key={assetView} action={explicitView === 'likes' ? 'like' : 'favorite'} mediaClassName={assetStyles.collectionMedia} preferPreviewImageThumbnails />}
       {!isReactionView && <>
       <section className="asset-library-filter-bar">
-        {user && canUseCompanyTemplates(user) && <StudioBatchHistory key={user.id} userId={user.id} initialId={params.get('imageBatchId') || undefined} />}
+        {user && canUseCompanyTemplates({ ...user, account_type: user.account_type || '' }) && <StudioBatchHistory key={user.id} userId={user.id} initialId={params.get('imageBatchId') || undefined} />}
         {isEnhanceView ? (
           <div className="asset-library-view-chip">
             <Sparkles size={14} aria-hidden="true" />

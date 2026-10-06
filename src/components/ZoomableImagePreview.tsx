@@ -227,7 +227,7 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, so
   const stopGestures = useCallback(() => {
     for (const side of sides) {
       const pane = paneRefs.current[side];
-      for (const id of points.current[side].keys()) { if (pane?.hasPointerCapture(id)) pane.releasePointerCapture(id); }
+      for (const id of Array.from(points.current[side].keys())) { if (pane?.hasPointerCapture(id)) pane.releasePointerCapture(id); }
       points.current[side].clear();
     }
   }, []);
@@ -238,7 +238,7 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, so
   useEffect(() => {
     alive.current = true;
     return () => { alive.current = false; stopGestures(); for (const request of Object.values(requests.current)) { request?.controller.abort(); request?.resolve(false); }
-      for (const url of localUrls.current) URL.revokeObjectURL(url); localUrls.current.clear(); };
+      for (const url of Array.from(localUrls.current)) URL.revokeObjectURL(url); localUrls.current.clear(); };
   }, [stopGestures]);
 
   const requestImage = useCallback((side: Side, image: ImageComparisonSource, verify = true): Promise<boolean> => {

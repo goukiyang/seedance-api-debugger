@@ -48,6 +48,10 @@ excludes=(--exclude='.env*' --exclude='.git' --exclude=node_modules --exclude='.
 public_files=(index.html style-gallery.js style-gallery.css canvas-styles.js like-button.css like-button.LICENSE.txt)
 sync_public() {
   local from="$1"
+  if test -f "$from/public/styles/loading.css"; then
+    mkdir -p "$app/public/styles"
+    install -o gouki -g gouki -m 644 "$from/public/styles/loading.css" "$app/public/styles/loading.css"
+  fi
   for file in "${public_files[@]}"; do
     if test -f "$from/public/tools/ultimate-canvas/$file"; then
       install -o gouki -g gouki -m 644 "$from/public/tools/ultimate-canvas/$file" "$app/public/tools/ultimate-canvas/$file"
