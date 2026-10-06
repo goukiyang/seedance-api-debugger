@@ -57,6 +57,8 @@ async function main() {
   const nineCells=Array.from({length:9},(_,i)=>({...cells[0],characterId:`nine-${i}`,rules:{...emptyRules,layout:'contact-sheet-9' as const,candidates:9 as const}}));
   const nine=withAvatarLayout({...oldPlan,candidates:nineCells},'contact-sheet-9');
   assert.throws(()=>withAvatarLayout(nine,'independent'));
+  assert.equal(avatarOutputCount(withAvatarLayout({...oldPlan,candidates:cells.slice(0,1)},'independent')),1);
+  assert.equal(avatarOutputCount(withAvatarLayout({...oldPlan,candidates:cells.slice(0,3)},'independent')),3);cases++;
   const legacyFieldsBefore=JSON.stringify(cells.map(c=>c.members[0].fields));
   assert.deepEqual(sheet.candidates.map(c=>c.members[0].fields),cells.map(c=>c.members[0].fields));assert.equal(JSON.stringify(cells.map(c=>c.members[0].fields)),legacyFieldsBefore);assert.equal(sheet.candidates[0].members[0].fields.nationality,undefined);assert.equal(sheet.candidates[0].members[0].fields.ancestry,undefined);cases++;
   assert.equal(avatarOutputCount(nine),1);assert.equal(nine.candidates.length,9);assert.ok(nine.sheetPrompt?.includes('3×3'));assert.ok(nine.sheetPrompt?.includes('正中格'));assert.ok(nine.sheetPrompt?.includes('右下格'));cases++;

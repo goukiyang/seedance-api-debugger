@@ -19,7 +19,7 @@ export function compileContactSheet(candidates: AvatarCandidate[], layout: Avata
   return `仅生成一张正方形图片，整张图为真实的${size}×${size}${avatarSheetLabel(layout)}。所有格子等大、边界清楚，每格恰好一位不同人物的头像，整张图共${count}位不同人物。不得把多人挤入同一格，不重复同一张脸，不增加第${count + 1}人。不添加姓名、编号或文字。每格分别遵守以下人物条件，不将一格的特征混到其他格。\n${candidates.map((c, i) => `${avatarCellLabel(layout, i)}格：\n${c.standardDescription}`).join('\n\n')}\n最终输出是一张包含上述${count}格的完整图片，不是${count}个文件。`;
 }
 export function withAvatarLayout(plan: AvatarPlan, layout: AvatarLayout): AvatarPlan {
-  if (layout === 'independent' && ![1, 2, 4].includes(plan.candidates.length)) throw new Error('独立头像支持1、2或4位候选，请重新准备人物。');
+  if (layout === 'independent' && (plan.candidates.length < 1 || plan.candidates.length > 4)) throw new Error('独立头像最多4位候选，请重新准备人物。');
   const candidates = plan.candidates.map(c => ({ ...c, rules: { ...c.rules, layout } }));
   if (isAvatarSheet({ layout })) validateSheetCandidates(candidates, plan.referenceIds, layout);
   return { ...plan, layout, candidates, sheetPrompt: isAvatarSheet({ layout }) ? compileContactSheet(candidates, layout) : undefined, aspectRatio: isAvatarSheet({ layout }) ? '1:1' : candidates[0].members.length > 1 ? '3:2' : '1:1' };
