@@ -37,8 +37,8 @@ export function ContextClipboardActions(props: Props) {
     navigator.clipboard?.addEventListener('clipboardchange', invalidate);
     const dialog = textareaRef.current?.closest('dialog');
     dialog?.addEventListener('close', invalidate);
-    return () => { probeSequence.current++; readPermission.current && (readPermission.current.onchange = null); window.removeEventListener('blur', invalidate); document.removeEventListener('visibilitychange', invalidate); navigator.clipboard?.removeEventListener('clipboardchange', invalidate); dialog?.removeEventListener('close', invalidate); };
-  }, [owner]);
+    return () => { invalidate(); readPermission.current && (readPermission.current.onchange = null); window.removeEventListener('blur', invalidate); document.removeEventListener('visibilitychange', invalidate); navigator.clipboard?.removeEventListener('clipboardchange', invalidate); dialog?.removeEventListener('close', invalidate); };
+  }, [owner, textareaRef]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   // Only a paste-intent interaction (or our explicit copy) may probe an already granted read.
@@ -72,9 +72,10 @@ export function ContextClipboardActions(props: Props) {
     if (working.current || disabled || !input || input.disabled || input.readOnly) return;
     working.current = true; setBusy(true); setMessage('');
     const sequence = ++probeSequence.current;
+    const canReport = () => mounted.current && currentOwner.current === owner && input === textareaRef.current && Boolean(input.getClientRects().length) && !latest.current.disabled;
     try {
       const text = await navigator.clipboard.readText();
-      if (currentOwner.current !== owner || sequence !== probeSequence.current) return;
+      if (currentOwner.current !== owner || sequence !== probeSequence.current) { if (canReport()) setMessage('读取已中断，请重新粘贴'); return; }
       if (!mounted.current || input !== textareaRef.current || !input.getClientRects().length) return;
       if (latest.current.disabled || input.disabled || input.readOnly) return;
       if (latest.current.value !== value || input.value !== value) { setMessage('内容已变化，请重新粘贴'); return; }
@@ -85,12 +86,12 @@ export function ContextClipboardActions(props: Props) {
       if (next === value) setMessage('内容未变化');
       else { latest.current.onPaste(next); setMessage('已替换全文'); }
       requestAnimationFrame(() => {
-        if (!mounted.current || latest.current.disabled || input.disabled || input.readOnly || !input.getClientRects().length || input !== textareaRef.current || input.value !== next) return;
+        if (!mounted.current || currentOwner.current !== owner || sequence !== probeSequence.current || latest.current.disabled || input.disabled || input.readOnly || !input.getClientRects().length || input !== textareaRef.current || input.value !== next) return;
         if (document.activeElement !== button && document.activeElement !== input) return;
         input.focus({ preventScroll: true });
         input.setSelectionRange(next.length, next.length);
       });
-    } catch { if (mounted.current && currentOwner.current === owner && sequence === probeSequence.current) { setReadable(false); setMessage('无法读取剪贴板，请在输入框内粘贴'); } }
+    } catch { if (canReport()) { setReadable(false); setMessage('无法读取剪贴板，请在输入框内粘贴'); } }
     finally { working.current = false; if (mounted.current) setBusy(false); }
   }
 
