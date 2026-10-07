@@ -149,7 +149,6 @@ export async function saveCanvasTextSettings(userId: string, input: unknown): Pr
       const rules = requested.map(rule => {
         const before = current.rules.find(item => item.id === rule.id);
         if (before && rule.revision !== before.revision) throw conflict();
-        if ((!before || (before.deletedAt && !rule.deletedAt)) && rule.enabled) throw new AuthError('新建或恢复的规则须先保存为未启用', 400);
         const changed = !before || ['name', 'purpose', 'body', 'enabled', 'order', 'deletedAt'].some(key => before[key as keyof CanvasRule] !== rule[key as keyof CanvasRule]);
         return { ...rule, revision: before ? before.revision + Number(changed) : 1,
           updatedAt: changed ? now : before!.updatedAt, deletedAt: rule.deletedAt ? (before?.deletedAt || now) : null };

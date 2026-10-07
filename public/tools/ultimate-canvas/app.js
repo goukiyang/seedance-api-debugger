@@ -5916,7 +5916,7 @@
                     + '<label>适用用途<select data-rule-field="purpose"' + (selected.deletedAt ? ' disabled' : '') + '>'
                     + Object.entries(rulePurposeLabels).map(([value, label]) => '<option value="' + value + '"' + (selected.purpose === value ? ' selected' : '') + '>' + label + '</option>').join('') + '</select></label>'
                     + '<label class="rules-enabled"><input type="checkbox" data-rule-field="enabled"' + (selected.enabled && !selected.deletedAt ? ' checked' : '')
-                    + (!selected.revision || selected.deletedAt || modal._restored?.has(selected.id) ? ' disabled' : '') + '>启用</label></div>'
+                    + (selected.deletedAt || (modal._mergeLegacy && selected.id === modal._mergeLegacyRuleId) ? ' disabled' : '') + '>启用</label></div>'
                     + '<label><span>正文</span><textarea data-rule-field="body" data-context-rules-editor maxlength="4000"' + (selected.deletedAt ? ' readonly' : '') + '>'
                     + escapeHtml(selected.body) + '</textarea></label><div class="rules-actions">' + rulesTime(selected.updatedAt)
                     + (selected.deletedAt ? ruleIconButton('restore', 'RotateCcw', '恢复为未启用')
@@ -6099,7 +6099,8 @@
             if (other >= 0 && other < list.length) { [list[index], list[other]] = [list[other], list[index]]; list.forEach((rule, order) => { rule.order = order; }); }
         } else if (action === 'original') add('原始基础正文', modal._settings.legacyOriginal.context, 'basic');
         else if (action === 'legacy') {
-            if (add('旧版修改（待合并）', modal._settings.legacyCurrent.context, 'basic')) modal._mergeLegacy = true;
+            const retained = add('旧版修改（待合并）', modal._settings.legacyCurrent.context, 'basic');
+            if (retained) { modal._mergeLegacy = true; modal._mergeLegacyRuleId = retained.id; }
         } else if (action === 'history') {
             const snapshot = modal._settings.history.find(item => String(item.revision) === modal.querySelector('[data-rules-history]').value);
             if (!snapshot) return;
