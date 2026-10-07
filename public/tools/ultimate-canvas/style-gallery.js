@@ -715,11 +715,12 @@
             const result = await options.onRefreshFavorite(item);
             if (!root || state !== capturedState || state.favoriteReads.get(key) !== revision) return;
             if (state.favoritePending.has(id)) { state.favoriteInvalidated.add(key); return; }
-            if (!Number.isSafeInteger(result?.version) || result.version < (item.reactionVersion || 0)) return;
-            item.reactionVersion = result.version;
-            item.favoriteUnconfirmed = result.unconfirmed === true;
+            const currentItem = state.items.find(entry => entry.key === key);
+            if (!currentItem || !Number.isSafeInteger(result?.version) || result.version < (currentItem.reactionVersion || 0)) return;
+            currentItem.reactionVersion = result.version;
+            currentItem.favoriteUnconfirmed = result.unconfirmed === true;
             const active = Boolean(result.liked || result.favorited);
-            item.favorited = active;
+            currentItem.favorited = active;
             state.favoriteStates[id] = active;
             if (!active && state.tab === 'favorites') {
                 state.items = state.items.filter(entry => identity(entry) !== id);
@@ -759,6 +760,11 @@
         } catch (error) {
             if (!root || state !== capturedState) return;
             state.favoriteStates[id] = typeof item.favorited === 'boolean' ? item.favorited : previous;
+            if (!state.favoriteStates[id] && state.tab === 'favorites') {
+                state.items = state.items.filter(entry => identity(entry) !== id);
+                if (state.selectedId === id) state.selectedId = '';
+                renderItems();
+            }
             showNotice(error?.message || '喜欢没有保存，请重试。');
         } finally {
             if (root && state === capturedState) {

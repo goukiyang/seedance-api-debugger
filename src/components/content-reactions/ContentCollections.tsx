@@ -64,6 +64,12 @@ export function ContentPreview({ content, close, onPrevious, onNext, hasNavigati
   onRetryNavigation?: () => void;
 }) {
   if (!content.previewUrl || !['image', 'video', 'audio'].includes(content.category)) return null;
+  let sourceHref = content.href;
+  if (sourceHref.startsWith('/assets?') && content.key.startsWith('asset:')) {
+    const params = new URLSearchParams(sourceHref.slice('/assets?'.length));
+    params.set('view', 'history');
+    sourceHref = `/assets?${params}`;
+  }
   return <MediaPreview
     src={content.previewUrl}
     type={content.category as 'image' | 'video' | 'audio'}
@@ -72,7 +78,7 @@ export function ContentPreview({ content, close, onPrevious, onNext, hasNavigati
     contentKey={content.key}
     previewKey={content.key}
     imageDownload={content.category === 'image' && content.downloadUrl ? () => handImageDownloadToBrowser(content.downloadUrl!, 'image.png') : undefined}
-    notice={<>{content.href.startsWith('/') && !content.href.startsWith('//') && <a href={content.href}><ExternalLink size={14} />查看原内容</a>}{navigationMessage && <div role="status">{navigationMessage}{onRetryNavigation && <button type="button" onClick={onRetryNavigation}>继续查找</button>}</div>}</>}
+    notice={<>{sourceHref.startsWith('/') && !sourceHref.startsWith('//') && <a href={sourceHref}><ExternalLink size={14} />查看原内容</a>}{navigationMessage && <div role="status">{navigationMessage}{onRetryNavigation && <button type="button" onClick={onRetryNavigation}>继续查找</button>}</div>}</>}
     hasNavigation={hasNavigation}
     onPrevious={onPrevious}
     onNext={onNext}
