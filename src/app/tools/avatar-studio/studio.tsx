@@ -1,12 +1,12 @@
 'use client';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Copy, Dice5, Download, Lock, Unlock, Save, Trash2, RotateCcw, UserRound, ImagePlus } from 'lucide-react';
+import { ArrowLeft, Copy, Dice5, Download, Lock, Unlock, Save, Trash2, RotateCcw, UserRound, ImagePlus } from 'lucide-react';
 import { useProductDialog } from '@/components/useProductDialog';
 import { RelativeTime } from '@/components/RelativeTime';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import { GenerationCompletionSettings, watchGenerationCompletion } from '@/components/GenerationCompletion';
-import ContentReactions from '@/components/content-reactions/ContentReactions';
+
 import { ResourceLibraryPicker } from '@/components/ResourceLibraryPicker';
 import { StudioReferenceGrid } from '@/app/image-studio/reference-grid';
 import { uploadFileAsAsset, type UploadProgressHandler, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
@@ -22,20 +22,14 @@ import { avatarRulesSignature, effectiveConditions } from '@/lib/avatar-random/i
 import { avatarLayout, avatarOutputCount, isAvatarSheet, avatarSheetSize, avatarSheetLabel, avatarCellLabel } from '@/lib/avatar-random/layout';
 import type { DescriptionStatus } from '@/lib/avatar-random/description-parser';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS } from '@/lib/image-studio/model-catalog';
-import { downloadAvatarCell } from './sheet-preview';
+import { AvatarSheetPreview, downloadAvatarCell } from './sheet-preview';
+import { GeneratedImageResults, type GeneratedImageResult } from '@/components/GeneratedImageResults';
+import { handImageDownloadToBrowser } from '@/lib/media/native-download';
 import styles from './studio.module.css';
 type Task = { id: string; ordinal: number; status: string; error?: string | null; asset: { id: string; original_url: string; thumbnail_url?: string | null } | null };
 type Payload = { records: AvatarRecord[]; recentConfigs:AvatarRecord[];recordTasks:Record<string,Task>; nextCursor?: string | null; settings: { model: string; revision: number; prices: Record<string, number | null> } };
 const statusLabel: Record<string, string> = { queued: '排队中', running: '生成中', succeeded: '图片已保存，待人工确认', failed: '生成失败', uncertain: '受理未知，请先查询' };
 async function api<T>(body?: unknown, query = '') { const response = await fetch(`/api/avatar-studio${query}`, { method: body ? 'POST' : 'GET', cache: 'no-store', ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) }); const data = await readJsonResponse<T & { error?: string; parse?: DescriptionStatus }>(response); if (!response.ok) throw Object.assign(new Error(data.error || '操作未确认'),{status:response.status,parse:data.parse}); return data; }
-function CandidateImage({ task, layout, index }: { task?: Task | null; layout: AvatarRules['layout']; index: number }) {
-  const src = task?.asset?.thumbnail_url || task?.asset?.original_url;
-  const [failed, setFailed] = useState('');
-  const size = avatarSheetSize(layout);
-  if (!src || failed === src) return <span className={styles.candidatePlaceholder}><UserRound size={28}/>{failed === src && src && <small>预览不可用</small>}</span>;
-  return size ? <span className={styles.cellThumb}><img src={src} alt={`${avatarCellLabel(layout, index)}格人物`} onError={() => setFailed(src)} style={{width:`${size*100}%`,height:`${size*100}%`,left:`-${index%size*100}%`,top:`-${Math.floor(index/size)*100}%`}}/></span>
-    : <img src={src} alt={`已生成人物${index+1}`} onError={() => setFailed(src)}/>;
-}
 export default function AvatarStudio({ ownerId, management, ticketId }: { ownerId: string; management?: boolean; ticketId?: string }) {
   const { confirm, prompt: askName, productDialog } = useProductDialog();
   const { refreshCredits } = useAppSession();
@@ -180,6 +174,21 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   const conditionsChanged=!!current&&avatarRulesSignature(rules,false)!==avatarRulesSignature(current.rules,false);
   const activePrompt=sheet?plan!.sheetPrompt||'':current?.prompt||'';
   const currentRecord = records.find(r => r.taskId === imageTask?.id);
+  const candidateResults = plan ? (sheet ? [{ candidateIndex: 0, output: tasks.find(value => value.ordinal === 1) || sourceTask, draftId: `draft:${plan.id}:sheet` }]
+    : plan.candidates.map((candidate, candidateIndex) => ({ candidateIndex, output: tasks.find(value => value.ordinal === candidateIndex + 1) || (candidateIndex === 0 ? sourceTask : null), draftId: `draft:${candidate.characterId}:${candidateIndex}` }))) : [];
+  if (previousImageTask?.asset && !candidateResults.some(value => value.output?.id === previousImageTask.id)) candidateResults.push({ candidateIndex: -1, output: previousImageTask, draftId: previousImageTask.id });
+  const sharedResults = candidateResults.map(({ candidateIndex, output, draftId }) => ({
+    id: output?.id || draftId, candidateIndex, output,
+    label: candidateIndex < 0 ? '保留的上一张人物图片' : sheet ? avatarSheetLabel(plan?.layout) : `候选 ${candidateIndex + 1}`,
+    status: output ? statusLabel[output.status] || '状态待确认' : '人物草稿，尚未出图',
+    pending: Boolean(output && ['queued', 'running'].includes(output.status)), error: output?.error,
+    media: output?.status === 'succeeded' && output.asset ? {
+      src: output.asset.original_url, thumbnailSrc: output.asset.thumbnail_url || undefined, alt: '人物整图',
+      fileName: 'avatar.png', contentKey: `asset:${output.asset.id}` as const, imageSharing: false,
+      comparisonCandidates: [...tasks, ...(sourceTask ? [sourceTask] : []), ...Object.values(recordTasks)].flatMap(value => value.status === 'succeeded' && value.asset ? [{ src: value.asset.original_url, thumbnailSrc: value.asset.thumbnail_url || undefined, alt: '人物整图', contentKey: `asset:${value.asset.id}` as const }] : []),
+    } : undefined,
+    download: output?.status === 'succeeded' && output.asset ? () => handImageDownloadToBrowser(`/api/image-studio/download?id=${encodeURIComponent(output.id)}`, 'avatar.png') : undefined,
+  } satisfies GeneratedImageResult & { candidateIndex: number; output: Task | null | undefined }));
   const blocked = referenceUploading || pending || tasks.some(t => t.status === 'uncertain');
   function assertDraft(draft: DraftSnapshot) {
     if(!alive.current||liveDraft.current.revision!==draft.revision||liveDraft.current.ownerRevision!==draft.ownerRevision)throw new Error('当前草稿或账号已变化，旧请求不会继续出图；请按当前内容重新生成。');
@@ -311,6 +320,20 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   function setChoice(field: string, value: string) { setRules(old => ({ ...old, choices: { ...old.choices, [field]: value },choiceSources:{...old.choiceSources,[field]:'user'},choiceEditedAt:{...old.choiceEditedAt,[field]:Date.now()} })); }
   async function returnImage() { await run(async () => { if (!ticketId || !image) return;if(!window.opener||window.opener.closed)throw new Error('原窗口已关闭，请在原任务的素材库重新选择；图片仍保留。'); const response = await fetch('/api/avatar-studio/handoff', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({action:'choose', id:ticketId, assetId:image.id}) }); const data = await readJsonResponse<{error?:string}>(response); if (!response.ok) throw new Error(data.error || '返回未确认'); window.opener.postMessage({ type: 'sd2:avatar-return', ticketId }, location.origin); window.opener.focus(); setNotice('已选择这张，正在等待原任务确认；原图仍保存在我的素材。'); }); }
   const visibleRecords = records.filter(r => r.kind === tab && Boolean(r.deletedAt) === deleted);
+  const historyResults = visibleRecords.filter(record => record.kind === 'result').map(record => {
+    const output = tasks.find(value => value.id === record.taskId) || (sourceTask?.id === record.taskId ? sourceTask : recordTasks[record.taskId || '']);
+    const assetId = output?.asset?.id || record.assetId;
+    return {
+      id: record.id, record, output, label: record.name,
+      status: output ? statusLabel[output.status] || '状态待确认' : '状态未读取',
+      pending: Boolean(output && ['queued', 'running'].includes(output.status)),
+      media: assetId ? { src: output?.asset?.original_url || `/api/image-studio/assets/${assetId}`,
+        thumbnailSrc: output?.asset?.thumbnail_url || `/api/image-studio/assets/${assetId}?thumbnail=1`,
+        alt: record.name, fileName: 'avatar.png', imageSharing: false,
+        contentKey: record.deletedAt ? undefined : `asset:${assetId}` as const } : undefined,
+      download: output?.status === 'succeeded' && output.asset ? () => handImageDownloadToBrowser(`/api/image-studio/download?id=${encodeURIComponent(output.id)}`, 'avatar.png') : undefined,
+    } satisfies GeneratedImageResult & { record: AvatarRecord; output: Task | null | undefined };
+  });
   const selectedOptionalConditions = Object.entries(rules.choices)
     .filter(([, value]) => typeof value === 'string' && value.trim())
     .map(([field, value]) => `${fieldLabels[field] || field}：${value}`);
@@ -328,27 +351,19 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     {(!management || editing.current) && <fieldset className={styles.layout} disabled={busy||referenceUploading||!ready}>
       <div className={styles.mainColumn}>
       <section aria-label="人物结果" data-avatar-results>
-        {plan ? <div className={styles.thumbnails} role="group" aria-label="人物候选" style={{gridTemplateColumns:`repeat(${sheet?avatarSheetSize(plan.layout):Math.min(4,plan.candidates.length)}, minmax(0, 1fr))`}}>
-          {plan.candidates.map((candidate,i) => {
-            const candidateTask=tasks.find(t=>t.ordinal===(sheet?1:i+1))||(i===0||sheet?sourceTask:null);
-            const label=sheet?`${avatarCellLabel(plan.layout,i)} · 人物`:`候选 ${i+1}`;
-            return <div key={candidate.characterId+String(i)} className={styles.candidate}>
-              <button type="button" className={styles.thumb} data-candidate-index={i} aria-pressed={index===i} aria-label={`选择${label}${candidateTask?.status==='succeeded'&&candidateTask.asset?'，双击或按Enter预览整图':''}`} onClick={()=>setIndex(i)} onDoubleClick={()=>{if(candidateTask?.status==='succeeded'&&candidateTask.asset)openImage(candidateTask.asset.original_url);}} onKeyDown={event=>{
-                if(event.key==='Enter'&&candidateTask?.status==='succeeded'&&candidateTask.asset){event.preventDefault();setIndex(i);openImage(candidateTask.asset.original_url);return;}
-                const size=sheet?avatarSheetSize(plan.layout):Math.min(4,plan.candidates.length);
-                const offset={ArrowLeft:-1,ArrowRight:1,ArrowUp:-size,ArrowDown:size}[event.key];
-                if(offset===undefined)return;
-                event.preventDefault();
-                const next=Math.max(0,Math.min(plan.candidates.length-1,i+offset));
-                setIndex(next);event.currentTarget.closest('[role="group"]')?.querySelector<HTMLButtonElement>(`[data-candidate-index="${next}"]`)?.focus();
-              }}><CandidateImage task={candidateTask} layout={sheet?plan.layout:'independent'} index={i}/></button>
-              <span className={styles.candidateLabel}>{label}</span>
-              {!candidateTask?.asset&&<small className={styles.price}>{candidateTask?statusLabel[candidateTask.status]||'状态待确认':'人物草稿，尚未出图'}</small>}
-            </div>;
-          })}
-        </div> : image ? <div className={styles.retainedImage}><img src={image.thumbnail_url||image.original_url} alt="保留的上一张人物图片"/></div> : <div className={styles.emptyResult}><UserRound size={36}/><p>暂无人物图片</p></div>}
-
-        <div className={styles.controls}>{plan&&plan.candidates.length>1&&<><button type="button" title="上一个" aria-label="上一个" onClick={()=>setIndex(i=>(i+plan.candidates.length-1)%plan.candidates.length)}><ArrowLeft size={16}/></button><button type="button" title="下一个" aria-label="下一个" onClick={()=>setIndex(i=>(i+1)%plan.candidates.length)}><ArrowRight size={16}/></button></>}{image&&<><button type="button" onClick={()=>openImage(image.original_url)}>预览整图</button><button type="button" disabled={busy||blocked||referenceIds.includes(image.id)} onClick={()=>{try{addReferences([image.id]);setNotice('已添加整图参考；没有上传、生成或扣费。');}catch(e){setError((e as Error).message);}}}><ImagePlus size={15}/>整图参考</button><a className={styles.quiet} href={`/api/image-studio/download?id=${encodeURIComponent(imageTask!.id)}`}><Download size={15}/>下载整图</a>{sheet&&imageTask===task&&task?.status==='succeeded'&&<button type="button" disabled={busy} onClick={()=>void run(async()=>{await downloadAvatarCell(image.original_url,avatarLayout(plan!),index);setNotice('已在本机裁出所选格并交给浏览器下载；没有生成、上传或收费。');})}><Download size={15}/>裁出此格</button>}<ContentReactions contentKey={`asset:${image.id}`} imageSharing={false}/>{!sheet&&task?.asset&&imageTask===task&&<button type="button" disabled={busy} onClick={()=>void run(async()=>{await askName('人物名称','我的人物',{title:'保存人物',confirmLabel:'保存',onSubmit:async name=>{await api({action:'save',name,planId:plan!.id,index,record:{kind:'character'}});await load();}});})}><Save size={15}/>保存这个人</button>}</>}
+        <GeneratedImageResults items={sharedResults} scope={`sd2:avatar-results:v1:${ownerId}:${plan?.id || 'retained'}:${avatarLayout(plan || rules)}`}
+          loading={!ready} emptyLabel="暂无人物图片" selectedId={task?.id || (plan ? `draft:${sheet ? plan.id + ':sheet' : plan.candidates[index]?.characterId + ':' + index}` : imageTask?.id)}
+          onSelect={item => { if (item.candidateIndex >= 0 && !sheet) setIndex(item.candidateIndex); }}
+          renderOverlay={(item, controls) => sheet && item.candidateIndex >= 0 && item.media && plan
+            ? <AvatarSheetPreview overlay src={item.media.thumbnailSrc || item.media.src} layout={avatarLayout(plan)} index={index} onSelect={setIndex} onPreview={controls.openPreview} /> : null}
+          renderSupplement={item => sheet && item.candidateIndex >= 0 && !item.media && plan ? <div className={styles.controls} aria-label="人物草稿分格">{plan.candidates.map((candidate, cell) => <button type="button" key={candidate.characterId} aria-pressed={index === cell} onClick={() => setIndex(cell)}>{avatarCellLabel(plan.layout, cell)}格人物</button>)}</div> : null}
+          renderActions={item => item.media && item.output?.asset ? <>
+            <button type="button" disabled={busy||blocked||referenceIds.includes(item.output.asset.id)} onClick={()=>{try{addReferences([item.output!.asset!.id]);setNotice('已添加整图参考；没有上传、生成或扣费。');}catch(e){setError((e as Error).message);}}}><ImagePlus size={15}/>整图参考</button>
+            {sheet && item.candidateIndex >= 0 && plan && <button type="button" disabled={busy} onClick={()=>void run(async()=>{await downloadAvatarCell(item.media!.src,avatarLayout(plan),index);setNotice('已在本机裁出所选格并交给浏览器下载；没有生成、上传或收费。');})}><Download size={15}/>裁出此格</button>}
+            {!sheet && item.candidateIndex >= 0 && plan && <button type="button" disabled={busy} onClick={()=>void run(async()=>{await askName('人物名称','我的人物',{title:'保存人物',confirmLabel:'保存',onSubmit:async name=>{await api({action:'save',name,planId:plan.id,index:item.candidateIndex,record:{kind:'character'}});await load();}});})}><Save size={15}/>保存这个人</button>}
+          </> : null}
+        />
+        <div className={styles.controls}>
         {current&&<><button type="button" disabled={busy||blocked} onClick={()=>void prepare('new',undefined,false,true)}>{draftSheet?'换一组人物':'换一个人'}</button><button type="button" disabled={busy||blocked||needsAnalysis||sheet||draftSheet||!image&&!current.baselineAssetId} onClick={()=>void prepare('styling')}>换个造型</button>{(!tasks.length||layoutChanged||model!==plan?.model||quality!==plan?.quality||resolution!==plan?.resolution||current.compilerVersion!==AVATAR_COMPILER_VERSION)&&<button type="button" disabled={busy||blocked||conditionsChanged||needsAnalysis||(draftSheet||layoutChanged)&&plan?.candidates.length!==rules.candidates} onClick={()=>void quoteOriginal()}>重新报价并按原人物出图</button>}</>}
         {ticketId&&image&&<button type="button" className={styles.primary} disabled={busy} onClick={()=>void returnImage()}>使用这张并返回</button>}</div>
         {tasks.some(t=>t.status==='failed')&&!tasks.some(t=>['queued','running','uncertain'].includes(t.status))&&<button type="button" className={styles.quiet} disabled={busy||conditionsChanged||needsAnalysis} onClick={()=>void run(async()=>{const draft=liveDraft.current;const data=await api<{plan:AvatarPlan}>({action:'retry',id:plan!.id});assertDraft(draft);await submit(data.plan,draft);})}>只重试失败项</button>}
@@ -411,8 +426,19 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
         <h2>{sheet?`${avatarCellLabel(plan?.layout,index)}格人物`:'当前人物'}</h2>{current ? <><p>{current.members.map(d=>`${d.fields.gender.value} · ${d.fields.age.value}岁 · ${d.fields.face_shape.value} · ${d.fields.hair_length.value}`).join('；')}</p><small>{sheet?`${avatarSheetLabel(plan?.layout)}保留${plan?.candidates.length}份人物条件；整图不能作为单人身份基准。`:'保持同人使用原图参考，模型仍可能改变面部；基准图不会自动替换。'}</small>{[...quickFields,'face_shape'].map(field=>{const f=current.members[0].fields[field];return <div key={field} className={styles.field}><span>{fieldLabels[field]}</span><select aria-label={`微调${fieldLabels[field]}`} value={rules.choices[field]||f.value} onChange={e=>setChoice(field,e.target.value)}>{Array.from(new Set([f.value,...catalog[field]])).map(v=><option key={v}>{v}</option>)}</select><button type="button" aria-label={`锁定${fieldLabels[field]}`} title={`锁定${fieldLabels[field]}，${f.source==='user'?'用户指定':f.source==='random'?'随机生成':'继承或推断'}`} aria-pressed={!!rules.locks[field]} onClick={()=>setRules(r=>{const locks={...r.locks};if(locks[field])delete locks[field];else locks[field]={...f,locked:true,manualLock:true};return {...r,locks};})}>{rules.locks[field]?<Lock size={14}/>:<Unlock size={14}/>}</button><button type="button" disabled={busy||blocked||sheet||draftSheet||!!rules.locks[field]||f.locked} title={`只重抽${fieldLabels[field]}，不出图`} aria-label={`只重抽${fieldLabels[field]}`} onClick={()=>void prepare('tweak',field,true)}><Dice5 size={15}/></button></div>;})}<div className={styles.controls}>{[...quickFields,'face_shape'].filter(field=>rules.choices[field]&&rules.choices[field]!==current.members[0].fields[field].value).map(field=><button type="button" className={styles.quiet} key={field} disabled={busy||blocked||sheet||draftSheet} onClick={()=>void prepare('tweak',field)}>微调{fieldLabels[field]}</button>)}</div><details><summary>完整人物信息</summary>{current.members.map((dna,i)=><div key={dna.seed}><strong>人物 {i+1}</strong><p>明显特征 {dna.details.filter(d=>d.prominence!=='micro').length} / 默认预算 {dna.featureBudget}</p>{Object.entries(dna.fields).map(([key,f])=><p key={key}>{fieldLabels[key]||key}：{f.value || '未指定'} · {f.source==='user'?'用户指定':f.source==='config'?'配置继承':f.source==='inferred'?'范围推断':'随机生成'}{f.locked?' · 已固定':''}</p>)}</div>)}</details><details><summary>人物描述与提示词</summary><div className={styles.prompt}>{activePrompt}</div><button className={styles.quiet} type="button" onClick={()=>void navigator.clipboard.writeText(activePrompt).catch(()=>setError('复制失败，请手动选择文本'))}><Copy size={15}/>复制提示词</button><small>随机规则 {current.members[0].ruleVersion}，图片模型不提供可复现的生图种子。</small></details>{currentRecord&&<label>人物符合度<select value={currentRecord.qualityStatus||'unreviewed'} onChange={e=>void run(()=>mutate(currentRecord,'quality',{record:{qualityStatus:e.target.value}}))}><option value="unreviewed">未人工确认</option><option value="matches">符合要求</option><option value="mismatch">不符合要求</option></select></label>}</> : <small>生成后查看人物信息</small>}</aside>
     </fieldset>}
     <section className={styles.records}><div className={styles.heading}><div className={styles.controls}>{(['config','character','result'] as const).map(t=><button type="button" key={t} aria-pressed={tab===t} onClick={()=>setTab(t)}>{t==='config'?'随机规则':t==='character'?'保存的人物':'生成历史'}</button>)}</div><label><input type="checkbox" checked={deleted} onChange={e=>setDeleted(e.target.checked)} style={{width:'auto'}}/> 最近删除</label></div>
-      {visibleRecords.map(r=>{const t=tasks.find(task=>task.id===r.taskId)||(sourceTask?.id===r.taskId?sourceTask:recordTasks[r.taskId||'']);return <article className={styles.record} key={r.id}>{t?.asset||r.assetId?<button type="button" className={styles.recordCover} aria-label={`预览${r.name}`} onClick={()=>openImage(t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}`,r.name)} onDoubleClick={()=>openImage(t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}`,r.name)}><img src={t?.asset?.thumbnail_url||t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}?thumbnail=1`} alt={r.name}/></button>:<span className={styles.recordCover}><UserRound size={24}/></span>}<div className={styles.recordText}><strong>{r.name}</strong><small><RelativeTime value={r.createdAt}/> · {r.kind==='result'?(t?statusLabel[t.status]:'状态未读取'):r.kind==='config'?`配置第${r.revision}版`:'已保存人物'}</small></div><div className={styles.controls}>{r.deletedAt?<button type="button" disabled={busy} onClick={()=>void run(()=>mutate(r,'undelete'))}>撤销删除</button>:<><button type="button" disabled={busy} onClick={()=>void restore(r)}>{r.kind==='config'?'使用/编辑':'恢复草稿'}</button>{r.kind==='config'&&<><button type="button" onClick={()=>void run(async()=>{await askName('配置名称',r.name,{title:'重命名',onSubmit:async name=>mutate(r,'rename',{name})});})}>重命名</button><button type="button" onClick={()=>void run(async()=>{await api({action:'save',name:`${r.name}副本`,record:{kind:'config',rules:r.rules}});await load();})}>复制</button></>}{r.kind==='result'&&t?.asset&&<ContentReactions contentKey={`asset:${t.asset.id}`} imageSharing={false}/>}<button type="button" disabled={busy} onClick={()=>void run(async()=>{if(await confirm(`删除“${r.name}”？可撤销，不删除已有图片、资产或其他历史。`,{title:'删除记录',confirmLabel:'删除',danger:true}))await mutate(r,'delete');})}><Trash2 size={15}/>删除</button></>}</div></article>;})}
-      {!visibleRecords.length&&<p className={styles.empty}>暂无{deleted?'已删除':''}{tab==='config'?'配置':tab==='character'?'人物':'生成历史'}</p>}{cursor&&<button type="button" className={styles.quiet} disabled={busy} onClick={()=>void run(async()=>{await load(true,cursor);})}>加载更多</button>}
+      {tab === 'result' ? <GeneratedImageResults key={`${ownerId}:${deleted}`} items={historyResults}
+        scope={`sd2:avatar-history-results:v1:${ownerId}:${deleted ? 'deleted' : 'active'}`}
+        hasMore={Boolean(cursor)} loadMore={async () => { if (cursor) await load(true, cursor); }} busy={busy}
+        emptyLabel={deleted ? '暂无已删除的生成记录' : '暂无生成历史'}
+        renderMetadata={({record, status}) => <div className={styles.recordText}><strong>{record.name}</strong><small><RelativeTime value={record.createdAt}/> · {status}</small></div>}
+        renderActions={({record}) => record.deletedAt ? <button type="button" disabled={busy} onClick={()=>void run(()=>mutate(record,'undelete'))}>撤销删除</button> : <>
+          <button type="button" disabled={busy} onClick={()=>void restore(record)}>恢复草稿</button>
+          <button type="button" disabled={busy} onClick={()=>void run(async()=>{if(await confirm(`删除“${record.name}”？可撤销，不删除已有图片、资产或其他历史。`,{title:'删除记录',confirmLabel:'删除',danger:true}))await mutate(record,'delete');})}><Trash2 size={15}/>删除</button>
+        </>}
+      /> : <>      {visibleRecords.map(r=>{const t=tasks.find(task=>task.id===r.taskId)||(sourceTask?.id===r.taskId?sourceTask:recordTasks[r.taskId||'']);return <article className={styles.record} key={r.id}>{t?.asset||r.assetId?<button type="button" className={styles.recordCover} aria-label={`预览${r.name}`} onClick={()=>openImage(t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}`,r.name)} onDoubleClick={()=>openImage(t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}`,r.name)}><img src={t?.asset?.thumbnail_url||t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}?thumbnail=1`} alt={r.name}/></button>:<span className={styles.recordCover}><UserRound size={24}/></span>}<div className={styles.recordText}><strong>{r.name}</strong><small><RelativeTime value={r.createdAt}/> · {r.kind==='result'?(t?statusLabel[t.status]:'状态未读取'):r.kind==='config'?`配置第${r.revision}版`:'已保存人物'}</small></div><div className={styles.controls}>{r.deletedAt?<button type="button" disabled={busy} onClick={()=>void run(()=>mutate(r,'undelete'))}>撤销删除</button>:<><button type="button" disabled={busy} onClick={()=>void restore(r)}>{r.kind==='config'?'使用/编辑':'恢复草稿'}</button>{r.kind==='config'&&<><button type="button" onClick={()=>void run(async()=>{await askName('配置名称',r.name,{title:'重命名',onSubmit:async name=>mutate(r,'rename',{name})});})}>重命名</button><button type="button" onClick={()=>void run(async()=>{await api({action:'save',name:`${r.name}副本`,record:{kind:'config',rules:r.rules}});await load();})}>复制</button></>}<button type="button" disabled={busy} onClick={()=>void run(async()=>{if(await confirm(`删除“${r.name}”？可撤销，不删除已有图片、资产或其他历史。`,{title:'删除记录',confirmLabel:'删除',danger:true}))await mutate(r,'delete');})}><Trash2 size={15}/>删除</button></>}</div></article>;})}
+      </>}
+
+      {tab !== 'result'&&!visibleRecords.length&&<p className={styles.empty}>暂无{deleted?'已删除':''}{tab==='config'?'配置':tab==='character'?'人物':'生成历史'}</p>}{tab !== 'result'&&cursor&&<button type="button" className={styles.quiet} disabled={busy} onClick={()=>void run(async()=>{await load(true,cursor);})}>加载更多</button>}
     </section>
     <ResourceLibraryPicker open={pickerOpen} imageOnly target="image-studio" purpose="avatar-reference" initialSource="random-person" title="添加人物参考图" confirmLabel="添加到参考区" maxSelection={MAX_REFERENCE_IMAGES}
       currentCount={referenceIds.length} currentAssetIds={referenceIds} onClose={()=>setPickerOpen(false)} onUploadFile={uploadReference}

@@ -14,6 +14,7 @@ import CharacterBoxEditor from '@/components/cutout/CharacterBoxEditor';
 import CutoutSettingsPanel from '@/components/cutout/CutoutSettingsPanel';
 import RegionSelector from '@/components/cutout/RegionSelector';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
+import { GeneratedImageResults, type GeneratedImageResult } from '@/components/GeneratedImageResults';
 import {
   cancelCutoutJob, createCutoutJob, cutoutResultReference, downloadCutoutBlob,
   getCutoutCapabilities, getCutoutHistory, getCutoutJob, saveCutoutBlob, uploadCutoutAsset,
@@ -843,6 +844,27 @@ export default function CutoutPage() {
   const sourceHeight = sourceSize?.height || 0;
   const selectedImageUrl = result?.result_url ? resultFileUrl(selectedJob!.job_id, result.result_url) : '';
   const resultCrop = normalizeCrop(result?.crop);
+  const matchingOriginal = source && selectedJob && originalSourceByJob.current.get(selectedJob.job_id) === source.id && sourceUrl ? { src: sourceUrl, alt: '本次原图' } : undefined;
+  const cutoutOutputs = selectedJob?.status === 'succeeded' && result ? [
+    ...(selectedImageUrl ? [{ id: `${selectedJob.job_id}:result`, url: selectedImageUrl, label: '抠图结果', filename: result.filename || 'cutout.png', main: true, mask: '' }] : []),
+    ...(selectedJob.kind === 'characters' && Array.isArray(result.items) ? result.items.flatMap((item, index) => {
+      const url = resultFileUrl(selectedJob.job_id, item.result_url || item.result_filename);
+      return url ? [{ id: `${selectedJob.job_id}:character:${item.id || index}`, url, label: item.name || `角色 ${index + 1}`, filename: item.result_filename || `${item.name || item.id || 'character'}.png`, main: false, mask: resultFileUrl(selectedJob.job_id, item.mask_url) }] : [];
+    }) : []),
+  ] : [];
+  const sharedResults: Array<GeneratedImageResult & { output?: typeof cutoutOutputs[number] }> = cutoutOutputs.map(output => ({
+    id: output.id, output, label: output.label, status: '已完成', transparent: true,
+    media: { src: output.url, alt: output.label, fileName: output.filename, comparison: matchingOriginal,
+      comparisonCandidates: cutoutOutputs.filter(other => other.id !== output.id).map(other => ({ src: other.url, alt: other.label })) },
+    download: async () => {
+      try { saveCutoutBlob(await downloadCutoutBlob(output.url), output.filename); }
+      catch (cause) { throw new Error(safeError(cause, 'download')); }
+    },
+  }));
+  if (selectedJob && selectedJob.status !== 'succeeded') sharedResults.push({
+    id: `${selectedJob.job_id}:state`, label: '任务结果', pending: ['queued', 'running'].includes(selectedJob.status),
+    status: selectedJob.status === 'queued' ? '排队中' : selectedJob.status === 'running' ? '处理中' : selectedJob.status === 'failed' ? '任务未完成，原图仍保留' : '任务已取消',
+  });
   const samAvailable = Boolean(capabilities?.models?.some(model => model.available === true && isSamModelId(model.id) && model.id === characterSettings.sam_model_id));
 
   return (
@@ -1045,52 +1067,19 @@ export default function CutoutPage() {
             {selectedJob?.status === 'failed' && <div className={`${styles.statusNotice} ${styles.statusError}`}>任务未完成。原图仍保留，请检查参数后重新提交。</div>}
             {selectedJob?.status === 'canceled' && <div className={styles.statusNotice}>任务已取消，原图与其他任务结果不受影响。</div>}
 
+            <GeneratedImageResults key={`${accountId}:${selectedJobId}`} items={sharedResults}
+              scope={`sd2:cutout-results:v1:${accountId}:${selectedJobId}:output`} emptyLabel={selectedJob ? '暂无可显示的图片结果' : '暂无任务结果'}
+              renderActions={item => item.output ? <>
+                <button type="button" onClick={() => sourceFromResult(item.output!.url, item.output!.filename, item.output!.main)}>作为后续图片</button>
+                {item.output.mask && <button type="button" onClick={() => void downloadResult(item.output!.mask, 'character-mask.png')}><Download size={14} />遮罩</button>}
+                {item.output.main && selectedJob?.kind === 'cutout' && <button type="button" onClick={() => setRepairTarget({url: item.output!.url, originalUrl: matchingOriginal?.src, cropMeta: resultCrop, filename: item.output!.filename})}><Brush size={14} />局部修复</button>}
+              </> : null}
+            />
             {selectedJob?.status === 'succeeded' && result && (
               <>
-                {selectedImageUrl && (
-                  <article className={styles.resultTile}>
-                    <div className={styles.resultTileHeader}><strong>{result.filename || '抠图结果'}</strong><span className={styles.statusBadge}>结果</span></div>
-                    <div className={styles.imageFrame}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img className={styles.resultImage} src={selectedImageUrl} alt="抠图结果" onDoubleClick={() => setZoom({ src: selectedImageUrl, alt: '抠图结果' })} />
-                    </div>
-                    <div className={styles.resultActions}>
-                      <button className={styles.textButton} type="button" onClick={() => void downloadResult(selectedImageUrl, result.filename || 'cutout.png')}><Download size={14} />下载结果</button>
-                      <button className={styles.textButton} type="button" onClick={() => sourceFromResult(selectedImageUrl, result.filename || 'cutout.png', true)}>作为后续图片</button>
-                      {selectedJob.kind === 'cutout' && <button className={styles.textButton} type="button" onClick={() => {
-                        const originalUrl = source?.kind === 'local' && originalSourceByJob.current.get(selectedJob.job_id) === source.id ? sourceUrl : undefined;
-                        setRepairTarget({ url: selectedImageUrl, originalUrl, cropMeta: resultCrop, filename: result.filename || 'cutout.png' });
-                      }}><Brush size={14} />局部修复</button>}
-                      <button className={styles.iconButton} title="查看大图" aria-label="查看结果大图" onClick={() => setZoom({ src: selectedImageUrl, alt: '抠图结果' })}><ImageIcon size={16} /></button>
-                    </div>
-                  </article>
-                )}
-                {result.mask_url && (
-                  <div className={styles.operationBar}>
-                    <button className={styles.textButton} type="button" onClick={() => void downloadResult(resultFileUrl(selectedJob.job_id, result.mask_url), 'cutout-mask.png')}><Download size={14} />下载遮罩</button>
-                  </div>
-                )}
-                {selectedJob.kind === 'characters' && Array.isArray(result.items) && (
-                  <div className={styles.resultGrid}>
-                    {result.items.map((item, index) => {
-                      const url = resultFileUrl(selectedJob.job_id, item.result_url || item.result_filename);
-                      if (!url) return null;
-                      return <article className={styles.resultTile} key={`${selectedJob.job_id}:${item.id || index}`}>
-                        <div className={styles.resultTileHeader}><strong>{item.name || item.id || `角色 ${index + 1}`}</strong><span className={styles.statusBadge}>{item.meta?.model || '角色结果'}</span></div>
-                        <div className={styles.imageFrame}>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img className={styles.resultImage} src={url} alt={item.name || `角色 ${index + 1}`} onDoubleClick={() => setZoom({ src: url, alt: item.name || `角色 ${index + 1}` })} />
-                        </div>
-                        <div className={styles.resultActions}>
-                          <button className={styles.textButton} type="button" onClick={() => void downloadResult(url, item.result_filename || `${item.name || item.id || 'character'}.png`)}><Download size={14} />下载</button>
-                          {item.mask_url && <button className={styles.textButton} type="button" onClick={() => void downloadResult(resultFileUrl(selectedJob.job_id, item.mask_url), item.mask_filename || 'character-mask.png')}><Download size={14} />遮罩</button>}
-                          <button className={styles.iconButton} title="查看大图" aria-label={`查看${item.name || item.id || index + 1}大图`} onClick={() => setZoom({ src: url, alt: item.name || '角色结果' })}><ImageIcon size={16} /></button>
-                          <button className={styles.textButton} type="button" onClick={() => sourceFromResult(url, item.result_filename || item.name || 'character.png', false)}>作为后续图片</button>
-                        </div>
-                      </article>;
-                    })}
-                  </div>
-                )}
+                {result.mask_url && <div className={styles.operationBar}>
+                  <button className={styles.textButton} type="button" onClick={() => void downloadResult(resultFileUrl(selectedJob.job_id, result.mask_url), 'cutout-mask.png')}><Download size={14} />下载遮罩</button>
+                </div>}
                 {(result.contact_sheet_url || result.manifest_url || result.zip_url) && (
                   <div className={styles.operationBar} aria-label="任务附带文件">
                     {result.contact_sheet_url && <button className={styles.textButton} type="button" onClick={() => void downloadResult(resultFileUrl(selectedJob.job_id, result.contact_sheet_url), 'contact-sheet.png')}><Download size={14} />总览图</button>}
@@ -1137,12 +1126,9 @@ export default function CutoutPage() {
           {localRepair && repairObjectUrl && (
             <section className={styles.section} aria-label="本地修复结果">
               <div className={styles.sectionHeading}><div><h2>本地修复结果</h2><p>仅保存在当前页面内存中；需要处理时会作为一张新图片上传。</p></div></div>
-              <div className={styles.imageFrame}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img className={styles.resultImage} src={repairObjectUrl} alt="本地修复结果" onDoubleClick={() => setZoom({ src: repairObjectUrl, alt: '本地修复结果' })} />
-              </div>
+              <GeneratedImageResults items={[{ id: 'local-repair', label: '本地修复结果', status: '尚未上传', transparent: true, media: { src: repairObjectUrl, alt: '本地修复结果', fileName: localRepair.filename }, download: () => saveCutoutBlob(localRepair.result, localRepair.filename) }]}
+                scope={`sd2:cutout-results:v1:${accountId}:local-repair`} />
               <div className={styles.resultActions}>
-                <button className={styles.textButton} type="button" onClick={() => saveCutoutBlob(localRepair.result, localRepair.filename)}><Download size={14} />下载修复图</button>
                 <button className={styles.textButton} type="button" onClick={() => saveCutoutBlob(localRepair.mask, localRepair.filename.replace(/\.png$/, '-mask.png'))}><Download size={14} />下载修复遮罩</button>
                 <button className={styles.secondaryButton} type="button" onClick={useLocalRepair} disabled={isBusy || Boolean(pendingSubmission)}>作为新图片处理</button>
                 <button className={styles.iconButton} type="button" title="移除本地结果" aria-label="移除本地结果" onClick={async () => { if (await confirm('移除尚未上传的本地修复结果？原图和服务器结果仍保留。', { title: '移除本地结果', confirmLabel: '移除', danger: true })) setLocalRepair(null); }}><Trash2 size={15} /></button>

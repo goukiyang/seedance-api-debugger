@@ -1,0 +1,21 @@
+.results { min-width: 0; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 20px; }
+.card { min-width: 0; }
+.media { position: relative; aspect-ratio: 1; overflow: hidden; border: 1px solid #333b40; border-radius: 6px; background: #080a0b; }
+.media[data-transparent] { background-color: #d3dad8; background-image: repeating-conic-gradient(#aab4b1 0% 25%, transparent 0% 50%); background-size: 20px 20px; }
+.pending { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #adb6bd; }
+.pending[role=button] { cursor: pointer; }
+.pending[aria-pressed=true] { box-shadow: inset 0 0 0 2px #79daca; }
+.pending:focus-visible { outline: 2px solid #79daca; outline-offset: -3px; }
+.waitingImage { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: blur(2.4px); }
+.phase { position: absolute; bottom: 8px; right: 8px; left: 8px; padding: 5px 8px; border-radius: 4px; background: #151a1de6; font-size: 13px; text-align: center; }
+.heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; padding: 8px 0; font-size: 13px; overflow-wrap: anywhere; }
+.heading span, .empty { color: #aab8b4; }
+.actions, .pagination { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.actions button, .pagination button, .error button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 5px 8px; border: 1px solid #414b48; border-radius: 4px; background: #202725; color: #e0e9e5; font-size: 13px; cursor: pointer; }
+.actions button:hover, .pagination button:hover { background: #303c37; }
+.actions button:focus-visible, .pagination button:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
+.actions button:disabled, .pagination button:disabled { opacity: .45; cursor: default; }
+.pagination { justify-content: center; padding: 14px 0; font-size: 13px; }
+.error { color: #efb0a6; font-size: 13px; overflow-wrap: anywhere; }
+.feedback { color: #c4d7cd; font-size: 13px; overflow-wrap: anywhere; }

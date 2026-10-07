@@ -37,7 +37,7 @@ export type ImagePreviewMetadata = {
 
 export type SafeImagePreviewDetails = Omit<ImagePreviewMetadata, 'context'> & { width?: number; height?: number; fileSize?: number };
 
-type ZoomableImagePreviewProps = {
+export type ZoomableImagePreviewProps = {
   src: string;
   thumbnailSrc?: string;
   alt: string;
@@ -58,6 +58,7 @@ type ZoomableImagePreviewProps = {
   onPrevious?: () => void;
   onNext?: () => void;
   onImageLoaded?: (src: string) => void;
+  onDownload?: () => void | Promise<unknown>;
   onClose: () => void;
 };
 
@@ -212,7 +213,7 @@ type ImageRequest = { token: number; controller: AbortController; resolve: (appl
 const sides: Side[] = ['current', 'comparison'];
 const viewIdentity = (side: Side, image: ImageComparisonSource) => imageSourceIdentity(image) + ':' + side;
 
-export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, previewKey, sourceVersion, contentKey, imageSharing = true, metadata, safeDetails, comparison, comparisonCandidates = [], details, notice, hasNavigation, onPrevious, onNext, onImageLoaded, onClose }: ZoomableImagePreviewProps) {
+export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, previewKey, sourceVersion, contentKey, imageSharing = true, metadata, safeDetails, comparison, comparisonCandidates = [], details, notice, hasNavigation, onPrevious, onNext, onImageLoaded, onDownload, onClose }: ZoomableImagePreviewProps) {
   const { user, hasLoadedUser } = useAppSession();
   const owner = user?.id || '';
   const backdropRef = useRef<HTMLDivElement>(null), toolbarRef = useRef<HTMLDivElement>(null), stageRef = useRef<HTMLDivElement>(null);
@@ -237,6 +238,8 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const [decodedImages, setDecodedImages] = useState<Record<string, DecodedImage>>({});
   const [frames, setFrames] = useState<Frames>({ current: { width: 1, height: 1 }, comparison: { width: 1, height: 1 } });
   const [message, setMessage] = useState(''), [copyState, setCopyState] = useState<{ src: string; busy?: boolean; success?: boolean; message?: string } | null>(null);
+  const [downloadBusy, setDownloadBusy] = useState(false);
+  const downloadLock = useRef(false);
   const points = useRef<Record<Side, Map<number, Point>>>({ current: new Map(), comparison: new Map() });
   const zoomPoints = useRef<Partial<Record<Side, Point>>>({});
   const localUrls = useRef(new Set<string>());
@@ -633,6 +636,11 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
             {decoded?.hd?.status === 'ready' ? <a className={styles.menuAction} href={versionedHdSource(selectedImage.src, 'hd-download', decoded.hd.sourceVersion)}><Download size={16} />下载高清 {decoded.hd.format?.toUpperCase()}{decoded.hd.bytes ? ` · ${formatImageBytes(decoded.hd.bytes)}` : ''}</a> : <span className={styles.menuAction}>高清档尚未就绪，原图仍可下载</span>}
             <a className={styles.menuAction} href={displaySource(selectedImage.src, 'download')} download={selectedImage.fileName || 'original-image'}><Download size={16} />下载原图{knownFileSize ? ` · ${formatImageBytes(fileSize)}` : ''}</a>
           </>}
+          {isOriginalSubject && safeSide === 'current' && onDownload && displaySource(selectedImage.src, 'download') === selectedImage.src && <button type="button" className={styles.menuAction} disabled={downloadBusy} onClick={() => {
+            if (downloadLock.current) return;
+            downloadLock.current = true; setDownloadBusy(true);
+            void Promise.resolve().then(onDownload).catch(error => { if (alive.current) setMessage(error instanceof Error ? error.message : '下载未完成，请重试'); }).finally(() => { downloadLock.current = false; if (alive.current) setDownloadBusy(false); });
+          }}><Download size={16} />{downloadBusy ? '准备下载' : '下载原图'}</button>}
           {hasNavigation && <div className={styles.mobileNavigation}><button type="button" className={styles.menuAction} onClick={onPrevious}><ArrowLeft size={16} />当前图上一张</button><button type="button" className={styles.menuAction} onClick={onNext}><ArrowRight size={16} />当前图下一张</button></div>}
           {comparisonMode && <div className={styles.compareOptions}>
             <button type="button" className={styles.menuAction} onClick={() => { userAction.current++; stopGestures(); setAxis(value => value === 'horizontal' ? 'vertical' : 'horizontal'); }}>{axis === 'horizontal' ? <ArrowUpDown size={16} /> : <ArrowLeftRight size={16} />}{axis === 'horizontal' ? '切换上下对比' : '切换左右对比'}</button>

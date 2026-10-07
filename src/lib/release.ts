@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '画布图片节点可从素材库添加参考图，处理继续使用原件；素材卡片更紧凑、删除移至右下，喜欢按钮保留单层底；素材库支持三行翻页并保留加载更多。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '人物生成、AI抠图与生图模板共用图片结果布局、三行翻页和预览操作；人物分格裁图、抠图透明背景与原图对比保留。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

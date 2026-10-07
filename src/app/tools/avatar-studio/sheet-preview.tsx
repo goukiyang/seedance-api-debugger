@@ -6,7 +6,7 @@ import type { AvatarLayout } from '@/lib/avatar-random/types';
 import { avatarCellRect, containImageSize } from '@/lib/avatar-random/sheet-geometry';
 import styles from './studio.module.css';
 
-export function AvatarSheetPreview({ src, layout, index, onSelect, onPreview }: { src: string; layout: AvatarLayout; index: number; onSelect: (index: number) => void; onPreview: () => void }) {
+export function AvatarSheetPreview({ src, layout, index, onSelect, onPreview, overlay = false }: { src: string; layout: AvatarLayout; index: number; onSelect: (index: number) => void; onPreview: () => void; overlay?: boolean }) {
   const container = useRef<HTMLDivElement>(null);
   const cells = useRef<Array<HTMLButtonElement | null>>([]);
   const [natural, setNatural] = useState<{ src: string; width: number; height: number } | null>(null);
@@ -25,12 +25,13 @@ export function AvatarSheetPreview({ src, layout, index, onSelect, onPreview }: 
   const loaded = natural?.src === src;
   // The selectable plane is the actual contain image, excluding letterbox space.
   const { width, height } = containImageSize(viewport.width, viewport.height, loaded && natural ? natural.width : 1, loaded && natural ? natural.height : 1);
-  return <div className={styles.sheetViewport} ref={container}>
+  return <div className={styles.sheetViewport} ref={container} style={overlay ? { position: 'absolute', inset: 0, height: '100%', background: 'transparent', pointerEvents: 'none' } : undefined}>
     <div className={styles.sheetPlane} style={{ width, height }}>
-      <img key={src} src={src} alt={`${size}×${size}人物整图`} onLoad={event => { setNatural({ src, width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); setFailed(''); }} onError={() => { setNatural(null); setFailed(src); }} />
+      <img key={src} src={src} alt={overlay ? '' : `${size}×${size}人物整图`} style={overlay ? { visibility: 'hidden' } : undefined} onLoad={event => { setNatural({ src, width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); setFailed(''); }} onError={() => { setNatural(null); setFailed(src); }} />
       {loaded && <div className={styles.sheetGrid} style={{ gridTemplateColumns: `repeat(${size}, 1fr)`, gridTemplateRows: `repeat(${size}, 1fr)` }}>
-        {Array.from({ length: size * size }, (_, i) => <button type="button" key={i} ref={element => { cells.current[i] = element; }} aria-label={`选择${avatarCellLabel(layout, i)}格人物`} aria-pressed={i === index} tabIndex={i === index ? 0 : -1}
+        {Array.from({ length: size * size }, (_, i) => <button type="button" key={i} style={overlay ? { pointerEvents: 'auto' } : undefined} ref={element => { cells.current[i] = element; }} aria-label={`选择${avatarCellLabel(layout, i)}格人物`} aria-pressed={i === index} tabIndex={i === index ? 0 : -1}
           onClick={() => onSelect(i)} onDoubleClick={onPreview} onKeyDown={event => {
+            if (event.key === 'Enter') { event.preventDefault(); onSelect(i); onPreview(); return; }
             const offset = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -size, ArrowDown: size }[event.key];
             if (offset === undefined) return;
             event.preventDefault();

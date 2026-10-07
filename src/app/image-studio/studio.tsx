@@ -7,7 +7,7 @@ import { ContextClipboardActions } from '@/components/ContextClipboardActions';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Heart, ChevronDown, ChevronRight, Clipboard, Copy, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
+import { Heart, ChevronDown, ChevronRight, Copy, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
 import { ContextVersionLabel, useModuleContextVersion } from './context-version-label';
 import { uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
@@ -15,12 +15,12 @@ import { UploadedImagePicker } from '@/components/UploadedImagePicker';
 import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
 import { scrollToWorkbenchHeader } from '@/lib/navigation/scroll-to-workbench-header';
 import { replaceImageModuleLocation } from '@/lib/navigation/image-module-location';
-import { useResultPages } from './use-result-pages';
+import { GeneratedImageResults, type GeneratedImageResult } from '@/components/GeneratedImageResults';
 import { useLikedStudioResults } from './liked-results';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useUnsavedNavigation } from '@/lib/hooks/use-unsaved-navigation';
-import { copyImage } from '@/lib/media/copy-image';
+
 import { ModuleGroupPicker } from './group-picker';
 import { TemplateFavoritesList, useTemplateFavorites } from './template-favorites';
 import type { ReactionListItem } from '@/lib/content-reactions/types';
@@ -37,9 +37,9 @@ function studioUploadProgress(file: File, index: number, count: number, progress
 }
 import { ZoomableImagePreview, type ImagePreviewMetadata, type ImageComparisonSource } from '@/components/ZoomableImagePreview';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
-import ContentReactions from '@/components/content-reactions/ContentReactions';
+
 import TemplateFavoriteTitle from '@/components/content-reactions/TemplateFavoriteTitle';
-import { ResultImageCover } from '@/components/ResultImageCover';
+
 import { studioResultVersion } from '@/lib/image-studio/result-attention';
 import { useResultAttention } from './use-result-attention';
 import styles from './studio.module.css';
@@ -72,13 +72,6 @@ function studioTaskPhase(task: StudioTask) {
   const phase = task.delivery?.phase;
   return ({ queued: '等待生成', provider: '生成中', unknown: '生成结果待确认', download: '原图下载中', recover: '恢复原图中', validate: '图片校验中', save: '保存中', stopped: '原图交付停止', failed: '未能交付图片', ready: studioTaskHasDeliveredAsset(task) ? '已完成' : task.status === 'succeeded' ? '图片已移除' : '生成结果待确认' } as Record<string, string>)[phase || '']
     || (task.status === 'running' ? '生成中' : task.status === 'queued' ? '等待生成' : task.status === 'uncertain' ? '生成结果待确认' : '未能交付图片');
-}
-function StudioWaitingImage({ src }: { src?: string | null }) {
-  const [failed, setFailed] = useState(false);
-  return <div className={styles.waitingImageFrame}>
-    {src && !failed ? <img className={styles.waitingMainImage} src={src} alt="本次输入主图（模糊预览）" onError={() => setFailed(true)} />
-      : <ImagePlus size={24} role="img" aria-label="暂无主图预览" />}
-  </div>;
 }
 type StudioModule = { referencePolicy?: StudioReferencePolicy; id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sourcePresetOwnedByViewer?: boolean; sourcePresetCanManageSharing?: boolean; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string; fixedReferenceCount?: number; fixedReferencesEditable?: boolean; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[]; reproductionState?: { fixedReferenceCount: number; styleGroups: StudioStyleSummary[] } | null };
 type StudioPreset = { id: string; name: string; revision: string; moduleContextVersion?: string | null; scope: 'admin' | 'creator'; isShared: boolean; canManageSharing?: boolean; ownedByViewer?: boolean; groupName: string; model: string; quality: string; resolution: ImageResolution; count: number; referenceLimit: number; aspectRatio: string; images: UploadedAssetPayload[]; banner: UploadedAssetPayload | null; contextConfigured: boolean; createdAt: string };
@@ -1631,20 +1624,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     setCopyFeedback({ id: task.id, text: copied ? '已复制' : '复制失败，请重试' });
     window.setTimeout(() => setCopyFeedback(current => current?.id === task.id ? null : current), copied ? 1800 : 2600);
   }
-  async function copyTaskImage(task: StudioTask) {
-    if (!studioTaskHasDeliveredAsset(task)) return;
-    const imageUrl = task.asset.original_url;
-    setCopyFeedback({ id: task.id, text: '复制中…' });
-    let copied = false;
-    try {
-      await copyImage(imageUrl);
-      copied = true;
-    } catch {
-      copied = false;
-    }
-    setCopyFeedback({ id: task.id, text: copied ? '已复制' : '复制失败，请重试' });
-    window.setTimeout(() => setCopyFeedback(current => current?.id === task.id ? null : current), copied ? 1800 : 2600);
-  }
   const moduleUnitCredits = settings ? settings.prices?.[moduleModel] ?? null : module.prices[moduleModel] ?? null;
   const selectedProviderReady = settings?.modelReady?.[moduleModel] ?? settings?.providerReady;
   const selectedFourToOne = settings?.modelFourToOne?.[moduleModel] === true;
@@ -1694,23 +1673,34 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const resultCursor = likedResults.liked ? likedResults.nextCursor : nextCursor;
   const refreshResults = () => { if (likedResults.liked) likedResults.refresh(); else void loadTasks(); };
   const previewableTasks = resultTasks.filter(task => studioTaskHasDeliveredAsset(task) && Boolean(task.asset.id));
-  const readNextResultPage = useCallback(async () => { if (nextCursor) await loadTasks(nextCursor); }, [loadTasks, nextCursor]);
-  const allResultPages = useResultPages({ items: tasks, storageKey: `sd2-image-studio-result-page:${taskReadScope}`, visible: !hidden && !likedResults.liked && resultView === 'images' && tasks.length > 0,
-    busy: loadingTasks || (templateWorkbench && taskReadAction !== 'idle'), error: Boolean(tasksError), hasMore: Boolean(nextCursor), loadMore: readNextResultPage, currentId: preview?.taskId || selectedResultId });
-  const likedResultPages = useResultPages({ items: likedResults.tasks.filter(task => !deletedIds.current.has(task.id)), storageKey: `sd2-image-studio-liked-result-page:${taskReadScope}`, visible: !hidden && likedResults.liked && resultView === 'images' && resultTasks.length > 0,
-    busy: likedResults.loading, error: Boolean(likedResults.error), hasMore: Boolean(likedResults.nextCursor), loadMore: likedResults.more, currentId: preview?.taskId || selectedResultId });
-  const resultPages = likedResults.liked ? likedResultPages : allResultPages;
+  const readNextResultPage = useCallback(async () => {
+    if (likedResults.liked) await likedResults.more();
+    else if (nextCursor) await loadTasks(nextCursor);
+  }, [likedResults.liked, likedResults.more, loadTasks, nextCursor]);
   function chooseResultFilter(liked: boolean) { setSelected([]); setDownloadMode(false); likedResults.choose(liked); setResultView('images'); }
-  function openTaskPreview(task: StudioTask) {
-    if (studioTaskHasDeliveredAsset(task)) { resultPages.goToId(task.id); setPreview(studioTaskPreviewState(task)); }
-  }
-  function movePreview(direction: -1 | 1) {
-    if (!preview?.taskId || previewableTasks.length < 2) return;
-    const currentIndex = previewableTasks.findIndex(task => task.id === preview.taskId);
-    const nextIndex = currentIndex < 0 ? 0 : (currentIndex + direction + previewableTasks.length) % previewableTasks.length;
-    resultPages.goToId(previewableTasks[nextIndex].id);
-    setPreview(studioTaskPreviewState(previewableTasks[nextIndex]));
-  }
+  const sharedResults = resultTasks.map(task => {
+    const image = studioTaskHasDeliveredAsset(task) ? studioTaskPreviewState(task) : null;
+    return {
+      id: task.id, task, label: `生成结果 ${task.ordinal}`, status: studioTaskPhase(task),
+      pending: ['queued', 'running'].includes(task.status),
+      waitingThumbnail: task.snapshot?.primaryReferenceImages?.[0]?.thumbnailUrl || task.snapshot?.primaryReferenceImages?.[0]?.originalUrl || undefined,
+      applied: sourceApplied && appliedSource?.taskId === task.id,
+      error: task.error,
+      onViewed: () => observeResultVersion(studioResultVersion(task)),
+      download: image ? () => { setSelected([task.id]); setDownloadMode(true); } : undefined,
+      downloadDisabled: downloadBusy,
+      downloadMessage: '已选择这张图片，请确认下载',
+      media: image ? {
+        src: image.src, thumbnailSrc: image.thumbnailSrc, alt: image.alt, title: image.title,
+        contentKey: image.contentKey, fileName: image.fileName, previewKey: task.id,
+        sourceVersion: image.resultVersion || undefined,
+        safeDetails: { ...image.metadata, width: image.width, height: image.height, fileSize: image.fileSize },
+        comparison: image.comparison,
+        comparisonCandidates: [...taskComparisonCandidates(task), ...previewableTasks.filter(other => other.batchId === task.batchId).map(other => ({ src: other.asset!.original_url, thumbnailSrc: other.asset!.thumbnail_url, alt: `生成结果 ${other.ordinal}`, contentKey: `asset:${other.asset!.id}` as const }))],
+        onImageLoaded: (src: string) => { if (src === image.src) observeResultVersion(image.resultVersion || null); },
+      } : undefined,
+    } satisfies GeneratedImageResult & { task: StudioTask };
+  });
 
   function changeFixedReferences(next: FixedStudioReference[]) {
     if (!fixedEditable) return;
@@ -1981,27 +1971,26 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         {batch.id && resultView === 'images' && <BatchResults key={`${userId}:${batch.id}:delivery`} id={batch.id} userId={userId} deliveryOnly autoPack={batch.pack} />}
         {!likedResults.liked && batch.busy && batch.localPreviews.length > 0 && <div className={styles.grid} aria-label="本批准备素材">{batch.localPreviews.map((src, index) => <article key={src} className={styles.result}><div className={styles.batchInputPreview}><img src={src} alt={`本批主图 ${index + 1}`} /></div><p role="status">准备中</p></article>)}</div>}
         {resultView === 'batch' ? batch.id ? <BatchResults key={`${userId}:${batch.id}`} id={batch.id} userId={userId} autoPack={batch.pack} /> : <p>暂无选中批次，可开始批量生成或从顶部“我的批次”找回。</p> : <>
-        {resultError && <p role="alert" className={styles.error}>{resultError}{templateWorkbench && <button type="button" disabled={resultBusy} onClick={() => { if (likedResults.liked) likedResults.refresh(); else void loadTasks(taskRetryCursor); }}>重试读取记录</button>}</p>}
         {downloadReady && <p role="status">已交给浏览器下载。<a href={downloadReady.url} download={downloadReady.name}>再次下载</a></p>}
-        {resultLoading && (resultTasks.length ? <LoadingStatus>{likedResults.liked ? '正在更新喜欢结果' : '正在更新生成记录'}</LoadingStatus> : <LoadingSkeleton label={likedResults.liked ? '正在读取喜欢结果' : '正在读取生成记录'} grid />)}
-        {!likedResults.liked && templateWorkbench && taskReadAction === 'refresh' && <LoadingStatus>正在刷新记录，已有图片仍保留</LoadingStatus>}
-        {!resultLoading && !resultTasks.length && !resultError && <div className={styles.empty}>{likedResults.liked ? '当前模板还没有喜欢的结果' : '暂无生成记录'}</div>}
-        <div ref={resultPages.gridRef} className={styles.grid} data-result-pages data-page-capacity={resultPages.capacity}>{resultPages.pageItems.map(task => <article key={task.id} className={styles.result} data-result-id={task.id}>
-          <div className={`${styles.resultMedia} ${!studioTaskHasDeliveredAsset(task) ? styles.pendingResultMedia : ''}`} data-reaction-surface>{studioTaskHasDeliveredAsset(task) ? <>
-            {task.asset.id && <ContentReactions contentKey={`asset:${task.asset.id}`} overlay />}
-            <ResultImageCover src={task.asset.thumbnail_url || undefined} alt={`生成结果 ${task.ordinal}`}
-              selected={selectedResultId === task.id} applied={sourceApplied && appliedSource?.taskId === task.id}
-              onSelect={() => setSelectedResultId(task.id)} onPreview={() => openTaskPreview(task)} onViewed={() => observeResultVersion(studioResultVersion(task))} />
-            {downloadMode && <input className={styles.select} type="checkbox" aria-label={`选择第 ${task.ordinal} 张图片`} checked={selected.includes(task.id)} onChange={event => {
+        <GeneratedImageResults key={likedResults.liked ? 'liked' : 'all'} items={sharedResults}
+          scope={`sd2-image-studio-${likedResults.liked ? 'liked-' : ''}result-page:${taskReadScope}`}
+          visible={!hidden && resultView === 'images'} loading={resultLoading} busy={resultBusy}
+          error={resultError} emptyLabel={likedResults.liked ? '当前模板还没有喜欢的结果' : '暂无生成记录'}
+          hasMore={Boolean(resultCursor)} loadMore={readNextResultPage}
+          onRetry={() => { if (likedResults.liked) likedResults.refresh(); else void loadTasks(taskRetryCursor); }}
+          selectedId={selectedResultId} onSelect={item => setSelectedResultId(item.id)}
+          previewId={preview?.taskId || null} onPreviewChange={item => {
+            if (item) setPreview(studioTaskPreviewState(item.task));
+            else { setPreview(null); if (resumeModulePreview.current) { resumeModulePreview.current = false; moduleDialog.current?.showModal(); } }
+          }}
+          renderOverlay={({task}) => <>
+            {downloadMode && studioTaskHasDeliveredAsset(task) && <input className={styles.select} type="checkbox" aria-label={`选择第 ${task.ordinal} 张图片`} checked={selected.includes(task.id)} onChange={event => {
               if (event.target.checked && selected.length >= 8) { setError('每次最多下载 8 张'); return; }
               setSelected(current => event.target.checked ? [...current, task.id] : current.filter(id => id !== task.id));
             }} />}
-          </> : <div className={`${styles.taskState} sd2-loading-surface`} data-busy={['queued', 'running'].includes(task.status)}>
-            {['queued', 'running'].includes(task.status) && <StudioWaitingImage key={task.snapshot?.primaryReferenceImages?.[0]?.thumbnailUrl || task.snapshot?.primaryReferenceImages?.[0]?.originalUrl || 'no-main-image'} src={task.snapshot?.primaryReferenceImages?.[0]?.thumbnailUrl || task.snapshot?.primaryReferenceImages?.[0]?.originalUrl} />}
-            <span role="status" className={styles.waitingStatus}>{studioTaskPhase(task)}</span>
-            {['download', 'recover'].includes(task.delivery?.phase || '') && Number(task.delivery?.expectedBytes) > 0 && task.delivery?.receivedBytes != null && <span>{Math.min(100, Math.floor(task.delivery.receivedBytes / task.delivery.expectedBytes! * 100))}% 字节已接收</span>}
-          </div>}<button type="button" className={styles.deleteResult} disabled={deleting || downloadBusy} title="删除生成记录" aria-label={`删除第 ${task.ordinal} 张生成记录`} onClick={() => { setDeleteError(''); setDeleteTarget(task); }}><Trash2 size={17} /></button></div>
-          <div className={styles.resultHeading}>
+            <button type="button" className={styles.deleteResult} disabled={deleting || downloadBusy} title="删除生成记录" aria-label={`删除第 ${task.ordinal} 张生成记录`} onClick={() => { setDeleteError(''); setDeleteTarget(task); }}><Trash2 size={17} /></button>
+          </>}
+          renderMetadata={({task}) => <>          <div className={styles.resultHeading}>
             <p className={styles.prompt}>{name} · {task.ordinal}</p>
             <span className={styles.resultOwner} aria-label="生成者"><UserIdentityBadge user={task.owner} size="sm" className="asset-card-user" /></span>
           </div>
@@ -2018,12 +2007,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
             </div>
             <RelativeTime className={styles.resultTime} value={task.createdAt} />
           </div>
-          <div className={styles.resultActions}><div className={styles.resultCommands} data-needs-action={task.status === 'uncertain'}>
-            {task.delivery?.recoveryAvailable && <button type="button" className={`${styles.recoveryAction} ${templateWorkbench ? 'sd2-loading-surface' : ''}`} data-busy={templateWorkbench && taskReadAction === 'refresh'} disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks()}>{templateWorkbench ? '刷新恢复状态' : '查看原图恢复'}</button>}
-            {studioTaskHasDeliveredAsset(task) && <button type="button" disabled={downloadBusy} title="下载图片" aria-label="下载图片" onClick={() => { setSelected([task.id]); setDownloadMode(true); }}><Download size={15} /></button>}
-            {studioTaskHasDeliveredAsset(task) && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制图片" aria-label="复制图片" onClick={() => void copyTaskImage(task)}><Clipboard size={15} /></button>}
-            {studioTaskHasDeliveredAsset(task) && <button type="button" className={styles.viewResult} title="查看图片" aria-label="查看图片" aria-describedby={`studio-preview-${task.id}`} onClick={event => { event.stopPropagation(); openTaskPreview(task); }} onDoubleClick={event => event.stopPropagation()}><Eye size={15} /><span id={`studio-preview-${task.id}`} role="tooltip" className={styles.resolutionTooltip}>查看图片</span></button>}
-            {isAdmin && task.snapshot?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制上下文" aria-label="复制上下文" onClick={() => void copyTaskContext(task)}><Copy size={15} /></button>}
+</>}
+          renderActions={({task}) => <>{task.delivery?.recoveryAvailable && <button type="button" disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks()}>{templateWorkbench ? '刷新恢复状态' : '查看原图恢复'}</button>}            {isAdmin && task.snapshot?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制上下文" aria-label="复制上下文" onClick={() => void copyTaskContext(task)}><Copy size={15} /></button>}
             {studioTaskHasDeliveredAsset(task) && <button type="button" className={styles.restoreResult} disabled={Boolean(restoreDisabledReason(task))} title={restoreDisabledReason(task) || '恢复这张图片的完整设置，不生成图片'} aria-label="恢复设置" aria-describedby={`studio-restore-${task.id}`} onClick={event => {
               event.stopPropagation();
               void (async () => {
@@ -2031,17 +2016,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
                 const reason = restoreTask(task); if (reason) setError(reason);
               })();
             }}><RotateCcw size={15} /><span id={`studio-restore-${task.id}`} role="tooltip" className={styles.resolutionTooltip}>恢复设置</span></button>}
-          </div>
-          </div>{copyFeedback?.id === task.id && <span className={styles.copyFeedback} role="status" aria-live="polite">{copyFeedback.text}</span>}{task.error && <p className={styles.error}>{task.error}</p>}
-          {task.delivery?.checkpointRetained && task.status === 'uncertain' && <p className={styles.muted}>恢复资料暂留供协查，已退款任务不能自动领取原图。请联系管理员。</p>}
-        </article>)}</div>
-        {!likedResults.liked && templateWorkbench && taskReadAction === 'more' && <LoadingStatus>正在读取更多记录</LoadingStatus>}
-        {resultTasks.length > 0 && <nav className={`${styles.pagination} ${styles.resultPagination}`} aria-label="图片结果分页">
-          <button type="button" aria-label="上一页图片" title="上一页图片" disabled={resultPages.start === 0 || (resultPages.restoring && !resultError) || resultBusy} onClick={resultPages.previous}><ChevronRight size={17} className={styles.previousPageIcon} /></button>
-          <span role="status">第 {resultPages.page} / {resultPages.pages}{resultCursor ? '+' : ''} 页</span>
-          <button type="button" aria-label="下一页图片" title={resultPages.start + resultPages.capacity >= resultTasks.length && resultCursor ? '读取下一批并翻页' : '下一页图片'} disabled={!resultPages.canNext || resultPages.restoring || resultBusy} onClick={resultPages.next}><ChevronRight size={17} /></button>
-          {(resultPages.start > 0 || resultError) && <button type="button" aria-label="回到第一页图片" title="回到第一页图片" disabled={(resultPages.restoring && !resultError) || resultBusy} onClick={resultPages.reset}><RotateCcw size={15} /></button>}
-        </nav>}
+</>}
+          renderSupplement={({task}) => <>
+            {copyFeedback?.id === task.id && <span className={styles.copyFeedback} role="status">{copyFeedback.text}</span>}
+            {['download', 'recover'].includes(task.delivery?.phase || '') && Number(task.delivery?.expectedBytes) > 0 && task.delivery?.receivedBytes != null && <p role="status">{Math.min(100, Math.floor(task.delivery.receivedBytes / task.delivery.expectedBytes! * 100))}% 字节已接收</p>}
+            {task.delivery?.checkpointRetained && task.status === 'uncertain' && <p className={styles.muted}>恢复资料暂留供协查，已退款任务不能自动领取原图。请联系管理员。</p>}
+          </>}
+        />
         </>}
       </section>
     </div>
@@ -2177,8 +2158,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         </label>
       </div>
     </dialog>
-    {preview && <ZoomableImagePreview contentKey={preview.contentKey} src={preview.src} thumbnailSrc={preview.thumbnailSrc} alt={preview.alt} title={preview.title} previewKey={preview.taskId || preview.src} sourceVersion={preview.resultVersion || undefined} fileName={preview.fileName} safeDetails={{ ...preview.metadata, width: preview.width, height: preview.height, fileSize: preview.fileSize }} comparison={preview.comparison}
-      comparisonCandidates={[...taskComparisonCandidates(resultTasks.find(task => task.id === preview.taskId)), ...previewableTasks.filter(task => task.batchId === resultTasks.find(current => current.id === preview.taskId)?.batchId).map(task => ({ src: task.asset!.original_url, thumbnailSrc: task.asset!.thumbnail_url, alt: `生成结果 ${task.ordinal}`, contentKey: `asset:${task.asset!.id}` as const }))]}
-      hasNavigation={Boolean(preview.taskId && previewableTasks.length > 1)} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onImageLoaded={src => { if (preview.taskId && preview.src === src) observeResultVersion(preview.resultVersion || null); }} onClose={() => { setPreview(null); if (resumeModulePreview.current) { resumeModulePreview.current = false; moduleDialog.current?.showModal(); } }} />}
+    {preview && !preview.taskId && <ZoomableImagePreview contentKey={preview.contentKey} src={preview.src} thumbnailSrc={preview.thumbnailSrc} alt={preview.alt} title={preview.title} previewKey={preview.taskId || preview.src} sourceVersion={preview.resultVersion || undefined} fileName={preview.fileName} safeDetails={{ ...preview.metadata, width: preview.width, height: preview.height, fileSize: preview.fileSize }} comparison={preview.comparison}
+ onClose={() => { setPreview(null); if (resumeModulePreview.current) { resumeModulePreview.current = false; moduleDialog.current?.showModal(); } }} />}
   </section>)}</>;
 }

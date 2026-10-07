@@ -1,4 +1,5 @@
-.cover { position: relative; display: block; padding: 0; width: 100%; height: 100%; overflow: hidden; border: 0; background: #080a0b; cursor: pointer; }
+.cover { position: relative; display: block; padding: 0; width: 100%; height: 100%; overflow: hidden; border: 0; background: transparent; cursor: pointer; }
+.readState { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: #171c1fd9; color: #c2cdcc; font-size: 13px; }
 .cover img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .hint { position: absolute; top: 38px; left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100% - 16px); padding: 6px 10px; border: 1px solid #4b595e; border-radius: 5px; background: #20292d; color: #eef3f1; font-size: 12px; font-weight: 500; white-space: normal; overflow-wrap: anywhere; pointer-events: none; opacity: 0; }
 .cover:hover .hint, .cover:focus-visible .hint { opacity: 1; }

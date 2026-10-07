@@ -42,7 +42,7 @@
 .sheetPlane { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
 .sheetPlane img { display: block; }
 .sheetGrid { position: absolute; inset: 0; display: grid; }
-.sheetGrid button { border: 2px solid transparent; cursor: pointer; min-width: 0; min-height: 0; }
+.sheetGrid button { border: 2px solid transparent; background: transparent; padding: 0; cursor: pointer; min-width: 0; min-height: 0; }
 .sheetGrid button[aria-pressed=true] { border-color: var(--primary-color, #337bc1); box-shadow: inset 0 0 0 1px var(--bg-secondary); }
 .sheetGrid button:focus-visible { outline: 2px solid var(--text-primary); outline-offset: -5px; }
 .cellThumb { position: absolute; inset: 0; overflow: hidden; }

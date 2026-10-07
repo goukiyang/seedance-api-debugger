@@ -69,7 +69,7 @@ export function useResultPages<T extends { id: string }>({ items, storageKey, vi
     }
     readsLeft.current--;
     reading.current = true;
-    void loadMore().finally(() => { reading.current = false; setCompletedReads(value => value + 1); });
+    void loadMore().catch(() => { readsLeft.current = 0; }).finally(() => { reading.current = false; setCompletedReads(value => value + 1); });
   }, [busy, completedReads, error, hasMore, items, loadMore, requested, restoredKey, storageKey, visible]);
 
   useEffect(() => {

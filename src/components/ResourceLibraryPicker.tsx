@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, Folder, Grid2X2, ImageIcon, Maximize, Minimize, Music, Play, RotateCcw, Search, Upload, X, ZoomIn, Menu, Trash2 } from 'lucide-react';
-import { useResultPages } from '@/app/image-studio/use-result-pages';
+import { useResultPages } from '@/components/useResultPages';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import MediaPreview from '@/components/MediaPreview';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
