@@ -153,7 +153,7 @@ export function BatchResults({ id, userId, outputDirectory, deliveryOnly = false
       comparisonCandidates: (batch?.items || []).flatMap(other => other.image ? [{ src: other.image.url, thumbnailSrc: other.image.thumbnail, alt: `生成结果 ${other.ordinal}`, contentKey: `asset:${other.image.id}` as const }] : []),
     } : undefined,
     download: item.image && item.taskId ? () => handImageDownloadToBrowser(`/api/image-studio/download?id=${encodeURIComponent(item.taskId!)}`, 'batch-image.png', () => scope.current === `${userId}:${id}`) : undefined,
-  } satisfies GeneratedImageResult)), [batch?.items, id, userId]);
+  } satisfies GeneratedImageResult & { generationStatus: string })), [batch?.items, id, userId]);
   return <div className={styles.results} aria-label="批次结果">
     <div className={styles.actions}><strong>{batch?.moduleName || '本批结果'}</strong><button type="button" title="刷新批次" aria-label="刷新批次" disabled={reading} onClick={() => void load()}><RefreshCw size={16} /></button>{deliveryOnly && <a href={`/assets?imageBatchId=${encodeURIComponent(id)}`}>本批资产</a>}</div>
     {error && <p role="alert" className={styles.error}>{error}</p>}

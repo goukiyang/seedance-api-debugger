@@ -146,6 +146,6 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
       {pages.canNext && <button type="button" disabled={readBusy || pages.restoring} onClick={pages.next}>{readBusy ? '读取中' : '加载更多'}</button>}
       <button type="button" aria-label="回到第一页图片" title="回到第一页图片" disabled={readBusy || pages.restoring && !readError} onClick={pages.reset}><RotateCcw size={15} /></button>
     </nav>}
-    {preview?.media && <ZoomableImagePreview {...preview.media} onDownload={preview.download} previewKey={preview.media.previewKey || `${scope}:${preview.id}`} hasNavigation={previewable.length > 1} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => changePreview(null)} />}
+    {preview?.media && <ZoomableImagePreview {...preview.media} resolveDownload={src => items.find(item => item.media?.src === src)?.download} previewKey={preview.media.previewKey || `${scope}:${preview.id}`} hasNavigation={previewable.length > 1} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => changePreview(null)} />}
   </div>;
 }

@@ -58,7 +58,7 @@ export type ZoomableImagePreviewProps = {
   onPrevious?: () => void;
   onNext?: () => void;
   onImageLoaded?: (src: string) => void;
-  onDownload?: () => void | Promise<unknown>;
+  resolveDownload?: (src: string) => (() => void | Promise<unknown>) | undefined;
   onClose: () => void;
 };
 
@@ -213,7 +213,7 @@ type ImageRequest = { token: number; controller: AbortController; resolve: (appl
 const sides: Side[] = ['current', 'comparison'];
 const viewIdentity = (side: Side, image: ImageComparisonSource) => imageSourceIdentity(image) + ':' + side;
 
-export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, previewKey, sourceVersion, contentKey, imageSharing = true, metadata, safeDetails, comparison, comparisonCandidates = [], details, notice, hasNavigation, onPrevious, onNext, onImageLoaded, onDownload, onClose }: ZoomableImagePreviewProps) {
+export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, previewKey, sourceVersion, contentKey, imageSharing = true, metadata, safeDetails, comparison, comparisonCandidates = [], details, notice, hasNavigation, onPrevious, onNext, onImageLoaded, resolveDownload, onClose }: ZoomableImagePreviewProps) {
   const { user, hasLoadedUser } = useAppSession();
   const owner = user?.id || '';
   const backdropRef = useRef<HTMLDivElement>(null), toolbarRef = useRef<HTMLDivElement>(null), stageRef = useRef<HTMLDivElement>(null);
@@ -252,6 +252,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const safeSide = comparisonMode && comparisonImage ? activeSide : 'current';
   const safeSideRef = useRef(safeSide); safeSideRef.current = safeSide;
   const selectedImage = sources[safeSide] || currentImage;
+  const downloadSelectedSource = resolveDownload?.(selectedImage.src);
   const identity = (image: ImageComparisonSource) => imageSourceIdentity(image);
   const selectedId = identity(selectedImage);
   const selectedView = views[viewIdentity(safeSide, selectedImage)] || fittedImageView;
@@ -636,10 +637,10 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
             {decoded?.hd?.status === 'ready' ? <a className={styles.menuAction} href={versionedHdSource(selectedImage.src, 'hd-download', decoded.hd.sourceVersion)}><Download size={16} />下载高清 {decoded.hd.format?.toUpperCase()}{decoded.hd.bytes ? ` · ${formatImageBytes(decoded.hd.bytes)}` : ''}</a> : <span className={styles.menuAction}>高清档尚未就绪，原图仍可下载</span>}
             <a className={styles.menuAction} href={displaySource(selectedImage.src, 'download')} download={selectedImage.fileName || 'original-image'}><Download size={16} />下载原图{knownFileSize ? ` · ${formatImageBytes(fileSize)}` : ''}</a>
           </>}
-          {isOriginalSubject && safeSide === 'current' && onDownload && displaySource(selectedImage.src, 'download') === selectedImage.src && <button type="button" className={styles.menuAction} disabled={downloadBusy} onClick={() => {
+          {downloadSelectedSource && displaySource(selectedImage.src, 'download') === selectedImage.src && <button type="button" className={styles.menuAction} disabled={downloadBusy} onClick={() => {
             if (downloadLock.current) return;
             downloadLock.current = true; setDownloadBusy(true);
-            void Promise.resolve().then(onDownload).catch(error => { if (alive.current) setMessage(error instanceof Error ? error.message : '下载未完成，请重试'); }).finally(() => { downloadLock.current = false; if (alive.current) setDownloadBusy(false); });
+            void Promise.resolve().then(downloadSelectedSource).catch(error => { if (alive.current) setMessage(error instanceof Error ? error.message : '下载未完成，请重试'); }).finally(() => { downloadLock.current = false; if (alive.current) setDownloadBusy(false); });
           }}><Download size={16} />{downloadBusy ? '准备下载' : '下载原图'}</button>}
           {hasNavigation && <div className={styles.mobileNavigation}><button type="button" className={styles.menuAction} onClick={onPrevious}><ArrowLeft size={16} />当前图上一张</button><button type="button" className={styles.menuAction} onClick={onNext}><ArrowRight size={16} />当前图下一张</button></div>}
           {comparisonMode && <div className={styles.compareOptions}>
