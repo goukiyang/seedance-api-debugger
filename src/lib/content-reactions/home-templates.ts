@@ -22,7 +22,7 @@ async function projectTemplates(user: SessionUser, keys: ContentKey[]): Promise<
   const archived = new Set((await prisma.platformSetting.findMany({ where: { key: { in: presetIds.map(archivedPresetKey) } }, take: 80, select: { key: true } })).map(row => row.key));
   const byId = new Map(presets.filter(row => !archived.has(archivedPresetKey(row.id))).map(row => [row.id, row]));
   const byModule = new Map(modules.map(row => [row.id, row]));
-  return keys.flatMap(key => {
+  return keys.flatMap<Projection>(key => {
     const [type, id] = key.split(':');
     if (type === 'image_template') {
       const row = byId.get(id);
