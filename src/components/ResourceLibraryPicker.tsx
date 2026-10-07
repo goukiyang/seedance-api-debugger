@@ -389,7 +389,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
             <span role="status">第 {resultPages.page} / {resultPages.pages}{hasMore ? '+' : ''} 页</span>
             <button type="button" title="下一页" aria-label="下一页素材" disabled={!resultPages.canNext || loading || busy || resultPages.restoring} onClick={resultPages.next}><ChevronRight size={17} /></button>
             <button type="button" title="回到第一页" aria-label="回到第一页素材" disabled={loading || busy || (resultPages.restoring && !error)} onClick={resultPages.reset}><RotateCcw size={15} /></button>
-          </nav>{hasMore && <button type="button" disabled={loading || busy || resultPages.restoring} onClick={() => void loadMore()}>加载更多</button>}</div>
+          </nav>{hasMore && <button type="button" disabled={!resultPages.canNext || loading || busy || resultPages.restoring} onClick={resultPages.next}>加载更多</button>}</div>
         </div>
       </section></div>
       <footer className={styles.footer}><button type="button" className={styles.uploadAction} disabled={busy || maxSelection === 0} onClick={() => input.current?.click()}><Upload size={18} /><span>上传素材</span></button><div className={styles.count}><strong>已选 {selected.length} 个</strong><small>{types.map(t => `${labels[t]} ${selectedCounts[t]}${typeLimits?.[t] !== undefined ? ` · 剩余 ${Math.max(0, typeLimits[t]! - selectedCounts[t])}` : ''}`).join(' / ')}{maxSelection !== undefined ? ` · 本次剩余 ${Math.max(0, maxSelection - selected.length)}` : ''} · 当前已添加 {currentCount}</small></div>
