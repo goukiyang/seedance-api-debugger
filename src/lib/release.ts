@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '新增只提供文字的skills；素材可按真实生成来源和模板筛选；未读模板仍可收起；大图、复制和高清下载使用原尺寸高清档，原图下载不变；修复预发布版本的升级判断。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '画布通用文本规则可分条命名、编辑、复制、启停和恢复，按普通文本、提示词或分镜用途生效；保存成功关闭，冲突保留草稿和旧规则。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

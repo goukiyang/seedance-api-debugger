@@ -19,8 +19,8 @@ export async function GET() {
     if (!user) throw new AuthError('请先登录', 401);
     assertInternalOnly(user, '外部账号无权使用画布规则');
     const settings = await getCanvasTextSettings();
-    return json({ revision: settings.revision, contextConfigured: Boolean(settings.context.trim()),
-      ...(user.role === 'admin' ? { context: settings.context } : {}) });
+    return json({ revision: settings.revision, contextConfigured: settings.rules.some(rule => rule.enabled && !rule.deletedAt && Boolean(rule.body.trim())),
+      ...(user.role === 'admin' ? { ...settings } : {}) });
   } catch (error) { return failure(error); }
 }
 
@@ -28,16 +28,11 @@ export async function PATCH(request: NextRequest) {
   try {
     const user = await getAdminUser(request);
     assertInternalOnly(user, '外部账号无权修改画布规则');
-    if (Number(request.headers.get('content-length')) > 64 * 1024) throw new AuthError('规则内容过大', 413);
+    if (Number(request.headers.get('content-length')) > 192 * 1024) throw new AuthError('规则内容过大', 413);
     const raw = await request.text();
-    if (Buffer.byteLength(raw, 'utf8') > 64 * 1024) throw new AuthError('规则内容过大', 413);
+    if (Buffer.byteLength(raw, 'utf8') > 192 * 1024) throw new AuthError('规则内容过大', 413);
     const body = JSON.parse(raw);
-    if (!body || typeof body !== 'object' || Array.isArray(body)
-      || typeof body.context !== 'string' || body.context.length > 4000
-      || !Number.isSafeInteger(body.revision) || body.revision < 0
-      || (body.confirmClear !== undefined && typeof body.confirmClear !== 'boolean')) {
-      throw new AuthError('规则最多4000字，请检查内容后保存', 400);
-    }
-    return json(await saveCanvasTextSettings(user.id, { context: body.context.trim(), revision: body.revision }, body.confirmClear === true));
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new AuthError('规则内容无效', 400);
+    return json(await saveCanvasTextSettings(user.id, body));
   } catch (error) { return failure(error); }
 }

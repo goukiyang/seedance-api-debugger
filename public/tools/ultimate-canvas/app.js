@@ -977,14 +977,16 @@
     }
 
     function normalizeContextRules(value) {
-        return typeof value === 'string' ? value.trim().slice(0, 4000) : '';
+        return typeof value === 'string' ? value : '';
     }
 
     function contextRulesForNode(node) {
-        return normalizeContextRules(node?.data?.contextRules || node?.data?.context_rules);
+        return normalizeContextRules(node?.data?.contextRules ?? node?.data?.context_rules);
     }
 
     function refreshContextRulesButtons(root = document) {
+        const rulesModal = document.querySelector('[data-context-rules-modal]');
+        if (rulesModal && !rulesOwnerMatches(rulesModal)) closeContextRulesModal(true);
         document.body.classList.toggle('is-canvas-admin', isCanvasAdmin());
         root.querySelectorAll?.('.canvas-node').forEach(nodeEl => {
             const node = engine.nodes.get(nodeEl.dataset.nodeId);
@@ -2513,9 +2515,7 @@
 
     function hasUnsavedCanvasChanges() {
         const rules = document.querySelector('[data-context-rules-modal]');
-        const rulesDirty = rules && (rules._saving
-            || rules.querySelector('[data-context-rules-textarea]').value !== rules._nodeInitial
-            || rules.querySelector('[data-global-rules-textarea]').value !== rules._globalInitial);
+        const rulesDirty = rules && (rules._saving || rulesModalDirty(rules));
         return canvasRuntime.documentDirty || canvasRuntime.saveState === 'saving'
             || Boolean(canvasRuntime.failedSaveRequest) || canvasRuntime.documentOperation || Boolean(rulesDirty);
     }
@@ -2529,8 +2529,7 @@
             rules?._saving ? '画布规则正在保存' : ''
         ].filter(Boolean);
         const unsaved = [];
-        if (rules && (rules.querySelector('[data-context-rules-textarea]').value !== rules._nodeInitial
-            || rules.querySelector('[data-global-rules-textarea]').value !== rules._globalInitial)) unsaved.push('画布规则');
+        if (rulesModalDirty(rules)) unsaved.push('画布规则');
         let recoverable = false;
         let snapshot;
         let contentSignature = '';
@@ -2550,7 +2549,7 @@
         } catch { /* Unavailable storage is not proof of a recoverable draft. */ }
         if ((canvasRuntime.documentDirty || canvasRuntime.failedSaveRequest) && !recoverable) unsaved.push('未存入浏览器的画布内容');
         return { unsaved, busy, revision: JSON.stringify([canvasRuntime.editSequence, canvasRuntime.documentTitle, contentSignature,
-            rules?.querySelector('[data-context-rules-textarea]')?.value, rules?.querySelector('[data-global-rules-textarea]')?.value]) };
+            rules?._nodeDraft, rules?._purpose, rules?._draft]) };
     }
 
     function updateDocumentInteraction() {
@@ -2997,6 +2996,15 @@
             canvasRuntime.documentProjectId = snapshot.projectId;
             canvasRuntime.documentVideoCardId = snapshot.videoCardId;
             canvasRuntime.documentRevision = result.document?.revision ?? canvasRuntime.documentRevision;
+            try {
+                const savedNodes = JSON.parse(snapshot.request.document_json)?.canvas?.nodes || [];
+                for (const savedNode of savedNodes) {
+                    const currentNode = engine.nodes.get(savedNode.id);
+                    const pendingRules = currentNode?._pendingTextRules;
+                    if (pendingRules && savedNode.data?.contextRules === pendingRules.candidate.contextRules
+                        && savedNode.data?.textPurpose === pendingRules.candidate.textPurpose) delete currentNode._pendingTextRules;
+                }
+            } catch { /* A missing acknowledgement cannot make an unconfirmed rule active. */ }
             canvasRuntime.documentDirty = snapshot.editSequence !== canvasRuntime.editSequence || Boolean(state.hasPending || canvasRuntime.saveTimer);
             canvasRuntime.saveState = canvasRuntime.documentDirty ? 'idle' : 'saved';
             canvasRuntime.saveError = null;
@@ -4451,7 +4459,7 @@
         const mode = node.data?.mode || node.data?.generationIntent?.mode || (isVideo
             ? (generationModeMap[tabText] || 'text-to-video')
             : isImage ? 'text-to-image' : 'text');
-        const contextRules = contextRulesForNode(node);
+        const contextRules = node._pendingTextRules ? (node._pendingTextRules.previous.contextRules ?? node._pendingTextRules.previous.context_rules ?? '') : contextRulesForNode(node);
 
         return {
             nodeId,
@@ -4462,6 +4470,7 @@
             prompt: prompt || node.data?.prompt || node.data?.description || '',
             contextRules,
             context_rules: contextRules,
+            ...(['text', 'script'].includes(kind) ? { textPurpose: (node._pendingTextRules ? node._pendingTextRules.previous.textPurpose : node.data?.textPurpose) || 'text' } : {}),
             model: ['text', 'script'].includes(kind) ? (node.data?.textModel || canvasRuntime.bootstrap?.capabilities?.text?.model || 'gpt-5.5')
                 : nodeEl.querySelector('[data-generation-image-model] option:checked')?.textContent.trim() || nodeEl.querySelector('.video-model-info')?.textContent.trim() || '',
             spec: nodeEl.querySelector('[data-generation-spec]')?.textContent.trim() || '',
@@ -4549,6 +4558,8 @@
                 generationSummary: summary,
                 generationPayload: payload,
                 generationResult: result,
+                textRuleHistory: [...(node.data?.textRuleHistory || []), { requestId: result.id,
+                    recordedAt: new Date().toISOString(), trace: result.rules_trace || null }].slice(-10),
                 generationStatus: result?.status || 'succeeded'
             };
         }
@@ -5765,164 +5776,343 @@
             nodeEl,
             label,
             prompt: promptValueFor(nodeEl, node),
-            rules: contextRulesForNode(node)
+            rules: node._pendingTextRules ? (node._pendingTextRules.previous.contextRules ?? node._pendingTextRules.previous.context_rules ?? '') : contextRulesForNode(node),
+            pendingRules: node._pendingTextRules
         };
     }
 
-    function buildContextRulesModal(ctx) {
-        return `
-            <div class="context-rules-modal-overlay" data-context-rules-modal data-node-id="${escapeHtml(ctx.nodeId)}">
-                <section class="context-rules-modal" role="dialog" aria-modal="true" aria-label="LLM 上下文规则">
-                    <header class="context-rules-modal-header">
-                        <div>
-                            <span>文本生成规则</span>
-                            <strong>${escapeHtml(ctx.label)}</strong>
-                        </div>
-                        <button class="context-rules-close" data-context-rules-close title="关闭">×</button>
-                    </header>
-                    <div class="context-rules-tabs" role="tablist" aria-label="规则范围">
-                        <button type="button" role="tab" data-rules-tab="node" aria-selected="true">节点专属</button>
-                        <button type="button" role="tab" data-rules-tab="global" aria-selected="false">全站通用</button>
-                    </div>
-                    <div class="context-rules-modal-body">
-                        <main class="context-rules-editor">
-                            <label>
-                                <span data-rules-editor-label>仅用于当前文本节点</span>
-                                <textarea data-context-rules-textarea maxlength="4000" placeholder="角色设定、输出格式或必须保留的信息">${escapeHtml(ctx.rules)}</textarea>
-                                <textarea data-global-rules-textarea maxlength="4000" placeholder="所有画布文本生成都要遵守的规则" hidden disabled></textarea>
-                            </label>
-                            <div class="context-rules-preview">
-                                <span>当前用户输入</span>
-                                <p>${escapeHtml(ctx.prompt || '还没有输入内容')}</p>
-                            </div>
-                        </main>
-                        <aside class="context-rules-side">
-                            <div>
-                                <span>权限</span>
-                                <strong>仅管理员可编辑</strong>
-                            </div>
-                            <div>
-                                <span>作用范围</span>
-                                <strong data-rules-scope>仅当前文本节点</strong>
-                            </div>
-                            <div>
-                                <span>生效</span>
-                                <strong>保存后，下次生成生效</strong>
-                            </div>
-                        </aside>
-                    </div>
-                    <p class="context-rules-status" data-rules-status role="status">全站通用规则读取中</p>
-                    <footer class="context-rules-modal-footer">
-                        <button class="context-rules-secondary" data-context-rules-clear>清空规则</button>
-                        <button class="context-rules-secondary" data-context-rules-cancel>取消</button>
-                        <button class="context-rules-primary" data-context-rules-save>保存节点规则</button>
-                    </footer>
-                </section>
-            </div>
-        `;
+    const rulePurposeLabels = { basic: '全部画布文本', text: '普通文本', prompt: '提示词创作/优化', storyboard: '分镜提示词' };
+    const ruleCopy = value => JSON.parse(JSON.stringify(value));
+    const ruleSignature = rules => JSON.stringify((rules || []).filter(rule => rule.revision || rule.name.trim() || rule.body.trim()));
+    function rulesOwnerMatches(modal) {
+        return modal.isConnected && isCanvasAdmin() && modal._owner === canvasRuntime.bootstrap?.user?.id
+            && modal._document === canvasRuntime.documentId && engine.nodes.get(modal.dataset.nodeId) === modal._node;
     }
-
+    function rulesScopeDirty(modal, scope = modal._scope) {
+        return scope === 'global' ? Boolean(modal._settings && (ruleSignature(modal._draft) !== ruleSignature(modal._settings.rules) || modal._mergeLegacy))
+            : Boolean(modal._node?._pendingTextRules) || modal._nodeDraft !== modal._nodeInitial || modal._purpose !== modal._purposeInitial;
+    }
+    function rulesModalDirty(modal) {
+        return Boolean(modal && (rulesScopeDirty(modal, 'node') || rulesScopeDirty(modal, 'global')));
+    }
+    function rulePurposeForModal(modal) {
+        const kind = modal._node?.data?.generationIntent?.kind || modal._node?.type;
+        const mode = modal._node?.data?.mode || modal._node?.data?.generationIntent?.mode;
+        return mode === 'video-prompt-enhance' ? 'prompt' : kind === 'script' ? 'storyboard' : modal._purpose;
+    }
+    function rulesUiPreference(modal, read = false) {
+        const key = 'sd2:canvas-rule-ui:' + modal._owner;
+        try {
+            if (read) return JSON.parse(localStorage.getItem(key) || 'null');
+            localStorage.setItem(key, JSON.stringify({ scope: modal._scope, selected: modal._selected, deleted: modal._showDeleted }));
+        } catch { /* Rule bodies and unsaved drafts are never put in this preference. */ }
+    }
+    function rulesTime(value) {
+        if (!value || !Number.isFinite(Date.parse(value))) return '';
+        const age = Math.max(0, Date.now() - Date.parse(value));
+        const label = age < 45000 ? '刚刚' : age < 3600000 ? Math.floor(age / 60000) + '分钟前'
+            : age < 86400000 ? Math.floor(age / 3600000) + '小时前' : age < 2592000000
+                ? Math.floor(age / 86400000) + '天前' : age < 31536000000 ? Math.floor(age / 2592000000) + '个月前' : Math.floor(age / 31536000000) + '年前';
+        return '<button type="button" class="rules-time" data-rules-time="' + escapeHtml(value) + '" aria-label="查看准确时间"><time datetime="' + escapeHtml(value) + '">' + label + '</time></button>';
+    }
+    function rulesTimeClose() {
+        const bubble = document.querySelector('[data-rules-time-bubble]');
+        bubble?._trigger?.removeAttribute('aria-describedby');
+        bubble?.remove();
+    }
+    function rulesTimeOpen(button, pinned = false) {
+        rulesTimeClose();
+        const bubble = document.createElement('div');
+        bubble.dataset.rulesTimeBubble = 'true';
+        bubble.dataset.pinned = String(pinned);
+        bubble.id = 'canvas-rules-exact-time';
+        bubble.role = 'tooltip';
+        bubble.className = 'rules-time-bubble';
+        bubble.textContent = new Date(button.dataset.rulesTime).toLocaleString() + '（本地时间）';
+        document.body.appendChild(bubble);
+        const rect = button.getBoundingClientRect();
+        bubble.style.left = Math.max(8, Math.min(rect.left, innerWidth - bubble.offsetWidth - 8)) + 'px';
+        bubble.style.top = (rect.bottom + bubble.offsetHeight < innerHeight - 8 ? rect.bottom + 6 : rect.top - bubble.offsetHeight - 6) + 'px';
+        button.setAttribute('aria-describedby', bubble.id);
+        bubble._trigger = button;
+    }
+    function ruleIconButton(action, icon, label, disabled = false) {
+        return '<button type="button" class="rules-icon" data-rule-action="' + action + '" title="' + label + '" aria-label="' + label + '"' + (disabled ? ' disabled' : '') + '>' + window.UltimateCanvasIcons(icon) + '</button>';
+    }
+    function buildContextRulesModal(ctx) {
+        return '<div class="context-rules-modal-overlay" data-context-rules-modal data-node-id="' + escapeHtml(ctx.nodeId) + '">'
+            + '<section class="context-rules-modal" role="dialog" aria-modal="true" aria-label="文本生成规则">'
+            + '<header class="context-rules-modal-header"><div><span>文本生成规则</span><strong>' + escapeHtml(ctx.label) + '</strong></div>'
+            + '<button type="button" class="context-rules-close" data-context-rules-close title="关闭" aria-label="关闭">' + window.UltimateCanvasIcons('X') + '</button></header>'
+            + '<div class="context-rules-tabs" role="tablist" aria-label="规则范围"><button type="button" role="tab" data-rules-tab="node">节点专属</button>'
+            + '<button type="button" role="tab" data-rules-tab="global">画布通用</button></div>'
+            + '<div data-rules-switch-guard hidden class="rules-switch-guard">当前范围有未保存修改。'
+            + '<button type="button" data-rules-switch="save">保存并切换</button><button type="button" data-rules-switch="discard">放弃并切换</button><button type="button" data-rules-switch="stay">留下</button></div>'
+            + '<div class="context-rules-modal-body" data-rules-body></div>'
+            + '<p class="context-rules-status" data-rules-status role="status">画布通用规则读取中</p>'
+            + '<footer class="context-rules-modal-footer"><span data-rules-dirty></span><button type="button" class="context-rules-secondary" data-context-rules-cancel>取消</button>'
+            + '<button type="button" class="context-rules-primary" data-context-rules-save>保存</button></footer></section></div>';
+    }
+    function rulesStatus(modal, message) {
+        if (message !== undefined) modal.querySelector('[data-rules-status]').textContent = message;
+        modal.querySelector('[data-rules-dirty]').textContent = rulesScopeDirty(modal) ? '未保存' : '';
+        const save = modal.querySelector('[data-context-rules-save]');
+        save.disabled = modal._saving || modal._loading || (modal._scope === 'global' && (!modal._settings || Boolean(modal._incoming)));
+        save.textContent = modal._saving ? '保存中' : modal._scope === 'global' ? '保存通用规则' : '保存节点规则';
+        save.classList.add('sd2-loading-surface');
+        save.dataset.busy = String(Boolean(modal._saving));
+    }
+    function rulesPreview(modal) {
+        const target = modal.querySelector('[data-rules-preview]');
+        if (!target) return;
+        const purpose = rulePurposeForModal(modal);
+        const rules = modal._draft || [];
+        const active = rules.filter(rule => !rule.deletedAt && rule.enabled && (rule.purpose === 'basic' || rule.purpose === purpose))
+            .sort((a, b) => Number(b.purpose === 'basic') - Number(a.purpose === 'basic') || a.order - b.order || a.id.localeCompare(b.id));
+        const total = active.reduce((count, rule) => count + rule.body.length, modal._nodeDraft.length);
+        target.textContent = (rulesScopeDirty(modal) ? '草稿预览；' : '已保存；') + rulePurposeLabels[purpose]
+            + '：基础' + active.filter(rule => rule.purpose === 'basic').length + '条，用途'
+            + active.filter(rule => rule.purpose !== 'basic').length + '条，节点专属' + Number(Boolean(modal._nodeDraft.trim()))
+            + '条；合计' + total + '/4000字。' + (total > 4000 ? '超过有效上限。' : '')
+            + rules.filter(rule => !active.includes(rule)).map(rule => rule.name + '：' + (rule.deletedAt ? '已删除' : !rule.enabled ? '未启用' : '用途不匹配')).join('；');
+        const effective = modal.querySelector('[data-rules-effective]');
+        if (effective) effective.textContent = active.map(rule => rule.name + '（' + rulePurposeLabels[rule.purpose] + '）\n' + rule.body).join('\n\n')
+            + (modal._nodeDraft ? '\n\n节点专属\n' + modal._nodeDraft : '');
+    }
+    function renderRuleList(modal) {
+        const target = modal.querySelector('[data-rule-list]');
+        if (!target) return;
+        const query = (modal._search || '').toLowerCase();
+        const list = modal._draft.filter(rule => Boolean(rule.deletedAt) === Boolean(modal._showDeleted) && (!query || rule.name.toLowerCase().includes(query)))
+            .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+        target.innerHTML = list.map(rule => '<button type="button" class="rules-list-item" data-rule-id="' + escapeHtml(rule.id)
+            + '" aria-pressed="' + String(rule.id === modal._selected) + '"><span>' + escapeHtml(rule.name || '未命名规则') + '</span><small>'
+            + (rule.deletedAt ? '已删除' : rule.enabled ? '已启用' : '未启用') + '</small></button>').join('')
+            || '<p class="rules-empty">' + (query ? '没有匹配规则' : modal._showDeleted ? '没有已删除规则' : '暂无规则') + '</p>';
+    }
+    function renderRulesEditor(modal) {
+        const global = modal._scope === 'global';
+        modal.querySelectorAll('[data-rules-tab]').forEach(button => button.setAttribute('aria-selected', String(button.dataset.rulesTab === modal._scope)));
+        const body = modal.querySelector('[data-rules-body]');
+        if (!global) {
+            body.innerHTML = '<main class="context-rules-editor"><label>节点用途<select data-rules-node-purpose>'
+                + ['text', 'prompt', 'storyboard'].map(value => '<option value="' + value + '"' + (modal._purpose === value ? ' selected' : '') + '>' + rulePurposeLabels[value] + '</option>').join('')
+                + '</select></label><label><span>仅当前节点</span><textarea data-context-rules-textarea data-context-rules-editor maxlength="4000">'
+                + escapeHtml(modal._nodeDraft) + '</textarea></label><details><summary>本次生效</summary><p data-rules-preview></p><pre data-rules-effective></pre></details>'
+                + '<details><summary>最近请求的规则版本</summary>' + (modal._node.data?.textRuleHistory || []).map(item => '<div>' + rulesTime(item.recordedAt)
+                    + '<pre>' + escapeHtml(JSON.stringify(item.trace, null, 2)) + '</pre></div>').join('') + '</details></main>';
+        } else if (!modal._settings) {
+            body.innerHTML = '<p>' + (modal._loading ? '读取中' : '读取失败，已生效规则未改变') + '</p><button type="button" data-rules-reload>重新读取</button>';
+        } else {
+            const selected = modal._draft.find(rule => rule.id === modal._selected && Boolean(rule.deletedAt) === Boolean(modal._showDeleted))
+                || modal._draft.find(rule => Boolean(rule.deletedAt) === Boolean(modal._showDeleted));
+            modal._selected = selected?.id;
+            body.innerHTML = '<nav class="rules-list" aria-label="通用规则"><button type="button" class="context-rules-secondary" data-rule-action="new">'
+                + window.UltimateCanvasIcons('Plus') + ' 新建规则</button><label class="rules-deleted-toggle"><input type="checkbox" data-rules-deleted'
+                + (modal._showDeleted ? ' checked' : '') + '>已删除</label>'
+                + (modal._draft.length > 8 ? '<input type="search" data-rules-search placeholder="搜索规则名" aria-label="搜索规则名" value="' + escapeHtml(modal._search || '') + '">' : '')
+                + '<div data-rule-list></div><button type="button" data-rules-reload>读取最新版对照</button></nav><main class="context-rules-editor">'
+                + (selected ? '<div class="rules-fields"><label>名称<input data-rule-field="name" maxlength="80" value="' + escapeHtml(selected.name) + '"' + (selected.deletedAt ? ' disabled' : '') + '></label>'
+                    + '<label>适用用途<select data-rule-field="purpose"' + (selected.deletedAt ? ' disabled' : '') + '>'
+                    + Object.entries(rulePurposeLabels).map(([value, label]) => '<option value="' + value + '"' + (selected.purpose === value ? ' selected' : '') + '>' + label + '</option>').join('') + '</select></label>'
+                    + '<label class="rules-enabled"><input type="checkbox" data-rule-field="enabled"' + (selected.enabled && !selected.deletedAt ? ' checked' : '')
+                    + (!selected.revision || selected.deletedAt || modal._restored?.has(selected.id) ? ' disabled' : '') + '>启用</label></div>'
+                    + '<label><span>正文</span><textarea data-rule-field="body" data-context-rules-editor maxlength="4000"' + (selected.deletedAt ? ' readonly' : '') + '>'
+                    + escapeHtml(selected.body) + '</textarea></label><div class="rules-actions">' + rulesTime(selected.updatedAt)
+                    + (selected.deletedAt ? ruleIconButton('restore', 'RotateCcw', '恢复为未启用')
+                        : '<details class="rules-menu"><summary title="更多操作" aria-label="更多操作">' + window.UltimateCanvasIcons('SlidersHorizontal') + '</summary>'
+                            + ruleIconButton('copy', 'Layers', '复制为未启用') + ruleIconButton('up', 'ArrowUp', '上移')
+                            + ruleIconButton('down', 'ArrowDown', '下移') + ruleIconButton('delete', 'Trash2', '删除规则') + '</details>') + '</div>'
+                    : '<p class="rules-empty">暂无规则</p>')
+                + '<details><summary>本次生效</summary><p data-rules-preview></p><pre data-rules-effective></pre></details>'
+                + (modal._settings.legacyChanged ? '<aside class="rules-conflict"><p>旧版规则已修改，当前规则库仍保留。需明确合并后保存。</p><textarea readonly aria-label="旧版最新正文">'
+                    + escapeHtml(modal._settings.legacyCurrent.context) + '</textarea><button type="button" data-rules-legacy-merge'
+                    + (modal._mergeLegacy ? ' disabled' : '') + '>保留两份，加入未启用规则</button></aside>' : '')
+                + '<details><summary>版本存档</summary><label>最近版本<select data-rules-history><option value="">选择版本</option>'
+                + modal._settings.history.map(item => '<option value="' + item.revision + '">版本 ' + item.revision + '</option>').join('')
+                + '</select></label><button type="button" data-rule-action="history">恢复为未启用草稿</button><button type="button" data-rule-action="original">找回原始基础正文</button></details>'
+                + '<div data-rules-conflicts></div></main>';
+            renderRuleList(modal);
+            renderRulesConflicts(modal);
+        }
+        if (modal._saving) body.querySelectorAll('input, select, textarea, button, summary').forEach(el => { el.disabled = true; });
+        if (modal._incoming) body.querySelectorAll('[data-rule-field]').forEach(el => { el.disabled = true; });
+        rulesStatus(modal);
+        rulesPreview(modal);
+        rulesUiPreference(modal);
+    }
+    function renderRulesConflicts(modal) {
+        const target = modal.querySelector('[data-rules-conflicts]');
+        if (!target || !modal._incoming) return;
+        target.innerHTML = '<aside class="rules-conflict"><strong>新版对照，原草稿保留</strong>'
+            + modal._conflicts.map(item => '<div><p>' + escapeHtml(item.mine?.name || item.theirs?.name || '规则') + '</p><div class="rules-compare">'
+                + '<label>我的草稿<textarea readonly>' + escapeHtml(JSON.stringify(item.mine, null, 2)) + '</textarea></label><label>最新保存<textarea readonly>'
+                + escapeHtml(JSON.stringify(item.theirs, null, 2)) + '</textarea></label></div>'
+                + '<button type="button" data-rules-resolve="' + escapeHtml(item.id) + '" data-choice="mine">用我的草稿</button>'
+                + '<button type="button" data-rules-resolve="' + escapeHtml(item.id) + '" data-choice="theirs">用最新版</button></div>').join('')
+            + '<button type="button" data-rules-rebase' + (modal._conflicts.length ? ' disabled' : '') + '>采用对照结果，继续编辑</button></aside>';
+    }
+    async function readRulesLibrary(modal) {
+        if (modal._loading || modal._saving) return;
+        modal._loading = true; rulesStatus(modal);
+        try {
+            const settings = await requestJson('/api/tools/ultimate-canvas/text-settings', { cache: 'no-store' });
+            if (!rulesOwnerMatches(modal)) return;
+            if (!Array.isArray(settings.rules) || !settings.expected) throw Error('规则读取结果不完整');
+            if (!modal._settings || !rulesScopeDirty(modal, 'global')) {
+                modal._settings = settings; modal._draft = ruleCopy(settings.rules); modal._incoming = null; modal._mergeLegacy = false;
+            } else {
+                modal._incoming = settings; modal._conflicts = []; modal._rebase = ruleCopy(settings.rules);
+                for (const mine of modal._draft) {
+                    const before = modal._settings.rules.find(rule => rule.id === mine.id);
+                    const theirs = settings.rules.find(rule => rule.id === mine.id);
+                    const localChanged = JSON.stringify(mine) !== JSON.stringify(before);
+                    const remoteChanged = JSON.stringify(theirs) !== JSON.stringify(before);
+                    if (localChanged && remoteChanged && JSON.stringify(mine) !== JSON.stringify(theirs)) modal._conflicts.push({ id: mine.id, mine, theirs });
+                    else if (localChanged) {
+                        modal._rebase = modal._rebase.filter(rule => rule.id !== mine.id);
+                        modal._rebase.push({ ...mine, revision: theirs?.revision || 0 });
+                    }
+                }
+            }
+            rulesStatus(modal, modal._incoming ? '草稿未覆盖；请完成新版对照。' : settings.legacyChanged ? '旧版正文有变化，需明确合并。' : '保存后，下次适用的文本生成生效。');
+        } catch (error) { if (rulesOwnerMatches(modal)) rulesStatus(modal, error.message + '；草稿未改变。'); }
+        finally {
+            modal._loading = false;
+            if (rulesOwnerMatches(modal)) renderRulesEditor(modal);
+        }
+    }
     async function closeContextRulesModal(force = false) {
         const modal = document.querySelector('[data-context-rules-modal]');
-        if (modal?._saving || modal?._closing) return false;
-        if (!force && modal && (modal.querySelector('[data-context-rules-textarea]').value !== modal._nodeInitial
-            || modal.querySelector('[data-global-rules-textarea]').value !== modal._globalInitial)
-        ) {
+        if (!force && (modal?._saving || modal?._closing)) return false;
+        if (!force && rulesModalDirty(modal)) {
             modal._closing = true;
             const accepted = await requestCanvasConfirmation({ title: '放弃修改', message: '规则有未保存修改，确定关闭吗？', confirmLabel: '放弃并关闭' });
             modal._closing = false;
             if (!accepted || !modal.isConnected) return false;
         }
+        rulesTimeClose();
+        if (modal?._timeRefresh) clearInterval(modal._timeRefresh);
         modal?.remove();
         document.body.classList.remove('context-rules-modal-open');
         window.parent.postMessage({ type: 'sd2-canvas-style-gallery', open: false }, window.location.origin);
         modal?._returnFocus?.focus?.();
         return true;
     }
-
     async function openContextRulesModal(nodeEl) {
-        if (!isCanvasAdmin()) {
-            showCanvasNotice('只有管理员可以编辑 LLM 上下文规则。', 'warn');
-            return;
-        }
+        if (!isCanvasAdmin()) { showCanvasNotice('只有管理员可以编辑文本规则。', 'warn'); return; }
         const ctx = contextRulesContextFor(nodeEl);
-        if (!ctx) return;
-        if (!await closeContextRulesModal()) return;
+        if (!ctx || !await closeContextRulesModal()) return;
         document.body.insertAdjacentHTML('beforeend', buildContextRulesModal(ctx));
         document.body.classList.add('context-rules-modal-open');
         const modal = document.querySelector('[data-context-rules-modal]');
-        modal._nodeInitial = ctx.rules;
-        modal._globalInitial = '';
-        modal._scope = 'node';
-        modal._returnFocus = nodeEl.querySelector('[data-context-rules-open]');
+        Object.assign(modal, { _node: ctx.node, _owner: canvasRuntime.bootstrap.user.id, _document: canvasRuntime.documentId,
+            _nodeInitial: ctx.rules, _nodeDraft: ctx.pendingRules?.candidate.contextRules ?? ctx.rules,
+            _purposeInitial: (ctx.pendingRules ? ctx.pendingRules.previous.textPurpose : ctx.node.data?.textPurpose) || 'text',
+            _purpose: ctx.pendingRules?.candidate.textPurpose || ctx.node.data?.textPurpose || 'text', _scope: 'node', _draft: [], _restored: new Set(),
+            _returnFocus: nodeEl.querySelector('[data-context-rules-open]') });
+        const preference = rulesUiPreference(modal, true);
+        if (preference?.scope === 'global') modal._scope = 'global';
+        if (typeof preference?.selected === 'string') modal._selected = preference.selected;
+        modal._showDeleted = preference?.deleted === true;
+        renderRulesEditor(modal);
         window.parent.postMessage({ type: 'sd2-canvas-style-gallery', open: true }, window.location.origin);
-        const textarea = document.querySelector('[data-context-rules-textarea]');
-        textarea?.focus();
-        textarea?.setSelectionRange?.(textarea.value.length, textarea.value.length);
-        try {
-            const settings = await requestJson('/api/tools/ultimate-canvas/text-settings', { cache: 'no-store' });
-            if (!modal.isConnected) return;
-            modal._globalRevision = settings.revision;
-            modal._globalInitial = settings.context || '';
-            const global = modal.querySelector('[data-global-rules-textarea]');
-            global.value = modal._globalInitial;
-            global.disabled = false;
-            modal.querySelector('[data-rules-status]').textContent = '通用规则与专属规则同时生效；冲突时通用规则优先。';
-        } catch (error) {
-            if (modal.isConnected) modal.querySelector('[data-rules-status]').textContent = `${error.message}；关闭重开可重试，节点规则仍可保存。`;
-        }
+        modal._timeRefresh = setInterval(() => {
+            if (!rulesOwnerMatches(modal)) { closeContextRulesModal(true); return; }
+            modal.querySelectorAll('[data-rules-time]').forEach(button => {
+                const replacement = document.createElement('div'); replacement.innerHTML = rulesTime(button.dataset.rulesTime);
+                button.querySelector('time').textContent = replacement.querySelector('time').textContent;
+            });
+        }, 60000);
+        modal.querySelector('textarea, [data-rules-tab]')?.focus();
+        await readRulesLibrary(modal);
     }
-
-    async function saveContextRulesModal(modal) {
-        if (modal._saving) return;
-        const status = modal.querySelector('[data-rules-status]');
-        if (modal._scope === 'global') {
-            if (!Number.isInteger(modal._globalRevision)) { status.textContent = '通用规则未读取成功，请关闭重开后重试。'; return; }
-            if (!await requestCanvasConfirmation({ title: '保存通用规则', message: '这会影响全站所有画布后续的文本生成。确认保存通用规则？', confirmLabel: '保存规则' })) return;
-            if (!modal.isConnected || modal._saving) return;
-            modal._saving = true;
-            const button = modal.querySelector('[data-context-rules-save]');
-            button.classList.add('sd2-loading-surface');
-            button.dataset.busy = 'true';
-            button.disabled = true;
-            modal.querySelector('[data-global-rules-textarea]').disabled = true;
-            try {
-                const context = normalizeContextRules(modal.querySelector('[data-global-rules-textarea]').value);
-                const saved = await patchJson('/api/tools/ultimate-canvas/text-settings', { context, revision: modal._globalRevision, confirmClear: !context });
-                modal._globalRevision = saved.revision;
-                modal._globalInitial = context;
-                modal.querySelector('[data-global-rules-textarea]').value = context;
-                status.textContent = '通用规则已保存，全站画布下次文本生成生效。';
-            } catch (error) { status.textContent = error.message; }
-            finally { modal._saving = false; button.dataset.busy = 'false'; button.disabled = false; modal.querySelector('[data-global-rules-textarea]').disabled = false; }
+    async function saveContextRulesModal(modal, close = true) {
+        if (modal._saving || modal._loading || !rulesOwnerMatches(modal)) return false;
+        const global = modal._scope === 'global';
+        if (global && (!modal._settings || modal._incoming)) { rulesStatus(modal, '请先完成读取或新版对照，草稿仍保留。'); return false; }
+        if (!rulesScopeDirty(modal)) { if (close) await closeContextRulesModal(); return true; }
+        modal._saving = true; renderRulesEditor(modal);
+        let saved = false;
+        try {
+            if (global) {
+                const result = await patchJson('/api/tools/ultimate-canvas/text-settings', {
+                    rules: modal._draft.filter(rule => rule.revision || rule.name.trim() || rule.body.trim()),
+                    expected: modal._settings.expected, mergeLegacy: modal._mergeLegacy === true
+                });
+                if (!rulesOwnerMatches(modal)) return false;
+                modal._settings = result; modal._draft = ruleCopy(result.rules); modal._mergeLegacy = false; modal._restored.clear();
+            } else {
+                const node = modal._node;
+                if (!canvasRuntime.documentWritable) throw Error('当前画布不可写，草稿仍保留。');
+                const previous = node._pendingTextRules?.previous || { contextRules: node.data?.contextRules, context_rules: node.data?.context_rules, contextRulesUpdatedAt: node.data?.contextRulesUpdatedAt, textPurpose: node.data?.textPurpose };
+                const candidate = { contextRules: modal._nodeDraft, contextRulesUpdatedAt: new Date().toISOString(), textPurpose: modal._purpose };
+                node._pendingTextRules = { previous, candidate };
+                node.data = { ...node.data, ...candidate };
+                scheduleCanvasSave('context_rules_change');
+                if (!await flushCanvasSave('context_rules_change', true) || node._pendingTextRules) throw Error('节点规则保存未确认，草稿仍保留；当前生成继续使用此前规则，请重试保存。');
+                if (!rulesOwnerMatches(modal)) return false;
+                modal._nodeInitial = modal._nodeDraft; modal._purposeInitial = modal._purpose;
+                refreshContextRulesButtons();
+            }
+            saved = true;
+            rulesStatus(modal, '已保存，下次适用的文本生成生效。');
+        } catch (error) { if (rulesOwnerMatches(modal)) rulesStatus(modal, error.message || '保存失败，草稿仍保留。'); }
+        finally {
+            modal._saving = false;
+            if (rulesOwnerMatches(modal)) renderRulesEditor(modal);
+        }
+        if (saved && close) await closeContextRulesModal();
+        return saved;
+    }
+    async function switchRulesScope(modal, scope) {
+        if (modal._saving || modal._loading || modal._scope === scope) return;
+        if (rulesScopeDirty(modal)) {
+            modal._pendingScope = scope;
+            modal.querySelector('[data-rules-switch-guard]').hidden = false;
             return;
         }
-        const nodeId = modal.dataset.nodeId;
-        const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
-        const node = engine.nodes.get(nodeId);
-        if (!nodeEl || !node) return;
-        const rules = normalizeContextRules(modal.querySelector('[data-context-rules-textarea]')?.value || '');
-        node.data = {
-            ...node.data,
-            contextRules: rules,
-            contextRulesUpdatedAt: rules ? new Date().toISOString() : null
+        modal._scope = scope; renderRulesEditor(modal);
+    }
+    async function rulesAction(modal, action) {
+        if (modal._saving || modal._loading || !rulesOwnerMatches(modal) || !modal._settings || modal._incoming) return;
+        const selected = modal._draft.find(rule => rule.id === modal._selected);
+        const add = (name = '', body = '', purpose = 'text') => {
+            if (modal._draft.length >= 40) { rulesStatus(modal, '规则最多40条（含已删除）。'); return; }
+            const rule = { id: crypto.randomUUID(), name, body, purpose, enabled: false, order: modal._draft.length,
+                revision: 0, deletedAt: null, updatedAt: null };
+            modal._draft.push(rule); modal._selected = rule.id; modal._showDeleted = false;
+            return rule;
         };
-        refreshContextRulesButtons();
-        scheduleCanvasSave('context_rules_change');
-        modal._saving = true;
-        const saveButton = modal.querySelector('[data-context-rules-save]');
-        saveButton.classList.add('sd2-loading-surface');
-        saveButton.dataset.busy = 'true';
-        saveButton.disabled = true;
-        modal.querySelector('[data-context-rules-textarea]').disabled = true;
-        try {
-            const saved = await flushCanvasSave('context_rules_change', true);
-            if (!saved) { status.textContent = '节点规则尚未保存到服务器，请重试。'; return; }
-            modal._nodeInitial = rules;
-            modal.querySelector('[data-context-rules-textarea]').value = rules;
-            status.textContent = '节点专属规则已保存，仅当前节点下次生成生效。';
-        } catch (error) { status.textContent = error.message || '节点规则保存失败，请重试。'; }
-        finally { modal._saving = false; saveButton.dataset.busy = 'false'; saveButton.disabled = false; modal.querySelector('[data-context-rules-textarea]').disabled = false; }
+        if (action === 'new') add();
+        else if (action === 'copy' && selected) add((selected.name + ' 副本').slice(0, 80), selected.body, selected.purpose);
+        else if (action === 'delete' && selected) {
+            if (selected.revision && !await requestCanvasConfirmation({ title: '删除规则', message: '保存后不再用于后续生成，正文仍可在已删除中恢复。', confirmLabel: '删除规则' })) return;
+            if (!rulesOwnerMatches(modal)) return;
+            if (!selected.revision) modal._draft = modal._draft.filter(rule => rule.id !== selected.id);
+            else { selected.deletedAt = new Date().toISOString(); selected.enabled = false; }
+        } else if (action === 'restore' && selected) {
+            selected.deletedAt = null; selected.enabled = false; modal._restored.add(selected.id); modal._showDeleted = false;
+        } else if ((action === 'up' || action === 'down') && selected) {
+            const list = modal._draft.filter(rule => !rule.deletedAt).sort((a, b) => a.order - b.order);
+            const index = list.indexOf(selected), other = index + (action === 'up' ? -1 : 1);
+            if (other >= 0 && other < list.length) { [list[index], list[other]] = [list[other], list[index]]; list.forEach((rule, order) => { rule.order = order; }); }
+        } else if (action === 'original') add('原始基础正文', modal._settings.legacyOriginal.context, 'basic');
+        else if (action === 'legacy') {
+            if (add('旧版修改（待合并）', modal._settings.legacyCurrent.context, 'basic')) modal._mergeLegacy = true;
+        } else if (action === 'history') {
+            const snapshot = modal._settings.history.find(item => String(item.revision) === modal.querySelector('[data-rules-history]').value);
+            if (!snapshot) return;
+            if (!await requestCanvasConfirmation({ title: '恢复规则版本', message: '恢复为未启用草稿；当前规则仍保留，保存才生效。', confirmLabel: '恢复草稿' }) || !rulesOwnerMatches(modal)) return;
+            for (const old of snapshot.rules) {
+                const current = modal._draft.find(rule => rule.id === old.id);
+                if (!current) continue;
+                Object.assign(current, { name: old.name, purpose: old.purpose, body: old.body, order: old.order, deletedAt: old.deletedAt, enabled: false });
+                modal._restored.add(current.id);
+            }
+        }
+        renderRulesEditor(modal);
+        if (action === 'new' || action === 'copy') modal.querySelector('[data-rule-field="name"]')?.focus();
     }
 
     function closePromptModal() {
@@ -6014,26 +6204,59 @@
 
         const contextRulesModal = e.target.closest('[data-context-rules-modal]');
         if (contextRulesModal) {
+            e.stopPropagation();
+            if (contextRulesModal._saving || contextRulesModal._closing) return;
+            if (!e.target.closest('.rules-menu')) contextRulesModal.querySelectorAll('.rules-menu[open]').forEach(menu => { menu.open = false; });
             if (e.target === contextRulesModal) { closeContextRulesModal(); return; }
             const tab = e.target.closest('[data-rules-tab]');
             if (tab) {
-                contextRulesModal._scope = tab.dataset.rulesTab;
-                const global = tab.dataset.rulesTab === 'global';
-                contextRulesModal.querySelectorAll('[data-rules-tab]').forEach(button => button.setAttribute('aria-selected', String(button === tab)));
-                contextRulesModal.querySelector('[data-context-rules-textarea]').hidden = global;
-                contextRulesModal.querySelector('[data-global-rules-textarea]').hidden = !global;
-                contextRulesModal.querySelector('[data-rules-editor-label]').textContent = global ? '所有画布的文本生成共同遵守' : '仅用于当前文本节点';
-                contextRulesModal.querySelector('[data-rules-scope]').textContent = global ? '全站所有画布的文本节点' : '仅当前文本节点';
-                contextRulesModal.querySelector('[data-context-rules-save]').textContent = global ? '保存全站规则' : '保存节点规则';
+                await switchRulesScope(contextRulesModal, tab.dataset.rulesTab);
                 return;
+            }
+            const switchButton = e.target.closest('[data-rules-switch]');
+            if (switchButton) {
+                const choice = switchButton.dataset.rulesSwitch;
+                if (choice === 'save' && !await saveContextRulesModal(contextRulesModal, false)) return;
+                if (choice === 'discard') {
+                    if (contextRulesModal._scope === 'node' && contextRulesModal._node._pendingTextRules) {
+                        rulesStatus(contextRulesModal, '上次保存结果尚未确认，请先重试保存；不会覆盖未知结果。'); return;
+                    }
+                    if (contextRulesModal._scope === 'node') { contextRulesModal._nodeDraft = contextRulesModal._nodeInitial; contextRulesModal._purpose = contextRulesModal._purposeInitial; }
+                    else { contextRulesModal._draft = ruleCopy(contextRulesModal._settings.rules); contextRulesModal._mergeLegacy = false; contextRulesModal._incoming = null; contextRulesModal._restored.clear(); }
+                }
+                if (choice !== 'stay') contextRulesModal._scope = contextRulesModal._pendingScope;
+                contextRulesModal.querySelector('[data-rules-switch-guard]').hidden = true;
+                renderRulesEditor(contextRulesModal); return;
+            }
+            const item = e.target.closest('[data-rule-id]');
+            if (item) { contextRulesModal._selected = item.dataset.ruleId; renderRulesEditor(contextRulesModal); return; }
+            const action = e.target.closest('[data-rule-action]');
+            if (action) { await rulesAction(contextRulesModal, action.dataset.ruleAction); return; }
+            if (e.target.closest('[data-rules-reload]')) { await readRulesLibrary(contextRulesModal); return; }
+            if (e.target.closest('[data-rules-legacy-merge]')) { await rulesAction(contextRulesModal, 'legacy'); return; }
+            const resolve = e.target.closest('[data-rules-resolve]');
+            if (resolve) {
+                const conflict = contextRulesModal._conflicts.find(item => item.id === resolve.dataset.rulesResolve);
+                if (!conflict) return;
+                const chosen = resolve.dataset.choice === 'mine' ? conflict.mine : conflict.theirs;
+                contextRulesModal._rebase = contextRulesModal._rebase.filter(item => item.id !== conflict.id);
+                if (chosen) {
+                    const restoring = conflict.theirs?.deletedAt && !chosen.deletedAt;
+                    contextRulesModal._rebase.push({ ...chosen, enabled: restoring ? false : chosen.enabled, revision: conflict.theirs?.revision || 0 });
+                    if (restoring) contextRulesModal._restored.add(chosen.id);
+                }
+                contextRulesModal._conflicts = contextRulesModal._conflicts.filter(item => item !== conflict);
+                renderRulesConflicts(contextRulesModal); return;
+            }
+            if (e.target.closest('[data-rules-rebase]')) {
+                if (contextRulesModal._conflicts.length) return;
+                contextRulesModal._draft = contextRulesModal._rebase;
+                contextRulesModal._settings = contextRulesModal._incoming;
+                contextRulesModal._incoming = null; contextRulesModal._mergeLegacy = false;
+                renderRulesEditor(contextRulesModal); return;
             }
             if (e.target.closest('[data-context-rules-close], [data-context-rules-cancel]')) {
                 closeContextRulesModal();
-                return;
-            }
-            if (e.target.closest('[data-context-rules-clear]')) {
-                const textarea = contextRulesModal.querySelector(contextRulesModal._scope === 'global' ? '[data-global-rules-textarea]' : '[data-context-rules-textarea]');
-                if (textarea && !textarea.disabled && !contextRulesModal._saving) textarea.value = '';
                 return;
             }
             if (e.target.closest('[data-context-rules-save]')) {
@@ -6309,6 +6532,55 @@
     // =====================
     // Node Actions (inside text/image nodes)
     // =====================
+    document.addEventListener('input', event => {
+        const modal = event.target.closest('[data-context-rules-modal]');
+        if (!modal || modal._saving || !rulesOwnerMatches(modal)) return;
+        if (event.target.matches('[data-context-rules-textarea]')) modal._nodeDraft = event.target.value;
+        if (event.target.matches('[data-rules-node-purpose]')) modal._purpose = event.target.value;
+        if (event.target.matches('[data-rule-field]') && !modal._incoming) {
+            const rule = modal._draft.find(item => item.id === modal._selected);
+            if (rule && !rule.deletedAt) {
+                const field = event.target.dataset.ruleField;
+                rule[field] = field === 'enabled' ? event.target.checked : event.target.value;
+                renderRuleList(modal);
+            }
+        }
+        if (event.target.matches('[data-rules-search]')) { modal._search = event.target.value; renderRuleList(modal); }
+        rulesStatus(modal); rulesPreview(modal);
+    });
+    document.addEventListener('change', event => {
+        const modal = event.target.closest('[data-context-rules-modal]');
+        if (modal && !modal._saving && event.target.matches('[data-rules-deleted]')) {
+            modal._showDeleted = event.target.checked; renderRulesEditor(modal);
+        }
+    });
+    document.addEventListener('click', event => {
+        const trigger = event.target.closest('[data-rules-time]');
+        const bubble = document.querySelector('[data-rules-time-bubble]');
+        if (trigger) {
+            event.stopPropagation();
+            if (bubble?._trigger === trigger && bubble.dataset.pinned === 'true') rulesTimeClose();
+            else rulesTimeOpen(trigger, true);
+        } else if (!event.target.closest('[data-rules-time-bubble]')) rulesTimeClose();
+    });
+    document.addEventListener('mouseover', event => {
+        const trigger = event.target.closest('[data-rules-time]');
+        if (trigger && document.querySelector('[data-rules-time-bubble]')?.dataset.pinned !== 'true') rulesTimeOpen(trigger);
+    });
+    document.addEventListener('focusin', event => {
+        if (event.target.matches('[data-rules-time]') && document.querySelector('[data-rules-time-bubble]')?.dataset.pinned !== 'true') rulesTimeOpen(event.target);
+    });
+    const closeUnpinnedRuleTime = () => {
+        const bubble = document.querySelector('[data-rules-time-bubble]');
+        if (bubble && bubble.dataset.pinned !== 'true' && document.activeElement !== bubble._trigger && !bubble._trigger.matches(':hover')) rulesTimeClose();
+    };
+    document.addEventListener('mouseout', closeUnpinnedRuleTime);
+    document.addEventListener('focusout', closeUnpinnedRuleTime);
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && document.querySelector('[data-rules-time-bubble]')) {
+            event.preventDefault(); event.stopImmediatePropagation(); rulesTimeClose();
+        }
+    }, true);
     document.addEventListener('change', event => {
         const select = event.target.closest('[data-text-model]');
         if (!select) return;
@@ -6321,9 +6593,12 @@
         const modal = document.querySelector('[data-context-rules-modal]');
         if (document.querySelector('dialog[open]')) return;
         if (!modal) return;
+        if (event.key === 'Escape' && modal.querySelector('.rules-menu[open]')) {
+            event.preventDefault(); event.stopImmediatePropagation(); modal.querySelector('.rules-menu[open]').open = false; return;
+        }
         if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closeContextRulesModal(); }
         if (event.key === 'Tab') {
-            const focusable = [...modal.querySelectorAll('button:not(:disabled), textarea:not(:disabled)')].filter(el => !el.hidden);
+            const focusable = [...modal.querySelectorAll('button:not(:disabled), textarea:not(:disabled), input:not(:disabled), select:not(:disabled), summary')].filter(el => el.getClientRects().length);
             const first = focusable[0], last = focusable[focusable.length - 1];
             if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
             else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
