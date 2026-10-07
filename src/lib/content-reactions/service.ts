@@ -16,6 +16,12 @@ async function resolveReactionContent(user: SessionUser, key: ContentKey, contex
   }
 }
 
+function templateIdentity(key: string) {
+  const type = key.split(':')[0];
+  if (!['image_template', 'image_module', 'video_template', 'video_draft', 'legacy_template'].includes(type)) return null;
+  return { templateKind: ['image_module', 'video_draft'].includes(type) ? 'workpage' : 'definition', templateMedium: type.startsWith('image_') ? 'image' : 'video' };
+}
+
 export async function getReactionState(user: SessionUser, key: ContentKey, available: boolean): Promise<ReactionState> {
   const row = await prisma.contentReaction.findUnique({ where: { user_id_content_key: { user_id: user.id, content_key: key } } });
   // Legacy private favorites affect only the viewer's active state, never this public count.
@@ -96,8 +102,9 @@ export async function listReactions(user: SessionUser, params: URLSearchParams):
   for (const row of rows) {
     const resolved = await resolveReactionContent(user, parseContentKey(row.content_key), context);
     if (search && (!resolved || !(resolved.prompt || resolved.summary.title).toLocaleLowerCase().includes(search))) continue;
-    if (resolved && category === 'template' && params.get('templateKind') && resolved.summary.templateKind !== params.get('templateKind')) continue;
-    if (resolved && category === 'template' && params.get('templateMedium') && resolved.summary.templateMedium !== params.get('templateMedium')) continue;
+    const template = resolved?.summary || templateIdentity(row.content_key);
+    if (category === 'template' && params.get('templateKind') && template?.templateKind !== params.get('templateKind')) continue;
+    if (category === 'template' && params.get('templateMedium') && template?.templateMedium !== params.get('templateMedium')) continue;
     counts.all++;
     if (row.category in counts) counts[row.category as ContentCategory]++;
     if (category === 'all' || category === row.category) matches.push({ row, resolved });

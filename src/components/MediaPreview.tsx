@@ -21,7 +21,7 @@ export type MediaPreviewProps = {
   previewKey?: string;
   safeDetails?: SafeImagePreviewDetails;
   imageDownload?: () => void | Promise<unknown>;
-  /** Caller-provided status/reactions/file metadata only; remove prompts before passing. */
+  /** Caller-provided status/file metadata only; shared preview owns reactions. */
   details?: ReactNode;
   notice?: ReactNode;
   onClose: () => void;

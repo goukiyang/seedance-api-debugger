@@ -24,7 +24,7 @@ function broadcast(userId: string, key: ContentKey, state: ReactionState) {
   window.dispatchEvent(new CustomEvent('sd2-reactions-changed', { detail }));
   channel?.postMessage(detail);
 }
-function installChannel() {
+export function installChannel() {
   if (channel || typeof BroadcastChannel === 'undefined') return;
   channel = new BroadcastChannel('sd2-content-reactions');
   channel.onmessage = event => {

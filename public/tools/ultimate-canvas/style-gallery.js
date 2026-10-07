@@ -296,6 +296,10 @@
         button.setAttribute('aria-pressed', String(active));
         button.setAttribute('aria-label', active ? '取消喜欢' : '喜欢');
         button.title = active ? '取消喜欢，从我的喜欢移除' : '喜欢，加入我的喜欢';
+        if (item.favoriteUnconfirmed) {
+            button.title = '上次操作尚未确认，点击重试原操作';
+            button.setAttribute('aria-label', '重试确认喜欢');
+        }
         button.disabled = Boolean(pending || typeof options?.onFavorite !== 'function');
         if (typeof options?.onFavorite !== 'function') button.title = '喜欢暂不可用';
     }
@@ -713,6 +717,7 @@
             if (state.favoritePending.has(id)) { state.favoriteInvalidated.add(key); return; }
             if (!Number.isSafeInteger(result?.version) || result.version < (item.reactionVersion || 0)) return;
             item.reactionVersion = result.version;
+            item.favoriteUnconfirmed = result.unconfirmed === true;
             const active = Boolean(result.liked || result.favorited);
             item.favorited = active;
             state.favoriteStates[id] = active;

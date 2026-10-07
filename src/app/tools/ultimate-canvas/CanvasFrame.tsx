@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import CanvasReactions from '@/components/content-reactions/CanvasReactions';
-import { invalidateReaction } from '@/components/content-reactions/ContentReactions';
+import { invalidateReaction, installChannel } from '@/components/content-reactions/ContentReactions';
 import MediaPreview from '@/components/MediaPreview';
 import { useProductDialog } from '@/components/useProductDialog';
 import type { ContentKey } from '@/lib/content-reactions/types';
@@ -33,6 +33,8 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
   const [styleGalleryOpen, setStyleGalleryOpen] = useState(false);
   const { user } = useAppSession();
   const userId = useRef(user?.id); userId.current = user?.id;
+  // Empty canvases still receive confirmed changes from other tabs.
+  useEffect(() => { if (user?.id) installChannel(); }, [user?.id]);
   const [referenceRequest, setReferenceRequest] = useState<ReferenceRequest | null>(null);
   const currentReferenceRequest = useRef(referenceRequest); currentReferenceRequest.current = referenceRequest;
   const referenceReceipt = useRef<{ requestId: string; resolve: () => void; reject: (error: Error) => void } | null>(null);

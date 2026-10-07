@@ -30,7 +30,9 @@
                     const params = new URLSearchParams({ query: query || '', category: category || '', model: model || '', tab: tab === 'gallery' ? 'all' : tab });
                     if (cursor) params.set('cursor', cursor);
                     params.set('recentIds', JSON.stringify(recentIds || []));
-                    return json(`${endpoint}?${params}`, null, signal);
+                    const result = await json(`${endpoint}?${params}`, null, signal);
+                    for (const item of result.items || []) item.favoriteUnconfirmed = pendingFavorites.has(`${context.userId}/${item.key}`);
+                    return result;
                 },
                 onFavorite: async (item, active) => {
                     if (!sameContext(context, hooks.context())) throw new Error('画布已切换，请重新打开风格广场。');
@@ -45,12 +47,14 @@
                             method: 'PUT', signal: AbortSignal.timeout(15000), payload
                         });
                         pendingFavorites.delete(id);
+                        item.favoriteUnconfirmed = false;
                         item.reactionVersion = result.state.version;
                         item.favorited = Boolean(result.state.liked || result.state.favorited);
                         window.parent.postMessage({ type: 'sd2-canvas-reactions-changed', userId: context.userId, key: result.state.key }, location.origin);
                         return Boolean(result.state.liked || result.state.favorited);
                     } catch (error) {
                         if (Number.isInteger(error.status) && error.status < 500) pendingFavorites.delete(id);
+                        item.favoriteUnconfirmed = pendingFavorites.has(id);
                         if (error.status === 409) {
                             const result = await json('/api/content-reactions/state', { keys: [item.key] });
                             const state = result.states?.[item.key];
@@ -65,7 +69,7 @@
                     if (!sameContext(context, hooks.context())) throw new Error('画布已切换，请重新打开风格广场。');
                     const state = result.states?.[item.key];
                     if (!state) throw new Error('喜欢状态暂时无法读取');
-                    return state;
+                    return { ...state, unconfirmed: pendingFavorites.has(`${context.userId}/${item.key}`) };
                 },
                 onApply: async item => {
                     if (!current(node, context)) throw new Error('画布已切换，请重新打开风格广场。');
