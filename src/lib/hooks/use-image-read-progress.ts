@@ -40,11 +40,12 @@ function responseLength(response: Response, source: string) {
   return Number.isSafeInteger(parsedLength) && parsedLength > 0 ? parsedLength : undefined;
 }
 
-export function useImageReadProgress(source: string, attempt: number): ImageReadResult {
+export function useImageReadProgress(source: string, attempt: number, enabled = true): ImageReadResult {
   const requestKey = `${source}\u0000${attempt}`;
   const [entry, setEntry] = useState<(ImageReadResult & { key: string }) | null>(null);
 
   useEffect(() => {
+    if (!enabled) return;
     let current = true;
     let nativeFallbackStarted = false;
     let objectUrl: string | null = null;
@@ -222,9 +223,9 @@ export function useImageReadProgress(source: string, attempt: number): ImageRead
       if (reader) void reader.cancel().catch(() => {});
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [requestKey, source]);
+  }, [requestKey, source, enabled]);
 
-  if (entry?.key === requestKey) {
+  if (enabled && entry?.key === requestKey) {
     const { key: _key, ...result } = entry;
     return result;
   }

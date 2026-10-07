@@ -151,12 +151,12 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
   // Navigation must describe all saved modules, not just the first content page.
   const directory = !cursor && !requestedIds ? await prisma.imageStudioModule.findMany({
     where: { owner_id: ownerId }, orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
-    select: { id: true, name: true, group_name: true },
+    select: { id: true, name: true, group_name: true, source_preset_id: true },
   }) : undefined;
   return { modules, nextCursor: rows.length > 12 ? visible[visible.length - 1].id : null,
     ...(directory ? { directory: [
       ...(directory.some(item => item.id === defaultId) ? [] : [{ id: defaultId, name: '模块 1', groupName: '未分组' }]),
-      ...directory.map(item => ({ id: item.id, name: item.name, groupName: item.group_name || '未分组' })),
+      ...directory.map(item => ({ id: item.id, name: item.name, groupName: item.group_name || '未分组', sourcePresetId: item.source_preset_id })),
     ] } : {}) };
 }
 export async function deleteStudioModule(ownerId: string, id: unknown, revision: unknown) {

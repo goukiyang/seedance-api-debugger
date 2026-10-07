@@ -6,6 +6,7 @@ import { isSafeIdentifier, sourceFingerprint, type MediaPreviewZoomMode } from '
 export type ImageComparisonSource = {
   src: string; alt: string; fileName?: string; thumbnailSrc?: string;
   contentKey?: ContentKey; pickerKey?: string; id?: string; version?: string;
+  width?: number; height?: number;
 };
 export type ImageView = { scale: number; x: number; y: number; mode: MediaPreviewZoomMode };
 export type ComparisonPreferences = { linked: boolean; axis: 'horizontal' | 'vertical' };
@@ -13,6 +14,22 @@ export const fittedImageView: ImageView = { scale: 1, x: 0, y: 0, mode: 'fit' };
 export const comparisonScopes: PickerScope[] = ['mine', 'project', 'shared', 'public'];
 const prefix = 'sd2:media-preview:comparison:v1';
 const validPickerKey = (key: unknown): key is string => typeof key === 'string' && /^(asset|reference_image):[a-zA-Z0-9_-]{1,100}$/.test(key);
+
+export function imageDisplaySource(src: string, mode: 'preview' | 'thumbnail' | 'original') {
+  try {
+    const url = new URL(src, 'https://sd2.youdooart.com');
+    if (url.origin !== 'https://sd2.youdooart.com') return src;
+    if (/^\/api\/image-studio\/(?:assets|template-assets)\//.test(url.pathname)) {
+      url.searchParams.delete('thumbnail'); url.searchParams.delete('preview');
+      if (mode !== 'original') url.searchParams.set(mode, '1');
+    } else if (/^\/api\/reference-images\/[^/]+\/content$/.test(url.pathname)) {
+      url.searchParams.set('variant', mode);
+    } else if (url.pathname === '/api/content-reactions/media') {
+      url.searchParams.set('variant', mode === 'original' ? 'download' : mode);
+    } else return src;
+    return url.pathname + url.search;
+  } catch { return src; }
+}
 
 export function sourcePickerKey(source: ImageComparisonSource) {
   if (validPickerKey(source.pickerKey)) return source.pickerKey;
@@ -23,13 +40,14 @@ export function sourcePickerKey(source: ImageComparisonSource) {
 export function imageSourceIdentity(source: ImageComparisonSource) {
   let canonicalSource = source.src;
   try { const url = new URL(source.src, 'https://sd2.youdooart.com'); if (url.origin === 'https://sd2.youdooart.com') canonicalSource = url.pathname + url.search; } catch { /* Unknown URLs are not persisted. */ }
-  const fingerprint = sourceFingerprint(canonicalSource);
+  const fingerprint = sourceFingerprint(canonicalSource + (source.version ? `${canonicalSource.includes('?') ? '&' : '?'}sd2SourceVersion=${encodeURIComponent(source.version)}` : ''));
   if (!fingerprint) return source.src; // Temporary object URLs are session-only.
   const id = sourcePickerKey(source) || (isSafeIdentifier(source.id) ? source.id : 'image');
   return `${id}@${fingerprint}`;
 }
 export function pickerImageSource(item: PickerItem): ImageComparisonSource {
   return { src: item.originalUrl, thumbnailSrc: item.thumbnailUrl || undefined, alt: '图片预览', fileName: item.fileName,
+    width: item.width || undefined, height: item.height || undefined,
     contentKey: item.referenceImageId ? `reference_image:${item.referenceImageId}` : item.key,
     pickerKey: item.referenceImageId ? `reference_image:${item.referenceImageId}` : item.key };
 }

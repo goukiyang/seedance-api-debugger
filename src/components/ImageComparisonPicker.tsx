@@ -106,7 +106,7 @@ export function ImageComparisonPicker({ side, candidates, container, onSelect, o
         <button type="button" onClick={() => localInput.current?.click()}><FolderOpen size={16} />本机图片</button>
         <input ref={localInput} type="file" accept="image/*" hidden onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void choose(undefined, file); }} />
       </div>
-      {(error || choosing) && <div className={styles.status} role="status">{error || '正在加载所选图片，原图保留'}{error && prefs.view !== 'context' && <button type="button" title="重试读取" aria-label="重试读取素材" onClick={() => setEpoch(value => value + 1)}><RotateCcw size={16} /></button>}</div>}
+      {(error || choosing) && <div className={styles.status} role="status">{error || '正在确认所选图片，完成后先显示缩略图'}{error && prefs.view !== 'context' && <button type="button" title="重试读取" aria-label="重试读取素材" onClick={() => setEpoch(value => value + 1)}><RotateCcw size={16} /></button>}</div>}
       <div className={styles.body} aria-busy={loading}>
         <div className={styles.grid}>{prefs.view === 'context'
           ? visibleCandidates.slice(0, contextLimit).map((image, index) => <button key={`${image.src}:${index}`} type="button" className={styles.item} onClick={() => void choose(image)}><img src={image.thumbnailSrc || image.src} alt="" loading="lazy" /><span>{image.alt || '本次图片'}</span></button>)

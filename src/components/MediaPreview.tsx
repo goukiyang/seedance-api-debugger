@@ -42,6 +42,7 @@ export default function MediaPreview(props: MediaPreviewProps) {
     return (
       <ZoomableImagePreview
         src={props.src}
+        thumbnailSrc={props.poster}
         alt="图片预览"
         title={props.title}
         previewKey={props.previewKey}

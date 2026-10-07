@@ -5,8 +5,7 @@ import { useProductDialog } from '@/components/useProductDialog';
 import { saveMainImageReminder, skipMainImageReminder } from './main-image-reminder';
 import { ContextClipboardActions } from '@/components/ContextClipboardActions';
 
-import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Heart, ChevronDown, ChevronRight, Clipboard, Copy, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
 import { ContextVersionLabel, useModuleContextVersion } from './context-version-label';
@@ -21,6 +20,9 @@ import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useUnsavedNavigation } from '@/lib/hooks/use-unsaved-navigation';
 import { copyImage } from '@/lib/media/copy-image';
+import { ModuleGroupPicker } from './group-picker';
+import { TemplateFavoritesList, useTemplateFavorites } from './template-favorites';
+import type { ReactionListItem } from '@/lib/content-reactions/types';
 
 function studioUploadProgress(file: File, index: number, count: number, progress: UploadProgressSnapshot) {
   const transferring = ['raw', 'proxy', 'storage', 'multipart'].includes(progress.phase);
@@ -78,10 +80,10 @@ function StudioWaitingImage({ src }: { src?: string | null }) {
 type StudioModule = { referencePolicy?: StudioReferencePolicy; id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sourcePresetOwnedByViewer?: boolean; sourcePresetCanManageSharing?: boolean; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string; fixedReferenceCount?: number; fixedReferencesEditable?: boolean; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; reproductionState?: { fixedReferenceCount: number; styleGroups: StudioStyleSummary[] } | null };
 type StudioPreset = { id: string; name: string; revision: string; moduleContextVersion?: string | null; scope: 'admin' | 'creator'; isShared: boolean; canManageSharing?: boolean; ownedByViewer?: boolean; groupName: string; model: string; quality: string; resolution: ImageResolution; count: number; referenceLimit: number; aspectRatio: string; images: UploadedAssetPayload[]; banner: UploadedAssetPayload | null; contextConfigured: boolean; createdAt: string };
 type QuickStudioPreset = StudioPreset & { prompt: string; context: string; referencesAvailable: boolean; referencePolicy?: StudioReferencePolicy; fixedReferences?: FixedStudioReference[]; styleGroupIds: string[] };
-type PresetSource = { draft: Record<string, unknown>; blocked: string | null };
+type PresetSource = { draft: Record<string, unknown>; blocked: string | null; groupDeleteBlocked?: boolean };
 type PresetSourceReader = () => PresetSource;
 type StudioFeedback = { message: string; tone: 'progress' | 'info' | 'success' | 'warning' | 'error' };
-type ImagePreviewState = { contentKey?: `asset:${string}`; taskId?: string; resultVersion?: string | null; src: string; alt: string; title?: string; fileName?: string; width?: number; height?: number; metadata?: ImagePreviewMetadata; comparison?: { src: string; alt: string; fileName?: string; thumbnailSrc?: string } };
+type ImagePreviewState = { contentKey?: `asset:${string}`; taskId?: string; resultVersion?: string | null; src: string; thumbnailSrc?: string; alt: string; title?: string; fileName?: string; width?: number; height?: number; metadata?: ImagePreviewMetadata; comparison?: { src: string; alt: string; fileName?: string; thumbnailSrc?: string } };
 type RatioPreferences = { custom: string[]; busy: boolean; error: string; onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean> };
 type ModuleScrollRequest = { target: 'module' | 'header'; id: string; group: string; token: number; behavior: ScrollBehavior; markViewed: boolean };
 type ModuleNavigationOptions = { ensureLoaded?: boolean; markViewed?: boolean; behavior?: ScrollBehavior };
@@ -139,6 +141,7 @@ function studioTaskPreviewState(task: StudioTask): ImagePreviewState {
     resultVersion: studioResultVersion(task),
     contentKey: task.asset?.id ? `asset:${task.asset.id}` : undefined,
     src: task.asset?.original_url || '',
+    thumbnailSrc: task.asset?.thumbnail_url,
     alt: `生成结果 ${task.ordinal}`,
     title: `生成结果 ${task.ordinal}`,
     width: task.asset?.width, height: task.asset?.height,
@@ -184,7 +187,8 @@ async function copyStudioText(value: string) {
   } catch { return false; }
 }
 
-export default function ImageStudio({ isAdmin, userId, templateWorkbench = false }: { isAdmin: boolean; userId: string; templateWorkbench?: boolean }) {
+export default function ImageStudio({ isAdmin, userId, templateWorkbench = false, favoritesRequest = 0 }: { isAdmin: boolean; userId: string; templateWorkbench?: boolean; favoritesRequest?: number }) {
+  const router = useRouter();
   const routeQuery = useSearchParams()?.toString() || '';
   const routedContentHandled = useRef('');
   const { confirm, prompt: askPresetName, productDialog } = useProductDialog();
@@ -196,7 +200,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
   const [presetManaging, setPresetManaging] = useState(false);
   const presetManagementLock = useRef(false);
   const [modules, setModules] = useState<StudioModule[]>([]);
-  const [directory, setDirectory] = useState<Array<Pick<StudioModule, 'id' | 'name' | 'groupName'>>>([]);
+  const [directory, setDirectory] = useState<Array<Pick<StudioModule, 'id' | 'name' | 'groupName' | 'sourcePresetId'>>>([]);
   const removedModuleIds = useRef(new Set<string>());
   const hydratingIds = useRef(new Set<string>());
   const [hydrating, setHydrating] = useState(false);
@@ -215,6 +219,10 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
   const viewRestored = restoredViewKey === viewStorageKey;
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
   const [imageGenerationExpanded, setImageGenerationExpanded] = useState(false);
+  const [favoritesExpanded, setFavoritesExpanded] = useState(false), [selectedFavorite, setSelectedFavorite] = useState('');
+  const favorites = useTemplateFavorites(userId, templateWorkbench && viewRestored && favoritesExpanded);
+  const [favoriteSelecting, setFavoriteSelecting] = useState(false);
+  const favoriteOpenRequest = useRef(0), routeFavoritesHandled = useRef(false);
   const [pendingModuleScroll, setPendingModuleScroll] = useState<ModuleScrollRequest | null>(null);
   const moduleScrollSequence = useRef(0);
   const pageRef = useRef<HTMLElement>(null);
@@ -245,6 +253,8 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
         : savedGroup ? [savedGroup] : [];
       setExpandedGroups(savedGroups);
       setImageGenerationExpanded(typeof view?.imageGenerationExpanded === 'boolean' ? view.imageGenerationExpanded : savedGroups.length > 0 || (!hasExpandedGroups && Boolean(savedActive)));
+      setFavoritesExpanded(view?.favoritesExpanded === true);
+      setSelectedFavorite(typeof view?.selectedFavorite === 'string' && /^[a-z_]+:[A-Za-z0-9_-]+$/.test(view.selectedFavorite) ? view.selectedFavorite : '');
     } else {
       if (typeof view?.group === 'string') setSelectedGroup(view.group);
       if (typeof view?.active === 'string') setActive(view.active);
@@ -255,9 +265,16 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     if (!viewRestored) return;
     try {
       const storage = templateWorkbench ? localStorage : sessionStorage;
-      storage.setItem(viewStorageKey, JSON.stringify({ group: selectedGroup, active, ...(templateWorkbench ? { coverView, expandedGroups, imageGenerationExpanded } : {}) }));
+      storage.setItem(viewStorageKey, JSON.stringify({ group: selectedGroup, active, ...(templateWorkbench ? { coverView, expandedGroups, imageGenerationExpanded, favoritesExpanded, selectedFavorite } : {}) }));
     } catch {}
-  }, [viewRestored, viewStorageKey, selectedGroup, active, coverView, expandedGroups, imageGenerationExpanded, templateWorkbench]);
+  }, [viewRestored, viewStorageKey, selectedGroup, active, coverView, expandedGroups, imageGenerationExpanded, favoritesExpanded, selectedFavorite, templateWorkbench]);
+  useEffect(() => {
+    if (!viewRestored || !templateWorkbench) return;
+    const fromRoute = new URLSearchParams(routeQuery).get('favorites') === '1';
+    if (favoritesRequest !== favoriteOpenRequest.current || fromRoute && !routeFavoritesHandled.current) setFavoritesExpanded(true);
+    favoriteOpenRequest.current = favoritesRequest;
+    if (fromRoute) routeFavoritesHandled.current = true;
+  }, [favoritesRequest, viewRestored, templateWorkbench, routeQuery]);
   const updateNavigationOffset = useCallback(() => {
     const page = pageRef.current;
     if (!page) return;
@@ -410,11 +427,11 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     } catch (e) { setError(e instanceof Error ? e.message : '新建失败'); }
     finally { createLock.current = false; setCreating(false); }
   }
-  async function openPresetLibrary(sourceId?: string) {
+  async function openPresetLibrary(sourceId?: string, requestedPresetId?: string) {
     setPresetSourceId(sourceId || active || '');
     setPresetDialogOpen(true); setPresetsLoading(true); setPresetsError('');
     try { const result = await readResponse(await fetch('/api/image-studio/presets', { cache: 'no-store' }));
-      const requested = new URLSearchParams(window.location.search).get('presetId');
+      const requested = requestedPresetId || new URLSearchParams(window.location.search).get('presetId');
       const sorted = [...result.presets].sort((a, b) => Number(b.id === requested) - Number(a.id === requested));
       setPresets(sorted);
       if (requested && !sorted.some(item => item.id === requested)) setPresetsError('喜欢的模板已不可用或不再共享');
@@ -524,6 +541,27 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     if (followGroup) setSelectedGroup(groupName);
   }, []);
   const groups = useMemo(() => Array.from(new Set([...DEFAULT_GROUPS, ...navigation.map(item => item.groupName).filter(Boolean)])), [navigation]);
+  async function selectFavorite(item: ReactionListItem) {
+    if (!item.content || !item.state.available || favoriteSelecting || loading) return;
+    setSelectedFavorite(item.key); setError(''); setFavoriteSelecting(true);
+    try {
+      const [type, id] = item.key.split(':');
+      if (type === 'image_module') {
+        const installed = navigation.find(module => module.id === id);
+        if (!installed) throw new Error('该模块已不可用，请刷新喜欢清单');
+        navigateToModule(installed.groupName || '未分组', installed.id);
+      } else if (type === 'image_template') {
+        const installed = modules.find(module => module.sourcePresetId === id) || directory.find(module => module.sourcePresetId === id);
+        if (installed) navigateToModule(installed.groupName || '未分组', installed.id);
+        else await openPresetLibrary(undefined, id);
+      } else {
+        const target = new URL(item.content.href, window.location.origin);
+        if (target.origin !== window.location.origin || target.pathname !== '/template-studio') throw new Error('模板入口已失效，请刷新喜欢清单');
+        router.push(target.pathname + target.search);
+      }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '模板无法打开，请重试'); }
+    finally { setFavoriteSelecting(false); }
+  }
   const visibleModules = useMemo(() => selectedGroup ? modules.filter(item => item.groupName === selectedGroup) : modules, [modules, selectedGroup]);
   const missingGroupModules = useMemo(() => (groupedModules[selectedGroup] || []).filter(item => !modules.some(module => module.id === item.id)), [groupedModules, selectedGroup, modules]);
   useLayoutEffect(() => {
@@ -609,8 +647,17 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     const availableGroups = Object.keys(groupedModules);
     setSelectedGroup(current => current && availableGroups.includes(current) ? current : availableGroups[0] || groups[0]);
   }, [groups, groupedModules, navigation.length]);
+  const [groupDeleting, setGroupDeleting] = useState(false);
+  const groupDeleteLock = useRef(false);
   async function deleteGroup(group: string) {
-    if (DEFAULT_GROUPS.includes(group)) return;
+    if (DEFAULT_GROUPS.includes(group) || groupDeleteLock.current) return;
+    groupDeleteLock.current = true; setGroupDeleting(true);
+    try { await deleteGroupMembers(group); }
+    finally { groupDeleteLock.current = false; setGroupDeleting(false); }
+  }
+  async function deleteGroupMembers(group: string) {
+    const blocked = () => (groupedModules[group] || []).some(item => presetSources.current.get(item.id)?.().groupDeleteBlocked);
+    if (blocked()) { setError('分组中有模块正在保存或处理其他操作，请完成后再删除分组'); return; }
     // Read unloaded members too; deleting a group must not omit later pages.
     const targets = [...modules.filter(item => item.groupName === group)];
     const unloaded = (groupedModules[group] || []).filter(item => !targets.some(target => target.id === item.id));
@@ -622,6 +669,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
       }
     } catch { setError('分组内容未能完整读取，请重试'); return; }
     if (!targets.length || !(await confirm(`删除分组“${group}”？其中的模块会移到“未分组”，图片和生成结果不会删除。`, { title: '删除分组', confirmLabel: '删除分组', danger: true }))) return;
+    if (blocked()) { setError('分组内容已变化，请完成保存后再删除分组'); return; }
     try {
       const replacements: StudioModule[] = [];
       for (const item of targets) {
@@ -640,7 +688,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
       void loadModules();
     }
   }
-  const resetSidebarExpansion = () => { setExpandedGroups([]); setImageGenerationExpanded(false); };
+  const resetSidebarExpansion = () => { setExpandedGroups([]); setImageGenerationExpanded(false); setFavoritesExpanded(false); setSelectedFavorite(''); };
   const navigateToImageSection = (event: React.MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
     replaceImageModuleLocation(null);
@@ -660,7 +708,8 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     <aside className={styles.moduleRail} data-remember-scroll="image-groups" aria-label={templateWorkbench ? '模板导航' : '分组快捷栏'}>
       {templateWorkbench ? <>
         <div className={styles.moduleRailTitle}>模板工作台</div>
-        <Link className={styles.moduleRailMajorLink} href="/assets?view=favorites"><Heart size={16} /><span>我的喜欢</span></Link>
+        <button type="button" className={styles.moduleRailMajorLink} aria-expanded={favoritesExpanded} aria-controls="template-favorites-desktop" onClick={() => setFavoritesExpanded(current => !current)}><Heart size={16} /><span>我的喜欢</span>{favoritesExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</button>
+        <div id="template-favorites-desktop" hidden={!favoritesExpanded}><TemplateFavoritesList data={favorites} selected={selectedFavorite} busy={favoriteSelecting || loading} onSelect={item => void selectFavorite(item)} /></div>
         <section className={styles.moduleRailMajor} aria-label="图片生成">
           <div className={styles.moduleRailMajorHeader}>
             <a className={`${styles.moduleRailMajorLink} ${styles.moduleRailMajorCurrent}`} href="#image-generation" aria-current="page" onClick={navigateToImageSection}>
@@ -710,8 +759,9 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     {templateWorkbench && <nav ref={mobileModuleNavRef} className={styles.mobileModuleNav} aria-label="图片模块导航">
       <div className={styles.mobileMajorLinks}>
         <a className={styles.mobileMajorLink} href="#image-generation" aria-current="page" onClick={navigateToImageSection}><ImagePlus size={16} /><span>图片生成</span>{hasAnyUnread && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</a>
-        <Link className={styles.mobileMajorLink} href="/assets?view=favorites"><Heart size={16} /><span>我的喜欢</span></Link>
+        <button type="button" className={styles.mobileMajorLink} aria-expanded={favoritesExpanded} aria-controls="template-favorites-mobile" onClick={() => setFavoritesExpanded(current => !current)}><Heart size={16} /><span>我的喜欢</span>{favoritesExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</button>
       </div>
+      <div id="template-favorites-mobile" className={styles.mobileFavoriteList} hidden={!favoritesExpanded}><TemplateFavoritesList data={favorites} selected={selectedFavorite} busy={favoriteSelecting || loading} onSelect={item => void selectFavorite(item)} /></div>
       <label className={styles.mobileGroupPicker}><span>分组</span><select aria-label="选择图片分组" value={selectedGroup} onChange={event => {
         const group = event.target.value;
         const first = groupedModules[group]?.[0];
@@ -743,7 +793,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
       </button>;
     })}</div><div className={styles.pagination} aria-label={templateWorkbench ? '模块封面分页' : '模板封面分页'}><button type="button" disabled={coverPage <= 0} onClick={() => setCoverPage(current => Math.max(0, current - 1))}>上一页</button><span>第 {coverPage + 1} / {coverPageCount} 页</span><button type="button" disabled={coverPage >= coverPageCount - 1} onClick={() => setCoverPage(current => Math.min(coverPageCount - 1, current + 1))}>下一页</button></div>{cursor && <button type="button" disabled={loading} onClick={() => void loadModules(cursor)}>{templateWorkbench ? '加载更多模块' : '加载更多模板'}</button>}</section>}
     <div hidden={coverView}>
-    {modules.map(module => <ImageStudioBlock key={module.id} templateWorkbench={templateWorkbench} module={module} hidden={coverView || Boolean(selectedGroup && module.groupName !== selectedGroup)} onMetadataChange={updateModuleMetadata} groups={groups} onDeleteGroup={deleteGroup} isAdmin={isAdmin} onToggleSharing={toggleModuleSharing} sharingId={presetSharingId}
+    {modules.map(module => <ImageStudioBlock key={module.id} templateWorkbench={templateWorkbench} module={module} hidden={coverView || Boolean(selectedGroup && module.groupName !== selectedGroup)} onMetadataChange={updateModuleMetadata} groups={groups} onDeleteGroup={deleteGroup} groupDeleting={groupDeleting} isAdmin={isAdmin} onToggleSharing={toggleModuleSharing} sharingId={presetSharingId}
       onModuleDelete={id => { removedModuleIds.current.add(id); setModules(current => current.filter(item => item.id !== id)); setDirectory(current => current.filter(item => item.id !== id)); setActive(current => current === id ? '' : current); }}
       userId={userId} settings={settings} globalContextDraft={isAdmin ? globalEditor.draft?.context : undefined} globalSettingsDirty={globalEditor.dirty || globalEditor.saving} settingsError={globalEditor.error} active={!coverView && active === module.id && module.groupName === selectedGroup} onActivate={() => { replaceImageModuleLocation(module.id); routedContentHandled.current = `${userId}:${window.location.search}`; setActive(module.id); }}
       onManagePresets={() => void openPresetLibrary(module.id)} registerPresetSource={registerPresetSource}
@@ -777,7 +827,8 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
   </main>)}</>;
 }
 
-function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, onModuleDelete, groups, onDeleteGroup, onToggleSharing, sharingId, settings, globalContextDraft, globalSettingsDirty, settingsError, active, onActivate, onModuleChange, onReloadSettings, ratios, templateWorkbench, quickPresetVersion, viewToken, onResultsViewed, onResultsAvailable, onManagePresets, registerPresetSource }: {
+function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, onModuleDelete, groups, onDeleteGroup, groupDeleting, onToggleSharing, sharingId, settings, globalContextDraft, globalSettingsDirty, settingsError, active, onActivate, onModuleChange, onReloadSettings, ratios, templateWorkbench, quickPresetVersion, viewToken, onResultsViewed, onResultsAvailable, onManagePresets, registerPresetSource }: {
+  groupDeleting: boolean;
   onManagePresets: () => void;
   registerPresetSource: (id: string, read: PresetSourceReader | null) => void;
   templateWorkbench: boolean;
@@ -962,7 +1013,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   }
   const presetSourceReader = useRef<PresetSourceReader>(() => ({ draft: {}, blocked: '正在读取设置' }));
   presetSourceReader.current = () => ({ draft: currentPresetDraft(), blocked: !contextEditable ? '共享模板的内部配置只能由创建者更新' :
-    !draftLoaded || draftRestoring || submitting || pendingSubmission || moduleSaving || presetSaving || quickPresetApplying || uploading || bannerUploading || ratioEditing ? '模块正在处理其他操作，请稍后再更新模板' : null });
+    !draftLoaded || draftRestoring || submitting || pendingSubmission || moduleSaving || presetSaving || quickPresetApplying || uploading || bannerUploading || ratioEditing ? '模块正在处理其他操作，请稍后再更新模板' : null,
+    groupDeleteBlocked: !draftLoaded || draftRestoring || submitting || Boolean(pendingSubmission) || moduleSaving || moduleDeleting || presetSaving || Boolean(quickPresetApplying) || uploading || bannerUploading || automaticSnapshot !== moduleSaved });
   useEffect(() => {
     registerPresetSource(module.id, () => presetSourceReader.current());
     return () => registerPresetSource(module.id, null);
@@ -1650,7 +1702,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   function previewReference(asset: UploadedAssetPayload, number: number) {
     if (!asset.originalUrl) return;
     if (moduleDialog.current?.open) { resumeModulePreview.current = true; moduleDialog.current.close(); }
-    setPreview({ contentKey: asset.id ? `asset:${asset.id}` : undefined, src: asset.originalUrl, alt: `参考图 ${number}`, fileName: asset.fileName, width: asset.width || undefined, height: asset.height || undefined });
+    setPreview({ contentKey: asset.id ? `asset:${asset.id}` : undefined, src: asset.originalUrl, thumbnailSrc: asset.thumbnailUrl || undefined, alt: `参考图 ${number}`, fileName: asset.fileName, width: asset.width || undefined, height: asset.height || undefined });
   }
   const addImages = useCallback(async (files: File[], fixed = false, auxiliary = false) => {
     if (uploadLock.current || submitting || pendingSubmission || !files.length) return;
@@ -1727,18 +1779,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       </TemplateFavoriteTitle>
       <div className={styles.counts}>
         {module.sourcePresetCanManageSharing && module.sourcePresetId && <button type="button" role="switch" aria-checked={module.sourcePresetShared === true} className={`${styles.presetSharing} ${styles.moduleSharing}`} title={templateWorkbench ? '只改变原模板的共享，不会发布当前模块草稿' : undefined} disabled={sharingId === module.sourcePresetId} onClick={() => void onToggleSharing(module)}>{templateWorkbench ? (module.sourcePresetShared === true ? '原模板已共享' : '共享原模板') : (module.sourcePresetShared === true ? '共享给同事' : '仅自己可见')}</button>}
-        <label className={styles.moduleGroupControl}>分组
-          <select aria-label="模块分组" value={groupName} onChange={event => changeGroup(event.target.value)}>
-            {groups.map(group => <option key={group} value={group}>{group}</option>)}
-            <option value="__other__">其他…</option>
-          </select>
-        </label>
-        {!DEFAULT_GROUPS.includes(groupName) && <button type="button" disabled={moduleSaving || automaticDirty} title="删除当前分组" onClick={() => void onDeleteGroup(groupName)}>删除分组</button>}
+        <ModuleGroupPicker value={groupName} groups={groups} protectedGroups={DEFAULT_GROUPS} disabled={!draftLoaded || draftRestoring || moduleSaving || automaticDirty || moduleDeleting || submitting || uploading || Boolean(pendingSubmission)} deleting={groupDeleting}
+          onChange={value => void changeGroup(value)} onDelete={onDeleteGroup} />
         {(moduleSaving || moduleSaveError || automaticDirty || settingsDirty) && <span role="status" className={styles.muted}>{moduleSaving ? '保存中' : moduleSaveError ? '保存失败' : automaticDirty ? '等待自动保存' : '设置未保存'}</span>}
         <span className={styles.contextEntry}><button type="button" disabled={!draftLoaded || draftRestoring} onClick={openModuleDialog}><Settings size={17} />模块上下文</button></span>
-        <button type="button" title={module.id === `default-${userId}` ? (templateWorkbench ? '默认模块需要保留' : '默认模板需要保留') : (templateWorkbench ? '删除模块' : '删除模板')} aria-label={`删除${templateWorkbench ? '模块' : '模板'}：${name}`}
+        <button type="button" className={templateWorkbench ? styles.moduleDeleteIcon : undefined} title={module.id === `default-${userId}` ? (templateWorkbench ? '默认模块需要保留' : '默认模板需要保留') : (templateWorkbench ? '删除模块' : '删除模板')} aria-label={moduleDeleting ? '正在删除模块' : `删除${templateWorkbench ? '模块' : '模板'}：${name}`} aria-busy={moduleDeleting || undefined}
           disabled={module.id === `default-${userId}` || moduleDeleting || moduleSaving || submitting || uploading || bannerUploading || Boolean(pendingSubmission)}
-          onClick={() => void deleteModule()}><Trash2 size={17} />{moduleDeleting ? '删除中' : templateWorkbench ? '删除模块' : '删除模板'}</button>
+          onClick={() => void deleteModule()}>{moduleDeleting ? <LoaderCircle size={17} className={styles.spinner} /> : <Trash2 size={17} />}{!templateWorkbench && (moduleDeleting ? '删除中' : '删除模板')}</button>
       </div>
     </header>
     <div className={`${styles.moduleBanner} ${banner?.originalUrl ? styles.moduleBannerHasImage : ''}`}>
@@ -2089,7 +2136,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         </label>
       </div>
     </dialog>
-    {preview && <ZoomableImagePreview contentKey={preview.contentKey} src={preview.src} alt={preview.alt} title={preview.title} previewKey={preview.taskId || preview.src} sourceVersion={preview.resultVersion || undefined} fileName={preview.fileName} safeDetails={{ ...preview.metadata, width: preview.width, height: preview.height }} comparison={preview.comparison}
+    {preview && <ZoomableImagePreview contentKey={preview.contentKey} src={preview.src} thumbnailSrc={preview.thumbnailSrc} alt={preview.alt} title={preview.title} previewKey={preview.taskId || preview.src} sourceVersion={preview.resultVersion || undefined} fileName={preview.fileName} safeDetails={{ ...preview.metadata, width: preview.width, height: preview.height }} comparison={preview.comparison}
       comparisonCandidates={[...taskComparisonCandidates(tasks.find(task => task.id === preview.taskId)), ...previewableTasks.filter(task => task.batchId === tasks.find(current => current.id === preview.taskId)?.batchId).map(task => ({ src: task.asset!.original_url, thumbnailSrc: task.asset!.thumbnail_url, alt: `生成结果 ${task.ordinal}`, contentKey: `asset:${task.asset!.id}` as const }))]}
       hasNavigation={Boolean(preview.taskId && previewableTasks.length > 1)} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onImageLoaded={src => { if (preview.taskId && preview.src === src) observeResultVersion(preview.resultVersion || null); }} onClose={() => { setPreview(null); if (resumeModulePreview.current) { resumeModulePreview.current = false; moduleDialog.current?.showModal(); } }} />}
   </section>)}</>;

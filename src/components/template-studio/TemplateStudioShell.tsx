@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
 import { Heart, RotateCcw } from 'lucide-react';
 import ImageStudio from '@/app/image-studio/studio';
 import { StudioBatchHistory } from '@/app/image-studio/batch-results';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import VideoTemplateWorkbench from './VideoTemplateWorkbench';
 import styles from './template-studio.module.css';
+import { TemplateFavoritesList, useTemplateFavorites } from '@/app/image-studio/template-favorites';
 
 type StudioType = 'image' | 'video';
 type VideoStudioView = 'templates' | 'prompts' | 'results';
@@ -140,6 +140,9 @@ export default function TemplateStudioShell({
   const userInteracted = useRef(false);
   const [restoreReady, setRestoreReady] = useState(false);
   const [hasRememberedLocation, setHasRememberedLocation] = useState(false);
+  const [favoritesRequest, setFavoritesRequest] = useState(0);
+  const [videoFavoritesOpen, setVideoFavoritesOpen] = useState(false);
+  const videoFavorites = useTemplateFavorites(userId, activeType === 'video' && videoFavoritesOpen);
 
   useEffect(() => {
     if (permissionMismatch) {
@@ -261,7 +264,10 @@ export default function TemplateStudioShell({
         </div>
         <div className={styles.headerActions}>
           {activeType === 'image' && <StudioBatchHistory key={userId} userId={userId} />}
-          <Link className={styles.quietButton} href="/assets?view=favorites&category=template"><Heart size={16} />我的喜欢</Link>
+          <button type="button" className={styles.quietButton} onClick={() => {
+            if (activeType === 'image') setFavoritesRequest(value => value + 1);
+            else setVideoFavoritesOpen(current => !current);
+          }} aria-expanded={activeType === 'video' ? videoFavoritesOpen : undefined}><Heart size={16} />我的喜欢</button>
           {hasRememberedLocation && (
             <button
               className={styles.quietButton}
@@ -290,9 +296,15 @@ export default function TemplateStudioShell({
         </div>
       </header>
 
+      {activeType === 'video' && videoFavoritesOpen && <TemplateFavoritesList data={videoFavorites} selected="" busy={false} onSelect={item => {
+        if (!item.content) return;
+        const target = new URL(item.content.href, window.location.origin);
+        if (target.origin === window.location.origin && target.pathname === '/template-studio') router.push(target.pathname + target.search);
+      }} />}
+
       {activeType === 'image' ? (
         <div className={styles.imageSurface} role="tabpanel">
-          <ImageStudio isAdmin={isAdmin} userId={userId} templateWorkbench />
+          <ImageStudio key={userId} isAdmin={isAdmin} userId={userId} templateWorkbench favoritesRequest={favoritesRequest} />
         </div>
       ) : (
         <div role="tabpanel">

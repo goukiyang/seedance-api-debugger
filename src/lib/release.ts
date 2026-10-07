@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '视频模板参考图改为同组加号图片块；创作首页在手机顶栏也能直接打开；大图工具栏收成单行，缩放、复制和对比设置仍可使用。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '修复切图后喜欢按钮重复；我的喜欢在模板侧栏展开；分组删除移入分组菜单，删除模块只留图标；大图先显示缩略图再加载高清预览。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);
