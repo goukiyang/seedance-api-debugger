@@ -11,7 +11,7 @@ import { batchStateLabel, safeBatchFileName, STUDIO_BATCH_LIMITS, type StudioBat
 import { readBatchResponse } from '@/lib/image-studio/batch-receipt';
 import { canSelectBatchDirectory, selectBatchDirectory, newBatchOutputDirectory, writeUniqueBatchFile, type BatchDirectoryHandle } from './batch-files';
 import styles from './batch.module.css';
-import { useResultPages } from './use-result-pages';
+import { useResultPages } from '@/components/useResultPages';
 type Delivery = { saved: Record<number, string>; child: BatchDirectoryHandle | null; lock: boolean; directory: BatchDirectoryHandle | null };
 const deliveries = new Map<string, Delivery>();
 function deliveryFor(key: string, directory?: BatchDirectoryHandle | null) {
