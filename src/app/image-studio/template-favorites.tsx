@@ -12,28 +12,32 @@ export function useTemplateFavorites(userId: string, open: boolean) {
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false), [error, setError] = useState(''), [loaded, setLoaded] = useState(false);
   const [epoch, setEpoch] = useState(0);
+  const [dataScope, setDataScope] = useState('');
   const sequence = useRef(0), controller = useRef<AbortController | null>(null);
   const allowed = hasLoadedUser && user?.id === userId;
+  const scope = allowed ? userId : '';
+  const currentScope = useRef(scope); currentScope.current = scope;
   const load = useCallback(async (next?: string) => {
+    if (!scope) return;
     controller.current?.abort();
     const request = new AbortController(); controller.current = request;
     const serial = ++sequence.current;
-    setLoading(true); setError('');
+    setDataScope(scope); setLoading(true); setError('');
     try {
       const params = new URLSearchParams({ action: 'like', category: 'template', limit: '24' });
       if (next) params.set('cursor', next);
       const response = await fetch(`/api/content-reactions?${params}`, { cache: 'no-store', signal: request.signal });
       const data: ReactionListResponse & { error?: string } = await response.json();
       if (!response.ok) throw new Error(data.error || '喜欢模板读取失败，请重试');
-      if (request.signal.aborted || serial !== sequence.current) return;
+      if (request.signal.aborted || serial !== sequence.current || currentScope.current !== scope) return;
       setItems(current => next ? [...current, ...data.items.filter(item => !current.some(old => old.key === item.key))] : data.items);
       setCursor(data.nextCursor); setLoaded(true);
     } catch (cause) {
-      if (!request.signal.aborted && serial === sequence.current) setError(cause instanceof Error ? cause.message : '喜欢模板读取失败，请重试');
-    } finally { if (serial === sequence.current) setLoading(false); }
-  }, []);
+      if (!request.signal.aborted && serial === sequence.current && currentScope.current === scope) setError(cause instanceof Error ? cause.message : '喜欢模板读取失败，请重试');
+    } finally { if (serial === sequence.current && currentScope.current === scope) setLoading(false); }
+  }, [scope]);
   useEffect(() => {
-    setItems([]); setCursor(null); setLoaded(false); setError('');
+    setItems([]); setCursor(null); setLoaded(false); setError(''); setDataScope(''); setLoading(false);
     return () => { sequence.current++; controller.current?.abort(); };
   }, [userId, allowed]);
   useEffect(() => {
@@ -49,7 +53,8 @@ export function useTemplateFavorites(userId: string, open: boolean) {
     window.addEventListener('sd2-reactions-changed', refresh);
     return () => window.removeEventListener('sd2-reactions-changed', refresh);
   }, [userId]);
-  return { items: allowed ? items : [], cursor, loading: loading || !hasLoadedUser, error, loaded, allowed,
+  const visible = Boolean(scope && dataScope === scope);
+  return { items: visible ? items : [], cursor: visible ? cursor : null, loading: visible ? loading : !hasLoadedUser || Boolean(open && allowed), error: visible ? error : '', loaded: visible && loaded, allowed,
     refresh: () => setEpoch(value => value + 1), more: () => { if (allowed && cursor && !loading) void load(cursor); } };
 }
 

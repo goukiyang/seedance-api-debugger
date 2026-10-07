@@ -40,7 +40,7 @@ export function sourcePickerKey(source: ImageComparisonSource) {
 export function imageSourceIdentity(source: ImageComparisonSource) {
   let canonicalSource = source.src;
   try { const url = new URL(source.src, 'https://sd2.youdooart.com'); if (url.origin === 'https://sd2.youdooart.com') canonicalSource = url.pathname + url.search; } catch { /* Unknown URLs are not persisted. */ }
-  const fingerprint = sourceFingerprint(canonicalSource + (source.version ? `${canonicalSource.includes('?') ? '&' : '?'}sd2SourceVersion=${encodeURIComponent(source.version)}` : ''));
+  const fingerprint = sourceFingerprint(canonicalSource);
   if (!fingerprint) return source.src; // Temporary object URLs are session-only.
   const id = sourcePickerKey(source) || (isSafeIdentifier(source.id) ? source.id : 'image');
   return `${id}@${fingerprint}`;

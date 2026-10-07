@@ -120,6 +120,7 @@ function PreviewImage({ src, thumbnailSrc, alt, original, className, style, onRe
   const hasThumbnail = thumbnail !== displaySource(src, 'preview');
   const key = `${displaySrc}:${attempt}`;
   const [thumbnailSettled, setThumbnailSettled] = useState('');
+  const [thumbnailLoaded, setThumbnailLoaded] = useState('');
   const [upgradeKey, setUpgradeKey] = useState('');
   const currentKeyRef = useRef(key);
   currentKeyRef.current = key;
@@ -132,7 +133,10 @@ function PreviewImage({ src, thumbnailSrc, alt, original, className, style, onRe
   }, [hasThumbnail, thumbnail, thumbnailSettled, key]);
   useEffect(() => {
     if (!hasThumbnail) return;
-    if (thumbnailImage.current?.complete) setThumbnailSettled(thumbnail);
+    if (thumbnailImage.current?.complete) {
+      setThumbnailSettled(thumbnail);
+      if (thumbnailImage.current.naturalWidth > 0) setThumbnailLoaded(thumbnail);
+    }
     const timeout = window.setTimeout(() => setThumbnailSettled(thumbnail), 10000);
     return () => window.clearTimeout(timeout);
   }, [hasThumbnail, thumbnail]);
@@ -159,13 +163,13 @@ function PreviewImage({ src, thumbnailSrc, alt, original, className, style, onRe
       ? readProgress.message || '当前来源无法提供读取进度'
       : readProgress.phase === 'decoding' ? '正在解码' : '正在读取';
   return <>
-    {hasThumbnail && !loaded && <img ref={thumbnailImage} key={thumbnail} src={thumbnail} alt={alt} className={className} style={style} draggable={false} data-image-preview-thumbnail
-      onLoad={() => setThumbnailSettled(thumbnail)} onError={() => setThumbnailSettled(thumbnail)} />}
+    {hasThumbnail && !loaded && <img ref={thumbnailImage} key={`thumbnail:${thumbnail}`} src={thumbnail} alt={alt} className={className} style={style} draggable={false} data-image-preview-thumbnail
+      onLoad={() => { setThumbnailSettled(thumbnail); setThumbnailLoaded(thumbnail); }} onError={() => setThumbnailSettled(thumbnail)} />}
     {/* eslint-disable-next-line @next/next/no-img-element */}
-    {imageSrc && <img ref={image} key={key} src={imageSrc} alt={alt} className={className} style={{ ...style, opacity: loaded ? 1 : 0 }} draggable={false} data-image-preview-image
+    {imageSrc && <img ref={image} key={`preview:${key}`} src={imageSrc} alt={alt} className={className} style={{ ...style, opacity: loaded ? 1 : 0 }} draggable={false} data-image-preview-image
       onLoad={event => { if (currentKeyRef.current !== key) return; setLoadedKey(key); setFailedKey(''); onReadyRef.current?.({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); }} onError={() => { if (currentKeyRef.current === key) setFailedKey(key); }} />}
     {!loaded && <div className={styles.imageStatus} role="status">
-      <span>{failed ? (unsupported ? progressLabel : '高清未能加载，可保留缩略图并重试') : upgradeKey !== key ? `${alt} · 正在显示缩略图` : `${alt} · ${original ? '完整原图' : '高清预览'} · ${progressLabel}`}</span>
+      <span>{failed ? (unsupported ? progressLabel : thumbnailLoaded === thumbnail ? '高清未能加载，缩略图仍可查看，请重试' : '图片未能加载，请重试') : upgradeKey !== key ? `${alt} · ${hasThumbnail ? '正在显示缩略图' : '正在准备图片'}` : `${alt} · ${original ? '完整原图' : '高清预览'} · ${progressLabel}`}</span>
       {failed && !unsupported && readProgress.phase === 'unavailable' && <span>{readProgress.message || '当前来源无法提供读取进度'}</span>}
       {!failed && readProgress.phase === 'reading' && readProgress.percent != null && <>
         <progress className={styles.imageProgress} max={100} value={readProgress.percent} aria-label={`${alt}读取进度 ${readProgress.percent}%`} />
@@ -542,13 +546,12 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
       {image && (() => {
         const id = identity(image), view = views[viewIdentity(side, image)] || fittedImageView, base = baseSize(side, image);
         const dimensionsKnown = Boolean(sizes[id] || image.width && image.height);
-        return <PreviewImage key={id} src={image.src} thumbnailSrc={image.thumbnailSrc} alt={side === 'current' ? '当前图' : '对比图'} original={originals[viewIdentity(side, image)] || false}
+        return <PreviewImage key={`${id}:${image.src}:${image.version || ''}`} src={image.src} thumbnailSrc={image.thumbnailSrc} alt={side === 'current' ? '当前图' : '对比图'} original={originals[viewIdentity(side, image)] || false}
           className={styles.compareImage}
           style={{ width: dimensionsKnown ? base.width : undefined, height: dimensionsKnown ? base.height : undefined,
             transform: 'translate(calc(-50% + ' + (view.x * base.width) + 'px), calc(-50% + ' + (view.y * base.height) + 'px)) scale(' + view.scale + ')' }}
           onReady={size => ready(side, image, size)} />;
       })()}
-      {waiting && <div className={styles.imageStatus} role="status">正在加载所选图片，原图保留</div>}
     </div>;
   }
   const activeOriginal = originals[viewIdentity(safeSide, selectedImage)] || false;
