@@ -6,6 +6,7 @@ import { RelativeTime } from '@/components/RelativeTime';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useProductDialog } from '@/components/useProductDialog';
 import { watchGenerationCompletion } from '@/components/GenerationCompletion';
+import { handImageDownloadToBrowser } from '@/lib/media/native-download';
 import { batchStateLabel, safeBatchFileName, STUDIO_BATCH_LIMITS, type StudioBatchView } from '@/lib/image-studio/batch-contract';
 import { readBatchResponse } from '@/lib/image-studio/batch-receipt';
 import { canSelectBatchDirectory, selectBatchDirectory, newBatchOutputDirectory, writeUniqueBatchFile, type BatchDirectoryHandle } from './batch-files';
@@ -56,7 +57,6 @@ export function BatchResults({ id, userId, outputDirectory, compact = false, del
     finally { reader.current = false; if (scope.current === expected) setReading(false); }
   }, [id, userId]);
   useEffect(() => { void load(); const timer = setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 5000); return () => clearInterval(timer); }, [load]);
-  useEffect(() => () => { if (zipReady) URL.revokeObjectURL(zipReady.url); }, [zipReady]);
   async function action(action: string) {
     if (actionLock.current || !batch) return;
     actionLock.current = true; setBusy(true); setError('');
@@ -75,7 +75,7 @@ export function BatchResults({ id, userId, outputDirectory, compact = false, del
       if (scope.current !== expected) return;
       const data = await readBatchResponse(await fetch('/api/image-studio/batches', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action, ...(action === 'retry' ? { ordinals, budget: retryBudget } : {}) }), signal: AbortSignal.timeout(20000) }), true);
       if (scope.current !== expected) return;
-      if (action === 'retry') watchGenerationCompletion(userId, id, 'batch', batch.total, crypto.randomUUID());
+      if (action === 'retry') watchGenerationCompletion(userId, id, 'batch', batch.total, crypto.randomUUID(), batch.generated);
       setBatch(data.batch); setSelected([]);
     } catch (error) { if (scope.current === expected) setError(error instanceof Error ? error.message : '操作结果待确认，请刷新原批次'); }
     finally { actionLock.current = false; if (scope.current === expected) setBusy(false); }
@@ -122,18 +122,15 @@ export function BatchResults({ id, userId, outputDirectory, compact = false, del
     saveLock.current = true; setSaveBusy(true); setSaveError('');
     try {
       const query = new URLSearchParams({ batchId: id }); packages[index].forEach(item => query.append('id', item.taskId!));
-      const response = await fetch(`/api/image-studio/download?${query}`, { signal: AbortSignal.timeout(120000) });
-      if (!response.ok) { await readBatchResponse(response); return; }
-      const blob = await response.blob();
+      const name = `batch-${id.slice(0, 12)}-part-${index + 1}.zip`, url = `/api/image-studio/download?${query}`;
       if (scope.current !== expected) return false;
-      if (!blob.size || blob.size > STUDIO_BATCH_LIMITS.zipBytes + 1024 * 1024) throw new Error('下载包过大或未完整准备，请减少图片后再试');
-      const name = `batch-${id.slice(0, 12)}-part-${index + 1}.zip`, url = URL.createObjectURL(blob);
+      await handImageDownloadToBrowser(url, name, () => scope.current === expected);
+      if (scope.current !== expected) return false;
       setZipReady({ url, name });
-      const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; anchor.click();
       setProvided(previous => Array.from(new Set([...previous, ...packages[index].map(item => item.ordinal)])));
       return true;
     } catch (error) { if (scope.current === expected) setSaveError(error instanceof Error ? error.message : '下载准备失败，已有图片仍保留'); return false; }
-    finally { saveLock.current = false; setSaveBusy(false); }
+    finally { saveLock.current = false; if (scope.current === expected) setSaveBusy(false); }
   }
   useEffect(() => {
     if (!autoPack || !batch || batch.active || batch.pending || batch.uncertain || !['complete', 'cancelled'].includes(batch.state) || !packages.length) return;

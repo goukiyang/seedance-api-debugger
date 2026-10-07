@@ -4,9 +4,10 @@ import { usePathname } from 'next/navigation';
 import { Bell, Volume2 } from 'lucide-react';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import styles from './GenerationCompletion.module.css';
+import { revalidateActiveImages, setImageReadSessionOwner } from '@/lib/media/image-read-session';
 
 type Kind = 'images' | 'avatar' | 'batch';
-type Watch = { owner: string; id: string; kind: Kind; count: number; receipt: string };
+type Watch = { owner: string; id: string; kind: Kind; count: number; receipt: string; baselineSuccess: number };
 type Preferences = { background: boolean; sound: boolean };
 const jobs = new Map<string, Watch>();
 const memoryReceipts = new Set<string>();
@@ -14,6 +15,7 @@ const defaults: Preferences = { background: true, sound: false };
 let owner: string | null = null, generation = 0, polling = false;
 let audio: AudioContext | null = null;
 let titleTimer: ReturnType<typeof setInterval> | null = null, originalTitle: string | null = null;
+let noticeTitle: string | null = null, noticeExpires = 0, noticeCount = 0;
 const prefKey = (id: string) => `sd2:completion:v1:${id}`;
 const receiptKey = (id: string) => `${prefKey(id)}:completed`;
 function preferences(id: string): Preferences {
@@ -22,35 +24,35 @@ function preferences(id: string): Preferences {
 function clearTitle() {
   if (titleTimer) clearInterval(titleTimer);
   titleTimer = null;
-  if (originalTitle !== null && [originalTitle, `已完成 · ${originalTitle}`, `生成已结束 · ${originalTitle}`].includes(document.title)) document.title = originalTitle;
-  originalTitle = null;
+  if (originalTitle !== null && (document.title === noticeTitle || document.title === originalTitle)) document.title = originalTitle;
+  originalTitle = null; noticeTitle = null; noticeExpires = 0; noticeCount = 0;
 }
 function completed(id: string): string[] {
   const memory = Array.from(memoryReceipts).filter(item => item.startsWith(`${id}:`)).map(item => item.slice(id.length + 1));
   try { const value = JSON.parse(localStorage.getItem(receiptKey(id)) || '[]'); return Array.from(new Set([...memory, ...(Array.isArray(value) ? value.filter(item => typeof item === 'string').slice(-200) : [])])); } catch { return memory; }
 }
-export function watchGenerationCompletion(ownerId: string, id: string, kind: Kind, count: number, operationId?: string) {
+export function watchGenerationCompletion(ownerId: string, id: string, kind: Kind, count: number, operationId?: string, baselineSuccess = 0) {
   if (ownerId !== owner || jobs.size >= 32 || !/^[a-zA-Z0-9-]{1,100}$/.test(id) || count < 1 || count > 100) return;
   if (operationId && !/^[a-zA-Z0-9-]{1,100}$/.test(operationId)) return;
   const receipt = `${kind}:${id}${operationId ? `:${operationId}` : ''}`;
   if (operationId) for (const job of Array.from(jobs.values())) {
     if (job.owner === ownerId && job.id === id && job.kind === kind) jobs.delete(job.receipt);
   }
-  if (!completed(ownerId).includes(receipt)) jobs.set(receipt, { owner: ownerId, id, kind, count, receipt });
+  if (!completed(ownerId).includes(receipt)) jobs.set(receipt, { owner: ownerId, id, kind, count, receipt, baselineSuccess });
 }
-function notify(success: boolean, prefs: Preferences) {
-  if (prefs.background && document.hidden) {
-    clearTitle(); originalTitle = document.title;
-    const text = success ? '已完成' : '生成已结束';
-    const steady = () => { if (originalTitle !== null) document.title = `${text} · ${originalTitle}`; };
-    steady();
-    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      const started = Date.now(); let turn = 0;
+function notify(success: boolean, prefs: Preferences, count = 1) {
+  if (success && prefs.background && document.hidden) {
+    if (originalTitle === null) { originalTitle = document.title; noticeExpires = Date.now() + 8000; }
+    noticeCount += count;
+    noticeTitle = `${noticeCount > 1 ? `${noticeCount}批` : '图片'}已完成 · ${originalTitle}`;
+    document.title = noticeTitle;
+    if (!titleTimer) {
+      let turn = 0;
       titleTimer = setInterval(() => {
-        if (!document.hidden) { clearTitle(); return; }
-        if (Date.now() - started >= 6000 || ++turn >= 6) { if (titleTimer) clearInterval(titleTimer); titleTimer = null; steady(); return; }
-        document.title = turn % 2 ? originalTitle! : `${text} · ${originalTitle}`;
-      }, 1000);
+        if (!document.hidden || !owner || !preferences(owner).background) { clearTitle(); return; }
+        if (Date.now() >= noticeExpires) { if (titleTimer) clearInterval(titleTimer); titleTimer = null; document.title = noticeTitle!; return; }
+        if (!matchMedia('(prefers-reduced-motion: reduce)').matches) document.title = ++turn % 2 ? originalTitle! : noticeTitle!;
+      }, 1400);
     }
   }
   if (prefs.sound && audio?.state === 'running') {
@@ -64,6 +66,7 @@ function notify(success: boolean, prefs: Preferences) {
 async function poll() {
   if (polling || !owner || !jobs.size) return;
   polling = true; const expectedOwner = owner, expectedGeneration = generation;
+  let successes = 0, failures = 0;
   try {
     for (const job of Array.from(jobs.values()).slice(0, 32)) {
       if (owner !== expectedOwner || generation !== expectedGeneration) break;
@@ -73,15 +76,17 @@ async function poll() {
         if (!response.ok) continue;
         const data = await response.json();
         if (owner !== expectedOwner || generation !== expectedGeneration) break;
-        let terminal = false, success = false;
+        let terminal = false, success = false, hasNewImage = false;
         if (job.kind === 'batch') {
           const batch = data.batch;
           terminal = batch && ['complete', 'cancelled'].includes(batch.state) && batch.active === 0 && batch.pending === 0 && batch.uncertain === 0;
           success = terminal && batch.generated === batch.total && batch.failed === 0 && batch.uncertain === 0;
+          hasNewImage = terminal && batch.generated > job.baselineSuccess;
         } else {
           const tasks = data.tasks;
           terminal = Array.isArray(tasks) && tasks.length === job.count && tasks.every(task => ['succeeded', 'failed'].includes(task.status));
           success = terminal && tasks.every((task: { status: string }) => task.status === 'succeeded');
+          hasNewImage = terminal && tasks.some((task: { status: string }) => task.status === 'succeeded');
         }
         if (!terminal) continue;
         jobs.delete(job.receipt);
@@ -90,25 +95,32 @@ async function poll() {
           memoryReceipts.add(`${job.owner}:${job.receipt}`);
           if (memoryReceipts.size > 200) memoryReceipts.delete(memoryReceipts.values().next().value!);
           try { localStorage.setItem(receiptKey(job.owner), JSON.stringify(Array.from(new Set([...completed(job.owner), job.receipt])).slice(-200))); } catch { /* In-memory watch deletion still prevents repeated polls. */ }
-          notify(success, preferences(job.owner));
+          if (hasNewImage) successes++; else if (!success) failures++;
         };
         if (navigator.locks) await navigator.locks.request(`sd2-completion:${job.owner}`, deliver); else deliver();
       } catch { /* Observation failures never imply completion or replay generation. */ }
     }
+    if (owner === expectedOwner && generation === expectedGeneration) {
+      if (successes) notify(true, preferences(expectedOwner), successes);
+      else if (failures) notify(false, preferences(expectedOwner));
+    }
   } finally { polling = false; }
 }
 export function GenerationCompletionRuntime() {
-  const { user } = useAppSession(); const pathname = usePathname();
+  const { user, hasLoadedUser, userLoadError } = useAppSession(); const pathname = usePathname();
+  useEffect(() => { setImageReadSessionOwner(hasLoadedUser && !userLoadError ? user ? `${user.id}:${user.role}:${user.account_type || ''}` : 'anonymous' : ''); }, [user?.id, user?.role, user?.account_type, hasLoadedUser, userLoadError]);
   useEffect(() => {
-    if (owner !== (user?.id || null)) { generation++; jobs.clear(); clearTitle(); }
-    if (owner !== (user?.id || null) && audio) { void audio.close(); audio = null; }
-    owner = user?.id || null;
-    const visible = () => { if (!document.hidden) { clearTitle(); void poll(); } };
+    const confirmedOwner = hasLoadedUser && !userLoadError ? user?.id || null : null;
+    if (owner !== confirmedOwner) { generation++; jobs.clear(); clearTitle(); }
+    if (owner !== confirmedOwner && audio) { void audio.close(); audio = null; }
+    owner = confirmedOwner;
+    const visible = () => { if (!document.hidden) { clearTitle(); revalidateActiveImages(); void poll(); } };
+    const changed = (event: StorageEvent) => { if (owner && event.key === prefKey(owner) && !preferences(owner).background) clearTitle(); };
     let timer: ReturnType<typeof setTimeout>, active = true;
-    const schedule = () => { if (active) timer = setTimeout(() => { void poll().finally(schedule); }, document.hidden ? 15000 : 5000); };
-    schedule(); document.addEventListener('visibilitychange', visible); window.addEventListener('focus', visible);
-    return () => { active = false; clearTimeout(timer); document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible); generation++; jobs.clear(); clearTitle(); };
-  }, [user?.id]);
+    const schedule = () => { if (active) timer = setTimeout(() => { if (!document.hidden) revalidateActiveImages(60000); void poll().finally(schedule); }, document.hidden ? 15000 : 5000); };
+    schedule(); document.addEventListener('visibilitychange', visible); window.addEventListener('focus', visible); window.addEventListener('storage', changed);
+    return () => { active = false; clearTimeout(timer); document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible); window.removeEventListener('storage', changed); generation++; jobs.clear(); clearTitle(); };
+  }, [user?.id, hasLoadedUser, userLoadError]);
   useEffect(() => { clearTitle(); }, [pathname]);
   return null;
 }

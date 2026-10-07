@@ -25,17 +25,30 @@ const thumbnailWaiters: Array<() => void> = [];
 
 // Call only after the asset route has checked the current viewer's permissions.
 export async function readStudioThumbnail(url: string): Promise<Buffer> {
-  return readStudioDisplayImage(url, false);
+  const bytes = await readStudioDisplayImage(url, 'thumbnail');
+  // Only an authorized web read prepares follow-up displays; no worker or bulk prewarming.
+  void readStudioPreview(url).catch(() => {});
+  return bytes;
 }
 
 export async function readStudioPreview(url: string): Promise<Buffer> {
-  return readStudioDisplayImage(url, true);
+  return readStudioDisplayImage(url, 'preview');
 }
+export async function readStudioDetail(url: string): Promise<Buffer> { return readStudioDisplayImage(url, 'detail'); }
 
-async function readStudioDisplayImage(url: string, preview: boolean): Promise<Buffer> {
-  const size = preview ? 2048 : 640;
-  const quality = preview ? 88 : 78;
-  const key = createHash('sha256').update(`${preview ? 'webp-2048-q88-v1' : 'webp-640-v1'}:${url}`).digest('hex');
+async function readStudioDisplayImage(url: string, variant: 'thumbnail' | 'preview' | 'detail'): Promise<Buffer> {
+  const size = variant === 'thumbnail' ? 640 : variant === 'preview' ? 1600 : 2048;
+  const quality = variant === 'thumbnail' ? 78 : variant === 'preview' ? 70 : 75;
+  let version = `remote-${Math.floor(Date.now() / 60000)}`;
+  const local = siteUploadPathFromUrl(url);
+  if (local) {
+    const root = await fs.realpath(path.join(process.cwd(), 'public/uploads'));
+    const file = await fs.realpath(path.resolve(process.cwd(), 'public', local.replace(/^\/+/, '')));
+    if (!file.startsWith(`${root}${path.sep}`)) throw new Error('素材路径无效');
+    const stat = await fs.stat(file);
+    version = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+  }
+  const key = createHash('sha256').update(`webp-${size}-q${quality}-v2:${version}:${url}`).digest('hex');
   const directory = path.join(process.cwd(), 'storage', 'studio-thumbnails');
   const file = path.join(directory, `${key}.webp`);
   try { return await fs.readFile(file); } catch (error) {

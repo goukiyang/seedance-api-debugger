@@ -53,6 +53,7 @@ import { studioFourToOneIssue } from '@/lib/image-generation/resolution';
 import { useStudioBatch } from './use-studio-batch';
 import { BatchResults } from './batch-results';
 import { watchGenerationCompletion } from '@/components/GenerationCompletion';
+import { handImageDownloadToBrowser } from '@/lib/media/native-download';
 import { describedEvolutionDirection, type EvolutionCapability, type EvolutionInput } from '@/lib/image-studio/evolution';
 import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import type { StudioReferencePolicy } from '@/lib/image-studio/reference-policy';
@@ -1441,7 +1442,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     document.addEventListener('visibilitychange', refresh);
     return () => document.removeEventListener('visibilitychange', refresh);
   }, [loadTasks, visible]);
-  useEffect(() => () => { if (downloadReady) URL.revokeObjectURL(downloadReady.url); }, [downloadReady]);
+  useEffect(() => () => { taskReadScopeRef.current = ''; }, []);
 
   async function querySubmission() {
     if (!pendingSubmission || submitLock.current || moduleDeleteLock.current) return;
@@ -1583,22 +1584,17 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       setError('图片尚未交付完成，请完成后再下载'); return;
     }
     setDownloadBusy(true); setError(''); setDownloadReady(null);
+    const expected = taskReadScope;
     try {
       const query = new URLSearchParams(); ids.forEach(id => query.append('id', id));
-      const response = await fetch(`/api/image-studio/download?${query}`);
-      if (!response.ok) { await readResponse(response); return; }
-      const expectedType = ids.length === 1 ? 'image/png' : 'application/zip';
-      if (!response.headers.get('content-type')?.startsWith(expectedType)) throw new Error('下载未返回图片，请重新登录后重试');
-      const blob = await response.blob();
-      if (!blob.size) throw new Error('下载文件为空，请重试');
-      const url = URL.createObjectURL(blob);
+      const url = `/api/image-studio/download?${query}`;
       const name = ids.length === 1 ? 'generated-image.png' : 'generated-images.zip';
+      await handImageDownloadToBrowser(url, name, () => taskReadScopeRef.current === expected);
+      if (taskReadScopeRef.current !== expected) return;
       setDownloadReady({ url, name });
-      const anchor = document.createElement('a'); anchor.href = url; anchor.download = name;
-      document.body.appendChild(anchor); anchor.click(); anchor.remove();
       setSelected([]); setDownloadMode(false);
-    } catch (e) { setError(e instanceof Error ? e.message : '下载失败，请重试'); }
-    finally { setDownloadBusy(false); }
+    } catch (e) { if (taskReadScopeRef.current === expected) setError(e instanceof Error ? e.message : '下载失败，请重试'); }
+    finally { if (taskReadScopeRef.current === expected) setDownloadBusy(false); }
   }
   async function deleteResult() {
     if (!deleteTarget || deleteLock.current) return;
@@ -1710,7 +1706,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   function previewReference(asset: UploadedAssetPayload, number: number) {
     if (!asset.originalUrl) return;
     if (moduleDialog.current?.open) { resumeModulePreview.current = true; moduleDialog.current.close(); }
-    setPreview({ contentKey: asset.id ? `asset:${asset.id}` : undefined, src: asset.originalUrl, thumbnailSrc: asset.thumbnailUrl || undefined, alt: `参考图 ${number}`, fileName: asset.fileName, width: asset.width || undefined, height: asset.height || undefined, fileSize: asset.fileSize });
+    const source = asset.originalUrl.startsWith('/api/') || !asset.id ? asset.originalUrl : `/api/content-reactions/media?key=${encodeURIComponent(`asset:${asset.id}`)}&variant=preview`;
+    setPreview({ contentKey: asset.id ? `asset:${asset.id}` : undefined, src: source, thumbnailSrc: asset.thumbnailUrl || undefined, alt: `参考图 ${number}`, fileName: asset.fileName, width: asset.width || undefined, height: asset.height || undefined, fileSize: asset.fileSize });
   }
   const addImages = useCallback(async (files: File[], fixed = false, auxiliary = false) => {
     if (uploadLock.current || submitting || pendingSubmission || !files.length) return;
@@ -1811,10 +1808,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     <div className={styles.workspace}>
       <section className={styles.inputs} aria-label="生成参数">
         {(appliedSource || reproduceSourceTaskId) && <p role="status" className={styles.appliedSource}>
-          {appliedSource ? <>来自：{appliedSource.label}<span>{sourceApplied ? '已套用' : '来源已修改'}</span></> : '历史复现'}
+          {appliedSource ? <span title={sourceApplied ? '已套用历史设置' : '来源已修改'}>{appliedSource.label}</span> : '历史复现'}
           <span>不自动生成</span>
-          {reproduceSourceTaskId && <span>沿用原上下文</span>}
-          {reproduceSourceTaskId && <button type="button" onClick={() => exitReproductionMode()}>退出历史复现</button>}
+          {reproduceSourceTaskId && <button type="button" title="退出历史复现，恢复当前模块上下文" onClick={() => exitReproductionMode()}>退出复现</button>}
         </p>}
         <div className={templateWorkbench ? styles.materialCluster : undefined}>
         <section className={`${styles.materialSection} ${templateWorkbench ? styles.primaryMaterials : ''}`} aria-label="主图">
@@ -1873,10 +1869,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           {(fixedReferences.length > 0 || Boolean(module.fixedReferenceCount) || reproductionFixedCount > styleImageCount) && <label className={styles.referenceToggle}><input type="checkbox" checked={useFixedReferences} disabled={uploading || submitting || Boolean(pendingSubmission)} onChange={event => setUseFixedReferences(event.target.checked)} />使用模板固定参考图</label>}
           <input ref={auxiliaryFileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={event => { void addImages(Array.from(event.target.files || []), false, true); event.target.value = ''; }} />
         </section>
-        </div>
         {auxiliaryCount > 0 && <div className={styles.materialFooter}>
           <button type="button" title="清空本次风格组和参考图，保留主图与文字" disabled={uploading || submitting || Boolean(pendingSubmission) || !auxiliaryCount} onClick={clearAllReferences}><X size={14} />清空参考</button>
         </div>}
+        </div>
         {uploadProgress && <UploadProgressIndicator busy {...uploadProgress} />}
         <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={event => {
           void addImages(Array.from(event.target.files || [])); event.target.value = '';
@@ -1952,7 +1948,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         {batch.busy && batch.localPreviews.length > 0 && <div className={styles.grid} aria-label="本批准备素材">{batch.localPreviews.map((src, index) => <article key={src} className={styles.result}><div className={styles.batchInputPreview}><img src={src} alt={`本批主图 ${index + 1}`} /></div><p role="status">准备中</p></article>)}</div>}
         {resultView === 'batch' ? batch.id ? <BatchResults key={`${userId}:${batch.id}`} id={batch.id} userId={userId} autoPack={batch.pack} /> : <p>暂无选中批次，可开始批量生成或从顶部“我的批次”找回。</p> : <>
         {tasksError && <p role="alert" className={styles.error}>{tasksError}{templateWorkbench && <button type="button" disabled={taskReadAction !== 'idle'} onClick={() => void loadTasks(taskRetryCursor)}>重试读取记录</button>}</p>}
-        {downloadReady && <p role="status">文件已准备好。<a href={downloadReady.url} download={downloadReady.name}>再次保存</a></p>}
+        {downloadReady && <p role="status">已交给浏览器下载。<a href={downloadReady.url} download={downloadReady.name}>再次下载</a></p>}
         {loadingTasks && (tasks.length ? <LoadingStatus>正在更新生成记录</LoadingStatus> : <LoadingSkeleton label="正在读取生成记录" grid />)}
         {templateWorkbench && taskReadAction === 'refresh' && <LoadingStatus>正在刷新记录，已有图片仍保留</LoadingStatus>}
         {!loadingTasks && !tasks.length && !tasksError && <div className={styles.empty}>暂无生成记录</div>}

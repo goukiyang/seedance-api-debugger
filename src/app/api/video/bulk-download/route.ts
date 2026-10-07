@@ -19,7 +19,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body = await request.json().catch(() => ({}));
+    const body = request.headers.get('content-type')?.startsWith('application/x-www-form-urlencoded')
+      ? await request.formData().then(form => {
+        const payload = form.get('payload');
+        if (typeof payload !== 'string' || payload.length > 8192) throw new Error('下载范围无效');
+        return JSON.parse(payload);
+      }) : await request.json().catch(() => ({}));
     const result = await buildBulkVideoDownloadPackage(
       user,
       parseBulkDownloadScope(body),
@@ -35,7 +40,8 @@ export async function POST(request: NextRequest) {
       headers: {
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename="${result.fileName}"`,
-        'Cache-Control': 'no-store',
+        'Cache-Control': 'private, no-store',
+        Vary: 'Cookie',
         'X-Bulk-Download-Total': String(result.summary.total),
         'X-Bulk-Download-Success': String(result.summary.success),
         'X-Bulk-Download-Failed': String(result.summary.failed),

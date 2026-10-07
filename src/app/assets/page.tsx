@@ -1,5 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 'use client';
+import { SessionPreviewImage } from '@/components/SessionPreviewImage';
+import { handBulkVideoZipToBrowser } from '@/lib/video/native-bulk-download';
 import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 
 import Link from 'next/link';
@@ -8,7 +10,6 @@ import { Profiler, Suspense, useCallback, useEffect, useMemo, useRef, useState }
 import { CheckSquare, Download, Eye, FolderInput, FolderPlus, ImagePlus, Maximize2, RefreshCcw, Search, Sparkles, Upload, X } from 'lucide-react';
 import {
   BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT,
-  downloadBulkVideoZip,
 } from '@/lib/video/download-client';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
@@ -762,10 +763,12 @@ function AssetsPageContent() {
   const [moving, setMoving] = useState(false);
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const [bulkDownloadStage, setBulkDownloadStage] = useState('');
-  const [readyVideoDownload, setReadyVideoDownload] = useState<{ url: string; fileName: string } | null>(null);
-  useEffect(() => () => {
-    if (readyVideoDownload) URL.revokeObjectURL(readyVideoDownload.url);
-  }, [readyVideoDownload]);
+  const downloadOwner = useRef(user?.id); downloadOwner.current = user?.id;
+  const nativeVideoDownloads = useRef(new Set<() => void>());
+  useEffect(() => {
+    downloadOwner.current = user?.id;
+    return () => { for (const cancel of nativeVideoDownloads.current) cancel(); nativeVideoDownloads.current.clear(); downloadOwner.current = undefined; };
+  }, [user?.id]);
   const [aiMediaKitReady, setAiMediaKitReady] = useState<boolean | null>(null);
   const [enhanceMenuItemId, setEnhanceMenuItemId] = useState<AssetLibraryItemId | null>(null);
   const [enhanceResolution, setEnhanceResolution] = useState<EnhanceResolution>('1080p');
@@ -1469,13 +1472,13 @@ function AssetsPageContent() {
       return;
     }
     setBulkDownloading(true);
-    setReadyVideoDownload(null);
     setError('');
     setMessage('');
     try {
-      const result = await downloadBulkVideoZip({ taskIds }, setBulkDownloadStage);
-      setReadyVideoDownload({ url: URL.createObjectURL(result.blob), fileName: result.fileName });
-      setMessage(`视频包已准备好：${result.success} 个视频${result.failed ? `，${result.failed} 个失败，详情见包内清单` : ''}。已请求浏览器下载；若未开始，请点击“保存视频包”。`);
+      const expected = user?.id;
+      const cancel = handBulkVideoZipToBrowser({ taskIds }, message => { if (downloadOwner.current === expected) setError(message); });
+      nativeVideoDownloads.current.add(cancel);
+      setMessage('已交给浏览器下载视频包；是否完成请查看浏览器下载列表，部分失败详情仍在包内清单中。');
     } catch (err) {
       setError(err instanceof Error ? err.message : '批量下载失败');
     } finally {
@@ -2103,13 +2106,9 @@ function AssetsPageContent() {
         </div>
       )}
 
-      {(bulkDownloading || readyVideoDownload) && (
+      {bulkDownloading && (
         <div className="asset-library-notice sd2-loading-surface" data-busy={bulkDownloading} role="status">
-          {bulkDownloading ? <span>{bulkDownloadStage}</span> : readyVideoDownload && (
-            <a href={readyVideoDownload.url} download={readyVideoDownload.fileName}>
-              <Download size={15} /> 保存视频包
-            </a>
-          )}
+          <span>{bulkDownloadStage}</span>
         </div>
       )}
 
@@ -2516,7 +2515,7 @@ function AssetsPageContent() {
                 onClick={() => setMediaPreviewOpen(true)}
                 aria-label="放大预览图片"
               >
-                <img src={activePreviewSrc} alt="资产预览" />
+                <SessionPreviewImage src={activePreviewSrc} thumbnail={activeItem.thumbnailUrl} alt="资产预览" />
               </button>
             ) : activeDetailMediaSrc ? (
               <img src={activeDetailMediaSrc} alt="资产预览" />

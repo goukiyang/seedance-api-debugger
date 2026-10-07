@@ -7,6 +7,8 @@ import {
   canUseAlbumImage,
 } from '@/lib/reference-albums/permissions';
 import { mediaPreviewResponse } from '@/lib/media/preview-response';
+import { authorizedImageResponse, type ImageVariant } from '@/lib/media/authorized-image-response';
+import { performance } from 'node:perf_hooks';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -15,6 +17,7 @@ async function content(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
+  const started = performance.now();
   try {
     const user = await getSession();
     if (!user) throw new AuthError('未登录', 401);
@@ -22,15 +25,15 @@ async function content(
     const image = await assertCanViewReferenceImage(user, params.id);
     if (image.asset && image.asset.status !== 'active') throw new AuthError('素材已不可用', 404);
     const variant = request.nextUrl.searchParams.get('variant') || 'original';
-    if (!['thumbnail', 'preview', 'original'].includes(variant)) throw new AuthError('素材类型无效', 400);
+    if (!['thumbnail', 'preview', 'detail', 'original', 'download'].includes(variant)) throw new AuthError('素材类型无效', 400);
     const assetType = image.asset?.type || 'image';
     if (variant === 'thumbnail' && assetType !== 'image' && !image.thumbnail_url) {
       throw new AuthError('暂无封面', 404);
     }
     const downloadable = await canDownloadOriginal(user, image);
-    const isOriginalMediaPreview = assetType !== 'image' && variant === 'preview';
+    const isOriginalMediaPreview = assetType !== 'image' && ['preview', 'detail'].includes(variant);
 
-    if (variant === 'original' && !downloadable) {
+    if (['original', 'download'].includes(variant) && !downloadable) {
       throw new AuthError('无权访问原素材', 403);
     }
 
@@ -43,11 +46,12 @@ async function content(
     }
 
     // Image-only viewers keep thumbnail access; originals still require download permission.
-    const useThumbnail = variant === 'thumbnail' || (variant === 'preview' && assetType === 'image' && !downloadable);
+    const useThumbnail = variant === 'thumbnail' || (['preview', 'detail'].includes(variant) && assetType === 'image' && !downloadable);
     const sourceUrl = useThumbnail
       ? (image.thumbnail_url || image.url)
       : image.url;
     const contentType = useThumbnail && image.thumbnail_url ? 'image/jpeg' : image.asset?.mime_type || 'image/jpeg';
+    if (assetType === 'image') return await authorizedImageResponse(request, sourceUrl, variant as ImageVariant, contentType, image.asset?.file_name || 'reference-image', started);
     return await mediaPreviewResponse(request, sourceUrl, contentType);
   } catch (error) {
     if (error instanceof AuthError) {

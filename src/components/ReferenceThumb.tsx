@@ -16,7 +16,11 @@ interface Props {
 }
 
 export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameRole, onRemove, onReplace, onPreview }: Props) {
-  const src = asset.thumbnailUrl || asset.originalUrl;
+  const protectedSource = asset.type === 'image' && uploadStatus === 'uploaded'
+    ? asset.referenceImageId ? `/api/reference-images/${encodeURIComponent(asset.referenceImageId)}/content`
+      : asset.assetId ? `/api/content-reactions/media?key=${encodeURIComponent(`asset:${asset.assetId}`)}` : null
+    : null;
+  const src = protectedSource ? `${protectedSource}${protectedSource.includes('?') ? '&' : '?'}variant=thumbnail` : asset.thumbnailUrl || asset.originalUrl;
   const contentKey: ContentKey | undefined = asset.referenceImageId
     ? `reference_image:${asset.referenceImageId}`
     : asset.assetId ? `asset:${asset.assetId}` : undefined;
@@ -25,7 +29,7 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
     : asset.assetId
       ? `/api/content-reactions/media?key=${encodeURIComponent(`asset:${asset.assetId}`)}&variant=preview`
       : '';
-  const fallbackSrc = asset.thumbnailUrl && asset.originalUrl && asset.thumbnailUrl !== asset.originalUrl
+  const fallbackSrc = protectedSource ? `${protectedSource}${protectedSource.includes('?') ? '&' : '?'}variant=preview` : asset.thumbnailUrl && asset.originalUrl && asset.thumbnailUrl !== asset.originalUrl
     ? asset.originalUrl
     : null;
   const isUploading = uploadStatus === 'uploading';
@@ -141,6 +145,7 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
       {previewOpen && canZoomPreview && contentKey && (
         <ZoomableImagePreview
           src={previewSrc}
+          thumbnailSrc={src || undefined}
           alt={`图${index + 1}`}
           fileName={asset.fileName || `图${index + 1}`}
           contentKey={contentKey}

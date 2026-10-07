@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, Check, Copy, Lock, Unlock, MoreHorizontal, Plus, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, Check, Copy, Download, Lock, Unlock, MoreHorizontal, Plus, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { copyImage } from '@/lib/media/copy-image';
 import styles from './ZoomableImagePreview.module.css';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
@@ -107,7 +107,8 @@ function formatImageBytes(bytes: number) {
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${unit}`;
 }
 
-function PreviewImage({ src, thumbnailSrc, alt, original, className, style, onReady, onThumbnailReady }: { src: string; thumbnailSrc?: string; alt: string; original: boolean; className: string; style: CSSProperties; onReady?: (size: IntrinsicSize) => void; onThumbnailReady?: (size: IntrinsicSize) => void }) {
+function PreviewImage({ src, thumbnailSrc, alt, original, detail, version = '', className, style, onReady, onThumbnailReady }: { src: string; thumbnailSrc?: string; alt: string; original: boolean; detail?: boolean; version?: string; className: string; style: CSSProperties; onReady?: (size: IntrinsicSize) => void; onThumbnailReady?: (size: IntrinsicSize) => void }) {
+  const { user } = useAppSession();
   const image = useRef<HTMLImageElement>(null);
   const thumbnailImage = useRef<HTMLImageElement>(null);
   const onReadyRef = useRef(onReady);
@@ -117,46 +118,40 @@ function PreviewImage({ src, thumbnailSrc, alt, original, className, style, onRe
   const [attempt, setAttempt] = useState(0);
   const [loadedKey, setLoadedKey] = useState('');
   const [failedKey, setFailedKey] = useState('');
-  const displaySrc = displaySource(src, original ? 'original' : 'preview');
+  const displaySrc = displaySource(src, original ? 'original' : detail ? 'detail' : 'preview');
   const thumbnail = thumbnailSrc || displaySource(src, 'thumbnail');
   const hasThumbnail = thumbnail !== displaySource(src, 'preview');
-  const key = `${displaySrc}:${attempt}`;
-  const [thumbnailSettled, setThumbnailSettled] = useState('');
+  const key = `${user?.id || 'anonymous'}:${version}:${displaySrc}:${attempt}`;
   const [thumbnailLoaded, setThumbnailLoaded] = useState('');
   const [upgradeKey, setUpgradeKey] = useState('');
   const currentKeyRef = useRef(key);
   currentKeyRef.current = key;
-  // Even a cached preview starts after the same object's thumbnail has painted.
+  // Prepare the clear image in parallel; these frames gate presentation, not its request.
   useEffect(() => {
-    if (hasThumbnail && thumbnailSettled !== thumbnail) return;
     let next = 0;
     const frame = requestAnimationFrame(() => { next = requestAnimationFrame(() => setUpgradeKey(key)); });
     return () => { cancelAnimationFrame(frame); cancelAnimationFrame(next); };
-  }, [hasThumbnail, thumbnail, thumbnailSettled, key]);
+  }, [key]);
   useEffect(() => {
     if (!hasThumbnail) return;
     if (thumbnailImage.current?.complete) {
-      setThumbnailSettled(thumbnail);
       if (thumbnailImage.current.naturalWidth > 0) {
         setThumbnailLoaded(thumbnail);
         onThumbnailReadyRef.current?.({ width: thumbnailImage.current.naturalWidth, height: thumbnailImage.current.naturalHeight });
       }
     }
-    const timeout = window.setTimeout(() => setThumbnailSettled(thumbnail), 10000);
-    return () => window.clearTimeout(timeout);
   }, [hasThumbnail, thumbnail, onThumbnailReady]);
-  const readResult = useImageReadProgress(displaySrc, attempt, upgradeKey === key);
+  const readResult = useImageReadProgress(displaySrc, attempt, true, version);
   const readProgress = readResult.progress;
   const imageSrc = readResult.imageSrc || undefined;
-  const loaded = loadedKey === key;
+  const loaded = loadedKey === key && upgradeKey === key && Boolean(imageSrc);
   const unsupported = readProgress.phase === 'unsupported';
-  const failed = failedKey === key || unsupported;
+  const failed = failedKey === key || unsupported || readProgress.phase === 'unavailable';
   useEffect(() => {
     if (loaded || unsupported || upgradeKey !== key) return;
     if (image.current?.complete && image.current.naturalWidth > 0) {
-      setLoadedKey(key);
-      onReadyRef.current?.({ width: image.current.naturalWidth, height: image.current.naturalHeight });
-      return;
+      const target = image.current;
+      void target.decode().then(() => { if (currentKeyRef.current === key) { setLoadedKey(key); onReadyRef.current?.({ width: target.naturalWidth, height: target.naturalHeight }); } }).catch(() => { if (currentKeyRef.current === key) setFailedKey(key); });
     }
     if (readProgress.phase === 'reading') return;
     const timer = window.setTimeout(() => setFailedKey(key), 30000);
@@ -168,11 +163,11 @@ function PreviewImage({ src, thumbnailSrc, alt, original, className, style, onRe
       ? readProgress.message || '当前来源无法提供读取进度'
       : readProgress.phase === 'decoding' ? '正在解码' : '正在读取';
   return <>
-    {hasThumbnail && !loaded && <img ref={thumbnailImage} key={`thumbnail:${thumbnail}`} src={thumbnail} alt={alt} className={className} style={style} draggable={false} data-image-preview-thumbnail
-      onLoad={event => { setThumbnailSettled(thumbnail); setThumbnailLoaded(thumbnail); onThumbnailReadyRef.current?.({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); }} onError={() => setThumbnailSettled(thumbnail)} />}
+    {hasThumbnail && !loaded && !readResult.denied && <img ref={thumbnailImage} key={`thumbnail:${user?.id || 'anonymous'}:${thumbnail}`} src={thumbnail} alt={alt} className={className} style={style} draggable={false} data-image-preview-thumbnail
+      onLoad={event => { setThumbnailLoaded(thumbnail); onThumbnailReadyRef.current?.({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); }} />}
     {/* eslint-disable-next-line @next/next/no-img-element */}
     {imageSrc && <img ref={image} key={`preview:${key}`} src={imageSrc} alt={alt} className={className} style={{ ...style, opacity: loaded ? 1 : 0 }} draggable={false} data-image-preview-image
-      onLoad={event => { if (currentKeyRef.current !== key) return; setLoadedKey(key); setFailedKey(''); onReadyRef.current?.({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); }} onError={() => { if (currentKeyRef.current === key) setFailedKey(key); }} />}
+      onLoad={event => { const target = event.currentTarget; void target.decode().then(() => { if (currentKeyRef.current !== key) return; setLoadedKey(key); setFailedKey(''); onReadyRef.current?.({ width: target.naturalWidth, height: target.naturalHeight }); }).catch(() => { if (currentKeyRef.current === key) setFailedKey(key); }); }} onError={() => { if (currentKeyRef.current === key) setFailedKey(key); }} />}
     {!loaded && <div className={styles.imageStatus} role="status">
       <span>{failed ? (unsupported ? progressLabel : thumbnailLoaded === thumbnail ? '高清未能加载，缩略图仍可查看，请重试' : '图片未能加载，请重试') : upgradeKey !== key ? `${alt} · ${hasThumbnail ? '正在显示缩略图' : '正在准备图片'}` : `${alt} · ${original ? '完整原图' : '高清预览'} · ${progressLabel}`}</span>
       {failed && !unsupported && readProgress.phase === 'unavailable' && <span>{readProgress.message || '当前来源无法提供读取进度'}</span>}
@@ -217,6 +212,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const [originalSizes, setOriginalSizes] = useState<Record<string, IntrinsicSize>>({});
   const [thumbnailFrames, setThumbnailFrames] = useState<Record<string, IntrinsicSize>>({});
   const [originals, setOriginals] = useState<Record<string, boolean>>({});
+  const [detailPreviews, setDetailPreviews] = useState<Record<string, boolean>>({});
   const [frames, setFrames] = useState<Frames>({ current: { width: 1, height: 1 }, comparison: { width: 1, height: 1 } });
   const [message, setMessage] = useState(''), [copyState, setCopyState] = useState<{ src: string; busy?: boolean; success?: boolean; message?: string } | null>(null);
   const points = useRef<Record<Side, Map<number, Point>>>({ current: new Map(), comparison: new Map() });
@@ -555,7 +551,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
       {image && (() => {
         const id = identity(image), view = views[viewIdentity(side, image)] || fittedImageView, base = baseSize(side, image);
         const dimensionsKnown = Boolean(thumbnailFrames[id] || sizes[id] || image.width && image.height);
-        return <PreviewImage key={`${id}:${image.src}:${image.version || ''}`} src={image.src} thumbnailSrc={image.thumbnailSrc} alt={side === 'current' ? '当前图' : '对比图'} original={originals[viewIdentity(side, image)] || false}
+        return <PreviewImage key={`${id}:${image.src}:${image.version || ''}`} src={image.src} thumbnailSrc={image.thumbnailSrc} version={image.version} alt={side === 'current' ? '当前图' : '对比图'} original={originals[viewIdentity(side, image)] || false} detail={detailPreviews[viewIdentity(side, image)] || false}
           className={styles.compareImage}
           style={{ width: dimensionsKnown ? base.width : undefined, height: dimensionsKnown ? base.height : undefined,
             transform: 'translate(calc(-50% + ' + (view.x * base.width) + 'px), calc(-50% + ' + (view.y * base.height) + 'px)) scale(' + view.scale + ')' }}
@@ -608,6 +604,11 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
             setCopyState({ src: copySource, busy: true }); void copyImage(copySource).then(() => { if (alive.current) setCopyState({ src: copySource, success: true, message: '图片已复制' }); }).catch(() => { if (alive.current) setCopyState({ src: copySource, message: '浏览器未允许复制，请使用图片右键菜单' }); });
           }}>{copyState?.success && copyState.src === copySource ? <Check size={16} /> : <Copy size={16} />}{copyState?.busy ? '正在复制' : safeSide === 'current' ? '复制当前图' : '复制对比图'}</button>
           {displaySource(selectedImage.src, 'preview') !== displaySource(selectedImage.src, 'original') && <button type="button" className={styles.menuAction} aria-pressed={activeOriginal} onClick={() => { userAction.current++; stopGestures(); setOriginals(value => ({ ...value, [viewIdentity(safeSide, selectedImage)]: !activeOriginal })); }}><ZoomIn size={16} />{activeOriginal ? '切换高清预览' : '加载完整原图'}</button>}
+          {displaySource(selectedImage.src, 'detail') !== selectedImage.src && <button type="button" className={styles.menuAction} aria-pressed={detailPreviews[viewIdentity(safeSide, selectedImage)] || false} onClick={() => { stopGestures(); setOriginals(value => ({ ...value, [viewIdentity(safeSide, selectedImage)]: false })); setDetailPreviews(value => ({ ...value, [viewIdentity(safeSide, selectedImage)]: !value[viewIdentity(safeSide, selectedImage)] })); }}><ZoomIn size={16} />{detailPreviews[viewIdentity(safeSide, selectedImage)] ? '切换轻量预览' : '查看细节预览'}</button>}
+          {displaySource(selectedImage.src, 'download') !== selectedImage.src && <>
+            <a className={styles.menuAction} href={displaySource(selectedImage.src, 'detail')} download="clear-image.webp"><Download size={16} />下载清晰图</a>
+            <a className={styles.menuAction} href={displaySource(selectedImage.src, 'download')} download={selectedImage.fileName || 'original-image'}><Download size={16} />下载原图{knownFileSize ? ` · ${formatImageBytes(fileSize)}` : ''}</a>
+          </>}
           {hasNavigation && <div className={styles.mobileNavigation}><button type="button" className={styles.menuAction} onClick={onPrevious}><ArrowLeft size={16} />当前图上一张</button><button type="button" className={styles.menuAction} onClick={onNext}><ArrowRight size={16} />当前图下一张</button></div>}
           {comparisonMode && <div className={styles.compareOptions}>
             <button type="button" className={styles.menuAction} onClick={() => { userAction.current++; stopGestures(); setAxis(value => value === 'horizontal' ? 'vertical' : 'horizontal'); }}>{axis === 'horizontal' ? <ArrowUpDown size={16} /> : <ArrowLeftRight size={16} />}{axis === 'horizontal' ? '切换上下对比' : '切换左右对比'}</button>

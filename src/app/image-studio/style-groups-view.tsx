@@ -214,6 +214,6 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
         if (refs.length !== _ids.length || draft.references.length + refs.length > MAX_REFERENCE_IMAGES) throw new Error('选择图片数量无效');
         changeReferences([...draft.references, ...refs]);
       }} />}
-    {preview?.originalUrl && <ZoomableImagePreview src={preview.originalUrl} alt="风格参考图" title="风格参考图" previewKey={preview.id} onClose={() => setPreview(null)} />}
+    {preview?.originalUrl && <ZoomableImagePreview src={preview.originalUrl} thumbnailSrc={preview.thumbnailUrl || undefined} alt="风格参考图" title="风格参考图" previewKey={preview.id} onClose={() => setPreview(null)} />}
   </div>)}</>;
 }

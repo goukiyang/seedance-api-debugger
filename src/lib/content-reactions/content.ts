@@ -25,7 +25,7 @@ export function parseContentKey(input: unknown): ContentKey {
 
 export type ResolvedContent = {
   summary: ContentSummary;
-  source?: { url: string; thumbnail: string | null; referenceId?: string; canPreviewOriginal?: boolean };
+  source?: { url: string; thumbnail: string | null; referenceId?: string; canPreviewOriginal?: boolean; mimeType?: string; fileName?: string };
   prompt?: string;
 };
 const mediaUrl = (key: ContentKey, variant: string) => `/api/content-reactions/media?key=${encodeURIComponent(key)}&variant=${variant}`;
@@ -90,7 +90,7 @@ export async function resolveContent(user: SessionUser, input: ContentKey): Prom
       const canPreviewOriginal = download || Boolean(reusableReferenceId);
       if (asset.type !== 'image' && !canPreviewOriginal) media.previewUrl = null;
       if (asset.type === 'video' && !asset.thumbnail_url) media.thumbnailUrl = null;
-      return { summary: media, source: { url: asset.original_url, thumbnail: asset.thumbnail_url, referenceId: download ? referenceId : reusableReferenceId || referenceId, canPreviewOriginal } };
+      return { summary: media, source: { url: asset.original_url, thumbnail: asset.thumbnail_url, referenceId: download ? referenceId : reusableReferenceId || referenceId, canPreviewOriginal, mimeType: asset.mime_type || undefined, fileName: asset.file_name } };
     }
     if (type === 'video_task') {
       const task = await prisma.videoTask.findUnique({ where: { id } });

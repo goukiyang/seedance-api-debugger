@@ -168,8 +168,8 @@ export async function GET(request: NextRequest) {
       const asset = byId.get(item.assetId!);
       if (!asset) return [];
       return [{ ...item, canRemoveFromLibrary: scope === 'mine' && asset.owner_id === user.id, width: asset.width, height: asset.height, fileSize: asset.file_size, duration: duration(asset.metadata_json),
-        originalUrl: item.referenceImageId ? `/api/reference-images/${item.referenceImageId}/content?variant=preview` : url(asset.original_url),
-        thumbnailUrl: item.referenceImageId ? `/api/reference-images/${item.referenceImageId}/content?variant=thumbnail` : asset.thumbnail_url ? url(asset.thumbnail_url) : asset.type === 'image' ? url(asset.original_url) : null }];
+        originalUrl: item.referenceImageId ? `/api/reference-images/${item.referenceImageId}/content?variant=preview` : asset.type === 'image' ? `/api/content-reactions/media?key=${encodeURIComponent(`asset:${asset.id}`)}&variant=preview` : url(asset.original_url),
+        thumbnailUrl: item.referenceImageId ? `/api/reference-images/${item.referenceImageId}/content?variant=thumbnail` : asset.type === 'image' ? `/api/content-reactions/media?key=${encodeURIComponent(`asset:${asset.id}`)}&variant=thumbnail` : asset.thumbnail_url ? url(asset.thumbnail_url) : null }];
     });
     const unavailable = sorted.filter(item => item.unavailableReason).length;
     return NextResponse.json({ items: projected, total: sorted.length, page, hasMore: page * limit < sorted.length, albums,
