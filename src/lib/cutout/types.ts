@@ -1,5 +1,13 @@
 export type CutoutKind = 'cutout' | 'characters' | 'crop' | 'split_preview' | 'split_region' | 'split_merge' | 'split_export';
 export type CutoutStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';
+export type CutoutProgressStage = 'preparing' | 'processing' | 'saving';
+export type CutoutProgress = {
+  stage: CutoutProgressStage;
+  attempt: number;
+  sequence: number;
+  reported_at: number;
+};
+export type CutoutUploadProgress = { loaded: number; total: number; percent: number };
 export type Box = { x: number; y: number; w: number; h: number };
 export type CharacterBox = Box & { id: string; name: string };
 export type PromptOverride = { id: string; points: number[][]; labels: number[]; mask_index?: number };
@@ -46,6 +54,8 @@ export type CutoutResult = {
 export type CutoutJob = {
   job_id: string; kind: CutoutKind; status: CutoutStatus;
   created_at: number; updated_at: number; result?: CutoutResult | null;
+  started_at?: number;
+  progress?: CutoutProgress;
   error?: { code?: string; message?: string; retryable?: boolean };
   parameters?: Record<string, unknown>; model?: string; device?: string;
 };

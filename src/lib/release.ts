@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '减少重复和无可保存内容的爱心；收藏可返回原内容，失效模板仍可取消；画布风格喜欢与站内同步，本机skills标记改为常用。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '抠图显示真实上传与处理阶段；长任务持续跟踪，暂时断网可重新查询，刷新后继续查看原任务。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
