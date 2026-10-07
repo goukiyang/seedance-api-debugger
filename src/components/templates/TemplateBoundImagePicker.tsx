@@ -267,26 +267,27 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
       });
       if (!asset?.id || !asset.originalUrl) throw new Error('图片上传回复缺少原件信息；已有绑定保留，请重新读取上传历史');
       const assetId = asset.id;
+      const originalUrl = asset.originalUrl;
       const nextImage: TemplateContextCardBoundImage = {
         source: 'upload_history',
         id: assetId,
         reference_image_id: null,
         asset_id: assetId,
         label: asset.fileName || file.name,
-        url: asset.originalUrl,
-        thumbnail_url: asset.thumbnailUrl || asset.originalUrl || null,
+        url: originalUrl,
+        thumbnail_url: asset.thumbnailUrl || originalUrl,
       };
       setHistoryImages((current) => [
         {
           id: assetId,
-          originalUrl: asset.originalUrl,
-          thumbnailUrl: asset.thumbnailUrl || asset.originalUrl || '',
+          originalUrl,
+          thumbnailUrl: asset.thumbnailUrl || originalUrl,
           fileName: asset.fileName || file.name,
           width: asset.width ?? null,
           height: asset.height ?? null,
           createdAt: new Date().toISOString(),
         },
-        ...current.filter((item) => item.id !== asset.id),
+        ...current.filter((item) => item.id !== assetId),
       ]);
       setTab('history');
       bindUploadedImage(nextImage);
