@@ -1,13 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ImagePlus, Info, RotateCw } from 'lucide-react';
+import { ImagePlus, Info, Plus, RotateCw } from 'lucide-react';
 import { StudioReferenceGrid } from '@/app/image-studio/reference-grid';
 import MediaPreview from '@/components/MediaPreview';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import type { UploadedAssetPayload } from '@/lib/http/file-upload';
 import type { StudioAssetInput, StudioDraftDto } from '@/lib/template-studio/types';
 import styles from './template-studio.module.css';
+import referenceStyles from '@/app/image-studio/studio.module.css';
 
 type ReferenceImage = UploadedAssetPayload & { id: string };
 type Props = {
@@ -55,12 +56,12 @@ export default function VideoDraftReferenceImages({ userId, draft, busy, onAdd, 
   const previewImage = preview?.scope === scope ? references.find(item => item.id === preview.id) : null;
   const loading = images.length > 0 && (metadata.scope !== scope || metadata.loading);
   const error = images.length > 0 && metadata.scope === scope ? metadata.error : '';
+  const addLabel = draft.assets.length >= 12 ? '素材已满' : busy ? '暂不可编辑' : '添加图片';
   return <section className={styles.videoReferences} data-video-draft-references aria-label="视频参考图">
     <div className={styles.sectionTitle}>
       <div className={styles.referenceHeading}><span>参考图</span><span className={styles.fieldHint}>{images.length} 张 · 素材合计 {draft.assets.length}/12</span>
         <div ref={helpRef} className={styles.referenceHelp}><button type="button" aria-label="参考图用途" aria-expanded={helpOpen} title="文案生成不读取图片，参考图供后续视频生成使用" onClick={() => setHelpOpen(value => !value)}><Info size={15} /></button>{helpOpen && <span role="tooltip">文案生成仅使用文字说明，不读取图片内容。参考图供后续视频生成使用。</span>}</div>
       </div>
-      <button className={styles.quietButton} type="button" disabled={busy || draft.assets.length >= 12} onClick={() => onAdd(null)}><ImagePlus size={15} />添加图片</button>
     </div>
     {slots.some(slot => slot.types.includes('image')) && <div className={styles.referenceSlotTools}>
       {slots.filter(slot => slot.types.includes('image')).map(slot => {
@@ -71,7 +72,7 @@ export default function VideoDraftReferenceImages({ userId, draft, busy, onAdd, 
         </button>;
       })}
     </div>}
-    {images.length > 0 && <StudioReferenceGrid items={references} labels="auxiliary" compact standalone disabled={busy} loading={loading}
+    <StudioReferenceGrid items={references} labels="auxiliary" compact standalone disabled={busy} loading={loading}
       onChange={next => onChange(next.map(item => item.id))}
       onPreview={item => setPreview({ scope, id: item.id })}
       onThumbnailError={item => setMetadata(current => current.scope !== scope ? current : { ...current, error: '部分参考图预览不可用，图片选择仍保留', items: current.items.map(image => image.id === item.id ? { ...image, thumbnailUrl: null } : image) })}
@@ -90,7 +91,11 @@ export default function VideoDraftReferenceImages({ userId, draft, busy, onAdd, 
             <option value="reference">参考素材</option><option value="first">首帧</option><option value="last">尾帧</option>
           </select>}
         </details>;
-      }} />}
+      }}>
+      <button className={referenceStyles.materialAdd} type="button" disabled={busy || draft.assets.length >= 12}
+        title={draft.assets.length >= 12 ? '素材合计已达到 12 项，请先移除素材' : busy ? '当前暂不可编辑参考图' : '从素材库添加参考图'}
+        aria-label={addLabel} onClick={() => onAdd(null)}><Plus size={24} /><span>{addLabel}</span></button>
+    </StudioReferenceGrid>
     {loading && <span className={styles.fieldHint} role="status">正在读取参考图…</span>}
     {error && <div className={styles.referenceError} role="alert"><span>{error}</span><button className={styles.iconButton} type="button" aria-label="重新读取参考图" title="重新读取参考图" onClick={() => setRetry(value => value + 1)}><RotateCw size={14} /></button></div>}
     {previewImage?.originalUrl && <MediaPreview type="image" src={previewImage.originalUrl} title={previewImage.fileName || '视频参考图'} previewKey={`video-template-reference:${userId}:${draft.id}:${previewImage.id}`} onClose={() => setPreview(null)} />}

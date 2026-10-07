@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, Check, Copy, Plus, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, Check, Copy, MoreHorizontal, Plus, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { copyImage } from '@/lib/media/copy-image';
 import styles from './ZoomableImagePreview.module.css';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
@@ -207,8 +207,10 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, so
   const localUrls = useRef(new Set<string>());
   const alive = useRef(true), userAction = useRef(0);
   const [initializedOwner, setInitializedOwner] = useState<string | null>(null);
-  const dismissPreview = useImagePreviewHistoryDismiss(Boolean(portalRoot), backdropRef, onClose);
-  const dimensionsTooltipId = useId();
+  const controlsId = useId();
+  const [controlsOpen, setControlsOpen] = useState<'zoom' | 'more' | null>(null);
+  const controlsRef = useRef<HTMLDivElement>(null), zoomTriggerRef = useRef<HTMLButtonElement>(null), moreTriggerRef = useRef<HTMLButtonElement>(null);
+  const dismissPreview = useImagePreviewHistoryDismiss(Boolean(portalRoot), controlsOpen ? controlsRef : backdropRef, onClose);
   const safeSide = comparisonMode && comparisonImage ? activeSide : 'current';
   const safeSideRef = useRef(safeSide); safeSideRef.current = safeSide;
   const selectedImage = sources[safeSide] || currentImage;
@@ -318,6 +320,14 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, so
   useDialogDismiss({ open: Boolean(portalRoot), dialogRef: backdropRef, dismissSurfaceRef: backdropRef,
     onDismiss: dismissPreview, initialFocusRef: backdropRef,
     isDismissTarget: target => target === backdropRef.current || target === stageRef.current });
+  useDialogDismiss({ open: Boolean(controlsOpen && portalRoot), dialogRef: controlsRef, modal: false,
+    branchRefs: [zoomTriggerRef, moreTriggerRef], onDismiss: () => setControlsOpen(null) });
+  useEffect(() => {
+    if (!controlsOpen) return;
+    stopGestures();
+    const frame = window.requestAnimationFrame(() => controlsRef.current?.querySelector<HTMLElement>('button:not(:disabled),select,input')?.focus({ preventScroll: true }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [controlsOpen, stopGestures]);
   useEffect(() => {
     const elements = [document.documentElement, document.body];
     const previous = elements.map(element => ({ overflow: element.style.overflow, overscrollBehavior: element.style.overscrollBehavior }));
@@ -556,49 +566,52 @@ export function ZoomableImagePreview({ src, alt, fileName, title, previewKey, so
   const candidates = Array.from(new Map([incoming, ...(comparison ? [comparison] : []), ...comparisonCandidates].filter(image => image.src).map(image => [identity(image), image])).values());
   function thumbnail(side: Side) {
     const image = sources[side];
-    return <button type="button" className={styles.sourceThumb} data-active={safeSide === side} title={side === 'current' ? '更换当前图' : '选择或更换对比图'} aria-label={side === 'current' ? '更换当前图' : '选择或更换对比图'} onClick={() => { userAction.current++; stopGestures(); setPickerSide(side); }}>
+    return <button type="button" className={styles.sourceThumb} data-active={safeSide === side} title={side === 'current' ? '更换当前图' : '选择或更换对比图'} aria-label={`${side === 'current' ? '更换当前图' : '选择或更换对比图'}${safeSide === side ? '，当前选中' : ''}`} onClick={() => { userAction.current++; stopGestures(); setControlsOpen(null); setPickerSide(side); }}>
       {image ? <img src={image.thumbnailSrc || displaySource(image.src, 'thumbnail')} alt="" draggable={false} /> : <Plus size={20} />}
-      <span>{side === 'current' ? '当前图' : '对比图'}</span>
+      <span className={styles.srOnly}>{side === 'current' ? '当前图' : '对比图'}</span>
     </button>;
   }
   return <><span ref={portalAnchorRef} hidden />{portalRoot && createPortal(<div ref={backdropRef} className={styles.backdrop} data-media-preview="sd2-media-preview" role="dialog" aria-modal="true" aria-label={imageTitle} tabIndex={-1}
     onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onPointerMove={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()}
     onDoubleClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onKeyUp={event => event.stopPropagation()}>
-    <div ref={toolbarRef} className={styles.toolbar} data-has-comparison="true" data-has-metadata={hasMetadata || undefined}>
-      <div className={styles.comparisonActions}>
-        <div className={styles.sourceGroup}>{thumbnail('current')}<button type="button" data-image-preview-compare aria-pressed={comparisonMode} title={comparisonMode ? '退出对比' : '开启对比'} aria-label={comparisonMode ? '退出对比' : '开启对比'}
+    <div ref={toolbarRef} className={styles.toolbar}>
+      <div className={styles.sourceGroup}>{thumbnail('current')}<button type="button" data-image-preview-compare aria-pressed={comparisonMode} title={comparisonMode ? '退出对比' : '开启对比'} aria-label={comparisonMode ? '退出对比' : '开启对比'}
           onClick={() => { userAction.current++; stopGestures(); if (comparisonMode) { setComparisonMode(false); setActiveSide('current'); }
-            else if (comparisonImage) setComparisonMode(true); else setPickerSide('comparison'); }}><ArrowLeftRight size={16} /><span className={styles.actionLabel}>对比</span></button>{thumbnail('comparison')}</div>
-        {comparisonMode && <div className={styles.compareOptions}>
-          <label className={styles.linkedMode}><input type="checkbox" checked={linked} onChange={event => { userAction.current++; stopGestures(); setLinked(event.target.checked); }} />联动</label>
-          <button type="button" title={axis === 'horizontal' ? '切换上下对比' : '切换左右对比'} aria-label={axis === 'horizontal' ? '切换上下对比' : '切换左右对比'} onClick={() => { userAction.current++; stopGestures(); setAxis(value => value === 'horizontal' ? 'vertical' : 'horizontal'); }}>{axis === 'horizontal' ? <ArrowUpDown size={16} /> : <ArrowLeftRight size={16} />}</button>
-          <select aria-label="对比更多操作" value="" onChange={event => { if (event.target.value === 'swap') swap(); else if (event.target.value === 'reset') reset(true); }}><option value="">更多</option><option value="swap">交换两图</option><option value="reset">还原两图</option></select>
-        </div>}
-      </div>
-      <div className={styles.leading}>{selectedImage.contentKey && <ContentReactions contentKey={selectedImage.contentKey} imageSharing={imageSharing} />}
-        <div className={styles.title}><strong>{safeSide === 'current' ? '当前图' : '对比图'}</strong><span>{Math.round(selectedView.scale * 100)}%{comparisonMode && linked ? ' · 联动' : ''}</span></div>
-      </div>
+            else if (comparisonImage) setComparisonMode(true); else { setControlsOpen(null); setPickerSide('comparison'); } }}><ArrowLeftRight size={16} /></button>{thumbnail('comparison')}</div>
       <div className={styles.actions}>
-        <button type="button" disabled={copyState?.busy} title={safeSide === 'current' ? '复制当前图' : '复制对比图'} aria-label={safeSide === 'current' ? '复制当前图' : '复制对比图'} onClick={() => {
-          setCopyState({ src: copySource, busy: true }); void copyImage(copySource).then(() => { if (alive.current) setCopyState({ src: copySource, success: true, message: '图片已复制' }); }).catch(() => { if (alive.current) setCopyState({ src: copySource, message: '浏览器未允许复制，请使用图片右键菜单' }); });
-        }}>{copyState?.success && copyState.src === copySource ? <Check size={16} /> : <Copy size={16} />}</button>
-        {displaySource(selectedImage.src, 'preview') !== displaySource(selectedImage.src, 'original') && <button type="button" aria-pressed={activeOriginal} title={activeOriginal ? '切换高清预览' : '加载选中图完整原图'} onClick={() => { userAction.current++; stopGestures(); setOriginals(value => ({ ...value, [viewIdentity(safeSide, selectedImage)]: !activeOriginal })); }}><span className={styles.actionLabel}>{activeOriginal ? '原图' : '高清预览'}</span></button>}
-        {hasNavigation && <><button type="button" title="当前图上一张" aria-label="当前图上一张" onClick={onPrevious}><ArrowLeft size={16} /></button><button type="button" title="当前图下一张" aria-label="当前图下一张" onClick={onNext}><ArrowRight size={16} /></button></>}
-        <label className={styles.zoomMode}><span className={styles.srOnly}>选中图显示比例</span><select aria-label="选中图显示比例" value={selectedView.mode} onChange={event => applyMode(event.target.value as MediaPreviewZoomMode)}><option value="fit">适合窗口</option><option value="width">适合宽度</option><option value="actual">实际像素</option><option value="custom" disabled>手动缩放</option></select></label>
-        <button type="button" onClick={() => zoomFromControls(1 / SCALE_STEP)} title="缩小选中图" aria-label="缩小选中图"><ZoomOut size={16} /></button>
-        <button type="button" onClick={() => zoomFromControls(SCALE_STEP)} title="放大选中图" aria-label="放大选中图"><ZoomIn size={16} /></button>
-        <button type="button" onClick={() => reset()} title={safeSide === 'current' ? '还原当前图' : '还原对比图'} aria-label={safeSide === 'current' ? '还原当前图' : '还原对比图'}><RotateCcw size={16} /></button>
+        {hasNavigation && <div className={styles.desktopNavigation}><button type="button" title="当前图上一张" aria-label="当前图上一张" onClick={onPrevious}><ArrowLeft size={16} /></button><button type="button" title="当前图下一张" aria-label="当前图下一张" onClick={onNext}><ArrowRight size={16} /></button></div>}
+        <button ref={zoomTriggerRef} type="button" className={styles.zoomTrigger} title="缩放选中图" aria-label={`${safeSide === 'current' ? '当前图' : '对比图'}缩放 ${Math.round(selectedView.scale * 100)}%${comparisonMode && linked ? '，联动已开启' : ''}`} aria-expanded={controlsOpen === 'zoom'} aria-controls={controlsOpen === 'zoom' ? controlsId : undefined} aria-haspopup="dialog" onClick={() => setControlsOpen(value => value === 'zoom' ? null : 'zoom')}><ZoomIn size={16} /><span>{Math.round(selectedView.scale * 100)}%</span></button>
+        <button ref={moreTriggerRef} type="button" title="图片与对比更多操作" aria-label="图片与对比更多操作" aria-expanded={controlsOpen === 'more'} aria-controls={controlsOpen === 'more' ? controlsId : undefined} aria-haspopup="dialog" onClick={() => setControlsOpen(value => value === 'more' ? null : 'more')}><MoreHorizontal size={18} /></button>
+        <button type="button" className={styles.closeButton} onClick={dismissPreview} title="关闭大图" aria-label="关闭大图"><X size={18} /></button>
       </div>
-      <button type="button" className={styles.closeButton} onClick={dismissPreview} title="关闭大图" aria-label="关闭大图"><X size={16} /></button>
-      {hasMetadata && <div className={styles.metadata}><div className={styles.metadataValues}>{visibleMetadata.model && <span>{visibleMetadata.model}</span>}{visibleMetadata.quality && <span>{visibleMetadata.quality}</span>}{visibleMetadata.ratio && <span>{visibleMetadata.ratio}</span>}
-        {visibleSize && <span className={styles.dimensionHint}><span tabIndex={0} aria-describedby={dimensionsTooltipId}>尺寸</span><span id={dimensionsTooltipId} className={styles.dimensionTooltip} role="tooltip">{visibleSize.width} × {visibleSize.height} 像素</span></span>}</div>
-        {visibleMetadata.time && <span className={styles.metadataTime}>{rawTime && Number.isFinite(Date.parse(rawTime)) ? <RelativeTime value={rawTime} /> : visibleMetadata.time}</span>}
+      {controlsOpen && <div ref={controlsRef} id={controlsId} className={styles.controlsPopover} role="dialog" aria-label={controlsOpen === 'zoom' ? '缩放选中图' : '图片与对比更多操作'}>
+        <header><strong>{safeSide === 'current' ? '当前图' : '对比图'}{controlsOpen === 'zoom' ? '缩放' : '操作'}</strong><button type="button" title="收起操作" aria-label="收起操作" onClick={() => setControlsOpen(null)}><X size={16} /></button></header>
+        {controlsOpen === 'zoom' ? <>
+          <label className={styles.zoomMode}><span>显示比例</span><select aria-label="选中图显示比例" value={selectedView.mode} onChange={event => applyMode(event.target.value as MediaPreviewZoomMode)}><option value="fit">适合窗口</option><option value="width">适合宽度</option><option value="actual">实际像素</option><option value="custom" disabled>手动缩放</option></select></label>
+          <div className={styles.popoverRow}><button type="button" onClick={() => zoomFromControls(1 / SCALE_STEP)} title="缩小选中图" aria-label="缩小选中图"><ZoomOut size={16} /></button><span>{Math.round(selectedView.scale * 100)}%</span><button type="button" onClick={() => zoomFromControls(SCALE_STEP)} title="放大选中图" aria-label="放大选中图"><ZoomIn size={16} /></button><button type="button" onClick={() => reset()} title="还原选中图" aria-label="还原选中图"><RotateCcw size={16} /></button></div>
+        </> : <>
+          {selectedImage.contentKey && <ContentReactions contentKey={selectedImage.contentKey} imageSharing={imageSharing} />}
+          <button type="button" className={styles.menuAction} disabled={copyState?.busy} onClick={() => {
+            setCopyState({ src: copySource, busy: true }); void copyImage(copySource).then(() => { if (alive.current) setCopyState({ src: copySource, success: true, message: '图片已复制' }); }).catch(() => { if (alive.current) setCopyState({ src: copySource, message: '浏览器未允许复制，请使用图片右键菜单' }); });
+          }}>{copyState?.success && copyState.src === copySource ? <Check size={16} /> : <Copy size={16} />}{copyState?.busy ? '正在复制' : safeSide === 'current' ? '复制当前图' : '复制对比图'}</button>
+          {displaySource(selectedImage.src, 'preview') !== displaySource(selectedImage.src, 'original') && <button type="button" className={styles.menuAction} aria-pressed={activeOriginal} onClick={() => { userAction.current++; stopGestures(); setOriginals(value => ({ ...value, [viewIdentity(safeSide, selectedImage)]: !activeOriginal })); }}><ZoomIn size={16} />{activeOriginal ? '切换高清预览' : '加载完整原图'}</button>}
+          {hasNavigation && <div className={styles.mobileNavigation}><button type="button" className={styles.menuAction} onClick={onPrevious}><ArrowLeft size={16} />当前图上一张</button><button type="button" className={styles.menuAction} onClick={onNext}><ArrowRight size={16} />当前图下一张</button></div>}
+          {comparisonMode && <div className={styles.compareOptions}>
+            <label className={styles.linkedMode}><input type="checkbox" checked={linked} onChange={event => { userAction.current++; stopGestures(); setLinked(event.target.checked); }} />两图联动</label>
+            <button type="button" className={styles.menuAction} onClick={() => { userAction.current++; stopGestures(); setAxis(value => value === 'horizontal' ? 'vertical' : 'horizontal'); }}>{axis === 'horizontal' ? <ArrowUpDown size={16} /> : <ArrowLeftRight size={16} />}{axis === 'horizontal' ? '切换上下对比' : '切换左右对比'}</button>
+            <button type="button" className={styles.menuAction} onClick={swap}><ArrowLeftRight size={16} />交换两图</button>
+            <button type="button" className={styles.menuAction} onClick={() => reset(true)}><RotateCcw size={16} />还原两图</button>
+          </div>}
+          {hasMetadata && <div className={styles.metadata}>{visibleMetadata.model && <span>模型：{visibleMetadata.model}</span>}{visibleMetadata.quality && <span>质量：{visibleMetadata.quality}</span>}{visibleMetadata.ratio && <span>比例：{visibleMetadata.ratio}</span>}{visibleMetadata.resolution && <span>分辨率：{visibleMetadata.resolution}</span>}
+            {visibleSize && <span>尺寸：{visibleSize.width} × {visibleSize.height} 像素</span>}
+            {visibleMetadata.time && <span>{rawTime && Number.isFinite(Date.parse(rawTime)) ? <RelativeTime value={rawTime} /> : visibleMetadata.time}</span>}
+          </div>}
+          {isOriginalSubject && details != null && <details className={styles.detailDisclosure}><summary>详情</summary><div className={styles.detailContent}>{details}</div></details>}
+        </>}
       </div>}
-      {(message || copyState?.src === copySource && copyState.message) && <div className={styles.notice} role="status">{message || copyState?.message}</div>}
-      {isOriginalSubject && notice != null && <div className={styles.notice}>{notice}</div>}
-      {isOriginalSubject && details != null && <details className={styles.detailDisclosure}><summary>详情</summary><div className={styles.detailContent}>{details}</div></details>}
     </div>
     <div ref={stageRef} className={styles.stage} data-image-preview-stage onAuxClick={event => event.preventDefault()}>
+      {(message || copyState?.src === copySource && copyState.message || isOriginalSubject && notice != null) && <div className={styles.notice} role="status">{message || (copyState?.src === copySource ? copyState.message : null)}{isOriginalSubject && notice}</div>}
       <div className={styles.compareFrame + ' ' + (comparisonMode ? axis === 'vertical' ? styles.compareVertical : styles.compareHorizontal : styles.singleFrame)} data-image-preview-compare-frame>
         {pane('current')}{comparisonMode && pane('comparison')}
       </div>

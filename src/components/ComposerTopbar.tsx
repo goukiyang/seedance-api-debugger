@@ -51,9 +51,10 @@ export default function ComposerTopbar({
     <header ref={header} className="composer-topbar">
       <div className="composer-topbar-left">
         <Link href="/" className="composer-topbar-logo" aria-label={`Seedance 2.0 v${release.version}`}>Seedance 2.0 <span className="composer-topbar-version">v{release.version}</span></Link>
+        <Link href="/" className={`composer-topbar-nav-btn composer-topbar-home${pathname === '/' ? ' active' : ''}`} aria-current={pathname === '/' ? 'page' : undefined}>创作首页</Link>
         <nav className="composer-topbar-nav" aria-label="快捷入口">
           {topbarQuickItems
-            .filter((item) => isNavItemVisible(item, user))
+            .filter((item) => item.href !== '/' && isNavItemVisible(item, user))
             .map((item) => item.label === '工具' ? <ToolsMenu key="tools" user={user} /> : (
             <Link
               key={item.href}

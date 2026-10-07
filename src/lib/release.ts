@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '修复直接打开或刷新视频生成页后，添加参考图和图集参考不打开的问题。登录状态读取失败时可重新检查，原素材选择与生成设置保留。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '视频模板参考图改为同组加号图片块；创作首页在手机顶栏也能直接打开；大图工具栏收成单行，缩放、复制和对比设置仍可使用。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

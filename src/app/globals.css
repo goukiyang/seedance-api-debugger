@@ -6611,6 +6611,8 @@ body.compare-fullscreen-open {
   align-items: center;
   gap: 12px;
   min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
 }
 
 .composer-topbar-logo {
@@ -6618,6 +6620,12 @@ body.compare-fullscreen-open {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.composer-topbar-home {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .composer-topbar-version {
@@ -6667,6 +6675,8 @@ body.compare-fullscreen-open {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
 }
 
 .composer-topbar-icon-btn {
@@ -13341,6 +13351,14 @@ body.compare-fullscreen-open {
 
   .composer-topbar-nav {
     display: none;
+  }
+
+  .composer-topbar-left {
+    gap: 8px;
+  }
+
+  .composer-topbar .account-menu-composer .account-menu-name {
+    max-width: 100px;
   }
 
   .composer-topbar-right > .composer-topbar-nav-btn,
