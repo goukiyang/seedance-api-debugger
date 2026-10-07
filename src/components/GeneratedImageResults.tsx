@@ -127,12 +127,12 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
         </div>
         {renderMetadata ? renderMetadata(item) : <div className={styles.heading}><strong>{item.label}</strong><span>{item.status}</span></div>}
         <div className={styles.actions}>
-          {item.media && <>
+          {item.media && <div className={styles.commonActions} data-busy={feedback?.id === item.id && feedback.busy || undefined}>
             {item.download && <button type="button" aria-label="下载图片" title="下载图片" disabled={item.downloadDisabled || Boolean(feedback?.busy)} onClick={() => void operate(item, 'download')}><Download size={15} /></button>}
             <button type="button" aria-label="复制图片" title="复制图片" disabled={Boolean(feedback?.busy)} onClick={() => void operate(item, 'copy')}><Copy size={15} /></button>
             <button type="button" aria-label="查看图片" title="查看图片" onClick={() => changePreview(item)}><Eye size={15} /></button>
-          </>}
-          {renderActions?.(item)}
+          </div>}
+          {renderActions && <div className={styles.specialtyActions}>{renderActions(item)}</div>}
         </div>
         {feedback?.id === item.id && <p className={styles.feedback} role="status">{feedback.message}</p>}
         {item.error && <p role="alert" className={styles.error}>{item.error}</p>}

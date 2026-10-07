@@ -12,6 +12,13 @@
 .heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; padding: 8px 0; font-size: 13px; overflow-wrap: anywhere; }
 .heading span, .empty { color: #aab8b4; }
 .actions, .pagination { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.commonActions, .specialtyActions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 32px; }
+.commonActions { flex-shrink: 0; }
+.actions .commonActions button { width: 34px; height: 32px; padding: 0; flex-shrink: 0; }
+@media (hover: hover) and (pointer: fine) {
+  .commonActions { opacity: 0; pointer-events: none; }
+  .card:hover .commonActions, .card:focus-within .commonActions, .commonActions[data-busy] { opacity: 1; pointer-events: auto; }
+}
 .actions button, .pagination button, .error button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 5px 8px; border: 1px solid #414b48; border-radius: 4px; background: #202725; color: #e0e9e5; font-size: 13px; cursor: pointer; }
 .actions button:hover, .pagination button:hover { background: #303c37; }
 .actions button:focus-visible, .pagination button:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
