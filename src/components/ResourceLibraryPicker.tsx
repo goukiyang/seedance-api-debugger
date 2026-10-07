@@ -19,6 +19,7 @@ import type { UploadedAssetSelection, UploadedImagePickerConfirmResult } from '@
 import styles from './ResourceLibraryPicker.module.css';
 import type { AvatarReturnTarget } from '@/lib/avatar-random/handoff';
 import { isNavItemVisible } from '@/lib/navigation';
+import { imageDisplaySource } from '@/lib/media/image-comparison';
 
 export interface ResourceLibraryPickerProps {
   open: boolean;
@@ -27,6 +28,7 @@ export interface ResourceLibraryPickerProps {
   title?: string;
   confirmLabel?: string;
   purpose?: string;
+  initialSource?: 'all' | 'template-image' | 'random-person';
   maxSelection?: number;
   typeLimits?: Partial<Record<AssetType, number>>;
   acceptedTypes?: AssetType[];
@@ -42,11 +44,12 @@ export interface ResourceLibraryPickerProps {
   onAvatarApplied?: () => Promise<void>;
   onAvatarConfirm?: ResourceLibraryPickerProps['onConfirm'];
 }
-type Preferences = { view: 'library' | 'favorites' | 'recent'; scope: PickerScope; source: string; type: string; query: string; sort: string; album: string; project: string; scroll: number; pages: number };
-const defaults: Preferences = { view: 'library', scope: 'mine', source: 'all', type: 'all', query: '', sort: 'newest', album: '', project: '', scroll: 0, pages: 1 };
+type Preferences = { view: 'library' | 'favorites' | 'recent'; scope: PickerScope; source: string; template: string; type: string; query: string; sort: string; album: string; project: string; scroll: number; pages: number };
+const defaults: Preferences = { view: 'library', scope: 'mine', source: 'all', template: '', type: 'all', query: '', sort: 'newest', album: '', project: '', scroll: 0, pages: 1 };
 const labels = { image: '图片', video: '视频', audio: '音频' };
 
 function selectionName(item: PickerItem) {
+  if (item.generationOrigin?.templateName) return item.generationOrigin.templateName;
   const name = item.fileName.trim();
   const generatedIdentifier = /^(?:(?:image|output|result|seedance|参考图)[-_])?(?:[a-f\d]{24,}|[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})(?:\.[a-z\d]+)?$/i;
   return name && !generatedIdentifier.test(name) ? name : item.type === 'image' ? '未命名图片' : `未命名${labels[item.type]}`;
@@ -63,7 +66,7 @@ function Thumbnail({ item }: { item: PickerItem }) {
   return <img src={item.thumbnailUrl} alt={item.fileName} loading="lazy" onError={() => setFailed(true)} />;
 }
 
-export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'image-studio' : 'assets', title = '添加参考素材', confirmLabel = '添加到参考区', purpose = 'reference', maxSelection, typeLimits, acceptedTypes, currentCount, currentAssetIds, currentReferenceImageIds = [], portalContainer, onClose, onUploadFile, onConfirm, onConfirmSelection, avatarTarget, onAvatarApplied, onAvatarConfirm }: ResourceLibraryPickerProps) {
+export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'image-studio' : 'assets', title = '添加参考素材', confirmLabel = '添加到参考区', purpose = 'reference', initialSource = 'all', maxSelection, typeLimits, acceptedTypes, currentCount, currentAssetIds, currentReferenceImageIds = [], portalContainer, onClose, onUploadFile, onConfirm, onConfirmSelection, avatarTarget, onAvatarApplied, onAvatarConfirm }: ResourceLibraryPickerProps) {
   const { user } = useAppSession();
   const { confirm: askConfirm, productDialog } = useProductDialog();
   const [removedItem, setRemovedItem] = useState<Pick<PickerItem,'assetId'|'identity'|'fileName'|'canRemoveFromLibrary'> | null>(null);
@@ -114,6 +117,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const prefsKey = user ? `sd2:resource-picker:v1:${user.id}:${target}:${purpose}` : '';
   const recentKey = user ? `sd2:resource-recent:v1:${user.id}:${target}` : '';
   const [prefs, setPrefs] = useState<Preferences>(defaults), [ready, setReady] = useState(false), [query, setQuery] = useState('');
+  const [templates, setTemplates] = useState<Array<{ id: string; name: string }>>([]);
   const [sessionOwner, setSessionOwner] = useState('');
   const [notice, setNotice] = useState('');
   const imports = useRef(new Map<string, PickerItem>()), importOwner = useRef('');
@@ -129,32 +133,33 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   useEffect(() => {
     if (!open || !user || !prefsKey) { setReady(false); sequence.current++; session.current++; return; }
     if (importOwner.current !== recentKey) { imports.current.clear(); importOwner.current = recentKey; }
-    const raw = stored<Partial<Preferences>>(prefsKey, {}), next = { ...defaults };
+    const raw = stored<Partial<Preferences>>(prefsKey, {}), next = { ...defaults, source: initialSource as string };
     if (['library', 'favorites', 'recent'].includes(raw.view || '')) next.view = raw.view!;
     if (scopes.some(([s]) => s === raw.scope)) next.scope = raw.scope!;
-    if (['all', 'uploaded', 'generated'].includes(raw.source || '')) next.source = raw.source!;
+    if (['all', 'uploaded', 'generated', 'other', 'template-image', 'random-person', 'other-generated', 'unknown', 'video-generated'].includes(raw.source || '')) next.source = raw.source!;
     if (raw.type === 'all' || types.includes(raw.type as AssetType)) next.type = raw.type!;
     if (typeof raw.query === 'string') next.query = raw.query.slice(0, 160);
     if (raw.sort === 'name') next.sort = 'name';
-    for (const field of ['album', 'project'] as const) if (typeof raw[field] === 'string' && /^[a-zA-Z0-9_-]{0,100}$/.test(raw[field]!)) next[field] = raw[field]!;
+    for (const field of ['album', 'project', 'template'] as const) if (typeof raw[field] === 'string' && /^[a-zA-Z0-9_-]{0,100}$/.test(raw[field]!)) next[field] = raw[field]!;
     if (typeof raw.scroll === 'number' && Number.isFinite(raw.scroll)) next.scroll = Math.max(0, raw.scroll);
     if (typeof raw.pages === 'number') next.pages = Math.min(5, Math.max(1, Math.floor(raw.pages) || 1));
     restoration.current = next.scroll; restoring.current = true;
-    setPrefs(next); setQuery(next.query); setSelected([]); setItems([]); setAlbums([]); setTotal(0); setPreview(null); setFailedFiles([]); setError(''); setNotice(''); setUploadLabel(''); setProgress(null); setSessionOwner(prefsKey);
-    const modal = Array.from(document.querySelectorAll('dialog[open]')).find(d => d.matches(':modal'));
+    setPrefs(next); setQuery(next.query); setSelected([]); setItems([]); setAlbums([]); setTemplates([]); setTotal(0); setPreview(null); setFailedFiles([]); setError(''); setNotice(''); setUploadLabel(''); setProgress(null); setSessionOwner(prefsKey);
+    const modal = Array.from(document.querySelectorAll('dialog[open]')).reverse().find(d => d.matches(':modal'));
     setContainer(portalContainer || modal || document.body); setReady(true);
     return () => { sequence.current++; session.current++; };
-  }, [open, prefsKey, portalContainer, types, user?.id]);
+  }, [open, prefsKey, portalContainer, types, user?.id, initialSource]);
   useEffect(() => { if (!ready || sessionOwner !== prefsKey) return; const timer = setTimeout(() => setPrefs(p => p.query === query ? p : { ...p, query, pages: 1, scroll: 0 }), 250); return () => clearTimeout(timer); }, [query, ready, sessionOwner, prefsKey]);
   useEffect(() => { if (ready && prefsKey && sessionOwner === prefsKey) { try { localStorage.setItem(prefsKey, JSON.stringify(prefs)); } catch { /* Storage failure never prevents selection. */ } } }, [prefs, ready, prefsKey, sessionOwner]);
   const fetchPage = useCallback(async (nextPage: number): Promise<PickerResponse> => {
     const params = new URLSearchParams({ scope: prefs.scope, source: prefs.source, types: prefs.type === 'all' ? typesKey : prefs.type, q: prefs.query, view: prefs.view, sort: prefs.sort, target, page: String(nextPage) });
     if (prefs.album) params.set('album', prefs.album); if (prefs.project) params.set('project', prefs.project);
+    if (prefs.template && prefs.source === 'template-image') params.set('template', prefs.template);
     if (prefs.view === 'recent') params.set('keys', validKeys(stored(recentKey, [])).join(','));
     const response = await fetch(`/api/assets/picker?${params}`, { cache: 'no-store' });
     const data = await readJsonResponse<PickerResponse & { error?: string }>(response, { invalidJsonMessage: '素材库服务返回了无效内容，请刷新或重新登录' });
     if (!response.ok) throw new Error(data.error || '素材库读取失败'); return data;
-  }, [prefs.scope, prefs.source, prefs.type, prefs.query, prefs.view, prefs.sort, prefs.album, prefs.project, typesKey, target, recentKey]);
+  }, [prefs.scope, prefs.source, prefs.template, prefs.type, prefs.query, prefs.view, prefs.sort, prefs.album, prefs.project, typesKey, target, recentKey]);
   useEffect(() => {
     if (!open || !ready || sessionOwner !== prefsKey) return;
     const token = ++sequence.current; setLoading(true); setError('');
@@ -163,7 +168,8 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         let batch: PickerItem[] = []; const count = restoring.current ? prefs.pages : 1;
         for (let nextPage = 1; nextPage <= count; nextPage++) {
           const data = await fetchPage(nextPage); if (token !== sequence.current) return;
-          batch = [...batch, ...data.items]; setAlbums(data.albums); setTotal(data.total); setPage(data.page); setHasMore(data.hasMore); setNotice(data.notice || '');
+          batch = [...batch, ...data.items]; setAlbums(data.albums); setTemplates(data.templates || []); setTotal(data.total); setPage(data.page); setHasMore(data.hasMore); setNotice(data.notice || '');
+          if (prefs.template && !(data.templates || []).some(t => t.id === prefs.template)) { setPrefs(p => ({ ...p, template: '', pages: 1, scroll: 0 })); return; }
           if (prefs.album && !data.albums.some(a => a.id === prefs.album && a.scope === prefs.scope) || prefs.project && !data.albums.some(a => a.project?.id === prefs.project && a.scope === prefs.scope)) {
             restoring.current = false; setPrefs(p => ({ ...p, album: '', project: '', pages: 1, scroll: 0 })); return;
           }
@@ -298,6 +304,12 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
       const uniqueItems = attachedItems.filter((item, index, all) => all.findIndex(other => other.identity === item.identity) === index);
       const result = onConfirmSelection ? await onConfirmSelection(uniqueItems) : await onConfirm(uniqueItems.map(i => i.id), uniqueItems);
       const message = failure(result); if (message) throw new Error(message);
+      if (active.current && confirmationSession === session.current) for (const item of uniqueItems.filter(item => item.type === 'image')) {
+        const descriptor = imageDisplaySource(item.originalUrl, 'hd-description');
+        if (descriptor === item.originalUrl) continue;
+        const url = new URL(descriptor, location.origin); url.searchParams.set('hd-priority', 'recent');
+        void fetch(url, { credentials: 'same-origin', cache: 'no-store' }).catch(() => {});
+      }
       if (recentKey) { try { localStorage.setItem(recentKey, JSON.stringify([...readyItems.map(i => i.key), ...validKeys(stored(recentKey, []))].filter((k, i, all) => all.indexOf(k) === i).slice(0, 60))); } catch { /* Local recent history is not cloud sync. */ } }
       if (active.current && confirmationSession === session.current) onClose();
     } catch (e) { if (confirmationSession === session.current) setError(e instanceof Error ? e.message : '添加失败，请重试'); }
@@ -330,7 +342,8 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         <div className={styles.filters}><button type="button" className={styles.mobileNavigation} aria-expanded={navigationOpen} onClick={() => setNavigationOpen(v => !v)}><Menu size={17} />图集／项目</button>
           <label className={`${styles.scopeControl} ${styles.mobileScope}`}><span>范围</span><select aria-label="素材范围" value={prefs.scope} onChange={e => change({ scope: e.target.value as PickerScope, album: '', project: '' })}>{availableScopes.map(([s, label]) => <option key={s} value={s}>{label}</option>)}{!availableScopes.some(([s]) => s === prefs.scope) && <option value={prefs.scope}>此范围已不可用</option>}</select></label>
           {types.length > 1 && <div className={`${styles.segments} ${styles.typeSegments}`} aria-label="素材类型">{['all', ...types].map(t => <button key={t} type="button" aria-pressed={prefs.type === t} onClick={() => change({ type: t })}>{t === 'all' ? '全部' : labels[t as AssetType]}</button>)}</div>}
-          <div className={`${styles.segments} ${styles.sourceSegments}`} aria-label="素材来源">{([['all', '全部来源'], ['uploaded', '上传的'], ['generated', '生成的']] as const).map(([source, label]) => <button key={source} type="button" aria-pressed={prefs.source === source} onClick={() => change({ source })}>{label}</button>)}</div>
+          <label className={styles.sortControl}><span>来源</span><select aria-label="素材来源" value={prefs.source} onChange={e => change({ source: e.target.value, template: '' })}><option value="all">全部来源</option><option value="uploaded">上传的</option><option value="generated">全部生成</option>{types.includes('image') && <><option value="template-image">模板生图</option><option value="random-person">随机人物</option><option value="other-generated">其他生成</option><option value="unknown">来源待识别</option></>}{types.includes('video') && <option value="video-generated">视频生成</option>}<option value="other">其他素材</option></select></label>
+          {prefs.source === 'template-image' && <label className={styles.sortControl}><span>模板</span><select aria-label="具体模板" value={prefs.template} onChange={e => change({ template: e.target.value })}><option value="">全部模板</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>}
           <label className={styles.sortControl}><span>排序</span><select aria-label="排序" value={prefs.sort} onChange={e => change({ sort: e.target.value })}><option value="newest">最新添加</option><option value="name">名称</option></select></label>
           <button type="button" className={styles.resetFilter} title="重置筛选和浏览位置" aria-label="重置筛选和浏览位置" onClick={() => { setQuery(''); change(defaults); }}><RotateCcw size={16} /></button>
         </div>
@@ -349,6 +362,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
             <ContentReactions contentKey={item.key} overlay imageSharing={false} onChange={() => { if (prefs.view === 'favorites') setEpoch(v => v + 1); }} />
             </div>
             <div className={styles.meta}><strong>{selectionName(item)}</strong>{item.unavailableReason && <small className={styles.compatibility}>{item.unavailableReason}</small>}
+              <small>{item.generationOrigin ? `${item.generationOrigin.label}${item.generationOrigin.templateName ? ` · ${item.generationOrigin.templateName}` : ''}` : item.source === 'uploaded' ? '上传的' : '其他素材'}</small>
               <details className={styles.cardDetails}><summary>详情</summary><small className={styles.originalName}>{item.fileName}</small><small>{item.source === 'generated' ? '生成' : item.source === 'uploaded' ? '上传' : '图集'}{item.width && item.height ? ` · ${item.width} × ${item.height}` : ''} · <RelativeTime value={item.createdAt} /></small></details>
             </div>
           </article>; })}</div>

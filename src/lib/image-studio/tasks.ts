@@ -23,6 +23,7 @@ import type { AvatarCandidate, AvatarLayout } from '@/lib/avatar-random/types';
 import { isAvatarSheet, validateSheetCandidates } from '@/lib/avatar-random/layout';
 import { evolutionCapability, parseEvolution, resolveEvolution, evolutionInstructions } from './evolution';
 import { studioTemplateTaskWhere } from './task-visibility';
+import { getSkillSelection, historicalSkills, parseSkillIds, resolveSkills, type SkillSnapshot } from './skills';
 
 export class StudioError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -33,6 +34,8 @@ type StudioTaskDraft = {
   globalContext?: string;
   fixedReferences?: StudioFixedReference[];
   styleGroupIds?: string[];
+  skillIds?: string[];
+  skillVersions?: Record<string, string>;
   referencePolicy?: StudioReferencePolicy;
 };
 
@@ -58,11 +61,17 @@ function parseStudioTaskDraft(value: unknown, referenceIds: string[]): StudioTas
   if (value === undefined) return undefined;
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new StudioError('当前生成草稿无效');
   const record = value as Record<string, unknown>;
-  const allowed = ['moduleContext', 'globalContext', 'fixedReferences', 'styleGroupIds', 'referencePolicy'];
+  const allowed = ['moduleContext', 'globalContext', 'fixedReferences', 'styleGroupIds', 'skillIds', 'skillVersions', 'referencePolicy'];
   if (Object.keys(record).some(key => !allowed.includes(key))) throw new StudioError('当前生成草稿包含不支持的字段');
   if (record.moduleContext !== undefined && (typeof record.moduleContext !== 'string' || record.moduleContext.length > 20000)) throw new StudioError('模块上下文最多 20000 字');
   if (record.globalContext !== undefined && (typeof record.globalContext !== 'string' || record.globalContext.length > 20000)) throw new StudioError('通用上下文最多 20000 字');
   const draft: StudioTaskDraft = {};
+  if (record.skillIds !== undefined) draft.skillIds = parseSkillIds(record.skillIds);
+  if (record.skillVersions !== undefined) {
+    if (!record.skillVersions || typeof record.skillVersions !== 'object' || Array.isArray(record.skillVersions)
+      || Object.entries(record.skillVersions).some(([id, version]) => !draft.skillIds?.includes(id) || typeof version !== 'string' || !/^[a-f0-9]{64}$/.test(version))) throw new StudioError('skills文字版本无效');
+    draft.skillVersions = record.skillVersions as Record<string, string>;
+  }
   if (record.moduleContext !== undefined) draft.moduleContext = record.moduleContext as string;
   if (record.globalContext !== undefined) draft.globalContext = record.globalContext as string;
   if (record.fixedReferences !== undefined) {
@@ -191,6 +200,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     let historicalReferenceOwners: Record<string, string> = {};
     const freshlySelectedStyleIds = new Set<string>();
     let historicalSnapshot: Record<string, unknown> | null = null;
+    let skills: SkillSnapshot[] = [];
     const referenceIds = input.referenceIds;
     if (reproduceFromTaskId) {
       const source = await tx.imageStudioTask.findFirst({ where: { id: reproduceFromTaskId, owner_id: ownerId }, select: { source_preset_id: true, snapshot_json: true } });
@@ -291,6 +301,10 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       }
     }
     let referencePolicy: StudioReferencePolicy;
+    if (!avatar) skills = reproduceFromTaskId && input.draft?.skillIds === undefined
+      ? await historicalSkills(identity, historicalSnapshot?.skills, tx)
+      : await resolveSkills(identity, input.draft?.skillIds ?? (workspace ? await getSkillSelection(ownerId, workspace.id, tx) : []), tx);
+    if (input.draft?.skillVersions && skills.some(skill => input.draft!.skillVersions![skill.id] !== skill.promptVersion)) throw new StudioError('skills文字已更新，请重新选择后生成', 409);
     if (avatar) referencePolicy = { ...defaultStudioReferencePolicy(referenceIds), primaryIds: avatar.candidates[0]?.baselineAssetId ? [avatar.candidates[0].baselineAssetId] : [], useFixedReferences: false };
     else if (input.draft?.referencePolicy) referencePolicy = input.draft.referencePolicy;
     else if (reproduceFromTaskId && historicalSnapshot?.referencePolicy !== undefined) {
@@ -318,7 +332,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     try { validateStudioReferenceCounts(referencePolicy, referenceIds, templateFixedReferences.length, actualStyleReferenceGroups.reduce((total, group) => total + group.references.length, 0), true); }
     catch (error) { throw new StudioError((error as Error).message); }
     const baseContext = [snapshotGlobalContext.trim(), snapshotModuleContext.trim()].filter(Boolean).join('\n\n---\n模块上下文：\n');
-    if (!input.prompt.trim() && !baseContext.trim() && primaryReferenceIds.length + auxiliaryCount === 0) throw new StudioError('请填写画面描述、上下文或添加参考图片');
+    if (!input.prompt.trim() && !baseContext.trim() && !skills.length && primaryReferenceIds.length + auxiliaryCount === 0) throw new StudioError('请填写画面描述、上下文、选择skills或添加参考图片');
     const referenceDescriptors: Array<{ id: string; role: 'primary' | 'transient-auxiliary' | 'template-fixed' | 'style-fixed'; label: string; note?: string; styleGroupId?: string }> = [];
     primaryReferenceIds.forEach((id, index) => referenceDescriptors.push({ id, role: 'primary', label: `主图 ${index + 1}（主图${'一二三四五六七八九十'[index]}，主要内容）` }));
     auxiliaryTransientIds.forEach((id, index) => referenceDescriptors.push({ id, role: 'transient-auxiliary', label: `辅助参考图 ${index + 1}` }));
@@ -347,7 +361,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     try { if (evolutionRequest) evolution = resolveEvolution(evolutionRequest, input.prompt, capability || { version: 1, defaultDirection: 'increase' }); }
     catch (error) { throw new StudioError((error as Error).message); }
     const context = [baseContext.trim(), evolution ? evolutionInstructions(evolution) : '', referenceInstructions ? `${roleInstructions}\n\n参考图顺序与作用（编号与实际发送次序一致）：\n${referenceInstructions}` : '',
-      styleNoteInstructions ? `风格组补充说明：\n${styleNoteInstructions}` : '']
+      styleNoteInstructions ? `风格组补充说明：\n${styleNoteInstructions}` : '',
+      skills.length ? `补充文字skills（仅补充本次未指定部分；本次手写要求优先；多个组冲突时后组优先）：\n${skills.map((skill, index) => `${index + 1}. ${JSON.stringify(skill.prompt)}`).join('\n')}` : '']
       .filter(Boolean).join('\n\n---\n');
     const active = await tx.imageStudioTask.count({ where: { owner_id: ownerId, status: { in: ['queued', 'running'] } } });
     if (!preparation && active + input.count > 8) throw new StudioError('最多同时生成 8 张，请等待当前任务完成', 429);
@@ -393,6 +408,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       primaryReferenceImages: primaryReferenceSnapshot,
       auxiliaryReferenceImages: auxiliaryReferenceSnapshot,
       styleGroupIds, styleGroups: styleGroupSnapshot,
+      skills, skillIds: skills.map(skill => skill.id), effectiveContext: context,
       referencePolicy: { ...referencePolicy, primaryIds: primaryReferenceIds },
       authorizedReferenceOwners: Object.fromEntries(references.map(ref => [ref.id, ref.owner_id])),
       transientReferenceImages: transientReferenceSnapshot,
@@ -644,11 +660,13 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json'
   const auxiliaryReferenceImages = (isAdmin ? snapshotAuxiliaryReferences : snapshotTransientAuxiliaryReferences).map(mapReference).filter((item): item is NonNullable<typeof item> => item !== null);
   const sourceAvailable = typeof task.snapshot_json === 'string' && task.snapshot_json.length > 0
     && ((typeof parsed.globalContext === 'string' && typeof parsed.moduleContext === 'string'
-      && Boolean(String(parsed.globalContext).trim() || String(parsed.moduleContext).trim())) || snapshotReferences.length > 0 || Boolean(typeof parsed.prompt === 'string' ? parsed.prompt.trim() : task.prompt.trim()));
+      && Boolean(String(parsed.globalContext).trim() || String(parsed.moduleContext).trim())) || snapshotReferences.length > 0 || Array.isArray(parsed.skills) && parsed.skills.length > 0 || Boolean(typeof parsed.prompt === 'string' ? parsed.prompt.trim() : task.prompt.trim()));
   const count = Number.isInteger(parsed.count) && Number(parsed.count) >= 1 && Number(parsed.count) <= 8 ? Number(parsed.count) : 1;
   const unitCredits = typeof parsed.unitCredits === 'number' && Number.isFinite(parsed.unitCredits) ? parsed.unitCredits : null;
   return {
     prompt: typeof parsed.prompt === 'string' ? parsed.prompt : task.prompt,
+    skills: Array.isArray(parsed.skills) ? parsed.skills.filter(skill => skill && typeof skill === 'object'
+      && (isAdmin || skill.ownerId === viewerOwnerId) && typeof skill.prompt === 'string') : [],
     evolution: parsed.evolution && typeof parsed.evolution === 'object' && ['increase', 'decrease'].includes(String((parsed.evolution as Record<string, unknown>).direction))
       ? { direction: (parsed.evolution as Record<string, unknown>).direction, manual: (parsed.evolution as Record<string, unknown>).manual === true } : null,
     model: typeof parsed.model === 'string' ? parsed.model : task.model,

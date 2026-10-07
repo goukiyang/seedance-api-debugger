@@ -47,6 +47,7 @@ import { StudioReferenceGrid, type FixedStudioReference } from './reference-grid
 import { RatioPicker } from './ratio-picker';
 import { useStudioSettings } from './use-studio-settings';
 import { StudioGlobalSettingsDialog } from './global-settings-dialog';
+import { StudioSkills, type SkillSummary } from './skills-view';
 import { StudioStyleGroups, type StudioStyleSummary } from './style-groups-view';
 import type { SettingsValue } from './settings-controller';
 import { normalizeStudioRatio, resolveStudioAspectRatio } from '@/lib/image-studio/ratios';
@@ -60,7 +61,7 @@ import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from '@/lib/image-st
 import type { StudioReferencePolicy } from '@/lib/image-studio/reference-policy';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
 
-type StudioSnapshot = { referencePolicy?: StudioReferencePolicy; primaryReferenceImages?: UploadedAssetPayload[]; auxiliaryReferenceImages?: UploadedAssetPayload[]; prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; contextAvailable?: boolean; contextConfigured?: boolean; referenceImages: UploadedAssetPayload[]; fixedReferenceImages?: FixedStudioReference[]; transientReferenceImages?: UploadedAssetPayload[]; fixedReferenceCount?: number; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[] };
+type StudioSnapshot = { referencePolicy?: StudioReferencePolicy; primaryReferenceImages?: UploadedAssetPayload[]; auxiliaryReferenceImages?: UploadedAssetPayload[]; prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; contextAvailable?: boolean; contextConfigured?: boolean; referenceImages: UploadedAssetPayload[]; fixedReferenceImages?: FixedStudioReference[]; transientReferenceImages?: UploadedAssetPayload[]; fixedReferenceCount?: number; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[] };
 type StudioTask = { id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; error?: string; unitCredits: number; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; finishedAt?: string | null; snapshot?: StudioSnapshot & { moduleContextVersion?: string | null; moduleContextVersionState?: string }; delivery?: { phase: string; receivedBytes?: number; expectedBytes?: number; recoveryAvailable: boolean; checkpointRetained: boolean; requestId?: string; upstreamRequestId?: string; validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string } }; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number } | null };
 function studioTaskHasDeliveredAsset(task: StudioTask): task is StudioTask & { asset: NonNullable<StudioTask['asset']> } {
   return task.status === 'succeeded' && Boolean(task.asset?.original_url);
@@ -79,7 +80,7 @@ function StudioWaitingImage({ src }: { src?: string | null }) {
       : <ImagePlus size={24} role="img" aria-label="暂无主图预览" />}
   </div>;
 }
-type StudioModule = { referencePolicy?: StudioReferencePolicy; id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sourcePresetOwnedByViewer?: boolean; sourcePresetCanManageSharing?: boolean; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string; fixedReferenceCount?: number; fixedReferencesEditable?: boolean; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; reproductionState?: { fixedReferenceCount: number; styleGroups: StudioStyleSummary[] } | null };
+type StudioModule = { referencePolicy?: StudioReferencePolicy; id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sourcePresetOwnedByViewer?: boolean; sourcePresetCanManageSharing?: boolean; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string; fixedReferenceCount?: number; fixedReferencesEditable?: boolean; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[]; reproductionState?: { fixedReferenceCount: number; styleGroups: StudioStyleSummary[] } | null };
 type StudioPreset = { id: string; name: string; revision: string; moduleContextVersion?: string | null; scope: 'admin' | 'creator'; isShared: boolean; canManageSharing?: boolean; ownedByViewer?: boolean; groupName: string; model: string; quality: string; resolution: ImageResolution; count: number; referenceLimit: number; aspectRatio: string; images: UploadedAssetPayload[]; banner: UploadedAssetPayload | null; contextConfigured: boolean; createdAt: string };
 type QuickStudioPreset = StudioPreset & { prompt: string; context: string; referencesAvailable: boolean; referencePolicy?: StudioReferencePolicy; fixedReferences?: FixedStudioReference[]; styleGroupIds: string[] };
 type PresetSource = { draft: Record<string, unknown>; blocked: string | null; groupDeleteBlocked?: boolean };
@@ -705,7 +706,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     routedContentHandled.current = `${userId}:${window.location.search}`;
     setPendingModuleScroll(null); setCoverView(true);
   };
-  const imageSectionOpen = imageGenerationExpanded || hasAnyUnread;
+  const imageSectionOpen = imageGenerationExpanded;
   return <>{productDialog}{(<main ref={pageRef} className={`${styles.page} ${templateWorkbench ? styles.templateWorkbench : ''}`}>
     <aside className={styles.moduleRail} data-remember-scroll="image-groups" aria-label={templateWorkbench ? '模板导航' : '分组快捷栏'}>
       {templateWorkbench ? <>
@@ -717,14 +718,14 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
             <a className={`${styles.moduleRailMajorLink} ${styles.moduleRailMajorCurrent}`} href="#image-generation" aria-current="page" onClick={navigateToImageSection}>
               <ImagePlus size={16} /><span>图片生成</span>{hasAnyUnread && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}
             </a>
-            <button type="button" className={styles.moduleRailMajorToggle} disabled={hasAnyUnread} aria-expanded={imageSectionOpen} aria-controls="template-image-groups"
-              aria-label={hasAnyUnread ? '有未读生成结果，查看后可折叠图片生成' : `${imageSectionOpen ? '折叠' : '展开'}图片生成`} title={hasAnyUnread ? '有未读生成结果，查看后可折叠' : `${imageSectionOpen ? '折叠' : '展开'}图片生成`}
+            <button type="button" className={styles.moduleRailMajorToggle} aria-expanded={imageSectionOpen} aria-controls="template-image-groups"
+              aria-label={`${imageSectionOpen ? '折叠' : '展开'}图片生成`} title={`${imageSectionOpen ? '折叠' : '展开'}图片生成`}
               onClick={() => setImageGenerationExpanded(current => !current)}>{imageSectionOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button>
           </div>
           <div id="template-image-groups" className={styles.moduleRailSubgroups} hidden={!imageSectionOpen}>
             {Object.entries(groupedModules).map(([group, items], index) => {
               const groupHasUnread = items.some(item => attention.unread.has(item.id));
-              const expanded = expandedGroups.includes(group) || groupHasUnread;
+              const expanded = expandedGroups.includes(group);
               const listId = `template-module-group-${index}`;
               return <div key={group} className={styles.moduleRailGroup}>
                 <div className={styles.moduleRailGroupHeader}>
@@ -732,8 +733,8 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
                     onClick={() => navigateToModule(group, items[0].id, { markViewed: false })}>
                     <span className={styles.navLabel}><span className={styles.navName}>{group}</span>{groupHasUnread && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</span><small title={`共 ${items.length} 个模块`}>{items.length}项</small>
                   </button>
-                  <button type="button" className={styles.moduleRailGroupToggle} disabled={groupHasUnread} aria-expanded={expanded} aria-controls={listId}
-                    aria-label={groupHasUnread ? `${group}有未读结果，查看后可折叠` : `${expanded ? '折叠' : '展开'}${group}`} title={groupHasUnread ? '有未读生成结果，查看后可折叠' : `${expanded ? '折叠' : '展开'}${group}`}
+                  <button type="button" className={styles.moduleRailGroupToggle} aria-expanded={expanded} aria-controls={listId}
+                    aria-label={`${expanded ? '折叠' : '展开'}${group}`} title={`${expanded ? '折叠' : '展开'}${group}`}
                     onClick={() => setExpandedGroups(current => current.includes(group) ? current.filter(item => item !== group) : [...current, group])}>
                     {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
                   </button>
@@ -850,6 +851,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const { confirm, prompt: askName, productDialog } = useProductDialog();
   const contextEditable = module.contextEditable !== false;
   const fixedEditable = isAdmin && module.fixedReferencesEditable !== false;
+  const [skills, setSkills] = useState<SkillSummary[]>(module.skills || []);
+  const [reproductionSkills, setReproductionSkills] = useState<SkillSummary[]>((module.reproductionState as { skills?: SkillSummary[] } | null)?.skills || []);
   const [styleGroups, setStyleGroups] = useState<StudioStyleSummary[]>(module.styleGroups || []);
   const [reproductionFixedCount, setReproductionFixedCount] = useState(module.reproductionState?.fixedReferenceCount || 0);
   const [reproductionStyles, setReproductionStyles] = useState<StudioStyleSummary[]>(module.reproductionState?.styleGroups || []);
@@ -902,7 +905,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const [savedModuleContext, setSavedModuleContext] = useState(module.context || '');
   const [moduleContextConfigured, setModuleContextConfigured] = useState(module.contextConfigured);
   const [moduleSaveError, setModuleSaveError] = useState('');
-  const [moduleSaved, setModuleSaved] = useState(JSON.stringify({ name: module.name, prompt: module.prompt, context: module.context || '', count: module.count, referenceLimit: moduleReferencePolicy(module).primaryMax, aspectRatio: module.aspectRatio || 'auto', model: module.model, quality: normalizeImageStudioQuality(module.model, module.quality), resolution: normalizeImageResolution(module.model, module.resolution || defaultImageResolution(module.model)), groupName: module.groupName || '未分组', bannerAssetId: module.banner?.id || null, referenceIds: [...module.images.filter(image => moduleReferencePolicy(module).primaryIds.includes(image.id || '')), ...module.images.filter(image => !moduleReferencePolicy(module).primaryIds.includes(image.id || ''))].map(image => image.id), reproduceFromTaskId: module.reproduceFromTaskId || null, sourcePresetId: module.sourcePresetId || null, styleGroupIds: module.styleGroupIds || [], referencePolicy: moduleReferencePolicy(module) }));
+  const [moduleSaved, setModuleSaved] = useState(JSON.stringify({ name: module.name, prompt: module.prompt, context: module.context || '', count: module.count, referenceLimit: moduleReferencePolicy(module).primaryMax, aspectRatio: module.aspectRatio || 'auto', model: module.model, quality: normalizeImageStudioQuality(module.model, module.quality), resolution: normalizeImageResolution(module.model, module.resolution || defaultImageResolution(module.model)), groupName: module.groupName || '未分组', bannerAssetId: module.banner?.id || null, referenceIds: [...module.images.filter(image => moduleReferencePolicy(module).primaryIds.includes(image.id || '')), ...module.images.filter(image => !moduleReferencePolicy(module).primaryIds.includes(image.id || ''))].map(image => image.id), reproduceFromTaskId: module.reproduceFromTaskId || null, sourcePresetId: module.sourcePresetId || null, skillIds: module.skillIds || [], styleGroupIds: module.styleGroupIds || [], referencePolicy: moduleReferencePolicy(module) }));
   const moduleSaveLock = useRef(false);
   const restoredDraftKey = useRef('');
   const autoSaveAttempt = useRef('');
@@ -997,11 +1000,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const pendingKey = `sd2-image-studio-pending:${suffix}`;
   const effectiveGlobalContext = reproduceSourceTaskId && reproductionGlobalContext !== null ? reproductionGlobalContext : globalContextDraft;
   const referencePolicy: StudioReferencePolicy = { primaryIds: images.flatMap(image => image.id ? [image.id] : []), primaryMin, primaryMax: referenceLimit, auxiliaryMax: auxiliaryLimit, styleMax: styleLimit, referenceMax: referenceImageLimit, useFixedReferences };
-  const moduleDraft = { name, prompt, context: moduleContext, count, referenceLimit, aspectRatio, model: moduleModel, quality: normalizeImageStudioQuality(moduleModel, quality), resolution: normalizeImageResolution(moduleModel, resolution), groupName, bannerAssetId: banner?.id || null, referenceIds: [...images, ...auxiliaryImages].map(image => image.id), reproduceFromTaskId: reproduceSourceTaskId || null, sourcePresetId: module.sourcePresetId || null, styleGroupIds: styleGroups.map(group => group.id), referencePolicy };
+  const moduleDraft = { name, prompt, context: moduleContext, count, referenceLimit, aspectRatio, model: moduleModel, quality: normalizeImageStudioQuality(moduleModel, quality), resolution: normalizeImageResolution(moduleModel, resolution), groupName, bannerAssetId: banner?.id || null, referenceIds: [...images, ...auxiliaryImages].map(image => image.id), reproduceFromTaskId: reproduceSourceTaskId || null, sourcePresetId: module.sourcePresetId || null, skillIds: skills.map(group => group.id), styleGroupIds: styleGroups.map(group => group.id), referencePolicy };
   const moduleSaveSnapshot = { ...moduleDraft };
   const moduleDirty = JSON.stringify(moduleSaveSnapshot) !== moduleSaved;
   const baseline = moduleSaved ? JSON.parse(moduleSaved) as typeof moduleDraft : moduleDraft;
-  const generationInputs = { evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, aspectRatio, resolution: normalizeImageResolution(moduleModel, resolution), referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: normalizeImageStudioQuality(moduleModel, quality), referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), styleGroupIds: moduleDraft.styleGroupIds };
+  const generationInputs = { evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, aspectRatio, resolution: normalizeImageResolution(moduleModel, resolution), referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: normalizeImageStudioQuality(moduleModel, quality), referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), skillIds: moduleDraft.skillIds, skillVersions: Object.fromEntries(skills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])), styleGroupIds: moduleDraft.styleGroupIds };
   const generationDraft = JSON.stringify(generationInputs);
   const batch = useStudioBatch({ userId, moduleId: module.id, unitCredits: settings ? settings.prices?.[moduleModel] ?? null : module.prices[moduleModel] ?? null,
     draftSignature: JSON.stringify([generationDraft, effectiveGlobalContext, reproduceSourceTaskId, settings?.revision, module.revision]) });
@@ -1014,7 +1017,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       count, referenceLimit, referencePolicy, aspectRatio, bannerAssetId: banner?.id || null, referenceIds: moduleDraft.referenceIds, sourceModuleId: module.id,
       reproduceFromTaskId: reproduceSourceTaskId || undefined,
       fixedReferences: fixedEditable ? fixedReferencePayload(reproduceSourceTaskId ? reproductionReferences.slice(0, Math.max(0, reproductionFixedCount - reproductionStyles.reduce((total, group) => total + group.referenceCount, 0))) : fixedReferences) : undefined,
-      styleGroupIds: (reproduceSourceTaskId ? reproductionStyles : styleGroups).map(group => group.id),
+      skillIds: (reproduceSourceTaskId ? reproductionSkills : skills).map(group => group.id), styleGroupIds: (reproduceSourceTaskId ? reproductionStyles : styleGroups).map(group => group.id),
     };
   }
   const presetSourceReader = useRef<PresetSourceReader>(() => ({ draft: {}, blocked: '正在读取设置' }));
@@ -1025,14 +1028,14 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     registerPresetSource(module.id, () => presetSourceReader.current());
     return () => registerPresetSource(module.id, null);
   }, [module.id, registerPresetSource]);
-  const restorationSignature = JSON.stringify({ inputs: generationInputs, source: reproduceSourceTaskId, references: reproductionReferences, fixedCount: reproductionFixedCount, styles: reproductionStyles, globalContext: effectiveGlobalContext });
+  const restorationSignature = JSON.stringify({ inputs: generationInputs, source: reproduceSourceTaskId, references: reproductionReferences, fixedCount: reproductionFixedCount, styles: reproductionStyles, skills: reproductionSkills, globalContext: effectiveGlobalContext });
   const sourceApplied = Boolean(appliedSource && !appliedSource.modified && appliedSource.signature === restorationSignature);
   useEffect(() => {
     if (appliedSource && !appliedSource.modified && appliedSource.signature !== restorationSignature) {
       setAppliedSource(previous => previous ? { ...previous, modified: true } : null);
     }
   }, [appliedSource, restorationSignature]);
-  const defaultGenerationDraft = JSON.stringify({ evolution: evolution ? { direction: evolution.defaultDirection, manual: false } : undefined, prompt: baseline.prompt, count: baseline.count, referenceLimit: baseline.referenceLimit, aspectRatio: baseline.aspectRatio, resolution: normalizeImageResolution(baseline.model, baseline.resolution), referenceIds: baseline.referenceIds, model: baseline.model, quality: normalizeImageStudioQuality(baseline.model, baseline.quality), referencePolicy: baseline.referencePolicy, context: savedModuleContext, fixedReferences: fixedReferencePayload(savedFixedReferences), styleGroupIds: baseline.styleGroupIds });
+  const defaultGenerationDraft = JSON.stringify({ evolution: evolution ? { direction: evolution.defaultDirection, manual: false } : undefined, prompt: baseline.prompt, count: baseline.count, referenceLimit: baseline.referenceLimit, aspectRatio: baseline.aspectRatio, resolution: normalizeImageResolution(baseline.model, baseline.resolution), referenceIds: baseline.referenceIds, model: baseline.model, quality: normalizeImageStudioQuality(baseline.model, baseline.quality), referencePolicy: baseline.referencePolicy, context: savedModuleContext, fixedReferences: fixedReferencePayload(savedFixedReferences), skillIds: baseline.skillIds || [], skillVersions: generationInputs.skillVersions, styleGroupIds: baseline.styleGroupIds });
   const generationChanged = generationDraft !== defaultGenerationDraft || Boolean(reproduceSourceTaskId);
   const automaticSnapshot = JSON.stringify({ ...baseline, name, groupName, bannerAssetId: banner?.id || null });
   const automaticDirty = automaticSnapshot !== moduleSaved;
@@ -1046,7 +1049,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const settingsDirty = moduleContext !== savedModuleContext || fixedDirty || generationDraft !== defaultGenerationDraft;
   const contextDialogSnapshot = JSON.stringify({ context: moduleContext, primaryMin, primaryMax: referenceLimit,
     auxiliaryMax: auxiliaryLimit, styleMax: styleLimit, referenceMax: referenceImageLimit, useFixedReferences,
-    fixedReferences: fixedReferencePayload(fixedReferences), styleGroupIds: styleGroups.map(group => group.id),
+    fixedReferences: fixedReferencePayload(fixedReferences), skillIds: skills.map(group => group.id), styleGroupIds: styleGroups.map(group => group.id),
     model: moduleModel, resolution: normalizeImageResolution(moduleModel, resolution), quality: normalizeImageStudioQuality(moduleModel, quality) });
   const contextDialogOpening = useRef('');
   const latestSettingsDraft = useRef('');
@@ -1139,7 +1142,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     setAuxiliaryImages(module.images.filter(image => !baseline.referencePolicy.primaryIds.includes(image.id || '')));
     setPrimaryMin(baseline.referencePolicy.primaryMin); setAuxiliaryLimit(baseline.referencePolicy.auxiliaryMax); setUseFixedReferences(baseline.referencePolicy.useFixedReferences);
     setStyleLimit(baseline.referencePolicy.styleMax ?? MAX_REFERENCE_IMAGES); setReferenceImageLimit(baseline.referencePolicy.referenceMax ?? MAX_REFERENCE_IMAGES);
-    setFixedReferences(savedFixedReferences); setModuleContext(savedModuleContext); setStyleGroups(module.styleGroups || []); setReproduceSourceTaskId(null);
+    setFixedReferences(savedFixedReferences); setModuleContext(savedModuleContext); setStyleGroups(module.styleGroups || []); setSkills(module.skills || []); setReproductionSkills([]); setReproduceSourceTaskId(null);
     setReproductionGlobalContext(null); setAppliedSource(null);
     setModuleSaveError('');
   }
@@ -1211,6 +1214,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         let restoredImages: UploadedAssetPayload[] = [];
         let restoredTask: StudioTask | undefined;
         let restoredStyles: StudioStyleSummary[] | undefined;
+        let restoredSkills: SkillSummary[] | undefined;
         let restoredFixed: FixedStudioReference[] | undefined;
         let recoveredFixedCount: number | undefined;
         let recoveredStyles: StudioStyleSummary[] | undefined;
@@ -1239,6 +1243,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           if (Array.isArray(saved.styleGroupIds)) {
             const styleIds = saved.styleGroupIds.filter((id: unknown): id is string => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)).slice(0, MAX_REFERENCE_IMAGES);
             restoredStyles = styleIds.length ? (await readResponse(await fetch(`/api/image-studio/style-groups?ids=${encodeURIComponent(styleIds.join(','))}`, { cache: 'no-store' }))).groups : [];
+          }
+          if (Array.isArray(saved.skillIds)) {
+            const ids = saved.skillIds.filter((id: unknown): id is string => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)).slice(0, 12);
+            const all: SkillSummary[] = (await readResponse(await fetch('/api/image-studio/skills', { cache: 'no-store' }))).skills;
+            restoredSkills = ids.map((id: string) => all.find(skill => skill.id === id) || { id, name: 'skills不可用', unavailable: true });
           }
           if (typeof saved.reproduceSourceTaskId === 'string') {
             if (saved.reproduceSourceTaskId.length > 120) throw new Error('历史任务编号无效，请恢复模板默认设置。');
@@ -1278,6 +1287,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         if (contextEditable && typeof saved.context === 'string') setModuleContext(saved.context.slice(0, 20000));
         if (restoredFixed) setFixedReferences(restoredFixed);
         if (restoredStyles) setStyleGroups(restoredStyles);
+        if (restoredSkills) setSkills(restoredSkills);
+        if (restoredTask) setReproductionSkills(restoredTask.snapshot?.skills || []);
         if (recoveredFixedCount !== undefined) setReproductionFixedCount(recoveredFixedCount);
         if (recoveredStyles) setReproductionStyles(recoveredStyles);
         if (Object.prototype.hasOwnProperty.call(saved, 'reproduceSourceTaskId')) {
@@ -1318,7 +1329,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     try { localStorage.setItem(draftKey, JSON.stringify({ schemaVersion: 2, resultView, evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, referencePolicy, aspectRatio, resolution,
       images: [...images, ...auxiliaryImages].map(image => ({ id: image.id })), context: contextEditable ? moduleContext : undefined,
       fixedReferences: fixedEditable ? fixedReferences.map(image => ({ id: image.id, note: image.note })) : undefined,
-      styleGroupIds: styleGroups.map(group => group.id), model: moduleModel, quality, reproduceSourceTaskId: reproduceSourceTaskId || null, revision: moduleRevision }));
+      skillIds: skills.map(group => group.id), styleGroupIds: styleGroups.map(group => group.id), model: moduleModel, quality, reproduceSourceTaskId: reproduceSourceTaskId || null, revision: moduleRevision }));
       setPersistedDraftSignature(generationDraft); }
     catch { setError('临时草稿未能保存到浏览器，请勿刷新；当前内容仍可生成或另存为。'); }
   }, [draftLoaded, draftRestoring, recoverableDraft, draftKey, generationDraft, reproduceSourceTaskId, moduleRevision, contextEditable, fixedEditable, resultView]);
@@ -1467,6 +1478,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       ...(historicalEvolution || evolution ? { evolution: historicalEvolution || evolutionInput } : {}),
       draft: { moduleContext: contextEditable ? moduleContext : undefined, globalContext: isAdmin ? effectiveGlobalContext : undefined,
         fixedReferences: !reproduceSourceTaskId && fixedEditable ? fixedReferencePayload(fixedReferences) : undefined,
+        skillIds: reproduceSourceTaskId ? undefined : skills.map(group => group.id),
+        skillVersions: reproduceSourceTaskId ? undefined : Object.fromEntries(skills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])),
         styleGroupIds: reproduceSourceTaskId ? undefined : styleGroups.map(group => group.id), referencePolicy } };
   }
   async function submit(retryTask?: StudioTask) {
@@ -1550,7 +1563,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     setUseFixedReferences(snapshot.referencePolicy?.useFixedReferences ?? true);
     setReproductionReferences(snapshot.fixedReferenceImages || []);
     setReproductionFixedCount(snapshot.fixedReferenceCount ?? snapshot.fixedReferenceImages?.length ?? 0);
-    setReproductionStyles(snapshot.styleGroups || []);
+    setReproductionStyles(snapshot.styleGroups || []); setReproductionSkills(snapshot.skills || []);
     const nextContext = isAdmin && snapshot.contextAvailable ? snapshot.moduleContext ?? '' : moduleContext;
     const nextGlobalContext = isAdmin && snapshot.contextAvailable ? snapshot.globalContext ?? '' : globalContextDraft;
     if (isAdmin && snapshot.contextAvailable) setModuleContext(nextContext);
@@ -1568,7 +1581,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     const signature = JSON.stringify({ inputs: { ...generationInputs, evolution: nextEvolution, prompt: snapshot.prompt || '', count: nextCount, referenceLimit: nextPolicy.primaryMax,
       aspectRatio: nextRatio, resolution: nextResolution, referenceIds: nextImages.map(image => image.id), model: nextModel, quality: nextQuality, referencePolicy: nextPolicy, context: nextContext },
       source: snapshot.sourceAvailable ? task.id : null, references: snapshot.fixedReferenceImages || [],
-      fixedCount: snapshot.fixedReferenceCount ?? snapshot.fixedReferenceImages?.length ?? 0, styles: snapshot.styleGroups || [], globalContext: nextGlobalContext });
+      fixedCount: snapshot.fixedReferenceCount ?? snapshot.fixedReferenceImages?.length ?? 0, styles: snapshot.styleGroups || [], skills: snapshot.skills || [], globalContext: nextGlobalContext });
     setAppliedSource({ taskId: task.id, label: `${module.name} · ${task.ordinal}`, signature, modified: false });
     return null;
   }
@@ -1860,6 +1873,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
             onChange={next => { if (reproduceSourceTaskId) exitReproductionMode('风格组已修改，接下来使用当前模板和风格组。'); setStyleGroups(next); }} />
         </section>
         <section className={styles.materialSection} aria-label="参考图">
+          <StudioSkills userId={userId} selected={reproduceSourceTaskId ? reproductionSkills : skills} disabled={uploading || submitting || Boolean(pendingSubmission)}
+            onChange={next => { if (reproduceSourceTaskId) exitReproductionMode('skills已修改，接下来使用当前模板和所选文字。'); setSkills(next); }} />
           {!templateWorkbench && <header className={styles.materialHeading}><h3>参考图</h3>
             <select aria-label="参考图数量上限" value={referenceImageLimit} disabled={uploading || submitting || Boolean(pendingSubmission)} onChange={event => setReferenceImageLimit(Number(event.target.value))}>
               {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>最多 {value} 张</option>)}
@@ -2031,6 +2046,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       </section>
     </div>
     {assetPickerOpen && <UploadedImagePicker open imageOnly target="image-studio"
+      initialSource={templateWorkbench ? 'template-image' : 'all'}
       title={imageSourceTarget === 'banner' ? '替换封面' : imageSourceTarget === 'fixed' ? '添加固定参考图' : imageSourceTarget === 'auxiliary' ? '添加参考图' : referenceLimit === 1 && images.length ? '替换主图' : '添加主图'}
       confirmLabel={imageSourceTarget === 'banner' ? '替换封面' : imageSourceTarget === 'fixed' ? '添加到固定参考区' : imageSourceTarget === 'auxiliary' ? '添加到参考区' : referenceLimit === 1 && images.length ? '替换主图' : '添加到主图'}
       purpose={imageSourceTarget}
@@ -2045,7 +2061,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         if(primary?images.length>=currentReferenceCap:auxiliaryImages.length>=currentAuxiliaryCap)throw new Error('参考区已满，没有替换已有图片');
         const nextImages=primary?[...images,...picked]:images, nextAuxiliary=primary?auxiliaryImages:[...auxiliaryImages,...picked];
         const nextPolicy={...referencePolicy,primaryIds:nextImages.flatMap(i=>i.id?[i.id]:[])};
-        const payload={schemaVersion:2,evolution:evolution?evolutionInput:undefined,prompt,count,referenceLimit,referencePolicy:nextPolicy,aspectRatio,resolution,images:[...nextImages,...nextAuxiliary].map(i=>({id:i.id})),context:contextEditable?moduleContext:undefined,fixedReferences:fixedEditable?fixedReferences.map(i=>({id:i.id,note:i.note})):undefined,styleGroupIds:styleGroups.map(g=>g.id),model:moduleModel,quality,reproduceSourceTaskId:reproduceSourceTaskId||null,revision:moduleRevision};
+        const payload={schemaVersion:2,evolution:evolution?evolutionInput:undefined,prompt,count,referenceLimit,referencePolicy:nextPolicy,aspectRatio,resolution,images:[...nextImages,...nextAuxiliary].map(i=>({id:i.id})),context:contextEditable?moduleContext:undefined,fixedReferences:fixedEditable?fixedReferences.map(i=>({id:i.id,note:i.note})):undefined,skillIds:skills.map(g=>g.id),styleGroupIds:styleGroups.map(g=>g.id),model:moduleModel,quality,reproduceSourceTaskId:reproduceSourceTaskId||null,revision:moduleRevision};
         try{localStorage.setItem(draftKey,JSON.stringify(payload));}catch{throw new Error('人物图片尚未存入本机草稿，未完成回填，请勿关闭原页面');}
         setImages(nextImages);setAuxiliaryImages(nextAuxiliary);
       }}

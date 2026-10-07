@@ -28,7 +28,8 @@ export async function GET(_request: NextRequest, { params }: { params: { assetId
     const preview = _request.nextUrl.searchParams.get('preview') === '1';
     const detail = _request.nextUrl.searchParams.get('detail') === '1';
     const download = _request.nextUrl.searchParams.get('download') === '1';
-    return await authorizedImageResponse(_request, asset.original_url, thumbnail ? 'thumbnail' : preview ? 'preview' : detail ? 'detail' : download ? 'download' : 'original', asset.mime_type || 'application/octet-stream', asset.file_name, started);
+    const hd = ['hd', 'hd-description', 'hd-download'].find(key => _request.nextUrl.searchParams.get(key) === '1') as 'hd' | 'hd-description' | 'hd-download' | undefined;
+    return await authorizedImageResponse(_request, asset.original_url, hd || (thumbnail ? 'thumbnail' : preview ? 'preview' : detail ? 'detail' : download ? 'download' : 'original'), asset.mime_type || 'application/octet-stream', asset.file_name, started);
   } catch {
     return NextResponse.json({ error: '图片读取失败，请重试' }, { status: 503, headers: privateImageHeaders });
   }

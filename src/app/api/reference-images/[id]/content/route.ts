@@ -25,7 +25,7 @@ async function content(
     const image = await assertCanViewReferenceImage(user, params.id);
     if (image.asset && image.asset.status !== 'active') throw new AuthError('素材已不可用', 404);
     const variant = request.nextUrl.searchParams.get('variant') || 'original';
-    if (!['thumbnail', 'preview', 'detail', 'original', 'download'].includes(variant)) throw new AuthError('素材类型无效', 400);
+    if (!['thumbnail', 'preview', 'detail', 'original', 'download', 'hd', 'hd-description', 'hd-download'].includes(variant)) throw new AuthError('素材类型无效', 400);
     const assetType = image.asset?.type || 'image';
     if (variant === 'thumbnail' && assetType !== 'image' && !image.thumbnail_url) {
       throw new AuthError('暂无封面', 404);
@@ -33,7 +33,7 @@ async function content(
     const downloadable = await canDownloadOriginal(user, image);
     const isOriginalMediaPreview = assetType !== 'image' && ['preview', 'detail'].includes(variant);
 
-    if (['original', 'download'].includes(variant) && !downloadable) {
+    if (['original', 'download', 'hd', 'hd-description', 'hd-download'].includes(variant) && !downloadable) {
       throw new AuthError('无权访问原素材', 403);
     }
 

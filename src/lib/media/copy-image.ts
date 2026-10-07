@@ -7,19 +7,22 @@ async function imagePng(src: string): Promise<Blob> {
   if (!blob.type.startsWith('image/')) throw new Error('当前内容不是图片');
   if (blob.type === 'image/png') return blob;
   const url = URL.createObjectURL(blob);
+  let canvas: HTMLCanvasElement | undefined;
   try {
     const image = new Image();
     image.src = url;
     await image.decode();
-    const canvas = document.createElement('canvas');
+    if (!image.naturalWidth || !image.naturalHeight || image.naturalWidth * image.naturalHeight > 40_000_000) throw new Error('图片过大，浏览器无法安全复制，请下载原图');
+    canvas = document.createElement('canvas');
     canvas.width = image.naturalWidth;
     canvas.height = image.naturalHeight;
     const context = canvas.getContext('2d');
     if (!context) throw new Error('浏览器无法复制这张图片');
     context.drawImage(image, 0, 0);
-    return await new Promise<Blob>((resolve, reject) => canvas.toBlob(result => result
+    return await new Promise<Blob>((resolve, reject) => canvas!.toBlob(result => result
       ? resolve(result) : reject(new Error('图片转换失败，请使用右键复制')), 'image/png'));
   } finally {
+    if (canvas) { canvas.width = 0; canvas.height = 0; }
     URL.revokeObjectURL(url);
   }
 }

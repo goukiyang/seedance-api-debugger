@@ -1,7 +1,7 @@
 'use client';
 
 export type ImageReadProgress = { phase: 'reading' | 'decoding' | 'unavailable' | 'unsupported'; loadedBytes: number; totalBytes?: number; percent?: number; message?: string };
-export type ImageReadResult = { imageSrc: string | null; progress: ImageReadProgress; denied?: boolean };
+export type ImageReadResult = { imageSrc: string | null; progress: ImageReadProgress; denied?: boolean; mime?: string; bytes?: number };
 type Listener = (value: ImageReadResult) => void;
 type Entry = { source: string; controller: AbortController; listeners: Set<Listener>; result: ImageReadResult; url?: string; etag?: string; bytes: number; at: number; reusable: boolean; decoded?: boolean; notifyAt?: number; checking?: Promise<void> };
 const entries = new Map<string, Entry>();
@@ -31,7 +31,7 @@ export function setImageReadSessionOwner(next: string) {
 function reusableSource(source: string) {
   const url = new URL(source, location.href);
   return url.origin === location.origin && /^\/api\/(?:image-studio\/(?:(?:assets|template-assets)\/|style-groups\/[^/]+\/assets\/)|reference-images\/[^/]+\/content|content-reactions\/media)/.test(url.pathname)
-    && (['preview', 'thumbnail', 'detail'].includes(url.searchParams.get('variant') || '') || ['preview', 'thumbnail', 'detail'].some(key => url.searchParams.get(key) === '1'));
+    && (['preview', 'thumbnail', 'detail', 'hd'].includes(url.searchParams.get('variant') || '') || ['preview', 'thumbnail', 'detail', 'hd'].some(key => url.searchParams.get(key) === '1'));
 }
 function prune(required = 0) {
   for (const [key, entry] of Array.from(entries)) if (!entry.listeners.size && Date.now() - entry.at > TTL) discard(key, entry);
@@ -79,7 +79,7 @@ async function read(entry: Entry) {
     await image.decode();
     if (!active()) return;
     entry.etag = response.headers.get('etag') || undefined; entry.at = Date.now(); entry.decoded = true;
-    publish(entry, { imageSrc: entry.url, progress: { phase: 'decoding', loadedBytes: bytes, ...(total ? { totalBytes: total, percent: 100 } : {}) } });
+    publish(entry, { imageSrc: entry.url, mime, bytes, progress: { phase: 'decoding', loadedBytes: bytes, ...(total ? { totalBytes: total, percent: 100 } : {}) } });
   } catch (error) {
     if (!active()) return;
     if (new URL(entry.source, location.href).origin !== location.origin) {

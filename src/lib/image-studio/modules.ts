@@ -10,6 +10,7 @@ import { canViewStudioPreset, type ImageStudioIdentity, type StudioPresetAccessR
 import { studioAssetUrl, studioTemplateAssetUrl } from './media';
 import { getStudioModuleFixedReferences, parseStudioFixedReferences, removeStudioModuleFixedReferences, setStudioModuleFixedReferences, setStudioPresetFixedReferences, StudioFixedReferenceError } from './fixed-references';
 import { getStudioModuleStyleIds, getStudioStyleGroup, parseStudioStyleIds, resolveStudioStyleReferences, setStudioModuleStyleIds, setStudioPresetStyleIds, studioStyleDTO, StudioStyleError } from './style-groups';
+import { getSkill, getSkillSelection, setSkillSelection, skillDTO } from './skills';
 import { studioVisibleAssetWhere } from './protected-assets';
 import { getStudioModuleReferencePolicy, parseStudioReferencePolicy, removeStudioModuleReferencePolicy, setStudioModuleReferencePolicy, setStudioPresetReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
 
@@ -56,6 +57,11 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
   const fixedReferences = await getStudioModuleFixedReferences(ownerId, row.id);
   const user = identity || await prisma.user.findUniqueOrThrow({ where: { id: ownerId }, select: { id: true, role: true, account_type: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
   const styleGroupIds = await getStudioModuleStyleIds(ownerId, row.id);
+  const skillIds = await getSkillSelection(ownerId, row.id);
+  const skills = await Promise.all(skillIds.map(async id => {
+    try { return skillDTO(await getSkill(user, id)); }
+    catch (error) { if (error instanceof StudioStyleError && [403, 404, 409].includes(error.status)) return { id, name: 'skills不可用', unavailable: true }; throw error; }
+  }));
   const styleGroups = await Promise.all(styleGroupIds.map(async id => {
     try { return await studioStyleDTO(user, await getStudioStyleGroup(user, id)); }
     catch (error) {
@@ -63,12 +69,13 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
       throw error;
     }
   }));
-  let reproductionState: { fixedReferenceCount: number; styleGroups: Array<{ id: string; name: string; referenceCount: number; coverUrl: string; canManage: false }> } | null = null;
+  let reproductionState: { fixedReferenceCount: number; skills: unknown[]; styleGroups: Array<{ id: string; name: string; referenceCount: number; coverUrl: string; canManage: false }> } | null = null;
   if (row.reproduce_task_id) {
     const sourceTask = await prisma.imageStudioTask.findFirst({ where: { id: row.reproduce_task_id, owner_id: ownerId }, select: { snapshot_json: true } });
     try {
       const snapshot = JSON.parse(sourceTask?.snapshot_json || '{}');
       reproductionState = { fixedReferenceCount: Array.isArray(snapshot.fixedReferenceImages) ? snapshot.fixedReferenceImages.length : 0,
+        skills: Array.isArray(snapshot.skills) ? snapshot.skills.filter((skill: { ownerId?: unknown; prompt?: unknown }) => (isAdmin || skill.ownerId === ownerId) && typeof skill.prompt === 'string') : [],
         styleGroups: Array.isArray(snapshot.styleGroups) ? snapshot.styleGroups.filter((group: { id?: unknown; name?: unknown }) => typeof group.id === 'string' && typeof group.name === 'string')
           .map((group: { id: string; name: string; referenceCount?: number }) => ({ id: group.id, name: group.name, referenceCount: Number(group.referenceCount) || 0, coverUrl: `/api/image-studio/style-groups/${group.id}/cover`, canManage: false })) : [] };
     } catch { reproductionState = null; }
@@ -117,7 +124,7 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     evolution: evolutionCapability(row),
     fixedReferencesEditable: isAdmin && (!sourcePreset || sourcePreset.owner_id === ownerId),
     fixedReferenceCount: fixedReferences.length,
-    styleGroupIds, styleGroups, reproductionState,
+    styleGroupIds, styleGroups, skillIds, skills, reproductionState,
     contextConfigured: Boolean(row.context.trim()), context: protectedSource ? '' : row.context,
     moduleContextVersion: await resolveModuleContextVersion(row.context).catch(() => null),
     createdAt: row.created_at, updatedAt: row.updated_at,
@@ -306,6 +313,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
     }
     try {
       if (body.styleGroupIds !== undefined) await setStudioModuleStyleIds(identity, id, body.styleGroupIds, tx);
+      if (body.skillIds !== undefined) await setSkillSelection(identity, id, body.skillIds, tx);
       const selectedIds = body.styleGroupIds === undefined ? await getStudioModuleStyleIds(ownerId, id, tx) : parseStudioStyleIds(body.styleGroupIds);
       const selected = await resolveStudioStyleReferences(identity, selectedIds, tx);
       const fixed = await getStudioModuleFixedReferences(ownerId, id, tx);
@@ -318,7 +326,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
     // An administrator's bound module is the canonical source for the shared
     // preset. Personal copies created from that preset stay independent.
     if (isAdmin && current?.source_preset_id) {
-      const source = await tx.imageStudioPreset.findUnique({ where: { id: current.source_preset_id }, select: { owner_id: true, scope: true } });
+      const source = await tx.imageStudioPreset.findUnique({ where: { id: current.source_preset_id }, select: { owner_id: true, scope: true, is_shared: true } });
       if (source?.owner_id === ownerId && source.scope === 'admin' && !(await studioPresetArchived(current.source_preset_id, tx))) {
         await tx.imageStudioPreset.update({ where: { id: current.source_preset_id }, data: {
           name: saved.name, group_name: saved.group_name, prompt: saved.prompt, context: saved.context,
@@ -341,6 +349,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
           }
         }
         if (body.styleGroupIds !== undefined) await setStudioPresetStyleIds(identity, current.source_preset_id, body.styleGroupIds, tx);
+        if (body.skillIds !== undefined && !source.is_shared) await setSkillSelection(identity, current.source_preset_id, body.skillIds, tx, 'preset');
       }
     }
     return saved;

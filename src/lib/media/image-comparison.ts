@@ -15,12 +15,13 @@ export const comparisonScopes: PickerScope[] = ['mine', 'project', 'shared', 'pu
 const prefix = 'sd2:media-preview:comparison:v1';
 const validPickerKey = (key: unknown): key is string => typeof key === 'string' && /^(asset|reference_image):[a-zA-Z0-9_-]{1,100}$/.test(key);
 
-export function imageDisplaySource(src: string, mode: 'preview' | 'thumbnail' | 'detail' | 'original' | 'download') {
+export function imageDisplaySource(src: string, mode: 'preview' | 'thumbnail' | 'detail' | 'original' | 'download' | 'hd' | 'hd-description' | 'hd-download') {
   try {
     const url = new URL(src, 'https://sd2.youdooart.com');
     if (url.origin !== 'https://sd2.youdooart.com') return src;
     if (/^\/api\/image-studio\/(?:(?:assets|template-assets)\/|style-groups\/[^/]+\/assets\/)/.test(url.pathname)) {
-      for (const variant of ['thumbnail', 'preview', 'detail', 'download']) url.searchParams.delete(variant);
+      for (const variant of ['thumbnail', 'preview', 'detail', 'download', 'hd', 'hd-description', 'hd-download']) url.searchParams.delete(variant);
+      url.searchParams.delete('hd-version');
       if (mode !== 'original') url.searchParams.set(mode, '1');
     } else if (/^\/api\/reference-images\/[^/]+\/content$/.test(url.pathname)) {
       url.searchParams.set('variant', mode);

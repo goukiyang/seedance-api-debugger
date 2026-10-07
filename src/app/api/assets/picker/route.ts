@@ -9,6 +9,7 @@ import { studioHiddenAssetUrls, studioVisibleReferenceWhere } from '@/lib/image-
 import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
 import type { PickerAlbum, PickerItem, PickerScope } from '@/lib/assets/picker-types';
 import { removedLibraryResources } from '@/lib/assets/library-removal';
+import { generationOrigins } from '@/lib/assets/generation-origin';
 
 export const dynamic = 'force-dynamic';
 const scopes: PickerScope[] = ['mine', 'project', 'shared', 'public'];
@@ -78,7 +79,6 @@ export async function GET(request: NextRequest) {
     const assetWhere: Prisma.AssetWhereInput = {
       owner_id: user.id, status: 'active', type: { in: imageStudio ? ['image'] : types },
       ...(hidden.length ? { original_url: { notIn: hidden } } : {}),
-      ...(q ? { file_name: { contains: q } } : {}),
     };
     const refWhere: Prisma.ReferenceImageWhereInput = {
       status: 'active', AND: [visibleRefs, { OR: [
@@ -89,10 +89,9 @@ export async function GET(request: NextRequest) {
         { asset: { is: { status: 'active', type: { in: imageStudio ? ['image'] : types } } } },
         ...(imageStudio || types.includes('image') ? [{ asset_id: null }] : []),
       ] }],
-      ...(q ? { OR: [{ asset: { file_name: { contains: q } } }, { album: { name: { contains: q } } }, { id: { contains: q } }] } : {}),
     };
     const [assets, references, generatedTasks, favorites, videoTasks] = await Promise.all([
-      scope === 'mine' && !albumId && !projectId ? prisma.asset.findMany({ where: assetWhere, select: { id: true, type: true, file_name: true, metadata_json: true, created_at: true } }) : Promise.resolve([]),
+      scope === 'mine' && !albumId && !projectId ? prisma.asset.findMany({ where: assetWhere, select: { id: true, owner_id: true, type: true, file_name: true, metadata_json: true, created_at: true } }) : Promise.resolve([]),
       prisma.referenceImage.findMany({ where: refWhere, select: { id: true, album_id: true, owner_user_id: true, source_type: true, created_at: true, asset: { select: { id: true, type: true, file_name: true, metadata_json: true, owner_id: true } } } }),
       prisma.imageStudioTask.findMany({ where: { owner_id: user.id, status: 'succeeded', asset_id: { not: null } }, select: { asset_id: true } }),
       p.get('view') === 'favorites' ? prisma.contentReaction.findMany({ where: { user_id: user.id, OR: [{ liked: true }, { favorited: true }] }, select: { content_key: true } }) : Promise.resolve([]),
@@ -103,10 +102,12 @@ export async function GET(request: NextRequest) {
       }, select: { id: true, owner_user_id: true, user_id: true, project_id: true, retention_status: true, local_video_path: true, public_video_url: true, duration: true, created_at: true } }) : Promise.resolve([]),
     ]);
     const generatedIds = new Set(generatedTasks.map(t => t.asset_id));
+    const origins = await generationOrigins(user, [...assets, ...references.flatMap(ref => ref.asset ? [ref.asset] : [])]);
     const assetSource = (asset: { id: string; metadata_json: string | null }): PickerItem['source'] => {
+      if (origins.has(asset.id) || generatedIds.has(asset.id)) return 'generated';
       try {
         const meta = JSON.parse(asset.metadata_json || '{}');
-        if (generatedIds.has(asset.id) || ['image_generation_api', 'workspace_generation'].includes(meta.source)) return 'generated';
+        if (typeof meta.studioTaskId === 'string' || ['image_generation_api', 'workspace_generation'].includes(meta.source)) return 'generated';
       } catch { /* The existing Asset history treats non-generated owned files as uploads. */ }
       return 'uploaded';
     };
@@ -149,10 +150,25 @@ export async function GET(request: NextRequest) {
     const favoriteKeys = new Set(favorites.map(f => f.content_key));
     const keys = p.getAll('keys').flatMap(k => k.split(',')).filter(k => /^(asset|reference_image|video_task):[a-zA-Z0-9_-]+$/.test(k)).slice(0, 80);
     const source = p.get('source');
+    const templateOptions = new Map<string, string>();
+    for (const item of items) {
+      if (item.source === 'generated') item.generationOrigin = item.type === 'video' ? { kind: 'video-generated', label: '视频生成' }
+        : item.assetId ? origins.get(item.assetId) || { kind: 'unknown', label: '来源待识别' } : { kind: 'unknown', label: '来源待识别' };
+      if (item.generationOrigin?.templateId && item.generationOrigin.templateName) templateOptions.set(item.generationOrigin.templateId, item.generationOrigin.templateName);
+    }
     const dedup = new Map<string, PickerItem>();
+    const albumById = new Map(albums.map(album => [album.id, album.name]));
+    const albumNames = new Map<string, string[]>();
+    for (const ref of references) {
+      const name = albumById.get(ref.album_id);
+      if (!name) continue;
+      for (const identity of [`reference_image:${ref.id}`, ...(ref.asset ? [`asset:${ref.asset.id}`] : [])]) albumNames.set(identity, [...(albumNames.get(identity) || []), name]);
+    }
     for (const item of items) {
       if (removed.has(item.identity) && scope === 'mine') continue;
-      if (source && source !== 'all' && item.source !== source) continue;
+      if (source && source !== 'all' && item.source !== source && item.generationOrigin?.kind !== source) continue;
+      if (p.get('template') && item.generationOrigin?.templateId !== p.get('template')) continue;
+      if (q && !item.key.startsWith('video_task:') && ![item.fileName, item.generationOrigin?.templateName || '', ...(albumNames.get(item.identity) || [])].some(name => name.toLocaleLowerCase().includes(q.toLocaleLowerCase()))) continue;
       if (p.get('view') === 'favorites' && !favoriteKeys.has(item.key) && !favoriteKeys.has(`reference_image:${item.referenceImageId}`)) continue;
       if (p.has('keys') && !keys.includes(item.key) && !keys.includes(`reference_image:${item.referenceImageId}`)) continue;
       if (!dedup.has(item.identity)) dedup.set(item.identity, item);
@@ -172,7 +188,7 @@ export async function GET(request: NextRequest) {
         thumbnailUrl: item.referenceImageId ? `/api/reference-images/${item.referenceImageId}/content?variant=thumbnail` : asset.type === 'image' ? `/api/content-reactions/media?key=${encodeURIComponent(`asset:${asset.id}`)}&variant=thumbnail` : asset.thumbnail_url ? url(asset.thumbnail_url) : null }];
     });
     const unavailable = sorted.filter(item => item.unavailableReason).length;
-    return NextResponse.json({ items: projected, total: sorted.length, page, hasMore: page * limit < sorted.length, albums,
+    return NextResponse.json({ items: projected, total: sorted.length, page, hasMore: page * limit < sorted.length, albums, templates: Array.from(templateOptions, ([id, name]) => ({ id, name })),
       ...(unavailable ? { notice: `${unavailable} 个素材暂不能用于此处，原因显示在对应素材下方；其他素材可正常添加` } : {}),
     }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {

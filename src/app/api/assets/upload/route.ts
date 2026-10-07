@@ -16,6 +16,7 @@ import {
   validateSiteUploadMetadata,
 } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
+import { requestHd } from '@/lib/media/hd-derivatives';
 
 export const runtime = 'nodejs';
 export const maxDuration = 180;
@@ -157,6 +158,7 @@ export async function POST(request: NextRequest) {
     if (mediaValidationError) return NextResponse.json({ error: mediaValidationError }, { status: 400 });
 
     const uploadResult = await uploadSiteAsset(buffer, fileName, mimeType, fileSize, user.id, mediaMetadata);
+    if (mimeType.startsWith('image/')) void requestHd(uploadResult.originalUrl, 0).catch(() => {});
 
     await recordAssetUploadLog({
       operatorId: user.id,

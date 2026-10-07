@@ -84,6 +84,8 @@ export async function listReactions(user: SessionUser, params: URLSearchParams):
   for (const row of rows) {
     const resolved = await resolveContent(user, parseContentKey(row.content_key));
     if (search && (!resolved || !(resolved.prompt || resolved.summary.title).toLocaleLowerCase().includes(search))) continue;
+    if (category === 'template' && params.get('templateKind') && resolved?.summary.templateKind !== params.get('templateKind')) continue;
+    if (category === 'template' && params.get('templateMedium') && resolved?.summary.templateMedium !== params.get('templateMedium')) continue;
     counts.all++;
     if (row.category in counts) counts[row.category as ContentCategory]++;
     if (category === 'all' || category === row.category) matches.push({ row, resolved });

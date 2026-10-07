@@ -1,4 +1,5 @@
 export const CONTENT_TYPES = ['asset', 'video_task', 'reference_image', 'image_template', 'image_module', 'video_template', 'video_draft', 'legacy_template', 'prompt', 'seedance_asset'] as const;
+import type { GenerationOrigin } from '@/lib/assets/generation-origin';
 export type ContentType = typeof CONTENT_TYPES[number];
 export type ContentKey = `${ContentType}:${string}`;
 export type ContentCategory = 'image' | 'video' | 'audio' | 'template' | 'prompt';
@@ -27,6 +28,9 @@ export type ContentSummary = {
   versionLabel: string | null;
   owner: { name: string; avatar_url: string | null } | null;
   reuse?: { assetId?: string; referenceImageId?: string };
+  templateKind?: 'definition' | 'workpage';
+  templateMedium?: 'image' | 'video';
+  generationOrigin?: GenerationOrigin;
 };
 
 export type ReactionListItem = {

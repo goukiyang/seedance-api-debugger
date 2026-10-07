@@ -9,6 +9,7 @@ import { fileExists, thumbnailFilePath } from '@/lib/video/thumbnail';
 import { canRequestTaskThumbnail, shouldExposeTaskThumbnailUrl } from '@/lib/video/thumbnail-availability';
 import { videoDeliveryStageForTask, type VideoDeliveryStage } from '@/lib/video/delivery-status';
 import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
+import { assetGenerationOrigin, generationOrigins, type GenerationOrigin } from '@/lib/assets/generation-origin';
 import { studioHiddenAssetUrls, studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
 import { removedLibraryResources } from '@/lib/assets/library-removal';
 import { estimateNormalVideoCharge, loadNormalVideoChargeRates, type NormalVideoChargeEstimate } from '@/lib/costs/normal-video-charge';
@@ -45,6 +46,7 @@ type LibraryItem = {
   id: string;
   kind: LibraryItemKind;
   source: LibraryItemSource;
+  generationOrigin?: GenerationOrigin;
   taskId: string | null;
   assetId: string | null;
   referenceImageId: string | null;
@@ -644,6 +646,7 @@ async function loadAssetItems(options: {
   }
 
   type AssetLibraryDbRow = {
+    metadata_json: string | null;
     id: string;
     original_url: string;
     thumbnail_url: string | null;
@@ -680,7 +683,7 @@ async function loadAssetItems(options: {
     const [generatedAssets, generatedCount] = await Promise.all([
       prisma.$queryRaw<AssetLibraryDbRow[]>(Prisma.sql`
         SELECT asset."id", asset."original_url", asset."thumbnail_url", asset."file_name", asset."type", asset."status",
-          asset."width", asset."height", asset."file_size", asset."created_at", asset."owner_id"
+          asset."width", asset."height", asset."file_size", asset."created_at", asset."owner_id", asset."metadata_json"
         FROM "Asset" asset
         WHERE ${statusFilter} AND ${typeFilter} ${ownerFilter} ${keywordFilter} ${generatedFilter} ${privacyFilter}
         ORDER BY asset."created_at" DESC
@@ -712,6 +715,7 @@ async function loadAssetItems(options: {
           file_size: true,
           created_at: true,
           owner_id: true,
+          metadata_json: true,
         },
       }),
       prisma.asset.count({ where }),
@@ -726,12 +730,13 @@ async function loadAssetItems(options: {
       })
     : [];
   const ownerById = new Map(owners.map((owner) => [owner.id, owner]));
+  const origins = await generationOrigins(options.user, assets.filter(asset => asset.type === 'image'));
 
   return {
-    items: assets.map((asset) => serializeAsset({
+    items: assets.map((asset) => ({ ...serializeAsset({
       ...asset,
       owner: ownerById.get(asset.owner_id) || null,
-    })),
+    }), generationOrigin: assetGenerationOrigin(asset, origins) })),
     total,
   };
 }
@@ -800,7 +805,7 @@ async function loadReferenceItems(options: {
         status: true,
         created_at: true,
         asset_id: true,
-        asset: { select: { width: true, height: true } },
+        asset: { select: { id: true, owner_id: true, metadata_json: true, width: true, height: true } },
         project: { select: { id: true, name: true, type: true, status: true } },
         owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
         album: { select: { id: true, name: true } },
@@ -809,7 +814,8 @@ async function loadReferenceItems(options: {
     prisma.referenceImage.count({ where }),
   ]);
 
-  return { items: images.map(serializeReferenceImage), total };
+  const origins = await generationOrigins(options.user, images.flatMap(image => image.asset ? [image.asset] : []));
+  return { items: images.map(image => ({ ...serializeReferenceImage(image), generationOrigin: image.asset ? assetGenerationOrigin(image.asset, origins) : image.source_type === 'generated' ? { kind: 'unknown' as const, label: '来源待识别' } : undefined })), total };
 }
 
 export async function GET(request: NextRequest) {

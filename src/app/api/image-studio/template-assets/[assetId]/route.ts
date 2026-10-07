@@ -36,7 +36,8 @@ export async function GET(_request: Request, { params }: { params: { assetId: st
     const preview = new URL(_request.url).searchParams.get('preview') === '1';
     const detail = new URL(_request.url).searchParams.get('detail') === '1';
     const download = new URL(_request.url).searchParams.get('download') === '1';
-    return await authorizedImageResponse(_request, asset.original_url, thumbnail ? 'thumbnail' : preview ? 'preview' : detail ? 'detail' : download ? 'download' : 'original', asset.mime_type || 'application/octet-stream', asset.file_name, started);
+    const hd = ['hd', 'hd-description', 'hd-download'].find(key => new URL(_request.url).searchParams.get(key) === '1') as 'hd' | 'hd-description' | 'hd-download' | undefined;
+    return await authorizedImageResponse(_request, asset.original_url, hd || (thumbnail ? 'thumbnail' : preview ? 'preview' : detail ? 'detail' : download ? 'download' : 'original'), asset.mime_type || 'application/octet-stream', asset.file_name, started);
   } catch {
     return new Response('Image unavailable', { status: 503, headers: privateImageHeaders });
   }

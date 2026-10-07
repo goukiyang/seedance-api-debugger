@@ -118,6 +118,7 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
   itemsRef.current = items;
   const [counts, setCounts] = useState(noCounts);
   const [total, setTotal] = useState(0);
+  const [templateKind, setTemplateKind] = useState(''), [templateMedium, setTemplateMedium] = useState('');
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -147,7 +148,7 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
   const explicitPosition = useRef(false);
   loadedCount.current = items.length;
   const scope = `${encodeURIComponent(userId)}:${action}`;
-  const identity = `${scope}:${JSON.stringify([category, search])}`;
+  const identity = `${scope}:${JSON.stringify([category, search, templateKind, templateMedium])}`;
   const currentIdentity = useRef(identity);
   currentIdentity.current = identity;
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; lifetime.current++; sequence.current++; previewNavigationSequence.current++; lock.current = false; }; }, []);
@@ -161,16 +162,19 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
   useEffect(() => {
     let savedCategory: ContentCategory | 'all' = 'all';
     let savedQuery = '';
+    setTemplateKind(''); setTemplateMedium('');
     try {
       const fallbackScope = `${encodeURIComponent(userId)}:${action === 'like' ? 'favorite' : 'like'}`;
       const saved = JSON.parse(localStorage.getItem(`reaction-filters:${scope}`) || localStorage.getItem(`reaction-filters:${fallbackScope}`) || 'null');
       if (saved?.version === 1) {
+        setTemplateKind(['definition', 'workpage'].includes(saved.templateKind) ? saved.templateKind : '');
+        setTemplateMedium(['image', 'video'].includes(saved.templateMedium) ? saved.templateMedium : '');
         if (categories.some(([id]) => id === saved.category)) savedCategory = saved.category;
         if (typeof saved.query === 'string' && saved.query.length <= 160) savedQuery = saved.query;
       }
     } catch {}
     explicitPosition.current = urlCategory !== null || urlQuery !== null || hasContent || Boolean(window.location.hash);
-    if (explicitPosition.current) { savedCategory = 'all'; savedQuery = ''; }
+    if (explicitPosition.current) { savedCategory = 'all'; savedQuery = ''; setTemplateKind(''); setTemplateMedium(''); }
     if (categories.some(([id]) => id === urlCategory)) savedCategory = urlCategory as ContentCategory | 'all';
     if (urlQuery !== null) savedQuery = urlQuery.slice(0, 160);
     setCategory(savedCategory); setQuery(savedQuery); setSearch(savedQuery.trim());
@@ -178,9 +182,9 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
   }, [scope, userId, action, urlCategory, urlQuery, hasContent]);
   useEffect(() => {
     if (!preferencesReady) return;
-    try { localStorage.setItem(`reaction-filters:${scope}`, JSON.stringify({ version: 1, category, query })); }
+    try { localStorage.setItem(`reaction-filters:${scope}`, JSON.stringify({ version: 1, category, query, templateKind, templateMedium })); }
     catch { setStorageWarning('浏览器未允许保存设置，本次仍可正常使用。'); }
-  }, [preferencesReady, scope, category, query]);
+  }, [preferencesReady, scope, category, query, templateKind, templateMedium]);
   const restorationComplete = items.length >= targetCount.current || !cursor || (restorePagesLeft.current === 0 && !loading);
   const resetScroll = useRememberedScroll(`reactions:${identity}`, loaded && loadedIdentity === identity && restorationComplete, { localFallback: true, skipRestore: explicitPosition.current || interacted.current });
   useEffect(() => { if (!preferencesReady) return; const timer = setTimeout(() => setSearch(query.trim()), 250); return () => clearTimeout(timer); }, [query, preferencesReady]);
@@ -190,6 +194,7 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
     lock.current = true; setLoading(true); setError('');
     try {
       const params = new URLSearchParams({ action, category, q: search, limit: '24' });
+      if (category === 'template') { if (templateKind) params.set('templateKind', templateKind); if (templateMedium) params.set('templateMedium', templateMedium); }
       if (next) params.set('cursor', next);
       const response = await fetch(`/api/content-reactions?${params}`, { cache: 'no-store' });
       const data: ReactionListResponse & { error?: string } = await response.json();
@@ -201,7 +206,7 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
       return incoming;
     } catch (e) { if (serial === sequence.current && currentIdentity.current === identity) setError(e instanceof Error ? e.message : '列表读取失败'); return [] as ReactionListItem[]; }
     finally { if (serial === sequence.current && currentIdentity.current === identity) { lock.current = false; setLoading(false); } }
-  }, [action, category, search, identity, preferencesReady]);
+  }, [action, category, search, templateKind, templateMedium, identity, preferencesReady]);
   useEffect(() => {
     setItems([]); setLoaded(false); setLoadedIdentity(''); cursorRef.current = null; setCursor(null); setUndo(null); setCounts(noCounts); setTotal(0); setMessage(''); setError('');
     targetCount.current = explicitPosition.current || resetRevision ? 24 : readRememberedCount(`reaction-count:${identity}`);
@@ -394,6 +399,7 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
     }
   }
   function resetPreferences() {
+    setTemplateKind(''); setTemplateMedium('');
     lifetime.current++; sequence.current++; lock.current = false;
     previewNavigationSequence.current++;
     resetScroll();
@@ -416,6 +422,7 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
   }
   if (!preferencesReady) return <p role="status">正在读取…</p>;
   return <section aria-label="我的喜欢">
+    {category === 'template' && <div className={styles.toolbar}><label>对象<select aria-label="模板对象" value={templateKind} onChange={event => setTemplateKind(event.target.value)}><option value="">全部</option><option value="definition">模板</option><option value="workpage">我的工作页</option></select></label><label>用途<select aria-label="模板用途" value={templateMedium} onChange={event => setTemplateMedium(event.target.value)}><option value="">全部</option><option value="image">图片</option><option value="video">视频</option></select></label></div>}
     <div className={styles.toolbar}><div className={styles.tabs}>{categories.map(([id, label]) => <button key={id} type="button" aria-pressed={category === id} onClick={() => setCategory(id)}>{label} {counts[id]}</button>)}</div><input type="search" aria-label="搜索喜欢的内容" placeholder="搜索内容" maxLength={160} value={query} onChange={event => setQuery(event.target.value)} /><span className={styles.muted}>最近喜欢 · {total} 项</span><button className={styles.command} type="button" aria-label="刷新列表" title="刷新列表" disabled={loading} onClick={() => { void load(); void revalidatePreview(); }}><RefreshCw size={16} /></button><button className={styles.command} type="button" aria-label="重置筛选和浏览位置（保留喜欢）" title="重置筛选和浏览位置（保留喜欢）" onClick={resetPreferences}><RotateCcw size={16} /></button></div>
     {error && <p role="alert">{error}<button className={styles.command} type="button" onClick={() => void load(cursor || undefined)}>重试</button></p>}
     {storageWarning && <p role="status">{storageWarning}</p>}
@@ -427,6 +434,8 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
       </div>
       <div className={styles.body}>{item.category === 'template' ? <TemplateFavoriteTitle contentKey={item.key} initialState={item.state} onChange={(state, act, active, previous) => changed(item, state, act, active, previous)}><h3 className={styles.title} title={item.content?.title || '内容已不可用'}>{item.content?.title || '内容已不可用'}</h3></TemplateFavoriteTitle> : <h3 className={styles.title}>{item.content?.title || '内容已不可用'}</h3>}{item.content?.owner && <UserIdentityBadge size="sm" user={item.content.owner} />}
         {item.content?.versionLabel && <span className={styles.muted}>版本：{item.content.versionLabel}</span>}
+        {item.content?.templateKind && <span className={styles.muted}>{item.content.templateKind === 'workpage' ? '我的工作页' : '模板'} · {item.content.templateMedium === 'image' ? '图片' : '视频'}</span>}
+        {item.content?.generationOrigin && <span className={styles.muted}>{item.content.generationOrigin.label}{item.content.generationOrigin.templateName ? ` · ${item.content.generationOrigin.templateName}` : ''}</span>}
         <div className={styles.actions}>{!['image', 'video', 'audio', 'template'].includes(item.category) && <ContentReactions contentKey={item.key} initialState={item.state} onChange={(state, act, active, previous) => changed(item, state, act, active, previous)} />}
           {item.content && <button className={styles.command} type="button" onClick={() => void open(item)}><ExternalLink size={15} /> {item.content.actionLabel}</button>}
           {item.content?.downloadUrl && <a className={styles.command} title="下载" aria-label="下载" href={item.content.downloadUrl}><Download size={16} /></a>}

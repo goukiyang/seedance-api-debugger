@@ -10,6 +10,7 @@ import { STUDIO_BATCH_LIMITS, type StudioBatchView } from './batch-contract';
 import { studioAssetUrl } from './media';
 import { studioVisibleAssetWhere } from './protected-assets';
 import { resolveStudioStyleReferences } from './style-groups';
+import { historicalSkills } from './skills';
 import type { StudioReferencePolicy } from './reference-policy';
 
 const PREFIX = 'studio_batch_v1:';
@@ -92,11 +93,13 @@ async function prepareBatch(owner: string, id: string) {
         if (first) {
           const before = JSON.parse((JSON.parse(first.value_json) as Prisma.ImageStudioTaskUncheckedCreateInput).snapshot_json as string);
           const now = JSON.parse(task.snapshot_json as string);
-          if (['globalContext', 'moduleContext', 'moduleRevision', 'settingsRevision', 'styleGroups', 'fixedReferenceImages'].some(field => JSON.stringify(before[field]) !== JSON.stringify(now[field]))) throw new StudioError('准备期间模板或价格发生变化，未开始生成，请重新核对');
+          const skillInput = (snapshot: Record<string, unknown>) => Array.isArray(snapshot.skills) ? snapshot.skills.map(skill => ({ id: skill.id, prompt: skill.prompt, promptVersion: skill.promptVersion, ownerId: skill.ownerId })) : [];
+          if (['globalContext', 'moduleContext', 'moduleRevision', 'settingsRevision', 'styleGroups', 'fixedReferenceImages'].some(field => JSON.stringify(before[field]) !== JSON.stringify(now[field]))
+            || JSON.stringify(skillInput(before)) !== JSON.stringify(skillInput(now))) throw new StudioError('准备期间模板或价格发生变化，未开始生成，请重新核对');
         }
         task.id = `${id}-${item.ordinal}-a0`; task.batch_id = id; task.ordinal = item.ordinal;
         task.context += `\n\n本批条目 ${item.ordinal}/${batch.total}。严格保留原正文中的明确条件；仅对正文未指定且允许随机的细节作不同选择，不照抄本批其他条目、不改变演化档数或组合图排版。`;
-        task.snapshot_json = JSON.stringify({ ...JSON.parse(task.snapshot_json as string), batchId: id, requestId: batch.requestId, persistentBatchId: id, batchOrdinal: item.ordinal });
+        task.snapshot_json = JSON.stringify({ ...JSON.parse(task.snapshot_json as string), effectiveContext: task.context, batchId: id, requestId: batch.requestId, persistentBatchId: id, batchOrdinal: item.ordinal });
         await tx.platformSetting.create({ data: { key: itemKey(id, item.ordinal), value_json: JSON.stringify(task), updated_by: owner } });
         current.prepared = true; batch.prepared += 1;
         await writeBatch(tx, row, batch);
@@ -206,6 +209,7 @@ export async function dispatchStudioBatches() {
         const assets = await tx.asset.findMany({ where: { id: { in: allIds }, status: 'active', type: 'image' }, select: { id: true, owner_id: true, hash: true } });
         if (assets.length !== allIds.length || assets.some(asset => asset.owner_id !== snapshot.authorizedReferenceOwners?.[asset.id] || snapshot.referenceImages.find((reference: { id: string }) => reference.id === asset.id)?.hash !== asset.hash)) throw new StudioError('本批素材归属或内容已变化，未派发新任务');
         if (snapshot.styleGroupIds?.length) await resolveStudioStyleReferences(user, snapshot.styleGroupIds, tx);
+        await historicalSkills(user, snapshot.skills, tx);
         const settingsRow = await tx.platformSetting.findUnique({ where: { key: IMAGE_STUDIO_SETTING_KEY } });
         const currentPrice = ({ ...DEFAULT_STUDIO_PRICES, ...(settingsRow ? JSON.parse(settingsRow.value_json).prices : {}) } as Record<string, number | null>)[String(data.model)];
         if (currentPrice !== data.unit_credits || batch.committedCredits + Number(data.unit_credits) > batch.budget) throw new StudioError('价格变化或预算不足，已停止新派发；请核对后开始新批次');

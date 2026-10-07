@@ -1,0 +1,19 @@
+[Unit]
+Description=SD2 private HD derivatives
+After=network.target
+
+[Service]
+Type=simple
+User=gouki
+WorkingDirectory=/srv/video-api-debugger/app
+Environment=NODE_ENV=production
+Environment=VIPS_CONCURRENCY=2
+Environment=UV_THREADPOOL_SIZE=2
+ExecStart=/usr/bin/flock -n /srv/video-api-debugger/app/storage/hd-worker.lock /usr/bin/node --import tsx scripts/process-hd-derivatives.ts worker
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=180
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

@@ -103,6 +103,7 @@ type ReferenceAlbumItem = {
 };
 
 type AssetLibraryItem = {
+  generationOrigin?: { label: string; templateName?: string };
   id: AssetLibraryItemId;
   kind: 'video' | 'image' | 'audio';
   source: 'video_task' | 'asset' | 'reference_image';
@@ -2336,6 +2337,7 @@ function AssetsPageContent() {
                       {(item.status === 'succeeded' || item.source !== 'video_task') && <ContentReactions contentKey={item.id} overlay />}
                     </span>
                     <div className="asset-card-meta">
+                      {item.generationOrigin && <small>{item.generationOrigin.label}{item.generationOrigin.templateName ? ` · ${item.generationOrigin.templateName}` : ''}</small>}
                       <div className="asset-card-title-row">
                         <strong>{shortText(item.title, '未命名资产', 34)}</strong>
                         {item.canEnhanceVideo && (

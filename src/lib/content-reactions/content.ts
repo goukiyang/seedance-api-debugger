@@ -1,5 +1,6 @@
 import 'server-only';
 import { prisma } from '@/lib/prisma';
+import { assetGenerationOrigin, generationOrigins } from '@/lib/assets/generation-origin';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 import { isTaskHiddenFromRegularUsers } from '@/lib/tasks/retention';
@@ -81,6 +82,7 @@ export async function resolveContent(user: SessionUser, input: ContentKey): Prom
       }
       if (!allowed) return null;
       const item = summary(input, asset.type as ContentCategory, asset.file_name || '素材', `/assets?content=${encodeURIComponent(input)}`);
+      if (asset.type === 'image') item.generationOrigin = assetGenerationOrigin(asset, await generationOrigins(user, [asset]));
       item.owner = await owner(asset.owner_id);
       if (user.account_type === 'internal') {
         if (asset.owner_id === user.id || user.role === 'admin') item.reuse = { assetId: id };
@@ -108,6 +110,7 @@ export async function resolveContent(user: SessionUser, input: ContentKey): Prom
       const row = await prisma.imageStudioPreset.findUnique({ where: { id } });
       if (!row || !canViewStudioPreset(user, row)) return null;
       const item = summary(input, 'template', row.name, `/template-studio?type=image&presetId=${id}`);
+      item.templateKind = 'definition'; item.templateMedium = 'image';
       item.actionLabel = '使用模板'; item.versionLabel = row.updated_at.toISOString(); item.owner = await owner(row.owner_id);
       return { summary: item };
     }
@@ -119,7 +122,8 @@ export async function resolveContent(user: SessionUser, input: ContentKey): Prom
         if (!source || !canViewStudioPreset(user, source)) return null;
       }
       const item = summary(input, 'template', row.name, `/template-studio?type=image&moduleId=${id}`);
-      item.actionLabel = '使用模板'; item.versionLabel = String(row.revision); item.owner = await owner(row.owner_id);
+      item.templateKind = 'workpage'; item.templateMedium = 'image';
+      item.actionLabel = '继续编辑'; item.versionLabel = String(row.revision); item.owner = await owner(row.owner_id);
       return { summary: item };
     }
     if (type === 'video_template') {
@@ -127,6 +131,7 @@ export async function resolveContent(user: SessionUser, input: ContentKey): Prom
       if (!row || row.status === 'archived' || !(row.owner_user_id === user.id || user.role === 'admin' || (row.status === 'published' && row.visibility === 'shared' && row.published_version))) return null;
       const manages = row.owner_user_id === user.id || user.role === 'admin';
       const item = summary(input, 'template', manages ? row.name : row.published_version!.name, `/template-studio?type=video&templateId=${id}&templateSource=studio`);
+      item.templateKind = 'definition'; item.templateMedium = 'video';
       item.actionLabel = '使用模板'; item.versionLabel = manages ? `修订 ${row.revision}` : `V${row.published_version!.version_number}`; item.owner = await owner(row.owner_user_id);
       return { summary: item };
     }
@@ -138,13 +143,15 @@ export async function resolveContent(user: SessionUser, input: ContentKey): Prom
         if (source.template.status === 'archived') return null;
       }
       const item = summary(input, 'template', row.name, `/template-studio?type=video&draftId=${id}`);
-      item.actionLabel = '使用模板'; item.versionLabel = String(row.revision); item.owner = await owner(user.id);
+      item.templateKind = 'workpage'; item.templateMedium = 'video';
+      item.actionLabel = '继续编辑'; item.versionLabel = String(row.revision); item.owner = await owner(user.id);
       return { summary: item };
     }
     if (type === 'legacy_template') {
       const row = await prisma.generationTemplate.findFirst({ where: { id, status: 'active' } });
       if (!row) return null;
       const item = summary(input, 'template', row.name, `/template-studio?type=video&templateId=${id}&templateSource=legacy`);
+      item.templateKind = 'definition'; item.templateMedium = 'video';
       item.actionLabel = '使用模板'; item.versionLabel = String(row.version);
       return { summary: item };
     }

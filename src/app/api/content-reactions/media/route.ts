@@ -13,11 +13,15 @@ export async function GET(request: Request) {
     const resolved = await resolveContent(await reactionUser(), parseContentKey(params.get('key')));
     if (!resolved?.source) throw new ReactionError('内容已不可用或无权访问', 404);
     const variant = params.get('variant') || 'preview';
-    if (!['preview', 'detail', 'thumbnail', 'original', 'download'].includes(variant)) throw new ReactionError('资源类型无效');
-    if (['original', 'download'].includes(variant) && !resolved.summary.downloadUrl) throw new ReactionError('无权下载原件', 403);
+    if (!['preview', 'detail', 'thumbnail', 'original', 'download', 'hd', 'hd-description', 'hd-download'].includes(variant)) throw new ReactionError('资源类型无效');
+    if (['original', 'download', 'hd', 'hd-description', 'hd-download'].includes(variant) && !resolved.summary.downloadUrl) throw new ReactionError('无权下载原件', 403);
     const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie', 'X-Content-Type-Options': 'nosniff' };
     if (['preview', 'detail'].includes(variant) && !resolved.summary.previewUrl) throw new ReactionError('无权预览原件', 403);
-    if (resolved.source.referenceId) return NextResponse.redirect(new URL(`/api/reference-images/${resolved.source.referenceId}/content?variant=${variant}`, request.url), { status: 302, headers });
+    if (resolved.source.referenceId) {
+      const target = new URL(`/api/reference-images/${resolved.source.referenceId}/content?variant=${variant}`, request.url);
+      for (const key of ['hd-version', 'hd-priority']) if (params.has(key)) target.searchParams.set(key, params.get(key)!);
+      return NextResponse.redirect(target, { status: 302, headers });
+    }
     if (resolved.summary.category === 'image') {
       return await authorizedImageResponse(request, variant === 'thumbnail' ? resolved.source.thumbnail || resolved.source.url : resolved.source.url, variant as ImageVariant, resolved.source.mimeType || 'application/octet-stream', resolved.source.fileName || resolved.summary.title, started);
     }
