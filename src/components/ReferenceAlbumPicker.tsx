@@ -90,7 +90,7 @@ function getConfirmFailure(result: ReferenceAlbumPickerConfirmResult) {
 
 function AlbumThumbnail({ image }: { image: ReferenceImageItem }) {
   const [failed, setFailed] = useState(false);
-  const src = image.thumbnail_url || `/api/reference-images/${encodeURIComponent(image.id)}/content?variant=thumbnail`;
+  const src = (!image.asset?.type || image.asset.type === 'image') ? `/api/reference-images/${encodeURIComponent(image.id)}/content?variant=thumbnail` : image.thumbnail_url;
   useEffect(() => setFailed(false), [src]);
   if (failed || !src) return <div className="album-picker-media-placeholder">暂无封面</div>;
   return <img src={src} alt={image.asset?.file_name || '素材封面'} loading="lazy" onError={() => setFailed(true)} />;

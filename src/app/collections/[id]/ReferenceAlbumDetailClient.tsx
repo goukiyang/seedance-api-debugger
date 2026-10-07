@@ -87,9 +87,10 @@ function isImageItem(image: ReferenceImageItem) {
 
 function AlbumDetailThumbnail({ image, alt }: { image: ReferenceImageItem; alt: string }) {
   const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [image.thumbnail_url]);
-  if (failed || !image.thumbnail_url) return <div className="album-image-media-placeholder">暂无封面</div>;
-  return <img src={image.thumbnail_url} alt={alt} loading="lazy" onError={() => setFailed(true)} />;
+  const src = isImageItem(image) ? `/api/reference-images/${encodeURIComponent(image.id)}/content?variant=thumbnail` : image.thumbnail_url;
+  useEffect(() => setFailed(false), [src]);
+  if (failed || !src) return <div className="album-image-media-placeholder">暂无封面</div>;
+  return <img src={src} alt={alt} loading="lazy" onError={() => setFailed(true)} />;
 }
 
 function formatUploadProgressDetail(files: File[], file: File, index: number, progress: UploadProgressSnapshot) {

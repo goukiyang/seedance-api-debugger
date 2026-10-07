@@ -379,7 +379,10 @@ function assetMediaAspectRatio(item: Pick<AssetLibraryItem, 'ratio' | 'width' | 
 }
 
 function AssetLibraryThumbnail({ item }: { item: AssetLibraryItem }) {
-  const hasCover = Boolean(item.thumbnailUrl && (item.kind === 'image' || item.thumbnailUrl !== item.previewUrl));
+  const protectedThumbnail = item.kind === 'image' ? item.source === 'reference_image' && item.referenceImageId
+    ? `/api/reference-images/${encodeURIComponent(item.referenceImageId)}/content?variant=thumbnail`
+    : item.source === 'asset' && item.assetId ? `/api/content-reactions/media?key=${encodeURIComponent(`asset:${item.assetId}`)}&variant=thumbnail` : null : null;
+  const hasCover = Boolean(protectedThumbnail || item.thumbnailUrl && (item.kind === 'image' || item.thumbnailUrl !== item.previewUrl));
   const [failed, setFailed] = useState(!hasCover);
   const [useCheckedPreview, setUseCheckedPreview] = useState(false);
 
@@ -389,7 +392,7 @@ function AssetLibraryThumbnail({ item }: { item: AssetLibraryItem }) {
 
   const previewUrl = useCheckedPreview && item.kind === 'image' && item.source === 'asset'
     ? `/api/content-reactions/media?key=${encodeURIComponent(item.id)}&variant=preview`
-    : item.thumbnailUrl as string;
+    : protectedThumbnail || item.thumbnailUrl as string;
 
   return <img
     src={previewUrl}
