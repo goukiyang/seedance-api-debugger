@@ -50,7 +50,7 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
     const check = () => { if (!request || !referenceContextMatches(request)) throw new Error('画布、节点或账号已变化，未覆盖原输入，请重新打开参考图'); };
     check();
     if (!request || !items.length || items.length > request.capacity || items.some(item => item.type !== 'image')) throw new Error('所选参考图数量或类型无效');
-    const references = [];
+    const references: Array<{ referenceImageId: string; assetId: string | null; title: string; width: number | null; height: number | null }> = [];
     for (const item of items) {
       check();
       let referenceImageId = item.referenceImageId;
