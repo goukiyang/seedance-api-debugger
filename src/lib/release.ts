@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '生成完成时后台标签温和提醒；参考图区与结果卡更紧凑，清空操作归位；图片先显示缩略图并并行读取清晰预览，原图和图片包交给浏览器下载。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '上下文粘贴可用时亮起，数量设置更紧凑；当前模板可筛选自己喜欢的生成结果；大图两侧选图入口靠近中央对比按钮。' };
 export function newerRelease(remote: string, local: string) {
   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
   const a = parse(remote), b = parse(local);

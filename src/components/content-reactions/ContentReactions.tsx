@@ -15,6 +15,7 @@ const queued = new Map<string, Set<ContentKey>>();
 const pending = new Map<string, ReactionMutation>();
 let timer: ReturnType<typeof setTimeout> | undefined;
 const cacheKey = (userId: string, key: ContentKey) => `${userId}/${key}`;
+export const cachedReactionState = (userId: string, key: ContentKey) => entries.get(cacheKey(userId, key))?.state;
 const emit = () => listeners.forEach(listener => listener());
 let channel: BroadcastChannel | null = null;
 

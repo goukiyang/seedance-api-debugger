@@ -490,12 +490,20 @@ export async function claimStudioTask() {
   return changed.count ? { ...candidate, status: 'running', lease_token: leaseToken } : null;
 }
 
-export async function listStudioTasks(ownerId: string, cursor?: string, moduleId?: string, isAdmin = false, taskId?: string, requestId?: string) {
+export async function listStudioTasks(ownerId: string, cursor?: string, moduleId?: string, isAdmin = false, taskId?: string, requestId?: string, likedOnly = false) {
   if (moduleId && !validStudioModuleId(moduleId, ownerId)) throw new StudioError('模块编号无效');
   if (taskId !== undefined && (typeof taskId !== 'string' || !taskId || taskId.length > 120)) throw new StudioError('历史生成记录无效');
   if (requestId !== undefined && !/^[a-zA-Z0-9-]{16,80}$/.test(requestId)) throw new StudioError('提交编号无效');
   const where: Prisma.ImageStudioTaskWhereInput = { ...studioTemplateTaskWhere(ownerId, moduleId, taskId !== undefined || Boolean(requestId)),
     ...(requestId ? { batch_id: createHash('sha256').update(`${ownerId}:${requestId}`).digest('hex') } : {}) };
+  if (likedOnly) {
+    if (!moduleId || taskId || requestId) throw new StudioError('请选择当前模板的喜欢结果');
+    // Match the shared heart's legacy private-favorite compatibility, never another viewer's marks.
+    const marks = await prisma.contentReaction.findMany({ where: { user_id: ownerId, content_key: { startsWith: 'asset:' }, OR: [{ liked: true }, { favorited: true }] }, select: { content_key: true } });
+    const assets = await prisma.asset.findMany({ where: { id: { in: marks.map(mark => mark.content_key.slice(6)) }, owner_id: ownerId, status: 'active' }, select: { id: true } });
+    where.asset_id = { in: assets.map(asset => asset.id) };
+    where.status = 'succeeded';
+  }
   const rows = taskId !== undefined
     ? await prisma.imageStudioTask.findFirst({ where: { ...where, id: taskId } }).then(task => task ? [task] : [])
     : await prisma.imageStudioTask.findMany({ where,

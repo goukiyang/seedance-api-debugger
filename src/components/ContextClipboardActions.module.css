@@ -6,3 +6,5 @@
 .bar .button:active:not(:disabled) { filter: brightness(.92); }
 .bar .button:focus-visible { outline: 2px solid #79daca; outline-offset: 3px; }
 .bar .button:disabled { opacity: .5; cursor: not-allowed; }
+.bar .button[data-readable=true]:not(:disabled) { background: #18483e; border-color: #79daca; color: #c2ffec; }
+.bar .button[data-readable=true]:hover:not(:disabled) { background: #205a4d; }

@@ -103,7 +103,7 @@
 .imageSectionHeading > strong { font-size: 14px; }
 .auxiliarySection { margin: 20px 0; padding: 4px 0 16px; border-top: 1px solid var(--border, #364344); border-bottom: 1px solid var(--border, #364344); }
 .referenceLimits { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; margin: 12px 0; font-size: 12px; }
-.referenceLimits label { display: inline-flex; align-items: center; gap: 6px; }
+.referenceLimits label, .primaryRange { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; white-space: nowrap; }
 .referenceLimits select { width: auto; min-width: 60px; padding: 5px 7px !important; }
 .moduleSettingsActions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; margin: 22px 0 26px; padding-top: 16px; border-top: 1px solid #2d383d; }
 .moduleSettingsActions > p { min-width: 0; margin: 0; color: #adb6bd; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
@@ -341,6 +341,7 @@
 .generationFeedback[data-tone="warning"] { color: #f5c76b; }
 .generationFeedback[data-tone="error"] { color: #ffb4ab; }
 .dialog { box-sizing: border-box; margin: auto; width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; background: #171c1f; color: #eef0f2; border: 1px solid #465057; border-radius: 8px; padding: 24px; }
+.dialog.contextDialog { width: min(820px, calc(100vw - 32px)); }
 .dialog > p { margin: 16px 0; line-height: 1.6; }
 .dialog::backdrop { background: rgb(0 0 0 / 65%); }
 .dialog select { width: 100%; }

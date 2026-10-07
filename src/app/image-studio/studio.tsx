@@ -16,6 +16,7 @@ import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
 import { scrollToWorkbenchHeader } from '@/lib/navigation/scroll-to-workbench-header';
 import { replaceImageModuleLocation } from '@/lib/navigation/image-module-location';
 import { useResultPages } from './use-result-pages';
+import { useLikedStudioResults } from './liked-results';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useUnsavedNavigation } from '@/lib/hooks/use-unsaved-navigation';
@@ -1666,10 +1667,27 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     : !prompt.trim() && !effectiveReferenceCount && !hasContext && !(batch.mode === 'batch' && batch.source === 'folder') ? { message: '请填写画面要求，或添加主图。', tone: 'info' }
     : batch.mode === 'single' && (!Number.isInteger(count) || count < 1 || count > 8) ? { message: '生成张数应为1到8的整数，请修改张数。', tone: 'warning' }
     : !ready ? { message: '生成条件尚未就绪，请检查模型和上下文设置。', tone: 'warning' } : null;
-  const previewableTasks = tasks.filter(task => studioTaskHasDeliveredAsset(task) && Boolean(task.asset.id));
+  const likedResults = useLikedStudioResults<StudioTask>(userId, module.id, visible && !hidden && resultView === 'images', templateWorkbench);
+  useEffect(() => { if (likedResults.liked) setResultView('images'); }, [likedResults.liked, resultView]);
+  useEffect(() => {
+    if (!likedResults.liked || likedResults.loading) return;
+    const ids = new Set(likedResults.tasks.map(task => task.id));
+    setSelected(current => current.every(id => ids.has(id)) ? current : current.filter(id => ids.has(id)));
+  }, [likedResults.liked, likedResults.loading, likedResults.tasks]);
+  const resultTasks = likedResults.liked ? likedResults.tasks.filter(task => !deletedIds.current.has(task.id)) : tasks;
+  const resultError = likedResults.liked ? likedResults.error : tasksError;
+  const resultLoading = likedResults.liked ? likedResults.loading : loadingTasks;
+  const resultBusy = likedResults.liked ? likedResults.loading : loadingTasks || templateWorkbench && taskReadAction !== 'idle';
+  const resultCursor = likedResults.liked ? likedResults.nextCursor : nextCursor;
+  const refreshResults = () => { if (likedResults.liked) likedResults.refresh(); else void loadTasks(); };
+  const previewableTasks = resultTasks.filter(task => studioTaskHasDeliveredAsset(task) && Boolean(task.asset.id));
   const readNextResultPage = useCallback(async () => { if (nextCursor) await loadTasks(nextCursor); }, [loadTasks, nextCursor]);
-  const resultPages = useResultPages({ items: tasks, storageKey: `sd2-image-studio-result-page:${taskReadScope}`, visible: !hidden && resultView === 'images' && tasks.length > 0,
+  const allResultPages = useResultPages({ items: tasks, storageKey: `sd2-image-studio-result-page:${taskReadScope}`, visible: !hidden && !likedResults.liked && resultView === 'images' && tasks.length > 0,
     busy: loadingTasks || (templateWorkbench && taskReadAction !== 'idle'), error: Boolean(tasksError), hasMore: Boolean(nextCursor), loadMore: readNextResultPage, currentId: preview?.taskId || selectedResultId });
+  const likedResultPages = useResultPages({ items: likedResults.tasks.filter(task => !deletedIds.current.has(task.id)), storageKey: `sd2-image-studio-liked-result-page:${taskReadScope}`, visible: !hidden && likedResults.liked && resultView === 'images' && resultTasks.length > 0,
+    busy: likedResults.loading, error: Boolean(likedResults.error), hasMore: Boolean(likedResults.nextCursor), loadMore: likedResults.more, currentId: preview?.taskId || selectedResultId });
+  const resultPages = likedResults.liked ? likedResultPages : allResultPages;
+  function chooseResultFilter(liked: boolean) { setSelected([]); setDownloadMode(false); likedResults.choose(liked); setResultView('images'); }
   function openTaskPreview(task: StudioTask) {
     if (studioTaskHasDeliveredAsset(task)) { resultPages.goToId(task.id); setPreview(studioTaskPreviewState(task)); }
   }
@@ -1940,18 +1958,19 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       </section>
       <section className={styles.outputs} aria-label="生成结果">
         <header className={styles.header}><h2>生成结果</h2><div className={styles.counts}>
-          <button type="button" aria-pressed={resultView === 'images'} onClick={() => setResultView('images')}>图片</button><button type="button" aria-pressed={resultView === 'batch'} onClick={() => setResultView('batch')}>批次</button>
+          {templateWorkbench && <button type="button" title={likedResults.liked ? '返回当前模板全部结果' : '只看当前模板中我喜欢的结果'} aria-label={likedResults.liked ? '返回当前模板全部结果' : '只看当前模板中我喜欢的结果'} aria-pressed={likedResults.liked} onClick={() => chooseResultFilter(!likedResults.liked)}><Heart size={16} fill={likedResults.liked ? 'currentColor' : 'none'} />喜欢</button>}
+          <button type="button" aria-pressed={resultView === 'images' && !likedResults.liked} onClick={() => chooseResultFilter(false)}>图片</button><button type="button" aria-pressed={resultView === 'batch'} onClick={() => { likedResults.choose(false); setResultView('batch'); }}>批次</button>
           {!downloadMode ? <button type="button" disabled={downloadBusy} onClick={() => { setSelected([]); setDownloadMode(true); }}><Download size={16} />下载</button> : <div className={styles.downloadModeBar}><span>已选 {selected.length} 张</span><button type="button" disabled={!selected.length || downloadBusy} onClick={() => void download(selected)}>{downloadBusy ? '准备中' : '确认下载'}</button><button type="button" disabled={downloadBusy} onClick={() => { setSelected([]); setDownloadMode(false); }}>取消</button></div>}
-          <button type="button" title="刷新记录" aria-label="刷新记录" className={templateWorkbench ? 'sd2-loading-surface' : undefined} data-busy={templateWorkbench && taskReadAction === 'refresh'} disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks()}><RefreshCw size={16} /></button>
+          <button type="button" title="刷新记录" aria-label="刷新记录" className={templateWorkbench ? 'sd2-loading-surface' : undefined} data-busy={likedResults.liked ? likedResults.loading : templateWorkbench && taskReadAction === 'refresh'} disabled={resultBusy} onClick={refreshResults}><RefreshCw size={16} /></button>
         </div></header>
         {batch.id && resultView === 'images' && <BatchResults key={`${userId}:${batch.id}:delivery`} id={batch.id} userId={userId} deliveryOnly autoPack={batch.pack} />}
         {batch.busy && batch.localPreviews.length > 0 && <div className={styles.grid} aria-label="本批准备素材">{batch.localPreviews.map((src, index) => <article key={src} className={styles.result}><div className={styles.batchInputPreview}><img src={src} alt={`本批主图 ${index + 1}`} /></div><p role="status">准备中</p></article>)}</div>}
         {resultView === 'batch' ? batch.id ? <BatchResults key={`${userId}:${batch.id}`} id={batch.id} userId={userId} autoPack={batch.pack} /> : <p>暂无选中批次，可开始批量生成或从顶部“我的批次”找回。</p> : <>
-        {tasksError && <p role="alert" className={styles.error}>{tasksError}{templateWorkbench && <button type="button" disabled={taskReadAction !== 'idle'} onClick={() => void loadTasks(taskRetryCursor)}>重试读取记录</button>}</p>}
+        {resultError && <p role="alert" className={styles.error}>{resultError}{templateWorkbench && <button type="button" disabled={resultBusy} onClick={() => { if (likedResults.liked) likedResults.refresh(); else void loadTasks(taskRetryCursor); }}>重试读取记录</button>}</p>}
         {downloadReady && <p role="status">已交给浏览器下载。<a href={downloadReady.url} download={downloadReady.name}>再次下载</a></p>}
-        {loadingTasks && (tasks.length ? <LoadingStatus>正在更新生成记录</LoadingStatus> : <LoadingSkeleton label="正在读取生成记录" grid />)}
-        {templateWorkbench && taskReadAction === 'refresh' && <LoadingStatus>正在刷新记录，已有图片仍保留</LoadingStatus>}
-        {!loadingTasks && !tasks.length && !tasksError && <div className={styles.empty}>暂无生成记录</div>}
+        {resultLoading && (resultTasks.length ? <LoadingStatus>{likedResults.liked ? '正在更新喜欢结果' : '正在更新生成记录'}</LoadingStatus> : <LoadingSkeleton label={likedResults.liked ? '正在读取喜欢结果' : '正在读取生成记录'} grid />)}
+        {!likedResults.liked && templateWorkbench && taskReadAction === 'refresh' && <LoadingStatus>正在刷新记录，已有图片仍保留</LoadingStatus>}
+        {!resultLoading && !resultTasks.length && !resultError && <div className={styles.empty}>{likedResults.liked ? '当前模板还没有喜欢的结果' : '暂无生成记录'}</div>}
         <div ref={resultPages.gridRef} className={styles.grid} data-result-pages data-page-capacity={resultPages.capacity}>{resultPages.pageItems.map(task => <article key={task.id} className={styles.result} data-result-id={task.id}>
           <div className={`${styles.resultMedia} ${!studioTaskHasDeliveredAsset(task) ? styles.pendingResultMedia : ''}`} data-reaction-surface>{studioTaskHasDeliveredAsset(task) ? <>
             {task.asset.id && <ContentReactions contentKey={`asset:${task.asset.id}`} overlay />}
@@ -2001,12 +2020,12 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           </div>{copyFeedback?.id === task.id && <span className={styles.copyFeedback} role="status" aria-live="polite">{copyFeedback.text}</span>}{task.error && <p className={styles.error}>{task.error}</p>}
           {task.delivery?.checkpointRetained && task.status === 'uncertain' && <p className={styles.muted}>恢复资料暂留供协查，已退款任务不能自动领取原图。请联系管理员。</p>}
         </article>)}</div>
-        {templateWorkbench && taskReadAction === 'more' && <LoadingStatus>正在读取更多记录</LoadingStatus>}
-        {tasks.length > 0 && <nav className={`${styles.pagination} ${styles.resultPagination}`} aria-label="图片结果分页">
-          <button type="button" aria-label="上一页图片" title="上一页图片" disabled={resultPages.start === 0 || (resultPages.restoring && !tasksError) || (templateWorkbench && taskReadAction !== 'idle')} onClick={resultPages.previous}><ChevronRight size={17} className={styles.previousPageIcon} /></button>
-          <span role="status">第 {resultPages.page} / {resultPages.pages}{nextCursor ? '+' : ''} 页</span>
-          <button type="button" aria-label="下一页图片" title={resultPages.start + resultPages.capacity >= tasks.length && nextCursor ? '读取下一批并翻页' : '下一页图片'} disabled={!resultPages.canNext || resultPages.restoring || (templateWorkbench && taskReadAction !== 'idle')} onClick={resultPages.next}><ChevronRight size={17} /></button>
-          {(resultPages.start > 0 || tasksError) && <button type="button" aria-label="回到第一页图片" title="回到第一页图片" disabled={(resultPages.restoring && !tasksError) || (templateWorkbench && taskReadAction !== 'idle')} onClick={resultPages.reset}><RotateCcw size={15} /></button>}
+        {!likedResults.liked && templateWorkbench && taskReadAction === 'more' && <LoadingStatus>正在读取更多记录</LoadingStatus>}
+        {resultTasks.length > 0 && <nav className={`${styles.pagination} ${styles.resultPagination}`} aria-label="图片结果分页">
+          <button type="button" aria-label="上一页图片" title="上一页图片" disabled={resultPages.start === 0 || (resultPages.restoring && !resultError) || resultBusy} onClick={resultPages.previous}><ChevronRight size={17} className={styles.previousPageIcon} /></button>
+          <span role="status">第 {resultPages.page} / {resultPages.pages}{resultCursor ? '+' : ''} 页</span>
+          <button type="button" aria-label="下一页图片" title={resultPages.start + resultPages.capacity >= resultTasks.length && resultCursor ? '读取下一批并翻页' : '下一页图片'} disabled={!resultPages.canNext || resultPages.restoring || resultBusy} onClick={resultPages.next}><ChevronRight size={17} /></button>
+          {(resultPages.start > 0 || resultError) && <button type="button" aria-label="回到第一页图片" title="回到第一页图片" disabled={(resultPages.restoring && !resultError) || resultBusy} onClick={resultPages.reset}><RotateCcw size={15} /></button>}
         </nav>}
         </>}
       </section>
@@ -2073,7 +2092,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       {deleteError && <p role="alert" className={styles.error}>{deleteError}</p>}
       <div className={styles.resultActions}><button type="button" autoFocus disabled={deleting} onClick={() => setDeleteTarget(null)}>取消</button><button type="button" className={styles.danger} disabled={deleting} onClick={() => void deleteResult()}><Trash2 size={16} />{deleting ? '删除中' : '确认删除'}</button></div>
     </dialog>
-    <dialog ref={moduleDialog} className={styles.dialog} onPaste={event => {
+    <dialog ref={moduleDialog} className={`${styles.dialog} ${styles.contextDialog}`} onPaste={event => {
       if (!fixedEditable || assetPickerOpen) return;
       const files = Array.from(event.clipboardData.items).filter(item => item.kind === 'file' && item.type.startsWith('image/')).map(item => item.getAsFile()).filter((file): file is File => Boolean(file));
       if (files.length) { event.preventDefault(); event.stopPropagation(); void addImages(files, true); }
@@ -2086,21 +2105,20 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         <textarea ref={moduleContextInput} aria-label="模块上下文" rows={12} maxLength={20000} value={moduleContext} onCompositionStart={() => setContextComposing(true)} onCompositionEnd={event => { setContextComposing(false); changeModuleContext(event.currentTarget.value); }} onChange={event => changeModuleContext(event.target.value)} />
       </> : <p className={styles.muted}>共享模板的内部上下文由创建者维护，生成时自动使用。</p>}
       <div className={styles.referenceLimits}>
-        <label>主图最少 <select aria-label="主图最少张数" value={primaryMin} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setPrimaryMin(Number(event.target.value))}>
-          {Array.from({ length: referenceLimit + 1 }, (_, value) => <option key={value} value={value}>{value} 张</option>)}
-        </select></label>
-        <label>主图最多 <select aria-label="模板主图最多张数" value={referenceLimit} disabled={submitting || Boolean(pendingSubmission)} onChange={event => {
+        <div className={styles.primaryRange} role="group" aria-label="主图张数范围"><span>主图</span><select aria-label="主图最少张数" value={primaryMin} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setPrimaryMin(Number(event.target.value))}>
+          {Array.from({ length: referenceLimit + 1 }, (_, value) => <option key={value} value={value}>{value}</option>)}
+        </select><span aria-hidden="true">-</span><select aria-label="模板主图最多张数" value={referenceLimit} disabled={submitting || Boolean(pendingSubmission)} onChange={event => {
           const next = Number(event.target.value);
           if (next < primaryMin || next < images.length) { setError('主图上限不能低于最少要求或已选张数。'); return; }
           setReferenceLimit(next);
-        }}>{Array.from({ length: MAX_REFERENCE_IMAGES }, (_, index) => index + 1).map(value => <option key={value} value={value}>{value} 张</option>)}</select></label>
-        <label>风格图片最多 <select aria-label="模板风格图片最多张数" value={styleLimit} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setStyleLimit(Number(event.target.value))}>
+        }}>{Array.from({ length: MAX_REFERENCE_IMAGES }, (_, index) => index + 1).map(value => <option key={value} value={value}>{value}</option>)}</select><span>张</span></div>
+        <label>风格上限 <select aria-label="模板风格图片最多张数" value={styleLimit} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setStyleLimit(Number(event.target.value))}>
           {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>{value} 张</option>)}
         </select></label>
-        <label>参考图最多 <select aria-label="模板参考图最多张数" value={referenceImageLimit} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setReferenceImageLimit(Number(event.target.value))}>
+        <label>参考上限 <select aria-label="模板参考图最多张数" value={referenceImageLimit} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setReferenceImageLimit(Number(event.target.value))}>
           {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>{value} 张</option>)}
         </select></label>
-        <label>辅助参考总上限 <select aria-label="模板辅助参考总上限" value={auxiliaryLimit} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setAuxiliaryLimit(Number(event.target.value))}>
+        <label>辅助总上限 <select aria-label="模板辅助参考总上限" value={auxiliaryLimit} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setAuxiliaryLimit(Number(event.target.value))}>
           {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>{value} 张</option>)}
         </select></label>
       </div>
@@ -2144,7 +2162,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       </div>
     </dialog>
     {preview && <ZoomableImagePreview contentKey={preview.contentKey} src={preview.src} thumbnailSrc={preview.thumbnailSrc} alt={preview.alt} title={preview.title} previewKey={preview.taskId || preview.src} sourceVersion={preview.resultVersion || undefined} fileName={preview.fileName} safeDetails={{ ...preview.metadata, width: preview.width, height: preview.height, fileSize: preview.fileSize }} comparison={preview.comparison}
-      comparisonCandidates={[...taskComparisonCandidates(tasks.find(task => task.id === preview.taskId)), ...previewableTasks.filter(task => task.batchId === tasks.find(current => current.id === preview.taskId)?.batchId).map(task => ({ src: task.asset!.original_url, thumbnailSrc: task.asset!.thumbnail_url, alt: `生成结果 ${task.ordinal}`, contentKey: `asset:${task.asset!.id}` as const }))]}
+      comparisonCandidates={[...taskComparisonCandidates(resultTasks.find(task => task.id === preview.taskId)), ...previewableTasks.filter(task => task.batchId === resultTasks.find(current => current.id === preview.taskId)?.batchId).map(task => ({ src: task.asset!.original_url, thumbnailSrc: task.asset!.thumbnail_url, alt: `生成结果 ${task.ordinal}`, contentKey: `asset:${task.asset!.id}` as const }))]}
       hasNavigation={Boolean(preview.taskId && previewableTasks.length > 1)} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onImageLoaded={src => { if (preview.taskId && preview.src === src) observeResultVersion(preview.resultVersion || null); }} onClose={() => { setPreview(null); if (resumeModulePreview.current) { resumeModulePreview.current = false; moduleDialog.current?.showModal(); } }} />}
   </section>)}</>;
 }

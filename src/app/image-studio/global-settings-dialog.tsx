@@ -41,7 +41,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
       if (await editor.controller.save()) onClose();
     } finally { saveLock.current = false; }
   };
-  return <>{productDialog}{(<dialog ref={dialog} className={styles.dialog}>
+  return <>{productDialog}{(<dialog ref={dialog} className={`${styles.dialog} ${styles.contextDialog}`}>
     <header className={styles.header}><h2>通用设置</h2><button type="button" aria-label="关闭设置" onClick={close}><X size={20} /></button></header>
     {open && <GenerationCompletionSettings key={ownerId} ownerId={ownerId} />}
     {canEdit && <>{editor.draft && <>

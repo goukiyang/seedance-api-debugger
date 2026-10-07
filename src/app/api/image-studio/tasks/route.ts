@@ -23,10 +23,11 @@ export async function GET(request: NextRequest) {
   try {
     const params = request.nextUrl.searchParams;
     const moduleId = params.get('moduleId') || undefined;
-    const entering = params.get('attention') === 'entry' && moduleId && !params.has('cursor') && !params.has('taskId') && !params.has('requestId');
+    const likedOnly = params.get('liked') === '1';
+    const entering = !likedOnly && params.get('attention') === 'entry' && moduleId && !params.has('cursor') && !params.has('taskId') && !params.has('requestId');
     const entrySnapshot = entering ? await studioTemplateEntrySnapshot(user.id, moduleId) : undefined;
-    const result = await listStudioTasks(user.id, params.get('cursor') || undefined, moduleId, user.role === 'admin', params.get('taskId') || undefined, params.get('requestId') || undefined);
-    return NextResponse.json({ ...result, ...(entrySnapshot ? { entrySnapshot } : {}) }, { headers: { 'Cache-Control': 'private, no-store' } });
+    const result = await listStudioTasks(user.id, params.get('cursor') || undefined, moduleId, user.role === 'admin', params.get('taskId') || undefined, params.get('requestId') || undefined, likedOnly);
+    return NextResponse.json({ ...result, ...(entrySnapshot ? { entrySnapshot } : {}) }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   }
   catch { return NextResponse.json({ error: '生成记录读取失败，请重试' }, { status: 503 }); }
 }

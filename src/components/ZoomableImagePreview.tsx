@@ -581,16 +581,15 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
     onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onPointerMove={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()}
     onDoubleClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onKeyUp={event => event.stopPropagation()}>
     <div ref={toolbarRef} className={styles.toolbar}>
-      <div className={styles.sourceGroup}>{thumbnail('current')}
+      <div className={styles.sourceGroup}>
         {hasNavigation && <div className={styles.desktopNavigation}><button type="button" title="当前图上一张" aria-label="当前图上一张" onClick={onPrevious}><ArrowLeft size={16} /></button><button type="button" title="当前图下一张" aria-label="当前图下一张" onClick={onNext}><ArrowRight size={16} /></button></div>}
         {comparisonMode && <button type="button" title={linked ? '关闭两图联动，独立调整' : '开启两图联动'} aria-label={linked ? '关闭两图联动，独立调整' : '开启两图联动'} aria-pressed={linked} onClick={() => { userAction.current++; stopGestures(); setLinked(value => !value); }}>{linked ? <Lock size={16} /> : <Unlock size={16} />}</button>}
         <button ref={zoomTriggerRef} type="button" className={styles.zoomTrigger} title="缩放选中图" aria-label={`${safeSide === 'current' ? '当前图' : '对比图'}缩放 ${Math.round(selectedView.scale * 100)}%${comparisonMode && linked ? '，联动已开启' : ''}`} aria-expanded={controlsOpen === 'zoom'} aria-controls={controlsOpen === 'zoom' ? controlsId : undefined} aria-haspopup="dialog" onClick={() => setControlsOpen(value => value === 'zoom' ? null : 'zoom')}><ZoomIn size={16} /><span>{Math.round(selectedView.scale * 100)}%</span></button>
       </div>
-      <button type="button" className={styles.compareToggle} data-image-preview-compare aria-pressed={comparisonMode} title={comparisonMode ? '退出对比' : '开启对比'} aria-label={comparisonMode ? '退出对比' : '开启对比'}
+      <div className={styles.compareSources} role="group" aria-label="当前图与对比图">{thumbnail('current')}<button type="button" className={styles.compareToggle} data-image-preview-compare aria-pressed={comparisonMode} title={comparisonMode ? '退出对比' : '开启对比'} aria-label={comparisonMode ? '退出对比' : '开启对比'}
           onClick={() => { userAction.current++; stopGestures(); if (comparisonMode) { setComparisonMode(false); setActiveSide('current'); }
-            else if (comparisonImage) setComparisonMode(true); else { setControlsOpen(null); setPickerSide('comparison'); } }}><ArrowLeftRight size={16} /></button>
+            else if (comparisonImage) setComparisonMode(true); else { setControlsOpen(null); setPickerSide('comparison'); } }}><ArrowLeftRight size={16} /></button>{thumbnail('comparison')}</div>
       <div className={styles.actions}>
-        {thumbnail('comparison')}
         <button ref={moreTriggerRef} type="button" title="图片与对比更多操作" aria-label="图片与对比更多操作" aria-expanded={controlsOpen === 'more'} aria-controls={controlsOpen === 'more' ? controlsId : undefined} aria-haspopup="dialog" onClick={() => setControlsOpen(value => value === 'more' ? null : 'more')}><MoreHorizontal size={18} /></button>
         <button type="button" className={styles.closeButton} onClick={dismissPreview} title="关闭大图" aria-label="关闭大图"><X size={18} /></button>
       </div>
