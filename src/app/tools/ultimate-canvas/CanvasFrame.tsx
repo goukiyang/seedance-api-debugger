@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import CanvasReactions from '@/components/content-reactions/CanvasReactions';
+import { invalidateReaction } from '@/components/content-reactions/ContentReactions';
 import MediaPreview from '@/components/MediaPreview';
 import { useProductDialog } from '@/components/useProductDialog';
 import type { ContentKey } from '@/lib/content-reactions/types';
@@ -122,6 +123,12 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
     };
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin || event.source !== frame.current?.contentWindow) return;
+      if (event.data?.type === 'sd2-canvas-reactions-changed') {
+        if (typeof event.data !== 'object' || Array.isArray(event.data)) return;
+        const { key, userId: owner } = event.data;
+        if (owner === userId.current && typeof owner === 'string' && typeof key === 'string' && /^image_template:[a-zA-Z0-9_-]+$/.test(key)) invalidateReaction(owner, key as ContentKey);
+        return;
+      }
       if (event.data?.type === 'sd2-canvas-reference-request') {
         const value = event.data;
         if (!validId(value.requestId) || value.userId !== userId.current || !validId(value.nodeId)
@@ -257,6 +264,13 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
         void requestLeave(destination).then(approved => { if (approved) leave(destination); });
       } else lastLocation = { url: location.href, state: window.history.state };
     };
+    const relayReaction = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (typeof userId.current === 'string' && detail?.userId === userId.current && typeof detail.key === 'string' && /^image_template:[a-zA-Z0-9_-]+$/.test(detail.key)) {
+        frame.current?.contentWindow?.postMessage({ type: 'sd2-canvas-reactions-invalidated', userId: userId.current, key: detail.key }, window.location.origin);
+      }
+    };
+    window.addEventListener('sd2-reactions-changed', relayReaction);
     window.addEventListener('message', onMessage);
     document.addEventListener('click', onClick, true);
     document.addEventListener('pointerdown', clearApproval, true);
@@ -273,6 +287,7 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
       referenceReceipt.current = null;
       previewRequest.current += 1;
       window.removeEventListener('message', onMessage);
+      window.removeEventListener('sd2-reactions-changed', relayReaction);
       unregisterRisk();
       clearApproval();
       document.removeEventListener('click', onClick, true);

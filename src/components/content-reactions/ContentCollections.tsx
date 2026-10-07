@@ -6,7 +6,9 @@ import { Copy, Download, ExternalLink, Image as ImageIcon, Music, X, Undo2, Refr
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
 import MediaPreview from '@/components/MediaPreview';
+import { handImageDownloadToBrowser } from '@/lib/media/native-download';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import { RelativeTime } from '@/components/RelativeTime';
 import ContentReactions, { writeReaction } from './ContentReactions';
 import TemplateFavoriteTitle from './TemplateFavoriteTitle';
 import type { ContentCategory, ContentKey, ContentSummary, ReactionAction, ReactionListItem, ReactionListResponse, ReactionState } from '@/lib/content-reactions/types';
@@ -69,8 +71,8 @@ export function ContentPreview({ content, close, onPrevious, onNext, hasNavigati
     poster={content.thumbnailUrl || undefined}
     contentKey={content.key}
     previewKey={content.key}
-    details={<ContentReactions contentKey={content.key} />}
-    notice={navigationMessage ? <div role="status">{navigationMessage}{onRetryNavigation && <button type="button" onClick={onRetryNavigation}>继续查找</button>}</div> : undefined}
+    imageDownload={content.category === 'image' && content.downloadUrl ? () => handImageDownloadToBrowser(content.downloadUrl!, 'image.png') : undefined}
+    notice={<>{content.href.startsWith('/') && !content.href.startsWith('//') && <a href={content.href}><ExternalLink size={14} />查看原内容</a>}{navigationMessage && <div role="status">{navigationMessage}{onRetryNavigation && <button type="button" onClick={onRetryNavigation}>继续查找</button>}</div>}</>}
     hasNavigation={hasNavigation}
     onPrevious={onPrevious}
     onNext={onNext}
@@ -433,7 +435,8 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
         {['image', 'video', 'audio'].includes(item.category) && <ContentReactions contentKey={item.key} initialState={item.state} overlay onChange={(state, act, active, previous) => changed(item, state, act, active, previous)} />}
       </div>
       <div className={styles.body}>{item.category === 'template' ? <TemplateFavoriteTitle contentKey={item.key} initialState={item.state} onChange={(state, act, active, previous) => changed(item, state, act, active, previous)}><h3 className={styles.title} title={item.content?.title || '内容已不可用'}>{item.content?.title || '内容已不可用'}</h3></TemplateFavoriteTitle> : <h3 className={styles.title}>{item.content?.title || '内容已不可用'}</h3>}{item.content?.owner && <UserIdentityBadge size="sm" user={item.content.owner} />}
-        {item.content?.versionLabel && <span className={styles.muted}>版本：{item.content.versionLabel}</span>}
+        <span className={styles.muted}>喜欢于 <RelativeTime value={item.markedAt} /></span>
+        {item.content?.versionLabel && <span className={styles.muted}>{/^\d{4}-\d{2}-\d{2}T/.test(item.content.versionLabel) ? <>{item.category === 'prompt' ? '生成于' : '更新于'} <RelativeTime value={item.content.versionLabel} /></> : <>版本：{item.content.versionLabel}</>}</span>}
         {item.content?.templateKind && <span className={styles.muted}>{item.content.templateKind === 'workpage' ? '我的工作页' : '模板'} · {item.content.templateMedium === 'image' ? '图片' : '视频'}</span>}
         {item.content?.generationOrigin && <span className={styles.muted}>{item.content.generationOrigin.label}{item.content.generationOrigin.templateName ? ` · ${item.content.generationOrigin.templateName}` : ''}</span>}
         <div className={styles.actions}>{!['image', 'video', 'audio', 'template'].includes(item.category) && <ContentReactions contentKey={item.key} initialState={item.state} onChange={(state, act, active, previous) => changed(item, state, act, active, previous)} />}

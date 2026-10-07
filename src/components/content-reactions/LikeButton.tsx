@@ -49,8 +49,9 @@ export default function LikeButton({ active, count, showCount, animateCount, dis
   }, [active, bloom]);
   const bursting = active && bloom > 0 && settledBloom !== bloom && !reducedMotion;
   const label = active ? '取消喜欢' : '喜欢';
+  const hint = active ? '取消喜欢，从我的喜欢移除' : '喜欢，加入我的喜欢';
   return <button className="sd2-like" type="button" data-reaction-action="like" data-bloom={bursting ? bloom : undefined}
-    title={count == null ? label : `${label} · 公开喜欢人数 ${format(count)}`} aria-label={count == null ? label : `${label}，公开喜欢人数 ${format(count)}`} aria-pressed={active} disabled={disabled} onClick={onClick}>
+    title={count == null ? hint : `${hint} · 公开喜欢人数 ${format(count)}`} aria-label={count == null ? label : `${label}，公开喜欢人数 ${format(count)}`} aria-pressed={active} disabled={disabled} onClick={onClick}>
     <span className="lk-heart"><span key={bursting ? `glyph-${bloom}` : 'glyph-still'} className="lk-glyph" onAnimationEnd={event => { if (event.target === event.currentTarget) setSettledBloom(bloom); }}><Heart size={19} strokeWidth={2.3} fill={active ? 'currentColor' : 'none'} /></span>
       {bursting && <span className="lk-burst" key={`burst-${bloom}`} aria-hidden="true"><span className="lk-bloom" />{colors.map((color, index) => <span key={index} className="lk-spoke" style={{ '--a': `${index * (360 / 7) - 90}deg` } as CSSProperties}><i style={{ '--c': color } as CSSProperties} /><i style={{ '--c': colors[(index + 3) % colors.length] } as CSSProperties} /></span>)}</span>}
     </span>

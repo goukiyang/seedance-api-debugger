@@ -7,7 +7,6 @@ import { useParams } from 'next/navigation';
 import { Eye } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
 import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
-import ContentReactions from '@/components/content-reactions/ContentReactions';
 import MediaPreview from '@/components/MediaPreview';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
@@ -1371,7 +1370,7 @@ export default function ProjectDetailPage() {
         poster={activePreviewTask.thumbnail_url || undefined}
         contentKey={`video_task:${activePreviewTask.id}`}
         previewKey={activePreviewTask.id}
-        details={<div><p>{activePreviewTask.local_status}</p>{activePreviewTask.local_status === 'succeeded' && <ContentReactions contentKey={`video_task:${activePreviewTask.id}`} />}</div>}
+        details={<div><p>{activePreviewTask.local_status}</p></div>}
         onClose={() => setActivePreviewTask(null)}
       />}
 

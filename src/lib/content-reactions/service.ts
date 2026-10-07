@@ -5,7 +5,16 @@ import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
 import { parseContentKey, ReactionError, resolveContent } from './content';
 import type { ContentCategory, ContentKey, ReactionAction, ReactionListResponse, ReactionMutation, ReactionState } from './types';
-import { createCutoutContentContext } from './cutout-content';
+import { createCutoutContentContext, type CutoutContentContext } from './cutout-content';
+
+async function resolveReactionContent(user: SessionUser, key: ContentKey, context?: CutoutContentContext) {
+  try { return await resolveContent(user, key, context); }
+  catch (error) {
+    // A temporarily unreadable cutout must not block other favorites or removal of the viewer's own mark.
+    if (key.startsWith('cutout_result:') && error instanceof Error && error.message === 'cutout_result_read_unavailable') return null;
+    throw error;
+  }
+}
 
 export async function getReactionState(user: SessionUser, key: ContentKey, available: boolean): Promise<ReactionState> {
   const row = await prisma.contentReaction.findUnique({ where: { user_id_content_key: { user_id: user.id, content_key: key } } });
@@ -20,7 +29,7 @@ export async function reactionStates(user: SessionUser, inputs: unknown) {
   const context = createCutoutContentContext(user.id);
   for (const input of Array.from(new Set(inputs))) {
     const key = parseContentKey(input);
-    const resolved = await resolveContent(user, key, context);
+    const resolved = await resolveReactionContent(user, key, context);
     states[key] = await getReactionState(user, resolved?.summary.key || key, Boolean(resolved));
   }
   return { states };
@@ -29,7 +38,7 @@ export async function reactionStates(user: SessionUser, inputs: unknown) {
 export async function setReaction(user: SessionUser, input: ReactionMutation) {
   const requested = parseContentKey(input?.key);
   if (!['like', 'favorite'].includes(input?.action) || typeof input.active !== 'boolean' || !Number.isSafeInteger(input.expectedVersion) || input.expectedVersion < 0 || typeof input.requestId !== 'string' || !/^[a-zA-Z0-9_-]{8,100}$/.test(input.requestId)) throw new ReactionError('操作参数无效');
-  const resolved = await resolveContent(user, requested);
+  const resolved = await resolveReactionContent(user, requested);
   const key = resolved?.summary.key || requested;
   const fingerprint = createHash('sha256').update(JSON.stringify([requested, input.action, input.active, input.expectedVersion])).digest('hex');
   const previous = await prisma.contentReactionEvent.findUnique({ where: { user_id_request_id: { user_id: user.id, request_id: input.requestId } } });
@@ -85,10 +94,10 @@ export async function listReactions(user: SessionUser, params: URLSearchParams):
   const context = createCutoutContentContext(user.id);
   // Search only current, authorized projections. Unavailable entries never retain searchable private text.
   for (const row of rows) {
-    const resolved = await resolveContent(user, parseContentKey(row.content_key), context);
+    const resolved = await resolveReactionContent(user, parseContentKey(row.content_key), context);
     if (search && (!resolved || !(resolved.prompt || resolved.summary.title).toLocaleLowerCase().includes(search))) continue;
-    if (category === 'template' && params.get('templateKind') && resolved?.summary.templateKind !== params.get('templateKind')) continue;
-    if (category === 'template' && params.get('templateMedium') && resolved?.summary.templateMedium !== params.get('templateMedium')) continue;
+    if (resolved && category === 'template' && params.get('templateKind') && resolved.summary.templateKind !== params.get('templateKind')) continue;
+    if (resolved && category === 'template' && params.get('templateMedium') && resolved.summary.templateMedium !== params.get('templateMedium')) continue;
     counts.all++;
     if (row.category in counts) counts[row.category as ContentCategory]++;
     if (category === 'all' || category === row.category) matches.push({ row, resolved });

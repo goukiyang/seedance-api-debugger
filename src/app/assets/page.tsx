@@ -1754,7 +1754,7 @@ function AssetsPageContent() {
     : null;
 
   const activeItemPrompt = activeItem?.prompt ? <div className="asset-detail-prompt"><span>Prompt</span><p>{activeItem.prompt}</p></div> : null;
-  const activeItemDetails = activeItem ? <>
+  const activeItemDetails = (withReaction = true) => activeItem ? <>
     {!activeItemCostBreakdown && activeItem.normalChargeEstimate && <div className="asset-detail-cost-panel" aria-label="按普通费率估算扣费">
       <div><span>按普通费率估算</span><strong>约 {costAmountToCnyEstimate({ amount_micros: activeItem.normalChargeEstimate.amountMicros, currency: 'USD' })}</strong></div>
       <div><span>美元金额</span><strong>{formatUsdDetailAmount(activeItem.normalChargeEstimate.amountMicros / 1_000_000, 6)}</strong></div>
@@ -1776,7 +1776,7 @@ function AssetsPageContent() {
       <div><dt>完成时间</dt><dd>{activeItem.completedAt ? <RelativeTime value={activeItem.completedAt} /> : '-'}</dd></div>
     </dl>
     <div className="asset-detail-actions">
-      {(activeItem.status === 'succeeded' || activeItem.source !== 'video_task') && <ContentReactions contentKey={activeItem.id} />}
+      {withReaction && (activeItem.status === 'succeeded' || activeItem.source !== 'video_task') && <ContentReactions contentKey={activeItem.id} />}
       {activeItem.taskId && <Link href={`/tasks/${activeItem.taskId}`}>打开任务详情</Link>}
       {activeItem.taskId && activeItem.kind === 'video' && isFastPathAssetVideo(activeItem) && !activeItem.stableDownloadReady && activeItem.previewAvailable && (
         <button type="button" onClick={() => void prepareStableDownload(activeItem.taskId as string)} disabled={preparingDownloadTaskId === activeItem.taskId}>
@@ -2531,7 +2531,7 @@ function AssetsPageContent() {
             )}
           </div>
           {activeItemPrompt}
-          {activeItemDetails}
+          {activeItemDetails()}
         </aside>
       )}
       {activeItem && mediaPreviewOpen && activePreviewSrc && <MediaPreview
@@ -2543,7 +2543,7 @@ function AssetsPageContent() {
           : activeItem.thumbnailUrl || undefined}
         contentKey={activeItem.id}
         previewKey={activeItem.id}
-        details={activeItemDetails}
+        details={activeItemDetails(false)}
         notice={previewNavigationMessage ? <div role="status">{previewNavigationMessage}{previewNavigationRetryable && <button type="button" onClick={() => void moveActiveItem(1)}>继续查找</button>}</div> : undefined}
         hasNavigation={canMovePreviewPrevious || canMovePreviewNext}
         onPrevious={canMovePreviewPrevious ? () => moveActiveItem(-1) : undefined}
@@ -2557,7 +2557,6 @@ function AssetsPageContent() {
         poster={restoredPreview.thumbnailUrl || undefined}
         contentKey={restoredPreview.key}
         previewKey={restoredPreview.key}
-        details={<ContentReactions contentKey={restoredPreview.key} />}
         onClose={closeAssetPreview}
       />}
     </div>

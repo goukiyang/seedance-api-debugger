@@ -5,21 +5,22 @@ import { createPortal } from 'react-dom';
 import ContentReactions from './ContentReactions';
 import type { ContentKey } from '@/lib/content-reactions/types';
 
-type CanvasData = { assetId?: string; asset_id?: string; referenceImageId?: string; reference_image_id?: string; taskId?: string; status?: string; generationStatus?: string; assetIds?: string[]; assets?: CanvasData[]; generationResult?: CanvasData };
-type CanvasWindow = Window & { canvasEngine?: { nodes: Map<string, { data?: CanvasData }> } };
-type Mount = { element: HTMLElement; key: ContentKey; index: number };
-function keysFor(data: CanvasData): ContentKey[] {
-  const keys = new Set<ContentKey>();
-  const add = (value: CanvasData) => {
-    if (value.taskId && (value.status === 'succeeded' || value.generationStatus === 'succeeded')) keys.add(`video_task:${value.taskId}`);
-    if (value.assetId || value.asset_id) keys.add(`asset:${value.assetId || value.asset_id}`);
-    else if (value.referenceImageId || value.reference_image_id) keys.add(`reference_image:${value.referenceImageId || value.reference_image_id}`);
-    for (const id of value.assetIds || []) if (id) keys.add(`asset:${id}`);
-  };
-  add(data);
-  if (data.generationResult) { add(data.generationResult); for (const asset of data.generationResult.assets || []) add(asset); }
-  for (const asset of data.assets || []) add(asset);
-  return Array.from(keys).filter(key => /^[a-z_]+:[a-zA-Z0-9_-]+$/.test(key));
+type CanvasData = { assetId?: string; asset_id?: string; referenceImageId?: string; reference_image_id?: string; taskId?: string; generationStatus?: string; selectedVideoResult?: { taskId?: string; playUrl?: string }; originalUrl?: string; imageUrl?: string; previewImage?: string; videoPreviewUrl?: string; generationResult?: { original_url?: string; originalUrl?: string; image_url?: string; imageUrl?: string; play_url?: string; playUrl?: string; result_video_url?: string; resultVideoUrl?: string } };
+type CanvasWindow = Window & { canvasEngine?: { nodes: Map<string, { type?: string; data?: CanvasData }> } };
+type Mount = { element: HTMLElement; key: ContentKey; nodeId: string };
+function keyFor(type: string | undefined, data: CanvasData): ContentKey | null {
+  const result = data.generationResult;
+  let key: ContentKey | null = null;
+  if (type === 'image' && (data.originalUrl || data.imageUrl || data.previewImage || result?.original_url || result?.originalUrl || result?.image_url || result?.imageUrl)) {
+    if (data.assetId || data.asset_id) key = `asset:${data.assetId || data.asset_id}`;
+    else if (data.referenceImageId || data.reference_image_id) key = `reference_image:${data.referenceImageId || data.reference_image_id}`;
+  } else if (type === 'video') {
+    const selected = data.selectedVideoResult;
+    if (selected?.taskId && selected.playUrl) key = `video_task:${selected.taskId}`;
+    else if (!selected && data.taskId && data.generationStatus === 'succeeded' && (data.videoPreviewUrl || result?.play_url || result?.playUrl || result?.result_video_url || result?.resultVideoUrl)) key = `video_task:${data.taskId}`;
+    else if (!selected && data.assetId && data.videoPreviewUrl) key = `asset:${data.assetId}`;
+  }
+  return key && /^(asset|reference_image|video_task):[a-zA-Z0-9_-]+$/.test(key) ? key : null;
 }
 
 export default function CanvasReactions({ frame }: { frame: RefObject<HTMLIFrameElement> }) {
@@ -42,12 +43,13 @@ export default function CanvasReactions({ frame }: { frame: RefObject<HTMLIFrame
         if (stopped) return;
         const result: Mount[] = [];
         for (const node of Array.from(doc.querySelectorAll<HTMLElement>('.canvas-node[data-node-id]'))) {
-          const data = child.canvasEngine?.nodes.get(node.dataset.nodeId || '')?.data;
-          const keys = data ? keysFor(data) : [];
+          const nodeId = node.dataset.nodeId || '';
+          const item = child.canvasEngine?.nodes.get(nodeId);
+          const key = item?.data ? keyFor(item.type, item.data) : null;
           let host = node.querySelector<HTMLElement>(':scope > .sd2-reaction-mount');
-          if (!keys.length) { host?.remove(); continue; }
+          if (!key) { host?.remove(); continue; }
           if (!host) { host = doc.createElement('div'); host.className = 'sd2-reaction-mount'; node.append(host); }
-          keys.forEach((key, index) => result.push({ element: host!, key, index: keys.length > 1 ? index + 1 : 0 }));
+          result.push({ element: host, key, nodeId });
         }
         setMounts(current => current.length === result.length && current.every((item, index) => item.element === result[index].element && item.key === result[index].key) ? current : result);
       };
@@ -64,5 +66,5 @@ export default function CanvasReactions({ frame }: { frame: RefObject<HTMLIFrame
     if (iframe.contentDocument?.readyState === 'complete') connect();
     return () => { iframe.removeEventListener('load', connect); cleanDocument(); };
   }, [frame]);
-  return <>{mounts.map(mount => createPortal(<span>{mount.index > 0 && <small>内容 {mount.index} </small>}<ContentReactions contentKey={mount.key} /></span>, mount.element, mount.key))}</>;
+  return <>{mounts.map(mount => createPortal(<ContentReactions contentKey={mount.key} />, mount.element, `${mount.nodeId}:${mount.key}`))}</>;
 }

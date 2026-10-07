@@ -2207,7 +2207,7 @@ function RunDetailPanel({
         poster={previewTask.thumbnailUrl || undefined}
         contentKey={`video_task:${previewTask.taskId}`}
         previewKey={previewTask.taskId}
-        details={<div><span>{videoTaskStage(previewTask).label}</span>{previewTask.status === 'succeeded' && <ContentReactions contentKey={`video_task:${previewTask.taskId}`} />}</div>}
+        details={<div><span>{videoTaskStage(previewTask).label}</span></div>}
         hasNavigation={playableTasks.length > 1}
         onPrevious={activePreviewIndex > 0 ? () => setPreviewTask(playableTasks[activePreviewIndex - 1]) : undefined}
         onNext={activePreviewIndex >= 0 && activePreviewIndex < playableTasks.length - 1 ? () => setPreviewTask(playableTasks[activePreviewIndex + 1]) : undefined}

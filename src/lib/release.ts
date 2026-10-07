@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '人物生成、AI抠图与生图模板共用图片结果布局、三行翻页和预览操作；人物分格裁图、抠图透明背景与原图对比保留。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '减少重复和无可保存内容的爱心；收藏可返回原内容，失效模板仍可取消；画布风格喜欢与站内同步，本机skills标记改为常用。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

@@ -5,6 +5,7 @@
 
     function create(hooks) {
         const polling = new Map();
+        const pendingFavorites = new Map();
         const sameContext = (a, b) => ['userId', 'projectId', 'cardId', 'documentId'].every(key => a?.[key] === b?.[key]);
         const current = (node, context) => hooks.getNode(node.id) === node && sameContext(context, hooks.context());
         const json = (url, payload, signal) => hooks.request(url, {
@@ -32,14 +33,24 @@
                     return json(`${endpoint}?${params}`, null, signal);
                 },
                 onFavorite: async (item, active) => {
+                    if (!sameContext(context, hooks.context())) throw new Error('画布已切换，请重新打开风格广场。');
+                    const id = `${context.userId}/${item.key}`;
+                    let payload = pendingFavorites.get(id);
+                    if (!payload) {
+                        payload = { key: item.key, action: 'like', active, expectedVersion: item.reactionVersion || 0, requestId: crypto.randomUUID() };
+                        pendingFavorites.set(id, payload);
+                    }
                     try {
                         const result = await hooks.request('/api/content-reactions', {
-                            method: 'PUT', signal: AbortSignal.timeout(15000), payload: { key: item.key, action: 'like', active,
-                                expectedVersion: item.reactionVersion || 0, requestId: crypto.randomUUID() }
+                            method: 'PUT', signal: AbortSignal.timeout(15000), payload
                         });
+                        pendingFavorites.delete(id);
                         item.reactionVersion = result.state.version;
+                        item.favorited = Boolean(result.state.liked || result.state.favorited);
+                        window.parent.postMessage({ type: 'sd2-canvas-reactions-changed', userId: context.userId, key: result.state.key }, location.origin);
                         return Boolean(result.state.liked || result.state.favorited);
                     } catch (error) {
+                        if (Number.isInteger(error.status) && error.status < 500) pendingFavorites.delete(id);
                         if (error.status === 409) {
                             const result = await json('/api/content-reactions/state', { keys: [item.key] });
                             const state = result.states?.[item.key];
@@ -47,6 +58,14 @@
                         }
                         throw error;
                     }
+                },
+                onRefreshFavorite: async item => {
+                    if (!sameContext(context, hooks.context())) throw new Error('画布已切换，请重新打开风格广场。');
+                    const result = await json('/api/content-reactions/state', { keys: [item.key] });
+                    if (!sameContext(context, hooks.context())) throw new Error('画布已切换，请重新打开风格广场。');
+                    const state = result.states?.[item.key];
+                    if (!state) throw new Error('喜欢状态暂时无法读取');
+                    return state;
                 },
                 onApply: async item => {
                     if (!current(node, context)) throw new Error('画布已切换，请重新打开风格广场。');

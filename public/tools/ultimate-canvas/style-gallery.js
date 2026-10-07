@@ -295,7 +295,7 @@
         if (!active) clearFavoriteAnimation(button);
         button.setAttribute('aria-pressed', String(active));
         button.setAttribute('aria-label', active ? '取消喜欢' : '喜欢');
-        button.title = active ? '取消喜欢' : '喜欢';
+        button.title = active ? '取消喜欢，从我的喜欢移除' : '喜欢，加入我的喜欢';
         button.disabled = Boolean(pending || typeof options?.onFavorite !== 'function');
         if (typeof options?.onFavorite !== 'function') button.title = '喜欢暂不可用';
     }
@@ -692,6 +692,40 @@
         }
     }
 
+    async function refreshFavorite(key) {
+        if (!root || typeof options?.onRefreshFavorite !== 'function') return;
+        const capturedState = state;
+        const item = state.items.find(entry => entry.key === key);
+        if (!item) {
+            if (state.tab === 'favorites') {
+                if (state.favoritePending.size) state.favoriteInvalidated.add(key);
+                else { state.favoriteStates = Object.create(null); void loadPage(false); }
+            }
+            return;
+        }
+        const id = identity(item);
+        if (state.favoritePending.has(id)) { state.favoriteInvalidated.add(key); return; }
+        const revision = (state.favoriteReads.get(key) || 0) + 1;
+        state.favoriteReads.set(key, revision);
+        try {
+            const result = await options.onRefreshFavorite(item);
+            if (!root || state !== capturedState || state.favoriteReads.get(key) !== revision) return;
+            if (state.favoritePending.has(id)) { state.favoriteInvalidated.add(key); return; }
+            if (!Number.isSafeInteger(result?.version) || result.version < (item.reactionVersion || 0)) return;
+            item.reactionVersion = result.version;
+            const active = Boolean(result.liked || result.favorited);
+            item.favorited = active;
+            state.favoriteStates[id] = active;
+            if (!active && state.tab === 'favorites') {
+                state.items = state.items.filter(entry => identity(entry) !== id);
+                if (state.selectedId === id) state.selectedId = '';
+                renderItems();
+            } else updateFavoriteButtons(id);
+        } catch (error) {
+            if (root && state === capturedState && state.favoriteReads.get(key) === revision) showNotice(error?.message || '喜欢状态读取失败，请重试。');
+        }
+    }
+
     async function toggleFavorite(id, button) {
         if (!root || state.favoritePending.has(id) || typeof options?.onFavorite !== 'function') return;
         const capturedState = state;
@@ -719,12 +753,17 @@
             }
         } catch (error) {
             if (!root || state !== capturedState) return;
-            state.favoriteStates[id] = previous;
+            state.favoriteStates[id] = typeof item.favorited === 'boolean' ? item.favorited : previous;
             showNotice(error?.message || '喜欢没有保存，请重试。');
         } finally {
             if (root && state === capturedState) {
                 state.favoritePending.delete(id);
                 updateFavoriteButtons(id);
+                if (!state.favoritePending.size) {
+                    const keys = Array.from(state.favoriteInvalidated);
+                    state.favoriteInvalidated.clear();
+                    keys.forEach(key => void refreshFavorite(key));
+                }
             }
         }
     }
@@ -1092,6 +1131,8 @@
             selectedId: '',
             favoriteStates: Object.create(null),
             favoritePending: new Set(),
+            favoriteInvalidated: new Set(),
+            favoriteReads: new Map(),
             applying: false,
             applyError: '',
             controller: null,
@@ -1122,6 +1163,13 @@
         renderCategories([], false);
         renderModels([], false);
         bindUI();
+        state.onReactionMessage = event => {
+            if (event.origin !== location.origin || event.source !== window.parent || event.data?.type !== 'sd2-canvas-reactions-invalidated'
+                || typeof event.data !== 'object' || Array.isArray(event.data)
+                || event.data.userId !== options.userId || typeof event.data.key !== 'string' || !/^image_template:[a-zA-Z0-9_-]+$/.test(event.data.key)) return;
+            void refreshFavorite(event.data.key);
+        };
+        window.addEventListener('message', state.onReactionMessage);
         try { ui.search.focus({ preventScroll: true }); } catch { ui.search.focus(); }
         loadPage(false, true);
         return true;
@@ -1137,6 +1185,7 @@
         });
         window.removeEventListener('keydown', state.onKeydown, true);
         window.removeEventListener('pagehide', state.onPagehide);
+        window.removeEventListener('message', state.onReactionMessage);
         document.removeEventListener('pointerdown', state.onPointerDown, true);
         document.removeEventListener('pointerup', state.onPointerUp, true);
         root.remove();

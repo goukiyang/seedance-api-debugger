@@ -20,6 +20,7 @@ export type MediaPreviewProps = {
   contentKey?: ContentKey;
   previewKey?: string;
   safeDetails?: SafeImagePreviewDetails;
+  imageDownload?: () => void | Promise<unknown>;
   /** Caller-provided status/reactions/file metadata only; remove prompts before passing. */
   details?: ReactNode;
   notice?: ReactNode;
@@ -47,6 +48,7 @@ export default function MediaPreview(props: MediaPreviewProps) {
         title={props.title}
         previewKey={props.previewKey}
         contentKey={props.contentKey}
+        resolveDownload={src => src === props.src ? props.imageDownload : undefined}
         safeDetails={props.safeDetails}
         details={props.details}
         notice={props.notice}

@@ -49,6 +49,18 @@ export function watchReactionChanges(userId: string, listener: () => void) {
 export function cachedReactionState(userId: string, key: ContentKey) {
   return entries.get(cacheKey(userId, key))?.state;
 }
+
+// External surfaces invalidate a key; only the existing server read supplies its state.
+export function invalidateReaction(userId: string, key: ContentKey) {
+  installChannel();
+  schedule(userId, key);
+  for (const [entryKey, value] of Array.from(entries)) {
+    if (entryKey.startsWith(`${userId}/`) && value.state?.key === key) schedule(userId, entryKey.slice(userId.length + 1) as ContentKey);
+  }
+  const detail = { userId, key };
+  window.dispatchEvent(new CustomEvent('sd2-reactions-changed', { detail }));
+  channel?.postMessage(detail);
+}
 function update(userId: string, requested: ContentKey, value: Entry) {
   const previous = entries.get(cacheKey(userId, requested));
   if (value.state && previous?.state && value.state.key === previous.state.key && value.state.version < previous.state.version) return;
@@ -140,6 +152,7 @@ export default function ContentReactions({ contentKey, initialState, onChange, d
   if (!userId) return null;
   const entry = entries.get(cacheKey(userId, contentKey)) || {};
   const state = entry.state;
+  const canLike = Boolean(state && (state.available || state.liked || state.favorited));
   const uncertain = Boolean(state && pending.has(cacheKey(userId, state.key)));
   function confirmed(next: ReactionState, active: boolean) {
     if (!mounted.current || currentIdentity.current !== identity) return;
@@ -154,11 +167,11 @@ export default function ContentReactions({ contentKey, initialState, onChange, d
   }
   return <span className={`${styles.controls} ${overlay ? styles.overlayControls : ''} ${favoriteOnly ? styles.favoriteOnly : ''}`} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} data-content-reactions data-overlay={overlay || undefined} aria-busy={entry.busy || undefined}>
     {/* Sibling keys must include the control type, not just the content identity. */}
-    <LikeButton key={`like:${identity}`} active={Boolean(state?.liked || state?.favorited)} count={favoriteOnly ? undefined : state?.likeCount} showCount={!favoriteOnly}
+    {canLike && <LikeButton key={`like:${identity}`} active={Boolean(state?.liked || state?.favorited)} count={favoriteOnly ? undefined : state?.likeCount} showCount={!favoriteOnly}
       disabled={Boolean(disabled || entry.busy || uncertain || !state || (!state.available && !(state.liked || state.favorited)))}
       animateCount={Boolean(pulse?.identity === identity && pulse.version === state?.version && pulse.count === state?.likeCount)}
-      bloom={pulse?.identity === identity && pulse.version === state?.version && pulse.active ? pulse.beat : 0} onClick={() => void act()} />
-    {imageSharing && !favoriteOnly && <ImageShareButton key={`share:${identity}`} contentKey={contentKey} userId={userId} disabled={disabled} />}
+      bloom={pulse?.identity === identity && pulse.version === state?.version && pulse.active ? pulse.beat : 0} onClick={() => void act()} />}
+    {state?.available && imageSharing && !favoriteOnly && <ImageShareButton key={`share:${identity}`} contentKey={contentKey} userId={userId} disabled={disabled} />}
     {entry.busy && <span className={styles.busy} role="status"><RefreshCw size={13} className={styles.busyIcon} />保存中</span>}
     {(entry.error || uncertain && !entry.busy) && <span className={styles.error} role="status">{entry.error || '上次操作尚未确认，请重试'}<button type="button" disabled={entry.busy} aria-label="重试喜欢" title="重试" onClick={() => {
       const retry = state && pending.get(cacheKey(userId, state.key));

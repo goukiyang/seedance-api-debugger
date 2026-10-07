@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { useAppSession } from '@/lib/context/AppSessionContext';
+import ContentReactions from '@/components/content-reactions/ContentReactions';
 import type { ReactionListItem, ReactionListResponse } from '@/lib/content-reactions/types';
 import styles from './studio.module.css';
 
@@ -65,10 +66,10 @@ export function TemplateFavoritesList({ data, selected, busy, onSelect }: {
     {data.loading && <p role="status">正在读取喜欢模板</p>}
     {!data.loading && !data.allowed && <p role="status">请登录当前账号后查看喜欢模板</p>}
     {data.error && <p role="alert">{data.error}<button type="button" title="重试读取喜欢模板" aria-label="重试读取喜欢模板" disabled={data.loading} onClick={data.refresh}><RefreshCw size={15} /></button></p>}
-    {data.items.map(item => <button key={item.key} type="button" className={styles.favoriteItem} disabled={busy || !item.content || !item.state.available}
+    {data.items.map(item => <div key={item.key} className={styles.favoriteItemRow}><button type="button" className={styles.favoriteItem} disabled={busy || !item.content || !item.state.available}
       aria-pressed={selected === item.key} title={item.content?.title || '模板已不可用'} onClick={() => onSelect(item)}>
-      <span>{item.content?.title || '模板已不可用'}</span><small>{item.key.startsWith('image_') ? '图片' : '视频'}</small>
-    </button>)}
+      <span>{item.content?.title || '当前无法读取模板'}</span><small>{item.content ? item.key.startsWith('image_') ? '图片' : '视频' : '喜欢仍保留'}</small>
+    </button><ContentReactions contentKey={item.key} initialState={item.state} favoriteOnly disabled={busy} /></div>)}
     {data.allowed && data.loaded && !data.loading && !data.error && !data.items.length && <p role="status">还没有喜欢的模板</p>}
     {data.cursor && <button type="button" disabled={data.loading || busy} onClick={data.more}>加载更多</button>}
   </div>;

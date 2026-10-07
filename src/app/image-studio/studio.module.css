@@ -75,6 +75,8 @@
 }
 .page .moduleDeleteIcon { flex: 0 0 44px; width: 44px; height: 44px; padding: 0; }
 .favoriteList { display: grid; gap: 3px; margin: 4px 0 10px 8px; max-height: min(400px, 45dvh); overflow-y: auto; }
+.favoriteItemRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px; min-width: 0; }
+.favoriteItemRow > [data-content-reactions] { max-width: 100%; }
 .favoriteList p { margin: 6px 4px; font-size: 12px; color: #adb6bd; overflow-wrap: anywhere; }
 .favoriteList .favoriteItem { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; justify-content: space-between; text-align: left; padding: 7px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
 .favoriteList .favoriteItem[aria-pressed=true] { border-color: #367d70; background: #203d38; color: #b9f7e8; }
