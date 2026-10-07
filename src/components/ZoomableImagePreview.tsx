@@ -214,6 +214,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const [views, setViews] = useState<Record<string, ImageView>>({});
   const viewsRef = useRef(views); viewsRef.current = views;
   const [sizes, setSizes] = useState<Record<string, IntrinsicSize>>({});
+  const [originalSizes, setOriginalSizes] = useState<Record<string, IntrinsicSize>>({});
   const [thumbnailFrames, setThumbnailFrames] = useState<Record<string, IntrinsicSize>>({});
   const [originals, setOriginals] = useState<Record<string, boolean>>({});
   const [frames, setFrames] = useState<Frames>({ current: { width: 1, height: 1 }, comparison: { width: 1, height: 1 } });
@@ -452,12 +453,16 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   function applyMode(mode: MediaPreviewZoomMode) {
     if (mode === 'custom') return;
     userAction.current++; stopGestures();
+    const targets = linked && comparisonMode ? sides : [safeSide];
+    const actualSize = (image: ImageComparisonSource) => image.width && image.height ? { width: image.width, height: image.height } : originalSizes[imageSourceIdentity(image)];
+    if (mode === 'actual' && targets.some(side => { const image = sourcesRef.current[side]; return image && !actualSize(image); })) {
+      setMessage('原图像素尺寸未知，请先加载完整原图'); return;
+    }
     setViews(value => {
       const next = { ...value };
-      for (const side of linked && comparisonMode ? sides : [safeSide]) {
+      for (const side of targets) {
         const image = sourcesRef.current[side]; if (!image) continue;
-        const id = viewIdentity(side, image), base = baseSize(side), size = image.width && image.height ? { width: image.width, height: image.height } : originals[id] || image.src.startsWith('blob:') ? sizes[imageSourceIdentity(image)] : undefined;
-        if (mode === 'actual' && !size) { setMessage('原图像素尺寸未知，请先加载完整原图'); continue; }
+        const id = viewIdentity(side, image), base = baseSize(side), size = actualSize(image);
         const scale = mode === 'fit' ? 1 : mode === 'width' ? (frames[side].width - 24) / base.width : size ? size.width / base.width : 1;
         next[id] = { scale: Math.max(MIN_SCALE, scale), x: 0, y: 0, mode };
       }
@@ -513,11 +518,12 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
     points.current[side].delete(event.pointerId);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   }
-  function ready(side: Side, image: ImageComparisonSource, size: IntrinsicSize) {
+  function ready(side: Side, image: ImageComparisonSource, size: IntrinsicSize, original: boolean) {
     if (!alive.current) return;
     if (sourcesRef.current[side] !== image) return;
     const id = imageSourceIdentity(image);
     setSizes(value => value[id]?.width === size.width && value[id]?.height === size.height ? value : { ...value, [id]: size });
+    if (original || image.src.startsWith('blob:')) setOriginalSizes(value => value[id]?.width === size.width && value[id]?.height === size.height ? value : { ...value, [id]: size });
     onImageLoaded?.(image.src);
   }
   function thumbnailReady(side: Side, image: ImageComparisonSource, size: IntrinsicSize) {
@@ -560,7 +566,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
           className={styles.compareImage}
           style={{ width: dimensionsKnown ? base.width : undefined, height: dimensionsKnown ? base.height : undefined,
             transform: 'translate(calc(-50% + ' + (view.x * base.width) + 'px), calc(-50% + ' + (view.y * base.height) + 'px)) scale(' + view.scale + ')' }}
-          onThumbnailReady={size => thumbnailReady(side, image, size)} onReady={size => ready(side, image, size)} />;
+          onThumbnailReady={size => thumbnailReady(side, image, size)} onReady={size => ready(side, image, size, originals[viewIdentity(side, image)] || false)} />;
       })()}
     </div>;
   }
@@ -568,7 +574,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const copySource = displaySource(selectedImage.src, activeOriginal ? 'original' : 'preview');
   const visibleMetadata = isOriginalSubject ? { model: safeMetadataValue(safeDetails?.model ?? metadata?.model), quality: safeMetadataValue(safeDetails?.quality ?? metadata?.quality),
     ratio: safeMetadataValue(safeDetails?.ratio ?? metadata?.ratio), resolution: safeMetadataValue(safeDetails?.resolution ?? metadata?.resolution), time: safeMetadataTime(safeDetails?.time ?? metadata?.time) } : {};
-  const visibleSize = selectedImage.width && selectedImage.height ? { width: selectedImage.width, height: selectedImage.height } : activeOriginal || selectedImage.src.startsWith('blob:') ? sizes[selectedId] : undefined;
+  const visibleSize = selectedImage.width && selectedImage.height ? { width: selectedImage.width, height: selectedImage.height } : originalSizes[selectedId];
   const previewSize = sizes[selectedId];
   const fileSize = selectedImage.fileSize;
   const knownFileSize = typeof fileSize === 'number' && Number.isFinite(fileSize) && fileSize > 0;

@@ -144,6 +144,7 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature }
   }
   const blocker = mode !== 'batch' ? '' : previewing ? '正在本机读取图片' : busy ? '正在处理本批' : pending ? '' : !loaded ? '正在恢复批次设置' : !Number.isInteger(total) || total < 1 || total > STUDIO_BATCH_LIMITS.images ? '请先选择有效素材，本批最多100张' : estimated == null ? '本批报价尚未就绪' : '';
   const controls = <div className={styles.controls}>
+    <p>{estimated != null && Number.isInteger(total) && total > 0 && total <= STUDIO_BATCH_LIMITS.images ? `本批总计 ${estimated} 积分` : '本批报价尚未就绪'}</p>
     <div className={styles.actions}>
       {source === 'folder' && <button type="button" disabled={busy || previewing || Boolean(pending)} onClick={() => void chooseSources()}><FolderOpen size={16} />{canSelectBatchDirectory() ? '选择素材文件夹' : '选择素材'}</button>}
       <label><input type="checkbox" checked={pack} disabled={busy} onChange={event => setPack(event.target.checked)} />完成后打包</label>

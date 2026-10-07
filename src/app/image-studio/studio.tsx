@@ -785,7 +785,10 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
       <button type="button" onClick={() => setGlobalSettingsOpen(true)}><Settings size={17} />通用设置</button>
       <button type="button" disabled={creating || !modules.length} onClick={() => void createModule()}><Plus size={17} />{creating ? '新建中' : '新建模块'}</button></div></header>
     {error && <p role="alert" className={styles.error}>{error}<button onClick={() => void loadModules(cursor || undefined)}>重试读取</button></p>}
-    {attention.error && <p role="status" className={styles.muted}>{attention.error}<button type="button" onClick={() => void attention.refresh(true)}>重试</button></p>}
+    {attention.error && <p role="status" className={styles.muted}>{attention.error}<button type="button" onClick={() => {
+      const target = attention.retryModuleId && directory.find(item => item.id === attention.retryModuleId);
+      if (target) navigateToModule(target.groupName || '未分组', target.id); else void attention.refresh(true);
+    }}>重试</button></p>}
     {coverView && <section className={styles.coverGrid} aria-label={templateWorkbench ? '模块封面' : '模板封面'}><div className={styles.coverGridInner}>{visibleCoverModules.map(module => {
       return <button key={module.id} type="button" className={styles.coverCard} onClick={() => navigateToModule(module.groupName || '未分组', module.id)}>
         <TemplateCoverVisual module={module} />

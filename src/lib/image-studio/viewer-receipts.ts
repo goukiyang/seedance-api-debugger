@@ -67,7 +67,7 @@ export async function studioTemplateEntrySnapshot(viewerId: string, moduleId: st
   if (!allowed.has(moduleId)) throw new Error('模板不存在或不可访问');
   await readReceipts(viewerId, results.filter(item => item.completedAt <= startedAt).map(item => item.version));
   // Content-addressed, immutable snapshots are reused on repeat entry. They never include later completions.
-  const snapshot = { schemaVersion: 1, moduleId, versions: results.filter(item => item.moduleId === moduleId).map(item => hash(item.version)).sort() };
+  const snapshot = { schemaVersion: 1, moduleId, versions: results.filter(item => item.moduleId === moduleId && item.completedAt <= startedAt).map(item => hash(item.version)).sort() };
   const token = hash(JSON.stringify(snapshot));
   await publishReceipt(path.join(directory(viewerId), `entry-${token}.json`), snapshot);
   return token;

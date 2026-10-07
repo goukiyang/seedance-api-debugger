@@ -43,9 +43,9 @@
   font-size: 13px;
   cursor: pointer;
 }
-.toolbar :where(.sourceGroup > button, .actions button, .controlsPopover > header > button, .popoverRow > button, .menuAction):not(:disabled):hover { border-color: #70cfbd; background: #253e37; }
-.toolbar :where(.sourceGroup > button, .actions button, .controlsPopover > header > button, .popoverRow > button, .menuAction):disabled { opacity: .6; cursor: not-allowed; }
-.toolbar :where(.sourceGroup > button, .actions button, .controlsPopover > header > button, .popoverRow > button, .menuAction):focus-visible, .zoomMode select:focus-visible, .detailDisclosure summary:focus-visible { outline: 2px solid #70cfbd; outline-offset: 2px; }
+.toolbar :where(.sourceGroup button, .compareToggle, .actions button, .controlsPopover > header > button, .popoverRow > button, .menuAction):not(:disabled):hover { border-color: #70cfbd; background: #253e37; }
+.toolbar :where(.sourceGroup button, .compareToggle, .actions button, .controlsPopover > header > button, .popoverRow > button, .menuAction):disabled { opacity: .6; cursor: not-allowed; }
+.toolbar :where(.sourceGroup button, .compareToggle, .actions button, .controlsPopover > header > button, .popoverRow > button, .menuAction):focus-visible, .zoomMode select:focus-visible, .detailDisclosure summary:focus-visible { outline: 2px solid #70cfbd; outline-offset: 2px; }
 .toolbar :where(.sourceGroup > button, .actions button, .menuAction)[aria-pressed="true"], .toolbar .actions button[aria-expanded="true"] { background: #214a42; border-color: #70cfbd; }
 .toolbar .sourceThumb { padding: 3px; position: relative; }
 .sourceThumb img { display: block; width: 30px; height: 30px; object-fit: contain; }
