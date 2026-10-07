@@ -30,6 +30,7 @@ import {
 } from '@/lib/cutout/settings';
 import styles from './cutout.module.css';
 import { isSamModelId } from '@/lib/cutout/models';
+import { cutoutResultContent } from '@/lib/cutout/result-content';
 import { ResourceLibraryPicker } from '@/components/ResourceLibraryPicker';
 import { uploadFileAsAsset } from '@/lib/http/file-upload';
 import type { PickerItem } from '@/lib/assets/picker-types';
@@ -384,6 +385,11 @@ export default function CutoutPage() {
         setHistoryOffset(preferences.historyOffset);
         selectedJobIdRef.current = preferences.selectedJobId || '';
         setSelectedJobId(preferences.selectedJobId || '');
+      }
+      const linkedJobId = new URLSearchParams(window.location.search).get('jobId');
+      if (linkedJobId && /^[a-zA-Z0-9_-]{1,128}$/.test(linkedJobId)) {
+        selectedJobIdRef.current = linkedJobId;
+        setSelectedJobId(linkedJobId);
       }
       const pending = loadPendingCutout(accountId);
       if (pending) {
@@ -846,16 +852,17 @@ export default function CutoutPage() {
   const resultCrop = normalizeCrop(result?.crop);
   const matchingOriginal = source && selectedJob && originalSourceByJob.current.get(selectedJob.job_id) === source.id && sourceUrl ? { src: sourceUrl, alt: '本次原图' } : undefined;
   const cutoutOutputs = selectedJob?.status === 'succeeded' && result ? [
-    ...(selectedImageUrl ? [{ id: `${selectedJob.job_id}:result`, url: selectedImageUrl, label: '抠图结果', filename: result.filename || 'cutout.png', main: true, mask: '' }] : []),
+    ...(selectedImageUrl ? [{ id: `${selectedJob.job_id}:result`, url: selectedImageUrl, label: '抠图结果', filename: result.filename || 'cutout.png', main: true, mask: '', content: cutoutResultContent(selectedJob, 'result') }] : []),
     ...(selectedJob.kind === 'characters' && Array.isArray(result.items) ? result.items.flatMap((item, index) => {
       const url = resultFileUrl(selectedJob.job_id, item.result_url || item.result_filename);
-      return url ? [{ id: `${selectedJob.job_id}:character:${item.id || index}`, url, label: item.name || `角色 ${index + 1}`, filename: item.result_filename || `${item.name || item.id || 'character'}.png`, main: false, mask: resultFileUrl(selectedJob.job_id, item.mask_url) }] : [];
+      return url ? [{ id: `${selectedJob.job_id}:character:${item.id || index}`, url, label: item.name || `角色 ${index + 1}`, filename: item.result_filename || `${item.name || item.id || 'character'}.png`, main: false, mask: resultFileUrl(selectedJob.job_id, item.mask_url), content: cutoutResultContent(selectedJob, `character_${index}`) }] : [];
     }) : []),
   ] : [];
   const sharedResults: Array<GeneratedImageResult & { output?: typeof cutoutOutputs[number] }> = cutoutOutputs.map(output => ({
     id: output.id, output, label: output.label, status: '已完成', transparent: true,
     media: { src: output.url, alt: output.label, fileName: output.filename, comparison: matchingOriginal,
-      comparisonCandidates: cutoutOutputs.filter(other => other.id !== output.id).map(other => ({ src: other.url, alt: other.label })) },
+      contentKey: output.content?.key, imageSharing: false,
+      comparisonCandidates: cutoutOutputs.filter(other => other.id !== output.id).map(other => ({ src: other.url, alt: other.label, contentKey: other.content?.key })) },
     download: async () => {
       try { saveCutoutBlob(await downloadCutoutBlob(output.url), output.filename); }
       catch (cause) { throw new Error(safeError(cause, 'download')); }

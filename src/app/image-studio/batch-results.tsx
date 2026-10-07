@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Download, FolderOpen, Pause, Play, RefreshCw, RotateCcw, Save, X } from 'lucide-react';
-import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
+import { Download, FolderOpen, Pause, Play, RefreshCw, RotateCcw, Save, X } from 'lucide-react';
+import { GeneratedImageResults, type GeneratedImageResult } from '@/components/GeneratedImageResults';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useProductDialog } from '@/components/useProductDialog';
@@ -11,7 +11,6 @@ import { batchStateLabel, safeBatchFileName, STUDIO_BATCH_LIMITS, type StudioBat
 import { readBatchResponse } from '@/lib/image-studio/batch-receipt';
 import { canSelectBatchDirectory, selectBatchDirectory, newBatchOutputDirectory, writeUniqueBatchFile, type BatchDirectoryHandle } from './batch-files';
 import styles from './batch.module.css';
-import { useResultPages } from '@/components/useResultPages';
 type Delivery = { saved: Record<number, string>; child: BatchDirectoryHandle | null; lock: boolean; directory: BatchDirectoryHandle | null };
 const deliveries = new Map<string, Delivery>();
 function deliveryFor(key: string, directory?: BatchDirectoryHandle | null) {
@@ -22,7 +21,7 @@ function deliveryFor(key: string, directory?: BatchDirectoryHandle | null) {
   return deliveries.get(key)!;
 }
 
-export function BatchResults({ id, userId, outputDirectory, compact = false, deliveryOnly = false, autoPack = false }: { id: string; userId: string; outputDirectory?: BatchDirectoryHandle | null; compact?: boolean; deliveryOnly?: boolean; autoPack?: boolean }) {
+export function BatchResults({ id, userId, outputDirectory, deliveryOnly = false, autoPack = false }: { id: string; userId: string; outputDirectory?: BatchDirectoryHandle | null; compact?: boolean; deliveryOnly?: boolean; autoPack?: boolean }) {
   const { confirm, productDialog } = useProductDialog();
   const delivery = deliveryFor(`${userId}:${id}`, outputDirectory);
   const [batch, setBatch] = useState<StudioBatchView | null>(null);
@@ -36,7 +35,6 @@ export function BatchResults({ id, userId, outputDirectory, compact = false, del
   const [zipReady, setZipReady] = useState<{ url: string; name: string } | null>(null);
   const [directory, setDirectory] = useState(delivery.directory);
   const [selected, setSelected] = useState<number[]>([]);
-  const [preview, setPreview] = useState<{ src: string; alt: string; id: string } | null>(null);
   const [autoSave, setAutoSave] = useState(Boolean(outputDirectory));
   const saveLock = useRef(false), actionLock = useRef(false), reader = useRef(false);
   const childDirectory = useRef<BatchDirectoryHandle | null>(delivery.child);
@@ -147,9 +145,15 @@ export function BatchResults({ id, userId, outputDirectory, compact = false, del
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoPack, batch?.state, batch?.generated, batch?.active, batch?.pending, batch?.uncertain]);
   const statusLabel = (state: string) => ({ pending: '等待派发', queued: '已受理，排队中', running: '生成中', succeeded: '已生成', failed: '生成失败', uncertain: '结果待确认', cancelled: '未派发，已取消' } as Record<string, string>)[state] || '状态待确认';
-  const resultItems = useMemo(() => (batch?.items || []).map(item => ({ ...item, id: String(item.ordinal) })), [batch?.items]);
-  const resultPages = useResultPages({ items: resultItems, storageKey: `sd2-image-studio-batch-page:${userId}:${id}`, visible: !deliveryOnly && resultItems.length > 0,
-    busy: reading, error: Boolean(error), hasMore: false, loadMore: load, currentId: preview?.id || null });
+  const resultItems = useMemo(() => (batch?.items || []).map(item => ({
+    ...item, id: String(item.ordinal), label: `${item.ordinal}. ${item.sourceName}`, generationStatus: item.status,
+    status: statusLabel(item.status), pending: ['pending', 'queued', 'running'].includes(item.status),
+    media: item.image ? { src: item.image.url, thumbnailSrc: item.image.thumbnail, alt: `第 ${item.ordinal} 张结果`, fileName: 'batch-image.png',
+      contentKey: `asset:${item.image.id}` as const,
+      comparisonCandidates: (batch?.items || []).flatMap(other => other.image ? [{ src: other.image.url, thumbnailSrc: other.image.thumbnail, alt: `生成结果 ${other.ordinal}`, contentKey: `asset:${other.image.id}` as const }] : []),
+    } : undefined,
+    download: item.image && item.taskId ? () => handImageDownloadToBrowser(`/api/image-studio/download?id=${encodeURIComponent(item.taskId!)}`, 'batch-image.png', () => scope.current === `${userId}:${id}`) : undefined,
+  } satisfies GeneratedImageResult)), [batch?.items, id, userId]);
   return <div className={styles.results} aria-label="批次结果">
     <div className={styles.actions}><strong>{batch?.moduleName || '本批结果'}</strong><button type="button" title="刷新批次" aria-label="刷新批次" disabled={reading} onClick={() => void load()}><RefreshCw size={16} /></button>{deliveryOnly && <a href={`/assets?imageBatchId=${encodeURIComponent(id)}`}>本批资产</a>}</div>
     {error && <p role="alert" className={styles.error}>{error}</p>}
@@ -175,20 +179,12 @@ export function BatchResults({ id, userId, outputDirectory, compact = false, del
         {saveError && <p role="alert" className={styles.error}>{saveError}，只补保存，不重新生成。</p>}
       </div>}
       {!deliveryOnly && batch.failed > 0 && <div className={styles.retry}><span>选中失败项 {selected.length} 张，本次重试预计 {selected.length * batch.unitCredits} 点；每项最多重试 3 次</span><button type="button" disabled={busy || !selected.length} onClick={() => void action('retry')}><RotateCcw size={16} />重试选中失败项</button></div>}
-      {!deliveryOnly && <div ref={resultPages.gridRef} className={compact ? styles.compactItems : styles.items} data-result-pages data-page-capacity={resultPages.capacity}>{resultPages.pageItems.map(item => <article className={styles.item} key={item.ordinal} data-result-id={item.id}>
-        {item.image ? <button type="button" aria-label={`预览第 ${item.ordinal} 张结果`} onClick={() => setPreview({ src: item.image!.url, alt: `第 ${item.ordinal} 张结果`, id: item.id })}><img src={item.image.thumbnail} alt={`第 ${item.ordinal} 张结果`} loading="lazy" /></button> : <div className={styles.placeholder}>暂无截图</div>}
-        <div><strong>{item.ordinal}. {item.sourceName}</strong><p>{statusLabel(item.status)}</p>{item.error && <p className={styles.error}>{item.error}</p>}{saved[item.ordinal] && <p>已保存并核对大小</p>}</div>
-        {item.status === 'failed' && <input type="checkbox" disabled={busy} aria-label={`重试第 ${item.ordinal} 项`} checked={selected.includes(item.ordinal)} onChange={event => setSelected(previous => event.target.checked ? [...previous, item.ordinal] : previous.filter(value => value !== item.ordinal))} />}
-      </article>)}</div>}
-      {!deliveryOnly && resultItems.length > 0 && <nav className={styles.pagination} aria-label="批次图片分页">
-        <button type="button" title="上一页图片" aria-label="上一页图片" disabled={resultPages.start === 0 || resultPages.restoring} onClick={resultPages.previous}><ChevronLeft size={17} /></button>
-        <span role="status">第 {resultPages.page} / {resultPages.pages} 页</span>
-        <button type="button" title="下一页图片" aria-label="下一页图片" disabled={!resultPages.canNext || resultPages.restoring} onClick={resultPages.next}><ChevronRight size={17} /></button>
-        {resultPages.start > 0 && <button type="button" title="回到第一页图片" aria-label="回到第一页图片" onClick={resultPages.reset}><RotateCcw size={15} /></button>}
-      </nav>}
-    </>}{preview && <ZoomableImagePreview src={preview.src} alt={preview.alt} fileName="batch-image.png"
-      comparisonCandidates={(batch?.items || []).flatMap(item => item.image ? [{ src: item.image.url, thumbnailSrc: item.image.thumbnail, alt: `生成结果 ${item.ordinal}`, contentKey: `asset:${item.image.id}` as const }] : [])}
-      onClose={() => setPreview(null)} />}
+      {!deliveryOnly && <GeneratedImageResults items={resultItems} scope={`sd2-image-studio-batch-page:${userId}:${id}`}
+        busy={reading} emptyLabel="暂无本批图片" renderSupplement={item => <>
+          {saved[item.ordinal] && <p>已保存并核对大小</p>}
+          {item.generationStatus === 'failed' && <label><input type="checkbox" disabled={busy} aria-label={`重试第 ${item.ordinal} 项`} checked={selected.includes(item.ordinal)} onChange={event => setSelected(previous => event.target.checked ? [...previous, item.ordinal] : previous.filter(value => value !== item.ordinal))} />重试此项</label>}
+        </>} />}
+    </>}
     {productDialog}
   </div>;
 }

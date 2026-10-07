@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
 import { parseContentKey, ReactionError, resolveContent } from './content';
 import type { ContentCategory, ContentKey, ReactionAction, ReactionListResponse, ReactionMutation, ReactionState } from './types';
+import { createCutoutContentContext } from './cutout-content';
 
 export async function getReactionState(user: SessionUser, key: ContentKey, available: boolean): Promise<ReactionState> {
   const row = await prisma.contentReaction.findUnique({ where: { user_id_content_key: { user_id: user.id, content_key: key } } });
@@ -16,9 +17,10 @@ export async function getReactionState(user: SessionUser, key: ContentKey, avail
 export async function reactionStates(user: SessionUser, inputs: unknown) {
   if (!Array.isArray(inputs) || inputs.length > 50) throw new ReactionError('每次最多读取50项');
   const states: Record<string, ReactionState> = {};
+  const context = createCutoutContentContext(user.id);
   for (const input of Array.from(new Set(inputs))) {
     const key = parseContentKey(input);
-    const resolved = await resolveContent(user, key);
+    const resolved = await resolveContent(user, key, context);
     states[key] = await getReactionState(user, resolved?.summary.key || key, Boolean(resolved));
   }
   return { states };
@@ -80,9 +82,10 @@ export async function listReactions(user: SessionUser, params: URLSearchParams):
   rows.sort((a, b) => markedAt(a) === markedAt(b) ? (a.id < b.id ? 1 : a.id > b.id ? -1 : 0) : markedAt(a) < markedAt(b) ? 1 : -1);
   const counts = { all: 0, image: 0, video: 0, audio: 0, template: 0, prompt: 0 };
   const matches: Array<{ row: typeof rows[number]; resolved: Awaited<ReturnType<typeof resolveContent>> }> = [];
+  const context = createCutoutContentContext(user.id);
   // Search only current, authorized projections. Unavailable entries never retain searchable private text.
   for (const row of rows) {
-    const resolved = await resolveContent(user, parseContentKey(row.content_key));
+    const resolved = await resolveContent(user, parseContentKey(row.content_key), context);
     if (search && (!resolved || !(resolved.prompt || resolved.summary.title).toLocaleLowerCase().includes(search))) continue;
     if (category === 'template' && params.get('templateKind') && resolved?.summary.templateKind !== params.get('templateKind')) continue;
     if (category === 'template' && params.get('templateMedium') && resolved?.summary.templateMedium !== params.get('templateMedium')) continue;

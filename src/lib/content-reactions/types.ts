@@ -1,4 +1,4 @@
-export const CONTENT_TYPES = ['asset', 'video_task', 'reference_image', 'image_template', 'image_module', 'video_template', 'video_draft', 'legacy_template', 'prompt', 'seedance_asset'] as const;
+export const CONTENT_TYPES = ['asset', 'video_task', 'reference_image', 'image_template', 'image_module', 'video_template', 'video_draft', 'legacy_template', 'prompt', 'seedance_asset', 'cutout_result'] as const;
 import type { GenerationOrigin } from '@/lib/assets/generation-origin';
 export type ContentType = typeof CONTENT_TYPES[number];
 export type ContentKey = `${ContentType}:${string}`;

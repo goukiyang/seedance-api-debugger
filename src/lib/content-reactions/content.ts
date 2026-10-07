@@ -12,6 +12,7 @@ import { getStudioTemplate } from '@/lib/template-studio/templates';
 import { StudioError } from '@/lib/template-studio/errors';
 import type { StudioRunSnapshot } from '@/lib/template-studio/types';
 import { CONTENT_TYPES, type ContentKey, type ContentSummary, type ContentCategory } from './types';
+import { resolveCutoutResult, type CutoutContentContext } from './cutout-content';
 
 export class ReactionError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -45,9 +46,17 @@ async function referenceAccess(user: SessionUser, id: string) {
 }
 
 // Resolve identity and current authorization together; never persist content snapshots in reactions.
-export async function resolveContent(user: SessionUser, input: ContentKey): Promise<ResolvedContent | null> {
+export async function resolveContent(user: SessionUser, input: ContentKey, context?: CutoutContentContext): Promise<ResolvedContent | null> {
   const [type, id] = input.split(':');
   try {
+    if (type === 'cutout_result') {
+      const result = await resolveCutoutResult(user, input, context);
+      if (!result) return null;
+      const item = summary(result.key, 'image', result.title, `/cutout?jobId=${encodeURIComponent(result.jobId)}`);
+      item.owner = await owner(user.id);
+      item.thumbnailUrl = result.url; item.previewUrl = result.url; item.downloadUrl = result.url;
+      return { summary: item };
+    }
     if (type === 'reference_image') {
       const access = await referenceAccess(user, id);
       if (!access) return null;
