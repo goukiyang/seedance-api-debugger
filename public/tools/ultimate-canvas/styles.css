@@ -1239,6 +1239,13 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
 }
 .generation-node .generation-empty-icon { display: grid; place-items: center; color: var(--text-dim); }
 .generation-node .generation-empty-icon svg { width: 54px; height: 54px; }
+.generation-node.node-type-image .generation-quick-modes { grid-template-rows: minmax(0, 1fr) auto auto; }
+.generation-empty-references { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.generation-empty-references button { display: inline-flex; align-items: center; gap: 6px; }
+.generation-empty-references button svg { width: 16px; height: 16px; }
+.generation-empty-references span { color: var(--text-tertiary); font-size: 12px; }
+.generation-empty-references button:focus-visible { outline: 2px solid var(--accent-teal); outline-offset: 2px; }
+.generation-empty-references button:disabled { opacity: .5; cursor: not-allowed; }
 .generation-node .generation-empty-actions { display: grid; justify-items: start; gap: 4px; }
 .generation-node .generation-empty-label { color: var(--text-tertiary); font-size: 12px; margin-bottom: 2px; }
 .generation-node .generation-quick-modes button {

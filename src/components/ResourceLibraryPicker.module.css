@@ -50,9 +50,11 @@
 .inUse { position: absolute; bottom: 7px; left: 7px; background: #293137; font-size: 12px; padding: 4px 6px; }
 .card .preview { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; display: grid; place-items: center; background: rgba(16, 22, 25, .8); color: #edf2f4; }
 .duration { position: absolute; bottom: 8px; right: 8px; padding: 3px 5px; background: rgba(16, 22, 25, .8); font-size: 11px; border-radius: 3px; pointer-events: none; }
-.meta { padding: 9px 10px 12px; }
-.meta strong { display: block; font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 5px 0; }
-.meta small { color: var(--text-secondary, #b4bec4); font-size: 11px; display: block; line-height: 1.6; }
+.cover:has(.removeButton) .duration { bottom: 56px; }
+.meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 7px 8px 8px; min-width: 0; }
+.meta > strong { display: block; flex: 1 1 auto; min-width: 0; max-width: 100%; font-size: 14px; font-weight: 500; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0; }
+.meta small { color: var(--text-secondary, #b4bec4); font-size: 11px; display: block; line-height: 1.4; }
+.meta > small:not(.compatibility) { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .cardTools { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
 .cardTools > span:first-child { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-secondary, #b4bec4); }
 .cardTools [data-content-reactions] > button:first-child { display: none; }
@@ -60,9 +62,12 @@
 .error { margin: 0 20px 12px; padding: 10px; background: #42272b; color: #ffd1d7; font-size: 13px; overflow-wrap: anywhere; }
 .error button { margin-left: 10px; text-decoration: underline; }
 .notice { margin: 0 20px 12px; font-size: 13px; color: var(--text-secondary, #b4bec4); line-height: 1.5; }
-.meta .compatibility { margin-top: 6px; color: #ffd7a3; overflow-wrap: anywhere; }
-.more { display: flex; align-items: center; justify-content: center; gap: 16px; color: var(--text-secondary, #b4bec4); margin-top: 18px; font-size: 12px; }
+.meta .compatibility { flex-basis: 100%; min-width: 0; margin-top: 2px; color: #ffd7a3; overflow-wrap: anywhere; }
+.more { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 12px; min-width: 0; color: var(--text-secondary, #b4bec4); margin-top: 12px; font-size: 12px; }
 .more button { border-color: var(--border, #3b4145); padding: 8px 12px; }
+.pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; min-width: 0; max-width: 100%; }
+.pagination button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 36px; width: 36px; height: 36px; padding: 0; }
+.pagination > span { min-width: 0; max-width: 100%; line-height: 1.4; text-align: center; overflow-wrap: anywhere; }
 .footer { display: grid; grid-template-columns: max-content minmax(130px, 245px) minmax(0, 1fr) max-content; grid-template-areas: "upload count selection actions"; align-items: center; gap: 14px; padding: 18px 26px; border-top: 1px solid var(--border, #3b4145); flex: none; }
 .footer .uploadAction { grid-area: upload; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; padding: 10px 12px; border-color: var(--border, #3b4145); white-space: nowrap; }
 .uploadAction svg { flex: none; }
@@ -90,9 +95,11 @@
   .footer { padding: 12px 14px; grid-template-columns: minmax(0, 1fr) max-content; grid-template-areas: "count upload" "selection selection" "actions actions"; gap: 10px; } .count { min-width: 0; } .selection { width: 100%; } .selectedThumb { width: 48px; height: 48px; } .footerActions { justify-content: flex-end; } .footerActions .primary { flex: 1; }
 }
 @media (max-width: 340px) { .grid { grid-template-columns: minmax(0, 1fr); } .segments button { padding: 7px; } .tabs { gap: 13px; } }
-.card .removeButton { position: absolute; top: 8px; left: 8px; z-index: 2; display: grid; place-items: center; width: 40px; height: 40px; padding: 0; background: rgba(16, 22, 25, .88); color: #edf2f4; cursor: pointer; }
-.card .removeButton:hover { color: #ffb4ab; }
+.card .removeButton { position: absolute; top: auto; left: auto; bottom: 8px; right: 8px; z-index: 2; display: grid; place-items: center; width: 40px; height: 40px; padding: 0; background: rgba(16, 22, 25, .88); color: #edf2f4; cursor: pointer; }
+.card .removeButton:hover:not(:disabled) { color: #ffb4ab; }
 @media (hover: hover) and (pointer: fine) { .card .removeButton { opacity: 0; pointer-events: none; } .card:hover .removeButton, .card:focus-within .removeButton { opacity: 1; pointer-events: auto; } }
-.cardDetails { font-size: 12px; color: var(--text-secondary, #b4bec4); }
+.cardDetails { flex-basis: 100%; min-width: 0; max-width: 100%; font-size: 12px; color: var(--text-secondary, #b4bec4); }
 .cardDetails summary { cursor: pointer; width: fit-content; min-height: 32px; display: flex; align-items: center; }
+.cardDetails summary:focus-visible { outline: 2px solid var(--accent, #8ef0c2); outline-offset: 2px; border-radius: 3px; }
 .meta .originalName { overflow-wrap: anywhere; }
+@media (hover: none), (pointer: coarse) { .pagination button { flex-basis: 44px; width: 44px; height: 44px; } .card .removeButton { width: 44px; height: 44px; } }

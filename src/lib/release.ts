@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '首页新增工作区快捷入口、最近项目和收藏模板，打开画布及常用功能更集中；原顶栏、图片原件导入与画布规则保持不变。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '画布图片节点可从素材库添加参考图，处理继续使用原件；素材卡片更紧凑、删除移至右下，喜欢按钮保留单层底；素材库支持三行翻页并保留加载更多。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

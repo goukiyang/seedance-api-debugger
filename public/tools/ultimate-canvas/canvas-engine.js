@@ -548,6 +548,10 @@ class CanvasEngine {
                         ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>'
                         : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7V5Z"/></svg>'}
                 </div>
+                ${type === 'image' ? `<div class="generation-empty-references">
+                    <button type="button" data-generation-command="import-reference">${window.UltimateCanvasIcons('ImagePlus')}参考图</button>
+                    <span data-import-reference-count></span>
+                </div>` : ''}
                 <div class="generation-empty-actions">
                     <span class="generation-empty-label">尝试</span>
                     ${type === 'image' ? `

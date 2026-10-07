@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Folder, Grid2X2, ImageIcon, Maximize, Minimize, Music, Play, RotateCcw, Search, Upload, X, ZoomIn, Menu, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Folder, Grid2X2, ImageIcon, Maximize, Minimize, Music, Play, RotateCcw, Search, Upload, X, ZoomIn, Menu, Trash2 } from 'lucide-react';
+import { useResultPages } from '@/app/image-studio/use-result-pages';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import MediaPreview from '@/components/MediaPreview';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
@@ -126,6 +127,9 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const [expanded, setExpanded] = useState(false), [navigationOpen, setNavigationOpen] = useState(false), [failedFiles, setFailedFiles] = useState<File[]>([]), [progress, setProgress] = useState<UploadProgressSnapshot | null>(null), [uploadLabel, setUploadLabel] = useState(''), [container, setContainer] = useState<Element | null>(null), [epoch, setEpoch] = useState(0);
   const dialog = useRef<HTMLDivElement>(null), backdrop = useRef<HTMLDivElement>(null), body = useRef<HTMLDivElement>(null), input = useRef<HTMLInputElement>(null);
   const sequence = useRef(0), session = useRef(0), locked = useRef(false), restoring = useRef(false), restoration = useRef(0);
+  const readingMore = useRef(false);
+  const filterKey = JSON.stringify([typesKey, prefs.view, prefs.scope, prefs.source, prefs.template, prefs.type, prefs.query, prefs.sort, prefs.album, prefs.project]);
+  const [loadedFilter, setLoadedFilter] = useState('');
   const active = useRef(open); active.current = open;
   const close = () => { if (locked.current) { setError('上传或添加尚未结束，请等待完成'); return; } onClose(); };
   useDialogDismiss({ open: open && ready && sessionOwner === prefsKey, dialogRef: dialog, dismissSurfaceRef: backdrop, onDismiss: () => preview ? setPreview(null) : close() });
@@ -162,7 +166,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   }, [prefs.scope, prefs.source, prefs.template, prefs.type, prefs.query, prefs.view, prefs.sort, prefs.album, prefs.project, typesKey, target, recentKey]);
   useEffect(() => {
     if (!open || !ready || sessionOwner !== prefsKey) return;
-    const token = ++sequence.current; setLoading(true); setError('');
+    const token = ++sequence.current; setLoading(true); setError(''); setItems([]); setLoadedFilter(''); setHasMore(false);
     void (async () => {
       try {
         let batch: PickerItem[] = []; const count = restoring.current ? prefs.pages : 1;
@@ -175,7 +179,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
           }
           if (!data.hasMore) break;
         }
-        setItems(batch);
+        setItems(batch); setLoadedFilter(filterKey);
       } catch (e) { if (token === sequence.current) setError(e instanceof Error ? e.message : '素材库读取失败'); }
       finally { if (token === sequence.current) setLoading(false); }
     })();
@@ -198,23 +202,36 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const change = (patch: Partial<Preferences>) => { restoring.current = false; body.current?.scrollTo({ top: 0 }); setPrefs(p => ({ ...p, ...patch, scroll: 0, pages: 1 })); };
   const removeItem = async (item: Pick<PickerItem,'assetId'|'identity'|'fileName'|'canRemoveFromLibrary'>, restore = false) => {
     if (!item.canRemoveFromLibrary || !/^(asset|reference_image|video_task):[a-zA-Z0-9_-]{1,100}$/.test(item.identity) || locked.current) return;
+    const removalSession = session.current;
     if (!restore && !(await askConfirm(`从我的素材库删除“${item.fileName}”？可以撤销。底层文件、已经添加到任务或图集的引用、已共享内容仍保留；这不是彻底删除。`, { title: '删除素材', confirmLabel: '从我的素材库删除', danger: true }))) return;
+    if (!active.current || removalSession !== session.current || locked.current) return;
     locked.current = true; setBusy(true); setError('');
     try {
       const response = await fetch('/api/assets/library/removal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identity: item.identity, assetId: item.assetId, removed: !restore }) });
       const data = await readJsonResponse<{ error?: string }>(response);
+      if (!active.current || removalSession !== session.current) return;
       if (!response.ok) throw new Error(data.error || '操作未确认');
       if (!restore) { setItems(old => old.filter(i => i.identity !== item.identity)); setSelected(old => old.filter(i => i.identity !== item.identity)); imports.current.delete(item.identity); }
       setRemovedItem(restore ? null : item);if(user){try{if(restore)localStorage.removeItem(`sd2:library-undo:${user.id}`);else localStorage.setItem(`sd2:library-undo:${user.id}`,JSON.stringify({assetId:item.assetId,identity:item.identity,fileName:item.fileName,canRemoveFromLibrary:true}));}catch{setNotice('删除已确认；本机无法记住撤销入口，请在关闭窗口前撤销。');}} setEpoch(v => v + 1);
-    } catch (e) { setError(e instanceof Error ? e.message : '操作失败'); }
+    } catch (e) { if (active.current && removalSession === session.current) setError(e instanceof Error ? e.message : '操作失败'); }
     finally { locked.current = false; setBusy(false); }
   };
   const loadMore = async () => {
-    if (loading) return; const token = sequence.current; setLoading(true);
-    try { const data = await fetchPage(page + 1); if (token !== sequence.current) return; setItems(old => [...old, ...data.items.filter(i => !old.some(o => o.identity === i.identity))]); setPage(data.page); setHasMore(data.hasMore); setPrefs(p => ({ ...p, pages: data.page })); }
+    if (loading || readingMore.current || loadedFilter !== filterKey || !hasMore) return; const token = sequence.current; readingMore.current = true; setLoading(true); setError('');
+    try { const data = await fetchPage(page + 1); if (token !== sequence.current) return; setItems(old => [...old, ...data.items.filter(i => !old.some(o => o.identity === i.identity))]); setPage(data.page); setHasMore(data.hasMore); setTotal(data.total); setPrefs(p => ({ ...p, pages: data.page })); }
     catch (e) { if (token === sequence.current) setError(e instanceof Error ? e.message : '读取失败'); }
-    finally { if (token === sequence.current) setLoading(false); }
+    finally { readingMore.current = false; if (token === sequence.current) setLoading(false); }
   };
+  const resultPages = useResultPages({
+    items: loadedFilter === filterKey && sessionOwner === prefsKey ? items.map(item => ({ id: item.identity, item })) : [],
+    storageKey: `${prefsKey}:page:v1:${filterKey}`, visible: open && ready && sessionOwner === prefsKey,
+    busy: loading || loadedFilter !== filterKey, error: Boolean(error), hasMore: loadedFilter === filterKey && hasMore,
+    loadMore, currentId: null,
+  });
+  useEffect(() => {
+    if (resultPages.restoring || loading) return;
+    body.current?.scrollTo({ top: 0 });
+  }, [resultPages.start, resultPages.restoring]);
   const upload = async (files: File[]) => {
     if (locked.current || !files.length) return;
     const kinds = files.map(f => f.type.split('/')[0] as AssetType);
@@ -353,7 +370,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         {error && <div role="alert" className={styles.error}>{error}<button type="button" disabled={busy} onClick={() => setEpoch(v => v + 1)}>重新读取</button></div>}
         {!!failedFiles.length && <div className={styles.error}>{failedFiles.map(f => f.name).join('、')}<button type="button" disabled={busy} onClick={() => void upload(failedFiles)}>重试失败文件</button></div>}
         <div ref={body} className={styles.body} aria-busy={loading} onScroll={e => { const scroll = e.currentTarget.scrollTop; if (!restoring.current) setPrefs(p => ({ ...p, scroll })); }} onWheel={() => { restoring.current = false; }} onTouchStart={() => { restoring.current = false; }}>
-          <div className={styles.grid}>{items.map(item => { const order = selected.findIndex(s => s.identity === item.identity), inUse = existing(item); return <article key={item.identity} className={`${styles.card} ${order >= 0 ? styles.selected : ''}`}>
+          <div ref={resultPages.gridRef} className={styles.grid}>{resultPages.pageItems.map(({ item }) => { const order = selected.findIndex(s => s.identity === item.identity), inUse = existing(item); return <article key={item.identity} className={`${styles.card} ${order >= 0 ? styles.selected : ''}`}>
             <div className={styles.cover} data-reaction-surface>
             <button type="button" className={styles.selectCard} disabled={busy || inUse || !!item.unavailableReason} aria-pressed={order >= 0} aria-label={`${order >= 0 ? '取消选择' : '选择'}${selectionName(item)}`} title={item.unavailableReason} onClick={() => toggle(item)}><Thumbnail item={item} />{order >= 0 && <span className={styles.order}>{order + 1}</span>}{inUse && <span className={styles.inUse}>已添加</span>}</button>
             {item.canRemoveFromLibrary && <button type="button" className={styles.removeButton} title="从我的素材库删除" aria-label={`从我的素材库删除：${selectionName(item)}`} disabled={busy} onClick={() => void removeItem(item)}><Trash2 size={17} /></button>}
@@ -361,13 +378,18 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
             {item.type !== 'image' && <span className={styles.duration}>{item.duration != null ? durationText(item.duration) : '时长未知'}</span>}
             <ContentReactions contentKey={item.key} overlay imageSharing={false} onChange={() => { if (prefs.view === 'favorites') setEpoch(v => v + 1); }} />
             </div>
-            <div className={styles.meta}><strong>{selectionName(item)}</strong>{item.unavailableReason && <small className={styles.compatibility}>{item.unavailableReason}</small>}
-              <small>{item.generationOrigin ? `${item.generationOrigin.label}${item.generationOrigin.templateName ? ` · ${item.generationOrigin.templateName}` : ''}` : item.source === 'uploaded' ? '上传的' : '其他素材'}</small>
+            <div className={styles.meta}><strong title={selectionName(item)}>{selectionName(item)}</strong>{item.unavailableReason && <small className={styles.compatibility}>{item.unavailableReason}</small>}
+              <small>{item.generationOrigin?.label || (item.source === 'uploaded' ? '上传的' : '其他素材')}</small>
               <details className={styles.cardDetails}><summary>详情</summary><small className={styles.originalName}>{item.fileName}</small><small>{item.source === 'generated' ? '生成' : item.source === 'uploaded' ? '上传' : '图集'}{item.width && item.height ? ` · ${item.width} × ${item.height}` : ''} · <RelativeTime value={item.createdAt} /></small></details>
             </div>
           </article>; })}</div>
           {loading && <div className={styles.empty} role="status">正在读取素材</div>}{!loading && !items.length && <div className={styles.empty}>{prefs.view === 'recent' ? '本机还没有符合筛选的最近选用素材' : '没有符合筛选的可用素材'}</div>}
-          <div className={styles.more}><span>{total} 个素材</span>{hasMore && <button type="button" disabled={loading} onClick={() => void loadMore()}>加载更多</button>}</div>
+          <div className={styles.more}><span>{total} 个素材</span><nav className={styles.pagination} aria-label="素材分页">
+            <button type="button" title="上一页" aria-label="上一页素材" disabled={!resultPages.start || loading || busy || (resultPages.restoring && !error)} onClick={resultPages.previous}><ChevronLeft size={17} /></button>
+            <span role="status">第 {resultPages.page} / {resultPages.pages}{hasMore ? '+' : ''} 页</span>
+            <button type="button" title="下一页" aria-label="下一页素材" disabled={!resultPages.canNext || loading || busy || resultPages.restoring} onClick={resultPages.next}><ChevronRight size={17} /></button>
+            <button type="button" title="回到第一页" aria-label="回到第一页素材" disabled={loading || busy || (resultPages.restoring && !error)} onClick={resultPages.reset}><RotateCcw size={15} /></button>
+          </nav>{hasMore && <button type="button" disabled={loading || busy || resultPages.restoring} onClick={() => void loadMore()}>加载更多</button>}</div>
         </div>
       </section></div>
       <footer className={styles.footer}><button type="button" className={styles.uploadAction} disabled={busy || maxSelection === 0} onClick={() => input.current?.click()}><Upload size={18} /><span>上传素材</span></button><div className={styles.count}><strong>已选 {selected.length} 个</strong><small>{types.map(t => `${labels[t]} ${selectedCounts[t]}${typeLimits?.[t] !== undefined ? ` · 剩余 ${Math.max(0, typeLimits[t]! - selectedCounts[t])}` : ''}`).join(' / ')}{maxSelection !== undefined ? ` · 本次剩余 ${Math.max(0, maxSelection - selected.length)}` : ''} · 当前已添加 {currentCount}</small></div>

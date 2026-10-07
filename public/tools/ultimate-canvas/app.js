@@ -12,6 +12,7 @@
 
     const engine = new CanvasEngine('canvas-container', 'canvas', 'connections-svg');
     window.canvasEngine = engine;
+    let pendingReferenceImport = null;
 
     function ensureNoticeStack() {
         let stack = document.getElementById('canvas-notice-stack');
@@ -1716,6 +1717,7 @@
     }
 
     function invalidateGenerationContext() {
+        cancelReferenceImport();
         canvasRuntime.pendingGenerationSubmissions.releaseAll(entry => entry.release?.(true));
         canvasRuntime.contextEpoch += 1;
     }
@@ -3719,6 +3721,7 @@
                 return {
                     nodeId: node.id,
                     referenceImageId,
+                    assetId: data.assetId || null,
                     preview,
                     title: data.title || `参考图 ${index + 1}`,
                     width: data.width || data.assetWidth || null,
@@ -3769,6 +3772,81 @@
             .filter(item => item.available)
             .map(item => ({ nodeId: item.nodeId, referenceImageId: item.referenceImageId }));
     }
+
+    function cancelReferenceImport() {
+        if (!pendingReferenceImport) return;
+        window.parent.postMessage({ type: 'sd2-canvas-reference-invalidated', requestId: pendingReferenceImport.requestId }, window.location.origin);
+        pendingReferenceImport = null;
+    }
+    function referenceImportSignature(nodeId) {
+        const node = engine.nodes.get(nodeId);
+        return JSON.stringify([node?.data?.mode || '', node?.data?.canvasStyle || null,
+            generationSettingsForNode(node), generationReferenceItems(nodeId).map(item => [item.nodeId, item.referenceImageId])]);
+    }
+    function referenceImportMatches(requestId) {
+        const pending = pendingReferenceImport;
+        const current = pending ? currentGenerationContext(pending.nodeId) : null;
+        return Boolean(pending && requestId === pending.requestId && canvasRuntime.documentWritable && !canvasRuntime.contextSwitching
+            && pending.userId === canvasRuntime.bootstrap?.user?.id
+            && pending.captured.documentId === current.documentId
+            && window.UltimateCanvasGenerationInteractions.generationContextMatches(pending.captured, current)
+            && !hasCurrentGenerationSubmission(pending.nodeId)
+            && referenceImportSignature(pending.nodeId) === pending.signature);
+    }
+    window.UltimateCanvasReferenceContextMatches = referenceImportMatches;
+    function openReferenceImport(nodeId) {
+        const node = engine.nodes.get(nodeId);
+        if (!node || !['image', 'video'].includes(node.type) || !canvasRuntime.documentWritable || canvasRuntime.contextSwitching) return false;
+        if (window.parent === window) { showCanvasNotice('请从站内画布页面打开参考图选择器。', 'warn'); return false; }
+        const capacity = referenceSelectionMaximum(node) - availableGenerationReferenceItems(nodeId).length;
+        if (capacity < 1 || hasCurrentGenerationSubmission(nodeId)) { showCanvasNotice('当前参考区已满或生成正在提交，请稍后再添加。', 'warn'); return false; }
+        cancelReferenceImport(); closeGenerationPopover();
+        const requestId = crypto.randomUUID();
+        pendingReferenceImport = { requestId, nodeId, userId: canvasRuntime.bootstrap?.user?.id,
+            captured: window.UltimateCanvasGenerationInteractions.captureGenerationContext(currentGenerationContext(nodeId)),
+            signature: referenceImportSignature(nodeId), capacity, returnFocus: document.activeElement };
+        window.parent.postMessage({ type: 'sd2-canvas-reference-request', requestId, userId: pendingReferenceImport.userId,
+            nodeId, documentId: canvasRuntime.documentId || null, projectId: canvasRuntime.selectedProjectId || null,
+            cardId: canvasRuntime.selectedVideoCardId || null, capacity,
+            currentReferenceImageIds: generationReferenceImageIds(nodeId),
+            currentAssetIds: generationReferenceItems(nodeId).flatMap(item => item.assetId ? [item.assetId] : []) }, window.location.origin);
+        return true;
+    }
+    window.addEventListener('message', event => {
+        if (event.origin !== window.location.origin || event.source !== window.parent) return;
+        const message = event.data;
+        if (message?.type === 'sd2-canvas-reference-cancel' && message.requestId === pendingReferenceImport?.requestId) {
+            const focus = pendingReferenceImport.returnFocus;
+            pendingReferenceImport = null; focus?.focus?.(); return;
+        }
+        if (message?.type !== 'sd2-canvas-reference-apply') return;
+        const pending = pendingReferenceImport;
+        const valid = referenceImportMatches(message.requestId) && Array.isArray(message.references)
+            && message.references.length > 0 && message.references.length <= pending.capacity
+            && message.references.every(item => item && typeof item.referenceImageId === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(item.referenceImageId)
+                && (item.assetId === null || typeof item.assetId === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(item.assetId))
+                && typeof item.title === 'string' && item.title.length <= 240
+                && [item.width, item.height].every(value => value === null || Number.isSafeInteger(value) && value > 0));
+        let success = false;
+        if (valid) {
+            const node = engine.nodes.get(pending.nodeId);
+            const current = generationReferenceItems(node.id);
+            const seen = new Set(current.map(item => item.referenceImageId));
+            const additions = message.references.filter(item => { if (seen.has(item.referenceImageId)) return false; seen.add(item.referenceImageId); return true; });
+            if (current.filter(item => item.available).length + additions.length <= referenceSelectionMaximum(node)) {
+                // Reuse the existing durable reference-input list. Never write the generated result or processing URL.
+                node.data.planReferences = [...(node.data.planReferences || []), ...additions.map(item => ({
+                    nodeId: `import-reference-${item.referenceImageId}`, referenceImageId: item.referenceImageId,
+                    assetId: item.assetId, title: item.title, width: item.width, height: item.height, available: true,
+                    preview: `/api/reference-images/${encodeURIComponent(item.referenceImageId)}/content?variant=thumbnail`
+                }))];
+                renderGenerationNodeControls(node.id); syncReferenceSelection(); renderReferenceSelectionStatus();
+                scheduleCanvasSave('generation_reference_import'); success = true;
+            }
+        }
+        window.parent.postMessage({ type: 'sd2-canvas-reference-receipt', requestId: message.requestId, success }, window.location.origin);
+        if (success) { pendingReferenceImport = null; setTimeout(() => pending.returnFocus?.focus?.(), 0); showCanvasNotice('参考图已添加，尚未开始生成。', 'info'); }
+    });
 
     function syncReferenceSelection() {
         const state = canvasRuntime.referenceSelection;
@@ -3932,6 +4010,11 @@
             || (node.type === 'video' ? 'text-to-video' : 'text-to-image');
         const promptInput = promptInputFor(nodeEl, node.type);
         const referenceCount = availableGenerationReferenceItems(nodeId).length;
+        const importButton = nodeEl.querySelector('[data-generation-command="import-reference"]');
+        if (importButton) importButton.disabled = !canvasRuntime.documentWritable || canvasRuntime.contextSwitching
+            || hasCurrentGenerationSubmission(nodeId) || referenceCount >= referenceSelectionMaximum(node);
+        const importCount = nodeEl.querySelector('[data-import-reference-count]');
+        if (importCount) importCount.textContent = referenceCount ? `已添加 ${referenceCount} 张` : '';
         const modeState = generationModeState(node, referenceCount);
         const mode = modeState.selected;
         const interactionReadiness = node.data?.canvasStyle ? { ready: true } : window.UltimateCanvasGenerationInteractions.generationInteractionReadiness(
@@ -5407,6 +5490,7 @@
         if (!node || !['image', 'video'].includes(node.type)) return;
 
         const action = command.dataset.generationCommand;
+        if (action === 'import-reference') { openReferenceImport(nodeId); return; }
         if (action === 'style-gallery') { closeGenerationPopover(); engine._hideAddMenu(); void canvasStyles.open(nodeId); return; }
         if (action === 'clear-style') { canvasStyles.clear(nodeId); return; }
         if (action === 'refresh-style') { void canvasStyles.resume(nodeId); return; }
@@ -5439,8 +5523,7 @@
         const state = canvasRuntime.referenceSelection;
         if (!action || !state) return;
         if (action === 'library') {
-            showPanel('assets-panel');
-            loadLibraryPanels(true);
+            openReferenceImport(state.targetNodeId);
         }
         if (action === 'return') {
             const transition = CanvasReferenceSelection.transition(state, 'return');

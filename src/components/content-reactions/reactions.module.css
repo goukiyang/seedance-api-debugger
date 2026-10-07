@@ -25,7 +25,7 @@
 [data-reaction-surface]:focus-within .overlayControls,
 .overlayControls:has(button[data-reaction-action][aria-pressed="true"]),
 .overlayControls:has(.busy),
-.overlayControls:has(.error) { background: rgb(12 17 19 / 76%); }
+.overlayControls:has(.error) { background: transparent; }
 .overlayControls:hover,
 .overlayControls:focus-within,
 [data-reaction-surface]:hover .overlayControls,
@@ -34,10 +34,11 @@
 .overlayControls:has(.error) { opacity: 1; pointer-events: auto; }
 .overlayControls .error,
 .overlayControls .busy { opacity: 1; }
+.overlayControls:not(.favoriteOnly) :is(.error, .busy) { padding: 4px 6px; border-radius: 4px; background: rgb(12 17 19 / 86%); }
 .overlayControls .error { max-width: min(52vw, 320px); overflow-wrap: anywhere; white-space: normal; }
 .overlayControls .error button { flex: 0 0 auto; }
 @media (hover: none), (pointer: coarse) {
-  .overlayControls { background: rgb(12 17 19 / 76%); opacity: 1; pointer-events: auto; }
+  .overlayControls { background: transparent; opacity: 1; pointer-events: auto; }
   .controls.overlayControls button { opacity: 1; pointer-events: auto; }
   .controls.overlayControls button:disabled { opacity: .45; }
 }
