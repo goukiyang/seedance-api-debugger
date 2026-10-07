@@ -107,11 +107,13 @@ function formatImageBytes(bytes: number) {
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${unit}`;
 }
 
-function PreviewImage({ src, thumbnailSrc, alt, original, className, style, onReady }: { src: string; thumbnailSrc?: string; alt: string; original: boolean; className: string; style: CSSProperties; onReady?: (size: IntrinsicSize) => void }) {
+function PreviewImage({ src, thumbnailSrc, alt, original, className, style, onReady, onThumbnailReady }: { src: string; thumbnailSrc?: string; alt: string; original: boolean; className: string; style: CSSProperties; onReady?: (size: IntrinsicSize) => void; onThumbnailReady?: (size: IntrinsicSize) => void }) {
   const image = useRef<HTMLImageElement>(null);
   const thumbnailImage = useRef<HTMLImageElement>(null);
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
+  const onThumbnailReadyRef = useRef(onThumbnailReady);
+  onThumbnailReadyRef.current = onThumbnailReady;
   const [attempt, setAttempt] = useState(0);
   const [loadedKey, setLoadedKey] = useState('');
   const [failedKey, setFailedKey] = useState('');
@@ -135,11 +137,14 @@ function PreviewImage({ src, thumbnailSrc, alt, original, className, style, onRe
     if (!hasThumbnail) return;
     if (thumbnailImage.current?.complete) {
       setThumbnailSettled(thumbnail);
-      if (thumbnailImage.current.naturalWidth > 0) setThumbnailLoaded(thumbnail);
+      if (thumbnailImage.current.naturalWidth > 0) {
+        setThumbnailLoaded(thumbnail);
+        onThumbnailReadyRef.current?.({ width: thumbnailImage.current.naturalWidth, height: thumbnailImage.current.naturalHeight });
+      }
     }
     const timeout = window.setTimeout(() => setThumbnailSettled(thumbnail), 10000);
     return () => window.clearTimeout(timeout);
-  }, [hasThumbnail, thumbnail]);
+  }, [hasThumbnail, thumbnail, onThumbnailReady]);
   const readResult = useImageReadProgress(displaySrc, attempt, upgradeKey === key);
   const readProgress = readResult.progress;
   const imageSrc = readResult.imageSrc || undefined;
@@ -164,7 +169,7 @@ function PreviewImage({ src, thumbnailSrc, alt, original, className, style, onRe
       : readProgress.phase === 'decoding' ? '正在解码' : '正在读取';
   return <>
     {hasThumbnail && !loaded && <img ref={thumbnailImage} key={`thumbnail:${thumbnail}`} src={thumbnail} alt={alt} className={className} style={style} draggable={false} data-image-preview-thumbnail
-      onLoad={() => { setThumbnailSettled(thumbnail); setThumbnailLoaded(thumbnail); }} onError={() => setThumbnailSettled(thumbnail)} />}
+      onLoad={event => { setThumbnailSettled(thumbnail); setThumbnailLoaded(thumbnail); onThumbnailReadyRef.current?.({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); }} onError={() => setThumbnailSettled(thumbnail)} />}
     {/* eslint-disable-next-line @next/next/no-img-element */}
     {imageSrc && <img ref={image} key={`preview:${key}`} src={imageSrc} alt={alt} className={className} style={{ ...style, opacity: loaded ? 1 : 0 }} draggable={false} data-image-preview-image
       onLoad={event => { if (currentKeyRef.current !== key) return; setLoadedKey(key); setFailedKey(''); onReadyRef.current?.({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); }} onError={() => { if (currentKeyRef.current === key) setFailedKey(key); }} />}
@@ -209,6 +214,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const [views, setViews] = useState<Record<string, ImageView>>({});
   const viewsRef = useRef(views); viewsRef.current = views;
   const [sizes, setSizes] = useState<Record<string, IntrinsicSize>>({});
+  const [thumbnailFrames, setThumbnailFrames] = useState<Record<string, IntrinsicSize>>({});
   const [originals, setOriginals] = useState<Record<string, boolean>>({});
   const [frames, setFrames] = useState<Frames>({ current: { width: 1, height: 1 }, comparison: { width: 1, height: 1 } });
   const [message, setMessage] = useState(''), [copyState, setCopyState] = useState<{ src: string; busy?: boolean; success?: boolean; message?: string } | null>(null);
@@ -367,7 +373,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   }, [portalRoot, comparisonMode, axis]);
 
   function baseSize(side: Side, image = sourcesRef.current[side]): IntrinsicSize {
-    const frame = frames[side], size = image && (sizes[imageSourceIdentity(image)] || (image.width && image.height ? { width: image.width, height: image.height } : undefined));
+    const frame = frames[side], size = image && (thumbnailFrames[imageSourceIdentity(image)] || sizes[imageSourceIdentity(image)] || (image.width && image.height ? { width: image.width, height: image.height } : undefined));
     if (!size) return { width: Math.max(1, frame.width - 24), height: Math.max(1, frame.height - 24) };
     const fit = Math.min((frame.width - 24) / size.width, (frame.height - 24) / size.height, 1);
     return { width: Math.max(1, size.width * fit), height: Math.max(1, size.height * fit) };
@@ -518,6 +524,14 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
     setSizes(value => value[id]?.width === size.width && value[id]?.height === size.height ? value : { ...value, [id]: size });
     onImageLoaded?.(image.src);
   }
+  function thumbnailReady(side: Side, image: ImageComparisonSource, size: IntrinsicSize) {
+    if (!alive.current || sourcesRef.current[side] !== image || image.width && image.height || size.width <= 0 || size.height <= 0) return;
+    const id = imageSourceIdentity(image), frame = frames[side];
+    if (frame.width <= 24 || frame.height <= 24) return;
+    // Only the display frame is inferred; actual-pixel controls still use the decoded full image.
+    const fit = Math.min(Math.max(1, frame.width - 24) / size.width, Math.max(1, frame.height - 24) / size.height);
+    setThumbnailFrames(value => value[id] ? value : { ...value, [id]: { width: size.width * fit, height: size.height * fit } });
+  }
   function choose(side: Side, image: ImageComparisonSource) { userAction.current++; return requestImage(side, image); }
   async function chooseLocal(side: Side, file: File) {
     if (!file.type.startsWith('image/') || file.size > 64 * 1024 * 1024) throw new Error('请选择64MB以内的图片');
@@ -545,12 +559,12 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
       {comparisonMode && <span className={styles.compareLabel}>{side === 'current' ? '当前图' : '对比图'}</span>}
       {image && (() => {
         const id = identity(image), view = views[viewIdentity(side, image)] || fittedImageView, base = baseSize(side, image);
-        const dimensionsKnown = Boolean(sizes[id] || image.width && image.height);
+        const dimensionsKnown = Boolean(thumbnailFrames[id] || sizes[id] || image.width && image.height);
         return <PreviewImage key={`${id}:${image.src}:${image.version || ''}`} src={image.src} thumbnailSrc={image.thumbnailSrc} alt={side === 'current' ? '当前图' : '对比图'} original={originals[viewIdentity(side, image)] || false}
           className={styles.compareImage}
           style={{ width: dimensionsKnown ? base.width : undefined, height: dimensionsKnown ? base.height : undefined,
             transform: 'translate(calc(-50% + ' + (view.x * base.width) + 'px), calc(-50% + ' + (view.y * base.height) + 'px)) scale(' + view.scale + ')' }}
-          onReady={size => ready(side, image, size)} />;
+          onThumbnailReady={size => thumbnailReady(side, image, size)} onReady={size => ready(side, image, size)} />;
       })()}
     </div>;
   }

@@ -354,6 +354,7 @@
   .mobileModuleNav label > span { flex: 0 0 auto; }
   .page .mobileModuleNav select { flex: 1 1 0; min-width: 0; width: 0; max-width: 100%; min-height: 44px; padding: 8px; font-size: 14px; text-overflow: ellipsis; }
   .page .mobileModuleNav button { min-height: 44px; padding: 8px 10px; white-space: nowrap; }
+  .page .mobileModuleNav .favoriteItem { white-space: normal; }
   .page .mobileModuleNav button[aria-pressed=true] { background: #203d38; border-color: #367d70; color: #b9f7e8; }
   .mobileModulePicker { grid-column: 1 / -1; }
 }
