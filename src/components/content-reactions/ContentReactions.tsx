@@ -15,25 +15,25 @@ const queued = new Map<string, Set<ContentKey>>();
 const pending = new Map<string, ReactionMutation>();
 let timer: ReturnType<typeof setTimeout> | undefined;
 const cacheKey = (userId: string, key: ContentKey) => `${userId}/${key}`;
-export const cachedReactionState = (userId: string, key: ContentKey) => entries.get(cacheKey(userId, key))?.state;
 const emit = () => listeners.forEach(listener => listener());
 let channel: BroadcastChannel | null = null;
 
-function broadcast(userId: string, key: ContentKey) {
+function broadcast(userId: string, key: ContentKey, state: ReactionState) {
   if (typeof window === 'undefined') return;
-  window.dispatchEvent(new CustomEvent('sd2-reactions-changed', { detail: { userId, key } }));
-  channel?.postMessage({ userId, key });
+  const detail = { userId, key, active: Boolean(state.liked || state.favorited) };
+  window.dispatchEvent(new CustomEvent('sd2-reactions-changed', { detail }));
+  channel?.postMessage(detail);
 }
 function installChannel() {
   if (channel || typeof BroadcastChannel === 'undefined') return;
   channel = new BroadcastChannel('sd2-content-reactions');
   channel.onmessage = event => {
-    const { userId, key } = event.data || {};
+    const { userId, key, active } = event.data || {};
     if (typeof userId !== 'string' || typeof key !== 'string') return;
     for (const [entryKey, value] of Array.from(entries)) {
       if (entryKey.startsWith(`${userId}/`) && value.state?.key === key) schedule(userId, entryKey.slice(userId.length + 1) as ContentKey);
     }
-    window.dispatchEvent(new CustomEvent('sd2-reactions-changed', { detail: { userId, key } }));
+    window.dispatchEvent(new CustomEvent('sd2-reactions-changed', { detail: { userId, key, ...(typeof active === 'boolean' ? { active } : {}) } }));
   };
 }
 function update(userId: string, requested: ContentKey, value: Entry) {
@@ -84,7 +84,7 @@ export async function writeReaction(userId: string, key: ContentKey, action: Rea
       if (response.status < 500) { pending.delete(id); schedule(userId, key); }
       throw new Error(data.error || '操作失败，请重试');
     }
-    pending.delete(id); update(userId, key, { state: data.state }); broadcast(userId, data.state.key);
+    pending.delete(id); update(userId, key, { state: data.state }); broadcast(userId, data.state.key, data.state);
     return data.state as ReactionState;
   } catch (error) {
     const message = error instanceof Error ? error.message : '操作失败，请重试';

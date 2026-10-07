@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { cachedReactionState } from '@/components/content-reactions/ContentReactions';
 import type { ContentKey } from '@/lib/content-reactions/types';
 
 export function useLikedStudioResults<T extends { id: string; asset?: { id?: string } | null }>(userId: string, moduleId: string, visible: boolean, enabled: boolean) {
@@ -46,6 +45,7 @@ export function useLikedStudioResults<T extends { id: string; asset?: { id?: str
         const response = await fetch(`/api/image-studio/tasks?${query}`, { cache: 'no-store', signal: controller.signal });
         const result = await response.json();
         if (!response.ok || !Array.isArray(result.tasks)) throw new Error(result.error || '喜欢结果读取失败，请重试');
+        if (result.viewerId !== userId) throw new Error('账号已变化，请重新打开当前模板');
         if (!valid()) return;
         tasks.push(...result.tasks);
         next = typeof result.nextCursor === 'string' ? result.nextCursor : null;
@@ -61,7 +61,7 @@ export function useLikedStudioResults<T extends { id: string; asset?: { id?: str
     } catch (error) {
       if (valid()) setData(previous => ({ ...previous, error: error instanceof Error ? error.message : '喜欢结果读取失败，请重试', loading: false }));
     } finally { if (request.current === controller) request.current = null; }
-  }, [moduleId, scope]);
+  }, [moduleId, scope, userId]);
   useEffect(() => {
     if (liked && visible) void read();
     else { request.current?.abort(); request.current = null; setData(previous => ({ ...previous, loading: false })); }
@@ -69,11 +69,10 @@ export function useLikedStudioResults<T extends { id: string; asset?: { id?: str
   useEffect(() => {
     if (!liked || !visible) return;
     const changed = (event: Event) => {
-      const detail = (event as CustomEvent<{ userId?: string; key?: ContentKey }>).detail;
+      const detail = (event as CustomEvent<{ userId?: string; key?: ContentKey; active?: boolean }>).detail;
       if (detail?.userId !== userId || !detail.key?.startsWith('asset:')) return;
       const asset = detail.key.slice(6);
-      const state = cachedReactionState(userId, detail.key);
-      if (state && !(state.liked || state.favorited)) {
+      if (detail.active === false) {
         removed.current.add(asset);
         setData(previous => ({ ...previous, tasks: previous.tasks.filter(task => task.asset?.id !== asset) }));
       } else removed.current.delete(asset);

@@ -104,7 +104,7 @@
 .auxiliarySection { margin: 20px 0; padding: 4px 0 16px; border-top: 1px solid var(--border, #364344); border-bottom: 1px solid var(--border, #364344); }
 .referenceLimits { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; margin: 12px 0; font-size: 12px; }
 .referenceLimits label, .primaryRange { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; white-space: nowrap; }
-.referenceLimits select { width: auto; min-width: 60px; padding: 5px 7px !important; }
+.dialog .referenceLimits select { width: 60px; min-width: 60px; flex: 0 0 60px; padding: 5px 7px !important; }
 .moduleSettingsActions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; margin: 22px 0 26px; padding-top: 16px; border-top: 1px solid #2d383d; }
 .moduleSettingsActions > p { min-width: 0; margin: 0; color: #adb6bd; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .moduleSettingsActions > button { min-width: 150px; margin-left: auto; white-space: nowrap; }
