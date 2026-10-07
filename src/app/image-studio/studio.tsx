@@ -403,7 +403,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     if (moduleId) {
       const target = directory.find(item => item.id === moduleId);
       if (target) {
-        navigateToModule(target.groupName || '未分组', moduleId, { behavior: 'auto' });
+        navigateToModule(target.groupName || '未分组', moduleId, { behavior: 'auto', markViewed: false });
       } else {
         routedContentHandled.current = routeKey;
         setError('指定的图片模板不存在或当前不可用');
