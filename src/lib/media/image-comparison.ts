@@ -91,9 +91,9 @@ export function saveImageView(user: string, identity: string, pair: string, axis
   const entries = Object.entries(value).slice(-78);
   write(`${prefix}:${encodeURIComponent(user)}:views`, { ...Object.fromEntries(entries), [identity]: view, [`${pair}:${axis}:${identity}`]: view });
 }
-type SelectionRecord = { enabled: boolean; current?: { key: string; identity: string }; comparison?: { key: string; identity: string } };
+type SelectionRecord = { enabled: boolean; comparison?: { key: string; identity: string } };
 function selectionKey(user: string, anchor: string) { return `${prefix}:${encodeURIComponent(user)}:selection:${encodeURIComponent(anchor)}`; }
-export function readComparisonSelection(user: string, anchor: string): SelectionRecord {
+export function readComparisonSelection(user: string, anchor: string, openedIdentity: string): SelectionRecord {
   const value = read(selectionKey(user, anchor));
   const source = (v: unknown) => {
     if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
@@ -101,12 +101,14 @@ export function readComparisonSelection(user: string, anchor: string): Selection
     return validPickerKey(data.key) && typeof data.identity === 'string' && data.identity.length <= 400 && !/[\/?#\\\u0000-\u001f]/.test(data.identity)
       ? { key: data.key, identity: data.identity } : undefined;
   };
-  return { enabled: value.enabled === true, current: source(value.current), comparison: source(value.comparison) };
+  // Legacy selections may have been swapped. Restore only records with a known left/right assignment.
+  const anchored = value.sidePolicy === 'anchored-current' || source(value.current)?.identity === openedIdentity;
+  return anchored ? { enabled: value.enabled === true, comparison: source(value.comparison) } : { enabled: false };
 }
 export function saveComparisonSelection(user: string, anchor: string, current: ImageComparisonSource, comparison: ImageComparisonSource | null, enabled: boolean) {
   const record = (image: ImageComparisonSource | null) => {
     const key = image && sourcePickerKey(image);
     return key && image ? { key, identity: imageSourceIdentity(image) } : undefined;
   };
-  write(selectionKey(user, anchor), { enabled: enabled && Boolean(record(comparison)), current: record(current), comparison: record(comparison) });
+  write(selectionKey(user, anchor), { sidePolicy: 'anchored-current', enabled: enabled && Boolean(record(comparison)), current: record(current), comparison: record(comparison) });
 }

@@ -300,7 +300,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
     setAxis(preferences.axis || (window.matchMedia('(max-width: 640px)').matches ? 'vertical' : 'horizontal'));
     setInitializedOwner(owner);
     if (!owner || !selectionAnchor) return;
-    const saved = readComparisonSelection(owner, selectionAnchor), action = userAction.current;
+    const saved = readComparisonSelection(owner, selectionAnchor, imageSourceIdentity(incoming)), action = userAction.current;
     const controller = new AbortController();
     void (async () => {
       const restored = saved.comparison ? await resolveComparisonImage(saved.comparison.key, controller.signal) : null;
@@ -544,13 +544,6 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
       return applied;
     } catch (error) { URL.revokeObjectURL(url); localUrls.current.delete(url); throw error; }
   }
-  function swap() {
-    if (!comparisonImage) return;
-    userAction.current++; stopGestures(); cancelRequests();
-    setViews(value => ({ ...value, [viewIdentity('current', comparisonImage)]: value[viewIdentity('comparison', comparisonImage)] || { ...fittedImageView },
-      [viewIdentity('comparison', currentImage)]: value[viewIdentity('current', currentImage)] || { ...fittedImageView } }));
-    setCurrentImage(comparisonImage); setComparisonImage(currentImage); setActiveSide(activeSide === 'current' ? 'comparison' : 'current');
-  }
   function pane(side: Side) {
     const image = sources[side];
     return <div key={side} ref={element => { if (element) paneRefs.current[side] = element; else delete paneRefs.current[side]; }}
@@ -618,7 +611,6 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
           {hasNavigation && <div className={styles.mobileNavigation}><button type="button" className={styles.menuAction} onClick={onPrevious}><ArrowLeft size={16} />当前图上一张</button><button type="button" className={styles.menuAction} onClick={onNext}><ArrowRight size={16} />当前图下一张</button></div>}
           {comparisonMode && <div className={styles.compareOptions}>
             <button type="button" className={styles.menuAction} onClick={() => { userAction.current++; stopGestures(); setAxis(value => value === 'horizontal' ? 'vertical' : 'horizontal'); }}>{axis === 'horizontal' ? <ArrowUpDown size={16} /> : <ArrowLeftRight size={16} />}{axis === 'horizontal' ? '切换上下对比' : '切换左右对比'}</button>
-            <button type="button" className={styles.menuAction} onClick={swap}><ArrowLeftRight size={16} />交换两图</button>
             <button type="button" className={styles.menuAction} onClick={() => reset(true)}><RotateCcw size={16} />还原两图</button>
           </div>}
           <div className={styles.metadata}>{visibleMetadata.model && <span>模型：{visibleMetadata.model}</span>}{visibleMetadata.quality && <span>质量：{visibleMetadata.quality}</span>}{visibleMetadata.ratio && <span>比例：{visibleMetadata.ratio}</span>}{visibleMetadata.resolution && <span>分辨率：{visibleMetadata.resolution}</span>}
