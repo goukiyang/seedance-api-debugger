@@ -767,7 +767,8 @@ function AssetsPageContent() {
   const nativeVideoDownloads = useRef(new Set<() => void>());
   useEffect(() => {
     downloadOwner.current = user?.id;
-    return () => { for (const cancel of nativeVideoDownloads.current) cancel(); nativeVideoDownloads.current.clear(); downloadOwner.current = undefined; };
+    const downloads = nativeVideoDownloads.current;
+    return () => { for (const cancel of Array.from(downloads)) cancel(); downloads.clear(); downloadOwner.current = undefined; };
   }, [user?.id]);
   const [aiMediaKitReady, setAiMediaKitReady] = useState<boolean | null>(null);
   const [enhanceMenuItemId, setEnhanceMenuItemId] = useState<AssetLibraryItemId | null>(null);
@@ -1476,7 +1477,8 @@ function AssetsPageContent() {
     setMessage('');
     try {
       const expected = user?.id;
-      const cancel = handBulkVideoZipToBrowser({ taskIds }, message => { if (downloadOwner.current === expected) setError(message); });
+      let cancel: (() => void) | undefined;
+      cancel = handBulkVideoZipToBrowser({ taskIds }, message => { if (downloadOwner.current === expected) setError(message); }, () => { if (cancel) nativeVideoDownloads.current.delete(cancel); });
       nativeVideoDownloads.current.add(cancel);
       setMessage('已交给浏览器下载视频包；是否完成请查看浏览器下载列表，部分失败详情仍在包内清单中。');
     } catch (err) {
