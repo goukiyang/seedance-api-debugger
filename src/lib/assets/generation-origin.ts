@@ -58,8 +58,8 @@ export async function generationOrigins(user: SessionUser, assets: Array<{ id: s
       result.set(asset.id, { kind: 'template-image', label: '模板生图',
         ...(preset && canViewStudioPreset(user, preset) ? { templateId: preset.id, templateName: preset.name } : {}) });
     } else if (task.module_id) {
-      const module = moduleById.get(task.module_id);
-      result.set(asset.id, { kind: 'template-image', label: '模板生图', ...(module ? { templateId: module.id, templateName: module.name } : {}) });
+      const workspace = moduleById.get(task.module_id);
+      result.set(asset.id, { kind: 'template-image', label: '模板生图', ...(workspace ? { templateId: workspace.id, templateName: workspace.name } : {}) });
     } else result.set(asset.id, { kind: 'other-generated', label: '其他生成' });
   }
   return result;

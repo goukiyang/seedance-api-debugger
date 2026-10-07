@@ -8,6 +8,13 @@ import { atomicHdJson, hdCapacity, hdControl, hdDirectory, hdEligibility, hdSour
 
 const mode = process.argv[2] || 'status';
 const batch = 'ui30-old-20261007';
+async function availableMemory() {
+  if (process.platform !== 'linux') return os.freemem();
+  const info = await fs.readFile('/proc/meminfo', 'utf8');
+  const match = /^MemAvailable:\s+(\d+)\s+kB$/m.exec(info);
+  if (!match) throw new Error('memory_guard_unavailable');
+  return Number(match[1]) * 1024;
+}
 const textFlag = (json: string | null) => {
   try { return JSON.parse(json || '{}').preserveText === true; } catch { return false; }
 };
@@ -84,7 +91,7 @@ async function main() {
       since = captured;
       await atomicHdJson(checkpoint, { since: since.toISOString() });
       if (!(await hdCapacity()).safe) await setHdControl(true, 'capacity_guard');
-      else if (os.loadavg()[0] > Math.max(4, os.cpus().length * 1.5) || os.freemem() < 1024 * 1024 * 1024) {
+      else if (os.loadavg()[0] > Math.max(4, os.cpus().length * 1.5) || await availableMemory() < 1024 * 1024 * 1024) {
         await setHdControl(true, 'load_guard');
       } else {
         const job = (await listHdJobs()).filter(j => j.status === 'queued' || j.status === 'running')

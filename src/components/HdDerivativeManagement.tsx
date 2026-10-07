@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Pause, Play, RefreshCw, RotateCcw } from 'lucide-react';
 type Status = { total: number; counts: Record<string, number>; reasons: Record<string, number>; control: { paused: boolean; reason?: string }; batches: Array<{ id: string; knownLocalOriginals: number; counts: Record<string, number>; notQueued: number; remoteVersionUnknown: number; unavailable: number }>; newCounts: Record<string, number> };
 const reasonLabel: Record<string, string> = { admin_pause: '管理员暂停', operator_pause: '操作员暂停', capacity_guard: '剩余空间不足', load_guard: '服务器忙碌', multi_frame: '多帧原件', pixel_limit: '像素数量超限', high_bit_depth: '高位深原件', wide_gamut: '色彩范围不适用', unverified_color_profile: '色彩配置未确认', existing_webp: '已有WebP，保留原件', original_smaller: '原件更小，使用原件', source_changed: '原件版本已变化', decode_or_source_failed: '读取或解码失败', temporary_io: '临时读取失败', output_integrity: '新文件校验异常', published_integrity: '已准备文件异常', discovery_source_failure: '新原件读取异常', retry_limit: '自动重试已用尽' };
+reasonLabel.worker_integrity_failure = '后台文件或读取状态异常';
 export function HdDerivativeManagement() {
   const [data, setData] = useState<Status | null>(null), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   async function load(action?: string) {

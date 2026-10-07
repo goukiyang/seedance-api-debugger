@@ -120,7 +120,7 @@ export async function hdCapacity(reserve = 0) {
   const dataDevice = (await fs.stat(await fs.realpath(path.join(process.cwd(), 'storage')))).dev;
   return { rootFree, dataFree, rootReserve: ROOT_RESERVE, dataReserve: DATA_RESERVE,
     separateDataMount: rootDevice !== dataDevice,
-    safe: rootFree > ROOT_RESERVE + reserve && dataFree > DATA_RESERVE + reserve && rootDevice !== dataDevice };
+    safe: rootFree > ROOT_RESERVE && dataFree > DATA_RESERVE + reserve && rootDevice !== dataDevice };
 }
 export async function hdControl() {
   try {
