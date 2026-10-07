@@ -16,6 +16,7 @@ export type PickerItem = {
   fileName: string;
   width: number | null;
   height: number | null;
+  fileSize?: number | null;
   duration: number | null;
   createdAt: string;
   source: 'uploaded' | 'generated' | 'other';

@@ -142,7 +142,7 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
         <span className={styles.styleTileName}>{group.unavailable ? '风格组不可用' : group.name}</span>
       </button>
       <button type="button" className={styles.materialRemove} title="移除风格组" aria-label={`移除${group.name}`} disabled={disabled} onClick={() => onChange(selected.filter(item => item.id !== group.id))}><X size={14} /></button>
-    </div>)}<button type="button" className={styles.materialAdd} disabled={disabled} onClick={openSelector}><Plus size={24} /><span>选择风格组</span></button></div> : selected.length > 0 && <div className={styles.styleSelection}>{selected.map(group => <div key={group.id} className={styles.styleSelected}>
+    </div>)}<button type="button" className={styles.materialAdd} disabled={disabled} title={maxReferences === 0 ? '本次风格图片额度已用完，可进入管理调整' : selectedCount >= maxReferences ? '风格图片已满，可进入管理替换' : '选择风格组'} onClick={openSelector}><Plus size={24} /><span>{maxReferences === 0 ? '管理风格组' : selectedCount >= maxReferences ? '替换风格组' : '选择风格组'}</span></button></div> : selected.length > 0 && <div className={styles.styleSelection}>{selected.map(group => <div key={group.id} className={styles.styleSelected}>
       {group.coverUrl && <img src={group.coverUrl} alt={`${group.name}封面`} />}
       <span>{group.name}</span><button type="button" title="移除风格组" aria-label={`移除${group.name}`} disabled={disabled} onClick={() => onChange(selected.filter(item => item.id !== group.id))}><X size={14} /></button>
     </div>)}</div>}

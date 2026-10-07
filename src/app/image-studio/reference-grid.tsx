@@ -10,6 +10,12 @@ import styles from './studio.module.css';
 
 export type FixedStudioReference = UploadedAssetPayload & { note: string; available?: boolean };
 
+function ReferenceThumbnail({ src, label, loading, onError }: { src?: string | null; label: string; loading: boolean; onError: () => void }) {
+  const [failed, setFailed] = useState(false);
+  return src && !failed ? <img decoding="async" draggable={false} src={src} alt={label} onError={() => { setFailed(true); onError(); }} />
+    : <span>{loading ? '正在读取图片…' : '图片已不可用'}</span>;
+}
+
 export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onChange, onPreview, disabled, offset = 0, notes, children, compact, labels = 'image', onSaveNote, onChangeRole, materialTiles = false, standalone = false, renderDetails, onThumbnailError, loading = false }: {
   items: T[]; onChange: (items: T[]) => void; onPreview: (item: T, number: number) => void;
   disabled?: boolean; offset?: number; notes?: boolean; children?: ReactNode; compact?: boolean; materialTiles?: boolean; standalone?: boolean; labels?: 'image' | 'template' | 'style' | 'primary' | 'auxiliary'; onSaveNote?: (items: T[]) => Promise<boolean>; onChangeRole?: (item: T, index: number) => void;
@@ -89,7 +95,7 @@ export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onC
       onClickCapture={event => { if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false; } }}>
       <div className={styles.reference}>
         <button type="button" className={styles.preview} disabled={!item.originalUrl} aria-label={`预览${label(index)}`} onClick={() => onPreview(item, offset + index + 1)}>
-          {item.thumbnailUrl ? <img decoding="async" draggable={false} src={item.thumbnailUrl} alt={label(index)} onError={() => onThumbnailError?.(item)} /> : <span>{loading ? '正在读取图片…' : '图片已不可用'}</span>}
+          <ReferenceThumbnail key={item.thumbnailUrl || 'unavailable'} src={item.thumbnailUrl} label={label(index)} loading={loading} onError={() => onThumbnailError?.(item)} />
         </button>
         <span className={styles.referenceNumber}>{label(index)}</span>
         <button type="button" data-sort-grip className={styles.referenceGrip} disabled={disabled} aria-label={`移动${label(index)}`} title="移动参考图"

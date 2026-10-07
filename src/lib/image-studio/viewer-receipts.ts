@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import { defaultStudioModuleId, validStudioModuleId } from './modules';
 import { studioResultVersion, type StudioAttentionSnapshot } from './result-attention';
+import { studioTemplateTaskWhere } from './task-visibility';
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const directory = (viewerId: string) => path.join(process.cwd(), 'storage', 'studio-viewer-receipts', hash(viewerId));
@@ -22,11 +23,13 @@ async function publishReceipt(file: string, value: unknown) {
   } finally { await fs.unlink(temporary).catch(() => {}); }
 }
 
-async function visibleResults(viewerId: string) {
+async function visibleResults(viewerId: string, moduleId?: string) {
   const modules = await prisma.imageStudioModule.findMany({ where: { owner_id: viewerId }, select: { id: true } });
   const allowed = new Set([defaultStudioModuleId(viewerId), ...modules.map(item => item.id)]);
+  if (moduleId && !allowed.has(moduleId)) throw new Error('模板不存在或不可访问');
   const tasks = await prisma.imageStudioTask.findMany({
-    where: { owner_id: viewerId, status: 'succeeded', deleted_at: null, asset_id: { not: null }, finished_at: { not: null } },
+    where: { AND: [moduleId ? studioTemplateTaskWhere(viewerId, moduleId) : { OR: Array.from(allowed, id => studioTemplateTaskWhere(viewerId, id)) },
+      { status: 'succeeded', asset_id: { not: null }, finished_at: { not: null } }] },
     select: { id: true, module_id: true, asset_id: true, finished_at: true },
   });
   const assetIds = Array.from(new Set(tasks.filter(task => !task.module_id || allowed.has(task.module_id)).flatMap(task => task.asset_id ? [task.asset_id] : [])));
@@ -53,8 +56,38 @@ async function readReceipts(viewerId: string, initialVersions: string[]) {
   }
   const baseline = JSON.parse(await fs.readFile(baselineFile, 'utf8'));
   if (baseline?.schemaVersion !== 1 || !Array.isArray(baseline.versions) || baseline.versions.some((item: unknown) => typeof item !== 'string' || !/^[a-f0-9]{64}$/.test(item))) throw new Error('已读记录不可用');
-  const files = (await fs.readdir(dir)).filter(file => /^[a-f0-9]{64}\.json$/.test(file));
-  return { seen: new Set<string>([...baseline.versions, ...files.map(file => file.slice(0, -5))]), revision: files.length + 1 };
+  const files = (await fs.readdir(dir)).filter(file => /^(?:seen-)?[a-f0-9]{64}\.json$/.test(file));
+  return { seen: new Set<string>([...baseline.versions, ...files.map(file => file.replace(/^seen-/, '').slice(0, -5))]), revision: files.length + 1 };
+}
+
+export async function studioTemplateEntrySnapshot(viewerId: string, moduleId: string) {
+  if (!validStudioModuleId(moduleId, viewerId)) throw new Error('模板编号无效');
+  const startedAt = Date.now();
+  const { allowed, results } = await visibleResults(viewerId);
+  if (!allowed.has(moduleId)) throw new Error('模板不存在或不可访问');
+  await readReceipts(viewerId, results.filter(item => item.completedAt <= startedAt).map(item => item.version));
+  // Content-addressed, immutable snapshots are reused on repeat entry. They never include later completions.
+  const snapshot = { schemaVersion: 1, moduleId, versions: results.filter(item => item.moduleId === moduleId).map(item => hash(item.version)).sort() };
+  const token = hash(JSON.stringify(snapshot));
+  await publishReceipt(path.join(directory(viewerId), `entry-${token}.json`), snapshot);
+  return token;
+}
+
+export async function confirmStudioTemplateEntry(viewerId: string, moduleId: unknown, token: unknown) {
+  if (!validStudioModuleId(moduleId, viewerId) || typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) throw new Error('模板提醒参数无效');
+  const snapshot = JSON.parse(await fs.readFile(path.join(directory(viewerId), `entry-${token}.json`), 'utf8'));
+  if (snapshot?.schemaVersion !== 1 || snapshot.moduleId !== moduleId || !Array.isArray(snapshot.versions)
+    || snapshot.versions.some((item: unknown) => typeof item !== 'string' || !/^[a-f0-9]{64}$/.test(item))
+    || hash(JSON.stringify(snapshot)) !== token) throw new Error('模板范围已失效，请重新打开');
+  const { allowed, results } = await visibleResults(viewerId);
+  if (!allowed.has(moduleId)) throw new Error('模板不存在或不可访问');
+  const receipts = await readReceipts(viewerId, results.map(item => item.version));
+  const captured = new Set<string>(snapshot.versions);
+  // Recheck current visibility; only this server-issued set can acknowledge template attention.
+  const observed = results.filter(item => item.moduleId === moduleId && captured.has(hash(item.version)) && !receipts.seen.has(hash(item.version)));
+  for (const item of observed) await publishReceipt(path.join(directory(viewerId), `seen-${hash(item.version)}.json`),
+    { schemaVersion: 1, moduleId, version: item.version, operation: 'enter_template', seenAt: new Date().toISOString() });
+  return studioAttentionSnapshot(viewerId);
 }
 
 export async function studioAttentionSnapshot(viewerId: string): Promise<StudioAttentionSnapshot> {

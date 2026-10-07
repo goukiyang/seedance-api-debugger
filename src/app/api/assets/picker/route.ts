@@ -167,7 +167,7 @@ export async function GET(request: NextRequest) {
       if (!item.assetId) return [item];
       const asset = byId.get(item.assetId!);
       if (!asset) return [];
-      return [{ ...item, canRemoveFromLibrary: scope === 'mine' && asset.owner_id === user.id, width: asset.width, height: asset.height, duration: duration(asset.metadata_json),
+      return [{ ...item, canRemoveFromLibrary: scope === 'mine' && asset.owner_id === user.id, width: asset.width, height: asset.height, fileSize: asset.file_size, duration: duration(asset.metadata_json),
         originalUrl: item.referenceImageId ? `/api/reference-images/${item.referenceImageId}/content?variant=preview` : url(asset.original_url),
         thumbnailUrl: item.referenceImageId ? `/api/reference-images/${item.referenceImageId}/content?variant=thumbnail` : asset.thumbnail_url ? url(asset.thumbnail_url) : asset.type === 'image' ? url(asset.original_url) : null }];
     });

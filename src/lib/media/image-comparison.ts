@@ -6,7 +6,7 @@ import { isSafeIdentifier, sourceFingerprint, type MediaPreviewZoomMode } from '
 export type ImageComparisonSource = {
   src: string; alt: string; fileName?: string; thumbnailSrc?: string;
   contentKey?: ContentKey; pickerKey?: string; id?: string; version?: string;
-  width?: number; height?: number;
+  width?: number; height?: number; fileSize?: number;
 };
 export type ImageView = { scale: number; x: number; y: number; mode: MediaPreviewZoomMode };
 export type ComparisonPreferences = { linked: boolean; axis: 'horizontal' | 'vertical' };
@@ -47,7 +47,7 @@ export function imageSourceIdentity(source: ImageComparisonSource) {
 }
 export function pickerImageSource(item: PickerItem): ImageComparisonSource {
   return { src: item.originalUrl, thumbnailSrc: item.thumbnailUrl || undefined, alt: '图片预览', fileName: item.fileName,
-    width: item.width || undefined, height: item.height || undefined,
+    width: item.width || undefined, height: item.height || undefined, fileSize: item.fileSize ?? undefined,
     contentKey: item.referenceImageId ? `reference_image:${item.referenceImageId}` : item.key,
     pickerKey: item.referenceImageId ? `reference_image:${item.referenceImageId}` : item.key };
 }

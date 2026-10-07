@@ -3,6 +3,7 @@ import { getSession } from '@/lib/auth/session';
 import { deleteStudioResult, listStudioTasks, StudioError, submitStudioBatch } from '@/lib/image-studio/tasks';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { ContextVersionError } from '@/lib/image-studio/context-version';
+import { studioTemplateEntrySnapshot } from '@/lib/image-studio/viewer-receipts';
 
 export const dynamic = 'force-dynamic';
 export async function DELETE(request: NextRequest) {
@@ -19,7 +20,14 @@ export async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用图片生成' }, { status: 403 });
-  try { return NextResponse.json(await listStudioTasks(user.id, request.nextUrl.searchParams.get('cursor') || undefined, request.nextUrl.searchParams.get('moduleId') || undefined, user.role === 'admin', request.nextUrl.searchParams.get('taskId') || undefined, request.nextUrl.searchParams.get('requestId') || undefined), { headers: { 'Cache-Control': 'no-store' } }); }
+  try {
+    const params = request.nextUrl.searchParams;
+    const moduleId = params.get('moduleId') || undefined;
+    const entering = params.get('attention') === 'entry' && moduleId && !params.has('cursor') && !params.has('taskId') && !params.has('requestId');
+    const entrySnapshot = entering ? await studioTemplateEntrySnapshot(user.id, moduleId) : undefined;
+    const result = await listStudioTasks(user.id, params.get('cursor') || undefined, moduleId, user.role === 'admin', params.get('taskId') || undefined, params.get('requestId') || undefined);
+    return NextResponse.json({ ...result, ...(entrySnapshot ? { entrySnapshot } : {}) }, { headers: { 'Cache-Control': 'private, no-store' } });
+  }
   catch { return NextResponse.json({ error: '生成记录读取失败，请重试' }, { status: 503 }); }
 }
 export async function POST(request: NextRequest) {

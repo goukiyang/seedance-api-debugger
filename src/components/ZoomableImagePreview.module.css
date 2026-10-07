@@ -13,7 +13,8 @@
 .toolbar {
   position: relative;
   z-index: 4;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px minmax(0, 1fr);
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -23,8 +24,9 @@
 }
 
 .sourceGroup, .actions, .desktopNavigation, .popoverRow { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.actions { justify-self: end; }
 
-.toolbar :where(.sourceGroup > button, .actions button, .controlsPopover > header > button, .popoverRow > button, .menuAction) {
+.toolbar :where(.sourceGroup button, .compareToggle, .actions button, .controlsPopover > header > button, .popoverRow > button, .menuAction) {
   box-sizing: border-box;
   flex: 0 0 auto;
   width: 38px;
@@ -50,6 +52,7 @@
 .sourceThumb[data-active="true"] { border-color: #70cfbd; box-shadow: inset 0 0 0 1px #70cfbd; }
 .sourceThumb[data-active="true"]::after { content: ''; position: absolute; right: 2px; bottom: 2px; width: 5px; height: 5px; border-radius: 50%; background: #70cfbd; }
 .toolbar .zoomTrigger { width: 76px; gap: 4px; font-variant-numeric: tabular-nums; }
+.toolbar .compareToggle[aria-pressed="true"] { background: #214a42; border-color: #70cfbd; }
 .toolbar .closeButton { background: #20272b; }
 .mobileNavigation { display: none; }
 
@@ -113,7 +116,9 @@
 .stageDragging .compareImage { transition: none; }
 
 @media (max-width: 640px) {
-  .toolbar { padding-inline: 8px; }
+  .toolbar { padding-inline: 8px; gap: 4px; }
+  .toolbar .zoomTrigger { width: 38px; }
+  .zoomTrigger > span { display: none; }
   .desktopNavigation { display: none; }
   .mobileNavigation { display: grid; gap: 8px; }
   .compareFrame { inset: 8px; gap: 6px; }

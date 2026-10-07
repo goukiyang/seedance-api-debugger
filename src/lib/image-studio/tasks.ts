@@ -22,6 +22,7 @@ import { DEFAULT_STUDIO_PRIMARY_MAX } from './limits';
 import type { AvatarCandidate, AvatarLayout } from '@/lib/avatar-random/types';
 import { isAvatarSheet, validateSheetCandidates } from '@/lib/avatar-random/layout';
 import { evolutionCapability, parseEvolution, resolveEvolution, evolutionInstructions } from './evolution';
+import { studioTemplateTaskWhere } from './task-visibility';
 
 export class StudioError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -493,14 +494,8 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
   if (moduleId && !validStudioModuleId(moduleId, ownerId)) throw new StudioError('模块编号无效');
   if (taskId !== undefined && (typeof taskId !== 'string' || !taskId || taskId.length > 120)) throw new StudioError('历史生成记录无效');
   if (requestId !== undefined && !/^[a-zA-Z0-9-]{16,80}$/.test(requestId)) throw new StudioError('提交编号无效');
-  const isolateAvatar = moduleId === defaultStudioModuleId(ownerId) && taskId === undefined && !requestId;
-  const where: Prisma.ImageStudioTaskWhereInput = { owner_id: ownerId, deleted_at: null,
-    ...(isolateAvatar ? { AND: [{ OR: [
-      { snapshot_json: null },
-      { AND: [{ NOT: { snapshot_json: { contains: '\"avatar\":' } } }, { NOT: { snapshot_json: { contains: '\"avatarLayout\":' } } }] },
-    ] }] } : {}),
-    ...(requestId ? { batch_id: createHash('sha256').update(`${ownerId}:${requestId}`).digest('hex') } : {}),
-    ...(moduleId ? moduleId === defaultStudioModuleId(ownerId) ? { OR: [{ module_id: null }, { module_id: moduleId }] } : { module_id: moduleId } : {}) };
+  const where: Prisma.ImageStudioTaskWhereInput = { ...studioTemplateTaskWhere(ownerId, moduleId, taskId !== undefined || Boolean(requestId)),
+    ...(requestId ? { batch_id: createHash('sha256').update(`${ownerId}:${requestId}`).digest('hex') } : {}) };
   const rows = taskId !== undefined
     ? await prisma.imageStudioTask.findFirst({ where: { ...where, id: taskId } }).then(task => task ? [task] : [])
     : await prisma.imageStudioTask.findMany({ where,
@@ -512,7 +507,7 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
     try { return JSON.parse(item.reference_ids) as string[]; } catch { return []; }
   })));
   const assets = await prisma.asset.findMany({ where: { id: { in: [...outputAssetIds, ...referenceIds] }, ...(isAdmin ? {} : { owner_id: ownerId }), status: 'active' },
-    select: { id: true, original_url: true, thumbnail_url: true, width: true, height: true } });
+    select: { id: true, original_url: true, thumbnail_url: true, width: true, height: true, file_size: true } });
   const assetById = new Map(assets.map(asset => [asset.id, asset]));
   const owner = items.length ? await prisma.user.findUnique({ where: { id: ownerId },
     select: { id: true, name: true, username: true, avatar_url: true } }) : null;

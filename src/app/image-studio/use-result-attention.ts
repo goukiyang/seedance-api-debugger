@@ -35,23 +35,29 @@ export function useResultAttention(userId: string, enabled: boolean) {
       if ((!controller.signal.aborted || timedOut) && currentScope.current === userId && startedEpoch === epoch.current && request === sequence.current) setState(previous => ({ ...previous, error: '未读状态读取失败' }));
     } finally { window.clearTimeout(timeout); if (inFlight.current === controller) inFlight.current = null; }
   }, [userId, enabled, accept]);
-  const markViewed = useCallback(async (moduleId: string, versions: string[]) => {
-    if (!enabled || !versions.length) return;
+  const saveReceipt = useCallback(async (body: { moduleId: string; versions?: string[]; operation?: 'enter_template'; entrySnapshot?: string }, signal?: AbortSignal) => {
+    if (!enabled || currentScope.current !== userId || signal?.aborted) return;
     const controller = new AbortController(); mutations.current.add(controller);
+    const cancel = () => controller.abort(); signal?.addEventListener('abort', cancel, { once: true });
     const request = ++sequence.current;
     let timedOut = false;
     const timeout = window.setTimeout(() => { timedOut = true; controller.abort(); }, 15000);
     epoch.current += 1;
     try {
       const response = await fetch('/api/image-studio/attention', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ moduleId, versions }), signal: controller.signal });
+        body: JSON.stringify(body), signal: controller.signal });
       if (!response.ok) throw new Error();
       const snapshot = await response.json();
       if (!controller.signal.aborted && (request === sequence.current || snapshot.receiptRevision > revision.current)) accept(snapshot);
     } catch {
       if ((!controller.signal.aborted || timedOut) && currentScope.current === userId && request === sequence.current) setState(previous => ({ ...previous, error: '已读未能保存，请重新打开模板' }));
-    } finally { window.clearTimeout(timeout); if (currentScope.current === userId) epoch.current += 1; mutations.current.delete(controller); }
+    } finally { window.clearTimeout(timeout); signal?.removeEventListener('abort', cancel); if (currentScope.current === userId) epoch.current += 1; mutations.current.delete(controller); }
   }, [userId, enabled, accept]);
+  const markViewed = useCallback(async (moduleId: string, versions: string[]) => {
+    if (versions.length) await saveReceipt({ moduleId, versions });
+  }, [saveReceipt]);
+  const confirmEntry = useCallback((moduleId: string, entrySnapshot: string, signal: AbortSignal) =>
+    saveReceipt({ moduleId, entrySnapshot, operation: 'enter_template' }, signal), [saveReceipt]);
   useEffect(() => {
     epoch.current += 1; revision.current = 0; lastRead.current = 0;
     setState({ viewerId: userId, unread: [], error: '' });
@@ -65,5 +71,5 @@ export function useResultAttention(userId: string, enabled: boolean) {
       window.clearInterval(timer); document.removeEventListener('visibilitychange', foreground);
     };
   }, [userId, refresh]);
-  return { unread: new Set(state.viewerId === userId ? state.unread : []), error: state.viewerId === userId ? state.error : '', refresh, markViewed };
+  return { unread: new Set(state.viewerId === userId ? state.unread : []), error: state.viewerId === userId ? state.error : '', refresh, markViewed, confirmEntry };
 }

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Folder, Grid2X2, ImageIcon, Maximize, Minimize, Music, Play, RotateCcw, Search, Upload, Video, X, ZoomIn, Menu, Trash2 } from 'lucide-react';
+import { Folder, Grid2X2, ImageIcon, Maximize, Minimize, Music, Play, RotateCcw, Search, Upload, X, ZoomIn, Menu, Trash2 } from 'lucide-react';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import MediaPreview from '@/components/MediaPreview';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
@@ -45,6 +45,12 @@ export interface ResourceLibraryPickerProps {
 type Preferences = { view: 'library' | 'favorites' | 'recent'; scope: PickerScope; source: string; type: string; query: string; sort: string; album: string; project: string; scroll: number; pages: number };
 const defaults: Preferences = { view: 'library', scope: 'mine', source: 'all', type: 'all', query: '', sort: 'newest', album: '', project: '', scroll: 0, pages: 1 };
 const labels = { image: '图片', video: '视频', audio: '音频' };
+
+function selectionName(item: PickerItem) {
+  const name = item.fileName.trim();
+  const generatedIdentifier = /^(?:(?:image|output|result|seedance|参考图)[-_])?(?:[a-f\d]{24,}|[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})(?:\.[a-z\d]+)?$/i;
+  return name && !generatedIdentifier.test(name) ? name : item.type === 'image' ? '未命名图片' : `未命名${labels[item.type]}`;
+}
 const scopes: Array<[PickerScope, string]> = [['mine', '我的素材'], ['project', '项目素材'], ['shared', '共享给我'], ['public', '公共素材']];
 function stored<T>(key: string, fallback: T): T { try { return JSON.parse(localStorage.getItem(key) || 'null') ?? fallback; } catch { return fallback; } }
 function validKeys(input: unknown): string[] { return Array.isArray(input) ? input.filter((key): key is string => typeof key === 'string' && /^(asset|reference_image|video_task):[a-zA-Z0-9_-]+$/.test(key)).slice(0, 60) : []; }
@@ -336,13 +342,15 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         <div ref={body} className={styles.body} aria-busy={loading} onScroll={e => { const scroll = e.currentTarget.scrollTop; if (!restoring.current) setPrefs(p => ({ ...p, scroll })); }} onWheel={() => { restoring.current = false; }} onTouchStart={() => { restoring.current = false; }}>
           <div className={styles.grid}>{items.map(item => { const order = selected.findIndex(s => s.identity === item.identity), inUse = existing(item); return <article key={item.identity} className={`${styles.card} ${order >= 0 ? styles.selected : ''}`}>
             <div className={styles.cover} data-reaction-surface>
-            <button type="button" className={styles.selectCard} disabled={busy || inUse || !!item.unavailableReason} aria-pressed={order >= 0} aria-label={`${order >= 0 ? '取消选择' : '选择'}${item.fileName}`} title={item.unavailableReason} onClick={() => toggle(item)}><Thumbnail item={item} />{order >= 0 && <span className={styles.order}>{order + 1}</span>}{inUse && <span className={styles.inUse}>已添加</span>}</button>
+            <button type="button" className={styles.selectCard} disabled={busy || inUse || !!item.unavailableReason} aria-pressed={order >= 0} aria-label={`${order >= 0 ? '取消选择' : '选择'}${selectionName(item)}`} title={item.unavailableReason} onClick={() => toggle(item)}><Thumbnail item={item} />{order >= 0 && <span className={styles.order}>{order + 1}</span>}{inUse && <span className={styles.inUse}>已添加</span>}</button>
+            {item.canRemoveFromLibrary && <button type="button" className={styles.removeButton} title="从我的素材库删除" aria-label={`从我的素材库删除：${selectionName(item)}`} disabled={busy} onClick={() => void removeItem(item)}><Trash2 size={17} /></button>}
             <button type="button" className={styles.preview} title={item.type === 'image' ? '放大图片' : `播放${labels[item.type]}`} aria-label={`${item.type === 'image' ? '放大' : '播放'}${item.fileName}`} onClick={() => setPreview(item)}>{item.type === 'image' ? <ZoomIn size={17} /> : <Play size={20} fill="currentColor" />}</button>
             {item.type !== 'image' && <span className={styles.duration}>{item.duration != null ? durationText(item.duration) : '时长未知'}</span>}
             <ContentReactions contentKey={item.key} overlay imageSharing={false} onChange={() => { if (prefs.view === 'favorites') setEpoch(v => v + 1); }} />
             </div>
-            <div className={styles.meta}><div className={styles.cardTools}><span>{item.type === 'image' ? <ImageIcon size={14} /> : item.type === 'video' ? <Video size={14} /> : <Music size={14} />}{labels[item.type]}</span></div><strong title={item.fileName}>{item.fileName}</strong><small>{item.source === 'generated' ? '生成' : item.source === 'uploaded' ? '上传' : '图集'}{item.width && item.height ? ` · ${item.width} × ${item.height}` : ''} · <RelativeTime value={item.createdAt} /></small>{item.unavailableReason && <small className={styles.compatibility}>{item.unavailableReason}</small>}</div>
-            {item.canRemoveFromLibrary && <button type="button" className={styles.removeButton} disabled={busy} onClick={() => void removeItem(item)}><Trash2 size={15} />删除</button>}
+            <div className={styles.meta}><strong>{selectionName(item)}</strong>{item.unavailableReason && <small className={styles.compatibility}>{item.unavailableReason}</small>}
+              <details className={styles.cardDetails}><summary>详情</summary><small className={styles.originalName}>{item.fileName}</small><small>{item.source === 'generated' ? '生成' : item.source === 'uploaded' ? '上传' : '图集'}{item.width && item.height ? ` · ${item.width} × ${item.height}` : ''} · <RelativeTime value={item.createdAt} /></small></details>
+            </div>
           </article>; })}</div>
           {loading && <div className={styles.empty} role="status">正在读取素材</div>}{!loading && !items.length && <div className={styles.empty}>{prefs.view === 'recent' ? '本机还没有符合筛选的最近选用素材' : '没有符合筛选的可用素材'}</div>}
           <div className={styles.more}><span>{total} 个素材</span>{hasMore && <button type="button" disabled={loading} onClick={() => void loadMore()}>加载更多</button>}</div>
@@ -353,7 +361,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         <div className={styles.footerActions}><button type="button" disabled={busy} onClick={close}>取消</button><button type="button" className={styles.primary} disabled={busy || !selected.length || !!canSelect(selected)} onClick={() => void confirm()}>{busy && !uploadLabel ? '正在添加' : confirmLabel}</button></div>
       </footer>
     </div>
-    {preview && (preview.type === 'image' ? <ZoomableImagePreview contentKey={preview.key} src={preview.originalUrl} alt={preview.fileName} fileName={preview.fileName} onClose={() => setPreview(null)} /> : <MediaPreview contentKey={preview.key} src={preview.originalUrl} type={preview.type} title={preview.fileName} poster={preview.thumbnailUrl || undefined} onClose={() => setPreview(null)} />)}
+    {preview && (preview.type === 'image' ? <ZoomableImagePreview contentKey={preview.key} src={preview.originalUrl} thumbnailSrc={preview.thumbnailUrl || undefined} alt={selectionName(preview)} fileName={preview.fileName} safeDetails={{ width: preview.width || undefined, height: preview.height || undefined, fileSize: preview.fileSize ?? undefined }} onClose={() => setPreview(null)} /> : <MediaPreview contentKey={preview.key} src={preview.originalUrl} type={preview.type} title={preview.fileName} poster={preview.thumbnailUrl || undefined} onClose={() => setPreview(null)} />)}
     {productDialog}
   </div>, container);
 }

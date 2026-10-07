@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, Check, Copy, MoreHorizontal, Plus, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, Check, Copy, Lock, Unlock, MoreHorizontal, Plus, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { copyImage } from '@/lib/media/copy-image';
 import styles from './ZoomableImagePreview.module.css';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
@@ -34,7 +34,7 @@ export type ImagePreviewMetadata = {
   time?: string;
 };
 
-export type SafeImagePreviewDetails = Omit<ImagePreviewMetadata, 'context'> & { width?: number; height?: number };
+export type SafeImagePreviewDetails = Omit<ImagePreviewMetadata, 'context'> & { width?: number; height?: number; fileSize?: number };
 
 type ZoomableImagePreviewProps = {
   src: string;
@@ -202,7 +202,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const paneRefs = useRef<Partial<Record<Side, HTMLDivElement>>>({});
   const portalAnchorRef = useRef<HTMLSpanElement>(null);
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
-  const incoming: ImageComparisonSource = { src, thumbnailSrc, alt, fileName, id: previewKey, version: sourceVersion, contentKey, width: safeDetails?.width, height: safeDetails?.height };
+  const incoming: ImageComparisonSource = { src, thumbnailSrc, alt, fileName, id: previewKey, version: sourceVersion, contentKey, width: safeDetails?.width, height: safeDetails?.height, fileSize: safeDetails?.fileSize };
   const [currentImage, setCurrentImage] = useState<ImageComparisonSource>(incoming);
   const [comparisonImage, setComparisonImage] = useState<ImageComparisonSource | null>(comparison || null);
   const sources = { current: currentImage, comparison: comparisonImage };
@@ -290,7 +290,6 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   }, [stopGestures]);
 
   const originalOwner = useRef<string | null>(null);
-  const initialSource = useRef(imageSourceIdentity(incoming));
   useEffect(() => {
     if (!hasLoadedUser || !portalRoot) return;
     if (originalOwner.current !== null && originalOwner.current !== owner) { cancelRequests(); onClose(); return; }
@@ -310,11 +309,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
         if (!alive.current || controller.signal.aborted || userAction.current !== action) return;
         setComparisonMode(saved.enabled);
       } else if (saved.comparison) setMessage('上次对比图已失效，请重新选择');
-      if (saved.current && saved.current.identity !== initialSource.current) {
-        const restoredCurrent = await resolveComparisonImage(saved.current.key, controller.signal);
-        if (!alive.current || controller.signal.aborted || userAction.current !== action) return;
-        if (imageSourceIdentity(restoredCurrent) === saved.current.identity) await requestImage('current', restoredCurrent, false);
-      }
+      // Explicitly opened images always anchor the left side; restore only the comparison selection.
     })().catch(() => { if (alive.current && !controller.signal.aborted && userAction.current === action) setMessage('上次图片无法恢复，原图保留，请重新选择'); });
     return () => controller.abort();
   // Restore once per account/opening; explicit navigation must not replay an old selection.
@@ -461,7 +456,8 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
       const next = { ...value };
       for (const side of linked && comparisonMode ? sides : [safeSide]) {
         const image = sourcesRef.current[side]; if (!image) continue;
-        const id = viewIdentity(side, image), base = baseSize(side), size = sizes[imageSourceIdentity(image)];
+        const id = viewIdentity(side, image), base = baseSize(side), size = image.width && image.height ? { width: image.width, height: image.height } : originals[id] || image.src.startsWith('blob:') ? sizes[imageSourceIdentity(image)] : undefined;
+        if (mode === 'actual' && !size) { setMessage('原图像素尺寸未知，请先加载完整原图'); continue; }
         const scale = mode === 'fit' ? 1 : mode === 'width' ? (frames[side].width - 24) / base.width : size ? size.width / base.width : 1;
         next[id] = { scale: Math.max(MIN_SCALE, scale), x: 0, y: 0, mode };
       }
@@ -536,7 +532,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   async function chooseLocal(side: Side, file: File) {
     if (!file.type.startsWith('image/') || file.size > 64 * 1024 * 1024) throw new Error('请选择64MB以内的图片');
     const url = URL.createObjectURL(file); localUrls.current.add(url);
-    try { const applied = await choose(side, { src: url, alt: '本机图片', fileName: file.name });
+    try { const applied = await choose(side, { src: url, alt: '本机图片', fileName: file.name, fileSize: file.size });
       if (!applied) { URL.revokeObjectURL(url); localUrls.current.delete(url); }
       else setMessage('本机图片仅本次预览，不上传、不跨重开保存');
       return applied;
@@ -572,9 +568,11 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const copySource = displaySource(selectedImage.src, activeOriginal ? 'original' : 'preview');
   const visibleMetadata = isOriginalSubject ? { model: safeMetadataValue(safeDetails?.model ?? metadata?.model), quality: safeMetadataValue(safeDetails?.quality ?? metadata?.quality),
     ratio: safeMetadataValue(safeDetails?.ratio ?? metadata?.ratio), resolution: safeMetadataValue(safeDetails?.resolution ?? metadata?.resolution), time: safeMetadataTime(safeDetails?.time ?? metadata?.time) } : {};
-  const visibleSize = isOriginalSubject && safeDetails?.width && safeDetails.height ? { width: safeDetails.width, height: safeDetails.height } : sizes[selectedId];
+  const visibleSize = selectedImage.width && selectedImage.height ? { width: selectedImage.width, height: selectedImage.height } : activeOriginal || selectedImage.src.startsWith('blob:') ? sizes[selectedId] : undefined;
+  const previewSize = sizes[selectedId];
+  const fileSize = selectedImage.fileSize;
+  const knownFileSize = typeof fileSize === 'number' && Number.isFinite(fileSize) && fileSize > 0;
   const rawTime = safeDetails?.time ?? metadata?.time;
-  const hasMetadata = Object.values(visibleMetadata).some(Boolean) || Boolean(visibleSize);
   const candidates = Array.from(new Map([incoming, ...(comparison ? [comparison] : []), ...comparisonCandidates].filter(image => image.src).map(image => [identity(image), image])).values());
   function thumbnail(side: Side) {
     const image = sources[side];
@@ -587,12 +585,16 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
     onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onPointerMove={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()}
     onDoubleClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onKeyUp={event => event.stopPropagation()}>
     <div ref={toolbarRef} className={styles.toolbar}>
-      <div className={styles.sourceGroup}>{thumbnail('current')}<button type="button" data-image-preview-compare aria-pressed={comparisonMode} title={comparisonMode ? '退出对比' : '开启对比'} aria-label={comparisonMode ? '退出对比' : '开启对比'}
-          onClick={() => { userAction.current++; stopGestures(); if (comparisonMode) { setComparisonMode(false); setActiveSide('current'); }
-            else if (comparisonImage) setComparisonMode(true); else { setControlsOpen(null); setPickerSide('comparison'); } }}><ArrowLeftRight size={16} /></button>{thumbnail('comparison')}</div>
-      <div className={styles.actions}>
+      <div className={styles.sourceGroup}>{thumbnail('current')}
         {hasNavigation && <div className={styles.desktopNavigation}><button type="button" title="当前图上一张" aria-label="当前图上一张" onClick={onPrevious}><ArrowLeft size={16} /></button><button type="button" title="当前图下一张" aria-label="当前图下一张" onClick={onNext}><ArrowRight size={16} /></button></div>}
+        {comparisonMode && <button type="button" title={linked ? '关闭两图联动，独立调整' : '开启两图联动'} aria-label={linked ? '关闭两图联动，独立调整' : '开启两图联动'} aria-pressed={linked} onClick={() => { userAction.current++; stopGestures(); setLinked(value => !value); }}>{linked ? <Lock size={16} /> : <Unlock size={16} />}</button>}
         <button ref={zoomTriggerRef} type="button" className={styles.zoomTrigger} title="缩放选中图" aria-label={`${safeSide === 'current' ? '当前图' : '对比图'}缩放 ${Math.round(selectedView.scale * 100)}%${comparisonMode && linked ? '，联动已开启' : ''}`} aria-expanded={controlsOpen === 'zoom'} aria-controls={controlsOpen === 'zoom' ? controlsId : undefined} aria-haspopup="dialog" onClick={() => setControlsOpen(value => value === 'zoom' ? null : 'zoom')}><ZoomIn size={16} /><span>{Math.round(selectedView.scale * 100)}%</span></button>
+      </div>
+      <button type="button" className={styles.compareToggle} data-image-preview-compare aria-pressed={comparisonMode} title={comparisonMode ? '退出对比' : '开启对比'} aria-label={comparisonMode ? '退出对比' : '开启对比'}
+          onClick={() => { userAction.current++; stopGestures(); if (comparisonMode) { setComparisonMode(false); setActiveSide('current'); }
+            else if (comparisonImage) setComparisonMode(true); else { setControlsOpen(null); setPickerSide('comparison'); } }}><ArrowLeftRight size={16} /></button>
+      <div className={styles.actions}>
+        {thumbnail('comparison')}
         <button ref={moreTriggerRef} type="button" title="图片与对比更多操作" aria-label="图片与对比更多操作" aria-expanded={controlsOpen === 'more'} aria-controls={controlsOpen === 'more' ? controlsId : undefined} aria-haspopup="dialog" onClick={() => setControlsOpen(value => value === 'more' ? null : 'more')}><MoreHorizontal size={18} /></button>
         <button type="button" className={styles.closeButton} onClick={dismissPreview} title="关闭大图" aria-label="关闭大图"><X size={18} /></button>
       </div>
@@ -609,15 +611,16 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
           {displaySource(selectedImage.src, 'preview') !== displaySource(selectedImage.src, 'original') && <button type="button" className={styles.menuAction} aria-pressed={activeOriginal} onClick={() => { userAction.current++; stopGestures(); setOriginals(value => ({ ...value, [viewIdentity(safeSide, selectedImage)]: !activeOriginal })); }}><ZoomIn size={16} />{activeOriginal ? '切换高清预览' : '加载完整原图'}</button>}
           {hasNavigation && <div className={styles.mobileNavigation}><button type="button" className={styles.menuAction} onClick={onPrevious}><ArrowLeft size={16} />当前图上一张</button><button type="button" className={styles.menuAction} onClick={onNext}><ArrowRight size={16} />当前图下一张</button></div>}
           {comparisonMode && <div className={styles.compareOptions}>
-            <label className={styles.linkedMode}><input type="checkbox" checked={linked} onChange={event => { userAction.current++; stopGestures(); setLinked(event.target.checked); }} />两图联动</label>
             <button type="button" className={styles.menuAction} onClick={() => { userAction.current++; stopGestures(); setAxis(value => value === 'horizontal' ? 'vertical' : 'horizontal'); }}>{axis === 'horizontal' ? <ArrowUpDown size={16} /> : <ArrowLeftRight size={16} />}{axis === 'horizontal' ? '切换上下对比' : '切换左右对比'}</button>
             <button type="button" className={styles.menuAction} onClick={swap}><ArrowLeftRight size={16} />交换两图</button>
             <button type="button" className={styles.menuAction} onClick={() => reset(true)}><RotateCcw size={16} />还原两图</button>
           </div>}
-          {hasMetadata && <div className={styles.metadata}>{visibleMetadata.model && <span>模型：{visibleMetadata.model}</span>}{visibleMetadata.quality && <span>质量：{visibleMetadata.quality}</span>}{visibleMetadata.ratio && <span>比例：{visibleMetadata.ratio}</span>}{visibleMetadata.resolution && <span>分辨率：{visibleMetadata.resolution}</span>}
-            {visibleSize && <span>尺寸：{visibleSize.width} × {visibleSize.height} 像素</span>}
+          <div className={styles.metadata}>{visibleMetadata.model && <span>模型：{visibleMetadata.model}</span>}{visibleMetadata.quality && <span>质量：{visibleMetadata.quality}</span>}{visibleMetadata.ratio && <span>比例：{visibleMetadata.ratio}</span>}{visibleMetadata.resolution && <span>分辨率：{visibleMetadata.resolution}</span>}
+            <span>原图尺寸：{visibleSize ? `${visibleSize.width} × ${visibleSize.height} 像素` : '未知'}</span>
+            <span>原文件大小：{knownFileSize ? formatImageBytes(fileSize) : '未知'}</span>
+            {!visibleSize && previewSize && <span>当前预览：{previewSize.width} × {previewSize.height} 像素（非原图尺寸）</span>}
             {visibleMetadata.time && <span>{rawTime && Number.isFinite(Date.parse(rawTime)) ? <RelativeTime value={rawTime} /> : visibleMetadata.time}</span>}
-          </div>}
+          </div>
           {isOriginalSubject && details != null && <details className={styles.detailDisclosure}><summary>详情</summary><div className={styles.detailContent}>{details}</div></details>}
         </>}
       </div>}
