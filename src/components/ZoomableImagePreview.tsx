@@ -121,7 +121,8 @@ function PreviewImage({ src, thumbnailSrc, alt, original, detail, version = '', 
   const displaySrc = displaySource(src, original ? 'original' : detail ? 'detail' : 'preview');
   const thumbnail = thumbnailSrc || displaySource(src, 'thumbnail');
   const hasThumbnail = thumbnail !== displaySource(src, 'preview');
-  const key = `${user?.id || 'anonymous'}:${version}:${displaySrc}:${attempt}`;
+  const accountIdentity = `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}`;
+  const key = `${accountIdentity}:${version}:${displaySrc}:${attempt}`;
   const [thumbnailLoaded, setThumbnailLoaded] = useState('');
   const [upgradeKey, setUpgradeKey] = useState('');
   const currentKeyRef = useRef(key);
@@ -163,7 +164,7 @@ function PreviewImage({ src, thumbnailSrc, alt, original, detail, version = '', 
       ? readProgress.message || '当前来源无法提供读取进度'
       : readProgress.phase === 'decoding' ? '正在解码' : '正在读取';
   return <>
-    {hasThumbnail && !loaded && !readResult.denied && <img ref={thumbnailImage} key={`thumbnail:${user?.id || 'anonymous'}:${thumbnail}`} src={thumbnail} alt={alt} className={className} style={style} draggable={false} data-image-preview-thumbnail
+    {hasThumbnail && !loaded && !readResult.denied && <img ref={thumbnailImage} key={`thumbnail:${accountIdentity}:${thumbnail}`} src={thumbnail} alt={alt} className={className} style={style} draggable={false} data-image-preview-thumbnail
       onLoad={event => { setThumbnailLoaded(thumbnail); onThumbnailReadyRef.current?.({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); }} />}
     {/* eslint-disable-next-line @next/next/no-img-element */}
     {imageSrc && <img ref={image} key={`preview:${key}`} src={imageSrc} alt={alt} className={className} style={{ ...style, opacity: loaded ? 1 : 0 }} draggable={false} data-image-preview-image
