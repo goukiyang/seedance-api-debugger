@@ -538,7 +538,7 @@ export default function CutoutPage() {
 
   async function selectLibraryImage(items: PickerItem[]) {
     const item = items[0], token = ++sourceSelection.current;
-    if (!item || item.type !== 'image' || !item.originalUrl) return { success: false, message: '原图不可用，请重新选择' };
+    if (!item || item.type !== 'image' || !item.originalUrl) return { success: false, message: '原图不可用或未授权读取，已有输入保留；请重新选择可读取原件的图片' };
     try {
       const response = await fetch(item.originalUrl, { cache: 'no-store', signal: AbortSignal.timeout(120000) });
       if (!response.ok) throw new Error('所选原图无法读取，原图和旧结果保留');

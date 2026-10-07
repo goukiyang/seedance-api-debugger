@@ -633,7 +633,7 @@
                 assetId: id,
                 title: asset.title || asset.fileName || '已上传图片',
                 thumbnailUrl: asset.thumbnailUrl || asset.originalUrl || '',
-                originalUrl: asset.originalUrl || asset.thumbnailUrl || '',
+                originalUrl: asset.originalUrl || '',
             });
         });
         node.data = { ...(node.data || {}), assetIds: deduped.map(asset => asset.id), asset_ids: deduped.map(asset => asset.id), assetPreviews: deduped };
@@ -652,7 +652,7 @@
             id: item.assetId || item.id,
             title: item.title,
             thumbnailUrl: item.thumbnailUrl || item.previewUrl || item.downloadUrl || '',
-            originalUrl: item.originalUrl || item.downloadUrl || item.previewUrl || '',
+            originalUrl: item.originalUrl || item.downloadUrl || '',
         }]);
     }
 

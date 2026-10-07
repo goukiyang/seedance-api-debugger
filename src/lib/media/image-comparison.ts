@@ -47,7 +47,7 @@ export function imageSourceIdentity(source: ImageComparisonSource) {
   return `${id}@${fingerprint}`;
 }
 export function pickerImageSource(item: PickerItem): ImageComparisonSource {
-  return { src: item.originalUrl, thumbnailSrc: item.thumbnailUrl || undefined, alt: '图片预览', fileName: item.fileName,
+  return { src: item.previewUrl || item.originalUrl, thumbnailSrc: item.thumbnailUrl || undefined, alt: '图片预览', fileName: item.fileName,
     width: item.width || undefined, height: item.height || undefined, fileSize: item.fileSize ?? undefined,
     contentKey: item.referenceImageId ? `reference_image:${item.referenceImageId}` : item.key,
     pickerKey: item.referenceImageId ? `reference_image:${item.referenceImageId}` : item.key };
@@ -60,7 +60,7 @@ export async function resolveComparisonImage(key: string, signal?: AbortSignal):
     const data = await readJsonResponse<PickerResponse>(response);
     if (!response.ok) throw new Error('图片权限暂时无法确认，请重试');
     const item = data.items.find(value => value.type === 'image' && (value.key === key || `reference_image:${value.referenceImageId}` === key));
-    if (item?.originalUrl) return pickerImageSource(item);
+    if (item?.previewUrl || item?.originalUrl) return pickerImageSource(item);
   }
   throw new Error('图片已失效或无权查看，请重新选择');
 }

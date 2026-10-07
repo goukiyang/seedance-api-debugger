@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { resolveImageInputUrls } from '@/lib/assets/original-image-input';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import path from 'path';
 import fs from 'fs';
@@ -656,6 +657,8 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
+  try { await resolveImageInputUrls(user, body); }
+  catch (error) { if (error instanceof AuthError) return errorJson(error.message, error.status); throw error; }
   let requestedProvider: GenerationProvider;
   try {
     requestedProvider = normalizeGenerationProvider(body.provider ?? body.engine);

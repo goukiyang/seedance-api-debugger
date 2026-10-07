@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { resolveImageInputUrls } from '@/lib/assets/original-image-input';
 import { Prisma } from '@prisma/client';
 import path from 'path';
 import fs from 'fs';
@@ -441,6 +442,8 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
+  try { await resolveImageInputUrls(user, body); }
+  catch (error) { if (error instanceof AuthError) return errorJson(error.message, error.status); throw error; }
   if (body.model !== undefined && body.model !== null && typeof body.model !== 'string') {
     return errorJson('IP model 无效', 400);
   }

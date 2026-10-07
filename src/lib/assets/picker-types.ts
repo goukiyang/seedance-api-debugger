@@ -12,6 +12,8 @@ export type PickerItem = {
   importUrl?: string;
   unavailableReason?: string;
   type: AssetType;
+  // Display URLs must never be used as upload or processing inputs.
+  previewUrl?: string;
   originalUrl: string;
   thumbnailUrl: string | null;
   fileName: string;

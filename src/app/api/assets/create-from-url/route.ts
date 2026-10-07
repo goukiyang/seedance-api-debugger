@@ -14,6 +14,7 @@ import { AuthError, getSession } from '@/lib/auth/session';
 import { createAsset } from '@/lib/provider/seedance-assets';
 import { seedanceAssetRepository } from '@/lib/assets/seedanceAssetRepository';
 import { normalizeAssetUrl } from '@/lib/assets/normalizeAssetUrl';
+import { originalImageInputUrl } from '@/lib/assets/original-image-input';
 
 type SeedanceCreateAssetType = 'Image' | 'Video' | 'Audio';
 
@@ -80,6 +81,7 @@ export async function POST(request: NextRequest) {
     const resolvedAssetType = assetType && ALLOWED_ASSET_TYPES.has(assetType)
       ? assetType
       : inferAssetTypeFromUrl(normalizedUrl);
+    if (resolvedAssetType === 'Image') normalizedUrl = normalizeAssetUrl(await originalImageInputUrl(user, normalizedUrl));
 
     // Step 2: 按 originalUrl 查 Active 资产
     const existing = await seedanceAssetRepository.findActiveByOriginalUrl(normalizedUrl);

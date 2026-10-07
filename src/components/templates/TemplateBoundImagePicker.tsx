@@ -265,7 +265,7 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
         invalidJsonMessage: UPLOAD_INVALID_JSON_MESSAGE,
         onProgress: (progress) => setUploadProgress(buildPickerUploadProgress(file, progress)),
       });
-      if (!asset?.id) throw new Error('图片上传成功，但没有返回素材 ID');
+      if (!asset?.id || !asset.originalUrl) throw new Error('图片上传回复缺少原件信息；已有绑定保留，请重新读取上传历史');
       const assetId = asset.id;
       const nextImage: TemplateContextCardBoundImage = {
         source: 'upload_history',
@@ -273,13 +273,13 @@ export function TemplateBoundImagePicker({ open, currentImage, onClose, onSelect
         reference_image_id: null,
         asset_id: assetId,
         label: asset.fileName || file.name,
-        url: asset.originalUrl || asset.thumbnailUrl || null,
+        url: asset.originalUrl,
         thumbnail_url: asset.thumbnailUrl || asset.originalUrl || null,
       };
       setHistoryImages((current) => [
         {
           id: assetId,
-          originalUrl: asset.originalUrl || asset.thumbnailUrl || '',
+          originalUrl: asset.originalUrl,
           thumbnailUrl: asset.thumbnailUrl || asset.originalUrl || '',
           fileName: asset.fileName || file.name,
           width: asset.width ?? null,

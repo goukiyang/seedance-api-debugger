@@ -120,7 +120,8 @@ export async function GET(request: NextRequest) {
       if (!a) {
         items.push({ key: `reference_image:${ref.id}`, identity: `reference_image:${ref.id}`, id: ref.id,
           referenceImageId: ref.id, type: 'image', fileName: `参考图-${ref.id}`,
-          originalUrl: `/api/reference-images/${ref.id}/content?variant=preview`,
+          previewUrl: `/api/reference-images/${ref.id}/content?variant=preview`,
+          originalUrl: downloadableAlbums.has(ref.album_id) ? `/api/reference-images/${ref.id}/content?variant=original` : '',
           thumbnailUrl: `/api/reference-images/${ref.id}/content?variant=thumbnail`,
           width: null, height: null, duration: null, createdAt: ref.created_at.toISOString(),
           source: ref.source_type === 'generated' ? 'generated' : ref.source_type === 'upload' ? 'uploaded' : 'other',
@@ -184,7 +185,10 @@ export async function GET(request: NextRequest) {
       const asset = byId.get(item.assetId!);
       if (!asset) return [];
       return [{ ...item, canRemoveFromLibrary: scope === 'mine' && asset.owner_id === user.id, width: asset.width, height: asset.height, fileSize: asset.file_size, duration: duration(asset.metadata_json),
-        originalUrl: item.referenceImageId ? `/api/reference-images/${item.referenceImageId}/content?variant=preview` : asset.type === 'image' ? `/api/content-reactions/media?key=${encodeURIComponent(`asset:${asset.id}`)}&variant=preview` : url(asset.original_url),
+        previewUrl: item.referenceImageId ? `/api/reference-images/${item.referenceImageId}/content?variant=preview` : asset.type === 'image' ? `/api/content-reactions/media?key=${encodeURIComponent(`asset:${asset.id}`)}&variant=preview` : url(asset.original_url),
+        originalUrl: asset.type !== 'image' ? item.referenceImageId ? `/api/reference-images/${item.referenceImageId}/content?variant=preview` : url(asset.original_url) : item.referenceImageId
+          ? references.some(ref => ref.id === item.referenceImageId && downloadableAlbums.has(ref.album_id)) ? `/api/reference-images/${item.referenceImageId}/content?variant=original` : ''
+          : `/api/content-reactions/media?key=${encodeURIComponent(`asset:${asset.id}`)}&variant=original`,
         thumbnailUrl: item.referenceImageId ? `/api/reference-images/${item.referenceImageId}/content?variant=thumbnail` : asset.type === 'image' ? `/api/content-reactions/media?key=${encodeURIComponent(`asset:${asset.id}`)}&variant=thumbnail` : asset.thumbnail_url ? url(asset.thumbnail_url) : null }];
     });
     const unavailable = sorted.filter(item => item.unavailableReason).length;

@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '画布通用文本规则可分条命名、编辑、复制、启停和恢复，按普通文本、提示词或分镜用途生效；保存成功关闭，冲突保留草稿和旧规则。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '图片导入和后续处理优先使用合法原件，缩略与高清压缩图仅用于展示；原件不可用时保留输入并提示。画布通用文本多规则管理保留。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
