@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '图片导入和后续处理优先使用合法原件，缩略与高清压缩图仅用于展示；原件不可用时保留输入并提示。画布通用文本多规则管理保留。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '首页新增工作区快捷入口、最近项目和收藏模板，打开画布及常用功能更集中；原顶栏、图片原件导入与画布规则保持不变。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

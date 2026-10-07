@@ -5,6 +5,7 @@ import { performance } from 'node:perf_hooks';
 import { canViewStudioPreset, canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { getStudioPresetsFixedReferences } from '@/lib/image-studio/fixed-references';
 import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
+import { homeTemplateCover } from '@/lib/content-reactions/home-templates';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,6 +14,16 @@ export async function GET(_request: Request, { params }: { params: { assetId: st
   const started = performance.now();
   const user = await getSession();
   if (!user) return new Response('Not found', { status: 404, headers: privateImageHeaders });
+  const homeKey = new URL(_request.url).searchParams.get('homeContentKey');
+  if (homeKey !== null) {
+    // This projection grants no original access: recheck the exact current
+    // object/banner/file binding on every authorized thumbnail read.
+    try {
+      const asset = await homeTemplateCover(user, homeKey, params.assetId);
+      if (!asset) return new Response('Not found', { status: 404, headers: privateImageHeaders });
+      return await authorizedImageResponse(_request, asset.original_url, 'thumbnail', asset.mime_type || 'application/octet-stream', asset.file_name, started);
+    } catch { return new Response('Not found', { status: 404, headers: privateImageHeaders }); }
+  }
   const asset = await prisma.asset.findFirst({ where: { id: params.assetId, status: 'active', type: 'image' }, select: { id: true, owner_id: true, original_url: true, mime_type: true, file_name: true } });
   if (!asset) return new Response('Not found', { status: 404, headers: privateImageHeaders });
   if (!await canReadStudioAsset(user, asset)) return new Response('Not found', { status: 404, headers: privateImageHeaders });

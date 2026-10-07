@@ -72,6 +72,12 @@ export function canManageStudioPreset(
     && preset.owner_id === user.id;
 }
 
+export function canViewStudioModule(user: ImageStudioIdentity | SessionUser,
+  module: { owner_id: string; source_preset_id: string | null }, source: StudioPresetAccessRow | null) {
+  return module.owner_id === user.id && canUseCompanyTemplates(user)
+    && (!module.source_preset_id || Boolean(source && canViewStudioPreset(user, source)));
+}
+
 export function isExplicitPresetAsset(preset: { banner_asset_id: string | null; reference_ids: string }, assetId: string) {
   if (preset.banner_asset_id === assetId) return true;
   try {

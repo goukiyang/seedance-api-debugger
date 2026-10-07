@@ -5,7 +5,7 @@ import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 import { isTaskHiddenFromRegularUsers } from '@/lib/tasks/retention';
 import { getReferenceImageByIdForAccess, getAlbumAccess } from '@/lib/reference-albums/permissions';
-import { canUseCompanyTemplates, canViewStudioPreset, isExplicitPresetAsset } from '@/lib/image-studio/access';
+import { canUseCompanyTemplates, canViewStudioPreset, canViewStudioModule, isExplicitPresetAsset } from '@/lib/image-studio/access';
 import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
 import { visibleRunPrompt } from '@/lib/template-studio/projection';
 import { getStudioTemplate } from '@/lib/template-studio/templates';
@@ -116,11 +116,9 @@ export async function resolveContent(user: SessionUser, input: ContentKey): Prom
     }
     if (type === 'image_module') {
       const row = await prisma.imageStudioModule.findUnique({ where: { id } });
-      if (!row || row.owner_id !== user.id || !canUseCompanyTemplates(user)) return null;
-      if (row.source_preset_id) {
-        const source = await prisma.imageStudioPreset.findUnique({ where: { id: row.source_preset_id } });
-        if (!source || !canViewStudioPreset(user, source)) return null;
-      }
+      if (!row) return null;
+      const source = row.source_preset_id ? await prisma.imageStudioPreset.findUnique({ where: { id: row.source_preset_id } }) : null;
+      if (!canViewStudioModule(user, row, source)) return null;
       const item = summary(input, 'template', row.name, `/template-studio?type=image&moduleId=${id}`);
       item.templateKind = 'workpage'; item.templateMedium = 'image';
       item.actionLabel = '继续编辑'; item.versionLabel = String(row.revision); item.owner = await owner(row.owner_id);

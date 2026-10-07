@@ -36,6 +36,19 @@ function installChannel() {
     window.dispatchEvent(new CustomEvent('sd2-reactions-changed', { detail: { userId, key, ...(typeof active === 'boolean' ? { active } : {}) } }));
   };
 }
+
+export function watchReactionChanges(userId: string, listener: () => void) {
+  installChannel();
+  const changed = (event: Event) => {
+    if ((event as CustomEvent).detail?.userId === userId) listener();
+  };
+  window.addEventListener('sd2-reactions-changed', changed);
+  return () => window.removeEventListener('sd2-reactions-changed', changed);
+}
+
+export function cachedReactionState(userId: string, key: ContentKey) {
+  return entries.get(cacheKey(userId, key))?.state;
+}
 function update(userId: string, requested: ContentKey, value: Entry) {
   const previous = entries.get(cacheKey(userId, requested));
   if (value.state && previous?.state && value.state.key === previous.state.key && value.state.version < previous.state.version) return;

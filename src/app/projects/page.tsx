@@ -108,6 +108,14 @@ export default function ProjectsPage() {
   const [activeTab, setActiveTab] = useState<'active' | 'archived'>('active');
   const [page, setPage] = useState(1);
   const [name, setName] = useState('');
+  const createNameRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const focus = () => {
+      if (window.location.hash === '#create-project') createNameRef.current?.focus();
+    };
+    focus(); window.addEventListener('hashchange', focus);
+    return () => window.removeEventListener('hashchange', focus);
+  }, []);
   const [description, setDescription] = useState('');
   const [billingMode, setBillingMode] = useState<'default' | 'budget'>('default');
   const [initialBudgetCredits, setInitialBudgetCredits] = useState('');
@@ -315,10 +323,11 @@ export default function ProjectsPage() {
         </div>
       )}
 
-      <div className="card">
+      <div className="card" id="create-project" style={{ scrollMarginTop: 'calc(var(--composer-topbar-height, 0px) + 24px)' }}>
         <h2 className="section-title">创建协作项目</h2>
         <form onSubmit={createProject} style={{ display: 'grid', gap: 12, maxWidth: 620 }}>
           <input
+            ref={createNameRef}
             className="input"
             value={name}
             onChange={(event) => setName(event.target.value)}

@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { canUseCompanyTemplates, type ImageStudioIdentity } from './access';
 import { siteUploadBaseUrls, siteUploadPathFromUrl } from '@/lib/assets/site-url';
@@ -24,6 +24,12 @@ export function canInspectStudioBinding(user: Pick<ImageStudioIdentity, 'id' | '
   return user.role === 'admin' || (binding.kind === 'style' && binding.ownerId === user.id);
 }
 
+function hiddenStudioBindings<T extends Protection>(user: ImageStudioIdentity | null, bindings: T[]) {
+  const ownedStyleIds = new Set(bindings.filter(binding => binding.kind === 'style' && canInspectStudioBinding(user, binding)).map(binding => binding.assetId));
+  return bindings.filter(binding => !canInspectStudioBinding(user, binding)
+    && (binding.kind === 'template' || !ownedStyleIds.has(binding.assetId)));
+}
+
 // Match underlying files as well as ids: older template application copied an
 // Asset row with the same URL, so checking just the source id leaves a bypass.
 export async function studioHiddenAssetUrls(user: ImageStudioIdentity | null, client: Client = prisma): Promise<string[]> {
@@ -33,9 +39,7 @@ export async function studioHiddenAssetUrls(user: ImageStudioIdentity | null, cl
     { key: { startsWith: 'studio_style_group_v1:' } },
   ] }, select: { key: true, value_json: true } });
   const allBindings = studioProtectedBindings(rows);
-  const ownedStyleIds = new Set(allBindings.filter(binding => binding.kind === 'style' && canInspectStudioBinding(user, binding)).map(binding => binding.assetId));
-  const bindings = allBindings.filter(binding => !canInspectStudioBinding(user, binding)
-    && (binding.kind === 'template' || !ownedStyleIds.has(binding.assetId)));
+  const bindings = hiddenStudioBindings(user, allBindings);
   if (!bindings.length) return [];
   const assets = await client.asset.findMany({ where: { id: { in: Array.from(new Set(bindings.map(binding => binding.assetId))) } },
     select: { original_url: true, thumbnail_url: true } });
@@ -52,6 +56,37 @@ export async function studioVisibleAssetWhere(user: ImageStudioIdentity, client:
 
 export async function canReadStudioAsset(user: ImageStudioIdentity, asset: { original_url: string }, client: Client = prisma) {
   return !(await studioHiddenAssetUrls(user, client)).includes(asset.original_url);
+}
+
+// Homepage covers need the same file-alias protection without loading every
+// private reference/note. Overflow or corrupt records fail closed to placeholders.
+export async function readableStudioCoverIds(user: ImageStudioIdentity,
+  assets: Array<{ id: string; original_url: string }>): Promise<Set<string>> {
+  if (!assets.length) return new Set();
+  if (assets.length > 40) throw new Error('封面数量超出限制');
+  if (user.role === 'admin' && canUseCompanyTemplates(user)) return new Set(assets.map(asset => asset.id));
+  const aliases = (url: string) => {
+    const pathname = siteUploadPathFromUrl(url);
+    return pathname ? [url, pathname, ...siteUploadBaseUrls().map(base => `${base}${pathname}`)] : [url];
+  };
+  const corrupt = await prisma.$queryRaw<Array<{ key: string }>>(Prisma.sql`
+    SELECT key FROM PlatformSetting WHERE
+      (key GLOB 'studio_fixed_references_v1:*' OR key GLOB 'studio_style_group_v1:*')
+      AND CASE WHEN json_valid(value_json) THEN
+        json_type(value_json, '$.ownerId') IS NOT 'text' OR json_type(value_json, '$.references') IS NOT 'array'
+        OR EXISTS (SELECT 1 FROM json_each(value_json, '$.references') r WHERE json_type(r.value, '$.assetId') IS NOT 'text')
+      ELSE 1 END LIMIT 1`);
+  if (corrupt.length) throw new Error('参考内容权限记录无法读取');
+  const rows = await prisma.$queryRaw<Array<{ assetId: string; ownerId: string; settingKey: string; original_url: string; thumbnail_url: string | null }>>(Prisma.sql`
+    SELECT a.id AS assetId, json_extract(p.value_json, '$.ownerId') AS ownerId, p.key AS settingKey,
+      a.original_url, a.thumbnail_url FROM PlatformSetting p, json_each(p.value_json, '$.references') r
+      JOIN Asset a ON a.id = json_extract(r.value, '$.assetId')
+    WHERE (p.key GLOB 'studio_fixed_references_v1:*' OR p.key GLOB 'studio_style_group_v1:*') LIMIT 257`);
+  if (rows.length > 256) throw new Error('封面权限暂时无法确认');
+  const bindings = rows.map(row => ({ ...row, kind: row.settingKey.startsWith('studio_style_group_v1:') ? 'style' as const : 'template' as const }));
+  const hidden = new Set(hiddenStudioBindings(user, bindings)
+    .flatMap(row => [row.original_url, ...(row.thumbnail_url ? [row.thumbnail_url] : [])]).flatMap(aliases));
+  return new Set(assets.filter(asset => !hidden.has(asset.original_url)).map(asset => asset.id));
 }
 
 export async function studioVisibleReferenceWhere(user: ImageStudioIdentity): Promise<Prisma.ReferenceImageWhereInput> {

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
-import { ensureDefaultProjectForUser, logProjectAction } from '@/lib/projects/permissions';
+import { ensureDefaultProjectForUser, getTaskWhereForUser, logProjectAction } from '@/lib/projects/permissions';
+import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { countDownloadableProjectTasks } from '@/lib/video/bulk-download';
 
@@ -13,8 +14,9 @@ export async function GET(request: NextRequest) {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
-    const includeArchived = request.nextUrl.searchParams.get('include_archived') === 'true';
-    const includeAll = user.role === 'admin' && request.nextUrl.searchParams.get('include_all') === 'true';
+    const home = request.nextUrl.searchParams.get('summary') === 'home';
+    const includeArchived = !home && request.nextUrl.searchParams.get('include_archived') === 'true';
+    const includeAll = !home && user.role === 'admin' && request.nextUrl.searchParams.get('include_all') === 'true';
     const lite = request.nextUrl.searchParams.get('lite') === 'true';
     const statusWhere = includeArchived ? { not: 'deleted' } : 'active';
 
@@ -31,6 +33,20 @@ export async function GET(request: NextRequest) {
             },
           ],
         };
+
+    if (home) {
+      const projects = await prisma.project.findMany({ where, take: 4,
+        orderBy: [{ updated_at: 'desc' }, { id: 'desc' }], select: { id: true, name: true, updated_at: true } });
+      const items = [];
+      for (const project of projects) {
+        const taskWhere = await getTaskWhereForUser(user, project.id);
+        const task = await prisma.videoTask.findFirst({ where: { AND: [taskWhere, { local_status: 'succeeded' }] },
+          orderBy: [{ updated_at: 'desc' }, { id: 'desc' }], select: { id: true, local_status: true, public_video_url: true,
+            local_video_path: true, result_video_url: true, result_last_frame_url: true, delivery_status: true } });
+        items.push({ ...project, thumbnailUrl: task ? taskThumbnailProjection(task).thumbnail_url : null });
+      }
+      return NextResponse.json({ projects: items }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
+    }
 
     if (lite) {
       type LiteProject = {
