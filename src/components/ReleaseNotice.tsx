@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { createPortal } from 'react-dom';
-import { release, newerRelease } from '@/lib/release';
+import { release, newerRelease, parseReleaseVersion } from '@/lib/release';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { cancelPageExit, getPageExitRisk, refreshPage } from '@/lib/hooks/page-exit-guard';
@@ -31,7 +31,7 @@ export default function ReleaseNotice() {
       const response = await fetch('/api/release', { cache: 'no-store', signal: AbortSignal.timeout(8000) });
       if (!response.ok) throw new Error('unavailable');
       const data = await response.json();
-      if (data.channel !== release.channel || !/^\d+\.\d+\.\d+$/.test(data.version)) throw new Error('unknown');
+      if (data.channel !== release.channel || !parseReleaseVersion(data.version)) throw new Error('unknown');
       let dismissed = false;
       try { dismissed = localStorage.getItem(laterKey) === data.version || localStorage.getItem('sd2:release:later') === data.version; } catch { /* Storage may be unavailable. */ }
       if (newerRelease(data.version, release.version)) {
@@ -41,7 +41,7 @@ export default function ReleaseNotice() {
         setMessage('当前已是最新版本');
         try { localStorage.removeItem(laterKey);localStorage.removeItem('sd2:release:later'); } catch { /* Optional persistence. */ }
       } else setMessage('暂无法确认更新，请稍后重试');
-    } catch { if (manual) setMessage('检查失败，请重试'); }
+    } catch { setMessage('检查失败，请重试'); }
     finally { inFlight.current = false; setChecking(false); }
   }, [laterKey]);
   useEffect(() => {
