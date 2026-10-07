@@ -14,7 +14,7 @@ export default async function Home() {
   const internal = isNavItemVisible({ label: '创作', href: '/generate', externalHidden: true }, user);
   const images = canUseCompanyTemplates(user);
   const entries = [
-    { name: '视频生成', icon: Clapperboard, tone: 'video', visible: internal, links: [{ name: '普通视频', href: '/generate' }, { name: 'IP视频', href: '/generate/ip' }] },
+    { name: '视频生成', icon: Clapperboard, tone: 'video', visible: internal, links: [{ name: '普通视频', href: '/generate' }, { name: 'IP视频', href: '/generate/ip' }, { name: '分镜提示词', href: '/template-studio?type=video&view=prompts' }] },
     { name: '画布', icon: Network, tone: 'canvas', visible: internal, links: [{ name: '打开画布', href: '/tools/ultimate-canvas' }] },
     { name: '模板', icon: LayoutTemplate, tone: 'templates', visible: internal || images, links: [...(images ? [{ name: '图片生成', href: '/template-studio?type=image' }] : []), ...(internal ? [{ name: '现有视频模板', href: '/template-studio?type=video' }] : [])] },
     { name: '随机真人', icon: UserRound, tone: 'avatar', visible: images, links: [{ name: '人物生成', href: '/tools/avatar-studio' }] },

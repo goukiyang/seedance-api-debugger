@@ -1684,7 +1684,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
       <header className={styles.videoHeader}>
         <nav className={styles.viewTabs} aria-label="视频工作区" role="tablist">
           {([
-            ['templates', '模板'], ['prompts', '我的提示词'], ['results', '视频结果'],
+            ['templates', '模板'], ['prompts', '分镜提示词'], ['results', '视频结果'],
           ] as const).map(([key, label]) => (
             <button key={key} type="button" role="tab" aria-selected={view === key} className={view === key ? styles.activeView : ''} onClick={() => setView(key)}>
               {label}
@@ -1747,8 +1747,9 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
               </section>
             </>
           ) : (
-            <section className={styles.sidebarSection} aria-label={view === 'prompts' ? '提示词历史筛选' : '视频结果筛选'}>
-              <div className={styles.sectionHeading}><h2>{view === 'prompts' ? '我的提示词' : '视频结果'}</h2><button className={styles.iconButton} type="button" title="重新载入" aria-label="重新载入" onClick={() => void loadRuns()}><LoaderCircle size={15} /></button></div>
+            <section className={styles.sidebarSection} aria-label={view === 'prompts' ? '分镜提示词历史筛选' : '视频结果筛选'}>
+              <div className={styles.sectionHeading}><h2>{view === 'prompts' ? '分镜提示词' : '视频结果'}</h2><button className={styles.iconButton} type="button" title="重新载入" aria-label="重新载入" onClick={() => void loadRuns()}><LoaderCircle size={15} /></button></div>
+              {view === 'prompts' && <button className={styles.primaryButton} type="button" onClick={() => void createBlankDraft()} disabled={working}><Plus size={15} />新建分镜提示词</button>}
               <div className={styles.filterRow}>
                 <label className={styles.visuallyHidden} htmlFor="studio-run-status">文案状态</label>
                 <select id="studio-run-status" value={runFilters.status} onChange={(event) => setRunFilters((current) => ({ ...current, status: statusFilter(event.target.value) }))}>
@@ -2027,7 +2028,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
             ) : detailError ? (
               <div className={`${styles.callout} ${styles.calloutError}`} role="alert"><span>{detailError}</span><button className={styles.quietButton} type="button" onClick={() => navigate({ runId: null })}>返回列表</button></div>
             ) : (
-              <div className={styles.emptyState}><Film size={22} /><h2>{view === 'prompts' ? '选择一条提示词记录' : '选择一条视频结果'}</h2><p>记录会按账号权限加载；失败和待确认状态会保留，未知结果先查再决定是否重试。</p></div>
+              <div className={styles.emptyState}><Film size={22} /><h2>{view === 'prompts' ? '选择一条分镜提示词记录' : '选择一条视频结果'}</h2><p>记录会按账号权限加载；失败和待确认状态会保留，未知结果先查再决定是否重试。</p></div>
             )
           )}
         </main>
