@@ -43,6 +43,8 @@
 
 ## sd2 服务器生产托管规则
 
+- CUT-P1＋IP25联合web已发布（2026-10-08）：有效APP树`/Users/gouki-youdoo/.codex/worktrees/cut-ip25-joint/video-api-debugger`、分支`codex/cut-ip25-joint-20261008`，v0.59.0、运行源`9f0421777ea8edfb2e0fd9850469d3619144b76b`、BUILD`NriTc5CJtRfvFq-nVdkxh`。抠图上传/持续查询/异常反馈与IP2.5专属名称、原4.5点/秒向上取整合同已保护部署，待用户手动验收；官方真实API与抠图后台细阶段未验。候选内置检查、源951项/公网28静态SHA一致，两worker及持久链接/inode/env元信息不变；本轮0新任务/上传/收费。即时f15/v0.58.0回退源`/srv/video-api-debugger/releases/f15f0a806f506ed925de7557f761a20d01b8eba7-cut-ip25-joint-rollback-source`、构建`/srv/video-api-debugger/app/.next-prod-prev-cut-ip25-joint-9f0421777ea8`在真实/data保留。上游f8bbe9a/v0.4.0仅候选Git保护、生产仍29824/v0.3.0；本机nativeworker入口已找到但精确身份/运行源与全写者停写未证，maintenance实际stop拒绝，数据迁移/真实worker及API短停仍缺精确授权。原PRE34、legacy93、HD暂停及其他未结项不受此发布结案；正式CUT详单第十二节/资料索引为私有证据入口，旧过程和首切前helper失败保留，不公开Git/服务器。
+
 - 当前正式生产入口是 `https://sd2.youdooart.com`，长期使用腾讯云 Ubuntu 服务器版。旧 `sd2.youdoodesign.com` / Mac 本地 Cloudflare Tunnel 入口不再作为生产入口；除非用户明确要求回滚或排查旧入口，不得重启 Mac 本地 `sd2` 当作恢复手段。
 - 用户未明确指定其他站点时，本项目所有页面查看、问题排查、代码修改、配置核对、登录回调、部署验证、截图验收和 API 验证，默认目标一律是 `https://sd2.youdooart.com/`。App 浏览器、Chrome、日志或历史记录里出现 `sd2.youdoodesign.com`，只能当作旧 tab/旧入口背景，不得自动切回 design 域名继续修改或验收。
 - 不得在 `sd2.youdoodesign.com`、design 域名、Mac 本地 Cloudflare Tunnel 或旧 `trycloudflare` 链路上做默认修改、默认部署、默认验证或默认排查。唯一例外是用户明确要求“旧入口 / design 域名 / 回滚 / 迁移核对”时，才可只读确认旧入口状态，并且不得把它的结果当成 `sd2.youdooart.com` 生产结论。
