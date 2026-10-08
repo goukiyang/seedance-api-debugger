@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, ArrowDown, ArrowUp, Clapperboard, ImagePlus, Plus, RefreshCw, Save, Trash2, WandSparkles } from 'lucide-react';
-import { buildStoryPrompt, parseStoryShots, validateStoryDraft, parseStoryMaterials, composeStoryShot, storyGenerationPrompt, type StoryMaterial, type StoryDraft, type StoryShot } from '@/lib/story-workflow';
+import { buildStoryPrompt, parseStoryShots, validateStoryDraft, parseStoryMaterials, composeStoryShot, separateStoryPrompt, storyGenerationPrompt, type StoryMaterial, type StoryDraft, type StoryShot } from '@/lib/story-workflow';
+import { canvasImageReferencePolicy } from '@/lib/canvas-image-references';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, imageResolutionOptions } from '@/lib/image-studio/model-catalog';
 import { STUDIO_RATIOS } from '@/lib/image-studio/ratios';
 import { useProductDialog } from '@/components/useProductDialog';
@@ -27,6 +28,20 @@ function textRequestFailureState(cause: unknown, content: string): TextRequest['
   if (content) return 'review';
   const status = Number((cause as { status?: number })?.status);
   return status >= 400 && status < 500 && ![408, 429].includes(status) ? 'rejected' : 'unconfirmed';
+}
+function mediaFailureState(cause: unknown, sent: boolean): string {
+  if (!sent) return 'not_sent';
+  const error = cause as { status?: number; response?: Record<string, unknown> };
+  const response = error?.response || {};
+  if (response.submission_unconfirmed || response.task_id || response.existing_task_id || response.id) return 'unconfirmed';
+  const status = Number(error?.status);
+  return status >= 400 && status < 500 && ![408, 425, 429].includes(status) ? 'rejected' : 'unconfirmed';
+}
+function videoReceptionStatus(task: Record<string, unknown>): string {
+  const status = String(task.local_status || 'unconfirmed');
+  // Local refunds/failure markers do not prove the upstream rejected a disconnected POST.
+  if (task.submission_unconfirmed || (status === 'failed' && !task.provider_task_id)) return 'unconfirmed';
+  return status;
 }
 type ImageHandoff = { moduleId: string; prompt: string; state: 'not_sent' | 'pending' | 'ready' | 'unconfirmed' };
 type Work = { draft: StoryDraft; request?: TextRequest; images: Record<string, ImageHandoff>;
@@ -110,10 +125,15 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
   const qualityOptions: readonly string[] = IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[mediaSettings.imageModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [];
   const imageResolutions: readonly string[] = imageResolutionOptions(mediaSettings.imageModel);
   const videoResolutions = mediaCapabilities?.video.model_options.find(item => item.value === mediaSettings.videoModel)?.resolutions || [];
-  const materialSignature = (value = current.current) => JSON.stringify({ materials: value.materials || [], references: value.materialReferences || {}, bindings: value.draft.shots.map(shot => [shot.id, shot.materialIds || []]) });
+  const materialSignature = (value = current.current) => {
+    const used = new Set(value.draft.shots.flatMap(shot => shot.materialIds || []));
+    return JSON.stringify({ materials: (value.materials || []).filter(item => used.has(item.id)),
+      references: Object.fromEntries(Object.entries(value.materialReferences || {}).filter(([id]) => used.has(id))),
+      bindings: value.draft.shots.filter(shot => shot.materialIds?.length).map(shot => [shot.id, shot.materialIds]) });
+  };
   const boundReferences = (shot: StoryShot) => (current.current.materials || []).filter(item => shot.materialIds?.includes(item.id)).flatMap(item => current.current.materialReferences?.[item.id] ? [current.current.materialReferences[item.id]] : []);
   function updateMaterial(id: string, patch: Partial<StoryMaterial>) {
-    change({ ...current.current, materials: (current.current.materials || []).map(item => item.id === id ? { ...item, ...patch } : item), materialsConfirmed: undefined });
+    change({ ...current.current, materials: (current.current.materials || []).map(item => item.id === id ? { ...item, ...patch } : item) });
   }
 
   useEffect(() => {
@@ -317,7 +337,8 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     change({ ...current.current, request: undefined }); await save();
   }
   function editShot(id: string, patch: Partial<StoryShot>) {
-    updateDraft({ shots: current.current.draft.shots.map(shot => shot.id === id ? { ...shot, ...patch } : shot) });
+    updateDraft({ shots: current.current.draft.shots.map(shot => shot.id === id ? { ...separateStoryPrompt(shot, current.current.materials || []),
+      ...(patch.materialIds !== undefined ? { materialPrompt: '' } : {}), ...patch } : shot) });
   }
   function moveShot(index: number, offset: number) {
     const shots = [...current.current.draft.shots];
@@ -343,9 +364,12 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     try {
       handoff = { ...handoff, state: 'pending' };
       change({ ...current.current, images: { ...current.current.images, [shot.id]: handoff } });
+      const referenceIds = Array.from(new Set([current.current.references[shot.id], ...boundReferences(shot)].filter(Boolean).map(item => item.assetId).filter((id): id is string => Boolean(id))));
+      const primary = current.current.references[shot.id]?.assetId;
+      const referencePolicy = canvasImageReferencePolicy(referenceIds, primary ? [primary] : []);
       await request('/api/image-studio/modules', { id: handoff.moduleId, revision: 0,
         name: shot.title.slice(0, 80) || '分镜画面', prompt: handoff.prompt, count: 1,
-        referenceIds: boundReferences(shot).map(item => item.assetId).filter(Boolean), groupName: '故事分镜' }, 'PUT');
+        referenceIds, referencePolicy, groupName: '故事分镜' }, 'PUT');
       change({ ...current.current, images: { ...current.current.images, [shot.id]: { ...handoff, state: 'ready' } } }); await save();
     } catch (cause) {
       change({ ...current.current, images: { ...current.current.images, [shot.id]: { ...handoff, state: 'unconfirmed' } } });
@@ -388,7 +412,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
       if (!response.ok || !data.success || typeof data.referenceImageId !== 'string') throw Error(data.error || data.message || '原图未能关联为参考图，请重新选择');
       referenceImageId = data.referenceImageId;
     }
-    change(materialId ? { ...current.current, materialReferences: { ...current.current.materialReferences, [materialId]: { ...item, referenceImageId } }, materialsConfirmed: undefined }
+    change(materialId ? { ...current.current, materialReferences: { ...current.current.materialReferences, [materialId]: { ...item, referenceImageId } } }
       : { ...current.current, references: { ...current.current.references, [shotId]: { ...item, referenceImageId } } });
     await save(); setNotice('已选用原图，未提交视频生成');
   }
@@ -457,9 +481,11 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     setNotice('素材生图草稿已准备，未生成或扣点');
   }
   async function confirmMaterials() {
-    parseStoryMaterials(JSON.stringify({ materials: current.current.materials || [] }));
+    const used = new Set(current.current.draft.shots.flatMap(shot => shot.materialIds || []));
+    const bound = (current.current.materials || []).filter(item => used.has(item.id));
+    parseStoryMaterials(JSON.stringify({ materials: bound }));
     if (current.current.draft.shots.some(shot => shot.materialIds?.some(id => !current.current.materials?.some(item => item.id === id)))) throw Error('镜头绑定含已不存在的素材，请重新选择');
-    if (current.current.materials?.some(item => !current.current.materialReferences?.[item.id])) throw Error('请为清单中的素材选用原图；不需要的素材可先移除');
+    if (bound.some(item => !current.current.materialReferences?.[item.id])) throw Error('请为镜头实际绑定的素材选用原图；也可取消不需要的绑定');
     if (!await confirm('按已确认的素材与镜头描述合成图、视频要求？原要求保留在旧稿中，新要求仍可编辑；不会生成或扣点。', { title: '确认素材', confirmLabel: '确认并合成' })) return;
     const previous = current.current;
     change({ ...previous, materialsConfirmed: materialSignature(previous), versions: [...previous.versions, archived(previous)].slice(-10),
@@ -474,19 +500,21 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
   async function queryRuns() {
     const images = { ...current.current.imageRuns }, videos = { ...current.current.videoRuns };
     for (const [id, run] of Object.entries(images)) {
-      const data = await request<{ tasks: Array<{ id: string; status: string }> }>(`/api/image-studio/tasks?requestId=${encodeURIComponent(run.requestId)}`);
+      if (!run.requestId && !run.taskId) continue;
+      const lookup = run.requestId ? `requestId=${encodeURIComponent(run.requestId)}` : `taskId=${encodeURIComponent(run.taskId!)}`;
+      const data = await request<{ tasks: Array<{ id: string; status: string }> }>(`/api/image-studio/tasks?${lookup}`);
       if (data.tasks[0]) images[id] = { ...run, taskId: data.tasks[0].id, status: data.tasks[0].status };
     }
     for (const [id, run] of Object.entries(videos)) {
       const videoNode = snapshot.current?.canvas.nodes.find(node => node.id === current.current.mediaNodes[id]);
       if (!videoNode) continue;
       if (!run.taskId) {
-        const data = await request<{ state: string; task?: { id: string; local_status: string } }>(`/api/tools/ultimate-canvas/video-submission?${new URLSearchParams({ document_id: documentId, node_id: videoNode.id, request_id: run.requestId })}`);
-        if (data.task) videos[id] = { ...run, taskId: data.task.id, status: data.task.local_status };
+        const data = await request<{ state: string; task?: { id: string; local_status: string; provider_task_id?: string | null } }>(`/api/tools/ultimate-canvas/video-submission?${new URLSearchParams({ document_id: documentId, node_id: videoNode.id, request_id: run.requestId })}`);
+        if (data.task) videos[id] = { ...run, taskId: data.task.id, status: videoReceptionStatus({ ...data.task, submission_unconfirmed: data.state === 'unconfirmed' }) };
       } else {
         const data = await request<{ task?: Record<string, unknown>; local_status?: string }>(`/api/${run.provider === 'volcengine_ip' ? 'ip/' : ''}video/status/${encodeURIComponent(run.taskId)}?refresh=true`);
         const task = data.task || data as Record<string, unknown>;
-        videos[id] = { ...run, status: String(task.local_status || run.status),
+        videos[id] = { ...run, status: videoReceptionStatus({ ...task, local_status: task.local_status || run.status }),
           previewAvailable: task.preview_available === true || Boolean(task.result_video_url || task.local_video_path),
           stableDownloadReady: task.stable_download_ready === true || Boolean(task.public_video_url) };
       }
@@ -499,7 +527,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
           const node = graph.canvas.nodes.find(item => item.id === current.current.mediaNodes[id]);
           const submission = node?.data.videoSubmission as { requestId?: string; state?: string; taskId?: string; input?: unknown } | undefined;
           if (!node || submission?.requestId !== run.requestId) continue;
-          submission.state = 'accepted'; submission.taskId = run.taskId;
+          submission.state = run.status === 'unconfirmed' ? 'unconfirmed' : 'accepted'; submission.taskId = run.taskId;
           node.data.taskId = run.taskId; node.data.generationStatus = run.status;
           const history = (node.data.videoHistory || []) as Array<{ taskId: string }>;
           if (!history.some(item => item.taskId === run.taskId)) node.data.videoHistory = [...history, { taskId: run.taskId, requestId: run.requestId, input: submission.input, status: run.status }];
@@ -508,65 +536,110 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     }
     setNotice('已查询原任务，没有重新派发');
   }
+  async function guardOriginalImages(shots: StoryShot[]) {
+    const runs = { ...current.current.imageRuns };
+    for (const shot of shots) {
+      const handoff = current.current.images[shot.id];
+      if (!handoff) continue;
+      let cursor: string | null = null;
+      let protectedTask: { id: string; status: string } | undefined;
+      const seen = new Set<string>();
+      // A bounded scan fails closed if history is too large or pagination is inconsistent.
+      for (let page = 0; page < 10; page++) {
+        const query = new URLSearchParams({ moduleId: handoff.moduleId });
+        if (cursor) query.set('cursor', cursor);
+        const data = await request<{ tasks: Array<{ id: string; status: string }>; nextCursor?: string | null }>(`/api/image-studio/tasks?${query}`);
+        protectedTask = data.tasks.find(task => !['failed', 'rejected', 'cancelled'].includes(task.status));
+        if (protectedTask) break;
+        cursor = data.nextCursor || null;
+        if (!cursor) break;
+        if (seen.has(cursor)) break;
+        seen.add(cursor);
+      }
+      if (protectedTask || cursor || (!runs[shot.id] && ['pending', 'unconfirmed'].includes(handoff.state))) {
+        runs[shot.id] = { ...runs[shot.id], requestId: protectedTask ? '' : runs[shot.id]?.requestId || '', input: runs[shot.id]?.input || {},
+          taskId: protectedTask?.id || runs[shot.id]?.taskId, status: protectedTask?.status || 'unconfirmed' };
+      }
+    }
+    if (JSON.stringify(runs) !== JSON.stringify(current.current.imageRuns || {})) {
+      change({ ...current.current, imageRuns: runs }); await save();
+    }
+  }
   async function dispatchShots(kind: 'image' | 'video', shotIds: string[]) {
-    const shots = [...current.current.draft.shots, ...(kind === 'image' ? (current.current.materials || []).map(materialShot) : [])].filter(shot => shotIds.includes(shot.id)).map(shot => ({ ...shot, imagePrompt: storyGenerationPrompt(shot, 'image'), videoPrompt: storyGenerationPrompt(shot, 'video') }));
+    const shots = [...current.current.draft.shots, ...(kind === 'image' ? (current.current.materials || []).map(materialShot) : [])].filter(shot => shotIds.includes(shot.id));
+    if (kind === 'image') await guardOriginalImages(shots);
     if (kind === 'video') {
       for (const shot of shots) {
-        if (current.current.videoRuns?.[shot.id]) continue;
+        const originalRun = current.current.videoRuns?.[shot.id];
+        if (originalRun && originalRun.status !== 'failed') continue;
         const node = snapshot.current?.canvas.nodes.find(item => item.id === current.current.mediaNodes[shot.id]);
         const submission = node?.data.videoSubmission as { requestId?: string; state?: string; taskId?: string; generationPayload?: { settings?: { provider?: string } } } | undefined;
-        const taskId = String(node?.data.taskId || submission?.taskId || '');
-        if (taskId || submission?.requestId) {
-          const provider = submission?.generationPayload?.settings?.provider || String((node?.data.videoSettings as { provider?: string })?.provider || 'seedance');
+        const taskId = String(originalRun?.taskId || node?.data.taskId || submission?.taskId || '');
+        if (taskId || (submission?.requestId && !['not_sent', 'rejected'].includes(submission.state || ''))) {
+          const provider = originalRun?.provider || submission?.generationPayload?.settings?.provider || String((node?.data.videoSettings as { provider?: string })?.provider || 'seedance');
           let status = 'unconfirmed';
           if (taskId) {
-            const result = await request<{ task?: { local_status?: string }; local_status?: string }>(`/api/${provider === 'volcengine_ip' ? 'ip/' : ''}video/status/${encodeURIComponent(taskId)}?refresh=true`);
-            status = result.task?.local_status || result.local_status || status;
+            const result = await request<{ task?: Record<string, unknown>; local_status?: string }>(`/api/${provider === 'volcengine_ip' ? 'ip/' : ''}video/status/${encodeURIComponent(taskId)}?refresh=true`);
+            status = videoReceptionStatus(result.task || result);
           }
-          change({ ...current.current, videoRuns: { ...current.current.videoRuns, [shot.id]: { requestId: submission?.requestId || taskId, taskId: taskId || undefined, provider, status } } });
+          change({ ...current.current, videoRuns: { ...current.current.videoRuns, [shot.id]: { requestId: originalRun?.requestId || submission?.requestId || taskId, taskId: taskId || undefined, provider, status } } });
+          await save();
+        } else if (originalRun?.status === 'failed') {
+          // A historical local failure without upstream identity is not a safe retry receipt.
+          change({ ...current.current, videoRuns: { ...current.current.videoRuns, [shot.id]: { ...originalRun, status: 'unconfirmed' } } });
           await save();
         }
       }
     }
     const runs = kind === 'image' ? current.current.imageRuns : current.current.videoRuns;
-    const selected = shots.filter(shot => !runs?.[shot.id] || ['failed', 'rejected', 'cancelled'].includes(runs[shot.id].status));
+    const selected = shots.filter(shot => !runs?.[shot.id] || ['not_sent', 'failed', 'rejected', 'cancelled'].includes(runs[shot.id].status));
     if (selected.length !== shots.length) setNotice('已受理、成功或结果未知的镜头已跳过，请查询原任务');
     if (!selected.length) throw Error('没有需要派发的镜头，请查询原任务或查看已有结果');
-    if (selected.some(shot => !shot.id.startsWith('material:')) && current.current.materials?.length && current.current.materialsConfirmed !== materialSignature()) throw Error('素材或绑定已变化，请先确认素材并合成要求');
+    if (selected.some(shot => shot.materialIds?.length) && current.current.materialsConfirmed !== materialSignature()) throw Error('实际绑定的素材已变化，请先确认素材并合成要求');
+    const imageReferences = (shot: StoryShot) => {
+      const references = [current.current.references[shot.id], ...boundReferences(shot)].filter(Boolean);
+      if (references.some(item => !item.assetId || item.unavailableReason)) throw Error('实际选用的原图不可用，请重新选择');
+      const referenceIds = Array.from(new Set(references.map(item => item.assetId!)));
+      const primary = current.current.references[shot.id]?.assetId;
+      return { referenceIds, referencePolicy: canvasImageReferencePolicy(referenceIds, primary ? [primary] : []) };
+    };
+    if (kind === 'image') selected.forEach(imageReferences);
     const settings = { ...mediaSettings };
     if (kind === 'image' && (!IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[settings.imageModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS]?.includes(settings.quality as never) || !imageResolutionOptions(settings.imageModel).includes(settings.resolution as never))) throw Error('当前图片模型不支持所选质量或分辨率，请重新选择');
     if (kind === 'video' && !mediaCapabilities?.video.model_options.some(item => item.value === settings.videoModel && item.provider === settings.provider && item.ready && item.resolutions.includes(settings.videoResolution))) throw Error('视频模型未就绪或参数不受支持，请重新选择');
     const quotes = await Promise.all(selected.map(async shot => {
       if (kind === 'image') {
         const quote = await request<{ status: string; estimatedCredits: number; revision: number }>('/api/tools/ultimate-canvas/quote', { kind: 'image', project_id: documentRef.current!.project_id, model: settings.imageModel, count: 1, quality: settings.quality, resolution: settings.resolution, ratio: settings.ratio });
-        if (quote.status !== 'estimate' || typeof quote.estimatedCredits !== 'number') throw Error('图片报价不可用，未派发');
+        if (quote.status !== 'estimate' || !Number.isSafeInteger(quote.estimatedCredits) || quote.estimatedCredits < 0) throw Error('图片报价不可用，未派发');
         return { shot, price: quote.estimatedCredits, revision: quote.revision };
       }
       const quote = await request<{ estimatedCost: number }>(`/api/tasks/estimate?${new URLSearchParams({ provider: settings.provider, model: settings.videoModel, resolution: settings.videoResolution, duration: String(shot.durationSeconds) })}`);
-      if (typeof quote.estimatedCost !== 'number') throw Error('视频报价不可用，未派发');
+      if (!Number.isSafeInteger(quote.estimatedCost) || quote.estimatedCost < 0) throw Error('视频报价不可用，未派发');
       return { shot, price: quote.estimatedCost, revision: 0 };
     }));
     const total = quotes.reduce((sum, item) => sum + item.price, 0);
     if (!Number.isSafeInteger(total) || !await confirm(`${quotes.map(item => `${item.shot.title}：${item.price} 点`).join('\n')}\n本次 ${selected.length} ${kind === 'image' ? '张图片' : '个视频'}，合计 ${total} 点。已成功或受理未知的任务不重跑。`, { title: kind === 'image' ? '生成分镜图' : '生成视频', confirmLabel: `确认 ${total} 点` })) return;
     for (const { shot, price, revision } of quotes) {
-      if (!(kind === 'image' ? shot.imagePrompt : shot.videoPrompt).trim()) throw Error(`${shot.title}缺少生成要求，后续项未派发`);
+      if (!storyGenerationPrompt(shot, kind).trim()) throw Error(`${shot.title}缺少生成要求，后续项未派发`);
       if (kind === 'image') {
         await imageDraft(shot);
         const moduleId = current.current.images[shot.id].moduleId;
-        const referenceIds = Array.from(new Set([current.current.references[shot.id], ...boundReferences(shot)].filter(Boolean).map(item => item.assetId).filter((id): id is string => Boolean(id))));
-        const input = { requestId: crypto.randomUUID(), moduleId, revision, prompt: shot.imagePrompt, count: 1,
-          referenceIds, model: settings.imageModel, quality: settings.quality, resolution: settings.resolution, aspectRatio: settings.ratio, maxEstimatedCost: price };
+        const { referenceIds, referencePolicy } = imageReferences(shot);
+        const input = { requestId: crypto.randomUUID(), moduleId, revision, prompt: storyGenerationPrompt(shot, 'image'), count: 1,
+          referenceIds, draft: { referencePolicy }, model: settings.imageModel, quality: settings.quality, resolution: settings.resolution, aspectRatio: settings.ratio, maxEstimatedCost: price };
         change({ ...current.current, imageRuns: { ...current.current.imageRuns, [shot.id]: { requestId: input.requestId, status: 'unconfirmed', input } } });
-        await save();
+        let sent = false;
         try {
+          await save();
           assertCurrentContext();
-          await request('/api/image-studio/tasks', input);
+          sent = true;
+          const data = await request<{ batchId?: string }>('/api/image-studio/tasks', input);
+          if (!data.batchId) throw Error('图片受理结果未确认，请查询原请求');
           change({ ...current.current, imageRuns: { ...current.current.imageRuns, [shot.id]: { requestId: input.requestId, status: 'queued', input } } }); await save();
         } catch (cause) {
-          const status = Number((cause as { status?: number }).status);
-          if (status >= 400 && status < 500 && ![408].includes(status)) {
-            change({ ...current.current, imageRuns: { ...current.current.imageRuns, [shot.id]: { requestId: input.requestId, status: 'rejected', input } } });
-            try { await save(); } catch { /* The original pending receipt remains safe to query. */ }
+          if (current.current.imageRuns?.[shot.id]?.status !== 'queued') {
+            change({ ...current.current, imageRuns: { ...current.current.imageRuns, [shot.id]: { requestId: input.requestId, status: mediaFailureState(cause, sent), input } } });
+            try { await save(); } catch { /* Preserve the local unsent/unknown evidence until the original save is resolved. */ }
           }
           setNotice('派发已停止，已受理项保留；请查询原请求'); throw cause;
         }
@@ -574,36 +647,52 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
         await mediaNode(shot);
         const videoId = current.current.mediaNodes[shot.id], requestId = crypto.randomUUID();
         const references = [current.current.references[shot.id], ...boundReferences(shot)].filter((item): item is PickerItem => Boolean(item));
-        const input = { prompt: shot.videoPrompt, model: settings.videoModel, generation_mode: 'all_in_one_reference',
+        const input = { prompt: storyGenerationPrompt(shot, 'video'), model: settings.videoModel, generation_mode: 'all_in_one_reference',
           ratio: settings.ratio, resolution: settings.videoResolution, duration: shot.durationSeconds, seed: -1,
           generate_audio: false, return_last_frame: false, watermark: false,
           project_id: documentRef.current!.project_id, video_card_id: snapshot.current!.context?.video_card_id,
           reference_image_ids: Array.from(new Set(references.map(item => item.referenceImageId).filter(Boolean))),
           idempotency_key: `${videoId}:${requestId}`, source_request_id: `ultimate_canvas:${videoId}:${requestId}`,
-          client_name: 'ultimate_canvas', final_prompt_snapshot: shot.videoPrompt, prompt_user_edited: true, max_estimated_cost: price,
+          client_name: 'ultimate_canvas', final_prompt_snapshot: storyGenerationPrompt(shot, 'video'), prompt_user_edited: true, max_estimated_cost: price,
           source_metadata: { source: 'ultimate_canvas', provider: settings.provider, canvas_document_id: documentId, canvas_node_id: videoId, mode: references.length ? 'image-to-video' : 'text-to-video' } };
-        const generationPayload = { kind: 'video', nodeId: videoId, requestId, prompt: shot.videoPrompt, settings: { model: settings.videoModel, provider: settings.provider, ratio: settings.ratio, duration: shot.durationSeconds, resolution: settings.videoResolution }, mode: references.length ? 'image-to-video' : 'text-to-video' };
+        const generationPayload = { kind: 'video', nodeId: videoId, requestId, prompt: input.prompt, settings: { model: settings.videoModel, provider: settings.provider, ratio: settings.ratio, duration: shot.durationSeconds, resolution: settings.videoResolution }, mode: references.length ? 'image-to-video' : 'text-to-video' };
         change({ ...current.current, videoRuns: { ...current.current.videoRuns, [shot.id]: { requestId, status: 'unconfirmed', provider: settings.provider } } });
-        await save(current.current, graph => {
-          const node = graph.canvas.nodes.find(item => item.id === videoId)!;
-          node.data.videoSettings = { ...generationPayload.settings };
-          node.data.videoSubmission = { requestId, state: 'unconfirmed', userId, documentId, projectId: documentRef.current!.project_id, cardId: graph.context?.video_card_id, input, generationPayload };
-          node.data.generationStatus = 'unconfirmed';
-        });
+        let sent = false;
         try {
+          await save(current.current, graph => {
+            const node = graph.canvas.nodes.find(item => item.id === videoId)!;
+            node.data.videoSettings = { ...generationPayload.settings };
+            node.data.videoSubmission = { requestId, state: 'unconfirmed', userId, documentId, projectId: documentRef.current!.project_id, cardId: graph.context?.video_card_id, input, generationPayload };
+            node.data.generationStatus = 'unconfirmed';
+          });
           assertCurrentContext();
-          const data = await request<{ task_id: string; local_status: string }>(settings.provider === 'volcengine_ip' ? '/api/ip/tasks/create' : '/api/tasks/create', input);
-          if (!data.task_id) throw Error('视频受理结果未知，请查询原请求');
-          change({ ...current.current, videoRuns: { ...current.current.videoRuns, [shot.id]: { requestId, status: data.local_status || 'submitted', taskId: data.task_id, provider: settings.provider } } });
+          sent = true;
+          const data = await request<{ id?: string; task_id?: string; provider_task_id?: string | null; local_status?: string; status?: string; submission_unconfirmed?: boolean }>(settings.provider === 'volcengine_ip' ? '/api/ip/tasks/create' : '/api/tasks/create', input);
+          const taskId = data.task_id || data.id;
+          if (!taskId) throw Error('视频受理结果未知，请查询原请求');
+          const status = videoReceptionStatus({ ...data, local_status: data.local_status || data.status || 'submitted' });
+          change({ ...current.current, videoRuns: { ...current.current.videoRuns, [shot.id]: { requestId, status, taskId, provider: settings.provider } } });
           await save(current.current, graph => {
             const node = graph.canvas.nodes.find(item => item.id === videoId)!;
             const submission = node.data.videoSubmission as Record<string, unknown>;
-            submission.state = 'accepted'; submission.taskId = data.task_id;
-            node.data.taskId = data.task_id; node.data.generationStatus = data.local_status || 'submitted';
+            submission.state = status === 'unconfirmed' ? 'unconfirmed' : 'accepted'; submission.taskId = taskId;
+            node.data.taskId = taskId; node.data.generationStatus = status;
             const history = (node.data.videoHistory || []) as unknown[];
-            node.data.videoHistory = [...history, { taskId: data.task_id, requestId, input, status: data.local_status || 'submitted' }];
+            node.data.videoHistory = [...history, { taskId, requestId, input, status }];
           });
-        } catch (cause) { setNotice('视频派发已停止，请查询原请求；未派发后续镜头'); throw cause; }
+          if (status === 'unconfirmed') throw Error('视频受理结果仍未知，已停止后续镜头；请查询原请求');
+        } catch (cause) {
+          const response = (cause as { response?: { task_id?: string; existing_task_id?: string } })?.response;
+          const knownId = current.current.videoRuns?.[shot.id]?.taskId || response?.task_id || response?.existing_task_id;
+          const status = knownId ? current.current.videoRuns?.[shot.id]?.status || 'unconfirmed' : mediaFailureState(cause, sent);
+          change({ ...current.current, videoRuns: { ...current.current.videoRuns, [shot.id]: { requestId, status, taskId: knownId, provider: settings.provider } } });
+          try { await save(current.current, graph => {
+            const node = graph.canvas.nodes.find(item => item.id === videoId);
+            const submission = node?.data.videoSubmission as Record<string, unknown> | undefined;
+            if (submission?.requestId === requestId && !knownId) { submission.state = status; node!.data.generationStatus = status; }
+          }); } catch { /* Keep the original saved request and local recovery evidence. */ }
+          setNotice('视频派发已停止；明确未发出或被拒绝的请求可重新确认，结果未知的请查询原请求'); throw cause;
+        }
       }
     }
     setNotice('本次手动派发已完成，请查询原任务；这不代表媒体生成成功');
@@ -633,7 +722,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     </section></div>
     <section className={styles.shots}><div className={styles.toolbar}><h2>本故事素材 · {work.materials?.length || 0}</h2><div className={styles.actions}>
       <button disabled={blocked || Boolean(awaiting) || !work.draft.script.trim()} onClick={() => void operate('提取素材清单', extractMaterials)}><WandSparkles size={16} />提取素材清单</button>
-      <button disabled={blocked || (work.materials?.length || 0) >= 60} onClick={() => change({ ...current.current, materials: [...(current.current.materials || []), { id: `material-${crypto.randomUUID()}`, kind: 'character', name: '新素材', description: '', shotIds: [] }], materialsConfirmed: undefined })}><Plus size={16} />添加素材</button>
+      <button disabled={blocked || (work.materials?.length || 0) >= 60} onClick={() => change({ ...current.current, materials: [...(current.current.materials || []), { id: `material-${crypto.randomUUID()}`, kind: 'character', name: '新素材', description: '', shotIds: [] }] })}><Plus size={16} />添加素材</button>
       <button className={styles.primary} disabled={blocked || !work.draft.shots.length} onClick={() => void operate('确认素材与要求', confirmMaterials)}>确认素材并合成要求</button></div></div>
       <p className={styles.status}>{work.materialsConfirmed === materialSignature(work) ? '素材已确认，图视频要求仍可编辑' : '素材未确认；不需要素材时，也可只用镜头描述生成'}</p>
       <div className={styles.materials}>{(work.materials || []).map(item => <section key={item.id} className={styles.material}>
@@ -645,8 +734,9 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
           <button className={styles.primary} disabled={blocked || !imageAllowed || !item.name.trim()} onClick={() => void operate('确认素材生图', () => dispatchShots('image', [`material:${item.id}`]))}><ImagePlus size={16} />生成素材图片</button>
           <button disabled={blocked} onClick={() => setPicker(`material:${item.id}`)}><ImagePlus size={16} />{work.materialReferences?.[item.id] ? '更换原图' : '选用原图'}</button>
           {work.images[`material:${item.id}`]?.state === 'ready' && <><Link className={styles.link} href={`/template-studio?type=image&moduleId=${encodeURIComponent(work.images[`material:${item.id}`].moduleId)}`}>素材工作区</Link><button disabled={blocked} onClick={() => void operate('读取素材结果', () => readResults(`material:${item.id}`))}><RefreshCw size={16} />读取素材结果</button></>}
-          <button title="移除本故事素材" aria-label="移除本故事素材" disabled={blocked} onClick={() => change({ ...current.current, materials: current.current.materials?.filter(value => value.id !== item.id), materialsConfirmed: undefined,
-            draft: { ...current.current.draft, shots: current.current.draft.shots.map(shot => ({ ...shot, materialIds: shot.materialIds?.filter(id => id !== item.id) })) } })}><Trash2 size={16} /></button></div>
+          <button title="移除本故事素材" aria-label="移除本故事素材" disabled={blocked} onClick={() => change({ ...current.current, materials: current.current.materials?.filter(value => value.id !== item.id),
+            draft: { ...current.current.draft, shots: current.current.draft.shots.map(shot => shot.materialIds?.includes(item.id)
+              ? { ...shot, materialIds: shot.materialIds.filter(id => id !== item.id), materialPrompt: '' } : shot) } })}><Trash2 size={16} /></button></div>
       </section>)}</div>
     </section>
     <section className={styles.shots}><div className={styles.toolbar}><h2>分镜 · {work.draft.shots.length}</h2>

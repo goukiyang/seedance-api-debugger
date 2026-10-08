@@ -44,7 +44,8 @@ export async function GET(request: NextRequest) {
     }
     if ((expectedProvider && task.provider !== expectedProvider) || (submission.input?.model && task.model !== submission.input.model)) throw new AuthError('任务模型或通道与原请求不匹配', 403);
     await assertCanViewTask(user, task);
-    return json({ state: 'accepted', task: { id: task.id, local_status: task.local_status } });
+    const unknown = task.local_status === 'failed' && !task.provider_task_id;
+    return json({ state: unknown ? 'unconfirmed' : 'accepted', task: { id: task.id, local_status: task.local_status, provider_task_id: task.provider_task_id } });
   } catch (error) {
     if (error instanceof AuthError) return json({ error: error.message }, error.status);
     return json({ error: '请求状态暂时无法读取，请保留原请求后重试' }, 500);

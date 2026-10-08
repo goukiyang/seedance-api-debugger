@@ -5,6 +5,8 @@ import { assertCanUseReferenceImage } from '@/lib/reference-albums/permissions';
 import { getCanvasImageQuote } from '@/lib/canvas-quote';
 import { saveStudioModule, validStudioModuleId } from '@/lib/image-studio/modules';
 import { submitStudioBatch } from '@/lib/image-studio/tasks';
+import { canvasImageReferencePolicy } from '@/lib/canvas-image-references';
+import { validateStudioReferenceCounts } from '@/lib/image-studio/reference-policy';
 import { assertCanvasStyleContext, canvasStyleFailure, canvasStyleJson, parseCanvasStyleContext, readCanvasStyleJson, requireCanvasStyleUser } from '@/lib/canvas-style-bridge';
 
 export const dynamic = 'force-dynamic';
@@ -56,12 +58,16 @@ export async function POST(request: NextRequest) {
       if (!ref.asset_id || ref.asset?.owner_id !== user.id || ref.asset.status !== 'active') throw new AuthError('当前图片队列仅支持本人可用原图，请选择本人原件', 403);
       referenceIds.push(ref.asset_id);
     }
+    const uniqueReferences = Array.from(new Set(referenceIds));
+    const referencePolicy = canvasImageReferencePolicy(uniqueReferences);
+    validateStudioReferenceCounts(referencePolicy, uniqueReferences, 0, 0, true);
     const existing = await prisma.imageStudioModule.findFirst({ where: { id: body.moduleId, owner_id: user.id } });
     if (!existing) await saveStudioModule(user.id, { id: body.moduleId, revision: 0, name: '画布图片',
       prompt: '', count: Number(settings.count), referenceIds: [], model: settings.model, quality: settings.quality,
       resolution: settings.resolution, aspectRatio: settings.ratio, groupName: '画布图片' }, false, user.role === 'admin', undefined, user);
     const batchId = await submitStudioBatch(user.id, { requestId: body.requestId, moduleId: body.moduleId,
-      revision: body.settingsRevision, prompt: body.prompt, count: Number(settings.count), referenceIds, maxEstimatedCost: body.maxEstimatedCost,
+      revision: body.settingsRevision, prompt: body.prompt, count: Number(settings.count), referenceIds: uniqueReferences,
+      draft: { referencePolicy }, maxEstimatedCost: body.maxEstimatedCost,
       model: settings.model, quality: settings.quality, resolution: settings.resolution, aspectRatio: settings.ratio });
     return canvasStyleJson({ batchId, moduleId: body.moduleId, count: Number(settings.count) }, 202);
   } catch (error) { return canvasStyleFailure(error, '提交结果未确认，请查询原图片请求，不要重新生成'); }

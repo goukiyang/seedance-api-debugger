@@ -1019,10 +1019,9 @@
                     if (engine.nodes.get(payload.nodeId)?.data?.canvasStyle) {
                         return canvasStyles.generate(payload, promptWithConnectedText(payload));
                     }
-                    if (canvasRuntime.bootstrap?.capabilities?.image?.model_options?.find(item => item.value === payload.settings?.model)?.capabilities?.quality_options?.length) {
-                        const result = await canvasStyles.generateOrdinary(payload, promptWithConnectedText(payload));
-                        if (!result.legacyRequired) return result;
-                    }
+                    payload = { ...payload, referenceImageIds: payload.referenceImageIds || collectReferenceImageIds(payload) };
+                    const result = await canvasStyles.generateOrdinary(payload, promptWithConnectedText(payload));
+                    if (!result.legacyRequired) return result;
                     const descriptor = window.UltimateCanvasGenerationNodes.imageRequest({
                         projectId: canvasRuntime.selectedProjectId,
                         cardId: canvasRuntime.selectedVideoCardId,

@@ -224,7 +224,8 @@
             }
             const settings = structuredClone(payload.settings);
             const quote = await json('/api/tools/ultimate-canvas/quote', { kind: 'image', project_id: context.projectId,
-                model: settings.model, count: settings.count, quality: settings.quality, resolution: settings.resolution, ratio: settings.requestedRatio || settings.ratio });
+                model: settings.model, count: settings.count, quality: settings.quality, resolution: settings.resolution,
+                size: settings.size || '1K', ratio: settings.requestedRatio || settings.ratio });
             if (quote.status !== 'estimate' || !Number.isSafeInteger(quote.estimatedCredits) || quote.estimatedCredits < 0) throw new Error('当前模型报价不可用，请选择已配置模型或重试');
             if (!await hooks.confirm({ title: '生成图片', message: `本次 ${settings.count} 张图片，预计 ${quote.estimatedCredits} 点。`, confirmLabel: `确认 ${quote.estimatedCredits} 点` })) throw new Error('已取消，未提交图片生成');
             if (!current(node, context)) throw contextError();

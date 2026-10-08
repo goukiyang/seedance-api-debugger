@@ -10,6 +10,7 @@ export type StoryShot = {
   lighting?: string;
   camera?: string;
   materialIds?: string[];
+  materialPrompt?: string;
 };
 
 export type StoryDraft = {
@@ -71,7 +72,7 @@ function text(value: unknown, field: string, max: number, required = false): str
 
 function normalizeShot(value: unknown, field: string, allowIncomplete: boolean): StoryShot {
   const input = record(value, field);
-  exactKeys(input, allowedShotKeys, field, ['framing', 'lighting', 'camera', 'materialIds']);
+  exactKeys(input, allowedShotKeys, field, ['framing', 'lighting', 'camera', 'materialIds', 'materialPrompt']);
   const id = text(input.id, `${field}.id`, 128, true);
   if (id !== id.trim()) invalid(`${field}.id`, '不能包含首尾空格');
   const durationSeconds = input.durationSeconds;
@@ -88,6 +89,7 @@ function normalizeShot(value: unknown, field: string, allowIncomplete: boolean):
     durationSeconds,
     ...Object.fromEntries(['framing', 'lighting', 'camera'].filter(key => input[key] !== undefined).map(key => [key, text(input[key], `${field}.${key}`, 300)])),
     ...(input.materialIds !== undefined ? { materialIds: validateStoryMaterialIds(input.materialIds) } : {}),
+    ...(input.materialPrompt !== undefined ? { materialPrompt: text(input.materialPrompt, `${field}.materialPrompt`, 12_000) } : {}),
   };
 }
 
@@ -113,19 +115,35 @@ export function parseStoryMaterials(content: string): StoryMaterial[] {
       description: text(item.description, 'material.description', 2000), shotIds: validateStoryMaterialIds(item.shotIds) };
   });
 }
-export function composeStoryShot(shot: StoryShot, materials: StoryMaterial[]): Pick<StoryShot, 'imagePrompt' | 'videoPrompt'> {
+export function separateStoryPrompt(shot: StoryShot, materials: StoryMaterial[]): StoryShot {
+  if (shot.materialPrompt !== undefined) return shot;
+  const context = materials.filter(item => shot.materialIds?.includes(item.id))
+    .map(item => `${({ character: '角色', scene: '场景', prop: '道具' })[item.kind]}：${item.name}；${item.description}`).join('\n');
+  const framing = [shot.framing && `景别：${shot.framing}`, shot.lighting && `光线：${shot.lighting}`].filter(Boolean).join('；');
+  const legacyImage = [shot.description, context, framing].filter(Boolean).join('\n');
+  const legacyVideo = [shot.description, context, framing, shot.camera && `运镜：${shot.camera}`, shot.dialogue && `对白：${shot.dialogue}`].filter(Boolean).join('\n');
+  // Only a complete old generated prefix is identifiable. Other handwritten text is untouched.
+  const body = (prompt: string, generated: string, fallback: string) => generated && (prompt === generated || prompt.startsWith(`${generated}\n`))
+    ? fallback + prompt.slice(generated.length) : prompt;
+  return { ...shot, imagePrompt: body(shot.imagePrompt, legacyImage, shot.description),
+    videoPrompt: body(shot.videoPrompt, legacyVideo, [shot.description, shot.dialogue && `对白：${shot.dialogue}`].filter(Boolean).join('\n')),
+    materialPrompt: context };
+}
+
+export function composeStoryShot(shot: StoryShot, materials: StoryMaterial[]): Pick<StoryShot, 'imagePrompt' | 'videoPrompt' | 'materialPrompt'> {
+  const separated = separateStoryPrompt(shot, materials);
   const bound = materials.filter(item => shot.materialIds?.includes(item.id));
   const context = bound.map(item => `${({ character: '角色', scene: '场景', prop: '道具' })[item.kind]}：${item.name}；${item.description}`).join('\n');
-  const framing = [shot.framing && `景别：${shot.framing}`, shot.lighting && `光线：${shot.lighting}`].filter(Boolean).join('；');
-  return { imagePrompt: [shot.description, context, framing].filter(Boolean).join('\n'),
-    videoPrompt: [shot.description, context, framing, shot.camera && `运镜：${shot.camera}`, shot.dialogue && `对白：${shot.dialogue}`].filter(Boolean).join('\n') };
+  return { imagePrompt: separated.imagePrompt || shot.description,
+    videoPrompt: separated.videoPrompt || [shot.description, shot.dialogue && `对白：${shot.dialogue}`].filter(Boolean).join('\n'),
+    materialPrompt: context };
 }
 
 export function storyGenerationPrompt(shot: StoryShot, kind: 'image' | 'video'): string {
   const prompt = (kind === 'image' ? shot.imagePrompt : shot.videoPrompt) || shot.description;
   const choices = [shot.framing && `景别：${shot.framing}`, shot.lighting && `光线：${shot.lighting}`,
     kind === 'video' && shot.camera && `运镜：${shot.camera}`].filter((item): item is string => Boolean(item));
-  return [prompt, ...choices.filter(item => !prompt.includes(item))].filter(Boolean).join('\n');
+  return [prompt, shot.materialPrompt, ...choices.filter(item => !prompt.includes(item))].filter(Boolean).join('\n');
 }
 
 function normalizeShots(value: unknown, field: string, allowEmpty: boolean, allowIncomplete: boolean): StoryShot[] {
