@@ -8,6 +8,8 @@ import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { resolveStudioModuleGenerationConfig, validStudioModuleId } from '@/lib/image-studio/modules';
 import { submitStudioBatch, StudioError } from '@/lib/image-studio/tasks';
+import { parseCanvasPromptMentions } from '@/lib/canvas-prompt-references';
+import { assertCanvasPromptCompatibility } from '@/lib/canvas-prompt-compatibility';
 import { normalizeStudioRatio } from '@/lib/image-studio/ratios';
 import {
   assertCanvasStyleContext, canvasStyleFailure, canvasStyleJson, parseCanvasStyleContext,
@@ -35,6 +37,7 @@ export async function POST(request: NextRequest) {
     const body = await readCanvasStyleJson(request);
     const context = parseCanvasStyleContext(body);
     await assertCanvasStyleContext(user, context);
+    await assertCanvasPromptCompatibility(user, context.documentId, context.nodeId, String(body.prompt || ''), body.promptMentions);
 
     const moduleId = typeof body.moduleId === 'string' ? body.moduleId : '';
     if (!validStudioModuleId(moduleId, user.id)) throw new AuthError('风格模板模块编号无效', 400);
@@ -89,6 +92,9 @@ export async function POST(request: NextRequest) {
     }
 
     const requestedReferenceIds = uniquePreserveOrder(body.referenceImageIds as string[]);
+    const mentions = parseCanvasPromptMentions(body.promptMentions);
+    if (mentions && requestedReferenceIds.length !== body.referenceImageIds.length) throw new AuthError('绑定参考图重复，请重新选择', 400);
+    const referenceAssets: Record<string, string> = {};
     const referenceAssetIds: string[] = [];
     for (const referenceImageId of requestedReferenceIds) {
       const reference = await assertCanUseReferenceImage(user, referenceImageId);
@@ -100,6 +106,7 @@ export async function POST(request: NextRequest) {
         throw new AuthError('风格库生成暂不支持其他用户拥有的共享参考图，请先复制到自己的素材后再选择', 403);
       }
       referenceAssetIds.push(reference.asset_id);
+      referenceAssets[referenceImageId] = reference.asset_id;
     }
 
     let moduleReferenceIds: string[];
@@ -131,7 +138,7 @@ export async function POST(request: NextRequest) {
         quality: generation.quality,
         resolution: generation.resolution,
         aspectRatio,
-      });
+      }, undefined, undefined, undefined, mentions ? { mentions, referenceAssets } : undefined);
     } catch (error) {
       if (error instanceof StudioError && error.status === 409) {
         if (error.message.includes('模块已在其他页面更新')) throw new StudioError(MODULE_CHANGED_MESSAGE, 409);

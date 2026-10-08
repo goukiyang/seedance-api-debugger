@@ -98,10 +98,10 @@ export async function POST(request: NextRequest) {
               workspaceId,
               projectId: context.projectId,
               sourceRequestId: context.nodeId,
-              sourceLabel: '无线画布风格库生成',
+              sourceLabel: '无限画布风格库生成',
               role: 'reference_image',
-              albumName: '无线画布上传素材',
-              albumDescription: '无线画布上传并自动归档的参考素材',
+              albumName: '无限画布上传素材',
+              albumDescription: '无限画布上传并自动归档的参考素材',
               metadataSource: 'ultimate_canvas_style_gallery',
             }, assetId);
             referenceImageId = attached.referenceImageId;

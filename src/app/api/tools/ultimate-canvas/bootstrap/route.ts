@@ -98,7 +98,7 @@ export async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
   try {
-    assertInternalOnly(user, '外部账号无权使用无线画布。');
+    assertInternalOnly(user, '外部账号无权使用无限画布。');
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -333,7 +333,7 @@ export async function GET(request: NextRequest) {
     backend: { mode: 'sd2', transport: 'same-origin', mock: false },
     tool: {
       id: 'ultimate-canvas',
-      name: '无线画布',
+      name: '无限画布',
       mode: 'formal',
       billing: 'unified_sd2',
     },

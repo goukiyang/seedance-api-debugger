@@ -21,7 +21,7 @@
         'duration', 'cameraPresets', 'templateId', 'template_id', 'templateVersion', 'moduleId', 'module_id',
         'source', 'executionMode', 'inputSource', 'retryCount', 'outputMode', 'canvasStyle', 'planSource',
         'planReferences', 'planParameterSource', 'videoCardId', 'videoBranchId', 'storyWorkflow', 'storySource', 'canvasGroup',
-        'referenceImageIds', 'reference_image_ids'
+        'referenceImageIds', 'reference_image_ids', 'provider', 'promptMentions'
     ]);
     const TRANSIENT_KEYS = new Set([
         'status', 'state', 'error', 'result', 'results', 'progress', 'generatedtext', 'generationsummary',
@@ -45,9 +45,9 @@
     ];
     const REQUEST_INPUT_FIELDS = [
         'nodeId', 'kind', 'requestId', 'projectId', 'videoCardId', 'videoBranchId', 'documentId', 'mode',
-        'prompt', 'promptUserEdited', 'referenceImageIds', 'settings'
+        'prompt', 'promptUserEdited', 'referenceImageIds', 'promptMentions', 'settings'
     ];
-    const INPUT_SETTING_FIELDS = new Set(['model', 'ratio', 'duration', 'resolution', 'quality', 'size', 'count', 'mode']);
+    const INPUT_SETTING_FIELDS = new Set(['provider', 'model', 'ratio', 'duration', 'resolution', 'quality', 'size', 'count', 'mode']);
     const SAFE_VIDEO_REFERENCE_FIELDS = [
         'taskId', 'requestId', 'contentKey', 'assetId', 'libraryItemId'
     ];
@@ -114,6 +114,10 @@
         fields.forEach(key => {
             const item = value[key];
             if (item === undefined || item === null) return;
+            if (key === 'promptMentions' && isRecord(item)) {
+                result[key] = sanitize(item);
+                return;
+            }
             if (key === 'settings' && isRecord(item)) {
                 const settings = {};
                 Object.entries(item).forEach(([settingKey, settingValue]) => {
@@ -157,7 +161,7 @@
         if (isRecord(submission)) {
             const requestId = safeIdentifier(submission.requestId);
             const taskId = safeIdentifier(submission.taskId);
-            const input = pickFields(submission.input, ['model', 'ratio', 'duration', 'resolution', 'prompt']);
+            const input = pickFields(submission.input, ['model', 'ratio', 'duration', 'resolution', 'prompt', 'promptMentions']);
             const generationPayload = pickFields(submission.generationPayload, REQUEST_INPUT_FIELDS);
             if (requestId || taskId) {
                 refs.videoSubmission = {
@@ -491,7 +495,9 @@
                     idMap.set(node.id, candidate);
                 });
                 originals.forEach(node => {
-                    const data = duplicateNodeData(node, idMap, groupIdMap);
+                    const references = duplicateOptions.referencesForNode?.(node.id);
+                    const source = Array.isArray(references) ? { ...node, data: { ...node.data, planReferences: references } } : node;
+                    const data = duplicateNodeData(source, idMap, groupIdMap);
                     data.id = idMap.get(node.id);
                     const id = engine.addNodeForCommand(node.type, node.x + offsetX, node.y + offsetY, data);
                     if (!id) throw new Error('复制节点失败');

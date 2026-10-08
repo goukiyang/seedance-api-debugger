@@ -1597,7 +1597,7 @@ export default function AdminIntegrationsClient() {
           <div>
             <h2 className="section-title mb-0">图片模型配置</h2>
             <p className="text-gray text-sm mt-2">
-              保存文生图、图生图和首尾帧草图模型；普通生成页和无线画布后续都从这里读取。
+              保存文生图、图生图和首尾帧草图模型；普通生成页和无限画布后续都从这里读取。
             </p>
           </div>
           <label className="toggle-switch" aria-label="启用图形生成 API">

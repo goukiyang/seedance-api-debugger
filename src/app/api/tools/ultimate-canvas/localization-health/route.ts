@@ -10,9 +10,9 @@ export async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
-    assertInternalOnly(user, '外部账号无权使用无线画布健康检查。');
+    assertInternalOnly(user, '外部账号无权使用无限画布健康检查。');
     if (user.role !== 'admin') {
-      return NextResponse.json({ error: '权限不足', message: '无线画布本地化健康检查只对管理员开放' }, { status: 403 });
+      return NextResponse.json({ error: '权限不足', message: '无限画布本地化健康检查只对管理员开放' }, { status: 403 });
     }
 
     const projectId = request.nextUrl.searchParams.get('project_id')?.trim() || null;

@@ -1,5 +1,5 @@
 /**
- * 无线画布 App – Application logic
+ * 无限画布 App – Application logic
  * Matches LibLib.tv interaction patterns:
  * - Double-click canvas → floating add-node menu at mouse position
  * - Left toolbar opens slide-out panels
@@ -179,18 +179,55 @@
         canvasMinimap.render();
     }
 
-    function runGraphAction(action) {
+    function runGraphAction(action, targetNodeId = null) {
         if (!graphEditAllowed()) return showCanvasNotice('请先处理保存或未确认的请求，再编辑画布结构。', 'warn');
         syncAllNodesFromDom();
         graphRestoring = true;
         try {
             if (action === 'undo') graphCommands.undo();
             if (action === 'redo') graphCommands.redo();
-            if (action === 'copy') graphCommands.duplicateSelection();
+            if (action === 'copy') {
+                if (targetNodeId) engine.selectNode(targetNodeId);
+                const placement = duplicatePlacement();
+                if (!placement) { showCanvasNotice('右侧没有足够空位，请先腾出位置再创建副本。', 'warn'); return; }
+                const result = graphCommands.duplicateSelection({ ...placement,
+                    referencesForNode: nodeId => generationReferenceItems(nodeId).map(item => ({ ...item,
+                        nodeId: item.referenceImageId ? `snapshot-reference-${item.referenceImageId}` : item.nodeId })) });
+                if (result.ok) {
+                    hydrateNodeViews();
+                    const nodeId = result.createdIds[0];
+                    const copied = engine.nodes.get(nodeId), rect = document.getElementById('canvas-container').getBoundingClientRect();
+                    if (copied && (copied.x * engine.scale + engine.offsetX < 0 || (copied.x + 624) * engine.scale + engine.offsetX > rect.width
+                        || copied.y * engine.scale + engine.offsetY < 0 || (copied.y + 440) * engine.scale + engine.offsetY > rect.height)) {
+                        engine.offsetX = 24 - copied.x * engine.scale; engine.offsetY = 24 - copied.y * engine.scale;
+                        engine._applyTransform();
+                    }
+                    document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"] .image-props-textarea, [data-node-id="${CSS.escape(nodeId)}"] .video-props-textarea`)?.focus();
+                }
+            }
             if (action === 'group') window.UltimateCanvasGroups.groupSelected(engine, graphCommands);
             if (action === 'ungroup') window.UltimateCanvasGroups.ungroupSelected(engine, graphCommands);
         } finally { graphRestoring = false; }
         updateGraphTools();
+    }
+    engine.onDuplicateNode = nodeId => runGraphAction('copy', nodeId);
+    function duplicatePlacement() {
+        const selected = engine.getSelectedNodeIds().map(id => engine.nodes.get(id)).filter(Boolean);
+        if (!selected.length) return null;
+        const bounds = node => {
+            const element = document.querySelector(`[data-node-id="${CSS.escape(node.id)}"]`);
+            return { x: node.x, y: node.y, width: element?.offsetWidth || 624, height: element?.offsetHeight || 440 };
+        };
+        const selectedBounds = selected.map(bounds), occupied = [...engine.nodes.values()].map(bounds);
+        const width = Math.max(...selectedBounds.map(node => node.x + node.width)) - Math.min(...selectedBounds.map(node => node.x));
+        for (let index = 0; index < 60; index++) {
+            const offsetX = width + 80 + Math.floor(index / 10) * 704, offsetY = (index % 10) * 504;
+            const collision = selectedBounds.some(copy => occupied.some(node => copy.x + offsetX < node.x + node.width + 24
+                && copy.x + offsetX + copy.width + 24 > node.x && copy.y + offsetY < node.y + node.height + 24
+                && copy.y + offsetY + copy.height + 24 > node.y));
+            if (!collision) return { offsetX, offsetY };
+        }
+        return null;
     }
 
     // Only synchronous user editing transactions enter history, not polling or Provider callbacks.
@@ -1032,6 +1069,7 @@
                         requestId: payload.requestId,
                         mode: payload.mode,
                         prompt: promptWithConnectedText(payload),
+                        ...(payload.promptMentions ? { promptMentions: payload.promptMentions } : {}),
                         referenceImageIds: payload.referenceImageIds || collectReferenceImageIds(payload),
                         settings: payload.settings || {}
                     });
@@ -1070,6 +1108,7 @@
                         mode: payload.mode,
                         prompt: promptWithConnectedText(payload),
                         promptUserEdited: true,
+                        ...(payload.promptMentions ? { promptMentions: payload.promptMentions } : {}),
                         referenceImageIds: payload.referenceImageIds || collectReferenceImageIds(payload),
                         settings: payload.settings || {}
                     });
@@ -1772,10 +1811,10 @@
             select.replaceChildren(...models.map(item => new Option(item.label, item.value, false, item.value === selected)));
             select.dataset.optionsKey = key;
         });
-        document.querySelectorAll('.node-type-image .video-model-info span:nth-child(2)').forEach(el => {
+        document.querySelectorAll('.node-type-image [data-generation-model-label]').forEach(el => {
             el.textContent = caps.image?.model || caps.image?.label || '图形生成';
         });
-        document.querySelectorAll('.node-type-video .video-model-info span:nth-child(2)').forEach(el => {
+        document.querySelectorAll('.node-type-video [data-generation-model-label]').forEach(el => {
             el.textContent = caps.video?.model || caps.video?.label || '默认视频 API';
         });
         renderAllGenerationNodeControls();
@@ -1799,7 +1838,7 @@
             imageSelect.title = '';
             return;
         }
-        const label = nodeEl?.querySelector('.video-model-info span:nth-child(2)');
+        const label = nodeEl?.querySelector('[data-generation-model-label]');
         if (!label || !node) return;
         const capabilities = canvasRuntime.bootstrap?.capabilities || {};
         if (node.type === 'image') {
@@ -2730,6 +2769,7 @@
             const shortcut = ['keydown', 'paste', 'drop'].includes(type) && !target?.closest('#header-bar, #canvas-save-recovery');
             if ((busy && (editorEvent || shortcut || target?.closest('#header-bar, #canvas-save-recovery')))
                 || (!canvasRuntime.documentWritable && (editorEvent || shortcut))) {
+                if (type === 'drop' && Array.from(event.dataTransfer?.types || []).includes('Files')) showCanvasNotice('当前画布不可编辑，未上传文件。', 'warn');
                 event.preventDefault();
                 event.stopImmediatePropagation();
             }
@@ -3296,6 +3336,12 @@
                 renderTextNodeBody(nodeEl, node);
                 return;
             }
+            if (['upload', 'asset', 'reference_image'].includes(node.data?.source) && node.data?.assetId && !node.data?.taskId) {
+                const mediaUrl = `/api/content-reactions/media?key=${encodeURIComponent(`asset:${node.data.assetId}`)}&variant=preview`;
+                decorateGeneratedNode(node.id, node.data.title || '导入素材', '',
+                    node.type === 'image' ? mediaUrl : node.data.thumbnailUrl || '', { mediaType: node.type, mediaUrl, imageUrl: mediaUrl });
+                return;
+            }
             if (node.type === 'image' && (node.data?.previewImage || node.data?.thumbnailUrl)) {
                 decorateGeneratedNode(
                     node.id,
@@ -3676,6 +3722,8 @@
                 taskId: item.taskId,
                 videoUrl: item.previewUrl,
                 downloadUrl: item.downloadUrl
+            } : isVideo && item.assetId ? {
+                mediaType: 'video', mediaUrl: `/api/content-reactions/media?key=${encodeURIComponent(`asset:${item.assetId}`)}&variant=preview`
             } : {
                 imageUrl: item.originalUrl || item.downloadUrl || itemPreview(item),
                 downloadUrl: item.downloadUrl || item.originalUrl || itemPreview(item)
@@ -3711,21 +3759,96 @@
         createNodeFromLibraryItem(item);
     });
 
-    async function uploadCanvasFile(file, role = '', canvasNodeId = '') {
+    async function uploadCanvasFile(file, role = '', canvasNodeId = '', onProgress = null, originalRequestId = '') {
         if (!canvasRuntime.selectedProjectId || !canvasRuntime.selectedVideoCardId) {
             throw new Error('请先选择项目和视频卡，再上传素材。');
         }
-        const formData = new FormData();
-        formData.set('file', file);
-        formData.set('project_id', canvasRuntime.selectedProjectId);
-        formData.set('video_card_id', canvasRuntime.selectedVideoCardId);
-        if (canvasRuntime.documentId) formData.set('canvas_document_id', canvasRuntime.documentId);
-        if (canvasNodeId) formData.set('canvas_node_id', canvasNodeId);
-        if (role) formData.set('role', role);
+        if (!canvasRuntime.documentId || !graphEditAllowed() || window.parent === window) throw new Error('请先保存可编辑画布，再上传素材。');
+        const requestId = originalRequestId || crypto.randomUUID();
+        const captured = uploadContextKey();
         canvasRuntime.uploadsInFlight += 1;
         try {
-            return await requestJson('/api/tools/ultimate-canvas/upload', { method: 'POST', body: formData });
+            return await new Promise((resolve, reject) => {
+                canvasUploadRequests.set(requestId, { captured, nodeId: canvasNodeId, resolve, reject, onProgress });
+                window.parent.postMessage({ type: 'sd2-canvas-upload-request', requestId,
+                    userId: canvasRuntime.bootstrap?.user?.id, documentId: canvasRuntime.documentId,
+                    projectId: canvasRuntime.selectedProjectId, cardId: canvasRuntime.selectedVideoCardId,
+                    files: [{ file, nodeId: canvasNodeId }] }, window.location.origin);
+            });
         } finally { canvasRuntime.uploadsInFlight -= 1; }
+    }
+
+    const canvasUploadRequests = new Map();
+    function uploadContextKey() { return JSON.stringify([canvasRuntime.bootstrap?.user?.id, canvasRuntime.documentId,
+        canvasRuntime.selectedProjectId, canvasRuntime.selectedVideoCardId, canvasRuntime.contextEpoch]); }
+    window.UltimateCanvasUploadContextMatches = requestId => {
+        const pending = canvasUploadRequests.get(requestId);
+        return Boolean(pending && pending.captured === uploadContextKey() && canvasRuntime.documentWritable
+            && !canvasRuntime.contextSwitching && !canvasRuntime.documentRestoring);
+    };
+    window.addEventListener('message', event => {
+        if (event.origin !== location.origin || event.source !== window.parent || event.data?.type !== 'sd2-canvas-upload-receipt') return;
+        const message = event.data;
+        const pending = canvasUploadRequests.get(message.requestId);
+        if (!pending) return;
+        if (!window.UltimateCanvasUploadContextMatches(message.requestId)) {
+            canvasUploadRequests.delete(message.requestId); pending.reject(new Error('画布目标已改变，原素材保留，未写回旧画布')); return;
+        }
+        if (message.progress) { pending.onProgress?.(message.progress); return; }
+        if (message.nodeId !== pending.nodeId || typeof message.success !== 'boolean') return;
+        canvasUploadRequests.delete(message.requestId);
+        if (message.success && message.result?.success) pending.resolve(message.result);
+        else pending.reject(new Error(message.error || '上传结果尚未确认，未重传原文件'));
+    });
+
+    function canvasFilePosition(clientX, clientY) {
+        const rect = document.getElementById('canvas-container').getBoundingClientRect();
+        return { x: (clientX - rect.left - engine.offsetX) / engine.scale,
+            y: (clientY - rect.top - engine.offsetY) / engine.scale };
+    }
+    function queueCanvasFiles(files, cx, cy, pendingConnection = null) {
+        if (!graphEditAllowed()) { showCanvasNotice('当前画布不可编辑或正在处理，未上传文件。', 'warn'); return; }
+        const entries = Array.from(files || []);
+        if (entries.length > 20) { showCanvasNotice('一次最多导入20个文件，请分批选择。', 'warn'); return; }
+        if (!entries.length) return;
+        const queuedContext = uploadContextKey();
+        let tray = document.querySelector('[data-canvas-upload-tray]');
+        if (!tray) { tray = document.createElement('div'); tray.dataset.canvasUploadTray = ''; tray.className = 'canvas-upload-tray'; document.body.appendChild(tray); }
+        let chain = Promise.resolve();
+        entries.forEach((file, index) => {
+            const row = document.createElement('div'); row.className = 'canvas-upload-row';
+            const label = document.createElement('span'); label.textContent = file.name; row.appendChild(label);
+            const status = document.createElement('span'); status.textContent = '等待上传'; row.appendChild(status);
+            const retry = document.createElement('button'); retry.type = 'button'; retry.title = '恢复此文件'; retry.innerHTML = window.UltimateCanvasIcons('RotateCcw', 14); retry.hidden = true; row.appendChild(retry);
+            const remove = document.createElement('button'); remove.type = 'button'; remove.title = '移除上传条目，不删除原素材'; remove.innerHTML = window.UltimateCanvasIcons('X', 14); row.appendChild(remove);
+            tray.appendChild(row);
+            let running = false, removed = false;
+            const nodeId = `node-upload-${crypto.randomUUID()}`;
+            const uploadRequestId = crypto.randomUUID();
+            const run = async () => {
+                if (removed || running) return;
+                if (queuedContext !== uploadContextKey()) { status.textContent = '画布或账号已变化，未上传此文件'; retry.hidden = true; return; }
+                if (!/^(image|video|audio)\//.test(file.type) || (pendingConnection?.role === 'input' && !file.type.startsWith('image/'))) {
+                    status.textContent = '此处不支持该文件类型'; return;
+                }
+                running = true; retry.hidden = true; remove.disabled = true; status.textContent = '正在读取原文件';
+                const captured = uploadContextKey();
+                try {
+                    const result = await uploadCanvasFile(file, '', nodeId, progress => {
+                        status.textContent = progress.totalBytes > 0 && Number.isFinite(progress.loadedBytes)
+                            ? `${progress.label || '正在上传'} ${Math.min(100, Math.round(progress.loadedBytes / progress.totalBytes * 100))}%`
+                            : progress.label || '正在上传';
+                    }, uploadRequestId);
+                    if (captured !== uploadContextKey()) throw new Error('画布目标已改变，未写回旧画布');
+                    if (!engine.nodes.has(nodeId)) createUploadedNode(result, cx + index * 80, cy + index * 60, pendingConnection, nodeId);
+                    status.textContent = '已加入画布';
+                } catch (error) { status.textContent = error?.message || '上传未确认'; retry.hidden = false; }
+                finally { running = false; remove.disabled = false; }
+            };
+            retry.addEventListener('click', () => { chain = chain.then(run); });
+            remove.addEventListener('click', () => { if (!running) { removed = true; row.remove(); if (!tray.children.length) tray.remove(); } });
+            chain = chain.then(run);
+        });
     }
 
     function createUploadedNode(uploadResult, cx, cy, pendingConnection = null, requestedNodeId = '') {
@@ -3753,7 +3876,7 @@
             nodeId,
             asset.fileName || '上传素材',
             uploadResult.reference_image_id ? '已上传并可作为生成参考图。' : '已上传到站内资产库。',
-            imagePreview
+            imagePreview, { mediaType: type, mediaUrl: asset.id ? `/api/content-reactions/media?key=${encodeURIComponent(`asset:${asset.id}`)}&variant=preview` : '' }
         );
         connectMenuNode(nodeId, pendingConnection);
         scheduleCanvasSave('upload_asset');
@@ -3917,7 +4040,8 @@
                 };
             })
             ;
-        return [...(engine.nodes.get(nodeId)?.data?.planReferences || []), ...connected].filter(item => {
+        return [...(engine.nodes.get(nodeId)?.data?.planReferences || []).map(item => ({ ...item,
+            preview: item.referenceImageId ? `/api/reference-images/${encodeURIComponent(item.referenceImageId)}/content?variant=thumbnail` : '' })), ...connected].filter(item => {
                 const key = item.referenceImageId || `node:${item.nodeId}`;
                 if (seen.has(key)) return false;
                 seen.add(key);
@@ -3981,6 +4105,94 @@
             && referenceImportSignature(pending.nodeId) === pending.signature);
     }
     window.UltimateCanvasReferenceContextMatches = referenceImportMatches;
+    let pendingMention = null, mentionComposing = false;
+    function closeCanvasMention() {
+        if (pendingMention) window.parent.postMessage({ type: 'sd2-canvas-mention-invalidated', requestId: pendingMention.requestId }, location.origin);
+        pendingMention = null;
+    }
+    function mentionContextMatches(requestId) {
+        const pending = pendingMention;
+        return Boolean(pending && pending.requestId === requestId && pending.input.isConnected
+            && pending.input.value === pending.prompt && pending.input.selectionStart === pending.cursor
+            && pending.input.selectionEnd === pending.cursor && pending.context === uploadContextKey()
+            && document.activeElement === pending.input && engine.nodes.get(pending.nodeId) === pending.node
+            && referenceImportSignature(pending.nodeId) === pending.signature && graphEditAllowed());
+    }
+    window.UltimateCanvasMentionContextMatches = mentionContextMatches;
+    function requestCanvasMention(input) {
+        if (!input?.matches?.('.image-props-textarea,.video-props-textarea') || mentionComposing || window.parent === window) return;
+        const nodeId = input.closest('[data-node-id]')?.dataset.nodeId, node = engine.nodes.get(nodeId);
+        const prompt = input.value, cursor = input.selectionStart;
+        if (!node || cursor !== input.selectionEnd || !graphEditAllowed()) { closeCanvasMention(); return; }
+        const before = prompt.slice(0, cursor);
+        if (!/@[^\s@]*$/.test(before)) { closeCanvasMention(); return; }
+        const items = [...availableGenerationReferenceItems(nodeId)];
+        engine.nodes.forEach(item => {
+            const id = item.type === 'image' ? referenceIdsFromNodeData(item.data || {})[0] : '';
+            if (id && !items.some(reference => reference.referenceImageId === id)) items.push({ referenceImageId: id,
+                nodeId: item.id, title: item.data?.title || '画布图片', available: true });
+        });
+        const bindings = node.data?.promptMentions?.version === 1 ? node.data.promptMentions.items || [] : [];
+        const reserved = new Set([...bindings.map(item => item.token), ...(prompt.match(/@图[1-9]\d*/g) || [])]);
+        let next = 1;
+        const candidates = items.slice(0, 79).map(item => {
+            let token = bindings.find(binding => binding.referenceImageId === item.referenceImageId)?.token;
+            if (!token) { while (reserved.has(`@图${next}`)) next++; token = `@图${next++}`; reserved.add(token); }
+            return { ...item, title: item.title || '参考图片', token };
+        });
+        const rect = input.getBoundingClientRect(), requestId = crypto.randomUUID();
+        pendingMention = { requestId, input, prompt, cursor, nodeId, node, candidates,
+            signature: referenceImportSignature(nodeId), context: uploadContextKey() };
+        window.parent.postMessage({ type: 'sd2-canvas-mention-request', requestId,
+            userId: canvasRuntime.bootstrap?.user?.id, nodeId, documentId: canvasRuntime.documentId,
+            projectId: canvasRuntime.selectedProjectId, cardId: canvasRuntime.selectedVideoCardId,
+            prompt, cursor, candidates, left: rect.left, top: rect.bottom + 4 }, location.origin);
+    }
+    document.addEventListener('compositionstart', () => { mentionComposing = true; closeCanvasMention(); });
+    document.addEventListener('compositionend', event => { mentionComposing = false; requestCanvasMention(event.target); });
+    document.addEventListener('input', event => requestCanvasMention(event.target));
+    document.addEventListener('keyup', event => { if (!['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(event.key)) requestCanvasMention(event.target); });
+    document.addEventListener('pointerdown', event => { if (pendingMention && event.target !== pendingMention.input) closeCanvasMention(); });
+    document.addEventListener('keydown', event => {
+        if (!pendingMention || mentionComposing || event.isComposing || !['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(event.key)) return;
+        event.preventDefault(); event.stopPropagation();
+        window.parent.postMessage({ type: 'sd2-canvas-mention-key', requestId: pendingMention.requestId, key: event.key }, location.origin);
+    }, true);
+    window.addEventListener('message', event => {
+        if (event.origin !== location.origin || event.source !== window.parent) return;
+        const message = event.data;
+        if (message?.type === 'sd2-canvas-mention-cancel' && message.requestId === pendingMention?.requestId) { pendingMention = null; return; }
+        if (message?.type === 'sd2-canvas-mention-library' && mentionContextMatches(message.requestId)) {
+            const originalMention = pendingMention, nodeId = originalMention.nodeId;
+            closeCanvasMention();
+            if (openReferenceImport(nodeId)) pendingReferenceImport.mentionInput = originalMention;
+            return;
+        }
+        if (message?.type !== 'sd2-canvas-mention-apply' || !mentionContextMatches(message.requestId)) return;
+        const pending = pendingMention;
+        const candidate = pending.candidates.find(item => item.referenceImageId === message.referenceImageId && item.token === message.token);
+        if (!candidate || typeof message.prompt !== 'string' || !Number.isInteger(message.cursor)) return;
+        const start = pending.prompt.lastIndexOf('@', pending.cursor - 1);
+        const after = pending.prompt.slice(pending.cursor), insertion = candidate.token + (/^\s/.test(after) ? '' : ' ');
+        const expected = pending.prompt.slice(0, start) + insertion + after;
+        if (message.prompt !== expected || message.cursor !== start + insertion.length) return;
+        const current = generationReferenceImageIds(pending.nodeId);
+        if (!current.includes(candidate.referenceImageId) && current.length >= referenceSelectionMaximum(pending.node)) {
+            showCanvasNotice('参考区已满，未修改正文，请先移除一张参考图。', 'warn'); return;
+        }
+        syncNodeDataFromDom(pending.nodeId, pending.node);
+        graphCommands.perform('prompt_reference', () => {
+            const node = pending.node;
+            if (!current.includes(candidate.referenceImageId)) node.data.planReferences = [...(node.data.planReferences || []),
+                { ...candidate, nodeId: `mention-reference-${candidate.referenceImageId}`, available: true }];
+            const items = node.data.promptMentions?.version === 1 ? [...node.data.promptMentions.items] : [];
+            if (!items.some(item => item.token === candidate.token)) items.push({ token: candidate.token, referenceImageId: candidate.referenceImageId });
+            node.data.promptMentions = { version: 1, items }; node.data.prompt = message.prompt;
+            pending.input.value = message.prompt; renderGenerationNodeControls(node.id);
+            scheduleCanvasSave('prompt_reference');
+        });
+        pending.input.focus(); pending.input.setSelectionRange(message.cursor, message.cursor); pendingMention = null;
+    });
     function openReferenceImport(nodeId) {
         const node = engine.nodes.get(nodeId);
         if (!node || !['image', 'video'].includes(node.type) || !canvasRuntime.documentWritable || canvasRuntime.contextSwitching) return false;
@@ -4027,12 +4239,24 @@
                     assetId: item.assetId, title: item.title, width: item.width, height: item.height, available: true,
                     preview: `/api/reference-images/${encodeURIComponent(item.referenceImageId)}/content?variant=thumbnail`
                 }))];
-                renderGenerationNodeControls(node.id); syncReferenceSelection(); renderReferenceSelectionStatus();
+                renderGenerationNodeControls(node.id); finishReferenceSelection({ returnToTarget: false });
+                canvasRuntime.pendingGenerationReferenceTargetId = null;
+                engine._hideAddMenu?.(); engine._hideContextMenu?.(); engine.selectNode(node.id);
                 scheduleCanvasSave('generation_reference_import'); success = true;
             }
         }
         window.parent.postMessage({ type: 'sd2-canvas-reference-receipt', requestId: message.requestId, success }, window.location.origin);
-        if (success) { pendingReferenceImport = null; setTimeout(() => pending.returnFocus?.focus?.(), 0); showCanvasNotice('参考图已添加，尚未开始生成。', 'info'); }
+        if (success) {
+            pendingReferenceImport = null;
+            setTimeout(() => {
+                pending.returnFocus?.focus?.();
+                const mention = pending.mentionInput;
+                if (mention && mention.input.isConnected && mention.input.value === mention.prompt
+                    && mention.input.selectionStart === mention.cursor && mention.input.selectionEnd === mention.cursor
+                    && mention.context === uploadContextKey() && engine.nodes.get(mention.nodeId) === mention.node) requestCanvasMention(mention.input);
+            }, 0);
+            showCanvasNotice('参考图已添加，尚未开始生成。', 'info');
+        }
     });
 
     function syncReferenceSelection() {
@@ -4060,6 +4284,7 @@
 
     function renderReferenceSelectionStatus() {
         document.querySelector('[data-reference-selection-status]')?.remove();
+        engine._hideAddMenu?.(); engine._hideContextMenu?.();
         const state = canvasRuntime.referenceSelection;
         if (!state) return;
         const target = engine.nodes.get(state.targetNodeId);
@@ -4071,8 +4296,8 @@
         status.innerHTML = `
             <span>从画布选择参考 <strong>${count}/${state.maximumReferences}</strong></span>
             <button type="button" data-reference-selection-action="library" title="从素材库选择">素材库</button>
-            <button type="button" data-reference-selection-action="return" title="返回节点">返回节点</button>
-            <button type="button" data-reference-selection-action="exit" title="退出">退出</button>`;
+            ${state.multiple ? '<button type="button" data-reference-selection-action="return" title="完成多选参考">完成</button>' : '<button type="button" data-reference-selection-action="multiple" title="一次选择多张参考">多选参考</button>'}
+            <button type="button" data-reference-selection-action="exit" title="取消选择">取消</button>`;
         document.body.appendChild(status);
     }
 
@@ -4084,6 +4309,7 @@
             canvasRuntime.pendingGenerationReferenceTargetId = null;
         }
         document.querySelector('[data-reference-selection-status]')?.remove();
+        engine._hideAddMenu?.(); engine._hideContextMenu?.();
         updateReferenceSelectionMarkers();
         if (options.returnToTarget !== false && engine.nodes.has(state.targetNodeId)) {
             engine.selectNode(state.targetNodeId);
@@ -4094,7 +4320,7 @@
         return true;
     }
 
-    function startReferenceSelection(targetNodeId) {
+    function startReferenceSelection(targetNodeId, options = {}) {
         const target = engine.nodes.get(targetNodeId);
         if (!target || !['image', 'video'].includes(target.type)) return false;
         finishReferenceSelection({ returnToTarget: false });
@@ -4108,6 +4334,7 @@
             targetNodeId,
             previousSelectedNodeId: engine.selectedNodeId,
             maximumReferences,
+            multiple: options.multiple === true,
             references: referenceSelectionItems(targetNodeId)
         });
         canvasRuntime.pendingGenerationReferenceTargetId = CanvasReferenceSelection.pendingTargetId(
@@ -4128,17 +4355,16 @@
             referenceImageId: referenceIdsFromNodeData(source.data || {})[0] || ''
         });
         if (!decision.accepted) {
-            engine.selectNode(target.id);
+            showCanvasNotice('请选择尚未加入的合法图片参考。', 'warn');
             return false;
         }
         if (!engine.connectNodes(sourceNodeId, target.id)) return false;
         canvasRuntime.referenceSelection = decision.session;
         canvasRuntime.pendingGenerationReferenceTargetId = CanvasReferenceSelection.pendingTargetId(decision.session);
-        engine.selectNode(target.id);
         renderGenerationNodeControls(target.id);
         scheduleCanvasSave('generation_reference_add');
         if (decision.finished) {
-            finishReferenceSelection({ reason: `已达当前模式的 ${state.maximumReferences} 张参考图上限` });
+            finishReferenceSelection({ reason: state.multiple ? `已达当前模式的 ${state.maximumReferences} 张参考图上限` : '参考图已添加，尚未开始生成。' });
         } else {
             renderReferenceSelectionStatus();
         }
@@ -4230,6 +4456,12 @@
             if (!readiness.ready) Object.assign(interactionReadiness, readiness);
         }
         updateGenerationNodeModelLabel(nodeEl, node);
+        const modelTrigger = nodeEl.querySelector('[data-generation-model-trigger]');
+        if (modelTrigger) {
+            const locked = generationSettingsLockReason(node);
+            modelTrigger.setAttribute('aria-disabled', locked ? 'true' : 'false');
+            modelTrigger.title = locked || '选择视频模型';
+        }
         if (promptInput && !promptInput.value && node.data?.prompt) promptInput.value = node.data.prompt;
         const modeLabel = nodeEl.querySelector('[data-generation-mode-label]');
         if (modeLabel) modeLabel.textContent = mode?.label || nodeMode;
@@ -4335,6 +4567,30 @@
                             title="移除参考图" aria-label="移除参考图">&times;</button>
                     </span>`).join('')
                 : '';
+        }
+        const region = nodeEl.querySelector('[data-generation-result-region]');
+        const hasResultMedia = Boolean(node.data?.originalUrl || node.data?.assetId || node.data?.videoPreviewUrl
+            || node.data?.resultVideoUrl || node.data?.selectedVideoResult?.playUrl || node.data?.generationResult?.imageUrl
+            || node.data?.generationResult?.assets?.length || node.data?.generationStatus === 'succeeded' && node.data?.previewImage);
+        if (region && !hasResultMedia) {
+            const available = references.filter(item => item.available && item.referenceImageId);
+            if (available.length) {
+                const index = Math.min(available.length - 1, Number(node._referencePreviewIndex) || 0);
+                decorateGeneratedNode(nodeId, '参考预览', '', `/api/reference-images/${encodeURIComponent(available[index].referenceImageId)}/content?variant=thumbnail`);
+                const preview = document.createElement('button'); preview.type = 'button'; preview.className = 'reference-preview-open';
+                preview.dataset.canvasMediaPreview = ''; preview.dataset.contentKey = `reference_image:${available[index].referenceImageId}`;
+                preview.title = '查看参考原图'; preview.setAttribute('aria-label', preview.title); preview.innerHTML = window.UltimateCanvasIcons('Maximize2', 16);
+                region.appendChild(preview);
+                if (available.length > 1) {
+                    const switcher = document.createElement('button'); switcher.type = 'button'; switcher.className = 'reference-preview-switch';
+                    switcher.title = '切换参考预览，不改变发送顺序'; switcher.textContent = `${index + 1}/${available.length}`;
+                    switcher.addEventListener('click', () => { node._referencePreviewIndex = (index + 1) % available.length; renderGenerationNodeControls(nodeId); });
+                    region.appendChild(switcher);
+                }
+                region.dataset.referencePreview = 'true';
+            } else if (region.dataset.referencePreview === 'true') {
+                region.replaceChildren(); delete region.dataset.referencePreview;
+            }
         }
         refreshOpenGenerationSpecPopover(node);
         syncImageResultActionsTrigger(nodeEl, node);
@@ -4481,7 +4737,19 @@
         </div>`;
     }
 
+    function generationSettingsLockReason(node) {
+        if (!canvasRuntime.documentWritable) return '当前画布只读，无法修改模型和参数';
+        if (canvasRuntime.contextSwitching || canvasRuntime.documentRestoring) return '画布正在切换，请稍后再修改';
+        if (canvasRuntime.documentOperation || canvasRuntime.failedSaveRequest || canvasRuntime.saveConflict) return '请先处理画布保存状态，再修改模型和参数';
+        if (node.data?.videoSubmissionLegacy || node.data?.videoSubmission?.state === 'unconfirmed') return '原请求受理情况未知，请先查询原请求；不会重新发送';
+        if (hasCurrentGenerationSubmission(node.id) || ['submitting', 'submitted', 'running', 'queued', 'processing', 'unconfirmed', 'uncertain'].includes(node.data?.generationStatus)) return '原请求正在提交或生成，请等待或查询原任务';
+        if (node.type === 'image' && (node.data?.canvasStyle || node.data?.styleJob)) return '使用风格模板的生成参数；移除风格后可调整';
+        return '';
+    }
+
     function applyGenerationSettingChoice(node, name, rawValue) {
+        const locked = generationSettingsLockReason(node);
+        if (locked) { showCanvasNotice(locked, 'warn'); return false; }
         const current = generationSettingsForNode(node);
         if (node.type === 'image') {
             const allowed = new Set(['ratio', 'resolution', 'count', 'quality']);
@@ -4500,13 +4768,17 @@
         } else if (node.type === 'video') {
             const allowed = new Set(['model', 'ratio', 'duration', 'resolution', 'generateAudio', 'returnLastFrame', 'watermark']);
             if (!allowed.has(name)) return false;
+            const modelOption = name === 'model' ? canvasRuntime.bootstrap?.capabilities?.video?.model_options?.find(item => item.value === rawValue) : null;
+            if (name === 'model' && (!modelOption?.provider || modelOption.ready === false)) {
+                showCanvasNotice(modelOption?.reason || '此模型尚未配置，暂不能选用', 'warn'); return false;
+            }
             const booleanValue = rawValue === 'true';
             node.data = {
                 ...node.data,
                 videoSettings: {
                     ...current,
                     model: name === 'model' ? rawValue : current.model,
-                    provider: name === 'model' ? canvasRuntime.bootstrap?.capabilities?.video?.model_options?.find(item => item.value === rawValue)?.provider || current.provider : current.provider,
+                    provider: name === 'model' ? modelOption.provider : current.provider,
                     ratio: name === 'ratio' ? rawValue : current.ratio,
                     duration: name === 'duration' ? Number(rawValue) : current.duration,
                     resolution: name === 'resolution' ? rawValue : current.resolution,
@@ -4516,6 +4788,10 @@
                 }
             };
             if (node.data.planSource) node.data.planParameterSource = `${node.data.planParameterSource || ''}；${name} 已由此节点手动选择：${rawValue}`;
+            const previousEstimate = canvasRuntime.videoEstimates.get(node.id);
+            if (previousEstimate?.timer) window.clearTimeout(previousEstimate.timer);
+            previousEstimate?.controller?.abort();
+            canvasRuntime.videoEstimates.delete(node.id);
         } else return false;
         renderGenerationNodeControls(node.id);
         scheduleCanvasSave(`${node.type}_settings_change`);
@@ -4650,9 +4926,11 @@
     function closeGenerationPopover() {
         const state = canvasRuntime.generationPopover;
         if (!state) return;
+        const restoreFocus = state.element?.contains(document.activeElement);
         state.anchor?.setAttribute('aria-expanded', 'false');
         state.element?.remove();
         canvasRuntime.generationPopover = null;
+        if (restoreFocus) state.anchor?.focus({ preventScroll: true });
     }
 
     function positionGenerationPopover(state) {
@@ -4677,6 +4955,10 @@
     function openGenerationPopover(nodeId, kind, anchor) {
         const node = engine.nodes.get(nodeId);
         if (!node || !anchor || !['image', 'video'].includes(node.type)) return;
+        if (['spec', 'mode', 'camera'].includes(kind)) {
+            const locked = generationSettingsLockReason(node);
+            if (locked) { showCanvasNotice(locked, 'warn'); return; }
+        }
         if (canvasRuntime.generationPopover?.anchor === anchor && canvasRuntime.generationPopover.kind === kind) {
             closeGenerationPopover();
             return;
@@ -4684,6 +4966,8 @@
         closeGenerationPopover();
         const element = document.createElement('div');
         element.className = 'generation-popover';
+        element.setAttribute('role', 'dialog');
+        element.setAttribute('aria-label', kind === 'spec' ? '生成模型与参数' : '生成设置');
         element.dataset.generationPopoverKind = kind;
         element.innerHTML = kind === 'mode' ? renderModePopover(node)
             : kind === 'spec' ? renderSpecPopover(node)
@@ -4695,6 +4979,7 @@
         anchor.setAttribute('aria-expanded', 'true');
         canvasRuntime.generationPopover = { nodeId, kind, anchor, element };
         positionGenerationPopover(canvasRuntime.generationPopover);
+        if (anchor.hasAttribute?.('data-generation-model-trigger')) element.querySelector('[data-generation-setting-choice="model"]')?.focus({ preventScroll: true });
     }
 
     function activeTabText(nodeEl) {
@@ -4758,6 +5043,7 @@
             videoBranchId: node.data?.videoBranchId || canvasRuntime.selectedVideoBranchId,
             modeLabel: tabText || mode,
             prompt: prompt || node.data?.prompt || node.data?.description || '',
+            ...(node.data?.promptMentions ? { promptMentions: node.data.promptMentions } : {}),
             contextRules,
             context_rules: contextRules,
             ...(['text', 'script'].includes(kind) ? { textPurpose: (node._pendingTextRules ? node._pendingTextRules.previous.textPurpose : node.data?.textPurpose) || 'text' } : {}),
@@ -5777,10 +6063,9 @@
             openReferenceImport(state.targetNodeId);
         }
         if (action === 'return') {
-            const transition = CanvasReferenceSelection.transition(state, 'return');
-            canvasRuntime.referenceSelection = transition.session;
-            engine.selectNode(transition.selectedNodeId);
+            finishReferenceSelection();
         }
+        if (action === 'multiple') { canvasRuntime.referenceSelection = { ...state, multiple: true }; renderReferenceSelectionStatus(); }
         if (action === 'exit') finishReferenceSelection();
     });
 
@@ -5849,6 +6134,8 @@
         if (!modeButton || modeButton.disabled || !state?.element.contains(modeButton)) return;
         const node = engine.nodes.get(state.nodeId);
         if (!node) return;
+        const locked = generationSettingsLockReason(node);
+        if (locked) { showCanvasNotice(locked, 'warn'); return; }
         node.data = { ...node.data, mode: modeButton.dataset.generationMode };
         renderGenerationNodeControls(node.id);
         scheduleCanvasSave(`${node.type}_mode_change`);
@@ -5872,9 +6159,11 @@
         updateGraphTools();
         closeGenerationPopover();
         if (engine.nodes.get(nodeId)?.type === 'text') updateGenerationLabels(canvasRuntime.bootstrap);
-        if (canvasRuntime.referenceSelection && nodeId !== canvasRuntime.referenceSelection.targetNodeId) {
-            selectCanvasReference(nodeId);
-        }
+    };
+    engine.onReferenceNodePick = nodeId => {
+        if (!canvasRuntime.referenceSelection) return false;
+        if (nodeId !== canvasRuntime.referenceSelection.targetNodeId) selectCanvasReference(nodeId);
+        return true;
     };
     engine.onNodeDeselected = () => { closeGenerationPopover(); updateGraphTools(); };
     const minimapViewportChanged = engine.onViewportChanged;
@@ -6826,21 +7115,33 @@
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/*,video/*,audio/*';
+        input.multiple = true;
         input.onchange = async (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            const requestedNodeId = `node-upload-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-            try {
-                showCanvasNotice('正在上传素材...', 'info');
-                const result = await uploadCanvasFile(file, '', requestedNodeId);
-                createUploadedNode(result, cx, cy, pendingConnection, requestedNodeId);
-                showCanvasNotice(result.asset?.warning || '素材上传完成，已加入画布。', result.asset?.warning ? 'warn' : 'info');
-            } catch (error) {
-                showCanvasNotice(error?.message || '上传失败。', 'error');
-            }
+            queueCanvasFiles(e.target.files, cx, cy, pendingConnection);
         };
         input.click();
     }
+    ['dragover', 'drop'].forEach(type => window.addEventListener(type, event => {
+        if (!Array.from(event.dataTransfer?.types || []).includes('Files')) return;
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (type === 'dragover') { event.dataTransfer.dropEffect = canvasRuntime.documentWritable ? 'copy' : 'none'; return; }
+        if (!event.target.closest?.('#canvas-workspace')) { showCanvasNotice('请把文件拖到画布中；不导入文件夹或外链。', 'warn'); return; }
+        if (!event.dataTransfer.files.length) { showCanvasNotice('这里只接受实际文件，不导入文件夹或外链。', 'warn'); return; }
+        if (!graphEditAllowed()) { showCanvasNotice('当前画布不可编辑，未上传文件。', 'warn'); return; }
+        const point = canvasFilePosition(event.clientX, event.clientY);
+        const referenceZone = event.target.closest?.('[data-generation-reference-list],.generation-reference-zone');
+        const target = referenceZone?.closest('[data-node-id]')?.dataset.nodeId;
+        queueCanvasFiles(event.dataTransfer.files, point.x, point.y, target ? { nodeId: target, role: 'input' } : null);
+    }, true));
+    document.addEventListener('paste', event => {
+        if (event.target.closest?.('input,textarea,[contenteditable="true"]')) return;
+        const files = Array.from(event.clipboardData?.items || []).filter(item => item.kind === 'file').map(item => item.getAsFile()).filter(Boolean);
+        if (!files.length) return;
+        event.preventDefault();
+        const rect = document.getElementById('canvas-container').getBoundingClientRect();
+        const point = canvasFilePosition(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        queueCanvasFiles(files, point.x, point.y);
+    });
 
     // =====================
     // Quick Start Cards
@@ -8023,13 +8324,25 @@
         window.UltimateCanvasGenerationInteractions.updateGenerationResultRegion(nodeEl, `
             <div class="generated-reference-card">
                 <strong class="generated-result-title">${escapeHtml(title)}</strong>
-                ${previewImage
+                ${['video', 'audio'].includes(options.mediaType) && options.mediaUrl
+                    ? `<${options.mediaType} class="generated-frame-preview" controls preload="metadata" src="${escapeHtml(options.mediaUrl)}" ${options.mediaType === 'video' && previewImage ? `poster="${escapeHtml(previewImage)}"` : ''}></${options.mediaType}>`
+                    : previewImage
                     ? `<img class="generated-frame-preview" src="${escapeHtml(previewImage)}" alt="${escapeHtml(title)}" draggable="false">`
                     : '<div class="generated-result-placeholder" aria-hidden="true"></div>'}
             </div>`);
         syncImageResultActionsTrigger(nodeEl, node, options);
         if (node?.type === 'video') syncVideoTaskActionsTrigger(nodeEl, node, options);
     }
+    document.addEventListener('error', event => {
+        const media = event.target;
+        if (!media?.matches?.('.generated-frame-preview') || !media.closest('.generated-reference-card')) return;
+        const region = media.closest('.generated-reference-card');
+        if (region.querySelector('[data-media-retry]')) return;
+        const message = document.createElement('span'); message.textContent = '素材预览暂不可用'; message.className = 'canvas-media-error';
+        const retry = document.createElement('button'); retry.type = 'button'; retry.dataset.mediaRetry = ''; retry.title = '重新读取素材预览'; retry.innerHTML = window.UltimateCanvasIcons('RotateCcw', 16);
+        retry.addEventListener('click', () => { message.remove(); retry.remove(); if (media.load) media.load(); else media.src = media.src; });
+        region.append(message, retry);
+    }, true);
 
     function createDirectorOutput(sourceId, kind, title, description, index = 0) {
         const nd = engine.nodes.get(sourceId);
@@ -8698,5 +9011,5 @@
         });
     }, 80);
 
-    console.log('🎬 无线画布 initialized');
+    console.log('🎬 无限画布 initialized');
 })();

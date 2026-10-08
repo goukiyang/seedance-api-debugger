@@ -65,6 +65,7 @@ function taskActionPopoverHarness(node: { id: string; type: string; data: Record
       return {
         className: '', dataset: {}, style: {}, isConnected: false,
         remove() { this.isConnected = false; },
+        contains() { return false; },
         setAttribute() {},
         getBoundingClientRect: () => ({ width: 190, height: 100 }),
       };
@@ -123,7 +124,7 @@ const specPopoverRuntime = {
   bootstrap: { capabilities: { image: {} } },
 };
 const specPopoverFactory = new Function(
-  'canvasRuntime', 'window', 'escapeHtml', 'generationSettingsForNode', 'positionGenerationPopover',
+  'canvasRuntime', 'window', 'escapeHtml', 'generationSettingsForNode', 'positionGenerationPopover', 'generationCapabilitiesForNode',
   `${specPopoverSource}\nreturn { refreshOpenGenerationSpecPopover };`,
 );
 const specPopoverApi = specPopoverFactory(
@@ -134,8 +135,9 @@ const specPopoverApi = specPopoverFactory(
     },
   },
   (value: unknown) => String(value ?? ''),
-  (node: any) => ({ ...node.data.imageSettings, maximumCount: 4 }),
+  (node: any) => ({ ...node.data.imageSettings, sizeOptions: ['1K', '2K'], maximumCount: 4 }),
   () => { specPopoverPositionCalls += 1; },
+  () => ({}),
 );
 const imageSpecNode = {
   id: 'image-spec-node', type: 'image', data: { imageSettings: { ratio: '21:9', size: '2K', count: 3 } },
@@ -208,14 +210,14 @@ contains(appSource, 'durableCanvasDocument(', 'canvas save uses the executable d
 contains(appSource, 'data-generated-image-action="regenerate"', 'image results remain regeneratable');
 contains(appSource, 'data-generation-submit', 'result nodes retain their generation submit control');
 contains(indexSource, 'generation-task-coordinator.js', 'canvas loads the polling coordinator before app startup');
-contains(indexSource, 'app.js?v=20260924-canvas-parallel', 'canvas app cache key matches the current canvas module refresh state');
+matches(indexSource, /app\.js\?v=[^"\s]+/, 'canvas app retains its existing versioned entry');
 contains(appSource, 'function scheduleVideoEstimate', 'video settings request a debounced estimate');
 contains(appSource, "'/api/tasks/estimate'", 'estimate uses the existing sd2 endpoint');
 contains(appSource, '350', 'video estimates debounce for 350ms');
 contains(appSource, '.abort()', 'a superseded video estimate request is aborted');
 contains(appSource, 'estimateSignature', 'stale estimate responses are checked against their settings signature');
 contains(appSource, '预计 ${', 'successful estimates are labeled clearly');
-contains(appSource, '提交后由后台计算', 'estimate failure remains nonblocking');
+contains(appSource, "typeof quote.estimatedCost !== 'number'", 'unknown quote blocks submission, configured zero remains numeric');
 contains(appSource, 'function clearAllVideoEstimates', 'app exposes one whole-canvas estimate cleanup path');
 const bootstrapSourceBlock = appSource.slice(
   appSource.indexOf('async function loadCanvasBootstrap'),
@@ -562,6 +564,7 @@ const selection = CanvasReferenceSelection.start({
   targetNodeId: 'target',
   previousSelectedNodeId: 'previous',
   maximumReferences: 2,
+  multiple: true,
 });
 const missingDurableId = CanvasReferenceSelection.add(selection, { nodeId: 'image-missing' });
 assert.equal(missingDurableId.accepted, false, 'canvas references require a durable referenceImageId');
@@ -668,13 +671,16 @@ assert.equal(interactions.modeOptions('video', {
 
 assert.ok(appSource.includes('generationInteractionReadiness'), 'app consumes the shared readiness contract');
 assert.ok(appSource.includes('availableGenerationReferenceItems'), 'app gates modes with available references');
-assert.ok(appSource.includes('capability.sizeOptions'), 'image spec UI consumes normalized size options');
+assert.ok(appSource.includes('settings.sizeOptions'), 'image spec UI consumes the actual selected-model size options');
 assert.ok(appSource.includes('capability.fixedSize'), 'image spec UI renders a read-only fixed size fallback');
 
 function engineHarness() {
   const engine = Object.create(CanvasEngine.prototype);
   engine.nodes = new Map();
   engine.connections = [];
+  engine.selectedNodeId = null;
+  engine.selectedNodeIds = new Set();
+  engine.planSplits = require('../public/tools/ultimate-canvas/plan-split.js').empty();
   engine.svg = { appendChild() {}, innerHTML: '', querySelectorAll: () => [] };
   engine.canvas = { innerHTML: '', querySelectorAll: () => [] };
   engine.scale = 1;

@@ -3,7 +3,7 @@
  * Nodes rendered with label OUTSIDE card, connectors always visible
  */
 const CanvasReferenceSelection = Object.freeze({
-    start({ targetNodeId, previousSelectedNodeId = null, maximumReferences, references = [] }) {
+    start({ targetNodeId, previousSelectedNodeId = null, maximumReferences, references = [], multiple = false }) {
         const maximum = Math.max(0, Number(maximumReferences) || 0);
         const durableReferences = references
             .filter(item => item?.nodeId && item?.referenceImageId)
@@ -12,6 +12,7 @@ const CanvasReferenceSelection = Object.freeze({
             active: durableReferences.length < maximum,
             targetNodeId,
             previousSelectedNodeId,
+            multiple: multiple === true,
             maximumReferences: maximum,
             references: durableReferences,
             startedAt: Date.now()
@@ -32,7 +33,7 @@ const CanvasReferenceSelection = Object.freeze({
             nodeId: candidate.nodeId,
             referenceImageId: candidate.referenceImageId
         }];
-        const finished = references.length >= session.maximumReferences;
+        const finished = !session.multiple || references.length >= session.maximumReferences;
         return {
             session: { ...session, active: !finished, references },
             accepted: true,
@@ -741,6 +742,7 @@ class CanvasEngine {
         lbl.addEventListener('mousedown', (e) => {
             if (e.button !== 0) return;
             e.stopPropagation();
+            if (this.onReferenceNodePick?.(id, e)) { e.preventDefault(); return; }
             if (this._toggleSelectionGesture(id, e)) { e.preventDefault(); return; }
             this.isDraggingNode = true;
             this.dragNode = wrap;
@@ -756,13 +758,14 @@ class CanvasEngine {
         wrap.querySelector('.node-card').addEventListener('mousedown', (e) => {
             if (e.button !== 0) return;
             if (e.target.closest('.node-connector')
-                || e.target.closest('textarea, input, select, button, a, details, summary, [contenteditable]')
+                || e.target.closest('textarea, input, select, button, a, details, summary, video, audio, [contenteditable]')
                 || e.target.closest('.node-action-row') || e.target.closest('.video-props-tab')
                 || e.target.closest('.video-tool-btn') || e.target.closest('.image-props-tools')
                 || e.target.closest('.model-selector') || e.target.closest('.director-actor')
                 || e.target.closest('.director-shot-chip')) return;
             e.preventDefault();
             e.stopPropagation();
+            if (this.onReferenceNodePick?.(id, e)) return;
             if (this._toggleSelectionGesture(id, e)) return;
             this.isDraggingNode = true;
             this.dragNode = wrap;
@@ -776,7 +779,8 @@ class CanvasEngine {
 
         // Select
         wrap.addEventListener('mousedown', (e) => {
-            if (e.button !== 0 || e.target.closest('.node-connector') || this.isDraggingNode) return;
+            if (e.button !== 0 || e.target.closest('.node-connector,video,audio') || this.isDraggingNode) return;
+            if (!e.target.closest('textarea,input,select,button,a,[contenteditable]') && this.onReferenceNodePick?.(id, e)) { e.preventDefault(); e.stopPropagation(); return; }
             if (!e.target.closest('textarea, input, select, button, a, [contenteditable]')
                 && this._toggleSelectionGesture(id, e)) return;
             if (!this.selectedNodeIds.has(id)) this._selectNode(id);
@@ -1048,7 +1052,9 @@ class CanvasEngine {
                 <div class="generation-editor-footer video-props-footer">
                     <div class="video-model-info">
                         <svg class="model-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H3v-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V3h4v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>
-                        <span data-generation-model-label>默认视频 API</span>
+                        <button type="button" class="canvas-model-trigger" data-generation-popover="spec" data-generation-model-trigger aria-expanded="false" aria-haspopup="dialog" title="选择视频模型">
+                            <span data-generation-model-label>待选择模型</span>${window.UltimateCanvasIcons('ChevronDown')}
+                        </button>
                     </div>
                     <div class="generation-summary-row">
                         <button type="button" class="generation-summary-button" data-generation-popover="mode" aria-expanded="false">
@@ -1059,7 +1065,7 @@ class CanvasEngine {
                         </button>
                     </div>
                     <div class="video-footer-right">
-                        <span class="cost-label" data-generation-cost>后台计费</span>
+                        <button type="button" class="cost-label" data-generation-cost title="重新读取当前模型报价">报价待确认</button>
                         <button class="submit-btn" data-generation-submit title="生成视频">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
                         </button>
@@ -1339,9 +1345,9 @@ class CanvasEngine {
     }
 
     _selectDragNodes(id) {
-        const groupId = this.nodes.get(id)?.data?.canvasGroup?.id;
-        const ids = groupId ? [...this.nodes.values()].filter(node => node.data?.canvasGroup?.id === groupId).map(node => node.id)
-            : this.selectedNodeIds.has(id) ? this.getSelectedNodeIds() : [id];
+        const selected = this.selectedNodeIds.has(id) ? this.getSelectedNodeIds() : [id];
+        const groups = new Set(selected.map(key => this.nodes.get(key)?.data?.canvasGroup?.id).filter(Boolean));
+        const ids = [...new Set([...selected, ...[...this.nodes.values()].filter(node => groups.has(node.data?.canvasGroup?.id)).map(node => node.id)])];
         this.selectNodes(ids, id);
         this.dragNodeStarts = new Map(ids.map(key => [key, { x: this.nodes.get(key).x, y: this.nodes.get(key).y }]));
     }
@@ -1595,8 +1601,8 @@ class CanvasEngine {
             m.innerHTML = `
                 ${['text', 'script'].includes(this.nodes.get(nodeId)?.type) ? '<div class="context-menu-item" data-action="split-plans" data-nid="' + nodeId + '">拆分视频方案</div><div class="context-menu-divider"></div>' : ''}
                 <div class="context-menu-item" data-action="dup" data-nid="${nodeId}">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                    复制节点</div>
+                    ${window.UltimateCanvasIcons('Copy')}
+                    创建副本</div>
                 <div class="context-menu-divider"></div>
                 <div class="context-menu-item danger" data-action="del" data-nid="${nodeId}">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -1618,7 +1624,7 @@ class CanvasEngine {
             const cy = (y - rect.top - this.offsetY)/this.scale;
             if (a==='del') this.deleteNode(nid);
             else if (a==='split-plans') this.onPlanSplit?.(nid);
-            else if (a==='dup') { const d = this.nodes.get(nid); if(d) this.addNode(d.type,d.x+30,d.y+30); }
+            else if (a==='dup') this.onDuplicateNode?.(nid);
             else if (a==='add-text') this.addNode('text',cx,cy);
             else if (a==='add-image') this.addNode('image',cx,cy);
             else if (a==='add-video') this.addNode('video',cx,cy);

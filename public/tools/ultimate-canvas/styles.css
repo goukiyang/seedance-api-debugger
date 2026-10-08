@@ -1,5 +1,5 @@
 /* ============================================
-   无线画布 – Faithful Replica Styles
+   无限画布 – Faithful Replica Styles
    ============================================ */
 
 :root {
@@ -1859,6 +1859,18 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
 }
 .video-model-info:hover { background: var(--bg-hover); }
 .video-model-info .model-icon { color: var(--accent-blue); }
+.video-model-info .canvas-model-trigger {
+    display: inline-flex; align-items: center; gap: 4px; min-width: 0; min-height: 32px;
+    padding: 4px; border: 0; border-radius: 4px; background: transparent; color: inherit;
+    font: inherit; cursor: pointer; text-align: left;
+}
+.canvas-model-trigger [data-generation-model-label] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.canvas-model-trigger svg { width: 12px; height: 12px; flex-shrink: 0; }
+.canvas-model-trigger:hover { background: var(--bg-hover); }
+.canvas-model-trigger:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.canvas-model-trigger[aria-disabled="true"] { opacity: .65; cursor: not-allowed; }
+.video-model-info button.canvas-node-credits { border: 0; background: transparent; color: inherit; padding: 4px; min-height: 32px; cursor: pointer; }
+.video-model-info button.canvas-node-credits:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
 .video-res-info {
     display: flex; align-items: center; gap: 4px;
     font-size: 14px; color: var(--text-tertiary);
@@ -4722,3 +4734,15 @@ body.canvas-document-busy #logo { pointer-events: none; }
     #canvas-context-controls .canvas-context-trigger { min-width: 0; }
     .canvas-document-title { max-width: 130px; }
 }
+/* Transient upload receipts are separate from durable canvas nodes. */
+.canvas-upload-tray { position: fixed; right: 16px; bottom: 48px; z-index: 1100; width: 360px; max-width: calc(100vw - 32px); max-height: 280px; overflow: auto; background: #202224; color: #f4f4f4; border: 1px solid #52565b; border-radius: 6px; padding: 8px; }
+.canvas-upload-row { display: grid; grid-template-columns: minmax(0, 1fr) 28px 28px; gap: 4px; padding: 6px 0; border-bottom: 1px solid #3e4246; }
+.canvas-upload-row > span { grid-column: 1; overflow-wrap: anywhere; font-size: 12px; }
+.canvas-upload-row > span:first-child { font-weight: 600; }
+.canvas-upload-row > button { width: 28px; height: 28px; grid-row: 1 / 3; border: 0; background: transparent; color: inherit; cursor: pointer; }
+.canvas-upload-row > button:first-of-type { grid-column: 2; }
+.canvas-upload-row > button:last-child { grid-column: 3; }
+.reference-preview-switch { position: absolute; left: 12px; bottom: 8px; min-width: 40px; height: 28px; border: 1px solid #666; border-radius: 4px; background: #f5f6f6; color: #222; font-size: 12px; cursor: pointer; }
+.canvas-media-error { padding: 8px; font-size: 12px; color: #e9b16c; }
+[data-media-retry] { width: 28px; height: 28px; border: 0; background: transparent; color: inherit; cursor: pointer; }
+.reference-preview-open { position: absolute; right: 8px; bottom: 8px; width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid #dfe3e6; border-radius: 4px; background: #fff; color: #48515b; }

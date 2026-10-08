@@ -1,4 +1,7 @@
 import { NextRequest } from 'next/server';
+import { assertCanvasPromptCompatibility } from '@/lib/canvas-prompt-compatibility';
+import { parseCanvasPromptMentions } from '@/lib/canvas-prompt-references';
+import { assertCanUseReferenceImage } from '@/lib/reference-albums/permissions';
 import { AuthError } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { resolveCanvasStudioReferenceUse } from '@/lib/canvas-studio-reference-use';
@@ -31,6 +34,7 @@ export async function POST(request: NextRequest) {
     const body = await readCanvasStyleJson(request);
     const context = parseCanvasStyleContext(body);
     await assertCanvasStyleContext(user, context);
+    await assertCanvasPromptCompatibility(user, context.documentId, context.nodeId, String(body.prompt || ''), body.promptMentions);
     if (!context.documentId || !context.nodeId || !validStudioModuleId(body.moduleId, user.id)
       || typeof body.requestId !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) throw new AuthError('图片任务归属或编号无效', 400);
     const doc = await prisma.canvasDocument.findUniqueOrThrow({ where: { id: context.documentId } });
@@ -48,6 +52,16 @@ export async function POST(request: NextRequest) {
       || quote.estimatedCredits !== body.maxEstimatedCost) throw new AuthError('价格或设置已变化，请重新核对；未派发新任务', 409);
     if (!Array.isArray(body.referenceImageIds) || body.referenceImageIds.length > 9) throw new AuthError('参考图数量无效', 400);
     const referenceImageIds = body.referenceImageIds as string[];
+    const mentions = parseCanvasPromptMentions(body.promptMentions);
+    const referenceAssets: Record<string, string> = {};
+    if (mentions) {
+      if (new Set(referenceImageIds).size !== referenceImageIds.length) throw new AuthError('绑定参考图重复，请重新选择', 400);
+      for (const id of referenceImageIds) {
+        const reference = await assertCanUseReferenceImage(user, id);
+        if (!reference.asset_id) throw new AuthError('绑定图片缺少持久原件，请重新选择', 400);
+        referenceAssets[id] = reference.asset_id;
+      }
+    }
     const uniqueReferences = Array.from((await resolveCanvasStudioReferenceUse(user, referenceImageIds)).keys());
     const referencePolicy = canvasImageReferencePolicy(uniqueReferences);
     validateStudioReferenceCounts(referencePolicy, uniqueReferences, 0, 0, true);
@@ -58,7 +72,8 @@ export async function POST(request: NextRequest) {
     const batchId = await submitStudioBatch(user.id, { requestId: body.requestId, moduleId: body.moduleId,
       revision: body.settingsRevision, prompt: body.prompt, count: Number(settings.count), referenceIds: uniqueReferences,
       draft: { referencePolicy }, maxEstimatedCost: body.maxEstimatedCost,
-      model: settings.model, quality: settings.quality, resolution: settings.resolution, aspectRatio: settings.ratio }, undefined, undefined, { user, referenceImageIds });
+      model: settings.model, quality: settings.quality, resolution: settings.resolution, aspectRatio: settings.ratio }, undefined, undefined, { user, referenceImageIds },
+      mentions ? { mentions, referenceAssets } : undefined);
     return canvasStyleJson({ batchId, moduleId: body.moduleId, count: Number(settings.count) }, 202);
   } catch (error) { return canvasStyleFailure(error, '提交结果未确认，请查询原图片请求，不要重新生成'); }
 }

@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '画布可选择普通或IP视频模型并核对点数；故事素材、逐镜绑定和故事板可编辑，单镜与整组生成需手动确认。本人原图的画布生图刷新后查询原任务。视频成功链路仍待核实。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '画布支持右键创建副本、@选择参考图片、拖入或粘贴素材；导入视频和参考预览可直接查看，多选移动与参考选择分开。生成仍需手动确认，结果未知时只查询原请求。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

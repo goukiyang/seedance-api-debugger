@@ -7,6 +7,7 @@ import { parseStoryMaterials, validateStoryDraft, composeStoryShot, separateStor
 import { canvasImageReferencePolicy } from '../src/lib/canvas-image-references';
 import { seedanceVideoDurationOptions, SEEDANCE_2_5_IP_MODEL_ID } from '../src/lib/provider/seedance-models';
 import { volcengineIpCapabilities } from '../src/lib/integrations/volcengine-ip-models';
+import { parseCanvasPromptMentions } from '../src/lib/canvas-prompt-references';
 
 const checks: string[] = [];
 const source = (file: string) => readFileSync(file, 'utf8');
@@ -382,6 +383,7 @@ async function main() {
     settingsRevision: 1, maxEstimatedCost: 5, prompt: '描述' };
   let submitted: any;
   const routeVm: any = { exports: {}, AuthError: Error, requireCanvasStyleUser: async () => ({ id: 'user', role: 'admin' }),
+    parseCanvasPromptMentions, assertCanvasPromptCompatibility: async (_: unknown, __: unknown, ___: unknown, ____: unknown, mentions: unknown) => { assert.equal(mentions, undefined); },
     readCanvasStyleJson: async () => body, parseCanvasStyleContext: (v: any) => v, assertCanvasStyleContext: async () => {}, validStudioModuleId: () => true,
     prisma: { canvasDocument: { findUniqueOrThrow: async () => ({ document_json: JSON.stringify({ canvas: { nodes: [{ id: 'node', type: 'image', data: { styleJob: { kind: 'ordinary', requestId: body.requestId, moduleId: body.moduleId, input: body } } }] } }) }) },
       imageStudioModule: { findFirst: async () => null } },

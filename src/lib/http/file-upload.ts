@@ -8,6 +8,9 @@ import {
 } from './upload-progress';
 
 export type { UploadProgressHandler, UploadProgressSnapshot };
+export class UploadNotAcceptedError extends Error {
+  constructor(message: string) { super(message); this.name = 'UploadNotAcceptedError'; }
+}
 
 const DEFAULT_UPLOAD_INVALID_JSON_MESSAGE = '素材上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
 const IMAGE_RAW_FALLBACK_MAX_SIZE_BYTES = 30 * 1024 * 1024;
@@ -454,6 +457,7 @@ async function uploadWithMultipart(
   context: UploadContext,
   invalidJsonMessage: string,
   onProgress?: UploadProgressHandler,
+  preserveUnknown = false,
 ): Promise<UploadedAssetPayload | null> {
   if (!shouldUseMultipartUpload(file)) return null;
 
@@ -486,7 +490,9 @@ async function uploadWithMultipart(
       '分块上传初始化接口',
       invalidJsonMessage,
     );
-    if (!startRes.ok) throw new Error(start.error || start.message || '分块上传初始化失败');
+    if (!startRes.ok) throw preserveUnknown && startRes.status >= 400 && startRes.status < 500
+      ? new UploadNotAcceptedError(start.error || start.message || '分块上传初始化被拒绝，原文件未发送')
+      : new Error(start.error || start.message || '分块上传初始化失败');
     if (start.reused === true && start.asset?.id) {
       notifyUploadProgress(onProgress, {
         phase: 'done',
@@ -555,7 +561,7 @@ async function uploadWithMultipart(
   try {
     await Promise.all(Array.from({ length: Math.min(MULTIPART_UPLOAD_CONCURRENCY, partCount) }, uploadNextPart));
   } catch (error) {
-    if (state && !shouldKeepMultipartResumeState(error)) {
+    if (state && !preserveUnknown && !shouldKeepMultipartResumeState(error)) {
       await abortMultipartUpload(state.uploadToken, invalidJsonMessage);
       clearMultipartResumeState(file, context.hash);
     }
@@ -592,11 +598,13 @@ async function uploadWithMultipart(
     invalidJsonMessage,
   );
   if (!completeRes.ok) {
+    if (preserveUnknown) throw new Error(complete.error || complete.message || '分块上传结果待确认，请查询原上传');
     await abortMultipartUpload(state.uploadToken, invalidJsonMessage);
     clearMultipartResumeState(file, context.hash);
     throw new Error(complete.error || complete.message || '分块上传完成登记失败');
   }
   if (!complete.asset?.id) {
+    if (preserveUnknown) throw new Error('分块上传结果未知，请查询原上传');
     await abortMultipartUpload(state.uploadToken, invalidJsonMessage);
     clearMultipartResumeState(file, context.hash);
     throw new Error('分块上传完成但没有返回素材 ID');
@@ -708,10 +716,11 @@ function putFileToStorage(
 
 export async function uploadFileToHistory(
   file: File,
-  options: { invalidJsonMessage?: string; fallbackToRaw?: boolean; onProgress?: UploadProgressHandler } = {},
+  options: { invalidJsonMessage?: string; fallbackToRaw?: boolean; onProgress?: UploadProgressHandler;
+    preserveUnknown?: boolean; beforeUpload?: (context: { hash: string; fileSize: number; mimeType: string }) => Promise<UploadedAssetPayload | null> } = {},
 ) {
   const invalidJsonMessage = options.invalidJsonMessage || DEFAULT_UPLOAD_INVALID_JSON_MESSAGE;
-  const fallbackToRaw = options.fallbackToRaw !== false;
+  const fallbackToRaw = options.preserveUnknown ? false : options.fallbackToRaw !== false;
   const onProgress = options.onProgress;
   let hash = '';
   let width: number | null = null;
@@ -752,7 +761,9 @@ export async function uploadFileToHistory(
     height,
     durationSeconds,
   };
-  const multipartAsset = await uploadWithMultipart(file, uploadContext, invalidJsonMessage, onProgress);
+  const restored = await options.beforeUpload?.({ hash, fileSize: file.size, mimeType: file.type });
+  if (restored?.id) return restored;
+  const multipartAsset = await uploadWithMultipart(file, uploadContext, invalidJsonMessage, onProgress, options.preserveUnknown);
   if (multipartAsset?.id) return multipartAsset;
 
   notifyUploadProgress(onProgress, {
@@ -788,6 +799,7 @@ export async function uploadFileToHistory(
   }
   if (!ticketRes.ok) {
     const message = ticket.error || ticket.message || '上传票据创建失败';
+    if (options.preserveUnknown && ticketRes.status >= 400 && ticketRes.status < 500) throw new UploadNotAcceptedError(message);
     if (ticketRes.status >= 500) {
       return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message, onProgress, uploadContext);
     }
@@ -824,6 +836,7 @@ export async function uploadFileToHistory(
     await putFileToStorage(ticket.uploadUrl, ticket.headers || {}, file, onProgress);
   } catch (error) {
     const message = error instanceof Error ? error.message : '上传到对象存储失败';
+    if (options.preserveUnknown) throw new Error(`${message}；原上传结果待确认，未切换链路重传`);
     return uploadWithServerProxyOrRawFallback(
       ticket,
       file,
@@ -865,7 +878,8 @@ export async function uploadFileToHistory(
     return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message, onProgress, uploadContext);
   }
   if (!completeRes.ok) {
-    throw new Error(complete.error || complete.message || '上传完成但入库失败，请重新上传。');
+    throw new Error(complete.error || complete.message || (options.preserveUnknown
+      ? '原上传登记结果待确认，请查询原上传；未重新发送文件' : '上传完成但入库失败，请重新上传。'));
   }
   if (!complete.asset?.id) throw new Error('上传完成但没有返回素材 ID');
   notifyUploadProgress(onProgress, {

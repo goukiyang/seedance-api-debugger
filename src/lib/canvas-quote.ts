@@ -45,7 +45,7 @@ export function parseCanvasQuoteInput(value: unknown): CanvasQuoteInput {
 
 // An estimate is not a wallet reservation, submission authorization, or payable quote.
 export async function getCanvasImageQuote(user: SessionUser, input: CanvasQuoteInput) {
-  assertInternalOnly(user, '外部账号无权使用无线画布。');
+  assertInternalOnly(user, '外部账号无权使用无限画布。');
   await assertCanGenerateInProject(user, input.project_id);
   const channels = await getImageGenerationChannels();
   const providerSettings = selectImageGenerationSettings(channels, input.model);

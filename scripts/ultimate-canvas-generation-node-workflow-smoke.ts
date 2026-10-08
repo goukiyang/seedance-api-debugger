@@ -122,6 +122,7 @@ assert.deepEqual(workflow.videoRequest({
   prompt: 'Slow camera move',
   referenceImageIds: ['first-frame', 'last-frame', 'ignored-frame'],
   settings: {
+    model: 'dreamina-seedance-2-0-260128',
     ratio: '9:16',
     duration: 6,
     resolution: '1080p',
@@ -134,6 +135,7 @@ assert.deepEqual(workflow.videoRequest({
   method: 'POST',
   payload: {
     prompt: 'Slow camera move',
+    model: 'dreamina-seedance-2-0-260128',
     generation_mode: 'first_last_frame',
     ratio: '9:16',
     duration: 6,
@@ -153,6 +155,7 @@ assert.deepEqual(workflow.videoRequest({
     source_request_id: 'ultimate_canvas:node-1:request-1',
     source_metadata: {
       source: 'ultimate_canvas',
+      provider: 'seedance',
       canvas_document_id: 'document-1',
       canvas_node_id: 'node-1',
       video_branch_id: 'branch-1',
@@ -210,6 +213,7 @@ assert.deepEqual(workflow.normalizeVideoCreate({
   taskId: 'task-1',
   providerTaskId: 'provider-1',
   status: 'submitted',
+  submissionUnconfirmed: false,
   frozenCost: 135,
 });
 
@@ -221,6 +225,7 @@ assert.deepEqual(workflow.normalizeVideoStatus({
 }), {
   taskId: 'task-1',
   status: 'succeeded',
+  submissionUnconfirmed: false,
   errorMessage: '',
   resultVideoUrl: '/uploads/video.mp4',
   resultLastFrameUrl: '/uploads/last.png',
@@ -254,7 +259,8 @@ contains(engineSource, 'data-generation-popover="spec"', 'nodes expose the speci
 contains(engineSource, 'data-generation-settings="image"', 'image specification trigger identifies its panel');
 contains(engineSource, 'data-generation-settings="video"', 'video specification trigger identifies its panel');
 excludes(engineSource, 'data-video-mode=', 'video modes are not permanently rendered in nodes');
-contains(engineSource, '后台计费', 'fake fixed point labels are removed');
+contains(engineSource, '报价待确认', 'initial price is unknown, not a fabricated fixed point label');
+assert.match(engineSource, /<button[^>]+data-generation-cost/, 'quote retry remains an independent native control');
 excludes(engineSource, '<span>智记</span>', 'old inert smart-note button removed');
 excludes(engineSource, '<span>角色库</span>', 'old inert character-library button removed');
 excludes(engineSource, '<span>高端</span>', 'old inert premium button removed');
@@ -273,8 +279,8 @@ contains(appSource, 'function generationChoiceGroup', 'specification choices ren
 contains(appSource, 'function generationDurationSlider', 'video duration setting renders as a compact slider');
 contains(appSource, 'data-generation-setting-choice', 'tile settings expose one event target');
 contains(appSource, 'data-generation-duration-slider', 'duration slider exposes one event target');
-contains(appSource, "const allowed = new Set(['ratio', 'resolution', 'count'])", 'image settings stay allowlisted');
-contains(appSource, "const allowed = new Set(['ratio', 'duration', 'resolution', 'generateAudio', 'returnLastFrame', 'watermark'])", 'video settings stay allowlisted');
+contains(appSource, "const allowed = new Set(['ratio', 'resolution', 'count', 'quality'])", 'image settings retain M13 quality allowlist');
+contains(appSource, "const allowed = new Set(['model', 'ratio', 'duration', 'resolution', 'generateAudio', 'returnLastFrame', 'watermark'])", 'video settings retain M13 model allowlist');
 contains(appSource, 'function updateGenerationNodeModelLabel', 'new nodes receive the backend model label');
 contains(appSource, 'pendingGenerationReferenceTargetId', 'asset selection targets a generation node');
 contains(appSource, 'referenceTarget.x - 720', 'selected reference nodes do not cover their target');
@@ -310,9 +316,9 @@ assert.match(
   /capabilities\.video\?\.message\s*\|\|\s*window\.UltimateCanvasBackendContract\.SAFE_UNAVAILABLE_MESSAGE/,
 );
 
-assert.match(indexSource, /styles\.css\?v=20260924-canvas-parallel-ports/);
-assert.match(indexSource, /canvas-engine\.js\?v=20260924-canvas-parallel-ports/);
-assert.match(indexSource, /generation-node-workflow\.js\?v=20260813-video-delivery/);
-assert.match(indexSource, /app\.js\?v=20260924-canvas-parallel/);
+assert.match(indexSource, /styles\.css\?v=[^"\s]+/);
+assert.match(indexSource, /canvas-engine\.js\?v=[^"\s]+/);
+assert.match(indexSource, /generation-node-workflow\.js\?v=[^"\s]+/);
+assert.match(indexSource, /app\.js\?v=[^"\s]+/);
 
 console.log('ultimate-canvas-generation-node-workflow-smoke passed');

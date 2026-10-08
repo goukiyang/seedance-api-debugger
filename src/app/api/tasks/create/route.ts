@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { compileCanvasVideoPrompt } from '@/lib/canvas-video-prompt';
+import { assertCanvasPromptCompatibility } from '@/lib/canvas-prompt-compatibility';
+import { parseCanvasPromptMentions, compileCanvasPromptReferences, CanvasPromptReferenceError } from '@/lib/canvas-prompt-references';
 import { resolveImageInputUrls } from '@/lib/assets/original-image-input';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import path from 'path';
@@ -858,6 +861,14 @@ export async function POST(request: NextRequest) {
     ].filter((value): value is string => typeof value === 'string' && Boolean(value.trim())).map(value => value.trim()));
     if (canvasDocumentIds.size > 1) throw new AuthError('画布归属信息不一致', 400);
     for (const canvasDocumentId of Array.from(canvasDocumentIds)) await assertCanEditCanvasDocument(user, canvasDocumentId, project.id);
+    for (const canvasDocumentId of Array.from(canvasDocumentIds)) await assertCanvasPromptCompatibility(user, canvasDocumentId,
+      cleanSourceMetadata(body.source_metadata).canvas_node_id || body.canvas_node_id || null, body.prompt, body.promptMentions);
+    if (body.promptMentions != null) {
+      if (canvasDocumentIds.size !== 1 || body.client_name !== 'ultimate_canvas') throw new AuthError('图片绑定仅用于合法画布请求', 400);
+      try { compileCanvasPromptReferences({ prompt: body.prompt, promptMentions: body.promptMentions, referenceImageIds: body.reference_image_ids ?? [] }); } catch (error) {
+        if (error instanceof CanvasPromptReferenceError) throw new AuthError(error.message, 400); throw error;
+      }
+    }
   } catch (error) {
     if (error instanceof AuthError) return errorJson(error.message, error.status);
     throw error;
@@ -1000,6 +1011,7 @@ export async function POST(request: NextRequest) {
     : [];
   const fingerprintPayload = {
     prompt: body.prompt.trim(),
+    ...(body.promptMentions != null ? { canvasPromptMentions: parseCanvasPromptMentions(body.promptMentions) } : {}),
     provider: requestedProvider,
     model: selectedModel,
     generationMode,
@@ -1106,7 +1118,7 @@ export async function POST(request: NextRequest) {
   const clientName = cleanClientName(body.client_name);
   const isUltimateCanvasRequest = clientName === 'ultimate_canvas'
     || cleanedSourceMetadata.source === 'ultimate_canvas';
-  const effectiveSourceLabel = isUltimateCanvasRequest ? '无线画布' : requestSource.source_label;
+  const effectiveSourceLabel = isUltimateCanvasRequest ? '无限画布' : requestSource.source_label;
   const sourceMetadata: Record<string, unknown> = {
     ...requestSource.source_metadata,
     ...cleanedSourceMetadata,
@@ -1529,14 +1541,22 @@ export async function POST(request: NextRequest) {
   }
 
   // --- Prompt validation + rendering ---
-  const promptValidation = await validatePromptReferences(body.prompt, workspaceId);
+  const hasCanvasBindings = body.promptMentions != null && new RegExp('@图[0-9]+(?![\\p{N}A-Za-z_])', 'u').test(body.prompt);
+  const promptValidation = hasCanvasBindings ? { valid: true, missing: [] } : await validatePromptReferences(body.prompt, workspaceId);
   if (!promptValidation.valid) {
     return NextResponse.json(
       { error: 'PROMPT_REFERENCE_ERROR', message: `prompt 中引用的图号不存在: ${promptValidation.missing.join(', ')}` },
       { status: 400 },
     );
   }
-  const { promptRendered, assetMapping } = await renderPromptWithAssets(body.prompt, workspaceId, generationMode);
+  let promptRendered: string, assetMapping: Record<string, string>;
+  try {
+    const rendered = hasCanvasBindings
+      ? await compileCanvasVideoPrompt(user, body.prompt, body.promptMentions, generationReferenceImageIds, preparedImages, finalReferenceImageUrls)
+      : await renderPromptWithAssets(body.prompt, workspaceId, generationMode);
+    ({ promptRendered, assetMapping } = rendered);
+    if ('canvasPromptFingerprint' in rendered) sourceMetadata.canvas_prompt_fingerprint = rendered.canvasPromptFingerprint;
+  } catch (error) { if (error instanceof AuthError) return errorJson(error.message, error.status); throw error; }
 
   // --- Build provider input ---
   const seed = body.seed ?? -1;

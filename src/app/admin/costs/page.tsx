@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import type { Prisma } from '@prisma/client';
+import { CANVAS_PRODUCT_NAME, CANVAS_SOURCE_LABELS, canvasSourceJsonMarkers, isCanvasSource } from '@/lib/canvas-source';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { getCostLedgerAuditSummary } from '@/lib/costs/audit';
@@ -22,8 +23,8 @@ import ProviderBalancePanel from './ProviderBalancePanel';
 export const dynamic = 'force-dynamic';
 
 const COST_SOURCE_FILTERS = [
-  { value: 'all', label: '全部来源', hint: '所有网页、外部 API 和无线画布任务' },
-  { value: 'ultimate_canvas', label: '无线画布', hint: '只看新无线画布产生的任务成本' },
+  { value: 'all', label: '全部来源', hint: '所有网页、外部 API 和无限画布任务' },
+  { value: 'ultimate_canvas', label: '无限画布', hint: '只看新无限画布产生的任务成本' },
   { value: 'web', label: '普通网页', hint: '普通生成页和站内页面任务' },
   { value: 'codex_api', label: '外部 API', hint: '外部接入接口创建的任务' },
 ] as const;
@@ -197,8 +198,8 @@ function taskSourceInfo(task: TaskSourceFields | null | undefined): SourceInfo {
   const source = typeof metadata?.source === 'string' ? metadata.source : '';
   const sourceLabel = typeof metadata?.source_label === 'string' ? metadata.source_label : '';
 
-  if (source === 'ultimate_canvas' || task.source_label === '无线画布') {
-    return { key: 'ultimate_canvas', label: sourceLabel || task.source_label || '无线画布' };
+  if (isCanvasSource(source, sourceLabel, task.source_label)) {
+    return { key: 'ultimate_canvas', label: CANVAS_PRODUCT_NAME };
   }
   if (task.source_type === 'codex_api') {
     return { key: 'codex_api', label: task.source_label || '外部 API' };
@@ -220,9 +221,8 @@ function SourceBadge({ source }: { source: SourceInfo }) {
 function ultimateCanvasTaskWhere(): Prisma.VideoTaskWhereInput {
   return {
     OR: [
-      { source_label: '无线画布' },
-      { source_metadata_json: { contains: '"source":"ultimate_canvas"' } },
-      { source_metadata_json: { contains: '"source": "ultimate_canvas"' } },
+      { source_label: { in: [...CANVAS_SOURCE_LABELS] } },
+      ...canvasSourceJsonMarkers().map(contains => ({ source_metadata_json: { contains } })),
     ],
   };
 }
@@ -491,7 +491,7 @@ export default async function AdminCostsPage({
         <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
           <div>
             <h2 className="section-title mb-0">来源筛选</h2>
-            <p className="text-gray text-sm mt-2">当前成本页按任务来源查看待处理队列和最近总账，方便核对无线画布、外部 API 和普通网页是否进入同一套账本。</p>
+            <p className="text-gray text-sm mt-2">当前成本页按任务来源查看待处理队列和最近总账，方便核对无限画布、外部 API 和普通网页是否进入同一套账本。</p>
           </div>
           <Link className="btn btn-secondary" href={sourcePointsHref(sourceFilter)}>
             查看同来源点数流水
@@ -775,7 +775,7 @@ export default async function AdminCostsPage({
         <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
           <div>
             <h2 className="section-title mb-0">最近总账</h2>
-            <p className="text-gray text-sm mt-2">按上方来源筛选后的成本账本；“无线画布”会直接从关联任务的来源 metadata 中识别。</p>
+            <p className="text-gray text-sm mt-2">按上方来源筛选后的成本账本；“无限画布”会直接从关联任务的来源 metadata 中识别。</p>
           </div>
           <span className="text-gray text-sm">{selectedSourceFilterLabel(sourceFilter)}</span>
         </div>

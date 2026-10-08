@@ -176,7 +176,7 @@
                     count: style.count, payload, state: 'submitting',
                     input: { ...context, nodeId: node.id, moduleId: style.moduleId,
                         settingsRevision: style.settingsRevision, moduleRevision: style.moduleRevision,
-                        prompt: resolvedPrompt, referenceImageIds: payload.referenceImageIds || [],
+                        prompt: resolvedPrompt, ...(payload.promptMentions ? { promptMentions: payload.promptMentions } : {}), referenceImageIds: payload.referenceImageIds || [],
                         settings: { model: style.model, quality: style.quality, resolution: style.resolution,
                             count: style.count, ratio: style.aspectRatio } }
                 };
@@ -237,6 +237,7 @@
                 payload, state: 'unconfirmed' };
             job.input = { projectId: context.projectId, cardId: context.cardId, documentId: context.documentId,
                 nodeId: node.id, requestId: job.requestId, moduleId: job.moduleId, prompt: resolvedPrompt,
+                ...(payload.promptMentions ? { promptMentions: payload.promptMentions } : {}),
                 settingsRevision: quote.revision, maxEstimatedCost: quote.estimatedCredits,
                 referenceImageIds: payload.referenceImageIds || [], settings: { model: settings.model,
                     quality: settings.quality, resolution: settings.resolution, ratio: settings.requestedRatio || settings.ratio, count: settings.count } };

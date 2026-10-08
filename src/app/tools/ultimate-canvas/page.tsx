@@ -21,7 +21,7 @@ export default async function UltimateCanvasPage({ searchParams }: { searchParam
 
   return (
     <main className="ultimate-canvas-page">
-      <section className="ultimate-canvas-frame-shell" aria-label="无线画布工具">
+      <section className="ultimate-canvas-frame-shell" aria-label="无限画布工具">
         <CanvasFrame documentId={documentId} focusNodeId={focusNodeId} />
       </section>
     </main>

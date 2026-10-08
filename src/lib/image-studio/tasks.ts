@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { compileCanvasPromptReferences, parseCanvasPromptMentions } from '@/lib/canvas-prompt-references';
 import { bindModuleContextVersion, MODULE_CONTEXT_VERSION_RULE, snapshotModuleContextVersion, withContextVersionRetry } from './context-version';
 import type { ImageStudioTask, Prisma } from '@prisma/client';
 import { studioDeliveryStatus } from './delivery';
@@ -138,8 +139,9 @@ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] 
   catch { throw new StudioError('历史固定参考图快照无效', 409); }
 }
 
-export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void> }, canvasUse?: { user: SessionUser; referenceImageIds: string[] }) {
+export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void> }, canvasUse?: { user: SessionUser; referenceImageIds: string[] }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }) {
   const input = parseStudioRequest(body);
+  const rawCanvasPrompt = input.prompt;
   const moduleId = body.moduleId;
   const sheet = Boolean(avatar && isAvatarSheet(avatar));
   if (avatar && (moduleId !== undefined || input.draft !== undefined || input.reproduceFromTaskId || (sheet ? input.count !== 1 || input.aspectRatio !== '1:1' : avatar.candidates.length !== input.count))) throw new StudioError('人物任务排版无效或继承了模板设置');
@@ -147,7 +149,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   if (moduleId !== undefined && !validStudioModuleId(moduleId, ownerId)) throw new StudioError('模块编号无效');
   const batchId = createHash('sha256').update(`${ownerId}:${input.requestId}`).digest('hex');
   if (canvasUse && (canvasUse.user.id !== ownerId || avatar || preparation)) throw new StudioError('画布参考图请求归属无效', 403);
-  const fingerprint = createHash('sha256').update(JSON.stringify({ ...input, requestId: undefined, ...(moduleId ? { moduleId } : {}), ...(canvasUse ? { canvasReferenceImageIds: canvasUse.referenceImageIds } : {}), ...(avatar ? { avatar: avatar.candidates, ...(sheet ? { avatarLayout: avatar!.layout } : {}) } : {}) })).digest('hex');
+  const fingerprint = createHash('sha256').update(JSON.stringify({ ...input, requestId: undefined, ...(moduleId ? { moduleId } : {}), ...(canvasUse ? { canvasReferenceImageIds: canvasUse.referenceImageIds } : {}), ...(canvasPrompt ? { canvasPromptMentions: parseCanvasPromptMentions(canvasPrompt.mentions), canvasPromptAssets: canvasPrompt.referenceAssets } : {}), ...(avatar ? { avatar: avatar.candidates, ...(sheet ? { avatarLayout: avatar!.layout } : {}) } : {}) })).digest('hex');
   const previous = await prisma.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
   if (previous) {
     if (previous.fingerprint !== fingerprint) throw new StudioError('提交编号已用于其他请求，请重新提交', 409);
@@ -383,6 +385,14 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       select: { id: true, owner_id: true, original_url: true, thumbnail_url: true, file_name: true, mime_type: true, width: true, height: true, file_size: true, hash: true } });
     const referencesById = new Map(references.map(reference => [reference.id, reference]));
     if (orderedReferenceIds.some(id => !referencesById.has(id))) throw new StudioError('固定参考图或本次参考图已不可用，或当前账号无权使用', 403);
+    let canvasPromptFingerprint: string | undefined;
+    if (canvasPrompt) {
+      const pairs = Object.entries(canvasPrompt.referenceAssets);
+      if (new Set(pairs.map(([, assetId]) => assetId)).size !== pairs.length) throw new StudioError('多张绑定图片指向同一原件，请重新选择明确的参考图', 400);
+      const actualIds = orderedReferenceIds.map(assetId => pairs.find(([, id]) => id === assetId)?.[0] || `canvas-original-${assetId}`);
+      const compiled = compileCanvasPromptReferences({ prompt: rawCanvasPrompt, promptMentions: canvasPrompt.mentions, referenceImageIds: actualIds });
+      input.prompt = compiled.prompt; canvasPromptFingerprint = compiled.fingerprint;
+    }
     if (reproduceFromTaskId && references.some(ref => actualFixedIds.includes(ref.id) && !freshlySelectedStyleIds.has(ref.id) && ref.owner_id !== (historicalReferenceOwners[ref.id] || ownerId))) throw new StudioError('历史参考图归属已变化，请重新选择风格组或模板', 403);
     const referenceSnapshot = referenceDescriptors.map(referenceDescriptor => {
       const id = referenceDescriptor.id;
@@ -412,6 +422,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const snapshot = JSON.stringify({
       version: 1,
       requestId: input.requestId, batchId, inputFingerprint: fingerprint,
+      ...(canvasPrompt ? { canvasPromptMentions: parseCanvasPromptMentions(canvasPrompt.mentions), canvasPromptFingerprint } : {}),
       referenceImages: referenceSnapshot,
       fixedReferenceImages: fixedReferenceSnapshot,
       templateFixedCount: actualTemplateFixedReferences.length,

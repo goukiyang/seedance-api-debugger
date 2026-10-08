@@ -8,9 +8,11 @@ import { useProductDialog } from '@/components/useProductDialog';
 import type { ContentKey } from '@/lib/content-reactions/types';
 import { ResourceLibraryPicker } from '@/components/ResourceLibraryPicker';
 import { useAppSession } from '@/lib/context/AppSessionContext';
-import { uploadFileAsAsset } from '@/lib/http/file-upload';
+import { uploadFileAsAsset, UploadNotAcceptedError } from '@/lib/http/file-upload';
 import { readJsonResponse } from '@/lib/http/json-response';
 import type { PickerItem } from '@/lib/assets/picker-types';
+import { PromptMentionPopover, type PromptMentionCandidate } from '@/components/PromptMentionPopover';
+import { detectMentionAtCursor, replaceMentionRange } from '@/lib/prompt/mention';
 import { cancelPageExit, getPageExitRisk, registerPageExitRisk, runApprovedPageExit, type PageExitRisk } from '@/lib/hooks/page-exit-guard';
 
 type CanvasMediaPreview = {
@@ -21,8 +23,42 @@ type CanvasMediaPreview = {
 };
 type ReferenceRequest = { requestId: string; userId: string; nodeId: string; documentId: string | null;
   projectId: string | null; cardId: string | null; capacity: number; currentReferenceImageIds: string[]; currentAssetIds: string[] };
-type ReferenceChild = Window & { UltimateCanvasReferenceContextMatches?: (requestId: string) => boolean };
+type ReferenceChild = Window & { UltimateCanvasReferenceContextMatches?: (requestId: string) => boolean;
+  UltimateCanvasMentionContextMatches?: (requestId: string) => boolean;
+  UltimateCanvasUploadContextMatches?: (requestId: string) => boolean };
+type MentionRequest = { requestId: string; prompt: string; cursor: number; candidates: PromptMentionCandidate[]; left: number; top: number };
+type UploadRequest = { requestId: string; userId: string; documentId: string; projectId: string; cardId: string;
+  files: Array<{ file: File; nodeId: string }> };
 const validId = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(value);
+
+async function uploadCanvasOriginal(file: File, context: Omit<UploadRequest, 'files'>,
+  matches: () => boolean, onProgress?: NonNullable<Parameters<typeof uploadFileAsAsset>[1]>['onProgress']) {
+  let markerKey = '';
+  try {
+    const asset = await uploadFileAsAsset(file, { preserveUnknown: true, fallbackToRaw: false, onProgress,
+      beforeUpload: async identity => {
+        if (!matches()) throw new Error('画布或账号已变化，未开始上传');
+        markerKey = `sd2_canvas_upload:${context.userId}:${context.projectId}:${context.cardId}:${context.documentId}:${identity.hash}`;
+        if (localStorage.getItem(markerKey)) {
+          const query = new URLSearchParams({ canvas_document_id: context.documentId, project_id: context.projectId,
+            video_card_id: context.cardId, hash: identity.hash, file_size: String(identity.fileSize), mime_type: identity.mimeType });
+          const response = await fetch(`/api/tools/ultimate-canvas/upload?${query}`, { credentials: 'same-origin' });
+          const result = await readJsonResponse<{ found?: boolean; asset?: { id?: string }; error?: string }>(response);
+          if (!matches()) throw new Error('画布或账号已变化，未关联素材');
+          if (!response.ok || !result.found || !validId(result.asset?.id)) throw new Error(result.error || '原上传结果仍未知，未重新上传；请稍后查询原请求');
+          return result.asset!;
+        }
+        localStorage.setItem(markerKey, JSON.stringify({ requestId: context.requestId, ...identity }));
+        return null;
+      } });
+    if (!matches()) throw new Error('画布或账号已变化，原素材保留，未写回旧画布');
+    if (!validId(asset.id)) throw new Error('原上传尚未返回素材编号，未关联');
+    return { asset, markerKey };
+  } catch (error) {
+    if (error instanceof UploadNotAcceptedError && markerKey) localStorage.removeItem(markerKey);
+    throw error;
+  }
+}
 
 export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: string; focusNodeId?: string }) {
   const frame = useRef<HTMLIFrameElement>(null);
@@ -34,6 +70,74 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
   const [styleGalleryOpen, setStyleGalleryOpen] = useState(false);
   const { user } = useAppSession();
   const userId = useRef(user?.id); userId.current = user?.id;
+  const [mention, setMention] = useState<MentionRequest | null>(null);
+  const mentionRef = useRef(mention); mentionRef.current = mention;
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const mentionIndexRef = useRef(mentionIndex); mentionIndexRef.current = mentionIndex;
+  const uploads = useRef(new Set<string>());
+  const closeMention = useCallback(() => {
+    const request = mentionRef.current;
+    if (request) frame.current?.contentWindow?.postMessage({ type: 'sd2-canvas-mention-cancel', requestId: request.requestId }, location.origin);
+    mentionRef.current = null; setMention(null);
+  }, []);
+  const selectMention = useCallback((candidate: PromptMentionCandidate) => {
+    const request = mentionRef.current;
+    if (!request || !(frame.current?.contentWindow as ReferenceChild | null)?.UltimateCanvasMentionContextMatches?.(request.requestId)) { closeMention(); return; }
+    if (candidate.type === 'source') {
+      frame.current?.contentWindow?.postMessage({ type: 'sd2-canvas-mention-library', requestId: request.requestId }, location.origin);
+      closeMention(); return;
+    }
+    if (candidate.type !== 'image' || !validId(candidate.referenceImageId)) return;
+    const range = detectMentionAtCursor(request.prompt, request.cursor);
+    if (!range) { closeMention(); return; }
+    const replacement = replaceMentionRange(request.prompt, range, candidate.token);
+    frame.current?.contentWindow?.postMessage({ type: 'sd2-canvas-mention-apply', requestId: request.requestId,
+      referenceImageId: candidate.referenceImageId, token: candidate.token, prompt: replacement.next, cursor: replacement.cursor }, location.origin);
+    mentionRef.current = null; setMention(null);
+  }, [closeMention]);
+  const runUploads = useCallback(async (request: UploadRequest) => {
+    if (uploads.current.has(request.requestId)) return;
+    uploads.current.add(request.requestId);
+    const matches = () => request.userId === userId.current
+      && Boolean((frame.current?.contentWindow as ReferenceChild | null)?.UltimateCanvasUploadContextMatches?.(request.requestId));
+    const send = (value: object) => frame.current?.contentWindow?.postMessage({ type: 'sd2-canvas-upload-receipt', requestId: request.requestId, ...value }, location.origin);
+    for (const entry of request.files) {
+      if (!matches()) {
+        send({ nodeId: entry.nodeId, success: false, error: '画布或账号已变化，未写回旧画布；原素材保留' });
+        break;
+      }
+      let markerKey = '';
+      let assetId: string | undefined;
+      try {
+        const original = await uploadCanvasOriginal(entry.file, request, matches,
+          progress => { if (matches()) send({ nodeId: entry.nodeId, progress }); });
+        const asset = original.asset; markerKey = original.markerKey;
+        assetId = asset.id;
+        if (!matches()) throw new Error('画布或账号已变化，原素材保留，未写回旧画布');
+        const response = await fetch('/api/tools/ultimate-canvas/upload', { method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request_id: request.requestId, asset_id: asset.id,
+            project_id: request.projectId, video_card_id: request.cardId, canvas_document_id: request.documentId, canvas_node_id: entry.nodeId }) });
+        const result = await readJsonResponse<{ success?: boolean; error?: string }>(response);
+        if (!response.ok || !result.success) throw new Error(result.error || '原件已上传，关联尚未确认；重试只恢复关联');
+        if (!matches()) throw new Error('画布或账号已变化，未写回旧画布');
+        send({ nodeId: entry.nodeId, success: true, result });
+        if (markerKey) localStorage.removeItem(markerKey);
+      } catch (error) {
+        send({ nodeId: entry.nodeId, success: false, ...(matches() ? { assetId } : {}),
+          error: !matches() ? '画布或账号已变化，未写回旧画布；原素材保留'
+            : error instanceof Error ? error.message : '上传尚未确认，原文件未重传' });
+      }
+    }
+    if (matches()) send({ finished: true });
+    uploads.current.delete(request.requestId);
+  }, []);
+  useEffect(() => {
+    const outside = (event: PointerEvent) => { if (!(event.target as Element)?.closest?.('.prompt-mention-popover')) closeMention(); };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape' && mentionRef.current) { event.preventDefault(); closeMention(); } };
+    document.addEventListener('pointerdown', outside); document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
+  }, [closeMention]);
+  useEffect(() => { closeMention(); }, [user?.id, closeMention]);
   // Empty canvases still receive confirmed changes from other tabs.
   useEffect(() => { if (user?.id) installChannel(); }, [user?.id]);
   const [referenceRequest, setReferenceRequest] = useState<ReferenceRequest | null>(null);
@@ -79,6 +183,7 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
         resolve: () => { clearTimeout(timer); resolve(); }, reject: error => { clearTimeout(timer); reject(error); } };
       frame.current?.contentWindow?.postMessage({ type: 'sd2-canvas-reference-apply', requestId: request.requestId, references }, location.origin);
     });
+    currentReferenceRequest.current = null; setReferenceRequest(null);
   };
   const { confirm, productDialog } = useProductDialog();
   useEffect(() => {
@@ -126,6 +231,43 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
     };
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin || event.source !== frame.current?.contentWindow) return;
+      const value = event.data;
+      if (value?.type === 'sd2-canvas-upload-request') {
+        if (!validId(value.requestId) || value.userId !== userId.current || ![value.documentId, value.projectId, value.cardId].every(validId)
+          || !Array.isArray(value.files) || value.files.length !== 1
+          || !value.files.every((entry: { file?: unknown; nodeId?: unknown }) => entry.file instanceof File && validId(entry.nodeId))
+          || !(frame.current?.contentWindow as ReferenceChild | null)?.UltimateCanvasUploadContextMatches?.(value.requestId)) return;
+        void runUploads(value); return;
+      }
+      if (value?.type === 'sd2-canvas-mention-request') {
+        if (!validId(value.requestId) || value.userId !== userId.current || !validId(value.nodeId)
+          || ![value.documentId, value.projectId, value.cardId].every(id => id === null || validId(id))
+          || typeof value.prompt !== 'string' || value.prompt.length > 30000
+          || !Number.isInteger(value.cursor) || !detectMentionAtCursor(value.prompt, value.cursor)
+          || !Array.isArray(value.candidates) || value.candidates.length > 80
+          || !(frame.current?.contentWindow as ReferenceChild | null)?.UltimateCanvasMentionContextMatches?.(value.requestId)) { closeMention(); return; }
+        const range = detectMentionAtCursor(value.prompt, value.cursor)!;
+        const candidates: PromptMentionCandidate[] = value.candidates.filter((item: { referenceImageId?: unknown; token?: unknown; title?: unknown }) =>
+          validId(item.referenceImageId) && typeof item.token === 'string' && /^@图[1-9]\d*$/.test(item.token) && typeof item.title === 'string')
+          .filter((item: { title: string; token: string }) => !range.query || `${item.title} ${item.token}`.toLowerCase().includes(range.query.toLowerCase()))
+          .map((item: { referenceImageId: string; token: string; title: string }) => ({ id: item.referenceImageId, type: 'image' as const,
+            referenceImageId: item.referenceImageId, token: item.token, label: item.token, title: item.title.slice(0, 240),
+            thumbnailUrl: `/api/reference-images/${encodeURIComponent(item.referenceImageId)}/content?variant=thumbnail` }));
+        candidates.push({ id: 'canvas-album', type: 'source', source: 'album', label: '素材库' });
+        const rect = frame.current?.getBoundingClientRect();
+        const request: MentionRequest = { requestId: value.requestId, prompt: value.prompt, cursor: value.cursor, candidates,
+          left: Math.max(8, Math.min(window.innerWidth - 328, (rect?.left || 0) + (Number(value.left) || 0))),
+          top: Math.max(8, Math.min(window.innerHeight - 300, (rect?.top || 0) + (Number(value.top) || 0))) };
+        mentionRef.current = request; setMention(request); setMentionIndex(0); return;
+      }
+      if (value?.type === 'sd2-canvas-mention-key' && value.requestId === mentionRef.current?.requestId) {
+        const current = mentionRef.current;
+        if (value.key === 'Escape') closeMention();
+        else if (current && value.key === 'Enter') selectMention(current.candidates[mentionIndexRef.current]);
+        else if (current && ['ArrowDown', 'ArrowUp'].includes(value.key)) setMentionIndex(index => (index + (value.key === 'ArrowDown' ? 1 : -1) + current.candidates.length) % current.candidates.length);
+        return;
+      }
+      if (value?.type === 'sd2-canvas-mention-invalidated') { closeMention(); return; }
       if (event.data?.type === 'sd2-canvas-reactions-changed') {
         if (typeof event.data !== 'object' || Array.isArray(event.data)) return;
         const { key, userId: owner } = event.data;
@@ -303,19 +445,29 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
       navigation?.removeEventListener('navigateerror', clearApproval);
       navigation?.removeEventListener('navigatesuccess', clearApproval);
     };
-  }, [confirm, closeReferencePicker]);
+  }, [confirm, closeReferencePicker, closeMention, selectMention, runUploads]);
   return <>
-    <iframe ref={frame} title="无线画布" src={`/tools/ultimate-canvas/index.html${initialDocumentId.current ? `?document_id=${encodeURIComponent(initialDocumentId.current)}` : ''}${initialFocusNodeId.current ? `${initialDocumentId.current ? '&' : '?'}focus_node=${encodeURIComponent(initialFocusNodeId.current)}` : ''}`} className="ultimate-canvas-frame" referrerPolicy="no-referrer" allow="fullscreen"
-      onLoad={() => { setStyleGalleryOpen(false); closeReferencePicker(); }}
+    <iframe ref={frame} title="无限画布" src={`/tools/ultimate-canvas/index.html${initialDocumentId.current ? `?document_id=${encodeURIComponent(initialDocumentId.current)}` : ''}${initialFocusNodeId.current ? `${initialDocumentId.current ? '&' : '?'}focus_node=${encodeURIComponent(initialFocusNodeId.current)}` : ''}`} className="ultimate-canvas-frame" referrerPolicy="no-referrer" allow="fullscreen"
+      onLoad={() => { setStyleGalleryOpen(false); closeReferencePicker(); closeMention(); }}
       style={styleGalleryOpen ? { position: 'fixed', inset: 0, width: '100vw', height: '100dvh', zIndex: 10000, borderRadius: 0 } : undefined} />
     <CanvasReactions frame={frame} />
+    {mention && <div onPointerDown={event => event.stopPropagation()} style={{ position: 'fixed', left: mention.left, top: mention.top,
+      width: 320, maxWidth: 'calc(100vw - 16px)', zIndex: 10005 }}>
+      <PromptMentionPopover candidates={mention.candidates} activeIndex={mentionIndex}
+        onActiveIndexChange={setMentionIndex} onSelect={selectMention} />
+    </div>}
     {referenceRequest && referenceRequest.userId === user?.id && <ResourceLibraryPicker key={referenceRequest.requestId}
       open imageOnly target="workspace" title="添加参考图" confirmLabel="添加到参考区"
       purpose={`canvas-reference:${referenceRequest.documentId || 'unsaved'}:${referenceRequest.nodeId}`}
       maxSelection={referenceRequest.capacity} currentCount={referenceRequest.currentReferenceImageIds.length}
       currentAssetIds={referenceRequest.currentAssetIds} currentReferenceImageIds={referenceRequest.currentReferenceImageIds}
       onClose={closeReferencePicker}
-      onUploadFile={async (file, onProgress) => { if (!referenceContextMatches(referenceRequest)) throw new Error('参考目标已改变，请重新打开'); return uploadFileAsAsset(file, { onProgress }); }}
+      onUploadFile={async (file, onProgress) => {
+        if (!referenceContextMatches(referenceRequest) || !referenceRequest.documentId || !referenceRequest.projectId || !referenceRequest.cardId) throw new Error('参考目标已改变，请重新打开');
+        const original = await uploadCanvasOriginal(file, { ...referenceRequest, documentId: referenceRequest.documentId,
+          projectId: referenceRequest.projectId, cardId: referenceRequest.cardId }, () => referenceContextMatches(referenceRequest), onProgress);
+        return original.asset;
+      }}
       onConfirm={async () => false} onConfirmSelection={applyReferences} />}
     {productDialog}
     {preview && (

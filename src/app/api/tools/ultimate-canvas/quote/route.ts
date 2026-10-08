@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) throw new AuthError('未登录', 401);
-    assertInternalOnly(user, '外部账号无权使用无线画布。');
+    assertInternalOnly(user, '外部账号无权使用无限画布。');
     const input = parseCanvasQuoteInput(await readInput(request));
     return NextResponse.json(await getCanvasImageQuote(user, input), { headers });
   } catch (error) {

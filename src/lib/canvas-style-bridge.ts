@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { CanvasPromptReferenceError } from '@/lib/canvas-prompt-references';
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession, type SessionUser } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
@@ -41,7 +42,7 @@ export const canvasStyleJson = (value: unknown, status = 200) =>
 export async function requireCanvasStyleUser(): Promise<SessionUser> {
   const user = await getSession();
   if (!user) throw new AuthError('未登录', 401);
-  assertInternalOnly(user, '外部账号无权使用无线画布风格库。');
+  assertInternalOnly(user, '外部账号无权使用无限画布风格库。');
   if (!canUseCompanyTemplates(user)) throw new AuthError('仅限公司飞书账号使用画布风格库', 403);
   return user;
 }
@@ -132,6 +133,7 @@ export function canvasStyleBatchId(ownerId: string, requestId: string) {
 }
 
 export function canvasStyleFailure(error: unknown, fallback: string) {
+  if (error instanceof CanvasPromptReferenceError) return canvasStyleJson({ error: error.code, message: error.message }, 400);
   if (error instanceof SyntaxError) return canvasStyleJson({ error: '请求内容不是有效 JSON' }, 400);
   if (error instanceof AuthError) return canvasStyleJson({ error: error.message }, error.status);
   if (error instanceof StudioModuleError || error instanceof StudioError || error instanceof StudioStyleError

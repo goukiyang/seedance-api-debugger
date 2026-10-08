@@ -263,7 +263,8 @@ async function main() {
     appSource.indexOf('function requestCanvasConfirmation'),
   );
   assert.ok(appSource.includes('createGenerationSubmissionTracker'), 'app uses transient submission ownership');
-  assert.ok(appSource.includes('recoverTasklessNonterminalVideoNode'), 'hydrate uses executable legacy recovery');
+  assert.ok(hydrateSource.includes("node.data.generationStatus = 'unconfirmed'"), 'taskless nonterminal legacy state retains true unknown barrier');
+  assert.ok(hydrateSource.includes('node.data.videoSubmissionLegacy = true'), 'taskless legacy state is marked for original-request recovery, not automatic resubmit');
   assert.ok(appSource.includes("scheduleCanvasSave('recover_taskless_video_status')"), 'recovery persists through the save queue');
   assert.ok(hydrateSource.includes('return recoveredTasklessVideoStatus;'), 'hydrate reports whether durable recovery occurred');
   assert.ok(!submitSource.includes('return recoveredTasklessVideoStatus;'), 'submission does not leak hydration state');

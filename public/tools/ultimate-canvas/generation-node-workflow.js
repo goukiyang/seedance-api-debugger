@@ -48,6 +48,14 @@
         return { ...value };
     }
 
+    function requestReferenceIds(input, maximum) {
+        if (input.promptMentions == null) return uniqueStrings(input.referenceImageIds, maximum);
+        const values = input.referenceImageIds || [];
+        if (!Array.isArray(values) || values.length > maximum || values.some(id => typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(id))) throw new Error('绑定参考图清单无效或超限，请重新选择。');
+        if (new Set(values).size !== values.length) throw new Error('绑定参考图重复，未改变首尾角色或发送顺序，请重新选择。');
+        return values.slice();
+    }
+
     function videoMode(mode, referenceLimit = 9) {
         const value = VIDEO_MODES[mode] || VIDEO_MODES['text-to-video'];
         return { ...value, maximumReferences: value.maximumReferences === 9 && Number.isInteger(referenceLimit) && referenceLimit > 0 && referenceLimit <= 30 ? referenceLimit : value.maximumReferences };
@@ -120,13 +128,14 @@
                 action: mode.action,
                 input: {
                     prompt,
+                    ...(input.promptMentions ? { promptMentions: input.promptMentions } : {}),
                     ...(clean(settings.model) ? { model: clean(settings.model) } : {}),
                     ...(clean(settings.quality) ? { quality: clean(settings.quality) } : {}),
                     ratio: clean(settings.requestedRatio) || (IMAGE_RATIOS.has(clean(settings.ratio)) ? clean(settings.ratio) : '16:9'),
                     size: clean(settings.size) || '1K',
                     ...(clean(settings.resolution) ? { resolution: clean(settings.resolution) } : {}),
                     count: Math.max(1, Math.floor(Number(settings.count) || 1)),
-                    reference_image_ids: uniqueStrings(input.referenceImageIds, 10),
+                    reference_image_ids: requestReferenceIds(input, 10),
                     mode: IMAGE_MODES[input.mode] ? input.mode : 'text-to-image'
                 }
             }
@@ -148,6 +157,7 @@
             method: 'POST',
             payload: {
                 prompt,
+                ...(input.promptMentions ? { promptMentions: input.promptMentions } : {}),
                 model: clean(settings.model),
                 ...(Number.isFinite(settings.maxEstimatedCost) ? { max_estimated_cost: settings.maxEstimatedCost } : {}),
                 generation_mode: mode.generationMode,
@@ -161,7 +171,7 @@
                 project_id: clean(input.projectId),
                 video_card_id: clean(input.cardId),
                 video_branch_id: clean(input.branchId),
-                reference_image_ids: uniqueStrings(input.referenceImageIds, mode.maximumReferences),
+                reference_image_ids: requestReferenceIds(input, mode.maximumReferences),
                 idempotency_key: `${nodeId}:${requestId}`,
                 final_prompt_snapshot: prompt,
                 prompt_user_edited: input.promptUserEdited !== false,

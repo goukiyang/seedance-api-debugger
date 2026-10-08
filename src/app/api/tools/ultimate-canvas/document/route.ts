@@ -25,7 +25,7 @@ function failure(error: unknown) {
 async function session() {
   const user = await getSession();
   if (!user) throw new AuthError('未登录', 401);
-  assertInternalOnly(user, '外部账号无权使用无线画布。');
+  assertInternalOnly(user, '外部账号无权使用无限画布。');
   return user;
 }
 

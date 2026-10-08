@@ -175,7 +175,7 @@ export async function assertCanEditCanvasDocument(user: SessionUser, documentId:
 /** Generation callers must pass write: true and their resolved projectId. */
 export async function assertCanAccessCanvasDocument(user: SessionUser, documentId: string,
   options: { write?: boolean; projectId?: string | null } = {}) {
-  assertInternalOnly(user, '外部账号无权使用无线画布。');
+  assertInternalOnly(user, '外部账号无权使用无限画布。');
   const document = await prisma.canvasDocument.findUnique({ where: { id: documentId } });
   await assertDocument(user, document, options.write ?? false);
   if (options.projectId !== undefined && options.projectId !== document!.project_id) {
@@ -382,7 +382,7 @@ function meaningfulContent(raw: string) {
 // Duplication copies configuration, not output history, private previews or live tasks.
 function duplicateSnapshot(snapshot: Snapshot): Snapshot {
   const configKeys = new Set(['title', 'prompt', 'authoredText', 'description', 'context', 'savedContext', 'contextRules',
-    'mode', 'imageSettings', 'videoSettings', 'settings', 'model', 'textModel', 'quality', 'ratio', 'size', 'resolution',
+    'mode', 'imageSettings', 'videoSettings', 'settings', 'model', 'provider', 'promptMentions', 'textModel', 'quality', 'ratio', 'size', 'resolution',
     'count', 'duration', 'cameraPresets', 'templateId', 'template_id', 'templateVersion', 'moduleId', 'module_id',
     'source', 'executionMode', 'inputSource', 'retryCount', 'outputMode', 'canvasStyle',
     'planSource', 'planReferences', 'planParameterSource', 'videoCardId', 'videoBranchId', 'storyWorkflow', 'storySource', 'canvasGroup']);
@@ -505,7 +505,7 @@ function conflict(document: CanvasDocument): never {
 }
 
 export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue, method: 'POST' | 'PATCH') {
-  assertInternalOnly(user, '外部账号无权使用无线画布。');
+  assertInternalOnly(user, '外部账号无权使用无限画布。');
   checkJson(body);
   const documentId = string(body.document_id ?? body.documentId);
   const projectSpecified = body.project_id !== undefined || body.projectId !== undefined;

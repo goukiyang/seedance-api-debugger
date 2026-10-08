@@ -70,7 +70,7 @@ export const topbarQuickItems: NavItem[] = [
   { label: '模板工作台', href: '/template-studio', match: ['/template-studio', '/templates', '/template-generate'], prefixMatch: true, externalHidden: true },
   { label: '资产', href: '/assets', match: ['/assets'], prefixMatch: true },
   { label: 'IP生成', href: '/generate/ip', match: ['/generate/ip'], prefixMatch: true },
-  { label: '无线画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'], prefixMatch: true, externalHidden: true },
+  { label: '无限画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'], prefixMatch: true, externalHidden: true },
   { label: '工具', href: '/tools/avatar-studio', match: ['/cutout', '/tools/avatar-studio'], prefixMatch: true },
   { label: '管理中心', href: '/admin', match: ['/admin'], prefixMatch: true, adminOnly: true },
 ];
@@ -85,7 +85,7 @@ export const userNavGroups: NavGroup[] = [
       { label: '视频超分', href: '/generate/enhance', match: ['/generate/enhance'], prefixMatch: true, adminOnly: true },
       { label: '模板生成', href: '/template-generate', prefixMatch: true, externalHidden: true },
       { label: '动画模板', href: '/templates', prefixMatch: true, externalHidden: true },
-      { label: '无线画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'], externalHidden: true },
+      { label: '无限画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'], externalHidden: true },
       ...(showLegacyVideoWorkbenchEntry
         ? [{ label: '视频工作台', href: '/workbench', prefixMatch: true }]
         : []),

@@ -4,6 +4,8 @@ import fs from 'fs';
 import path from 'path';
 import { AuthError, getSession, type SessionUser } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
+import { assertCanvasPromptCompatibility } from '@/lib/canvas-prompt-compatibility';
+import { compileCanvasPromptReferences, parseCanvasPromptMentions, validateCanvasBoundReferenceImageIds, CanvasPromptReferenceError } from '@/lib/canvas-prompt-references';
 import {
   createImageGeneration,
   getImageGenerationChannels,
@@ -273,6 +275,7 @@ async function writeGenerationAttemptLog(params: {
   workspaceId?: string;
   assetIds?: string[];
   referenceImageIds?: string[];
+  canvasPromptFingerprint?: string;
 }) {
   await prisma.operationLog.create({
     data: {
@@ -298,6 +301,7 @@ async function writeGenerationAttemptLog(params: {
         workspace_id: params.workspaceId || null,
         asset_ids: params.assetIds || [],
         reference_image_ids: params.referenceImageIds || [],
+        ...(params.canvasPromptFingerprint ? { canvas_prompt_fingerprint: params.canvasPromptFingerprint } : {}),
       }),
     },
   });
@@ -369,6 +373,7 @@ export async function POST(request: NextRequest) {
     }
 
     const input = normalizeInput(body.input);
+    await assertCanvasPromptCompatibility(user, canvasDocumentId, canvasNodeId, buildGenerationPrompt(body, input, action), input.promptMentions);
     if (inputTooLarge(input)) {
       return NextResponse.json({ error: '图形生成输入过长，请减少节点、参考图或提示词内容' }, { status: 400 });
     }
@@ -387,7 +392,12 @@ export async function POST(request: NextRequest) {
     const referenceLimit = settings.provider === 'seedream'
       ? SEEDREAM_REFERENCE_IMAGE_LIMIT
       : DEFAULT_REFERENCE_IMAGE_LIMIT;
-    const referenceImageIds = normalizeStringList(input.reference_image_ids || input.referenceImageIds, referenceLimit);
+    const rawReferenceImageIds = input.reference_image_ids || input.referenceImageIds || [];
+    const mentions = parseCanvasPromptMentions(input.promptMentions);
+    if (mentions && (!canvasDocumentId || !canvasNodeId)) throw new AuthError('图片绑定仅用于合法画布请求', 400);
+    const referenceImageIds = mentions ? validateCanvasBoundReferenceImageIds(rawReferenceImageIds)
+      : normalizeStringList(rawReferenceImageIds, referenceLimit);
+    if (mentions && referenceImageIds.length > referenceLimit) throw new AuthError('绑定参考图超过限制，请重新选择', 400);
     const referenceImages: AuthorizedReferenceImage[] = [];
     for (const referenceImageId of referenceImageIds) {
       referenceImages.push(await assertCanUseReferenceImage(user, referenceImageId));
@@ -415,7 +425,10 @@ export async function POST(request: NextRequest) {
       }, { status: 503 });
     }
 
-    const prompt = buildGenerationPrompt(body, input, action);
+    const rawPrompt = buildGenerationPrompt(body, input, action);
+    if (mentions && referenceInputs.length !== referenceImageIds.length) throw new AuthError('实际原件与绑定清单不一致，请重新选择', 400);
+    const compiled = mentions ? compileCanvasPromptReferences({ prompt: rawPrompt, promptMentions: mentions, referenceImageIds }) : null;
+    const prompt = compiled?.prompt ?? rawPrompt;
     if (!prompt) return NextResponse.json({ error: '图形生成提示词不能为空' }, { status: 400 });
 
     const count = normalizeCount(
@@ -529,6 +542,7 @@ export async function POST(request: NextRequest) {
       workspaceId,
       assetIds: generatedAssets.map((asset) => asset.assetId),
       referenceImageIds: generatedAssets.map((asset) => asset.referenceImageId),
+      canvasPromptFingerprint: compiled?.fingerprint,
     });
 
     return NextResponse.json({
@@ -551,6 +565,7 @@ export async function POST(request: NextRequest) {
       output_format: settings.output_format,
       response_format: settings.response_format,
       reference_image_count: referenceImageIds.length,
+      ...(compiled ? { canvas_prompt_fingerprint: compiled.fingerprint } : {}),
       workspaceId,
       assets: generatedAssets,
       asset_id: generatedAssets[0]?.assetId || null,
@@ -558,6 +573,7 @@ export async function POST(request: NextRequest) {
       workspace_asset_id: generatedAssets[0]?.workspaceAssetId || null,
     });
   } catch (error) {
+    if (error instanceof CanvasPromptReferenceError) return NextResponse.json({ error: error.code, message: error.message }, { status: 400 });
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }

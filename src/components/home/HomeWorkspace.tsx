@@ -296,7 +296,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin }: { 
       {internal && <section className={styles.canvasSection} aria-labelledby="home-canvas-title">
         <Link href="/tools/ultimate-canvas" className={styles.canvas}>
           <span className={styles.canvasIcon}><Network size={28} strokeWidth={1.7} aria-hidden="true" /></span>
-          <h2 id="home-canvas-title">无线画布</h2>
+          <h2 id="home-canvas-title">无限画布</h2>
           <span className={styles.canvasAction}>打开画布<ArrowRight size={17} aria-hidden="true" /></span>
         </Link>
       </section>}
