@@ -555,9 +555,10 @@ export async function getVideoTaskStatus(
       try {
         data = JSON.parse(responseText);
       } catch {
-        throw new Error(`Invalid JSON response: ${responseText.slice(0, 200)}`);
+        throw new Error(`Invalid JSON response: ${String(redactInlineImageTransport(responseText)).slice(0, 200)}`);
       }
     }
+    data = redactInlineImageTransport(data) as Record<string, unknown>;
 
     console.log(`[Status] HTTP Status: ${response.status}`);
     console.log(`[Status] Response:`, JSON.stringify(redactProviderResponseForLog(data), null, 2));
@@ -669,9 +670,10 @@ export async function getVideoTaskStatusByClientRequestId(
     try {
       data = JSON.parse(responseText);
     } catch {
-      throw new Error(`Seedance 查询返回非 JSON 响应：${responseText.slice(0, 200)}`);
+      throw new Error(`Seedance 查询返回非 JSON 响应：${String(redactInlineImageTransport(responseText)).slice(0, 200)}`);
     }
   }
+  data = redactInlineImageTransport(data) as Record<string, unknown>;
   if (!response.ok) {
     throw new Error(`Seedance 按 clientRequestId 查询失败（HTTP ${response.status}）`);
   }

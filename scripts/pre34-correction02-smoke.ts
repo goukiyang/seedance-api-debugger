@@ -8,8 +8,8 @@ import { seedanceLocalReferenceTransport } from '../src/lib/provider/reference-i
 import type { PickerItem } from '../src/lib/assets/picker-types';
 import type { CreateVideoInput } from '../src/types';
 import { STUDIO_TEXT_MODELS, isStudioTextModel } from '../src/lib/template-studio/text-models';
-import { buildContentArray, buildSeedanceVideoPayload, redactInlineImageTransport } from '../src/lib/provider/jimeng';
-import { normalizeProviderErrorMessage } from '../src/lib/provider/error-message';
+import { buildContentArray, buildSeedanceVideoPayload, redactInlineImageTransport, buildProviderHttpErrorStatus, mapProviderStatus } from '../src/lib/provider/jimeng';
+import { normalizeProviderErrorMessage, providerFailureUserMessage } from '../src/lib/provider/error-message';
 
 function actual(file: string, names: string[]) {
   const source = readFileSync(file, 'utf8');
@@ -108,6 +108,17 @@ async function originalTransport() {
   });
   assert.equal(providerCalls, 2, 'offline provider boundary only; no automatic retry');
   assert.ok(!output.join('\n').includes(bytes.toString('base64')), 'provider log cannot contain echoed inline originals');
+  providerContext.buildProviderHttpErrorStatus = buildProviderHttpErrorStatus;
+  providerContext.mapProviderStatus = mapProviderStatus; providerContext.providerFailureUserMessage = providerFailureUserMessage;
+  providerContext.fetch = async () => new Response(JSON.stringify({ id: 'provider-fixture', status: 'failed',
+    echoedInput: content, error: { code: 'InvalidParameter', message: `content[1].image_url ${patch.reference_image_base64_data![0]}` } }), { status: 200 });
+  runInNewContext(actual('src/lib/provider/jimeng.ts', ['pickNumber', 'pickString', 'maskVideoUrl', 'redactProviderResponseForLog', 'getVideoTaskStatus', 'getVideoTaskStatusByClientRequestId']), providerContext);
+  for (const lookup of [providerContext.exports.getVideoTaskStatus, providerContext.exports.getVideoTaskStatusByClientRequestId]) {
+    const receipt = await lookup('provider-fixture');
+    assert.equal(receipt.local_status, 'failed');
+    assert.ok(!JSON.stringify(receipt).includes(bytes.toString('base64')), 'status/error raw receipt cannot persist echoed inline originals');
+  }
+  assert.ok(!output.join('\n').includes(bytes.toString('base64')), 'status logs cannot contain encoded originals');
   await assert.rejects(seedanceLocalReferenceTransport(input, [{ url, asset }], async () => Buffer.from('wrong bytes')), /不一致/);
   await assert.rejects(seedanceLocalReferenceTransport(input, [{ url, asset: { ...asset, file_size: 30_000_000 } }], read), /30MB/);
   const beforeOversize = reads;
