@@ -18,7 +18,12 @@ import { attachStoryVideo, type StoryCanvas as Snapshot } from './story-handoff'
 
 type Document = { id: string; owner_user_id: string; project_id: string; title: string; revision: number;
   status: string; updated_at: string; document_json: string };
-type TextRequest = { id: string; stage: 'script' | 'storyboard'; state: 'not_sent' | 'pending' | 'unconfirmed' | 'review'; raw?: string; message?: string };
+type TextRequest = { id: string; stage: 'script' | 'storyboard'; state: 'not_sent' | 'pending' | 'unconfirmed' | 'review' | 'rejected'; raw?: string; message?: string };
+function textRequestFailureState(cause: unknown, content: string): TextRequest['state'] {
+  if (content) return 'review';
+  const status = Number((cause as { status?: number })?.status);
+  return status >= 400 && status < 500 && ![408, 429].includes(status) ? 'rejected' : 'unconfirmed';
+}
 type ImageHandoff = { moduleId: string; prompt: string; state: 'not_sent' | 'pending' | 'ready' | 'unconfirmed' };
 type Work = { draft: StoryDraft; request?: TextRequest; images: Record<string, ImageHandoff>;
   references: Record<string, PickerItem>; mediaNodes: Record<string, string>;
@@ -244,7 +249,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed }
       validateStoryDraft(next.draft);
       change(next); await save(next); setNotice(stage === 'script' ? '完整剧本已保存' : '分镜已保存，请核对各镜头');
     } catch (cause) {
-      const next = { ...current.current, request: { ...pending.request!, state: content ? 'review' as const : 'unconfirmed' as const,
+      const next = { ...current.current, request: { ...pending.request!, state: textRequestFailureState(cause, content),
         raw: content || undefined, message: message(cause) } };
       change(next);
       try { await save(next); } catch { /* Local pending marker remains, without an automatic generation retry. */ }
@@ -356,7 +361,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed }
         <button disabled={blocked} onClick={() => void operate('保存草稿', async () => { await save(); setNotice('故事与分镜已保存'); })}><Save size={16} />{dirty || failedSave.current ? '保存草稿' : '已保存'}</button></div></header>
     <p role={error ? 'alert' : 'status'} className={`${styles.status} ${error ? styles.error : ''}`}>{error || busy || notice || (loading ? '正在读取故事' : !ready ? '请从画布选择故事节点打开' : '文字生成不扣本站点数；图视频生成在原工作区另行确认点数。')}</p>
     {conflict && <button disabled={Boolean(busy)} onClick={() => void operate('读取最新画布', reconcile)}><RefreshCw size={16} />读取最新画布并保留故事草稿</button>}
-    {work.request && <section className={styles.status}><strong>{work.request.state === 'review' ? '返回内容待核对' : work.request.state === 'not_sent' ? '文字请求未发出' : '文字结果未确认'}</strong><p>{work.request.message || '不会自动重发文字请求'}</p>
+    {work.request && <section className={styles.status}><strong>{work.request.state === 'review' ? '返回内容待核对' : work.request.state === 'rejected' ? '文字请求被拒绝' : work.request.state === 'not_sent' ? '文字请求未发出' : '文字结果未确认'}</strong><p>{work.request.message || '不会自动重发文字请求'}</p>
       {work.request.raw && <pre className={styles.raw}>{work.request.raw}</pre>}<button disabled={blocked} onClick={() => void operate('处理文字请求', dismissRequest)}>保留原稿并结束等待</button></section>}
     {ready && <><div className={styles.grid}><section className={styles.section}><h2>故事</h2>
       <label>故事内容<textarea className={styles.storyText} disabled={Boolean(busy)} value={work.draft.story} onChange={event => updateDraft({ story: event.target.value })} /></label>

@@ -170,7 +170,7 @@ export async function POST(request: NextRequest) {
   const requestedVideoCardId = cleanString(body.video_card_id || body.videoCardId) || null;
   const canvasDocumentId = cleanString(body.canvas_document_id || body.canvasDocumentId) || null;
 
-  if (user.role !== 'admin' && !requestedVideoCardId) {
+  if (user.role !== 'admin' && !requestedVideoCardId && !canvasDocumentId) {
     return NextResponse.json({ error: '请先选择项目和视频卡，再使用无线画布 LLM' }, { status: 400 });
   }
 
@@ -190,6 +190,19 @@ export async function POST(request: NextRequest) {
       await assertCanGenerateInVideoCard(user, project.id, videoCard.id);
       projectId = project.id;
       videoCardId = videoCard.id;
+    } catch (error) {
+      if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
+      throw error;
+    }
+  } else if (canvasDocumentId) {
+    try {
+      // Resolve the project from the editable document, never from a default project or a dummy video card.
+      const canvas = await assertCanEditCanvasDocument(user, canvasDocumentId);
+      if (requestedProjectId && requestedProjectId !== canvas.project_id) {
+        throw new AuthError('画布不属于当前项目', 400);
+      }
+      projectId = canvas.project_id;
+      if (projectId) await getProjectForGeneration(user, projectId);
     } catch (error) {
       if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
       throw error;

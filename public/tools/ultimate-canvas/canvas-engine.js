@@ -689,7 +689,11 @@ class CanvasEngine {
 
         const labelIcon = this._icon(type);
         const label = this._label(type, id);
-        const body = this._body(type, id);
+        const editableText = ['text', 'script'].includes(type) && (typeof nd.data?.authoredText === 'string'
+            ? nd.data.authoredText : !nd.data?.generatedText && nd.data?.prompt ? nd.data.prompt : null);
+        const body = editableText !== false && editableText !== null
+            ? `<div class="node-text-content" contenteditable="true" style="white-space:pre-wrap" data-placeholder="在这里输入你的故事...">${this._escapeHtml(editableText)}</div>`
+            : this._body(type, id);
         const generationBody = type === 'image' || type === 'video' ? `
             <div class="generation-quick-modes generation-empty-state" data-generation-quick-modes>
                 <div class="generation-empty-icon" aria-hidden="true">
@@ -732,7 +736,9 @@ class CanvasEngine {
         // Drag via label
         const lbl = wrap.querySelector('.node-label');
         lbl.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
             e.stopPropagation();
+            if (this._toggleSelectionGesture(id, e)) { e.preventDefault(); return; }
             this.isDraggingNode = true;
             this.dragNode = wrap;
             this.dragStartX = e.clientX;
@@ -754,6 +760,7 @@ class CanvasEngine {
                 || e.target.closest('.director-shot-chip')) return;
             e.preventDefault();
             e.stopPropagation();
+            if (this._toggleSelectionGesture(id, e)) return;
             this.isDraggingNode = true;
             this.dragNode = wrap;
             this.dragStartX = e.clientX;
@@ -766,7 +773,10 @@ class CanvasEngine {
 
         // Select
         wrap.addEventListener('mousedown', (e) => {
-            if (!e.target.closest('.node-connector') && !this.isDraggingNode) this._selectNode(id);
+            if (e.button !== 0 || e.target.closest('.node-connector') || this.isDraggingNode) return;
+            if (!e.target.closest('textarea, input, select, button, a, [contenteditable]')
+                && this._toggleSelectionGesture(id, e)) return;
+            if (!this.selectedNodeIds.has(id)) this._selectNode(id);
         });
 
         // Connectors
@@ -1331,6 +1341,13 @@ class CanvasEngine {
             : this.selectedNodeIds.has(id) ? this.getSelectedNodeIds() : [id];
         this.selectNodes(ids, id);
         this.dragNodeStarts = new Map(ids.map(key => [key, { x: this.nodes.get(key).x, y: this.nodes.get(key).y }]));
+    }
+
+    _toggleSelectionGesture(id, event) {
+        if (!event.shiftKey && !event.ctrlKey && !event.metaKey) return false;
+        const ids = this.getSelectedNodeIds();
+        this.selectNodes(ids.includes(id) ? ids.filter(key => key !== id) : [...ids, id], id);
+        return true;
     }
 
     selectNodes(nodeIds = [], primaryNodeId = null) {

@@ -163,7 +163,13 @@
             ['btn-copy-nodes', selected.length > 0], ['btn-group', selected.length > 1],
             ['btn-ungroup', selected.some(id => engine.nodes.get(id)?.data?.canvasGroup)]]) {
             const button = document.getElementById(id);
-            if (button) button.disabled = !allowed || !enabled;
+            if (button) {
+                button.disabled = !allowed || !enabled;
+                if (id === 'btn-copy-nodes' || id === 'btn-group') {
+                    const label = `${id === 'btn-copy-nodes' ? '复制选中节点' : '分组选中节点'}（${selected.length}）`;
+                    button.title = label; button.setAttribute('aria-label', label);
+                }
+            }
         }
         engine.nodes.forEach(node => {
             const el = document.querySelector(`[data-node-id="${CSS.escape(node.id)}"]`);
@@ -228,8 +234,8 @@
         sourceText: nodeId => {
             const node = engine.nodes.get(nodeId);
             const el = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
-            return el?.querySelector('.node-text-content')?.textContent
-                ?? node?.data?.generatedText ?? node?.data?.prompt ?? node?.data?.description ?? '';
+            return el?.querySelector('.node-text-content')?.innerText ?? el?.querySelector('.node-text-content')?.textContent
+                ?? node?.data?.authoredText ?? node?.data?.generatedText ?? node?.data?.prompt ?? node?.data?.description ?? '';
         },
         writable: () => canvasRuntime.documentWritable && !canvasRuntime.contextSwitching,
         bindings: node => {
@@ -2916,6 +2922,7 @@
                 getCurrentDocument: () => ({ id: canvasRuntime.documentId, project_id: canvasRuntime.selectedProjectId, title: canvasRuntime.documentTitle, revision: canvasRuntime.documentRevision }),
                 openDocument: openManagedDocument,
                 createDocument: createManagedDocument,
+                getReturnFocusTarget: () => document.querySelector('[data-canvas-library]'),
                 onInitialCancel: async () => {
                     const risk = window.UltimateCanvasGetExitRisk?.();
                     if (risk?.busy?.length || canvasRuntime.failedSaveRequest || canvasRuntime.saveConflict) {
@@ -2924,7 +2931,7 @@
                     }
                     // No document has been chosen: return to a real page, never create one on cancel.
                     window.top.location.assign('/');
-                    return { focusTarget: document.querySelector('[data-canvas-library-open]') };
+                    return { focusTarget: document.querySelector('[data-canvas-library]') };
                 },
                 beforeLeave: async () => {
                     return withDocumentOperation(async () => {
@@ -3043,11 +3050,15 @@
         const label = nodeEl.querySelector('.node-label')?.textContent?.trim() || '';
         const tabText = nodeEl.querySelector('[data-generation-mode-label]')?.textContent.trim() || activeTabText(nodeEl);
         const contextRules = contextRulesForNode(node);
+        const editor = ['text', 'script'].includes(node.type) ? nodeEl.querySelector('.node-text-content') : null;
+        const editableValue = editor?.innerText ?? editor?.textContent ?? '';
+        const authored = editor && (typeof node.data?.authoredText === 'string'
+            || !node.data?.generatedText || editableValue !== node.data.generatedText);
         node.data = {
             ...node.data,
             title: node.data?.title || label,
             prompt: ['text', 'script', 'video', 'image'].includes(node.type) ? prompt : prompt || node.data?.prompt || '',
-            ...(['text', 'script'].includes(node.type) && node.data?.generatedText !== undefined ? { generatedText: prompt } : {}),
+            ...(authored ? { authoredText: editableValue } : {}),
             contextRules,
             mode: node.type === 'video'
                 ? (generationModeMap[tabText] || node.data?.mode || 'text-to-video')
@@ -3278,17 +3289,9 @@
                 syncImageModeButtons(nodeEl, node.data?.mode || 'text-to-image');
                 if (node.data?.styleJob) void canvasStyles.resume(node.id);
             }
-            if ((node.type === 'text' || node.type === 'script') && node.data?.generatedText) {
-                applyTextGenerationResult(nodeEl, {
-                    nodeId: node.id,
-                    kind: node.type,
-                    prompt: node.data.prompt || ''
-                }, {
-                    title: node.data.title,
-                    text: node.data.generatedText,
-                    summary: node.data.generationSummary,
-                    status: node.data.generationStatus || 'succeeded'
-                });
+            if ((node.type === 'text' || node.type === 'script') && (typeof node.data?.authoredText === 'string'
+                || node.data?.generatedText || node.data?.prompt)) {
+                renderTextNodeBody(nodeEl, node);
                 return;
             }
             if (node.type === 'image' && (node.data?.previewImage || node.data?.thumbnailUrl)) {
@@ -4691,8 +4694,8 @@
     function collectNodePrompt(nodeEl, type) {
         if (type === 'video') return nodeEl.querySelector('.video-props-textarea')?.value ?? '';
         if (type === 'image') return textFrom(nodeEl, '.image-props-textarea');
-        return nodeEl.querySelector('.node-text-content')?.textContent
-            || textFrom(nodeEl, '.node-input-textarea');
+        return nodeEl.querySelector('.node-text-content')?.innerText ?? nodeEl.querySelector('.node-text-content')?.textContent
+            ?? textFrom(nodeEl, '.node-input-textarea');
     }
 
     function collectGenerationPayload(nodeEl) {
@@ -4737,7 +4740,7 @@
         const data = engine.nodes.get(payload.nodeId)?.data;
         if (data?.planSource || data?.storySource) return payload.prompt;
         const context = (payload.sourceNodes || []).filter(source => ['text', 'script'].includes(source.type))
-            .map(source => source.data?.generatedText || source.data?.prompt || source.data?.description || '')
+            .map(source => source.data?.authoredText ?? (source.data?.generatedText || source.data?.prompt || source.data?.description || ''))
             .filter(value => typeof value === 'string' && value.trim());
         return [payload.prompt, ...context].filter(Boolean).join('\n\n');
     }
@@ -4779,6 +4782,13 @@
         return (result?.text || result?.content || result?.message || '').trim();
     }
 
+    function renderTextNodeBody(nodeEl, node) {
+        const value = node.data?.authoredText ?? node.data?.generatedText ?? node.data?.prompt ?? '';
+        const body = nodeEl.querySelector('.node-body');
+        if (body) body.innerHTML = `<div class="node-text-content${typeof node.data?.authoredText !== 'string' && node.data?.generatedText ? ' generated-text-content' : ''}" contenteditable="true" style="white-space:pre-wrap"
+            data-placeholder="在这里输入你的故事...">${escapeHtml(value)}</div>`;
+    }
+
     function applyTextGenerationResult(nodeEl, payload, result) {
         const node = engine.nodes.get(payload.nodeId);
         const generatedText = generatedTextFromResult(result);
@@ -4791,14 +4801,12 @@
         const summary = result?.summary || generatedText.slice(0, 140);
         const body = nodeEl.querySelector('.node-body');
         if (body) {
-            body.innerHTML = `
-                <div class="node-text-content generated-text-content" contenteditable="true"
-                     data-placeholder="LLM 生成内容">
-                    ${escapeHtml(generatedText)}
-                </div>`;
+            body.innerHTML = `<div class="node-text-content generated-text-content" contenteditable="true"
+                data-placeholder="LLM 生成内容">${escapeHtml(generatedText)}</div>`;
         }
 
         if (node) {
+            delete node.data.authoredText;
             node.data = {
                 ...node.data,
                 title,
@@ -6902,12 +6910,8 @@
 
         switch (act) {
             case 'write':
-                // Replace body with editable text area
-                body.innerHTML = `
-                    <div class="node-text-content" contenteditable="true"
-                         style="outline:none; min-height:80px; cursor:text; padding:4px;"
-                         data-placeholder="在这里输入你的故事...">
-                    </div>`;
+                nd.data.authoredText = nd.data.authoredText ?? nd.data.generatedText ?? nd.data.prompt ?? '';
+                renderTextNodeBody(nodeEl, nd);
                 body.querySelector('.node-text-content').focus();
                 break;
             case 'txt2video':

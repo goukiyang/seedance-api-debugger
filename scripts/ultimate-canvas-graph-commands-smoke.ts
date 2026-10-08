@@ -208,6 +208,74 @@ function groupAndBoundedHistorySmoke() {
   assert.equal(commands.undo(), false, 'older history is trimmed at the bound');
 }
 
+function realPointerSelectionAndAuthoredCopySmoke() {
+  const engine: any = new FakeCanvasEngine();
+  const wraps = new Map<string, any>();
+  function element() {
+    const classes = new Set<string>(), listeners = new Map<string, Function>();
+    const result: any = { dataset: {}, style: {}, classList: { add: (key: string) => classes.add(key),
+      remove: (key: string) => classes.delete(key), contains: (key: string) => classes.has(key) },
+      addEventListener: (name: string, callback: Function) => listeners.set(name, callback),
+      fire: (name: string, event: any) => listeners.get(name)?.(event) };
+    Object.defineProperty(result, 'textContent', { set(value) {
+      result.innerHTML = String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    } });
+    const label: any = { ...result, fire: undefined }, card: any = { ...result, fire: undefined };
+    for (const child of [label, card]) {
+      const callbacks = new Map<string, Function>();
+      child.addEventListener = (name: string, callback: Function) => callbacks.set(name, callback);
+      child.fire = (name: string, event: any) => callbacks.get(name)?.(event);
+    }
+    result.querySelector = (selector: string) => selector === '.node-label' ? label : selector === '.node-card' ? card : null;
+    result.querySelectorAll = () => [];
+    return result;
+  }
+  engine.canvas = { querySelectorAll: () => Array.from(wraps.values()).filter(wrap => wrap.classList.contains('selected')),
+    querySelector: (selector: string) => wraps.get(/data-node-id="([^"]+)"/.exec(selector)?.[1] || '') };
+  for (const method of ['selectNodes', '_selectNode', '_deselectAll', '_toggleSelectionGesture', '_selectDragNodes', '_escapeHtml']) engine[method] = CanvasEngine.prototype[method];
+  engine._icon = () => ''; engine._label = () => '文本'; engine._body = () => ''; engine._propsPanel = () => '';
+  const oldDocument = globalThis.document, oldCss = globalThis.CSS, oldWindow = globalThis.window;
+  Object.assign(globalThis, { document: { createElement: element, querySelector: engine.canvas.querySelector },
+    CSS: { escape: (id: string) => id }, window: { UltimateCanvasIcons: () => '' } });
+  try {
+    for (const id of ['a', 'b']) {
+      const node = { id, type: 'text', x: 0, y: 0, data: { authoredText: `手写 ${id}`, prompt: `手写 ${id}`,
+        taskId: 'must-not-copy', generatedText: 'runtime output', generationStatus: 'succeeded', quote: { points: 99 } } };
+      engine.nodes.set(id, node); wraps.set(id, CanvasEngine.prototype._buildNode.call(engine, node));
+      assert.ok(wraps.get(id).innerHTML.includes(`手写 ${id}`), 'copied/reopened authored input renders in real node builder');
+    }
+    engine.connections = [{ from: 'a', to: 'b' }];
+    const pointer = (shiftKey = false) => ({ button: 0, shiftKey, clientX: 10, clientY: 10,
+      target: { closest: () => null }, stopPropagation() {}, preventDefault() {} });
+    wraps.get('a').querySelector('.node-label').fire('mousedown', pointer());
+    engine.isDraggingNode = false;
+    wraps.get('b').querySelector('.node-card').fire('mousedown', pointer(true));
+    assert.deepEqual(engine.getSelectedNodeIds(), ['a', 'b']);
+    assert.equal(engine.isDraggingNode, false, 'modifier selection is not a drag');
+    assert.ok(wraps.get('a').classList.contains('selected') && wraps.get('b').classList.contains('selected'));
+    const commands = createCanvasCommands(engine);
+    const copied = commands.duplicateSelection();
+    assert.equal(copied.createdIds.length, 2); assert.equal(engine.connections.length, 2);
+    const input = engine.nodes.get(copied.idMap.a).data;
+    assert.equal(input.authoredText, '手写 a'); assert.equal(input.generatedText, undefined);
+    assert.equal(input.taskId, undefined); assert.equal(input.quote, undefined);
+    engine.selectNodes(['a', 'b'], 'b');
+    assert.equal(groupSelected(engine, commands, { id: 'actual-pointer-group' }).ok, true);
+    assert.equal(ungroupSelected(engine, commands).ok, true);
+    const token = commands.begin('手写正文'); engine.nodes.get('a').data.authoredText = '新输入'; commands.commit(token);
+    engine.nodes.get('a').data.generatedText = 'fresh Provider result';
+    commands.undo(); assert.equal(engine.nodes.get('a').data.authoredText, '手写 a');
+    assert.equal(engine.nodes.get('a').data.generatedText, 'fresh Provider result');
+    commands.redo(); assert.equal(engine.nodes.get('a').data.authoredText, '新输入');
+    engine.selectNodes(['a', 'b'], 'b');
+    wraps.get('a').querySelector('.node-label').fire('mousedown', pointer());
+    assert.equal(engine.dragNodeStarts.size, 2, 'ordinary drag on selected node preserves multiple selected nodes');
+    engine.isDraggingNode = false;
+    wraps.get('b').fire('mousedown', pointer(true));
+    assert.deepEqual(engine.getSelectedNodeIds(), ['a'], 'wrapper modifier toggles, rather than resetting selection');
+  } finally { Object.assign(globalThis, { document: oldDocument, CSS: oldCss, window: oldWindow }); }
+}
+
 function typedEdgesAndMinimapSmoke() {
   const nodes = new Map([
     ['a', { id: 'a', type: 'flow-template' }],
@@ -257,6 +325,7 @@ function main() {
   assert.equal(moving.nodes.get('b').x, 240);
   assert.equal(moving.nodes.get('b').y, 85);
   selectionCopyAndHistorySmoke();
+  realPointerSelectionAndAuthoredCopySmoke();
   runtimeTruthAndRecoverySmoke();
   groupAndBoundedHistorySmoke();
   typedEdgesAndMinimapSmoke();

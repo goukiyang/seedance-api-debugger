@@ -17,7 +17,7 @@ const context = { module: { exports: null as unknown }, randomUUID,
 runInNewContext(compiled, context);
 const copy = context.module.exports as (value: unknown) => any;
 const original = { canvas: { viewport: {}, connections: [{ from: 'a', to: 'b' }], nodes: [
-  { id: 'a', type: 'script', x: 0, y: 0, data: { prompt: 'story', storyWorkflow: { version: 1, story: '完整原文' },
+  { id: 'a', type: 'script', x: 0, y: 0, data: { prompt: 'story', authoredText: '手写正文', storyWorkflow: { version: 1, story: '完整原文' },
     storyRequest: { state: 'unconfirmed' }, storyMediaNodes: { paid: 'b' }, canvasGroup: { id: 'old-group', name: '镜头组' } } },
   { id: 'b', type: 'video', x: 300, y: 0, data: { prompt: 'video', taskId: 'paid-task', generationStatus: 'succeeded',
     videoSubmission: { requestId: 'paid-request' }, storySource: { nodeId: 'a', shotId: 'shot-1', sourceRevision: 7 }, generationResult: { url: '/protected' }, canvasGroup: { id: 'old-group', name: '镜头组' } } },
@@ -27,6 +27,7 @@ assert.notEqual(result.canvas.nodes[0].id, 'a');
 assert.notEqual(result.canvas.nodes[0].data.canvasGroup.id, 'old-group');
 assert.equal(result.canvas.nodes[0].data.canvasGroup.id, result.canvas.nodes[1].data.canvasGroup.id);
 assert.equal(result.canvas.nodes[0].data.storyWorkflow.story, '完整原文');
+assert.equal(result.canvas.nodes[0].data.authoredText, '手写正文');
 assert.equal(result.canvas.nodes[0].data.storyRequest, undefined);
 assert.equal(result.canvas.nodes[0].data.storyMediaNodes, undefined);
 assert.equal(result.canvas.nodes[1].data.taskId, undefined);

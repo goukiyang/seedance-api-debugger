@@ -1048,7 +1048,8 @@
         document.body.classList.remove('canvas-library-open');
         backgroundInert.forEach((value, node) => { node.inert = value; });
         backgroundInert.clear();
-        const target = focusTarget?.isConnected ? focusTarget : previousFocus;
+        const target = focusTarget?.isConnected ? focusTarget
+            : previousFocus?.isConnected ? previousFocus : options.getReturnFocusTarget?.();
         if (target?.isConnected && !target.closest?.('[inert]') && !target.disabled) target.focus({ preventScroll: true });
         return true;
     }
