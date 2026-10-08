@@ -422,7 +422,7 @@ export async function advanceToolFlowRun(runId: string) {
     const nodeRuns = new Map(run.node_runs.map((item) => [item.node_id, item]));
     const creditUser = await tx.user.findUniqueOrThrow({
       where: { id: run.owner_id },
-      select: { id: true, role: true, account_type: true, user_profile: true, status: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true },
+      select: { id: true, role: true, account_type: true, user_profile: true, feature_profile_id: true, status: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true },
     });
     if (!canUseCompanyTemplates(creditUser)) throw new AuthError('仅限公司飞书账号使用工具流', 403);
     const existingWaiting = run.node_runs.find((item) => item.status === 'waiting_selection' || item.status === 'waiting_confirmation');

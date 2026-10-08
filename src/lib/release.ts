@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '抠图显示实际上传进度，持续查询已有任务并提示查询异常；IP生成的2.5模型名称与费用更清楚，沿用原价格。抠图后台细阶段尚未上线。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '管理员可单独授权邮箱账号使用内部普通功能，不影响其他邮箱和飞书账号，也不授予管理员权限。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

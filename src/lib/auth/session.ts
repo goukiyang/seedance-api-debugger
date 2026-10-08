@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { cookies } from 'next/headers';
 import { prisma } from '@/lib/prisma';
 import { verifyPassword } from './password';
+import { sessionAccountPayload, sessionAccountPayloadMatches } from './session-account-binding';
 
 export interface SessionUser {
   id: string;
@@ -76,11 +77,13 @@ export async function getSessionByToken(token?: string | null): Promise<SessionU
       return null;
     }
 
-    const userId = Buffer.from(userIdB64, 'base64').toString('utf8');
+    const accountPayload = Buffer.from(userIdB64, 'base64').toString('utf8');
+    const userId = accountPayload.split(':')[0];
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
+        password_hash: true,
         name: true,
         username: true,
         email: true,
@@ -106,6 +109,7 @@ export async function getSessionByToken(token?: string | null): Promise<SessionU
 
     if (user.role !== 'admin' && user.role !== 'user') return null;
     if (user.account_type !== 'internal' && user.account_type !== 'external') return null;
+    if (!sessionAccountPayloadMatches(accountPayload, user)) return null;
     return {
       id: user.id,
       name: user.name,
@@ -135,7 +139,12 @@ export async function getSessionByToken(token?: string | null): Promise<SessionU
 }
 
 export async function createSession(userId: string): Promise<string> {
-  const payload = Buffer.from(userId).toString('base64');
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, role: true, account_type: true, feature_profile_id: true, password_hash: true },
+  });
+  if (!user) throw new Error('Cannot create a session for a missing account');
+  const payload = Buffer.from(sessionAccountPayload(user)).toString('base64');
   const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64');
   return `${payload}.${sig}`;
 }

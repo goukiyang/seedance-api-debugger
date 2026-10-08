@@ -9,6 +9,7 @@ interface SideNavProps {
   user?: {
     role?: string | null;
     account_type?: string | null;
+    feature_profile_id?: string | null;
     feishu?: { user_id?: string | null; open_id?: string | null; union_id?: string | null } | null;
   } | null;
 }
@@ -21,6 +22,7 @@ function SideNavGroup({
   user?: {
     role?: string | null;
     account_type?: string | null;
+    feature_profile_id?: string | null;
     feishu?: { user_id?: string | null; open_id?: string | null; union_id?: string | null } | null;
   } | null;
 }) {
