@@ -951,11 +951,13 @@ class CanvasEngine {
                     </div>
                 </div>`;
             case 'audio': return `
+                <div class="generation-result-region" data-generation-result-region>
                 <div class="audio-waveform">
                     <div class="audio-bar"></div><div class="audio-bar"></div>
                     <div class="audio-bar"></div><div class="audio-bar"></div>
                     <div class="audio-bar"></div><div class="audio-bar"></div>
                     <div class="audio-bar"></div><div class="audio-bar"></div>
+                </div>
                 </div>`;
             case 'director': {
                 return `

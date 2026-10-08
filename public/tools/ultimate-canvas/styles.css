@@ -4279,6 +4279,18 @@ body.director-studio-open {
     display: flex; align-items: center; justify-content: center;
     min-height: 80px;
 }
+.node-type-audio .generation-result-region { width: 100%; }
+.node-type-audio .audio-waveform { justify-content: center; }
+.node-type-audio .generated-reference-card {
+    min-height: 0; padding: 0; border: 0; background: none;
+}
+.node-type-audio .generated-result-title {
+    position: static; padding: 0; background: none;
+}
+.node-type-audio audio.generated-frame-preview {
+    height: 54px; min-height: 54px; max-height: 54px;
+    margin-top: 8px; border: 0; background: none;
+}
 .audio-waveform {
     display: flex; gap: 2px; align-items: center; height: 28px;
 }

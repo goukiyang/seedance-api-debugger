@@ -3806,16 +3806,27 @@
         return { x: (clientX - rect.left - engine.offsetX) / engine.scale,
             y: (clientY - rect.top - engine.offsetY) / engine.scale };
     }
+    function canvasUploadPosition(nodeIds, cx, cy) {
+        let x = cx;
+        nodeIds.forEach(nodeId => {
+            const node = engine.nodes.get(nodeId);
+            if (!node) return;
+            const element = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+            x = Math.max(x, node.x + (element?.offsetWidth || 624) + 40);
+        });
+        return { x, y: cy };
+    }
     function queueCanvasFiles(files, cx, cy, pendingConnection = null) {
         if (!graphEditAllowed()) { showCanvasNotice('当前画布不可编辑或正在处理，未上传文件。', 'warn'); return; }
         const entries = Array.from(files || []);
         if (entries.length > 20) { showCanvasNotice('一次最多导入20个文件，请分批选择。', 'warn'); return; }
         if (!entries.length) return;
         const queuedContext = uploadContextKey();
+        const placedNodeIds = [];
         let tray = document.querySelector('[data-canvas-upload-tray]');
         if (!tray) { tray = document.createElement('div'); tray.dataset.canvasUploadTray = ''; tray.className = 'canvas-upload-tray'; document.body.appendChild(tray); }
         let chain = Promise.resolve();
-        entries.forEach((file, index) => {
+        entries.forEach(file => {
             const row = document.createElement('div'); row.className = 'canvas-upload-row';
             const label = document.createElement('span'); label.textContent = file.name; row.appendChild(label);
             const status = document.createElement('span'); status.textContent = '等待上传'; row.appendChild(status);
@@ -3840,10 +3851,16 @@
                             : progress.label || '正在上传';
                     }, uploadRequestId);
                     if (captured !== uploadContextKey()) throw new Error('画布目标已改变，未写回旧画布');
-                    if (!engine.nodes.has(nodeId)) createUploadedNode(result, cx + index * 80, cy + index * 60, pendingConnection, nodeId);
+                    if (!engine.nodes.has(nodeId)) {
+                        const position = canvasUploadPosition(placedNodeIds, cx, cy);
+                        createUploadedNode(result, position.x, position.y, pendingConnection, nodeId);
+                    }
                     status.textContent = '已加入画布';
                 } catch (error) { status.textContent = error?.message || '上传未确认'; retry.hidden = false; }
-                finally { running = false; remove.disabled = false; }
+                finally {
+                    if (engine.nodes.has(nodeId) && !placedNodeIds.includes(nodeId)) placedNodeIds.push(nodeId);
+                    running = false; remove.disabled = false;
+                }
             };
             retry.addEventListener('click', () => { chain = chain.then(run); });
             remove.addEventListener('click', () => { if (!running) { removed = true; row.remove(); if (!tray.children.length) tray.remove(); } });
