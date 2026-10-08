@@ -6,12 +6,14 @@
     const labels = { rename: '重命名', duplicate: '创建副本', archive: '归档', restore: '恢复', restore_revision: '恢复版本' };
     let options, root, ui, dialog, projects = [], documents = [];
     let projectId = '', status = 'active', query = '', cursor = null, snapshot = '';
-    let sequence = 0, loading = false, busy = false, timer, previousFocus;
+    let sequence = 0, loading = false, busy = false, timer, relativeTimeTimer, previousFocus;
     let lastId = '', retryList = null, dialogJob = null;
     const pendingMutations = new Map();
     let pendingCreate = null, historySequence = 0, historyState = null;
     let phase = 'initial', projectsReady = false, selectedInitialProject = false;
     const backgroundInert = new Map();
+    let timeDisclosure = null, dismissedTimeTrigger = null, timeCloseTimer, timeBubbleSequence = 0;
+    const relativeTimeFormat = new Intl.RelativeTimeFormat('zh-CN', { numeric: 'always' });
 
     function el(tag, className, text) {
         const node = document.createElement(tag);
@@ -135,8 +137,10 @@
         ui.newButton.disabled = busy || loading || !projects.some(isCreatableProject);
         ui.refresh.disabled = busy || loading;
         const currentId = idOf(current());
-        ui.close.hidden = !currentId;
-        ui.close.disabled = busy || !currentId;
+        ui.close.hidden = false;
+        ui.close.disabled = busy;
+        ui.close.title = currentId ? '返回画布' : '取消选择并返回';
+        ui.close.setAttribute('aria-label', currentId ? '返回画布' : '取消选择并返回');
         ui.more.disabled = busy || loading || stale;
         ui.more.hidden = !cursor;
         ui.more.textContent = loading ? '正在加载…' : '加载更多';
@@ -182,15 +186,182 @@
         ui.stateNew.disabled = busy || loading;
     }
 
-    function dateLabel(value) {
+    function relativeTimeLabel(value, now = Date.now()) {
+        if (value === null || value === undefined || value === '') return '更新时间未知';
+        const timestamp = value instanceof Date ? value.getTime() : new Date(value).getTime();
+        if (!Number.isFinite(timestamp)) return '更新时间未知';
+        const diff = timestamp - now;
+        const age = Math.abs(diff);
+        if (age < 45000) return diff > 0 ? '即将' : '刚刚';
+        let amount, unit;
+        if (age < 3600000) { amount = Math.round(age / 60000); unit = 'minute'; }
+        else if (age < 86400000) { amount = Math.round(age / 3600000); unit = 'hour'; }
+        else if (age < 604800000) { amount = Math.round(age / 86400000); unit = 'day'; }
+        else if (age < 2592000000) { amount = Math.round(age / 604800000); unit = 'week'; }
+        else {
+            const earlier = new Date(Math.min(timestamp, now));
+            const later = new Date(Math.max(timestamp, now));
+            const incompleteMonth = later.getDate() < earlier.getDate()
+                || (later.getDate() === earlier.getDate() && (later.getHours() < earlier.getHours()
+                    || (later.getHours() === earlier.getHours() && later.getMinutes() < earlier.getMinutes())));
+            amount = Math.max(1, (later.getFullYear() - earlier.getFullYear()) * 12
+                + later.getMonth() - earlier.getMonth()
+                - (incompleteMonth ? 1 : 0));
+            if (amount >= 12) { amount = Math.max(1, Math.round(amount / 12)); unit = 'year'; }
+            else unit = 'month';
+        }
+        return relativeTimeFormat.format(diff < 0 ? -amount : amount, unit);
+    }
+
+    function relativeTimeTone(value, now = Date.now()) {
+        if (value === null || value === undefined || value === '') return 'unknown';
+        const timestamp = value instanceof Date ? value.getTime() : new Date(value).getTime();
+        if (!Number.isFinite(timestamp)) return 'unknown';
+        const age = now - timestamp;
+        if (age < 3600000) return 'fresh';
+        if (age < 86400000) return 'recent';
+        if (age < 604800000) return 'settled';
+        if (age < 2592000000) return 'old';
+        return 'stale';
+    }
+
+    function exactTimeLabel(value) {
         const date = new Date(value);
-        return value && Number.isFinite(date.getTime())
-            ? date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-            : '更新时间未知';
+        if (value === null || value === undefined || value === '' || !Number.isFinite(date.getTime())) return '准确时间未知';
+        const local = new Intl.DateTimeFormat('sv-SE', {
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+        }).format(date);
+        const offset = -date.getTimezoneOffset();
+        const sign = offset >= 0 ? '+' : '-';
+        const hours = String(Math.floor(Math.abs(offset) / 60)).padStart(2, '0');
+        const minutes = String(Math.abs(offset) % 60).padStart(2, '0');
+        const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || '本地时区';
+        return `${local} (UTC${sign}${hours}:${minutes}, ${zone})`;
+    }
+
+    function positionTimeBubble() {
+        if (!timeDisclosure) return;
+        const { trigger, bubble } = timeDisclosure;
+        if (!trigger.isConnected) { hideTimeBubble(false); return; }
+        bubble.hidden = false;
+        bubble.style.visibility = 'hidden';
+        const triggerRect = trigger.getBoundingClientRect();
+        const bubbleRect = bubble.getBoundingClientRect();
+        const edge = 8;
+        const left = Math.max(edge, Math.min(
+            triggerRect.left + (triggerRect.width - bubbleRect.width) / 2,
+            window.innerWidth - bubbleRect.width - edge
+        ));
+        const below = triggerRect.bottom + edge;
+        const above = triggerRect.top - bubbleRect.height - edge;
+        let top = below + bubbleRect.height <= window.innerHeight - edge
+            ? below : above >= edge ? above
+                : window.innerHeight - triggerRect.bottom >= triggerRect.top
+                    ? Math.min(below, window.innerHeight - bubbleRect.height - edge)
+                    : Math.max(edge, above);
+        bubble.style.left = `${Math.round(left)}px`;
+        bubble.style.top = `${Math.max(edge, Math.round(top))}px`;
+        bubble.style.visibility = '';
+    }
+
+    function hideTimeBubble(dismiss) {
+        clearTimeout(timeCloseTimer);
+        if (!timeDisclosure) return;
+        const { trigger, bubble } = timeDisclosure;
+        if (dismiss) dismissedTimeTrigger = trigger;
+        trigger.removeAttribute('aria-describedby');
+        trigger.removeAttribute('aria-controls');
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.setAttribute('aria-pressed', 'false');
+        bubble.remove();
+        timeDisclosure = null;
+    }
+
+    function showTimeBubble(trigger, pinned) {
+        if (!trigger?.isConnected) return;
+        if (timeDisclosure?.trigger !== trigger) hideTimeBubble(false);
+        if (!timeDisclosure) {
+            const bubble = el('span', 'uc-doc-time-bubble', trigger.dataset.exactTime);
+            bubble.id = `uc-doc-time-bubble-${++timeBubbleSequence}`;
+            bubble.setAttribute('role', 'tooltip');
+            bubble.addEventListener('pointerenter', () => clearTimeout(timeCloseTimer));
+            bubble.addEventListener('pointerleave', () => scheduleTimeHide(trigger));
+            const host = dialog?.open && dialog.contains(trigger) ? dialog : document.body;
+            host.append(bubble);
+            timeDisclosure = { trigger, bubble, pinned: false };
+        }
+        if (pinned) timeDisclosure.pinned = true;
+        trigger.setAttribute('aria-controls', timeDisclosure.bubble.id);
+        trigger.setAttribute('aria-describedby', timeDisclosure.bubble.id);
+        trigger.setAttribute('aria-expanded', 'true');
+        trigger.setAttribute('aria-pressed', String(timeDisclosure.pinned));
+        positionTimeBubble();
+    }
+
+    function scheduleTimeHide(trigger) {
+        clearTimeout(timeCloseTimer);
+        timeCloseTimer = setTimeout(() => {
+            if (timeDisclosure?.trigger !== trigger || timeDisclosure.pinned) return;
+            if (trigger.matches(':hover') || document.activeElement === trigger || timeDisclosure.bubble.matches(':hover')) return;
+            hideTimeBubble(false);
+        }, 90);
+    }
+
+    function timeControl(value) {
+        const date = new Date(value);
+        const valid = value !== null && value !== undefined && value !== '' && Number.isFinite(date.getTime());
+        const relative = relativeTimeLabel(value);
+        const trigger = button('', () => {}, 'uc-doc-time-trigger');
+        trigger.dataset.exactTime = exactTimeLabel(value);
+        trigger.dataset.timeAge = relativeTimeTone(value);
+        trigger.setAttribute('aria-label', '查看准确时间：' + relative);
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.setAttribute('aria-pressed', 'false');
+        const time = el('time', '', relative);
+        if (valid) time.dateTime = date.toISOString();
+        trigger.append(time);
+        trigger.addEventListener('pointerenter', () => {
+            if (dismissedTimeTrigger === trigger) dismissedTimeTrigger = null;
+            showTimeBubble(trigger, false);
+        });
+        trigger.addEventListener('pointerleave', () => {
+            if (dismissedTimeTrigger === trigger) dismissedTimeTrigger = null;
+            scheduleTimeHide(trigger);
+        });
+        trigger.addEventListener('focus', () => {
+            if (dismissedTimeTrigger !== trigger) showTimeBubble(trigger, false);
+        });
+        trigger.addEventListener('blur', () => {
+            if (dismissedTimeTrigger === trigger) dismissedTimeTrigger = null;
+            scheduleTimeHide(trigger);
+        });
+        trigger.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (timeDisclosure?.trigger === trigger && timeDisclosure.pinned) hideTimeBubble(true);
+            else { dismissedTimeTrigger = null; showTimeBubble(trigger, true); }
+        });
+        return trigger;
+    }
+
+    function refreshRelativeTimes() {
+        if (!root) return;
+        root.querySelectorAll('.uc-doc-time-trigger').forEach(trigger => {
+            const time = trigger.querySelector('time');
+            const label = relativeTimeLabel(time?.dateTime);
+            if (time) time.textContent = label;
+            trigger.dataset.timeAge = relativeTimeTone(time?.dateTime);
+            trigger.setAttribute('aria-label', '查看准确时间：' + label);
+        });
     }
 
     function renderList() {
-        const focusedId = document.activeElement?.closest('[data-document-id]')?.dataset.documentId;
+        const activeElement = document.activeElement;
+        const focusedId = activeElement?.closest('[data-document-id]')?.dataset.documentId;
+        const focusedTime = activeElement?.matches('.uc-doc-time-trigger');
+        hideTimeBubble(false);
+        if (dismissedTimeTrigger && !dismissedTimeTrigger.isConnected) dismissedTimeTrigger = null;
         ui.list.replaceChildren();
         documents.forEach(doc => {
             const row = el('li', 'uc-doc-row');
@@ -222,11 +393,8 @@
             meta.append(el('span', '', owningProject?.display_name || owningProject?.name || '项目不可用'));
             const owner = avatar(doc.owner || (doc.owner_name ? { name: doc.owner_name, avatar_url: doc.owner_avatar_url } : null));
             if (owner) meta.append(owner);
-            const time = el('time', '', dateLabel(doc.updated_at));
-            if (doc.updated_at && Number.isFinite(new Date(doc.updated_at).getTime())) time.dateTime = new Date(doc.updated_at).toISOString();
-            meta.append(time);
+            meta.append(timeControl(doc.updated_at));
             if (doc.status === 'archived') meta.append(el('span', 'uc-doc-archived', '已归档'));
-            copy.append(meta);
             open.append(preview, copy);
             const details = el('details', 'uc-doc-actions');
             const summary = el('summary', '', '⋯');
@@ -246,13 +414,16 @@
                 }, action === 'archive' ? 'uc-doc-danger' : 'uc-doc-menu-button'));
             });
             details.append(summary, menu);
-            row.append(open, details);
+            row.append(open, meta, details);
             ui.list.append(row);
         });
         ui.empty.hidden = documents.length > 0 || loading || !ui.error.hidden;
         ui.empty.textContent = query ? '没有找到匹配的画布' : status === 'archived' ? '暂无已归档画布' : '暂无画布';
         ui.count.textContent = documents.length ? '已加载 ' + documents.length + ' 个画布' : '';
-        if (focusedId) Array.from(ui.list.children).find(row => row.dataset.documentId === focusedId)?.querySelector('button')?.focus({ preventScroll: true });
+        if (focusedId) {
+            const row = Array.from(ui.list.children).find(item => item.dataset.documentId === focusedId);
+            row?.querySelector(focusedTime ? '.uc-doc-time-trigger' : '.uc-doc-open')?.focus({ preventScroll: true });
+        }
         updateControls();
     }
 
@@ -350,12 +521,46 @@
         finally { busy = false; updateControls(); }
     }
 
-    function returnToEditor() {
+    function returnToEditor(reason = 'cancel') {
         const doc = current();
         // The current editor may be outside the selected project, search or archive tab.
         // Reopen through the parent to revalidate access and restore writable state.
         if (idOf(doc)) return openDocument(doc, true);
-        return false;
+        return cancelInitialSelection(reason);
+    }
+
+    async function cancelInitialSelection(reason) {
+        if (busy || dialog.open) return false;
+        if (idOf(current())) return openDocument(current(), true);
+        if (typeof options.onInitialCancel !== 'function') {
+            ui.errorText.textContent = '暂时无法安全返回。请选择已有画布，或稍后重试。';
+            ui.error.hidden = false;
+            ui.retry.hidden = true;
+            return false;
+        }
+        busy = true;
+        updateControls();
+        try {
+            if (!await leave()) return false;
+            // Optional app-owned exit; false keeps this chooser open, focusTarget restores focus.
+            const result = await options.onInitialCancel({ reason, projectId });
+            if (result === false) {
+                ui.errorText.textContent = '仍在画布选择中，尚未离开。';
+                ui.error.hidden = false;
+                ui.retry.hidden = true;
+                return false;
+            }
+            const focusTarget = result && typeof result === 'object' && result.focusTarget instanceof HTMLElement
+                ? result.focusTarget : null;
+            closeLibraryLayer(focusTarget);
+            return true;
+        } catch (error) {
+            fail(error, '返回');
+            return false;
+        } finally {
+            busy = false;
+            updateControls();
+        }
     }
 
     function mutationId() {
@@ -461,6 +666,7 @@
     }
 
     function renderHistory() {
+        hideTimeBubble(false);
         dialogJob.action = 'history';
         ui.dialogTitle.textContent = '版本历史';
         ui.dialogDescription.hidden = false;
@@ -482,7 +688,7 @@
         historyState.revisions.forEach(revision => {
             const row = el('li', 'uc-doc-history-row');
             const detail = el('div');
-            detail.append(el('strong', '', '版本 ' + revision.revision), el('p', '', revision.title || '未命名画布'), el('time', '', dateLabel(revision.created_at)));
+            detail.append(el('strong', '', '版本 ' + revision.revision), el('p', '', revision.title || '未命名画布'), timeControl(revision.created_at));
             row.append(detail);
             if (revision.revision === historyState.doc.revision) row.append(el('span', 'uc-doc-count', '当前版本'));
             else row.append(button('恢复', () => {
@@ -493,7 +699,7 @@
                 ui.historyBack.hidden = false;
                 ui.submit.hidden = false;
                 ui.dialogTitle.textContent = '恢复版本';
-                ui.dialogDescription.textContent = '恢复到版本 ' + revision.revision + '（' + dateLabel(revision.created_at) + '）？当前画布内容将被此版本替换。';
+                ui.dialogDescription.textContent = '恢复到版本 ' + revision.revision + '（' + exactTimeLabel(revision.created_at) + '）？当前画布内容将被此版本替换。';
                 setDialogBusy(false);
                 ui.cancel.focus();
             }));
@@ -614,7 +820,7 @@
         const title = el('h1', '', '项目与画布');
         const actions = el('div', 'uc-doc-heading-actions');
         ui = {};
-        ui.close = button('×', returnToEditor, 'uc-doc-button uc-doc-icon-button');
+        ui.close = button('×', () => returnToEditor('cancel'), 'uc-doc-button uc-doc-icon-button');
         ui.close.title = '返回画布';
         ui.close.setAttribute('aria-label', '返回画布');
         ui.newButton = button('新建画布', () => showDialog('new'), 'uc-doc-button uc-doc-primary');
@@ -744,6 +950,7 @@
         dialog.addEventListener('cancel', event => { if (busy) event.preventDefault(); });
         dialog.addEventListener('close', () => {
             ++historySequence;
+            if (timeDisclosure && dialog.contains(timeDisclosure.trigger)) hideTimeBubble(false);
             if (root.hidden) return;
             if (dialogJob?.trigger?.isConnected) dialogJob.trigger.focus({ preventScroll: true });
             else root.focus({ preventScroll: true });
@@ -752,18 +959,40 @@
         // Keep the editor's document-level shortcuts from handling library input.
         ['keydown', 'keyup', 'keypress', 'paste', 'wheel', 'pointerdown', 'pointerup', 'click'].forEach(type => {
             root.addEventListener(type, event => {
-                if (type === 'keydown' && event.key === 'Escape' && !dialog.open) {
-                    event.preventDefault();
-                    const menu = root.querySelector('details[open]');
-                    if (menu) { menu.open = false; menu.querySelector('summary').focus(); }
-                    else returnToEditor();
+                if (type === 'keydown' && event.key === 'Escape') {
+                    if (timeDisclosure) {
+                        hideTimeBubble(true);
+                        event.preventDefault();
+                        event.stopImmediatePropagation();
+                        return;
+                    }
+                    if (!dialog.open) {
+                        event.preventDefault();
+                        const menu = root.querySelector('details[open]');
+                        if (menu) { menu.open = false; menu.querySelector('summary').focus(); }
+                        else returnToEditor('escape');
+                    }
                 }
                 event.stopPropagation();
             });
         });
         root.addEventListener('click', event => {
-            if (!event.target.closest('details')) root.querySelectorAll('details[open]').forEach(item => { item.open = false; });
+            const target = event.target instanceof Element ? event.target : null;
+            if (timeDisclosure && !target?.closest('.uc-doc-time-trigger')
+                && !timeDisclosure.bubble.contains(event.target)) hideTimeBubble(true);
+            if (!target?.closest('details')) root.querySelectorAll('details[open]').forEach(item => { item.open = false; });
         });
+        document.addEventListener('click', event => {
+            if (root.hidden || dialog.open || root.contains(event.target) || timeDisclosure?.bubble.contains(event.target)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation();
+            if (timeDisclosure) hideTimeBubble(true);
+            if (!busy) void returnToEditor('outside');
+        }, true);
+        root.addEventListener('scroll', positionTimeBubble, { passive: true });
+        window.addEventListener('resize', positionTimeBubble);
+        window.addEventListener('scroll', positionTimeBubble, true);
         document.body.append(root);
         updateControls();
         if (!new URLSearchParams(window.location.search).get('document_id')) void show();
@@ -779,6 +1008,9 @@
         if (root.hidden) previousFocus = document.activeElement;
         root.hidden = false;
         document.body.classList.add('canvas-library-open');
+        refreshRelativeTimes();
+        clearInterval(relativeTimeTimer);
+        relativeTimeTimer = setInterval(refreshRelativeTimes, 60000);
         const canvas = document.getElementById('canvas-container');
         if (canvas && !backgroundInert.has(canvas)) {
             backgroundInert.set(canvas, canvas.inert);
@@ -799,15 +1031,25 @@
     function closeAfterOpen() {
         const loaded = current();
         if (!idOf(loaded) || !loaded.project_id || !Number.isInteger(loaded.revision)) return false;
+        closeLibraryLayer();
+        return true;
+    }
+
+    function closeLibraryLayer(focusTarget) {
+        if (!root || root.hidden) return false;
         if (dialog.open) dialog.close();
+        hideTimeBubble(false);
+        dismissedTimeTrigger = null;
         clearTimeout(timer);
+        clearInterval(relativeTimeTimer);
         ++sequence;
         loading = false;
         root.hidden = true;
         document.body.classList.remove('canvas-library-open');
         backgroundInert.forEach((value, node) => { node.inert = value; });
         backgroundInert.clear();
-        if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+        const target = focusTarget?.isConnected ? focusTarget : previousFocus;
+        if (target?.isConnected && !target.closest?.('[inert]') && !target.disabled) target.focus({ preventScroll: true });
         return true;
     }
 

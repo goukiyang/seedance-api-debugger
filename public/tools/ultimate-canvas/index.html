@@ -8,11 +8,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=crule31-rules-v2">
+    <link rel="stylesheet" href="styles.css?v=pre34-0.58.0">
     <link rel="stylesheet" href="/styles/loading.css?v=0.36.1">
     <link rel="stylesheet" href="style-gallery.css?v=20261006-unified-likes">
     <link rel="stylesheet" href="like-button.css?v=20261006-unified-likes">
-    <link rel="stylesheet" href="document-library.css?v=20260925-canvas-documents">
+    <link rel="stylesheet" href="document-library.css?v=pre34-0.58.0">
     <link rel="stylesheet" href="node-pricing.css?v=20260925-model-price-menu">
     <link rel="icon" href="data:,">
     <style>
@@ -268,7 +268,7 @@
                                     <circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
                                 </svg>
                             </div>
-                            <span class="quick-card-text">音乐生成</span>
+                            <span class="quick-card-text">添加音频素材</span>
                         </div>
                     </div>
                 </div>
@@ -352,6 +352,12 @@
 
         <!-- Floating Canvas Bottom Toolbar -->
         <div id="canvas-floating-toolbar" class="canvas-floating-toolbar">
+            <button type="button" class="toolbar-pill-btn" id="btn-undo" data-graph-icon="Undo2" title="撤销编辑" aria-label="撤销编辑" disabled></button>
+            <button type="button" class="toolbar-pill-btn" id="btn-redo" data-graph-icon="Redo2" title="重做编辑" aria-label="重做编辑" disabled></button>
+            <button type="button" class="toolbar-pill-btn" id="btn-copy-nodes" data-graph-icon="Copy" title="复制选中节点" aria-label="复制选中节点" disabled></button>
+            <button type="button" class="toolbar-pill-btn" id="btn-group" data-graph-icon="Group" title="组合选中节点" aria-label="组合选中节点" disabled></button>
+            <button type="button" class="toolbar-pill-btn" id="btn-ungroup" data-graph-icon="Ungroup" title="取消组合" aria-label="取消组合" disabled></button>
+            <span class="toolbar-pill-divider"></span>
             <button class="toolbar-pill-btn" id="btn-fit" title="整理画布">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
@@ -377,13 +383,17 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
         </div>
+        <canvas id="canvas-minimap" width="240" height="160" hidden aria-label="画布小地图" tabindex="0"></canvas>
     </main>
 
     <script src="assets/director/liblib/director-liblib-data.js"></script>
-    <script src="icons.js?v=0.35.0"></script>
+    <script src="icons.js?v=pre34-0.58.0"></script>
     <script src="plan-split.js?v=0.35.0"></script>
     <script src="plan-split-ui.js?v=0.35.0"></script>
-    <script src="canvas-engine.js?v=0.35.0"></script>
+    <script src="canvas-engine.js?v=pre34-0.58.0"></script>
+    <script src="canvas-commands.js?v=pre34-0.58.0"></script>
+    <script src="canvas-groups.js?v=pre34-0.58.0"></script>
+    <script src="canvas-minimap.js?v=pre34-0.58.0"></script>
     <script src="backend-contract.js?v=0.35.0"></script>
     <script src="generation-api.js?v=20260713-sd2-same-origin"></script>
     <script src="generation-node-interactions.js?v=0.35.0"></script>
@@ -391,11 +401,11 @@
     <script src="video-card-workflow.js?v=20260711-video-card-complete"></script>
     <script src="generation-task-coordinator.js?v=0.35.0-history-closure"></script>
     <script src="canvas-save-coordinator.js?v=20260712-final-hardening"></script>
-    <script src="document-library.js?v=20260925-canvas-documents"></script>
+    <script src="document-library.js?v=pre34-0.58.0"></script>
     <script src="node-pricing.js?v=20260925-model-price-menu"></script>
     <script src="style-gallery.js?v=20261006-unified-likes"></script>
     <script src="canvas-styles.js?v=20261006-unified-likes"></script>
-    <script src="app.js?v=crule31-rules-v2"></script>
+    <script src="app.js?v=pre34-0.58.0"></script>
     <script src="toolflow-workflow.js?v=20260924-canvas-parallel"></script>
     <script type="module" src="director-3d.js"></script>
 </body>

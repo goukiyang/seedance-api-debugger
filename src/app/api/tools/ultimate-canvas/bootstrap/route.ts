@@ -34,6 +34,7 @@ import { seedanceVideoDurationCapabilities } from '@/lib/provider/seedance-model
 import { defaultImageResolution, imageResolutionOptions } from '@/lib/image-generation/resolution';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS } from '@/lib/image-studio/model-catalog';
 import { STUDIO_TEXT_MODELS, isStudioTextModel } from '@/lib/template-studio/text-models';
+import { AUDIO_CAPABILITY } from '@/lib/provider/audio-contract';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -367,6 +368,7 @@ export async function GET(request: NextRequest) {
         : null,
     },
     capabilities: {
+      audio: AUDIO_CAPABILITY,
       text: {
         enabled: textReady,
         label: 'GPT-5.5 文本能力',

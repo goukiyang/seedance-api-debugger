@@ -115,6 +115,114 @@
         requestName: requestCanvasName,
     };
 
+    let graphRestoring = false;
+    document.querySelectorAll('[data-graph-icon]').forEach(button => {
+        button.innerHTML = window.UltimateCanvasIcons(button.dataset.graphIcon);
+    });
+    const graphCommands = window.UltimateCanvasCommands.createCanvasCommands(engine, {
+        onChange: ({ action }) => {
+            if (action !== 'clear') scheduleCanvasSave('graph_edit');
+            updateGraphTools();
+        },
+        onRestore: ({ removedNodeIds }) => {
+            for (const id of removedNodeIds) window.UltimateCanvasNodePricing?.dispose(id);
+            // Resume uses existing task IDs and GET status only, never generation.
+            stopAllVideoPolling();
+            graphRestoring = true;
+            try { hydrateNodeViews(); } finally { graphRestoring = false; }
+            updateGraphTools();
+        },
+        onLimit: () => showCanvasNotice('较早的撤销记录已释放，画布内容仍保留。')
+    });
+    const canvasMinimap = window.UltimateCanvasMinimap.createCanvasMinimap(engine,
+        document.getElementById('canvas-minimap'), { colors: {
+            background: '#202124', border: '#53555a', node: '#a0a4aa', selected: '#4cd6ba',
+            flow: '#deb775', connection: '#666a73', viewport: '#eeeeef'
+        } });
+
+    function graphEditAllowed() {
+        return canvasRuntime.documentWritable && !canvasRuntime.contextSwitching && !canvasRuntime.documentRestoring
+            && !canvasRuntime.documentOperation && !canvasRuntime.failedSaveRequest && !canvasRuntime.saveConflict
+            && !canvasRuntime.uploadsInFlight && canvasRuntime.pendingGenerationSubmissions.size() === 0
+            && ![...engine.nodes.values()].some(node =>
+                ['pending', 'unconfirmed'].includes(node.data?.storyRequest?.state)
+                || ['submitting', 'submitted', 'running', 'queued', 'processing', 'unconfirmed', 'uncertain'].includes(node.data?.generationStatus)
+                || node.data?.videoSubmission?.state === 'unconfirmed'
+                || document.querySelector(`[data-node-id="${CSS.escape(node.id)}"] .is-generating, [data-node-id="${CSS.escape(node.id)}"] [data-busy="true"]`));
+    }
+
+    function minimapKey() {
+        return `sd2:canvas:minimap:${canvasRuntime.bootstrap?.user?.id || 'unknown'}:${canvasRuntime.documentId || 'none'}`;
+    }
+
+    function updateGraphTools() {
+        const allowed = graphEditAllowed();
+        const selected = engine.getSelectedNodeIds();
+        const state = graphCommands.getState();
+        for (const [id, enabled] of [['btn-undo', state.canUndo], ['btn-redo', state.canRedo],
+            ['btn-copy-nodes', selected.length > 0], ['btn-group', selected.length > 1],
+            ['btn-ungroup', selected.some(id => engine.nodes.get(id)?.data?.canvasGroup)]]) {
+            const button = document.getElementById(id);
+            if (button) button.disabled = !allowed || !enabled;
+        }
+        engine.nodes.forEach(node => {
+            const el = document.querySelector(`[data-node-id="${CSS.escape(node.id)}"]`);
+            el?.classList.toggle('canvas-node-grouped', Boolean(node.data?.canvasGroup?.id));
+        });
+        canvasMinimap.render();
+    }
+
+    function runGraphAction(action) {
+        if (!graphEditAllowed()) return showCanvasNotice('请先处理保存或未确认的请求，再编辑画布结构。', 'warn');
+        syncAllNodesFromDom();
+        graphRestoring = true;
+        try {
+            if (action === 'undo') graphCommands.undo();
+            if (action === 'redo') graphCommands.redo();
+            if (action === 'copy') graphCommands.duplicateSelection();
+            if (action === 'group') window.UltimateCanvasGroups.groupSelected(engine, graphCommands);
+            if (action === 'ungroup') window.UltimateCanvasGroups.ungroupSelected(engine, graphCommands);
+        } finally { graphRestoring = false; }
+        updateGraphTools();
+    }
+
+    // Only synchronous user editing transactions enter history, not polling or Provider callbacks.
+    let graphGesture = null;
+    document.addEventListener('pointerdown', event => {
+        if (!event.isTrusted || !graphEditAllowed() || !event.target.closest('#canvas-container')) return;
+        syncAllNodesFromDom(); graphGesture = graphCommands.begin('移动节点');
+    }, true);
+    document.addEventListener('pointerup', () => {
+        if (!graphGesture) return;
+        const token = graphGesture; graphGesture = null;
+        queueMicrotask(() => { syncAllNodesFromDom(); graphCommands.commit(token); updateGraphTools(); });
+    }, true);
+    for (const eventName of ['click', 'beforeinput', 'change', 'keydown']) {
+        document.addEventListener(eventName, event => {
+            if (!event.isTrusted || graphRestoring || !graphEditAllowed()) return;
+            if (event.target.closest('#canvas-floating-toolbar')) return;
+            if (eventName === 'keydown' && !['Delete', 'Backspace'].includes(event.key)) return;
+            syncAllNodesFromDom();
+            const token = graphCommands.begin('编辑画布', { coalesceKey: event.target.closest('.canvas-node')?.dataset.nodeId });
+            queueMicrotask(() => {
+                if (graphRestoring || canvasRuntime.documentRestoring) return;
+                syncAllNodesFromDom(); graphCommands.commit(token); updateGraphTools();
+            });
+        }, true);
+    }
+    document.addEventListener('keydown', event => {
+        if (!(event.ctrlKey || event.metaKey) || event.altKey
+            || event.target.closest('input,textarea,select,[contenteditable="true"],[role="dialog"]')) return;
+        const key = event.key.toLowerCase();
+        const action = key === 'z' ? (event.shiftKey ? 'redo' : 'undo') : key === 'y' ? 'redo' : key === 'd' ? 'copy' : null;
+        if (!action) return;
+        event.preventDefault(); event.stopImmediatePropagation(); runGraphAction(action);
+    }, true);
+    for (const [id, action] of [['btn-undo', 'undo'], ['btn-redo', 'redo'], ['btn-copy-nodes', 'copy'],
+        ['btn-group', 'group'], ['btn-ungroup', 'ungroup']]) {
+        document.getElementById(id)?.addEventListener('click', () => runGraphAction(action));
+    }
+
     const planSplit = window.UltimateCanvasPlanSplitUI.create({
         engine, dialog: openCanvasProductDialog, confirm: requestCanvasConfirmation,
         sourceText: nodeId => {
@@ -142,6 +250,40 @@
         snapshot: canvasDocumentPayload, render: renderAllGenerationNodeControls
     });
     engine.onPlanSplit = nodeId => { void planSplit.open(nodeId); };
+
+    async function openStoryStudio(nodeId) {
+        if (!canvasRuntime.documentWritable || canvasRuntime.contextSwitching) return;
+        if (window.UltimateCanvasGetExitRisk?.().busy?.length) {
+            showCanvasNotice('当前请求尚未确认，请先处理后再打开故事与分镜。', 'warn');
+            return;
+        }
+        const node = engine.nodes.get(nodeId);
+        if (!node || !['text', 'script'].includes(node.type)) return;
+        scheduleCanvasSave('open_story_studio');
+        if (!await flushCanvasSave('open_story_studio') || !canvasRuntime.documentId) {
+            showCanvasNotice('请先保存画布，再打开故事与分镜。', 'warn');
+            return;
+        }
+        if (engine.nodes.get(nodeId) !== node) return;
+        const query = new URLSearchParams({ document_id: canvasRuntime.documentId, node_id: nodeId });
+        window.top.location.href = '/story-studio?' + query;
+    }
+
+    function renderStoryEntry(nodeId) {
+        const node = engine.nodes.get(nodeId);
+        const el = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+        if (!node || !el || !['text', 'script'].includes(node.type)) return;
+        let entry = el.querySelector('[data-story-entry]');
+        if (!entry) {
+            entry = document.createElement('button');
+            entry.type = 'button'; entry.dataset.storyEntry = nodeId;
+            entry.className = 'canvas-story-entry';
+            entry.innerHTML = window.UltimateCanvasIcons('Clapperboard') + '<span>故事与分镜</span>';
+            entry.onclick = event => { event.stopPropagation(); void openStoryStudio(nodeId); };
+            (el.querySelector('.node-body') || el).appendChild(entry);
+        }
+        entry.disabled = !canvasRuntime.documentWritable || canvasRuntime.contextSwitching;
+    }
 
     const canvasStyles = window.UltimateCanvasStyles.create({
         request: requestJson,
@@ -2483,6 +2625,7 @@
 
     function updateSaveIndicator() {
         updateDocumentInteraction();
+        updateGraphTools();
         const el = document.getElementById('canvas-save-state');
         if (!el) return;
         const labels = {
@@ -2773,6 +2916,16 @@
                 getCurrentDocument: () => ({ id: canvasRuntime.documentId, project_id: canvasRuntime.selectedProjectId, title: canvasRuntime.documentTitle, revision: canvasRuntime.documentRevision }),
                 openDocument: openManagedDocument,
                 createDocument: createManagedDocument,
+                onInitialCancel: async () => {
+                    const risk = window.UltimateCanvasGetExitRisk?.();
+                    if (risk?.busy?.length || canvasRuntime.failedSaveRequest || canvasRuntime.saveConflict) {
+                        showCanvasNotice('当前请求或保存尚未确认，先处理后再返回首页。', 'warn');
+                        return false;
+                    }
+                    // No document has been chosen: return to a real page, never create one on cancel.
+                    window.top.location.assign('/');
+                    return { focusTarget: document.querySelector('[data-canvas-library-open]') };
+                },
                 beforeLeave: async () => {
                     return withDocumentOperation(async () => {
                         const saved = canvasRuntime.documentWritable ? await flushCanvasSave('before_library', true) : true;
@@ -3322,6 +3475,17 @@
     }
 
     function installAutosaveHooks() {
+        const originalRestore = engine.restore.bind(engine);
+        engine.restore = (...args) => {
+            const result = originalRestore(...args);
+            graphCommands.clear();
+            let visible = false;
+            try { visible = localStorage.getItem(minimapKey()) === '1'; } catch {}
+            document.getElementById('canvas-minimap').hidden = !visible;
+            document.getElementById('btn-minimap').classList.toggle('active', visible);
+            updateGraphTools();
+            return result;
+        };
         const originalAddNode = engine.addNode.bind(engine);
         engine.addNode = (...args) => {
             const nodeId = originalAddNode(...args);
@@ -3999,6 +4163,7 @@
 
     function renderGenerationNodeControls(nodeId) {
         planSplit.renderNode(nodeId);
+        renderStoryEntry(nodeId);
         renderVideoResultHistory(nodeId);
         const node = engine.nodes.get(nodeId);
         const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
@@ -4142,6 +4307,7 @@
 
     function renderAllGenerationNodeControls() {
         engine.nodes.forEach(node => renderGenerationNodeControls(node.id));
+        updateGraphTools();
     }
 
     function applyGenerationQuickMode(nodeId, mode) {
@@ -4568,7 +4734,8 @@
     }
 
     function promptWithConnectedText(payload) {
-        if (engine.nodes.get(payload.nodeId)?.data?.planSource) return payload.prompt;
+        const data = engine.nodes.get(payload.nodeId)?.data;
+        if (data?.planSource || data?.storySource) return payload.prompt;
         const context = (payload.sourceNodes || []).filter(source => ['text', 'script'].includes(source.type))
             .map(source => source.data?.generatedText || source.data?.prompt || source.data?.description || '')
             .filter(value => typeof value === 'string' && value.trim());
@@ -4648,6 +4815,7 @@
         }
 
         setNodeGenerationStatus(nodeEl, 'success', result?.message || '文本生成完成');
+        renderStoryEntry(payload.nodeId);
         showCanvasNotice(result?.message || 'LLM 生成完成', 'info');
         scheduleCanvasSave('text_generation');
     }
@@ -5618,14 +5786,16 @@
         generationResizeFrame = window.requestAnimationFrame(renderAllGenerationNodeControls);
     });
     engine.onNodeSelected = nodeId => {
+        updateGraphTools();
         closeGenerationPopover();
         if (engine.nodes.get(nodeId)?.type === 'text') updateGenerationLabels(canvasRuntime.bootstrap);
         if (canvasRuntime.referenceSelection && nodeId !== canvasRuntime.referenceSelection.targetNodeId) {
             selectCanvasReference(nodeId);
         }
     };
-    engine.onNodeDeselected = closeGenerationPopover;
-    engine.onViewportChanged = closeGenerationPopover;
+    engine.onNodeDeselected = () => { closeGenerationPopover(); updateGraphTools(); };
+    const minimapViewportChanged = engine.onViewportChanged;
+    engine.onViewportChanged = (...args) => { minimapViewportChanged?.(...args); closeGenerationPopover(); };
 
     document.addEventListener('click', event => {
         const previewAction = event.target.closest('[data-canvas-media-preview]');
@@ -6601,14 +6771,21 @@
             const cy = (rect.height / 2 - engine.offsetY) / engine.scale;
 
             switch (type) {
-                case 'script-gen': engine.addNode('script', cx - 100, cy - 80); break;
+                case 'script-gen': {
+                    const storyId = engine.addNode('script', cx - 100, cy - 80);
+                    void openStoryStudio(storyId);
+                    break;
+                }
                 case 'character': engine.addNode('image', cx - 100, cy - 80); break;
                 case 'auto-video':
                     const tid = engine.addNode('text', cx - 360, cy - 60);
                     const vid = engine.addNode('video', cx + 120, cy - 60);
                     engine._createConnection(tid, vid);
                     break;
-                case 'music': engine.addNode('audio', cx - 100, cy - 40); break;
+                case 'music':
+                    engine.addNode('audio', cx - 100, cy - 40);
+                    showCanvasNotice('已添加音频素材节点。音频生成服务尚未接通。', 'info');
+                    break;
             }
         });
     });
@@ -6750,6 +6927,7 @@
             case 'txt2music':
                 const aId = engine.addNode('audio', nd.x + 450, nd.y);
                 engine._createConnection(nodeId, aId);
+                showCanvasNotice('已添加音频素材节点，未发起音频生成。', 'info');
                 break;
             case 'vid-keyframe': {
                 const outputId = engine.addNode('video', nd.x + 450, nd.y, {
@@ -8361,8 +8539,11 @@
     // Arrange canvas (整理画布): put the tool-flow main path on one lane,
     // keep branches stacked beside it, then fit the result into the viewport.
     document.getElementById('btn-fit')?.addEventListener('click', () => {
+        if (!graphEditAllowed()) return;
+        const token = graphCommands.begin('整理画布');
         const arranged = engine.arrangeToolflowNodes?.();
         engine.fitView();
+        graphCommands.commit(token);
         if (arranged) {
             scheduleCanvasSave('toolflow_layout');
             showCanvasNotice('工具流主路径已整理，分支已并列排开。', 'success');
@@ -8378,8 +8559,12 @@
 
     // Minimap toggle (小地图)
     document.getElementById('btn-minimap')?.addEventListener('click', (e) => {
-        e.currentTarget.classList.remove('active');
-        showCanvasNotice('画布小地图还没有接入，当前不会显示缩略导航。', 'warn');
+        const minimap = document.getElementById('canvas-minimap');
+        minimap.hidden = !minimap.hidden;
+        e.currentTarget.classList.toggle('active', !minimap.hidden);
+        e.currentTarget.setAttribute('aria-pressed', String(!minimap.hidden));
+        try { localStorage.setItem(minimapKey(), minimap.hidden ? '0' : '1'); } catch {}
+        canvasMinimap.render();
     });
 
     // =====================

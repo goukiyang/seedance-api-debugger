@@ -67,6 +67,19 @@ const CanvasReferenceSelection = Object.freeze({
     }
 });
 
+const TOOLFLOW_CONNECTIONS = Object.freeze({
+    'flow-input': new Set(['flow-template', 'flow-select', 'flow-confirm', 'flow-output']),
+    'flow-template': new Set(['flow-template', 'flow-select', 'flow-confirm', 'flow-output']),
+    'flow-select': new Set(['flow-template', 'flow-select', 'flow-confirm', 'flow-output']),
+    'flow-confirm': new Set(['flow-template', 'flow-select', 'flow-confirm', 'flow-output']),
+    'flow-output': new Set()
+});
+
+function cloneCanvasValue(value) {
+    if (typeof structuredClone === 'function') return structuredClone(value);
+    return JSON.parse(JSON.stringify(value));
+}
+
 class CanvasEngine {
     constructor(containerId, canvasId, svgId) {
         this.container = document.getElementById(containerId);
@@ -100,6 +113,7 @@ class CanvasEngine {
         this.flowSystemSettings = { model: 'gpt-image-2', quality: 'auto', providerReady: false };
         this.flowInputUploadState = new Map();
         this.selectedNodeId = null;
+        this.selectedNodeIds = new Set();
         this.nextNodeId = 1;
 
         this.onNodeSelected = null;
@@ -109,6 +123,8 @@ class CanvasEngine {
         this.onConnectionRejected = null;
         this.onNodeDeleted = null;
         this.onViewportChanged = null;
+        this.onCanvasGeometryChanged = null;
+        this._commandCreateConnection = this._createConnection.bind(this);
 
         this.connectionResizeFrame = null;
         this.nodeResizeObserver = typeof ResizeObserver === 'function'
@@ -228,6 +244,7 @@ class CanvasEngine {
                 // Select overlapping nodes
                 const mRect = marquee.getBoundingClientRect();
                 let selectedAny = false;
+                const selectedNodeIds = [];
                 this.nodes.forEach((nd, id) => {
                     const el = document.querySelector(`[data-node-id="${id}"]`);
                     if (el) {
@@ -240,6 +257,7 @@ class CanvasEngine {
                         if (overlap) {
                             el.classList.add('selected');
                             this.selectedNodeId = id;
+                            selectedNodeIds.push(id);
                             selectedAny = true;
                         } else {
                             el.classList.remove('selected');
@@ -250,6 +268,7 @@ class CanvasEngine {
                 if (!selectedAny) {
                     this.selectedNodeId = null;
                 }
+                this.selectedNodeIds = new Set(selectedNodeIds);
             }
         }
         if (this.isDraggingNode && this.dragNode) {
@@ -268,6 +287,15 @@ class CanvasEngine {
             this.dragNode.style.top = newY + 'px';
             const nd = this.nodes.get(this.dragNode.dataset.nodeId);
             if (nd) { nd.x = newX; nd.y = newY; }
+            this.dragNodeStarts?.forEach((start, id) => {
+                if (id === this.dragNode.dataset.nodeId) return;
+                const member = this.nodes.get(id);
+                const element = document.querySelector(`[data-node-id="${CSS.escape(id)}"]`);
+                if (!member || !element) return;
+                member.x = start.x + newX - this.nodeStartX;
+                member.y = start.y + newY - this.nodeStartY;
+                element.style.left = member.x + 'px'; element.style.top = member.y + 'px';
+            });
             this._updateConnections();
         }
         if (this.isDrawingConnection && this.tempConnectionLine) {
@@ -287,11 +315,18 @@ class CanvasEngine {
         if (this.isSelecting) {
             this.isSelecting = false;
             document.getElementById('selection-marquee')?.classList.add('hidden');
+            if (this.selectedNodeId) this.onNodeSelected?.(this.selectedNodeId, this.nodes.get(this.selectedNodeId));
+            else this.onNodeDeselected?.();
         }
         if (this.isDraggingNode) {
             this.isDraggingNode = false;
+            const nodeId = this.dragNode?.dataset.nodeId;
+            const node = nodeId ? this.nodes.get(nodeId) : null;
+            const moved = Boolean(node && (node.x !== this.nodeStartX || node.y !== this.nodeStartY));
             if (this.dragNode) this.dragNode.classList.remove('dragging');
             this.dragNode = null;
+            this.dragNodeStarts = null;
+            if (moved) this._notifyCanvasGeometryChanged('node-move', { nodeIds: [nodeId] });
         }
         if (this.isDrawingConnection) {
             const target = document.elementFromPoint(e.clientX, e.clientY);
@@ -374,6 +409,25 @@ class CanvasEngine {
         this._updateConnections();
     }
 
+    setViewport(viewport = {}) {
+        const nextScale = Number(viewport.scale);
+        this.scale = Number.isFinite(nextScale) ? Math.max(0.15, Math.min(3, nextScale)) : this.scale;
+        if (Number.isFinite(Number(viewport.offsetX))) this.offsetX = Number(viewport.offsetX);
+        if (Number.isFinite(Number(viewport.offsetY))) this.offsetY = Number(viewport.offsetY);
+        this._applyTransform();
+        this._updateZoom();
+        this._updateConnections();
+        return { scale: this.scale, offsetX: this.offsetX, offsetY: this.offsetY };
+    }
+
+    centerAt(x, y) {
+        const rect = this.container.getBoundingClientRect();
+        return this.setViewport({
+            offsetX: rect.width / 2 - Number(x) * this.scale,
+            offsetY: rect.height / 2 - Number(y) * this.scale
+        });
+    }
+
     // --- Add-node Menu ---
     _showAddMenu(clientX, clientY, options = {}) {
         this._hideAddMenu();
@@ -424,7 +478,15 @@ class CanvasEngine {
     }
 
     // --- Nodes ---
-    addNode(type, x, y, data = {}) {
+    addNode(type, x, y, data = {}, options = {}) {
+        return this._addNodeCore(type, x, y, data, options);
+    }
+
+    addNodeForCommand(type, x, y, data = {}) {
+        return this._addNodeCore(type, x, y, data, { select: false, notify: false });
+    }
+
+    _addNodeCore(type, x, y, data = {}, options = {}) {
         const requestedId = typeof data?.id === 'string' && data.id.trim() ? data.id.trim() : '';
         const id = requestedId || 'node-' + this.nextNodeId++;
         const match = id.match(/^node-(\d+)$/);
@@ -437,7 +499,8 @@ class CanvasEngine {
         this.canvas.appendChild(el);
         this.nodeResizeObserver?.observe(el);
         document.getElementById('canvas-welcome')?.classList.add('hidden');
-        this._selectNode(id);
+        if (options.select !== false) this._selectNode(id);
+        if (options.notify !== false) this._notifyCanvasGeometryChanged('node-add', { nodeIds: [id] });
         return id;
     }
 
@@ -476,6 +539,7 @@ class CanvasEngine {
         this.nodes.clear();
         this.connections = [];
         this.selectedNodeId = null;
+        this.selectedNodeIds.clear();
         this.nextNodeId = 1;
 
         const nodes = Array.isArray(snapshot.nodes) ? snapshot.nodes : [];
@@ -503,6 +567,87 @@ class CanvasEngine {
         this._updateZoom();
         this._updateConnections();
         document.getElementById('canvas-welcome')?.classList.toggle('hidden', this.nodes.size > 0);
+        this._notifyCanvasGeometryChanged('restore');
+    }
+
+    applyCommandSnapshot(snapshot = {}) {
+        if (!Array.isArray(snapshot.nodes) || !Array.isArray(snapshot.connections)) return false;
+        const nextNodes = new Map();
+        snapshot.nodes.forEach(node => {
+            if (!node?.id || !node?.type || nextNodes.has(node.id)) return;
+            nextNodes.set(node.id, {
+                id: String(node.id), type: String(node.type),
+                x: Number.isFinite(Number(node.x)) ? Number(node.x) : 0,
+                y: Number.isFinite(Number(node.y)) ? Number(node.y) : 0,
+                data: node.data && typeof node.data === 'object' && !Array.isArray(node.data)
+                    ? cloneCanvasValue(node.data) : {}
+            });
+        });
+
+        const nextConnections = [];
+        for (const edge of snapshot.connections) {
+            if (!edge?.from || !edge?.to) return false;
+            const issue = this._connectionValidationError(String(edge.from), String(edge.to), nextNodes, nextConnections);
+            if (issue) return false;
+            nextConnections.push({ from: String(edge.from), to: String(edge.to) });
+        }
+
+        const previousNodes = this.nodes;
+        const previousNodeIds = new Set(previousNodes.keys());
+        const nextNodeIds = new Set(nextNodes.keys());
+        const removedNodeIds = [...previousNodeIds].filter(id => !nextNodeIds.has(id));
+        const addedNodeIds = [...nextNodeIds].filter(id => !previousNodeIds.has(id));
+        const changedNodeIds = [];
+
+        nextNodes.forEach((next, id) => {
+            const previous = previousNodes.get(id);
+            if (!previous) return;
+            const changed = previous.type !== next.type || previous.x !== next.x || previous.y !== next.y
+                || JSON.stringify(previous.data || {}) !== JSON.stringify(next.data || {});
+            if (changed) changedNodeIds.push(id);
+            previous.type = next.type;
+            previous.x = next.x;
+            previous.y = next.y;
+            previous.data = next.data;
+            nextNodes.set(id, previous);
+        });
+
+        this.canvas.querySelectorAll('.canvas-node').forEach(element => {
+            const id = element.dataset.nodeId;
+            if (!nextNodeIds.has(id) || changedNodeIds.includes(id)) {
+                this.nodeResizeObserver?.unobserve(element);
+                element.remove();
+            }
+        });
+        this.svg.querySelectorAll('.connection-line, .connection-delete-control').forEach(line => line.remove());
+
+        this.nodes = nextNodes;
+        nextNodes.forEach((node, id) => {
+            const previous = previousNodes.get(id);
+            const existingElement = this.canvas.querySelector(`[data-node-id="${CSS.escape(id)}"]`);
+            if (existingElement) return;
+            if (previous && !changedNodeIds.includes(id)) changedNodeIds.push(id);
+            const element = this._buildNode(node);
+            this.canvas.appendChild(element);
+            this.nodeResizeObserver?.observe(element);
+        });
+
+        this.connections = [];
+        nextConnections.forEach(edge => this._commandCreateConnection(edge.from, edge.to, { notify: false, showError: false }));
+        if (Object.prototype.hasOwnProperty.call(snapshot, 'planSplits')) {
+            this.planSplits = snapshot.planSplits ? cloneCanvasValue(snapshot.planSplits) : null;
+        }
+        this.nextNodeId = Math.max(this.nextNodeId, Number(snapshot.nextNodeId) || 1);
+
+        const survivingSelection = [...this.selectedNodeIds].filter(id => nextNodeIds.has(id));
+        const primary = this.selectedNodeId && nextNodeIds.has(this.selectedNodeId)
+            ? this.selectedNodeId : survivingSelection[survivingSelection.length - 1];
+        this.selectNodes(survivingSelection, primary);
+        this._updateConnections();
+        document.getElementById('canvas-welcome')?.classList.toggle('hidden', this.nodes.size > 0);
+        const result = { removedNodeIds, addedNodeIds, changedNodeIds };
+        this._notifyCanvasGeometryChanged('command-restore', result);
+        return result;
     }
 
     deleteNode(nodeId) {
@@ -521,13 +666,17 @@ class CanvasEngine {
             return true;
         });
         const deleted = this.nodes.delete(nodeId);
+        this.selectedNodeIds.delete(nodeId);
         if (this.selectedNodeId === nodeId) {
-            this.selectedNodeId = null;
-            this.onNodeDeselected?.();
+            const nextSelected = [...this.selectedNodeIds].at(-1) || null;
+            this.selectedNodeId = nextSelected;
+            if (nextSelected) this.onNodeSelected?.(nextSelected, this.nodes.get(nextSelected));
+            else this.onNodeDeselected?.();
         }
         if (this.nodes.size === 0)
             document.getElementById('canvas-welcome')?.classList.remove('hidden');
         if (deleted) this.onNodeDeleted?.(nodeId);
+        if (deleted) this._notifyCanvasGeometryChanged('node-delete', { nodeIds: [nodeId] });
     }
 
     _buildNode(nd) {
@@ -591,7 +740,7 @@ class CanvasEngine {
             this.nodeStartX = parseFloat(wrap.style.left);
             this.nodeStartY = parseFloat(wrap.style.top);
             wrap.classList.add('dragging');
-            this._selectNode(id);
+            this._selectDragNodes(id);
         });
 
         // Also drag via card header area (but not inputs/buttons inside)
@@ -612,12 +761,12 @@ class CanvasEngine {
             this.nodeStartX = parseFloat(wrap.style.left);
             this.nodeStartY = parseFloat(wrap.style.top);
             wrap.classList.add('dragging');
-            this._selectNode(id);
+            this._selectDragNodes(id);
         });
 
         // Select
         wrap.addEventListener('mousedown', (e) => {
-            if (!e.target.closest('.node-connector')) this._selectNode(id);
+            if (!e.target.closest('.node-connector') && !this.isDraggingNode) this._selectNode(id);
         });
 
         // Connectors
@@ -1172,28 +1321,59 @@ class CanvasEngine {
         return true;
     }
 
+    getSelectedNodeIds() {
+        return [...this.selectedNodeIds].filter(id => this.nodes.has(id));
+    }
+
+    _selectDragNodes(id) {
+        const groupId = this.nodes.get(id)?.data?.canvasGroup?.id;
+        const ids = groupId ? [...this.nodes.values()].filter(node => node.data?.canvasGroup?.id === groupId).map(node => node.id)
+            : this.selectedNodeIds.has(id) ? this.getSelectedNodeIds() : [id];
+        this.selectNodes(ids, id);
+        this.dragNodeStarts = new Map(ids.map(key => [key, { x: this.nodes.get(key).x, y: this.nodes.get(key).y }]));
+    }
+
+    selectNodes(nodeIds = [], primaryNodeId = null) {
+        const ids = [...new Set(nodeIds)].filter(id => this.nodes.has(id));
+        const previousSelection = this.selectedNodeIds.size > 0;
+        this.canvas.querySelectorAll('.canvas-node.selected').forEach(element => element.classList.remove('selected'));
+        this.selectedNodeIds = new Set(ids);
+        this.selectedNodeId = ids.includes(primaryNodeId) ? primaryNodeId : (ids[ids.length - 1] || null);
+        if (previousSelection && !this.selectedNodeId) this.onNodeDeselected?.();
+        ids.forEach(id => this.canvas.querySelector(`[data-node-id="${CSS.escape(id)}"]`)?.classList.add('selected'));
+        if (this.selectedNodeId) this.onNodeSelected?.(this.selectedNodeId, this.nodes.get(this.selectedNodeId));
+        return ids;
+    }
+
     _selectNode(id) {
         this._deselectAll();
         this.selectedNodeId = id;
+        this.selectedNodeIds = new Set([id]);
         document.querySelector(`[data-node-id="${id}"]`)?.classList.add('selected');
         this.onNodeSelected?.(id, this.nodes.get(id));
     }
     _deselectAll() {
-        document.querySelectorAll('.canvas-node.selected').forEach(n => n.classList.remove('selected'));
-        if (this.selectedNodeId) this.onNodeDeselected?.();
+        this.canvas.querySelectorAll('.canvas-node.selected').forEach(n => n.classList.remove('selected'));
+        const selected = Boolean(this.selectedNodeId || this.selectedNodeIds.size);
         this.selectedNodeId = null;
+        this.selectedNodeIds.clear();
+        if (selected) this.onNodeDeselected?.();
     }
 
     // --- Connections ---
     connectNodes(fromId, toId) {
+        return this._connectNodes(fromId, toId, false);
+    }
+
+    connectNodesForCommand(fromId, toId) {
+        return this._connectNodes(fromId, toId, true);
+    }
+
+    _connectNodes(fromId, toId, commandOnly) {
         if (!this.nodes.has(fromId) || !this.nodes.has(toId)) return false;
-        if (fromId === toId) {
-            this._showNodeIssue(fromId, '不能连接到自己');
-            this.onConnectionRejected?.(fromId, toId, '不能连接到自己');
-            return false;
-        }
         const before = this.connections.length;
-        this._createConnection(fromId, toId);
+        if (commandOnly) this._commandCreateConnection(fromId, toId, { notify: false });
+        else this._createConnection(fromId, toId);
         return this.connections.length > before;
     }
 
@@ -1207,6 +1387,7 @@ class CanvasEngine {
         this.connections = this.connections.filter(item => !(item.from === fromId && item.to === toId));
         removed.forEach(item => this.onConnectionDeleted?.(item.from, item.to));
         this._updateConnections();
+        this._notifyCanvasGeometryChanged('connection-delete', { connections: removed.map(({ from, to }) => ({ from, to })) });
         return true;
     }
 
@@ -1235,38 +1416,42 @@ class CanvasEngine {
             y: y
         };
     }
-    _createConnection(fromId, toId) {
-        const source = this.nodes.get(fromId);
-        const target = this.nodes.get(toId);
-        if (!source || !target) return false;
-        if (this.connections.find(c => c.from === fromId && c.to === toId)) {
-            this._showNodeIssue(toId, '这条连接已存在');
-            this.onConnectionRejected?.(fromId, toId, '这条连接已存在');
-            return false;
+    _connectionValidationError(fromId, toId, nodes = this.nodes, connections = this.connections) {
+        const source = nodes.get(fromId);
+        const target = nodes.get(toId);
+        if (!source || !target) return { message: '节点不存在', reason: 'missing-node' };
+        if (fromId === toId) return { message: '不能连接到自己', reason: 'self-connection' };
+        if (connections.some(connection => connection.from === fromId && connection.to === toId)) {
+            return { message: '这条连接已存在', reason: 'duplicate-connection' };
         }
         const sourceIsFlow = source.type.startsWith('flow-');
         const targetIsFlow = target.type.startsWith('flow-');
         if (sourceIsFlow || targetIsFlow) {
-            const allowed = sourceIsFlow && targetIsFlow
-                && source.type !== 'flow-output'
-                && target.type !== 'flow-input';
+            const allowed = sourceIsFlow && targetIsFlow && Boolean(TOOLFLOW_CONNECTIONS[source.type]?.has(target.type));
             const createsCycle = (() => {
                 const seen = new Set([toId]);
                 const stack = [toId];
                 while (stack.length) {
                     const current = stack.pop();
                     if (current === fromId) return true;
-                    this.connections.filter(item => item.from === current).forEach(item => {
+                    connections.filter(item => item.from === current).forEach(item => {
                         if (!seen.has(item.to)) { seen.add(item.to); stack.push(item.to); }
                     });
                 }
                 return false;
             })();
-            if (!allowed || createsCycle) {
-                this._showNodeIssue(toId, !allowed ? '不能连接这个节点类型' : '不能形成循环');
-                this.onConnectionRejected?.(fromId, toId, !allowed ? '工具流节点类型不兼容' : '工具流不能形成循环');
-                return false;
-            }
+            if (!allowed) return { message: '不能连接这个节点类型', reason: 'incompatible-toolflow-edge' };
+            if (createsCycle) return { message: '不能形成循环', reason: 'toolflow-cycle' };
+        }
+        return null;
+    }
+
+    _createConnection(fromId, toId, options = {}) {
+        const issue = this._connectionValidationError(fromId, toId);
+        if (issue) {
+            if (options.showError !== false) this._showNodeIssue(toId, issue.message);
+            if (options.notify !== false) this.onConnectionRejected?.(fromId, toId, issue.reason);
+            return false;
         }
         const lineId = `conn-${fromId}-${toId}`;
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -1284,7 +1469,8 @@ class CanvasEngine {
         // getBoundingClientRect() returns intermediate values during animation
         requestAnimationFrame(() => this._updateConnections());
         setTimeout(() => this._updateConnections(), 350);
-        this.onConnectionCreated?.(fromId, toId);
+        if (options.notify !== false) this.onConnectionCreated?.(fromId, toId);
+        if (options.notify !== false) this._notifyCanvasGeometryChanged('connection-add', { connections: [{ from: fromId, to: toId }] });
         return true;
     }
     _createConnectionDeleteControl(connection) {
@@ -1489,7 +1675,12 @@ class CanvasEngine {
             });
         });
         this._updateConnections();
+        this._notifyCanvasGeometryChanged('toolflow-arrange', { nodeIds: flowNodes.map(node => node.id) });
         return true;
+    }
+
+    _notifyCanvasGeometryChanged(kind, details = {}) {
+        this.onCanvasGeometryChanged?.({ kind, ...details });
     }
 }
 

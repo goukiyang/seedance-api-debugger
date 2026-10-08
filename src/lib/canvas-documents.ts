@@ -385,8 +385,9 @@ function duplicateSnapshot(snapshot: Snapshot): Snapshot {
     'mode', 'imageSettings', 'videoSettings', 'settings', 'model', 'textModel', 'quality', 'ratio', 'size', 'resolution',
     'count', 'duration', 'cameraPresets', 'templateId', 'template_id', 'templateVersion', 'moduleId', 'module_id',
     'source', 'executionMode', 'inputSource', 'retryCount', 'outputMode', 'canvasStyle',
-    'planSource', 'planReferences', 'planParameterSource', 'videoCardId', 'videoBranchId']);
+    'planSource', 'planReferences', 'planParameterSource', 'videoCardId', 'videoBranchId', 'storyWorkflow', 'storySource', 'canvasGroup']);
   const remap = new Map(snapshot.canvas.nodes.map(node => [node.id, `node-${randomUUID()}`]));
+  const groups = new Map<string, string>();
   const plans = object(snapshot.canvas.planSplits)
     ? JSON.parse(JSON.stringify(snapshot.canvas.planSplits)) as ObjectValue : null;
   if (plans && object(plans.sources)) {
@@ -410,8 +411,16 @@ function duplicateSnapshot(snapshot: Snapshot): Snapshot {
       ...(plans ? { planSplits: plans } : {}),
       nodes: snapshot.canvas.nodes.map(node => {
         const data = Object.fromEntries(Object.entries(node.data).filter(([key]) => configKeys.has(key)));
+        if (object(data.canvasGroup) && typeof data.canvasGroup.id === 'string') {
+          const old = data.canvasGroup.id;
+          if (!groups.has(old)) groups.set(old, `group-${randomUUID()}`);
+          data.canvasGroup = { version: 1, id: groups.get(old),
+            ...(typeof data.canvasGroup.name === 'string' ? { name: data.canvasGroup.name.slice(0, 80) } : {}) };
+        }
         if (object(data.planSource)) data.planSource = { ...data.planSource,
           sourceNodeId: remap.get(String(data.planSource.sourceNodeId)) || null };
+        if (object(data.storySource)) data.storySource = { ...data.storySource,
+          nodeId: remap.get(String(data.storySource.nodeId)) || null };
         if (Array.isArray(data.planReferences)) data.planReferences = data.planReferences.map(item => object(item)
           ? { ...item, nodeId: remap.get(String(item.nodeId)) || item.nodeId } : item);
         if (node.type === 'flow-input') {

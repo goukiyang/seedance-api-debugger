@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '减少重复和无可保存内容的爱心；收藏可返回原内容，失效模板仍可取消；画布风格喜欢与站内同步，本机skills标记改为常用。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '新增故事与完整剧本、可编辑分镜及手动图视频串联；画布支持撤销、复制、分组和小地图；画布列表可安全返回、时间显示更清楚。音频目前只支持添加素材。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

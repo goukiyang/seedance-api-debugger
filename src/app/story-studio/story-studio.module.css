@@ -1,0 +1,29 @@
+.studio { max-width: 1480px; margin: 0 auto; padding: 24px; color: var(--text-primary, #e5e7eb); }
+.header, .actions, .shotHeader { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.header { justify-content: space-between; border-bottom: 1px solid var(--border-color, #374151); padding-bottom: 18px; margin-bottom: 20px; }
+.header h1 { font-size: 24px; margin: 0; }
+.header small, .status { color: var(--text-secondary, #9ca3af); }
+.studio button, .studio select, .studio input, .studio textarea, .link { border: 1px solid var(--border-color, #4b5563); background: var(--bg-secondary, #181a20); color: inherit; border-radius: 6px; font-size: 14px; }
+.studio button, .link { padding: 9px 12px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; text-decoration: none; cursor: pointer; min-height: 38px; }
+.studio button:disabled { opacity: .5; cursor: not-allowed; }
+.studio button:focus-visible, .studio textarea:focus-visible, .studio input:focus-visible, .studio select:focus-visible, .link:focus-visible { outline: 2px solid #39b99e; outline-offset: 2px; }
+.studio button.primary { background: #137c67; border-color: #289a83; color: white; }
+.grid { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(300px, 1.4fr); gap: 24px; }
+.section { min-width: 0; }
+.section h2 { font-size: 18px; margin: 0 0 12px; }
+.studio label { display: flex; flex-direction: column; gap: 7px; font-size: 13px; margin-bottom: 12px; }
+.studio textarea, .studio input, .studio select { width: 100%; box-sizing: border-box; padding: 10px; line-height: 1.6; }
+.studio textarea { resize: vertical; min-height: 88px; }
+.storyText { min-height: 280px !important; }
+.scriptText { min-height: 380px !important; }
+.status { font-size: 13px; margin: 12px 0; line-height: 1.6; overflow-wrap: anywhere; }
+.error { color: #f4a4a4; }
+.shots { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--border-color, #374151); }
+.shot { padding: 18px 0; border-top: 1px solid var(--border-color, #374151); }
+.shotHeader { justify-content: space-between; margin-bottom: 12px; }
+.shotHeader h3 { margin: 0; font-size: 16px; }
+.shotFields { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; }
+.duration { max-width: 160px; }
+.raw { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow: auto; }
+.toolbar { display: flex; gap: 12px; justify-content: space-between; flex-wrap: wrap; margin-bottom: 15px; }
+@media (max-width: 760px) { .studio { padding: 16px; } .grid, .shotFields { grid-template-columns: 1fr; } .header h1 { font-size: 22px; } }
