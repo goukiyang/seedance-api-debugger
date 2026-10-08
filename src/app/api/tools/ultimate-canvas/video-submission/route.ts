@@ -3,6 +3,7 @@ import { AuthError, getSession } from '@/lib/auth/session';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 import { prisma } from '@/lib/prisma';
+import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -42,10 +43,12 @@ export async function GET(request: NextRequest) {
       || metadata.canvas_document_id !== document.id || metadata.canvas_node_id !== nodeId) {
       throw new AuthError('任务与当前请求不匹配', 403);
     }
-    if ((expectedProvider && task.provider !== expectedProvider) || (submission.input?.model && task.model !== submission.input.model)) throw new AuthError('任务模型或通道与原请求不匹配', 403);
+    const storedProvider = expectedProvider === 'volcengine_ip' ? VOLCENGINE_IP_VIDEO_PROVIDER : expectedProvider;
+    if ((storedProvider && task.provider !== storedProvider) || (submission.input?.model && task.model !== submission.input.model)) throw new AuthError('任务模型或通道与原请求不匹配', 403);
     await assertCanViewTask(user, task);
-    const unknown = task.local_status === 'failed' && !task.provider_task_id;
-    return json({ state: unknown ? 'unconfirmed' : 'accepted', task: { id: task.id, local_status: task.local_status, provider_task_id: task.provider_task_id } });
+    const unknown = task.error_code === 'IP_SUBMISSION_UNCONFIRMED'
+      || (['queued', 'submitted', 'running', 'processing', 'pending', 'failed'].includes(task.local_status) && !task.provider_task_id);
+    return json({ state: unknown ? 'unconfirmed' : 'accepted', task: { id: task.id, local_status: task.local_status, provider_task_id: task.provider_task_id, error_code: task.error_code } });
   } catch (error) {
     if (error instanceof AuthError) return json({ error: error.message }, error.status);
     return json({ error: '请求状态暂时无法读取，请保留原请求后重试' }, 500);

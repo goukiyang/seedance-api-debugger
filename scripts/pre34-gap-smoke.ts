@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import { createHash } from 'node:crypto';
 import { parseStoryMaterials, validateStoryDraft, composeStoryShot, separateStoryPrompt, storyGenerationPrompt, type StoryShot } from '../src/lib/story-workflow';
 import { canvasImageReferencePolicy } from '../src/lib/canvas-image-references';
 import { seedanceVideoDurationOptions, SEEDANCE_2_5_IP_MODEL_ID } from '../src/lib/provider/seedance-models';
@@ -20,6 +21,142 @@ function functionCode(file: string, names: string[]) {
   return ts.transpileModule(names.map(name => found.get(name)).join('\n') + names.map(name => `;this.${name}=${name}`).join(''), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
 }
 const shot: StoryShot = { id: 'shot-1', title: '镜头1', description: '雨夜公交站', dialogue: '', imagePrompt: '', videoPrompt: '', durationSeconds: 5 };
+
+class FixtureAuthError extends Error {
+  constructor(message: string, public status = 400) { super(message); }
+}
+
+async function verifyReviewCorrections(api: any) {
+  const appFile = 'public/tools/ultimate-canvas/app.js';
+  const ast = ts.createSourceFile(appFile, source(appFile), ts.ScriptTarget.Latest, true);
+  let optionsCode = '';
+  const findOptions = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && node.expression.getText(ast) === 'window.UltimateCanvasGenerationTaskCoordinator.createGenerationTaskCoordinator') optionsCode = node.arguments[0].getText(ast);
+    ts.forEachChild(node, findOptions);
+  };
+  findOptions(ast); assert.ok(optionsCode);
+  const contract: any = { URL, module: { exports: {} } };
+  runInNewContext(source('public/tools/ultimate-canvas/backend-contract.js'), contract);
+  for (const provider of ['seedance', 'volcengine_ip']) {
+    const calls: string[] = [];
+    const node = { data: { taskId: 'task', videoSubmission: { state: 'unconfirmed', input: { source_metadata: { provider } } } } };
+    const vm: any = { exports: {}, window: { location: { origin: 'https://sd2.youdooart.com' }, UltimateCanvasBackendContract: contract.module.exports, UltimateCanvasGenerationNodes: api },
+      engine: { nodes: new Map([['node', node]]) }, canvasRuntime: { bootstrap: {} }, CSS: { escape: (v: string) => v },
+      document: { querySelector: () => null }, setNodeGenerationStatus: () => {},
+      requestJson: async (url: string) => { calls.push(url); return { task: { id: 'task', local_status: 'submitted', error_code: 'IP_SUBMISSION_UNCONFIRMED' } }; } };
+    runInNewContext(functionCode(appFile, ['videoStatusUrl']), vm);
+    runInNewContext(`this.options = ${optionsCode};`, vm);
+    const result = await vm.options.fetchStatus('task', { nodeId: 'node' });
+    assert.deepEqual(calls, [provider === 'volcengine_ip' ? '/api/ip/video/status/task?refresh=true' : '/api/video/status/task?refresh=true']);
+    assert.equal(result.local_status, 'unconfirmed');
+  }
+  checks.push('R1: actual coordinator fetchStatus callback issues ordinary/IP GET exactly once using entry.nodeId');
+
+  const input = { model: 'ip-model', source_metadata: { provider: 'volcengine_ip' } };
+  const submission = { requestId: 'original-request', state: 'unconfirmed', userId: 'user', documentId: 'doc', input,
+    generationPayload: { nodeId: 'node', requestId: 'original-request', settings: { provider: 'volcengine_ip' } } };
+  const storedTask = { id: 'task', user_id: 'user', project_id: 'project', video_card_id: 'card',
+    source_request_id: 'ultimate_canvas:node:original-request', source_metadata_json: JSON.stringify({ canvas_document_id: 'doc', canvas_node_id: 'node' }),
+    provider: 'volcengine_ark', model: 'ip-model', local_status: 'submitted', provider_task_id: null, error_code: 'IP_SUBMISSION_UNCONFIRMED' };
+  const docSubmission = { ...submission, projectId: 'project', cardId: 'card' };
+  let viewCalls = 0;
+  const query: any = { exports: {}, AuthError: FixtureAuthError, VOLCENGINE_IP_VIDEO_PROVIDER: 'volcengine_ark',
+    getSession: async () => ({ id: 'user' }), assertCanEditCanvasDocument: async () => ({ id: 'doc', project_id: 'project', document_json: JSON.stringify({ canvas: { nodes: [{ id: 'node', data: { videoSubmission: docSubmission } }] } }) }),
+    prisma: { videoTask: { findUnique: async (arg: any) => { assert.equal(arg.where.user_id_idempotency_key.idempotency_key, 'node:original-request'); return storedTask; } } },
+    assertCanViewTask: async () => { viewCalls++; }, json: (value: any, status = 200) => ({ value, status }) };
+  runInNewContext(functionCode('src/app/api/tools/ultimate-canvas/video-submission/route.ts', ['GET']), query);
+  const req = { nextUrl: { searchParams: new URLSearchParams({ document_id: 'doc', node_id: 'node', request_id: 'original-request' }) } };
+  const found = await query.GET(req); assert.equal(found.status, 200); assert.equal(found.value.state, 'unconfirmed'); assert.equal(viewCalls, 1);
+  assert.equal(found.value.task.error_code, 'IP_SUBMISSION_UNCONFIRMED');
+  for (const field of ['user_id', 'project_id', 'video_card_id', 'source_request_id', 'provider', 'model', 'source_metadata_json'] as const) {
+    const original = storedTask[field]; storedTask[field] = 'other';
+    const result = await query.GET(req); assert.notEqual(result.status, 200); storedTask[field] = original;
+  }
+  storedTask.source_metadata_json = JSON.stringify({ canvas_document_id: 'other', canvas_node_id: 'node' });
+  assert.equal((await query.GET(req)).status, 403);
+  storedTask.source_metadata_json = JSON.stringify({ canvas_document_id: 'doc', canvas_node_id: 'other' });
+  assert.equal((await query.GET(req)).status, 403);
+  checks.push('R2/R3: real lookup accepts persisted volcengine_ark mapping; user/project/card/request/document/node/model/provider guards retained; IP error_code stays unknown');
+
+  const node: any = { id: 'node', data: { videoSubmission: submission } };
+  const polled: string[] = [], lookedUp: string[] = [];
+  const noop = () => {};
+  const vm: any = { exports: {}, window: { UltimateCanvasGenerationNodes: api, UltimateCanvasGenerationInteractions: { generationContextMatches: () => true } },
+    canvasRuntime: { bootstrap: { user: { id: 'user' } }, documentId: 'doc', selectedVideoCardId: 'card' },
+    engine: { nodes: new Map([['node', node]]) }, document: { querySelector: () => null }, CSS: { escape: (v: string) => v }, URLSearchParams,
+    syncNodeDataFromDom: noop, decorateGeneratedNode: noop, renderGenerationNodeControls: noop, renderVideoResultHistory: noop,
+    setNodeGenerationStatus: noop, scheduleCanvasSave: noop, showCanvasNotice: noop, taskDescription: () => '', videoStageLabel: () => '', videoPreviewForTask: () => '',
+    pollVideoTask: (task: string) => polled.push(task), currentGenerationContext: () => ({}), flushCanvasSave: async () => true,
+    requestJson: async (url: string) => { lookedUp.push(url); return { state: 'unconfirmed', task: { id: 'task', local_status: 'submitted', error_code: 'IP_SUBMISSION_UNCONFIRMED' } }; } };
+  runInNewContext(functionCode(appFile, ['applyVideoGenerationResult', 'applyVideoTaskStatus', 'recoverVideoSubmission']), vm);
+  vm.applyVideoGenerationResult(null, submission.generationPayload, { id: 'task', status: 'submitted', error_code: 'IP_SUBMISSION_UNCONFIRMED' });
+  assert.equal(submission.state, 'unconfirmed'); assert.equal(node.data.taskId, 'task'); assert.equal(node.data.generationStatus, 'unconfirmed');
+  await vm.recoverVideoSubmission('node', 'task');
+  assert.equal(submission.state, 'unconfirmed'); assert.equal(lookedUp.length, 1); assert.ok(lookedUp[0].includes('original-request'));
+  assert.equal(polled.length, 2); assert.ok(polled.every(id => id === 'task'));
+  vm.applyVideoTaskStatus('node', { id: 'task', local_status: 'failed', provider_task_id: null, refunded_cost: 15 });
+  assert.equal(submission.state, 'unconfirmed');
+  vm.applyVideoTaskStatus('node', { id: 'task', local_status: 'running', provider_task_id: 'upstream-task' });
+  assert.equal(submission.state, 'accepted');
+  checks.push('R3: actual create/apply/recover preserves IP unknown and original task; refund without upstream identity cannot clear; confirmed original polling resolves it');
+
+  const use: any = { exports: {}, AuthError: FixtureAuthError, assertCanUseReferenceImage: async (_: unknown, id: string) => ({ asset_id: id === 'legacy' ? null : 'shared-asset', asset: { id: 'shared-asset', owner_id: 'other-owner', status: 'active', type: 'image' } }) };
+  runInNewContext(functionCode('src/lib/canvas-studio-reference-use.ts', ['resolveCanvasStudioReferenceUse']), use);
+  const owners = await use.resolveCanvasStudioReferenceUse({ id: 'user' }, ['shared-ref']);
+  assert.equal(owners.get('shared-asset'), 'other-owner');
+  await assert.rejects(use.resolveCanvasStudioReferenceUse({ id: 'user' }, ['legacy']), /持久原件/);
+  use.assertCanUseReferenceImage = async () => { throw new FixtureAuthError('not permitted', 403); };
+  await assert.rejects(use.resolveCanvasStudioReferenceUse({ id: 'user' }, ['denied']), /not permitted/);
+
+  const queued: any[] = [], ledger: any[] = [], assetReads: any[] = [];
+  const tx: any = { imageStudioTask: { findFirst: async (arg: any) => queued.find(row => row.batch_id === arg.where.batch_id) || null, count: async () => 0, create: async ({ data }: any) => queued.push(data) },
+    user: { findUnique: async () => ({ id: 'user', status: 'active', role: 'member' }) },
+    asset: { count: async () => 0, findMany: async (arg: any) => { assetReads.push(arg); return [{ id: 'shared-asset', owner_id: 'other-owner', width: 1024, height: 1024 }]; } },
+    creditLedger: { create: async ({ data }: any) => ledger.push(data) } };
+  const submit: any = { exports: {}, createHash, StudioError: FixtureAuthError, StudioStyleError: FixtureAuthError, StudioReferencePolicyError: FixtureAuthError,
+    parseStudioRequest: (body: any) => ({ ...body }), validStudioModuleId: () => true,
+    prisma: { imageStudioTask: tx.imageStudioTask, $transaction: async (fn: any) => fn(tx) },
+    getImageStudioSettings: async () => ({ revision: 1, context: '' }), withContextVersionRetry: (fn: any) => fn(), canUseCompanyTemplates: () => true,
+    resolveCanvasStudioReferenceUse: async () => owners,
+    resolveStudioModuleGenerationConfig: () => ({ model: 'gemini', quality: 'auto', resolution: '2K', prices: { gemini: 5 } }),
+    IMAGE_STUDIO_MODEL_QUALITY_OPTIONS: { gemini: ['auto'] }, IMAGE_STUDIO_MODEL_COST_USD: { gemini: 0 },
+    getImageGenerationSettingsForModel: async () => ({ provider: 'configured' }), isStudioImageGenerationProvider: () => true, isImageGenerationApiReady: () => true,
+    resolveStudioStyleReferences: async () => ({ groups: [] }), resolveSkills: async () => [], evolutionCapability: () => null,
+    validateStudioReferenceCounts: () => {}, studioVisibleAssetWhere: async () => ({}), studioTemplateAssetUrl: (id: string) => `private/${id}`,
+    resolveStudioAspectRatio: () => ({ requested: '1:1', resolved: '1:1', source: 'manual' }), studioFourToOneIssue: () => '', supportsStudioFourToOne: () => false,
+    normalizeImageResolution: () => '2K', imageOutputSize: () => '2048x2048', bindModuleContextVersion: async () => 'v1', MODULE_CONTEXT_VERSION_RULE: 'existing',
+    allocateTaskCredits: async () => ({ snapshot: 'freeze', allocations: [], balance_before: 100, balance_after: 95, frozen_before: 0, frozen_after: 5 }) };
+  runInNewContext(functionCode('src/lib/image-studio/tasks.ts', ['submitStudioBatch']), submit);
+  const request: any = { requestId: 'original-shared-request', prompt: '描述', count: 1, revision: 1, referenceIds: ['shared-asset'], model: 'gemini', quality: 'auto', maxEstimatedCost: 5,
+    draft: { referencePolicy: canvasImageReferencePolicy(['shared-asset']) } };
+  const canvasUse = { user: { id: 'user' }, referenceImageIds: ['shared-ref'] };
+  const batch = await submit.submitStudioBatch('user', request, undefined, undefined, canvasUse);
+  assert.equal(queued.length, 1); assert.equal(ledger.length, 1); assert.equal(queued[0].quality, 'auto');
+  assert.deepEqual(JSON.parse(queued[0].reference_ids), ['shared-asset']);
+  const snapshot = JSON.parse(queued[0].snapshot_json);
+  assert.equal(snapshot.authorizedReferenceOwners['shared-asset'], 'other-owner'); assert.equal(snapshot.requestId, request.requestId);
+  assert.equal(snapshot.referenceImages[0].originalUrl, null); assert.equal(snapshot.referenceImages[0].thumbnailUrl, null);
+  assert.ok(assetReads[0].where.OR.some((clause: any) => clause.id === 'shared-asset' && clause.owner_id === 'other-owner'));
+  assert.equal(await submit.submitStudioBatch('user', request, undefined, undefined, canvasUse), batch);
+  assert.equal(queued.length, 1); assert.equal(ledger.length, 1);
+  await assert.rejects(submit.submitStudioBatch('user', { ...request, prompt: 'changed' }, undefined, undefined, canvasUse), /其他请求/);
+  submit.resolveCanvasStudioReferenceUse = async () => { throw new FixtureAuthError('revoked use', 403); };
+  await assert.rejects(submit.submitStudioBatch('user', { ...request, requestId: 'new-request' }, undefined, undefined, canvasUse), /revoked use/);
+  assert.equal(queued.length, 1); assert.equal(ledger.length, 1);
+  checks.push('R4: actual existing batch submit queues shared original ID/owner/quality, no copy/original URL grant; original-request dedupe prevents second queue/freeze; changed/revoked use rejected');
+
+  for (const status of ['queued', 'uncertain', 'failed']) {
+    const results: any = { exports: {}, AuthError: FixtureAuthError, requireCanvasStyleUser: async () => ({ id: 'user' }),
+      readCanvasStyleJson: async () => ({ moduleId: 'module', requestId: 'fixture-request-00000', count: 1 }),
+      parseCanvasStyleContext: () => ({}), assertCanvasStyleContext: async () => {}, validStudioModuleId: () => true, REQUEST_ID_PATTERN: /^[a-zA-Z0-9-]{16,80}$/, canvasStyleBatchId: () => 'batch',
+      prisma: { imageStudioModule: { findFirst: async () => ({ id: 'module' }) }, imageStudioTask: { findMany: async () => [{ id: 'task', status, asset_id: null }] } },
+      canvasStyleJson: (value: any) => value, canvasStyleFailure: (error: any) => { throw error; } };
+    runInNewContext(functionCode('src/app/api/tools/ultimate-canvas/styles/results/route.ts', ['POST']), results);
+    const result = await results.POST({}); assert.equal(result.pending, status !== 'failed'); assert.equal(result.submission_unconfirmed, status === 'uncertain');
+    assert.equal(result.status, status === 'uncertain' ? 'unconfirmed' : status);
+  }
+  checks.push('R4: actual results API keeps uncertain/refunded tasks pending-unknown instead of unlocking new generation');
+}
 
 async function main() {
   const materials = parseStoryMaterials(JSON.stringify({ materials: [{ id: 'coat', kind: 'character', name: '女子', description: '黄色雨衣', shotIds: ['shot-1'] }] }));
@@ -71,39 +208,56 @@ async function main() {
   assert.equal(api.videoRequest({ ...payload, referenceImageIds: references, settings: { ...payload.settings, referenceImageLimit: 30 } }).payload.reference_image_ids.length, 30);
   checks.push('M13: IP identity/provider, official route, duration30, Fast1080 rejection and cap');
 
-  for (const scenario of ['cancel', 'save-failure', 'success', 'free', 'restored', 'unknown', 'shared', 'unquoted-seedream']) {
+  for (const scenario of ['cancel', 'save-failure', 'success', 'free', 'restored', 'unknown', 'shared', 'shared-pending', 'shared-disconnect', 'shared-uncertain', 'shared-no-asset', 'unquoted-seedream']) {
     const context = { userId: 'owner', projectId: 'project', cardId: 'card', documentId: 'document', writable: true };
-    const input: any = { nodeId: 'node', prompt: '描述', settings: { model: scenario === 'unquoted-seedream' ? 'seedream' : 'gemini-3.1-flash-image-preview', quality: 'auto', resolution: '2K', ratio: '16:9', count: 1 }, referenceImageIds: scenario === 'shared' ? ['shared-ref'] : [] };
+    const input: any = { nodeId: 'node', prompt: '描述', settings: { model: scenario === 'unquoted-seedream' ? 'seedream' : 'gemini-3.1-flash-image-preview', quality: 'auto', resolution: '2K', ratio: '16:9', count: 1 }, referenceImageIds: scenario.startsWith('shared') ? ['shared-ref'] : [] };
     const job = { kind: 'ordinary', context, requestId: 'existing-request', moduleId: 'existing-module', batchId: 'existing-batch', count: 1, payload: input };
     const node: any = { id: 'node', type: 'image', data: scenario === 'restored' || scenario === 'unknown' ? { styleJob: job } : {} };
-    const calls: string[] = []; let saved = false;
-    const vm: any = { window: { setTimeout: () => { throw Error('unexpected wait'); } }, document: { hidden: false }, structuredClone, AbortSignal,
+    const calls: string[] = []; let saved = false, resultReads = 0;
+    const vm: any = { window: { setTimeout: (callback: () => void) => { if (scenario === 'shared-pending') callback(); else throw Error('unexpected wait'); } }, document: { hidden: false }, structuredClone, AbortSignal,
       crypto: { randomUUID: () => 'fixture-request-0000000' }, URLSearchParams };
     runInNewContext(source('public/tools/ultimate-canvas/canvas-styles.js'), vm);
     const styles = vm.window.UltimateCanvasStyles.create({ getNode: () => node, context: () => context,
       save: () => {}, render: () => {}, status: () => {}, apply: () => {}, notice: () => {},
       confirm: async () => scenario !== 'cancel', flush: async () => { saved = true; return scenario !== 'save-failure'; },
-      request: async (url: string) => {
+      request: async (url: string, body: any) => {
         calls.push(url);
         if (url.endsWith('/quote')) return scenario === 'unquoted-seedream' ? { status: 'unavailable', estimatedCredits: null } : { status: 'estimate', estimatedCredits: scenario === 'free' ? 0 : 5, revision: 1 };
-        if (url.includes('/images/generate?')) return { durable: false };
-        if (url.endsWith('/images/generate')) { assert.ok(saved); assert.ok(node.data.styleJob); return { batchId: 'batch' }; }
-        if (url.endsWith('/results')) return scenario === 'unknown' ? { status: 'not_found' } : { pending: false, status: 'succeeded', assets: [{ id: 'original' }] };
+        if (url.includes('/images/generate?')) return { durable: scenario !== 'shared-no-asset' };
+        if (url.endsWith('/images/generate')) {
+          assert.ok(saved); assert.ok(node.data.styleJob); assert.equal(body.payload.settings.quality, 'auto');
+          if (scenario === 'shared-disconnect') throw Error('connection reset after POST');
+          return { batchId: 'batch' };
+        }
+        if (url.endsWith('/results')) return scenario === 'shared-pending' && resultReads++ === 0 ? { status: 'queued', pending: true, completedCount: 0, totalCount: 1 }
+          : scenario === 'unknown' ? { status: 'not_found' }
+          : scenario === 'shared-uncertain' ? { status: 'unconfirmed', pending: true, submission_unconfirmed: true }
+          : { pending: false, status: 'succeeded', assets: [{ id: 'original' }] };
         throw Error(`unexpected endpoint ${url}`);
       } });
-    if (['cancel', 'save-failure', 'unknown', 'unquoted-seedream'].includes(scenario)) await assert.rejects(styles.generateOrdinary(input, input.prompt));
+    if (['cancel', 'save-failure', 'unknown', 'shared-disconnect', 'shared-uncertain', 'shared-no-asset', 'unquoted-seedream'].includes(scenario)) await assert.rejects(styles.generateOrdinary(input, input.prompt));
     else {
       const result = await styles.generateOrdinary(input, input.prompt);
       if (scenario === 'shared') {
-        assert.equal(result.legacyRequired, true);
+        assert.equal(result.legacyRequired, undefined);
+        assert.equal(result.assets.length, 1);
         const descriptor = api.imageRequest(input);
         assert.equal(descriptor.payload.input.quality, input.settings.quality);
         assert.equal(descriptor.payload.input.resolution, input.settings.resolution);
       }
     }
-    assert.equal(calls.filter(url => url.endsWith('/images/generate')).length, ['success', 'free'].includes(scenario) ? 1 : 0);
+    assert.equal(calls.filter(url => url.endsWith('/images/generate')).length, ['success', 'free', 'shared', 'shared-pending', 'shared-disconnect', 'shared-uncertain'].includes(scenario) ? 1 : 0);
     if (scenario === 'restored') assert.deepEqual(calls, ['/api/tools/ultimate-canvas/styles/results']);
     if (scenario === 'unknown') assert.equal(node.data.styleJob.requestId, 'existing-request');
+    if (['shared-disconnect', 'shared-uncertain'].includes(scenario)) {
+      const persisted = JSON.parse(JSON.stringify(node.data.styleJob));
+      assert.equal(persisted.state, 'unconfirmed');
+      node.data.styleJob = persisted;
+      const before = calls.length;
+      if (scenario === 'shared-uncertain') await assert.rejects(styles.generateOrdinary(input, input.prompt));
+      else await styles.generateOrdinary(input, input.prompt);
+      assert.deepEqual(calls.slice(before), ['/api/tools/ultimate-canvas/styles/results']);
+    }
   }
   checks.push('C17: cancel/save barrier/one POST/restored zero POST/unknown original preserved');
 
@@ -143,7 +297,7 @@ async function main() {
   const c: any = { exports: {}, current: { current: { draft: { shots: [shot] }, groups: [] } }, crypto: { randomUUID: () => 'group' }, setNotice: () => {}, save: async () => {}, change: (value: any) => { c.current.current = value; } };
   runInNewContext(functionCode('src/app/story-studio/story-studio.tsx', ['createGroup']), c); await c.createGroup(); assert.equal(c.current.current.groups.length, 1);
   checks.push('B15: build group has no create API; cancel zero create, confirmed count, stop unknown and skip successful');
-  for (const scenario of ['unsent-save', 'unsent-context', 'rejected', 'unknown', 'unknown-with-id', 'local-failed-refund', 'accepted-id', 'free', 'missing-receipt']) {
+  for (const scenario of ['unsent-save', 'unsent-context', 'rejected', 'unknown', 'unknown-with-id', 'ip-error-code', 'local-failed-refund', 'accepted-id', 'free', 'missing-receipt']) {
     const current: any = { current: { draft: { shots: [shot] }, images: {}, references: {}, mediaNodes: { 'shot-1': 'video' } } };
     const node: any = { id: 'video', data: {} }, calls: string[] = [];
     const c: any = { exports: {}, current, mediaSettings: { videoModel: 'video-model', provider: 'seedance', videoResolution: '720p', ratio: '16:9' },
@@ -162,9 +316,10 @@ async function main() {
         if (scenario === 'rejected') throw Object.assign(Error('rejected'), { status: 422, response: { error: 'invalid' } });
         if (scenario === 'unknown') throw Error('network lost');
         if (scenario === 'unknown-with-id') return { id: 'task', submission_unconfirmed: true, status: 'submitted' };
+        if (scenario === 'ip-error-code') return { id: 'task', error_code: 'IP_SUBMISSION_UNCONFIRMED', local_status: 'submitted', provider_task_id: null };
         if (scenario === 'local-failed-refund') return { id: 'task', local_status: 'failed', provider_task_id: null, refunded_cost: 15, provider_cost_status: 'failed_no_charge' };
         if (scenario === 'missing-receipt') return {};
-        return { id: 'task', status: 'submitted' };
+        return { id: 'task', status: 'submitted', provider_task_id: 'upstream-task' };
       } };
     runInNewContext(functionCode('src/app/story-studio/story-studio.tsx', ['dispatchShots', 'mediaFailureState', 'videoReceptionStatus']), c);
     if (['accepted-id', 'free'].includes(scenario)) await c.dispatchShots('video', ['shot-1']);
@@ -178,6 +333,7 @@ async function main() {
   assert.equal(failure.mediaFailureState({ status: 409, response: { existing_task_id: 'existing' } }, true), 'unconfirmed');
   assert.equal(failure.mediaFailureState({ status: 400, response: { task_id: 'failed-but-reception-unknown' } }, true), 'unconfirmed');
   assert.equal(failure.mediaFailureState({ status: 408 }, true), 'unconfirmed');
+  assert.equal(failure.mediaFailureState({ status: 400, response: { error_code: 'IP_SUBMISSION_UNCONFIRMED' } }, true), 'unconfirmed');
   checks.push('B15 recovery: image/video definitely-unsent, rejection, unknown, original task-bearing error, normal id receipt and unconfirmed202 stop');
   const unknownWork: any = { current: { imageRuns: { 'shot-1': { requestId: 'original-image', status: 'unconfirmed', input: {} } },
     videoRuns: { 'shot-1': { requestId: 'original-video', status: 'unconfirmed', provider: 'seedance' } }, mediaNodes: { 'shot-1': 'video' } } };
@@ -230,7 +386,7 @@ async function main() {
     prisma: { canvasDocument: { findUniqueOrThrow: async () => ({ document_json: JSON.stringify({ canvas: { nodes: [{ id: 'node', type: 'image', data: { styleJob: { kind: 'ordinary', requestId: body.requestId, moduleId: body.moduleId, input: body } } }] } }) }) },
       imageStudioModule: { findFirst: async () => null } },
     getCanvasImageQuote: async () => ({ status: 'estimate', revision: 1, estimatedCredits: 5 }),
-    assertCanUseReferenceImage: async (_: unknown, id: string) => ({ asset_id: id, asset: { owner_id: 'user', status: 'active' } }),
+    resolveCanvasStudioReferenceUse: async (_: unknown, ids: string[]) => new Map(ids.map(id => [id, 'user'])),
     canvasImageReferencePolicy, validateStudioReferenceCounts: countVm.validateStudioReferenceCounts,
     saveStudioModule: async () => {}, submitStudioBatch: async (_: unknown, v: any) => { submitted = v; return 'batch'; },
     canvasStyleJson: (v: any) => v, canvasStyleFailure: (e: unknown) => { throw e; } };
@@ -250,6 +406,7 @@ async function main() {
   adapterVm.installGenerationAdapter(); await assert.rejects(adapter.generate({ kind: 'image', nodeId: 'node', prompt: '描述', settings: { model: 'seedream' } }));
   assert.equal(quotes, 1); assert.equal(legacyCreates, 0);
   checks.push('M13/C17: adapter quotes models with no quality_options; unavailable quote prevents legacy assets POST');
+  await verifyReviewCorrections(api);
   console.log(JSON.stringify({ pass: true, checks, scope: 'offline mocks only; no browser/DB/provider/fees' }, null, 2));
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

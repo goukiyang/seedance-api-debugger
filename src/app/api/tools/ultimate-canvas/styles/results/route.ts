@@ -123,15 +123,16 @@ export async function POST(request: NextRequest) {
     }
 
     const activeTasks = tasks.filter(task => task.status === 'queued' || task.status === 'running');
+    const unconfirmedTasks = tasks.filter(task => !['queued', 'running', 'succeeded', 'failed', 'cancelled'].includes(task.status));
     const attachmentPending = succeeded.some(task => !outputByAsset.has(task.asset_id!));
-    const pending = activeTasks.length > 0 || attachmentPending;
-    const completedCount = tasks.length - activeTasks.length;
+    const pending = activeTasks.length > 0 || unconfirmedTasks.length > 0 || attachmentPending;
+    const completedCount = tasks.length - activeTasks.length - unconfirmedTasks.length;
     const succeededCount = tasks.filter(task => task.status === 'succeeded').length;
     const missingOutputCount = succeededCount - outputByAsset.size;
     if (missingOutputCount > 0) outputErrors.push('有已完成图片当前不可用或尚未加入素材区。');
     const taskErrors = tasks.filter(task => task.status !== 'succeeded' && task.error).map(task => task.error!.trim()).filter(Boolean);
     const errors = Array.from(new Set([...taskErrors, ...outputErrors])).join('\n').slice(0, 1200);
-    const status = pending
+    const status = unconfirmedTasks.length > 0 ? 'unconfirmed' : pending
       ? (activeTasks.length > 0 && activeTasks.every(task => task.status === 'queued') ? 'queued' : 'running')
       : outputByAsset.size > 0 ? 'succeeded' : 'failed';
     const orderedAssets = succeeded.flatMap(task => {
@@ -142,6 +143,7 @@ export async function POST(request: NextRequest) {
     return canvasStyleJson({
       status,
       pending,
+      submission_unconfirmed: unconfirmedTasks.length > 0,
       assets: orderedAssets,
       ...(errors ? { error: errors } : {}),
       completedCount,

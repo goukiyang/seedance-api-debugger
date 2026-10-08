@@ -24,6 +24,8 @@ import { isAvatarSheet, validateSheetCandidates } from '@/lib/avatar-random/layo
 import { evolutionCapability, parseEvolution, resolveEvolution, evolutionInstructions } from './evolution';
 import { studioTemplateTaskWhere } from './task-visibility';
 import { getSkillSelection, historicalSkills, parseSkillIds, resolveSkills, type SkillSnapshot } from './skills';
+import type { SessionUser } from '@/lib/auth/session';
+import { resolveCanvasStudioReferenceUse } from '@/lib/canvas-studio-reference-use';
 
 export class StudioError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -136,7 +138,7 @@ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] 
   catch { throw new StudioError('历史固定参考图快照无效', 409); }
 }
 
-export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void> }) {
+export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void> }, canvasUse?: { user: SessionUser; referenceImageIds: string[] }) {
   const input = parseStudioRequest(body);
   const moduleId = body.moduleId;
   const sheet = Boolean(avatar && isAvatarSheet(avatar));
@@ -144,7 +146,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   if (sheet) { try { validateSheetCandidates(avatar!.candidates, input.referenceIds, avatar!.layout); } catch (e) { throw new StudioError((e as Error).message); } }
   if (moduleId !== undefined && !validStudioModuleId(moduleId, ownerId)) throw new StudioError('模块编号无效');
   const batchId = createHash('sha256').update(`${ownerId}:${input.requestId}`).digest('hex');
-  const fingerprint = createHash('sha256').update(JSON.stringify({ ...input, requestId: undefined, ...(moduleId ? { moduleId } : {}), ...(avatar ? { avatar: avatar.candidates, ...(sheet ? { avatarLayout: avatar!.layout } : {}) } : {}) })).digest('hex');
+  if (canvasUse && (canvasUse.user.id !== ownerId || avatar || preparation)) throw new StudioError('画布参考图请求归属无效', 403);
+  const fingerprint = createHash('sha256').update(JSON.stringify({ ...input, requestId: undefined, ...(moduleId ? { moduleId } : {}), ...(canvasUse ? { canvasReferenceImageIds: canvasUse.referenceImageIds } : {}), ...(avatar ? { avatar: avatar.candidates, ...(sheet ? { avatarLayout: avatar!.layout } : {}) } : {}) })).digest('hex');
   const previous = await prisma.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
   if (previous) {
     if (previous.fingerprint !== fingerprint) throw new StudioError('提交编号已用于其他请求，请重新提交', 409);
@@ -166,6 +169,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (!user || user.status !== 'active') throw new StudioError('当前账号无法生成', 403);
     const identity: ImageStudioIdentity = user;
     if (!canUseCompanyTemplates(identity)) throw new StudioError('仅限公司飞书账号生成图片', 403);
+    const canvasReferenceOwners = canvasUse ? await resolveCanvasStudioReferenceUse(canvasUse.user, canvasUse.referenceImageIds) : new Map<string, string>();
+    if (canvasUse && (canvasReferenceOwners.size !== new Set(input.referenceIds).size || input.referenceIds.some(id => !canvasReferenceOwners.has(id)))) throw new StudioError('画布参考图与持久请求不匹配', 403);
     const workspace = moduleId ? await tx.imageStudioModule.findFirst({ where: { id: moduleId as string, owner_id: ownerId } }) : null;
     if (moduleId && moduleId !== defaultStudioModuleId(ownerId) && !workspace) throw new StudioError('模块不存在或无权使用', 403);
     const reproduceFromTaskId = input.reproduceFromTaskId || (!input.draft ? workspace?.reproduce_task_id : undefined);
@@ -369,11 +374,12 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       .filter(Boolean).join('\n\n---\n');
     const active = await tx.imageStudioTask.count({ where: { owner_id: ownerId, status: { in: ['queued', 'running'] } } });
     if (!preparation && active + input.count > 8) throw new StudioError('最多同时生成 8 张，请等待当前任务完成', 429);
-    const visibleTransient = await tx.asset.count({ where: { id: { in: uniqueTransientIds }, owner_id: ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity, tx)] } });
-    if (visibleTransient !== uniqueTransientIds.length) throw new StudioError('本次参考图已不可用或无权查看', 403);
+    const ownedTransientIds = uniqueTransientIds.filter(id => !canvasReferenceOwners.has(id));
+    const visibleTransient = await tx.asset.count({ where: { id: { in: ownedTransientIds }, owner_id: ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity, tx)] } });
+    if (visibleTransient !== ownedTransientIds.length) throw new StudioError('本次参考图已不可用或无权查看', 403);
     const actualReferenceIds = Array.from(new Set(orderedReferenceIds));
     const references = await tx.asset.findMany({ where: { id: { in: actualReferenceIds }, status: 'active', type: 'image',
-      OR: [{ owner_id: ownerId }, { id: { in: actualFixedIds } }] },
+      OR: [{ owner_id: ownerId }, { id: { in: actualFixedIds } }, ...Array.from(canvasReferenceOwners, ([id, expectedOwner]) => ({ id, owner_id: expectedOwner }))] },
       select: { id: true, owner_id: true, original_url: true, thumbnail_url: true, file_name: true, mime_type: true, width: true, height: true, file_size: true, hash: true } });
     const referencesById = new Map(references.map(reference => [reference.id, reference]));
     if (orderedReferenceIds.some(id => !referencesById.has(id))) throw new StudioError('固定参考图或本次参考图已不可用，或当前账号无权使用', 403);
@@ -381,7 +387,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const referenceSnapshot = referenceDescriptors.map(referenceDescriptor => {
       const id = referenceDescriptor.id;
       const reference = referencesById.get(id);
-      return { id, originalUrl: reference ? studioTemplateAssetUrl(id) : null, thumbnailUrl: reference ? studioTemplateAssetUrl(id, true) : null,
+      const useOnly = canvasReferenceOwners.has(id) && reference?.owner_id !== ownerId;
+      return { id, originalUrl: reference && !useOnly ? studioTemplateAssetUrl(id) : null, thumbnailUrl: reference && !useOnly ? studioTemplateAssetUrl(id, true) : null,
         fileName: reference?.file_name || null, mimeType: reference?.mime_type || null, width: reference?.width || null,
         height: reference?.height || null, fileSize: reference?.file_size || null, hash: reference?.hash || null,
         referenceRole: referenceDescriptor.role,
@@ -414,6 +421,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       skills, skillIds: skills.map(skill => skill.id), effectiveContext: context,
       referencePolicy: { ...referencePolicy, primaryIds: primaryReferenceIds },
       authorizedReferenceOwners: Object.fromEntries(references.map(ref => [ref.id, ref.owner_id])),
+      ...(canvasUse ? { canvasReferenceImageIds: canvasUse.referenceImageIds } : {}),
       transientReferenceImages: transientReferenceSnapshot,
       globalContext: snapshotGlobalContext,
       moduleContext: snapshotModuleContext,

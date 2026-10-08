@@ -33,14 +33,16 @@ function mediaFailureState(cause: unknown, sent: boolean): string {
   if (!sent) return 'not_sent';
   const error = cause as { status?: number; response?: Record<string, unknown> };
   const response = error?.response || {};
-  if (response.submission_unconfirmed || response.task_id || response.existing_task_id || response.id) return 'unconfirmed';
+  if (response.submission_unconfirmed || response.error_code === 'IP_SUBMISSION_UNCONFIRMED'
+    || response.task_id || response.existing_task_id || response.id) return 'unconfirmed';
   const status = Number(error?.status);
   return status >= 400 && status < 500 && ![408, 425, 429].includes(status) ? 'rejected' : 'unconfirmed';
 }
 function videoReceptionStatus(task: Record<string, unknown>): string {
   const status = String(task.local_status || 'unconfirmed');
   // Local refunds/failure markers do not prove the upstream rejected a disconnected POST.
-  if (task.submission_unconfirmed || (status === 'failed' && !task.provider_task_id)) return 'unconfirmed';
+  if (task.submission_unconfirmed || task.error_code === 'IP_SUBMISSION_UNCONFIRMED'
+    || (['queued', 'submitted', 'running', 'processing', 'pending', 'failed'].includes(status) && !task.provider_task_id)) return 'unconfirmed';
   return status;
 }
 type ImageHandoff = { moduleId: string; prompt: string; state: 'not_sent' | 'pending' | 'ready' | 'unconfirmed' };
@@ -509,7 +511,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
       const videoNode = snapshot.current?.canvas.nodes.find(node => node.id === current.current.mediaNodes[id]);
       if (!videoNode) continue;
       if (!run.taskId) {
-        const data = await request<{ state: string; task?: { id: string; local_status: string; provider_task_id?: string | null } }>(`/api/tools/ultimate-canvas/video-submission?${new URLSearchParams({ document_id: documentId, node_id: videoNode.id, request_id: run.requestId })}`);
+        const data = await request<{ state: string; task?: { id: string; local_status: string; provider_task_id?: string | null; error_code?: string | null } }>(`/api/tools/ultimate-canvas/video-submission?${new URLSearchParams({ document_id: documentId, node_id: videoNode.id, request_id: run.requestId })}`);
         if (data.task) videos[id] = { ...run, taskId: data.task.id, status: videoReceptionStatus({ ...data.task, submission_unconfirmed: data.state === 'unconfirmed' }) };
       } else {
         const data = await request<{ task?: Record<string, unknown>; local_status?: string }>(`/api/${run.provider === 'volcengine_ip' ? 'ip/' : ''}video/status/${encodeURIComponent(run.taskId)}?refresh=true`);
@@ -667,7 +669,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
           });
           assertCurrentContext();
           sent = true;
-          const data = await request<{ id?: string; task_id?: string; provider_task_id?: string | null; local_status?: string; status?: string; submission_unconfirmed?: boolean }>(settings.provider === 'volcengine_ip' ? '/api/ip/tasks/create' : '/api/tasks/create', input);
+          const data = await request<{ id?: string; task_id?: string; provider_task_id?: string | null; local_status?: string; status?: string; submission_unconfirmed?: boolean; error_code?: string | null }>(settings.provider === 'volcengine_ip' ? '/api/ip/tasks/create' : '/api/tasks/create', input);
           const taskId = data.task_id || data.id;
           if (!taskId) throw Error('视频受理结果未知，请查询原请求');
           const status = videoReceptionStatus({ ...data, local_status: data.local_status || data.status || 'submitted' });

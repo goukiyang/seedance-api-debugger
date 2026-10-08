@@ -140,6 +140,11 @@
                         hooks.save('canvas_style_submission_unknown');
                         throw new Error(job.kind === 'ordinary' ? '提交尚未确认，请查看生成状态；不会重新发送或扣点。' : '提交尚未确认。点击生成可安全重试原请求，不会重复扣费。');
                     }
+                    if (result.submission_unconfirmed || result.status === 'unconfirmed') {
+                        job.state = 'unconfirmed';
+                        hooks.save('canvas_style_submission_unknown');
+                        throw new Error('上游受理尚未确认，请查询原任务；不会重新生成或扣点。');
+                    }
                     if (!result.pending) {
                         delete node.data.styleJob;
                         hooks.save('canvas_style_finished');
@@ -211,15 +216,13 @@
                 if (job.kind !== 'ordinary' || !sameContext(job.context, context)) throw new Error('请先查询原图片任务');
                 return { ...await waitForResult(node, job), canvasStylePayload: job.payload };
             }
-            let legacyRequired = false;
             if (payload.referenceImageIds?.length) {
                 const params = new URLSearchParams({ projectId: context.projectId, cardId: context.cardId, documentId: context.documentId, nodeId: node.id });
                 payload.referenceImageIds.forEach(id => params.append('referenceImageId', id));
                 const eligibility = await json(`/api/tools/ultimate-canvas/images/generate?${params}`);
                 if (!current(node, context)) throw contextError();
                 if (!eligibility.durable) {
-                    hooks.notice('共享参考图沿用原生成路径；当前持久图片队列仅支持本人原件。', 'info');
-                    legacyRequired = true;
+                    throw new Error('此参考图无法安全恢复生成，未提交；请选择已有持久原件记录的参考图');
                 }
             }
             const settings = structuredClone(payload.settings);
@@ -229,7 +232,6 @@
             if (quote.status !== 'estimate' || !Number.isSafeInteger(quote.estimatedCredits) || quote.estimatedCredits < 0) throw new Error('当前模型报价不可用，请选择已配置模型或重试');
             if (!await hooks.confirm({ title: '生成图片', message: `本次 ${settings.count} 张图片，预计 ${quote.estimatedCredits} 点。`, confirmLabel: `确认 ${quote.estimatedCredits} 点` })) throw new Error('已取消，未提交图片生成');
             if (!current(node, context)) throw contextError();
-            if (legacyRequired) return { legacyRequired: true };
             job = { kind: 'ordinary', requestId: crypto.randomUUID(), moduleId: crypto.randomUUID(), count: settings.count,
                 context: { userId: context.userId, projectId: context.projectId, cardId: context.cardId, documentId: context.documentId },
                 payload, state: 'unconfirmed' };

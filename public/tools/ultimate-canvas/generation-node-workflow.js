@@ -204,18 +204,28 @@
     }
 
     function normalizeVideoCreate(result = {}) {
+        const status = videoReceptionStatus(result);
         return {
             taskId: result.task_id || result.id || '',
             providerTaskId: result.provider_task_id || result.providerTaskId || '',
-            status: result.local_status || result.status || 'submitted',
+            status,
+            submissionUnconfirmed: status === 'unconfirmed',
             frozenCost: Number(result.frozen_cost ?? result.frozenCost ?? 0)
         };
+    }
+
+    function videoReceptionStatus(task = {}) {
+        const status = task.local_status || task.status || 'submitted';
+        return task.submission_unconfirmed || task.error_code === 'IP_SUBMISSION_UNCONFIRMED'
+            || status === 'unconfirmed'
+            || (['queued', 'submitted', 'running', 'processing', 'pending', 'failed'].includes(status) && !(task.provider_task_id || task.providerTaskId))
+            ? 'unconfirmed' : status;
     }
 
     function normalizeVideoStatus(result = {}) {
         const task = result.task && typeof result.task === 'object' ? result.task : result;
         const taskId = task.task_id || task.id || '';
-        const status = task.local_status || task.status || 'submitted';
+        const status = videoReceptionStatus(task);
         const stableDownloadReady = task.stable_download_ready === true
             || task.stableDownloadReady === true
             || Boolean(task.public_video_url);
@@ -228,6 +238,7 @@
         return {
             taskId,
             status,
+            submissionUnconfirmed: status === 'unconfirmed',
             errorMessage: task.error_message || task.message || '',
             resultVideoUrl: task.result_video_url || task.video_url || '',
             resultLastFrameUrl: task.result_last_frame_url || '',
@@ -269,6 +280,7 @@
         normalizeImageResult,
         normalizeVideoCreate,
         normalizeVideoStatus,
+        videoReceptionStatus,
         videoTaskSnapshot,
         uniqueStrings
     };
