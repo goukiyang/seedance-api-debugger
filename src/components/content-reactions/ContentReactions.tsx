@@ -118,9 +118,10 @@ export async function writeReaction(userId: string, key: ContentKey, action: Rea
   }
 }
 
-export default function ContentReactions({ contentKey, initialState, onChange, disabled = false, overlay = false, imageSharing = true, favoriteOnly = false }: {
+export default function ContentReactions({ contentKey, initialState, onChange, disabled = false, overlay = false, parentControlled = false, imageSharing = true, favoriteOnly = false }: {
   contentKey: ContentKey; initialState?: ReactionState; disabled?: boolean;
   overlay?: boolean;
+  parentControlled?: boolean;
   imageSharing?: boolean;
   favoriteOnly?: boolean;
   onChange?: (state: ReactionState, action: ReactionAction, active: boolean, previous?: ReactionState) => void;
@@ -165,13 +166,15 @@ export default function ContentReactions({ contentKey, initialState, onChange, d
     const active = !(state.liked || state.favorited);
     try { const next = await writeReaction(userId, contentKey, 'like', active, state); if (next) confirmed(next, active); } catch { /* Error is retained with a retry action. */ }
   }
-  return <span className={`${styles.controls} ${overlay ? styles.overlayControls : ''} ${favoriteOnly ? styles.favoriteOnly : ''}`} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} data-content-reactions data-overlay={overlay || undefined} aria-busy={entry.busy || undefined}>
+  return <span className={`${styles.controls} ${overlay ? parentControlled ? styles.parentOverlayControls : styles.overlayControls : ''} ${favoriteOnly ? styles.favoriteOnly : ''}`} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} data-content-reactions data-overlay={overlay || undefined} aria-busy={entry.busy || undefined}>
+    <span className={styles.reactionActions} data-result-secondary={parentControlled || undefined}>
     {/* Sibling keys must include the control type, not just the content identity. */}
     {canLike && <LikeButton key={`like:${identity}`} active={Boolean(state?.liked || state?.favorited)} count={favoriteOnly ? undefined : state?.likeCount} showCount={!favoriteOnly}
       disabled={Boolean(disabled || entry.busy || uncertain || !state || (!state.available && !(state.liked || state.favorited)))}
       animateCount={Boolean(pulse?.identity === identity && pulse.version === state?.version && pulse.count === state?.likeCount)}
       bloom={pulse?.identity === identity && pulse.version === state?.version && pulse.active ? pulse.beat : 0} onClick={() => void act()} />}
     {state?.available && imageSharing && !favoriteOnly && <ImageShareButton key={`share:${identity}`} contentKey={contentKey} userId={userId} disabled={disabled} />}
+    </span>
     {entry.busy && <span className={styles.busy} role="status"><RefreshCw size={13} className={styles.busyIcon} />保存中</span>}
     {(entry.error || uncertain && !entry.busy) && <span className={styles.error} role="status">{entry.error || '上次操作尚未确认，请重试'}<button type="button" disabled={entry.busy} aria-label="重试喜欢" title="重试" onClick={() => {
       const retry = state && pending.get(cacheKey(userId, state.key));

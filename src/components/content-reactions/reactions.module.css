@@ -1,4 +1,7 @@
 .controls { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; vertical-align: middle; }
+.reactionActions { display: inline-flex; align-items: center; gap: 4px; }
+.parentOverlayControls { position: absolute; top: 6px; left: 6px; z-index: 4; max-width: calc(100% - 12px); padding: 3px; }
+.parentOverlayControls :is(.error, .busy) { padding: 4px 6px; border-radius: 4px; background: rgb(12 17 19 / 86%); max-width: min(52vw, 320px); white-space: normal; overflow-wrap: anywhere; }
 .favoriteTitleRow { display: flex; align-items: center; gap: 8px; width: fit-content; max-width: 100%; min-width: 0; flex-wrap: nowrap; }
 .favoriteTitleRow > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .favoriteOnly { position: relative; flex: 0 0 auto; flex-wrap: nowrap; }

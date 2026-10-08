@@ -800,7 +800,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
         {work.mediaNodes[shot.id] && <p className={styles.status}><Link className={styles.link} href={`/tools/ultimate-canvas?document_id=${encodeURIComponent(documentId)}&focus_node=${encodeURIComponent(work.mediaNodes[shot.id])}`}><Clapperboard size={16} />打开此镜头视频</Link></p>}
       </section>)}</div>
       {resultShot && <GeneratedImageResults items={results} scope={`story:${userId}:${documentId}:${nodeId}:${resultShot}`} hasMore={Boolean(cursor)} loadMore={() => readResults(resultShot, true)} emptyLabel="此镜头暂无生成结果"
-        renderActions={item => resultAssets[item.id] ? <button disabled={blocked} onClick={() => void operate('选用原图', async () => {
+        renderPrimaryActions={item => resultAssets[item.id] ? <button disabled={blocked} onClick={() => void operate('选用原图', async () => {
           await selectReference(resultShot, resultAssets[item.id]);
         })}>选用此原图</button> : null} />}
     </section></>}

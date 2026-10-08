@@ -33,12 +33,13 @@ function WaitingImage({ src }: { src?: string }) {
   return src && failed !== src ? <img className={styles.waitingImage} src={src} alt="本次输入图片" onError={() => setFailed(src)} /> : <ImagePlus size={24} aria-hidden="true" />;
 }
 
-export function GeneratedImageResults<T extends GeneratedImageResult>({ items, scope, visible = true, loading = false, busy = false, error = '', emptyLabel = '暂无生成结果', hasMore = false, loadMore = noMore, onRetry, selectedId, onSelect, previewId, onPreviewChange, renderMetadata, renderActions, renderOverlay, renderSupplement }: {
+export function GeneratedImageResults<T extends GeneratedImageResult>({ items, scope, visible = true, loading = false, busy = false, error = '', emptyLabel = '暂无生成结果', hasMore = false, loadMore = noMore, onRetry, selectedId, onSelect, previewId, onPreviewChange, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement }: {
   items: T[]; scope: string; visible?: boolean; loading?: boolean; busy?: boolean; error?: string; emptyLabel?: string;
   hasMore?: boolean; loadMore?: () => Promise<unknown>; onRetry?: () => void;
   selectedId?: string | null; onSelect?: (item: T) => void;
   previewId?: string | null; onPreviewChange?: (item: T | null) => void;
   renderMetadata?: (item: T) => ReactNode; renderActions?: (item: T) => ReactNode;
+  renderPrimaryActions?: (item: T) => ReactNode; renderDelete?: (item: T) => ReactNode;
   renderOverlay?: (item: T, controls: { openPreview: () => void }) => ReactNode; renderSupplement?: (item: T) => ReactNode;
 }) {
   const [localPreview, setLocalPreview] = useState<string | null>(null);
@@ -51,6 +52,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
   const currentScope = useRef(scope); currentScope.current = scope;
   const pendingOperation = useRef(false);
   const alive = useRef(true);
+  const previewTrigger = useRef<HTMLElement | null>(null);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const readMore = useCallback(async () => {
     if (readLock.current) return;
@@ -71,11 +73,17 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
   useEffect(() => { setLocalPreview(null); setLocalSelection(null); setFeedback(null); }, [scope]);
   const previewable = items.filter(item => item.media?.src);
   const preview = previewable.find(item => item.id === activePreview);
-  const changePreview = useCallback((item: T | null) => {
-    if (item) { pages.goToId(item.id); setLocalSelection(item.id); onSelect?.(item); }
+  const changePreview = useCallback((item: T | null, alreadySelected = false) => {
+    if (item && !activePreview) previewTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (item && !alreadySelected) { pages.goToId(item.id); setLocalSelection(item.id); onSelect?.(item); }
     setLocalPreview(item?.id || null);
     onPreviewChange?.(item);
-  }, [onPreviewChange, onSelect, pages]);
+    if (!item) {
+      const trigger = previewTrigger.current;
+      previewTrigger.current = null;
+      requestAnimationFrame(() => { if (trigger?.isConnected) trigger.focus({ preventScroll: true }); });
+    }
+  }, [activePreview, onPreviewChange, onSelect, pages]);
   useEffect(() => {
     if (activePreview && !preview) { setLocalPreview(null); onPreviewChange?.(null); }
   }, [activePreview, preview, onPreviewChange]);
@@ -112,11 +120,11 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
       const next = items[Math.max(0, Math.min(items.length - 1, index + offset))]; select(next);
       requestAnimationFrame(() => { const card = Array.from(pages.gridRef.current?.querySelectorAll<HTMLElement>('[data-result-id]') || []).find(element => element.dataset.resultId === next.id); card?.querySelector<HTMLElement>('[data-result-cover], [data-result-choice]')?.focus(); });
     }}>
-      {pages.pageItems.map(item => <article key={item.id} className={styles.card} data-result-id={item.id}>
+      {pages.pageItems.map(item => <article key={item.id} className={styles.card} data-result-id={item.id} data-result-controls-parent>
         <div className={styles.media} data-transparent={item.transparent || undefined} data-reaction-surface>
           {item.media ? <>
-            <ResultImageCover src={item.media.thumbnailSrc || item.media.src} alt={item.label} selected={currentSelection === item.id} applied={Boolean(item.applied)} onSelect={() => select(item)} onPreview={() => changePreview(item)} onViewed={item.onViewed} />
-            {item.media.contentKey && <ContentReactions contentKey={item.media.contentKey} imageSharing={item.media.imageSharing} overlay />}
+            <ResultImageCover src={item.media.thumbnailSrc || item.media.src} alt={item.label} selected={currentSelection === item.id} applied={Boolean(item.applied)} onSelect={() => select(item)} onPreview={() => changePreview(item, true)} onViewed={item.onViewed} />
+            {item.media.contentKey && <ContentReactions contentKey={item.media.contentKey} imageSharing={item.media.imageSharing} overlay parentControlled />}
           </> : <div className={`${styles.pending} sd2-loading-surface`} data-busy={item.pending || undefined}
             data-result-choice={onSelect ? '' : undefined} role={onSelect ? 'button' : undefined} tabIndex={onSelect ? 0 : undefined} aria-label={onSelect ? `选择${item.label}` : undefined} aria-pressed={onSelect ? currentSelection === item.id : undefined}
             onClick={onSelect ? () => select(item) : undefined}
@@ -124,15 +132,17 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
             <WaitingImage src={item.waitingThumbnail} /><span role="status" className={styles.phase}>{item.status}</span>
           </div>}
           {renderOverlay?.(item, { openPreview: () => changePreview(item) })}
+          {renderDelete && <div className={styles.deleteSlot} data-result-secondary onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{renderDelete(item)}</div>}
         </div>
         {renderMetadata ? renderMetadata(item) : <div className={styles.heading}><strong>{item.label}</strong><span>{item.status}</span></div>}
-        <div className={styles.actions}>
-          {item.media && <div className={styles.commonActions} data-busy={feedback?.id === item.id && feedback.busy || undefined}>
+        <div className={styles.actions} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
+          {item.media && <div className={styles.commonActions} data-result-secondary aria-busy={feedback?.id === item.id && feedback.busy || undefined}>
             {item.download && <button type="button" aria-label="下载图片" title="下载图片" disabled={item.downloadDisabled || Boolean(feedback?.busy)} onClick={() => void operate(item, 'download')}><Download size={15} /></button>}
             <button type="button" aria-label="复制图片" title="复制图片" disabled={Boolean(feedback?.busy)} onClick={() => void operate(item, 'copy')}><Copy size={15} /></button>
             <button type="button" aria-label="查看图片" title="查看图片" onClick={() => changePreview(item)}><Eye size={15} /></button>
           </div>}
-          {renderActions && <div className={styles.specialtyActions}>{renderActions(item)}</div>}
+          {renderActions && <div className={styles.specialtyActions} data-result-secondary>{renderActions(item)}</div>}
+          {renderPrimaryActions && <div className={styles.specialtyActions}>{renderPrimaryActions(item)}</div>}
         </div>
         {feedback?.id === item.id && <p className={styles.feedback} role="status">{feedback.message}</p>}
         {item.error && <p role="alert" className={styles.error}>{item.error}</p>}

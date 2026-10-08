@@ -30,8 +30,7 @@ export function AvatarSheetPreview({ src, layout, index, onSelect, onPreview, ov
       <img key={src} src={src} alt={overlay ? '' : `${size}×${size}人物整图`} style={overlay ? { visibility: 'hidden' } : undefined} onLoad={event => { setNatural({ src, width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); setFailed(''); }} onError={() => { setNatural(null); setFailed(src); }} />
       {loaded && <div className={styles.sheetGrid} style={{ gridTemplateColumns: `repeat(${size}, 1fr)`, gridTemplateRows: `repeat(${size}, 1fr)` }}>
         {Array.from({ length: size * size }, (_, i) => <button type="button" key={i} style={overlay ? { pointerEvents: 'auto' } : undefined} ref={element => { cells.current[i] = element; }} aria-label={`选择${avatarCellLabel(layout, i)}格人物`} aria-pressed={i === index} tabIndex={i === index ? 0 : -1}
-          onClick={() => onSelect(i)} onDoubleClick={onPreview} onKeyDown={event => {
-            if (event.key === 'Enter') { event.preventDefault(); onSelect(i); onPreview(); return; }
+          onClick={event => { event.stopPropagation(); if (event.detail > 1) return; onSelect(i); onPreview(); }} onPointerDown={event => event.stopPropagation()} onKeyDown={event => {
             const offset = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -size, ArrowDown: size }[event.key];
             if (offset === undefined) return;
             event.preventDefault();

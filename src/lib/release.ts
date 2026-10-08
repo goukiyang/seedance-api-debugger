@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '画布支持右键创建副本、@选择参考图片、拖入或粘贴素材；导入视频和参考预览可直接查看，多选移动与参考选择分开。生成仍需手动确认，结果未知时只查询原请求。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '模板主图、风格与参考图分层显示；图片结果单击即可预览，操作按钮统一出现。图片模板侧栏整行折叠，删除和喜欢位置更清楚；重复入口与未保存提示已精简，草稿和保存保护保留。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

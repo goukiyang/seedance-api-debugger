@@ -81,8 +81,8 @@ type PresetSourceReader = () => PresetSource;
 type StudioFeedback = { message: string; tone: 'progress' | 'info' | 'success' | 'warning' | 'error' };
 type ImagePreviewState = { contentKey?: `asset:${string}`; taskId?: string; resultVersion?: string | null; src: string; thumbnailSrc?: string; alt: string; title?: string; fileName?: string; width?: number; height?: number; fileSize?: number; metadata?: ImagePreviewMetadata; comparison?: ImageComparisonSource };
 type RatioPreferences = { custom: string[]; busy: boolean; error: string; onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean> };
-type ModuleScrollRequest = { target: 'module' | 'header'; id: string; group: string; token: number; behavior: ScrollBehavior; markViewed: boolean };
-type ModuleNavigationOptions = { ensureLoaded?: boolean; markViewed?: boolean; behavior?: ScrollBehavior };
+type ModuleScrollRequest = { target: 'module' | 'header'; id: string; group: string; token: number; behavior: ScrollBehavior; markViewed: boolean; expansionRevision?: number };
+type ModuleNavigationOptions = { ensureLoaded?: boolean; markViewed?: boolean; behavior?: ScrollBehavior; expandParents?: boolean };
 const models = IMAGE_STUDIO_MODELS;
 const fixedReferencePayload = (items: FixedStudioReference[]) => items.map(item => ({ assetId: item.id, note: item.note || '' }));
 const DEFAULT_GROUPS = ['未分组', '常用', '角色', '场景', '海报'];
@@ -187,6 +187,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
   const router = useRouter();
   const routeQuery = useSearchParams()?.toString() || '';
   const routedContentHandled = useRef('');
+  const sidebarInteraction = useRef(0);
   const { confirm, prompt: askPresetName, productDialog } = useProductDialog();
   const presetSources = useRef(new Map<string, PresetSourceReader>());
   const registerPresetSource = useCallback((id: string, read: PresetSourceReader | null) => {
@@ -197,6 +198,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
   const presetManagementLock = useRef(false);
   const [modules, setModules] = useState<StudioModule[]>([]);
   const [directory, setDirectory] = useState<Array<Pick<StudioModule, 'id' | 'name' | 'groupName' | 'sourcePresetId'>>>([]);
+  const [directoryReady, setDirectoryReady] = useState(false);
   const removedModuleIds = useRef(new Set<string>());
   const hydratingIds = useRef(new Set<string>());
   const [hydrating, setHydrating] = useState(false);
@@ -349,7 +351,10 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     listLock.current = true; setLoading(true); setError('');
     try {
       const data = await readResponse(await fetch(`/api/image-studio/modules${next ? `?cursor=${encodeURIComponent(next)}` : ''}`, { cache: 'no-store' }));
-      if (Array.isArray(data.directory)) setDirectory(data.directory.filter((item: StudioModule) => !removedModuleIds.current.has(item.id)));
+      if (Array.isArray(data.directory)) {
+        setDirectory(data.directory.filter((item: StudioModule) => !removedModuleIds.current.has(item.id)));
+        setDirectoryReady(true);
+      }
       setModules(current => {
         const ids = new Set(current.map(item => item.id));
         return [...current, ...data.modules.filter((item: StudioModule) => !ids.has(item.id) && !removedModuleIds.current.has(item.id))]
@@ -383,10 +388,12 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     setCoverView(false);
     setSelectedGroup(group);
     setActive(id);
-    setExpandedGroups(current => current.includes(group) ? current : [...current, group]);
-    setImageGenerationExpanded(true);
+    if (options.expandParents !== false) {
+      setExpandedGroups(current => current.includes(group) ? current : [...current, group]);
+      setImageGenerationExpanded(true);
+    }
     if (options.markViewed === false) setRequestedView({ viewerId: userId, moduleId: '', token: 0 });
-    setPendingModuleScroll({ target: 'module', id, group, token: ++moduleScrollSequence.current, behavior: options.behavior || 'smooth', markViewed: templateWorkbench && options.markViewed !== false });
+    setPendingModuleScroll({ target: 'module', id, group, token: ++moduleScrollSequence.current, behavior: options.behavior || 'smooth', markViewed: templateWorkbench && options.markViewed !== false, expansionRevision: options.expandParents === false ? -1 : sidebarInteraction.current });
     if (options.ensureLoaded !== false && !modules.some(module => module.id === id)) void hydrateModules([id]);
   }, [hydrateModules, modules, templateWorkbench, userId]);
   useEffect(() => {
@@ -399,7 +406,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     if (moduleId) {
       const target = directory.find(item => item.id === moduleId);
       if (target) {
-        navigateToModule(target.groupName || '未分组', moduleId, { behavior: 'auto', markViewed: false });
+        navigateToModule(target.groupName || '未分组', moduleId, { behavior: 'auto', markViewed: false, expandParents: sidebarInteraction.current === 0 });
       } else {
         routedContentHandled.current = routeKey;
         setError('指定的图片模板不存在或当前不可用');
@@ -530,6 +537,14 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     (groups[group] ||= []).push(item);
     return groups;
   }, {}), [navigation]);
+  useEffect(() => {
+    if (!viewRestored || !directoryReady || loading) return;
+    const available = new Set(Object.keys(groupedModules));
+    setExpandedGroups(current => {
+      const valid = current.filter(group => available.has(group));
+      return valid.length === current.length ? current : valid;
+    });
+  }, [viewRestored, directoryReady, loading, groupedModules]);
   const hasAnyUnread = useMemo(() => navigation.some(item => attention.unread.has(item.id)), [navigation, attention.unread]);
   const updateModuleMetadata = useCallback((id: string, name: string, groupName: string, followGroup = false) => {
     setModules(current => current.map(item => item.id === id && (item.name !== name || item.groupName !== groupName)
@@ -584,8 +599,10 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     const targetGroup = targetModule.groupName || '未分组';
     if (targetGroup !== pendingModuleScroll.group) {
       setSelectedGroup(targetGroup);
-      setExpandedGroups(current => Array.from(new Set([...current, targetGroup])));
-      setImageGenerationExpanded(true);
+      if (pendingModuleScroll.expansionRevision === sidebarInteraction.current) {
+        setExpandedGroups(current => Array.from(new Set([...current, targetGroup])));
+        setImageGenerationExpanded(true);
+      }
       setPendingModuleScroll(current => current?.token === pendingModuleScroll.token ? { ...current, group: targetGroup } : current);
       return;
     }
@@ -684,16 +701,9 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
       void loadModules();
     }
   }
-  const resetSidebarExpansion = () => { setExpandedGroups([]); setImageGenerationExpanded(false); setFavoritesExpanded(false); setSelectedFavorite(''); };
-  const navigateToImageSection = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    event.preventDefault();
-    replaceImageModuleLocation(null);
-    routedContentHandled.current = `${userId}:${window.location.search}`;
-    setCoverView(false);
-    setImageGenerationExpanded(true);
-    setRequestedView({ viewerId: userId, moduleId: '', token: 0 });
-    setPendingModuleScroll({ target: 'header', id: 'image-generation', group: selectedGroup, token: ++moduleScrollSequence.current, behavior: 'smooth', markViewed: false });
-  };
+  const resetSidebarExpansion = () => { sidebarInteraction.current++; setExpandedGroups([]); setImageGenerationExpanded(false); setFavoritesExpanded(false); setSelectedFavorite(''); };
+  const toggleImageSection = () => { sidebarInteraction.current++; setImageGenerationExpanded(current => !current); };
+  const toggleModuleGroup = (group: string) => { sidebarInteraction.current++; setExpandedGroups(current => current.includes(group) ? current.filter(item => item !== group) : [...current, group]); };
   const navigateToCovers = () => {
     replaceImageModuleLocation(null, true);
     routedContentHandled.current = `${userId}:${window.location.search}`;
@@ -708,12 +718,10 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
         <div id="template-favorites-desktop" hidden={!favoritesExpanded}><TemplateFavoritesList data={favorites} selected={selectedFavorite} busy={favoriteSelecting || loading} onSelect={item => void selectFavorite(item)} /></div>
         <section className={styles.moduleRailMajor} aria-label="图片生成">
           <div className={styles.moduleRailMajorHeader}>
-            <a className={`${styles.moduleRailMajorLink} ${styles.moduleRailMajorCurrent}`} href="#image-generation" aria-current="page" onClick={navigateToImageSection}>
+            <button type="button" className={styles.moduleRailMajorLink} aria-expanded={imageSectionOpen} aria-controls="template-image-groups" onClick={toggleImageSection}>
               <ImagePlus size={16} /><span>图片生成</span>{hasAnyUnread && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}
-            </a>
-            <button type="button" className={styles.moduleRailMajorToggle} aria-expanded={imageSectionOpen} aria-controls="template-image-groups"
-              aria-label={`${imageSectionOpen ? '折叠' : '展开'}图片生成`} title={`${imageSectionOpen ? '折叠' : '展开'}图片生成`}
-              onClick={() => setImageGenerationExpanded(current => !current)}>{imageSectionOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button>
+              {imageSectionOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            </button>
           </div>
           <div id="template-image-groups" className={styles.moduleRailSubgroups} hidden={!imageSectionOpen}>
             {Object.entries(groupedModules).map(([group, items], index) => {
@@ -722,13 +730,9 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
               const listId = `template-module-group-${index}`;
               return <div key={group} className={styles.moduleRailGroup}>
                 <div className={styles.moduleRailGroupHeader}>
-                  <button type="button" className={`${styles.moduleRailGroupTitle} ${selectedGroup === group ? styles.moduleRailActive : ''}`} aria-current={selectedGroup === group ? 'page' : undefined}
-                    onClick={() => navigateToModule(group, items[0].id, { markViewed: false })}>
-                    <span className={styles.navLabel}><span className={styles.navName}>{group}</span>{groupHasUnread && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</span><small title={`共 ${items.length} 个模块`}>{items.length}项</small>
-                  </button>
-                  <button type="button" className={styles.moduleRailGroupToggle} aria-expanded={expanded} aria-controls={listId}
-                    aria-label={`${expanded ? '折叠' : '展开'}${group}`} title={`${expanded ? '折叠' : '展开'}${group}`}
-                    onClick={() => setExpandedGroups(current => current.includes(group) ? current.filter(item => item !== group) : [...current, group])}>
+                  <button type="button" className={`${styles.moduleRailGroupTitle} ${!coverView && items.some(item => item.id === active) ? styles.moduleRailGroupCurrent : ''}`} aria-expanded={expanded} aria-controls={listId} disabled={!items.length}
+                    onClick={() => toggleModuleGroup(group)}>
+                    <span className={styles.navLabel}><span className={styles.navName} title={group}>{group}</span>{groupHasUnread && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</span><small title={`共 ${items.length} 个模块`}>{items.length}项</small>
                     {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
                   </button>
                 </div>
@@ -754,15 +758,12 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     </aside>
     {templateWorkbench && <nav ref={mobileModuleNavRef} className={styles.mobileModuleNav} aria-label="图片模块导航">
       <div className={styles.mobileMajorLinks}>
-        <a className={styles.mobileMajorLink} href="#image-generation" aria-current="page" onClick={navigateToImageSection}><ImagePlus size={16} /><span>图片生成</span>{hasAnyUnread && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</a>
+        <button type="button" className={styles.mobileMajorLink} aria-expanded={imageSectionOpen} aria-controls="template-mobile-image-groups" onClick={toggleImageSection}><ImagePlus size={16} /><span>图片生成</span>{hasAnyUnread && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}{imageSectionOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button>
         <button type="button" className={styles.mobileMajorLink} aria-expanded={favoritesExpanded} aria-controls="template-favorites-mobile" onClick={() => setFavoritesExpanded(current => !current)}><Heart size={16} /><span>我的喜欢</span>{favoritesExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</button>
       </div>
       <div id="template-favorites-mobile" className={styles.mobileFavoriteList} hidden={!favoritesExpanded}><TemplateFavoritesList data={favorites} selected={selectedFavorite} busy={favoriteSelecting || loading} onSelect={item => void selectFavorite(item)} /></div>
-      <label className={styles.mobileGroupPicker}><span>分组</span><select aria-label="选择图片分组" value={selectedGroup} onChange={event => {
-        const group = event.target.value;
-        const first = groupedModules[group]?.[0];
-        if (first) navigateToModule(group, first.id, { markViewed: false });
-      }}>
+      <div id="template-mobile-image-groups" className={styles.mobileImageGroups} hidden={!imageSectionOpen}>
+      <label className={styles.mobileGroupPicker}><span>分组</span><select aria-label="选择图片分组" value={selectedGroup} onChange={event => setSelectedGroup(event.target.value)}>
         {!Object.keys(groupedModules).length && <option value="">暂无分组</option>}
         {Object.entries(groupedModules).map(([group, items]) => <option key={group} value={group}>{group} ({items.length}项){items.some(item => attention.unread.has(item.id)) ? ' · 未读' : ''}</option>)}
       </select></label>
@@ -774,6 +775,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
         {(groupedModules[selectedGroup] || []).map(item => <option key={item.id} value={item.id}>{item.name}{attention.unread.has(item.id) ? ' · 未读' : ''}</option>)}
       </select></label>
       {!coverView && attention.unread.has(active) && <button type="button" title="读取当前模板的新结果" aria-label="读取当前模板的新结果" onClick={() => navigateToModule(selectedGroup, active)}><Eye size={16} /><span className={styles.unreadDot} /></button>}
+      </div>
     </nav>}
     <div className={styles.content}>
     <header id="image-generation" className={`${styles.header} ${styles.generationHeader}`}><div><h1>{coverView ? (templateWorkbench ? '模块封面' : '模板封面') : '图片生成'}</h1><p className={styles.muted}>{coverView ? (templateWorkbench ? '所有模块的 3:4 封面预览' : '所有模板的 3:4 封面预览') : `当前分组：${selectedGroup || '未分组'}`}</p></div><div className={styles.counts}>
@@ -1807,7 +1809,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         {module.sourcePresetCanManageSharing && module.sourcePresetId && <button type="button" role="switch" aria-checked={module.sourcePresetShared === true} className={`${styles.presetSharing} ${styles.moduleSharing}`} title={templateWorkbench ? '只改变原模板的共享，不会发布当前模块草稿' : undefined} disabled={sharingId === module.sourcePresetId} onClick={() => void onToggleSharing(module)}>{templateWorkbench ? (module.sourcePresetShared === true ? '原模板已共享' : '共享原模板') : (module.sourcePresetShared === true ? '共享给同事' : '仅自己可见')}</button>}
         <ModuleGroupPicker value={groupName} groups={groups} protectedGroups={DEFAULT_GROUPS} disabled={!draftLoaded || draftRestoring || moduleSaving || automaticDirty || moduleDeleting || submitting || uploading || Boolean(pendingSubmission)} deleting={groupDeleting}
           onChange={value => void changeGroup(value)} onDelete={onDeleteGroup} />
-        {(moduleSaving || moduleSaveError || automaticDirty || settingsDirty) && <span role="status" className={styles.muted}>{moduleSaving ? '保存中' : moduleSaveError ? '保存失败' : automaticDirty ? '等待自动保存' : '设置未保存'}</span>}
+        {(moduleSaving || moduleSaveError) && <span role="status" className={styles.muted}>{moduleSaving ? '保存中' : '保存失败'}</span>}
         <span className={styles.contextEntry}><button type="button" disabled={!draftLoaded || draftRestoring} onClick={openModuleDialog}><Settings size={17} />模块上下文</button></span>
         <button type="button" className={templateWorkbench ? styles.moduleDeleteIcon : undefined} title={module.id === `default-${userId}` ? (templateWorkbench ? '默认模块需要保留' : '默认模板需要保留') : (templateWorkbench ? '删除模块' : '删除模板')} aria-label={moduleDeleting ? '正在删除模块' : `删除${templateWorkbench ? '模块' : '模板'}：${name}`} aria-busy={moduleDeleting || undefined}
           disabled={module.id === `default-${userId}` || moduleDeleting || moduleSaving || submitting || uploading || bannerUploading || Boolean(pendingSubmission)}
@@ -1852,7 +1854,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
             </StudioReferenceGrid>
           </div>
         </section>
-        <section className={styles.materialSection} aria-label="风格组">
+        <section className={`${styles.materialSection} ${styles.styleMaterials}`} aria-label="风格组与文字 skills">
           {!templateWorkbench && <header className={styles.materialHeading}><h3>风格组</h3>
             <select aria-label="风格图片数量上限" value={styleLimit} disabled={uploading || submitting || Boolean(pendingSubmission)} onChange={event => setStyleLimit(Number(event.target.value))}>
               {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>最多 {value} 张</option>)}
@@ -1861,10 +1863,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           <StudioStyleGroups userId={userId} selected={activeStyles} currentImages={auxiliaryImages} tiles maxReferences={currentStyleCap}
             disabled={uploading || submitting || Boolean(pendingSubmission)}
             onChange={next => { if (reproduceSourceTaskId) exitReproductionMode('风格组已修改，接下来使用当前模板和风格组。'); setStyleGroups(next); }} />
-        </section>
-        <section className={styles.materialSection} aria-label="参考图">
           <StudioSkills userId={userId} selected={reproduceSourceTaskId ? reproductionSkills : skills} disabled={uploading || submitting || Boolean(pendingSubmission)}
             onChange={next => { if (reproduceSourceTaskId) exitReproductionMode('skills已修改，接下来使用当前模板和所选文字。'); setSkills(next); }} />
+        </section>
+        <section className={`${styles.materialSection} ${templateWorkbench ? styles.auxiliaryMaterials : ''}`} aria-label="参考图">
           {!templateWorkbench && <header className={styles.materialHeading}><h3>参考图</h3>
             <select aria-label="参考图数量上限" value={referenceImageLimit} disabled={uploading || submitting || Boolean(pendingSubmission)} onChange={event => setReferenceImageLimit(Number(event.target.value))}>
               {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>最多 {value} 张</option>)}
@@ -1970,7 +1972,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         </div></header>
         {batch.id && resultView === 'images' && <BatchResults key={`${userId}:${batch.id}:delivery`} id={batch.id} userId={userId} deliveryOnly autoPack={batch.pack} />}
         {!likedResults.liked && batch.busy && batch.localPreviews.length > 0 && <div className={styles.grid} aria-label="本批准备素材">{batch.localPreviews.map((src, index) => <article key={src} className={styles.result}><div className={styles.batchInputPreview}><img src={src} alt={`本批主图 ${index + 1}`} /></div><p role="status">准备中</p></article>)}</div>}
-        {resultView === 'batch' ? batch.id ? <BatchResults key={`${userId}:${batch.id}`} id={batch.id} userId={userId} autoPack={batch.pack} /> : <p>暂无选中批次，可开始批量生成或从顶部“我的批次”找回。</p> : <>
+        {resultView === 'batch' ? batch.id ? <BatchResults key={`${userId}:${batch.id}`} id={batch.id} userId={userId} autoPack={batch.pack} /> : <p>暂无选中批次，可开始批量生成或从<a href="/assets">资产库的“我的批次”</a>找回。</p> : <>
         {downloadReady && <p role="status">已交给浏览器下载。<a href={downloadReady.url} download={downloadReady.name}>再次下载</a></p>}
         <GeneratedImageResults key={likedResults.liked ? 'liked' : 'all'} items={sharedResults}
           scope={`sd2-image-studio-${likedResults.liked ? 'liked-' : ''}result-page:${taskReadScope}`}
@@ -1984,12 +1986,12 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
             else { setPreview(null); if (resumeModulePreview.current) { resumeModulePreview.current = false; moduleDialog.current?.showModal(); } }
           }}
           renderOverlay={({task}) => <>
-            {downloadMode && studioTaskHasDeliveredAsset(task) && <input className={styles.select} type="checkbox" aria-label={`选择第 ${task.ordinal} 张图片`} checked={selected.includes(task.id)} onChange={event => {
+            {downloadMode && studioTaskHasDeliveredAsset(task) && <input className={styles.select} data-result-secondary type="checkbox" aria-label={`选择第 ${task.ordinal} 张图片`} checked={selected.includes(task.id)} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onChange={event => {
               if (event.target.checked && selected.length >= 8) { setError('每次最多下载 8 张'); return; }
               setSelected(current => event.target.checked ? [...current, task.id] : current.filter(id => id !== task.id));
             }} />}
-            <button type="button" className={styles.deleteResult} disabled={deleting || downloadBusy} title="删除生成记录" aria-label={`删除第 ${task.ordinal} 张生成记录`} onClick={() => { setDeleteError(''); setDeleteTarget(task); }}><Trash2 size={17} /></button>
           </>}
+          renderDelete={({task}) => <button type="button" disabled={deleting || downloadBusy} title="删除生成记录" aria-label={`删除第 ${task.ordinal} 张生成记录`} onClick={() => { setDeleteError(''); setDeleteTarget(task); }}><Trash2 size={17} /></button>}
           renderMetadata={({task}) => <>          <div className={styles.resultHeading}>
             <p className={styles.prompt}>{name} · {task.ordinal}</p>
             <span className={styles.resultOwner} aria-label="生成者"><UserIdentityBadge user={task.owner} size="sm" className="asset-card-user" /></span>
@@ -2008,7 +2010,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
             <RelativeTime className={styles.resultTime} value={task.createdAt} />
           </div>
 </>}
-          renderActions={({task}) => <>{task.delivery?.recoveryAvailable && <button type="button" disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks()}>{templateWorkbench ? '刷新恢复状态' : '查看原图恢复'}</button>}            {isAdmin && task.snapshot?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制上下文" aria-label="复制上下文" onClick={() => void copyTaskContext(task)}><Copy size={15} /></button>}
+          renderPrimaryActions={({task}) => task.delivery?.recoveryAvailable ? <button type="button" disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks()}>{templateWorkbench ? '刷新恢复状态' : '查看原图恢复'}</button> : null}
+          renderActions={({task}) => <>{isAdmin && task.snapshot?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制上下文" aria-label="复制上下文" onClick={() => void copyTaskContext(task)}><Copy size={15} /></button>}
             {studioTaskHasDeliveredAsset(task) && <button type="button" className={styles.restoreResult} disabled={Boolean(restoreDisabledReason(task))} title={restoreDisabledReason(task) || '恢复这张图片的完整设置，不生成图片'} aria-label="恢复设置" aria-describedby={`studio-restore-${task.id}`} onClick={event => {
               event.stopPropagation();
               void (async () => {
@@ -2121,7 +2124,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       </div>
       {templateWorkbench && <button type="button" title="替换主图提醒设置" onClick={() => void confirm('此设置仅影响替换主图提醒，不影响生成费用、变价或权限确认。', { title: '主图提醒', confirmLabel: '保存设置', checkbox: { label: '每次替换主图前提醒', checked: !skipMainImageReminder(userId) }, onSubmit: async (_value, checked) => saveMainImageReminder(userId, !checked) })}><Settings size={16} />主图提醒</button>}
       <div className={styles.moduleSettingsActions}>
-        <p role="status">{moduleSaving ? '正在保存' : settingsDirty ? '上下文未保存' : generationChanged ? '生成参数为临时草稿' : '已保存'}</p>
         {contextEditable && <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModuleSettings()}><Save size={16} />{moduleSaving ? '正在保存' : templateWorkbench ? '保存模块设置' : '保存模板设置'}</button>}
       </div>
       {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}<button disabled={moduleSaving || uploading || bannerUploading} onClick={() => void saveModuleSettings()}>重试保存</button></p>}

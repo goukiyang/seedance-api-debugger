@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Heart, RotateCcw } from 'lucide-react';
 import ImageStudio from '@/app/image-studio/studio';
-import { StudioBatchHistory } from '@/app/image-studio/batch-results';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import VideoTemplateWorkbench from './VideoTemplateWorkbench';
 import styles from './template-studio.module.css';
@@ -140,7 +139,6 @@ export default function TemplateStudioShell({
   const userInteracted = useRef(false);
   const [restoreReady, setRestoreReady] = useState(false);
   const [hasRememberedLocation, setHasRememberedLocation] = useState(false);
-  const [favoritesRequest, setFavoritesRequest] = useState(0);
   const [videoFavoritesOpen, setVideoFavoritesOpen] = useState(false);
   const videoFavorites = useTemplateFavorites(userId, activeType === 'video' && videoFavoritesOpen);
 
@@ -263,11 +261,11 @@ export default function TemplateStudioShell({
           <h1>模板工作台</h1>
         </div>
         <div className={styles.headerActions}>
-          {activeType === 'image' && <StudioBatchHistory key={userId} userId={userId} />}
-          <button type="button" className={styles.quietButton} onClick={() => {
-            if (activeType === 'image') setFavoritesRequest(value => value + 1);
-            else setVideoFavoritesOpen(current => !current);
-          }} aria-expanded={activeType === 'video' ? videoFavoritesOpen : undefined}><Heart size={16} />我的喜欢</button>
+          {activeType === 'video' && (
+            <button type="button" className={styles.quietButton} onClick={() => setVideoFavoritesOpen(current => !current)} aria-expanded={videoFavoritesOpen}>
+              <Heart size={16} />我的喜欢
+            </button>
+          )}
           {hasRememberedLocation && (
             <button
               className={styles.quietButton}
@@ -304,7 +302,7 @@ export default function TemplateStudioShell({
 
       {activeType === 'image' ? (
         <div className={styles.imageSurface} role="tabpanel">
-          <ImageStudio key={userId} isAdmin={isAdmin} userId={userId} templateWorkbench favoritesRequest={favoritesRequest} />
+          <ImageStudio key={userId} isAdmin={isAdmin} userId={userId} templateWorkbench />
         </div>
       ) : (
         <div role="tabpanel">
