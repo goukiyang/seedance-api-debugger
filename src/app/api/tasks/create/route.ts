@@ -17,6 +17,7 @@ import {
   generationPromptLimitMessage,
 } from '@/lib/prompt/limits';
 import { createVideoTask, buildContentArray, isApiKeyConfigured } from '@/lib/provider/jimeng';
+import { seedanceLocalReferenceTransport } from '@/lib/provider/reference-image-transport';
 import { parseSeedanceVideoModel, seedanceRatioFollowsFirstFrame, isSeedanceVideoDuration, seedanceVideoDurationError } from '@/lib/provider/seedance-models';
 import {
   validateSeedanceEditMode,
@@ -1589,6 +1590,12 @@ export async function POST(request: NextRequest) {
   };
 
   let h3ReferenceTransfer: Awaited<ReturnType<typeof uploadH3ReferenceImagesForTask>> | null = null;
+  let seedanceReferenceTransport: Partial<CreateVideoInput> = {};
+  if (requestedProvider === 'seedance' && (body.canvas_document_id
+    || cleanSourceMetadata(body.source_metadata).canvas_document_id || requestSource.source_metadata?.canvas_document_id)) {
+    try { seedanceReferenceTransport = await seedanceLocalReferenceTransport({ ...providerInput, callback_url: requestCallbackUrl || undefined }, generationReferenceImages); }
+    catch (error) { return errorJson(error instanceof Error ? error.message : '参考原图直传准备失败，尚未提交视频生成', 400); }
+  }
   let h3GeneratePayload: H3GeneratePayload | null = null;
   let storedFinalPromptSnapshot = finalPromptSnapshot;
 
@@ -2133,7 +2140,7 @@ export async function POST(request: NextRequest) {
           apiToken: h3Settings.api_token || undefined,
           idempotencyKey: providerIdempotencyKey,
         })
-      : await createVideoTask(providerInput);
+      : await createVideoTask({ ...providerInput, ...seedanceReferenceTransport });
 
     await prisma.videoTask.update({
       where: { id: taskId },

@@ -15,6 +15,8 @@ import { getProjectForGeneration } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import { getCanvasTextSettings, compileCanvasTextRules, canvasRulePurpose } from '@/lib/canvas-text-settings';
 import { isStudioTextModel } from '@/lib/template-studio/text-models';
+import { canvasTextWaitMs } from '@/lib/story-text-contract';
+import type { MuskChatDiagnostics } from '@/lib/integrations/musk';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -152,6 +154,9 @@ export async function POST(request: NextRequest) {
 
   const nodeId = cleanString(body.nodeId).slice(0, 120) || null;
   const kind = normalizeKind(body.kind);
+  if (body.story_stage !== undefined && (kind !== 'script' || !['script', 'storyboard'].includes(String(body.story_stage)))) {
+    return NextResponse.json({ error: '故事文字阶段无效' }, { status: 400 });
+  }
   const mode = cleanString(body.mode, 'text').slice(0, 80);
   const prompt = cleanString(body.prompt).slice(0, MAX_PROMPT_LENGTH);
   const title = cleanString(body.title).slice(0, 120);
@@ -211,6 +216,13 @@ export async function POST(request: NextRequest) {
 
   try {
     await assertCanUseCanvasDocument(user, canvasDocumentId, projectId);
+    if (body.story_stage !== undefined) {
+      if (!canvasDocumentId || !nodeId) throw new AuthError('故事文字请求需要已保存的画布节点', 400);
+      const document = await assertCanEditCanvasDocument(user, canvasDocumentId, projectId);
+      const graph = JSON.parse(document.document_json);
+      const node = graph.canvas?.nodes?.find((item: { id?: string; type?: string }) => item.id === nodeId && ['script', 'text'].includes(item.type || ''));
+      if (!node?.data?.storyWorkflow) throw new AuthError('请先保存故事草稿再生成文字', 400);
+    }
   } catch (error) {
     if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
     throw error;
@@ -253,15 +265,17 @@ export async function POST(request: NextRequest) {
   };
 
   let ruleTrace: ReturnType<typeof compileCanvasTextRules>['trace'] | undefined;
+  let diagnostics: MuskChatDiagnostics | undefined;
+  const selectedSettings = { ...settings, default_model: requestedModel || settings.default_model };
+  const sourceRequestId = typeof body.source_request_id === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(body.source_request_id) ? body.source_request_id : null;
   try {
     const globalRules = await getCanvasTextSettings();
     const compiled = compileCanvasTextRules(globalRules, canvasRulePurpose(kind, mode, body.textPurpose), contextRules);
     ruleTrace = compiled.trace;
-    const selectedSettings = { ...settings, default_model: requestedModel || settings.default_model };
     const completion = await createMuskChatCompletion({
       settings: selectedSettings,
       temperature: 0.35,
-      timeoutMs: 60000,
+      timeoutMs: canvasTextWaitMs(kind, body.story_stage),
       messages: [
         {
           role: 'system',
@@ -281,6 +295,7 @@ export async function POST(request: NextRequest) {
       ],
     });
 
+    diagnostics = completion.diagnostics;
     const parsed = parseLlmJson(completion.content);
     await writeCanvasLog({
       userId: user.id,
@@ -301,6 +316,9 @@ export async function POST(request: NextRequest) {
         source_node_count: sourceNodes.length,
         context_rules_applied: Boolean(contextRules),
         context_rules_ignored: Boolean(rawContextRules && !contextRules),
+        source_request_id: sourceRequestId,
+        story_stage: body.story_stage || null,
+        diagnostics,
       },
     });
 
@@ -336,6 +354,12 @@ export async function POST(request: NextRequest) {
         canvas_document_id: canvasDocumentId,
         reason: error instanceof MuskApiError ? error.code : 'llm_response_error',
         rules_trace: ruleTrace,
+        model: selectedSettings.default_model,
+        prompt_length: prompt.length,
+        source_node_count: sourceNodes.length,
+        source_request_id: sourceRequestId,
+        story_stage: body.story_stage || null,
+        diagnostics: error instanceof MuskApiError ? error.diagnostics : diagnostics,
       },
     });
     return NextResponse.json({ error: message }, { status });

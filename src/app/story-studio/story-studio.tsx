@@ -15,6 +15,8 @@ import type { ContentKey } from '@/lib/content-reactions/types';
 import styles from './story-studio.module.css';
 import { timingFromStory, validateStoryTiming } from './story-duration';
 import { attachStoryVideo, type StoryCanvas as Snapshot } from './story-handoff';
+import { STUDIO_TEXT_MODELS, isStudioTextModel } from '@/lib/template-studio/text-models';
+import { STORY_TEXT_CLIENT_WAIT_MS } from '@/lib/story-text-contract';
 
 type Document = { id: string; owner_user_id: string; project_id: string; title: string; revision: number;
   status: string; updated_at: string; document_json: string };
@@ -26,23 +28,31 @@ function textRequestFailureState(cause: unknown, content: string): TextRequest['
 }
 type ImageHandoff = { moduleId: string; prompt: string; state: 'not_sent' | 'pending' | 'ready' | 'unconfirmed' };
 type Work = { draft: StoryDraft; request?: TextRequest; images: Record<string, ImageHandoff>;
+  textModel?: string;
   references: Record<string, PickerItem>; mediaNodes: Record<string, string>;
   lineage: { scriptStory?: string; shotsScript?: string }; versions: StoryVersion[] };
 type StoryVersion = Omit<Work, 'request' | 'versions'> & { id: string; createdAt: string };
 type SaveRequest = Record<string, unknown> & { mutation_id: string; document_json: string; base_revision: number };
 const DOC_API = '/api/tools/ultimate-canvas/document';
 const blank = (): StoryDraft => ({ version: 1, story: '', script: '', shots: [], sourceRevision: 0 });
-async function request<T>(url: string, body?: unknown, method = 'POST'): Promise<T> {
-  const response = await fetch(url, { method: body ? method : 'GET', credentials: 'same-origin', cache: 'no-store',
-    ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) });
-  let data;
-  try { data = await response.json(); } catch { throw new Error('服务返回未能确认，请保留当前草稿'); }
-  if (!response.ok) throw Object.assign(new Error(data.error || data.message || '操作未完成'), { status: response.status });
-  return data as T;
+async function request<T>(url: string, body?: unknown, method = 'POST', timeoutMs?: number): Promise<T> {
+  const controller = timeoutMs ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const response = await fetch(url, { method: body ? method : 'GET', credentials: 'same-origin', cache: 'no-store', signal: controller?.signal,
+      ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) });
+    let data;
+    try { data = await response.json(); } catch { throw new Error('服务返回未能确认，请保留当前草稿'); }
+    if (!response.ok) throw Object.assign(new Error(data.error || data.message || '操作未完成'), { status: response.status });
+    return data as T;
+  } catch (cause) {
+    if (controller?.signal.aborted) throw Error('文字请求等待已结束，结果未确认；这不代表上游已取消，不会自动重发');
+    throw cause;
+  } finally { if (timer) clearTimeout(timer); }
 }
 const message = (error: unknown) => error instanceof Error ? error.message : '操作未完成';
 
-export default function StoryStudio({ userId, documentId, nodeId, imageAllowed }: { userId: string; documentId: string; nodeId: string; imageAllowed: boolean }) {
+export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, defaultTextModel }: { userId: string; documentId: string; nodeId: string; imageAllowed: boolean; defaultTextModel: string }) {
   const [document, setDocument] = useState<Document | null>(null);
   const [work, setWork] = useState<Work>({ draft: blank(), images: {}, references: {}, mediaNodes: {}, lineage: {}, versions: [] });
   const [busy, setBusy] = useState('');
@@ -57,6 +67,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed }
   const [cursor, setCursor] = useState<string | null>(null);
   const [resultShot, setResultShot] = useState<string | null>(null);
   const [resultAssets, setResultAssets] = useState<Record<string, PickerItem>>({});
+  const [focusVideoId, setFocusVideoId] = useState<string | null>(null);
   const current = useRef(work); current.current = work;
   const documentRef = useRef(document); documentRef.current = document;
   const snapshot = useRef<Snapshot | null>(null);
@@ -94,6 +105,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed }
           script: String(node.data.generatedText || ''), sourceRevision: doc.revision,
         };
         const value: Work = { draft, request: node.data.storyRequest as TextRequest | undefined,
+          textModel: isStudioTextModel(node.data.textModel) ? node.data.textModel : isStudioTextModel(defaultTextModel) ? defaultTextModel : undefined,
           images: (node.data.storyImages || {}) as Work['images'], references: (node.data.storyReferences || {}) as Work['references'],
           mediaNodes: (node.data.storyMediaNodes || {}) as Work['mediaNodes'],
           lineage: (node.data.storyLineage || {}) as Work['lineage'], versions: (node.data.storyVersions || []) as StoryVersion[] };
@@ -106,6 +118,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed }
             validateStoryDraft(local.work.draft);
             if (local.revision === doc.revision || await confirm('本地故事草稿基于较早画布。保留该草稿继续核对？不会自动覆盖服务器。', { title: '恢复草稿', confirmLabel: '保留草稿' })) {
               restored = { ...value, ...local.work, lineage: local.work.lineage || {}, versions: local.work.versions || [] };
+              if (!isStudioTextModel(restored.textModel)) restored.textModel = value.textModel;
               if (restored.request?.state === 'pending') restored.request = { ...restored.request, state: 'unconfirmed' };
               failedSave.current = local.pending || null;
               sequence.current = 1; setDirty(true);
@@ -123,7 +136,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed }
     }
     void load();
     return () => { alive.current = false; };
-  }, [documentId, nodeId, userId, key, confirm]);
+  }, [documentId, nodeId, userId, key, confirm, defaultTextModel]);
 
   async function save(value = current.current, transform?: (graph: Snapshot) => void) {
     const doc = documentRef.current;
@@ -152,6 +165,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed }
     const node = graph.canvas.nodes.find(item => item.id === nodeId);
     if (!node) throw Error('故事节点不存在，未保存');
     Object.assign(node.data, { storyWorkflow: value.draft, storyRequest: value.request || null, storyImages: value.images,
+      textModel: isStudioTextModel(value.textModel) ? value.textModel : undefined,
       storyReferences: value.references, storyMediaNodes: value.mediaNodes,
       storyLineage: value.lineage, storyVersions: value.versions });
     transform?.(graph);
@@ -193,6 +207,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed }
     if (!await confirm('保留最新画布的其他节点，并使用本页故事草稿替换此故事节点？原服务器故事会保留在历史版本中；不会重发文字或媒体生成。', { title: '核对草稿', confirmLabel: '保留并合并' })) return;
     if (node.data.storyWorkflow) {
       const serverWork: Work = { draft: validateStoryDraft(node.data.storyWorkflow),
+        textModel: isStudioTextModel(node.data.textModel) ? node.data.textModel : undefined,
         images: (node.data.storyImages || {}) as Work['images'], references: (node.data.storyReferences || {}) as Work['references'],
         mediaNodes: (node.data.storyMediaNodes || {}) as Work['mediaNodes'], lineage: (node.data.storyLineage || {}) as Work['lineage'], versions: [] };
       change({ ...current.current, versions: [...current.current.versions, archived(serverWork)].slice(-10) });
@@ -206,6 +221,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed }
 
   function archived(value: Work): StoryVersion {
     return { id: crypto.randomUUID(), createdAt: new Date().toISOString(), draft: value.draft, images: value.images,
+      textModel: value.textModel,
       references: value.references, mediaNodes: value.mediaNodes, lineage: value.lineage };
   }
 
@@ -235,8 +251,10 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed }
         kind: 'script', prompt, nodeId, canvas_document_id: documentId, project_id: documentRef.current!.project_id,
         video_card_id: graph.context?.video_card_id || null, textPurpose: stage === 'storyboard' ? 'storyboard' : 'text',
         source_request_id: pending.request!.id,
+        story_stage: stage,
+        ...(isStudioTextModel(pending.textModel) ? { model: pending.textModel } : {}),
         contextRules: graph.canvas.nodes.find(node => node.id === nodeId)?.data.contextRules || '',
-      });
+      }, 'POST', STORY_TEXT_CLIENT_WAIT_MS);
       content = data.content || data.text || '';
       if (!content.trim()) throw Error('文字接口没有返回完整内容');
       const shots = stage === 'storyboard' ? parseStoryShots(content) : null;
@@ -301,7 +319,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed }
     const reference = current.current.references[shot.id];
     const oldId = current.current.mediaNodes[shot.id];
     if (oldId) {
-      if (snapshot.current!.canvas.nodes.some(node => node.id === oldId)) { setNotice('此镜头已有视频节点，打开画布继续编辑'); return; }
+      if (snapshot.current!.canvas.nodes.some(node => node.id === oldId)) { setFocusVideoId(oldId); setNotice('此镜头已有视频节点，打开画布继续编辑'); return; }
       if (!await confirm('原视频节点已不存在。原任务和结果不会删除，明确为此镜头准备一个新节点？不会提交生成。', { title: '准备新节点', confirmLabel: '准备新节点' })) return;
     }
     const videoId = `node-story-${crypto.randomUUID()}`;
@@ -312,6 +330,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed }
       attachStoryVideo(graph, nodeId, shot, ordinal, reference, videoId,
         `node-story-reference-${crypto.randomUUID()}`, draft.sourceRevision);
     });
+    setFocusVideoId(videoId);
     setNotice('视频节点已保存，尚未提交生成；在画布核对模型与点数后手动生成');
   }
   async function selectReference(shotId: string, item: PickerItem) {
@@ -357,13 +376,17 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed }
   const awaiting = work.request && ['pending', 'unconfirmed'].includes(work.request.state);
   return <main className={styles.studio}>
     <header className={styles.header}><div><h1>故事与分镜</h1>{document && <small>{document.title} · <RelativeTime value={document.updated_at} /></small>}</div>
-      <div className={styles.actions}><Link className={styles.link} href={`/tools/ultimate-canvas${documentId ? `?document_id=${encodeURIComponent(documentId)}` : ''}`}><ArrowLeft size={16} />画布</Link>
+      <div className={styles.actions}><Link className={styles.link} href={`/tools/ultimate-canvas${documentId ? `?document_id=${encodeURIComponent(documentId)}${focusVideoId ? `&focus_node=${encodeURIComponent(focusVideoId)}` : ''}` : ''}`}><ArrowLeft size={16} />画布</Link>
         <button disabled={blocked} onClick={() => void operate('保存草稿', async () => { await save(); setNotice('故事与分镜已保存'); })}><Save size={16} />{dirty || failedSave.current ? '保存草稿' : '已保存'}</button></div></header>
     <p role={error ? 'alert' : 'status'} className={`${styles.status} ${error ? styles.error : ''}`}>{error || busy || notice || (loading ? '正在读取故事' : !ready ? '请从画布选择故事节点打开' : '文字生成不扣本站点数；图视频生成在原工作区另行确认点数。')}</p>
     {conflict && <button disabled={Boolean(busy)} onClick={() => void operate('读取最新画布', reconcile)}><RefreshCw size={16} />读取最新画布并保留故事草稿</button>}
     {work.request && <section className={styles.status}><strong>{work.request.state === 'review' ? '返回内容待核对' : work.request.state === 'rejected' ? '文字请求被拒绝' : work.request.state === 'not_sent' ? '文字请求未发出' : '文字结果未确认'}</strong><p>{work.request.message || '不会自动重发文字请求'}</p>
       {work.request.raw && <pre className={styles.raw}>{work.request.raw}</pre>}<button disabled={blocked} onClick={() => void operate('处理文字请求', dismissRequest)}>保留原稿并结束等待</button></section>}
     {ready && <><div className={styles.grid}><section className={styles.section}><h2>故事</h2>
+      <label>文字模型<select disabled={blocked || Boolean(awaiting)} value={work.textModel || ''} onChange={event => change({ ...current.current, textModel: event.target.value || undefined })}>
+        <option value="">后台默认模型</option>
+        {STUDIO_TEXT_MODELS.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
+      </select></label>
       <label>故事内容<textarea className={styles.storyText} disabled={Boolean(busy)} value={work.draft.story} onChange={event => updateDraft({ story: event.target.value })} /></label>
       <button className={styles.primary} disabled={blocked || Boolean(awaiting) || !work.draft.story.trim()} onClick={() => void operate('生成完整剧本', () => generate('script'))}><WandSparkles size={16} />生成完整剧本</button>
     </section><section className={styles.section}><h2>完整剧本</h2>
@@ -401,7 +424,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed }
           <button className={styles.primary} disabled={blocked || !shot.videoPrompt.trim()} onClick={() => void operate('送回画布', () => mediaNode(shot))}><Clapperboard size={16} />{work.mediaNodes[shot.id] ? '核对画布节点' : '送回画布'}</button></div>
         {work.references[shot.id] && <p className={styles.status}>已选原图：{work.references[shot.id].fileName}</p>}
         {work.images[shot.id] && work.images[shot.id].prompt !== shot.imagePrompt && <p className={styles.status}>生图草稿仍保留创建时的要求；后续改动请在该工作区核对，不会自动覆盖。</p>}
-        {work.mediaNodes[shot.id] && <p className={styles.status}>已创建的视频节点保留当时的要求；请在画布核对后手动生成。</p>}
+        {work.mediaNodes[shot.id] && <p className={styles.status}><Link className={styles.link} href={`/tools/ultimate-canvas?document_id=${encodeURIComponent(documentId)}&focus_node=${encodeURIComponent(work.mediaNodes[shot.id])}`}><Clapperboard size={16} />打开此镜头视频</Link></p>}
       </section>)}
       {resultShot && <GeneratedImageResults items={results} scope={`story:${userId}:${documentId}:${nodeId}:${resultShot}`} hasMore={Boolean(cursor)} loadMore={() => readResults(resultShot, true)} emptyLabel="此镜头暂无生成结果"
         renderActions={item => resultAssets[item.id] ? <button disabled={blocked} onClick={() => void operate('选用原图', async () => {

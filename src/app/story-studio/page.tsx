@@ -3,6 +3,7 @@ import { getSession } from '@/lib/auth/session';
 import { externalFallbackPath, isExternalUser } from '@/lib/access/external-role';
 import StoryStudio from './story-studio';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { getMuskApiSettings } from '@/lib/integrations/musk';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,5 +16,6 @@ export default async function StoryStudioPage({ searchParams = {} }: {
   const user = await getSession();
   if (!user) redirect(`/login?next=${encodeURIComponent(`/story-studio?${new URLSearchParams({ document_id: documentId, node_id: nodeId })}`)}`);
   if (isExternalUser(user)) redirect(externalFallbackPath());
-  return <StoryStudio userId={user.id} documentId={documentId} nodeId={nodeId} imageAllowed={canUseCompanyTemplates(user)} />;
+  const settings = await getMuskApiSettings();
+  return <StoryStudio userId={user.id} documentId={documentId} nodeId={nodeId} imageAllowed={canUseCompanyTemplates(user)} defaultTextModel={settings.default_model} />;
 }

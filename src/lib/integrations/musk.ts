@@ -120,6 +120,7 @@ export class MuskApiError extends Error {
     message: string,
     public readonly status = 500,
     public readonly code = 'musk_api_error',
+    public diagnostics?: MuskChatDiagnostics,
   ) {
     super(message);
   }
@@ -146,38 +147,57 @@ export type MuskChatCompletionResult = {
   content: string;
   model: string | null;
   usage: unknown;
+  diagnostics: MuskChatDiagnostics;
 };
+
+export type MuskChatDiagnostics = {
+  model: string; requestChars: number; requestBytes: number; timeoutMs: number;
+  phase: 'awaiting_headers' | 'reading_body' | 'parsing' | 'completed';
+  elapsedMs: number; headersMs: number | null; bodyMs: number | null;
+  httpStatus: number | null; upstreamRequestId: string | null; networkCode?: string;
+};
+
+function safeMuskRequestId(value: string | null) {
+  return value && /^[A-Za-z0-9_.:-]{1,160}$/.test(value) ? value : null;
+}
 
 export async function createMuskChatCompletion(params: {
   settings: MuskApiSettings;
   messages: MuskChatMessage[];
   temperature?: number;
   timeoutMs?: number;
+  fetchImpl?: typeof fetch;
 }): Promise<MuskChatCompletionResult> {
   if (!isMuskApiReady(params.settings)) {
     throw new MuskApiError('Musk API 未启用或缺少 API Key', 503, 'musk_api_not_configured');
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), params.timeoutMs || 45000);
+  const body = JSON.stringify({ model: params.settings.default_model, messages: params.messages,
+    temperature: params.temperature ?? 0.2, response_format: { type: 'json_object' } });
+  const started = Date.now();
+  const diagnostics: MuskChatDiagnostics = { model: params.settings.default_model,
+    requestChars: body.length, requestBytes: Buffer.byteLength(body), timeoutMs: params.timeoutMs || 45000,
+    phase: 'awaiting_headers', elapsedMs: 0, headersMs: null, bodyMs: null, httpStatus: null, upstreamRequestId: null };
+  const timeout = setTimeout(() => controller.abort(), diagnostics.timeoutMs);
 
   try {
-    const response = await fetch(buildChatCompletionsUrl(params.settings.base_url), {
+    const response = await (params.fetchImpl || fetch)(buildChatCompletionsUrl(params.settings.base_url), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${params.settings.api_key}`,
       },
-      body: JSON.stringify({
-        model: params.settings.default_model,
-        messages: params.messages,
-        temperature: params.temperature ?? 0.2,
-        response_format: { type: 'json_object' },
-      }),
+      body,
       signal: controller.signal,
     });
-
+    diagnostics.headersMs = Date.now() - started;
+    diagnostics.httpStatus = response.status;
+    diagnostics.upstreamRequestId = safeMuskRequestId(response.headers.get('x-request-id') || response.headers.get('request-id'));
+    diagnostics.phase = 'reading_body';
     const text = await response.text();
+    diagnostics.bodyMs = Date.now() - started - diagnostics.headersMs;
+    diagnostics.phase = 'parsing';
     if (!response.ok) {
       throw new MuskApiError(`Musk API 调用失败 (HTTP ${response.status})`, response.status, 'musk_api_upstream_error');
     }
@@ -201,17 +221,22 @@ export async function createMuskChatCompletion(params: {
       throw new MuskApiError('Musk API 未返回 message.content', 502, 'musk_api_empty_content');
     }
 
+    diagnostics.phase = 'completed';
+    diagnostics.elapsedMs = Date.now() - started;
     return {
       content,
       model: typeof data.model === 'string' ? data.model : null,
       usage: data.usage ?? null,
+      diagnostics,
     };
   } catch (error) {
-    if (error instanceof MuskApiError) throw error;
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new MuskApiError('Musk API 调用超时', 504, 'musk_api_timeout');
-    }
-    throw new MuskApiError('Musk API 调用失败', 500, 'musk_api_request_failed');
+    diagnostics.elapsedMs = Date.now() - started;
+    const code = (error as { cause?: { code?: unknown }; code?: unknown })?.cause?.code
+      || (error as { code?: unknown })?.code;
+    if (typeof code === 'string' && /^(?:UND_ERR_[A-Z_]+|E(?:CONNRESET|CONNREFUSED|TIMEDOUT|AI_AGAIN|NOTFOUND))$/.test(code)) diagnostics.networkCode = code;
+    if (error instanceof MuskApiError) { error.diagnostics = diagnostics; throw error; }
+    if (controller.signal.aborted) throw new MuskApiError('Musk API 调用超时', 504, 'musk_api_timeout', diagnostics);
+    throw new MuskApiError('Musk API 调用失败', 500, 'musk_api_request_failed', diagnostics);
   } finally {
     clearTimeout(timeout);
   }

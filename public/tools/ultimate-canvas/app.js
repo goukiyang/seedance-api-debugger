@@ -54,6 +54,7 @@
         documentRevision: 0,
         documentTitle: '未命名画布',
         explicitDocumentId: new URLSearchParams(window.location.search).get('document_id'),
+        explicitFocusNode: new URLSearchParams(window.location.search).get('focus_node'),
         documentWritable: false,
         documentDirty: false,
         editSequence: 0,
@@ -3440,6 +3441,11 @@
             engine.restore(parsed.canvas || parsed);
             window.UltimateCanvasToolflow?.normalizeLoadedFlowNodes?.();
             recoveredTasklessVideoStatus = hydrateNodeViews();
+            if (canvasRuntime.explicitFocusNode && /^[A-Za-z0-9_-]{1,160}$/.test(canvasRuntime.explicitFocusNode)
+                && engine.nodes.has(canvasRuntime.explicitFocusNode)) {
+                planSplit.focus([canvasRuntime.explicitFocusNode]);
+                canvasRuntime.explicitFocusNode = null;
+            }
             refreshContextRulesButtons();
             canvasRuntime.saveState = 'saved';
             canvasRuntime.saveError = null;
@@ -4156,6 +4162,16 @@
     }
 
     function applyGenerationNodeDimensions(nodeEl, settings) {
+        const node = engine.nodes.get(nodeEl?.dataset?.nodeId);
+        const width = Number(node?.data?.width), height = Number(node?.data?.height);
+        if (node?.type === 'image' && node.data?.source === 'reference_image' && node.data?.originalUrl
+            && Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0) {
+            const scale = generationNodeLongEdge(nodeEl) / Math.max(width, height);
+            nodeEl.style.setProperty('--generation-node-width', `${width * scale}px`);
+            nodeEl.style.setProperty('--generation-node-height', `${height * scale}px`);
+            nodeEl.dataset.generationRatio = window.UltimateCanvasGenerationInteractions.ratioFromImageDimensions(width, height) || settings.ratio;
+            return { width: width * scale, height: height * scale, ratio: nodeEl.dataset.generationRatio };
+        }
         const dimensions = window.UltimateCanvasGenerationInteractions
             .generationNodeDimensions(settings.ratio, generationNodeLongEdge(nodeEl));
         nodeEl.style.setProperty('--generation-node-width', `${dimensions.width}px`);
@@ -5128,7 +5144,8 @@
         setNodeGenerationStatus(el, 'loading', '正在查询原请求的受理结果');
         try {
             if (submission.userId !== canvasRuntime.bootstrap?.user?.id || submission.documentId !== canvasRuntime.documentId) throw Error('请在原账号、原画布中查询此请求。');
-            if (!await flushCanvasSave('before_video_lookup')) throw Error('请先保存原请求，再查询受理状态。');
+            // This GET checks the persisted binding itself. Saving first wrongly blocks
+            // restore inside a document operation, and is unnecessary even during a CAS conflict.
             const query = new URLSearchParams({ document_id: submission.documentId, node_id: nodeId, request_id: submission.requestId });
             const result = await requestJson(`/api/tools/ultimate-canvas/video-submission?${query}`, { cache: 'no-store' });
             if (!window.UltimateCanvasGenerationInteractions.generationContextMatches(captured, currentGenerationContext(nodeId))
@@ -5138,7 +5155,7 @@
                 return;
             }
             applyVideoGenerationResult(el, submission.generationPayload, { task_id: result.task.id, local_status: result.task.local_status });
-            await flushCanvasSave('video_lookup_accepted');
+            if (!canvasRuntime.documentOperation) await flushCanvasSave('video_lookup_accepted');
         } catch (error) {
             if (engine.nodes.get(nodeId) === node) setNodeGenerationStatus(el, 'warn', error.message || '查询失败，请保留原请求后重试。');
         } finally {

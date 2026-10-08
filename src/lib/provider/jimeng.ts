@@ -318,14 +318,7 @@ export function buildContentArray(input: CreateVideoInput & { generation_mode: G
 // Step1: Create Video Task (只返回 id)
 // ============================================================================
 
-export async function createVideoTask(
-  input: SeedanceProviderInput & { generation_mode: GenerationMode }
-): Promise<ProviderCreateResponse> {
-  if (!isApiKeyConfigured()) {
-    throw new Error('API key not configured');
-  }
-
-  const endpoint = `${SEEDANCE_BASE_URL}/call`;
+export function buildSeedanceVideoPayload(input: SeedanceProviderInput & { generation_mode: GenerationMode }): Record<string, unknown> {
   const model = resolveSeedanceVideoModel(input.model);
   if (input.duration !== undefined && !isSeedanceVideoDuration(input.duration, model)) {
     throw new Error(seedanceVideoDurationError(model));
@@ -379,6 +372,34 @@ export async function createVideoTask(
   if (input.execution_expires_after) {
     payload.execution_expires_after = input.execution_expires_after;
   }
+  return payload;
+}
+
+export const SEEDANCE_INLINE_REQUEST_MAX_BYTES = 64_000_000;
+
+export function redactInlineImageTransport(value: unknown): unknown {
+  if (typeof value === 'string') return value.replace(/data:[^,\s"'<>]*;base64,[A-Za-z0-9+/=\r\n]+/gi, '[inline image omitted]');
+  if (Array.isArray(value)) return value.map(redactInlineImageTransport);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key,
+    key.toLowerCase().includes('base64') ? '[inline image omitted]' : redactInlineImageTransport(item)]));
+}
+
+export async function createVideoTask(
+  input: SeedanceProviderInput & { generation_mode: GenerationMode }
+): Promise<ProviderCreateResponse> {
+  if (!isApiKeyConfigured()) throw new Error('API key not configured');
+  const endpoint = `${SEEDANCE_BASE_URL}/call`;
+  const payload = buildSeedanceVideoPayload(input);
+  const model = payload.model;
+  const content = payload.content as ContentItem[];
+  const clientRequestId = input.clientRequestId || input.client_request_id;
+  const requestBody = JSON.stringify(payload);
+  const hasInlineImages = content.some(item => item.image_url?.url.startsWith('data:'));
+  if (hasInlineImages
+    && Buffer.byteLength(requestBody) > SEEDANCE_INLINE_REQUEST_MAX_BYTES) {
+    throw new Error('原图编码后的请求超过64MB，未发送给视频服务');
+  }
 
   console.log('\n========== Step1: Create Video Task ==========');
   console.log(`Endpoint:  ${endpoint}`);
@@ -400,7 +421,7 @@ export async function createVideoTask(
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(payload),
+      body: requestBody,
     });
 
     const responseText = await response.text();
@@ -411,9 +432,10 @@ export async function createVideoTask(
       try {
         data = JSON.parse(responseText);
       } catch {
-        throw createNonJsonProviderError(response, responseText);
+        throw createNonJsonProviderError(response, hasInlineImages ? String(redactInlineImageTransport(responseText)) : responseText);
       }
     }
+    if (hasInlineImages) data = redactInlineImageTransport(data) as Record<string, unknown>;
 
     console.log(`[Create] HTTP Status: ${response.status}`);
     console.log(`[Create] Response:`, JSON.stringify(data, null, 2));
@@ -437,8 +459,9 @@ export async function createVideoTask(
       raw: data,
     };
   } catch (error) {
-    console.error('\n❌ Step1 Create failed:', error);
-    throw error;
+    const safeError = hasInlineImages ? new Error(String(redactInlineImageTransport(error instanceof Error ? error.message : 'Seedance 创建任务失败'))) : error;
+    console.error('\n❌ Step1 Create failed:', safeError);
+    throw safeError;
   }
 }
 

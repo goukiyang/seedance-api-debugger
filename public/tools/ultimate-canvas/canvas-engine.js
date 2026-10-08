@@ -566,6 +566,8 @@ class CanvasEngine {
         this._applyTransform();
         this._updateZoom();
         this._updateConnections();
+        if (snapshot.selectedNodeId && this.nodes.has(snapshot.selectedNodeId)) this._selectNode(snapshot.selectedNodeId);
+        else this._deselectAll();
         document.getElementById('canvas-welcome')?.classList.toggle('hidden', this.nodes.size > 0);
         this._notifyCanvasGeometryChanged('restore');
     }
@@ -688,7 +690,8 @@ class CanvasEngine {
         wrap.style.top = y + 'px';
 
         const labelIcon = this._icon(type);
-        const label = this._label(type, id);
+        const label = typeof nd.data?.title === 'string' && nd.data.title.trim()
+            ? this._escapeHtml(nd.data.title.trim().slice(0, 160)) : this._label(type, id);
         const editableText = ['text', 'script'].includes(type) && (typeof nd.data?.authoredText === 'string'
             ? nd.data.authoredText : !nd.data?.generatedText && nd.data?.prompt ? nd.data.prompt : null);
         const body = editableText !== false && editableText !== null

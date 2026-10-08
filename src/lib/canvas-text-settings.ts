@@ -105,8 +105,9 @@ export async function getCanvasTextSettings(): Promise<CanvasRuleState> {
 
 export function canvasRulePurpose(kind: string, mode: string, explicit?: unknown): Exclude<CanvasRulePurpose, 'basic'> {
   if (mode === 'video-prompt-enhance') return 'prompt';
+  if (explicit === 'text' || explicit === 'prompt' || explicit === 'storyboard') return explicit;
   if (kind === 'script') return 'storyboard';
-  return explicit === 'prompt' || explicit === 'storyboard' ? explicit : 'text';
+  return 'text';
 }
 
 export function compileCanvasTextRules(state: CanvasRuleState, purpose: Exclude<CanvasRulePurpose, 'basic'>, nodeRules: string) {
