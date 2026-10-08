@@ -5122,13 +5122,18 @@
             }
         );
         renderGenerationNodeControls(payload.nodeId);
-        setNodeGenerationStatus(nodeEl, 'loading', '视频任务已提交，正在查询状态');
-        showCanvasNotice(result?.message || '视频任务已提交。', 'info');
+        if (normalized.status === 'failed') {
+            applyVideoTaskStatus(payload.nodeId, result);
+            showCanvasNotice('原请求已确认：视频生成失败，输入已保留，不会重复生成。', 'error');
+        } else {
+            setNodeGenerationStatus(nodeEl, 'loading', '视频任务已提交，正在查询状态');
+            showCanvasNotice(result?.message || '视频任务已提交。', 'info');
+        }
         pollVideoTask(normalized.taskId, payload.nodeId);
         scheduleCanvasSave('video_generation');
     }
 
-    async function recoverVideoSubmission(nodeId) {
+    async function recoverVideoSubmission(nodeId, expectedTaskId = '') {
         const node = engine.nodes.get(nodeId), submission = node?.data?.videoSubmission;
         if (!submission || submission.state !== 'unconfirmed') return;
         if (node._submissionQueryBusy) return;
@@ -5144,12 +5149,18 @@
             const result = await requestJson(`/api/tools/ultimate-canvas/video-submission?${query}`, { cache: 'no-store' });
             if (!window.UltimateCanvasGenerationInteractions.generationContextMatches(captured, currentGenerationContext(nodeId))
                 || node.data.videoSubmission !== submission) return;
-            if (!result.task?.id) {
+            if (result.state !== 'accepted' || !/^[a-zA-Z0-9_-]{1,160}$/.test(result.task?.id || '')
+                || (expectedTaskId && result.task.id !== expectedTaskId)) {
                 setNodeGenerationStatus(el, 'warn', '提交结果待确认：暂未找到任务，不代表未受理。可稍后再次查询，不会重复生成。');
                 return;
             }
             applyVideoGenerationResult(el, submission.generationPayload, { task_id: result.task.id, local_status: result.task.local_status });
-            if (!canvasRuntime.documentOperation) await flushCanvasSave('video_lookup_accepted');
+            if (!canvasRuntime.documentOperation) await flushCanvasSave('video_lookup_accepted').catch(() => {
+                if (engine.nodes.get(nodeId) === node && node.data.videoSubmission === submission) {
+                    showCanvasNotice('原请求结果已确认，但画布保存未确认；输入和任务编号已保留，请检查保存状态。', 'warn');
+                }
+            });
+            return true;
         } catch (error) {
             if (engine.nodes.get(nodeId) === node) setNodeGenerationStatus(el, 'warn', error.message || '查询失败，请保留原请求后重试。');
         } finally {
@@ -5443,9 +5454,16 @@
             captured: capturedContext,
             current: () => currentGenerationContext(payload.nodeId),
             onSuccess: result => applyGenerationResult(nodeEl, result?.canvasStylePayload || payload, result),
-            onError: error => {
+            onError: async error => {
                 const node = engine.nodes.get(payload.nodeId);
                 if (payload.kind === 'video' && node?.data?.videoSubmission?.requestId === payload.requestId) {
+                    const localTaskId = error?.response?.task_id;
+                    if (typeof localTaskId === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(localTaskId)) {
+                        const confirmed = await recoverVideoSubmission(payload.nodeId, localTaskId);
+                        if (confirmed || engine.nodes.get(payload.nodeId) !== node
+                            || node.data.videoSubmission?.requestId !== payload.requestId
+                            || !window.UltimateCanvasGenerationInteractions.generationContextMatches(capturedContext, currentGenerationContext(payload.nodeId))) return;
+                    }
                     setNodeGenerationStatus(nodeEl, 'warn', '提交结果待确认。请查询原请求；不会自动重复生成。');
                     scheduleCanvasSave('video_submission_unknown');
                     showCanvasNotice(error?.message || '提交结果待确认，请查询原请求。', 'warn');

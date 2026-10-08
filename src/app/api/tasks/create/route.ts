@@ -17,6 +17,7 @@ import {
   generationPromptLimitMessage,
 } from '@/lib/prompt/limits';
 import { createVideoTask, buildContentArray, isApiKeyConfigured } from '@/lib/provider/jimeng';
+import type { ProviderCreateDiagnostic } from '@/lib/provider/create-diagnostic';
 import { seedanceLocalReferenceTransport } from '@/lib/provider/reference-image-transport';
 import { parseSeedanceVideoModel, seedanceRatioFollowsFirstFrame, isSeedanceVideoDuration, seedanceVideoDurationError } from '@/lib/provider/seedance-models';
 import {
@@ -2069,6 +2070,7 @@ export async function POST(request: NextRequest) {
 
   // --- Call provider DIRECTLY (no internal HTTP) ---
   let providerRequestId: string | null = null;
+  const seedanceDiagnostic: { value: ProviderCreateDiagnostic | null } = { value: null };
   try {
     providerInput.clientRequestId = taskId;
     providerInput.client_request_id = taskId;
@@ -2140,7 +2142,7 @@ export async function POST(request: NextRequest) {
           apiToken: h3Settings.api_token || undefined,
           idempotencyKey: providerIdempotencyKey,
         })
-      : await createVideoTask({ ...providerInput, ...seedanceReferenceTransport });
+      : await createVideoTask({ ...providerInput, ...seedanceReferenceTransport }, diagnostic => { seedanceDiagnostic.value = diagnostic; });
 
     await prisma.videoTask.update({
       where: { id: taskId },
@@ -2156,7 +2158,9 @@ export async function POST(request: NextRequest) {
       requestId: providerRequest.id,
       task: { ...createdTask, provider_task_id: providerResult.provider_task_id },
       providerTaskId: providerResult.provider_task_id,
+      httpStatus: seedanceDiagnostic.value?.http_status,
       responseSummary: {
+        seedance_diagnostic: seedanceDiagnostic.value || undefined,
         provider_task_id: providerResult.provider_task_id,
         response_keys: providerResult.raw && typeof providerResult.raw === 'object'
           ? Object.keys(providerResult.raw as Record<string, unknown>)
@@ -2251,7 +2255,9 @@ export async function POST(request: NextRequest) {
         requestId: providerRequestId,
         errorCode: userFacingFailure.code,
         errorMessage: providerFailureMessage,
+        httpStatus: seedanceDiagnostic.value?.http_status,
         responseSummary: {
+          seedance_diagnostic: seedanceDiagnostic.value || undefined,
           error: {
             code: userFacingFailure.code,
             user_message: userFacingFailure.message,

@@ -10,6 +10,7 @@ import type { CreateVideoInput } from '../src/types';
 import { STUDIO_TEXT_MODELS, isStudioTextModel } from '../src/lib/template-studio/text-models';
 import { buildContentArray, buildSeedanceVideoPayload, redactInlineImageTransport, buildProviderHttpErrorStatus, mapProviderStatus } from '../src/lib/provider/jimeng';
 import { normalizeProviderErrorMessage, providerFailureUserMessage } from '../src/lib/provider/error-message';
+import { providerCreateDiagnostic } from '../src/lib/provider/create-diagnostic';
 
 function actual(file: string, names: string[]) {
   const source = readFileSync(file, 'utf8');
@@ -92,7 +93,8 @@ async function originalTransport() {
   assert.ok(!ledgerPayload.includes('seedanceReferenceTransport'), 'original URL-based ledger hash remains unchanged');
   const output: string[] = [];
   let status = 200, providerCalls = 0;
-  const providerContext: any = { exports: {}, Buffer, isApiKeyConfigured: () => true, buildSeedanceVideoPayload,
+  const providerContext: any = { exports: {}, Buffer, providerCreateDiagnostic,
+    isApiKeyConfigured: () => true, buildSeedanceVideoPayload,
     SEEDANCE_BASE_URL: 'https://example.invalid/never-connect', SEEDANCE_API_KEY: '', SEEDANCE_INLINE_REQUEST_MAX_BYTES: 64000000,
     redactInlineImageTransport, normalizeProviderErrorMessage, maskKey: () => '***',
     console: { log: (...items: unknown[]) => output.push(items.map(item => String(item)).join(' ')), error: (...items: unknown[]) => output.push(items.map(item => String(item)).join(' ')) },

@@ -23,6 +23,7 @@ import {
 } from './seedance-models';
 import { buildSeedanceDraftContent } from './seedance-draft';
 import { seedanceVideoEditParameters, type SeedanceProviderInput } from './seedance-video-edit';
+import { providerCreateDiagnostic, type ProviderCreateDiagnostic, type ProviderCreatePhase } from './create-diagnostic';
 
 // ============================================================================
 // Environment Configuration
@@ -386,7 +387,8 @@ export function redactInlineImageTransport(value: unknown): unknown {
 }
 
 export async function createVideoTask(
-  input: SeedanceProviderInput & { generation_mode: GenerationMode }
+  input: SeedanceProviderInput & { generation_mode: GenerationMode },
+  onDiagnostic?: (diagnostic: ProviderCreateDiagnostic) => void
 ): Promise<ProviderCreateResponse> {
   if (!isApiKeyConfigured()) throw new Error('API key not configured');
   const endpoint = `${SEEDANCE_BASE_URL}/call`;
@@ -395,9 +397,10 @@ export async function createVideoTask(
   const content = payload.content as ContentItem[];
   const clientRequestId = input.clientRequestId || input.client_request_id;
   const requestBody = JSON.stringify(payload);
+  const encodedJsonBytes = Buffer.byteLength(requestBody);
   const hasInlineImages = content.some(item => item.image_url?.url.startsWith('data:'));
   if (hasInlineImages
-    && Buffer.byteLength(requestBody) > SEEDANCE_INLINE_REQUEST_MAX_BYTES) {
+    && encodedJsonBytes > SEEDANCE_INLINE_REQUEST_MAX_BYTES) {
     throw new Error('原图编码后的请求超过64MB，未发送给视频服务');
   }
 
@@ -415,6 +418,14 @@ export async function createVideoTask(
   console.log(`API Key:   ${maskKey(SEEDANCE_API_KEY)}`);
   console.log('================================================\n');
 
+  const startedAt = Date.now();
+  let phase: ProviderCreatePhase = 'fetch';
+  let httpStatus: number | null = null;
+  const capture = (error?: unknown) => {
+    const diagnostic = providerCreateDiagnostic({ phase, startedAt, encodedJsonBytes, httpStatus, error });
+    try { onDiagnostic?.(diagnostic); } catch { /* Capture must not change task or refund handling. */ }
+    return diagnostic;
+  };
   try {
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -424,10 +435,13 @@ export async function createVideoTask(
       body: requestBody,
     });
 
+    httpStatus = response.status;
+    phase = 'response_body';
     const responseText = await response.text();
     
     // 处理空响应或非 JSON 响应
     let data: Record<string, unknown> = {};
+    phase = 'response_parse';
     if (responseText.trim()) {
       try {
         data = JSON.parse(responseText);
@@ -440,6 +454,7 @@ export async function createVideoTask(
     console.log(`[Create] HTTP Status: ${response.status}`);
     console.log(`[Create] Response:`, JSON.stringify(data, null, 2));
 
+    phase = 'response_validation';
     if (!response.ok) {
       const providerErrorMessage = normalizeProviderErrorMessage(data.error ?? data.message ?? data);
       throw new Error(providerErrorMessage || `Seedance 创建任务失败（HTTP ${response.status}）`);
@@ -454,13 +469,16 @@ export async function createVideoTask(
 
     console.log(`\n✅ Step1 Complete: provider_task_id = ${providerTaskId}\n`);
 
+    phase = 'complete';
+    capture();
     return {
       provider_task_id: providerTaskId,
       raw: data,
     };
   } catch (error) {
+    const diagnostic = capture(error);
     const safeError = hasInlineImages ? new Error(String(redactInlineImageTransport(error instanceof Error ? error.message : 'Seedance 创建任务失败'))) : error;
-    console.error('\n❌ Step1 Create failed:', safeError);
+    console.error('\n❌ Step1 Create failed:', safeError instanceof Error ? safeError.message : 'Seedance 创建任务失败', diagnostic);
     throw safeError;
   }
 }

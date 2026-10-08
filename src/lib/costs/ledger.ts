@@ -363,6 +363,7 @@ export async function markProviderApiRequestAccepted(params: {
   task: CostTaskSnapshot;
   providerTaskId?: string | null;
   responseSummary?: unknown;
+  httpStatus?: number | null;
 }) {
   await prisma.$transaction(async (tx) => {
     await tx.providerApiRequest.update({
@@ -370,6 +371,7 @@ export async function markProviderApiRequestAccepted(params: {
       data: {
         provider_task_id: params.providerTaskId || null,
         status: 'accepted',
+        ...(params.httpStatus !== undefined ? { http_status: params.httpStatus } : {}),
         response_summary_json: params.responseSummary ? JSON.stringify(params.responseSummary) : null,
         completed_at: new Date(),
       },
@@ -403,11 +405,13 @@ export async function markProviderApiRequestFailed(params: {
   errorCode?: string | null;
   errorMessage?: string | null;
   responseSummary?: unknown;
+  httpStatus?: number | null;
 }) {
   await prisma.providerApiRequest.update({
     where: { id: params.requestId },
     data: {
       status: 'failed',
+      ...(params.httpStatus !== undefined ? { http_status: params.httpStatus } : {}),
       error_code: params.errorCode || null,
       error_message: params.errorMessage || null,
       response_summary_json: params.responseSummary ? JSON.stringify(params.responseSummary) : null,
