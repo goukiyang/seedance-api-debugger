@@ -232,6 +232,25 @@
         };
     }
 
+    // Keep database payloads and serialized reference lists out of canvas drafts.
+    function videoTaskSnapshot(task = {}) {
+        const status = normalizeVideoStatus(task);
+        return {
+            task_id: status.taskId,
+            provider_task_id: task.provider_task_id || task.providerTaskId || null,
+            local_status: status.status,
+            error_message: status.errorMessage,
+            result_video_url: status.resultVideoUrl,
+            result_last_frame_url: status.resultLastFrameUrl,
+            thumbnail_url: status.thumbnailUrl,
+            play_url: status.playUrl,
+            download_url: status.downloadUrl,
+            stable_download_ready: status.stableDownloadReady,
+            preview_available: status.previewAvailable,
+            retry_after_ms: status.retryAfterMs
+        };
+    }
+
     return {
         imageMode,
         videoMode,
@@ -242,6 +261,7 @@
         normalizeImageResult,
         normalizeVideoCreate,
         normalizeVideoStatus,
+        videoTaskSnapshot,
         uniqueStrings
     };
 });

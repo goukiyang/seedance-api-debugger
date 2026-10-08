@@ -24,9 +24,10 @@ type ReferenceRequest = { requestId: string; userId: string; nodeId: string; doc
 type ReferenceChild = Window & { UltimateCanvasReferenceContextMatches?: (requestId: string) => boolean };
 const validId = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(value);
 
-export default function CanvasFrame({ documentId }: { documentId?: string }) {
+export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: string; focusNodeId?: string }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const initialDocumentId = useRef(documentId);
+  const initialFocusNodeId = useRef(validId(focusNodeId) ? focusNodeId : undefined);
   const dirty = useRef(false);
   const previewRequest = useRef(0);
   const [preview, setPreview] = useState<CanvasMediaPreview | null>(null);
@@ -304,7 +305,7 @@ export default function CanvasFrame({ documentId }: { documentId?: string }) {
     };
   }, [confirm, closeReferencePicker]);
   return <>
-    <iframe ref={frame} title="无线画布" src={`/tools/ultimate-canvas/index.html${initialDocumentId.current ? `?document_id=${encodeURIComponent(initialDocumentId.current)}` : ''}`} className="ultimate-canvas-frame" referrerPolicy="no-referrer" allow="fullscreen"
+    <iframe ref={frame} title="无线画布" src={`/tools/ultimate-canvas/index.html${initialDocumentId.current ? `?document_id=${encodeURIComponent(initialDocumentId.current)}` : ''}${initialFocusNodeId.current ? `${initialDocumentId.current ? '&' : '?'}focus_node=${encodeURIComponent(initialFocusNodeId.current)}` : ''}`} className="ultimate-canvas-frame" referrerPolicy="no-referrer" allow="fullscreen"
       onLoad={() => { setStyleGalleryOpen(false); closeReferencePicker(); }}
       style={styleGalleryOpen ? { position: 'fixed', inset: 0, width: '100vw', height: '100dvh', zIndex: 10000, borderRadius: 0 } : undefined} />
     <CanvasReactions frame={frame} />

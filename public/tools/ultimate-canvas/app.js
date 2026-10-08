@@ -688,10 +688,7 @@
                 videoBranchId: task.video_branch_id || node.data?.videoBranchId || null,
                 generationStatus: status,
                 versionRole: task.version_role || node.data?.versionRole || 'normal',
-                generationResult: {
-                    ...(node.data?.generationResult || {}),
-                    ...task
-                }
+                generationResult: window.UltimateCanvasGenerationNodes.videoTaskSnapshot(task)
             };
             const succeeded = status === 'succeeded';
             decorateGeneratedNode(
@@ -3443,7 +3440,7 @@
             recoveredTasklessVideoStatus = hydrateNodeViews();
             if (canvasRuntime.explicitFocusNode && /^[A-Za-z0-9_-]{1,160}$/.test(canvasRuntime.explicitFocusNode)
                 && engine.nodes.has(canvasRuntime.explicitFocusNode)) {
-                planSplit.focus([canvasRuntime.explicitFocusNode]);
+                planSplit.focus([canvasRuntime.explicitFocusNode], { includeControls: true });
                 canvasRuntime.explicitFocusNode = null;
             }
             refreshContextRulesButtons();
@@ -5059,10 +5056,7 @@
             resultVideoUrl: normalized.resultVideoUrl || node.data.resultVideoUrl,
             resultLastFrameUrl: normalized.resultLastFrameUrl || node.data.resultLastFrameUrl,
             thumbnailUrl: preview || node.data.thumbnailUrl,
-            generationResult: {
-                ...(node.data.generationResult || {}),
-                ...task
-            }
+            generationResult: window.UltimateCanvasGenerationNodes.videoTaskSnapshot(task)
         };
         decorateGeneratedNode(
             nodeId,

@@ -8,14 +8,28 @@
         let active = null, opening = false;
         const state = () => engine.planSplits ||= P.empty();
         function sourceText(nodeId) { return options.sourceText(nodeId); }
-        function focus(ids) {
+        function focus(ids, settings = {}) {
             const nodes = ids.map(id => engine.nodes.get(id)).filter(Boolean);
             if (!nodes.length) return options.notice('本批节点已删除；需要新节点时请明确创建副本。', 'warn');
+            if (settings.includeControls) engine.selectNode(nodes[0].id);
             const bounds = nodes.reduce((box, node) => {
                 const el = document.querySelector('[data-node-id="' + CSS.escape(node.id) + '"]');
-                box.left = Math.min(box.left, node.x); box.top = Math.min(box.top, node.y);
-                box.right = Math.max(box.right, node.x + (el?.offsetWidth || 640));
-                box.bottom = Math.max(box.bottom, node.y + (el?.offsetHeight || 480));
+                let left = node.x, top = node.y;
+                let right = node.x + (el?.offsetWidth || 640), bottom = node.y + (el?.offsetHeight || 480);
+                if (settings.includeControls && el) {
+                    const anchor = el.getBoundingClientRect(), scale = engine.scale || 1;
+                    // Selected controls can extend outside the node's layout box.
+                    for (const control of el.querySelectorAll('[data-generation-editor], .node-input-bar, .node-video-props, .generation-node-toolbar, [data-video-result-history]')) {
+                        const rect = control.getBoundingClientRect();
+                        if (!rect.width || !rect.height) continue;
+                        left = Math.min(left, node.x + (rect.left - anchor.left) / scale);
+                        top = Math.min(top, node.y + (rect.top - anchor.top) / scale);
+                        right = Math.max(right, node.x + (rect.right - anchor.left) / scale);
+                        bottom = Math.max(bottom, node.y + (rect.bottom - anchor.top) / scale);
+                    }
+                }
+                box.left = Math.min(box.left, left); box.top = Math.min(box.top, top);
+                box.right = Math.max(box.right, right); box.bottom = Math.max(box.bottom, bottom);
                 return box;
             }, { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
             const rect = engine.container.getBoundingClientRect();
@@ -24,7 +38,7 @@
             engine.offsetX = rect.width / 2 - (bounds.left + bounds.right) / 2 * engine.scale;
             engine.offsetY = rect.height / 2 - (bounds.top + bounds.bottom) / 2 * engine.scale;
             engine._applyTransform(); engine._updateZoom(); engine._updateConnections();
-            engine.selectNode(nodes[0].id);
+            if (!settings.includeControls) engine.selectNode(nodes[0].id);
         }
         function persist() {
             if (!active || !options.writable()) return;
