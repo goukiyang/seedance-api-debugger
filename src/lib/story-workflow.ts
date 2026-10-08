@@ -6,6 +6,10 @@ export type StoryShot = {
   imagePrompt: string;
   videoPrompt: string;
   durationSeconds: number;
+  framing?: string;
+  lighting?: string;
+  camera?: string;
+  materialIds?: string[];
 };
 
 export type StoryDraft = {
@@ -51,8 +55,8 @@ function record(value: unknown, field: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function exactKeys(value: Record<string, unknown>, allowed: string[], field: string) {
-  const unknown = Object.keys(value).find(key => !allowed.includes(key));
+function exactKeys(value: Record<string, unknown>, allowed: string[], field: string, optional: string[] = []) {
+  const unknown = Object.keys(value).find(key => !allowed.includes(key) && !optional.includes(key));
   if (unknown) invalid(`${field}.${unknown}`, '包含不支持的字段', 'invalid-shape');
   const missing = allowed.find(key => !Object.hasOwn(value, key));
   if (missing) invalid(`${field}.${missing}`, '缺少必要字段', 'invalid-shape');
@@ -67,7 +71,7 @@ function text(value: unknown, field: string, max: number, required = false): str
 
 function normalizeShot(value: unknown, field: string, allowIncomplete: boolean): StoryShot {
   const input = record(value, field);
-  exactKeys(input, allowedShotKeys, field);
+  exactKeys(input, allowedShotKeys, field, ['framing', 'lighting', 'camera', 'materialIds']);
   const id = text(input.id, `${field}.id`, 128, true);
   if (id !== id.trim()) invalid(`${field}.id`, '不能包含首尾空格');
   const durationSeconds = input.durationSeconds;
@@ -82,7 +86,46 @@ function normalizeShot(value: unknown, field: string, allowIncomplete: boolean):
     imagePrompt: text(input.imagePrompt, `${field}.imagePrompt`, 4_000, !allowIncomplete),
     videoPrompt: text(input.videoPrompt, `${field}.videoPrompt`, 4_000, !allowIncomplete),
     durationSeconds,
+    ...Object.fromEntries(['framing', 'lighting', 'camera'].filter(key => input[key] !== undefined).map(key => [key, text(input[key], `${field}.${key}`, 300)])),
+    ...(input.materialIds !== undefined ? { materialIds: validateStoryMaterialIds(input.materialIds) } : {}),
   };
+}
+
+export type StoryMaterial = { id: string; kind: 'character' | 'scene' | 'prop'; name: string; description: string; shotIds: string[] };
+export function validateStoryMaterialIds(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > 60 || value.some(id => typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(id))) invalid('materials', '素材编号无效');
+  return Array.from(new Set(value as string[]));
+}
+export function parseStoryMaterials(content: string): StoryMaterial[] {
+  if (content.length > 12000) invalid('materials', '素材清单返回过长');
+  let value;
+  try { value = JSON.parse(content); } catch { return invalid('materials', '素材清单不是完整 JSON'); }
+  const object = record(value, 'materials'); exactKeys(object, ['materials'], 'materials');
+  if (!Array.isArray(object.materials) || object.materials.length > 60) invalid('materials', '素材最多 60 项');
+  const ids = new Set<string>();
+  return object.materials.map((entry, index) => {
+    const item = record(entry, `materials[${index}]`); exactKeys(item, ['id', 'kind', 'name', 'description', 'shotIds'], 'material');
+    const id = text(item.id, 'material.id', 128, true);
+    validateStoryMaterialIds([id]);
+    if (ids.has(id)) invalid('material.id', '素材编号重复'); ids.add(id);
+    if (!['character', 'scene', 'prop'].includes(String(item.kind))) invalid('material.kind', '素材类型无效');
+    return { id, kind: item.kind as StoryMaterial['kind'], name: text(item.name, 'material.name', 160, true),
+      description: text(item.description, 'material.description', 2000), shotIds: validateStoryMaterialIds(item.shotIds) };
+  });
+}
+export function composeStoryShot(shot: StoryShot, materials: StoryMaterial[]): Pick<StoryShot, 'imagePrompt' | 'videoPrompt'> {
+  const bound = materials.filter(item => shot.materialIds?.includes(item.id));
+  const context = bound.map(item => `${({ character: '角色', scene: '场景', prop: '道具' })[item.kind]}：${item.name}；${item.description}`).join('\n');
+  const framing = [shot.framing && `景别：${shot.framing}`, shot.lighting && `光线：${shot.lighting}`].filter(Boolean).join('；');
+  return { imagePrompt: [shot.description, context, framing].filter(Boolean).join('\n'),
+    videoPrompt: [shot.description, context, framing, shot.camera && `运镜：${shot.camera}`, shot.dialogue && `对白：${shot.dialogue}`].filter(Boolean).join('\n') };
+}
+
+export function storyGenerationPrompt(shot: StoryShot, kind: 'image' | 'video'): string {
+  const prompt = (kind === 'image' ? shot.imagePrompt : shot.videoPrompt) || shot.description;
+  const choices = [shot.framing && `景别：${shot.framing}`, shot.lighting && `光线：${shot.lighting}`,
+    kind === 'video' && shot.camera && `运镜：${shot.camera}`].filter((item): item is string => Boolean(item));
+  return [prompt, ...choices.filter(item => !prompt.includes(item))].filter(Boolean).join('\n');
 }
 
 function normalizeShots(value: unknown, field: string, allowEmpty: boolean, allowIncomplete: boolean): StoryShot[] {

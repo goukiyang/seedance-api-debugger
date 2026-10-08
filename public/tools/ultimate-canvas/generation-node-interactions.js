@@ -168,7 +168,7 @@
             mode = {
                 ...mode,
                 maximumReferences: Number.isInteger(capability?.maxReferenceImages)
-                    ? Math.min(mode.maximumReferences, capability.maxReferenceImages)
+                    ? kind === 'video' && mode.maximumReferences === 9 ? Math.min(30, capability.maxReferenceImages) : Math.min(mode.maximumReferences, capability.maxReferenceImages)
                     : mode.maximumReferences
             };
             let reason = '';

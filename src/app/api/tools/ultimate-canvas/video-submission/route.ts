@@ -35,12 +35,14 @@ export async function GET(request: NextRequest) {
     // Absence is not evidence that a delayed POST was never accepted.
     if (!task) return json({ state: 'unconfirmed', task: null });
     const metadata = JSON.parse(task.source_metadata_json || '{}');
+    const expectedProvider = submission.generationPayload?.settings?.provider || submission.input?.source_metadata?.provider;
     if (task.user_id !== user.id || task.project_id !== document.project_id
       || task.video_card_id !== submission.cardId
       || task.source_request_id !== `ultimate_canvas:${nodeId}:${requestId}`
       || metadata.canvas_document_id !== document.id || metadata.canvas_node_id !== nodeId) {
       throw new AuthError('任务与当前请求不匹配', 403);
     }
+    if ((expectedProvider && task.provider !== expectedProvider) || (submission.input?.model && task.model !== submission.input.model)) throw new AuthError('任务模型或通道与原请求不匹配', 403);
     await assertCanViewTask(user, task);
     return json({ state: 'accepted', task: { id: task.id, local_status: task.local_status } });
   } catch (error) {

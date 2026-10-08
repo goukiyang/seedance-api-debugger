@@ -35,6 +35,9 @@ import { defaultImageResolution, imageResolutionOptions } from '@/lib/image-gene
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS } from '@/lib/image-studio/model-catalog';
 import { STUDIO_TEXT_MODELS, isStudioTextModel } from '@/lib/template-studio/text-models';
 import { AUDIO_CAPABILITY } from '@/lib/provider/audio-contract';
+import { getVolcengineIpApiSettings, isVolcengineIpApiReady } from '@/lib/integrations/volcengine-ip';
+import { volcengineIpCapabilities } from '@/lib/integrations/volcengine-ip-models';
+import { IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, defaultImageStudioQuality } from '@/lib/image-studio/model-catalog';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -70,6 +73,8 @@ function imageModelCapabilities(provider: string, model: string) {
     output_formats: ['png'],
     supports_stream: false,
     supports_sequential_generation: false,
+    quality_options: IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [],
+    default_quality: defaultImageStudioQuality(model),
     notes: ['通用草图', '兼容现有图片生成流程'],
   };
 }
@@ -315,7 +320,14 @@ export async function GET(request: NextRequest) {
   const imageReady = imageModels.some(model => isImageGenerationApiReady(selectImageGenerationSettings(imageChannels, model)));
   const imageLabel = imageModelLabel(imageSettings.provider, imageSettings.default_model);
   const seedanceVideoReady = isApiKeyConfigured();
-  const videoReady = seedanceVideoReady || h3VideoConfig.ready;
+  const ipReady = isVolcengineIpApiReady(await getVolcengineIpApiSettings());
+  const videoModels = [
+    ...videoConfig.model_options.map(item => ({ ...item, value: item.id, provider: 'seedance', ready: seedanceVideoReady,
+      label: item.id.includes('2-5') ? '普通视频 2.5' : '普通视频 2.0', resolutions: [...RESOLUTION_OPTIONS] })),
+    ...volcengineIpCapabilities().map(item => ({ ...item, value: item.id, provider: 'volcengine_ip', ready: ipReady,
+      label: item.id.includes('2-5') ? 'IP 视频 2.5' : item.id.includes('fast') ? 'IP 视频 2.0 · 快速版' : item.id.includes('mini') ? 'IP 视频 2.0 · 轻量版' : 'IP 视频 2.0' })),
+  ];
+  const videoReady = seedanceVideoReady || ipReady || h3VideoConfig.ready;
 
   return NextResponse.json({
     backend: { mode: 'sd2', transport: 'same-origin', mock: false },
@@ -418,6 +430,10 @@ export async function GET(request: NextRequest) {
             model_options: videoConfig.model_options,
           },
           {
+            id: 'volcengine_ip', label: 'IP 视频', enabled: ipReady, ready: ipReady,
+            model_options: videoModels.filter(item => item.provider === 'volcengine_ip'),
+          },
+          {
             id: 'h3',
             label: 'H3 本地工作站',
             enabled: h3VideoConfig.enabled,
@@ -449,7 +465,7 @@ export async function GET(request: NextRequest) {
             : null,
         },
         model: videoConfig.model,
-        model_options: videoConfig.model_options,
+        model_options: videoModels,
         interaction: {
           modes: [
             'text-to-video',
@@ -463,15 +479,13 @@ export async function GET(request: NextRequest) {
           ratios: RATIO_OPTIONS,
           durations: DURATION_OPTIONS,
           // Legacy canvas requests still use the default model; do not widen it.
-          duration_by_model: seedanceVideoDurationCapabilities(),
+          duration_by_model: { ...seedanceVideoDurationCapabilities(), ...Object.fromEntries(volcengineIpCapabilities().map(item => [item.id, item.durations])) },
           resolutions: RESOLUTION_OPTIONS,
           supports_audio: true,
           supports_last_frame: true,
           supports_watermark: true,
-          model_options: videoConfig.model_options,
-          provider_options: h3VideoConfig.ready
-            ? ['seedance', 'h3']
-            : ['seedance'],
+          model_options: videoModels,
+          provider_options: ['seedance', 'volcengine_ip', ...(h3VideoConfig.ready ? ['h3'] : [])],
           h3_notes: [
             '首帧和尾帧会由后端转交给 H3',
             '多余参考图、参考视频和音频第一版只作为可见上下文',

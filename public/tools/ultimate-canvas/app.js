@@ -294,6 +294,7 @@
 
     const canvasStyles = window.UltimateCanvasStyles.create({
         request: requestJson,
+        confirm: requestCanvasConfirmation,
         getNode: nodeId => engine.nodes.get(nodeId),
         context: () => ({ userId: canvasRuntime.bootstrap?.user?.id, projectId: canvasRuntime.selectedProjectId,
             cardId: canvasRuntime.selectedVideoCardId, documentId: canvasRuntime.documentId,
@@ -1018,6 +1019,10 @@
                     if (engine.nodes.get(payload.nodeId)?.data?.canvasStyle) {
                         return canvasStyles.generate(payload, promptWithConnectedText(payload));
                     }
+                    if (canvasRuntime.bootstrap?.capabilities?.image?.model_options?.find(item => item.value === payload.settings?.model)?.capabilities?.quality_options?.length) {
+                        const result = await canvasStyles.generateOrdinary(payload, promptWithConnectedText(payload));
+                        if (!result.legacyRequired) return result;
+                    }
                     const descriptor = window.UltimateCanvasGenerationNodes.imageRequest({
                         projectId: canvasRuntime.selectedProjectId,
                         cardId: canvasRuntime.selectedVideoCardId,
@@ -1069,7 +1074,7 @@
                         referenceImageIds: payload.referenceImageIds || collectReferenceImageIds(payload),
                         settings: payload.settings || {}
                     });
-                    descriptor.url = backendEndpoint(capabilities.video?.endpoint, descriptor.url, 'video');
+                    descriptor.url = backendEndpoint(descriptor.url, '', 'video');
                     if (unsent) descriptor.payload = structuredClone(prior.input);
                     const submission = unsent ? prior : { requestId: payload.requestId, state: 'unconfirmed',
                         userId: canvasRuntime.bootstrap?.user?.id, documentId: canvasRuntime.documentId,
@@ -3791,12 +3796,12 @@
             const resolutionOptions = Array.isArray(limits.size_options) && limits.size_options.length
                 ? limits.size_options
                 : ['1K', '2K'];
-            const requestedResolution = resolutionOptions.includes(current.resolution)
-                ? current.resolution
-                : resolutionOptions.includes(current.size) ? current.size : limits.default_resolution || resolutionOptions[resolutionOptions.length - 1];
+            const requestedResolution = current.resolution || (resolutionOptions.includes(current.size) ? current.size : limits.default_resolution || resolutionOptions[resolutionOptions.length - 1]);
             const customSize = typeof current.size === 'string' && /^\d+x\d+$/.test(current.size) ? current.size : '';
             return {
                 model,
+                quality: current.quality || limits.default_quality || 'auto',
+                qualityOptions: limits.quality_options || [],
                 ratio: ratioResolution.resolved,
                 requestedRatio: ratioResolution.requested,
                 ratioSource: ratioResolution.source,
@@ -3810,9 +3815,11 @@
         if (node.type === 'video') {
             const current = node.data?.videoSettings || {};
             if (node.data?.planSource) return { ...current };
+            const model = current.model || canvasRuntime.bootstrap?.capabilities?.video?.model;
+            const option = canvasRuntime.bootstrap?.capabilities?.video?.model_options?.find(item => item.value === model);
             return {
                 ...current,
-                model: current.model || canvasRuntime.bootstrap?.capabilities?.video?.model,
+                model, provider: current.provider || option?.provider || 'seedance', referenceImageLimit: option?.reference_media?.imageLimit || 9,
                 ratio: current.ratio || ratioFromContext(),
                 duration: Number(current.duration || durationFromContext()),
                 resolution: current.resolution || resolutionFromContext(),
@@ -3824,8 +3831,18 @@
         return {};
     }
 
+    function generationCapabilitiesForNode(node) {
+        const capability = canvasRuntime.bootstrap?.capabilities?.[node.type];
+        if (node.type !== 'video') return capability;
+        const model = node.data?.videoSettings?.model || capability?.model;
+        const option = capability?.model_options?.find(item => item.value === model);
+        return { ...capability, interaction: { ...capability?.interaction,
+            max_reference_images: option?.reference_media?.imageLimit || 9,
+            resolutions: option?.resolutions || capability?.interaction?.resolutions } };
+    }
+
     function videoEstimateSignature(settings) {
-        return `${settings.model || ''}:${settings.resolution}:${settings.duration}`;
+        return `${settings.provider || 'seedance'}:${settings.model || ''}:${settings.resolution}:${settings.duration}`;
     }
 
     function scheduleVideoEstimate(nodeId) {
@@ -3845,6 +3862,7 @@
             const url = new URL(endpoint, window.location.origin);
             url.searchParams.set('resolution', settings.resolution);
             url.searchParams.set('duration', String(settings.duration));
+            url.searchParams.set('provider', settings.provider || 'seedance');
             const model = settings.model;
             if (model) url.searchParams.set('model', model);
             try {
@@ -3852,7 +3870,7 @@
                     cache: 'no-store',
                     signal: controller.signal
                 });
-                if (!Number.isFinite(Number(data?.estimatedCost))) throw new Error('estimate unavailable');
+                if (typeof data?.estimatedCost !== 'number' || !Number.isSafeInteger(data.estimatedCost) || data.estimatedCost < 0) throw new Error('estimate unavailable');
                 const current = canvasRuntime.videoEstimates.get(nodeId);
                 const currentNode = engine.nodes.get(nodeId);
                 if (current?.controller !== controller
@@ -3921,7 +3939,7 @@
     function generationModeState(node, referenceCount = availableGenerationReferenceItems(node.id).length) {
         const capability = window.UltimateCanvasGenerationInteractions.normalizeCapabilities(
             node.type,
-            canvasRuntime.bootstrap?.capabilities?.[node.type]
+            generationCapabilitiesForNode(node)
         );
         const selectedMode = node.data?.mode || node.data?.generationIntent?.mode
             || (node.type === 'video' ? 'text-to-video' : 'text-to-image');
@@ -4274,7 +4292,7 @@
             if (refreshStyle) refreshStyle.hidden = !styleJob;
             if (promptInput) promptInput.readOnly = Boolean(styleJob);
             nodeEl.querySelectorAll('[data-generation-popover]').forEach(button => {
-                button.disabled = Boolean(style);
+                button.disabled = Boolean(style || styleJob);
                 if (style) button.title = '使用风格模板的生成参数；移除风格后可调整';
                 else button.removeAttribute('title');
             });
@@ -4294,7 +4312,10 @@
                     ? `已冻结 ${node.data.frozenCost}`
                     : estimate?.signature === estimateSignature && estimate.status === 'success'
                         ? `预计 ${estimate.estimatedCost} 点`
-                        : '提交后由后台计算';
+                        : estimate?.signature === estimateSignature && estimate.status === 'failure' ? '报价失败 · 点击重查'
+                        : estimate?.signature === estimateSignature && estimate.status === 'pending' ? '正在报价' : '报价待确认';
+                cost.onclick = () => { canvasRuntime.videoEstimates.delete(nodeId); scheduleVideoEstimate(nodeId); };
+                cost.title = '点击重新读取当前模型的价格';
             }
             if (settings.model && settings.duration && settings.resolution) scheduleVideoEstimate(nodeId);
         }
@@ -4414,7 +4435,7 @@
     function renderModePopover(node) {
         const capability = window.UltimateCanvasGenerationInteractions.normalizeCapabilities(
             node.type,
-            canvasRuntime.bootstrap?.capabilities?.[node.type]
+            generationCapabilitiesForNode(node)
         );
         const selected = node.data?.mode || node.data?.generationIntent?.mode
             || (node.type === 'video' ? 'text-to-video' : 'text-to-image');
@@ -4430,7 +4451,7 @@
         const settings = generationSettingsForNode(node);
         const capability = window.UltimateCanvasGenerationInteractions.normalizeCapabilities(
             node.type,
-            canvasRuntime.bootstrap?.capabilities?.[node.type]
+            generationCapabilitiesForNode(node)
         );
         if (node.type === 'image') {
             const sizeControl = settings.sizeOptions.length
@@ -4443,15 +4464,18 @@
                 ${generationChoiceGroup('ratio', '比例', capability.ratios, settings.requestedRatio || settings.ratio)}
                 <p class="generation-spec-hint">当前生效：${escapeHtml(settings.ratio)} · ${escapeHtml(settings.ratioSource === 'reference' ? '首张有效参考图' : '模型默认或手动选择')} · ${escapeHtml(settings.size)}</p>
                 ${sizeControl}
+                ${settings.qualityOptions?.length ? generationChoiceGroup('quality', '质量', settings.qualityOptions, settings.quality, value => ({ auto: '自动', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高' })[value] || value) : ''}
+                <p class="generation-spec-hint">背景写入画面描述；当前接口没有独立透明背景参数。</p>
                 ${generationChoiceGroup('count', '生成数量', counts, settings.count, value => `${value}张`)}
             </div>`;
         }
         return `<div class="generation-popover-spec" data-generation-settings="video">
             ${generationChoiceGroup('model', '模型', (canvasRuntime.bootstrap?.capabilities?.video?.model_options || []).map(item => item.value), settings.model,
-                value => canvasRuntime.bootstrap?.capabilities?.video?.model_options?.find(item => item.value === value)?.label || value)}
+                value => { const option = canvasRuntime.bootstrap?.capabilities?.video?.model_options?.find(item => item.value === value); return (option?.label || value) + (option?.ready === false ? '（未配置）' : ''); })}
             ${generationChoiceGroup('ratio', '比例', capability.ratios, settings.ratio)}
             ${generationDurationSlider(canvasRuntime.bootstrap?.capabilities?.video?.interaction?.duration_by_model?.[settings.model] || [], settings.duration)}
-            ${generationChoiceGroup('resolution', '分辨率', capability.resolutions, settings.resolution)}
+            ${generationChoiceGroup('resolution', '分辨率', canvasRuntime.bootstrap?.capabilities?.video?.model_options?.find(item => item.value === settings.model)?.resolutions || capability.resolutions, settings.resolution)}
+            <p class="generation-spec-hint">切换模型保留原参数；不支持的值请重新选择。2.5 首尾帧的实际比例跟随首帧。</p>
             ${capability.supportsAudio ? generationChoiceGroup('generateAudio', '生成声音', [true, false], settings.generateAudio, value => value ? '开启' : '关闭') : ''}
             ${capability.supportsLastFrame ? generationChoiceGroup('returnLastFrame', '返回尾帧', [true, false], settings.returnLastFrame, value => value ? '开启' : '关闭') : ''}
             ${capability.supportsWatermark ? generationChoiceGroup('watermark', '水印', [true, false], settings.watermark, value => value ? '开启' : '关闭') : ''}
@@ -4461,12 +4485,13 @@
     function applyGenerationSettingChoice(node, name, rawValue) {
         const current = generationSettingsForNode(node);
         if (node.type === 'image') {
-            const allowed = new Set(['ratio', 'resolution', 'count']);
+            const allowed = new Set(['ratio', 'resolution', 'count', 'quality']);
             if (!allowed.has(name)) return false;
             node.data = {
                 ...node.data,
                 imageSettings: {
                     model: current.model,
+                    quality: name === 'quality' ? rawValue : current.quality,
                     ratio: name === 'ratio' ? rawValue : current.requestedRatio,
                     resolution: name === 'resolution' ? rawValue : current.resolution,
                     size: name === 'ratio' || name === 'resolution' ? '' : current.size,
@@ -4482,6 +4507,7 @@
                 videoSettings: {
                     ...current,
                     model: name === 'model' ? rawValue : current.model,
+                    provider: name === 'model' ? canvasRuntime.bootstrap?.capabilities?.video?.model_options?.find(item => item.value === rawValue)?.provider || current.provider : current.provider,
                     ratio: name === 'ratio' ? rawValue : current.ratio,
                     duration: name === 'duration' ? Number(rawValue) : current.duration,
                     resolution: name === 'resolution' ? rawValue : current.resolution,
@@ -4941,7 +4967,10 @@
         loadLibraryPanels(true);
     }
 
-    function videoStatusUrl(taskId) {
+    function videoStatusUrl(taskId, nodeId) {
+        const node = engine.nodes.get(nodeId);
+        const input = node?.data?.videoHistory?.find(item => item.taskId === taskId)?.input || node?.data?.videoSubmission?.input;
+        if (input?.source_metadata?.provider === 'volcengine_ip') return `/api/ip/video/status/${encodeURIComponent(taskId)}?refresh=true`;
         return window.UltimateCanvasBackendContract.resolveTaskStatusEndpoint(
             canvasRuntime.bootstrap?.capabilities?.video?.status_endpoint_template,
             taskId,
@@ -4978,7 +5007,7 @@
             const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(entry.nodeId)}"]`);
             const node = engine.nodes.get(entry.nodeId);
             if (node?.data.taskId === taskId && node.data.videoSubmission?.state !== 'unconfirmed') setNodeGenerationStatus(nodeEl, 'loading', '正在读取视频状态');
-            const data = await requestJson(videoStatusUrl(taskId), {
+            const data = await requestJson(videoStatusUrl(taskId, nodeId), {
                 cache: 'no-store',
                 policy: 'video-status'
             });
@@ -5299,7 +5328,7 @@
         if (generationNode && !selectedStyle && ['image', 'video'].includes(generationNode.type)) {
             const capability = window.UltimateCanvasGenerationInteractions.normalizeCapabilities(
                 generationNode.type,
-                capabilities[generationNode.type]
+                generationCapabilitiesForNode(generationNode)
             );
             const interactionReadiness = window.UltimateCanvasGenerationInteractions.generationInteractionReadiness(
                 generationNode.type,
@@ -5428,6 +5457,16 @@
         }
 
         const submittingNode = engine.nodes.get(payload.nodeId);
+        if (hasCurrentGenerationSubmission(payload.nodeId)) return;
+        const quotedContext = JSON.stringify(currentGenerationContext(payload.nodeId));
+        if (payload.kind === 'video') {
+            const settings = payload.settings || {};
+            const quote = await requestJson(`/api/tasks/estimate?${new URLSearchParams({ provider: settings.provider || 'seedance', model: settings.model, resolution: settings.resolution, duration: String(settings.duration) })}`, { cache: 'no-store' }).catch(error => { showCanvasNotice(error.message || '报价失败，请重试；未提交。', 'warn'); return null; });
+            if (!quote || typeof quote.estimatedCost !== 'number' || !Number.isFinite(quote.estimatedCost)) return;
+            if (!await requestCanvasConfirmation({ title: '生成视频', message: `本次 1 个视频，预计 ${quote.estimatedCost} 点。`, detail: '失败或受理未知时先查询原任务，不会自动重新生成。', confirmLabel: `确认 ${quote.estimatedCost} 点` })) return;
+            if (JSON.stringify(currentGenerationContext(payload.nodeId)) !== quotedContext || engine.nodes.get(payload.nodeId) !== submittingNode || videoEstimateSignature(generationSettingsForNode(submittingNode)) !== videoEstimateSignature(settings)) { showCanvasNotice('画布或参数已变化，请重新确认价格。', 'warn'); return; }
+            payload.settings.maxEstimatedCost = quote.estimatedCost;
+        }
         if (payload.kind === 'video') payload.requestId ||= crypto.randomUUID();
         const capturedContext = window.UltimateCanvasGenerationInteractions.captureGenerationContext(
             currentGenerationContext(payload.nodeId)

@@ -16,6 +16,7 @@
     const CANVAS_PATHS = [
         /^\/api\/tools\/ultimate-canvas\/(?:bootstrap|document|upload|quote|text-settings|video-submission)$/,
         /^\/api\/tools\/ultimate-canvas\/styles(?:\/(?:apply|generate|results))?$/,
+        /^\/api\/tools\/ultimate-canvas\/images\/generate$/,
         /^\/api\/content-reactions(?:\/(?:state|content))?$/,
         /^\/api\/assets\/library$/,
         /^\/api\/projects(?:\/[^/]+(?:\/video-cards)?)?$/,
@@ -32,10 +33,11 @@
     function isAllowedEndpoint(url, policy) {
         if (url.hash || url.username || url.password) return false;
         if (Object.prototype.hasOwnProperty.call(CAPABILITY_PATHS, policy)) {
+            if (policy === 'video' && url.pathname === '/api/ip/tasks/create' && !url.search) return true;
             return url.pathname === CAPABILITY_PATHS[policy] && !url.search;
         }
         if (policy === 'video-status') {
-            return /^\/api\/video\/status\/[^/]+$/.test(url.pathname)
+            return /^\/api\/(?:ip\/)?video\/status\/[^/]+$/.test(url.pathname)
                 && url.search === '?refresh=true';
         }
         if (policy !== 'canvas') return false;

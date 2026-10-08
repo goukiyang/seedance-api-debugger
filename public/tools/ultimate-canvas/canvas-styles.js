@@ -138,7 +138,7 @@
                     if (result.status === 'not_found') {
                         job.state = 'unconfirmed';
                         hooks.save('canvas_style_submission_unknown');
-                        throw new Error('提交尚未确认。点击生成可安全重试原请求，不会重复扣费。');
+                        throw new Error(job.kind === 'ordinary' ? '提交尚未确认，请查看生成状态；不会重新发送或扣点。' : '提交尚未确认。点击生成可安全重试原请求，不会重复扣费。');
                     }
                     if (!result.pending) {
                         delete node.data.styleJob;
@@ -148,7 +148,7 @@
                             message: result.error ? `已保存 ${result.assets.length} 张图片；${result.error}` : `已生成 ${result.assets.length} 张图片，并保存到资产库。` };
                     }
                     job.state = 'running';
-                    hooks.status(node.id, 'loading', `风格生成中 · 已完成 ${Number(result.completedCount) || 0}/${Number(result.totalCount) || job.count} 张`);
+                    hooks.status(node.id, 'loading', `${job.kind === 'ordinary' ? '图片' : '风格'}生成中 · 已完成 ${Number(result.completedCount) || 0}/${Number(result.totalCount) || job.count} 张`);
                     await new Promise(resolve => window.setTimeout(resolve, document.hidden ? 15000 : attempt < 5 ? 3000 : 6000));
                 }
                 throw new Error('任务仍在处理中，状态检查已暂停。点击“查看生成状态”继续，不会重新生成。');
@@ -203,6 +203,62 @@
             return { ...result, canvasStylePayload: job.payload };
         }
 
+        async function generateOrdinary(payload, resolvedPrompt) {
+            const node = hooks.getNode(payload.nodeId), context = hooks.context();
+            if (!node || node.type !== 'image') throw new Error('图片节点不存在');
+            let job = node.data.styleJob;
+            if (job) {
+                if (job.kind !== 'ordinary' || !sameContext(job.context, context)) throw new Error('请先查询原图片任务');
+                return { ...await waitForResult(node, job), canvasStylePayload: job.payload };
+            }
+            let legacyRequired = false;
+            if (payload.referenceImageIds?.length) {
+                const params = new URLSearchParams({ projectId: context.projectId, cardId: context.cardId, documentId: context.documentId, nodeId: node.id });
+                payload.referenceImageIds.forEach(id => params.append('referenceImageId', id));
+                const eligibility = await json(`/api/tools/ultimate-canvas/images/generate?${params}`);
+                if (!current(node, context)) throw contextError();
+                if (!eligibility.durable) {
+                    hooks.notice('共享参考图沿用原生成路径；当前持久图片队列仅支持本人原件。', 'info');
+                    legacyRequired = true;
+                }
+            }
+            const settings = structuredClone(payload.settings);
+            const quote = await json('/api/tools/ultimate-canvas/quote', { kind: 'image', project_id: context.projectId,
+                model: settings.model, count: settings.count, quality: settings.quality, resolution: settings.resolution, ratio: settings.requestedRatio || settings.ratio });
+            if (quote.status !== 'estimate' || !Number.isSafeInteger(quote.estimatedCredits) || quote.estimatedCredits < 0) throw new Error('当前模型报价不可用，请选择已配置模型或重试');
+            if (!await hooks.confirm({ title: '生成图片', message: `本次 ${settings.count} 张图片，预计 ${quote.estimatedCredits} 点。`, confirmLabel: `确认 ${quote.estimatedCredits} 点` })) throw new Error('已取消，未提交图片生成');
+            if (!current(node, context)) throw contextError();
+            if (legacyRequired) return { legacyRequired: true };
+            job = { kind: 'ordinary', requestId: crypto.randomUUID(), moduleId: crypto.randomUUID(), count: settings.count,
+                context: { userId: context.userId, projectId: context.projectId, cardId: context.cardId, documentId: context.documentId },
+                payload, state: 'unconfirmed' };
+            job.input = { projectId: context.projectId, cardId: context.cardId, documentId: context.documentId,
+                nodeId: node.id, requestId: job.requestId, moduleId: job.moduleId, prompt: resolvedPrompt,
+                settingsRevision: quote.revision, maxEstimatedCost: quote.estimatedCredits,
+                referenceImageIds: payload.referenceImageIds || [], settings: { model: settings.model,
+                    quality: settings.quality, resolution: settings.resolution, ratio: settings.requestedRatio || settings.ratio, count: settings.count } };
+            node.data.styleJob = job;
+            hooks.save('ordinary_image_before_submit');
+            if (!await hooks.flush('ordinary_image_before_submit')) {
+                delete node.data.styleJob;
+                hooks.save('ordinary_image_not_sent');
+                throw new Error('图片请求未发出，画布尚未保存；请先重试保存');
+            }
+            if (!current(node, context)) throw contextError();
+            let accepted;
+            try { accepted = await json('/api/tools/ultimate-canvas/images/generate', job.input); }
+            catch (error) {
+                if (Number.isInteger(error.status) && error.status >= 400 && error.status < 500 && ![408, 429].includes(error.status)) {
+                    delete node.data.styleJob;
+                    if (current(node, context)) hooks.save('ordinary_image_rejected');
+                }
+                throw error;
+            }
+            job.batchId = accepted.batchId; job.state = 'running';
+            if (current(node, context)) hooks.save('ordinary_image_submitted');
+            return { ...await waitForResult(node, job), canvasStylePayload: job.payload };
+        }
+
         async function resume(nodeId) {
             const node = hooks.getNode(nodeId);
             const job = node?.data?.styleJob;
@@ -222,7 +278,7 @@
             }
         }
 
-        return { open, clear, generate, resume };
+        return { open, clear, generate, generateOrdinary, resume };
     }
 
     window.UltimateCanvasStyles = { create };

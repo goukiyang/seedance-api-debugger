@@ -2,9 +2,9 @@ import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertCanGenerateInProject } from '@/lib/projects/permissions';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
-import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { getImageGenerationChannels, selectImageGenerationSettings, isImageGenerationApiReady } from '@/lib/integrations/image-generation';
-import { isGeminiImageModel } from '@/lib/image-generation/resolution';
+import { isGeminiImageModel, imageResolutionOptions } from '@/lib/image-generation/resolution';
 
 export type CanvasQuoteInput = {
   kind: 'image';
@@ -51,6 +51,9 @@ export async function getCanvasImageQuote(user: SessionUser, input: CanvasQuoteI
   const providerSettings = selectImageGenerationSettings(channels, input.model);
   const studio = await getImageStudioSettings();
   const provider = providerSettings.provider;
+  if (input.quality !== undefined && IMAGE_STUDIO_MODELS.includes(input.model as ImageStudioModel)
+    && !(IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[input.model as ImageStudioModel] as readonly string[]).includes(input.quality)) throw new AuthError('所选模型不支持此图片质量，请重新选择', 400);
+  if (input.resolution !== undefined && !imageResolutionOptions(input.model, provider).includes(input.resolution as never)) throw new AuthError('所选模型不支持此分辨率，请重新选择', 400);
   const models = channels.shared.provider === 'seedream'
     ? [channels.shared.default_model, ...IMAGE_STUDIO_MODELS.filter(isGeminiImageModel)]
     : Array.from(new Set([...IMAGE_STUDIO_MODELS, channels.shared.default_model]));

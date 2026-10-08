@@ -48,9 +48,9 @@
         return { ...value };
     }
 
-    function videoMode(mode) {
+    function videoMode(mode, referenceLimit = 9) {
         const value = VIDEO_MODES[mode] || VIDEO_MODES['text-to-video'];
-        return { ...value };
+        return { ...value, maximumReferences: value.maximumReferences === 9 && Number.isInteger(referenceLimit) && referenceLimit > 0 && referenceLimit <= 30 ? referenceLimit : value.maximumReferences };
     }
 
     function contextErrors(input) {
@@ -70,7 +70,8 @@
     }
 
     function validateVideo(input = {}) {
-        const mode = videoMode(input.mode);
+        const selectedOption = input.capabilities?.model_options?.find(item => item.value === input.settings?.model);
+        const mode = videoMode(input.mode, selectedOption?.reference_media?.imageLimit);
         const references = uniqueStrings(input.referenceImageIds, mode.maximumReferences);
         const settings = input.settings || {};
         const errors = contextErrors(input);
@@ -84,13 +85,17 @@
         const duration = Number(settings.duration);
         const resolution = clean(settings.resolution).toLowerCase();
         const model = clean(settings.model);
+        const option = input.capabilities?.model_options?.find(item => item.value === model);
         const durations = input.capabilities?.interaction?.duration_by_model?.[model];
         if (!model || !Array.isArray(durations)) errors.push('请选择当前可用的视频模型。');
+        if (option?.ready === false) errors.push('所选视频接口尚未配置，请联系管理员或选择可用模型。');
+        if (option && option.provider !== (settings.provider || 'seedance')) errors.push('模型与生成接口不匹配，请重新选择模型。');
         if (clean(input.prompt).length > 20000) errors.push('单个视频方案超过2万字，请调整分段。');
         if (!RATIOS.has(ratio)) errors.push('视频比例无效。');
         if (!Number.isInteger(duration) || !durations?.includes(duration)) errors.push('时长不在所选模型的能力范围内，请明确重新选择；不会自动截短。');
         if ((input.referenceImageIds || []).length > mode.maximumReferences) errors.push('参考图数量超过当前模式上限，请明确移除多余图片。');
         if (!RESOLUTIONS.has(resolution)) errors.push('视频分辨率无效。');
+        if (option?.resolutions && !option.resolutions.includes(resolution)) errors.push('所选模型不支持此分辨率，请重新选择；原值未被替换。');
         return { valid: errors.length === 0, errors, message: errors[0] || '' };
     }
 
@@ -129,8 +134,8 @@
 
     function videoRequest(input = {}) {
         const modeName = VIDEO_MODES[input.mode] ? input.mode : 'text-to-video';
-        const mode = videoMode(modeName);
         const settings = input.settings || {};
+        const mode = videoMode(modeName, settings.referenceImageLimit);
         const ratio = clean(settings.ratio);
         const duration = Number(settings.duration);
         const resolution = clean(settings.resolution).toLowerCase();
@@ -138,11 +143,12 @@
         const requestId = clean(input.requestId);
         const nodeId = clean(input.nodeId);
         return {
-            url: '/api/tasks/create',
+            url: settings.provider === 'volcengine_ip' ? '/api/ip/tasks/create' : '/api/tasks/create',
             method: 'POST',
             payload: {
                 prompt,
                 model: clean(settings.model),
+                ...(Number.isFinite(settings.maxEstimatedCost) ? { max_estimated_cost: settings.maxEstimatedCost } : {}),
                 generation_mode: mode.generationMode,
                 ratio,
                 duration,
@@ -162,6 +168,7 @@
                 source_request_id: sourceRequestId(input),
                 source_metadata: {
                     source: 'ultimate_canvas',
+                    provider: settings.provider || 'seedance',
                     canvas_document_id: clean(input.documentId),
                     canvas_node_id: nodeId,
                     video_branch_id: clean(input.branchId),

@@ -116,10 +116,12 @@ export function parseStudioRequest(body: Record<string, unknown>) {
   if (model !== undefined && (typeof model !== 'string' || !IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number]))) throw new StudioError('生成模型无效');
   const quality = body.quality === undefined ? undefined : body.quality;
   if (quality !== undefined && (typeof quality !== 'string' || quality.length > 30)) throw new StudioError('图片质量无效');
+  const maxEstimatedCost = body.maxEstimatedCost;
+  if (maxEstimatedCost !== undefined && (typeof maxEstimatedCost !== 'number' || !Number.isSafeInteger(maxEstimatedCost) || maxEstimatedCost < 0)) throw new StudioError('确认价格无效');
   if (moduleRevision !== undefined && (!Number.isInteger(moduleRevision) || moduleRevision < 0)) throw new StudioError('模块已更新，请刷新后重试', 409);
   const reproduceFromTaskId = body.reproduceFromTaskId === undefined ? undefined : body.reproduceFromTaskId;
   if (reproduceFromTaskId !== undefined && (typeof reproduceFromTaskId !== 'string' || reproduceFromTaskId.length > 120)) throw new StudioError('历史生成记录无效', 400);
-  return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), moduleRevision, reproduceFromTaskId, referenceIds, ...(evolution ? { evolution } : {}), ...(draft !== undefined ? { draft } : {}), ...(aspectRatio !== undefined ? { aspectRatio } : {}), ...(resolution !== undefined ? { resolution } : {}), ...(model !== undefined ? { model: model as typeof IMAGE_STUDIO_MODELS[number] } : {}), ...(quality !== undefined ? { quality: quality as string } : {}) };
+  return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), moduleRevision, reproduceFromTaskId, referenceIds, ...(maxEstimatedCost !== undefined ? { maxEstimatedCost: maxEstimatedCost as number } : {}), ...(evolution ? { evolution } : {}), ...(draft !== undefined ? { draft } : {}), ...(aspectRatio !== undefined ? { aspectRatio } : {}), ...(resolution !== undefined ? { resolution } : {}), ...(model !== undefined ? { model: model as typeof IMAGE_STUDIO_MODELS[number] } : {}), ...(quality !== undefined ? { quality: quality as string } : {}) };
 }
 
 function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] {
@@ -191,6 +193,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     }
     const price = generation.prices[generation.model];
     if (price === null || !Number.isInteger(price) || price < 0 || price > 100000) throw new StudioError('管理员尚未设置当前模块的有效生成积分', 409);
+    if (input.maxEstimatedCost !== undefined && price * input.count > input.maxEstimatedCost) throw new StudioError('图片价格已变化，请重新确认点数', 409);
     let snapshotGlobalContext = avatar ? '' : user.role === 'admin' && input.draft?.globalContext !== undefined ? input.draft.globalContext : settings.context;
     let snapshotModuleContext = input.draft?.moduleContext !== undefined ? input.draft.moduleContext : workspace?.context || '';
     let templateFixedReferences: StudioFixedReference[] = [];

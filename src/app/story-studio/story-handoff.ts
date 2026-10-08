@@ -7,7 +7,7 @@ export type StoryCanvas = { context?: { project_id?: string; video_card_id?: str
 }; [key: string]: unknown };
 
 export function attachStoryVideo(graph: StoryCanvas, sourceId: string, shot: StoryShot, ordinal: number,
-  reference: PickerItem | undefined, videoId: string, imageId: string, sourceRevision: number): void {
+  reference: PickerItem | undefined, videoId: string, imageId: string, sourceRevision: number, settings: Record<string, unknown> = {}): void {
   const source = graph.canvas.nodes.find(node => node.id === sourceId && ['text', 'script'].includes(node.type));
   if (!source) throw Error('故事源节点已不存在，未创建媒体节点');
   if (graph.canvas.nodes.some(node => node.id === videoId || reference && node.id === imageId)) throw Error('本次媒体节点已存在，请打开画布核对');
@@ -26,7 +26,7 @@ export function attachStoryVideo(graph: StoryCanvas, sourceId: string, shot: Sto
   }
   graph.canvas.nodes.push({ id: videoId, type: 'video', x: left + (reference ? 760 : 0), y: top,
     data: { title: shot.title, prompt: shot.videoPrompt, description: shot.description, generationStatus: 'idle',
-      mode: reference ? 'image-to-video' : 'text-to-video', videoSettings: { duration: shot.durationSeconds },
+      mode: reference ? 'image-to-video' : 'text-to-video', videoSettings: { ...settings, duration: shot.durationSeconds },
       storySource: { nodeId: sourceId, shotId: shot.id, sourceRevision } } });
   graph.canvas.connections.push({ from: sourceId, to: videoId });
   if (reference) {
