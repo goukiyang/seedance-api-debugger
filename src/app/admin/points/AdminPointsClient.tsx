@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { CANVAS_PRODUCT_NAME, isCanvasSource } from '@/lib/canvas-source';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
@@ -151,8 +152,8 @@ function recordSourceInfo(record: Pick<LedgerRecord, 'metadata_json'>) {
   const sourceLabel = typeof sourceMetadata?.source_label === 'string' ? sourceMetadata.source_label : '';
   const iface = typeof sourceMetadata?.interface === 'string' ? sourceMetadata.interface : '';
 
-  if (source === 'ultimate_canvas') {
-    return { key: 'ultimate_canvas', label: sourceLabel || '无线画布' };
+  if (isCanvasSource(source, sourceLabel)) {
+    return { key: 'ultimate_canvas', label: CANVAS_PRODUCT_NAME };
   }
   if (iface === 'codex') return { key: 'codex_api', label: sourceLabel || '外部 API' };
   if (iface === 'web') return { key: 'web', label: sourceLabel || '普通网页' };

@@ -382,7 +382,7 @@ function meaningfulContent(raw: string) {
 // Duplication copies configuration, not output history, private previews or live tasks.
 function duplicateSnapshot(snapshot: Snapshot): Snapshot {
   const configKeys = new Set(['title', 'prompt', 'authoredText', 'description', 'context', 'savedContext', 'contextRules',
-    'mode', 'imageSettings', 'videoSettings', 'settings', 'model', 'textModel', 'quality', 'ratio', 'size', 'resolution',
+    'mode', 'imageSettings', 'videoSettings', 'settings', 'model', 'provider', 'promptMentions', 'textModel', 'quality', 'ratio', 'size', 'resolution',
     'count', 'duration', 'cameraPresets', 'templateId', 'template_id', 'templateVersion', 'moduleId', 'module_id',
     'source', 'executionMode', 'inputSource', 'retryCount', 'outputMode', 'canvasStyle',
     'planSource', 'planReferences', 'planParameterSource', 'videoCardId', 'videoBranchId', 'storyWorkflow', 'storySource', 'canvasGroup']);

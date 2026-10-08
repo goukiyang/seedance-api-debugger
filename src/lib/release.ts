@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '画布可选择普通或IP视频模型并核对点数；故事素材、逐镜绑定和故事板可编辑，单镜与整组生成需手动确认。本人原图的画布生图刷新后查询原任务。视频成功链路仍待核实。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '保护回退版本保留画布正文、素材和图片绑定；已绑定图片请更新后再生成，原任务仍可查询。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

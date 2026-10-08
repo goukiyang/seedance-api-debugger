@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { assertCanvasPromptCompatibility } from '@/lib/canvas-prompt-compatibility';
 import { AuthError } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { resolveCanvasStudioReferenceUse } from '@/lib/canvas-studio-reference-use';
@@ -31,6 +32,7 @@ export async function POST(request: NextRequest) {
     const body = await readCanvasStyleJson(request);
     const context = parseCanvasStyleContext(body);
     await assertCanvasStyleContext(user, context);
+    await assertCanvasPromptCompatibility(user, context.documentId, context.nodeId, String(body.prompt || ''), body.promptMentions, true);
     if (!context.documentId || !context.nodeId || !validStudioModuleId(body.moduleId, user.id)
       || typeof body.requestId !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) throw new AuthError('图片任务归属或编号无效', 400);
     const doc = await prisma.canvasDocument.findUniqueOrThrow({ where: { id: context.documentId } });

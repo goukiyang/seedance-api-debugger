@@ -1004,6 +1004,7 @@
         if (!window.CanvasGenerationAPI?.setAdapter) return;
         window.CanvasGenerationAPI.setAdapter({
             async generate(payload) {
+                assertGuardedCanvasPrompt(payload);
                 const capabilities = canvasRuntime.bootstrap?.capabilities || {};
                 if (payload.kind === 'text' || payload.kind === 'script') {
                     const endpoint = payload.kind === 'script'
@@ -5452,10 +5453,22 @@
         ));
     }
 
+    function assertGuardedCanvasPrompt(payload) {
+        if (!['image', 'video'].includes(payload?.kind)) return;
+        const node = engine.nodes.get(payload.nodeId);
+        const inputs = [payload, node?.data, node?.data?.videoSubmission?.input, node?.data?.styleJob?.input];
+        if (inputs.some(input => input?.promptMentions != null)
+            || new RegExp('@图[0-9]+(?![\\p{N}A-Za-z_])', 'u').test(promptWithConnectedText(payload))) {
+            throw Error('保护回退版本不能核实图片绑定。请更新后再生成；正文、原件和原任务已保留。');
+        }
+    }
+
     async function submitNodeGeneration(nodeEl, button, savedPayload) {
         const api = window.CanvasGenerationAPI;
         const payload = savedPayload || collectGenerationPayload(nodeEl);
         if (!api || !payload) return;
+        try { assertGuardedCanvasPrompt(payload); }
+        catch (error) { showCanvasNotice(error.message, 'warn'); return; }
 
         const readiness = generationReadiness(payload);
         if (!readiness.ready) {

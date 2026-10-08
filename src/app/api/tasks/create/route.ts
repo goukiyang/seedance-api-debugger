@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { assertCanvasPromptCompatibility } from '@/lib/canvas-prompt-compatibility';
 import { resolveImageInputUrls } from '@/lib/assets/original-image-input';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import path from 'path';
@@ -858,6 +859,9 @@ export async function POST(request: NextRequest) {
     ].filter((value): value is string => typeof value === 'string' && Boolean(value.trim())).map(value => value.trim()));
     if (canvasDocumentIds.size > 1) throw new AuthError('画布归属信息不一致', 400);
     for (const canvasDocumentId of Array.from(canvasDocumentIds)) await assertCanEditCanvasDocument(user, canvasDocumentId, project.id);
+    await assertCanvasPromptCompatibility(user, Array.from(canvasDocumentIds)[0] || null,
+      cleanSourceMetadata(body.source_metadata).canvas_node_id || body.canvas_node_id || null, body.prompt, body.promptMentions,
+      body.client_name === 'ultimate_canvas' || cleanSourceMetadata(body.source_metadata).source === 'ultimate_canvas');
   } catch (error) {
     if (error instanceof AuthError) return errorJson(error.message, error.status);
     throw error;

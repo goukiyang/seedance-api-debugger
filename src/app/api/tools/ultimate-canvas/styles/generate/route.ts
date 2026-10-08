@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { assertCanvasPromptCompatibility } from '@/lib/canvas-prompt-compatibility';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
 import { assertCanUseReferenceImage, uniquePreserveOrder } from '@/lib/reference-albums/permissions';
@@ -35,6 +36,7 @@ export async function POST(request: NextRequest) {
     const body = await readCanvasStyleJson(request);
     const context = parseCanvasStyleContext(body);
     await assertCanvasStyleContext(user, context);
+    await assertCanvasPromptCompatibility(user, context.documentId, context.nodeId, String(body.prompt || ''), body.promptMentions, true);
 
     const moduleId = typeof body.moduleId === 'string' ? body.moduleId : '';
     if (!validStudioModuleId(moduleId, user.id)) throw new AuthError('风格模板模块编号无效', 400);

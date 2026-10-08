@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { assertCanvasPromptCompatibility } from '@/lib/canvas-prompt-compatibility';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import fs from 'fs';
 import path from 'path';
@@ -369,6 +370,7 @@ export async function POST(request: NextRequest) {
     }
 
     const input = normalizeInput(body.input);
+    await assertCanvasPromptCompatibility(user, canvasDocumentId, canvasNodeId, buildGenerationPrompt(body, input, action), input.promptMentions, true);
     if (inputTooLarge(input)) {
       return NextResponse.json({ error: '图形生成输入过长，请减少节点、参考图或提示词内容' }, { status: 400 });
     }

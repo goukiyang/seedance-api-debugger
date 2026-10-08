@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import type { Prisma } from '@prisma/client';
+import { CANVAS_PRODUCT_NAME, CANVAS_SOURCE_LABELS, canvasSourceJsonMarkers, isCanvasSource } from '@/lib/canvas-source';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { getCostLedgerAuditSummary } from '@/lib/costs/audit';
@@ -197,8 +198,8 @@ function taskSourceInfo(task: TaskSourceFields | null | undefined): SourceInfo {
   const source = typeof metadata?.source === 'string' ? metadata.source : '';
   const sourceLabel = typeof metadata?.source_label === 'string' ? metadata.source_label : '';
 
-  if (source === 'ultimate_canvas' || task.source_label === '无线画布') {
-    return { key: 'ultimate_canvas', label: sourceLabel || task.source_label || '无线画布' };
+  if (isCanvasSource(source, sourceLabel, task.source_label)) {
+    return { key: 'ultimate_canvas', label: CANVAS_PRODUCT_NAME };
   }
   if (task.source_type === 'codex_api') {
     return { key: 'codex_api', label: task.source_label || '外部 API' };
@@ -220,9 +221,8 @@ function SourceBadge({ source }: { source: SourceInfo }) {
 function ultimateCanvasTaskWhere(): Prisma.VideoTaskWhereInput {
   return {
     OR: [
-      { source_label: '无线画布' },
-      { source_metadata_json: { contains: '"source":"ultimate_canvas"' } },
-      { source_metadata_json: { contains: '"source": "ultimate_canvas"' } },
+      { source_label: { in: [...CANVAS_SOURCE_LABELS] } },
+      ...canvasSourceJsonMarkers().map(contains => ({ source_metadata_json: { contains } })),
     ],
   };
 }
