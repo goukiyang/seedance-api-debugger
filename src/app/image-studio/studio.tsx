@@ -1852,7 +1852,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
             </StudioReferenceGrid>
           </div>
         </section>
-        <section className={styles.materialSection} aria-label="风格组">
+        <section className={`${styles.materialSection} ${styles.styleMaterials}`} aria-label="风格组与文字 skills">
           {!templateWorkbench && <header className={styles.materialHeading}><h3>风格组</h3>
             <select aria-label="风格图片数量上限" value={styleLimit} disabled={uploading || submitting || Boolean(pendingSubmission)} onChange={event => setStyleLimit(Number(event.target.value))}>
               {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>最多 {value} 张</option>)}
@@ -1861,10 +1861,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           <StudioStyleGroups userId={userId} selected={activeStyles} currentImages={auxiliaryImages} tiles maxReferences={currentStyleCap}
             disabled={uploading || submitting || Boolean(pendingSubmission)}
             onChange={next => { if (reproduceSourceTaskId) exitReproductionMode('风格组已修改，接下来使用当前模板和风格组。'); setStyleGroups(next); }} />
-        </section>
-        <section className={styles.materialSection} aria-label="参考图">
           <StudioSkills userId={userId} selected={reproduceSourceTaskId ? reproductionSkills : skills} disabled={uploading || submitting || Boolean(pendingSubmission)}
             onChange={next => { if (reproduceSourceTaskId) exitReproductionMode('skills已修改，接下来使用当前模板和所选文字。'); setSkills(next); }} />
+        </section>
+        <section className={`${styles.materialSection} ${templateWorkbench ? styles.auxiliaryMaterials : ''}`} aria-label="参考图">
           {!templateWorkbench && <header className={styles.materialHeading}><h3>参考图</h3>
             <select aria-label="参考图数量上限" value={referenceImageLimit} disabled={uploading || submitting || Boolean(pendingSubmission)} onChange={event => setReferenceImageLimit(Number(event.target.value))}>
               {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>最多 {value} 张</option>)}

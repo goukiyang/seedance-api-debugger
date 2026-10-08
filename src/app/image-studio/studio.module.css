@@ -268,13 +268,22 @@
 .waitingImageFrame { position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden; background: #171c1f; }
 .waitingMainImage { display: block; width: 100%; height: 100%; object-fit: cover; filter: blur(2.4px); transform: scale(1.03); }
 .waitingStatus { position: relative; z-index: 1; align-self: flex-end; margin: auto 8px 8px; padding: 4px 8px; border-radius: 4px; background: #151a1de6; font-size: 13px; text-align: center; }
-.materialCluster { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(96px, 100%), 1fr)); align-items: start; gap: 10px; padding: 10px; margin-bottom: 12px; }
-.materialCluster .materialSection, .materialCluster .materialSection > div, .materialCluster .styleGroupsTiles, .materialCluster .materialGrid { display: contents; }
-.materialCluster .materialGrid > * { width: auto; min-width: 0; flex: none; }
-.materialCluster .referenceToggle, .materialCluster .materialFooter { grid-column: 1 / -1; margin: 0; }
+.materialCluster { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 12px; padding: 10px; margin-bottom: 12px; }
+.materialCluster .materialSection { box-sizing: border-box; min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 0; }
+.materialCluster .primaryMaterials { --material-tile-size: 128px; }
+.materialCluster .styleMaterials { --material-tile-size: 96px; display: grid; grid-template-columns: repeat(auto-fill, minmax(0, min(var(--material-tile-size), 100%))); justify-content: start; align-content: start; gap: 8px; }
+.materialCluster .auxiliaryMaterials { --material-tile-size: 72px; }
+.materialCluster .primaryMaterials .materialGrid, .materialCluster .auxiliaryMaterials .materialGrid { grid-template-columns: repeat(auto-fill, minmax(0, min(var(--material-tile-size), 100%))); justify-content: start; }
+.materialCluster .styleMaterials .styleGroupsTiles, .materialCluster .styleMaterials .materialGrid { display: contents; }
+.materialCluster .referenceToggle, .materialCluster .materialFooter { margin: 0; }
+.materialCluster .materialFooter { padding: 4px 2px 2px; }
 .materialCluster [aria-label="参考图片"]:focus-visible { outline: none; }
 .materialCluster [aria-label="参考图片"]:focus-visible .materialAdd { outline: 2px solid #70cfbd; outline-offset: 2px; }
-.materialCluster .materialFooter { padding: 4px 2px 2px; }
+@media (max-width: 600px) {
+  .materialCluster .primaryMaterials { --material-tile-size: 112px; }
+  .materialCluster .styleMaterials { --material-tile-size: 88px; }
+  .materialCluster .auxiliaryMaterials { --material-tile-size: 64px; }
+}
 @media (max-width: 420px) { .generationHeader { flex-wrap: wrap; } .generationActions { grid-template-columns: minmax(0, 1fr); } .generationModes { justify-self: start; } }
 .page .select { position: absolute; bottom: 10px; left: 10px; width: 20px; height: 20px; accent-color: #2ba98e; }
 .page .deleteResult { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; padding: 0; background: #171c1f; opacity: 0; }
