@@ -67,6 +67,16 @@ async function main() {
   check(response.status === 502 && !(await response.text()).includes('<script>'), 'non-json upstream error safe');
   response = await proxyCutout(request('v1/jobs', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'fixture-retry-key-1' }, body: JSON.stringify(payload) }), ['v1', 'jobs'], user, env, fetcher);
   check(response.status === 502 && (await response.json()).submission_made === null, 'upstream 5xx after submission cannot claim unsubmitted');
+  reply = () => Response.json({ detail: { code: 'CUTOUT_MAINTENANCE', accepted: false, message: 'fixture-private-path' } }, { status: 503 });
+  response = await proxyCutout(request('v1/jobs', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'fixture-retry-key-1' }, body: JSON.stringify(payload) }), ['v1', 'jobs'], user, env, fetcher);
+  const maintenance = await response.json();
+  check(response.status === 503 && maintenance.submission_made === false && response.headers.get('retry-after') === '60' && !maintenance.message.includes('fixture-private'), 'explicit maintenance rejection is safe and unsubmitted');
+  reply = () => Response.json({ detail: { code: 'CUTOUT_MAINTENANCE_CONTROL_UNAVAILABLE', accepted: false } }, { status: 503 });
+  response = await proxyCutout(request('v1/jobs', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'fixture-retry-key-1' }, body: JSON.stringify(payload) }), ['v1', 'jobs'], user, env, fetcher);
+  check((await response.json()).submission_made === false, 'unsafe maintenance control also explicitly rejected before acceptance');
+  reply = () => Response.json({ detail: { code: 'CUTOUT_MAINTENANCE' } }, { status: 503 });
+  response = await proxyCutout(request('v1/jobs', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'fixture-retry-key-1' }, body: JSON.stringify(payload) }), ['v1', 'jobs'], user, env, fetcher);
+  check((await response.json()).submission_made === null, 'maintenance without explicit rejection stays uncertain');
   reply = () => new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png', 'set-cookie': 'fixture-upstream-cookie' } });
   response = await proxyCutout(request('v1/results/j/a.png'), ['v1', 'results', 'j', 'a.png'], user, env, fetcher);
   check(response.status === 200 && response.headers.get('cache-control') === 'private, no-store' && !response.headers.has('set-cookie') && (await response.arrayBuffer()).byteLength === 3, 'download streams bytes privately and strips upstream cookies');

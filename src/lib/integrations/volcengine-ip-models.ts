@@ -1,4 +1,4 @@
-import { SEEDANCE_2_5_IP_MODEL_ID, seedanceVideoDurationOptions } from '@/lib/provider/seedance-models';
+import { SEEDANCE_2_5_IP_MODEL_ID, seedanceVideoDurationOptions, seedanceVideoModelInternalMultiplier } from '@/lib/provider/seedance-models';
 import { seedanceReferenceMediaCapabilities } from '@/lib/provider/reference-media-policy';
 
 export type VolcengineIpModelOption = {
@@ -29,8 +29,8 @@ export const VOLCENGINE_IP_MODEL_OPTIONS: VolcengineIpModelOption[] = [
   },
   {
     id: SEEDANCE_2_5_IP_MODEL_ID,
-    label: 'Seedance 2.5',
-    detail: '4-30 秒 · 480p / 720p / 1080p',
+    label: 'Seedance 2.5（IP生成）',
+    detail: '4-30 秒 · 480p / 720p / 1080p · 4.5 点/秒，总点数向上取整',
   },
 ];
 
@@ -50,11 +50,11 @@ export function volcengineIpModelLabel(model: string): string {
 
 export function volcengineIpCapabilities() {
   return VOLCENGINE_IP_MODEL_OPTIONS.map((option) => ({
-    ...option,
-    durations: seedanceVideoDurationOptions(option.id),
-    resolutions: volcengineIpModelResolutions(option.id),
-    reference_media: seedanceReferenceMediaCapabilities(option.id),
-    first_frame_ratio: option.id === SEEDANCE_2_5_IP_MODEL_ID ? 'adaptive' : 'selected',
-    internal_credit_multiplier: option.id === SEEDANCE_2_5_IP_MODEL_ID ? 1.5 : 1,
+      ...option,
+      durations: seedanceVideoDurationOptions(option.id),
+      resolutions: volcengineIpModelResolutions(option.id),
+      reference_media: seedanceReferenceMediaCapabilities(option.id),
+      first_frame_ratio: option.id === SEEDANCE_2_5_IP_MODEL_ID ? 'adaptive' : 'selected',
+      internal_credit_multiplier: seedanceVideoModelInternalMultiplier(option.id),
   }));
 }

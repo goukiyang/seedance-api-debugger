@@ -58,6 +58,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   PIXEL_QUOTA_EXCEEDED: '图片尺寸超过账户限制，请缩小后重试',
   ACTIVE_JOB_QUOTA_EXCEEDED: '已有任务等待完成，请稍后再提交',
   QUEUE_NOT_CONFIGURED: '抠图队列暂不可用，任务没有提交，请稍后重试',
+  CUTOUT_MAINTENANCE: '抠图暂时维护，尚未创建任务，请保留原图片稍后重试',
+  CUTOUT_MAINTENANCE_CONTROL_UNAVAILABLE: '抠图维护状态暂时无法确认，尚未创建任务，请保留原图片后重试',
   JOB_NOT_FOUND: '找不到当前账户的任务，请从历史记录重新打开',
   FILE_NOT_FOUND: '找不到当前账户的结果文件，请重新打开任务',
   IDEMPOTENCY_CONFLICT: '这次重试的内容已改变，请检查参数后重新提交',
@@ -66,9 +68,12 @@ async function upstreamFailure(response: Response, mutation = false) {
   const body = await response.json().catch(() => null);
   const code = typeof body?.detail?.code === 'string' && /^[A-Z0-9_]{1,80}$/.test(body.detail.code) ? body.detail.code : 'CUTOUT_UPSTREAM_ERROR';
   const message = ERROR_MESSAGES[code] || ([401, 403].includes(response.status) ? ERROR_MESSAGES.UNAUTHORIZED : response.status === 409 ? '任务状态或提交内容已改变，请重新查询后继续' : '抠图服务未完成请求，原图与已有结果保留，请重试');
-  const uncertain = mutation && (response.status >= 500 || response.status < 400);
-  return json({ success: false, error: code, message: uncertain ? '服务回复异常，无法确认任务是否已提交。请查询历史，或保留原参数和原提交标识重试，不要另建任务' : message,
+  const maintenanceRejected = response.status === 503 && ['CUTOUT_MAINTENANCE', 'CUTOUT_MAINTENANCE_CONTROL_UNAVAILABLE'].includes(code) && body?.detail?.accepted === false;
+  const uncertain = !maintenanceRejected && mutation && (response.status >= 500 || response.status < 400);
+  const result = json({ success: false, error: code, message: uncertain ? '服务回复异常，无法确认任务是否已提交。请查询历史，或保留原参数和原提交标识重试，不要另建任务' : message,
     submission_made: uncertain ? null : false }, response.status >= 400 && response.status < 600 ? response.status : 502);
+  if (maintenanceRejected) result.headers.set('Retry-After', '60');
+  return result;
 }
 const fetchUpstream = (fetcher: typeof fetch, url: string, init: RequestInit, timeout = 30_000) => fetcher(url, { ...init, cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(timeout) });
 

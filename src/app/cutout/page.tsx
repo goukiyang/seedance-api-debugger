@@ -16,11 +16,11 @@ import RegionSelector from '@/components/cutout/RegionSelector';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import { GeneratedImageResults, type GeneratedImageResult } from '@/components/GeneratedImageResults';
 import {
-  cancelCutoutJob, createCutoutJob, cutoutResultReference, downloadCutoutBlob,
+  cancelCutoutJob, createCutoutJob, cutoutResultReference, cutoutSubmissionUncertain, downloadCutoutBlob,
   getCutoutCapabilities, getCutoutHistory, getCutoutJob, saveCutoutBlob, uploadCutoutAsset,
 } from '@/lib/cutout/client';
 import type {
-  Box, CharacterBox, CutoutCapabilities, CutoutJob, CutoutKind, CutoutSettings,
+  Box, CharacterBox, CutoutCapabilities, CutoutJob, CutoutKind, CutoutProgress, CutoutSettings, CutoutUploadProgress,
   ModelOption, PromptOverride, SplitItem,
 } from '@/lib/cutout/types';
 import { getPageExitRisk, usePageExitRisk } from '@/lib/hooks/page-exit-guard';
@@ -31,6 +31,7 @@ import {
 import styles from './cutout.module.css';
 import { isSamModelId } from '@/lib/cutout/models';
 import { cutoutResultContent } from '@/lib/cutout/result-content';
+import { planCutoutJobQuery, refreshCutoutHistoryForQuery, type CutoutJobReadOutcome } from '@/lib/cutout/job-query';
 import { ResourceLibraryPicker } from '@/components/ResourceLibraryPicker';
 import { uploadFileAsAsset } from '@/lib/http/file-upload';
 import type { PickerItem } from '@/lib/assets/picker-types';
@@ -190,11 +191,33 @@ function integrationCopy(capabilities: CutoutCapabilities | null) {
   return '抠图服务已就绪。';
 }
 
+function elapsedLabel(startedAt: number, now: number) {
+  const seconds = Math.max(0, Math.floor(now / 1000 - startedAt));
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  if (minutes < 60) return remainder ? `${minutes} 分 ${remainder} 秒` : `${minutes} 分`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours} 小时 ${remainingMinutes} 分` : `${hours} 小时`;
+}
+
+function progressLabel(stage: CutoutProgress['stage']) {
+  if (stage === 'preparing') return '准备图片';
+  if (stage === 'processing') return '正在抠图';
+  return '保存结果';
+}
+
+function isTerminalJob(job: CutoutJob | null | undefined) {
+  return Boolean(job && ['succeeded', 'failed', 'canceled'].includes(job.status));
+}
+
 export default function CutoutPage() {
   const { confirm, productDialog } = useProductDialog();
   const actionLock = useRef(false);
   const mounted = useRef(true);
   const historyRequest = useRef(0);
+  const currentHistoryLoaderRef = useRef<(() => Promise<void>) | null>(null);
   const originalSourceByJob = useRef(new Map<string, string>());
   const [authChecked, setAuthChecked] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -215,6 +238,7 @@ export default function CutoutPage() {
   const [regionBox, setRegionBox] = useState<Box | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [mutation, setMutation] = useState<'upload' | 'submit' | 'cancel' | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<CutoutUploadProgress | null>(null);
   const [pendingSubmission, setPendingSubmission] = useState<PendingSubmission | null>(null);
   const [history, setHistory] = useState<CutoutJob[]>([]);
   const [historyTotal, setHistoryTotal] = useState<number | null>(null);
@@ -224,7 +248,10 @@ export default function CutoutPage() {
   const [selectedJob, setSelectedJob] = useState<CutoutJob | null>(null);
   const [selectedJobId, setSelectedJobId] = useState('');
   const [preferencesReady, setPreferencesReady] = useState(false);
-  const [pollPaused, setPollPaused] = useState(false);
+  const [jobReadIssue, setJobReadIssue] = useState('');
+  const [manualQueryBusy, setManualQueryBusy] = useState(false);
+  const [elapsedAt, setElapsedAt] = useState(0);
+  const [queryRefreshToken, setQueryRefreshToken] = useState(0);
   const [splitEntries, setSplitEntries] = useState<SplitEntry[]>([]);
   const [selectedEntryKeys, setSelectedEntryKeys] = useState<string[]>([]);
   const [exportModes, setExportModes] = useState({ trim: true, canvas: true });
@@ -238,11 +265,27 @@ export default function CutoutPage() {
   const [imagePickerOpen, setImagePickerOpen] = useState(false);
   const sourceSelection = useRef(0);
   const selectedJobIdRef = useRef('');
+  const selectedJobRef = useRef<CutoutJob | null>(null);
+  const accountIdRef = useRef('');
+  const accountGenerationRef = useRef(0);
+  const lastAccountIdRef = useRef('');
+  const selectionGenerationRef = useRef(0);
+  const jobReadSequenceRef = useRef(0);
+  const automaticQueryBlockedRef = useRef(false);
+  const activeJobReadRef = useRef<{
+    requestId: number;
+    accountId: string;
+    accountGeneration: number;
+    jobId: string;
+    generation: number;
+    controller: AbortController;
+  } | null>(null);
+  const latestProgressRef = useRef<{ accountId: string; jobId: string; progress: CutoutProgress } | null>(null);
   const pendingSubmissionRef = useRef<PendingSubmission | null>(null);
   const terminalHandledRef = useRef(new Set<string>());
   const splitMetaByJobRef = useRef(new Map<string, { width: number; height: number } | null>());
   const pollFailuresRef = useRef(0);
-  const pollAttemptsRef = useRef(0);
+  accountIdRef.current = accountId;
 
   const sourceUrl = source?.kind === 'result' ? source.url : sourceObjectUrl;
   const actionReady = Boolean(
@@ -268,16 +311,38 @@ export default function CutoutPage() {
     revision: `${source?.id || ''}:${selectedJobId}:${boxes.length}:${prompts.length}:${regionBox ? `${regionBox.x},${regionBox.y},${regionBox.w},${regionBox.h}` : ''}:${repairDirty}:${pendingSubmission?.key || ''}`,
   });
 
-  const chooseJob = useCallback((job: CutoutJob | null) => {
-    if (selectedJobIdRef.current !== (job?.job_id || '')) {
+  const setJobContext = useCallback((jobId: string) => {
+    if (selectedJobIdRef.current !== jobId) {
+      activeJobReadRef.current?.controller.abort();
+      activeJobReadRef.current = null;
+      selectionGenerationRef.current += 1;
       pollFailuresRef.current = 0;
-      pollAttemptsRef.current = 0;
+      automaticQueryBlockedRef.current = false;
+      latestProgressRef.current = null;
+      setJobReadIssue('');
     }
-    selectedJobIdRef.current = job?.job_id || '';
-    setSelectedJob(job);
-    setSelectedJobId(job?.job_id || '');
-    setPollPaused(false);
+    selectedJobIdRef.current = jobId;
   }, []);
+
+  const chooseJob = useCallback((job: CutoutJob | null) => {
+    const jobId = job?.job_id || '';
+    const selectionChanged = selectedJobIdRef.current !== jobId;
+    setJobContext(jobId);
+    if (isTerminalJob(job)) latestProgressRef.current = null;
+    else if (job?.progress) {
+      const currentProgress = latestProgressRef.current;
+      const isOlder = currentProgress?.accountId === accountIdRef.current && currentProgress.jobId === jobId
+        && (job.progress.attempt < currentProgress.progress.attempt
+          || job.progress.attempt === currentProgress.progress.attempt && (job.progress.sequence < currentProgress.progress.sequence
+            || job.progress.sequence === currentProgress.progress.sequence && job.progress.reported_at < currentProgress.progress.reported_at));
+      if (selectionChanged || !currentProgress || currentProgress.accountId !== accountIdRef.current || currentProgress.jobId !== jobId || !isOlder) {
+        latestProgressRef.current = { accountId: accountIdRef.current, jobId, progress: job.progress };
+      }
+    }
+    setSelectedJob(job);
+    selectedJobRef.current = job;
+    setSelectedJobId(jobId);
+  }, [setJobContext]);
 
   const sourceFromResult = useCallback(async (url: string, name: string, fullCanvas: boolean) => {
     if (actionLock.current || pendingSubmissionRef.current || getPageExitRisk().busy.length) return;
@@ -302,7 +367,12 @@ export default function CutoutPage() {
 
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; historyRequest.current++; };
+    return () => {
+      mounted.current = false;
+      historyRequest.current++;
+      activeJobReadRef.current?.controller.abort();
+      activeJobReadRef.current = null;
+    };
   }, []);
 
   const setJobResult = useCallback((job: CutoutJob) => {
@@ -339,6 +409,90 @@ export default function CutoutPage() {
       setSelectedEntryKeys((current) => current.includes(entry.key) ? current : [...current, entry.key]);
     }
   }, [chooseJob]);
+
+  const applyJobResponse = useCallback((job: CutoutJob, context: {
+    accountId: string; accountGeneration: number; jobId: string; selectionGeneration: number;
+  }) => {
+    if (!mounted.current || accountIdRef.current !== context.accountId
+      || accountGenerationRef.current !== context.accountGeneration
+      || selectedJobIdRef.current !== context.jobId
+      || selectionGenerationRef.current !== context.selectionGeneration
+      || job.job_id !== context.jobId) return null;
+
+    const latestProgress = latestProgressRef.current;
+    const current = selectedJobRef.current;
+    if (current?.job_id === job.job_id && job.updated_at < current.updated_at) return null;
+
+    let preserveLatestProgress = false;
+    if (latestProgress?.accountId === context.accountId && latestProgress.jobId === context.jobId && job.progress) {
+      const previous = latestProgress.progress;
+      const incoming = job.progress;
+      preserveLatestProgress = incoming.attempt === previous.attempt && (incoming.sequence < previous.sequence
+          || incoming.sequence === previous.sequence && incoming.reported_at < previous.reported_at);
+    }
+
+    if (current?.job_id === job.job_id && isTerminalJob(current) && job.status !== current.status) return null;
+
+    const nextJob = isTerminalJob(job)
+      ? { ...job, progress: undefined }
+      : preserveLatestProgress && latestProgress ? { ...job, progress: latestProgress.progress } : job;
+    if (isTerminalJob(nextJob)) latestProgressRef.current = null;
+    else if (nextJob.progress) latestProgressRef.current = { accountId: context.accountId, jobId: context.jobId, progress: nextJob.progress };
+    else if (latestProgress?.accountId === context.accountId && latestProgress.jobId === context.jobId) latestProgressRef.current = null;
+    setJobResult(nextJob);
+    return nextJob;
+  }, [setJobResult]);
+
+  const readSelectedJob = useCallback(async (jobId: string, selectionGeneration: number): Promise<CutoutJobReadOutcome> => {
+    const accountIdAtStart = accountIdRef.current;
+    const accountGeneration = accountGenerationRef.current;
+    if (!accountIdAtStart || selectedJobIdRef.current !== jobId || selectionGenerationRef.current !== selectionGeneration) return { kind: 'stale' };
+    const existing = activeJobReadRef.current;
+    if (existing && existing.accountId === accountIdAtStart && existing.accountGeneration === accountGeneration
+      && existing.jobId === jobId && existing.generation === selectionGeneration) return { kind: 'in-flight' };
+    existing?.controller.abort();
+
+    const requestId = ++jobReadSequenceRef.current;
+    const controller = new AbortController();
+    const request = { requestId, accountId: accountIdAtStart, accountGeneration, jobId, generation: selectionGeneration, controller };
+    activeJobReadRef.current = request;
+    const isCurrentRequest = () => activeJobReadRef.current?.requestId === requestId
+      && accountIdRef.current === accountIdAtStart
+      && accountGenerationRef.current === accountGeneration
+      && selectedJobIdRef.current === jobId
+      && selectionGenerationRef.current === selectionGeneration;
+    try {
+      const job = await getCutoutJob(jobId, controller.signal);
+      if (!isCurrentRequest()) return { kind: 'stale' };
+      const applied = applyJobResponse(job, { accountId: accountIdAtStart, accountGeneration, jobId, selectionGeneration });
+      if (!applied) return isCurrentRequest() ? { kind: 'ignored' } : { kind: 'stale' };
+      setJobReadIssue('');
+      return { kind: 'updated', job: applied };
+    } catch (error) {
+      if (controller.signal.aborted || !isCurrentRequest()) return { kind: 'stale' };
+      const status = typeof error === 'object' && error && 'status' in error ? Number((error as { status?: unknown }).status) : -1;
+      setJobReadIssue(status === 0 || status >= 500
+        ? '暂时无法更新任务状态，任务可能仍在处理。可重新查询。'
+        : safeError(error, 'history'));
+      return { kind: 'request-failed', status };
+    } finally {
+      if (activeJobReadRef.current?.requestId === requestId) activeJobReadRef.current = null;
+    }
+  }, [applyJobResponse]);
+
+  useEffect(() => {
+    if (lastAccountIdRef.current === accountId) return;
+    const previousAccount = lastAccountIdRef.current;
+    lastAccountIdRef.current = accountId;
+    accountGenerationRef.current += 1;
+    if (!previousAccount) return;
+    setJobContext('');
+    setSelectedJob(null);
+    selectedJobRef.current = null;
+    setSelectedJobId('');
+    latestProgressRef.current = null;
+    setJobReadIssue('');
+  }, [accountId, setJobContext]);
 
   useEffect(() => {
     let active = true;
@@ -383,12 +537,12 @@ export default function CutoutPage() {
         setMode(preferences.mode);
         setAdvancedOpen(preferences.advancedOpen);
         setHistoryOffset(preferences.historyOffset);
-        selectedJobIdRef.current = preferences.selectedJobId || '';
+        setJobContext(preferences.selectedJobId || '');
         setSelectedJobId(preferences.selectedJobId || '');
       }
       const linkedJobId = new URLSearchParams(window.location.search).get('jobId');
       if (linkedJobId && /^[a-zA-Z0-9_-]{1,128}$/.test(linkedJobId)) {
-        selectedJobIdRef.current = linkedJobId;
+        setJobContext(linkedJobId);
         setSelectedJobId(linkedJobId);
       }
       const pending = loadPendingCutout(accountId);
@@ -399,7 +553,7 @@ export default function CutoutPage() {
       }
     }
     setPreferencesReady(true);
-  }, [accountId, authChecked, isAdmin]);
+  }, [accountId, authChecked, isAdmin, setJobContext]);
 
   useEffect(() => {
     if (!preferencesReady || !accountId) return;
@@ -446,6 +600,7 @@ export default function CutoutPage() {
       if (mounted.current && requestId === historyRequest.current) setHistoryLoading(false);
     }
   }, [historyOffset]);
+  currentHistoryLoaderRef.current = loadHistory;
 
   useEffect(() => {
     if (!authChecked || !isAdmin || !preferencesReady) return;
@@ -453,47 +608,74 @@ export default function CutoutPage() {
   }, [authChecked, isAdmin, loadHistory, preferencesReady]);
 
   useEffect(() => {
-    if (!preferencesReady || !selectedJobId || selectedJob) return;
-    let active = true;
-    getCutoutJob(selectedJobId)
-      .then((job) => { if (active) setJobResult(job); })
-      .catch((error) => { if (active) setNotice({ kind: 'error', text: safeError(error, 'history') }); });
-    return () => { active = false; };
-  }, [preferencesReady, selectedJobId, selectedJob, setJobResult]);
+    if (!selectedJob || !['queued', 'running'].includes(selectedJob.status)) return;
+    setElapsedAt(Date.now());
+    const timer = window.setInterval(() => setElapsedAt(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [selectedJob?.job_id, selectedJob?.started_at, selectedJob?.status]);
 
   useEffect(() => {
-    if (!selectedJob || !['queued', 'running'].includes(selectedJob.status) || pollPaused) return;
+    if (!preferencesReady || !selectedJobId) return;
+    const jobId = selectedJobId;
+    const selectionGeneration = selectionGenerationRef.current;
+    const initialJob = selectedJobRef.current?.job_id === jobId ? selectedJobRef.current : null;
+    if (initialJob && isTerminalJob(initialJob)) return;
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = (delay: number) => {
+      if (!active || document.visibilityState !== 'visible') return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => { void poll(); }, delay);
+    };
     const poll = async () => {
-      if (!active || selectedJobIdRef.current !== selectedJob.job_id) return;
-      pollAttemptsRef.current += 1;
-      if (pollAttemptsRef.current > 40) {
-        setPollPaused(true);
-        setNotice({ kind: 'warning', text: '自动查询已暂停；任务仍可在历史中手动重新查询。' });
-        return;
+      if (!active || automaticQueryBlockedRef.current || document.visibilityState !== 'visible' || selectedJobIdRef.current !== jobId
+        || selectionGenerationRef.current !== selectionGeneration) return;
+      const currentJob = selectedJobRef.current;
+      if (currentJob?.job_id === jobId && isTerminalJob(currentJob)) return;
+      const outcome = await readSelectedJob(jobId, selectionGeneration);
+      if (selectedJobIdRef.current !== jobId || selectionGenerationRef.current !== selectionGeneration) return;
+      if (outcome.kind === 'updated') pollFailuresRef.current = 0;
+      else if (outcome.kind === 'request-failed') pollFailuresRef.current += 1;
+      const plan = planCutoutJobQuery({
+        jobId,
+        currentJob: selectedJobRef.current,
+        outcome,
+        failureCount: pollFailuresRef.current,
+        now: Date.now(),
+      });
+      if (outcome.kind === 'updated') automaticQueryBlockedRef.current = false;
+      else if (outcome.kind === 'request-failed' && plan.delayMs === null) automaticQueryBlockedRef.current = true;
+      if (mounted.current) void refreshCutoutHistoryForQuery(plan, currentHistoryLoaderRef);
+      if (!active) return;
+      if (plan.refreshHistory) {
+        active = false;
+        if (timer) clearTimeout(timer);
       }
-      try {
-        const job = await getCutoutJob(selectedJob.job_id);
-        if (!active || selectedJobIdRef.current !== job.job_id) return;
-        pollFailuresRef.current = 0;
-        setJobResult(job);
-        if (['queued', 'running'].includes(job.status)) timer = setTimeout(poll, 3500);
-        else void loadHistory();
-      } catch {
-        if (!active) return;
-        pollFailuresRef.current += 1;
-        if (pollFailuresRef.current >= 3) {
-          setPollPaused(true);
-          setNotice({ kind: 'warning', text: '任务状态暂时无法自动更新；可手动重新查询。' });
-          return;
-        }
-        timer = setTimeout(poll, 5000);
+      if (plan.delayMs !== null) schedule(plan.delayMs);
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') {
+        if (timer) clearTimeout(timer);
+        const request = activeJobReadRef.current;
+        if (request?.jobId === jobId && request.generation === selectionGeneration) request.controller.abort();
+      } else {
+        if (timer) clearTimeout(timer);
+        void poll();
       }
     };
-    timer = setTimeout(poll, 3500);
-    return () => { active = false; if (timer) clearTimeout(timer); };
-  }, [loadHistory, pollPaused, selectedJob?.job_id, selectedJob?.status, setJobResult]);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    if (document.visibilityState === 'visible') {
+      if (!initialJob) void poll();
+      else schedule(initialJob.status === 'queued' ? planCutoutJobQuery({
+        jobId, currentJob: initialJob, outcome: { kind: 'in-flight' }, failureCount: 0, now: Date.now(),
+      }).delayMs || 3500 : 3500);
+    }
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [loadHistory, preferencesReady, queryRefreshToken, readSelectedJob, selectedJobId]);
 
   const modelOptions = useMemo<ModelOption[]>(() => {
     const options: ModelOption[] = [{ id: 'auto', label: '自动选择', available: true }];
@@ -606,9 +788,13 @@ export default function CutoutPage() {
   const getOrUploadAsset = useCallback(async (chosen: SourceImage) => {
     if (cachedAsset?.sourceId === chosen.id) return cachedAsset.assetId;
     setMutation('upload');
+    setUploadProgress(null);
     let image: Blob = chosen.kind === 'local' ? chosen.file : await downloadCutoutBlob(chosen.url);
-    const uploaded = await uploadCutoutAsset(image, chosen.name);
+    const uploaded = await uploadCutoutAsset(image, chosen.name, (progress) => {
+      if (mounted.current && actionLock.current) setUploadProgress(progress);
+    });
     if (!mounted.current) throw new Error('页面已离开，未创建任务');
+    setUploadProgress(null);
     setCachedAsset({ sourceId: chosen.id, assetId: uploaded.asset_id });
     if (uploaded.width > 0 && uploaded.height > 0) setSourceSize({ width: uploaded.width, height: uploaded.height });
     return uploaded.asset_id;
@@ -641,8 +827,7 @@ export default function CutoutPage() {
         : { kind: 'success', text: job.status === 'succeeded' ? '任务已完成。' : '任务已提交，完成后会显示结果。' });
       setJobResult(job);
     } catch (error) {
-      const status = typeof error === 'object' && error && 'status' in error ? Number((error as { status?: unknown }).status) : -1;
-      if (status === 0 || status >= 500 || (typeof error === 'object' && error && 'submissionMade' in error && error.submissionMade === null)) {
+      if (cutoutSubmissionUncertain(error)) {
         pendingSubmissionRef.current = pending;
         setPendingSubmission(pending);
         setNotice({ kind: 'warning', text: safeError(error, 'job') });
@@ -687,6 +872,7 @@ export default function CutoutPage() {
       await submitWithKey(pending);
     } catch (error) {
       setMutation(null);
+      setUploadProgress(null);
       setNotice({ kind: 'error', text: safeError(error, 'upload') });
     } finally { actionLock.current = false; }
   }, [actionReady, capabilities, getOrUploadAsset, preferencesReady, source, sourceSize, submitWithKey]);
@@ -779,35 +965,60 @@ export default function CutoutPage() {
   };
 
   const requerySelected = async () => {
-    if (!selectedJobId || isBusy) return;
-    setMutation('submit');
-    setNotice({ kind: 'info', text: '正在重新查询任务。' });
+    const jobId = selectedJobIdRef.current;
+    const selectionGeneration = selectionGenerationRef.current;
+    if (!jobId || isBusy || manualQueryBusy) return;
+    setManualQueryBusy(true);
+    automaticQueryBlockedRef.current = false;
+    setJobReadIssue('');
     try {
-      const job = await getCutoutJob(selectedJobId);
-      setJobResult(job);
-      setNotice({ kind: 'success', text: '任务状态已更新。' });
-      setPollPaused(false);
-      pollFailuresRef.current = 0;
-      pollAttemptsRef.current = 0;
-    } catch (error) {
-      setNotice({ kind: 'error', text: safeError(error, 'history') });
-    } finally { setMutation(null); }
+      const outcome = await readSelectedJob(jobId, selectionGeneration);
+      if (outcome.kind === 'updated') {
+        pollFailuresRef.current = 0;
+        automaticQueryBlockedRef.current = false;
+        setQueryRefreshToken((current) => current + 1);
+      } else if (outcome.kind === 'in-flight') {
+        setJobReadIssue('正在读取最新状态，请稍候。');
+      }
+      if (outcome.kind === 'request-failed') {
+        pollFailuresRef.current += 1;
+        if (outcome.status !== 0 && outcome.status < 500) automaticQueryBlockedRef.current = true;
+      }
+      if (outcome.kind === 'updated' && isTerminalJob(outcome.job)) void loadHistory();
+    } finally {
+      if (mounted.current) setManualQueryBusy(false);
+    }
   };
 
   const cancelQueued = async () => {
-    if (!selectedJob || selectedJob.status !== 'queued' || isBusy) return;
+    if (!selectedJob || selectedJob.status !== 'queued' || isBusy || actionLock.current) return;
+    const jobId = selectedJob.job_id;
+    const accountIdAtStart = accountIdRef.current;
+    const accountGeneration = accountGenerationRef.current;
+    const selectionGeneration = selectionGenerationRef.current;
+    actionLock.current = true;
     setMutation('cancel');
     try {
-      const job = await cancelCutoutJob(selectedJob.job_id);
-      setJobResult(job);
-      setNotice({ kind: 'success', text: '已取消排队中的任务。' });
-      void loadHistory();
+      const job = await cancelCutoutJob(jobId);
+      if (accountIdRef.current !== accountIdAtStart || accountGenerationRef.current !== accountGeneration
+        || selectedJobIdRef.current !== jobId || selectionGenerationRef.current !== selectionGeneration) return;
+      const applied = applyJobResponse(job, { accountId: accountIdAtStart, accountGeneration, jobId, selectionGeneration });
+      if (applied) {
+        setNotice({ kind: 'success', text: job.status === 'canceled' ? '已取消排队中的任务。' : '任务状态已更新。' });
+        void loadHistory();
+      } else void readSelectedJob(jobId, selectionGeneration);
     } catch (error) {
-      setNotice({ kind: 'error', text: safeError(error, 'cancel') });
-      if (typeof error === 'object' && error && 'status' in error && Number((error as { status?: unknown }).status) === 409) {
-        try { setJobResult(await getCutoutJob(selectedJob.job_id)); } catch { /* user can requery */ }
+      if (accountIdRef.current === accountIdAtStart && accountGenerationRef.current === accountGeneration
+        && selectedJobIdRef.current === jobId && selectionGenerationRef.current === selectionGeneration) {
+        setNotice({ kind: 'error', text: safeError(error, 'cancel') });
       }
-    } finally { setMutation(null); }
+      if (typeof error === 'object' && error && 'status' in error && Number((error as { status?: unknown }).status) === 409) {
+        await readSelectedJob(jobId, selectionGeneration);
+      }
+    } finally {
+      actionLock.current = false;
+      if (mounted.current) setMutation(null);
+    }
   };
 
   const downloadResult = async (url: string, filename: string) => {
@@ -846,6 +1057,15 @@ export default function CutoutPage() {
   }
 
   const result = selectedJob?.result || null;
+  const activeJob = selectedJob && ['queued', 'running'].includes(selectedJob.status) ? selectedJob : null;
+  const activeStage = activeJob?.status === 'queued' ? '正在排队' : activeJob?.progress ? progressLabel(activeJob.progress.stage) : '任务正在处理';
+  const activeElapsed = activeJob?.status === 'queued'
+    ? `提交后 ${elapsedLabel(activeJob.created_at, elapsedAt)}`
+    : activeJob?.started_at != null ? `自首次开始 ${elapsedLabel(activeJob.started_at, elapsedAt)}` : '';
+  const uploadMessage = uploadProgress?.percent != null && uploadProgress.percent >= 100
+    ? '上传数据已发送，正在确认图片接收…'
+    : uploadProgress ? `正在上传原图 ${Math.floor(uploadProgress.percent)}%`
+      : '正在准备并上传原图；等待服务确认接收。';
   const sourceWidth = sourceSize?.width || 0;
   const sourceHeight = sourceSize?.height || 0;
   const selectedImageUrl = result?.result_url ? resultFileUrl(selectedJob!.job_id, result.result_url) : '';
@@ -1004,11 +1224,15 @@ export default function CutoutPage() {
             <div className={styles.primaryActions}>
               <button className={styles.primaryButton} type="button" onClick={submitMain} disabled={!source || !sourceSize || !preferencesReady || !actionReady || isBusy || Boolean(pendingSubmission) || (mode === 'characters' && characterSettings.strategy === 'sam_box' && !samAvailable)}>
                 {isBusy ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}
-                {isBusy ? '处理中…' : mode === 'cutout' ? '开始普通抠图' : '开始角色拆切'}
+                {mutation === 'upload' ? '正在上传…' : mutation === 'submit' ? '正在提交…' : mode === 'cutout' ? '开始普通抠图' : '开始角色拆切'}
               </button>
               {pendingSubmission && <button className={styles.secondaryButton} type="button" onClick={retrySubmission} disabled={isBusy || !actionReady}><RefreshCw size={15} />重试确认提交</button>}
               {source?.kind === 'result' && <button className={styles.secondaryButton} type="button" onClick={runCrop} disabled={!actionReady || isBusy || Boolean(pendingSubmission)}><Crop size={15} />裁剪透明边缘</button>}
               {source && <button className={styles.secondaryButton} type="button" onClick={runSplitPreview} disabled={!actionReady || isBusy || Boolean(pendingSubmission)}><Scan size={15} />拆分透明对象</button>}
+              {mutation === 'upload' && <div className={styles.uploadProgress} role="status" aria-live="polite">
+                <span>{uploadMessage}</span>
+                <progress aria-label="原图上传进度" max={100} value={uploadProgress ? Math.floor(uploadProgress.percent) : undefined} />
+              </div>}
             </div>
           </section>
 
@@ -1062,15 +1286,26 @@ export default function CutoutPage() {
 
           <section className={styles.section} aria-labelledby="cutout-result-title">
             <div className={styles.resultHeader}>
-              <div className={styles.sectionTitle}><ImageIcon size={17} aria-hidden="true" /><div><h2 id="cutout-result-title">任务结果</h2><p>{selectedJob ? `${selectedJob.job_id.slice(0, 12)} · ${selectedJob.status === 'queued' ? '排队中' : selectedJob.status === 'running' ? '处理中' : selectedJob.status === 'succeeded' ? '已完成' : selectedJob.status === 'failed' ? '失败' : '已取消'}` : '选择一条任务查看结果。'}</p></div></div>
-              {selectedJob && <div className={styles.buttonRow}>
-                <button className={styles.iconButton} type="button" title="重新查询" aria-label="重新查询" onClick={() => void requerySelected()} disabled={isBusy}><RefreshCw size={15} /></button>
-                {selectedJob.status === 'queued' && <button className={styles.iconButton} type="button" title="取消排队任务" aria-label="取消排队任务" onClick={() => void cancelQueued()} disabled={isBusy}><X size={15} /></button>}
+              <div className={styles.sectionTitle}><ImageIcon size={17} aria-hidden="true" /><div><h2 id="cutout-result-title">任务结果</h2><p>{selectedJob ? `${selectedJob.job_id.slice(0, 12)} · ${selectedJob.status === 'queued' ? '排队中' : selectedJob.status === 'running' ? '处理中' : selectedJob.status === 'succeeded' ? '已完成' : selectedJob.status === 'failed' ? '失败' : '已取消'}` : selectedJobId ? `${selectedJobId.slice(0, 12)} · 等待读取状态` : '选择一条任务查看结果。'}</p></div></div>
+              {(selectedJob || selectedJobId) && <div className={styles.buttonRow}>
+                <button className={styles.iconButton} type="button" title="重新查询" aria-label="重新查询" onClick={() => void requerySelected()} disabled={isBusy || manualQueryBusy}><RefreshCw size={15} /></button>
+                {selectedJob?.status === 'queued' && <button className={styles.iconButton} type="button" title="取消排队任务" aria-label="取消排队任务" onClick={() => void cancelQueued()} disabled={isBusy}><X size={15} /></button>}
               </div>}
             </div>
 
-            {!selectedJob && <p className={styles.emptyHint}>提交任务后，处理进度和可用结果会显示在这里。</p>}
-            {selectedJob && ['queued', 'running'].includes(selectedJob.status) && <div className={styles.statusNotice}><LoaderCircle size={15} aria-hidden="true" />{selectedJob.status === 'queued' ? '任务已进入队列，离开页面不会重复提交。' : '任务正在处理；页面会有限次自动查询，也可手动重新查询。'}</div>}
+            {!selectedJob && <p className={styles.emptyHint}>{selectedJobId ? '尚未读取到任务详情。可重新查询；不会因此重新提交任务。' : '提交任务后，处理进度和可用结果会显示在这里。'}</p>}
+            {activeJob && <div className={styles.statusNotice} role="status" aria-live="polite">
+              <LoaderCircle size={15} aria-hidden="true" />
+              <div className={styles.progressCopy}>
+                <strong>{activeStage}</strong>
+                <span>{activeJob.status === 'queued' ? '离开页面不会重复提交；页面隐藏时暂停查询，返回后继续。' : '页面保持在前台时自动查询；离开时暂停，返回后继续。'}</span>
+                {(activeElapsed || (activeJob.progress && activeJob.progress.attempt > 1)) && <span className={styles.progressMeta}>
+                  {activeElapsed}{activeElapsed && activeJob.progress && activeJob.progress.attempt > 1 ? ' · ' : ''}
+                  {activeJob.progress && activeJob.progress.attempt > 1 ? `第 ${activeJob.progress.attempt} 次处理` : ''}
+                </span>}
+              </div>
+            </div>}
+            {jobReadIssue && <div className={`${styles.statusNotice} ${styles.statusWarning}`} role="status">{jobReadIssue}</div>}
             {selectedJob?.status === 'failed' && <div className={`${styles.statusNotice} ${styles.statusError}`}>任务未完成。原图仍保留，请检查参数后重新提交。</div>}
             {selectedJob?.status === 'canceled' && <div className={styles.statusNotice}>任务已取消，原图与其他任务结果不受影响。</div>}
 

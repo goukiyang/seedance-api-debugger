@@ -503,6 +503,37 @@
   min-width: 160px;
 }
 
+.uploadProgress {
+  display: grid;
+  flex: 1 0 100%;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.uploadProgress progress {
+  width: min(100%, 360px);
+  height: 7px;
+  accent-color: var(--tone-info-text);
+}
+
+.progressCopy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.progressCopy strong {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.progressMeta {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 .historyToolbar {
   display: flex;
   align-items: center;

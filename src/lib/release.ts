@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '新增故事与完整剧本、可编辑分镜及手动图视频串联；画布支持撤销、复制、分组和小地图；画布列表可安全返回、时间显示更清楚。音频目前只支持添加素材。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '抠图显示实际上传进度，持续查询已有任务并提示查询异常；IP生成的2.5模型名称与费用更清楚，沿用原价格。抠图后台细阶段尚未上线。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
