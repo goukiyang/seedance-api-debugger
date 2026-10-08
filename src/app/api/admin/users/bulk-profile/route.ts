@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { refreshQuotaMembership } from '@/lib/credits/periodic';
 import { getAdminUser, errorJson } from '@/lib/auth/api-helpers';
 import type { SessionUser } from '@/lib/auth/session';
+import { maintainAccountSessionBinding } from '@/lib/auth/session-account-binding';
 import {
   getDefaultFeatureProfileId,
   normalizeFeatureProfileId,
@@ -51,6 +52,11 @@ export async function POST(request: NextRequest) {
       where: { id: { in: userIds }, status: { not: 'deleted' } },
       select: {
         id: true,
+        role: true,
+        password_hash: true,
+        status: true,
+        expires_at: true,
+        updated_at: true,
         username: true,
         account_type: true,
         user_profile: true,
@@ -73,12 +79,19 @@ export async function POST(request: NextRequest) {
           ? 'external_limited'
           : explicitFeatureProfileId || getDefaultFeatureProfileId(accountType, nextUserProfile);
 
-        const updated = await tx.user.update({
-          where: { id: user.id },
+        const changed = await tx.user.updateMany({
+          where: { id: user.id, updated_at: user.updated_at, password_hash: user.password_hash },
           data: {
             user_profile: nextUserProfile,
             feature_profile_id: nextFeatureProfileId,
+            password_hash: maintainAccountSessionBinding(user, {
+              ...user, user_profile: nextUserProfile, feature_profile_id: nextFeatureProfileId,
+            }),
           },
+        });
+        if (changed.count !== 1) throw new Error('Account changed concurrently');
+        const updated = await tx.user.findUniqueOrThrow({
+          where: { id: user.id },
           select: {
             id: true,
             user_profile: true,

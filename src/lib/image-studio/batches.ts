@@ -119,7 +119,7 @@ async function prepareBatch(owner: string, id: string) {
 
 export async function studioBatchView(owner: string, id: string, includeItems = true): Promise<StudioBatchView> {
   const { batch } = await readOwned(owner, id);
-  const identity = await prisma.user.findUniqueOrThrow({ where: { id: owner }, select: { id: true, role: true, account_type: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
+  const identity = await prisma.user.findUniqueOrThrow({ where: { id: owner }, select: { id: true, role: true, account_type: true, feature_profile_id: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
   const taskIds = batch.items.flatMap(item => item.taskId ? [item.taskId] : []);
   const tasks = await prisma.imageStudioTask.findMany({ where: { id: { in: taskIds }, owner_id: owner }, select: { id: true, status: true, error: true, asset_id: true, deleted_at: true } });
   const assets = includeItems ? await prisma.asset.findMany({ where: { id: { in: tasks.flatMap(task => !task.deleted_at && task.asset_id ? [task.asset_id] : []) }, owner_id: owner, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity)] }, select: { id: true, file_size: true } }) : [];
@@ -195,7 +195,7 @@ export async function dispatchStudioBatches() {
         const prepared = await tx.platformSetting.findUnique({ where: { key: itemKey(batch.id, item.ordinal) } });
         if (!prepared) throw new StudioError('素材快照不可用，未派发新任务');
         const data = JSON.parse(prepared.value_json) as Prisma.ImageStudioTaskUncheckedCreateInput;
-        const user = await tx.user.findUnique({ where: { id: batch.ownerId }, select: { id: true, role: true, account_type: true, status: true, user_profile: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
+        const user = await tx.user.findUnique({ where: { id: batch.ownerId }, select: { id: true, role: true, account_type: true, feature_profile_id: true, status: true, user_profile: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
         if (!user || user.status !== 'active' || !canUseCompanyTemplates(user)) throw new StudioError('当前账号不能继续生成');
         if (data.source_preset_id) {
           const source = await tx.imageStudioPreset.findUnique({ where: { id: data.source_preset_id }, select: { owner_id: true, scope: true, is_shared: true } });

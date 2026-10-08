@@ -21,7 +21,7 @@ export async function validateAvatarReferences(owner: string, ids: string[]) {
   try { validateStudioReferenceCounts(defaultStudioReferencePolicy(ids), ids, 0, 0); }
   catch (error) { throw new StudioError((error as Error).message); }
   if (!ids.length) return;
-  const identity = await prisma.user.findUnique({ where: { id: owner }, select: { id: true, role: true, account_type: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
+  const identity = await prisma.user.findUnique({ where: { id: owner }, select: { id: true, role: true, account_type: true, feature_profile_id: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
   if (!identity) throw new StudioError('参考图已不可用或无权使用', 403);
   const count = await prisma.asset.count({ where: { id: { in: ids }, owner_id: owner, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity)] } });
   if (count !== new Set(ids).size) throw new StudioError('参考图已不可用或无权使用，请移除或重新选择', 403);

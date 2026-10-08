@@ -1,4 +1,5 @@
 import type { SessionUser } from '@/lib/auth/session';
+import { hasInternalEmailAuthorization } from '@/lib/access/external-role';
 
 type FeishuIdentity = {
   user_id?: string | null;
@@ -11,6 +12,7 @@ export type ImageStudioIdentity = {
   id: string;
   role: string;
   account_type: string;
+  feature_profile_id?: string | null;
   feishu?: FeishuIdentity | null;
   feishu_user_id?: string | null;
   feishu_open_id?: string | null;
@@ -38,12 +40,15 @@ function identityFeishu(user: ImageStudioIdentity) {
  * feature guard. Shared templates require an internal Feishu identity from
  * the configured tenant when one is configured. An internal administrator may
  * still manage their own templates when their account predates Feishu login,
- * but a regular user must have a Feishu identity. An external account never
+ * but a regular user must have a Feishu identity or explicit internal email
+ * authorization. The latter grants ordinary company access, not a Feishu
+ * identity or administrator privileges. An external account never
  * crosses this boundary, even if its role column says admin.
  */
 export function canUseCompanyTemplates(user: ImageStudioIdentity | SessionUser) {
   if (user.account_type !== 'internal') return false;
   if (user.role === 'admin') return true;
+  if (hasInternalEmailAuthorization(user)) return true;
   const feishu = identityFeishu(user);
   const allowedTenant = process.env.FEISHU_ALLOWED_TENANT_KEY?.trim();
   return Boolean(

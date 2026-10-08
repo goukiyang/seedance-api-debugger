@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { refreshQuotaMembership } from '@/lib/credits/periodic';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
 import { hashPassword } from '@/lib/auth/password';
+import { maintainAccountSessionBinding } from '@/lib/auth/session-account-binding';
 import type { SessionUser } from '@/lib/auth/session';
 import {
   getDefaultFeatureProfileId,
@@ -198,16 +199,24 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (userProfileWasProvided || accountType || accountTypeChanged) updateData.user_profile = nextUserProfile;
   if (featureProfileWasProvided || accountType || accountTypeChanged || userProfileWasProvided) updateData.feature_profile_id = nextFeatureProfileId;
   if (expiresAtWasProvided) updateData.expires_at = nextExpiresAt;
-  if (password) updateData.password_hash = hashPassword(password);
+  const nextPasswordHash = maintainAccountSessionBinding(existing, {
+    ...existing, role: nextRole, account_type: nextAccountType, status: nextStatus,
+    user_profile: nextUserProfile, feature_profile_id: nextFeatureProfileId, expires_at: nextExpiresAt,
+  }, password ? hashPassword(password) : existing.password_hash);
+  if (nextPasswordHash !== existing.password_hash) updateData.password_hash = nextPasswordHash;
 
   if (Object.keys(updateData).length === 0) {
     return errorJson('没有可更新的字段', 400);
   }
 
   const updated = await prisma.$transaction(async (tx) => {
-    const user = await tx.user.update({
-      where: { id },
+    const changed = await tx.user.updateMany({
+      where: { id, updated_at: existing.updated_at, password_hash: existing.password_hash },
       data: updateData,
+    });
+    if (changed.count !== 1) throw new Error('Account changed concurrently');
+    const user = await tx.user.findUniqueOrThrow({
+      where: { id },
       select: {
         id: true,
         name: true,
@@ -293,10 +302,11 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   }
 
   await prisma.$transaction(async (tx) => {
-    await tx.user.update({
-      where: { id },
-      data: { status: 'deleted' },
+    const changed = await tx.user.updateMany({
+      where: { id, updated_at: user.updated_at, password_hash: user.password_hash },
+      data: { status: 'deleted', password_hash: maintainAccountSessionBinding(user, { ...user, status: 'deleted' }) },
     });
+    if (changed.count !== 1) throw new Error('Account changed concurrently');
     await refreshQuotaMembership(tx, id);
 
     await tx.operationLog.create({

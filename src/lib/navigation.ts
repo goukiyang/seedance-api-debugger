@@ -1,3 +1,5 @@
+import { hasInternalEmailAuthorization, isExternalUser, type AccountScopedUser } from '@/lib/access/external-role';
+
 export interface NavItem {
   label: string;
   href: string;
@@ -138,23 +140,17 @@ export function isNavItemActive(pathname: string, item: NavItem) {
 
 export function isNavItemVisible(
   item: NavItem,
-  viewer: boolean | {
-    role?: string | null;
-    account_type?: string | null;
+  viewer: boolean | (AccountScopedUser & {
     feishu?: { user_id?: string | null; open_id?: string | null; union_id?: string | null; tenant_key?: string | null } | null;
-  } | null | undefined,
+  }) | null | undefined,
 ) {
   const isAdmin = typeof viewer === 'boolean' ? viewer : viewer?.role === 'admin';
   const isExternal = typeof viewer === 'boolean'
     ? false
-    : viewer?.role !== 'admin'
-      && (
-        viewer?.account_type === 'external'
-        || !Boolean(viewer?.feishu?.user_id || viewer?.feishu?.open_id || viewer?.feishu?.union_id)
-      );
+    : !viewer || isExternalUser(viewer);
 
   if (item.adminOnly && !isAdmin) return false;
-  if (item.imageStudioOnly && (typeof viewer === 'boolean' ? !viewer : viewer?.account_type !== 'internal' || !isAdmin && (!viewer?.feishu?.tenant_key || !Boolean(viewer?.feishu?.user_id || viewer?.feishu?.open_id || viewer?.feishu?.union_id)))) return false;
+  if (item.imageStudioOnly && (typeof viewer === 'boolean' ? !viewer : viewer?.account_type !== 'internal' || !isAdmin && !hasInternalEmailAuthorization(viewer) && (!viewer?.feishu?.tenant_key || !Boolean(viewer?.feishu?.user_id || viewer?.feishu?.open_id || viewer?.feishu?.union_id)))) return false;
   if ((item.externalHidden || item.externalOnlyHidden) && isExternal) return false;
   return true;
 }

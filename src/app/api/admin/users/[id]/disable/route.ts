@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { refreshQuotaMembership } from '@/lib/credits/periodic';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
 import type { SessionUser } from '@/lib/auth/session';
+import { maintainAccountSessionBinding } from '@/lib/auth/session-account-binding';
 
 type RouteContext = {
   params: {
@@ -46,7 +47,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   await prisma.$transaction(async (tx) => {
-    await tx.user.update({ where: { id }, data: { status: 'disabled' } });
+    const changed = await tx.user.updateMany({ where: { id, updated_at: user.updated_at, password_hash: user.password_hash },
+      data: { status: 'disabled', password_hash: maintainAccountSessionBinding(user, { ...user, status: 'disabled' }) } });
+    if (changed.count !== 1) throw new Error('Account changed concurrently');
     await refreshQuotaMembership(tx, id);
     await tx.operationLog.create({
       data: {

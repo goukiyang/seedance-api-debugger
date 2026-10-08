@@ -55,7 +55,7 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
   const ids = Array.isArray(row.reference_ids) ? row.reference_ids : JSON.parse(row.reference_ids) as string[];
   const protectedSource = !isAdmin && Boolean(row.source_preset_id) && sourcePreset?.owner_id !== ownerId;
   const fixedReferences = await getStudioModuleFixedReferences(ownerId, row.id);
-  const user = identity || await prisma.user.findUniqueOrThrow({ where: { id: ownerId }, select: { id: true, role: true, account_type: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
+  const user = identity || await prisma.user.findUniqueOrThrow({ where: { id: ownerId }, select: { id: true, role: true, account_type: true, feature_profile_id: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
   const styleGroupIds = await getStudioModuleStyleIds(ownerId, row.id);
   const skillIds = await getSkillSelection(ownerId, row.id);
   const skills = await Promise.all(skillIds.map(async id => {
@@ -237,7 +237,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
     throw new StudioModuleError(`旧版保存请求最多支持 ${referenceLimit} 张参考图`);
   }
   const row = await prisma.$transaction(async tx => {
-    const identity = sourceIdentity || await tx.user.findUniqueOrThrow({ where: { id: ownerId }, select: { id: true, role: true, account_type: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
+    const identity = sourceIdentity || await tx.user.findUniqueOrThrow({ where: { id: ownerId }, select: { id: true, role: true, account_type: true, feature_profile_id: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
     const current = await tx.imageStudioModule.findUnique({ where: { id } });
     if (current && current.owner_id !== ownerId) throw new StudioModuleError('无权修改这个模块', 403);
     if (current && createOnly) return current;

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
 import { hashPassword } from '@/lib/auth/password';
+import { maintainAccountSessionBinding } from '@/lib/auth/session-account-binding';
 import type { SessionUser } from '@/lib/auth/session';
 import { grantInitialCredits, getCreditPolicy, resolveInitialGrantAmount } from '@/lib/credits/policy';
 import {
@@ -149,7 +150,10 @@ export async function POST(request: NextRequest) {
           name,
           username,
           email,
-	          password_hash: hashPassword(password),
+	          password_hash: maintainAccountSessionBinding(
+              { id: '', password_hash: '', role: 'user', account_type: 'external' },
+              { id: '', password_hash: '', role, account_type: accountType, feature_profile_id: featureProfileId },
+              hashPassword(password)),
 	          role,
 	          account_type: accountType,
 	          user_profile: userProfile,

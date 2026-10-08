@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '模板主图、风格与参考图分层显示；图片结果单击即可预览，操作按钮统一出现。图片模板侧栏整行折叠，删除和喜欢位置更清楚；重复入口与未保存提示已精简，草稿和保存保护保留。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '明确授权的邮箱账号可使用内部普通功能。撤销授权、修改密码或删除账号后，旧登录不再恢复；其他账号的权限和登录保持不变。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

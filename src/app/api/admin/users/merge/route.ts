@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
+import { maintainAccountSessionBinding } from '@/lib/auth/session-account-binding';
 
 const MAX_SOURCE_USERS = 20;
 
@@ -502,7 +503,7 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      await tx.user.update({
+      const changed = await tx.user.updateMany({
         where: { id: targetUserId },
         data: {
           feishu_user_id: primaryFeishuIdentity.feishu_user_id,
@@ -517,12 +518,15 @@ export async function POST(request: NextRequest) {
           avatar_url: primaryFeishuIdentity.avatar_url,
         },
       });
+      if (changed.count !== 1) throw new Error('Account changed concurrently');
     }
 
-    await tx.user.updateMany({
-      where: { id: { in: sourceUserIds } },
-      data: { status: 'deleted' },
-    });
+    for (const source of sourceUsers) {
+      await tx.user.update({
+        where: { id: source.id, password_hash: source.password_hash },
+        data: { status: 'deleted', password_hash: maintainAccountSessionBinding(source, { ...source, status: 'deleted' }) },
+      });
+    }
 
     await tx.operationLog.create({
       data: {

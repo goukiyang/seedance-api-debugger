@@ -165,7 +165,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     }
     const user = await tx.user.findUnique({ where: { id: ownerId }, select: {
       id: true, role: true, account_type: true, status: true,
-      user_profile: true,
+      user_profile: true, feature_profile_id: true,
       feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true,
     } });
     if (!user || user.status !== 'active') throw new StudioError('当前账号无法生成', 403);

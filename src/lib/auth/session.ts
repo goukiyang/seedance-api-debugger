@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { cookies } from 'next/headers';
 import { prisma } from '@/lib/prisma';
 import { verifyPassword } from './password';
+import { sessionAccountPayload, sessionAccountPayloadMatches, type SessionAccount } from './session-account-binding';
 
 export interface SessionUser {
   id: string;
@@ -76,11 +77,13 @@ export async function getSessionByToken(token?: string | null): Promise<SessionU
       return null;
     }
 
-    const userId = Buffer.from(userIdB64, 'base64').toString('utf8');
+    const accountPayload = Buffer.from(userIdB64, 'base64').toString('utf8');
+    const userId = accountPayload.split(':')[0];
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
+        password_hash: true,
         name: true,
         username: true,
         email: true,
@@ -106,6 +109,7 @@ export async function getSessionByToken(token?: string | null): Promise<SessionU
 
     if (user.role !== 'admin' && user.role !== 'user') return null;
     if (user.account_type !== 'internal' && user.account_type !== 'external') return null;
+    if (!sessionAccountPayloadMatches(accountPayload, user, SESSION_SECRET)) return null;
     return {
       id: user.id,
       name: user.name,
@@ -134,8 +138,19 @@ export async function getSessionByToken(token?: string | null): Promise<SessionU
   }
 }
 
-export async function createSession(userId: string): Promise<string> {
-  const payload = Buffer.from(userId).toString('base64');
+export async function createSession(userId: string, authenticatedAccount?: SessionAccount): Promise<string> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, role: true, account_type: true, feature_profile_id: true, password_hash: true,
+      user_profile: true, status: true, expires_at: true },
+  });
+  if (!user || user.status !== 'active' || (user.expires_at && user.expires_at.getTime() <= Date.now())) {
+    throw new Error('Cannot create a session for an unavailable account');
+  }
+  if (authenticatedAccount && sessionAccountPayload(user, SESSION_SECRET) !== sessionAccountPayload(authenticatedAccount, SESSION_SECRET)) {
+    throw new Error('Account changed during authentication');
+  }
+  const payload = Buffer.from(sessionAccountPayload(user, SESSION_SECRET)).toString('base64');
   const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64');
   return `${payload}.${sig}`;
 }
@@ -163,13 +178,18 @@ export async function login(
     return { error: '账号或密码错误', status: 401 };
   }
 
-  // 更新 last_login_at
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { last_login_at: new Date() },
-  });
-
-  const token = await createSession(user.id);
+  let token: string;
+  try {
+    // Do not mint a new bound cookie from a password verified before a reset.
+    const changed = await prisma.user.updateMany({
+      where: { id: user.id, password_hash: user.password_hash, status: 'active' },
+      data: { last_login_at: new Date() },
+    });
+    if (changed.count !== 1) return { error: '账号状态已变化，请重新登录', status: 401 };
+    token = await createSession(user.id, user);
+  } catch {
+    return { error: '账号状态已变化，请重新登录', status: 401 };
+  }
   const role = user.role === 'admin' ? 'admin' : 'user';
   const accountType = user.account_type === 'external' ? 'external' : 'internal';
   return {
