@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import { AUDIO_CAPABILITY } from '../src/lib/provider/audio-contract';
 
 const source = readFileSync('src/lib/canvas-documents.ts', 'utf8');
 const ast = ts.createSourceFile('canvas-documents.ts', source, ts.ScriptTarget.Latest, true);
@@ -37,6 +38,14 @@ assert.deepEqual(result.canvas.connections, [{ from: result.canvas.nodes[0].id, 
 
 const html = readFileSync('public/tools/ultimate-canvas/index.html', 'utf8');
 const app = readFileSync('public/tools/ultimate-canvas/app.js', 'utf8');
+const engineSource = readFileSync('public/tools/ultimate-canvas/canvas-engine.js', 'utf8');
+assert.equal(AUDIO_CAPABILITY.configured, false);
+assert.equal(AUDIO_CAPABILITY.enabled, false);
+assert.equal(AUDIO_CAPABILITY.quote, null);
+assert.deepEqual(AUDIO_CAPABILITY.models, []);
+assert.equal(AUDIO_CAPABILITY.materialSupported, true);
+for (const body of [html, app, engineSource]) assert.ok(!/文字生音乐|音乐生成|生成音乐/.test(body));
+assert.ok(engineSource.includes('添加音频素材'));
 for (const file of ['canvas-commands.js', 'canvas-groups.js', 'canvas-minimap.js']) {
   assert.ok(html.indexOf(`src="${file}`) < html.indexOf('src="app.js'));
 }

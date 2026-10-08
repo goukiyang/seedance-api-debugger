@@ -889,7 +889,7 @@ class CanvasEngine {
                         <span class="action-icon">🖼</span>图片及推理提示词
                     </div>
                     <div class="node-action-row" data-action="txt2music" data-nid="${id}">
-                        <span class="action-icon">🔊</span>文字生音乐
+                        <span class="action-icon">🔊</span>添加音频素材
                     </div>
                 </div>
                 <div class="node-context-rules-row">
