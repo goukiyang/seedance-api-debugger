@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '画布视频结果可直接播放，重开后核对状态并保留暂停位置；等待时显示参考图。修复正常同站访问时技能无法保存的问题，生成和费用规则不变。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '新增画布角色库、职责与交付设置，以及任务交流、检查返工和历史。角色版本单独保存，加入不自动执行；文字 AI 需报价和预算就绪后逐次开始。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

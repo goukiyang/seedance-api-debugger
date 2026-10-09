@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
       : await latestCanvasDocument(user, params.get('project_id')?.trim() || null);
     const requestedProject = params.get('project_id')?.trim();
     if (document && requestedProject && document.project_id !== requestedProject) throw new AuthError('画布不属于当前项目', 400);
-    return json({ document: document ? canvasDetail(document) : null });
+    return json({ document: document ? canvasDetail(document, (request.headers.get('x-canvas-capabilities') || '').split(',')) : null });
   } catch (error) { return failure(error); }
 }
 

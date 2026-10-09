@@ -13,6 +13,8 @@
     <link rel="stylesheet" href="style-gallery.css?v=20261006-unified-likes">
     <link rel="stylesheet" href="like-button.css?v=20261006-unified-likes">
     <link rel="stylesheet" href="document-library.css?v=pre34-0.58.0">
+    <link rel="stylesheet" href="role-module.css?v=0.66.0">
+    <link rel="stylesheet" href="role-workflow.css?v=0.66.0">
     <link rel="stylesheet" href="node-pricing.css?v=20260925-model-price-menu">
     <link rel="icon" href="data:,">
     <style>
@@ -97,6 +99,7 @@
                     <polyline points="21 15 16 10 5 21"/>
                 </svg>
             </button>
+            <button class="toolbar-btn" id="tool-roles" data-tooltip="角色" data-panel="roles-panel" data-graph-icon="Users" aria-label="角色"></button>
             <button class="toolbar-btn" id="tool-history" data-tooltip="历史记录" data-panel="history-panel">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
@@ -220,6 +223,12 @@
                 </div>
             </div>
         </div>
+
+        <div id="roles-panel" class="side-panel">
+            <div class="panel-header"><span>角色库</span><button type="button" id="tool-role-pending" class="toolflow-mode-toggle" aria-label="待我处理">待我处理</button><button type="button" class="panel-close" aria-label="关闭角色库" data-graph-icon="X"></button></div>
+            <div id="roles-panel-body" class="panel-body-list"></div>
+        </div>
+        <aside id="role-work-panel" hidden aria-label="角色工作"></aside>
 
         <!-- Canvas Container -->
         <div id="canvas-container" class="canvas-container">
@@ -387,14 +396,14 @@
     </main>
 
     <script src="assets/director/liblib/director-liblib-data.js"></script>
-    <script src="icons.js?v=pre34-0.58.0"></script>
+    <script src="icons.js?v=0.66.0"></script>
     <script src="plan-split.js?v=0.35.0"></script>
     <script src="plan-split-ui.js?v=0.35.0"></script>
-    <script src="canvas-engine.js?v=can37-0.61.0"></script>
-    <script src="canvas-commands.js?v=can37-0.61.0"></script>
+    <script src="canvas-engine.js?v=0.66.0"></script>
+    <script src="canvas-commands.js?v=0.66.0"></script>
     <script src="canvas-groups.js?v=pre34-0.58.0"></script>
     <script src="canvas-minimap.js?v=pre34-0.58.0"></script>
-    <script src="backend-contract.js?v=0.35.0"></script>
+    <script src="backend-contract.js?v=0.66.0"></script>
     <script src="generation-api.js?v=20260713-sd2-same-origin"></script>
     <script src="generation-node-interactions.js?v=0.35.0"></script>
     <script src="generation-node-workflow.js?v=can37-0.61.0"></script>
@@ -405,7 +414,9 @@
     <script src="node-pricing.js?v=20260925-model-price-menu"></script>
     <script src="style-gallery.js?v=20261006-unified-likes"></script>
     <script src="canvas-styles.js?v=can37-0.61.0"></script>
-    <script src="app.js?v=can37-0.61.0"></script>
+    <script src="role-creator.js?v=0.66.0"></script>
+    <script src="role-workflow.js?v=0.66.0"></script>
+    <script src="app.js?v=0.66.0"></script>
     <script src="toolflow-workflow.js?v=20260924-canvas-parallel"></script>
     <script type="module" src="director-3d.js"></script>
 </body>

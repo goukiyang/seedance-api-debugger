@@ -687,6 +687,7 @@ class CanvasEngine {
         const wrap = document.createElement('div');
         wrap.className = `canvas-node node-type-${type}${type === 'image' || type === 'video' ? ' generation-node' : ''}${type.startsWith('flow-') ? ' toolflow-node' : ''}`;
         wrap.dataset.nodeId = id;
+        if (type === 'role') { wrap.tabIndex = 0; wrap.setAttribute('aria-label', nd.data?.roleConfig?.snapshot?.name || '角色'); }
         wrap.style.left = x + 'px';
         wrap.style.top = y + 'px';
 
@@ -695,9 +696,17 @@ class CanvasEngine {
             ? this._escapeHtml(nd.data.title.trim().slice(0, 160)) : this._label(type, id);
         const editableText = ['text', 'script'].includes(type) && (typeof nd.data?.authoredText === 'string'
             ? nd.data.authoredText : !nd.data?.generatedText && nd.data?.prompt ? nd.data.prompt : null);
-        const body = editableText !== false && editableText !== null
+        const role = nd.data?.roleConfig?.snapshot;
+        const roleBody = type === 'role' ? `<div class="role-node-summary">
+            <strong>${this._escapeHtml(role?.name || nd.data?.title || '角色')}</strong>
+            <span>${this._escapeHtml(role?.executor?.kind === 'ai' ? 'AI · ' + (role.executor.model || '未指定模型') : role?.executor?.kind === 'person' ? '人员' : '稍后指定')}</span>
+            <p>${this._escapeHtml(role?.responsibilities || '职责待配置')}</p>
+            <button type="button" data-role-open="${this._escapeHtml(id)}">${window.UltimateCanvasIcons('ClipboardList')}工作</button>
+            <button type="button" data-role-instance-settings="${this._escapeHtml(id)}" aria-label="角色实例配置" title="角色实例配置">${window.UltimateCanvasIcons('SlidersHorizontal')}</button>
+        </div>` : null;
+        const body = roleBody || (editableText !== false && editableText !== null
             ? `<div class="node-text-content" contenteditable="true" style="white-space:pre-wrap" data-placeholder="在这里输入你的故事...">${this._escapeHtml(editableText)}</div>`
-            : this._body(type, id);
+            : this._body(type, id));
         const generationBody = type === 'image' || type === 'video' ? `
             <div class="generation-quick-modes generation-empty-state" data-generation-quick-modes>
                 <div class="generation-empty-icon" aria-hidden="true">
@@ -816,11 +825,12 @@ class CanvasEngine {
 
     _label(type, id) {
         const n = { text:'文本节点', image:'图片节点', video:'视频', audio:'音频',
-                    'video-compose':'视频合成', director:'导演台', script:'脚本' }[type] || '节点';
+                    'video-compose':'视频合成', director:'导演台', script:'脚本', role:'角色' }[type] || '节点';
         const num = id.replace('node-','');
         return `${n} ${num}`;
     }
     _icon(type) {
+        if (type === 'role') return window.UltimateCanvasIcons('UserRound');
         const map = {
             text: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/></svg>`,
             image: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`,
