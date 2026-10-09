@@ -1,4 +1,4 @@
-import { videoDeliveryStageForTask } from '@/lib/video/delivery-status';
+import { videoDeliveryStageForTask, videoPlayableAvailableForTask } from '@/lib/video/delivery-status';
 import { shouldExposeTaskThumbnailUrl } from '@/lib/video/thumbnail-availability';
 
 export type TaskThumbnailProjectionSource = {
@@ -22,6 +22,7 @@ export function retryAfterMsForTaskThumbnailStage(
 
 export function taskThumbnailProjection(task: TaskThumbnailProjectionSource) {
   const deliveryStage = videoDeliveryStageForTask(task);
+  const playableAvailable = videoPlayableAvailableForTask(task);
   const thumbnailUrl = shouldExposeTaskThumbnailUrl({
     publicVideoUrl: task.public_video_url,
     localVideoPath: task.local_video_path,
@@ -33,7 +34,8 @@ export function taskThumbnailProjection(task: TaskThumbnailProjectionSource) {
     delivery_stage: deliveryStage,
     stable_download_ready: deliveryStage.stableDownloadReady,
     preview_available: deliveryStage.previewAvailable,
-    play_url: deliveryStage.previewAvailable ? `/api/video/play/${task.id}` : null,
+    playable_available: playableAvailable,
+    play_url: playableAvailable ? `/api/video/play/${task.id}` : null,
     download_url: deliveryStage.stableDownloadReady ? `/api/video/download/${task.id}` : null,
     thumbnail_url: thumbnailUrl,
     retry_after_ms: retryAfterMsForTaskThumbnailStage(deliveryStage.key),

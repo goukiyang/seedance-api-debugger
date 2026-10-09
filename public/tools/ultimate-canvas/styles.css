@@ -4273,6 +4273,123 @@ body.director-studio-open {
     border: 1px solid rgba(255,255,255,0.14);
     background: #111;
 }
+.generation-node .generation-result-region:not(:empty) .canvas-video-result,
+.generation-node .generation-result-region:not(:empty) .canvas-video-stage {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    max-height: none;
+}
+.generation-node .generation-result-region:not(:empty) .canvas-video-result {
+    position: relative;
+    overflow: hidden;
+    border-radius: inherit;
+    background: #111;
+}
+.generation-node .generation-result-region:not(:empty) .canvas-video-stage {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    background: #111;
+}
+.generation-node .generation-result-region:not(:empty) .canvas-video-stage video {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+    margin: 0;
+    border: 0;
+    border-radius: inherit;
+    background: #111;
+    object-fit: contain;
+}
+.generation-node .generation-result-region:not(:empty) .canvas-video-cover {
+    position: absolute;
+    inset: 0 0 48px;
+    z-index: 2;
+    display: grid;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    place-items: center;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+}
+.generation-node .generation-result-region:not(:empty) .canvas-video-cover[hidden] {
+    display: none;
+}
+.generation-node .generation-result-region:not(:empty) .canvas-video-cover:focus-visible {
+    outline: 2px solid var(--accent-teal);
+    outline-offset: -3px;
+}
+.generation-node .generation-result-region:not(:empty) .canvas-video-pending-source {
+    filter: brightness(.7);
+}
+.generation-node .generation-result-region:not(:empty) .canvas-video-result-meta {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 3;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    max-width: calc(100% - 16px);
+    color: var(--text-primary);
+    font-size: 11px;
+    line-height: 1.4;
+    pointer-events: none;
+}
+.generation-node .generation-result-region:not(:empty) .canvas-video-result-meta > * {
+    pointer-events: auto;
+}
+.canvas-video-result-meta .generated-result-title,
+.canvas-video-result-meta [data-video-summary] {
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 3px 5px;
+    border-radius: 3px;
+    background: #111c;
+}
+.canvas-video-result-meta [data-video-read-state]:not(:empty) {
+    flex-basis: 100%;
+    padding: 4px 6px;
+    border-radius: 3px;
+    background: #111e;
+    color: #f5d6ae;
+    overflow-wrap: anywhere;
+}
+.canvas-video-result-meta button {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    min-height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    color: #fff;
+    background: #111c;
+    cursor: pointer;
+}
+.canvas-video-result-meta button:focus-visible {
+    outline: 2px solid var(--accent-teal);
+    outline-offset: 2px;
+}
+body.canvas-document-readonly .canvas-video-stage video,
+body.canvas-document-readonly .canvas-video-cover {
+    pointer-events: auto;
+}
 
 /* ===== Audio Node ===== */
 .node-type-audio .node-body {

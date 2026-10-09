@@ -29,6 +29,14 @@ function hasPreview(task: VideoDeliveryStageTask) {
   );
 }
 
+export function videoPlayableAvailableForTask(task: VideoDeliveryStageTask) {
+  return Boolean(
+    task.public_video_url
+    || task.local_video_path
+    || (task.result_video_url && !isInternalOnlyResultUrl(task.result_video_url))
+  );
+}
+
 export function videoDeliveryStageForTask(task: VideoDeliveryStageTask): VideoDeliveryStage {
   if (task.local_status !== 'succeeded') {
     return {

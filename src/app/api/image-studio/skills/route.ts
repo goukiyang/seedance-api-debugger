@@ -3,12 +3,24 @@ import { deleteSkill, listSkills, saveSkill } from '@/lib/image-studio/skills';
 import { StudioStyleError } from '@/lib/image-studio/style-groups';
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
+function validRequestOrigin(request: Request) {
+  const origin = request.headers.get('origin'), host = request.headers.get('host');
+  if (!origin || !host || /[/\\?#@,\s]/.test(host)) return false;
+  try {
+    // The production proxy preserves Host and overwrites X-Forwarded-Proto.
+    const forwardedProtocol = request.headers.get('x-forwarded-proto');
+    if (forwardedProtocol !== null && !['http', 'https'].includes(forwardedProtocol)) return false;
+    const protocol = forwardedProtocol ? `${forwardedProtocol}:` : new URL(request.url).protocol;
+    if (!['http:', 'https:'].includes(protocol)) return false;
+    return origin === new URL(`${protocol}//${host}`).origin;
+  } catch { return false; }
+}
 async function handle(request: Request) {
   try {
     const user = await getSession();
     if (!user) return Response.json({ error: '请先登录' }, { status: 401, headers });
     if (request.method === 'GET') return Response.json({ skills: await listSkills(user) }, { headers });
-    if (request.headers.get('origin') !== new URL(request.url).origin) return Response.json({ error: '请求来源无效' }, { status: 403, headers });
+    if (!validRequestOrigin(request)) return Response.json({ error: '请求来源无效' }, { status: 403, headers });
     if (Number(request.headers.get('content-length') || 0) > 64 * 1024) throw new StudioStyleError('skills内容过大');
     const reader = request.body?.getReader();
     if (!reader) throw new StudioStyleError('skills内容无效');

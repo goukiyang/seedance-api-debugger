@@ -4,6 +4,7 @@ import { assetGenerationOrigin, generationOrigins } from '@/lib/assets/generatio
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 import { isTaskHiddenFromRegularUsers } from '@/lib/tasks/retention';
+import { videoDeliveryStageForTask, videoPlayableAvailableForTask } from '@/lib/video/delivery-status';
 import { getReferenceImageByIdForAccess, getAlbumAccess } from '@/lib/reference-albums/permissions';
 import { canUseCompanyTemplates, canViewStudioPreset, canViewStudioModule, isExplicitPresetAsset } from '@/lib/image-studio/access';
 import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
@@ -110,10 +111,11 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
       if (!task || task.local_status !== 'succeeded' || isTaskHiddenFromRegularUsers(task)) return null;
       await assertCanViewTask(user, task);
       const item = summary(input, 'video', '生成视频', `/tasks/${id}`);
+      const deliveryStage = videoDeliveryStageForTask(task);
       item.owner = await owner(task.owner_user_id || task.user_id);
       item.thumbnailUrl = `/api/video/thumbnail/${id}`;
-      item.previewUrl = `/api/video/play/${id}`;
-      item.downloadUrl = `/api/video/download/${id}`;
+      item.previewUrl = videoPlayableAvailableForTask(task) ? `/api/video/play/${id}` : null;
+      item.downloadUrl = deliveryStage.stableDownloadReady ? `/api/video/download/${id}` : null;
       return { summary: item };
     }
     if (user.account_type !== 'internal') return null;

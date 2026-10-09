@@ -232,31 +232,111 @@
             ? 'unconfirmed' : status;
     }
 
+    function explicitBooleanValue(value, snakeKey, camelKey) {
+        if (value?.[snakeKey] === false || value?.[camelKey] === false) return false;
+        if (value?.[snakeKey] === true || value?.[camelKey] === true) return true;
+        return null;
+    }
+
+    function hasTrustedPlayableSource(task, resultVideoUrl) {
+        const publicVideoUrl = task.public_video_url || task.publicVideoUrl;
+        const localVideoPath = task.local_video_path || task.localVideoPath;
+        const trustedResultVideo = [
+            resultVideoUrl,
+            task.result_video_url,
+            task.resultVideoUrl,
+            task.video_url,
+            task.videoUrl
+        ].some(value => typeof value === 'string'
+            && value.trim()
+            && !/^h3-internal-output:\/\//i.test(value.trim()));
+        return Boolean(publicVideoUrl || localVideoPath || trustedResultVideo);
+    }
+
+    function canonicalVideoPlayPath(taskId) {
+        return taskId ? `/api/video/play/${encodeURIComponent(taskId)}` : '';
+    }
+
+    function isCanonicalVideoPlayUrl(taskId, value) {
+        const canonicalPath = canonicalVideoPlayPath(taskId);
+        if (!canonicalPath || typeof value !== 'string' || !value.trim()) return false;
+        const candidate = value.trim();
+        if (candidate === canonicalPath) return true;
+
+        const currentLocation = typeof globalThis !== 'undefined' ? globalThis.location : null;
+        if (!currentLocation?.origin || typeof URL !== 'function') return false;
+        try {
+            const parsed = new URL(candidate, currentLocation.href);
+            return parsed.origin === currentLocation.origin
+                && parsed.pathname === canonicalPath
+                && !parsed.search
+                && !parsed.hash
+                && !parsed.username
+                && !parsed.password;
+        } catch {
+            return false;
+        }
+    }
+
+    function normalizeVideoDeliveryStage(task) {
+        const stage = task.delivery_stage || task.deliveryStage;
+        if (!stage || typeof stage !== 'object' || Array.isArray(stage)) return null;
+        const normalized = {};
+        if (typeof stage.key === 'string') normalized.key = stage.key;
+        if (typeof stage.label === 'string') normalized.label = stage.label;
+        const stableDownloadReady = explicitBooleanValue(stage, 'stable_download_ready', 'stableDownloadReady');
+        const previewAvailable = explicitBooleanValue(stage, 'preview_available', 'previewAvailable');
+        if (stableDownloadReady !== null) normalized.stableDownloadReady = stableDownloadReady;
+        if (previewAvailable !== null) normalized.previewAvailable = previewAvailable;
+        return Object.keys(normalized).length ? normalized : null;
+    }
+
     function normalizeVideoStatus(result = {}) {
         const task = result.task && typeof result.task === 'object' ? result.task : result;
-        const taskId = task.task_id || task.id || '';
+        const taskId = task.task_id || task.taskId || task.id || '';
         const status = videoReceptionStatus(task);
-        const stableDownloadReady = task.stable_download_ready === true
-            || task.stableDownloadReady === true
-            || Boolean(task.public_video_url);
-        const previewAvailable = task.preview_available === true
-            || task.previewAvailable === true
-            || Boolean(task.result_video_url || task.local_video_path || task.result_last_frame_url);
+        const publicVideoUrl = task.public_video_url || task.publicVideoUrl || '';
+        const resultVideoUrl = task.result_video_url || task.resultVideoUrl || task.video_url || task.videoUrl || '';
+        const resultLastFrameUrl = task.result_last_frame_url || task.resultLastFrameUrl || '';
+        const deliveryStage = normalizeVideoDeliveryStage(task);
+        const stableExplicit = explicitBooleanValue(task, 'stable_download_ready', 'stableDownloadReady');
+        const stageStableExplicit = explicitBooleanValue(deliveryStage, 'stable_download_ready', 'stableDownloadReady');
+        const stableDownloadReady = stableExplicit !== null
+            ? stableExplicit
+            : stageStableExplicit !== null
+                ? stageStableExplicit
+                : Boolean(publicVideoUrl);
+        const previewExplicit = explicitBooleanValue(task, 'preview_available', 'previewAvailable');
+        const stagePreviewExplicit = explicitBooleanValue(deliveryStage, 'preview_available', 'previewAvailable');
+        const previewAvailable = previewExplicit !== null ? previewExplicit
+            : stagePreviewExplicit !== null ? stagePreviewExplicit
+                : hasTrustedPlayableSource(task, resultVideoUrl) || Boolean(resultLastFrameUrl);
+        const playableExplicit = explicitBooleanValue(task, 'playable_available', 'playableAvailable');
+        const legacyCanonicalPlayUrl = task.play_url || task.playUrl || '';
+        const trustedSource = hasTrustedPlayableSource(task, resultVideoUrl);
+        const internalOnly = /^h3-internal-output:\/\//i.test(String(resultVideoUrl).trim()) && !trustedSource;
+        const playableAvailable = playableExplicit !== null
+            ? playableExplicit
+            : trustedSource || (!internalOnly && isCanonicalVideoPlayUrl(taskId, legacyCanonicalPlayUrl));
         const fallbackThumbnailUrl = previewAvailable && taskId
             ? `/api/video/thumbnail/${encodeURIComponent(taskId)}`
             : '';
+        const playUrl = playableAvailable ? canonicalVideoPlayPath(taskId) : '';
+        const downloadUrl = stableDownloadReady && taskId ? `/api/video/download/${encodeURIComponent(taskId)}` : '';
         return {
             taskId,
             status,
             submissionUnconfirmed: status === 'unconfirmed',
             errorMessage: task.error_message || task.message || '',
-            resultVideoUrl: task.result_video_url || task.video_url || '',
-            resultLastFrameUrl: task.result_last_frame_url || '',
+            resultVideoUrl,
+            resultLastFrameUrl,
             thumbnailUrl: task.thumbnail_url || task.thumbnailUrl || fallbackThumbnailUrl,
-            playUrl: task.play_url || task.playUrl || (previewAvailable && taskId ? `/api/video/play/${encodeURIComponent(taskId)}` : ''),
-            downloadUrl: task.download_url || task.downloadUrl || (stableDownloadReady && taskId ? `/api/video/download/${encodeURIComponent(taskId)}` : ''),
+            playUrl,
             stableDownloadReady,
             previewAvailable,
+            playableAvailable,
+            deliveryStage,
+            downloadUrl,
             retryAfterMs: Number(task.retry_after_ms ?? task.retryAfterMs ?? 0) || null
         };
     }
@@ -276,6 +356,8 @@
             download_url: status.downloadUrl,
             stable_download_ready: status.stableDownloadReady,
             preview_available: status.previewAvailable,
+            playable_available: status.playableAvailable,
+            delivery_stage: status.deliveryStage,
             retry_after_ms: status.retryAfterMs
         };
     }

@@ -13,6 +13,11 @@
     const engine = new CanvasEngine('canvas-container', 'canvas', 'connections-svg');
     window.canvasEngine = engine;
     let pendingReferenceImport = null;
+    const inlineVideoPlayers = new Map();
+    const videoReadOrders = new Map();
+    let videoReadSequence = 0;
+    let videoRecheck = null;
+    let lastVideoRecheck = 0;
 
     function ensureNoticeStack() {
         let stack = document.getElementById('canvas-notice-stack');
@@ -532,6 +537,7 @@
 
     async function loadVideoCardWorkspace(cardId, options = {}) {
         if (!cardId) return null;
+        const epoch = canvasRuntime.contextEpoch;
         const cached = !options.force
             && canvasRuntime.videoCardDetails.has(cardId)
             && canvasRuntime.videoCardBranches.has(cardId)
@@ -555,6 +561,7 @@
         ]).then(([detail, branchesPayload, tasksPayload]) => {
             const branches = branchesPayload?.branches || [];
             const tasks = tasksPayload?.tasks || [];
+            if (epoch !== canvasRuntime.contextEpoch) return { detail, branches, tasks };
             canvasRuntime.videoCardDetails.set(cardId, detail);
             canvasRuntime.videoCardBranches.set(cardId, branches);
             canvasRuntime.videoCardTasks.set(cardId, tasks);
@@ -566,10 +573,10 @@
             }
             return { detail, branches, tasks };
         }).catch(error => {
-            canvasRuntime.videoCardLoadErrors.set(cardId, error);
+            if (epoch === canvasRuntime.contextEpoch) canvasRuntime.videoCardLoadErrors.set(cardId, error);
             throw error;
         }).finally(() => {
-            canvasRuntime.videoCardLoads.delete(cardId);
+            if (canvasRuntime.videoCardLoads.get(cardId) === request) canvasRuntime.videoCardLoads.delete(cardId);
         });
 
         canvasRuntime.videoCardLoads.set(cardId, request);
@@ -789,30 +796,14 @@
         nodeIds.forEach(id => {
             const node = engine.nodes.get(id);
             if (!node) return;
-            const status = task.local_status || task.status || node.data?.generationStatus || 'submitted';
+            if (node.data.taskId !== task.id) { applyVideoTaskStatus(id, task); return; }
             node.data = {
                 ...node.data,
-                taskId: task.id,
-                providerTaskId: task.provider_task_id || node.data?.providerTaskId || null,
                 videoCardId: task.video_card_id || node.data?.videoCardId || canvasRuntime.selectedVideoCardId,
                 videoBranchId: task.video_branch_id || node.data?.videoBranchId || null,
-                generationStatus: status,
-                versionRole: task.version_role || node.data?.versionRole || 'normal',
-                generationResult: window.UltimateCanvasGenerationNodes.videoTaskSnapshot(task)
+                versionRole: task.version_role || node.data?.versionRole || 'normal'
             };
-            const succeeded = status === 'succeeded';
-            decorateGeneratedNode(
-                id,
-                succeeded ? '\u89c6\u9891\u751f\u6210\u5b8c\u6210' : '\u89c6\u9891\u751f\u6210\u4efb\u52a1',
-                taskDescription(task),
-                videoPreviewForTask(task),
-                {
-                    taskId: task.id,
-                    videoUrl: succeeded || task.result_video_url ? `/api/video/play/${task.id}` : '',
-                    downloadUrl: `/api/video/download/${task.id}`,
-                    versionRole: task.version_role || node.data.versionRole
-                }
-            );
+            applyVideoTaskStatus(id, task);
         });
         if (nodeIds.length) scheduleCanvasSave('video_task_refresh');
     }
@@ -859,6 +850,7 @@
         stopVideoPolling(taskId);
         const node = engine.nodes.get(targetNodeId);
         if (node) {
+            releaseInlineVideos(targetNodeId);
             node.data = {
                 ...node.data,
                 taskId: nextTaskId,
@@ -867,6 +859,8 @@
                 videoBranchId: resolvedBranchId,
                 generationStatus: result.local_status || result.status || 'submitted',
                 generationResult: result,
+                videoPreviewUrl: '', videoDownloadUrl: '', thumbnailUrl: '', resultVideoUrl: '', resultLastFrameUrl: '',
+                stableDownloadReady: false, previewAvailable: false, playableAvailable: false, videoPlaybackPosition: null,
                 versionRole: 'normal'
             };
         }
@@ -1190,9 +1184,11 @@
                         userId: canvasRuntime.bootstrap?.user?.id, documentId: canvasRuntime.documentId,
                         projectId: canvasRuntime.selectedProjectId, cardId: canvasRuntime.selectedVideoCardId,
                         input: structuredClone(descriptor.payload), generationPayload: structuredClone(payload) };
+                    prepareVideoSubmissionView(node);
                     node.data.videoSubmission = submission;
                     canvasRuntime.unsentVideoRequests.set(payload.nodeId, submission);
                     node.data.generationStatus = 'unconfirmed';
+                    decorateGeneratedNode(node.id, '视频生成任务', '提交结果待确认，不会重复生成');
                     scheduleCanvasSave('video_before_submit');
                     cacheCanvasDraft(canvasSaveSnapshot('video_before_submit'));
                     // This persisted uncertainty barrier precedes the POST, including a crash between the two.
@@ -1978,6 +1974,8 @@
     }
 
     function invalidateGenerationContext() {
+        releaseInlineVideos();
+        videoReadOrders.clear();
         cancelReferenceImport();
         canvasRuntime.pendingGenerationSubmissions.releaseAll(entry => entry.release?.(true));
         canvasRuntime.contextEpoch += 1;
@@ -2818,11 +2816,10 @@
 
     function updateDocumentInteraction() {
         const busy = canvasRuntime.documentOperation || canvasRuntime.contextSwitching || canvasRuntime.documentRestoring;
-        const locked = busy || !canvasRuntime.documentWritable;
         document.body.classList.toggle('canvas-document-busy', busy);
         document.body.classList.toggle('canvas-document-readonly', !canvasRuntime.documentWritable);
         const workspace = document.getElementById('canvas-workspace');
-        if (workspace) workspace.inert = locked;
+        if (workspace) workspace.inert = busy;
         document.querySelectorAll('[data-canvas-new], [data-canvas-library], [data-canvas-rename]').forEach(button => {
             button.disabled = busy || (button.hasAttribute('data-canvas-rename') && !canvasRuntime.documentWritable);
         });
@@ -2835,6 +2832,7 @@
             const target = event.target instanceof Element ? event.target : null;
             const busy = canvasRuntime.documentOperation || canvasRuntime.contextSwitching || canvasRuntime.documentRestoring;
             if (target?.closest('[data-canvas-confirm], .canvas-product-dialog[open]')) return;
+            if (!busy && !canvasRuntime.documentWritable && safeVideoReadInteraction(target, event)) return;
             if (!busy && target?.closest('[data-plan-open], [data-plan-view-source], [data-video-history-preview], [data-video-history-more]')) return;
             if (target?.closest('#ultimate-canvas-documents') && !busy) return;
             const editorEvent = target?.closest('#canvas-workspace, .generation-popover, [data-prompt-editor], [data-context-rules-editor]');
@@ -2847,6 +2845,14 @@
             }
         }, true);
     });
+
+    function safeVideoReadInteraction(target, event) {
+        if (event.type === 'keydown' && event.key === 'Tab' && !event.ctrlKey && !event.metaKey && !event.altKey) return true;
+        if (!target?.closest('[data-canvas-inline-video], [data-video-play], [data-video-read-retry], [data-canvas-media-preview]')) return false;
+        if (['click', 'pointerdown', 'mousedown'].includes(event.type)) return true;
+        return event.type === 'keydown' && !event.ctrlKey && !event.metaKey && !event.altKey
+            && [' ', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'Escape'].includes(event.key);
+    }
 
     async function withDocumentOperation(action) {
         if (canvasRuntime.documentOperation || canvasRuntime.contextSwitching) throw new Error('画布正在处理，请稍后再操作。');
@@ -3434,35 +3440,8 @@
                 return;
             }
             if (node.type === 'video' && node.data?.taskId) {
-                const result = node.data.generationResult || {};
-                const stableDownloadReady = node.data.stableDownloadReady === true
-                    || result.stable_download_ready === true
-                    || result.stableDownloadReady === true
-                    || Boolean(result.public_video_url || result.download_url || result.downloadUrl);
-                const downloadUrl = stableDownloadReady
-                    ? (node.data.videoDownloadUrl || result.download_url || result.downloadUrl || `/api/video/download/${node.data.taskId}`)
-                    : '';
-                decorateGeneratedNode(
-                    node.id,
-                    node.data.generationStatus === 'succeeded' ? '视频生成完成' : '视频生成任务',
-                    node.data.description || `任务状态：${node.data.generationStatus || 'submitted'}`,
-                    node.data.thumbnailUrl || '',
-                    {
-                        taskId: node.data.taskId,
-                        videoUrl: node.data.videoPreviewUrl || '',
-                        downloadUrl
-                    }
-                );
-                if (
-                    !['succeeded', 'failed', 'cancelled'].includes(node.data.generationStatus)
-                    || (node.data.generationStatus === 'succeeded' && !stableDownloadReady)
-                ) {
-                    pollVideoTask(node.data.taskId, node.id);
-                }
+                applyVideoTaskStatus(node.id, videoTaskForNode(node));
             }
-            if (node.type === 'video') (node.data.videoHistory || []).forEach(item => {
-                if (!['failed', 'cancelled'].includes(item.status) && !(item.status === 'succeeded' && item.stableDownloadReady)) pollVideoTask(item.taskId, node.id);
-            });
         });
         return recoveredTasklessVideoStatus;
     }
@@ -3603,6 +3582,7 @@
                         if (node.data?.videoSubmission?.state === 'unconfirmed') void recoverVideoSubmission(node.id);
                     });
                 }
+                if (canvasRuntime.documentLoaded) void recheckBoundVideoNodes();
             }
         }
     }
@@ -3610,6 +3590,8 @@
     function installAutosaveHooks() {
         const originalRestore = engine.restore.bind(engine);
         engine.restore = (...args) => {
+            releaseInlineVideos();
+            videoReadOrders.clear();
             const result = originalRestore(...args);
             graphCommands.clear();
             let visible = false;
@@ -3631,7 +3613,10 @@
         engine.deleteNode = (...args) => {
             window.UltimateCanvasNodePricing?.dispose(args[0]);
             const deletedNode = engine.nodes.get(args[0]);
+            releaseInlineVideos(args[0]);
+            for (const key of videoReadOrders.keys()) if (key.startsWith(`${args[0]}:`)) videoReadOrders.delete(key);
             if (deletedNode?.data?.taskId) stopVideoPolling(deletedNode.data.taskId, deletedNode.id);
+            (deletedNode?.data?.videoHistory || []).forEach(item => stopVideoPolling(item.taskId, deletedNode.id));
             const estimate = canvasRuntime.videoEstimates.get(args[0]);
             if (estimate?.timer) window.clearTimeout(estimate.timer);
             estimate?.controller?.abort();
@@ -4943,19 +4928,12 @@
 
     function videoTaskActionsForNode(node, overrides = {}) {
         const data = node?.data || {};
-        const result = data.generationResult || {};
+        const normalized = window.UltimateCanvasGenerationNodes.normalizeVideoStatus(videoTaskForNode(node));
         const cardId = data.videoCardId || canvasRuntime.selectedVideoCardId || '';
         const detail = canvasRuntime.videoCardDetails.get(cardId);
         const cardSummary = canvasRuntime.bootstrap?.context?.video_cards?.find(card => card.id === cardId);
-        const stableDownloadReady = data.stableDownloadReady === true
-            || result.stable_download_ready === true
-            || result.stableDownloadReady === true
-            || Boolean(result.public_video_url || result.download_url || result.downloadUrl);
-        const previewUrl = overrides.videoUrl ?? overrides.previewUrl ?? data.videoPreviewUrl
-            ?? result.play_url ?? result.playUrl ?? result.result_video_url ?? result.resultVideoUrl;
-        const rawDownloadUrl = overrides.downloadUrl ?? data.videoDownloadUrl
-            ?? result.download_url ?? result.downloadUrl;
-        const downloadUrl = stableDownloadReady ? rawDownloadUrl : '';
+        const previewUrl = normalized.playUrl;
+        const downloadUrl = normalized.downloadUrl;
         const actions = window.UltimateCanvasGenerationInteractions.videoTaskActionAvailability({
             taskId: data.taskId,
             status: data.generationStatus,
@@ -5280,20 +5258,57 @@
     }
 
     function videoPreviewForTask(task) {
-        if (!task?.id) return '';
-        if (task.local_status === 'succeeded' || task.result_video_url || task.local_video_path || task.result_last_frame_url) {
-            return `/api/video/thumbnail/${task.id}`;
+        return window.UltimateCanvasGenerationNodes.normalizeVideoStatus(task).thumbnailUrl;
+    }
+
+    function videoTaskForNode(node) {
+        const data = node?.data || {};
+        const taskId = data.taskId || '';
+        const result = data.generationResult || {};
+        const resultId = result.task_id || result.id;
+        const history = (data.videoHistory || []).find(item => item.taskId === taskId) || {};
+        const snapshot = resultId === taskId ? result : {};
+        return {
+            ...history, ...snapshot, task_id: taskId,
+            provider_task_id: data.providerTaskId || snapshot.provider_task_id || null,
+            local_status: data.generationStatus || snapshot.local_status || history.status,
+            play_url: snapshot.play_url ?? data.videoPreviewUrl ?? history.playUrl,
+            download_url: snapshot.download_url ?? data.videoDownloadUrl ?? history.downloadUrl,
+            thumbnail_url: snapshot.thumbnail_url || data.thumbnailUrl || history.thumbnailUrl || '',
+            result_video_url: snapshot.result_video_url || data.resultVideoUrl || '',
+            result_last_frame_url: snapshot.result_last_frame_url || data.resultLastFrameUrl || '',
+            stable_download_ready: snapshot.stable_download_ready ?? data.stableDownloadReady ?? history.stableDownloadReady,
+            preview_available: snapshot.preview_available ?? data.previewAvailable ?? history.previewAvailable,
+            playable_available: snapshot.playable_available ?? data.playableAvailable ?? history.playableAvailable
+        };
+    }
+
+    function prepareVideoSubmissionView(node) {
+        const data = node.data;
+        if (data.taskId) {
+            const history = data.videoHistory ||= [];
+            if (!history.some(item => item.taskId === data.taskId)) history.push({
+                ...window.UltimateCanvasGenerationNodes.normalizeVideoStatus(videoTaskForNode(node)),
+                contentKey: `video_task:${data.taskId}`,
+                input: data.videoSubmission?.input || (data.generationPayload?.settings?.provider
+                    ? { source_metadata: { provider: data.generationPayload.settings.provider } } : undefined),
+                requestId: data.videoSubmission?.requestId
+            });
         }
-        return '';
+        releaseInlineVideos(node.id);
+        Object.assign(data, { taskId: '', providerTaskId: null, generationResult: null,
+            videoPreviewUrl: '', videoDownloadUrl: '', thumbnailUrl: '', resultVideoUrl: '', resultLastFrameUrl: '',
+            stableDownloadReady: false, previewAvailable: false, playableAvailable: false, videoPlaybackPosition: null });
     }
 
     function taskDescription(task) {
         const status = task?.local_status || task?.status || 'submitted';
         if (status === 'succeeded') {
-            if (task?.stable_download_ready || task?.download_url || task?.public_video_url) {
+            const capability = window.UltimateCanvasGenerationNodes.normalizeVideoStatus(task);
+            if (capability.stableDownloadReady) {
                 return '视频已生成，稳定下载已就绪，可预览、下载并在任务记录中追溯。';
             }
-            if (task?.preview_available || task?.play_url || task?.result_video_url || task?.local_video_path) {
+            if (capability.playableAvailable) {
                 return '视频已生成，可先预览，系统正在准备稳定下载。';
             }
             return '视频已生成，系统正在同步预览和下载资源。';
@@ -5381,7 +5396,8 @@
 
     function videoStatusUrl(taskId, nodeId) {
         const node = engine.nodes.get(nodeId);
-        const input = node?.data?.videoHistory?.find(item => item.taskId === taskId)?.input || node?.data?.videoSubmission?.input;
+        const input = node?.data?.videoHistory?.find(item => item.taskId === taskId)?.input
+            || (node?.data?.taskId === taskId ? node.data.videoSubmission?.input : null);
         if (input?.source_metadata?.provider === 'volcengine_ip') return `/api/ip/video/status/${encodeURIComponent(taskId)}?refresh=true`;
         return window.UltimateCanvasBackendContract.resolveTaskStatusEndpoint(
             canvasRuntime.bootstrap?.capabilities?.video?.status_endpoint_template,
@@ -5398,6 +5414,212 @@
         canvasRuntime.pollingCoordinator.clear();
     }
 
+    function beginVideoRead(nodeId, taskId) {
+        const order = ++videoReadSequence;
+        videoReadOrders.set(`${nodeId}:${taskId}`, order);
+        return order;
+    }
+
+    async function recheckBoundVideoNodes() {
+        if (!canvasRuntime.documentLoaded || canvasRuntime.documentRestoring) return;
+        const epoch = canvasRuntime.contextEpoch;
+        if (videoRecheck?.epoch === epoch) return videoRecheck.promise;
+        lastVideoRecheck = Date.now();
+        const nodes = Array.from(engine.nodes.values()).filter(node => node.type === 'video'
+            && (node.data?.taskId || node.data?.videoHistory?.some(item => item.taskId)));
+        const orders = new Map();
+        nodes.forEach(node => [node.data.taskId, ...(node.data.videoHistory || []).slice(-20).map(item => item.taskId)]
+            .filter(Boolean).forEach(id => orders.set(`${node.id}:${id}`, beginVideoRead(node.id, id))));
+        const reads = new Map();
+        const read = (taskId, nodeId) => {
+            if (reads.size >= 64 && !reads.has(taskId)) throw Error('本轮查询数量已达上限，可稍后继续核对');
+            if (!reads.has(taskId)) reads.set(taskId, requestJson(videoStatusUrl(taskId, nodeId), { cache: 'no-store', policy: 'video-status' }));
+            return reads.get(taskId);
+        };
+        const promise = (async () => {
+            // One read per existing card, then one status read only for bindings absent from that list.
+            const cards = new Map();
+            for (const node of nodes) {
+                const cardId = node.data.videoCardId;
+                if (cardId && cards.size < 32 && !cards.has(cardId)) cards.set(cardId, requestJson(`/api/video-cards/${encodeURIComponent(cardId)}/tasks`, { cache: 'no-store' })
+                    .then(data => data.tasks || []).catch(() => []));
+            }
+            for (const node of nodes) {
+                if (epoch !== canvasRuntime.contextEpoch) break;
+                const taskId = node.data.taskId;
+                const tasks = await (cards.get(node.data.videoCardId) || Promise.resolve([]));
+                const bindings = [...new Set([taskId, ...(node.data.videoHistory || []).slice(-20).map(item => item.taskId)])].filter(Boolean);
+                for (const id of bindings) {
+                    if (epoch !== canvasRuntime.contextEpoch || engine.nodes.get(node.id) !== node || node.data.taskId !== taskId) break;
+                    try {
+                        const cached = tasks.find(task => (task.id || task.task_id) === id);
+                        const response = cached || await read(id, node.id);
+                        if (epoch !== canvasRuntime.contextEpoch || engine.nodes.get(node.id) !== node || node.data.taskId !== taskId) break;
+                        const task = response.task || response;
+                        if ((task.id || task.task_id) !== id) continue;
+                        if (applyVideoTaskStatus(node.id, task, orders.get(`${node.id}:${id}`)) === false) continue;
+                        const status = window.UltimateCanvasGenerationNodes.normalizeVideoStatus(task);
+                        const delivery = task.delivery_stage?.key || task.delivery_stage;
+                        const terminal = ['failed', 'cancelled'].includes(status.status)
+                            || (status.status === 'succeeded' && (status.stableDownloadReady || ['ready', 'failed'].includes(delivery)));
+                        if (terminal) stopVideoPolling(id, node.id);
+                        else if (canvasRuntime.documentWritable) {
+                            pollVideoTask(id, node.id);
+                        }
+                    } catch (error) {
+                        if (epoch !== canvasRuntime.contextEpoch || engine.nodes.get(node.id) !== node) break;
+                        if (videoReadOrders.get(`${node.id}:${id}`) !== orders.get(`${node.id}:${id}`)) continue;
+                        if ([401, 403].includes(error?.status)) {
+                            stopVideoPolling(id, node.id);
+                            if (id === taskId) {
+                                releaseInlineVideos(node.id);
+                                applyVideoTaskStatus(node.id, { id, local_status: node.data.generationStatus,
+                                    provider_task_id: node.data.providerTaskId, playable_available: false,
+                                    stable_download_ready: false, preview_available: false });
+                                setNodeGenerationStatus(document.querySelector(`[data-node-id="${CSS.escape(node.id)}"]`), 'warn', '无权读取此视频，请确认登录和访问权限');
+                            }
+                        }
+                        const item = node.data.videoHistory?.find(entry => entry.taskId === id);
+                        if (item) item.lookupError = true;
+                        renderVideoResultHistory(node.id);
+                    }
+                }
+            }
+        })();
+        videoRecheck = { epoch, promise };
+        try { await promise; } finally { if (videoRecheck?.promise === promise) videoRecheck = null; }
+    }
+
+    function pauseInlineVideos(except = null) {
+        inlineVideoPlayers.forEach(({ video }) => { if (video !== except) video.pause(); });
+    }
+
+    function releaseInlineVideos(nodeId = '') {
+        inlineVideoPlayers.forEach((state, id) => {
+            if (nodeId && id !== nodeId) return;
+            state.controller?.abort();
+            window.clearTimeout(state.retryTimer);
+            state.retryResolve?.();
+            state.listeners?.abort();
+            inlineVideoPlayers.delete(id);
+            state.video.pause();
+            state.video.removeAttribute('src');
+            state.video.load();
+        });
+    }
+
+    function bindInlineVideo(nodeId, taskId, playUrl) {
+        const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+        const video = nodeEl?.querySelector('[data-canvas-inline-video]');
+        const node = engine.nodes.get(nodeId);
+        if (!video || !node) return;
+        if (inlineVideoPlayers.get(nodeId)?.video === video) {
+            const label = nodeEl.querySelector('[data-video-read-state]');
+            if (label) label.textContent = video.dataset.readState || '';
+            return;
+        }
+        const state = { video, node, taskId, playUrl, epoch: canvasRuntime.contextEpoch, controller: null, listeners: new AbortController(), blocked: false };
+        inlineVideoPlayers.set(nodeId, state);
+        const current = () => inlineVideoPlayers.get(nodeId) === state && engine.nodes.get(nodeId) === node
+            && state.epoch === canvasRuntime.contextEpoch && node.data.taskId === taskId && video.isConnected;
+        const label = message => {
+            if (!current()) return;
+            const target = nodeEl.querySelector('[data-video-read-state]');
+            if (target) target.textContent = message;
+            video.dataset.readState = message;
+        };
+        const savePosition = () => {
+            if (!current() || state.blocked || !canvasRuntime.documentWritable || canvasRuntime.documentRestoring
+                || !Number.isFinite(video.currentTime) || video.currentTime < 0 || video.currentTime > 86400) return;
+            if (node.data.videoPlaybackPosition?.taskId === taskId && node.data.videoPlaybackPosition.seconds === video.currentTime) return;
+            node.data.videoPlaybackPosition = { taskId, seconds: video.currentTime };
+            scheduleCanvasSave('video_view_position');
+        };
+        const started = () => {
+            if (!current() || state.blocked) return;
+            video.dataset.started = '1';
+            nodeEl.querySelector('[data-video-play]')?.remove();
+            label('');
+        };
+        const play = async () => {
+            if (!current() || state.blocked) return;
+            if (canvasRuntime.referenceSelection) { engine.onReferenceNodePick(nodeId); return; }
+            pauseInlineVideos(video);
+            label('正在读取视频');
+            if (!video.getAttribute('src')) video.setAttribute('src', playUrl);
+            try { await video.play(); if (current() && !video.paused) started(); }
+            catch (error) { if (current() && !state.blocked) label(error?.name === 'NotAllowedError' ? '请点击播放按钮开始播放' : '视频读取失败，请重试'); }
+        };
+        video.addEventListener('play', () => { if (current()) pauseInlineVideos(video); });
+        video.addEventListener('playing', started);
+        video.addEventListener('pause', savePosition);
+        video.addEventListener('seeked', savePosition);
+        video.addEventListener('loadedmetadata', () => {
+            const position = node.data.videoPlaybackPosition;
+            if (!current() || position?.taskId !== taskId || typeof position.seconds !== 'number'
+                || !Number.isFinite(position.seconds) || position.seconds < 0 || position.seconds > 86400) return;
+            if (Number.isFinite(video.duration) && video.duration > 0) video.currentTime = Math.min(position.seconds, Math.max(0, video.duration - .1));
+        });
+        video.addEventListener('waiting', () => { if (!state.blocked) label('正在读取视频'); });
+        video.addEventListener('canplay', () => { if (!state.blocked) label(''); });
+        video.addEventListener('error', async () => {
+            if (!current() || !video.getAttribute('src')) return;
+            label('视频暂不可读，请重试');
+            state.controller?.abort();
+            window.clearTimeout(state.retryTimer); state.retryResolve?.();
+            const run = state.probeRun = (state.probeRun || 0) + 1;
+            for (let attempt = 0; attempt < 3 && current() && state.probeRun === run; attempt++) {
+                const controller = new AbortController(); state.controller = controller;
+                const timeout = window.setTimeout(() => controller.abort(), 10000);
+                let retry = false;
+                try {
+                    const response = await fetch(playUrl, { method: 'HEAD', redirect: 'manual', credentials: 'same-origin', cache: 'no-store', signal: controller.signal });
+                    if (!current() || state.probeRun !== run) return;
+                    if ([401, 403].includes(response.status)) {
+                        stopVideoPolling(taskId, nodeId); beginVideoRead(nodeId, taskId);
+                        state.blocked = true; video.pause(); video.removeAttribute('src'); video.load();
+                        nodeEl.querySelector('[data-video-play]')?.remove();
+                        const retryButton = nodeEl.querySelector('[data-video-read-retry]');
+                        if (retryButton) retryButton.disabled = true;
+                        label('无权读取此视频，请确认登录和访问权限');
+                    } else if (response.status === 404) label('视频已不可用');
+                    else if (response.status === 425) { label('视频文件尚未准备好，请稍后重试'); retry = true; }
+                    else if (response.ok) label([3, 4].includes(video.error?.code) ? '浏览器无法播放此视频，可到任务详情查看' : '请点击重试重新读取视频');
+                    else { label('视频读取失败，请重试或到任务详情查看'); retry = response.status >= 500; }
+                } catch { if (current() && state.probeRun === run) { label('网络读取失败，请稍后重试'); retry = true; } }
+                finally { window.clearTimeout(timeout); }
+                if (!retry || attempt === 2 || !current() || state.probeRun !== run) break;
+                await new Promise(resolve => { state.retryResolve = resolve; state.retryTimer = window.setTimeout(resolve, 2000 * 2 ** attempt); });
+            }
+        });
+        nodeEl.addEventListener('click', event => {
+            if (!event.target.closest('[data-video-play], [data-video-read-retry]')) return;
+            event.stopPropagation();
+            if (state.suppressNextClick) { state.suppressNextClick = false; event.preventDefault(); return; }
+            if (!current() || state.blocked) return;
+            if (event.target.closest('[data-video-read-retry]')) video.load();
+            void play();
+        }, { signal: state.listeners.signal });
+        nodeEl.addEventListener('pointerdown', event => {
+            if (!canvasRuntime.referenceSelection || !event.target.closest('[data-canvas-inline-video], [data-video-play]')) return;
+            state.suppressNextClick = true;
+            event.preventDefault(); event.stopPropagation(); engine.onReferenceNodePick(nodeId);
+        }, { capture: true, signal: state.listeners.signal });
+        nodeEl.addEventListener('keydown', event => {
+            if (!event.target.closest('[data-canvas-inline-video], [data-video-play], [data-video-read-retry]')) return;
+            if ([' ', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) event.stopPropagation();
+            if (canvasRuntime.referenceSelection && [' ', 'Enter'].includes(event.key)) {
+                event.preventDefault(); engine.onReferenceNodePick(nodeId);
+            }
+        }, { capture: true, signal: state.listeners.signal });
+    }
+
+    window.addEventListener('focus', () => { if (Date.now() - lastVideoRecheck > 60000) void recheckBoundVideoNodes(); });
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) pauseInlineVideos();
+        else if (Date.now() - lastVideoRecheck > 60000) void recheckBoundVideoNodes();
+    });
+
     function clearAllVideoEstimates() {
         window.UltimateCanvasGenerationInteractions.clearVideoEstimateEntries(
             canvasRuntime.videoEstimates,
@@ -5405,7 +5627,11 @@
         );
     }
 
-    window.addEventListener('pagehide', clearAllVideoEstimates);
+    window.addEventListener('pagehide', () => {
+        pauseInlineVideos();
+        if (canvasRuntime.documentWritable && canvasRuntime.documentDirty) cacheCanvasDraft(canvasSaveSnapshot('video_view_exit'));
+        releaseInlineVideos(); stopAllVideoPolling(); clearAllVideoEstimates();
+    });
 
     function pollVideoTask(taskId, nodeId) {
         if (!taskId || !nodeId) return;
@@ -5416,6 +5642,7 @@
     canvasRuntime.pollingCoordinator = window.UltimateCanvasGenerationTaskCoordinator.createGenerationTaskCoordinator({
         allowTaskHistory: true,
         fetchStatus: async (taskId, entry) => {
+            entry.statusReadOrder = beginVideoRead(entry.nodeId, taskId);
             const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(entry.nodeId)}"]`);
             const node = engine.nodes.get(entry.nodeId);
             if (node?.data.taskId === taskId && node.data.videoSubmission?.state !== 'unconfirmed') setNodeGenerationStatus(nodeEl, 'loading', '正在读取视频状态');
@@ -5427,18 +5654,31 @@
             return { ...task, local_status: window.UltimateCanvasGenerationNodes.videoReceptionStatus(task) };
         },
         onStatus: (nodeId, task, entry) => {
-            applyVideoTaskStatus(nodeId, task);
+            if (applyVideoTaskStatus(nodeId, task, entry.statusReadOrder) === false) return;
             const status = task.local_status || task.status;
             if (['succeeded', 'failed', 'cancelled'].includes(status)) {
                 loadLibraryPanels(true);
-            } else if (entry.attempt >= 120) {
-                stopVideoPolling(entry.taskId);
+            }
+            if (entry.attempt >= 120) {
+                stopVideoPolling(entry.taskId, nodeId);
                 const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
                 if (engine.nodes.get(nodeId)?.data.taskId === entry.taskId) setNodeGenerationStatus(nodeEl, 'warn', '轮询已暂停，可刷新页面继续查询任务状态');
             }
         },
         onError: (taskId, nodeId, errorCount, error, entry) => {
             const node = engine.nodes.get(nodeId);
+            if (videoReadOrders.get(`${nodeId}:${taskId}`) !== entry.statusReadOrder) return;
+            if ([401, 403].includes(error?.status)) {
+                stopVideoPolling(taskId, nodeId);
+                if (node?.data.taskId === taskId) {
+                    releaseInlineVideos(nodeId);
+                    applyVideoTaskStatus(nodeId, { id: taskId, local_status: node.data.generationStatus,
+                        provider_task_id: node.data.providerTaskId, playable_available: false,
+                        stable_download_ready: false, preview_available: false });
+                    setNodeGenerationStatus(document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`), 'warn', '无权读取此视频，请重新登录或确认访问权限');
+                }
+                return;
+            }
             if (node?.data.taskId !== taskId || node.data.videoSubmission?.state === 'unconfirmed') {
                 const item = node?.data.videoHistory?.find(result => result.taskId === taskId);
                 if (item) { item.lookupError = true; renderVideoResultHistory(nodeId); scheduleCanvasSave('video_history_query_error'); }
@@ -5451,7 +5691,7 @@
                 showCanvasNotice(error?.message || '视频状态轮询暂时失败，正在自动重试。', 'warn');
             }
             if (entry.attempt >= 120) {
-                stopVideoPolling(taskId);
+                stopVideoPolling(taskId, nodeId);
                 setNodeGenerationStatus(nodeEl, 'warn', '轮询已暂停，可刷新页面继续查询任务状态');
             }
         },
@@ -5469,10 +5709,12 @@
         }
     });
 
-    function applyVideoTaskStatus(nodeId, task) {
+    function applyVideoTaskStatus(nodeId, task, readOrder = 0) {
         const node = engine.nodes.get(nodeId);
         const normalized = window.UltimateCanvasGenerationNodes.normalizeVideoStatus(task);
-        if (!node || !normalized.taskId) return;
+        if (!node || !normalized.taskId) return false;
+        if (readOrder && videoReadOrders.get(`${nodeId}:${normalized.taskId}`) !== readOrder) return false;
+        if (!readOrder) beginVideoRead(nodeId, normalized.taskId);
         const history = node.data.videoHistory || [];
         const previousResult = history.find(item => item.taskId === normalized.taskId);
         if (previousResult) {
@@ -5481,24 +5723,25 @@
             if (JSON.stringify(previousResult) !== before) scheduleCanvasSave('video_history_status');
             renderVideoResultHistory(nodeId);
         }
-        if (node.data.taskId !== normalized.taskId) return;
+        if (node.data.taskId !== normalized.taskId) return true;
         if (node.data.videoSubmission?.taskId === normalized.taskId) node.data.videoSubmission.state = normalized.submissionUnconfirmed ? 'unconfirmed' : 'accepted';
         const previousStatus = node.data?.generationStatus;
         const nextStatus = normalized.status || previousStatus;
-        const preview = normalized.thumbnailUrl || videoPreviewForTask(task);
+        const preview = normalized.previewAvailable ? normalized.thumbnailUrl || videoPreviewForTask(task) : '';
         node.data = {
             ...node.data,
             taskId: normalized.taskId,
             providerTaskId: task.provider_task_id || node.data.providerTaskId || null,
             generationStatus: nextStatus,
-            videoPreviewUrl: normalized.playUrl || node.data.videoPreviewUrl,
+            videoPreviewUrl: normalized.playUrl,
             videoDownloadUrl: normalized.downloadUrl,
             stableDownloadReady: normalized.stableDownloadReady,
             previewAvailable: normalized.previewAvailable,
+            playableAvailable: normalized.playableAvailable,
             retryAfterMs: normalized.retryAfterMs,
-            resultVideoUrl: normalized.resultVideoUrl || node.data.resultVideoUrl,
-            resultLastFrameUrl: normalized.resultLastFrameUrl || node.data.resultLastFrameUrl,
-            thumbnailUrl: preview || node.data.thumbnailUrl,
+            resultVideoUrl: normalized.resultVideoUrl,
+            resultLastFrameUrl: normalized.resultLastFrameUrl,
+            thumbnailUrl: preview,
             generationResult: window.UltimateCanvasGenerationNodes.videoTaskSnapshot(task)
         };
         decorateGeneratedNode(
@@ -5515,7 +5758,7 @@
         renderGenerationNodeControls(nodeId);
         const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
         if (nextStatus === 'succeeded') {
-            const deliveryFailed = task?.delivery_stage?.key === 'failed';
+            const deliveryFailed = (task?.delivery_stage?.key || task?.delivery_stage) === 'failed';
             setNodeGenerationStatus(
                 nodeEl,
                 deliveryFailed ? 'warn' : normalized.stableDownloadReady ? 'success' : 'loading',
@@ -5528,6 +5771,7 @@
         if (nextStatus !== previousStatus || ['succeeded', 'failed', 'cancelled'].includes(nextStatus)) {
             scheduleCanvasSave('video_status');
         }
+        return true;
     }
 
     function applyVideoGenerationResult(nodeEl, payload, result) {
@@ -5549,7 +5793,7 @@
             taskId: normalized.taskId,
             providerTaskId: normalized.providerTaskId || null,
             videoPreviewUrl: '', videoDownloadUrl: '', thumbnailUrl: '', resultVideoUrl: '', resultLastFrameUrl: '',
-            stableDownloadReady: false, previewAvailable: false, previewVideoTaskId: null,
+            stableDownloadReady: false, previewAvailable: false, playableAvailable: false, videoPlaybackPosition: null, previewVideoTaskId: null,
             frozenCost: normalized.frozenCost || null,
             generationPayload: payload,
             generationResult: result,
@@ -5627,7 +5871,8 @@
         if (node?.type !== 'video' || !el) return;
         const history = node.data.videoHistory || [];
         const limit = node.data.videoHistoryVisible || 20;
-        const visible = history.slice(-limit);
+        const visible = history.slice(-limit).map(item => ({ ...item,
+            ...window.UltimateCanvasGenerationNodes.normalizeVideoStatus({ ...item, task_id: item.taskId }) }));
         const resultLabel = taskId => { const index = history.findIndex(item => item.taskId === taskId); return index < 0 ? '未选择' : '结果 ' + (index + 1); };
         const pending = node.data.videoSubmission?.state === 'unconfirmed' || node.data.videoSubmissionLegacy;
         let panel = el.querySelector('[data-video-result-history]');
@@ -5639,7 +5884,7 @@
                 + (canvasRuntime.unsentVideoRequests.get(nodeId) === node.data.videoSubmission ? '<button type="button" data-video-request-send>保存并发送原请求</button>' : '')
                 + '<details><summary>原请求输入</summary><p>' + escapeHtml([node.data.videoSubmission.input.model, node.data.videoSubmission.input.ratio, node.data.videoSubmission.input.duration + '秒'].join(' · ')) + '</p><pre>' + escapeHtml(node.data.videoSubmission.input.prompt) + '</pre></details>' : '')
             + (history.length ? '<details data-video-history-expanded ' + (node.data.videoHistoryOpen ? 'open' : '') + '><summary>生成记录 ' + history.length + ' · 预览：' + resultLabel(node.data.previewVideoTaskId || node.data.taskId) + ' · 选用：' + resultLabel(node.data.selectedVideoResult?.taskId) + '</summary>'
-                + visible.map((item, index) => '<div class="canvas-video-history-row"><img alt="' + (item.thumbnailUrl ? '视频截图' : '暂无截图') + '" ' + (item.thumbnailUrl ? 'src="' + escapeHtml(item.thumbnailUrl) + '"' : '') + '><span>结果 ' + (history.length - visible.length + index + 1) + ' · ' + escapeHtml(item.status === 'succeeded' ? item.stableDownloadReady ? '文件就绪' : '文件准备中' : item.status || '查询中') + (item.lookupError ? ' · 查询暂时失败，刷新可继续' : '') + '</span><button type="button" data-video-history-preview="' + escapeHtml(item.taskId) + '" ' + (!item.previewAvailable ? 'disabled' : '') + '>预览</button>'
+                + visible.map((item, index) => '<div class="canvas-video-history-row"><img alt="' + (item.thumbnailUrl ? '视频截图' : '暂无截图') + '" ' + (item.thumbnailUrl ? 'src="' + escapeHtml(item.thumbnailUrl) + '"' : '') + '><span>结果 ' + (history.length - visible.length + index + 1) + ' · ' + escapeHtml(item.status === 'succeeded' ? item.stableDownloadReady ? '文件就绪' : '文件准备中' : item.status || '查询中') + (item.lookupError ? ' · 查询暂时失败，刷新可继续' : '') + '</span><button type="button" data-video-history-preview="' + escapeHtml(item.taskId) + '" ' + (!item.playableAvailable ? 'disabled' : '') + '>预览</button>'
                     + (item.downloadUrl ? '<a download href="' + escapeHtml(item.downloadUrl) + '">下载</a>' : '')
                     + '<button type="button" data-video-history-select="' + escapeHtml(item.taskId) + '" ' + (!canvasRuntime.documentWritable || item.status !== 'succeeded' || !item.stableDownloadReady ? 'disabled' : '') + '>' + (node.data.selectedVideoResult?.taskId === item.taskId ? '已选用' : '选用此结果') + '</button></div>').join('')
                 + (history.length > limit ? '<button type="button" data-video-history-more>更多记录</button>' : '') + '</details>' : '');
@@ -5672,9 +5917,11 @@
         const taskId = target.dataset.videoHistoryPreview || target.dataset.videoHistorySelect;
         const result = node?.data?.videoHistory?.find(item => item.taskId === taskId);
         if (!result) return;
-        if (target.dataset.videoHistoryPreview && result.previewAvailable) {
+        const capability = window.UltimateCanvasGenerationNodes.normalizeVideoStatus({ ...result, task_id: taskId });
+        if (target.dataset.videoHistoryPreview && capability.playableAvailable) {
+            pauseInlineVideos();
             node.data.previewVideoTaskId = taskId;
-            window.parent.postMessage({ type: 'sd2-canvas-preview-request', contentKey: result.contentKey }, window.location.origin);
+            window.parent.postMessage({ type: 'sd2-canvas-preview-request', contentKey: `video_task:${taskId}` }, window.location.origin);
             scheduleCanvasSave('video_history_preview');
         } else if (target.dataset.videoHistorySelect && canvasRuntime.documentWritable && result.status === 'succeeded' && result.stableDownloadReady) {
             const captured = currentGenerationContext(nodeId);
@@ -6302,6 +6549,7 @@
             event.preventDefault();
             event.stopPropagation();
             closeGenerationPopover();
+            pauseInlineVideos();
             const contentKey = previewAction.dataset.contentKey || '';
             if (!/^(asset|reference_image|video_task):[a-zA-Z0-9_-]+$/.test(contentKey)) {
                 showCanvasNotice('这条媒体没有可追溯的内容编号，暂不能在画布内预览。', 'warn');
@@ -8448,6 +8696,42 @@
         const resultRegion = nodeEl?.querySelector('[data-generation-result-region]');
         if (!resultRegion) return;
         const node = engine.nodes.get(nodeId);
+        if (node?.type === 'video' && (options.taskId || node.data?.videoSubmission)) {
+            const taskId = options.taskId || node.data.taskId || '';
+            const normalized = window.UltimateCanvasGenerationNodes.normalizeVideoStatus(videoTaskForNode(node));
+            const playUrl = normalized.playableAvailable ? normalized.playUrl : '';
+            const oldPlayer = inlineVideoPlayers.get(nodeId);
+            if (oldPlayer && (oldPlayer.taskId !== taskId || oldPlayer.playUrl !== playUrl)) releaseInlineVideos(nodeId);
+            else if (oldPlayer?.blocked && playUrl) {
+                releaseInlineVideos(nodeId);
+                window.UltimateCanvasGenerationInteractions.releaseVideoGenerationResultRegion(nodeEl);
+            }
+            const waiting = !['succeeded', 'failed', 'cancelled'].includes(node.data.generationStatus);
+            const primary = waiting ? availableGenerationReferenceItems(nodeId)[0]?.preview || '' : '';
+            const poster = previewImage || primary;
+            const icon = name => window.UltimateCanvasIcons(name, 20);
+            const html = `<div class="canvas-video-result" data-delivery-stage="${escapeHtml(normalized.deliveryStage?.key || '')}"
+                data-playable-available="${Boolean(normalized.playableAvailable)}" data-preview-available="${Boolean(normalized.previewAvailable)}"
+                data-stable-download-ready="${Boolean(normalized.stableDownloadReady)}">
+                <div class="canvas-video-stage">
+                    ${playUrl ? `<video class="generated-frame-preview" data-canvas-inline-video controls playsinline preload="none" ${poster ? `poster="${escapeHtml(poster)}"` : ''}></video>
+                        <button type="button" class="canvas-video-cover" data-video-play aria-label="播放视频">${icon('Play')}</button>`
+                        : poster ? `<img class="generated-frame-preview ${waiting ? 'canvas-video-pending-source' : ''}" src="${escapeHtml(poster)}" alt="${waiting ? '生成参考图' : '视频封面'}" draggable="false">`
+                        : '<div class="generated-result-placeholder" aria-hidden="true"></div>'}
+                </div>
+                <div class="canvas-video-result-meta" data-video-result-meta>
+                    <strong class="generated-result-title" title="${escapeHtml(title)}">${escapeHtml(title)}</strong>
+                    <span data-video-summary title="${escapeHtml(description)}">${escapeHtml(description)}</span>
+                    <span data-video-read-state role="status" aria-live="polite"></span>
+                    ${playUrl ? `<button type="button" data-video-read-retry title="重新读取视频" aria-label="重新读取视频">${icon('RotateCcw')}</button>
+                        <button type="button" data-canvas-media-preview data-content-key="${escapeHtml(`video_task:${taskId}`)}" title="放大视频" aria-label="放大视频">${icon('Maximize2')}</button>` : ''}
+                </div>
+            </div>`;
+            window.UltimateCanvasGenerationInteractions.updateVideoGenerationResultRegion(nodeEl, html, { taskId, playUrl });
+            if (playUrl) bindInlineVideo(nodeId, taskId, playUrl);
+            syncVideoTaskActionsTrigger(nodeEl, node, options);
+            return;
+        }
         window.UltimateCanvasGenerationInteractions.updateGenerationResultRegion(nodeEl, `
             <div class="generated-reference-card">
                 <strong class="generated-result-title">${escapeHtml(title)}</strong>
@@ -8463,7 +8747,7 @@
     }
     document.addEventListener('error', event => {
         const media = event.target;
-        if (!media?.matches?.('.generated-frame-preview') || !media.closest('.generated-reference-card')) return;
+        if (!media?.matches?.('.generated-frame-preview') || media.hasAttribute('data-canvas-inline-video') || !media.closest('.generated-reference-card')) return;
         const region = media.closest('.generated-reference-card');
         if (region.querySelector('[data-media-retry]')) return;
         const message = document.createElement('span'); message.textContent = '素材预览暂不可用'; message.className = 'canvas-media-error';

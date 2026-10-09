@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '我的喜欢支持个人分组、改名和确认取消；图片结果更紧凑，翻页更方便。模板原内容、历史和费用规则不变。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '画布视频结果可直接播放，重开后核对状态并保留暂停位置；等待时显示参考图。修复正常同站访问时技能无法保存的问题，生成和费用规则不变。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
