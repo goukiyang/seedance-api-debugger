@@ -31,6 +31,9 @@ export async function PUT(request: NextRequest) {
   try {
     const user = await getAdminUser(request);
     const body = await request.json();
+    if (body && typeof body === 'object' && body.templateDefaults !== undefined) {
+      return NextResponse.json({ error: '当前服务已回退，暂不支持修改统一默认。请刷新页面；当前输入仍保留。' }, { status: 409 });
+    }
     if (!body || typeof body !== 'object' || Array.isArray(body) || (body.context !== undefined && (typeof body.context !== 'string' || body.context.length > 20000))
       || (body.confirmContextClear !== undefined && typeof body.confirmContextClear !== 'boolean')
       || (body.model !== undefined && !IMAGE_STUDIO_MODELS.includes(body.model)) || !Number.isInteger(body.revision) || body.revision < 0
