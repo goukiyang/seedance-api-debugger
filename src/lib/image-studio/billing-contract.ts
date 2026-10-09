@@ -14,7 +14,7 @@ export type ImageBillingContract = {
   issuedAt: string;
   expiresAt: string;
   deadline: string | null;
-  estimateSource: 'legacy_fixed' | 'confirmed_p90' | 'provider_rule' | 'scope_model_history';
+  estimateSource: 'legacy_fixed' | 'confirmed_p90' | 'provider_rule' | 'scope_model_history' | 'exact_spec_sparse';
   estimateVersion: string;
 };
 
@@ -47,7 +47,7 @@ export function parseImageBillingContract(value: string | null | undefined): Ima
       || !/^[a-f0-9]{64}$/.test(contract.scope) || typeof contract.model !== 'string'
       || !/^[a-f0-9]{64}$/.test(contract.specification)
       || contract.pointsPerUsd !== IMAGE_POINTS_PER_USD
-      || !['legacy_fixed', 'confirmed_p90', 'provider_rule', 'scope_model_history'].includes(contract.estimateSource)
+      || !['legacy_fixed', 'confirmed_p90', 'provider_rule', 'scope_model_history', 'exact_spec_sparse'].includes(contract.estimateSource)
       || typeof contract.estimateVersion !== 'string'
       || !Number.isFinite(Date.parse(contract.issuedAt)) || !Number.isFinite(Date.parse(contract.expiresAt))
       || Date.parse(contract.expiresAt) <= Date.parse(contract.issuedAt)

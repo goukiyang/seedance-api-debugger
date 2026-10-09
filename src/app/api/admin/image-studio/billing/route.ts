@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma';
 import { getImageGenerationSettingsForModel } from '@/lib/integrations/image-generation';
 import { matchImageSupplierCharge, readImageSupplierBills } from '@/lib/image-studio/billing-provider';
 import { settleImageSupplierCharge } from '@/lib/image-studio/billing';
+import { IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
 
 export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
@@ -17,8 +18,9 @@ export async function PUT(request: NextRequest) {
     const user = await getAdminUser(request);
     const body = await request.json();
     if (typeof body.enabled !== 'boolean' || !Number.isSafeInteger(body.revision) || body.revision < 0
-      || body.confirmNewImageActualBilling !== true) return NextResponse.json({ error: '请明确确认只对新图片报价启用实扣意向' }, { status: 400 });
-    const saved = await saveImageBillingIntent(body.enabled, body.revision, user.id);
+      || body.confirmNewImageActualBilling !== true || !Array.isArray(body.enabledModels)
+      || body.enabledModels.some((model: unknown) => typeof model !== 'string' || !IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number]))) return NextResponse.json({ error: '请明确选择新图片实扣模型并确认意向' }, { status: 400 });
+    const saved = await saveImageBillingIntent(body.enabled, body.revision, user.id, body.enabledModels);
     if (!saved) return NextResponse.json({ error: '计费设置已变化，请重新读取' }, { status: 409 });
     return NextResponse.json(await imageBillingReadinessPayload(), { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) { return NextResponse.json({ error: error instanceof AuthError ? error.message : '保存计费意向失败，未确认启用' }, { status: error instanceof AuthError ? error.status : 503 }); }

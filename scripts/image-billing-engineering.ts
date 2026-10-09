@@ -19,6 +19,7 @@ async function main() {
   const { saveImageBillingIntent, imageBillingReady } = await import('../src/lib/image-studio/billing-readiness');
   const { consumeImageQuote, imageQuoteKey } = await import('../src/lib/image-studio/billing-quote-store');
   const { assertStudioPostAuthorization } = await import('../src/lib/image-studio/worker');
+  const { exactSpecificationEstimate, imageCostGroup } = await import('../src/lib/image-studio/billing-calibration');
   const { createToolFlowQuoteProof, assertToolFlowQuoteProof, validateSubmittedToolFlowQuote, toolFlowQuoteCookieName } = await import('../src/lib/tools/toolflow-runtime');
   const results: string[] = [];
   const scope = 'a'.repeat(64), model = 'gemini-3.1-flash-image-preview', specification = 'b'.repeat(64);
@@ -114,7 +115,7 @@ async function main() {
     const afterBucket = await prisma.creditBucket.findUniqueOrThrow({ where: { id: bucket.id } });
     assert.equal(afterBucket.amount_remaining, 0); assert.equal(afterBucket.frozen_amount, 0);
     results.push('expired_original_source_not_revived');
-    await saveImageBillingIntent(true, 0, successful.owner_id);
+    await saveImageBillingIntent(true, 0, successful.owner_id, [model]);
     assert.equal((await imageBillingReady(scope, model)).ready, true);
     assert.equal((await imageBillingReady('c'.repeat(64), model)).ready, false);
     const quoteId = randomUUID(), quoteContract = contract(5);
@@ -126,6 +127,24 @@ async function main() {
     await prisma.$transaction(tx => consumeImageQuote(tx, consume));
     await assert.rejects(prisma.$transaction(tx => consumeImageQuote(tx, consume)));
     results.push('per_scope_model_readiness_quote_owner_count_cas');
+    const shadow = await task(5, { mode: 'fixed', frozen: 0 });
+    await prisma.imageStudioTask.update({ where: { id: shadow.id }, data: { quality: 'low', output_size: '1024x1024',
+      aspect_ratio: '1:1', prompt: 'red circle', context: '', finished_at: new Date() } });
+    await settleImageSupplierCharge(shadow.id, bill(shadow.gateway_request_id!, 16170));
+    const shape = { model, quality: 'low', output_size: '1024x1024', aspect_ratio: '1:1',
+      reference_ids: '[]', context: '', prompt: 'a different short prompt' };
+    const sampleBills = [bill(shadow.gateway_request_id!, 16170)];
+    const sparse = await exactSpecificationEstimate(scope, shape, sampleBills);
+    assert.equal(sparse?.credits, 2); assert.equal(sparse?.source, 'exact_spec_sparse'); assert.equal(sparse?.samples, 1);
+    assert.equal(imageCostGroup(shape), imageCostGroup({ ...shape, prompt: 'another short prompt' }));
+    assert.equal(await exactSpecificationEstimate(scope, { ...shape, quality: 'high' }, sampleBills), null);
+    assert.equal(await exactSpecificationEstimate(scope, { ...shape, reference_ids: '["untrusted-ref"]' }, sampleBills), null);
+    assert.equal(await exactSpecificationEstimate(scope, shape, [{ ...sampleBills[0], type: 6 }]), null);
+    results.push('confirmed_fixed_shadow_cash_sparse_same_spec_not_prompt_identity');
+    await saveImageBillingIntent(true, 1, successful.owner_id, ['gpt-image-2.5-sunburst']);
+    assert.equal((await imageBillingReady(scope, model)).ready, false);
+    await saveImageBillingIntent(true, 2, successful.owner_id, [model]);
+    results.push('model_selection_does_not_activate_another_proven_model');
     const awaiting = await task(5, { status: 'running' });
     const authorized = await prisma.imageStudioTask.update({ where: { id: awaiting.id }, data: {
       lease_token: 'isolated-lease', lease_until: new Date(Date.now() + 60000), gateway_request_id: null, billing_status: 'awaiting_response' } });

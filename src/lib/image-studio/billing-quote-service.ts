@@ -7,6 +7,7 @@ import { parseImageBillingContract, type ImageBillingContract } from './billing-
 import { imageBillingReady } from './billing-readiness';
 import { readImageSupplierBills } from './billing-provider';
 import { supplierHistoryEstimate } from './billing-quote';
+import { exactSpecificationEstimate, imageCostGroup } from './billing-calibration';
 import { imageQuoteKey, type StoredImageQuote } from './billing-quote-store';
 
 export async function prepareImageBillingQuote(owner: string, body: Record<string, unknown>, avatar?: Parameters<typeof submitStudioBatch>[2],
@@ -30,22 +31,29 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
     ? reference.width * reference.height : 40_000_000), 0);
   const settings = await getImageGenerationSettingsForModel(base.model);
   const rows = await readImageSupplierBills(settings, base.scope);
-  const estimate = supplierHistoryEstimate(rows, base.model,
+  const historicalEstimate = supplierHistoryEstimate(rows, base.model,
     { inputCharacters: Math.max(...prepared.map(item => String(item.context).length + String(item.prompt).length)) + additionalInputCharacters, referencePixels });
-  if (!estimate) throw new StudioError('当前模型价格依据不足或已过期，本次尚未报价或生成；请更新价格依据，或由管理员关闭实际计费后继续使用原固定合同', 409);
+  const specifications = prepared.map(item => ({ model: base.model, quality: item.quality, output_size: item.output_size,
+    aspect_ratio: item.aspect_ratio, reference_ids: String(item.reference_ids), context: String(item.context), prompt: String(item.prompt) }));
+  const group = imageCostGroup(specifications[0]);
+  const sameGroup = !!group && specifications.every(item => imageCostGroup(item) === group);
+  const estimate = historicalEstimate?.source !== 'provider_rule' && additionalInputCharacters === 0 && sameGroup
+    ? await exactSpecificationEstimate(base.scope, specifications[0], rows) : null;
+  const selectedEstimate = estimate || historicalEstimate;
+  if (!selectedEstimate) throw new StudioError('当前模型价格依据不足或已过期，本次尚未报价或生成；请更新价格依据，或由管理员关闭实际计费后继续使用原固定合同', 409);
   const now = Date.now();
-  const contract: ImageBillingContract = { ...base, mode: 'actual', authorizedCredits: estimate.credits,
+  const contract: ImageBillingContract = { ...base, mode: 'actual', authorizedCredits: selectedEstimate.credits,
     issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + 60000).toISOString(),
-    deadline: new Date(now + 48 * 3600000).toISOString(), estimateSource: estimate.source, estimateVersion: estimate.version };
+    deadline: new Date(now + 48 * 3600000).toISOString(), estimateSource: selectedEstimate.source, estimateVersion: selectedEstimate.version };
   const id = randomUUID();
   const quote: StoredImageQuote = { owner, count: prepared.length, fingerprint: base.specification,
     intentRevision: state.intentRevision, contract };
   await prisma.platformSetting.deleteMany({ where: { key: { startsWith: `image_billing_quote_v1:${owner}:` },
     created_at: { lt: new Date(now - 120000) } } });
   await prisma.platformSetting.create({ data: { key: imageQuoteKey(owner, id), value_json: JSON.stringify(quote), updated_by: owner } });
-  return { billingMode: 'actual', billingQuoteId: id, unitCredits: estimate.credits,
-    estimatedCredits: estimate.credits * prepared.length, expiresAt: contract.expiresAt, revision: body.revision,
-    actualChargeEnabled: true, estimate: { source: estimate.source, confidence: estimate.confidence,
-      samples: estimate.samples, calibrated: false, assumption: estimate.assumption },
-    pointsPerUsd: 35, multiplier: 1, creditPrecision: 0.01, authorizedMaximumCredits: estimate.credits * prepared.length };
+  return { billingMode: 'actual', billingQuoteId: id, unitCredits: selectedEstimate.credits,
+    estimatedCredits: selectedEstimate.credits * prepared.length, expiresAt: contract.expiresAt, revision: body.revision,
+    actualChargeEnabled: true, estimate: { source: selectedEstimate.source, confidence: selectedEstimate.confidence,
+      samples: selectedEstimate.samples, calibrated: false, assumption: selectedEstimate.assumption },
+    pointsPerUsd: 35, multiplier: 1, creditPrecision: 0.01, authorizedMaximumCredits: selectedEstimate.credits * prepared.length };
 }
