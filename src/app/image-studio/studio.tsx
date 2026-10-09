@@ -23,6 +23,7 @@ import { useUnsavedNavigation } from '@/lib/hooks/use-unsaved-navigation';
 
 import { ModuleGroupPicker } from './group-picker';
 import { TemplateFavoritesList, useTemplateFavorites } from './template-favorites';
+import { tryContentKeyParts } from '@/lib/content-reactions/key';
 import type { ReactionListItem } from '@/lib/content-reactions/types';
 
 function studioUploadProgress(file: File, index: number, count: number, progress: UploadProgressSnapshot) {
@@ -561,7 +562,9 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     if (!item.content || !item.state.available || favoriteSelecting || loading) return;
     setSelectedFavorite(item.key); setError(''); setFavoriteSelecting(true);
     try {
-      const [type, id] = item.key.split(':');
+      const parsed = tryContentKeyParts(item.key);
+      if (!parsed) throw new Error('该喜欢已不可用，请刷新喜欢清单');
+      const { type, id } = parsed;
       if (type === 'image_module') {
         const installed = navigation.find(module => module.id === id);
         if (!installed) throw new Error('该模块已不可用，请刷新喜欢清单');
@@ -2118,25 +2121,25 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           </>}
           renderDelete={({task}) => <button type="button" disabled={deleting || downloadBusy} title="删除生成记录" aria-label={`删除第 ${task.ordinal} 张生成记录`} onClick={() => { setDeleteError(''); setDeleteTarget(task); }}><Trash2 size={17} /></button>}
           renderMetadata={({task}) => <>          <div className={styles.resultHeading}>
-            <p className={styles.prompt}>{name} · {task.ordinal}</p>
+            <p className={styles.prompt} title={`${name} · ${task.ordinal}`}>{name} · {task.ordinal}</p>
             <span className={styles.resultOwner} aria-label="生成者"><UserIdentityBadge user={task.owner} size="sm" className="asset-card-user" /></span>
           </div>
           <div className={styles.resultMeta}>
             <div className={styles.resultConfig}>
             <span title={IMAGE_STUDIO_MODEL_LABELS[task.model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || task.model}>{studioModelShortLabel(task.model)}</span>
             <span>·</span>
-            <span>{IMAGE_STUDIO_QUALITY_LABELS[normalizeImageStudioQuality(task.model, task.quality) as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || task.quality || '自动'}</span>
+            <span title={`画质：${IMAGE_STUDIO_QUALITY_LABELS[normalizeImageStudioQuality(task.model, task.quality) as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || task.quality || '自动'}`}>{IMAGE_STUDIO_QUALITY_LABELS[normalizeImageStudioQuality(task.model, task.quality) as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || task.quality || '自动'}</span>
             <span>·</span><span className={styles.resolutionHint} tabIndex={0} aria-describedby={`studio-size-${task.id}`}>
               {task.snapshot?.resolution && /^[124]K$/i.test(task.snapshot.resolution) ? task.snapshot.resolution : '自动'}
               <span id={`studio-size-${task.id}`} role="tooltip" className={styles.resolutionTooltip}>{task.asset?.width && task.asset.height ? `${task.asset.width} × ${task.asset.height} px` : '实际尺寸暂不可用'}</span>
             </span>
-            <span>·</span><ContextVersionLabel code={task.snapshot?.moduleContextVersion} state={task.snapshot?.moduleContextVersionState || 'missing'} onRetry={() => void loadTasks()} />
+            <span>·</span><span className={styles.resultContextVersion} title={task.snapshot?.moduleContextVersion ? `模块上下文版本：${task.snapshot.moduleContextVersion}` : '模块上下文版本状态'}><ContextVersionLabel code={task.snapshot?.moduleContextVersion} state={task.snapshot?.moduleContextVersionState || 'missing'} onRetry={() => void loadTasks()} /></span>
             </div>
             <RelativeTime className={styles.resultTime} value={task.createdAt} />
           </div>
 </>}
           renderPrimaryActions={({task}) => task.delivery?.recoveryAvailable ? <button type="button" disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks()}>{templateWorkbench ? '刷新恢复状态' : '查看原图恢复'}</button> : null}
-          renderActions={({task}) => <>{isAdmin && task.snapshot?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制上下文" aria-label="复制上下文" onClick={() => void copyTaskContext(task)}><Copy size={15} /></button>}
+          renderActions={({task}) => (isAdmin && task.snapshot?.sourceAvailable || studioTaskHasDeliveredAsset(task)) ? <>{isAdmin && task.snapshot?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制上下文" aria-label="复制上下文" onClick={() => void copyTaskContext(task)}><Copy size={15} /></button>}
             {studioTaskHasDeliveredAsset(task) && <button type="button" className={styles.restoreResult} disabled={Boolean(restoreDisabledReason(task))} title={restoreDisabledReason(task) || '恢复这张图片的完整设置，不生成图片'} aria-label="恢复设置" aria-describedby={`studio-restore-${task.id}`} onClick={event => {
               event.stopPropagation();
               void (async () => {
@@ -2144,7 +2147,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
                 const reason = restoreTask(task); if (reason) setError(reason);
               })();
             }}><RotateCcw size={15} /><span id={`studio-restore-${task.id}`} role="tooltip" className={styles.resolutionTooltip}>恢复设置</span></button>}
-</>}
+</> : null}
           renderSupplement={({task}) => <>
             {copyFeedback?.id === task.id && <span className={styles.copyFeedback} role="status">{copyFeedback.text}</span>}
             {['download', 'recover'].includes(task.delivery?.phase || '') && Number(task.delivery?.expectedBytes) > 0 && task.delivery?.receivedBytes != null && <p role="status">{Math.min(100, Math.floor(task.delivery.receivedBytes / task.delivery.expectedBytes! * 100))}% 字节已接收</p>}

@@ -1,5 +1,5 @@
 .results { min-width: 0; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 20px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 14px; }
 .card { min-width: 0; }
 .media { position: relative; aspect-ratio: 1; overflow: hidden; border: 1px solid #333b40; border-radius: 6px; background: #080a0b; }
 .media[data-transparent] { background-color: #d3dad8; background-image: repeating-conic-gradient(#aab4b1 0% 25%, transparent 0% 50%); background-size: 20px 20px; }
@@ -11,8 +11,12 @@
 .phase { position: absolute; bottom: 8px; right: 8px; left: 8px; padding: 5px 8px; border-radius: 4px; background: #151a1de6; font-size: 13px; text-align: center; }
 .heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; padding: 8px 0; font-size: 13px; overflow-wrap: anywhere; }
 .heading span, .empty { color: #aab8b4; }
+.heading strong { min-width: 0; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.card > :not(.media) strong { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .actions, .pagination { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.actions { min-height: 32px; }
+.actions { min-width: 0; }
+.mediaActions { position: absolute; inset-inline-start: 8px; inset-block-end: 8px; z-index: 6; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; max-inline-size: calc(100% - 56px); max-block-size: calc(100% - 64px); overflow-y: auto; padding: 4px; border: 1px solid #414b48; border-radius: 5px; background: rgb(17 22 20 / 92%); box-shadow: 0 2px 8px #0008; }
+.media:has(input[data-result-secondary]) .mediaActions { inset-block-end: 48px; max-inline-size: calc(100% - 16px); }
 .deleteSlot { position: absolute; right: 8px; bottom: 8px; z-index: 4; }
 .deleteSlot:empty { display: none; }
 .deleteSlot button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 1px solid #414b48; border-radius: 4px; background: #202725e6; color: #e0e9e5; cursor: pointer; }
@@ -20,15 +24,18 @@
 .deleteSlot button:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
 .commonActions, .specialtyActions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 32px; }
 .commonActions { flex-shrink: 0; }
-.actions .commonActions button { width: 34px; height: 32px; padding: 0; flex-shrink: 0; }
+.specialtyActions { min-width: 0; }
+.commonActions button { width: 32px; height: 32px; padding: 0; flex: 0 0 32px; }
 @media (hover: hover) and (pointer: fine) {
   .card [data-result-secondary] { opacity: 0; pointer-events: none; }
-  .card:hover [data-result-secondary], .card:focus-within [data-result-secondary], .card:has([aria-busy="true"]) [data-result-secondary] { opacity: 1; pointer-events: auto; }
+  .card:hover [data-result-secondary], .card:focus-within [data-result-secondary],
+  .card:has([aria-busy="true"]) [data-result-secondary], .card:has([data-busy="true"]) [data-result-secondary] { opacity: 1; pointer-events: auto; }
 }
-.actions button, .pagination button, .error button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 5px 8px; border: 1px solid #414b48; border-radius: 4px; background: #202725; color: #e0e9e5; font-size: 13px; cursor: pointer; }
-.actions button:hover, .pagination button:hover { background: #303c37; }
-.actions button:focus-visible, .pagination button:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
-.actions button:disabled, .pagination button:disabled { opacity: .45; cursor: default; }
-.pagination { justify-content: center; padding: 14px 0; font-size: 13px; }
+.actions button, .mediaActions button, .pagination button, .error button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 5px 8px; border: 1px solid #414b48; border-radius: 4px; background: #202725; color: #e0e9e5; font-size: 13px; cursor: pointer; }
+.actions button:hover, .mediaActions button:hover, .pagination button:hover { background: #303c37; }
+.actions button:focus-visible, .mediaActions button:focus-visible, .pagination button:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
+.actions button:disabled, .mediaActions button:disabled, .pagination button:disabled { opacity: .45; cursor: default; }
+.mediaActions .commonActions button { padding: 0; }
+.pagination { justify-content: center; padding: 10px 0; font-size: 13px; }
 .error { color: #efb0a6; font-size: 13px; overflow-wrap: anywhere; }
 .feedback { color: #c4d7cd; font-size: 13px; overflow-wrap: anywhere; }

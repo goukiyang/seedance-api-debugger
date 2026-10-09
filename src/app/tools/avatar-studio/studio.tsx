@@ -510,8 +510,9 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
         scope={`sd2:avatar-history-results:v1:${ownerId}:${deleted ? 'deleted' : 'active'}`}
         hasMore={Boolean(cursor)} loadMore={async () => { if (cursor) await load(true, cursor); }} busy={busy}
         emptyLabel={deleted ? '暂无已删除的生成记录' : '暂无生成历史'}
-        renderMetadata={({record, status}) => <div className={styles.recordText}><strong>{record.name}</strong><small><RelativeTime value={record.createdAt}/> · {status}</small></div>}
-        renderActions={({record}) => record.deletedAt ? <button type="button" disabled={busy} onClick={()=>void run(()=>mutate(record,'undelete'))}>撤销删除</button> : <>
+        renderMetadata={({record, status}) => <div className={styles.recordText}><strong title={record.name}>{record.name}</strong><small><RelativeTime value={record.createdAt}/> · {status}</small></div>}
+        renderPrimaryActions={({record}) => record.deletedAt ? <button type="button" disabled={busy} onClick={()=>void run(()=>mutate(record,'undelete'))}>撤销删除</button> : null}
+        renderActions={({record}) => record.deletedAt ? null : <>
           <button type="button" disabled={busy} onClick={()=>void restore(record)}>恢复草稿</button>
         </>}
         renderDelete={({record}) => !record.deletedAt ? <button type="button" title="删除生成记录" aria-label={`删除生成记录：${record.name}`} disabled={busy} onClick={()=>void run(async()=>{if(await confirm(`删除“${record.name}”？可撤销，不删除已有图片、资产或其他历史。`,{title:'删除记录',confirmLabel:'删除',danger:true}))await mutate(record,'delete');})}><Trash2 size={15}/></button> : null}

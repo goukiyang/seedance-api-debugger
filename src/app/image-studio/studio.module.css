@@ -300,14 +300,18 @@
 .customRatio { display: flex; gap: 8px; margin-top: 8px; }
 .customRatio input { min-width: 0; flex: 1; }
 @media (hover: none) { .page .ratioDelete, .resultCommands { opacity: 1; } }
-.resultHeading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; margin: 7px 0 3px; }
-.prompt { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; margin: 0; }
+.resultHeading { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; margin: 4px 0 2px; line-height: 1.2; }
+.prompt { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 1.2; margin: 0; }
 .resultActions { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
-.resultMeta { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; margin: 0 0 4px; color: #adb6bd; font-size: 12px; line-height: 1.25; }
-.resultConfig { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; }
-.resultConfig > span[title] { color: #d8f4ed; font-weight: 800; cursor: help; }
-.resultTime { flex-shrink: 0; margin-left: auto; white-space: nowrap; color: #adb6bd; }
-.resultOwner { display: inline-flex; flex-shrink: 0; min-width: 0; max-width: 42%; margin-left: auto; }
+.resultMeta { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; column-gap: 6px; row-gap: 2px; min-width: 0; margin: 0 0 3px; color: #adb6bd; font-size: 11px; line-height: 1.2; }
+.resultConfig { display: flex; align-items: center; flex: 1 1 145px; flex-wrap: nowrap; gap: 3px; min-width: 0; overflow: hidden; white-space: nowrap; }
+.resultConfig > span[title] { max-width: 8ch; overflow: hidden; color: #d8f4ed; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
+.resultTime { flex: 0 0 auto; margin-left: auto; white-space: nowrap; color: #adb6bd; }
+.resultOwner { display: inline-flex; flex-shrink: 0; min-width: 0; max-width: 36%; margin-left: auto; }
+.resultContextVersion { flex: 0 1 5.5em; min-width: 0; max-width: 5.5em; overflow: hidden; white-space: nowrap; }
+.resultContextVersion .contextVersion { min-width: 0; flex-wrap: nowrap; gap: 2px; font-size: 11px; }
+.resultContextVersion .contextCode { min-width: 0; max-width: 5.5em; min-height: 20px; overflow: hidden; font-size: 11px; }
+.resultContextVersion .contextCode > span { min-width: 0; max-width: 5ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .resolutionHint { position: relative; cursor: help; }
 .resolutionHint:focus-visible { outline: 2px solid #a4f2df; outline-offset: 3px; }
 .resolutionTooltip { display: none; position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); z-index: 8; width: max-content; max-width: 180px; padding: 6px 8px; background: #252d32; color: #eef0f2; border: 1px solid #657077; border-radius: 4px; box-shadow: 0 3px 10px #0006; pointer-events: none; }

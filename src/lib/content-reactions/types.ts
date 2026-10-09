@@ -39,6 +39,8 @@ export type ReactionListItem = {
   markedAt: string;
   state: ReactionState;
   content: ContentSummary | null;
+  personalAlias?: string | null;
+  groupId?: string | null;
 };
 
 export type ReactionListResponse = {
@@ -46,6 +48,8 @@ export type ReactionListResponse = {
   total: number;
   counts: Record<ContentCategory | 'all', number>;
   nextCursor: string | null;
+  organization?: TemplateFavoriteOrganization;
+  selectedGroup?: string;
 };
 
 export type ReactionMutation = {
@@ -54,4 +58,22 @@ export type ReactionMutation = {
   active: boolean;
   expectedVersion: number;
   requestId: string;
+  viewerId?: string;
 };
+
+export type TemplateFavoriteOrganization = {
+  ownerId: string;
+  revision: number;
+  groups: Array<{ id: string; name: string; count: number }>;
+  total: number;
+  ungroupedCount: number;
+};
+
+export type TemplateFavoriteCommand =
+  | { action: 'create-group'; groupId: string; name: string }
+  | { action: 'rename-group'; groupId: string; name: string }
+  | { action: 'delete-group'; groupId: string }
+  | { action: 'move'; key: string; groupId: string | null }
+  | { action: 'rename'; key: string; name: string | null };
+
+export type TemplateFavoriteMutation = TemplateFavoriteCommand & { viewerId: string; expectedRevision: number; requestId: string };

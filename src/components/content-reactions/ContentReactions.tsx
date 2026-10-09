@@ -37,6 +37,13 @@ export function installChannel() {
   };
 }
 
+export function notifyTemplateFavoritesChanged(userId: string) {
+  installChannel();
+  const detail = { userId, key: '', category: 'template' };
+  window.dispatchEvent(new CustomEvent('sd2-reactions-changed', { detail }));
+  channel?.postMessage(detail);
+}
+
 export function watchReactionChanges(userId: string, listener: () => void) {
   installChannel();
   const changed = (event: Event) => {
@@ -48,6 +55,10 @@ export function watchReactionChanges(userId: string, listener: () => void) {
 
 export function cachedReactionState(userId: string, key: ContentKey) {
   return entries.get(cacheKey(userId, key))?.state;
+}
+
+export function pendingReactionMutation(userId: string, key: ContentKey) {
+  return pending.get(cacheKey(userId, key));
 }
 
 // External surfaces invalidate a key; only the existing server read supplies its state.
@@ -81,9 +92,10 @@ async function flush() {
     for (let start = 0; start < keys.length; start += 50) {
       const batch = keys.slice(start, start + 50);
       try {
-        const response = await fetch('/api/content-reactions/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keys: batch }), cache: 'no-store' });
+        const response = await fetch('/api/content-reactions/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keys: batch, viewerId: userId }), cache: 'no-store' });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || '读取失败');
+        if (data.viewerId !== userId) throw new Error('账号已变化，请重新读取');
         for (const key of batch) if (!entries.get(cacheKey(userId, key))?.busy) update(userId, key, { state: data.states[key] });
       } catch (error) {
         for (const key of batch) if (!entries.get(cacheKey(userId, key))?.busy) update(userId, key, { ...entries.get(cacheKey(userId, key)), error: error instanceof Error ? error.message : '读取失败' });
@@ -98,7 +110,7 @@ export async function writeReaction(userId: string, key: ContentKey, action: Rea
   let body = pending.get(id);
   // Preserve the original request after an uncertain network result; never silently invert it.
   if (!body) {
-    body = { key: state.key, action, active, expectedVersion: state.version, requestId: crypto.randomUUID() };
+    body = { key: state.key, action, active, expectedVersion: state.version, requestId: crypto.randomUUID(), viewerId: userId };
     pending.set(id, body);
   }
   update(userId, key, { state, busy: true }); entries.set(id, { state, busy: true });
