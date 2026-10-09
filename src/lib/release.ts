@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '生成按钮下统一显示本次合计点数。图片费用核对后可显示美元费用和实扣点数；新图片实扣须有有效报价与账单核对依据，历史任务和视频固定价格不变。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '生图模板新增统一默认设置，新建模块直接采用；已有模块可手动套用，正文、素材和历史配置保留。费用规则不变。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

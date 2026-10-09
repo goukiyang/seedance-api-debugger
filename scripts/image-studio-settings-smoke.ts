@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { createStudioSettingsController, studioSettingsDirty, type SettingsValue, type SettingsWrite } from '../src/app/image-studio/settings-controller';
 import { prisma } from '../src/lib/prisma';
 import { getImageStudioSettings, saveImageStudioSettings, imageStudioSettingsPayload, StudioSettingsClearConfirmationError } from '../src/lib/image-studio/settings';
+import { defaultStudioTemplateDefaults } from '../src/lib/image-studio/template-defaults';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -11,7 +12,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 const fixture = (revision = 22, context = 'Current global context'): SettingsValue => ({
-  context, revision, prices: { test: 20 }, providerReady: true, contextConfigured: Boolean(context),
+  context, revision, prices: { test: 20 }, providerReady: true, contextConfigured: Boolean(context), templateDefaults: defaultStudioTemplateDefaults(),
 });
 
 async function main() {

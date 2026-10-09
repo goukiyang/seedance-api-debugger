@@ -50,6 +50,7 @@ import { StudioGlobalSettingsDialog } from './global-settings-dialog';
 import { StudioSkills, type SkillSummary } from './skills-view';
 import { StudioStyleGroups, type StudioStyleSummary } from './style-groups-view';
 import type { SettingsValue } from './settings-controller';
+import { parseStudioTemplateDefaults } from '@/lib/image-studio/template-defaults';
 import { normalizeStudioRatio, resolveStudioAspectRatio } from '@/lib/image-studio/ratios';
 import { studioFourToOneIssue } from '@/lib/image-generation/resolution';
 import { useStudioBatch } from './use-studio-batch';
@@ -827,7 +828,8 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
           <button type="button" disabled={presetApplying || Boolean(quickLinkingId) || presetManaging} onClick={() => void applyPreset(preset)}>新建并应用</button>
         </div></article>)}</div>}
     </dialog>
-    <StudioGlobalSettingsDialog open={globalSettingsOpen} onClose={() => setGlobalSettingsOpen(false)} editor={globalEditor} ownerId={userId} canEdit={isAdmin} />
+    <StudioGlobalSettingsDialog open={globalSettingsOpen} onClose={() => setGlobalSettingsOpen(false)} editor={globalEditor} ownerId={userId} canEdit={isAdmin}
+      ratios={{ custom: customRatios, busy: ratiosBusy, error: ratiosError, onRetry: () => void syncRatios(), onCustom: syncRatios }} />
     {!settings && globalEditor.error && <p role="alert" className={styles.error}>{globalEditor.error}<button onClick={() => void globalEditor.controller.load()}>重试读取设置</button></p>}
   </main>)}</>;
 }
@@ -904,6 +906,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const [savedModuleContext, setSavedModuleContext] = useState(module.context || '');
   const [moduleContextConfigured, setModuleContextConfigured] = useState(module.contextConfigured);
   const [moduleSaveError, setModuleSaveError] = useState('');
+  const [unifiedDefaultsError, setUnifiedDefaultsError] = useState('');
   const [moduleSaved, setModuleSaved] = useState(JSON.stringify({ name: module.name, prompt: module.prompt, context: module.context || '', count: module.count, referenceLimit: moduleReferencePolicy(module).primaryMax, aspectRatio: module.aspectRatio || 'auto', model: module.model, quality: normalizeImageStudioQuality(module.model, module.quality), resolution: normalizeImageResolution(module.model, module.resolution || defaultImageResolution(module.model)), groupName: module.groupName || '未分组', bannerAssetId: module.banner?.id || null, referenceIds: [...module.images.filter(image => moduleReferencePolicy(module).primaryIds.includes(image.id || '')), ...module.images.filter(image => !moduleReferencePolicy(module).primaryIds.includes(image.id || ''))].map(image => image.id), reproduceFromTaskId: module.reproduceFromTaskId || null, sourcePresetId: module.sourcePresetId || null, skillIds: module.skillIds || [], styleGroupIds: module.styleGroupIds || [], referencePolicy: moduleReferencePolicy(module) }));
   const moduleSaveLock = useRef(false);
   const restoredDraftKey = useRef('');
@@ -1150,6 +1153,33 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     setFixedReferences(savedFixedReferences); setModuleContext(savedModuleContext); setStyleGroups(module.styleGroups || []); setSkills(module.skills || []); setReproductionSkills([]); setReproduceSourceTaskId(null);
     setReproductionGlobalContext(null); setAppliedSource(null);
     setModuleSaveError('');
+  }
+
+  function applyUnifiedDefaults() {
+    if (!draftLoaded || draftRestoring || quickPresetLock.current || presetSaveLock.current || submitting || pendingSubmission
+      || moduleSaving || moduleDeleting || uploading || bannerUploading || ratioEditing) return;
+    try {
+      if (!settings?.templateDefaults) throw new Error('统一默认设置尚未读取，请重新读取通用设置后再试。');
+      const defaults = parseStudioTemplateDefaults(settings.templateDefaults);
+      const ratioIssue = studioFourToOneIssue(defaults.aspectRatio, settings.modelFourToOne?.[defaults.model] === true);
+      if (ratioIssue) throw new Error(ratioIssue);
+      if (styleGroups.some(group => group.unavailable)) throw new Error('当前风格组不可用，请先处理后再套用统一默认。');
+      const styles = styleGroups.reduce((total, group) => total + group.referenceCount, 0);
+      const fixedCount = fixedEditable ? fixedReferences.length : module.fixedReferenceCount ?? savedFixedReferences.length;
+      const ordinary = auxiliaryImages.length + (defaults.useFixedReferences ? fixedCount : 0);
+      if (images.length > defaults.primaryMax || styles > defaults.styleMax || ordinary > defaults.referenceMax
+        || styles + ordinary > defaults.auxiliaryMax || images.length + styles + ordinary > MAX_REFERENCE_IMAGES) {
+        throw new Error('统一默认的图片上限低于当前已选素材，未套用；请先调整默认上限或自行移除素材。');
+      }
+      // Parameters only: retain all content and source identities. The existing draft signature invalidates quotations.
+      setPrimaryMin(defaults.primaryMin); setReferenceLimit(defaults.primaryMax); setStyleLimit(defaults.styleMax);
+      setReferenceImageLimit(defaults.referenceMax); setAuxiliaryLimit(defaults.auxiliaryMax); setUseFixedReferences(defaults.useFixedReferences);
+      setModuleModel(defaults.model); setQuality(defaults.quality); setResolution(defaults.resolution);
+      setCount(defaults.count); setAspectRatio(defaults.aspectRatio);
+      if (reproduceSourceTaskId) exitReproductionMode();
+      setUnifiedDefaultsError(''); setError('');
+      setSaveStatus('已套用统一默认，尚未保存；正文和素材保留。');
+    } catch (cause) { setUnifiedDefaultsError(cause instanceof Error ? cause.message : '统一默认未套用，请重试'); }
   }
 
   async function deleteModule() {
@@ -2194,8 +2224,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     }}>
       <header className={styles.header}><h2>模块上下文</h2><button type="button" aria-label="关闭模块上下文" onClick={closeModuleDialog}><X size={20} /></button></header>
       <div className={styles.contextEditorTools}><span>模块上下文版本：<ContextVersionLabel {...contextVersion} unsaved={contextUnsaved} /></span>
+        <button type="button" disabled={!settings?.templateDefaults || !draftLoaded || draftRestoring || moduleSaving || moduleDeleting || presetSaving || Boolean(quickPresetApplying) || submitting || Boolean(pendingSubmission) || uploading || bannerUploading || ratioEditing}
+          onClick={applyUnifiedDefaults}><RefreshCw size={16} />套用统一默认</button>
         {contextEditable && <ContextClipboardActions value={moduleContext} textareaRef={moduleContextInput} onPaste={changeModuleContext} maxLength={20000} disabled={moduleSaving} />}
       </div>
+      {unifiedDefaultsError && <p role="alert" className={styles.error}>{unifiedDefaultsError}</p>}
       {contextEditable ? <>
         <textarea ref={moduleContextInput} aria-label="模块上下文" rows={12} maxLength={20000} value={moduleContext} onCompositionStart={() => setContextComposing(true)} onCompositionEnd={event => { setContextComposing(false); changeModuleContext(event.currentTarget.value); }} onChange={event => changeModuleContext(event.target.value)} />
       </> : <p className={styles.muted}>共享模板的内部上下文由创建者维护，生成时自动使用。</p>}
@@ -2219,7 +2252,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       </div>
       {templateWorkbench && <button type="button" title="替换主图提醒设置" onClick={() => void confirm('此设置仅影响替换主图提醒，不影响生成费用、变价或权限确认。', { title: '主图提醒', confirmLabel: '保存设置', checkbox: { label: '每次替换主图前提醒', checked: !skipMainImageReminder(userId) }, onSubmit: async (_value, checked) => saveMainImageReminder(userId, !checked) })}><Settings size={16} />主图提醒</button>}
       <div className={styles.moduleSettingsActions}>
-        {contextEditable && <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModuleSettings()}><Save size={16} />{moduleSaving ? '正在保存' : templateWorkbench ? '保存模块设置' : '保存模板设置'}</button>}
+        <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModuleSettings()}><Save size={16} />{moduleSaving ? '正在保存' : templateWorkbench ? '保存模块设置' : '保存模板设置'}</button>
       </div>
       {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}<button disabled={moduleSaving || uploading || bannerUploading} onClick={() => void saveModuleSettings()}>重试保存</button></p>}
       <div className={styles.imageSectionHeading}><label className={styles.referenceToggle}><input type="checkbox" checked={useFixedReferences} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setUseFixedReferences(event.target.checked)} />使用模板固定参考图</label>

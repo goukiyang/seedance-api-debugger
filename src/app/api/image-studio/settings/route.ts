@@ -5,6 +5,8 @@ import { getImageStudioSettings, saveImageStudioSettings, imageStudioSettingsPay
 import { getImageGenerationChannels, selectImageGenerationSettings, isImageGenerationApiReady, isStudioImageGenerationProvider } from '@/lib/integrations/image-generation';
 import { supportsStudioFourToOne } from '@/lib/image-generation/resolution';
 import { imageBillingReadinessPayload } from '@/lib/image-studio/billing-readiness';
+import { parseStudioTemplateDefaults } from '@/lib/image-studio/template-defaults';
+import { studioFourToOneIssue } from '@/lib/image-generation/resolution';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,8 +41,20 @@ export async function PUT(request: NextRequest) {
           && (!Number.isInteger(body.prices[model]) || body.prices[model] < 0 || body.prices[model] > 100000))))) {
       return NextResponse.json({ error: '设置无效，上下文最多 20000 字' }, { status: 400 });
     }
+    let templateDefaults;
+    if (body.templateDefaults !== undefined) {
+      try { templateDefaults = parseStudioTemplateDefaults(body.templateDefaults); }
+      catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : '统一默认设置无效' }, { status: 400 }); }
+      if (templateDefaults.aspectRatio === '4:1') {
+        const channels = await getImageGenerationChannels();
+        const api = selectImageGenerationSettings(channels, templateDefaults.model);
+        const issue = studioFourToOneIssue(templateDefaults.aspectRatio, supportsStudioFourToOne(templateDefaults.model, api.provider));
+        if (issue) return NextResponse.json({ error: issue }, { status: 400 });
+      }
+    }
     const current = await getImageStudioSettings();
-    const settings = await saveImageStudioSettings({ ...current, context: body.context ?? current.context, revision: body.revision, model: body.model ?? current.model, prices: body.prices ?? current.prices }, user.id, { confirmContextClear: body.confirmContextClear === true });
+    const settings = await saveImageStudioSettings({ context: body.context ?? current.context, revision: body.revision, model: body.model ?? current.model,
+      prices: body.prices ?? current.prices, ...(templateDefaults === undefined ? {} : { templateDefaults }) }, user.id, { confirmContextClear: body.confirmContextClear === true });
     if (!settings) return NextResponse.json({ error: '设置已在其他页面更新，请重新读取后修改' }, { status: 409 });
     return NextResponse.json(settings);
   } catch (error) {

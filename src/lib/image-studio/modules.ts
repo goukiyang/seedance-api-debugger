@@ -13,6 +13,7 @@ import { getStudioModuleStyleIds, getStudioStyleGroup, parseStudioStyleIds, reso
 import { getSkill, getSkillSelection, setSkillSelection, skillDTO } from './skills';
 import { studioVisibleAssetWhere } from './protected-assets';
 import { getStudioModuleReferencePolicy, parseStudioReferencePolicy, removeStudioModuleReferencePolicy, setStudioModuleReferencePolicy, setStudioPresetReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
+import { studioTemplateDefaultPolicy } from './template-defaults';
 
 export const defaultStudioModuleId = (ownerId: string) => `default-${ownerId}`;
 export class StudioModuleError extends Error {
@@ -88,7 +89,8 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
   const referenceLimit = Math.max(1, Math.min(MAX_REFERENCE_IMAGES, Number(row.reference_limit) || DEFAULT_STUDIO_PRIMARY_MAX));
   const visibleTransientIds = ids.filter(id => assets.some(asset => asset.id === id));
   let referencePolicy;
-  try { referencePolicy = await getStudioModuleReferencePolicy(ownerId, row.id, visibleTransientIds, referenceLimit); }
+  try { referencePolicy = saved ? await getStudioModuleReferencePolicy(ownerId, row.id, visibleTransientIds, referenceLimit)
+    : studioTemplateDefaultPolicy(settings.templateDefaults!); }
   catch (error) {
     if (error instanceof StudioReferencePolicyError) throw new StudioModuleError(error.message, error.status);
     throw error;
@@ -153,7 +155,10 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
   const visible = rows.slice(0, 12);
   const modules = await Promise.all(visible.map(row => moduleDTO(row, ownerId, settings, true, isAdmin, row.source_preset_id ? sourceById.get(row.source_preset_id) : undefined, identity)));
   if (includeDefault) {
-    modules.unshift(await moduleDTO(defaultRow || { id: defaultId, name: '模块 1', prompt: '', context: '', count: 1, reference_limit: DEFAULT_STUDIO_PRIMARY_MAX, reference_ids: [], revision: 0, created_at: new Date(0), updated_at: new Date(0) }, ownerId, settings, Boolean(defaultRow), isAdmin, defaultRow?.source_preset_id ? sourceById.get(defaultRow.source_preset_id) : undefined, identity));
+    const defaults = settings.templateDefaults;
+    modules.unshift(await moduleDTO(defaultRow || { id: defaultId, name: '模块 1', prompt: '', context: '',
+      model: defaults.model, quality: defaults.quality, resolution: defaults.resolution, count: defaults.count,
+      aspect_ratio: defaults.aspectRatio, reference_limit: defaults.primaryMax, reference_ids: [], revision: 0, created_at: new Date(0), updated_at: new Date(0) }, ownerId, settings, Boolean(defaultRow), isAdmin, defaultRow?.source_preset_id ? sourceById.get(defaultRow.source_preset_id) : undefined, identity));
   }
   // Navigation must describe all saved modules, not just the first content page.
   const directory = !cursor && !requestedIds ? await prisma.imageStudioModule.findMany({
@@ -265,17 +270,24 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       const source = await tx.imageStudioTask.findFirst({ where: { id: reproduceFromTaskId, owner_id: ownerId, snapshot_json: { not: null } }, select: { id: true } });
       if (!source) throw new StudioModuleError('历史生成记录不存在或无权复现', 403);
     }
-    const selectedModel = model || current?.model || (await getImageStudioSettings()).model;
+    // Read new-module defaults inside this transaction, never re-resolve old saved contracts.
+    const settings = await getImageStudioSettings(tx);
+    const defaults = settings.templateDefaults;
+    const initializeDefaults = !current && createOnly && !forcedSourcePresetId;
+    if (initializeDefaults) referencePolicy = studioTemplateDefaultPolicy(defaults);
+    const selectedModel = initializeDefaults ? defaults.model : model || current?.model || settings.model;
     const selectedQuality = quality !== undefined
       ? normalizeImageStudioQuality(String(selectedModel), String(quality))
-      : createOnly
-        ? defaultImageStudioQuality(String(selectedModel))
+      : initializeDefaults
+        ? defaults.quality
+        : createOnly ? defaultImageStudioQuality(String(selectedModel))
         : normalizeImageStudioQuality(String(selectedModel), current?.quality);
-    const selectedResolution = normalizeImageResolution(String(selectedModel), body.resolution !== undefined ? body.resolution : current?.resolution);
-    const data = { name: name.trim(), prompt, count: Number(count), reference_limit: referenceLimit, reference_ids: JSON.stringify(ids), revision: Number(revision) + 1,
-      ...(aspectRatio !== undefined ? { aspect_ratio: aspectRatio } : {}),
-      ...(model !== undefined ? { model: model as string } : {}),
-      quality: selectedQuality, resolution: selectedResolution,
+    const selectedResolution = initializeDefaults ? defaults.resolution : normalizeImageResolution(String(selectedModel), body.resolution !== undefined ? body.resolution : current?.resolution);
+    const data = { name: name.trim(), prompt, count: initializeDefaults ? defaults.count : Number(count),
+      reference_limit: initializeDefaults ? defaults.primaryMax : referenceLimit, reference_ids: JSON.stringify(ids), revision: Number(revision) + 1,
+      ...(initializeDefaults ? { aspect_ratio: defaults.aspectRatio } : aspectRatio !== undefined ? { aspect_ratio: aspectRatio } : {}),
+      ...(initializeDefaults ? { model: defaults.model } : model !== undefined ? { model: model as string } : {}),
+      quality: initializeDefaults ? defaults.quality : selectedQuality, resolution: selectedResolution,
       ...(groupName !== undefined ? { group_name: groupName.trim() || '未分组' } : {}),
       ...(bannerAssetId !== undefined ? { banner_asset_id: bannerAssetId } : {}),
       ...(reproduceFromTaskId !== undefined ? { reproduce_task_id: reproduceFromTaskId } : {}),

@@ -31,6 +31,10 @@ export function useStudioSettings(userId: string, isAdmin: boolean) {
       document.removeEventListener('visibilitychange', refresh);
     };
   }, [controller]);
-  usePageExitRisk({ unsaved: dirty ? ['图片通用设置'] : [], busy: state.saving ? ['通用设置正在保存'] : [], revision: JSON.stringify(state.draft) });
+  usePageExitRisk({
+    unsaved: dirty ? ['图片通用设置'] : [],
+    busy: state.saving ? ['通用设置正在保存'] : [],
+    revision: JSON.stringify({ context: state.draft?.context, prices: state.draft?.prices, templateDefaults: state.draft?.templateDefaults }),
+  });
   return { ...state, dirty, controller };
 }
