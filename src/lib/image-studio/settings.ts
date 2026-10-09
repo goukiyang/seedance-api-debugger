@@ -49,7 +49,9 @@ export async function saveImageStudioSettings(input: ImageStudioSettings, userId
     if (row && (JSON.parse(row.value_json) as ImageStudioSettings).context.trim() && !input.context.trim() && options.confirmContextClear !== true) {
       throw new StudioSettingsClearConfirmationError();
     }
-    const next = { context: input.context, model: input.model, prices: input.prices, revision: currentRevision + 1 };
+    // Retain compatible JSON extensions when an older settings editor saves.
+    const current = row ? JSON.parse(row.value_json) as ImageStudioSettings : null;
+    const next = { ...current, context: input.context, model: input.model, prices: input.prices, revision: currentRevision + 1 };
     if (row) {
       const updated = await tx.platformSetting.updateMany({
         where: { id: row.id, value_json: row.value_json },
