@@ -7,14 +7,16 @@ import { readableStudioCoverIds } from '@/lib/image-studio/protected-assets';
 import type { HomeTemplate, HomeTemplates } from '@/lib/home/types';
 import type { ContentKey } from './types';
 import { parseContentKey, ReactionError } from './content';
+import { tryContentKeyParts } from './key';
 
 const presetSelect = { id: true, owner_id: true, scope: true, is_shared: true, name: true, banner_asset_id: true } as const;
 type Projection = { key: ContentKey; title: string; href: string; kind: 'definition' | 'workpage'; ownerId: string; bannerId: string | null };
 
 async function projectTemplates(user: SessionUser, keys: ContentKey[]): Promise<Projection[]> {
   if (!canUseCompanyTemplates(user)) return [];
-  const definitions = keys.filter(key => key.startsWith('image_template:')).map(key => key.split(':')[1]);
-  const moduleIds = keys.filter(key => key.startsWith('image_module:')).map(key => key.split(':')[1]);
+  const parts = keys.flatMap(key => { const parsed = tryContentKeyParts(key); return parsed ? [parsed] : []; });
+  const definitions = parts.filter(item => item.type === 'image_template').map(item => item.id);
+  const moduleIds = parts.filter(item => item.type === 'image_module').map(item => item.id);
   const modules = await prisma.imageStudioModule.findMany({ where: { id: { in: moduleIds }, owner_id: user.id }, take: 40,
     select: { id: true, owner_id: true, name: true, banner_asset_id: true, source_preset_id: true } });
   const presetIds = Array.from(new Set([...definitions, ...modules.flatMap(row => row.source_preset_id ? [row.source_preset_id] : [])]));
@@ -22,8 +24,7 @@ async function projectTemplates(user: SessionUser, keys: ContentKey[]): Promise<
   const archived = new Set((await prisma.platformSetting.findMany({ where: { key: { in: presetIds.map(archivedPresetKey) } }, take: 80, select: { key: true } })).map(row => row.key));
   const byId = new Map(presets.filter(row => !archived.has(archivedPresetKey(row.id))).map(row => [row.id, row]));
   const byModule = new Map(modules.map(row => [row.id, row]));
-  return keys.flatMap<Projection>(key => {
-    const [type, id] = key.split(':');
+  return parts.flatMap<Projection>(({ key, type, id }) => {
     if (type === 'image_template') {
       const row = byId.get(id);
       return row && canViewStudioPreset(user, row) ? [{ key, title: row.name, href: `/template-studio?type=image&presetId=${encodeURIComponent(id)}`,
@@ -77,7 +78,7 @@ export async function homeTemplates(user: SessionUser, params: URLSearchParams):
   ] }, orderBy: [{ updated_at: 'desc' }, { id: 'desc' }], take: 41,
   select: { id: true, content_key: true, liked: true, favorited: true, version: true, updated_at: true } });
   const batch = candidates.slice(0, 40);
-  const projected = await projectTemplates(user, batch.map(row => parseContentKey(row.content_key)));
+  const projected = await projectTemplates(user, batch.flatMap(row => { const parsed = tryContentKeyParts(row.content_key); return parsed ? [parsed.key] : []; }));
   const byKey = new Map(projected.map(row => [row.key, row]));
   const selected: Array<{ row: typeof batch[number]; projection: Projection }> = [];
   let consumed = 0;

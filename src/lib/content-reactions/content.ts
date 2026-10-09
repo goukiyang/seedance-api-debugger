@@ -11,17 +11,17 @@ import { visibleRunPrompt } from '@/lib/template-studio/projection';
 import { getStudioTemplate } from '@/lib/template-studio/templates';
 import { StudioError } from '@/lib/template-studio/errors';
 import type { StudioRunSnapshot } from '@/lib/template-studio/types';
-import { CONTENT_TYPES, type ContentKey, type ContentSummary, type ContentCategory } from './types';
+import { type ContentKey, type ContentSummary, type ContentCategory } from './types';
 import { resolveCutoutResult, type CutoutContentContext } from './cutout-content';
+import { tryContentKeyParts } from './key';
+import { studioPresetArchived } from '@/lib/image-studio/preset-lifecycle';
 
 export class ReactionError extends Error {
   constructor(message: string, public status = 400) { super(message); }
 }
 
 export function parseContentKey(input: unknown): ContentKey {
-  if (typeof input !== 'string' || input.length > 180) throw new ReactionError('内容编号无效');
-  const [type, id, extra] = input.split(':');
-  if (!CONTENT_TYPES.includes(type as typeof CONTENT_TYPES[number]) || !id || extra !== undefined || !/^[a-zA-Z0-9_-]+$/.test(id)) throw new ReactionError('内容编号无效');
+  if (!tryContentKeyParts(input)) throw new ReactionError('内容编号无效');
   return input as ContentKey;
 }
 
@@ -47,7 +47,9 @@ async function referenceAccess(user: SessionUser, id: string) {
 
 // Resolve identity and current authorization together; never persist content snapshots in reactions.
 export async function resolveContent(user: SessionUser, input: ContentKey, context?: CutoutContentContext): Promise<ResolvedContent | null> {
-  const [type, id] = input.split(':');
+  const parsed = tryContentKeyParts(input);
+  if (!parsed) throw new ReactionError('内容编号无效');
+  const { type, id } = parsed;
   try {
     if (type === 'cutout_result') {
       const result = await resolveCutoutResult(user, input, context);
@@ -117,8 +119,8 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
     if (user.account_type !== 'internal') return null;
     if (type === 'image_template') {
       const row = await prisma.imageStudioPreset.findUnique({ where: { id } });
-      if (!row || !canViewStudioPreset(user, row)) return null;
-      const item = summary(input, 'template', row.name, `/template-studio?type=image&presetId=${id}`);
+      if (!row || await studioPresetArchived(row.id) || !canViewStudioPreset(user, row)) return null;
+      const item = summary(input, 'template', row.name, `/template-studio?type=image&presetId=${encodeURIComponent(id)}`);
       item.templateKind = 'definition'; item.templateMedium = 'image';
       item.actionLabel = '使用模板'; item.versionLabel = row.updated_at.toISOString(); item.owner = await owner(row.owner_id);
       return { summary: item };
@@ -127,6 +129,7 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
       const row = await prisma.imageStudioModule.findUnique({ where: { id } });
       if (!row) return null;
       const source = row.source_preset_id ? await prisma.imageStudioPreset.findUnique({ where: { id: row.source_preset_id } }) : null;
+      if (source && await studioPresetArchived(source.id)) return null;
       if (!canViewStudioModule(user, row, source)) return null;
       const item = summary(input, 'template', row.name, `/template-studio?type=image&moduleId=${id}`);
       item.templateKind = 'workpage'; item.templateMedium = 'image';
