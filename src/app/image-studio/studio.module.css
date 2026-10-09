@@ -227,6 +227,7 @@
 .page .generate { width: 100%; min-height: 44px; margin-top: 12px; }
 .generationToolbar { display: grid; gap: 12px; margin-bottom: 16px; }
 .generationToolbar > p { margin: 0; }
+.generationEstimate { margin: 0; color: #adb6bd; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
 .generationQuantity { align-items: center; gap: 10px; margin: 0; }
 .generationQuantity label { color: #adb6bd; font-size: 13px; }
 .page .generationQuantity button { min-height: 40px; padding: 6px 10px; }

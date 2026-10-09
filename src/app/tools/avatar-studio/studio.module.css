@@ -63,6 +63,7 @@
 .detail h2 { font-size: 16px; margin: 0; }
 .detail p { font-size: 13px; line-height: 1.6; margin: 0; }
 .detail small, .price { font-size: 12px; color: var(--text-secondary); }
+.estimate { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .prompt { white-space: pre-wrap; font-size: 12px; max-height: 240px; overflow: auto; overflow-wrap: anywhere; }
 .notice { margin: 10px 0; padding: 10px 12px; background: var(--bg-secondary); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .error { color: #d35b63; }

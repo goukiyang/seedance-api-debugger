@@ -511,6 +511,7 @@ export async function settleTaskCredits(
     terminalStatus: string;
     frozenAmount: number;
     freezeSnapshot?: string | null;
+    actualCost?: number;
   },
 ) {
   const account = await ensureCreditAccount(tx, input.userId);
@@ -519,16 +520,27 @@ export async function settleTaskCredits(
   const totalFrozenBefore = account.frozen_credits + bucketFrozenBefore;
   const now = new Date();
   const succeeded = input.terminalStatus === 'succeeded';
+  if (input.actualCost !== undefined && (!succeeded && input.actualCost !== 0 || !Number.isFinite(input.actualCost)
+    || input.actualCost < 0 || input.actualCost > input.frozenAmount
+    || Math.abs(input.actualCost * 100 - Math.round(input.actualCost * 100)) > 0.00001)) {
+    throw new Error('实际扣点超过原预留或精度无效，已停止结算');
+  }
+  let remainingCost = succeeded ? input.actualCost ?? input.frozenAmount : 0;
 
   let longAmount = 0;
+  let longConsumed = 0;
   let refundedAmount = 0;
   let expiredClosedAmount = 0;
   let bucketReleasedAmount = 0;
 
   for (const allocation of allocations) {
+    const consumed = Math.min(allocation.amount, remainingCost);
+    remainingCost = Math.max(0, remainingCost - consumed);
+    const unused = allocation.amount - consumed;
     if (allocation.source_type === 'balance') {
       longAmount += allocation.amount;
-      if (!succeeded) refundedAmount += allocation.amount;
+      longConsumed += consumed;
+      refundedAmount += unused;
       continue;
     }
 
@@ -540,12 +552,12 @@ export async function settleTaskCredits(
     bucketReleasedAmount += release;
     const isStillUsable = bucket.status === 'active' && (!bucket.expires_at || bucket.expires_at > now);
     const nextFrozen = Math.max(0, bucket.frozen_amount - release);
-    const nextRemaining = !succeeded && isStillUsable
-      ? bucket.amount_remaining + release
+    const nextRemaining = isStillUsable
+      ? bucket.amount_remaining + unused
       : bucket.amount_remaining;
 
-    if (!succeeded && isStillUsable) refundedAmount += release;
-    if (!succeeded && !isStillUsable) expiredClosedAmount += release;
+    if (isStillUsable) refundedAmount += unused;
+    if (!isStillUsable) expiredClosedAmount += unused;
 
     await tx.creditBucket.update({
       where: { id: bucket.id },
@@ -560,8 +572,11 @@ export async function settleTaskCredits(
   }
 
   const totalAmount = allocations.reduce((total, item) => total + item.amount, 0);
+  if (input.actualCost !== undefined && (remainingCost > 0.00001 || account.frozen_credits + 0.00001 < longAmount
+    || account.balance + 0.00001 < longConsumed)) throw new Error('原预留来源不足，已停止结算');
+  const actualCost = succeeded ? input.actualCost ?? totalAmount : 0;
   const longFrozenAfter = Math.max(0, account.frozen_credits - longAmount);
-  const balanceAfter = succeeded ? account.balance - longAmount : account.balance;
+  const balanceAfter = account.balance - longConsumed;
   const bucketFrozenAfter = Math.max(0, bucketFrozenBefore - bucketReleasedAmount);
   const totalFrozenAfter = longFrozenAfter + bucketFrozenAfter;
 
@@ -571,8 +586,8 @@ export async function settleTaskCredits(
       ? {
           balance: balanceAfter,
           frozen_credits: longFrozenAfter,
-          monthly_used: account.monthly_used + totalAmount,
-          total_used: account.total_used + totalAmount,
+          monthly_used: account.monthly_used + actualCost,
+          total_used: account.total_used + actualCost,
         }
       : { frozen_credits: longFrozenAfter },
   });
@@ -588,14 +603,14 @@ export async function settleTaskCredits(
         frozen_before: totalFrozenBefore,
         frozen_after: totalFrozenAfter,
         related_task_id: input.taskId,
-        reason: `任务失败时原周期额度已过期，关闭 ${expiredClosedAmount} 点返还`,
+        reason: `原周期额度已过期，关闭 ${expiredClosedAmount} 点返还`,
         metadata_json: JSON.stringify({ allocations }),
       },
     });
   }
 
   return {
-    actualCost: succeeded ? totalAmount : 0,
+    actualCost,
     refundedAmount,
     expiredClosedAmount,
     balanceBefore: account.balance,

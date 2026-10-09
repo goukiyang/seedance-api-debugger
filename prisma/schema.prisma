@@ -396,6 +396,17 @@ model ImageStudioTask {
   model          String
   quality        String         @default("auto")
   provider_cost_usd Float?
+  billing_mode String @default("fixed")
+  billing_status String @default("legacy_unknown")
+  billing_scope String?
+  billing_contract_json String?
+  gateway_request_id String?
+  actual_amount_micros Int?
+  actual_credits Float?
+  billing_deadline DateTime?
+  billing_next_check_at DateTime?
+  billing_attempts Int @default(0)
+  billing_settled_at DateTime?
   snapshot_json  String?
   aspect_ratio   String   @default("auto")
   output_size    String?
@@ -417,12 +428,17 @@ model ImageStudioTask {
   updated_at     DateTime @updatedAt
   finished_at    DateTime?
 
+  cost_ledgers CostLedger[]
+  cost_allocations CostAllocation[]
+
   @@index([owner_id, created_at])
   @@index([status, created_at])
   @@index([batch_id, owner_id])
   @@index([owner_id, module_id, created_at])
   @@index([source_preset_id, created_at])
   @@index([tool_flow_run_id, tool_flow_node_id, status])
+  @@index([billing_status, billing_next_check_at])
+  @@index([billing_scope, gateway_request_id])
 }
 
 model PlatformSetting {
@@ -1407,6 +1423,7 @@ model CostLedger {
   source_type         String // task | provider_request | official_bill | adjustment | transfer
   source_id           String?
   task_id             String?
+  image_task_id       String?
   user_id             String?
   project_id          String?
   provider_request_id String?
@@ -1431,6 +1448,7 @@ model CostLedger {
   created_at          DateTime @default(now())
 
   task             VideoTask?          @relation(fields: [task_id], references: [id], onDelete: SetNull)
+  image_task       ImageStudioTask?    @relation(fields: [image_task_id], references: [id], onDelete: SetNull)
   user             User?               @relation(fields: [user_id], references: [id], onDelete: SetNull)
   project          Project?            @relation(fields: [project_id], references: [id], onDelete: SetNull)
   provider_request ProviderApiRequest? @relation(fields: [provider_request_id], references: [id], onDelete: SetNull)
@@ -1438,6 +1456,7 @@ model CostLedger {
 
   @@index([source_type, source_id])
   @@index([task_id])
+  @@index([image_task_id])
   @@index([user_id])
   @@index([project_id])
   @@index([provider_request_id])
@@ -1455,6 +1474,7 @@ model CostAllocation {
   allocation_type String // project | user | task | cost_center | unallocated
   allocation_id   String
   task_id         String?
+  image_task_id   String?
   user_id         String?
   project_id      String?
   amount_minor    Int?
@@ -1469,12 +1489,14 @@ model CostAllocation {
 
   ledger  CostLedger @relation(fields: [ledger_id], references: [id], onDelete: Cascade)
   task    VideoTask? @relation(fields: [task_id], references: [id], onDelete: SetNull)
+  image_task ImageStudioTask? @relation(fields: [image_task_id], references: [id], onDelete: SetNull)
   user    User?      @relation(fields: [user_id], references: [id], onDelete: SetNull)
   project Project?   @relation(fields: [project_id], references: [id], onDelete: SetNull)
 
   @@index([ledger_id])
   @@index([allocation_type, allocation_id])
   @@index([task_id])
+  @@index([image_task_id])
   @@index([user_id])
   @@index([project_id])
   @@index([created_at])

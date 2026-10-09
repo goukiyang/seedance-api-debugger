@@ -10,6 +10,22 @@ import type { ImageStudioTask } from '@prisma/client';
 import { beginStudioRequest, recordStudioResponse, createStudioBase64Delivery, createStudioDelivery, readStudioDelivery, downloadStudioDelivery,
   discardStudioDelivery, studioDeliveryCanRetry, studioDeliveryStatus, cleanupStudioDeliveries, updateStudioDelivery, type StudioDelivery } from './delivery';
 import { prepareStudioOutput } from './output';
+import { imageBillingScope } from './billing-scope';
+import { parseImageBillingContract } from './billing-contract';
+
+export async function assertStudioPostAuthorization(task: ImageStudioTask) {
+  const current = await prisma.imageStudioTask.findUnique({ where: { id: task.id } });
+  if (!current || current.status !== 'running' || current.lease_token !== task.lease_token
+    || !current.lease_until || current.lease_until <= new Date()) throw new StudioImageDownloadError('delivery_lease_lost');
+  if (current.billing_mode === 'actual') {
+    const contract = parseImageBillingContract(current.billing_contract_json);
+    if (!contract || contract.mode !== 'actual' || contract.scope !== current.billing_scope
+      || contract.authorizedCredits !== current.unit_credits || current.billing_settled_at
+      || current.billing_status !== 'awaiting_response' || current.gateway_request_id
+      || !current.billing_deadline || current.billing_deadline <= new Date()
+      || Date.parse(contract.deadline!) <= Date.now()) throw new Error('图片费用授权已停止，未向供应商提交');
+  }
+}
 
 export async function processStudioTask(generate: typeof requestStudioImages = requestStudioImages) {
   const task = await claimStudioTask();
@@ -42,8 +58,13 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
       await updateStudioDelivery(recovery, { recoveries: (recovery.recoveries || 0) + 1 });
       original = await download(recovery); usage = recovery.usage;
     } else {
+      if (task.billing_mode === 'actual') {
+        const contract = parseImageBillingContract(task.billing_contract_json);
+        if (!contract || contract.mode !== 'actual' || Date.parse(contract.deadline!) <= Date.now()) throw new Error('图片费用授权已过期，未向供应商提交');
+      }
       const settings = await getImageGenerationSettingsForModel(task.model);
       if (!isStudioImageGenerationProvider(settings.provider) || !isImageGenerationApiReady(settings)) throw new Error('图片专用 API 暂不可用');
+      if (task.billing_scope && imageBillingScope(settings) !== task.billing_scope) throw new Error('提交时的图片通道已变化，请核对原任务');
       const images = [];
       const snapshot = task.snapshot_json ? JSON.parse(task.snapshot_json) : {};
       const owners: Record<string, string> = snapshot.authorizedReferenceOwners || {};
@@ -53,9 +74,11 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
         images.push({ bytes: await normalizeStudioImage(await readStudioImage(asset.original_url, taskSignal)), mimeType: 'image/png' });
       }
       await assertLease();
+      await assertStudioPostAuthorization(task);
       stage = 'provider'; providerStarted = true;
       await beginStudioRequest(task);
       await assertLease();
+      await assertStudioPostAuthorization(task);
       const result = await generate({ baseUrl: settings.base_url, apiKey: settings.api_key!, model: task.model,
         provider: settings.provider === 'ai_media_vip' ? 'ai_media_vip' : 'musk',
         prompt: task.prompt.trim() ? `${task.context}\n\n---\n本次画面要求：\n${task.prompt}` : task.context,
@@ -86,7 +109,7 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
         requestId: deliveryStatus.requestId, upstreamRequestId: deliveryStatus.upstreamRequestId, validation,
         responseStatus: deliveryStatus.responseStatus, returnedAt: deliveryStatus.returnedAt } } });
     if (finished) {
-      await discardStudioDelivery(task).catch(() => {});
+      await discardStudioDelivery(task);
       await completeToolFlowTask(task.id);
     }
   } catch (error) {

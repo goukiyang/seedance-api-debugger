@@ -5,6 +5,8 @@ import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { getImageGenerationChannels, selectImageGenerationSettings, isImageGenerationApiReady } from '@/lib/integrations/image-generation';
 import { isGeminiImageModel, imageResolutionOptions } from '@/lib/image-generation/resolution';
+import { imageBillingReady } from '@/lib/image-studio/billing-readiness';
+import { imageBillingScope } from '@/lib/image-studio/billing-scope';
 
 export type CanvasQuoteInput = {
   kind: 'image';
@@ -58,13 +60,15 @@ export async function getCanvasImageQuote(user: SessionUser, input: CanvasQuoteI
     ? [channels.shared.default_model, ...IMAGE_STUDIO_MODELS.filter(isGeminiImageModel)]
     : Array.from(new Set([...IMAGE_STUDIO_MODELS, channels.shared.default_model]));
   const maximumCount = provider === 'seedream' ? 1 : providerSettings.max_outputs_per_request;
-  const quoteModel = (model: string) => {
+  const quoteModel = async (model: string) => {
     const api = selectImageGenerationSettings(channels, model);
     const providerReady = isImageGenerationApiReady(api);
     const modelMaximumCount = api.provider === 'seedream' ? 1 : api.max_outputs_per_request;
     const studioModel = IMAGE_STUDIO_MODELS.includes(model as ImageStudioModel);
     const allowedModel = api.provider === 'seedream' ? model === channels.shared.default_model : studioModel;
     const price = api.provider !== 'seedream' && studioModel ? studio.prices[model as ImageStudioModel] : null;
+    const actualQuoteRequired = api.provider === 'musk' && Boolean(api.api_key)
+      && (await imageBillingReady(imageBillingScope(api), model)).ready;
     const estimated = typeof price === 'number' ? price * input.count : null;
     const reason = !allowedModel ? 'model_unavailable'
       : !providerReady ? 'provider_unavailable'
@@ -76,15 +80,19 @@ export async function getCanvasImageQuote(user: SessionUser, input: CanvasQuoteI
       label: studioModel ? IMAGE_STUDIO_MODEL_LABELS[model as ImageStudioModel] : (api.provider === 'seedream' ? 'Seedream 5.0 Pro' : model),
       status: reason ? 'unavailable' as const : 'estimate' as const,
       reason,
-      unitCredits: reason ? null : price,
-      estimatedCredits: reason ? null : estimated,
+      unitCredits: reason || actualQuoteRequired ? null : price,
+      estimatedCredits: reason || actualQuoteRequired ? null : estimated,
       count: input.count,
       chargeEnabled: false as const,
+      billingMode: 'fixed' as const,
+      actualQuoteRequired,
+      estimateSource: 'legacy_fixed' as const,
+      creditPrecision: 0.01,
     };
   };
   const now = Date.now();
   return {
-    ...quoteModel(input.model),
+    ...await quoteModel(input.model),
     kind: 'image' as const,
     scope: 'ordinary_image' as const,
     projectId: input.project_id,
@@ -97,6 +105,6 @@ export async function getCanvasImageQuote(user: SessionUser, input: CanvasQuoteI
     specifications: { resolution: input.resolution || null, ratio: input.ratio || null, size: input.size || null, quality: input.quality || null },
     issuedAt: new Date(now).toISOString(),
     expiresAt: new Date(now + 60_000).toISOString(),
-    modelOptions: models.map(quoteModel),
+    modelOptions: await Promise.all(models.map(quoteModel)),
   };
 }

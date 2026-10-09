@@ -1,6 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 'use client';
 import { SessionPreviewImage } from '@/components/SessionPreviewImage';
+import { ImageBillingBadge } from '@/components/ImageBillingBadge';
 import { handBulkVideoZipToBrowser } from '@/lib/video/native-bulk-download';
 import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 
@@ -37,6 +38,8 @@ import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { StudioBatchHistory } from '@/app/image-studio/batch-results';
 import { costAmountToCnyEstimate, usdToCnyRateText } from '@/lib/costs/currency';
 import type { NormalVideoChargeEstimate } from '@/lib/costs/normal-video-charge';
+import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
+import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
 import { assetGridProfilerOnRender } from '@/lib/performance/interaction-metrics';
 
 type AssetScope = 'history' | 'project' | 'user';
@@ -130,6 +133,7 @@ type AssetLibraryItem = {
   providerOfficialAmountMicros: number | null;
   providerFinalAmountMicros: number | null;
   chargedCredits: number | null;
+  imageBilling?: ImageBillingView | null;
   normalChargeEstimate: NormalVideoChargeEstimate | null;
   videoCardId: string | null;
   isEnhanceTask: boolean;
@@ -742,6 +746,8 @@ function AssetsPageContent() {
   const [users, setUsers] = useState<UserItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncingAssets, setSyncingAssets] = useState(false);
+  useImageBillingRefresh(items.map(item => ({ id: item.id, billing: item.imageBilling })),
+    () => { if (!syncingAssets) setReloadToken(value => value + 1); }, !!user);
   const [showingCachedAssets, setShowingCachedAssets] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -2333,6 +2339,7 @@ function AssetsPageContent() {
                           )}
                         </span>
                       )}
+                      {item.kind === 'image' && <ImageBillingBadge billing={item.imageBilling} />}
                       {duration && <span className="asset-card-duration">{duration}</span>}
                       {(item.status === 'succeeded' || item.source !== 'video_task') && <ContentReactions contentKey={item.id} overlay />}
                     </span>

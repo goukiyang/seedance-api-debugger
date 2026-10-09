@@ -85,3 +85,19 @@
     letter-spacing: 0;
     overflow-wrap: anywhere;
 }
+.generated-reference-card { position: relative; }
+.canvas-image-billing {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 2;
+    max-width: calc(100% - 16px);
+    padding: 3px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.94);
+    color: #333;
+    font-size: 11px;
+    line-height: 16px;
+    overflow-wrap: anywhere;
+    pointer-events: none;
+}

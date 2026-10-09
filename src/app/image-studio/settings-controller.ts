@@ -5,6 +5,7 @@ export type SettingsValue = {
   providerReady: boolean;
   modelReady?: Record<string, boolean>;
   modelFourToOne?: Record<string, boolean>;
+  billingReadiness?: { models: Record<string, { ready: boolean }> };
   prices: Record<string, number | null>;
 };
 
@@ -67,7 +68,7 @@ export function createStudioSettingsController(isAdmin: boolean, transport: Tran
     async refreshAvailability() {
       try {
         const value = await transport.read();
-        if (state.settings) update({ settings: { ...state.settings, providerReady: value.providerReady, modelReady: value.modelReady, modelFourToOne: value.modelFourToOne } });
+        if (state.settings) update({ settings: { ...state.settings, providerReady: value.providerReady, modelReady: value.modelReady, modelFourToOne: value.modelFourToOne, billingReadiness: value.billingReadiness } });
       } catch { /* A transient availability failure must not replace the settings baseline. */ }
     },
     editContext(context: string) {

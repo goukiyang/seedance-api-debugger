@@ -5,12 +5,177 @@
 
     function create(hooks) {
         const polling = new Map();
+        const billingPolling = new Map();
+        const billingPending = rows => (rows || []).some(item => item.billing?.pollUntil
+            && Date.parse(item.billing.pollUntil) > Date.now()
+            && ['awaiting_response', 'pending', 'reconciling'].includes(item.billing.status));
+        async function resumeBilling(nodeId) {
+            const node = hooks.getNode(nodeId), job = node?.data?.imageBillingJob;
+            if (!job || billingPolling.has(node) || !current(node, job.context)) return;
+            const operation = (async () => {
+                let failures = 0;
+                for (let attempt = 0; attempt < 100 && current(node, job.context) && node.data.imageBillingJob === job; attempt++) {
+                    if (document.hidden) { await new Promise(resolve => setTimeout(resolve, 15000)); continue; }
+                    try {
+                        const result = await json(`${endpoint}/results`, { ...job.context, nodeId: node.id,
+                            moduleId: job.moduleId, batchId: job.batchId, requestId: job.requestId, count: job.count, action: 'billing' });
+                        if (!current(node, job.context) || node.data.imageBillingJob !== job) return;
+                        hooks.billing?.(node.id, result.billing || []);
+                        failures = 0;
+                        if (!billingPending(result.billing)) {
+                            if (node.data.imageBillingJob === job && job.state !== 'settled') {
+                                job.state = 'settled';
+                                hooks.save('canvas_image_billing_finished');
+                            }
+                            return;
+                        }
+                    } catch (error) { if ([401, 403, 404].includes(error.status) || ++failures >= 3) return; }
+                    await new Promise(resolve => setTimeout(resolve, 15000));
+                }
+            })();
+            billingPolling.set(node, operation);
+            try { await operation; } finally { if (billingPolling.get(node) === operation) billingPolling.delete(node); }
+        }
         const pendingFavorites = new Map();
+        const actualQuotes = new Map();
         const sameContext = (a, b) => ['userId', 'projectId', 'cardId', 'documentId'].every(key => a?.[key] === b?.[key]);
         const current = (node, context) => hooks.getNode(node.id) === node && sameContext(context, hooks.context());
         const json = (url, payload, signal) => hooks.request(url, {
             ...(payload ? { method: 'POST', payload } : {}), cache: 'no-store', signal: signal || AbortSignal.timeout(30000)
         });
+        const quoteSnapshot = nodeId => hooks.getQuoteSnapshot?.(nodeId) || '';
+        const quoteInputsMatch = (node, context, snapshot) => current(node, context)
+            && context.writable === hooks.context().writable
+            && typeof snapshot === 'string' && snapshot.length > 0 && quoteSnapshot(node.id) === snapshot;
+        function validActualQuote(quote, revision) {
+            const expiresAt = Date.parse(quote?.expiresAt);
+            return quote?.billingMode === 'actual' && quote.actualChargeEnabled === true
+                && typeof quote.billingQuoteId === 'string' && quote.billingQuoteId.length > 0
+                && Number.isSafeInteger(quote.revision) && quote.revision === revision
+                && Number.isFinite(quote.estimatedCredits) && quote.estimatedCredits >= 0
+                && Number.isSafeInteger(Math.ceil(quote.estimatedCredits))
+                && Number.isFinite(expiresAt) && expiresAt > Date.now();
+        }
+        const showQuote = (nodeId, quote) => hooks.showQuote?.(nodeId, quote);
+        const clearQuote = nodeId => hooks.clearQuote?.(nodeId);
+
+        function invalidateQuote(nodeId) {
+            const entry = actualQuotes.get(String(nodeId));
+            entry?.controller?.abort();
+            actualQuotes.delete(String(nodeId));
+            hooks.clearActualQuote?.(nodeId);
+        }
+
+        function ordinaryModuleId(node, context) {
+            const id = node.data?.canvasImageModuleId;
+            const owner = node.data?.canvasImageModuleOwnerId;
+            if (owner === context.userId && id === `default-${context.userId}`) return id;
+            if (owner === context.userId && typeof id === 'string'
+                && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) return id;
+            const nextId = `default-${context.userId}`;
+            node.data = { ...(node.data || {}), canvasImageModuleId: nextId, canvasImageModuleOwnerId: context.userId };
+            hooks.save('canvas_image_quote_module');
+            return nextId;
+        }
+
+        function buildActualQuoteInput(node, safeQuote, context) {
+            const payload = hooks.getGenerationPayload?.(node.id);
+            if (!payload || payload.nodeId !== node.id) return null;
+            const style = node.data?.canvasStyle;
+            const requestId = crypto.randomUUID();
+            const prompt = payload.prompt || '';
+            if (style) {
+                return {
+                    endpoint: `${endpoint}/generate`,
+                    revision: style.settingsRevision,
+                    input: { ...context, nodeId: node.id, moduleId: style.moduleId, requestId,
+                        settingsRevision: style.settingsRevision, moduleRevision: style.moduleRevision,
+                        prompt, ...(payload.promptMentions ? { promptMentions: payload.promptMentions } : {}),
+                        referenceImageIds: payload.referenceImageIds || [],
+                        settings: { model: style.model, quality: style.quality, resolution: style.resolution,
+                            count: style.count, ratio: style.aspectRatio } }
+                };
+            }
+            const settings = payload.settings || {};
+            return {
+                endpoint: '/api/tools/ultimate-canvas/images/generate',
+                revision: safeQuote.revision,
+                input: { projectId: context.projectId, cardId: context.cardId, documentId: context.documentId,
+                    nodeId: node.id, requestId, moduleId: ordinaryModuleId(node, context), prompt,
+                    ...(payload.promptMentions ? { promptMentions: payload.promptMentions } : {}),
+                    settingsRevision: safeQuote.revision, referenceImageIds: payload.referenceImageIds || [],
+                    settings: { model: settings.model, quality: settings.quality, resolution: settings.resolution,
+                        ratio: settings.requestedRatio || settings.ratio, count: settings.count } }
+            };
+        }
+
+        async function getActualQuoteEntry(nodeId, safeQuote) {
+            const node = hooks.getNode(nodeId);
+            const context = hooks.context();
+            const generationPayload = node && hooks.getGenerationPayload?.(nodeId);
+            const settings = generationPayload?.settings || {};
+            const style = node?.data?.canvasStyle;
+            const expectedModel = style?.model || settings.model;
+            const expectedCount = style?.count ?? settings.count;
+            if (!node || node.type !== 'image' || !context.userId || !generationPayload || !context.writable || !context.projectId
+                || !context.documentId || !context.cardId || safeQuote?.actualQuoteRequired !== true
+                || safeQuote.kind !== 'image' || safeQuote.projectId !== context.projectId
+                || safeQuote.model !== expectedModel || safeQuote.count !== expectedCount
+                || safeQuote.status !== 'estimate' || !Number.isSafeInteger(safeQuote.revision)
+                || node.data?.styleJob) throw new Error('报价或画布状态未就绪；未提交生成。');
+            if (!style) ordinaryModuleId(node, context);
+            const snapshot = quoteSnapshot(nodeId);
+            if (!snapshot) throw new Error('画布节点未保存；未获取报价。');
+
+            const cached = actualQuotes.get(String(nodeId));
+            if (cached?.snapshot === snapshot && cached.revision === safeQuote.revision) {
+                if (cached.promise) return cached.promise;
+                if (validActualQuote(cached.quote, cached.revision)) return cached;
+            }
+            invalidateQuote(nodeId);
+            const controller = new AbortController();
+            const entry = { snapshot, revision: safeQuote.revision, controller, quote: null, promise: null };
+            actualQuotes.set(String(nodeId), entry);
+            entry.promise = (async () => {
+                const timeout = window.setTimeout(() => controller.abort(), 30000);
+                try {
+                    if (!await hooks.flush('canvas_image_quote_prepare') || !quoteInputsMatch(node, context, snapshot)) {
+                        throw new Error('画布已变化或尚未保存；未获取报价。');
+                    }
+                    const request = buildActualQuoteInput(node, safeQuote, context);
+                    if (!request || request.revision !== safeQuote.revision) throw new Error('报价版本已变化；未获取报价。');
+                    const quote = await json(request.endpoint, { ...request.input, action: 'quote' }, controller.signal);
+                    const currentModuleId = node.data?.canvasStyle?.moduleId || node.data?.canvasImageModuleId;
+                    if (actualQuotes.get(String(nodeId)) !== entry || controller.signal.aborted
+                        || request.input.moduleId !== currentModuleId
+                        || !validActualQuote(quote, entry.revision) || !quoteInputsMatch(node, context, snapshot)) {
+                        throw new Error('报价已过期或参数已变化；未提交生成。');
+                    }
+                    entry.quote = quote;
+                    entry.input = request.input;
+                    entry.kind = node.data?.canvasStyle ? 'style' : 'ordinary';
+                    return entry;
+                } finally { window.clearTimeout(timeout); }
+            })().catch(error => {
+                if (actualQuotes.get(String(nodeId)) === entry) actualQuotes.delete(String(nodeId));
+                throw error;
+            }).finally(() => { entry.promise = null; });
+            return entry.promise;
+        }
+
+        async function prefetchActualQuote(nodeId, safeQuote) {
+            try { return (await getActualQuoteEntry(nodeId, safeQuote)).quote; }
+            catch { return null; }
+        }
+
+        function cachedActualQuote(nodeId, snapshot, revision) {
+            const entry = actualQuotes.get(String(nodeId));
+            const node = hooks.getNode(nodeId);
+            const expectedModuleId = node?.data?.canvasStyle?.moduleId || node?.data?.canvasImageModuleId;
+            return entry?.snapshot === snapshot && entry.revision === revision
+                && entry.input?.moduleId === expectedModuleId
+                && validActualQuote(entry.quote, revision) ? entry : null;
+        }
 
         async function open(nodeId) {
             const node = hooks.getNode(nodeId);
@@ -146,10 +311,19 @@
                         throw new Error('上游受理尚未确认，请查询原任务；不会重新生成或扣点。');
                     }
                     if (!result.pending) {
+                        hooks.billing?.(node.id, result.billing || []);
+                        if ((result.billing || []).some(item => item.assetId && item.billing)) {
+                            node.data.imageBillingJob = { context: job.context, moduleId: job.moduleId,
+                                batchId: job.batchId, requestId: job.requestId, count: job.count,
+                                state: billingPending(result.billing) ? 'pending' : 'settled' };
+                            if (billingPending(result.billing)) void resumeBilling(node.id);
+                        }
                         delete node.data.styleJob;
                         hooks.save('canvas_style_finished');
+                        hooks.quoteConsumed?.(node.id);
                         if (!result.assets?.length) throw new Error(result.error || '风格生成失败，输入和参考已保留。');
-                        return { ...result, partial: result.status !== 'succeeded' || Boolean(result.error),
+                        const { billing, billingPending: pendingBilling, ...publicResult } = result;
+                        return { ...publicResult, partial: result.status !== 'succeeded' || Boolean(result.error),
                             message: result.error ? `已保存 ${result.assets.length} 张图片；${result.error}` : `已生成 ${result.assets.length} 张图片，并保存到资产库。` };
                     }
                     job.state = 'running';
@@ -170,6 +344,15 @@
             if (!style || style.appliedBy !== context.userId) throw new Error('请重新应用此风格后生成。');
             let job = node.data.styleJob;
             if (job && !sameContext(job.context, context)) throw new Error('此任务属于原项目或视频卡，请返回原画布查看。');
+            if (job?.quoteExpiresAt && !job.batchId && Date.parse(job.quoteExpiresAt) <= Date.now()) {
+                clearQuote(node.id);
+                try {
+                    return { ...await waitForResult(node, job), canvasStylePayload: job.payload };
+                } catch (error) {
+                    if (current(node, context)) hooks.status(node.id, 'warn', '报价已过期；仅查询原请求，未重新提交生成。');
+                    throw new Error(`报价已过期；未重新提交生成。${error.message ? ` ${error.message}` : ''}`);
+                }
+            }
             if (!job) {
                 job = { requestId: payload.requestId || crypto.randomUUID(), moduleId: style.moduleId,
                     context: { userId: context.userId, projectId: context.projectId, cardId: context.cardId, documentId: context.documentId },
@@ -181,12 +364,80 @@
                             count: style.count, ratio: style.aspectRatio } }
                 };
                 job.input.requestId = job.requestId;
+                const snapshot = quoteSnapshot(node.id);
+                let quote;
+                try {
+                    quote = await json('/api/tools/ultimate-canvas/quote', { kind: 'image', project_id: context.projectId,
+                        model: style.model, count: style.count, quality: style.quality, resolution: style.resolution,
+                        ratio: style.aspectRatio || 'auto' });
+                } catch (error) {
+                    clearQuote(node.id);
+                    throw error;
+                }
+                if (quote?.kind !== 'image' || quote.projectId !== context.projectId || quote.model !== style.model
+                    || quote.count !== style.count || typeof quote.actualQuoteRequired !== 'boolean'
+                    || !Number.isSafeInteger(quote.revision) || quote.revision !== style.settingsRevision
+                    || quote.actualQuoteRequired && (quote.unitCredits !== null || quote.estimatedCredits !== null)
+                    || !quoteInputsMatch(node, context, snapshot)) {
+                    clearQuote(node.id);
+                    throw new Error('风格参数或报价资格已变化，请重新应用风格后重试；未提交生成。');
+                }
+                if (quote.actualQuoteRequired) {
+                    let actualEntry;
+                    try {
+                        actualEntry = cachedActualQuote(node.id, snapshot, style.settingsRevision)
+                            || await getActualQuoteEntry(node.id, quote);
+                    } catch (error) {
+                        clearQuote(node.id);
+                        throw error;
+                    }
+                    const actualQuote = actualEntry.quote;
+                    if (actualEntry.kind !== 'style' || !validActualQuote(actualQuote, style.settingsRevision)
+                        || !quoteInputsMatch(node, context, snapshot)) {
+                        clearQuote(node.id);
+                        throw new Error('完整报价已失效或参数已变化；本次未提交，请重新获取并确认。');
+                    }
+                    job.requestId = actualEntry.input.requestId;
+                    job.input = actualEntry.input;
+                    const maxEstimatedCost = Math.ceil(actualQuote.estimatedCredits);
+                    showQuote(node.id, actualQuote);
+                    let confirmed = false;
+                    try {
+                        confirmed = await hooks.confirm({ title: '生成图片',
+                            message: `本次 ${style.count} 张图片，报价约 ${maxEstimatedCost} 点。`,
+                            detail: '确认后按实际费用核对；报价过期或参数变化时不会提交。',
+                            confirmLabel: `确认 ${maxEstimatedCost} 点` });
+                    } catch (error) {
+                        clearQuote(node.id);
+                        throw error;
+                    }
+                    if (!confirmed) {
+                        clearQuote(node.id);
+                        throw new Error('已取消，未提交风格图片生成。');
+                    }
+                    if (!validActualQuote(actualQuote, style.settingsRevision)
+                        || !quoteInputsMatch(node, context, snapshot)) {
+                        clearQuote(node.id);
+                        throw new Error('报价已过期或风格参数已变化；本次未提交，请重新获取并确认。');
+                    }
+                    job.input.billingQuoteId = actualQuote.billingQuoteId;
+                    job.input.maxEstimatedCost = maxEstimatedCost;
+                    job.quoteExpiresAt = actualQuote.expiresAt;
+                } else invalidateQuote(node.id);
                 node.data.styleJob = job;
                 hooks.render(node.id);
                 hooks.save('canvas_style_submit_prepare');
                 if (!await hooks.flush('canvas_style_submit_prepare')) {
                     delete node.data.styleJob;
+                    clearQuote(node.id);
                     throw new Error('画布尚未保存，未提交生成。请恢复连接后再试。');
+                }
+                if (job.quoteExpiresAt && Date.parse(job.quoteExpiresAt) <= Date.now()) {
+                    delete node.data.styleJob;
+                    if (current(node, context)) hooks.save('canvas_style_quote_expired');
+                    invalidateQuote(node.id);
+                    clearQuote(node.id);
+                    throw new Error('本次报价已过期，请重新点击获取报价；未提交生成。');
                 }
             }
             if (!current(node, job.context)) throw contextError();
@@ -195,8 +446,12 @@
                     const accepted = await json(`${endpoint}/generate`, job.input);
                     job.batchId = accepted.batchId;
                     job.state = 'running';
+                    invalidateQuote(node.id);
+                    clearQuote(node.id);
                     if (current(node, job.context)) hooks.save('canvas_style_submitted');
                 } catch (error) {
+                    invalidateQuote(node.id);
+                    clearQuote(node.id);
                     if (Number.isInteger(error.status) && error.status >= 400 && error.status < 500 && ![408, 429].includes(error.status)) {
                         delete node.data.styleJob;
                     } else job.state = 'unconfirmed';
@@ -226,32 +481,105 @@
                 }
             }
             const settings = structuredClone(payload.settings);
+            const snapshot = quoteSnapshot(node.id);
             const quote = await json('/api/tools/ultimate-canvas/quote', { kind: 'image', project_id: context.projectId,
                 model: settings.model, count: settings.count, quality: settings.quality, resolution: settings.resolution,
                 size: settings.size || '1K', ratio: settings.requestedRatio || settings.ratio });
-            if (quote.status !== 'estimate' || !Number.isSafeInteger(quote.estimatedCredits) || quote.estimatedCredits < 0) throw new Error('当前模型报价不可用，请选择已配置模型或重试');
-            if (!await hooks.confirm({ title: '生成图片', message: `本次 ${settings.count} 张图片，预计 ${quote.estimatedCredits} 点。`, confirmLabel: `确认 ${quote.estimatedCredits} 点` })) throw new Error('已取消，未提交图片生成');
-            if (!current(node, context)) throw contextError();
-            job = { kind: 'ordinary', requestId: crypto.randomUUID(), moduleId: crypto.randomUUID(), count: settings.count,
+            job = { kind: 'ordinary', requestId: crypto.randomUUID(), moduleId: ordinaryModuleId(node, context), count: settings.count,
                 context: { userId: context.userId, projectId: context.projectId, cardId: context.cardId, documentId: context.documentId },
                 payload, state: 'unconfirmed' };
             job.input = { projectId: context.projectId, cardId: context.cardId, documentId: context.documentId,
                 nodeId: node.id, requestId: job.requestId, moduleId: job.moduleId, prompt: resolvedPrompt,
                 ...(payload.promptMentions ? { promptMentions: payload.promptMentions } : {}),
-                settingsRevision: quote.revision, maxEstimatedCost: quote.estimatedCredits,
+                settingsRevision: quote.revision,
                 referenceImageIds: payload.referenceImageIds || [], settings: { model: settings.model,
                     quality: settings.quality, resolution: settings.resolution, ratio: settings.requestedRatio || settings.ratio, count: settings.count } };
+            if (quote?.kind !== 'image' || quote.projectId !== context.projectId
+                || quote.model !== settings.model || quote.count !== settings.count
+                || quote.status !== 'estimate' || quote.chargeEnabled !== false
+                || typeof quote.actualQuoteRequired !== 'boolean'
+                || !Number.isSafeInteger(quote.revision)
+                || quote.actualQuoteRequired && (quote.unitCredits !== null || quote.estimatedCredits !== null)
+                || !quote.actualQuoteRequired && (!Number.isSafeInteger(quote.estimatedCredits) || quote.estimatedCredits < 0)
+                || !quoteInputsMatch(node, context, snapshot)) {
+                throw new Error('当前图片报价无效或参数已变化，请重新核对；未提交生成。');
+            }
+            if (quote.actualQuoteRequired) {
+                let actualEntry;
+                try {
+                    actualEntry = cachedActualQuote(node.id, snapshot, quote.revision)
+                        || await getActualQuoteEntry(node.id, quote);
+                }
+                catch (error) {
+                    clearQuote(node.id);
+                    throw error;
+                }
+                const actualQuote = actualEntry.quote;
+                if (actualEntry.kind !== 'ordinary') {
+                    invalidateQuote(node.id);
+                    throw new Error('图片报价与当前节点不匹配；未提交生成。');
+                }
+                if (!validActualQuote(actualQuote, quote.revision) || !quoteInputsMatch(node, context, snapshot)) {
+                    clearQuote(node.id);
+                    throw new Error('完整报价已失效或参数已变化；本次未提交，请重新获取并确认。');
+                }
+                const maxEstimatedCost = Math.ceil(actualQuote.estimatedCredits);
+                showQuote(node.id, actualQuote);
+                let confirmed = false;
+                try {
+                    confirmed = await hooks.confirm({ title: '生成图片',
+                        message: `本次 ${settings.count} 张图片，报价约 ${maxEstimatedCost} 点。`,
+                        detail: '确认后按实际费用核对；报价过期或参数变化时不会提交。',
+                        confirmLabel: `确认 ${maxEstimatedCost} 点` });
+                } catch (error) {
+                    clearQuote(node.id);
+                    throw error;
+                }
+                if (!confirmed) {
+                    clearQuote(node.id);
+                    throw new Error('已取消，未提交图片生成。');
+                }
+                if (!validActualQuote(actualQuote, quote.revision) || !quoteInputsMatch(node, context, snapshot)) {
+                    clearQuote(node.id);
+                    throw new Error('报价已过期或图片参数已变化；本次未提交，请重新获取并确认。');
+                }
+                job.requestId = actualEntry.input.requestId;
+                job.moduleId = actualEntry.input.moduleId;
+                job.input = actualEntry.input;
+                job.input.billingQuoteId = actualQuote.billingQuoteId;
+                job.input.maxEstimatedCost = maxEstimatedCost;
+                job.quoteExpiresAt = actualQuote.expiresAt;
+            } else {
+                invalidateQuote(node.id);
+                if (!await hooks.confirm({ title: '生成图片', message: `本次 ${settings.count} 张图片，预计 ${quote.estimatedCredits} 点。`, confirmLabel: `确认 ${quote.estimatedCredits} 点` })) throw new Error('已取消，未提交图片生成');
+                if (!quoteInputsMatch(node, context, snapshot)) throw new Error('图片参数已变化，请重新核对报价；未提交生成。');
+                job.input.maxEstimatedCost = quote.estimatedCredits;
+            }
             node.data.styleJob = job;
             hooks.save('ordinary_image_before_submit');
             if (!await hooks.flush('ordinary_image_before_submit')) {
                 delete node.data.styleJob;
                 hooks.save('ordinary_image_not_sent');
+                clearQuote(node.id);
                 throw new Error('图片请求未发出，画布尚未保存；请先重试保存');
             }
-            if (!current(node, context)) throw contextError();
+            if (!quoteInputsMatch(node, context, snapshot)) {
+                delete node.data.styleJob;
+                hooks.save('ordinary_image_quote_invalidated');
+                clearQuote(node.id);
+                throw new Error('图片参数或画布已变化；本次未提交，请重新确认。');
+            }
+            if (job.quoteExpiresAt && Date.parse(job.quoteExpiresAt) <= Date.now()) {
+                delete node.data.styleJob;
+                hooks.save('ordinary_image_quote_expired');
+                clearQuote(node.id);
+                throw new Error('本次报价已过期，请重新点击获取报价；未提交生成。');
+            }
             let accepted;
             try { accepted = await json('/api/tools/ultimate-canvas/images/generate', job.input); }
             catch (error) {
+                invalidateQuote(node.id);
+                clearQuote(node.id);
                 if (Number.isInteger(error.status) && error.status >= 400 && error.status < 500 && ![408, 429].includes(error.status)) {
                     delete node.data.styleJob;
                     if (current(node, context)) hooks.save('ordinary_image_rejected');
@@ -259,6 +587,8 @@
                 throw error;
             }
             job.batchId = accepted.batchId; job.state = 'running';
+            invalidateQuote(node.id);
+            clearQuote(node.id);
             if (current(node, context)) hooks.save('ordinary_image_submitted');
             return { ...await waitForResult(node, job), canvasStylePayload: job.payload };
         }
@@ -282,7 +612,8 @@
             }
         }
 
-        return { open, clear, generate, generateOrdinary, resume };
+        return { open, clear, generate, generateOrdinary, resume, resumeBilling,
+            prefetchActualQuote, invalidateQuote };
     }
 
     window.UltimateCanvasStyles = { create };

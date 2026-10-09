@@ -31,6 +31,8 @@ export function imageStudioSettingsPayload(settings: ImageStudioSettings, isAdmi
   return {
     model: settings.model, prices: settings.prices, revision: settings.revision,
     contextConfigured: Boolean(settings.context.trim()),
+    billing: { mode: 'per_submission', actualChargeEnabled: false, requiresConfirmedQuote: true,
+      pointsPerUsd: 35, multiplier: 1, creditPrecision: 0.01, oldTasksRebilled: false },
     ...(isAdmin ? { context: settings.context } : {}),
   };
 }

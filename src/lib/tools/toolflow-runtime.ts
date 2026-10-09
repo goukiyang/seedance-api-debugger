@@ -1,16 +1,40 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { allocateTaskCredits, settleTaskCredits, type CreditPolicyUser } from '@/lib/credits/policy';
 import { createInAppNotification } from '@/lib/notifications';
-import { getImageStudioSettings } from '@/lib/image-studio/settings';
+import { getImageStudioSettings, IMAGE_STUDIO_SETTING_KEY } from '@/lib/image-studio/settings';
 import { canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from '@/lib/image-studio/access';
 import { defaultImageStudioQuality, normalizeImageStudioQuality, IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
 import { normalizeStudioRatio, studioRatioSize } from '@/lib/image-studio/ratios';
+import { getImageGenerationSettingsForModel } from '@/lib/integrations/image-generation';
+import { imageBillingScope } from '@/lib/image-studio/billing-scope';
+import { fixedImageBillingContract, imageSpecification } from '@/lib/image-studio/billing-quote';
+import { creditsToCents } from '@/lib/image-studio/billing-contract';
 import { assertCanUseToolFlow, parseJsonObject, validateToolFlowGraph, type ToolFlowGraph, type ToolFlowNode } from './toolflow';
 
 type Tx = Prisma.TransactionClient;
+type ToolFlowQuoteStep = {
+  nodeId: string;
+  templateId: string | null;
+  moduleId: string | null;
+  templateVersion: string | null;
+  model: string;
+  count: number;
+  unitCredits: number | null;
+  estimatedCredits: number | null;
+  status: 'fixed' | 'unknown';
+};
+type ToolFlowQuote = {
+  flowId: string;
+  flowVersion: number;
+  settingsRevision: number;
+  estimatedCredits: number | null;
+  expiresAt: string;
+  billingMode: 'fixed';
+  steps: ToolFlowQuoteStep[];
+};
 type RunSnapshot = {
   schema: 'toolflow.v1';
   flow_id: string;
@@ -20,6 +44,8 @@ type RunSnapshot = {
   project_id: string | null;
   graph: ToolFlowGraph;
   input_asset_ids: string[];
+  billing_mode?: 'fixed';
+  billing_quote?: ToolFlowQuote;
 };
 
 type NodeResult = {
@@ -44,11 +70,19 @@ type TemplateConfig = {
   referenceIds: string[];
   moduleId: string | null;
   templateId: string | null;
+  templateVersion: string | null;
   sourcePresetId: string | null;
 };
 
 const TERMINAL_TASK_STATUSES = new Set(['succeeded', 'failed', 'uncertain', 'cancelled']);
 const TERMINAL_RUN_STATUSES = new Set(['succeeded', 'partial_success', 'failed', 'cancelled']);
+
+function toolFlowQuoteSecret() {
+  const secret = process.env.SESSION_SECRET?.trim();
+  if (secret) return secret;
+  if (process.env.NODE_ENV === 'production') throw new AuthError('工具流报价校验暂不可用', 503);
+  return 'dev-secret-change-in-production';
+}
 
 function clean(value: unknown, fallback = '') {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
@@ -81,6 +115,45 @@ function parseNodeResult(value: string | null | undefined): NodeResult {
 
 function stringify(value: unknown) {
   return JSON.stringify(value);
+}
+
+function quoteProofPayload(userId: string, value: unknown) {
+  const quote = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const steps = Array.isArray(quote.steps) ? quote.steps.map((value) => {
+    const step = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+    return ['nodeId', 'templateId', 'moduleId', 'templateVersion', 'model', 'count', 'unitCredits', 'estimatedCredits', 'status']
+      .map((key) => step[key] ?? null);
+  }) : [];
+  return JSON.stringify([userId, quote.flowId ?? null, quote.flowVersion ?? null, quote.settingsRevision ?? null,
+    quote.estimatedCredits ?? null, quote.expiresAt ?? null, quote.billingMode ?? null, steps]);
+}
+
+export function toolFlowQuoteCookieName(flowId: string, expiresAt: string) {
+  const id = createHash('sha256').update(`${flowId}\0${expiresAt}`).digest('hex').slice(0, 24);
+  return `toolflow_quote_${id}`;
+}
+
+export function createToolFlowQuoteProof(userId: string, quote: ToolFlowQuote) {
+  return createHmac('sha256', toolFlowQuoteSecret()).update(quoteProofPayload(userId, quote)).digest('base64url');
+}
+
+export function assertToolFlowQuoteProof(userId: string, quote: unknown, proof: string | undefined) {
+  if (!proof || !/^[A-Za-z0-9_-]{43}$/.test(proof)) throw new AuthError('工具流报价凭据无效或已过期，请重新报价', 409);
+  const expected = createHmac('sha256', toolFlowQuoteSecret()).update(quoteProofPayload(userId, quote)).digest();
+  const received = Buffer.from(proof, 'base64url');
+  if (received.length !== expected.length || !timingSafeEqual(received, expected)) {
+    throw new AuthError('工具流报价凭据无效或已过期，请重新报价', 409);
+  }
+}
+
+async function currentImageSettingsRevision(tx: Tx) {
+  const row = await tx.platformSetting.findUnique({ where: { key: IMAGE_STUDIO_SETTING_KEY } });
+  if (!row) return 0;
+  try {
+    const revision = Number((JSON.parse(row.value_json) as { revision?: unknown }).revision);
+    if (Number.isInteger(revision) && revision >= 0) return revision;
+  } catch { /* Invalid settings cannot validate a quote. */ }
+  throw new AuthError('图片设置已变化，请重新获取报价', 409);
 }
 
 function nodeMap(graph: ToolFlowGraph) {
@@ -198,6 +271,7 @@ async function resolveTemplate(
   inputAssetIds: string[],
   settings: Awaited<ReturnType<typeof getImageStudioSettings>>,
   identity: ImageStudioIdentity,
+  options: { cloneReferenceAssets?: boolean; allowUnknownModel?: boolean; allowUnknownPrice?: boolean } = {},
 ): Promise<TemplateConfig> {
   const data = node.data || {};
   const templateId = clean(data.template_id || data.templateId) || null;
@@ -217,15 +291,17 @@ async function resolveTemplate(
   let outputSize: string | null = clean(data.size || data.output_size) || null;
   let templateReferenceIds: string[] = [];
   let sourcePresetId: string | null = null;
-  const templateVersion = data.template_version ?? data.templateVersion;
+  const requestedTemplateVersion = data.template_version ?? data.templateVersion;
+  let resolvedTemplateVersion: string | null = null;
 
   if (templateId) {
     const preset = await tx.imageStudioPreset.findUnique({ where: { id: templateId } });
     if (!preset || !canViewStudioPreset(identity, preset)) throw new AuthError('图片模板不存在或未授权', 403);
     sourcePresetId = preset.id;
     const presetIds = safeJsonArray(preset.reference_ids);
-    if (templateVersion && String(templateVersion) !== preset.updated_at.toISOString()) throw new AuthError('图片模板已更新，请刷新后重新确认节点配置', 409);
-    templateReferenceIds = await clonePresetAssets(tx, preset.owner_id, ownerId, presetIds);
+    resolvedTemplateVersion = preset.updated_at.toISOString();
+    if (requestedTemplateVersion && String(requestedTemplateVersion) !== resolvedTemplateVersion) throw new AuthError('图片模板已更新，请刷新后重新确认节点配置', 409);
+    templateReferenceIds = options.cloneReferenceAssets === false ? presetIds : await clonePresetAssets(tx, preset.owner_id, ownerId, presetIds);
     if (data.model && clean(data.model) !== preset.model) throw new AuthError('当前模板不允许切换到该图片模型', 400);
     prompt = [preset.prompt, promptSupplement].filter(Boolean).join('\n\n');
     templateContext = preset.context || '';
@@ -242,8 +318,10 @@ async function resolveTemplate(
       const source = await tx.imageStudioPreset.findUnique({ where: { id: studioModule.source_preset_id }, select: { owner_id: true, scope: true, is_shared: true } });
       if (!source || !canViewStudioPreset(identity, source)) throw new AuthError('该模板已停止共享，不能新建任务', 403);
     }
-    if (templateVersion && String(templateVersion) !== String(studioModule.revision)) throw new AuthError('图片模块已更新，请刷新后重新确认节点配置', 409);
-    templateReferenceIds = await clonePresetAssets(tx, ownerId, ownerId, safeJsonArray(studioModule.reference_ids));
+    resolvedTemplateVersion = String(studioModule.revision);
+    if (requestedTemplateVersion && String(requestedTemplateVersion) !== resolvedTemplateVersion) throw new AuthError('图片模块已更新，请刷新后重新确认节点配置', 409);
+    const moduleReferenceIds = safeJsonArray(studioModule.reference_ids);
+    templateReferenceIds = options.cloneReferenceAssets === false ? moduleReferenceIds : await clonePresetAssets(tx, ownerId, ownerId, moduleReferenceIds);
     if (data.model && clean(data.model) !== studioModule.model) throw new AuthError('当前模板不允许切换到该图片模型', 400);
     prompt = [studioModule.prompt, promptSupplement].filter(Boolean).join('\n\n');
     templateContext = studioModule.context || '';
@@ -264,13 +342,13 @@ async function resolveTemplate(
   const nodeContext = clean(data.context || data.module_context || data.moduleContext);
   context = [settings.context, templateContext, nodeContext].map((value) => clean(value)).filter(Boolean).join('\n\n---\n');
 
-  if (!IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number])) throw new AuthError('当前图片模型未配置或不可用', 409);
+  if (!options.allowUnknownModel && !IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number])) throw new AuthError('当前图片模型未配置或不可用', 409);
   // A saved image module may intentionally keep the user-facing prompt empty
   // and store the reusable instruction in its context. The image worker uses
   // that context as the provider prompt when no extra scene description is
   // supplied, so do not reject a selected module solely for an empty prompt.
   if (!prompt && !context.trim()) throw new AuthError('图片模板没有有效提示词', 400);
-  if (!settings.prices[model as keyof typeof settings.prices] && settings.prices[model as keyof typeof settings.prices] !== 0) {
+  if (options.allowUnknownPrice !== true && !settings.prices[model as keyof typeof settings.prices] && settings.prices[model as keyof typeof settings.prices] !== 0) {
     throw new AuthError('当前图片模型尚未配置工具流生成积分', 409);
   }
   try { aspectRatio = normalizeStudioRatio(aspectRatio); } catch { aspectRatio = 'auto'; }
@@ -286,13 +364,110 @@ async function resolveTemplate(
     referenceIds,
     moduleId,
     templateId,
+    templateVersion: resolvedTemplateVersion,
     sourcePresetId,
   };
 }
 
+async function buildToolFlowQuote(
+  tx: Tx,
+  user: SessionUser,
+  flow: { id: string; owner_id: string; version: number; graph_json: string },
+  settings: Awaited<ReturnType<typeof getImageStudioSettings>>,
+  now = Date.now(),
+): Promise<ToolFlowQuote> {
+  const graph = validateToolFlowGraph(JSON.parse(flow.graph_json));
+  const steps: ToolFlowQuoteStep[] = [];
+  let totalCents = 0;
+  let hasUnknown = false;
+  for (const node of graph.nodes) {
+    if (node.type !== 'flow-template') continue;
+    const config = await resolveTemplate(tx, flow.owner_id, flow.owner_id, node, [], settings,
+      user as unknown as ImageStudioIdentity, { cloneReferenceAssets: false, allowUnknownModel: true, allowUnknownPrice: true });
+    const rawPrice = settings.prices[config.model as keyof typeof settings.prices];
+    let unitCredits: number | null = null;
+    let estimatedCredits: number | null = null;
+    let status: ToolFlowQuoteStep['status'] = 'unknown';
+    try {
+      if (!IMAGE_STUDIO_MODELS.includes(config.model as typeof IMAGE_STUDIO_MODELS[number])
+        || typeof rawPrice !== 'number' || !Number.isFinite(rawPrice)) throw new Error('unknown price');
+      const unitCents = creditsToCents(rawPrice);
+      const stepCents = unitCents * config.count;
+      if (!Number.isSafeInteger(stepCents)) throw new Error('unsafe price');
+      unitCredits = unitCents / 100;
+      estimatedCredits = stepCents / 100;
+      totalCents += stepCents;
+      if (!Number.isSafeInteger(totalCents)) throw new Error('unsafe total');
+      status = 'fixed';
+    } catch {
+      hasUnknown = true;
+    }
+    steps.push({ nodeId: node.id, templateId: config.templateId, moduleId: config.moduleId,
+      templateVersion: config.templateVersion, model: config.model, count: config.count,
+      unitCredits, estimatedCredits, status });
+  }
+  return {
+    flowId: flow.id,
+    flowVersion: flow.version,
+    settingsRevision: settings.revision,
+    estimatedCredits: hasUnknown ? null : totalCents / 100,
+    expiresAt: new Date(now + 60_000).toISOString(),
+    billingMode: 'fixed',
+    steps,
+  };
+}
+
+export function validateSubmittedToolFlowQuote(value: unknown, current: ToolFlowQuote): ToolFlowQuote {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AuthError('请先获取有效的工具流固定点数报价', 409);
+  const submitted = value as Partial<ToolFlowQuote>;
+  const expiresAt = typeof submitted.expiresAt === 'string' ? Date.parse(submitted.expiresAt) : NaN;
+  const now = Date.now();
+  if (!Number.isFinite(expiresAt) || expiresAt <= now || expiresAt > now + 60_000
+    || submitted.billingMode !== 'fixed' || current.estimatedCredits === null
+    || submitted.flowId !== current.flowId || submitted.flowVersion !== current.flowVersion
+    || submitted.settingsRevision !== current.settingsRevision
+    || submitted.estimatedCredits !== current.estimatedCredits || !Array.isArray(submitted.steps)
+    || submitted.steps.length !== current.steps.length) {
+    throw new AuthError('工具流报价已过期或设置已变化，请重新报价', 409);
+  }
+  const fields: Array<keyof ToolFlowQuoteStep> = ['nodeId', 'templateId', 'moduleId', 'templateVersion', 'model', 'count', 'unitCredits', 'estimatedCredits', 'status'];
+  for (let index = 0; index < current.steps.length; index += 1) {
+    const received = submitted.steps[index] as Partial<ToolFlowQuoteStep> | null;
+    const expected = current.steps[index];
+    if (!received || typeof received !== 'object' || fields.some((field) => received[field] !== expected[field])) {
+      throw new AuthError('工具流模板或报价已变化，请重新报价', 409);
+    }
+  }
+  return { ...current, expiresAt: submitted.expiresAt! };
+}
+
+export async function getToolFlowQuote(user: SessionUser, flowId: string) {
+  if (!canUseCompanyTemplates(user)) throw new AuthError('仅限公司飞书账号使用工具流', 403);
+  const flow = await assertCanUseToolFlow(user, flowId);
+  const settings = await getImageStudioSettings();
+  return prisma.$transaction(async (tx) => {
+    const currentFlow = await tx.toolFlow.findUnique({ where: { id: flow.id } });
+    if (!currentFlow || currentFlow.owner_id !== user.id || currentFlow.status === 'deleted') throw new AuthError('工具流不存在', 404);
+    if (currentFlow.version !== flow.version || await currentImageSettingsRevision(tx) !== settings.revision) {
+      throw new AuthError('工具流或图片设置已变化，请重新获取报价', 409);
+    }
+    return buildToolFlowQuote(tx, user, currentFlow, settings);
+  });
+}
+
 async function createQueuedTask(tx: Tx, ownerId: string, creditUser: CreditPolicyUser, runId: string, run: RunSnapshot, node: ToolFlowNode, config: TemplateConfig, itemIndex: number, settings: Awaited<ReturnType<typeof getImageStudioSettings>>) {
   const id = `tf-${run.flow_id.slice(0, 12)}-${run.version}-${randomUUID()}`;
-  const unitCredits = Number(settings.prices[config.model as keyof typeof settings.prices]);
+  const unitCredits = run.billing_quote?.steps.find((step) => step.nodeId === node.id)?.unitCredits
+    ?? Number(settings.prices[config.model as keyof typeof settings.prices]);
+  const apiSettings = await getImageGenerationSettingsForModel(config.model, tx);
+  const billingScope = imageBillingScope(apiSettings);
+  const billingContract = fixedImageBillingContract({ scope: billingScope, model: config.model, credits: unitCredits,
+    specification: imageSpecification({ model: config.model, quality: config.quality, outputSize: config.outputSize,
+      aspectRatio: config.aspectRatio, referenceCount: config.referenceIds.length,
+      inputCharacters: config.context.length + config.prompt.length,
+      inputDigest: createHash('sha256').update(stringify({ flowId: run.flow_id, flowVersion: run.version,
+        settingsRevision: run.billing_quote?.settingsRevision ?? settings.revision, nodeId: node.id,
+        prompt: config.prompt, context: config.context, referenceIds: config.referenceIds })).digest('hex') }) });
   const freeze = unitCredits > 0
     ? await allocateTaskCredits(tx, creditUser, unitCredits, id)
     : null;
@@ -310,6 +485,10 @@ async function createQueuedTask(tx: Tx, ownerId: string, creditUser: CreditPolic
       revision: settings.revision,
       model: config.model,
       quality: config.quality,
+      billing_mode: 'fixed',
+      billing_status: 'awaiting_response',
+      billing_scope: billingScope,
+      billing_contract_json: stringify(billingContract),
       snapshot_json: stringify({
         schema: 'toolflow.image-task.v1',
         flowId: run.flow_id,
@@ -322,6 +501,9 @@ async function createQueuedTask(tx: Tx, ownerId: string, creditUser: CreditPolic
         context: config.context,
         model: config.model,
         quality: config.quality,
+        billingMode: 'fixed',
+        billingContract,
+        quotedSettingsRevision: run.billing_quote?.settingsRevision ?? settings.revision,
         aspectRatio: config.aspectRatio,
         outputSize: config.outputSize,
         referenceIds: config.referenceIds,
@@ -367,7 +549,18 @@ async function scheduleTemplateNode(
 ) {
   const previous = parseNodeResult(nodeRun.result_json);
   const existingSuccesses = previous.succeededAssetIds || [];
-  const config = await resolveTemplate(tx, runRow.owner_id, run.flow_owner_id, node, inputAssetIds, settings, creditUser as unknown as ImageStudioIdentity);
+  const quoteStep = run.billing_mode === 'fixed'
+    ? run.billing_quote?.steps.find((step) => step.nodeId === node.id)
+    : undefined;
+  if (run.billing_mode === 'fixed' && (!quoteStep || quoteStep.status !== 'fixed' || quoteStep.unitCredits === null)) {
+    throw new AuthError('工具流固定报价缺少有效节点价格，未派发任务', 409);
+  }
+  const config = await resolveTemplate(tx, runRow.owner_id, run.flow_owner_id, node, inputAssetIds, settings,
+    creditUser as unknown as ImageStudioIdentity, quoteStep ? { allowUnknownPrice: true } : undefined);
+  if (quoteStep && (config.templateId !== quoteStep.templateId || config.moduleId !== quoteStep.moduleId
+    || config.templateVersion !== quoteStep.templateVersion || config.model !== quoteStep.model || config.count !== quoteStep.count)) {
+    throw new AuthError('工具流模板已变化，请重新报价后再运行', 409);
+  }
   const expected = Math.max(existingSuccesses.length, config.count);
   const remaining = Math.max(0, expected - existingSuccesses.length);
   const taskIds: string[] = [];
@@ -528,21 +721,35 @@ export async function advanceToolFlowRun(runId: string) {
   }, { timeout: 30000 });
 }
 
-export async function createToolFlowRun(user: SessionUser, flowId: string, inputAssetIds: string[]) {
+export async function createToolFlowRun(user: SessionUser, flowId: string, inputAssetIds: string[], submittedQuote: unknown, quoteProof?: string) {
   if (!canUseCompanyTemplates(user)) throw new AuthError('仅限公司飞书账号使用工具流', 403);
   const flow = await assertCanUseToolFlow(user, flowId);
-  const graph = validateToolFlowGraph(JSON.parse(flow.graph_json));
+  validateToolFlowGraph(JSON.parse(flow.graph_json));
+  const settings = await getImageStudioSettings();
   const ids = parseIds(inputAssetIds);
   if (!ids.length) throw new AuthError('工具流至少需要一个输入图片', 400);
   const ownedAssets = await prisma.asset.count({ where: { id: { in: ids }, owner_id: user.id, status: 'active', type: 'image' } });
   if (ownedAssets !== new Set(ids).size) throw new AuthError('输入图片不存在或无权使用', 403);
-  const snapshot: RunSnapshot = { schema: 'toolflow.v1', flow_id: flow.id, flow_owner_id: flow.owner_id, version: flow.version, name: flow.name, project_id: flow.project_id, graph, input_asset_ids: ids };
   const run = await prisma.$transaction(async (tx) => {
+    const currentFlow = await tx.toolFlow.findUnique({ where: { id: flow.id } });
+    if (!currentFlow || currentFlow.owner_id !== user.id || currentFlow.status === 'deleted') throw new AuthError('工具流不存在', 404);
+    if (currentFlow.version !== flow.version || await currentImageSettingsRevision(tx) !== settings.revision) {
+      throw new AuthError('工具流或图片设置已变化，请重新获取报价', 409);
+    }
+    const graph = validateToolFlowGraph(JSON.parse(currentFlow.graph_json));
+    const currentQuote = await buildToolFlowQuote(tx, user, currentFlow, settings);
+    assertToolFlowQuoteProof(user.id, submittedQuote, quoteProof);
+    const billingQuote = validateSubmittedToolFlowQuote(submittedQuote, currentQuote);
+    const snapshot: RunSnapshot = {
+      schema: 'toolflow.v1', flow_id: currentFlow.id, flow_owner_id: currentFlow.owner_id,
+      version: currentFlow.version, name: currentFlow.name, project_id: currentFlow.project_id,
+      graph, input_asset_ids: ids, billing_mode: 'fixed', billing_quote: billingQuote,
+    };
     const created = await tx.toolFlowRun.create({
       data: {
-        flow_id: flow.id,
+        flow_id: currentFlow.id,
         owner_id: user.id,
-        flow_version: flow.version,
+        flow_version: currentFlow.version,
         status: 'queued',
         snapshot_json: stringify(snapshot),
         node_runs: { create: graph.nodes.map((node) => ({
@@ -556,7 +763,7 @@ export async function createToolFlowRun(user: SessionUser, flowId: string, input
       },
       include: { node_runs: true },
     });
-    await logRunAction(tx, user.id, 'toolflow_run_created', created.id, { flow_id: flow.id, version: flow.version, input_asset_count: ids.length });
+    await logRunAction(tx, user.id, 'toolflow_run_created', created.id, { flow_id: currentFlow.id, version: currentFlow.version, input_asset_count: ids.length, billing_mode: 'fixed', estimated_credits: billingQuote.estimatedCredits });
     return created;
   });
   await advanceToolFlowRun(run.id);

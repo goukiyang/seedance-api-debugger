@@ -6,6 +6,11 @@ import { studioDeliveryStatus } from './delivery';
 import { prisma } from '@/lib/prisma';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import { getImageStudioSettings } from './settings';
+import { imageBillingScope } from './billing-scope';
+import { fixedImageBillingContract, imageSpecification } from './billing-quote';
+import { imageBillingView, parseImageBillingContract } from './billing-contract';
+import { consumeImageQuote } from './billing-quote-store';
+import { imageBillingReady } from './billing-readiness';
 import { getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider } from '@/lib/integrations/image-generation';
 import { defaultStudioModuleId, resolveStudioModuleGenerationConfig, validStudioModuleId } from './modules';
 import { canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from './access';
@@ -120,6 +125,7 @@ export function parseStudioRequest(body: Record<string, unknown>) {
   const quality = body.quality === undefined ? undefined : body.quality;
   if (quality !== undefined && (typeof quality !== 'string' || quality.length > 30)) throw new StudioError('图片质量无效');
   const maxEstimatedCost = body.maxEstimatedCost;
+  if (body.billingQuoteId !== undefined && (typeof body.billingQuoteId !== 'string' || !/^[a-f0-9-]{36}$/.test(body.billingQuoteId))) throw new StudioError('图片报价编号无效');
   if (maxEstimatedCost !== undefined && (typeof maxEstimatedCost !== 'number' || !Number.isSafeInteger(maxEstimatedCost) || maxEstimatedCost < 0)) throw new StudioError('确认价格无效');
   if (moduleRevision !== undefined && (!Number.isInteger(moduleRevision) || moduleRevision < 0)) throw new StudioError('模块已更新，请刷新后重试', 409);
   const reproduceFromTaskId = body.reproduceFromTaskId === undefined ? undefined : body.reproduceFromTaskId;
@@ -141,6 +147,7 @@ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] 
 
 export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void> }, canvasUse?: { user: SessionUser; referenceImageIds: string[] }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }) {
   const input = parseStudioRequest(body);
+  const billingQuoteId = typeof body.billingQuoteId === 'string' ? body.billingQuoteId : undefined;
   const rawCanvasPrompt = input.prompt;
   const moduleId = body.moduleId;
   const sheet = Boolean(avatar && isAvatarSheet(avatar));
@@ -148,7 +155,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   if (sheet) { try { validateSheetCandidates(avatar!.candidates, input.referenceIds, avatar!.layout); } catch (e) { throw new StudioError((e as Error).message); } }
   if (moduleId !== undefined && !validStudioModuleId(moduleId, ownerId)) throw new StudioError('模块编号无效');
   const batchId = createHash('sha256').update(`${ownerId}:${input.requestId}`).digest('hex');
-  if (canvasUse && (canvasUse.user.id !== ownerId || avatar || preparation)) throw new StudioError('画布参考图请求归属无效', 403);
+  if (canvasUse && (canvasUse.user.id !== ownerId || avatar)) throw new StudioError('画布参考图请求归属无效', 403);
   const fingerprint = createHash('sha256').update(JSON.stringify({ ...input, requestId: undefined, ...(moduleId ? { moduleId } : {}), ...(canvasUse ? { canvasReferenceImageIds: canvasUse.referenceImageIds } : {}), ...(canvasPrompt ? { canvasPromptMentions: parseCanvasPromptMentions(canvasPrompt.mentions), canvasPromptAssets: canvasPrompt.referenceAssets } : {}), ...(avatar ? { avatar: avatar.candidates, ...(sheet ? { avatarLayout: avatar!.layout } : {}) } : {}) })).digest('hex');
   const previous = await prisma.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
   if (previous) {
@@ -198,9 +205,9 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (!isStudioImageGenerationProvider(imageApi.provider) || !isImageGenerationApiReady(imageApi)) {
       throw new StudioError(generation.model.startsWith('gemini-') ? 'Banana 专用通道尚未配置，请管理员在后台 API 设置填写专用 Key' : '图片专用 API 尚未配置', 503);
     }
-    const price = generation.prices[generation.model];
+    let price = generation.prices[generation.model];
     if (price === null || !Number.isInteger(price) || price < 0 || price > 100000) throw new StudioError('管理员尚未设置当前模块的有效生成积分', 409);
-    if (input.maxEstimatedCost !== undefined && price * input.count > input.maxEstimatedCost) throw new StudioError('图片价格已变化，请重新确认点数', 409);
+    if (!billingQuoteId && input.maxEstimatedCost !== undefined && price * input.count > input.maxEstimatedCost) throw new StudioError('图片价格已变化，请重新确认点数', 409);
     let snapshotGlobalContext = avatar ? '' : user.role === 'admin' && input.draft?.globalContext !== undefined ? input.draft.globalContext : settings.context;
     let snapshotModuleContext = input.draft?.moduleContext !== undefined ? input.draft.moduleContext : workspace?.context || '';
     let templateFixedReferences: StudioFixedReference[] = [];
@@ -419,6 +426,27 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const resolution = normalizeImageResolution(generation.model, input.resolution || generation.resolution, imageApi.provider);
     const outputSize = imageOutputSize(generation.model, resolution, resolvedAspectRatio, imageApi.provider);
     const moduleContextVersion = await bindModuleContextVersion(snapshotModuleContext, tx);
+    const billingScope = imageBillingScope(imageApi);
+    if (!preparation && !billingQuoteId && (await imageBillingReady(billingScope, generation.model, tx)).ready) {
+      throw new StudioError('当前模型需要确认有效报价，请重新报价后提交；尚未生成', 409);
+    }
+    let billingContract = fixedImageBillingContract({ scope: billingScope, model: generation.model, credits: price,
+      specification: imageSpecification({ model: generation.model, quality: generation.quality, outputSize,
+        aspectRatio: resolvedAspectRatio, referenceCount: orderedReferenceIds.length,
+        inputCharacters: context.length + input.prompt.length,
+        inputDigest: createHash('sha256').update(JSON.stringify({ context, prompt: input.prompt,
+          avatar: avatar?.candidates, references: referenceSnapshot.map(ref => ({ id: ref.id, hash: ref.hash })),
+          revision: settings.revision, moduleRevision: workspace?.revision })).digest('hex') }) });
+    if (billingQuoteId) {
+      if (preparation) throw new StudioError('批量准备不能沿用已确认的单次报价', 409);
+      try {
+        billingContract = await consumeImageQuote(tx, { owner: ownerId, id: billingQuoteId,
+          count: input.count, fingerprint: billingContract.specification, specification: billingContract.specification,
+          scope: billingScope, model: generation.model });
+      } catch { throw new StudioError('实扣报价已过期、被使用或参数已变化，请重新报价', 409); }
+      price = billingContract.authorizedCredits;
+      if (input.maxEstimatedCost === undefined || price * input.count > input.maxEstimatedCost) throw new StudioError('请先确认本次预估及最高扣点授权', 409);
+    }
     const snapshot = JSON.stringify({
       version: 1,
       requestId: input.requestId, batchId, inputFingerprint: fingerprint,
@@ -447,6 +475,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       quality: generation.quality,
       prices: generation.prices,
       unitCredits: price,
+      billingContract,
       count: input.count,
       aspectRatio,
       resolvedAspectRatio,
@@ -465,6 +494,9 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       const freeze = !preparation && price > 0 ? await allocateTaskCredits(tx, user, price, id) : null;
       const taskData: Prisma.ImageStudioTaskUncheckedCreateInput = {
         id, batch_id: batchId, owner_id: ownerId, module_id: moduleId as string | undefined, source_preset_id: sourcePresetId, ordinal: i + 1, fingerprint,
+        billing_mode: billingContract.mode, billing_scope: billingScope,
+        billing_contract_json: JSON.stringify(billingContract), billing_status: 'awaiting_response',
+        billing_deadline: billingContract.mode === 'actual' ? new Date(billingContract.deadline!) : null,
         prompt: taskPrompt, context, revision: settings.revision, model: generation.model,
         quality: generation.quality,
         provider_cost_usd: IMAGE_STUDIO_MODEL_COST_USD[generation.model as keyof typeof IMAGE_STUDIO_MODEL_COST_USD], snapshot_json: sheet ? JSON.stringify({ ...JSON.parse(snapshot), avatarLayout: avatar!.layout, avatar: { layout: avatar!.layout, cells: avatar!.candidates } }) : candidate ? JSON.stringify({ ...JSON.parse(snapshot), prompt: taskPrompt, avatar: candidate }) : snapshot,
@@ -481,7 +513,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         metadata_json: JSON.stringify({ allocations: freeze.allocations }),
       } });
     }
-    if (avatar?.onQueued) await avatar.onQueued(tx, batchId);
+    if (!preparation && avatar?.onQueued) await avatar.onQueued(tx, batchId);
   }, { timeout: 15000 }));
   return batchId;
 }
@@ -503,9 +535,24 @@ export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded
         || !asset.thumbnail_url || asset.width !== prepared.width || asset.height !== prepared.height) throw new Error('Output asset unavailable');
       await tx.imageStudioTask.update({ where: { id: task.id }, data: { asset_id: asset.id } });
     }
-    if (task.unit_credits === 0) return true;
+    const billing = parseImageBillingContract(task.billing_contract_json);
+    if (task.billing_mode === 'actual') {
+      if (!billing || billing.mode !== 'actual' || billing.scope !== task.billing_scope
+        || billing.authorizedCredits !== task.unit_credits) throw new Error('图片收费合同无效');
+      if (status === 'succeeded') {
+        await tx.imageStudioTask.update({ where: { id: task.id }, data: { billing_status: 'pending',
+          billing_deadline: new Date(billing.deadline!), billing_next_check_at: new Date() } });
+        return true;
+      }
+    }
+    if (task.unit_credits === 0) {
+      await tx.imageStudioTask.update({ where: { id: task.id }, data: { actual_credits: 0,
+        billing_settled_at: new Date() } });
+      return true;
+    }
     const settlement = await settleTaskCredits(tx, { taskId: task.id, userId: task.owner_id,
-      terminalStatus: status, frozenAmount: task.unit_credits, freezeSnapshot: task.freeze_snapshot });
+      terminalStatus: status, frozenAmount: task.unit_credits, freezeSnapshot: task.freeze_snapshot,
+      ...(task.billing_mode === 'actual' ? { actualCost: 0 } : {}) });
     await tx.creditLedger.create({ data: {
       user_id: task.owner_id, type: status === 'succeeded' ? 'task_success_deduct' : 'task_failed_refund',
       amount: status === 'succeeded' ? -settlement.actualCost : settlement.refundedAmount,
@@ -515,6 +562,8 @@ export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded
       reason: status === 'succeeded' ? '图片已保存，结算积分' : '图片未交付，释放冻结积分',
       metadata_json: JSON.stringify({ allocations: settlement.allocations, expired_closed: settlement.expiredClosedAmount }),
     } });
+    await tx.imageStudioTask.update({ where: { id: task.id }, data: { actual_credits: settlement.actualCost,
+      billing_settled_at: new Date() } });
     return true;
   }, { timeout: 15000 });
 }
@@ -567,6 +616,7 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
       delivery: deliveries.get(task.id),
       prompt: task.prompt, model: task.model, quality: task.quality, status: task.status, error: task.error, unitCredits: task.unit_credits,
       providerCostUsd: task.provider_cost_usd,
+      billing: imageBillingView(task, ownerId, isAdmin),
       aspectRatio: task.aspect_ratio, outputSize: task.output_size,
       createdAt: task.created_at, finishedAt: task.finished_at, referenceIds: snapshot.transientReferenceImages.map(image => image.id),
       snapshot: { ...snapshot, moduleContextVersion: contextVersions.get(task.id)?.code ?? null, moduleContextVersionState: contextVersions.get(task.id)?.state ?? 'missing' },
@@ -609,6 +659,7 @@ export async function listAdminStudioTasks(cursor?: string, moduleId?: string, o
     error: task.error,
     unitCredits: task.unit_credits,
     providerCostUsd: task.provider_cost_usd,
+    billing: imageBillingView(task, task.owner_id, true),
     aspectRatio: task.aspect_ratio,
     outputSize: task.output_size,
     createdAt: task.created_at,

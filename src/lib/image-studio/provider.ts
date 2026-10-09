@@ -115,6 +115,7 @@ export async function requestStudioImages(params: {
 async function requestGeminiStudioImages(params: {
   baseUrl: string; apiKey: string; model: string; prompt: string;
   count: number; images: StudioImageInput[]; signal: AbortSignal; ratio?: string; size?: string;
+  recordResponse?: (response: Response) => Promise<void>;
 }, fetcher: typeof fetch): Promise<{ images: string[]; usage: unknown }> {
   const url = new URL(params.baseUrl);
   const basePath = url.pathname.replace(/\/$/, '').replace(/\/v1$/, '').replace(/\/v1beta$/, '');
@@ -143,6 +144,7 @@ async function requestGeminiStudioImages(params: {
   } catch {
     throw new StudioProviderError('request', params.signal.aborted ? 'timeout' : 'network');
   }
+  await params.recordResponse?.(response);
   const value = await response.json().catch(() => { throw new StudioProviderError('response', 'invalid_json', response.status); });
   if (!response.ok) throw new StudioProviderError('request', 'http_error', response.status);
   const images = (value?.candidates || []).flatMap((candidate: { content?: { parts?: Array<Record<string, unknown>> } }) => candidate.content?.parts || [])
@@ -152,5 +154,6 @@ async function requestGeminiStudioImages(params: {
     })
     .filter((image: unknown): image is string => typeof image === 'string' && image.length > 0);
   if (!images.length) throw new StudioProviderError('response', 'empty_output', response.status);
+  if (images.length !== params.count) throw new StudioProviderError('response', 'unexpected_count', response.status);
   return { images: images.slice(0, params.count), usage: safeUsage(value.usageMetadata || value.usage) };
 }

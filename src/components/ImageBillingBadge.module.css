@@ -1,0 +1,24 @@
+.badge {
+  position: absolute;
+  z-index: 5;
+  inset-block-start: 8px;
+  inset-inline-end: 8px;
+  max-inline-size: calc(100% - 16px);
+  padding: 4px 7px;
+  border: 1px solid oklch(0.76 0.08 78 / 0.55);
+  border-radius: 4px;
+  background: oklch(0.18 0.025 78 / 0.94);
+  color: oklch(0.94 0.045 82);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-align: end;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+.badge[data-confirmed] {
+  border-color: oklch(0.72 0.07 188 / 0.5);
+  background: oklch(0.16 0.018 188 / 0.94);
+  color: oklch(0.94 0.035 188);
+}

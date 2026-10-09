@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
-import { validStudioModuleId } from '@/lib/image-studio/modules';
+import { defaultStudioModuleId, validStudioModuleId } from '@/lib/image-studio/modules';
+import { imageBillingPending, imageBillingView } from '@/lib/image-studio/billing-contract';
 import { studioAssetUrl } from '@/lib/image-studio/media';
 import { getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { attachAssetToSiteReferenceImage } from '@/lib/assets/reference-import';
@@ -28,8 +29,9 @@ export async function POST(request: NextRequest) {
 
     const moduleId = typeof body.moduleId === 'string' ? body.moduleId : '';
     if (!validStudioModuleId(moduleId, user.id)) throw new AuthError('风格模板模块编号无效', 400);
-    const studioModule = await prisma.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: user.id }, select: { id: true } });
-    if (!studioModule) throw new AuthError('风格模板模块不存在或无权使用', 404);
+    const unframed = moduleId === defaultStudioModuleId(user.id);
+    const studioModule = unframed ? null : await prisma.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: user.id }, select: { id: true } });
+    if (!unframed && !studioModule) throw new AuthError('风格模板模块不存在或无权使用', 404);
     const requestId = typeof body.requestId === 'string' ? body.requestId : '';
     if (!REQUEST_ID_PATTERN.test(requestId)) throw new AuthError('生成请求编号无效', 400);
     const expectedBatchId = canvasStyleBatchId(user.id, requestId);
@@ -42,9 +44,10 @@ export async function POST(request: NextRequest) {
     }
 
     const tasks = await prisma.imageStudioTask.findMany({
-      where: { owner_id: user.id, module_id: moduleId, batch_id: expectedBatchId, deleted_at: null },
+      where: { owner_id: user.id, module_id: unframed ? null : moduleId, batch_id: expectedBatchId, deleted_at: null },
       orderBy: { ordinal: 'asc' },
-      select: { id: true, status: true, asset_id: true, error: true, ordinal: true },
+      select: { id: true, status: true, asset_id: true, error: true, ordinal: true, owner_id: true,
+        billing_status: true, actual_amount_micros: true, actual_credits: true, billing_contract_json: true },
     });
     if (!tasks.length) {
       return canvasStyleJson({ status: 'not_found', pending: false, assets: [], completedCount: 0, totalCount: 0 });
@@ -52,6 +55,10 @@ export async function POST(request: NextRequest) {
     if (body.count !== undefined && Number(body.count) !== tasks.length) {
       throw new AuthError('生成批次数量与提交记录不匹配', 409);
     }
+    const billing = tasks.map(task => ({ taskId: task.id, assetId: task.asset_id,
+      billing: imageBillingView(task, user.id, user.role === 'admin') }));
+    const billingPending = billing.some(item => imageBillingPending(item.billing));
+    if (body.action === 'billing') return canvasStyleJson({ billing, billingPending });
 
     const succeeded = tasks.filter(task => task.status === 'succeeded' && task.asset_id);
     const assetIds = succeeded.map(task => task.asset_id!).filter((id, index, list) => list.indexOf(id) === index);
@@ -148,6 +155,8 @@ export async function POST(request: NextRequest) {
       ...(errors ? { error: errors } : {}),
       completedCount,
       totalCount: tasks.length,
+      billing,
+      billingPending,
     });
   } catch (error) {
     return canvasStyleFailure(error, '读取风格生成结果失败，请稍后重试');

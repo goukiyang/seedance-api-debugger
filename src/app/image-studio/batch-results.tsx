@@ -9,6 +9,7 @@ import { watchGenerationCompletion } from '@/components/GenerationCompletion';
 import { handImageDownloadToBrowser } from '@/lib/media/native-download';
 import { batchStateLabel, safeBatchFileName, STUDIO_BATCH_LIMITS, type StudioBatchView } from '@/lib/image-studio/batch-contract';
 import { readBatchResponse } from '@/lib/image-studio/batch-receipt';
+import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
 import { canSelectBatchDirectory, selectBatchDirectory, newBatchOutputDirectory, writeUniqueBatchFile, type BatchDirectoryHandle } from './batch-files';
 import styles from './batch.module.css';
 type Delivery = { saved: Record<number, string>; child: BatchDirectoryHandle | null; lock: boolean; directory: BatchDirectoryHandle | null };
@@ -54,7 +55,10 @@ export function BatchResults({ id, userId, outputDirectory, deliveryOnly = false
     } catch (error) { if (scope.current === expected) setError(error instanceof Error ? error.message : '批次读取失败'); }
     finally { reader.current = false; if (scope.current === expected) setReading(false); }
   }, [id, userId]);
-  useEffect(() => { void load(); const timer = setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 5000); return () => clearInterval(timer); }, [load]);
+  useEffect(() => { void load(); }, [load]);
+  const generationPending = !!batch && !['complete', 'cancelled'].includes(batch.state);
+  useEffect(() => { if (!generationPending) return; const timer = setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 5000); return () => clearInterval(timer); }, [load, generationPending]);
+  useImageBillingRefresh((batch?.items || []).map(item => ({ id: item.taskId || String(item.ordinal), billing: item.billing })), load);
   async function action(action: string) {
     if (actionLock.current || !batch) return;
     actionLock.current = true; setBusy(true); setError('');

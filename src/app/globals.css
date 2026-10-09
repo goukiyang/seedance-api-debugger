@@ -13286,14 +13286,18 @@ body.compare-fullscreen-open {
 
 .composer-action-right {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 4px;
   flex-shrink: 0;
 }
 
 .composer-points {
   font-size: 13px;
   color: rgba(255, 255, 255, 0.6);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .composer-submit-btn {

@@ -9,6 +9,8 @@ import { LoadingSkeleton, LoadingStatus } from './LoadingState';
 import { copyImage } from '@/lib/media/copy-image';
 import { useResultPages } from './useResultPages';
 import styles from './GeneratedImageResults.module.css';
+import { ImageBillingBadge } from './ImageBillingBadge';
+import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
 
 export type GeneratedImageResult = {
   id: string;
@@ -24,6 +26,7 @@ export type GeneratedImageResult = {
   downloadDisabled?: boolean;
   downloadMessage?: string;
   error?: string | null;
+  billing?: ImageBillingView | null;
 };
 
 const noMore = async () => undefined;
@@ -132,6 +135,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
             <WaitingImage src={item.waitingThumbnail} /><span role="status" className={styles.phase}>{item.status}</span>
           </div>}
           {renderOverlay?.(item, { openPreview: () => changePreview(item) })}
+          <ImageBillingBadge billing={item.billing} />
           {renderDelete && <div className={styles.deleteSlot} data-result-secondary onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{renderDelete(item)}</div>}
         </div>
         {renderMetadata ? renderMetadata(item) : <div className={styles.heading}><strong>{item.label}</strong><span>{item.status}</span></div>}

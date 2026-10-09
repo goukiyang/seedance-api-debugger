@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '明确授权的邮箱账号可使用内部普通功能。撤销授权、修改密码或删除账号后，旧登录不再恢复；其他账号的权限和登录保持不变。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '生成按钮下统一显示本次合计点数。图片费用核对后可显示美元费用和实扣点数；新图片实扣须有有效报价与账单核对依据，历史任务和视频固定价格不变。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

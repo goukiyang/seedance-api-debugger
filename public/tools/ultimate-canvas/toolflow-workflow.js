@@ -14,8 +14,18 @@
         templatePickerStepId: '',
         templateSearch: '',
         loading: false,
+        flowLoadPromise: null,
         inputUploads: new Map(),
         pollTimer: null,
+        quote: null,
+        quoteKey: '',
+        quoteMessage: '保存并选择工具流后查看费用',
+        quoteDirty: false,
+        quoteLoading: false,
+        quoteRequestToken: 0,
+        quotePromise: null,
+        quoteRequestKey: '',
+        quoteExpiryTimer: null,
         bound: false,
     };
 
@@ -65,6 +75,153 @@
 
     function inputAssetIds(node = flowInputNode()) { return parseIds(node?.data?.assetIds || node?.data?.asset_ids); }
 
+    function flowQuoteKey(flow = currentFlow()) { return flow ? `${flow.id}:${flow.version}` : ''; }
+
+    function quoteLines() {
+        return [...(panel()?.querySelectorAll('[data-toolflow-run]') || [])]
+            .map(button => button.closest('.toolflow-guided-actions, .toolflow-actions'))
+            .filter(Boolean);
+    }
+
+    function ensureQuoteLines() {
+        quoteLines().forEach(actions => {
+            if (actions.nextElementSibling?.matches('[data-toolflow-quote-line]')) return;
+            const line = document.createElement('div');
+            line.dataset.toolflowQuoteLine = '';
+            line.setAttribute('role', 'status');
+            line.setAttribute('aria-live', 'polite');
+            line.style.cssText = 'display:block;margin:-4px 0 8px;color:var(--text-secondary);font-size:12px;line-height:1.4;min-height:16px;font-variant-numeric:tabular-nums;';
+            actions.insertAdjacentElement('afterend', line);
+        });
+    }
+
+    function renderQuoteLines() {
+        ensureQuoteLines();
+        const flow = currentFlow();
+        let text = state.quoteMessage;
+        if (!flow) text = '保存并选择工具流后查看费用';
+        else if (state.quoteDirty) text = '参数已修改，请先保存后重新获取报价';
+        else if (state.quoteLoading) text = '正在获取工具流报价…';
+        else if (state.quote) {
+            const expiresAt = Date.parse(state.quote.expiresAt);
+            if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) text = '报价已过期，点击运行重新获取';
+            else if (state.quote.estimatedCredits === null) text = '费用待估算';
+            else text = `合计约 ${Number(state.quote.estimatedCredits).toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 点数`;
+        }
+        quoteLines().forEach(actions => {
+            const line = actions.nextElementSibling;
+            if (line?.matches('[data-toolflow-quote-line]')) line.textContent = text;
+        });
+    }
+
+    function clearQuoteExpiryTimer() {
+        if (state.quoteExpiryTimer) clearTimeout(state.quoteExpiryTimer);
+        state.quoteExpiryTimer = null;
+    }
+
+    function invalidateFlowQuote(message, requiresSave = true) {
+        state.quoteRequestToken += 1;
+        state.quote = null;
+        state.quoteKey = '';
+        state.quotePromise = null;
+        state.quoteRequestKey = '';
+        state.quoteLoading = false;
+        state.quoteDirty = requiresSave;
+        state.quoteMessage = message;
+        clearQuoteExpiryTimer();
+        renderQuoteLines();
+    }
+
+    function markFlowDraftChanged() {
+        if (state.quoteDirty) return;
+        invalidateFlowQuote('参数已修改，请先保存后重新获取报价', true);
+    }
+
+    function quoteMatchesCurrentFlow(quote = state.quote, flow = currentFlow()) {
+        return Boolean(quote && flow && !state.quoteDirty
+            && state.quoteKey === flowQuoteKey(flow)
+            && quote.flowId === flow.id && quote.flowVersion === flow.version
+            && quote.billingMode === 'fixed'
+            && Number.isSafeInteger(quote.settingsRevision) && quote.settingsRevision >= 0
+            && Array.isArray(quote.steps)
+            && Number.isFinite(Date.parse(quote.expiresAt)) && Date.parse(quote.expiresAt) > Date.now());
+    }
+
+    async function refreshFlowQuote() {
+        const flow = currentFlow();
+        if (!flow) {
+            invalidateFlowQuote('保存并选择工具流后查看费用', false);
+            return null;
+        }
+        if (state.quoteDirty) {
+            renderQuoteLines();
+            return null;
+        }
+        const key = flowQuoteKey(flow);
+        if (quoteMatchesCurrentFlow()) {
+            renderQuoteLines();
+            return state.quote;
+        }
+        if (state.quotePromise && state.quoteRequestKey === key) return state.quotePromise;
+
+        const token = ++state.quoteRequestToken;
+        state.quote = null;
+        state.quoteKey = '';
+        state.quoteLoading = true;
+        state.quoteMessage = '正在获取工具流报价…';
+        state.quoteRequestKey = key;
+        clearQuoteExpiryTimer();
+        renderQuoteLines();
+
+        const promise = request(`/api/tools/ultimate-canvas/flows/${encodeURIComponent(flow.id)}/quote`, { cache: 'no-store' })
+            .then(quote => {
+                const expiresAt = Date.parse(quote?.expiresAt);
+                const hasUnknown = Array.isArray(quote?.steps) && quote.steps.some(step => step?.status === 'unknown');
+                if (quote?.flowId !== flow.id || quote.flowVersion !== flow.version
+                    || quote.billingMode !== 'fixed' || !Number.isSafeInteger(quote.settingsRevision)
+                    || !Array.isArray(quote.steps) || quote.steps.some(step => !['fixed', 'unknown'].includes(step?.status))
+                    || !Number.isFinite(expiresAt) || expiresAt <= Date.now()
+                    || (quote.estimatedCredits !== null && (!Number.isFinite(quote.estimatedCredits) || quote.estimatedCredits < 0))
+                    || (hasUnknown && quote.estimatedCredits !== null)) {
+                    throw new Error('报价信息无效或已变化');
+                }
+                if (token === state.quoteRequestToken && flowQuoteKey() === key && !state.quoteDirty) {
+                    state.quote = quote;
+                    state.quoteKey = key;
+                    state.quoteMessage = '';
+                    state.quoteLoading = false;
+                    state.quoteExpiryTimer = setTimeout(() => {
+                        if (state.quote === quote) {
+                            state.quote = null;
+                            state.quoteKey = '';
+                            state.quoteMessage = '报价已过期，点击运行重新获取';
+                            renderQuoteLines();
+                        }
+                    }, Math.max(0, expiresAt - Date.now()));
+                    renderQuoteLines();
+                }
+                return quote;
+            })
+            .catch(error => {
+                if (token === state.quoteRequestToken) {
+                    state.quote = null;
+                    state.quoteKey = '';
+                    state.quoteLoading = false;
+                    state.quoteMessage = `${error.message || '报价读取失败'}；点击运行可重试`;
+                    renderQuoteLines();
+                }
+                return null;
+            })
+            .finally(() => {
+                if (token === state.quoteRequestToken) {
+                    state.quotePromise = null;
+                    state.quoteRequestKey = '';
+                }
+            });
+        state.quotePromise = promise;
+        return promise;
+    }
+
     function syncInputStateFromNode() {
         state.selectedInputAssetIds = inputAssetIds();
         return state.selectedInputAssetIds;
@@ -84,7 +241,11 @@
         if (!isFormData && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
         const response = await fetch(url, { credentials: 'same-origin', ...options, headers });
         const body = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(body.error || body.message || '工具流请求失败');
+        if (!response.ok) {
+            const error = new Error(body.error || body.message || '工具流请求失败');
+            error.status = response.status;
+            throw error;
+        }
         return body;
     }
 
@@ -231,7 +392,9 @@
     }
 
     function selectFlow(id) {
-        state.selectedFlowId = id || '';
+        const nextId = id || '';
+        if (nextId !== state.selectedFlowId) invalidateFlowQuote('正在读取工具流报价…', false);
+        state.selectedFlowId = nextId;
         const select = panel()?.querySelector('[data-toolflow-select]');
         if (select) select.value = state.selectedFlowId;
         const flow = currentFlow();
@@ -239,6 +402,10 @@
         if (visibility) visibility.value = 'private';
         hydrateGuidedFromFlow(flow);
         renderList();
+        if (flow && !state.quoteDirty) {
+            if (quoteMatchesCurrentFlow()) renderQuoteLines();
+            else void refreshFlowQuote();
+        } else renderQuoteLines();
     }
 
     function renderList() {
@@ -295,17 +462,28 @@
         }
     }
 
-    async function loadFlows() {
-        if (state.loading) return;
+    async function loadFlows(fresh = false) {
+        while (state.flowLoadPromise) {
+            if (!fresh) return state.flowLoadPromise;
+            await state.flowLoadPromise;
+        }
         state.loading = true;
-        try {
-            const query = projectId() ? `?project_id=${encodeURIComponent(projectId())}` : '';
-            const result = await request(`/api/tools/ultimate-canvas/flows${query}`);
-            state.flows = result.flows || [];
-            if (!state.flows.some(flow => flow.id === state.selectedFlowId)) state.selectedFlowId = state.flows[0]?.id || '';
-            selectFlow(state.selectedFlowId);
-        } catch (error) { setState(error.message, 'error'); }
-        finally { state.loading = false; }
+        let promise;
+        promise = (async () => {
+            try {
+                const query = projectId() ? `?project_id=${encodeURIComponent(projectId())}` : '';
+                const result = await request(`/api/tools/ultimate-canvas/flows${query}`, fresh ? { cache: 'no-store' } : {});
+                state.flows = result.flows || [];
+                if (!state.flows.some(flow => flow.id === state.selectedFlowId)) state.selectedFlowId = state.flows[0]?.id || '';
+                selectFlow(state.selectedFlowId);
+            } catch (error) { setState(error.message, 'error'); }
+            finally {
+                state.loading = false;
+                if (state.flowLoadPromise === promise) state.flowLoadPromise = null;
+            }
+        })();
+        state.flowLoadPromise = promise;
+        await promise;
     }
 
     function renderNodeSettings() {
@@ -349,6 +527,8 @@
                 visibility: panel()?.querySelector('[data-toolflow-visibility]')?.value || 'private',
             }) });
             state.selectedFlowId = result.flow.id;
+            state.flows = [result.flow, ...state.flows.filter(flow => flow.id !== result.flow.id)];
+            invalidateFlowQuote('已保存，正在更新工具流报价…', false);
             await loadFlows();
             selectFlow(state.selectedFlowId);
             setState(`已保存 · v${result.flow.version}`, 'success');
@@ -424,6 +604,24 @@
         if (state.run && allActive(state.run)) { notice('已有工具流正在运行，请等待、暂停或取消。', 'warn'); return; }
         const flow = currentFlow();
         if (!flow) { notice('请先保存并选择工具流。', 'warn'); return; }
+        if (state.quoteDirty) {
+            notice('工具流参数尚未保存；先保存后重新获取报价，本次未派发。', 'warn');
+            return;
+        }
+        if (!quoteMatchesCurrentFlow()) {
+            const refreshedQuote = await refreshFlowQuote();
+            notice(refreshedQuote ? '报价已更新，请核对总价后再次运行；本次未派发。' : '尚未取得有效报价，请检查后重试；本次未派发。', refreshedQuote ? 'info' : 'warn');
+            return;
+        }
+        const quote = state.quote;
+        if (quote.estimatedCredits === null || quote.steps.some(step => step.status === 'unknown')) {
+            invalidateFlowQuote('报价未定，正在重新获取…', false);
+            const refreshedQuote = await refreshFlowQuote();
+            notice(refreshedQuote && refreshedQuote.estimatedCredits !== null
+                ? '报价已更新，请核对总价后再次运行；本次未派发。'
+                : '工具流费用仍待估算；本次未派发。', 'warn');
+            return;
+        }
         try {
             ensureGuidedGraph();
             const nodeInputIds = inputAssetIds();
@@ -431,11 +629,18 @@
                 ? (nodeInputIds.length ? nodeInputIds : [...state.selectedInputAssetIds])
                 : (nodeInputIds.length ? nodeInputIds : parseIds(panel()?.querySelector('[data-toolflow-input-assets]')?.value));
             if (!inputIds.length) { notice('请先选择至少一张输入图片。', 'warn'); return; }
-            const result = await request(`/api/tools/ultimate-canvas/flows/${encodeURIComponent(flow.id)}/runs`, { method: 'POST', body: json({ input_asset_ids: inputIds }) });
+            const result = await request(`/api/tools/ultimate-canvas/flows/${encodeURIComponent(flow.id)}/runs`, { method: 'POST', body: json({ input_asset_ids: inputIds, quote }) });
             setRun(result.run);
             setState('已进入现有图片任务队列', 'running');
             schedulePoll();
-        } catch (error) { setState(`执行失败：${error.message}`, 'error'); notice(error.message, 'error'); }
+        } catch (error) {
+            if (error.status === 409) {
+                invalidateFlowQuote('报价已失效，正在重新获取…', false);
+                await loadFlows(true);
+                setState('报价已变化，本次未派发；请核对新报价后重试。', 'warn');
+            } else setState(`执行失败：${error.message}`, 'error');
+            notice(error.message || '工具流运行失败', 'error');
+        }
     }
 
     async function updateRun(action, extra = {}) {
@@ -505,6 +710,7 @@
         state.templatePickerStepId = kind === 'template' ? step.id : '';
         ensureGuidedGraph();
         renderGuided();
+        markFlowDraftChanged();
     }
 
     function removeGuidedStep(stepId) {
@@ -513,6 +719,7 @@
         state.guidedSteps = state.guidedSteps.filter(item => item.id !== stepId);
         if (state.templatePickerStepId === stepId) state.templatePickerStepId = '';
         runtime().markChanged?.('toolflow_guided_step_remove');
+        markFlowDraftChanged();
         ensureGuidedGraph();
         renderGuided();
     }
@@ -525,6 +732,7 @@
         [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
         state.guidedSteps = next;
         runtime().markChanged?.('toolflow_guided_step_reorder');
+        markFlowDraftChanged();
         ensureGuidedGraph();
         renderGuided();
     }
@@ -540,6 +748,7 @@
     }
 
     function resetGuidedFlow() {
+        invalidateFlowQuote('新流程尚未保存', false);
         state.selectedFlowId = '';
         state.guidedSteps = [];
         state.selectedInputAssetIds = [];
@@ -581,6 +790,7 @@
         engine()?.refreshToolflowNode?.(node.id);
         renderNodeSettings();
         runtime().markChanged?.('toolflow_node_template_change');
+        markFlowDraftChanged();
     }
 
     function updateTemplateNodeField(node, field, rawValue, refresh = true) {
@@ -593,6 +803,7 @@
             renderNodeSettings();
         }
         runtime().markChanged?.(`toolflow_node_${field}_change`);
+        markFlowDraftChanged();
     }
 
     function updateTemplateContextSaveState(node) {
@@ -617,6 +828,7 @@
         node.data = { ...(node.data || {}), context: value, savedContext: value };
         engine()?.refreshToolflowNode?.(node.id);
         runtime().markChanged?.('toolflow_node_context_save');
+        markFlowDraftChanged();
         notice('节点上下文已保存，不会覆盖通用上下文。', 'success');
     }
 
@@ -756,6 +968,8 @@
         if (state.bound || !panel()) return;
         state.bound = true;
         const root = panel();
+        ensureQuoteLines();
+        renderQuoteLines();
         let savedMode = 'guided';
         try { savedMode = localStorage.getItem('ultimate-canvas:toolflow-mode') || 'guided'; } catch { /* optional preference */ }
         setMode(savedMode);
@@ -809,6 +1023,7 @@
                     const node = step.nodeId ? engine()?.nodes.get(step.nodeId) : null;
                     if (node && item) applyTemplateToNode(node, templateOptionValue(item));
                     runtime().markChanged?.('toolflow_guided_template_change');
+                    markFlowDraftChanged();
                 }
                 state.templatePickerStepId = '';
                 state.templateSearch = '';
@@ -872,6 +1087,7 @@
             const field = event.target.closest('[data-toolflow-node-field]');
             if (field && field.dataset.toolflowNodeField === 'context') {
                 updateTemplateContextSaveState(nodeById(field.dataset.toolflowNodeId));
+                markFlowDraftChanged();
                 return;
             }
             if (field) updateTemplateNodeField(nodeById(field.dataset.toolflowNodeId), field.dataset.toolflowNodeField, field.value);
@@ -894,12 +1110,13 @@
             if (field && field.dataset.toolflowNodeField === 'context') {
                 const node = nodeById(field.dataset.toolflowNodeId);
                 updateTemplateContextSaveState(node);
+                markFlowDraftChanged();
                 return;
             }
             const prompt = event.target.closest('[data-toolflow-node-prompt]');
             if (!prompt) return;
             const node = engine()?.nodes.get(prompt.dataset.toolflowNodePrompt);
-            if (node) { node.data = { ...(node.data || {}), prompt: prompt.value }; runtime().markChanged?.('toolflow_prompt_change'); }
+            if (node) { node.data = { ...(node.data || {}), prompt: prompt.value }; runtime().markChanged?.('toolflow_prompt_change'); markFlowDraftChanged(); }
         });
         document.addEventListener('paste', event => {
             const file = [...(event.clipboardData?.items || [])].find(item => item.type.startsWith('image/'))?.getAsFile();

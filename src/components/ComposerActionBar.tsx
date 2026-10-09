@@ -412,10 +412,8 @@ export function ComposerActionBar({
         </details>
       ) : chips}
 
-      {/* 右侧：点数 + 提交按钮 */}
+      {/* 右侧：提交按钮与费用 */}
       <div className="composer-action-right">
-        <div className="composer-points">{points === null ? '待确认时长' : `✦ ${points}`}</div>
-
         <button
           type="button"
           className="composer-submit-btn"
@@ -430,6 +428,10 @@ export function ComposerActionBar({
             </svg>
           )}
         </button>
+
+        <div className="composer-points">
+          {points === null ? '费用待估算' : `合计约 ${points} 点数`}
+        </div>
       </div>
     </div>
   );

@@ -24,10 +24,15 @@ import type { DescriptionStatus } from '@/lib/avatar-random/description-parser';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS } from '@/lib/image-studio/model-catalog';
 import { AvatarSheetPreview, downloadAvatarCell } from './sheet-preview';
 import { GeneratedImageResults, type GeneratedImageResult } from '@/components/GeneratedImageResults';
+import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
+import { imageBillingPending } from '@/lib/image-studio/billing-contract';
+import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
 import { handImageDownloadToBrowser } from '@/lib/media/native-download';
 import styles from './studio.module.css';
-type Task = { id: string; ordinal: number; status: string; error?: string | null; asset: { id: string; original_url: string; thumbnail_url?: string | null } | null };
-type Payload = { records: AvatarRecord[]; recentConfigs:AvatarRecord[];recordTasks:Record<string,Task>; nextCursor?: string | null; settings: { model: string; revision: number; prices: Record<string, number | null> } };
+type Task = { id: string; ordinal: number; status: string; error?: string | null; billing?: ImageBillingView | null; asset: { id: string; original_url: string; thumbnail_url?: string | null } | null };
+type Payload = { records: AvatarRecord[]; recentConfigs:AvatarRecord[];recordTasks:Record<string,Task>; nextCursor?: string | null; settings: { model: string; revision: number; prices: Record<string, number | null>; billingReadiness?: { models: Record<string, { ready: boolean }> } } };
+type AvatarImageQuote = { billingMode: 'fixed' | 'actual'; billingQuoteId: string | null; unitCredits: number; estimatedCredits: number; expiresAt?: string };
+type CachedAvatarImageQuote = { planId: string; parameters: string; quote: AvatarImageQuote };
 const statusLabel: Record<string, string> = { queued: '排队中', running: '生成中', succeeded: '图片已保存，待人工确认', failed: '生成失败', uncertain: '受理未知，请先查询' };
 async function api<T>(body?: unknown, query = '') { const response = await fetch(`/api/avatar-studio${query}`, { method: body ? 'POST' : 'GET', cache: 'no-store', ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) }); const data = await readJsonResponse<T & { error?: string; parse?: DescriptionStatus }>(response); if (!response.ok) throw Object.assign(new Error(data.error || '操作未确认'),{status:response.status,parse:data.parse}); return data; }
 export default function AvatarStudio({ ownerId, management, ticketId }: { ownerId: string; management?: boolean; ticketId?: string }) {
@@ -37,6 +42,11 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   const [rules, setRules] = useState<AvatarRules>(emptyRules), [plan, setPlan] = useState<AvatarPlan | null>(null), [tasks, setTasks] = useState<Task[]>([]), [records, setRecords] = useState<AvatarRecord[]>([]), [cursor, setCursor] = useState<string | null>(null);
   const [model, setModel] = useState(IMAGE_STUDIO_MODELS[0] as string), [quality, setQuality] = useState('auto'), [resolution, setResolution] = useState('1K');
   const [prices, setPrices] = useState<Record<string, number | null>>({}), [index, setIndex] = useState(0), [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState(''), [ready, setReady] = useState(false), [advanced, setAdvanced] = useState(false), [tab, setTab] = useState<'config' | 'character' | 'result'>(management ? 'config' : 'result'), [deleted, setDeleted] = useState(false), [pending, setPending] = useState(false);
+  const [billingQuote, setBillingQuote] = useState<CachedAvatarImageQuote | null>(null);
+  const [billingReadiness, setBillingReadiness] = useState<Payload['settings']['billingReadiness']>();
+  const [draftBillingEstimate, setDraftBillingEstimate] = useState<{ parameters: string; estimatedCredits: number; expiresAt: string } | null>(null);
+  const [quoteVisible, setQuoteVisible] = useState(true);
+  useEffect(() => { const update = () => setQuoteVisible(!document.hidden); update(); document.addEventListener('visibilitychange', update); return () => document.removeEventListener('visibilitychange', update); }, []);
   const [recordTasks, setRecordTasks] = useState<Record<string, Task>>({});
   const [parseStatus,setParseStatus]=useState<DescriptionStatus|null>(null),[stage,setStage]=useState('');
   const [pickerOpen, setPickerOpen] = useState(false), [referenceUploading, setReferenceUploading] = useState(false);
@@ -47,6 +57,33 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   const pasteLock = useRef(false);
   const [parseBinding,setParseBinding]=useState('');
   const analysisBinding=JSON.stringify([ownerId,rules.description.trim(),rules.descriptionEditedAt||0,AVATAR_PARSER_VERSION]);
+  const billingParameters=JSON.stringify([ownerId,avatarRulesSignature(rules),model,quality,resolution,avatarLayout(rules)]);
+  const previousBillingParameters=useRef(billingParameters);
+  useEffect(()=>{if(previousBillingParameters.current!==billingParameters)setBillingQuote(null);previousBillingParameters.current=billingParameters;},[billingParameters]);
+  useEffect(()=>{if(!billingQuote?.quote.expiresAt)return;const delay=Date.parse(billingQuote.quote.expiresAt)-Date.now();if(delay<=0){setBillingQuote(null);return;}const timer=window.setTimeout(()=>setBillingQuote(current=>current?.planId===billingQuote.planId?null:current),delay);return()=>window.clearTimeout(timer);},[billingQuote]);
+  const visibleBillingQuote=billingQuote&&billingQuote.planId===plan?.id&&billingQuote.parameters===billingParameters
+    &&(!billingQuote.quote.expiresAt||Date.parse(billingQuote.quote.expiresAt)>Date.now())?billingQuote.quote:null;
+  const visibleDraftBillingEstimate=draftBillingEstimate?.parameters===billingParameters
+    &&Date.parse(draftBillingEstimate.expiresAt)>Date.now()?draftBillingEstimate:null;
+  const quotablePlan=plan&&plan.model===model&&plan.quality===quality&&plan.resolution===resolution
+    &&avatarLayout(plan)===avatarLayout(rules)&&avatarRulesSignature(plan.candidates[0].rules)===avatarRulesSignature(rules)?plan:null;
+  const automaticQuoteInput=JSON.stringify(quotablePlan?{action:'billing-quote',planId:quotablePlan.id}:{action:'billing-quote',rules,model,quality,resolution});
+  const actualQuoteRequired=billingReadiness?.models?.[model]?.ready===true;
+  useEffect(()=>{
+    if(!actualQuoteRequired||!ready||management||!quoteVisible||busy||pending||visibleBillingQuote||!quotablePlan&&visibleDraftBillingEstimate)return;
+    const abort=new AbortController();
+    const timer=window.setTimeout(()=>{
+      void fetch('/api/avatar-studio',{method:'POST',headers:{'Content-Type':'application/json'},body:automaticQuoteInput,
+        signal:AbortSignal.any([abort.signal,AbortSignal.timeout(20000)])}).then(response=>readJsonResponse<AvatarImageQuote&{estimateOnly?:boolean}>(response))
+        .then(result=>{
+          if(abort.signal.aborted||!Number.isFinite(result.estimatedCredits)||result.estimatedCredits<0||!result.expiresAt||Date.parse(result.expiresAt)<=Date.now())return;
+          if(result.estimateOnly===true)setDraftBillingEstimate({parameters:billingParameters,estimatedCredits:result.estimatedCredits,expiresAt:result.expiresAt});
+          else if(quotablePlan&&['fixed','actual'].includes(result.billingMode)&&(result.billingMode!=='actual'||result.billingQuoteId))setBillingQuote({planId:quotablePlan.id,parameters:billingParameters,quote:result});
+        }).catch(()=>{});
+    },500);
+    return()=>{window.clearTimeout(timer);abort.abort();};
+  },[actualQuoteRequired,ready,management,quoteVisible,busy,pending,visibleBillingQuote,visibleDraftBillingEstimate,automaticQuoteInput,billingParameters,quotablePlan]);
+  useEffect(()=>{if(!draftBillingEstimate)return;const timer=window.setTimeout(()=>setDraftBillingEstimate(current=>current===draftBillingEstimate?null:current),Math.max(0,Date.parse(draftBillingEstimate.expiresAt)-Date.now()));return()=>window.clearTimeout(timer);},[draftBillingEstimate]);
   const inputSignature=JSON.stringify([ownerId,rules,model,quality,resolution,plan?.id,index,ready]);
   const liveDraft=useRef({ownerId,rules,model,quality,resolution,analysisBinding,inputSignature,revision:0,ownerRevision:0,prices,blocked:referenceUploading||pending||tasks.some(t=>t.status==='uncertain'),ready});
   liveDraft.current={ownerId,rules,model,quality,resolution,analysisBinding,inputSignature,revision:liveDraft.current.revision+(liveDraft.current.inputSignature===inputSignature?0:1),ownerRevision:liveDraft.current.ownerRevision+(liveDraft.current.ownerId===ownerId?0:1),prices,blocked:referenceUploading||pending||tasks.some(t=>t.status==='uncertain'),ready};
@@ -66,7 +103,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   const planRef=useRef<string|null>(null), filterRef=useRef({tab,deleted}); filterRef.current={tab,deleted};
   const draftSignature=JSON.stringify({rules,planId:plan?.id,index,model,quality,resolution,advanced,tab,deleted,previousImageTaskId:previousImageTask?.id,runningPlans});
   usePageExitRisk({ unsaved: ready&&storedSignature===draftSignature ? [] : ['人物工作现场尚未保存'], busy: busy || referenceUploading ? ['人物操作或参考图上传处理中'] : [], revision: draftSignature });
-  const load = useCallback(async (append = false, nextCursor?: string | null) => { const owner=liveDraft.current.ownerId,filter={...filterRef.current};const params=new URLSearchParams({kind:filter.tab,deleted:filter.deleted?'1':'0'});if(nextCursor)params.set('cursor',nextCursor);const data = await api<Payload>(undefined, `?${params}`); if (!alive.current||owner!==liveDraft.current.ownerId||filterRef.current.tab!==filter.tab||filterRef.current.deleted!==filter.deleted) return; setRecords(old => append ? [...old, ...data.records.filter(r=>!old.some(o=>o.id===r.id))] : data.records);setRecordTasks(old=>append?{...old,...data.recordTasks}:data.recordTasks);setRecentConfigs(data.recentConfigs); setCursor(data.nextCursor || null); setPrices(data.settings.prices); return data; }, []);
+  const load = useCallback(async (append = false, nextCursor?: string | null) => { const owner=liveDraft.current.ownerId,filter={...filterRef.current};const params=new URLSearchParams({kind:filter.tab,deleted:filter.deleted?'1':'0'});if(nextCursor)params.set('cursor',nextCursor);const data = await api<Payload>(undefined, `?${params}`); if (!alive.current||owner!==liveDraft.current.ownerId||filterRef.current.tab!==filter.tab||filterRef.current.deleted!==filter.deleted) return; setRecords(old => append ? [...old, ...data.records.filter(r=>!old.some(o=>o.id===r.id))] : data.records);setRecordTasks(old=>append?{...old,...data.recordTasks}:data.recordTasks);setRecentConfigs(data.recentConfigs); setCursor(data.nextCursor || null); setPrices(data.settings.prices); setBillingReadiness(data.settings.billingReadiness); return data; }, []);
   const queryPlan = useCallback(async (id: string) => {
     const owner=liveDraft.current.ownerId;
     const sequence = (querySequences.current.get(id) || 0) + 1;
@@ -77,7 +114,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     setTasks(data.tasks);setSourceTask(data.sourceTask||null);
     const latestTasks = data.sourceTask ? [...data.tasks, data.sourceTask] : data.tasks;
     setRecordTasks(old => ({ ...old, ...Object.fromEntries(latestTasks.map(task => [task.id, task])) }));
-    const settled = data.tasks.filter(task => ['succeeded','failed','uncertain'].includes(task.status)).map(task => `${task.id}:${task.status}`);
+    const settled = data.tasks.filter(task => ['succeeded','failed','uncertain'].includes(task.status)).map(task => `${task.id}:${task.status}:${task.billing?.status}:${task.billing?.chargedCredits}`);
     // Refresh once per settlement phase, not on every task poll.
     if (settled.some(phase => !settledTaskPhases.current.has(phase))) {
       settled.forEach(phase => settledTaskPhases.current.add(phase));
@@ -86,6 +123,9 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     if (data.tasks.length) {setPending(false);try{localStorage.removeItem(`${key}:pending`);}catch{}}
     return data;
   }, [key, refreshCredits]);
+  useImageBillingRefresh([...tasks, ...(sourceTask ? [sourceTask] : []),
+    ...records.flatMap(record => record.taskId && recordTasks[record.taskId] ? [recordTasks[record.taskId]] : [])],
+    async () => { await load(true); if (planRef.current) await queryPlan(planRef.current); }, ready);
   useEffect(() => { let active=true;alive.current = true;initializedOwner.current=null;setReady(false);setPickerOpen(false);setReferenceUploading(false);setReferenceMetadata({owner:'',assets:[]});setReferenceError('');setFailedReferences([]);setPasteProgress(null);setRules(emptyRules);setPlan(null);planRef.current=null;setTasks([]);setSourceTask(null);setPreviousImageTask(null);setRunningPlans([]);setRecords([]);setRecordTasks({});setParseStatus(null);setParseBinding('');editing.current=null;setPending(false);querySequences.current.clear();settledTaskPhases.current.clear();void (async () => { try {
     const data = await load(); if (!active) return;
     let saved: { rules?: AvatarRules; planId?: string; index?: number; model?: string; quality?: string; resolution?: string; advanced?: boolean; deleted?: boolean; tab?: 'config' | 'character' | 'result'; previousImageTaskId?:string; runningPlans?:string[] } = {};
@@ -104,8 +144,8 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   } catch (e) { if(active)setError((e as Error).message); } finally { if (active) {initializedOwner.current=ownerId;setReady(true);} } })(); return () => { active=false;alive.current = false; }; }, [key, ownerId, load, management, queryPlan]);
   useEffect(() => { if (!ready||initializedOwner.current!==ownerId) return; try { localStorage.setItem(key, draftSignature);setStoredSignature(draftSignature); } catch { setNotice('本机无法保存工作现场，请勿刷新；本次仍可编辑或另存。'); } }, [key, ownerId, ready, draftSignature]);
   useEffect(() => { if (!ready) return; const scrollKey=`${key}:scroll:${management?'configs':'studio'}`;let position=0;try{position=Number(localStorage.getItem(scrollKey));}catch{} const frame=requestAnimationFrame(()=>{if(Number.isFinite(position)&&position>0)window.scrollTo(0,position);}); const save=()=>{try{localStorage.setItem(scrollKey,String(window.scrollY));}catch{}};window.addEventListener('scroll',save,{passive:true});return()=>{cancelAnimationFrame(frame);window.removeEventListener('scroll',save);}; },[key,management,ready]);
-  useEffect(() => { if (!plan || !tasks.some(t => ['queued','running'].includes(t.status))) return; const timer = setInterval(() => void queryPlan(plan.id).catch(e => setError(e.message)), 5000); return () => clearInterval(timer); }, [plan?.id, tasks, queryPlan]);
-  useEffect(()=>{if(!ready||!runningPlans.length)return;let active=true;const refresh=async()=>{for(const id of runningPlans){try{const data=await api<{tasks:Task[]}>(undefined,`?plan=${encodeURIComponent(id)}`);if(!active)return;setRecordTasks(old=>({...old,...Object.fromEntries(data.tasks.map(task=>[task.id,task]))}));if(data.tasks.length&&data.tasks.every(task=>!['queued','running','uncertain'].includes(task.status)))setRunningPlans(old=>old.filter(value=>value!==id));}catch{}}};void refresh();const timer=setInterval(()=>void refresh(),5000);return()=>{active=false;clearInterval(timer);};},[ready,runningPlans]);
+  useEffect(() => { if (!plan || !tasks.some(t => ['queued','running'].includes(t.status))) return; const timer = setInterval(() => { if (!document.hidden) void queryPlan(plan.id).catch(e => setError(e.message)); }, 5000); return () => clearInterval(timer); }, [plan?.id, tasks, queryPlan]);
+  useEffect(()=>{if(!ready||!runningPlans.length)return;let active=true,busy=false;const refresh=async()=>{if(busy||document.hidden)return;busy=true;try{for(const id of runningPlans){try{const data=await api<{tasks:Task[]}>(undefined,`?plan=${encodeURIComponent(id)}`);if(!active)return;setRecordTasks(old=>({...old,...Object.fromEntries(data.tasks.map(task=>[task.id,task]))}));if(data.tasks.length&&data.tasks.every(task=>!['queued','running','uncertain'].includes(task.status)&&!imageBillingPending(task.billing)))setRunningPlans(old=>old.filter(value=>value!==id));}catch{}}}finally{busy=false;}};void refresh();const timer=setInterval(()=>void refresh(),5000);return()=>{active=false;clearInterval(timer);};},[ready,runningPlans]);
   useEffect(()=>{if(ready)void load().catch(e=>setError(e.message));},[ready,tab,deleted,load]);
   useEffect(()=>{setParseStatus(null);setParseBinding('');if(!ready||!rules.description.trim())return;let active=true;const binding=analysisBinding;const timer=setTimeout(()=>void api<{parse:DescriptionStatus}>({action:'parse-status',description:rules.description}).then(data=>{if(active&&!lock.current&&liveDraft.current.analysisBinding===binding){setParseStatus(data.parse);setParseBinding(binding);}}).catch(()=>undefined),600);return()=>{active=false;clearTimeout(timer);};},[ready,analysisBinding,rules.description]);
   useEffect(()=>{if(!ticketId)return;const receive=(e:MessageEvent)=>{if(e.origin===location.origin&&e.source===window.opener&&e.data?.type==='sd2:avatar-applied'&&e.data.ticketId===ticketId)setNotice('原任务已确认回填，没有启动生成。');};window.addEventListener('message',receive);return()=>window.removeEventListener('message',receive);},[ticketId]);
@@ -181,6 +221,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     id: output?.id || draftId, candidateIndex, output,
     label: candidateIndex < 0 ? '保留的上一张人物图片' : sheet ? avatarSheetLabel(plan?.layout) : `候选 ${candidateIndex + 1}`,
     status: output ? statusLabel[output.status] || '状态待确认' : '人物草稿，尚未出图',
+    billing: output?.billing,
     pending: Boolean(output && ['queued', 'running'].includes(output.status)), error: output?.error,
     media: output?.status === 'succeeded' && output.asset ? {
       src: output.asset.original_url, thumbnailSrc: output.asset.thumbnail_url || undefined, alt: '人物整图',
@@ -206,9 +247,10 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   async function checkImageSettings(draft: DraftSnapshot) {
     setStage('检查图片价格和通道');
     const response=await fetch('/api/image-studio/settings',{cache:'no-store'});
-    const settings=await readJsonResponse<{error?:string;prices:Record<string,number|null>;modelReady:Record<string,boolean>}>(response);
+    const settings=await readJsonResponse<{error?:string;prices:Record<string,number|null>;modelReady:Record<string,boolean>;billingReadiness?:Payload['settings']['billingReadiness']}>(response);
     assertDraft(draft);
     if(!response.ok)throw new Error(settings.error||'图片设置尚未确认，本次未调用文字模型或提交图片。');
+    setBillingReadiness(settings.billingReadiness);
     const unit=settings.prices?.[draft.model];
     if(unit!==draft.prices[draft.model]){
       setPrices(old=>({...old,[draft.model]:unit??null}));
@@ -252,6 +294,31 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     if(next.candidates.some(candidate=>candidate.members.length!==original.rules.people))throw new Error('返回的人数与当前选择不一致，本次未提交；正文和原参数保留。');
     if(next.unitCredits===null||!Number.isInteger(next.unitCredits)||next.unitCredits<0||!next.imageReady){setNotice('人物草稿已准备，图片通道或报价尚未就绪；本次未提交图片。');return;}
     const count=avatarOutputCount(next),expectedCount=isAvatarSheet(original.rules)?1:original.rules.candidates;
+    const quoteParameters=JSON.stringify([ownerId,avatarRulesSignature(next.candidates[0].rules),next.model,next.quality,next.resolution,avatarLayout(next)]);
+    let quote=billingQuote?.planId===next.id&&billingQuote.parameters===quoteParameters
+      &&(!billingQuote.quote.expiresAt||Date.parse(billingQuote.quote.expiresAt)>Date.now())?billingQuote.quote:null;
+    if(!quote){
+      setStage('确认图片报价');
+      const result=await api<AvatarImageQuote>({action:'billing-quote',planId:next.id});
+      assertDraft(original);
+      if(!['fixed','actual'].includes(result.billingMode)||!Number.isFinite(result.unitCredits)||result.unitCredits<0
+        ||!Number.isFinite(result.estimatedCredits)||result.estimatedCredits<0
+        ||(result.billingQuoteId!==null&&typeof result.billingQuoteId!=='string')
+        ||!result.expiresAt||!Number.isFinite(Date.parse(result.expiresAt))||Date.parse(result.expiresAt)<=Date.now()
+        ||(result.billingMode==='actual'&&!result.billingQuoteId))throw new Error('本次图片报价信息不完整，尚未提交。');
+      const previousTotal=billingQuote?.planId===next.id&&billingQuote.parameters===quoteParameters
+        &&(!billingQuote.quote.expiresAt||Date.parse(billingQuote.quote.expiresAt)>Date.now())
+        ?Math.ceil(billingQuote.quote.estimatedCredits)
+        :visibleDraftBillingEstimate?Math.ceil(visibleDraftBillingEstimate.estimatedCredits):Math.ceil((original.prices[next.model]??next.unitCredits)*count);
+      quote=result;
+      setBillingQuote({planId:next.id,parameters:quoteParameters,quote:result});
+      if(Math.ceil(result.estimatedCredits)>previousTotal || direct && result.billingMode==='actual' && !visibleDraftBillingEstimate){
+        setPlan(next);
+        setNotice(`图片预估为 ${Math.ceil(result.estimatedCredits)} 点数，本次未提交；请核对后再次点击生成。`);
+        return;
+      }
+    }
+    if(quote.expiresAt&&Date.parse(quote.expiresAt)<=Date.now()){setBillingQuote(null);setNotice('图片报价已过期，本次未提交；请再次点击获取新报价。');return;}
     if(direct&&(next.unitCredits!==original.prices[original.model]||count!==expectedCount)){
       setPrices(old=>({...old,[next.model]:next.unitCredits}));
       setNotice(`图片报价已变化：${count}张，每张${next.unitCredits}点，共${count*next.unitCredits}点。本次未提交图片，请核对新报价后重新点击生成。`);
@@ -259,9 +326,10 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     }
     if(!direct){
       setStage('等待确认图片费用');
-      if (!(await confirm(`${isAvatarSheet(next)?`1张${avatarSheetLabel(next.layout)}，${next.candidates.length}位不同人物、每格1人`:`${count}张独立候选，每张${next.candidates[0].members.length}人`}，每张${next.unitCredits}点，共冻结${count * next.unitCredits}点。仅本次明确的人物要求会用于生成。`, { title: '确认生成', confirmLabel: '生成图片' }))) return;
+      if (!(await confirm(`${isAvatarSheet(next)?`1张${avatarSheetLabel(next.layout)}，${next.candidates.length}位不同人物、每格1人`:`${count}张独立候选，每张${next.candidates[0].members.length}人`}，图片预估合计约${Math.ceil(quote.estimatedCredits)}点。仅本次明确的人物要求会用于生成。`, { title: '确认生成', confirmLabel: '生成图片' }))) return;
     }
     assertDraft(original);
+    if(quote.expiresAt&&Date.parse(quote.expiresAt)<=Date.now()){setBillingQuote(null);setNotice('图片报价已过期，本次未提交；请再次点击获取新报价。');return false;}
     // Save the exact request before POST so reload can query it without replaying payment.
     localStorage.setItem(key,JSON.stringify({...JSON.parse(draftSignature),rules:next.candidates[0].rules,planId:next.id,index:0,model:next.model,quality:next.quality,resolution:next.resolution,...(imageTask?.asset?{previousImageTaskId:imageTask.id}:{})}));
     localStorage.setItem(`${key}:pending`,next.id);
@@ -270,8 +338,9 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     setPlan(next);setRules(next.candidates[0].rules);setTasks([]);setSourceTask(null);setIndex(0);
     planRef.current=next.id;setPending(true);
     setStage('提交图片任务');
+    setBillingQuote(null);
     try {
-      try { await api({ action: 'submit', id: next.id, layout:avatarLayout(next),rules:next.candidates[0].rules,model:next.model,quality:next.quality,resolution:next.resolution }); watchGenerationCompletion(ownerId, next.id, 'avatar', count); }
+      try { await api({ action: 'submit', id: next.id, layout:avatarLayout(next),rules:next.candidates[0].rules,model:next.model,quality:next.quality,resolution:next.resolution,...(quote.billingQuoteId?{billingQuoteId:quote.billingQuoteId}:{}),maxEstimatedCost:Math.ceil(quote.estimatedCredits) });watchGenerationCompletion(ownerId, next.id, 'avatar', count); }
       finally { if (alive.current && liveDraft.current.ownerRevision===original.ownerRevision && planRef.current===next.id) await refreshCredits({ force: true }); }
       if(!alive.current||liveDraft.current.ownerRevision!==original.ownerRevision||planRef.current!==next.id)return true;
       setPending(false);setNotice('图片任务已提交，正在查询结果；尚未代表已出图。'); await queryPlan(next.id); await load();
@@ -285,6 +354,9 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     if(action!=='tweak'){checkGeneration(draft);await checkImageSettings(draft);}
     const parse=await readParse(draft,action==='new');
     assertDraft(draft);setStage('准备人物和图片报价');
+    const reusable=action==='new'&&!forceNew&&plan&&!tasks.length&&avatarRulesSignature(draft.rules)===avatarRulesSignature(plan.candidates[0].rules)
+      &&draft.model===plan.model&&draft.quality===plan.quality&&draft.resolution===plan.resolution&&avatarLayout(draft.rules)===avatarLayout(plan);
+    if(reusable){await submit(plan,draft,true);return;}
     const reprice=action==='new'&&!forceNew&&plan&&plan.candidates.length===draft.rules.candidates&&avatarRulesSignature(draft.rules)===avatarRulesSignature(plan.candidates[0].rules)&&(!tasks.length||draft.model!==plan.model||draft.quality!==plan.quality||draft.resolution!==plan.resolution);
     const result = await api<{plan:AvatarPlan}>(reprice?{action:'quote',id:plan!.id,rules:draft.rules,model:draft.model,quality:draft.quality,resolution:draft.resolution,layout:avatarLayout(draft.rules)}:{ action: 'prepare', rules:reroll&&field?{...draft.rules,choices:{...draft.rules.choices,[field]:''}}:draft.rules, ...(parse?{descriptionId:parse.descriptionId,parserVersion:parse.parserVersion}:{}), model:draft.model, quality:draft.quality, resolution:draft.resolution, previousId: plan?.id, previousIndex: index, baselineAssetId: sheet?undefined:current?.baselineAssetId || image?.id, actionType: action, ...(field ? { field } : {}) });
     assertDraft(draft);
@@ -326,6 +398,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     return {
       id: record.id, record, output, label: record.name,
       status: output ? statusLabel[output.status] || '状态待确认' : '状态未读取',
+      billing: output?.billing,
       pending: Boolean(output && ['queued', 'running'].includes(output.status)),
       media: assetId ? { src: output?.asset?.original_url || `/api/image-studio/assets/${assetId}`,
         thumbnailSrc: output?.asset?.thumbnail_url || `/api/image-studio/assets/${assetId}?thumbnail=1`,
@@ -384,9 +457,16 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
         {referenceError&&<p role="status" className={styles.error}>{referenceError}</p>}
         {pasteProgress&&<UploadProgressIndicator label={pasteProgress.label} percent={pasteProgress.percent} busy/>}
         {!!failedReferences.length&&<div className={styles.controls}><span className={styles.error}>{failedReferences.length}张未上传，正文和已有参考保留</span><button type="button" disabled={busy||blocked} onClick={()=>void uploadPastedReferences(failedReferences)}>重试未上传图片</button><button type="button" disabled={busy||blocked} onClick={()=>setFailedReferences([])}>移除未上传图片</button></div>}
-        <span className={styles.price}>{prices[model] == null ? '此模型尚未设置价格' : draftSheet?`1张${avatarSheetLabel(rules.layout)}，当前报价${prices[model]}点；${rules.candidates}位不同人物，每格1人，整图1:1`:`${rules.candidates}张，每张${prices[model]}点，共${prices[model]! * rules.candidates}点；${rules.people}人/张`}</span>
-        {!!rules.description.trim()&&<small className={styles.price}>生成时按正文理解人物并提交图片。新正文首次理解可能另有上游文字模型费用，金额未知；图片积分如上。</small>}
         <button type="button" className={styles.primary} disabled={!ready||busy||blocked||management} onClick={()=>void prepare()}>{busy?stage||'处理中':draftSheet?`生成${avatarSheetLabel(rules.layout)}`:'生成独立头像'}</button>
+        <p className={styles.estimate}>
+          {visibleBillingQuote
+            ? `合计约 ${Math.ceil(visibleBillingQuote.estimatedCredits)} 点数`
+            : visibleDraftBillingEstimate
+              ? `合计约 ${Math.ceil(visibleDraftBillingEstimate.estimatedCredits)} 点数`
+            : billingReadiness?.models?.[model]?.ready || prices[model] == null || !Number.isFinite(prices[model]) || prices[model]! < 0
+              ? '费用待估算'
+              : `合计约 ${Math.ceil(prices[model]! * (draftSheet ? 1 : rules.candidates))} 点数`}
+        </p>
         {referenceUploading&&<span role="status" className={styles.price}>参考图上传中，请等待上传完成后生成。</span>}
         {blocked&&!referenceUploading && <button type="button" className={styles.quiet} onClick={()=>void run(async()=>{const id=planRef.current;if(!id)throw new Error('原计划编号暂不可读取，请保留草稿后重新打开页面；未重复提交');await queryPlan(id);})}>查询原提交，不重复生成</button>}
 

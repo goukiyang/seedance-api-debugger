@@ -1,13 +1,14 @@
 (function (root) {
     'use strict';
     const ENDPOINT = '/api/tools/ultimate-canvas/quote';
-    const DEBOUNCE_MS = 250;
-    const MAX_WAIT_MS = 1000;
+    const DEBOUNCE_MS = 500;
+    const MAX_WAIT_MS = 500;
     const MAX_NODES = 128;
     const MAX_CONCURRENT = 4;
     let mounted = null;
 
-    function mount({ requestJson, getNodeSettings, getProjectId, getBootstrap }) {
+    function mount({ requestJson, getNodeSettings, getProjectId, getBootstrap,
+        getQuoteSnapshot = () => '', onActualQuoteRequired = null, onQuoteInvalidated = null }) {
         if (![requestJson, getNodeSettings, getProjectId, getBootstrap].every(fn => typeof fn === 'function')) {
             throw new TypeError('Node pricing requires requestJson, getNodeSettings, getProjectId and getBootstrap.');
         }
@@ -26,7 +27,10 @@
             for (const key of ['resolution', 'ratio', 'size', 'quality']) {
                 if (typeof settings[key] === 'string') payload[key] = settings[key];
             }
-            return { payload, key: JSON.stringify([payload, capability]) };
+            const nodeEl = states.get(String(node.id))?.el;
+            const prompt = nodeEl?.querySelector('.image-props-textarea')?.value ?? node.data?.prompt ?? '';
+            return { payload, key: JSON.stringify([payload, settings, capability, node.data?.mode || '', prompt,
+                getQuoteSnapshot(node.id)]) };
         }
 
         function usable(state) {
@@ -34,19 +38,59 @@
                 && state.node.type === 'image' && state.el.querySelector('[data-generation-image-model]');
         }
 
-        function reasonText(reason) {
-            return ({ provider_unavailable: '接口未配置', model_unavailable: '模型不可用',
-                count_exceeds_limit: '张数超出限制', price_unconfigured: '未配置报价' })[reason] || '报价不可用';
-        }
-
-        function priceText(quote) {
-            return quote?.status === 'estimate' && quote.chargeEnabled === false
-                && Number.isFinite(quote.estimatedCredits) && quote.estimatedCredits >= 0
-                ? `${quote.estimatedCredits}积分` : '—';
+        function paintPrice(state) {
+            const style = state.node.data?.canvasStyle;
+            let slot = style
+                ? state.el.querySelector('[data-style-price]')
+                : state.el.querySelector('[data-canvas-node-price]');
+            if (!slot) {
+                const editor = state.el.querySelector('[data-generation-editor="image"]');
+                const footer = editor?.querySelector('.generation-editor-footer');
+                if (!editor || !footer) return;
+                slot = document.createElement('div');
+                slot.className = 'canvas-node-price-slot';
+                slot.dataset.canvasNodePrice = '';
+                slot.setAttribute('role', 'status');
+                slot.setAttribute('aria-live', 'polite');
+                slot.textContent = '费用待估算';
+                footer.after(slot);
+            }
+            if (style) {
+                const actualExpiresAt = Date.parse(state.actualQuote?.expiresAt);
+                if (state.quote?.actualQuoteRequired === true) {
+                    const amount = state.actualQuote?.billingMode === 'actual'
+                        && state.actualQuote.actualChargeEnabled === true
+                        && Number.isFinite(actualExpiresAt) && actualExpiresAt > Date.now()
+                        && Number.isFinite(state.actualQuote.estimatedCredits) && state.actualQuote.estimatedCredits >= 0
+                        ? Math.ceil(state.actualQuote.estimatedCredits) : null;
+                    slot.textContent = Number.isSafeInteger(amount) ? `合计约 ${amount} 点数` : '费用待估算';
+                } else {
+                    const total = style.unitCredits * style.count;
+                    slot.textContent = state.quote?.actualQuoteRequired === false && Number.isSafeInteger(style.unitCredits)
+                        && style.unitCredits >= 0 && Number.isSafeInteger(style.count) && style.count > 0
+                        && Number.isSafeInteger(total) ? `合计约 ${total} 点数` : '费用待估算';
+                }
+                return;
+            }
+            if (state.quote?.actualQuoteRequired === true) {
+                const amount = state.actualQuote?.billingMode === 'actual'
+                    && state.actualQuote.actualChargeEnabled === true
+                    && Date.parse(state.actualQuote.expiresAt) > Date.now()
+                    && Number.isFinite(state.actualQuote.estimatedCredits) && state.actualQuote.estimatedCredits >= 0
+                    ? Math.ceil(state.actualQuote.estimatedCredits) : null;
+                slot.textContent = Number.isSafeInteger(amount) ? `合计约 ${amount} 点数` : '费用待估算';
+                return;
+            }
+            const credits = state.quote?.actualQuoteRequired === false
+                && state.quote?.status === 'estimate' && state.quote.chargeEnabled === false
+                && Number.isFinite(state.quote.estimatedCredits) && state.quote.estimatedCredits >= 0
+                ? Math.ceil(state.quote.estimatedCredits) : null;
+            slot.textContent = Number.isSafeInteger(credits) ? `合计约 ${credits} 点数` : '费用待估算';
         }
 
         function paint(state) {
             if (!usable(state)) return;
+            paintPrice(state);
             const select = state.el.querySelector('[data-generation-image-model]');
             const line = select.closest('.video-model-info');
             if (!line) return;
@@ -118,7 +162,7 @@
                     row.type = 'button';
                     row.setAttribute('role', 'menuitemradio');
                     row.dataset.model = option.value;
-                    row.append(document.createElement('span'), document.createElement('small'));
+                    row.append(document.createElement('span'));
                     row.addEventListener('click', event => {
                         event.stopPropagation();
                         select.value = row.dataset.model;
@@ -134,9 +178,6 @@
                 row.firstChild.textContent = option.textContent;
                 row.disabled = option.disabled || !option.value;
                 row.setAttribute('aria-checked', String(option.selected));
-                const quote = state.quote?.modelOptions?.find(item => item.model === option.value);
-                row.lastChild.textContent = priceText(quote);
-                row.lastChild.title = quote?.status === 'estimate' ? `预估用量：${quote.unitCredits}积分 × ${quote.count}张` : reasonText(quote?.reason);
             });
         }
 
@@ -144,7 +185,9 @@
         function cancel(state) {
             clearTimeout(state.timer);
             clearTimeout(state.expiryTimer);
+            clearTimeout(state.actualQuoteTimer);
             state.timer = null;
+            state.actualQuoteTimer = null;
             state.ready = false;
             state.version += 1;
             state.controller?.abort();
@@ -154,11 +197,14 @@
         function dispose(nodeId) {
             if (nodeId === undefined) {
                 stopped = true;
+                document.removeEventListener('input', onPromptInput);
+                document.removeEventListener('visibilitychange', onVisibility);
                 for (const id of Array.from(states.keys())) dispose(id);
                 return;
             }
             const state = states.get(String(nodeId));
             if (!state) return;
+            onQuoteInvalidated?.(state.node.id);
             cancel(state);
             state.menu?.remove();
             state.trigger?.remove();
@@ -169,7 +215,7 @@
         }
 
         function drain() {
-            if (stopped) return;
+            if (stopped || document.hidden) return;
             for (const state of states.values()) {
                 if (!usable(state)) { dispose(state.id); continue; }
                 if (active >= MAX_CONCURRENT) break;
@@ -182,29 +228,54 @@
                 const controller = new AbortController();
                 state.controller = controller;
                 active += 1;
-                const timeout = setTimeout(() => controller.abort(), 10000);
+                const timeout = setTimeout(() => controller.abort(), 30000);
                 Promise.resolve().then(() => requestJson(ENDPOINT, {
                     method: 'POST', payload, cache: 'no-store', signal: controller.signal
-                })).then(quote => {
+                })).then(async quote => {
                     if (!usable(state) || state.version !== version || controller.signal.aborted
                         || inputFor(state.node).key !== key) return;
                     if (quote?.kind !== 'image' || quote.projectId !== state.payload.project_id
                         || quote.model !== state.payload.model || quote.count !== state.payload.count
                         || quote.chargeEnabled !== false || !['estimate', 'unavailable'].includes(quote.status)
-                        || !Array.isArray(quote.modelOptions) || !Number.isFinite(Date.parse(quote.expiresAt))) {
+                        || typeof quote.actualQuoteRequired !== 'boolean'
+                        || (quote.actualQuoteRequired && (quote.unitCredits !== null || quote.estimatedCredits !== null))
+                        || !Number.isSafeInteger(quote.revision) || !Array.isArray(quote.modelOptions)
+                        || quote.modelOptions.some(item => typeof item?.actualQuoteRequired !== 'boolean'
+                            || (item.actualQuoteRequired && (item.unitCredits !== null || item.estimatedCredits !== null)))
+                        || !Number.isFinite(Date.parse(quote.expiresAt))) {
                         throw new Error('Invalid estimate response');
                     }
                     state.quote = quote;
                     state.validUntil = Math.min(Date.parse(quote.expiresAt), Date.now() + 60000);
                     if (state.validUntil <= Date.now()) throw new Error('Expired estimate response');
                     paint(state);
+                    if (quote.actualQuoteRequired && quote.status === 'estimate' && onActualQuoteRequired) {
+                        const actualQuote = await onActualQuoteRequired(state.node, quote);
+                        if (!usable(state) || state.version !== version || inputFor(state.node).key !== key) return;
+                        const actualExpiry = Date.parse(actualQuote?.expiresAt);
+                        if (actualQuote?.billingMode === 'actual' && actualQuote.actualChargeEnabled === true
+                            && Number.isFinite(actualQuote.estimatedCredits) && actualQuote.estimatedCredits >= 0
+                            && Number.isFinite(actualExpiry) && actualExpiry > Date.now()) {
+                            state.actualQuote = actualQuote;
+                            state.actualQuoteTimer = setTimeout(() => {
+                                if (state.version !== version) return;
+                                state.actualQuote = null;
+                                onQuoteInvalidated?.(state.node.id);
+                                paint(state);
+                            }, Math.max(0, actualExpiry - Date.now()));
+                            paint(state);
+                        }
+                    }
                     state.expiryTimer = setTimeout(() => {
                         if (!usable(state)) { dispose(state.id); return; }
                         if (state.version !== version) return;
                         state.quote = null;
+                        state.actualQuote = null;
                         state.validUntil = 0;
                         state.message = '报价已过期';
+                        onQuoteInvalidated?.(state.node.id);
                         paint(state);
+                        if (!document.hidden) refresh(state.el, state.node);
                     }, Math.max(0, state.validUntil - Date.now()));
                 }).catch(() => {
                     if (!usable(state) || state.version !== version || inputFor(state.node).key !== key) return;
@@ -240,6 +311,12 @@
                 paint(state);
                 return;
             }
+            if (state.key && state.key !== input.key) {
+                state.actualQuote = null;
+                clearTimeout(state.actualQuoteTimer);
+                state.actualQuoteTimer = null;
+                onQuoteInvalidated?.(state.node.id);
+            }
             cancel(state);
             state.key = input.key;
             state.payload = input.payload;
@@ -250,7 +327,7 @@
             state.message = !input.payload.project_id ? '请先选择项目' : valid ? '待报价' : '参数未就绪';
             paint(state);
             if (!valid) { state.queuedAt = 0; return; }
-            state.queuedAt = state.queuedAt || Date.now();
+            state.queuedAt = Date.now();
             state.timer = setTimeout(() => {
                 state.timer = null;
                 state.ready = true;
@@ -258,13 +335,63 @@
             }, Math.max(0, Math.min(DEBOUNCE_MS, MAX_WAIT_MS - (Date.now() - state.queuedAt))));
         }
 
-        mounted = { refresh, dispose };
+        function onPromptInput(event) {
+            const input = event.target;
+            if (!input?.matches?.('.image-props-textarea')) return;
+            const nodeEl = input.closest('[data-node-id]');
+            const node = window.canvasEngine?.nodes?.get(nodeEl?.dataset.nodeId);
+            if (node) refresh(nodeEl, node);
+        }
+
+        document.addEventListener('input', onPromptInput);
+        function onVisibility() {
+            if (document.hidden) return;
+            for (const state of states.values()) refresh(state.el, state.node);
+            drain();
+        }
+        document.addEventListener('visibilitychange', onVisibility);
+        mounted = {
+            refresh,
+            dispose,
+            actualQuoteRequired(nodeId) {
+                const quote = states.get(String(nodeId))?.quote;
+                return typeof quote?.actualQuoteRequired === 'boolean' ? quote.actualQuoteRequired : null;
+            },
+            actualQuote(nodeId) {
+                const quote = states.get(String(nodeId))?.actualQuote;
+                return Date.parse(quote?.expiresAt) > Date.now() ? quote : null;
+            },
+            clearActualQuote(nodeId) {
+                const state = states.get(String(nodeId));
+                if (!state) return;
+                state.actualQuote = null;
+                clearTimeout(state.actualQuoteTimer);
+                state.actualQuoteTimer = null;
+                paint(state);
+            },
+            invalidateProjection(nodeId) {
+                const state = states.get(String(nodeId));
+                if (!state) return;
+                onQuoteInvalidated?.(state.node.id);
+                cancel(state);
+                state.key = '';
+                state.quote = null;
+                state.actualQuote = null;
+                state.validUntil = 0;
+                state.queuedAt = 0;
+                paint(state);
+            }
+        };
         return mounted;
     }
 
     root.UltimateCanvasNodePricing = {
         mount,
         refresh(nodeEl, node) { mounted?.refresh(nodeEl, node); },
+        actualQuoteRequired(nodeId) { return mounted?.actualQuoteRequired(nodeId) ?? null; },
+        actualQuote(nodeId) { return mounted?.actualQuote(nodeId) ?? null; },
+        clearActualQuote(nodeId) { mounted?.clearActualQuote(nodeId); },
+        invalidateProjection(nodeId) { mounted?.invalidateProjection(nodeId); },
         dispose(nodeId) { mounted?.dispose(nodeId); }
     };
 })(window);

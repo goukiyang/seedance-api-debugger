@@ -329,9 +329,81 @@
         entry.disabled = !canvasRuntime.documentWritable || canvasRuntime.contextSwitching;
     }
 
+    function canvasGenerationQuotePayload(nodeId) {
+        const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+        const payload = nodeEl && collectGenerationPayload(nodeEl);
+        return payload ? { ...payload, prompt: promptWithConnectedText(payload) } : null;
+    }
+
+    function canvasGenerationQuoteSnapshot(nodeId) {
+        const node = engine.nodes.get(nodeId);
+        const payload = canvasGenerationQuotePayload(nodeId);
+        if (!node || !payload) return '';
+        return JSON.stringify({
+            userId: canvasRuntime.bootstrap?.user?.id,
+            projectId: canvasRuntime.selectedProjectId,
+            cardId: canvasRuntime.selectedVideoCardId,
+            documentId: canvasRuntime.documentId,
+            writable: canvasRuntime.documentWritable && !canvasRuntime.contextSwitching,
+            mode: payload.mode,
+            prompt: payload.prompt,
+            promptMentions: payload.promptMentions || null,
+            settings: payload.settings,
+            referenceImageIds: payload.referenceImageIds || [],
+            style: node.data?.canvasStyle || null
+        });
+    }
+
+    const canvasBillingViews = new Map();
+    function renderCanvasBilling(nodeId) {
+        const entry = canvasBillingViews.get(nodeId), node = engine.nodes.get(nodeId);
+        const region = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"] .generated-reference-card`);
+        region?.querySelector('[data-canvas-image-billing]')?.remove();
+        if (!region || !node || !entry || entry.owner !== canvasRuntime.bootstrap?.user?.id || entry.documentId !== canvasRuntime.documentId
+            || entry.assetId !== node.data?.assetId) return;
+        const view = entry.billing;
+        const badge = document.createElement('span'); badge.dataset.canvasImageBilling = '';
+        badge.className = 'canvas-image-billing';
+        badge.textContent = view?.amountMicros !== null && view?.chargedCredits !== null
+            && Number.isSafeInteger(view?.amountMicros) && Number.isFinite(view?.chargedCredits)
+            ? `$${(view.amountMicros / 1000000).toFixed(6).replace(/0+$/, '').replace(/\.$/, '')} · ${view.chargedCredits.toFixed(2)}点`
+            : ['awaiting_response', 'pending', 'reconciling'].includes(view?.status) ? '费用核对中' : '费用待核对';
+        region.append(badge);
+    }
     const canvasStyles = window.UltimateCanvasStyles.create({
+        billing: (nodeId, rows) => {
+            const owner = canvasRuntime.bootstrap?.user?.id;
+            rows.filter(item => item.billing && item.assetId).forEach((item, index) => {
+                const target = index === 0 ? nodeId : `image-result-${item.assetId}`;
+                if (index > 0 && rows.filter(row => row.assetId === item.assetId).length !== 1) return;
+                const previous = canvasBillingViews.get(target);
+                if (previous && (previous.billing.status !== item.billing.status || previous.billing.chargedCredits !== item.billing.chargedCredits)) {
+                    window.parent.postMessage({ type: 'sd2-canvas-billing-settled', userId: owner }, location.origin);
+                }
+                if (canvasBillingViews.size >= 1024 && !canvasBillingViews.has(target)) canvasBillingViews.delete(canvasBillingViews.keys().next().value);
+                canvasBillingViews.set(target, { owner, documentId: canvasRuntime.documentId, assetId: item.assetId, taskId: item.taskId, billing: item.billing });
+                renderCanvasBilling(target);
+            });
+        },
         request: requestJson,
         confirm: requestCanvasConfirmation,
+        getQuoteSnapshot: canvasGenerationQuoteSnapshot,
+        getGenerationPayload: canvasGenerationQuotePayload,
+        clearActualQuote: nodeId => window.UltimateCanvasNodePricing?.clearActualQuote(nodeId),
+        quoteConsumed: nodeId => window.UltimateCanvasNodePricing?.invalidateProjection(nodeId),
+        showQuote: (nodeId, quote) => {
+            const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+            const line = engine.nodes.get(nodeId)?.data?.canvasStyle
+                ? nodeEl?.querySelector('[data-style-price]')
+                : nodeEl?.querySelector('[data-canvas-node-price]');
+            if (!line) return;
+            const total = Number(quote?.estimatedCredits);
+            line.textContent = Number.isFinite(total) && total >= 0 && Number.isSafeInteger(Math.ceil(total))
+                ? `合计约 ${Math.ceil(total).toLocaleString('zh-CN')} 点数` : '费用待估算';
+        },
+        clearQuote: nodeId => {
+            if (engine.nodes.has(nodeId)) renderGenerationNodeControls(nodeId);
+        },
         getNode: nodeId => engine.nodes.get(nodeId),
         context: () => ({ userId: canvasRuntime.bootstrap?.user?.id, projectId: canvasRuntime.selectedProjectId,
             cardId: canvasRuntime.selectedVideoCardId, documentId: canvasRuntime.documentId,
@@ -2844,7 +2916,7 @@
             if (Array.isArray(value)) return value.map(clean);
             if (!value || typeof value !== 'object') return value;
             return Object.fromEntries(Object.entries(value)
-                .filter(([key]) => !/^(task_?ids?|provider_?task_?id|run_?id|batch_?id|generationResult|generationError|statusEndpoint|frozenCost|styleJob|videoSubmission|videoSubmissionLegacy|videoHistory|selectedVideoResult|previewVideoTaskId|generationPayload)$/i.test(key))
+                .filter(([key]) => !/^(task_?ids?|provider_?task_?id|run_?id|batch_?id|generationResult|generationError|statusEndpoint|frozenCost|styleJob|imageBillingJob|videoSubmission|videoSubmissionLegacy|videoHistory|selectedVideoResult|previewVideoTaskId|generationPayload)$/i.test(key))
                 .map(([key, item]) => [key, key === 'generationStatus' ? 'idle' : clean(item)]));
         };
         return JSON.stringify(clean(JSON.parse(raw)));
@@ -2990,7 +3062,11 @@
                 notice: showCanvasNotice
             });
             canvasRuntime.libraryMounted = true;
-            window.UltimateCanvasNodePricing?.mount({ requestJson, getNodeSettings: generationSettingsForNode, getProjectId: () => canvasRuntime.selectedProjectId, getBootstrap: () => canvasRuntime.bootstrap });
+            window.UltimateCanvasNodePricing?.mount({ requestJson, getNodeSettings: generationSettingsForNode,
+                getProjectId: () => canvasRuntime.selectedProjectId, getBootstrap: () => canvasRuntime.bootstrap,
+                getQuoteSnapshot: canvasGenerationQuoteSnapshot,
+                onActualQuoteRequired: (node, quote) => canvasStyles.prefetchActualQuote(node.id, quote),
+                onQuoteInvalidated: nodeId => canvasStyles.invalidateQuote(nodeId) });
             if (initial) {
                 await loadCanvasDocument({ document: initial });
             } else {
@@ -3330,6 +3406,7 @@
             if (node.type === 'image') {
                 syncImageModeButtons(nodeEl, node.data?.mode || 'text-to-image');
                 if (node.data?.styleJob) void canvasStyles.resume(node.id);
+                if (node.data?.imageBillingJob) void canvasStyles.resumeBilling(node.id);
             }
             if ((node.type === 'text' || node.type === 'script') && (typeof node.data?.authoredText === 'string'
                 || node.data?.generatedText || node.data?.prompt)) {
@@ -4437,6 +4514,21 @@
         return dimensions;
     }
 
+    function ensureGenerationPriceStack(nodeEl) {
+        const footerRight = nodeEl?.querySelector('.video-footer-right');
+        const submit = footerRight?.querySelector('[data-generation-submit]');
+        if (!footerRight || !submit) return null;
+        let stack = footerRight.querySelector('[data-generation-price-stack]');
+        if (!stack) {
+            stack = document.createElement('div');
+            stack.dataset.generationPriceStack = '';
+            stack.style.cssText = 'display:flex;flex-direction:column;align-items:flex-end;gap:2px;';
+            footerRight.insertBefore(stack, submit);
+        }
+        if (submit.parentElement !== stack) stack.appendChild(submit);
+        return stack;
+    }
+
     function renderGenerationNodeControls(nodeId) {
         planSplit.renderNode(nodeId);
         renderStoryEntry(nodeId);
@@ -4444,6 +4536,7 @@
         const node = engine.nodes.get(nodeId);
         const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
         if (!node || !nodeEl || !['image', 'video'].includes(node.type)) return;
+        const priceStack = ensureGenerationPriceStack(nodeEl);
 
         const settings = generationSettingsForNode(node);
         applyGenerationNodeDimensions(nodeEl, settings);
@@ -4518,15 +4611,27 @@
                 stylePrice = document.createElement('span');
                 stylePrice.className = 'cost-label';
                 stylePrice.dataset.stylePrice = '';
-                nodeEl.querySelector('.video-footer-right')?.prepend(stylePrice);
+                stylePrice.setAttribute('role', 'status');
+                stylePrice.setAttribute('aria-live', 'polite');
             }
+            if (priceStack && stylePrice.parentElement !== priceStack) priceStack.appendChild(stylePrice);
             stylePrice.hidden = !style;
             if (style) {
-                window.UltimateCanvasNodePricing?.dispose(node.id);
+                window.UltimateCanvasNodePricing?.refresh(nodeEl, node);
                 modelLine?.classList.remove('has-canvas-node-price');
                 const select = nodeEl.querySelector('[data-generation-image-model]');
                 if (select) select.hidden = false;
-                stylePrice.textContent = Number.isFinite(style.unitCredits) ? `${style.unitCredits * style.count} 点` : '报价待确认';
+                const actualQuoteRequired = window.UltimateCanvasNodePricing?.actualQuoteRequired(node.id);
+                const actualQuote = window.UltimateCanvasNodePricing?.actualQuote(node.id);
+                const actualTotal = Math.ceil(Number(actualQuote?.estimatedCredits));
+                const fixedTotal = style.unitCredits * style.count;
+                stylePrice.textContent = actualQuoteRequired === true && actualQuote?.billingMode === 'actual'
+                    && Number.isSafeInteger(actualTotal) && actualTotal >= 0
+                    ? `合计约 ${actualTotal.toLocaleString('zh-CN')} 点数`
+                    : actualQuoteRequired === false && Number.isSafeInteger(style.unitCredits)
+                        && style.unitCredits >= 0 && Number.isSafeInteger(style.count) && style.count > 0
+                        && Number.isSafeInteger(fixedTotal)
+                        ? `合计约 ${fixedTotal.toLocaleString('zh-CN')} 点数` : '费用待估算';
                 stylePrice.title = '按应用风格时的报价；价格变化时会停止提交';
                 if (submit && !submit.classList.contains('is-loading')) submit.disabled = Boolean(styleJob && styleJob.state !== 'unconfirmed') || style.appliedBy !== canvasRuntime.bootstrap?.user?.id;
             } else window.UltimateCanvasNodePricing?.refresh(nodeEl, node);
@@ -4554,8 +4659,13 @@
             const estimate = canvasRuntime.videoEstimates.get(nodeId);
             const estimateSignature = videoEstimateSignature(settings);
             if (cost) {
-                nodeEl.querySelector('.video-model-info')?.appendChild(cost);
+                if (priceStack && cost.parentElement !== priceStack) priceStack.appendChild(cost);
                 cost.classList.add('canvas-node-credits');
+                Object.assign(cost.style, {
+                    border: '0', background: 'transparent', color: 'var(--text-tertiary)',
+                    padding: '0', minHeight: '0', margin: '0', cursor: 'pointer',
+                    font: 'inherit', fontSize: '11px', whiteSpace: 'nowrap',
+                });
                 cost.textContent = node.data?.frozenCost
                     ? `已冻结 ${node.data.frozenCost}`
                     : estimate?.signature === estimateSignature && estimate.status === 'success'
@@ -8348,6 +8458,7 @@
                     : '<div class="generated-result-placeholder" aria-hidden="true"></div>'}
             </div>`);
         syncImageResultActionsTrigger(nodeEl, node, options);
+        if (node?.type === 'image') renderCanvasBilling(nodeId);
         if (node?.type === 'video') syncVideoTaskActionsTrigger(nodeEl, node, options);
     }
     document.addEventListener('error', event => {

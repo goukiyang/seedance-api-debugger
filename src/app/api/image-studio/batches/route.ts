@@ -3,6 +3,7 @@ import { getSession } from '@/lib/auth/session';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { createStudioBatch, listStudioBatches, studioBatchView, updateStudioBatch } from '@/lib/image-studio/batches';
 import { StudioError } from '@/lib/image-studio/tasks';
+import { quoteStudioBatch } from '@/lib/image-studio/batch-billing-quote';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -27,6 +28,7 @@ async function handle(request: NextRequest, write = false) {
       const raw = Buffer.concat(chunks).toString('utf8');
       const body = JSON.parse(raw);
       if (!body || typeof body !== 'object' || Array.isArray(body)) throw new StudioError('提交内容无效');
+      if (request.method === 'POST' && body.action === 'quote') return NextResponse.json(await quoteStudioBatch(user.id, body), { headers: { 'Cache-Control': 'private, no-store' } });
       if (request.method === 'PATCH') { await updateStudioBatch(user.id, body); return NextResponse.json({ batch: await studioBatchView(user.id, body.id) }); }
       const id = await createStudioBatch(user.id, body);
       return NextResponse.json({ batch: await studioBatchView(user.id, id) }, { status: 202 });

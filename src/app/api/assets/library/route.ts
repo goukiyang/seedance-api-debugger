@@ -10,6 +10,7 @@ import { canRequestTaskThumbnail, shouldExposeTaskThumbnailUrl } from '@/lib/vid
 import { videoDeliveryStageForTask, type VideoDeliveryStage } from '@/lib/video/delivery-status';
 import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
 import { assetGenerationOrigin, generationOrigins, type GenerationOrigin } from '@/lib/assets/generation-origin';
+import { imageBillingView, type ImageBillingView } from '@/lib/image-studio/billing-contract';
 import { studioHiddenAssetUrls, studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
 import { removedLibraryResources } from '@/lib/assets/library-removal';
 import { estimateNormalVideoCharge, loadNormalVideoChargeRates, type NormalVideoChargeEstimate } from '@/lib/costs/normal-video-charge';
@@ -47,6 +48,7 @@ type LibraryItem = {
   kind: LibraryItemKind;
   source: LibraryItemSource;
   generationOrigin?: GenerationOrigin;
+  imageBilling?: ImageBillingView | null;
   taskId: string | null;
   assetId: string | null;
   referenceImageId: string | null;
@@ -731,12 +733,21 @@ async function loadAssetItems(options: {
     : [];
   const ownerById = new Map(owners.map((owner) => [owner.id, owner]));
   const origins = await generationOrigins(options.user, assets.filter(asset => asset.type === 'image'));
+  const billingRows = await prisma.imageStudioTask.findMany({ where: { asset_id: { in: assets.filter(asset => asset.type === 'image'
+    && (options.user.role === 'admin' || asset.owner_id === options.user.id)).map(asset => asset.id) },
+    ...(options.user.role === 'admin' ? {} : { owner_id: options.user.id }), status: 'succeeded' },
+    select: { asset_id: true, owner_id: true, billing_status: true, actual_amount_micros: true,
+      actual_credits: true, billing_contract_json: true }, take: 1001 });
+  const billsByAsset = new Map<string, typeof billingRows>();
+  if (billingRows.length < 1001) for (const row of billingRows) { const rows = billsByAsset.get(row.asset_id!) || []; rows.push(row); billsByAsset.set(row.asset_id!, rows); }
 
   return {
     items: assets.map((asset) => ({ ...serializeAsset({
       ...asset,
       owner: ownerById.get(asset.owner_id) || null,
-    }), generationOrigin: assetGenerationOrigin(asset, origins) })),
+    }), generationOrigin: assetGenerationOrigin(asset, origins),
+      imageBilling: (() => { const rows = billsByAsset.get(asset.id); return rows?.length === 1 && rows[0].owner_id === asset.owner_id
+        ? imageBillingView(rows[0], options.user.id, options.user.role === 'admin') : null; })() })),
     total,
   };
 }

@@ -63,7 +63,7 @@ async function findOfficialChargeAllocations(ledgerIds: string[]) {
     const batchRows = await prisma.costAllocation.findMany({
       where: {
         ledger_id: { in: batchLedgerIds },
-        amount_minor: { not: null },
+        OR: [{ amount_minor: { not: null } }, { amount_micros: { not: null } }],
       },
       select: {
         amount_minor: true,

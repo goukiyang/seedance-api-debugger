@@ -58,11 +58,13 @@ import { watchGenerationCompletion } from '@/components/GenerationCompletion';
 import { handImageDownloadToBrowser } from '@/lib/media/native-download';
 import { describedEvolutionDirection, type EvolutionCapability, type EvolutionInput } from '@/lib/image-studio/evolution';
 import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
+import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
+import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
 import type { StudioReferencePolicy } from '@/lib/image-studio/reference-policy';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
 
 type StudioSnapshot = { referencePolicy?: StudioReferencePolicy; primaryReferenceImages?: UploadedAssetPayload[]; auxiliaryReferenceImages?: UploadedAssetPayload[]; prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; contextAvailable?: boolean; contextConfigured?: boolean; referenceImages: UploadedAssetPayload[]; fixedReferenceImages?: FixedStudioReference[]; transientReferenceImages?: UploadedAssetPayload[]; fixedReferenceCount?: number; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[] };
-type StudioTask = { id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; error?: string; unitCredits: number; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; finishedAt?: string | null; snapshot?: StudioSnapshot & { moduleContextVersion?: string | null; moduleContextVersionState?: string }; delivery?: { phase: string; receivedBytes?: number; expectedBytes?: number; recoveryAvailable: boolean; checkpointRetained: boolean; requestId?: string; upstreamRequestId?: string; validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string } }; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number } | null };
+type StudioTask = { id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; error?: string; unitCredits: number; billing?: ImageBillingView | null; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; finishedAt?: string | null; snapshot?: StudioSnapshot & { moduleContextVersion?: string | null; moduleContextVersionState?: string }; delivery?: { phase: string; receivedBytes?: number; expectedBytes?: number; recoveryAvailable: boolean; checkpointRetained: boolean; requestId?: string; upstreamRequestId?: string; validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string } }; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number } | null };
 function studioTaskHasDeliveredAsset(task: StudioTask): task is StudioTask & { asset: NonNullable<StudioTask['asset']> } {
   return task.status === 'succeeded' && Boolean(task.asset?.original_url);
 }
@@ -79,6 +81,8 @@ type QuickStudioPreset = StudioPreset & { prompt: string; context: string; refer
 type PresetSource = { draft: Record<string, unknown>; blocked: string | null; groupDeleteBlocked?: boolean };
 type PresetSourceReader = () => PresetSource;
 type StudioFeedback = { message: string; tone: 'progress' | 'info' | 'success' | 'warning' | 'error' };
+type StudioImageQuote = { billingMode: 'fixed' | 'actual'; billingQuoteId: string | null; unitCredits: number; estimatedCredits: number; expiresAt?: string };
+type CachedStudioImageQuote = { signature: string; requestId: string; quote: StudioImageQuote };
 type ImagePreviewState = { contentKey?: `asset:${string}`; taskId?: string; resultVersion?: string | null; src: string; thumbnailSrc?: string; alt: string; title?: string; fileName?: string; width?: number; height?: number; fileSize?: number; metadata?: ImagePreviewMetadata; comparison?: ImageComparisonSource };
 type RatioPreferences = { custom: string[]; busy: boolean; error: string; onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean> };
 type ModuleScrollRequest = { target: 'module' | 'header'; id: string; group: string; token: number; behavior: ScrollBehavior; markViewed: boolean; expansionRevision?: number };
@@ -952,6 +956,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   }
   const taskReadLoaded = useRef(false);
   const [submitting, setSubmitting] = useState(false);
+  const [billingQuote, setBillingQuote] = useState<CachedStudioImageQuote | null>(null);
+  const [quoteVisible, setQuoteVisible] = useState(true);
+  useEffect(() => { const update = () => setQuoteVisible(!document.hidden); update(); document.addEventListener('visibilitychange', update); return () => document.removeEventListener('visibilitychange', update); }, []);
+  const previousEstimateSignature = useRef('');
+  const liveGenerationSignature = useRef('');
   const [queryingSubmission, setQueryingSubmission] = useState(false);
   const [pendingSubmission, setPendingSubmission] = useState<Record<string, unknown> | null>(null);
   const [reproduceSourceTaskId, setReproduceSourceTaskId] = useState<string | null>(module.reproduceFromTaskId || null);
@@ -1001,7 +1010,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const baseline = moduleSaved ? JSON.parse(moduleSaved) as typeof moduleDraft : moduleDraft;
   const generationInputs = { evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, aspectRatio, resolution: normalizeImageResolution(moduleModel, resolution), referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: normalizeImageStudioQuality(moduleModel, quality), referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), skillIds: moduleDraft.skillIds, skillVersions: Object.fromEntries(skills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])), styleGroupIds: moduleDraft.styleGroupIds };
   const generationDraft = JSON.stringify(generationInputs);
-  const batch = useStudioBatch({ userId, moduleId: module.id, unitCredits: settings ? settings.prices?.[moduleModel] ?? null : module.prices[moduleModel] ?? null,
+  const actualQuoteRequired = settings?.billingReadiness?.models?.[moduleModel]?.ready === true;
+  const batch = useStudioBatch({ userId, moduleId: module.id, actualQuoteRequired, quotePayload: settings ? generationPayload(undefined, '') : null, unitCredits: settings ? settings.prices?.[moduleModel] ?? null : module.prices[moduleModel] ?? null,
     draftSignature: JSON.stringify([generationDraft, effectiveGlobalContext, reproduceSourceTaskId, settings?.revision, module.revision]) });
   const contextVersion = useModuleContextVersion({ moduleId: module.id, raw: moduleContext, taskId: reproduceSourceTaskId,
     editable: contextEditable, enabled: !hidden && draftLoaded && !draftRestoring, composing: contextComposing });
@@ -1439,6 +1449,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     };
   }, [templateWorkbench, active, viewToken, loadTasks]);
   const hasPending = tasks.some(task => task.status === 'queued' || task.status === 'running');
+  useImageBillingRefresh(tasks, () => loadTasks(undefined, 'silent'), visible);
   useEffect(() => {
     if (!visible) return;
     const timer = setInterval(() => { if (!document.hidden) void loadTasks(undefined, 'silent'); }, hasPending ? 5000 : 15000);
@@ -1465,9 +1476,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     finally { submitLock.current = false; setSubmitting(false); setQueryingSubmission(false); }
   }
 
-  function generationPayload(retryTask?: StudioTask) {
+  function generationPayload(retryTask?: StudioTask, requestId = crypto.randomUUID()) {
     const historicalEvolution = (retryTask?.snapshot as (StudioSnapshot & { evolution?: EvolutionInput }) | undefined)?.evolution;
-    return { requestId: crypto.randomUUID(), prompt: retryTask?.prompt ?? prompt,
+    return { requestId, prompt: retryTask?.prompt ?? prompt,
       moduleId: module.id, model: retryTask?.model || moduleModel, quality: retryTask?.quality || quality, reproduceFromTaskId: reproduceSourceTaskId || undefined, count: retryTask ? 1 : count, aspectRatio: retryTask?.aspectRatio || aspectRatio, resolution: retryTask?.snapshot?.resolution || resolution, revision: settings!.revision,
       referenceIds: retryTask?.referenceIds || moduleDraft.referenceIds,
       ...(historicalEvolution || evolution ? { evolution: historicalEvolution || evolutionInput } : {}),
@@ -1492,18 +1503,58 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       || activeFixedReferences.some(item => item.available === false) || activeStyles.some(group => group.unavailable))) {
       setError('请检查主图数量、辅助参考数量和图片可用性。'); return;
     }
-    const payload = generationPayload(retryTask);
+    const currentPayload = generationPayload(retryTask);
+    const expectedFormSignature = liveGenerationSignature.current;
+    const signature = JSON.stringify([userId, Object.fromEntries(Object.entries(currentPayload).filter(([key]) => key !== 'requestId'))]);
+    const reusableQuote = billingQuote?.signature === signature
+      && (!billingQuote.quote.expiresAt || Date.parse(billingQuote.quote.expiresAt) > Date.now()) ? billingQuote : null;
+    const payload = reusableQuote ? generationPayload(retryTask, reusableQuote.requestId) : currentPayload;
     const ratioIssue = studioFourToOneIssue(payload.aspectRatio, settings.modelFourToOne?.[payload.model] === true);
     if (ratioIssue) { setError(ratioIssue); return; }
+    submitLock.current = true; setSubmitting(true); setError('');
+    let confirmedQuote = reusableQuote?.quote || null;
+    try {
+      if (!confirmedQuote) {
+        const quote = await readResponse(await fetch('/api/image-studio/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(20000) })) as StudioImageQuote;
+        if (liveGenerationSignature.current !== expectedFormSignature) throw new Error('本次参数已变化，报价未用于生成，请重新确认。');
+        if (!['fixed', 'actual'].includes(quote.billingMode) || !Number.isFinite(quote.unitCredits) || quote.unitCredits < 0
+          || !Number.isFinite(quote.estimatedCredits) || quote.estimatedCredits < 0
+          || (quote.billingQuoteId !== null && typeof quote.billingQuoteId !== 'string')
+          || !quote.expiresAt || !Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= Date.now()
+          || (quote.billingMode === 'actual' && !quote.billingQuoteId)) {
+          throw new Error('本次报价信息不完整，尚未提交图片。');
+        }
+        const baseline = !actualQuoteRequired && moduleUnitCredits != null && Number.isFinite(moduleUnitCredits) && moduleUnitCredits >= 0
+          ? Math.ceil(moduleUnitCredits * payload.count) : null;
+        if (baseline === null || Math.ceil(quote.estimatedCredits) > baseline) {
+          setBillingQuote({ signature, requestId: payload.requestId, quote });
+          setError(`本次预估为 ${Math.ceil(quote.estimatedCredits)} 点数，尚未生成；请核对后再次点击。`);
+          submitLock.current = false; setSubmitting(false);
+          return;
+        }
+        confirmedQuote = quote;
+        setBillingQuote({ signature, requestId: payload.requestId, quote });
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '报价未确认，尚未提交图片。');
+      submitLock.current = false; setSubmitting(false);
+      return;
+    }
+    if (!confirmedQuote) { setError('本次报价未确认，尚未提交图片。'); submitLock.current = false; setSubmitting(false); return; }
+    if (confirmedQuote.expiresAt && Date.parse(confirmedQuote.expiresAt) <= Date.now()) {
+      setBillingQuote(null); setError('本次报价已过期，尚未提交图片；请再次点击获取新报价。');
+      submitLock.current = false; setSubmitting(false); return;
+    }
     try {
       const saved = JSON.stringify({ requestId: payload.requestId });
       localStorage.setItem(pendingKey, saved);
       if (localStorage.getItem(pendingKey) !== saved) throw new Error('Request identity not saved');
-    } catch { setError('提交编号未能保存，尚未提交生成。请允许浏览器保存数据后再试。'); return; }
-    submitLock.current = true; setSubmitting(true); setError('');
+    } catch { setError('提交编号未能保存，尚未提交生成。请允许浏览器保存数据后再试。'); submitLock.current = false; setSubmitting(false); return; }
     let ambiguous = true;
     try {
-      const response = await fetch('/api/image-studio/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(20000) });
+      const submission = { ...payload, ...(confirmedQuote.billingQuoteId ? { billingQuoteId: confirmedQuote.billingQuoteId } : {}), maxEstimatedCost: Math.ceil(confirmedQuote.estimatedCredits) };
+      setBillingQuote(null);
+      const response = await fetch('/api/image-studio/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(submission), signal: AbortSignal.timeout(20000) });
       if (response.status >= 400 && response.status < 500) { ambiguous = false; setPendingSubmission(null); try { localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch {} if (response.status === 409) onReloadSettings(); await readResponse(response); }
       else {
         const value = await readResponse(response);
@@ -1627,6 +1678,43 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     window.setTimeout(() => setCopyFeedback(current => current?.id === task.id ? null : current), copied ? 1800 : 2600);
   }
   const moduleUnitCredits = settings ? settings.prices?.[moduleModel] ?? null : module.prices[moduleModel] ?? null;
+  const estimatePayload = settings ? generationPayload(undefined, '') : null;
+  const estimateSignature = estimatePayload ? JSON.stringify([userId, Object.fromEntries(Object.entries(estimatePayload).filter(([key]) => key !== 'requestId'))]) : '';
+  liveGenerationSignature.current = estimateSignature;
+  useEffect(() => {
+    if (!actualQuoteRequired || !estimateSignature || hidden || !active || !quoteVisible || !draftLoaded || draftRestoring
+      || submitting || pendingSubmission || batch.mode !== 'single'
+      || !Number.isInteger(count) || count < 1 || count > 8) return;
+    if (billingQuote?.signature === estimateSignature && billingQuote.quote.expiresAt
+      && Date.parse(billingQuote.quote.expiresAt) > Date.now()) return;
+    const abort = new AbortController();
+    const timer = window.setTimeout(() => {
+      const requestId = crypto.randomUUID();
+      const payload = { ...JSON.parse(estimateSignature)[1], requestId };
+      void fetch('/api/image-studio/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload), signal: AbortSignal.any([abort.signal, AbortSignal.timeout(20000)]) })
+        .then(readResponse).then((quote: StudioImageQuote) => {
+          if (abort.signal.aborted || liveGenerationSignature.current !== estimateSignature) return;
+          if (!Number.isFinite(quote.estimatedCredits) || quote.estimatedCredits < 0 || !quote.expiresAt
+            || Date.parse(quote.expiresAt) <= Date.now() || quote.billingMode === 'actual' && !quote.billingQuoteId) return;
+          setBillingQuote({ signature: estimateSignature, requestId, quote });
+        }).catch(() => { /* Unknown pricing stays unknown; this never generates. */ });
+    }, 500);
+    return () => { window.clearTimeout(timer); abort.abort(); };
+  }, [actualQuoteRequired, estimateSignature, hidden, active, quoteVisible, draftLoaded, draftRestoring, submitting, pendingSubmission, batch.mode, count, billingQuote]);
+  const visibleQuote = billingQuote?.signature === estimateSignature
+    && (!billingQuote.quote.expiresAt || Date.parse(billingQuote.quote.expiresAt) > Date.now()) ? billingQuote.quote : null;
+  useEffect(() => {
+    if (previousEstimateSignature.current && previousEstimateSignature.current !== estimateSignature) setBillingQuote(null);
+    previousEstimateSignature.current = estimateSignature;
+  }, [estimateSignature]);
+  useEffect(() => {
+    if (!billingQuote?.quote.expiresAt) return;
+    const delay = Date.parse(billingQuote.quote.expiresAt) - Date.now();
+    if (delay <= 0) { setBillingQuote(null); return; }
+    const timer = window.setTimeout(() => setBillingQuote(current => current?.requestId === billingQuote.requestId ? null : current), delay);
+    return () => window.clearTimeout(timer);
+  }, [billingQuote]);
   const selectedProviderReady = settings?.modelReady?.[moduleModel] ?? settings?.providerReady;
   const selectedFourToOne = settings?.modelFourToOne?.[moduleModel] === true;
   const ratioIssue = studioFourToOneIssue(aspectRatio, selectedFourToOne);
@@ -1683,7 +1771,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const sharedResults = resultTasks.map(task => {
     const image = studioTaskHasDeliveredAsset(task) ? studioTaskPreviewState(task) : null;
     return {
-      id: task.id, task, label: `生成结果 ${task.ordinal}`, status: studioTaskPhase(task),
+      id: task.id, task, label: `生成结果 ${task.ordinal}`, status: studioTaskPhase(task), billing: task.billing,
       pending: ['queued', 'running'].includes(task.status),
       waitingThumbnail: task.snapshot?.primaryReferenceImages?.[0]?.thumbnailUrl || task.snapshot?.primaryReferenceImages?.[0]?.originalUrl || undefined,
       applied: sourceApplied && appliedSource?.taskId === task.id,
@@ -1913,7 +2001,14 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
             <input id={`studio-count-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} type="number" min={1} max={8} step={1} value={count} onChange={event => setCount(Number(event.target.value))} />
           </div>}
           {batch.mode === 'batch' && batch.controls}
-          {batch.mode === 'single' && <p className={styles.muted}>{moduleUnitCredits == null ? '当前模型积分单价尚未设置' : `本次 ${moduleUnitCredits * (Number.isInteger(count) ? count : 0)} 积分`}</p>}
+          {batch.mode === 'single' && <p className={styles.generationEstimate}>
+            {visibleQuote && Number.isFinite(visibleQuote.estimatedCredits)
+              ? `合计约 ${Math.ceil(visibleQuote.estimatedCredits)} 点数`
+              : !actualQuoteRequired && moduleUnitCredits != null && Number.isFinite(moduleUnitCredits) && moduleUnitCredits >= 0
+                && Number.isInteger(count) && count >= 1 && count <= 8
+                ? `合计约 ${Math.ceil(moduleUnitCredits * count)} 点数`
+              : '费用待估算'}
+          </p>}
           {generationFeedback && <p id={`generation-blocker-${module.id}`} role="status" className={styles.generationFeedback} data-tone={generationFeedback.tone}>{generationFeedback.message}</p>}
           {settingsError && <button type="button" onClick={async () => { if (!dirty || (await confirm('重新读取会替换未保存的通用设置，是否继续？', { title: '重新读取', confirmLabel: '放弃修改并读取' }))) onReloadSettings(true); }}><RefreshCw size={16} />重新读取设置</button>}
           {sourceSharingBlocked && <p role="alert" className={styles.error}>该模板已停止共享，不能新建任务；已提交任务和历史结果仍保留。</p>}

@@ -68,7 +68,7 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
   const previewRequest = useRef(0);
   const [preview, setPreview] = useState<CanvasMediaPreview | null>(null);
   const [styleGalleryOpen, setStyleGalleryOpen] = useState(false);
-  const { user } = useAppSession();
+  const { user, refreshCredits } = useAppSession();
   const userId = useRef(user?.id); userId.current = user?.id;
   const [mention, setMention] = useState<MentionRequest | null>(null);
   const mentionRef = useRef(mention); mentionRef.current = mention;
@@ -232,6 +232,10 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin || event.source !== frame.current?.contentWindow) return;
       const value = event.data;
+      if (value?.type === 'sd2-canvas-billing-settled') {
+        if (value.userId === userId.current) void refreshCredits({ force: true });
+        return;
+      }
       if (value?.type === 'sd2-canvas-upload-request') {
         if (!validId(value.requestId) || value.userId !== userId.current || ![value.documentId, value.projectId, value.cardId].every(validId)
           || !Array.isArray(value.files) || value.files.length !== 1
@@ -445,7 +449,7 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
       navigation?.removeEventListener('navigateerror', clearApproval);
       navigation?.removeEventListener('navigatesuccess', clearApproval);
     };
-  }, [confirm, closeReferencePicker, closeMention, selectMention, runUploads]);
+  }, [confirm, closeReferencePicker, closeMention, selectMention, runUploads, refreshCredits]);
   return <>
     <iframe ref={frame} title="无限画布" src={`/tools/ultimate-canvas/index.html${initialDocumentId.current ? `?document_id=${encodeURIComponent(initialDocumentId.current)}` : ''}${initialFocusNodeId.current ? `${initialDocumentId.current ? '&' : '?'}focus_node=${encodeURIComponent(initialFocusNodeId.current)}` : ''}`} className="ultimate-canvas-frame" referrerPolicy="no-referrer" allow="fullscreen"
       onLoad={() => { setStyleGalleryOpen(false); closeReferencePicker(); closeMention(); }}

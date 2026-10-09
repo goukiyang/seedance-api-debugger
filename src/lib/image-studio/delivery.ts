@@ -17,14 +17,14 @@ export type StudioDelivery = {
   phase?: 'download' | 'recover' | 'validate' | 'save' | 'stopped'; code?: string;
   validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string; transparentPixels?: number };
 };
-function directory(id: string) {
+function directory(id: string, billing = false) {
   if (!/^[a-zA-Z0-9-]{1,120}$/.test(id)) throw new Error('Invalid delivery identity');
-  return path.join(root(), id);
+  return path.join(billing ? path.join(process.cwd(), 'storage', 'studio-billing') : root(), id);
 }
-async function writePrivate(id: string, name: string, bytes: string | Buffer) {
-  const dir = directory(id);
+async function writePrivate(id: string, name: string, bytes: string | Buffer, billing = false) {
+  const dir = directory(id, billing);
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-  await fs.chmod(root(), 0o700);
+  await fs.chmod(path.dirname(dir), 0o700);
   await fs.chmod(dir, 0o700);
   const temporary = path.join(dir, `${randomUUID()}.tmp`);
   try {
@@ -38,8 +38,9 @@ async function writePrivate(id: string, name: string, bytes: string | Buffer) {
 async function save(record: StudioDelivery) { await writePrivate(record.taskId, 'source.json', JSON.stringify(record)); }
 
 type StudioReceipt = { taskId: string; ownerId: string; localRequestId: string; batchId: string; fingerprint: string;
-  submittedAt: number; returnedAt?: number; status?: number; upstreamRequestId?: string; headerName?: string };
-export async function beginStudioRequest(task: Identity & { batch_id: string; fingerprint: string; snapshot_json: string | null }) {
+  submittedAt: number; returnedAt?: number; status?: number; upstreamRequestId?: string; headerName?: string;
+  gatewayRequestId?: string; billingScope?: string | null };
+export async function beginStudioRequest(task: Identity & { batch_id: string; fingerprint: string; snapshot_json: string | null; billing_scope?: string | null }) {
   // Exclusive durable marker: never resend an upstream POST after a crash or ambiguous response.
   const dir = directory(task.id);
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
@@ -47,7 +48,7 @@ export async function beginStudioRequest(task: Identity & { batch_id: string; fi
   let snapshot: Record<string, unknown> = {};
   try { snapshot = JSON.parse(task.snapshot_json || '{}'); } catch {}
   const receipt: StudioReceipt = { taskId: task.id, ownerId: task.owner_id, localRequestId: typeof snapshot.requestId === 'string' ? snapshot.requestId : task.batch_id,
-    batchId: task.batch_id, fingerprint: task.fingerprint, submittedAt: Date.now() };
+    batchId: task.batch_id, fingerprint: task.fingerprint, submittedAt: Date.now(), billingScope: task.billing_scope };
   const handle = await fs.open(path.join(dir, 'request.json'), 'wx', 0o600);
   try { await handle.writeFile(JSON.stringify(receipt)); await handle.sync(); } finally { await handle.close(); }
   const folder = await fs.open(dir, 'r'); try { await folder.sync(); } finally { await folder.close(); }
@@ -57,11 +58,23 @@ export async function recordStudioResponse(task: Identity, response: Response) {
   const receipt: StudioReceipt = JSON.parse(await fs.readFile(file, 'utf8'));
   if (receipt.taskId !== task.id || receipt.ownerId !== task.owner_id) throw new Error('Request identity mismatch');
   receipt.returnedAt = Date.now(); receipt.status = response.status;
+  const gateway = response.headers.get('x-oneapi-request-id');
+  if (gateway && /^[a-zA-Z0-9_.:-]{1,200}$/.test(gateway)) receipt.gatewayRequestId = gateway;
   for (const name of ['x-request-id', 'request-id', 'x-ms-request-id']) {
     const id = response.headers.get(name);
     if (id && /^[a-zA-Z0-9_.:-]{1,200}$/.test(id)) { receipt.upstreamRequestId = id; receipt.headerName = name; break; }
   }
   await writePrivate(task.id, 'request.json', JSON.stringify(receipt));
+  // The accounting receipt survives delivery cleanup, including failures before
+  // image decoding. It contains no URL, image bytes, prompt or credentials.
+  await writePrivate(task.id, 'request.json', JSON.stringify(receipt), true);
+  if (receipt.billingScope) {
+    const changed = await prisma.imageStudioTask.updateMany({ where: { id: task.id, owner_id: task.owner_id,
+      billing_scope: receipt.billingScope, OR: [{ gateway_request_id: null }, { gateway_request_id: receipt.gatewayRequestId || null }] },
+      data: { gateway_request_id: receipt.gatewayRequestId || null,
+        billing_status: receipt.gatewayRequestId ? 'pending' : 'unmatched', billing_next_check_at: new Date() } });
+    if (!changed.count) throw new Error('Billing receipt identity conflict');
+  }
 }
 export function decodeStudioBase64(value: string) {
   if (!value.length || value.length > MAX_STUDIO_GENERATED_BASE64 || value.length % 4 !== 0
@@ -130,7 +143,16 @@ export function studioDeliveryCanRetry(record: StudioDelivery) {
   return record.expiresAt > Date.now() && (record.recoveries || 0) < STUDIO_MAX_DOWNLOAD_ATTEMPTS && (record.complete || record.attempts < STUDIO_MAX_DOWNLOAD_ATTEMPTS);
 }
 export async function discardStudioDelivery(task: Identity) {
+  await preserveStudioBillingReceipt(task);
   await fs.rm(directory(task.id), { recursive: true, force: true });
+}
+
+export async function preserveStudioBillingReceipt(task: Identity) {
+  let receipt: StudioReceipt;
+  try { receipt = JSON.parse(await fs.readFile(path.join(directory(task.id), 'request.json'), 'utf8')); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+  if (receipt.taskId !== task.id || receipt.ownerId !== task.owner_id) throw new Error('Billing receipt ownership mismatch');
+  await writePrivate(task.id, 'request.json', JSON.stringify(receipt), true);
 }
 
 // Only filenames derived from a validated task id are used. Signed URLs stay outside public/ and the DB/API.
@@ -281,7 +303,11 @@ export async function cleanupStudioDeliveries(now = Date.now()) {
     // Keep expired records long enough for a worker to settle; remove abandoned files within one day.
     if (now - stat.mtimeMs > STUDIO_CHECKPOINT_RETENTION_MS) {
       const active = await prisma.imageStudioTask.findFirst({ where: { id: entry.name, status: { in: ['queued', 'running'] } }, select: { id: true } });
-      if (!active) await fs.rm(dir, { recursive: true, force: true });
+      if (!active) {
+        const task = await prisma.imageStudioTask.findUnique({ where: { id: entry.name }, select: { id: true, owner_id: true } });
+        if (task) await preserveStudioBillingReceipt(task);
+        await fs.rm(dir, { recursive: true, force: true });
+      }
     }
   }
   lastCleanup = now;

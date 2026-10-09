@@ -11,7 +11,10 @@ import { IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_QUALITY_LABELS } from '@/lib/im
 import styles from './batch.module.css';
 import { watchGenerationCompletion } from '@/components/GenerationCompletion';
 
-export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature }: { userId: string; moduleId: string; unitCredits: number | null; draftSignature: string }) {
+type StudioBatchQuote = { billingMode: 'fixed' | 'actual'; batchQuoteId: string | null; estimatedCredits: number; unitCredits: number; expiresAt: string };
+type CachedStudioBatchQuote = { signature: string; requestId: string; quote: StudioBatchQuote; expired?: boolean };
+
+export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, actualQuoteRequired = false, quotePayload }: { userId: string; moduleId: string; unitCredits: number | null; draftSignature: string; actualQuoteRequired?: boolean; quotePayload?: Record<string, unknown> | null }) {
   const [mode, setMode] = useState<'single' | 'batch'>('single');
   const [source, setSource] = useState<'current' | 'folder'>('folder');
   const [quantity, setQuantity] = useState(8), [perFile, setPerFile] = useState(1), [pack, setPack] = useState(false);
@@ -19,19 +22,66 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature }
   const [files, setFiles] = useState<BatchLocalFile[]>([]), [skipped, setSkipped] = useState<string[]>([]);
   const [previewing, setPreviewing] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [progress, setProgress] = useState('');
   const [id, setId] = useState<string | null>(null), [pending, setPending] = useState<string | null>(null);
+  const [billingQuote, setBillingQuote] = useState<CachedStudioBatchQuote | null>(null);
+  const [quoteVisible, setQuoteVisible] = useState(true);
+  useEffect(() => { const update = () => setQuoteVisible(!document.hidden); update(); document.addEventListener('visibilitychange', update); return () => document.removeEventListener('visibilitychange', update); }, []);
   const [loadedScope, setLoadedScope] = useState('');
   const fileInput = useRef<HTMLInputElement>(null), directoryInput = useRef<HTMLInputElement>(null), lock = useRef(false), fileRef = useRef<BatchLocalFile[]>([]);
   const scopedKey = `sd2-studio-batch-draft:v1:${userId}:${moduleId}`, pendingKey = `${scopedKey}:request`;
   const loaded = loadedScope === scopedKey;
   const total = source === 'current' ? quantity : files.length * perFile;
   const estimated = unitCredits == null ? null : unitCredits * total;
+  const baseDisplayEstimate = estimated != null && Number.isFinite(estimated) && estimated >= 0
+    && Number.isInteger(total) && total > 0 && total <= STUDIO_BATCH_LIMITS.images
+    ? Math.ceil(estimated) : null;
   const signature = JSON.stringify([scopedKey, source, quantity, perFile, unitCredits, draftSignature, files.map(local => [local.file.name, local.file.size, local.file.lastModified])]);
+  const quoteSources: Array<{ name: string; assetId?: string }> = source === 'folder' && Number.isInteger(perFile) && perFile >= 1 && perFile <= 8
+    ? files.flatMap(local => Array.from({ length: perFile }, (_, variant) => ({ name: `${local.file.name.replace(/\.[^.]+$/, '')}-v${variant + 1}`, ...(local.assetId ? { assetId: local.assetId } : {}) })))
+    : source === 'current' && Number.isInteger(total) && total >= 1 && total <= STUDIO_BATCH_LIMITS.images
+      ? Array.from({ length: total }, (_, index) => ({ name: `image-${index + 1}` })) : [];
+  const quoteSignature = JSON.stringify([signature, quoteSources]);
+  const quoteInputReady = quoteSources.length > 0 && quoteSources.length <= STUDIO_BATCH_LIMITS.images
+    && (source !== 'folder' || quoteSources.every(item => item.assetId));
+  const previousQuoteSignature = useRef(quoteSignature);
+  const visibleQuote = billingQuote?.signature === quoteSignature
+    && !billingQuote.expired && Date.parse(billingQuote.quote.expiresAt) > Date.now() ? billingQuote.quote : null;
+  const displayEstimate = visibleQuote ? Math.ceil(visibleQuote.estimatedCredits) : actualQuoteRequired ? null : baseDisplayEstimate;
   const live = useRef({ scope: scopedKey, signature, mounted: true }); live.current = { scope: scopedKey, signature, mounted: live.current.mounted };
   const { confirm, productDialog } = useProductDialog();
+  const automaticPayload = quotePayload ? JSON.stringify(quotePayload) : '';
+  useEffect(() => {
+    if (!actualQuoteRequired || !quoteVisible || mode !== 'batch' || !loaded || busy || previewing || pending || !automaticPayload
+      || !quoteInputReady) return;
+    if (billingQuote?.signature === quoteSignature && !billingQuote.expired && Date.parse(billingQuote.quote.expiresAt) > Date.now()) return;
+    const abort = new AbortController();
+    const timer = window.setTimeout(() => {
+      if (document.hidden) return;
+      const requestId = crypto.randomUUID();
+      const payload = { ...JSON.parse(automaticPayload), action: 'quote', count: 1, requestId, sources: JSON.parse(quoteSignature)[1] };
+      void fetch('/api/image-studio/batches', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload), signal: AbortSignal.any([abort.signal, AbortSignal.timeout(120000)]) })
+        .then(response => readBatchResponse(response)).then((quote: StudioBatchQuote) => {
+          if (abort.signal.aborted || !Number.isFinite(quote.estimatedCredits) || quote.estimatedCredits < 0
+            || !Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= Date.now()
+            || quote.billingMode === 'actual' && !quote.batchQuoteId) return;
+          previousQuoteSignature.current = quoteSignature;
+          setBillingQuote({ signature: quoteSignature, requestId, quote });
+        }).catch(() => {});
+    }, 500);
+    return () => { window.clearTimeout(timer); abort.abort(); };
+  }, [actualQuoteRequired, quoteVisible, mode, loaded, busy, previewing, pending, automaticPayload, quoteSignature, quoteInputReady, billingQuote]);
   useEffect(() => { live.current.mounted = true; return () => { live.current.mounted = false; fileRef.current.forEach(file => URL.revokeObjectURL(file.preview)); }; }, []);
+  useEffect(() => { if (previousQuoteSignature.current !== quoteSignature) setBillingQuote(null); previousQuoteSignature.current = quoteSignature; }, [quoteSignature]);
+  useEffect(() => {
+    if (!billingQuote?.quote.expiresAt) return;
+    const delay = Date.parse(billingQuote.quote.expiresAt) - Date.now();
+    if (delay <= 0) { setBillingQuote(current => current?.requestId === billingQuote.requestId ? { ...current, expired: true } : current); return; }
+    const timer = window.setTimeout(() => setBillingQuote(current => current?.requestId === billingQuote.requestId ? { ...current, expired: true } : current), delay);
+    return () => window.clearTimeout(timer);
+  }, [billingQuote]);
   useUnsavedNavigation(busy || previewing || files.some(file => !file.assetId), confirm, { unsaved: files.some(file => !file.assetId) ? ['尚未上传的本机批量素材，离开后需重新选择'] : [], busy: busy ? ['批次素材或提交正在处理'] : previewing ? ['本机图片正在读取'] : [], revision: signature });
   useEffect(() => {
-    fileRef.current.forEach(file => URL.revokeObjectURL(file.preview)); fileRef.current = []; setFiles([]); setSkipped([]); setFolderName(''); setError(''); setId(null); setPending(null);
+    fileRef.current.forEach(file => URL.revokeObjectURL(file.preview)); fileRef.current = []; setFiles([]); setSkipped([]); setFolderName(''); setError(''); setId(null); setPending(null); setBillingQuote(null);
     setMode('single'); setSource('folder'); setQuantity(8); setPerFile(1); setPack(false); setBusy(false); setPreviewing(false); setProgress('');
     try {
       const saved = JSON.parse(localStorage.getItem(scopedKey) || 'null');
@@ -98,19 +148,12 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature }
     lock.current = true; setBusy(true); setError('');
     let submittedRequest: string | null = null;
     try {
-      const quote = async () => {
+      const checkSettings = async () => {
         const current = await readBatchResponse(await fetch('/api/image-studio/settings', { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
         if (!valid() || current.revision !== snapshot.revision || current.prices?.[String(snapshot.model)] !== unitCredits) throw new Error('素材、模型或报价已变化，请重新读取设置后确认；尚未生成');
       };
-      await quote();
-      const balance = await readBatchResponse(await fetch('/api/me/credits', { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
+      await checkSettings();
       if (!valid()) return false;
-      if (estimated > 0 && (!Number.isFinite(balance.available) || balance.available < estimated)) throw new Error('可用点数不足，尚未上传或生成');
-      const model = IMAGE_STUDIO_MODEL_LABELS[String(snapshot.model) as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || String(snapshot.model);
-      const quality = IMAGE_STUDIO_QUALITY_LABELS[String(snapshot.quality) as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || String(snapshot.quality || '默认');
-      if (!await confirm(`${source === 'folder' ? localFiles.length + '张素材' : '当前正文'} · 生成${total}张\n${model} · ${quality} · ${String(snapshot.resolution || '默认')} · ${String(snapshot.aspectRatio || '自动')}\n本次预计${estimated}点`, { title: '确认生成', confirmLabel: `确认生成 · ${estimated}点`, anchor: null })) return false;
-      if (!valid()) throw new Error('当前设置已变化，未上传或生成，请重新确认');
-      await quote();
       const sources: Array<{ name: string; assetId?: string }> = [];
       if (source === 'folder') {
         for (let index = 0; index < localFiles.length; index++) {
@@ -127,12 +170,57 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature }
         }
       } else for (let index = 0; index < total; index++) sources.push({ name: `image-${index + 1}` });
       if (!valid()) throw new Error('当前设置已变化，未提交生成');
-      await quote();
-      const requestId = crypto.randomUUID();
+      await checkSettings();
+      const quoteKey = JSON.stringify([expected, sources]);
+      const priorQuote = billingQuote?.signature === quoteKey ? billingQuote : null;
+      const requestId = priorQuote?.requestId || crypto.randomUUID();
+      const quoteRequest = { ...snapshot, action: 'quote', requestId, count: 1, sources };
+      const readQuote = async () => {
+        const result = await readBatchResponse(await fetch('/api/image-studio/batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(quoteRequest), signal: AbortSignal.timeout(120000) })) as StudioBatchQuote;
+        if (!valid()) throw new Error('当前设置已变化，报价未用于生成');
+        if (!['fixed', 'actual'].includes(result.billingMode) || !Number.isFinite(result.estimatedCredits) || result.estimatedCredits < 0
+          || !Number.isFinite(result.unitCredits) || result.unitCredits < 0 || !result.expiresAt
+          || !Number.isFinite(Date.parse(result.expiresAt)) || Date.parse(result.expiresAt) <= Date.now()
+          || (result.batchQuoteId !== null && typeof result.batchQuoteId !== 'string')
+          || (result.billingMode === 'actual' && !result.batchQuoteId)) throw new Error('本批报价信息不完整，尚未生成');
+        return result;
+      };
+      let quote = priorQuote && !priorQuote.expired && Date.parse(priorQuote.quote.expiresAt) > Date.now() ? priorQuote.quote : await readQuote();
+      previousQuoteSignature.current = quoteKey;
+      setBillingQuote({ signature: quoteKey, requestId, quote });
+      const quoteTotal = Math.ceil(quote.estimatedCredits);
+      if (!Number.isSafeInteger(quoteTotal) || quoteTotal < 0 || quoteTotal > 10000000) throw new Error('本批报价超出可确认范围，尚未生成');
+      const currentBalance = await readBatchResponse(await fetch('/api/me/credits', { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
+      if (!valid()) return false;
+      if (quoteTotal > 0 && (!Number.isFinite(currentBalance.available) || currentBalance.available < quoteTotal)) throw new Error('可用点数不足，素材已上传但尚未生成');
+      const model = IMAGE_STUDIO_MODEL_LABELS[String(snapshot.model) as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || String(snapshot.model);
+      const quality = IMAGE_STUDIO_QUALITY_LABELS[String(snapshot.quality) as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || String(snapshot.quality || '默认');
+      if (!await confirm(`${source === 'folder' ? localFiles.length + '张已上传素材' : '当前正文'} · 生成${total}张\n${model} · ${quality} · ${String(snapshot.resolution || '默认')} · ${String(snapshot.aspectRatio || '自动')}\n本批预计合计 ${quoteTotal} 点`, { title: '确认生成', confirmLabel: `确认生成 · ${quoteTotal}点`, anchor: null })) return false;
+      if (!valid()) throw new Error('当前设置已变化，尚未生成，请重新确认');
+      await checkSettings();
+      let confirmedTotal = quoteTotal;
+      if (Date.parse(quote.expiresAt) <= Date.now()) {
+        setProgress('报价已过期，正在重新获取本批报价');
+        quote = await readQuote();
+        setBillingQuote({ signature: quoteKey, requestId, quote });
+        if (Math.ceil(quote.estimatedCredits) > confirmedTotal) {
+          setError(`报价已更新为 ${Math.ceil(quote.estimatedCredits)} 点，本批尚未生成；请再次点击并确认新总额。`);
+          return false;
+        }
+        const refreshedBalance = await readBatchResponse(await fetch('/api/me/credits', { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
+        if (!valid()) return false;
+        if (confirmedTotal > 0 && (!Number.isFinite(refreshedBalance.available) || refreshedBalance.available < confirmedTotal)) throw new Error('可用点数不足，素材已上传但尚未生成');
+      }
+      if (Date.parse(quote.expiresAt) <= Date.now()) {
+        setBillingQuote(current => current?.requestId === requestId ? { ...current, expired: true } : current);
+        setError('本批报价再次过期，尚未生成；请重新获取并确认报价。');
+        return false;
+      }
       localStorage.setItem(pendingKey, requestId);
       if (localStorage.getItem(pendingKey) !== requestId) throw new Error('提交编号未能保存，尚未提交生成');
       submittedRequest = requestId; setPending(requestId); setProgress('正在登记本批素材和设置');
-      const response = await fetch('/api/image-studio/batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...snapshot, requestId, count: 1, budget: estimated, sources }), signal: AbortSignal.timeout(120000) });
+      setBillingQuote(null);
+      const response = await fetch('/api/image-studio/batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...snapshot, requestId, count: 1, budget: confirmedTotal, sources, ...(quote.batchQuoteId ? { batchQuoteId: quote.batchQuoteId } : {}) }), signal: AbortSignal.timeout(120000) });
       if (response.status >= 400 && response.status < 500) { localStorage.removeItem(pendingKey); submittedRequest = null; if (valid()) setPending(null); }
       const result = await readBatchResponse(response, true);
       localStorage.removeItem(pendingKey);
@@ -144,7 +232,7 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature }
   }
   const blocker = mode !== 'batch' ? '' : previewing ? '正在本机读取图片' : busy ? '正在处理本批' : pending ? '' : !loaded ? '正在恢复批次设置' : !Number.isInteger(total) || total < 1 || total > STUDIO_BATCH_LIMITS.images ? '请先选择有效素材，本批最多100张' : estimated == null ? '本批报价尚未就绪' : '';
   const controls = <div className={styles.controls}>
-    <p>{estimated != null && Number.isInteger(total) && total > 0 && total <= STUDIO_BATCH_LIMITS.images ? `本批总计 ${estimated} 积分` : '本批报价尚未就绪'}</p>
+    <p>{displayEstimate != null ? `合计约 ${displayEstimate} 点数` : '费用待估算'}</p>
     <div className={styles.actions}>
       {source === 'folder' && <button type="button" disabled={busy || previewing || Boolean(pending)} onClick={() => void chooseSources()}><FolderOpen size={16} />{canSelectBatchDirectory() ? '选择素材文件夹' : '选择素材'}</button>}
       <label><input type="checkbox" checked={pack} disabled={busy} onChange={event => setPack(event.target.checked)} />完成后打包</label>

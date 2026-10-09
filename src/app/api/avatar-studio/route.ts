@@ -4,7 +4,9 @@ import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { listStudioTasks, StudioError } from '@/lib/image-studio/tasks';
 import { listAvatarRecords, mutateAvatarRecord, readAvatar } from '@/lib/avatar-random/store';
-import { avatarDescriptionStatus, parseAvatarDescription, prepareAvatarPlan, submitAvatarPlan, validateAvatarReferences } from '@/lib/avatar-random/service';
+import { avatarDescriptionStatus, estimateAvatarDraft, parseAvatarDescription, prepareAvatarPlan, quoteAvatarPlan, submitAvatarPlan, validateAvatarReferences } from '@/lib/avatar-random/service';
+import { imageBillingView } from '@/lib/image-studio/billing-contract';
+import { imageBillingReadinessPayload } from '@/lib/image-studio/billing-readiness';
 import { AvatarDescriptionError } from '@/lib/avatar-random/description-parser';
 import { adaptAvatarPrompt, parseAvatarRules } from '@/lib/avatar-random/engine';
 import { AVATAR_COMPILER_VERSION, type AvatarPlan, type AvatarRecord } from '@/lib/avatar-random/types';
@@ -22,7 +24,7 @@ async function sourceTask(owner:string,id?:string) {
   if(!id)return null;
   const task=await prisma.imageStudioTask.findFirst({where:{id,owner_id:owner}});
   const asset=task?.asset_id?await prisma.asset.findFirst({where:{id:task.asset_id,owner_id:owner,status:'active',type:'image'}}):null;
-  return task?{id:task.id,ordinal:1,status:task.status,error:task.error,asset:asset?{id:asset.id,original_url:studioAssetUrl(asset.id),thumbnail_url:studioAssetUrl(asset.id,true)}:null}:null;
+  return task?{id:task.id,ordinal:1,status:task.status,error:task.error,billing:imageBillingView(task,owner,false),asset:asset?{id:asset.id,original_url:studioAssetUrl(asset.id),thumbnail_url:studioAssetUrl(asset.id,true)}:null}:null;
 }
 
 export const dynamic = 'force-dynamic';
@@ -54,12 +56,17 @@ export async function GET(req: NextRequest) { return run(async owner => {
   const rows=await prisma.imageStudioTask.findMany({where:{id:{in:ids},owner_id:owner}});
   const assets=await prisma.asset.findMany({where:{id:{in:rows.flatMap(t=>t.asset_id?[t.asset_id]:[])},owner_id:owner,status:'active',type:'image'},select:{id:true}});
   const byId=new Set(assets.map(a=>a.id));
-  const recordTasks=Object.fromEntries(rows.map(t=>[t.id,{id:t.id,ordinal:t.ordinal,status:t.status,error:t.error,asset:t.asset_id&&byId.has(t.asset_id)?{id:t.asset_id,original_url:studioAssetUrl(t.asset_id),thumbnail_url:studioAssetUrl(t.asset_id,true)}:null}]));
-  return { ...records, recordTasks, settings: { model: settings.model, revision: settings.revision, prices: settings.prices } };
+  const recordTasks=Object.fromEntries(rows.map(t=>[t.id,{id:t.id,ordinal:t.ordinal,status:t.status,error:t.error,billing:imageBillingView(t,owner,false),asset:t.asset_id&&byId.has(t.asset_id)?{id:t.asset_id,original_url:studioAssetUrl(t.asset_id),thumbnail_url:studioAssetUrl(t.asset_id,true)}:null}]));
+  return { ...records, recordTasks, settings: { model: settings.model, revision: settings.revision, prices: settings.prices, billingReadiness: await imageBillingReadinessPayload() } };
 }); }
 export async function POST(req: NextRequest) { return run(async owner => {
   const body = await req.json();
   if (!body || typeof body !== 'object'||Array.isArray(body)) throw new StudioError('请求无效');
+  if (body.action === 'billing-quote') {
+    if (body.planId === undefined) return estimateAvatarDraft(owner, body);
+    if (typeof body.planId !== 'string' || body.planId.length > 120) throw new StudioError('人物草稿编号无效');
+    return quoteAvatarPlan(owner, body.planId);
+  }
   if (body.action === 'parse-status') return { parse: await avatarDescriptionStatus(owner, body.description) };
   if (body.action === 'analyze') {
     if (typeof body.description !== 'string' || !body.description.trim() || body.description.length > 3000 || !Number.isSafeInteger(body.draftRevision) || body.draftRevision < 0) throw new StudioError('文案或当前草稿无效');
