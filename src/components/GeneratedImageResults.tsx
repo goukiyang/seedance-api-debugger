@@ -77,6 +77,10 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
   useEffect(() => { setLocalPreview(null); setLocalSelection(null); setFeedback(null); }, [scope]);
   const previewable = items.filter(item => item.media?.src);
   const preview = previewable.find(item => item.id === activePreview);
+  const previewIndex = previewable.findIndex(item => item.id === activePreview);
+  const imageNeighbors = Array.from(new Set([previewable[previewIndex - 1], previewable[previewIndex + 1]]))
+    .filter(item => item?.media).map(item => ({ source: item.media!.src, sourceVersion: item.media!.sourceVersion,
+      thumbnail: item.media!.thumbnailSrc, width: item.media!.safeDetails?.width, height: item.media!.safeDetails?.height, bytes: item.media!.safeDetails?.fileSize }));
   const changePreview = useCallback((item: T | null, alreadySelected = false) => {
     if (item && !activePreview) previewTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (item && !alreadySelected) { pages.goToId(item.id); setLocalSelection(item.id); onSelect?.(item); }
@@ -169,6 +173,6 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
       })}
     </div>
     {pagination('bottom')}
-    {preview?.media && <ZoomableImagePreview {...preview.media} resolveDownload={src => items.find(item => item.media?.src === src)?.download} previewKey={preview.media.previewKey || `${scope}:${preview.id}`} hasNavigation={previewable.length > 1} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => changePreview(null)} />}
+    {preview?.media && <ZoomableImagePreview {...preview.media} imageNeighbors={imageNeighbors} resolveDownload={src => items.find(item => item.media?.src === src)?.download} previewKey={preview.media.previewKey || `${scope}:${preview.id}`} hasNavigation={previewable.length > 1} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => changePreview(null)} />}
   </div>;
 }

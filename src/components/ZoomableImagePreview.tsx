@@ -11,6 +11,7 @@ import type { ContentKey } from '@/lib/content-reactions/types';
 import { isSafeIdentifier, useMediaPreviewState, type MediaPreviewZoomMode } from '@/lib/hooks/use-media-preview-state';
 import { useImageReadProgress } from '@/lib/hooks/use-image-read-progress';
 import { useHdImageSource, versionedHdSource, type HdDescription } from '@/lib/hooks/use-hd-image-source';
+import { useImageNeighbors, type ImageReadCandidate } from '@/lib/hooks/use-image-neighbors';
 import { isTopmostDialogLayer, useDialogDismiss } from '@/components/useDialogDismiss';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useAppSession } from '@/lib/context/AppSessionContext';
@@ -51,6 +52,7 @@ export type ZoomableImagePreviewProps = {
   comparison?: ImageComparisonSource;
   comparisonCandidates?: ImageComparisonSource[];
   sourceVersion?: string;
+  imageNeighbors?: ImageReadCandidate[];
   /** Caller-provided status/reactions/file metadata only; remove prompts before passing. */
   details?: ReactNode;
   notice?: ReactNode;
@@ -124,16 +126,17 @@ function PreviewImage({ src, thumbnailSrc, alt, original, version = '', classNam
   const [failedKey, setFailedKey] = useState('');
   const hd = useHdImageSource(src, original, attempt, version);
   const [fallbackKey, setFallbackKey] = useState('');
-  const fallbackIdentity = `${user?.id || 'anonymous'}:${src}:${hd.version}:${attempt}`;
+  const fallbackIdentity = `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}:${src}:${version}:${attempt}`;
   const rawFallback = fallbackKey === fallbackIdentity;
   const displaySrc = rawFallback ? displaySource(src, 'original') : hd.readSource;
+  const originalSrc = displaySource(src, 'original');
+  const [retainOriginal, setRetainOriginal] = useState(displaySrc === originalSrc);
   const thumbnail = thumbnailSrc || displaySource(src, 'thumbnail');
   const hasThumbnail = thumbnail !== displaySource(src, 'preview');
   const accountIdentity = `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}`;
   const key = `${accountIdentity}:${hd.version}:${displaySrc}:${attempt}`;
   const [thumbnailLoaded, setThumbnailLoaded] = useState('');
   const [upgradeKey, setUpgradeKey] = useState('');
-  const [shown, setShown] = useState<{ identity: string; source: string } | null>(null);
   const currentKeyRef = useRef(key);
   currentKeyRef.current = key;
   // Prepare the clear image in parallel; these frames gate presentation, not its request.
@@ -151,18 +154,24 @@ function PreviewImage({ src, thumbnailSrc, alt, original, version = '', classNam
       }
     }
   }, [hasThumbnail, thumbnail, onThumbnailReady]);
-  const readResult = useImageReadProgress(displaySrc, attempt, Boolean(displaySrc), hd.version);
+  const originalResult = useImageReadProgress(originalSrc, attempt, displaySrc === originalSrc || retainOriginal, version);
+  const clearResult = useImageReadProgress(displaySrc, attempt, Boolean(displaySrc) && displaySrc !== originalSrc, hd.version);
+  const readResult = displaySrc === originalSrc ? originalResult : clearResult;
   const readProgress = readResult.progress;
   const imageSrc = readResult.imageSrc || undefined;
   const loaded = loadedKey === key && upgradeKey === key && Boolean(imageSrc);
   const unsupported = readProgress.phase === 'unsupported';
   const failed = failedKey === key || unsupported || readProgress.phase === 'unavailable';
-  useEffect(() => { if (!imageSrc || readResult.denied || hd.denied) onUnavailableRef.current?.(); }, [imageSrc, readResult.denied, hd.denied, key]);
+  const blocked = readResult.denied || readResult.unconfirmed || hd.denied;
+  useEffect(() => { if (blocked || failed) onUnavailableRef.current?.(); }, [blocked, failed, key]);
+  useEffect(() => { if (displaySrc === originalSrc) setRetainOriginal(true); else if (loaded) setRetainOriginal(false); }, [displaySrc, originalSrc, loaded]);
   useEffect(() => {
-    if (failed && !readResult.denied && hd.description?.status === 'ready' && !hd.description.original && !rawFallback && !original) setFallbackKey(fallbackIdentity);
-  }, [failed, readResult.denied, hd.description?.status, hd.description?.original, rawFallback, original, fallbackIdentity]);
+    if ((unsupported || failedKey === key || readResult.refreshSource) && !readResult.denied && hd.description?.status === 'ready' && !rawFallback && !original) {
+      if (readResult.refreshSource) hd.refresh();
+      setFallbackKey(fallbackIdentity);
+    }
+  }, [unsupported, failedKey, key, readResult.refreshSource, readResult.denied, hd.description?.status, hd.refresh, rawFallback, original, fallbackIdentity]);
   const reportReady = (target: HTMLImageElement) => {
-    setShown({ identity: `${accountIdentity}:${src}`, source: target.src });
     onReadyRef.current?.({ width: target.naturalWidth, height: target.naturalHeight },
       { source: target.src, fullSize: hd.fullSize || rawFallback, hd: hd.description, mime: readResult.mime, bytes: readResult.bytes, account: accountIdentity });
   };
@@ -170,28 +179,28 @@ function PreviewImage({ src, thumbnailSrc, alt, original, version = '', classNam
     if (loaded || unsupported || upgradeKey !== key || !displaySrc) return;
     if (image.current?.complete && image.current.naturalWidth > 0) {
       const target = image.current;
-      void target.decode().then(() => { if (currentKeyRef.current === key) { setLoadedKey(key); reportReady(target); } }).catch(() => { if (currentKeyRef.current === key) setFailedKey(key); });
+      void (readResult.decoded ? Promise.resolve() : target.decode()).then(() => { if (currentKeyRef.current === key) { setLoadedKey(key); reportReady(target); } }).catch(() => { if (currentKeyRef.current === key) setFailedKey(key); });
     }
     if (readProgress.phase === 'reading') return;
     const timer = window.setTimeout(() => setFailedKey(key), 30000);
     return () => window.clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, loaded, readProgress.phase, unsupported, upgradeKey, displaySrc]);
+  }, [key, loaded, readProgress.phase, unsupported, upgradeKey, displaySrc, imageSrc, readResult.decoded]);
   const progressLabel = readProgress.phase === 'unsupported'
     ? readProgress.message || '该来源不是图片，未读取文件内容'
     : readProgress.phase === 'unavailable'
       ? readProgress.message || '当前来源无法提供读取进度'
       : readProgress.phase === 'decoding' ? '正在解码' : '正在读取';
   return <>
-    {!loaded && !readResult.denied && !hd.denied && shown?.identity === `${accountIdentity}:${src}` && shown.source !== imageSrc && <img src={shown.source} alt={alt} className={className} style={style} draggable={false} onError={() => setShown(null)} />}
-    {hasThumbnail && !loaded && !readResult.denied && (!shown || shown.identity !== `${accountIdentity}:${src}` || hd.denied) && <img ref={thumbnailImage} key={`thumbnail:${accountIdentity}:${thumbnail}`} src={thumbnail} alt={alt} className={className} style={style} draggable={false} data-image-preview-thumbnail
+    {!loaded && !blocked && displaySrc !== originalSrc && originalResult.imageSrc && !originalResult.denied && !originalResult.unconfirmed && <img src={originalResult.imageSrc} alt={alt} className={className} style={style} draggable={false} />}
+    {hasThumbnail && !loaded && !blocked && !(displaySrc !== originalSrc && originalResult.imageSrc) && <img ref={thumbnailImage} key={`thumbnail:${accountIdentity}:${thumbnail}`} src={thumbnail} alt={alt} className={className} style={style} draggable={false} data-image-preview-thumbnail
       onLoad={event => { setThumbnailLoaded(thumbnail); onThumbnailReadyRef.current?.({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); }} />}
     {/* eslint-disable-next-line @next/next/no-img-element */}
-    {imageSrc && <img ref={image} key={`preview:${key}`} src={imageSrc} alt={alt} className={className} style={{ ...style, opacity: loaded ? 1 : 0 }} draggable={false} data-image-preview-image
-      onLoad={event => { const target = event.currentTarget; void target.decode().then(() => { if (currentKeyRef.current !== key) return; setLoadedKey(key); setFailedKey(''); reportReady(target); }).catch(() => { if (currentKeyRef.current === key) setFailedKey(key); }); }} onError={() => { if (currentKeyRef.current === key) setFailedKey(key); }} />}
+    {imageSrc && !blocked && <img ref={image} key={`preview:${key}`} src={imageSrc} alt={alt} className={className} style={{ ...style, opacity: loaded ? 1 : 0 }} draggable={false} data-image-preview-image
+      onLoad={event => { const target = event.currentTarget; void (readResult.decoded ? Promise.resolve() : target.decode()).then(() => { if (currentKeyRef.current !== key) return; setLoadedKey(key); setFailedKey(''); reportReady(target); }).catch(() => { if (currentKeyRef.current === key) setFailedKey(key); }); }} onError={() => { if (currentKeyRef.current === key) setFailedKey(key); }} />}
     {loaded && hd.pending && <div className={styles.imageStatus} role="status">当前为完整原图，高清图正在准备</div>}
     {!loaded && <div className={styles.imageStatus} role="status">
-      <span>{hd.pending ? '高清图正在准备，缩略图仍可查看' : failed ? (unsupported ? progressLabel : thumbnailLoaded === thumbnail ? '高清未能加载，缩略图仍可查看，请重试' : '图片未能加载，请重试') : upgradeKey !== key ? `${alt} · ${hasThumbnail ? '正在显示缩略图' : '正在准备图片'}` : `${alt} · ${original || rawFallback || hd.description?.status === 'skipped' || hd.description?.status === 'failed' ? '完整原图' : hd.description?.status === 'ready' ? '原尺寸高清' : '轻量预览'} · ${progressLabel}`}</span>
+      <span>{blocked ? readProgress.message || (hd.denied ? '图片权限或来源不可用' : '本次图片权限暂时无法确认，请重试') : hd.pending ? '高清图正在准备，缩略图仍可查看' : failed ? (unsupported ? progressLabel : thumbnailLoaded === thumbnail ? '高清未能加载，缩略图仍可查看，请重试' : '图片未能加载，请重试') : upgradeKey !== key ? `${alt} · ${hasThumbnail ? '正在显示缩略图' : '正在准备图片'}` : `${alt} · ${original || rawFallback || hd.description?.status === 'skipped' || hd.description?.status === 'failed' ? '完整原图' : hd.description?.status === 'ready' ? '原尺寸高清' : '轻量预览'} · ${progressLabel}`}</span>
       {hd.error && <span>{hd.denied ? '当前仅可预览，无权读取高清原件' : '高清状态读取失败，可重试或查看原图'}</span>}
       {failed && !unsupported && readProgress.phase === 'unavailable' && <span>{readProgress.message || '当前来源无法提供读取进度'}</span>}
       {!failed && readProgress.phase === 'reading' && readProgress.percent != null && <>
@@ -213,7 +222,7 @@ type ImageRequest = { token: number; controller: AbortController; resolve: (appl
 const sides: Side[] = ['current', 'comparison'];
 const viewIdentity = (side: Side, image: ImageComparisonSource) => imageSourceIdentity(image) + ':' + side;
 
-export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, previewKey, sourceVersion, contentKey, imageSharing = true, metadata, safeDetails, comparison, comparisonCandidates = [], details, notice, hasNavigation, onPrevious, onNext, onImageLoaded, resolveDownload, onClose }: ZoomableImagePreviewProps) {
+export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, previewKey, sourceVersion, imageNeighbors = [], contentKey, imageSharing = true, metadata, safeDetails, comparison, comparisonCandidates = [], details, notice, hasNavigation, onPrevious, onNext, onImageLoaded, resolveDownload, onClose }: ZoomableImagePreviewProps) {
   const { user, hasLoadedUser } = useAppSession();
   const owner = user?.id || '';
   const backdropRef = useRef<HTMLDivElement>(null), toolbarRef = useRef<HTMLDivElement>(null), stageRef = useRef<HTMLDivElement>(null);
@@ -226,6 +235,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const sources = { current: currentImage, comparison: comparisonImage };
   const sourcesRef = useRef(sources); sourcesRef.current = sources;
   const [comparisonMode, setComparisonMode] = useState(false), [linked, setLinked] = useState(false);
+  useImageNeighbors(imageNeighbors, Boolean(hasNavigation) && !comparisonMode && currentImage.src === src);
   const [axis, setAxis] = useState<'horizontal' | 'vertical'>('horizontal'), [activeSide, setActiveSide] = useState<Side>('current');
   const [pickerSide, setPickerSide] = useState<Side | null>(null);
   const requests = useRef<Partial<Record<Side, ImageRequest>>>({}), sequence = useRef(0);

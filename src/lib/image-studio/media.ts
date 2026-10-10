@@ -8,6 +8,7 @@ import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { isPrivateNetworkHost } from '@/lib/media/public-url';
 import { MAX_STUDIO_GENERATED_BYTES } from './limits';
 import { setTimeout as delay } from 'node:timers/promises';
+import { imageStatEtag } from '@/lib/media/image-validators';
 
 const MAX_BYTES = 20 * 1024 * 1024;
 
@@ -36,7 +37,8 @@ export async function readStudioPreview(url: string): Promise<Buffer> {
 }
 export async function readStudioDetail(url: string): Promise<Buffer> { return readStudioDisplayImage(url, 'detail'); }
 
-async function readStudioDisplayImage(url: string, variant: 'thumbnail' | 'preview' | 'detail'): Promise<Buffer> {
+type StudioDisplayVariant = 'thumbnail' | 'preview' | 'detail';
+async function studioDisplayLocation(url: string, variant: StudioDisplayVariant) {
   const size = variant === 'thumbnail' ? 640 : variant === 'preview' ? 1600 : 2048;
   const quality = variant === 'thumbnail' ? 78 : variant === 'preview' ? 70 : 75;
   let version = `remote-${Math.floor(Date.now() / 60000)}`;
@@ -46,11 +48,31 @@ async function readStudioDisplayImage(url: string, variant: 'thumbnail' | 'previ
     const file = await fs.realpath(path.resolve(process.cwd(), 'public', local.replace(/^\/+/, '')));
     if (!file.startsWith(`${root}${path.sep}`)) throw new Error('素材路径无效');
     const stat = await fs.stat(file);
+    if (!stat.isFile() || !stat.size) throw new Error('图片文件不可用');
     version = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
   }
   const key = createHash('sha256').update(`webp-${size}-q${quality}-v2:${version}:${url}`).digest('hex');
   const directory = path.join(process.cwd(), 'storage', 'studio-thumbnails');
   const file = path.join(directory, `${key}.webp`);
+  return { size, quality, directory, file, key };
+}
+
+// Metadata only: neither missing derivatives nor remote versions start preparation.
+export async function statStudioDisplayImage(url: string, variant: StudioDisplayVariant) {
+  if (!siteUploadPathFromUrl(url)) return null;
+  const location = await studioDisplayLocation(url, variant);
+  try {
+    const root = await fs.realpath(location.directory);
+    const file = await fs.realpath(location.file);
+    if (!file.startsWith(`${root}${path.sep}`)) throw new Error('display_boundary');
+    const info = await fs.stat(file);
+    if (!info.isFile() || !info.size) return null;
+    return { file, size: info.size, etag: imageStatEtag(info, `studio-${variant}-${location.key}`) };
+  } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
+}
+
+async function readStudioDisplayImage(url: string, variant: StudioDisplayVariant): Promise<Buffer> {
+  const { size, quality, directory, file, key } = await studioDisplayLocation(url, variant);
   try { return await fs.readFile(file); } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }

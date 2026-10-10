@@ -7,6 +7,7 @@ import { ArrowLeft, ArrowRight, Music2, RotateCcw, X } from 'lucide-react';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import type { SafeImagePreviewDetails } from '@/components/ZoomableImagePreview';
+import type { ImageReadCandidate } from '@/lib/hooks/use-image-neighbors';
 import type { ContentKey } from '@/lib/content-reactions/types';
 import { useMediaPreviewState } from '@/lib/hooks/use-media-preview-state';
 import { isTopmostDialogLayer, useDialogDismiss } from '@/components/useDialogDismiss';
@@ -28,6 +29,7 @@ export type MediaPreviewProps = {
   onPrevious?: () => void;
   onNext?: () => void;
   hasNavigation?: boolean;
+  imageNeighbors?: ImageReadCandidate[];
 };
 
 function mediaErrorMessage(code: number | undefined, mediaName: string) {
@@ -53,6 +55,7 @@ export default function MediaPreview(props: MediaPreviewProps) {
         details={props.details}
         notice={props.notice}
         hasNavigation={props.hasNavigation}
+        imageNeighbors={props.imageNeighbors}
         onPrevious={props.onPrevious}
         onNext={props.onNext}
         onClose={props.onClose}

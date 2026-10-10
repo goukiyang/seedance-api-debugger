@@ -1850,6 +1850,12 @@ function AssetsPageContent() {
   </> : null;
   const loadedPreviewItems = previewSequence.current;
   const activeIndex = activeItem ? loadedPreviewItems.findIndex((item) => item.id === activeItem.id) : -1;
+  const imageNeighbors = [loadedPreviewItems[activeIndex - 1], loadedPreviewItems[activeIndex + 1]]
+    .filter(item => item?.kind === 'image' && item.previewUrl).map(item => ({
+      source: item.source === 'reference_image' && item.referenceImageId
+        ? `/api/reference-images/${encodeURIComponent(item.referenceImageId)}/content?variant=preview`
+        : assetPlaybackSource(item)!, thumbnail: item.thumbnailUrl || undefined,
+    }));
   const canMovePreviewPrevious = activeIndex > 0;
   const canMovePreviewNext = activeIndex >= 0 && (activeIndex < loadedPreviewItems.length - 1 || previewNextPage !== null);
   const moveActiveItem = async (direction: -1 | 1) => {
@@ -2597,6 +2603,7 @@ function AssetsPageContent() {
         details={activeItemDetails(false)}
         notice={previewNavigationMessage ? <div role="status">{previewNavigationMessage}{previewNavigationRetryable && <button type="button" onClick={() => void moveActiveItem(1)}>继续查找</button>}</div> : undefined}
         hasNavigation={canMovePreviewPrevious || canMovePreviewNext}
+        imageNeighbors={imageNeighbors}
         onPrevious={canMovePreviewPrevious ? () => moveActiveItem(-1) : undefined}
         onNext={canMovePreviewNext ? () => moveActiveItem(1) : undefined}
         onClose={() => setMediaPreviewOpen(false)}

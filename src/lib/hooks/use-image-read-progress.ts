@@ -6,7 +6,7 @@ export type { ImageReadProgress } from '@/lib/media/image-read-session';
 
 export function useImageReadProgress(source: string, attempt: number, enabled = true, version = ''): ImageReadResult {
   const { user, hasLoadedUser, userLoadError } = useAppSession();
-  const account = hasLoadedUser && !userLoadError ? user ? `${user.id}:${user.role}:${user.account_type || ''}` : 'anonymous' : '';
+  const account = hasLoadedUser && !userLoadError ? `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` : '';
   const key = `${account}\u0000${source}\u0000${version}\u0000${attempt}`;
   const [entry, setEntry] = useState<(ImageReadResult & { key: string }) | null>(null);
   useEffect(() => {
@@ -14,7 +14,7 @@ export function useImageReadProgress(source: string, attempt: number, enabled = 
     if (/^(blob:|data:)/i.test(source)) {
       let current = true;
       const image = new Image(); image.src = source;
-      void image.decode().then(() => { if (current) setEntry({ key, imageSrc: source, progress: { phase: 'decoding', loadedBytes: 0 } }); }).catch(() => { if (current) setEntry({ key, imageSrc: null, progress: { phase: 'unavailable', loadedBytes: 0, message: '本地图片无法解码，请重试' } }); });
+      void image.decode().then(() => { if (current) setEntry({ key, imageSrc: source, decoded: true, progress: { phase: 'decoding', loadedBytes: 0 } }); }).catch(() => { if (current) setEntry({ key, imageSrc: null, progress: { phase: 'unavailable', loadedBytes: 0, message: '本地图片无法解码，请重试' } }); });
       return () => { current = false; };
     }
     let current = true;

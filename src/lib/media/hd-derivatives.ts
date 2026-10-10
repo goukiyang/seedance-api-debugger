@@ -64,7 +64,7 @@ async function withLease<T>(key: string, action: () => Promise<T>): Promise<T | 
   try { return await action(); }
   finally { clearInterval(heartbeat); await fs.rmdir(lock).catch(() => {}); }
 }
-export async function requestHd(source: string, priority = 1, preserveText?: boolean, batch?: string) {
+async function hdRequestIdentity(source: string, preserveText?: boolean) {
   const current = await hdSource(source);
   if (!current) return null; // Unknown remote versions never become permanent derivative keys.
   if (preserveText === undefined) {
@@ -75,6 +75,37 @@ export async function requestHd(source: string, priority = 1, preserveText?: boo
   const key = createHash('sha256').update(JSON.stringify({ file: current.file, version: current.version,
     policy: HD_POLICY, format: 'alpha-or-text-lossless-webp-otherwise-avif', q: 95, chroma: '4:4:4', effort: 6, orientation: 'auto', color: '8bit-srgb',
     library: sharp.versions, preserveText })).digest('hex');
+  return { current, key, preserveText: Boolean(preserveText) };
+}
+
+export async function lookupHd(source: string) {
+  const identity = await hdRequestIdentity(source);
+  if (!identity) return null;
+  const { current, key, preserveText } = identity;
+  const job = await readHdJob(key);
+  if (!job) return null;
+  if (job.version !== current.version || job.preserveText !== preserveText) throw new Error('invalid_hd_manifest');
+  if (job.status !== 'ready') return job;
+  const common = Number.isSafeInteger(job.bytes) && job.bytes! > 0
+    && Number.isSafeInteger(job.width) && job.width! > 0 && Number.isSafeInteger(job.height) && job.height! > 0;
+  let valid = common && job.format === 'original' && job.bytes === current.size;
+  if (common && ['avif', 'webp'].includes(job.format || '') && job.file === `${key}.${job.format}` && job.mime === `image/${job.format}`) {
+    valid = await (async () => {
+      const root = await fs.realpath(hdDirectory());
+      const file = await fs.realpath(path.join(root, job.file!));
+      if (!file.startsWith(`${root}${path.sep}`)) return false;
+      const info = await fs.stat(file);
+      return info.isFile() && info.size === job.bytes;
+    })().catch(() => false);
+  }
+  return valid ? job : { ...job, status: 'failed' as const, reason: 'published_integrity' };
+}
+
+export async function requestHd(source: string, priority = 1, preserveText?: boolean, batch?: string) {
+  const identity = await hdRequestIdentity(source, preserveText);
+  if (!identity) return null;
+  const { current, key } = identity;
+  preserveText = identity.preserveText;
   let existing = await readHdJob(key);
   if (existing?.status === 'ready' && existing.format !== 'original') {
     const valid = existing.file && /^[a-f0-9]{64}\.(avif|webp)$/.test(existing.file)
