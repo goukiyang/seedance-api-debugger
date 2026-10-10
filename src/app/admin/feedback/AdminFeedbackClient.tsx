@@ -7,6 +7,9 @@ import { RelativeTime } from '@/components/RelativeTime';
 import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 import PaginationControls from '@/components/PaginationControls';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
+import { RotateCcw, X } from 'lucide-react';
+import { usePageExitRisk } from '@/lib/hooks/page-exit-guard';
 
 type FeedbackUser = {
   id: string;
@@ -71,10 +74,14 @@ function feedbackExportFilename(date = new Date()) {
   return `feedback_export_${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}_${pad(date.getHours())}${pad(date.getMinutes())}.pdf`;
 }
 
-export default function AdminFeedbackClient({ currentUser }: { currentUser: FeedbackUser }) {
+export default function AdminFeedbackClient({ currentUser, feedbackId }: { currentUser: FeedbackUser; feedbackId?: string }) {
   const { confirm, productDialog } = useProductDialog();
   const actionLock = useRef(false);
   const readSequence = useRef(0);
+  const detailSequence = useRef(0);
+  const detailRef = useRef<HTMLElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const savedDetail = useRef<FeedbackItem | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const runFeedbackAction = async (action: () => Promise<void>) => {
     if (actionLock.current) return;
@@ -96,6 +103,73 @@ export default function AdminFeedbackClient({ currentUser }: { currentUser: Feed
   const [note, setNote] = useState('');
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState<FeedbackPagination | null>(null);
+  const [restored, setRestored] = useState(false);
+  const restoreDetail = useRef<string | null>(null);
+  const storageKey = `sd2:admin-feedback:v1:${currentUser.id}`;
+  const dirtyDetail = Boolean(active && (note !== (savedDetail.current?.admin_note || '') || active.status !== savedDetail.current?.status));
+  usePageExitRisk({ unsaved: dirtyDetail ? ['反馈备注或状态'] : [], busy: actionBusy ? ['反馈保存'] : [], revision: `${active?.id || ''}:${active?.status || ''}:${note}` });
+  const removeDetailLink = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('feedbackId');
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  };
+
+  const openDetail = (item: FeedbackItem) => {
+    detailSequence.current += 1;
+    savedDetail.current = item;
+    setNote(item.admin_note || '');
+    setActive(item);
+  };
+  const closeDetail = async () => {
+    if (actionLock.current) return;
+    if (dirtyDetail
+      && !await confirm('修改还没保存，放弃修改并关闭？', { title: '未保存修改', confirmLabel: '放弃修改', anchor: null })) return;
+    detailSequence.current += 1;
+    setActive(null);
+    removeDetailLink();
+  };
+  useDialogDismiss({ open: Boolean(active), dialogRef: detailRef, dismissSurfaceRef: backdropRef, onDismiss: () => { void closeDetail(); } });
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
+      if (saved?.version === 1) {
+        setStatus(['', 'new', 'reviewed', 'archived'].includes(saved.status) ? saved.status : '');
+        setHasImage(['', 'true', 'false'].includes(saved.hasImage) ? saved.hasImage : '');
+        setKeyword(typeof saved.keyword === 'string' ? saved.keyword.slice(0, 200) : '');
+        setPagePath(typeof saved.pagePath === 'string' ? saved.pagePath.slice(0, 200) : '');
+        setPage(Number.isInteger(saved.page) && saved.page > 0 && saved.page <= 10000 ? saved.page : 1);
+        restoreDetail.current = typeof saved.activeId === 'string' ? saved.activeId : null;
+      }
+    } catch { /* Storage is optional; retain usable defaults. */ }
+    setRestored(true);
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (!restored) return;
+    try { localStorage.setItem(storageKey, JSON.stringify({ version: 1, status, hasImage, keyword, pagePath, page, activeId: active?.id || null })); }
+    catch { /* Browsing still works when persistence is unavailable. */ }
+  }, [restored, storageKey, status, hasImage, keyword, pagePath, page, active?.id]);
+
+  useEffect(() => {
+    if (!restored) return;
+    const id = feedbackId || restoreDetail.current;
+    restoreDetail.current = null;
+    if (!id) return;
+    if (!/^[a-zA-Z0-9_-]{1,80}$/.test(id)) { setError('反馈链接不完整，请在列表查找'); return; }
+    const sequence = ++detailSequence.current;
+    const controller = new AbortController();
+    void fetch(`/api/admin/feedback/${encodeURIComponent(id)}`, { cache: 'no-store', signal: controller.signal })
+      .then(async response => {
+        const data = await response.json();
+        if (sequence !== detailSequence.current) return;
+        if (!response.ok) throw new Error(data.error || '反馈读取失败，请重试');
+        if (!actionLock.current) openDetail(data.feedback);
+      }).catch(cause => {
+        if (!controller.signal.aborted && sequence === detailSequence.current) setError(cause instanceof Error ? cause.message : '反馈读取失败，请重试');
+      });
+    return () => { controller.abort(); };
+  }, [restored, feedbackId]);
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
@@ -134,13 +208,10 @@ export default function AdminFeedbackClient({ currentUser }: { currentUser: Feed
   };
 
   useEffect(() => {
+    if (!restored) return;
     void load(page);
     return () => { readSequence.current += 1; };
-  }, [status, hasImage]);
-
-  useEffect(() => {
-    setNote(active?.admin_note || '');
-  }, [active]);
+  }, [status, hasImage, restored]);
 
   const toggleAll = () => {
     if (selectedIds.length === items.length) {
@@ -171,6 +242,7 @@ export default function AdminFeedbackClient({ currentUser }: { currentUser: Feed
     }
     setMessage('已归档');
     setActive(null);
+    removeDetailLink();
     await load(page);
   };
 
@@ -189,7 +261,9 @@ export default function AdminFeedbackClient({ currentUser }: { currentUser: Feed
       return;
     }
     setMessage('已保存');
-    setActive(data.feedback);
+    savedDetail.current = data.feedback;
+    setActive(null);
+    removeDetailLink();
     await load(page);
   };
 
@@ -244,7 +318,7 @@ export default function AdminFeedbackClient({ currentUser }: { currentUser: Feed
         </div>
       )}
 
-      <section style={{ display: 'grid', gridTemplateColumns: '160px 160px 1fr 1fr auto', gap: 10, alignItems: 'center', marginBottom: 14 }}>
+      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))', gap: 10, alignItems: 'center', marginBottom: 14 }}>
         <select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }} style={controlStyle}>
           <option value="">全部状态</option>
           <option value="new">新反馈</option>
@@ -268,6 +342,12 @@ export default function AdminFeedbackClient({ currentUser }: { currentUser: Feed
         >
           筛选
         </button>
+        <button type="button" title="重置筛选与上次位置" aria-label="重置筛选与上次位置" style={miniButtonStyle} onClick={() => {
+          if (active || actionLock.current) return;
+          setStatus(''); setHasImage(''); setKeyword(''); setPagePath(''); setPage(1);
+          try { localStorage.removeItem(storageKey); } catch { /* Optional storage. */ }
+          window.location.assign('/admin/feedback');
+        }}><RotateCcw size={16} /></button>
       </section>
 
       <section style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
@@ -331,7 +411,7 @@ export default function AdminFeedbackClient({ currentUser }: { currentUser: Feed
                     <td style={tdStyle}><RelativeTime value={item.created_at} /></td>
                     <td style={tdStyle}>
                       <div style={{ display: 'flex', gap: 6 }}>
-                        <button type="button" onClick={() => setActive(item)} style={miniButtonStyle}>详情</button>
+                        <button type="button" onClick={() => openDetail(item)} style={miniButtonStyle}>详情</button>
                         <button type="button" disabled={actionBusy} onClick={() => void runFeedbackAction(() => archive([item.id]))} style={miniButtonStyle}>归档</button>
                         <button type="button" onClick={() => exportSingle(item.id)} style={miniButtonStyle}>PDF</button>
                       </div>
@@ -366,12 +446,13 @@ export default function AdminFeedbackClient({ currentUser }: { currentUser: Feed
       </div>
 
       {active && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <section style={{ width: 760, maxWidth: '100%', maxHeight: '88vh', overflowY: 'auto', borderRadius: 8, background: '#151821', border: '1px solid rgba(255,255,255,0.1)', padding: 20 }}>
+        <div ref={backdropRef} style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <section ref={detailRef} role="dialog" aria-modal="true" aria-labelledby="feedback-detail-title" style={{ width: 760, maxWidth: '100%', maxHeight: '88vh', overflowY: 'auto', borderRadius: 8, background: '#151821', border: '1px solid rgba(255,255,255,0.1)', padding: 20 }}>
             <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-              <h2 style={{ margin: 0, fontSize: 20 }}>反馈详情</h2>
-              <button type="button" onClick={() => setActive(null)} style={miniButtonStyle}>关闭</button>
+              <h2 id="feedback-detail-title" style={{ margin: 0, fontSize: 20 }}>反馈详情</h2>
+              <button type="button" disabled={actionBusy} onClick={() => void closeDetail()} aria-label="关闭" title="关闭" style={miniButtonStyle}><X size={16} /></button>
             </header>
+            {error && <p role="alert" style={{ color: '#ff9b9b', margin: '0 0 14px', overflowWrap: 'anywhere' }}>{error}</p>}
             <dl style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '10px 14px', margin: 0, fontSize: 13 }}>
               <dt style={dtStyle}>完整内容</dt><dd style={ddStyle}>{active.content}</dd>
               <dt style={dtStyle}>提交人</dt><dd style={ddStyle}><UserIdentityBadge user={active.user} size="sm" showEmail /></dd>
@@ -380,7 +461,7 @@ export default function AdminFeedbackClient({ currentUser }: { currentUser: Feed
               <dt style={dtStyle}>任务 ID</dt><dd style={ddStyle}>{active.task_id || '-'}</dd>
               <dt style={dtStyle}>状态</dt>
               <dd style={ddStyle}>
-                <select value={active.status} onChange={(event) => setActive({ ...active, status: event.target.value })} style={controlStyle}>
+                <select disabled={actionBusy} value={active.status} onChange={(event) => setActive({ ...active, status: event.target.value })} style={controlStyle}>
                   <option value="new">新反馈</option>
                   <option value="reviewed">已查看</option>
                   <option value="archived">已归档</option>
@@ -389,7 +470,7 @@ export default function AdminFeedbackClient({ currentUser }: { currentUser: Feed
               <dt style={dtStyle}>提交时间</dt><dd style={ddStyle}><RelativeTime value={active.created_at} /></dd>
               <dt style={dtStyle}>管理员备注</dt>
               <dd style={ddStyle}>
-                <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={4} style={{ ...controlStyle, resize: 'vertical' }} />
+                <textarea disabled={actionBusy} value={note} onChange={(event) => setNote(event.target.value)} rows={4} style={{ ...controlStyle, resize: 'vertical' }} />
               </dd>
             </dl>
 

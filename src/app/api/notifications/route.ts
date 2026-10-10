@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
     const limit = boundedLimit(request.nextUrl.searchParams.get('limit'));
     const where = {
       target_user_id: user.id,
+      channel: 'in_app',
       ...(status ? { status } : unreadOnly ? { read_at: null } : {}),
     };
 
@@ -41,6 +42,7 @@ export async function GET(request: NextRequest) {
       prisma.notification.count({
         where: {
           target_user_id: user.id,
+          channel: 'in_app',
           read_at: null,
           status: { not: 'read' },
         },
@@ -70,6 +72,7 @@ export async function PATCH(request: NextRequest) {
     const result = await prisma.notification.updateMany({
       where: {
         target_user_id: user.id,
+        channel: 'in_app',
         read_at: null,
       },
       data: {

@@ -1,0 +1,23 @@
+[Unit]
+Description=SD2 feedback Feishu notification delivery
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=gouki
+WorkingDirectory=/data/video-api-debugger/feedback-delivery/current
+EnvironmentFile=/srv/video-api-debugger/app/.env
+EnvironmentFile=/data/video-api-debugger/feedback-delivery/.env.feedback
+Environment=NODE_ENV=production
+Environment=TMPDIR=/data/video-api-debugger/feedback-delivery/tmp
+Environment=TMP=/data/video-api-debugger/feedback-delivery/tmp
+Environment=TEMP=/data/video-api-debugger/feedback-delivery/tmp
+Environment=npm_config_cache=/data/video-api-debugger/feedback-delivery/cache
+ExecStart=/usr/bin/env node --import tsx scripts/process-feedback-deliveries.ts
+TimeoutStartSec=240
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+StandardOutput=append:/data/video-api-debugger/feedback-delivery/log/delivery.log
+StandardError=append:/data/video-api-debugger/feedback-delivery/log/delivery.log
+

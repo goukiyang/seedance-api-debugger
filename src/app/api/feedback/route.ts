@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
+import { enqueueFeedbackNotification, feedbackPrisma as prisma } from '@/lib/feedback/notification';
 
 function text(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
@@ -28,17 +28,21 @@ export async function POST(request: NextRequest) {
     }
     const user = await getSession();
     userId = user?.id || null;
-    const feedback = await prisma.feedback.create({
-      data: {
-        user_id: user?.id || null,
-        task_id: text(body.taskId) || null,
-        content,
-        image_urls_json: imageUrls.length ? JSON.stringify(imageUrls) : null,
-        page_url: text(body.pageUrl) || null,
-        pathname: text(body.pathname) || null,
-        user_agent: request.headers.get('user-agent') || null,
-        status: 'new',
-      },
+    const feedback = await prisma.$transaction(async (tx) => {
+      const saved = await tx.feedback.create({
+        data: {
+          user_id: user?.id || null,
+          task_id: text(body.taskId) || null,
+          content,
+          image_urls_json: imageUrls.length ? JSON.stringify(imageUrls) : null,
+          page_url: text(body.pageUrl) || null,
+          pathname: text(body.pathname) || null,
+          user_agent: request.headers.get('user-agent') || null,
+          status: 'new',
+        },
+      });
+      await enqueueFeedbackNotification(tx, saved, user, imageUrls.length);
+      return saved;
     });
 
     if (user?.id && imageUrls.length > 0) {
@@ -50,11 +54,11 @@ export async function POST(request: NextRequest) {
         durationMs: Date.now() - startedAt,
         uploadMode: 'single',
         totalParts: imageUrls.length,
-      });
+      }).catch(() => console.warn('feedback_auxiliary_log_failed'));
     }
     return NextResponse.json({ success: true, feedback: { id: feedback.id } }, { status: 201 });
   } catch (error) {
-    console.error('[Feedback POST]', error);
+    console.error('feedback_submit_failed');
     if (userId) {
       await recordAssetUploadLog({
         operatorId: userId,
@@ -62,8 +66,8 @@ export async function POST(request: NextRequest) {
         status: 'failed',
         durationMs: Date.now() - startedAt,
         errorCode: 'feedback_mount_failed',
-        errorMessage: error instanceof Error ? error.message : '提交失败',
-      });
+        errorMessage: '提交失败',
+      }).catch(() => console.warn('feedback_auxiliary_log_failed'));
     }
     return NextResponse.json({ error: '提交失败，请稍后重试。' }, { status: 500 });
   }

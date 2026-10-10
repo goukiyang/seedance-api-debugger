@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '画布视频结果可直接播放，重开后核对状态并保留暂停位置；等待时显示参考图。修复正常同站访问时技能无法保存的问题，生成和费用规则不变。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '新修改意见会通知到指定的飞书账号，点击通知可查看对应反馈；反馈保存不再受辅助日志故障影响。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
