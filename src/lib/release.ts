@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '分辨率可应用到我的已有模板并撤销；资产视频支持悬停预览和单击详情；已授权大图切换更快；人物描述回复未知时可主动按原文生成，不重复文字费用。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '当前为角色保护回退版本。普通画布功能保留；角色画布暂不能打开或修改，角色、成果和费用记录保留。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
