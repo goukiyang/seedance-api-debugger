@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { PrismaClient, type Prisma } from '@prisma/client';
 import { adminNavItems, isNavItemActive, userNavItems } from '@/lib/navigation';
+import { feedbackAttachmentNotice, validFeedbackAttachments, type FeedbackAttachments } from './attachments';
 
 const feedbackGlobal = globalThis as unknown as { feedbackPrisma?: PrismaClient };
 // Feedback may contain pasted credentials. Never let database errors print it.
@@ -16,7 +17,7 @@ export const LEASE_MS = 90_000;
 export type FeedbackMessage = { msgType: 'text' | 'interactive'; content: string };
 
 export type FeedbackDelivery = {
-  version: 1;
+  version: 1 | 2;
   eventKey: string;
   feedbackId: string;
   uuid: string;
@@ -31,6 +32,15 @@ export type FeedbackDelivery = {
   ambiguousSend: boolean;
   lastErrorCode: string | null;
   message?: FeedbackMessage;
+  preparation?: {
+    authorId: string | null;
+    author: string;
+    page: string;
+    summary: string;
+    until: number;
+    cycles: number;
+    attachments: FeedbackAttachments;
+  };
 };
 
 export function feedbackConfig() {
@@ -98,9 +108,9 @@ export function feedbackPageName(pathname: string | null) {
 }
 
 export function feedbackDeliveryMessage(meta: FeedbackDelivery, body: string | null): FeedbackMessage | null {
-  const message = meta.message ?? (body ? { msgType: 'text', content: JSON.stringify({ text: body }) } : null);
+  const message = meta.message ?? (meta.version === 1 && body ? { msgType: 'text', content: JSON.stringify({ text: body }) } : null);
   if (!message || !['text', 'interactive'].includes(message.msgType) || typeof message.content !== 'string'
-    || !message.content || message.content.length > 4000) return null;
+    || !message.content || (meta.version === 1 ? message.content.length > 4000 : Buffer.byteLength(message.content, 'utf8') > 26_000)) return null;
   try {
     const content = JSON.parse(message.content);
     if (!content || typeof content !== 'object' || Array.isArray(content)) return null;
@@ -108,6 +118,26 @@ export function feedbackDeliveryMessage(meta: FeedbackDelivery, body: string | n
     if (message.msgType === 'interactive' && !Array.isArray(content.elements)) return null;
     return message;
   } catch { return null; }
+}
+
+export function feedbackImageCard(meta: FeedbackDelivery): FeedbackMessage | null {
+  const preparation = meta.preparation;
+  if (meta.version !== 2 || !preparation || preparation.attachments.items.some(item => ['pending', 'uploading'].includes(item.state))) return null;
+  const plain = (content: string) => ({ tag: 'plain_text', content });
+  const images = preparation.attachments.items.filter(item => item.state === 'ready');
+  const notice = feedbackAttachmentNotice(preparation.attachments);
+  return { msgType: 'interactive', content: JSON.stringify({
+    config: { wide_screen_mode: true },
+    header: { template: 'blue', title: plain('新修改意见') },
+    elements: [
+      { tag: 'div', text: plain(preparation.summary) },
+      ...images.map((item, index) => ({ tag: 'img', img_key: item.imageKey, mode: 'fit_horizontal', alt: plain(`反馈截图 ${index + 1}`) })),
+      ...(notice ? [{ tag: 'note', elements: [plain(notice)] }] : []),
+      { tag: 'note', elements: [plain(`${preparation.author} · ${preparation.page}`), plain('Seedance2.0系统反馈通知')] },
+      { tag: 'action', actions: [{ tag: 'button', type: 'primary', text: plain('查看意见'),
+        url: `${FEEDBACK_SITE}/admin/feedback?feedbackId=${encodeURIComponent(meta.feedbackId)}` }] },
+    ],
+  }) };
 }
 
 function feedbackCard(feedbackId: string, author: string, page: string, summary: string, attachmentCount: number): FeedbackMessage {
@@ -129,7 +159,7 @@ function feedbackCard(feedbackId: string, author: string, page: string, summary:
 export function parseFeedbackDelivery(value: string | null): FeedbackDelivery | null {
   try {
     const data = JSON.parse(value || '') as FeedbackDelivery;
-    if (data.version !== 1 || !/^[a-zA-Z0-9_-]{1,80}$/.test(data.feedbackId)
+    if (![1, 2].includes(data.version) || !/^[a-zA-Z0-9_-]{1,80}$/.test(data.feedbackId)
       || data.uuid !== feedbackEventId(data.feedbackId)
       || data.eventKey !== `${FEEDBACK_NOTIFICATION_TYPE}:${data.feedbackId}`
       || !['pending', 'sent', 'failed', 'unknown'].includes(data.state)
@@ -143,6 +173,17 @@ export function parseFeedbackDelivery(value: string | null): FeedbackDelivery | 
       || (data.ambiguousSend !== undefined && typeof data.ambiguousSend !== 'boolean')
       || (data.lastErrorCode !== undefined && data.lastErrorCode !== null
         && (typeof data.lastErrorCode !== 'string' || !/^[a-z0-9_-]{1,100}$/.test(data.lastErrorCode)))) return null;
+    if (data.version === 2) {
+      const prep = data.preparation;
+      if (!prep || !validFeedbackAttachments(prep.attachments)
+        || (prep.authorId !== null && !/^[a-zA-Z0-9_-]{1,80}$/.test(prep.authorId))
+        || prep.attachments.items.some(item => item.ownerId !== prep.authorId)
+        || typeof prep.author !== 'string' || prep.author.length > 24 || typeof prep.page !== 'string' || prep.page.length > 80
+        || typeof prep.summary !== 'string' || prep.summary.length > 200
+        || !Number.isSafeInteger(prep.until) || prep.until < 0 || !Number.isSafeInteger(prep.cycles) || prep.cycles < 0 || prep.cycles > 100
+        || (data.message && prep.attachments.items.some(item => ['pending', 'uploading'].includes(item.state)))
+        || (!data.message && (data.firstSendAt !== null || data.ambiguousSend))) return null;
+    }
     // Older metadata lacking the flag is conservative once a send was attempted.
     return { ...data, ambiguousSend: data.ambiguousSend ?? (data.firstSendAt !== null), lastErrorCode: data.lastErrorCode ?? null };
   } catch { return null; }
@@ -152,7 +193,7 @@ export async function enqueueFeedbackNotification(
   tx: Prisma.TransactionClient,
   feedback: { id: string; content: string; pathname: string | null },
   author: { name?: string | null; id: string } | null,
-  attachmentCount: number,
+  attachments: FeedbackAttachments | number,
 ) {
   const config = feedbackConfig();
   if (!config.enabled) return;
@@ -166,12 +207,14 @@ export async function enqueueFeedbackNotification(
   const safeAuthor = safeFeedbackAuthor(author?.name, Boolean(author));
   const summary = safeFeedbackSummary(feedback.content);
   const page = feedbackPageName(feedback.pathname);
+  const attachmentCount = typeof attachments === 'number' ? attachments : attachments.total;
   const meta: FeedbackDelivery = {
-    version: 1, eventKey: `${FEEDBACK_NOTIFICATION_TYPE}:${feedback.id}`, feedbackId: feedback.id,
+    version: typeof attachments === 'number' ? 1 : 2, eventKey: `${FEEDBACK_NOTIFICATION_TYPE}:${feedback.id}`, feedbackId: feedback.id,
     uuid: feedbackEventId(feedback.id), identity: config.identity, state: valid ? 'pending' : 'failed',
     attempts: 0, nextAttemptAt: Date.now(), firstSendAt: null, leaseToken: null, leaseUntil: null, receiptId: null,
     ambiguousSend: false, lastErrorCode: null,
-    message: feedbackCard(feedback.id, safeAuthor, page, summary, attachmentCount),
+    ...(typeof attachments === 'number' ? { message: feedbackCard(feedback.id, safeAuthor, page, summary, attachmentCount) }
+      : { preparation: { authorId: author?.id || null, author: safeAuthor, page, summary, until: Date.now() + 30 * 60_000, cycles: 0, attachments } }),
   };
   await tx.notification.create({ data: {
     id: meta.uuid, type: FEEDBACK_NOTIFICATION_TYPE, channel: 'feishu', status: valid ? 'pending' : 'failed',
