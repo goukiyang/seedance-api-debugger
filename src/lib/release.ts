@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '新修改意见会通知到指定的飞书账号，点击通知可查看对应反馈；反馈保存不再受辅助日志故障影响。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '提意见更简洁，飞书卡片可直接查看意见，后台优先展示正文和截图；风格组保留资产库选择，移除独立上传按钮。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

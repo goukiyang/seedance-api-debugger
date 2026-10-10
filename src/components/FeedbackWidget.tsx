@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { uploadFileAsAsset } from '@/lib/http/file-upload';
+import { ImagePlus, MessageSquare, X } from 'lucide-react';
 
 type UploadItem = {
   id: string;
@@ -80,6 +81,13 @@ export default function FeedbackWidget() {
   const activeUploadsRef = useRef(new Set<string>());
   const panelRef = useRef<HTMLElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!message) return;
+    const timeout = window.setTimeout(() => setMessage(''), 3000);
+    return () => window.clearTimeout(timeout);
+  }, [message]);
 
   const hidden = useMemo(() => pathname === '/login' || pathname.startsWith('/admin'), [pathname]);
 
@@ -305,7 +313,7 @@ export default function FeedbackWidget() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '提交失败，请稍后重试。');
-      setMessage('已收到反馈，谢谢。');
+      setMessage('意见已提交');
       const submittedIds = new Set(submittedUploads.map((item) => item.id));
       const submittedPreviewUrls = new Set(submittedUploads.map((item) => item.previewUrl).filter(Boolean));
       const remainingUploads = uploadsRef.current.filter((item) => !submittedIds.has(item.id));
@@ -315,10 +323,8 @@ export default function FeedbackWidget() {
         contentEditedRef.current = false;
         updateContent('');
       }
-      window.setTimeout(() => {
-        setMessage('');
-        setOpen(false);
-      }, 1500);
+      // New edits made while this request was pending remain a draft, not submitted.
+      if (!contentRef.current && remainingUploads.length === 0) setOpen(false);
     } catch (err) {
       const reason = err instanceof Error ? err.message : '提交失败，请稍后重试。';
       setError(imageUrls.length > 0 ? `截图已上传成功，但反馈提交失败：${reason}` : reason);
@@ -338,7 +344,7 @@ export default function FeedbackWidget() {
         <section ref={panelRef} onPaste={onPaste} style={{
           width: 360,
           maxWidth: 'calc(100vw - 48px)',
-          maxHeight: 520,
+          maxHeight: 'min(520px, calc(100dvh - 112px))',
           overflowY: 'auto',
           marginBottom: 12,
           padding: 16,
@@ -350,12 +356,9 @@ export default function FeedbackWidget() {
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
             <div>
-              <h2 style={{ margin: 0, fontSize: 18 }}>反馈</h2>
-              <p style={{ margin: '6px 0 0', color: 'rgba(255,255,255,0.62)', fontSize: 13 }}>
-                告诉我们哪里不好用，支持截图上传。
-              </p>
+              <h2 style={{ margin: 0, fontSize: 18 }}>提意见</h2>
             </div>
-            <button type="button" onClick={() => setOpen(false)} disabled={submitting} aria-label="收起反馈" style={iconButtonStyle}>×</button>
+            <button type="button" onClick={() => setOpen(false)} disabled={submitting} aria-label="收起反馈" title="收起反馈" style={iconButtonStyle}><X size={16} /></button>
           </div>
 
           <textarea
@@ -364,7 +367,8 @@ export default function FeedbackWidget() {
               contentEditedRef.current = true;
               updateContent(event.target.value);
             }}
-            placeholder="请输入你的反馈"
+            aria-label="意见描述"
+            placeholder="哪里不好用，或想怎样改？"
             rows={5}
             style={{
               width: '100%',
@@ -380,18 +384,11 @@ export default function FeedbackWidget() {
             }}
           />
 
-          <label style={{
-            display: 'block',
-            marginTop: 12,
-            padding: 14,
-            textAlign: 'center',
-            border: '1px dashed rgba(255,255,255,0.22)',
-            borderRadius: 8,
-            color: 'rgba(255,255,255,0.72)',
-            cursor: 'pointer',
-          }}>
-            上传图片，或在反馈窗口粘贴
+          <div style={{ marginTop: 8 }}>
+            <button type="button" title="添加截图" aria-label="添加截图" disabled={submitting}
+              onClick={() => fileInputRef.current?.click()} style={{ ...iconButtonStyle, width: 36, height: 36, borderRadius: 8 }}><ImagePlus size={18} /></button>
             <input
+              ref={fileInputRef}
               type="file"
               accept="image/jpeg,image/png,image/webp"
               multiple
@@ -401,14 +398,14 @@ export default function FeedbackWidget() {
               }}
               style={{ display: 'none' }}
             />
-          </label>
+          </div>
 
           {uploads.length > 0 && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 12 }}>
               {uploads.map((item) => (
                 <div key={item.id} style={{ position: 'relative' }}>
                   <img src={item.previewUrl || item.imageUrl} alt="反馈图片预览" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 8 }} />
-                  <button type="button" onClick={() => removeUpload(item.id)} aria-label="移除图片" style={{ ...iconButtonStyle, position: 'absolute', top: 4, right: 4 }}>×</button>
+                  <button type="button" onClick={() => removeUpload(item.id)} aria-label="移除图片" title="移除图片" style={{ ...iconButtonStyle, position: 'absolute', top: 4, right: 4 }}><X size={14} /></button>
                   <div style={{ marginTop: 4, minHeight: 18, color: item.error ? '#fca5a5' : 'rgba(255,255,255,0.58)', fontSize: 11 }}>
                     {item.uploading ? '上传中' : item.error ? item.error : '已上传'}
                   </div>
@@ -420,37 +417,40 @@ export default function FeedbackWidget() {
             </div>
           )}
 
-          {(message || error) && (
+          {error && (
             <div style={{
               marginTop: 12,
-              color: error ? '#fca5a5' : '#86efac',
+              color: '#fca5a5',
               fontSize: 13,
             }}>
-              {error || message}
+              {error}
             </div>
           )}
           {error.startsWith('截图已上传成功，但反馈提交失败') && (
             <button type="button" onClick={retrySubmitUploadedAssets} disabled={submitting} style={{ ...linkButtonStyle, marginTop: 8 }}>
-              重新提交反馈
+              重新提交意见
             </button>
           )}
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
             <button type="button" onClick={() => setOpen(false)} disabled={submitting} style={secondaryButtonStyle}>取消</button>
             <button type="button" onClick={submit} disabled={submitting} style={primaryButtonStyle}>
-              {submitting ? '提交中' : '提交'}
+              {submitting ? '提交中' : '提交意见'}
             </button>
           </div>
         </section>
       )}
 
+      {message && <div role="status" style={{ position: 'absolute', bottom: 8, right: 68, padding: '10px 14px',
+        background: '#202a24', color: '#b8ebc9', border: '1px solid #4a6654', borderRadius: 8,
+        whiteSpace: 'nowrap', fontSize: 13, pointerEvents: 'none' }}>{message}</div>}
       <button
         ref={triggerRef}
         type="button"
         disabled={submitting}
         onClick={() => setOpen((value) => !value)}
-        aria-label="反馈"
-        title="反馈"
+        aria-label="提意见"
+        title="提意见"
         style={{
           width: 56,
           height: 56,
@@ -461,18 +461,19 @@ export default function FeedbackWidget() {
           boxShadow: '0 10px 24px rgba(0,0,0,0.24)',
           cursor: 'pointer',
           fontSize: 24,
-          lineHeight: '56px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}
         onMouseEnter={(event) => { event.currentTarget.style.transform = 'scale(1.06)'; }}
         onMouseLeave={(event) => { event.currentTarget.style.transform = 'scale(1)'; }}
       >
-        ?
+        <MessageSquare size={24} />
       </button>
     </div>
   );
 }
 
 const iconButtonStyle: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   width: 28,
   height: 28,
   borderRadius: '50%',

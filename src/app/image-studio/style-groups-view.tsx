@@ -3,7 +3,7 @@
 import { useProductDialog } from '@/components/useProductDialog';
 
 import { useEffect, useId, useRef, useState } from 'react';
-import { Combine, ImagePlus, Layers, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
+import { Combine, Layers, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import { UploadedImagePicker } from '@/components/UploadedImagePicker';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
@@ -42,7 +42,6 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
   const noteFieldId = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   const editor = useRef<HTMLDialogElement>(null);
-  const input = useRef<HTMLInputElement>(null);
   const uploadLock = useRef(false);
   const request = useRef(0);
   const dirty = draft !== null && JSON.stringify(draft) !== savedDraft;
@@ -195,9 +194,7 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
         <div onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void upload(Array.from(event.dataTransfer.files)); }}>
           <StudioReferenceGrid items={draft.references} onChange={changeReferences} onPreview={image => setPreview(image)} compact labels="style" notes disabled={busy || uploading} />
         </div>
-        <div className={styles.counts}><button type="button" disabled={busy || uploading || draft.references.length >= MAX_REFERENCE_IMAGES} onClick={() => input.current?.click()}><ImagePlus size={16} />上传图片</button>
-          <button type="button" disabled={busy || uploading || draft.references.length >= MAX_REFERENCE_IMAGES} onClick={() => setPicker(true)}><Plus size={16} />从资产库选择</button></div>
-        <input ref={input} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={event => { void upload(Array.from(event.target.files || [])); event.target.value = ''; }} />
+        <div className={styles.counts}><button type="button" disabled={busy || uploading || draft.references.length >= MAX_REFERENCE_IMAGES} onClick={() => setPicker(true)}><Plus size={16} />从资产库选择</button></div>
         {uploading && <p role="status">正在上传图片…</p>}
         {error && <p role="alert" className={styles.error}>{error}</p>}
         <div className={styles.resultActions}><button type="button" className={styles.primary} disabled={busy || uploading || !draft.name.trim() || !draft.references.length || !dirty} onClick={() => void save()}><Save size={16} />{busy ? '正在保存' : '保存风格组'}</button></div>

@@ -10,6 +10,7 @@ import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { RotateCcw, X } from 'lucide-react';
 import { usePageExitRisk } from '@/lib/hooks/page-exit-guard';
+import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 
 type FeedbackUser = {
   id: string;
@@ -104,6 +105,8 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState<FeedbackPagination | null>(null);
   const [restored, setRestored] = useState(false);
+  const [preview, setPreview] = useState<{ url: string; index: number; feedbackId: string } | null>(null);
+  const [technicalOpen, setTechnicalOpen] = useState(false);
   const restoreDetail = useRef<string | null>(null);
   const storageKey = `sd2:admin-feedback:v1:${currentUser.id}`;
   const dirtyDetail = Boolean(active && (note !== (savedDetail.current?.admin_note || '') || active.status !== savedDetail.current?.status));
@@ -128,7 +131,7 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
     setActive(null);
     removeDetailLink();
   };
-  useDialogDismiss({ open: Boolean(active), dialogRef: detailRef, dismissSurfaceRef: backdropRef, onDismiss: () => { void closeDetail(); } });
+  useDialogDismiss({ open: Boolean(active) && !preview, dialogRef: detailRef, dismissSurfaceRef: backdropRef, onDismiss: () => { void closeDetail(); } });
 
   useEffect(() => {
     try {
@@ -139,6 +142,7 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
         setKeyword(typeof saved.keyword === 'string' ? saved.keyword.slice(0, 200) : '');
         setPagePath(typeof saved.pagePath === 'string' ? saved.pagePath.slice(0, 200) : '');
         setPage(Number.isInteger(saved.page) && saved.page > 0 && saved.page <= 10000 ? saved.page : 1);
+        setTechnicalOpen(saved.technicalOpen === true);
         restoreDetail.current = typeof saved.activeId === 'string' ? saved.activeId : null;
       }
     } catch { /* Storage is optional; retain usable defaults. */ }
@@ -147,9 +151,9 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
 
   useEffect(() => {
     if (!restored) return;
-    try { localStorage.setItem(storageKey, JSON.stringify({ version: 1, status, hasImage, keyword, pagePath, page, activeId: active?.id || null })); }
+    try { localStorage.setItem(storageKey, JSON.stringify({ version: 1, status, hasImage, keyword, pagePath, page, activeId: active?.id || null, technicalOpen })); }
     catch { /* Browsing still works when persistence is unavailable. */ }
-  }, [restored, storageKey, status, hasImage, keyword, pagePath, page, active?.id]);
+  }, [restored, storageKey, status, hasImage, keyword, pagePath, page, active?.id, technicalOpen]);
 
   useEffect(() => {
     if (!restored) return;
@@ -446,52 +450,62 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
       </div>
 
       {active && (
-        <div ref={backdropRef} style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <div ref={backdropRef} style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, visibility: preview ? 'hidden' : 'visible' }}>
           <section ref={detailRef} role="dialog" aria-modal="true" aria-labelledby="feedback-detail-title" style={{ width: 760, maxWidth: '100%', maxHeight: '88vh', overflowY: 'auto', borderRadius: 8, background: '#151821', border: '1px solid rgba(255,255,255,0.1)', padding: 20 }}>
             <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
               <h2 id="feedback-detail-title" style={{ margin: 0, fontSize: 20 }}>反馈详情</h2>
               <button type="button" disabled={actionBusy} onClick={() => void closeDetail()} aria-label="关闭" title="关闭" style={miniButtonStyle}><X size={16} /></button>
             </header>
             {error && <p role="alert" style={{ color: '#ff9b9b', margin: '0 0 14px', overflowWrap: 'anywhere' }}>{error}</p>}
-            <dl style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '10px 14px', margin: 0, fontSize: 13 }}>
-              <dt style={dtStyle}>完整内容</dt><dd style={ddStyle}>{active.content}</dd>
-              <dt style={dtStyle}>提交人</dt><dd style={ddStyle}><UserIdentityBadge user={active.user} size="sm" showEmail /></dd>
-              <dt style={dtStyle}>页面 URL</dt><dd style={ddStyle}>{active.page_url || '-'}</dd>
-              <dt style={dtStyle}>UserAgent</dt><dd style={ddStyle}>{active.user_agent || '-'}</dd>
-              <dt style={dtStyle}>任务 ID</dt><dd style={ddStyle}>{active.task_id || '-'}</dd>
-              <dt style={dtStyle}>状态</dt>
-              <dd style={ddStyle}>
+            <p style={{ margin: '0 0 16px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: 15, lineHeight: 1.65 }}>{active.content}</p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', alignItems: 'center', color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>
+              <UserIdentityBadge user={active.user} size="sm" />
+              <span style={{ overflowWrap: 'anywhere' }}>{active.pathname || '未提供页面'}</span>
+              <RelativeTime value={active.created_at} />
+            </div>
+            {parseImages(active.image_urls_json).length > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: 10, marginTop: 16 }}>
+                {parseImages(active.image_urls_json).map((url, index) => (
+                  <button key={`${url}-${index}`} type="button" title={`查看截图 ${index + 1}`} aria-label={`查看截图 ${index + 1}`}
+                    onClick={() => setPreview({ url, index, feedbackId: active.id })}
+                    style={{ border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: 0, overflow: 'hidden', cursor: 'zoom-in', background: '#111318' }}>
+                    <img src={url} alt={`反馈截图 ${index + 1}`} style={{ display: 'block', width: '100%', aspectRatio: '4 / 3', objectFit: 'contain' }} />
+                  </button>
+                ))}
+              </div>
+            )}
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', marginTop: 20, paddingTop: 16 }}>
+              <label style={{ display: 'block', marginBottom: 8, color: 'rgba(255,255,255,0.65)', fontSize: 13 }}>状态
                 <select disabled={actionBusy} value={active.status} onChange={(event) => setActive({ ...active, status: event.target.value })} style={controlStyle}>
                   <option value="new">新反馈</option>
                   <option value="reviewed">已查看</option>
                   <option value="archived">已归档</option>
                 </select>
-              </dd>
-              <dt style={dtStyle}>提交时间</dt><dd style={ddStyle}><RelativeTime value={active.created_at} /></dd>
-              <dt style={dtStyle}>管理员备注</dt>
-              <dd style={ddStyle}>
+              </label>
+              <label style={{ display: 'block', marginTop: 12, color: 'rgba(255,255,255,0.65)', fontSize: 13 }}>内部备注
                 <textarea disabled={actionBusy} value={note} onChange={(event) => setNote(event.target.value)} rows={4} style={{ ...controlStyle, resize: 'vertical' }} />
-              </dd>
-            </dl>
-
-            {parseImages(active.image_urls_json).length > 0 && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginTop: 16 }}>
-                {parseImages(active.image_urls_json).map((url) => (
-                  <a key={url} href={url} target="_blank" rel="noreferrer">
-                    <img src={url} alt="反馈图片" style={{ width: '100%', aspectRatio: '4 / 3', objectFit: 'cover', borderRadius: 8, border: '1px solid rgba(255,255,255,0.12)' }} />
-                  </a>
-                ))}
-              </div>
-            )}
-
-            <footer style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
-              <button type="button" disabled={actionBusy} onClick={() => void runFeedbackAction(() => archive([active.id]))} style={secondaryButtonStyle}>归档</button>
+              </label>
+            </div>
+            <details open={technicalOpen} onToggle={event => setTechnicalOpen(event.currentTarget.open)} style={{ marginTop: 16, fontSize: 13 }}>
+              <summary style={{ cursor: 'pointer', color: 'rgba(255,255,255,0.65)', padding: '8px 0' }}>技术信息 / 导出</summary>
+              <dl style={{ margin: '8px 0', display: 'grid', gridTemplateColumns: '80px minmax(0, 1fr)', gap: '10px 12px', fontSize: 12 }}>
+                <dt style={dtStyle}>反馈编号</dt><dd style={ddStyle}>{active.id}</dd>
+                <dt style={dtStyle}>提交人</dt><dd style={ddStyle}><UserIdentityBadge user={active.user} size="sm" showEmail /></dd>
+                <dt style={dtStyle}>页面 URL</dt><dd style={ddStyle}>{active.page_url || '-'}</dd>
+                <dt style={dtStyle}>UserAgent</dt><dd style={ddStyle}>{active.user_agent || '-'}</dd>
+                <dt style={dtStyle}>任务 ID</dt><dd style={ddStyle}>{active.task_id || '-'}</dd>
+              </dl>
               <button type="button" onClick={() => exportSingle(active.id)} style={secondaryButtonStyle}>下载 PDF</button>
+            </details>
+            <footer style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8, marginTop: 18, position: 'sticky', bottom: -20, padding: '12px 0', background: '#151821' }}>
+              <button type="button" disabled={actionBusy} onClick={() => void runFeedbackAction(() => archive([active.id]))} style={secondaryButtonStyle}>归档</button>
               <button type="button" disabled={actionBusy} className="sd2-loading-surface" data-busy={actionBusy} onClick={() => void runFeedbackAction(saveDetail)} style={primaryButtonStyle}>保存</button>
             </footer>
           </section>
         </div>
       )}
+      {preview && active && <ZoomableImagePreview src={preview.url} alt={`反馈截图 ${preview.index + 1}`} title="反馈截图"
+        previewKey={`feedback:${currentUser.id}:${preview.feedbackId}:${preview.index}`} onClose={() => setPreview(null)} />}
     </main>
   );
 }

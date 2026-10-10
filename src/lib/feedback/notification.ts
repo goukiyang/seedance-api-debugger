@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { PrismaClient, type Prisma } from '@prisma/client';
+import { adminNavItems, isNavItemActive, userNavItems } from '@/lib/navigation';
 
 const feedbackGlobal = globalThis as unknown as { feedbackPrisma?: PrismaClient };
 // Feedback may contain pasted credentials. Never let database errors print it.
@@ -11,6 +12,8 @@ export const FEEDBACK_SITE = 'https://sd2.youdooart.com';
 // Feishu deduplicates uuid for one hour. Leave a margin for clocks and requests.
 export const SEND_WINDOW_MS = 50 * 60_000;
 export const LEASE_MS = 90_000;
+
+export type FeedbackMessage = { msgType: 'text' | 'interactive'; content: string };
 
 export type FeedbackDelivery = {
   version: 1;
@@ -27,6 +30,7 @@ export type FeedbackDelivery = {
   receiptId: string | null;
   ambiguousSend: boolean;
   lastErrorCode: string | null;
+  message?: FeedbackMessage;
 };
 
 export function feedbackConfig() {
@@ -85,6 +89,43 @@ export function safeFeedbackAuthor(name: string | null | undefined, signedIn: bo
   return name && new RegExp('^[\\p{L} .-]{1,24}$', 'u').test(name) ? name : signedIn ? '站内用户' : '未登录访客';
 }
 
+export function feedbackPageName(pathname: string | null) {
+  const path = safeFeedbackPath(pathname);
+  if (path === '/image-studio') return '图片生成';
+  const items = [...userNavItems, ...adminNavItems].filter(item => isNavItemActive(path, item));
+  items.sort((a, b) => b.href.length - a.href.length);
+  return items[0]?.label || '其他页面';
+}
+
+export function feedbackDeliveryMessage(meta: FeedbackDelivery, body: string | null): FeedbackMessage | null {
+  const message = meta.message ?? (body ? { msgType: 'text', content: JSON.stringify({ text: body }) } : null);
+  if (!message || !['text', 'interactive'].includes(message.msgType) || typeof message.content !== 'string'
+    || !message.content || message.content.length > 4000) return null;
+  try {
+    const content = JSON.parse(message.content);
+    if (!content || typeof content !== 'object' || Array.isArray(content)) return null;
+    if (message.msgType === 'text' && typeof content.text !== 'string') return null;
+    if (message.msgType === 'interactive' && !Array.isArray(content.elements)) return null;
+    return message;
+  } catch { return null; }
+}
+
+function feedbackCard(feedbackId: string, author: string, page: string, summary: string, attachmentCount: number): FeedbackMessage {
+  const plain = (content: string) => ({ tag: 'plain_text', content });
+  return { msgType: 'interactive', content: JSON.stringify({
+    config: { wide_screen_mode: true },
+    header: { template: 'blue', title: plain('新修改意见') },
+    elements: [
+      { tag: 'note', elements: [plain('Seedance2.0系统反馈通知')] },
+      { tag: 'div', text: plain(`提交人：${author}\n页面：${page}`) },
+      { tag: 'div', text: plain(summary) },
+      ...(attachmentCount > 0 ? [{ tag: 'div', text: plain(`截图：${attachmentCount} 张`) }] : []),
+      { tag: 'action', actions: [{ tag: 'button', type: 'primary', text: plain('查看意见'),
+        url: `${FEEDBACK_SITE}/admin/feedback?feedbackId=${encodeURIComponent(feedbackId)}` }] },
+    ],
+  }) };
+}
+
 export function parseFeedbackDelivery(value: string | null): FeedbackDelivery | null {
   try {
     const data = JSON.parse(value || '') as FeedbackDelivery;
@@ -98,6 +139,7 @@ export function parseFeedbackDelivery(value: string | null): FeedbackDelivery | 
       || (data.leaseUntil !== null && (!Number.isSafeInteger(data.leaseUntil) || data.leaseUntil < 0))
       || (data.leaseToken !== null && typeof data.leaseToken !== 'string')
       || typeof data.identity !== 'string'
+      || (data.message !== undefined && !feedbackDeliveryMessage(data, null))
       || (data.ambiguousSend !== undefined && typeof data.ambiguousSend !== 'boolean')
       || (data.lastErrorCode !== undefined && data.lastErrorCode !== null
         && (typeof data.lastErrorCode !== 'string' || !/^[a-z0-9_-]{1,100}$/.test(data.lastErrorCode)))) return null;
@@ -121,19 +163,22 @@ export async function enqueueFeedbackNotification(
   // A deleted FK target cannot own an outbox row. Never redirect to another user.
   if (!recipient) { console.warn('feedback_recipient_missing'); return; }
   const valid = validFeedbackRecipient(recipient, config);
+  const safeAuthor = safeFeedbackAuthor(author?.name, Boolean(author));
+  const summary = safeFeedbackSummary(feedback.content);
+  const page = feedbackPageName(feedback.pathname);
   const meta: FeedbackDelivery = {
     version: 1, eventKey: `${FEEDBACK_NOTIFICATION_TYPE}:${feedback.id}`, feedbackId: feedback.id,
     uuid: feedbackEventId(feedback.id), identity: config.identity, state: valid ? 'pending' : 'failed',
     attempts: 0, nextAttemptAt: Date.now(), firstSendAt: null, leaseToken: null, leaseUntil: null, receiptId: null,
     ambiguousSend: false, lastErrorCode: null,
+    message: feedbackCard(feedback.id, safeAuthor, page, summary, attachmentCount),
   };
   await tx.notification.create({ data: {
     id: meta.uuid, type: FEEDBACK_NOTIFICATION_TYPE, channel: 'feishu', status: valid ? 'pending' : 'failed',
     target_user_id: config.recipientId, title: '新修改意见',
     body: ['Seedance2.0系统反馈通知', '新修改意见',
-      `提交人：${safeFeedbackAuthor(author?.name, Boolean(author))}`,
-      `页面：${safeFeedbackPath(feedback.pathname)}`,
-      `摘要：${safeFeedbackSummary(feedback.content)}`, `附件：${attachmentCount} 个`,
+      `提交人：${safeAuthor}`, `页面：${page}`, `摘要：${summary}`,
+      ...(attachmentCount > 0 ? [`截图：${attachmentCount} 张`] : []),
       `后台查看：${FEEDBACK_SITE}/admin/feedback?feedbackId=${encodeURIComponent(feedback.id)}`].join('\n'),
     metadata_json: JSON.stringify(meta), error_message: valid ? null : 'feedback_identity_invalid',
   } });
