@@ -27,6 +27,7 @@ export type FeedbackDelivery = {
   receiptId: string | null;
   ambiguousSend: boolean;
   lastErrorCode: string | null;
+  message?: FeedbackMessage;
 };
 
 export function feedbackConfig() {
@@ -98,6 +99,7 @@ export function parseFeedbackDelivery(value: string | null): FeedbackDelivery | 
       || (data.leaseUntil !== null && (!Number.isSafeInteger(data.leaseUntil) || data.leaseUntil < 0))
       || (data.leaseToken !== null && typeof data.leaseToken !== 'string')
       || typeof data.identity !== 'string'
+      || (data.message !== undefined && !feedbackDeliveryMessage(data, null))
       || (data.ambiguousSend !== undefined && typeof data.ambiguousSend !== 'boolean')
       || (data.lastErrorCode !== undefined && data.lastErrorCode !== null
         && (typeof data.lastErrorCode !== 'string' || !/^[a-z0-9_-]{1,100}$/.test(data.lastErrorCode)))) return null;
@@ -137,4 +139,19 @@ export async function enqueueFeedbackNotification(
       `后台查看：${FEEDBACK_SITE}/admin/feedback?feedbackId=${encodeURIComponent(feedback.id)}`].join('\n'),
     metadata_json: JSON.stringify(meta), error_message: valid ? null : 'feedback_identity_invalid',
   } });
+}
+
+export type FeedbackMessage = { msgType: 'text' | 'interactive'; content: string };
+
+export function feedbackDeliveryMessage(meta: FeedbackDelivery, body: string | null): FeedbackMessage | null {
+  const message = meta.message ?? (body ? { msgType: 'text', content: JSON.stringify({ text: body }) } : null);
+  if (!message || !['text', 'interactive'].includes(message.msgType) || typeof message.content !== 'string'
+    || !message.content || message.content.length > 4000) return null;
+  try {
+    const content = JSON.parse(message.content);
+    if (!content || typeof content !== 'object' || Array.isArray(content)) return null;
+    if (message.msgType === 'text' && typeof content.text !== 'string') return null;
+    if (message.msgType === 'interactive' && !Array.isArray(content.elements)) return null;
+    return message;
+  } catch { return null; }
 }

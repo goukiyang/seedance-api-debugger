@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { FEEDBACK_NOTIFICATION_TYPE, LEASE_MS, SEND_WINDOW_MS,
-  feedbackPrisma as prisma, feedbackConfig, parseFeedbackDelivery, validFeedbackRecipient, type FeedbackDelivery } from './notification';
+  feedbackPrisma as prisma, feedbackConfig, feedbackDeliveryMessage, parseFeedbackDelivery, validFeedbackRecipient, type FeedbackDelivery } from './notification';
 
 class DeliveryError extends Error {
   constructor(public code: string, public ambiguous = false, public retryable = true) { super(code); }
@@ -79,6 +79,10 @@ export async function processFeedbackDeliveries(limit = 10) {
         id: true, status: true, role: true, expires_at: true, feishu_open_id: true, feishu_tenant_key: true,
       } });
       if (!validFeedbackRecipient(recipient, config) || meta.identity !== config.identity) throw new DeliveryError('feedback_identity_changed', false, false);
+      const message = feedbackDeliveryMessage(meta, job.body);
+      if (!message) throw new DeliveryError('feedback_payload_invalid', false, false);
+      // Legacy pending rows keep their text, frozen before IO just like new cards.
+      if (!meta.message) await persist({ ...meta, message }, 'pending', null);
       const token = await feedbackTenantToken();
       // Recheck immediately before send; no network call holds a SQLite transaction.
       const current = await prisma.user.findUnique({ where: { id: config.recipientId }, select: {
@@ -86,12 +90,11 @@ export async function processFeedbackDeliveries(limit = 10) {
       } });
       if (!validFeedbackRecipient(current, config)) throw new DeliveryError('feedback_identity_changed', false, false);
       if (meta.firstSendAt !== null && Date.now() - meta.firstSendAt >= SEND_WINDOW_MS) throw new DeliveryError('feedback_delivery_window_closed', meta.ambiguousSend, false);
-      if (!job.body || job.body.length > 4000) throw new DeliveryError('feedback_payload_invalid', false, false);
       priorSendAmbiguity = meta.ambiguousSend;
       // A crash after starting IO is unknown; an explicit rejection clears only this attempt.
       await persist({ ...meta, firstSendAt: meta.firstSendAt ?? Date.now(), ambiguousSend: true }, 'pending', null);
       const response = await feishuRequest('im/v1/messages?receive_id_type=open_id', {
-        receive_id: current!.feishu_open_id, msg_type: 'text', content: JSON.stringify({ text: job.body }), uuid: meta.uuid,
+        receive_id: current!.feishu_open_id, msg_type: message.msgType, content: message.content, uuid: meta.uuid,
       }, token, meta.firstSendAt! + SEND_WINDOW_MS, meta.leaseUntil!);
       const receipt = response.data as { message_id?: unknown } | undefined;
       if (typeof receipt?.message_id !== 'string' || !receipt.message_id) throw new DeliveryError('feedback_receipt_unknown', true);
