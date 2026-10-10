@@ -142,7 +142,15 @@ export function canvasMetadata(document: Metadata) {
   };
 }
 
+function requireRoleCompatibleRelease(document: { schema_version: number }) {
+  if (document.schema_version >= 3) {
+    throw new CanvasDocumentError('当前为角色保护回退版本，此画布暂不能读写；角色、成果及费用记录均保留，请恢复支持角色的版本后继续',
+      426, 'role_rollback_guard', { required_capabilities: ['role.v1'] });
+  }
+}
+
 export function canvasDetail(document: CanvasDocument) {
+  requireRoleCompatibleRelease(document);
   return { ...canvasMetadata(document), document_json: document.document_json };
 }
 
@@ -158,6 +166,7 @@ async function assertDocument(user: SessionUser, document: Metadata | null, writ
   // Personal canvases are owner-only, including historical links and admin accounts.
   if (document.owner_user_id !== user.id) throw new AuthError('无权访问此画布', 403);
   await assertProject(user, document.project_id, write);
+  requireRoleCompatibleRelease(document);
 }
 
 export async function readCanvasDocument(user: SessionUser, documentId: string) {
