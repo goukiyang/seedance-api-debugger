@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { imageDisplaySource } from '@/lib/media/image-comparison';
 import { canPrefetchImages, prefetchImageRead, setImageReadSessionOwner } from '@/lib/media/image-read-session';
@@ -8,10 +8,29 @@ import { prefetchHdImageSource } from '@/lib/media/hd-source-session';
 import { versionedHdSource } from './use-hd-image-source';
 
 export type ImageReadCandidate = { source: string; sourceVersion?: string; thumbnail?: string; width?: number; height?: number; bytes?: number; variant?: 'original' | 'hd' | 'preview' };
-export function useImageNeighbors(candidates: ImageReadCandidate[], enabled: boolean) {
+function sourceFamily(source: string) {
+  try {
+    const url = new URL(source, 'https://sd2.youdooart.com'); url.hash = '';
+    for (const name of ['thumbnail', 'preview', 'detail', 'download', 'hd', 'hd-description', 'hd-download', 'hd-version', 'variant']) url.searchParams.delete(name);
+    url.searchParams.sort();
+    return url.pathname.startsWith('/api/') ? `${url.pathname}${url.search}` : url.href;
+  } catch { return source; }
+}
+export function useImageNeighbors(candidates: ImageReadCandidate[], enabled: boolean, currentSource = '') {
   const { user, hasLoadedUser, userLoadError } = useAppSession();
   const account = hasLoadedUser && !userLoadError ? `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` : '';
-  const key = JSON.stringify(candidates.slice(0, 2));
+  const current = sourceFamily(currentSource);
+  const movement = useRef<1 | -1 | 0>(0);
+  const history = useRef<{ current: string; neighbors: string[] }>({ current: '', neighbors: [] });
+  const available = candidates.slice(0, 2);
+  const neighborKeys = available.map(candidate => sourceFamily(candidate.source));
+  if (enabled && current && current !== history.current.current) {
+    const movedTo = history.current.neighbors.indexOf(current);
+    movement.current = movedTo === 1 ? 1 : movedTo === 0 ? -1 : 0;
+    history.current = { current, neighbors: neighborKeys };
+  } else if (enabled && current) history.current.neighbors = neighborKeys;
+  const ordered = movement.current === 1 ? [available[1], available[0]] : available;
+  const key = JSON.stringify(ordered.filter((candidate): candidate is ImageReadCandidate => Boolean(candidate)));
   useEffect(() => {
     if (!enabled || !account || !canPrefetchImages()) return;
     setImageReadSessionOwner(account);

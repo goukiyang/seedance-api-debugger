@@ -49,13 +49,26 @@ export class StudioSettingsClearConfirmationError extends Error {
 }
 
 export async function saveImageStudioSettings(input: ImageStudioSettings, userId: string, options: { confirmContextClear?: boolean } = {}) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction(tx => saveImageStudioSettingsInTx(tx, input, userId, options));
+}
+
+export async function saveImageStudioSettingsInTx(tx: Prisma.TransactionClient, input: ImageStudioSettings, userId: string,
+  options: { confirmContextClear?: boolean; skipUnchanged?: boolean } = {}) {
     const row = await tx.platformSetting.findUnique({ where: { key: IMAGE_STUDIO_SETTING_KEY } });
     const current = row ? JSON.parse(row.value_json) as ImageStudioSettings : null;
     const currentRevision = current?.revision ?? 0;
     if (currentRevision !== input.revision) return null;
     if (current?.context.trim() && !input.context.trim() && options.confirmContextClear !== true) {
       throw new StudioSettingsClearConfirmationError();
+    }
+    if (options.skipUnchanged) {
+      const decoded = current ? decodeSettings(current) : await getImageStudioSettings(tx);
+      if (decoded.context === input.context && decoded.model === input.model
+        && IMAGE_STUDIO_MODELS.every(model => decoded.prices[model] === input.prices[model])
+        && (input.templateDefaults === undefined || JSON.stringify(decoded.templateDefaults) === JSON.stringify(parseStudioTemplateDefaults(input.templateDefaults)))) {
+        // The resolution receipt is locked by its caller; an unchanged default is read-only.
+        return decoded;
+      }
     }
     // Omitted defaults from an older client must preserve the current JSON extension.
     const next = { ...current, context: input.context, model: input.model, prices: input.prices, revision: currentRevision + 1,
@@ -72,5 +85,4 @@ export async function saveImageStudioSettings(input: ImageStudioSettings, userId
       } });
     }
     return decodeSettings(next);
-  });
 }

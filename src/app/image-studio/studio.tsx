@@ -49,6 +49,7 @@ import { StudioReferenceGrid, type FixedStudioReference } from './reference-grid
 import { RatioPicker } from './ratio-picker';
 import { useStudioSettings } from './use-studio-settings';
 import { StudioGlobalSettingsDialog } from './global-settings-dialog';
+import type { ResolutionDelta } from '@/lib/image-studio/resolution-apply-types';
 import { StudioSkills, type SkillSummary } from './skills-view';
 import { StudioStyleGroups, type StudioStyleSummary } from './style-groups-view';
 import type { SettingsValue } from './settings-controller';
@@ -204,6 +205,21 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
   const [presetManaging, setPresetManaging] = useState(false);
   const presetManagementLock = useRef(false);
   const [modules, setModules] = useState<StudioModule[]>([]);
+  const resolutionDirty = useRef(new Set<string>());
+  const [resolutionDeltas, setResolutionDeltas] = useState<Record<string, ResolutionDelta>>({});
+  const registerResolutionDirty = useCallback((id: string, dirty: boolean) => {
+    if (dirty) resolutionDirty.current.add(id); else resolutionDirty.current.delete(id);
+  }, []);
+  const applyResolutionDeltas = useCallback((deltas: ResolutionDelta[]) => {
+    setResolutionDeltas(previous => ({ ...previous, ...Object.fromEntries(deltas.map(delta => [delta.id, delta])) }));
+    const byId = new Map(deltas.map(delta => [delta.id, delta]));
+    setModules(current => current.map(module => {
+      const delta = byId.get(module.id);
+      return delta && module.revision === delta.beforeRevision && !resolutionDirty.current.has(module.id)
+        ? { ...module, resolution: delta.resolution as ImageResolution, revision: delta.revision } : module;
+    }));
+  }, []);
+  useEffect(() => { resolutionDirty.current.clear(); setResolutionDeltas({}); }, [userId]);
   const [directory, setDirectory] = useState<Array<Pick<StudioModule, 'id' | 'name' | 'groupName' | 'sourcePresetId'>>>([]);
   const [directoryReady, setDirectoryReady] = useState(false);
   const removedModuleIds = useRef(new Set<string>());
@@ -811,6 +827,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
       onModuleDelete={id => { removedModuleIds.current.add(id); setModules(current => current.filter(item => item.id !== id)); setDirectory(current => current.filter(item => item.id !== id)); setActive(current => current === id ? '' : current); }}
       userId={userId} settings={settings} globalContextDraft={isAdmin ? globalEditor.draft?.context : undefined} globalSettingsDirty={globalEditor.dirty || globalEditor.saving} settingsError={globalEditor.error} active={!coverView && active === module.id && module.groupName === selectedGroup} onActivate={() => { replaceImageModuleLocation(module.id); routedContentHandled.current = `${userId}:${window.location.search}`; setActive(module.id); }}
       onManagePresets={() => void openPresetLibrary(module.id)} registerPresetSource={registerPresetSource}
+      registerResolutionDirty={registerResolutionDirty} resolutionDelta={resolutionDeltas[module.id]}
       quickPresetVersion={quickPresetVersion} viewToken={requestedView.viewerId === userId && requestedView.moduleId === module.id ? requestedView.token : 0} onResultsViewed={attention.markViewed} onTemplateEntered={attention.confirmEntry} onResultsAvailable={attention.refresh}
       onModuleChange={next => { setModules(current => current.map(item => item.id === next.id ? { ...next, name: item.name, groupName: item.groupName } : item)); }}
       ratios={{ custom: customRatios, busy: ratiosBusy, error: ratiosError, onRetry: () => void syncRatios(), onCustom: syncRatios }}
@@ -837,15 +854,17 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
         </div></article>)}</div>}
     </dialog>
     <StudioGlobalSettingsDialog open={globalSettingsOpen} onClose={() => setGlobalSettingsOpen(false)} editor={globalEditor} ownerId={userId} canEdit={isAdmin}
+      getExcluded={() => modules.filter(module => (module.saved || module.id === `default-${userId}`) && resolutionDirty.current.has(module.id)).map(module => module.id)} onDeltas={applyResolutionDeltas}
       ratios={{ custom: customRatios, busy: ratiosBusy, error: ratiosError, onRetry: () => void syncRatios(), onCustom: syncRatios }} />
     {!settings && globalEditor.error && <p role="alert" className={styles.error}>{globalEditor.error}<button onClick={() => void globalEditor.controller.load()}>重试读取设置</button></p>}
   </main>)}</>;
 }
 
-function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, onModuleDelete, groups, onDeleteGroup, groupDeleting, onToggleSharing, sharingId, settings, globalContextDraft, globalSettingsDirty, settingsError, active, onActivate, onModuleChange, onReloadSettings, ratios, templateWorkbench, quickPresetVersion, viewToken, onResultsViewed, onTemplateEntered, onResultsAvailable, onManagePresets, registerPresetSource }: {
+function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, onModuleDelete, groups, onDeleteGroup, groupDeleting, onToggleSharing, sharingId, settings, globalContextDraft, globalSettingsDirty, settingsError, active, onActivate, onModuleChange, onReloadSettings, ratios, templateWorkbench, quickPresetVersion, viewToken, onResultsViewed, onTemplateEntered, onResultsAvailable, onManagePresets, registerPresetSource, registerResolutionDirty, resolutionDelta }: {
   groupDeleting: boolean;
   onManagePresets: () => void;
   registerPresetSource: (id: string, read: PresetSourceReader | null) => void;
+  registerResolutionDirty: (id: string, dirty: boolean) => void; resolutionDelta?: ResolutionDelta;
   templateWorkbench: boolean;
   quickPresetVersion: number;
   onModuleDelete: (id: string) => void;
@@ -1057,6 +1076,26 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const generationChanged = generationDraft !== defaultGenerationDraft || Boolean(reproduceSourceTaskId);
   const automaticSnapshot = JSON.stringify({ ...baseline, name, groupName, bannerAssetId: banner?.id || null });
   const automaticDirty = automaticSnapshot !== moduleSaved;
+  const resolutionProtected = moduleDirty || automaticDirty || fixedDirty || !draftLoaded || draftRestoring || submitting || Boolean(pendingSubmission)
+    || moduleSaving || moduleDeleting || presetSaving || Boolean(quickPresetApplying) || uploading || bannerUploading || Boolean(reproduceSourceTaskId);
+  const resolutionDraftExcluded = moduleDirty || automaticDirty || fixedDirty || !draftLoaded || draftRestoring || Boolean(recoverableDraft);
+  useLayoutEffect(() => {
+    registerResolutionDirty(module.id, resolutionDraftExcluded);
+    return () => registerResolutionDirty(module.id, false);
+  }, [module.id, resolutionDraftExcluded, registerResolutionDirty]);
+  useEffect(() => {
+    if (!resolutionDelta || resolutionDelta.revision <= revisionRef.current) return;
+    setBillingQuote(null);
+    if (resolutionProtected || revisionRef.current !== resolutionDelta.beforeRevision) {
+      setModuleSaveError('此模板的已保存分辨率已在批量操作中变化。当前草稿未覆盖；请先核对再保存。');
+      return;
+    }
+    revisionRef.current = resolutionDelta.revision;
+    setModuleRevision(resolutionDelta.revision);
+    setResolution(resolutionDelta.resolution as ImageResolution);
+    setModuleSaved(previous => JSON.stringify({ ...JSON.parse(previous), resolution: resolutionDelta.resolution }));
+    setSaveStatus('已同步新的分辨率，其它参数未改变');
+  }, [resolutionDelta, resolutionProtected]);
   const unpersistedDraft = draftLoaded && generationChanged && persistedDraftSignature !== generationDraft;
   // Recoverable browser drafts are not lost on refresh; failed persistence still blocks exit.
   useUnsavedNavigation(dirty || automaticDirty || moduleSaving || presetSaving || Boolean(quickPresetApplying) || uploading || bannerUploading || unpersistedDraft, confirm, {
@@ -1109,12 +1148,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
 
   useEffect(() => {
     // Group removal updates modules in the parent without remounting editors.
+    if (resolutionDelta?.revision === module.revision) return;
     if (module.revision <= revisionRef.current) return;
     revisionRef.current = module.revision;
     setModuleRevision(module.revision);
     setGroupName(module.groupName || '未分组');
     setModuleSaved(current => current ? JSON.stringify({ ...JSON.parse(current), groupName: module.groupName || '未分组' }) : current);
-  }, [module.revision, module.groupName]);
+  }, [module.revision, module.groupName, resolutionDelta]);
 
   useEffect(() => { if (deleteTarget) deleteDialog.current?.showModal(); else deleteDialog.current?.close(); }, [deleteTarget]);
   useEffect(() => { if (nameEditing) nameInput.current?.focus(); }, [nameEditing]);

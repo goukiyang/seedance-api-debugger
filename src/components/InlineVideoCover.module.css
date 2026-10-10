@@ -1,6 +1,8 @@
 .stage, .poster { position: absolute; inset: 0; display: grid; place-items: center; min-width: 0; min-height: 0; }
 .poster[hidden], .video[hidden] { display: none; }
 .poster img, .video { position: absolute; inset: 0; display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: contain; object-position: center; }
+.hoverStage .poster, .hoverStage .video { pointer-events: none; }
+.hoverStage[data-error] .poster { display: grid; }
 .toggle { position: absolute; inset: 0; display: grid; place-items: center; padding: 0; border: 0; border-radius: 0; background: transparent; color: #eef4f1; cursor: pointer; }
 .toggle:focus-visible { outline: 2px solid #79daca; outline-offset: -3px; }
 .toggle:disabled { cursor: default; }

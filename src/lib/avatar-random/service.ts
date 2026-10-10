@@ -10,8 +10,8 @@ import { catalog, identityFields } from './catalog';
 import { adaptAvatarPrompt, createAvatarCandidates, emptyConstraints, parseAvatarRules } from './engine';
 import { avatarKey, avatarPlanKey, avatarRecordKey, readAvatar } from './store';
 import { AVATAR_COMPILER_VERSION, type AvatarConstraints, type AvatarCandidate, type AvatarPlan, type AvatarRecord } from './types';
-import { descriptionSystemPrompt } from './description-contract';
-import { AvatarDescriptionError, descriptionId, inspectDescription, resolveDescription, type DescriptionStore } from './description-parser';
+import { descriptionSystemPrompt, originalDescriptionConstraints } from './description-contract';
+import { AvatarDescriptionError, descriptionId, inspectDescription, originalDescriptionAttempt, resolveDescription, type DescriptionStore } from './description-parser';
 import { avatarLayout, avatarOutputCount, withAvatarLayout, isAvatarSheet, avatarSheetLabel } from './layout';
 import { avatarRulesSignature } from './intent';
 import { defaultStudioReferencePolicy, validateStudioReferenceCounts } from '@/lib/image-studio/reference-policy';
@@ -78,17 +78,37 @@ export async function prepareAvatarPlan(owner: string, body: Record<string, unkn
   const index = Number(body.previousIndex || 0);
   const current = previous?.candidates[index];
   const action = body.actionType === 'styling' ? 'styling' : body.actionType === 'tweak' ? 'tweak' : 'new';
+  const originalRequested = body.descriptionMode !== undefined || body.originalAttemptRequestId !== undefined;
+  if (originalRequested && (body.descriptionMode !== 'original' || action !== 'new' || !rules.description
+    || typeof body.originalAttemptRequestId !== 'string')) throw new StudioError('按原描述继续的请求无效，请重新查询当前文案状态', 409);
   if (action !== 'new' && (isAvatarSheet(rules) || previous && isAvatarSheet(previous))) throw new StudioError('宫格整图不是单人的身份基准。请先切换独立头像并重新报价出图，再保存人物或换造型。');
   if (action !== 'new' && !current) throw new StudioError('请先恢复一个可用的人物');
   if (action === 'tweak' && (typeof body.field !== 'string' || !(body.field in catalog) || rules.description !== current!.rules.description)) throw new StudioError('微调只修改所选字段；描述已变化，请先恢复草稿或选择换一个人');
   if (current && action!=='new' && rules.people!==current.members.length) throw new StudioError('微调或换造型不能改变人数，请选择换一个人');
+  let originalRaw: string | null = null;
+  let interpretation: AvatarPlan['descriptionInterpretation'];
+  let constraints: AvatarConstraints;
   if (rules.description) {
     const parse = await avatarDescriptionStatus(owner, rules.description);
-    if (parse.state !== 'succeeded') throw new AvatarDescriptionError(parse);
     if (body.descriptionId !== parse.descriptionId || body.parserVersion !== parse.parserVersion) throw new StudioError('文案分析已变化，请先查询当前分析结果；本次不调用模型', 409);
+    if (body.descriptionMode === 'original') {
+      if (!parse.canContinueOriginal || parse.canRecheck || parse.state !== 'unknown') throw new StudioError('文案处理状态已变化，请先重新查询；本次未调用文字模型或提交图片', 409);
+      const store = descriptionStore(owner, rules.description);
+      originalRaw = await store.readAttempt();
+      const attempt = originalDescriptionAttempt(originalRaw);
+      if (!attempt || attempt.requestId !== body.originalAttemptRequestId || attempt.requestId !== parse.requestId
+        || await store.readResponse(attempt.requestId) !== null || await store.readCache() !== null) throw new StudioError('原文处理状态已变化，请重新查询；本次不调用文字模型', 409);
+      constraints = originalDescriptionConstraints(rules.description);
+      interpretation = { mode: 'original', descriptionId: parse.descriptionId, parserVersion: attempt.parserVersion, originalAttemptRequestId: attempt.requestId, source: 'original-description' };
+    } else {
+      if (parse.state !== 'succeeded') throw new AvatarDescriptionError(parse);
+      constraints = await parseAvatarDescription(owner, rules.description, false);
+      interpretation = { mode: 'parsed', descriptionId: parse.descriptionId, parserVersion: parse.parserVersion!, source: 'saved-reply' };
+    }
+  } else {
+    constraints = emptyConstraints();
   }
   // Preparing a quote must never implicitly purchase a text-model request.
-  const constraints = await parseAvatarDescription(owner, rules.description, false);
   if (constraints.members?.length && !(isAvatarSheet(rules) ? [1,rules.candidates].includes(constraints.members.length) : constraints.members.length === rules.people)) throw new StudioError('描述中的人物数量与排版不一致；宫格可指定一套共同条件或与格数相同的人物，独立图按每张人数设置');
   const settings = await getImageStudioSettings();
   const model = typeof body.model === 'string' && IMAGE_STUDIO_MODELS.includes(body.model as typeof IMAGE_STUDIO_MODELS[number]) ? body.model : settings.model;
@@ -117,9 +137,21 @@ export async function prepareAvatarPlan(owner: string, body: Record<string, unkn
   const api = await getImageGenerationSettingsForModel(model);
   if(referenceIds.length&&!api.supports_image_to_image)throw new StudioError('当前模型通道不支持参考图，请更换模型或移除可选参考；同人基准不能自动移除');
   const imageReady=unitCredits!==null&&Number.isInteger(unitCredits)&&unitCredits>=0&&isStudioImageGenerationProvider(api.provider)&&isImageGenerationApiReady(api)&&(referenceIds.length?api.supports_image_to_image:api.supports_text_to_image);
-  const plan: AvatarPlan = withAvatarLayout({ id: randomUUID(), candidates, model, quality, resolution, aspectRatio: rules.people > 1 ? '3:2' : '1:1', settingsRevision: settings.revision, unitCredits, referenceIds, createdAt: new Date().toISOString(), imageReady, imageSeedSupport:'unsupported',warnings:candidates.flatMap(c=>c.members.flatMap(d=>d.warnings||[])) }, avatarLayout(rules));
+  const plan: AvatarPlan = withAvatarLayout({ id: randomUUID(), candidates, model, quality, resolution, aspectRatio: rules.people > 1 ? '3:2' : '1:1', settingsRevision: settings.revision, unitCredits, referenceIds, createdAt: new Date().toISOString(), imageReady, imageSeedSupport:'unsupported',warnings:candidates.flatMap(c=>c.members.flatMap(d=>d.warnings||[])), ...(interpretation ? { descriptionInterpretation: interpretation } : {}) }, avatarLayout(rules));
   if(isAvatarSheet(plan))plan.id=`sheet-${plan.id}`;
-  await prisma.platformSetting.create({ data: { key: avatarPlanKey(owner, plan), value_json: JSON.stringify(plan), updated_by: owner } });
+  await prisma.$transaction(async tx => {
+    if (originalRaw && interpretation?.mode === 'original') {
+      const attemptKey = avatarKey(owner, 'parse-attempt', interpretation.descriptionId);
+      const currentAttempt = await tx.platformSetting.findUnique({ where: { key: attemptKey }, select: { id: true, value_json: true, updated_at: true } });
+      const locked = currentAttempt?.value_json === originalRaw
+        ? await tx.platformSetting.updateMany({ where: { id: currentAttempt.id, key: attemptKey, value_json: originalRaw, updated_at: currentAttempt.updated_at }, data: { value_json: originalRaw, updated_at: currentAttempt.updated_at } })
+        : { count: 0 };
+      const response = await tx.platformSetting.findUnique({ where: { key: avatarKey(owner, 'parse-response', `${interpretation.descriptionId}-${interpretation.originalAttemptRequestId}`) } });
+      const parsed = await tx.platformSetting.findUnique({ where: { key: avatarKey(owner, 'parse', interpretation.descriptionId) } });
+      if (!locked.count || response || parsed) throw new StudioError('原回复或处理状态已变化，请重读后继续；旧请求和费用保留', 409);
+    }
+    await tx.platformSetting.create({ data: { key: avatarPlanKey(owner, plan), value_json: JSON.stringify(plan), updated_by: owner } });
+  });
   return plan;
 }
 export async function submitAvatarPlan(owner: string, id: string, expectedLayout?: unknown, draft?: Record<string, unknown>) {
@@ -139,7 +171,7 @@ export async function submitAvatarPlan(owner: string, id: string, expectedLayout
   return submitStudioBatch(owner, { requestId: plan.id, prompt: isAvatarSheet({layout}) ? plan.sheetPrompt : plan.candidates[0].prompt, count, revision: plan.settingsRevision, referenceIds: plan.referenceIds, model: plan.model, quality: plan.quality, resolution: plan.resolution, aspectRatio: plan.aspectRatio, billingQuoteId: draft?.billingQuoteId, maxEstimatedCost: draft?.maxEstimatedCost }, { candidates: plan.candidates, layout, onQueued: async (tx, batchId) => {
     for (let i = 0; i < count; i++) {
       const candidate = plan.candidates[i], taskId = `${batchId}-${i}`;
-      const record: AvatarRecord = { id: randomUUID(), kind: 'result', layout, name: avatarResultTitle(candidate, layout, i), revision: 1, deletedAt: null, createdAt: plan.createdAt, updatedAt: plan.createdAt, ...(isAvatarSheet({layout}) ? { sheetCandidates: plan.candidates } : { candidate }), rules: candidate.rules, planId: plan.id, taskId, qualityStatus: 'unreviewed' };
+      const record: AvatarRecord = { id: randomUUID(), kind: 'result', layout, name: avatarResultTitle(candidate, layout, i), revision: 1, deletedAt: null, createdAt: plan.createdAt, updatedAt: plan.createdAt, ...(isAvatarSheet({layout}) ? { sheetCandidates: plan.candidates } : { candidate }), rules: candidate.rules, planId: plan.id, taskId, qualityStatus: 'unreviewed', ...(plan.descriptionInterpretation ? { descriptionInterpretation: plan.descriptionInterpretation } : {}) };
       if(isAvatarSheet({layout}))record.id=`sheet-${record.id}`;
       await tx.platformSetting.create({ data: { key: avatarRecordKey(owner, record), value_json: JSON.stringify(record), updated_by: owner } });
     }

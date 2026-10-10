@@ -1,8 +1,9 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useAppSession } from '@/lib/context/AppSessionContext';
-import { acquireImageRead, type ImageReadResult } from '@/lib/media/image-read-session';
+import { acquireImageRead, isImagePreviewReady, type ImageReadResult } from '@/lib/media/image-read-session';
 export type { ImageReadProgress } from '@/lib/media/image-read-session';
+export { isImagePreviewReady };
 
 export function useImageReadProgress(source: string, attempt: number, enabled = true, version = ''): ImageReadResult {
   const { user, hasLoadedUser, userLoadError } = useAppSession();
@@ -14,7 +15,7 @@ export function useImageReadProgress(source: string, attempt: number, enabled = 
     if (/^(blob:|data:)/i.test(source)) {
       let current = true;
       const image = new Image(); image.src = source;
-      void image.decode().then(() => { if (current) setEntry({ key, imageSrc: source, decoded: true, progress: { phase: 'decoding', loadedBytes: 0 } }); }).catch(() => { if (current) setEntry({ key, imageSrc: null, progress: { phase: 'unavailable', loadedBytes: 0, message: '本地图片无法解码，请重试' } }); });
+      void image.decode().then(() => { if (current) setEntry({ key, imageSrc: source, decoded: true, width: image.naturalWidth, height: image.naturalHeight, progress: { phase: 'decoding', loadedBytes: 0 } }); }).catch(() => { if (current) setEntry({ key, imageSrc: null, progress: { phase: 'unavailable', loadedBytes: 0, message: '本地图片无法解码，请重试' } }); });
       return () => { current = false; };
     }
     let current = true;

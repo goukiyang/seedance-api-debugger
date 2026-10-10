@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { decodeDescriptionOutput, validateDescriptionConstraints } from '../src/lib/avatar-random/description-contract';
-import { AvatarDescriptionError, inspectDescription, resolveDescription, type DescriptionStore } from '../src/lib/avatar-random/description-parser';
+import { AvatarDescriptionError, inspectDescription, isLegalAvatarParserVersion, isLegalDescriptionRequestId, originalDescriptionAttempt, resolveDescription, safeDescriptionDiagnostics, type DescriptionStore } from '../src/lib/avatar-random/description-parser';
 import { avatarLayout, avatarOutputCount, compileContactSheet, withAvatarLayout } from '../src/lib/avatar-random/layout';
 import { emptyRules, type AvatarCandidate, type AvatarConstraints, type AvatarPlan } from '../src/lib/avatar-random/types';
 import { avatarKey, avatarPlanKey, avatarRecordKey, avatarReadKeys } from '../src/lib/avatar-random/storage-keys';
@@ -24,7 +24,8 @@ function memory() {
 async function main() {
   let cases = 0;
   assert.equal(validateDescriptionConstraints(decodeDescriptionOutput('```json\n'+JSON.stringify(valid)+'\n```'), description).explicit.age.value, '30'); cases++;
-  for (const value of [ { ...valid, extra: true }, { ...valid, explicit: { age: { value: 30, evidence: '' } } }, { ...valid, scopes: ['unsupported'] }, { ...valid, background: '海边' }, { ...valid, explicit: { age: { value: 100, evidence: '30岁' } } } ]) { assert.throws(() => validateDescriptionConstraints(value, description)); cases++; }
+  const customScope=validateDescriptionConstraints({...valid,scopes:['unsupported']},description);assert.deepEqual(customScope.scopes,['unsupported']);cases++;
+  for (const value of [ { ...valid, extra: true }, { ...valid, explicit: { age: { value: 30, evidence: '' } } }, { ...valid, background: '海边' }, { ...valid, explicit: { age: { value: 100, evidence: '30岁' } } } ]) { assert.throws(() => validateDescriptionConstraints(value, description)); cases++; }
   const unresolved=validateDescriptionConstraints({...valid,conflicts:['年龄冲突'],unrecognized:['要求待确认']},description);assert.equal(unresolved.conflicts.length,1);assert.equal(unresolved.unrecognized.length,1);cases++;
   const first = memory(); let calls = 0;
   const call = async () => { calls++; return { content: JSON.stringify(valid) }; };
@@ -32,20 +33,32 @@ async function main() {
   await resolveDescription(description, { approved: true }, first.store, call);
   assert.equal(calls, 1);assert.equal(first.responses.size,1);assert.equal((await inspectDescription(description,first.store)).state,'succeeded');cases++;
   const bad = memory();let badCalls=0;
-  await assert.rejects(resolveDescription(description,{approved:true},bad.store,async()=>{badCalls++;return {content:'{}'};}),e=>e instanceof AvatarDescriptionError&&e.parse.state==='failed'&&e.parse.failure?.field==='explicit');
-  const failed=await inspectDescription(description,bad.store);assert.equal(failed.canRecheck,true);
-  await assert.rejects(resolveDescription(description,{approved:false,recheck:true},bad.store,async()=>{badCalls++;return {content:JSON.stringify(valid)};}));assert.equal(badCalls,1);cases++;
+  const fallback=await resolveDescription(description,{approved:true},bad.store,async()=>{badCalls++;return {content:'{}'};});
+  assert.equal(fallback.interpretation,'original');assert.equal(fallback.description,description);assert.deepEqual(fallback.explicit,{});assert.equal(Array.from(bad.responses.values())[0],'{}');
+  assert.equal((await inspectDescription(description,bad.store)).state,'succeeded');
+  await resolveDescription(description,{approved:false,recheck:true},bad.store,async()=>{badCalls++;throw Error('must not call model');});assert.equal(badCalls,1);cases++;
   const legacy=memory();const old=JSON.stringify({state:'pending',createdAt:'2026-01-01T00:00:00Z'});legacy.setRaw(old);
   const unknown=await inspectDescription(description,legacy.store);assert.equal(unknown.state,'unknown');assert.equal(await legacy.store.readAttempt(),old);
   await assert.rejects(resolveDescription(description,{approved:true},legacy.store,call));assert.equal(calls,1);cases++;
   const timeout=memory();await assert.rejects(resolveDescription(description,{approved:true},timeout.store,async()=>{throw Object.assign(new Error('timeout'),{code:'musk_api_timeout'});}));
   const lost=await inspectDescription(description,timeout.store);assert.equal(lost.state,'unknown');assert.equal(lost.cost,'unknown');assert.equal(lost.retryToken,undefined);
   await assert.rejects(resolveDescription(description,{approved:true,retryToken:'unknown-cannot-retry'},timeout.store,call));assert.equal(calls,1);cases++;
+  const now=Date.parse('2026-10-10T14:00:00.000Z'), legalRequestId='6f9619ff-8b86-4f5a-bf6b-9c0f98a7e7a3';
+  const attempt=(state:'unknown'|'pending',age:number,extra:Record<string,unknown>={})=>JSON.stringify({version:2,parserVersion:'1.2.0',requestId:legalRequestId,state,createdAt:new Date(now-age).toISOString(),cost:'unknown',...extra});
+  assert.equal(isLegalDescriptionRequestId(legalRequestId),true);assert.equal(isLegalDescriptionRequestId('6f9619ff-8b86-1f5a-bf6b-9c0f98a7e7a3'),false);
+  assert.equal(isLegalAvatarParserVersion('1.2.0'),true);assert.equal(isLegalAvatarParserVersion('1.2'),false);
+  assert.equal(isLegalAvatarParserVersion('1.2.3-alpha.1+build.7'),true);assert.equal(isLegalAvatarParserVersion('01.2.3'),false);assert.equal(isLegalAvatarParserVersion('1.2.3-'),false);
+  assert.deepEqual(originalDescriptionAttempt(attempt('unknown',1000),now),{requestId:legalRequestId,parserVersion:'1.2.0'});
+  assert.equal(originalDescriptionAttempt(attempt('pending',119999),now),null);assert.deepEqual(originalDescriptionAttempt(attempt('pending',120000),now),{requestId:legalRequestId,parserVersion:'1.2.0'});
+  for(const invalid of [attempt('unknown',1000,{requestId:'bad-id'}),attempt('unknown',1000,{cost:'response-received'}),attempt('unknown',1000,{responseId:legalRequestId}),attempt('unknown',1000,{parserVersion:'bad'}),attempt('unknown',1000,{createdAt:'yesterday'}),attempt('unknown',-1)])assert.equal(originalDescriptionAttempt(invalid,now),null);cases++;
+  const diagnostics=safeDescriptionDiagnostics(Object.assign(new Error('never persisted'),{code:'musk_api_timeout',diagnostics:{phase:'awaiting_headers',timeoutMs:45000,elapsedMs:45001,headersMs:12,httpStatus:504,upstreamRequestId:'upstream:req-1',networkCode:'ECONNRESET',requestBody:'private prompt',apiKey:'secret'}}));
+  assert.deepEqual(diagnostics,{code:'musk_api_timeout',phase:'awaiting_headers',timeoutMs:45000,elapsedMs:45001,headersMs:12,httpStatus:504,upstreamRequestId:'upstream:req-1',networkCode:'ECONNRESET'});
+  assert.equal(safeDescriptionDiagnostics({code:'sk-secret',diagnostics:{httpStatus:999999,networkCode:'secret',upstreamRequestId:'bad id'}}).code,undefined);cases++;
   const race=memory();let raceCalls=0;let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});
   const inFlight=resolveDescription(description,{approved:true},race.store,async()=>{raceCalls++;await gate;return {content:JSON.stringify(valid)};});
   await new Promise(resolve=>setImmediate(resolve));await assert.rejects(resolveDescription(description,{approved:true},race.store,call));release();await inFlight;assert.equal(raceCalls,1);cases++;
   const receipt=memory();const requestId='saved-request';receipt.setRaw(JSON.stringify({version:2,state:'pending',requestId,createdAt:new Date().toISOString()}));receipt.responses.set(requestId,JSON.stringify(valid));
-  assert.equal((await inspectDescription(description,receipt.store)).canRecheck,true);await resolveDescription(description,{approved:false,recheck:true},receipt.store,call);assert.equal(calls,1);cases++;
+  const receiptStatus=await inspectDescription(description,receipt.store);assert.equal(receiptStatus.canRecheck,true);assert.equal(receiptStatus.canContinueOriginal,undefined);await resolveDescription(description,{approved:false,recheck:true},receipt.store,call);assert.equal(calls,1);cases++;
   const persistence=memory();const complete=persistence.store.complete;persistence.store.complete=async()=>{throw new Error('disk');};
   await assert.rejects(resolveDescription(description,{approved:true},persistence.store,call),e=>e instanceof AvatarDescriptionError&&e.parse.failure?.stage==='persistence'&&e.parse.canRecheck);
   assert.equal((await inspectDescription(description,persistence.store)).state,'unknown');
@@ -85,7 +98,7 @@ async function main() {
   const located={...receiptShape,explicit:{facial_hair:{value:'淡胡茬',evidence:'左侧下巴短胡茬'}},details:[{...receiptShape.details[0],evidence:'左侧下巴短胡茬',position:'下巴',side:'left',kind:'natural'}]};const locatedResult=validateDescriptionConstraints(located,receiptDescription+'左侧下巴短胡茬');assert.equal(locatedResult.details[0].position,'下巴');assert.equal(locatedResult.details[0].side,'left');cases++;
   const differentEvidence={...receiptShape,details:[{...receiptShape.details[0],value:'浅旧伤',evidence:'旧伤',position:'眉部',kind:'trace'}]};assert.equal(validateDescriptionConstraints(differentEvidence,receiptDescription+'旧伤').details[0].kind,'trace');cases++;
   const immutableConflict={...valid,explicit:{age:{value:'30',evidence:'30岁',excluded:['30']}},conflicts:[]};const conflictBefore=JSON.stringify(immutableConflict);assert.ok(validateDescriptionConstraints(immutableConflict,description).conflicts.length);assert.equal(JSON.stringify(immutableConflict),conflictBefore);cases++;
-  const strictOld=memory();strictOld.setRaw(JSON.stringify({version:2,parserVersion:'1.1.0',state:'failed',requestId:'old-intent',responseId:'old-intent',createdAt:new Date().toISOString(),cost:'response-received'}));strictOld.responses.set('old-intent',JSON.stringify({...valid,summary:undefined}));await assert.rejects(resolveDescription(description,{approved:false,recheck:true},strictOld.store,async()=>{throw Error('must not call model');}),e=>e instanceof AvatarDescriptionError&&e.parse.failure?.field==='summary');cases++;
+  const strictOld=memory();strictOld.setRaw(JSON.stringify({version:2,parserVersion:'1.1.0',state:'failed',requestId:'old-intent',responseId:'old-intent',createdAt:new Date().toISOString(),cost:'response-received'}));const strictReply=JSON.stringify({...valid,summary:undefined});strictOld.responses.set('old-intent',strictReply);const strictFallback=await resolveDescription(description,{approved:false,recheck:true},strictOld.store,async()=>{throw Error('must not call model');});assert.equal(strictFallback.interpretation,'original');assert.equal(strictFallback.description,description);assert.deepEqual(strictFallback.explicit,{});assert.equal(strictOld.responses.get('old-intent'),strictReply);cases++;
   let actualReceiptReplay=false;
   if(process.env.AVATAR_PRIVATE_RECEIPT){
     const rows=JSON.parse(readFileSync(process.env.AVATAR_PRIVATE_RECEIPT,'utf8')) as Array<{key:string;value_json:string}>;

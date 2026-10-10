@@ -395,3 +395,11 @@
 .result:hover .restoreResult, .result:focus-within .restoreResult { opacity: 1; pointer-events: auto; }
 .restoreResult:hover .resolutionTooltip, .restoreResult:focus-visible .resolutionTooltip { display: block; }
 @media (hover: none) { .resultCommands .restoreResult { opacity: 1; pointer-events: auto; } }
+.resolutionScope { display: flex; flex-wrap: wrap; gap: 8px 16px; border: 0; padding: 8px 0; margin: 0; }
+.resolutionScope label { display: inline-flex; align-items: center; gap: 6px; }
+.resolutionScope input { width: auto; }
+.resolutionApply { margin: 8px 0; font-size: 13px; overflow-wrap: anywhere; }
+.resolutionApply p { margin: 8px 0; }
+.resolutionActions { display: flex; flex-wrap: wrap; gap: 8px; }
+.resolutionTargets { padding: 0; list-style: none; max-height: 240px; overflow: auto; }
+.resolutionTargets li { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-bottom: 1px solid var(--border, #dedee3); }

@@ -114,7 +114,7 @@ export function GenerationCompletionRuntime() {
     if (owner !== confirmedOwner) { generation++; jobs.clear(); clearTitle(); }
     if (owner !== confirmedOwner && audio) { void audio.close(); audio = null; }
     owner = confirmedOwner;
-    const visible = () => { revalidateActiveImages(); if (!document.hidden) { clearTitle(); void poll(); } };
+    const visible = () => { revalidateActiveImages(60000); if (!document.hidden) { clearTitle(); void poll(); } };
     const changed = (event: StorageEvent) => { if (owner && event.key === prefKey(owner) && !preferences(owner).background) clearTitle(); };
     let timer: ReturnType<typeof setTimeout>, active = true;
     const schedule = () => { if (active) timer = setTimeout(() => { if (!document.hidden) revalidateActiveImages(60000); void poll().finally(schedule); }, document.hidden ? 15000 : 5000); };

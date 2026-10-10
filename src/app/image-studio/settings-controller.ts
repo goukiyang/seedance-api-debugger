@@ -97,6 +97,16 @@ export function createStudioSettingsController(isAdmin: boolean, transport: Tran
       if (!isAdmin || !state.draft || state.loading) return;
       update({ draft: { ...state.draft, templateDefaults: { ...state.draft.templateDefaults, ...patch } }, status: '设置未保存' });
     },
+    acceptCommitted(saved: SettingsResponse, submittedDraft: SettingsDraft) {
+      const savedValue = validate({ ...state.settings, ...saved });
+      if (!state.settings || savedValue.revision < state.settings.revision) return false;
+      ++readSequence;
+      update({ settings: savedValue, ...(state.draft === submittedDraft ? { draft: {
+        context: savedValue.context ?? '', prices: { ...savedValue.prices }, templateDefaults: { ...savedValue.templateDefaults },
+      } } : {}), error: '' });
+      update({ status: studioSettingsDirty(state) ? '默认值已保存；有新的修改尚未保存' : '默认值已保存' });
+      return !studioSettingsDirty(state);
+    },
     async save() {
       if (!isAdmin || !state.settings || !state.draft || state.loading || state.saving || !studioSettingsDirty(state)) return false;
       let templateDefaults: StudioTemplateDefaults;

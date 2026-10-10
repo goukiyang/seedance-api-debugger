@@ -17,7 +17,7 @@ import { usePageExitRisk } from '@/lib/hooks/page-exit-guard';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { catalog, fieldLabels, quickFields } from '@/lib/avatar-random/catalog';
-import { AVATAR_COMPILER_VERSION, AVATAR_PARSER_VERSION, emptyRules, type AvatarPlan, type AvatarRecord, type AvatarRules } from '@/lib/avatar-random/types';
+import { AVATAR_COMPILER_VERSION, AVATAR_PARSER_VERSION, emptyRules, type AvatarPlan, type AvatarRecord, type AvatarRules, type DescriptionInterpretation } from '@/lib/avatar-random/types';
 import { avatarRulesSignature, effectiveConditions } from '@/lib/avatar-random/intent';
 import { avatarLayout, avatarOutputCount, isAvatarSheet, avatarSheetSize, avatarSheetLabel, avatarCellLabel } from '@/lib/avatar-random/layout';
 import type { DescriptionStatus } from '@/lib/avatar-random/description-parser';
@@ -34,6 +34,19 @@ type Payload = { total: number; records: AvatarRecord[]; recentConfigs:AvatarRec
 type AvatarImageQuote = { billingMode: 'fixed' | 'actual'; billingQuoteId: string | null; unitCredits: number; estimatedCredits: number; expiresAt?: string };
 type CachedAvatarImageQuote = { planId: string; parameters: string; quote: AvatarImageQuote };
 const statusLabel: Record<string, string> = { queued: '排队中', running: '生成中', succeeded: '图片已保存，待人工确认', failed: '生成失败', uncertain: '受理未知，请先查询' };
+const descriptionDiagnosticLabels: Record<string, string> = {
+  musk_api_not_configured: '文字理解服务未就绪', musk_api_upstream_error: '文字理解服务返回错误',
+  musk_api_invalid_response: '文字理解服务回复无法读取', musk_api_empty_content: '文字理解服务没有返回有效内容',
+  musk_api_timeout: '等待文字理解回复超时', musk_api_request_failed: '连接文字理解服务失败',
+};
+const descriptionPhaseLabels: Record<string, string> = {
+  awaiting_headers: '等待服务响应', reading_body: '读取服务回复', parsing: '检查服务回复', completed: '已收到回复',
+};
+function descriptionInterpretationLabel(value?: DescriptionInterpretation) {
+  if (value?.mode === 'original' && value.source === 'original-description') return '按原描述生成';
+  if (value?.mode === 'parsed' && value.source === 'saved-reply') return '使用已保存的文字回复';
+  return '';
+}
 async function api<T>(body?: unknown, query = '') { const response = await fetch(`/api/avatar-studio${query}`, { method: body ? 'POST' : 'GET', cache: 'no-store', ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) }); const data = await readJsonResponse<T & { error?: string; parse?: DescriptionStatus }>(response); if (!response.ok) throw Object.assign(new Error(data.error || '操作未确认'),{status:response.status,parse:data.parse}); return data; }
 export default function AvatarStudio({ ownerId, management, ticketId }: { ownerId: string; management?: boolean; ticketId?: string }) {
   const { confirm, prompt: askName, productDialog } = useProductDialog();
@@ -101,6 +114,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   liveDraft.current={ownerId,rules,model,quality,resolution,analysisBinding,inputSignature,revision:liveDraft.current.revision+(liveDraft.current.inputSignature===inputSignature?0:1),ownerRevision:liveDraft.current.ownerRevision+(liveDraft.current.ownerId===ownerId?0:1),prices,blocked:referenceUploading||pending||tasks.some(t=>t.status==='uncertain'),ready};
   type DraftSnapshot = typeof liveDraft.current;
   const activeParse=parseBinding===analysisBinding?parseStatus:null;
+  const canContinueOriginal=activeParse?.state==='unknown'&&activeParse.canContinueOriginal===true&&!activeParse.canRecheck;
   const needsAnalysis=!!rules.description.trim()&&activeParse?.state!=='succeeded';
   const [recentConfigs,setRecentConfigs]=useState<AvatarRecord[]>([]),[sourceTask,setSourceTask]=useState<Task|null>(null),[storedSignature,setStoredSignature]=useState('');
   const [previousImageTask,setPreviousImageTask]=useState<Task|null>(null);
@@ -298,12 +312,13 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     if(settings.modelReady?.[draft.model]!==true)throw new Error('当前模型图片通道尚未就绪，本次未调用文字模型或提交图片。');
   }
   async function run(work: () => Promise<void>) { if (lock.current) return; const draft=liveDraft.current; lock.current = true; setBusy(true); setError(''); try { await work(); } catch (e) { if(alive.current&&liveDraft.current.ownerRevision===draft.ownerRevision&&liveDraft.current.revision===draft.revision){setError((e as Error).message);if((e as {parse?:DescriptionStatus}).parse)showParse((e as {parse:DescriptionStatus}).parse,draft);} } finally { lock.current = false; if(alive.current){setBusy(false);setStage('');} } }
-  async function readParse(draft: DraftSnapshot, allowAnalysis: boolean, retryToken?: string, recheckOnly=false) {
+  async function readParse(draft: DraftSnapshot, allowAnalysis: boolean, retryToken?: string, recheckOnly=false, allowOriginal=false) {
     if(!draft.rules.description.trim())return null;
     setStage('检查人物文案');
     let {parse}=await api<{parse:DescriptionStatus}>({action:'parse-status',description:draft.rules.description});
     showParse(parse,draft);
     if(parse.state==='succeeded'&&!recheckOnly)return parse;
+    if(allowOriginal && !recheckOnly && parse.canContinueOriginal && !parse.canRecheck)return parse;
     let rechecked=false;
     const request=async(free:boolean)=>{
       assertDraft(draft);setStage(free?'免费重检已有回复':'理解人物文案');
@@ -391,13 +406,19 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     const draft=liveDraft.current;
     if(draft.blocked)throw new Error('原提交尚未确认，请先查询原任务；不能微调或新建人物');
     if(action!=='tweak'){checkGeneration(draft);await checkImageSettings(draft);}
-    const parse=await readParse(draft,action==='new');
+    const parse=await readParse(draft,action==='new',undefined,false,action==='new');
     assertDraft(draft);setStage('准备人物和图片报价');
+    const originalBindingMatches=!parse?.canContinueOriginal||!!plan?.descriptionInterpretation
+      &&plan.descriptionInterpretation.mode==='original'
+      &&plan.descriptionInterpretation.source==='original-description'
+      &&plan.descriptionInterpretation.descriptionId===parse.descriptionId
+      &&plan.descriptionInterpretation.parserVersion===parse.parserVersion
+      &&plan.descriptionInterpretation.originalAttemptRequestId===parse.requestId;
     const reusable=action==='new'&&!forceNew&&plan&&!tasks.length&&avatarRulesSignature(draft.rules)===avatarRulesSignature(plan.candidates[0].rules)
-      &&draft.model===plan.model&&draft.quality===plan.quality&&draft.resolution===plan.resolution&&avatarLayout(draft.rules)===avatarLayout(plan);
+      &&draft.model===plan.model&&draft.quality===plan.quality&&draft.resolution===plan.resolution&&avatarLayout(draft.rules)===avatarLayout(plan)&&originalBindingMatches;
     if(reusable){await submit(plan,draft,true);return;}
-    const reprice=action==='new'&&!forceNew&&plan&&plan.candidates.length===draft.rules.candidates&&avatarRulesSignature(draft.rules)===avatarRulesSignature(plan.candidates[0].rules)&&(!tasks.length||draft.model!==plan.model||draft.quality!==plan.quality||draft.resolution!==plan.resolution);
-    const result = await api<{plan:AvatarPlan}>(reprice?{action:'quote',id:plan!.id,rules:draft.rules,model:draft.model,quality:draft.quality,resolution:draft.resolution,layout:avatarLayout(draft.rules)}:{ action: 'prepare', rules:reroll&&field?{...draft.rules,choices:{...draft.rules.choices,[field]:''}}:draft.rules, ...(parse?{descriptionId:parse.descriptionId,parserVersion:parse.parserVersion}:{}), model:draft.model, quality:draft.quality, resolution:draft.resolution, previousId: plan?.id, previousIndex: index, baselineAssetId: sheet?undefined:current?.baselineAssetId || image?.id, actionType: action, ...(field ? { field } : {}) });
+    const reprice=action==='new'&&!forceNew&&plan&&originalBindingMatches&&plan.candidates.length===draft.rules.candidates&&avatarRulesSignature(draft.rules)===avatarRulesSignature(plan.candidates[0].rules)&&(!tasks.length||draft.model!==plan.model||draft.quality!==plan.quality||draft.resolution!==plan.resolution);
+    const result = await api<{plan:AvatarPlan}>(reprice?{action:'quote',id:plan!.id,rules:draft.rules,model:draft.model,quality:draft.quality,resolution:draft.resolution,layout:avatarLayout(draft.rules)}:{ action: 'prepare', rules:reroll&&field?{...draft.rules,choices:{...draft.rules.choices,[field]:''}}:draft.rules, ...(parse?{descriptionId:parse.descriptionId,parserVersion:parse.parserVersion,...(parse.canContinueOriginal&&!parse.canRecheck?{descriptionMode:'original',originalAttemptRequestId:parse.requestId}:{})}:{}), model:draft.model, quality:draft.quality, resolution:draft.resolution, previousId: plan?.id, previousIndex: index, baselineAssetId: sheet?undefined:current?.baselineAssetId || image?.id, actionType: action, ...(field ? { field } : {}) });
     assertDraft(draft);
     if(action==='tweak'){planRef.current=result.plan.id;setPlan(result.plan);setRules(result.plan.candidates[0].rules);setSourceTask(null);setTasks([]);setIndex(0);setPending(false);setNotice('仅修改人物草稿，尚未生成图片或扣除图片点数。');}
     else {const submitted=await submit(result.plan,draft,action==='new');if(!submitted){assertDraft(draft);if(!image){planRef.current=result.plan.id;setPlan(result.plan);setSourceTask(null);setTasks([]);setIndex(0);}}}
@@ -515,7 +536,8 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
         {referenceError&&<p role="status" className={styles.error}>{referenceError}</p>}
         {pasteProgress&&<UploadProgressIndicator label={pasteProgress.label} percent={pasteProgress.percent} busy/>}
         {!!failedReferences.length&&<div className={styles.controls}><span className={styles.error}>{failedReferences.length}张未上传，正文和已有参考保留</span><button type="button" disabled={busy||blocked} onClick={()=>void uploadPastedReferences(failedReferences)}>重试未上传图片</button><button type="button" disabled={busy||blocked} onClick={()=>setFailedReferences([])}>移除未上传图片</button></div>}
-        <button type="button" className={styles.primary} disabled={!ready||busy||blocked||management} onClick={()=>void prepare()}>{busy?stage||'处理中':draftSheet?`生成${avatarSheetLabel(rules.layout)}`:'生成独立头像'}</button>
+        <button type="button" className={styles.primary} disabled={!ready||busy||blocked||management} onClick={()=>void prepare()}>{busy?stage||'处理中':canContinueOriginal?'按原描述生成':draftSheet?`生成${avatarSheetLabel(rules.layout)}`:'生成独立头像'}</button>
+        {canContinueOriginal&&<p className={styles.price}>原文字回复未取回，不再重复调用文字模型。</p>}
         <p className={styles.estimate}>
           {visibleBillingQuote
             ? `合计约 ${Math.ceil(visibleBillingQuote.estimatedCredits)} 点数`
@@ -533,6 +555,20 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
           <strong>{activeParse.state==='succeeded'?'可以生成':activeParse.state==='needs-clarification'?'条件有冲突':activeParse.state==='pending'?'正在处理描述':activeParse.state==='failed'?'描述处理失败':'处理状态待确认'}</strong>
           {!!activeParse.message&&<p>{activeParse.message}</p>}
           {!!clarificationIssues.length&&<p>需要确认：{clarificationIssues.join('；')}</p>}
+          {activeParse.diagnostics&&<details className={styles.parseDetails}>
+            <summary><span>排查信息</span><small>仅显示可安全用于定位的信息</small></summary>
+            <div className={styles.parseSummary}>
+              {activeParse.diagnostics.code&&descriptionDiagnosticLabels[activeParse.diagnostics.code]&&<p>状态：{descriptionDiagnosticLabels[activeParse.diagnostics.code]}</p>}
+              {activeParse.diagnostics.phase&&descriptionPhaseLabels[activeParse.diagnostics.phase]&&<p>阶段：{descriptionPhaseLabels[activeParse.diagnostics.phase]}</p>}
+              {activeParse.diagnostics.httpStatus!==undefined&&<p>服务响应状态：{activeParse.diagnostics.httpStatus}</p>}
+              {activeParse.diagnostics.timeoutMs!==undefined&&<p>等待上限：{activeParse.diagnostics.timeoutMs.toLocaleString()} 毫秒</p>}
+              {activeParse.diagnostics.elapsedMs!==undefined&&<p>已等待：{activeParse.diagnostics.elapsedMs.toLocaleString()} 毫秒</p>}
+              {activeParse.diagnostics.headersMs!==undefined&&<p>收到响应耗时：{activeParse.diagnostics.headersMs.toLocaleString()} 毫秒</p>}
+              {activeParse.diagnostics.bodyMs!==undefined&&<p>读取回复耗时：{activeParse.diagnostics.bodyMs.toLocaleString()} 毫秒</p>}
+              {activeParse.diagnostics.networkCode&&<p>网络状态：{activeParse.diagnostics.networkCode}</p>}
+              {activeParse.diagnostics.upstreamRequestId&&<p style={{overflowWrap:'anywhere'}}>上游请求编号：{activeParse.diagnostics.upstreamRequestId}</p>}
+            </div>
+          </details>}
           {activeParse.state!=='succeeded'&&<div className={styles.controls}><button type="button" disabled={busy} onClick={()=>void run(async()=>{const binding=liveDraft.current.analysisBinding;const data=await api<{parse:DescriptionStatus}>({action:'parse-status',description:rules.description});if(liveDraft.current.analysisBinding===binding){setParseStatus(data.parse);setParseBinding(binding);}})}>查询解析状态</button>{activeParse.canRecheck&&<button type="button" disabled={busy} onClick={()=>void analyze(undefined,true)}>免费重检原回复</button>}{activeParse.retryToken&&activeParse.state==='failed'&&<button type="button" disabled={busy||blocked} onClick={()=>void analyze(activeParse.retryToken)}>确认后重新解析一次</button>}</div>}
         </div>}
         {activeParse&&(activeParse.understanding||activeParse.constraints)&&<details className={styles.parseDetails}>
@@ -568,13 +604,13 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
         scope={`sd2:avatar-history-results:v1:${ownerId}:${deleted ? 'deleted' : 'active'}`}
         hasMore={Boolean(cursor)} total={recordTotal} loadMore={async () => { if (cursor) await load(true, cursor); }} busy={busy}
         emptyLabel={deleted ? '暂无已删除的生成记录' : '暂无生成历史'}
-        renderMetadata={({record, status}) => <div className={styles.recordText}><strong title={record.name}>{record.name}</strong><small><RelativeTime value={record.createdAt}/> · {status}</small></div>}
+        renderMetadata={({record, status}) => <div className={styles.recordText}><strong title={record.name}>{record.name}</strong><small><RelativeTime value={record.createdAt}/> · {status}{descriptionInterpretationLabel(record.descriptionInterpretation) ? ` · ${descriptionInterpretationLabel(record.descriptionInterpretation)}` : ''}</small></div>}
         renderPrimaryActions={({record}) => record.deletedAt ? <button type="button" disabled={busy} onClick={()=>void run(()=>mutate(record,'undelete'))}>撤销删除</button> : null}
         renderActions={({record}) => record.deletedAt ? null : <>
           <button type="button" disabled={busy} onClick={()=>void restore(record)}>恢复草稿</button>
         </>}
         renderDelete={({record}) => !record.deletedAt ? <button type="button" title="删除生成记录" aria-label={`删除生成记录：${record.name}`} disabled={busy} onClick={()=>void run(async()=>{if(await confirm(`删除“${record.name}”？可撤销，不删除已有图片、资产或其他历史。`,{title:'删除记录',confirmLabel:'删除',danger:true}))await mutate(record,'delete');})}><Trash2 size={15}/></button> : null}
-      /> : <>      {visibleRecords.map(r=>{const t=tasks.find(task=>task.id===r.taskId)||(sourceTask?.id===r.taskId?sourceTask:recordTasks[r.taskId||'']);return <article className={styles.record} key={r.id}>{t?.asset||r.assetId?<button type="button" className={styles.recordCover} aria-label={`预览${r.name}`} onClick={()=>openImage(t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}`,r.name)} onDoubleClick={()=>openImage(t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}`,r.name)}><img src={t?.asset?.thumbnail_url||t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}?thumbnail=1`} alt={r.name}/></button>:<span className={styles.recordCover}><UserRound size={24}/></span>}<div className={styles.recordText}><strong>{r.name}</strong><small><RelativeTime value={r.createdAt}/> · {r.kind==='result'?(t?statusLabel[t.status]:'状态未读取'):r.kind==='config'?`配置第${r.revision}版`:'已保存人物'}</small></div><div className={styles.controls}>{r.deletedAt?<button type="button" disabled={busy} onClick={()=>void run(()=>mutate(r,'undelete'))}>撤销删除</button>:<><button type="button" disabled={busy} onClick={()=>void restore(r)}>{r.kind==='config'?'使用/编辑':'恢复草稿'}</button>{r.kind==='config'&&<><button type="button" onClick={()=>void run(async()=>{await askName('配置名称',r.name,{title:'重命名',onSubmit:async name=>mutate(r,'rename',{name})});})}>重命名</button><button type="button" onClick={()=>void run(async()=>{await api({action:'save',name:`${r.name}副本`,record:{kind:'config',rules:r.rules}});await load();})}>复制</button></>}<button type="button" disabled={busy} onClick={()=>void run(async()=>{if(await confirm(`删除“${r.name}”？可撤销，不删除已有图片、资产或其他历史。`,{title:'删除记录',confirmLabel:'删除',danger:true}))await mutate(r,'delete');})}><Trash2 size={15}/>删除</button></>}</div></article>;})}
+      /> : <>      {visibleRecords.map(r=>{const t=tasks.find(task=>task.id===r.taskId)||(sourceTask?.id===r.taskId?sourceTask:recordTasks[r.taskId||'']);const interpretation=descriptionInterpretationLabel(r.descriptionInterpretation);return <article className={styles.record} key={r.id}>{t?.asset||r.assetId?<button type="button" className={styles.recordCover} aria-label={`预览${r.name}`} onClick={()=>openImage(t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}`,r.name)} onDoubleClick={()=>openImage(t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}`,r.name)}><img src={t?.asset?.thumbnail_url||t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}?thumbnail=1`} alt={r.name}/></button>:<span className={styles.recordCover}><UserRound size={24}/></span>}<div className={styles.recordText}><strong>{r.name}</strong><small><RelativeTime value={r.createdAt}/> · {r.kind==='result'?(t?statusLabel[t.status]:'状态未读取'):r.kind==='config'?`配置第${r.revision}版`:'已保存人物'}{interpretation?` · ${interpretation}`:''}</small></div><div className={styles.controls}>{r.deletedAt?<button type="button" disabled={busy} onClick={()=>void run(()=>mutate(r,'undelete'))}>撤销删除</button>:<><button type="button" disabled={busy} onClick={()=>void restore(r)}>{r.kind==='config'?'使用/编辑':'恢复草稿'}</button>{r.kind==='config'&&<><button type="button" onClick={()=>void run(async()=>{await askName('配置名称',r.name,{title:'重命名',onSubmit:async name=>mutate(r,'rename',{name})});})}>重命名</button><button type="button" onClick={()=>void run(async()=>{await api({action:'save',name:`${r.name}副本`,record:{kind:'config',rules:r.rules}});await load();})}>复制</button></>}<button type="button" disabled={busy} onClick={()=>void run(async()=>{if(await confirm(`删除“${r.name}”？可撤销，不删除已有图片、资产或其他历史。`,{title:'删除记录',confirmLabel:'删除',danger:true}))await mutate(r,'delete');})}><Trash2 size={15}/>删除</button></>}</div></article>;})}
       </>}
 
       {tab !== 'result'&&!visibleRecords.length&&<p className={styles.empty}>暂无{deleted?'已删除':''}{tab==='config'?'配置':tab==='character'?'人物':'生成历史'}</p>}{tab !== 'result'&&cursor&&<button type="button" className={styles.quiet} disabled={busy} onClick={()=>void run(async()=>{await load(true,cursor);})}>加载更多</button>}

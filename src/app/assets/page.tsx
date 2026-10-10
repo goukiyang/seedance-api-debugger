@@ -26,6 +26,7 @@ import { taskDetailHref } from '@/lib/navigation/return-to';
 import { uploadFileAsAsset, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import MediaPreview from '@/components/MediaPreview';
 import { InlineVideoCover } from '@/components/InlineVideoCover';
+import { AssetPreviewMedia } from '@/components/AssetPreviewMedia';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import assetStyles from './assets.module.css';
 import {
@@ -43,6 +44,7 @@ import type { NormalVideoChargeEstimate } from '@/lib/costs/normal-video-charge'
 import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
 import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
 import { assetGridProfilerOnRender } from '@/lib/performance/interaction-metrics';
+import { AssetPlaybackCoordinator, getAssetCardClickAction, type AssetPlaybackBoundary, type AssetPlaybackLease } from '@/lib/media/asset-playback';
 
 type AssetScope = 'history' | 'project' | 'user';
 type AssetView = AssetScope | 'enhance' | 'favorites' | 'likes';
@@ -798,8 +800,18 @@ function AssetsPageContent() {
   const [mediaPreviewOpen, setMediaPreviewOpen] = useState(false);
   const [restoredPreview, setRestoredPreview] = useState<ContentSummary | null>(null);
   const [previewNextPage, setPreviewNextPage] = useState<number | null>(null);
-  const [playingItemId, setPlayingItemId] = useState<string | null>(null);
-  useEffect(() => { setPlayingItemId(null); }, [assetView, type, status, sort, groupBy, projectId, ownerUserId, keyword, page, selectionMode]);
+  const previousPreviewOwnerId = useRef<string | null>(user?.id || null);
+  const previewAccountChanged = previousPreviewOwnerId.current !== (user?.id || null);
+  const playbackRef = useRef<AssetPlaybackCoordinator | null>(null);
+  if (!playbackRef.current) playbackRef.current = new AssetPlaybackCoordinator();
+  const playback = playbackRef.current;
+  useEffect(() => {
+    playback.stopHover('filter');
+  }, [playback, assetView, type, status, sort, groupBy, projectId, ownerUserId, keyword, selectionMode]);
+  useEffect(() => {
+    playback.stopHover('page');
+  }, [playback, page]);
+  useEffect(() => () => playback.stopAll('unmount'), [playback]);
   const [previewNavigationMessage, setPreviewNavigationMessage] = useState('');
   const [previewNavigationRetryable, setPreviewNavigationRetryable] = useState(false);
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
@@ -908,6 +920,29 @@ function AssetsPageContent() {
     }
   }, [user?.id]);
 
+  const beginHoverPlayback = useCallback((key: string, src: string, media: HTMLVideoElement, release: (reason: AssetPlaybackBoundary) => void) => (
+    playback.claimHover(key, src, media, release)
+  ), [playback]);
+  const isHoverPlaybackCurrent = useCallback((lease: AssetPlaybackLease, key: string, src: string, media: HTMLVideoElement) => (
+    playback.isHoverCurrent(lease, key, src, media)
+  ), [playback]);
+  const endHoverPlayback = useCallback((lease: AssetPlaybackLease, key: string, src: string, media: HTMLVideoElement, reason: AssetPlaybackBoundary) => {
+    playback.releaseHover(lease, key, src, media, reason);
+  }, [playback]);
+  const claimDetailPlayback = useCallback((key: string, src: string, media: HTMLMediaElement) => (
+    playback.claimDetail(key, src, media)
+  ), [playback]);
+  const releaseDetailPlayback = useCallback((lease: AssetPlaybackLease, key: string, src: string, media: HTMLMediaElement) => {
+    playback.releaseDetail(lease, key, src, media);
+  }, [playback]);
+  const openMediaPreview = useCallback(() => {
+    playback.setModalBlocked(true);
+    setMediaPreviewOpen(true);
+  }, [playback]);
+  useEffect(() => {
+    playback.setModalBlocked(mediaPreviewOpen || Boolean(restoredPreview));
+  }, [playback, mediaPreviewOpen, restoredPreview]);
+
   const clearPreviewSequence = useCallback(() => {
     previewNavigationGeneration.current += 1;
     previewPages.current.clear();
@@ -919,6 +954,8 @@ function AssetsPageContent() {
   }, []);
 
   const selectAssetItem = useCallback((item: AssetLibraryItem) => {
+    playback.stopAll('selection');
+    playback.setModalBlocked(false);
     clearPreviewSequence();
     previewPages.current.set(page, {
       items: displayItems,
@@ -929,9 +966,11 @@ function AssetsPageContent() {
     setPreviewNextPage(previewNextPageRef.current);
     setMediaPreviewOpen(false);
     activateAssetPreviewItem(item);
-  }, [activateAssetPreviewItem, clearPreviewSequence, displayItems, page, pagination]);
+  }, [activateAssetPreviewItem, clearPreviewSequence, displayItems, page, pagination, playback]);
 
   const closeAssetPreview = useCallback(() => {
+    playback.stopAll('drawer-close');
+    playback.setModalBlocked(false);
     previewRestoreGeneration.current += 1;
     clearPreviewSequence();
     setActiveItem(null);
@@ -940,7 +979,7 @@ function AssetsPageContent() {
     if (user?.id) {
       try { localStorage.removeItem(assetPreviewStorageKey(user.id)); } catch {}
     }
-  }, [clearPreviewSequence, user?.id]);
+  }, [clearPreviewSequence, playback, user?.id]);
 
   useDialogDismiss({
     open: Boolean(activeItem && !mediaPreviewOpen),
@@ -973,6 +1012,7 @@ function AssetsPageContent() {
   };
 
   const resetForFilterChange = () => {
+    playback.stopAll('filter');
     setPage(1);
     closeAssetPreview();
     clearSelection();
@@ -993,16 +1033,17 @@ function AssetsPageContent() {
     void refreshUser();
   }, [refreshUser]);
 
-  const previousPreviewOwnerId = useRef<string | null>(user?.id || null);
   useEffect(() => {
     if (previousPreviewOwnerId.current === (user?.id || null)) return;
     previousPreviewOwnerId.current = user?.id || null;
+    playback.stopAll('account');
+    playback.setModalBlocked(false);
     previewRestoreGeneration.current += 1;
     clearPreviewSequence();
     setActiveItem(null);
     setMediaPreviewOpen(false);
     setRestoredPreview(null);
-  }, [clearPreviewSequence, user?.id]);
+  }, [clearPreviewSequence, playback, user?.id]);
 
   useEffect(() => {
     if (!hasLoadedUser || loadingUser || user || userLoadError) return;
@@ -1309,7 +1350,12 @@ function AssetsPageContent() {
   };
 
   const handleCardClick = (event: React.MouseEvent, item: AssetLibraryItem) => {
-    if (selectionMode || event.shiftKey || event.metaKey || event.ctrlKey) {
+    if (getAssetCardClickAction({
+      selectionMode,
+      shiftKey: event.shiftKey,
+      metaKey: event.metaKey,
+      ctrlKey: event.ctrlKey,
+    }) === 'select') {
       if (!selectionMode) setSelectionMode(true);
       if (event.shiftKey) {
         selectRange(item.id);
@@ -2370,13 +2416,18 @@ function AssetsPageContent() {
                       data-reaction-surface
                       onClickCapture={event => {
                         if ((event.target as Element).closest('[data-content-reactions]')) return;
-                        if (selectionMode || event.shiftKey || event.metaKey || event.ctrlKey) {
+                        if (getAssetCardClickAction({
+                          selectionMode,
+                          shiftKey: event.shiftKey,
+                          metaKey: event.metaKey,
+                          ctrlKey: event.ctrlKey,
+                        }) === 'select') {
                           event.preventDefault(); event.stopPropagation(); handleCardClick(event, item);
                         }
                       }}
                     >
-                      {item.kind === 'video' && !selectionMode ? <InlineVideoCover key={`${item.id}:${assetPlaybackSource(item)}`} src={assetPlaybackSource(item)} contentKey={item.id} title={item.title}
-                        active={playingItemId === item.id && !activeItem} onActivate={() => setPlayingItemId(item.id)} onPause={() => setPlayingItemId(current => current === item.id ? null : current)}>
+                      {item.kind === 'video' && !selectionMode ? <InlineVideoCover key={`${user?.id || 'anonymous'}:${item.id}:${assetPlaybackSource(item)}`} interaction="hover" assetKey={item.id} contextKey={`${pageScope}:${page}`} src={assetPlaybackSource(item)} title={item.title}
+                        disabled={mediaPreviewOpen || Boolean(restoredPreview)} onHoverStart={beginHoverPlayback} isHoverCurrent={isHoverPlaybackCurrent} onHoverStop={endHoverPlayback}>
                         <AssetLibraryThumbnail item={item} />
                       </InlineVideoCover> : item.kind === 'audio' ? (
                         <span className="asset-card-audio-placeholder">
@@ -2526,7 +2577,7 @@ function AssetsPageContent() {
         />
       )}
 
-      {activeItem && !mediaPreviewOpen && (
+      {activeItem && !previewAccountChanged && !mediaPreviewOpen && (
         <aside ref={detailDrawerRef} className="asset-detail-drawer" aria-label="资产详情">
           <div className="asset-detail-header">
             <div>
@@ -2549,17 +2600,20 @@ function AssetsPageContent() {
             )}
             {activeItem.kind === 'video' && activePreviewSrc ? (
               <>
-                {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                <video
+                <AssetPreviewMedia
+                  key={`${user?.id || 'anonymous'}:${activeItem.id}:${activePreviewSrc}`}
+                  kind="video"
+                  contentKey={activeItem.id}
                   src={activePreviewSrc}
-                  controls
-                  preload="metadata"
                   poster={activeItem.thumbnailUrl || undefined}
+                  title={activeItem.title}
+                  onClaim={claimDetailPlayback}
+                  onRelease={releaseDetailPlayback}
                 />
                 <button
                   type="button"
                   className={assetStyles.detailPreviewExpand}
-                  onClick={() => setMediaPreviewOpen(true)}
+                  onClick={openMediaPreview}
                   aria-label="放大预览视频"
                   title="放大预览"
                 >
@@ -2569,14 +2623,21 @@ function AssetsPageContent() {
             ) : activeItem.kind === 'audio' && activePreviewSrc ? (
               <div className="asset-detail-audio-player">
                 <span>音频素材</span>
-                {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                <audio src={activePreviewSrc} controls preload="metadata" />
+                <AssetPreviewMedia
+                  key={`${user?.id || 'anonymous'}:${activeItem.id}:${activePreviewSrc}`}
+                  kind="audio"
+                  contentKey={activeItem.id}
+                  src={activePreviewSrc}
+                  title={activeItem.title}
+                  onClaim={claimDetailPlayback}
+                  onRelease={releaseDetailPlayback}
+                />
               </div>
             ) : activeItem.kind === 'image' && activePreviewSrc ? (
               <button
                 type="button"
                 className={assetStyles.detailPreviewImageButton}
-                onClick={() => setMediaPreviewOpen(true)}
+                onClick={openMediaPreview}
                 aria-label="放大预览图片"
               >
                 <SessionPreviewImage src={activePreviewSrc} thumbnail={activeItem.thumbnailUrl} alt="资产预览" />
@@ -2591,7 +2652,7 @@ function AssetsPageContent() {
           {activeItemDetails()}
         </aside>
       )}
-      {activeItem && mediaPreviewOpen && activePreviewSrc && <MediaPreview
+      {activeItem && !previewAccountChanged && mediaPreviewOpen && activePreviewSrc && <MediaPreview
         src={activePreviewSrc}
         type={activeItem.kind}
         title={activeItem.title}
@@ -2606,9 +2667,9 @@ function AssetsPageContent() {
         imageNeighbors={imageNeighbors}
         onPrevious={canMovePreviewPrevious ? () => moveActiveItem(-1) : undefined}
         onNext={canMovePreviewNext ? () => moveActiveItem(1) : undefined}
-        onClose={() => setMediaPreviewOpen(false)}
+        onClose={() => { setMediaPreviewOpen(false); playback.setModalBlocked(Boolean(restoredPreview)); }}
       />}
-      {!activeItem && restoredPreview && <MediaPreview
+      {!activeItem && !previewAccountChanged && restoredPreview && <MediaPreview
         src={restoredPreview.previewUrl as string}
         type={restoredPreview.category as 'image' | 'video' | 'audio'}
         title={restoredPreview.title}

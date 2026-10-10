@@ -1,30 +1,46 @@
 'use client';
 
-import { setHdImageSessionOwner } from './hd-source-session';
+import { invalidateHdImageSource, registerImageReadFamilyInvalidator, setHdImageSessionOwner } from './hd-source-session';
 
 export type ImageReadProgress = { phase: 'reading' | 'decoding' | 'unavailable' | 'unsupported'; loadedBytes: number; totalBytes?: number; percent?: number; message?: string };
-export type ImageReadResult = { imageSrc: string | null; progress: ImageReadProgress; denied?: boolean; unconfirmed?: boolean; refreshSource?: boolean; decoded?: boolean; mime?: string; bytes?: number };
+export type ImageReadResult = { imageSrc: string | null; progress: ImageReadProgress; denied?: boolean; unconfirmed?: boolean; refreshSource?: boolean; decoded?: boolean; mime?: string; bytes?: number; width?: number; height?: number };
 type Listener = (value: ImageReadResult) => void;
-type Consumer = { listener: Listener; approval: number };
+type Consumer = { listener: Listener; approval: number; expectedVersion: string };
 type Entry = {
-  key: string; source: string; controller: AbortController; consumers: Set<Consumer>; prefetches: number;
-  result: ImageReadResult; blocked?: ImageReadResult; revision: number; blob?: Blob; url?: string; etag?: string; headTag?: string; bytes: number;
-  accessedAt: number; checkedAt: number; reusable: boolean; decoded: boolean; image?: HTMLImageElement;
+  key: string; account: string; source: string; controller: AbortController; consumers: Set<Consumer>; prefetches: number;
+  result: ImageReadResult; blocked?: ImageReadResult; revision: number; blob?: Blob; url?: string; etag?: string; sourceVersion?: string; actualVersion?: string;
+  headTag?: string; bytes: number; width?: number; height?: number; accessedAt: number; checkedAt: number; retryAfter: number;
+  reusableAllowed: boolean; reusable: boolean; stale: boolean; decoded: boolean; image?: HTMLImageElement;
   checking?: Promise<void>; transfer?: Promise<void>; transferController?: AbortController; decoding?: Promise<void>;
+  transferExpectedVersion?: string;
 };
 type Transfer = { entry: Entry; controller: AbortController; run: () => Promise<void>; resolve: () => void; reject: (error: unknown) => void };
 const entries = new Map<string, Entry>();
 const waiting: Transfer[] = [], running = new Set<Transfer>();
 const MAX_ENTRIES = 32, MAX_BYTES = 64 * 1024 * 1024, IDLE_TTL = 10 * 60_000;
+const REVALIDATE_AFTER = 60_000, MAX_DECODED_IMAGES = 3, MAX_DECODED_BYTES = 96 * 1024 * 1024;
 let owner = '', epoch = 0;
 const reading = (): ImageReadResult => ({ imageSrc: null, progress: { phase: 'reading', loadedBytes: 0 } });
+const decoding = (entry: Entry): ImageReadResult => ({ imageSrc: null, progress: { phase: 'decoding', loadedBytes: entry.bytes }, bytes: entry.bytes });
 const mimeOf = (response: Response) => response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() || '';
-const weakTag = (tag: string) => tag.replace(/^W\//, '');
+const weakTag = (tag: string) => tag.trim().replace(/^W\//, '');
+const versionsMatch = (expected: string, actual: string) => Boolean(expected && actual && weakTag(expected) === weakTag(actual));
 const inUse = (entry: Entry) => entry.consumers.size > 0 || entry.prefetches > 0;
+
+export function isImagePreviewReady(result: ImageReadResult, domDecoded = false) {
+  return Boolean(result.imageSrc && (result.decoded === true || domDecoded));
+}
 
 export function canonicalImageReadSource(source: string) {
   const url = new URL(source, location.href);
   url.hash = ''; url.searchParams.sort();
+  return url.origin === location.origin ? `${url.pathname}${url.search}` : url.href;
+}
+function sourceFamily(source: string) {
+  const url = new URL(source, location.href);
+  url.hash = '';
+  for (const name of ['thumbnail', 'preview', 'detail', 'download', 'hd', 'hd-description', 'hd-download', 'hd-version', 'variant']) url.searchParams.delete(name);
+  url.searchParams.sort();
   return url.origin === location.origin ? `${url.pathname}${url.search}` : url.href;
 }
 function reusableSource(source: string) {
@@ -32,25 +48,60 @@ function reusableSource(source: string) {
   return url.origin === location.origin && /^\/api\/(?:image-studio\/(?:(?:assets|template-assets)\/|style-groups\/[^/]+\/assets\/)|reference-images\/[^/]+\/content|content-reactions\/media)/.test(url.pathname)
     && !['download', 'hd-download', 'hd-description'].some(mode => url.searchParams.get('variant') === mode || url.searchParams.get(mode) === '1');
 }
+function responseVersion(response: Response) {
+  return response.headers.get('X-Image-Source-Version')?.trim() || response.headers.get('etag')?.trim() || '';
+}
+function representationChanged(entry: Entry, response: Response): boolean | null {
+  const sourceVersion = response.headers.get('X-Image-Source-Version')?.trim() || '';
+  const etag = response.headers.get('etag')?.trim() || '';
+  if (sourceVersion && entry.sourceVersion) return !versionsMatch(entry.sourceVersion, sourceVersion) || Boolean(etag && entry.etag && !versionsMatch(entry.etag, etag));
+  if (etag && entry.etag) return !versionsMatch(entry.etag, etag);
+  const observed = sourceVersion || etag;
+  return observed && entry.actualVersion ? !versionsMatch(entry.actualVersion, observed) : null;
+}
 function touch(entry: Entry) {
   entry.accessedAt = Date.now();
   if (entries.get(entry.key) === entry) { entries.delete(entry.key); entries.set(entry.key, entry); }
 }
+function consumerResult(entry: Entry, consumer: Consumer) {
+  if (consumer.approval !== entry.revision) return entry.blocked || reading();
+  if (entry.result.imageSrc && consumer.expectedVersion && (!entry.actualVersion || !versionsMatch(consumer.expectedVersion, entry.actualVersion))) {
+    return { imageSrc: null, refreshSource: true, progress: { phase: 'unavailable' as const, loadedBytes: 0, message: '图片版本已变化，请重新打开' } };
+  }
+  return entry.result;
+}
 function emit(entry: Entry) {
-  for (const consumer of Array.from(entry.consumers)) {
-    const allowed = consumer.approval === entry.revision;
-    consumer.listener(allowed ? entry.result : entry.blocked || reading());
+  for (const consumer of Array.from(entry.consumers)) consumer.listener(consumerResult(entry, consumer));
+}
+function publish(entry: Entry, result: ImageReadResult) { entry.result = result; entry.blocked = undefined; emit(entry); }
+function dropDecoded(entry: Entry) {
+  if (entry.image) entry.image.src = '';
+  entry.image = undefined; entry.decoded = false; entry.width = undefined; entry.height = undefined;
+  if (entry.blob) entry.result = { imageSrc: entry.url || null, progress: { phase: 'decoding', loadedBytes: entry.bytes }, mime: entry.blob.type, bytes: entry.bytes };
+}
+function pruneDecoded() {
+  const recency = new Map(Array.from(entries.values()).reverse().map((entry, index) => [entry, index]));
+  const candidates = Array.from(entries.values()).filter(entry => entry.decoded && entry.image)
+    .sort((a, b) => Number(b.consumers.size > 0) - Number(a.consumers.size > 0)
+      || Number(b.prefetches > 0) - Number(a.prefetches > 0)
+      || (recency.get(a) || 0) - (recency.get(b) || 0));
+  let kept = 0, bytes = 0;
+  for (const entry of candidates) {
+    const estimate = Math.max(1, (entry.width || 0) * (entry.height || 0) * 4);
+    const current = kept === 0 && entry.consumers.size > 0;
+    if (kept < MAX_DECODED_IMAGES && (bytes + estimate <= MAX_DECODED_BYTES || current)) { kept++; bytes += estimate; }
+    else dropDecoded(entry);
   }
 }
-function publish(entry: Entry, result: ImageReadResult) { entry.result = result; emit(entry); }
 function dropBody(entry: Entry) {
   entry.revision++; entry.transferController?.abort();
-  entry.transfer = undefined; entry.transferController = undefined;
+  entry.transfer = undefined; entry.transferController = undefined; entry.transferExpectedVersion = undefined;
   if (entry.url) URL.revokeObjectURL(entry.url);
   if (entry.image) entry.image.src = '';
-  entry.blob = undefined; entry.url = undefined; entry.image = undefined; entry.etag = undefined;
-  entry.headTag = undefined;
-  entry.bytes = 0; entry.decoded = false; entry.decoding = undefined;
+  entry.blob = undefined; entry.url = undefined; entry.image = undefined; entry.etag = undefined; entry.sourceVersion = undefined; entry.actualVersion = undefined;
+  entry.headTag = undefined; entry.width = undefined; entry.height = undefined;
+  entry.bytes = 0; entry.decoded = false; entry.decoding = undefined; entry.reusable = false; entry.stale = false; entry.retryAfter = 0;
+  entry.result = reading(); entry.blocked = undefined;
 }
 function discard(entry: Entry) {
   if (entries.get(entry.key) === entry) entries.delete(entry.key);
@@ -65,13 +116,26 @@ function prune(required = 0, reserveEntry = false) {
   }
   return bytes + required <= MAX_BYTES && entries.size + Number(reserveEntry) <= MAX_ENTRIES;
 }
-function fail(entry: Entry, message: string, denied = false, refreshSource = false) {
-  entry.transferController?.abort();
-  if (!entry.blob) entry.bytes = 0;
-  if (denied || refreshSource) dropBody(entry);
+function blockEntry(entry: Entry, message: string, denied = false, refreshSource = false) {
+  dropBody(entry);
+  entry.blocked = { imageSrc: null, denied, unconfirmed: !denied && !refreshSource, refreshSource, progress: { phase: 'unavailable', loadedBytes: 0, message } };
   for (const consumer of Array.from(entry.consumers)) consumer.approval = 0;
-  entry.blocked = { imageSrc: null, denied, unconfirmed: !denied, refreshSource, progress: { phase: 'unavailable', loadedBytes: 0, message } };
   emit(entry);
+}
+function invalidateImageReadFamily(source: string, account: string, message: string, invalidateHd = true) {
+  if (!account || account !== owner) return;
+  const family = sourceFamily(source);
+  for (const entry of Array.from(entries.values())) if (entry.account === account && sourceFamily(entry.source) === family) {
+    blockEntry(entry, message, true);
+  }
+  if (invalidateHd) invalidateHdImageSource(source, account, { propagateToImageReads: false });
+}
+function blocked(entry: Entry, message: string, denied = false, refreshSource = false) {
+  if (denied) { invalidateImageReadFamily(entry.source, entry.account, message); return; }
+  blockEntry(entry, message, false, refreshSource);
+}
+function fail(entry: Entry, message: string, denied = false, refreshSource = false) {
+  blocked(entry, message, denied, refreshSource);
 }
 function drain() {
   while (running.size < 2) {
@@ -97,27 +161,29 @@ function schedule(entry: Entry, controller: AbortController, run: () => Promise<
   });
 }
 async function decode(entry: Entry) {
-  if (!entry.blob || !entry.consumers.size) return;
-  if (entry.decoded) {
-    publish(entry, { imageSrc: entry.url || null, decoded: true, mime: entry.blob.type, bytes: entry.bytes, progress: { phase: 'decoding', loadedBytes: entry.bytes, percent: 100 } });
-    return;
-  }
+  if (!entry.blob || !inUse(entry)) return;
+  if (entry.decoded && entry.image) { if (entry.consumers.size) publish(entry, entry.result); return; }
   if (entry.decoding) return entry.decoding;
   const revision = entry.revision;
   const pending = (async () => {
     try {
       entry.url ||= URL.createObjectURL(entry.blob!);
-      publish(entry, { imageSrc: null, progress: { phase: 'decoding', loadedBytes: entry.bytes } });
+      if (entry.consumers.size) publish(entry, decoding(entry));
       const image = new Image(); entry.image = image; image.src = entry.url;
       await image.decode();
-      if (entry.controller.signal.aborted || revision !== entry.revision) return;
-      entry.decoded = true;
-      if (!entry.consumers.size) { image.src = ''; entry.image = undefined; }
-      publish(entry, { imageSrc: entry.url || null, decoded: true, mime: entry.blob?.type, bytes: entry.bytes, progress: { phase: 'decoding', loadedBytes: entry.bytes, percent: 100 } });
+      if (entry.controller.signal.aborted || revision !== entry.revision || !entry.blob) return;
+      const width = image.naturalWidth, height = image.naturalHeight;
+      if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0) throw new Error('invalid_dimensions');
+      entry.decoded = true; entry.width = width; entry.height = height;
+      entry.result = { imageSrc: entry.url, decoded: true, mime: entry.blob.type, bytes: entry.bytes, width, height,
+        progress: { phase: 'decoding', loadedBytes: entry.bytes, percent: 100 } };
+      entry.blocked = undefined; touch(entry); pruneDecoded();
+      if (entry.decoded && entry.consumers.size) emit(entry);
     } catch {
       if (entry.controller.signal.aborted || revision !== entry.revision) return;
       dropBody(entry);
       entry.blocked = { imageSrc: null, progress: { phase: 'unsupported', loadedBytes: 0, message: '浏览器无法解码此图片，可查看原图或下载' } };
+      for (const consumer of Array.from(entry.consumers)) consumer.approval = 0;
       emit(entry);
     }
   })();
@@ -125,11 +191,11 @@ async function decode(entry: Entry) {
   await pending;
   if (entry.decoding === pending) entry.decoding = undefined;
 }
-async function transfer(entry: Entry) {
+async function transfer(entry: Entry, expectedVersion = '') {
   if (entry.blob) return decode(entry);
   if (entry.transfer) return entry.transfer;
   const controller = new AbortController(), revision = entry.revision, expected = epoch;
-  entry.transferController = controller;
+  entry.transferController = controller; entry.transferExpectedVersion = expectedVersion;
   const active = () => expected === epoch && revision === entry.revision && !controller.signal.aborted && !entry.controller.signal.aborted;
   const pending = schedule(entry, controller, async () => {
     try {
@@ -160,78 +226,111 @@ async function transfer(entry: Entry) {
         }
         if (!active()) return;
         if (!bytes || total && bytes !== total) throw new Error('图片未完整读取，请重试');
-        entry.blob = new Blob(chunks, { type: mime }); entry.etag = response.headers.get('etag') || undefined;
+        const blob = new Blob(chunks, { type: mime });
+        const etag = response.headers.get('etag')?.trim() || undefined;
+        const sourceVersion = response.headers.get('X-Image-Source-Version')?.trim() || undefined;
+        const actualVersion = sourceVersion || etag || '';
+        entry.blob = blob; entry.etag = etag; entry.sourceVersion = sourceVersion; entry.actualVersion = actualVersion || undefined;
+        entry.reusable = entry.reusableAllowed && Boolean(actualVersion); entry.checkedAt = Date.now(); entry.retryAfter = 0; entry.stale = false;
         touch(entry); await decode(entry);
       } finally { await reader.cancel().catch(() => {}); }
     } catch (error) {
       if (!active()) return;
-      entry.bytes = 0;
       fail(entry, error instanceof Error && error.message !== 'Failed to fetch' ? error.message : '图片读取失败，请重试');
     }
   }).catch(() => {});
   entry.transfer = pending;
   await pending;
-  if (entry.transfer === pending) { entry.transfer = undefined; entry.transferController = undefined; }
+  if (entry.transfer === pending) { entry.transfer = undefined; entry.transferController = undefined; entry.transferExpectedVersion = undefined; }
 }
-async function validate(entry: Entry) {
-  if (entry.checking) return entry.checking;
-  const expected = epoch;
+function keepStale(entry: Entry) {
+  entry.stale = true; entry.retryAfter = Date.now() + REVALIDATE_AFTER;
+}
+function allowBodyAgain(entry: Entry) {
+  entry.blocked = undefined; entry.stale = false; entry.retryAfter = 0;
+  for (const consumer of Array.from(entry.consumers)) consumer.approval = entry.revision;
+  entry.result = reading(); emit(entry);
+}
+async function revalidate(entry: Entry) {
+  if (!entry.blob || !entry.actualVersion || !entry.reusable || entry.checking) return entry.checking;
+  const now = Date.now();
+  if (now - entry.checkedAt < REVALIDATE_AFTER || now < entry.retryAfter) return;
+  const expected = epoch, revision = entry.revision;
   const pending = (async () => {
     try {
-      const response = await fetch(entry.source, { method: 'HEAD', cache: 'no-store', credentials: 'same-origin', headers: entry.blob && entry.etag ? { 'If-None-Match': entry.etag } : {}, signal: AbortSignal.any([entry.controller.signal, AbortSignal.timeout(15000)]) });
-      if (expected !== epoch || entry.controller.signal.aborted) return;
-      const mime = mimeOf(response), tag = response.headers.get('etag');
-      const url = new URL(entry.source, location.href);
-      const preparable = ['thumbnail', 'preview', 'detail'].some(mode => url.searchParams.get('variant') === mode || url.searchParams.get(mode) === '1');
-      if (response.status === 409 && preparable && entry.consumers.size) {
-        if (!entry.transfer) { dropBody(entry); entry.result = reading(); }
-      } else if (response.status === 304) {
-        if (!entry.blob || !entry.etag || mime && !mime.startsWith('image/') || tag && weakTag(tag) !== weakTag(entry.etag)) throw new Error('没有可复用的有效图片');
-      } else if (response.status !== 200 || !mime.startsWith('image/')) {
-        fail(entry, '图片暂时不可读取，请重试', [401, 403, 404].includes(response.status), response.status === 409); return;
-      } else if (!(entry.blob && entry.etag && tag && weakTag(tag) === weakTag(entry.etag))
-        && !(entry.transfer && entry.headTag && tag && weakTag(tag) === weakTag(entry.headTag))) {
-        dropBody(entry); entry.result = reading();
+      const response = await fetch(entry.source, { method: 'HEAD', cache: 'no-store', credentials: 'same-origin', headers: entry.etag ? { 'If-None-Match': entry.etag } : {}, signal: AbortSignal.any([entry.controller.signal, AbortSignal.timeout(15000)]) });
+      if (expected !== epoch || revision !== entry.revision || entry.controller.signal.aborted) return;
+      const mime = mimeOf(response);
+      if (response.status === 304) {
+        const tag = response.headers.get('etag')?.trim() || '';
+        const sourceVersion = response.headers.get('X-Image-Source-Version')?.trim() || '';
+        if (!entry.etag || mime && !mime.startsWith('image/') || tag && !versionsMatch(entry.etag, tag)
+          || sourceVersion && entry.sourceVersion && !versionsMatch(entry.sourceVersion, sourceVersion)) { keepStale(entry); return; }
+        entry.checkedAt = Date.now(); entry.retryAfter = 0; entry.stale = false; touch(entry); return;
       }
-      if (response.status === 200) entry.headTag = tag || undefined;
-      entry.checkedAt = Date.now(); touch(entry);
-      entry.blocked = undefined;
-      for (const consumer of Array.from(entry.consumers)) consumer.approval = entry.revision;
-      void transfer(entry);
+      if ([401, 403, 404].includes(response.status)) { fail(entry, '图片权限或来源已变化，请重新打开', true); return; }
+      if (response.status === 409 && isHdVariant(entry.source)) { fail(entry, '高清图尚未准备好，可查看原图', false, true); return; }
+      if (!response.ok || !mime.startsWith('image/')) { keepStale(entry); return; }
+      const version = responseVersion(response);
+      if (!version) { keepStale(entry); return; }
+      const changed = representationChanged(entry, response);
+      if (changed === null) { keepStale(entry); return; }
+      if (changed) {
+        dropBody(entry); allowBodyAgain(entry); void transfer(entry);
+        return;
+      }
+      entry.etag = response.headers.get('etag')?.trim() || entry.etag;
+      entry.sourceVersion = response.headers.get('X-Image-Source-Version')?.trim() || entry.sourceVersion;
+      entry.actualVersion = entry.sourceVersion || entry.etag || version;
+      entry.checkedAt = Date.now(); entry.retryAfter = 0; entry.stale = false; touch(entry);
     } catch {
-      if (expected === epoch && !entry.controller.signal.aborted) fail(entry, '本次图片权限暂时无法确认，请重试');
+      if (expected === epoch && revision === entry.revision && !entry.controller.signal.aborted) keepStale(entry);
     }
   })();
   entry.checking = pending;
   await pending;
   if (entry.checking === pending) entry.checking = undefined;
 }
-function getEntry(account: string, source: string, version: string) {
+function isHdVariant(source: string) {
+  const url = new URL(source, location.href);
+  return url.searchParams.get('variant') === 'hd' || url.searchParams.get('hd') === '1';
+}
+function getEntry(account: string, source: string) {
   prune();
-  const canonical = canonicalImageReadSource(source), key = JSON.stringify(['protected-image-cache-v1', epoch, account, canonical, version]);
+  const canonical = canonicalImageReadSource(source), key = JSON.stringify(['protected-image-cache-v2', epoch, account, canonical]);
   let entry = entries.get(key);
   if (!entry) {
     if (!prune(0, true)) return null;
-    entry = { key, source: canonical, controller: new AbortController(), consumers: new Set(), prefetches: 0, result: reading(), revision: 1, bytes: 0, accessedAt: Date.now(), checkedAt: 0, reusable: reusableSource(canonical), decoded: false };
+    entry = { key, account, source: canonical, controller: new AbortController(), consumers: new Set(), prefetches: 0, result: reading(), revision: 1, bytes: 0,
+      accessedAt: Date.now(), checkedAt: 0, retryAfter: 0, reusableAllowed: reusableSource(canonical), reusable: reusableSource(canonical), stale: false, decoded: false };
     entries.set(key, entry);
   }
   touch(entry); return entry;
 }
+function startColdRead(entry: Entry, version = '') {
+  entry.blocked = undefined;
+  if (!entry.blob && entry.result.progress.phase !== 'reading') publish(entry, reading());
+  void transfer(entry, version);
+}
 function releaseUnused(entry: Entry) {
   touch(entry);
-  if (!entry.consumers.size && entry.image && !entry.decoding) { entry.image.src = ''; entry.image = undefined; }
-  if (!inUse(entry) && (!entry.blob || !entry.etag || !entry.reusable)) discard(entry);
-  else prune();
+  if (!inUse(entry) && (!entry.blob || !entry.actualVersion || !entry.reusable)) discard(entry);
+  else { prune(); pruneDecoded(); }
 }
 export function setImageReadSessionOwner(next: string) {
   if (owner === next) return;
   owner = next; epoch++; setHdImageSessionOwner(next);
-  for (const entry of Array.from(entries.values())) { fail(entry, '账号已变化，请重新打开图片', true); discard(entry); }
+  for (const entry of Array.from(entries.values())) { blockEntry(entry, '账号已变化，请重新打开图片', true); discard(entry); }
 }
-export function revalidateActiveImages(minAge = 0) {
+export function invalidateImageReadSource(source: string, account = owner) {
+  invalidateImageReadFamily(source, account, '图片权限或来源已变化，请重新打开');
+}
+export function revalidateActiveImages(minAge = REVALIDATE_AFTER) {
   prune();
   if (document.hidden) { cancelImagePrefetches(); return; }
-  for (const entry of Array.from(entries.values())) if (entry.consumers.size && !entry.checking && Date.now() - entry.checkedAt >= minAge) void validate(entry);
+  const now = Date.now();
+  for (const entry of Array.from(entries.values())) if (entry.consumers.size && !entry.checking && entry.blob && entry.actualVersion
+    && now - entry.checkedAt >= Math.max(REVALIDATE_AFTER, minAge) && now >= entry.retryAfter) void revalidate(entry);
 }
 export function cancelImagePrefetches(exceptSource?: string) {
   const except = exceptSource ? canonicalImageReadSource(exceptSource) : '';
@@ -248,21 +347,55 @@ export function acquireImageRead(account: string, source: string, version: strin
   setImageReadSessionOwner(account);
   if (!account) { listener({ imageSrc: null, denied: true, progress: { phase: 'unavailable', loadedBytes: 0, message: '请先确认登录状态后重试' } }); return () => {}; }
   cancelImagePrefetches(source);
-  const entry = getEntry(account, source, version);
+  const entry = getEntry(account, source);
   if (!entry) { listener({ imageSrc: null, progress: { phase: 'unavailable', loadedBytes: 0, message: '当前打开的图片较多，请关闭部分预览后重试' } }); return () => {}; }
-  const consumer = { listener, approval: 0 }; entry.consumers.add(consumer);
-  listener(reading()); drain(); void validate(entry);
+  const expectedVersion = version.trim();
+  const consumer: Consumer = { listener, approval: entry.revision, expectedVersion };
+  entry.consumers.add(consumer); touch(entry);
+  const cached = Boolean(entry.blob && entry.actualVersion && entry.reusable);
+  const knownMismatch = cached && expectedVersion && !versionsMatch(expectedVersion, entry.actualVersion || '');
+  if (knownMismatch) {
+    dropBody(entry); consumer.approval = entry.revision; allowBodyAgain(entry); startColdRead(entry, expectedVersion);
+  } else if (cached) {
+    consumer.approval = entry.revision;
+    if (entry.decoded && entry.result.decoded) listener(consumerResult(entry, consumer));
+    else { listener(decoding(entry)); void decode(entry); }
+    void revalidate(entry);
+  } else {
+    if (entry.blob) dropBody(entry);
+    consumer.approval = entry.revision; entry.blocked = undefined;
+    listener(entry.transfer ? consumerResult(entry, consumer) : reading());
+    if (entry.transfer && expectedVersion && entry.transferExpectedVersion && !versionsMatch(expectedVersion, entry.transferExpectedVersion)) {
+      dropBody(entry); consumer.approval = entry.revision; allowBodyAgain(entry); startColdRead(entry, expectedVersion);
+    } else if (entry.blob) void decode(entry);
+    else startColdRead(entry, expectedVersion);
+  }
+  drain();
   return () => { entry.consumers.delete(consumer); releaseUnused(entry); drain(); };
 }
 export function prefetchImageRead(account: string, source: string, version = '') {
   if (!account || account !== owner || !canPrefetchImages() || !reusableSource(source)) return () => {};
-  const entry = getEntry(account, source, version);
+  const entry = getEntry(account, source);
   if (!entry) return () => {};
-  entry.prefetches++; void validate(entry);
+  entry.prefetches++;
+  const expectedVersion = version.trim();
+  const cached = Boolean(entry.blob && entry.actualVersion && entry.reusable);
+  if (cached && expectedVersion && !versionsMatch(expectedVersion, entry.actualVersion || '')) {
+    dropBody(entry); void transfer(entry, expectedVersion);
+  } else if (cached) {
+    if (entry.decoded) pruneDecoded(); else void decode(entry);
+    void revalidate(entry);
+  } else {
+    if (entry.blob) dropBody(entry);
+    void transfer(entry, expectedVersion);
+  }
   let released = false;
   return () => {
     if (released) return; released = true; entry.prefetches = Math.max(0, entry.prefetches - 1);
-    // Let the same React effect flush hand a neighbor transfer to its new foreground consumer.
     queueMicrotask(() => releaseUnused(entry));
   };
 }
+
+registerImageReadFamilyInvalidator((source, account) => {
+  invalidateImageReadFamily(source, account, '图片权限或来源已变化，请重新打开', false);
+});

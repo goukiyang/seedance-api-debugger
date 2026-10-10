@@ -27,7 +27,7 @@ export function useHdImageSource(source: string, original: boolean, attempt: num
     return acquireHdImageSource(account, descriptionSource, sourceVersion, result => setState({ key, ...result }));
   }, [key, account, supported, original, descriptionSource, sourceVersion]);
   const current = state?.key === key ? state : null;
-  const description = original ? undefined : current?.description || (account && supported ? hdImageHint(account, descriptionSource, sourceVersion) : undefined);
+  const description = original ? undefined : current?.description || (account && supported ? hdImageHint(account, descriptionSource, sourceVersion, true) : undefined);
   const pending = supported && !original && !current?.error && (!description || ['queued', 'running'].includes(description.status));
   const raw = original || description?.status !== 'ready';
   const readSource = raw ? imageDisplaySource(source, 'original') : versionedHdSource(source, 'hd', description.sourceVersion);

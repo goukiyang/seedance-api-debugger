@@ -17,16 +17,21 @@ import { RatioPicker } from './ratio-picker';
 import { usePageExitRisk } from '@/lib/hooks/page-exit-guard';
 import type { useStudioSettings } from './use-studio-settings';
 import styles from './studio.module.css';
+import { useResolutionApply } from './use-resolution-apply';
+import { ResolutionApplyPanel } from './resolution-apply-panel';
+import type { ResolutionDelta } from '@/lib/image-studio/resolution-apply-types';
 
-export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, canEdit, ratios }: {
+export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, canEdit, ratios, getExcluded, onDeltas }: {
   open: boolean; onClose: () => void; editor: ReturnType<typeof useStudioSettings>; ownerId: string; canEdit: boolean;
   ratios: Pick<ComponentProps<typeof RatioPicker>, 'custom' | 'busy' | 'error' | 'onRetry' | 'onCustom'>;
+  getExcluded: () => string[]; onDeltas: (deltas: ResolutionDelta[]) => void;
 }) {
   const { confirm, productDialog } = useProductDialog();
   const dialog = useRef<HTMLDialogElement>(null);
   const contextInput = useRef<HTMLTextAreaElement>(null);
   const saveLock = useRef(false);
   const [ratioEditing, setRatioEditing] = useState(false);
+  const batch = useResolutionApply({ open, ownerId, canEdit, editor, getExcluded, onDeltas });
   const defaults = editor.draft?.templateDefaults;
   const supportsFourToOne = (model: ImageStudioModel) => editor.settings?.modelFourToOne?.[model] ?? supportsStudioFourToOne(model);
   const fourToOneAvailable = defaults ? supportsFourToOne(defaults.model) : false;
@@ -34,28 +39,33 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
     ? editor.settings?.modelReady?.[defaults.model] ?? editor.settings?.providerReady
     : undefined;
   usePageExitRisk({ unsaved: ratioEditing ? ['图片默认比例'] : [],
-    busy: open && ratios.busy ? ['图片比例正在保存'] : [], revision: String(ratioEditing) });
+    busy: open && (ratios.busy || batch.busy) ? ['图片设置正在保存或应用'] : [], revision: String(ratioEditing) });
   useEffect(() => {
     if (open) dialog.current?.showModal();
     else dialog.current?.close();
   }, [open]);
   const close = async () => {
-    if (canEdit && (editor.saving || ratios.busy)) return;
+    if (canEdit && (editor.saving || ratios.busy || batch.busy)) return;
     if (canEdit && (editor.dirty || ratioEditing) && !(await confirm('修改尚未保存。关闭后会保留当前草稿，确定关闭吗？', { title: '关闭编辑', confirmLabel: '关闭编辑' }))) return;
     onClose();
   };
   useDialogDismiss({ open, dialogRef: dialog, nativeDialog: true, onDismiss: close });
   const reload = async () => {
-    if (!canEdit || editor.loading || editor.saving) return;
+    if (!canEdit || editor.loading || editor.saving || batch.busy) return;
     if (!editor.dirty || (await confirm('重新读取会替换未保存的通用设置，是否继续？', { title: '重新读取', confirmLabel: '放弃修改并读取' }))) void editor.controller.load(true);
   };
   const save = async () => {
-    if (!canEdit || saveLock.current || editor.saving || editor.loading || ratios.busy || ratioEditing) return;
+    if (!canEdit || saveLock.current || editor.saving || editor.loading || ratios.busy || ratioEditing || batch.busy) return;
     saveLock.current = true;
     try {
       if (editor.settings?.context?.trim() && editor.draft && !editor.draft.context.trim()
         && !(await confirm('确定清空通用上下文？这会影响所有模板之后的新生成，模板自己的上下文会保留。', { title: '清空上下文', confirmLabel: '清空并保存', danger: true }))) return;
-      if (await editor.controller.save()) onClose();
+      if (batch.scope) {
+        if (!batch.canCommit || !batch.value) return;
+        const count = batch.value.operation.counts.change;
+        if (!(await confirm(`保存通用设置，并把我的 ${count} 个已有模板分辨率改为 ${batch.value.operation.resolution}？其它模板参数和共享原模板不会改变。`, { title: '应用分辨率', confirmLabel: '保存并应用' }))) return;
+        if (await batch.commit()) onClose();
+      } else if (await editor.controller.save()) onClose();
     } finally { saveLock.current = false; }
   };
   return <>{productDialog}{(<dialog ref={dialog} className={`${styles.dialog} ${styles.contextDialog}`}>
@@ -68,7 +78,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
         value={editor.draft.context} onChange={event => { if (canEdit) editor.controller.editContext(event.target.value); }} />
       <section className={styles.auxiliarySection} aria-labelledby="studio-template-defaults-title">
         <div className={styles.imageSectionHeading}><strong id="studio-template-defaults-title">模板统一默认值</strong></div>
-        <p className={styles.muted}>适用范围：新建模块</p>
+        <p className={styles.muted}>统一默认值用于新建模板。</p>
         <div className={styles.referenceLimits}>
           <div className={styles.primaryRange} role="group" aria-label="默认主图张数范围"><span>主图</span>
             <select aria-label="主图最少张数" value={defaults.primaryMin} disabled={!canEdit || editor.loading}
@@ -118,6 +128,13 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
             </select>
           </label>
         </div>
+        <fieldset className={styles.resolutionScope}><legend>分辨率适用范围</legend>
+          <label><input type="radio" name="studio-resolution-scope" checked={!batch.scope} disabled={batch.busy} onChange={() => batch.setScope(false)} />仅新建模板</label>
+          <label><input type="radio" name="studio-resolution-scope" checked={batch.scope} disabled={batch.busy} onChange={() => batch.setScope(true)} />新建模板 + 我的已有模板</label>
+        </fieldset>
+        <ResolutionApplyPanel batch={batch} onContinue={() => { void (async () => { if (await batch.continue()) onClose(); })(); }} onRestore={() => { void (async () => {
+          if (await confirm('只撤销这次仍未被后来修改的分辨率。通用默认值不会撤销，其它参数不变。', { title: '撤销分辨率', confirmLabel: '撤销已应用' })) await batch.restore();
+        })(); }} />
         <div className={styles.modelQualityRow}>
           <label className={styles.compactField}><strong>生成张数</strong>
             <select value={defaults.count} disabled={!canEdit || editor.loading}
@@ -141,7 +158,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
           placeholder={model === 'gemini-3-pro-image-preview' ? '未设置' : '20'} value={editor.draft?.prices[model] ?? ''}
           onChange={event => { if (canEdit) editor.controller.editPrice(model, event.target.value === '' ? null : Number(event.target.value)); }} />
       </label>)}
-      <button type="button" className={styles.primary} disabled={!canEdit || !editor.dirty || editor.loading || editor.saving || ratios.busy || ratioEditing} onClick={save}><Save size={16} />{editor.saving ? '正在保存' : '保存设置'}</button>
+      <button type="button" className={styles.primary} disabled={!canEdit || (batch.scope ? !batch.canCommit : !editor.dirty) || editor.loading || editor.saving || batch.busy || ratios.busy || ratioEditing} onClick={save}><Save size={16} />{editor.saving || batch.busy ? '正在保存或应用' : batch.scope ? '保存并应用分辨率' : '保存设置'}</button>
     </>}
     <p role="status">{editor.status || '正在读取通用设置'}</p>
     {editor.error && <div role="alert" className={styles.error}>{editor.error}
