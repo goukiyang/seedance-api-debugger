@@ -3,7 +3,7 @@ const STORE_NAME = 'asset_library_pages';
 const DB_VERSION = 1;
 const CACHE_TTL_MS = 5 * 60_000;
 
-export const ASSET_LIBRARY_CACHE_SCHEMA_VERSION = 4;
+export const ASSET_LIBRARY_CACHE_SCHEMA_VERSION = 5;
 
 type AssetLibraryCacheKeyInput = {
   view?: string;
@@ -21,6 +21,7 @@ type AssetLibraryCacheKeyInput = {
   ownerUserId: string;
   keyword: string;
   page: number;
+  limit?: number;
   schemaVersion?: number;
 };
 
@@ -121,6 +122,7 @@ export function createAssetLibraryCacheKey(input: AssetLibraryCacheKeyInput) {
     input.ownerUserId || '-',
     input.keyword.trim() || '-',
     String(input.page),
+    String(input.limit || 60),
   ].join('|');
 }
 

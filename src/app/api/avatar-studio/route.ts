@@ -3,7 +3,7 @@ import { getSession } from '@/lib/auth/session';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { listStudioTasks, StudioError } from '@/lib/image-studio/tasks';
-import { listAvatarRecords, mutateAvatarRecord, readAvatar } from '@/lib/avatar-random/store';
+import { avatarResultRecords, listAvatarRecords, mutateAvatarRecord, readAvatar } from '@/lib/avatar-random/store';
 import { avatarDescriptionStatus, estimateAvatarDraft, parseAvatarDescription, prepareAvatarPlan, quoteAvatarPlan, submitAvatarPlan, validateAvatarReferences } from '@/lib/avatar-random/service';
 import { imageBillingView } from '@/lib/image-studio/billing-contract';
 import { imageBillingReadinessPayload } from '@/lib/image-studio/billing-readiness';
@@ -43,11 +43,17 @@ async function run(action: (owner: string) => Promise<unknown>) {
 }
 export async function GET(req: NextRequest) { return run(async owner => {
   const imageTaskId=req.nextUrl.searchParams.get('imageTask');
-  if(imageTaskId){if(!/^[a-zA-Z0-9-]{1,100}$/.test(imageTaskId))throw new StudioError('图片记录无效');return {sourceTask:await sourceTask(owner,imageTaskId)};}
+  if(imageTaskId){if(!/^[a-zA-Z0-9-]{1,100}$/.test(imageTaskId))throw new StudioError('图片记录无效');return {sourceTask:await sourceTask(owner,imageTaskId), resultRecords: await avatarResultRecords(owner, [imageTaskId])};}
   const planId = req.nextUrl.searchParams.get('plan');
   const recordId=req.nextUrl.searchParams.get('record');
   if(recordId){const record=await readAvatar<AvatarRecord>(owner,'record',recordId);if(!record||record.deletedAt)throw new StudioError('记录已失效',404);return {record};}
-  if (planId) { const plan = await readAvatar<AvatarPlan>(owner, 'plan', planId); if (!plan) throw new StudioError('草稿不存在', 404); return { plan, sourceTask:await sourceTask(owner,plan.sourceTaskId), ...(await listStudioTasks(owner, undefined, undefined, false, undefined, plan.id)) }; }
+  if (planId) {
+    const plan = await readAvatar<AvatarPlan>(owner, 'plan', planId);
+    if (!plan) throw new StudioError('草稿不存在', 404);
+    const result = await listStudioTasks(owner, undefined, undefined, false, undefined, plan.id);
+    return { plan, sourceTask: await sourceTask(owner, plan.sourceTaskId), ...result,
+      resultRecords: await avatarResultRecords(owner, [...result.tasks.map(task => task.id), ...(plan.sourceTaskId ? [plan.sourceTaskId] : [])]) };
+  }
   const settings = await getImageStudioSettings();
   const kind=req.nextUrl.searchParams.get('kind')||'result';
   if(!['config','character','result'].includes(kind))throw new StudioError('记录类别无效');

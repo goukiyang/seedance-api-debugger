@@ -30,7 +30,7 @@ import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
 import { handImageDownloadToBrowser } from '@/lib/media/native-download';
 import styles from './studio.module.css';
 type Task = { id: string; ordinal: number; status: string; error?: string | null; billing?: ImageBillingView | null; asset: { id: string; original_url: string; thumbnail_url?: string | null } | null };
-type Payload = { records: AvatarRecord[]; recentConfigs:AvatarRecord[];recordTasks:Record<string,Task>; nextCursor?: string | null; settings: { model: string; revision: number; prices: Record<string, number | null>; billingReadiness?: { models: Record<string, { ready: boolean }> } } };
+type Payload = { total: number; records: AvatarRecord[]; recentConfigs:AvatarRecord[];recordTasks:Record<string,Task>; nextCursor?: string | null; settings: { model: string; revision: number; prices: Record<string, number | null>; billingReadiness?: { models: Record<string, { ready: boolean }> } } };
 type AvatarImageQuote = { billingMode: 'fixed' | 'actual'; billingQuoteId: string | null; unitCredits: number; estimatedCredits: number; expiresAt?: string };
 type CachedAvatarImageQuote = { planId: string; parameters: string; quote: AvatarImageQuote };
 const statusLabel: Record<string, string> = { queued: '排队中', running: '生成中', succeeded: '图片已保存，待人工确认', failed: '生成失败', uncertain: '受理未知，请先查询' };
@@ -48,6 +48,18 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   const [quoteVisible, setQuoteVisible] = useState(true);
   useEffect(() => { const update = () => setQuoteVisible(!document.hidden); update(); document.addEventListener('visibilitychange', update); return () => document.removeEventListener('visibilitychange', update); }, []);
   const [recordTasks, setRecordTasks] = useState<Record<string, Task>>({});
+  const [resultRecords, setResultRecords] = useState<Record<string, AvatarRecord>>({});
+  const [recordTotal, setRecordTotal] = useState<number | null>(null);
+  const historySequence = useRef(0);
+  const historyPages = useRef({ scope: '', count: 1 });
+  const mergeResultRecords = useCallback((records: AvatarRecord[]) => {
+    setResultRecords(old => {
+      const next = { ...old };
+      for (const record of records) if (record.kind === 'result' && record.taskId && (!next[record.taskId] || next[record.taskId].revision <= record.revision)) next[record.taskId] = record;
+      return next;
+    });
+  }, []);
+  useEffect(() => { setResultRecords({}); setRecordTotal(null); historySequence.current++; }, [ownerId]);
   const [parseStatus,setParseStatus]=useState<DescriptionStatus|null>(null),[stage,setStage]=useState('');
   const [pickerOpen, setPickerOpen] = useState(false), [referenceUploading, setReferenceUploading] = useState(false);
   const [referenceMetadata, setReferenceMetadata] = useState<{ owner: string; assets: UploadedAssetPayload[] }>({ owner: '', assets: [] });
@@ -103,14 +115,41 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   const planRef=useRef<string|null>(null), filterRef=useRef({tab,deleted}); filterRef.current={tab,deleted};
   const draftSignature=JSON.stringify({rules,planId:plan?.id,index,model,quality,resolution,advanced,tab,deleted,previousImageTaskId:previousImageTask?.id,runningPlans});
   usePageExitRisk({ unsaved: ready&&storedSignature===draftSignature ? [] : ['人物工作现场尚未保存'], busy: busy || referenceUploading ? ['人物操作或参考图上传处理中'] : [], revision: draftSignature });
-  const load = useCallback(async (append = false, nextCursor?: string | null) => { const owner=liveDraft.current.ownerId,filter={...filterRef.current};const params=new URLSearchParams({kind:filter.tab,deleted:filter.deleted?'1':'0'});if(nextCursor)params.set('cursor',nextCursor);const data = await api<Payload>(undefined, `?${params}`); if (!alive.current||owner!==liveDraft.current.ownerId||filterRef.current.tab!==filter.tab||filterRef.current.deleted!==filter.deleted) return; setRecords(old => append ? [...old, ...data.records.filter(r=>!old.some(o=>o.id===r.id))] : data.records);setRecordTasks(old=>append?{...old,...data.recordTasks}:data.recordTasks);setRecentConfigs(data.recentConfigs); setCursor(data.nextCursor || null); setPrices(data.settings.prices); setBillingReadiness(data.settings.billingReadiness); return data; }, []);
+  const load = useCallback(async (append = false, nextCursor?: string | null) => {
+    const owner = liveDraft.current.ownerId, filter = { ...filterRef.current }, sequence = ++historySequence.current;
+    const scope = `${owner}:${filter.tab}:${filter.deleted}`;
+    if (historyPages.current.scope !== scope) historyPages.current = { scope, count: 1 };
+    const valid = () => alive.current && owner === liveDraft.current.ownerId && sequence === historySequence.current && filterRef.current.tab === filter.tab && filterRef.current.deleted === filter.deleted;
+    const count = nextCursor ? 1 : Math.min(20, historyPages.current.count);
+    const rows: AvatarRecord[] = [], taskRows: Record<string, Task> = {};
+    let after = nextCursor, data: Payload | undefined, reads = 0;
+    // Refresh the loaded prefix with its matching cursor, not a fresh head plus stale tail.
+    for (; reads < count; reads++) {
+      const params = new URLSearchParams({ kind: filter.tab, deleted: filter.deleted ? '1' : '0' });
+      if (after) params.set('cursor', after);
+      data = await api<Payload>(undefined, `?${params}`);
+      if (!valid()) return;
+      rows.push(...data.records); Object.assign(taskRows, data.recordTasks);
+      after = data.nextCursor;
+      if (!after) { reads++; break; }
+    }
+    if (!data || !valid()) return;
+    historyPages.current.count = nextCursor ? historyPages.current.count + 1 : reads;
+    setRecords(old => Array.from(new Map([...(nextCursor && append ? old : []), ...rows].map(record => [record.id, record])).values()));
+    setRecordTasks(old => ({ ...old, ...taskRows }));
+    mergeResultRecords(rows);
+    setRecordTotal(Number.isSafeInteger(data.total) && data.total >= 0 ? data.total : null);
+    setRecentConfigs(data.recentConfigs); setCursor(data.nextCursor || null); setPrices(data.settings.prices); setBillingReadiness(data.settings.billingReadiness);
+    return data;
+  }, [mergeResultRecords]);
   const queryPlan = useCallback(async (id: string) => {
     const owner=liveDraft.current.ownerId;
     const sequence = (querySequences.current.get(id) || 0) + 1;
     querySequences.current.set(id, sequence);
-    const data = await api<{ plan: AvatarPlan; tasks: Task[];sourceTask?:Task|null }>(undefined, `?plan=${encodeURIComponent(id)}`);
+    const data = await api<{ plan: AvatarPlan; tasks: Task[];sourceTask?:Task|null; resultRecords: AvatarRecord[] }>(undefined, `?plan=${encodeURIComponent(id)}`);
     if (!alive.current||owner!==liveDraft.current.ownerId||planRef.current!==id||querySequences.current.get(id)!==sequence) return data;
     setPlan(old => old?.id===id ? old : data.plan);
+    mergeResultRecords(data.resultRecords || []);
     setTasks(data.tasks);setSourceTask(data.sourceTask||null);
     const latestTasks = data.sourceTask ? [...data.tasks, data.sourceTask] : data.tasks;
     setRecordTasks(old => ({ ...old, ...Object.fromEntries(latestTasks.map(task => [task.id, task])) }));
@@ -122,7 +161,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     }
     if (data.tasks.length) {setPending(false);try{localStorage.removeItem(`${key}:pending`);}catch{}}
     return data;
-  }, [key, refreshCredits]);
+  }, [key, refreshCredits, mergeResultRecords]);
   useImageBillingRefresh([...tasks, ...(sourceTask ? [sourceTask] : []),
     ...records.flatMap(record => record.taskId && recordTasks[record.taskId] ? [recordTasks[record.taskId]] : [])],
     async () => { await load(true); if (planRef.current) await queryPlan(planRef.current); }, ready);
@@ -136,7 +175,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     setDeleted(saved.deleted === true);
     if(saved.quality)setQuality(saved.quality);if(saved.resolution)setResolution(saved.resolution);
     if(Array.isArray(saved.runningPlans))setRunningPlans(saved.runningPlans.filter(id=>typeof id==='string'&&/^[a-zA-Z0-9-]{1,100}$/.test(id)));
-    if(typeof saved.previousImageTaskId==='string'&&/^[a-zA-Z0-9-]{1,100}$/.test(saved.previousImageTaskId)){try{const previous=await api<{sourceTask:Task|null}>(undefined,`?imageTask=${encodeURIComponent(saved.previousImageTaskId)}`);if(active)setPreviousImageTask(previous.sourceTask?.asset?previous.sourceTask:null);}catch{}}
+    if(typeof saved.previousImageTaskId==='string'&&/^[a-zA-Z0-9-]{1,100}$/.test(saved.previousImageTaskId)){try{const previous=await api<{sourceTask:Task|null; resultRecords: AvatarRecord[]}>(undefined,`?imageTask=${encodeURIComponent(saved.previousImageTaskId)}`);if(active){setPreviousImageTask(previous.sourceTask?.asset?previous.sourceTask:null);mergeResultRecords(previous.resultRecords||[]);}}catch{}}
     if(!active)return;
     const pendingId=localStorage.getItem(`${key}:pending`);
     const resumeId=pendingId||saved.planId;
@@ -210,14 +249,14 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   }
   const sheet=!!plan&&isAvatarSheet(plan), draftSheet=isAvatarSheet(rules), layoutChanged=!!plan&&avatarLayout(plan)!==avatarLayout(rules);
   const current = plan?.candidates[index], task = tasks.find(t => t.ordinal === (sheet ? 1 : index + 1))||sourceTask;
-  const imageTask=task?.asset?task:previousImageTask, image=imageTask?.asset;
+  const imageTask=task?.asset && !resultRecords[task.id]?.deletedAt ? task : previousImageTask && !resultRecords[previousImageTask.id]?.deletedAt ? previousImageTask : null, image=imageTask?.asset;
   const conditionsChanged=!!current&&avatarRulesSignature(rules,false)!==avatarRulesSignature(current.rules,false);
   const activePrompt=sheet?plan!.sheetPrompt||'':current?.prompt||'';
   const currentRecord = records.find(r => r.taskId === imageTask?.id);
   const candidateResults = plan ? (sheet ? [{ candidateIndex: 0, output: tasks.find(value => value.ordinal === 1) || sourceTask, draftId: `draft:${plan.id}:sheet` }]
     : plan.candidates.map((candidate, candidateIndex) => ({ candidateIndex, output: tasks.find(value => value.ordinal === candidateIndex + 1) || (candidateIndex === 0 ? sourceTask : null), draftId: `draft:${candidate.characterId}:${candidateIndex}` }))) : [];
   if (previousImageTask?.asset && !candidateResults.some(value => value.output?.id === previousImageTask.id)) candidateResults.push({ candidateIndex: -1, output: previousImageTask, draftId: previousImageTask.id });
-  const sharedResults = candidateResults.map(({ candidateIndex, output, draftId }) => ({
+  const sharedResults = candidateResults.filter(value => !value.output || !resultRecords[value.output.id]?.deletedAt).map(({ candidateIndex, output, draftId }) => ({
     id: output?.id || draftId, candidateIndex, output,
     label: candidateIndex < 0 ? '保留的上一张人物图片' : sheet ? avatarSheetLabel(plan?.layout) : `候选 ${candidateIndex + 1}`,
     status: output ? statusLabel[output.status] || '状态待确认' : '人物草稿，尚未出图',
@@ -382,7 +421,25 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     setStage('更新图片报价');const data=await api<{plan:AvatarPlan}>({action:'quote',id:plan.id,rules,model,quality,resolution,layout:avatarLayout(rules)});
     assertDraft(draft);await submit(data.plan,draft);
   }); }
-  async function mutate(record: AvatarRecord, action: string, extra: Record<string,unknown> = {}) { await api({ action, id: record.id, revision: record.revision, ...extra }); await load(); }
+  async function mutate(record: AvatarRecord, action: string, extra: Record<string,unknown> = {}) {
+    const owner = liveDraft.current.ownerId;
+    const result = await api<{ record: AvatarRecord }>({ action, id: record.id, revision: record.revision, ...extra });
+    if (!alive.current || owner !== liveDraft.current.ownerId) return;
+    if (result.record.id !== record.id || result.record.kind !== record.kind || result.record.taskId !== record.taskId || (action === 'delete' && !result.record.deletedAt)) throw new Error('结果未确认，请重新读取；未从页面移除图片');
+    mergeResultRecords([result.record]);
+    await load().catch(error => setError(`已保存，但列表暂未更新：${error.message}`));
+  }
+  async function removeResult(output: Task) {
+    const owner = liveDraft.current.ownerId;
+    const data = await api<{ sourceTask: Task | null; resultRecords: AvatarRecord[] }>(undefined, `?imageTask=${encodeURIComponent(output.id)}`);
+    if (!alive.current || owner !== liveDraft.current.ownerId) return;
+    const record = data.resultRecords.find(record => record.taskId === output.id && record.kind === 'result' && !record.deletedAt);
+    if (!record || data.sourceTask?.asset?.id !== output.asset?.id) throw new Error('这张图片的结果记录暂不可确认，请重新读取；没有删除任务、账单或原件');
+    if (!await confirm('将这张图片移到人物结果的“最近删除”？可撤销，任务、账单、资产和原件都会保留。', { title: '删除这张图', confirmLabel: '删除', danger: true })) return;
+    if (!alive.current || owner !== liveDraft.current.ownerId) return;
+    await mutate(record, 'delete');
+    if (alive.current && owner === liveDraft.current.ownerId) setNotice('这张图片已移到最近删除，可撤销；任务、账单和原件保留。');
+  }
   async function restore(record: AvatarRecord) { await run(async () => {
     if(blocked)throw new Error('原提交尚未确认，请先查询原任务');
     rememberResult();
@@ -435,6 +492,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
             {sheet && item.candidateIndex >= 0 && plan && <button type="button" disabled={busy} onClick={()=>void run(async()=>{await downloadAvatarCell(item.media!.src,avatarLayout(plan),index);setNotice('已在本机裁出所选格并交给浏览器下载；没有生成、上传或收费。');})}><Download size={15}/>裁出此格</button>}
           </> : null}
           renderPrimaryActions={item => item.media && item.output?.asset && !sheet && item.candidateIndex >= 0 && plan ? <button type="button" disabled={busy} onClick={()=>void run(async()=>{await askName('人物名称','我的人物',{title:'保存人物',confirmLabel:'保存',onSubmit:async name=>{await api({action:'save',name,planId:plan.id,index:item.candidateIndex,record:{kind:'character'}});await load();}});})}><Save size={15}/>保存这个人</button> : null}
+          renderDelete={item => item.media && item.output?.asset ? <button type="button" disabled={busy} title="删除这张图（可撤销）" aria-label={`删除${item.label}（可撤销）`} onClick={() => void run(() => removeResult(item.output!))}><Trash2 size={15}/></button> : null}
         />
         <div className={styles.controls}>
         {current&&<><button type="button" disabled={busy||blocked} onClick={()=>void prepare('new',undefined,false,true)}>{draftSheet?'换一组人物':'换一个人'}</button><button type="button" disabled={busy||blocked||needsAnalysis||sheet||draftSheet||!image&&!current.baselineAssetId} onClick={()=>void prepare('styling')}>换个造型</button>{(!tasks.length||layoutChanged||model!==plan?.model||quality!==plan?.quality||resolution!==plan?.resolution||current.compilerVersion!==AVATAR_COMPILER_VERSION)&&<button type="button" disabled={busy||blocked||conditionsChanged||needsAnalysis||(draftSheet||layoutChanged)&&plan?.candidates.length!==rules.candidates} onClick={()=>void quoteOriginal()}>重新报价并按原人物出图</button>}</>}
@@ -508,7 +566,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     <section className={styles.records}><div className={styles.heading}><div className={styles.controls}>{(['config','character','result'] as const).map(t=><button type="button" key={t} aria-pressed={tab===t} onClick={()=>setTab(t)}>{t==='config'?'随机规则':t==='character'?'保存的人物':'生成历史'}</button>)}</div><label><input type="checkbox" checked={deleted} onChange={e=>setDeleted(e.target.checked)} style={{width:'auto'}}/> 最近删除</label></div>
       {tab === 'result' ? <GeneratedImageResults key={`${ownerId}:${deleted}`} items={historyResults}
         scope={`sd2:avatar-history-results:v1:${ownerId}:${deleted ? 'deleted' : 'active'}`}
-        hasMore={Boolean(cursor)} loadMore={async () => { if (cursor) await load(true, cursor); }} busy={busy}
+        hasMore={Boolean(cursor)} total={recordTotal} loadMore={async () => { if (cursor) await load(true, cursor); }} busy={busy}
         emptyLabel={deleted ? '暂无已删除的生成记录' : '暂无生成历史'}
         renderMetadata={({record, status}) => <div className={styles.recordText}><strong title={record.name}>{record.name}</strong><small><RelativeTime value={record.createdAt}/> · {status}</small></div>}
         renderPrimaryActions={({record}) => record.deletedAt ? <button type="button" disabled={busy} onClick={()=>void run(()=>mutate(record,'undelete'))}>撤销删除</button> : null}

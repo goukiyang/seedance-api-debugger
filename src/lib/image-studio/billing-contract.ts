@@ -1,3 +1,5 @@
+import { formatAmountMicrosWithFixedCny } from '../costs/currency';
+
 export const IMAGE_BILLING_VERSION = 'cost02-v1';
 export const IMAGE_POINTS_PER_USD = 35;
 
@@ -72,11 +74,14 @@ export function imageBillingPending(view: ImageBillingView | null | undefined, n
 }
 
 export function imageBillingLabel(view: ImageBillingView) {
-  if (view.amountMicros !== null && view.chargedCredits !== null) {
-    const dollars = (view.amountMicros / 1_000_000).toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
-    return `$${dollars} · ${view.chargedCredits.toFixed(2)}点`;
+  if (view.status === 'confirmed') {
+    if (view.amountMicros !== null && Number.isFinite(view.amountMicros) && view.amountMicros >= 0
+      && view.chargedCredits !== null && Number.isFinite(view.chargedCredits) && view.chargedCredits >= 0) {
+      return `${formatAmountMicrosWithFixedCny(view.amountMicros, 'USD')} · ${view.chargedCredits.toFixed(2)}点`;
+    }
+    return '费用待核对';
   }
   if (['awaiting_response', 'pending', 'reconciling'].includes(view.status)) return '费用核对中';
   if (['conflict', 'over_limit', 'manual', 'deadline_expired'].includes(view.status)) return '费用待核对';
-  return '未对账';
+  return '费用待核对';
 }

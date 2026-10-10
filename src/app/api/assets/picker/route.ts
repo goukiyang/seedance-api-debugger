@@ -177,7 +177,11 @@ export async function GET(request: NextRequest) {
     const sorted = Array.from(dedup.values()).sort((a, b) => p.get('sort') === 'name' ? a.fileName.localeCompare(b.fileName, 'zh-CN') || a.identity.localeCompare(b.identity) : b.createdAt.localeCompare(a.createdAt) || a.identity.localeCompare(b.identity));
     if (p.get('view') === 'recent') sorted.sort((a, b) => keys.indexOf(a.key) - keys.indexOf(b.key));
     // Merge lightweight authorized identities first; load media metadata only for this page.
-    const pageItems = sorted.slice((page - 1) * limit, page * limit);
+    const after = p.get('after');
+    const afterIndex = after ? sorted.findIndex(item => item.identity === after) : -1;
+    if (after && afterIndex < 0) return NextResponse.json({ error: '素材目录已变化，请重新读取' }, { status: 409 });
+    const start = after ? afterIndex + 1 : (page - 1) * limit;
+    const pageItems = sorted.slice(start, start + limit);
     const pageAssets = await prisma.asset.findMany({ where: { id: { in: pageItems.flatMap(i => i.assetId ? [i.assetId] : []) }, status: 'active', ...(hidden.length ? { original_url: { notIn: hidden } } : {}) } });
     const byId = new Map(pageAssets.map(a => [a.id, a]));
     const projected = pageItems.flatMap(item => {
@@ -192,7 +196,9 @@ export async function GET(request: NextRequest) {
         thumbnailUrl: item.referenceImageId ? `/api/reference-images/${item.referenceImageId}/content?variant=thumbnail` : asset.type === 'image' ? `/api/content-reactions/media?key=${encodeURIComponent(`asset:${asset.id}`)}&variant=thumbnail` : asset.thumbnail_url ? url(asset.thumbnail_url) : null }];
     });
     const unavailable = sorted.filter(item => item.unavailableReason).length;
-    return NextResponse.json({ items: projected, total: sorted.length, page, hasMore: page * limit < sorted.length, albums, templates: Array.from(templateOptions, ([id, name]) => ({ id, name })),
+    const hasMore = start + limit < sorted.length;
+    return NextResponse.json({ items: projected, total: sorted.length, page, hasMore,
+      nextCursor: hasMore ? pageItems[pageItems.length - 1]?.identity || null : null, albums, templates: Array.from(templateOptions, ([id, name]) => ({ id, name })),
       ...(unavailable ? { notice: `${unavailable} 个素材暂不能用于此处，原因显示在对应素材下方；其他素材可正常添加` } : {}),
     }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {

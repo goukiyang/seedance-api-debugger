@@ -1,4 +1,5 @@
 'use client';
+import { ChevronFirst, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface PaginationControlsProps {
   page: number;
@@ -7,6 +8,7 @@ interface PaginationControlsProps {
   pageSize?: number;
   onPageChange: (page: number) => void;
   label?: string;
+  busy?: boolean;
 }
 
 export default function PaginationControls({
@@ -16,6 +18,7 @@ export default function PaginationControls({
   pageSize,
   onPageChange,
   label = '记录',
+  busy = false,
 }: PaginationControlsProps) {
   if (totalPages <= 1) return null;
 
@@ -30,21 +33,25 @@ export default function PaginationControls({
         {start !== null && end !== null ? `，当前 ${start}-${end}` : ''}
       </span>
       <div className="page-pagination-actions">
+        <button className="btn btn-secondary" type="button" aria-label="回到第一页" title="回到第一页"
+          disabled={busy || clampedPage <= 1} onClick={() => onPageChange(1)}><ChevronFirst size={17} /></button>
         <button
           className="btn btn-secondary"
           type="button"
-          disabled={clampedPage <= 1}
+          disabled={busy || clampedPage <= 1}
+          aria-label="上一页" title="上一页"
           onClick={() => onPageChange(clampedPage - 1)}
         >
-          上一页
+          <ChevronLeft size={17} />
         </button>
         <button
           className="btn btn-secondary"
           type="button"
-          disabled={clampedPage >= totalPages}
+          disabled={busy || clampedPage >= totalPages}
+          aria-label="下一页" title="下一页"
           onClick={() => onPageChange(clampedPage + 1)}
         >
-          下一页
+          <ChevronRight size={17} />
         </button>
       </div>
     </nav>

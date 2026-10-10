@@ -7,7 +7,8 @@ import { ContextClipboardActions } from '@/components/ContextClipboardActions';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Heart, ChevronDown, ChevronRight, Copy, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
+import { Heart, ChevronFirst, ChevronLeft, ChevronDown, ChevronRight, Copy, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
+import { useResultPages } from '@/components/useResultPages';
 import { ContextVersionLabel, useModuleContextVersion } from './context-version-label';
 import { uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
@@ -206,6 +207,8 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
   const [directory, setDirectory] = useState<Array<Pick<StudioModule, 'id' | 'name' | 'groupName' | 'sourcePresetId'>>>([]);
   const [directoryReady, setDirectoryReady] = useState(false);
   const removedModuleIds = useRef(new Set<string>());
+  const moduleReadScope = useRef({ owner: userId, generation: 0 });
+  if (moduleReadScope.current.owner !== userId) moduleReadScope.current = { owner: userId, generation: moduleReadScope.current.generation + 1 };
   const hydratingIds = useRef(new Set<string>());
   const [hydrating, setHydrating] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -301,16 +304,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
       page.style.removeProperty('--template-mobile-nav-height');
     };
   }, [templateWorkbench, updateNavigationOffset]);
-  const [coverPage, setCoverPage] = useState(() => {
-    if (typeof window === 'undefined') return 0;
-    try {
-      const stored = Number(window.localStorage.getItem('sd2-image-studio-cover-page'));
-      return Number.isInteger(stored) && stored >= 0 ? stored : 0;
-    } catch {
-      return 0;
-    }
-  });
-  const [coverColumns, setCoverColumns] = useState(4);
+  const [coverRetry, setCoverRetry] = useState(0);
   const globalEditor = useStudioSettings(userId, isAdmin);
   const settings = globalEditor.settings;
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
@@ -340,23 +334,20 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     finally { ratiosLock.current = false; setRatiosBusy(false); }
   }
   useEffect(() => { void syncRatios(); }, []);
-  useEffect(() => {
-    const syncCoverColumns = () => setCoverColumns(window.innerWidth <= 520 ? 1 : window.innerWidth <= 800 ? 2 : window.innerWidth <= 1000 ? 3 : 4);
-    syncCoverColumns();
-    window.addEventListener('resize', syncCoverColumns);
-    return () => window.removeEventListener('resize', syncCoverColumns);
-  }, []);
-  useEffect(() => {
-    try { const stored = Number(localStorage.getItem('sd2-image-studio-cover-page')); if (Number.isInteger(stored) && stored >= 0) setCoverPage(stored); } catch { /* Pagination is a convenience, not a dependency. */ }
-  }, []);
   const createId = useRef<string | null>(null);
   const createLock = useRef(false);
   const listLock = useRef(false);
+  useEffect(() => {
+    listLock.current = false; removedModuleIds.current.clear(); hydratingIds.current.clear();
+    setModules([]); setDirectory([]); setDirectoryReady(false); setCursor(null); setActive('');
+  }, [userId]);
   const loadModules = useCallback(async (next?: string) => {
     if (listLock.current) return;
     listLock.current = true; setLoading(true); setError('');
+    const scope = moduleReadScope.current;
     try {
       const data = await readResponse(await fetch(`/api/image-studio/modules${next ? `?cursor=${encodeURIComponent(next)}` : ''}`, { cache: 'no-store' }));
+      if (moduleReadScope.current !== scope) return;
       if (Array.isArray(data.directory)) {
         setDirectory(data.directory.filter((item: StudioModule) => !removedModuleIds.current.has(item.id)));
         setDirectoryReady(true);
@@ -368,8 +359,8 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
             || new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id.localeCompare(b.id));
       });
       setCursor(data.nextCursor); setActive(current => current || data.modules[0]?.id || '');
-    } catch (e) { setError(e instanceof Error ? e.message : '模块读取失败'); }
-    finally { listLock.current = false; setLoading(false); }
+    } catch (e) { if (moduleReadScope.current === scope) setError(e instanceof Error ? e.message : '模块读取失败'); }
+    finally { if (moduleReadScope.current === scope) { listLock.current = false; setLoading(false); } }
   }, [userId]);
   useEffect(() => { void loadModules(); }, [loadModules]);
   const hydrateModules = useCallback(async (ids: string[]) => {
@@ -377,16 +368,20 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     if (!requested.length) return;
     requested.forEach(id => hydratingIds.current.add(id));
     setHydrating(true);
+    const scope = moduleReadScope.current;
     try {
       const data = await readResponse(await fetch(`/api/image-studio/modules?ids=${encodeURIComponent(requested.join(','))}`, { cache: 'no-store' }));
+      if (moduleReadScope.current !== scope) return;
+      const returnedIds = new Set<string>(data.modules.map((item: StudioModule) => item.id));
+      setDirectory(current => current.filter(item => !requested.includes(item.id) || returnedIds.has(item.id)));
       setModules(current => {
         const existing = new Set(current.map(item => item.id));
         return [...current, ...data.modules.filter((item: StudioModule) => !existing.has(item.id) && !removedModuleIds.current.has(item.id))];
       });
       setError('');
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '模块读取失败，请重试'); }
-    finally { requested.forEach(id => hydratingIds.current.delete(id)); setHydrating(hydratingIds.current.size > 0); }
-  }, []);
+    } catch (cause) { if (moduleReadScope.current === scope) setError(cause instanceof Error ? cause.message : '模块读取失败，请重试'); }
+    finally { if (moduleReadScope.current === scope) { requested.forEach(id => hydratingIds.current.delete(id)); setHydrating(hydratingIds.current.size > 0); } }
+  }, [userId]);
   const navigateToModule = useCallback((group: string, id: string, options: ModuleNavigationOptions = {}) => {
     replaceImageModuleLocation(id);
     routedContentHandled.current = `${userId}:${window.location.search}`;
@@ -536,8 +531,8 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
   const navigation = useMemo(() => {
     const items = new Map(directory.map(item => [item.id, item]));
     modules.forEach(item => items.set(item.id, { id: item.id, name: item.name, groupName: item.groupName }));
-    return Array.from(items.values());
-  }, [directory, modules]);
+    return Array.from(items.values()).sort((a, b) => Number(b.id === `default-${userId}`) - Number(a.id === `default-${userId}`));
+  }, [directory, modules, userId]);
   const groupedModules = useMemo(() => navigation.reduce<Record<string, typeof navigation>>((groups, item) => {
     const group = item.groupName || '未分组';
     (groups[group] ||= []).push(item);
@@ -655,14 +650,21 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
   useEffect(() => {
     if (active && navigation.some(item => item.id === active) && !modules.some(item => item.id === active)) void hydrateModules([active]);
   }, [active, navigation, modules, hydrateModules]);
-  const coverPageSize = coverColumns * 3;
-  const coverPageCount = Math.max(1, Math.ceil(modules.length / coverPageSize));
-  const visibleCoverModules = useMemo(() => modules.slice(coverPage * coverPageSize, (coverPage + 1) * coverPageSize), [coverPage, coverPageSize, modules]);
+  const coverPages = useResultPages({ items: directoryReady ? navigation : [], storageKey: `sd2:module-covers:v1:${userId}`,
+    visible: coverView, busy: loading || !directoryReady, error: Boolean(error), hasMore: false,
+    total: directoryReady ? navigation.length : null, loadMore: async () => undefined, currentId: null });
+  const visibleCoverIds = coverPages.pageItems.map(item => item.id).join(',');
   useEffect(() => {
-    if (!modules.length) return;
-    setCoverPage(current => Math.min(current, coverPageCount - 1));
-  }, [coverPageCount, modules.length]);
-  useEffect(() => { try { localStorage.setItem('sd2-image-studio-cover-page', String(coverPage)); } catch { /* Pagination is a convenience, not a dependency. */ } }, [coverPage]);
+    if (!coverView || !directoryReady || error) return;
+    const missing = visibleCoverIds.split(',').filter(id => id && !modules.some(module => module.id === id));
+    if (missing.length) void hydrateModules(missing);
+  }, [coverView, directoryReady, visibleCoverIds, modules, hydrateModules, error, coverRetry]);
+  const coverPagination = <nav className={styles.pagination} aria-label="封面分页">
+    <button type="button" aria-label="回到第一页封面" title="回到第一页封面" disabled={!coverPages.start && !coverPages.restoring} onClick={coverPages.reset}><ChevronFirst size={17} /></button>
+    <button type="button" aria-label="上一页封面" title="上一页封面" disabled={!coverPages.start} onClick={coverPages.previous}><ChevronLeft size={17} /></button>
+    <span role="status">{directoryReady ? `第 ${coverPages.page} / ${coverPages.pages} 页，共 ${navigation.length} 个封面` : '正在读取封面目录'}</span>
+    <button type="button" aria-label="下一页封面" title="下一页封面" disabled={!coverPages.canNext} onClick={coverPages.next}><ChevronRight size={17} /></button>
+  </nav>;
   useEffect(() => {
     if (!navigation.length) return;
     const availableGroups = Object.keys(groupedModules);
@@ -790,17 +792,19 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
       <button type="button" onClick={() => void openPresetLibrary()}>模板库</button>
       <button type="button" onClick={() => setGlobalSettingsOpen(true)}><Settings size={17} />通用设置</button>
       <button type="button" disabled={creating || !modules.length} onClick={() => void createModule()}><Plus size={17} />{creating ? '新建中' : '新建模块'}</button></div></header>
-    {error && <p role="alert" className={styles.error}>{error}<button onClick={() => void loadModules(cursor || undefined)}>重试读取</button></p>}
+    {error && <p role="alert" className={styles.error}>{error}<button onClick={() => { if (coverView && directoryReady) { setError(''); setCoverRetry(value => value + 1); } else void loadModules(cursor || undefined); }}>重试读取</button></p>}
     {attention.error && <p role="status" className={styles.muted}>{attention.error}<button type="button" onClick={() => {
       const target = attention.retryModuleId && directory.find(item => item.id === attention.retryModuleId);
       if (target) navigateToModule(target.groupName || '未分组', target.id); else void attention.refresh(true);
     }}>重试</button></p>}
-    {coverView && <section className={styles.coverGrid} aria-label={templateWorkbench ? '模块封面' : '模板封面'}><div className={styles.coverGridInner}>{visibleCoverModules.map(module => {
-      return <button key={module.id} type="button" className={styles.coverCard} onClick={() => navigateToModule(module.groupName || '未分组', module.id)}>
-        <TemplateCoverVisual module={module} />
-        <span className={styles.coverDescription}><strong className={styles.navLabel} title={module.name}><span className={styles.navName}>{module.name}</span>{attention.unread.has(module.id) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</strong><small>{module.prompt.trim() ? module.prompt.trim().slice(0, 96) : `以${module.name}为主题，按当前参考图和模型设置生成图片。`}</small></span>
+    {coverView && <section className={styles.coverGrid} aria-label={templateWorkbench ? '模块封面' : '模板封面'}>{coverPagination}<div className={styles.coverGridInner} ref={coverPages.gridRef}>{coverPages.pageItems.map(entry => {
+      const coverModule = modules.find(item => item.id === entry.id);
+      if (!coverModule) return <div key={entry.id} className={`${styles.coverCard} sd2-loading-surface`} data-busy={!error} role="status"><strong>{entry.name}</strong><span>{error ? '封面未能读取，请重试' : '读取封面中'}</span></div>;
+      return <button key={coverModule.id} type="button" className={styles.coverCard} onClick={() => navigateToModule(coverModule.groupName || '未分组', coverModule.id)}>
+        <TemplateCoverVisual module={coverModule} />
+        <span className={styles.coverDescription}><strong className={styles.navLabel} title={coverModule.name}><span className={styles.navName}>{coverModule.name}</span>{attention.unread.has(coverModule.id) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</strong><small>{coverModule.prompt.trim() ? coverModule.prompt.trim().slice(0, 96) : `以${coverModule.name}为主题，按当前参考图和模型设置生成图片。`}</small></span>
       </button>;
-    })}</div><div className={styles.pagination} aria-label={templateWorkbench ? '模块封面分页' : '模板封面分页'}><button type="button" disabled={coverPage <= 0} onClick={() => setCoverPage(current => Math.max(0, current - 1))}>上一页</button><span>第 {coverPage + 1} / {coverPageCount} 页</span><button type="button" disabled={coverPage >= coverPageCount - 1} onClick={() => setCoverPage(current => Math.min(coverPageCount - 1, current + 1))}>下一页</button></div>{cursor && <button type="button" disabled={loading} onClick={() => void loadModules(cursor)}>{templateWorkbench ? '加载更多模块' : '加载更多模板'}</button>}</section>}
+    })}</div>{coverPagination}{coverPages.canNext && <button type="button" onClick={coverPages.next}>加载更多封面</button>}</section>}
     <div hidden={coverView}>
     {modules.map(module => <ImageStudioBlock key={module.id} templateWorkbench={templateWorkbench} module={module} hidden={coverView || Boolean(selectedGroup && module.groupName !== selectedGroup)} onMetadataChange={updateModuleMetadata} groups={groups} onDeleteGroup={deleteGroup} groupDeleting={groupDeleting} isAdmin={isAdmin} onToggleSharing={toggleModuleSharing} sharingId={presetSharingId}
       onModuleDelete={id => { removedModuleIds.current.add(id); setModules(current => current.filter(item => item.id !== id)); setDirectory(current => current.filter(item => item.id !== id)); setActive(current => current === id ? '' : current); }}
@@ -931,6 +935,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const [copyFeedback, setCopyFeedback] = useState<{ id: string; text: string } | null>(null);
   const [tasks, setTasks] = useState<StudioTask[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [taskTotal, setTaskTotal] = useState<number | null>(null);
+  const loadedTaskPages = useRef(1);
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [tasksError, setTasksError] = useState('');
   const [taskReadAction, setTaskReadAction] = useState<'idle' | 'initial' | 'refresh' | 'more'>('initial');
@@ -1397,6 +1403,25 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   }
 
   const loadTasks = useCallback(async (cursor?: string, action: 'initial' | 'refresh' | 'silent' | 'view' = 'refresh') => {
+    const readPages = async (signal?: AbortSignal, entry = false) => {
+      const count = cursor ? 1 : Math.min(20, loadedTaskPages.current);
+      let next: string | undefined = cursor;
+      let result: { tasks: StudioTask[]; nextCursor: string | null; total: number; entrySnapshot?: string } | null = null;
+      let entrySnapshot: string | undefined;
+      const rows: StudioTask[] = [];
+      for (let read = 0; read < count; read++) {
+        const query = new URLSearchParams({ moduleId: module.id });
+        if (next) query.set('cursor', next);
+        if (entry && read === 0 && !cursor) query.set('attention', 'entry');
+        const page = await readResponse(await fetch(`/api/image-studio/tasks?${query}`, { cache: 'no-store', signal }));
+        rows.push(...page.tasks);
+        entrySnapshot ||= page.entrySnapshot;
+        result = { ...page, entrySnapshot };
+        next = page.nextCursor || undefined;
+        if (!next) break;
+      }
+      return { ...result!, tasks: Array.from(new Map(rows.map(task => [task.id, task])).values()) };
+    };
     if (templateWorkbench) {
       const scope = `${userId}:${module.id}`;
       if (action === 'initial' && taskReadLoaded.current) action = 'silent';
@@ -1413,20 +1438,17 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         setTaskRetryCursor(cursor);
       }
       try {
-        const query = new URLSearchParams({ moduleId: module.id });
-        if (cursor) query.set('cursor', cursor);
-        if (action === 'view' && !cursor) query.set('attention', 'entry');
-        const result = await readResponse(await fetch(`/api/image-studio/tasks?${query}`, { cache: 'no-store', signal: request.controller.signal }));
+        const result = await readPages(request.controller.signal, action === 'view');
         if (!currentRequest()) return;
         taskReadLoaded.current = true;
         setTasks(current => {
           const fresh: StudioTask[] = result.tasks.filter((task: StudioTask) => !deletedIds.current.has(task.id));
           const ids = new Set(fresh.map(task => task.id));
           const previous = current.filter(task => !ids.has(task.id) && !deletedIds.current.has(task.id));
-          return cursor ? [...previous, ...fresh] : loadedMore.current ? [...fresh, ...previous] : fresh;
+          return cursor ? [...previous, ...fresh] : fresh;
         });
-        if (cursor || !loadedMore.current) setNextCursor(result.nextCursor);
-        if (cursor) loadedMore.current = true;
+        setNextCursor(result.nextCursor); setTaskTotal(result.total);
+        if (cursor) { loadedMore.current = true; loadedTaskPages.current++; }
         setTasksError('');
         void onResultsAvailable();
         if (action === 'view' && !cursor && currentView.current.active && currentView.current.token === requestedToken && typeof result.entrySnapshot === 'string') {
@@ -1444,25 +1466,25 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     }
     if (listLock.current) return;
     listLock.current = true;
+    const scope = `${userId}:${module.id}`;
     try {
-      const query = new URLSearchParams({ moduleId: module.id });
-      if (cursor) query.set('cursor', cursor);
-      const result = await readResponse(await fetch(`/api/image-studio/tasks?${query}`, { cache: 'no-store' }));
+      const result = await readPages();
+      if (taskReadScopeRef.current !== scope) return;
       setTasks(current => {
         const fresh: StudioTask[] = result.tasks.filter((task: StudioTask) => !deletedIds.current.has(task.id));
         const ids = new Set(fresh.map(task => task.id));
         const previous = current.filter(task => !ids.has(task.id) && !deletedIds.current.has(task.id));
-        return cursor ? [...previous, ...fresh] : loadedMore.current ? [...fresh, ...previous] : fresh;
+        return cursor ? [...previous, ...fresh] : fresh;
       });
-      if (cursor || !loadedMore.current) setNextCursor(result.nextCursor);
-      if (cursor) loadedMore.current = true;
+      setNextCursor(result.nextCursor); setTaskTotal(result.total);
+      if (cursor) { loadedMore.current = true; loadedTaskPages.current++; }
       setTasksError('');
-    } catch (e) { setTasksError(e instanceof Error ? e.message : '读取记录失败'); }
-    finally { listLock.current = false; setLoadingTasks(false); }
+    } catch (e) { if (taskReadScopeRef.current === scope) setTasksError(e instanceof Error ? e.message : '读取记录失败'); }
+    finally { if (taskReadScopeRef.current === scope) { listLock.current = false; setLoadingTasks(false); } }
   }, [module.id, userId, templateWorkbench, onResultsAvailable, onTemplateEntered]);
   useEffect(() => {
-    if (!templateWorkbench) return;
-    setTasks([]); setSelected([]); setPreview(null); setNextCursor(null); setTasksError('');
+    setTasks([]); setSelected([]); setPreview(null); setNextCursor(null); setTaskTotal(null); loadedTaskPages.current = 1; setTasksError('');
+    listLock.current = false;
     setViewedResults(null); requestedReadToken.current = 0; readAttemptToken.current = 0;
     setLoadingTasks(true); setTaskReadAction('initial'); loadedMore.current = false; taskReadLoaded.current = false;
     return () => {
@@ -2106,7 +2128,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           scope={`sd2-image-studio-${likedResults.liked ? 'liked-' : ''}result-page:${taskReadScope}`}
           visible={!hidden && resultView === 'images'} loading={resultLoading} busy={resultBusy}
           error={resultError} emptyLabel={likedResults.liked ? '当前模板还没有喜欢的结果' : '暂无生成记录'}
-          hasMore={Boolean(resultCursor)} loadMore={readNextResultPage}
+          hasMore={Boolean(resultCursor)} total={likedResults.liked ? likedResults.total : taskTotal} loadMore={readNextResultPage}
           onRetry={() => { if (likedResults.liked) likedResults.refresh(); else void loadTasks(taskRetryCursor); }}
           selectedId={selectedResultId} onSelect={item => setSelectedResultId(item.id)}
           previewId={preview?.taskId || null} onPreviewChange={item => {

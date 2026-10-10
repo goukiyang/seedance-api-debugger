@@ -14,8 +14,12 @@ import {
   YAxis,
 } from 'recharts';
 import {
+  CNY_CONVERSION_UNAVAILABLE,
+  MONEY_AMOUNT_UNAVAILABLE,
+  currencyAmountToCny,
   formatAmountMicrosWithFixedCny,
   formatAmountMinorWithFixedCny,
+  formatCnyAmount,
 } from '@/lib/costs/currency';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
@@ -81,7 +85,26 @@ const TREND_BUCKET_WIDTH = 142;
 
 function formatCurrencyTotals(totals: DashboardCurrencyTotal[], fallback = '待官方确认') {
   if (!totals.length) return fallback;
-  return totals.map((item) => formatAmountMicrosWithFixedCny(item.amount_micros, item.currency)).join(' · ');
+  let totalCny = 0;
+  let hasUnconvertedAmount = false;
+  let hasInvalidAmount = false;
+  for (const item of totals) {
+    const amountCny = currencyAmountToCny(item.amount_micros / 1_000_000, item.currency);
+    if (amountCny === null) {
+      const display = formatAmountMicrosWithFixedCny(item.amount_micros, item.currency);
+      hasUnconvertedAmount ||= display === CNY_CONVERSION_UNAVAILABLE;
+      hasInvalidAmount ||= display === MONEY_AMOUNT_UNAVAILABLE;
+      continue;
+    }
+    totalCny += amountCny;
+  }
+  if (hasUnconvertedAmount || hasInvalidAmount || !Number.isFinite(totalCny)) {
+    return [
+      hasUnconvertedAmount ? CNY_CONVERSION_UNAVAILABLE : '',
+      hasInvalidAmount || !Number.isFinite(totalCny) ? MONEY_AMOUNT_UNAVAILABLE : '',
+    ].filter(Boolean).join(' · ');
+  }
+  return formatCnyAmount(totalCny);
 }
 
 function formatCurrencyRates(totals: DashboardCurrencyTotal[], fallback = '暂无可算均价') {
@@ -148,20 +171,29 @@ function maxBreakdownCount(items: DashboardBreakdownItem[]) {
 }
 
 const donutColors = ['#2563eb', '#22a06b', '#f59e0b', '#7c3aed', '#06b6d4', '#94a3b8'];
-type DonutMetric = 'official_cost' | 'points' | 'count';
+type DonutMetric = 'official_cost' | 'points' | 'count' | 'unavailable';
 
-function officialMicrosTotal(item: DashboardBreakdownItem) {
-  return item.official_costs.reduce((sum, total) => sum + total.amount_micros, 0);
+function officialCnyTotal(item: DashboardBreakdownItem) {
+  let totalCny = 0;
+  for (const total of item.official_costs) {
+    const amountCny = currencyAmountToCny(total.amount_micros / 1_000_000, total.currency);
+    if (amountCny === null) return null;
+    totalCny += amountCny;
+  }
+  return Number.isFinite(totalCny) ? totalCny : null;
 }
 
 function donutMetric(items: DashboardBreakdownItem[]): DonutMetric {
-  if (items.some((item) => officialMicrosTotal(item) > 0)) return 'official_cost';
+  if (items.some((item) => item.official_costs.length > 0)) {
+    return items.some((item) => officialCnyTotal(item) === null) ? 'unavailable' : 'official_cost';
+  }
   if (items.some((item) => item.points > 0)) return 'points';
   return 'count';
 }
 
 function breakdownWeight(item: DashboardBreakdownItem, metric: DonutMetric) {
-  if (metric === 'official_cost') return officialMicrosTotal(item);
+  if (metric === 'unavailable') return 0;
+  if (metric === 'official_cost') return officialCnyTotal(item) || 0;
   if (metric === 'points') return item.points;
   return item.count;
 }
@@ -172,6 +204,7 @@ function breakdownWeightTotal(items: DashboardBreakdownItem[], metric: DonutMetr
 
 function breakdownShare(item: DashboardBreakdownItem, items: DashboardBreakdownItem[]) {
   const metric = donutMetric(items);
+  if (metric === 'unavailable') return '—';
   const total = breakdownWeightTotal(items, metric);
   if (total <= 0) return '0%';
   return `${((breakdownWeight(item, metric) / total) * 100).toFixed(1)}%`;
@@ -179,6 +212,7 @@ function breakdownShare(item: DashboardBreakdownItem, items: DashboardBreakdownI
 
 function donutGradient(items: DashboardBreakdownItem[]) {
   const metric = donutMetric(items);
+  if (metric === 'unavailable') return '#e2e8f0 0deg 360deg';
   const total = breakdownWeightTotal(items, metric);
   if (total <= 0) return '#e2e8f0 0deg 360deg';
 
@@ -251,8 +285,15 @@ function DonutLegend({ items, showProjectAvatar = false }: { items: DashboardBre
   );
 }
 
-function trendOfficialMicros(bucket: DashboardTrendBucket) {
-  return bucket.official_costs.reduce((sum, total) => sum + total.amount_micros, 0);
+function trendBucketCnyAmount(bucket: DashboardTrendBucket) {
+  if (bucket.task_count > 0 && bucket.official_costs.length === 0) return null;
+  let totalCny = 0;
+  for (const total of bucket.official_costs) {
+    const amountCny = currencyAmountToCny(total.amount_micros / 1_000_000, total.currency);
+    if (amountCny === null) return null;
+    totalCny += amountCny;
+  }
+  return Number.isFinite(totalCny) ? totalCny : null;
 }
 
 function mergeTrendOfficialCosts(buckets: DashboardTrendBucket[]) {
@@ -272,21 +313,12 @@ function mergeTrendOfficialCosts(buckets: DashboardTrendBucket[]) {
 }
 
 function formatTrendBucketCost(bucket: DashboardTrendBucket) {
-  if (bucket.official_costs.length) return formatCurrencyTotals(bucket.official_costs, '$0.00');
-  return bucket.task_count > 0 ? '待官方确认' : '$0.00';
+  if (bucket.official_costs.length) return formatCurrencyTotals(bucket.official_costs, '¥0.00');
+  return bucket.task_count > 0 ? '待官方确认' : '¥0.00';
 }
 
 function formatTrendCostBarLabel(bucket: DashboardTrendBucket) {
-  if (!bucket.official_costs.length) return bucket.task_count > 0 ? '待确认' : '$0.00';
-  return bucket.official_costs
-    .map((total) => {
-      const amount = total.amount_micros / 1_000_000;
-      const currency = total.currency.toUpperCase();
-      if (currency === 'USD') return `$${amount.toFixed(2)}`;
-      if (currency === 'CNY') return `¥${amount.toFixed(2)}`;
-      return `${amount.toFixed(2)} ${currency}`;
-    })
-    .join(' / ');
+  return formatTrendBucketCost(bucket);
 }
 
 function trendBucketClass(bucket: DashboardTrendBucket) {
@@ -301,10 +333,7 @@ function formatCompactNumber(value: number) {
 }
 
 function formatCostAxis(value: number) {
-  if (value === 0) return '$0';
-  if (Math.abs(value) >= 1000) return `$${compactFormatter.format(value)}`;
-  if (Math.abs(value) >= 10) return `$${Math.round(value)}`;
-  return `$${value.toFixed(1)}`;
+  return formatCnyAmount(value);
 }
 
 function trendChartWidth(bucketCount: number) {
@@ -319,8 +348,7 @@ type TrendChartPoint = {
   enhanceTaskCount: number;
   durationSeconds: number;
   durationLabel: string;
-  officialCostMicros: number;
-  officialCostAmount: number;
+  officialCostAmount: number | null;
   officialCostLabel: string;
   officialCostBarLabel: string;
   stateLabel: string;
@@ -328,7 +356,7 @@ type TrendChartPoint = {
 };
 
 function toTrendChartPoint(bucket: DashboardTrendBucket): TrendChartPoint {
-  const officialCostMicros = trendOfficialMicros(bucket);
+  const officialCostAmount = trendBucketCnyAmount(bucket);
   const enhanceTaskCount = Math.max(0, bucket.enhance_task_count || 0);
   const regularTaskCount = Math.max(0, bucket.task_count - enhanceTaskCount);
   return {
@@ -339,8 +367,7 @@ function toTrendChartPoint(bucket: DashboardTrendBucket): TrendChartPoint {
     enhanceTaskCount,
     durationSeconds: bucket.duration_seconds,
     durationLabel: formatSeconds(bucket.duration_seconds),
-    officialCostMicros,
-    officialCostAmount: officialCostMicros / 1_000_000,
+    officialCostAmount,
     officialCostLabel: formatTrendBucketCost(bucket),
     officialCostBarLabel: formatTrendCostBarLabel(bucket),
     stateLabel: bucket.official_costs.length ? '官方已确认' : bucket.task_count > 0 ? '待官方确认' : '暂无生成',
@@ -480,7 +507,7 @@ function TrendChart({ buckets }: { buckets: DashboardTrendBucket[] }) {
                   tick={{ fill: '#92400e', fontSize: 12, fontWeight: 700 }}
                   tickFormatter={formatCostAxis}
                   tickLine={false}
-                  width={58}
+                  width={92}
                   yAxisId="cost"
                 />
                 <Tooltip content={<TrendTooltip />} cursor={{ fill: 'rgba(37, 99, 235, 0.08)' }} />

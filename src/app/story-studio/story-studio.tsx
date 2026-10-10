@@ -95,6 +95,8 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
   const [picker, setPicker] = useState<string | null>(null);
   const [results, setResults] = useState<GeneratedImageResult[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
+  const [resultTotal, setResultTotal] = useState<number | null>(null);
+  const resultReadSequence = useRef(0);
   const [resultShot, setResultShot] = useState<string | null>(null);
   const [resultAssets, setResultAssets] = useState<Record<string, PickerItem>>({});
   const [focusVideoId, setFocusVideoId] = useState<string | null>(null);
@@ -108,6 +110,8 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
   const alive = useRef(true);
   const { confirm, productDialog } = useProductDialog();
   const key = `sd2:story:v1:${userId}:${documentId}:${nodeId}`;
+  const resultScope = useRef(key); resultScope.current = key;
+  useEffect(() => { resultReadSequence.current++; setResults([]); setCursor(null); setResultShot(null); setResultTotal(null); setResultAssets({}); }, [key]);
   const loadedContext = useRef(key);
   function assertCurrentContext() {
     if (!alive.current || loadedContext.current !== key || documentRef.current?.id !== documentId) throw Error('故事页面已切换，请回到原故事查询；不会继续派发');
@@ -419,13 +423,15 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     await save(); setNotice('已选用原图，未提交视频生成');
   }
   async function readResults(shotId: string, more = false) {
+    const scope = key, sequence = ++resultReadSequence.current;
     const handoff = current.current.images[shotId];
     if (!handoff || !imageAllowed) throw Error('此镜头还没有可用的生图工作区');
     const query = new URLSearchParams({ moduleId: handoff.moduleId });
     if (more && cursor) query.set('cursor', cursor);
     const data = await request<{ tasks: Array<{ id: string; status: string; error?: string; asset?: {
       id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number;
-    } | null }>; nextCursor?: string | null }>(`/api/image-studio/tasks?${query}`);
+    } | null }>; nextCursor?: string | null; total: number }>(`/api/image-studio/tasks?${query}`);
+    if (!alive.current || resultScope.current !== scope || sequence !== resultReadSequence.current) return;
     const assets: Record<string, PickerItem> = {};
     const items: GeneratedImageResult[] = data.tasks.map(task => {
       const asset = task.status === 'succeeded' ? task.asset : null;
@@ -439,7 +445,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
           alt: '分镜画面', contentKey: `asset:${asset.id}` as ContentKey } } : {}) };
     });
     setResultShot(shotId); setResults(old => more ? [...old, ...items.filter(item => !old.some(existing => existing.id === item.id))] : items);
-    setResultAssets(old => more ? { ...old, ...assets } : assets); setCursor(data.nextCursor || null);
+    setResultAssets(old => more ? { ...old, ...assets } : assets); setCursor(data.nextCursor || null); setResultTotal(Number.isSafeInteger(data.total) && data.total >= 0 ? data.total : null);
   }
 
   async function extractMaterials() {
@@ -799,7 +805,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
         {work.images[shot.id] && work.images[shot.id].prompt !== shot.imagePrompt && <p className={styles.status}>生图草稿仍保留创建时的要求；后续改动请在该工作区核对，不会自动覆盖。</p>}
         {work.mediaNodes[shot.id] && <p className={styles.status}><Link className={styles.link} href={`/tools/ultimate-canvas?document_id=${encodeURIComponent(documentId)}&focus_node=${encodeURIComponent(work.mediaNodes[shot.id])}`}><Clapperboard size={16} />打开此镜头视频</Link></p>}
       </section>)}</div>
-      {resultShot && <GeneratedImageResults items={results} scope={`story:${userId}:${documentId}:${nodeId}:${resultShot}`} hasMore={Boolean(cursor)} loadMore={() => readResults(resultShot, true)} emptyLabel="此镜头暂无生成结果"
+      {resultShot && <GeneratedImageResults items={results} scope={`story:${userId}:${documentId}:${nodeId}:${resultShot}`} hasMore={Boolean(cursor)} total={resultTotal} loadMore={() => readResults(resultShot, true)} emptyLabel="此镜头暂无生成结果"
         renderPrimaryActions={item => resultAssets[item.id] ? <button disabled={blocked} onClick={() => void operate('选用原图', async () => {
           await selectReference(resultShot, resultAssets[item.id]);
         })}>选用此原图</button> : null} />}

@@ -23,7 +23,23 @@ export async function listAvatarRecords(owner: string, cursor?: string, kind?: s
   if (cursor && !(await prisma.platformSetting.findFirst({ where: { ...where, id: cursor }, select: { id: true } }))) throw new StudioError('分页已失效，请重新读取', 409);
   const rows = await prisma.platformSetting.findMany({ where, orderBy: [{ created_at: 'desc' }, { id: 'desc' }], take: 61, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
   const recent = await prisma.platformSetting.findMany({ where: { ...partitions, AND: [{ value_json: { contains: '"kind":"config"' } }, { value_json: { contains: '"deletedAt":null' } }] }, orderBy: { updated_at: 'desc' }, take: 3 });
-  return { records: rows.slice(0, 60).map(row => JSON.parse(row.value_json) as AvatarRecord), recentConfigs: recent.map(row => JSON.parse(row.value_json) as AvatarRecord), nextCursor: rows.length > 60 ? rows[59].id : null };
+  const total = await prisma.platformSetting.count({ where });
+  return { total, records: rows.slice(0, 60).map(row => JSON.parse(row.value_json) as AvatarRecord), recentConfigs: recent.map(row => JSON.parse(row.value_json) as AvatarRecord), nextCursor: rows.length > 60 ? rows[59].id : null };
+}
+export async function avatarResultRecords(owner: string, taskIds: string[]) {
+  const ids = Array.from(new Set(taskIds));
+  if (ids.length > 60) throw new StudioError('结果数量超限');
+  ids.forEach(avatarId);
+  if (!ids.length) return [];
+  const rows = await prisma.platformSetting.findMany({ where: {
+    OR: ['record', 'sheet-record'].map(kind => ({ key: { startsWith: `avatar:v1:${owner}:${kind}:` } })),
+    AND: [{ value_json: { contains: '"kind":"result"' } },
+      { OR: ids.map(id => ({ value_json: { contains: `"taskId":"${id}"` } })) }],
+  }, take: 121, select: { value_json: true } });
+  if (rows.length === 121) throw new StudioError('结果记录暂不可确认，请重新读取', 409);
+  const records = rows.map(row => JSON.parse(row.value_json) as AvatarRecord).filter(record => record.kind === 'result' && record.taskId && ids.includes(record.taskId));
+  if (new Set(records.map(record => record.taskId)).size !== records.length) throw new StudioError('结果记录存在歧义，请重新读取', 409);
+  return records;
 }
 export async function mutateAvatarRecord(owner: string, input: { id?: string; revision?: number; action: string; name?: string; record?: Partial<AvatarRecord> }) {
   if (input.id !== undefined) avatarId(input.id);

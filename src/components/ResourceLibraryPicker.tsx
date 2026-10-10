@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronLeft, ChevronRight, Folder, Grid2X2, ImageIcon, Maximize, Minimize, Music, Play, RotateCcw, Search, Upload, X, ZoomIn, Menu, Trash2 } from 'lucide-react';
+import { ChevronFirst, ChevronLeft, ChevronRight, Folder, Grid2X2, ImageIcon, Maximize, Minimize, Music, Play, RotateCcw, Search, Upload, X, ZoomIn, Menu, Trash2 } from 'lucide-react';
 import { useResultPages } from '@/components/useResultPages';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import MediaPreview from '@/components/MediaPreview';
@@ -155,9 +155,11 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   }, [open, prefsKey, portalContainer, types, user?.id, initialSource]);
   useEffect(() => { if (!ready || sessionOwner !== prefsKey) return; const timer = setTimeout(() => setPrefs(p => p.query === query ? p : { ...p, query, pages: 1, scroll: 0 }), 250); return () => clearTimeout(timer); }, [query, ready, sessionOwner, prefsKey]);
   useEffect(() => { if (ready && prefsKey && sessionOwner === prefsKey) { try { localStorage.setItem(prefsKey, JSON.stringify(prefs)); } catch { /* Storage failure never prevents selection. */ } } }, [prefs, ready, prefsKey, sessionOwner]);
-  const fetchPage = useCallback(async (nextPage: number): Promise<PickerResponse> => {
+  const readCursor = useRef<string | null>(null);
+  const fetchPage = useCallback(async (nextPage: number, after?: string | null): Promise<PickerResponse> => {
     const params = new URLSearchParams({ scope: prefs.scope, source: prefs.source, types: prefs.type === 'all' ? typesKey : prefs.type, q: prefs.query, view: prefs.view, sort: prefs.sort, target, page: String(nextPage) });
     if (prefs.album) params.set('album', prefs.album); if (prefs.project) params.set('project', prefs.project);
+    if (after) params.set('after', after);
     if (prefs.template && prefs.source === 'template-image') params.set('template', prefs.template);
     if (prefs.view === 'recent') params.set('keys', validKeys(stored(recentKey, [])).join(','));
     const response = await fetch(`/api/assets/picker?${params}`, { cache: 'no-store' });
@@ -170,9 +172,11 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     void (async () => {
       try {
         let batch: PickerItem[] = []; const count = restoring.current ? prefs.pages : 1;
+        let after: string | null = null;
         for (let nextPage = 1; nextPage <= count; nextPage++) {
-          const data = await fetchPage(nextPage); if (token !== sequence.current) return;
-          batch = [...batch, ...data.items]; setAlbums(data.albums); setTemplates(data.templates || []); setTotal(data.total); setPage(data.page); setHasMore(data.hasMore); setNotice(data.notice || '');
+          const data = await fetchPage(nextPage, after); if (token !== sequence.current) return;
+          after = data.nextCursor || null; readCursor.current = after;
+          batch = Array.from(new Map([...batch, ...data.items].map(item => [item.identity, item])).values()); setAlbums(data.albums); setTemplates(data.templates || []); setTotal(data.total); setPage(data.page); setHasMore(data.hasMore); setNotice(data.notice || '');
           if (prefs.template && !(data.templates || []).some(t => t.id === prefs.template)) { setPrefs(p => ({ ...p, template: '', pages: 1, scroll: 0 })); return; }
           if (prefs.album && !data.albums.some(a => a.id === prefs.album && a.scope === prefs.scope) || prefs.project && !data.albums.some(a => a.project?.id === prefs.project && a.scope === prefs.scope)) {
             restoring.current = false; setPrefs(p => ({ ...p, album: '', project: '', pages: 1, scroll: 0 })); return;
@@ -218,7 +222,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   };
   const loadMore = async () => {
     if (loading || readingMore.current || loadedFilter !== filterKey || !hasMore) return; const token = sequence.current; readingMore.current = true; setLoading(true); setError('');
-    try { const data = await fetchPage(page + 1); if (token !== sequence.current) return; setItems(old => [...old, ...data.items.filter(i => !old.some(o => o.identity === i.identity))]); setPage(data.page); setHasMore(data.hasMore); setTotal(data.total); setPrefs(p => ({ ...p, pages: data.page })); }
+    try { const data = await fetchPage(page + 1, readCursor.current); if (token !== sequence.current) return; readCursor.current = data.nextCursor || null; setItems(old => Array.from(new Map([...old, ...data.items].map(item => [item.identity, item])).values())); setPage(data.page); setHasMore(data.hasMore); setTotal(data.total); setPrefs(p => ({ ...p, pages: data.page })); }
     catch (e) { if (token === sequence.current) setError(e instanceof Error ? e.message : '读取失败'); }
     finally { readingMore.current = false; if (token === sequence.current) setLoading(false); }
   };
@@ -226,6 +230,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     items: loadedFilter === filterKey && sessionOwner === prefsKey ? items.map(item => ({ id: item.identity, item })) : [],
     storageKey: `${prefsKey}:page:v1:${filterKey}`, visible: open && ready && sessionOwner === prefsKey,
     busy: loading || loadedFilter !== filterKey, error: Boolean(error), hasMore: loadedFilter === filterKey && hasMore,
+    total: loadedFilter === filterKey ? total : null,
     loadMore, currentId: null,
   });
   useEffect(() => {
@@ -386,9 +391,9 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
           {loading && <div className={styles.empty} role="status">正在读取素材</div>}{!loading && !items.length && <div className={styles.empty}>{prefs.view === 'recent' ? '本机还没有符合筛选的最近选用素材' : '没有符合筛选的可用素材'}</div>}
           <div className={styles.more}><span>{total} 个素材</span><nav className={styles.pagination} aria-label="素材分页">
             <button type="button" title="上一页" aria-label="上一页素材" disabled={!resultPages.start || loading || busy || (resultPages.restoring && !error)} onClick={resultPages.previous}><ChevronLeft size={17} /></button>
-            <span role="status">第 {resultPages.page} / {resultPages.pages}{hasMore ? '+' : ''} 页</span>
+            <span role="status">第 {resultPages.page}{resultPages.pages === null ? ' 页，仍有更多' : ` / ${resultPages.pages} 页`}</span>
             <button type="button" title="下一页" aria-label="下一页素材" disabled={!resultPages.canNext || loading || busy || resultPages.restoring} onClick={resultPages.next}><ChevronRight size={17} /></button>
-            <button type="button" title="回到第一页" aria-label="回到第一页素材" disabled={loading || busy || (resultPages.restoring && !error)} onClick={resultPages.reset}><RotateCcw size={15} /></button>
+            <button type="button" title="回到第一页" aria-label="回到第一页素材" disabled={loading || busy || (!resultPages.start && !resultPages.restoring)} onClick={resultPages.reset}><ChevronFirst size={17} /></button>
           </nav>{hasMore && <button type="button" disabled={!resultPages.canNext || loading || busy || resultPages.restoring} onClick={resultPages.next}>加载更多</button>}</div>
         </div>
       </section></div>

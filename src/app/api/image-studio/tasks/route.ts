@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
     const result = await listStudioTasks(user.id, params.get('cursor') || undefined, moduleId, user.role === 'admin', params.get('taskId') || undefined, params.get('requestId') || undefined, likedOnly);
     return NextResponse.json({ ...result, ...(likedOnly ? { viewerId: user.id } : {}), ...(entrySnapshot ? { entrySnapshot } : {}) }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   }
-  catch { return NextResponse.json({ error: '生成记录读取失败，请重试' }, { status: 503 }); }
+  catch (error) { return NextResponse.json({ error: error instanceof StudioError ? error.message : '生成记录读取失败，请重试' }, { status: error instanceof StudioError ? error.status : 503 }); }
 }
 export async function POST(request: NextRequest) {
   const user = await getSession();

@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import PageBanner from '@/components/PageBanner';
 import { useProductDialog } from '@/components/useProductDialog';
 import { useSettingsPageSubmit } from '@/lib/hooks/use-settings-page-submit';
+import { formatCurrencyAmountWithFixedCny } from '@/lib/costs/currency';
 import { RelativeTime } from '@/components/RelativeTime';
 import { LoadingSkeleton } from '@/components/LoadingState';
 import BananaImageChannel from './BananaImageChannel';
@@ -1638,6 +1639,9 @@ export default function AdminIntegrationsClient() {
             <div className="image-model-options" aria-label="图片模型能力">
               {IMAGE_MODEL_OPTIONS.map((option) => {
                 const active = imageConfig.default_model === option.model;
+                const modelCost = IMAGE_STUDIO_MODEL_COST_USD[option.model as ImageStudioModel];
+                const modelCostText = modelCost === null ? '人民币价格待设置'
+                  : formatCurrencyAmountWithFixedCny(modelCost, 'USD');
                 return (
                   <button
                     key={option.model}
@@ -1648,7 +1652,9 @@ export default function AdminIntegrationsClient() {
                   >
                     <span>{option.label}</span>
                     <small>{option.summary}</small>
-                    {option.model in IMAGE_STUDIO_MODEL_COST_USD && <small>{IMAGE_STUDIO_MODEL_COST_USD[option.model as ImageStudioModel] === null ? '美元成本待设置' : `$${IMAGE_STUDIO_MODEL_COST_USD[option.model as ImageStudioModel]} / 张`}</small>}
+                    {option.model in IMAGE_STUDIO_MODEL_COST_USD && (
+                      <small>{modelCostText.startsWith('¥') ? `${modelCostText} / 张` : modelCostText}</small>
+                    )}
                     <em>{option.tags.join(' / ')}</em>
                   </button>
                 );

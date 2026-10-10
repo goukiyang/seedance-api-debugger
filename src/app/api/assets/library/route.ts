@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createHash } from 'node:crypto';
 import { Prisma, type Prisma as PrismaTypes } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getSession, type SessionUser } from '@/lib/auth/session';
@@ -429,15 +430,24 @@ function serializeReferenceImage(image: {
   };
 }
 
-function sortItems(items: LibraryItem[], sort: string) {
+type LibrarySortItem = Pick<LibraryItem, 'id' | 'createdAt' | 'completedAt' | 'duration' | 'project' | 'owner'>;
+const DIRECTORY_LIMIT = 50_000;
+
+function boundedDirectory(items: LibrarySortItem[]) {
+  if (items.length > DIRECTORY_LIMIT) throw new Error('LIBRARY_DIRECTORY_LIMIT');
+  return { items: [] as LibraryItem[], directory: items, total: items.length };
+}
+
+function sortItems<T extends LibrarySortItem>(items: T[], sort: string) {
   const time = (value: string | null) => value ? new Date(value).getTime() : 0;
   return [...items].sort((a, b) => {
-    if (sort === 'created_asc') return time(a.createdAt) - time(b.createdAt);
-    if (sort === 'completed_desc') return time(b.completedAt || b.createdAt) - time(a.completedAt || a.createdAt);
-    if (sort === 'project') return (a.project?.name || '未归属项目').localeCompare(b.project?.name || '未归属项目', 'zh-CN');
-    if (sort === 'user') return (a.owner?.displayName || '未知用户').localeCompare(b.owner?.displayName || '未知用户', 'zh-CN');
-    if (sort === 'duration') return (b.duration || 0) - (a.duration || 0) || time(b.createdAt) - time(a.createdAt);
-    return time(b.createdAt) - time(a.createdAt);
+    const primary = sort === 'created_asc' ? time(a.createdAt) - time(b.createdAt)
+      : sort === 'completed_desc' ? time(b.completedAt || b.createdAt) - time(a.completedAt || a.createdAt)
+        : sort === 'project' ? (a.project?.name || '未归属项目').localeCompare(b.project?.name || '未归属项目', 'zh-CN')
+          : sort === 'user' ? (a.owner?.displayName || '未知用户').localeCompare(b.owner?.displayName || '未知用户', 'zh-CN')
+            : sort === 'duration' ? (b.duration || 0) - (a.duration || 0)
+              : time(b.createdAt) - time(a.createdAt);
+    return primary || (sort === 'created_asc' ? time(a.createdAt) - time(b.createdAt) : time(b.createdAt) - time(a.createdAt)) || a.id.localeCompare(b.id);
   });
 }
 
@@ -474,6 +484,8 @@ async function loadVideoItems(options: {
   limit: number;
   includeForMerge: boolean;
   removedIds: string[];
+  directory?: boolean;
+  ids?: string[];
 }) {
   const user = options.user;
 
@@ -540,11 +552,22 @@ async function loadVideoItems(options: {
   if (keywordFilter) filters.push(keywordFilter);
 
   const where = parseBaseWhere(baseWhere, filters);
+  if (options.directory) {
+    const rows = await prisma.videoTask.findMany({ where, take: DIRECTORY_LIMIT + 1,
+      select: { id: true, created_at: true, completed_at: true, duration: true,
+        project: { select: { id: true, name: true } },
+        owner: { select: { id: true, name: true, username: true, email: true } },
+        user: { select: { id: true, name: true, username: true, email: true } } } });
+    return boundedDirectory(rows.map(row => ({ id: `video_task:${row.id}`, createdAt: row.created_at.toISOString(),
+      completedAt: row.completed_at?.toISOString() || null, duration: row.duration, project: row.project, owner: userSummary(row.owner || row.user) })));
+  }
+  if (options.ids) filters.push({ id: { in: options.ids } });
+  const contentWhere = parseBaseWhere(baseWhere, filters);
   const take = options.includeForMerge ? options.page * options.limit : options.limit;
   const skip = options.includeForMerge ? 0 : (options.page - 1) * options.limit;
   const [tasks, total] = await Promise.all([
     prisma.videoTask.findMany({
-      where,
+      where: contentWhere,
       orderBy: taskOrderBy(options.sort),
       skip,
       take,
@@ -615,6 +638,8 @@ async function loadAssetItems(options: {
   includeGenerated: boolean;
   take: number;
   removedIds: string[];
+  directory?: boolean;
+  ids?: string[];
 }) {
   if (options.enhance !== 'none') {
     return { items: [] as LibraryItem[], total: 0 };
@@ -646,6 +671,7 @@ async function loadAssetItems(options: {
   if (options.keyword) {
     where.file_name = { contains: options.keyword };
   }
+  if (options.ids) where.id = { in: options.ids };
 
   type AssetLibraryDbRow = {
     metadata_json: string | null;
@@ -682,12 +708,21 @@ async function loadAssetItems(options: {
       SELECT 1 FROM "ImageStudioTask" generated_task
       WHERE generated_task."asset_id" = asset."id" AND generated_task."status" = 'succeeded'
     )`;
+    const idFilter = options.ids ? (options.ids.length ? Prisma.sql`AND asset."id" IN (${Prisma.join(options.ids)})` : Prisma.sql`AND 0 = 1`) : Prisma.empty;
+    if (options.directory) {
+      const rows = await prisma.$queryRaw<Array<{ id: string; created_at: Date | string; owner_id: string }>>(Prisma.sql`
+        SELECT asset."id", asset."created_at", asset."owner_id" FROM "Asset" asset
+        WHERE ${statusFilter} AND ${typeFilter} ${ownerFilter} ${keywordFilter} ${generatedFilter} ${privacyFilter}
+        LIMIT ${DIRECTORY_LIMIT + 1}
+      `);
+      return assetDirectory(rows);
+    }
     const [generatedAssets, generatedCount] = await Promise.all([
       prisma.$queryRaw<AssetLibraryDbRow[]>(Prisma.sql`
         SELECT asset."id", asset."original_url", asset."thumbnail_url", asset."file_name", asset."type", asset."status",
           asset."width", asset."height", asset."file_size", asset."created_at", asset."owner_id", asset."metadata_json"
         FROM "Asset" asset
-        WHERE ${statusFilter} AND ${typeFilter} ${ownerFilter} ${keywordFilter} ${generatedFilter} ${privacyFilter}
+        WHERE ${statusFilter} AND ${typeFilter} ${ownerFilter} ${keywordFilter} ${generatedFilter} ${privacyFilter} ${idFilter}
         ORDER BY asset."created_at" DESC
         LIMIT ${options.take}
       `),
@@ -700,6 +735,10 @@ async function loadAssetItems(options: {
     assets = generatedAssets;
     total = Number(generatedCount[0]?.count || 0);
   } else {
+    if (options.directory) {
+      return assetDirectory(await prisma.asset.findMany({ where, take: DIRECTORY_LIMIT + 1,
+        select: { id: true, created_at: true, owner_id: true } }));
+    }
     [assets, total] = await Promise.all([
       prisma.asset.findMany({
         where,
@@ -752,6 +791,19 @@ async function loadAssetItems(options: {
   };
 }
 
+async function assetDirectory(rows: Array<{ id: string; created_at: Date | string; owner_id: string }>) {
+  if (rows.length > DIRECTORY_LIMIT) throw new Error('LIBRARY_DIRECTORY_LIMIT');
+  const ownerIds = Array.from(new Set(rows.map(row => row.owner_id)));
+  const byId = new Map<string, LibraryUser>();
+  for (let start = 0; start < ownerIds.length; start += 500) {
+    const owners = await prisma.user.findMany({ where: { id: { in: ownerIds.slice(start, start + 500) } },
+      select: { id: true, name: true, username: true, email: true } });
+    owners.forEach(owner => byId.set(owner.id, owner));
+  }
+  return boundedDirectory(rows.map(row => ({ id: `asset:${row.id}`, createdAt: new Date(row.created_at).toISOString(),
+    completedAt: null, duration: null, project: null, owner: userSummary(byId.get(row.owner_id)) || legacyAssetOwnerSummary(row.owner_id) })));
+}
+
 async function loadReferenceItems(options: {
   user: SessionUser;
   type: string;
@@ -764,6 +816,8 @@ async function loadReferenceItems(options: {
   take: number;
   removedIds: string[];
   removedAssetIds: string[];
+  directory?: boolean;
+  ids?: string[];
 }) {
   if (options.enhance !== 'none') {
     return { items: [] as LibraryItem[], total: 0 };
@@ -801,6 +855,14 @@ async function loadReferenceItems(options: {
   }
   if (options.keyword) {
     where.album = { name: { contains: options.keyword } };
+  }
+  if (options.ids) where.id = { in: options.ids };
+  if (options.directory) {
+    const rows = await prisma.referenceImage.findMany({ where, take: DIRECTORY_LIMIT + 1,
+      select: { id: true, created_at: true, project: { select: { id: true, name: true } },
+        owner: { select: { id: true, name: true, username: true, email: true } } } });
+    return boundedDirectory(rows.map(row => ({ id: `reference_image:${row.id}`, createdAt: row.created_at.toISOString(),
+      completedAt: null, duration: null, project: row.project, owner: userSummary(row.owner) })));
   }
 
   const [images, total] = await Promise.all([
@@ -848,7 +910,6 @@ export async function GET(request: NextRequest) {
     const limit = positiveInt(searchParams.get('limit'), 40, 100);
     const includeUploads = searchParams.get('include_uploads') === 'true';
     const includeGenerated = searchParams.get('include_generated') === 'true';
-    const includeForMerge = type === 'all';
     // Private library preferences must not alter project/shared or admin audit views.
     const removed = scope === 'history' && !projectId && status !== 'hidden'
       ? await removedLibraryResources(user.id) : { asset: [], video_task: [], reference_image: [] };
@@ -857,64 +918,35 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: '权限不足' }, { status: 403 });
     }
 
-    const takeForMerge = page * limit;
-    const [videoResult, assetResult, referenceResult] = await Promise.all([
-      loadVideoItems({
-        user,
-        type,
-        scope,
-        enhance,
-        status,
-        sort,
-        projectId,
-        ownerUserId,
-        keyword,
-        page,
-        limit,
-        includeForMerge,
-        removedIds: removed.video_task,
-      }),
-      (includeUploads || includeGenerated)
-        ? loadAssetItems({
-          user,
-          userId: user.id,
-          role: user.role,
-          type,
-          enhance,
-          scope,
-          status,
-          ownerUserId,
-          keyword,
-          includeUploads,
-          includeGenerated,
-          take: includeForMerge ? takeForMerge : limit,
-          removedIds: removed.asset,
-        })
-        : Promise.resolve({ items: [] as LibraryItem[], total: 0 }),
-      loadReferenceItems({
-        user,
-        type,
-        enhance,
-        scope,
-        status,
-        projectId,
-        ownerUserId,
-        keyword,
-        take: includeForMerge ? takeForMerge : limit,
-        removedIds: removed.reference_image,
-        removedAssetIds: removed.asset,
-      }),
+    const videoOptions = { user, type, scope, enhance, status, sort, projectId, ownerUserId, keyword,
+      page: 1, limit, includeForMerge: false, removedIds: removed.video_task };
+    const assetOptions = { user, userId: user.id, role: user.role, type, enhance, scope, status, ownerUserId,
+      keyword, includeUploads, includeGenerated, take: limit, removedIds: removed.asset };
+    const referenceOptions = { user, type, enhance, scope, status, projectId, ownerUserId, keyword,
+      take: limit, removedIds: removed.reference_image, removedAssetIds: removed.asset };
+    const directoryResults = await Promise.all([
+      loadVideoItems({ ...videoOptions, directory: true }),
+      includeUploads || includeGenerated ? loadAssetItems({ ...assetOptions, directory: true }) : null,
+      loadReferenceItems({ ...referenceOptions, directory: true }),
     ]);
-
-    const merged = sortItems([
-      ...videoResult.items,
-      ...assetResult.items,
-      ...referenceResult.items,
-    ], sort);
-    const total = videoResult.total + assetResult.total + referenceResult.total;
-    const items = includeForMerge
-      ? merged.slice((page - 1) * limit, page * limit)
-      : merged;
+    const directory = sortItems(Array.from(new Map(directoryResults.flatMap(result =>
+      result && 'directory' in result ? result.directory : []).map(item => [item.id, item])).values()), sort);
+    const directoryVersion = createHash('sha256').update(JSON.stringify(directory.map(item => item.id))).digest('hex');
+    const expectedDirectory = searchParams.get('directory_version');
+    if (expectedDirectory && expectedDirectory !== directoryVersion) {
+      return NextResponse.json({ error: '素材目录已变化，请刷新后继续翻页；当前内容保留' }, { status: 409, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
+    }
+    const total = directory.length;
+    const actualPage = Math.min(page, Math.max(1, Math.ceil(total / limit)));
+    const selected = directory.slice((actualPage - 1) * limit, actualPage * limit);
+    const ids = (source: LibraryItemSource) => selected.filter(item => item.id.startsWith(`${source}:`)).map(item => item.id.slice(source.length + 1));
+    const [videoResult, assetResult, referenceResult] = await Promise.all([
+      loadVideoItems({ ...videoOptions, ids: ids('video_task') }),
+      includeUploads || includeGenerated ? loadAssetItems({ ...assetOptions, ids: ids('asset') }) : null,
+      loadReferenceItems({ ...referenceOptions, ids: ids('reference_image') }),
+    ]);
+    const byId = new Map([...videoResult.items, ...(assetResult?.items || []), ...referenceResult.items].map(item => [item.id, item]));
+    const items = selected.flatMap(item => byId.has(item.id) ? [byId.get(item.id)!] : []);
 
     return NextResponse.json({
       items,
@@ -937,20 +969,25 @@ export async function GET(request: NextRequest) {
         keyword,
       },
       pagination: {
-        page,
+        page: actualPage,
         limit,
         total,
         total_pages: Math.max(1, Math.ceil(total / limit)),
-        has_more: page * limit < total,
+        has_more: actualPage * limit < total,
       },
-    });
+      directoryChanged: items.length !== selected.length,
+      directoryVersion,
+    }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   } catch (error) {
     if (error instanceof Error && error.message === 'missing_session') {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
     }
-    console.error('[AssetLibrary] List error:', error);
+    if (error instanceof Error && error.message === 'LIBRARY_DIRECTORY_LIMIT') {
+      return NextResponse.json({ error: '当前范围素材过多，请先按类型、项目或用户缩小范围' }, { status: 503 });
+    }
+    console.error('[AssetLibrary] List error');
     return NextResponse.json(
-      { error: '资产加载失败', message: error instanceof Error ? error.message : 'Unknown error' },
+      { error: '资产加载失败，请重新读取' },
       { status: 500 },
     );
   }

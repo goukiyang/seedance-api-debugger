@@ -7,7 +7,9 @@ import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Profiler, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Profiler, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import PaginationControls from '@/components/PaginationControls';
+import { gridPageCapacity } from '@/components/useResultPages';
 import { CheckSquare, Download, Eye, FolderInput, FolderPlus, ImagePlus, Maximize2, RefreshCcw, Search, Sparkles, Upload, X } from 'lucide-react';
 import {
   BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT,
@@ -36,7 +38,7 @@ import { cacheSafeAssetUrl } from '@/lib/assets/library-cache-policy';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { StudioBatchHistory } from '@/app/image-studio/batch-results';
-import { costAmountToCnyEstimate, usdToCnyRateText } from '@/lib/costs/currency';
+import { costAmountToCnyEstimate, formatCurrencyAmount, usdToCnyRateText } from '@/lib/costs/currency';
 import type { NormalVideoChargeEstimate } from '@/lib/costs/normal-video-charge';
 import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
 import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
@@ -501,7 +503,6 @@ function formatChargedCredits(item: Pick<AssetLibraryItem, 'kind' | 'source' | '
 
 function formatCnyCostBadge(item: Pick<AssetLibraryItem, 'kind' | 'source' | 'providerCostCurrency' | 'providerOfficialAmountMinor' | 'providerFinalAmountMinor' | 'providerOfficialAmountMicros' | 'providerFinalAmountMicros'>) {
   if (item.kind !== 'video' || item.source !== 'video_task') return '';
-  if (item.providerCostCurrency?.trim().toUpperCase() !== 'USD') return '';
   const amountMicros = item.providerFinalAmountMicros ?? item.providerOfficialAmountMicros;
   const amountMinor = item.providerFinalAmountMinor ?? item.providerOfficialAmountMinor;
   const hasMicros = amountMicros !== null && amountMicros !== undefined;
@@ -516,21 +517,8 @@ function formatCnyCostBadge(item: Pick<AssetLibraryItem, 'kind' | 'source' | 'pr
   });
 }
 
-function formatUsdDetailAmount(value: number, maxDigits: number) {
-  const fixed = value.toFixed(maxDigits);
-  const trimmed = fixed
-    .replace(/(\.\d*?[1-9])0+$/, '$1')
-    .replace(/\.0+$/, '.00');
-  const [integerPart, decimalPart = ''] = trimmed.split('.');
-  const normalizedDecimal = decimalPart.length >= 2
-    ? decimalPart
-    : decimalPart.padEnd(2, '0');
-  return `$${integerPart}.${normalizedDecimal} USD`;
-}
-
 function formatAssetCostBreakdown(item: Pick<AssetLibraryItem, 'kind' | 'source' | 'providerCostCurrency' | 'providerOfficialAmountMinor' | 'providerFinalAmountMinor' | 'providerOfficialAmountMicros' | 'providerFinalAmountMicros'>) {
   if (item.kind !== 'video' || item.source !== 'video_task') return null;
-  if (item.providerCostCurrency?.trim().toUpperCase() !== 'USD') return null;
   const amountMicros = item.providerFinalAmountMicros ?? item.providerOfficialAmountMicros;
   const amountMinor = item.providerFinalAmountMinor ?? item.providerOfficialAmountMinor;
   const hasMicros = amountMicros !== null && amountMicros !== undefined;
@@ -547,9 +535,8 @@ function formatAssetCostBreakdown(item: Pick<AssetLibraryItem, 'kind' | 'source'
   if (!cny) return null;
 
   return {
-    usd: formatUsdDetailAmount(usdValue, hasMicros ? 6 : 2),
-    cny: `约 ${cny}`,
-    rate: usdToCnyRateText(),
+    cny,
+    rate: item.providerCostCurrency?.trim().toUpperCase() === 'USD' ? `人民币折算，按站内展示汇率 ${usdToCnyRateText()}，不是银行实际支付金额` : '人民币金额',
   };
 }
 
@@ -740,6 +727,59 @@ function AssetsPageContent() {
   const [keywordDraft, setKeywordDraft] = useState('');
   const [reloadToken, setReloadToken] = useState(0);
   const [page, setPage] = useState(1);
+  const [pageCapacity, setPageCapacity] = useState(3);
+  const gridProbe = useRef<HTMLDivElement>(null);
+  const latestPage = useRef({ page, capacity: pageCapacity });
+  latestPage.current = { page, capacity: pageCapacity };
+  const pageScope = JSON.stringify([user?.id, user?.role, assetView, type, status, sort, groupBy, showUploadedAssets, projectId, ownerUserId, keyword.trim()]);
+  const [restoredPageScope, setRestoredPageScope] = useState('');
+  const [restoredFiltersOwner, setRestoredFiltersOwner] = useState('');
+  const directorySnapshot = useRef({ scope: '', reload: -1, version: '' });
+  const verifiedItemsScope = useRef('');
+  useEffect(() => {
+    if (!user?.id) return;
+    try {
+      const saved = JSON.parse(localStorage.getItem(`sd2:asset-filters:v1:${user.id}`) || 'null');
+      if (saved?.version === 1 && !hasExplicitContent) {
+        if (!hasExplicitView && assetViewTabs.some(tab => tab.id === saved.assetView && (!tab.adminOnly || user.role === 'admin'))) setAssetView(saved.assetView);
+        if (!new URLSearchParams(window.location.search).has('type') && isAssetType(saved.type)) setType(saved.type);
+        if (['all', 'succeeded', 'running', 'submitted', 'failed', 'cancelled', 'hidden'].includes(saved.status)) setStatus(saved.status);
+        if (['created_desc', 'created_asc', 'completed_desc', 'project', 'user', 'duration'].includes(saved.sort)) setSort(saved.sort);
+        if (['date', 'project', 'user'].includes(saved.groupBy)) setGroupBy(saved.groupBy);
+        if (typeof saved.showUploadedAssets === 'boolean') setShowUploadedAssets(saved.showUploadedAssets);
+        if (typeof saved.projectId === 'string' && /^[a-zA-Z0-9_-]{0,100}$/.test(saved.projectId)) setProjectId(saved.projectId);
+        if (user.role === 'admin' && typeof saved.ownerUserId === 'string' && /^[a-zA-Z0-9_-]{0,100}$/.test(saved.ownerUserId)) setOwnerUserId(saved.ownerUserId);
+        if (typeof saved.keyword === 'string' && saved.keyword.length <= 160) { setKeyword(saved.keyword); setKeywordDraft(saved.keyword); }
+      }
+    } catch {}
+    setRestoredFiltersOwner(user.id);
+  }, [user?.id, user?.role, hasExplicitContent, hasExplicitView, setAssetView]);
+  useEffect(() => {
+    if (!user?.id || restoredFiltersOwner !== user.id) return;
+    try { localStorage.setItem(`sd2:asset-filters:v1:${user.id}`, JSON.stringify({ version: 1, assetView, type, status, sort, groupBy, showUploadedAssets, projectId, ownerUserId, keyword })); } catch {}
+  }, [user?.id, restoredFiltersOwner, assetView, type, status, sort, groupBy, showUploadedAssets, projectId, ownerUserId, keyword]);
+  useLayoutEffect(() => {
+    const grid = gridProbe.current;
+    if (!grid) return;
+    const measure = () => {
+      if (grid.getBoundingClientRect().width <= 0) return;
+      const capacity = Math.min(99, gridPageCapacity(grid));
+      if (capacity === latestPage.current.capacity) return;
+      const anchor = (latestPage.current.page - 1) * latestPage.current.capacity;
+      latestPage.current = { page: Math.floor(anchor / capacity) + 1, capacity };
+      setPage(latestPage.current.page); setPageCapacity(capacity);
+    };
+    measure();
+    const observer = new ResizeObserver(measure); observer.observe(grid);
+    return () => observer.disconnect();
+  }, [assetView, cardSize]);
+  useEffect(() => {
+    if (!user?.id) return;
+    let anchor = 0;
+    try { const saved = JSON.parse(localStorage.getItem(`sd2:asset-page:v1:${pageScope}`) || 'null'); if (saved?.version === 1 && Number.isSafeInteger(saved.anchor) && saved.anchor >= 0 && saved.anchor < 1_000_000) anchor = saved.anchor; } catch {}
+    setPage(Math.floor(anchor / latestPage.current.capacity) + 1);
+    setRestoredPageScope(pageScope);
+  }, [user?.id, pageScope]);
   const [items, setItems] = useState<AssetLibraryItem[]>([]);
   const [pagination, setPagination] = useState<Pagination | null>(null);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
@@ -1053,8 +1093,9 @@ function AssetsPageContent() {
   }, [user, movePanelOpen, bulkTarget]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || restoredPageScope !== pageScope || restoredFiltersOwner !== user.id) return;
     let cancelled = false;
+    const abort = new AbortController();
     const normalizedKeyword = keyword.trim();
     const cacheKey = createAssetLibraryCacheKey({
       view: assetView,
@@ -1072,6 +1113,7 @@ function AssetsPageContent() {
       ownerUserId,
       keyword: normalizedKeyword,
       page,
+      limit: pageCapacity,
     });
     setError('');
     setShowingCachedAssets(false);
@@ -1084,10 +1126,14 @@ function AssetsPageContent() {
       sort,
       group_by: groupBy,
       page: String(page),
-      limit: '60',
+      limit: String(pageCapacity),
     });
     params.set('include_uploads', showUploadedAssets ? 'true' : 'false');
     params.set('include_generated', 'true');
+    if (directorySnapshot.current.scope !== pageScope || directorySnapshot.current.reload !== reloadToken) {
+      directorySnapshot.current = { scope: pageScope, reload: reloadToken, version: '' };
+    }
+    if (directorySnapshot.current.version) params.set('directory_version', directorySnapshot.current.version);
     if (enhanceFilter !== 'none') params.set('enhance', enhanceFilter);
     if (scope === 'project' && projectId) params.set('project_id', projectId);
     if (scope === 'user' && ownerUserId) params.set('owner_user_id', ownerUserId);
@@ -1113,14 +1159,21 @@ function AssetsPageContent() {
       }
 
       try {
-        const response = await fetch(`/api/assets/library?${params.toString()}`, { cache: 'no-store' });
+        const response = await fetch(`/api/assets/library?${params.toString()}`, { cache: 'no-store', signal: abort.signal });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || data.message || '资产加载失败');
         if (!cancelled) {
+          verifiedItemsScope.current = pageScope;
+          if (typeof data.directoryVersion === 'string' && /^[a-f0-9]{64}$/.test(data.directoryVersion)) directorySnapshot.current.version = data.directoryVersion;
           const nextItems = (data.items || []) as AssetLibraryItem[];
           const nextPagination = (data.pagination || null) as Pagination | null;
           setItems(nextItems);
           setPagination(nextPagination);
+          if (nextPagination) {
+            setPage(nextPagination.page);
+            try { localStorage.setItem(`sd2:asset-page:v1:${pageScope}`, JSON.stringify({ version: 1, anchor: (nextPagination.page - 1) * pageCapacity })); } catch {}
+          }
+          if (data.directoryChanged) setError('部分素材刚刚变化，请刷新后查看最新完整页');
           setSelectedIds((current) => current.filter((id) => nextItems.some((item) => item.id === id)));
           setShowingCachedAssets(false);
           void writeAssetLibraryCache<AssetLibraryItem, Pagination>({
@@ -1135,7 +1188,10 @@ function AssetsPageContent() {
       } catch (err) {
         if (!cancelled) {
           if (showedCache) {
-            setError('最新资产同步失败，当前显示上次加载内容，可稍后重试。');
+            setError(`${err instanceof Error ? err.message : '最新资产同步失败'}；当前显示上次加载内容，可刷新后重试。`);
+          } else if (verifiedItemsScope.current === pageScope) {
+            setShowingCachedAssets(true);
+            setError(`${err instanceof Error ? err.message : '资产加载失败'}；已保留当前内容，可刷新后重试。`);
           } else {
             setItems([]);
             setPagination(null);
@@ -1152,8 +1208,9 @@ function AssetsPageContent() {
 
     return () => {
       cancelled = true;
+      abort.abort();
     };
-  }, [user, assetView, scope, requestType, enhanceFilter, showUploadedAssets, status, sort, groupBy, projectId, ownerUserId, keyword, page, reloadToken]);
+  }, [user, assetView, scope, requestType, enhanceFilter, showUploadedAssets, status, sort, groupBy, projectId, ownerUserId, keyword, page, pageCapacity, pageScope, restoredPageScope, restoredFiltersOwner, reloadToken]);
 
   useEffect(() => {
     if (!user?.id || hasExplicitContent || isReactionView) return;
@@ -1762,14 +1819,11 @@ function AssetsPageContent() {
   const activeItemPrompt = activeItem?.prompt ? <div className="asset-detail-prompt"><span>Prompt</span><p>{activeItem.prompt}</p></div> : null;
   const activeItemDetails = (withReaction = true) => activeItem ? <>
     {!activeItemCostBreakdown && activeItem.normalChargeEstimate && <div className="asset-detail-cost-panel" aria-label="按普通费率估算扣费">
-      <div><span>按普通费率估算</span><strong>约 {costAmountToCnyEstimate({ amount_micros: activeItem.normalChargeEstimate.amountMicros, currency: 'USD' })}</strong></div>
-      <div><span>美元金额</span><strong>{formatUsdDetailAmount(activeItem.normalChargeEstimate.amountMicros / 1_000_000, 6)}</strong></div>
-      <small>同模型、同参考类型；{activeItem.normalChargeEstimate.completionTokens.toLocaleString('zh-CN')} Token × ${activeItem.normalChargeEstimate.usdPerMillionTokens.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}/百万 Token。{usdToCnyRateText()}</small>
+      <div><span>按普通费率估算</span><strong title={`按站内展示汇率折算：${usdToCnyRateText()}`}>{costAmountToCnyEstimate({ amount_micros: activeItem.normalChargeEstimate.amountMicros, currency: 'USD' })}</strong></div>
+      <small>同模型、同参考类型；{activeItem.normalChargeEstimate.completionTokens.toLocaleString('zh-CN')} Token × {formatCurrencyAmount(activeItem.normalChargeEstimate.usdPerMillionTokens, 'USD')}/百万 Token，按站内展示汇率折算。</small>
     </div>}
     {activeItemCostBreakdown && <div className="asset-detail-cost-panel" aria-label="扣费金额">
-      <div><span>美金扣费</span><strong>{activeItemCostBreakdown.usd}</strong></div>
-      <div><span>人民币扣费</span><strong>{activeItemCostBreakdown.cny}</strong></div>
-      <small>{activeItemCostBreakdown.rate}</small>
+      <div><span>费用（人民币）</span><strong title={activeItemCostBreakdown.rate}>{activeItemCostBreakdown.cny}</strong></div>
     </div>}
     <dl className="asset-detail-list">
       <div><dt>状态</dt><dd>{statusLabel(activeItem.status)}</dd></div>
@@ -1832,10 +1886,11 @@ function AssetsPageContent() {
           sort,
           group_by: groupBy,
           page: String(pageToRead),
-          limit: '60',
+          limit: String(pageCapacity),
         });
         pageParams.set('include_uploads', showUploadedAssets ? 'true' : 'false');
         pageParams.set('include_generated', 'true');
+        if (directorySnapshot.current.scope === pageScope && directorySnapshot.current.version) pageParams.set('directory_version', directorySnapshot.current.version);
         if (enhanceFilter !== 'none') pageParams.set('enhance', enhanceFilter);
         if (scope === 'project' && projectId) pageParams.set('project_id', projectId);
         if (scope === 'user' && ownerUserId) pageParams.set('owner_user_id', ownerUserId);
@@ -2235,6 +2290,7 @@ function AssetsPageContent() {
         onPointerMove={handleGridPointerMove}
         onPointerUp={handleGridPointerUp}
       >
+        <div ref={gridProbe} className={`asset-library-grid asset-library-grid-${cardSize}`} aria-hidden="true" style={{ height: 0, overflow: 'hidden', margin: 0 }} />
         {loading && (items.length ? <LoadingStatus>正在更新资产，暂时保留上次结果</LoadingStatus> : <LoadingSkeleton label="正在读取资产" grid />)}
 
         {!loading && !error && items.length === 0 && (
@@ -2448,19 +2504,7 @@ function AssetsPageContent() {
         ))}
         </Profiler>
 
-        {pagination && pagination.total_pages > 1 && (
-          <div className="asset-library-pagination">
-            <span>第 {pagination.page} / {pagination.total_pages} 页，共 {pagination.total} 个资产</span>
-            <div>
-              <button type="button" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>
-                上一页
-              </button>
-              <button type="button" disabled={!pagination.has_more} onClick={() => setPage((value) => value + 1)}>
-                下一页
-              </button>
-            </div>
-          </div>
-        )}
+        {pagination && (showingCachedAssets ? <p role="status">上次加载的第 {pagination.page} 页，完整数量待更新</p> : <PaginationControls page={pagination.page} totalPages={pagination.total_pages} pageSize={pagination.limit} total={pagination.total} label="资产" onPageChange={setPage} busy={syncingAssets || loading} />)}
       </main>
       </>}
 

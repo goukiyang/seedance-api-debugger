@@ -591,6 +591,10 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
     where.asset_id = { in: assets.map(asset => asset.id) };
     where.status = 'succeeded';
   }
+  if (cursor && !(await prisma.imageStudioTask.findFirst({ where: { ...where, id: cursor }, select: { id: true } }))) {
+    throw new StudioError('结果目录已变化，请重新读取', 409);
+  }
+  const total = await prisma.imageStudioTask.count({ where: { ...where, ...(taskId ? { id: taskId } : {}) } });
   const rows = taskId !== undefined
     ? await prisma.imageStudioTask.findFirst({ where: { ...where, id: taskId } }).then(task => task ? [task] : [])
     : await prisma.imageStudioTask.findMany({ where,
@@ -609,7 +613,7 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
   const publicOwner = owner ? { id: owner.id, name: displayUserName(owner), avatar_url: owner.avatar_url } : null;
   const deliveries = new Map(await Promise.all(items.map(async task => [task.id, await studioDeliveryStatus(task)] as const)));
   const contextVersions = new Map(await Promise.all(items.map(async task => [task.id, await snapshotModuleContextVersion(task.snapshot_json)] as const)));
-  return { tasks: items.map(task => {
+  return { total, tasks: items.map(task => {
     const snapshot = publicStudioSnapshot(task, assetById, isAdmin, ownerId);
     return { id: task.id, batchId: task.batch_id, ordinal: task.ordinal,
       owner: publicOwner,
