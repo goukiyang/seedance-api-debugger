@@ -2,17 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 import { enqueueFeedbackNotification, feedbackPrisma as prisma } from '@/lib/feedback/notification';
+import { snapshotFeedbackAttachments } from '@/lib/feedback/attachments';
 
 function text(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
-}
-
-function cleanImageUrls(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is string => typeof item === 'string')
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 export async function POST(request: NextRequest) {
@@ -21,14 +14,14 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const content = text(body.content);
-    const imageUrls = cleanImageUrls(body.imageUrls);
 
     if (!content) {
       return NextResponse.json({ error: '请输入反馈内容' }, { status: 400 });
     }
     const user = await getSession();
     userId = user?.id || null;
-    const feedback = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
+      const { snapshot, imageUrls } = await snapshotFeedbackAttachments(tx, userId, body.imageUrls, body.uploadedAssetIds);
       const saved = await tx.feedback.create({
         data: {
           user_id: user?.id || null,
@@ -41,22 +34,24 @@ export async function POST(request: NextRequest) {
           status: 'new',
         },
       });
-      await enqueueFeedbackNotification(tx, saved, user, imageUrls.length);
-      return saved;
+      await enqueueFeedbackNotification(tx, saved, user, snapshot);
+      return { feedback: saved, snapshot, imageUrls };
     });
+    const { feedback, snapshot, imageUrls } = result;
 
     if (user?.id && imageUrls.length > 0) {
       await recordAssetUploadLog({
         operatorId: user.id,
         stage: 'mount',
         status: 'succeeded',
-        assetId: Array.isArray(body.uploadedAssetIds) ? String(body.uploadedAssetIds[0] || '') : null,
+        assetId: snapshot.items[0]?.assetId || null,
         durationMs: Date.now() - startedAt,
         uploadMode: 'single',
         totalParts: imageUrls.length,
       }).catch(() => console.warn('feedback_auxiliary_log_failed'));
     }
-    return NextResponse.json({ success: true, feedback: { id: feedback.id } }, { status: 201 });
+    return NextResponse.json({ success: true, feedback: { id: feedback.id },
+      attachments: { saved: imageUrls.length, notSaved: snapshot.total - imageUrls.length } }, { status: 201 });
   } catch (error) {
     console.error('feedback_submit_failed');
     if (userId) {

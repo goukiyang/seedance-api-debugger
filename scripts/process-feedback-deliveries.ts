@@ -11,7 +11,8 @@ processFeedbackDeliveries().then(result => {
     const cwd = realpathSync(process.cwd());
     const hash = (file: string) => createHash('sha256').update(readFileSync(path.join(cwd, file))).digest('hex');
     const receipt = { at: new Date().toISOString(), cwd, version: JSON.parse(readFileSync(path.join(cwd, 'package.json'), 'utf8')).version,
-      notificationSha: hash('src/lib/feedback/notification.ts'), deliverySha: hash('src/lib/feedback/delivery.ts'), result };
+      notificationSha: hash('src/lib/feedback/notification.ts'), deliverySha: hash('src/lib/feedback/delivery.ts'),
+      attachmentsSha: hash('src/lib/feedback/attachments.ts'), result };
     const temporary = path.join(process.env.TMPDIR, `last-run-${randomUUID()}.tmp`);
     writeFileSync(temporary, JSON.stringify(receipt), { flag: 'wx', mode: 0o600 });
     renameSync(temporary, path.join(process.env.TMPDIR, 'last-run.json'));

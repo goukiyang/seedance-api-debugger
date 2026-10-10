@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '提意见更简洁，飞书卡片可直接查看意见，后台优先展示正文和截图；风格组保留资产库选择，移除独立上传按钮。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '新意见的飞书通知现在可附合法截图，先看意见与图片，再看来源；未附图片会说明原因，仍可直接查看意见详情。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

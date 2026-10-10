@@ -313,7 +313,8 @@ export default function FeedbackWidget() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '提交失败，请稍后重试。');
-      setMessage('意见已提交');
+      const notSaved = Number.isSafeInteger(data.attachments?.notSaved) && data.attachments.notSaved > 0 ? data.attachments.notSaved : 0;
+      setMessage(notSaved ? `意见已提交，${notSaved} 项附件未通过核验，未保存。` : '意见已提交');
       const submittedIds = new Set(submittedUploads.map((item) => item.id));
       const submittedPreviewUrls = new Set(submittedUploads.map((item) => item.previewUrl).filter(Boolean));
       const remainingUploads = uploadsRef.current.filter((item) => !submittedIds.has(item.id));
