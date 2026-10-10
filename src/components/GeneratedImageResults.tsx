@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ChevronFirst, ChevronLeft, ChevronRight, Copy, Download, Eye, ImagePlus } from 'lucide-react';
+import { ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Copy, Download, Eye, ImagePlus } from 'lucide-react';
 import { ResultImageCover } from './ResultImageCover';
 import { ZoomableImagePreview, type ZoomableImagePreviewProps } from './ZoomableImagePreview';
 import ContentReactions from './content-reactions/ContentReactions';
@@ -111,13 +111,13 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
   }
   const pagination = (position: 'top' | 'bottom') => (items.length > 0 || readError) && <nav className={styles.pagination} aria-label={position === 'top' ? '图片结果顶部翻页' : '图片结果底部翻页'}>
     <button type="button" aria-label="回到第一页图片" title="回到第一页图片" disabled={!pages.start && !pages.restoring || readBusy} onClick={pages.reset}><ChevronFirst size={17} /></button>
-    <button type="button" aria-label="上一页图片" title="上一页图片" disabled={!pages.start || readBusy || pages.restoring && !readError} onClick={pages.previous}><ChevronLeft size={17} /></button>
-    <span role="status">第 {pages.page}{pages.pages === null ? ' 页，仍有更多' : ` / ${pages.pages} 页`}</span>
+    <button type="button" aria-label="上一页图片" title="上一页图片" disabled={!pages.start || readBusy || pages.restoring && !readError && !pages.navigationIssue} onClick={pages.previous}><ChevronLeft size={17} /></button>
+    <span role="status">第 {pages.page}{pages.pages === null ? ' 页，仍有更多' : ` / ${pages.pages} 页`}{pages.restoring && !pages.navigationIssue && !readError ? '，正在读取目标页' : ''}</span>
     <button type="button" aria-label="下一页图片" title="下一页图片" disabled={!pages.canNext || readBusy || pages.restoring} onClick={pages.next}><ChevronRight size={17} /></button>
-    {position === 'bottom' && pages.canNext && <button type="button" disabled={readBusy || pages.restoring} onClick={pages.next}>{readBusy ? '读取中' : '加载更多'}</button>}
+    <button type="button" aria-label="最后一页图片" title="最后一页" disabled={!pages.canLast || readBusy || pages.restoring} onClick={pages.last}><ChevronLast size={17} /></button>
   </nav>;
   return <div className={styles.results} data-generated-image-results>
-    {readError && <p role="alert" className={styles.error}>{readError}<button type="button" disabled={readBusy} onClick={() => { setReadState({ scope, busy: false, error: '' }); if (onRetry) onRetry(); else void readMore().catch(() => undefined); }}>重试读取</button></p>}
+    {(readError || pages.navigationIssue) && <p role="alert" className={styles.error}>{readError || pages.navigationIssue}<button type="button" disabled={readBusy} onClick={() => { setReadState({ scope, busy: false, error: '' }); pages.retry(); if (pages.restoring && hasMore) return; if (onRetry) onRetry(); else void readMore().catch(() => undefined); }}>{!readError && pages.restoring && hasMore ? '继续翻页' : '重试读取'}</button>{pages.restoring && onRetry && readError && <button type="button" disabled={readBusy} onClick={() => { pages.retry(); onRetry(); }}>刷新目录</button>}</p>}
     {loading && (items.length ? <LoadingStatus>正在更新结果，已有图片保留</LoadingStatus> : <LoadingSkeleton label="正在读取生成结果" grid />)}
     {!loading && !items.length && !error && <p className={styles.empty}>{emptyLabel}</p>}
     {((pages.pages ?? 1) > 1 || hasMore) && pagination('top')}

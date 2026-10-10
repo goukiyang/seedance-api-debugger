@@ -1,5 +1,5 @@
 'use client';
-import { ChevronFirst, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronFirst, ChevronLast, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface PaginationControlsProps {
   page: number;
@@ -53,6 +53,8 @@ export default function PaginationControls({
         >
           <ChevronRight size={17} />
         </button>
+        <button className="btn btn-secondary" type="button" aria-label="最后一页" title="最后一页"
+          disabled={busy || clampedPage >= totalPages} onClick={() => onPageChange(totalPages)}><ChevronLast size={17} /></button>
       </div>
     </nav>
   );

@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '修复“我的喜欢”侧栏名称和分组被挤压的问题，保留紧凑图标和手机端入口。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '分页新增最后一页按钮，去掉重复的加载更多；读取失败保留当前页，可继续或重试。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

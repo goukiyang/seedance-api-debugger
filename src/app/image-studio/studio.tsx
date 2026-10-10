@@ -7,7 +7,7 @@ import { ContextClipboardActions } from '@/components/ContextClipboardActions';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Heart, ChevronFirst, ChevronLeft, ChevronDown, ChevronRight, Copy, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
+import { Heart, ChevronFirst, ChevronLast, ChevronLeft, ChevronDown, ChevronRight, Copy, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
 import { useResultPages } from '@/components/useResultPages';
 import { ContextVersionLabel, useModuleContextVersion } from './context-version-label';
 import { uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
@@ -651,7 +651,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     if (active && navigation.some(item => item.id === active) && !modules.some(item => item.id === active)) void hydrateModules([active]);
   }, [active, navigation, modules, hydrateModules]);
   const coverPages = useResultPages({ items: directoryReady ? navigation : [], storageKey: `sd2:module-covers:v1:${userId}`,
-    visible: coverView, busy: loading || !directoryReady, error: Boolean(error), hasMore: false,
+    visible: coverView, busy: loading || hydrating || !directoryReady, error: Boolean(error), hasMore: false,
     total: directoryReady ? navigation.length : null, loadMore: async () => undefined, currentId: null });
   const visibleCoverIds = coverPages.pageItems.map(item => item.id).join(',');
   useEffect(() => {
@@ -659,11 +659,12 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     const missing = visibleCoverIds.split(',').filter(id => id && !modules.some(module => module.id === id));
     if (missing.length) void hydrateModules(missing);
   }, [coverView, directoryReady, visibleCoverIds, modules, hydrateModules, error, coverRetry]);
-  const coverPagination = <nav className={styles.pagination} aria-label="封面分页">
-    <button type="button" aria-label="回到第一页封面" title="回到第一页封面" disabled={!coverPages.start && !coverPages.restoring} onClick={coverPages.reset}><ChevronFirst size={17} /></button>
-    <button type="button" aria-label="上一页封面" title="上一页封面" disabled={!coverPages.start} onClick={coverPages.previous}><ChevronLeft size={17} /></button>
+  const coverPagination = <nav className={styles.pagination} style={{ flexWrap: 'wrap' }} aria-label="封面分页">
+    <button type="button" aria-label="回到第一页封面" title="回到第一页封面" disabled={loading || hydrating || !directoryReady || !coverPages.start && !coverPages.restoring} onClick={coverPages.reset}><ChevronFirst size={17} /></button>
+    <button type="button" aria-label="上一页封面" title="上一页封面" disabled={loading || hydrating || !directoryReady || !coverPages.start} onClick={coverPages.previous}><ChevronLeft size={17} /></button>
     <span role="status">{directoryReady ? `第 ${coverPages.page} / ${coverPages.pages} 页，共 ${navigation.length} 个封面` : '正在读取封面目录'}</span>
-    <button type="button" aria-label="下一页封面" title="下一页封面" disabled={!coverPages.canNext} onClick={coverPages.next}><ChevronRight size={17} /></button>
+    <button type="button" aria-label="下一页封面" title="下一页封面" disabled={loading || hydrating || !directoryReady || !coverPages.canNext} onClick={coverPages.next}><ChevronRight size={17} /></button>
+    <button type="button" aria-label="最后一页封面" title="最后一页" disabled={loading || hydrating || !directoryReady || !coverPages.canLast || coverPages.restoring} onClick={coverPages.last}><ChevronLast size={17} /></button>
   </nav>;
   useEffect(() => {
     if (!navigation.length) return;
@@ -804,7 +805,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
         <TemplateCoverVisual module={coverModule} />
         <span className={styles.coverDescription}><strong className={styles.navLabel} title={coverModule.name}><span className={styles.navName}>{coverModule.name}</span>{attention.unread.has(coverModule.id) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</strong><small>{coverModule.prompt.trim() ? coverModule.prompt.trim().slice(0, 96) : `以${coverModule.name}为主题，按当前参考图和模型设置生成图片。`}</small></span>
       </button>;
-    })}</div>{coverPagination}{coverPages.canNext && <button type="button" onClick={coverPages.next}>加载更多封面</button>}</section>}
+    })}</div>{coverPagination}</section>}
     <div hidden={coverView}>
     {modules.map(module => <ImageStudioBlock key={module.id} templateWorkbench={templateWorkbench} module={module} hidden={coverView || Boolean(selectedGroup && module.groupName !== selectedGroup)} onMetadataChange={updateModuleMetadata} groups={groups} onDeleteGroup={deleteGroup} groupDeleting={groupDeleting} isAdmin={isAdmin} onToggleSharing={toggleModuleSharing} sharingId={presetSharingId}
       onModuleDelete={id => { removedModuleIds.current.add(id); setModules(current => current.filter(item => item.id !== id)); setDirectory(current => current.filter(item => item.id !== id)); setActive(current => current === id ? '' : current); }}

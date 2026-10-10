@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronFirst, ChevronLeft, ChevronRight, Folder, Grid2X2, ImageIcon, Maximize, Minimize, Music, Play, RotateCcw, Search, Upload, X, ZoomIn, Menu, Trash2 } from 'lucide-react';
+import { ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Folder, Grid2X2, ImageIcon, Maximize, Minimize, Music, Play, RotateCcw, Search, Upload, X, ZoomIn, Menu, Trash2 } from 'lucide-react';
 import { useResultPages } from '@/components/useResultPages';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import MediaPreview from '@/components/MediaPreview';
@@ -223,7 +223,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const loadMore = async () => {
     if (loading || readingMore.current || loadedFilter !== filterKey || !hasMore) return; const token = sequence.current; readingMore.current = true; setLoading(true); setError('');
     try { const data = await fetchPage(page + 1, readCursor.current); if (token !== sequence.current) return; readCursor.current = data.nextCursor || null; setItems(old => Array.from(new Map([...old, ...data.items].map(item => [item.identity, item])).values())); setPage(data.page); setHasMore(data.hasMore); setTotal(data.total); setPrefs(p => ({ ...p, pages: data.page })); }
-    catch (e) { if (token === sequence.current) setError(e instanceof Error ? e.message : '读取失败'); }
+    catch (e) { if (token === sequence.current) { setError(e instanceof Error ? e.message : '读取失败'); throw e; } }
     finally { readingMore.current = false; if (token === sequence.current) setLoading(false); }
   };
   const resultPages = useResultPages({
@@ -372,7 +372,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         {uploadLabel && <UploadProgressIndicator busy label={progress?.label || '准备上传'} detail={uploadLabel} percent={progress?.percent} />}
         {notice && <div role="status" className={styles.notice}>{notice}</div>}
         {removedItem && <div role="status" className={styles.notice}>已从我的素材库删除，文件和已有引用保留。<button type="button" disabled={busy} onClick={() => void removeItem(removedItem, true)}>撤销删除</button></div>}
-        {error && <div role="alert" className={styles.error}>{error}<button type="button" disabled={busy} onClick={() => setEpoch(v => v + 1)}>重新读取</button></div>}
+        {(error || resultPages.navigationIssue) && <div role="alert" className={styles.error}>{error || resultPages.navigationIssue}<button type="button" disabled={busy || loading} onClick={() => { setError(''); resultPages.retry(); if (!resultPages.restoring || !hasMore) setEpoch(v => v + 1); }}>{!error && resultPages.restoring && hasMore ? '继续翻页' : '重新读取'}</button>{resultPages.restoring && error && <button type="button" disabled={busy || loading} onClick={() => { resultPages.retry(); setEpoch(v => v + 1); }}>刷新目录</button>}</div>}
         {!!failedFiles.length && <div className={styles.error}>{failedFiles.map(f => f.name).join('、')}<button type="button" disabled={busy} onClick={() => void upload(failedFiles)}>重试失败文件</button></div>}
         <div ref={body} className={styles.body} aria-busy={loading} onScroll={e => { const scroll = e.currentTarget.scrollTop; if (!restoring.current) setPrefs(p => ({ ...p, scroll })); }} onWheel={() => { restoring.current = false; }} onTouchStart={() => { restoring.current = false; }}>
           <div ref={resultPages.gridRef} className={styles.grid}>{resultPages.pageItems.map(({ item }) => { const order = selected.findIndex(s => s.identity === item.identity), inUse = existing(item); return <article key={item.identity} className={`${styles.card} ${order >= 0 ? styles.selected : ''}`}>
@@ -390,11 +390,12 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
           </article>; })}</div>
           {loading && <div className={styles.empty} role="status">正在读取素材</div>}{!loading && !items.length && <div className={styles.empty}>{prefs.view === 'recent' ? '本机还没有符合筛选的最近选用素材' : '没有符合筛选的可用素材'}</div>}
           <div className={styles.more}><span>{total} 个素材</span><nav className={styles.pagination} aria-label="素材分页">
-            <button type="button" title="上一页" aria-label="上一页素材" disabled={!resultPages.start || loading || busy || (resultPages.restoring && !error)} onClick={resultPages.previous}><ChevronLeft size={17} /></button>
-            <span role="status">第 {resultPages.page}{resultPages.pages === null ? ' 页，仍有更多' : ` / ${resultPages.pages} 页`}</span>
-            <button type="button" title="下一页" aria-label="下一页素材" disabled={!resultPages.canNext || loading || busy || resultPages.restoring} onClick={resultPages.next}><ChevronRight size={17} /></button>
             <button type="button" title="回到第一页" aria-label="回到第一页素材" disabled={loading || busy || (!resultPages.start && !resultPages.restoring)} onClick={resultPages.reset}><ChevronFirst size={17} /></button>
-          </nav>{hasMore && <button type="button" disabled={!resultPages.canNext || loading || busy || resultPages.restoring} onClick={resultPages.next}>加载更多</button>}</div>
+            <button type="button" title="上一页" aria-label="上一页素材" disabled={!resultPages.start || loading || busy || (resultPages.restoring && !error && !resultPages.navigationIssue)} onClick={resultPages.previous}><ChevronLeft size={17} /></button>
+            <span role="status">第 {resultPages.page}{resultPages.pages === null ? ' 页，仍有更多' : ` / ${resultPages.pages} 页`}{resultPages.restoring && !resultPages.navigationIssue && !error ? '，正在读取目标页' : ''}</span>
+            <button type="button" title="下一页" aria-label="下一页素材" disabled={!resultPages.canNext || loading || busy || resultPages.restoring} onClick={resultPages.next}><ChevronRight size={17} /></button>
+            <button type="button" title="最后一页" aria-label="最后一页素材" disabled={!resultPages.canLast || loading || busy || resultPages.restoring} onClick={resultPages.last}><ChevronLast size={17} /></button>
+          </nav></div>
         </div>
       </section></div>
       <footer className={styles.footer}><button type="button" className={styles.uploadAction} disabled={busy || maxSelection === 0} onClick={() => input.current?.click()}><Upload size={18} /><span>上传素材</span></button><div className={styles.count}><strong>已选 {selected.length} 个</strong><small>{types.map(t => `${labels[t]} ${selectedCounts[t]}${typeLimits?.[t] !== undefined ? ` · 剩余 ${Math.max(0, typeLimits[t]! - selectedCounts[t])}` : ''}`).join(' / ')}{maxSelection !== undefined ? ` · 本次剩余 ${Math.max(0, maxSelection - selected.length)}` : ''} · 当前已添加 {currentCount}</small></div>
