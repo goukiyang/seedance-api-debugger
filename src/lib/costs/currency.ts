@@ -1,4 +1,4 @@
-const DEFAULT_USD_TO_CNY_RATE = 7.2;
+const DEFAULT_USD_TO_CNY_RATE = 7;
 const configuredUsdToCnyRate = () => {
   const raw = process.env.NEXT_PUBLIC_USD_CNY_RATE;
   const parsed = raw ? Number(raw) : NaN;
