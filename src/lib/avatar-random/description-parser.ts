@@ -4,8 +4,13 @@ import { decodeDescriptionOutput, DescriptionContractError, originalDescriptionC
 import { intentIssues, intentView } from './intent';
 import { AVATAR_PARSER_VERSION } from './types';
 
-export type DescriptionStatus = { descriptionId: string; parserVersion?: string; constraints?: AvatarConstraints; understanding?: ReturnType<typeof intentView>; state: 'not-started' | 'pending' | 'succeeded' | 'needs-clarification' | 'failed' | 'unknown'; message: string; canRecheck: boolean; retryToken?: string; requestId?: string; failure?: { code: string; stage: string; field?: string }; cost: 'not-started' | 'unknown' | 'response-received' };
-type Attempt = { version: 2; parserVersion?: string; requestId: string; state: 'pending' | 'received' | 'succeeded' | 'failed' | 'unknown'; createdAt: string; updatedAt: string; responseId?: string; failure?: DescriptionStatus['failure']; cost: DescriptionStatus['cost'] };
+export type DescriptionDiagnostics = { code?: string; phase?: string; timeoutMs?: number; elapsedMs?: number; headersMs?: number; bodyMs?: number; httpStatus?: number; upstreamRequestId?: string; networkCode?: string };
+export type DescriptionStatus = { descriptionId: string; parserVersion?: string; constraints?: AvatarConstraints; understanding?: ReturnType<typeof intentView>; state: 'not-started' | 'pending' | 'succeeded' | 'needs-clarification' | 'failed' | 'unknown'; message: string; canRecheck: boolean; canContinueOriginal?: boolean; diagnostics?: DescriptionDiagnostics; retryToken?: string; requestId?: string; failure?: { code: string; stage: string; field?: string }; cost: 'not-started' | 'unknown' | 'response-received' };
+type Attempt = { version: 2; parserVersion?: string; requestId: string; state: 'pending' | 'received' | 'succeeded' | 'failed' | 'unknown'; createdAt: string; updatedAt: string; responseId?: string; failure?: DescriptionStatus['failure']; diagnostics?: DescriptionDiagnostics; cost: DescriptionStatus['cost'] };
+const DESCRIPTION_ERROR_CODES = new Set(['musk_api_not_configured', 'musk_api_upstream_error', 'musk_api_invalid_response', 'musk_api_empty_content', 'musk_api_timeout', 'musk_api_request_failed']);
+const DESCRIPTION_NETWORK_CODE = /^(?:UND_ERR_[A-Z_]+|E(?:CONNRESET|CONNREFUSED|TIMEDOUT|AI_AGAIN|NOTFOUND))$/;
+const DESCRIPTION_REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const PARSER_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
 export type DescriptionStore = {
   readCache(): Promise<AvatarConstraints | null>;
   readAttempt(): Promise<string | null>;
@@ -21,6 +26,35 @@ export class AvatarDescriptionError extends Error {
 export const descriptionId = (description: string) => createHash('sha256').update(`parser-1.0.0:${description}`).digest('hex');
 const token = (raw: string) => createHash('sha256').update(raw).digest('hex');
 function readAttempt(raw: string): Partial<Attempt> { try { return JSON.parse(raw) || {}; } catch { return {}; } }
+export const isLegalDescriptionRequestId = (value: unknown): value is string => typeof value === 'string' && DESCRIPTION_REQUEST_ID.test(value);
+export const isLegalAvatarParserVersion = (value: unknown): value is string => typeof value === 'string' && value.length <= 64 && PARSER_VERSION.test(value);
+export function safeDescriptionDiagnostics(error: unknown): DescriptionDiagnostics {
+  const value = error && typeof error === 'object' ? error as { code?: unknown; diagnostics?: unknown } : null;
+  const source = value?.diagnostics && typeof value.diagnostics === 'object' && !Array.isArray(value.diagnostics)
+    ? value.diagnostics as Record<string, unknown> : {};
+  const result: DescriptionDiagnostics = {};
+  for (const key of ['timeoutMs', 'elapsedMs', 'headersMs', 'bodyMs'] as const) {
+    const number = source[key];
+    if (typeof number === 'number' && Number.isSafeInteger(number) && number >= 0 && number <= 86400000) result[key] = number;
+  }
+  if (typeof source.httpStatus === 'number' && Number.isSafeInteger(source.httpStatus) && source.httpStatus >= 100 && source.httpStatus <= 599) result.httpStatus = source.httpStatus;
+  if (typeof value?.code === 'string' && DESCRIPTION_ERROR_CODES.has(value.code)) result.code = value.code;
+  if (['awaiting_headers', 'reading_body', 'parsing', 'completed'].includes(String(source.phase))) result.phase = String(source.phase);
+  if (typeof source.upstreamRequestId === 'string' && /^[A-Za-z0-9_.:-]{1,120}$/.test(source.upstreamRequestId)) result.upstreamRequestId = source.upstreamRequestId;
+  if (typeof source.networkCode === 'string' && DESCRIPTION_NETWORK_CODE.test(source.networkCode)) result.networkCode = source.networkCode;
+  return result;
+}
+export function originalDescriptionAttempt(raw: string | null, now = Date.now()) {
+  if (!raw) return null;
+  const attempt = readAttempt(raw);
+  if (attempt.version !== 2 || !isLegalDescriptionRequestId(attempt.requestId)
+    || typeof attempt.createdAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(attempt.createdAt)) return null;
+  const createdAt = Date.parse(attempt.createdAt), parserVersion = attempt.parserVersion === undefined ? AVATAR_PARSER_VERSION : attempt.parserVersion;
+  if (!Number.isFinite(createdAt) || createdAt > now || attempt.cost !== 'unknown' || attempt.responseId !== undefined
+    || !isLegalAvatarParserVersion(parserVersion)
+    || !(attempt.state === 'unknown' || attempt.state === 'pending' && now - createdAt >= 120000)) return null;
+  return { requestId: attempt.requestId, parserVersion };
+}
 function statusFor(id: string, raw: string | null, now: number): DescriptionStatus {
   if (!raw) return { descriptionId: id, state: 'not-started', message: '尚未解析描述，尚未提交图片任务。', canRecheck: false, cost: 'not-started' };
   const a = readAttempt(raw);
@@ -34,8 +68,11 @@ function statusFor(id: string, raw: string | null, now: number): DescriptionStat
 }
 async function receiptState(id: string, raw: string | null, store: DescriptionStore, now = Date.now()) {
   const state = statusFor(id, raw, now), a = raw ? readAttempt(raw) : null;
-  if (a?.requestId && await store.readResponse(a.responseId || a.requestId) !== null) return { ...state, canRecheck: true, cost: 'response-received' as const, message: '已保存文字模型回复，可免费重新检查；没有提交人物图片任务。' };
-  return state;
+  if (a?.requestId && await store.readResponse(a.responseId || a.requestId) !== null) return { ...state, canRecheck: true, cost: 'response-received' as const, message: '已保存文字模型回复，可免费重新检查；没有提交人物图片任务。',
+    ...(a.diagnostics ? { diagnostics: safeDescriptionDiagnostics({ diagnostics: a.diagnostics, code: a.diagnostics.code }) } : {}) };
+  const original = originalDescriptionAttempt(raw, now);
+  return { ...state, ...(original && state.state === 'unknown' ? { canContinueOriginal: true, parserVersion: original.parserVersion } : {}),
+    ...(a?.diagnostics ? { diagnostics: safeDescriptionDiagnostics({ diagnostics: a.diagnostics, code: a.diagnostics.code }) } : {}) };
 }
 function cachedConstraints(value: AvatarConstraints, description: string) {
   try { return validateDescriptionConstraints(value, description); }
@@ -85,7 +122,7 @@ export async function resolveDescription(description: string, options: { approve
       const upstream = e as { code?: string; status?: number };
       const definitive = upstream.code === 'musk_api_not_configured' || upstream.code === 'musk_api_upstream_error' && Number(upstream.status) < 500;
       const hasReceipt = await store.readResponse(attempt.requestId) !== null;
-      const failed: Attempt = { ...attempt, ...(hasReceipt ? { responseId: attempt.requestId } : {}), state: definitive ? 'failed' : 'unknown', updatedAt: new Date().toISOString(), cost: hasReceipt ? 'response-received' : upstream.code === 'musk_api_not_configured' ? 'not-started' : 'unknown', failure: { code: definitive ? 'model_request_rejected' : 'model_receipt_unknown', stage: hasReceipt ? 'persistence' : 'model-request' } };
+      const failed: Attempt = { ...attempt, ...(hasReceipt ? { responseId: attempt.requestId } : {}), diagnostics: safeDescriptionDiagnostics(e), state: definitive ? 'failed' : 'unknown', updatedAt: new Date().toISOString(), cost: hasReceipt ? 'response-received' : upstream.code === 'musk_api_not_configured' ? 'not-started' : 'unknown', failure: { code: definitive ? 'model_request_rejected' : 'model_receipt_unknown', stage: hasReceipt ? 'persistence' : 'model-request' } };
       await store.replaceAttempt(raw, JSON.stringify(failed));
       throw new AvatarDescriptionError(await receiptState(id, await store.readAttempt(), store), 503);
     }

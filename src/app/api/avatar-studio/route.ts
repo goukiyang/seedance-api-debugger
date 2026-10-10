@@ -7,7 +7,7 @@ import { avatarResultRecords, listAvatarRecords, mutateAvatarRecord, readAvatar 
 import { avatarDescriptionStatus, estimateAvatarDraft, parseAvatarDescription, prepareAvatarPlan, quoteAvatarPlan, submitAvatarPlan, validateAvatarReferences } from '@/lib/avatar-random/service';
 import { imageBillingView } from '@/lib/image-studio/billing-contract';
 import { imageBillingReadinessPayload } from '@/lib/image-studio/billing-readiness';
-import { AvatarDescriptionError } from '@/lib/avatar-random/description-parser';
+import { AvatarDescriptionError, isLegalAvatarParserVersion, isLegalDescriptionRequestId } from '@/lib/avatar-random/description-parser';
 import { adaptAvatarPrompt, parseAvatarRules } from '@/lib/avatar-random/engine';
 import { AVATAR_COMPILER_VERSION, type AvatarPlan, type AvatarRecord } from '@/lib/avatar-random/types';
 import { prisma } from '@/lib/prisma';
@@ -19,6 +19,18 @@ import { getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudio
 import { IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
 import { isAvatarSheet, avatarLayout, withAvatarLayout } from '@/lib/avatar-random/layout';
 import { avatarRulesSignature } from '@/lib/avatar-random/intent';
+
+function validateOriginalContinuation(body: Record<string, unknown>) {
+  if (body.descriptionMode === undefined && body.originalAttemptRequestId === undefined) return;
+  const rules = body.rules;
+  const description = rules && typeof rules === 'object' && !Array.isArray(rules) ? (rules as { description?: unknown }).description : undefined;
+  if (body.descriptionMode !== 'original' || body.actionType !== 'new'
+    || typeof body.descriptionId !== 'string' || !/^[a-f0-9]{64}$/.test(body.descriptionId)
+    || !isLegalAvatarParserVersion(body.parserVersion) || !isLegalDescriptionRequestId(body.originalAttemptRequestId)
+    || typeof description !== 'string' || !description.trim() || description.length > 3000) {
+    throw new StudioError('按原描述继续的请求无效，请重新查询当前文案状态', 400);
+  }
+}
 
 async function sourceTask(owner:string,id?:string) {
   if(!id)return null;
@@ -35,7 +47,7 @@ async function run(action: (owner: string) => Promise<unknown>) {
   try { return NextResponse.json(await action(user.id), { headers: { 'Cache-Control': 'no-store' } }); }
   catch (e) {
     if (e instanceof AvatarDescriptionError) {
-      console.warn('[AvatarDescription]', JSON.stringify({ requestId: e.parse.requestId, state: e.parse.state, ...e.parse.failure }));
+      console.warn('[AvatarDescription]', JSON.stringify({ requestId: e.parse.requestId, state: e.parse.state, ...e.parse.failure, diagnostics: e.parse.diagnostics }));
       return NextResponse.json({ error: e.message, parse: e.parse }, { status: e.status, headers: { 'Cache-Control': 'private, no-store' } });
     }
     return NextResponse.json({ error: e instanceof StudioError ? e.message : '操作未确认，请重新读取；不要重复新建出图任务' }, { status: e instanceof StudioError ? e.status : 503 });
@@ -84,7 +96,7 @@ export async function POST(req: NextRequest) { return run(async owner => {
     await parseAvatarDescription(owner, body.description.trim(), false, undefined, true);
     return { parse: await avatarDescriptionStatus(owner, body.description) };
   }
-  if (body.action === 'prepare') return { plan: await prepareAvatarPlan(owner, body) };
+  if (body.action === 'prepare') { validateOriginalContinuation(body); return { plan: await prepareAvatarPlan(owner, body) }; }
   if (body.action === 'submit') return { batchId: await submitAvatarPlan(owner, body.id, body.layout, body) };
   if (body.action === 'restore') {
     const record = await readAvatar<AvatarRecord>(owner, 'record', body.id);
