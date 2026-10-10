@@ -8,6 +8,7 @@ import { Readable, Transform } from 'node:stream';
 import { NextResponse } from 'next/server';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { isPrivateNetworkHost } from './public-url';
+import { imageEtagMatches, imageStatEtag } from './image-validators';
 
 const privateHeaders = { 'Cache-Control': 'private, no-store', Vary: 'Cookie', 'X-Content-Type-Options': 'nosniff' };
 const MAX_REMOTE_BYTES = 2 * 1024 * 1024 * 1024;
@@ -42,7 +43,7 @@ function deadline<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
 }
 
 // Caller must authorize the stored resource first. Never accept a caller-supplied proxy URL.
-export async function mediaPreviewResponse(request: Request, source: string, fallbackMime: string): Promise<NextResponse> {
+export async function mediaPreviewResponse(request: Request, source: string, fallbackMime: string, inlineImagePolicy?: string): Promise<NextResponse> {
   const local = siteUploadPathFromUrl(source) || (source.startsWith('/') && !source.startsWith('//') ? source.split(/[?#]/)[0] : null);
   const contentType = previewMime(source, fallbackMime);
   if (local) {
@@ -56,9 +57,15 @@ export async function mediaPreviewResponse(request: Request, source: string, fal
     if (!roots.some(root => root && file.startsWith(`${root}${path.sep}`))) return mediaError('素材路径无效', 400);
     const info = await stat(file);
     if (!info.isFile() || !info.size) return mediaError('文件不可用', 404);
+    const imageHeaders = inlineImagePolicy && contentType.startsWith('image/')
+      ? { ETag: imageStatEtag(info, inlineImagePolicy), 'X-Image-Source-Version': imageStatEtag(info, inlineImagePolicy) } : undefined;
+    // Weak image validators do not participate in the existing Range/If-Range contract.
+    if (imageHeaders && !request.headers.has('range') && imageEtagMatches(request.headers.get('if-none-match'), imageHeaders.ETag)) {
+      return new NextResponse(null, { status: 304, headers: { ...privateHeaders, ...imageHeaders, 'Content-Type': contentType } });
+    }
     const rangeHeader = request.method === 'HEAD' ? null : request.headers.get('range');
     const range = rangeHeader ? parsePreviewRange(rangeHeader, info.size) : null;
-    const headers = { ...privateHeaders, 'Content-Type': contentType, 'Accept-Ranges': 'bytes' };
+    const headers = { ...privateHeaders, ...imageHeaders, 'Content-Type': contentType, 'Accept-Ranges': 'bytes' };
     if (rangeHeader && !range) return new NextResponse(null, { status: 416, headers: { ...headers, 'Content-Range': `bytes */${info.size}` } });
     const responseHeaders = { ...headers, 'Content-Length': String(range ? range.end - range.start + 1 : info.size), ...(range ? { 'Content-Range': `bytes ${range.start}-${range.end}/${info.size}` } : {}) };
     if (request.method === 'HEAD') return new NextResponse(null, { headers: responseHeaders });

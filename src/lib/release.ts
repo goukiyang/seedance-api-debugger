@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '分页新增最后一页按钮，去掉重复的加载更多；读取失败保留当前页，可继续或重试。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '相容回退保护：保留原分页界面；图片权限、只读预取与条件响应合同保留。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
