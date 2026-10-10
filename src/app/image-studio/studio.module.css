@@ -26,16 +26,16 @@
 .page .moduleRail .moduleRailGroupCurrent { border-left: 2px solid #79daca; color: #d8e6e1; }
 .moduleRailGroupTitle .navLabel { flex: 1 1 auto; gap: 2px; }
 .moduleRailGroupTitle > small { flex: 0 0 auto; }
-.page .moduleRailGroup button:where(:not([data-reaction-action])) { justify-content: space-between; }
-.moduleRailGroup button:where(:not([data-reaction-action])) small { color: #849098; font-size: 11px; }
+.page .moduleRailGroup button:where(:not([data-reaction-action], [data-template-favorites] button)) { justify-content: space-between; }
+.moduleRailGroup button:where(:not([data-reaction-action], [data-template-favorites] button)) small { color: #849098; font-size: 11px; }
 .moduleRailChildren { display: grid; gap: 2px; margin: 0 0 0 12px; border-left: 1px solid #314047; padding-left: 0; }
 .page .moduleRail .moduleRailChild { width: auto; height: 32px; padding: 5px 6px; color: #aeb9bf; font-size: 12px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .page .moduleRail .moduleRailChild:hover { color: #b9f7e8; background: #1b2a2b; }
 .moduleRailFooter { margin: 12px 4px 0; padding-top: 8px; border-top: 1px solid #2d383d; }
 .page .moduleRail .moduleRailFooter button { width: auto; min-height: 32px; padding: 5px 6px; border-color: transparent; color: #9eabb1; font-size: 11px; }
 .page .moduleRail .moduleRailFooter button:hover { color: #c6d0d5; }
-.page .moduleRail button:where(:not([data-reaction-action])) { width: 100%; justify-content: flex-start; padding: 7px 8px; border-color: transparent; background: transparent; color: #c6d0d5; font-size: 13px; text-align: left; }
-.page .moduleRail button:where(:not([data-reaction-action])):hover { background: #222b2e; color: #e6e8eb; }
+.page .moduleRail button:where(:not([data-reaction-action], [data-template-favorites] button)) { width: 100%; justify-content: flex-start; padding: 7px 8px; border-color: transparent; background: transparent; color: #c6d0d5; font-size: 13px; text-align: left; }
+.page .moduleRail button:where(:not([data-reaction-action], [data-template-favorites] button)):hover { background: #222b2e; color: #e6e8eb; }
 .page .moduleRail .moduleRailChild.moduleRailActive { background: #203d38; border-color: #367d70; color: #b9f7e8; }
 .templateWorkbench .module, .templateWorkbench .generationHeader { scroll-margin-top: calc(var(--composer-topbar-height, 48px) + var(--template-mobile-nav-height, 0px) + 12px); }
 .header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; }
@@ -384,10 +384,10 @@
   .mobileMajorLink > svg { flex: 0 0 auto; }
   .mobileModuleNav label { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
   .mobileModuleNav label > span { flex: 0 0 auto; }
-  .page .mobileModuleNav select { flex: 1 1 0; min-width: 0; width: 0; max-width: 100%; min-height: 44px; padding: 8px; font-size: 14px; text-overflow: ellipsis; }
-  .page .mobileModuleNav button:where(:not([data-reaction-action])) { min-height: 40px; padding: 8px 10px; white-space: nowrap; }
+  .page .mobileModuleNav select:where(:not([data-template-favorites] select)) { flex: 1 1 0; min-width: 0; width: 0; max-width: 100%; min-height: 44px; padding: 8px; font-size: 14px; text-overflow: ellipsis; }
+  .page .mobileModuleNav button:where(:not([data-reaction-action], [data-template-favorites] button)) { min-height: 40px; padding: 8px 10px; white-space: nowrap; }
   .page .mobileModuleNav .favoriteItem { white-space: normal; }
-  .page .mobileModuleNav button:where(:not([data-reaction-action]))[aria-pressed=true] { background: #203d38; border-color: #367d70; color: #b9f7e8; }
+  .page .mobileModuleNav button:where(:not([data-reaction-action], [data-template-favorites] button))[aria-pressed=true] { background: #203d38; border-color: #367d70; color: #b9f7e8; }
   .mobileModulePicker { grid-column: 1 / -1; }
 }
 @media (max-width: 800px) { .primaryMaterials .materialGrid { max-width: 360px; } }

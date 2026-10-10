@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '价格统一按人民币显示两位小数；翻页补齐完整数量与首页按钮，封面和素材按页面宽度分批展示；人物结果可逐张查看、可撤销删除，图片仅显示已对账标签。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '修复“我的喜欢”侧栏名称和分组被挤压的问题，保留紧凑图标和手机端入口。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

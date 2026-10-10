@@ -179,7 +179,7 @@ function FavoriteList({ data, selected, busy, onSelect }: { data: ReturnType<typ
     setMenu(null);
     await prompt('分组名称', group.name, { title: '改名', confirmLabel: '保存', maxLength: 60, onSubmit: value => data.manage({ action: 'rename-group', groupId: group.id, name: value }) });
   }
-  return <div ref={panel} className={styles.list} aria-label="喜欢的模板" aria-busy={data.loading || data.writing || busy}>
+  return <div ref={panel} className={styles.list} data-template-favorites aria-label="喜欢的模板" aria-busy={data.loading || data.writing || busy}>
     {data.allowed && <div className={styles.toolbar}>
       <select aria-label="喜欢分组" value={data.group} disabled={busy || data.writing} onChange={event => { setMenu(null); data.changeGroup(event.target.value); }}>
         <option value="all">全部 · {data.organization?.total ?? '—'}</option><option value="ungrouped">未分组 · {data.organization?.ungroupedCount ?? '—'}</option>
