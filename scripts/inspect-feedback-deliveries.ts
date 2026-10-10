@@ -7,7 +7,8 @@ prisma.notification.findMany({ where: { channel: 'feishu', type: FEEDBACK_NOTIFI
   const meta = parseFeedbackDelivery(row.metadata_json);
   return { id: row.id, status: row.status, state: meta?.state || 'invalid', feedbackId: meta?.feedbackId,
     attempts: meta?.attempts, nextAttemptAt: meta?.nextAttemptAt, firstSendAt: meta?.firstSendAt,
-    receiptId: meta?.receiptId, errorCode: row.error_message, createdAt: row.created_at, sentAt: row.sent_at };
+    receiptId: meta?.receiptId, errorCode: row.error_message, causeCode: meta?.lastErrorCode,
+    ambiguousSend: meta?.ambiguousSend, createdAt: row.created_at, sentAt: row.sent_at };
 }))))
   .catch(() => { console.error('feedback_delivery_inspection_failed'); process.exitCode = 1; })
   .finally(() => prisma.$disconnect());

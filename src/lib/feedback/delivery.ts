@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { FEEDBACK_NOTIFICATION_TYPE, FEEDBACK_RECIPIENT_ID, LEASE_MS, SEND_WINDOW_MS,
+import { FEEDBACK_NOTIFICATION_TYPE, LEASE_MS, SEND_WINDOW_MS,
   feedbackPrisma as prisma, feedbackConfig, parseFeedbackDelivery, validFeedbackRecipient, type FeedbackDelivery } from './notification';
 
 class DeliveryError extends Error {
@@ -9,7 +9,8 @@ class DeliveryError extends Error {
 async function feishuRequest(path: string, body: unknown, token?: string, deadline?: number, leaseUntil?: number) {
   let response: Response;
   let data: Record<string, unknown>;
-  if (token && (deadline === undefined || leaseUntil === undefined || Date.now() >= deadline || Date.now() >= leaseUntil)) {
+  if (token && (deadline === undefined || leaseUntil === undefined || Date.now() < deadline - SEND_WINDOW_MS
+    || Date.now() >= deadline || Date.now() >= leaseUntil)) {
     throw new DeliveryError('feedback_delivery_unknown', true, false);
   }
   try {
@@ -36,8 +37,9 @@ export async function feedbackTenantToken() {
 export async function processFeedbackDeliveries(limit = 10) {
   const config = feedbackConfig();
   if (!config.enabled) return { enabled: false, sent: 0, failed: 0, unknown: 0 };
+  if (!config.recipientId) throw new DeliveryError('feedback_recipient_configuration_invalid', false, false);
   const jobs = await prisma.notification.findMany({
-    where: { channel: 'feishu', type: FEEDBACK_NOTIFICATION_TYPE, status: 'pending', target_user_id: FEEDBACK_RECIPIENT_ID },
+    where: { channel: 'feishu', type: FEEDBACK_NOTIFICATION_TYPE, status: 'pending', target_user_id: config.recipientId },
     orderBy: { updated_at: 'asc' }, take: 100,
   });
   const result = { enabled: true, sent: 0, failed: 0, unknown: 0 };
@@ -69,22 +71,25 @@ export async function processFeedbackDeliveries(limit = 10) {
       if (!updated.count) throw new DeliveryError('feedback_lease_lost', true, false);
       owned = serialized; meta = next;
     };
+    let priorSendAmbiguity: boolean | null = null;
     try {
-      if (expired || (meta.attempts > 12 && meta.firstSendAt !== null)) throw new DeliveryError('feedback_delivery_unknown', true, false);
+      if (expired || (meta.attempts > 12 && meta.firstSendAt !== null)) throw new DeliveryError('feedback_delivery_window_closed', meta.ambiguousSend, false);
       if (meta.attempts > 12) throw new DeliveryError('feedback_attempts_exhausted', false, false);
-      const recipient = await prisma.user.findUnique({ where: { id: FEEDBACK_RECIPIENT_ID }, select: {
+      const recipient = await prisma.user.findUnique({ where: { id: config.recipientId }, select: {
         id: true, status: true, role: true, expires_at: true, feishu_open_id: true, feishu_tenant_key: true,
       } });
       if (!validFeedbackRecipient(recipient, config) || meta.identity !== config.identity) throw new DeliveryError('feedback_identity_changed', false, false);
       const token = await feedbackTenantToken();
       // Recheck immediately before send; no network call holds a SQLite transaction.
-      const current = await prisma.user.findUnique({ where: { id: FEEDBACK_RECIPIENT_ID }, select: {
+      const current = await prisma.user.findUnique({ where: { id: config.recipientId }, select: {
         id: true, status: true, role: true, expires_at: true, feishu_open_id: true, feishu_tenant_key: true,
       } });
       if (!validFeedbackRecipient(current, config)) throw new DeliveryError('feedback_identity_changed', false, false);
-      if (meta.firstSendAt !== null && Date.now() - meta.firstSendAt >= SEND_WINDOW_MS) throw new DeliveryError('feedback_delivery_unknown', true, false);
+      if (meta.firstSendAt !== null && Date.now() - meta.firstSendAt >= SEND_WINDOW_MS) throw new DeliveryError('feedback_delivery_window_closed', meta.ambiguousSend, false);
       if (!job.body || job.body.length > 4000) throw new DeliveryError('feedback_payload_invalid', false, false);
-      await persist({ ...meta, firstSendAt: meta.firstSendAt ?? Date.now() }, 'pending', null);
+      priorSendAmbiguity = meta.ambiguousSend;
+      // A crash after starting IO is unknown; an explicit rejection clears only this attempt.
+      await persist({ ...meta, firstSendAt: meta.firstSendAt ?? Date.now(), ambiguousSend: true }, 'pending', null);
       const response = await feishuRequest('im/v1/messages?receive_id_type=open_id', {
         receive_id: current!.feishu_open_id, msg_type: 'text', content: JSON.stringify({ text: job.body }), uuid: meta.uuid,
       }, token, meta.firstSendAt! + SEND_WINDOW_MS, meta.leaseUntil!);
@@ -95,10 +100,12 @@ export async function processFeedbackDeliveries(limit = 10) {
     } catch (error) {
       const failure = error instanceof DeliveryError ? error : new DeliveryError('feedback_delivery_unavailable', meta.firstSendAt !== null);
       // Once a send may have happened, do not reset its uuid or safety clock.
-      const unknown = meta.firstSendAt !== null && (!failure.retryable || Date.now() - meta.firstSendAt >= SEND_WINDOW_MS);
-      const terminal = !failure.retryable || unknown || meta.attempts >= 12;
-      const state = terminal ? (unknown || (meta.firstSendAt !== null && failure.ambiguous) ? 'unknown' : 'failed') : 'pending';
-      await persist({ ...meta, state, leaseToken: null, leaseUntil: null,
+      const ambiguousSend = (priorSendAmbiguity ?? meta.ambiguousSend) || failure.ambiguous;
+      const windowClosed = meta.firstSendAt !== null && (Date.now() < meta.firstSendAt || Date.now() - meta.firstSendAt >= SEND_WINDOW_MS);
+      const terminal = !failure.retryable || windowClosed || meta.attempts >= 12;
+      const state = terminal ? (meta.firstSendAt !== null && ambiguousSend ? 'unknown' : 'failed') : 'pending';
+      const lastErrorCode = failure.code === 'feedback_delivery_window_closed' ? meta.lastErrorCode || failure.code : failure.code;
+      await persist({ ...meta, state, ambiguousSend, lastErrorCode, leaseToken: null, leaseUntil: null,
         nextAttemptAt: Date.now() + Math.min(600_000, 15_000 * 2 ** Math.min(meta.attempts - 1, 6)) },
       terminal ? 'failed' : 'pending', state === 'unknown' ? 'feedback_delivery_unknown_manual_check' : failure.code);
       if (state === 'unknown') result.unknown++;

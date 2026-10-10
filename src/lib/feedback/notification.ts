@@ -7,7 +7,6 @@ export const feedbackPrisma = feedbackGlobal.feedbackPrisma ?? new PrismaClient(
 if (process.env.NODE_ENV !== 'production') feedbackGlobal.feedbackPrisma = feedbackPrisma;
 
 export const FEEDBACK_NOTIFICATION_TYPE = 'feedback_feishu_v1';
-export const FEEDBACK_RECIPIENT_ID = 'cmpipakyk001nmt1wx4t7wxzg';
 export const FEEDBACK_SITE = 'https://sd2.youdooart.com';
 // Feishu deduplicates uuid for one hour. Leave a margin for clocks and requests.
 export const SEND_WINDOW_MS = 50 * 60_000;
@@ -26,12 +25,15 @@ export type FeedbackDelivery = {
   leaseToken: string | null;
   leaseUntil: number | null;
   receiptId: string | null;
+  ambiguousSend: boolean;
+  lastErrorCode: string | null;
 };
 
 export function feedbackConfig() {
+  const recipientId = process.env.FEISHU_FEEDBACK_RECIPIENT_USER_ID || '';
   return {
     enabled: process.env.FEISHU_FEEDBACK_ENABLED === 'true',
-    recipientId: process.env.FEISHU_FEEDBACK_RECIPIENT_USER_ID || '',
+    recipientId: /^[a-zA-Z0-9_-]{1,80}$/.test(recipientId) ? recipientId : '',
     identity: process.env.FEISHU_FEEDBACK_IDENTITY_SHA256 || '',
     appId: process.env.FEISHU_APP_ID || '',
     appSecret: process.env.FEISHU_APP_SECRET || '',
@@ -45,7 +47,7 @@ export function recipientIdentity(userId: string, openId: string, appId: string,
 
 type Recipient = { id: string; status: string; role: string; expires_at: Date | null; feishu_open_id: string | null; feishu_tenant_key: string | null };
 export function validFeedbackRecipient(user: Recipient | null, config = feedbackConfig()) {
-  return Boolean(user && config.recipientId === FEEDBACK_RECIPIENT_ID && user.id === FEEDBACK_RECIPIENT_ID
+  return Boolean(user && /^[a-zA-Z0-9_-]{1,80}$/.test(config.recipientId) && user.id === config.recipientId
     && user.status === 'active' && user.role === 'admin'
     && (!user.expires_at || user.expires_at.getTime() > Date.now())
     && config.appId && config.appSecret && config.tenant && user.feishu_tenant_key === config.tenant
@@ -95,8 +97,12 @@ export function parseFeedbackDelivery(value: string | null): FeedbackDelivery | 
       || (data.firstSendAt !== null && (!Number.isSafeInteger(data.firstSendAt) || data.firstSendAt < 0))
       || (data.leaseUntil !== null && (!Number.isSafeInteger(data.leaseUntil) || data.leaseUntil < 0))
       || (data.leaseToken !== null && typeof data.leaseToken !== 'string')
-      || typeof data.identity !== 'string') return null;
-    return data;
+      || typeof data.identity !== 'string'
+      || (data.ambiguousSend !== undefined && typeof data.ambiguousSend !== 'boolean')
+      || (data.lastErrorCode !== undefined && data.lastErrorCode !== null
+        && (typeof data.lastErrorCode !== 'string' || !/^[a-z0-9_-]{1,100}$/.test(data.lastErrorCode)))) return null;
+    // Older metadata lacking the flag is conservative once a send was attempted.
+    return { ...data, ambiguousSend: data.ambiguousSend ?? (data.firstSendAt !== null), lastErrorCode: data.lastErrorCode ?? null };
   } catch { return null; }
 }
 
@@ -108,7 +114,8 @@ export async function enqueueFeedbackNotification(
 ) {
   const config = feedbackConfig();
   if (!config.enabled) return;
-  const recipient = await tx.user.findUnique({ where: { id: FEEDBACK_RECIPIENT_ID }, select: {
+  if (!config.recipientId) { console.warn('feedback_recipient_configuration_invalid'); return; }
+  const recipient = await tx.user.findUnique({ where: { id: config.recipientId }, select: {
     id: true, status: true, role: true, expires_at: true, feishu_open_id: true, feishu_tenant_key: true,
   } });
   // A deleted FK target cannot own an outbox row. Never redirect to another user.
@@ -118,10 +125,11 @@ export async function enqueueFeedbackNotification(
     version: 1, eventKey: `${FEEDBACK_NOTIFICATION_TYPE}:${feedback.id}`, feedbackId: feedback.id,
     uuid: feedbackEventId(feedback.id), identity: config.identity, state: valid ? 'pending' : 'failed',
     attempts: 0, nextAttemptAt: Date.now(), firstSendAt: null, leaseToken: null, leaseUntil: null, receiptId: null,
+    ambiguousSend: false, lastErrorCode: null,
   };
   await tx.notification.create({ data: {
     id: meta.uuid, type: FEEDBACK_NOTIFICATION_TYPE, channel: 'feishu', status: valid ? 'pending' : 'failed',
-    target_user_id: FEEDBACK_RECIPIENT_ID, title: '新修改意见',
+    target_user_id: config.recipientId, title: '新修改意见',
     body: ['Seedance2.0系统反馈通知', '新修改意见',
       `提交人：${safeFeedbackAuthor(author?.name, Boolean(author))}`,
       `页面：${safeFeedbackPath(feedback.pathname)}`,
