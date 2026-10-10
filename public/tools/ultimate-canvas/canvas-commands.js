@@ -21,7 +21,7 @@
         'duration', 'cameraPresets', 'templateId', 'template_id', 'templateVersion', 'moduleId', 'module_id',
         'source', 'executionMode', 'inputSource', 'retryCount', 'outputMode', 'canvasStyle', 'planSource',
         'planReferences', 'planParameterSource', 'videoCardId', 'videoBranchId', 'storyWorkflow', 'storySource', 'canvasGroup',
-        'referenceImageIds', 'reference_image_ids', 'provider', 'promptMentions'
+        'referenceImageIds', 'reference_image_ids', 'provider', 'promptMentions', 'roleConfig'
     ]);
     const TRANSIENT_KEYS = new Set([
         'status', 'state', 'error', 'result', 'results', 'progress', 'generatedtext', 'generationsummary',
@@ -33,7 +33,8 @@
         'generationstatus', 'videosubmission', 'videosubmissionlegacy', 'videohistory', 'selectedvideoresult',
         'generationpayload', 'previewvideotaskid', 'taskstatus', 'runstatus', 'batchstatus', 'statusendpoint',
         'pollingurl', 'pollurl', 'frozencost', 'quotedcost', 'pointquote', 'quote', 'reservation', 'settlement',
-        'ledgerentry', 'chargedpoints', 'costfreeze', 'providerresponse'
+        'ledgerentry', 'chargedpoints', 'costfreeze', 'providerresponse',
+        'roletaskrunid', 'roleworkid', 'roleattemptid', 'roledeliveryid', 'roleconfirmation', 'rolehandoff', 'rolefees'
     ]);
     const MEDIA_KEYS = new Set([
         'previewimage', 'referenceimage', 'referenceimages', 'thumbnail', 'thumbnails', 'poster', 'cover',

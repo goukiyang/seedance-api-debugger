@@ -35,6 +35,7 @@ import { defaultImageResolution, imageResolutionOptions } from '@/lib/image-gene
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS } from '@/lib/image-studio/model-catalog';
 import { STUDIO_TEXT_MODELS, isStudioTextModel } from '@/lib/template-studio/text-models';
 import { AUDIO_CAPABILITY } from '@/lib/provider/audio-contract';
+import { USD_TO_CNY_RATE, usdToCnyRateText } from '@/lib/costs/currency';
 import { getVolcengineIpApiSettings, isVolcengineIpApiReady } from '@/lib/integrations/volcengine-ip';
 import { volcengineIpCapabilities } from '@/lib/integrations/volcengine-ip-models';
 import { IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, defaultImageStudioQuality } from '@/lib/image-studio/model-catalog';
@@ -331,6 +332,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     backend: { mode: 'sd2', transport: 'same-origin', mock: false },
+    money_display: { usd_to_cny_rate: USD_TO_CNY_RATE, rate_text: usdToCnyRateText() },
     tool: {
       id: 'ultimate-canvas',
       name: '无限画布',

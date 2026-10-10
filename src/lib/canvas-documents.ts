@@ -79,7 +79,7 @@ export function parseCanvasSnapshot(raw: string, projectId: string | null, v2: b
   checkJson(parsed);
   if (!object(parsed) || !object(parsed.canvas)) invalid('画布缺少 canvas 快照');
   if (parsed.schema !== undefined && parsed.schema !== 'ultimate_canvas.v1') invalid('不支持此画布格式');
-  if (parsed.schemaVersion !== undefined && parsed.schemaVersion !== 1 && parsed.schemaVersion !== 2) {
+  if (parsed.schemaVersion !== undefined && (typeof parsed.schemaVersion !== 'number' || ![1, 2, 3].includes(parsed.schemaVersion))) {
     throw new CanvasDocumentError('画布版本较新，请刷新后重试', 426, 'schema_upgrade_required');
   }
   const graph = parsed.canvas;
@@ -88,13 +88,20 @@ export function parseCanvasSnapshot(raw: string, projectId: string | null, v2: b
   if (graph.nodes.length > 1000 || graph.connections.length > 5000) invalid('画布节点或连线过多，请拆分保存');
   const nodeIds = new Set<string>();
   const types = new Set(['text', 'script', 'image', 'video', 'audio', 'director',
-    'flow-input', 'flow-template', 'flow-select', 'flow-confirm', 'flow-output']);
+    'flow-input', 'flow-template', 'flow-select', 'flow-confirm', 'flow-output', 'role']);
   for (const node of graph.nodes) {
     if (!object(node) || !id(node.id) || nodeIds.has(node.id)) invalid('节点 ID 无效或重复');
     if (typeof node.type !== 'string' || !types.has(node.type)) invalid('不支持的节点类型');
     if (typeof node.x !== 'number' || !Number.isFinite(node.x)
       || typeof node.y !== 'number' || !Number.isFinite(node.y) || !object(node.data)) invalid('节点坐标或配置无效');
     nodeIds.add(node.id);
+    if (node.type === 'role') {
+      const config = node.data.roleConfig;
+      if (!object(config) || !id(config.definitionId) || !Number.isSafeInteger(config.version) || Number(config.version) < 1) invalid('角色缺少有效的库版本');
+      // Business state lives in the durable role ledger, never in reversible canvas JSON.
+      node.data = { title: typeof node.data.title === 'string' ? node.data.title.slice(0, 80) : '',
+        roleConfig: { definitionId: config.definitionId, version: config.version, ...(object(config.snapshot) ? { snapshot: config.snapshot } : {}) } };
+    }
   }
   const connections = new Set<string>();
   for (const edge of graph.connections) {
@@ -103,6 +110,9 @@ export function parseCanvasSnapshot(raw: string, projectId: string | null, v2: b
     const key = `${edge.from}:${edge.to}`;
     if (connections.has(key)) invalid('画布存在重复连线');
     connections.add(key);
+    const from = graph.nodes.find(n => object(n) && n.id === edge.from) as NodeSnapshot;
+    const to = graph.nodes.find(n => object(n) && n.id === edge.to) as NodeSnapshot;
+    if ((from.type === 'role' && to.type.startsWith('flow-')) || (to.type === 'role' && from.type.startsWith('flow-'))) invalid('角色不能接入图片工具执行流');
   }
   if (graph.selectedNodeId != null && (!id(graph.selectedNodeId) || !nodeIds.has(graph.selectedNodeId))) {
     invalid('选中节点不存在');
@@ -119,10 +129,20 @@ export function parseCanvasSnapshot(raw: string, projectId: string | null, v2: b
   const context = object(parsed.context) ? parsed.context : {};
   if (context.project_id != null && context.project_id !== projectId) invalid('画布内容与所属项目不一致');
   if (v2) {
-    parsed.schemaVersion = 2;
+    parsed.schemaVersion = parsed.schemaVersion === 3 || graph.nodes.some(n => object(n) && n.type === 'role') ? 3 : 2;
     parsed.context = { ...context, project_id: projectId };
   }
+  if (graph.nodes.some(n => object(n) && n.type === 'role')) {
+    parsed.schemaVersion = 3;
+    parsed.requiredCapabilities = ['role.v1'];
+  } else if (parsed.schemaVersion === 3) parsed.requiredCapabilities = ['role.v1'];
   return parsed as Snapshot;
+}
+
+export function requireCanvasRoleCapability(schemaVersion: number, capabilities: unknown) {
+  if (schemaVersion >= 3 && (!Array.isArray(capabilities) || !capabilities.includes('role.v1'))) {
+    throw new CanvasDocumentError('此画布包含角色，请刷新到支持角色的版本；原画布不会被旧页面覆盖', 426, 'role_capability_required', { required_capabilities: ['role.v1'] });
+  }
 }
 
 export const canvasMetadataSelect = {
@@ -142,7 +162,8 @@ export function canvasMetadata(document: Metadata) {
   };
 }
 
-export function canvasDetail(document: CanvasDocument) {
+export function canvasDetail(document: CanvasDocument, capabilities: unknown = []) {
+  requireCanvasRoleCapability(document.schema_version, capabilities);
   return { ...canvasMetadata(document), document_json: document.document_json };
 }
 
@@ -269,7 +290,7 @@ function resourceRefs(snapshot: Snapshot) {
   return { asset_ids: Array.from(assets).sort(), reference_image_ids: Array.from(references).sort(), task_ids: Array.from(tasks).sort() };
 }
 
-async function validateAssets(db: Db, user: SessionUser, snapshot: Snapshot, hydrateInputs = false) {
+export async function validateAssets(db: Db, user: SessionUser, snapshot: Snapshot, hydrateInputs = false) {
   const refs = resourceRefs(snapshot);
   const authorizedReferenceAssets = new Set<string>();
   const previews = new Map<string, { id: string; originalUrl: string; thumbnailUrl: string; title: string }>();
@@ -358,7 +379,7 @@ async function validateNewReferences(db: Db, user: SessionUser, snapshot: Snapsh
   }
 }
 
-async function saveHistory(db: Db, document: CanvasDocument) {
+export async function saveCanvasHistory(db: Db, document: CanvasDocument) {
   const snapshot = parseCanvasSnapshot(document.document_json, document.project_id, true);
   await db.canvasDocumentRevision.create({ data: {
     document_id: document.id, revision: document.revision, schema_version: document.schema_version,
@@ -385,7 +406,7 @@ function duplicateSnapshot(snapshot: Snapshot): Snapshot {
     'mode', 'imageSettings', 'videoSettings', 'settings', 'model', 'provider', 'promptMentions', 'textModel', 'quality', 'ratio', 'size', 'resolution',
     'count', 'duration', 'cameraPresets', 'templateId', 'template_id', 'templateVersion', 'moduleId', 'module_id',
     'source', 'executionMode', 'inputSource', 'retryCount', 'outputMode', 'canvasStyle',
-    'planSource', 'planReferences', 'planParameterSource', 'videoCardId', 'videoBranchId', 'storyWorkflow', 'storySource', 'canvasGroup']);
+    'planSource', 'planReferences', 'planParameterSource', 'videoCardId', 'videoBranchId', 'storyWorkflow', 'storySource', 'canvasGroup', 'roleConfig']);
   const remap = new Map(snapshot.canvas.nodes.map(node => [node.id, `node-${randomUUID()}`]));
   const groups = new Map<string, string>();
   const plans = object(snapshot.canvas.planSplits)
@@ -404,7 +425,7 @@ function duplicateSnapshot(snapshot: Snapshot): Snapshot {
     }
   }
   return {
-    schema: 'ultimate_canvas.v1', schemaVersion: 2,
+    schema: 'ultimate_canvas.v1', schemaVersion: snapshot.schemaVersion === 3 ? 3 : 2,
     context: { project_id: object(snapshot.context) ? snapshot.context.project_id : null },
     canvas: {
       version: 1, viewport: snapshot.canvas.viewport, selectedNodeId: null,
@@ -449,6 +470,7 @@ function withoutLiveTasks(snapshot: Snapshot): Snapshot {
     'generationresult', 'generationerror', 'generationprogress',
     'videosubmission', 'videosubmissionlegacy', 'videohistory', 'selectedvideoresult', 'generationpayload', 'previewvideotaskid',
     'taskstatus', 'runstatus', 'batchstatus', 'statusendpoint', 'pollingurl', 'pollurl',
+    'roletaskrunid', 'roleworkid', 'roleattemptid', 'roledeliveryid', 'roleconfirmation', 'rolehandoff', 'rolefees',
   ]);
   const mediaKeys = new Set([
     'previewimage', 'referenceimage', 'referenceimages', 'thumbnail', 'thumbnails',
@@ -478,6 +500,26 @@ async function prepareDetachedSnapshot(db: Db, user: SessionUser, snapshot: Snap
   const detached = withoutLiveTasks(snapshot);
   await validateAssets(db, user, detached, true);
   return parseCanvasSnapshot(JSON.stringify(detached), projectId, true);
+}
+
+async function validateRoles(db: Db, user: SessionUser, snapshot: Snapshot, retainedSource: Snapshot | null, remapped = false) {
+  const roles = snapshot.canvas.nodes.filter(n => n.type === 'role');
+  if (!roles.length) return;
+  const oldNodes = retainedSource?.canvas.nodes || [];
+  for (const node of roles) {
+    const config = node.data.roleConfig as ObjectValue;
+    const old = oldNodes.find(n => n.type === 'role' && (remapped
+      ? object(n.data.roleConfig) && n.data.roleConfig.definitionId === config.definitionId && n.data.roleConfig.version === config.version
+      : n.id === node.id));
+    const oldConfig = object(old?.data.roleConfig) ? old!.data.roleConfig : null;
+    const retained = oldConfig?.definitionId === config.definitionId && oldConfig?.version === config.version;
+    const version = await db.canvasRoleVersion.findFirst({ where: { definition_id: String(config.definitionId), version: Number(config.version),
+      definition: { owner_user_id: user.id, ...(!retained ? { status: 'active' } : {}) } } });
+    if (!version) throw new CanvasDocumentError('角色不存在、已归档或无权加入，请回到角色库检查', 409, 'role_version_unavailable');
+    const role = JSON.parse(version.snapshot_json);
+    node.data.roleConfig = { definitionId: version.definition_id, version: version.version, snapshot: role };
+    node.data.title = role.name;
+  }
 }
 
 function rawSnapshot(body: ObjectValue) {
@@ -548,6 +590,7 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
     }
     const document = await db.canvasDocument.findUnique({ where: { id: receipt.document_id }, select: canvasMetadataSelect });
     await assertDocument(user, document, true);
+    requireCanvasRoleCapability(document!.schema_version, body.required_capabilities);
     if (documentId && documentId !== receipt.document_id) {
       await assertDocument(user, await db.canvasDocument.findUnique({ where: { id: documentId }, select: canvasMetadataSelect }), true);
     }
@@ -561,6 +604,7 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
       if (repeated) return repeated;
       const existing = documentId ? await db.canvasDocument.findUnique({ where: { id: documentId } }) : null;
       if (documentId) await assertDocument(user, existing, true);
+      if (existing && ['save', 'duplicate', 'restore_revision'].includes(action)) requireCanvasRoleCapability(existing.schema_version, body.required_capabilities);
       if (existing && !v2 && existing.protocol_version >= 2) {
         throw new CanvasDocumentError('此画布已使用新版保存，请刷新页面并保留本地草稿', 426, 'protocol_upgrade_required');
       }
@@ -579,9 +623,14 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
         throw new CanvasDocumentError('请先用新版保存此画布，再恢复历史版本', 409, 'history_unavailable');
       }
       let snapshot: Snapshot | null = null;
+      let retainedRoleSource: Snapshot | null = null;
       let activeNode: string | null = existing?.active_generation_node_id ?? null;
       let title = titleFor(body.title, existing?.title ?? '未命名画布');
       if (action === 'save') {
+        if (existing) {
+          try { retainedRoleSource = parseCanvasSnapshot(existing.document_json, projectId, false); }
+          catch { /* Invalid stored content grants no archive exception. */ }
+        }
         snapshot = parseCanvasSnapshot(rawSnapshot(body), projectId, v2);
         // POST creation also serves conflict/draft copies, not only empty canvases.
         // Strip runtime bindings before reference validation and before any snapshot is stored.
@@ -593,8 +642,9 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
         if (activeNode && !snapshot.canvas.nodes.some(node => node.id === activeNode)) invalid('当前节点不存在');
         if (!existing) activeNode = null;
       } else if (action === 'duplicate') {
+        retainedRoleSource = parseCanvasSnapshot(existing!.document_json, projectId, true);
         snapshot = await prepareDetachedSnapshot(db, user,
-          duplicateSnapshot(parseCanvasSnapshot(existing!.document_json, projectId, true)), projectId);
+          duplicateSnapshot(retainedRoleSource), projectId);
         title = titleFor(body.title, `${existing!.title.slice(0, 115)} 副本`);
         activeNode = null;
       } else if (action === 'restore_revision') {
@@ -603,11 +653,19 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
           where: { document_id_revision: { document_id: documentId, revision: Number(body.target_revision) } },
         });
         if (!revision) throw new CanvasDocumentError('历史版本已过期或不存在', 404, 'revision_not_found');
+        retainedRoleSource = parseCanvasSnapshot(revision.document_json, projectId, true);
         snapshot = await prepareDetachedSnapshot(db, user,
-          parseCanvasSnapshot(revision.document_json, projectId, true), projectId);
+          retainedRoleSource, projectId);
         title = revision.title;
         activeNode = null;
       } else if (action === 'rename' && body.title === undefined) invalid('请输入新的画布名称');
+
+      if (snapshot) {
+        // Once upgraded, removing/restoring the last role must not reopen old-client writes.
+        if (existing?.schema_version === 3) { snapshot.schemaVersion = 3; snapshot.requiredCapabilities = ['role.v1']; }
+        requireCanvasRoleCapability(Number(snapshot.schemaVersion) || 1, body.required_capabilities);
+        await validateRoles(db, user, snapshot, retainedRoleSource, action === 'duplicate');
+      }
 
       const newDocument = !existing || action === 'duplicate';
       const data = {
@@ -615,7 +673,7 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
         ...(snapshot ? { document_json: JSON.stringify(snapshot) } : {}),
         ...(action === 'archive' ? { status: 'archived' } : action === 'restore' ? { status: 'active' } : {}),
         // Metadata actions must not implicitly upgrade historical JSON/protocol.
-        ...(v2 && action === 'save' ? { protocol_version: 2, schema_version: 2,
+        ...(v2 && snapshot ? { protocol_version: 2, schema_version: Number(snapshot.schemaVersion) || 2,
           ...(existing?.protocol_version === 1 ? { legacy_document_json: existing.document_json } : {}) } : {}),
       };
       let document: CanvasDocument;
@@ -631,7 +689,7 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
         }
         document = await db.canvasDocument.create({ data: {
           ...data, id: newId, owner_user_id: user.id, project_id: projectId, document_json: JSON.stringify(snapshot),
-          revision: 1, schema_version: 2, protocol_version: 2, access_scope: 'private', status: 'active',
+          revision: 1, schema_version: Number(snapshot?.schemaVersion) || 2, protocol_version: 2, access_scope: 'private', status: 'active',
         } });
       } else {
         // This predicate also fences a legacy write racing the first v2 save.
@@ -645,7 +703,7 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
       if (document.protocol_version >= 2 && (newDocument || existing!.protocol_version < 2
         || document.title !== existing!.title
         || meaningfulContent(document.document_json) !== meaningfulContent(existing!.document_json))) {
-        await saveHistory(db, document);
+        await saveCanvasHistory(db, document);
       }
       if (!v2) return { success: true, document: canvasDetail(document) };
       const response = { success: true, document: canvasMetadata(document), mutation_id: mutationId,

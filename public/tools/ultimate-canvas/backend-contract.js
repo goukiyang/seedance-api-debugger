@@ -17,6 +17,8 @@
         /^\/api\/tools\/ultimate-canvas\/(?:bootstrap|document|upload|quote|text-settings|video-submission)$/,
         /^\/api\/tools\/ultimate-canvas\/styles(?:\/(?:apply|generate|results))?$/,
         /^\/api\/tools\/ultimate-canvas\/images\/generate$/,
+        /^\/api\/tools\/ultimate-canvas\/(?:roles(?:\/[A-Za-z0-9_-]+)?|role-join|role-runs(?:\/[A-Za-z0-9_-]+)?|role-work(?:\/[A-Za-z0-9_-]+(?:\/execute)?)?|role-receipts\/[A-Za-z0-9_-]+|role-attempts\/[A-Za-z0-9_-]+)$/,
+        /^\/api\/tools\/ultimate-canvas\/role-deliveries\/[A-Za-z0-9_-]+\/attachments\/(?:[0-9]|1[0-9])$/,
         /^\/api\/content-reactions(?:\/(?:state|content))?$/,
         /^\/api\/assets\/library$/,
         /^\/api\/projects(?:\/[^/]+(?:\/video-cards)?)?$/,

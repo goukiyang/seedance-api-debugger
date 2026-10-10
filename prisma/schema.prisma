@@ -932,6 +932,192 @@ model CanvasDocumentMutation {
   @@index([created_at])
 }
 
+// Role history and idempotency are independent of canvas snapshot retention.
+// Existing users/documents remain soft authorization references, without new delete constraints.
+model CanvasRoleDefinition {
+  id              String   @id
+  owner_user_id   String
+  name            String
+  status          String   @default("active")
+  current_version Int      @default(1)
+  revision        Int      @default(1)
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+  versions        CanvasRoleVersion[]
+
+  @@index([owner_user_id, status, updated_at, id])
+}
+
+model CanvasRoleVersion {
+  id            String   @id
+  definition_id String
+  version       Int
+  schema        String   @default("role.v1")
+  snapshot_json String
+  created_at    DateTime @default(now())
+  definition    CanvasRoleDefinition @relation(fields: [definition_id], references: [id], onDelete: Restrict)
+  works         CanvasRoleWork[]
+
+  @@unique([definition_id, version])
+}
+
+model CanvasRoleTaskRun {
+  id                       String   @id
+  owner_user_id            String
+  document_id              String
+  requirements_revision    Int      @default(1)
+  revision                 Int      @default(1)
+  status                   String   @default("active")
+  paused                   Boolean  @default(false)
+  budget_points_limit      Int?
+  budget_usd_micros_limit  Int?
+  reserved_points          Int      @default(0)
+  reserved_usd_micros      Int      @default(0)
+  settled_points           Int      @default(0)
+  settled_usd_micros       Int      @default(0)
+  max_calls                Int?
+  call_count               Int      @default(0)
+  max_rounds               Int
+  wait_limit_seconds       Int?
+  created_at               DateTime @default(now())
+  updated_at               DateTime @updatedAt
+  requirements             CanvasRoleTaskRevision[]
+  works                    CanvasRoleWork[]
+  events                   CanvasRoleEvent[]
+
+  @@index([owner_user_id, document_id, updated_at, id])
+}
+
+model CanvasRoleTaskRevision {
+  id                    String   @id
+  role_task_run_id      String
+  requirements_revision Int
+  snapshot_json         String
+  created_by            String
+  created_at            DateTime @default(now())
+  run                   CanvasRoleTaskRun @relation(fields: [role_task_run_id], references: [id], onDelete: Restrict)
+
+  @@unique([role_task_run_id, requirements_revision])
+}
+
+model CanvasRoleWork {
+  id                    String   @id
+  role_task_run_id      String
+  requirements_revision Int
+  node_id               String
+  round                 Int
+  role_version_id       String
+  revision              Int      @default(1)
+  phase                 String   @default("offered")
+  executor_user_id       String?
+  reviewer_node_id       String?
+  confirm_required      Boolean  @default(false)
+  snapshot_json         String
+  inputs_json           String   @default("[]")
+  draft_text            String   @default("")
+  current_delivery_id   String?
+  wait_reason           String?
+  wait_since            DateTime?
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+  run                   CanvasRoleTaskRun @relation(fields: [role_task_run_id], references: [id], onDelete: Restrict)
+  role_version          CanvasRoleVersion @relation(fields: [role_version_id], references: [id], onDelete: Restrict)
+  deliveries            CanvasRoleDelivery[]
+  attempts              CanvasRoleAttempt[]
+
+  @@unique([role_task_run_id, requirements_revision, node_id, round])
+  @@index([role_task_run_id, phase, updated_at, id])
+}
+
+model CanvasRoleDelivery {
+  id                    String   @id
+  work_id               String
+  version               Int
+  requirements_revision Int
+  content_json          String
+  input_digest          String
+  submitted_by          String
+  submission_kind       String
+  supersedes_id          String?
+  created_at            DateTime @default(now())
+  work                  CanvasRoleWork @relation(fields: [work_id], references: [id], onDelete: Restrict)
+
+  @@unique([work_id, version])
+}
+
+model CanvasRoleEvent {
+  id                    String   @id
+  role_task_run_id      String
+  requirements_revision Int
+  work_id               String?
+  actor_user_id         String
+  actor_kind            String
+  kind                  String
+  delivery_id           String?
+  from_node_id          String?
+  to_node_id            String?
+  detail_json           String
+  created_at            DateTime @default(now())
+  run                   CanvasRoleTaskRun @relation(fields: [role_task_run_id], references: [id], onDelete: Restrict)
+
+  @@index([role_task_run_id, created_at, id])
+  @@index([work_id, created_at, id])
+}
+
+model CanvasRoleAttempt {
+  id                    String   @id
+  work_id               String
+  round                 Int
+  purpose               String
+  attempt               Int
+  request_id            String   @unique
+  state                 String
+  input_snapshot_json   String
+  quote_json            String
+  reserved_points       Int
+  reserved_usd_micros   Int
+  fee_state             String
+  provider_scope        String?
+  provider_reference    String?
+  result_json           String?
+  settled_points        Int?
+  settled_usd_micros    Int?
+  settlement_receipt    String?
+  settlement_applied    Boolean  @default(false)
+  started_at            DateTime @default(now())
+  finished_at           DateTime?
+  work                  CanvasRoleWork @relation(fields: [work_id], references: [id], onDelete: Restrict)
+
+  @@unique([work_id, round, purpose, attempt])
+  @@unique([provider_scope, provider_reference])
+}
+
+model CanvasRoleHandoff {
+  id                    String   @id
+  role_task_run_id      String
+  requirements_revision Int
+  source_work_id        String
+  source_delivery_id    String
+  target_work_id        String
+  bundle_json           String
+  created_at            DateTime @default(now())
+
+  @@unique([source_delivery_id, target_work_id, requirements_revision])
+  @@index([role_task_run_id, target_work_id])
+}
+
+model CanvasRoleMutationReceipt {
+  id             String   @id
+  owner_user_id  String
+  mutation_id    String
+  request_hash   String
+  object_id      String
+  response_json  String
+  created_at     DateTime @default(now())
+
+  @@unique([owner_user_id, mutation_id])
+}
+
 model ToolFlow {
   id          String   @id @default(cuid())
   owner_id    String

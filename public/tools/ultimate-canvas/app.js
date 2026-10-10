@@ -18,6 +18,7 @@
     let videoReadSequence = 0;
     let videoRecheck = null;
     let lastVideoRecheck = 0;
+    let roleCreator = null, roleWorkflow = null, roleInstanceLayer = null;
 
     function ensureNoticeStack() {
         let stack = document.getElementById('canvas-notice-stack');
@@ -57,6 +58,7 @@
         bootstrapError: null,
         documentId: null,
         documentRevision: 0,
+        documentSchemaVersion: 2,
         documentTitle: '未命名画布',
         explicitDocumentId: new URLSearchParams(window.location.search).get('document_id'),
         explicitFocusNode: new URLSearchParams(window.location.search).get('focus_node'),
@@ -149,6 +151,7 @@
     function graphEditAllowed() {
         return canvasRuntime.documentWritable && !canvasRuntime.contextSwitching && !canvasRuntime.documentRestoring
             && !canvasRuntime.documentOperation && !canvasRuntime.failedSaveRequest && !canvasRuntime.saveConflict
+            && !roleJoinPending()
             && !canvasRuntime.uploadsInFlight && canvasRuntime.pendingGenerationSubmissions.size() === 0
             && ![...engine.nodes.values()].some(node =>
                 ['pending', 'unconfirmed'].includes(node.data?.storyRequest?.state)
@@ -483,14 +486,17 @@
             }, 'Canvas request endpoint is not allowed.');
         }
         const hasPayload = options.payload !== undefined;
+        const payload = hasPayload && endpoint.split('?')[0] === '/api/tools/ultimate-canvas/document'
+            ? { ...options.payload, required_capabilities: ['role.v1'] } : options.payload;
         const body = options.body !== undefined
             ? options.body
             : hasPayload
-                ? JSON.stringify(options.payload)
+                ? JSON.stringify(payload)
                 : undefined;
         const requestHeaders = {
             ...(hasPayload ? { 'Content-Type': 'application/json' } : {}),
             ...workspaceHeaders(),
+            ...(endpoint.split('?')[0] === '/api/tools/ultimate-canvas/document' ? { 'x-canvas-capabilities': 'role.v1' } : {}),
             ...(options.headers || {})
         };
         const res = await fetch(endpoint, {
@@ -1979,14 +1985,19 @@
         cancelReferenceImport();
         canvasRuntime.pendingGenerationSubmissions.releaseAll(entry => entry.release?.(true));
         canvasRuntime.contextEpoch += 1;
+        roleInstanceLayer?.close(); roleInstanceLayer = null;
+        roleCreator?.contextChanged();
+        roleWorkflow?.contextChanged();
     }
 
     function openCanvasProductDialog(options) {
         const opener = document.activeElement;
         const dialog = document.createElement('dialog');
         dialog.className = `canvas-product-dialog ${options.className || ''}`;
-        dialog.setAttribute('aria-labelledby', options.labelledBy);
-        dialog.innerHTML = options.content;
+        if (options.labelledBy) dialog.setAttribute('aria-labelledby', options.labelledBy);
+        // Role leaves construct safe DOM with listeners; preserve that DOM rather than stringify it.
+        if (options.content instanceof Node) dialog.append(options.content);
+        else dialog.innerHTML = options.content;
         let down = null, dismissing = false;
         const outside = event => {
             const box = dialog.getBoundingClientRect();
@@ -2118,6 +2129,7 @@
         canvasRuntime.documentId = null;
         canvasRuntime.explicitDocumentId = null;
         canvasRuntime.documentRevision = 0;
+        canvasRuntime.documentSchemaVersion = 2;
         canvasRuntime.documentWritable = false;
         canvasRuntime.documentDirty = false;
         canvasRuntime.documentTitle = '未命名画布';
@@ -2779,7 +2791,8 @@
         const rules = document.querySelector('[data-context-rules-modal]');
         const rulesDirty = rules && (rules._saving || rulesModalDirty(rules));
         return canvasRuntime.documentDirty || canvasRuntime.saveState === 'saving'
-            || Boolean(canvasRuntime.failedSaveRequest) || canvasRuntime.documentOperation || Boolean(rulesDirty);
+            || Boolean(canvasRuntime.failedSaveRequest) || canvasRuntime.documentOperation || Boolean(rulesDirty)
+            || Boolean(roleCreator?.hasUnsaved()) || Boolean(roleWorkflow?.hasUnsaved()) || Boolean(roleInstanceLayer?.dirty);
     }
 
     function canvasExitRisk() {
@@ -2792,6 +2805,10 @@
         ].filter(Boolean);
         const unsaved = [];
         if (rulesModalDirty(rules)) unsaved.push('画布规则');
+        if (roleCreator?.hasUnsaved()) unsaved.push('角色设置草稿');
+        if (roleWorkflow?.hasUnsaved()) unsaved.push('角色工作草稿');
+        if (roleInstanceLayer?.dirty) unsaved.push('角色实例版本');
+        if (roleJoinPending()) busy.push('角色加入结果待核对，请用原请求恢复');
         let recoverable = false;
         let snapshot;
         let contentSignature = '';
@@ -2922,7 +2939,7 @@
             if (Array.isArray(value)) return value.map(clean);
             if (!value || typeof value !== 'object') return value;
             return Object.fromEntries(Object.entries(value)
-                .filter(([key]) => !/^(task_?ids?|provider_?task_?id|run_?id|batch_?id|generationResult|generationError|statusEndpoint|frozenCost|styleJob|imageBillingJob|videoSubmission|videoSubmissionLegacy|videoHistory|selectedVideoResult|previewVideoTaskId|generationPayload)$/i.test(key))
+                .filter(([key]) => !/^(role_?(?:task_?run_?id|work_?id|attempt_?id|delivery_?id|confirmation|handoff|fees)|task_?ids?|provider_?task_?id|run_?id|batch_?id|generationResult|generationError|statusEndpoint|frozenCost|styleJob|imageBillingJob|videoSubmission|videoSubmissionLegacy|videoHistory|selectedVideoResult|previewVideoTaskId|generationPayload)$/i.test(key))
                 .map(([key, item]) => [key, key === 'generationStatus' ? 'idle' : clean(item)]));
         };
         return JSON.stringify(clean(JSON.parse(raw)));
@@ -3168,6 +3185,7 @@
     }
 
     function syncNodeDataFromDom(nodeId, node) {
+        if (node?.type === 'role') return;
         const nodeEl = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
         if (!nodeEl || !node) return;
         const prompt = collectNodePrompt(nodeEl, node.type);
@@ -3200,6 +3218,8 @@
         syncAllNodesFromDom();
         return {
             schema: 'ultimate_canvas.v1',
+            schemaVersion: canvasRuntime.documentSchemaVersion === 3 || [...engine.nodes.values()].some(n => n.type === 'role') ? 3 : 2,
+            requiredCapabilities: ['role.v1'],
             savedAt: new Date().toISOString(),
             context: {
                 project_id: context.projectId ?? canvasRuntime.selectedProjectId,
@@ -3234,6 +3254,7 @@
                 project_id: projectId,
                 title: canvasRuntime.documentTitle,
                 protocol_version: 2,
+                required_capabilities: ['role.v1'],
                 base_revision: canvasRuntime.documentRevision,
                 mutation_id: documentMutationId(),
                 active_generation_node_id: engine.selectedNodeId,
@@ -3312,7 +3333,7 @@
     });
 
     async function saveCanvasDocument(reason = 'autosave') {
-        if (canvasRuntime.documentOperation || canvasRuntime.saveConflict) return false;
+        if (canvasRuntime.documentOperation || canvasRuntime.saveConflict || roleJoinPending()) return false;
         const snapshot = canvasSaveSnapshot(reason);
         if (!snapshot || snapshot === true) return true;
         const outcome = await canvasRuntime.saveCoordinator.request(snapshot);
@@ -3330,6 +3351,7 @@
 
     async function flushCanvasSaveNow(reason) {
         if (!canvasRuntime.documentWritable) return true;
+        if (roleJoinPending()) return false;
         if (canvasRuntime.saveConflict) return false;
         if (!canvasRuntime.documentDirty && canvasRuntime.saveState === 'saved' && !canvasRuntime.failedSaveRequest) return true;
         window.clearTimeout(canvasRuntime.saveTimer);
@@ -3534,6 +3556,7 @@
             canvasRuntime.documentId = documentToRestore.id;
             canvasRuntime.explicitDocumentId = documentToRestore.id;
             canvasRuntime.documentRevision = documentToRestore.revision || 0;
+            canvasRuntime.documentSchemaVersion = documentToRestore.schema_version || parsed.schemaVersion || 2;
             canvasRuntime.documentTitle = recoveredDraft ? draft.request.title : documentToRestore.title || '未命名画布';
             canvasRuntime.failedSaveRequest = null;
             canvasRuntime.saveConflict = false;
@@ -7314,7 +7337,7 @@
     const sidePanels = document.querySelectorAll('.side-panel');
     let activePanel = null;
 
-    function showPanel(panelId) {
+    function showPanel(panelId, roleOptions) {
         sidePanels.forEach(p => p.classList.remove('active'));
         toolbarBtns.forEach(b => b.classList.remove('active'));
 
@@ -7329,6 +7352,7 @@
         } else {
             activePanel = null;
         }
+        if (activePanel === 'roles-panel') void roleCreator?.openLibrary(roleOptions || {});
     }
 
     toolbarBtns.forEach(btn => {
@@ -7338,6 +7362,289 @@
     document.querySelectorAll('.panel-close').forEach(btn => {
         btn.addEventListener('click', () => showPanel(null));
     });
+
+    function roleContext() {
+        const userId = canvasRuntime.bootstrap?.user?.id || null;
+        return { userId, projectId: canvasRuntime.selectedProjectId, documentId: canvasRuntime.documentId,
+            documentRevision: canvasRuntime.documentRevision, contextEpoch: canvasRuntime.contextEpoch,
+            writable: canvasRuntime.documentWritable && !canvasRuntime.contextSwitching && !canvasRuntime.documentOperation,
+            textModels: (canvasRuntime.bootstrap?.capabilities?.text?.model_options || []).map(m => ({ ...m, id: m.value })),
+            scopeKey: `sd2:roles:${userId || 'none'}:${canvasRuntime.selectedProjectId || 'none'}:${canvasRuntime.documentId || 'none'}` };
+    }
+    const roleJoinMemory = new Map();
+    function roleJoinKey(ctx = roleContext()) {
+        return ctx.userId && ctx.documentId ? `${ctx.scopeKey}:join-pending` : null;
+    }
+    function roleJoinPending(ctx = roleContext()) {
+        const key = roleJoinKey(ctx);
+        if (!key) return null;
+        // Called during initial toolbar setup before the bridge Map is initialized.
+        let memory;
+        try { memory = roleJoinMemory.get(key); } catch { return null; }
+        if (memory) return memory;
+        try {
+            const saved = JSON.parse(localStorage.getItem(key) || 'null');
+            if (saved?.document_id === ctx.documentId && typeof saved.mutation_id === 'string'
+                && typeof saved.definition_id === 'string' && Number.isInteger(saved.version) && Number.isInteger(saved.document_revision)) {
+                roleJoinMemory.set(key, saved); return saved;
+            }
+        } catch { /* Memory still protects a request if local storage is unavailable. */ }
+        return null;
+    }
+    function retainRoleJoin(ctx, payload) {
+        const key = roleJoinKey(ctx);
+        roleJoinMemory.set(key, payload);
+        try { localStorage.setItem(key, JSON.stringify(payload)); }
+        catch { showCanvasNotice('加入请求只保留在当前页，请保持页面打开并核对原回执。', 'warn'); }
+    }
+    function clearRoleJoin(ctx) {
+        const key = roleJoinKey(ctx);
+        roleJoinMemory.delete(key);
+        try { localStorage.removeItem(key); } catch {}
+    }
+    function roleTime(value) {
+        const wrapper = document.createElement('span');
+        wrapper.innerHTML = rulesTime(value);
+        const time = wrapper.querySelector('time');
+        if (time?.textContent === '0分钟前') time.textContent = '刚刚';
+        return wrapper.innerHTML;
+    }
+    const roleBridge = {
+        engine, libraryRoot: document.getElementById('roles-panel-body'), workRoot: document.getElementById('role-work-panel'),
+        formatUsdMicros: value => {
+            const rate = canvasRuntime.bootstrap?.money_display?.usd_to_cny_rate;
+            if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0
+                || typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0) return '金额待核对';
+            const converted = value * rate / 1000000;
+            if (!Number.isFinite(converted)) return '金额待核对';
+            return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY',
+                minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(converted).replace('￥', '¥');
+        },
+        usdToCnyRateText: () => canvasRuntime.bootstrap?.money_display?.rate_text || '人民币换算汇率未确认',
+        context: roleContext, icon: name => window.UltimateCanvasIcons(name)
+            || window.UltimateCanvasIcons(String(name || '').split('-').map(part => part ? part[0].toUpperCase() + part.slice(1) : '').join(''))
+            || window.UltimateCanvasIcons('CircleHelp'),
+        escape: escapeHtml, renderTime: roleTime, dialog: openCanvasProductDialog,
+        confirm: options => requestCanvasConfirmation({ ...options, confirmLabel: options.confirmText || options.confirmLabel }),
+        notice: showCanvasNotice,
+        request: async (url, options) => {
+            try { return await requestJson(url, options); }
+            catch (error) { error.data = error.response; throw error; }
+        },
+        saveDocument: async reason => {
+            const before = roleContext();
+            if (!before.writable || !before.documentId || !await flushCanvasSave(reason || 'role_operation')) throw new Error('请先创建并保存可编辑画布，角色库内容仍保留。');
+            const after = roleContext();
+            if (before.contextEpoch !== after.contextEpoch || before.documentId !== after.documentId) throw new Error('画布目标已变化，未继续角色操作');
+            return after;
+        },
+        listRoleNodes: () => [...engine.nodes.values()].filter(n => n.type === 'role')
+            .map(n => ({ id: n.id, title: n.data?.title, roleConfig: structuredClone(n.data?.roleConfig || {}) })),
+        listMaterialNodes: () => [...engine.nodes.values()].filter(n => n.type !== 'role' && !n.type.startsWith('flow-'))
+            .map(n => ({ id: n.id, title: n.data?.title || n.type, type: n.type })),
+        openCreator: options => roleCreator?.openCreator(options),
+        openLibrary: async options => {
+            if (await roleWorkflow?.close() === false) return false;
+            if (activePanel === 'roles-panel') await roleCreator?.openLibrary(options || {});
+            else showPanel('roles-panel', options);
+            return true;
+        },
+        closeLibrary: () => showPanel(null),
+        onSaved: () => { void roleWorkflow?.refresh(); },
+        onBillingSettled: () => {
+            const userId = roleContext().userId;
+            if (userId) window.parent.postMessage({ type: 'sd2-canvas-billing-settled', userId }, location.origin);
+        },
+        joinRole: async options => {
+            let ctx = roleContext(), payload = roleJoinPending(ctx);
+            if (payload && (payload.mutation_id !== options.mutationId || payload.definition_id !== options.definitionId || payload.version !== options.version)) {
+                throw new Error('另一个角色加入结果尚未确认，请先恢复原加入请求。');
+            }
+            if (!payload) {
+                if (!graphEditAllowed()) throw new Error('画布正在处理其他操作，请稍后加入；已保存的角色不会丢失。');
+                ctx = await roleBridge.saveDocument('before_role_join');
+                payload = { mutation_id: options.mutationId, document_id: ctx.documentId, document_revision: ctx.documentRevision,
+                    definition_id: options.definitionId, version: options.version, position: options.position,
+                    pending_connection: options.pendingConnection || null };
+                retainRoleJoin(ctx, payload);
+            }
+            return withDocumentOperation(async () => {
+                let result;
+                try { result = await requestJson(`/api/tools/ultimate-canvas/role-receipts/${encodeURIComponent(payload.mutation_id)}`); }
+                catch (error) { if (error.status !== 404) throw error; }
+                if (!result) {
+                    try { result = await postJson('/api/tools/ultimate-canvas/role-join', payload); }
+                    catch (error) {
+                        if (error.status >= 400 && error.status < 500 && error.response?.code === 'revision_conflict') clearRoleJoin(ctx);
+                        throw error;
+                    }
+                }
+                clearRoleJoin(ctx);
+                if (ctx.contextEpoch !== canvasRuntime.contextEpoch || ctx.documentId !== canvasRuntime.documentId) throw new Error('角色已保存到原画布，当前目标已变化，请打开原画布核对加入回执。');
+                if (canvasRuntime.documentRevision !== payload.document_revision
+                    && !(canvasRuntime.documentRevision === result.document.revision && engine.nodes.has(result.nodeId))) {
+                    throw new Error('加入已确认，但画布已继续更新；请重读该画布核对，不会重新插入旧节点。');
+                }
+                // Integrate only the confirmed node; existing video elements/tasks remain untouched.
+                canvasRuntime.documentRestoring = true;
+                try {
+                    if (!engine.nodes.has(result.nodeId)) {
+                        const token = graphCommands.begin('role_join');
+                        engine.addNode('role', result.node.x, result.node.y, { ...result.node.data, id: result.nodeId });
+                        if (payload.pending_connection) connectMenuNode(result.nodeId, payload.pending_connection);
+                        graphCommands.commit(token);
+                    }
+                } finally { canvasRuntime.documentRestoring = false; }
+                canvasRuntime.documentRevision = result.document.revision;
+                canvasRuntime.documentSchemaVersion = 3;
+                canvasRuntime.documentDirty = false; canvasRuntime.saveState = 'saved';
+                const draftKey = draftStorageKey();
+                try { if (draftKey) localStorage.removeItem(draftKey); } catch {}
+                engine.selectNode(result.nodeId); updateSaveIndicator();
+                return { nodeId: result.nodeId, documentId: ctx.documentId };
+            });
+        }
+    };
+    roleCreator = window.UltimateCanvasRoleCreator?.create(roleBridge);
+    roleWorkflow = window.UltimateCanvasRoleWorkflow?.create(roleBridge);
+    document.getElementById('tool-role-pending')?.addEventListener('click', async () => {
+        if (await roleWorkflow?.openPending()) showPanel(null);
+    });
+    document.addEventListener('click', event => {
+        const settings = event.target.closest('[data-role-instance-settings]');
+        if (settings) {
+            event.preventDefault(); event.stopPropagation();
+            void openRoleInstanceSettings(settings.dataset.roleInstanceSettings);
+            return;
+        }
+        const button = event.target.closest('[data-role-open]');
+        if (!button) return;
+        event.preventDefault(); event.stopPropagation();
+        void roleWorkflow?.open(button.dataset.roleOpen);
+    });
+    let roleCardGesture = null;
+    document.addEventListener('pointerdown', event => {
+        const card = event.target.closest('.node-type-role');
+        roleCardGesture = card && event.button === 0 && !event.target.closest('button,input,textarea,a,.node-port')
+            ? { id: card.dataset.nodeId, x: event.clientX, y: event.clientY, pointerId: event.pointerId } : null;
+    });
+    document.addEventListener('pointerup', event => {
+        const gesture = roleCardGesture; roleCardGesture = null;
+        if (gesture && gesture.pointerId === event.pointerId && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) < 6
+            && event.target.closest('.node-type-role')?.dataset.nodeId === gesture.id) void roleWorkflow?.open(gesture.id);
+    });
+    document.addEventListener('pointercancel', () => { roleCardGesture = null; });
+    document.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' || event.target.closest('button,input,textarea,a,[contenteditable="true"],dialog')) return;
+        const card = event.target.closest('.node-type-role');
+        if (card) { event.preventDefault(); void roleWorkflow?.open(card.dataset.nodeId); }
+    });
+
+    async function openRoleInstanceSettings(nodeId) {
+        if (roleInstanceLayer) return;
+        const node = engine.nodes.get(nodeId), ctx = roleContext();
+        if (node?.type !== 'role' || !ctx.writable) return showCanvasNotice('当前角色只可查看。', 'warn');
+        const original = structuredClone(node.data.roleConfig), heading = `role-instance-${crypto.randomUUID()}`;
+        let definition;
+        try { definition = await roleBridge.request(`/api/tools/ultimate-canvas/roles/${encodeURIComponent(original.definitionId)}`); }
+        catch (error) { return showCanvasNotice(error.message, 'warn'); }
+        if (ctx.contextEpoch !== roleContext().contextEpoch || engine.nodes.get(nodeId) !== node || roleInstanceLayer) return;
+        let selected = original, busy = false, readOrder = 0, changedLocally = false;
+        const current = () => ctx.contextEpoch === roleContext().contextEpoch && ctx.documentId === roleContext().documentId
+            && engine.nodes.get(nodeId) === node && JSON.stringify(node.data.roleConfig) === JSON.stringify(original);
+        const finish = () => { layer.close(); if (roleInstanceLayer === state) roleInstanceLayer = null; updateSaveIndicator(); };
+        const dismiss = async () => {
+            if (busy) return;
+            if (state.dirty && !await roleBridge.confirm({ title: '放弃更改？', message: '当前实例版本选择尚未保存。', confirmText: '放弃更改' })) return;
+            finish();
+        };
+        const layer = openCanvasProductDialog({ className: 'canvas-confirm-dialog', labelledBy: heading, onDismiss: dismiss,
+            content: `<div class="canvas-confirm-head"><strong id="${heading}">角色实例</strong>
+                <button type="button" class="context-command" data-instance-close aria-label="关闭">${roleBridge.icon('X')}</button></div>
+                <p>${escapeHtml(original.snapshot?.name || node.data.title)} · 当前版本 ${original.version}</p>
+                <label>角色版本 <input class="canvas-name-input" type="number" min="1" max="${Number(definition.role.current_version)}" step="1" value="${original.version}" data-instance-version></label>
+                <p data-instance-preview></p><p role="status" data-instance-status></p>
+                <div class="canvas-confirm-actions"><button type="button" class="context-command" data-instance-executor>更换执行者</button>
+                <button type="button" class="context-command danger" data-instance-remove>移除角色</button>
+                <button type="button" class="context-primary-command" data-instance-save disabled>保存实例</button></div>` });
+        const state = { close: finish, dirty: false }; roleInstanceLayer = state;
+        const input = layer.dialog.querySelector('[data-instance-version]'), save = layer.dialog.querySelector('[data-instance-save]');
+        const status = layer.dialog.querySelector('[data-instance-status]'), preview = layer.dialog.querySelector('[data-instance-preview]');
+        const render = () => {
+            const executor = selected.snapshot?.executor;
+            preview.textContent = `版本 ${selected.version} · ${executor?.kind === 'ai' ? 'AI · ' + executor.model : executor?.kind === 'person' ? '人员' : '稍后指定'}`;
+            save.disabled = busy || !state.dirty || !selected || !current(); updateSaveIndicator();
+        };
+        render();
+        input.addEventListener('input', () => { state.dirty = input.value !== String(original.version); selected = null; save.disabled = true; updateSaveIndicator(); });
+        input.addEventListener('change', async () => {
+            const version = Number(input.value), order = ++readOrder;
+            if (!Number.isInteger(version) || version < 1 || version > definition.role.current_version) { status.textContent = '请选择已经保存的有效版本。'; return; }
+            try {
+                const result = await roleBridge.request(`/api/tools/ultimate-canvas/roles/${encodeURIComponent(original.definitionId)}?version=${version}`);
+                if (roleInstanceLayer !== state || !current() || order !== readOrder) return;
+                selected = { definitionId: original.definitionId, version: result.version.version, snapshot: result.version.snapshot };
+                status.textContent = ''; render();
+            } catch (error) { if (roleInstanceLayer === state && order === readOrder) status.textContent = error.message; }
+        });
+        layer.dialog.addEventListener('click', async event => {
+            const button = event.target.closest('button');
+            if (!button || busy) return;
+            if (button.hasAttribute('data-instance-close')) return void dismiss();
+            if (changedLocally) {
+                if (!button.hasAttribute('data-instance-save')) return;
+                if (ctx.contextEpoch !== roleContext().contextEpoch || ctx.documentId !== roleContext().documentId) return;
+                busy = true; save.disabled = true;
+                try {
+                    if (!await flushCanvasSave('role_instance_recovery')) throw new Error('保存尚未确认，请保留当前页并处理画布保存提示。');
+                    state.dirty = false; finish(); void roleWorkflow?.refresh();
+                } catch (error) { if (roleInstanceLayer === state) status.textContent = error.message; }
+                finally { busy = false; if (roleInstanceLayer === state) save.disabled = false; }
+                return;
+            }
+            if (button.hasAttribute('data-instance-executor')) {
+                if (state.dirty && !await roleBridge.confirm({ title: '放弃选择？', message: '先编辑角色库的新版本，当前实例不会自动升级。', confirmText: '继续编辑' })) return;
+                finish();
+                showCanvasNotice(`编辑库中当前版本 v${definition.role.current_version}，保存后再显式切换实例；旧任务不会自动切换。`);
+                return void roleCreator?.openCreator({ roleId: original.definitionId, version: definition.role.current_version, mode: 'edit' });
+            }
+            const remove = button.hasAttribute('data-instance-remove');
+            if (!remove && !button.hasAttribute('data-instance-save')) return;
+            if (!current() || !graphEditAllowed() || (!remove && !selected)) { status.textContent = '画布或角色已变化，请关闭后重新读取。'; return; }
+            if (!await roleBridge.confirm({ title: remove ? '移除角色？' : '切换版本？', confirmText: remove ? '移除角色' : '切换版本',
+                message: remove ? '只移除画布实例，角色库、任务和费用历史保留。在途调用不会被取消。' : '原任务按旧版本保留，后续操作将停止，需要明确修改任务要求后继续。在途调用不会被取消。' })) return;
+            if (!current() || !graphEditAllowed()) return;
+            busy = true; save.disabled = true; status.textContent = '正在保存…';
+            try {
+                await roleBridge.saveDocument('before_role_instance_change');
+                if (!current()) throw new Error('画布目标已变化，未更改实例。');
+                await withDocumentOperation(async () => {
+                    const token = graphCommands.begin(remove ? 'role_remove' : 'role_version');
+                    if (remove) engine.deleteNode(nodeId);
+                    else {
+                        node.data.roleConfig = structuredClone(selected); node.data.title = selected.snapshot.name;
+                        const element = document.querySelector(`.node-type-role[data-node-id="${CSS.escape(nodeId)}"]`);
+                        const replacement = engine._buildNode(node); engine.nodeResizeObserver?.unobserve(element);
+                        element?.replaceWith(replacement); engine.nodeResizeObserver?.observe(replacement);
+                        engine.selectNode(nodeId); engine._updateConnections();
+                    }
+                    graphCommands.commit(token);
+                    changedLocally = true; input.disabled = true;
+                    scheduleCanvasSave('role_instance_change');
+                    if (!await flushCanvasSave('role_instance_change', true)) throw new Error('实例更改尚未保存，请先处理画布保存状态。');
+                });
+                if (roleInstanceLayer !== state) return;
+                state.dirty = false; finish(); void roleWorkflow?.refresh();
+            } catch (error) { if (roleInstanceLayer === state) status.textContent = error.message; }
+            finally {
+                busy = false;
+                if (roleInstanceLayer === state) {
+                    if (changedLocally) { state.dirty = true; save.textContent = '重试画布保存'; }
+                    save.disabled = changedLocally ? false : !state.dirty || !current();
+                }
+            }
+        });
+    }
 
     function connectMenuNode(newNodeId, pendingConnection) {
         if (!newNodeId || !pendingConnection?.nodeId) return;
@@ -7381,6 +7688,7 @@
         menu.setAttribute('role', 'menu');
         menu.setAttribute('aria-label', connection ? incoming ? '添加上下文' : '引用该节点生成' : '添加节点');
         menu.innerHTML = `<div class="menu-section-title">${menu.getAttribute('aria-label')}</div>${buttons}
+            ${!owner?.type.startsWith('flow-') ? `<button type="button" role="menuitem" class="menu-item" data-action="add-role">${icon('Users')}<span>角色</span></button>` : ''}
             ${connection ? `<button type="button" role="menuitem" class="menu-item" data-action="reference-node" ${canReference ? '' : 'disabled title="请从接收图片的节点左侧选择已有参考"'}>${icon('Link')}<span>参考节点</span></button>` : ''}
             ${!connection || owner?.type.startsWith('flow-') ? `<details><summary>工具流节点</summary>${[['flow-input', '输入'], ['flow-template', '图片模板'], ['flow-select', '结果筛选'], ['flow-confirm', '人工确认'], ['flow-output', '输出']].map(([type, label]) => `<button type="button" role="menuitem" class="menu-item" data-node-type="${type}">${icon('Layers')}<span>${label}</span></button>`).join('')}</details>` : ''}
             ${!connection || incoming ? `<div class="menu-divider"></div><button type="button" class="menu-item" role="menuitem" data-action="upload">${icon('Upload')}<span>上传素材</span></button>` : ''}
@@ -7472,6 +7780,10 @@
             const y = source ? source.y : cy - placement.y;
             const newNodeId = engine.addNode(type, x, y);
             connectMenuNode(newNodeId, pendingConnection);
+        } else if (action === 'add-role') {
+            engine._hideAddMenu();
+            void roleBridge.openLibrary({ position: { x: cx - 160, y: cy - 80 }, pendingConnection });
+            return;
         } else if (action === 'reference-node') {
             engine._hideAddMenu();
             if (pendingConnection?.role === 'input') startReferenceSelection(pendingConnection.nodeId);

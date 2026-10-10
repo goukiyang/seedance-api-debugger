@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '分辨率可应用到我的已有模板并撤销；资产视频支持悬停预览和单击详情；已授权大图切换更快；人物描述回复未知时可主动按原文生成，不重复文字费用。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '无限画布新增私有角色库，可设置职责与交付、交流、提交成果和返工，并保存历史。加入角色不会自动调用 AI；报价和预算未确认时不发送请求。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

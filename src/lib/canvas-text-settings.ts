@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
 
@@ -95,12 +96,14 @@ function stateFromRows(legacyRaw: string | null, libraryRaw: string | null): Can
     expected: { libraryToken: token(libraryRaw), legacyToken: legacy.token, libraryRevision: library.revision, legacyRevision: legacy.revision } };
 }
 
-export async function getCanvasTextSettings(): Promise<CanvasRuleState> {
+export async function getCanvasTextSettings(db?: Prisma.TransactionClient): Promise<CanvasRuleState> {
   // A single read snapshot: opening the editor or generating never creates a setting.
-  return prisma.$transaction(async tx => {
+  const read = async (tx: Prisma.TransactionClient) => {
     const rows = await tx.platformSetting.findMany({ where: { key: { in: [LEGACY_KEY, RULES_KEY] } }, select: { key: true, value_json: true } });
     return stateFromRows(rows.find(row => row.key === LEGACY_KEY)?.value_json ?? null, rows.find(row => row.key === RULES_KEY)?.value_json ?? null);
-  });
+  };
+  // An existing role write transaction must not wait on a second SQLite transaction.
+  return db ? read(db) : prisma.$transaction(read);
 }
 
 export function canvasRulePurpose(kind: string, mode: string, explicit?: unknown): Exclude<CanvasRulePurpose, 'basic'> {
