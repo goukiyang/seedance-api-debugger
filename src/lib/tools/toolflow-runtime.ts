@@ -92,9 +92,10 @@ async function assertToolFlowLegacyRoute(tx: Tx, config: TemplateConfig, configu
     throw new AuthError(`工具流入口暂不支持图片型号 ${model} 的默认供应商「${supplier}」；请恢复该型号的共享/Banana 兼容通道，或改用图片工作区。`, 409);
   }
   const capability = option?.models[model as typeof IMAGE_STUDIO_MODELS[number]];
+  const fixedPoints = capability?.fixedPoints;
   const fixedPriceMatches = typeof configuredPrice === 'number' && Number.isFinite(configuredPrice)
-    && Number.isSafeInteger(capability?.fixedPoints)
-    && creditsToCents(configuredPrice) === creditsToCents(capability.fixedPoints!);
+    && typeof fixedPoints === 'number' && Number.isSafeInteger(fixedPoints)
+    && creditsToCents(configuredPrice) === creditsToCents(fixedPoints);
   const parametersMatch = Boolean(capability?.qualities?.includes(config.quality)
     && capability.ratios?.includes(config.aspectRatio)
     && capability.maxReferences !== null && capability.maxReferences !== undefined
