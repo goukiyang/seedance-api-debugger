@@ -14,13 +14,14 @@ import type { SharedStudioIntent } from '@/lib/image-studio/shared-types';
 import { IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_QUALITY_LABELS } from '@/lib/image-studio/model-catalog';
 import { canSelectBatchDirectory, selectBatchDirectory, newBatchOutputDirectory, writeUniqueBatchFile, type BatchDirectoryHandle } from './batch-files';
 import styles from './batch.module.css';
+import { hasSharedDefaults } from './use-shared-studio';
 type Delivery = { saved: Record<number, string>; child: BatchDirectoryHandle | null; lock: boolean; directory: BatchDirectoryHandle | null };
 type SharedBatchView = StudioBatchView & { sharedLive?: SharedStudioIntent; definitionConfirmationRequired?: boolean };
 type SavedPersonalInput = Partial<{ prompt: string; model: string; quality: string; resolution: string; count: number; aspectRatio: string }>;
 type CurrentSharedModule = { id: string; name: string; revision: number; templatePrompt?: string; personalPrompt?: string;
   model: string; quality: string; resolution: string; count: number; aspectRatio: string;
   sharedLive?: { intent: SharedStudioIntent; available: boolean; unavailableReason?: string; overriddenFields: Array<keyof SavedPersonalInput>;
-    defaults: { model?: string; quality?: string; resolution?: string; aspectRatio?: string; referencePolicy?: { primaryMin: number; primaryMax: number } } } };
+    defaults?: import('@/lib/image-studio/shared-types').SharedStudioDefaults } };
 type ContinuationQuote = { sharedLive?: SharedStudioIntent; billingMode: 'fixed' | 'actual'; batchQuoteId: string | null;
   estimatedCredits: number; unitCredits: number; expiresAt: string; imageChannel?: { channelId: string; configRevision: string } };
 function sameDefinition(left?: SharedStudioIntent, right?: SharedStudioIntent) {
@@ -102,9 +103,9 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
       const data = await readResult(await fetch(`/api/image-studio/modules?ids=${encodeURIComponent(fresh.moduleId)}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
       if (!valid()) throw new Error('已离开原批次，未继续生成');
       const current: CurrentSharedModule | undefined = data.modules?.find((item: CurrentSharedModule) => item.id === fresh.moduleId);
-      if (!current?.sharedLive?.available || current.sharedLive.intent.protocol !== 'shared-live-v1') throw new Error(current?.sharedLive?.unavailableReason || '原批次的共享模板已不可用，不能继续；原任务和结果保留');
+      if (!current?.sharedLive?.available || !hasSharedDefaults(current.sharedLive.defaults) || current.sharedLive.intent.protocol !== 'shared-live-v1') throw new Error(current?.sharedLive?.unavailableReason || '原批次的共享模板已不可用，不能继续；原任务和结果保留');
       if (fresh.sharedLive && current.sharedLive.intent.presetId !== fresh.sharedLive.presetId) throw new Error('原批次绑定已变化，不能改用另一个模板');
-      return current as CurrentSharedModule & { sharedLive: NonNullable<CurrentSharedModule['sharedLive']> };
+      return current as CurrentSharedModule & { sharedLive: NonNullable<CurrentSharedModule['sharedLive']> & { defaults: import('@/lib/image-studio/shared-types').SharedStudioDefaults } };
     };
     const current = await readDefinition();
     if (!fresh.definitionConfirmationRequired && fresh.state !== 'needs-confirmation' && sameDefinition(fresh.sharedLive, current.sharedLive.intent)) {
@@ -124,7 +125,7 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
       if (field === 'count' ? !Number.isInteger(value) : typeof value !== 'string') throw new Error('原批次的本人已保存输入尚未完整读取，未继续生成');
       Object.assign(personalOverrides, { [field]: value });
     }
-    const continuation = { sharedLive: current.sharedLive.intent, personalOverrides, moduleRevision: current.revision };
+    const continuation = { sharedLive: current.sharedLive.intent, personalOverrides, personalPrompt: personalOverrides.prompt ?? '', moduleRevision: current.revision };
     const quote: ContinuationQuote = await readResult(await fetch('/api/image-studio/batches', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'quote', id, ...continuation }), signal: AbortSignal.timeout(120000) }));
     if (!valid()) return;

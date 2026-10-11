@@ -2,7 +2,24 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { UploadedAssetPayload } from '@/lib/http/file-upload';
-import type { SharedStudioIntent } from '@/lib/image-studio/shared-types';
+import type { SharedStudioDefaults, SharedStudioIntent } from '@/lib/image-studio/shared-types';
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS } from '@/lib/image-studio/model-catalog';
+import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
+
+export function hasSharedDefaults(value: unknown): value is SharedStudioDefaults {
+  if (!value || typeof value !== 'object') return false;
+  const defaults = value as SharedStudioDefaults;
+  const policy = defaults.referencePolicy;
+  return ['model', 'quality', 'resolution', 'aspectRatio'].every(key => typeof (value as Record<string, unknown>)[key] === 'string' && Boolean((value as Record<string, unknown>)[key]))
+    && IMAGE_STUDIO_MODELS.includes(defaults.model) && IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[defaults.model].includes(defaults.quality)
+    && IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[defaults.model].includes(defaults.resolution)
+    && Number.isInteger(defaults.count) && defaults.count >= 1 && defaults.count <= 8
+    && Number.isInteger(defaults.referenceLimit) && defaults.referenceLimit >= 1 && defaults.referenceLimit <= MAX_REFERENCE_IMAGES
+    && Boolean(policy) && Array.isArray(policy.primaryIds) && policy.primaryIds.every(id => typeof id === 'string')
+    && [policy.primaryMin, policy.primaryMax, policy.auxiliaryMax].every(limit => Number.isInteger(limit) && limit >= 0 && limit <= MAX_REFERENCE_IMAGES)
+    && [policy.styleMax, policy.referenceMax].every(limit => limit === undefined || Number.isInteger(limit) && limit >= 0 && limit <= MAX_REFERENCE_IMAGES)
+    && policy.primaryMax >= 1 && policy.primaryMin <= policy.primaryMax && typeof policy.useFixedReferences === 'boolean';
+}
 
 export type SharedStudioEntry = {
   presetId: string; name: string; groupName: string; banner?: UploadedAssetPayload | null;
