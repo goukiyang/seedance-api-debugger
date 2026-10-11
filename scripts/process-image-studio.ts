@@ -6,6 +6,7 @@ import { dispatchWaitingToolFlowRuns } from '../src/lib/tools/toolflow-runtime';
 import { reconcileImageBilling } from '../src/lib/image-studio/billing';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import packageInfo from '../package.json';
 import { IMAGE_BILLING_VERSION } from '../src/lib/image-studio/billing-contract';
 
@@ -17,8 +18,15 @@ process.on('SIGINT', () => { stopping = true; });
 async function main() {
   let source = path.basename(process.cwd());
   try { source = fs.readFileSync(path.join(process.cwd(), '.deployed-commit'), 'utf8').trim(); } catch {}
+  const loadedModuleSha = Object.fromEntries([
+    'scripts/process-image-studio.ts',
+    'src/lib/image-studio/worker.ts', 'src/lib/image-studio/provider.ts',
+    'src/lib/integrations/image-generation.ts', 'src/lib/integrations/image-generation-defaults.ts',
+    'src/lib/image-studio/batches.ts',
+    'src/lib/image-studio/billing.ts', 'src/lib/tools/toolflow-runtime.ts',
+  ].map(file => [file, createHash('sha256').update(fs.readFileSync(path.join(process.cwd(), file))).digest('hex')]));
   console.log('[image-studio-source]', JSON.stringify({ source: /^[a-f0-9]{40}$/.test(source) ? source : 'unknown',
-    version: packageInfo.version, billingContract: IMAGE_BILLING_VERSION }));
+    version: packageInfo.version, billingContract: IMAGE_BILLING_VERSION, loadedModuleSha }));
   do {
     if (fs.existsSync(path.join(process.cwd(), 'storage', 'image-studio-drain'))) break;
     if (!billingWork) billingWork = reconcileImageBilling().catch(() => {

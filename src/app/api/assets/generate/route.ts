@@ -9,6 +9,7 @@ import { assertCanvasPromptCompatibility } from '@/lib/canvas-prompt-compatibili
 import { compileCanvasPromptReferences, parseCanvasPromptMentions, validateCanvasBoundReferenceImageIds, CanvasPromptReferenceError } from '@/lib/canvas-prompt-references';
 import {
   createImageGeneration,
+  imageGenerationModelOutputSize,
   getImageGenerationChannels,
   selectImageGenerationSettings,
   ImageGenerationApiError,
@@ -35,7 +36,7 @@ import { assertCanUseReferenceImage, uniquePreserveOrder } from '@/lib/reference
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { resolveStudioAspectRatio, normalizeStudioRatio } from '@/lib/image-studio/ratios';
-import { imageOutputSize, isValidImageDimension, normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS } from '@/lib/image-generation/resolution';
+import { isValidImageDimension, normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS } from '@/lib/image-generation/resolution';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 
 export const dynamic = 'force-dynamic';
@@ -409,7 +410,7 @@ export async function POST(request: NextRequest) {
       }
     }
     const imageChannel = effectiveChannelId === 'original' ? undefined : await captureImageGenerationChannel(selectedModel, effectiveChannelId);
-    const settings = imageChannel ? { ...await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true), default_model: selectedModel }
+    const settings = imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, selectedModel)
       : selectImageGenerationSettings(channels, selectedModel);
     const modelLabel = imageGenerationModelLabel(settings.provider, settings.default_model);
     const referenceLimit = settings.provider === 'seedream'
@@ -479,7 +480,7 @@ export async function POST(request: NextRequest) {
     const requestedSize = cleanString(input.size || input.default_size || body.size);
     const imageSize = isValidImageDimension(requestedSize)
       ? requestedSize
-      : imageOutputSize(settings.default_model, resolution, ratio, settings.provider);
+      : imageGenerationModelOutputSize(settings, settings.default_model, resolution, ratio);
     // Explicit channels use the durable queue. Never issue an untracked POST here.
     if (imageChannel) {
       if (!canUseCompanyTemplates(user)) throw new AuthError('当前账号没有此图片生成通道权限', 403);

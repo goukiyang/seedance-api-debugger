@@ -3,7 +3,7 @@ import { getAdminUser } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { isPrivateNetworkHost } from '@/lib/media/public-url';
-import { BANANA_IMAGE_API_SETTING_KEY, buildImageGenerationApiSettingsPatch, getImageGenerationApiSettings, isImageGenerationApiReady } from '@/lib/integrations/image-generation';
+import { BANANA_IMAGE_API_SETTING_KEY, buildImageGenerationApiSettingsPatch, getImageGenerationApiSettings, hasLegacyImageGenerationModelApiKey, isImageGenerationApiReady } from '@/lib/integrations/image-generation';
 
 export const dynamic = 'force-dynamic';
 const safeConfig = (settings: Awaited<ReturnType<typeof getImageGenerationApiSettings>>) => ({
@@ -43,7 +43,7 @@ export async function PUT(request: NextRequest) {
       const current = await getImageGenerationApiSettings(tx, 'banana');
       const candidate = buildImageGenerationApiSettingsPatch(current, input);
       candidate.enabled = body.clear_api_key === true ? false : body.enabled;
-      if (candidate.enabled && !candidate.api_key) throw new AuthError('请先填写 Banana 专用 API Key', 400);
+      if (candidate.enabled && !candidate.api_key && !await hasLegacyImageGenerationModelApiKey('banana', tx)) throw new AuthError('请先填写 Banana 共用 API Key 或至少一个型号的独立 API Key', 400);
       await tx.platformSetting.upsert({
         where: { key: BANANA_IMAGE_API_SETTING_KEY },
         create: { key: BANANA_IMAGE_API_SETTING_KEY, value_json: JSON.stringify(candidate), updated_by: admin.id },

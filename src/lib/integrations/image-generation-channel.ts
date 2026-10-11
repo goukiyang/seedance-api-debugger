@@ -57,6 +57,11 @@ export type ImageGenerationChannelsDto = {
 
 export type ImageGenerationManagedModelDto = {
   enabled: boolean;
+  protocol: ImageGenerationChannelProtocol;
+  upstreamModel: string | null;
+  baseUrl: string | null;
+  apiKeyConfigured: boolean;
+  apiKeyOverrideConfigured: boolean;
   ready: boolean;
   disabledReason: string | null;
   billingMode: ImageGenerationBillingMode | null;

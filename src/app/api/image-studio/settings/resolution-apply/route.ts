@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
         const channels = await getImageGenerationChannels();
         const channelId = await resolveImageGenerationRequestChannel(defaults.model);
         const api = channelId
-          ? await resolveImageGenerationChannelSnapshot(await captureImageGenerationChannel(defaults.model, channelId), undefined, true)
+          ? await resolveImageGenerationChannelSnapshot(await captureImageGenerationChannel(defaults.model, channelId), undefined, true, defaults.model)
           : selectImageGenerationSettings(channels, defaults.model);
         const issue = studioFourToOneIssue(defaults.aspectRatio, supportsStudioFourToOne(defaults.model, api.provider));
         if (issue) return response({ error: issue }, 400);

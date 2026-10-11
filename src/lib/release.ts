@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '生图模板不再显示供应商选择，新生成跟随后台保存的默认供应商；已有任务和结果不变，后台 API 设置仍保留供应商选择。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '供应商可为不同生图模型设置独立接口；修复高清大图读取后不显示的问题；模板图片结果翻页移到顶部标题栏。已有任务与结果不变。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

@@ -907,6 +907,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const bodyDirection = describedEvolutionDirection(prompt);
   const evolutionConflict = evolution && evolutionInput.manual && bodyDirection && bodyDirection !== evolutionInput.direction ? '正文方向与手选方向冲突，请调整正文或方向' : '';
   const [resultView, setResultView] = useState<'images' | 'batch'>('images');
+  const [resultPaginationSlot, setResultPaginationSlot] = useState<HTMLDivElement | null>(null);
   const [count, setCount] = useState(module.count);
   const [referenceLimit, setReferenceLimit] = useState(module.referencePolicy?.primaryMax ?? Math.max(1, Math.min(MAX_REFERENCE_IMAGES, module.referenceLimit || DEFAULT_STUDIO_PRIMARY_MAX)));
   const [primaryMin, setPrimaryMin] = useState(module.referencePolicy?.primaryMin ?? 0);
@@ -2203,7 +2204,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         {error && <p role="alert" className={styles.error}>{error}</p>}
       </section>
       <section className={styles.outputs} aria-label="生成结果">
-        <header className={styles.header}><h2>生成结果</h2><div className={styles.counts}>
+        <header className={`${styles.header}${templateWorkbench ? ` ${styles.resultHeader}` : ''}`}><h2>生成结果</h2>
+          {templateWorkbench && resultView === 'images' && <div className={styles.resultPaginationSlot} ref={setResultPaginationSlot} />}
+          <div className={styles.counts}>
           {templateWorkbench && <button type="button" title={likedResults.liked ? '返回当前模板全部结果' : '只看当前模板中我喜欢的结果'} aria-label={likedResults.liked ? '返回当前模板全部结果' : '只看当前模板中我喜欢的结果'} aria-pressed={likedResults.liked} onClick={() => chooseResultFilter(!likedResults.liked)}><Heart size={16} fill={likedResults.liked ? 'currentColor' : 'none'} />喜欢</button>}
           <button type="button" aria-pressed={resultView === 'images' && !likedResults.liked} onClick={() => chooseResultFilter(false)}>图片</button><button type="button" aria-pressed={resultView === 'batch'} onClick={() => { likedResults.choose(false); setResultView('batch'); }}>批次</button>
           {!downloadMode ? <button type="button" disabled={downloadBusy} onClick={() => { setSelected([]); setDownloadMode(true); }}><Download size={16} />下载</button> : <div className={styles.downloadModeBar}><span>已选 {selected.length} 张</span><button type="button" disabled={!selected.length || downloadBusy} onClick={() => void download(selected)}>{downloadBusy ? '准备中' : '确认下载'}</button><button type="button" disabled={downloadBusy} onClick={() => { setSelected([]); setDownloadMode(false); }}>取消</button></div>}
@@ -2214,6 +2217,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         {resultView === 'batch' ? batch.id ? <BatchResults key={`${userId}:${batch.id}`} id={batch.id} userId={userId} autoPack={batch.pack} /> : <p>暂无选中批次，可开始批量生成或从<a href="/assets">资产库的“我的批次”</a>找回。</p> : <>
         {downloadReady && <p role="status">已交给浏览器下载。<a href={downloadReady.url} download={downloadReady.name}>再次下载</a></p>}
         <GeneratedImageResults key={likedResults.liked ? 'liked' : 'all'} items={sharedResults}
+          paginationSlot={templateWorkbench ? resultPaginationSlot : undefined}
           scope={`sd2-image-studio-${likedResults.liked ? 'liked-' : ''}result-page:${taskReadScope}`}
           visible={!hidden && resultView === 'images'} loading={resultLoading} busy={resultBusy}
           error={resultError} emptyLabel={likedResults.liked ? '当前模板还没有喜欢的结果' : '暂无生成记录'}

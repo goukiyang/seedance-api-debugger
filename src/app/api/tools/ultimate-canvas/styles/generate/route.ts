@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
     const channelId = requestedChannelId || 'original';
     const imageChannel = suppliedImageChannel || (effectiveChannelId === 'original' ? undefined : await captureImageGenerationChannel(generation.model, effectiveChannelId));
     const apiSettings = imageChannel?.channelId === 'original' ? await getImageGenerationSettingsForModel(generation.model)
-      : imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true) : await getImageGenerationSettingsForModel(generation.model);
+      : imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, generation.model) : await getImageGenerationSettingsForModel(generation.model);
     let unitCredits = currentSettings.prices[generation.model];
     let channelActual = false;
     if (imageChannel) {

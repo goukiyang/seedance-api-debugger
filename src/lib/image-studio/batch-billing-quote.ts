@@ -141,7 +141,7 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
 
   const publicChannel = imageChannel ? { channelId: imageChannel.channelId, configRevision: imageChannel.configRevision } : undefined;
   if (imageChannel) {
-    try { await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true); }
+    try { await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, model); }
     catch { throw new StudioError('整批准备期间图片通道已停用或修订过期，请重新报价', 409); }
   }
   if (contracts.every(contract => contract === null)) return { billingMode: 'fixed' as const, batchQuoteId: null,
@@ -159,7 +159,7 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
   }
   if (imageChannel) {
     try {
-      const current = await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true);
+      const current = await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, first.model);
       if (imageBillingScope(current) !== first.scope) throw new Error('scope_changed');
     } catch { throw new StudioError('图片通道在整批报价期间已变化，请重新报价', 409); }
   }

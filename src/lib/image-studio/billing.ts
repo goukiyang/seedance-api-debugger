@@ -126,7 +126,7 @@ async function reconcileChannelImageBilling() {
       await exitImageBilling(task, 'deadline_expired', true); continue;
     }
     let settings: ImageGenerationResolvedSettings;
-    try { settings = await resolveImageGenerationChannelSnapshot(snapshot, prisma, false); }
+    try { settings = await resolveImageGenerationChannelSnapshot(snapshot, prisma, false, task.model); }
     catch { await exitImageBilling(task, 'manual', true); continue; }
     try {
       if (!isMuskImageGenerationChannel(settings) || new URL(settings.base_url).origin !== 'https://api.muskapis.com'

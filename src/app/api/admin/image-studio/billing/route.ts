@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     if (!task?.billing_scope || !task.gateway_request_id || !publicBillingStatus || !['manual', 'conflict', 'deadline_expired', 'unmatched'].includes(publicBillingStatus))
       return NextResponse.json({ error: '该任务不属于已退出自动结算的可核对任务' }, { status: 409 });
     const snapshot = JSON.parse(task.snapshot_json || '{}');
-    const settings = snapshot.imageChannel ? await resolveImageGenerationChannelSnapshot(snapshot.imageChannel) : await getImageGenerationSettingsForModel(task.model);
+    const settings = snapshot.imageChannel ? await resolveImageGenerationChannelSnapshot(snapshot.imageChannel, undefined, false, task.model) : await getImageGenerationSettingsForModel(task.model);
     if (!isMuskImageGenerationChannel(settings)) return NextResponse.json({ error: '此供应商尚无已核实的实际账单接口，不能用其他供应商账单对账' }, { status: 409 });
     const match = matchImageSupplierCharge(await readImageSupplierBills(settings, task.billing_scope), task.gateway_request_id, task.model);
     if (match.state !== 'matched') return NextResponse.json({ state: match.state, userCharged: false }, { status: 409 });

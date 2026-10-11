@@ -12,14 +12,14 @@ import { fixedImageBillingContract, imageSpecification } from './billing-quote';
 import { imageBillingView, parseImageBillingContract } from './billing-contract';
 import { consumeImageQuote } from './billing-quote-store';
 import { imageBillingReady } from './billing-readiness';
-import { captureImageGenerationChannel, resolveImageGenerationChannelSnapshot, validateImageGenerationChannel,
+import { captureImageGenerationChannel, resolveImageGenerationChannelSnapshot, validateImageGenerationChannel, imageGenerationModelOutputSize,
   getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider, isMuskImageGenerationChannel, ImageGenerationChannelError,
   type ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import { defaultStudioModuleId, resolveStudioModuleGenerationConfig, validStudioModuleId } from './modules';
 import { canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from './access';
 import { resolveStudioAspectRatio, normalizeStudioRatio } from './ratios';
-import { imageOutputSize, normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS, supportsStudioFourToOne, studioFourToOneIssue } from '@/lib/image-generation/resolution';
+import { normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS, supportsStudioFourToOne, studioFourToOneIssue } from '@/lib/image-generation/resolution';
 import { MAX_REFERENCE_IMAGES } from './limits';
 import { IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS } from './model-catalog';
 import { studioAssetUrl, studioTemplateAssetUrl } from './media';
@@ -292,14 +292,14 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       // A supplied pair is only a freshness check for a quote/avatar plan, never
       // an execution snapshot that could be mistaken for a pinned legacy worker.
       if (input.imageChannel) {
-        try { await resolveImageGenerationChannelSnapshot(input.imageChannel, tx, true); }
+        try { await resolveImageGenerationChannelSnapshot(input.imageChannel, tx, true, generation.model); }
         catch { throw new StudioError('原图片通道配置已变化，请重新报价并确认', 409); }
       }
       imageApi = await getImageGenerationSettingsForModel(generation.model, tx);
     } else {
       imageChannel = input.imageChannel || await captureImageGenerationChannel(generation.model, effectiveRequestedChannelId, tx);
       if (imageChannel.channelId !== effectiveRequestedChannelId) throw new StudioError('图片通道与配置版本不匹配', 409);
-      imageApi = await resolveImageGenerationChannelSnapshot(imageChannel, tx, true);
+      imageApi = await resolveImageGenerationChannelSnapshot(imageChannel, tx, true, generation.model);
       const channelCapability = imageApi.modelCapabilities[generation.model as keyof typeof imageApi.modelCapabilities];
       const validation = validateImageGenerationChannel(imageApi, { model: generation.model, quality: generation.quality,
         resolution: input.resolution || generation.resolution, ratio: input.aspectRatio || 'auto', referenceCount: input.referenceIds.length });
@@ -565,7 +565,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const ratioIssue = studioFourToOneIssue(resolvedAspectRatio, supportsStudioFourToOne(generation.model, imageApi.provider));
     if (ratioIssue) throw new StudioError(ratioIssue);
     const resolution = normalizeImageResolution(generation.model, input.resolution || generation.resolution, imageApi.provider);
-    const outputSize = imageOutputSize(generation.model, resolution, resolvedAspectRatio, imageApi.provider);
+    const outputSize = imageGenerationModelOutputSize(imageApi, generation.model, resolution, resolvedAspectRatio);
     const moduleContextVersion = await bindModuleContextVersion(snapshotModuleContext, tx);
     const billingScope = imageBillingScope(imageApi);
     const actualBillingEligible = isMuskImageGenerationChannel(imageApi)

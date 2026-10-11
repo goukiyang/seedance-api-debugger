@@ -95,6 +95,7 @@ export class StudioProviderError extends Error {
 // Keep GPT image requests isolated from the existing Gemini/Seedream adapters.
 export async function requestStudioImages(params: {
   baseUrl: string; apiKey: string; model: string; prompt: string;
+  upstreamModel?: string;
   provider?: 'musk' | 'ai_media_vip';
   protocol?: ImageGenerationChannelProtocol;
   idempotencyKey?: string;
@@ -109,9 +110,10 @@ export async function requestStudioImages(params: {
   size?: string;
 }, fetcher: typeof fetch = fetch, readImage: typeof readStudioImage = readStudioImage): Promise<{ images: string[]; usage: unknown }> {
   if (!IMAGE_STUDIO_MODELS.includes(params.model as typeof IMAGE_STUDIO_MODELS[number])) throw new Error('不支持的图片模型');
+  if (params.upstreamModel !== undefined && !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,199}$/.test(params.upstreamModel)) throw new Error('供应商型号名称无效');
   if (!Number.isInteger(params.count) || params.count < 1 || params.count > 8) throw new Error('生成张数必须为 1 到 8');
   if (params.images.length > MAX_REFERENCE_IMAGES) throw new Error(`最多使用 ${MAX_REFERENCE_IMAGES} 张参考图`);
-  if (params.size && (params.protocol === 'openai_images' || !isGeminiImageModel(params.model) || params.provider === 'ai_media_vip') && !isValidImageDimension(params.size)) {
+  if (params.size && params.protocol !== 'gemini_native' && (params.protocol === 'openai_images' || !isGeminiImageModel(params.model) || params.provider === 'ai_media_vip') && !isValidImageDimension(params.size)) {
     throw new Error('生成尺寸无效');
   }
   const transport: typeof fetch = params.protocol && fetcher === fetch ? fetchPinnedApi as typeof fetch : fetcher;
@@ -130,7 +132,7 @@ export async function requestStudioImages(params: {
   let body: BodyInit;
   if (params.images.length) {
     const form = new FormData();
-    form.set('model', params.model);
+    form.set('model', params.upstreamModel || params.model);
     form.set('prompt', params.prompt);
     form.set('n', String(params.count));
     form.set('output_format', 'png');
@@ -142,7 +144,7 @@ export async function requestStudioImages(params: {
     body = form;
   } else {
     headers['Content-Type'] = 'application/json';
-    body = JSON.stringify({ model: params.model, prompt: params.prompt, n: params.count, output_format: 'png', ...(params.size ? { size: params.size } : {}), ...(params.quality && params.quality !== 'auto' ? { quality: params.quality } : {}) });
+    body = JSON.stringify({ model: params.upstreamModel || params.model, prompt: params.prompt, n: params.count, output_format: 'png', ...(params.size ? { size: params.size } : {}), ...(params.quality && params.quality !== 'auto' ? { quality: params.quality } : {}) });
   }
   let value: any;
   let response: Response | undefined;
@@ -238,13 +240,14 @@ export async function requestStudioImages(params: {
 
 async function requestGeminiStudioImages(params: {
   baseUrl: string; apiKey: string; model: string; prompt: string;
+  upstreamModel?: string;
   count: number; images: StudioImageInput[]; signal: AbortSignal; ratio?: string; size?: string;
   recordResponse?: (response: Response) => Promise<void>;
   protocol?: ImageGenerationChannelProtocol;
 }, fetcher: typeof fetch): Promise<{ images: string[]; usage: unknown }> {
   const url = new URL(params.baseUrl);
   const basePath = url.pathname.replace(/\/$/, '').replace(/\/v1$/, '').replace(/\/v1beta$/, '');
-  url.pathname = `${basePath}/v1beta/models/${encodeURIComponent(params.model)}:generateContent`;
+  url.pathname = `${basePath}/v1beta/models/${encodeURIComponent(params.upstreamModel || params.model)}:generateContent`;
   const parts: Array<Record<string, unknown>> = [{ text: params.prompt }];
   for (const image of params.images) {
     parts.push({ inlineData: { mimeType: image.mimeType, data: Buffer.from(image.bytes).toString('base64') } });

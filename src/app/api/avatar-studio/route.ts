@@ -130,7 +130,7 @@ export async function POST(req: NextRequest) { return run(async owner => {
     const channelId=typeof body.channelId==='string'?body.channelId:previous.channelId||'original';
     const effectiveChannelId=await resolveImageGenerationRequestChannel(model,channelId)||'original';
     const imageChannel=effectiveChannelId!=='original'?await captureImageGenerationChannel(model,effectiveChannelId):undefined;
-    const api=imageChannel?await resolveImageGenerationChannelSnapshot(imageChannel,undefined,true):await getImageGenerationSettingsForModel(model);
+    const api=imageChannel?await resolveImageGenerationChannelSnapshot(imageChannel,undefined,true,model):await getImageGenerationSettingsForModel(model);
     if(imageChannel){const capability=validateImageGenerationChannel(api,{model,quality,resolution,ratio:isAvatarSheet({layout})?'1:1':previous.aspectRatio,referenceCount:previous.referenceIds.length});if(!capability.ok)throw new StudioError(capability.error);price=capability.capability.fixedPoints;}
     if(!imageChannel&&(price===undefined||price===null))throw new StudioError('原模型已失效或没有报价，历史设置仍保留');
     let plan:AvatarPlan;

@@ -77,7 +77,7 @@ async function resolveQuoteSettings(model: string, channel: ImageGenerationChann
   const channelId = requestedChannelId || channel?.channelId || 'original';
   if (channelId === 'original') {
     if (channel) {
-      try { await resolveImageGenerationChannelSnapshot(channel, undefined, true); }
+      try { await resolveImageGenerationChannelSnapshot(channel, undefined, true, model); }
       catch { throw new StudioError('原图片通道配置已变化，请重新报价', 409); }
     }
     return getImageGenerationSettingsForModel(model);
@@ -87,7 +87,7 @@ async function resolveQuoteSettings(model: string, channel: ImageGenerationChann
     throw new StudioError('图片通道报价缺少固定配置修订，请重新报价', 409);
   }
   try {
-    return await resolveImageGenerationChannelSnapshot(channel, undefined, true);
+    return await resolveImageGenerationChannelSnapshot(channel, undefined, true, model);
   } catch {
     throw new StudioError('图片通道配置已停用或修订过期，请重新获取报价', 409);
   }
@@ -197,7 +197,7 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
   }
   if (pinnedChannel && imageChannel) {
     try {
-      const current = await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true);
+      const current = await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, base.model);
       if (imageBillingScope(current) !== base.scope) throw new Error('scope_changed');
     } catch {
       throw new StudioError('图片通道在报价期间已变化，请重新获取报价', 409);

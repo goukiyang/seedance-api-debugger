@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
-import { isGeminiImageModel, isValidImageDimension, supportsStudioFourToOne } from '@/lib/image-generation/resolution';
+import { imageOutputSize, normalizeImageResolution, isGeminiImageModel, isValidImageDimension, supportsStudioFourToOne } from '@/lib/image-generation/resolution';
 import {
   IMAGE_STUDIO_MODELS,
   IMAGE_STUDIO_MODEL_QUALITY_OPTIONS,
@@ -33,6 +33,7 @@ export type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-ge
 export const IMAGE_GENERATION_API_SETTING_KEY = 'image_generation_api_v1';
 export const BANANA_IMAGE_API_SETTING_KEY = 'banana_image_api_v1';
 export const IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY = 'image_generation_channels_v1';
+export const IMAGE_GENERATION_LEGACY_MODEL_API_SETTING_PREFIX = 'image_generation_legacy_model_api_v1:';
 const IMAGE_GENERATION_CHANNEL_VERSION_PREFIX = 'image_generation_channel_version_v1:';
 export const FLUXPORT_IMAGE_GENERATION_BASE_URL = 'https://api.uselg.top';
 
@@ -77,6 +78,9 @@ export type ImageGenerationApiSettings = {
 export type ImageGenerationModelCapability = {
   enabled: boolean;
   protocol: ImageGenerationChannelProtocol;
+  /** Optional supplier request name/address; local model validation is unchanged. */
+  upstreamModel?: string;
+  baseUrl?: string;
   qualities: string[] | null;
   resolutions: string[] | null;
   ratios: string[] | null;
@@ -95,8 +99,13 @@ export type ImageGenerationResolvedSettings = ImageGenerationApiSettings & {
   supplierKind: 'fluxport' | 'musk' | 'other' | 'legacy';
   protocol: ImageGenerationResolvedProtocol;
   modelCapabilities: Partial<Record<ImageStudioModel, ImageGenerationModelCapability>>;
+  /** Private frozen overrides. Never include these in registry or public DTOs. */
+  modelApiKeys?: Partial<Record<ImageStudioModel, string>>;
+  inherited_base_url?: string;
+  inherited_api_key?: string | null;
   /** True when this frozen version belongs to an admin-managed registry entry. */
   managedChannel: boolean;
+  explicitModelApi?: boolean;
   label?: string;
   deleted?: boolean;
 };
@@ -315,14 +324,17 @@ export type ImageGenerationChannels = {
   fluxport: ImageGenerationResolvedSettings;
   managed: ImageGenerationResolvedSettings[];
   registry: ManagedChannelRegistry;
+  legacyModelApis: Record<'shared' | 'banana', LegacyModelApiRegistry>;
 };
 
 export async function getImageGenerationChannels(client: Prisma.TransactionClient | typeof prisma = prisma): Promise<ImageGenerationChannels> {
-  const [shared, banana, registry, studioSettings] = await Promise.all([
+  const [shared, banana, registry, studioSettings, sharedModels, bananaModels] = await Promise.all([
     getImageGenerationApiSettings(client),
     getImageGenerationApiSettings(client, 'banana'),
     readManagedChannelRegistry(client),
     getImageStudioSettings(client).catch(() => null),
+    readLegacyModelApiRegistry('shared', client),
+    readLegacyModelApiRegistry('banana', client),
   ]);
   const records = registry.channels;
   const versions = await Promise.all(records.map(async record => hydrateActualBilling(
@@ -336,6 +348,7 @@ export async function getImageGenerationChannels(client: Prisma.TransactionClien
     fluxport,
     managed: versions.filter(item => item.channelId !== 'fluxport'),
     registry,
+    legacyModelApis: { shared: sharedModels, banana: bananaModels },
   };
 }
 
@@ -349,12 +362,35 @@ export function selectImageGenerationSettings(
     const legacy = isGeminiImageModel(model) ? channels.banana : channels.shared;
     return resolveLegacySettings(legacy, model, 'original', channels.legacyPrices);
   }
-  if (channelId === 'shared') return resolveLegacySettings(channels.shared, model, 'shared', channels.legacyPrices);
-  if (channelId === 'banana') return resolveLegacySettings(channels.banana, model, 'banana', channels.legacyPrices);
-  if (channelId === 'fluxport') return { ...channels.fluxport, default_model: model };
+  if (channelId === 'shared') return applyLegacyModelApis(resolveLegacySettings(channels.shared, model, 'shared', channels.legacyPrices), channels.legacyModelApis.shared, model);
+  if (channelId === 'banana') return applyLegacyModelApis(resolveLegacySettings(channels.banana, model, 'banana', channels.legacyPrices), channels.legacyModelApis.banana, model);
+  if (channelId === 'fluxport') return resolveImageGenerationModelSettings(channels.fluxport, model);
   const selected = channels.managed.find(item => item.channelId === channelId);
   if (!selected || selected.deleted) throw new ImageGenerationChannelError('所选图片供应商配置不存在或已归档', 404, 'image_channel_not_found');
-  return { ...selected, default_model: model };
+  return resolveImageGenerationModelSettings(selected, model);
+}
+
+/** Resolve one local model against the same immutable supplier revision. */
+export function resolveImageGenerationModelSettings(settings: ImageGenerationResolvedSettings, model: string): ImageGenerationResolvedSettings {
+  const capability = settings.modelCapabilities[model as ImageStudioModel];
+  const inheritedBase = settings.inherited_base_url ?? settings.base_url;
+  const inheritedKey = settings.inherited_api_key !== undefined ? settings.inherited_api_key : settings.api_key;
+  return {
+    ...settings,
+    default_model: model,
+    inherited_base_url: inheritedBase,
+    inherited_api_key: inheritedKey,
+    base_url: capability?.baseUrl || inheritedBase,
+    api_key: settings.modelApiKeys?.[model as ImageStudioModel] || inheritedKey,
+  };
+}
+
+/** Convert the existing local resolution/ratio to the explicitly chosen adapter. */
+export function imageGenerationModelOutputSize(settings: ImageGenerationApiSettings, model: string, resolution: unknown, ratio: string) {
+  const resolved = settings as ImageGenerationResolvedSettings;
+  const protocol = resolved.managedChannel || resolved.explicitModelApi ? resolved.modelCapabilities[model as ImageStudioModel]?.protocol : undefined;
+  if (protocol === 'gemini_native') return normalizeImageResolution(model, resolution, settings.provider);
+  return imageOutputSize(model, resolution, ratio, protocol === 'openai_images' ? 'ai_media_vip' : settings.provider);
 }
 
 /** New requests resolve the model's default route explicitly; historical callers keep using original semantics. */
@@ -465,12 +501,17 @@ type PrivateImageGenerationChannelVersion = {
   supplierKind: 'fluxport' | 'musk' | 'other' | 'legacy';
   sourceChannelId?: 'shared' | 'banana';
   sourceFingerprint?: string;
+  /** Optional legacy model-API row revision; absent keeps historical snapshots unchanged. */
+  modelOverrideRevision?: string | null;
+  selectedModel?: ImageStudioModel;
   /** Billing intent revision captured for alias channels so fixed quotes cannot outlive a mode change. */
   billingIntentRevision?: number;
   protocol: ImageGenerationResolvedProtocol;
   managedChannel: boolean;
+  explicitModelApi?: boolean;
   settings: ImageGenerationApiSettings;
   modelCapabilities: Partial<Record<ImageStudioModel, ImageGenerationModelCapability>>;
+  modelApiKeys?: Partial<Record<ImageStudioModel, string>>;
   deleted?: boolean;
 };
 
@@ -556,9 +597,111 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
+type LegacyModelApi = { protocol?: ImageGenerationChannelProtocol; upstreamModel?: string; baseUrl?: string; apiKey?: string };
+type LegacyModelApiRegistry = { version: 1; revision: string | null; models: Partial<Record<ImageStudioModel, LegacyModelApi>> };
+
+async function readLegacyModelApiRegistry(channel: 'shared' | 'banana', client: Prisma.TransactionClient | typeof prisma): Promise<LegacyModelApiRegistry> {
+  const row = await client.platformSetting.findUnique({ where: { key: `${IMAGE_GENERATION_LEGACY_MODEL_API_SETTING_PREFIX}${channel}` } });
+  if (!row) return { version: 1, revision: null, models: {} };
+  let value: unknown;
+  try { value = JSON.parse(row.value_json); } catch { throw new ImageGenerationChannelError('原供应商型号配置损坏，未使用旧接口代替', 500, 'image_legacy_model_api_invalid'); }
+  if (!isRecord(value) || value.version !== 1 || typeof value.revision !== 'string' || !/^[0-9a-f-]{36}$/i.test(value.revision) || !isRecord(value.models)) {
+    throw new ImageGenerationChannelError('原供应商型号配置格式无效，未使用旧接口代替', 500, 'image_legacy_model_api_invalid');
+  }
+  const models: LegacyModelApiRegistry['models'] = {};
+  for (const [model, source] of Object.entries(value.models)) {
+    if (!IMAGE_STUDIO_MODELS.includes(model as ImageStudioModel) || !isRecord(source)
+      || Object.keys(source).some(key => !['protocol', 'upstreamModel', 'baseUrl', 'apiKey'].includes(key))
+      || source.protocol !== undefined && source.protocol !== 'gemini_native' && source.protocol !== 'openai_images'
+      || source.upstreamModel !== undefined && (typeof source.upstreamModel !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,199}$/.test(source.upstreamModel))
+      || source.baseUrl !== undefined && (typeof source.baseUrl !== 'string' || source.baseUrl.length > 2048)
+      || source.apiKey !== undefined && (typeof source.apiKey !== 'string' || !source.apiKey.trim() || source.apiKey.length > 500)) {
+      throw new ImageGenerationChannelError('原供应商型号配置内容无效，未使用旧接口代替', 500, 'image_legacy_model_api_invalid');
+    }
+    models[model as ImageStudioModel] = source as LegacyModelApi;
+  }
+  return { version: 1, revision: value.revision, models };
+}
+
+export async function hasLegacyImageGenerationModelOverride(model: ImageStudioModel, channel: 'shared' | 'banana', client: Prisma.TransactionClient | typeof prisma = prisma) {
+  return Boolean((await readLegacyModelApiRegistry(channel, client)).models[model]);
+}
+
+export async function hasLegacyImageGenerationModelApiKey(channel: 'shared' | 'banana', client: Prisma.TransactionClient | typeof prisma = prisma) {
+  return Object.values((await readLegacyModelApiRegistry(channel, client)).models).some(api => Boolean(api?.apiKey));
+}
+
+function applyLegacyModelApis(settings: ImageGenerationResolvedSettings, registry: LegacyModelApiRegistry, model: string) {
+  const modelCapabilities = { ...settings.modelCapabilities };
+  const modelApiKeys: Partial<Record<ImageStudioModel, string>> = {};
+  for (const localModel of IMAGE_STUDIO_MODELS) {
+    const api = registry.models[localModel];
+    const capability = modelCapabilities[localModel];
+    if (!api || !capability) continue;
+    modelCapabilities[localModel] = { ...capability,
+      ...(api.protocol ? { protocol: api.protocol } : {}),
+      ...(api.upstreamModel ? { upstreamModel: api.upstreamModel } : {}),
+      ...(api.baseUrl ? { baseUrl: api.baseUrl } : {}),
+    };
+    if (api.apiKey) modelApiKeys[localModel] = api.apiKey;
+  }
+  return resolveImageGenerationModelSettings({ ...settings, modelCapabilities, modelApiKeys, explicitModelApi: Boolean(registry.models[model as ImageStudioModel]) }, model);
+}
+
+/** Only edits one original supplier's transport; pricing, enablement and defaults stay separate. */
+export async function updateLegacyImageGenerationModelApi(input: ManagedImageGenerationChannelInput & { model?: unknown; modelApi?: unknown }, updatedBy: string) {
+  if (input.id !== 'shared' && input.id !== 'banana') throw new ImageGenerationChannelError('原供应商编号无效');
+  const channel = input.id;
+  if (!IMAGE_STUDIO_MODELS.includes(input.model as ImageStudioModel) || !isRecord(input.modelApi)) throw new ImageGenerationChannelError('请选择有效型号并填写 API 配置');
+  const model = input.model as ImageStudioModel;
+  const source = input.modelApi;
+  if (Object.keys(source).some(key => !['protocol', 'upstreamModel', 'baseUrl', 'apiKey', 'clearApiKey', 'clearOverrides'].includes(key))
+    || source.upstreamModel !== undefined && typeof source.upstreamModel !== 'string'
+    || source.baseUrl !== undefined && typeof source.baseUrl !== 'string'
+    || source.clearApiKey !== undefined && typeof source.clearApiKey !== 'boolean'
+    || source.clearOverrides !== undefined && typeof source.clearOverrides !== 'boolean') throw new ImageGenerationChannelError('型号 API 配置字段无效');
+  if (source.clearOverrides !== true && source.protocol !== 'gemini_native' && source.protocol !== 'openai_images') throw new ImageGenerationChannelError('请选择已支持的请求协议');
+  const upstreamModel = typeof source.upstreamModel === 'string' ? source.upstreamModel.trim() : '';
+  if (upstreamModel && !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,199}$/.test(upstreamModel)) throw new ImageGenerationChannelError('供应商型号名称无效');
+  const baseUrl = typeof source.baseUrl === 'string' && source.baseUrl.trim() ? await validateManagedBaseUrl(source.baseUrl) : undefined;
+  const key = typeof source.apiKey === 'string' ? source.apiKey.trim() : '';
+  if (key.length > 500 || source.apiKey !== undefined && typeof source.apiKey !== 'string' || source.clearApiKey === true && key) throw new ImageGenerationChannelError('型号密钥输入无效');
+  const settingKey = `${IMAGE_GENERATION_LEGACY_MODEL_API_SETTING_PREFIX}${channel}`;
+  await prisma.$transaction(async tx => {
+    const current = await readLegacyModelApiRegistry(channel, tx);
+    if ((input.expectedRevision ?? null) !== current.revision) throw new ImageGenerationChannelError('型号 API 配置已被其他管理员修改，请重新读取；未覆盖新设置', 409, 'image_legacy_model_api_conflict');
+    const global = await getImageGenerationApiSettings(tx, channel === 'banana' ? 'banana' : 'default');
+    if (!isStudioImageGenerationProvider(global.provider)) throw new ImageGenerationChannelError('此原供应商使用独立接口合同，不能套用兼容生图协议；原配置未改', 409);
+    const previousKey = current.models[model]?.apiKey;
+    const apiKey = source.clearApiKey === true ? undefined : key || previousKey;
+    const revision = randomUUID();
+    const next: LegacyModelApiRegistry = { version: 1, revision, models: { ...current.models, [model]: {
+      protocol: source.protocol as ImageGenerationChannelProtocol,
+      ...(upstreamModel ? { upstreamModel } : {}), ...(baseUrl ? { baseUrl } : {}), ...(apiKey ? { apiKey } : {}),
+    } } };
+    if (source.clearOverrides === true) delete next.models[model];
+    const row = await tx.platformSetting.findUnique({ where: { key: settingKey } });
+    try {
+      if (row) {
+        const swapped = await tx.platformSetting.updateMany({ where: { key: settingKey, value_json: row.value_json }, data: { value_json: JSON.stringify(next), updated_by: updatedBy } });
+        if (swapped.count !== 1) throw new ImageGenerationChannelError('型号配置已变化，请重新读取', 409, 'image_legacy_model_api_conflict');
+      } else await tx.platformSetting.create({ data: { key: settingKey, value_json: JSON.stringify(next), updated_by: updatedBy } });
+    } catch (error) {
+      if (isRecord(error) && error.code === 'P2002') throw new ImageGenerationChannelError('型号配置已被其他管理员创建，请重新读取', 409, 'image_legacy_model_api_conflict');
+      throw error;
+    }
+    await tx.operationLog.create({ data: { operator_id: updatedBy, action: 'image_generation_legacy_model_api_update', target_type: 'PlatformSetting', target_id: settingKey,
+      detail: JSON.stringify({ model, revision, api_key_configured: Boolean(next.models[model]?.apiKey), protocol: next.models[model]?.protocol || null, overrides_cleared: source.clearOverrides === true }) } });
+  });
+  const channels = await getManagedImageGenerationChannels();
+  return channels.find(item => item.id === channel)!;
+}
+
 function readPersistedCapability(raw: unknown, model: ImageStudioModel, legacyOpenAiGemini = false): ImageGenerationModelCapability | null {
   if (!isRecord(raw) || (raw.protocol !== 'gemini_native' && raw.protocol !== 'openai_images')) return null;
-  if (raw.protocol === 'gemini_native' ? !GEMINI_CHANNEL_MODELS.has(model) : !GPT_IMAGE_CHANNEL_MODELS.has(model) && !(legacyOpenAiGemini && GEMINI_CHANNEL_MODELS.has(model))) return null;
+  // Protocol is an explicit per-model setting, independent of the local name.
+  if (raw.upstreamModel !== undefined && (typeof raw.upstreamModel !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,199}$/.test(raw.upstreamModel))) return null;
+  if (raw.baseUrl !== undefined && (typeof raw.baseUrl !== 'string' || raw.baseUrl.length > 2048)) return null;
   if (raw.enabled !== undefined && typeof raw.enabled !== 'boolean') return null;
   const list = (value: unknown, allowed: readonly string[]) => {
     if (value === null || value === undefined) return null;
@@ -588,6 +731,8 @@ function readPersistedCapability(raw: unknown, model: ImageStudioModel, legacyOp
   return {
     enabled: raw.enabled === true,
     protocol: raw.protocol,
+    ...(typeof raw.upstreamModel === 'string' ? { upstreamModel: raw.upstreamModel } : {}),
+    ...(typeof raw.baseUrl === 'string' ? { baseUrl: raw.baseUrl } : {}),
     qualities,
     resolutions,
     ratios,
@@ -603,18 +748,33 @@ function parseManagedCapabilities(
   channelId: ImageGenerationChannelId,
   protocol: ImageGenerationResolvedProtocol,
 ): Partial<Record<ImageStudioModel, ImageGenerationModelCapability>> {
+  if (!isRecord(value)) throw new ImageGenerationChannelError('型号配置格式无效，请重新读取后保存', 400, 'image_channel_invalid_capability');
   const input = isRecord(value) ? value : {};
+  if (Object.keys(input).some(key => !IMAGE_STUDIO_MODELS.includes(key as ImageStudioModel))) {
+    throw new ImageGenerationChannelError('供应商配置包含不支持的本站型号', 400, 'image_channel_model_not_allowed');
+  }
   const output: Partial<Record<ImageStudioModel, ImageGenerationModelCapability>> = {};
   for (const model of IMAGE_STUDIO_MODELS) {
-    const requestedProtocol = channelId === 'fluxport'
+    const source = isRecord(input[model]) ? input[model] : {};
+    if (source.upstreamModel !== undefined && source.upstreamModel !== null && typeof source.upstreamModel !== 'string'
+      || source.baseUrl !== undefined && source.baseUrl !== null && typeof source.baseUrl !== 'string') {
+      throw new ImageGenerationChannelError(`型号 ${model} 的地址或名称格式无效`, 400, 'image_channel_invalid_model_api');
+    }
+    if (source.protocol !== undefined && source.protocol !== 'gemini_native' && source.protocol !== 'openai_images') {
+      throw new ImageGenerationChannelError(`型号 ${model} 的请求协议不受支持`, 400, 'image_channel_invalid_protocol');
+    }
+    const requestedProtocol = source.protocol === 'gemini_native' || source.protocol === 'openai_images' ? source.protocol : channelId === 'fluxport'
       ? FLUXPORT_PROTOCOL_BY_MODEL[model]
       : protocol === 'gemini_native' || protocol === 'openai_images' ? protocol : null;
     if (!requestedProtocol) continue;
     const protocolCompatible = requestedProtocol === 'gemini_native'
       ? GEMINI_CHANNEL_MODELS.has(model)
       : GPT_IMAGE_CHANNEL_MODELS.has(model);
-    if (!protocolCompatible) continue;
-    const source = isRecord(input[model]) ? input[model] : {};
+    if (!protocolCompatible && source.protocol === undefined) continue;
+    const upstreamModel = typeof source.upstreamModel === 'string' ? source.upstreamModel.trim() : '';
+    if (upstreamModel && !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,199}$/.test(upstreamModel)) {
+      throw new ImageGenerationChannelError(`型号 ${model} 的供应商型号名称无效`, 400, 'image_channel_invalid_upstream_model');
+    }
     const parseCapabilityList = (field: 'qualities' | 'resolutions' | 'ratios', allowed: readonly string[]) => {
       const raw = source[field];
       if (raw === null || raw === undefined || typeof raw === 'string' && !raw.trim()) return null;
@@ -653,6 +813,8 @@ function parseManagedCapabilities(
     output[model] = {
       enabled: source.enabled === true,
       protocol: requestedProtocol,
+      ...(upstreamModel ? { upstreamModel } : {}),
+      ...(typeof source.baseUrl === 'string' && source.baseUrl.trim() ? { baseUrl: source.baseUrl.trim() } : {}),
       qualities,
       resolutions,
       ratios,
@@ -812,6 +974,11 @@ async function readPrivateChannelVersion(
       || !Number.isSafeInteger(parsed.billingIntentRevision) || parsed.billingIntentRevision < 0)) {
     throw new ImageGenerationChannelError('图片供应商修订的计费意图版本无效', 500, 'image_channel_revision_invalid');
   }
+  if (parsed.modelOverrideRevision !== undefined && parsed.modelOverrideRevision !== null
+    && (typeof parsed.modelOverrideRevision !== 'string' || !/^[0-9a-f-]{36}$/i.test(parsed.modelOverrideRevision))
+    || parsed.selectedModel !== undefined && !IMAGE_STUDIO_MODELS.includes(parsed.selectedModel as ImageStudioModel)) {
+    throw new ImageGenerationChannelError('原供应商型号修订信息无效', 500, 'image_channel_revision_invalid');
+  }
   const rawProvider = knownProvider ? storedProvider : 'musk';
   const managedProvider = rawProvider === 'fluxport' || rawProvider === 'managed';
   const normalizedSettings = normalizeImageGenerationApiSettings({
@@ -837,6 +1004,17 @@ async function readPrivateChannelVersion(
       throw new ImageGenerationChannelError('图片供应商修订能力数据损坏', 500, 'image_channel_revision_invalid');
     }
   }
+  const modelApiKeys: Partial<Record<ImageStudioModel, string>> = {};
+  if (parsed.modelApiKeys !== undefined) {
+    if (!isRecord(parsed.modelApiKeys) || Object.entries(parsed.modelApiKeys).some(([model, key]) =>
+      !IMAGE_STUDIO_MODELS.includes(model as ImageStudioModel) || typeof key !== 'string' || !key.trim() || key.length > 500)) {
+      throw new ImageGenerationChannelError('图片供应商型号凭据修订损坏，不能继续执行', 500, 'image_channel_revision_invalid');
+    }
+    for (const model of IMAGE_STUDIO_MODELS) {
+      const key = parsed.modelApiKeys[model];
+      if (typeof key === 'string') modelApiKeys[model] = key;
+    }
+  }
   return {
     version: 1,
     channelId,
@@ -849,11 +1027,15 @@ async function readPrivateChannelVersion(
     sourceFingerprint: typeof parsed.sourceFingerprint === 'string' ? parsed.sourceFingerprint : undefined,
     billingIntentRevision: typeof parsed.billingIntentRevision === 'number' && Number.isSafeInteger(parsed.billingIntentRevision)
       ? parsed.billingIntentRevision : undefined,
+    ...(Object.prototype.hasOwnProperty.call(parsed, 'modelOverrideRevision') ? { modelOverrideRevision: parsed.modelOverrideRevision as string | null } : {}),
+    selectedModel: IMAGE_STUDIO_MODELS.includes(parsed.selectedModel as ImageStudioModel) ? parsed.selectedModel as ImageStudioModel : undefined,
     protocol: parsed.protocol === 'gemini_native' || parsed.protocol === 'openai_images' || parsed.protocol === 'mixed'
       ? parsed.protocol : 'legacy',
     managedChannel: parsed.managedChannel === true,
+    explicitModelApi: parsed.explicitModelApi === true,
     settings,
     modelCapabilities,
+    modelApiKeys,
     deleted: parsed.deleted === true,
   };
 }
@@ -953,6 +1135,12 @@ async function isActualBillingReady(
   model: string,
   client: Prisma.TransactionClient | typeof prisma,
 ) {
+  if ((settings as ImageGenerationResolvedSettings).modelCapabilities) {
+    const capability = (settings as ImageGenerationResolvedSettings).modelCapabilities[model as ImageStudioModel];
+    // Existing bill proofs identify the local model exactly, not an arbitrary alias.
+    if (capability?.upstreamModel && capability.upstreamModel !== model) return false;
+    settings = resolveImageGenerationModelSettings(settings as ImageGenerationResolvedSettings, model);
+  }
   if (!isMuskImageGenerationChannel(settings)) return false;
   try {
     if (new URL(settings.base_url).origin !== 'https://api.muskapis.com') return false;
@@ -972,6 +1160,16 @@ async function legacyBillingIntentState(
   model: string,
   client: Prisma.TransactionClient | typeof prisma,
 ) {
+  if ((settings as ImageGenerationResolvedSettings).modelCapabilities) {
+    const resolved = settings as ImageGenerationResolvedSettings;
+    const capability = resolved.modelCapabilities[model as ImageStudioModel];
+    settings = resolveImageGenerationModelSettings(resolved, model);
+    if (capability?.upstreamModel && capability.upstreamModel !== model) {
+      const { imageBillingIntent } = await import('@/lib/image-studio/billing-readiness');
+      const intent = await imageBillingIntent(client);
+      return { selected: intent.enabled && intent.enabledModels.includes(model), revision: intent.revision, quoteReady: false };
+    }
+  }
   const { imageBillingIntent, imageBillingReady } = await import('@/lib/image-studio/billing-readiness');
   const intent = await imageBillingIntent(client);
   const selected = intent.enabled && intent.enabledModels.includes(model);
@@ -1013,6 +1211,7 @@ async function modelDisabledReason(
   model: ImageStudioModel,
   client: Prisma.TransactionClient | typeof prisma,
 ) {
+  settings = resolveImageGenerationModelSettings(settings, model);
   if (settings.deleted) return '该配置已归档，只保留已受理任务查询与结算';
   if (!settings.enabled) return '通道已停用';
   if (!settings.api_key) return '尚未配置 API Key';
@@ -1020,6 +1219,7 @@ async function modelDisabledReason(
   const incomplete = modelCapabilityCompleteness(capability);
   if (incomplete) return incomplete;
   if (capability?.billingMode === 'actual') {
+    if (capability.upstreamModel && capability.upstreamModel !== model) return '供应商型号名称与本站型号不同，尚无对应的精确账单证明；请使用已确认的固定点数';
     if (!isMuskImageGenerationChannel(settings)) return '实际计费仅适用于已确认的 Musk 供应商与同一 API Key';
     if (capability.actualQuoteRequired !== true || !await isActualBillingReady(settings, model, client)) {
       return '该 API Key 与型号暂无有效的精确账单证明，实际计费未就绪';
@@ -1037,7 +1237,9 @@ function managedSettingsFromVersion(version: PrivateImageGenerationChannelVersio
     supplierKind: version.supplierKind,
     protocol: version.protocol,
     modelCapabilities: version.modelCapabilities,
+    modelApiKeys: version.modelApiKeys,
     managedChannel: version.managedChannel,
+    explicitModelApi: version.explicitModelApi,
     label: version.label,
     deleted: version.deleted === true,
   } as ImageGenerationResolvedSettings;
@@ -1115,12 +1317,14 @@ export async function captureImageGenerationChannel(
 
   const sourceChannelId = channelId === 'original' ? (isGeminiImageModel(model) ? 'banana' : 'shared') : channelId;
   const settings = await getImageGenerationApiSettings(tx, sourceChannelId === 'banana' ? 'banana' : 'default');
+  const modelApis = await readLegacyModelApiRegistry(sourceChannelId, tx);
   const studioSettings = await getImageStudioSettings(tx).catch(() => null);
   const prices = studioSettings?.prices || Object.fromEntries(IMAGE_STUDIO_MODELS.map(item => [item, null])) as Record<ImageStudioModel, number | null>;
-  if (channelId !== 'original' && !isImageGenerationApiReady(settings)) {
+  const resolved = channelId === 'original' ? resolveLegacySettings(settings, model, channelId, prices)
+    : applyLegacyModelApis(resolveLegacySettings(settings, model, channelId, prices), modelApis, model);
+  if (channelId !== 'original' && !isImageGenerationApiReady(resolved)) {
     throw new ImageGenerationChannelError('所选图片接口未启用或配置不完整', 409, 'image_channel_not_available');
   }
-  const resolved = resolveLegacySettings(settings, model, channelId, prices);
   if (channelId !== 'original') {
     let capability = resolved.modelCapabilities[model as ImageStudioModel];
     if (!capability?.enabled) {
@@ -1144,15 +1348,19 @@ export async function captureImageGenerationChannel(
       channelId,
       configRevision,
       label: channelId === 'shared' ? '共享接口' : 'Banana 专用接口',
-      supplierName: settings.api_key ? providerSupplierName(settings.provider) || '未知供应商' : '未知供应商',
+      supplierName: resolved.api_key ? providerSupplierName(settings.provider) || '未知供应商' : '未知供应商',
       supplierKind: 'legacy',
       sourceChannelId,
       sourceFingerprint: createHash('sha256').update(JSON.stringify(settings)).digest('hex'),
+      modelOverrideRevision: modelApis.revision,
+      selectedModel: model as ImageStudioModel,
       billingIntentRevision: billingIntent.revision,
-      protocol: legacyProtocol(settings.provider, model),
+      protocol: capability.protocol,
       managedChannel: false,
+      explicitModelApi: resolved.explicitModelApi,
       settings,
       modelCapabilities: resolved.modelCapabilities,
+      modelApiKeys: resolved.modelApiKeys,
     };
     await writePrivateChannelVersion(tx, version, 'image-generation-task');
     return { channelId, configRevision };
@@ -1167,6 +1375,8 @@ export async function captureImageGenerationChannel(
     supplierKind: 'legacy',
     sourceChannelId,
     sourceFingerprint: createHash('sha256').update(JSON.stringify(settings)).digest('hex'),
+    modelOverrideRevision: modelApis.revision,
+    selectedModel: model as ImageStudioModel,
     protocol: channelId === 'original' ? 'legacy' : legacyProtocol(settings.provider, model),
     managedChannel: false,
     settings,
@@ -1180,6 +1390,7 @@ export async function resolveImageGenerationChannelSnapshot(
   snapshot: ImageGenerationChannelSnapshot,
   tx: Prisma.TransactionClient | typeof prisma = prisma,
   forSubmission = false,
+  model?: string,
 ): Promise<ImageGenerationResolvedSettings> {
   assertImageGenerationChannelId(snapshot.channelId);
   if (!/^[0-9a-f-]{36}$/i.test(snapshot.configRevision)) {
@@ -1193,6 +1404,13 @@ export async function resolveImageGenerationChannelSnapshot(
         throw new ImageGenerationChannelError('原接口快照缺少报价版本信息', 409, 'image_channel_quote_snapshot_invalid');
       }
       const current = await getImageGenerationApiSettings(tx, version.sourceChannelId === 'banana' ? 'banana' : 'default');
+      const modelApis = await readLegacyModelApiRegistry(version.sourceChannelId, tx);
+      if (version.selectedModel && model && version.selectedModel !== model) throw new ImageGenerationChannelError('报价型号与任务不匹配，请重新报价', 409, 'image_channel_quote_model_mismatch');
+      if (Object.prototype.hasOwnProperty.call(version, 'modelOverrideRevision')
+        ? version.modelOverrideRevision !== modelApis.revision
+        : modelApis.revision !== null) {
+        throw new ImageGenerationChannelError('此供应商型号 API 配置已变化，请重新报价；未使用新配置替换原快照', 409, 'image_channel_quote_stale');
+      }
       if (snapshot.channelId !== 'original' && version.billingIntentRevision !== undefined) {
         const { imageBillingIntent } = await import('@/lib/image-studio/billing-readiness');
         const currentIntent = await imageBillingIntent(tx);
@@ -1204,10 +1422,11 @@ export async function resolveImageGenerationChannelSnapshot(
       if (fingerprint !== version.sourceFingerprint) {
         throw new ImageGenerationChannelError('原接口配置已变化，请重新获取报价后再提交', 409, 'image_channel_quote_stale');
       }
-      if (snapshot.channelId !== 'original' && !isImageGenerationApiReady(current)) {
+      if (snapshot.channelId !== 'original' && !isImageGenerationApiReady(model ? resolveImageGenerationModelSettings(settings, model) : settings)) {
         throw new ImageGenerationChannelError('所选图片接口已停用或配置不完整，请重新选择', 409, 'image_channel_not_available');
       }
-      return hydrateActualBilling(settings, tx);
+      const hydrated = await hydrateActualBilling(settings, tx);
+      return model ? resolveImageGenerationModelSettings(hydrated, model) : hydrated;
     }
     const registry = await readManagedChannelRegistry(tx);
     const current = registry.channels.find(item => item.id === snapshot.channelId);
@@ -1215,7 +1434,8 @@ export async function resolveImageGenerationChannelSnapshot(
       throw new ImageGenerationChannelError('图片供应商配置已停用或修订过期，请重新报价', 409, 'image_channel_revision_stale');
     }
   }
-  return hydrateActualBilling(settings, tx);
+  const hydrated = await hydrateActualBilling(settings, tx);
+  return model ? resolveImageGenerationModelSettings(hydrated, model) : hydrated;
 }
 
 /** Live admission switch only; never substitutes live credentials for a frozen version. */
@@ -1226,7 +1446,8 @@ export async function assertImageGenerationChannelDispatchOpen(
   if (snapshot.channelId === 'original') return;
   if (snapshot.channelId === 'shared' || snapshot.channelId === 'banana') {
     const current = await getImageGenerationApiSettings(client, snapshot.channelId === 'banana' ? 'banana' : 'default');
-    if (current.enabled && current.api_key && current.base_url) return;
+    const modelApis = await readLegacyModelApiRegistry(snapshot.channelId, client);
+    if (current.enabled && current.base_url && (current.api_key || Object.values(modelApis.models).some(api => api?.apiKey))) return;
   } else {
     const registry = await readManagedChannelRegistry(client);
     const current = registry.channels.find(item => item.id === snapshot.channelId);
@@ -1241,6 +1462,7 @@ export function validateImageGenerationChannel(
 ): { ok: true; capability: ImageGenerationModelCapability } | { ok: false; code: string; error: string } {
   const model = args.model as ImageStudioModel;
   if (!IMAGE_STUDIO_MODELS.includes(model)) return { ok: false, code: 'image_channel_model_not_allowed', error: '所选图片型号不在允许列表中' };
+  settings = resolveImageGenerationModelSettings(settings, model);
   const capability = settings.modelCapabilities[model];
   if (settings.channelId === 'original') {
     if (!isImageGenerationApiReady(settings)) return { ok: false, code: 'image_generation_api_not_configured', error: '原接口未启用或配置不完整' };
@@ -1313,7 +1535,7 @@ async function channelOption(
       billingMode: effectiveCapability?.billingMode || null,
       fixedPoints: capability?.fixedPoints ?? null,
       billingSource: capability?.billingSource || (settings.channelId === 'shared' || settings.channelId === 'banana' ? 'legacy_image_studio_contract' : null),
-      actualQuoteRequired: Boolean(actualReady && isMuskImageGenerationChannel(settings)),
+      actualQuoteRequired: Boolean(actualReady && isMuskImageGenerationChannel(resolveImageGenerationModelSettings(settings, model))),
       qualities: capability?.qualities ?? null,
       resolutions: capability?.resolutions ?? null,
       ratios: capability?.ratios ?? null,
@@ -1342,18 +1564,18 @@ export async function getImageGenerationChannelOptions(
     getImageGenerationDefaultRoutes(client),
   ]);
   const items: ImageGenerationChannelDto[] = [];
-  const shared = resolveLegacySettings(channels.shared, IMAGE_STUDIO_MODELS[2], 'shared', channels.legacyPrices);
-  const banana = resolveLegacySettings(channels.banana, IMAGE_STUDIO_MODELS[0], 'banana', channels.legacyPrices);
+  const shared = selectImageGenerationSettings(channels, IMAGE_STUDIO_MODELS[2], 'shared');
+  const banana = selectImageGenerationSettings(channels, IMAGE_STUDIO_MODELS[0], 'banana');
   items.push(await channelOption(shared, '共享接口', channels.shared.api_key ? providerSupplierName(channels.shared.provider) : null,
-    Boolean(channels.shared.api_key && channels.shared.base_url), channels.shared.enabled, client));
+    Boolean((channels.shared.api_key || Object.values(shared.modelApiKeys || {}).some(Boolean)) && channels.shared.base_url), channels.shared.enabled, client));
   items.push(await channelOption(banana, 'Banana 专用接口', channels.banana.api_key ? providerSupplierName(channels.banana.provider) : null,
-    Boolean(channels.banana.api_key && channels.banana.base_url), channels.banana.enabled, client));
+    Boolean((channels.banana.api_key || Object.values(banana.modelApiKeys || {}).some(Boolean)) && channels.banana.base_url), channels.banana.enabled, client));
   const fluxport = channels.fluxport;
-  items.push(await channelOption(fluxport, fluxport.label || 'FluxPort', 'FluxPort', Boolean(fluxport.api_key && fluxport.base_url), fluxport.enabled, client));
+  items.push(await channelOption(fluxport, fluxport.label || 'FluxPort', 'FluxPort', Boolean((fluxport.api_key || Object.values(fluxport.modelApiKeys || {}).some(Boolean)) && fluxport.base_url), fluxport.enabled, client));
   for (const settings of channels.managed) {
     if (settings.deleted) continue;
     items.push(await channelOption(settings, settings.label || settings.supplierName, settings.supplierName,
-      Boolean(settings.api_key && settings.base_url), settings.enabled, client));
+      Boolean((settings.api_key || Object.values(settings.modelApiKeys || {}).some(Boolean)) && settings.base_url), settings.enabled, client));
   }
 
   const originalModels: ImageGenerationChannelDto['models'] = {};
@@ -1400,12 +1622,17 @@ async function registryDto(
     const reason = await modelDisabledReason(settings, model, client);
     models[model] = {
       enabled: capability?.enabled === true,
+      protocol: capability?.protocol || (record.protocol === 'gemini_native' ? 'gemini_native' : record.id === 'fluxport' ? FLUXPORT_PROTOCOL_BY_MODEL[model] : 'openai_images'),
+      upstreamModel: capability?.upstreamModel || null,
+      baseUrl: capability?.baseUrl || null,
+      apiKeyConfigured: Boolean(resolveImageGenerationModelSettings(settings, model).api_key),
+      apiKeyOverrideConfigured: Boolean(settings.modelApiKeys?.[model]),
       ready: !reason,
       disabledReason: reason,
       billingMode: capability?.billingMode || null,
       fixedPoints: capability?.fixedPoints ?? null,
       billingSource: capability?.billingSource || null,
-      actualQuoteRequired: Boolean(actualReady && isMuskImageGenerationChannel(settings)),
+      actualQuoteRequired: Boolean(actualReady && isMuskImageGenerationChannel(resolveImageGenerationModelSettings(settings, model))),
       qualities: capability?.qualities ?? null,
       resolutions: capability?.resolutions ?? null,
       ratios: capability?.ratios ?? null,
@@ -1422,7 +1649,7 @@ async function registryDto(
     enabled: record.enabled,
     deleted: record.deleted,
     configRevision: record.configRevision,
-    apiKeyConfigured: Boolean(settings.api_key),
+    apiKeyConfigured: Boolean(settings.inherited_api_key !== undefined ? settings.inherited_api_key : settings.api_key),
     models,
   };
 }
@@ -1431,7 +1658,18 @@ export async function getManagedImageGenerationChannels(
   client: Prisma.TransactionClient | typeof prisma = prisma,
 ): Promise<ImageGenerationManagedChannelDto[]> {
   const registry = await readManagedChannelRegistry(client);
-  return Promise.all(registry.channels.map(async record => registryDto(record, await resolveCurrentManagedSettings(record, client), client)));
+  const managed = await Promise.all(registry.channels.map(async record => registryDto(record, await resolveCurrentManagedSettings(record, client), client)));
+  const channels = await getImageGenerationChannels(client);
+  for (const channel of ['shared', 'banana'] as const) {
+    const global = channels[channel];
+    const settings = selectImageGenerationSettings(channels, IMAGE_STUDIO_MODELS[0], channel);
+    const record: ManagedChannelRegistryRecord = { id: channel, label: channel === 'shared' ? '共享图形 API' : 'Banana 专用 API',
+      supplierName: providerSupplierName(global.provider) || '原供应商', supplierKind: global.provider === 'musk' ? 'musk' : 'other',
+      protocol: global.provider === 'musk' ? 'mixed' : 'openai_images', baseUrl: global.base_url, enabled: global.enabled, deleted: false,
+      configRevision: channels.legacyModelApis[channel].revision, modelCapabilities: settings.modelCapabilities };
+    managed.push(await registryDto(record, settings, client));
+  }
+  return managed;
 }
 
 export async function setImageGenerationModelDefaultRoute(
@@ -1543,6 +1781,16 @@ async function saveManagedRecord(
       ? await validateManagedBaseUrl(FLUXPORT_IMAGE_GENERATION_BASE_URL)
       : await validateManagedBaseUrl(input.baseUrl, beforeRecord?.baseUrl);
   if (!baseUrl) throw new ImageGenerationChannelError('图片供应商配置不存在', 404, 'image_channel_not_found');
+  // Validate every explicit model endpoint before entering the write transaction.
+  const validatedModelBases: Partial<Record<ImageStudioModel, string>> = {};
+  if ((operation === 'create' || operation === 'update') && isRecord(input.models)) {
+    for (const model of IMAGE_STUDIO_MODELS) {
+      const source = input.models[model];
+      if (isRecord(source) && typeof source.baseUrl === 'string' && source.baseUrl.trim()) {
+        validatedModelBases[model] = await validateManagedBaseUrl(source.baseUrl);
+      }
+    }
+  }
 
   return prisma.$transaction(async tx => {
     const registryRowBefore = await tx.platformSetting.findUnique({ where: { key: IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY } });
@@ -1574,6 +1822,22 @@ async function saveManagedRecord(
     const modelCapabilities = operation === 'archive' || operation === 'restore'
       ? existing!.modelCapabilities
       : parseManagedCapabilities(modelsInput, id, protocol);
+    const modelApiKeys = { ...previous?.modelApiKeys };
+    if (operation === 'create' || operation === 'update') {
+      for (const model of IMAGE_STUDIO_MODELS) {
+        const source = isRecord(modelsInput) && isRecord(modelsInput[model]) ? modelsInput[model] as Record<string, unknown> : {};
+        const key = typeof source.apiKey === 'string' ? source.apiKey.trim() : '';
+        if (key.length > 500 || source.apiKey !== undefined && typeof source.apiKey !== 'string') {
+          throw new ImageGenerationChannelError('型号 API Key 格式无效，请核对输入', 400, 'image_channel_invalid_api_key');
+        }
+        if (source.clearApiKey === true && key) throw new ImageGenerationChannelError('型号密钥不能同时替换和清除', 400, 'image_channel_key_conflict');
+        if (source.clearApiKey === true) delete modelApiKeys[model];
+        else if (key) modelApiKeys[model] = key;
+        if (modelCapabilities[model] && validatedModelBases[model]) {
+          modelCapabilities[model] = { ...modelCapabilities[model]!, baseUrl: validatedModelBases[model] };
+        }
+      }
+    }
     const requestedEnabled = operation === 'create' || operation === 'update' ? input.enabled === true : false;
     if ((operation === 'create' || operation === 'update') && input.enabled !== undefined && typeof input.enabled !== 'boolean') {
       throw new ImageGenerationChannelError('启用状态无效，请重新选择后保存', 400, 'image_channel_invalid_enabled');
@@ -1584,7 +1848,7 @@ async function saveManagedRecord(
     const inputKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
     if (inputKey.length > 500) throw new ImageGenerationChannelError('API Key 过长，请核对输入内容', 400, 'image_channel_invalid_api_key');
     const apiKey = input.clearApiKey === true ? null : inputKey || previous?.api_key || null;
-    if (requestedEnabled && !apiKey) {
+    if (requestedEnabled && !apiKey && !Object.values(modelApiKeys).some(Boolean)) {
       throw new ImageGenerationChannelError('启用图片供应商前必须先填写 API Key；当前输入未保存', 400, 'image_channel_api_key_required');
     }
     const enabled = requestedEnabled;
@@ -1632,6 +1896,7 @@ async function saveManagedRecord(
       managedChannel: true,
       settings,
       modelCapabilities,
+      modelApiKeys,
       deleted,
     };
     await writePrivateChannelVersion(tx, version, updatedBy);
@@ -1973,6 +2238,9 @@ export async function createImageGeneration(params: {
   referenceImages?: string[];
   quality?: string;
 }): Promise<ImageGenerationResult> {
+  if ((params.settings as ImageGenerationResolvedSettings).modelCapabilities) {
+    params = { ...params, settings: resolveImageGenerationModelSettings(params.settings as ImageGenerationResolvedSettings, params.settings.default_model) };
+  }
   if (!isImageGenerationApiReady(params.settings)) {
     throw new ImageGenerationApiError('图形生成 API 未启用或缺少配置', 503, 'image_generation_api_not_configured');
   }
@@ -1990,10 +2258,10 @@ export async function createImageGeneration(params: {
     if (isStudioImageGenerationProvider(params.settings.provider)
       && IMAGE_STUDIO_MODELS.includes(params.settings.default_model as typeof IMAGE_STUDIO_MODELS[number])) {
       const resolvedSettings = params.settings as ImageGenerationResolvedSettings;
-      const managedProtocol = resolvedSettings.managedChannel
+      const managedProtocol = resolvedSettings.managedChannel || resolvedSettings.explicitModelApi
         ? resolvedSettings.modelCapabilities[params.settings.default_model as ImageStudioModel]?.protocol
         : undefined;
-      if (resolvedSettings.managedChannel && !managedProtocol) {
+      if ((resolvedSettings.managedChannel || resolvedSettings.explicitModelApi) && !managedProtocol) {
         throw new ImageGenerationApiError('所选图片供应商修订缺少该型号的明确请求协议', 409, 'image_generation_channel_protocol_missing');
       }
       const images: StudioImageInput[] = [];
@@ -2012,6 +2280,7 @@ export async function createImageGeneration(params: {
         provider: params.settings.provider === 'musk' ? 'musk' as const : 'ai_media_vip' as const,
         ...(managedProtocol ? { protocol: managedProtocol } : {}),
         model: params.settings.default_model,
+        upstreamModel: resolvedSettings.modelCapabilities?.[params.settings.default_model as ImageStudioModel]?.upstreamModel,
         prompt: params.prompt,
         quality: normalizeImageStudioQuality(params.settings.default_model, params.quality || 'auto'),
         count,

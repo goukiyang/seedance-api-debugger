@@ -8,7 +8,7 @@ import { getImageStudioSettings, IMAGE_STUDIO_SETTING_KEY } from '@/lib/image-st
 import { canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from '@/lib/image-studio/access';
 import { defaultImageStudioQuality, normalizeImageStudioQuality, IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
 import { normalizeStudioRatio, studioRatioSize } from '@/lib/image-studio/ratios';
-import { getImageGenerationChannelOptions, getImageGenerationSettingsForModel, getManagedImageGenerationChannels } from '@/lib/integrations/image-generation';
+import { getImageGenerationChannelOptions, getImageGenerationSettingsForModel, getManagedImageGenerationChannels, hasLegacyImageGenerationModelOverride } from '@/lib/integrations/image-generation';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import { imageBillingScope } from '@/lib/image-studio/billing-scope';
 import { fixedImageBillingContract, imageSpecification } from '@/lib/image-studio/billing-quote';
@@ -84,6 +84,9 @@ async function assertToolFlowLegacyRoute(tx: Tx, config: TemplateConfig, configu
   const mapped = await resolveImageGenerationRequestChannel(model as typeof IMAGE_STUDIO_MODELS[number], undefined, tx);
   if (!mapped) return;
   const legacy = model.startsWith('gemini-') ? 'banana' : 'shared';
+  if (mapped === legacy && await hasLegacyImageGenerationModelOverride(model as typeof IMAGE_STUDIO_MODELS[number], legacy, tx)) {
+    throw new AuthError('此型号使用独立 API 配置，工具流暂不能固定该配置执行；请使用正常生图入口，原工具流未派发。', 409);
+  }
   const options = await getImageGenerationChannelOptions(tx);
   const option = options.items.find((item) => item.id === mapped);
   const managed = option ? null : (await getManagedImageGenerationChannels(tx)).find((item) => item.id === mapped);

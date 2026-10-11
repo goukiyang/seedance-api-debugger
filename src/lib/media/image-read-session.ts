@@ -88,8 +88,11 @@ function pruneDecoded() {
   let kept = 0, bytes = 0;
   for (const entry of candidates) {
     const estimate = Math.max(1, (entry.width || 0) * (entry.height || 0) * 4);
-    const current = kept === 0 && entry.consumers.size > 0;
-    if (kept < MAX_DECODED_IMAGES && (bytes + estimate <= MAX_DECODED_BYTES || current)) { kept++; bytes += estimate; }
+    // The budget bounds retained neighbors, not images still owned by a visible
+    // reader (including both comparison panes and an original-to-HD handoff).
+    // Dropping a completing foreground decode here would suppress its ready emit.
+    const current = entry.consumers.size > 0;
+    if (current || kept < MAX_DECODED_IMAGES && bytes + estimate <= MAX_DECODED_BYTES) { kept++; bytes += estimate; }
     else dropDecoded(entry);
   }
 }
@@ -324,6 +327,16 @@ export function setImageReadSessionOwner(next: string) {
 }
 export function invalidateImageReadSource(source: string, account = owner) {
   invalidateImageReadFamily(source, account, '图片权限或来源已变化，请重新打开');
+}
+// An explicit display retry must not reuse the same failed DOM source forever.
+// Reset only this representation; authorization/descriptor invalidation remains
+// the separate whole-family path above. The next acquisition performs one GET.
+export function resetImageReadForRetry(source: string, account = owner) {
+  if (!account || account !== owner || /^(blob:|data:)/i.test(source)) return;
+  const canonical = canonicalImageReadSource(source);
+  for (const entry of Array.from(entries.values())) if (entry.account === account && entry.source === canonical) {
+    dropBody(entry); allowBodyAgain(entry);
+  }
 }
 export function revalidateActiveImages(minAge = REVALIDATE_AFTER) {
   prune();

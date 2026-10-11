@@ -75,6 +75,11 @@ type ImageGenerationConfig = {
 
 type ManagedImageModel = {
   enabled: boolean;
+  protocol?: 'gemini_native' | 'openai_images';
+  upstreamModel?: string | null;
+  baseUrl?: string | null;
+  apiKeyConfigured?: boolean;
+  apiKeyOverrideConfigured?: boolean;
   ready: boolean;
   disabledReason: string | null;
   billingMode: 'fixed' | 'actual' | null;
@@ -136,6 +141,12 @@ type StoredImageRoutePreference = {
 
 type ChannelCapabilityDraft = {
   enabled: boolean;
+  protocol: 'gemini_native' | 'openai_images';
+  upstreamModel: string;
+  baseUrl: string;
+  apiKey: string;
+  clearApiKey: boolean;
+  clearOverrides?: boolean;
   qualities: string;
   resolutions: string;
   ratios: string;
@@ -147,6 +158,7 @@ type ChannelCapabilityDraft = {
 type ManagedChannelDraft = {
   id?: string;
   expectedRevision?: string | null;
+  editingModel?: ImageStudioModel;
   label: string;
   supplierName: string;
   supplierKind: 'musk' | 'other' | 'fluxport';
@@ -450,7 +462,8 @@ function linkedUserSubtitle(config: CodexConfig) {
 }
 
 function emptyChannelCapabilityDraft(): ChannelCapabilityDraft {
-  return { enabled: false, qualities: '', resolutions: '', ratios: '', maxReferences: '', billingMode: '', fixedPoints: '' };
+  return { enabled: false, protocol: 'openai_images', upstreamModel: '', baseUrl: '', apiKey: '', clearApiKey: false,
+    qualities: '', resolutions: '', ratios: '', maxReferences: '', billingMode: '', fixedPoints: '' };
 }
 
 function emptyManagedChannelDraft(): ManagedChannelDraft {
@@ -462,9 +475,7 @@ function emptyManagedChannelDraft(): ManagedChannelDraft {
 }
 
 function managedDraftModels(draft: ManagedChannelDraft) {
-  return IMAGE_STUDIO_MODELS.filter(model => draft.supplierKind === 'fluxport'
-    || draft.protocol === 'gemini_native' && model.startsWith('gemini-')
-    || draft.protocol === 'openai_images' && model.startsWith('gpt-image-'));
+  return IMAGE_STUDIO_MODELS.filter(model => Boolean(draft.models[model]));
 }
 
 function managedDraftCapabilityMissingFields(capability: ChannelCapabilityDraft) {
@@ -550,6 +561,12 @@ function managedChannelDraftFrom(channel: ManagedImageChannel): ManagedChannelDr
       const capability = channel.models[model];
       return [model, {
         enabled: capability?.enabled === true,
+        protocol: capability?.protocol || (channel.supplierKind === 'fluxport' && model.startsWith('gemini-')
+          ? 'gemini_native' : channel.protocol === 'gemini_native' ? 'gemini_native' : 'openai_images'),
+        upstreamModel: capability?.upstreamModel || '',
+        baseUrl: capability?.baseUrl || '',
+        apiKey: '',
+        clearApiKey: false,
         qualities: capability?.qualities?.join(', ') || '',
         resolutions: capability?.resolutions?.join(', ') || '',
         ratios: capability?.ratios?.join(', ') || '',
@@ -763,9 +780,7 @@ export default function AdminIntegrationsClient() {
   const sharedSupplierName = IMAGE_CHANNEL_OPTIONS.find(option => option.provider === imageConfig.provider)?.label
     || imageRouteCurrentChannel?.supplierName
     || '共享图形 API';
-  const selectedManagedImageChannel = imageRouteCurrentChannelId !== 'shared' && imageRouteCurrentChannelId !== 'banana'
-    ? managedImageChannels.find(channel => channel.id === imageRouteCurrentChannelId)
-    : undefined;
+  const selectedManagedImageChannel = managedImageChannels.find(channel => channel.id === imageRouteCurrentChannelId);
   const selectedManagedModelCapability = selectedManagedImageChannel?.models[selectedRouteModel];
   const imageRouteHasChanges = imageRouteCurrentChoice !== imageRouteServerChoice;
 
@@ -1165,8 +1180,9 @@ export default function AdminIntegrationsClient() {
   };
 
   const openManagedChannelDraft = (draft: ManagedChannelDraft) => {
-    managedChannelDraftBaseline.current = JSON.stringify(draft);
-    setManagedChannelDraft(draft);
+    const editingDraft = { ...draft, editingModel: selectedRouteModel };
+    managedChannelDraftBaseline.current = JSON.stringify(editingDraft);
+    setManagedChannelDraft(editingDraft);
     setChannelManagementOpen(true);
   };
 
@@ -1279,6 +1295,11 @@ export default function AdminIntegrationsClient() {
           : null;
         return [model, {
           enabled: capability.enabled,
+          protocol: capability.protocol,
+          upstreamModel: capability.upstreamModel,
+          baseUrl: capability.baseUrl,
+          apiKey: capability.apiKey,
+          clearApiKey: capability.clearApiKey,
           qualities: splitList(capability.qualities),
           resolutions: splitList(capability.resolutions),
           ratios: splitList(capability.ratios),
@@ -1303,7 +1324,18 @@ export default function AdminIntegrationsClient() {
       const response = await fetch('/api/admin/integrations/image-generation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel_action: managedChannelDraft.id ? 'update' : 'create', channel }),
+        body: JSON.stringify(managedChannelDraft.id === 'shared' || managedChannelDraft.id === 'banana'
+          ? { channel_action: 'update-legacy-model-api', channel: {
+            id: managedChannelDraft.id, expectedRevision: managedChannelDraft.expectedRevision,
+            model: managedChannelDraft.editingModel || selectedRouteModel,
+            modelApi: { protocol: models[managedChannelDraft.editingModel || selectedRouteModel].protocol,
+              upstreamModel: models[managedChannelDraft.editingModel || selectedRouteModel].upstreamModel,
+              baseUrl: models[managedChannelDraft.editingModel || selectedRouteModel].baseUrl,
+              apiKey: models[managedChannelDraft.editingModel || selectedRouteModel].apiKey,
+              clearApiKey: models[managedChannelDraft.editingModel || selectedRouteModel].clearApiKey,
+              clearOverrides: managedChannelDraft.models[managedChannelDraft.editingModel || selectedRouteModel].clearOverrides === true },
+          } }
+          : { channel_action: managedChannelDraft.id ? 'update' : 'create', channel }),
       });
       const data = await response.json().catch(() => null) as Record<string, unknown> | null;
       const errorMessage = typeof data?.error === 'string' ? data.error : '保存图片供应商配置失败';
@@ -2732,7 +2764,7 @@ export default function AdminIntegrationsClient() {
         </div>
       </form>}
 
-      {imageRouteCurrentChannelId !== 'shared' && imageRouteCurrentChannelId !== 'banana' && (
+      {(
         <section className="card codex-config-form" aria-labelledby="selected-image-channel-title">
           <div className="codex-config-head">
             <div>
@@ -2752,7 +2784,9 @@ export default function AdminIntegrationsClient() {
           <div className="codex-config-status">
             <div><span className="info-label">用于此型号</span><strong>{imageChannels === null ? '通道信息未读取，暂不能确认' : imageChannelStatus(imageRouteCurrentChannel, selectedRouteModel)}</strong></div>
             <div><span className="info-label">通道状态</span><strong>{selectedManagedImageChannel?.deleted ? '已归档' : selectedManagedImageChannel?.enabled ? '已启用' : selectedManagedImageChannel ? '已停用' : '配置不存在'}</strong></div>
-            <div><span className="info-label">API Key</span><strong>{selectedManagedImageChannel ? selectedManagedImageChannel.apiKeyConfigured ? '已设置' : '未设置' : '未确认'}</strong></div>
+            <div><span className="info-label">此型号 API Key</span><strong>{selectedManagedModelCapability?.apiKeyConfigured ? selectedManagedModelCapability.apiKeyOverrideConfigured ? '独立密钥已设置' : '继承供应商密钥' : selectedManagedImageChannel?.apiKeyConfigured ? '继承供应商密钥' : '未设置'}</strong></div>
+            <div><span className="info-label">供应商型号名称</span><strong>{selectedManagedModelCapability?.upstreamModel || selectedRouteModel}</strong></div>
+            <div><span className="info-label">此型号 API 地址</span><strong>{selectedManagedModelCapability?.baseUrl || selectedManagedImageChannel?.baseUrl || '未设置'}</strong></div>
             <div><span className="info-label">{IMAGE_STUDIO_MODEL_LABELS[selectedRouteModel]}规格/计费</span><strong>{selectedManagedModelCapability
               ? `${selectedManagedModelCapability.qualities?.join(' / ') || '质量未知'} · ${selectedManagedModelCapability.resolutions?.join(' / ') || '分辨率未知'} · ${selectedManagedModelCapability.ratios?.join(' / ') || '比例未知'} · ${selectedManagedModelCapability.billingMode === 'fixed' ? `固定 ${selectedManagedModelCapability.fixedPoints ?? '未知'} 点/张` : selectedManagedModelCapability.billingMode === 'actual' ? '按实际账单' : '计费待确认'}`
               : '未配置此型号'}</strong></div>
@@ -2781,7 +2815,7 @@ export default function AdminIntegrationsClient() {
         </div>
 
         <div className="mt-3" role="list" aria-label="已保存供应商配置">
-          {managedImageChannels.map(channel => (
+          {managedImageChannels.filter(channel => channel.id !== 'shared' && channel.id !== 'banana').map(channel => (
             <div key={channel.id} role="listitem" className="codex-config-actions" style={{ justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border-color, #d8dee8)', padding: '12px 0' }}>
               <div>
                 <strong>{channel.label}</strong>
@@ -2815,7 +2849,7 @@ export default function AdminIntegrationsClient() {
               </div>
             </div>
           ))}
-          {managedImageChannels.length === 0 && <p className="text-gray text-sm">暂无额外供应商配置。</p>}
+          {!managedImageChannels.some(channel => channel.id !== 'shared' && channel.id !== 'banana') && <p className="text-gray text-sm">暂无额外供应商配置。</p>}
         </div>
 
         {managedChannelDraft && (
@@ -2824,17 +2858,19 @@ export default function AdminIntegrationsClient() {
               <div>
                 <h3 className="section-title mb-0">{managedChannelDraft.id ? '编辑供应商配置' : '新增供应商配置'}</h3>
                 <p className="text-gray text-sm mt-2">
-                  启用只保存通道状态；每个型号仍需单独补齐规格与计费，才能用于新任务。按实际账单计费还需核实同一 API Key 与型号的账单证明。
+                  {managedChannelDraft.id === 'shared' || managedChannelDraft.id === 'banana'
+                    ? '这里只保存当前型号的 API 配置，不改变共用设置、启停、规格和点数。新任务固定保存时的配置，原任务不变。'
+                    : '启用只保存通道状态；每个型号仍需单独补齐规格与计费，才能用于新任务。按实际账单计费还需核实同一 API Key 与型号的账单证明。'}
                 </p>
               </div>
-              <label className="toggle-switch" aria-label="启用该图片供应商">
+              {managedChannelDraft.id !== 'shared' && managedChannelDraft.id !== 'banana' && <label className="toggle-switch" aria-label="启用该图片供应商">
                 <input
                   type="checkbox"
                   checked={managedChannelDraft.enabled}
                   onChange={event => setManagedChannelDraft(current => current ? { ...current, enabled: event.target.checked } : current)}
                 />
                 <span className="toggle-slider"></span>
-              </label>
+              </label>}
             </div>
 
             <p className="text-gray text-sm mt-2">
@@ -2847,7 +2883,7 @@ export default function AdminIntegrationsClient() {
               {managedDraftUsesActualBilling ? ' 按实际账单的型号还需核对同一 Key 的账单证明。' : ''}
             </p>
 
-            <div className="codex-config-grid">
+            {managedChannelDraft.id !== 'shared' && managedChannelDraft.id !== 'banana' && <div className="codex-config-grid">
               <div className="form-group">
                 <label className="form-label" htmlFor="managed-image-label">配置名称</label>
                 <input id="managed-image-label" className="input" required maxLength={120} value={managedChannelDraft.label}
@@ -2870,19 +2906,7 @@ export default function AdminIntegrationsClient() {
                 </div>
               )}
               <div className="form-group">
-                <label className="form-label" htmlFor="managed-image-protocol">请求协议</label>
-                {managedChannelDraft.supplierKind === 'fluxport' ? (
-                  <input id="managed-image-protocol" className="input" value="按每个型号明确选择协议" disabled />
-                ) : (
-                  <select id="managed-image-protocol" className="input" value={managedChannelDraft.protocol}
-                    onChange={event => setManagedChannelDraft(current => current ? { ...current, protocol: event.target.value as 'gemini_native' | 'openai_images' } : current)}>
-                    <option value="gemini_native">Gemini 原生</option>
-                    <option value="openai_images">OpenAI 图片接口</option>
-                  </select>
-                )}
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="managed-image-base-url">API 地址</label>
+                <label className="form-label" htmlFor="managed-image-base-url">供应商共用 API 地址</label>
                 <input id="managed-image-base-url" className="input" type="url" required maxLength={2048}
                   value={managedChannelDraft.baseUrl || (managedChannelDraft.supplierKind === 'fluxport' ? 'https://api.uselg.top' : '')}
                   disabled={managedChannelDraft.supplierKind === 'fluxport'}
@@ -2891,7 +2915,7 @@ export default function AdminIntegrationsClient() {
                 <small className="text-gray">仅允许安全的 HTTPS 公网 API 地址。</small>
               </div>
               <div className="form-group">
-                <label className="form-label" htmlFor="managed-image-api-key">API Key</label>
+                <label className="form-label" htmlFor="managed-image-api-key">供应商共用 API Key</label>
                 <input id="managed-image-api-key" className="input" type="password" value={managedChannelDraft.apiKey}
                   onChange={event => setManagedChannelDraft(current => current ? { ...current, apiKey: event.target.value, clearApiKey: event.target.value ? false : current.clearApiKey } : current)}
                   placeholder={managedChannelDraft.id ? '当前已设置，留空不变' : '输入 API Key'} autoComplete="new-password" />
@@ -2903,16 +2927,13 @@ export default function AdminIntegrationsClient() {
                   </label>
                 )}
               </div>
-            </div>
-
+            </div>}
             <div className="form-group mt-3">
-              <strong>型号能力与计费</strong>
-              <p className="text-gray text-sm mt-1">所有能力都需按供应商资料逐项确认；列表留空或数量未知时保持不可用。固定点数填 0 表示明确免费，不代表未知价格。</p>
+              <strong>{managedChannelDraft.id === 'shared' || managedChannelDraft.id === 'banana' ? '当前型号 API 配置' : '型号能力与计费'}</strong>
+              {managedChannelDraft.id !== 'shared' && managedChannelDraft.id !== 'banana' && <p className="text-gray text-sm mt-1">所有能力都需按供应商资料逐项确认；列表留空或数量未知时保持不可用。固定点数填 0 表示明确免费，不代表未知价格。</p>}
             </div>
             <div className="codex-config-grid">
-              {IMAGE_STUDIO_MODELS.filter(model => model === selectedRouteModel && (managedChannelDraft.supplierKind === 'fluxport'
-                || managedChannelDraft.protocol === 'gemini_native' && model.startsWith('gemini-')
-                || managedChannelDraft.protocol === 'openai_images' && model.startsWith('gpt-image-')))
+              {IMAGE_STUDIO_MODELS.filter(model => model === (managedChannelDraft.editingModel || selectedRouteModel))
                 .map(model => {
                   const capability = managedChannelDraft.models[model];
                   const missingFields = managedDraftCapabilityMissingFields(capability);
@@ -2922,7 +2943,7 @@ export default function AdminIntegrationsClient() {
                     models: { ...current.models, [model]: { ...current.models[model], ...patch } },
                   } : current);
                   return (
-                    <details key={model} className="form-group" style={{ border: '1px solid var(--border-color, #d8dee8)', borderRadius: 10, padding: 12 }}>
+                    <details key={model} open className="form-group" style={{ border: '1px solid var(--border-color, #d8dee8)', borderRadius: 10, padding: 12 }}>
                       <summary style={{ cursor: 'pointer' }}>
                         <strong>{IMAGE_STUDIO_MODEL_LABELS[model]}</strong>
                         <span className="text-gray">
@@ -2946,9 +2967,38 @@ export default function AdminIntegrationsClient() {
                         </div>
                       )}
                       <label className="codex-clear-token mt-2">
-                        <input type="checkbox" checked={capability.enabled} onChange={event => updateCapability({ enabled: event.target.checked })} />
+                        <input type="checkbox" checked={capability.enabled} disabled={managedChannelDraft.id === 'shared' || managedChannelDraft.id === 'banana'} onChange={event => updateCapability({ enabled: event.target.checked })} />
                         已确认该型号可用
                       </label>
+                      <p className="text-gray text-sm mt-2">以下只影响此供应商的当前型号，新任务使用保存后的配置；已有任务保留原配置。保存配置不会改变上方默认供应商选择。</p>
+                      <label className="form-label mt-2" htmlFor={`${prefix}-protocol`}>此型号请求协议</label>
+                      <select id={`${prefix}-protocol`} className="input" value={capability.protocol}
+                        onChange={event => updateCapability({ protocol: event.target.value as ChannelCapabilityDraft['protocol'] })}>
+                        <option value="gemini_native">Gemini 原生生图</option>
+                        <option value="openai_images">OpenAI 兼容生图</option>
+                      </select>
+                      <label className="form-label mt-2" htmlFor={`${prefix}-upstream-model`}>供应商型号名称</label>
+                      <input id={`${prefix}-upstream-model`} className="input" maxLength={200} value={capability.upstreamModel}
+                        onChange={event => updateCapability({ upstreamModel: event.target.value })} placeholder={`留空使用 ${model}`} />
+                      <label className="form-label mt-2" htmlFor={`${prefix}-base-url`}>此型号 API 地址</label>
+                      <input id={`${prefix}-base-url`} className="input" type="url" maxLength={2048} value={capability.baseUrl}
+                        onChange={event => updateCapability({ baseUrl: event.target.value })} placeholder="留空继承供应商共用地址" />
+                      <label className="form-label mt-2" htmlFor={`${prefix}-api-key`}>此型号独立 API Key</label>
+                      <input id={`${prefix}-api-key`} className="input" type="password" maxLength={500} autoComplete="new-password" value={capability.apiKey}
+                        onChange={event => updateCapability({ apiKey: event.target.value, clearApiKey: false })}
+                        placeholder={managedImageChannels.find(item => item.id === managedChannelDraft.id)?.models[model]?.apiKeyOverrideConfigured
+                          ? '独立密钥已设置，留空保留' : '未设置时继承供应商共用密钥'} />
+                      <label className="codex-clear-token mt-2">
+                        <input type="checkbox" checked={capability.clearApiKey}
+                          disabled={!managedImageChannels.find(item => item.id === managedChannelDraft.id)?.models[model]?.apiKeyOverrideConfigured || Boolean(capability.apiKey)}
+                          onChange={event => updateCapability({ clearApiKey: event.target.checked })} />
+                        清除此型号独立密钥，改为继承供应商共用密钥
+                      </label>
+                      {(managedChannelDraft.id === 'shared' || managedChannelDraft.id === 'banana') && <label className="codex-clear-token mt-2">
+                        <input type="checkbox" checked={capability.clearOverrides === true} onChange={event => updateCapability({ clearOverrides: event.target.checked })} />
+                        保存时清除此型号全部独立 API 配置，恢复原共用接口
+                      </label>}
+                      {managedChannelDraft.id !== 'shared' && managedChannelDraft.id !== 'banana' && <>
                       <label className="form-label mt-2" htmlFor={`${prefix}-quality`}>质量选项</label>
                       <input id={`${prefix}-quality`} className="input" value={capability.qualities} onChange={event => updateCapability({ qualities: event.target.value })}
                         placeholder={IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model].join(', ')} />
@@ -2975,6 +3025,7 @@ export default function AdminIntegrationsClient() {
                       {capability.billingMode === 'actual' && (
                         <small className="text-gray d-block mt-2">提交时会按同一 API Key 和该型号核对账单证明；未就绪前不能用于新任务。</small>
                       )}
+                      </>}
                     </details>
                   );
                 })}
@@ -2988,7 +3039,7 @@ export default function AdminIntegrationsClient() {
                 }
               }}>取消</button>
             <button className="btn btn-primary sd2-loading-surface" type="submit" disabled={managedChannelSaving || managedChannelOutcomeUnknown} data-busy={managedChannelSaving}>
-                {managedChannelSaving ? '正在保存' : '保存供应商配置'}
+                {managedChannelSaving ? '正在保存' : managedChannelDraft.id === 'shared' || managedChannelDraft.id === 'banana' ? '保存此型号 API 配置' : '保存供应商配置'}
               </button>
             </div>
           </form>

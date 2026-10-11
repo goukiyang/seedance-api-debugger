@@ -10,6 +10,7 @@ import ContentReactions from '@/components/content-reactions/ContentReactions';
 import type { ContentKey } from '@/lib/content-reactions/types';
 import { isSafeIdentifier, useMediaPreviewState, type MediaPreviewZoomMode } from '@/lib/hooks/use-media-preview-state';
 import { isImagePreviewReady, useImageReadProgress } from '@/lib/hooks/use-image-read-progress';
+import { resetImageReadForRetry } from '@/lib/media/image-read-session';
 import { useHdImageSource, versionedHdSource, type HdDescription } from '@/lib/hooks/use-hd-image-source';
 import { useImageNeighbors, type ImageReadCandidate } from '@/lib/hooks/use-image-neighbors';
 import { isTopmostDialogLayer, useDialogDismiss } from '@/components/useDialogDismiss';
@@ -139,7 +140,6 @@ function PreviewImage({ src, thumbnailSrc, alt, original, version = '', classNam
   const [thumbnailLoaded, setThumbnailLoaded] = useState('');
   const currentKeyRef = useRef(key);
   const readyKeyRef = useRef('');
-  currentKeyRef.current = key;
   useEffect(() => {
     if (!hasThumbnail) return;
     if (thumbnailImage.current?.complete) {
@@ -154,20 +154,25 @@ function PreviewImage({ src, thumbnailSrc, alt, original, version = '', classNam
   const readResult = displaySrc === originalSrc ? originalResult : clearResult;
   const readProgress = readResult.progress;
   const imageSrc = readResult.imageSrc || undefined;
-  const loaded = isImagePreviewReady(readResult, loadedKey === key);
+  const imageIdentity = `${key}:${imageSrc || ''}`;
+  currentKeyRef.current = imageIdentity;
   const unsupported = readProgress.phase === 'unsupported';
-  const failed = failedKey === key || unsupported || readProgress.phase === 'unavailable' || readResult.refreshSource === true;
-  const blocked = readResult.denied || readResult.unconfirmed || hd.denied;
+  const failed = failedKey === imageIdentity || unsupported || readProgress.phase === 'unavailable' || readResult.refreshSource === true;
+  const blocked = readResult.denied || originalResult.denied || hd.denied;
+  const loaded = !failed && !blocked && isImagePreviewReady(readResult, loadedKey === imageIdentity);
   useEffect(() => { if (blocked || failed) onUnavailableRef.current?.(); }, [blocked, failed, key]);
-  useEffect(() => { if (displaySrc === originalSrc) setRetainOriginal(true); else if (loaded) setRetainOriginal(false); }, [displaySrc, originalSrc, loaded]);
   useEffect(() => {
-    if ((unsupported || failedKey === key || readResult.refreshSource) && !readResult.denied && hd.description?.status === 'ready' && !rawFallback && !original) {
+    if (displaySrc === originalSrc) setRetainOriginal(true);
+    else if (loaded && loadedKey === imageIdentity) setRetainOriginal(false);
+  }, [displaySrc, originalSrc, loaded, loadedKey, imageIdentity]);
+  useEffect(() => {
+    if ((unsupported || failedKey === imageIdentity || readResult.refreshSource) && !blocked && hd.description?.status === 'ready' && !rawFallback && !original) {
       if (readResult.refreshSource) hd.refresh();
       setFallbackKey(fallbackIdentity);
     }
-  }, [unsupported, failedKey, key, readResult.refreshSource, readResult.denied, hd.description?.status, hd.refresh, rawFallback, original, fallbackIdentity]);
+  }, [unsupported, failedKey, imageIdentity, readResult.refreshSource, blocked, hd.description?.status, hd.refresh, rawFallback, original, fallbackIdentity]);
   const reportReady = (target?: HTMLImageElement | null) => {
-    const readyIdentity = `${key}:${imageSrc || ''}`;
+    const readyIdentity = imageIdentity;
     if (readyKeyRef.current === readyIdentity) return;
     const width = readResult.width || target?.naturalWidth || 0, height = readResult.height || target?.naturalHeight || 0;
     if (width <= 0 || height <= 0) return;
@@ -176,18 +181,22 @@ function PreviewImage({ src, thumbnailSrc, alt, original, version = '', classNam
       { source: imageSrc || target?.src || displaySrc, fullSize: hd.fullSize || rawFallback, hd: hd.description, mime: readResult.mime, bytes: readResult.bytes, account: accountIdentity });
   };
   useEffect(() => {
-    if (!displaySrc || unsupported) return;
-    if (readResult.decoded) { setLoadedKey(key); setFailedKey(''); reportReady(image.current); return; }
+    if (!displaySrc || failed || blocked) return;
+    if (readResult.decoded) {
+      const target = image.current;
+      if (target?.complete && target.naturalWidth > 0 && target.getAttribute('src') === imageSrc) setLoadedKey(imageIdentity);
+      reportReady(target); return;
+    }
     if (loaded) return;
     if (image.current?.complete && image.current.naturalWidth > 0) {
       const target = image.current;
-      void target.decode().then(() => { if (currentKeyRef.current === key) { setLoadedKey(key); setFailedKey(''); reportReady(target); } }).catch(() => { if (currentKeyRef.current === key) setFailedKey(key); });
+      void target.decode().then(() => { if (currentKeyRef.current === imageIdentity) { setLoadedKey(imageIdentity); reportReady(target); } }).catch(() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); });
     }
     if (readProgress.phase === 'reading') return;
-    const timer = window.setTimeout(() => setFailedKey(key), 30000);
+    const timer = window.setTimeout(() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); }, 30000);
     return () => window.clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, loaded, readProgress.phase, unsupported, displaySrc, imageSrc, readResult.decoded]);
+  }, [imageIdentity, loaded, readProgress.phase, failed, blocked, displaySrc, imageSrc, readResult.decoded]);
   const progressLabel = readProgress.phase === 'unsupported'
     ? readProgress.message || '该来源不是图片，未读取文件内容'
     : readProgress.phase === 'unavailable'
@@ -198,20 +207,24 @@ function PreviewImage({ src, thumbnailSrc, alt, original, version = '', classNam
     {hasThumbnail && !loaded && !blocked && !(displaySrc !== originalSrc && originalResult.imageSrc) && <img ref={thumbnailImage} key={`thumbnail:${accountIdentity}:${thumbnail}`} src={thumbnail} alt={alt} className={className} style={style} draggable={false} data-image-preview-thumbnail
       onLoad={event => { setThumbnailLoaded(thumbnail); onThumbnailReadyRef.current?.({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); }} />}
     {/* eslint-disable-next-line @next/next/no-img-element */}
-    {imageSrc && !blocked && <img ref={image} key={`preview:${key}`} src={imageSrc} alt={alt} className={className} style={{ ...style, opacity: loaded ? 1 : 0 }} draggable={false} data-image-preview-image
-      onLoad={event => { const target = event.currentTarget; void (readResult.decoded ? Promise.resolve() : target.decode()).then(() => { if (currentKeyRef.current !== key) return; setLoadedKey(key); setFailedKey(''); reportReady(target); }).catch(() => { if (currentKeyRef.current === key) setFailedKey(key); }); }} onError={() => { if (currentKeyRef.current === key) setFailedKey(key); }} />}
-    {loaded && hd.pending && <div className={styles.imageStatus} role="status">当前为完整原图，高清图正在准备</div>}
-    {!loaded && <div className={styles.imageStatus} role="status">
-      <span>{blocked ? readProgress.message || (hd.denied ? '图片权限或来源不可用' : '本次图片权限暂时无法确认，请重试') : hd.pending ? '高清图正在准备，缩略图仍可查看' : failed ? (unsupported ? progressLabel : thumbnailLoaded === thumbnail ? '高清未能加载，缩略图仍可查看，请重试' : '图片未能加载，请重试') : `${alt} · ${original || rawFallback || hd.description?.status === 'skipped' || hd.description?.status === 'failed' ? '完整原图' : hd.description?.status === 'ready' ? '原尺寸高清' : '轻量预览'} · ${progressLabel}`}</span>
+    {imageSrc && !blocked && !failed && <img ref={image} key={`preview:${imageIdentity}`} src={imageSrc} alt={alt} className={className} style={{ ...style, opacity: loaded ? 1 : 0 }} draggable={false} data-image-preview-image
+      onLoad={event => { const target = event.currentTarget; void (readResult.decoded ? Promise.resolve() : target.decode()).then(() => { if (currentKeyRef.current !== imageIdentity) return; setLoadedKey(imageIdentity); reportReady(target); }).catch(() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); }); }} onError={() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); }} />}
+    {loaded && hd.pending && !rawFallback && <div className={styles.imageStatus} role="status">当前为完整原图，高清图正在准备</div>}
+    {(!loaded || rawFallback || hd.error) && <div className={styles.imageStatus} role="status">
+      <span>{blocked ? readProgress.message || '图片权限或来源不可用' : failed ? (unsupported ? progressLabel : thumbnailLoaded === thumbnail ? '高清未能加载，缩略图仍可查看，请重试' : '图片未能加载，请重试') : loaded ? rawFallback ? '高清图未能显示，当前为完整原图，可重试' : '当前图片仍可查看' : hd.pending ? '高清图正在准备，缩略图仍可查看' : `${alt} · ${original || rawFallback || hd.description?.status === 'skipped' || hd.description?.status === 'failed' ? '完整原图' : hd.description?.status === 'ready' ? '原尺寸高清' : '轻量预览'} · ${progressLabel}`}</span>
       {hd.error && <span>{hd.denied ? '当前仅可预览，无权读取高清原件' : '高清状态读取失败，可重试或查看原图'}</span>}
       {failed && !unsupported && readProgress.phase === 'unavailable' && <span>{readProgress.message || '当前来源无法提供读取进度'}</span>}
-      {!failed && readProgress.phase === 'reading' && readProgress.percent != null && <>
+      {!loaded && !failed && readProgress.phase === 'reading' && readProgress.percent != null && <>
         <progress className={styles.imageProgress} max={100} value={readProgress.percent} aria-label={`${alt}读取进度 ${readProgress.percent}%`} />
         {readProgress.totalBytes != null && <span>{readProgress.percent}% · {formatImageBytes(readProgress.loadedBytes)} / {formatImageBytes(readProgress.totalBytes)}</span>}
       </>}
-      {!failed && readProgress.phase === 'reading' && readProgress.percent == null && <span>已读取 {formatImageBytes(readProgress.loadedBytes)}</span>}
-      {!failed && readProgress.phase === 'decoding' && <span>已读取 {formatImageBytes(readProgress.loadedBytes)}</span>}
-      {(failed || hd.error) && !unsupported && <button type="button" title="重新加载" aria-label="重新加载图片" onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); setAttempt(value => value + 1); }}><RotateCcw size={16} /></button>}
+      {!loaded && !failed && readProgress.phase === 'reading' && readProgress.percent == null && <span>已读取 {formatImageBytes(readProgress.loadedBytes)}</span>}
+      {!loaded && !failed && readProgress.phase === 'decoding' && <span>已读取 {formatImageBytes(readProgress.loadedBytes)}</span>}
+      {(failed || rawFallback || hd.error) && <button type="button" title="重新加载" aria-label="重新加载图片" onPointerDown={event => event.stopPropagation()} onClick={event => {
+        event.stopPropagation();
+        if (failed || rawFallback) resetImageReadForRetry(rawFallback ? hd.readSource : displaySrc, accountIdentity);
+        setAttempt(value => value + 1);
+      }}><RotateCcw size={16} /></button>}
     </div>}
   </>;
 }

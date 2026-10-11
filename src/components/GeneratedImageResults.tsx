@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Copy, Download, Eye, ImagePlus } from 'lucide-react';
 import { ResultImageCover } from './ResultImageCover';
 import { ZoomableImagePreview, type ZoomableImagePreviewProps } from './ZoomableImagePreview';
@@ -36,10 +37,12 @@ function WaitingImage({ src }: { src?: string }) {
   return src && failed !== src ? <img className={styles.waitingImage} src={src} alt="本次输入图片" onError={() => setFailed(src)} /> : <ImagePlus size={24} aria-hidden="true" />;
 }
 
-export function GeneratedImageResults<T extends GeneratedImageResult>({ items, scope, visible = true, loading = false, busy = false, error = '', emptyLabel = '暂无生成结果', hasMore = false, total, loadMore = noMore, onRetry, selectedId, onSelect, previewId, onPreviewChange, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement }: {
+export function GeneratedImageResults<T extends GeneratedImageResult>({ items, scope, visible = true, loading = false, busy = false, error = '', emptyLabel = '暂无生成结果', hasMore = false, total, loadMore = noMore, onRetry, selectedId, onSelect, previewId, onPreviewChange, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, paginationSlot }: {
   items: T[]; scope: string; visible?: boolean; loading?: boolean; busy?: boolean; error?: string; emptyLabel?: string;
   hasMore?: boolean; loadMore?: () => Promise<unknown>; onRetry?: () => void;
   total?: number | null;
+  /** A supplied slot owns pagination placement; null reserves it until mounted. */
+  paginationSlot?: HTMLElement | null;
   selectedId?: string | null; onSelect?: (item: T) => void;
   previewId?: string | null; onPreviewChange?: (item: T | null) => void;
   renderMetadata?: (item: T) => ReactNode; renderActions?: (item: T) => ReactNode;
@@ -113,18 +116,20 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
       if (alive.current && identity === currentScope.current) setFeedback({ id: item.id, busy: false, message: cause instanceof Error ? cause.message : '操作未完成，请重试' });
     } finally { pendingOperation.current = false; }
   }
-  const pagination = (position: 'top' | 'bottom') => (items.length > 0 || readError) && <nav className={styles.pagination} aria-label={position === 'top' ? '图片结果顶部翻页' : '图片结果底部翻页'}>
+  const pageLabel = `第 ${pages.page}${pages.pages === null ? ' 页，仍有更多' : ` / ${pages.pages} 页`}${pages.restoring && !pages.navigationIssue && !readError ? '，正在读取目标页' : ''}`;
+  const pagination = (position: 'top' | 'bottom' | 'header') => (items.length > 0 || readError) && <nav className={`${styles.pagination}${position === 'header' ? ` ${styles.headerPagination}` : ''}`} aria-label={position === 'header' ? '图片结果翻页' : position === 'top' ? '图片结果顶部翻页' : '图片结果底部翻页'}>
     <button type="button" aria-label="回到第一页图片" title="回到第一页图片" disabled={!pages.start && !pages.restoring || readBusy} onClick={pages.reset}><ChevronFirst size={17} /></button>
     <button type="button" aria-label="上一页图片" title="上一页图片" disabled={!pages.start || readBusy || pages.restoring && !readError && !pages.navigationIssue} onClick={pages.previous}><ChevronLeft size={17} /></button>
-    <span role="status">第 {pages.page}{pages.pages === null ? ' 页，仍有更多' : ` / ${pages.pages} 页`}{pages.restoring && !pages.navigationIssue && !readError ? '，正在读取目标页' : ''}</span>
+    <span role="status" title={position === 'header' ? pageLabel : undefined}>{pageLabel}</span>
     <button type="button" aria-label="下一页图片" title="下一页图片" disabled={!pages.canNext || readBusy || pages.restoring} onClick={pages.next}><ChevronRight size={17} /></button>
     <button type="button" aria-label="最后一页图片" title="最后一页" disabled={!pages.canLast || readBusy || pages.restoring} onClick={pages.last}><ChevronLast size={17} /></button>
   </nav>;
   return <div className={styles.results} data-generated-image-results>
+    {paginationSlot && createPortal(pagination('header'), paginationSlot)}
     {(readError || pages.navigationIssue) && <p role="alert" className={styles.error}>{readError || pages.navigationIssue}<button type="button" disabled={readBusy} onClick={() => { setReadState({ scope, busy: false, error: '' }); pages.retry(); if (pages.restoring && hasMore) return; if (onRetry) onRetry(); else void readMore().catch(() => undefined); }}>{!readError && pages.restoring && hasMore ? '继续翻页' : '重试读取'}</button>{pages.restoring && onRetry && readError && <button type="button" disabled={readBusy} onClick={() => { pages.retry(); onRetry(); }}>刷新目录</button>}</p>}
     {loading && (items.length ? <LoadingStatus>正在更新结果，已有图片保留</LoadingStatus> : <LoadingSkeleton label="正在读取生成结果" grid />)}
     {!loading && !items.length && !error && <p className={styles.empty}>{emptyLabel}</p>}
-    {((pages.pages ?? 1) > 1 || hasMore) && pagination('top')}
+    {paginationSlot === undefined && ((pages.pages ?? 1) > 1 || hasMore) && pagination('top')}
     <div className={styles.grid} ref={pages.gridRef} data-result-pages data-page-capacity={pages.capacity} onKeyDown={event => {
       if (!(event.target instanceof HTMLElement) || !event.target.matches('[data-result-cover], [data-result-choice]')) return;
       const offset = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -Math.max(1, pages.capacity / 3), ArrowDown: Math.max(1, pages.capacity / 3) }[event.key];
@@ -172,7 +177,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
         );
       })}
     </div>
-    {pagination('bottom')}
+    {paginationSlot === undefined && pagination('bottom')}
     {preview?.media && <ZoomableImagePreview {...preview.media} imageNeighbors={imageNeighbors} resolveDownload={src => items.find(item => item.media?.src === src)?.download} previewKey={preview.media.previewKey || `${scope}:${preview.id}`} hasNavigation={previewable.length > 1} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => changePreview(null)} />}
   </div>;
 }

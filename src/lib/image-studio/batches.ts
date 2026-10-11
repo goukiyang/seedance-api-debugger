@@ -105,7 +105,7 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
       const imageChannel = billingQuote?.imageChannel || input.imageChannel
         || await captureImageGenerationChannel(model, effectiveChannelId, tx);
       if (imageChannel.channelId !== effectiveChannelId) throw new StudioError('本批报价与图片通道不匹配', 409);
-      const api = await resolveImageGenerationChannelSnapshot(imageChannel, tx, true);
+      const api = await resolveImageGenerationChannelSnapshot(imageChannel, tx, true, model);
       const validation = validateImageGenerationChannel(api, { model, quality: input.quality || resolveStudioModuleGenerationConfig(workspace, settings).quality,
         resolution: input.resolution || resolveStudioModuleGenerationConfig(workspace, settings).resolution,
         ratio: input.aspectRatio || 'auto', referenceCount: input.referenceIds.length });
@@ -301,7 +301,7 @@ export async function dispatchStudioBatches() {
         let channelApi: ImageGenerationResolvedSettings | null = null;
         if (isChannelBatch(batch)) {
           await assertImageGenerationChannelDispatchOpen(batch.input.imageChannel as ImageGenerationChannelSnapshot, tx);
-          channelApi = await resolveImageGenerationChannelSnapshot(batch.input.imageChannel as ImageGenerationChannelSnapshot, tx, false);
+          channelApi = await resolveImageGenerationChannelSnapshot(batch.input.imageChannel as ImageGenerationChannelSnapshot, tx, false, String(data.model));
         }
         const currentPrice = isChannelBatch(batch)
           ? channelApi?.modelCapabilities[String(data.model) as keyof typeof channelApi.modelCapabilities]?.fixedPoints

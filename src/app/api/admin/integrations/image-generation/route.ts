@@ -20,6 +20,8 @@ import {
   archiveManagedImageGenerationChannel,
   restoreManagedImageGenerationChannel,
   setImageGenerationModelDefaultRoute,
+  updateLegacyImageGenerationModelApi,
+  hasLegacyImageGenerationModelApiKey,
   ImageGenerationChannelError,
 } from '@/lib/integrations/image-generation';
 
@@ -70,6 +72,11 @@ async function updateImageGenerationConfig(request: NextRequest) {
     const admin = await getAdminUser(request);
     const body = await request.json() as Record<string, unknown>;
     const channelAction = body.channel_action ?? body.channelAction;
+    if (channelAction === 'update-legacy-model-api') {
+      const input = body.channel && typeof body.channel === 'object' && !Array.isArray(body.channel) ? body.channel as Record<string, unknown> : body;
+      const channel = await updateLegacyImageGenerationModelApi(input, admin.id);
+      return NextResponse.json({ ok: true, channel });
+    }
     if (channelAction === 'set-model-default') {
       if (typeof body.model !== 'string' || !IMAGE_STUDIO_MODELS.includes(body.model as ImageStudioModel)) {
         return NextResponse.json({ error: '所选图片型号不在允许列表中' }, { status: 400 });
@@ -111,8 +118,8 @@ async function updateImageGenerationConfig(request: NextRequest) {
     if (candidate.enabled && !candidate.default_model) {
       return NextResponse.json({ error: '启用图形生成 API 前必须设置默认模型' }, { status: 400 });
     }
-    if (candidate.enabled && !candidate.api_key) {
-      return NextResponse.json({ error: '启用图形生成 API 前必须设置 API Key' }, { status: 400 });
+    if (candidate.enabled && !candidate.api_key && !await hasLegacyImageGenerationModelApiKey('shared')) {
+      return NextResponse.json({ error: '启用前请设置共用 API Key 或至少一个型号的独立 API Key' }, { status: 400 });
     }
 
     const saved = await saveImageGenerationApiSettings(body, admin.id);

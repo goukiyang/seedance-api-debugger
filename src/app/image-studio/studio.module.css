@@ -261,6 +261,17 @@
 .quickPresetChoices { display: flex; gap: 8px; min-width: 0; overflow-x: auto; padding-block: 2px; }
 .quickPresetChoices button { flex: 0 0 auto; max-inline-size: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .outputs { min-width: 0; }
+.outputs .resultHeader { gap: 12px; margin-bottom: 16px; }
+.resultHeader h2 { flex: 0 0 auto; }
+.resultPaginationSlot { display: flex; align-items: center; justify-content: center; flex: 1 1 280px; min-inline-size: min(280px, 100%); min-block-size: 40px; }
+.resultHeader .counts { margin-inline-start: auto; justify-content: flex-end; }
+@media (hover: hover) and (pointer: fine) {
+  .resultPaginationSlot > nav { opacity: 0; pointer-events: none; }
+  .resultHeader:hover .resultPaginationSlot > nav, .resultHeader:focus-within .resultPaginationSlot > nav { opacity: 1; pointer-events: auto; }
+}
+@media (hover: none), (any-pointer: coarse) {
+  .resultPaginationSlot > nav { opacity: 1; pointer-events: auto; }
+}
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 20px; }
 .result { min-width: 0; }
 .resultMedia { position: relative; aspect-ratio: 1; overflow: hidden; border: 1px solid #333b40; border-radius: 6px; }

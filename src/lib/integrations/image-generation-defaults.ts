@@ -83,5 +83,8 @@ export async function resolveImageGenerationRequestChannel(
     return requestedChannelId;
   }
   const defaults = await getImageGenerationDefaultRoutes(client);
-  return defaults.models[validatedModel] || null;
+  if (defaults.models[validatedModel]) return defaults.models[validatedModel]!;
+  const legacyChannel = validatedModel.startsWith('gemini-') ? 'banana' : 'shared';
+  const { hasLegacyImageGenerationModelOverride } = await import('@/lib/integrations/image-generation');
+  return await hasLegacyImageGenerationModelOverride(validatedModel, legacyChannel, client) ? legacyChannel : null;
 }

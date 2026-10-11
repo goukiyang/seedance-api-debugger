@@ -204,7 +204,7 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
       if (resuming) {
         // Historical, frozen credentials are intentionally used only for the
         // same provider task GET, even if the live channel is disabled or rotated.
-        settings = await resolveImageGenerationChannelSnapshot(imageChannel, prisma, false);
+        settings = await resolveImageGenerationChannelSnapshot(imageChannel, prisma, false, task.model);
         capability = settings.modelCapabilities[task.model as keyof typeof settings.modelCapabilities];
         if (!settings.api_key || !settings.base_url || !capability?.enabled || !capability.protocol) {
           throw new Error('原任务查询配置不可用；已保留回执，不会重新生成');
@@ -218,7 +218,7 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
         }
         // Submission already checked the live revision. Queued work retains
         // that immutable version even if an administrator later edits/deletes it.
-        settings = await resolveImageGenerationChannelSnapshot(imageChannel, prisma, false);
+        settings = await resolveImageGenerationChannelSnapshot(imageChannel, prisma, false, task.model);
         await assertImageGenerationChannelDispatchOpen(imageChannel);
         const validation = validateImageGenerationChannel(settings, { model: task.model, quality: task.quality,
           resolution: typeof snapshot.resolution === 'string' ? snapshot.resolution : undefined,
@@ -259,6 +259,7 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
         preparedRequest = false;
         providerStarted = true;
         const result = await generate({ baseUrl: settings.base_url, apiKey: settings.api_key, model: task.model,
+          upstreamModel: capability.upstreamModel,
           provider: settings.provider === 'ai_media_vip' ? 'ai_media_vip' : 'musk', protocol: capability.protocol,
           idempotencyKey: task.id, prompt: task.prompt.trim() ? `${task.context}\n\n---\n本次画面要求：\n${task.prompt}` : task.context,
           count: 1, images, size: task.output_size || undefined, ratio: task.aspect_ratio, quality: task.quality,
@@ -280,6 +281,7 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
         stage = 'provider';
         providerStarted = true;
         const result = await generate({ baseUrl: settings.base_url, apiKey: settings.api_key!, model: task.model,
+          upstreamModel: capability.upstreamModel,
           provider: settings.provider === 'ai_media_vip' ? 'ai_media_vip' : 'musk', protocol: capability!.protocol,
           idempotencyKey: task.id, resumeAsync: { taskId: asyncReceipt!.providerTaskId,
             pollAfterMs: asyncReceipt!.pollAfterMs, expiresAt: asyncReceipt!.expiresAt },
