@@ -108,6 +108,7 @@ export const userNavGroups: NavGroup[] = [
     items: [
       { label: '人物生成', href: '/tools/avatar-studio', prefixMatch: true, imageStudioOnly: true },
       { label: 'AI 抠图', href: '/cutout', prefixMatch: true, adminOnly: true },
+      { label: 'API 设置', href: '/admin/integrations', prefixMatch: true, adminOnly: true },
     ],
   },
 ];
@@ -121,7 +122,7 @@ export const adminNavGroups: NavGroup[] = [
       { label: '项目管理', href: '/admin/projects', prefixMatch: true },
       { label: '产出与反馈', href: '/admin/outputs', match: ['/admin/outputs', '/admin/feedback'] },
       { label: '图片任务审计', href: '/admin/image-studio', prefixMatch: true },
-      { label: '成本与接口', href: '/admin/costs', match: ['/admin/costs', '/admin/integrations'] },
+      { label: '成本管理', href: '/admin/costs', prefixMatch: true },
       { label: '模板工作台', href: '/admin/templates', match: ['/admin/templates', '/admin/agent-runs'], prefixMatch: true },
     ],
   },
