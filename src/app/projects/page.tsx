@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState, type FormEvent } from 'react';
+import { forwardRef, Suspense, useEffect, useId, useImperativeHandle, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Download, FolderKanban, MoreHorizontal, Plus, RotateCcw, Search } from 'lucide-react';
@@ -287,7 +287,7 @@ function ProjectCover({ project }: { project: ProjectItem }) {
   );
 }
 
-export default function ProjectsPage() {
+function ProjectsPageContent() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -1287,5 +1287,13 @@ export default function ProjectsPage() {
 
       <ProjectRenamePromptHost key={accountKey} ref={renamePromptRef} />
     </div>
+  );
+}
+
+export default function ProjectsPage() {
+  return (
+    <Suspense fallback={<div className="card" role="status" aria-busy="true">正在加载项目列表…</div>}>
+      <ProjectsPageContent />
+    </Suspense>
   );
 }

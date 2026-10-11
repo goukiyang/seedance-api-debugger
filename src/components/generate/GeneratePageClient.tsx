@@ -530,6 +530,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const selectedVideoBranchIdRef = useRef('');
   const workspaceBridgeKeyRef = useRef('');
   const workspaceRefreshRef = useRef<{ key: string; refresh: () => Promise<void> } | null>(null);
+  const composerMainRef = useRef<HTMLElement | null>(null);
+  const projectPanelRef = useRef<HTMLDivElement | null>(null);
+  const videoCardPanelRef = useRef<HTMLDivElement | null>(null);
 
   // ---- Collections ----
   const [collections, setCollections] = useState<AssetCollection[]>([]);
@@ -837,6 +840,14 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   }, [currentUser?.id]);
   const isExternalIpUser = isIpSurface && isExternalUser(currentUser);
   const hideExternalIpInternalControls = isIpSurface && (loadingUser || isExternalUser(currentUser));
+
+  useEffect(() => {
+    [composerMainRef.current, projectPanelRef.current, videoCardPanelRef.current].forEach((element) => {
+      if (!element) return;
+      if (reuseUiLocked) element.setAttribute('inert', '');
+      else element.removeAttribute('inert');
+    });
+  }, [hideExternalIpInternalControls, reuseUiLocked]);
 
   const h3Ready = !isIpSurface
     && h3VideoConfig?.ready === true
@@ -2584,7 +2595,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       )}
 
       {/* ===== 页面主体 ===== */}
-      <main className="composer-main" aria-busy={reuseUiLocked} inert={reuseUiLocked}>
+      <main ref={composerMainRef} className="composer-main" aria-busy={reuseUiLocked}>
         {projectReturnTo && (
           <div className="composer-prefill-notice">
             <Link href={projectReturnTo}>{taskReturnLabel(projectReturnTo)}</Link>
@@ -2620,7 +2631,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           )}
         </div>
 
-        <div className="composer-project-panel" aria-busy={reuseUiLocked} inert={reuseUiLocked}>
+        <div ref={projectPanelRef} className="composer-project-panel" aria-busy={reuseUiLocked}>
           <div className="composer-project-row">
             <div className="composer-project-copy">
               <span className="composer-project-label">保存到</span>
@@ -2867,7 +2878,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       </div>
 
       {!hideExternalIpInternalControls && (
-      <div className={`composer-video-card-panel ${videoCardPanelOpen ? 'is-open' : ''}`} aria-busy={reuseUiLocked} inert={reuseUiLocked}>
+      <div ref={videoCardPanelRef} className={`composer-video-card-panel ${videoCardPanelOpen ? 'is-open' : ''}`} aria-busy={reuseUiLocked}>
         <button
           type="button"
           className="composer-video-card-summary"

@@ -535,6 +535,7 @@ export function GenerationComposer({
 }: Props) {
   const { confirm, productDialog } = useProductDialog();
   const workspace = useWorkspace();
+  const generationComposerRef = React.useRef<HTMLDivElement | null>(null);
   const workspaceOperationCountRef = React.useRef(0);
   const templateEnabled = templateMode === 'workbench';
   const appliedReuseDraftRef = React.useRef<string | null>(null);
@@ -636,6 +637,13 @@ export function GenerationComposer({
     () => runWorkspaceOperation(() => workspace.refresh()),
     [runWorkspaceOperation, workspace.refresh],
   );
+
+  useEffect(() => {
+    const element = generationComposerRef.current;
+    if (!element) return;
+    if (interactionLocked) element.setAttribute('inert', '');
+    else element.removeAttribute('inert');
+  }, [interactionLocked]);
 
   useEffect(() => {
     reportWorkspaceBusy();
@@ -1694,9 +1702,9 @@ export function GenerationComposer({
     <>
       {productDialog}
       <div
+        ref={generationComposerRef}
         className="generation-composer"
         aria-busy={interactionLocked || workspace.loading || workspaceOperationCountRef.current > 0}
-        inert={interactionLocked}
       >
         {templateEnabled && (
         <section className="template-workbench" aria-label="模板驱动生成">
