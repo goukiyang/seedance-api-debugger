@@ -72,8 +72,7 @@ export function canManageStudioPreset(
   preset: StudioPresetAccessRow,
 ) {
   return canUseCompanyTemplates(user)
-    && user.role === 'admin'
-    && preset.scope === 'admin'
+    && (preset.scope === 'creator' || (user.role === 'admin' && preset.scope === 'admin'))
     && preset.owner_id === user.id;
 }
 

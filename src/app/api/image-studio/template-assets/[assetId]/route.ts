@@ -2,10 +2,13 @@ import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { authorizedImageResponse, privateImageHeaders } from '@/lib/media/authorized-image-response';
 import { performance } from 'node:perf_hooks';
-import { canViewStudioPreset, canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { canViewStudioPreset, canUseCompanyTemplates, type ImageStudioIdentity } from '@/lib/image-studio/access';
 import { getStudioPresetsFixedReferences } from '@/lib/image-studio/fixed-references';
 import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
 import { homeTemplateCover } from '@/lib/content-reactions/home-templates';
+import { studioPresetArchived } from '@/lib/image-studio/preset-lifecycle';
+import { assertStudioActor } from '@/lib/image-studio/shared-contract';
+import { getStudioPresetReferencePolicy } from '@/lib/image-studio/reference-policy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,16 +30,28 @@ export async function GET(_request: Request, { params }: { params: { assetId: st
   const asset = await prisma.asset.findFirst({ where: { id: params.assetId, status: 'active', type: 'image' }, select: { id: true, owner_id: true, original_url: true, mime_type: true, file_name: true } });
   if (!asset) return new Response('Not found', { status: 404, headers: privateImageHeaders });
   if (!await canReadStudioAsset(user, asset)) return new Response('Not found', { status: 404, headers: privateImageHeaders });
-  if (asset.owner_id !== user.id && !(user.role === 'admin' && canUseCompanyTemplates(user))) {
-    if (!canUseCompanyTemplates(user)) return new Response('Not found', { status: 404, headers: privateImageHeaders });
-    const presets = await prisma.imageStudioPreset.findMany({ where: { OR: [{ owner_id: user.id }, { is_shared: true }] }, select: { id: true, owner_id: true, scope: true, is_shared: true, banner_asset_id: true, reference_ids: true } });
-    const visiblePresets = presets.filter(preset => canViewStudioPreset(user, preset));
-    const explicitAsset = visiblePresets.some(preset => preset.banner_asset_id === asset.id
-      || (() => { try { const ids = JSON.parse(preset.reference_ids); return Array.isArray(ids) && ids.includes(asset.id); } catch { return false; } })());
+  if (asset.owner_id !== user.id) {
+    let actor: ImageStudioIdentity;
+    try { actor = await assertStudioActor(user.id); }
+    catch { return new Response('Not found', { status: 404, headers: privateImageHeaders }); }
+    if (!canUseCompanyTemplates(actor)) return new Response('Not found', { status: 404, headers: privateImageHeaders });
+    const presets = await prisma.imageStudioPreset.findMany({ where: { OR: [{ owner_id: actor.id }, { is_shared: true }] }, select: { id: true, owner_id: true, scope: true, is_shared: true, banner_asset_id: true, reference_ids: true } });
+    const active = await Promise.all(presets.map(async preset => canViewStudioPreset(actor, preset) && preset.owner_id === asset.owner_id && !(await studioPresetArchived(preset.id))));
+    const visiblePresets = presets.filter((_, index) => active[index]);
+    let explicitAsset = false;
+    for (const preset of visiblePresets) {
+      if (preset.banner_asset_id === asset.id) { explicitAsset = true; break; }
+      try {
+        const ids = JSON.parse(preset.reference_ids);
+        if (!Array.isArray(ids)) continue;
+        const policy = await getStudioPresetReferencePolicy(preset.owner_id, preset.id, ids, undefined);
+        if (ids.includes(asset.id) && !policy.primaryIds.includes(asset.id)) { explicitAsset = true; break; }
+      } catch { return new Response('Not found', { status: 404, headers: privateImageHeaders }); }
+    }
     let fixedAsset = false;
     if (!explicitAsset) {
       try {
-        const fixedByPreset = await getStudioPresetsFixedReferences(user, visiblePresets);
+        const fixedByPreset = await getStudioPresetsFixedReferences(actor, visiblePresets);
         fixedAsset = Array.from(fixedByPreset.values()).some(references => references.some(reference => reference.assetId === asset.id));
       } catch { return new Response('Not found', { status: 404, headers: privateImageHeaders }); }
     }

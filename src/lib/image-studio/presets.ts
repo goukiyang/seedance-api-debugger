@@ -6,14 +6,15 @@ import { evolutionCapability, type EvolutionCapability } from './evolution';
 import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from './limits';
 import { IMAGE_STUDIO_MODELS, defaultImageResolution, normalizeImageStudioQuality, normalizeImageResolution } from './model-catalog';
 import { normalizeStudioRatio } from './ratios';
-import { saveStudioModule, StudioModuleError, validStudioModuleId } from './modules';
+import { studioModuleDTOForUser, StudioModuleError, validStudioModuleId } from './modules';
 import { canManageStudioPreset, canUseCompanyTemplates as canUseCompanyTemplatesForUser, canViewStudioPreset, type ImageStudioIdentity } from './access';
 import { studioTemplateAssetUrl } from './media';
-import { getStudioModuleFixedReferences, getStudioPresetsFixedReferences, getStudioPresetFixedReferences, parseStudioFixedReferences, setStudioPresetFixedReferences, type StudioFixedReference } from './fixed-references';
+import { getStudioModuleFixedReferences, getStudioPresetsFixedReferences, getStudioPresetFixedReferences, parseStudioFixedReferences, setStudioModuleFixedReferences, setStudioPresetFixedReferences, type StudioFixedReference } from './fixed-references';
 import { studioVisibleAssetWhere } from './protected-assets';
-import { getStudioModuleStyleIds, parseStudioStyleIds, resolveStudioStyleReferences, setStudioPresetStyleIds } from './style-groups';
+import { getStudioModuleStyleIds, parseStudioStyleIds, resolveStudioStyleReferences, setStudioModuleStyleIds, setStudioPresetStyleIds } from './style-groups';
 import { cloneHistoricalSkills, getSkillSelection, parseSkillIds, resolveSkills, setSkillSelection } from './skills';
-import { defaultStudioReferencePolicy, getStudioPresetReferencePolicy, parseStudioReferencePolicy, setStudioPresetReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
+import { defaultStudioReferencePolicy, getStudioPresetReferencePolicy, parseStudioReferencePolicy, setStudioModuleReferencePolicy, setStudioPresetReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
+import { assertStudioActor, automaticStudioModuleId, publishSharedStudioModule, replaceSharedStudioPreset, resolveSharedStudioDefinition, restoreStudioDefaultGroup, studioPublisherModule, studioSharedBinding, StudioSharingError } from './shared-contract';
 
 export { canUseCompanyTemplatesForUser as canUseCompanyTemplates };
 
@@ -24,6 +25,7 @@ type PresetDraft = {
   styleGroupIds?: unknown; skillIds?: unknown; referencePolicy?: unknown;
   presetId?: unknown; revision?: unknown;
   reproduceFromTaskId?: unknown;
+  isShared?: unknown; requestId?: unknown; moduleRevision?: unknown; expectedRevision?: unknown; expectedDefinitionToken?: unknown; templatePrompt?: unknown;
 };
 
 function parseIds(value: unknown) {
@@ -47,7 +49,15 @@ function decodeQuickPresetIds(value: string | undefined, ownerId: string): strin
   } catch { throw new StudioModuleError('快捷模板无法读取，请重试', 503); }
 }
 
-export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: string) {
+export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: string, presetId?: string) {
+  user = await assertStudioActor(user.id);
+  if (presetId !== undefined) {
+    const { publicDTO } = await resolveSharedStudioDefinition(user, presetId);
+    return [{ id: publicDTO.presetId, ...publicDTO, ...publicDTO.defaults, prompt: publicDTO.templatePrompt, sourcePresetId: publicDTO.presetId,
+      scope: (await prisma.imageStudioPreset.findUniqueOrThrow({ where: { id: presetId }, select: { scope: true } })).scope,
+      referencesAvailable: true, fixedReferencesEditable: user.role === 'admin' && publicDTO.ownedByViewer,
+      skillIds: [], moduleContextVersion: await resolveModuleContextVersion(publicDTO.context).catch(() => null) }];
+  }
   let quickIds: string[] | undefined;
   if (moduleId !== undefined) {
     if (!validStudioModuleId(moduleId, user.id)) throw new StudioModuleError('模块不存在或无权使用', 404);
@@ -63,17 +73,32 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
   const archived = await prisma.platformSetting.findMany({ where: { key: { in: rows.map(row => archivedPresetKey(row.id)) } }, select: { key: true } });
   const archivedKeys = new Set(archived.map(item => item.key));
   const visibleRows = rows.filter(row => canViewStudioPreset(user, row) && !archivedKeys.has(archivedPresetKey(row.id)));
-  const fixedByPreset = await getStudioPresetsFixedReferences(user, visibleRows);
-  const referencePolicies = await Promise.all(visibleRows.map(async row => [row.id, await getStudioPresetReferencePolicy(row.owner_id, row.id, parsePreset(row), row.reference_limit)] as const));
+  const privateRows = visibleRows.filter(row => !row.is_shared);
+  const fixedByPreset = await getStudioPresetsFixedReferences(user, privateRows);
+  const referencePolicies = await Promise.all(privateRows.map(async row => [row.id, await getStudioPresetReferencePolicy(row.owner_id, row.id, parsePreset(row), row.reference_limit)] as const));
   const policyByPreset = new Map(referencePolicies);
-  const styleIdsByPreset = moduleId === undefined ? new Map<string, string[]>() : new Map(await Promise.all(visibleRows.map(async row =>
+  const styleIdsByPreset = moduleId === undefined ? new Map<string, string[]>() : new Map(await Promise.all(privateRows.map(async row =>
     [row.id, await getStudioModuleStyleIds(row.owner_id, row.id, prisma, 'preset')] as const)));
   const reusableIds = (row: typeof visibleRows[number]) => parsePreset(row).filter(id => !policyByPreset.get(row.id)?.primaryIds.includes(id));
-  const assetIds = visibleRows.flatMap(row => [...reusableIds(row), ...(fixedByPreset.get(row.id) || []).map(reference => reference.assetId)]);
-  const bannerIds = visibleRows.map(row => row.banner_asset_id).filter((id): id is string => Boolean(id));
+  const assetIds = privateRows.flatMap(row => [...reusableIds(row), ...(fixedByPreset.get(row.id) || []).map(reference => reference.assetId)]);
+  const bannerIds = privateRows.map(row => row.banner_asset_id).filter((id): id is string => Boolean(id));
   const assets = await prisma.asset.findMany({ where: { id: { in: Array.from(new Set([...assetIds, ...bannerIds])) }, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(user)] }, select: { id: true, owner_id: true, original_url: true, thumbnail_url: true, width: true, height: true } });
   const byId = new Map(assets.map(asset => [asset.id, asset]));
   return Promise.all(visibleRows.map(async row => {
+    if (row.is_shared) {
+      try {
+        const { publicDTO } = await resolveSharedStudioDefinition(user, row.id);
+        return { id: row.id, scope: row.scope, ...publicDTO, ...publicDTO.defaults, prompt: publicDTO.templatePrompt,
+          sourcePresetId: row.id, referencesAvailable: true, skillIds: [],
+          moduleContextVersion: await resolveModuleContextVersion(publicDTO.context).catch(() => null), createdAt: row.created_at, updatedAt: row.updated_at };
+      } catch (error) {
+        if (!(error instanceof StudioSharingError) || ![403, 404, 409].includes(error.status)) throw error;
+        return { id: row.id, name: row.name, scope: row.scope, groupName: row.group_name, revision: row.updated_at.toISOString(),
+          isShared: row.is_shared, ownedByViewer: row.owner_id === user.id, canManageSharing: canManageStudioPreset(user, row),
+          unavailable: true, unavailableReason: error.message, prompt: '', context: '', contextConfigured: false, referencesAvailable: false,
+          images: [], banner: null, fixedReferences: [], fixedReferenceCount: 0, skillIds: [] };
+      }
+    }
     const ids = reusableIds(row);
     const visibleIds = ids.filter(id => {
       const asset = byId.get(id);
@@ -117,6 +142,28 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
 }
 
 export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDraft, replace = false) {
+  user = await assertStudioActor(user.id);
+  if (body.isShared !== undefined && typeof body.isShared !== 'boolean') throw new StudioModuleError('模板共享设置无效');
+  if (replace) {
+    const target = await prisma.imageStudioPreset.findUnique({ where: { id: String(body.presetId || '') } });
+    if (target?.is_shared || body.isShared === true || (target?.owner_id === user.id && await studioPublisherModule(user.id, target.id)) || await prisma.platformSetting.findUnique({ where: { key: `studio_shared_reproduction_v1:${String(body.presetId || '')}` }, select: { id: true } })) {
+      return replaceSharedStudioPreset(user, String(body.presetId || ''), body as Record<string, unknown>);
+    }
+  } else if (body.isShared === true) {
+    return prisma.$transaction(async tx => {
+      const actor = await assertStudioActor(user.id, tx);
+      const moduleId = typeof body.sourceModuleId === 'string' ? body.sourceModuleId : automaticStudioModuleId(actor.id, `new-preset:${String(body.requestId)}`);
+      if (!validStudioModuleId(moduleId, actor.id)) throw new StudioModuleError('模板来源模块无效', 400);
+      const priorWorkspace = await tx.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: actor.id } });
+      const workspace = priorWorkspace || (!body.sourceModuleId
+        ? await tx.imageStudioModule.create({ data: { id: moduleId, owner_id: actor.id, name: typeof body.name === 'string' ? body.name : '未命名模块', revision: 1 } }) : null);
+      if (!workspace) throw new StudioModuleError('模板来源模块不存在或无权使用', 403);
+      const published = await publishSharedStudioModule(actor, moduleId, { ...body, requestId: body.requestId,
+        expectedRevision: body.sourceModuleId ? body.moduleRevision ?? body.expectedRevision : 1 }, tx);
+      if (!body.sourceModuleId && !priorWorkspace) await tx.platformSetting.deleteMany({ where: { key: `studio_shared_overrides_v1:${moduleId}` } });
+      return tx.imageStudioPreset.findUniqueOrThrow({ where: { id: published.presetId } });
+    }, { timeout: 15000 });
+  }
   if (!canUseCompanyTemplatesForUser(user)) throw new StudioModuleError('仅限公司飞书账号使用共享模板', 403);
   const userId = user.id;
   const isAdmin = user.role === 'admin';
@@ -158,8 +205,15 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
   const sourceModuleId = body.sourceModuleId == null ? null : String(body.sourceModuleId);
   if (sourceModuleId && !validStudioModuleId(sourceModuleId, userId)) throw new StudioModuleError('模板来源模块无效', 403);
   return prisma.$transaction(async tx => {
+    user = await assertStudioActor(user.id, tx);
+    if (scope === 'admin' && user.role !== 'admin' || fixedReferences !== undefined && user.role !== 'admin') throw new StudioModuleError('当前账号没有保存管理员配置的权限', 403);
     const target = replace ? await tx.imageStudioPreset.findFirst({ where: { id: String(body.presetId || ''), owner_id: userId } }) : null;
     if (target && await studioPresetArchived(target.id, tx)) throw new StudioModuleError('模板已删除，请重新读取', 409);
+    if (target && !canManageStudioPreset(user, target)) throw new StudioModuleError('当前账号没有修改该模板的权限', 403);
+    if (target && (target.is_shared || await studioPublisherModule(userId, target.id, tx)
+      || await tx.platformSetting.findUnique({ where: { key: `studio_shared_reproduction_v1:${target.id}` }, select: { id: true } }))) {
+      throw new StudioModuleError('模板已成为共享原件，请重新读取后保存定义；当前草稿仍保留', 409);
+    }
     if (replace && (!target || typeof body.revision !== 'string' || target.updated_at.toISOString() !== body.revision)) {
       throw new StudioModuleError(target ? '模板已在其他页面更新，请重新读取后修改' : '只能修改自己的模板', target ? 409 : 403);
     }
@@ -168,7 +222,7 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
     if (sourceModuleId) {
       const sourceModule = await tx.imageStudioModule.findFirst({ where: { id: sourceModuleId, owner_id: userId }, select: { id: true, context: true, source_preset_id: true } });
       if (!sourceModule) throw new StudioModuleError('模板来源模块不存在或无权使用', 403);
-      if (!isAdmin && sourceModule.source_preset_id) {
+      if (user.role !== 'admin' && sourceModule.source_preset_id) {
         const original = await tx.imageStudioPreset.findUnique({ where: { id: sourceModule.source_preset_id }, select: { owner_id: true } });
         if (!original || original.owner_id !== userId) throw new StudioModuleError('共享模板的内部配置只能由创建者另存', 403);
       }
@@ -200,7 +254,7 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
       if (originalId) {
         const original = await tx.imageStudioPreset.findUnique({ where: { id: originalId } });
         if (!original || !canViewStudioPreset(user, original)) throw new StudioModuleError('原模板已不可用', 403);
-        if (!isAdmin && original.owner_id !== userId) throw new StudioModuleError('共享模板的内部配置只能由创建者另存', 403);
+        if (user.role !== 'admin' && original.owner_id !== userId) throw new StudioModuleError('共享模板的内部配置只能由创建者另存', 403);
       }
       effectiveContext = snapshot.moduleContext;
       skillIds = await cloneHistoricalSkills(user, snapshot.skills, tx);
@@ -216,7 +270,7 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
       if (changed.count !== 1) throw new StudioModuleError('模板已在其他页面更新，请重新读取后修改', 409);
       created = await tx.imageStudioPreset.findUniqueOrThrow({ where: { id: target.id } });
     } else {
-      created = await tx.imageStudioPreset.create({ data: { ...data, id: randomUUID(), owner_id: userId, scope, is_shared: skillIds.length === 0 } });
+      created = await tx.imageStudioPreset.create({ data: { ...data, id: randomUUID(), owner_id: userId, scope, is_shared: false } });
     }
     await setStudioPresetFixedReferences(userId, created.id, presetFixedReferences, tx);
     await setStudioPresetStyleIds(user, created.id, styleIds, tx);
@@ -234,16 +288,20 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
       const ids = Array.from(new Set([...decodeQuickPresetIds(stored?.value_json, userId), ...(priorPresetId ? [priorPresetId] : []), created.id]));
       const valueJson = JSON.stringify({ ownerId: userId, ids });
       await tx.platformSetting.upsert({ where: { key }, create: { key, value_json: valueJson, updated_by: userId }, update: { value_json: valueJson, updated_by: userId } });
-      await tx.imageStudioModule.update({ where: { id: sourceModuleId }, data: { source_preset_id: created.id } });
+      if (!(await studioSharedBinding(userId, sourceModuleId, tx))) {
+        await tx.imageStudioModule.update({ where: { id: sourceModuleId }, data: { source_preset_id: created.id } });
+      }
     }
+    await restoreStudioDefaultGroup(userId, groupName, tx);
     return created;
   });
 }
 
 export async function manageStudioPreset(user: ImageStudioIdentity, presetId: string, revision: unknown, action: 'rename' | 'delete', value?: unknown) {
   return prisma.$transaction(async tx => {
+    user = await assertStudioActor(user.id, tx);
     const preset = await tx.imageStudioPreset.findFirst({ where: { id: presetId, owner_id: user.id } });
-    if (!preset) throw new StudioModuleError('只能管理自己的模板', 403);
+    if (!preset || !canManageStudioPreset(user, preset)) throw new StudioModuleError('只能管理自己的模板', 403);
     if (await studioPresetArchived(preset.id, tx)) throw new StudioModuleError('模板已删除，请重新读取', 409);
     if (typeof revision !== 'string' || revision !== preset.updated_at.toISOString()) throw new StudioModuleError('模板已在其他页面更新，请重新读取后修改', 409);
     const where = { id: presetId, owner_id: user.id, updated_at: preset.updated_at };
@@ -258,6 +316,8 @@ export async function manageStudioPreset(user: ImageStudioIdentity, presetId: st
       // Keep the source row for authorized historical restoration, without exposing a recycle bin.
       await tx.platformSetting.create({ data: { key: archivedPresetKey(presetId), value_json: JSON.stringify({ archivedAt: new Date().toISOString() }), updated_by: user.id } });
     }
+    const publisher = await studioPublisherModule(user.id, presetId, tx);
+    if (publisher) await tx.imageStudioModule.updateMany({ where: { id: publisher, owner_id: user.id }, data: { revision: { increment: 1 } } });
     return { id: presetId };
   });
 }
@@ -265,6 +325,7 @@ export async function manageStudioPreset(user: ImageStudioIdentity, presetId: st
 export async function linkStudioQuickPreset(user: ImageStudioIdentity, moduleId: string, presetId: string) {
   if (!validStudioModuleId(moduleId, user.id)) throw new StudioModuleError('模块不存在或无权使用', 404);
   return prisma.$transaction(async tx => {
+    user = await assertStudioActor(user.id, tx);
     const workspace = await tx.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: user.id }, select: { id: true } });
     const preset = await tx.imageStudioPreset.findFirst({ where: { id: presetId, owner_id: user.id }, select: { id: true } });
     if (!workspace || !preset) throw new StudioModuleError('只能添加自己的模板到自己的模块', 403);
@@ -278,19 +339,29 @@ export async function linkStudioQuickPreset(user: ImageStudioIdentity, moduleId:
   });
 }
 
-export async function setStudioPresetSharing(user: ImageStudioIdentity, presetId: string, isShared: boolean) {
-  const preset = await prisma.imageStudioPreset.findUnique({ where: { id: presetId } });
-  if (!preset || !canManageStudioPreset(user, preset)) {
-    throw new StudioModuleError('只有模板创建管理员可以修改共享状态', 403);
-  }
-  if (await studioPresetArchived(preset.id)) throw new StudioModuleError('模板已删除，请重新读取', 409);
-  if (isShared && (await getSkillSelection(preset.owner_id, preset.id, prisma, 'preset')).length) throw new StudioModuleError('skills仅自己可见，请移除后再共享模板', 409);
-  return prisma.imageStudioPreset.update({ where: { id: presetId }, data: { is_shared: isShared } });
+export async function setStudioPresetSharing(user: ImageStudioIdentity, presetId: string, isShared: boolean, revision?: unknown) {
+  return prisma.$transaction(async tx => {
+    user = await assertStudioActor(user.id, tx);
+    const preset = await tx.imageStudioPreset.findUnique({ where: { id: presetId } });
+    if (!preset || !canManageStudioPreset(user, preset)) {
+      throw new StudioModuleError('只有模板创建者可以修改共享状态', 403);
+    }
+    if (await studioPresetArchived(preset.id, tx)) throw new StudioModuleError('模板已删除，请重新读取', 409);
+    if (revision !== undefined && revision !== preset.updated_at.toISOString()) throw new StudioModuleError('模板已在其他页面更新，请重新读取', 409);
+    if (isShared) await resolveSharedStudioDefinition(user, presetId, tx);
+    const changed = await tx.imageStudioPreset.updateMany({ where: { id: presetId, owner_id: user.id, updated_at: preset.updated_at },
+      data: { is_shared: isShared, updated_at: new Date(Math.max(Date.now(), preset.updated_at.getTime() + 1)) } });
+    if (changed.count !== 1) throw new StudioModuleError('模板共享状态已变化，请重新读取', 409);
+    const publisher = await studioPublisherModule(user.id, presetId, tx);
+    if (publisher) await tx.imageStudioModule.updateMany({ where: { id: publisher, owner_id: user.id }, data: { revision: { increment: 1 } } });
+    return tx.imageStudioPreset.findUniqueOrThrow({ where: { id: presetId } });
+  });
 }
 
 export async function applyStudioPreset(user: ImageStudioIdentity, presetId: string) {
   const userId = user.id;
-  const { preset, ids, fixedReferences, sources, styleGroupIds, skillIds, referencePolicy } = await prisma.$transaction(async tx => {
+  const moduleId = await prisma.$transaction(async tx => {
+    user = await assertStudioActor(userId, tx);
     const preset = await tx.imageStudioPreset.findUnique({ where: { id: presetId } });
     if (!preset || !canViewStudioPreset(user, preset)) throw new StudioModuleError('模板不存在或无权使用', 404);
     if (await studioPresetArchived(preset.id, tx)) throw new StudioModuleError('模板已删除，请重新读取', 409);
@@ -308,18 +379,28 @@ export async function applyStudioPreset(user: ImageStudioIdentity, presetId: str
     const allIds = Array.from(new Set([...ids, ...fixedReferences.map(reference => reference.assetId), ...(preset.banner_asset_id ? [preset.banner_asset_id] : [])]));
     const sources = await tx.asset.findMany({ where: { id: { in: allIds }, owner_id: preset.owner_id, status: 'active', type: 'image' } });
     if (sources.length !== allIds.length) throw new StudioModuleError('模板引用的图片已不可用，请重新保存模板', 409);
-    return { preset, ids, fixedReferences, sources, styleGroupIds, skillIds, referencePolicy };
-  });
-  const assetMap = new Map<string, string>();
-  await prisma.$transaction(async tx => {
+    const visible = await studioVisibleAssetWhere(user, tx);
+    const publicIds = [...ids, ...(preset.banner_asset_id ? [preset.banner_asset_id] : [])];
+    if (await tx.asset.count({ where: { id: { in: publicIds }, AND: [visible] } }) !== new Set(publicIds).size) throw new StudioModuleError('模板引用包含不可查看的图片', 403);
+    const assetMap = new Map<string, string>();
     for (const source of sources) {
       if (fixedReferences.some(reference => reference.assetId === source.id)) continue;
       if (source.owner_id === userId) { assetMap.set(source.id, source.id); continue; }
       const clone = await tx.asset.create({ data: { owner_id: userId, type: source.type, original_url: source.original_url, thumbnail_url: source.thumbnail_url, file_name: source.file_name, mime_type: source.mime_type, width: source.width, height: source.height, file_size: source.file_size, hash: null, status: 'active' } });
       assetMap.set(source.id, clone.id);
     }
-  });
-  const copiedReferenceIds = ids.map(id => assetMap.get(id)).filter((id): id is string => Boolean(id));
-  const copiedPrimaryIds = referencePolicy.primaryIds.map(id => assetMap.get(id)).filter((id): id is string => Boolean(id));
-  return saveStudioModule(userId, { id: randomUUID(), revision: 0, name: preset.name, prompt: preset.prompt, context: preset.context, model: preset.model, quality: preset.quality, resolution: preset.resolution, count: preset.count, referenceLimit: preset.reference_limit, referencePolicy: { ...referencePolicy, primaryIds: copiedPrimaryIds }, aspectRatio: preset.aspect_ratio, groupName: preset.group_name, bannerAssetId: preset.banner_asset_id ? assetMap.get(preset.banner_asset_id) || null : null, referenceIds: copiedReferenceIds, styleGroupIds, skillIds }, false, user.role === 'admin', preset.id, user);
+    const copiedReferenceIds = ids.map(id => assetMap.get(id)).filter((id): id is string => Boolean(id));
+    const id = randomUUID();
+    await tx.imageStudioModule.create({ data: { id, owner_id: userId, revision: 1, source_preset_id: preset.id,
+      name: preset.name, prompt: preset.prompt, context: preset.context, model: preset.model, quality: preset.quality, resolution: preset.resolution,
+      count: preset.count, reference_limit: preset.reference_limit, aspect_ratio: preset.aspect_ratio, group_name: preset.group_name,
+      banner_asset_id: preset.banner_asset_id ? assetMap.get(preset.banner_asset_id) || null : null, reference_ids: JSON.stringify(copiedReferenceIds) } });
+    if (preset.owner_id === userId) await setStudioModuleFixedReferences(userId, id, fixedReferences, tx);
+    await setStudioModuleReferencePolicy(userId, id, referencePolicy, copiedReferenceIds, tx);
+    await setStudioModuleStyleIds(user, id, styleGroupIds, tx);
+    await setSkillSelection(user, id, skillIds, tx);
+    await restoreStudioDefaultGroup(userId, preset.group_name, tx);
+    return id;
+  }, { timeout: 15000 });
+  return studioModuleDTOForUser(user, moduleId);
 }
