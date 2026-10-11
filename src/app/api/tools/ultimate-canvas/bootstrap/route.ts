@@ -9,6 +9,9 @@ import {
   isMuskApiReady,
 } from '@/lib/integrations/musk';
 import {
+  DEFAULT_IMAGE_GENERATION_API_SETTINGS,
+  ImageGenerationChannelError,
+  type ImageGenerationResolvedSettings,
   getImageGenerationChannelOptions,
   getImageGenerationChannels,
   selectImageGenerationSettings,
@@ -40,6 +43,7 @@ import { USD_TO_CNY_RATE, usdToCnyRateText } from '@/lib/costs/currency';
 import { getVolcengineIpApiSettings, isVolcengineIpApiReady } from '@/lib/integrations/volcengine-ip';
 import { volcengineIpCapabilities } from '@/lib/integrations/volcengine-ip-models';
 import { IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, defaultImageStudioQuality } from '@/lib/image-studio/model-catalog';
+import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -47,13 +51,60 @@ export const runtime = 'nodejs';
 const PROJECT_TAKE = 100;
 const VIDEO_CARD_TAKE = 60;
 
+function unavailableImageSettings(model: string, channelId: string): ImageGenerationResolvedSettings {
+  return {
+    ...DEFAULT_IMAGE_GENERATION_API_SETTINGS,
+    enabled: false,
+    provider: 'managed',
+    base_url: '',
+    default_model: model,
+    api_key: null,
+    channelId,
+    configRevision: 'unavailable',
+    supplierName: '',
+    supplierKind: 'other',
+    protocol: 'openai_images',
+    modelCapabilities: {},
+    managedChannel: true,
+    label: '默认图片供应商不可用',
+    deleted: true,
+  };
+}
+
+async function imageSettingsForModel(channels: Awaited<ReturnType<typeof getImageGenerationChannels>>, model: string) {
+  if (!IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number])) return selectImageGenerationSettings(channels, model);
+  const channelId = await resolveImageGenerationRequestChannel(model as typeof IMAGE_STUDIO_MODELS[number]);
+  let settings;
+  try {
+    settings = selectImageGenerationSettings(channels, model, channelId || 'original');
+  } catch (error) {
+    if (error instanceof ImageGenerationChannelError && error.status === 404) {
+      return unavailableImageSettings(model, channelId || 'original');
+    }
+    throw error;
+  }
+  return { ...settings, default_model: model };
+}
+
 function imageModelLabel(provider: string, model: string) {
   if (provider === 'seedream') return 'Seedream 5.0 Pro';
   if (provider === 'musk') return 'Gemini Image (Musk)';
   return model || provider || '图片模型';
 }
 
-function imageModelCapabilities(provider: string, model: string) {
+function imageModelCapabilities(provider: string, model: string, unavailable = false) {
+  if (unavailable) {
+    return {
+      reference_image_limit: 0,
+      max_outputs_per_request: 1,
+      size_options: [],
+      default_resolution: null,
+      output_formats: [],
+      supports_stream: false,
+      supports_sequential_generation: false,
+      notes: ['默认图片供应商不可用，参数范围未知'],
+    };
+  }
   const sizeOptions = imageResolutionOptions(model, provider);
   if (provider === 'seedream') {
     return {
@@ -113,7 +164,7 @@ export async function GET(request: NextRequest) {
     getImageGenerationChannels(),
     getH3ApiSettings(),
   ]);
-  const imageSettings = selectImageGenerationSettings(imageChannels, imageChannels.shared.default_model);
+  const imageSettings = await imageSettingsForModel(imageChannels, imageChannels.shared.default_model);
   const videoConfig = getProviderConfig();
   const h3VideoConfig = safeH3ConfigDto(h3Settings);
   const creditSummary = await prisma.$transaction((tx) => getCreditSummary(tx, user));
@@ -319,8 +370,9 @@ export async function GET(request: NextRequest) {
   const imageModels = imageChannels.shared.provider === 'seedream'
     ? [imageChannels.shared.default_model, 'gemini-3.1-flash-image-preview', 'gemini-3-pro-image-preview']
     : Array.from(new Set([...IMAGE_STUDIO_MODELS, imageChannels.shared.default_model]));
-  const imageReady = imageModels.some(model => isImageGenerationApiReady(selectImageGenerationSettings(imageChannels, model)));
-  const imageLabel = imageModelLabel(imageSettings.provider, imageSettings.default_model);
+  const imageSettingsByModel = new Map(await Promise.all(imageModels.map(async model => [model, await imageSettingsForModel(imageChannels, model)] as const)));
+  const imageReady = imageModels.some(model => isImageGenerationApiReady(imageSettingsByModel.get(model)!));
+  const imageLabel = imageSettings.label || imageModelLabel(imageSettings.provider, imageSettings.default_model);
   const seedanceVideoReady = isApiKeyConfigured();
   const ipReady = isVolcengineIpApiReady(await getVolcengineIpApiSettings());
   const videoModels = [
@@ -402,19 +454,19 @@ export async function GET(request: NextRequest) {
         model_options: imageModels.map(model => ({
           value: model,
           label: IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || imageModelLabel(imageSettings.provider, model),
-          capabilities: imageModelCapabilities(selectImageGenerationSettings(imageChannels, model).provider, model),
-          ready: isImageGenerationApiReady(selectImageGenerationSettings(imageChannels, model)),
+          capabilities: imageModelCapabilities(imageSettingsByModel.get(model)!.provider, model, imageSettingsByModel.get(model)!.deleted === true),
+          ready: isImageGenerationApiReady(imageSettingsByModel.get(model)!),
         })),
         size: imageSettings.default_size,
         output_format: imageSettings.output_format,
         response_format: imageSettings.response_format,
         watermark: imageSettings.watermark,
-        capabilities: imageModelCapabilities(imageSettings.provider, imageSettings.default_model),
+        capabilities: imageModelCapabilities(imageSettings.provider, imageSettings.default_model, imageSettings.deleted === true),
         interaction: {
           modes: ['text-to-image', 'image-to-image', 'upscale-image', 'first-frame-draft', 'last-frame-draft'],
           ratios: ['auto', ...RATIO_OPTIONS],
-          size_options: imageModelCapabilities(imageSettings.provider, imageSettings.default_model).size_options,
-          max_outputs_per_request: imageModelCapabilities(imageSettings.provider, imageSettings.default_model).max_outputs_per_request,
+          size_options: imageModelCapabilities(imageSettings.provider, imageSettings.default_model, imageSettings.deleted === true).size_options,
+          max_outputs_per_request: imageModelCapabilities(imageSettings.provider, imageSettings.default_model, imageSettings.deleted === true).max_outputs_per_request,
           max_reference_images: imageModelCapabilities(imageSettings.provider, imageSettings.default_model).reference_image_limit,
         },
         endpoint: '/api/assets/generate',

@@ -10,6 +10,10 @@ import { parseStudioRequest, safeImageChannelSnapshot, StudioError } from './tas
 import { STUDIO_BATCH_LIMITS } from './batch-contract';
 import { parseImageBillingContract, type ImageBillingContract } from './billing-contract';
 import { imageBillingReady } from './billing-readiness';
+import { getImageStudioSettings } from './settings';
+import { resolveStudioModuleGenerationConfig } from './modules';
+import { captureImageGenerationChannel } from '@/lib/integrations/image-generation';
+import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 
 const key = (owner: string, id: string) => `image_batch_billing_quote_v1:${owner}:${id}`;
 
@@ -38,7 +42,8 @@ function canonicalImageChannel(body: Record<string, unknown>, resolved?: ImageGe
     throw new StudioError('整批报价对应的图片通道修订已变化，请重新报价', 409);
   }
   const channel = resolved || supplied;
-  if (channel && typeof body.channelId === 'string' && body.channelId !== channel.channelId) {
+  if (channel && typeof body.channelId === 'string' && body.channelId !== channel.channelId
+    && !(resolved && body.channelId === 'original')) {
     throw new StudioError('图片通道与报价修订不匹配', 409);
   }
   return channel;
@@ -74,7 +79,19 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
   const contracts: Array<ImageBillingContract | null> = [];
   const policy = input.draft?.referencePolicy;
   let total = 0, fixedUnit: number | null = null, intentRevision: number | null = null;
-  let imageChannel = canonicalImageChannel(body);
+  const suppliedImageChannel = canonicalImageChannel({ ...body, channelId: undefined });
+  const workspace = await prisma.imageStudioModule.findFirst({ where: { id: body.moduleId, owner_id: owner }, select: { model: true, quality: true, resolution: true } });
+  if (!workspace) throw new StudioError('模板不存在或无权使用', 404);
+  const settings = await getImageStudioSettings();
+  const model = input.model || resolveStudioModuleGenerationConfig(workspace, settings).model;
+  const requestedChannelId = typeof body.channelId === 'string' ? body.channelId : undefined;
+  const effectiveChannelId = requestedChannelId === undefined && suppliedImageChannel
+    ? suppliedImageChannel.channelId
+    : (await resolveImageGenerationRequestChannel(model, requestedChannelId) || 'original');
+  if (suppliedImageChannel && suppliedImageChannel.channelId !== effectiveChannelId) {
+    throw new StudioError('整批报价对应的图片通道与型号默认供应商不匹配，请重新报价', 409);
+  }
+  let imageChannel = suppliedImageChannel || (effectiveChannelId === 'original' ? undefined : await captureImageGenerationChannel(model, effectiveChannelId));
   try {
     for (let index = 0; index < sources.length; index++) {
       const source = sources[index] as { name?: unknown; assetId?: unknown };
@@ -82,7 +99,8 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
         || source.assetId !== undefined && (typeof source.assetId !== 'string' || source.assetId.length > 100)) throw new StudioError('素材清单无效');
       const referenceIds = source.assetId ? [source.assetId as string, ...input.referenceIds.filter(id => !policy?.primaryIds.includes(id))] : input.referenceIds;
       const quote = await prepareImageBillingQuote(owner, { ...body,
-        ...(imageChannel ? { channelId: imageChannel.channelId, imageChannel } : {}),
+        ...(imageChannel ? { ...(typeof body.channelId === 'string' ? { channelId: body.channelId }
+          : imageChannel.channelId === 'original' ? {} : { channelId: imageChannel.channelId }), imageChannel } : {}),
         requestId: `${batchId.slice(0, 48)}-${index + 1}`, count: 1,
         referenceIds, ...(source.assetId && input.draft && policy ? { draft: { ...input.draft, referencePolicy: { ...policy, primaryIds: [source.assetId] } } } : {}) }, undefined, undefined, undefined, 256);
       if (quote.imageChannel) {
@@ -165,9 +183,20 @@ export async function consumeBatchQuote(tx: Prisma.TransactionClient, owner: str
   let stored: StoredBatchQuote;
   try { stored = JSON.parse(row.value_json) as StoredBatchQuote; }
   catch { throw new StudioError('整批报价记录无效，未派发生成', 409); }
-  const suppliedChannel = canonicalImageChannel(body);
   const storedChannel = stored.imageChannel ? safeImageChannelSnapshot(stored.imageChannel) || undefined : undefined;
   const input = parseStudioRequest({ ...body, count: 1, maxEstimatedCost: undefined });
+  const workspace = typeof body.moduleId === 'string'
+    ? await tx.imageStudioModule.findFirst({ where: { id: body.moduleId, owner_id: owner }, select: { model: true, quality: true, resolution: true } })
+    : null;
+  if (!workspace) throw new StudioError('模板不存在或无权使用', 404);
+  const settings = await getImageStudioSettings();
+  const model = input.model || resolveStudioModuleGenerationConfig(workspace, settings).model;
+  const requestedChannelId = typeof body.channelId === 'string' ? body.channelId : undefined;
+  if (requestedChannelId === 'original' && storedChannel) {
+    const currentDefault = await resolveImageGenerationRequestChannel(model, 'original', tx) || 'original';
+    if (currentDefault !== storedChannel.channelId) throw new StudioError('型号默认图片通道已变化，请重新报价', 409);
+  }
+  const suppliedChannel = canonicalImageChannel(body, storedChannel);
   if (stored.owner !== owner || !Array.isArray(stored.contracts) || !stored.contracts.length
     || !Number.isFinite(stored.total) || stored.total < 0 || !Number.isFinite(stored.unitCredits) || stored.unitCredits < 0
     || !Number.isInteger(stored.intentRevision) || stored.intentRevision < 0
@@ -185,5 +214,6 @@ export async function consumeBatchQuote(tx: Prisma.TransactionClient, owner: str
     if (!ready.ready || ready.intentRevision !== stored.intentRevision) throw new StudioError('实扣设置已变化，请重新报价', 409);
   }
   if ((await tx.platformSetting.deleteMany({ where: { id: row.id, value_json: row.value_json } })).count !== 1) throw new StudioError('整批报价已被使用', 409);
-  return { contracts: contracts as ImageBillingContract[], total: stored.total, unitCredits: stored.unitCredits };
+  return { contracts: contracts as ImageBillingContract[], total: stored.total, unitCredits: stored.unitCredits,
+    ...(storedChannel ? { imageChannel: storedChannel } : {}) };
 }

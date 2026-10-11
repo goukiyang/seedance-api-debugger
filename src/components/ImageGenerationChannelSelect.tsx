@@ -22,10 +22,14 @@ export function ImageGenerationChannelSelect({
   model?: string;
   legacyReady?: boolean;
 }) {
-  const options = model
+  const choices = model
     ? imageStudioChannelOptionsForModel(channels, model, value, legacyReady)
     : channels.items;
-  return <select id={id} className={className} aria-label={model ? '图片供应商' : '生图通道'} value={value} disabled={disabled}
+  const options = choices.some(channel => channel.id === value) ? choices : [{
+    id: value, label: '上次选择的供应商', supplierName: null, ready: false, enabled: false, configured: false,
+    disabledReason: '该供应商已删除或不再可用，请主动重新选择。', models: {},
+  }, ...choices];
+  return <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><select id={id} className={className} aria-label={model ? '图片供应商' : '生图通道'} value={value} disabled={disabled}
     onChange={event => onChange(event.target.value)}>
     {options.map(channel => {
       const modelReady = !model || imageStudioChannelReadyForModel(channel, model,
@@ -41,5 +45,6 @@ export function ImageGenerationChannelSelect({
         title={channel.disabledReason || (model && !modelReady
           ? '当前模型在此供应商不可用，请手动选择其他供应商；现有图片参数未更改。' : undefined)}>{label}</option>;
     })}
-  </select>;
+  </select>{value !== 'original' && <button className="btn btn-secondary" type="button" disabled={disabled}
+    onClick={() => onChange('original')} title="此后的新任务跟随管理员为当前模型保存的默认供应商，不修改图片参数。">跟随默认</button>}</span>;
 }

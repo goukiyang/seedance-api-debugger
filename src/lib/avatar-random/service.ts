@@ -21,6 +21,7 @@ import { imageBillingScope } from '@/lib/image-studio/billing-scope';
 import { imageBillingReady } from '@/lib/image-studio/billing-readiness';
 import { readImageSupplierBills } from '@/lib/image-studio/billing-provider';
 import { supplierHistoryEstimate } from '@/lib/image-studio/billing-quote';
+import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 
 export async function validateAvatarReferences(owner: string, ids: string[]) {
   try { validateStudioReferenceCounts(defaultStudioReferencePolicy(ids), ids, 0, 0); }
@@ -135,8 +136,10 @@ export async function prepareAvatarPlan(owner: string, body: Record<string, unkn
   candidates=candidates.map(c=>adaptAvatarPrompt(c,model));
   let unitCredits = settings.prices[model as keyof typeof settings.prices];
   let channelActual = false;
-  const channelId = typeof body.channelId === 'string' ? body.channelId : 'original';
-  const imageChannel = channelId !== 'original' ? await captureImageGenerationChannel(model, channelId) : undefined;
+  const requestedChannelId = typeof body.channelId === 'string' ? body.channelId : undefined;
+  const channelId = requestedChannelId || 'original';
+  const effectiveChannelId = await resolveImageGenerationRequestChannel(model, requestedChannelId) || 'original';
+  const imageChannel = effectiveChannelId !== 'original' ? await captureImageGenerationChannel(model, effectiveChannelId) : undefined;
   const api = imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true) : await getImageGenerationSettingsForModel(model);
   if (imageChannel) {
     const capability = validateImageGenerationChannel(api, { model, quality, resolution, ratio: isAvatarSheet(rules) ? '1:1' : rules.people > 1 ? '3:2' : '1:1', referenceCount: referenceIds.length });
@@ -213,8 +216,10 @@ export async function estimateAvatarDraft(owner: string, body: Record<string, un
   const referenceIds = rules.referenceIds || [];
   await validateAvatarReferences(owner, referenceIds);
   const settings = await getImageStudioSettings();
-  const channelId = typeof body.channelId === 'string' ? body.channelId : 'original';
-  const imageChannel = channelId === 'original' ? undefined : await captureImageGenerationChannel(model, channelId);
+  const requestedChannelId = typeof body.channelId === 'string' ? body.channelId : undefined;
+  const channelId = requestedChannelId || 'original';
+  const effectiveChannelId = await resolveImageGenerationRequestChannel(model, requestedChannelId) || 'original';
+  const imageChannel = effectiveChannelId === 'original' ? undefined : await captureImageGenerationChannel(model, effectiveChannelId);
   const api = imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true) : await getImageGenerationSettingsForModel(model);
   const count = isAvatarSheet(rules) ? 1 : rules.candidates;
   let fixed = settings.prices[model as keyof typeof settings.prices];
@@ -239,5 +244,6 @@ export async function estimateAvatarDraft(owner: string, body: Record<string, un
   }
   if (unitCredits === null) throw new StudioError('图片费用依据不足，未派发生成', 409);
   return { estimateOnly: true, billingMode, estimatedCredits: unitCredits * count, unitCredits,
+    ...(imageChannel ? { imageChannel } : {}), channelId,
     expiresAt: new Date(Date.now() + 60000).toISOString(), calibrated: false };
 }

@@ -17,6 +17,7 @@ import type { ImageBillingContract } from './billing-contract';
 import { consumeBatchQuote } from './batch-billing-quote';
 import { imageBillingReady } from './billing-readiness';
 import { imageBillingScope } from './billing-scope';
+import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import { captureImageGenerationChannel, getImageGenerationSettingsForModel, isMuskImageGenerationChannel, assertImageGenerationChannelDispatchOpen, ImageGenerationChannelError,
   resolveImageGenerationChannelSnapshot, validateImageGenerationChannel, type ImageGenerationChannelSnapshot, type ImageGenerationResolvedSettings } from '@/lib/integrations/image-generation';
 import { QueueCapacityError, QueueMaintenanceError, reserveImageStudioQueueCapacity } from './queue-capacity';
@@ -86,15 +87,24 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
     if (!workspace) throw new StudioError('模板不存在或无权使用', 404);
     const settings = await getImageStudioSettings();
     const billingQuote = body.batchQuoteId ? await consumeBatchQuote(tx, ownerId, body) : null;
-    if (!billingQuote && (!input.channelId || input.channelId === 'original')) {
-      const model = input.model || resolveStudioModuleGenerationConfig(workspace, settings).model;
+    const model = input.model || resolveStudioModuleGenerationConfig(workspace, settings).model;
+    const explicitChannelId = typeof body.channelId === 'string' ? body.channelId : undefined;
+    const effectiveChannelId = explicitChannelId === undefined && (billingQuote?.imageChannel || input.imageChannel)
+      ? (billingQuote?.imageChannel || input.imageChannel)!.channelId
+      : (await resolveImageGenerationRequestChannel(model, explicitChannelId, tx) || 'original');
+    if (explicitChannelId === 'original' && input.imageChannel
+      && effectiveChannelId !== input.imageChannel.channelId) {
+      throw new StudioError('当前型号默认图片通道已变化，请重新报价', 409);
+    }
+    if (!billingQuote && effectiveChannelId === 'original') {
       const api = await getImageGenerationSettingsForModel(model, tx);
       if ((await imageBillingReady(imageBillingScope(api), model, tx)).ready) throw new StudioError('当前模型需要确认有效整批报价，尚未创建或派发生成', 409);
     }
-    const model = input.model || resolveStudioModuleGenerationConfig(workspace, settings).model;
     let unitCredits = billingQuote?.unitCredits ?? settings.prices[model];
-    if (input.channelId && input.channelId !== 'original') {
-      const imageChannel = input.imageChannel || await captureImageGenerationChannel(model, input.channelId, tx);
+    if (effectiveChannelId !== 'original') {
+      const imageChannel = billingQuote?.imageChannel || input.imageChannel
+        || await captureImageGenerationChannel(model, effectiveChannelId, tx);
+      if (imageChannel.channelId !== effectiveChannelId) throw new StudioError('本批报价与图片通道不匹配', 409);
       const api = await resolveImageGenerationChannelSnapshot(imageChannel, tx, true);
       const validation = validateImageGenerationChannel(api, { model, quality: input.quality || resolveStudioModuleGenerationConfig(workspace, settings).quality,
         resolution: input.resolution || resolveStudioModuleGenerationConfig(workspace, settings).resolution,
@@ -109,6 +119,7 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
       else throw new StudioError('当前图片通道缺少有效的固定点数或实际计费能力', 409);
       shared.imageChannel = imageChannel;
     }
+    if (billingQuote?.imageChannel && effectiveChannelId === 'original') shared.imageChannel = billingQuote.imageChannel;
     if (unitCredits == null || (billingQuote?.total ?? unitCredits * items.length) > Number(body.budget)) throw new StudioError('最高预算不足以覆盖本批预计点数');
     const assetIds = Array.from(new Set(items.flatMap(item => item.assetId ? [item.assetId] : [])));
     const assets = await tx.asset.findMany({ where: { id: { in: assetIds }, owner_id: ownerId, status: 'active', type: 'image' }, select: { id: true, file_size: true } });

@@ -1906,16 +1906,17 @@
             const selectedModel = generationSettingsForNode(node).model || capability.model;
             if (channelSelect) {
                 const channels = canvasImageChannels();
-                const originalRouteId = selection.id === 'original' ? originalImageChannelRouteForModel(selectedModel) : null;
+                const originalRouteId = originalImageChannelRouteForModel(selectedModel);
                 const originalRoute = originalRouteId ? channels.find(item => item.id === originalRouteId) : null;
-                const visibleChannels = channels.filter(item => !(selection.id === 'original' && item.id === originalRouteId));
+                const visibleChannels = channels.filter(item => !(selection.id === 'original' && item.id === originalRouteId)
+                    && !(selection.id === originalRouteId && item.id === 'original'));
                 if (selection.missing) {
                     visibleChannels.unshift({ id: selection.id, label: '上次选择的通道（当前配置中不存在）', supplierName: null,
                         ready: false, enabled: false, configured: false, disabledReason: selection.fallbackReason, models: {} });
                 }
                 channelSelect.replaceChildren(...visibleChannels.map(item => {
-                    const label = item.id === 'original' && originalRoute?.supplierName
-                        ? `${originalRoute.supplierName} · ${item.label}`
+                    const label = item.id === 'original'
+                        ? `后台默认 · ${originalRoute?.supplierName || originalRoute?.label || '当前型号供应商不可用'}`
                         : item.supplierName && item.supplierName !== item.label ? `${item.supplierName} · ${item.label}` : item.label;
                     const option = new Option(
                         label, item.id, false, item.id === selection.id
@@ -1927,6 +1928,31 @@
                 channelSelect.value = selection.id;
                 channelSelect.disabled = Boolean(generationSettingsLockReason(node, true)) || !imageChannelPreferenceKey();
                 channelSelect.title = selection.fallbackReason || channel?.disabledReason || '';
+                let followDefault = channelSelect.parentElement?.querySelector('[data-image-follow-default]');
+                if (!followDefault && channelSelect.parentElement) {
+                    followDefault = document.createElement('button');
+                    followDefault.type = 'button';
+                    followDefault.dataset.imageFollowDefault = '';
+                    followDefault.textContent = '跟随默认';
+                    followDefault.title = '新任务跟随该模型的后台默认供应商，不修改其他参数';
+                    followDefault.addEventListener('click', event => {
+                        event.stopPropagation();
+                        const currentNode = engine.nodes.get(channelSelect.closest('[data-node-id]')?.dataset.nodeId);
+                        if (!currentNode || currentNode.type !== 'image') return;
+                        const locked = generationSettingsLockReason(currentNode, true);
+                        if (locked) { showCanvasNotice(locked, 'warn'); return; }
+                        const key = imageChannelPreferenceKey();
+                        if (!key) return;
+                        try { localStorage.setItem(key, 'original'); }
+                        catch { showCanvasNotice('通道偏好保存失败；本次未切换供应商。', 'warn'); return; }
+                        renderAllGenerationNodeControls();
+                    });
+                    channelSelect.after(followDefault);
+                }
+                if (followDefault) {
+                    followDefault.hidden = selection.id === 'original';
+                    followDefault.disabled = channelSelect.disabled;
+                }
                 if (selection.fallbackReason && canvasRuntime.imageChannelFallbackShown !== selection.fallbackReason) {
                     canvasRuntime.imageChannelFallbackShown = selection.fallbackReason;
                     showCanvasNotice(selection.fallbackReason, 'warn');
@@ -1950,8 +1976,7 @@
                 option.disabled = item.ready === false || item.unavailable === true;
                 return option;
             }));
-            imageSelect.disabled = !options.length || (channel?.id === 'original'
-                ? !capability.enabled : channel?.enabled !== true || channel?.configured !== true);
+            imageSelect.disabled = !options.length || channel?.enabled !== true || channel?.configured !== true;
             imageSelect.title = '型号列表合并所有供应商并去重；切换型号不会改变供应商，当前通道不支持的型号不可选。';
             return;
         }
@@ -4069,8 +4094,19 @@
 
     function originalImageChannelRouteForModel(model) {
         if (!model) return null;
+        const saved = canvasRuntime.bootstrap?.capabilities?.image?.imageChannels?.defaultRoutes?.models?.[model];
+        if (typeof saved === 'string' && saved) return saved;
         return model === 'gemini-3.1-flash-image-preview' || model === 'gemini-3-pro-image-preview'
             ? 'banana' : 'shared';
+    }
+
+    function usesLegacyImageRoute(model, selection = selectedImageChannel()) {
+        return selection.id === 'original' && !canvasRuntime.bootstrap?.capabilities?.image?.imageChannels?.defaultRoutes?.models?.[model];
+    }
+
+    function effectiveImageChannelId(model, selection = selectedImageChannel()) {
+        return selection.id === 'original' && !usesLegacyImageRoute(model, selection)
+            ? originalImageChannelRouteForModel(model) : selection.id;
     }
 
     function selectedImageChannel() {
@@ -4110,10 +4146,11 @@
             options.set(capability.model, { value: capability.model, label: capability.label || capability.model });
         }
         return [...options.values()].map(option => {
-            const selectedCapability = channel?.id === 'original'
+            const legacy = usesLegacyImageRoute(option.value, { id: channel?.id });
+            const selectedCapability = legacy
                 ? legacyOptions.find(item => item?.value === option.value)
                 : channel?.models?.[option.value];
-            const ready = channel?.id === 'original'
+            const ready = legacy
                 ? selectedCapability ? selectedCapability.ready !== false : option.value === capability.model && capability.enabled !== false
                 : selectedCapability?.ready === true;
             return { ...option, ready };
@@ -4128,17 +4165,17 @@
         if (!channel || channel.id !== 'original' && (channel.enabled !== true || channel.configured !== true || channel.ready !== true)) {
             return channel?.disabledReason || `${channel?.label || '所选生图通道'}未配置或暂未就绪，请联系管理员。`;
         }
-        if (channel.id === 'original') {
+        const settings = generationSettingsForNode(node);
+        if (usesLegacyImageRoute(settings.model, selection)) {
             const capability = canvasRuntime.bootstrap?.capabilities?.image || {};
             const model = generationSettingsForNode(node).model || capability.model;
             const modelOption = capability.model_options?.find(item => item.value === model);
             return modelOption?.ready === false || (!modelOption && (model !== capability.model || capability.enabled === false))
                 ? '当前原接口不支持所选图片型号；请手动选择其他型号或通道，其他参数未更改。' : '';
         }
-        const settings = generationSettingsForNode(node);
         if (!Number.isSafeInteger(settings.count) || settings.count < 1 || settings.count > 8) return '一次可提交 1–8 张；原数量已保留，请手动调整后再生成。';
         const model = channel.models?.[settings.model];
-        if (!model?.ready) return '当前生图通道不支持所选模型；请手动选择其他模型或通道，参数未更改。';
+        if (!model?.ready) return model?.disabledReason || '当前生图通道不支持所选模型；请手动选择其他模型或通道，参数未更改。';
         if (model.billingMode === 'fixed' && model.fixedPoints == null && !['shared', 'banana'].includes(channel.id)) return '当前通道固定点数尚未配置，暂不能生成。';
         if (!model.billingMode) return '当前生图通道计费方式尚未确认，暂不能生成。';
         if (!model.qualities || !model.resolutions || !model.ratios || model.maxReferences == null) return '当前通道的图片参数支持范围尚未确认，暂不能生成。';
@@ -4157,9 +4194,11 @@
                 const first = availableGenerationReferenceItems(node.id).find(item => item.width > 0 && item.height > 0);
                 const ratio = window.UltimateCanvasGenerationInteractions.resolveImageRatio(style.aspectRatio || 'auto', first, '1:1');
                 const selection = selectedImageChannel();
+                const legacy = usesLegacyImageRoute(style.model, selection);
+                const actual = canvasImageChannels().find(item => item.id === (legacy ? originalImageChannelRouteForModel(style.model) : effectiveImageChannelId(style.model, selection)));
                 return { model: style.model, quality: style.quality, ratio: ratio.resolved, requestedRatio: style.aspectRatio,
-                    ...(selection.id !== 'original' ? { channelId: selection.id } : {}),
-                    ...(selection.id !== 'original' ? { imageChannelLabel: selection.channel?.label || '', imageSupplierName: selection.channel?.supplierName || '' } : {}),
+                    ...(!legacy ? { channelId: selection.id, effectiveChannelId: effectiveImageChannelId(style.model, selection) } : {}),
+                    imageChannelLabel: actual?.label || '', imageSupplierName: actual?.supplierName || '',
                     ratioSource: ratio.source, resolution: style.resolution,
                     size: window.UltimateCanvasGenerationInteractions.imageSizeForRatio(ratio.resolved, style.resolution),
                     count: style.count, maximumCount: style.count, sizeOptions: [style.resolution] };
@@ -4169,14 +4208,16 @@
             const channel = selection.channel;
             const current = node.data?.imageSettings || {};
             const model = current.model || capability.model;
-            const channelModel = channel?.id !== 'original' ? channel?.models?.[model] : null;
+            const legacy = usesLegacyImageRoute(model, selection);
+            const actual = canvasImageChannels().find(item => item.id === (legacy ? originalImageChannelRouteForModel(model) : effectiveImageChannelId(model, selection)));
+            const channelModel = !legacy ? channel?.models?.[model] : null;
             const legacyLimits = capability.model_options?.find(item => item.value === model)?.capabilities || capability.capabilities || {};
-            const limits = channel?.id !== 'original' ? {
+            const limits = !legacy ? {
                 quality_options: channelModel?.qualities || [], size_options: channelModel?.resolutions || [],
                 ratio_options: channelModel?.ratios || [], default_quality: current.quality || 'auto',
                 default_resolution: current.resolution || '1K'
             } : legacyLimits;
-            const maximum = channel?.id !== 'original' ? 8 : Math.max(1, Number(limits.max_outputs_per_request) || 1);
+            const maximum = !legacy ? 8 : Math.max(1, Number(limits.max_outputs_per_request) || 1);
             const references = availableGenerationReferenceItems(node.id);
             const firstReference = references.find(item => Number.isInteger(Number(item.width)) && Number(item.width) > 0
                 && Number.isInteger(Number(item.height)) && Number(item.height) > 0) || null;
@@ -4185,22 +4226,23 @@
             );
             const resolutionOptions = Array.isArray(limits.size_options) && limits.size_options.length
                 ? limits.size_options
-                : channel?.id !== 'original' ? [] : ['1K', '2K'];
+                : !legacy ? [] : ['1K', '2K'];
             const requestedResolution = current.resolution || (resolutionOptions.includes(current.size) ? current.size : limits.default_resolution || resolutionOptions[resolutionOptions.length - 1]);
             const customSize = typeof current.size === 'string' && /^\d+x\d+$/.test(current.size) ? current.size : '';
             return {
                 model,
-                ...(channel?.id && channel.id !== 'original' ? { channelId: channel.id } : {}),
+                ...(!legacy ? { channelId: selection.id, effectiveChannelId: effectiveImageChannelId(model, selection) } : {}),
+                imageChannelLabel: actual?.label || '', imageSupplierName: actual?.supplierName || '',
                 quality: current.quality || limits.default_quality || 'auto',
                 qualityOptions: limits.quality_options || [],
-                ratioOptions: channel?.id !== 'original' ? (Array.isArray(limits.ratio_options) ? limits.ratio_options : [])
+                ratioOptions: !legacy ? (Array.isArray(limits.ratio_options) ? limits.ratio_options : [])
                     : Array.isArray(limits.ratio_options) && limits.ratio_options.length ? limits.ratio_options : undefined,
                 ratio: ratioResolution.resolved,
                 requestedRatio: ratioResolution.requested,
                 ratioSource: ratioResolution.source,
                 resolution: requestedResolution,
                 size: customSize || window.UltimateCanvasGenerationInteractions.imageSizeForRatio(ratioResolution.resolved, requestedResolution),
-                count: channel?.id !== 'original'
+                count: !legacy
                     ? (current.count == null ? 1 : Number(current.count))
                     : Math.max(1, Math.min(maximum, Number(current.count) || 1)),
                 maximumCount: maximum,
@@ -4228,7 +4270,7 @@
 
     function generationCapabilitiesForNode(node) {
         const capability = canvasRuntime.bootstrap?.capabilities?.[node.type];
-        if (node.type === 'image' && selectedImageChannel().id !== 'original') {
+        if (node.type === 'image' && !usesLegacyImageRoute(generationSettingsForNode(node).model)) {
             const settings = generationSettingsForNode(node);
             const model = selectedImageChannel().channel?.models?.[settings.model];
             return { ...capability, enabled: model?.ready === true, interaction: {
@@ -4356,7 +4398,7 @@
         if (node?.type === 'image') {
             const selected = selectedImageChannel();
             const settings = generationSettingsForNode(node);
-            const limit = selected.channel?.id !== 'original' ? selected.channel?.models?.[settings.model]?.maxReferences : null;
+            const limit = !usesLegacyImageRoute(settings.model, selected) ? selected.channel?.models?.[settings.model]?.maxReferences : null;
             if (Number.isSafeInteger(limit) && limit >= 0) return limit;
         }
         const state = generationModeState(node);
@@ -4849,7 +4891,7 @@
                 refreshStyle.insertAdjacentElement('afterend', cancelQueued);
             }
             if (cancelQueued) {
-                cancelQueued.hidden = !styleJob?.input?.settings?.channelId;
+                cancelQueued.hidden = !styleJob?.input?.settings?.channelId || styleJob.input.settings.channelId === 'original' && !styleJob.input.settings.effectiveChannelId;
                 cancelQueued.disabled = Boolean(styleJob?.cancelling) || !canvasRuntime.documentWritable || canvasRuntime.contextSwitching;
             }
             if (promptInput) promptInput.readOnly = Boolean(styleJob);
@@ -5108,7 +5150,7 @@
             if (name !== 'count') {
                 const settings = generationSettingsForNode(node);
                 const selection = selectedImageChannel();
-                const model = selection.channel?.id !== 'original' ? selection.channel?.models?.[settings.model] : null;
+                const model = !usesLegacyImageRoute(settings.model, selection) ? selection.channel?.models?.[settings.model] : null;
                 const allowedValues = name === 'quality' ? model?.qualities : name === 'resolution' ? model?.resolutions : model?.ratios;
                 if (Array.isArray(allowedValues) && !allowedValues.includes(rawValue)) return false;
             }
@@ -6299,10 +6341,11 @@
                 if (generationNode.data.styleJob && generationNode.data.styleJob.state !== 'unconfirmed') return { ready: false, message: '请等待当前任务完成，或点击查看生成状态。' };
                 return { ready: true };
             }
-            if (!capabilities.image?.enabled) {
+            const imageCapability = generationNode ? generationCapabilitiesForNode(generationNode) : capabilities.image;
+            if (!imageCapability?.enabled) {
                 return {
                     ready: false,
-                    message: capabilities.image?.message
+                    message: imageCapability?.message
                         || window.UltimateCanvasBackendContract.SAFE_UNAVAILABLE_MESSAGE
                 };
             }
@@ -6750,7 +6793,8 @@
                 return;
             }
             const key = imageChannelPreferenceKey();
-            try { if (key) localStorage.setItem(key, channel.id); } catch { showCanvasNotice('浏览器未允许保存通道偏好；当前选择仅在本次页面打开期间保留。', 'warn'); }
+            try { if (key) localStorage.setItem(key, channel.id); }
+            catch { imageChannelSelect.value = selectedImageChannel().id; showCanvasNotice('通道偏好保存失败；本次未切换供应商。', 'warn'); return; }
             canvasRuntime.imageChannelFallbackShown = '';
             renderAllGenerationNodeControls();
             return;
@@ -6760,7 +6804,7 @@
             const node = engine.nodes.get(imageModelSelect.closest('[data-node-id]')?.dataset.nodeId);
             if (!node || node.type !== 'image') return;
             const selection = selectedImageChannel();
-            const option = selection.channel?.id !== 'original'
+            const option = !usesLegacyImageRoute(imageModelSelect.value, selection)
                 ? (selection.channel?.models?.[imageModelSelect.value]?.ready ? { value: imageModelSelect.value } : null)
                 : canvasRuntime.bootstrap?.capabilities?.image?.model_options?.find(item => item.value === imageModelSelect.value && item.ready !== false);
             if (!option) { updateGenerationNodeModelLabel(imageModelSelect.closest('[data-node-id]'), node); return; }

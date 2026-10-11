@@ -7,6 +7,7 @@ import { getImageGenerationChannels, selectImageGenerationSettings, isImageGener
 import { isGeminiImageModel, imageResolutionOptions } from '@/lib/image-generation/resolution';
 import { imageBillingReady } from '@/lib/image-studio/billing-readiness';
 import { imageBillingScope } from '@/lib/image-studio/billing-scope';
+import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 
 export type CanvasQuoteInput = {
   kind: 'image';
@@ -51,7 +52,10 @@ export async function getCanvasImageQuote(user: SessionUser, input: CanvasQuoteI
   assertInternalOnly(user, '外部账号无权使用无限画布。');
   await assertCanGenerateInProject(user, input.project_id);
   const channels = await getImageGenerationChannels();
-  const imageChannel = input.channelId && input.channelId !== 'original' ? await captureImageGenerationChannel(input.model, input.channelId) : undefined;
+  const effectiveChannelId = IMAGE_STUDIO_MODELS.includes(input.model as ImageStudioModel)
+    ? await resolveImageGenerationRequestChannel(input.model as ImageStudioModel, input.channelId) || 'original'
+    : input.channelId && input.channelId !== 'original' ? input.channelId : 'original';
+  const imageChannel = effectiveChannelId !== 'original' ? await captureImageGenerationChannel(input.model, effectiveChannelId) : undefined;
   const providerSettings = imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true) : selectImageGenerationSettings(channels, input.model);
   if (imageChannel) {
     const capability = validateImageGenerationChannel(providerSettings, { model: input.model, quality: input.quality, resolution: input.resolution, ratio: input.ratio });
@@ -109,7 +113,7 @@ export async function getCanvasImageQuote(user: SessionUser, input: CanvasQuoteI
     scope: 'ordinary_image' as const,
     projectId: input.project_id,
     provider,
-    channelId: imageChannel?.channelId || 'original',
+    channelId: input.channelId || 'original',
     imageChannel,
     maximumCount,
     revision: studio.revision,

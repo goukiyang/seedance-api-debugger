@@ -11,13 +11,15 @@ import { IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_QUALITY_LABELS } from '@/lib/im
 import styles from './batch.module.css';
 import { watchGenerationCompletion } from '@/components/GenerationCompletion';
 import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
+import { imageStudioEffectiveChannelId, normalizeImageStudioChannels } from '@/lib/image-studio/channels';
 
 type StudioBatchQuote = { billingMode: 'fixed' | 'actual'; batchQuoteId: string | null; estimatedCredits: number; unitCredits: number; expiresAt: string; imageChannel?: ImageGenerationChannelSnapshot };
 type CachedStudioBatchQuote = { signature: string; requestId: string; quote: StudioBatchQuote; expired?: boolean };
 
-export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, actualQuoteRequired = false, quotePayload }: { userId: string; moduleId: string; unitCredits: number | null; draftSignature: string; actualQuoteRequired?: boolean; quotePayload?: Record<string, unknown> | null }) {
+export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, actualQuoteRequired = false, quotePayload, effectiveChannelId }: { userId: string; moduleId: string; unitCredits: number | null; draftSignature: string; actualQuoteRequired?: boolean; quotePayload?: Record<string, unknown> | null; effectiveChannelId?: string }) {
   const channelQuoteMatches = (quote: StudioBatchQuote, payload: Record<string, unknown>) => !payload.channelId
-    || (quote.imageChannel?.channelId === payload.channelId && typeof quote.imageChannel.configRevision === 'string' && Boolean(quote.imageChannel.configRevision));
+    || (payload.channelId === 'original' && (!effectiveChannelId || effectiveChannelId === 'original'))
+    || (quote.imageChannel?.channelId === (effectiveChannelId || payload.channelId) && typeof quote.imageChannel.configRevision === 'string' && Boolean(quote.imageChannel.configRevision));
   const [mode, setMode] = useState<'single' | 'batch'>('single');
   const [source, setSource] = useState<'current' | 'folder'>('folder');
   const [quantity, setQuantity] = useState(8), [perFile, setPerFile] = useState(1), [pack, setPack] = useState(false);
@@ -73,7 +75,7 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
         }).catch(() => {});
     }, 500);
     return () => { window.clearTimeout(timer); abort.abort(); };
-  }, [actualQuoteRequired, quoteVisible, mode, loaded, busy, previewing, pending, automaticPayload, quoteSignature, quoteInputReady, billingQuote]);
+  }, [actualQuoteRequired, quoteVisible, mode, loaded, busy, previewing, pending, automaticPayload, quoteSignature, quoteInputReady, billingQuote, effectiveChannelId]);
   useEffect(() => { live.current.mounted = true; return () => { live.current.mounted = false; fileRef.current.forEach(file => URL.revokeObjectURL(file.preview)); }; }, []);
   useEffect(() => { if (previousQuoteSignature.current !== quoteSignature) setBillingQuote(null); previousQuoteSignature.current = quoteSignature; }, [quoteSignature]);
   useEffect(() => {
@@ -156,16 +158,18 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
         const current = await readBatchResponse(await fetch('/api/image-studio/settings', { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
         if (!valid() || current.revision !== snapshot.revision) throw new Error('素材、模型或报价已变化，请重新读取设置后确认；尚未生成');
         const channelId = typeof snapshot.channelId === 'string' ? snapshot.channelId : 'original';
-        if (channelId === 'original') {
+        const freshChannels = normalizeImageStudioChannels(current.imageChannels);
+        const freshEffectiveId = imageStudioEffectiveChannelId(freshChannels, String(snapshot.model), channelId);
+        if (freshEffectiveId !== (effectiveChannelId || channelId)) throw new Error('后台默认供应商已变化，请重新读取设置并确认；素材保留，尚未生成');
+        if (freshEffectiveId === 'original') {
           if (current.prices?.[String(snapshot.model)] !== unitCredits) throw new Error('素材、模型或报价已变化，请重新读取设置后确认；尚未生成');
           return;
         }
-        const rows = (current.imageChannels as { items?: Array<{ id: string; enabled: boolean; configured: boolean; ready: boolean; models?: Record<string, { ready: boolean; billingMode: string | null; fixedPoints: number | null }> }> } | undefined)?.items;
-        const channel = rows?.find(item => item.id === channelId);
+        const channel = freshChannels.items.find(item => item.id === freshEffectiveId);
         const capability = channel?.models?.[String(snapshot.model)];
         if (!channel?.enabled || !channel.configured || !channel.ready || !capability?.ready
           || capability.billingMode === 'actual' && !actualQuoteRequired
-          || capability.billingMode === 'fixed' && (capability.fixedPoints ?? (['shared', 'banana'].includes(channelId) ? current.prices?.[String(snapshot.model)] : null)) !== unitCredits) {
+          || capability.billingMode === 'fixed' && (capability.fixedPoints ?? (['shared', 'banana'].includes(freshEffectiveId) ? current.prices?.[String(snapshot.model)] : null)) !== unitCredits) {
           throw new Error('所选生图通道或报价已变化，请重新读取设置后确认；尚未生成');
         }
       };

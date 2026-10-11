@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import {
   getImageGenerationSettingsForModel,
+  captureImageGenerationChannel,
   isMuskImageGenerationChannel,
   resolveImageGenerationChannelSnapshot,
   type ImageGenerationResolvedSettings,
@@ -105,9 +106,10 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
   let taskSnapshot: Record<string, unknown>;
   try { taskSnapshot = JSON.parse(String(task.snapshot_json)) as Record<string, unknown>; }
   catch { throw new StudioError('图片报价快照无效，请重新报价', 409); }
-  const imageChannel = imageChannelFromPreparedTask(task);
-  const requestedChannelId = typeof body.channelId === 'string' ? body.channelId
-    : imageChannel?.channelId;
+  const imageChannel = imageChannelFromPreparedTask(task)
+    || await captureImageGenerationChannel(base.model, 'original');
+  const requestedChannelId = imageChannel?.channelId
+    || (typeof body.channelId === 'string' && body.channelId !== 'original' ? body.channelId : undefined);
   const settings = await resolveQuoteSettings(base.model, imageChannel, requestedChannelId);
   let scope: string;
   try { scope = imageBillingScope(settings); }

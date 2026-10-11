@@ -1,7 +1,8 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { imageBillingScope } from './billing-scope';
-import { getImageGenerationSettingsForModel } from '@/lib/integrations/image-generation';
+import { getImageGenerationChannels, ImageGenerationChannelError, selectImageGenerationSettings } from '@/lib/integrations/image-generation';
+import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import { IMAGE_STUDIO_MODELS } from './model-catalog';
 import { readImageSupplierBills } from './billing-provider';
 import { supplierHistoryEstimate } from './billing-quote';
@@ -59,10 +60,28 @@ export async function imageBillingReady(scope: string, model: string, store: Sto
 
 export async function imageBillingReadinessPayload() {
   const intent = await imageBillingIntent();
+  const channels = await getImageGenerationChannels();
   const models = Object.fromEntries(await Promise.all(IMAGE_STUDIO_MODELS.map(async model => {
-    const settings = await getImageGenerationSettingsForModel(model);
-    if (settings.provider !== 'musk' || !settings.api_key) return [model, { exactPostBill: false, priceRuleAvailable: false,
-      eligibleForIntent: false, eligibilityReason: 'provider_unavailable', ready: false }];
+    const defaultChannelId = await resolveImageGenerationRequestChannel(model);
+    let settings;
+    try {
+      settings = defaultChannelId
+        ? selectImageGenerationSettings(channels, model, defaultChannelId)
+        : selectImageGenerationSettings(channels, model);
+    } catch (error) {
+      if (error instanceof ImageGenerationChannelError && error.status === 404) return [model, {
+        exactPostBill: false, priceRuleAvailable: false, eligibleForIntent: false,
+        eligibilityReason: 'default_channel_unavailable', reason: 'default_channel_unavailable', ready: false,
+        priceRuleRequired: true,
+      }];
+      throw error;
+    }
+    if (!settings.enabled || settings.deleted || !settings.api_key) return [model, { exactPostBill: false, priceRuleAvailable: false,
+      eligibleForIntent: false, eligibilityReason: 'default_channel_unavailable',
+      reason: 'default_channel_unavailable', ready: false }];
+    if (settings.provider !== 'musk') return [model, { exactPostBill: false, priceRuleAvailable: false,
+      eligibleForIntent: false, eligibilityReason: 'provider_unavailable',
+      reason: 'provider_unavailable', ready: false }];
     const scope = imageBillingScope(settings), result = await imageBillingReady(scope, model);
     let priceRuleAvailable = false;
     if (result.exactPostBill) {

@@ -66,7 +66,7 @@ import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
 import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
 import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
 import type { StudioReferencePolicy } from '@/lib/image-studio/reference-policy';
-import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, imageStudioChannelReadyForModel, useImageStudioChannel } from '@/lib/image-studio/channels';
+import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, imageStudioChannelReadyForModel, imageStudioUsesLegacyRoute, imageStudioEffectiveChannelId, useImageStudioChannel } from '@/lib/image-studio/channels';
 import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChannelSelect';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
 
@@ -1049,21 +1049,23 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const baseline = moduleSaved ? JSON.parse(moduleSaved) as typeof moduleDraft : moduleDraft;
   const selectedChannel = imageChannels.items.find(item => item.id === imageChannelId);
   const selectedChannelModel = imageStudioChannelModel(selectedChannel, moduleModel);
+  const legacyImageRoute = imageStudioUsesLegacyRoute(imageChannels, moduleModel, imageChannelId);
+  const effectiveImageChannelId = imageStudioEffectiveChannelId(imageChannels, moduleModel, imageChannelId);
   const channelModels = imageStudioChannelModels(imageChannels, models);
   const modelChoices = channelModels.includes(moduleModel) ? channelModels : [moduleModel, ...channelModels];
-  const qualityChoices = selectedChannelModel?.qualities ?? (imageChannelId === 'original'
+  const qualityChoices = selectedChannelModel?.qualities ?? (legacyImageRoute
     ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [] : []);
-  const resolutionChoices = selectedChannelModel?.resolutions ?? (imageChannelId === 'original'
+  const resolutionChoices = selectedChannelModel?.resolutions ?? (legacyImageRoute
     ? IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] || [] : []);
-  const generationInputs = { evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, aspectRatio, resolution: imageChannelId === 'original' ? normalizeImageResolution(moduleModel, resolution) : resolution, referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: imageChannelId === 'original' ? normalizeImageStudioQuality(moduleModel, quality) : quality, ...(imageChannelId !== 'original' ? { channelId: imageChannelId } : {}), referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), skillIds: moduleDraft.skillIds, skillVersions: Object.fromEntries(skills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])), styleGroupIds: moduleDraft.styleGroupIds };
+  const generationInputs = { evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, aspectRatio, resolution: legacyImageRoute ? normalizeImageResolution(moduleModel, resolution) : resolution, referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: legacyImageRoute ? normalizeImageStudioQuality(moduleModel, quality) : quality, channelId: imageChannelId, referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), skillIds: moduleDraft.skillIds, skillVersions: Object.fromEntries(skills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])), styleGroupIds: moduleDraft.styleGroupIds };
   const generationDraft = JSON.stringify(generationInputs);
-  const actualQuoteRequired = imageChannelId === 'original' ? settings?.billingReadiness?.models?.[moduleModel]?.ready === true
+  const actualQuoteRequired = legacyImageRoute ? settings?.billingReadiness?.models?.[moduleModel]?.ready === true
     : selectedChannelModel?.actualQuoteRequired === true || selectedChannelModel?.billingMode === 'actual';
-  const moduleUnitCredits = imageChannelId !== 'original' && selectedChannelModel?.billingMode === 'fixed'
+  const moduleUnitCredits = !legacyImageRoute && selectedChannelModel?.billingMode === 'fixed'
     ? (selectedChannelModel.fixedPoints ?? (['shared', 'banana'].includes(imageChannelId) ? settings?.prices?.[moduleModel] ?? null : null))
     : settings ? settings.prices?.[moduleModel] ?? null : module.prices[moduleModel] ?? null;
-  const batch = useStudioBatch({ userId, moduleId: module.id, actualQuoteRequired, quotePayload: settings ? generationPayload(undefined, '') : null, unitCredits: moduleUnitCredits,
-    draftSignature: JSON.stringify([generationDraft, effectiveGlobalContext, reproduceSourceTaskId, settings?.revision, module.revision]) });
+  const batch = useStudioBatch({ userId, moduleId: module.id, actualQuoteRequired, quotePayload: settings ? generationPayload(undefined, '') : null, unitCredits: moduleUnitCredits, effectiveChannelId: effectiveImageChannelId,
+    draftSignature: JSON.stringify([generationDraft, effectiveGlobalContext, reproduceSourceTaskId, settings?.revision, module.revision, effectiveImageChannelId, imageChannelId === 'original' ? imageChannels.defaultRoutes?.revision : undefined]) });
   const contextVersion = useModuleContextVersion({ moduleId: module.id, raw: moduleContext, taskId: reproduceSourceTaskId,
     editable: contextEditable, enabled: !hidden && draftLoaded && !draftRestoring, composing: contextComposing });
   const contextUnsaved = moduleContext !== savedModuleContext || Boolean(reproduceSourceTaskId && reproduceSourceTaskId !== baseline.reproduceFromTaskId);
@@ -1091,7 +1093,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       setAppliedSource(previous => previous ? { ...previous, modified: true } : null);
     }
   }, [appliedSource, restorationSignature]);
-  const defaultGenerationDraft = JSON.stringify({ evolution: evolution ? { direction: evolution.defaultDirection, manual: false } : undefined, prompt: baseline.prompt, count: baseline.count, referenceLimit: baseline.referenceLimit, aspectRatio: baseline.aspectRatio, resolution: normalizeImageResolution(baseline.model, baseline.resolution), referenceIds: baseline.referenceIds, model: baseline.model, quality: normalizeImageStudioQuality(baseline.model, baseline.quality), referencePolicy: baseline.referencePolicy, context: savedModuleContext, fixedReferences: fixedReferencePayload(savedFixedReferences), skillIds: baseline.skillIds || [], skillVersions: generationInputs.skillVersions, styleGroupIds: baseline.styleGroupIds });
+  const defaultGenerationDraft = JSON.stringify({ evolution: evolution ? { direction: evolution.defaultDirection, manual: false } : undefined, prompt: baseline.prompt, count: baseline.count, referenceLimit: baseline.referenceLimit, aspectRatio: baseline.aspectRatio, resolution: legacyImageRoute ? normalizeImageResolution(baseline.model, baseline.resolution) : baseline.resolution, referenceIds: baseline.referenceIds, model: baseline.model, quality: legacyImageRoute ? normalizeImageStudioQuality(baseline.model, baseline.quality) : baseline.quality, channelId: 'original', referencePolicy: baseline.referencePolicy, context: savedModuleContext, fixedReferences: fixedReferencePayload(savedFixedReferences), skillIds: baseline.skillIds || [], skillVersions: generationInputs.skillVersions, styleGroupIds: baseline.styleGroupIds });
   const generationChanged = generationDraft !== defaultGenerationDraft || Boolean(reproduceSourceTaskId);
   const automaticSnapshot = JSON.stringify({ ...baseline, name, groupName, bannerAssetId: banner?.id || null });
   const automaticDirty = automaticSnapshot !== moduleSaved;
@@ -1594,7 +1596,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   function generationPayload(retryTask?: StudioTask, requestId = crypto.randomUUID()) {
     const historicalEvolution = (retryTask?.snapshot as (StudioSnapshot & { evolution?: EvolutionInput }) | undefined)?.evolution;
     return { requestId, prompt: retryTask?.prompt ?? prompt,
-      moduleId: module.id, model: retryTask?.model || moduleModel, quality: retryTask?.quality || quality, reproduceFromTaskId: reproduceSourceTaskId || undefined, count: retryTask ? 1 : count, aspectRatio: retryTask?.aspectRatio || aspectRatio, resolution: retryTask?.snapshot?.resolution || resolution, revision: settings!.revision, ...(imageChannelId !== 'original' ? { channelId: imageChannelId } : {}),
+      moduleId: module.id, model: retryTask?.model || moduleModel, quality: retryTask?.quality || quality, reproduceFromTaskId: reproduceSourceTaskId || undefined, count: retryTask ? 1 : count, aspectRatio: retryTask?.aspectRatio || aspectRatio, resolution: retryTask?.snapshot?.resolution || resolution, revision: settings!.revision, channelId: imageChannelId,
       referenceIds: retryTask?.referenceIds || moduleDraft.referenceIds,
       ...(historicalEvolution || evolution ? { evolution: historicalEvolution || evolutionInput } : {}),
       draft: { moduleContext: contextEditable ? moduleContext : undefined, globalContext: isAdmin ? effectiveGlobalContext : undefined,
@@ -1619,13 +1621,16 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       setError('请检查主图数量、辅助参考数量和图片可用性。'); return;
     }
     const currentPayload = generationPayload(retryTask);
+    const requestLegacyRoute = imageStudioUsesLegacyRoute(imageChannels, currentPayload.model, imageChannelId);
+    const requestChannelId = imageStudioEffectiveChannelId(imageChannels, currentPayload.model, imageChannelId);
+    const requestCapability = imageStudioChannelModel(selectedChannel, currentPayload.model);
     const expectedFormSignature = liveGenerationSignature.current;
-    const signature = JSON.stringify([userId, Object.fromEntries(Object.entries(currentPayload).filter(([key]) => key !== 'requestId'))]);
+    const signature = JSON.stringify([userId, Object.fromEntries(Object.entries(currentPayload).filter(([key]) => key !== 'requestId')), requestChannelId, imageChannelId === 'original' ? imageChannels.defaultRoutes?.revision : undefined]);
     const reusableQuote = billingQuote?.signature === signature
       && (!billingQuote.quote.expiresAt || Date.parse(billingQuote.quote.expiresAt) > Date.now()) ? billingQuote : null;
     const payload = reusableQuote ? generationPayload(retryTask, reusableQuote.requestId) : currentPayload;
-    const ratioIssue = studioFourToOneIssue(payload.aspectRatio, imageChannelId !== 'original'
-      ? selectedChannelModel?.ratios?.includes('4:1') === true
+    const ratioIssue = studioFourToOneIssue(payload.aspectRatio, !requestLegacyRoute
+      ? requestCapability?.ratios?.includes('4:1') === true
       : settings.modelFourToOne?.[payload.model] === true);
     if (ratioIssue) { setError(ratioIssue); return; }
     submitLock.current = true; setSubmitting(true); setError('');
@@ -1641,7 +1646,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           || (quote.billingMode === 'actual' && !quote.billingQuoteId)) {
           throw new Error('本次报价信息不完整，尚未提交图片。');
         }
-        if (imageChannelId !== 'original' && (quote.imageChannel?.channelId !== imageChannelId
+        if (!requestLegacyRoute && (quote.imageChannel?.channelId !== requestChannelId
           || typeof quote.imageChannel.configRevision !== 'string' || !quote.imageChannel.configRevision)) {
           throw new Error('生图通道配置已变化，报价未能绑定到当前通道；尚未提交图片，请重新确认。');
         }
@@ -1662,7 +1667,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       return;
     }
     if (!confirmedQuote) { setError('本次报价未确认，尚未提交图片。'); submitLock.current = false; setSubmitting(false); return; }
-    if (imageChannelId !== 'original' && (confirmedQuote.imageChannel?.channelId !== imageChannelId
+    if (!requestLegacyRoute && (confirmedQuote.imageChannel?.channelId !== requestChannelId
       || typeof confirmedQuote.imageChannel.configRevision !== 'string' || !confirmedQuote.imageChannel.configRevision)) {
       setBillingQuote(null); setError('生图通道配置已变化，当前报价未用于生成；请重新获取报价。');
       submitLock.current = false; setSubmitting(false); return;
@@ -1678,7 +1683,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     } catch { setError('提交编号未能保存，尚未提交生成。请允许浏览器保存数据后再试。'); submitLock.current = false; setSubmitting(false); return; }
     let ambiguous = true;
     try {
-      const submission = { ...payload, ...(imageChannelId !== 'original' ? { imageChannel: confirmedQuote.imageChannel } : {}), ...(confirmedQuote.billingQuoteId ? { billingQuoteId: confirmedQuote.billingQuoteId } : {}), maxEstimatedCost: Math.ceil(confirmedQuote.estimatedCredits) };
+      const submission = { ...payload, ...(confirmedQuote.imageChannel ? { imageChannel: confirmedQuote.imageChannel } : {}), ...(confirmedQuote.billingQuoteId ? { billingQuoteId: confirmedQuote.billingQuoteId } : {}), maxEstimatedCost: Math.ceil(confirmedQuote.estimatedCredits) };
       setBillingQuote(null);
       const response = await fetch('/api/image-studio/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(submission), signal: AbortSignal.timeout(20000) });
       if (response.status >= 400 && response.status < 500) { ambiguous = false; setPendingSubmission(null); try { localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch {} if (response.status === 409) onReloadSettings(); await readResponse(response); }
@@ -1804,7 +1809,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     window.setTimeout(() => setCopyFeedback(current => current?.id === task.id ? null : current), copied ? 1800 : 2600);
   }
   const estimatePayload = settings ? generationPayload(undefined, '') : null;
-  const estimateSignature = estimatePayload ? JSON.stringify([userId, Object.fromEntries(Object.entries(estimatePayload).filter(([key]) => key !== 'requestId'))]) : '';
+  const estimateSignature = estimatePayload ? JSON.stringify([userId, Object.fromEntries(Object.entries(estimatePayload).filter(([key]) => key !== 'requestId')), effectiveImageChannelId, imageChannelId === 'original' ? imageChannels.defaultRoutes?.revision : undefined]) : '';
   liveGenerationSignature.current = estimateSignature;
   useEffect(() => {
     if (!actualQuoteRequired || !estimateSignature || hidden || !active || !quoteVisible || !draftLoaded || draftRestoring
@@ -1841,12 +1846,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     return () => window.clearTimeout(timer);
   }, [billingQuote]);
   const selectedProviderReady = imageStudioChannelReadyForModel(selectedChannel, moduleModel, settings?.modelReady?.[moduleModel] ?? settings?.providerReady);
-  const selectedFourToOne = imageChannelId !== 'original'
+  const selectedFourToOne = !legacyImageRoute
     ? selectedChannelModel?.ratios?.includes('4:1') === true
     : settings?.modelFourToOne?.[moduleModel] === true;
   const ratioIssue = studioFourToOneIssue(aspectRatio, selectedFourToOne);
   const channelIssue = !imageChannelReady ? '正在读取生图通道，请稍候。' : imageStudioChannelIssue(selectedChannel, moduleModel, {
     legacyReady: settings?.modelReady?.[moduleModel] ?? settings?.providerReady,
+    legacyRoute: legacyImageRoute,
     quality: generationInputs.quality, resolution: generationInputs.resolution,
     ratio: aspectRatio, referenceCount: effectiveReferenceCount,
   });
@@ -2154,7 +2160,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         <label className={styles.label} htmlFor={`studio-prompt-${module.id}`}>{evolution ? '演化内容' : '补充'} {!evolution && <span>有图片时选填</span>}</label>
         <textarea id={`studio-prompt-${module.id}`} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} value={prompt} maxLength={20000} onChange={event => setPrompt(event.target.value)} placeholder={evolution ? '什么发生变化' : '补充想生成的画面'} rows={9} />
         {evolutionConflict && <p role="alert" className={styles.error}>{evolutionConflict}</p>}
-        <RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={effectiveReferences.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} fourToOneSupported={selectedFourToOne} allowedRatios={selectedChannelModel?.ratios ?? undefined} restrictToAllowedRatios={imageChannelId !== 'original'} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
+        <RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={effectiveReferences.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} fourToOneSupported={selectedFourToOne} allowedRatios={selectedChannelModel?.ratios ?? undefined} restrictToAllowedRatios={!legacyImageRoute} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
         <div className={styles.modelQualityRow}>
           <label className={styles.compactField} htmlFor={`studio-model-${module.id}`}><strong>生成模型</strong>
             <select id={`studio-model-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={moduleModel} onChange={event => setModuleModel(event.target.value)}>

@@ -59,15 +59,18 @@
         }
         function imageChannelFor(settings) {
             const channelId = clean(settings?.channelId);
-            return channelId && channelId !== 'original' ? channelId : '';
+            return channelId || '';
+        }
+        function expectedImageChannelFor(settings) {
+            return clean(settings?.effectiveChannelId) || imageChannelFor(settings);
         }
         function hasImageChannelSnapshot(value, channelId) {
             return Boolean(channelId && value?.channelId === channelId
                 && typeof value.configRevision === 'string' && value.configRevision.length > 0);
         }
-        function validImageChannelQuote(quote, channelId) {
+        function validImageChannelQuote(quote, channelId, expectedChannelId = channelId) {
             if (!channelId) return true;
-            if (!hasImageChannelSnapshot(quote?.imageChannel, channelId)
+            if (!hasImageChannelSnapshot(quote?.imageChannel, expectedChannelId)
                 || quote.status !== 'estimate' || quote.chargeEnabled !== false
                 || typeof quote.actualQuoteRequired !== 'boolean') return false;
             return quote.actualQuoteRequired
@@ -83,8 +86,8 @@
             return {
                 channelId,
                 imageChannel: { ...imageChannel },
-                imageChannelLabel: clean(settings?.imageChannelLabel),
-                imageSupplierName: clean(settings?.imageSupplierName)
+                imageChannelLabel: clean(imageChannel?.label) || clean(settings?.imageChannelLabel),
+                imageSupplierName: clean(imageChannel?.supplierName) || clean(settings?.imageSupplierName)
             };
         }
         const showQuote = (nodeId, quote) => hooks.showQuote?.(nodeId, quote);
@@ -118,7 +121,7 @@
             if (style) {
                 const channelId = imageChannelFor(payload.settings);
                 const imageChannel = channelId ? safeQuote.imageChannel : undefined;
-                if (channelId && !hasImageChannelSnapshot(imageChannel, channelId)) {
+                if (channelId && !hasImageChannelSnapshot(imageChannel, expectedImageChannelFor(payload.settings))) {
                     throw new Error('风格通道报价修订无效；未提交生成，请重新核对。');
                 }
                 return {
@@ -126,7 +129,7 @@
                     revision: style.settingsRevision,
                     input: { ...context, nodeId: node.id, moduleId: style.moduleId, requestId,
                         settingsRevision: style.settingsRevision, moduleRevision: style.moduleRevision,
-                        ...(channelId ? { channelId, imageChannel } : {}),
+                        ...(channelId ? { channelId, imageChannel } : safeQuote.imageChannel ? { channelId: 'original', imageChannel: safeQuote.imageChannel } : {}),
                         prompt, ...(payload.promptMentions ? { promptMentions: payload.promptMentions } : {}),
                         referenceImageIds: payload.referenceImageIds || [],
                         settings: { model: style.model, quality: style.quality, resolution: style.resolution,
@@ -141,12 +144,12 @@
                     nodeId: node.id, requestId, moduleId: ordinaryModuleId(node, context), prompt,
                     ...(payload.promptMentions ? { promptMentions: payload.promptMentions } : {}),
                     settingsRevision: safeQuote.revision, referenceImageIds: payload.referenceImageIds || [],
-                    ...(clean(settings.channelId) && clean(settings.channelId) !== 'original' ? {
-                        channelId: settings.channelId, imageChannel: safeQuote.imageChannel
+                    ...(imageChannelFor(settings) || safeQuote.imageChannel ? {
+                        channelId: settings.channelId || 'original', imageChannel: safeQuote.imageChannel
                     } : {}),
                     settings: { model: settings.model, quality: settings.quality, resolution: settings.resolution,
                         ratio: settings.requestedRatio || settings.ratio, count: settings.count,
-                        ...(clean(settings.channelId) && clean(settings.channelId) !== 'original' ? { channelId: settings.channelId } : {}) } }
+                        ...(imageChannelFor(settings) ? { channelId: settings.channelId } : {}) } }
             };
         }
 
@@ -164,7 +167,7 @@
                 || safeQuote.kind !== 'image' || safeQuote.projectId !== context.projectId
                 || safeQuote.model !== expectedModel || safeQuote.count !== expectedCount
                 || safeQuote.status !== 'estimate' || !Number.isSafeInteger(safeQuote.revision)
-                || channelId && !validImageChannelQuote(safeQuote, channelId)
+                || channelId && !validImageChannelQuote(safeQuote, channelId, expectedImageChannelFor(settings))
                 || node.data?.styleJob) throw new Error('报价或画布状态未就绪；未提交生成。');
             if (!style) ordinaryModuleId(node, context);
             const snapshot = quoteSnapshot(nodeId);
@@ -423,7 +426,7 @@
                 if (quote?.kind !== 'image' || quote.projectId !== context.projectId || quote.model !== style.model
                     || quote.count !== style.count || typeof quote.actualQuoteRequired !== 'boolean'
                     || !Number.isSafeInteger(quote.revision) || quote.revision !== style.settingsRevision
-                    || selectedChannelId && !validImageChannelQuote(quote, selectedChannelId)
+                    || selectedChannelId && !validImageChannelQuote(quote, selectedChannelId, expectedImageChannelFor(payload.settings))
                     || quote.actualQuoteRequired && (quote.unitCredits !== null || quote.estimatedCredits !== null)
                     || !quoteInputsMatch(node, context, snapshot)) {
                     clearQuote(node.id);
@@ -435,6 +438,10 @@
                     job.input.settings.channelId = selectedChannelId;
                     const history = imageChannelHistory(payload.settings, selectedChannelId, quote.imageChannel);
                     job.payload = { ...payload, settings: { ...payload.settings, ...history } };
+                }
+                else if (quote.imageChannel) {
+                    job.input.channelId = 'original';
+                    job.input.imageChannel = { ...quote.imageChannel };
                 }
                 if (quote.actualQuoteRequired) {
                     let actualEntry;
@@ -540,9 +547,9 @@
             const quote = await json('/api/tools/ultimate-canvas/quote', { kind: 'image', project_id: context.projectId,
                 model: settings.model, count: settings.count, quality: settings.quality, resolution: settings.resolution,
                 size: settings.size || '1K', ratio: settings.requestedRatio || settings.ratio,
-                ...(clean(settings.channelId) && clean(settings.channelId) !== 'original' ? { channelId: settings.channelId } : {}) });
-            if (settings.channelId && settings.channelId !== 'original'
-                && !validImageChannelQuote(quote, settings.channelId)) {
+                ...(imageChannelFor(settings) ? { channelId: settings.channelId } : {}) });
+            if (imageChannelFor(settings)
+                && !validImageChannelQuote(quote, settings.channelId, expectedImageChannelFor(settings))) {
                 throw new Error('当前通道报价快照无效；未提交生成，请重新核对。');
             }
             job = { kind: 'ordinary', requestId: crypto.randomUUID(), moduleId: ordinaryModuleId(node, context), count: settings.count,
@@ -554,8 +561,8 @@
                 settingsRevision: quote.revision,
                 referenceImageIds: payload.referenceImageIds || [], settings: { model: settings.model,
                     quality: settings.quality, resolution: settings.resolution, ratio: settings.requestedRatio || settings.ratio, count: settings.count,
-                    ...(clean(settings.channelId) && clean(settings.channelId) !== 'original' ? { channelId: settings.channelId } : {}) },
-                ...(clean(settings.channelId) && clean(settings.channelId) !== 'original' ? { channelId: settings.channelId, imageChannel: quote.imageChannel } : {}) };
+                    ...(imageChannelFor(settings) ? { channelId: settings.channelId } : {}) },
+                ...(imageChannelFor(settings) || quote.imageChannel ? { channelId: settings.channelId || 'original', imageChannel: quote.imageChannel } : {}) };
             if (quote?.kind !== 'image' || quote.projectId !== context.projectId
                 || quote.model !== settings.model || quote.count !== settings.count
                 || quote.status !== 'estimate' || quote.chargeEnabled !== false

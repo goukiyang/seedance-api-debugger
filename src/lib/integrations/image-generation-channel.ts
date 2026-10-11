@@ -49,6 +49,10 @@ export type ImageGenerationChannelDto = {
 
 export type ImageGenerationChannelsDto = {
   items: ImageGenerationChannelDto[];
+  defaultRoutes?: {
+    revision: number;
+    models: Partial<Record<ImageStudioModel, string>>;
+  };
 };
 
 export type ImageGenerationManagedModelDto = {

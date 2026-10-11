@@ -8,7 +8,8 @@ import { getImageStudioSettings, IMAGE_STUDIO_SETTING_KEY } from '@/lib/image-st
 import { canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from '@/lib/image-studio/access';
 import { defaultImageStudioQuality, normalizeImageStudioQuality, IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
 import { normalizeStudioRatio, studioRatioSize } from '@/lib/image-studio/ratios';
-import { getImageGenerationSettingsForModel } from '@/lib/integrations/image-generation';
+import { getImageGenerationChannelOptions, getImageGenerationSettingsForModel, getManagedImageGenerationChannels } from '@/lib/integrations/image-generation';
+import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import { imageBillingScope } from '@/lib/image-studio/billing-scope';
 import { fixedImageBillingContract, imageSpecification } from '@/lib/image-studio/billing-quote';
 import { creditsToCents } from '@/lib/image-studio/billing-contract';
@@ -74,6 +75,40 @@ type TemplateConfig = {
   templateVersion: string | null;
   sourcePresetId: string | null;
 };
+
+async function assertToolFlowLegacyRoute(tx: Tx, config: TemplateConfig, configuredPrice: number | null | undefined) {
+  const model = config.model;
+  if (!IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number])) {
+    throw new AuthError(`工具流入口不支持图片型号 ${model}；请改用图片工作区选择可用型号。`, 409);
+  }
+  const mapped = await resolveImageGenerationRequestChannel(model as typeof IMAGE_STUDIO_MODELS[number], undefined, tx);
+  if (!mapped) return;
+  const legacy = model.startsWith('gemini-') ? 'banana' : 'shared';
+  const options = await getImageGenerationChannelOptions(tx);
+  const option = options.items.find((item) => item.id === mapped);
+  const managed = option ? null : (await getManagedImageGenerationChannels(tx)).find((item) => item.id === mapped);
+  const supplier = option?.supplierName || option?.label || managed?.supplierName || managed?.label || mapped;
+  if (mapped && mapped !== legacy) {
+    throw new AuthError(`工具流入口暂不支持图片型号 ${model} 的默认供应商「${supplier}」；请恢复该型号的共享/Banana 兼容通道，或改用图片工作区。`, 409);
+  }
+  const capability = option?.models[model as typeof IMAGE_STUDIO_MODELS[number]];
+  const fixedPriceMatches = typeof configuredPrice === 'number' && Number.isFinite(configuredPrice)
+    && Number.isSafeInteger(capability?.fixedPoints)
+    && creditsToCents(configuredPrice) === creditsToCents(capability.fixedPoints!);
+  const parametersMatch = Boolean(capability?.qualities?.includes(config.quality)
+    && capability.ratios?.includes(config.aspectRatio)
+    && capability.maxReferences !== null && capability.maxReferences !== undefined
+    && config.referenceIds.length <= capability.maxReferences);
+  if (!option?.enabled || !option.configured || !capability?.ready || capability.billingMode !== 'fixed'
+    || !fixedPriceMatches || !parametersMatch) {
+    const reason = capability?.billingMode === 'actual'
+      ? '当前供应商使用实际计费，不符合工具流固定点数合同'
+      : !fixedPriceMatches ? '当前供应商固定点数与工具流报价不一致'
+        : !parametersMatch ? '当前供应商未确认支持模板的图片参数'
+          : capability?.disabledReason || '当前供应商未就绪';
+    throw new AuthError(`工具流入口无法按原固定计费与图片参数合同使用型号 ${model} 的默认供应商「${supplier}」：${reason}。请修复兼容配置，或改用图片工作区。`, 409);
+  }
+}
 
 const TERMINAL_TASK_STATUSES = new Set(['succeeded', 'failed', 'uncertain', 'cancelled']);
 const TERMINAL_RUN_STATUSES = new Set(['succeeded', 'partial_success', 'failed', 'cancelled']);
@@ -386,6 +421,7 @@ async function buildToolFlowQuote(
     const config = await resolveTemplate(tx, flow.owner_id, flow.owner_id, node, [], settings,
       user as unknown as ImageStudioIdentity, { cloneReferenceAssets: false, allowUnknownModel: true, allowUnknownPrice: true });
     const rawPrice = settings.prices[config.model as keyof typeof settings.prices];
+    await assertToolFlowLegacyRoute(tx, config, rawPrice);
     let unitCredits: number | null = null;
     let estimatedCredits: number | null = null;
     let status: ToolFlowQuoteStep['status'] = 'unknown';

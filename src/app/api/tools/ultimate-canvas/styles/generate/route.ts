@@ -7,7 +7,7 @@ import { IMAGE_RESOLUTION_OPTIONS } from '@/lib/image-generation/resolution';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { resolveStudioModuleGenerationConfig, validStudioModuleId } from '@/lib/image-studio/modules';
-import { submitStudioBatch, StudioError } from '@/lib/image-studio/tasks';
+import { submitStudioBatch, safeImageChannelSnapshot, StudioError } from '@/lib/image-studio/tasks';
 import { prepareImageBillingQuote } from '@/lib/image-studio/billing-quote-service';
 import { imageBillingReady } from '@/lib/image-studio/billing-readiness';
 import { imageBillingScope } from '@/lib/image-studio/billing-scope';
@@ -15,6 +15,7 @@ import { getImageGenerationSettingsForModel, captureImageGenerationChannel, reso
 import { parseCanvasPromptMentions } from '@/lib/canvas-prompt-references';
 import { assertCanvasPromptCompatibility } from '@/lib/canvas-prompt-compatibility';
 import { normalizeStudioRatio } from '@/lib/image-studio/ratios';
+import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import {
   assertCanvasStyleContext, canvasStyleFailure, canvasStyleJson, parseCanvasStyleContext,
   readCanvasStyleJson, requireCanvasStyleUser,
@@ -90,9 +91,19 @@ export async function POST(request: NextRequest) {
     const moduleRatio = normalizeStudioRatio(studioModule.aspect_ratio || 'auto');
     if (model !== generation.model || quality !== generation.quality || resolution !== generation.resolution
       || Number(count) !== studioModule.count || aspectRatio !== moduleRatio) throw invalidSettings();
-    const channelId = typeof settingsInput.channelId === 'string' ? settingsInput.channelId : 'original';
-    const imageChannel = channelId === 'original' ? undefined : await captureImageGenerationChannel(generation.model, channelId);
-    const apiSettings = imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true) : await getImageGenerationSettingsForModel(generation.model);
+    const requestedChannelId = typeof settingsInput.channelId === 'string' ? settingsInput.channelId : undefined;
+    const suppliedImageChannel = body.imageChannel === undefined ? undefined : safeImageChannelSnapshot(body.imageChannel) || undefined;
+    if (body.imageChannel !== undefined && !suppliedImageChannel) throw new StudioError('图片通道报价版本无效，请重新报价', 409);
+    const effectiveChannelId = requestedChannelId === undefined && suppliedImageChannel
+      ? suppliedImageChannel.channelId
+      : await resolveImageGenerationRequestChannel(generation.model, requestedChannelId) || 'original';
+    if (suppliedImageChannel && suppliedImageChannel.channelId !== effectiveChannelId) {
+      throw new StudioError('当前型号默认图片通道已变化，请重新报价', 409);
+    }
+    const channelId = requestedChannelId || 'original';
+    const imageChannel = suppliedImageChannel || (effectiveChannelId === 'original' ? undefined : await captureImageGenerationChannel(generation.model, effectiveChannelId));
+    const apiSettings = imageChannel?.channelId === 'original' ? await getImageGenerationSettingsForModel(generation.model)
+      : imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true) : await getImageGenerationSettingsForModel(generation.model);
     let unitCredits = currentSettings.prices[generation.model];
     let channelActual = false;
     if (imageChannel) {
@@ -144,7 +155,7 @@ export async function POST(request: NextRequest) {
 
     const submission = { requestId, moduleId, moduleRevision: Number(expectedModuleRevision),
       revision: Number(expectedSettingsRevision), prompt, count: Number(count), referenceIds: mergedReferenceIds,
-      model: generation.model, channelId, imageChannel: body.imageChannel || imageChannel, quality: generation.quality, resolution: generation.resolution, aspectRatio,
+      model: generation.model, ...(requestedChannelId !== undefined || !suppliedImageChannel ? { channelId } : {}), imageChannel: body.imageChannel || imageChannel, quality: generation.quality, resolution: generation.resolution, aspectRatio,
       billingQuoteId: body.billingQuoteId, maxEstimatedCost: body.maxEstimatedCost };
     const promptBinding = mentions ? { mentions, referenceAssets } : undefined;
     if (body.action === 'quote') return canvasStyleJson(await prepareImageBillingQuote(user.id, submission, undefined, undefined, promptBinding));

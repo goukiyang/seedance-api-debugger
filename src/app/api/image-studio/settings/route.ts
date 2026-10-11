@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession, AuthError } from '@/lib/auth/session';
 import { getAdminUser } from '@/lib/auth/api-helpers';
 import { getImageStudioSettings, saveImageStudioSettings, imageStudioSettingsPayload, StudioSettingsClearConfirmationError, IMAGE_STUDIO_MODELS } from '@/lib/image-studio/settings';
-import { getImageGenerationChannelOptions, getImageGenerationChannels, selectImageGenerationSettings, isImageGenerationApiReady, isStudioImageGenerationProvider } from '@/lib/integrations/image-generation';
+import { getImageGenerationChannelOptions, getImageGenerationChannels, ImageGenerationChannelError, selectImageGenerationSettings, isImageGenerationApiReady, isStudioImageGenerationProvider } from '@/lib/integrations/image-generation';
+import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import { supportsStudioFourToOne } from '@/lib/image-generation/resolution';
 import { imageBillingReadinessPayload } from '@/lib/image-studio/billing-readiness';
 import { parseStudioTemplateDefaults } from '@/lib/image-studio/template-defaults';
@@ -10,18 +11,31 @@ import { studioFourToOneIssue } from '@/lib/image-generation/resolution';
 
 export const dynamic = 'force-dynamic';
 
+async function settingsForModel(channels: Awaited<ReturnType<typeof getImageGenerationChannels>>, model: typeof IMAGE_STUDIO_MODELS[number]) {
+  const channelId = await resolveImageGenerationRequestChannel(model);
+  try {
+    return selectImageGenerationSettings(channels, model, channelId || 'original');
+  } catch (error) {
+    if (error instanceof ImageGenerationChannelError && error.status === 404) return null;
+    throw error;
+  }
+}
+
 export async function GET() {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   try {
     const settings = await getImageStudioSettings();
     const channels = await getImageGenerationChannels();
+    const selectedSettings = await Promise.all(IMAGE_STUDIO_MODELS.map(async model => [model, await settingsForModel(channels, model)] as const));
+    const byModel = new Map(selectedSettings);
     const modelReady = Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => {
-      const api = selectImageGenerationSettings(channels, model);
-      return [model, isStudioImageGenerationProvider(api.provider) && isImageGenerationApiReady(api)];
+      const api = byModel.get(model);
+      return [model, Boolean(api && isStudioImageGenerationProvider(api.provider) && isImageGenerationApiReady(api))];
     }));
     const providerReady = Object.values(modelReady).some(Boolean);
-    const modelFourToOne = Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [model, supportsStudioFourToOne(model, selectImageGenerationSettings(channels, model).provider)]));
+    const modelFourToOne = Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [model, byModel.get(model)
+      ? supportsStudioFourToOne(model, byModel.get(model)!.provider) : false]));
     return NextResponse.json({ ...imageStudioSettingsPayload(settings, user.role === 'admin'), providerReady, modelReady, modelFourToOne, imageChannels: await getImageGenerationChannelOptions(),
       billingReadiness: await imageBillingReadinessPayload() }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   } catch {
@@ -47,7 +61,8 @@ export async function PUT(request: NextRequest) {
       catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : '统一默认设置无效' }, { status: 400 }); }
       if (templateDefaults.aspectRatio === '4:1') {
         const channels = await getImageGenerationChannels();
-        const api = selectImageGenerationSettings(channels, templateDefaults.model);
+        const api = await settingsForModel(channels, templateDefaults.model);
+        if (!api) return NextResponse.json({ error: '该型号的默认图片供应商已删除或不存在；未切换到其他供应商，暂时无法确认 4:1 支持' }, { status: 409 });
         const issue = studioFourToOneIssue(templateDefaults.aspectRatio, supportsStudioFourToOne(templateDefaults.model, api.provider));
         if (issue) return NextResponse.json({ error: issue }, { status: 400 });
       }

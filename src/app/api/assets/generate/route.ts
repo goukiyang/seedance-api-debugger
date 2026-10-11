@@ -36,6 +36,7 @@ import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { resolveStudioAspectRatio, normalizeStudioRatio } from '@/lib/image-studio/ratios';
 import { imageOutputSize, isValidImageDimension, normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS } from '@/lib/image-generation/resolution';
+import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -397,13 +398,17 @@ export async function POST(request: NextRequest) {
     const requestedModel = cleanString(input.model);
     const selectedModel = requestedModel || channels.shared.default_model;
     const channelId = typeof input.channelId === 'string' ? input.channelId : typeof body.channelId === 'string' ? body.channelId : 'original';
-    if (channelId === 'original' && requestedModel && requestedModel !== channels.shared.default_model) {
+    const routedChannelId = IMAGE_STUDIO_MODELS.includes(selectedModel as ImageStudioModel)
+      ? await resolveImageGenerationRequestChannel(selectedModel as ImageStudioModel, channelId)
+      : channelId === 'original' ? null : channelId;
+    const effectiveChannelId = routedChannelId || 'original';
+    if (effectiveChannelId === 'original' && channelId === 'original' && requestedModel && requestedModel !== channels.shared.default_model) {
       const banana = requestedModel === 'gemini-3.1-flash-image-preview' || requestedModel === 'gemini-3-pro-image-preview';
       if ((!banana && channels.shared.provider === 'seedream') || !IMAGE_STUDIO_MODELS.includes(requestedModel as ImageStudioModel)) {
         return NextResponse.json({ error: '当前图片接口不支持所选模型，请重新选择' }, { status: 400 });
       }
     }
-    const imageChannel = channelId === 'original' ? undefined : await captureImageGenerationChannel(selectedModel, channelId);
+    const imageChannel = effectiveChannelId === 'original' ? undefined : await captureImageGenerationChannel(selectedModel, effectiveChannelId);
     const settings = imageChannel ? { ...await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true), default_model: selectedModel }
       : selectImageGenerationSettings(channels, selectedModel);
     const modelLabel = imageGenerationModelLabel(settings.provider, settings.default_model);

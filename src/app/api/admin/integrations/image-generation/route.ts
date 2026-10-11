@@ -4,6 +4,9 @@ import { AuthError } from '@/lib/auth/session';
 import { getAdminUser } from '@/lib/auth/api-helpers';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { imageBillingIntent } from '@/lib/image-studio/billing-readiness';
+import { IMAGE_STUDIO_MODELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
+import type { ImageGenerationChannelId } from '@/lib/integrations/image-generation-channel';
+import { ImageGenerationDefaultRoutesError } from '@/lib/integrations/image-generation-defaults';
 import {
   IMAGE_GENERATION_API_SETTING_KEY,
   buildImageGenerationApiSettingsPatch,
@@ -16,6 +19,7 @@ import {
   updateManagedImageGenerationChannel,
   archiveManagedImageGenerationChannel,
   restoreManagedImageGenerationChannel,
+  setImageGenerationModelDefaultRoute,
   ImageGenerationChannelError,
 } from '@/lib/integrations/image-generation';
 
@@ -66,6 +70,25 @@ async function updateImageGenerationConfig(request: NextRequest) {
     const admin = await getAdminUser(request);
     const body = await request.json() as Record<string, unknown>;
     const channelAction = body.channel_action ?? body.channelAction;
+    if (channelAction === 'set-model-default') {
+      if (typeof body.model !== 'string' || !IMAGE_STUDIO_MODELS.includes(body.model as ImageStudioModel)) {
+        return NextResponse.json({ error: '所选图片型号不在允许列表中' }, { status: 400 });
+      }
+      if (!Object.prototype.hasOwnProperty.call(body, 'channelId')
+        || (body.channelId !== null && typeof body.channelId !== 'string')) {
+        return NextResponse.json({ error: '请重新选择默认供应商后保存' }, { status: 400 });
+      }
+      if (typeof body.expectedRevision !== 'number' || !Number.isSafeInteger(body.expectedRevision) || body.expectedRevision < 0) {
+        return NextResponse.json({ error: '设置版本无效，请重新读取后保存' }, { status: 400 });
+      }
+      const defaultRoutes = await setImageGenerationModelDefaultRoute(
+        body.model as ImageStudioModel,
+        body.channelId as ImageGenerationChannelId | null,
+        body.expectedRevision,
+        admin.id,
+      );
+      return NextResponse.json({ ok: true, defaultRoutes });
+    }
     if (channelAction === 'create' || channelAction === 'update' || channelAction === 'archive' || channelAction === 'restore') {
       const input = body.channel && typeof body.channel === 'object' && !Array.isArray(body.channel)
         ? body.channel as Record<string, unknown>
@@ -134,6 +157,10 @@ async function updateImageGenerationConfig(request: NextRequest) {
     if (error instanceof ImageGenerationChannelError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     }
+    if (error instanceof ImageGenerationDefaultRoutesError) {
+      console.error('[Admin/ImageGenerationIntegration] Default routes are invalid');
+      return NextResponse.json({ error: '图片型号默认供应商设置无法读取；未按空设置处理' }, { status: 500 });
+    }
     console.error('[Admin/ImageGenerationIntegration] Update failed:', error instanceof Error ? error.name : 'unknown');
     return NextResponse.json({
       error: '保存图形生成 API 配置失败，请稍后重试；未确认保存成功',
@@ -145,17 +172,20 @@ export async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
     const settings = await getImageGenerationApiSettings();
-    const [channels, options, managedChannelPresets] = await Promise.all([
+    const [channels, imageChannels, managedChannelPresets] = await Promise.all([
       getManagedImageGenerationChannels(),
       getImageGenerationChannelOptions(),
       getManagedChannelPresets(),
     ]);
+    const defaultRoutes = imageChannels.defaultRoutes;
     return NextResponse.json({
       ok: true,
       setting_key: IMAGE_GENERATION_API_SETTING_KEY,
       config: safeConfigDto(settings),
       channels,
-      options,
+      options: imageChannels,
+      imageChannels,
+      defaultRoutes,
       managedChannelPresets,
     });
   } catch (error) {
@@ -164,6 +194,10 @@ export async function GET(request: NextRequest) {
     }
     if (error instanceof ImageGenerationChannelError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+    }
+    if (error instanceof ImageGenerationDefaultRoutesError) {
+      console.error('[Admin/ImageGenerationIntegration] Default routes are invalid');
+      return NextResponse.json({ error: '图片型号默认供应商设置无法读取；未按空设置处理' }, { status: 500 });
     }
     console.error('[Admin/ImageGenerationIntegration] GET failed:', error instanceof Error ? error.name : 'unknown');
     return NextResponse.json({ error: '读取图形生成 API 配置失败' }, { status: 500 });

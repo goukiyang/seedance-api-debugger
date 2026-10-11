@@ -22,6 +22,7 @@ import { avatarRulesSignature } from '@/lib/avatar-random/intent';
 import { QueueCapacityError, QueueMaintenanceError } from '@/lib/image-studio/queue-capacity';
 import { ImageGenerationChannelError } from '@/lib/integrations/image-generation';
 import { historicalImageSupplier } from '@/lib/image-studio/channel-history';
+import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 
 function validateOriginalContinuation(body: Record<string, unknown>) {
   if (body.descriptionMode === undefined && body.originalAttemptRequestId === undefined) return;
@@ -127,7 +128,8 @@ export async function POST(req: NextRequest) { return run(async owner => {
     const quality=typeof body.quality==='string'?body.quality:previous.quality,resolution=typeof body.resolution==='string'?body.resolution:previous.resolution;
     let price=settings.prices[model as keyof typeof settings.prices];
     const channelId=typeof body.channelId==='string'?body.channelId:previous.channelId||'original';
-    const imageChannel=channelId!=='original'?await captureImageGenerationChannel(model,channelId):undefined;
+    const effectiveChannelId=await resolveImageGenerationRequestChannel(model,channelId)||'original';
+    const imageChannel=effectiveChannelId!=='original'?await captureImageGenerationChannel(model,effectiveChannelId):undefined;
     const api=imageChannel?await resolveImageGenerationChannelSnapshot(imageChannel,undefined,true):await getImageGenerationSettingsForModel(model);
     if(imageChannel){const capability=validateImageGenerationChannel(api,{model,quality,resolution,ratio:isAvatarSheet({layout})?'1:1':previous.aspectRatio,referenceCount:previous.referenceIds.length});if(!capability.ok)throw new StudioError(capability.error);price=capability.capability.fixedPoints;}
     if(!imageChannel&&(price===undefined||price===null))throw new StudioError('原模型已失效或没有报价，历史设置仍保留');

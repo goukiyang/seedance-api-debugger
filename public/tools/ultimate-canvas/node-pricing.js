@@ -24,13 +24,13 @@
                 kind: 'image', project_id: getProjectId() || '',
                 model: settings.model || capability.model || '', count: settings.count
             };
-            if (typeof settings.channelId === 'string' && settings.channelId && settings.channelId !== 'original') payload.channelId = settings.channelId;
+            if (typeof settings.channelId === 'string' && settings.channelId) payload.channelId = settings.channelId;
             for (const key of ['resolution', 'ratio', 'size', 'quality']) {
                 if (typeof settings[key] === 'string') payload[key] = settings[key];
             }
             const nodeEl = states.get(String(node.id))?.el;
             const prompt = nodeEl?.querySelector('.image-props-textarea')?.value ?? node.data?.prompt ?? '';
-            return { payload, key: JSON.stringify([payload, settings, capability, node.data?.mode || '', prompt,
+            return { payload, expectedChannelId: settings.effectiveChannelId || settings.channelId, key: JSON.stringify([payload, settings, capability, node.data?.mode || '', prompt,
                 getQuoteSnapshot(node.id)]) };
         }
 
@@ -52,7 +52,7 @@
                 || !Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= Date.now()) return null;
             if (state.payload.channelId) {
                 const channel = quote.imageChannel;
-                if (channel?.channelId !== state.payload.channelId
+                if (channel?.channelId !== inputFor(state.node).expectedChannelId
                     || typeof channel.configRevision !== 'string' || !/^[0-9a-f-]{36}$/i.test(channel.configRevision)) return null;
             }
             return quote;
@@ -261,7 +261,7 @@
                         || inputFor(state.node).key !== key) return;
                     if (quote?.kind !== 'image' || quote.projectId !== state.payload.project_id
                         || quote.model !== state.payload.model || quote.count !== state.payload.count
-                        || (state.payload.channelId && (quote.imageChannel?.channelId !== state.payload.channelId
+                        || (state.payload.channelId && (quote.imageChannel?.channelId !== inputFor(state.node).expectedChannelId
                             || typeof quote.imageChannel?.configRevision !== 'string' || !quote.imageChannel.configRevision))
                         || quote.chargeEnabled !== false || !['estimate', 'unavailable'].includes(quote.status)
                         || typeof quote.actualQuoteRequired !== 'boolean'
@@ -387,7 +387,7 @@
             imageChannel(nodeId) {
                 const state = states.get(String(nodeId));
                 if (!state || state.validUntil <= Date.now() || !state.payload.channelId
-                    || state.quote?.imageChannel?.channelId !== state.payload.channelId
+                    || state.quote?.imageChannel?.channelId !== inputFor(state.node).expectedChannelId
                     || typeof state.quote?.imageChannel?.configRevision !== 'string') return null;
                 return state.quote.imageChannel;
             },

@@ -1,10 +1,9 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import PageBanner from '@/components/PageBanner';
 import { useProductDialog } from '@/components/useProductDialog';
 import { useSettingsPageSubmit } from '@/lib/hooks/use-settings-page-submit';
-import { formatCurrencyAmountWithFixedCny } from '@/lib/costs/currency';
 import { RelativeTime } from '@/components/RelativeTime';
 import { LoadingSkeleton } from '@/components/LoadingState';
 import BananaImageChannel from './BananaImageChannel';
@@ -14,12 +13,12 @@ import { VOLCENGINE_IP_MODEL_OPTIONS } from '@/lib/integrations/volcengine-ip-mo
 import {
   IMAGE_STUDIO_MODELS,
   IMAGE_STUDIO_MODEL_LABELS,
-  IMAGE_STUDIO_MODEL_COST_USD,
   IMAGE_STUDIO_MODEL_QUALITY_OPTIONS,
   IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS,
   type ImageStudioModel,
 } from '@/lib/image-studio/model-catalog';
 import { STUDIO_RATIOS } from '@/lib/image-studio/ratios';
+import { useAppSession } from '@/lib/context/AppSessionContext';
 
 type UserSelectorType = 'id' | 'email' | 'username';
 
@@ -100,6 +99,39 @@ type ManagedImageChannel = {
   configRevision: string | null;
   apiKeyConfigured: boolean;
   models: Partial<Record<ImageStudioModel, ManagedImageModel>>;
+};
+
+type ImageGenerationChannelDto = {
+  id: string;
+  label: string;
+  supplierName: string;
+  enabled: boolean;
+  configured: boolean;
+  ready: boolean;
+  disabledReason: string | null;
+  deleted?: boolean;
+  models: Partial<Record<ImageStudioModel, {
+    ready: boolean;
+    disabledReason: string | null;
+    qualities?: string[] | null;
+    resolutions?: string[] | null;
+    ratios?: string[] | null;
+    maxReferences?: number | null;
+    billingMode?: 'fixed' | 'actual' | null;
+    fixedPoints?: number | null;
+    actualQuoteRequired?: boolean;
+  }>>;
+};
+
+type ImageGenerationDefaultRoutes = {
+  revision: number;
+  models: Partial<Record<ImageStudioModel, string>>;
+};
+
+type StoredImageRoutePreference = {
+  version: 1;
+  model: ImageStudioModel;
+  channelId: string | null;
 };
 
 type ChannelCapabilityDraft = {
@@ -280,6 +312,63 @@ const IMAGE_API_ENDPOINT_OPTIONS = [
   { label: 'MuskAPI', value: 'https://api.muskapis.com/' },
   { label: 'AI Media VIP', value: 'https://api.ai-media.vip/v1/' },
 ] as const;
+
+const IMAGE_ROUTE_PREFERENCE_STORAGE_KEY = 'sd2-admin-image-route-selection-v1';
+
+function isImageStudioModel(value: unknown): value is ImageStudioModel {
+  return typeof value === 'string' && (IMAGE_STUDIO_MODELS as readonly string[]).includes(value);
+}
+
+function parseImageGenerationDefaultRoutes(value: unknown): ImageGenerationDefaultRoutes | null {
+  if (!value || typeof value !== 'object') return null;
+  const input = value as { revision?: unknown; models?: unknown };
+  if (!Number.isSafeInteger(input.revision) || Number(input.revision) < 0 || !input.models || typeof input.models !== 'object') return null;
+  const models: Partial<Record<ImageStudioModel, string>> = {};
+  for (const model of IMAGE_STUDIO_MODELS) {
+    const channelId = (input.models as Record<string, unknown>)[model];
+    if (typeof channelId === 'string' && channelId.length > 0 && channelId !== 'original') models[model] = channelId;
+  }
+  return { revision: Number(input.revision), models };
+}
+
+function parseImageGenerationChannelOptions(value: unknown): ImageGenerationChannelDto[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.flatMap(item => {
+    if (!item || typeof item !== 'object') return [];
+    const channel = item as Partial<ImageGenerationChannelDto>;
+    if (typeof channel.id !== 'string' || channel.id === 'original' || typeof channel.label !== 'string'
+      || typeof channel.supplierName !== 'string' || typeof channel.enabled !== 'boolean'
+      || typeof channel.configured !== 'boolean' || typeof channel.ready !== 'boolean'
+      || !channel.models || typeof channel.models !== 'object') return [];
+    return [{
+      id: channel.id,
+      label: channel.label,
+      supplierName: channel.supplierName,
+      enabled: channel.enabled,
+      configured: channel.configured,
+      ready: channel.ready,
+      disabledReason: typeof channel.disabledReason === 'string' ? channel.disabledReason : null,
+      deleted: channel.deleted === true,
+      models: channel.models,
+    }];
+  });
+}
+
+function originalImageChannelIdForModel(model: ImageStudioModel) {
+  return model.startsWith('gemini-') ? 'banana' : 'shared';
+}
+
+function imageChannelStatus(channel: ImageGenerationChannelDto | undefined, model: ImageStudioModel) {
+  if (!channel) return '配置不存在，不能用于新任务';
+  if (channel.deleted) return channel.disabledReason || '已归档，不能用于新任务';
+  if (!channel.enabled) return channel.disabledReason || '已停用，不能用于新任务';
+  if (!channel.configured) return channel.disabledReason || '待配置，不能用于新任务';
+  if (!channel.ready) return channel.disabledReason || '通道未就绪，不能用于新任务';
+  const capability = channel.models[model];
+  if (!capability) return '未配置此型号，不能用于新任务';
+  if (!capability.ready) return capability.disabledReason || channel.disabledReason || '型号配置未就绪，不能用于新任务';
+  return '型号配置已就绪';
+}
 
 const EMPTY_VOLCENGINE_IP_CONFIG: VolcengineIpConfig = {
   enabled: false,
@@ -474,10 +563,22 @@ function managedChannelDraftFrom(channel: ManagedImageChannel): ManagedChannelDr
 
 export default function AdminIntegrationsClient() {
   const { confirm, productDialog } = useProductDialog();
+  const { user: currentUser, hasLoadedUser, refreshUser } = useAppSession();
   const [config, setConfig] = useState<CodexConfig>(EMPTY_CONFIG);
   const [muskConfig, setMuskConfig] = useState<MuskConfig>(EMPTY_MUSK_CONFIG);
   const [imageConfig, setImageConfig] = useState<ImageGenerationConfig>(EMPTY_IMAGE_GENERATION_CONFIG);
   const [managedImageChannels, setManagedImageChannels] = useState<ManagedImageChannel[]>([]);
+  const [imageChannels, setImageChannels] = useState<ImageGenerationChannelDto[] | null>(null);
+  const [imageDefaultRoutes, setImageDefaultRoutes] = useState<ImageGenerationDefaultRoutes | null>(null);
+  const [imageRouteDrafts, setImageRouteDrafts] = useState<Partial<Record<ImageStudioModel, string | null>>>({});
+  const [selectedRouteModel, setSelectedRouteModel] = useState<ImageStudioModel>(IMAGE_STUDIO_MODELS[0]);
+  const [routePreferenceUserId, setRoutePreferenceUserId] = useState<string | null>(null);
+  const [routePreferenceNotice, setRoutePreferenceNotice] = useState('');
+  const [routeSaving, setRouteSaving] = useState(false);
+  const [routeReading, setRouteReading] = useState(false);
+  const [routeOutcomeUnknown, setRouteOutcomeUnknown] = useState(false);
+  const [routeOutcomeMessage, setRouteOutcomeMessage] = useState('');
+  const [channelManagementOpen, setChannelManagementOpen] = useState(false);
   const [managedChannelDraft, setManagedChannelDraft] = useState<ManagedChannelDraft | null>(null);
   const [fluxportFlareFixedPointsPreset, setFluxportFlareFixedPointsPreset] = useState<number | null>(null);
   const [managedChannelOutcomeUnknown, setManagedChannelOutcomeUnknown] = useState(false);
@@ -522,6 +623,20 @@ export default function AdminIntegrationsClient() {
   const [h3QueueReason, setH3QueueReason] = useState('');
   const [h3QueueMessage, setH3QueueMessage] = useState<SubmitState>(null);
   const [bananaDirty, setBananaDirty] = useState(false);
+  const imageConfigBaseline = useRef('');
+  const managedChannelDraftBaseline = useRef('');
+  const routePreferenceHydratedUserId = useRef<string | null>(null);
+  const currentUserIdRef = useRef<string | null>(currentUser?.id ?? null);
+  currentUserIdRef.current = currentUser?.id ?? null;
+  const routeRequestSequence = useRef(0);
+  const previousRouteAccountId = useRef<string | null>(currentUser?.id ?? null);
+  const routePreferencesReady = !imageDefaultRoutes || imageChannels === null || !hasLoadedUser || (currentUser?.id
+    ? routePreferenceUserId === currentUser.id
+    : routePreferenceUserId === 'anonymous');
+  const routeDraftSnapshot = Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [
+    `imageRoute:${model}`,
+    imageRouteDrafts[model] ?? null,
+  ]));
   const settingsSubmit = useSettingsPageSubmit({
     codex: { config, entered: Boolean(token), clearToken },
     musk: { config: muskConfig, entered: Boolean(muskApiKey), clearMuskApiKey },
@@ -531,7 +646,79 @@ export default function AdminIntegrationsClient() {
     mediakit: { config: aiMediaKitConfig, entered: Boolean(aiMediaKitApiKey), clearAiMediaKitApiKey },
     h3: { config: h3Config, apiEntered: Boolean(h3ApiToken), adminEntered: Boolean(h3AdminToken), clearH3ApiToken, clearH3AdminToken },
     banana: bananaDirty,
-  }, !loading, '/admin', confirm, muskTesting || h3Testing || h3QueueLoading || managedChannelSaving);
+    ...routeDraftSnapshot,
+  }, !loading, '/admin', confirm, muskTesting || h3Testing || h3QueueLoading || managedChannelSaving || routeSaving || routeReading);
+
+  useEffect(() => {
+    if (!hasLoadedUser) void refreshUser();
+  }, [hasLoadedUser, refreshUser]);
+
+  useEffect(() => {
+    const userId = currentUser?.id ?? null;
+    if (previousRouteAccountId.current === userId) return;
+    previousRouteAccountId.current = userId;
+    routeRequestSequence.current += 1;
+    setRouteSaving(false);
+    setRouteReading(false);
+    setRouteOutcomeUnknown(false);
+    setRouteOutcomeMessage('');
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (!imageDefaultRoutes || imageChannels === null || !hasLoadedUser) return;
+    const userId = currentUser?.id;
+    if (!userId) {
+      if (routePreferenceHydratedUserId.current !== 'anonymous') {
+        setSelectedRouteModel(IMAGE_STUDIO_MODELS[0]);
+        setImageRouteDrafts(Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [model, imageDefaultRoutes.models[model] ?? null])) as Partial<Record<ImageStudioModel, string | null>>);
+      }
+      routePreferenceHydratedUserId.current = 'anonymous';
+      setRoutePreferenceUserId('anonymous');
+      return;
+    }
+    if (routePreferenceHydratedUserId.current === userId) {
+      setRoutePreferenceUserId(userId);
+      return;
+    }
+
+    let stored: StoredImageRoutePreference | null = null;
+    try {
+      const raw = window.localStorage.getItem(`${IMAGE_ROUTE_PREFERENCE_STORAGE_KEY}:${userId}`);
+      const parsed = raw ? JSON.parse(raw) as Partial<StoredImageRoutePreference> : null;
+      if (parsed?.version === 1 && isImageStudioModel(parsed.model)
+        && (parsed.channelId === null || typeof parsed.channelId === 'string')) {
+        stored = { version: 1, model: parsed.model, channelId: parsed.channelId };
+      }
+    } catch {
+      setRoutePreferenceNotice('本机无法读取上次模型与供应商选择，本次仍可正常设置。');
+    }
+
+    const channelExistsForModel = stored?.channelId === null || Boolean(stored && imageChannels.some(channel =>
+      channel.id === stored!.channelId));
+    const validPreference = stored && channelExistsForModel ? stored : null;
+    setSelectedRouteModel(validPreference?.model || IMAGE_STUDIO_MODELS[0]);
+    const nextDrafts = Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [model, imageDefaultRoutes.models[model] ?? null])) as Partial<Record<ImageStudioModel, string | null>>;
+    if (validPreference) nextDrafts[validPreference.model] = validPreference.channelId;
+    setImageRouteDrafts(nextDrafts);
+    routePreferenceHydratedUserId.current = userId;
+    setRoutePreferenceUserId(userId);
+  }, [currentUser?.id, hasLoadedUser, imageChannels, imageDefaultRoutes]);
+
+  useEffect(() => {
+    const userId = currentUser?.id;
+    if (!userId || routePreferenceUserId !== userId || !imageDefaultRoutes || imageChannels === null) return;
+    try {
+      const preference: StoredImageRoutePreference = {
+        version: 1,
+        model: selectedRouteModel,
+        channelId: imageRouteDrafts[selectedRouteModel] ?? null,
+      };
+      window.localStorage.setItem(`${IMAGE_ROUTE_PREFERENCE_STORAGE_KEY}:${userId}`, JSON.stringify(preference));
+      setRoutePreferenceNotice('');
+    } catch {
+      setRoutePreferenceNotice('本机无法记住上次模型与供应商选择，本次设置仍保留在当前页面。');
+    }
+  }, [currentUser?.id, imageChannels, imageDefaultRoutes, imageRouteDrafts, routePreferenceUserId, selectedRouteModel]);
 
   const statusText = useMemo(() => {
     if (config.ready) return '已启用，可被 Codex 调用';
@@ -568,6 +755,19 @@ export default function AdminIntegrationsClient() {
     [imageConfig.provider],
   );
   const isSeedreamImageModel = imageConfig.provider === 'seedream';
+  const imageRouteServerChoice = imageDefaultRoutes?.models[selectedRouteModel] ?? null;
+  const imageRouteCurrentChoice = imageRouteDrafts[selectedRouteModel] ?? null;
+  const imageRouteCurrentChannelId = imageRouteCurrentChoice ?? originalImageChannelIdForModel(selectedRouteModel);
+  const imageRouteCurrentChannel = imageChannels?.find(channel => channel.id === imageRouteCurrentChannelId);
+  const imageRouteDefaultActualChannel = imageChannels?.find(channel => channel.id === originalImageChannelIdForModel(selectedRouteModel));
+  const sharedSupplierName = IMAGE_CHANNEL_OPTIONS.find(option => option.provider === imageConfig.provider)?.label
+    || imageRouteCurrentChannel?.supplierName
+    || '共享图形 API';
+  const selectedManagedImageChannel = imageRouteCurrentChannelId !== 'shared' && imageRouteCurrentChannelId !== 'banana'
+    ? managedImageChannels.find(channel => channel.id === imageRouteCurrentChannelId)
+    : undefined;
+  const selectedManagedModelCapability = selectedManagedImageChannel?.models[selectedRouteModel];
+  const imageRouteHasChanges = imageRouteCurrentChoice !== imageRouteServerChoice;
 
   const volcengineStatusText = useMemo(() => {
     if (volcengineConfig.ready) return '已启用';
@@ -596,7 +796,9 @@ export default function AdminIntegrationsClient() {
     return '健康检查未通过';
   }, [h3Config]);
 
-  const managedDraftModelsForSummary = managedChannelDraft ? managedDraftModels(managedChannelDraft) : [];
+  const managedDraftModelsForSummary = managedChannelDraft
+    ? managedDraftModels(managedChannelDraft).filter(model => model === selectedRouteModel)
+    : [];
   const managedDraftSelectedCount = managedChannelDraft
     ? managedDraftModelsForSummary.filter(model => managedChannelDraft.models[model].enabled).length
     : 0;
@@ -662,8 +864,23 @@ export default function AdminIntegrationsClient() {
       }
       setConfig(codexData.config || EMPTY_CONFIG);
       setMuskConfig(muskData.config || EMPTY_MUSK_CONFIG);
-      setImageConfig(imageData.config || EMPTY_IMAGE_GENERATION_CONFIG);
+      const loadedImageConfig = imageData.config || EMPTY_IMAGE_GENERATION_CONFIG;
+      setImageConfig(loadedImageConfig);
+      imageConfigBaseline.current = JSON.stringify(loadedImageConfig);
       setManagedImageChannels(Array.isArray(imageData.channels) ? imageData.channels : []);
+      const imageChannelsData = imageData.imageChannels && typeof imageData.imageChannels === 'object'
+        ? imageData.imageChannels as { items?: unknown; defaultRoutes?: unknown }
+        : null;
+      const loadedImageRoutes = parseImageGenerationDefaultRoutes(imageData.defaultRoutes ?? imageChannelsData?.defaultRoutes);
+      const loadedImageChannelOptions = parseImageGenerationChannelOptions(imageChannelsData?.items);
+      setImageDefaultRoutes(loadedImageRoutes);
+      setImageChannels(loadedImageChannelOptions);
+      if (loadedImageRoutes) {
+        setImageRouteDrafts(Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [
+          model,
+          loadedImageRoutes.models[model] ?? null,
+        ])) as Partial<Record<ImageStudioModel, string | null>>);
+      }
       const flareFixedPoints = imageData.managedChannelPresets?.fluxportFlareFixedPoints;
       setFluxportFlareFixedPointsPreset(Number.isSafeInteger(flareFixedPoints) && flareFixedPoints >= 0 ? flareFixedPoints : null);
       setVolcengineConfig(volcengineData.config || EMPTY_VOLCENGINE_IP_CONFIG);
@@ -673,6 +890,140 @@ export default function AdminIntegrationsClient() {
       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '读取配置失败' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const readImageRouteConfig = async () => {
+    const response = await fetch('/api/admin/integrations/image-generation', { cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '重新读取图片供应商配置失败');
+    const imageChannelsData = data.imageChannels && typeof data.imageChannels === 'object'
+      ? data.imageChannels as { items?: unknown; defaultRoutes?: unknown }
+      : null;
+    const routes = parseImageGenerationDefaultRoutes(data.defaultRoutes ?? imageChannelsData?.defaultRoutes);
+    if (!routes) throw new Error('没有收到可核对的图片默认供应商配置');
+    return {
+      routes,
+      channels: parseImageGenerationChannelOptions(imageChannelsData?.items),
+      managedChannels: Array.isArray(data.channels) ? data.channels.filter(isManagedImageChannel) : null,
+      data,
+    };
+  };
+
+  const applyImageRouteRead = (
+    routes: ImageGenerationDefaultRoutes,
+    channels: ImageGenerationChannelDto[] | null,
+    preserveDraftModel?: ImageStudioModel,
+  ) => {
+    const previousRoutes = imageDefaultRoutes;
+    setImageDefaultRoutes(routes);
+    if (channels) setImageChannels(channels);
+    setImageRouteDrafts(current => Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => {
+      const previousDraft = current[model] ?? null;
+      const previousDefault = previousRoutes?.models[model] ?? null;
+      const keepDraft = model === preserveDraftModel || previousDraft !== previousDefault;
+      return [model, keepDraft ? previousDraft : routes.models[model] ?? null];
+    })) as Partial<Record<ImageStudioModel, string | null>>);
+  };
+
+  const reReadImageRouteAfterUnknown = async () => {
+    const requestId = ++routeRequestSequence.current;
+    const requestUserId = currentUserIdRef.current;
+    const requestIsCurrent = () => routeRequestSequence.current === requestId && currentUserIdRef.current === requestUserId;
+    setRouteReading(true);
+    try {
+      const result = await readImageRouteConfig();
+      if (!requestIsCurrent()) return;
+      const observedChoice = result.routes.models[selectedRouteModel] ?? null;
+      const requestedChoice = imageRouteDrafts[selectedRouteModel] ?? null;
+      applyImageRouteRead(result.routes, result.channels, selectedRouteModel);
+      if (result.managedChannels) setManagedImageChannels(result.managedChannels);
+      setRouteOutcomeUnknown(false);
+      setRouteOutcomeMessage('');
+      if (observedChoice === requestedChoice) {
+        setImageRouteDrafts(current => ({ ...current, [selectedRouteModel]: observedChoice }));
+        setSubmitState({ type: 'success', message: '已从后台配置核对到该模型的默认供应商已更新。' });
+      } else {
+        setSubmitState({ type: 'error', message: '已重新读取：后台默认供应商未变，当前选择仍保留为未保存草稿，可核对后再保存。' });
+      }
+    } catch (error) {
+      if (requestIsCurrent()) setRouteOutcomeMessage(error instanceof Error ? error.message : '重新读取失败，保存结果仍未确认。');
+    } finally {
+      if (requestIsCurrent()) setRouteReading(false);
+    }
+  };
+
+  const saveImageDefaultRoute = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!routePreferencesReady || !imageDefaultRoutes || !imageChannels || routeOutcomeUnknown || !settingsSubmit.start()) return;
+    let saved = false;
+    let requestSent = false;
+    setRouteSaving(true);
+    setRouteOutcomeMessage('');
+    setSubmitState(null);
+    const channelId = imageRouteCurrentChoice;
+    const model = selectedRouteModel;
+    const requestId = ++routeRequestSequence.current;
+    const requestUserId = currentUserIdRef.current;
+    const requestIsCurrent = () => routeRequestSequence.current === requestId && currentUserIdRef.current === requestUserId;
+    try {
+      requestSent = true;
+      const response = await fetch('/api/admin/integrations/image-generation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channel_action: 'set-model-default',
+          model,
+          channelId,
+          expectedRevision: imageDefaultRoutes.revision,
+        }),
+      });
+      const data = await response.json().catch(() => null) as Record<string, unknown> | null;
+      if (!requestIsCurrent()) return;
+      const returnedRoutes = parseImageGenerationDefaultRoutes(data?.defaultRoutes);
+      if (!response.ok) {
+        if (response.status >= 500) {
+          setRouteOutcomeUnknown(true);
+          setRouteOutcomeMessage(`${typeof data?.error === 'string' ? data.error : '保存请求未确认完成'}。请重新读取后台结果；读取确认前不能重复提交。`);
+        } else if (response.status === 409) {
+          setRouteOutcomeMessage('后台默认设置已被更新。正在重新读取最新版本；当前选择会保留。');
+          try {
+            const result = await readImageRouteConfig();
+            if (!requestIsCurrent()) return;
+            applyImageRouteRead(result.routes, result.channels, model);
+            if (result.managedChannels) setManagedImageChannels(result.managedChannels);
+            setRouteOutcomeMessage('已读取最新版本。当前选择仍保留为草稿，可核对后再保存。');
+          } catch {
+            if (requestIsCurrent()) setRouteOutcomeMessage('后台默认设置已被更新，但最新版本暂时无法读取。当前选择已保留；请先重新读取后再保存。');
+          }
+        } else {
+          setRouteOutcomeMessage(typeof data?.error === 'string' ? data.error : '保存默认供应商失败；当前选择仍保留。');
+        }
+        return;
+      }
+      if (!returnedRoutes || data?.ok !== true) {
+        setRouteOutcomeUnknown(true);
+        setRouteOutcomeMessage('请求已返回，但没有收到可核对的保存结果。请重新读取后台结果；读取确认前不能重复提交。');
+        return;
+      }
+      applyImageRouteRead(returnedRoutes, imageChannels);
+      setImageRouteDrafts(current => ({ ...current, [model]: returnedRoutes.models[model] ?? null }));
+      setRouteOutcomeUnknown(false);
+      setRouteOutcomeMessage('');
+      setSubmitState({ type: 'success', message: '已保存。今后未主动另选供应商的新任务将使用此默认；用户主动选择仍优先。' });
+      saved = true;
+    } catch (error) {
+      if (!requestIsCurrent()) return;
+      if (requestSent) {
+        setRouteOutcomeUnknown(true);
+        setRouteOutcomeMessage(`${error instanceof Error ? error.message : '网络或响应异常'}。保存结果暂未确认；请重新读取后台结果，不要重复提交。`);
+      } else {
+        setRouteOutcomeMessage(error instanceof Error ? error.message : '保存默认供应商失败；当前选择仍保留。');
+      }
+    } finally {
+      const requestStillCurrent = requestIsCurrent();
+      if (requestStillCurrent) setRouteSaving(false);
+      settingsSubmit.finish(`imageRoute:${model}`, requestStillCurrent && saved);
     }
   };
 
@@ -786,6 +1137,7 @@ export default function AdminIntegrationsClient() {
         return;
       }
       setImageConfig(data.config || imageConfig);
+      imageConfigBaseline.current = JSON.stringify(data.config || imageConfig);
       setImageApiKey('');
       setClearImageApiKey(false);
       setSubmitState({ type: 'success', message: '图形生成 API 配置已保存到后台配置。' });
@@ -803,8 +1155,78 @@ export default function AdminIntegrationsClient() {
     const data = await response.json();
     if (!response.ok || !Array.isArray(data.channels)) throw new Error(data.error || '读取图片供应商配置失败');
     setManagedImageChannels(data.channels);
+    const imageChannelsData = data.imageChannels && typeof data.imageChannels === 'object'
+      ? data.imageChannels as { items?: unknown; defaultRoutes?: unknown }
+      : null;
+    const routes = parseImageGenerationDefaultRoutes(data.defaultRoutes ?? imageChannelsData?.defaultRoutes);
+    if (routes) applyImageRouteRead(routes, parseImageGenerationChannelOptions(imageChannelsData?.items) ?? imageChannels);
     const flareFixedPoints = data.managedChannelPresets?.fluxportFlareFixedPoints;
     setFluxportFlareFixedPointsPreset(Number.isSafeInteger(flareFixedPoints) && flareFixedPoints >= 0 ? flareFixedPoints : null);
+  };
+
+  const openManagedChannelDraft = (draft: ManagedChannelDraft) => {
+    managedChannelDraftBaseline.current = JSON.stringify(draft);
+    setManagedChannelDraft(draft);
+    setChannelManagementOpen(true);
+  };
+
+  const managedChannelDraftIsDirty = () => Boolean(managedChannelDraft)
+    && JSON.stringify(managedChannelDraft) !== managedChannelDraftBaseline.current;
+
+  const discardCurrentSupplierDraft = () => {
+    if (imageRouteCurrentChannelId === 'shared') {
+      try {
+        if (imageConfigBaseline.current) setImageConfig(JSON.parse(imageConfigBaseline.current) as ImageGenerationConfig);
+      } catch {
+        // The baseline is created from this page's own parsed API response.
+      }
+      setImageApiKey('');
+      setClearImageApiKey(false);
+    }
+    if (imageRouteCurrentChannelId === 'banana') setBananaDirty(false);
+    if (managedChannelDraft) {
+      managedChannelDraftBaseline.current = '';
+      setManagedChannelDraft(null);
+    }
+  };
+
+  const canSwitchImageRouteView = async (nextChannelId: string) => {
+    if (nextChannelId === imageRouteCurrentChannelId) return true;
+    const sharedDirty = imageRouteCurrentChannelId === 'shared'
+      && (Boolean(imageApiKey.trim()) || clearImageApiKey || Boolean(imageConfigBaseline.current && JSON.stringify(imageConfig) !== imageConfigBaseline.current));
+    const bananaIsDirty = imageRouteCurrentChannelId === 'banana' && bananaDirty;
+    const managedIsDirty = managedChannelDraftIsDirty();
+    if (!sharedDirty && !bananaIsDirty && !managedIsDirty) {
+      if (managedChannelDraft) {
+        managedChannelDraftBaseline.current = '';
+        setManagedChannelDraft(null);
+      }
+      return true;
+    }
+    const confirmed = await confirm('切换到另一供应商会放弃当前未保存的供应商配置。其他后台设置不会改动。要继续吗？', {
+      title: '放弃修改', confirmLabel: '放弃并切换', danger: true,
+    });
+    if (!confirmed) return false;
+    discardCurrentSupplierDraft();
+    return true;
+  };
+
+  const selectImageRouteModel = async (nextModel: ImageStudioModel) => {
+    if (!isImageStudioModel(nextModel)) return;
+    const nextChoice = imageRouteDrafts[nextModel] ?? null;
+    const nextChannelId = nextChoice ?? originalImageChannelIdForModel(nextModel);
+    if (!await canSwitchImageRouteView(nextChannelId)) return;
+    setSelectedRouteModel(nextModel);
+    setRouteOutcomeMessage('');
+  };
+
+  const selectImageRouteChannel = async (value: string) => {
+    const nextChoice = value === '' ? null : value;
+    if (nextChoice === 'original') return;
+    const nextChannelId = nextChoice ?? originalImageChannelIdForModel(selectedRouteModel);
+    if (!await canSwitchImageRouteView(nextChannelId)) return;
+    setImageRouteDrafts(current => ({ ...current, [selectedRouteModel]: nextChoice }));
+    setRouteOutcomeMessage('');
   };
 
   const applyFluxportFlareDraftPreset = () => {
@@ -899,12 +1321,19 @@ export default function AdminIntegrationsClient() {
       }
       const savedChannel = data.channel;
       setManagedImageChannels(current => withManagedChannelReceipt(current, savedChannel));
+      managedChannelDraftBaseline.current = '';
       setManagedChannelDraft(null);
       setManagedChannelOutcomeUnknown(false);
       setManagedChannelReReadSucceeded(false);
       setManagedChannelOutcomeMessage('');
-      setSubmitState({ type: 'success', message: managedChannelSaveMessage(savedChannel, managedChannelDraft.id ? 'update' : 'save') });
       saved = true;
+      let refreshWarning = '';
+      try {
+        await refreshManagedImageChannels();
+      } catch {
+        refreshWarning = '；供应商列表暂未刷新，可重新读取配置';
+      }
+      setSubmitState({ type: 'success', message: managedChannelSaveMessage(savedChannel, managedChannelDraft.id ? 'update' : 'save') + refreshWarning });
     } catch (error) {
       if (requestSent) {
         markManagedChannelOutcomeUnknown('网络或响应异常，保存结果暂未确认。请重新读取配置列表，核对后再继续，不要直接重复提交。');
@@ -953,8 +1382,14 @@ export default function AdminIntegrationsClient() {
       setManagedChannelOutcomeUnknown(false);
       setManagedChannelReReadSucceeded(false);
       setManagedChannelOutcomeMessage('');
-      setSubmitState({ type: 'success', message: managedChannelSaveMessage(savedChannel, action) });
       saved = true;
+      let refreshWarning = '';
+      try {
+        await refreshManagedImageChannels();
+      } catch {
+        refreshWarning = '；供应商列表暂未刷新，可重新读取配置';
+      }
+      setSubmitState({ type: 'success', message: managedChannelSaveMessage(savedChannel, action) + refreshWarning });
     } catch (error) {
       if (requestSent) {
         markManagedChannelOutcomeUnknown('网络或响应异常，操作结果暂未确认。请重新读取配置列表，核对后再继续，不要直接重复操作。');
@@ -965,24 +1400,6 @@ export default function AdminIntegrationsClient() {
       setManagedChannelSaving(false);
       settingsSubmit.finish('managedChannel', saved);
     }
-  };
-
-  const applyImageModel = (model: string) => {
-    const option = IMAGE_MODEL_OPTIONS.find((item) => item.model === model) || IMAGE_MODEL_OPTIONS[0];
-    setImageConfig((prev) => ({
-      ...prev,
-      default_model: option.model,
-      max_outputs_per_request: option.maxOutputs,
-      default_size: option.defaultSize,
-      output_format: prev.output_format || 'png',
-      response_format: prev.response_format || 'url',
-      provider: option.model === 'doubao-seedream-5-0-pro-260628' ? 'seedream' : prev.provider === 'seedream' ? 'musk' : prev.provider,
-      base_url: option.model === 'doubao-seedream-5-0-pro-260628' ? IMAGE_CHANNEL_OPTIONS[2].baseUrl : prev.provider === 'seedream' ? IMAGE_CHANNEL_OPTIONS[0].baseUrl : prev.base_url,
-      watermark: prev.provider === 'seedream' ? false : prev.watermark,
-      supports_text_to_image: true,
-      supports_image_to_image: true,
-      supports_async_task: option.supportsAsyncTask,
-    }));
   };
 
   const applyImageChannel = (provider: ImageGenerationProvider) => {
@@ -1983,14 +2400,87 @@ export default function AdminIntegrationsClient() {
         )}
       </form>
 
-      <BananaImageChannel onDirtyChange={setBananaDirty} onSaveStart={settingsSubmit.start} onSaveFinish={saved => settingsSubmit.finish('banana', saved)} />
-
-      <form className="card codex-config-form" onSubmit={saveImageConfig}>
+      <form className="card codex-config-form" onSubmit={saveImageDefaultRoute}>
         <div className="codex-config-head">
           <div>
-            <h2 className="section-title mb-0">图片模型配置</h2>
+            <h2 className="section-title mb-0">图片默认供应商</h2>
             <p className="text-gray text-sm mt-2">
-              保存文生图、图生图和首尾帧草图模型；普通生成页和无限画布后续都从这里读取。
+              为所选型号设置默认供应商，仅影响之后未主动另选供应商的新任务；用户主动选择仍优先。保存这里不会启用通道、写入 Key 或修改供应商配置。
+            </p>
+          </div>
+        </div>
+        <div className="codex-config-grid">
+          <div className="form-group">
+            <label className="form-label" htmlFor="image-route-model">图片模型</label>
+            <select id="image-route-model" className="input" value={selectedRouteModel}
+              disabled={!routePreferencesReady || routeSaving || routeReading || routeOutcomeUnknown}
+              onChange={event => void selectImageRouteModel(event.target.value as ImageStudioModel)}>
+              {IMAGE_STUDIO_MODELS.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model]}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="image-route-channel">默认供应商</label>
+            <select id="image-route-channel" className="input" value={imageRouteCurrentChoice ?? ''}
+              disabled={!routePreferencesReady || routeSaving || routeReading || routeOutcomeUnknown || imageChannels === null}
+              onChange={event => void selectImageRouteChannel(event.target.value)}>
+              <option value="">原默认（实际：{imageRouteDefaultActualChannel?.supplierName
+                || (originalImageChannelIdForModel(selectedRouteModel) === 'banana' ? 'Banana' : sharedSupplierName)}）</option>
+              {imageChannels?.map(channel => (
+                <option key={channel.id} value={channel.id}>
+                  {channel.id === 'shared'
+                    ? `${sharedSupplierName}（共享图形 API）`
+                    : channel.id === 'banana'
+                      ? 'Banana 专用通道'
+                      : `${channel.supplierName} · ${channel.label}`}
+                  {' · '}{imageChannelStatus(channel, selectedRouteModel)}
+                </option>
+              ))}
+              {imageRouteCurrentChoice && !imageChannels?.some(channel => channel.id === imageRouteCurrentChoice) && (
+                <option value={imageRouteCurrentChoice} disabled>当前配置不存在（不能生成）</option>
+              )}
+            </select>
+            <small className="text-gray">
+              当前：{imageRouteCurrentChannelId === 'shared'
+                ? `${sharedSupplierName}（共享图形 API）`
+                : imageRouteCurrentChannelId === 'banana'
+                  ? 'Banana 专用通道'
+                  : imageRouteCurrentChannel?.supplierName || imageRouteCurrentChannel?.label || '配置不存在'}
+              {' · '}{imageChannels === null ? '通道信息未读取，暂不能确认可用状态' : imageChannelStatus(imageRouteCurrentChannel, selectedRouteModel)}
+            </small>
+          </div>
+        </div>
+        {routePreferenceNotice && <p className="text-gray text-sm" role="status">{routePreferenceNotice}</p>}
+        {!imageDefaultRoutes || imageChannels === null ? (
+          <p className="text-gray text-sm" role="status">尚未读取到默认供应商信息；当前不能修改路由。其他接口配置仍可单独保存。</p>
+        ) : null}
+        {routeOutcomeUnknown && (
+          <div className="alert alert-error mt-3" role="alert">
+            {routeOutcomeMessage || '保存结果暂未确认。'}
+            <div className="codex-config-actions mt-2">
+              <button className="btn btn-secondary" type="button" disabled={routeSaving || routeReading} onClick={() => void reReadImageRouteAfterUnknown()}>
+                {routeReading ? '正在重新读取' : '重新读取后台结果'}
+              </button>
+            </div>
+          </div>
+        )}
+        {!routeOutcomeUnknown && routeOutcomeMessage && <p className="text-gray text-sm" role="status">{routeOutcomeMessage}</p>}
+        <div className="codex-config-actions">
+          <button className="btn btn-primary sd2-loading-surface" type="submit" disabled={!imageDefaultRoutes || !imageChannels || !routePreferencesReady || !imageRouteHasChanges || routeSaving || routeOutcomeUnknown} data-busy={routeSaving}>
+            {routeSaving ? '正在保存' : '保存该型号默认供应商'}
+          </button>
+        </div>
+      </form>
+
+      {imageRouteCurrentChannelId === 'banana' && (
+        <BananaImageChannel onDirtyChange={setBananaDirty} onSaveStart={settingsSubmit.start} onSaveFinish={saved => settingsSubmit.finish('banana', saved)} />
+      )}
+
+      {imageRouteCurrentChannelId === 'shared' && <form className="card codex-config-form" onSubmit={saveImageConfig}>
+        <div className="codex-config-head">
+          <div>
+            <h2 className="section-title mb-0">共享图形 API 配置</h2>
+            <p className="text-gray text-sm mt-2">
+              这里只编辑共享图形 API 本身；上方默认供应商单独保存，用户主动选择供应商仍优先。
             </p>
           </div>
           <label className="toggle-switch" aria-label="启用图形生成 API">
@@ -2004,61 +2494,25 @@ export default function AdminIntegrationsClient() {
         </div>
 
         <div className="codex-config-grid">
-          <div className="form-group image-model-field">
-            <label className="form-label" htmlFor="image-channel">图片 API 通道</label>
+          <details className="form-group">
+            <summary style={{ cursor: 'pointer' }}>
+              <strong>共享 API 协议配置（影响该通道）</strong>
+              <span className="text-gray"> · 当前供应商：{sharedSupplierName}</span>
+            </summary>
+            <p className="text-gray text-sm mt-2">更改并保存后，只更新“共享图形 API”配置，不会改上方各型号的默认供应商选择。</p>
+            <label className="form-label mt-2" htmlFor="image-channel">共享 API 实际供应商</label>
             <select
               id="image-channel"
               className="input"
               value={imageConfig.provider}
               onChange={(event) => applyImageChannel(event.target.value as ImageGenerationProvider)}
             >
-              {IMAGE_CHANNEL_OPTIONS.map((option) => (
-                <option key={option.provider} value={option.provider}>
-                  {option.label}
-                </option>
-              ))}
+              {IMAGE_CHANNEL_OPTIONS.map((option) => <option key={option.provider} value={option.provider}>{option.label}</option>)}
             </select>
-            <small className="text-gray">GPT Image 等模型使用此通道；Banana 2 / Pro 始终使用上方 Banana 专用通道，均不共用 GPT-5.5 的 Key。</small>
-            <label className="form-label mt-3" htmlFor="image-default-model">图片模型</label>
-            <select
-              id="image-default-model"
-              className="input"
-              value={imageConfig.default_model}
-              onChange={(event) => applyImageModel(event.target.value)}
-            >
-              {IMAGE_MODEL_OPTIONS.map((option) => <option key={option.model} value={option.model}>{option.label}</option>)}
-            </select>
-            <div className="image-model-options" aria-label="图片模型能力">
-              {IMAGE_MODEL_OPTIONS.map((option) => {
-                const active = imageConfig.default_model === option.model;
-                const modelCost = IMAGE_STUDIO_MODEL_COST_USD[option.model as ImageStudioModel];
-                const modelCostText = modelCost === null ? '人民币价格待设置'
-                  : formatCurrencyAmountWithFixedCny(modelCost, 'USD');
-                return (
-                  <button
-                    key={option.model}
-                    className={`image-model-option${active ? ' is-active' : ''}`}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => applyImageModel(option.model)}
-                  >
-                    <span>{option.label}</span>
-                    <small>{option.summary}</small>
-                    {option.model in IMAGE_STUDIO_MODEL_COST_USD && (
-                      <small>{modelCostText.startsWith('¥') ? `${modelCostText} / 张` : modelCostText}</small>
-                    )}
-                    <em>{option.tags.join(' / ')}</em>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="image-base-url">API 地址</label>
+            <label className="form-label mt-2" htmlFor="image-api-endpoint">常用 API 地址</label>
             <select
               id="image-api-endpoint"
-              className="input mb-2"
+              className="input"
               value={IMAGE_API_ENDPOINT_OPTIONS.some((option) => option.value === imageConfig.base_url) ? imageConfig.base_url : ''}
               onChange={(event) => {
                 const channel = IMAGE_CHANNEL_OPTIONS.find(option => option.baseUrl === event.target.value);
@@ -2068,6 +2522,10 @@ export default function AdminIntegrationsClient() {
               <option value="">自定义地址</option>
               {IMAGE_API_ENDPOINT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
+          </details>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="image-base-url">API 地址</label>
             <input
               id="image-base-url"
               className="input"
@@ -2079,7 +2537,7 @@ export default function AdminIntegrationsClient() {
           </div>
 
           <div className="form-group">
-            <label className="form-label" htmlFor="image-model-id">上游模型 ID</label>
+            <label className="form-label" htmlFor="image-model-id">共享 API 上游模型 ID</label>
             <input
               id="image-model-id"
               className="input"
@@ -2090,6 +2548,7 @@ export default function AdminIntegrationsClient() {
               maxLength={80}
               required
             />
+            <small className="text-gray">这是共享 API 的上游参数，不是上方全站默认路由的图片型号。</small>
           </div>
 
           <div className="form-group">
@@ -2271,81 +2730,92 @@ export default function AdminIntegrationsClient() {
             {imageSaving ? '正在保存' : '保存图形生成 API'}
           </button>
         </div>
-      </form>
+      </form>}
 
-      <section className="card codex-config-form" aria-labelledby="managed-image-channels-title">
-        <div className="codex-config-head">
-          <div>
-            <h2 id="managed-image-channels-title" className="section-title mb-0">图片供应商通道</h2>
-            <p className="text-gray text-sm mt-2">
-              为 FluxPort 或其他兼容接口单独保存 Key、请求协议和已确认能力。留空表示未知，不会自动开放；Key 不会回显。
-            </p>
+      {imageRouteCurrentChannelId !== 'shared' && imageRouteCurrentChannelId !== 'banana' && (
+        <section className="card codex-config-form" aria-labelledby="selected-image-channel-title">
+          <div className="codex-config-head">
+            <div>
+              <h2 id="selected-image-channel-title" className="section-title mb-0">当前供应商配置</h2>
+              <p className="text-gray text-sm mt-2 mb-0">
+                {selectedManagedImageChannel?.supplierName || imageRouteCurrentChannel?.supplierName || '供应商'}
+                {selectedManagedImageChannel?.label || imageRouteCurrentChannel?.label ? ` · ${selectedManagedImageChannel?.label || imageRouteCurrentChannel?.label}` : ''}
+              </p>
+            </div>
+            {selectedManagedImageChannel && (
+              <button className="btn btn-secondary" type="button" disabled={managedChannelSaving || managedChannelOutcomeUnknown}
+                onClick={() => openManagedChannelDraft(managedChannelDraftFrom(selectedManagedImageChannel))}>
+                编辑当前配置
+              </button>
+            )}
           </div>
+          <div className="codex-config-status">
+            <div><span className="info-label">用于此型号</span><strong>{imageChannels === null ? '通道信息未读取，暂不能确认' : imageChannelStatus(imageRouteCurrentChannel, selectedRouteModel)}</strong></div>
+            <div><span className="info-label">通道状态</span><strong>{selectedManagedImageChannel?.deleted ? '已归档' : selectedManagedImageChannel?.enabled ? '已启用' : selectedManagedImageChannel ? '已停用' : '配置不存在'}</strong></div>
+            <div><span className="info-label">API Key</span><strong>{selectedManagedImageChannel ? selectedManagedImageChannel.apiKeyConfigured ? '已设置' : '未设置' : '未确认'}</strong></div>
+            <div><span className="info-label">{IMAGE_STUDIO_MODEL_LABELS[selectedRouteModel]}规格/计费</span><strong>{selectedManagedModelCapability
+              ? `${selectedManagedModelCapability.qualities?.join(' / ') || '质量未知'} · ${selectedManagedModelCapability.resolutions?.join(' / ') || '分辨率未知'} · ${selectedManagedModelCapability.ratios?.join(' / ') || '比例未知'} · ${selectedManagedModelCapability.billingMode === 'fixed' ? `固定 ${selectedManagedModelCapability.fixedPoints ?? '未知'} 点/张` : selectedManagedModelCapability.billingMode === 'actual' ? '按实际账单' : '计费待确认'}`
+              : '未配置此型号'}</strong></div>
+          </div>
+          {!selectedManagedImageChannel && <p className="text-gray text-sm mt-2 mb-0">供应商状态详情未读取到；此选择不会因此被标为可用。</p>}
+        </section>
+      )}
+
+      <details className="card codex-config-form" open={channelManagementOpen} onToggle={event => setChannelManagementOpen(event.currentTarget.open)}>
+        <summary style={{ cursor: 'pointer' }}>
+          <strong>管理供应商配置</strong>
+          <span className="text-gray"> · 新增、编辑、停用、归档或恢复；此处不决定各型号默认供应商</span>
+        </summary>
+        <div className="codex-config-head mt-3">
+          <p className="text-gray text-sm mt-0 mb-0">
+            每个供应商的 Key、协议和型号能力单独保存。未配置或未核实的通道仍可被选作默认，但会明确显示不能用于新任务。
+          </p>
           <button
             className="btn btn-primary"
             type="button"
             disabled={managedChannelSaving || managedChannelOutcomeUnknown}
-            onClick={() => setManagedChannelDraft(emptyManagedChannelDraft())}
+            onClick={() => openManagedChannelDraft(emptyManagedChannelDraft())}
           >
             新增供应商
           </button>
         </div>
 
-        <div className="codex-config-grid">
+        <div className="mt-3" role="list" aria-label="已保存供应商配置">
           {managedImageChannels.map(channel => (
-            <article key={channel.id} className="form-group" style={{ border: '1px solid var(--border-color, #d8dee8)', borderRadius: 10, padding: 16 }}>
-              <div className="codex-config-head">
-                <div>
-                  <strong>{channel.label}</strong>
-                  <p className="text-gray text-sm mt-1 mb-0">
-                    {channel.supplierName} · {channel.protocol === 'mixed' ? '预设混合协议' : channel.protocol === 'gemini_native' ? 'Gemini 原生协议' : 'OpenAI 图片协议'}
-                  </p>
-                </div>
-                <strong>{channel.deleted ? '已归档' : channel.enabled ? '已启用' : '已停用'}</strong>
-              </div>
-              <p className="text-gray text-sm mt-2 mb-2" style={{ overflowWrap: 'anywhere' }}>
-                {channel.baseUrl} · API Key {channel.apiKeyConfigured ? '已设置' : '未设置'}
-              </p>
-              <p className="text-gray text-sm mt-0">
-                可用于新任务的型号：{managedChannelReadyModels(channel).join('、') || '暂无'}
-              </p>
-              {channel.enabled && managedChannelReadyModels(channel).length === 0 && (
-                <p className="text-gray text-sm mt-0">
-                  通道已启用，但当前没有就绪型号，暂不能用于新任务。{managedChannelPendingModels(channel).length
-                    ? `待补：${managedChannelPendingModels(channel).join('；')}`
-                    : '尚未勾选型号。'}
+            <div key={channel.id} role="listitem" className="codex-config-actions" style={{ justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border-color, #d8dee8)', padding: '12px 0' }}>
+              <div>
+                <strong>{channel.label}</strong>
+                <p className="text-gray text-sm mt-1 mb-0">
+                  {channel.supplierName} · {channel.deleted ? '已归档' : channel.enabled ? '已启用' : '已停用'} · API Key {channel.apiKeyConfigured ? '已设置' : '未设置'} · 就绪型号 {managedChannelReadyModels(channel).join('、') || '暂无'}
                 </p>
-              )}
+              </div>
               <div className="codex-config-actions">
-                    <button className="btn btn-secondary" type="button" disabled={managedChannelSaving || managedChannelOutcomeUnknown} onClick={() => setManagedChannelDraft(managedChannelDraftFrom(channel))}>
-                  编辑
-                </button>
+                <button className="btn btn-secondary" type="button" disabled={managedChannelSaving || managedChannelOutcomeUnknown}
+                  onClick={() => openManagedChannelDraft(managedChannelDraftFrom(channel))}>编辑</button>
                 {channel.deleted ? (
                   <button className="btn btn-secondary" type="button" disabled={managedChannelSaving || managedChannelOutcomeUnknown} onClick={() => void runManagedChannelAction(channel, 'restore')}>
                     恢复（保持停用）
                   </button>
                 ) : (
                   <>
-                    <button className="btn btn-secondary" type="button" disabled={managedChannelSaving || managedChannelOutcomeUnknown} onClick={() => void runManagedChannelAction(channel, 'update', !channel.enabled)}>
+                    <button className="btn btn-secondary" type="button" disabled={managedChannelSaving || managedChannelOutcomeUnknown}
+                      onClick={() => void runManagedChannelAction(channel, 'update', !channel.enabled)}>
                       {channel.enabled ? '停用' : '启用'}
                     </button>
-                    <button
-                      className="btn btn-secondary"
-                      type="button"
-                      disabled={managedChannelSaving || managedChannelOutcomeUnknown || channel.id === 'fluxport'}
+                    <button className="btn btn-secondary" type="button" disabled={managedChannelSaving || managedChannelOutcomeUnknown || channel.id === 'fluxport'}
                       onClick={async () => {
                         if (await confirm(`归档“${channel.label}”？已受理的任务仍会保留原配置，归档后不能新建任务。`, { title: '归档配置', confirmLabel: '归档', danger: true })) {
                           await runManagedChannelAction(channel, 'archive');
                         }
-                      }}
-                    >
+                      }}>
                       归档
                     </button>
                   </>
                 )}
               </div>
-            </article>
+            </div>
           ))}
+          {managedImageChannels.length === 0 && <p className="text-gray text-sm">暂无额外供应商配置。</p>}
         </div>
 
         {managedChannelDraft && (
@@ -2440,9 +2910,9 @@ export default function AdminIntegrationsClient() {
               <p className="text-gray text-sm mt-1">所有能力都需按供应商资料逐项确认；列表留空或数量未知时保持不可用。固定点数填 0 表示明确免费，不代表未知价格。</p>
             </div>
             <div className="codex-config-grid">
-              {IMAGE_STUDIO_MODELS.filter(model => managedChannelDraft.supplierKind === 'fluxport'
+              {IMAGE_STUDIO_MODELS.filter(model => model === selectedRouteModel && (managedChannelDraft.supplierKind === 'fluxport'
                 || managedChannelDraft.protocol === 'gemini_native' && model.startsWith('gemini-')
-                || managedChannelDraft.protocol === 'openai_images' && model.startsWith('gpt-image-'))
+                || managedChannelDraft.protocol === 'openai_images' && model.startsWith('gpt-image-')))
                 .map(model => {
                   const capability = managedChannelDraft.models[model];
                   const missingFields = managedDraftCapabilityMissingFields(capability);
@@ -2512,7 +2982,10 @@ export default function AdminIntegrationsClient() {
 
             <div className="codex-config-actions">
               <button className="btn btn-secondary" type="button" disabled={managedChannelSaving} onClick={async () => {
-                if (await confirm('放弃当前未保存的图片供应商修改？', { title: '放弃修改', confirmLabel: '放弃', danger: true })) setManagedChannelDraft(null);
+                if (await confirm('放弃当前未保存的图片供应商修改？', { title: '放弃修改', confirmLabel: '放弃', danger: true })) {
+                  managedChannelDraftBaseline.current = '';
+                  setManagedChannelDraft(null);
+                }
               }}>取消</button>
             <button className="btn btn-primary sd2-loading-surface" type="submit" disabled={managedChannelSaving || managedChannelOutcomeUnknown} data-busy={managedChannelSaving}>
                 {managedChannelSaving ? '正在保存' : '保存供应商配置'}
@@ -2520,7 +2993,7 @@ export default function AdminIntegrationsClient() {
             </div>
           </form>
         )}
-      </section>
+      </details>
 
       <form className="card codex-config-form" onSubmit={saveConfig}>
         <div className="codex-config-head">

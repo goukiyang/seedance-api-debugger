@@ -20,7 +20,7 @@ import { timingFromStory, validateStoryTiming } from './story-duration';
 import { attachStoryVideo, type StoryCanvas as Snapshot } from './story-handoff';
 import { STUDIO_TEXT_MODELS, isStudioTextModel } from '@/lib/template-studio/text-models';
 import { STORY_TEXT_CLIENT_WAIT_MS } from '@/lib/story-text-contract';
-import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, useImageStudioChannel } from '@/lib/image-studio/channels';
+import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, imageStudioUsesLegacyRoute, imageStudioEffectiveChannelId, useImageStudioChannel } from '@/lib/image-studio/channels';
 import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChannelSelect';
 import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
 
@@ -133,15 +133,18 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
   const mediaSettings = work.mediaSettings || { imageModel: mediaCapabilities?.image.model || 'gemini-3.1-flash-image-preview', quality: 'auto', resolution: '2K', ratio: '16:9',
     videoModel: mediaCapabilities?.video.model || '', provider: 'seedance', videoResolution: '720p' };
   const selectedImageChannelModel = imageStudioChannelModel(imageChannel.channel, mediaSettings.imageModel);
+  const legacyImageRoute = imageStudioUsesLegacyRoute(imageChannel.channels, mediaSettings.imageModel, imageChannel.channelId);
+  const effectiveImageChannelId = imageStudioEffectiveChannelId(imageChannel.channels, mediaSettings.imageModel, imageChannel.channelId);
   const channelImageModels = imageStudioChannelModels(imageChannel.channels, IMAGE_STUDIO_MODELS);
   const imageModelChoices = channelImageModels.includes(mediaSettings.imageModel) ? channelImageModels : [mediaSettings.imageModel, ...channelImageModels];
-  const qualityOptions: readonly string[] = selectedImageChannelModel?.qualities ?? (imageChannel.channelId === 'original'
+  const qualityOptions: readonly string[] = selectedImageChannelModel?.qualities ?? (legacyImageRoute
     ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[mediaSettings.imageModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [] : []);
-  const imageResolutions: readonly string[] = selectedImageChannelModel?.resolutions ?? (imageChannel.channelId === 'original'
+  const imageResolutions: readonly string[] = selectedImageChannelModel?.resolutions ?? (legacyImageRoute
     ? imageResolutionOptions(mediaSettings.imageModel) : []);
-  const ratioOptions: readonly string[] = selectedImageChannelModel?.ratios ?? (imageChannel.channelId === 'original' ? STUDIO_RATIOS : []);
+  const ratioOptions: readonly string[] = selectedImageChannelModel?.ratios ?? (legacyImageRoute ? STUDIO_RATIOS : []);
   const channelIssue = !imageChannel.ready ? '正在读取生图通道，请稍候。' : imageStudioChannelIssue(imageChannel.channel, mediaSettings.imageModel, {
     quality: mediaSettings.quality, resolution: mediaSettings.resolution, ratio: mediaSettings.ratio,
+    legacyRoute: legacyImageRoute,
   });
   const videoResolutions = mediaCapabilities?.video.model_options.find(item => item.value === mediaSettings.videoModel)?.resolutions || [];
   const materialSignature = (value = current.current) => {
@@ -624,24 +627,24 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
       const primary = current.current.references[shot.id]?.assetId;
       return { referenceIds, referencePolicy: canvasImageReferencePolicy(referenceIds, primary ? [primary] : []) };
     };
+    const settings = { ...mediaSettings };
     if (kind === 'image') {
       if (channelIssue) throw Error(channelIssue);
       selected.forEach(shot => {
         const referenceCount = imageReferences(shot).referenceIds.length;
-        const issue = imageStudioChannelIssue(imageChannel.channel, settings.imageModel, { quality: settings.quality, resolution: settings.resolution, ratio: settings.ratio, referenceCount });
+        const issue = imageStudioChannelIssue(imageChannel.channel, settings.imageModel, { quality: settings.quality, resolution: settings.resolution, ratio: settings.ratio, referenceCount, legacyRoute: legacyImageRoute });
         if (issue) throw Error(issue);
       });
     }
-    const settings = { ...mediaSettings };
-    if (kind === 'image' && imageChannel.channelId === 'original'
+    if (kind === 'image' && legacyImageRoute
       && (!IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[settings.imageModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS]?.includes(settings.quality as never)
         || !imageResolutionOptions(settings.imageModel).includes(settings.resolution as never))) throw Error('当前图片模型不支持所选质量或分辨率，请重新选择');
     if (kind === 'video' && !mediaCapabilities?.video.model_options.some(item => item.value === settings.videoModel && item.provider === settings.provider && item.ready && item.resolutions.includes(settings.videoResolution))) throw Error('视频模型未就绪或参数不受支持，请重新选择');
     const quotes = await Promise.all(selected.map(async shot => {
       if (kind === 'image') {
-        const quote = await request<{ status: string; estimatedCredits: number; revision: number; imageChannel?: ImageGenerationChannelSnapshot }>('/api/tools/ultimate-canvas/quote', { kind: 'image', project_id: documentRef.current!.project_id, model: settings.imageModel, ...(imageChannel.channelId !== 'original' ? { channelId: imageChannel.channelId } : {}), count: 1, quality: settings.quality, resolution: settings.resolution, ratio: settings.ratio });
+        const quote = await request<{ status: string; estimatedCredits: number; revision: number; imageChannel?: ImageGenerationChannelSnapshot }>('/api/tools/ultimate-canvas/quote', { kind: 'image', project_id: documentRef.current!.project_id, model: settings.imageModel, channelId: imageChannel.channelId, count: 1, quality: settings.quality, resolution: settings.resolution, ratio: settings.ratio });
         if (quote.status !== 'estimate' || !Number.isSafeInteger(quote.estimatedCredits) || quote.estimatedCredits < 0) throw Error('图片报价不可用，未派发');
-        if (imageChannel.channelId !== 'original' && (quote.imageChannel?.channelId !== imageChannel.channelId || !quote.imageChannel.configRevision)) throw Error('生图通道配置已变化，未能绑定到当前报价；尚未派发');
+        if (!legacyImageRoute && (quote.imageChannel?.channelId !== effectiveImageChannelId || !quote.imageChannel.configRevision)) throw Error('生图通道配置已变化，未能绑定到当前报价；尚未派发');
         return { shot, price: quote.estimatedCredits, revision: quote.revision, imageChannel: quote.imageChannel };
       }
       const quote = await request<{ estimatedCost: number }>(`/api/tasks/estimate?${new URLSearchParams({ provider: settings.provider, model: settings.videoModel, resolution: settings.videoResolution, duration: String(shot.durationSeconds) })}`);
@@ -657,7 +660,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
         const moduleId = current.current.images[shot.id].moduleId;
         const { referenceIds, referencePolicy } = imageReferences(shot);
         const input = { requestId: crypto.randomUUID(), moduleId, revision, prompt: storyGenerationPrompt(shot, 'image'), count: 1,
-          referenceIds, draft: { referencePolicy }, model: settings.imageModel, ...(imageChannel.channelId !== 'original' ? { channelId: imageChannel.channelId, imageChannel: imageChannelSnapshot } : {}), quality: settings.quality, resolution: settings.resolution, aspectRatio: settings.ratio, maxEstimatedCost: price };
+          referenceIds, draft: { referencePolicy }, model: settings.imageModel, channelId: imageChannel.channelId, ...(imageChannelSnapshot ? { imageChannel: imageChannelSnapshot } : {}), quality: settings.quality, resolution: settings.resolution, aspectRatio: settings.ratio, maxEstimatedCost: price };
         change({ ...current.current, imageRuns: { ...current.current.imageRuns, [shot.id]: { requestId: input.requestId, status: 'unconfirmed', input } } });
         let sent = false;
         try {

@@ -15,6 +15,11 @@ import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { requestStudioImages, StudioProviderError, type StudioImageInput } from '@/lib/image-studio/provider';
 import { readStudioImage, normalizeStudioImage } from '@/lib/image-studio/media';
 import {
+  getImageGenerationDefaultRoutes,
+  IMAGE_GENERATION_MODEL_DEFAULTS_SETTING_KEY,
+  parseImageGenerationDefaultRoutes,
+} from '@/lib/integrations/image-generation-defaults';
+import {
   type ImageGenerationChannelDto,
   type ImageGenerationChannelId,
   type ImageGenerationChannelProtocol,
@@ -348,8 +353,21 @@ export function selectImageGenerationSettings(
   if (channelId === 'banana') return resolveLegacySettings(channels.banana, model, 'banana', channels.legacyPrices);
   if (channelId === 'fluxport') return { ...channels.fluxport, default_model: model };
   const selected = channels.managed.find(item => item.channelId === channelId);
-  if (!selected) throw new ImageGenerationChannelError('所选图片供应商配置不存在或已归档', 404, 'image_channel_not_found');
+  if (!selected || selected.deleted) throw new ImageGenerationChannelError('所选图片供应商配置不存在或已归档', 404, 'image_channel_not_found');
   return { ...selected, default_model: model };
+}
+
+/** New requests resolve the model's default route explicitly; historical callers keep using original semantics. */
+export async function getImageGenerationDefaultSettingsForModel(
+  model: ImageStudioModel,
+  client: Prisma.TransactionClient | typeof prisma = prisma,
+) {
+  const [channels, defaults] = await Promise.all([
+    getImageGenerationChannels(client),
+    getImageGenerationDefaultRoutes(client),
+  ]);
+  const channelId = defaults.models[model] || (isGeminiImageModel(model) ? 'banana' : 'shared');
+  return selectImageGenerationSettings(channels, model, channelId);
 }
 
 // Keep the historical `(model, client)` call shape; `channelId` is an optional third argument.
@@ -1319,10 +1337,11 @@ async function channelOption(
 export async function getImageGenerationChannelOptions(
   client: Prisma.TransactionClient | typeof prisma = prisma,
 ): Promise<ImageGenerationChannelsDto> {
-  const channels = await getImageGenerationChannels(client);
-  const items: ImageGenerationChannelDto[] = [{
-    id: 'original', label: '原接口', supplierName: null, ready: true, enabled: true, configured: true, disabledReason: null, models: {},
-  }];
+  const [channels, defaultRoutes] = await Promise.all([
+    getImageGenerationChannels(client),
+    getImageGenerationDefaultRoutes(client),
+  ]);
+  const items: ImageGenerationChannelDto[] = [];
   const shared = resolveLegacySettings(channels.shared, IMAGE_STUDIO_MODELS[2], 'shared', channels.legacyPrices);
   const banana = resolveLegacySettings(channels.banana, IMAGE_STUDIO_MODELS[0], 'banana', channels.legacyPrices);
   items.push(await channelOption(shared, '共享接口', channels.shared.api_key ? providerSupplierName(channels.shared.provider) : null,
@@ -1336,7 +1355,36 @@ export async function getImageGenerationChannelOptions(
     items.push(await channelOption(settings, settings.label || settings.supplierName, settings.supplierName,
       Boolean(settings.api_key && settings.base_url), settings.enabled, client));
   }
-  return { items };
+
+  const originalModels: ImageGenerationChannelDto['models'] = {};
+  for (const model of IMAGE_STUDIO_MODELS) {
+    const defaultChannelId = defaultRoutes.models[model] || (isGeminiImageModel(model) ? 'banana' : 'shared');
+    const defaultChannel = items.find(item => item.id === defaultChannelId);
+    originalModels[model] = defaultChannel?.models[model] || {
+      ready: false,
+      disabledReason: '该型号默认供应商已删除或不存在；未切换到其他供应商',
+      billingMode: null,
+      fixedPoints: null,
+      billingSource: null,
+      actualQuoteRequired: false,
+      qualities: null,
+      resolutions: null,
+      ratios: null,
+      maxReferences: null,
+    };
+  }
+  const originalReady = Object.values(originalModels).some(item => item?.ready === true);
+  const original: ImageGenerationChannelDto = {
+    id: 'original',
+    label: '原接口',
+    supplierName: null,
+    ready: originalReady,
+    enabled: true,
+    configured: true,
+    disabledReason: originalReady ? null : '该型号默认供应商未就绪',
+    models: originalModels,
+  };
+  return { items: [original, ...items], defaultRoutes };
 }
 
 async function registryDto(
@@ -1384,6 +1432,83 @@ export async function getManagedImageGenerationChannels(
 ): Promise<ImageGenerationManagedChannelDto[]> {
   const registry = await readManagedChannelRegistry(client);
   return Promise.all(registry.channels.map(async record => registryDto(record, await resolveCurrentManagedSettings(record, client), client)));
+}
+
+export async function setImageGenerationModelDefaultRoute(
+  model: ImageStudioModel,
+  channelId: ImageGenerationChannelId | null,
+  expectedRevision: number,
+  updatedBy: string,
+) {
+  if (!IMAGE_STUDIO_MODELS.includes(model)) {
+    throw new ImageGenerationChannelError('所选图片型号不在允许列表中', 400, 'image_channel_model_not_allowed');
+  }
+  if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+    throw new ImageGenerationChannelError('设置版本无效，请重新读取后保存', 400, 'image_generation_default_invalid_revision');
+  }
+  if (channelId !== null) {
+    assertImageGenerationChannelId(channelId);
+    if (channelId === 'original') {
+      throw new ImageGenerationChannelError('原接口是未设置时的兼容路由，不能作为默认供应商保存', 400, 'image_generation_default_invalid_channel');
+    }
+  }
+
+  return prisma.$transaction(async tx => {
+    const row = await tx.platformSetting.findUnique({ where: { key: IMAGE_GENERATION_MODEL_DEFAULTS_SETTING_KEY } });
+    const current = parseImageGenerationDefaultRoutes(row?.value_json);
+    if (current.revision !== expectedRevision) {
+      throw new ImageGenerationChannelError('默认供应商设置已被其他管理员修改，请刷新后重试；未覆盖较新的设置', 409, 'image_generation_default_revision_conflict');
+    }
+    if (current.revision >= Number.MAX_SAFE_INTEGER) {
+      throw new ImageGenerationChannelError('默认供应商设置版本已达上限，未保存更改', 409, 'image_generation_default_revision_exhausted');
+    }
+
+    if (channelId && channelId !== 'shared' && channelId !== 'banana' && channelId !== 'fluxport') {
+      const registry = await readManagedChannelRegistry(tx);
+      const selected = registry.channels.find(item => item.id === channelId);
+      if (!selected || selected.deleted) {
+        throw new ImageGenerationChannelError('所选图片供应商配置不存在或已归档；未更改默认设置', 404, 'image_channel_not_found');
+      }
+    }
+
+    const models = { ...current.models };
+    if (channelId === null) delete models[model];
+    else models[model] = channelId;
+    const next = { version: 1 as const, revision: current.revision + 1, models };
+    const valueJson = JSON.stringify(next);
+    try {
+      if (row) {
+        const swapped = await tx.platformSetting.updateMany({
+          where: { key: IMAGE_GENERATION_MODEL_DEFAULTS_SETTING_KEY, value_json: row.value_json },
+          data: { value_json: valueJson, updated_by: updatedBy },
+        });
+        if (swapped.count !== 1) {
+          throw new ImageGenerationChannelError('默认供应商设置已被其他管理员修改，请刷新后重试；未覆盖较新的设置', 409, 'image_generation_default_revision_conflict');
+        }
+      } else {
+        await tx.platformSetting.create({
+          data: { key: IMAGE_GENERATION_MODEL_DEFAULTS_SETTING_KEY, value_json: valueJson, updated_by: updatedBy },
+        });
+      }
+    } catch (error) {
+      if (error instanceof ImageGenerationChannelError) throw error;
+      if (isRecord(error) && error.code === 'P2002') {
+        throw new ImageGenerationChannelError('默认供应商设置已被其他管理员创建，请刷新后重试', 409, 'image_generation_default_revision_conflict');
+      }
+      throw error;
+    }
+
+    await tx.operationLog.create({
+      data: {
+        operator_id: updatedBy,
+        action: 'image_generation_model_default_route_update',
+        target_type: 'PlatformSetting',
+        target_id: IMAGE_GENERATION_MODEL_DEFAULTS_SETTING_KEY,
+        detail: JSON.stringify({ model, channelId, revision: next.revision }),
+      },
+    });
+    return { revision: next.revision, models: next.models };
+  });
 }
 
 async function validateManagedBaseUrl(value: unknown, fallback?: string) {

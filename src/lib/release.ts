@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '生图型号不再重复展示，可在型号旁选择一家供应商。后台启用与型号可用状态分别显示，保存失败会保留输入；个人空间入口不再随项目筛选消失。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '后台按型号选择并保存默认生图供应商，新任务跟随已保存默认；生成时仍可主动另选。供应商待配置或停用会明确提示，不会偷偷改用旧供应商。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

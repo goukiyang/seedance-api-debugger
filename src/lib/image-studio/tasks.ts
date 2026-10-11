@@ -15,6 +15,7 @@ import { imageBillingReady } from './billing-readiness';
 import { captureImageGenerationChannel, resolveImageGenerationChannelSnapshot, validateImageGenerationChannel,
   getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider, isMuskImageGenerationChannel, ImageGenerationChannelError,
   type ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation';
+import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import { defaultStudioModuleId, resolveStudioModuleGenerationConfig, validStudioModuleId } from './modules';
 import { canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from './access';
 import { resolveStudioAspectRatio, normalizeStudioRatio } from './ratios';
@@ -149,7 +150,7 @@ export function parseStudioRequest(body: Record<string, unknown>) {
   if (body.imageChannel !== undefined) {
     imageChannel = safeImageChannelSnapshot(body.imageChannel) || undefined;
     if (!imageChannel) throw new StudioError('图片通道配置版本无效');
-    if (channelId !== undefined && channelId !== imageChannel.channelId) throw new StudioError('图片通道与配置版本不匹配');
+    if (channelId !== undefined && channelId !== 'original' && channelId !== imageChannel.channelId) throw new StudioError('图片通道与配置版本不匹配');
     if (!['original', 'shared', 'banana', 'fluxport'].includes(imageChannel.channelId)
       && !/^image-[0-9a-f-]{36}$/.test(imageChannel.channelId)) throw new StudioError('图片供应商无效');
   }
@@ -188,6 +189,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   if (moduleId !== undefined && !validStudioModuleId(moduleId, ownerId)) throw new StudioError('模块编号无效');
   const batchId = createHash('sha256').update(`${ownerId}:${input.requestId}`).digest('hex');
   if (canvasUse && (canvasUse.user.id !== ownerId || avatar)) throw new StudioError('画布参考图请求归属无效', 403);
+  const explicitChannelId = typeof body.channelId === 'string' ? body.channelId : undefined;
   const requestedChannelId = input.channelId || input.imageChannel?.channelId || 'original';
   const fingerprintInput = { ...input } as Record<string, unknown>;
   if (requestedChannelId === 'original') {
@@ -206,7 +208,10 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       const snapshot = JSON.parse(task.snapshot_json || '{}') as Record<string, unknown>;
       if (snapshot.inputFingerprint === requestFingerprint) {
         const savedChannel = safeImageChannelSnapshot(snapshot.imageChannel);
-        return requestedChannelId === 'original' ? !savedChannel
+        return requestedChannelId === 'original' ? input.imageChannel
+          ? savedChannel?.channelId === input.imageChannel.channelId
+            && savedChannel.configRevision === input.imageChannel.configRevision
+          : true
           : savedChannel?.channelId === requestedChannelId
             && (!input.imageChannel || savedChannel.configRevision === input.imageChannel.configRevision);
       }
@@ -258,9 +263,31 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const requestedModel = input.model || workspace?.model || settings.model;
     if (input.quality !== undefined && !(IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[requestedModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] as readonly string[] | undefined)?.includes(input.quality)) throw new StudioError('当前模型不支持所选图片质量');
     const generation = resolveStudioModuleGenerationConfig({ ...workspace, ...(input.model ? { model: input.model } : {}), ...(input.quality !== undefined ? { quality: input.quality } : {}) }, settings);
+    let effectiveRequestedChannelId = requestedChannelId;
+    if (explicitChannelId === undefined && input.imageChannel) {
+      // A snapshot without a channel choice is the older explicit-snapshot
+      // contract; keep it pinned instead of consulting today's model default.
+      effectiveRequestedChannelId = input.imageChannel.channelId;
+    } else {
+      try {
+        effectiveRequestedChannelId = await resolveImageGenerationRequestChannel(
+          generation.model as typeof IMAGE_STUDIO_MODELS[number], explicitChannelId, tx,
+        ) || 'original';
+      } catch (error) {
+        throw new StudioError(error instanceof Error ? error.message : '图片型号默认供应商设置无法读取', 503);
+      }
+      if (explicitChannelId === 'original' && input.imageChannel
+        && effectiveRequestedChannelId !== input.imageChannel.channelId) {
+        throw new StudioError('当前型号默认供应商已变化，原报价尚未生成；请重新报价', 409);
+      }
+    }
+    if (effectiveRequestedChannelId !== 'original' && explicitChannelId !== effectiveRequestedChannelId
+      && (input.maxEstimatedCost !== undefined || billingQuoteId) && !input.imageChannel) {
+      throw new StudioError('当前型号默认供应商已变化或旧报价缺少通道版本，请重新获取报价并确认；未派发生成', 409);
+    }
     let imageChannel: ImageGenerationChannelSnapshot | undefined;
     let imageApi;
-    if (requestedChannelId === 'original') {
+    if (effectiveRequestedChannelId === 'original') {
       // The protected legacy worker always resolves the original settings itself.
       // A supplied pair is only a freshness check for a quote/avatar plan, never
       // an execution snapshot that could be mistaken for a pinned legacy worker.
@@ -270,8 +297,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       }
       imageApi = await getImageGenerationSettingsForModel(generation.model, tx);
     } else {
-      imageChannel = input.imageChannel || await captureImageGenerationChannel(generation.model, requestedChannelId, tx);
-      if (imageChannel.channelId !== requestedChannelId) throw new StudioError('图片通道与配置版本不匹配', 409);
+      imageChannel = input.imageChannel || await captureImageGenerationChannel(generation.model, effectiveRequestedChannelId, tx);
+      if (imageChannel.channelId !== effectiveRequestedChannelId) throw new StudioError('图片通道与配置版本不匹配', 409);
       imageApi = await resolveImageGenerationChannelSnapshot(imageChannel, tx, true);
       const channelCapability = imageApi.modelCapabilities[generation.model as keyof typeof imageApi.modelCapabilities];
       const validation = validateImageGenerationChannel(imageApi, { model: generation.model, quality: generation.quality,
@@ -561,7 +588,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       try {
         billingContract = await consumeImageQuote(tx, { owner: ownerId, id: billingQuoteId,
           count: input.count, fingerprint: billingContract.specification, specification: billingContract.specification,
-          scope: billingScope, model: generation.model });
+          scope: billingScope, model: generation.model, imageChannel: imageChannel || input.imageChannel });
       } catch { throw new StudioError('实扣报价已过期、被使用或参数已变化，请重新报价', 409); }
       price = billingContract.authorizedCredits;
       if (input.maxEstimatedCost === undefined || price * input.count > input.maxEstimatedCost) throw new StudioError('请先确认本次预估及最高扣点授权', 409);
@@ -569,10 +596,15 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const fingerprint = imageChannel
       ? createHash('sha256').update(`${requestFingerprint}\0${imageChannel.channelId}\0${imageChannel.configRevision}`).digest('hex')
       : requestFingerprint;
+    const quoteImageChannel = imageChannel || input.imageChannel
+      || (preparation && effectiveRequestedChannelId === 'original'
+        ? await captureImageGenerationChannel(generation.model, 'original', tx)
+        : undefined);
     const snapshot = JSON.stringify({
       version: 1,
       requestId: input.requestId, batchId, inputFingerprint: requestFingerprint,
-      ...(imageChannel ? { imageChannel, imageChannelLabel: imageApi.label || imageApi.channelId,
+      ...(quoteImageChannel
+        ? { imageChannel: quoteImageChannel, imageChannelLabel: imageApi.label || imageApi.channelId,
         imageSupplierName: imageApi.supplierName } : {}),
       ...(canvasPrompt ? { canvasPromptMentions: parseCanvasPromptMentions(canvasPrompt.mentions), canvasPromptFingerprint } : {}),
       referenceImages: referenceSnapshot,

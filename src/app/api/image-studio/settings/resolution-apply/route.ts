@@ -4,7 +4,8 @@ import { AuthError } from '@/lib/auth/session';
 import { executeResolutionOperation, readResolutionOperations, ResolutionApplyError } from '@/lib/image-studio/resolution-apply';
 import { StudioSettingsClearConfirmationError } from '@/lib/image-studio/settings';
 import { parseStudioTemplateDefaults } from '@/lib/image-studio/template-defaults';
-import { getImageGenerationChannels, selectImageGenerationSettings } from '@/lib/integrations/image-generation';
+import { captureImageGenerationChannel, getImageGenerationChannels, ImageGenerationChannelError, resolveImageGenerationChannelSnapshot, selectImageGenerationSettings } from '@/lib/integrations/image-generation';
+import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import { studioFourToOneIssue, supportsStudioFourToOne } from '@/lib/image-generation/resolution';
 
 export const dynamic = 'force-dynamic';
@@ -13,6 +14,7 @@ function response(data: unknown, status = 200) { return NextResponse.json(data, 
 function failure(error: unknown) {
   if (error instanceof AuthError || error instanceof ResolutionApplyError) return response({ error: error.message,
     ...(error instanceof ResolutionApplyError && error.requestId ? { requestId: error.requestId } : {}) }, error.status);
+  if (error instanceof ImageGenerationChannelError) return response({ error: error.message }, error.status);
   if (error instanceof StudioSettingsClearConfirmationError) return response({ error: error.message }, 409);
   if (error instanceof SyntaxError) return response({ error: '操作内容无效' }, 400);
   return response({ error: '本次结果尚未确认，请查询原操作编号后重试；不要新建同一批次' }, 503);
@@ -40,7 +42,10 @@ export async function POST(request: NextRequest) {
       catch { return response({ error: '模板默认值无效' }, 400); }
       if (defaults.aspectRatio === '4:1') {
         const channels = await getImageGenerationChannels();
-        const api = selectImageGenerationSettings(channels, defaults.model);
+        const channelId = await resolveImageGenerationRequestChannel(defaults.model);
+        const api = channelId
+          ? await resolveImageGenerationChannelSnapshot(await captureImageGenerationChannel(defaults.model, channelId), undefined, true)
+          : selectImageGenerationSettings(channels, defaults.model);
         const issue = studioFourToOneIssue(defaults.aspectRatio, supportsStudioFourToOne(defaults.model, api.provider));
         if (issue) return response({ error: issue }, 400);
       }
