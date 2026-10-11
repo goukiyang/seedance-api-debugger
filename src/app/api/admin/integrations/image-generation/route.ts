@@ -6,7 +6,7 @@ import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { imageBillingIntent } from '@/lib/image-studio/billing-readiness';
 import { IMAGE_STUDIO_MODELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import type { ImageGenerationChannelId } from '@/lib/integrations/image-generation-channel';
-import { ImageGenerationDefaultRoutesError } from '@/lib/integrations/image-generation-defaults';
+import { ImageGenerationDefaultRoutesError, getImageGenerationDefaultRoutes } from '@/lib/integrations/image-generation-defaults';
 import {
   IMAGE_GENERATION_API_SETTING_KEY,
   buildImageGenerationApiSettingsPatch,
@@ -23,9 +23,13 @@ import {
   updateLegacyImageGenerationModelApi,
   hasLegacyImageGenerationModelApiKey,
   ImageGenerationChannelError,
+  getImageModelApiForms,
+  saveImageModelApiForm,
+  readImageModelApiSaveReceipt,
 } from '@/lib/integrations/image-generation';
 
 export const dynamic = 'force-dynamic';
+const privateHeaders = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
 
 const FLUXPORT_FLARE_MODEL = 'gpt-image-2.5-flare' as const;
 
@@ -72,6 +76,10 @@ async function updateImageGenerationConfig(request: NextRequest) {
     const admin = await getAdminUser(request);
     const body = await request.json() as Record<string, unknown>;
     const channelAction = body.channel_action ?? body.channelAction;
+    if (channelAction === 'save-model-api') {
+      const result = await saveImageModelApiForm(body, admin.id);
+      return NextResponse.json({ ok: true, ...result }, { headers: privateHeaders });
+    }
     if (channelAction === 'update-legacy-model-api') {
       const input = body.channel && typeof body.channel === 'object' && !Array.isArray(body.channel) ? body.channel as Record<string, unknown> : body;
       const channel = await updateLegacyImageGenerationModelApi(input, admin.id);
@@ -177,7 +185,16 @@ async function updateImageGenerationConfig(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    await getAdminUser(request);
+    const admin = await getAdminUser(request);
+    const mutationId = request.nextUrl.searchParams.get('mutation_id');
+    if (mutationId !== null) {
+      const result = await readImageModelApiSaveReceipt(admin.id, mutationId);
+      return NextResponse.json({ ok: true, found: Boolean(result), receipt: result?.receipt || null }, { headers: privateHeaders });
+    }
+    if (request.nextUrl.searchParams.get('view') === 'model-api') {
+      const result = await prisma.$transaction(async tx => ({ forms: await getImageModelApiForms(tx), defaultRoutes: await getImageGenerationDefaultRoutes(tx) }));
+      return NextResponse.json({ ok: true, ...result }, { headers: privateHeaders });
+    }
     const settings = await getImageGenerationApiSettings();
     const [channels, imageChannels, managedChannelPresets] = await Promise.all([
       getManagedImageGenerationChannels(),
