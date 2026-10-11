@@ -7,4 +7,4 @@ export const runtime = 'nodejs';
 export function GET(request: NextRequest, { params }: { params: { roleId: string } }) {
   return roleRoute(request, false, user => getRole(user, params.roleId, request.nextUrl.searchParams.has('version') ? integer(Number(request.nextUrl.searchParams.get('version'))) : undefined));
 }
-export function PATCH(request: NextRequest, { params }: { params: { roleId: string } }) { return roleRoute(request, true, (user, body) => editRole(user, params.roleId, body)); }
+export function PATCH(request: NextRequest, { params }: { params: { roleId: string } }) { return roleRoute(request, true, (user, body) => editRole(user, params.roleId, body, (request.headers.get('x-canvas-capabilities') || '').split(','))); }

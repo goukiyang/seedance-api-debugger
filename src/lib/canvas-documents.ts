@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'crypto';
+import { workflowSnapshots, remapWorkflows, WORKFLOW_CAPABILITY } from '@/lib/canvas-roles/workflow-schema';
 import { Prisma, type CanvasDocument } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
@@ -79,10 +80,11 @@ export function parseCanvasSnapshot(raw: string, projectId: string | null, v2: b
   checkJson(parsed);
   if (!object(parsed) || !object(parsed.canvas)) invalid('画布缺少 canvas 快照');
   if (parsed.schema !== undefined && parsed.schema !== 'ultimate_canvas.v1') invalid('不支持此画布格式');
-  if (parsed.schemaVersion !== undefined && (typeof parsed.schemaVersion !== 'number' || ![1, 2, 3].includes(parsed.schemaVersion))) {
+  if (parsed.schemaVersion !== undefined && (typeof parsed.schemaVersion !== 'number' || ![1, 2, 3, 4].includes(parsed.schemaVersion))) {
     throw new CanvasDocumentError('画布版本较新，请刷新后重试', 426, 'schema_upgrade_required');
   }
   const graph = parsed.canvas;
+  if (graph.roleWorkflows !== undefined) graph.roleWorkflows = workflowSnapshots(graph.roleWorkflows);
   if (graph.version !== undefined && graph.version !== 1) invalid('不支持此画布引擎版本');
   if (!Array.isArray(graph.nodes) || !Array.isArray(graph.connections)) invalid('画布节点和连线必须是数组');
   if (graph.nodes.length > 1000 || graph.connections.length > 5000) invalid('画布节点或连线过多，请拆分保存');
@@ -104,6 +106,16 @@ export function parseCanvasSnapshot(raw: string, projectId: string | null, v2: b
     }
   }
   const connections = new Set<string>();
+  const flows = workflowSnapshots(graph.roleWorkflows);
+  for (const flow of flows) for (const member of flow.nodeIds) {
+    const node = graph.nodes.find(n => object(n) && n.id === member);
+    if (object(node) && node.type !== 'role') invalid('工作流岗位不能引用普通材料节点');
+  }
+  for (const flow of flows) for (const p of flow.participants) {
+    const node = graph.nodes.find(n => object(n) && n.id === p.reviewerNodeId);
+    const config = object(node) && object(node.data) && node.data.roleConfig;
+    if (object(config) && object(config.snapshot) && config.snapshot.reviewAuthority === 'none') invalid('协调岗位不承担内容审核');
+  }
   for (const edge of graph.connections) {
     if (!object(edge) || !id(edge.from) || !id(edge.to)
       || !nodeIds.has(edge.from) || !nodeIds.has(edge.to) || edge.from === edge.to) invalid('连线引用了无效节点');
@@ -113,6 +125,20 @@ export function parseCanvasSnapshot(raw: string, projectId: string | null, v2: b
     const from = graph.nodes.find(n => object(n) && n.id === edge.from) as NodeSnapshot;
     const to = graph.nodes.find(n => object(n) && n.id === edge.to) as NodeSnapshot;
     if ((from.type === 'role' && to.type.startsWith('flow-')) || (to.type === 'role' && from.type.startsWith('flow-'))) invalid('角色不能接入图片工具执行流');
+    if (from.type === 'role' && to.type === 'role') {
+      const a = flows.find(f => f.nodeIds.includes(String(edge.from))), b = flows.find(f => f.nodeIds.includes(String(edge.to)));
+      if ((a || b) && a?.id !== b?.id) invalid('岗位材料不能跨工作流连接');
+    }
+    if (from.type === 'role' || to.type === 'role') {
+      const stack = [String(edge.to)], seen = new Set<string>();
+      while (stack.length) {
+        const current = stack.pop()!;
+        if (current === edge.from) invalid('角色材料流向不能循环，检查与退回请使用任务关系');
+        if (seen.has(current)) continue;
+        seen.add(current);
+        for (const next of graph.connections) if (object(next) && next.from === current && typeof next.to === 'string') stack.push(next.to);
+      }
+    }
   }
   if (graph.selectedNodeId != null && (!id(graph.selectedNodeId) || !nodeIds.has(graph.selectedNodeId))) {
     invalid('选中节点不存在');
@@ -129,10 +155,13 @@ export function parseCanvasSnapshot(raw: string, projectId: string | null, v2: b
   const context = object(parsed.context) ? parsed.context : {};
   if (context.project_id != null && context.project_id !== projectId) invalid('画布内容与所属项目不一致');
   if (v2) {
-    parsed.schemaVersion = parsed.schemaVersion === 3 || graph.nodes.some(n => object(n) && n.type === 'role') ? 3 : 2;
+    parsed.schemaVersion = parsed.schemaVersion === 4 || (Array.isArray(graph.roleWorkflows) && graph.roleWorkflows.length) ? 4
+      : parsed.schemaVersion === 3 || graph.nodes.some(n => object(n) && n.type === 'role') ? 3 : 2;
     parsed.context = { ...context, project_id: projectId };
   }
-  if (graph.nodes.some(n => object(n) && n.type === 'role')) {
+  if (parsed.schemaVersion === 4 || (Array.isArray(graph.roleWorkflows) && graph.roleWorkflows.length)) {
+    parsed.schemaVersion = 4; parsed.requiredCapabilities = ['role.v1', WORKFLOW_CAPABILITY];
+  } else if (graph.nodes.some(n => object(n) && n.type === 'role')) {
     parsed.schemaVersion = 3;
     parsed.requiredCapabilities = ['role.v1'];
   } else if (parsed.schemaVersion === 3) parsed.requiredCapabilities = ['role.v1'];
@@ -140,6 +169,9 @@ export function parseCanvasSnapshot(raw: string, projectId: string | null, v2: b
 }
 
 export function requireCanvasRoleCapability(schemaVersion: number, capabilities: unknown) {
+  if (schemaVersion >= 4 && (!Array.isArray(capabilities) || !capabilities.includes(WORKFLOW_CAPABILITY))) {
+    throw new CanvasDocumentError('此画布包含角色工作流，请刷新后继续；原工作流不会被旧页面覆盖', 426, 'workflow_capability_required');
+  }
   if (schemaVersion >= 3 && (!Array.isArray(capabilities) || !capabilities.includes('role.v1'))) {
     throw new CanvasDocumentError('此画布包含角色，请刷新到支持角色的版本；原画布不会被旧页面覆盖', 426, 'role_capability_required', { required_capabilities: ['role.v1'] });
   }
@@ -425,11 +457,12 @@ function duplicateSnapshot(snapshot: Snapshot): Snapshot {
     }
   }
   return {
-    schema: 'ultimate_canvas.v1', schemaVersion: snapshot.schemaVersion === 3 ? 3 : 2,
+    schema: 'ultimate_canvas.v1', schemaVersion: Number(snapshot.schemaVersion) >= 3 ? snapshot.schemaVersion : 2,
     context: { project_id: object(snapshot.context) ? snapshot.context.project_id : null },
     canvas: {
       version: 1, viewport: snapshot.canvas.viewport, selectedNodeId: null,
       ...(plans ? { planSplits: plans } : {}),
+      ...(snapshot.canvas.roleWorkflows ? { roleWorkflows: remapWorkflows(snapshot.canvas.roleWorkflows, remap) } : {}),
       nodes: snapshot.canvas.nodes.map(node => {
         const data = Object.fromEntries(Object.entries(node.data).filter(([key]) => configKeys.has(key)));
         if (object(data.canvasGroup) && typeof data.canvasGroup.id === 'string') {
@@ -517,8 +550,15 @@ async function validateRoles(db: Db, user: SessionUser, snapshot: Snapshot, reta
       definition: { owner_user_id: user.id, ...(!retained ? { status: 'active' } : {}) } } });
     if (!version) throw new CanvasDocumentError('角色不存在、已归档或无权加入，请回到角色库检查', 409, 'role_version_unavailable');
     const role = JSON.parse(version.snapshot_json);
+    if (role.workflowOnly && !workflowSnapshots(snapshot.canvas.roleWorkflows).some(flow => flow.nodeIds.includes(node.id))) {
+      throw new CanvasDocumentError('模板岗位须属于角色工作流，旧页面不会把它作为普通节点加入', 409, 'workflow_required');
+    }
     node.data.roleConfig = { definitionId: version.definition_id, version: version.version, snapshot: role };
     node.data.title = role.name;
+  }
+  for (const flow of workflowSnapshots(snapshot.canvas.roleWorkflows)) for (const p of flow.participants) {
+    const reviewer = roles.find(node => node.id === p.reviewerNodeId)?.data.roleConfig;
+    if (object(reviewer) && object(reviewer.snapshot) && reviewer.snapshot.reviewAuthority === 'none') invalid('协调岗位不承担内容审核');
   }
 }
 
@@ -662,7 +702,10 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
 
       if (snapshot) {
         // Once upgraded, removing/restoring the last role must not reopen old-client writes.
-        if (existing?.schema_version === 3) { snapshot.schemaVersion = 3; snapshot.requiredCapabilities = ['role.v1']; }
+        if (existing && existing.schema_version >= 3) {
+          snapshot.schemaVersion = Math.max(existing.schema_version, Number(snapshot.schemaVersion) || 2);
+          snapshot.requiredCapabilities = existing.schema_version >= 4 ? ['role.v1', WORKFLOW_CAPABILITY] : ['role.v1'];
+        }
         requireCanvasRoleCapability(Number(snapshot.schemaVersion) || 1, body.required_capabilities);
         await validateRoles(db, user, snapshot, retainedRoleSource, action === 'duplicate');
       }

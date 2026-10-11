@@ -197,6 +197,7 @@
             })),
             connections: engine.connections.map(({ from, to }) => ({ from, to })),
             planSplits: engine.planSplits ? sanitize(engine.planSplits) : null,
+            roleWorkflows: sanitize(engine.roleWorkflows || []),
             nextNodeId: Number(engine.nextNodeId) || 1
         };
     }
@@ -495,6 +496,19 @@
                     while (engine.nodes.has(candidate) || [...idMap.values()].includes(candidate)) candidate = `node-${nextNumericId++}`;
                     idMap.set(node.id, candidate);
                 });
+                for (const flow of before.roleWorkflows || []) {
+                    const nodeIds = flow.nodeIds.filter(id => idMap.has(id)).map(id => idMap.get(id));
+                    if (!nodeIds.length) continue;
+                    const finalNodeId = idMap.get(flow.finalNodeId) || nodeIds[0];
+                    const participants = flow.participants.filter(p => idMap.has(p.nodeId)).map(p => ({ ...clone(p), nodeId: idMap.get(p.nodeId),
+                        participation: idMap.get(p.nodeId) === finalNodeId ? 'required' : p.participation,
+                        reviewerNodeId: idMap.get(p.reviewerNodeId) || null,
+                        dependencies: p.dependencies.filter(d => idMap.has(d.nodeId)).map(d => ({ ...d, nodeId: idMap.get(d.nodeId) })) }));
+                    engine.roleWorkflows = [...(engine.roleWorkflows || []), { ...clone(flow), id: 'workflow-' + uniqueToken(),
+                        name: (flow.name + ' 副本').slice(0, 80), nodeIds, participants, finalNodeId,
+                        coordinatorNodeId: idMap.get(flow.coordinatorNodeId) || nodeIds[0],
+                        guidance: flow.guidance.filter(e => idMap.has(e.from) && idMap.has(e.to)).map(e => ({ from: idMap.get(e.from), to: idMap.get(e.to) })) }];
+                }
                 originals.forEach(node => {
                     const references = duplicateOptions.referencesForNode?.(node.id);
                     const source = Array.isArray(references) ? { ...node, data: { ...node.data, planReferences: references } } : node;
@@ -505,7 +519,7 @@
                     if (id !== idMap.get(node.id)) throw new Error('复制节点编号与预留编号不一致');
                     createdIds.push(id);
                 });
-                for (const edge of engine.connections) {
+                for (const edge of before.connections) {
                     if (!idMap.has(edge.from) || !idMap.has(edge.to)) continue;
                     if (!engine.connectNodesForCommand(idMap.get(edge.from), idMap.get(edge.to))) {
                         engine.applyCommandSnapshot(before);

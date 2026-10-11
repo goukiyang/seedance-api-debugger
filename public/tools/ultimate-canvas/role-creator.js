@@ -101,7 +101,10 @@
                     ? { kind: executor.kind, ...(executor.userId ? { userId: executor.userId } : {}), ...(executor.model ? { model: executor.model } : {}) }
                     : { kind: 'unassigned' },
                 tools: Array.isArray(source.tools) ? source.tools.filter(item => item === 'manual' || item === 'text') : ['manual'],
-                requiredItems: Array.isArray(source.requiredItems) ? source.requiredItems.map(String).slice(0, 30) : []
+                requiredItems: Array.isArray(source.requiredItems) ? source.requiredItems.map(String).slice(0, 30) : [],
+                ...(Array.isArray(source.contextGaps) && source.contextGaps.length ? { contextGaps: source.contextGaps.map(String).slice(0, 12) } : {}),
+                ...(['none', 'content', 'final'].includes(source.reviewAuthority) ? { reviewAuthority: source.reviewAuthority } : {}),
+                ...(source.workflowOnly === true ? { workflowOnly: true } : {})
             };
         }
         function canonical(value) { return JSON.stringify(value); }
@@ -479,6 +482,7 @@
                 (value.loadError ? '<div class="role-error-state" role="alert">' + html(value.loadError) + '<button type="button" data-role-source-retry>重新读取</button></div>' : '') +
                 (value.conflict ? '<div class="role-conflict-strip" role="alert"><p>' + html(value.conflict.message) + '</p><div><button type="button" data-role-read-latest>查看最新版本</button><button type="button" data-role-copy-draft ' + (value.pendingMutation || value.busy ? 'disabled' : '') + '>复制草稿为新角色</button></div></div>' : '') +
                 '<main class="role-creator-body" ' + (value.loadingSource ? 'aria-busy="true"' : '') + '>' +
+                (snap.contextGaps?.length ? '<section class="role-error-state"><strong>岗位要求待补齐</strong>' + snap.contextGaps.map(gap => '<label class="role-check-row"><input type="checkbox" data-role-gap="' + html(gap) + '"' + (disabled ? ' disabled' : '') + '>已在职责 / 交付中补齐：' + html(gap) + '</label>').join('') + '</section>' : '') +
                 '<div class="role-form-row role-name-row"><label for="role-name-' + html(value.domId) + '">名称</label><input id="role-name-' + html(value.domId) + '" data-role-name maxlength="80" value="' + html(snap.name) + '" placeholder="角色名称" ' + (disabled ? 'disabled' : '') + '></div>' +
                 '<button type="button" class="role-summary-row" data-role-edit-field="responsibilities" ' + (disabled ? 'disabled' : '') + '><span>职责</span><span class="role-summary-value">' + html(summary(snap.responsibilities, '填写职责')) + (value.childDrafts.responsibilities ? '<small class="role-field-pending">有未确定输入</small>' : '') + '</span>' + icon('ChevronRight') + '</button>' +
                 '<button type="button" class="role-summary-row" data-role-edit-field="delivery" ' + (disabled ? 'disabled' : '') + '><span>交付</span><span class="role-summary-value">' + html(summary(snap.delivery, '填写交付')) + (value.childDrafts.delivery ? '<small class="role-field-pending">有未确定输入</small>' : '') + '</span>' + icon('ChevronRight') + '</button>' +
@@ -655,6 +659,19 @@
         function onCreatorChange(value, event) {
             if (creator !== value || creatorLocked(value)) return;
             const target = event.target;
+            if (target.matches('[data-role-gap]') && target.checked) {
+                let baseline = {};
+                try { baseline = JSON.parse(value.baseline || '{}'); } catch {}
+                if (!['responsibilities', 'delivery', 'criteria', 'boundary'].some(key => baseline[key] !== value.snapshot[key])) {
+                    target.checked = false; bridge.notice?.('请先补充岗位内容，再标记缺项已补齐。', 'warn'); return;
+                }
+                if (value.snapshot.contextGaps?.length === 1 && !value.snapshot.criteria?.trim()) {
+                    target.checked = false; bridge.notice?.('请补充岗位验收标准，再完成缺项确认。', 'warn'); return;
+                }
+                value.snapshot.contextGaps = (value.snapshot.contextGaps || []).filter(gap => gap !== target.dataset.roleGap);
+                if (!value.snapshot.contextGaps.length) delete value.snapshot.contextGaps;
+                persistCreator(value); renderCreator(value); return;
+            }
             if (target.matches('[data-role-model]')) {
                 const model = textModels(context()).find(item => item.id === target.value);
                 if (model) value.snapshot.executor = { kind: 'ai', model: model.id };
