@@ -61,7 +61,8 @@ export function parseSharedStudioIntent(value: unknown): SharedStudioIntent | un
   const intent = value as Record<string, unknown>;
   if (Object.keys(intent).some(key => !['protocol', 'presetId', 'definitionToken'].includes(key))
     || intent.protocol !== 'shared-live-v1' || typeof intent.presetId !== 'string'
-    || !/^[a-zA-Z0-9-]{1,120}$/.test(intent.presetId)
+    || (!/^[a-zA-Z0-9-]{1,120}$/.test(intent.presetId)
+      && !/^module-source:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(intent.presetId))
     || typeof intent.definitionToken !== 'string' || !intent.definitionToken || intent.definitionToken.length > 256) {
     throw new StudioError('共享模板协议或版本无效，请重新读取模板', 409);
   }
