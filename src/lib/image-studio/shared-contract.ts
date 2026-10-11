@@ -271,8 +271,8 @@ export function parseSharedStudioPersonalOverrides(value: unknown): SharedStudio
 export async function resolveSharedStudioModule(user: ImageStudioIdentity, moduleId: string, client: SharedStudioClient = prisma) {
   const binding = await studioSharedBinding(user.id, moduleId, client);
   if (!binding) return null;
-  const module = await client.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: user.id } });
-  if (!module || module.source_preset_id !== binding.presetId) throw new StudioSharingError('共享模板工作区不存在或来源不匹配', 409);
+  const workspace = await client.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: user.id } });
+  if (!workspace || workspace.source_preset_id !== binding.presetId) throw new StudioSharingError('共享模板工作区不存在或来源不匹配', 409);
   const { definition, publicDTO } = await resolveSharedStudioDefinition(user, binding.presetId, client);
   if (binding.mode === 'publisher' && definition.sourceOwnerId !== user.id) throw new StudioSharingError('无权管理他人的原模板', 403);
   const personalOverrides = await getSharedStudioPersonalOverrides(user.id, moduleId, client);
@@ -328,11 +328,11 @@ export async function openSharedStudioModule(user: ImageStudioIdentity, presetId
     if (existing && (existing.owner_id !== actor.id || existing.source_preset_id !== presetId || !(await studioSharedBinding(actor.id, moduleId, tx)))) {
       throw new StudioSharingError('共享工作区编号冲突，原数据未改', 409);
     }
-    const module = existing || await tx.imageStudioModule.create({ data: { id: moduleId, owner_id: actor.id, source_preset_id: presetId, revision: 1 } });
+    const workspace = existing || await tx.imageStudioModule.create({ data: { id: moduleId, owner_id: actor.id, source_preset_id: presetId, revision: 1 } });
     if (!existing) await bindStudioModule(tx, moduleId, { protocol: SHARED_STUDIO_PROTOCOL, ownerId: actor.id, presetId,
       mode: sourceOwnerId === actor.id ? 'publisher' : 'live' });
-    await writeReceipt(tx, actor.id, requestId, fingerprint, { moduleId, presetId, revision: module.revision });
-    return module;
+    await writeReceipt(tx, actor.id, requestId, fingerprint, { moduleId, presetId, revision: workspace.revision });
+    return workspace;
   });
 }
 
@@ -411,19 +411,19 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
     const fingerprint = digest(['publish-shared', moduleId, input]);
     const receipt = await readReceipt(tx, actor.id, input.requestId, fingerprint);
     if (receipt) {
-      const module = await tx.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: actor.id } });
-      if (!module) throw new StudioSharingError('原保存工作区已删除，不会重复发布', 409);
-      return { module, presetId: String(receipt.presetId), receipt };
+      const workspace = await tx.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: actor.id } });
+      if (!workspace) throw new StudioSharingError('原保存工作区已删除，不会重复发布', 409);
+      return { module: workspace, presetId: String(receipt.presetId), receipt };
     }
-    const module = await tx.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: actor.id } });
-    if (!module) throw new StudioSharingError('只能保存自己的模板', 403);
-    if (!Number.isInteger(input.expectedRevision) || module.revision !== input.expectedRevision) throw new StudioSharingError('模板已在其他页面保存，当前草稿仍保留', 409);
+    const workspace = await tx.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: actor.id } });
+    if (!workspace) throw new StudioSharingError('只能保存自己的模板', 403);
+    if (!Number.isInteger(input.expectedRevision) || workspace.revision !== input.expectedRevision) throw new StudioSharingError('模板已在其他页面保存，当前草稿仍保留', 409);
     const binding = await studioSharedBinding(actor.id, moduleId, tx);
     if (binding && binding.mode !== 'publisher') throw new StudioSharingError('只能由创建者修改共享原模板', 403);
     if (!binding && input.isShared !== true) throw new StudioSharingError('请选择共享后再保存模板，个人输入不会自动公开', 400);
     if (has(input, 'isShared') && typeof input.isShared !== 'boolean') throw new StudioSharingError('模板共享设置无效', 400);
-    if (!binding && module.source_preset_id) {
-      const prior = await tx.imageStudioPreset.findUnique({ where: { id: module.source_preset_id } });
+    if (!binding && workspace.source_preset_id) {
+      const prior = await tx.imageStudioPreset.findUnique({ where: { id: workspace.source_preset_id } });
       if (!prior || prior.owner_id !== actor.id || !canViewStudioPreset(actor, prior) || await studioPresetArchived(prior.id, tx)) {
         throw new StudioSharingError('个人副本含他人的模板定义，不能另行共享内部配置', 403);
       }
@@ -448,9 +448,9 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
     if (has(input, 'reproduceFromTaskId') && (typeof input.reproduceFromTaskId !== 'string' || !input.reproduceFromTaskId || input.reproduceFromTaskId.length > 120)) {
       throw new StudioSharingError('共享复现定义必须保留合法的历史来源', 400);
     }
-    const sourceTaskId = has(input, 'reproduceFromTaskId') ? input.reproduceFromTaskId as string : source ? reproduction?.sourceTaskId : module.reproduce_task_id;
+    const sourceTaskId = has(input, 'reproduceFromTaskId') ? input.reproduceFromTaskId as string : source ? reproduction?.sourceTaskId : workspace.reproduce_task_id;
     if (sourceTaskId && reproduction?.sourceTaskId !== sourceTaskId) reproduction = await historicalDefinition(actor, sourceTaskId, tx);
-    const base = source || module;
+    const base = source || workspace;
     const stringField = (key: string, fallback: string, max: number, allowEmpty = true) => {
       const value = has(input, key) ? input[key] : fallback;
       if (typeof value !== 'string' || value.length > max || !allowEmpty && !value.trim()) throw new StudioSharingError('模板文字或名称无效', 400);
@@ -514,19 +514,19 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
     await setStudioPresetFixedReferences(actor.id, presetId, fixedReferences, tx);
     await setStudioPresetReferencePolicy(actor.id, presetId, referencePolicy, templateIds, tx);
     await setStudioPresetStyleIds(actor, presetId, styleGroupIds, tx);
-    const personalChanges = await writeSharedStudioPersonalState(actor, module, {
+    const personalChanges = await writeSharedStudioPersonalState(actor, workspace, {
       ...(has(input, 'personalOverrides') ? { personalOverrides: input.personalOverrides } : {}),
       ...(has(input, 'resetFields') ? { resetFields: input.resetFields } : {}),
       ...(has(input, 'personalReferenceIds') ? { referenceIds: input.personalReferenceIds } : {}),
       ...(has(input, 'personalReferencePolicy') ? { referencePolicy: input.personalReferencePolicy } : {}),
     }, tx);
-    const changed = await tx.imageStudioModule.updateMany({ where: { id: moduleId, owner_id: actor.id, revision: module.revision },
-      data: { ...personalChanges, source_preset_id: presetId, revision: module.revision + 1 } });
+    const changed = await tx.imageStudioModule.updateMany({ where: { id: moduleId, owner_id: actor.id, revision: workspace.revision },
+      data: { ...personalChanges, source_preset_id: presetId, revision: workspace.revision + 1 } });
     if (changed.count !== 1) throw new StudioSharingError('模板已在其他页面保存，当前草稿仍保留', 409);
     await bindStudioModule(tx, moduleId, { protocol: SHARED_STUDIO_PROTOCOL, ownerId: actor.id, presetId, mode: 'publisher' });
     await restoreStudioDefaultGroup(actor.id, groupName, tx);
     const { definition } = await resolveSharedStudioDefinition(actor, presetId, tx);
-    const result = { moduleId, presetId, beforeRevision: module.revision, revision: module.revision + 1,
+    const result = { moduleId, presetId, beforeRevision: workspace.revision, revision: workspace.revision + 1,
       sourceRevision: definition.sourceRevision, definitionToken: definition.intent.definitionToken };
     await writeReceipt(tx, actor.id, input.requestId, fingerprint, result);
     return { module: await tx.imageStudioModule.findUniqueOrThrow({ where: { id: moduleId } }), presetId, receipt: result };
@@ -617,9 +617,9 @@ export async function replaceSharedStudioPreset(user: ImageStudioIdentity, prese
     if (input.revision !== source.updated_at.toISOString()) throw new StudioSharingError('模板已在其他页面保存，当前草稿仍保留', 409);
     const definitionToken = await sharedDefinitionToken(source, tx);
     if (input.expectedDefinitionToken !== undefined && input.expectedDefinitionToken !== definitionToken) throw new StudioSharingError('模板依赖已更新，当前草稿仍保留', 409);
-    const module = await openSharedStudioModule(actor, presetId, `replace-open:${digest([input.requestId, presetId])}`, tx);
-    const published = await publishSharedStudioModule(actor, module.id, { ...input, requestId: `replace-definition:${digest([input.requestId, presetId])}`,
-      expectedRevision: module.revision, expectedDefinitionToken: definitionToken }, tx);
+    const workspace = await openSharedStudioModule(actor, presetId, `replace-open:${digest([input.requestId, presetId])}`, tx);
+    const published = await publishSharedStudioModule(actor, workspace.id, { ...input, requestId: `replace-definition:${digest([input.requestId, presetId])}`,
+      expectedRevision: workspace.revision, expectedDefinitionToken: definitionToken }, tx);
     await writeReceipt(tx, actor.id, input.requestId, fingerprint, published.receipt);
     return tx.imageStudioPreset.findUniqueOrThrow({ where: { id: presetId } });
   });
@@ -637,15 +637,15 @@ export async function saveSharedStudioPersonal(user: ImageStudioIdentity, module
     }
     const binding = await studioSharedBinding(actor.id, moduleId, tx);
     if (!binding) throw new StudioSharingError('该模块不是实时共享工作区', 400);
-    const module = await tx.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: actor.id } });
-    if (!module || module.revision !== body.revision) throw new StudioSharingError('个人设置已在其他页面保存，当前草稿仍保留', 409);
+    const workspace = await tx.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: actor.id } });
+    if (!workspace || workspace.revision !== body.revision) throw new StudioSharingError('个人设置已在其他页面保存，当前草稿仍保留', 409);
     const forbidden = ['sourcePresetId', 'source_preset_id', 'ownerId', 'owner_id', 'templatePrompt', 'context', 'globalContext', 'fixedReferences', 'styleGroupIds', 'skillIds', 'isShared'];
     if (forbidden.some(field => has(body, field))) throw new StudioSharingError('个人保存不能修改共享模板定义', 403);
-    const personalChanges = await writeSharedStudioPersonalState(actor, module, body, tx);
-    const changed = await tx.imageStudioModule.updateMany({ where: { id: moduleId, owner_id: actor.id, revision: module.revision },
-      data: { ...personalChanges, revision: module.revision + 1 } });
+    const personalChanges = await writeSharedStudioPersonalState(actor, workspace, body, tx);
+    const changed = await tx.imageStudioModule.updateMany({ where: { id: moduleId, owner_id: actor.id, revision: workspace.revision },
+      data: { ...personalChanges, revision: workspace.revision + 1 } });
     if (changed.count !== 1) throw new StudioSharingError('个人设置已在其他页面保存，当前草稿仍保留', 409);
-    await writeReceipt(tx, actor.id, body.requestId, fingerprint, { moduleId, revision: module.revision + 1 });
+    await writeReceipt(tx, actor.id, body.requestId, fingerprint, { moduleId, revision: workspace.revision + 1 });
     return tx.imageStudioModule.findUniqueOrThrow({ where: { id: moduleId } });
   });
 }
