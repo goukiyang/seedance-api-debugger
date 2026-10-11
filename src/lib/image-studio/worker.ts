@@ -2,7 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider,
   resolveImageGenerationChannelSnapshot, isMuskImageGenerationChannel, validateImageGenerationChannel, assertImageGenerationChannelDispatchOpen, ImageGenerationChannelError,
   type ImageGenerationResolvedSettings } from '@/lib/integrations/image-generation';
-import { claimStudioTask, finishStudioTask, safeImageChannelSnapshot } from './tasks';
+import { claimStudioTask, finishStudioTask, safeImageChannelSnapshot, assertFrozenSharedStudioTask } from './tasks';
 import { requestStudioImages, StudioProviderError } from './provider';
 import { normalizeStudioImage, validateGeneratedStudioImage, readStudioImage, StudioImageDeliveryError, StudioImageDownloadError } from './media';
 import { STUDIO_EXECUTION_MS } from './limits';
@@ -23,6 +23,8 @@ export async function assertStudioPostAuthorization(task: ImageStudioTask) {
   const activeStatus = task.status === 'channel_running' ? 'channel_running' : 'running';
   if (!current || current.status !== activeStatus || current.lease_token !== task.lease_token
     || !current.lease_until || current.lease_until <= new Date()) throw new StudioImageDownloadError('delivery_lease_lost');
+  // Only validate the accepted snapshot; never resolve today's shared source here.
+  assertFrozenSharedStudioTask(current);
   if (current.billing_mode === 'actual') {
     const contract = parseImageBillingContract(current.billing_contract_json);
     const billingStatus = activeStatus === 'channel_running' ? 'channel_awaiting_response' : 'awaiting_response';
@@ -70,11 +72,15 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
         const contract = parseImageBillingContract(task.billing_contract_json);
         if (!contract || contract.mode !== 'actual' || Date.parse(contract.deadline!) <= Date.now()) throw new Error('图片费用授权已过期，未向供应商提交');
       }
-      const settings = await getImageGenerationSettingsForModel(task.model);
+      const snapshot = task.snapshot_json ? JSON.parse(task.snapshot_json) : {};
+      const frozenChannel = safeImageChannelSnapshot(snapshot.imageChannel);
+      if (snapshot.sharedLive !== undefined) assertFrozenSharedStudioTask(task);
+      const settings = snapshot.sharedLive !== undefined && frozenChannel
+        ? await resolveImageGenerationChannelSnapshot(frozenChannel, prisma, false, task.model)
+        : await getImageGenerationSettingsForModel(task.model);
       if (!isStudioImageGenerationProvider(settings.provider) || !isImageGenerationApiReady(settings)) throw new Error('图片专用 API 暂不可用');
       if (task.billing_scope && imageBillingScope(settings) !== task.billing_scope) throw new Error('提交时的图片通道已变化，请核对原任务');
       const images = [];
-      const snapshot = task.snapshot_json ? JSON.parse(task.snapshot_json) : {};
       const owners: Record<string, string> = snapshot.authorizedReferenceOwners || {};
       for (const id of JSON.parse(task.reference_ids) as string[]) {
         const asset = await prisma.asset.findFirst({ where: { id, owner_id: owners[id] || task.owner_id, status: 'active', type: 'image' } });

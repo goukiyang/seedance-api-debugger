@@ -10,10 +10,14 @@ export function studioProtectedBindings(rows: Array<{ key: string; value_json: s
   return rows.flatMap(row => {
     let value: Record<string, unknown>;
     try { value = JSON.parse(row.value_json); } catch { throw new Error('参考内容权限记录无法读取'); }
-    if (!value || typeof value.ownerId !== 'string' || !Array.isArray(value.references)) throw new Error('参考内容权限记录无效');
-    return value.references.flatMap(item => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('参考内容权限记录无效');
+    const historical = row.key.startsWith('studio_shared_reproduction_v1:');
+    const ownerId = historical ? value.sourceOwnerId : value.ownerId;
+    const references = historical ? value.templateFixedReferences : value.references;
+    if (!value || typeof ownerId !== 'string' || !Array.isArray(references)) throw new Error('参考内容权限记录无效');
+    return references.flatMap(item => {
       if (!item || typeof item.assetId !== 'string') throw new Error('参考内容权限记录无效');
-      return [{ assetId: item.assetId, ownerId: value.ownerId as string,
+      return [{ assetId: item.assetId, ownerId,
         kind: row.key.startsWith('studio_style_group_v1:') ? 'style' as const : 'template' as const }];
     });
   });
@@ -37,6 +41,7 @@ export async function studioHiddenAssetUrls(user: ImageStudioIdentity | null, cl
   const rows = await client.platformSetting.findMany({ where: { OR: [
     { key: { startsWith: 'studio_fixed_references_v1:' } },
     { key: { startsWith: 'studio_style_group_v1:' } },
+    { key: { startsWith: 'studio_shared_reproduction_v1:' } },
   ] }, select: { key: true, value_json: true } });
   const allBindings = studioProtectedBindings(rows);
   const bindings = hiddenStudioBindings(user, allBindings);
@@ -46,7 +51,7 @@ export async function studioHiddenAssetUrls(user: ImageStudioIdentity | null, cl
   return Array.from(new Set(assets.flatMap(asset => [asset.original_url, ...(asset.thumbnail_url ? [asset.thumbnail_url] : [])]).flatMap(url => {
     const pathname = siteUploadPathFromUrl(url);
     return pathname ? [url, pathname, ...siteUploadBaseUrls().map(base => `${base}${pathname}`)] : [url];
-  })));
+  }))).sort();
 }
 
 export async function studioVisibleAssetWhere(user: ImageStudioIdentity, client: Client = prisma): Promise<Prisma.AssetWhereInput> {
@@ -84,8 +89,17 @@ export async function readableStudioCoverIds(user: ImageStudioIdentity,
     WHERE (p.key GLOB 'studio_fixed_references_v1:*' OR p.key GLOB 'studio_style_group_v1:*') LIMIT 257`);
   if (rows.length > 256) throw new Error('封面权限暂时无法确认');
   const bindings = rows.map(row => ({ ...row, kind: row.settingKey.startsWith('studio_style_group_v1:') ? 'style' as const : 'template' as const }));
-  const hidden = new Set(hiddenStudioBindings(user, bindings)
-    .flatMap(row => [row.original_url, ...(row.thumbnail_url ? [row.thumbnail_url] : [])]).flatMap(aliases));
+  const historicalRows = await prisma.platformSetting.findMany({ where: { key: { startsWith: 'studio_shared_reproduction_v1:' } }, take: 257, select: { key: true, value_json: true } });
+  if (historicalRows.length > 256) throw new Error('封面权限暂时无法确认');
+  const historicalBindings = studioProtectedBindings(historicalRows);
+  const historicalAssets = await prisma.asset.findMany({ where: { id: { in: historicalBindings.map(binding => binding.assetId) } }, select: { id: true, original_url: true, thumbnail_url: true } });
+  const historicalById = new Map(historicalAssets.map(asset => [asset.id, asset]));
+  const hiddenHistorical = hiddenStudioBindings(user, historicalBindings).flatMap(binding => {
+    const asset = historicalById.get(binding.assetId);
+    return asset ? [asset.original_url, ...(asset.thumbnail_url ? [asset.thumbnail_url] : [])].flatMap(aliases) : [];
+  });
+  const hidden = new Set([...hiddenHistorical, ...hiddenStudioBindings(user, bindings)
+    .flatMap(row => [row.original_url, ...(row.thumbnail_url ? [row.thumbnail_url] : [])]).flatMap(aliases)]);
   return new Set(assets.filter(asset => !hidden.has(asset.original_url)).map(asset => asset.id));
 }
 

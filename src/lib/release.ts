@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '补齐首页登录入口：从首页进入的注册、验证码登录和已有账号现在默认返回创作首页，明确打开的站内页面仍优先返回。上一版的主图保留、双击替换和图片API配置提示继续保留。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '已恢复兼容版本。共享模板、个人输入与已受理任务继续保留；旧页面不能确认的共享生成会暂停，请刷新后重新核对。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
