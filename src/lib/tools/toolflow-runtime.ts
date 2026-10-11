@@ -12,6 +12,7 @@ import { getImageGenerationSettingsForModel } from '@/lib/integrations/image-gen
 import { imageBillingScope } from '@/lib/image-studio/billing-scope';
 import { fixedImageBillingContract, imageSpecification } from '@/lib/image-studio/billing-quote';
 import { creditsToCents } from '@/lib/image-studio/billing-contract';
+import { reserveImageStudioQueueCapacity, QueueCapacityError, QueueMaintenanceError } from '@/lib/image-studio/queue-capacity';
 import { assertCanUseToolFlow, parseJsonObject, validateToolFlowGraph, type ToolFlowGraph, type ToolFlowNode } from './toolflow';
 
 type Tx = Prisma.TransactionClient;
@@ -563,6 +564,19 @@ async function scheduleTemplateNode(
   }
   const expected = Math.max(existingSuccesses.length, config.count);
   const remaining = Math.max(0, expected - existingSuccesses.length);
+  // A node keeps its original identity and requested count while other image
+  // entries occupy the shared queue. No task or credit freeze exists yet.
+  try {
+    await reserveImageStudioQueueCapacity(tx, runRow.owner_id, remaining);
+  } catch (error) {
+    if (!(error instanceof QueueCapacityError) && !(error instanceof QueueMaintenanceError)) throw error;
+    await tx.toolFlowNodeRun.update({ where: { id: nodeRun.id }, data: {
+      status: 'pending', input_asset_ids: stringify(inputAssetIds),
+      result_json: stringify({ ...previous, expected, inputAssetIds, succeededAssetIds: existingSuccesses }),
+      error: error.message,
+    } });
+    return { frozenCredits: 0, waiting: true };
+  }
   const taskIds: string[] = [];
   let frozenCredits = 0;
   for (let index = 0; index < remaining; index += 1) {
@@ -719,6 +733,21 @@ export async function advanceToolFlowRun(runId: string) {
       await notifyRunOwner(tx, run, 'toolflow_finished', status === 'succeeded' ? '工具流完成' : '工具流部分完成', status === 'succeeded' ? '工具流已完成，结果已进入资产库。' : '工具流部分完成，成功结果已保留。', { status });
     }
   }, { timeout: 30000 });
+}
+
+/** Called by the sole image coordinator when capacity becomes available. */
+export async function dispatchWaitingToolFlowRuns() {
+  const runs = await prisma.toolFlowRun.findMany({
+    where: { status: { in: ['queued', 'running'] }, node_runs: { some: { status: 'pending' } } },
+    orderBy: { created_at: 'asc' }, take: 10, select: { id: true },
+  });
+  for (const run of runs) {
+    await advanceToolFlowRun(run.id).catch(() => {
+      // Leave the durable run and its node numbers intact; don't synthesize
+      // failed tasks or change their quoted price just to release capacity.
+      console.error('[toolflow] pending image dispatch deferred');
+    });
+  }
 }
 
 export async function createToolFlowRun(user: SessionUser, flowId: string, inputAssetIds: string[], submittedQuote: unknown, quoteProof?: string) {

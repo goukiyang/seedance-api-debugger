@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import type { Prisma } from '@prisma/client';
 import { IMAGE_STUDIO_MODELS } from './model-catalog';
 
 export { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODEL_LABELS } from './model-catalog';
@@ -17,8 +18,8 @@ export const DEFAULT_STUDIO_PRICES = Object.fromEntries(IMAGE_STUDIO_MODELS.map(
   model === 'gemini-3-pro-image-preview' ? null : 20,
 ])) as ImageStudioSettings['prices'];
 
-export async function getImageStudioSettings(): Promise<ImageStudioSettings> {
-  const row = await prisma.platformSetting.findUnique({ where: { key: IMAGE_STUDIO_SETTING_KEY } });
+export async function getImageStudioSettings(client: Pick<Prisma.TransactionClient, 'platformSetting'> = prisma): Promise<ImageStudioSettings> {
+  const row = await client.platformSetting.findUnique({ where: { key: IMAGE_STUDIO_SETTING_KEY } });
   if (!row) return { context: '', model: IMAGE_STUDIO_MODELS[0], revision: 0, prices: { ...DEFAULT_STUDIO_PRICES } };
   const value = JSON.parse(row.value_json) as ImageStudioSettings;
   if (!IMAGE_STUDIO_MODELS.includes(value.model) || typeof value.context !== 'string' || !Number.isInteger(value.revision)) {
