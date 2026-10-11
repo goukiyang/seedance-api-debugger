@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '左侧工作流统一管理图片与角色协作。导演组模板已准备九岗位和可编辑分工；缺少的岗位要求会明确提示。原角色库、历史与图片工作流保留，创建和恢复不会开始 AI 调用。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '我的项目可按封面查找、搜索和翻页。进入项目先看生成记录与结果，参考图集、费用和成员各有入口。带入旧任务会先确认替换当前输入，生成后可返回原项目；下载与原管理能力保留。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
