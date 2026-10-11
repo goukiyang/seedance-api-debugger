@@ -7,7 +7,7 @@ import { useProductDialog } from '@/components/useProductDialog';
 import { STUDIO_BATCH_LIMITS } from '@/lib/image-studio/batch-contract';
 import { readBatchResponse } from '@/lib/image-studio/batch-receipt';
 import { canSelectBatchDirectory, selectBatchDirectory, readBatchDirectory, previewBatchFiles, type BatchLocalFile } from './batch-files';
-import { IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_QUALITY_LABELS } from '@/lib/image-studio/model-catalog';
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_QUALITY_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import styles from './batch.module.css';
 import { watchGenerationCompletion } from '@/components/GenerationCompletion';
 import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
@@ -166,7 +166,9 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
           return;
         }
         const channel = freshChannels.items.find(item => item.id === freshEffectiveId);
-        const capability = channel?.models?.[String(snapshot.model)];
+        const model = String(snapshot.model) as ImageStudioModel;
+        if (!IMAGE_STUDIO_MODELS.includes(model)) throw new Error('本批型号无效；素材保留，尚未生成');
+        const capability = channel?.models?.[model];
         if (!channel?.enabled || !channel.configured || !channel.ready || !capability?.ready
           || capability.billingMode === 'actual' && !actualQuoteRequired
           || capability.billingMode === 'fixed' && (capability.fixedPoints ?? (['shared', 'banana'].includes(freshEffectiveId) ? current.prices?.[String(snapshot.model)] : null)) !== unitCredits) {
