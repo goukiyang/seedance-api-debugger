@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
 import { getAdminUser } from '@/lib/auth/api-helpers';
+import { getImageStudioSettings } from '@/lib/image-studio/settings';
+import { imageBillingIntent } from '@/lib/image-studio/billing-readiness';
 import {
   IMAGE_GENERATION_API_SETTING_KEY,
   buildImageGenerationApiSettingsPatch,
@@ -18,6 +20,25 @@ import {
 } from '@/lib/integrations/image-generation';
 
 export const dynamic = 'force-dynamic';
+
+const FLUXPORT_FLARE_MODEL = 'gpt-image-2.5-flare' as const;
+
+async function getManagedChannelPresets() {
+  try {
+    return await prisma.$transaction(async tx => {
+      const settings = await getImageStudioSettings(tx);
+      const billingIntent = await imageBillingIntent(tx);
+      const fixedPoints = settings.prices[FLUXPORT_FLARE_MODEL];
+      const actualBillingSelected = billingIntent.enabled && billingIntent.enabledModels.includes(FLUXPORT_FLARE_MODEL);
+      return {
+        fluxportFlareFixedPoints: !actualBillingSelected && typeof fixedPoints === 'number'
+          && Number.isSafeInteger(fixedPoints) && fixedPoints >= 0 ? fixedPoints : null,
+      };
+    });
+  } catch {
+    return { fluxportFlareFixedPoints: null };
+  }
+}
 
 function safeConfigDto(settings: Awaited<ReturnType<typeof getImageGenerationApiSettings>>) {
   return {
@@ -124,9 +145,10 @@ export async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
     const settings = await getImageGenerationApiSettings();
-    const [channels, options] = await Promise.all([
+    const [channels, options, managedChannelPresets] = await Promise.all([
       getManagedImageGenerationChannels(),
       getImageGenerationChannelOptions(),
+      getManagedChannelPresets(),
     ]);
     return NextResponse.json({
       ok: true,
@@ -134,6 +156,7 @@ export async function GET(request: NextRequest) {
       config: safeConfigDto(settings),
       channels,
       options,
+      managedChannelPresets,
     });
   } catch (error) {
     if (error instanceof AuthError) {

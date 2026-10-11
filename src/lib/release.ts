@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '我的项目可按封面查找、搜索和翻页。进入项目先看生成记录与结果，参考图集、费用和成员各有入口。带入旧任务会先确认替换当前输入，生成后可返回原项目；下载与原管理能力保留。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '生图型号不再重复展示，可在型号旁选择一家供应商。后台启用与型号可用状态分别显示，保存失败会保留输入；个人空间入口不再随项目筛选消失。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

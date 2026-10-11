@@ -907,15 +907,20 @@ function resolveLegacySettings(settings: ImageGenerationApiSettings, model: stri
   };
 }
 
+function modelCapabilityMissingRequirements(capability: ImageGenerationModelCapability | undefined) {
+  if (!capability || !capability.enabled) return ['该型号尚未加入可用白名单'];
+  const missing: string[] = [];
+  if (!capability.qualities || capability.qualities.length === 0) missing.push('尚未确认支持的图片质量');
+  if (!capability.resolutions || capability.resolutions.length === 0) missing.push('尚未确认支持的分辨率');
+  if (!capability.ratios || capability.ratios.length === 0) missing.push('尚未确认支持的图片比例');
+  if (capability.maxReferences === null) missing.push('尚未确认参考图上限');
+  if (!capability.billingMode) missing.push('尚未设置计费方式');
+  if (capability.billingMode === 'fixed' && capability.fixedPoints === null) missing.push('固定点数未填写，明确免费时请填写 0');
+  return missing;
+}
+
 function modelCapabilityCompleteness(capability: ImageGenerationModelCapability | undefined) {
-  if (!capability || !capability.enabled) return '该型号尚未加入可用白名单';
-  if (!capability.qualities || capability.qualities.length === 0) return '尚未确认该型号支持的图片质量';
-  if (!capability.resolutions || capability.resolutions.length === 0) return '尚未确认该型号支持的分辨率';
-  if (!capability.ratios || capability.ratios.length === 0) return '尚未确认该型号支持的图片比例';
-  if (capability.maxReferences === null) return '尚未确认该型号的参考图上限';
-  if (!capability.billingMode) return '尚未设置该型号计费方式';
-  if (capability.billingMode === 'fixed' && capability.fixedPoints === null) return '固定点数未填写，明确免费时请填写 0';
-  return null;
+  return modelCapabilityMissingRequirements(capability)[0] || null;
 }
 
 export function isMuskImageGenerationChannel(settings: ImageGenerationApiSettings) {
@@ -1444,13 +1449,20 @@ async function saveManagedRecord(
     const modelCapabilities = operation === 'archive' || operation === 'restore'
       ? existing!.modelCapabilities
       : parseManagedCapabilities(modelsInput, id, protocol);
+    const requestedEnabled = operation === 'create' || operation === 'update' ? input.enabled === true : false;
+    if ((operation === 'create' || operation === 'update') && input.enabled !== undefined && typeof input.enabled !== 'boolean') {
+      throw new ImageGenerationChannelError('启用状态无效，请重新选择后保存', 400, 'image_channel_invalid_enabled');
+    }
+    if (requestedEnabled && input.clearApiKey === true) {
+      throw new ImageGenerationChannelError('不能同时清除 API Key 并启用通道；请保留或重新填写 API Key', 400, 'image_channel_enable_key_conflict');
+    }
     const inputKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
     if (inputKey.length > 500) throw new ImageGenerationChannelError('API Key 过长，请核对输入内容', 400, 'image_channel_invalid_api_key');
     const apiKey = input.clearApiKey === true ? null : inputKey || previous?.api_key || null;
-    const enabled = operation === 'create' ? false
-      : operation === 'archive' ? false
-        : operation === 'restore' ? false
-          : input.enabled === true && Boolean(apiKey);
+    if (requestedEnabled && !apiKey) {
+      throw new ImageGenerationChannelError('启用图片供应商前必须先填写 API Key；当前输入未保存', 400, 'image_channel_api_key_required');
+    }
+    const enabled = requestedEnabled;
     const deleted = operation === 'archive' ? true : operation === 'restore' ? false : existing?.deleted === true;
     const configRevision = randomUUID();
     const provider: ImageGenerationProvider = isFluxPort ? 'fluxport' : supplierKind === 'musk' ? 'musk' : 'managed';
@@ -1523,13 +1535,6 @@ async function saveManagedRecord(
       throw error;
     }
     const resolved = await hydrateActualBilling(managedSettingsFromVersion(version), tx);
-    if (enabled && !deleted) {
-      const readiness = await Promise.all(IMAGE_STUDIO_MODELS.filter(model => modelCapabilities[model]?.enabled)
-        .map(model => modelDisabledReason(resolved, model, tx)));
-      if (!readiness.some(reason => reason === null)) {
-        throw new ImageGenerationChannelError(readiness.find(reason => reason) || '没有可启用的完整型号能力', 400, 'image_channel_not_ready');
-      }
-    }
     const result = await registryDto(record, resolved, tx);
     await tx.operationLog.create({
       data: {

@@ -165,10 +165,10 @@ export async function GET(request: NextRequest) {
             },
           },
         }),
-        scope === 'participating'
-          ? Promise.resolve(null)
-          : prisma.project.findFirst({
-              where: { AND: [projectWhere, { type: 'personal', owner_user_id: user.id }] },
+        prisma.project.findFirst({
+              // The personal-space shortcut uses the original authorization boundary,
+              // independently of the grid's search, status and ownership filters.
+              where: { AND: [where, { type: 'personal', owner_user_id: user.id }] },
               orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
               include: {
                 owner: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },

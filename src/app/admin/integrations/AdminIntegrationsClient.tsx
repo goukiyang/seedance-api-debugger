@@ -372,6 +372,79 @@ function emptyManagedChannelDraft(): ManagedChannelDraft {
   };
 }
 
+function managedDraftModels(draft: ManagedChannelDraft) {
+  return IMAGE_STUDIO_MODELS.filter(model => draft.supplierKind === 'fluxport'
+    || draft.protocol === 'gemini_native' && model.startsWith('gemini-')
+    || draft.protocol === 'openai_images' && model.startsWith('gpt-image-'));
+}
+
+function managedDraftCapabilityMissingFields(capability: ChannelCapabilityDraft) {
+  if (!capability.enabled) return [];
+  const missing: string[] = [];
+  if (!capability.qualities.trim()) missing.push('质量选项');
+  if (!capability.resolutions.trim()) missing.push('分辨率');
+  if (!capability.ratios.trim()) missing.push('图片比例');
+  if (!capability.maxReferences.trim()) missing.push('参考图上限');
+  if (!capability.billingMode) missing.push('计费方式');
+  if (capability.billingMode === 'fixed' && !capability.fixedPoints.trim()) missing.push('每张点数');
+  return missing;
+}
+
+function managedChannelCapabilityMissingFields(capability: ManagedImageModel | undefined) {
+  if (!capability?.enabled) return [];
+  const missing: string[] = [];
+  if (!capability.qualities?.length) missing.push('质量选项');
+  if (!capability.resolutions?.length) missing.push('分辨率');
+  if (!capability.ratios?.length) missing.push('图片比例');
+  if (capability.maxReferences === null) missing.push('参考图上限');
+  if (!capability.billingMode) missing.push('计费方式');
+  if (capability.billingMode === 'fixed' && capability.fixedPoints === null) missing.push('每张点数');
+  if (capability.billingMode === 'actual' && !capability.actualQuoteRequired) missing.push('同一 Key 的账单证明');
+  return missing;
+}
+
+function isManagedImageChannel(value: unknown): value is ManagedImageChannel {
+  return Boolean(value && typeof value === 'object'
+    && typeof (value as ManagedImageChannel).id === 'string'
+    && typeof (value as ManagedImageChannel).enabled === 'boolean'
+    && typeof (value as ManagedImageChannel).deleted === 'boolean'
+    && (value as ManagedImageChannel).models && typeof (value as ManagedImageChannel).models === 'object');
+}
+
+function withManagedChannelReceipt(channels: ManagedImageChannel[], saved: ManagedImageChannel) {
+  const index = channels.findIndex(channel => channel.id === saved.id);
+  if (index < 0) return [...channels, saved];
+  return channels.map(channel => channel.id === saved.id ? saved : channel);
+}
+
+function managedChannelReadyModels(channel: ManagedImageChannel) {
+  return IMAGE_STUDIO_MODELS.filter(model => channel.models[model]?.ready).map(model => IMAGE_STUDIO_MODEL_LABELS[model]);
+}
+
+function managedChannelPendingModels(channel: ManagedImageChannel) {
+  return IMAGE_STUDIO_MODELS.flatMap(model => {
+    const capability = channel.models[model];
+    if (!capability?.enabled || capability.ready) return [];
+    const missing = managedChannelCapabilityMissingFields(capability);
+    const reason = missing.length ? missing.join('、') : capability.disabledReason || '尚未就绪';
+    return [`${IMAGE_STUDIO_MODEL_LABELS[model]}（${reason}）`];
+  });
+}
+
+function managedChannelSaveMessage(channel: ManagedImageChannel, action: 'save' | 'update' | 'archive' | 'restore') {
+  if (action === 'archive') return '配置已归档，已受理任务仍保留原修订。';
+  if (action === 'restore') return '配置已恢复；恢复后仍处于停用状态。';
+  const readyModels = managedChannelReadyModels(channel);
+  const pendingModels = managedChannelPendingModels(channel);
+  const pendingDetail = pendingModels.length ? `待补：${pendingModels.join('；')}。` : '';
+  if (channel.enabled) {
+    return readyModels.length
+      ? `配置已保存并启用。当前可用于新任务的型号：${readyModels.join('、')}。${pendingDetail}`
+      : `配置已保存并启用；当前没有就绪型号，暂不能用于新任务。${pendingDetail || '请按型号逐项补齐规格和计费信息。'}`;
+  }
+  return '配置已保存，当前通道处于停用状态。';
+}
+
 function managedChannelDraftFrom(channel: ManagedImageChannel): ManagedChannelDraft {
   return {
     id: channel.id,
@@ -406,6 +479,10 @@ export default function AdminIntegrationsClient() {
   const [imageConfig, setImageConfig] = useState<ImageGenerationConfig>(EMPTY_IMAGE_GENERATION_CONFIG);
   const [managedImageChannels, setManagedImageChannels] = useState<ManagedImageChannel[]>([]);
   const [managedChannelDraft, setManagedChannelDraft] = useState<ManagedChannelDraft | null>(null);
+  const [fluxportFlareFixedPointsPreset, setFluxportFlareFixedPointsPreset] = useState<number | null>(null);
+  const [managedChannelOutcomeUnknown, setManagedChannelOutcomeUnknown] = useState(false);
+  const [managedChannelReReadSucceeded, setManagedChannelReReadSucceeded] = useState(false);
+  const [managedChannelOutcomeMessage, setManagedChannelOutcomeMessage] = useState('');
   const [volcengineConfig, setVolcengineConfig] = useState<VolcengineIpConfig>(EMPTY_VOLCENGINE_IP_CONFIG);
   const [aiMediaKitConfig, setAiMediaKitConfig] = useState<AiMediaKitConfig>(EMPTY_AIMEDIAKIT_CONFIG);
   const [h3Config, setH3Config] = useState<H3Config>(EMPTY_H3_CONFIG);
@@ -519,6 +596,27 @@ export default function AdminIntegrationsClient() {
     return '健康检查未通过';
   }, [h3Config]);
 
+  const managedDraftModelsForSummary = managedChannelDraft ? managedDraftModels(managedChannelDraft) : [];
+  const managedDraftSelectedCount = managedChannelDraft
+    ? managedDraftModelsForSummary.filter(model => managedChannelDraft.models[model].enabled).length
+    : 0;
+  const managedDraftIncompleteModels = managedChannelDraft
+    ? managedDraftModelsForSummary.flatMap(model => {
+      const missing = managedDraftCapabilityMissingFields(managedChannelDraft.models[model]);
+      return missing.length ? [`${IMAGE_STUDIO_MODEL_LABELS[model]}（${missing.join('、')}）`] : [];
+    })
+    : [];
+  const managedDraftUsesActualBilling = managedChannelDraft
+    ? managedDraftModelsForSummary.some(model => managedChannelDraft.models[model].enabled && managedChannelDraft.models[model].billingMode === 'actual')
+    : false;
+
+  const markManagedChannelOutcomeUnknown = (message: string) => {
+    setManagedChannelOutcomeUnknown(true);
+    setManagedChannelReReadSucceeded(false);
+    setManagedChannelOutcomeMessage(message);
+    setSubmitState({ type: 'error', message });
+  };
+
   const loadConfig = async () => {
     try {
       const [codexRes, muskRes, imageRes, volcengineRes, aiMediaKitRes, h3Res] = await Promise.all([
@@ -566,6 +664,8 @@ export default function AdminIntegrationsClient() {
       setMuskConfig(muskData.config || EMPTY_MUSK_CONFIG);
       setImageConfig(imageData.config || EMPTY_IMAGE_GENERATION_CONFIG);
       setManagedImageChannels(Array.isArray(imageData.channels) ? imageData.channels : []);
+      const flareFixedPoints = imageData.managedChannelPresets?.fluxportFlareFixedPoints;
+      setFluxportFlareFixedPointsPreset(Number.isSafeInteger(flareFixedPoints) && flareFixedPoints >= 0 ? flareFixedPoints : null);
       setVolcengineConfig(volcengineData.config || EMPTY_VOLCENGINE_IP_CONFIG);
       setAiMediaKitConfig(aiMediaKitData.config || EMPTY_AIMEDIAKIT_CONFIG);
       setH3Config(normalizeH3Config(h3Data.config));
@@ -703,12 +803,50 @@ export default function AdminIntegrationsClient() {
     const data = await response.json();
     if (!response.ok || !Array.isArray(data.channels)) throw new Error(data.error || '读取图片供应商配置失败');
     setManagedImageChannels(data.channels);
+    const flareFixedPoints = data.managedChannelPresets?.fluxportFlareFixedPoints;
+    setFluxportFlareFixedPointsPreset(Number.isSafeInteger(flareFixedPoints) && flareFixedPoints >= 0 ? flareFixedPoints : null);
+  };
+
+  const applyFluxportFlareDraftPreset = () => {
+    const fixedPoints = fluxportFlareFixedPointsPreset;
+    if (fixedPoints === null) return;
+    setManagedChannelDraft(current => {
+      if (!current || current.supplierKind !== 'fluxport') return current;
+      return {
+        ...current,
+        models: {
+          ...current.models,
+          'gpt-image-2.5-flare': {
+            ...current.models['gpt-image-2.5-flare'],
+            enabled: true,
+            qualities: 'auto',
+            resolutions: '1K',
+            ratios: '1:1',
+            maxReferences: '0',
+            billingMode: 'fixed',
+            fixedPoints: String(fixedPoints),
+          },
+        },
+      };
+    });
+  };
+
+  const reReadManagedChannelsAfterUnknown = async () => {
+    try {
+      await refreshManagedImageChannels();
+      setManagedChannelReReadSucceeded(true);
+      setManagedChannelOutcomeMessage('配置列表已重新读取。请核对本次新增或修改是否已出现；若已出现，请取消当前草稿或编辑已有配置，不要重复新增。');
+    } catch {
+      setManagedChannelReReadSucceeded(false);
+      setManagedChannelOutcomeMessage('重新读取失败，保存结果仍未确认。请稍后重读配置列表，不要直接重复提交。');
+    }
   };
 
   const saveManagedImageChannel = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!managedChannelDraft || !settingsSubmit.start()) return;
     let saved = false;
+    let requestSent = false;
     setManagedChannelSaving(true);
     setSubmitState(null);
     try {
@@ -739,19 +877,40 @@ export default function AdminIntegrationsClient() {
         clearApiKey: managedChannelDraft.clearApiKey,
         models,
       };
+      requestSent = true;
       const response = await fetch('/api/admin/integrations/image-generation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ channel_action: managedChannelDraft.id ? 'update' : 'create', channel }),
       });
-      const data = await response.json();
-      if (!response.ok || !data.channel) throw new Error(data.error || '保存图片供应商配置失败');
-      await refreshManagedImageChannels();
+      const data = await response.json().catch(() => null) as Record<string, unknown> | null;
+      const errorMessage = typeof data?.error === 'string' ? data.error : '保存图片供应商配置失败';
+      if (!response.ok) {
+        if (response.status >= 500) {
+          markManagedChannelOutcomeUnknown(`${errorMessage}；保存结果暂未确认。请重新读取配置列表，核对后再继续，不要直接重复提交。`);
+        } else {
+          setSubmitState({ type: 'error', message: errorMessage });
+        }
+        return;
+      }
+      if (!isManagedImageChannel(data?.channel)) {
+        markManagedChannelOutcomeUnknown('请求已完成，但没有收到可核对的保存结果。请重新读取配置列表后再继续，不要直接重复提交。');
+        return;
+      }
+      const savedChannel = data.channel;
+      setManagedImageChannels(current => withManagedChannelReceipt(current, savedChannel));
       setManagedChannelDraft(null);
-      setSubmitState({ type: 'success', message: '图片供应商配置已保存；新配置已生成独立修订。' });
+      setManagedChannelOutcomeUnknown(false);
+      setManagedChannelReReadSucceeded(false);
+      setManagedChannelOutcomeMessage('');
+      setSubmitState({ type: 'success', message: managedChannelSaveMessage(savedChannel, managedChannelDraft.id ? 'update' : 'save') });
       saved = true;
     } catch (error) {
-      setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存图片供应商配置失败' });
+      if (requestSent) {
+        markManagedChannelOutcomeUnknown('网络或响应异常，保存结果暂未确认。请重新读取配置列表，核对后再继续，不要直接重复提交。');
+      } else {
+        setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存图片供应商配置失败' });
+      }
     } finally {
       setManagedChannelSaving(false);
       settingsSubmit.finish('managedChannel', saved);
@@ -761,6 +920,7 @@ export default function AdminIntegrationsClient() {
   const runManagedChannelAction = async (channel: ManagedImageChannel, action: 'update' | 'archive' | 'restore', enabled?: boolean) => {
     if (!settingsSubmit.start()) return;
     let saved = false;
+    let requestSent = false;
     setManagedChannelSaving(true);
     setSubmitState(null);
     try {
@@ -768,18 +928,39 @@ export default function AdminIntegrationsClient() {
       const body = action === 'update'
         ? { channel_action: action, channel: { ...channel, expectedRevision: channel.configRevision, enabled } }
         : { channel_action: action, channel: { id: channel.id, expectedRevision: channel.configRevision } };
+      requestSent = true;
       const response = await fetch('/api/admin/integrations/image-generation', {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = await response.json();
-      if (!response.ok || !data.channel) throw new Error(data.error || '更新图片供应商状态失败');
-      await refreshManagedImageChannels();
-      setSubmitState({ type: 'success', message: action === 'archive' ? '配置已归档，已受理任务仍保留原修订。' : action === 'restore' ? '配置已恢复；恢复后仍处于停用状态。' : enabled ? '配置已启用。' : '配置已停用。' });
+      const data = await response.json().catch(() => null) as Record<string, unknown> | null;
+      const errorMessage = typeof data?.error === 'string' ? data.error : '更新图片供应商状态失败';
+      if (!response.ok) {
+        if (response.status >= 500) {
+          markManagedChannelOutcomeUnknown(`${errorMessage}；操作结果暂未确认。请重新读取配置列表，核对后再继续，不要直接重复操作。`);
+        } else {
+          setSubmitState({ type: 'error', message: errorMessage });
+        }
+        return;
+      }
+      if (!isManagedImageChannel(data?.channel)) {
+        markManagedChannelOutcomeUnknown('请求已完成，但没有收到可核对的操作结果。请重新读取配置列表后再继续，不要重复操作。');
+        return;
+      }
+      const savedChannel = data.channel;
+      setManagedImageChannels(current => withManagedChannelReceipt(current, savedChannel));
+      setManagedChannelOutcomeUnknown(false);
+      setManagedChannelReReadSucceeded(false);
+      setManagedChannelOutcomeMessage('');
+      setSubmitState({ type: 'success', message: managedChannelSaveMessage(savedChannel, action) });
       saved = true;
     } catch (error) {
-      setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '更新图片供应商状态失败' });
+      if (requestSent) {
+        markManagedChannelOutcomeUnknown('网络或响应异常，操作结果暂未确认。请重新读取配置列表，核对后再继续，不要直接重复操作。');
+      } else {
+        setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '更新图片供应商状态失败' });
+      }
     } finally {
       setManagedChannelSaving(false);
       settingsSubmit.finish('managedChannel', saved);
@@ -1158,7 +1339,26 @@ export default function AdminIntegrationsClient() {
         </div>
       </div>
 
-      {submitState && (
+      {managedChannelOutcomeUnknown ? (
+        <div className="alert alert-error mt-4">
+          {managedChannelOutcomeMessage}
+          <div className="codex-config-actions mt-2">
+            <button className="btn btn-secondary" type="button" disabled={managedChannelSaving} onClick={() => void reReadManagedChannelsAfterUnknown()}>
+              重新读取配置
+            </button>
+            {managedChannelReReadSucceeded && (
+              <button className="btn btn-secondary" type="button" disabled={managedChannelSaving} onClick={() => {
+                setManagedChannelOutcomeUnknown(false);
+                setManagedChannelReReadSucceeded(false);
+                setManagedChannelOutcomeMessage('');
+                setSubmitState({ type: 'success', message: '已读取当前配置列表。请按列表核对结果后再继续；如本次修改已出现，请编辑已有配置，不要重复新增。' });
+              }}>
+                已核对，继续操作
+              </button>
+            )}
+          </div>
+        </div>
+      ) : submitState && (
         <div className={`alert ${submitState.type === 'success' ? 'alert-success' : 'alert-error'} mt-4`}>
           {submitState.message}
         </div>
@@ -2084,7 +2284,7 @@ export default function AdminIntegrationsClient() {
           <button
             className="btn btn-primary"
             type="button"
-            disabled={managedChannelSaving}
+            disabled={managedChannelSaving || managedChannelOutcomeUnknown}
             onClick={() => setManagedChannelDraft(emptyManagedChannelDraft())}
           >
             新增供应商
@@ -2107,25 +2307,32 @@ export default function AdminIntegrationsClient() {
                 {channel.baseUrl} · API Key {channel.apiKeyConfigured ? '已设置' : '未设置'}
               </p>
               <p className="text-gray text-sm mt-0">
-                可用型号：{IMAGE_STUDIO_MODELS.filter(model => channel.models[model]?.ready).map(model => IMAGE_STUDIO_MODEL_LABELS[model]).join('、') || '暂无；先补齐能力和计费信息'}
+                可用于新任务的型号：{managedChannelReadyModels(channel).join('、') || '暂无'}
               </p>
+              {channel.enabled && managedChannelReadyModels(channel).length === 0 && (
+                <p className="text-gray text-sm mt-0">
+                  通道已启用，但当前没有就绪型号，暂不能用于新任务。{managedChannelPendingModels(channel).length
+                    ? `待补：${managedChannelPendingModels(channel).join('；')}`
+                    : '尚未勾选型号。'}
+                </p>
+              )}
               <div className="codex-config-actions">
-                <button className="btn btn-secondary" type="button" onClick={() => setManagedChannelDraft(managedChannelDraftFrom(channel))}>
+                    <button className="btn btn-secondary" type="button" disabled={managedChannelSaving || managedChannelOutcomeUnknown} onClick={() => setManagedChannelDraft(managedChannelDraftFrom(channel))}>
                   编辑
                 </button>
                 {channel.deleted ? (
-                  <button className="btn btn-secondary" type="button" onClick={() => void runManagedChannelAction(channel, 'restore')}>
+                  <button className="btn btn-secondary" type="button" disabled={managedChannelSaving || managedChannelOutcomeUnknown} onClick={() => void runManagedChannelAction(channel, 'restore')}>
                     恢复（保持停用）
                   </button>
                 ) : (
                   <>
-                    <button className="btn btn-secondary" type="button" disabled={managedChannelSaving} onClick={() => void runManagedChannelAction(channel, 'update', !channel.enabled)}>
+                    <button className="btn btn-secondary" type="button" disabled={managedChannelSaving || managedChannelOutcomeUnknown} onClick={() => void runManagedChannelAction(channel, 'update', !channel.enabled)}>
                       {channel.enabled ? '停用' : '启用'}
                     </button>
                     <button
                       className="btn btn-secondary"
                       type="button"
-                      disabled={managedChannelSaving || channel.id === 'fluxport'}
+                      disabled={managedChannelSaving || managedChannelOutcomeUnknown || channel.id === 'fluxport'}
                       onClick={async () => {
                         if (await confirm(`归档“${channel.label}”？已受理的任务仍会保留原配置，归档后不能新建任务。`, { title: '归档配置', confirmLabel: '归档', danger: true })) {
                           await runManagedChannelAction(channel, 'archive');
@@ -2147,7 +2354,7 @@ export default function AdminIntegrationsClient() {
               <div>
                 <h3 className="section-title mb-0">{managedChannelDraft.id ? '编辑供应商配置' : '新增供应商配置'}</h3>
                 <p className="text-gray text-sm mt-2">
-                  每次保存会建立不可变配置修订。启用前至少要有一个能力完整、计费已明确的型号。
+                  启用只保存通道状态；每个型号仍需单独补齐规格与计费，才能用于新任务。按实际账单计费还需核实同一 API Key 与型号的账单证明。
                 </p>
               </div>
               <label className="toggle-switch" aria-label="启用该图片供应商">
@@ -2159,6 +2366,16 @@ export default function AdminIntegrationsClient() {
                 <span className="toggle-slider"></span>
               </label>
             </div>
+
+            <p className="text-gray text-sm mt-2">
+              {managedDraftSelectedCount === 0
+                ? '当前未勾选型号。通道可以单独启用，但没有就绪型号前不能用于新任务。'
+                : `当前勾选 ${managedDraftSelectedCount} 个型号。`}
+              {managedDraftIncompleteModels.length > 0
+                ? ` 待补：${managedDraftIncompleteModels.join('；')}。`
+                : managedDraftSelectedCount > 0 ? ' 已填写草稿字段不代表供应商接口或账单已核实。' : ''}
+              {managedDraftUsesActualBilling ? ' 按实际账单的型号还需核对同一 Key 的账单证明。' : ''}
+            </p>
 
             <div className="codex-config-grid">
               <div className="form-group">
@@ -2228,6 +2445,7 @@ export default function AdminIntegrationsClient() {
                 || managedChannelDraft.protocol === 'openai_images' && model.startsWith('gpt-image-'))
                 .map(model => {
                   const capability = managedChannelDraft.models[model];
+                  const missingFields = managedDraftCapabilityMissingFields(capability);
                   const prefix = `managed-${model}`;
                   const updateCapability = (patch: Partial<ChannelCapabilityDraft>) => setManagedChannelDraft(current => current ? {
                     ...current,
@@ -2237,8 +2455,26 @@ export default function AdminIntegrationsClient() {
                     <details key={model} className="form-group" style={{ border: '1px solid var(--border-color, #d8dee8)', borderRadius: 10, padding: 12 }}>
                       <summary style={{ cursor: 'pointer' }}>
                         <strong>{IMAGE_STUDIO_MODEL_LABELS[model]}</strong>
-                        <span className="text-gray"> · {capability.enabled ? '加入白名单' : '未开放'}</span>
+                        <span className="text-gray">
+                          {' · '}{!capability.enabled ? '未勾选' : missingFields.length ? `待补：${missingFields.join('、')}` : '字段已填，待服务端核验'}
+                        </span>
                       </summary>
+                      {model === 'gpt-image-2.5-flare' && managedChannelDraft.supplierKind === 'fluxport' && (
+                        <div className="form-group mt-2">
+                          {fluxportFlareFixedPointsPreset !== null ? (
+                            <>
+                              <button className="btn btn-secondary" type="button" disabled={managedChannelSaving || managedChannelOutcomeUnknown} onClick={applyFluxportFlareDraftPreset}>
+                                基础文生图示例 + 沿用本站 Flare 点数（{fluxportFlareFixedPointsPreset} 点/张）
+                              </button>
+                              <small className="text-gray d-block mt-1">
+                                只填入本次草稿：auto、1K、正方形、不用参考图；不立即保存。供应商实际账单和接口可用性仍待核实。
+                              </small>
+                            </>
+                          ) : (
+                            <p className="text-gray text-sm mb-0">当前没有可复用的本站 Flare 固定点数，不会预填点数；请按后台价格配置核对。</p>
+                          )}
+                        </div>
+                      )}
                       <label className="codex-clear-token mt-2">
                         <input type="checkbox" checked={capability.enabled} onChange={event => updateCapability({ enabled: event.target.checked })} />
                         已确认该型号可用
@@ -2266,6 +2502,9 @@ export default function AdminIntegrationsClient() {
                         <input id={`${prefix}-points`} className="input" type="number" min={0} step={1} value={capability.fixedPoints}
                           onChange={event => updateCapability({ fixedPoints: event.target.value })} placeholder="0 表示明确免费" />
                       </>}
+                      {capability.billingMode === 'actual' && (
+                        <small className="text-gray d-block mt-2">提交时会按同一 API Key 和该型号核对账单证明；未就绪前不能用于新任务。</small>
+                      )}
                     </details>
                   );
                 })}
@@ -2275,7 +2514,7 @@ export default function AdminIntegrationsClient() {
               <button className="btn btn-secondary" type="button" disabled={managedChannelSaving} onClick={async () => {
                 if (await confirm('放弃当前未保存的图片供应商修改？', { title: '放弃修改', confirmLabel: '放弃', danger: true })) setManagedChannelDraft(null);
               }}>取消</button>
-              <button className="btn btn-primary sd2-loading-surface" type="submit" disabled={managedChannelSaving} data-busy={managedChannelSaving}>
+            <button className="btn btn-primary sd2-loading-surface" type="submit" disabled={managedChannelSaving || managedChannelOutcomeUnknown} data-busy={managedChannelSaving}>
                 {managedChannelSaving ? '正在保存' : '保存供应商配置'}
               </button>
             </div>

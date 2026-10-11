@@ -20,7 +20,7 @@ import { timingFromStory, validateStoryTiming } from './story-duration';
 import { attachStoryVideo, type StoryCanvas as Snapshot } from './story-handoff';
 import { STUDIO_TEXT_MODELS, isStudioTextModel } from '@/lib/template-studio/text-models';
 import { STORY_TEXT_CLIENT_WAIT_MS } from '@/lib/story-text-contract';
-import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, imageStudioChannelReadyForModel, useImageStudioChannel } from '@/lib/image-studio/channels';
+import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, useImageStudioChannel } from '@/lib/image-studio/channels';
 import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChannelSelect';
 import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
 
@@ -133,7 +133,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
   const mediaSettings = work.mediaSettings || { imageModel: mediaCapabilities?.image.model || 'gemini-3.1-flash-image-preview', quality: 'auto', resolution: '2K', ratio: '16:9',
     videoModel: mediaCapabilities?.video.model || '', provider: 'seedance', videoResolution: '720p' };
   const selectedImageChannelModel = imageStudioChannelModel(imageChannel.channel, mediaSettings.imageModel);
-  const channelImageModels = imageStudioChannelModels(imageChannel.channel, IMAGE_STUDIO_MODELS);
+  const channelImageModels = imageStudioChannelModels(imageChannel.channels, IMAGE_STUDIO_MODELS);
   const imageModelChoices = channelImageModels.includes(mediaSettings.imageModel) ? channelImageModels : [mediaSettings.imageModel, ...channelImageModels];
   const qualityOptions: readonly string[] = selectedImageChannelModel?.qualities ?? (imageChannel.channelId === 'original'
     ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[mediaSettings.imageModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [] : []);
@@ -776,8 +776,8 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
       <button disabled={blocked || work.draft.shots.length >= 30} onClick={() => updateDraft({ shots: [...work.draft.shots, { id: `shot-${crypto.randomUUID()}`, title: `镜头 ${work.draft.shots.length + 1}`, description: '', dialogue: '', imagePrompt: '', videoPrompt: '', durationSeconds: 5 }] })}><Plus size={16} />添加镜头</button></div>
       </div>
       <details><summary>生成设置</summary><div className={styles.shotFields}>
-        <label>生图通道<ImageGenerationChannelSelect channels={imageChannel.channels} value={imageChannel.channelId} disabled={blocked} onChange={imageChannel.select}/></label>
-        <label>图片模型<select disabled={blocked} value={mediaSettings.imageModel} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, imageModel: event.target.value } })}>{imageModelChoices.map(model => <option key={model} value={model} disabled={model!==mediaSettings.imageModel&&!imageStudioChannelReadyForModel(imageChannel.channel,model)}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS]||model}</option>)}</select></label>
+        <label>图片模型<select disabled={blocked} value={mediaSettings.imageModel} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, imageModel: event.target.value } })}>{imageModelChoices.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS]||model}</option>)}</select></label>
+        <label>供应商<ImageGenerationChannelSelect channels={imageChannel.channels} value={imageChannel.channelId} disabled={blocked} onChange={imageChannel.select} model={mediaSettings.imageModel}/></label>
         <label>图片质量<select disabled={blocked} value={mediaSettings.quality} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, quality: event.target.value } })}>{!qualityOptions.includes(mediaSettings.quality) && <option disabled value={mediaSettings.quality}>{mediaSettings.quality}（需重新选择）</option>}{qualityOptions.map(value => <option key={value} value={value}>{IMAGE_STUDIO_QUALITY_LABELS[value as keyof typeof IMAGE_STUDIO_QUALITY_LABELS]}</option>)}</select></label>
         <label>图片分辨率<select disabled={blocked} value={mediaSettings.resolution} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, resolution: event.target.value } })}>{!imageResolutions.includes(mediaSettings.resolution) && <option disabled value={mediaSettings.resolution}>{mediaSettings.resolution}（需重新选择）</option>}{imageResolutions.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
         <label>比例<select disabled={blocked} value={mediaSettings.ratio} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, ratio: event.target.value } })}>{!ratioOptions.includes(mediaSettings.ratio)&&<option value={mediaSettings.ratio} disabled>{mediaSettings.ratio}（当前通道不支持）</option>}{ratioOptions.map(value => <option key={value} value={value}>{value}</option>)}</select></label>

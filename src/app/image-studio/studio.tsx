@@ -1049,7 +1049,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const baseline = moduleSaved ? JSON.parse(moduleSaved) as typeof moduleDraft : moduleDraft;
   const selectedChannel = imageChannels.items.find(item => item.id === imageChannelId);
   const selectedChannelModel = imageStudioChannelModel(selectedChannel, moduleModel);
-  const channelModels = imageStudioChannelModels(selectedChannel || imageChannels.items[0], models);
+  const channelModels = imageStudioChannelModels(imageChannels, models);
   const modelChoices = channelModels.includes(moduleModel) ? channelModels : [moduleModel, ...channelModels];
   const qualityChoices = selectedChannelModel?.qualities ?? (imageChannelId === 'original'
     ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [] : []);
@@ -2156,13 +2156,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         {evolutionConflict && <p role="alert" className={styles.error}>{evolutionConflict}</p>}
         <RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={effectiveReferences.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} fourToOneSupported={selectedFourToOne} allowedRatios={selectedChannelModel?.ratios ?? undefined} restrictToAllowedRatios={imageChannelId !== 'original'} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
         <div className={styles.modelQualityRow}>
-          <label className={styles.compactField} htmlFor={`studio-channel-${module.id}`}><strong>生图通道</strong>
-            <ImageGenerationChannelSelect id={`studio-channel-${module.id}`} channels={imageChannels} value={imageChannelId} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onChange={onImageChannelChange} />
-          </label>
           <label className={styles.compactField} htmlFor={`studio-model-${module.id}`}><strong>生成模型</strong>
-            <select id={`studio-model-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={moduleModel} onChange={event => { const next = event.target.value; setModuleModel(next); if (imageChannelId === 'original') { setQuality(defaultImageStudioQuality(next)); setResolution(defaultImageResolution(next)); } }}>
-              {modelChoices.map(model => <option key={model} value={model} disabled={model !== moduleModel && !imageStudioChannelReadyForModel(selectedChannel, model, settings?.modelReady?.[model])}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model}</option>)}
+            <select id={`studio-model-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={moduleModel} onChange={event => setModuleModel(event.target.value)}>
+              {modelChoices.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model}</option>)}
             </select>
+          </label>
+          <label className={styles.compactField} htmlFor={`studio-channel-${module.id}`}><strong>供应商</strong>
+            <ImageGenerationChannelSelect id={`studio-channel-${module.id}`} channels={imageChannels} value={imageChannelId} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onChange={onImageChannelChange} model={moduleModel} legacyReady={settings?.modelReady?.[moduleModel] ?? settings?.providerReady} />
           </label>
           <label className={styles.compactField} htmlFor={`studio-quality-${module.id}`}><strong>图片质量</strong>
             <select id={`studio-quality-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={quality} onChange={event => setQuality(event.target.value)}>

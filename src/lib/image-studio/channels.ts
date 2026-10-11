@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { isGeminiImageModel } from '@/lib/image-generation/resolution';
 import { IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
 import type { ImageGenerationChannelDto, ImageGenerationChannelsDto, ImageGenerationModelCapabilityDto } from '@/lib/integrations/image-generation-channel';
 
@@ -87,9 +88,54 @@ export function imageStudioChannelModel(channel: ImageStudioChannel | undefined,
   return channel?.models[model];
 }
 
-export function imageStudioChannelModels(channel: ImageStudioChannel, legacyModels: readonly string[]) {
-  if (channel.id === ORIGINAL_IMAGE_CHANNEL_ID) return [...legacyModels];
-  return Object.keys(channel.models);
+export function imageStudioChannelModels(channelOrChannels: ImageStudioChannel | ImageStudioChannels, legacyModels: readonly string[]) {
+  const channels = 'items' in channelOrChannels ? channelOrChannels.items : [channelOrChannels];
+  const models = new Set<string>();
+  for (const channel of channels) {
+    if (channel.id === ORIGINAL_IMAGE_CHANNEL_ID) {
+      for (const model of legacyModels) models.add(model);
+      continue;
+    }
+    for (const model of Object.keys(channel.models)) models.add(model);
+  }
+  return legacyModels.filter(model => models.has(model));
+}
+
+export function imageStudioChannelOptionsForModel(
+  channels: ImageStudioChannels,
+  model: string,
+  selectedChannelId: string,
+  legacyReady?: boolean,
+) {
+  const readyOptions = channels.items.filter(channel => imageStudioChannelReadyForModel(channel, model,
+    channel.id === ORIGINAL_IMAGE_CHANNEL_ID ? legacyReady : undefined));
+  const selected = channels.items.find(channel => channel.id === selectedChannelId);
+  if (selected && !readyOptions.some(channel => channel.id === selected.id)) readyOptions.unshift(selected);
+
+  const originalRouteId = isGeminiImageModel(model) ? 'banana' : 'shared';
+  const route = channels.items.find(channel => channel.id === originalRouteId);
+  const originalVisible = readyOptions.some(channel => channel.id === ORIGINAL_IMAGE_CHANNEL_ID);
+  const routeVisible = readyOptions.some(channel => channel.id === originalRouteId);
+  const routeReady = imageStudioChannelReadyForModel(route, model);
+  if (originalVisible && routeVisible) {
+    const preserveOriginal = selectedChannelId === ORIGINAL_IMAGE_CHANNEL_ID;
+    const duplicateId = preserveOriginal ? originalRouteId : routeReady ? ORIGINAL_IMAGE_CHANNEL_ID : null;
+    if (duplicateId) {
+      const duplicateIndex = readyOptions.findIndex(channel => channel.id === duplicateId);
+      if (duplicateIndex >= 0) readyOptions.splice(duplicateIndex, 1);
+    }
+  }
+
+  if (route && originalVisible) {
+    const originalIndex = readyOptions.findIndex(channel => channel.id === ORIGINAL_IMAGE_CHANNEL_ID);
+    readyOptions[originalIndex] = {
+      ...readyOptions[originalIndex],
+      label: `${route.label}（原默认）`,
+      supplierName: route.supplierName,
+    };
+  }
+
+  return readyOptions;
 }
 
 export function imageStudioChannelIssue(channel: ImageStudioChannel | undefined, model: string, values: {

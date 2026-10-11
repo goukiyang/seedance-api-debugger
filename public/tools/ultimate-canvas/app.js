@@ -1902,12 +1902,23 @@
             const channelSelect = nodeEl.querySelector('[data-generation-image-channel]');
             const selection = selectedImageChannel();
             const channel = selection.channel;
+            const capability = canvasRuntime.bootstrap?.capabilities?.image || {};
+            const selectedModel = generationSettingsForNode(node).model || capability.model;
             if (channelSelect) {
                 const channels = canvasImageChannels();
-                channelSelect.replaceChildren(...channels.map(item => {
+                const originalRouteId = selection.id === 'original' ? originalImageChannelRouteForModel(selectedModel) : null;
+                const originalRoute = originalRouteId ? channels.find(item => item.id === originalRouteId) : null;
+                const visibleChannels = channels.filter(item => !(selection.id === 'original' && item.id === originalRouteId));
+                if (selection.missing) {
+                    visibleChannels.unshift({ id: selection.id, label: '上次选择的通道（当前配置中不存在）', supplierName: null,
+                        ready: false, enabled: false, configured: false, disabledReason: selection.fallbackReason, models: {} });
+                }
+                channelSelect.replaceChildren(...visibleChannels.map(item => {
+                    const label = item.id === 'original' && originalRoute?.supplierName
+                        ? `${originalRoute.supplierName} · ${item.label}`
+                        : item.supplierName && item.supplierName !== item.label ? `${item.supplierName} · ${item.label}` : item.label;
                     const option = new Option(
-                        item.supplierName && item.supplierName !== item.label ? `${item.supplierName} · ${item.label}` : item.label,
-                        item.id, false, item.id === selection.id
+                        label, item.id, false, item.id === selection.id
                     );
                     option.disabled = item.id !== 'original' && (item.enabled !== true || item.configured !== true);
                     option.title = item.disabledReason || '';
@@ -1928,20 +1939,20 @@
                 imageSelect.title = '使用风格模板的模型；移除风格后可自由选择';
                 return;
             }
-            const capability = canvasRuntime.bootstrap?.capabilities?.image || {};
-            const selected = generationSettingsForNode(node).model || capability.model;
+            const selected = selectedModel;
             const options = imageChannelModelOptions(channel, capability).filter(item => item?.value);
             if (selected && !options.some(item => item.value === selected)) {
                 options.unshift({ value: selected, label: `${selected}（当前通道不支持）`, ready: false, unavailable: true });
             }
             imageSelect.replaceChildren(...options.map(item => {
-                const option = new Option(item.label || item.value, item.value, false, item.value === selected);
+                const label = item.label || item.value;
+                const option = new Option(item.ready === false && !item.unavailable ? `${label}（当前通道不支持）` : label, item.value, false, item.value === selected);
                 option.disabled = item.ready === false || item.unavailable === true;
                 return option;
             }));
             imageSelect.disabled = !options.length || (channel?.id === 'original'
                 ? !capability.enabled : channel?.enabled !== true || channel?.configured !== true);
-            imageSelect.title = channel?.id !== 'original' ? '模型选项仅显示当前供应商已确认支持的模型；不兼容的现有选择会保留并阻止生成。' : '';
+            imageSelect.title = '型号列表合并所有供应商并去重；切换型号不会改变供应商，当前通道不支持的型号不可选。';
             return;
         }
         const label = nodeEl?.querySelector('[data-generation-model-label]');
@@ -4056,6 +4067,12 @@
         return channels;
     }
 
+    function originalImageChannelRouteForModel(model) {
+        if (!model) return null;
+        return model === 'gemini-3.1-flash-image-preview' || model === 'gemini-3-pro-image-preview'
+            ? 'banana' : 'shared';
+    }
+
     function selectedImageChannel() {
         const items = canvasImageChannels();
         let selectedId = 'original';
@@ -4065,17 +4082,42 @@
             if (saved) selectedId = saved;
         } catch { /* Canvas remains usable with the original channel. */ }
         const selected = items.find(item => item.id === selectedId);
-        if (selectedId !== 'original' && (!selected || selected.enabled !== true || selected.configured !== true)) {
-            try { if (key) localStorage.setItem(key, 'original'); } catch { /* Keep the safe fallback in memory. */ }
-            return { id: 'original', channel: items.find(item => item.id === 'original') || null,
-                fallbackReason: selected?.disabledReason || `${selected?.label || '上次选择的生图通道'}已不可用，已恢复原接口；没有自动生成。` };
+        if (!selected) {
+            return { id: selectedId, channel: null, missing: true,
+                fallbackReason: `上次选择的生图通道已不在当前配置中（${selectedId}）；偏好已保留，请手动选择其他通道。` };
         }
-        return { id: selectedId, channel: selected || items.find(item => item.id === 'original') || null, fallbackReason: '' };
+        if (selectedId !== 'original' && (selected.enabled !== true || selected.configured !== true)) {
+            return { id: selectedId, channel: selected,
+                fallbackReason: `${selected.disabledReason || `${selected.label || '上次选择的生图通道'}已不可用`}；偏好已保留，请手动选择其他通道。` };
+        }
+        return { id: selectedId, channel: selected, missing: false, fallbackReason: '' };
     }
 
     function imageChannelModelOptions(channel, capability) {
-        if (!channel || channel.id === 'original') return capability.model_options || [{ value: capability.model, label: capability.label || capability.model, ready: capability.enabled !== false }];
-        return Object.entries(channel.models || {}).filter(([, item]) => item && item.ready === true).map(([value]) => ({ value, label: value, ready: true }));
+        const legacyOptions = Array.isArray(capability.model_options) ? capability.model_options : [];
+        const options = new Map();
+        for (const item of legacyOptions) {
+            if (!item || typeof item.value !== 'string' || !item.value || options.has(item.value)) continue;
+            options.set(item.value, { value: item.value, label: item.label || item.value });
+        }
+        for (const item of canvasImageChannels()) {
+            for (const value of Object.keys(item.models || {})) {
+                if (!value || options.has(value)) continue;
+                options.set(value, { value, label: value });
+            }
+        }
+        if (!options.size && capability.model) {
+            options.set(capability.model, { value: capability.model, label: capability.label || capability.model });
+        }
+        return [...options.values()].map(option => {
+            const selectedCapability = channel?.id === 'original'
+                ? legacyOptions.find(item => item?.value === option.value)
+                : channel?.models?.[option.value];
+            const ready = channel?.id === 'original'
+                ? selectedCapability ? selectedCapability.ready !== false : option.value === capability.model && capability.enabled !== false
+                : selectedCapability?.ready === true;
+            return { ...option, ready };
+        });
     }
 
     function imageChannelIssueForNode(node) {
@@ -4086,7 +4128,13 @@
         if (!channel || channel.id !== 'original' && (channel.enabled !== true || channel.configured !== true || channel.ready !== true)) {
             return channel?.disabledReason || `${channel?.label || '所选生图通道'}未配置或暂未就绪，请联系管理员。`;
         }
-        if (channel.id === 'original') return '';
+        if (channel.id === 'original') {
+            const capability = canvasRuntime.bootstrap?.capabilities?.image || {};
+            const model = generationSettingsForNode(node).model || capability.model;
+            const modelOption = capability.model_options?.find(item => item.value === model);
+            return modelOption?.ready === false || (!modelOption && (model !== capability.model || capability.enabled === false))
+                ? '当前原接口不支持所选图片型号；请手动选择其他型号或通道，其他参数未更改。' : '';
+        }
         const settings = generationSettingsForNode(node);
         if (!Number.isSafeInteger(settings.count) || settings.count < 1 || settings.count > 8) return '一次可提交 1–8 张；原数量已保留，请手动调整后再生成。';
         const model = channel.models?.[settings.model];
