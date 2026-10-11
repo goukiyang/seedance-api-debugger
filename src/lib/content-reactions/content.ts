@@ -122,8 +122,8 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
     if (type === 'image_template') {
       let row = await prisma.imageStudioPreset.findUnique({ where: { id } });
       if (!row && id.startsWith('module-source:')) {
-        const module = await prisma.imageStudioModule.findUnique({ where: { id: id.slice('module-source:'.length) }, select: { source_preset_id: true } });
-        if (module?.source_preset_id) row = await prisma.imageStudioPreset.findUnique({ where: { id: module.source_preset_id } });
+        const workspace = await prisma.imageStudioModule.findUnique({ where: { id: id.slice('module-source:'.length) }, select: { source_preset_id: true } });
+        if (workspace?.source_preset_id) row = await prisma.imageStudioPreset.findUnique({ where: { id: workspace.source_preset_id } });
       }
       if (!row || await studioPresetArchived(row.id) || !canViewStudioPreset(user, row)) return null;
       const item = summary(input, 'template', row.name, `/template-studio?type=image&presetId=${encodeURIComponent(row.id)}`);
