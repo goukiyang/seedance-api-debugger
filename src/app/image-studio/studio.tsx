@@ -1634,6 +1634,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           const binding: StudioModule | undefined = data.modules?.find((item: StudioModule) => item.id === module.id);
           if (binding?.sharedLive?.mode === 'publisher' && binding.sharedLive.intent.presetId === created.id) onModuleChange(binding);
           else throw new Error('模板已保存，共享工作区尚未读取，请核对原模板，不要重复另存');
+        } else if (!request.payload.isShared && !sharedLive) {
+          onModuleChange({ ...module, sourcePresetId: created.id, sourcePresetShared: false,
+            sourcePresetOwnedByViewer: true, sourcePresetCanManageSharing: true });
         }
         await onPresetSaved();
         presetCreateRequest.current = null;
