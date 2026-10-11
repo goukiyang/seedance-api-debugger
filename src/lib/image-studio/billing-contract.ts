@@ -20,6 +20,7 @@ export type ImageBillingContract = {
 
 export type ImageBillingView = {
   status: string;
+  mode?: 'fixed' | 'actual' | null;
   pollUntil?: string | null;
   amountMicros: number | null;
   chargedCredits: number | null;
@@ -62,7 +63,8 @@ export function imageBillingView(task: { owner_id: string; billing_status: strin
   actual_credits: number | null; billing_contract_json: string | null }, viewerId: string, isAdmin: boolean): ImageBillingView | null {
   if (!isAdmin && task.owner_id !== viewerId) return null;
   const contract = parseImageBillingContract(task.billing_contract_json);
-  return { status: task.billing_status, pollUntil: contract ? contract.deadline || new Date(Date.parse(contract.issuedAt) + 48 * 60 * 60_000).toISOString() : null, amountMicros: task.actual_amount_micros,
+  const status = task.billing_status.startsWith('channel_') ? task.billing_status.slice('channel_'.length) : task.billing_status;
+  return { status, mode: contract?.mode ?? null, pollUntil: contract?.mode === 'actual' ? contract.deadline : null, amountMicros: task.actual_amount_micros,
     chargedCredits: task.actual_credits, pointsPerUsd: contract?.mode === 'actual' ? contract.pointsPerUsd : null };
 }
 
@@ -72,6 +74,10 @@ export function imageBillingPending(view: ImageBillingView | null | undefined, n
 }
 
 export function imageBillingLabel(view: ImageBillingView) {
+  if (view.status === 'confirmed' && view.mode === 'fixed'
+    && view.chargedCredits !== null && Number.isFinite(view.chargedCredits) && view.chargedCredits >= 0) {
+    return `固定 ${view.chargedCredits.toFixed(2)} 点 · 供应商费用未核实`;
+  }
   if (view.amountMicros !== null && view.chargedCredits !== null) {
     const dollars = (view.amountMicros / 1_000_000).toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
     return `$${dollars} · ${view.chargedCredits.toFixed(2)}点`;
