@@ -350,7 +350,10 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   await withContextVersionRetry(() => prisma.$transaction(async tx => {
     const duplicate = await tx.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
     if (duplicate) {
-      if (input.sharedLive) return;
+      if (input.sharedLive) {
+        if (moduleId !== undefined && moduleId !== duplicate.module_id) throw new StudioError('提交编号已用于其他请求，请查询原记录', 409);
+        return;
+      }
       if (!matchesRequest(duplicate)) throw new StudioError('提交编号冲突', 409);
       return;
     }
