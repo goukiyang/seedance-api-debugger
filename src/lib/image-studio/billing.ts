@@ -2,16 +2,18 @@ import { createHash } from 'node:crypto';
 import type { ImageStudioTask, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { settleTaskCredits } from '@/lib/credits/policy';
-import { getImageGenerationSettingsForModel } from '@/lib/integrations/image-generation';
+import { getImageGenerationSettingsForModel, isMuskImageGenerationChannel, resolveImageGenerationChannelSnapshot,
+  type ImageGenerationChannelSnapshot, type ImageGenerationResolvedSettings } from '@/lib/integrations/image-generation';
 import { billedCredits, parseImageBillingContract } from './billing-contract';
 import { imageBillingScope } from './billing-scope';
 import { matchImageSupplierCharge, readImageSupplierBills, type ImageSupplierCharge } from './billing-provider';
 import { recordImageBillingProof } from './billing-readiness';
+import { safeImageChannelSnapshot } from './tasks';
 
 const eventKey = (scope: string, requestId: string) => `image-bill:${createHash('sha256').update(`${scope}\0${requestId}\0consume`).digest('hex')}`;
 const terminal = ['succeeded', 'failed', 'uncertain'];
 const MAX_ATTEMPTS = 48;
-const billable = (task: ImageStudioTask) => task.billing_status === 'pending' && terminal.includes(task.status);
+const billable = (task: ImageStudioTask) => ['pending', 'channel_pending'].includes(task.billing_status) && terminal.includes(task.status);
 
 async function writeCreditSettlement(tx: Prisma.TransactionClient, task: ImageStudioTask, actualCost?: number) {
   const settlement = await settleTaskCredits(tx, { taskId: task.id, userId: task.owner_id,
@@ -32,8 +34,10 @@ async function writeCreditSettlement(tx: Prisma.TransactionClient, task: ImageSt
 export async function settleImageSupplierCharge(taskId: string, charge: ImageSupplierCharge, cashOnly = false) {
   return prisma.$transaction(async tx => {
     const task = await tx.imageStudioTask.findUnique({ where: { id: taskId } });
+    const channelPrefix = task?.billing_status.startsWith('channel_') ? 'channel_' : '';
+    const cashOnlyStatuses = ['manual', 'conflict', 'deadline_expired', 'unmatched'].map(status => `${channelPrefix}${status}`);
     if (!task || !(billable(task) || cashOnly && terminal.includes(task.status)
-      && ['manual', 'conflict', 'deadline_expired', 'unmatched'].includes(task.billing_status))) return false;
+      && cashOnlyStatuses.includes(task.billing_status))) return false;
     if (cashOnly && task.billing_mode === 'actual' && task.status === 'succeeded' && !task.billing_settled_at) throw new Error('Reservation must be released first');
     const contract = parseImageBillingContract(task.billing_contract_json);
     if (!contract || contract.scope !== task.billing_scope || charge.requestId !== task.gateway_request_id
@@ -44,12 +48,12 @@ export async function settleImageSupplierCharge(taskId: string, charge: ImageSup
         await writeCreditSettlement(tx, task);
         await tx.imageStudioTask.update({ where: { id: task.id }, data: { actual_credits: 0, billing_settled_at: new Date() } });
       }
-      await tx.imageStudioTask.update({ where: { id: task.id }, data: { billing_status: 'conflict', billing_next_check_at: null } });
+      await tx.imageStudioTask.update({ where: { id: task.id }, data: { billing_status: `${channelPrefix}conflict`, billing_next_check_at: null } });
       return false;
     }
     const changed = await tx.imageStudioTask.updateMany({ where: { id: task.id, billing_status: task.billing_status,
       gateway_request_id: charge.requestId, billing_scope: contract.scope, status: task.status },
-      data: { billing_status: 'reconciling' } });
+      data: { billing_status: `${channelPrefix}reconciling` } });
     if (!changed.count) return false;
     const key = eventKey(contract.scope, charge.requestId);
     const existing = await tx.costLedger.findUnique({ where: { idempotency_key: key } });
@@ -59,7 +63,7 @@ export async function settleImageSupplierCharge(taskId: string, charge: ImageSup
         await writeCreditSettlement(tx, task);
         await tx.imageStudioTask.update({ where: { id: task.id }, data: { actual_credits: 0, billing_settled_at: new Date() } });
       }
-      await tx.imageStudioTask.update({ where: { id: task.id }, data: { billing_status: 'conflict', billing_next_check_at: null } });
+      await tx.imageStudioTask.update({ where: { id: task.id }, data: { billing_status: `${channelPrefix}conflict`, billing_next_check_at: null } });
       return false;
     }
     const delivered = task.status === 'succeeded';
@@ -83,17 +87,18 @@ export async function settleImageSupplierCharge(taskId: string, charge: ImageSup
       image_task_id: task.id, user_id: task.owner_id, amount_micros: charge.amountMicros, currency: 'USD' } });
     if (delivered) await recordImageBillingProof(tx, { scope: contract.scope, model: task.model, taskId: task.id, ledgerId: ledger.id });
     await tx.imageStudioTask.update({ where: { id: task.id }, data: { actual_amount_micros: charge.amountMicros,
-      actual_credits: chargedCredits, billing_status: !delivered ? 'provider_loss' : cashOnly ? 'late_confirmed_no_charge' : overLimit ? 'over_limit' : expired ? 'deadline_expired' : 'confirmed',
+      actual_credits: chargedCredits, billing_status: `${channelPrefix}${!delivered ? 'provider_loss' : cashOnly ? 'late_confirmed_no_charge' : overLimit ? 'over_limit' : expired ? 'deadline_expired' : 'confirmed'}`,
       billing_settled_at: contract.mode === 'actual' && delivered && !cashOnly ? new Date() : task.billing_settled_at,
       billing_next_check_at: null } });
     return true;
   }, { timeout: 15000 });
 }
 
-async function exitImageBilling(task: ImageStudioTask, status: 'manual' | 'conflict' | 'deadline_expired' | 'unmatched') {
+async function exitImageBilling(task: ImageStudioTask, status: 'manual' | 'conflict' | 'deadline_expired' | 'unmatched', channel = false) {
+  const prefix = channel ? 'channel_' : '';
   await prisma.$transaction(async tx => {
-    const changed = await tx.imageStudioTask.updateMany({ where: { id: task.id, billing_status: 'pending' },
-      data: { billing_status: status, billing_next_check_at: null } });
+    const changed = await tx.imageStudioTask.updateMany({ where: { id: task.id, billing_status: `${prefix}pending` },
+      data: { billing_status: `${prefix}${status}`, billing_next_check_at: null } });
     if (!changed.count) return;
     if (task.billing_mode === 'actual' && task.status === 'succeeded' && !task.billing_settled_at) {
       await writeCreditSettlement(tx, task);
@@ -104,6 +109,52 @@ async function exitImageBilling(task: ImageStudioTask, status: 'manual' | 'confl
 
 let active = false;
 let nextTick = 0;
+
+async function reconcileChannelImageBilling() {
+  const tasks = await prisma.imageStudioTask.findMany({ where: { billing_status: 'channel_pending',
+    status: { in: terminal }, OR: [{ billing_next_check_at: null }, { billing_next_check_at: { lte: new Date() } }] },
+    orderBy: { created_at: 'asc' }, take: 24 });
+  const groups = new Map<string, { settings: ImageGenerationResolvedSettings; tasks: ImageStudioTask[] }>();
+  for (const task of tasks) {
+    const contract = parseImageBillingContract(task.billing_contract_json);
+    let snapshot: ImageGenerationChannelSnapshot | null = null;
+    try { snapshot = safeImageChannelSnapshot(JSON.parse(task.snapshot_json || '{}').imageChannel); } catch {}
+    if (!contract || contract.mode !== 'actual' || !contract.scope || contract.model !== task.model
+      || contract.scope !== task.billing_scope || !task.gateway_request_id || !task.billing_scope || !snapshot
+      || snapshot.channelId === 'original') { await exitImageBilling(task, 'unmatched', true); continue; }
+    if (task.billing_attempts >= MAX_ATTEMPTS || task.billing_deadline && task.billing_deadline <= new Date()) {
+      await exitImageBilling(task, 'deadline_expired', true); continue;
+    }
+    let settings: ImageGenerationResolvedSettings;
+    try { settings = await resolveImageGenerationChannelSnapshot(snapshot, prisma, false); }
+    catch { await exitImageBilling(task, 'manual', true); continue; }
+    try {
+      if (!isMuskImageGenerationChannel(settings) || new URL(settings.base_url).origin !== 'https://api.muskapis.com'
+        || !settings.api_key || imageBillingScope(settings) !== task.billing_scope) {
+        await exitImageBilling(task, 'manual', true); continue;
+      }
+    } catch { await exitImageBilling(task, 'manual', true); continue; }
+    const group = groups.get(task.billing_scope) || { settings, tasks: [] };
+    group.tasks.push(task); groups.set(task.billing_scope, group);
+  }
+  for (const [scope, group] of Array.from(groups.entries()).slice(0, 2)) {
+    let rows: ImageSupplierCharge[] | null = null;
+    try { rows = await readImageSupplierBills(group.settings, scope); } catch { /* Missing bills are not zero-dollar bills. */ }
+    for (const task of group.tasks) {
+      const match = rows ? matchImageSupplierCharge(rows, task.gateway_request_id!, task.model) : { state: 'missing' as const };
+      if (match.state === 'conflict') await exitImageBilling(task, 'conflict', true);
+      else if (match.state === 'matched') {
+        try { await settleImageSupplierCharge(task.id, match.charge); }
+        catch {
+          await prisma.imageStudioTask.updateMany({ where: { id: task.id, billing_status: 'channel_pending' },
+            data: { billing_status: 'channel_manual', billing_next_check_at: null } });
+        }
+      } else await prisma.imageStudioTask.updateMany({ where: { id: task.id, billing_status: 'channel_pending' },
+        data: { billing_attempts: { increment: 1 }, billing_next_check_at: new Date(Date.now() + Math.min(60 * 60_000, 30_000 * Math.pow(2, Math.min(task.billing_attempts, 7)))) } });
+    }
+  }
+}
+
 export async function reconcileImageBilling() {
   if (active || Date.now() < nextTick) return;
   active = true; nextTick = Date.now() + 30_000;
@@ -144,5 +195,6 @@ export async function reconcileImageBilling() {
           data: { billing_attempts: { increment: 1 }, billing_next_check_at: new Date(Date.now() + Math.min(60 * 60_000, 30_000 * Math.pow(2, Math.min(task.billing_attempts, 7)))) } });
       }
     }
+    await reconcileChannelImageBilling();
   } finally { active = false; }
 }
