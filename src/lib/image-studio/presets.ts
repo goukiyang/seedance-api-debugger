@@ -68,19 +68,20 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
   const policyByPreset = new Map(referencePolicies);
   const styleIdsByPreset = moduleId === undefined ? new Map<string, string[]>() : new Map(await Promise.all(visibleRows.map(async row =>
     [row.id, await getStudioModuleStyleIds(row.owner_id, row.id, prisma, 'preset')] as const)));
-  const assetIds = visibleRows.flatMap(row => [...parsePreset(row), ...(fixedByPreset.get(row.id) || []).map(reference => reference.assetId)]);
+  const reusableIds = (row: typeof visibleRows[number]) => parsePreset(row).filter(id => !policyByPreset.get(row.id)?.primaryIds.includes(id));
+  const assetIds = visibleRows.flatMap(row => [...reusableIds(row), ...(fixedByPreset.get(row.id) || []).map(reference => reference.assetId)]);
   const bannerIds = visibleRows.map(row => row.banner_asset_id).filter((id): id is string => Boolean(id));
   const assets = await prisma.asset.findMany({ where: { id: { in: Array.from(new Set([...assetIds, ...bannerIds])) }, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(user)] }, select: { id: true, owner_id: true, original_url: true, thumbnail_url: true, width: true, height: true } });
   const byId = new Map(assets.map(asset => [asset.id, asset]));
   return Promise.all(visibleRows.map(async row => {
-    const ids = parsePreset(row);
+    const ids = reusableIds(row);
     const visibleIds = ids.filter(id => {
       const asset = byId.get(id);
       return Boolean(asset && asset.owner_id === row.owner_id);
     });
     const storedPolicy = policyByPreset.get(row.id);
     const referencePolicy = storedPolicy
-      ? { ...storedPolicy, primaryIds: storedPolicy.primaryIds.filter(id => visibleIds.includes(id)) }
+      ? { ...storedPolicy, primaryIds: [] }
       : undefined;
     const canSeeContext = user.role === 'admin' || row.owner_id === user.id;
     const toPayload = (id: string) => {
@@ -127,10 +128,10 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
   const context = typeof body.context === 'string' ? body.context : '';
   const model = typeof body.model === 'string' && IMAGE_STUDIO_MODELS.includes(body.model as never) ? body.model : '';
   const count = Number(body.count);
-  const ids = parseIds(body.referenceIds);
+  const requestedIds = parseIds(body.referenceIds);
   let referencePolicy: StudioReferencePolicy | undefined;
   if (body.referencePolicy !== undefined) {
-    try { referencePolicy = parseStudioReferencePolicy(body.referencePolicy, ids); }
+    try { referencePolicy = parseStudioReferencePolicy(body.referencePolicy, requestedIds); }
     catch (error) {
       if (error instanceof StudioReferencePolicyError) throw new StudioModuleError(error.message, error.status);
       throw error;
@@ -139,6 +140,10 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
   const referenceLimit = body.referenceLimit === undefined
     ? referencePolicy?.primaryMax ?? DEFAULT_STUDIO_PRIMARY_MAX
     : Number(body.referenceLimit);
+  // Presets store reusable settings and auxiliary references, never a user's current main image.
+  const incomingPolicy = referencePolicy || defaultStudioReferencePolicy(requestedIds, referenceLimit);
+  const ids = requestedIds.filter(id => !incomingPolicy.primaryIds.includes(id));
+  referencePolicy = { ...incomingPolicy, primaryIds: [] };
   let fixedReferences: StudioFixedReference[] | undefined;
   if (body.fixedReferences !== undefined) {
     if (!isAdmin) throw new StudioModuleError('固定模板图只能由管理员修改', 403);
@@ -146,9 +151,6 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
     catch (error) { throw new StudioModuleError((error as Error).message); }
   }
   if (!name || name.length > 80 || prompt.length > 20000 || context.length > 20000 || groupName.length > 40 || !model || !Number.isInteger(count) || count < 1 || count > 8 || !Number.isInteger(referenceLimit) || referenceLimit < 1 || referenceLimit > MAX_REFERENCE_IMAGES || ids.length > MAX_REFERENCE_IMAGES) throw new StudioModuleError('模板内容无效');
-  if (!referencePolicy && ids.length > referenceLimit) {
-    throw new StudioModuleError(`旧版保存请求最多支持 ${referenceLimit} 张参考图`);
-  }
   const aspectRatio = normalizeStudioRatio(body.aspectRatio);
   const quality = normalizeImageStudioQuality(model, body.quality);
   const resolution = normalizeImageResolution(model, body.resolution || defaultImageResolution(model));
@@ -292,12 +294,14 @@ export async function applyStudioPreset(user: ImageStudioIdentity, presetId: str
     const preset = await tx.imageStudioPreset.findUnique({ where: { id: presetId } });
     if (!preset || !canViewStudioPreset(user, preset)) throw new StudioModuleError('模板不存在或无权使用', 404);
     if (await studioPresetArchived(preset.id, tx)) throw new StudioModuleError('模板已删除，请重新读取', 409);
-    const ids = parsePreset(preset);
+    const storedIds = parsePreset(preset);
+    const storedPolicy = await getStudioPresetReferencePolicy(preset.owner_id, preset.id, storedIds, preset.reference_limit, tx);
+    const ids = storedIds.filter(id => !storedPolicy.primaryIds.includes(id));
     const fixedReferences = await getStudioPresetFixedReferences(user, preset, tx);
     const styleGroupIds = await getStudioModuleStyleIds(preset.owner_id, preset.id, tx, 'preset');
     const skillIds = await getSkillSelection(preset.owner_id, preset.id, tx, 'preset');
     await resolveSkills(user, skillIds, tx);
-    const referencePolicy = await getStudioPresetReferencePolicy(preset.owner_id, preset.id, ids, preset.reference_limit, tx);
+    const referencePolicy = { ...storedPolicy, primaryIds: [] };
     const styles = await resolveStudioStyleReferences(user, styleGroupIds, tx);
     try { validateStudioReferenceCounts(referencePolicy, ids, fixedReferences.length, styles.references.length); }
     catch (error) { throw new StudioModuleError((error as Error).message, 409); }

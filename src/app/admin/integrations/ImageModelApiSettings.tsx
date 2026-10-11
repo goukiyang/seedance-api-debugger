@@ -3,10 +3,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pencil, RotateCcw } from 'lucide-react';
 import { useProductDialog } from '@/components/useProductDialog';
-import { IMAGE_STUDIO_MODEL_LABELS } from '@/lib/image-studio/model-catalog';
+import { IMAGE_STUDIO_MODEL_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { IMAGE_API_GROUPS, imageApiGroupModels, type ImageApiGroup, type ImageApiGroupFormDto, type ImageApiGroupProviderDto, type ImageApiGroupSaveReceipt } from '@/lib/integrations/image-generation-channel';
 import type { ImageGenerationDefaultRoutesDto } from '@/lib/integrations/image-generation-defaults';
-import ImageApiGroupEditor, { type ImageApiGroupDraft } from './ImageApiGroupEditor';
+import ImageApiGroupEditor, { ImageApiGroupModelStatuses, type ImageApiGroupDraft } from './ImageApiGroupEditor';
 
 type Props = {
   accountId: string | null; onDraftChange: (drafts: Record<string, boolean>, ready: boolean) => void;
@@ -30,6 +30,23 @@ function forgetOperation(operation: PendingSave) {
     const value = JSON.parse(localStorage.getItem(pendingStorageKey(operation.accountId)) || 'null');
     if (value?.mutationId === operation.mutationId) localStorage.removeItem(pendingStorageKey(operation.accountId));
   } catch { /* A receipt remains authoritative even when preferences are unavailable. */ }
+}
+
+function receiptModelStatuses(receipt: ImageApiGroupSaveReceipt) {
+  const models = imageApiGroupModels(receipt.group), statuses = receipt.modelStatuses;
+  if (!Array.isArray(receipt.affectedModels) || receipt.affectedModels.length !== models.length
+    || new Set(receipt.affectedModels).size !== models.length || !receipt.affectedModels.every(model => models.includes(model))
+    || !statuses || !models.every(model => {
+      const value = statuses[model];
+      return value && typeof value.enabled === 'boolean' && typeof value.ready === 'boolean'
+        && typeof value.apiKeyConfigured === 'boolean' && typeof value.apiKeyOverrideConfigured === 'boolean'
+        && typeof value.protocolConfigured === 'boolean' && typeof value.configurationReady === 'boolean'
+        && Array.isArray(value.missingRequirements) && value.missingRequirements.every(item => typeof item === 'string')
+        && Array.isArray(value.blockingReasons) && value.blockingReasons.every(item => typeof item === 'string')
+        && value.configurationReady === (value.missingRequirements.length === 0)
+        && value.ready === (receipt.enabled && value.enabled && value.configurationReady && value.blockingReasons.length === 0);
+    })) return null;
+  return Object.fromEntries(models.map(model => [model, statuses[model]!]));
 }
 
 export default function ImageModelApiSettings({ accountId, onDraftChange, onSaveStart, onSaveFinish }: Props) {
@@ -163,6 +180,11 @@ export default function ImageModelApiSettings({ accountId, onDraftChange, onSave
       throw new Error('保存回执与本次操作不符，仍需查询原回执。');
     }
     const id = draftKey(operation.group, operation.providerId);
+    const statuses = receiptModelStatuses(receipt), models = imageApiGroupModels(operation.group);
+    const names = (items: ImageStudioModel[]) => items.map(model => IMAGE_STUDIO_MODEL_LABELS[model]).join('、') || '无';
+    const readinessMessage = statuses
+      ? `配置可用：${names(models.filter(model => statuses[model]?.ready))}；尚不能生成：${names(models.filter(model => !statuses[model]?.ready))}。`
+      : '原回执未含完整型号状态，请重新读取核对，不能据此判断可生成。';
     forgetOperation(operation);
     setDrafts(current => {
       if (current[id] && JSON.stringify(current[id]) !== JSON.stringify(operation.draft)) return current;
@@ -171,13 +193,18 @@ export default function ImageModelApiSettings({ accountId, onDraftChange, onSave
     setForms(current => current?.map(form => form.group === operation.group ? { ...form, defaultProviderId: operation.providerId,
       defaultChannelIds: Object.fromEntries(imageApiGroupModels(operation.group).map(model => [model, receipt.channelId])),
       providers: form.providers.map(provider => provider.id === operation.providerId ? { ...provider, channelId: receipt.channelId,
-        enabled: receipt.enabled, apiKeyConfigured: receipt.apiKeyConfigured, groupConfigured: true } : provider) } : form) || null);
+        enabled: receipt.enabled, apiKeyConfigured: receipt.apiKeyConfigured, groupConfigured: true,
+        models: statuses ? { ...provider.models, ...statuses } : Object.fromEntries(models.flatMap(model => {
+          const currentModel = provider.models[model];
+          return currentModel ? [[model, { ...currentModel, ready: false, configurationReady: undefined,
+            missingRequirements: undefined, blockingReasons: undefined }]] : [];
+        })) } : provider) } : form) || null);
     setChoices(current => ({ ...current, [operation.group]: operation.providerId }));
     setDefaults(receipt.defaultRoutes); setPending(null); setNeedsRead(true);
     if (operation.editor) setEditor(current => current?.group === operation.group && current.providerId === operation.providerId ? null : current);
-    setMessage(current => ({ ...current, [operation.group]: receipt.enabled
-      ? '已保存并启用本组；型号未开启或能力缺项的仍不能生成，未发测试请求。'
-      : '已保存但未启用；本组后续新任务不会改用其他供应商，已提交任务不变。' }));
+    setMessage(current => ({ ...current, [operation.group]: `${receipt.enabled ? '已保存并启用本组' : '已保存但未启用'}。`
+      + `本组 ${models.length} 个型号未来新任务默认已保存，不改变模板选择的型号和已提交任务。`
+      + readinessMessage + '连通性与实际出图未验证，未发送生成请求。' }));
   }
   async function runSave(operation: PendingSave, request: () => Promise<Response>) {
     const epoch = generation.current;
@@ -274,9 +301,13 @@ export default function ImageModelApiSettings({ accountId, onDraftChange, onSave
             {draft?.clearApiKey && <p className="text-sm">保存会清除本组共用 Key；型号独立 Key 不变，可在编辑中取消清除。</p>}
             <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 12 }}><input type="checkbox" checked={draft?.enabled === true} disabled={!provider || provider.deleted} onChange={event => { if (provider && draft) changeDraft(group, provider.id, { ...draft, enabled: event.target.checked }); }} /><span>启用本组，保存后生效；不改变型号开关</span></label>
             {provider && <p className="text-gray text-sm">{provider.groupConfigured || form?.defaultProviderId === provider.id ? provider.enabled ? '已保存状态：启用' : '已保存状态：停用，可编辑并保存' : '尚未保存本组配置；启用须明确勾选'}。{overrides > 0 ? `${overrides} 个型号的独立地址或 Key 会保留。` : '各型号保留自己的协议、规格及点数。'}</p>}
+            {provider && draft && form && <>
+              <p className="text-gray text-sm">保存影响本组 {imageApiGroupModels(group).length} 个型号未来新任务的默认供应商，不改变模板选择的型号、另一组和已提交任务。</p>
+              <ImageApiGroupModelStatuses group={group} provider={provider} draft={draft} stale={needsRead}
+                showDraft={provider.id !== form.defaultProviderId || JSON.stringify(draft) !== JSON.stringify(baseDraft(form, provider))} />
+            </>}
             <div className="codex-config-actions"><button type="submit" className="btn btn-primary sd2-loading-surface" data-busy={busy === group} disabled={!provider || provider.deleted || !defaults || !dirty[group]}>{busy === group ? '正在保存' : '保存'}</button></div>
           </fieldset>
-          {provider && <details style={{ marginTop: 12 }}><summary className="text-gray text-sm">型号可用状态</summary>{imageApiGroupModels(group).map(model => <p key={model} className="text-sm">{IMAGE_STUDIO_MODEL_LABELS[model]}：{provider.models[model]?.ready ? '配置条件已齐备，连通性未验证' : provider.models[model]?.disabledReason || '能力未确认'}</p>)}</details>}
           {message[group] && <p role="status" className="text-sm">{message[group]}</p>}
           {pending?.group === group && <button type="button" className="btn btn-secondary" disabled={Boolean(busy)} onClick={() => void queryReceipt()}>查询原保存回执</button>}
         </form>

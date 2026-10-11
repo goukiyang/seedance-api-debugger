@@ -28,11 +28,11 @@ const ERROR_MESSAGES: Record<string, string> = {
 };
 
 function defaultLanding(user?: CallbackUser | null) {
-  return '/generate';
+  return '/';
 }
 
 function safeLandingPath(value: string | null | undefined, fallback: string) {
-  if (!value || !value.startsWith('/') || value.startsWith('//')) return fallback;
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(value)) return fallback;
   return value;
 }
 

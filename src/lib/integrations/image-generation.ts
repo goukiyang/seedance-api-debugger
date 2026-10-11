@@ -20,9 +20,9 @@ import {
   parseImageGenerationDefaultRoutes,
 } from '@/lib/integrations/image-generation-defaults';
 import {
-  IMAGE_API_GROUPS, imageApiGroupModels,
+  IMAGE_API_GROUPS, imageApiGroupModels, imageApiGroupModelMissingRequirements,
   type ImageApiGroup, type ImageApiGroupFormDto, type ImageApiGroupSettings,
-  type ImageApiGroupSaveReceipt,
+  type ImageApiGroupSaveReceipt, type ImageApiGroupModelDto,
   type ImageGenerationChannelDto,
   type ImageGenerationChannelId,
   type ImageGenerationChannelProtocol,
@@ -1849,6 +1849,45 @@ function imageApiGroupSettings(settings: ImageGenerationResolvedSettings): Image
     supportsImageToImage: settings.supports_image_to_image, supportsAsyncTask: settings.supports_async_task };
 }
 
+function imageApiGroupModelStatuses(settings: ImageGenerationResolvedSettings, group: ImageApiGroup, deleted = settings.deleted === true) {
+  const result: Partial<Record<ImageStudioModel, ImageApiGroupModelDto>> = {};
+  for (const model of imageApiGroupModels(group)) {
+    const capability = settings.modelCapabilities[model];
+    const effective = resolveImageGenerationModelSettings(settings, model);
+    const actualBillingReasons: string[] = [];
+    if (capability?.billingMode === 'actual') {
+      if (capability.upstreamModel && capability.upstreamModel !== model) actualBillingReasons.push('上游型号与本站型号不同，尚无对应的精确账单证明');
+      if (!isMuskImageGenerationChannel(effective)) actualBillingReasons.push('实际计费仅适用于已确认的 Musk 供应商与同一 API Key');
+      if (capability.actualQuoteRequired !== true) actualBillingReasons.push('该 API Key 与型号的精确账单证明未就绪');
+    }
+    const missingRequirements = imageApiGroupModelMissingRequirements({
+      providerSupported: isStudioImageGenerationProvider(settings.provider),
+      baseUrlConfigured: Boolean(effective.base_url), apiKeyConfigured: Boolean(effective.api_key),
+      protocol: capability?.protocol, qualities: capability?.qualities, resolutions: capability?.resolutions,
+      ratios: capability?.ratios, maxReferences: capability?.maxReferences,
+      billingMode: capability?.billingMode, fixedPoints: capability?.fixedPoints,
+    }, actualBillingReasons);
+    const blockingReasons: string[] = [];
+    if (deleted) blockingReasons.push('该供应商已归档，只保留已受理任务');
+    if (!settings.enabled) blockingReasons.push('本组未启用');
+    if (capability?.enabled !== true) blockingReasons.push('该型号未启用');
+    const configurationReady = missingRequirements.length === 0;
+    result[model] = { enabled: capability?.enabled === true,
+      protocol: capability?.protocol || (group === 'banana' ? 'gemini_native' : 'openai_images'),
+      protocolConfigured: Boolean(capability?.protocol),
+      upstreamModel: capability?.upstreamModel || null, baseUrl: capability?.baseUrl || null,
+      apiKeyConfigured: Boolean(effective.api_key), apiKeyOverrideConfigured: Boolean(settings.modelApiKeys?.[model]),
+      configurationReady, missingRequirements, blockingReasons,
+      ready: configurationReady && blockingReasons.length === 0,
+      disabledReason: blockingReasons[0] || missingRequirements[0] || null,
+      billingMode: capability?.billingMode || null, fixedPoints: capability?.fixedPoints ?? null,
+      billingSource: capability?.billingSource || null, actualQuoteRequired: capability?.actualQuoteRequired === true,
+      qualities: capability?.qualities ?? null, resolutions: capability?.resolutions ?? null,
+      ratios: capability?.ratios ?? null, maxReferences: capability?.maxReferences ?? null };
+  }
+  return result;
+}
+
 export async function getImageApiGroupForms(client: Prisma.TransactionClient | typeof prisma = prisma): Promise<ImageApiGroupFormDto[]> {
   const defaults = await getImageGenerationDefaultRoutes(client);
   const channels = await getImageGenerationChannels(client);
@@ -1860,22 +1899,7 @@ export async function getImageApiGroupForms(client: Prisma.TransactionClient | t
     for (const id of imageApiGroupSources(channels)) {
       const source = await imageApiGroupSource(channels, group, id, client);
       const settings = await hydrateActualBilling(source.settings, client);
-      const modelDtos: ImageApiGroupFormDto['providers'][number]['models'] = {};
-      for (const model of models) {
-        const capability = settings.modelCapabilities[model];
-        const reason = source.deleted ? '该供应商已归档，未恢复原配置'
-          : !isStudioImageGenerationProvider(settings.provider) ? '现有接口类型未支持本组型号，仍可编辑并保存停用配置'
-            : await modelDisabledReason(settings, model, client);
-        modelDtos[model] = { enabled: capability?.enabled === true,
-          protocol: capability?.protocol || (group === 'banana' ? 'gemini_native' : 'openai_images'),
-          upstreamModel: capability?.upstreamModel || null, baseUrl: capability?.baseUrl || null,
-          apiKeyConfigured: Boolean(resolveImageGenerationModelSettings(settings, model).api_key),
-          apiKeyOverrideConfigured: Boolean(settings.modelApiKeys?.[model]), ready: !reason, disabledReason: reason,
-          billingMode: capability?.billingMode || null, fixedPoints: capability?.fixedPoints ?? null,
-          billingSource: capability?.billingSource || null, actualQuoteRequired: capability?.actualQuoteRequired === true,
-          qualities: capability?.qualities ?? null, resolutions: capability?.resolutions ?? null, ratios: capability?.ratios ?? null,
-          maxReferences: capability?.maxReferences ?? null };
-      }
+      const modelDtos = imageApiGroupModelStatuses(settings, group, source.deleted);
       providers.push({ id, channelId: source.copyRecord ? source.copyId : id,
         label: settings.label === settings.supplierName ? settings.supplierName : `${settings.supplierName}（${settings.label}）`,
         supplierName: settings.supplierName, groupConfigured: Boolean(source.copyRecord), enabled: settings.enabled, deleted: source.deleted, sourceRevision: source.sourceRevision,
@@ -2055,8 +2079,11 @@ export async function saveImageApiGroupForm(input: Record<string, unknown>, acto
         models: { ...defaults.models, ...Object.fromEntries(models.map(model => [model, source.copyId])) } };
       await swapSimpleModelSetting(tx, IMAGE_GENERATION_MODEL_DEFAULTS_SETTING_KEY, defaultRow?.value_json,
         JSON.stringify({ version: 1, ...defaultRoutes }), actorId);
+      const savedSettings = await hydrateActualBilling(managedSettingsFromVersion(version), tx);
       const receipt: ImageApiGroupSaveReceipt = { mutationId, group, providerId: id, channelId: source.copyId,
-        enabled, apiKeyConfigured: Boolean(apiKey), defaultRoutes, savedAt: new Date().toISOString() };
+        enabled, apiKeyConfigured: Boolean(apiKey), defaultRoutes, savedAt: new Date().toISOString(),
+        affectedModels: models.filter(model => defaultRoutes.models[model] === source.copyId),
+        modelStatuses: imageApiGroupModelStatuses(savedSettings, group) };
       await tx.operationLog.create({ data: { id: imageApiGroupReceiptId(actorId, mutationId), operator_id: actorId,
         action: 'image_generation_group_api_save', target_type: 'PlatformSetting', target_id: source.copyId,
         detail: JSON.stringify({ requestHash, receipt }) } });

@@ -114,6 +114,18 @@ export function imageStudioChannelModel(channel: ImageStudioChannel | undefined,
   return channel?.models[model];
 }
 
+export function imageStudioChannelUnitCredits(
+  capability: ImageStudioChannelModel | undefined,
+  legacyRoute: boolean,
+  effectiveChannelId: string,
+  legacyPrice: number | null | undefined,
+) {
+  const price = legacyRoute ? legacyPrice : capability?.billingMode === 'fixed'
+    ? capability.fixedPoints ?? (['shared', 'banana'].includes(effectiveChannelId) ? legacyPrice : null)
+    : null;
+  return typeof price === 'number' && Number.isFinite(price) && price >= 0 ? price : null;
+}
+
 export function imageStudioChannelModels(channelOrChannels: ImageStudioChannel | ImageStudioChannels, legacyModels: readonly string[]) {
   const channels = 'items' in channelOrChannels ? channelOrChannels.items : [channelOrChannels];
   const models = new Set<string>();
@@ -178,12 +190,24 @@ export function imageStudioChannelIssue(channel: ImageStudioChannel | undefined,
   if (channel.id === ORIGINAL_IMAGE_CHANNEL_ID && values.legacyRoute !== false) {
     return values.legacyReady === false ? '当前模型的原接口尚未就绪，请联系管理员检查接口。' : null;
   }
-  if (!channel.ready) return channel.disabledReason || `${channel.label}暂未就绪，请联系管理员。`;
   const capability = imageStudioChannelModel(channel, model);
   if (channel.id === ORIGINAL_IMAGE_CHANNEL_ID && !capability && values.legacyRoute !== false) {
     return values.legacyReady === false ? '当前模型的原接口尚未就绪，请联系管理员检查接口。' : null;
   }
-  if (!capability || !capability.ready) return capability?.disabledReason || '当前生图通道不支持所选模型或暂未就绪；请手动选择可用通道或模型，其他参数未更改。';
+  if (capability) {
+    const missing = [
+      !capability.qualities?.length ? '图片质量' : null,
+      !capability.resolutions?.length ? '分辨率' : null,
+      !capability.ratios?.length ? '图片比例' : null,
+      capability.maxReferences == null ? '参考图上限' : null,
+      !capability.billingMode ? '计费方式' : null,
+      capability.billingMode === 'fixed' && capability.fixedPoints == null
+        && !['shared', 'banana'].includes(channel.id) ? '固定点数' : null,
+    ].filter(Boolean);
+    if (missing.length) return `${model} 的当前供应商尚未确认${missing.join('、')}。当前选择和素材已保留，请管理员补齐该型号配置。`;
+  }
+  if (!channel.ready) return channel.disabledReason || `${channel.label}暂未就绪，请联系管理员。`;
+  if (!capability || !capability.ready) return capability?.disabledReason || '当前供应商的所选型号尚未就绪；当前选择和素材已保留，请联系管理员检查配置。';
   if (!capability.billingMode) return '当前生图通道的计费方式尚未确认，暂不能生成；请联系管理员检查配置。';
   if (capability.billingMode === 'fixed' && capability.fixedPoints == null
     && channel.id !== 'shared' && channel.id !== 'banana') {

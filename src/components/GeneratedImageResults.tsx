@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Copy, Download, Eye, ImagePlus } from 'lucide-react';
+import { ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Image as ImageIcon, Download, Eye, ImagePlus } from 'lucide-react';
 import { ResultImageCover } from './ResultImageCover';
 import { ZoomableImagePreview, type ZoomableImagePreviewProps } from './ZoomableImagePreview';
 import ContentReactions from './content-reactions/ContentReactions';
@@ -37,13 +37,14 @@ function WaitingImage({ src }: { src?: string }) {
   return src && failed !== src ? <img className={styles.waitingImage} src={src} alt="本次输入图片" onError={() => setFailed(src)} /> : <ImagePlus size={24} aria-hidden="true" />;
 }
 
-export function GeneratedImageResults<T extends GeneratedImageResult>({ items, scope, visible = true, loading = false, busy = false, error = '', emptyLabel = '暂无生成结果', hasMore = false, total, loadMore = noMore, onRetry, selectedId, onSelect, previewId, onPreviewChange, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, paginationSlot }: {
+export function GeneratedImageResults<T extends GeneratedImageResult>({ items, scope, visible = true, loading = false, busy = false, error = '', emptyLabel = '暂无生成结果', hasMore = false, total, loadMore = noMore, onRetry, selectedId, onSelect, previewId, onPreviewChange, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, paginationSlot, onQuickUse }: {
   items: T[]; scope: string; visible?: boolean; loading?: boolean; busy?: boolean; error?: string; emptyLabel?: string;
   hasMore?: boolean; loadMore?: () => Promise<unknown>; onRetry?: () => void;
   total?: number | null;
   /** A supplied slot owns pagination placement; null reserves it until mounted. */
   paginationSlot?: HTMLElement | null;
   selectedId?: string | null; onSelect?: (item: T) => void;
+  onQuickUse?: (item: T) => void;
   previewId?: string | null; onPreviewChange?: (item: T | null) => void;
   renderMetadata?: (item: T) => ReactNode; renderActions?: (item: T) => ReactNode;
   renderPrimaryActions?: (item: T) => ReactNode; renderDelete?: (item: T) => ReactNode;
@@ -148,7 +149,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
           <article key={item.id} className={styles.card} data-result-id={item.id} data-result-controls-parent>
             <div className={styles.media} data-transparent={item.transparent || undefined} data-reaction-surface>
               {item.media ? <>
-                <ResultImageCover src={item.media.thumbnailSrc || item.media.src} alt={item.label} selected={currentSelection === item.id} applied={Boolean(item.applied)} onSelect={() => select(item)} onPreview={() => changePreview(item, true)} onViewed={item.onViewed} />
+                <ResultImageCover key={`${scope}:${item.id}`} src={item.media.thumbnailSrc || item.media.src} alt={item.label} selected={currentSelection === item.id} applied={Boolean(item.applied)} onSelect={() => select(item)} onPreview={() => changePreview(item, true)} onViewed={item.onViewed} active={visible} onQuickUse={onQuickUse ? () => onQuickUse(item) : undefined} />
                 {item.media.contentKey && <ContentReactions contentKey={item.media.contentKey} imageSharing={item.media.imageSharing} overlay parentControlled />}
               </> : <div className={`${styles.pending} sd2-loading-surface`} data-busy={item.pending || undefined}
                 data-result-choice={onSelect ? '' : undefined} role={onSelect ? 'button' : undefined} tabIndex={onSelect ? 0 : undefined} aria-label={onSelect ? `选择${item.label}` : undefined} aria-pressed={onSelect ? currentSelection === item.id : undefined}
@@ -162,7 +163,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
               {(item.media || secondaryActions) && <div className={styles.mediaActions} data-result-secondary aria-busy={feedback?.id === item.id && feedback.busy || undefined} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
                 {item.media && <div className={styles.commonActions}>
                   {item.download && <button type="button" aria-label="下载图片" title="下载图片" disabled={item.downloadDisabled || Boolean(feedback?.busy)} onClick={() => void operate(item, 'download')}><Download size={15} /></button>}
-                  <button type="button" aria-label="复制图片" title="复制图片" disabled={Boolean(feedback?.busy)} onClick={() => void operate(item, 'copy')}><Copy size={15} /></button>
+                  <button type="button" aria-label="复制图片" title="复制图片" disabled={Boolean(feedback?.busy)} onClick={() => void operate(item, 'copy')}><ImageIcon size={15} /></button>
                   <button type="button" aria-label="查看图片" title="查看图片" onClick={() => changePreview(item)}><Eye size={15} /></button>
                 </div>}
                 {secondaryActions && <div className={styles.specialtyActions}>{secondaryActions}</div>}

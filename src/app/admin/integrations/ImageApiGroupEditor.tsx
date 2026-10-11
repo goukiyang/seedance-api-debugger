@@ -8,7 +8,7 @@ import styles from '@/components/ProductDialog.module.css';
 import { IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import { STUDIO_RATIOS } from '@/lib/image-studio/ratios';
-import { imageApiGroupModels, type ImageApiGroup, type ImageApiGroupSettings, type ImageApiGroupProviderDto, type ImageApiGroupModelDto } from '@/lib/integrations/image-generation-channel';
+import { imageApiGroupModels, imageApiGroupModelMissingRequirements, type ImageApiGroup, type ImageApiGroupSettings, type ImageApiGroupProviderDto, type ImageApiGroupModelDto } from '@/lib/integrations/image-generation-channel';
 
 type ModelPatch = Partial<Pick<ImageApiGroupModelDto, 'enabled' | 'protocol' | 'upstreamModel' | 'baseUrl' | 'qualities' | 'resolutions' | 'ratios' | 'maxReferences' | 'billingMode' | 'fixedPoints'>> & { apiKey?: string; clearApiKey?: boolean };
 type EditableGroupSettings = Pick<ImageApiGroupSettings, 'label' | 'supplierName' | 'provider' | 'baseUrl'>;
@@ -18,6 +18,80 @@ type Props = {
   busy: boolean; pending: boolean; needsRead: boolean; message: string;
   onChange: (draft: ImageApiGroupDraft) => void; onDismiss: () => void; onSave: () => void; onQuery: () => void; onRead: () => void;
 };
+
+function draftModelStatus(group: ImageApiGroup, provider: ImageApiGroupProviderDto, draft: ImageApiGroupDraft, model: ImageStudioModel) {
+  const current = provider.models[model], patch = draft.models[model] || {}, value = { ...current, ...patch };
+  const settings = { ...provider.settings, ...draft.settings };
+  const hasModelPatch = Object.keys(patch).length > 0;
+  const baseUrl = (value.baseUrl || settings.baseUrl).trim();
+  const ownKey = patch.clearApiKey !== true && Boolean(patch.apiKey?.trim() || current?.apiKeyOverrideConfigured);
+  const commonKey = !draft.clearApiKey && Boolean(draft.apiKey.trim() || provider.apiKeyConfigured);
+  const extra: string[] = [], actualBillingReasons: string[] = [];
+  if (baseUrl) {
+    try { if (!['https:', 'http:'].includes(new URL(baseUrl).protocol)) extra.push('API 地址格式无效'); }
+    catch { extra.push('API 地址格式无效'); }
+  }
+  if (typeof value.maxReferences === 'number' && value.maxReferences > MAX_REFERENCE_IMAGES) extra.push(`参考图上限不能超过 ${MAX_REFERENCE_IMAGES}`);
+  for (const key of [draft.apiKey, patch.apiKey || '']) {
+    if (key.trim() && (/[*•●…]{3,}/.test(key) || /[\r\n\x00-\x1f\x7f]/.test(key))) extra.push('API Key 不能使用掩码或控制字符');
+  }
+  if (value.billingMode === 'actual') {
+    const upstreamModel = value.upstreamModel?.trim() || model;
+    if (upstreamModel !== model) actualBillingReasons.push('上游型号与本站型号不同，尚无对应的精确账单证明');
+    if (settings.provider !== 'musk') actualBillingReasons.push('实际计费仅适用于已确认的 Musk 供应商与同一 API Key');
+    const scopeChanged = settings.provider !== provider.settings.provider
+      || baseUrl !== (current?.baseUrl || provider.settings.baseUrl).trim()
+      || Boolean(patch.apiKey?.trim()) || patch.clearApiKey === true
+      || !ownKey && Boolean(draft.apiKey.trim() || draft.clearApiKey)
+      || upstreamModel !== (current?.upstreamModel || model)
+      || value.protocol !== current?.protocol || value.billingMode !== current?.billingMode;
+    if (scopeChanged || current?.actualQuoteRequired !== true) actualBillingReasons.push('精确账单证明需保存后由服务端核对');
+  }
+  const missingRequirements = imageApiGroupModelMissingRequirements({
+    providerSupported: settings.provider !== 'seedream', baseUrlConfigured: Boolean(baseUrl), apiKeyConfigured: ownKey || commonKey,
+    protocol: !hasModelPatch && current?.protocolConfigured !== true ? null : value.protocol || (group === 'banana' ? 'gemini_native' : 'openai_images'),
+    qualities: value.qualities, resolutions: value.resolutions, ratios: value.ratios,
+    maxReferences: value.maxReferences, billingMode: value.billingMode, fixedPoints: value.fixedPoints,
+  }, actualBillingReasons);
+  missingRequirements.push(...extra.filter(reason => !missingRequirements.includes(reason)));
+  const blockingReasons: string[] = [];
+  if (provider.deleted) blockingReasons.push('该供应商已归档');
+  if (!draft.enabled) blockingReasons.push('本次输入未启用本组');
+  if (value.enabled !== true) blockingReasons.push('该型号未启用');
+  return { enabled: value.enabled === true, configurationReady: missingRequirements.length === 0, missingRequirements, blockingReasons };
+}
+
+export function ImageApiGroupModelStatuses({ group, provider, draft, showDraft = false, stale = false }: {
+  group: ImageApiGroup; provider: ImageApiGroupProviderDto; draft: ImageApiGroupDraft; showDraft?: boolean; stale?: boolean;
+}) {
+  const requirements = (items: string[], label: string) => items.length > 0 && <ul aria-label={label} className="text-sm" style={{ paddingLeft: 20, margin: '4px 0', color: 'var(--tone-warning-text)' }}>
+    {items.map(item => <li key={item} style={{ overflowWrap: 'anywhere' }}>{item}</li>)}
+  </ul>;
+  return <div style={{ margin: '12px 0', minWidth: 0 }}>
+    <p className="text-gray text-sm">{provider.groupConfigured ? '已保存的本组型号状态' : '供应商原有型号配置（本组独立配置未保存）'}{stale ? '，最新状态待重新读取' : ''}。连通性和实际出图未验证。</p>
+    <ul style={{ listStyle: 'none', padding: 0 }}>
+      {imageApiGroupModels(group).map(model => {
+        const saved = provider.models[model], preview = showDraft ? draftModelStatus(group, provider, draft, model) : null;
+        const known = typeof saved?.configurationReady === 'boolean' && Array.isArray(saved.missingRequirements) && Array.isArray(saved.blockingReasons);
+        return <li key={model} style={{ padding: '10px 0', borderBottom: '1px solid var(--border-color)', overflowWrap: 'anywhere' }}>
+          <span className="text-sm">{IMAGE_STUDIO_MODEL_LABELS[model]}</span>
+          <p className="text-gray text-sm" style={{ marginTop: 4 }}>已保存：{typeof saved?.enabled === 'boolean' ? `型号${saved.enabled ? '启用' : '停用'}` : '型号开关未读取'}；{known && saved
+            ? saved.configurationReady ? saved.ready ? '配置齐备，新任务配置可用' : '配置齐备，新任务暂不可用' : '配置未齐'
+            : '完整状态未读取，请重新读取核对'}。</p>
+          {known && saved && <>
+            {saved.blockingReasons!.length > 0 && <p className="text-gray text-sm">{saved.blockingReasons!.join('；')}</p>}
+            {requirements(saved.missingRequirements!, '已保存配置缺项')}
+          </>}
+          {preview && <div style={{ marginTop: 8 }}>
+            <p className="text-gray text-sm">本次输入（未保存）：型号{preview.enabled ? '启用' : '停用'}；{preview.configurationReady ? '本地可判条件已齐，保存后由服务端核对' : '配置未齐'}。</p>
+            {preview.blockingReasons.length > 0 && <p className="text-gray text-sm">{preview.blockingReasons.join('；')}</p>}
+            {requirements(preview.missingRequirements, '本次输入缺项')}
+          </div>}
+        </li>;
+      })}
+    </ul>
+  </div>;
+}
 
 export default function ImageApiGroupEditor({ group, provider, draft, busy, pending, needsRead, message, onChange, onDismiss, onSave, onQuery, onRead }: Props) {
   const dialog = useRef<HTMLDialogElement>(null), titleId = useId(), scopeId = useId();
@@ -33,7 +107,8 @@ export default function ImageApiGroupEditor({ group, provider, draft, busy, pend
     <form onSubmit={event => { event.preventDefault(); onSave(); }} aria-busy={busy}>
       <header className={styles.header}><h2 id={titleId}>{group === 'banana' ? 'Banana' : 'Image'} 设置</h2>
         <button type="button" className={styles.close} aria-label="关闭设置" title="关闭设置" disabled={busy} onClick={onDismiss}><X size={18} /></button></header>
-      <p id={scopeId} className={styles.message}>保存后，本组未另选供应商的新任务使用此配置；另一组、原供应商公共开关和已提交任务不变。型号独立地址和 Key 默认保留，选择继承才改用共用设置。</p>
+      <p id={scopeId} className={styles.message}>保存影响本组 {imageApiGroupModels(group).length} 个型号未来未另选供应商的新任务默认，不改变模板选择的型号、另一组和已提交任务。型号独立地址和 Key 默认保留，原供应商公共开关不变。</p>
+      <ImageApiGroupModelStatuses group={group} provider={provider} draft={draft} showDraft stale={needsRead} />
       <fieldset disabled={locked} style={{ border: 0, padding: 0, minWidth: 0 }}>
         {field('配置名称', <input className={styles.input} maxLength={120} value={settings.label} onChange={event => shared('label', event.target.value)} />)}
         {field('供应商名称', <input className={styles.input} maxLength={120} value={settings.supplierName} onChange={event => shared('supplierName', event.target.value)} />)}
@@ -67,7 +142,6 @@ export default function ImageApiGroupEditor({ group, provider, draft, busy, pend
           return <details key={model} style={{ borderTop: '1px solid var(--border-color)', padding: '14px 0' }}>
             <summary>{IMAGE_STUDIO_MODEL_LABELS[model]}{value.enabled ? '' : '（型号停用）'}</summary>
             <p className={styles.message}>{model}</p>
-            {current?.disabledReason && <p className={styles.message}>已保存状态：{current.disabledReason}</p>}
             <label className={styles.checkbox}><input type="checkbox" checked={value.enabled === true} onChange={event => modelChange(model, { enabled: event.target.checked })} />允许此型号生成新任务</label>
             {field('请求协议', <select className={styles.input} value={value.protocol || (group === 'banana' ? 'gemini_native' : 'openai_images')} onChange={event => modelChange(model, { protocol: event.target.value as 'gemini_native' | 'openai_images' })}><option value="openai_images">OpenAI Images</option><option value="gemini_native">Gemini 原生</option></select>)}
             {field('上游型号', <input className={styles.input} maxLength={200} value={value.upstreamModel || ''} placeholder={`留空使用 ${model}`} onChange={event => modelChange(model, { upstreamModel: event.target.value })} />)}

@@ -3,7 +3,7 @@ import { login } from '@/lib/auth/session';
 import { setSessionCookie } from '@/lib/auth/session-cookie';
 
 function safeRedirectPath(value: unknown, fallback: string) {
-  if (typeof value !== 'string') return fallback;
+  if (typeof value !== 'string' || /[\\\u0000-\u001f\u007f]/.test(value)) return fallback;
   const trimmed = value.trim();
   if (!trimmed || !trimmed.startsWith('/') || trimmed.startsWith('//')) return fallback;
   return trimmed;
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (isFormSubmit) {
-      const fallback = '/generate';
+      const fallback = '/';
       const response = new NextResponse(null, {
         status: 303,
         headers: { Location: safeRedirectPath(body.next, fallback) },

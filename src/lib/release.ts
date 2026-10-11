@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '图片API按Image和Banana两组管理，选供应商后可打开编辑。停用配置也能保存，明确启用只作用于本组；型号独立设置和已提交任务保留。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '登录默认进入创作首页；生图结果双击可替换主图，恢复设置和快捷模板保留当前主图。复制按钮更易区分，放大图片去除青色边框。图片API明确显示规格和费用缺项，不再误报不支持或沿用旧供应商点数。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

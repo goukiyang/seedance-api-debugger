@@ -7,7 +7,7 @@ import { ContextClipboardActions } from '@/components/ContextClipboardActions';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Heart, ChevronFirst, ChevronLast, ChevronLeft, ChevronDown, ChevronRight, Copy, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
+import { Heart, ChevronFirst, ChevronLast, ChevronLeft, ChevronDown, ChevronRight, Copy, ClipboardList, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
 import { useResultPages } from '@/components/useResultPages';
 import { ContextVersionLabel, useModuleContextVersion } from './context-version-label';
 import { uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
@@ -66,7 +66,7 @@ import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
 import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
 import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
 import type { StudioReferencePolicy } from '@/lib/image-studio/reference-policy';
-import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, imageStudioChannelReadyForModel, imageStudioUsesLegacyRoute, imageStudioEffectiveChannelId, useImageStudioChannel } from '@/lib/image-studio/channels';
+import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, imageStudioChannelReadyForModel, imageStudioChannelUnitCredits, imageStudioUsesLegacyRoute, imageStudioEffectiveChannelId, useImageStudioChannel } from '@/lib/image-studio/channels';
 import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChannelSelect';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
 
@@ -1062,9 +1062,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const generationDraft = JSON.stringify(generationInputs);
   const actualQuoteRequired = legacyImageRoute ? settings?.billingReadiness?.models?.[moduleModel]?.ready === true
     : selectedChannelModel?.actualQuoteRequired === true || selectedChannelModel?.billingMode === 'actual';
-  const moduleUnitCredits = !legacyImageRoute && selectedChannelModel?.billingMode === 'fixed'
-    ? (selectedChannelModel.fixedPoints ?? (['shared', 'banana'].includes(imageChannelId) ? settings?.prices?.[moduleModel] ?? null : null))
-    : settings ? settings.prices?.[moduleModel] ?? null : module.prices[moduleModel] ?? null;
+  const moduleUnitCredits = imageStudioChannelUnitCredits(selectedChannelModel, legacyImageRoute, effectiveImageChannelId,
+    settings ? settings.prices?.[moduleModel] : module.prices[moduleModel]);
   const batch = useStudioBatch({ userId, moduleId: module.id, actualQuoteRequired, quotePayload: settings ? generationPayload(undefined, '') : null, unitCredits: moduleUnitCredits, effectiveChannelId: effectiveImageChannelId,
     draftSignature: JSON.stringify([generationDraft, effectiveGlobalContext, reproduceSourceTaskId, settings?.revision, module.revision, effectiveImageChannelId, imageChannelId === 'original' ? imageChannels.defaultRoutes?.revision : undefined]) });
   const contextVersion = useModuleContextVersion({ moduleId: module.id, raw: moduleContext, taskId: reproduceSourceTaskId,
@@ -1073,7 +1072,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   function currentPresetDraft(): Record<string, unknown> {
     return {
       scope: isAdmin ? 'admin' : 'creator', groupName, prompt, context: moduleContext, model: moduleModel, quality, resolution,
-      count, referenceLimit, referencePolicy, aspectRatio, bannerAssetId: banner?.id || null, referenceIds: moduleDraft.referenceIds, sourceModuleId: module.id,
+      count, referenceLimit, referencePolicy: { ...referencePolicy, primaryIds: [] }, aspectRatio, bannerAssetId: banner?.id || null,
+      referenceIds: auxiliaryImages.flatMap(image => image.id ? [image.id] : []), sourceModuleId: module.id,
       reproduceFromTaskId: reproduceSourceTaskId || undefined,
       fixedReferences: fixedEditable ? fixedReferencePayload(reproduceSourceTaskId ? reproductionReferences.slice(0, Math.max(0, reproductionFixedCount - reproductionStyles.reduce((total, group) => total + group.referenceCount, 0))) : fixedReferences) : undefined,
       skillIds: (reproduceSourceTaskId ? reproductionSkills : skills).map(group => group.id), styleGroupIds: (reproduceSourceTaskId ? reproductionStyles : styleGroups).map(group => group.id),
@@ -1307,14 +1307,15 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       if (!current) throw new Error('这个快捷模板已不可用，请重新选择。');
       if (!current.referencesAvailable) throw new Error('快捷模板中的部分参考图已不可用，当前设置未被替换。');
       const policy = current.referencePolicy || moduleReferencePolicy({ ...module, images: current.images, referenceLimit: current.referenceLimit, referencePolicy: undefined });
-      const restored = await restoreTemporaryDraft({ ...current, images: current.images.map(image => ({ id: image.id })),
-        referencePolicy: policy, fixedReferences: current.fixedReferences, reproduceSourceTaskId: null });
+      const restored = await restoreTemporaryDraft({ ...current,
+        images: current.images.filter(image => !policy.primaryIds.includes(image.id || '')).map(image => ({ id: image.id })),
+        referencePolicy: { ...policy, primaryIds: [] }, fixedReferences: current.fixedReferences, reproduceSourceTaskId: null }, false, true);
       if (restored) { setAppliedSource(null); setReproductionGlobalContext(null); setSaveStatus(`已套用：${current.name}`); }
     } catch (cause) { setError(cause instanceof Error ? cause.message : '快捷模板套用失败'); }
     finally { quickPresetLock.current = false; setQuickPresetApplying(null); setDraftRestoring(false); }
   }
 
-  async function restoreTemporaryDraft(saved = recoverableDraft, automatic = false) {
+  async function restoreTemporaryDraft(saved = recoverableDraft, automatic = false, preservePrimary = false) {
       const sequence = ++draftRestoreSequence.current;
       setDraftRestoring(true);
       if (saved) {
@@ -1366,7 +1367,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
             recoveredStyles = restoredTask.snapshot.styleGroups || [];
           }
         } catch (cause) {
-          if (sequence === draftRestoreSequence.current) { blockedDraftSignature.current = generationDraft; setError(cause instanceof Error ? cause.message : '草稿参考图读取失败，请重试'); setRecoverableDraft(saved); setDraftRestoring(false); }
+          if (sequence === draftRestoreSequence.current) { blockedDraftSignature.current = generationDraft; setError(cause instanceof Error ? cause.message : '草稿参考图读取失败，请重试'); if (!preservePrimary) setRecoverableDraft(saved); setDraftRestoring(false); }
           return false;
         }
         if (sequence !== draftRestoreSequence.current) return false;
@@ -1381,8 +1382,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         if (typeof saved.aspectRatio === 'string') { try { setAspectRatio(normalizeStudioRatio(saved.aspectRatio)); } catch {} }
         const policy = saved.referencePolicy;
         const primaryIds = policy && Array.isArray(policy.primaryIds) ? validIds(policy.primaryIds) : restoredImages.flatMap(image => image.id ? [image.id] : []);
-        setImages(restoredImages.filter(image => primaryIds.includes(image.id || '')));
-        setAuxiliaryImages(restoredImages.filter(image => !primaryIds.includes(image.id || '')));
+        if (!preservePrimary) setImages(restoredImages.filter(image => primaryIds.includes(image.id || '')));
+        setAuxiliaryImages(restoredImages.filter(image => !primaryIds.includes(image.id || '') && (!preservePrimary || !images.some(primary => primary.id === image.id))));
         if (policy && Number.isInteger(policy.primaryMax) && policy.primaryMax >= 1 && policy.primaryMax <= MAX_REFERENCE_IMAGES) {
           setReferenceLimit(policy.primaryMax);
           if (Number.isInteger(policy.primaryMin) && policy.primaryMin >= 0 && policy.primaryMin <= policy.primaryMax) setPrimaryMin(policy.primaryMin);
@@ -1733,8 +1734,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     setCount(nextCount); setAspectRatio(nextRatio); setResolution(nextResolution);
     const transient = snapshot.transientReferenceImages || snapshot.referenceImages;
     const primaryIds = snapshot.referencePolicy?.primaryIds || transient.flatMap(image => image.id ? [image.id] : []);
-    setImages(transient.filter(image => image && primaryIds.includes(image.id || '')));
-    setAuxiliaryImages(transient.filter(image => image && !primaryIds.includes(image.id || '')));
+    const nextAuxiliary = transient.filter(image => image && !primaryIds.includes(image.id || '') && !images.some(primary => primary.id === image.id));
+    setAuxiliaryImages(nextAuxiliary);
     setReferenceLimit(snapshot.referencePolicy?.primaryMax ?? Math.max(1, transient.length));
     setPrimaryMin(snapshot.referencePolicy?.primaryMin ?? 0); setAuxiliaryLimit(snapshot.referencePolicy?.auxiliaryMax ?? MAX_REFERENCE_IMAGES);
     setStyleLimit(snapshot.referencePolicy?.styleMax ?? MAX_REFERENCE_IMAGES); setReferenceImageLimit(snapshot.referencePolicy?.referenceMax ?? MAX_REFERENCE_IMAGES);
@@ -1742,6 +1743,12 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     setReproductionReferences(snapshot.fixedReferenceImages || []);
     setReproductionFixedCount(snapshot.fixedReferenceCount ?? snapshot.fixedReferenceImages?.length ?? 0);
     setReproductionStyles(snapshot.styleGroups || []); setReproductionSkills(snapshot.skills || []);
+    const nextStyles = snapshot.styleGroups || [], nextSkills = snapshot.skills || [];
+    const nextFixed = fixedEditable ? (snapshot.fixedReferenceImages || []).slice(0,
+      Math.max(0, (snapshot.fixedReferenceCount ?? snapshot.fixedReferenceImages?.length ?? 0)
+        - nextStyles.reduce((total, group) => total + group.referenceCount, 0))) : fixedReferences;
+    setStyleGroups(nextStyles); setSkills(nextSkills);
+    if (fixedEditable) setFixedReferences(nextFixed);
     const nextContext = isAdmin && snapshot.contextAvailable ? snapshot.moduleContext ?? '' : moduleContext;
     const nextGlobalContext = isAdmin && snapshot.contextAvailable ? snapshot.globalContext ?? '' : globalContextDraft;
     if (isAdmin && snapshot.contextAvailable) setModuleContext(nextContext);
@@ -1751,17 +1758,51 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     if (typeof snapshot.quality === 'string') setQuality(normalizeImageStudioQuality(snapshot.model || moduleModel, snapshot.quality));
     setReproduceSourceTaskId(snapshot.sourceAvailable ? task.id : null);
     // Bind to the expected post-restore inputs, not the render before the state batch applies.
-    const nextPolicy: StudioReferencePolicy = { primaryIds: transient.filter(image => image && primaryIds.includes(image.id || '')).flatMap(image => image.id ? [image.id] : []),
+    const nextPolicy: StudioReferencePolicy = { primaryIds: images.flatMap(image => image.id ? [image.id] : []),
       primaryMin: snapshot.referencePolicy?.primaryMin ?? 0, primaryMax: snapshot.referencePolicy?.primaryMax ?? Math.max(1, transient.length),
       auxiliaryMax: snapshot.referencePolicy?.auxiliaryMax ?? MAX_REFERENCE_IMAGES, styleMax: snapshot.referencePolicy?.styleMax ?? MAX_REFERENCE_IMAGES,
       referenceMax: snapshot.referencePolicy?.referenceMax ?? MAX_REFERENCE_IMAGES, useFixedReferences: snapshot.referencePolicy?.useFixedReferences ?? true };
-    const nextImages = [...transient.filter(image => image && primaryIds.includes(image.id || '')), ...transient.filter(image => image && !primaryIds.includes(image.id || ''))];
+    const nextImages = [...images, ...nextAuxiliary];
     const signature = JSON.stringify({ inputs: { ...generationInputs, evolution: nextEvolution, prompt: snapshot.prompt || '', count: nextCount, referenceLimit: nextPolicy.primaryMax,
-      aspectRatio: nextRatio, resolution: nextResolution, referenceIds: nextImages.map(image => image.id), model: nextModel, quality: nextQuality, referencePolicy: nextPolicy, context: nextContext },
+      aspectRatio: nextRatio, resolution: nextResolution, referenceIds: nextImages.map(image => image.id), model: nextModel, quality: nextQuality, referencePolicy: nextPolicy, context: nextContext,
+      fixedReferences: fixedReferencePayload(nextFixed), skillIds: nextSkills.map(group => group.id),
+      skillVersions: Object.fromEntries(nextSkills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])), styleGroupIds: nextStyles.map(group => group.id) },
       source: snapshot.sourceAvailable ? task.id : null, references: snapshot.fixedReferenceImages || [],
       fixedCount: snapshot.fixedReferenceCount ?? snapshot.fixedReferenceImages?.length ?? 0, styles: snapshot.styleGroups || [], skills: snapshot.skills || [], globalContext: nextGlobalContext });
     setAppliedSource({ taskId: task.id, label: `${module.name} · ${task.ordinal}`, signature, modified: false });
+    setSaveStatus('已恢复设置，当前主图保持不变');
     return null;
+  }
+
+  async function replaceMainFromResult(assetId: string | undefined) {
+    if (!assetId || !active || !draftLoaded || draftRestoring || submitting || pendingSubmission
+      || uploadLock.current || quickPresetLock.current || presetSaveLock.current || moduleSaving || moduleDeleting
+      || uploading || bannerUploading || ratioEditing) return;
+    if (currentReferenceCap < 1) { setError('辅助参考已占满可用数量，请先减少参考图，当前主图未替换。'); return; }
+    const expectedScope = taskReadScope, expectedView = currentView.current.token;
+    const signature = liveGenerationSignature.current;
+    const current = () => taskReadScopeRef.current === expectedScope && currentView.current.active
+      && currentView.current.token === expectedView && liveGenerationSignature.current === signature;
+    uploadLock.current = true; setUploading(true); setError(''); setSaveStatus('正在核对原图');
+    try {
+      const result = await readResponse(await fetch(`/api/assets/history?assetIds=${encodeURIComponent(assetId)}`,
+        { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
+      const asset: UploadedAssetPayload | undefined = result.assets?.find((item: UploadedAssetPayload) => item.id === assetId);
+      if (!asset?.originalUrl) throw new Error('这张原图已不可用或无权复用，当前主图未替换。');
+      if (!current()) return;
+      const original = await fetch(`/api/content-reactions/media?key=${encodeURIComponent(`asset:${assetId}`)}&variant=original`,
+        { method: 'HEAD', cache: 'no-store', signal: AbortSignal.timeout(15000) });
+      if (!original.ok || !original.headers.get('content-type')?.startsWith('image/')) throw new Error('原图读取失败，当前主图未替换。');
+      if (!current()) return;
+      setImages([asset]);
+      setAuxiliaryImages(previous => previous.filter(image => image.id !== assetId));
+      setSaveStatus('已替换主图，未生成图片');
+    } catch (cause) {
+      if (current()) { setError(cause instanceof Error ? cause.message : '主图替换失败，原主图保留。'); setSaveStatus(''); }
+    } finally {
+      uploadLock.current = false;
+      if (taskReadScopeRef.current === expectedScope) { setUploading(false); if (!current()) setSaveStatus(''); }
+    }
   }
 
   function exitReproductionMode(message = '已退出历史复现模式，接下来会使用当前模块上下文。') {
@@ -1876,7 +1917,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     : channelIssue ? { message: channelIssue, tone: imageChannelMessage ? 'info' : 'warning' }
     : !selectedProviderReady ? { message: '当前模型的图片服务尚未就绪，请换一个模型或联系管理员检查接口。', tone: 'warning' }
     : ratioIssue ? { message: ratioIssue, tone: 'warning' }
-    : moduleUnitCredits === null ? { message: '当前模型尚未设置点数，请换一个模型或联系管理员配置。', tone: 'warning' }
+    : !actualQuoteRequired && moduleUnitCredits === null ? { message: '当前模型尚未设置点数，请换一个模型或联系管理员配置。', tone: 'warning' }
     : activeFixedReferences.some(item => item.available === false) ? { message: '固定参考图已不可用，请关闭、移除或更换。', tone: 'error' }
     : activeStyles.some(group => group.unavailable) ? { message: '已选风格组不可用，请移除或重新选择。', tone: 'error' }
     : batch.mode === 'batch' && batch.source === 'folder' && primaryMin > 1 ? { message: `这个模板至少需要 ${primaryMin} 张主图，素材逐图每项只有 1 张；请选择当前正文模式。`, tone: 'warning' }
@@ -2147,7 +2188,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
               : !actualQuoteRequired && moduleUnitCredits != null && Number.isFinite(moduleUnitCredits) && moduleUnitCredits >= 0
                 && Number.isInteger(count) && count >= 1 && count <= 8
                 ? `合计约 ${Math.ceil(moduleUnitCredits * count)} 点数`
-              : '费用待估算'}
+              : !legacyImageRoute && !selectedChannelModel?.billingMode ? '费用未配置' : '费用待估算'}
           </p>}
           {generationFeedback && <p id={`generation-blocker-${module.id}`} role="status" className={styles.generationFeedback} data-tone={generationFeedback.tone}>{generationFeedback.message}</p>}
           {settingsError && <button type="button" onClick={async () => { if (!dirty || (await confirm('重新读取会替换未保存的通用设置，是否继续？', { title: '重新读取', confirmLabel: '放弃修改并读取' }))) onReloadSettings(true); }}><RefreshCw size={16} />重新读取设置</button>}
@@ -2155,7 +2196,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           {pendingSubmission && <p className={styles.muted}>提交结果待确认，只查询原请求，不会再次生成。<button type="button" disabled={submitting} onClick={async () => {
             if ((await confirm('上次提交可能已受理。放弃核对后，再次生成会新建任务，可能再次产生上游费用。确定放弃核对吗？', { title: '放弃核对', confirmLabel: '放弃核对' }))) { setPendingSubmission(null); try { localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch {} }
           }}>放弃核对</button></p>}
-          {!ready && !settingsError && <p className={styles.muted}>{!selectedProviderReady ? '图片服务尚未就绪' : '请管理员完成模型积分设置'}</p>}
+          {!ready && !settingsError && !channelIssue && <p className={styles.muted}>{!selectedProviderReady ? '图片服务尚未就绪' : '请管理员完成模型积分设置'}</p>}
         </div>
         {evolution && <div className={styles.counts} role="group" aria-label="演化方向">{(['increase', 'decrease'] as const).map(direction => <button type="button" key={direction} aria-pressed={(evolutionInput.manual ? evolutionInput.direction : bodyDirection || evolution.defaultDirection) === direction} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onClick={() => setEvolutionInput({ direction, manual: true })}>{direction === 'increase' ? '递进' : '递减'}</button>)}{evolutionInput.manual && <button type="button" title="按正文和模板默认方向" onClick={() => setEvolutionInput({ direction: evolution.defaultDirection, manual: false })}><RotateCcw size={14} /></button>}</div>}
         <label className={styles.label} htmlFor={`studio-prompt-${module.id}`}>{evolution ? '演化内容' : '补充'} {!evolution && <span>有图片时选填</span>}</label>
@@ -2165,7 +2206,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         <div className={styles.modelQualityRow}>
           <label className={styles.compactField} htmlFor={`studio-model-${module.id}`}><strong>生成模型</strong>
             <select id={`studio-model-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={moduleModel} onChange={event => setModuleModel(event.target.value)}>
-              {modelChoices.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model}</option>)}
+              {modelChoices.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model}{imageChannelReady && !imageStudioChannelReadyForModel(selectedChannel, model, settings?.modelReady?.[model] ?? settings?.providerReady) ? '（未就绪）' : ''}</option>)}
             </select>
           </label>
           {!templateWorkbench && <label className={styles.compactField} htmlFor={`studio-channel-${module.id}`}><strong>供应商</strong>
@@ -2173,18 +2214,18 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           </label>}
           <label className={styles.compactField} htmlFor={`studio-quality-${module.id}`}><strong>图片质量</strong>
             <select id={`studio-quality-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={quality} onChange={event => setQuality(event.target.value)}>
-              {!qualityChoices.includes(quality) && <option value={quality} disabled>{IMAGE_STUDIO_QUALITY_LABELS[quality as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || quality}（当前通道不支持）</option>}
+              {!qualityChoices.includes(quality) && <option value={quality} disabled>{IMAGE_STUDIO_QUALITY_LABELS[quality as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || quality}{qualityChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）'}</option>}
               {qualityChoices.map(option => <option key={option} value={option}>{IMAGE_STUDIO_QUALITY_LABELS[option as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || option}</option>)}
             </select>
           </label>
           <label className={styles.compactField} htmlFor={`studio-resolution-${module.id}`}><strong>分辨率</strong>
             <select id={`studio-resolution-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={resolution} onChange={event => setResolution(event.target.value as ImageResolution)}>
-              {!resolutionChoices.includes(resolution) && <option value={resolution} disabled>{resolution}（当前通道不支持）</option>}
+              {!resolutionChoices.includes(resolution) && <option value={resolution} disabled>{resolution}{resolutionChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）'}</option>}
               {resolutionChoices.map(option => <option key={option} value={option}>{option}</option>)}
             </select>
           </label>
         </div>
-        {!IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS]?.some(option => option !== 'auto') && <p className={styles.muted}>当前模型不支持质量档位，按模型默认质量生成。</p>}
+        {qualityChoices.length > 0 && !qualityChoices.some(option => option !== 'auto') && <p className={styles.muted}>当前供应商只配置了模型默认质量。</p>}
         <div className={styles.moduleQuickActions} aria-label="模板快捷设置">
           <div className={styles.quickPresetRow}>
             <button type="button" title="管理模板" aria-label="管理模板" onClick={onManagePresets}><FolderCog size={16} /></button>
@@ -2214,12 +2255,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         </div></header>
         {batch.id && resultView === 'images' && <BatchResults key={`${userId}:${batch.id}:delivery`} id={batch.id} userId={userId} deliveryOnly autoPack={batch.pack} />}
         {!likedResults.liked && batch.busy && batch.localPreviews.length > 0 && <div className={styles.grid} aria-label="本批准备素材">{batch.localPreviews.map((src, index) => <article key={src} className={styles.result}><div className={styles.batchInputPreview}><img src={src} alt={`本批主图 ${index + 1}`} /></div><p role="status">准备中</p></article>)}</div>}
-        {resultView === 'batch' ? batch.id ? <BatchResults key={`${userId}:${batch.id}`} id={batch.id} userId={userId} autoPack={batch.pack} /> : <p>暂无选中批次，可开始批量生成或从<a href="/assets">资产库的“我的批次”</a>找回。</p> : <>
+        {resultView === 'batch' ? batch.id ? <BatchResults key={`${userId}:${batch.id}`} id={batch.id} userId={userId} autoPack={batch.pack} visible={visible && active && !hidden} onQuickUse={templateWorkbench ? assetId => void replaceMainFromResult(assetId) : undefined} /> : <p>暂无选中批次，可开始批量生成或从<a href="/assets">资产库的“我的批次”</a>找回。</p> : <>
         {downloadReady && <p role="status">已交给浏览器下载。<a href={downloadReady.url} download={downloadReady.name}>再次下载</a></p>}
         <GeneratedImageResults key={likedResults.liked ? 'liked' : 'all'} items={sharedResults}
+          onQuickUse={templateWorkbench ? item => void replaceMainFromResult(item.task.asset?.id) : undefined}
           paginationSlot={templateWorkbench ? resultPaginationSlot : undefined}
           scope={`sd2-image-studio-${likedResults.liked ? 'liked-' : ''}result-page:${taskReadScope}`}
-          visible={!hidden && resultView === 'images'} loading={resultLoading} busy={resultBusy}
+          visible={visible && active && !hidden && resultView === 'images'} loading={resultLoading} busy={resultBusy}
           error={resultError} emptyLabel={likedResults.liked ? '当前模板还没有喜欢的结果' : '暂无生成记录'}
           hasMore={Boolean(resultCursor)} total={likedResults.liked ? likedResults.total : taskTotal} loadMore={readNextResultPage}
           onRetry={() => { if (likedResults.liked) likedResults.refresh(); else void loadTasks(taskRetryCursor); }}
@@ -2263,11 +2305,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
               await loadTasks();
             } catch (cause) { setError(cause instanceof Error ? cause.message : '取消未确认，请刷新原任务'); }
           })()}>取消未受理排队</button> : task.delivery?.recoveryAvailable ? <button type="button" disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks()}>{templateWorkbench ? '刷新恢复状态' : '查看原图恢复'}</button> : null}
-          renderActions={({task}) => (isAdmin && task.snapshot?.sourceAvailable || studioTaskHasDeliveredAsset(task)) ? <>{isAdmin && task.snapshot?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制上下文" aria-label="复制上下文" onClick={() => void copyTaskContext(task)}><Copy size={15} /></button>}
-            {studioTaskHasDeliveredAsset(task) && <button type="button" className={styles.restoreResult} disabled={Boolean(restoreDisabledReason(task))} title={restoreDisabledReason(task) || '恢复这张图片的完整设置，不生成图片'} aria-label="恢复设置" aria-describedby={`studio-restore-${task.id}`} onClick={event => {
+          renderActions={({task}) => (isAdmin && task.snapshot?.sourceAvailable || studioTaskHasDeliveredAsset(task)) ? <>{isAdmin && task.snapshot?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制文字上下文" aria-label="复制文字上下文" onClick={() => void copyTaskContext(task)}><ClipboardList size={15} /></button>}
+            {studioTaskHasDeliveredAsset(task) && <button type="button" className={styles.restoreResult} disabled={Boolean(restoreDisabledReason(task))} title={restoreDisabledReason(task) || '恢复设置和风格组，保留当前主图，不生成图片'} aria-label="恢复设置，保留主图" aria-describedby={`studio-restore-${task.id}`} onClick={event => {
               event.stopPropagation();
               void (async () => {
-                if ((unpersistedDraft || moduleContext !== savedModuleContext || fixedDirty || dirty || automaticDirty) && !(await confirm('当前未保存的设置将被这张图片的历史设置替换，继续恢复？', { title: '恢复设置', confirmLabel: '恢复设置' }))) return;
+                if ((unpersistedDraft || moduleContext !== savedModuleContext || fixedDirty || dirty || automaticDirty) && !(await confirm('除当前主图外，未保存的设置将被这张图片的历史设置替换，继续恢复？', { title: '恢复设置', confirmLabel: '恢复设置' }))) return;
                 const reason = restoreTask(task); if (reason) setError(reason);
               })();
             }}><RotateCcw size={15} /><span id={`studio-restore-${task.id}`} role="tooltip" className={styles.resolutionTooltip}>恢复设置</span></button>}

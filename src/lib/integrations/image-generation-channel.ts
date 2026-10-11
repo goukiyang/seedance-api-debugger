@@ -13,7 +13,38 @@ export type ImageApiGroupSettings = {
   outputFormat: 'png' | 'jpeg'; responseFormat: 'url' | 'b64_json'; watermark: boolean;
   supportsTextToImage: boolean; supportsImageToImage: boolean; supportsAsyncTask: boolean;
 };
-export type ImageApiGroupModelDto = ImageGenerationManagedModelDto;
+export type ImageApiGroupModelDto = ImageGenerationManagedModelDto & {
+  protocolConfigured?: boolean;
+  configurationReady?: boolean;
+  missingRequirements?: string[];
+  blockingReasons?: string[];
+};
+
+export type ImageApiGroupModelConfiguration = {
+  providerSupported: boolean; baseUrlConfigured: boolean; apiKeyConfigured: boolean;
+  protocol?: ImageGenerationChannelProtocol | null;
+  qualities?: string[] | null; resolutions?: string[] | null; ratios?: string[] | null;
+  maxReferences?: number | null; billingMode?: ImageGenerationBillingMode | null; fixedPoints?: number | null;
+};
+
+/** Read-only admin diagnostics; this does not gate saving or change dispatch. */
+export function imageApiGroupModelMissingRequirements(value: ImageApiGroupModelConfiguration, actualBillingReasons: string[] = []) {
+  const missing: string[] = [];
+  if (!value.providerSupported) missing.push('现有接口类型尚未支持本组型号');
+  if (!value.baseUrlConfigured) missing.push('尚未配置 API 地址');
+  if (!value.apiKeyConfigured) missing.push('尚未配置 API Key');
+  if (value.protocol !== 'gemini_native' && value.protocol !== 'openai_images') missing.push('尚未确认请求协议');
+  if (!value.qualities?.length) missing.push('尚未确认支持的图片质量');
+  if (!value.resolutions?.length) missing.push('尚未确认支持的分辨率');
+  if (!value.ratios?.length) missing.push('尚未确认支持的图片比例');
+  if (!Number.isSafeInteger(value.maxReferences) || Number(value.maxReferences) < 0) missing.push('尚未确认参考图上限');
+  if (value.billingMode !== 'fixed' && value.billingMode !== 'actual') missing.push('尚未设置计费方式');
+  if (value.billingMode === 'fixed' && (!Number.isSafeInteger(value.fixedPoints) || Number(value.fixedPoints) < 0)) {
+    missing.push('固定点数未填写或无效，明确免费时请填写 0');
+  }
+  if (value.billingMode === 'actual') missing.push(...actualBillingReasons);
+  return Array.from(new Set(missing));
+}
 export type ImageApiGroupProviderDto = {
   id: string; channelId: string; label: string; supplierName: string; groupConfigured: boolean; enabled: boolean; deleted: boolean;
   sourceRevision: string; apiKeyConfigured: boolean; settings: ImageApiGroupSettings;
@@ -27,6 +58,8 @@ export type ImageApiGroupSaveReceipt = {
   mutationId: string; group: ImageApiGroup; providerId: string; channelId: string; enabled: boolean;
   apiKeyConfigured: boolean; defaultRoutes: { revision: number; models: Partial<Record<ImageStudioModel, string>> };
   savedAt: string;
+  affectedModels?: ImageStudioModel[];
+  modelStatuses?: Partial<Record<ImageStudioModel, ImageApiGroupModelDto>>;
 };
 
 /**
