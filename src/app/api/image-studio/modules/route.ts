@@ -34,8 +34,8 @@ async function save(request: NextRequest, createOnly: boolean) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) return NextResponse.json({ error: '模块内容无效' }, { status: 400, headers: privateHeaders });
     if (createOnly && body.action === 'open-shared') {
       if (typeof body.presetId !== 'string' || !body.presetId || body.presetId.length > 160) return NextResponse.json({ error: '共享模板编号无效' }, { status: 400, headers: privateHeaders });
-      const module = await openSharedStudioModule(user, body.presetId, body.requestId);
-      return NextResponse.json(await studioModuleDTOForUser(user, module.id), { headers: privateHeaders });
+      const workspace = await openSharedStudioModule(user, body.presetId, body.requestId);
+      return NextResponse.json(await studioModuleDTOForUser(user, workspace.id), { headers: privateHeaders });
     }
     return NextResponse.json(await saveStudioModule(user.id, body, createOnly, user.role === 'admin', undefined, user), { headers: privateHeaders });
   }
