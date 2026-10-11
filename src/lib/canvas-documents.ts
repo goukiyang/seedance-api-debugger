@@ -140,6 +140,9 @@ export function parseCanvasSnapshot(raw: string, projectId: string | null, v2: b
 }
 
 export function requireCanvasRoleCapability(schemaVersion: number, capabilities: unknown) {
+  if (schemaVersion >= 4) {
+    throw new CanvasDocumentError('此画布使用新版角色工作流，当前回退版本只保留历史；请更新后继续', 426, 'workflow_capability_required', { required_capabilities: ['role.workflow.v1'] });
+  }
   if (schemaVersion >= 3 && (!Array.isArray(capabilities) || !capabilities.includes('role.v1'))) {
     throw new CanvasDocumentError('此画布包含角色，请刷新到支持角色的版本；原画布不会被旧页面覆盖', 426, 'role_capability_required', { required_capabilities: ['role.v1'] });
   }
@@ -604,7 +607,7 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
       if (repeated) return repeated;
       const existing = documentId ? await db.canvasDocument.findUnique({ where: { id: documentId } }) : null;
       if (documentId) await assertDocument(user, existing, true);
-      if (existing && ['save', 'duplicate', 'restore_revision'].includes(action)) requireCanvasRoleCapability(existing.schema_version, body.required_capabilities);
+      if (existing && (existing.schema_version >= 4 || ['save', 'duplicate', 'restore_revision'].includes(action))) requireCanvasRoleCapability(existing.schema_version, body.required_capabilities);
       if (existing && !v2 && existing.protocol_version >= 2) {
         throw new CanvasDocumentError('此画布已使用新版保存，请刷新页面并保留本地草稿', 426, 'protocol_upgrade_required');
       }

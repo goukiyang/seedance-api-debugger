@@ -76,6 +76,7 @@ export async function getRole(user: SessionUser, roleId: string, version?: numbe
   return { role, version: { ...row, snapshot: JSON.parse(row.snapshot_json), snapshot_json: undefined } };
 }
 export async function createRole(user: SessionUser, body: JsonRecord) {
+  if (record(body.snapshot) && (body.snapshot.contextGaps !== undefined || body.snapshot.reviewAuthority !== undefined || body.snapshot.workflowOnly !== undefined)) throw new RoleError('此岗位要求新版角色工作流，当前回退版本不会保存不完整定义', 426, 'workflow_capability_required');
   return roleMutation(user, body, 'role_create', async () => assertRoleUser(user), async db => {
     const snapshot = roleSnapshot(body.snapshot, user.id);
     const roleId = `role-${digest([user.id, body.mutation_id])}`;
@@ -87,6 +88,7 @@ export async function createRole(user: SessionUser, body: JsonRecord) {
   });
 }
 export async function editRole(user: SessionUser, roleId: string, body: JsonRecord) {
+  if (record(body.snapshot) && (body.snapshot.contextGaps !== undefined || body.snapshot.reviewAuthority !== undefined || body.snapshot.workflowOnly !== undefined)) throw new RoleError('此岗位要求新版角色工作流，当前回退版本不会覆盖这些要求', 426, 'workflow_capability_required');
   return roleMutation(user, body, `role_edit:${identifier(roleId)}`, db => ownedDefinition(db, user, roleId), async db => {
     const role = await ownedDefinition(db, user, roleId);
     if (integer(body.base_revision) !== role.revision || integer(body.base_version) !== role.current_version) {
@@ -117,7 +119,7 @@ export async function roleReceipt(user: SessionUser, mutationId: string) {
   if (!receipt) throw new RoleError('尚未找到保存回执，请保留草稿与原请求编号', 404, 'receipt_not_found');
   const response = JSON.parse(receipt.response_json);
   // Receipts are not an alternate route around current project/document access.
-  if (response.nodeId && response.documentId === receipt.object_id) {
+  if ((response.nodeId || response.workflowId) && response.documentId === receipt.object_id) {
     const { roleDocument } = await import('./permissions');
     await roleDocument(user, receipt.object_id);
   } else if (response.role?.id === receipt.object_id) await ownedDefinition(prisma, user, receipt.object_id);

@@ -35,12 +35,17 @@ export async function assertCurrentRoleUser(db: RoleDb, user: SessionUser) {
 }
 export async function roleDocument(user: SessionUser, documentId: string, write = false) {
   await assertCurrentRoleUser(prisma, user);
-  return write ? assertCanEditCanvasDocument(user, documentId) : assertCanReadCanvasDocument(user, documentId);
+  const document = await (write ? assertCanEditCanvasDocument(user, documentId) : assertCanReadCanvasDocument(user, documentId));
+  if (document.schema_version >= 4) throw new RoleError('新版角色工作流已保留，当前回退版本不能继续执行；请更新后操作', 426, 'workflow_capability_required');
+  return document;
 }
 export async function ownedDefinition(db: RoleDb, user: SessionUser, definitionId: string, add = false) {
   await assertCurrentRoleUser(db, user);
   const role = await db.canvasRoleDefinition.findFirst({ where: { id: definitionId, owner_user_id: user.id } });
   if (!role) throw new RoleError('角色不存在或不可访问', 404, 'role_not_found');
+  const version = await db.canvasRoleVersion.findUnique({ where: { definition_id_version: { definition_id: role.id, version: role.current_version } } });
+  const snapshot = version ? JSON.parse(version.snapshot_json) : null;
+  if (snapshot && (snapshot.contextGaps?.length || snapshot.reviewAuthority || snapshot.workflowOnly)) throw new RoleError('此岗位使用新版工作流要求，当前回退版本不能编辑或执行；原件已保留', 426, 'workflow_capability_required');
   if (add && role.status !== 'active') throw new RoleError('角色已归档，请先恢复到角色库', 409, 'role_archived');
   return role;
 }
