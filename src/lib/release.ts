@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '登录默认进入创作首页；生图结果双击可替换主图，恢复设置和快捷模板保留当前主图。复制按钮更易区分，放大图片去除青色边框。图片API明确显示规格和费用缺项，不再误报不支持或沿用旧供应商点数。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '补齐首页登录入口：从首页进入的注册、验证码登录和已有账号现在默认返回创作首页，明确打开的站内页面仍优先返回。上一版的主图保留、双击替换和图片API配置提示继续保留。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
