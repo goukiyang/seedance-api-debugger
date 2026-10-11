@@ -115,12 +115,12 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
         } else if (presetId && (forced || revision.activeDefinitionToken !== appliedToken)) {
           const data = await readShared<{ modules: T[] }>(`/api/image-studio/modules?ids=${encodeURIComponent(moduleId)}`, controller.signal);
           if (!currentRead()) return;
-          const module = data.modules.find(item => item.id === moduleId && item.sharedLive?.intent.presetId === presetId);
-          if (!module?.sharedLive?.available) latest.current.onUnavailable(presetId, '模板已不可用');
+          const workspace = data.modules.find(item => item.id === moduleId && item.sharedLive?.intent.presetId === presetId);
+          if (!workspace?.sharedLive?.available) latest.current.onUnavailable(presetId, '模板已不可用');
           else {
             // A definition can change between revision and detail. Its own token is authoritative.
-            appliedToken = module.sharedLive.intent.definitionToken;
-            latest.current.onDefinition(module);
+            appliedToken = workspace.sharedLive.intent.definitionToken;
+            latest.current.onDefinition(workspace);
           }
         }
         if (currentRead()) setFeedback({ owner: userId, error: '', loading: false });
