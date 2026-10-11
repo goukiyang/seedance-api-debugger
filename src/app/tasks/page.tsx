@@ -14,6 +14,7 @@ import { useAppSession } from '@/lib/context/AppSessionContext';
 import { isExternalUser } from '@/lib/access/external-role';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
 import { taskDetailHref } from '@/lib/navigation/return-to';
+import { enhanceWorkspaceHref, taskReuseHref } from '@/lib/navigation/task-reuse';
 import { BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT, downloadBulkVideoZip } from '@/lib/video/download-client';
 import type { TaskGenerationMode } from '@/types';
 import { TASK_GENERATION_MODE_LABELS } from '@/types';
@@ -63,6 +64,9 @@ interface Task {
   admin_hidden_by?: string | null;
   delete_reason?: string | null;
   project?: { id: string; name: string; type: string } | null;
+  project_id?: string | null;
+  video_card_id?: string | null;
+  video_branch_id?: string | null;
 }
 
 interface Pagination {
@@ -501,11 +505,19 @@ export default function TasksPage() {
                       <Link href={taskDetailHref(task.id, '/tasks')} className="btn btn-secondary">
                         查看详情
                       </Link>
-                      {!externalUser && (
-                      <Link href={enhanceTask ? '/generate/enhance' : `/generate?reuse_task_id=${task.id}`} className="btn btn-primary">
-                        {enhanceTask ? '继续超分' : '重新生成'}
-                      </Link>
-                      )}
+                      {!externalUser && (enhanceTask ? (
+                        <Link href={enhanceWorkspaceHref('/tasks')} className="btn btn-primary">
+                          继续超分
+                        </Link>
+                      ) : taskReuseHref(task, '/tasks') ? (
+                        <Link href={taskReuseHref(task, '/tasks')!} className="btn btn-primary">
+                          重新生成
+                        </Link>
+                      ) : (
+                        <button type="button" className="btn btn-primary" disabled title="此类型任务暂不支持直接复用输入">
+                          暂不能复用
+                        </button>
+                      ))}
                       {!externalUser && (
                       <button
                         type="button"

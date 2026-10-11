@@ -14,6 +14,308 @@ export const dynamic = 'force-dynamic';
 
 const OFFICIAL_PROJECT_COST_EVENTS = ['official_charge', 'adjustment', 'reversal'];
 
+const PROJECT_DETAIL_PAGE_SIZE = 20;
+const PROJECT_TASK_FILTERS = new Set(['all', 'running', 'succeeded', 'failed', 'cancelled']);
+
+function boundedPage(value: string | null) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? Math.min(parsed, 100_000) : 1;
+}
+
+function boundedSearch(value: string | null) {
+  return (value || '').trim().slice(0, 120);
+}
+
+function safeTaskProjection<T extends {
+  id: string;
+  local_status: string;
+  public_video_url?: string | null;
+  local_video_path?: string | null;
+  result_video_url?: string | null;
+  result_last_frame_url?: string | null;
+  delivery_status?: string | null;
+}>(task: T) {
+  const {
+    public_video_url: _publicVideoUrl,
+    local_video_path: _localVideoPath,
+    result_video_url: _resultVideoUrl,
+    result_last_frame_url: _resultLastFrameUrl,
+    ...safeTask
+  } = task;
+  return { ...safeTask, ...taskThumbnailProjection(task) };
+}
+
+async function getProjectSection(
+  request: NextRequest,
+  user: NonNullable<Awaited<ReturnType<typeof getSession>>>,
+  access: Awaited<ReturnType<typeof assertCanViewProject>>,
+  projectId: string,
+  section: string,
+) {
+  if (!['tasks', 'albums', 'finance', 'members'].includes(section)) {
+    return NextResponse.json({ error: '无效的项目分区' }, { status: 400 });
+  }
+
+  const searchParams = request.nextUrl.searchParams;
+  const requestedPage = boundedPage(searchParams.get('page'));
+  const pageSize = PROJECT_DETAIL_PAGE_SIZE;
+  const taskWhere = user.role === 'admin'
+    ? { project_id: projectId }
+    : { project_id: projectId, retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] } };
+  const membersSection = section === 'members';
+  const canReturnInvites = membersSection && access.canManageMembers;
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      type: true,
+      visibility: true,
+      status: true,
+      owner_user_id: true,
+      owner: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
+      members: {
+        where: { status: 'active' },
+        orderBy: { joined_at: 'asc' },
+        select: {
+          id: true,
+          user_id: true,
+          role: true,
+          joined_at: true,
+          user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, role: true, status: true, account_type: true } },
+        },
+      },
+      invites: canReturnInvites ? {
+        where: { status: 'active' },
+        orderBy: { created_at: 'desc' },
+        take: 5,
+        select: { id: true, token: true, default_role: true, expires_at: true, used_count: true, max_uses: true },
+      } : false,
+      _count: { select: { members: true, tasks: true, reference_albums: { where: { status: { not: 'deleted' } } } } },
+    },
+  });
+  if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
+  const budget = await prisma.$transaction((tx) => getProjectBudgetSummary(tx, projectId));
+
+  const common = {
+    project: {
+      ...project,
+      members: membersSection ? project.members : [],
+      invites: canReturnInvites ? project.invites : [],
+      _count: project._count,
+    },
+    viewer_id: user.id,
+    budget,
+    permissions: {
+      role: access.role,
+      can_manage_project: access.canManageProject,
+      can_manage_members: access.canManageMembers,
+      can_manage_assets: access.canManageAssets,
+      can_generate: access.canGenerate,
+    },
+  };
+
+  if (section === 'tasks') {
+    const search = boundedSearch(searchParams.get('q'));
+    const statusFilter = PROJECT_TASK_FILTERS.has(searchParams.get('status') || '') ? (searchParams.get('status') || 'all') : 'all';
+    const sort = searchParams.get('sort') === 'oldest' ? 'oldest' : 'newest';
+    const statusWhere = statusFilter === 'running'
+      ? { local_status: { in: ['submitted', 'running'] } }
+      : statusFilter === 'succeeded'
+        ? { local_status: 'succeeded' }
+        : statusFilter === 'failed'
+          ? { local_status: 'failed' }
+          : statusFilter === 'cancelled'
+            ? { local_status: 'cancelled' }
+            : {};
+    const searchWhere = search ? { OR: [
+      { prompt: { contains: search } },
+      { model: { contains: search } },
+      { provider: { contains: search } },
+      { id: { contains: search } },
+    ] } : {};
+    const where = { AND: [taskWhere, statusWhere, searchWhere] };
+    const [total, matchingTaskCount, succeededCount, failedCount, runningCount] = await Promise.all([
+      prisma.videoTask.count({ where }),
+      prisma.videoTask.count({ where: taskWhere }),
+      prisma.videoTask.count({ where: { ...taskWhere, local_status: 'succeeded' } }),
+      prisma.videoTask.count({ where: { ...taskWhere, local_status: { in: ['failed', 'cancelled'] } } }),
+      prisma.videoTask.count({ where: { ...taskWhere, local_status: { in: ['submitted', 'running'] } } }),
+    ]);
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const page = Math.min(requestedPage, totalPages);
+    const tasks = await prisma.videoTask.findMany({
+      where,
+      orderBy: sort === 'oldest' ? [{ created_at: 'asc' }, { id: 'asc' }] : [{ created_at: 'desc' }, { id: 'desc' }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      select: {
+        id: true, prompt: true, provider: true, model: true, generation_mode: true,
+        ratio: true, duration: true, resolution: true, local_status: true, delivery_status: true,
+        provider_task_id: true, public_video_url: true, result_video_url: true,
+        result_last_frame_url: true, local_video_path: true, owner_user_id: true, user_id: true,
+        estimated_cost: true, actual_cost: true, refund_amount: true, provider_cost_status: true,
+        provider_official_amount_minor: true, provider_final_amount_minor: true,
+        provider_official_amount_micros: true, provider_final_amount_micros: true,
+        provider_cost_currency: true, provider_billing_status: true, created_at: true,
+        video_card_id: true, video_branch_id: true,
+        owner: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
+        user: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
+      },
+    });
+    return NextResponse.json({ ...common,
+      tasks: tasks.map(safeTaskProjection),
+      review_summary: { task_count: matchingTaskCount, succeeded_count: succeededCount, failed_count: failedCount, running_count: runningCount },
+      pagination: { page, page_size: pageSize, total, total_pages: totalPages },
+      filters: { q: search, status: statusFilter, sort },
+    });
+  }
+
+  if (section === 'albums') {
+    const where = { project_id: projectId, status: { not: 'deleted' } };
+    const total = await prisma.referenceAlbum.count({ where });
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const page = Math.min(requestedPage, totalPages);
+    const pagedAlbums = await prisma.referenceAlbum.findMany({
+      where, orderBy: [{ updated_at: 'desc' }, { id: 'desc' }], skip: (page - 1) * pageSize, take: pageSize,
+      select: { id: true, name: true, description: true, album_type: true, visibility: true, status: true, updated_at: true,
+        _count: { select: { images: { where: { status: 'active' } } } } },
+    });
+    return NextResponse.json({ ...common,
+      reference_albums: pagedAlbums.map((album) => ({ ...album, image_count: album._count.images })),
+      pagination: { page, page_size: pageSize, total, total_pages: totalPages },
+    });
+  }
+
+  if (section === 'members') {
+    return NextResponse.json({ ...common, project: { ...common.project,
+      members: project.members, invites: canReturnInvites ? project.invites : [],
+    } });
+  }
+
+  const ledgerWhere = {
+    event_type: { in: OFFICIAL_PROJECT_COST_EVENTS },
+    OR: [{ project_id: projectId }, { allocations: { some: { project_id: projectId } } }],
+  };
+  const [taskCount, succeededCount, failedCount, runningCount, creditTotals, officialAllocationMicrosTotals,
+    officialAllocationMinorTotals, officialDirectMicrosTotals, officialDirectMinorTotals, ledgerTotalCount, officialPendingCount,
+    costUnknownCount, highCostTasks, ledgerPageOne] = await Promise.all([
+    prisma.videoTask.count({ where: taskWhere }),
+    prisma.videoTask.count({ where: { ...taskWhere, local_status: 'succeeded' } }),
+    prisma.videoTask.count({ where: { ...taskWhere, local_status: { in: ['failed', 'cancelled'] } } }),
+    prisma.videoTask.count({ where: { ...taskWhere, local_status: { in: ['submitted', 'running'] } } }),
+    prisma.videoTask.aggregate({ where: taskWhere, _sum: { estimated_cost: true, actual_cost: true, refund_amount: true } }),
+    prisma.costAllocation.groupBy({
+      by: ['currency'],
+      where: { project_id: projectId, ledger: { event_type: { in: OFFICIAL_PROJECT_COST_EVENTS } }, amount_micros: { not: null } },
+      _sum: { amount_micros: true },
+    }),
+    prisma.costAllocation.groupBy({
+      by: ['currency'],
+      where: { project_id: projectId, ledger: { event_type: { in: OFFICIAL_PROJECT_COST_EVENTS } }, amount_micros: null, amount_minor: { not: null } },
+      _sum: { amount_minor: true },
+    }),
+    prisma.costLedger.groupBy({
+      by: ['currency'],
+      where: { event_type: { in: OFFICIAL_PROJECT_COST_EVENTS }, project_id: projectId, allocations: { none: {} }, amount_micros: { not: null } },
+      _sum: { amount_micros: true },
+    }),
+    prisma.costLedger.groupBy({
+      by: ['currency'],
+      where: { event_type: { in: OFFICIAL_PROJECT_COST_EVENTS }, project_id: projectId, allocations: { none: {} }, amount_micros: null, amount_minor: { not: null } },
+      _sum: { amount_minor: true },
+    }),
+    prisma.costLedger.count({ where: ledgerWhere }),
+    prisma.videoTask.count({ where: { ...taskWhere, local_status: { in: ['succeeded', 'failed', 'cancelled'] }, provider_cost_status: { notIn: ['official_confirmed', 'reconciled', 'failed_no_charge'] } } }),
+    prisma.videoTask.count({ where: { ...taskWhere, provider_cost_status: { in: ['unknown', 'disputed'] } } }),
+    prisma.videoTask.findMany({
+      where: taskWhere,
+      orderBy: [{ actual_cost: 'desc' }, { estimated_cost: 'desc' }, { created_at: 'desc' }, { id: 'desc' }],
+      take: 8,
+      select: {
+        id: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true,
+        estimated_cost: true, actual_cost: true, provider_cost_status: true, public_video_url: true,
+        result_video_url: true, result_last_frame_url: true, local_video_path: true, created_at: true,
+        owner: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
+        user: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
+      },
+    }),
+    prisma.costLedger.findMany({
+      where: ledgerWhere,
+      orderBy: [{ occurred_at: 'desc' }, { created_at: 'desc' }, { id: 'desc' }],
+      skip: 0,
+      take: pageSize,
+      select: {
+        id: true, source_type: true, source_id: true, task_id: true, user_id: true, project_id: true,
+        provider_name: true, provider_task_id: true, event_type: true, amount_minor: true, amount_micros: true,
+        currency: true, usage_quantity: true, usage_unit: true, cost_source: true, confidence: true,
+        official_charge_id: true, reason: true, occurred_at: true, created_at: true,
+        user: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
+        task: { select: { id: true, prompt: true, provider: true, model: true, generation_mode: true, local_status: true,
+          delivery_status: true, provider_task_id: true, public_video_url: true, result_video_url: true,
+          result_last_frame_url: true, local_video_path: true, provider_cost_status: true,
+          provider_official_amount_minor: true, provider_final_amount_minor: true,
+          provider_official_amount_micros: true, provider_final_amount_micros: true,
+          provider_cost_currency: true, provider_billing_status: true, created_at: true,
+          owner: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
+          user: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } } } },
+        allocations: { where: { project_id: projectId }, select: { id: true, allocation_type: true, allocation_id: true,
+          amount_minor: true, amount_micros: true, currency: true, reason: true } },
+      },
+    }),
+  ]);
+  const totalPages = Math.max(1, Math.ceil(ledgerTotalCount / pageSize));
+  const page = Math.min(requestedPage, totalPages);
+  const pagedLedgers = page === 1 ? ledgerPageOne : await prisma.costLedger.findMany({
+    where: ledgerWhere, orderBy: [{ occurred_at: 'desc' }, { created_at: 'desc' }, { id: 'desc' }],
+    skip: (page - 1) * pageSize, take: pageSize,
+    select: { id: true, source_type: true, source_id: true, task_id: true, user_id: true, project_id: true,
+      provider_name: true, provider_task_id: true, event_type: true, amount_minor: true, amount_micros: true,
+      currency: true, usage_quantity: true, usage_unit: true, cost_source: true, confidence: true,
+      official_charge_id: true, reason: true, occurred_at: true, created_at: true,
+      user: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
+      task: { select: { id: true, prompt: true, provider: true, model: true, generation_mode: true, local_status: true,
+        delivery_status: true, provider_task_id: true, public_video_url: true, result_video_url: true,
+        result_last_frame_url: true, local_video_path: true, provider_cost_status: true,
+        provider_official_amount_minor: true, provider_final_amount_minor: true,
+        provider_official_amount_micros: true, provider_final_amount_micros: true, provider_cost_currency: true,
+        provider_billing_status: true, created_at: true,
+        owner: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
+        user: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } } } },
+      allocations: { where: { project_id: projectId }, select: { id: true, allocation_type: true, allocation_id: true,
+        amount_minor: true, amount_micros: true, currency: true, reason: true } },
+    },
+  });
+  const projectedLedgers = pagedLedgers.map((ledger) => ({
+    ...ledger,
+    task: ledger.task ? safeTaskProjection(ledger.task) : null,
+  }));
+  const officialCostTotals = buildCostTotals(
+    [...officialAllocationMicrosTotals, ...officialDirectMicrosTotals],
+    [...officialAllocationMinorTotals, ...officialDirectMinorTotals],
+  );
+  const primaryOfficialCost = officialCostTotals[0] || null;
+  return NextResponse.json({ ...common,
+    review_summary: {
+      task_count: taskCount, succeeded_count: succeededCount, failed_count: failedCount, running_count: runningCount,
+      estimated_credits: creditTotals._sum.estimated_cost || 0,
+      charged_credits: creditTotals._sum.actual_cost || 0,
+      refunded_credits: creditTotals._sum.refund_amount || 0,
+      success_rate: taskCount > 0 ? Math.round((succeededCount / taskCount) * 1000) / 10 : 0,
+      official_cost_minor: primaryOfficialCost?.amount_minor || 0,
+      official_cost_micros: primaryOfficialCost?.amount_micros || 0,
+      official_cost_currency: primaryOfficialCost?.currency || null,
+      official_cost_totals: officialCostTotals,
+      official_pending_count: officialPendingCount,
+      cost_unknown_count: costUnknownCount,
+      high_cost_tasks: highCostTasks.map(safeTaskProjection), failed_tasks: [],
+    },
+    cost_ledgers: projectedLedgers,
+    pagination: { page, page_size: pageSize, total: ledgerTotalCount, total_pages: totalPages },
+  });
+}
+
 function normalizeCurrency(currency: string | null | undefined) {
   return (currency || 'CNY').trim().toUpperCase();
 }
@@ -83,6 +385,8 @@ export async function GET(
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
     const access = await assertCanViewProject(user, params.id);
+    const section = request.nextUrl.searchParams.get('section');
+    if (section) return getProjectSection(request, user, access, params.id, section);
 
     const project = await prisma.project.findUnique({
       where: { id: params.id },

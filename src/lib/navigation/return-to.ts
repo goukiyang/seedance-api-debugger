@@ -21,12 +21,16 @@ function isAllowedReturnPath(value: string) {
 }
 
 export function sanitizeReturnTo(value: string | null | undefined) {
-  if (!value) return DEFAULT_TASK_RETURN_TO;
+  return sanitizeOptionalReturnTo(value) || DEFAULT_TASK_RETURN_TO;
+}
+
+export function sanitizeOptionalReturnTo(value: string | null | undefined): string | null {
+  if (!value) return null;
   const trimmed = value.trim();
-  if (!trimmed) return DEFAULT_TASK_RETURN_TO;
-  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) return DEFAULT_TASK_RETURN_TO;
-  if (trimmed.includes('\\') || /[\u0000-\u001f\u007f]/.test(trimmed)) return DEFAULT_TASK_RETURN_TO;
-  if (!isAllowedReturnPath(trimmed)) return DEFAULT_TASK_RETURN_TO;
+  if (!trimmed) return null;
+  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) return null;
+  if (trimmed.includes('\\') || /[\u0000-\u001f\u007f]/.test(trimmed)) return null;
+  if (!isAllowedReturnPath(trimmed)) return null;
   return trimmed;
 }
 

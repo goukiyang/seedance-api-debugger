@@ -31,6 +31,7 @@ import {
   formatProviderUsdCharge,
 } from '@/lib/costs/currency';
 import { sanitizeReturnTo, taskDetailHref, taskReturnLabel } from '@/lib/navigation/return-to';
+import { enhanceWorkspaceHref, taskReuseHref } from '@/lib/navigation/task-reuse';
 import { showVideoCardManagementUi } from '@/lib/navigation';
 import type { DisplayUser } from '@/lib/users/display';
 
@@ -80,6 +81,7 @@ interface VideoTask {
   project_id: string | null;
   project?: { id: string; name: string; type: string } | null;
   video_card_id: string | null;
+  video_branch_id?: string | null;
   video_card?: { id: string; title: string; objective: string | null; status: string; project_id: string } | null;
   template_id?: string | null;
   generation_template?: { id: string; name: string; template_key: string; version: string; status: string } | null;
@@ -1705,11 +1707,22 @@ export default function TaskDetailPage() {
   const taskCompletedTime = formatTaskTime(task.completed_at || task.updated_at);
   const taskCompletedTimePrefix = task.completed_at ? '生成于' : '更新于';
   const taskCompletedExactLabel = task.completed_at ? '精确时间' : '更新时间';
-  const reuseHref = `/generate?reuse_task_id=${encodeURIComponent(task.id)}${
-    task.project_id ? `&project_id=${encodeURIComponent(task.project_id)}` : ''
-  }${
-    task.video_card_id ? `&video_card_id=${encodeURIComponent(task.video_card_id)}` : ''
-  }`;
+  const enhanceSourceCanBeLocated = Boolean(
+    isEnhanceTask
+      && enhanceSourceTask
+      && enhanceSourceTask.local_status === 'succeeded'
+      && enhanceSourceTask.provider !== 'volcengine_mediakit'
+      && enhanceSourceTask.generation_mode !== 'enhance_video'
+      && (enhanceSourceTask.local_video_path || enhanceSourceTask.result_video_url)
+      && enhanceSourceTask.video_card_id
+      && enhanceSourceTask.duration,
+  );
+  const taskActionHref = isEnhanceTask
+    ? enhanceWorkspaceHref(returnTo, enhanceSourceCanBeLocated ? enhanceSourceTask?.id : null)
+    : taskReuseHref(task, returnTo);
+  const taskActionLabel = isEnhanceTask
+    ? (enhanceSourceCanBeLocated ? '选择源视频超分' : '在超分工作台继续')
+    : '复用输入';
   const taskCreditText = task.actual_cost !== null && task.actual_cost !== undefined
     ? formatCreditPoints(task.actual_cost)
     : task.frozen_cost !== null && task.frozen_cost !== undefined
@@ -1809,10 +1822,12 @@ export default function TaskDetailPage() {
                 </div>
                 <div className="task-action-row task-primary-action">
                   {resultPrimaryAction === 'reuse' && (
-                    <Link href={reuseHref} className="btn btn-primary">
+                    taskActionHref ? <Link href={taskActionHref} className="btn btn-primary">
                       <RotateCcw size={16} aria-hidden="true" />
-                      复用输入
-                    </Link>
+                      {taskActionLabel}
+                    </Link> : <button type="button" className="btn btn-primary" disabled title="此类型任务暂不支持直接复用输入">
+                      暂不能复用
+                    </button>
                   )}
                   {resultPrimaryAction === 'refresh' && (
                     <button className="btn btn-primary" onClick={queryStatus} disabled={querying}>
@@ -1828,6 +1843,13 @@ export default function TaskDetailPage() {
                   )}
                 </div>
               </div>
+              {isEnhanceTask && (
+                <p className="task-action-help">
+                  {enhanceSourceCanBeLocated
+                    ? '已定位原来源视频；进入后仍需核对超分参数并手动提交。'
+                    : '请在超分工作台重新选择可用的源视频；不会自动创建任务。'}
+                </p>
+              )}
 
               <div className="task-result-identity-bar">
                 <UserIdentityBadge user={taskOwner} subtitle="生成者" />
@@ -2015,10 +2037,12 @@ export default function TaskDetailPage() {
                   </button>
                 )}
                 {resultPrimaryAction !== 'reuse' && (
-                  <Link href={reuseHref} className="btn btn-secondary">
+                  taskActionHref ? <Link href={taskActionHref} className="btn btn-secondary">
                     <RotateCcw size={16} aria-hidden="true" />
-                    复用输入
-                  </Link>
+                    {taskActionLabel}
+                  </Link> : <button type="button" className="btn btn-secondary" disabled title="此类型任务暂不支持直接复用输入">
+                    暂不能复用
+                  </button>
                 )}
                 {canUseVideoActions && (
                   <button
@@ -2161,10 +2185,12 @@ export default function TaskDetailPage() {
                     {promptCopied ? '已复制' : '复制提示词'}
                   </button>
                 )}
-                <Link href={reuseHref} className="btn btn-secondary">
+                {taskActionHref ? <Link href={taskActionHref} className="btn btn-secondary">
                   <RotateCcw size={16} aria-hidden="true" />
-                  复用输入
-                </Link>
+                  {taskActionLabel}
+                </Link> : <button type="button" className="btn btn-secondary" disabled title="此类型任务暂不支持直接复用输入">
+                  暂不能复用
+                </button>}
               </div>
             </div>
 

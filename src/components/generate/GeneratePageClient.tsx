@@ -26,7 +26,7 @@ import { formatProviderUsdCharge } from '@/lib/costs/currency';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { externalFallbackPath, isExternalUser } from '@/lib/access/external-role';
 import { isNavItemVisible, showVideoCardManagementUi } from '@/lib/navigation';
-import { taskDetailHref } from '@/lib/navigation/return-to';
+import { sanitizeOptionalReturnTo, taskDetailHref, taskReturnLabel } from '@/lib/navigation/return-to';
 import {
   normalizeGenerationDefaults,
   type GenerationDefaults,
@@ -510,6 +510,29 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const projectRemovalBackdropRef = useRef<HTMLDivElement>(null);
   const projectRemovalDialogRef = useRef<HTMLDivElement>(null);
   const appliedPreferenceProjectRef = useRef(false);
+  const userChangedProjectRef = useRef(false);
+  const userChangedVideoCardRef = useRef(false);
+  const userChangedVideoBranchRef = useRef(false);
+  const userEditedComposerRef = useRef(false);
+
+  useEffect(() => {
+    const markComposerEdited = (event: Event) => {
+      if (!(event.target instanceof Element)) return;
+      const composer = event.target.closest('.generation-composer');
+      if (!composer) return;
+      if (event.type === 'click' && !event.target.closest('button, input, select, textarea, [role="button"], [contenteditable="true"]')) return;
+      userEditedComposerRef.current = true;
+    };
+
+    ['input', 'change', 'click', 'paste', 'drop'].forEach((eventName) => {
+      document.addEventListener(eventName, markComposerEdited, true);
+    });
+    return () => {
+      ['input', 'change', 'click', 'paste', 'drop'].forEach((eventName) => {
+        document.removeEventListener(eventName, markComposerEdited, true);
+      });
+    };
+  }, []);
 
   // ---- Collections ----
   const [collections, setCollections] = useState<AssetCollection[]>([]);
@@ -559,6 +582,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [studioHandoff, setStudioHandoff] = useState<StudioGenerationHandoff | null>(null);
   const [studioRunId, setStudioRunId] = useState<string | null>(null);
   const [studioReturnTo, setStudioReturnTo] = useState<string | null>(null);
+  const [projectReturnTo, setProjectReturnTo] = useState<string | null>(null);
   const [studioWorkspaceTabId, setStudioWorkspaceTabId] = useState<string | null>(null);
   const [studioHandoffLoading, setStudioHandoffLoading] = useState(false);
   const [studioHandoffError, setStudioHandoffError] = useState<string | null>(null);
@@ -575,6 +599,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       runId,
       window.location.origin,
     ));
+    setProjectReturnTo(sanitizeOptionalReturnTo(searchParams.get('return_to')));
     if (!runId) return;
     setStudioRunId(runId);
     if (studioHandoffRequestRef.current === runId) return;
@@ -688,12 +713,13 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   }, [currentUser?.role, h3Ready, h3VideoConfig, isIpSurface, seedanceDraftCapability.create_enabled, selectedH3Lora?.label, selectedH3Preset?.label]);
   const activeModelLabel = surfaceConfig.modelLabel;
   const generationReturnTo = useMemo(() => {
-    if (!studioRunId && !studioReturnTo) return surfaceConfig.routePath;
     const params = new URLSearchParams();
     if (studioRunId) params.set('template_studio_run_id', studioRunId);
     if (studioReturnTo) params.set('template_studio_return_to', studioReturnTo);
-    return `${surfaceConfig.routePath}?${params.toString()}`;
-  }, [studioReturnTo, studioRunId, surfaceConfig.routePath]);
+    if (projectReturnTo) params.set('return_to', projectReturnTo);
+    const query = params.toString();
+    return query ? `${surfaceConfig.routePath}?${query}` : surfaceConfig.routePath;
+  }, [projectReturnTo, studioReturnTo, studioRunId, surfaceConfig.routePath]);
   const activeProviderLabel = 'Seedance 视频';
   const refreshH3VideoConfig = useCallback(async () => {
     if (isIpSurface) return null;
@@ -781,7 +807,29 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
   useEffect(() => {
     if (!loadingUser && !isIpSurface && isExternalUser(currentUser)) {
-      window.location.replace(externalFallbackPath());
+      const currentUrl = new URL(window.location.href);
+      const fallbackUrl = new URL(externalFallbackPath(), window.location.origin);
+      const returnTo = sanitizeOptionalReturnTo(currentUrl.searchParams.get('return_to'));
+      if (returnTo) fallbackUrl.searchParams.set('return_to', returnTo);
+
+      ['reuse_task_id', 'project_id', 'video_card_id', 'video_branch_id'].forEach((key) => {
+        const value = currentUrl.searchParams.get(key)?.trim();
+        if (value && value.length <= 200 && !/[\u0000-\u001f\u007f]/.test(value)) {
+          fallbackUrl.searchParams.set(key, value);
+        }
+      });
+      const templateStudioRunId = currentUrl.searchParams.get('template_studio_run_id')?.trim() || null;
+      if (templateStudioRunId && templateStudioRunId.length <= 200 && !/[\u0000-\u001f\u007f]/.test(templateStudioRunId)) {
+        fallbackUrl.searchParams.set('template_studio_run_id', templateStudioRunId);
+      }
+      const templateStudioReturnTo = safeTemplateStudioReturnTo(
+        currentUrl.searchParams.get('template_studio_return_to'),
+        templateStudioRunId,
+        window.location.origin,
+      );
+      if (templateStudioReturnTo) fallbackUrl.searchParams.set('template_studio_return_to', templateStudioReturnTo);
+
+      window.location.replace(`${fallbackUrl.pathname}${fallbackUrl.search}${fallbackUrl.hash}`);
     }
   }, [currentUser, isIpSurface, loadingUser]);
 
@@ -916,15 +964,18 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
       const requestedProjectId = new URLSearchParams(window.location.search).get('project_id');
       const rememberedProjectId = window.localStorage.getItem(PROJECT_STORAGE_KEY);
-      const preferredId = options.preferredProjectId || requestedProjectId || rememberedProjectId || '';
+      const preferredId = options.preferredProjectId
+        || (userChangedProjectRef.current ? '' : requestedProjectId || rememberedProjectId || '');
 
       setSelectedProjectId((current) => {
-        const preferred = preferredId ? list.find((project) => project.id === preferredId) : null;
-        if (preferred) return preferred.id;
-
         const currentProject = options.keepSelected !== false && current
           ? list.find((project) => project.id === current)
           : null;
+        if (userChangedProjectRef.current && !options.preferredProjectId && currentProject) return currentProject.id;
+
+        const preferred = preferredId ? list.find((project) => project.id === preferredId) : null;
+        if (preferred) return preferred.id;
+
         if (currentProject) return currentProject.id;
 
         const personal = list.find((project) => project.type === 'personal');
@@ -948,7 +999,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
   const loadVideoCards = useCallback(async (
     projectId: string,
-    options: { preferredVideoCardId?: string | null; keepSelected?: boolean } = {},
+    options: { preferredVideoCardId?: string | null; keepSelected?: boolean; forcePreferred?: boolean } = {},
   ) => {
     if (!projectId) {
       setVideoCards([]);
@@ -964,13 +1015,17 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       const list: VideoCardOption[] = data.video_cards || [];
       setVideoCards(list);
       const requestedVideoCardId = new URLSearchParams(window.location.search).get('video_card_id');
-      const preferredId = options.preferredVideoCardId || requestedVideoCardId || '';
+      const preferredId = userChangedVideoCardRef.current && !options.forcePreferred
+        ? ''
+        : requestedVideoCardId || options.preferredVideoCardId || '';
       setSelectedVideoCardId((current) => {
-        const preferred = preferredId ? list.find((card) => card.id === preferredId) : null;
-        if (preferred) return preferred.id;
         const currentCard = options.keepSelected !== false && current
           ? list.find((card) => card.id === current)
           : null;
+        if (userChangedVideoCardRef.current && currentCard) return currentCard.id;
+
+        const preferred = preferredId ? list.find((card) => card.id === preferredId) : null;
+        if (preferred) return preferred.id;
         if (currentCard) return currentCard.id;
         const active = list.find((card) => card.status !== 'sealed' && card.status !== 'archived');
         return (active || list[0])?.id || '';
@@ -1006,7 +1061,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 	        const list: VideoBranchOption[] = Array.isArray(data.branches) ? data.branches : [];
 	        const active = list.filter((branch) => ['exploring', 'candidate', 'primary'].includes(branch.status));
 	        setVideoBranches(active);
-	        const requestedBranchId = new URLSearchParams(window.location.search).get('video_branch_id');
+	        const requestedBranchId = userChangedVideoBranchRef.current
+	          ? null
+	          : new URLSearchParams(window.location.search).get('video_branch_id');
 	        setSelectedVideoBranchId((current) => {
 	          if (requestedBranchId && active.some((branch) => branch.id === requestedBranchId)) return requestedBranchId;
 	          if (current && active.some((branch) => branch.id === current)) return current;
@@ -1029,7 +1086,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
   useEffect(() => {
     if (appliedPreferenceProjectRef.current) return;
-    if (!generationDefaults?.projectId || projects.length === 0) return;
+    if (!generationDefaults?.projectId || projects.length === 0 || userChangedProjectRef.current) return;
     const requestedProjectId = new URLSearchParams(window.location.search).get('project_id');
     if (requestedProjectId || reuseDraft?.projectId) return;
 
@@ -1058,6 +1115,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       const data = await readJsonResponse<{ project: ProjectOption; error?: string; message?: string }>(res);
       if (!res.ok) throw new Error(data.message || data.error || '新建项目失败');
 
+      userChangedProjectRef.current = true;
       setProjectName('');
       setProjectCreateOpen(false);
       setProjectPickerOpen(false);
@@ -1097,11 +1155,13 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       if (!res.ok) throw new Error(data.message || data.error || '创建视频卡失败');
       setVideoCardTitle('');
       setVideoCardObjective('');
+      userChangedVideoCardRef.current = true;
       setSelectedVideoCardId(data.video_card.id);
       setVideoCardMessage({ type: 'success', text: `已创建视频卡「${data.video_card.title}」` });
       await loadVideoCards(selectedProjectId, {
         preferredVideoCardId: data.video_card.id,
         keepSelected: false,
+        forcePreferred: true,
       });
     } catch (err) {
       setVideoCardMessage({ type: 'error', text: err instanceof Error ? err.message : '创建视频卡失败' });
@@ -1182,6 +1242,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
   useEffect(() => {
     if (!reuseDraft?.projectId) return;
+    const requestedProjectId = new URLSearchParams(window.location.search).get('project_id');
+    if (requestedProjectId || userChangedProjectRef.current) return;
     if (projects.some((project) => project.id === reuseDraft.projectId)) {
       setSelectedProjectId(reuseDraft.projectId);
     }
@@ -1238,6 +1300,13 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       if ((data.draft.provider === 'volcengine_ark') !== isIpSurface) {
         throw new Error('任务属于另一生成入口，请在对应入口复用，未替换当前生成参数。');
       }
+      if (options.clearUrl && userEditedComposerRef.current) {
+        const currentUrl = new URL(window.location.href);
+        currentUrl.searchParams.delete('reuse_task_id');
+        window.history.replaceState(null, '', `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+        setReuseMessage('检测到你已开始编辑，未覆盖当前输入；如仍要复用旧任务，请重新打开复用入口。');
+        return;
+      }
       setReuseDraft({
         model: data.draft.model || null,
         taskId: data.draft.task_id,
@@ -1263,7 +1332,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           : `已回填旧任务，恢复 ${restored} 项素材。${data.inputWarnings?.join(' ') || ''}`,
       );
       if (options.clearUrl) {
-        window.history.replaceState(null, '', isIpSurface ? '/generate/ip' : '/generate');
+        const currentUrl = new URL(window.location.href);
+        currentUrl.searchParams.delete('reuse_task_id');
+        window.history.replaceState(null, '', `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
       }
       if (options.scrollToComposer !== false) {
         requestAnimationFrame(() => {
@@ -1666,6 +1737,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
             ? current
             : [cardData.video_card as VideoCardOption, ...current]
         ));
+        userChangedVideoCardRef.current = true;
         setSelectedVideoCardId(cardData.video_card.id);
       }
 
@@ -2054,6 +2126,12 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
       {/* ===== 页面主体 ===== */}
       <main className="composer-main">
+        {projectReturnTo && (
+          <div className="composer-prefill-notice">
+            <Link href={projectReturnTo}>{taskReturnLabel(projectReturnTo)}</Link>
+            <span>返回来源页面不会清除本次已选内容。</span>
+          </div>
+        )}
 
         {/* Hero 空状态 */}
         <div className="composer-hero">
@@ -2186,6 +2264,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                           const removalAction = projectRemovalAction(project);
                           const selectProject = () => {
                             if (projectBusy) return;
+                            userChangedProjectRef.current = true;
+                            userChangedVideoCardRef.current = false;
+                            userChangedVideoBranchRef.current = false;
                             setSelectedProjectId(project.id);
                             setProjectPickerOpen(false);
                             setProjectCreateOpen(false);
@@ -2355,7 +2436,11 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                 <select
                   className="composer-project-input"
                   value={selectedVideoCardId}
-                  onChange={(event) => setSelectedVideoCardId(event.target.value)}
+                  onChange={(event) => {
+                    userChangedVideoCardRef.current = true;
+                    userChangedVideoBranchRef.current = false;
+                    setSelectedVideoCardId(event.target.value);
+                  }}
                   disabled={!selectedProjectId || loadingVideoCards || videoCardBusy}
                 >
                   <option value="">
@@ -2392,7 +2477,10 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 	                <select
 	                  className="composer-project-input"
 	                  value={selectedVideoBranchId}
-	                  onChange={(event) => setSelectedVideoBranchId(event.target.value)}
+	                  onChange={(event) => {
+	                    userChangedVideoBranchRef.current = true;
+	                    setSelectedVideoBranchId(event.target.value);
+	                  }}
 	                  disabled={loadingVideoBranches || videoCardBusy}
 	                >
 	                  <option value="">不指定方向</option>
