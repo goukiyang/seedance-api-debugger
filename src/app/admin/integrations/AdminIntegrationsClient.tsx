@@ -11,7 +11,15 @@ import BananaImageChannel from './BananaImageChannel';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { displayUserSubtitle } from '@/lib/users/display';
 import { VOLCENGINE_IP_MODEL_OPTIONS } from '@/lib/integrations/volcengine-ip-models';
-import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_COST_USD, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
+import {
+  IMAGE_STUDIO_MODELS,
+  IMAGE_STUDIO_MODEL_LABELS,
+  IMAGE_STUDIO_MODEL_COST_USD,
+  IMAGE_STUDIO_MODEL_QUALITY_OPTIONS,
+  IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS,
+  type ImageStudioModel,
+} from '@/lib/image-studio/model-catalog';
+import { STUDIO_RATIOS } from '@/lib/image-studio/ratios';
 
 type UserSelectorType = 'id' | 'email' | 'username';
 
@@ -64,6 +72,58 @@ type ImageGenerationConfig = {
   supports_text_to_image: boolean;
   supports_image_to_image: boolean;
   supports_async_task: boolean;
+};
+
+type ManagedImageModel = {
+  enabled: boolean;
+  ready: boolean;
+  disabledReason: string | null;
+  billingMode: 'fixed' | 'actual' | null;
+  fixedPoints: number | null;
+  billingSource: string | null;
+  actualQuoteRequired: boolean;
+  qualities: string[] | null;
+  resolutions: string[] | null;
+  ratios: string[] | null;
+  maxReferences: number | null;
+};
+
+type ManagedImageChannel = {
+  id: string;
+  label: string;
+  supplierName: string;
+  supplierKind: 'fluxport' | 'musk' | 'other';
+  protocol: 'gemini_native' | 'openai_images' | 'mixed';
+  baseUrl: string;
+  enabled: boolean;
+  deleted: boolean;
+  configRevision: string | null;
+  apiKeyConfigured: boolean;
+  models: Partial<Record<ImageStudioModel, ManagedImageModel>>;
+};
+
+type ChannelCapabilityDraft = {
+  enabled: boolean;
+  qualities: string;
+  resolutions: string;
+  ratios: string;
+  maxReferences: string;
+  billingMode: '' | 'fixed' | 'actual';
+  fixedPoints: string;
+};
+
+type ManagedChannelDraft = {
+  id?: string;
+  expectedRevision?: string | null;
+  label: string;
+  supplierName: string;
+  supplierKind: 'musk' | 'other' | 'fluxport';
+  protocol: 'gemini_native' | 'openai_images' | 'mixed';
+  baseUrl: string;
+  enabled: boolean;
+  apiKey: string;
+  clearApiKey: boolean;
+  models: Record<ImageStudioModel, ChannelCapabilityDraft>;
 };
 
 type VolcengineIpConfig = {
@@ -300,11 +360,52 @@ function linkedUserSubtitle(config: CodexConfig) {
   return `${displayUserSubtitle(user) || user.id.slice(0, 8)} · ${user.status}`;
 }
 
+function emptyChannelCapabilityDraft(): ChannelCapabilityDraft {
+  return { enabled: false, qualities: '', resolutions: '', ratios: '', maxReferences: '', billingMode: '', fixedPoints: '' };
+}
+
+function emptyManagedChannelDraft(): ManagedChannelDraft {
+  return {
+    label: '', supplierName: '', supplierKind: 'other', protocol: 'openai_images', baseUrl: '',
+    enabled: false, apiKey: '', clearApiKey: false,
+    models: Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [model, emptyChannelCapabilityDraft()])) as Record<ImageStudioModel, ChannelCapabilityDraft>,
+  };
+}
+
+function managedChannelDraftFrom(channel: ManagedImageChannel): ManagedChannelDraft {
+  return {
+    id: channel.id,
+    expectedRevision: channel.configRevision,
+    label: channel.label,
+    supplierName: channel.supplierName,
+    supplierKind: channel.supplierKind,
+    protocol: channel.protocol,
+    baseUrl: channel.baseUrl,
+    enabled: channel.enabled,
+    apiKey: '',
+    clearApiKey: false,
+    models: Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => {
+      const capability = channel.models[model];
+      return [model, {
+        enabled: capability?.enabled === true,
+        qualities: capability?.qualities?.join(', ') || '',
+        resolutions: capability?.resolutions?.join(', ') || '',
+        ratios: capability?.ratios?.join(', ') || '',
+        maxReferences: capability?.maxReferences === null || capability?.maxReferences === undefined ? '' : String(capability.maxReferences),
+        billingMode: capability?.billingMode || '',
+        fixedPoints: capability?.fixedPoints === null || capability?.fixedPoints === undefined ? '' : String(capability.fixedPoints),
+      } satisfies ChannelCapabilityDraft];
+    })) as Record<ImageStudioModel, ChannelCapabilityDraft>,
+  };
+}
+
 export default function AdminIntegrationsClient() {
   const { confirm, productDialog } = useProductDialog();
   const [config, setConfig] = useState<CodexConfig>(EMPTY_CONFIG);
   const [muskConfig, setMuskConfig] = useState<MuskConfig>(EMPTY_MUSK_CONFIG);
   const [imageConfig, setImageConfig] = useState<ImageGenerationConfig>(EMPTY_IMAGE_GENERATION_CONFIG);
+  const [managedImageChannels, setManagedImageChannels] = useState<ManagedImageChannel[]>([]);
+  const [managedChannelDraft, setManagedChannelDraft] = useState<ManagedChannelDraft | null>(null);
   const [volcengineConfig, setVolcengineConfig] = useState<VolcengineIpConfig>(EMPTY_VOLCENGINE_IP_CONFIG);
   const [aiMediaKitConfig, setAiMediaKitConfig] = useState<AiMediaKitConfig>(EMPTY_AIMEDIAKIT_CONFIG);
   const [h3Config, setH3Config] = useState<H3Config>(EMPTY_H3_CONFIG);
@@ -313,6 +414,7 @@ export default function AdminIntegrationsClient() {
   const [muskSaving, setMuskSaving] = useState(false);
   const [muskTesting, setMuskTesting] = useState(false);
   const [imageSaving, setImageSaving] = useState(false);
+  const [managedChannelSaving, setManagedChannelSaving] = useState(false);
   const [volcengineSaving, setVolcengineSaving] = useState(false);
   const [aiMediaKitSaving, setAiMediaKitSaving] = useState(false);
   const [h3Saving, setH3Saving] = useState(false);
@@ -347,11 +449,12 @@ export default function AdminIntegrationsClient() {
     codex: { config, entered: Boolean(token), clearToken },
     musk: { config: muskConfig, entered: Boolean(muskApiKey), clearMuskApiKey },
     image: { config: imageConfig, entered: Boolean(imageApiKey), clearImageApiKey },
+    managedChannel: { config: managedChannelDraft, entered: Boolean(managedChannelDraft?.apiKey.trim()), clearApiKey: managedChannelDraft?.clearApiKey },
     volcengine: { config: volcengineConfig, entered: Boolean(volcengineApiKey), clearVolcengineApiKey },
     mediakit: { config: aiMediaKitConfig, entered: Boolean(aiMediaKitApiKey), clearAiMediaKitApiKey },
     h3: { config: h3Config, apiEntered: Boolean(h3ApiToken), adminEntered: Boolean(h3AdminToken), clearH3ApiToken, clearH3AdminToken },
     banana: bananaDirty,
-  }, !loading, '/admin', confirm, muskTesting || h3Testing || h3QueueLoading);
+  }, !loading, '/admin', confirm, muskTesting || h3Testing || h3QueueLoading || managedChannelSaving);
 
   const statusText = useMemo(() => {
     if (config.ready) return '已启用，可被 Codex 调用';
@@ -462,6 +565,7 @@ export default function AdminIntegrationsClient() {
       setConfig(codexData.config || EMPTY_CONFIG);
       setMuskConfig(muskData.config || EMPTY_MUSK_CONFIG);
       setImageConfig(imageData.config || EMPTY_IMAGE_GENERATION_CONFIG);
+      setManagedImageChannels(Array.isArray(imageData.channels) ? imageData.channels : []);
       setVolcengineConfig(volcengineData.config || EMPTY_VOLCENGINE_IP_CONFIG);
       setAiMediaKitConfig(aiMediaKitData.config || EMPTY_AIMEDIAKIT_CONFIG);
       setH3Config(normalizeH3Config(h3Data.config));
@@ -591,6 +695,94 @@ export default function AdminIntegrationsClient() {
     } finally {
       setImageSaving(false);
       settingsSubmit.finish('image', saved);
+    }
+  };
+
+  const refreshManagedImageChannels = async () => {
+    const response = await fetch('/api/admin/integrations/image-generation', { cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok || !Array.isArray(data.channels)) throw new Error(data.error || '读取图片供应商配置失败');
+    setManagedImageChannels(data.channels);
+  };
+
+  const saveManagedImageChannel = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!managedChannelDraft || !settingsSubmit.start()) return;
+    let saved = false;
+    setManagedChannelSaving(true);
+    setSubmitState(null);
+    try {
+      const models = Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => {
+        const capability = managedChannelDraft.models[model];
+        const splitList = (value: string) => value.trim()
+          ? Array.from(new Set(value.split(',').map(item => item.trim()).filter(Boolean)))
+          : null;
+        return [model, {
+          enabled: capability.enabled,
+          qualities: splitList(capability.qualities),
+          resolutions: splitList(capability.resolutions),
+          ratios: splitList(capability.ratios),
+          maxReferences: capability.maxReferences.trim() === '' ? null : Number(capability.maxReferences),
+          billingMode: capability.billingMode || null,
+          fixedPoints: capability.fixedPoints.trim() === '' ? null : Number(capability.fixedPoints),
+        }];
+      }));
+      const channel = {
+        ...(managedChannelDraft.id ? { id: managedChannelDraft.id, expectedRevision: managedChannelDraft.expectedRevision } : {}),
+        label: managedChannelDraft.label,
+        supplierName: managedChannelDraft.supplierName,
+        supplierKind: managedChannelDraft.supplierKind,
+        protocol: managedChannelDraft.protocol,
+        baseUrl: managedChannelDraft.baseUrl,
+        enabled: managedChannelDraft.enabled,
+        apiKey: managedChannelDraft.apiKey,
+        clearApiKey: managedChannelDraft.clearApiKey,
+        models,
+      };
+      const response = await fetch('/api/admin/integrations/image-generation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel_action: managedChannelDraft.id ? 'update' : 'create', channel }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.channel) throw new Error(data.error || '保存图片供应商配置失败');
+      await refreshManagedImageChannels();
+      setManagedChannelDraft(null);
+      setSubmitState({ type: 'success', message: '图片供应商配置已保存；新配置已生成独立修订。' });
+      saved = true;
+    } catch (error) {
+      setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存图片供应商配置失败' });
+    } finally {
+      setManagedChannelSaving(false);
+      settingsSubmit.finish('managedChannel', saved);
+    }
+  };
+
+  const runManagedChannelAction = async (channel: ManagedImageChannel, action: 'update' | 'archive' | 'restore', enabled?: boolean) => {
+    if (!settingsSubmit.start()) return;
+    let saved = false;
+    setManagedChannelSaving(true);
+    setSubmitState(null);
+    try {
+      const method = action === 'archive' ? 'DELETE' : 'POST';
+      const body = action === 'update'
+        ? { channel_action: action, channel: { ...channel, expectedRevision: channel.configRevision, enabled } }
+        : { channel_action: action, channel: { id: channel.id, expectedRevision: channel.configRevision } };
+      const response = await fetch('/api/admin/integrations/image-generation', {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.channel) throw new Error(data.error || '更新图片供应商状态失败');
+      await refreshManagedImageChannels();
+      setSubmitState({ type: 'success', message: action === 'archive' ? '配置已归档，已受理任务仍保留原修订。' : action === 'restore' ? '配置已恢复；恢复后仍处于停用状态。' : enabled ? '配置已启用。' : '配置已停用。' });
+      saved = true;
+    } catch (error) {
+      setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '更新图片供应商状态失败' });
+    } finally {
+      setManagedChannelSaving(false);
+      settingsSubmit.finish('managedChannel', saved);
     }
   };
 
@@ -1880,6 +2072,216 @@ export default function AdminIntegrationsClient() {
           </button>
         </div>
       </form>
+
+      <section className="card codex-config-form" aria-labelledby="managed-image-channels-title">
+        <div className="codex-config-head">
+          <div>
+            <h2 id="managed-image-channels-title" className="section-title mb-0">图片供应商通道</h2>
+            <p className="text-gray text-sm mt-2">
+              为 FluxPort 或其他兼容接口单独保存 Key、请求协议和已确认能力。留空表示未知，不会自动开放；Key 不会回显。
+            </p>
+          </div>
+          <button
+            className="btn btn-primary"
+            type="button"
+            disabled={managedChannelSaving}
+            onClick={() => setManagedChannelDraft(emptyManagedChannelDraft())}
+          >
+            新增供应商
+          </button>
+        </div>
+
+        <div className="codex-config-grid">
+          {managedImageChannels.map(channel => (
+            <article key={channel.id} className="form-group" style={{ border: '1px solid var(--border-color, #d8dee8)', borderRadius: 10, padding: 16 }}>
+              <div className="codex-config-head">
+                <div>
+                  <strong>{channel.label}</strong>
+                  <p className="text-gray text-sm mt-1 mb-0">
+                    {channel.supplierName} · {channel.protocol === 'mixed' ? '预设混合协议' : channel.protocol === 'gemini_native' ? 'Gemini 原生协议' : 'OpenAI 图片协议'}
+                  </p>
+                </div>
+                <strong>{channel.deleted ? '已归档' : channel.enabled ? '已启用' : '已停用'}</strong>
+              </div>
+              <p className="text-gray text-sm mt-2 mb-2" style={{ overflowWrap: 'anywhere' }}>
+                {channel.baseUrl} · API Key {channel.apiKeyConfigured ? '已设置' : '未设置'}
+              </p>
+              <p className="text-gray text-sm mt-0">
+                可用型号：{IMAGE_STUDIO_MODELS.filter(model => channel.models[model]?.ready).map(model => IMAGE_STUDIO_MODEL_LABELS[model]).join('、') || '暂无；先补齐能力和计费信息'}
+              </p>
+              <div className="codex-config-actions">
+                <button className="btn btn-secondary" type="button" onClick={() => setManagedChannelDraft(managedChannelDraftFrom(channel))}>
+                  编辑
+                </button>
+                {channel.deleted ? (
+                  <button className="btn btn-secondary" type="button" onClick={() => void runManagedChannelAction(channel, 'restore')}>
+                    恢复（保持停用）
+                  </button>
+                ) : (
+                  <>
+                    <button className="btn btn-secondary" type="button" disabled={managedChannelSaving} onClick={() => void runManagedChannelAction(channel, 'update', !channel.enabled)}>
+                      {channel.enabled ? '停用' : '启用'}
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      type="button"
+                      disabled={managedChannelSaving || channel.id === 'fluxport'}
+                      onClick={async () => {
+                        if (await confirm(`归档“${channel.label}”？已受理的任务仍会保留原配置，归档后不能新建任务。`, { title: '归档配置', confirmLabel: '归档', danger: true })) {
+                          await runManagedChannelAction(channel, 'archive');
+                        }
+                      }}
+                    >
+                      归档
+                    </button>
+                  </>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+
+        {managedChannelDraft && (
+          <form className="codex-config-form mt-3" onSubmit={saveManagedImageChannel}>
+            <div className="codex-config-head">
+              <div>
+                <h3 className="section-title mb-0">{managedChannelDraft.id ? '编辑供应商配置' : '新增供应商配置'}</h3>
+                <p className="text-gray text-sm mt-2">
+                  每次保存会建立不可变配置修订。启用前至少要有一个能力完整、计费已明确的型号。
+                </p>
+              </div>
+              <label className="toggle-switch" aria-label="启用该图片供应商">
+                <input
+                  type="checkbox"
+                  checked={managedChannelDraft.enabled}
+                  onChange={event => setManagedChannelDraft(current => current ? { ...current, enabled: event.target.checked } : current)}
+                />
+                <span className="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div className="codex-config-grid">
+              <div className="form-group">
+                <label className="form-label" htmlFor="managed-image-label">配置名称</label>
+                <input id="managed-image-label" className="input" required maxLength={120} value={managedChannelDraft.label}
+                  onChange={event => setManagedChannelDraft(current => current ? { ...current, label: event.target.value } : current)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="managed-image-supplier">供应商真实名称</label>
+                <input id="managed-image-supplier" className="input" required maxLength={120} value={managedChannelDraft.supplierName}
+                  disabled={managedChannelDraft.supplierKind === 'fluxport'}
+                  onChange={event => setManagedChannelDraft(current => current ? { ...current, supplierName: event.target.value } : current)} />
+              </div>
+              {!managedChannelDraft.id && (
+                <div className="form-group">
+                  <label className="form-label" htmlFor="managed-image-supplier-kind">供应商类型</label>
+                  <select id="managed-image-supplier-kind" className="input" value={managedChannelDraft.supplierKind}
+                    onChange={event => setManagedChannelDraft(current => current ? { ...current, supplierKind: event.target.value as 'musk' | 'other' } : current)}>
+                    <option value="other">其他兼容供应商</option>
+                    <option value="musk">Musk</option>
+                  </select>
+                </div>
+              )}
+              <div className="form-group">
+                <label className="form-label" htmlFor="managed-image-protocol">请求协议</label>
+                {managedChannelDraft.supplierKind === 'fluxport' ? (
+                  <input id="managed-image-protocol" className="input" value="按每个型号明确选择协议" disabled />
+                ) : (
+                  <select id="managed-image-protocol" className="input" value={managedChannelDraft.protocol}
+                    onChange={event => setManagedChannelDraft(current => current ? { ...current, protocol: event.target.value as 'gemini_native' | 'openai_images' } : current)}>
+                    <option value="gemini_native">Gemini 原生</option>
+                    <option value="openai_images">OpenAI 图片接口</option>
+                  </select>
+                )}
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="managed-image-base-url">API 地址</label>
+                <input id="managed-image-base-url" className="input" type="url" required maxLength={2048}
+                  value={managedChannelDraft.baseUrl || (managedChannelDraft.supplierKind === 'fluxport' ? 'https://api.uselg.top' : '')}
+                  disabled={managedChannelDraft.supplierKind === 'fluxport'}
+                  onChange={event => setManagedChannelDraft(current => current ? { ...current, baseUrl: event.target.value } : current)}
+                  placeholder="https://api.example.com/v1" autoComplete="url" />
+                <small className="text-gray">仅允许安全的 HTTPS 公网 API 地址。</small>
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="managed-image-api-key">API Key</label>
+                <input id="managed-image-api-key" className="input" type="password" value={managedChannelDraft.apiKey}
+                  onChange={event => setManagedChannelDraft(current => current ? { ...current, apiKey: event.target.value, clearApiKey: event.target.value ? false : current.clearApiKey } : current)}
+                  placeholder={managedChannelDraft.id ? '当前已设置，留空不变' : '输入 API Key'} autoComplete="new-password" />
+                {managedChannelDraft.id && (
+                  <label className="codex-clear-token mt-2">
+                    <input type="checkbox" checked={managedChannelDraft.clearApiKey} disabled={!managedImageChannels.find(item => item.id === managedChannelDraft.id)?.apiKeyConfigured || Boolean(managedChannelDraft.apiKey)}
+                      onChange={event => setManagedChannelDraft(current => current ? { ...current, clearApiKey: event.target.checked } : current)} />
+                    清除当前 API Key
+                  </label>
+                )}
+              </div>
+            </div>
+
+            <div className="form-group mt-3">
+              <strong>型号能力与计费</strong>
+              <p className="text-gray text-sm mt-1">所有能力都需按供应商资料逐项确认；列表留空或数量未知时保持不可用。固定点数填 0 表示明确免费，不代表未知价格。</p>
+            </div>
+            <div className="codex-config-grid">
+              {IMAGE_STUDIO_MODELS.filter(model => managedChannelDraft.supplierKind === 'fluxport'
+                || managedChannelDraft.protocol === 'gemini_native' && model.startsWith('gemini-')
+                || managedChannelDraft.protocol === 'openai_images' && model.startsWith('gpt-image-'))
+                .map(model => {
+                  const capability = managedChannelDraft.models[model];
+                  const prefix = `managed-${model}`;
+                  const updateCapability = (patch: Partial<ChannelCapabilityDraft>) => setManagedChannelDraft(current => current ? {
+                    ...current,
+                    models: { ...current.models, [model]: { ...current.models[model], ...patch } },
+                  } : current);
+                  return (
+                    <details key={model} className="form-group" style={{ border: '1px solid var(--border-color, #d8dee8)', borderRadius: 10, padding: 12 }}>
+                      <summary style={{ cursor: 'pointer' }}>
+                        <strong>{IMAGE_STUDIO_MODEL_LABELS[model]}</strong>
+                        <span className="text-gray"> · {capability.enabled ? '加入白名单' : '未开放'}</span>
+                      </summary>
+                      <label className="codex-clear-token mt-2">
+                        <input type="checkbox" checked={capability.enabled} onChange={event => updateCapability({ enabled: event.target.checked })} />
+                        已确认该型号可用
+                      </label>
+                      <label className="form-label mt-2" htmlFor={`${prefix}-quality`}>质量选项</label>
+                      <input id={`${prefix}-quality`} className="input" value={capability.qualities} onChange={event => updateCapability({ qualities: event.target.value })}
+                        placeholder={IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model].join(', ')} />
+                      <label className="form-label mt-2" htmlFor={`${prefix}-resolution`}>分辨率</label>
+                      <input id={`${prefix}-resolution`} className="input" value={capability.resolutions} onChange={event => updateCapability({ resolutions: event.target.value })}
+                        placeholder={IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[model].join(', ')} />
+                      <label className="form-label mt-2" htmlFor={`${prefix}-ratio`}>比例</label>
+                      <input id={`${prefix}-ratio`} className="input" value={capability.ratios} onChange={event => updateCapability({ ratios: event.target.value })}
+                        placeholder={STUDIO_RATIOS.join(', ')} />
+                      <label className="form-label mt-2" htmlFor={`${prefix}-references`}>参考图上限</label>
+                      <input id={`${prefix}-references`} className="input" type="number" min={0} max={10} step={1} value={capability.maxReferences}
+                        onChange={event => updateCapability({ maxReferences: event.target.value })} placeholder="留空表示未知" />
+                      <label className="form-label mt-2" htmlFor={`${prefix}-billing`}>计费方式</label>
+                      <select id={`${prefix}-billing`} className="input" value={capability.billingMode} onChange={event => updateCapability({ billingMode: event.target.value as ChannelCapabilityDraft['billingMode'] })}>
+                        <option value="">未确认（不可用）</option>
+                        <option value="fixed">固定点数</option>
+                        <option value="actual" disabled={managedChannelDraft.supplierKind !== 'musk'}>按实际账单（仅 Musk 同范围证明就绪时）</option>
+                      </select>
+                      {capability.billingMode === 'fixed' && <>
+                        <label className="form-label mt-2" htmlFor={`${prefix}-points`}>每张点数</label>
+                        <input id={`${prefix}-points`} className="input" type="number" min={0} step={1} value={capability.fixedPoints}
+                          onChange={event => updateCapability({ fixedPoints: event.target.value })} placeholder="0 表示明确免费" />
+                      </>}
+                    </details>
+                  );
+                })}
+            </div>
+
+            <div className="codex-config-actions">
+              <button className="btn btn-secondary" type="button" disabled={managedChannelSaving} onClick={async () => {
+                if (await confirm('放弃当前未保存的图片供应商修改？', { title: '放弃修改', confirmLabel: '放弃', danger: true })) setManagedChannelDraft(null);
+              }}>取消</button>
+              <button className="btn btn-primary sd2-loading-surface" type="submit" disabled={managedChannelSaving} data-busy={managedChannelSaving}>
+                {managedChannelSaving ? '正在保存' : '保存供应商配置'}
+              </button>
+            </div>
+          </form>
+        )}
+      </section>
 
       <form className="card codex-config-form" onSubmit={saveConfig}>
         <div className="codex-config-head">

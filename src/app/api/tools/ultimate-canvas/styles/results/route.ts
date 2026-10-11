@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
 import { defaultStudioModuleId, validStudioModuleId } from '@/lib/image-studio/modules';
 import { imageBillingPending, imageBillingView } from '@/lib/image-studio/billing-contract';
+import { publicImageTaskStatus, cancelQueuedChannelTask, StudioError } from '@/lib/image-studio/tasks';
+import { historicalImageSupplier } from '@/lib/image-studio/channel-history';
 import { studioAssetUrl } from '@/lib/image-studio/media';
 import { getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { attachAssetToSiteReferenceImage } from '@/lib/assets/reference-import';
@@ -46,7 +48,7 @@ export async function POST(request: NextRequest) {
     const tasks = await prisma.imageStudioTask.findMany({
       where: { owner_id: user.id, module_id: unframed ? null : moduleId, batch_id: expectedBatchId, deleted_at: null },
       orderBy: { ordinal: 'asc' },
-      select: { id: true, status: true, asset_id: true, error: true, ordinal: true, owner_id: true,
+      select: { id: true, status: true, asset_id: true, error: true, ordinal: true, owner_id: true, snapshot_json: true,
         billing_status: true, actual_amount_micros: true, actual_credits: true, billing_contract_json: true },
     });
     if (!tasks.length) {
@@ -54,6 +56,15 @@ export async function POST(request: NextRequest) {
     }
     if (body.count !== undefined && Number(body.count) !== tasks.length) {
       throw new AuthError('生成批次数量与提交记录不匹配', 409);
+    }
+    if (body.action === 'cancel-queued') {
+      let cancelled = 0;
+      for (const task of tasks.filter(task => task.status === 'channel_queued')) {
+        try { if (await cancelQueuedChannelTask(user.id, task.id)) cancelled++; }
+        catch (error) { if (!(error instanceof StudioError && error.status === 409)) throw error; }
+      }
+      return canvasStyleJson({ cancelled, retained: tasks.length - cancelled,
+        message: '只取消可证明未请求上游的通道排队任务；已受理、已完成或未知结果的任务保留，未停止供应商或重发生成' });
     }
     const billing = tasks.map(task => ({ taskId: task.id, assetId: task.asset_id,
       billing: imageBillingView(task, user.id, user.role === 'admin') }));
@@ -129,8 +140,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const activeTasks = tasks.filter(task => task.status === 'queued' || task.status === 'running');
-    const unconfirmedTasks = tasks.filter(task => !['queued', 'running', 'succeeded', 'failed', 'cancelled'].includes(task.status));
+    const activeTasks = tasks.filter(task => ['queued', 'running'].includes(publicImageTaskStatus(task.status)));
+    const unconfirmedTasks = tasks.filter(task => !['queued', 'running', 'succeeded', 'failed', 'cancelled'].includes(publicImageTaskStatus(task.status)));
     const attachmentPending = succeeded.some(task => !outputByAsset.has(task.asset_id!));
     const pending = activeTasks.length > 0 || unconfirmedTasks.length > 0 || attachmentPending;
     const completedCount = tasks.length - activeTasks.length - unconfirmedTasks.length;
@@ -140,7 +151,7 @@ export async function POST(request: NextRequest) {
     const taskErrors = tasks.filter(task => task.status !== 'succeeded' && task.error).map(task => task.error!.trim()).filter(Boolean);
     const errors = Array.from(new Set([...taskErrors, ...outputErrors])).join('\n').slice(0, 1200);
     const status = unconfirmedTasks.length > 0 ? 'unconfirmed' : pending
-      ? (activeTasks.length > 0 && activeTasks.every(task => task.status === 'queued') ? 'queued' : 'running')
+      ? (activeTasks.length > 0 && activeTasks.every(task => publicImageTaskStatus(task.status) === 'queued') ? 'queued' : 'running')
       : outputByAsset.size > 0 ? 'succeeded' : 'failed';
     const orderedAssets = succeeded.flatMap(task => {
       const result = task.asset_id ? outputByAsset.get(task.asset_id) : null;
@@ -152,6 +163,7 @@ export async function POST(request: NextRequest) {
       pending,
       submission_unconfirmed: unconfirmedTasks.length > 0,
       assets: orderedAssets,
+      snapshot: historicalImageSupplier(tasks[0].snapshot_json),
       ...(errors ? { error: errors } : {}),
       completedCount,
       totalCount: tasks.length,

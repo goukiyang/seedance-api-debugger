@@ -2,6 +2,7 @@ import { loadEnvConfig } from '@next/env';
 import { processStudioTask, recoverStudioTasks } from '../src/lib/image-studio/worker';
 import { prisma } from '../src/lib/prisma';
 import { dispatchStudioBatches } from '../src/lib/image-studio/batches';
+import { dispatchWaitingToolFlowRuns } from '../src/lib/tools/toolflow-runtime';
 import { reconcileImageBilling } from '../src/lib/image-studio/billing';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,6 +27,8 @@ async function main() {
     await recoverStudioTasks();
     if (stopping || fs.existsSync(path.join(process.cwd(), 'storage', 'image-studio-drain'))) break;
     await dispatchStudioBatches();
+    if (stopping || fs.existsSync(path.join(process.cwd(), 'storage', 'image-studio-drain'))) break;
+    await dispatchWaitingToolFlowRuns();
     if (stopping || fs.existsSync(path.join(process.cwd(), 'storage', 'image-studio-drain'))) break;
     await Promise.all([processStudioTask(), processStudioTask()]);
     if (process.argv.includes('--once')) break;

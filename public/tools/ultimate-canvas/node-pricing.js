@@ -24,6 +24,7 @@
                 kind: 'image', project_id: getProjectId() || '',
                 model: settings.model || capability.model || '', count: settings.count
             };
+            if (typeof settings.channelId === 'string' && settings.channelId && settings.channelId !== 'original') payload.channelId = settings.channelId;
             for (const key of ['resolution', 'ratio', 'size', 'quality']) {
                 if (typeof settings[key] === 'string') payload[key] = settings[key];
             }
@@ -36,6 +37,25 @@
         function usable(state) {
             return !stopped && states.get(state.id) === state && state.el.isConnected
                 && state.node.type === 'image' && state.el.querySelector('[data-generation-image-model]');
+        }
+
+        function currentQuote(nodeId) {
+            const state = states.get(String(nodeId));
+            if (!state || !usable(state) || state.validUntil <= Date.now() || !state.quote
+                || !state.key || inputFor(state.node).key !== state.key) return null;
+            const quote = state.quote;
+            if (quote.kind !== 'image' || quote.projectId !== state.payload.project_id
+                || quote.model !== state.payload.model || quote.count !== state.payload.count
+                || quote.status !== 'estimate' || quote.chargeEnabled !== false
+                || quote.actualQuoteRequired !== false
+                || !Number.isSafeInteger(quote.estimatedCredits) || quote.estimatedCredits < 0
+                || !Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= Date.now()) return null;
+            if (state.payload.channelId) {
+                const channel = quote.imageChannel;
+                if (channel?.channelId !== state.payload.channelId
+                    || typeof channel.configRevision !== 'string' || !/^[0-9a-f-]{36}$/i.test(channel.configRevision)) return null;
+            }
+            return quote;
         }
 
         function paintPrice(state) {
@@ -64,6 +84,11 @@
                         && Number.isFinite(state.actualQuote.estimatedCredits) && state.actualQuote.estimatedCredits >= 0
                         ? Math.ceil(state.actualQuote.estimatedCredits) : null;
                     slot.textContent = Number.isSafeInteger(amount) ? `合计约 ${amount} 点数` : '费用待估算';
+                } else if (state.payload?.channelId) {
+                    const quote = currentQuote(state.id);
+                    const amount = state.quote?.actualQuoteRequired === false ? quote?.estimatedCredits : null;
+                    slot.textContent = Number.isSafeInteger(amount) && amount >= 0
+                        ? `合计约 ${amount} 点数` : '费用待估算';
                 } else {
                     const total = style.unitCredits * style.count;
                     slot.textContent = state.quote?.actualQuoteRequired === false && Number.isSafeInteger(style.unitCredits)
@@ -236,6 +261,8 @@
                         || inputFor(state.node).key !== key) return;
                     if (quote?.kind !== 'image' || quote.projectId !== state.payload.project_id
                         || quote.model !== state.payload.model || quote.count !== state.payload.count
+                        || (state.payload.channelId && (quote.imageChannel?.channelId !== state.payload.channelId
+                            || typeof quote.imageChannel?.configRevision !== 'string' || !quote.imageChannel.configRevision))
                         || quote.chargeEnabled !== false || !['estimate', 'unavailable'].includes(quote.status)
                         || typeof quote.actualQuoteRequired !== 'boolean'
                         || (quote.actualQuoteRequired && (quote.unitCredits !== null || quote.estimatedCredits !== null))
@@ -357,9 +384,19 @@
                 const quote = states.get(String(nodeId))?.quote;
                 return typeof quote?.actualQuoteRequired === 'boolean' ? quote.actualQuoteRequired : null;
             },
+            imageChannel(nodeId) {
+                const state = states.get(String(nodeId));
+                if (!state || state.validUntil <= Date.now() || !state.payload.channelId
+                    || state.quote?.imageChannel?.channelId !== state.payload.channelId
+                    || typeof state.quote?.imageChannel?.configRevision !== 'string') return null;
+                return state.quote.imageChannel;
+            },
             actualQuote(nodeId) {
                 const quote = states.get(String(nodeId))?.actualQuote;
                 return Date.parse(quote?.expiresAt) > Date.now() ? quote : null;
+            },
+            quote(nodeId) {
+                return currentQuote(nodeId);
             },
             clearActualQuote(nodeId) {
                 const state = states.get(String(nodeId));
@@ -389,7 +426,9 @@
         mount,
         refresh(nodeEl, node) { mounted?.refresh(nodeEl, node); },
         actualQuoteRequired(nodeId) { return mounted?.actualQuoteRequired(nodeId) ?? null; },
+        imageChannel(nodeId) { return mounted?.imageChannel(nodeId) ?? null; },
         actualQuote(nodeId) { return mounted?.actualQuote(nodeId) ?? null; },
+        quote(nodeId) { return mounted?.quote(nodeId) ?? null; },
         clearActualQuote(nodeId) { mounted?.clearActualQuote(nodeId); },
         invalidateProjection(nodeId) { mounted?.invalidateProjection(nodeId); },
         dispose(nodeId) { mounted?.dispose(nodeId); }

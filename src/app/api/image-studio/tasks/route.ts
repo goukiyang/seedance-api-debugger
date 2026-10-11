@@ -1,11 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { deleteStudioResult, listStudioTasks, StudioError, submitStudioBatch } from '@/lib/image-studio/tasks';
+import { deleteStudioResult, listStudioTasks, cancelQueuedChannelTask, StudioError, submitStudioBatch } from '@/lib/image-studio/tasks';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { ContextVersionError } from '@/lib/image-studio/context-version';
 import { studioTemplateEntrySnapshot } from '@/lib/image-studio/viewer-receipts';
+import { QueueCapacityError, QueueMaintenanceError } from '@/lib/image-studio/queue-capacity';
+import { ImageGenerationChannelError } from '@/lib/integrations/image-generation';
 
 export const dynamic = 'force-dynamic';
+export async function PATCH(request: NextRequest) {
+  const user = await getSession();
+  if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
+  if (user.status !== 'active' || !canUseCompanyTemplates(user)) return NextResponse.json({ error: '无权操作图片任务' }, { status: 403 });
+  try {
+    const body = await request.json();
+    if (body.action !== 'cancel' || typeof body.id !== 'string' || !/^[a-zA-Z0-9-]{1,120}$/.test(body.id)) throw new StudioError('取消参数无效', 400);
+    const cancelled = await cancelQueuedChannelTask(user.id, body.id);
+    return NextResponse.json({ cancelled, message: '未受理排队任务已取消，原记录保留；没有取消供应商任务' });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof StudioError ? error.message : '取消未确认，请重新读取原任务；未承诺释放费用' }, { status: error instanceof StudioError ? error.status : 503 });
+  }
+}
 export async function DELETE(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
@@ -39,6 +54,8 @@ export async function POST(request: NextRequest) {
     const batchId = await submitStudioBatch(user.id, await request.json());
     return NextResponse.json({ batchId }, { status: 202 });
   } catch (error) {
+    if (error instanceof ImageGenerationChannelError) return NextResponse.json({ error: error.message, code: error.code, submitted: false }, { status: error.status });
+    if (error instanceof QueueCapacityError || error instanceof QueueMaintenanceError) return NextResponse.json({ error: error.message, code: error.code, submitted: false }, { status: error.status });
     if (error instanceof SyntaxError) return NextResponse.json({ error: '提交内容无效' }, { status: 400 });
     if (error instanceof StudioError || error instanceof ContextVersionError) return NextResponse.json({ error: error.message }, { status: error.status });
     if (error instanceof Error && error.message.startsWith('点数不足')) return NextResponse.json({ error: error.message }, { status: 409 });

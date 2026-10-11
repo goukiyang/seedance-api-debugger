@@ -220,7 +220,7 @@
 .counts button { min-width: 40px; }
 .counts button[aria-pressed=true] { border-color: #79daca; color: #a4f2df; background: #123b33; }
 .counts input { width: 68px; }
-.modelQualityRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(110px, .55fr) minmax(110px, .55fr); gap: 10px; margin-top: 20px; }
+.modelQualityRow { display: grid; grid-template-columns: minmax(140px, .9fr) minmax(160px, 1fr) minmax(110px, .55fr) minmax(110px, .55fr); gap: 10px; margin-top: 20px; }
 .compactField { display: grid; gap: 8px; min-width: 0; font-size: 14px; }
 .compactField strong { font-weight: 750; }
 .compactField select { width: 100%; }

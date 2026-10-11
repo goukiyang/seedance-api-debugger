@@ -1845,6 +1845,7 @@ button.context-status:disabled { opacity: 0.55; cursor: wait; }
 }
 .generation-editor-footer .generation-summary-button { font-size: 12px; padding: 4px 6px; }
 .generation-editor-footer .video-model-info { font-size: 12px; padding: 0 3px; max-width: 205px; }
+.generation-editor-footer .video-model-info [data-generation-image-channel] { max-width: 88px; min-width: 50px; }
 .generation-editor-footer .video-model-info .canvas-model-trigger { font-size: 12px; }
 .generation-editor-footer .video-model-info .model-icon { color: var(--text-secondary); width: 16px; height: 16px; flex-shrink: 0; }
 .generation-editor-footer .generation-summary-row { border-left: 1px solid var(--border-node); padding-left: 7px; }

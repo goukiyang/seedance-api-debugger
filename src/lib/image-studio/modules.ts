@@ -178,7 +178,7 @@ export async function deleteStudioModule(ownerId: string, id: unknown, revision:
     const current = await tx.imageStudioModule.findFirst({ where: { id, owner_id: ownerId } });
     if (!current) return;
     if (current.revision !== revision) throw new StudioModuleError('模板已更新，请刷新后再删除', 409);
-    const pending = await tx.imageStudioTask.count({ where: { owner_id: ownerId, module_id: id, status: { in: ['queued', 'running'] } } });
+    const pending = await tx.imageStudioTask.count({ where: { owner_id: ownerId, module_id: id, status: { in: ['queued', 'running', 'channel_queued', 'channel_running'] } } });
     if (pending) throw new StudioModuleError('模板还有生成中的任务，请完成后再删除', 409);
     // Tasks and assets have independent ownership and remain available in assets.
     await removeStudioModuleFixedReferences(ownerId, id, tx);

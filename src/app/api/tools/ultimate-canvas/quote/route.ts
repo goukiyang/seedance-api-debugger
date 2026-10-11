@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { getCanvasImageQuote, parseCanvasQuoteInput } from '@/lib/canvas-quote';
+import { ImageGenerationChannelError } from '@/lib/integrations/image-generation';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -44,6 +45,7 @@ export async function POST(request: NextRequest) {
     const input = parseCanvasQuoteInput(await readInput(request));
     return NextResponse.json(await getCanvasImageQuote(user, input), { headers });
   } catch (error) {
+    if (error instanceof ImageGenerationChannelError) return NextResponse.json({ error: error.message, code: error.code, submitted: false }, { status: error.status, headers });
     if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status, headers });
     return NextResponse.json({ error: '报价暂时不可用，请稍后重试' }, { status: 503, headers });
   }

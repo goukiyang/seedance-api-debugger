@@ -6,10 +6,12 @@ import { resolveStudioAspectRatio, normalizeStudioRatio, STUDIO_RATIOS } from '@
 import { imageOutputSize, studioFourToOneIssue } from '@/lib/image-generation/resolution';
 import styles from './studio.module.css';
 
-export function RatioPicker({ value, onChange, reference, model, resolution, fourToOneSupported, custom, busy, disabled, error, onRetry, onCustom, onEditing }: {
+export function RatioPicker({ value, onChange, reference, model, resolution, fourToOneSupported, custom, busy, disabled, error, onRetry, onCustom, onEditing, allowedRatios, restrictToAllowedRatios = false }: {
   value: string; onChange: (ratio: string) => void; reference?: { width?: unknown; height?: unknown } | null; model: string; resolution: string; custom: string[]; busy: boolean; disabled: boolean; error: string;
   onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean>; onEditing: (editing: boolean) => void;
   fourToOneSupported: boolean;
+  allowedRatios?: string[];
+  restrictToAllowedRatios?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
@@ -56,6 +58,9 @@ export function RatioPicker({ value, onChange, reference, model, resolution, fou
     existing.add(ratio);
     return [{ label: ratio, ratio, removable: true }];
   });
+  const rows = [{ label: '自动（跟随原图）', ratio: 'auto', removable: false }, ...presetRows, ...customRows];
+  if (value !== 'auto' && !rows.some(item => item.ratio === value)) rows.push({ label: `${value}（当前参数）`, ratio: value, removable: false });
+  const ratioAllowed = (ratio: string) => !restrictToAllowedRatios || Boolean(allowedRatios?.includes(ratio));
   const nativeSize = ratioResolution.resolved === '4:1' && !ratioIssue
     ? ({ '0.5K': '1024 × 256', '1K': '2048 × 512', '2K': '4096 × 1024', '4K': '8192 × 2048' } as Record<string, string>)[size] : '';
   return <div ref={root} className={styles.ratioPicker} onKeyDown={event => {
@@ -74,8 +79,8 @@ export function RatioPicker({ value, onChange, reference, model, resolution, fou
       <span id={`${id}-value`}>{other ? '其他' : value === 'auto' ? '自动（跟随原图）' : preset || value}</span><ChevronDown size={16} />
     </button>
     {open && <div id={`${id}-menu`} data-ratio-menu className={styles.ratioMenu} role="group" aria-label="选择图片比例">
-      {[{ label: '自动（跟随原图）', ratio: 'auto', removable: false }, ...presetRows, ...customRows].map(({ label, ratio, removable }) => <div className={styles.ratioRow} key={ratio}>
-        <button type="button" aria-pressed={!other && value === ratio} aria-disabled={Boolean(studioFourToOneIssue(ratio, fourToOneSupported))} disabled={disabled || busy} onClick={() => select(ratio)}><span>{label}{ratio === '4:1' && !fourToOneSupported ? '（当前不可用）' : ''}</span>{!other && value === ratio && <Check size={15} />}</button>
+      {rows.map(({ label, ratio, removable }) => <div className={styles.ratioRow} key={ratio}>
+        <button type="button" aria-pressed={!other && value === ratio} aria-disabled={Boolean(studioFourToOneIssue(ratio, fourToOneSupported)) || !ratioAllowed(ratio)} disabled={disabled || busy || !ratioAllowed(ratio)} onClick={() => select(ratio)}><span>{label}{!ratioAllowed(ratio) ? '（当前通道不支持）' : ratio === '4:1' && !fourToOneSupported ? '（当前不可用）' : ''}</span>{!other && value === ratio && <Check size={15} />}</button>
         {removable && <button type="button" className={styles.ratioDelete} title={`删除比例 ${label}`} aria-label={`删除比例 ${label}`} disabled={busy || disabled} onClick={async () => {
           if (await onCustom(ratio, true)) trigger.current?.focus();
         }}><Trash2 size={15} /></button>}

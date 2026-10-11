@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
     if (!settings || typeof settings.model !== 'string' || typeof settings.quality !== 'string'
       || typeof settings.resolution !== 'string' || typeof settings.ratio !== 'string') throw new AuthError('图片设置无效', 400);
     const quote = await getCanvasImageQuote(user, { kind: 'image', project_id: context.projectId,
-      model: settings.model, count: Number(settings.count), quality: settings.quality, resolution: settings.resolution, ratio: settings.ratio });
+      model: settings.model, channelId: typeof settings.channelId === 'string' ? settings.channelId : undefined, count: Number(settings.count), quality: settings.quality, resolution: settings.resolution, ratio: settings.ratio });
     if (quote.status !== 'estimate' || quote.revision !== body.settingsRevision
       || body.action !== 'quote' && quote.actualQuoteRequired && !body.billingQuoteId
       || body.action !== 'quote' && !body.billingQuoteId && quote.estimatedCredits !== body.maxEstimatedCost) throw new AuthError('价格或设置已变化，请重新核对；未派发新任务', 409);
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
     const submission = { requestId: body.requestId, ...(unframed ? {} : { moduleId: body.moduleId }),
       revision: body.settingsRevision, prompt: body.prompt, count: Number(settings.count), referenceIds: uniqueReferences,
       draft: { referencePolicy }, maxEstimatedCost: body.maxEstimatedCost, billingQuoteId: body.billingQuoteId,
-      model: settings.model, quality: settings.quality, resolution: settings.resolution, aspectRatio: settings.ratio };
+      model: settings.model, channelId: settings.channelId, imageChannel: body.imageChannel, quality: settings.quality, resolution: settings.resolution, aspectRatio: settings.ratio };
     const promptBinding = mentions ? { mentions, referenceAssets } : undefined;
     if (body.action === 'quote') return canvasStyleJson(await prepareImageBillingQuote(user.id, submission, undefined, { user, referenceImageIds }, promptBinding));
     const batchId = await submitStudioBatch(user.id, submission, undefined, undefined, { user, referenceImageIds }, promptBinding);

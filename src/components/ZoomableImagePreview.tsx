@@ -33,6 +33,7 @@ export type ImagePreviewMetadata = {
   quality?: string;
   ratio?: string;
   resolution?: string;
+  supplier?: string;
   time?: string;
 };
 
@@ -603,6 +604,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const decoded = candidateDecoded?.account === `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` ? candidateDecoded : undefined;
   const copySource = decoded?.fullSize ? decoded.source : '';
   const visibleMetadata = isOriginalSubject ? { model: safeMetadataValue(safeDetails?.model ?? metadata?.model), quality: safeMetadataValue(safeDetails?.quality ?? metadata?.quality),
+    supplier: safeMetadataValue(safeDetails?.supplier ?? metadata?.supplier),
     ratio: safeMetadataValue(safeDetails?.ratio ?? metadata?.ratio), resolution: safeMetadataValue(safeDetails?.resolution ?? metadata?.resolution), time: safeMetadataTime(safeDetails?.time ?? metadata?.time) } : {};
   const visibleSize = originalSizes[selectedId] || (selectedImage.width && selectedImage.height ? { width: selectedImage.width, height: selectedImage.height } : undefined);
   const previewSize = sizes[selectedId];
@@ -658,7 +660,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
             <button type="button" className={styles.menuAction} onClick={() => { userAction.current++; stopGestures(); setAxis(value => value === 'horizontal' ? 'vertical' : 'horizontal'); }}>{axis === 'horizontal' ? <ArrowUpDown size={16} /> : <ArrowLeftRight size={16} />}{axis === 'horizontal' ? '切换上下对比' : '切换左右对比'}</button>
             <button type="button" className={styles.menuAction} onClick={() => reset(true)}><RotateCcw size={16} />还原两图</button>
           </div>}
-          <div className={styles.metadata}>{visibleMetadata.model && <span>模型：{visibleMetadata.model}</span>}{visibleMetadata.quality && <span>质量：{visibleMetadata.quality}</span>}{visibleMetadata.ratio && <span>比例：{visibleMetadata.ratio}</span>}{visibleMetadata.resolution && <span>分辨率：{visibleMetadata.resolution}</span>}
+          <div className={styles.metadata}>{visibleMetadata.model && <span>模型：{visibleMetadata.model}</span>}{visibleMetadata.quality && <span>质量：{visibleMetadata.quality}</span>}{visibleMetadata.supplier && <span>供应商：{visibleMetadata.supplier}</span>}{visibleMetadata.ratio && <span>比例：{visibleMetadata.ratio}</span>}{visibleMetadata.resolution && <span>分辨率：{visibleMetadata.resolution}</span>}
             <span>原图尺寸：{visibleSize ? `${visibleSize.width} × ${visibleSize.height} 像素` : '未知'}</span>
             <span>原文件大小：{knownFileSize ? formatImageBytes(fileSize) : '未知'}</span>
             {decoded?.mime && <span>当前显示：{decoded.mime.replace('image/', '').toUpperCase()}{decoded.bytes ? ` · ${formatImageBytes(decoded.bytes)}` : ''}</span>}

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
-import { listStudioTasks, StudioError } from '@/lib/image-studio/tasks';
+import { listStudioTasks, StudioError, publicImageTaskStatus } from '@/lib/image-studio/tasks';
 import { avatarResultRecords, listAvatarRecords, mutateAvatarRecord, readAvatar } from '@/lib/avatar-random/store';
 import { avatarDescriptionStatus, estimateAvatarDraft, parseAvatarDescription, prepareAvatarPlan, quoteAvatarPlan, submitAvatarPlan, validateAvatarReferences } from '@/lib/avatar-random/service';
 import { imageBillingView } from '@/lib/image-studio/billing-contract';
@@ -15,10 +15,13 @@ import { randomUUID } from 'node:crypto';
 import { avatarPlanKey } from '@/lib/avatar-random/store';
 import { studioAssetUrl } from '@/lib/image-studio/media';
 import { createHash } from 'node:crypto';
-import { getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider } from '@/lib/integrations/image-generation';
+import { getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider, getImageGenerationChannelOptions, captureImageGenerationChannel, resolveImageGenerationChannelSnapshot, validateImageGenerationChannel } from '@/lib/integrations/image-generation';
 import { IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
 import { isAvatarSheet, avatarLayout, withAvatarLayout } from '@/lib/avatar-random/layout';
 import { avatarRulesSignature } from '@/lib/avatar-random/intent';
+import { QueueCapacityError, QueueMaintenanceError } from '@/lib/image-studio/queue-capacity';
+import { ImageGenerationChannelError } from '@/lib/integrations/image-generation';
+import { historicalImageSupplier } from '@/lib/image-studio/channel-history';
 
 function validateOriginalContinuation(body: Record<string, unknown>) {
   if (body.descriptionMode === undefined && body.originalAttemptRequestId === undefined) return;
@@ -36,7 +39,7 @@ async function sourceTask(owner:string,id?:string) {
   if(!id)return null;
   const task=await prisma.imageStudioTask.findFirst({where:{id,owner_id:owner}});
   const asset=task?.asset_id?await prisma.asset.findFirst({where:{id:task.asset_id,owner_id:owner,status:'active',type:'image'}}):null;
-  return task?{id:task.id,ordinal:1,status:task.status,error:task.error,billing:imageBillingView(task,owner,false),asset:asset?{id:asset.id,original_url:studioAssetUrl(asset.id),thumbnail_url:studioAssetUrl(asset.id,true)}:null}:null;
+  return task?{id:task.id,ordinal:1,status:publicImageTaskStatus(task.status),error:task.error,snapshot:historicalImageSupplier(task.snapshot_json),billing:imageBillingView(task,owner,false),asset:asset?{id:asset.id,original_url:studioAssetUrl(asset.id),thumbnail_url:studioAssetUrl(asset.id,true)}:null}:null;
 }
 
 export const dynamic = 'force-dynamic';
@@ -46,6 +49,8 @@ async function run(action: (owner: string) => Promise<unknown>) {
   if (user.status !== 'active' || !canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限有图片生成权限的公司账号使用' }, { status: 403 });
   try { return NextResponse.json(await action(user.id), { headers: { 'Cache-Control': 'no-store' } }); }
   catch (e) {
+    if (e instanceof ImageGenerationChannelError) return NextResponse.json({ error: e.message, code: e.code, submitted: false }, { status: e.status });
+    if (e instanceof QueueCapacityError || e instanceof QueueMaintenanceError) return NextResponse.json({ error: e.message, code: e.code, submitted: false }, { status: e.status });
     if (e instanceof AvatarDescriptionError) {
       console.warn('[AvatarDescription]', JSON.stringify({ requestId: e.parse.requestId, state: e.parse.state, ...e.parse.failure, diagnostics: e.parse.diagnostics }));
       return NextResponse.json({ error: e.message, parse: e.parse }, { status: e.status, headers: { 'Cache-Control': 'private, no-store' } });
@@ -74,8 +79,8 @@ export async function GET(req: NextRequest) { return run(async owner => {
   const rows=await prisma.imageStudioTask.findMany({where:{id:{in:ids},owner_id:owner}});
   const assets=await prisma.asset.findMany({where:{id:{in:rows.flatMap(t=>t.asset_id?[t.asset_id]:[])},owner_id:owner,status:'active',type:'image'},select:{id:true}});
   const byId=new Set(assets.map(a=>a.id));
-  const recordTasks=Object.fromEntries(rows.map(t=>[t.id,{id:t.id,ordinal:t.ordinal,status:t.status,error:t.error,billing:imageBillingView(t,owner,false),asset:t.asset_id&&byId.has(t.asset_id)?{id:t.asset_id,original_url:studioAssetUrl(t.asset_id),thumbnail_url:studioAssetUrl(t.asset_id,true)}:null}]));
-  return { ...records, recordTasks, settings: { model: settings.model, revision: settings.revision, prices: settings.prices, billingReadiness: await imageBillingReadinessPayload() } };
+  const recordTasks=Object.fromEntries(rows.map(t=>[t.id,{id:t.id,ordinal:t.ordinal,status:publicImageTaskStatus(t.status),error:t.error,snapshot:historicalImageSupplier(t.snapshot_json),billing:imageBillingView(t,owner,false),asset:t.asset_id&&byId.has(t.asset_id)?{id:t.asset_id,original_url:studioAssetUrl(t.asset_id),thumbnail_url:studioAssetUrl(t.asset_id,true)}:null}]));
+  return { ...records, recordTasks, settings: { model: settings.model, revision: settings.revision, prices: settings.prices, imageChannels: await getImageGenerationChannelOptions(), billingReadiness: await imageBillingReadinessPayload() } };
 }); }
 export async function POST(req: NextRequest) { return run(async owner => {
   const body = await req.json();
@@ -120,11 +125,14 @@ export async function POST(req: NextRequest) { return run(async owner => {
     const model=typeof body.model==='string'?body.model:previous.model;
     if(!IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number]))throw new StudioError('原模型已不可用，请明确选择可用模型；人物草稿保留');
     const quality=typeof body.quality==='string'?body.quality:previous.quality,resolution=typeof body.resolution==='string'?body.resolution:previous.resolution;
-    const price=settings.prices[model as keyof typeof settings.prices];
-    if(price===undefined||price===null)throw new StudioError('原模型已失效或没有报价，历史设置仍保留');
-    const api=await getImageGenerationSettingsForModel(model);
+    let price=settings.prices[model as keyof typeof settings.prices];
+    const channelId=typeof body.channelId==='string'?body.channelId:previous.channelId||'original';
+    const imageChannel=channelId!=='original'?await captureImageGenerationChannel(model,channelId):undefined;
+    const api=imageChannel?await resolveImageGenerationChannelSnapshot(imageChannel,undefined,true):await getImageGenerationSettingsForModel(model);
+    if(imageChannel){const capability=validateImageGenerationChannel(api,{model,quality,resolution,ratio:isAvatarSheet({layout})?'1:1':previous.aspectRatio,referenceCount:previous.referenceIds.length});if(!capability.ok)throw new StudioError(capability.error);price=capability.capability.fixedPoints;}
+    if(!imageChannel&&(price===undefined||price===null))throw new StudioError('原模型已失效或没有报价，历史设置仍保留');
     let plan:AvatarPlan;
-    try { plan=withAvatarLayout({...previous,sourceTaskId:undefined,model,quality,resolution,id:(isAvatarSheet({layout})?'sheet-':'')+createHash('sha256').update(`quote:${AVATAR_COMPILER_VERSION}:${owner}:${previous.id}:${settings.revision}:${model}:${quality}:${resolution}:${layout}`).digest('hex'),settingsRevision:settings.revision,unitCredits:price,imageReady:isStudioImageGenerationProvider(api.provider)&&isImageGenerationApiReady(api)&&(previous.referenceIds.length?api.supports_image_to_image:api.supports_text_to_image),candidates:previous.candidates.map(c=>adaptAvatarPrompt(c,model)),createdAt:new Date().toISOString()},layout); }
+    try { plan=withAvatarLayout({...previous,sourceTaskId:undefined,model,channelId,imageChannel,quality,resolution,id:(isAvatarSheet({layout})?'sheet-':'')+createHash('sha256').update(`quote:${AVATAR_COMPILER_VERSION}:${owner}:${previous.id}:${settings.revision}:${model}:${quality}:${resolution}:${layout}:${channelId}:${imageChannel?.configRevision||'legacy'}`).digest('hex'),settingsRevision:settings.revision,unitCredits:price,imageReady:isStudioImageGenerationProvider(api.provider)&&isImageGenerationApiReady(api)&&(previous.referenceIds.length?api.supports_image_to_image:api.supports_text_to_image),candidates:previous.candidates.map(c=>adaptAvatarPrompt(c,model)),createdAt:new Date().toISOString()},layout); }
     catch(e){throw new StudioError((e as Error).message);}
     await prisma.platformSetting.upsert({where:{key:avatarPlanKey(owner,plan)},create:{key:avatarPlanKey(owner,plan),value_json:JSON.stringify(plan),updated_by:owner},update:{}});
     return {plan:await readAvatar<AvatarPlan>(owner,'plan',plan.id)};
@@ -137,8 +145,8 @@ export async function POST(req: NextRequest) { return run(async owner => {
     const failed = tasks.filter(t => t.status === 'failed');
     if (!failed.length) throw new StudioError('没有可重试的明确失败项');
     const settings = await getImageStudioSettings();
-    const plan = { ...previous, sourceTaskId: undefined, id: (isAvatarSheet(previous)?'sheet-':'')+createHash('sha256').update(`retry:${owner}:${previous.id}`).digest('hex'), candidates: isAvatarSheet(previous) ? previous.candidates : failed.map(t => previous.candidates[t.ordinal - 1]), settingsRevision: settings.revision, unitCredits: settings.prices[previous.model as keyof typeof settings.prices], createdAt: new Date().toISOString() };
-    if (plan.unitCredits === null) throw new StudioError('当前模型尚未设置报价');
+    const plan = { ...previous, sourceTaskId: undefined, id: (isAvatarSheet(previous)?'sheet-':'')+createHash('sha256').update(`retry:${owner}:${previous.id}`).digest('hex'), candidates: isAvatarSheet(previous) ? previous.candidates : failed.map(t => previous.candidates[t.ordinal - 1]), settingsRevision: settings.revision, unitCredits: previous.imageChannel ? previous.unitCredits : settings.prices[previous.model as keyof typeof settings.prices], createdAt: new Date().toISOString() };
+    if (!previous.imageChannel && plan.unitCredits === null) throw new StudioError('当前模型尚未设置报价');
     await prisma.platformSetting.upsert({where:{key:avatarPlanKey(owner,plan)},create:{key:avatarPlanKey(owner,plan),value_json:JSON.stringify(plan),updated_by:owner},update:{}});
     return { plan:await readAvatar<AvatarPlan>(owner,'plan',plan.id) };
   }

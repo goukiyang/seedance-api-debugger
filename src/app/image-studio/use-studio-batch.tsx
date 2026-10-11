@@ -10,11 +10,14 @@ import { canSelectBatchDirectory, selectBatchDirectory, readBatchDirectory, prev
 import { IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_QUALITY_LABELS } from '@/lib/image-studio/model-catalog';
 import styles from './batch.module.css';
 import { watchGenerationCompletion } from '@/components/GenerationCompletion';
+import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
 
-type StudioBatchQuote = { billingMode: 'fixed' | 'actual'; batchQuoteId: string | null; estimatedCredits: number; unitCredits: number; expiresAt: string };
+type StudioBatchQuote = { billingMode: 'fixed' | 'actual'; batchQuoteId: string | null; estimatedCredits: number; unitCredits: number; expiresAt: string; imageChannel?: ImageGenerationChannelSnapshot };
 type CachedStudioBatchQuote = { signature: string; requestId: string; quote: StudioBatchQuote; expired?: boolean };
 
 export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, actualQuoteRequired = false, quotePayload }: { userId: string; moduleId: string; unitCredits: number | null; draftSignature: string; actualQuoteRequired?: boolean; quotePayload?: Record<string, unknown> | null }) {
+  const channelQuoteMatches = (quote: StudioBatchQuote, payload: Record<string, unknown>) => !payload.channelId
+    || (quote.imageChannel?.channelId === payload.channelId && typeof quote.imageChannel.configRevision === 'string' && Boolean(quote.imageChannel.configRevision));
   const [mode, setMode] = useState<'single' | 'batch'>('single');
   const [source, setSource] = useState<'current' | 'folder'>('folder');
   const [quantity, setQuantity] = useState(8), [perFile, setPerFile] = useState(1), [pack, setPack] = useState(false);
@@ -63,7 +66,8 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
         .then(response => readBatchResponse(response)).then((quote: StudioBatchQuote) => {
           if (abort.signal.aborted || !Number.isFinite(quote.estimatedCredits) || quote.estimatedCredits < 0
             || !Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= Date.now()
-            || quote.billingMode === 'actual' && !quote.batchQuoteId) return;
+            || quote.billingMode === 'actual' && !quote.batchQuoteId
+            || !channelQuoteMatches(quote, JSON.parse(automaticPayload))) return;
           previousQuoteSignature.current = quoteSignature;
           setBillingQuote({ signature: quoteSignature, requestId, quote });
         }).catch(() => {});
@@ -150,7 +154,20 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
     try {
       const checkSettings = async () => {
         const current = await readBatchResponse(await fetch('/api/image-studio/settings', { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
-        if (!valid() || current.revision !== snapshot.revision || current.prices?.[String(snapshot.model)] !== unitCredits) throw new Error('素材、模型或报价已变化，请重新读取设置后确认；尚未生成');
+        if (!valid() || current.revision !== snapshot.revision) throw new Error('素材、模型或报价已变化，请重新读取设置后确认；尚未生成');
+        const channelId = typeof snapshot.channelId === 'string' ? snapshot.channelId : 'original';
+        if (channelId === 'original') {
+          if (current.prices?.[String(snapshot.model)] !== unitCredits) throw new Error('素材、模型或报价已变化，请重新读取设置后确认；尚未生成');
+          return;
+        }
+        const rows = (current.imageChannels as { items?: Array<{ id: string; enabled: boolean; configured: boolean; ready: boolean; models?: Record<string, { ready: boolean; billingMode: string | null; fixedPoints: number | null }> }> } | undefined)?.items;
+        const channel = rows?.find(item => item.id === channelId);
+        const capability = channel?.models?.[String(snapshot.model)];
+        if (!channel?.enabled || !channel.configured || !channel.ready || !capability?.ready
+          || capability.billingMode === 'actual' && !actualQuoteRequired
+          || capability.billingMode === 'fixed' && (capability.fixedPoints ?? (['shared', 'banana'].includes(channelId) ? current.prices?.[String(snapshot.model)] : null)) !== unitCredits) {
+          throw new Error('所选生图通道或报价已变化，请重新读取设置后确认；尚未生成');
+        }
       };
       await checkSettings();
       if (!valid()) return false;
@@ -182,7 +199,8 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
           || !Number.isFinite(result.unitCredits) || result.unitCredits < 0 || !result.expiresAt
           || !Number.isFinite(Date.parse(result.expiresAt)) || Date.parse(result.expiresAt) <= Date.now()
           || (result.batchQuoteId !== null && typeof result.batchQuoteId !== 'string')
-          || (result.billingMode === 'actual' && !result.batchQuoteId)) throw new Error('本批报价信息不完整，尚未生成');
+          || (result.billingMode === 'actual' && !result.batchQuoteId)
+          || !channelQuoteMatches(result, snapshot)) throw new Error('本批报价信息不完整或通道已变化，尚未生成');
         return result;
       };
       let quote = priorQuote && !priorQuote.expired && Date.parse(priorQuote.quote.expiresAt) > Date.now() ? priorQuote.quote : await readQuote();
@@ -220,7 +238,7 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
       if (localStorage.getItem(pendingKey) !== requestId) throw new Error('提交编号未能保存，尚未提交生成');
       submittedRequest = requestId; setPending(requestId); setProgress('正在登记本批素材和设置');
       setBillingQuote(null);
-      const response = await fetch('/api/image-studio/batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...snapshot, requestId, count: 1, budget: confirmedTotal, sources, ...(quote.batchQuoteId ? { batchQuoteId: quote.batchQuoteId } : {}) }), signal: AbortSignal.timeout(120000) });
+      const response = await fetch('/api/image-studio/batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...snapshot, requestId, count: 1, budget: confirmedTotal, sources, ...(quote.imageChannel ? { imageChannel: quote.imageChannel } : {}), ...(quote.batchQuoteId ? { batchQuoteId: quote.batchQuoteId } : {}) }), signal: AbortSignal.timeout(120000) });
       if (response.status >= 400 && response.status < 500) { localStorage.removeItem(pendingKey); submittedRequest = null; if (valid()) setPending(null); }
       const result = await readBatchResponse(response, true);
       localStorage.removeItem(pendingKey);

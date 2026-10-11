@@ -1897,6 +1897,28 @@
     function updateGenerationNodeModelLabel(nodeEl, node) {
         const imageSelect = nodeEl?.querySelector('[data-generation-image-model]');
         if (imageSelect && node?.type === 'image') {
+            const channelSelect = nodeEl.querySelector('[data-generation-image-channel]');
+            const selection = selectedImageChannel();
+            const channel = selection.channel;
+            if (channelSelect) {
+                const channels = canvasImageChannels();
+                channelSelect.replaceChildren(...channels.map(item => {
+                    const option = new Option(
+                        item.supplierName && item.supplierName !== item.label ? `${item.supplierName} · ${item.label}` : item.label,
+                        item.id, false, item.id === selection.id
+                    );
+                    option.disabled = item.id !== 'original' && (item.enabled !== true || item.configured !== true);
+                    option.title = item.disabledReason || '';
+                    return option;
+                }));
+                channelSelect.value = selection.id;
+                channelSelect.disabled = Boolean(generationSettingsLockReason(node, true)) || !imageChannelPreferenceKey();
+                channelSelect.title = selection.fallbackReason || channel?.disabledReason || '';
+                if (selection.fallbackReason && canvasRuntime.imageChannelFallbackShown !== selection.fallbackReason) {
+                    canvasRuntime.imageChannelFallbackShown = selection.fallbackReason;
+                    showCanvasNotice(selection.fallbackReason, 'warn');
+                }
+            }
             if (node.data?.canvasStyle) {
                 const style = node.data.canvasStyle;
                 imageSelect.replaceChildren(new Option(style.modelLabel || style.model, style.model));
@@ -1905,11 +1927,19 @@
                 return;
             }
             const capability = canvasRuntime.bootstrap?.capabilities?.image || {};
-            const options = capability.model_options || [{ value: capability.model, label: capability.label || capability.model }];
-            const selected = node.data?.imageSettings?.model || capability.model;
-            imageSelect.innerHTML = options.filter(item => item.value).map(item => `<option value="${escapeHtml(item.value)}"${item.value === selected ? ' selected' : ''}>${escapeHtml(item.label || item.value)}</option>`).join('');
-            imageSelect.disabled = !capability.enabled || !options.length;
-            imageSelect.title = '';
+            const selected = generationSettingsForNode(node).model || capability.model;
+            const options = imageChannelModelOptions(channel, capability).filter(item => item?.value);
+            if (selected && !options.some(item => item.value === selected)) {
+                options.unshift({ value: selected, label: `${selected}（当前通道不支持）`, ready: false, unavailable: true });
+            }
+            imageSelect.replaceChildren(...options.map(item => {
+                const option = new Option(item.label || item.value, item.value, false, item.value === selected);
+                option.disabled = item.ready === false || item.unavailable === true;
+                return option;
+            }));
+            imageSelect.disabled = !options.length || (channel?.id === 'original'
+                ? !capability.enabled : channel?.enabled !== true || channel?.configured !== true);
+            imageSelect.title = channel?.id !== 'original' ? '模型选项仅显示当前供应商已确认支持的模型；不兼容的现有选择会保留并阻止生成。' : '';
             return;
         }
         const label = nodeEl?.querySelector('[data-generation-model-label]');
@@ -3994,6 +4024,64 @@
         '图片参考': 'image-reference-video'
     };
 
+    function imageChannelPreferenceKey() {
+        const userId = canvasRuntime.bootstrap?.user?.id;
+        return userId ? `sd2:image-channel:v1:ultimate-canvas:${encodeURIComponent(userId)}` : null;
+    }
+
+    function canvasImageChannels() {
+        const items = canvasRuntime.bootstrap?.capabilities?.image?.imageChannels?.items;
+        const channels = Array.isArray(items) ? items.filter(item => item && typeof item.id === 'string') : [];
+        if (!channels.some(item => item.id === 'original')) channels.unshift({ id: 'original', label: '原接口', supplierName: null,
+            ready: true, enabled: true, configured: true, disabledReason: null, models: {} });
+        return channels;
+    }
+
+    function selectedImageChannel() {
+        const items = canvasImageChannels();
+        let selectedId = 'original';
+        const key = imageChannelPreferenceKey();
+        try {
+            const saved = key ? localStorage.getItem(key) : null;
+            if (saved) selectedId = saved;
+        } catch { /* Canvas remains usable with the original channel. */ }
+        const selected = items.find(item => item.id === selectedId);
+        if (selectedId !== 'original' && (!selected || selected.enabled !== true || selected.configured !== true)) {
+            try { if (key) localStorage.setItem(key, 'original'); } catch { /* Keep the safe fallback in memory. */ }
+            return { id: 'original', channel: items.find(item => item.id === 'original') || null,
+                fallbackReason: selected?.disabledReason || `${selected?.label || '上次选择的生图通道'}已不可用，已恢复原接口；没有自动生成。` };
+        }
+        return { id: selectedId, channel: selected || items.find(item => item.id === 'original') || null, fallbackReason: '' };
+    }
+
+    function imageChannelModelOptions(channel, capability) {
+        if (!channel || channel.id === 'original') return capability.model_options || [{ value: capability.model, label: capability.label || capability.model, ready: capability.enabled !== false }];
+        return Object.entries(channel.models || {}).filter(([, item]) => item && item.ready === true).map(([value]) => ({ value, label: value, ready: true }));
+    }
+
+    function imageChannelIssueForNode(node) {
+        if (!node || node.type !== 'image') return '';
+        const selection = selectedImageChannel();
+        const channel = selection.channel;
+        if (selection.fallbackReason) return selection.fallbackReason;
+        if (!channel || channel.id !== 'original' && (channel.enabled !== true || channel.configured !== true || channel.ready !== true)) {
+            return channel?.disabledReason || `${channel?.label || '所选生图通道'}未配置或暂未就绪，请联系管理员。`;
+        }
+        if (channel.id === 'original') return '';
+        const settings = generationSettingsForNode(node);
+        if (!Number.isSafeInteger(settings.count) || settings.count < 1 || settings.count > 8) return '一次可提交 1–8 张；原数量已保留，请手动调整后再生成。';
+        const model = channel.models?.[settings.model];
+        if (!model?.ready) return '当前生图通道不支持所选模型；请手动选择其他模型或通道，参数未更改。';
+        if (model.billingMode === 'fixed' && model.fixedPoints == null && !['shared', 'banana'].includes(channel.id)) return '当前通道固定点数尚未配置，暂不能生成。';
+        if (!model.billingMode) return '当前生图通道计费方式尚未确认，暂不能生成。';
+        if (!model.qualities || !model.resolutions || !model.ratios || model.maxReferences == null) return '当前通道的图片参数支持范围尚未确认，暂不能生成。';
+        if (model.qualities && !model.qualities.includes(settings.quality)) return '当前通道不支持所选图片质量，请手动调整后再生成。';
+        if (model.resolutions && !model.resolutions.includes(settings.resolution)) return '当前通道不支持所选分辨率，请手动调整后再生成。';
+        if (model.ratios && !model.ratios.includes(settings.requestedRatio)) return '当前通道不支持所选比例，请手动调整后再生成。';
+        if (Number.isSafeInteger(model.maxReferences) && generationReferenceImageIds(node.id).length > model.maxReferences) return `当前通道最多使用 ${model.maxReferences} 张参考图，请减少后再生成。`;
+        return '';
+    }
+
     function generationSettingsForNode(node) {
         if (!node) return {};
         if (node.type === 'image') {
@@ -4001,16 +4089,27 @@
                 const style = node.data.canvasStyle;
                 const first = availableGenerationReferenceItems(node.id).find(item => item.width > 0 && item.height > 0);
                 const ratio = window.UltimateCanvasGenerationInteractions.resolveImageRatio(style.aspectRatio || 'auto', first, '1:1');
+                const selection = selectedImageChannel();
                 return { model: style.model, quality: style.quality, ratio: ratio.resolved, requestedRatio: style.aspectRatio,
+                    ...(selection.id !== 'original' ? { channelId: selection.id } : {}),
+                    ...(selection.id !== 'original' ? { imageChannelLabel: selection.channel?.label || '', imageSupplierName: selection.channel?.supplierName || '' } : {}),
                     ratioSource: ratio.source, resolution: style.resolution,
                     size: window.UltimateCanvasGenerationInteractions.imageSizeForRatio(ratio.resolved, style.resolution),
                     count: style.count, maximumCount: style.count, sizeOptions: [style.resolution] };
             }
             const capability = canvasRuntime.bootstrap?.capabilities?.image || {};
+            const selection = selectedImageChannel();
+            const channel = selection.channel;
             const current = node.data?.imageSettings || {};
             const model = current.model || capability.model;
-            const limits = capability.model_options?.find(item => item.value === model)?.capabilities || capability.capabilities || {};
-            const maximum = Math.max(1, Number(limits.max_outputs_per_request) || 1);
+            const channelModel = channel?.id !== 'original' ? channel?.models?.[model] : null;
+            const legacyLimits = capability.model_options?.find(item => item.value === model)?.capabilities || capability.capabilities || {};
+            const limits = channel?.id !== 'original' ? {
+                quality_options: channelModel?.qualities || [], size_options: channelModel?.resolutions || [],
+                ratio_options: channelModel?.ratios || [], default_quality: current.quality || 'auto',
+                default_resolution: current.resolution || '1K'
+            } : legacyLimits;
+            const maximum = channel?.id !== 'original' ? 8 : Math.max(1, Number(limits.max_outputs_per_request) || 1);
             const references = availableGenerationReferenceItems(node.id);
             const firstReference = references.find(item => Number.isInteger(Number(item.width)) && Number(item.width) > 0
                 && Number.isInteger(Number(item.height)) && Number(item.height) > 0) || null;
@@ -4019,19 +4118,24 @@
             );
             const resolutionOptions = Array.isArray(limits.size_options) && limits.size_options.length
                 ? limits.size_options
-                : ['1K', '2K'];
+                : channel?.id !== 'original' ? [] : ['1K', '2K'];
             const requestedResolution = current.resolution || (resolutionOptions.includes(current.size) ? current.size : limits.default_resolution || resolutionOptions[resolutionOptions.length - 1]);
             const customSize = typeof current.size === 'string' && /^\d+x\d+$/.test(current.size) ? current.size : '';
             return {
                 model,
+                ...(channel?.id && channel.id !== 'original' ? { channelId: channel.id } : {}),
                 quality: current.quality || limits.default_quality || 'auto',
                 qualityOptions: limits.quality_options || [],
+                ratioOptions: channel?.id !== 'original' ? (Array.isArray(limits.ratio_options) ? limits.ratio_options : [])
+                    : Array.isArray(limits.ratio_options) && limits.ratio_options.length ? limits.ratio_options : undefined,
                 ratio: ratioResolution.resolved,
                 requestedRatio: ratioResolution.requested,
                 ratioSource: ratioResolution.source,
                 resolution: requestedResolution,
                 size: customSize || window.UltimateCanvasGenerationInteractions.imageSizeForRatio(ratioResolution.resolved, requestedResolution),
-                count: Math.max(1, Math.min(maximum, Number(current.count) || 1)),
+                count: channel?.id !== 'original'
+                    ? (current.count == null ? 1 : Number(current.count))
+                    : Math.max(1, Math.min(maximum, Number(current.count) || 1)),
                 maximumCount: maximum,
                 sizeOptions: resolutionOptions
             };
@@ -4057,6 +4161,15 @@
 
     function generationCapabilitiesForNode(node) {
         const capability = canvasRuntime.bootstrap?.capabilities?.[node.type];
+        if (node.type === 'image' && selectedImageChannel().id !== 'original') {
+            const settings = generationSettingsForNode(node);
+            const model = selectedImageChannel().channel?.models?.[settings.model];
+            return { ...capability, enabled: model?.ready === true, interaction: {
+                modes: ['text-to-image', 'image-to-image', 'upscale-image', 'first-frame-draft', 'last-frame-draft'],
+                ratios: model?.ratios || [], size_options: model?.resolutions || [],
+                max_reference_images: Number.isSafeInteger(model?.maxReferences) ? model.maxReferences : 0
+            } };
+        }
         if (node.type !== 'video') return capability;
         const model = node.data?.videoSettings?.model || capability?.model;
         const option = capability?.model_options?.find(item => item.value === model);
@@ -4173,6 +4286,12 @@
     }
 
     function referenceSelectionMaximum(node) {
+        if (node?.type === 'image') {
+            const selected = selectedImageChannel();
+            const settings = generationSettingsForNode(node);
+            const limit = selected.channel?.id !== 'original' ? selected.channel?.models?.[settings.model]?.maxReferences : null;
+            if (Number.isSafeInteger(limit) && limit >= 0) return limit;
+        }
         const state = generationModeState(node);
         return Math.max(0, Math.min(
             Number(state.capability.maxReferenceImages) || 0,
@@ -4567,6 +4686,10 @@
             nodeMode,
             { transientPending: hasCurrentGenerationSubmission(nodeId) }
         );
+        if (node.type === 'image') {
+            const channelIssue = imageChannelIssueForNode(node);
+            if (channelIssue) Object.assign(interactionReadiness, { ready: false, message: channelIssue });
+        }
         if (node.type === 'video' && (node.data?.planSource || node.data?.videoSubmission || node.data?.videoSubmissionLegacy)) {
             const readiness = generationReadiness({ kind: 'video', nodeId, mode: nodeMode,
                 prompt: promptInput?.value ?? node.data?.prompt ?? '', settings,
@@ -4632,7 +4755,7 @@
                 const actualQuoteRequired = window.UltimateCanvasNodePricing?.actualQuoteRequired(node.id);
                 const actualQuote = window.UltimateCanvasNodePricing?.actualQuote(node.id);
                 const actualTotal = Math.ceil(Number(actualQuote?.estimatedCredits));
-                const fixedTotal = style.unitCredits * style.count;
+                const fixedTotal = settings.channelId ? window.UltimateCanvasNodePricing?.quote(node.id)?.estimatedCredits : style.unitCredits * style.count;
                 stylePrice.textContent = actualQuoteRequired === true && actualQuote?.billingMode === 'actual'
                     && Number.isSafeInteger(actualTotal) && actualTotal >= 0
                     ? `合计约 ${actualTotal.toLocaleString('zh-CN')} 点数`
@@ -4641,7 +4764,7 @@
                         && Number.isSafeInteger(fixedTotal)
                         ? `合计约 ${fixedTotal.toLocaleString('zh-CN')} 点数` : '费用待估算';
                 stylePrice.title = '按应用风格时的报价；价格变化时会停止提交';
-                if (submit && !submit.classList.contains('is-loading')) submit.disabled = Boolean(styleJob && styleJob.state !== 'unconfirmed') || style.appliedBy !== canvasRuntime.bootstrap?.user?.id;
+                if (submit && !submit.classList.contains('is-loading')) submit.disabled = !interactionReadiness.ready || Boolean(styleJob && styleJob.state !== 'unconfirmed') || style.appliedBy !== canvasRuntime.bootstrap?.user?.id;
             } else window.UltimateCanvasNodePricing?.refresh(nodeEl, node);
             if (spec) spec.textContent = `${style?.aspectRatio === 'auto' ? '跟随参考' : settings.ratio} · ${style?.quality || settings.resolution}${style?.quality ? ` · ${settings.resolution}` : ''} · ${settings.count}张`;
             const styleLabel = nodeEl.querySelector('[data-generation-style-label]');
@@ -4651,6 +4774,17 @@
             if (clearStyle) { clearStyle.hidden = !style; clearStyle.disabled = Boolean(styleJob); }
             const refreshStyle = nodeEl.querySelector('[data-generation-command="refresh-style"]');
             if (refreshStyle) refreshStyle.hidden = !styleJob;
+            let cancelQueued = nodeEl.querySelector('[data-generation-command="cancel-image-queued"]');
+            if (!cancelQueued && refreshStyle?.parentElement) {
+                cancelQueued = document.createElement('button');
+                cancelQueued.type = 'button'; cancelQueued.dataset.generationCommand = 'cancel-image-queued';
+                cancelQueued.className = refreshStyle.className; cancelQueued.textContent = '取消未受理排队';
+                refreshStyle.insertAdjacentElement('afterend', cancelQueued);
+            }
+            if (cancelQueued) {
+                cancelQueued.hidden = !styleJob?.input?.settings?.channelId;
+                cancelQueued.disabled = Boolean(styleJob?.cancelling) || !canvasRuntime.documentWritable || canvasRuntime.contextSwitching;
+            }
             if (promptInput) promptInput.readOnly = Boolean(styleJob);
             nodeEl.querySelectorAll('[data-generation-popover]').forEach(button => {
                 button.disabled = Boolean(style || styleJob);
@@ -4769,7 +4903,7 @@
         return true;
     }
 
-    function generationChoiceGroup(name, label, values, selected, format = value => String(value)) {
+    function generationChoiceGroup(name, label, values, selected, format = value => String(value), unavailable = []) {
         return `<section class="generation-choice-section" data-generation-choice-section="${escapeHtml(name)}">
             <h3>${escapeHtml(label)}</h3>
             <div class="generation-choice-grid">
@@ -4779,8 +4913,9 @@
                     const ratio = name === 'ratio' && /^\d+:\d+$/.test(raw)
                         ? `<span class="generation-ratio-glyph" style="--generation-choice-ratio:${raw.replace(':', ' / ')}" aria-hidden="true"></span>`
                         : '';
+                    const disabled = unavailable.includes(raw);
                     return `<button type="button" class="generation-choice-button" data-generation-setting-choice="${escapeHtml(name)}"
-                        data-generation-value="${escapeHtml(raw)}" aria-pressed="${active}">${ratio}<span>${escapeHtml(format(value))}</span></button>`;
+                        data-generation-value="${escapeHtml(raw)}" aria-pressed="${active}" ${disabled ? 'disabled aria-disabled="true"' : ''}>${ratio}<span>${escapeHtml(format(value))}</span></button>`;
                 }).join('')}
             </div>
         </section>`;
@@ -4844,19 +4979,33 @@
             generationCapabilitiesForNode(node)
         );
         if (node.type === 'image') {
-            const sizeControl = settings.sizeOptions.length
-                ? generationChoiceGroup('resolution', '分辨率', settings.sizeOptions, settings.resolution || settings.size)
+            const ratioValues = settings.ratioOptions ?? capability.ratios;
+            const ratioValue = settings.requestedRatio || settings.ratio;
+            const ratioChoices = [...(ratioValues || [])];
+            const ratioUnavailable = Boolean(settings.ratioOptions) && !ratioChoices.includes(ratioValue);
+            if (ratioValue && !ratioChoices.includes(ratioValue)) ratioChoices.push(ratioValue);
+            const sizeValue = settings.resolution || settings.size;
+            const sizeChoices = [...settings.sizeOptions];
+            const sizeUnavailable = Boolean(settings.channelId) && !sizeChoices.includes(sizeValue);
+            if (sizeValue && !sizeChoices.includes(sizeValue)) sizeChoices.push(sizeValue);
+            const qualityChoices = [...(settings.qualityOptions || [])];
+            const qualityUnavailable = Boolean(settings.channelId) && !qualityChoices.includes(settings.quality);
+            if (settings.quality && !qualityChoices.includes(settings.quality)) qualityChoices.push(settings.quality);
+            const sizeControl = sizeChoices.length
+                ? generationChoiceGroup('resolution', '分辨率', sizeChoices, sizeValue, value => String(value), sizeUnavailable ? [sizeValue] : [])
                 : capability.fixedSize
                     ? `<section class="generation-choice-section"><h3>尺寸</h3><div class="generation-spec-static">${escapeHtml(capability.fixedSize)}</div></section>`
                     : '<section class="generation-choice-section"><h3>尺寸</h3><div class="generation-spec-static">不可用</div></section>';
             const counts = Array.from({ length: settings.maximumCount }, (_, index) => index + 1);
+            const countUnavailable = Boolean(settings.channelId) && !counts.includes(settings.count);
+            if (countUnavailable && Number.isFinite(settings.count)) counts.push(settings.count);
             return `<div class="generation-popover-spec" data-generation-settings="image">
-                ${generationChoiceGroup('ratio', '比例', capability.ratios, settings.requestedRatio || settings.ratio)}
+                ${generationChoiceGroup('ratio', '比例', ratioChoices, ratioValue, value => String(value), ratioUnavailable ? [ratioValue] : [])}
                 <p class="generation-spec-hint">当前生效：${escapeHtml(settings.ratio)} · ${escapeHtml(settings.ratioSource === 'reference' ? '首张有效参考图' : '模型默认或手动选择')} · ${escapeHtml(settings.size)}</p>
                 ${sizeControl}
-                ${settings.qualityOptions?.length ? generationChoiceGroup('quality', '质量', settings.qualityOptions, settings.quality, value => ({ auto: '自动', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高' })[value] || value) : ''}
+                ${qualityChoices.length ? generationChoiceGroup('quality', '质量', qualityChoices, settings.quality, value => ({ auto: '自动', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高' })[value] || value, qualityUnavailable ? [settings.quality] : []) : ''}
                 <p class="generation-spec-hint">背景写入画面描述；当前接口没有独立透明背景参数。</p>
-                ${generationChoiceGroup('count', '生成数量', counts, settings.count, value => `${value}张`)}
+                ${generationChoiceGroup('count', '生成数量', counts, settings.count, value => `${value}张`, countUnavailable ? [settings.count] : [])}
             </div>`;
         }
         return `<div class="generation-popover-spec" data-generation-settings="video">
@@ -4872,13 +5021,13 @@
         </div>`;
     }
 
-    function generationSettingsLockReason(node) {
+    function generationSettingsLockReason(node, supplierOnly = false) {
         if (!canvasRuntime.documentWritable) return '当前画布只读，无法修改模型和参数';
         if (canvasRuntime.contextSwitching || canvasRuntime.documentRestoring) return '画布正在切换，请稍后再修改';
         if (canvasRuntime.documentOperation || canvasRuntime.failedSaveRequest || canvasRuntime.saveConflict) return '请先处理画布保存状态，再修改模型和参数';
         if (node.data?.videoSubmissionLegacy || node.data?.videoSubmission?.state === 'unconfirmed') return '原请求受理情况未知，请先查询原请求；不会重新发送';
         if (hasCurrentGenerationSubmission(node.id) || ['submitting', 'submitted', 'running', 'queued', 'processing', 'unconfirmed', 'uncertain'].includes(node.data?.generationStatus)) return '原请求正在提交或生成，请等待或查询原任务';
-        if (node.type === 'image' && (node.data?.canvasStyle || node.data?.styleJob)) return '使用风格模板的生成参数；移除风格后可调整';
+        if (node.type === 'image' && (node.data?.styleJob || node.data?.canvasStyle && !supplierOnly)) return '使用风格模板的生成参数；移除风格后可调整';
         return '';
     }
 
@@ -4889,6 +5038,13 @@
         if (node.type === 'image') {
             const allowed = new Set(['ratio', 'resolution', 'count', 'quality']);
             if (!allowed.has(name)) return false;
+            if (name !== 'count') {
+                const settings = generationSettingsForNode(node);
+                const selection = selectedImageChannel();
+                const model = selection.channel?.id !== 'original' ? selection.channel?.models?.[settings.model] : null;
+                const allowedValues = name === 'quality' ? model?.qualities : name === 'resolution' ? model?.resolutions : model?.ratios;
+                if (Array.isArray(allowedValues) && !allowedValues.includes(rawValue)) return false;
+            }
             node.data = {
                 ...node.data,
                 imageSettings: {
@@ -5353,7 +5509,11 @@
         const normalized = window.UltimateCanvasGenerationNodes.normalizeImageResult(result);
         const imageUrl = normalized.imageUrl;
         const title = normalized.fileName || '图片生成结果';
-        const desc = result?.message || `${payload.modeLabel || payload.mode} 已完成并写入资产库`;
+        const snapshot = result?.snapshot || result?.task?.snapshot || result?.generation?.snapshot || null;
+        const channelLabel = typeof snapshot?.imageChannelLabel === 'string' ? snapshot.imageChannelLabel.trim() : '';
+        const supplierName = typeof snapshot?.imageSupplierName === 'string' ? snapshot.imageSupplierName.trim() : '';
+        const historicalChannel = [supplierName, channelLabel].filter(Boolean).join(' · ');
+        const desc = [result?.message || `${payload.modeLabel || payload.mode} 已完成并写入资产库`, historicalChannel].filter(Boolean).join(' · ');
         if (node) {
             node.data = {
                 ...node.data,
@@ -5376,6 +5536,7 @@
                 },
                 generationPayload: payload,
                 generationResult: result,
+                    ...(historicalChannel ? { imageGenerationSourceLabel: historicalChannel } : {}),
                 generationStatus: 'succeeded'
             };
         }
@@ -6140,6 +6301,13 @@
         const payload = savedPayload || collectGenerationPayload(nodeEl);
         if (!api || !payload) return;
 
+        if (payload.kind === 'image') {
+            const node = engine.nodes.get(payload.nodeId);
+            const channelIssue = imageChannelIssueForNode(node);
+            if (channelIssue) { showCanvasNotice(channelIssue, 'warn'); return; }
+            if (payload.settings?.channelId) payload.imageChannel = window.UltimateCanvasNodePricing?.imageChannel(payload.nodeId) || undefined;
+        }
+
         const readiness = generationReadiness(payload);
         if (!readiness.ready) {
             showCanvasNotice(readiness.message, 'warn');
@@ -6428,6 +6596,7 @@
         if (action === 'style-gallery') { closeGenerationPopover(); engine._hideAddMenu(); void canvasStyles.open(nodeId); return; }
         if (action === 'clear-style') { canvasStyles.clear(nodeId); return; }
         if (action === 'refresh-style') { void canvasStyles.resume(nodeId); return; }
+        if (action === 'cancel-image-queued') { void canvasStyles.cancelQueued(nodeId); return; }
         if (action === 'optimize-prompt' && node.type === 'video') {
             optimizeVideoPrompt(nodeEl, node, command);
             return;
@@ -6502,13 +6671,33 @@
     });
 
     document.addEventListener('change', event => {
+        const imageChannelSelect = event.target.closest?.('[data-generation-image-channel]');
+        if (imageChannelSelect) {
+            const node = engine.nodes.get(imageChannelSelect.closest('[data-node-id]')?.dataset.nodeId);
+            const channel = canvasImageChannels().find(item => item.id === imageChannelSelect.value);
+            const locked = node && generationSettingsLockReason(node, true);
+            if (!node || node.type !== 'image' || locked || !channel
+                || channel.id !== 'original' && (channel.enabled !== true || channel.configured !== true)) {
+                imageChannelSelect.value = selectedImageChannel().id;
+                if (locked) showCanvasNotice(locked, 'warn');
+                return;
+            }
+            const key = imageChannelPreferenceKey();
+            try { if (key) localStorage.setItem(key, channel.id); } catch { showCanvasNotice('浏览器未允许保存通道偏好；当前选择仅在本次页面打开期间保留。', 'warn'); }
+            canvasRuntime.imageChannelFallbackShown = '';
+            renderAllGenerationNodeControls();
+            return;
+        }
         const imageModelSelect = event.target.closest?.('[data-generation-image-model]');
         if (imageModelSelect) {
             const node = engine.nodes.get(imageModelSelect.closest('[data-node-id]')?.dataset.nodeId);
             if (!node || node.type !== 'image') return;
-            const option = canvasRuntime.bootstrap?.capabilities?.image?.model_options?.find(item => item.value === imageModelSelect.value);
-            if (!option) return;
-            node.data = { ...node.data, imageSettings: { ...node.data?.imageSettings, model: option.value, resolution: option.capabilities.default_resolution, size: '' } };
+            const selection = selectedImageChannel();
+            const option = selection.channel?.id !== 'original'
+                ? (selection.channel?.models?.[imageModelSelect.value]?.ready ? { value: imageModelSelect.value } : null)
+                : canvasRuntime.bootstrap?.capabilities?.image?.model_options?.find(item => item.value === imageModelSelect.value && item.ready !== false);
+            if (!option) { updateGenerationNodeModelLabel(imageModelSelect.closest('[data-node-id]'), node); return; }
+            node.data = { ...node.data, imageSettings: { ...node.data?.imageSettings, model: option.value } };
             renderGenerationNodeControls(node.id);
             scheduleCanvasSave('image_model_change');
             refreshOpenGenerationSpecPopover(node);

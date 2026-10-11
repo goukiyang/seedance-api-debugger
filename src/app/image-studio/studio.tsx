@@ -63,11 +63,14 @@ import { handImageDownloadToBrowser } from '@/lib/media/native-download';
 import { describedEvolutionDirection, type EvolutionCapability, type EvolutionInput } from '@/lib/image-studio/evolution';
 import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
+import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
 import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
 import type { StudioReferencePolicy } from '@/lib/image-studio/reference-policy';
+import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, imageStudioChannelReadyForModel, useImageStudioChannel } from '@/lib/image-studio/channels';
+import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChannelSelect';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
 
-type StudioSnapshot = { referencePolicy?: StudioReferencePolicy; primaryReferenceImages?: UploadedAssetPayload[]; auxiliaryReferenceImages?: UploadedAssetPayload[]; prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; contextAvailable?: boolean; contextConfigured?: boolean; referenceImages: UploadedAssetPayload[]; fixedReferenceImages?: FixedStudioReference[]; transientReferenceImages?: UploadedAssetPayload[]; fixedReferenceCount?: number; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[] };
+type StudioSnapshot = { imageChannelLabel?: string | null; imageSupplierName?: string | null; referencePolicy?: StudioReferencePolicy; primaryReferenceImages?: UploadedAssetPayload[]; auxiliaryReferenceImages?: UploadedAssetPayload[]; prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; contextAvailable?: boolean; contextConfigured?: boolean; referenceImages: UploadedAssetPayload[]; fixedReferenceImages?: FixedStudioReference[]; transientReferenceImages?: UploadedAssetPayload[]; fixedReferenceCount?: number; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[] };
 type StudioTask = { id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; error?: string; unitCredits: number; billing?: ImageBillingView | null; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; finishedAt?: string | null; snapshot?: StudioSnapshot & { moduleContextVersion?: string | null; moduleContextVersionState?: string }; delivery?: { phase: string; receivedBytes?: number; expectedBytes?: number; recoveryAvailable: boolean; checkpointRetained: boolean; requestId?: string; upstreamRequestId?: string; validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string } }; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number } | null };
 function studioTaskHasDeliveredAsset(task: StudioTask): task is StudioTask & { asset: NonNullable<StudioTask['asset']> } {
   return task.status === 'succeeded' && Boolean(task.asset?.original_url);
@@ -85,7 +88,7 @@ type QuickStudioPreset = StudioPreset & { prompt: string; context: string; refer
 type PresetSource = { draft: Record<string, unknown>; blocked: string | null; groupDeleteBlocked?: boolean };
 type PresetSourceReader = () => PresetSource;
 type StudioFeedback = { message: string; tone: 'progress' | 'info' | 'success' | 'warning' | 'error' };
-type StudioImageQuote = { billingMode: 'fixed' | 'actual'; billingQuoteId: string | null; unitCredits: number; estimatedCredits: number; expiresAt?: string };
+type StudioImageQuote = { billingMode: 'fixed' | 'actual'; billingQuoteId: string | null; unitCredits: number; estimatedCredits: number; expiresAt?: string; imageChannel?: ImageGenerationChannelSnapshot };
 type CachedStudioImageQuote = { signature: string; requestId: string; quote: StudioImageQuote };
 type ImagePreviewState = { contentKey?: `asset:${string}`; taskId?: string; resultVersion?: string | null; src: string; thumbnailSrc?: string; alt: string; title?: string; fileName?: string; width?: number; height?: number; fileSize?: number; metadata?: ImagePreviewMetadata; comparison?: ImageComparisonSource };
 type RatioPreferences = { custom: string[]; busy: boolean; error: string; onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean> };
@@ -149,7 +152,9 @@ function studioTaskPreviewState(task: StudioTask): ImagePreviewState {
     alt: `生成结果 ${task.ordinal}`,
     title: `生成结果 ${task.ordinal}`,
     width: task.asset?.width, height: task.asset?.height, fileSize: task.asset?.file_size,
-    metadata: { model, quality, ratio: snapshot?.resolvedAspectRatio || task.aspectRatio || 'auto', resolution: snapshot?.resolution || '自动', time: task.createdAt },
+    metadata: { model, quality,
+      supplier: [snapshot?.imageSupplierName, snapshot?.imageChannelLabel].filter((value): value is string => typeof value === 'string' && Boolean(value.trim())).join(' · ') || undefined,
+      ratio: snapshot?.resolvedAspectRatio || task.aspectRatio || 'auto', resolution: snapshot?.resolution || '自动', time: task.createdAt },
     comparison: singleReferenceComparison(task),
   };
 }
@@ -323,6 +328,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
   const [coverRetry, setCoverRetry] = useState(0);
   const globalEditor = useStudioSettings(userId, isAdmin);
   const settings = globalEditor.settings;
+  const imageChannel = useImageStudioChannel(userId, 'image-studio', settings?.imageChannels, Boolean(settings));
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   const [presetDialogOpen, setPresetDialogOpen] = useState(false);
   const [presets, setPresets] = useState<StudioPreset[]>([]);
@@ -825,7 +831,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
     <div hidden={coverView}>
     {modules.map(module => <ImageStudioBlock key={module.id} templateWorkbench={templateWorkbench} module={module} hidden={coverView || Boolean(selectedGroup && module.groupName !== selectedGroup)} onMetadataChange={updateModuleMetadata} groups={groups} onDeleteGroup={deleteGroup} groupDeleting={groupDeleting} isAdmin={isAdmin} onToggleSharing={toggleModuleSharing} sharingId={presetSharingId}
       onModuleDelete={id => { removedModuleIds.current.add(id); setModules(current => current.filter(item => item.id !== id)); setDirectory(current => current.filter(item => item.id !== id)); setActive(current => current === id ? '' : current); }}
-      userId={userId} settings={settings} globalContextDraft={isAdmin ? globalEditor.draft?.context : undefined} globalSettingsDirty={globalEditor.dirty || globalEditor.saving} settingsError={globalEditor.error} active={!coverView && active === module.id && module.groupName === selectedGroup} onActivate={() => { replaceImageModuleLocation(module.id); routedContentHandled.current = `${userId}:${window.location.search}`; setActive(module.id); }}
+      userId={userId} settings={settings} imageChannels={imageChannel.channels} imageChannelId={imageChannel.channelId} imageChannelReady={imageChannel.ready} imageChannelMessage={imageChannel.message} onImageChannelChange={imageChannel.select} globalContextDraft={isAdmin ? globalEditor.draft?.context : undefined} globalSettingsDirty={globalEditor.dirty || globalEditor.saving} settingsError={globalEditor.error} active={!coverView && active === module.id && module.groupName === selectedGroup} onActivate={() => { replaceImageModuleLocation(module.id); routedContentHandled.current = `${userId}:${window.location.search}`; setActive(module.id); }}
       onManagePresets={() => void openPresetLibrary(module.id)} registerPresetSource={registerPresetSource}
       registerResolutionDirty={registerResolutionDirty} resolutionDelta={resolutionDeltas[module.id]}
       quickPresetVersion={quickPresetVersion} viewToken={requestedView.viewerId === userId && requestedView.moduleId === module.id ? requestedView.token : 0} onResultsViewed={attention.markViewed} onTemplateEntered={attention.confirmEntry} onResultsAvailable={attention.refresh}
@@ -860,7 +866,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
   </main>)}</>;
 }
 
-function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, onModuleDelete, groups, onDeleteGroup, groupDeleting, onToggleSharing, sharingId, settings, globalContextDraft, globalSettingsDirty, settingsError, active, onActivate, onModuleChange, onReloadSettings, ratios, templateWorkbench, quickPresetVersion, viewToken, onResultsViewed, onTemplateEntered, onResultsAvailable, onManagePresets, registerPresetSource, registerResolutionDirty, resolutionDelta }: {
+function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, onModuleDelete, groups, onDeleteGroup, groupDeleting, onToggleSharing, sharingId, settings, imageChannels, imageChannelId, imageChannelReady, imageChannelMessage, onImageChannelChange, globalContextDraft, globalSettingsDirty, settingsError, active, onActivate, onModuleChange, onReloadSettings, ratios, templateWorkbench, quickPresetVersion, viewToken, onResultsViewed, onTemplateEntered, onResultsAvailable, onManagePresets, registerPresetSource, registerResolutionDirty, resolutionDelta }: {
   groupDeleting: boolean;
   onManagePresets: () => void;
   registerPresetSource: (id: string, read: PresetSourceReader | null) => void;
@@ -870,6 +876,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   onModuleDelete: (id: string) => void;
   hidden: boolean; onMetadataChange: (id: string, name: string, groupName: string, followGroup?: boolean) => void;
   isAdmin: boolean; userId: string; module: StudioModule & { fixedReferences?: FixedStudioReference[]; contextEditable?: boolean }; groups: string[]; onDeleteGroup: (group: string) => Promise<void>; onToggleSharing: (module: StudioModule) => Promise<void>; sharingId: string | null; settings: SettingsValue | null;
+  imageChannels: ReturnType<typeof useImageStudioChannel>['channels']; imageChannelId: string; imageChannelReady: boolean; imageChannelMessage: string; onImageChannelChange: (value: string) => void;
   globalContextDraft?: string; globalSettingsDirty: boolean; settingsError: string; active: boolean; onActivate: () => void; onModuleChange: (module: StudioModule) => void;
   viewToken: number; onResultsViewed: (moduleId: string, versions: string[]) => Promise<void>; onResultsAvailable: () => Promise<void>;
   onTemplateEntered: (moduleId: string, snapshot: string, signal: AbortSignal) => Promise<void>;
@@ -1040,10 +1047,22 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   const moduleSaveSnapshot = { ...moduleDraft };
   const moduleDirty = JSON.stringify(moduleSaveSnapshot) !== moduleSaved;
   const baseline = moduleSaved ? JSON.parse(moduleSaved) as typeof moduleDraft : moduleDraft;
-  const generationInputs = { evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, aspectRatio, resolution: normalizeImageResolution(moduleModel, resolution), referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: normalizeImageStudioQuality(moduleModel, quality), referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), skillIds: moduleDraft.skillIds, skillVersions: Object.fromEntries(skills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])), styleGroupIds: moduleDraft.styleGroupIds };
+  const selectedChannel = imageChannels.items.find(item => item.id === imageChannelId);
+  const selectedChannelModel = imageStudioChannelModel(selectedChannel, moduleModel);
+  const channelModels = imageStudioChannelModels(selectedChannel || imageChannels.items[0], models);
+  const modelChoices = channelModels.includes(moduleModel) ? channelModels : [moduleModel, ...channelModels];
+  const qualityChoices = selectedChannelModel?.qualities ?? (imageChannelId === 'original'
+    ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [] : []);
+  const resolutionChoices = selectedChannelModel?.resolutions ?? (imageChannelId === 'original'
+    ? IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] || [] : []);
+  const generationInputs = { evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, aspectRatio, resolution: imageChannelId === 'original' ? normalizeImageResolution(moduleModel, resolution) : resolution, referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: imageChannelId === 'original' ? normalizeImageStudioQuality(moduleModel, quality) : quality, ...(imageChannelId !== 'original' ? { channelId: imageChannelId } : {}), referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), skillIds: moduleDraft.skillIds, skillVersions: Object.fromEntries(skills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])), styleGroupIds: moduleDraft.styleGroupIds };
   const generationDraft = JSON.stringify(generationInputs);
-  const actualQuoteRequired = settings?.billingReadiness?.models?.[moduleModel]?.ready === true;
-  const batch = useStudioBatch({ userId, moduleId: module.id, actualQuoteRequired, quotePayload: settings ? generationPayload(undefined, '') : null, unitCredits: settings ? settings.prices?.[moduleModel] ?? null : module.prices[moduleModel] ?? null,
+  const actualQuoteRequired = imageChannelId === 'original' ? settings?.billingReadiness?.models?.[moduleModel]?.ready === true
+    : selectedChannelModel?.actualQuoteRequired === true || selectedChannelModel?.billingMode === 'actual';
+  const moduleUnitCredits = imageChannelId !== 'original' && selectedChannelModel?.billingMode === 'fixed'
+    ? (selectedChannelModel.fixedPoints ?? (['shared', 'banana'].includes(imageChannelId) ? settings?.prices?.[moduleModel] ?? null : null))
+    : settings ? settings.prices?.[moduleModel] ?? null : module.prices[moduleModel] ?? null;
+  const batch = useStudioBatch({ userId, moduleId: module.id, actualQuoteRequired, quotePayload: settings ? generationPayload(undefined, '') : null, unitCredits: moduleUnitCredits,
     draftSignature: JSON.stringify([generationDraft, effectiveGlobalContext, reproduceSourceTaskId, settings?.revision, module.revision]) });
   const contextVersion = useModuleContextVersion({ moduleId: module.id, raw: moduleContext, taskId: reproduceSourceTaskId,
     editable: contextEditable, enabled: !hidden && draftLoaded && !draftRestoring, composing: contextComposing });
@@ -1575,7 +1594,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
   function generationPayload(retryTask?: StudioTask, requestId = crypto.randomUUID()) {
     const historicalEvolution = (retryTask?.snapshot as (StudioSnapshot & { evolution?: EvolutionInput }) | undefined)?.evolution;
     return { requestId, prompt: retryTask?.prompt ?? prompt,
-      moduleId: module.id, model: retryTask?.model || moduleModel, quality: retryTask?.quality || quality, reproduceFromTaskId: reproduceSourceTaskId || undefined, count: retryTask ? 1 : count, aspectRatio: retryTask?.aspectRatio || aspectRatio, resolution: retryTask?.snapshot?.resolution || resolution, revision: settings!.revision,
+      moduleId: module.id, model: retryTask?.model || moduleModel, quality: retryTask?.quality || quality, reproduceFromTaskId: reproduceSourceTaskId || undefined, count: retryTask ? 1 : count, aspectRatio: retryTask?.aspectRatio || aspectRatio, resolution: retryTask?.snapshot?.resolution || resolution, revision: settings!.revision, ...(imageChannelId !== 'original' ? { channelId: imageChannelId } : {}),
       referenceIds: retryTask?.referenceIds || moduleDraft.referenceIds,
       ...(historicalEvolution || evolution ? { evolution: historicalEvolution || evolutionInput } : {}),
       draft: { moduleContext: contextEditable ? moduleContext : undefined, globalContext: isAdmin ? effectiveGlobalContext : undefined,
@@ -1605,7 +1624,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     const reusableQuote = billingQuote?.signature === signature
       && (!billingQuote.quote.expiresAt || Date.parse(billingQuote.quote.expiresAt) > Date.now()) ? billingQuote : null;
     const payload = reusableQuote ? generationPayload(retryTask, reusableQuote.requestId) : currentPayload;
-    const ratioIssue = studioFourToOneIssue(payload.aspectRatio, settings.modelFourToOne?.[payload.model] === true);
+    const ratioIssue = studioFourToOneIssue(payload.aspectRatio, imageChannelId !== 'original'
+      ? selectedChannelModel?.ratios?.includes('4:1') === true
+      : settings.modelFourToOne?.[payload.model] === true);
     if (ratioIssue) { setError(ratioIssue); return; }
     submitLock.current = true; setSubmitting(true); setError('');
     let confirmedQuote = reusableQuote?.quote || null;
@@ -1619,6 +1640,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           || !quote.expiresAt || !Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= Date.now()
           || (quote.billingMode === 'actual' && !quote.billingQuoteId)) {
           throw new Error('本次报价信息不完整，尚未提交图片。');
+        }
+        if (imageChannelId !== 'original' && (quote.imageChannel?.channelId !== imageChannelId
+          || typeof quote.imageChannel.configRevision !== 'string' || !quote.imageChannel.configRevision)) {
+          throw new Error('生图通道配置已变化，报价未能绑定到当前通道；尚未提交图片，请重新确认。');
         }
         const baseline = !actualQuoteRequired && moduleUnitCredits != null && Number.isFinite(moduleUnitCredits) && moduleUnitCredits >= 0
           ? Math.ceil(moduleUnitCredits * payload.count) : null;
@@ -1637,6 +1662,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
       return;
     }
     if (!confirmedQuote) { setError('本次报价未确认，尚未提交图片。'); submitLock.current = false; setSubmitting(false); return; }
+    if (imageChannelId !== 'original' && (confirmedQuote.imageChannel?.channelId !== imageChannelId
+      || typeof confirmedQuote.imageChannel.configRevision !== 'string' || !confirmedQuote.imageChannel.configRevision)) {
+      setBillingQuote(null); setError('生图通道配置已变化，当前报价未用于生成；请重新获取报价。');
+      submitLock.current = false; setSubmitting(false); return;
+    }
     if (confirmedQuote.expiresAt && Date.parse(confirmedQuote.expiresAt) <= Date.now()) {
       setBillingQuote(null); setError('本次报价已过期，尚未提交图片；请再次点击获取新报价。');
       submitLock.current = false; setSubmitting(false); return;
@@ -1648,7 +1678,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     } catch { setError('提交编号未能保存，尚未提交生成。请允许浏览器保存数据后再试。'); submitLock.current = false; setSubmitting(false); return; }
     let ambiguous = true;
     try {
-      const submission = { ...payload, ...(confirmedQuote.billingQuoteId ? { billingQuoteId: confirmedQuote.billingQuoteId } : {}), maxEstimatedCost: Math.ceil(confirmedQuote.estimatedCredits) };
+      const submission = { ...payload, ...(imageChannelId !== 'original' ? { imageChannel: confirmedQuote.imageChannel } : {}), ...(confirmedQuote.billingQuoteId ? { billingQuoteId: confirmedQuote.billingQuoteId } : {}), maxEstimatedCost: Math.ceil(confirmedQuote.estimatedCredits) };
       setBillingQuote(null);
       const response = await fetch('/api/image-studio/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(submission), signal: AbortSignal.timeout(20000) });
       if (response.status >= 400 && response.status < 500) { ambiguous = false; setPendingSubmission(null); try { localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch {} if (response.status === 409) onReloadSettings(); await readResponse(response); }
@@ -1773,7 +1803,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     setCopyFeedback({ id: task.id, text: copied ? '已复制' : '复制失败，请重试' });
     window.setTimeout(() => setCopyFeedback(current => current?.id === task.id ? null : current), copied ? 1800 : 2600);
   }
-  const moduleUnitCredits = settings ? settings.prices?.[moduleModel] ?? null : module.prices[moduleModel] ?? null;
   const estimatePayload = settings ? generationPayload(undefined, '') : null;
   const estimateSignature = estimatePayload ? JSON.stringify([userId, Object.fromEntries(Object.entries(estimatePayload).filter(([key]) => key !== 'requestId'))]) : '';
   liveGenerationSignature.current = estimateSignature;
@@ -1811,11 +1840,18 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     const timer = window.setTimeout(() => setBillingQuote(current => current?.requestId === billingQuote.requestId ? null : current), delay);
     return () => window.clearTimeout(timer);
   }, [billingQuote]);
-  const selectedProviderReady = settings?.modelReady?.[moduleModel] ?? settings?.providerReady;
-  const selectedFourToOne = settings?.modelFourToOne?.[moduleModel] === true;
+  const selectedProviderReady = imageStudioChannelReadyForModel(selectedChannel, moduleModel, settings?.modelReady?.[moduleModel] ?? settings?.providerReady);
+  const selectedFourToOne = imageChannelId !== 'original'
+    ? selectedChannelModel?.ratios?.includes('4:1') === true
+    : settings?.modelFourToOne?.[moduleModel] === true;
   const ratioIssue = studioFourToOneIssue(aspectRatio, selectedFourToOne);
+  const channelIssue = !imageChannelReady ? '正在读取生图通道，请稍候。' : imageStudioChannelIssue(selectedChannel, moduleModel, {
+    legacyReady: settings?.modelReady?.[moduleModel] ?? settings?.providerReady,
+    quality: generationInputs.quality, resolution: generationInputs.resolution,
+    ratio: aspectRatio, referenceCount: effectiveReferenceCount,
+  });
   const hasContext = reproduceSourceTaskId ? reproductionContextConfigured : Boolean((isAdmin ? effectiveGlobalContext?.trim() : settings?.contextConfigured) || (contextEditable ? moduleContext.trim() : moduleContextConfigured));
-  const ready = Boolean(selectedProviderReady && moduleUnitCredits !== null && settings && !settingsError);
+  const ready = Boolean(selectedProviderReady && (actualQuoteRequired || moduleUnitCredits !== null) && settings && !settingsError);
   const generationFeedback: StudioFeedback | null = batch.mode === 'batch' && batch.pending ? batch.busy ? { message: '正在核对原批次，不会重新提交生成', tone: 'progress' } : null
     : evolutionConflict ? { message: evolutionConflict, tone: 'warning' }
     : batch.mode === 'batch' && batch.blocker ? { message: batch.blocker, tone: 'info' }
@@ -1830,6 +1866,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
     : ratioEditing ? { message: '图片比例尚未确认，请先完成比例设置。', tone: 'info' }
     : settingsError ? { message: `设置暂不可用：${settingsError}`, tone: 'error' }
     : !settings ? { message: '正在读取生成设置，请稍候；长时间无变化请刷新页面。', tone: 'progress' }
+    : channelIssue ? { message: channelIssue, tone: imageChannelMessage ? 'info' : 'warning' }
     : !selectedProviderReady ? { message: '当前模型的图片服务尚未就绪，请换一个模型或联系管理员检查接口。', tone: 'warning' }
     : ratioIssue ? { message: ratioIssue, tone: 'warning' }
     : moduleUnitCredits === null ? { message: '当前模型尚未设置点数，请换一个模型或联系管理员配置。', tone: 'warning' }
@@ -2117,21 +2154,26 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
         <label className={styles.label} htmlFor={`studio-prompt-${module.id}`}>{evolution ? '演化内容' : '补充'} {!evolution && <span>有图片时选填</span>}</label>
         <textarea id={`studio-prompt-${module.id}`} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} value={prompt} maxLength={20000} onChange={event => setPrompt(event.target.value)} placeholder={evolution ? '什么发生变化' : '补充想生成的画面'} rows={9} />
         {evolutionConflict && <p role="alert" className={styles.error}>{evolutionConflict}</p>}
-        <RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={effectiveReferences.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} fourToOneSupported={selectedFourToOne} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
+        <RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={effectiveReferences.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} fourToOneSupported={selectedFourToOne} allowedRatios={selectedChannelModel?.ratios ?? undefined} restrictToAllowedRatios={imageChannelId !== 'original'} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
         <div className={styles.modelQualityRow}>
+          <label className={styles.compactField} htmlFor={`studio-channel-${module.id}`}><strong>生图通道</strong>
+            <ImageGenerationChannelSelect id={`studio-channel-${module.id}`} channels={imageChannels} value={imageChannelId} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onChange={onImageChannelChange} />
+          </label>
           <label className={styles.compactField} htmlFor={`studio-model-${module.id}`}><strong>生成模型</strong>
-            <select id={`studio-model-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={moduleModel} onChange={event => { const next = event.target.value; setModuleModel(next); setQuality(defaultImageStudioQuality(next)); setResolution(defaultImageResolution(next)); }}>
-              {models.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model]}</option>)}
+            <select id={`studio-model-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={moduleModel} onChange={event => { const next = event.target.value; setModuleModel(next); if (imageChannelId === 'original') { setQuality(defaultImageStudioQuality(next)); setResolution(defaultImageResolution(next)); } }}>
+              {modelChoices.map(model => <option key={model} value={model} disabled={model !== moduleModel && !imageStudioChannelReadyForModel(selectedChannel, model, settings?.modelReady?.[model])}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model}</option>)}
             </select>
           </label>
           <label className={styles.compactField} htmlFor={`studio-quality-${module.id}`}><strong>图片质量</strong>
-            <select id={`studio-quality-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={normalizeImageStudioQuality(moduleModel, quality)} onChange={event => setQuality(event.target.value)}>
-              {(IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || ['auto']).map(option => <option key={option} value={option}>{IMAGE_STUDIO_QUALITY_LABELS[option]}</option>)}
+            <select id={`studio-quality-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={quality} onChange={event => setQuality(event.target.value)}>
+              {!qualityChoices.includes(quality) && <option value={quality} disabled>{IMAGE_STUDIO_QUALITY_LABELS[quality as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || quality}（当前通道不支持）</option>}
+              {qualityChoices.map(option => <option key={option} value={option}>{IMAGE_STUDIO_QUALITY_LABELS[option as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || option}</option>)}
             </select>
           </label>
           <label className={styles.compactField} htmlFor={`studio-resolution-${module.id}`}><strong>分辨率</strong>
-            <select id={`studio-resolution-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={normalizeImageResolution(moduleModel, resolution)} onChange={event => setResolution(normalizeImageResolution(moduleModel, event.target.value))}>
-              {(IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] || ['1K', '2K']).map(option => <option key={option} value={option}>{option}</option>)}
+            <select id={`studio-resolution-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={resolution} onChange={event => setResolution(event.target.value as ImageResolution)}>
+              {!resolutionChoices.includes(resolution) && <option value={resolution} disabled>{resolution}（当前通道不支持）</option>}
+              {resolutionChoices.map(option => <option key={option} value={option}>{option}</option>)}
             </select>
           </label>
         </div>
@@ -2190,6 +2232,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
           <div className={styles.resultMeta}>
             <div className={styles.resultConfig}>
             <span title={IMAGE_STUDIO_MODEL_LABELS[task.model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || task.model}>{studioModelShortLabel(task.model)}</span>
+            {(() => { const source = [task.snapshot?.imageSupplierName, task.snapshot?.imageChannelLabel].filter((value): value is string => typeof value === 'string' && Boolean(value.trim())).join(' · '); return source ? <><span>·</span><span title="生成时供应商">{source}</span></> : null; })()}
             <span>·</span>
             <span title={`画质：${IMAGE_STUDIO_QUALITY_LABELS[normalizeImageStudioQuality(task.model, task.quality) as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || task.quality || '自动'}`}>{IMAGE_STUDIO_QUALITY_LABELS[normalizeImageStudioQuality(task.model, task.quality) as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || task.quality || '自动'}</span>
             <span>·</span><span className={styles.resolutionHint} tabIndex={0} aria-describedby={`studio-size-${task.id}`}>
@@ -2201,7 +2244,15 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
             <RelativeTime className={styles.resultTime} value={task.createdAt} />
           </div>
 </>}
-          renderPrimaryActions={({task}) => task.delivery?.recoveryAvailable ? <button type="button" disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks()}>{templateWorkbench ? '刷新恢复状态' : '查看原图恢复'}</button> : null}
+          renderPrimaryActions={({task}) => task.status === 'queued' && task.snapshot?.imageChannelLabel ? <button type="button" disabled={submitting} onClick={() => void (async () => {
+            if (!await confirm('只取消尚未向供应商请求的排队任务并释放原预留；已受理或结果未知的任务不会取消。', { title: '取消排队', confirmLabel: '取消排队', danger: true })) return;
+            try {
+              const response = await fetch('/api/image-studio/tasks', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cancel', id: task.id }) });
+              const result = await response.json();
+              if (!response.ok) throw new Error(result.error || '取消未确认，请刷新原任务');
+              await loadTasks();
+            } catch (cause) { setError(cause instanceof Error ? cause.message : '取消未确认，请刷新原任务'); }
+          })()}>取消未受理排队</button> : task.delivery?.recoveryAvailable ? <button type="button" disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks()}>{templateWorkbench ? '刷新恢复状态' : '查看原图恢复'}</button> : null}
           renderActions={({task}) => (isAdmin && task.snapshot?.sourceAvailable || studioTaskHasDeliveredAsset(task)) ? <>{isAdmin && task.snapshot?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制上下文" aria-label="复制上下文" onClick={() => void copyTaskContext(task)}><Copy size={15} /></button>}
             {studioTaskHasDeliveredAsset(task) && <button type="button" className={styles.restoreResult} disabled={Boolean(restoreDisabledReason(task))} title={restoreDisabledReason(task) || '恢复这张图片的完整设置，不生成图片'} aria-label="恢复设置" aria-describedby={`studio-restore-${task.id}`} onClick={event => {
               event.stopPropagation();

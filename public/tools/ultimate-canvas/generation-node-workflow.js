@@ -125,9 +125,13 @@
                 canvas_node_id: clean(input.nodeId),
                 tab_id: clean(input.workspaceKey),
                 source_request_id: sourceRequestId(input),
+                ...(clean(settings.channelId) && clean(settings.channelId) !== 'original' ? {
+                    channelId: clean(settings.channelId), imageChannel: input.imageChannel || undefined
+                } : {}),
                 action: mode.action,
                 input: {
                     prompt,
+                    ...(clean(settings.channelId) && clean(settings.channelId) !== 'original' ? { channelId: clean(settings.channelId) } : {}),
                     ...(input.promptMentions ? { promptMentions: input.promptMentions } : {}),
                     ...(clean(settings.model) ? { model: clean(settings.model) } : {}),
                     ...(clean(settings.quality) ? { quality: clean(settings.quality) } : {}),

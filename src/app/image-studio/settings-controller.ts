@@ -1,5 +1,6 @@
 import { defaultStudioTemplateDefaults, parseStudioTemplateDefaults, type StudioTemplateDefaults } from '@/lib/image-studio/template-defaults';
 import { IMAGE_STUDIO_MODELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
+import type { ImageGenerationChannelsDto } from '@/lib/integrations/image-generation-channel';
 
 export type SettingsValue = {
   context?: string;
@@ -10,6 +11,7 @@ export type SettingsValue = {
   providerReady: boolean;
   modelReady?: Record<string, boolean>;
   modelFourToOne?: Record<string, boolean>;
+  imageChannels?: ImageGenerationChannelsDto;
   billingReadiness?: { models: Record<string, { ready: boolean }> };
   prices: Record<string, number | null>;
 };
@@ -82,7 +84,9 @@ export function createStudioSettingsController(isAdmin: boolean, transport: Tran
     async refreshAvailability() {
       try {
         const value = await transport.read();
-        if (state.settings) update({ settings: { ...state.settings, providerReady: value.providerReady, modelReady: value.modelReady, modelFourToOne: value.modelFourToOne, billingReadiness: value.billingReadiness } });
+        if (state.settings) update({ settings: { ...state.settings, providerReady: value.providerReady, modelReady: value.modelReady,
+          modelFourToOne: value.modelFourToOne, billingReadiness: value.billingReadiness,
+          ...(value.imageChannels === undefined ? {} : { imageChannels: value.imageChannels }) } });
       } catch { /* A transient availability failure must not replace the settings baseline. */ }
     },
     editContext(context: string) {

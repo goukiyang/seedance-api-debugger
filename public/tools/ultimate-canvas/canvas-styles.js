@@ -4,6 +4,7 @@
     const endpoint = '/api/tools/ultimate-canvas/styles';
 
     function create(hooks) {
+        const clean = value => typeof value === 'string' ? value.trim() : '';
         const polling = new Map();
         const billingPolling = new Map();
         const billingPending = rows => (rows || []).some(item => item.billing?.pollUntil
@@ -56,6 +57,36 @@
                 && Number.isSafeInteger(Math.ceil(quote.estimatedCredits))
                 && Number.isFinite(expiresAt) && expiresAt > Date.now();
         }
+        function imageChannelFor(settings) {
+            const channelId = clean(settings?.channelId);
+            return channelId && channelId !== 'original' ? channelId : '';
+        }
+        function hasImageChannelSnapshot(value, channelId) {
+            return Boolean(channelId && value?.channelId === channelId
+                && typeof value.configRevision === 'string' && value.configRevision.length > 0);
+        }
+        function validImageChannelQuote(quote, channelId) {
+            if (!channelId) return true;
+            if (!hasImageChannelSnapshot(quote?.imageChannel, channelId)
+                || quote.status !== 'estimate' || quote.chargeEnabled !== false
+                || typeof quote.actualQuoteRequired !== 'boolean') return false;
+            return quote.actualQuoteRequired
+                ? quote.unitCredits === null && quote.estimatedCredits === null
+                : Number.isSafeInteger(quote.unitCredits) && quote.unitCredits >= 0
+                    && Number.isSafeInteger(quote.estimatedCredits) && quote.estimatedCredits >= 0;
+        }
+        function sameImageChannelSnapshot(left, right) {
+            return left?.channelId === right?.channelId && left?.configRevision === right?.configRevision;
+        }
+        function imageChannelHistory(settings, channelId, imageChannel) {
+            if (!channelId) return {};
+            return {
+                channelId,
+                imageChannel: { ...imageChannel },
+                imageChannelLabel: clean(settings?.imageChannelLabel),
+                imageSupplierName: clean(settings?.imageSupplierName)
+            };
+        }
         const showQuote = (nodeId, quote) => hooks.showQuote?.(nodeId, quote);
         const clearQuote = nodeId => hooks.clearQuote?.(nodeId);
 
@@ -85,15 +116,21 @@
             const requestId = crypto.randomUUID();
             const prompt = payload.prompt || '';
             if (style) {
+                const channelId = imageChannelFor(payload.settings);
+                const imageChannel = channelId ? safeQuote.imageChannel : undefined;
+                if (channelId && !hasImageChannelSnapshot(imageChannel, channelId)) {
+                    throw new Error('风格通道报价修订无效；未提交生成，请重新核对。');
+                }
                 return {
                     endpoint: `${endpoint}/generate`,
                     revision: style.settingsRevision,
                     input: { ...context, nodeId: node.id, moduleId: style.moduleId, requestId,
                         settingsRevision: style.settingsRevision, moduleRevision: style.moduleRevision,
+                        ...(channelId ? { channelId, imageChannel } : {}),
                         prompt, ...(payload.promptMentions ? { promptMentions: payload.promptMentions } : {}),
                         referenceImageIds: payload.referenceImageIds || [],
                         settings: { model: style.model, quality: style.quality, resolution: style.resolution,
-                            count: style.count, ratio: style.aspectRatio } }
+                            count: style.count, ratio: style.aspectRatio, ...(channelId ? { channelId } : {}) } }
                 };
             }
             const settings = payload.settings || {};
@@ -104,8 +141,12 @@
                     nodeId: node.id, requestId, moduleId: ordinaryModuleId(node, context), prompt,
                     ...(payload.promptMentions ? { promptMentions: payload.promptMentions } : {}),
                     settingsRevision: safeQuote.revision, referenceImageIds: payload.referenceImageIds || [],
+                    ...(clean(settings.channelId) && clean(settings.channelId) !== 'original' ? {
+                        channelId: settings.channelId, imageChannel: safeQuote.imageChannel
+                    } : {}),
                     settings: { model: settings.model, quality: settings.quality, resolution: settings.resolution,
-                        ratio: settings.requestedRatio || settings.ratio, count: settings.count } }
+                        ratio: settings.requestedRatio || settings.ratio, count: settings.count,
+                        ...(clean(settings.channelId) && clean(settings.channelId) !== 'original' ? { channelId: settings.channelId } : {}) } }
             };
         }
 
@@ -115,6 +156,7 @@
             const generationPayload = node && hooks.getGenerationPayload?.(nodeId);
             const settings = generationPayload?.settings || {};
             const style = node?.data?.canvasStyle;
+            const channelId = imageChannelFor(settings);
             const expectedModel = style?.model || settings.model;
             const expectedCount = style?.count ?? settings.count;
             if (!node || node.type !== 'image' || !context.userId || !generationPayload || !context.writable || !context.projectId
@@ -122,6 +164,7 @@
                 || safeQuote.kind !== 'image' || safeQuote.projectId !== context.projectId
                 || safeQuote.model !== expectedModel || safeQuote.count !== expectedCount
                 || safeQuote.status !== 'estimate' || !Number.isSafeInteger(safeQuote.revision)
+                || channelId && !validImageChannelQuote(safeQuote, channelId)
                 || node.data?.styleJob) throw new Error('报价或画布状态未就绪；未提交生成。');
             if (!style) ordinaryModuleId(node, context);
             const snapshot = quoteSnapshot(nodeId);
@@ -148,6 +191,7 @@
                     const currentModuleId = node.data?.canvasStyle?.moduleId || node.data?.canvasImageModuleId;
                     if (actualQuotes.get(String(nodeId)) !== entry || controller.signal.aborted
                         || request.input.moduleId !== currentModuleId
+                        || request.input.channelId && !sameImageChannelSnapshot(quote?.imageChannel, request.input.imageChannel)
                         || !validActualQuote(quote, entry.revision) || !quoteInputsMatch(node, context, snapshot)) {
                         throw new Error('报价已过期或参数已变化；未提交生成。');
                     }
@@ -327,7 +371,7 @@
                             message: result.error ? `已保存 ${result.assets.length} 张图片；${result.error}` : `已生成 ${result.assets.length} 张图片，并保存到资产库。` };
                     }
                     job.state = 'running';
-                    hooks.status(node.id, 'loading', `${job.kind === 'ordinary' ? '图片' : '风格'}生成中 · 已完成 ${Number(result.completedCount) || 0}/${Number(result.totalCount) || job.count} 张`);
+                    hooks.status(node.id, result.error ? 'warn' : 'loading', result.error || `${job.kind === 'ordinary' ? '图片' : '风格'}生成中 · 已完成 ${Number(result.completedCount) || 0}/${Number(result.totalCount) || job.count} 张`);
                     await new Promise(resolve => window.setTimeout(resolve, document.hidden ? 15000 : attempt < 5 ? 3000 : 6000));
                 }
                 throw new Error('任务仍在处理中，状态检查已暂停。点击“查看生成状态”继续，不会重新生成。');
@@ -342,6 +386,7 @@
             const style = node?.data?.canvasStyle;
             const context = hooks.context();
             if (!style || style.appliedBy !== context.userId) throw new Error('请重新应用此风格后生成。');
+            const selectedChannelId = imageChannelFor(payload.settings);
             let job = node.data.styleJob;
             if (job && !sameContext(job.context, context)) throw new Error('此任务属于原项目或视频卡，请返回原画布查看。');
             if (job?.quoteExpiresAt && !job.batchId && Date.parse(job.quoteExpiresAt) <= Date.now()) {
@@ -359,9 +404,10 @@
                     count: style.count, payload, state: 'submitting',
                     input: { ...context, nodeId: node.id, moduleId: style.moduleId,
                         settingsRevision: style.settingsRevision, moduleRevision: style.moduleRevision,
+                        ...(selectedChannelId ? { channelId: selectedChannelId } : {}),
                         prompt: resolvedPrompt, ...(payload.promptMentions ? { promptMentions: payload.promptMentions } : {}), referenceImageIds: payload.referenceImageIds || [],
                         settings: { model: style.model, quality: style.quality, resolution: style.resolution,
-                            count: style.count, ratio: style.aspectRatio } }
+                            count: style.count, ratio: style.aspectRatio, ...(selectedChannelId ? { channelId: selectedChannelId } : {}) } }
                 };
                 job.input.requestId = job.requestId;
                 const snapshot = quoteSnapshot(node.id);
@@ -369,7 +415,7 @@
                 try {
                     quote = await json('/api/tools/ultimate-canvas/quote', { kind: 'image', project_id: context.projectId,
                         model: style.model, count: style.count, quality: style.quality, resolution: style.resolution,
-                        ratio: style.aspectRatio || 'auto' });
+                        ratio: style.aspectRatio || 'auto', ...(selectedChannelId ? { channelId: selectedChannelId } : {}) });
                 } catch (error) {
                     clearQuote(node.id);
                     throw error;
@@ -377,10 +423,18 @@
                 if (quote?.kind !== 'image' || quote.projectId !== context.projectId || quote.model !== style.model
                     || quote.count !== style.count || typeof quote.actualQuoteRequired !== 'boolean'
                     || !Number.isSafeInteger(quote.revision) || quote.revision !== style.settingsRevision
+                    || selectedChannelId && !validImageChannelQuote(quote, selectedChannelId)
                     || quote.actualQuoteRequired && (quote.unitCredits !== null || quote.estimatedCredits !== null)
                     || !quoteInputsMatch(node, context, snapshot)) {
                     clearQuote(node.id);
                     throw new Error('风格参数或报价资格已变化，请重新应用风格后重试；未提交生成。');
+                }
+                if (selectedChannelId) {
+                    job.input.channelId = selectedChannelId;
+                    job.input.imageChannel = { ...quote.imageChannel };
+                    job.input.settings.channelId = selectedChannelId;
+                    const history = imageChannelHistory(payload.settings, selectedChannelId, quote.imageChannel);
+                    job.payload = { ...payload, settings: { ...payload.settings, ...history } };
                 }
                 if (quote.actualQuoteRequired) {
                     let actualEntry;
@@ -393,6 +447,7 @@
                     }
                     const actualQuote = actualEntry.quote;
                     if (actualEntry.kind !== 'style' || !validActualQuote(actualQuote, style.settingsRevision)
+                        || selectedChannelId && !sameImageChannelSnapshot(actualEntry.input.imageChannel, quote.imageChannel)
                         || !quoteInputsMatch(node, context, snapshot)) {
                         clearQuote(node.id);
                         throw new Error('完整报价已失效或参数已变化；本次未提交，请重新获取并确认。');
@@ -484,7 +539,12 @@
             const snapshot = quoteSnapshot(node.id);
             const quote = await json('/api/tools/ultimate-canvas/quote', { kind: 'image', project_id: context.projectId,
                 model: settings.model, count: settings.count, quality: settings.quality, resolution: settings.resolution,
-                size: settings.size || '1K', ratio: settings.requestedRatio || settings.ratio });
+                size: settings.size || '1K', ratio: settings.requestedRatio || settings.ratio,
+                ...(clean(settings.channelId) && clean(settings.channelId) !== 'original' ? { channelId: settings.channelId } : {}) });
+            if (settings.channelId && settings.channelId !== 'original'
+                && !validImageChannelQuote(quote, settings.channelId)) {
+                throw new Error('当前通道报价快照无效；未提交生成，请重新核对。');
+            }
             job = { kind: 'ordinary', requestId: crypto.randomUUID(), moduleId: ordinaryModuleId(node, context), count: settings.count,
                 context: { userId: context.userId, projectId: context.projectId, cardId: context.cardId, documentId: context.documentId },
                 payload, state: 'unconfirmed' };
@@ -493,7 +553,9 @@
                 ...(payload.promptMentions ? { promptMentions: payload.promptMentions } : {}),
                 settingsRevision: quote.revision,
                 referenceImageIds: payload.referenceImageIds || [], settings: { model: settings.model,
-                    quality: settings.quality, resolution: settings.resolution, ratio: settings.requestedRatio || settings.ratio, count: settings.count } };
+                    quality: settings.quality, resolution: settings.resolution, ratio: settings.requestedRatio || settings.ratio, count: settings.count,
+                    ...(clean(settings.channelId) && clean(settings.channelId) !== 'original' ? { channelId: settings.channelId } : {}) },
+                ...(clean(settings.channelId) && clean(settings.channelId) !== 'original' ? { channelId: settings.channelId, imageChannel: quote.imageChannel } : {}) };
             if (quote?.kind !== 'image' || quote.projectId !== context.projectId
                 || quote.model !== settings.model || quote.count !== settings.count
                 || quote.status !== 'estimate' || quote.chargeEnabled !== false
@@ -612,7 +674,22 @@
             }
         }
 
-        return { open, clear, generate, generateOrdinary, resume, resumeBilling,
+        async function cancelQueued(nodeId) {
+            const node = hooks.getNode(nodeId), job = node?.data?.styleJob;
+            if (!job || !current(node, job.context) || !hooks.context().writable || job.cancelling) return;
+            job.cancelling = true;
+            try {
+                if (!await hooks.confirm({ title: '取消排队', message: '只取消尚未向供应商请求的排队任务，并释放对应预留。', detail: '已受理、已完成或结果未知的任务继续保留；不是取消供应商任务。', confirmLabel: '取消未受理排队' })) return;
+                const result = await json(`${endpoint}/results`, { ...job.context, nodeId: node.id,
+                    moduleId: job.moduleId, batchId: job.batchId, requestId: job.requestId, count: job.count, action: 'cancel-queued' });
+                if (!current(node, job.context)) return;
+                hooks.notice(`${Number(result.cancelled) || 0} 个未受理排队任务已取消。已受理或未知记录仍保留。`, 'info');
+                await resume(nodeId);
+            } catch (error) { hooks.notice(error.message || '取消未确认，请查询原任务；没有重新生成。', 'warn'); }
+            finally { delete job.cancelling; if (current(node, job.context)) hooks.render(nodeId); }
+        }
+
+        return { open, clear, generate, generateOrdinary, resume, resumeBilling, cancelQueued,
             prefetchActualQuote, invalidateQuote };
     }
 

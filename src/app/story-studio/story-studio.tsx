@@ -20,6 +20,9 @@ import { timingFromStory, validateStoryTiming } from './story-duration';
 import { attachStoryVideo, type StoryCanvas as Snapshot } from './story-handoff';
 import { STUDIO_TEXT_MODELS, isStudioTextModel } from '@/lib/template-studio/text-models';
 import { STORY_TEXT_CLIENT_WAIT_MS } from '@/lib/story-text-contract';
+import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, imageStudioChannelReadyForModel, useImageStudioChannel } from '@/lib/image-studio/channels';
+import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChannelSelect';
+import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
 
 type Document = { id: string; owner_user_id: string; project_id: string; title: string; revision: number;
   status: string; updated_at: string; document_json: string };
@@ -100,7 +103,8 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
   const [resultShot, setResultShot] = useState<string | null>(null);
   const [resultAssets, setResultAssets] = useState<Record<string, PickerItem>>({});
   const [focusVideoId, setFocusVideoId] = useState<string | null>(null);
-  const [mediaCapabilities, setMediaCapabilities] = useState<{ image: { model: string }; video: { model: string; model_options: Array<{ value: string; label: string; provider: string; ready: boolean; resolutions: string[] }> } } | null>(null);
+  const [mediaCapabilities, setMediaCapabilities] = useState<{ image: { model: string; imageChannels?: unknown }; video: { model: string; model_options: Array<{ value: string; label: string; provider: string; ready: boolean; resolutions: string[] }> } } | null>(null);
+  const imageChannel = useImageStudioChannel(userId, 'story-studio', mediaCapabilities?.image.imageChannels, Boolean(mediaCapabilities));
   const current = useRef(work); current.current = work;
   const documentRef = useRef(document); documentRef.current = document;
   const snapshot = useRef<Snapshot | null>(null);
@@ -128,8 +132,17 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
   const updateDraft = (patch: Partial<StoryDraft>) => change({ ...current.current, draft: { ...current.current.draft, ...patch } });
   const mediaSettings = work.mediaSettings || { imageModel: mediaCapabilities?.image.model || 'gemini-3.1-flash-image-preview', quality: 'auto', resolution: '2K', ratio: '16:9',
     videoModel: mediaCapabilities?.video.model || '', provider: 'seedance', videoResolution: '720p' };
-  const qualityOptions: readonly string[] = IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[mediaSettings.imageModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [];
-  const imageResolutions: readonly string[] = imageResolutionOptions(mediaSettings.imageModel);
+  const selectedImageChannelModel = imageStudioChannelModel(imageChannel.channel, mediaSettings.imageModel);
+  const channelImageModels = imageStudioChannelModels(imageChannel.channel, IMAGE_STUDIO_MODELS);
+  const imageModelChoices = channelImageModels.includes(mediaSettings.imageModel) ? channelImageModels : [mediaSettings.imageModel, ...channelImageModels];
+  const qualityOptions: readonly string[] = selectedImageChannelModel?.qualities ?? (imageChannel.channelId === 'original'
+    ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[mediaSettings.imageModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [] : []);
+  const imageResolutions: readonly string[] = selectedImageChannelModel?.resolutions ?? (imageChannel.channelId === 'original'
+    ? imageResolutionOptions(mediaSettings.imageModel) : []);
+  const ratioOptions: readonly string[] = selectedImageChannelModel?.ratios ?? (imageChannel.channelId === 'original' ? STUDIO_RATIOS : []);
+  const channelIssue = !imageChannel.ready ? '正在读取生图通道，请稍候。' : imageStudioChannelIssue(imageChannel.channel, mediaSettings.imageModel, {
+    quality: mediaSettings.quality, resolution: mediaSettings.resolution, ratio: mediaSettings.ratio,
+  });
   const videoResolutions = mediaCapabilities?.video.model_options.find(item => item.value === mediaSettings.videoModel)?.resolutions || [];
   const materialSignature = (value = current.current) => {
     const used = new Set(value.draft.shots.flatMap(shot => shot.materialIds || []));
@@ -611,15 +624,25 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
       const primary = current.current.references[shot.id]?.assetId;
       return { referenceIds, referencePolicy: canvasImageReferencePolicy(referenceIds, primary ? [primary] : []) };
     };
-    if (kind === 'image') selected.forEach(imageReferences);
+    if (kind === 'image') {
+      if (channelIssue) throw Error(channelIssue);
+      selected.forEach(shot => {
+        const referenceCount = imageReferences(shot).referenceIds.length;
+        const issue = imageStudioChannelIssue(imageChannel.channel, settings.imageModel, { quality: settings.quality, resolution: settings.resolution, ratio: settings.ratio, referenceCount });
+        if (issue) throw Error(issue);
+      });
+    }
     const settings = { ...mediaSettings };
-    if (kind === 'image' && (!IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[settings.imageModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS]?.includes(settings.quality as never) || !imageResolutionOptions(settings.imageModel).includes(settings.resolution as never))) throw Error('当前图片模型不支持所选质量或分辨率，请重新选择');
+    if (kind === 'image' && imageChannel.channelId === 'original'
+      && (!IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[settings.imageModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS]?.includes(settings.quality as never)
+        || !imageResolutionOptions(settings.imageModel).includes(settings.resolution as never))) throw Error('当前图片模型不支持所选质量或分辨率，请重新选择');
     if (kind === 'video' && !mediaCapabilities?.video.model_options.some(item => item.value === settings.videoModel && item.provider === settings.provider && item.ready && item.resolutions.includes(settings.videoResolution))) throw Error('视频模型未就绪或参数不受支持，请重新选择');
     const quotes = await Promise.all(selected.map(async shot => {
       if (kind === 'image') {
-        const quote = await request<{ status: string; estimatedCredits: number; revision: number }>('/api/tools/ultimate-canvas/quote', { kind: 'image', project_id: documentRef.current!.project_id, model: settings.imageModel, count: 1, quality: settings.quality, resolution: settings.resolution, ratio: settings.ratio });
+        const quote = await request<{ status: string; estimatedCredits: number; revision: number; imageChannel?: ImageGenerationChannelSnapshot }>('/api/tools/ultimate-canvas/quote', { kind: 'image', project_id: documentRef.current!.project_id, model: settings.imageModel, ...(imageChannel.channelId !== 'original' ? { channelId: imageChannel.channelId } : {}), count: 1, quality: settings.quality, resolution: settings.resolution, ratio: settings.ratio });
         if (quote.status !== 'estimate' || !Number.isSafeInteger(quote.estimatedCredits) || quote.estimatedCredits < 0) throw Error('图片报价不可用，未派发');
-        return { shot, price: quote.estimatedCredits, revision: quote.revision };
+        if (imageChannel.channelId !== 'original' && (quote.imageChannel?.channelId !== imageChannel.channelId || !quote.imageChannel.configRevision)) throw Error('生图通道配置已变化，未能绑定到当前报价；尚未派发');
+        return { shot, price: quote.estimatedCredits, revision: quote.revision, imageChannel: quote.imageChannel };
       }
       const quote = await request<{ estimatedCost: number }>(`/api/tasks/estimate?${new URLSearchParams({ provider: settings.provider, model: settings.videoModel, resolution: settings.videoResolution, duration: String(shot.durationSeconds) })}`);
       if (!Number.isSafeInteger(quote.estimatedCost) || quote.estimatedCost < 0) throw Error('视频报价不可用，未派发');
@@ -627,14 +650,14 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     }));
     const total = quotes.reduce((sum, item) => sum + item.price, 0);
     if (!Number.isSafeInteger(total) || !await confirm(`${quotes.map(item => `${item.shot.title}：${item.price} 点`).join('\n')}\n本次 ${selected.length} ${kind === 'image' ? '张图片' : '个视频'}，合计 ${total} 点。已成功或受理未知的任务不重跑。`, { title: kind === 'image' ? '生成分镜图' : '生成视频', confirmLabel: `确认 ${total} 点` })) return;
-    for (const { shot, price, revision } of quotes) {
+    for (const { shot, price, revision, imageChannel: imageChannelSnapshot } of quotes) {
       if (!storyGenerationPrompt(shot, kind).trim()) throw Error(`${shot.title}缺少生成要求，后续项未派发`);
       if (kind === 'image') {
         await imageDraft(shot);
         const moduleId = current.current.images[shot.id].moduleId;
         const { referenceIds, referencePolicy } = imageReferences(shot);
         const input = { requestId: crypto.randomUUID(), moduleId, revision, prompt: storyGenerationPrompt(shot, 'image'), count: 1,
-          referenceIds, draft: { referencePolicy }, model: settings.imageModel, quality: settings.quality, resolution: settings.resolution, aspectRatio: settings.ratio, maxEstimatedCost: price };
+          referenceIds, draft: { referencePolicy }, model: settings.imageModel, ...(imageChannel.channelId !== 'original' ? { channelId: imageChannel.channelId, imageChannel: imageChannelSnapshot } : {}), quality: settings.quality, resolution: settings.resolution, aspectRatio: settings.ratio, maxEstimatedCost: price };
         change({ ...current.current, imageRuns: { ...current.current.imageRuns, [shot.id]: { requestId: input.requestId, status: 'unconfirmed', input } } });
         let sent = false;
         try {
@@ -739,7 +762,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
         <label>外形与准备要求<textarea disabled={blocked} value={item.description} onChange={event => updateMaterial(item.id, { description: event.target.value })} /></label>
         {work.materialReferences?.[item.id] && <img className={styles.media} src={work.materialReferences[item.id].thumbnailUrl || work.materialReferences[item.id].originalUrl} alt={item.name} />}
         <div className={styles.actions}><button disabled={blocked || !imageAllowed} onClick={() => void operate('准备素材草稿', () => prepareMaterial(item))}><ImagePlus size={16} />准备素材草稿</button>
-          <button className={styles.primary} disabled={blocked || !imageAllowed || !item.name.trim()} onClick={() => void operate('确认素材生图', () => dispatchShots('image', [`material:${item.id}`]))}><ImagePlus size={16} />生成素材图片</button>
+          <button className={styles.primary} disabled={blocked || !imageAllowed || Boolean(channelIssue) || !item.name.trim()} onClick={() => void operate('确认素材生图', () => dispatchShots('image', [`material:${item.id}`]))}><ImagePlus size={16} />生成素材图片</button>
           <button disabled={blocked} onClick={() => setPicker(`material:${item.id}`)}><ImagePlus size={16} />{work.materialReferences?.[item.id] ? '更换原图' : '选用原图'}</button>
           {work.images[`material:${item.id}`]?.state === 'ready' && <><Link className={styles.link} href={`/template-studio?type=image&moduleId=${encodeURIComponent(work.images[`material:${item.id}`].moduleId)}`}>素材工作区</Link><button disabled={blocked} onClick={() => void operate('读取素材结果', () => readResults(`material:${item.id}`))}><RefreshCw size={16} />读取素材结果</button></>}
           <button title="移除本故事素材" aria-label="移除本故事素材" disabled={blocked} onClick={() => change({ ...current.current, materials: current.current.materials?.filter(value => value.id !== item.id),
@@ -753,16 +776,17 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
       <button disabled={blocked || work.draft.shots.length >= 30} onClick={() => updateDraft({ shots: [...work.draft.shots, { id: `shot-${crypto.randomUUID()}`, title: `镜头 ${work.draft.shots.length + 1}`, description: '', dialogue: '', imagePrompt: '', videoPrompt: '', durationSeconds: 5 }] })}><Plus size={16} />添加镜头</button></div>
       </div>
       <details><summary>生成设置</summary><div className={styles.shotFields}>
-        <label>图片模型<select disabled={blocked} value={mediaSettings.imageModel} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, imageModel: event.target.value } })}>{IMAGE_STUDIO_MODELS.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model]}</option>)}</select></label>
+        <label>生图通道<ImageGenerationChannelSelect channels={imageChannel.channels} value={imageChannel.channelId} disabled={blocked} onChange={imageChannel.select}/></label>
+        <label>图片模型<select disabled={blocked} value={mediaSettings.imageModel} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, imageModel: event.target.value } })}>{imageModelChoices.map(model => <option key={model} value={model} disabled={model!==mediaSettings.imageModel&&!imageStudioChannelReadyForModel(imageChannel.channel,model)}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS]||model}</option>)}</select></label>
         <label>图片质量<select disabled={blocked} value={mediaSettings.quality} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, quality: event.target.value } })}>{!qualityOptions.includes(mediaSettings.quality) && <option disabled value={mediaSettings.quality}>{mediaSettings.quality}（需重新选择）</option>}{qualityOptions.map(value => <option key={value} value={value}>{IMAGE_STUDIO_QUALITY_LABELS[value as keyof typeof IMAGE_STUDIO_QUALITY_LABELS]}</option>)}</select></label>
         <label>图片分辨率<select disabled={blocked} value={mediaSettings.resolution} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, resolution: event.target.value } })}>{!imageResolutions.includes(mediaSettings.resolution) && <option disabled value={mediaSettings.resolution}>{mediaSettings.resolution}（需重新选择）</option>}{imageResolutions.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-        <label>比例<select disabled={blocked} value={mediaSettings.ratio} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, ratio: event.target.value } })}>{STUDIO_RATIOS.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+        <label>比例<select disabled={blocked} value={mediaSettings.ratio} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, ratio: event.target.value } })}>{!ratioOptions.includes(mediaSettings.ratio)&&<option value={mediaSettings.ratio} disabled>{mediaSettings.ratio}（当前通道不支持）</option>}{ratioOptions.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
         <label>视频模型<select disabled={blocked} value={mediaSettings.videoModel} onChange={event => { const option = mediaCapabilities?.video.model_options.find(item => item.value === event.target.value); if (option) change({ ...current.current, mediaSettings: { ...mediaSettings, videoModel: option.value, provider: option.provider } }); }}>
           {(mediaCapabilities?.video.model_options || []).map(item => <option key={item.value} value={item.value} disabled={!item.ready}>{item.label}{!item.ready ? '（未配置）' : ''}</option>)}</select></label>
         <label>视频分辨率<select disabled={blocked} value={mediaSettings.videoResolution} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, videoResolution: event.target.value } })}>{!videoResolutions.includes(mediaSettings.videoResolution) && <option disabled value={mediaSettings.videoResolution}>{mediaSettings.videoResolution}（需重新选择）</option>}{videoResolutions.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-      </div><p className={styles.status}>切换模型保留原值，不支持的参数请重新选择；提交前重新核对数量和点数。</p></details>
+      </div><p className={styles.status}>切换通道不会更改模型和图片参数；不支持的现有参数会阻止生成，需手动调整。{channelIssue||imageChannel.message}</p></details>
       {(work.groups || []).map((group, index) => <div className={styles.group} key={group.id}><strong>分镜组 {index + 1} · {work.draft.shots.filter(shot => group.shotIds.includes(shot.id)).length} 镜</strong><div className={styles.actions}>
-        <button className={styles.primary} disabled={blocked || !imageAllowed} onClick={() => void operate('确认整组生图', () => dispatchShots('image', group.shotIds))}><ImagePlus size={16} />整组生图</button>
+        <button className={styles.primary} disabled={blocked || !imageAllowed || Boolean(channelIssue)} onClick={() => void operate('确认整组生图', () => dispatchShots('image', group.shotIds))}><ImagePlus size={16} />整组生图</button>
         <button disabled={blocked} onClick={() => void operate('确认整组视频', () => dispatchShots('video', group.shotIds))}><Clapperboard size={16} />整组视频</button>
         <button disabled={blocked} onClick={() => void operate('查询原任务', queryRuns)}><RefreshCw size={16} />查询原任务</button></div></div>)}
       {work.lineage.shotsScript !== undefined && work.lineage.shotsScript !== work.draft.script && <p className={styles.status}>剧本已修改，当前分镜仍属于原剧本版本，请核对。</p>}
@@ -792,7 +816,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
         {work.references[shot.id] && <img className={styles.media} src={work.references[shot.id].thumbnailUrl || work.references[shot.id].originalUrl} alt={shot.title} />}
         {work.videoRuns?.[shot.id]?.status === 'succeeded' && work.videoRuns[shot.id].previewAvailable && work.videoRuns[shot.id].taskId && <video className={styles.media} controls preload="metadata" src={`/api/video/play/${encodeURIComponent(work.videoRuns[shot.id].taskId!)}`} />}
         {work.videoRuns?.[shot.id]?.stableDownloadReady && work.videoRuns[shot.id].taskId && <a className={styles.link} href={`/api/video/download/${encodeURIComponent(work.videoRuns[shot.id].taskId!)}`}>下载此镜视频</a>}
-        <div className={styles.actions}><button className={styles.primary} disabled={blocked || !imageAllowed || !(shot.imagePrompt || shot.description).trim()} onClick={() => void operate('确认单镜生图', () => dispatchShots('image', [shot.id]))}><ImagePlus size={16} />生成此镜图片</button>
+        <div className={styles.actions}><button className={styles.primary} disabled={blocked || !imageAllowed || Boolean(channelIssue) || !(shot.imagePrompt || shot.description).trim()} onClick={() => void operate('确认单镜生图', () => dispatchShots('image', [shot.id]))}><ImagePlus size={16} />生成此镜图片</button>
           <button disabled={blocked || !(shot.videoPrompt || shot.description).trim()} onClick={() => void operate('确认单镜视频', () => dispatchShots('video', [shot.id]))}><Clapperboard size={16} />生成此镜视频</button>
           {(work.imageRuns?.[shot.id] || work.videoRuns?.[shot.id]) && <button disabled={blocked} onClick={() => void operate('查询原任务', queryRuns)}><RefreshCw size={16} />查询原任务</button>}</div>
         {(work.imageRuns?.[shot.id] || work.videoRuns?.[shot.id]) && <p className={styles.status}>图片：{({ unconfirmed: '受理未确认', queued: '排队中', running: '生成中', succeeded: '已完成', failed: '失败', rejected: '未受理' } as Record<string, string>)[work.imageRuns?.[shot.id]?.status || ''] || '未派发'} · 视频：{({ unconfirmed: '受理未确认', submitted: '已提交', queued: '排队中', running: '生成中', succeeded: '已完成', failed: '失败' } as Record<string, string>)[work.videoRuns?.[shot.id]?.status || ''] || '未派发'}</p>}

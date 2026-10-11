@@ -27,11 +27,14 @@ import { GeneratedImageResults, type GeneratedImageResult } from '@/components/G
 import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
 import { imageBillingPending } from '@/lib/image-studio/billing-contract';
 import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
+import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, imageStudioChannelReadyForModel, normalizeImageStudioChannels, useImageStudioChannel } from '@/lib/image-studio/channels';
+import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChannelSelect';
+import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
 import { handImageDownloadToBrowser } from '@/lib/media/native-download';
 import styles from './studio.module.css';
-type Task = { id: string; ordinal: number; status: string; error?: string | null; billing?: ImageBillingView | null; asset: { id: string; original_url: string; thumbnail_url?: string | null } | null };
-type Payload = { total: number; records: AvatarRecord[]; recentConfigs:AvatarRecord[];recordTasks:Record<string,Task>; nextCursor?: string | null; settings: { model: string; revision: number; prices: Record<string, number | null>; billingReadiness?: { models: Record<string, { ready: boolean }> } } };
-type AvatarImageQuote = { billingMode: 'fixed' | 'actual'; billingQuoteId: string | null; unitCredits: number; estimatedCredits: number; expiresAt?: string };
+type Task = { id: string; ordinal: number; status: string; error?: string | null; billing?: ImageBillingView | null; snapshot?: { imageChannelLabel?: string | null; imageSupplierName?: string | null } | null; asset: { id: string; original_url: string; thumbnail_url?: string | null } | null };
+type Payload = { total: number; records: AvatarRecord[]; recentConfigs:AvatarRecord[];recordTasks:Record<string,Task>; nextCursor?: string | null; settings: { model: string; revision: number; prices: Record<string, number | null>; imageChannels?: unknown; billingReadiness?: { models: Record<string, { ready: boolean }> } } };
+type AvatarImageQuote = { billingMode: 'fixed' | 'actual'; billingQuoteId: string | null; unitCredits: number; estimatedCredits: number; expiresAt?: string; imageChannel?: ImageGenerationChannelSnapshot };
 type CachedAvatarImageQuote = { planId: string; parameters: string; quote: AvatarImageQuote };
 const statusLabel: Record<string, string> = { queued: '排队中', running: '生成中', succeeded: '图片已保存，待人工确认', failed: '生成失败', uncertain: '受理未知，请先查询' };
 const descriptionDiagnosticLabels: Record<string, string> = {
@@ -54,9 +57,17 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   const key = `sd2:avatar-studio:v1:${ownerId}`;
   const [rules, setRules] = useState<AvatarRules>(emptyRules), [plan, setPlan] = useState<AvatarPlan | null>(null), [tasks, setTasks] = useState<Task[]>([]), [records, setRecords] = useState<AvatarRecord[]>([]), [cursor, setCursor] = useState<string | null>(null);
   const [model, setModel] = useState(IMAGE_STUDIO_MODELS[0] as string), [quality, setQuality] = useState('auto'), [resolution, setResolution] = useState('1K');
+  const [imageChannels, setImageChannels] = useState<unknown>(null);
   const [prices, setPrices] = useState<Record<string, number | null>>({}), [index, setIndex] = useState(0), [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState(''), [ready, setReady] = useState(false), [advanced, setAdvanced] = useState(false), [tab, setTab] = useState<'config' | 'character' | 'result'>(management ? 'config' : 'result'), [deleted, setDeleted] = useState(false), [pending, setPending] = useState(false);
   const [billingQuote, setBillingQuote] = useState<CachedAvatarImageQuote | null>(null);
   const [billingReadiness, setBillingReadiness] = useState<Payload['settings']['billingReadiness']>();
+  const imageChannel = useImageStudioChannel(ownerId, 'avatar-studio', imageChannels, Boolean(imageChannels));
+  const selectedChannelModel = imageStudioChannelModel(imageChannel.channel, model);
+  const channelModels = imageStudioChannelModels(imageChannel.channel, IMAGE_STUDIO_MODELS);
+  const modelChoices = channelModels.includes(model) ? channelModels : [model, ...channelModels];
+  const qualityChoices = selectedChannelModel?.qualities ?? (imageChannel.channelId === 'original' ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [] : []);
+  const resolutionChoices = selectedChannelModel?.resolutions ?? (imageChannel.channelId === 'original' ? IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[model as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] || [] : []);
+  const channelIssue = !imageChannel.ready ? '正在读取生图通道，请稍候。' : imageStudioChannelIssue(imageChannel.channel, model, { quality, resolution, ratio: '1:1', referenceCount: rules.referenceIds?.length || 0 });
   const [draftBillingEstimate, setDraftBillingEstimate] = useState<{ parameters: string; estimatedCredits: number; expiresAt: string } | null>(null);
   const [quoteVisible, setQuoteVisible] = useState(true);
   useEffect(() => { const update = () => setQuoteVisible(!document.hidden); update(); document.addEventListener('visibilitychange', update); return () => document.removeEventListener('visibilitychange', update); }, []);
@@ -82,7 +93,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   const pasteLock = useRef(false);
   const [parseBinding,setParseBinding]=useState('');
   const analysisBinding=JSON.stringify([ownerId,rules.description.trim(),rules.descriptionEditedAt||0,AVATAR_PARSER_VERSION]);
-  const billingParameters=JSON.stringify([ownerId,avatarRulesSignature(rules),model,quality,resolution,avatarLayout(rules)]);
+  const billingParameters=JSON.stringify([ownerId,avatarRulesSignature(rules),model,quality,resolution,avatarLayout(rules),imageChannel.channelId]);
   const previousBillingParameters=useRef(billingParameters);
   useEffect(()=>{if(previousBillingParameters.current!==billingParameters)setBillingQuote(null);previousBillingParameters.current=billingParameters;},[billingParameters]);
   useEffect(()=>{if(!billingQuote?.quote.expiresAt)return;const delay=Date.parse(billingQuote.quote.expiresAt)-Date.now();if(delay<=0){setBillingQuote(null);return;}const timer=window.setTimeout(()=>setBillingQuote(current=>current?.planId===billingQuote.planId?null:current),delay);return()=>window.clearTimeout(timer);},[billingQuote]);
@@ -91,9 +102,11 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   const visibleDraftBillingEstimate=draftBillingEstimate?.parameters===billingParameters
     &&Date.parse(draftBillingEstimate.expiresAt)>Date.now()?draftBillingEstimate:null;
   const quotablePlan=plan&&plan.model===model&&plan.quality===quality&&plan.resolution===resolution
+    &&(plan.channelId||'original')===imageChannel.channelId
     &&avatarLayout(plan)===avatarLayout(rules)&&avatarRulesSignature(plan.candidates[0].rules)===avatarRulesSignature(rules)?plan:null;
-  const automaticQuoteInput=JSON.stringify(quotablePlan?{action:'billing-quote',planId:quotablePlan.id}:{action:'billing-quote',rules,model,quality,resolution});
-  const actualQuoteRequired=billingReadiness?.models?.[model]?.ready===true;
+  const automaticQuoteInput=JSON.stringify(quotablePlan?{action:'billing-quote',planId:quotablePlan.id,channelId:imageChannel.channelId,...(quotablePlan.imageChannel?{imageChannel:quotablePlan.imageChannel}:{})}:{action:'billing-quote',rules,model,quality,resolution,channelId:imageChannel.channelId});
+  const actualQuoteRequired=imageChannel.channelId==='original'?billingReadiness?.models?.[model]?.ready===true
+    :selectedChannelModel?.actualQuoteRequired===true||selectedChannelModel?.billingMode==='actual';
   useEffect(()=>{
     if(!actualQuoteRequired||!ready||management||!quoteVisible||busy||pending||visibleBillingQuote||!quotablePlan&&visibleDraftBillingEstimate)return;
     const abort=new AbortController();
@@ -109,9 +122,9 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     return()=>{window.clearTimeout(timer);abort.abort();};
   },[actualQuoteRequired,ready,management,quoteVisible,busy,pending,visibleBillingQuote,visibleDraftBillingEstimate,automaticQuoteInput,billingParameters,quotablePlan]);
   useEffect(()=>{if(!draftBillingEstimate)return;const timer=window.setTimeout(()=>setDraftBillingEstimate(current=>current===draftBillingEstimate?null:current),Math.max(0,Date.parse(draftBillingEstimate.expiresAt)-Date.now()));return()=>window.clearTimeout(timer);},[draftBillingEstimate]);
-  const inputSignature=JSON.stringify([ownerId,rules,model,quality,resolution,plan?.id,index,ready]);
-  const liveDraft=useRef({ownerId,rules,model,quality,resolution,analysisBinding,inputSignature,revision:0,ownerRevision:0,prices,blocked:referenceUploading||pending||tasks.some(t=>t.status==='uncertain'),ready});
-  liveDraft.current={ownerId,rules,model,quality,resolution,analysisBinding,inputSignature,revision:liveDraft.current.revision+(liveDraft.current.inputSignature===inputSignature?0:1),ownerRevision:liveDraft.current.ownerRevision+(liveDraft.current.ownerId===ownerId?0:1),prices,blocked:referenceUploading||pending||tasks.some(t=>t.status==='uncertain'),ready};
+  const inputSignature=JSON.stringify([ownerId,rules,model,quality,resolution,imageChannel.channelId,plan?.id,index,ready]);
+  const liveDraft=useRef({ownerId,rules,model,quality,resolution,channelId:imageChannel.channelId,analysisBinding,inputSignature,revision:0,ownerRevision:0,prices,blocked:referenceUploading||pending||tasks.some(t=>t.status==='uncertain'),ready});
+  liveDraft.current={ownerId,rules,model,quality,resolution,channelId:imageChannel.channelId,analysisBinding,inputSignature,revision:liveDraft.current.revision+(liveDraft.current.inputSignature===inputSignature?0:1),ownerRevision:liveDraft.current.ownerRevision+(liveDraft.current.ownerId===ownerId?0:1),prices,blocked:referenceUploading||pending||tasks.some(t=>t.status==='uncertain'),ready};
   type DraftSnapshot = typeof liveDraft.current;
   const activeParse=parseBinding===analysisBinding?parseStatus:null;
   const canContinueOriginal=activeParse?.state==='unknown'&&activeParse.canContinueOriginal===true&&!activeParse.canRecheck;
@@ -127,7 +140,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   const settledTaskPhases = useRef(new Set<string>());
   const querySequences = useRef(new Map<string, number>());
   const planRef=useRef<string|null>(null), filterRef=useRef({tab,deleted}); filterRef.current={tab,deleted};
-  const draftSignature=JSON.stringify({rules,planId:plan?.id,index,model,quality,resolution,advanced,tab,deleted,previousImageTaskId:previousImageTask?.id,runningPlans});
+  const draftSignature=JSON.stringify({rules,planId:plan?.id,index,model,quality,resolution,channelId:imageChannel.channelId,advanced,tab,deleted,previousImageTaskId:previousImageTask?.id,runningPlans});
   usePageExitRisk({ unsaved: ready&&storedSignature===draftSignature ? [] : ['人物工作现场尚未保存'], busy: busy || referenceUploading ? ['人物操作或参考图上传处理中'] : [], revision: draftSignature });
   const load = useCallback(async (append = false, nextCursor?: string | null) => {
     const owner = liveDraft.current.ownerId, filter = { ...filterRef.current }, sequence = ++historySequence.current;
@@ -154,6 +167,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     mergeResultRecords(rows);
     setRecordTotal(Number.isSafeInteger(data.total) && data.total >= 0 ? data.total : null);
     setRecentConfigs(data.recentConfigs); setCursor(data.nextCursor || null); setPrices(data.settings.prices); setBillingReadiness(data.settings.billingReadiness);
+    setImageChannels(data.settings.imageChannels ?? null);
     return data;
   }, [mergeResultRecords]);
   const queryPlan = useCallback(async (id: string) => {
@@ -292,24 +306,40 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     assertDraft(draft);
     if(!draft.ready||management)throw new Error('人物页面尚未就绪，请等待或返回人物生成。');
     if(liveDraft.current.blocked)throw new Error('原提交尚未确认，请先查询原任务；不能重复生成。');
-    const unit=draft.prices[draft.model];
-    if(unit==null||!Number.isInteger(unit)||unit<0)throw new Error('当前模型图片价格尚未就绪，本次未调用文字模型或提交图片。');
+    const channel=imageChannel.channels.items.find(item=>item.id===draft.channelId);
+    const capability=imageStudioChannelModel(channel,draft.model);
+    const unit=draft.channelId==='original'?draft.prices[draft.model]:capability?.billingMode==='fixed'
+      ?(capability.fixedPoints??(['shared','banana'].includes(draft.channelId)?draft.prices[draft.model]:null)):0;
+    if(draft.channelId==='original'&&(unit==null||!Number.isInteger(unit)||unit<0))throw new Error('当前模型图片价格尚未就绪，本次未调用文字模型或提交图片。');
+    if(draft.channelId!=='original'){
+      const issue=imageStudioChannelIssue(channel,draft.model,{quality:draft.quality,resolution:draft.resolution,ratio:isAvatarSheet(draft.rules)?'1:1':'1:1',referenceCount:draft.rules.referenceIds?.length||0});
+      if(issue)throw new Error(`${issue} 本次未调用文字模型或提交图片。`);
+      if(capability?.billingMode==='fixed'&&(unit==null||!Number.isInteger(unit)||unit<0))throw new Error('当前生图通道尚未配置固定点数，本次未调用文字模型或提交图片。');
+    }
     const selected=draft.model as typeof IMAGE_STUDIO_MODELS[number];
-    if(!IMAGE_STUDIO_MODELS.includes(selected)||!IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[selected]?.some(option=>option===draft.quality)||!IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[selected]?.some(option=>option===draft.resolution))throw new Error('当前图片模型或参数不可用，请先调整；本次未调用文字模型或提交图片。');
+    if(!IMAGE_STUDIO_MODELS.includes(selected)||(draft.channelId==='original'
+      &&(!IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[selected]?.some(option=>option===draft.quality)||!IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[selected]?.some(option=>option===draft.resolution))))throw new Error('当前图片模型或参数不可用，请先调整；本次未调用文字模型或提交图片。');
   }
   async function checkImageSettings(draft: DraftSnapshot) {
     setStage('检查图片价格和通道');
     const response=await fetch('/api/image-studio/settings',{cache:'no-store'});
-    const settings=await readJsonResponse<{error?:string;prices:Record<string,number|null>;modelReady:Record<string,boolean>;billingReadiness?:Payload['settings']['billingReadiness']}>(response);
+    const settings=await readJsonResponse<{error?:string;prices:Record<string,number|null>;modelReady:Record<string,boolean>;imageChannels?:unknown;billingReadiness?:Payload['settings']['billingReadiness']}>(response);
     assertDraft(draft);
     if(!response.ok)throw new Error(settings.error||'图片设置尚未确认，本次未调用文字模型或提交图片。');
-    setBillingReadiness(settings.billingReadiness);
+    setBillingReadiness(settings.billingReadiness); setImageChannels(settings.imageChannels ?? null);
+    const freshChannels=normalizeImageStudioChannels(settings.imageChannels);
+    const freshChannel=freshChannels.items.find(item=>item.id===draft.channelId);
+    const freshCapability=imageStudioChannelModel(freshChannel,draft.model);
+    const freshIssue=draft.channelId==='original'?null:imageStudioChannelIssue(freshChannel,draft.model,{quality:draft.quality,resolution:draft.resolution,ratio:'1:1',referenceCount:draft.rules.referenceIds?.length||0});
+    if(freshIssue)throw new Error(`${freshIssue} 本次未调用文字模型或提交图片。`);
     const unit=settings.prices?.[draft.model];
-    if(unit!==draft.prices[draft.model]){
+    if(draft.channelId==='original'&&unit!==draft.prices[draft.model]){
       setPrices(old=>({...old,[draft.model]:unit??null}));
       throw new Error('图片价格已变化，请核对按钮上方的新报价后重新点击；本次未调用文字模型或提交图片。');
     }
-    if(settings.modelReady?.[draft.model]!==true)throw new Error('当前模型图片通道尚未就绪，本次未调用文字模型或提交图片。');
+    if(draft.channelId==='original'&&settings.modelReady?.[draft.model]!==true)throw new Error('当前模型图片通道尚未就绪，本次未调用文字模型或提交图片。');
+    if(draft.channelId!=='original'&&(!freshChannel||!imageStudioChannelReadyForModel(freshChannel,draft.model,settings.modelReady?.[draft.model])
+      ||freshCapability?.billingMode==='fixed'&&freshCapability.fixedPoints==null&&!['shared','banana'].includes(draft.channelId)))throw new Error('当前图片通道或固定点数尚未就绪；本次未调用文字模型或提交图片。');
   }
   async function run(work: () => Promise<void>) { if (lock.current) return; const draft=liveDraft.current; lock.current = true; setBusy(true); setError(''); try { await work(); } catch (e) { if(alive.current&&liveDraft.current.ownerRevision===draft.ownerRevision&&liveDraft.current.revision===draft.revision){setError((e as Error).message);if((e as {parse?:DescriptionStatus}).parse)showParse((e as {parse:DescriptionStatus}).parse,draft);} } finally { lock.current = false; if(alive.current){setBusy(false);setStage('');} } }
   async function readParse(draft: DraftSnapshot, allowAnalysis: boolean, retryToken?: string, recheckOnly=false, allowOriginal=false) {
@@ -346,9 +376,10 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     if(liveDraft.current.blocked)throw new Error('原提交尚未确认，请先查询；本次未重复出图。');
     if(next.model!==original.model||next.quality!==original.quality||next.resolution!==original.resolution||avatarLayout(next)!==avatarLayout(original.rules))throw new Error('返回的图片参数与当前选择不一致，本次未提交；请重新准备。');
     if(next.candidates.some(candidate=>candidate.members.length!==original.rules.people))throw new Error('返回的人数与当前选择不一致，本次未提交；正文和原参数保留。');
-    if(next.unitCredits===null||!Number.isInteger(next.unitCredits)||next.unitCredits<0||!next.imageReady){setNotice('人物草稿已准备，图片通道或报价尚未就绪；本次未提交图片。');return;}
+    if((next.unitCredits===null&&!actualQuoteRequired||next.unitCredits!==null&&(!Number.isInteger(next.unitCredits)||next.unitCredits<0))||!next.imageReady){setNotice('人物草稿已准备，图片通道或报价尚未就绪；本次未提交图片。');return;}
     const count=avatarOutputCount(next),expectedCount=isAvatarSheet(original.rules)?1:original.rules.candidates;
-    const quoteParameters=JSON.stringify([ownerId,avatarRulesSignature(next.candidates[0].rules),next.model,next.quality,next.resolution,avatarLayout(next)]);
+    if((next.channelId||'original')!==original.channelId)throw new Error('人物草稿使用的生图通道与当前选择不同，请按当前通道重新准备；尚未提交图片。');
+    const quoteParameters=JSON.stringify([ownerId,avatarRulesSignature(next.candidates[0].rules),next.model,next.quality,next.resolution,avatarLayout(next),next.channelId||'original',next.imageChannel?.configRevision||'legacy']);
     let quote=billingQuote?.planId===next.id&&billingQuote.parameters===quoteParameters
       &&(!billingQuote.quote.expiresAt||Date.parse(billingQuote.quote.expiresAt)>Date.now())?billingQuote.quote:null;
     if(!quote){
@@ -360,10 +391,13 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
         ||(result.billingQuoteId!==null&&typeof result.billingQuoteId!=='string')
         ||!result.expiresAt||!Number.isFinite(Date.parse(result.expiresAt))||Date.parse(result.expiresAt)<=Date.now()
         ||(result.billingMode==='actual'&&!result.billingQuoteId))throw new Error('本次图片报价信息不完整，尚未提交。');
+      if((next.channelId||'original')!=='original'&&(!next.imageChannel||result.imageChannel?.channelId!==next.imageChannel.channelId
+        ||result.imageChannel.configRevision!==next.imageChannel.configRevision))throw new Error('生图通道配置已变化，当前报价未绑定到人物草稿；尚未提交图片。');
       const previousTotal=billingQuote?.planId===next.id&&billingQuote.parameters===quoteParameters
         &&(!billingQuote.quote.expiresAt||Date.parse(billingQuote.quote.expiresAt)>Date.now())
         ?Math.ceil(billingQuote.quote.estimatedCredits)
-        :visibleDraftBillingEstimate?Math.ceil(visibleDraftBillingEstimate.estimatedCredits):Math.ceil((original.prices[next.model]??next.unitCredits)*count);
+        :visibleDraftBillingEstimate?Math.ceil(visibleDraftBillingEstimate.estimatedCredits)
+          :next.unitCredits !== null ? Math.ceil(((next.channelId||'original')==='original'?(original.prices[next.model]??next.unitCredits):next.unitCredits)*count) : -1;
       quote=result;
       setBillingQuote({planId:next.id,parameters:quoteParameters,quote:result});
       if(Math.ceil(result.estimatedCredits)>previousTotal || direct && result.billingMode==='actual' && !visibleDraftBillingEstimate){
@@ -372,10 +406,12 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
         return;
       }
     }
+    if((next.channelId||'original')!=='original'&&(!next.imageChannel||quote?.imageChannel?.channelId!==next.imageChannel.channelId
+      ||quote.imageChannel.configRevision!==next.imageChannel.configRevision))throw new Error('生图通道配置已变化，当前报价未绑定到人物草稿；尚未提交图片。');
     if(quote.expiresAt&&Date.parse(quote.expiresAt)<=Date.now()){setBillingQuote(null);setNotice('图片报价已过期，本次未提交；请再次点击获取新报价。');return;}
-    if(direct&&(next.unitCredits!==original.prices[original.model]||count!==expectedCount)){
+    if(direct&&(next.channelId||'original')==='original'&&(next.unitCredits!==original.prices[original.model]||count!==expectedCount)){
       setPrices(old=>({...old,[next.model]:next.unitCredits}));
-      setNotice(`图片报价已变化：${count}张，每张${next.unitCredits}点，共${count*next.unitCredits}点。本次未提交图片，请核对新报价后重新点击生成。`);
+      setNotice(next.unitCredits === null ? '图片价格尚未确认，本次未提交图片；请先核对新报价。' : `图片报价已变化：${count}张，每张${next.unitCredits}点，共${count*next.unitCredits}点。本次未提交图片，请核对新报价后重新点击生成。`);
       return;
     }
     if(!direct){
@@ -394,7 +430,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     setStage('提交图片任务');
     setBillingQuote(null);
     try {
-      try { await api({ action: 'submit', id: next.id, layout:avatarLayout(next),rules:next.candidates[0].rules,model:next.model,quality:next.quality,resolution:next.resolution,...(quote.billingQuoteId?{billingQuoteId:quote.billingQuoteId}:{}),maxEstimatedCost:Math.ceil(quote.estimatedCredits) });watchGenerationCompletion(ownerId, next.id, 'avatar', count); }
+      try { await api({ action: 'submit', id: next.id, layout:avatarLayout(next),rules:next.candidates[0].rules,model:next.model,quality:next.quality,resolution:next.resolution,...(next.channelId&&next.channelId!=='original'?{channelId:next.channelId,imageChannel:quote.imageChannel}:{}),...(quote.billingQuoteId?{billingQuoteId:quote.billingQuoteId}:{}),maxEstimatedCost:Math.ceil(quote.estimatedCredits) });watchGenerationCompletion(ownerId, next.id, 'avatar', count); }
       finally { if (alive.current && liveDraft.current.ownerRevision===original.ownerRevision && planRef.current===next.id) await refreshCredits({ force: true }); }
       if(!alive.current||liveDraft.current.ownerRevision!==original.ownerRevision||planRef.current!==next.id)return true;
       setPending(false);setNotice('图片任务已提交，正在查询结果；尚未代表已出图。'); await queryPlan(next.id); await load();
@@ -415,10 +451,10 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
       &&plan.descriptionInterpretation.parserVersion===parse.parserVersion
       &&plan.descriptionInterpretation.originalAttemptRequestId===parse.requestId;
     const reusable=action==='new'&&!forceNew&&plan&&!tasks.length&&avatarRulesSignature(draft.rules)===avatarRulesSignature(plan.candidates[0].rules)
-      &&draft.model===plan.model&&draft.quality===plan.quality&&draft.resolution===plan.resolution&&avatarLayout(draft.rules)===avatarLayout(plan)&&originalBindingMatches;
+      &&draft.model===plan.model&&draft.quality===plan.quality&&draft.resolution===plan.resolution&&(plan.channelId||'original')===draft.channelId&&avatarLayout(draft.rules)===avatarLayout(plan)&&originalBindingMatches;
     if(reusable){await submit(plan,draft,true);return;}
-    const reprice=action==='new'&&!forceNew&&plan&&originalBindingMatches&&plan.candidates.length===draft.rules.candidates&&avatarRulesSignature(draft.rules)===avatarRulesSignature(plan.candidates[0].rules)&&(!tasks.length||draft.model!==plan.model||draft.quality!==plan.quality||draft.resolution!==plan.resolution);
-    const result = await api<{plan:AvatarPlan}>(reprice?{action:'quote',id:plan!.id,rules:draft.rules,model:draft.model,quality:draft.quality,resolution:draft.resolution,layout:avatarLayout(draft.rules)}:{ action: 'prepare', rules:reroll&&field?{...draft.rules,choices:{...draft.rules.choices,[field]:''}}:draft.rules, ...(parse?{descriptionId:parse.descriptionId,parserVersion:parse.parserVersion,...(parse.canContinueOriginal&&!parse.canRecheck?{descriptionMode:'original',originalAttemptRequestId:parse.requestId}:{})}:{}), model:draft.model, quality:draft.quality, resolution:draft.resolution, previousId: plan?.id, previousIndex: index, baselineAssetId: sheet?undefined:current?.baselineAssetId || image?.id, actionType: action, ...(field ? { field } : {}) });
+    const reprice=action==='new'&&!forceNew&&plan&&originalBindingMatches&&plan.candidates.length===draft.rules.candidates&&avatarRulesSignature(draft.rules)===avatarRulesSignature(plan.candidates[0].rules)&&(!tasks.length||draft.model!==plan.model||draft.quality!==plan.quality||draft.resolution!==plan.resolution||(plan.channelId||'original')!==draft.channelId);
+    const result = await api<{plan:AvatarPlan}>(reprice?{action:'quote',id:plan!.id,rules:draft.rules,model:draft.model,channelId:draft.channelId,quality:draft.quality,resolution:draft.resolution,layout:avatarLayout(draft.rules)}:{ action: 'prepare', rules:reroll&&field?{...draft.rules,choices:{...draft.rules.choices,[field]:''}}:draft.rules, ...(parse?{descriptionId:parse.descriptionId,parserVersion:parse.parserVersion,...(parse.canContinueOriginal&&!parse.canRecheck?{descriptionMode:'original',originalAttemptRequestId:parse.requestId}:{})}:{}), model:draft.model, channelId:draft.channelId, quality:draft.quality, resolution:draft.resolution, previousId: plan?.id, previousIndex: index, baselineAssetId: sheet?undefined:current?.baselineAssetId || image?.id, actionType: action, ...(field ? { field } : {}) });
     assertDraft(draft);
     if(action==='tweak'){planRef.current=result.plan.id;setPlan(result.plan);setRules(result.plan.candidates[0].rules);setSourceTask(null);setTasks([]);setIndex(0);setPending(false);setNotice('仅修改人物草稿，尚未生成图片或扣除图片点数。');}
     else {const submitted=await submit(result.plan,draft,action==='new');if(!submitted){assertDraft(draft);if(!image){planRef.current=result.plan.id;setPlan(result.plan);setSourceTask(null);setTasks([]);setIndex(0);}}}
@@ -439,7 +475,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     const draft=liveDraft.current;
     if(!plan||blocked)throw new Error('请先查询原任务；本次没有重复生成');
     if(conditionsChanged)throw new Error('人物条件已变化，请先按当前文案和条件准备人物；旧图片仍保留');
-    setStage('更新图片报价');const data=await api<{plan:AvatarPlan}>({action:'quote',id:plan.id,rules,model,quality,resolution,layout:avatarLayout(rules)});
+    setStage('更新图片报价');const data=await api<{plan:AvatarPlan}>({action:'quote',id:plan.id,rules,model,channelId:draft.channelId,quality,resolution,layout:avatarLayout(rules)});
     assertDraft(draft);await submit(data.plan,draft);
   }); }
   async function mutate(record: AvatarRecord, action: string, extra: Record<string,unknown> = {}) {
@@ -512,13 +548,19 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
             <button type="button" disabled={busy||blocked||referenceIds.includes(item.output.asset.id)} onClick={()=>{try{addReferences([item.output!.asset!.id]);setNotice('已添加整图参考；没有上传、生成或扣费。');}catch(e){setError((e as Error).message);}}}><ImagePlus size={15}/>整图参考</button>
             {sheet && item.candidateIndex >= 0 && plan && <button type="button" disabled={busy} onClick={()=>void run(async()=>{await downloadAvatarCell(item.media!.src,avatarLayout(plan),index);setNotice('已在本机裁出所选格并交给浏览器下载；没有生成、上传或收费。');})}><Download size={15}/>裁出此格</button>}
           </> : null}
-          renderPrimaryActions={item => item.media && item.output?.asset && !sheet && item.candidateIndex >= 0 && plan ? <button type="button" disabled={busy} onClick={()=>void run(async()=>{await askName('人物名称','我的人物',{title:'保存人物',confirmLabel:'保存',onSubmit:async name=>{await api({action:'save',name,planId:plan.id,index:item.candidateIndex,record:{kind:'character'}});await load();}});})}><Save size={15}/>保存这个人</button> : null}
+          renderPrimaryActions={item => item.output?.status === 'queued' && item.output.snapshot?.imageChannelLabel ? <button type="button" disabled={busy} onClick={() => void run(async () => {
+            if (!await confirm('只取消尚未向供应商请求的排队任务；已受理或结果未知的任务不取消。', { title: '取消排队', confirmLabel: '取消排队', danger: true })) return;
+            const response = await fetch('/api/image-studio/tasks', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cancel', id: item.output!.id }) });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || '取消未确认，请重新查询原任务');
+            if (plan) await queryPlan(plan.id); await load();
+          })}>取消未受理排队</button> : item.media && item.output?.asset && !sheet && item.candidateIndex >= 0 && plan ? <button type="button" disabled={busy} onClick={()=>void run(async()=>{await askName('人物名称','我的人物',{title:'保存人物',confirmLabel:'保存',onSubmit:async name=>{await api({action:'save',name,planId:plan.id,index:item.candidateIndex,record:{kind:'character'}});await load();}});})}><Save size={15}/>保存这个人</button> : null}
           renderDelete={item => item.media && item.output?.asset ? <button type="button" disabled={busy} title="删除这张图（可撤销）" aria-label={`删除${item.label}（可撤销）`} onClick={() => void run(() => removeResult(item.output!))}><Trash2 size={15}/></button> : null}
         />
         <div className={styles.controls}>
         {current&&<><button type="button" disabled={busy||blocked} onClick={()=>void prepare('new',undefined,false,true)}>{draftSheet?'换一组人物':'换一个人'}</button><button type="button" disabled={busy||blocked||needsAnalysis||sheet||draftSheet||!image&&!current.baselineAssetId} onClick={()=>void prepare('styling')}>换个造型</button>{(!tasks.length||layoutChanged||model!==plan?.model||quality!==plan?.quality||resolution!==plan?.resolution||current.compilerVersion!==AVATAR_COMPILER_VERSION)&&<button type="button" disabled={busy||blocked||conditionsChanged||needsAnalysis||(draftSheet||layoutChanged)&&plan?.candidates.length!==rules.candidates} onClick={()=>void quoteOriginal()}>重新报价并按原人物出图</button>}</>}
         {ticketId&&image&&<button type="button" className={styles.primary} disabled={busy} onClick={()=>void returnImage()}>使用这张并返回</button>}</div>
-        {tasks.some(t=>t.status==='failed')&&!tasks.some(t=>['queued','running','uncertain'].includes(t.status))&&<button type="button" className={styles.quiet} disabled={busy||conditionsChanged||needsAnalysis} onClick={()=>void run(async()=>{const draft=liveDraft.current;const data=await api<{plan:AvatarPlan}>({action:'retry',id:plan!.id});assertDraft(draft);await submit(data.plan,draft);})}>只重试失败项</button>}
+        {tasks.some(t=>t.status==='failed')&&!tasks.some(t=>['queued','running','uncertain'].includes(t.status))&&<button type="button" className={styles.quiet} disabled={busy||conditionsChanged||needsAnalysis||(plan?.channelId||'original')!==imageChannel.channelId} onClick={()=>void run(async()=>{const draft=liveDraft.current;if((plan?.channelId||'original')!==draft.channelId)throw new Error('失败任务使用的生图通道与当前选择不同，请切回原通道后重试；没有新建任务。');const data=await api<{plan:AvatarPlan}>({action:'retry',id:plan!.id,channelId:draft.channelId,...(plan?.imageChannel?{imageChannel:plan.imageChannel}:{})});assertDraft(draft);await submit(data.plan,draft);})}>只重试失败项</button>}
         {previousImageTask?.asset&&imageTask===previousImageTask&&<p className={styles.price}>保留的上一张图片；当前人物或任务还没有新图片。</p>}
         {sheet&&<p className={styles.price}>整图不是单人的身份基准；可裁出所选格下载，保存人物仍需独立原图。</p>}
         {task?.error&&<p className={styles.error}>{task.error}</p>}{tasks.length>0&&<p className={styles.price}>已完成 {tasks.filter(t=>t.status==='succeeded').length}/{plan?avatarOutputCount(plan):0} 张。图片已保存不代表人物要求已符合。</p>}
@@ -536,7 +578,8 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
         {referenceError&&<p role="status" className={styles.error}>{referenceError}</p>}
         {pasteProgress&&<UploadProgressIndicator label={pasteProgress.label} percent={pasteProgress.percent} busy/>}
         {!!failedReferences.length&&<div className={styles.controls}><span className={styles.error}>{failedReferences.length}张未上传，正文和已有参考保留</span><button type="button" disabled={busy||blocked} onClick={()=>void uploadPastedReferences(failedReferences)}>重试未上传图片</button><button type="button" disabled={busy||blocked} onClick={()=>setFailedReferences([])}>移除未上传图片</button></div>}
-        <button type="button" className={styles.primary} disabled={!ready||busy||blocked||management} onClick={()=>void prepare()}>{busy?stage||'处理中':canContinueOriginal?'按原描述生成':draftSheet?`生成${avatarSheetLabel(rules.layout)}`:'生成独立头像'}</button>
+        <button type="button" className={styles.primary} disabled={!ready||busy||blocked||management||Boolean(channelIssue)} onClick={()=>void prepare()}>{busy?stage||'处理中':canContinueOriginal?'按原描述生成':draftSheet?`生成${avatarSheetLabel(rules.layout)}`:'生成独立头像'}</button>
+        {channelIssue&&<p role="status" className={styles.price}>{channelIssue}</p>}{imageChannel.message&&<p role="status" className={styles.price}>{imageChannel.message}</p>}
         {canContinueOriginal&&<p className={styles.price}>原文字回复未取回，不再重复调用文字模型。</p>}
         <p className={styles.estimate}>
           {visibleBillingQuote
@@ -594,8 +637,9 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
         </details>
         <div className={styles.controls} aria-label="图片排版"><button type="button" aria-pressed={rules.layout==='contact-sheet'} onClick={()=>setRules(r=>({...r,layout:'contact-sheet',people:1,candidates:4}))}>四宫格（1张）</button><button type="button" aria-pressed={rules.layout==='contact-sheet-9'} onClick={()=>setRules(r=>({...r,layout:'contact-sheet-9',people:1,candidates:9}))}>九宫格（1张）</button><button type="button" aria-pressed={!draftSheet} onClick={()=>setRules(r=>({...r,layout:'independent',candidates:r.candidates===9?4:r.candidates}))}>独立头像</button></div>
         {!draftSheet&&<div className={styles.controls}><button type="button" aria-pressed={rules.people === 1} onClick={() => setRules(r => ({...r,people:1}))}>单人头像</button><button type="button" aria-pressed={rules.people > 1} onClick={() => setRules(r => ({...r,people:2}))}>多人</button>{rules.people > 1 && <select aria-label="每张图片人数" value={rules.people} onChange={e=>setRules(r=>({...r,people:Number(e.target.value) as 2|3|4}))}>{[2,3,4].map(n=><option key={n} value={n}>{n}人</option>)}</select>}</div>}
-        <label>图片模型<select value={model} onChange={e=>{setModel(e.target.value);setQuality('auto');setResolution('1K');}}>{!IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number])&&<option value={model}>原模型已不可用</option>}{IMAGE_STUDIO_MODELS.map(m=><option key={m} value={m}>{IMAGE_STUDIO_MODEL_LABELS[m]}</option>)}</select></label>
-        <div className={styles.quick}><label>质量<select value={quality} onChange={e=>setQuality(e.target.value)}>{(IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model as typeof IMAGE_STUDIO_MODELS[number]]||[quality]).map(q=><option key={q}>{q}</option>)}</select></label><label>分辨率<select value={resolution} onChange={e=>setResolution(e.target.value)}>{(IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[model as typeof IMAGE_STUDIO_MODELS[number]]||[resolution]).map(q=><option key={q}>{q}</option>)}</select></label></div>
+        <label>生图通道<ImageGenerationChannelSelect channels={imageChannel.channels} value={imageChannel.channelId} disabled={busy||pending} onChange={imageChannel.select}/></label>
+        <label>图片模型<select value={model} disabled={busy||pending} onChange={e=>{setModel(e.target.value);if(imageChannel.channelId==='original'){setQuality('auto');setResolution('1K');}}}>{!modelChoices.includes(model)&&<option value={model}>原模型已不可用</option>}{modelChoices.map(m=><option key={m} value={m} disabled={m!==model&&!imageStudioChannelReadyForModel(imageChannel.channel,m,billingReadiness?.models?.[m]?.ready)}>{IMAGE_STUDIO_MODEL_LABELS[m as keyof typeof IMAGE_STUDIO_MODEL_LABELS]||m}</option>)}</select></label>
+        <div className={styles.quick}><label>质量<select value={quality} disabled={busy||pending} onChange={e=>setQuality(e.target.value)}>{!qualityChoices.includes(quality)&&<option value={quality} disabled>{quality}（当前通道不支持）</option>}{qualityChoices.map(q=><option key={q}>{q}</option>)}</select></label><label>分辨率<select value={resolution} disabled={busy||pending} onChange={e=>setResolution(e.target.value)}>{!resolutionChoices.includes(resolution)&&<option value={resolution} disabled>{resolution}（当前通道不支持）</option>}{resolutionChoices.map(q=><option key={q}>{q}</option>)}</select></label></div>
         {!draftSheet&&<div className={styles.controls} aria-label="不同候选数量">{[1,2,4].map(n=><button key={n} type="button" aria-pressed={rules.candidates===n} onClick={()=>setRules(r=>({...r,candidates:n as 1|2|4}))}>{n}位候选</button>)}</div>}
         <h2>{sheet?`${avatarCellLabel(plan?.layout,index)}格人物`:'当前人物'}</h2>{current ? <><p>{current.members.map(d=>`${d.fields.gender.value} · ${d.fields.age.value}岁 · ${d.fields.face_shape.value} · ${d.fields.hair_length.value}`).join('；')}</p><small>{sheet?`${avatarSheetLabel(plan?.layout)}保留${plan?.candidates.length}份人物条件；整图不能作为单人身份基准。`:'保持同人使用原图参考，模型仍可能改变面部；基准图不会自动替换。'}</small>{[...quickFields,'face_shape'].map(field=>{const f=current.members[0].fields[field];return <div key={field} className={styles.field}><span>{fieldLabels[field]}</span><select aria-label={`微调${fieldLabels[field]}`} value={rules.choices[field]||f.value} onChange={e=>setChoice(field,e.target.value)}>{Array.from(new Set([f.value,...catalog[field]])).map(v=><option key={v}>{v}</option>)}</select><button type="button" aria-label={`锁定${fieldLabels[field]}`} title={`锁定${fieldLabels[field]}，${f.source==='user'?'用户指定':f.source==='random'?'随机生成':'继承或推断'}`} aria-pressed={!!rules.locks[field]} onClick={()=>setRules(r=>{const locks={...r.locks};if(locks[field])delete locks[field];else locks[field]={...f,locked:true,manualLock:true};return {...r,locks};})}>{rules.locks[field]?<Lock size={14}/>:<Unlock size={14}/>}</button><button type="button" disabled={busy||blocked||sheet||draftSheet||!!rules.locks[field]||f.locked} title={`只重抽${fieldLabels[field]}，不出图`} aria-label={`只重抽${fieldLabels[field]}`} onClick={()=>void prepare('tweak',field,true)}><Dice5 size={15}/></button></div>;})}<div className={styles.controls}>{[...quickFields,'face_shape'].filter(field=>rules.choices[field]&&rules.choices[field]!==current.members[0].fields[field].value).map(field=><button type="button" className={styles.quiet} key={field} disabled={busy||blocked||sheet||draftSheet} onClick={()=>void prepare('tweak',field)}>微调{fieldLabels[field]}</button>)}</div><details><summary>完整人物信息</summary>{current.members.map((dna,i)=><div key={dna.seed}><strong>人物 {i+1}</strong><p>明显特征 {dna.details.filter(d=>d.prominence!=='micro').length} / 默认预算 {dna.featureBudget}</p>{Object.entries(dna.fields).map(([key,f])=><p key={key}>{fieldLabels[key]||key}：{f.value || '未指定'} · {f.source==='user'?'用户指定':f.source==='config'?'配置继承':f.source==='inferred'?'范围推断':'随机生成'}{f.locked?' · 已固定':''}</p>)}</div>)}</details><details><summary>人物描述与提示词</summary><div className={styles.prompt}>{activePrompt}</div><button className={styles.quiet} type="button" onClick={()=>void navigator.clipboard.writeText(activePrompt).catch(()=>setError('复制失败，请手动选择文本'))}><Copy size={15}/>复制提示词</button><small>随机规则 {current.members[0].ruleVersion}，图片模型不提供可复现的生图种子。</small></details>{currentRecord&&<label>人物符合度<select value={currentRecord.qualityStatus||'unreviewed'} onChange={e=>void run(()=>mutate(currentRecord,'quality',{record:{qualityStatus:e.target.value}}))}><option value="unreviewed">未人工确认</option><option value="matches">符合要求</option><option value="mismatch">不符合要求</option></select></label>}</> : <small>生成后查看人物信息</small>}</aside>
     </fieldset>}
@@ -610,7 +654,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
           <button type="button" disabled={busy} onClick={()=>void restore(record)}>恢复草稿</button>
         </>}
         renderDelete={({record}) => !record.deletedAt ? <button type="button" title="删除生成记录" aria-label={`删除生成记录：${record.name}`} disabled={busy} onClick={()=>void run(async()=>{if(await confirm(`删除“${record.name}”？可撤销，不删除已有图片、资产或其他历史。`,{title:'删除记录',confirmLabel:'删除',danger:true}))await mutate(record,'delete');})}><Trash2 size={15}/></button> : null}
-      /> : <>      {visibleRecords.map(r=>{const t=tasks.find(task=>task.id===r.taskId)||(sourceTask?.id===r.taskId?sourceTask:recordTasks[r.taskId||'']);const interpretation=descriptionInterpretationLabel(r.descriptionInterpretation);return <article className={styles.record} key={r.id}>{t?.asset||r.assetId?<button type="button" className={styles.recordCover} aria-label={`预览${r.name}`} onClick={()=>openImage(t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}`,r.name)} onDoubleClick={()=>openImage(t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}`,r.name)}><img src={t?.asset?.thumbnail_url||t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}?thumbnail=1`} alt={r.name}/></button>:<span className={styles.recordCover}><UserRound size={24}/></span>}<div className={styles.recordText}><strong>{r.name}</strong><small><RelativeTime value={r.createdAt}/> · {r.kind==='result'?(t?statusLabel[t.status]:'状态未读取'):r.kind==='config'?`配置第${r.revision}版`:'已保存人物'}{interpretation?` · ${interpretation}`:''}</small></div><div className={styles.controls}>{r.deletedAt?<button type="button" disabled={busy} onClick={()=>void run(()=>mutate(r,'undelete'))}>撤销删除</button>:<><button type="button" disabled={busy} onClick={()=>void restore(r)}>{r.kind==='config'?'使用/编辑':'恢复草稿'}</button>{r.kind==='config'&&<><button type="button" onClick={()=>void run(async()=>{await askName('配置名称',r.name,{title:'重命名',onSubmit:async name=>mutate(r,'rename',{name})});})}>重命名</button><button type="button" onClick={()=>void run(async()=>{await api({action:'save',name:`${r.name}副本`,record:{kind:'config',rules:r.rules}});await load();})}>复制</button></>}<button type="button" disabled={busy} onClick={()=>void run(async()=>{if(await confirm(`删除“${r.name}”？可撤销，不删除已有图片、资产或其他历史。`,{title:'删除记录',confirmLabel:'删除',danger:true}))await mutate(r,'delete');})}><Trash2 size={15}/>删除</button></>}</div></article>;})}
+      /> : <>      {visibleRecords.map(r=>{const t=tasks.find(task=>task.id===r.taskId)||(sourceTask?.id===r.taskId?sourceTask:recordTasks[r.taskId||'']);const interpretation=descriptionInterpretationLabel(r.descriptionInterpretation);const imageSource=[t?.snapshot?.imageSupplierName,t?.snapshot?.imageChannelLabel].filter((value):value is string=>typeof value==='string'&&Boolean(value.trim())).join(' · ');return <article className={styles.record} key={r.id}>{t?.asset||r.assetId?<button type="button" className={styles.recordCover} aria-label={`预览${r.name}`} onClick={()=>openImage(t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}`,r.name)} onDoubleClick={()=>openImage(t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}`,r.name)}><img src={t?.asset?.thumbnail_url||t?.asset?.original_url||`/api/image-studio/assets/${r.assetId}?thumbnail=1`} alt={r.name}/></button>:<span className={styles.recordCover}><UserRound size={24}/></span>}<div className={styles.recordText}><strong>{r.name}</strong><small><RelativeTime value={r.createdAt}/> · {r.kind==='result'?(t?statusLabel[t.status]:'状态未读取'):r.kind==='config'?`配置第${r.revision}版`:'已保存人物'}{imageSource?` · 生成时供应商：${imageSource}`:''}{interpretation?` · ${interpretation}`:''}</small></div><div className={styles.controls}>{r.deletedAt?<button type="button" disabled={busy} onClick={()=>void run(()=>mutate(r,'undelete'))}>撤销删除</button>:<><button type="button" disabled={busy} onClick={()=>void restore(r)}>{r.kind==='config'?'使用/编辑':'恢复草稿'}</button>{r.kind==='config'&&<><button type="button" onClick={()=>void run(async()=>{await askName('配置名称',r.name,{title:'重命名',onSubmit:async name=>mutate(r,'rename',{name})});})}>重命名</button><button type="button" onClick={()=>void run(async()=>{await api({action:'save',name:`${r.name}副本`,record:{kind:'config',rules:r.rules}});await load();})}>复制</button></>}<button type="button" disabled={busy} onClick={()=>void run(async()=>{if(await confirm(`删除“${r.name}”？可撤销，不删除已有图片、资产或其他历史。`,{title:'删除记录',confirmLabel:'删除',danger:true}))await mutate(r,'delete');})}><Trash2 size={15}/>删除</button></>}</div></article>;})}
       </>}
 
       {tab !== 'result'&&!visibleRecords.length&&<p className={styles.empty}>暂无{deleted?'已删除':''}{tab==='config'?'配置':tab==='character'?'人物':'生成历史'}</p>}{tab !== 'result'&&cursor&&<button type="button" className={styles.quiet} disabled={busy} onClick={()=>void run(async()=>{await load(true,cursor);})}>加载更多</button>}
