@@ -120,9 +120,13 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
     }
     if (user.account_type !== 'internal') return null;
     if (type === 'image_template') {
-      const row = await prisma.imageStudioPreset.findUnique({ where: { id } });
+      let row = await prisma.imageStudioPreset.findUnique({ where: { id } });
+      if (!row && id.startsWith('module-source:')) {
+        const module = await prisma.imageStudioModule.findUnique({ where: { id: id.slice('module-source:'.length) }, select: { source_preset_id: true } });
+        if (module?.source_preset_id) row = await prisma.imageStudioPreset.findUnique({ where: { id: module.source_preset_id } });
+      }
       if (!row || await studioPresetArchived(row.id) || !canViewStudioPreset(user, row)) return null;
-      const item = summary(input, 'template', row.name, `/template-studio?type=image&presetId=${encodeURIComponent(id)}`);
+      const item = summary(input, 'template', row.name, `/template-studio?type=image&presetId=${encodeURIComponent(row.id)}`);
       item.templateKind = 'definition'; item.templateMedium = 'image';
       item.actionLabel = '使用模板'; item.versionLabel = row.updated_at.toISOString(); item.owner = await owner(row.owner_id);
       return { summary: item };

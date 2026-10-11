@@ -16,8 +16,9 @@ async function projectTemplates(user: SessionUser, keys: ContentKey[]): Promise<
   if (!canUseCompanyTemplates(user)) return [];
   const parts = keys.flatMap(key => { const parsed = tryContentKeyParts(key); return parsed ? [parsed] : []; });
   const definitions = parts.filter(item => item.type === 'image_template').map(item => item.id);
+  const legacyModules = definitions.filter(id => id.startsWith('module-source:')).map(id => id.slice('module-source:'.length));
   const moduleIds = parts.filter(item => item.type === 'image_module').map(item => item.id);
-  const modules = await prisma.imageStudioModule.findMany({ where: { id: { in: moduleIds }, owner_id: user.id }, take: 40,
+  const modules = await prisma.imageStudioModule.findMany({ where: { OR: [{ id: { in: moduleIds }, owner_id: user.id }, { id: { in: legacyModules } }] }, take: 40,
     select: { id: true, owner_id: true, name: true, banner_asset_id: true, source_preset_id: true } });
   const presetIds = Array.from(new Set([...definitions, ...modules.flatMap(row => row.source_preset_id ? [row.source_preset_id] : [])]));
   const presets = await prisma.imageStudioPreset.findMany({ where: { id: { in: presetIds } }, take: 80, select: presetSelect });
@@ -26,8 +27,9 @@ async function projectTemplates(user: SessionUser, keys: ContentKey[]): Promise<
   const byModule = new Map(modules.map(row => [row.id, row]));
   return parts.flatMap<Projection>(({ key, type, id }) => {
     if (type === 'image_template') {
-      const row = byId.get(id);
-      return row && canViewStudioPreset(user, row) ? [{ key, title: row.name, href: `/template-studio?type=image&presetId=${encodeURIComponent(id)}`,
+      const legacy = id.startsWith('module-source:') ? byModule.get(id.slice('module-source:'.length)) : null;
+      const row = byId.get(id) || (legacy?.source_preset_id ? byId.get(legacy.source_preset_id) : null);
+      return row && canViewStudioPreset(user, row) ? [{ key, title: row.name, href: `/template-studio?type=image&presetId=${encodeURIComponent(row.id)}`,
         kind: 'definition' as const, ownerId: row.owner_id, bannerId: row.banner_asset_id }] : [];
     }
     const row = byModule.get(id), source = row?.source_preset_id ? byId.get(row.source_preset_id) || null : null;

@@ -104,7 +104,8 @@
 .imageSectionHeading { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 16px 0 10px; }
 .imageSectionHeading > strong { font-size: 14px; }
 .auxiliarySection { margin: 20px 0; padding: 4px 0 16px; border-top: 1px solid var(--border, #364344); border-bottom: 1px solid var(--border, #364344); }
-.referenceLimits { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; margin: 12px 0; font-size: 12px; }
+.referenceLimits { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; margin: 12px 0; padding: 0; border: 0; min-width: 0; font-size: 12px; }
+.templatePrompt { display: grid; gap: 8px; margin: 12px 0; font-size: 13px; }
 .referenceLimits label, .primaryRange { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; white-space: nowrap; }
 .dialog .referenceLimits select { width: 60px; min-width: 60px; flex: 0 0 60px; padding: 5px 7px !important; }
 .moduleSettingsActions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; margin: 22px 0 26px; padding-top: 16px; border-top: 1px solid #2d383d; }
@@ -414,3 +415,4 @@
 .resolutionActions { display: flex; flex-wrap: wrap; gap: 8px; }
 .resolutionTargets { padding: 0; list-style: none; max-height: 240px; overflow: auto; }
 .resolutionTargets li { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-bottom: 1px solid var(--border, #dedee3); }
+.sharedOrigin { color: var(--text-secondary, #9ca3af); font-size: 12px; font-weight: 400; white-space: nowrap; flex-shrink: 0; }

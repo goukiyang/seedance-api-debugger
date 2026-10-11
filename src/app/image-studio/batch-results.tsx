@@ -10,9 +10,32 @@ import { handImageDownloadToBrowser } from '@/lib/media/native-download';
 import { batchStateLabel, safeBatchFileName, STUDIO_BATCH_LIMITS, type StudioBatchView } from '@/lib/image-studio/batch-contract';
 import { readBatchResponse } from '@/lib/image-studio/batch-receipt';
 import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
+import type { SharedStudioIntent } from '@/lib/image-studio/shared-types';
+import { IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_QUALITY_LABELS } from '@/lib/image-studio/model-catalog';
 import { canSelectBatchDirectory, selectBatchDirectory, newBatchOutputDirectory, writeUniqueBatchFile, type BatchDirectoryHandle } from './batch-files';
 import styles from './batch.module.css';
 type Delivery = { saved: Record<number, string>; child: BatchDirectoryHandle | null; lock: boolean; directory: BatchDirectoryHandle | null };
+type SharedBatchView = StudioBatchView & { sharedLive?: SharedStudioIntent; definitionConfirmationRequired?: boolean };
+type SavedPersonalInput = Partial<{ prompt: string; model: string; quality: string; resolution: string; count: number; aspectRatio: string }>;
+type CurrentSharedModule = { id: string; name: string; revision: number; templatePrompt?: string; personalPrompt?: string;
+  model: string; quality: string; resolution: string; count: number; aspectRatio: string;
+  sharedLive?: { intent: SharedStudioIntent; available: boolean; unavailableReason?: string; overriddenFields: Array<keyof SavedPersonalInput>;
+    defaults: { model?: string; quality?: string; resolution?: string; aspectRatio?: string; referencePolicy?: { primaryMin: number; primaryMax: number } } } };
+type ContinuationQuote = { sharedLive?: SharedStudioIntent; billingMode: 'fixed' | 'actual'; batchQuoteId: string | null;
+  estimatedCredits: number; unitCredits: number; expiresAt: string; imageChannel?: { channelId: string; configRevision: string } };
+function sameDefinition(left?: SharedStudioIntent, right?: SharedStudioIntent) {
+  return left?.protocol === 'shared-live-v1' && right?.protocol === 'shared-live-v1'
+    && left.presetId === right.presetId && left.definitionToken === right.definitionToken;
+}
+function continuationSignature(batch: SharedBatchView) {
+  return JSON.stringify([batch.id, batch.moduleId, batch.state, batch.sharedLive, batch.definitionConfirmationRequired,
+    batch.pending, batch.committedCredits, batch.budget,
+    batch.items?.filter(item => !item.taskId && item.status !== 'cancelled').map(item => [item.ordinal, item.sourceName])]);
+}
+async function readResult(response: Response, expectBatch = false) {
+  try { return await readBatchResponse(response, expectBatch); }
+  catch (cause) { throw Object.assign(cause instanceof Error ? cause : new Error('原批次结果尚未确认'), { status: response.status }); }
+}
 const deliveries = new Map<string, Delivery>();
 function deliveryFor(key: string, directory?: BatchDirectoryHandle | null) {
   if (!deliveries.has(key)) {
@@ -22,11 +45,16 @@ function deliveryFor(key: string, directory?: BatchDirectoryHandle | null) {
   return deliveries.get(key)!;
 }
 
-export function BatchResults({ id, userId, outputDirectory, deliveryOnly = false, autoPack = false, onQuickUse, visible = true }: { id: string; userId: string; outputDirectory?: BatchDirectoryHandle | null; compact?: boolean; deliveryOnly?: boolean; autoPack?: boolean; onQuickUse?: (assetId: string) => void; visible?: boolean }) {
-  const { confirm, productDialog } = useProductDialog();
+type BatchResultsProps = { id: string; userId: string; outputDirectory?: BatchDirectoryHandle | null; compact?: boolean; deliveryOnly?: boolean; autoPack?: boolean; onQuickUse?: (assetId: string) => void; visible?: boolean; onSourceChanged?: () => void };
+export function BatchResults(props: BatchResultsProps) {
+  return <BatchResultsWorkspace key={`${props.userId}:${props.id}`} {...props} />;
+}
+function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = false, autoPack = false, onQuickUse, visible = true, onSourceChanged }: BatchResultsProps) {
+  const { confirm, prompt: askBudget, productDialog } = useProductDialog();
   const delivery = deliveryFor(`${userId}:${id}`, outputDirectory);
-  const [batch, setBatch] = useState<StudioBatchView | null>(null);
+  const [batch, setBatch] = useState<SharedBatchView | null>(null);
   const [error, setError] = useState('');
+  const [continuationMessage, setContinuationMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [reading, setReading] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
@@ -46,24 +74,130 @@ export function BatchResults({ id, userId, outputDirectory, deliveryOnly = false
   }, [outputDirectory, delivery]);
   useEffect(() => { scope.current = `${userId}:${id}`; return () => { scope.current = ''; }; }, [userId, id]);
   const load = useCallback(async () => {
-    if (reader.current) return;
+    if (reader.current || actionLock.current) return;
     reader.current = true; setReading(true);
     const expected = `${userId}:${id}`;
     try {
       const data = await readBatchResponse(await fetch(`/api/image-studio/batches?id=${encodeURIComponent(id)}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }), true);
-      if (scope.current === expected) { setBatch(data.batch); setSaved({ ...delivery.saved }); setError(''); }
-    } catch (error) { if (scope.current === expected) setError(error instanceof Error ? error.message : '批次读取失败'); }
+      if (scope.current === expected && !actionLock.current) { setBatch(data.batch); setSaved({ ...delivery.saved }); setError(''); }
+    } catch (error) { if (scope.current === expected && !actionLock.current) setError(error instanceof Error ? error.message : '批次读取失败'); }
     finally { reader.current = false; if (scope.current === expected) setReading(false); }
   }, [id, userId]);
   useEffect(() => { void load(); }, [load]);
   const generationPending = !!batch && !['complete', 'cancelled'].includes(batch.state);
-  useEffect(() => { if (!generationPending) return; const timer = setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 5000); return () => clearInterval(timer); }, [load, generationPending]);
+  useEffect(() => { if (!generationPending || busy) return; const timer = setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 5000); return () => clearInterval(timer); }, [load, generationPending, busy]);
   useImageBillingRefresh((batch?.items || []).map(item => ({ id: item.taskId || String(item.ordinal), billing: item.billing })), load);
+  async function continueSharedBatch(expected: string) {
+    const valid = () => scope.current === expected;
+    const readOriginal = async () => {
+      const result = await readResult(await fetch(`/api/image-studio/batches?id=${encodeURIComponent(id)}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }), true);
+      if (!valid()) throw new Error('已离开原批次，未继续生成');
+      if (result.batch.id !== id) throw new Error('原批次未能确认，不会新建任务');
+      return result.batch as SharedBatchView;
+    };
+    const fresh = await readOriginal();
+    setBatch(fresh);
+    if (!['needs-confirmation', 'paused', 'blocked'].includes(fresh.state) || fresh.pending < 1) throw new Error('原批次当前无需继续，请查看最新状态');
+    const readDefinition = async () => {
+      const data = await readResult(await fetch(`/api/image-studio/modules?ids=${encodeURIComponent(fresh.moduleId)}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
+      if (!valid()) throw new Error('已离开原批次，未继续生成');
+      const current: CurrentSharedModule | undefined = data.modules?.find((item: CurrentSharedModule) => item.id === fresh.moduleId);
+      if (!current?.sharedLive?.available || current.sharedLive.intent.protocol !== 'shared-live-v1') throw new Error(current?.sharedLive?.unavailableReason || '原批次的共享模板已不可用，不能继续；原任务和结果保留');
+      if (fresh.sharedLive && current.sharedLive.intent.presetId !== fresh.sharedLive.presetId) throw new Error('原批次绑定已变化，不能改用另一个模板');
+      return current as CurrentSharedModule & { sharedLive: NonNullable<CurrentSharedModule['sharedLive']> };
+    };
+    const current = await readDefinition();
+    if (!fresh.definitionConfirmationRequired && fresh.state !== 'needs-confirmation' && sameDefinition(fresh.sharedLive, current.sharedLive.intent)) {
+      const result = await readResult(await fetch('/api/image-studio/batches', { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'resume', sharedLive: current.sharedLive.intent }), signal: AbortSignal.timeout(120000) }), true);
+      if (valid()) {
+        setBatch(result.batch);
+        if (result.batch.id !== id || result.batch.definitionConfirmationRequired || result.batch.state === 'needs-confirmation') throw new Error('原批次仍需确认，请核对最新状态；不会自动继续');
+        setContinuationMessage('已继续原批次，原任务与预算保持不变');
+      }
+      return;
+    }
+    const personalOverrides: SavedPersonalInput = {};
+    for (const field of current.sharedLive.overriddenFields || []) {
+      if (!['prompt', 'model', 'quality', 'resolution', 'count', 'aspectRatio'].includes(field)) continue;
+      const value = field === 'prompt' ? current.personalPrompt : current[field];
+      if (field === 'count' ? !Number.isInteger(value) : typeof value !== 'string') throw new Error('原批次的本人已保存输入尚未完整读取，未继续生成');
+      Object.assign(personalOverrides, { [field]: value });
+    }
+    const continuation = { sharedLive: current.sharedLive.intent, personalOverrides, moduleRevision: current.revision };
+    const quote: ContinuationQuote = await readResult(await fetch('/api/image-studio/batches', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'quote', id, ...continuation }), signal: AbortSignal.timeout(120000) }));
+    if (!valid()) return;
+    if (!['fixed', 'actual'].includes(quote.billingMode) || !Number.isFinite(quote.estimatedCredits) || quote.estimatedCredits < 0
+      || !Number.isFinite(quote.unitCredits) || quote.unitCredits < 0 || !Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= Date.now()
+      || quote.batchQuoteId !== null && typeof quote.batchQuoteId !== 'string'
+      || quote.billingMode === 'actual' && !quote.batchQuoteId || !sameDefinition(quote.sharedLive, continuation.sharedLive)
+      || quote.imageChannel && (!quote.imageChannel.channelId || !quote.imageChannel.configRevision)) throw new Error('剩余项报价尚未完整确认，原批次保持不变');
+    const remainingCredits = Math.ceil(quote.estimatedCredits);
+    const minimumBudget = fresh.committedCredits + remainingCredits;
+    const suggestedBudget = Math.max(fresh.budget, minimumBudget);
+    if (!Number.isSafeInteger(suggestedBudget) || suggestedBudget < 0 || suggestedBudget > 10000000) throw new Error('整批最高点数超出可确认范围，原批次保持不变');
+    const defaults = current.sharedLive.defaults;
+    const model = personalOverrides.model ?? defaults.model ?? current.model;
+    const quality = personalOverrides.quality ?? defaults.quality ?? current.quality;
+    const policy = defaults.referencePolicy;
+    const description = [`当前模板：${current.name}`, typeof current.templatePrompt === 'string' && current.templatePrompt ? `模板画面描述：${current.templatePrompt.slice(0, 160)}` : '',
+      `${IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model} · ${IMAGE_STUDIO_QUALITY_LABELS[quality as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || quality} · ${personalOverrides.resolution ?? defaults.resolution ?? current.resolution} · ${personalOverrides.aspectRatio ?? defaults.aspectRatio ?? current.aspectRatio}`,
+      policy ? `主图要求：${policy.primaryMin} 至 ${policy.primaryMax} 张` : '',
+      `剩余未受理 ${fresh.pending} 项，预计 ${remainingCredits} 点；已受理计入 ${fresh.committedCredits} 点。`,
+      '只继续原批剩余项，保留本人已保存输入和原素材；已受理、未知和成功项不重发。', '填写整批最高点数（包含已受理部分）：'].filter(Boolean).join('\n');
+    let mutationSent = false;
+    await askBudget(description, String(suggestedBudget), { title: '确认继续', confirmLabel: `确认继续 · ${remainingCredits}点`, maxLength: 8, anchor: null,
+      onSubmit: async value => {
+        if (!valid()) throw new Error('已离开原批次，未继续生成');
+        if (mutationSent) {
+          const observed = await readOriginal(); setBatch(observed);
+          throw new Error('已查询原批次，不会重复发送继续请求；请关闭确认框查看最新状态');
+        }
+        if (!/^\d{1,8}$/.test(value)) throw new Error('请填写整批最高点数，不能包含小数');
+        const budget = Number(value);
+        if (!Number.isSafeInteger(budget) || budget < minimumBudget || budget > 10000000) throw new Error(`整批最高点数须为 ${minimumBudget} 至 10000000 点`);
+        if (Date.parse(quote.expiresAt) <= Date.now()) throw new Error('报价已过期，未继续生成；请关闭确认框重新读取报价');
+        const latestBatch = await readOriginal();
+        const latestDefinition = await readDefinition();
+        if (continuationSignature(latestBatch) !== continuationSignature(fresh)
+          || latestDefinition.revision !== current.revision || !sameDefinition(latestDefinition.sharedLive.intent, continuation.sharedLive)) {
+          setBatch(latestBatch); onSourceChanged?.();
+          throw new Error('原批次或当前模板已变化，未继续生成；请关闭确认框重新报价');
+        }
+        if (!valid() || Date.parse(quote.expiresAt) <= Date.now()) throw new Error('报价或当前页面已变化，未继续生成；请重新核对');
+        mutationSent = true;
+        try {
+          const result = await readResult(await fetch('/api/image-studio/batches', { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, action: 'resume', ...continuation, budget, ...(quote.batchQuoteId ? { batchQuoteId: quote.batchQuoteId } : {}),
+              ...(quote.imageChannel ? { imageChannel: quote.imageChannel } : {}) }), signal: AbortSignal.timeout(120000) }), true);
+          if (!valid()) return;
+          if (result.batch.id !== id) throw new Error('继续回执未匹配原批次，请查询原批次，不要新建任务');
+          setBatch(result.batch); onSourceChanged?.();
+          if (result.batch.definitionConfirmationRequired || result.batch.state === 'needs-confirmation'
+            || !sameDefinition(result.batch.sharedLive, continuation.sharedLive)) throw Object.assign(new Error('模板或剩余项再次变化，原批次仍待确认；请关闭确认框重新核对'), { status: 409 });
+          setSelected([]);
+          setContinuationMessage('已确认当前模板与整批最高点数，只重新准备未受理项；原任务和结果保留');
+          watchGenerationCompletion(userId, id, 'batch', fresh.total, crypto.randomUUID(), fresh.generated);
+        } catch (cause) {
+          if (valid()) {
+            const status = Number((cause as { status?: number })?.status);
+            if ([401, 403, 404, 409].includes(status)) onSourceChanged?.();
+            setError(status >= 400 && status < 500 ? cause instanceof Error ? cause.message : '继续请求被拒绝，原批次保持不变'
+              : '继续结果尚未确认，请查询原批次；不会自动再发继续请求或新建批次');
+          }
+          throw cause;
+        }
+      } });
+  }
   async function action(action: string) {
     if (actionLock.current || !batch) return;
-    actionLock.current = true; setBusy(true); setError('');
+    actionLock.current = true; setBusy(true); setError(''); setContinuationMessage('');
     const expected = `${userId}:${id}`, ordinals = [...selected], retryBudget = batch.committedCredits + ordinals.length * batch.unitCredits;
     try {
+      if (action === 'resume' && (batch.sharedLive || batch.definitionConfirmationRequired || batch.state === 'needs-confirmation')) {
+        await continueSharedBatch(expected); return;
+      }
       const quoteRetry = async () => {
         if (!batch.model) throw new Error('原批次模型报价无法核对，请先查询原批次；没有重新生成');
         const current = await readBatchResponse(await fetch('/api/image-studio/settings', { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
@@ -79,7 +213,7 @@ export function BatchResults({ id, userId, outputDirectory, deliveryOnly = false
       if (scope.current !== expected) return;
       if (action === 'retry') watchGenerationCompletion(userId, id, 'batch', batch.total, crypto.randomUUID(), batch.generated);
       setBatch(data.batch); setSelected([]);
-    } catch (error) { if (scope.current === expected) setError(error instanceof Error ? error.message : '操作结果待确认，请刷新原批次'); }
+    } catch (error) { if (scope.current === expected) { setError(error instanceof Error ? error.message : '操作结果待确认，请刷新原批次'); if (action === 'resume') onSourceChanged?.(); } }
     finally { actionLock.current = false; if (scope.current === expected) setBusy(false); }
   }
   async function chooseDirectory() {
@@ -148,7 +282,7 @@ export function BatchResults({ id, userId, outputDirectory, deliveryOnly = false
   // The terminal result set determines packages; exporting never creates image tasks.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoPack, batch?.state, batch?.generated, batch?.active, batch?.pending, batch?.uncertain]);
-  const statusLabel = (state: string) => ({ pending: '等待派发', queued: '已受理，排队中', running: '生成中', succeeded: '已生成', failed: '生成失败', uncertain: '结果待确认', cancelled: '未派发，已取消' } as Record<string, string>)[state] || '状态待确认';
+  const statusLabel = (state: string) => ({ pending: '等待派发', 'needs-confirmation': '模板已更新，待确认后继续', queued: '已受理，排队中', running: '生成中', succeeded: '已生成', failed: '生成失败', uncertain: '结果待确认', cancelled: '未派发，已取消' } as Record<string, string>)[state] || '状态待确认';
   const resultItems = useMemo(() => (batch?.items || []).map(item => ({
     ...item, id: String(item.ordinal), label: `${item.ordinal}. ${item.sourceName}`, generationStatus: item.status,
     status: statusLabel(item.status), pending: ['pending', 'queued', 'running'].includes(item.status),
@@ -161,15 +295,18 @@ export function BatchResults({ id, userId, outputDirectory, deliveryOnly = false
   return <div className={styles.results} aria-label="批次结果">
     <div className={styles.actions}><strong>{batch?.moduleName || '本批结果'}</strong><button type="button" title="刷新批次" aria-label="刷新批次" disabled={reading} onClick={() => void load()}><RefreshCw size={16} /></button>{deliveryOnly && <a href={`/assets?imageBatchId=${encodeURIComponent(id)}`}>本批资产</a>}</div>
     {error && <p role="alert" className={styles.error}>{error}</p>}
+    {continuationMessage && <p role="status">{continuationMessage}</p>}
     {!batch && <p role="status">{reading ? '正在读取原批次' : '尚未读取批次'}，不会重新提交生成。</p>}
     {batch && <>
       <p className={styles.summary}>{batchStateLabel(batch.state)} · <RelativeTime value={batch.createdAt} /> · 已生成 {batch.generated}/{batch.total} · 已保存 {Object.keys(saved).length}/{batch.generated} · 失败 {batch.failed} · 待确认 {batch.uncertain}</p>
       {!deliveryOnly && <p>素材已准备 {batch.prepared}/{batch.total} · 在途 {batch.active} · 未派发 {batch.pending}</p>}
       {batch.note && <p role="status">{batch.note}</p>}
+      {(batch.state === 'needs-confirmation' || batch.definitionConfirmationRequired) && <p role="status">当前模板需要重新确认，剩余未受理 {batch.pending} 项；已受理与未知结果不会重发。</p>}
       <div className={styles.actions}>
-        {['preparing', 'blocked'].includes(batch.state) && batch.prepared < batch.total && <button type="button" disabled={busy} onClick={() => void action('prepare')}><RefreshCw size={16} />继续准备原批素材</button>}
-        {batch.state === 'ready' && <button type="button" disabled={busy} onClick={() => void action('pause')}><Pause size={16} />暂停未派发</button>}
-        {['paused', 'blocked'].includes(batch.state) && batch.prepared === batch.total && <button type="button" disabled={busy} onClick={() => void action('resume')}><Play size={16} />继续剩余</button>}
+        {['preparing', 'blocked'].includes(batch.state) && !batch.definitionConfirmationRequired && batch.prepared < batch.total && <button type="button" disabled={busy} onClick={() => void action('prepare')}><RefreshCw size={16} />继续准备原批素材</button>}
+        {['ready', 'needs-confirmation'].includes(batch.state) && <button type="button" disabled={busy} onClick={() => void action('pause')}><Pause size={16} />暂停未派发</button>}
+        {(['paused', 'blocked'].includes(batch.state) && batch.prepared === batch.total || batch.definitionConfirmationRequired || batch.state === 'needs-confirmation')
+          && batch.pending > 0 && !['cancelled', 'complete'].includes(batch.state) && <button type="button" className={styles.primary} disabled={busy} onClick={() => void action('resume')}><Play size={16} />{batch.definitionConfirmationRequired || batch.state === 'needs-confirmation' ? '核对并继续剩余' : '继续剩余'}</button>}
         {!['cancelled', 'complete'].includes(batch.state) && <button type="button" disabled={busy} onClick={() => void action('cancel')}><X size={16} />取消未派发</button>}
       </div>
       {batch.uncertain > 0 && <p role="status">结果未知项不会自动重发。请刷新查询原任务，仍未知时联系管理员核对。</p>}
