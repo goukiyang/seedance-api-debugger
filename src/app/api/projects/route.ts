@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
@@ -9,18 +10,24 @@ import { countDownloadableProjectTasks } from '@/lib/video/bulk-download';
 
 export const dynamic = 'force-dynamic';
 
+function boundedInteger(value: string | null, fallback: number, min: number, max: number) {
+  if (!value || !/^\d+$/.test(value)) return fallback;
+  return Math.min(max, Math.max(min, Number(value)));
+}
+
 export async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
     const home = request.nextUrl.searchParams.get('summary') === 'home';
-    const includeArchived = !home && request.nextUrl.searchParams.get('include_archived') === 'true';
-    const includeAll = !home && user.role === 'admin' && request.nextUrl.searchParams.get('include_all') === 'true';
     const lite = request.nextUrl.searchParams.get('lite') === 'true';
+    const viewList = !home && !lite && request.nextUrl.searchParams.get('view') === 'list';
+    const includeArchived = !home && (viewList || request.nextUrl.searchParams.get('include_archived') === 'true');
+    const includeAll = !home && user.role === 'admin' && request.nextUrl.searchParams.get('include_all') === 'true';
     const statusWhere = includeArchived ? { not: 'deleted' } : 'active';
 
-    const where = includeAll
+    const where: Prisma.ProjectWhereInput = includeAll
       ? { status: statusWhere }
       : {
           status: statusWhere,
@@ -103,6 +110,167 @@ export async function GET(request: NextRequest) {
           };
         }),
       });
+    }
+
+    if (viewList) {
+      const params = request.nextUrl.searchParams;
+      const selectedStatus = params.get('status') === 'archived' ? 'archived' : 'active';
+      const search = (params.get('search') || '').trim().slice(0, 120);
+      const sort = params.get('sort') === 'name' ? 'name' : 'updated';
+      const scope = params.get('scope') === 'owned' || params.get('scope') === 'participating'
+        ? params.get('scope') as 'owned' | 'participating'
+        : 'all';
+      const pageSize = boundedInteger(params.get('page_size'), 12, 3, 24);
+      const requestedPage = boundedInteger(params.get('page'), 1, 1, 1_000_000);
+      const statusFilter: Prisma.ProjectWhereInput['status'] = selectedStatus === 'archived'
+        ? 'archived'
+        : { in: ['active', 'locked'] };
+
+      const filters: Prisma.ProjectWhereInput[] = [where, { status: statusFilter }];
+      if (search) {
+        filters.push({ OR: [
+          { name: { contains: search } },
+          { description: { contains: search } },
+        ] });
+      }
+      if (scope === 'owned') filters.push({ owner_user_id: user.id });
+      if (scope === 'participating') filters.push({ owner_user_id: { not: user.id } });
+
+      const projectWhere: Prisma.ProjectWhereInput = { AND: filters };
+      const gridWhere: Prisma.ProjectWhereInput = {
+        AND: [projectWhere, { type: { notIn: ['personal', 'system'] } }],
+      };
+      const total = await prisma.project.count({ where: gridWhere });
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      const page = Math.min(requestedPage, totalPages);
+      const orderBy: Prisma.ProjectOrderByWithRelationInput[] = sort === 'name'
+        ? [{ name: 'asc' }, { id: 'asc' }]
+        : [{ updated_at: 'desc' }, { id: 'desc' }];
+
+      const [projects, personalProject] = await Promise.all([
+        prisma.project.findMany({
+          where: gridWhere,
+          orderBy,
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          include: {
+            owner: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
+            members: { where: { user_id: user.id }, select: { user_id: true, role: true, status: true }, take: 1 },
+            _count: {
+              select: {
+                members: true,
+                tasks: { where: { retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] } } },
+                reference_albums: { where: { status: { not: 'deleted' } } },
+              },
+            },
+          },
+        }),
+        scope === 'participating'
+          ? Promise.resolve(null)
+          : prisma.project.findFirst({
+              where: { AND: [projectWhere, { type: 'personal', owner_user_id: user.id }] },
+              orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
+              include: {
+                owner: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
+                members: { where: { user_id: user.id }, select: { user_id: true, role: true, status: true }, take: 1 },
+                _count: {
+                  select: {
+                    members: true,
+                    tasks: { where: { retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] } } },
+                    reference_albums: { where: { status: { not: 'deleted' } } },
+                  },
+                },
+              },
+            }),
+      ]);
+
+      const projectIds = projects.map((project) => project.id);
+      const [downloadableCountByProject, activeTaskRows] = await Promise.all([
+        countDownloadableProjectTasks(projectIds),
+        projectIds.length > 0
+          ? prisma.videoTask.groupBy({
+              by: ['project_id'],
+              where: {
+                project_id: { in: projectIds },
+                retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] },
+                local_status: { in: ['submitted', 'running'] },
+              },
+              _count: { _all: true },
+            })
+          : Promise.resolve([]),
+      ]);
+      const activeTaskCountByProject = new Map(
+        activeTaskRows.flatMap((row) => row.project_id ? [[row.project_id, row._count._all] as const] : []),
+      );
+      const deleteCandidateProjectIds = projects
+        .filter((project) => project.type === 'team' && (includeAll
+          || project.owner_user_id === user.id
+          || ['admin', 'project_owner'].includes(project.members[0]?.role || '')))
+        .map((project) => project.id);
+      const fullTaskCountRows = deleteCandidateProjectIds.length > 0
+        ? await prisma.videoTask.groupBy({
+            by: ['project_id'],
+            where: { project_id: { in: deleteCandidateProjectIds } },
+            _count: { _all: true },
+          })
+        : [];
+      const fullTaskCountByProject = new Map(
+        fullTaskCountRows.flatMap((row) => row.project_id ? [[row.project_id, row._count._all] as const] : []),
+      );
+      const projectItems = await Promise.all(projects.map(async (project) => {
+        const taskWhere = await getTaskWhereForUser(user, project.id);
+        const task = await prisma.videoTask.findFirst({
+          where: { AND: [taskWhere, { local_status: 'succeeded' }] },
+          orderBy: [{ updated_at: 'desc' }, { id: 'desc' }],
+          select: {
+            id: true,
+            local_status: true,
+            public_video_url: true,
+            local_video_path: true,
+            result_video_url: true,
+            result_last_frame_url: true,
+            delivery_status: true,
+          },
+        });
+        const myRole = includeAll
+          ? 'admin'
+          : (project.owner_user_id === user.id ? 'project_owner' : project.members[0]?.role || null);
+        const canManageProject = myRole === 'admin' || myRole === 'project_owner';
+        const isActiveNonSystem = project.status === 'active' && project.type !== 'system';
+        return {
+          ...project,
+          my_role: myRole,
+          can_generate: isActiveNonSystem && myRole !== null && myRole !== 'viewer',
+          can_manage_project: myRole === 'admin' || myRole === 'project_owner',
+          ...(canManageProject ? {
+            legacy_can_delete: project.type === 'team'
+              && (fullTaskCountByProject.get(project.id) ?? 0) === 0
+              && project._count.reference_albums === 0,
+          } : {}),
+          can_manage_members: (myRole === 'admin' || myRole === 'project_owner')
+            && ['team', 'public'].includes(project.type),
+          can_manage_assets: isActiveNonSystem && ['admin', 'project_owner', 'editor'].includes(myRole || ''),
+          active_task_count: activeTaskCountByProject.get(project.id) || 0,
+          downloadable_task_count: downloadableCountByProject.get(project.id) || 0,
+          thumbnail_url: task ? taskThumbnailProjection(task).thumbnail_url : null,
+        };
+      }));
+
+      let personalItem = null;
+      if (personalProject) {
+        const memberRole = personalProject.members[0]?.role || null;
+        personalItem = {
+          ...personalProject,
+          my_role: personalProject.owner_user_id === user.id ? 'project_owner' : memberRole,
+        };
+      }
+
+      return NextResponse.json({
+        projects: projectItems,
+        personal_project: personalItem,
+        pagination: { page, page_size: pageSize, total, total_pages: totalPages },
+        filters: { search, status: selectedStatus, sort, scope },
+      }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
     }
 
     const projects = await prisma.project.findMany({

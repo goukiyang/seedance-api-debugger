@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { AlertCircle, CheckCircle2, RefreshCcw, Sparkles } from 'lucide-react';
 import EnhanceVideoAction from '@/components/EnhanceVideoAction';
+import { RelativeTime } from '@/components/RelativeTime';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
-import { taskDetailHref } from '@/lib/navigation/return-to';
+import { sanitizeOptionalReturnTo, taskDetailHref, taskReturnLabel } from '@/lib/navigation/return-to';
+import { useAppSession } from '@/lib/context/AppSessionContext';
 
 type EnhanceTaskCandidate = {
   id: string;
@@ -41,18 +43,6 @@ type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 
 const PAGE_SIZE = 24;
 
-function formatTime(value: string | null) {
-  if (!value) return '未完成';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '时间未知';
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
 function canEnhance(task: EnhanceTaskCandidate) {
   return task.local_status === 'succeeded'
     && Boolean(task.local_video_path || task.result_video_url || task.public_video_url)
@@ -70,15 +60,42 @@ function taskSubtitle(task: EnhanceTaskCandidate) {
 }
 
 export default function EnhanceVideoPageClient() {
+  const { user, hasLoadedUser, loadingUser, refreshUser } = useAppSession();
   const [tasks, setTasks] = useState<EnhanceTaskCandidate[]>([]);
   const [config, setConfig] = useState<ConfigState | null>(null);
   const [loadState, setLoadState] = useState<LoadState>('idle');
   const [error, setError] = useState('');
+  const [requestedSourceTaskId, setRequestedSourceTaskId] = useState<string | null>(null);
+  const [returnTo, setReturnTo] = useState<string | null>(null);
+  const taskListRequestRef = useRef(0);
+  const activeAccountIdRef = useRef<string | null>(user?.id || null);
+  activeAccountIdRef.current = user?.id || null;
 
   const eligibleTasks = useMemo(() => tasks.filter(canEnhance), [tasks]);
   const blockedTasks = useMemo(() => tasks.filter((task) => !canEnhance(task)).slice(0, 6), [tasks]);
+  const requestedTask = tasks.find((task) => task.id === requestedSourceTaskId) || null;
+  const requestedSourceTask = eligibleTasks.find((task) => task.id === requestedSourceTaskId) || null;
+  const canStartRequestedSource = Boolean(
+    requestedSourceTask
+      && (requestedSourceTask.local_video_path || requestedSourceTask.result_video_url)
+      && requestedSourceTask.video_card_id
+      && requestedSourceTask.duration,
+  );
+  const selectedSourceTask = canStartRequestedSource ? requestedSourceTask : null;
+  const enhancerReturnTo = useMemo(() => {
+    const params = new URLSearchParams();
+    if (returnTo) params.set('return_to', returnTo);
+    if (requestedSourceTaskId) params.set('source_task_id', requestedSourceTaskId);
+    const query = params.toString();
+    return query ? `/generate/enhance?${query}` : '/generate/enhance';
+  }, [requestedSourceTaskId, returnTo]);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const accountId = user?.id || null;
+    if (loadingUser || !accountId) return;
+    const requestId = ++taskListRequestRef.current;
+    const isCurrentRequest = () => taskListRequestRef.current === requestId
+      && activeAccountIdRef.current === accountId;
     setLoadState('loading');
     setError('');
     try {
@@ -87,7 +104,20 @@ export default function EnhanceVideoPageClient() {
         fetch(`/api/video/list?page=1&limit=${PAGE_SIZE}`, { cache: 'no-store' }),
       ]);
 
+      if (!isCurrentRequest()) return;
+      if (configResponse.status === 401 || tasksResponse.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
+      if ([403, 404].includes(configResponse.status)) setConfig(null);
+      if ([403, 404].includes(tasksResponse.status)) {
+        setTasks([]);
+        throw new Error('当前账号无法读取这组任务，请重新打开工作台。');
+      }
+      if (!configResponse.ok) throw new Error('超分配置读取失败，请稍后重试。');
+
       const configData = await configResponse.json();
+      if (!isCurrentRequest()) return;
       setConfig({
         ready: configData.aimediakit_enhance_video?.ready === true,
         enabled: configData.aimediakit_enhance_video?.enabled === true,
@@ -95,20 +125,51 @@ export default function EnhanceVideoPageClient() {
       });
 
       const tasksData = await tasksResponse.json();
+      if (!isCurrentRequest()) return;
       if (!tasksResponse.ok) {
         throw new Error(tasksData.message || tasksData.error || '视频列表加载失败');
       }
       setTasks(Array.isArray(tasksData.tasks) ? tasksData.tasks : []);
       setLoadState('ready');
     } catch (err) {
+      if (!isCurrentRequest()) return;
       setError(err instanceof Error ? err.message : '视频超分页加载失败');
       setLoadState('error');
     }
-  };
+  }, [loadingUser, user?.id]);
 
   useEffect(() => {
+    if (!hasLoadedUser && !loadingUser) void refreshUser();
+  }, [hasLoadedUser, loadingUser, refreshUser]);
+
+  useEffect(() => {
+    taskListRequestRef.current += 1;
+    setTasks([]);
+    setConfig(null);
+    setLoadState('idle');
+    setError('');
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (loadingUser || !user?.id) return;
     void load();
+  }, [load, user?.id, loadingUser]);
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const rawSourceTaskId = searchParams.get('source_task_id')?.trim() || null;
+    const sourceTaskId = rawSourceTaskId && rawSourceTaskId.length <= 200 && !/[\u0000-\u001f\u007f]/.test(rawSourceTaskId)
+      ? rawSourceTaskId
+      : null;
+    setRequestedSourceTaskId(sourceTaskId);
+    setReturnTo(sanitizeOptionalReturnTo(searchParams.get('return_to')));
   }, []);
+
+  useEffect(() => {
+    if (loadState !== 'ready' || !selectedSourceTask) return;
+    document.querySelector(`[data-enhance-source-id="${CSS.escape(selectedSourceTask.id)}"]`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [loadState, selectedSourceTask?.id]);
 
   return (
     <div className="enhance-video-page">
@@ -116,9 +177,20 @@ export default function EnhanceVideoPageClient() {
         <div>
           <span className="enhance-video-eyebrow">AI MediaKit</span>
           <h1>视频超分</h1>
-          <p>选择一条已成功的视频，创建新的超分任务。</p>
+          <p>
+            {selectedSourceTask
+              ? '已定位原来源视频；请确认下方来源后，再手动选择超分参数并提交。'
+              : requestedTask && !requestedSourceTask
+                ? '原来源任务目前不满足超分条件，请从列表中手动选择可用视频。'
+                : requestedSourceTask && !canStartRequestedSource
+                  ? '已找到原来源视频，但创建超分所需信息不完整；请重新选择可用视频。'
+                  : requestedSourceTaskId && loadState === 'ready'
+                    ? '原来源视频未在最近 24 条可用任务中定位，请在列表中手动选择。'
+                : '选择一条已成功的视频，创建新的超分任务。'}
+          </p>
         </div>
         <div className="enhance-video-hero-actions">
+          {returnTo && <Link href={returnTo} className="btn btn-secondary">{taskReturnLabel(returnTo)}</Link>}
           <button type="button" className="btn btn-secondary" onClick={() => void load()} disabled={loadState === 'loading'}>
             <RefreshCcw size={16} aria-hidden="true" />
             {loadState === 'loading' ? '刷新中' : '刷新'}
@@ -150,13 +222,23 @@ export default function EnhanceVideoPageClient() {
 
       {error && <div className="enhance-video-error">{error}</div>}
 
+      {requestedSourceTaskId && loadState === 'ready' && !selectedSourceTask && (
+        <div className="alert alert-info" role="status">
+          {requestedTask && !requestedSourceTask
+            ? '原来源任务当前未成功、没有可用视频或本身属于超分任务；请手动选择普通的已成功视频。'
+            : requestedSourceTask
+              ? '原来源视频已找到，但缺少创建超分所需的视频卡、时长或可用源文件；请重新选择。'
+              : `此工作台只读取最近 ${PAGE_SIZE} 条任务；原来源不在当前可用列表中，请手动选择符合条件的视频。`}
+        </div>
+      )}
+
       <section className="enhance-video-list">
         <div className="enhance-video-section-head">
           <div>
             <h2>可超分视频</h2>
             <span>{loadState === 'loading' ? '正在加载' : `${eligibleTasks.length} 条可用`}</span>
           </div>
-          <Link href="/tasks">查看全部任务</Link>
+          <Link href={returnTo || '/tasks'}>{returnTo ? taskReturnLabel(returnTo) : '查看全部任务'}</Link>
         </div>
 
         {loadState === 'loading' && (
@@ -177,7 +259,12 @@ export default function EnhanceVideoPageClient() {
         {eligibleTasks.length > 0 && (
           <div className="enhance-video-grid">
             {eligibleTasks.map((task) => (
-              <article className="enhance-video-card" key={task.id}>
+              <article
+                className="enhance-video-card"
+                key={task.id}
+                data-enhance-source-id={selectedSourceTask?.id === task.id ? task.id : undefined}
+              >
+                {selectedSourceTask?.id === task.id && <span className="task-enhance-chip">已定位来源视频</span>}
                 <TaskVideoThumbnail
                   taskId={task.id}
                   thumbnailUrl={task.thumbnail_url}
@@ -192,17 +279,17 @@ export default function EnhanceVideoPageClient() {
                   retryAfterMs={task.retry_after_ms}
                   provider={task.provider}
                   generationMode={task.generation_mode}
-                  href={taskDetailHref(task.id, '/generate/enhance')}
+                  href={taskDetailHref(task.id, enhancerReturnTo)}
                   size="card"
                   reactions
                 />
                 <div className="enhance-video-card-body">
                   <div>
-                    <Link href={taskDetailHref(task.id, '/generate/enhance')} className="enhance-video-card-title">
+                    <Link href={taskDetailHref(task.id, enhancerReturnTo)} className="enhance-video-card-title">
                       {task.prompt || '未命名视频'}
                     </Link>
                     <span>{taskSubtitle(task)}</span>
-                    <small>{formatTime(task.completed_at || task.created_at)}</small>
+                    <small><RelativeTime value={task.completed_at || task.created_at} /></small>
                   </div>
                   <EnhanceVideoAction
                     task={{
@@ -233,7 +320,7 @@ export default function EnhanceVideoPageClient() {
           </div>
           <div className="enhance-video-blocked-list">
             {blockedTasks.map((task) => (
-              <Link href={taskDetailHref(task.id, '/generate/enhance')} className="enhance-video-blocked-item" key={task.id}>
+              <Link href={taskDetailHref(task.id, enhancerReturnTo)} className="enhance-video-blocked-item" key={task.id}>
                 <span>{task.prompt || task.id}</span>
                 <strong>{task.local_status || '状态未知'}</strong>
               </Link>

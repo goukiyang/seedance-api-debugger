@@ -13,6 +13,11 @@ export type BulkVideoDownloadClientResult = {
   failed: number;
 };
 
+export type BulkVideoDownloadOptions = {
+  signal?: AbortSignal;
+  canDownload?: () => boolean;
+};
+
 const CURRENT_PRODUCTION_ORIGIN = 'https://sd2.youdooart.com';
 const LEGACY_PRODUCTION_ORIGIN = 'https://sd2.youdoodesign.com';
 
@@ -30,17 +35,31 @@ function fileNameFromDisposition(value: string | null) {
   return match?.[1] || fallbackZipName();
 }
 
-function triggerDownload(blob: Blob, fileName: string) {
+function triggerDownload(blob: Blob, fileName: string, options?: BulkVideoDownloadOptions) {
   const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = fileName;
-  anchor.rel = 'noopener';
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  // Keep the object URL alive until the browser has accepted the download.
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  let triggered = false;
+  try {
+    ensureDownloadAllowed(options);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    anchor.rel = 'noopener';
+    document.body.appendChild(anchor);
+    try {
+      ensureDownloadAllowed(options);
+      anchor.click();
+      triggered = true;
+    } finally {
+      anchor.remove();
+    }
+  } finally {
+    if (triggered) {
+      // Keep the object URL alive until the browser has accepted the download.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } else {
+      URL.revokeObjectURL(url);
+    }
+  }
 }
 
 async function errorMessageFromResponse(response: Response) {
@@ -49,6 +68,14 @@ async function errorMessageFromResponse(response: Response) {
     return data.message || data.error || '批量下载失败';
   } catch {
     return '批量下载失败';
+  }
+}
+
+function ensureDownloadAllowed(options?: BulkVideoDownloadOptions) {
+  if (options?.signal?.aborted || options?.canDownload?.() === false) {
+    const error = new Error('The download was cancelled because its account context changed.');
+    error.name = 'AbortError';
+    throw error;
   }
 }
 
@@ -71,7 +98,9 @@ function networkDownloadErrorMessage(error: unknown) {
 export async function downloadBulkVideoZip(
   payload: BulkVideoDownloadRequest,
   onStage?: (stage: string) => void,
+  options?: BulkVideoDownloadOptions,
 ): Promise<BulkVideoDownloadClientResult> {
+  ensureDownloadAllowed(options);
   onStage?.('正在打包视频…');
   let response: Response;
   try {
@@ -79,26 +108,34 @@ export async function downloadBulkVideoZip(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      ...(options?.signal ? { signal: options.signal } : {}),
     });
   } catch (error) {
+    ensureDownloadAllowed(options);
     throw new Error(networkDownloadErrorMessage(error));
   }
 
+  ensureDownloadAllowed(options);
   const contentType = response.headers.get('content-type') || '';
   if (!response.ok || !contentType.includes('application/zip')) {
-    throw new Error(await errorMessageFromResponse(response));
+    const message = await errorMessageFromResponse(response);
+    ensureDownloadAllowed(options);
+    throw new Error(message);
   }
 
   const fileName = fileNameFromDisposition(response.headers.get('content-disposition'));
+  ensureDownloadAllowed(options);
   onStage?.('正在接收视频包…');
   let blob: Blob;
   try {
     blob = await response.blob();
   } catch {
+    ensureDownloadAllowed(options);
     throw new Error('视频包接收中断，请重新下载');
   }
+  ensureDownloadAllowed(options);
   if (!blob.size) throw new Error('收到的视频包为空，请重新下载');
-  triggerDownload(blob, fileName);
+  triggerDownload(blob, fileName, options);
 
   return {
     blob,
