@@ -202,6 +202,21 @@ export async function GET(request: NextRequest) {
       const activeTaskCountByProject = new Map(
         activeTaskRows.flatMap((row) => row.project_id ? [[row.project_id, row._count._all] as const] : []),
       );
+      const deleteCandidateProjectIds = projects
+        .filter((project) => project.type === 'team' && (includeAll
+          || project.owner_user_id === user.id
+          || ['admin', 'project_owner'].includes(project.members[0]?.role || '')))
+        .map((project) => project.id);
+      const fullTaskCountRows = deleteCandidateProjectIds.length > 0
+        ? await prisma.videoTask.groupBy({
+            by: ['project_id'],
+            where: { project_id: { in: deleteCandidateProjectIds } },
+            _count: { _all: true },
+          })
+        : [];
+      const fullTaskCountByProject = new Map(
+        fullTaskCountRows.flatMap((row) => row.project_id ? [[row.project_id, row._count._all] as const] : []),
+      );
       const projectItems = await Promise.all(projects.map(async (project) => {
         const taskWhere = await getTaskWhereForUser(user, project.id);
         const task = await prisma.videoTask.findFirst({
@@ -217,13 +232,21 @@ export async function GET(request: NextRequest) {
             delivery_status: true,
           },
         });
-        const myRole = project.owner_user_id === user.id ? 'project_owner' : project.members[0]?.role || null;
+        const myRole = includeAll
+          ? 'admin'
+          : (project.owner_user_id === user.id ? 'project_owner' : project.members[0]?.role || null);
+        const canManageProject = myRole === 'admin' || myRole === 'project_owner';
         const isActiveNonSystem = project.status === 'active' && project.type !== 'system';
         return {
           ...project,
-          my_role: includeAll ? 'admin' : myRole,
+          my_role: myRole,
           can_generate: isActiveNonSystem && myRole !== null && myRole !== 'viewer',
           can_manage_project: myRole === 'admin' || myRole === 'project_owner',
+          ...(canManageProject ? {
+            legacy_can_delete: project.type === 'team'
+              && (fullTaskCountByProject.get(project.id) ?? 0) === 0
+              && project._count.reference_albums === 0,
+          } : {}),
           can_manage_members: (myRole === 'admin' || myRole === 'project_owner')
             && ['team', 'public'].includes(project.type),
           can_manage_assets: isActiveNonSystem && ['admin', 'project_owner', 'editor'].includes(myRole || ''),

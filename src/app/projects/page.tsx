@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Download, FolderKanban, MoreHorizontal, Plus, RotateCcw, Search } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
@@ -14,6 +14,7 @@ import { RelativeTime } from '@/components/RelativeTime';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { externalFallbackPath, isExternalUser } from '@/lib/access/external-role';
 import { BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT, downloadBulkVideoZip } from '@/lib/video/download-client';
+import { sanitizeOptionalReturnTo } from '@/lib/navigation/return-to';
 
 interface ProjectItem {
   id: string;
@@ -28,6 +29,7 @@ interface ProjectItem {
   thumbnail_url?: string | null;
   active_task_count?: number;
   downloadable_task_count?: number;
+  legacy_can_delete?: boolean;
   owner?: { id?: string; name: string | null; username: string | null; avatar_url?: string | null; account_type?: string | null };
   _count?: { members: number; tasks: number; reference_albums?: number };
 }
@@ -49,6 +51,27 @@ type PendingProjectAction = { project: ProjectItem; action: ProjectAction };
 type ProjectStatusFilter = 'active' | 'archived';
 type ProjectSort = 'updated' | 'name';
 type ProjectScope = 'all' | 'owned' | 'participating';
+type AccountOperation = 'create' | 'action' | 'rename' | 'download';
+type AccountOperationSnapshot = { kind: AccountOperation; accountKey: string; epoch: number; token: number };
+
+type ProjectRenamePromptOptions = {
+  title?: string;
+  confirmLabel?: string;
+  maxLength?: number | null;
+  onSubmit?: (value: string, checked: boolean) => Promise<void>;
+};
+
+type ProjectRenamePromptHandle = {
+  prompt: (message: string, value: string, options?: ProjectRenamePromptOptions) => Promise<string | null>;
+};
+
+const ProjectRenamePromptHost = forwardRef<ProjectRenamePromptHandle>(function ProjectRenamePromptHost(_props, ref) {
+  const dialog = useProductDialog();
+  useImperativeHandle(ref, () => ({
+    prompt: (message: string, value: string, options?: ProjectRenamePromptOptions) => dialog.prompt(message, value, options),
+  }), [dialog.prompt]);
+  return dialog.productDialog;
+});
 
 interface ListPreferences {
   search: string;
@@ -135,6 +158,25 @@ function saveListPreferences(userId: string, preferences: ListPreferences) {
   }
 }
 
+function projectListReturnTo(projectId: string, preferences: ListPreferences) {
+  const params = new URLSearchParams({
+    search: preferences.search,
+    status: preferences.status,
+    sort: preferences.sort,
+    scope: preferences.scope,
+    page: String(preferences.page),
+  });
+  const candidate = `/projects?${params.toString()}#project-card-${encodeURIComponent(projectId)}`;
+  return sanitizeOptionalReturnTo(candidate) || '/projects';
+}
+
+function projectDetailHref(projectId: string, preferences: ListPreferences, section?: 'members') {
+  const params = new URLSearchParams();
+  if (section) params.set('view', section);
+  params.set('return_to', projectListReturnTo(projectId, preferences));
+  return `/projects/${encodeURIComponent(projectId)}?${params.toString()}`;
+}
+
 function updateListUrl(preferences: ListPreferences) {
   const url = new URL(window.location.href);
   const values: Array<[keyof ListPreferences, string, string]> = [
@@ -158,10 +200,6 @@ function updateListUrl(preferences: ListPreferences) {
 
 function canManageProject(project: ProjectItem): boolean {
   return project.my_role === 'admin' || project.my_role === 'project_owner';
-}
-
-function canDeleteProject(project: ProjectItem): boolean {
-  return project.type === 'team' && (project._count?.tasks ?? 0) === 0 && (project._count?.reference_albums ?? 0) === 0;
 }
 
 function canShowDeleteProjectAction(project: ProjectItem): boolean {
@@ -251,9 +289,18 @@ function ProjectCover({ project }: { project: ProjectItem }) {
 
 export default function ProjectsPage() {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const routeQuery = searchParams?.toString() || '';
   const { user: currentUser, hasLoadedUser, loadingUser, refreshUser } = useAppSession();
   const currentUserId = currentUser?.id || '';
   const accountKey = currentUserId ? `${currentUserId}:${currentUser?.role || ''}` : 'anonymous';
+  const activeAccountRef = useRef(accountKey);
+  const accountEpochRef = useRef(0);
+  if (activeAccountRef.current !== accountKey) {
+    activeAccountRef.current = accountKey;
+    accountEpochRef.current += 1;
+  }
 
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [personalProject, setPersonalProject] = useState<ProjectItem | null>(null);
@@ -274,6 +321,8 @@ export default function ProjectsPage() {
   const [pageSize, setPageSize] = useState(12);
   const [preferencesReadyFor, setPreferencesReadyFor] = useState('');
   const [storageUnavailable, setStorageUnavailable] = useState(false);
+  const [locationRevision, setLocationRevision] = useState(0);
+  const [returnAnchorId, setReturnAnchorId] = useState('');
   const [highlightProjectId, setHighlightProjectId] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const [actionError, setActionError] = useState('');
@@ -293,10 +342,19 @@ export default function ProjectsPage() {
   const createDialogRef = useRef<HTMLDivElement>(null);
   const createTitleId = useId();
   const createDescriptionId = useId();
+  const currentPreferences: ListPreferences = { search, status: activeTab, sort, scope, page };
   const gridRef = useRef<HTMLDivElement>(null);
   const requestSequence = useRef(0);
-  const activeAccountRef = useRef('');
   const initializedAccountRef = useRef('');
+  const operationTokensRef = useRef<Record<AccountOperation, number>>({ create: 0, action: 0, rename: 0, download: 0 });
+  const renamePromptRef = useRef<ProjectRenamePromptHandle>(null);
+  const downloadAbortRef = useRef<AbortController | null>(null);
+  const ownLocationWriteRef = useRef('');
+  const pageRef = useRef(page);
+  const pageSizeRef = useRef(pageSize);
+  const currentPreferencesRef = useRef(currentPreferences);
+  pageRef.current = page;
+  currentPreferencesRef.current = currentPreferences;
 
   const [downloadProject, setDownloadProject] = useState<ProjectItem | null>(null);
   const [downloadingProjectId, setDownloadingProjectId] = useState<string | null>(null);
@@ -304,13 +362,31 @@ export default function ProjectsPage() {
   const [projectActionBusy, setProjectActionBusy] = useState(false);
   const downloadBackdropRef = useRef<HTMLDivElement>(null);
   const downloadDialogRef = useRef<HTMLDivElement>(null);
-  const productDialog = useProductDialog();
-
-  const currentPreferences: ListPreferences = { search, status: activeTab, sort, scope, page };
   const queryKey = JSON.stringify({ accountKey, ...currentPreferences, search: appliedSearch, pageSize });
   const preferencesReady = preferencesReadyFor === accountKey;
   const hasCurrentList = preferencesReady && appliedSearch === search && projectsAccountKey === accountKey && loadedQueryKey === queryKey;
   const showListError = search === appliedSearch && Boolean(listError && failedQueryKey === queryKey);
+
+  function beginAccountOperation(kind: AccountOperation): AccountOperationSnapshot {
+    const token = operationTokensRef.current[kind] + 1;
+    operationTokensRef.current[kind] = token;
+    return { kind, accountKey, epoch: accountEpochRef.current, token };
+  }
+
+  function isCurrentAccountOperation(snapshot: AccountOperationSnapshot) {
+    return activeAccountRef.current === snapshot.accountKey
+      && accountEpochRef.current === snapshot.epoch
+      && operationTokensRef.current[snapshot.kind] === snapshot.token;
+  }
+
+  function writeListUrl(preferences: ListPreferences) {
+    const beforeQuery = new URLSearchParams(window.location.search).toString();
+    const before = beforeQuery ? `${window.location.pathname}?${beforeQuery}` : window.location.pathname;
+    updateListUrl(preferences);
+    const afterQuery = new URLSearchParams(window.location.search).toString();
+    const after = afterQuery ? `${window.location.pathname}?${afterQuery}` : window.location.pathname;
+    if (after !== before) ownLocationWriteRef.current = after;
+  }
 
   function closeCreateDialog() {
     if (createBusyRef.current) return;
@@ -368,6 +444,8 @@ export default function ProjectsPage() {
     setCreateSubmitting(false);
     createBusyRef.current = false;
     if (previousIdentity && previousIdentity !== identity) {
+      downloadAbortRef.current?.abort();
+      downloadAbortRef.current = null;
       setCreateOpen(window.location.hash === '#create-project');
       setName('');
       setDescription('');
@@ -375,7 +453,9 @@ export default function ProjectsPage() {
       setInitialBudgetCredits('');
       setReviewBudgetSuggestion(null);
       setDownloadProject(null);
+      setDownloadingProjectId(null);
       setPendingProjectAction(null);
+      setProjectActionBusy(false);
     }
 
     const restored = readListPreferences(currentUserId);
@@ -386,8 +466,59 @@ export default function ProjectsPage() {
     setSort(restored.preferences.sort);
     setScope(restored.preferences.scope);
     setPage(restored.preferences.page);
+    pageRef.current = restored.preferences.page;
     setPreferencesReadyFor(identity);
   }, [accountKey, currentUserId, hasLoadedUser]);
+
+  useEffect(() => {
+    if (!hasLoadedUser || preferencesReadyFor !== accountKey) return;
+    const routeQueryKey = routeQuery ? `${pathname}?${routeQuery}` : pathname;
+    const currentQuery = new URLSearchParams(window.location.search).toString();
+    const liveLocationKey = currentQuery ? `${window.location.pathname}?${currentQuery}` : window.location.pathname;
+    if (ownLocationWriteRef.current && ownLocationWriteRef.current === liveLocationKey) {
+      if (ownLocationWriteRef.current === routeQueryKey) ownLocationWriteRef.current = '';
+      return;
+    }
+    ownLocationWriteRef.current = '';
+    const restored = readListPreferences(currentUserId);
+    const next = restored.preferences;
+    const current = currentPreferencesRef.current;
+    const unchanged = next.search === current.search
+      && next.status === current.status
+      && next.sort === current.sort
+      && next.scope === current.scope
+      && next.page === current.page;
+    if (unchanged) return;
+    setStorageUnavailable(restored.storageUnavailable);
+    setSearch(next.search);
+    setAppliedSearch(next.search);
+    setActiveTab(next.status);
+    setSort(next.sort);
+    setScope(next.scope);
+    setPage(next.page);
+    pageRef.current = next.page;
+  }, [accountKey, currentUserId, hasLoadedUser, locationRevision, pathname, preferencesReadyFor, routeQuery]);
+
+  useEffect(() => {
+    const onPopState = () => setLocationRevision((revision) => revision + 1);
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  useEffect(() => {
+    const syncHash = () => {
+      let hash = window.location.hash.slice(1);
+      try { hash = decodeURIComponent(hash); } catch { /* Keep the literal hash if malformed. */ }
+      setReturnAnchorId(hash.startsWith('project-card-') ? hash : '');
+    };
+    syncHash();
+    window.addEventListener('hashchange', syncHash);
+    window.addEventListener('popstate', syncHash);
+    return () => {
+      window.removeEventListener('hashchange', syncHash);
+      window.removeEventListener('popstate', syncHash);
+    };
+  }, [pathname, routeQuery]);
 
   useEffect(() => {
     if (!preferencesReady || appliedSearch === search) return;
@@ -410,6 +541,10 @@ export default function ProjectsPage() {
 
     const controller = new AbortController();
     const requestId = ++requestSequence.current;
+    const requestEpoch = accountEpochRef.current;
+    const isCurrentListRequest = () => activeAccountRef.current === accountKey
+      && accountEpochRef.current === requestEpoch
+      && requestSequence.current === requestId;
     setLoading(true);
     setListError('');
     setFailedQueryKey('');
@@ -421,11 +556,13 @@ export default function ProjectsPage() {
           credentials: 'same-origin',
           signal: controller.signal,
         });
+        if (!isCurrentListRequest() || controller.signal.aborted) return;
         if (res.status === 401) {
           window.location.href = '/login';
           return;
         }
         const data = await res.json().catch(() => null) as ProjectListResponse | { error?: string; message?: string } | null;
+        if (!isCurrentListRequest() || controller.signal.aborted) return;
         if (!res.ok) {
           const message = data && 'error' in data ? data.error || data.message : '';
           throw new Error(message || `项目列表读取失败（${res.status}）`);
@@ -436,22 +573,23 @@ export default function ProjectsPage() {
           || !Number.isInteger(data.pagination.total_pages)) {
           throw new Error('项目列表返回内容不完整，请重试');
         }
-        if (controller.signal.aborted || activeAccountRef.current !== accountKey || requestSequence.current !== requestId) return;
+        if (controller.signal.aborted || !isCurrentListRequest()) return;
         setProjects(data.projects);
         setPersonalProject(data.personal_project || null);
         setPagination(data.pagination);
         setProjectsAccountKey(accountKey);
         setLoadedQueryKey(queryKey);
         if (data.pagination.page !== page) {
+          pageRef.current = data.pagination.page;
           setPage(data.pagination.page);
-          updateListUrl({ ...currentPreferences, page: data.pagination.page });
+          writeListUrl({ ...currentPreferences, page: data.pagination.page });
         }
       } catch (error) {
-        if (controller.signal.aborted || activeAccountRef.current !== accountKey || requestSequence.current !== requestId) return;
+        if (controller.signal.aborted || !isCurrentListRequest()) return;
         setListError(error instanceof Error ? error.message : '项目列表读取失败，请重试');
         setFailedQueryKey(queryKey);
       } finally {
-        if (!controller.signal.aborted && activeAccountRef.current === accountKey && requestSequence.current === requestId) {
+        if (!controller.signal.aborted && isCurrentListRequest()) {
           setLoading(false);
         }
       }
@@ -475,7 +613,17 @@ export default function ProjectsPage() {
         ? 1
         : getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).filter(Boolean).length);
       const next = Math.min(24, Math.max(3, columns * PROJECT_ROWS_PER_COLUMN));
-      setPageSize(previous => previous === next ? previous : next);
+      const previous = pageSizeRef.current;
+      if (previous === next) return;
+      pageSizeRef.current = next;
+      setPageSize(next);
+      const currentPage = pageRef.current;
+      const nextPage = Math.floor(((currentPage - 1) * previous) / next) + 1;
+      if (nextPage !== currentPage) {
+        pageRef.current = nextPage;
+        setPage(nextPage);
+        writeListUrl({ ...currentPreferencesRef.current, page: nextPage });
+      }
     };
     updatePageSize();
     const observer = new ResizeObserver(updatePageSize);
@@ -525,13 +673,16 @@ export default function ProjectsPage() {
   }, []);
 
   useEffect(() => {
-    if (!highlightProjectId || !hasCurrentList) return;
-    const target = document.getElementById(`project-card-${highlightProjectId}`);
+    if (!hasCurrentList) return;
+    const targetId = highlightProjectId ? `project-card-${highlightProjectId}` : returnAnchorId;
+    if (!targetId) return;
+    const target = document.getElementById(targetId);
     if (!target) return;
     target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (!highlightProjectId) return;
     const timer = window.setTimeout(() => setHighlightProjectId(null), 4_000);
     return () => window.clearTimeout(timer);
-  }, [hasCurrentList, highlightProjectId, projects]);
+  }, [hasCurrentList, highlightProjectId, projects, returnAnchorId]);
 
   function applyPreferences(update: Partial<ListPreferences>) {
     const next = normalizePreferences({ ...currentPreferences, ...update });
@@ -539,8 +690,9 @@ export default function ProjectsPage() {
     setActiveTab(next.status);
     setSort(next.sort);
     setScope(next.scope);
+    pageRef.current = next.page;
     setPage(next.page);
-    updateListUrl(next);
+    writeListUrl(next);
   }
 
   function resetPreferences() {
@@ -587,6 +739,7 @@ export default function ProjectsPage() {
       return;
     }
 
+    const operation = beginAccountOperation('create');
     createBusyRef.current = true;
     setCreateSubmitting(true);
     try {
@@ -595,11 +748,13 @@ export default function ProjectsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: trimmedName, description: trimmedDescription, type: 'team' }),
       });
-      const data = await res.json().catch(() => null) as { project?: { id?: string }; error?: string; message?: string } | null;
+      if (!isCurrentAccountOperation(operation)) return;
       if (res.status === 401) {
         window.location.href = '/login';
         return;
       }
+      const data = await res.json().catch(() => null) as { project?: { id?: string }; error?: string; message?: string } | null;
+      if (!isCurrentAccountOperation(operation)) return;
       if (res.status >= 500) {
         setCreateUnknown(true);
         return;
@@ -630,10 +785,12 @@ export default function ProjectsPage() {
       setActionError('');
       setReloadVersion((version) => version + 1);
     } catch {
-      setCreateUnknown(true);
+      if (isCurrentAccountOperation(operation)) setCreateUnknown(true);
     } finally {
-      createBusyRef.current = false;
-      setCreateSubmitting(false);
+      if (isCurrentAccountOperation(operation)) {
+        createBusyRef.current = false;
+        setCreateSubmitting(false);
+      }
     }
   }
 
@@ -652,6 +809,7 @@ export default function ProjectsPage() {
   async function confirmProjectAction() {
     if (!pendingProjectAction || projectActionBusy) return;
     const { project, action } = pendingProjectAction;
+    const operation = beginAccountOperation('action');
     const label = action === 'archive' ? '归档' : action === 'restore' ? '恢复' : '删除';
     setProjectActionBusy(true);
     try {
@@ -662,55 +820,93 @@ export default function ProjectsPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action }),
           });
+      if (!isCurrentAccountOperation(operation)) return;
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
       const data = await res.json().catch(() => null) as { error?: string; message?: string } | null;
+      if (!isCurrentAccountOperation(operation)) return;
       if (!res.ok) throw new Error(data?.error || data?.message || `${label}项目失败`);
       setPendingProjectAction(null);
       setNotice(action === 'delete' ? '项目已删除' : `项目已${label}`);
       setReloadVersion((version) => version + 1);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : `${label}项目失败`);
-      setPendingProjectAction(null);
+      if (isCurrentAccountOperation(operation)) {
+        setActionError(error instanceof Error ? error.message : `${label}项目失败`);
+        setPendingProjectAction(null);
+      }
     } finally {
-      setProjectActionBusy(false);
+      if (isCurrentAccountOperation(operation)) setProjectActionBusy(false);
     }
   }
 
   async function handleRenameProject(project: ProjectItem) {
-    const value = await productDialog.prompt('项目名称', project.name, {
+    const operation = beginAccountOperation('rename');
+    const value = await renamePromptRef.current?.prompt('项目名称', project.name, {
       title: '重命名项目',
       confirmLabel: '保存名称',
       maxLength: null,
       onSubmit: async (nextName) => {
+        if (!isCurrentAccountOperation(operation)) throw new Error('账号已切换，本次重命名未提交。请关闭此对话框后在当前账号重新打开。');
         const res = await fetch(`/api/projects/${project.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: nextName }),
         });
-        const data = await res.json().catch(() => null) as { error?: string; message?: string } | null;
+        if (!isCurrentAccountOperation(operation)) throw new Error('账号已切换，本次重命名结果未应用。');
+        if (res.status === 401) {
+          window.location.href = '/login';
+          throw new Error('登录状态已失效，请重新登录后重试。');
+        }
+        const data = await res.json().catch(() => null) as { project?: { id?: string; name?: string }; error?: string; message?: string } | null;
+        if (!isCurrentAccountOperation(operation)) throw new Error('账号已切换，本次重命名结果未应用。');
         if (!res.ok) throw new Error(data?.error || data?.message || '项目名称保存失败，请重试。');
+        if (data?.project?.id !== project.id || data.project.name !== nextName.trim()) {
+          throw new Error('服务器没有返回已保存的项目名称，暂未确认保存成功。请核对项目后再重试。');
+        }
         setNotice('项目名称已保存');
         setActionError('');
         setReloadVersion((version) => version + 1);
       },
     });
-    if (value !== null) setActionError('');
+    if (isCurrentAccountOperation(operation) && value != null) setActionError('');
   }
 
   async function handleProjectDownload() {
     if (!downloadProject || downloadingProjectId === downloadProject.id) return;
     const count = downloadProject.downloadable_task_count || 0;
     if (count <= 0 || count > BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT) return;
+    const operation = beginAccountOperation('download');
     setActionError('');
     setNotice('');
     setDownloadingProjectId(downloadProject.id);
+    const controller = new AbortController();
+    downloadAbortRef.current = controller;
     try {
-      const result = await downloadBulkVideoZip({ projectId: downloadProject.id });
+      const result = await downloadBulkVideoZip(
+        { projectId: downloadProject.id },
+        undefined,
+        { signal: controller.signal, canDownload: () => isCurrentAccountOperation(operation) },
+      );
+      if (!isCurrentAccountOperation(operation)) return;
       setNotice(`已开始下载项目视频包：${result.success} 个视频${result.failed ? `，${result.failed} 个失败，详情见 manifest` : ''}`);
       setDownloadProject(null);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : '项目视频包下载失败');
+      if (isCurrentAccountOperation(operation)) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          return;
+        } else if (error instanceof Error && error.message === '未登录') {
+          window.location.href = '/login';
+        } else {
+          setActionError(error instanceof Error ? error.message : '项目视频包下载失败');
+        }
+      }
     } finally {
-      setDownloadingProjectId(null);
+      if (isCurrentAccountOperation(operation)) {
+        if (downloadAbortRef.current === controller) downloadAbortRef.current = null;
+        setDownloadingProjectId(null);
+      }
     }
   }
 
@@ -783,7 +979,7 @@ export default function ProjectsPage() {
       </section>
 
       {visiblePersonalProject && (
-        <Link href={`/projects/${visiblePersonalProject.id}`} style={{
+        <Link id={`project-card-${visiblePersonalProject.id}`} href={projectDetailHref(visiblePersonalProject.id, currentPreferences)} style={{
           alignItems: 'center',
           background: 'var(--bg-panel)',
           border: '1px solid var(--border-color)',
@@ -844,7 +1040,7 @@ export default function ProjectsPage() {
           const isMutable = project.status !== 'locked';
           const canArchive = isManager && isMutable && project.status === 'active' && project.type === 'team';
           const canRestore = isManager && isMutable && project.status === 'archived';
-          const deleteAllowed = canDeleteProject(project) && isMutable;
+          const deleteAllowed = project.legacy_can_delete === true;
           const highlighted = project.id === highlightProjectId;
           return (
             <article
@@ -864,7 +1060,7 @@ export default function ProjectsPage() {
                 padding: 12,
               }}
             >
-              <Link href={`/projects/${project.id}`} aria-label={`进入项目：${displayName}`} style={{ color: 'inherit', display: 'grid', gap: 10, textDecoration: 'none' }}>
+              <Link href={projectDetailHref(project.id, currentPreferences)} aria-label={`进入项目：${displayName}`} style={{ color: 'inherit', display: 'grid', gap: 10, textDecoration: 'none' }}>
                 <ProjectCover project={project} />
                 <span style={{ display: 'grid', gap: 5 }}>
                   <span style={{ alignItems: 'center', display: 'flex', flexWrap: 'wrap', gap: 7, justifyContent: 'space-between' }}>
@@ -933,7 +1129,7 @@ export default function ProjectsPage() {
                       top: 'calc(100% + 6px)',
                       zIndex: 3,
                     }}>
-                      <Link href={`/projects/${project.id}`} className="btn btn-secondary" style={{ justifyContent: 'flex-start', textDecoration: 'none' }} onClick={closeProjectMenu}>成员与设置</Link>
+                      <Link href={projectDetailHref(project.id, currentPreferences, 'members')} className="btn btn-secondary" style={{ justifyContent: 'flex-start', textDecoration: 'none' }} onClick={closeProjectMenu}>成员与设置</Link>
                       {project.status !== 'archived' && (
                         <button className="btn btn-secondary" type="button" style={{ justifyContent: 'flex-start' }} onClick={(event) => { closeProjectMenu(event); void handleRenameProject(project); }}>重命名</button>
                       )}
@@ -1089,7 +1285,7 @@ export default function ProjectsPage() {
         />
       )}
 
-      {productDialog.productDialog}
+      <ProjectRenamePromptHost key={accountKey} ref={renamePromptRef} />
     </div>
   );
 }

@@ -410,6 +410,9 @@ interface Props {
     resolutionApprovalConfirmed?: boolean;
   } | null;
   studioHandoff?: StudioGenerationHandoff | null;
+  interactionLocked?: boolean;
+  onWorkspaceBusyChange?: (busy: boolean, reason?: 'read-error' | 'pending-attach' | 'uploading' | 'upload-failed' | 'saving' | 'picker-open' | 'loading' | null) => void;
+  onWorkspaceRefreshReady?: (refresh: (() => Promise<void>) | null) => void;
   onCollectionLoad: (collectionId: string) => Promise<void>;
   onCollectionSave: (name: string) => Promise<void>;
   onCollectionNew: (name: string) => Promise<void>;
@@ -500,6 +503,9 @@ export function GenerationComposer({
   onReset,
   reuseDraft,
   studioHandoff = null,
+  interactionLocked = false,
+  onWorkspaceBusyChange,
+  onWorkspaceRefreshReady,
   require1080pApproval,
   selectedVideoCardId,
   canManageTemplates = false,
@@ -529,6 +535,7 @@ export function GenerationComposer({
 }: Props) {
   const { confirm, productDialog } = useProductDialog();
   const workspace = useWorkspace();
+  const workspaceOperationCountRef = React.useRef(0);
   const templateEnabled = templateMode === 'workbench';
   const appliedReuseDraftRef = React.useRef<string | null>(null);
   const appliedInitialSettingsRef = React.useRef(false);
@@ -558,6 +565,7 @@ export function GenerationComposer({
   const [templateDrawerOpen, setTemplateDrawerOpen] = useState(false);
   const [templateSaveBusy, setTemplateSaveBusy] = useState(false);
   const [templateSaveError, setTemplateSaveError] = useState<string | null>(null);
+
   const [moduleBuilderType, setModuleBuilderType] = useState<ModuleBuilderType>('auto');
   const [moduleBuilderIntent, setModuleBuilderIntent] = useState('');
   const [moduleBuilderRules, setModuleBuilderRules] = useState(DEFAULT_MODULE_BUILDER_RULES);
@@ -592,6 +600,51 @@ export function GenerationComposer({
   const appliedStudioProviderRunRef = React.useRef<string | null>(null);
   const appliedStudioModelRunRef = React.useRef<string | null>(null);
   const appliedStudioLoraRunRef = React.useRef<string | null>(null);
+
+  const reportWorkspaceBusy = useCallback(() => {
+    const uploadStatuses = Object.values(workspace.uploadStatuses);
+    const reason = workspace.pendingWorkspaceAttach
+      ? 'pending-attach'
+      : uploadStatuses.some((status) => status === 'uploading')
+        ? 'uploading'
+        : uploadStatuses.some((status) => status === 'failed')
+          ? 'upload-failed'
+          : workspace.error
+            ? 'read-error'
+            : workspaceOperationCountRef.current > 0 || templateSaveBusy
+              ? 'saving'
+              : showAlbumPicker || showUploadedImagePicker || templateDrawerOpen
+                ? 'picker-open'
+                : workspace.loading || templateLoading || agentBusy || moduleBuilderBusy || muskConfigLoading || Boolean(studioHandoff && !studioSettingsReady)
+                  ? 'loading'
+                  : null;
+    onWorkspaceBusyChange?.(reason !== null, reason);
+  }, [agentBusy, moduleBuilderBusy, muskConfigLoading, onWorkspaceBusyChange, showAlbumPicker, showUploadedImagePicker, studioHandoff, studioSettingsReady, templateDrawerOpen, templateLoading, templateSaveBusy, workspace.error, workspace.loading, workspace.pendingWorkspaceAttach, workspace.uploadStatuses]);
+
+  const runWorkspaceOperation = useCallback(async <T,>(operation: () => Promise<T>): Promise<T> => {
+    workspaceOperationCountRef.current += 1;
+    reportWorkspaceBusy();
+    try {
+      return await operation();
+    } finally {
+      workspaceOperationCountRef.current = Math.max(0, workspaceOperationCountRef.current - 1);
+      reportWorkspaceBusy();
+    }
+  }, [reportWorkspaceBusy]);
+
+  const refreshWorkspaceForParent = useCallback(
+    () => runWorkspaceOperation(() => workspace.refresh()),
+    [runWorkspaceOperation, workspace.refresh],
+  );
+
+  useEffect(() => {
+    reportWorkspaceBusy();
+  }, [reportWorkspaceBusy]);
+
+  useEffect(() => {
+    onWorkspaceRefreshReady?.(refreshWorkspaceForParent);
+    return () => onWorkspaceRefreshReady?.(null);
+  }, [onWorkspaceRefreshReady, refreshWorkspaceForParent]);
 
   useEffect(() => {
     if (!studioHandoff) {
@@ -1086,8 +1139,8 @@ export function GenerationComposer({
     setResolutionApprovalConfirmed(
       require1080pApproval && reuseDraft.resolution === '1080p' ? Boolean(reuseDraft.resolutionApprovalConfirmed) : false,
     );
-    void workspace.refresh();
-  }, [reuseDraft, studioHandoff, require1080pApproval, workspace, modelOptions, onModelChange]);
+    void runWorkspaceOperation(() => workspace.refresh());
+  }, [reuseDraft, studioHandoff, require1080pApproval, workspace, modelOptions, onModelChange, runWorkspaceOperation]);
 
   useEffect(() => {
     if (!initialSettings || appliedInitialSettingsRef.current || settingsTouchedRef.current || reuseDraft || studioHandoff) return;
@@ -1430,29 +1483,31 @@ export function GenerationComposer({
       const ok = await confirm('加载图集将替换当前素材，确定继续？', { title: '替换当前素材', confirmLabel: '加载并替换' });
       if (!ok) return;
     }
-    await onCollectionLoad(collectionId);
-  }, [workspace.assets.length, onCollectionLoad, confirm]);
+    await runWorkspaceOperation(() => onCollectionLoad(collectionId));
+  }, [workspace.assets.length, onCollectionLoad, confirm, runWorkspaceOperation]);
 
   const handleSaveCollection = useCallback(async (name: string) => {
-    await onCollectionSave(name);
-  }, [onCollectionSave]);
+    await runWorkspaceOperation(() => onCollectionSave(name));
+  }, [onCollectionSave, runWorkspaceOperation]);
 
   const handleNewCollection = useCallback(async (name: string) => {
-    await onCollectionNew(name);
-  }, [onCollectionNew]);
+    await runWorkspaceOperation(() => onCollectionNew(name));
+  }, [onCollectionNew, runWorkspaceOperation]);
 
   const handleRemove = useCallback(async (assetId: string) => {
-    await workspace.removeAsset(assetId);
-  }, [workspace]);
+    await runWorkspaceOperation(() => workspace.removeAsset(assetId));
+  }, [runWorkspaceOperation, workspace]);
 
   const handleReorder = useCallback(async (newOrder: Array<{ assetId: string; sortOrder: number }>) => {
-    await workspace.reorderAssets(newOrder);
-  }, [workspace]);
+    await runWorkspaceOperation(() => workspace.reorderAssets(newOrder));
+  }, [runWorkspaceOperation, workspace]);
 
   const handleReplace = useCallback(async (assetId: string, file: File) => {
-    await workspace.replaceAsset(assetId, file);
-    await refreshReferenceAlbums();
-  }, [workspace, refreshReferenceAlbums]);
+    await runWorkspaceOperation(async () => {
+      await workspace.replaceAsset(assetId, file);
+      await refreshReferenceAlbums();
+    });
+  }, [runWorkspaceOperation, workspace, refreshReferenceAlbums]);
 
   const handlePreview = useCallback((src: string, type?: WorkspaceAssetItem['type'], title?: string, poster?: string, contentKey?: ContentKey) => {
     if (!type) return;
@@ -1504,11 +1559,11 @@ export function GenerationComposer({
       .filter((label): label is string => Boolean(label));
 
     if (idsToAdd.length > 0) {
-      await workspace.addReferenceImages(idsToAdd);
+      await runWorkspaceOperation(() => workspace.addReferenceImages(idsToAdd));
     }
     await refreshReferenceAlbums();
     return labelsToInsert;
-  }, [workspace, imageReferenceAssets, refreshReferenceAlbums]);
+  }, [workspace, imageReferenceAssets, refreshReferenceAlbums, runWorkspaceOperation]);
 
   const handleAddReferenceImages = useCallback(async (
     referenceImageIds: string[],
@@ -1558,11 +1613,11 @@ export function GenerationComposer({
       .filter((label): label is string => Boolean(label));
 
     if (idsToAdd.length > 0) {
-      await workspace.addAssets(idsToAdd);
+      await runWorkspaceOperation(() => workspace.addAssets(idsToAdd));
       await refreshReferenceAlbums();
     }
     return labelsToInsert;
-  }, [workspace, imageReferenceAssets, refreshReferenceAlbums]);
+  }, [workspace, imageReferenceAssets, refreshReferenceAlbums, runWorkspaceOperation]);
 
   const handleAddUploadedAssets = useCallback(async (
     assetIds: string[],
@@ -1607,26 +1662,29 @@ export function GenerationComposer({
       const ok = await confirm('切换图集会替换当前参考素材列表，确定继续？', { title: '替换参考素材', confirmLabel: '切换并替换' });
       if (!ok) return;
     }
-    await workspace.loadReferenceAlbum(albumId, seedanceReferenceMediaCapabilities(selectedModel).imageLimit);
+    await runWorkspaceOperation(() => workspace.loadReferenceAlbum(albumId, seedanceReferenceMediaCapabilities(selectedModel).imageLimit));
     setCurrentReferenceAlbumId(albumId);
     setCurrentReferenceAlbumName(albumName);
-  }, [workspace, selectedModel, confirm]);
+  }, [workspace, selectedModel, confirm, runWorkspaceOperation]);
 
   const handleSaveCurrentAsReferenceAlbum = useCallback(async (name: string) => {
     if (workspace.assets.length === 0) throw new Error('当前没有可保存的参考素材');
-    const albumId = await workspace.saveCurrentAsReferenceAlbum(name);
+    const albumId = await runWorkspaceOperation(() => workspace.saveCurrentAsReferenceAlbum(name));
     setCurrentReferenceAlbumId(albumId);
     setCurrentReferenceAlbumName(name);
     await refreshReferenceAlbums();
-  }, [workspace, refreshReferenceAlbums]);
+  }, [workspace, refreshReferenceAlbums, runWorkspaceOperation]);
 
   const handleCreateReferenceAlbum = useCallback(async (name: string) => {
-    const albumId = await workspace.createReferenceAlbum(name);
-    await workspace.clearAssets();
+    const albumId = await runWorkspaceOperation(async () => {
+      const nextAlbumId = await workspace.createReferenceAlbum(name);
+      await workspace.clearAssets();
+      return nextAlbumId;
+    });
     setCurrentReferenceAlbumId(albumId);
     setCurrentReferenceAlbumName(name);
     await refreshReferenceAlbums();
-  }, [workspace, refreshReferenceAlbums]);
+  }, [workspace, refreshReferenceAlbums, runWorkspaceOperation]);
 
   // ============================================================================
   // Render
@@ -1635,7 +1693,11 @@ export function GenerationComposer({
   return (
     <>
       {productDialog}
-      <div className="generation-composer">
+      <div
+        className="generation-composer"
+        aria-busy={interactionLocked || workspace.loading || workspaceOperationCountRef.current > 0}
+        inert={interactionLocked}
+      >
         {templateEnabled && (
         <section className="template-workbench" aria-label="模板驱动生成">
           <div className="template-workbench-header">
@@ -1966,7 +2028,7 @@ export function GenerationComposer({
               model={selectedModel}
               assets={workspace.assets}
               uploadStatuses={workspace.uploadStatuses}
-              onUpload={workspace.uploadAsset}
+              onUpload={(file, onProgress) => runWorkspaceOperation(() => workspace.uploadAsset(file, onProgress))}
               onRemove={handleRemove}
               onReorder={handleReorder}
               onReplace={handleReplace}
@@ -1996,7 +2058,7 @@ export function GenerationComposer({
               model={selectedModel}
               assets={workspace.assets}
               uploadStatuses={workspace.uploadStatuses}
-              onUpload={workspace.uploadAsset}
+              onUpload={(file, onProgress) => runWorkspaceOperation(() => workspace.uploadAsset(file, onProgress))}
               onRemove={handleRemove}
               onReorder={handleReorder}
               onReplace={handleReplace}
@@ -2019,7 +2081,7 @@ export function GenerationComposer({
             <span>
               素材已上传成功，但加入参考区失败。系统已保留素材 ID，可直接重试，不需要重新上传。
             </span>
-            <button type="button" onClick={() => { void workspace.retryPendingAttach(); }} disabled={workspace.loading}>
+            <button type="button" onClick={() => { void runWorkspaceOperation(() => workspace.retryPendingAttach()); }} disabled={workspace.loading || interactionLocked}>
               {workspace.loading ? '正在重试...' : `重试加入参考区（${workspace.pendingWorkspaceAttach.assetIds.length} 个）`}
             </button>
           </div>
@@ -2222,7 +2284,7 @@ export function GenerationComposer({
       />}
 
       <UploadedImagePicker
-        open={showUploadedImagePicker || showAlbumPicker}
+        open={(showUploadedImagePicker || showAlbumPicker) && !interactionLocked}
         target="workspace"
         title={generationMode === 'first_last_frame' ? '添加首尾帧素材' : '添加视频参考素材'}
         confirmLabel="添加到视频参考区"
@@ -2237,16 +2299,16 @@ export function GenerationComposer({
         currentAssetIds={workspace.assets.map((asset) => asset.assetId)}
         currentReferenceImageIds={currentReferenceImageIds}
         avatarTarget={workspace.workspace ? { kind: 'workspace', id: workspace.workspace.id, currentAssetIds: workspace.assets.map(a=>a.assetId), capacity: Math.max(0,(generationMode==='first_last_frame'?2:seedanceReferenceMediaCapabilities(selectedModel).imageLimit)-imageReferenceAssets.length), imageLimit: generationMode==='first_last_frame'?2:seedanceReferenceMediaCapabilities(selectedModel).imageLimit, sourceSignature: JSON.stringify([workspace.workspace.id,generationMode,selectedModel,prompt,workspace.assets.map(a=>[a.assetId,a.role,a.referenceImageId])]), role: generationMode==='first_last_frame'?(workspace.assets.some(a=>a.role==='first_frame')?'last_frame':'first_frame'):'reference_image' } : undefined}
-        onAvatarApplied={workspace.refresh}
+        onAvatarApplied={refreshWorkspaceForParent}
         onClose={() => { handleMentionPickerClose('history'); handleMentionPickerClose('album'); }}
-        onUploadFile={workspace.uploadAssetToHistory}
+        onUploadFile={(file, onProgress) => runWorkspaceOperation(() => workspace.uploadAssetToHistory(file, onProgress))}
         onConfirm={handleAddUploadedAssets}
         onConfirmSelection={async (items: PickerItem[]) => {
           const newItems = items.filter(item => !workspace.assets.some(a => a.assetId === item.assetId || a.referenceImageId && a.referenceImageId === item.referenceImageId));
           const labelList = newItems.filter(item => item.type === 'image').map((_, index) => `图片${imageReferenceAssets.length + index + 1}`);
           const next = appendReferenceMarkers(prompt, labelList);
           if (next.length > MAX_GENERATION_PROMPT_CHARS) throw new Error(`${GENERATION_PROMPT_LIMIT_MESSAGE}，无法自动插入 @图片 标记`);
-          await workspace.addLibrarySelection(newItems.map(item => item.referenceImageId ? { referenceImageId: item.referenceImageId } : { assetId: item.assetId }));
+          await runWorkspaceOperation(() => workspace.addLibrarySelection(newItems.map(item => item.referenceImageId ? { referenceImageId: item.referenceImageId } : { assetId: item.assetId })));
           if (pendingMentionRequestRef.current) resolvePendingMentionRequest(formatReferenceTokens(labelList) || null);
           else setPrompt(current => appendReferenceMarkers(current, labelList));
         }}

@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { AlertCircle, CheckCircle2, RefreshCcw, Sparkles } from 'lucide-react';
 import EnhanceVideoAction from '@/components/EnhanceVideoAction';
+import { RelativeTime } from '@/components/RelativeTime';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import { sanitizeOptionalReturnTo, taskDetailHref, taskReturnLabel } from '@/lib/navigation/return-to';
+import { useAppSession } from '@/lib/context/AppSessionContext';
 
 type EnhanceTaskCandidate = {
   id: string;
@@ -41,18 +43,6 @@ type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 
 const PAGE_SIZE = 24;
 
-function formatTime(value: string | null) {
-  if (!value) return '未完成';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '时间未知';
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
 function canEnhance(task: EnhanceTaskCandidate) {
   return task.local_status === 'succeeded'
     && Boolean(task.local_video_path || task.result_video_url || task.public_video_url)
@@ -70,12 +60,16 @@ function taskSubtitle(task: EnhanceTaskCandidate) {
 }
 
 export default function EnhanceVideoPageClient() {
+  const { user, hasLoadedUser, loadingUser, refreshUser } = useAppSession();
   const [tasks, setTasks] = useState<EnhanceTaskCandidate[]>([]);
   const [config, setConfig] = useState<ConfigState | null>(null);
   const [loadState, setLoadState] = useState<LoadState>('idle');
   const [error, setError] = useState('');
   const [requestedSourceTaskId, setRequestedSourceTaskId] = useState<string | null>(null);
   const [returnTo, setReturnTo] = useState<string | null>(null);
+  const taskListRequestRef = useRef(0);
+  const activeAccountIdRef = useRef<string | null>(user?.id || null);
+  activeAccountIdRef.current = user?.id || null;
 
   const eligibleTasks = useMemo(() => tasks.filter(canEnhance), [tasks]);
   const blockedTasks = useMemo(() => tasks.filter((task) => !canEnhance(task)).slice(0, 6), [tasks]);
@@ -88,11 +82,20 @@ export default function EnhanceVideoPageClient() {
       && requestedSourceTask.duration,
   );
   const selectedSourceTask = canStartRequestedSource ? requestedSourceTask : null;
-  const enhancerReturnTo = returnTo
-    ? `/generate/enhance?return_to=${encodeURIComponent(returnTo)}`
-    : '/generate/enhance';
+  const enhancerReturnTo = useMemo(() => {
+    const params = new URLSearchParams();
+    if (returnTo) params.set('return_to', returnTo);
+    if (requestedSourceTaskId) params.set('source_task_id', requestedSourceTaskId);
+    const query = params.toString();
+    return query ? `/generate/enhance?${query}` : '/generate/enhance';
+  }, [requestedSourceTaskId, returnTo]);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const accountId = user?.id || null;
+    if (loadingUser || !accountId) return;
+    const requestId = ++taskListRequestRef.current;
+    const isCurrentRequest = () => taskListRequestRef.current === requestId
+      && activeAccountIdRef.current === accountId;
     setLoadState('loading');
     setError('');
     try {
@@ -101,7 +104,20 @@ export default function EnhanceVideoPageClient() {
         fetch(`/api/video/list?page=1&limit=${PAGE_SIZE}`, { cache: 'no-store' }),
       ]);
 
+      if (!isCurrentRequest()) return;
+      if (configResponse.status === 401 || tasksResponse.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
+      if ([403, 404].includes(configResponse.status)) setConfig(null);
+      if ([403, 404].includes(tasksResponse.status)) {
+        setTasks([]);
+        throw new Error('当前账号无法读取这组任务，请重新打开工作台。');
+      }
+      if (!configResponse.ok) throw new Error('超分配置读取失败，请稍后重试。');
+
       const configData = await configResponse.json();
+      if (!isCurrentRequest()) return;
       setConfig({
         ready: configData.aimediakit_enhance_video?.ready === true,
         enabled: configData.aimediakit_enhance_video?.enabled === true,
@@ -109,23 +125,44 @@ export default function EnhanceVideoPageClient() {
       });
 
       const tasksData = await tasksResponse.json();
+      if (!isCurrentRequest()) return;
       if (!tasksResponse.ok) {
         throw new Error(tasksData.message || tasksData.error || '视频列表加载失败');
       }
       setTasks(Array.isArray(tasksData.tasks) ? tasksData.tasks : []);
       setLoadState('ready');
     } catch (err) {
+      if (!isCurrentRequest()) return;
       setError(err instanceof Error ? err.message : '视频超分页加载失败');
       setLoadState('error');
     }
-  };
+  }, [loadingUser, user?.id]);
+
+  useEffect(() => {
+    if (!hasLoadedUser && !loadingUser) void refreshUser();
+  }, [hasLoadedUser, loadingUser, refreshUser]);
+
+  useEffect(() => {
+    taskListRequestRef.current += 1;
+    setTasks([]);
+    setConfig(null);
+    setLoadState('idle');
+    setError('');
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (loadingUser || !user?.id) return;
+    void load();
+  }, [load, user?.id, loadingUser]);
 
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
-    const sourceTaskId = searchParams.get('source_task_id')?.trim() || null;
+    const rawSourceTaskId = searchParams.get('source_task_id')?.trim() || null;
+    const sourceTaskId = rawSourceTaskId && rawSourceTaskId.length <= 200 && !/[\u0000-\u001f\u007f]/.test(rawSourceTaskId)
+      ? rawSourceTaskId
+      : null;
     setRequestedSourceTaskId(sourceTaskId);
     setReturnTo(sanitizeOptionalReturnTo(searchParams.get('return_to')));
-    void load();
   }, []);
 
   useEffect(() => {
@@ -252,7 +289,7 @@ export default function EnhanceVideoPageClient() {
                       {task.prompt || '未命名视频'}
                     </Link>
                     <span>{taskSubtitle(task)}</span>
-                    <small>{formatTime(task.completed_at || task.created_at)}</small>
+                    <small><RelativeTime value={task.completed_at || task.created_at} /></small>
                   </div>
                   <EnhanceVideoAction
                     task={{

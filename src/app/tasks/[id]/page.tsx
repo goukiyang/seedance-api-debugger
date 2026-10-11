@@ -1707,21 +1707,11 @@ export default function TaskDetailPage() {
   const taskCompletedTime = formatTaskTime(task.completed_at || task.updated_at);
   const taskCompletedTimePrefix = task.completed_at ? '生成于' : '更新于';
   const taskCompletedExactLabel = task.completed_at ? '精确时间' : '更新时间';
-  const enhanceSourceCanBeLocated = Boolean(
-    isEnhanceTask
-      && enhanceSourceTask
-      && enhanceSourceTask.local_status === 'succeeded'
-      && enhanceSourceTask.provider !== 'volcengine_mediakit'
-      && enhanceSourceTask.generation_mode !== 'enhance_video'
-      && (enhanceSourceTask.local_video_path || enhanceSourceTask.result_video_url)
-      && enhanceSourceTask.video_card_id
-      && enhanceSourceTask.duration,
-  );
   const taskActionHref = isEnhanceTask
-    ? enhanceWorkspaceHref(returnTo, enhanceSourceCanBeLocated ? enhanceSourceTask?.id : null)
+    ? enhanceWorkspaceHref(returnTo, enhanceSourceTaskId)
     : taskReuseHref(task, returnTo);
   const taskActionLabel = isEnhanceTask
-    ? (enhanceSourceCanBeLocated ? '选择源视频超分' : '在超分工作台继续')
+    ? (enhanceSourceTaskId ? '查找原来源视频' : '选择源视频')
     : '复用输入';
   const taskCreditText = task.actual_cost !== null && task.actual_cost !== undefined
     ? formatCreditPoints(task.actual_cost)
@@ -1845,9 +1835,10 @@ export default function TaskDetailPage() {
               </div>
               {isEnhanceTask && (
                 <p className="task-action-help">
-                  {enhanceSourceCanBeLocated
-                    ? '已定位原来源视频；进入后仍需核对超分参数并手动提交。'
-                    : '请在超分工作台重新选择可用的源视频；不会自动创建任务。'}
+                  {enhanceSourceTaskId
+                    ? '进入后会在最近 24 条任务中查找原来源；若未找到或当前不可用，请手动选择。仍需核对参数并手动提交。'
+                    : '此任务没有可恢复的原来源编号；请在工作台手动选择可用源视频并核对参数后提交。'}
+                  {' '}不会自动创建任务。
                 </p>
               )}
 

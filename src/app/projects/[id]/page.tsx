@@ -1,9 +1,8 @@
 'use client';
-import { useProductDialog } from '@/components/useProductDialog';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Eye } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
 import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
@@ -12,17 +11,19 @@ import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { RelativeTime } from '@/components/RelativeTime';
 import PaginationControls from '@/components/PaginationControls';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
 import { showVideoCardManagementUi } from '@/lib/navigation';
-import { taskDetailHref } from '@/lib/navigation/return-to';
+import { sanitizeOptionalReturnTo, taskDetailHref } from '@/lib/navigation/return-to';
 import { enhanceWorkspaceHref, taskReuseHref } from '@/lib/navigation/task-reuse';
+import { useAppSession } from '@/lib/context/AppSessionContext';
 
 type ProjectSection = 'tasks' | 'albums' | 'finance' | 'members';
 type ProjectViewState = {
   section: ProjectSection;
   taskPage: number;
   taskSearch: string;
-  taskStatus: 'all' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+  taskStatus: 'all' | 'running' | 'playable' | 'failed';
   taskSort: 'newest' | 'oldest';
   albumPage: number;
   financePage: number;
@@ -49,7 +50,8 @@ function readProjectViewParams(params: { get: (name: string) => string | null })
   if (albumPage) result.albumPage = albumPage;
   if (financePage) result.financePage = financePage;
   if (params.get('task_q') !== null) result.taskSearch = (params.get('task_q') || '').slice(0, 120);
-  if (status === 'running' || status === 'succeeded' || status === 'failed' || status === 'cancelled' || status === 'all') result.taskStatus = status;
+  if (status === 'running' || status === 'playable' || status === 'failed' || status === 'all') result.taskStatus = status;
+  else if (status === 'succeeded' || status === 'cancelled') result.taskStatus = 'all';
   if (sort === 'oldest' || sort === 'newest') result.taskSort = sort;
   return result;
 }
@@ -68,7 +70,8 @@ function normalizeStoredProjectView(value: unknown): Partial<ProjectViewState> {
   if (albumPage) result.albumPage = albumPage;
   if (financePage) result.financePage = financePage;
   if (typeof stored.taskSearch === 'string') result.taskSearch = stored.taskSearch.slice(0, 120);
-  if (stored.taskStatus === 'running' || stored.taskStatus === 'succeeded' || stored.taskStatus === 'failed' || stored.taskStatus === 'cancelled' || stored.taskStatus === 'all') result.taskStatus = stored.taskStatus;
+  if (stored.taskStatus === 'running' || stored.taskStatus === 'playable' || stored.taskStatus === 'failed' || stored.taskStatus === 'all') result.taskStatus = stored.taskStatus;
+  else if (stored.taskStatus === 'succeeded' || stored.taskStatus === 'cancelled') result.taskStatus = 'all';
   if (stored.taskSort === 'oldest' || stored.taskSort === 'newest') result.taskSort = stored.taskSort;
   return result;
 }
@@ -76,6 +79,20 @@ function normalizeStoredProjectView(value: unknown): Partial<ProjectViewState> {
 function projectViewStorageKey(projectId: string, viewerId: string) {
   return `sd2:project-detail-view:v1:${viewerId}:${projectId}`;
 }
+
+function safeProjectListReturnTo(value: string | null | undefined) {
+  const safe = sanitizeOptionalReturnTo(value);
+  return safe && safe.split(/[?#]/, 1)[0] === '/projects' ? safe : '/projects';
+}
+
+type ProjectOperation = 'member' | 'invite' | 'rename' | 'projectAction' | 'removeMember' | 'videoCard' | 'budget';
+
+type ProjectOperationSnapshot = {
+  kind: ProjectOperation;
+  identity: string;
+  epoch: number;
+  requestId: number;
+};
 
 interface ProjectDetail {
   id: string;
@@ -370,6 +387,7 @@ function roleLabel(role: string): string {
 function statusLabel(status: string): string {
   if (status === 'active') return '进行中';
   if (status === 'archived') return '已归档';
+  if (status === 'locked') return '已锁定';
   return status;
 }
 
@@ -503,15 +521,87 @@ function providerTaskIdLabel(ledger: CostLedgerItem): string {
   return ledger.provider_task_id || ledger.task?.provider_task_id || '-';
 }
 
+function MemberRemovalConfirmModal({
+  memberName,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  memberName: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useDialogDismiss({
+    open: true,
+    dialogRef: panelRef,
+    dismissSurfaceRef: overlayRef,
+    onDismiss: onCancel,
+    dismissOnOutside: !busy,
+    dismissOnEscape: !busy,
+  });
+
+  return (
+    <div ref={overlayRef} className="modal-overlay" role="dialog" aria-modal="true" aria-label="移除成员确认">
+      <div ref={panelRef} className="modal-panel project-removal-modal">
+        <div className="modal-header">
+          <div>
+            <h2>移除成员</h2>
+            <p>确认后，该成员将从此项目的成员列表中移除。</p>
+          </div>
+          <button type="button" className="modal-close" onClick={onCancel} disabled={busy} aria-label="关闭">×</button>
+        </div>
+        <div className="project-removal-summary"><strong>{memberName}</strong></div>
+        <div className="modal-actions">
+          <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={busy}>取消</button>
+          <button type="button" className="btn btn-danger" onClick={onConfirm} disabled={busy}>
+            {busy ? '处理中...' : '移除成员'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ProjectDetailPage() {
-  const { confirm, productDialog } = useProductDialog();
+  const router = useRouter();
+  const { user: currentUser, hasLoadedUser, loadingUser, refreshUser } = useAppSession();
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
+  const routeQuery = searchParams.toString();
   const projectId = params.id;
+  const currentUserId = currentUser?.id || '';
+  const accountKey = currentUserId ? `${currentUserId}:${currentUser?.role || ''}` : 'anonymous';
+  const identityKey = `${accountKey}:${projectId}`;
   const [workspace, setWorkspace] = useState<ProjectViewState>(() => ({
     ...DEFAULT_PROJECT_VIEW,
     ...readProjectViewParams(searchParams),
   }));
+  const activeIdentityRef = useRef(identityKey);
+  const identityEpochRef = useRef(0);
+  if (activeIdentityRef.current !== identityKey) {
+    activeIdentityRef.current = identityKey;
+    identityEpochRef.current += 1;
+  }
+  const activeSectionQueryKey = (() => {
+    const query = new URLSearchParams({ section: workspace.section });
+    if (workspace.section === 'tasks') {
+      query.set('page', String(workspace.taskPage));
+      query.set('q', workspace.taskSearch);
+      query.set('status', workspace.taskStatus);
+      query.set('sort', workspace.taskSort);
+    } else if (workspace.section === 'albums') {
+      query.set('page', String(workspace.albumPage));
+    } else if (workspace.section === 'finance') {
+      query.set('page', String(workspace.financePage));
+    }
+    return `${identityKey}?${query.toString()}`;
+  })();
+  const activeSectionQueryRef = useRef(activeSectionQueryKey);
+  activeSectionQueryRef.current = activeSectionQueryKey;
+  const projectListReturnTo = safeProjectListReturnTo(searchParams.get('return_to'));
   const projectReturnTo = (() => {
     const query = new URLSearchParams({
       view: workspace.section,
@@ -522,6 +612,7 @@ export default function ProjectDetailPage() {
       finance_page: String(workspace.financePage),
     });
     if (workspace.taskSearch) query.set('task_q', workspace.taskSearch);
+    query.set('return_to', projectListReturnTo);
     return `/projects/${encodeURIComponent(projectId)}?${query.toString()}`;
   })();
   const projectTaskReturnTo = (taskId: string) => {
@@ -530,6 +621,7 @@ export default function ProjectDetailPage() {
       task_sort: workspace.taskSort, album_page: String(workspace.albumPage), finance_page: String(workspace.financePage),
     });
     if (workspace.taskSearch) query.set('task_q', workspace.taskSearch);
+    query.set('return_to', projectListReturnTo);
     return `/projects/${encodeURIComponent(projectId)}?${query.toString()}#task-${encodeURIComponent(taskId)}`;
   };
   const [project, setProject] = useState<ProjectDetail | null>(null);
@@ -549,8 +641,11 @@ export default function ProjectDetailPage() {
   });
   const [loading, setLoading] = useState(true);
   const [sectionLoading, setSectionLoading] = useState(false);
+  const [loadedDataIdentity, setLoadedDataIdentity] = useState('');
+  const [loadErrorIdentity, setLoadErrorIdentity] = useState('');
   const [viewerId, setViewerId] = useState('');
   const [sectionPagination, setSectionPagination] = useState<ProjectPagination | null>(null);
+  const [sectionPaginationQueryKey, setSectionPaginationQueryKey] = useState('');
   const [activePreviewTask, setActivePreviewTask] = useState<ProjectVideoPreviewTask | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -568,35 +663,103 @@ export default function ProjectDetailPage() {
   const [savingBudget, setSavingBudget] = useState(false);
   const [pendingProjectAction, setPendingProjectAction] = useState<ProjectAction | null>(null);
   const [projectActionBusy, setProjectActionBusy] = useState(false);
+  const [pendingMemberRemoval, setPendingMemberRemoval] = useState<{ identity: string; userId: string; memberName: string } | null>(null);
+  const [memberRemovalBusy, setMemberRemovalBusy] = useState(false);
+  const routeStatePendingRef = useRef(false);
   const requestSequence = useRef(0);
+  const operationTokensRef = useRef<Record<ProjectOperation, number>>({
+    member: 0, invite: 0, rename: 0, projectAction: 0, removeMember: 0, videoCard: 0, budget: 0,
+  });
   const loadedPreferencesFor = useRef('');
   const initializedDraftsFor = useRef('');
   const initializedBudgetDraftFor = useRef('');
-  const loadedProjectId = useRef('');
+  const loadedProjectIdentity = useRef('');
   const viewerIdRef = useRef('');
 
+  const beginOperation = (kind: ProjectOperation): ProjectOperationSnapshot => {
+    const requestId = operationTokensRef.current[kind] + 1;
+    operationTokensRef.current[kind] = requestId;
+    return { kind, identity: identityKey, epoch: identityEpochRef.current, requestId };
+  };
+  const isCurrentOperation = (snapshot: ProjectOperationSnapshot) => (
+    activeIdentityRef.current === snapshot.identity
+    && identityEpochRef.current === snapshot.epoch
+    && operationTokensRef.current[snapshot.kind] === snapshot.requestId
+  );
+
+  const clearProjectData = useCallback(() => {
+    setLoadedDataIdentity('');
+    setProject(null);
+    setTasks([]);
+    setVideoCards([]);
+    setCostLedgers([]);
+    setReferenceAlbums([]);
+    setReviewSummary(null);
+    setBudget(null);
+    setArchiveAnomalies(null);
+    setPermissions({ can_manage_project: false, can_manage_members: false, can_manage_assets: false, can_generate: false, role: '' });
+    setSectionPagination(null);
+    setSectionPaginationQueryKey('');
+    setViewerId('');
+    viewerIdRef.current = '';
+    setActivePreviewTask(null);
+    setMessage('');
+    setError('');
+    setLoadErrorIdentity('');
+    setMemberUserId('');
+    setMemberRole('member');
+    setJoinUrl('');
+    setEditName('');
+    setEditDescription('');
+    setVideoCardTitle('');
+    setVideoCardObjective('');
+    setCreatingVideoCard(false);
+    setSimilarVideoCards([]);
+    setConfirmDuplicateVideoCard(false);
+    setBudgetDraft('');
+    setSavingBudget(false);
+    setPendingProjectAction(null);
+    setProjectActionBusy(false);
+    setPendingMemberRemoval(null);
+    setMemberRemovalBusy(false);
+    loadedPreferencesFor.current = '';
+    initializedDraftsFor.current = '';
+    initializedBudgetDraftFor.current = '';
+    loadedProjectIdentity.current = '';
+  }, []);
+
+  const reportApiFailure = (res: Response, data: { error?: string; message?: string }, fallback: string) => {
+    const message = data.error || data.message || fallback;
+    if (res.status === 401) {
+      clearProjectData();
+      router.replace('/login');
+      return;
+    }
+    if (res.status === 403 || res.status === 404) {
+      clearProjectData();
+      setError(message);
+      setLoadErrorIdentity(identityKey);
+      return;
+    }
+    setError(message);
+  };
+
   const loadProject = async () => {
+    if (!hasLoadedUser || loadingUser || !currentUserId) return;
     const requestId = ++requestSequence.current;
+    const requestIdentity = identityKey;
+    const requestQueryKey = activeSectionQueryKey;
+    const isCurrentRequest = () => (
+      requestId === requestSequence.current
+      && activeIdentityRef.current === requestIdentity
+      && activeSectionQueryRef.current === requestQueryKey
+    );
     const section = workspace.section;
-    if (loadedProjectId.current !== projectId) {
-      loadedProjectId.current = projectId;
-      setProject(null);
-      setTasks([]);
-      setVideoCards([]);
-      setCostLedgers([]);
-      setReferenceAlbums([]);
-      setReviewSummary(null);
-      setBudget(null);
-      setArchiveAnomalies(null);
+    if (loadedProjectIdentity.current !== identityKey) {
+      loadedProjectIdentity.current = identityKey;
+      clearProjectData();
+      loadedProjectIdentity.current = identityKey;
       setLoading(true);
-      setJoinUrl('');
-      setMessage('');
-      setMemberUserId('');
-      setActivePreviewTask(null);
-      setPendingProjectAction(null);
-      loadedPreferencesFor.current = '';
-      initializedDraftsFor.current = '';
-      initializedBudgetDraftFor.current = '';
     }
     const query = new URLSearchParams({ section });
     if (section === 'tasks') {
@@ -612,20 +775,31 @@ export default function ProjectDetailPage() {
     if (!project) setLoading(true);
     else setSectionLoading(true);
     setError('');
+    setLoadErrorIdentity('');
     try {
       const res = await fetch(`/api/projects/${projectId}?${query.toString()}`, { cache: 'no-store' });
+      if (!isCurrentRequest()) return;
       if (res.status === 401) {
-        window.location.href = '/login';
+        clearProjectData();
+        router.replace('/login');
         return;
       }
       const data = await res.json();
-      if (requestId !== requestSequence.current) return;
+      if (!isCurrentRequest()) return;
       if (!res.ok) {
+        if (res.status === 403 || res.status === 404) clearProjectData();
         setError(data.error || data.message || '项目加载失败');
-        if (!project) setProject(null);
+        setLoadErrorIdentity(identityKey);
         return;
       }
       const nextViewerId = typeof data.viewer_id === 'string' ? data.viewer_id : '';
+      if (nextViewerId !== currentUserId || data.project?.id !== projectId) {
+        clearProjectData();
+        setError('登录状态或项目已变化，请重试读取。');
+        setLoadErrorIdentity(identityKey);
+        void refreshUser({ force: true });
+        return;
+      }
       const viewerChanged = Boolean(viewerIdRef.current && nextViewerId && viewerIdRef.current !== nextViewerId);
       if (viewerChanged) {
         setProject(null);
@@ -676,7 +850,6 @@ export default function ProjectDetailPage() {
       }
       if (section === 'tasks') {
         setTasks(data.tasks || []);
-        setReviewSummary(data.review_summary || null);
         if (data.pagination?.page && data.pagination.page !== workspace.taskPage) setWorkspace((current) => ({ ...current, taskPage: data.pagination.page }));
       }
       if (section === 'members') {
@@ -692,6 +865,8 @@ export default function ProjectDetailPage() {
         if (data.pagination?.page && data.pagination.page !== workspace.financePage) setWorkspace((current) => ({ ...current, financePage: data.pagination.page }));
       }
       setSectionPagination(data.pagination || null);
+      setSectionPaginationQueryKey(requestQueryKey);
+      setLoadedDataIdentity(identityKey);
       setBudget(data.budget || null);
       if (data.budget && initializedBudgetDraftFor.current !== draftIdentity) {
         setBudgetDraft(String(data.budget.budget_credits));
@@ -711,10 +886,11 @@ export default function ProjectDetailPage() {
         loadedPreferencesFor.current = preferenceIdentity;
       }
     } catch (err) {
-      if (requestId !== requestSequence.current) return;
+      if (!isCurrentRequest()) return;
       setError(err instanceof Error ? err.message : '项目加载失败');
+      setLoadErrorIdentity(identityKey);
     } finally {
-      if (requestId === requestSequence.current) {
+      if (isCurrentRequest()) {
         setLoading(false);
         setSectionLoading(false);
       }
@@ -722,15 +898,42 @@ export default function ProjectDetailPage() {
   };
 
   useEffect(() => {
+    if (!hasLoadedUser && !loadingUser) void refreshUser();
+  }, [hasLoadedUser, loadingUser, refreshUser]);
+
+  useEffect(() => {
+    if (hasLoadedUser && !currentUserId) router.replace('/login');
+  }, [hasLoadedUser, currentUserId, router]);
+
+  useEffect(() => {
+    requestSequence.current += 1;
+    clearProjectData();
+    setLoading(true);
+    setWorkspace({ ...DEFAULT_PROJECT_VIEW, ...readProjectViewParams(new URLSearchParams(window.location.search)) });
+  }, [identityKey, clearProjectData]);
+
+  useEffect(() => {
+    if (!hasLoadedUser || loadingUser || !currentUserId) return;
     const timer = window.setTimeout(() => { void loadProject(); }, workspace.section === 'tasks' ? 250 : 0);
     return () => {
       window.clearTimeout(timer);
       requestSequence.current += 1;
     };
-  }, [projectId, workspace.section, workspace.taskPage, workspace.taskSearch, workspace.taskStatus, workspace.taskSort, workspace.albumPage, workspace.financePage]);
+  }, [hasLoadedUser, loadingUser, currentUserId, currentUser?.role, projectId, workspace.section, workspace.taskPage, workspace.taskSearch, workspace.taskStatus, workspace.taskSort, workspace.albumPage, workspace.financePage]);
 
   useEffect(() => {
-    if (!viewerId || !loadedPreferencesFor.current) return;
+    const urlState = readProjectViewParams(new URLSearchParams(routeQuery));
+    if (!Object.keys(urlState).length) return;
+    routeStatePendingRef.current = true;
+    setWorkspace((current) => ({ ...current, ...urlState }));
+  }, [routeQuery]);
+
+  useEffect(() => {
+    if (!viewerId || loadedDataIdentity !== identityKey || !loadedPreferencesFor.current) return;
+    if (routeStatePendingRef.current) {
+      routeStatePendingRef.current = false;
+      return;
+    }
     try {
       window.localStorage.setItem(projectViewStorageKey(projectId, viewerId), JSON.stringify(workspace));
     } catch { /* Local preferences are best-effort and never block project work. */ }
@@ -743,8 +946,9 @@ export default function ProjectDetailPage() {
       finance_page: String(workspace.financePage),
     });
     if (workspace.taskSearch) query.set('task_q', workspace.taskSearch);
+    query.set('return_to', projectListReturnTo);
     window.history.replaceState(window.history.state, '', `/projects/${encodeURIComponent(projectId)}?${query.toString()}${window.location.hash}`);
-  }, [workspace, viewerId, projectId]);
+  }, [workspace, viewerId, projectId, identityKey, loadedDataIdentity, projectListReturnTo]);
 
   useEffect(() => {
     if (workspace.section !== 'tasks' || !tasks.length || !window.location.hash.startsWith('#task-')) return;
@@ -754,69 +958,101 @@ export default function ProjectDetailPage() {
 
   const addMember = async (event: React.FormEvent) => {
     event.preventDefault();
+    const operation = beginOperation('member');
+    if (!isCurrentOperation(operation)) return;
     setError('');
+    setLoadErrorIdentity('');
     setMessage('');
-    const res = await fetch(`/api/projects/${projectId}/members`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: memberUserId, role: memberRole }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || data.message || '添加成员失败');
-      return;
+    try {
+      const res = await fetch(`/api/projects/${projectId}/members`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: memberUserId, role: memberRole }),
+      });
+      if (!isCurrentOperation(operation)) return;
+      const data = await res.json();
+      if (!isCurrentOperation(operation)) return;
+      if (!res.ok) {
+        reportApiFailure(res, data, '添加成员失败');
+        return;
+      }
+      setMemberUserId('');
+      setMessage('成员已加入项目');
+      await loadProject();
+    } catch (err) {
+      if (isCurrentOperation(operation)) setError(err instanceof Error ? err.message : '添加成员失败');
     }
-    setMemberUserId('');
-    setMessage('成员已加入项目');
-    await loadProject();
   };
 
   const createInvite = async () => {
+    const operation = beginOperation('invite');
+    if (!isCurrentOperation(operation)) return;
     setError('');
+    setLoadErrorIdentity('');
     setMessage('');
-    const res = await fetch(`/api/projects/${projectId}/invites`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ default_role: 'member', expires_days: 7 }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || data.message || '创建邀请失败');
-      return;
+    try {
+      const res = await fetch(`/api/projects/${projectId}/invites`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ default_role: 'member', expires_days: 7 }),
+      });
+      if (!isCurrentOperation(operation)) return;
+      const data = await res.json();
+      if (!isCurrentOperation(operation)) return;
+      if (!res.ok) {
+        reportApiFailure(res, data, '创建邀请失败');
+        return;
+      }
+      const url = `${window.location.origin}${data.join_url}`;
+      setJoinUrl(url);
+      setMessage('邀请链接已创建');
+      await loadProject();
+    } catch (err) {
+      if (isCurrentOperation(operation)) setError(err instanceof Error ? err.message : '创建邀请失败');
     }
-    const url = `${window.location.origin}${data.join_url}`;
-    setJoinUrl(url);
-    setMessage('邀请链接已创建');
-    await loadProject();
   };
 
   const updateProjectInfo = async (event: React.FormEvent) => {
     event.preventDefault();
+    const operation = beginOperation('rename');
+    if (!isCurrentOperation(operation)) return;
     setError('');
+    setLoadErrorIdentity('');
     setMessage('');
-    const res = await fetch(`/api/projects/${projectId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: editName, description: editDescription }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || data.message || '更新项目失败');
-      return;
+    const submittedName = editName;
+    const submittedDescription = editDescription;
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: submittedName, description: submittedDescription }),
+      });
+      if (!isCurrentOperation(operation)) return;
+      const data = await res.json();
+      if (!isCurrentOperation(operation)) return;
+      if (!res.ok) {
+        reportApiFailure(res, data, '更新项目失败');
+        return;
+      }
+      setMessage('项目信息已更新');
+      await loadProject();
+    } catch (err) {
+      if (isCurrentOperation(operation)) setError(err instanceof Error ? err.message : '更新项目失败');
     }
-    setMessage('项目信息已更新');
-    await loadProject();
   };
 
   const requestProjectAction = (action: ProjectAction) => {
-    if (!project) return;
+    if (!project || activeIdentityRef.current !== identityKey) return;
     setError('');
+    setLoadErrorIdentity('');
     setMessage('');
     setPendingProjectAction(action);
   };
 
   const confirmProjectAction = async () => {
     if (!project || !pendingProjectAction) return;
+    const operation = beginOperation('projectAction');
+    if (!isCurrentOperation(operation)) return;
     const action = pendingProjectAction;
     const label = action === 'archive' ? '归档为只读' : action === 'restore' ? '恢复' : '删除';
 
@@ -829,9 +1065,11 @@ export default function ProjectDetailPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action }),
           });
+      if (!isCurrentOperation(operation)) return;
       const data = await res.json();
+      if (!isCurrentOperation(operation)) return;
       if (!res.ok) {
-        setError(data.error || data.message || `${label}项目失败`);
+        reportApiFailure(res, data, `${label}项目失败`);
         return;
       }
       setPendingProjectAction(null);
@@ -842,32 +1080,67 @@ export default function ProjectDetailPage() {
       setMessage(`项目已${label}`);
       await loadProject();
     } catch (err) {
-      setError(err instanceof Error ? err.message : `${label}项目失败`);
-      setPendingProjectAction(null);
+      if (isCurrentOperation(operation)) {
+        setError(err instanceof Error ? err.message : `${label}项目失败`);
+        setPendingProjectAction(null);
+      }
     } finally {
-      setProjectActionBusy(false);
+      if (isCurrentOperation(operation)) setProjectActionBusy(false);
     }
   };
 
-  const removeMember = async (userId: string) => {
-    if (!project) return;
+  const removeMember = (userId: string, memberName: string) => {
+    if (!project || activeIdentityRef.current !== identityKey) return;
+    if (userId === project.owner_user_id || !project.members.some((member) => member.user_id === userId)) return;
     setError('');
+    setLoadErrorIdentity('');
     setMessage('');
-    if (!await confirm('确定移除此项目成员吗？', { title: '移除成员', confirmLabel: '移除成员', danger: true })) return;
-    const res = await fetch(`/api/projects/${projectId}/members/${userId}`, { method: 'DELETE' });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || data.message || '移除成员失败');
+    setPendingMemberRemoval({ identity: identityKey, userId, memberName });
+  };
+
+  const confirmMemberRemoval = async () => {
+    const target = pendingMemberRemoval;
+    if (!project || !target || target.identity !== identityKey || activeIdentityRef.current !== identityKey) return;
+    if (target.userId === project.owner_user_id || !project.members.some((member) => member.user_id === target.userId)) {
+      setPendingMemberRemoval(null);
       return;
     }
-    setMessage('成员已移除');
-    await loadProject();
+    const operation = beginOperation('removeMember');
+    if (!isCurrentOperation(operation)) return;
+    setMemberRemovalBusy(true);
+    setError('');
+    setLoadErrorIdentity('');
+    setMessage('');
+    try {
+      const res = await fetch(`/api/projects/${projectId}/members/${target.userId}`, { method: 'DELETE' });
+      if (!isCurrentOperation(operation)) return;
+      const data = await res.json();
+      if (!isCurrentOperation(operation)) return;
+      if (!res.ok) {
+        reportApiFailure(res, data, '移除成员失败');
+        if (isCurrentOperation(operation)) setPendingMemberRemoval(null);
+        return;
+      }
+      setPendingMemberRemoval(null);
+      setMessage('成员已移除');
+      await loadProject();
+    } catch (err) {
+      if (isCurrentOperation(operation)) {
+        setError(err instanceof Error ? err.message : '移除成员失败');
+        setPendingMemberRemoval(null);
+      }
+    } finally {
+      if (isCurrentOperation(operation)) setMemberRemovalBusy(false);
+    }
   };
 
   const createVideoCard = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!project) return;
+    const operation = beginOperation('videoCard');
+    if (!isCurrentOperation(operation)) return;
     setError('');
+    setLoadErrorIdentity('');
     setMessage('');
     const title = videoCardTitle.trim();
     if (!title) {
@@ -885,7 +1158,9 @@ export default function ProjectDetailPage() {
           confirm_duplicate: confirmDuplicateVideoCard,
         }),
       });
+      if (!isCurrentOperation(operation)) return;
       const data = await res.json();
+      if (!isCurrentOperation(operation)) return;
       if (!res.ok) {
         if (res.status === 409 && data.code === 'SIMILAR_VIDEO_CARD_EXISTS') {
           setSimilarVideoCards(data.similar_video_cards || []);
@@ -893,7 +1168,7 @@ export default function ProjectDetailPage() {
           setError('发现可能重复的视频卡。可以进入已有卡继续归档，或再次点击“仍然新建”。');
           return;
         }
-        setError(data.error || data.message || '创建视频卡失败');
+        reportApiFailure(res, data, '创建视频卡失败');
         return;
       }
       setVideoCardTitle('');
@@ -902,17 +1177,23 @@ export default function ProjectDetailPage() {
       setConfirmDuplicateVideoCard(false);
       setMessage('视频卡已创建');
       await loadProject();
+    } catch (err) {
+      if (isCurrentOperation(operation)) setError(err instanceof Error ? err.message : '创建视频卡失败');
     } finally {
-      setCreatingVideoCard(false);
+      if (isCurrentOperation(operation)) setCreatingVideoCard(false);
     }
   };
 
   const updateProjectBudget = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!project) return;
+    const operation = beginOperation('budget');
+    if (!isCurrentOperation(operation)) return;
+    const submittedBudgetDraft = budgetDraft;
     setError('');
+    setLoadErrorIdentity('');
     setMessage('');
-    const budgetCredits = Number(budgetDraft);
+    const budgetCredits = Number(submittedBudgetDraft);
     if (!Number.isFinite(budgetCredits) || budgetCredits < 0) {
       setError('预算必须是非负数字');
       return;
@@ -927,41 +1208,74 @@ export default function ProjectDetailPage() {
           reason: '项目详情页调整预算',
         }),
       });
+      if (!isCurrentOperation(operation)) return;
       const data = await res.json();
+      if (!isCurrentOperation(operation)) return;
       if (!res.ok) {
-        setError(data.error || data.message || '更新预算失败');
+        reportApiFailure(res, data, '更新预算失败');
         return;
       }
       setBudget(data.budget || null);
-      setBudgetDraft(data.budget ? String(data.budget.budget_credits) : budgetDraft);
+      if (budgetDraft === submittedBudgetDraft) setBudgetDraft(data.budget ? String(data.budget.budget_credits) : submittedBudgetDraft);
       setMessage('项目预算已更新');
       await loadProject();
+    } catch (err) {
+      if (isCurrentOperation(operation)) setError(err instanceof Error ? err.message : '更新预算失败');
     } finally {
-      setSavingBudget(false);
+      if (isCurrentOperation(operation)) setSavingBudget(false);
     }
   };
 
-  if (loading) {
+  const sectionPaginationIsCurrent = sectionPaginationQueryKey === activeSectionQueryKey;
+
+  if (!hasLoadedUser || loadingUser || loading || (Boolean(currentUserId) && loadedDataIdentity !== identityKey && loadErrorIdentity !== identityKey)) {
     return <div className="card"><p className="text-gray">加载中...</p></div>;
+  }
+
+  if (hasLoadedUser && !currentUserId) {
+    return <div className="card"><p className="text-gray">正在返回登录页…</p></div>;
   }
 
   if (!project) {
     return (
       <div className="card">
         <p className="text-red">{error || '项目不存在或无权访问'}</p>
-        <Link href="/projects" className="btn btn-secondary mt-4">返回项目列表</Link>
+        <div className="flex items-center mt-4" style={{ gap: 10, flexWrap: 'wrap' }}>
+          {error && <button type="button" className="btn btn-secondary" onClick={() => void loadProject()}>重试读取</button>}
+          <Link href={projectListReturnTo} className="btn btn-secondary">返回项目列表</Link>
+        </div>
       </div>
     );
   }
 
+  const generatorQuery = new URLSearchParams({ project_id: project.id, return_to: projectReturnTo });
+  const generatorHref = `/generate?${generatorQuery.toString()}`;
+
   return (
     <div>
-      {productDialog}
       <PageBanner
         eyebrow="项目详情"
         title={projectDisplayName(project)}
-        description={project.description || '项目中的生成任务、参考图集和成员协作。'}
-        backHref="/projects"
+        description={`${project.description || '项目中的生成任务、参考图集和成员协作。'} · ${statusLabel(project.status)} · ${roleLabel(permissions.role)}`}
+        actions={permissions.can_generate && project.status === 'active' && !budget?.block_reason ? (
+          <a href={generatorHref} className="btn btn-primary">生成视频</a>
+        ) : permissions.can_generate && project.status === 'active' && budget?.block_reason ? (
+          <div className="flex items-center" style={{ gap: 10, flexWrap: 'wrap' }}>
+            <span className="text-gray text-sm">暂不可生成：{budget.block_reason}</span>
+            <button type="button" className="btn btn-secondary" onClick={() => setWorkspace((current) => ({ ...current, section: 'finance' }))}>查看费用</button>
+          </div>
+        ) : project.status !== 'active' ? (
+          <div className="flex items-center" style={{ gap: 10, flexWrap: 'wrap' }}>
+            <span className="text-gray text-sm">当前项目为{statusLabel(project.status)}，不能继续生成。</span>
+            <button type="button" className="btn btn-secondary" onClick={() => setWorkspace((current) => ({ ...current, section: 'members' }))}>查看项目选项</button>
+          </div>
+        ) : (
+          <div className="flex items-center" style={{ gap: 10, flexWrap: 'wrap' }}>
+            <span className="text-gray text-sm">当前角色没有生成权限。</span>
+            <button type="button" className="btn btn-secondary" onClick={() => setWorkspace((current) => ({ ...current, section: 'members' }))}>查看成员与设置</button>
+          </div>
+        )}
+        backHref={projectListReturnTo}
         backLabel="返回项目"
       />
 
@@ -973,6 +1287,7 @@ export default function ProjectDetailPage() {
               邀请链接：<a className="link" href={joinUrl}>{joinUrl}</a>
             </p>
           )}
+          {error && loadErrorIdentity === identityKey && <button type="button" className="btn btn-secondary mt-2" onClick={() => void loadProject()}>重试读取</button>}
         </div>
       )}
 
@@ -982,50 +1297,25 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      <div className="card">
-        <div className="flex items-center justify-between" style={{ gap: 16, flexWrap: 'wrap' }}>
-          <div>
-            <h2 className="section-title mb-0">项目概览</h2>
-            <p className="text-gray text-sm mt-2">
-              {statusLabel(project.status)} · {roleLabel(permissions.role)} · 成员 {project._count?.members ?? 0} · 任务 {project._count?.tasks ?? 0} · 图集 {project._count?.reference_albums ?? 0}
-            </p>
-          </div>
-          {permissions.can_generate && project.status === 'active' && !budget?.block_reason ? (
-            <a
-              href={`/generate?project_id=${encodeURIComponent(project.id)}`}
-              className="btn btn-primary"
-            >
-              生成视频
-            </a>
-          ) : permissions.can_generate && project.status === 'active' && budget?.block_reason ? (
-            <span className="text-gray text-sm">预算暂不可生成 · <button type="button" className="link" onClick={() => setWorkspace((current) => ({ ...current, section: 'finance' }))}>查看费用</button></span>
-          ) : project.status !== 'active' ? (
-            <span className="text-gray text-sm">项目状态：{statusLabel(project.status)} · <button type="button" className="link" onClick={() => setWorkspace((current) => ({ ...current, section: 'members' }))}>查看项目选项</button></span>
-          ) : (
-            <span className="text-gray text-sm">当前角色没有生成权限 · <button type="button" className="link" onClick={() => setWorkspace((current) => ({ ...current, section: 'members' }))}>查看项目成员</button></span>
-          )}
-        </div>
-      </div>
-
       <nav className="card" aria-label="项目分区" style={{ display: 'grid', gap: 12 }}>
-        <div className="flex items-center" role="tablist" aria-label="主要内容" style={{ gap: 8, flexWrap: 'wrap' }}>
+        <div className="flex items-center" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <span className="text-gray text-sm">主要内容</span>
           {([
             ['tasks', '生成记录'], ['albums', '参考图集'],
           ] as Array<[ProjectSection, string]>).map(([section, label]) => (
-            <button key={section} type="button" role="tab" aria-selected={workspace.section === section}
-              className="btn btn-secondary"
-              style={workspace.section === section ? { fontWeight: 700, borderWidth: 2 } : undefined}
+            <button key={section} type="button" aria-pressed={workspace.section === section}
+              className={`btn ${workspace.section === section ? 'btn-primary' : 'btn-secondary'}`}
               onClick={() => setWorkspace((current) => ({ ...current, section, taskPage: section === 'tasks' ? current.taskPage : 1 }))}>
               {label}
             </button>
           ))}
-          <span className="text-gray text-sm" aria-hidden="true">·</span>
+          <span className="text-gray text-sm" style={{ marginLeft: 8 }}>管理</span>
           {([
             ['finance', '费用'], ['members', '成员与设置'],
           ] as Array<[ProjectSection, string]>).map(([section, label]) => (
-            <button key={section} type="button" role="tab" aria-selected={workspace.section === section}
-              className="btn btn-secondary"
-              style={workspace.section === section ? { fontWeight: 700, borderWidth: 2 } : undefined}
+            <button key={section} type="button" aria-pressed={workspace.section === section}
+              className="link"
+              style={workspace.section === section ? { fontWeight: 700, textDecoration: 'underline' } : undefined}
               onClick={() => setWorkspace((current) => ({ ...current, section }))}>
               {label}
             </button>
@@ -1085,6 +1375,7 @@ export default function ProjectDetailPage() {
                 min="0"
                 step="0.01"
                 value={budgetDraft}
+                disabled={savingBudget}
                 onChange={(event) => setBudgetDraft(event.target.value)}
                 placeholder="预算点数"
               />
@@ -1211,7 +1502,7 @@ export default function ProjectDetailPage() {
                         查看视频卡
                       </Link>
                       {permissions.can_generate && card.status !== 'sealed' && card.status !== 'archived' && (
-                        <Link className="btn btn-primary" href={`/generate?project_id=${project.id}&video_card_id=${card.id}`}>
+                        <Link className="btn btn-primary" href={`/generate?project_id=${encodeURIComponent(project.id)}&video_card_id=${encodeURIComponent(card.id)}&return_to=${encodeURIComponent(projectReturnTo)}`}>
                           在此卡生成
                         </Link>
                       )}
@@ -1320,7 +1611,9 @@ export default function ProjectDetailPage() {
             <h2 className="section-title mb-0">官方真实成本明细</h2>
             <p className="text-gray text-sm mt-2">按 official_charge / adjustment / reversal 账本行展示，可从每笔成本追到视频任务。</p>
           </div>
-          <span className="text-gray text-sm">最近 {costLedgers.length} 条</span>
+          <span className="text-gray text-sm">{sectionPaginationIsCurrent && sectionPagination
+            ? `当前页 ${costLedgers.length} 条 · 共 ${sectionPagination.total} 条`
+            : '明细读取中'}</span>
         </div>
 
         {costLedgers.length === 0 ? (
@@ -1420,15 +1713,17 @@ export default function ProjectDetailPage() {
             </tbody>
           </table>
         )}
+        {sectionPaginationIsCurrent && sectionPagination && <PaginationControls page={sectionPagination.page} totalPages={sectionPagination.total_pages}
+          total={sectionPagination.total} pageSize={sectionPagination.page_size} busy={sectionLoading}
+          onPageChange={(page) => setWorkspace((current) => ({ ...current, financePage: page }))} label="条成本明细" />}
       </div>
 
-      </>
-      )}
+      </>}
 
       {workspace.section === 'tasks' && <div className="card">
         <div className="flex items-start justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
           <div><h2 className="section-title mb-0">生成记录</h2><p className="text-gray text-sm mt-2">按当前权限查看全部匹配记录；已完成但暂不可播放的视频会保留在历史中。</p></div>
-          <span className="text-gray text-sm">{sectionPagination?.total ?? project._count?.tasks ?? 0} 条记录</span>
+          <span className="text-gray text-sm">{sectionPaginationIsCurrent && sectionPagination ? `${sectionPagination.total} 条记录` : '记录数读取中'}</span>
         </div>
         <div className="flex items-center mb-4" style={{ gap: 10, flexWrap: 'wrap' }}>
           <input className="input" style={{ flex: '1 1 220px', maxWidth: 420 }} value={workspace.taskSearch}
@@ -1436,7 +1731,7 @@ export default function ProjectDetailPage() {
             placeholder="搜索提示词、模型或任务编号" aria-label="搜索生成记录" />
           <select className="input" style={{ width: 170 }} value={workspace.taskStatus}
             onChange={(event) => setWorkspace((current) => ({ ...current, taskStatus: event.target.value as ProjectViewState['taskStatus'], taskPage: 1 }))} aria-label="筛选生成状态">
-            <option value="all">全部状态</option><option value="running">进行中</option><option value="succeeded">已完成</option><option value="failed">失败</option><option value="cancelled">已取消</option>
+            <option value="all">全部记录</option><option value="running">进行中</option><option value="playable">可播放</option><option value="failed">失败或已取消</option>
           </select>
           <select className="input" style={{ width: 150 }} value={workspace.taskSort}
             onChange={(event) => setWorkspace((current) => ({ ...current, taskSort: event.target.value as ProjectViewState['taskSort'], taskPage: 1 }))} aria-label="排序生成记录">
@@ -1452,6 +1747,7 @@ export default function ProjectDetailPage() {
               const detailHref = taskDetailHref(task.id, returnTo);
               const reuseHref = taskReuseHref({ ...task, project_id: project.id }, returnTo);
               const enhanceHref = task.local_status === 'succeeded' && task.playable_available && !isEnhanceTask(task)
+                && Boolean(task.video_card_id && task.duration && task.duration > 0)
                 ? enhanceWorkspaceHref(returnTo, task.id) : null;
               return (
                 <article id={`task-${task.id}`} key={task.id} className="card" style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 180px) minmax(0, 1fr)', gap: 16, alignItems: 'center', margin: 0 }}>
@@ -1471,6 +1767,7 @@ export default function ProjectDetailPage() {
                       {task.stable_download_ready && task.download_url && <a className="link" href={task.download_url}>下载</a>}
                       {reuseHref && <Link className="link" href={reuseHref}>复用参数</Link>}
                       {enhanceHref && <Link className="link" href={enhanceHref}>视频增强</Link>}
+                      {isEnhanceTask(task) && <Link className="link" href={enhanceWorkspaceHref(returnTo)}>重新选择源视频</Link>}
                       <Link className="link" href={detailHref}>查看详情</Link>
                     </div>
                   </div>
@@ -1479,7 +1776,7 @@ export default function ProjectDetailPage() {
             })}
           </div>
         )}
-        {sectionPagination && <PaginationControls page={sectionPagination.page} totalPages={sectionPagination.total_pages}
+        {sectionPaginationIsCurrent && sectionPagination && <PaginationControls page={sectionPagination.page} totalPages={sectionPagination.total_pages}
           total={sectionPagination.total} pageSize={sectionPagination.page_size} busy={sectionLoading}
           onPageChange={(page) => setWorkspace((current) => ({ ...current, taskPage: page }))} label="条生成记录" />}
       </div>}
@@ -1498,7 +1795,7 @@ export default function ProjectDetailPage() {
           </div>
         )}
         {!permissions.can_manage_assets && <p className="text-gray text-sm mt-4">当前角色可查看或使用项目素材，但不能修改项目图集。</p>}
-        {sectionPagination && <PaginationControls page={sectionPagination.page} totalPages={sectionPagination.total_pages}
+        {sectionPaginationIsCurrent && sectionPagination && <PaginationControls page={sectionPagination.page} totalPages={sectionPagination.total_pages}
           total={sectionPagination.total} pageSize={sectionPagination.page_size} busy={sectionLoading}
           onPageChange={(page) => setWorkspace((current) => ({ ...current, albumPage: page }))} label="个图集" />}
       </div>}
@@ -1539,7 +1836,7 @@ export default function ProjectDetailPage() {
                     <button
                       className="btn btn-danger"
                       type="button"
-                      onClick={() => removeMember(member.user_id)}
+                      onClick={() => removeMember(member.user_id, member.user.name || member.user.username || member.user.email || `ID ${member.user.id.slice(0, 8)}`)}
                       disabled={member.user_id === project.owner_user_id}
                     >
                       移除
@@ -1653,6 +1950,14 @@ export default function ProjectDetailPage() {
           busy={projectActionBusy}
           onCancel={() => setPendingProjectAction(null)}
           onConfirm={() => void confirmProjectAction()}
+        />
+      )}
+      {pendingMemberRemoval?.identity === identityKey && loadedDataIdentity === identityKey && project && (
+        <MemberRemovalConfirmModal
+          memberName={pendingMemberRemoval.memberName}
+          busy={memberRemovalBusy}
+          onCancel={() => { if (!memberRemovalBusy) setPendingMemberRemoval(null); }}
+          onConfirm={() => void confirmMemberRemoval()}
         />
       )}
     </div>

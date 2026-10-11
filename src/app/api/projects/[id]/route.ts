@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic';
 const OFFICIAL_PROJECT_COST_EVENTS = ['official_charge', 'adjustment', 'reversal'];
 
 const PROJECT_DETAIL_PAGE_SIZE = 20;
-const PROJECT_TASK_FILTERS = new Set(['all', 'running', 'succeeded', 'failed', 'cancelled']);
+const PROJECT_TASK_FILTERS = new Set(['all', 'running', 'playable', 'failed']);
 
 function boundedPage(value: string | null) {
   const parsed = Number(value);
@@ -120,15 +120,47 @@ async function getProjectSection(
     const search = boundedSearch(searchParams.get('q'));
     const statusFilter = PROJECT_TASK_FILTERS.has(searchParams.get('status') || '') ? (searchParams.get('status') || 'all') : 'all';
     const sort = searchParams.get('sort') === 'oldest' ? 'oldest' : 'newest';
+    const playableTaskWhere = {
+      OR: [
+        { public_video_url: { not: '' } },
+        { local_video_path: { not: '' } },
+        {
+          result_video_url: { not: '' },
+          NOT: { result_video_url: { startsWith: 'h3-internal-output://' } },
+        },
+      ],
+    };
+    const runningTaskWhere = {
+      OR: [
+        { local_status: { in: ['submitted', 'running'] } },
+        {
+          local_status: 'succeeded',
+          AND: [
+            { OR: [{ public_video_url: null }, { public_video_url: '' }] },
+            {
+              OR: [
+                { delivery_status: null },
+                { delivery_status: { notIn: ['succeeded', 'failed'] } },
+              ],
+            },
+            {
+              OR: [
+                playableTaskWhere,
+                { delivery_status: { in: ['pending', 'running'] } },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const failedTaskWhere = { local_status: { in: ['failed', 'cancelled'] } };
     const statusWhere = statusFilter === 'running'
-      ? { local_status: { in: ['submitted', 'running'] } }
-      : statusFilter === 'succeeded'
-        ? { local_status: 'succeeded' }
+      ? runningTaskWhere
+      : statusFilter === 'playable'
+        ? playableTaskWhere
         : statusFilter === 'failed'
-          ? { local_status: 'failed' }
-          : statusFilter === 'cancelled'
-            ? { local_status: 'cancelled' }
-            : {};
+          ? failedTaskWhere
+          : {};
     const searchWhere = search ? { OR: [
       { prompt: { contains: search } },
       { model: { contains: search } },
@@ -140,8 +172,8 @@ async function getProjectSection(
       prisma.videoTask.count({ where }),
       prisma.videoTask.count({ where: taskWhere }),
       prisma.videoTask.count({ where: { ...taskWhere, local_status: 'succeeded' } }),
-      prisma.videoTask.count({ where: { ...taskWhere, local_status: { in: ['failed', 'cancelled'] } } }),
-      prisma.videoTask.count({ where: { ...taskWhere, local_status: { in: ['submitted', 'running'] } } }),
+      prisma.videoTask.count({ where: { ...taskWhere, ...failedTaskWhere } }),
+      prisma.videoTask.count({ where: { AND: [taskWhere, runningTaskWhere] } }),
     ]);
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     const page = Math.min(requestedPage, totalPages);
