@@ -9,7 +9,7 @@ import { assertLiveNode, ownedRun, type RoleDb } from './permissions';
 import { roleMutation } from './repository';
 import { assertCurrentMaterials, assertEffectiveInputs, latestWorks, taskRequirements, workInputDigest, finalizeDelivered } from './work';
 import { callRoleText, cashToPointCents, parseTextContract, readTextCharge, textScope, TEXT_BILLING_KEY, type TextContract } from './text-provider';
-import { digest, identifier, integer, record, RoleError, text, type JsonRecord, type RoleSnapshot, type TaskRequirements } from './types';
+import { assertRolePrepared, digest, identifier, integer, record, RoleError, text, type JsonRecord, type RoleSnapshot, type TaskRequirements } from './types';
 
 function executorIdentity(work: CanvasRoleWork) {
   const snapshot = JSON.parse(work.snapshot_json);
@@ -26,6 +26,8 @@ async function quoteFor(db: RoleDb, work: CanvasRoleWork, purpose: string, req: 
     executorWork = reviewer;
   }
   const snapshot: RoleSnapshot = JSON.parse(executorWork.snapshot_json).role;
+  assertRolePrepared(snapshot);
+  if (purpose === 'review' && snapshot.reviewAuthority === 'none') throw new RoleError('此岗位只负责协调，不承担内容审核', 409, 'role_review_forbidden');
   if (snapshot.executor.kind !== 'ai' || !snapshot.tools.includes('text')) throw new RoleError('此角色未配置文字 AI 能力', 409, 'text_executor_unavailable');
   const settings = await getMuskApiSettings(db);
   if (!isMuskApiReady(settings) || new URL(settings.base_url).origin !== 'https://api.muskapis.com') throw new RoleError('已配置文字供应商当前不可用', 503, 'text_provider_unavailable');
@@ -118,10 +120,12 @@ export async function executionInput(db: RoleDb, work: CanvasRoleWork, req: Task
     throw new RoleError('此文字模型未接通原件理解，请人工处理媒体成果；不会把缩略图当作已读原件', 409, 'text_material_unsupported');
   }
   const compiled = compileCanvasTextRules(await getCanvasTextSettings(db), 'text', '');
-  return { purpose, role: snapshot, task: { goal: req.goal, criteria: req.criteria, requirementsRevision: work.requirements_revision },
+  const { contextGaps: _contextGaps, workflowOnly: _workflowOnly, ...preparedRole } = snapshot;
+  const { contextGaps: _targetGaps, workflowOnly: _targetWorkflowOnly, ...reviewTarget } = JSON.parse(work.snapshot_json).role;
+  return { purpose, role: preparedRole, task: { goal: req.goal, criteria: req.criteria, requirementsRevision: work.requirements_revision },
     materials: req.materials || [], inputs, currentDraft: draft, context, contextDigest: digest(context),
     ...(delivery ? { reviewDelivery: { id: delivery.id, version: delivery.version, content: JSON.parse(delivery.content_json) },
-      reviewTarget: JSON.parse(work.snapshot_json).role, reviewIsRecommendationOnly: true } : {}),
+      reviewTarget, reviewIsRecommendationOnly: true } : {}),
     rules: { basicRules: compiled.basicRules, purposeRules: compiled.purposeRules }, rulesTrace: compiled.trace };
 }
 

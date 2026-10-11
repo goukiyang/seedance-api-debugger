@@ -18,7 +18,7 @@
     let videoReadSequence = 0;
     let videoRecheck = null;
     let lastVideoRecheck = 0;
-    let roleCreator = null, roleWorkflow = null, roleInstanceLayer = null;
+    let roleCreator = null, roleWorkflow = null, roleInstanceLayer = null, workflowHub = null;
 
     function ensureNoticeStack() {
         let stack = document.getElementById('canvas-notice-stack');
@@ -139,6 +139,7 @@
             graphRestoring = true;
             try { hydrateNodeViews(); } finally { graphRestoring = false; }
             updateGraphTools();
+            workflowHub?.render();
         },
         onLimit: () => showCanvasNotice('较早的撤销记录已释放，画布内容仍保留。')
     });
@@ -152,6 +153,7 @@
         return canvasRuntime.documentWritable && !canvasRuntime.contextSwitching && !canvasRuntime.documentRestoring
             && !canvasRuntime.documentOperation && !canvasRuntime.failedSaveRequest && !canvasRuntime.saveConflict
             && !roleJoinPending()
+            && !workflowHub?.hasPending()
             && !canvasRuntime.uploadsInFlight && canvasRuntime.pendingGenerationSubmissions.size() === 0
             && ![...engine.nodes.values()].some(node =>
                 ['pending', 'unconfirmed'].includes(node.data?.storyRequest?.state)
@@ -487,7 +489,7 @@
         }
         const hasPayload = options.payload !== undefined;
         const payload = hasPayload && endpoint.split('?')[0] === '/api/tools/ultimate-canvas/document'
-            ? { ...options.payload, required_capabilities: ['role.v1'] } : options.payload;
+            ? { ...options.payload, required_capabilities: ['role.v1', 'role.workflow.v1'] } : options.payload;
         const body = options.body !== undefined
             ? options.body
             : hasPayload
@@ -496,7 +498,7 @@
         const requestHeaders = {
             ...(hasPayload ? { 'Content-Type': 'application/json' } : {}),
             ...workspaceHeaders(),
-            ...(endpoint.split('?')[0] === '/api/tools/ultimate-canvas/document' ? { 'x-canvas-capabilities': 'role.v1' } : {}),
+            ...(endpoint.startsWith('/api/tools/ultimate-canvas/') ? { 'x-canvas-capabilities': 'role.v1,role.workflow.v1' } : {}),
             ...(options.headers || {})
         };
         const res = await fetch(endpoint, {
@@ -2018,6 +2020,7 @@
         roleInstanceLayer?.close(); roleInstanceLayer = null;
         roleCreator?.contextChanged();
         roleWorkflow?.contextChanged();
+        workflowHub?.contextChanged();
     }
 
     function openCanvasProductDialog(options) {
@@ -2839,6 +2842,7 @@
         if (roleWorkflow?.hasUnsaved()) unsaved.push('角色工作草稿');
         if (roleInstanceLayer?.dirty) unsaved.push('角色实例版本');
         if (roleJoinPending()) busy.push('角色加入结果待核对，请用原请求恢复');
+        if (workflowHub?.hasPending()) busy.push('工作流模板结果待确认，请核对原请求');
         let recoverable = false;
         let snapshot;
         let contentSignature = '';
@@ -3248,8 +3252,9 @@
         syncAllNodesFromDom();
         return {
             schema: 'ultimate_canvas.v1',
-            schemaVersion: canvasRuntime.documentSchemaVersion === 3 || [...engine.nodes.values()].some(n => n.type === 'role') ? 3 : 2,
-            requiredCapabilities: ['role.v1'],
+            schemaVersion: canvasRuntime.documentSchemaVersion >= 4 || engine.roleWorkflows?.length ? 4
+                : canvasRuntime.documentSchemaVersion === 3 || [...engine.nodes.values()].some(n => n.type === 'role') ? 3 : 2,
+            requiredCapabilities: ['role.v1', 'role.workflow.v1'],
             savedAt: new Date().toISOString(),
             context: {
                 project_id: context.projectId ?? canvasRuntime.selectedProjectId,
@@ -3284,7 +3289,7 @@
                 project_id: projectId,
                 title: canvasRuntime.documentTitle,
                 protocol_version: 2,
-                required_capabilities: ['role.v1'],
+                required_capabilities: ['role.v1', 'role.workflow.v1'],
                 base_revision: canvasRuntime.documentRevision,
                 mutation_id: documentMutationId(),
                 active_generation_node_id: engine.selectedNodeId,
@@ -3652,6 +3657,7 @@
             document.getElementById('canvas-minimap').hidden = !visible;
             document.getElementById('btn-minimap').classList.toggle('active', visible);
             updateGraphTools();
+            workflowHub?.render();
             return result;
         };
         const originalAddNode = engine.addNode.bind(engine);
@@ -3702,7 +3708,20 @@
             if (wasDragging) scheduleCanvasSave('node_move');
             return result;
         };
-        engine.onConnectionDeleted = (_fromId, toId) => {
+        engine.onConnectionCreated = (fromId, toId) => {
+            if (canvasRuntime.documentRestoring) return;
+            const flow = (engine.roleWorkflows || []).find(f => f.nodeIds.includes(fromId) && f.nodeIds.includes(toId));
+            const target = flow?.participants.find(p => p.nodeId === toId);
+            if (target && !target.dependencies.some(d => d.nodeId === fromId)) target.dependencies.push({ nodeId: fromId, required: true });
+            workflowHub?.render();
+        };
+        engine.onConnectionDeleted = (fromId, toId) => {
+            if (!canvasRuntime.documentRestoring) {
+                const flow = (engine.roleWorkflows || []).find(f => f.nodeIds.includes(fromId) && f.nodeIds.includes(toId));
+                const target = flow?.participants.find(p => p.nodeId === toId);
+                if (target) target.dependencies = target.dependencies.filter(d => d.nodeId !== fromId);
+                workflowHub?.render();
+            }
             syncReferenceSelection();
             renderReferenceSelectionStatus();
             renderGenerationNodeControls(toId);
@@ -7541,11 +7560,15 @@
         } else {
             activePanel = null;
         }
-        if (activePanel === 'roles-panel') void roleCreator?.openLibrary(roleOptions || {});
+        if (activePanel === 'roles-panel') { void roleCreator?.openLibrary(roleOptions || {}); workflowHub?.render(); }
+        if (activePanel === 'roles-panel' || activePanel === 'toolflow-panel') document.getElementById('tool-toolflow')?.classList.add('active');
     }
 
     toolbarBtns.forEach(btn => {
-        btn.addEventListener('click', () => showPanel(btn.dataset.panel));
+        btn.addEventListener('click', () => {
+            if (btn.id === 'tool-toolflow' && activePanel !== 'toolflow-panel' && activePanel !== 'roles-panel') workflowHub?.selectKind(workflowHub.rememberedKind(), false);
+            else showPanel(btn.id === 'tool-toolflow' ? null : btn.dataset.panel);
+        });
     });
 
     document.querySelectorAll('.panel-close').forEach(btn => {
@@ -7627,8 +7650,32 @@
             if (before.contextEpoch !== after.contextEpoch || before.documentId !== after.documentId) throw new Error('画布目标已变化，未继续角色操作');
             return after;
         },
-        listRoleNodes: () => [...engine.nodes.values()].filter(n => n.type === 'role')
+        listRoleNodes: nodeId => [...engine.nodes.values()].filter(n => n.type === 'role'
+            && (!nodeId || !(engine.roleWorkflows || []).some(f => f.nodeIds.includes(nodeId))
+                || (engine.roleWorkflows || []).find(f => f.nodeIds.includes(nodeId)).nodeIds.includes(n.id)))
             .map(n => ({ id: n.id, title: n.data?.title, roleConfig: structuredClone(n.data?.roleConfig || {}) })),
+        workflowForNode: nodeId => (engine.roleWorkflows || []).find(f => f.nodeIds.includes(nodeId)) || null,
+        saveWorkflowRelations: async (nodeId, values) => {
+            const ctx = await roleBridge.saveDocument('before_workflow_relations');
+            const flow = roleBridge.workflowForNode(nodeId);
+            if (!flow || values.participants.some(p => !flow.nodeIds.includes(p.nodeId))) throw new Error('工作流岗位已变化，请重新读取。');
+            const byId = new Map(values.participants.map(p => [p.nodeId, p]));
+            const token = graphCommands.begin('workflow_relations');
+            flow.participants = flow.nodeIds.map(id => byId.get(id) || { nodeId: id, participation: 'excluded', reviewerNodeId: null,
+                confirmRequired: false, ownerMaySubmit: false, ownerMayReview: false, dependencies: [] });
+            flow.finalNodeId = values.finalNodeId;
+            canvasRuntime.documentRestoring = true;
+            try {
+                engine.connections.filter(e => flow.nodeIds.includes(e.from) && flow.nodeIds.includes(e.to))
+                    .forEach(e => engine.disconnectNodes(e.from, e.to));
+                for (const p of flow.participants) for (const d of p.dependencies) engine.connectNodesForCommand(d.nodeId, p.nodeId);
+            } finally { canvasRuntime.documentRestoring = false; }
+            graphCommands.commit(token);
+            scheduleCanvasSave('workflow_relations');
+            if (!await flushCanvasSave('workflow_relations', true)) throw new Error('分工尚未保存，草稿与画布修改保留。');
+            if (ctx.contextEpoch !== roleContext().contextEpoch) throw new Error('分工已保存到原画布，请回原画布查看。');
+            workflowHub?.render();
+        },
         listMaterialNodes: () => [...engine.nodes.values()].filter(n => n.type !== 'role' && !n.type.startsWith('flow-'))
             .map(n => ({ id: n.id, title: n.data?.title || n.type, type: n.type })),
         openCreator: options => roleCreator?.openCreator(options),
@@ -7651,9 +7698,11 @@
             }
             if (!payload) {
                 if (!graphEditAllowed()) throw new Error('画布正在处理其他操作，请稍后加入；已保存的角色不会丢失。');
+                if (!workflowHub?.current()) throw new Error('请先在工作流中选择或创建角色协作，再加入岗位；角色库内容仍保留。');
                 ctx = await roleBridge.saveDocument('before_role_join');
                 payload = { mutation_id: options.mutationId, document_id: ctx.documentId, document_revision: ctx.documentRevision,
                     definition_id: options.definitionId, version: options.version, position: options.position,
+                    workflow_id: workflowHub?.current()?.id || null,
                     pending_connection: options.pendingConnection || null };
                 retainRoleJoin(ctx, payload);
             }
@@ -7664,7 +7713,7 @@
                 if (!result) {
                     try { result = await postJson('/api/tools/ultimate-canvas/role-join', payload); }
                     catch (error) {
-                        if (error.status >= 400 && error.status < 500 && error.response?.code === 'revision_conflict') clearRoleJoin(ctx);
+                        if (error.status >= 400 && error.status < 500 && ['revision_conflict', 'workflow_unavailable', 'workflow_required'].includes(error.response?.code)) clearRoleJoin(ctx);
                         throw error;
                     }
                 }
@@ -7679,13 +7728,16 @@
                 try {
                     if (!engine.nodes.has(result.nodeId)) {
                         const token = graphCommands.begin('role_join');
+                        if (Array.isArray(result.roleWorkflows)) engine.roleWorkflows = structuredClone(result.roleWorkflows);
                         engine.addNode('role', result.node.x, result.node.y, { ...result.node.data, id: result.nodeId });
                         if (payload.pending_connection) connectMenuNode(result.nodeId, payload.pending_connection);
                         graphCommands.commit(token);
                     }
                 } finally { canvasRuntime.documentRestoring = false; }
                 canvasRuntime.documentRevision = result.document.revision;
-                canvasRuntime.documentSchemaVersion = 3;
+                canvasRuntime.documentSchemaVersion = Math.max(canvasRuntime.documentSchemaVersion, result.document.schema_version || 3);
+                if (Array.isArray(result.roleWorkflows)) engine.roleWorkflows = structuredClone(result.roleWorkflows);
+                workflowHub?.render();
                 canvasRuntime.documentDirty = false; canvasRuntime.saveState = 'saved';
                 const draftKey = draftStorageKey();
                 try { if (draftKey) localStorage.removeItem(draftKey); } catch {}
@@ -7696,6 +7748,33 @@
     };
     roleCreator = window.UltimateCanvasRoleCreator?.create(roleBridge);
     roleWorkflow = window.UltimateCanvasRoleWorkflow?.create(roleBridge);
+    workflowHub = window.UltimateCanvasRoleWorkflows.create({
+        ...roleBridge, flows: () => engine.roleWorkflows || [], nodes: () => roleBridge.listRoleNodes(),
+        showPanel: id => { if (activePanel !== id) showPanel(id); }, requestName: requestCanvasName,
+        position: () => ({ x: (innerWidth / 2 - engine.offsetX) / engine.scale, y: (innerHeight / 2 - engine.offsetY) / engine.scale }),
+        openWork: (id, options) => roleWorkflow.open(id, options), openSettings: openRoleInstanceSettings,
+        saveRelations: async () => { scheduleCanvasSave('workflow_settings'); if (!await flushCanvasSave('workflow_settings', true)) throw new Error('工作流更改尚未保存，请处理画布保存状态。'); },
+        adopt: async (result, payload) => {
+            if ((engine.roleWorkflows || []).some(f => f.id === result.workflowId)) return;
+            if (canvasRuntime.documentRevision !== payload.document_revision) {
+                if (canvasRuntime.documentRevision === result.document.revision && (engine.roleWorkflows || []).some(f => f.id === result.workflowId)) return;
+                throw new Error('模板已保存，但画布已继续更新；请重新读取原画布，不会再创建模板。');
+            }
+            canvasRuntime.documentRestoring = true;
+            try {
+                const token = graphCommands.begin('role_workflow_template');
+                engine.roleWorkflows = [...(engine.roleWorkflows || []).filter(f => f.id !== result.workflowId), result.workflow];
+                for (const node of result.nodes) if (!engine.nodes.has(node.id)) engine.addNode('role', node.x, node.y, { ...node.data, id: node.id });
+                for (const edge of result.connections || []) engine.connectNodesForCommand(edge.from, edge.to);
+                graphCommands.commit(token);
+            } finally { canvasRuntime.documentRestoring = false; }
+            canvasRuntime.documentRevision = result.document.revision; canvasRuntime.documentSchemaVersion = 4;
+            canvasRuntime.documentDirty = false; canvasRuntime.saveState = 'saved';
+            try { const k = draftStorageKey(); if (k) localStorage.removeItem(k); } catch {}
+            if (result.nodes[0]) engine.selectNode(result.nodes[0].id);
+            updateSaveIndicator();
+        }
+    });
     document.getElementById('tool-role-pending')?.addEventListener('click', async () => {
         if (await roleWorkflow?.openPending()) showPanel(null);
     });
@@ -7753,7 +7832,7 @@
                 <p>${escapeHtml(original.snapshot?.name || node.data.title)} · 当前版本 ${original.version}</p>
                 <label>角色版本 <input class="canvas-name-input" type="number" min="1" max="${Number(definition.role.current_version)}" step="1" value="${original.version}" data-instance-version></label>
                 <p data-instance-preview></p><p role="status" data-instance-status></p>
-                <div class="canvas-confirm-actions"><button type="button" class="context-command" data-instance-executor>更换执行者</button>
+                <div class="canvas-confirm-actions"><button type="button" class="context-command" data-instance-executor>编辑岗位</button>
                 <button type="button" class="context-command danger" data-instance-remove>移除角色</button>
                 <button type="button" class="context-primary-command" data-instance-save disabled>保存实例</button></div>` });
         const state = { close: finish, dirty: false }; roleInstanceLayer = state;
@@ -7877,7 +7956,6 @@
         menu.setAttribute('role', 'menu');
         menu.setAttribute('aria-label', connection ? incoming ? '添加上下文' : '引用该节点生成' : '添加节点');
         menu.innerHTML = `<div class="menu-section-title">${menu.getAttribute('aria-label')}</div>${buttons}
-            ${!owner?.type.startsWith('flow-') ? `<button type="button" role="menuitem" class="menu-item" data-action="add-role">${icon('Users')}<span>角色</span></button>` : ''}
             ${connection ? `<button type="button" role="menuitem" class="menu-item" data-action="reference-node" ${canReference ? '' : 'disabled title="请从接收图片的节点左侧选择已有参考"'}>${icon('Link')}<span>参考节点</span></button>` : ''}
             ${!connection || owner?.type.startsWith('flow-') ? `<details><summary>工具流节点</summary>${[['flow-input', '输入'], ['flow-template', '图片模板'], ['flow-select', '结果筛选'], ['flow-confirm', '人工确认'], ['flow-output', '输出']].map(([type, label]) => `<button type="button" role="menuitem" class="menu-item" data-node-type="${type}">${icon('Layers')}<span>${label}</span></button>`).join('')}</details>` : ''}
             ${!connection || incoming ? `<div class="menu-divider"></div><button type="button" class="menu-item" role="menuitem" data-action="upload">${icon('Upload')}<span>上传素材</span></button>` : ''}
@@ -7969,10 +8047,6 @@
             const y = source ? source.y : cy - placement.y;
             const newNodeId = engine.addNode(type, x, y);
             connectMenuNode(newNodeId, pendingConnection);
-        } else if (action === 'add-role') {
-            engine._hideAddMenu();
-            void roleBridge.openLibrary({ position: { x: cx - 160, y: cy - 80 }, pendingConnection });
-            return;
         } else if (action === 'reference-node') {
             engine._hideAddMenu();
             if (pendingConnection?.role === 'input') startReferenceSelection(pendingConnection.nodeId);

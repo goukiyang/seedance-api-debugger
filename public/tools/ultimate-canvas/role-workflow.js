@@ -669,7 +669,7 @@
 
         async function loadNodes(ctx) {
             const [roles, materials] = await Promise.all([
-                Promise.resolve().then(() => bridge.listRoleNodes()),
+                Promise.resolve().then(() => bridge.listRoleNodes(state.mode === 'role' ? state.selectedNodeId : '')),
                 Promise.resolve().then(() => bridge.listMaterialNodes())
             ]);
             if (!isCurrent(ctx)) return false;
@@ -807,6 +807,7 @@
             state.selectedWorkId = textOf(options?.workId, rememberedWork); state.tab = options?.workId ? 'work' : state.tab || 'work';
             state.detail = null; state.error = ''; state.eventCursor = null; state.extraEvents = [];
             ensureRoot(); persistView(); render(); await refresh();
+            if (options?.configure && isCurrent(currentContext())) await openTaskSettings(currentDetail()?.run || null);
             return true;
         }
 
@@ -1013,6 +1014,8 @@
             const time = work.updated_at || work.created_at || run.updated_at || run.created_at;
             addTime(status, time);
             block.append(status);
+            if (recordList(detail.summary?.context_gaps).length) block.append(panelMessage('岗位要求待补齐：' + detail.summary.context_gaps.join('、') + '。请编辑岗位并切换实例版本，再更新本次任务。', 'warning'));
+            if (recordList(detail.summary?.reviewer_context_gaps).length) block.append(panelMessage('指定检查岗位要求待补齐：' + detail.summary.reviewer_context_gaps.join('、') + '。补齐并更新本次任务前不能审核交接。', 'warning'));
             if (detail.waiting_expired) block.append(panelMessage('等待时间已到；系统没有强行推进。请核对当前状态后再处理。', 'warning'));
             if (work.wait_reason) block.append(panelMessage(work.wait_reason, 'warning'));
             block.append(summaryRow('目标', textOf(req.goal, textOf(work.goal, '目标待同步'))));
@@ -1269,6 +1272,12 @@
             const title = el('div', 'crw-actions-title');
             title.append(el('h3', '', '下一步'));
             box.append(title);
+
+            if (recordList(role.contextGaps).length && !['delivered', 'unknown', 'review', 'confirmation'].includes(work.phase)) {
+                box.append(panelMessage('岗位要求待补齐，不能开始或提交：' + role.contextGaps.join('、'), 'warning'));
+                box.append(button('更新任务要求', 'task-settings', '', 'sliders-horizontal'));
+                return box;
+            }
 
             if (work.phase === 'offered' || work.phase === 'rejected') {
                 box.append(button(work.phase === 'rejected' ? '重新接收' : '接收任务', 'work-accept', 'primary', 'check'));
@@ -1674,6 +1683,10 @@
             error.textContent = state.taskDraftError; form.append(error);
             const footer = el('div', 'crw-dialog-footer');
             footer.append(button('取消', 'dialog-cancel', 'quiet'));
+            if (bridge.workflowForNode?.(state.selectedNodeId)) {
+                const relationSave = button('保存工作流分工', 'save-workflow-relations', '', 'save');
+                relationSave.disabled = state.taskSaving || state.taskConflict; footer.append(relationSave);
+            }
             if (editing) {
                 const limits = button('只保存限额', 'save-task', '', 'save'); limits.dataset.updateKind = 'limits';
                 limits.disabled = state.taskSaving || state.taskConflict; footer.append(limits);
@@ -1685,6 +1698,10 @@
         }
 
         function createTaskDraft(existingRun, requirements) {
+            if (!existingRun && !recordList(requirements.participants).length) {
+                const flow = bridge.workflowForNode?.(state.selectedNodeId);
+                if (flow) requirements = { participants: flow.participants, finalNodeId: flow.finalNodeId };
+            }
             const current = recordList(requirements.participants);
             return {
                 runId: existingRun?.id || '', nodeId: state.selectedNodeId, baseRevision: Number(existingRun?.revision) || 0,
@@ -1760,7 +1777,7 @@
             const reviewer = el('label', 'crw-field'); reviewer.append(el('span', 'crw-field-label', '检查角色'));
             const reviewerSelect = el('select', 'crw-select'); reviewerSelect.dataset.participantField = 'reviewerNodeId'; reviewerSelect.dataset.nodeId = node.id;
             appendOption(reviewerSelect, '', '不指定角色检查');
-            state.nodes.filter(item => item.id !== node.id).forEach(item => appendOption(reviewerSelect, item.id, nodeTitle(item)));
+            state.nodes.filter(item => item.id !== node.id && item.roleConfig?.snapshot?.reviewAuthority !== 'none').forEach(item => appendOption(reviewerSelect, item.id, nodeTitle(item)));
             reviewerSelect.value = participant.reviewerNodeId || ''; reviewer.append(reviewerSelect); row.append(reviewer);
             row.append(checkRow('交付后需要本人确认', 'confirmRequired', node.id, participant.confirmRequired));
             row.append(checkRow('允许本人代为提交', 'ownerMaySubmit', node.id, participant.ownerMaySubmit));
@@ -2049,6 +2066,20 @@
             }
             if (action === 'dialog-readonly-close') { closeModal(); return; }
             if (action === 'save-task') { await saveTask(target); return; }
+            if (action === 'save-workflow-relations') {
+                const ctx = currentContext(), draft = copyJson(state.taskDraft), req = collectRequirements(draft);
+                const validation = validateRequirements({ ...req, goal: '工作流分工' }, { ...draft, materialNodes: [], max_rounds: '1', max_calls: '', wait_limit_seconds: '', budget_points_limit: '', budget_usd: '' });
+                if (validation) throw new Error(validation);
+                state.taskSaving = true; updatePendingControls();
+                try {
+                    await bridge.saveWorkflowRelations(state.selectedNodeId, { participants: req.participants, finalNodeId: req.finalNodeId });
+                    if (isCurrent(ctx)) {
+                        bridge.notice?.('工作流分工已保存；任务草稿保留，已有任务和预算未改变。', 'success');
+                        persistView(); closeModal();
+                    }
+                } finally { state.taskSaving = false; updatePendingControls(); }
+                return;
+            }
             if (action === 'submit-text-action') { await submitTextAction(target); return; }
             if (action === 'recover-receipt') { await queryPendingReceipt(target); return; }
             if (action === 'query-attempt') { await queryAttempt(target); return; }

@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '图片生成可分别选择模型和供应商，管理员可增删和编辑图片接口。原接口与历史保留；已受理的异步图片任务按原编号恢复，不重复生成。新接口须先完成配置与能力确认。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '左侧工作流统一管理图片与角色协作。导演组模板已准备九岗位和可编辑分工；缺少的岗位要求会明确提示。原角色库、历史与图片工作流保留，创建和恢复不会开始 AI 调用。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

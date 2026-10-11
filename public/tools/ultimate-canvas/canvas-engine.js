@@ -509,6 +509,7 @@ class CanvasEngine {
         return {
             version: 1,
             planSplits: this.planSplits || window.UltimateCanvasPlanSplit?.empty(),
+            roleWorkflows: this.roleWorkflows || [],
             viewport: {
                 scale: this.scale,
                 offsetX: this.offsetX,
@@ -531,6 +532,7 @@ class CanvasEngine {
     }
 
     restore(snapshot = {}) {
+        this.roleWorkflows = cloneCanvasValue(snapshot.roleWorkflows || []);
         this.planSplits = snapshot.planSplits || window.UltimateCanvasPlanSplit?.empty();
         this.canvas.querySelectorAll('.canvas-node').forEach(node => {
             this.nodeResizeObserver?.unobserve(node);
@@ -625,6 +627,7 @@ class CanvasEngine {
         this.svg.querySelectorAll('.connection-line, .connection-delete-control').forEach(line => line.remove());
 
         this.nodes = nextNodes;
+        if (Object.prototype.hasOwnProperty.call(snapshot, 'roleWorkflows')) this.roleWorkflows = cloneCanvasValue(snapshot.roleWorkflows || []);
         nextNodes.forEach((node, id) => {
             const previous = previousNodes.get(id);
             const existingElement = this.canvas.querySelector(`[data-node-id="${CSS.escape(id)}"]`);
@@ -697,9 +700,12 @@ class CanvasEngine {
         const editableText = ['text', 'script'].includes(type) && (typeof nd.data?.authoredText === 'string'
             ? nd.data.authoredText : !nd.data?.generatedText && nd.data?.prompt ? nd.data.prompt : null);
         const role = nd.data?.roleConfig?.snapshot;
+        const roleFlow = (this.roleWorkflows || []).find(flow => flow.nodeIds.includes(id));
         const roleBody = type === 'role' ? `<div class="role-node-summary">
             <strong>${this._escapeHtml(role?.name || nd.data?.title || '角色')}</strong>
+            ${roleFlow ? `<small>${this._escapeHtml(roleFlow.name)}</small>` : ''}
             <span>${this._escapeHtml(role?.executor?.kind === 'ai' ? 'AI · ' + (role.executor.model || '未指定模型') : role?.executor?.kind === 'person' ? '人员' : '稍后指定')}</span>
+            ${role?.contextGaps?.length ? `<small>岗位要求待补齐（${role.contextGaps.length}项）</small>` : ''}
             <p>${this._escapeHtml(role?.responsibilities || '职责待配置')}</p>
             <button type="button" data-role-open="${this._escapeHtml(id)}">${window.UltimateCanvasIcons('ClipboardList')}工作</button>
             <button type="button" data-role-instance-settings="${this._escapeHtml(id)}" aria-label="角色实例配置" title="角色实例配置">${window.UltimateCanvasIcons('SlidersHorizontal')}</button>
@@ -1453,6 +1459,23 @@ class CanvasEngine {
         }
         const sourceIsFlow = source.type.startsWith('flow-');
         const targetIsFlow = target.type.startsWith('flow-');
+        if (source.type === 'role' || target.type === 'role') {
+            const sourceGroup = (this.roleWorkflows || []).find(f => f.nodeIds.includes(fromId));
+            const targetGroup = (this.roleWorkflows || []).find(f => f.nodeIds.includes(toId));
+            if (source.type === 'role' && target.type === 'role' && (sourceGroup || targetGroup)) {
+                if (sourceGroup?.id !== targetGroup?.id) return { message: '请在同一工作流中配置岗位关系', reason: 'workflow-scope' };
+                if ([fromId, toId].some(id => sourceGroup.participants.find(p => p.nodeId === id)?.participation === 'excluded')) {
+                    return { message: '请先在任务与关系中将这两个岗位设为参与', reason: 'workflow-participation' };
+                }
+            }
+            const seen = new Set(), stack = [toId];
+            while (stack.length) {
+                const current = stack.pop();
+                if (current === fromId) return { message: '材料流向不能循环；检查和退回在任务中配置', reason: 'role-material-cycle' };
+                if (seen.has(current)) continue;
+                seen.add(current); connections.filter(e => e.from === current).forEach(e => stack.push(e.to));
+            }
+        }
         if (sourceIsFlow || targetIsFlow) {
             const allowed = sourceIsFlow && targetIsFlow && Boolean(TOOLFLOW_CONNECTIONS[source.type]?.has(target.type));
             const createsCycle = (() => {

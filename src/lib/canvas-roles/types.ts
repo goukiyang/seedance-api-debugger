@@ -9,7 +9,7 @@ export type RoleExecutor = { kind: 'person' | 'ai' | 'unassigned'; userId?: stri
 export type RoleSnapshot = {
   schema: 'role.v1'; name: string; responsibilities: string; delivery: string;
   criteria: string; boundary: string; executor: RoleExecutor;
-  tools: ('manual' | 'text')[]; requiredItems: string[];
+  tools: ('manual' | 'text')[]; requiredItems: string[]; contextGaps?: string[]; reviewAuthority?: 'none' | 'content' | 'final'; workflowOnly?: true;
 };
 export type RoleNodeConfig = { definitionId: string; version: number; snapshot?: RoleSnapshot };
 export type WorkPhase = 'offered' | 'needs_material' | 'rejected' | 'ready' | 'working'
@@ -87,13 +87,25 @@ export function roleSnapshot(raw: unknown, ownerId: string): RoleSnapshot {
   if (!Array.isArray(requiredItems) || requiredItems.length > 30) throw new RoleError('必交项最多30项');
   const itemNames = requiredItems.map(item => text(item, 160, true));
   if (new Set(itemNames).size !== itemNames.length) throw new RoleError('必交项名称不能重复');
+  const gaps = raw.contextGaps ?? [];
+  if (!Array.isArray(gaps) || gaps.length > 12) throw new RoleError('岗位缺项配置无效');
+  const contextGaps = Array.from(new Set(gaps.map(item => text(item, 160, true))));
+  if (raw.reviewAuthority !== undefined && (typeof raw.reviewAuthority !== 'string' || !['none', 'content', 'final'].includes(raw.reviewAuthority))) throw new RoleError('岗位审核职责无效');
+  if (raw.workflowOnly !== undefined && raw.workflowOnly !== true) throw new RoleError('岗位工作流归属无效');
   return {
     schema: ROLE_CAPABILITY, name: text(raw.name, 80, true),
     responsibilities: text(raw.responsibilities, 12000, true), delivery: text(raw.delivery, 12000, true),
     criteria: text(raw.criteria, 8000), boundary: text(raw.boundary, 8000), executor,
     tools: Array.from(new Set(tools)) as RoleSnapshot['tools'],
     requiredItems: itemNames,
+    ...(contextGaps.length ? { contextGaps } : {}),
+    ...(raw.reviewAuthority !== undefined ? { reviewAuthority: raw.reviewAuthority as RoleSnapshot['reviewAuthority'] } : {}),
+    ...(raw.workflowOnly === true ? { workflowOnly: true } : {}),
   };
+}
+
+export function assertRolePrepared(snapshot: RoleSnapshot) {
+  if (snapshot.contextGaps?.length) throw new RoleError('请先补齐岗位要求：' + snapshot.contextGaps.join('、'), 409, 'role_context_incomplete');
 }
 
 export function requirements(raw: unknown, ownerId: string, nodeIds: Set<string>): TaskRequirements {

@@ -9,8 +9,23 @@ import { executionView } from './execution';
 import { assertDeliveryOriginals, authoredCanvasText, originalIdentity, submissionAttachments } from './media';
 import { assertLiveNode, ownedDefinition, ownedRun, roleDocument, type RoleDb } from './permissions';
 import { roleMutation } from './repository';
-import { digest, identifier, integer, pointCents, roleRunView, record, requirements, RoleError, text,
+import { workflowSnapshots } from './workflow-schema';
+import { assertRolePrepared, digest, identifier, integer, pointCents, roleRunView, record, requirements, RoleError, text,
   type JsonRecord, type RoleParticipant, type RoleSnapshot, type TaskRequirements } from './types';
+
+function assertWorkflowParticipants(value: unknown, req: TaskRequirements) {
+  const flows = workflowSnapshots(value), active = req.participants.filter(p => p.participation !== 'excluded');
+  const flow = flows.find(item => active.some(p => item.nodeIds.includes(p.nodeId)));
+  if (flow && active.some(p => !flow.nodeIds.includes(p.nodeId))) throw new RoleError('本次任务只能使用所属工作流的岗位，请分别配置其他工作流', 409, 'workflow_scope_conflict');
+}
+function assertReviewAuthorities(nodes: { id: string; data: JsonRecord }[], req: TaskRequirements) {
+  for (const p of req.participants) {
+    const config = nodes.find(node => node.id === p.reviewerNodeId)?.data.roleConfig;
+    if (record(config) && record(config.snapshot) && config.snapshot.reviewAuthority === 'none') {
+      throw new RoleError('协调岗位不承担内容审核，请指定专业检查者或总导演', 409, 'role_review_forbidden');
+    }
+  }
+}
 
 export async function taskRequirements(db: RoleDb, runId: string, revision: number): Promise<TaskRequirements> {
   const row = await db.canvasRoleTaskRevision.findUnique({ where: {
@@ -79,6 +94,7 @@ async function makeWork(db: RoleDb, user: SessionUser, runId: string, revision: 
   } });
   if (!roleVersion) throw new RoleError('角色版本不存在', 409, 'role_version_unavailable');
   const snapshot: RoleSnapshot = JSON.parse(roleVersion.snapshot_json);
+  if (snapshot.workflowOnly && !workflowSnapshots(JSON.parse(documentJson).canvas.roleWorkflows).some(flow => flow.nodeIds.includes(p.nodeId))) throw new RoleError('此岗位须在所属工作流中配置任务', 409, 'workflow_required');
   const work = await db.canvasRoleWork.create({ data: {
     id: randomUUID(), role_task_run_id: runId, requirements_revision: revision,
     node_id: p.nodeId, round, role_version_id: roleVersion.id,
@@ -98,6 +114,8 @@ export async function createTaskRun(user: SessionUser, body: JsonRecord) {
     if (integer(body.document_revision, 0) !== document.revision) throw new RoleError('画布已更新，请读取后再配置任务', 409, 'revision_conflict');
     const graph = parseCanvasSnapshot(document.document_json, document.project_id, false);
     const req = requirements(body.requirements, user.id, new Set(graph.canvas.nodes.filter(n => n.type === 'role').map(n => n.id)));
+    assertWorkflowParticipants(graph.canvas.roleWorkflows, req);
+    assertReviewAuthorities(graph.canvas.nodes, req);
     req.materials = await materialSnapshot(db, user, document.document_json, req);
     const run = await db.canvasRoleTaskRun.create({ data: { id: randomUUID(), owner_user_id: user.id,
       document_id: documentId, max_rounds: integer(body.max_rounds, 1, 100),
@@ -212,6 +230,9 @@ export async function readWork(user: SessionUser, workId: string, params = new U
     catch (error) { actionUnavailableReason = error instanceof Error ? error.message : '原角色不可继续工作'; }
   }
   if (document.status !== 'active') actionUnavailableReason = '画布已归档，当前仅可回查历史';
+  const contextGaps: string[] = JSON.parse(work.snapshot_json).role.contextGaps || [];
+  const reviewerWork = currentWorks.find(w => w.node_id === work.reviewer_node_id);
+  const reviewerContextGaps: string[] = reviewerWork ? JSON.parse(reviewerWork.snapshot_json).role.contextGaps || [] : [];
   const required = req.participants.filter(p => p.participation === 'required');
   const ownerReceipt = await prisma.canvasRoleEvent.findFirst({ where: { role_task_run_id: run.id,
     requirements_revision: work.requirements_revision, kind: 'owner_result_available' }, orderBy: { created_at: 'desc' } });
@@ -231,6 +252,8 @@ export async function readWork(user: SessionUser, workId: string, params = new U
     summary: { requirements_revision: work.requirements_revision, round: work.round,
       is_current_work: isCurrentWork, current_work_id: currentNodeWork?.id ?? null,
       action_available: !actionUnavailableReason, action_unavailable_reason: actionUnavailableReason,
+      context_gaps: contextGaps,
+      reviewer_context_gaps: reviewerContextGaps,
       task_update_available: isCurrentWork && document.status === 'active',
       task_control_available: isCurrentWork && document.status === 'active',
       completed_required: required.filter(p => currentWorks.find(w => w.node_id === p.nodeId)?.phase === 'delivered').length,
@@ -313,11 +336,14 @@ export async function updateTaskRun(user: SessionUser, runId: string, body: Json
     // Uncertain external requests cannot be bypassed by changing requirements.
     const inFlight = await db.canvasRoleAttempt.count({ where: { work: { role_task_run_id: run.id }, OR: [{ state: { in: ['reserved', 'sending', 'unknown'] } }, { fee_state: { in: ['pending', 'unknown', 'authorization_required'] } }] } });
     if (inFlight) throw new RoleError('尚有模型请求或费用待核对，请先恢复原回执', 409, 'attempt_unresolved');
-    const nodes = parseCanvasSnapshot(document.document_json, document.project_id, false).canvas.nodes;
+    const graph = parseCanvasSnapshot(document.document_json, document.project_id, false).canvas;
+    const nodes = graph.nodes;
     const previous = await taskRequirements(db, run.id, run.requirements_revision);
     const oldWorks = await latestWorks(db, run.id, run.requirements_revision);
     const limitsOnly = body.update_kind === 'limits' || body.requirements === undefined;
     const req = limitsOnly ? previous : requirements(body.requirements, user.id, new Set(nodes.filter(n => n.type === 'role').map(n => n.id)));
+    if (!limitsOnly) assertWorkflowParticipants(graph.roleWorkflows, req);
+    if (!limitsOnly) assertReviewAuthorities(nodes, req);
     const configuredChanged = digest({ ...req, materials: undefined }) !== digest({ ...previous, materials: undefined });
     req.materials = !limitsOnly && (configuredChanged || body.refresh_materials === true)
       ? await materialSnapshot(db, user, document.document_json, req) : previous.materials;
@@ -430,6 +456,7 @@ export async function actOnWork(user: SessionUser, workId: string, body: JsonRec
       throw new RoleError('这是历史修订，记录保留；请打开当前工作后操作', 409, 'work_superseded');
     }
     const action = String(body.action), beforePhase = work.phase;
+    if (['accept', 'submit'].includes(action)) assertRolePrepared(JSON.parse(work.snapshot_json).role);
     if (!['message', 'pause', 'resume'].includes(action) && await db.canvasRoleAttempt.count({ where: { work_id: work.id,
       OR: [{ state: { in: ['reserved', 'sending', 'unknown'] } }, { fee_state: { in: ['pending', 'unknown', 'authorization_required'] } }] } })) {
       throw new RoleError('此工作已有请求或结果待确认，请查原回执，不能改写或重发', 409, 'attempt_unresolved');
@@ -514,6 +541,8 @@ export async function actOnWork(user: SessionUser, workId: string, body: JsonRec
             const reviewer = (await latestWorks(db, run.id, run.requirements_revision)).find(w => w.node_id === work.reviewer_node_id);
             if (!reviewer) throw new RoleError('指定检查者已失效', 403, 'reviewer_unavailable');
             assertLiveNode(reviewer, document.document_json);
+            assertRolePrepared(JSON.parse(reviewer.snapshot_json).role);
+            if (JSON.parse(reviewer.snapshot_json).role.reviewAuthority === 'none') throw new RoleError('协调岗位不承担内容审核', 409, 'role_review_forbidden');
             const executor: RoleSnapshot['executor'] = JSON.parse(reviewer.snapshot_json).role.executor;
             if (executor.kind !== 'person' && !(p.ownerMayReview && body.owner_proxy === true)) throw new RoleError('需要指定检查者，或明确允许本人代检查', 403, 'review_not_authorized');
             if (executor.kind === 'person' && executor.userId !== user.id) throw new RoleError('不是本次检查者', 403, 'reviewer_mismatch');

@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
 import { assertRoleUser, assertCurrentRoleUser, ownedDefinition, type RoleDb } from './permissions';
-import { digest, identifier, integer, record, roleSnapshot, RoleError, ROLE_PAGE_SIZE, text, type JsonRecord } from './types';
+import { digest, identifier, integer, record, roleSnapshot, RoleError, ROLE_PAGE_SIZE, text, type JsonRecord, type RoleSnapshot } from './types';
 
 export async function roleMutation<T>(user: SessionUser, body: JsonRecord, kind: string,
   authorize: (db: RoleDb) => Promise<unknown>, perform: (db: RoleDb) => Promise<{ objectId: string; result: T }>) {
@@ -86,9 +86,14 @@ export async function createRole(user: SessionUser, body: JsonRecord) {
     return { objectId: roleId, result: { role, version: { id: version.id, version: 1, snapshot } } };
   });
 }
-export async function editRole(user: SessionUser, roleId: string, body: JsonRecord) {
+export async function editRole(user: SessionUser, roleId: string, body: JsonRecord, capabilities: string[] = []) {
   return roleMutation(user, body, `role_edit:${identifier(roleId)}`, db => ownedDefinition(db, user, roleId), async db => {
     const role = await ownedDefinition(db, user, roleId);
+    const current = await db.canvasRoleVersion.findUnique({ where: { definition_id_version: { definition_id: role.id, version: role.current_version } } });
+    const previousSnapshot = JSON.parse(current?.snapshot_json || '{}');
+    if ((previousSnapshot.contextGaps?.length || previousSnapshot.reviewAuthority || previousSnapshot.workflowOnly) && !capabilities.includes('role.workflow.v1')) {
+      throw new RoleError('岗位包含待补齐要求，请刷新后编辑，旧页面不会删除缺项', 426, 'workflow_capability_required');
+    }
     if (integer(body.base_revision) !== role.revision || integer(body.base_version) !== role.current_version) {
       throw new RoleError('角色已更新，请保留草稿并读取最新版本', 409, 'revision_conflict', { current_revision: role.revision });
     }
@@ -98,6 +103,12 @@ export async function editRole(user: SessionUser, roleId: string, body: JsonReco
     if (action === 'edit') {
       if (role.status !== 'active') throw new RoleError('请先恢复角色再编辑', 409, 'role_archived');
       snapshot = roleSnapshot(body.snapshot, user.id);
+      if (previousSnapshot.workflowOnly && !snapshot.workflowOnly) throw new RoleError('此岗位属于工作流，请保留归属；历史角色不受影响', 409, 'workflow_required');
+      if (previousSnapshot.reviewAuthority && snapshot.reviewAuthority !== previousSnapshot.reviewAuthority) throw new RoleError('请保留此岗位的审核职责；其他职责可另建角色', 409, 'role_authority_changed');
+      if ((previousSnapshot.contextGaps?.length || 0) > (snapshot.contextGaps?.length || 0)) {
+        if (!['responsibilities', 'delivery', 'criteria', 'boundary'].some(key => previousSnapshot[key] !== snapshot![key as keyof RoleSnapshot])) throw new RoleError('请先补充岗位内容，再标记缺项已补齐', 409, 'role_context_incomplete');
+        if (!snapshot.contextGaps?.length && !snapshot.criteria) throw new RoleError('请补充岗位验收标准，再完成缺项确认', 409, 'role_context_incomplete');
+      }
       version++;
       await db.canvasRoleVersion.create({ data: { id: `${roleId}-v${version}`, definition_id: roleId, version, snapshot_json: JSON.stringify(snapshot) } });
     }
@@ -117,7 +128,7 @@ export async function roleReceipt(user: SessionUser, mutationId: string) {
   if (!receipt) throw new RoleError('尚未找到保存回执，请保留草稿与原请求编号', 404, 'receipt_not_found');
   const response = JSON.parse(receipt.response_json);
   // Receipts are not an alternate route around current project/document access.
-  if (response.nodeId && response.documentId === receipt.object_id) {
+  if ((response.nodeId || response.workflowId) && response.documentId === receipt.object_id) {
     const { roleDocument } = await import('./permissions');
     await roleDocument(user, receipt.object_id);
   } else if (response.role?.id === receipt.object_id) await ownedDefinition(prisma, user, receipt.object_id);
