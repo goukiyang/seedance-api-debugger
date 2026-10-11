@@ -6,8 +6,15 @@ import {
   IMAGE_GENERATION_API_SETTING_KEY,
   buildImageGenerationApiSettingsPatch,
   getImageGenerationApiSettings,
+  getImageGenerationChannelOptions,
+  getManagedImageGenerationChannels,
   isImageGenerationApiReady,
   saveImageGenerationApiSettings,
+  createManagedImageGenerationChannel,
+  updateManagedImageGenerationChannel,
+  archiveManagedImageGenerationChannel,
+  restoreManagedImageGenerationChannel,
+  ImageGenerationChannelError,
 } from '@/lib/integrations/image-generation';
 
 export const dynamic = 'force-dynamic';
@@ -37,6 +44,20 @@ async function updateImageGenerationConfig(request: NextRequest) {
   try {
     const admin = await getAdminUser(request);
     const body = await request.json() as Record<string, unknown>;
+    const channelAction = body.channel_action ?? body.channelAction;
+    if (channelAction === 'create' || channelAction === 'update' || channelAction === 'archive' || channelAction === 'restore') {
+      const input = body.channel && typeof body.channel === 'object' && !Array.isArray(body.channel)
+        ? body.channel as Record<string, unknown>
+        : body;
+      const saved = channelAction === 'create'
+        ? await createManagedImageGenerationChannel(input, admin.id)
+        : channelAction === 'update'
+          ? await updateManagedImageGenerationChannel(input, admin.id)
+          : channelAction === 'archive'
+            ? await archiveManagedImageGenerationChannel(input, admin.id)
+            : await restoreManagedImageGenerationChannel(input, admin.id);
+      return NextResponse.json({ ok: true, channel: saved });
+    }
     const current = await getImageGenerationApiSettings();
     const candidate = buildImageGenerationApiSettingsPatch(current, body);
 
@@ -89,9 +110,12 @@ async function updateImageGenerationConfig(request: NextRequest) {
     if (error instanceof Error && error.message.startsWith('图形生成 API 地址')) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
-    console.error('[Admin/ImageGenerationIntegration] Update failed:', error);
+    if (error instanceof ImageGenerationChannelError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+    }
+    console.error('[Admin/ImageGenerationIntegration] Update failed:', error instanceof Error ? error.name : 'unknown');
     return NextResponse.json({
-      error: error instanceof Error ? error.message : '保存图形生成 API 配置失败',
+      error: '保存图形生成 API 配置失败，请稍后重试；未确认保存成功',
     }, { status: 500 });
   }
 }
@@ -100,16 +124,25 @@ export async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
     const settings = await getImageGenerationApiSettings();
+    const [channels, options] = await Promise.all([
+      getManagedImageGenerationChannels(),
+      getImageGenerationChannelOptions(),
+    ]);
     return NextResponse.json({
       ok: true,
       setting_key: IMAGE_GENERATION_API_SETTING_KEY,
       config: safeConfigDto(settings),
+      channels,
+      options,
     });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[Admin/ImageGenerationIntegration] GET failed:', error);
+    if (error instanceof ImageGenerationChannelError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+    }
+    console.error('[Admin/ImageGenerationIntegration] GET failed:', error instanceof Error ? error.name : 'unknown');
     return NextResponse.json({ error: '读取图形生成 API 配置失败' }, { status: 500 });
   }
 }
@@ -120,4 +153,23 @@ export async function PUT(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   return updateImageGenerationConfig(request);
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const admin = await getAdminUser(request);
+    const body = await request.json() as Record<string, unknown>;
+    const input = body.channel && typeof body.channel === 'object' && !Array.isArray(body.channel)
+      ? body.channel as Record<string, unknown>
+      : body;
+    const archived = await archiveManagedImageGenerationChannel(input, admin.id);
+    return NextResponse.json({ ok: true, channel: archived });
+  } catch (error) {
+    if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
+    if (error instanceof ImageGenerationChannelError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+    }
+    console.error('[Admin/ImageGenerationIntegration] Delete failed:', error instanceof Error ? error.name : 'unknown');
+    return NextResponse.json({ error: '归档图片供应商配置失败' }, { status: 500 });
+  }
 }

@@ -4,6 +4,8 @@ import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { createStudioBatch, listStudioBatches, studioBatchView, updateStudioBatch } from '@/lib/image-studio/batches';
 import { StudioError } from '@/lib/image-studio/tasks';
 import { quoteStudioBatch } from '@/lib/image-studio/batch-billing-quote';
+import { QueueCapacityError, QueueMaintenanceError } from '@/lib/image-studio/queue-capacity';
+import { ImageGenerationChannelError } from '@/lib/integrations/image-generation';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -42,6 +44,8 @@ async function handle(request: NextRequest, write = false) {
     }
     return NextResponse.json(await listStudioBatches(user.id, request.nextUrl.searchParams.get('cursor') || undefined), { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
+    if (error instanceof ImageGenerationChannelError) return NextResponse.json({ error: error.message, code: error.code, submitted: false }, { status: error.status });
+    if (error instanceof QueueCapacityError || error instanceof QueueMaintenanceError) return NextResponse.json({ error: error.message, code: error.code, submitted: false }, { status: error.status });
     if (error instanceof StudioError) return NextResponse.json({ error: error.message }, { status: error.status });
     if (error instanceof SyntaxError) return NextResponse.json({ error: '提交内容无效' }, { status: 400 });
     return NextResponse.json({ error: write ? '操作结果待确认，请查询原批次，不要重复新建' : '批次读取失败，请重试' }, { status: 503 });

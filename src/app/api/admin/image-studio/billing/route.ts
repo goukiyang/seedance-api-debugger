@@ -3,7 +3,7 @@ import { getAdminUser } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
 import { imageBillingReadinessPayload, saveImageBillingIntent } from '@/lib/image-studio/billing-readiness';
 import { prisma } from '@/lib/prisma';
-import { getImageGenerationSettingsForModel } from '@/lib/integrations/image-generation';
+import { getImageGenerationSettingsForModel, resolveImageGenerationChannelSnapshot, isMuskImageGenerationChannel } from '@/lib/integrations/image-generation';
 import { matchImageSupplierCharge, readImageSupplierBills } from '@/lib/image-studio/billing-provider';
 import { settleImageSupplierCharge } from '@/lib/image-studio/billing';
 import { IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
@@ -33,9 +33,12 @@ export async function POST(request: NextRequest) {
     if (body.action !== 'record-late-provider-cost' || typeof body.taskId !== 'string' || body.taskId.length > 120)
       return NextResponse.json({ error: '请选择需要核对迟到账单的图片任务' }, { status: 400 });
     const task = await prisma.imageStudioTask.findUnique({ where: { id: body.taskId } });
-    if (!task?.billing_scope || !task.gateway_request_id || !['manual', 'conflict', 'deadline_expired', 'unmatched'].includes(task.billing_status))
+    const publicBillingStatus = task?.billing_status.startsWith('channel_') ? task.billing_status.slice('channel_'.length) : task?.billing_status;
+    if (!task?.billing_scope || !task.gateway_request_id || !publicBillingStatus || !['manual', 'conflict', 'deadline_expired', 'unmatched'].includes(publicBillingStatus))
       return NextResponse.json({ error: '该任务不属于已退出自动结算的可核对任务' }, { status: 409 });
-    const settings = await getImageGenerationSettingsForModel(task.model);
+    const snapshot = JSON.parse(task.snapshot_json || '{}');
+    const settings = snapshot.imageChannel ? await resolveImageGenerationChannelSnapshot(snapshot.imageChannel) : await getImageGenerationSettingsForModel(task.model);
+    if (!isMuskImageGenerationChannel(settings)) return NextResponse.json({ error: '此供应商尚无已核实的实际账单接口，不能用其他供应商账单对账' }, { status: 409 });
     const match = matchImageSupplierCharge(await readImageSupplierBills(settings, task.billing_scope), task.gateway_request_id, task.model);
     if (match.state !== 'matched') return NextResponse.json({ state: match.state, userCharged: false }, { status: 409 });
     return NextResponse.json({ recorded: await settleImageSupplierCharge(task.id, match.charge, true), userCharged: false }, { headers: { 'Cache-Control': 'private, no-store' } });

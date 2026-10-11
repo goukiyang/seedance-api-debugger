@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '无限画布新增私有角色库，可设置职责与交付、交流、提交成果和返工，并保存历史。加入角色不会自动调用 AI；报价和预算未确认时不发送请求。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '图片接口处于兼容回退保护。原入口与历史保留；新通道暂不派发，已受理任务仍按原编号查询。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

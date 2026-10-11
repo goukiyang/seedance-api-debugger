@@ -13,6 +13,7 @@ import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import { getProjectForGeneration } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import { prisma } from '@/lib/prisma';
+import { ImageGenerationChannelError } from '@/lib/integrations/image-generation';
 
 const RESPONSE_HEADERS = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
 const MAX_JSON_BYTES = 128 * 1024;
@@ -133,6 +134,11 @@ export function canvasStyleBatchId(ownerId: string, requestId: string) {
 }
 
 export function canvasStyleFailure(error: unknown, fallback: string) {
+  if (error instanceof ImageGenerationChannelError) return canvasStyleJson({ error: error.code, message: error.message, submitted: false }, error.status);
+  if (error instanceof Error && ('code' in error) && ('status' in error)
+    && (error.code === 'image_queue_capacity' || error.code === 'image_queue_maintenance')) {
+    return canvasStyleJson({ error: error.code, message: error.message, submitted: false }, Number(error.status));
+  }
   if (error instanceof CanvasPromptReferenceError) return canvasStyleJson({ error: error.code, message: error.message }, 400);
   if (error instanceof SyntaxError) return canvasStyleJson({ error: '请求内容不是有效 JSON' }, 400);
   if (error instanceof AuthError) return canvasStyleJson({ error: error.message }, error.status);

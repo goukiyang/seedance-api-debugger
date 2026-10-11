@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import fs from 'fs';
 import path from 'path';
+import { createHash } from 'node:crypto';
 import { AuthError, getSession, type SessionUser } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { assertCanvasPromptCompatibility } from '@/lib/canvas-prompt-compatibility';
@@ -11,8 +12,20 @@ import {
   getImageGenerationChannels,
   selectImageGenerationSettings,
   ImageGenerationApiError,
+  ImageGenerationChannelError,
   isImageGenerationApiReady,
+  captureImageGenerationChannel,
+  resolveImageGenerationChannelSnapshot,
+  validateImageGenerationChannel,
 } from '@/lib/integrations/image-generation';
+import { canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { getImageStudioSettings } from '@/lib/image-studio/settings';
+import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
+import { defaultStudioModuleId } from '@/lib/image-studio/modules';
+import { StudioError, submitStudioBatch } from '@/lib/image-studio/tasks';
+import { prepareImageBillingQuote } from '@/lib/image-studio/billing-quote-service';
+import { assertImageStudioAdmissionOpen, reserveImageStudioQueueCapacity, QueueMaintenanceError, QueueCapacityError } from '@/lib/image-studio/queue-capacity';
+import { createSynchronousImageAdmission, finishSynchronousImageAdmission, SynchronousImageAdmissionError } from '@/lib/image-studio/synchronous-admission';
 import { attachAssetToSiteReferenceImage, ReferenceImportError } from '@/lib/assets/reference-import';
 import { getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { uploadAsset } from '@/lib/assets/storage';
@@ -342,6 +355,8 @@ async function assertCanAttachCanvasContext(user: SessionUser, canvasDocumentId:
 export async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  let synchronousAdmission: { key: string; requestId: string } | undefined;
+  let synchronousStatus: 'succeeded' | 'accepted_unknown' = 'accepted_unknown';
 
   try {
     assertInternalOnly(user, '外部账号无权使用资产图形生成。');
@@ -381,13 +396,16 @@ export async function POST(request: NextRequest) {
     const channels = await getImageGenerationChannels();
     const requestedModel = cleanString(input.model);
     const selectedModel = requestedModel || channels.shared.default_model;
-    if (requestedModel && requestedModel !== channels.shared.default_model) {
+    const channelId = typeof input.channelId === 'string' ? input.channelId : typeof body.channelId === 'string' ? body.channelId : 'original';
+    if (channelId === 'original' && requestedModel && requestedModel !== channels.shared.default_model) {
       const banana = requestedModel === 'gemini-3.1-flash-image-preview' || requestedModel === 'gemini-3-pro-image-preview';
       if ((!banana && channels.shared.provider === 'seedream') || !IMAGE_STUDIO_MODELS.includes(requestedModel as ImageStudioModel)) {
         return NextResponse.json({ error: '当前图片接口不支持所选模型，请重新选择' }, { status: 400 });
       }
     }
-    const settings = selectImageGenerationSettings(channels, selectedModel);
+    const imageChannel = channelId === 'original' ? undefined : await captureImageGenerationChannel(selectedModel, channelId);
+    const settings = imageChannel ? { ...await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true), default_model: selectedModel }
+      : selectImageGenerationSettings(channels, selectedModel);
     const modelLabel = imageGenerationModelLabel(settings.provider, settings.default_model);
     const referenceLimit = settings.provider === 'seedream'
       ? SEEDREAM_REFERENCE_IMAGE_LIMIT
@@ -396,7 +414,9 @@ export async function POST(request: NextRequest) {
     const mentions = parseCanvasPromptMentions(input.promptMentions);
     if (mentions && (!canvasDocumentId || !canvasNodeId)) throw new AuthError('图片绑定仅用于合法画布请求', 400);
     const referenceImageIds = mentions ? validateCanvasBoundReferenceImageIds(rawReferenceImageIds)
-      : normalizeStringList(rawReferenceImageIds, referenceLimit);
+      : imageChannel ? uniquePreserveOrder(Array.isArray(rawReferenceImageIds) ? rawReferenceImageIds : [])
+        : normalizeStringList(rawReferenceImageIds, referenceLimit);
+    if (imageChannel && referenceImageIds.length > MAX_REFERENCE_IMAGES) throw new AuthError(`此通道最多接收 ${MAX_REFERENCE_IMAGES} 张参考图；未截掉原选择，也未生成`, 400);
     if (mentions && referenceImageIds.length > referenceLimit) throw new AuthError('绑定参考图超过限制，请重新选择', 400);
     const referenceImages: AuthorizedReferenceImage[] = [];
     for (const referenceImageId of referenceImageIds) {
@@ -431,11 +451,15 @@ export async function POST(request: NextRequest) {
     const prompt = compiled?.prompt ?? rawPrompt;
     if (!prompt) return NextResponse.json({ error: '图形生成提示词不能为空' }, { status: 400 });
 
+    const requestedCount = input.count ?? input.output_count ?? input.outputCount;
+    if (imageChannel && requestedCount !== undefined && (!Number.isInteger(requestedCount) || Number(requestedCount) < 1 || Number(requestedCount) > 8)) {
+      throw new AuthError('一次队列提交为 1 到 8 张；未改变原数量，也未生成', 400);
+    }
     const count = normalizeCount(
-      input.count ?? input.output_count ?? input.outputCount,
+      requestedCount,
       1,
       1,
-      settings.max_outputs_per_request,
+      imageChannel ? 8 : settings.max_outputs_per_request,
     );
     const rawRatio = input.ratio ?? body.ratio;
     let requestedRatio: string;
@@ -451,19 +475,54 @@ export async function POST(request: NextRequest) {
     const imageSize = isValidImageDimension(requestedSize)
       ? requestedSize
       : imageOutputSize(settings.default_model, resolution, ratio, settings.provider);
+    // Explicit channels use the durable queue. Never issue an untracked POST here.
+    if (imageChannel) {
+      if (!canUseCompanyTemplates(user)) throw new AuthError('当前账号没有此图片生成通道权限', 403);
+      const requestId = cleanString(body.requestId || input.requestId);
+      if (!/^[a-zA-Z0-9-]{16,80}$/.test(requestId)) throw new AuthError('请提供稳定的图片请求编号，查询或重试不能更换编号', 400);
+      const quality = cleanString(input.quality || body.quality);
+      const capability = validateImageGenerationChannel(settings, { model: selectedModel, quality, resolution, ratio: requestedRatio, referenceCount: referenceImageIds.length });
+      if (!capability.ok) throw new AuthError(capability.error, 400);
+      if (referenceImages.some(image => !image.asset_id || !image.asset || image.asset.status !== 'active')) throw new AuthError('此通道需要持久原件参考图，请重新选择；未生成', 409);
+      const studio = await getImageStudioSettings();
+      const submission = { requestId, channelId, imageChannel: body.imageChannel || imageChannel,
+        revision: body.settingsRevision ?? studio.revision, prompt: rawPrompt, count,
+        referenceIds: referenceImages.map(image => image.asset_id!), model: selectedModel, quality,
+        resolution, aspectRatio: requestedRatio, billingQuoteId: body.billingQuoteId, maxEstimatedCost: body.maxEstimatedCost };
+      const canvasUse = { user, referenceImageIds };
+      const referenceAssets = Object.fromEntries(referenceImages.map(image => [image.id, image.asset_id!]));
+      const promptBinding = mentions ? { mentions, referenceAssets } : undefined;
+      if (body.quote === true) return NextResponse.json(await prepareImageBillingQuote(user.id, submission, undefined, canvasUse, promptBinding), { headers: { 'Cache-Control': 'private, no-store' } });
+      const batchId = await submitStudioBatch(user.id, submission, undefined, undefined, canvasUse, promptBinding);
+      return NextResponse.json({ success: true, pending: true, batchId, requestId, count,
+        resultsEndpoint: '/api/tools/ultimate-canvas/styles/results',
+        resultsInput: { projectId: project.id, cardId: videoCard.id, documentId: canvasDocumentId, nodeId: canvasNodeId,
+          moduleId: defaultStudioModuleId(user.id), requestId, batchId, count } }, { status: 202, headers: { 'Cache-Control': 'private, no-store' } });
+    }
+
+    assertImageStudioAdmissionOpen();
     const explicitWorkspaceId = cleanString(body.workspace_id || body.workspaceId);
     let workspaceId = explicitWorkspaceId;
     if (workspaceId) {
       const workspace = await prisma.workspace.findFirst({
-        where: { id: workspaceId, owner_id: user.id, status: 'active' },
-        select: { id: true },
+        where: { id: workspaceId, owner_id: user.id, status: 'active' }, select: { id: true },
       });
       if (!workspace) return NextResponse.json({ error: '当前工作区不存在或无权使用' }, { status: 404 });
     } else {
       const tabId = cleanString(body.tab_id || body.tabId || request.headers.get('x-tab-id'), 'default');
       workspaceId = (await getOrCreateWorkspace(tabId, user.id)).id;
     }
-
+    // A maintenance freeze must also cover the compatible synchronous path.
+    assertImageStudioAdmissionOpen();
+    const scope = createHash('sha256').update(JSON.stringify([settings.provider, settings.base_url, settings.api_key])).digest('hex');
+    const fingerprint = createHash('sha256').update(JSON.stringify({ action, projectId: project.id, videoCardId: videoCard.id,
+      canvasDocumentId, canvasNodeId, prompt, referenceImageIds, model: settings.default_model, ratio, size: imageSize,
+      quality: cleanString(input.quality || body.quality), count, scope })).digest('hex');
+    synchronousAdmission = await prisma.$transaction(async tx => {
+      await reserveImageStudioQueueCapacity(tx, user.id, count);
+      return createSynchronousImageAdmission(tx, { ownerId: user.id, requestId: cleanString(body.requestId || input.requestId) || undefined,
+        fingerprint, count, model: settings.default_model, scope });
+    });
     const providerResult = await createImageGeneration({
       settings,
       prompt,
@@ -473,6 +532,7 @@ export async function POST(request: NextRequest) {
       referenceImages: referenceInputs,
       quality: cleanString(input.quality || body.quality),
     });
+    synchronousStatus = providerResult.images.length === count ? 'succeeded' : 'accepted_unknown';
     const generatedAssets: Array<{
       assetId: string;
       referenceImageId: string;
@@ -547,6 +607,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      synchronous_request_id: synchronousAdmission.requestId,
       action,
       requested_count: count,
       delivered_count: generatedAssets.length,
@@ -573,20 +634,35 @@ export async function POST(request: NextRequest) {
       workspace_asset_id: generatedAssets[0]?.workspaceAssetId || null,
     });
   } catch (error) {
+    if (error instanceof SynchronousImageAdmissionError) return NextResponse.json({ error: 'image_generation_request_already_recorded', message: error.message,
+      ...(error.requestId ? { synchronous_request_id: error.requestId } : {}) }, { status: error.status });
+    if (error instanceof ImageGenerationChannelError) return NextResponse.json({ error: error.code, message: error.message, submitted: false }, { status: error.status });
+    if (error instanceof QueueMaintenanceError || error instanceof QueueCapacityError) return NextResponse.json({ error: error.code, message: error.message }, { status: error.status });
     if (error instanceof CanvasPromptReferenceError) return NextResponse.json({ error: error.code, message: error.message }, { status: 400 });
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
+    if (error instanceof StudioError) return NextResponse.json({ error: error.message }, { status: error.status });
     if (error instanceof ImageGenerationApiError) {
-      return NextResponse.json({ error: error.code, message: error.message }, { status: error.status });
+      return NextResponse.json({ error: error.code, message: error.message,
+        ...(synchronousAdmission ? { synchronous_request_id: synchronousAdmission.requestId, acceptance: synchronousStatus,
+          recovery_message: '原请求已留档，请先核对结果与费用；没有自动重发。' } : {}) }, { status: error.status });
     }
     if (error instanceof ReferenceImportError) {
       return NextResponse.json({ error: error.code, message: error.message }, { status: error.status });
     }
-    console.error('[ImageGeneration] Generate failed:', error);
+    console.error('[ImageGeneration] Generate failed; request details omitted');
     return NextResponse.json({
       error: 'image_generation_failed',
-      message: error instanceof Error ? error.message : '图形生成请求失败',
+      message: '图形生成请求未确认，请查询原请求或联系管理员；没有自动重发',
+      ...(synchronousAdmission ? { synchronous_request_id: synchronousAdmission.requestId, acceptance: synchronousStatus,
+        recovery_message: '原请求已留档，请先核对结果与费用；没有自动重发。' } : {}),
     }, { status: 500 });
+  } finally {
+    // The awaited server Promise has settled here, including timeout exceptions.
+    // Unknown acceptance/fees remain auditable, but do not consume execution capacity forever.
+    if (synchronousAdmission) await finishSynchronousImageAdmission(synchronousAdmission, synchronousStatus).catch(() => {
+      console.error('[ImageGeneration] Synchronous admission finalization failed; administrator reconciliation required');
+    });
   }
 }

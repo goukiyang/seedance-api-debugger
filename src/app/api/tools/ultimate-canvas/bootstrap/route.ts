@@ -9,6 +9,7 @@ import {
   isMuskApiReady,
 } from '@/lib/integrations/musk';
 import {
+  getImageGenerationChannelOptions,
   getImageGenerationChannels,
   selectImageGenerationSettings,
   isImageGenerationApiReady,
@@ -394,6 +395,7 @@ export async function GET(request: NextRequest) {
       },
       image: {
         enabled: imageReady,
+        imageChannels: await getImageGenerationChannelOptions(),
         label: imageLabel,
         provider: imageSettings.provider,
         model: imageSettings.default_model,

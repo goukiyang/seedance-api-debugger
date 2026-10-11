@@ -4,7 +4,7 @@ import { createMuskChatCompletion, getMuskApiSettings, isMuskApiReady, MuskApiEr
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { StudioError, submitStudioBatch } from '@/lib/image-studio/tasks';
 import { IMAGE_STUDIO_MODELS, normalizeImageStudioQuality } from '@/lib/image-studio/model-catalog';
-import { getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider } from '@/lib/integrations/image-generation';
+import { getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider, captureImageGenerationChannel, resolveImageGenerationChannelSnapshot, validateImageGenerationChannel, isMuskImageGenerationChannel } from '@/lib/integrations/image-generation';
 import { normalizeImageResolution } from '@/lib/image-generation/resolution';
 import { catalog, identityFields } from './catalog';
 import { adaptAvatarPrompt, createAvatarCandidates, emptyConstraints, parseAvatarRules } from './engine';
@@ -133,11 +133,20 @@ export async function prepareAvatarPlan(owner: string, body: Record<string, unkn
   referenceIds.push(...(rules.referenceIds || []).filter(id => !referenceIds.includes(id)));
   await validateAvatarReferences(owner, referenceIds);
   candidates=candidates.map(c=>adaptAvatarPrompt(c,model));
-  const unitCredits = settings.prices[model as keyof typeof settings.prices];
-  const api = await getImageGenerationSettingsForModel(model);
+  let unitCredits = settings.prices[model as keyof typeof settings.prices];
+  let channelActual = false;
+  const channelId = typeof body.channelId === 'string' ? body.channelId : 'original';
+  const imageChannel = channelId !== 'original' ? await captureImageGenerationChannel(model, channelId) : undefined;
+  const api = imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true) : await getImageGenerationSettingsForModel(model);
+  if (imageChannel) {
+    const capability = validateImageGenerationChannel(api, { model, quality, resolution, ratio: isAvatarSheet(rules) ? '1:1' : rules.people > 1 ? '3:2' : '1:1', referenceCount: referenceIds.length });
+    if (!capability.ok) throw new StudioError(capability.error);
+    unitCredits = capability.capability.fixedPoints;
+    channelActual = capability.capability.billingMode === 'actual';
+  }
   if(referenceIds.length&&!api.supports_image_to_image)throw new StudioError('当前模型通道不支持参考图，请更换模型或移除可选参考；同人基准不能自动移除');
-  const imageReady=unitCredits!==null&&Number.isInteger(unitCredits)&&unitCredits>=0&&isStudioImageGenerationProvider(api.provider)&&isImageGenerationApiReady(api)&&(referenceIds.length?api.supports_image_to_image:api.supports_text_to_image);
-  const plan: AvatarPlan = withAvatarLayout({ id: randomUUID(), candidates, model, quality, resolution, aspectRatio: rules.people > 1 ? '3:2' : '1:1', settingsRevision: settings.revision, unitCredits, referenceIds, createdAt: new Date().toISOString(), imageReady, imageSeedSupport:'unsupported',warnings:candidates.flatMap(c=>c.members.flatMap(d=>d.warnings||[])), ...(interpretation ? { descriptionInterpretation: interpretation } : {}) }, avatarLayout(rules));
+  const imageReady=(channelActual||unitCredits!==null&&Number.isInteger(unitCredits)&&unitCredits>=0)&&isStudioImageGenerationProvider(api.provider)&&isImageGenerationApiReady(api)&&(referenceIds.length?api.supports_image_to_image:api.supports_text_to_image);
+  const plan: AvatarPlan = withAvatarLayout({ id: randomUUID(), candidates, model, channelId, imageChannel, quality, resolution, aspectRatio: rules.people > 1 ? '3:2' : '1:1', settingsRevision: settings.revision, unitCredits, referenceIds, createdAt: new Date().toISOString(), imageReady, imageSeedSupport:'unsupported',warnings:candidates.flatMap(c=>c.members.flatMap(d=>d.warnings||[])), ...(interpretation ? { descriptionInterpretation: interpretation } : {}) }, avatarLayout(rules));
   if(isAvatarSheet(plan))plan.id=`sheet-${plan.id}`;
   await prisma.$transaction(async tx => {
     if (originalRaw && interpretation?.mode === 'original') {
@@ -164,11 +173,18 @@ export async function submitAvatarPlan(owner: string, id: string, expectedLayout
   const settings = await getImageStudioSettings();
   const alreadyQueued = await prisma.imageStudioTask.findFirst({ where: { owner_id: owner, batch_id: createHash('sha256').update(`${owner}:${plan.id}`).digest('hex') } });
   if (!alreadyQueued && plan.candidates.some(candidate => candidate.compilerVersion !== AVATAR_COMPILER_VERSION)) throw new StudioError('人物草稿需更新报价以保留完整原描述；不用重填描述或重新分析', 409);
-  if (!alreadyQueued && (plan.unitCredits===null||settings.revision !== plan.settingsRevision || settings.prices[plan.model as keyof typeof settings.prices] !== plan.unitCredits)) throw new StudioError('报价已变化，请更新报价后确认费用；人物草稿不需要重新随机', 409);
-  const api = await getImageGenerationSettingsForModel(plan.model);
+  if (!alreadyQueued && (settings.revision !== plan.settingsRevision || (!plan.imageChannel && (plan.unitCredits===null || settings.prices[plan.model as keyof typeof settings.prices] !== plan.unitCredits)))) throw new StudioError('报价已变化，请更新报价后确认费用；人物草稿不需要重新随机', 409);
+  if ((draft?.channelId || 'original') !== (plan.channelId || 'original')) throw new StudioError('图片供应商已变化，请重新报价；人物草稿保留', 409);
+  const api = plan.imageChannel ? await resolveImageGenerationChannelSnapshot(plan.imageChannel, undefined, !alreadyQueued) : await getImageGenerationSettingsForModel(plan.model);
+  if (!alreadyQueued && plan.imageChannel) {
+    const validation = validateImageGenerationChannel(api, { model: plan.model, quality: plan.quality, resolution: plan.resolution, ratio: plan.aspectRatio, referenceCount: plan.referenceIds.length });
+    if (!validation.ok) throw new StudioError(validation.error, 409);
+    if (validation.capability.billingMode === 'fixed' && validation.capability.fixedPoints !== plan.unitCredits) throw new StudioError('图片报价已变化，请重新报价；人物草稿保留', 409);
+    if (validation.capability.billingMode === 'actual' && !draft?.billingQuoteId) throw new StudioError('请先确认此通道的实际费用报价，未派发生成', 409);
+  }
   if (!alreadyQueued && (!isStudioImageGenerationProvider(api.provider) || !isImageGenerationApiReady(api))) throw new StudioError('当前模型生成通道尚未就绪', 503);
   if (!alreadyQueued) await validateAvatarReferences(owner, plan.referenceIds);
-  return submitStudioBatch(owner, { requestId: plan.id, prompt: isAvatarSheet({layout}) ? plan.sheetPrompt : plan.candidates[0].prompt, count, revision: plan.settingsRevision, referenceIds: plan.referenceIds, model: plan.model, quality: plan.quality, resolution: plan.resolution, aspectRatio: plan.aspectRatio, billingQuoteId: draft?.billingQuoteId, maxEstimatedCost: draft?.maxEstimatedCost }, { candidates: plan.candidates, layout, onQueued: async (tx, batchId) => {
+  return submitStudioBatch(owner, { requestId: plan.id, prompt: isAvatarSheet({layout}) ? plan.sheetPrompt : plan.candidates[0].prompt, count, revision: plan.settingsRevision, referenceIds: plan.referenceIds, model: plan.model, channelId: plan.channelId, imageChannel: plan.imageChannel, quality: plan.quality, resolution: plan.resolution, aspectRatio: plan.aspectRatio, billingQuoteId: draft?.billingQuoteId, maxEstimatedCost: draft?.maxEstimatedCost }, { candidates: plan.candidates, layout, onQueued: async (tx, batchId) => {
     for (let i = 0; i < count; i++) {
       const candidate = plan.candidates[i], taskId = `${batchId}-${i}`;
       const record: AvatarRecord = { id: randomUUID(), kind: 'result', layout, name: avatarResultTitle(candidate, layout, i), revision: 1, deletedAt: null, createdAt: plan.createdAt, updatedAt: plan.createdAt, ...(isAvatarSheet({layout}) ? { sheetCandidates: plan.candidates } : { candidate }), rules: candidate.rules, planId: plan.id, taskId, qualityStatus: 'unreviewed', ...(plan.descriptionInterpretation ? { descriptionInterpretation: plan.descriptionInterpretation } : {}) };
@@ -184,7 +200,7 @@ export async function quoteAvatarPlan(owner: string, id: string) {
   return prepareImageBillingQuote(owner, { requestId: plan.id,
     prompt: isAvatarSheet(plan) ? plan.sheetPrompt : plan.candidates[0].prompt,
     count: avatarOutputCount(plan), revision: plan.settingsRevision, referenceIds: plan.referenceIds,
-    model: plan.model, quality: plan.quality, resolution: plan.resolution, aspectRatio: plan.aspectRatio },
+    model: plan.model, channelId: plan.channelId, imageChannel: plan.imageChannel, quality: plan.quality, resolution: plan.resolution, aspectRatio: plan.aspectRatio },
     { candidates: plan.candidates, layout: avatarLayout(plan) });
 }
 
@@ -196,13 +212,24 @@ export async function estimateAvatarDraft(owner: string, body: Record<string, un
   if (!IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number])) throw new StudioError('图片模型无效');
   const referenceIds = rules.referenceIds || [];
   await validateAvatarReferences(owner, referenceIds);
-  const settings = await getImageStudioSettings(), api = await getImageGenerationSettingsForModel(model);
+  const settings = await getImageStudioSettings();
+  const channelId = typeof body.channelId === 'string' ? body.channelId : 'original';
+  const imageChannel = channelId === 'original' ? undefined : await captureImageGenerationChannel(model, channelId);
+  const api = imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true) : await getImageGenerationSettingsForModel(model);
   const count = isAvatarSheet(rules) ? 1 : rules.candidates;
-  const fixed = settings.prices[model as keyof typeof settings.prices];
-  if (fixed === null || !Number.isInteger(fixed) || fixed < 0) throw new StudioError('图片合同尚未就绪', 409);
-  const state = api.provider === 'musk' && api.api_key ? await imageBillingReady(imageBillingScope(api), model) : { ready: false };
+  let fixed = settings.prices[model as keyof typeof settings.prices];
+  let requestedMode: 'fixed' | 'actual' | undefined;
+  if (imageChannel) {
+    const validation = validateImageGenerationChannel(api, { model, quality: typeof body.quality === 'string' ? body.quality : undefined, resolution: typeof body.resolution === 'string' ? body.resolution : undefined, ratio: isAvatarSheet(rules) ? '1:1' : rules.people > 1 ? '3:2' : '1:1', referenceCount: referenceIds.length });
+    if (!validation.ok) throw new StudioError(validation.error, 409);
+    fixed = validation.capability.fixedPoints;
+    requestedMode = validation.capability.billingMode ?? undefined;
+  }
+  const state = isMuskImageGenerationChannel(api) && api.api_key ? await imageBillingReady(imageBillingScope(api), model) : { ready: false };
+  if (requestedMode === 'actual' && !state.ready) throw new StudioError('此供应商实际费用尚未就绪，未改用固定点数', 409);
+  if (requestedMode !== 'actual' && (fixed === null || !Number.isInteger(fixed) || fixed < 0)) throw new StudioError('图片合同尚未就绪', 409);
   let unitCredits = fixed, billingMode: 'actual' | 'fixed' = 'fixed';
-  if (state.ready) {
+  if (state.ready && requestedMode !== 'fixed') {
     const references = await prisma.asset.findMany({ where: { id: { in: referenceIds }, owner_id: owner, type: 'image', status: 'active' },
       select: { width: true, height: true } });
     const estimate = supplierHistoryEstimate(await readImageSupplierBills(api, imageBillingScope(api)), model,
@@ -210,6 +237,7 @@ export async function estimateAvatarDraft(owner: string, body: Record<string, un
     if (!estimate) throw new StudioError('当前模型价格依据不足或已过期', 409);
     unitCredits = estimate.credits; billingMode = 'actual';
   }
+  if (unitCredits === null) throw new StudioError('图片费用依据不足，未派发生成', 409);
   return { estimateOnly: true, billingMode, estimatedCredits: unitCredits * count, unitCredits,
     expiresAt: new Date(Date.now() + 60000).toISOString(), calibrated: false };
 }

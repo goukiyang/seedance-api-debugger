@@ -37,9 +37,62 @@ async function writePrivate(id: string, name: string, bytes: string | Buffer, bi
 }
 async function save(record: StudioDelivery) { await writePrivate(record.taskId, 'source.json', JSON.stringify(record)); }
 
-type StudioReceipt = { taskId: string; ownerId: string; localRequestId: string; batchId: string; fingerprint: string;
+export type StudioReceipt = { taskId: string; ownerId: string; localRequestId: string; batchId: string; fingerprint: string;
   submittedAt: number; returnedAt?: number; status?: number; upstreamRequestId?: string; headerName?: string;
-  gatewayRequestId?: string; billingScope?: string | null };
+  gatewayRequestId?: string; billingScope?: string | null; channelId?: string; configRevision?: string;
+  dispatchState?: 'prepared' | 'held' | 'attempted' };
+type AsyncIdentity = Identity & { snapshot_json: string | null };
+export type StudioAsyncReceipt = { schema: 'image.async-receipt.v1'; taskId: string; ownerId: string;
+  channelId: string; configRevision: string; providerTaskId: string; pollAfterMs: number; acceptedAt: number;
+  expiresAt?: string; state: 'accepted' | 'success' | 'failed' };
+function asyncIdentity(task: AsyncIdentity) {
+  let snapshot;
+  try { snapshot = JSON.parse(task.snapshot_json || '{}').imageChannel; } catch {}
+  if (!snapshot || typeof snapshot.channelId !== 'string' || typeof snapshot.configRevision !== 'string') throw new Error('Async channel identity unavailable');
+  return { channelId: snapshot.channelId, configRevision: snapshot.configRevision };
+}
+export async function readStudioRequestReceipt(task: Identity): Promise<StudioReceipt | null> {
+  for (const billing of [false, true]) {
+    try { const value = JSON.parse(await fs.readFile(path.join(directory(task.id, billing), 'request.json'), 'utf8')) as StudioReceipt;
+      if (value.taskId !== task.id || value.ownerId !== task.owner_id) throw new Error('Request receipt ownership mismatch');
+      return value;
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  }
+  return null;
+}
+export async function readStudioAsyncReceipt(task: AsyncIdentity): Promise<StudioAsyncReceipt | null> {
+  const expected = asyncIdentity(task);
+  for (const billing of [false, true]) {
+    try { const value = JSON.parse(await fs.readFile(path.join(directory(task.id, billing), 'async.json'), 'utf8')) as StudioAsyncReceipt;
+      if (value.schema !== 'image.async-receipt.v1' || value.taskId !== task.id || value.ownerId !== task.owner_id
+        || value.channelId !== expected.channelId || value.configRevision !== expected.configRevision
+        || !/^[a-zA-Z0-9_-]{1,180}$/.test(value.providerTaskId) || !Number.isFinite(value.acceptedAt)
+        || !Number.isSafeInteger(value.pollAfterMs) || value.pollAfterMs < 2000 || value.pollAfterMs > 30000
+        || (value.expiresAt !== undefined && (typeof value.expiresAt !== 'string' || !Number.isFinite(Date.parse(value.expiresAt))))
+        || !['accepted', 'success', 'failed'].includes(value.state)) throw new Error('Async receipt identity mismatch');
+      return value;
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  }
+  return null;
+}
+export async function createStudioAsyncReceipt(task: AsyncIdentity, accepted: { taskId: string; pollAfterMs?: number; expiresAt?: string }) {
+  const identity = asyncIdentity(task);
+  if (!/^[a-zA-Z0-9_-]{1,180}$/.test(accepted.taskId)) throw new Error('Invalid upstream task identity');
+  const previous = await readStudioAsyncReceipt(task);
+  if (previous) { if (previous.providerTaskId !== accepted.taskId) throw new Error('Async task identity changed'); return previous; }
+  const receipt: StudioAsyncReceipt = { schema: 'image.async-receipt.v1', taskId: task.id, ownerId: task.owner_id, ...identity,
+    providerTaskId: accepted.taskId, pollAfterMs: Math.min(30000, Math.max(2000, Math.floor(accepted.pollAfterMs || 2000))),
+    ...(typeof accepted.expiresAt === 'string' && Number.isFinite(Date.parse(accepted.expiresAt)) ? { expiresAt: accepted.expiresAt } : {}),
+    acceptedAt: Date.now(), state: 'accepted' };
+  await writePrivate(task.id, 'async.json', JSON.stringify(receipt));
+  await writePrivate(task.id, 'async.json', JSON.stringify(receipt), true);
+  return receipt;
+}
+export async function updateStudioAsyncReceipt(receipt: StudioAsyncReceipt, changes: { state?: StudioAsyncReceipt['state']; pollAfterMs?: number }) {
+  Object.assign(receipt, changes, { pollAfterMs: Math.min(30000, Math.max(2000, Math.floor(changes.pollAfterMs || receipt.pollAfterMs))) });
+  await writePrivate(receipt.taskId, 'async.json', JSON.stringify(receipt));
+  await writePrivate(receipt.taskId, 'async.json', JSON.stringify(receipt), true);
+}
 export async function beginStudioRequest(task: Identity & { batch_id: string; fingerprint: string; snapshot_json: string | null; billing_scope?: string | null }) {
   // Exclusive durable marker: never resend an upstream POST after a crash or ambiguous response.
   const dir = directory(task.id);
@@ -49,9 +102,30 @@ export async function beginStudioRequest(task: Identity & { batch_id: string; fi
   try { snapshot = JSON.parse(task.snapshot_json || '{}'); } catch {}
   const receipt: StudioReceipt = { taskId: task.id, ownerId: task.owner_id, localRequestId: typeof snapshot.requestId === 'string' ? snapshot.requestId : task.batch_id,
     batchId: task.batch_id, fingerprint: task.fingerprint, submittedAt: Date.now(), billingScope: task.billing_scope };
+  if (snapshot.imageChannel && typeof snapshot.imageChannel === 'object') {
+    const channel = snapshot.imageChannel as { channelId?: unknown; configRevision?: unknown };
+    if (typeof channel.channelId !== 'string' || typeof channel.configRevision !== 'string') throw new Error('Invalid frozen request channel');
+    receipt.channelId = channel.channelId; receipt.configRevision = channel.configRevision;
+    receipt.dispatchState = 'prepared';
+  }
+  const previous = receipt.channelId ? await readStudioRequestReceipt(task) : null;
+  if (previous) {
+    if (previous.dispatchState !== 'held' || previous.channelId !== receipt.channelId
+      || previous.configRevision !== receipt.configRevision || previous.fingerprint !== task.fingerprint
+      || previous.returnedAt !== undefined || previous.status !== undefined) throw new Error('Request already attempted');
+    await writePrivate(task.id, 'request.json', JSON.stringify({ ...previous, dispatchState: 'prepared' }));
+    return;
+  }
   const handle = await fs.open(path.join(dir, 'request.json'), 'wx', 0o600);
   try { await handle.writeFile(JSON.stringify(receipt)); await handle.sync(); } finally { await handle.close(); }
   const folder = await fs.open(dir, 'r'); try { await folder.sync(); } finally { await folder.close(); }
+}
+/** A held intent is provably before the transport call; it is not an accepted receipt. */
+export async function setStudioUnsentRequestState(task: Identity, state: 'held' | 'attempted') {
+  const receipt = await readStudioRequestReceipt(task);
+  if (!receipt?.channelId || receipt.dispatchState !== 'prepared' || receipt.status !== undefined
+    || receipt.returnedAt !== undefined) throw new Error('Unsent request identity unavailable');
+  await writePrivate(task.id, 'request.json', JSON.stringify({ ...receipt, dispatchState: state }));
 }
 export async function recordStudioResponse(task: Identity, response: Response) {
   const file = path.join(directory(task.id), 'request.json');
@@ -72,7 +146,7 @@ export async function recordStudioResponse(task: Identity, response: Response) {
     const changed = await prisma.imageStudioTask.updateMany({ where: { id: task.id, owner_id: task.owner_id,
       billing_scope: receipt.billingScope, OR: [{ gateway_request_id: null }, { gateway_request_id: receipt.gatewayRequestId || null }] },
       data: { gateway_request_id: receipt.gatewayRequestId || null,
-        billing_status: receipt.gatewayRequestId ? 'pending' : 'unmatched', billing_next_check_at: new Date() } });
+        billing_status: `${receipt.channelId ? 'channel_' : ''}${receipt.gatewayRequestId ? 'pending' : 'unmatched'}`, billing_next_check_at: new Date() } });
     if (!changed.count) throw new Error('Billing receipt identity conflict');
   }
 }
@@ -103,16 +177,19 @@ export async function updateStudioDelivery(record: StudioDelivery, changes: Part
 export async function studioDeliveryStatus(task: Identity & { status: string; usage_json?: string | null }) {
   const record = await readStudioDelivery(task).catch(() => null);
   let receipt: StudioReceipt | null = null;
-  try { receipt = JSON.parse(await fs.readFile(path.join(directory(task.id), 'request.json'), 'utf8')); } catch {}
+  try { receipt = await readStudioRequestReceipt(task); } catch {}
   let completed: { requestId?: string; upstreamRequestId?: string; validation?: StudioDelivery['validation']; responseStatus?: number; returnedAt?: number } = {};
   if (task.status === 'succeeded') {
     try { completed = JSON.parse(task.usage_json || '{}').studioDelivery || {}; } catch {}
   }
-  const running = task.status === 'running';
-  return { phase: task.status === 'queued' ? 'queued' : task.status === 'succeeded' ? 'ready'
+  const running = task.status === 'running' || task.status === 'channel_running';
+  let asyncReceipt: StudioAsyncReceipt | null = null;
+  if ('snapshot_json' in task) asyncReceipt = await readStudioAsyncReceipt(task as AsyncIdentity).catch(() => null);
+  return { phase: task.status === 'queued' || task.status === 'channel_queued' ? 'queued' : task.status === 'succeeded' ? 'ready'
     : running ? record?.phase || 'provider' : record ? 'stopped' : task.status === 'uncertain' ? 'unknown' : 'failed',
+    accepted: Boolean(asyncReceipt),
     receivedBytes: record?.receivedBytes, expectedBytes: record?.expectedBytes,
-    recoveryAvailable: running && Boolean(record && studioDeliveryCanRetry(record)),
+    recoveryAvailable: running && Boolean(asyncReceipt && asyncReceipt.state !== 'failed' || record && studioDeliveryCanRetry(record)),
     checkpointRetained: Boolean(record), validation: record?.validation || completed.validation,
     // No signed URL, usage, private file path, prompt or Base64 leaves this boundary.
     responseStatus: receipt?.status ?? completed.responseStatus, returnedAt: receipt?.returnedAt ?? completed.returnedAt,
@@ -147,6 +224,18 @@ export async function discardStudioDelivery(task: Identity) {
   await fs.rm(directory(task.id), { recursive: true, force: true });
 }
 
+// Only a verified immutable async identity may retire a local download
+// checkpoint before querying that same upstream task. Receipts are never removed.
+export async function resetStudioAsyncDelivery(task: AsyncIdentity, providerTaskId: string) {
+  const receipt = await readStudioAsyncReceipt(task);
+  if (!receipt || receipt.providerTaskId !== providerTaskId || receipt.state === 'failed') throw new Error('Async checkpoint reset identity mismatch');
+  await preserveStudioBillingReceipt(task);
+  await writePrivate(task.id, 'async.json', JSON.stringify(receipt), true);
+  for (const name of ['source.json', 'image.part']) {
+    await fs.unlink(path.join(directory(task.id), name)).catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; });
+  }
+}
+
 export async function preserveStudioBillingReceipt(task: Identity) {
   let receipt: StudioReceipt;
   try { receipt = JSON.parse(await fs.readFile(path.join(directory(task.id), 'request.json'), 'utf8')); }
@@ -159,7 +248,7 @@ export async function preserveStudioBillingReceipt(task: Identity) {
 export async function downloadStudioDelivery(record: StudioDelivery, signal: AbortSignal,
   openStream: typeof openStudioImageStream = openStudioImageStream, attemptMs = STUDIO_DOWNLOAD_WINDOW_MS,
   assertLease: () => Promise<void> = async () => {}): Promise<Buffer> {
-  if (record.expiresAt <= Date.now()) throw new StudioImageDownloadError('download_source_expired');
+  if (!record.complete && record.expiresAt <= Date.now()) throw new StudioImageDownloadError('download_source_expired');
   const file = path.join(directory(record.taskId), 'image.part');
   if (record.kind === 'base64' && !record.complete) {
     const bytes = await fs.readFile(file).catch(() => Buffer.alloc(0));
@@ -302,7 +391,7 @@ export async function cleanupStudioDeliveries(now = Date.now()) {
     const stat = await fs.stat(dir);
     // Keep expired records long enough for a worker to settle; remove abandoned files within one day.
     if (now - stat.mtimeMs > STUDIO_CHECKPOINT_RETENTION_MS) {
-      const active = await prisma.imageStudioTask.findFirst({ where: { id: entry.name, status: { in: ['queued', 'running'] } }, select: { id: true } });
+      const active = await prisma.imageStudioTask.findFirst({ where: { id: entry.name, status: { in: ['queued', 'running', 'channel_queued', 'channel_running'] } }, select: { id: true } });
       if (!active) {
         const task = await prisma.imageStudioTask.findUnique({ where: { id: entry.name }, select: { id: true, owner_id: true } });
         if (task) await preserveStudioBillingReceipt(task);
