@@ -71,16 +71,17 @@ export async function getImageGenerationDefaultRoutes(
 
 /** Resolves a new request's explicit channel or model default; null means the legacy Gemini/Banana or shared route. */
 export async function resolveImageGenerationRequestChannel(
-  model: ImageStudioModel,
+  model: string,
   requestedChannelId?: string | null,
   client: DefaultRoutesClient = prisma,
 ): Promise<ImageGenerationChannelId | null> {
-  if (!IMAGE_STUDIO_MODELS.includes(model)) {
+  const validatedModel = IMAGE_STUDIO_MODELS.find(allowedModel => allowedModel === model);
+  if (!validatedModel) {
     throw new ImageGenerationDefaultRoutesError('所选图片型号不在允许列表中');
   }
   if (requestedChannelId !== undefined && requestedChannelId !== null && requestedChannelId !== 'original') {
     return requestedChannelId;
   }
   const defaults = await getImageGenerationDefaultRoutes(client);
-  return defaults.models[model] || null;
+  return defaults.models[validatedModel] || null;
 }
