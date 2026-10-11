@@ -1,14 +1,39 @@
 import type { Prisma } from '@prisma/client';
+import { createHash, randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
-import { isGeminiImageModel, isValidImageDimension } from '@/lib/image-generation/resolution';
-import { IMAGE_STUDIO_MODELS, normalizeImageStudioQuality } from '@/lib/image-studio/model-catalog';
+import { isGeminiImageModel, isValidImageDimension, supportsStudioFourToOne } from '@/lib/image-generation/resolution';
+import {
+  IMAGE_STUDIO_MODELS,
+  IMAGE_STUDIO_MODEL_QUALITY_OPTIONS,
+  IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS,
+  normalizeImageStudioQuality,
+  type ImageStudioModel,
+} from '@/lib/image-studio/model-catalog';
+import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
+import { STUDIO_RATIOS } from '@/lib/image-studio/ratios';
+import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { requestStudioImages, StudioProviderError, type StudioImageInput } from '@/lib/image-studio/provider';
 import { readStudioImage, normalizeStudioImage } from '@/lib/image-studio/media';
+import {
+  type ImageGenerationChannelDto,
+  type ImageGenerationChannelId,
+  type ImageGenerationChannelProtocol,
+  type ImageGenerationChannelsDto,
+  type ImageGenerationChannelSnapshot,
+  type ImageGenerationManagedChannelDto,
+  type ImageGenerationResolvedProtocol,
+} from '@/lib/integrations/image-generation-channel';
+export type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
 
 export const IMAGE_GENERATION_API_SETTING_KEY = 'image_generation_api_v1';
 export const BANANA_IMAGE_API_SETTING_KEY = 'banana_image_api_v1';
+export const IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY = 'image_generation_channels_v1';
+const IMAGE_GENERATION_CHANNEL_VERSION_PREFIX = 'image_generation_channel_version_v1:';
+export const FLUXPORT_IMAGE_GENERATION_BASE_URL = 'https://api.uselg.top';
 
 export const IMAGE_GENERATION_PROVIDERS = ['musk', 'ai_media_vip', 'seedream'] as const;
+export type LegacyImageGenerationProvider = typeof IMAGE_GENERATION_PROVIDERS[number];
+export type ImageGenerationProvider = LegacyImageGenerationProvider | 'fluxport' | 'managed';
 export const DEFAULT_MUSK_IMAGE_MODEL = 'gemini-3.1-flash-image-preview';
 export const DEFAULT_MUSK_IMAGE_BASE_URL = 'https://api.muskapis.com/';
 export const DEFAULT_AI_MEDIA_IMAGE_BASE_URL = 'https://api.ai-media.vip/v1/';
@@ -22,7 +47,6 @@ const IMAGE_GENERATION_SIZE_OPTIONS = ['1K', '2K'] as const;
 const IMAGE_GENERATION_OUTPUT_FORMATS = ['png', 'jpeg'] as const;
 const IMAGE_GENERATION_RESPONSE_FORMATS = ['url', 'b64_json'] as const;
 
-export type ImageGenerationProvider = typeof IMAGE_GENERATION_PROVIDERS[number];
 export type ImageGenerationSize = typeof IMAGE_GENERATION_SIZE_OPTIONS[number];
 export type ImageGenerationOutputFormat = typeof IMAGE_GENERATION_OUTPUT_FORMATS[number];
 export type ImageGenerationResponseFormat = typeof IMAGE_GENERATION_RESPONSE_FORMATS[number];
@@ -43,6 +67,33 @@ export type ImageGenerationApiSettings = {
   supports_text_to_image: boolean;
   supports_image_to_image: boolean;
   supports_async_task: boolean;
+};
+
+export type ImageGenerationModelCapability = {
+  enabled: boolean;
+  protocol: ImageGenerationChannelProtocol;
+  qualities: string[] | null;
+  resolutions: string[] | null;
+  ratios: string[] | null;
+  maxReferences: number | null;
+  billingMode: 'fixed' | 'actual' | null;
+  fixedPoints: number | null;
+  billingSource: string | null;
+  /** Computed from this model's frozen API Key scope, never accepted from the client. */
+  actualQuoteRequired?: boolean;
+};
+
+export type ImageGenerationResolvedSettings = ImageGenerationApiSettings & {
+  channelId: ImageGenerationChannelId;
+  configRevision: string;
+  supplierName: string;
+  supplierKind: 'fluxport' | 'musk' | 'other' | 'legacy';
+  protocol: ImageGenerationResolvedProtocol;
+  modelCapabilities: Partial<Record<ImageStudioModel, ImageGenerationModelCapability>>;
+  /** True when this frozen version belongs to an admin-managed registry entry. */
+  managedChannel: boolean;
+  label?: string;
+  deleted?: boolean;
 };
 
 export type ImageGenerationApiSettingsInput = Partial<ImageGenerationApiSettings> & {
@@ -77,12 +128,12 @@ function clampInteger(value: unknown, fallback: number, min: number, max: number
   return Math.min(max, Math.max(min, Math.floor(next)));
 }
 
-function normalizeProvider(value: unknown): ImageGenerationProvider {
+function normalizeProvider(value: unknown): LegacyImageGenerationProvider {
   const raw = cleanString(value, DEFAULT_IMAGE_GENERATION_API_SETTINGS.provider);
-  if (LEGACY_IMAGE_GENERATION_PROVIDERS.has(raw)) return DEFAULT_IMAGE_GENERATION_API_SETTINGS.provider;
-  return IMAGE_GENERATION_PROVIDERS.includes(raw as ImageGenerationProvider)
-    ? raw as ImageGenerationProvider
-    : DEFAULT_IMAGE_GENERATION_API_SETTINGS.provider;
+  if (LEGACY_IMAGE_GENERATION_PROVIDERS.has(raw)) return 'musk';
+  return IMAGE_GENERATION_PROVIDERS.includes(raw as LegacyImageGenerationProvider)
+    ? raw as LegacyImageGenerationProvider
+    : 'musk';
 }
 
 function providerDefaults(provider: ImageGenerationProvider) {
@@ -129,7 +180,7 @@ function providerDefaults(provider: ImageGenerationProvider) {
 }
 
 export function isStudioImageGenerationProvider(provider: ImageGenerationProvider) {
-  return provider === 'musk' || provider === 'ai_media_vip';
+  return provider === 'musk' || provider === 'ai_media_vip' || provider === 'fluxport' || provider === 'managed';
 }
 
 function normalizeDefaultModel(value: unknown, provider: ImageGenerationProvider) {
@@ -252,25 +303,63 @@ export async function getImageGenerationApiSettings(
   }
 }
 
-export async function getImageGenerationChannels(client: Prisma.TransactionClient | typeof prisma = prisma) {
-  const [shared, banana] = await Promise.all([
+export type ImageGenerationChannels = {
+  shared: ImageGenerationApiSettings;
+  banana: ImageGenerationApiSettings;
+  legacyPrices: Record<ImageStudioModel, number | null>;
+  fluxport: ImageGenerationResolvedSettings;
+  managed: ImageGenerationResolvedSettings[];
+  registry: ManagedChannelRegistry;
+};
+
+export async function getImageGenerationChannels(client: Prisma.TransactionClient | typeof prisma = prisma): Promise<ImageGenerationChannels> {
+  const [shared, banana, registry, studioSettings] = await Promise.all([
     getImageGenerationApiSettings(client),
     getImageGenerationApiSettings(client, 'banana'),
+    readManagedChannelRegistry(client),
+    getImageStudioSettings(client).catch(() => null),
   ]);
-  return { shared, banana };
+  const records = registry.channels;
+  const versions = await Promise.all(records.map(async record => hydrateActualBilling(
+    await resolveCurrentManagedSettings(record, client), client,
+  )));
+  const fluxport = versions.find(item => item.channelId === 'fluxport') || emptyFluxPortSettings();
+  return {
+    shared,
+    banana,
+    legacyPrices: studioSettings?.prices || Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [model, null])) as Record<ImageStudioModel, number | null>,
+    fluxport,
+    managed: versions.filter(item => item.channelId !== 'fluxport'),
+    registry,
+  };
 }
 
-// A missing Banana key must never silently use the shared image/LLM credential.
+// Missing/original preserves the historic Gemini -> Banana, other -> shared route.
 export function selectImageGenerationSettings(
-  channels: Awaited<ReturnType<typeof getImageGenerationChannels>>,
+  channels: ImageGenerationChannels,
   model: string,
-): ImageGenerationApiSettings {
-  return { ...(isGeminiImageModel(model) ? channels.banana : channels.shared), default_model: model };
+  channelId: ImageGenerationChannelId = 'original',
+): ImageGenerationResolvedSettings {
+  if (channelId === 'original') {
+    const legacy = isGeminiImageModel(model) ? channels.banana : channels.shared;
+    return resolveLegacySettings(legacy, model, 'original', channels.legacyPrices);
+  }
+  if (channelId === 'shared') return resolveLegacySettings(channels.shared, model, 'shared', channels.legacyPrices);
+  if (channelId === 'banana') return resolveLegacySettings(channels.banana, model, 'banana', channels.legacyPrices);
+  if (channelId === 'fluxport') return { ...channels.fluxport, default_model: model };
+  const selected = channels.managed.find(item => item.channelId === channelId);
+  if (!selected) throw new ImageGenerationChannelError('所选图片供应商配置不存在或已归档', 404, 'image_channel_not_found');
+  return { ...selected, default_model: model };
 }
 
-export async function getImageGenerationSettingsForModel(model: string, client: Prisma.TransactionClient | typeof prisma = prisma) {
-  const settings = await getImageGenerationApiSettings(client, isGeminiImageModel(model) ? 'banana' : 'default');
-  return { ...settings, default_model: model };
+// Keep the historical `(model, client)` call shape; `channelId` is an optional third argument.
+export async function getImageGenerationSettingsForModel(
+  model: string,
+  client: Prisma.TransactionClient | typeof prisma = prisma,
+  channelId: ImageGenerationChannelId = 'original',
+) {
+  const channels = await getImageGenerationChannels(client);
+  return selectImageGenerationSettings(channels, model, channelId);
 }
 
 export function buildImageGenerationApiSettingsPatch(
@@ -332,6 +421,1150 @@ export async function saveImageGenerationApiSettings(
   });
 
   return settings;
+}
+
+type ManagedChannelRegistryRecord = {
+  id: ImageGenerationChannelId;
+  label: string;
+  supplierName: string;
+  supplierKind: 'fluxport' | 'musk' | 'other';
+  protocol: ImageGenerationResolvedProtocol;
+  baseUrl: string;
+  enabled: boolean;
+  deleted: boolean;
+  configRevision: string | null;
+  modelCapabilities: Partial<Record<ImageStudioModel, ImageGenerationModelCapability>>;
+};
+
+type ManagedChannelRegistry = { version: 1; channels: ManagedChannelRegistryRecord[] };
+
+type PrivateImageGenerationChannelVersion = {
+  version: 1;
+  channelId: ImageGenerationChannelId;
+  configRevision: string;
+  label: string;
+  supplierName: string;
+  supplierKind: 'fluxport' | 'musk' | 'other' | 'legacy';
+  sourceChannelId?: 'shared' | 'banana';
+  sourceFingerprint?: string;
+  /** Billing intent revision captured for alias channels so fixed quotes cannot outlive a mode change. */
+  billingIntentRevision?: number;
+  protocol: ImageGenerationResolvedProtocol;
+  managedChannel: boolean;
+  settings: ImageGenerationApiSettings;
+  modelCapabilities: Partial<Record<ImageStudioModel, ImageGenerationModelCapability>>;
+  deleted?: boolean;
+};
+
+export type ManagedImageGenerationChannelInput = {
+  id?: unknown;
+  expectedRevision?: unknown;
+  label?: unknown;
+  supplierName?: unknown;
+  supplierKind?: unknown;
+  protocol?: unknown;
+  baseUrl?: unknown;
+  enabled?: unknown;
+  deleted?: unknown;
+  apiKey?: unknown;
+  clearApiKey?: unknown;
+  models?: unknown;
+};
+
+export class ImageGenerationChannelError extends Error {
+  constructor(message: string, public readonly status = 400, public readonly code = 'image_channel_invalid') {
+    super(message);
+    this.name = 'ImageGenerationChannelError';
+  }
+}
+
+const GEMINI_CHANNEL_MODELS = new Set<ImageStudioModel>([
+  'gemini-3.1-flash-image-preview',
+  'gemini-3-pro-image-preview',
+]);
+const GPT_IMAGE_CHANNEL_MODELS = new Set<ImageStudioModel>([
+  'gpt-image-2',
+  'gpt-image-2.5-flare',
+  'gpt-image-2.5-sunburst',
+]);
+const FLUXPORT_PROTOCOL_BY_MODEL: Record<ImageStudioModel, ImageGenerationChannelProtocol> = {
+  'gemini-3.1-flash-image-preview': 'gemini_native',
+  'gemini-3-pro-image-preview': 'gemini_native',
+  'gpt-image-2': 'openai_images',
+  'gpt-image-2.5-flare': 'openai_images',
+  'gpt-image-2.5-sunburst': 'openai_images',
+};
+
+function blankCapability(protocol: ImageGenerationChannelProtocol, enabled = false): ImageGenerationModelCapability {
+  return {
+    enabled,
+    protocol,
+    qualities: null,
+    resolutions: null,
+    ratios: null,
+    maxReferences: null,
+    billingMode: null,
+    fixedPoints: null,
+    billingSource: null,
+  };
+}
+
+function emptyFluxPortRecord(): ManagedChannelRegistryRecord {
+  return {
+    id: 'fluxport',
+    label: 'FluxPort',
+    supplierName: 'FluxPort',
+    supplierKind: 'fluxport',
+    protocol: 'mixed',
+    baseUrl: FLUXPORT_IMAGE_GENERATION_BASE_URL,
+    enabled: false,
+    deleted: false,
+    configRevision: null,
+    modelCapabilities: Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [model, blankCapability(FLUXPORT_PROTOCOL_BY_MODEL[model])])) as Partial<Record<ImageStudioModel, ImageGenerationModelCapability>>,
+  };
+}
+
+function isDynamicImageChannelId(value: unknown): value is ImageGenerationChannelId {
+  return typeof value === 'string'
+    && /^image-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function assertImageGenerationChannelId(value: unknown): asserts value is ImageGenerationChannelId {
+  if (value === 'original' || value === 'shared' || value === 'banana' || value === 'fluxport' || isDynamicImageChannelId(value)) return;
+  throw new ImageGenerationChannelError('图片供应商配置编号无效', 400, 'image_channel_invalid_id');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function readPersistedCapability(raw: unknown, model: ImageStudioModel, legacyOpenAiGemini = false): ImageGenerationModelCapability | null {
+  if (!isRecord(raw) || (raw.protocol !== 'gemini_native' && raw.protocol !== 'openai_images')) return null;
+  if (raw.protocol === 'gemini_native' ? !GEMINI_CHANNEL_MODELS.has(model) : !GPT_IMAGE_CHANNEL_MODELS.has(model) && !(legacyOpenAiGemini && GEMINI_CHANNEL_MODELS.has(model))) return null;
+  if (raw.enabled !== undefined && typeof raw.enabled !== 'boolean') return null;
+  const list = (value: unknown, allowed: readonly string[]) => {
+    if (value === null || value === undefined) return null;
+    if (!Array.isArray(value) || !value.every(item => typeof item === 'string' && allowed.includes(item))) return null;
+    return Array.from(new Set(value as string[]));
+  };
+  const qualities = list(raw.qualities, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model]);
+  const resolutions = list(raw.resolutions, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[model]);
+  const ratios = list(raw.ratios, ['auto', ...STUDIO_RATIOS]);
+  if ((raw.qualities !== undefined && raw.qualities !== null && qualities === null)
+    || (raw.resolutions !== undefined && raw.resolutions !== null && resolutions === null)
+    || (raw.ratios !== undefined && raw.ratios !== null && ratios === null)) return null;
+  const maxReferences = raw.maxReferences === null || raw.maxReferences === undefined
+    ? null
+    : Number.isSafeInteger(raw.maxReferences) && Number(raw.maxReferences) >= 0 && Number(raw.maxReferences) <= MAX_REFERENCE_IMAGES
+      ? Number(raw.maxReferences)
+      : null;
+  if (raw.maxReferences !== null && raw.maxReferences !== undefined && maxReferences === null) return null;
+  const billingMode = raw.billingMode === 'fixed' || raw.billingMode === 'actual' ? raw.billingMode : null;
+  if (raw.billingMode !== undefined && raw.billingMode !== null && billingMode === null) return null;
+  const fixedPoints = raw.fixedPoints === null || raw.fixedPoints === undefined
+    ? null
+    : Number.isSafeInteger(raw.fixedPoints) && Number(raw.fixedPoints) >= 0
+      ? Number(raw.fixedPoints)
+      : null;
+  if (raw.fixedPoints !== null && raw.fixedPoints !== undefined && fixedPoints === null) return null;
+  return {
+    enabled: raw.enabled === true,
+    protocol: raw.protocol,
+    qualities,
+    resolutions,
+    ratios,
+    maxReferences,
+    billingMode,
+    fixedPoints,
+    billingSource: typeof raw.billingSource === 'string' ? raw.billingSource.slice(0, 80) : null,
+  };
+}
+
+function parseManagedCapabilities(
+  value: unknown,
+  channelId: ImageGenerationChannelId,
+  protocol: ImageGenerationResolvedProtocol,
+): Partial<Record<ImageStudioModel, ImageGenerationModelCapability>> {
+  const input = isRecord(value) ? value : {};
+  const output: Partial<Record<ImageStudioModel, ImageGenerationModelCapability>> = {};
+  for (const model of IMAGE_STUDIO_MODELS) {
+    const requestedProtocol = channelId === 'fluxport'
+      ? FLUXPORT_PROTOCOL_BY_MODEL[model]
+      : protocol === 'gemini_native' || protocol === 'openai_images' ? protocol : null;
+    if (!requestedProtocol) continue;
+    const protocolCompatible = requestedProtocol === 'gemini_native'
+      ? GEMINI_CHANNEL_MODELS.has(model)
+      : GPT_IMAGE_CHANNEL_MODELS.has(model);
+    if (!protocolCompatible) continue;
+    const source = isRecord(input[model]) ? input[model] : {};
+    const parseCapabilityList = (field: 'qualities' | 'resolutions' | 'ratios', allowed: readonly string[]) => {
+      const raw = source[field];
+      if (raw === null || raw === undefined || typeof raw === 'string' && !raw.trim()) return null;
+      const values = Array.isArray(raw)
+        ? raw.filter((item): item is string => typeof item === 'string').map(item => item.trim()).filter(Boolean)
+        : typeof raw === 'string' ? raw.split(',').map(item => item.trim()).filter(Boolean) : null;
+      if (!values) return null;
+      const unique = Array.from(new Set(values));
+      if (unique.some(item => !allowed.includes(item))) {
+        throw new ImageGenerationChannelError(`型号 ${model} 的${field}包含当前应用不支持的值`, 400, 'image_channel_invalid_capability');
+      }
+      return unique;
+    };
+    const qualities = parseCapabilityList('qualities', IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model]);
+    const resolutions = parseCapabilityList('resolutions', IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[model]);
+    const ratios = parseCapabilityList('ratios', STUDIO_RATIOS);
+    const rawMaxReferences = source.maxReferences;
+    const maxReferences = rawMaxReferences === null || rawMaxReferences === undefined || rawMaxReferences === ''
+      ? null
+      : Number.isSafeInteger(Number(rawMaxReferences)) && Number(rawMaxReferences) >= 0 && Number(rawMaxReferences) <= MAX_REFERENCE_IMAGES
+        ? Number(rawMaxReferences)
+        : null;
+    if (rawMaxReferences !== null && rawMaxReferences !== undefined && rawMaxReferences !== '' && maxReferences === null) {
+      throw new ImageGenerationChannelError(`型号 ${model} 的参考图上限必须是 0 到 ${MAX_REFERENCE_IMAGES} 的整数`, 400, 'image_channel_invalid_capability');
+    }
+    const billingMode = source.billingMode === 'fixed' || source.billingMode === 'actual' ? source.billingMode : null;
+    const rawFixedPoints = source.fixedPoints;
+    const fixedPoints = rawFixedPoints === null || rawFixedPoints === undefined || rawFixedPoints === ''
+      ? null
+      : Number.isSafeInteger(Number(rawFixedPoints)) && Number(rawFixedPoints) >= 0
+        ? Number(rawFixedPoints)
+        : null;
+    if (rawFixedPoints !== null && rawFixedPoints !== undefined && rawFixedPoints !== '' && fixedPoints === null) {
+      throw new ImageGenerationChannelError(`型号 ${model} 的固定点数必须是非负整数，0 表示明确免费`, 400, 'image_channel_invalid_price');
+    }
+    output[model] = {
+      enabled: source.enabled === true,
+      protocol: requestedProtocol,
+      qualities,
+      resolutions,
+      ratios,
+      maxReferences,
+      billingMode,
+      fixedPoints,
+      billingSource: billingMode === 'fixed'
+        ? 'admin_explicit_fixed_points'
+        : billingMode === 'actual' ? 'same_scope_actual_billing_proof' : null,
+    };
+  }
+  return output;
+}
+
+async function readManagedChannelRegistry(client: Prisma.TransactionClient | typeof prisma): Promise<ManagedChannelRegistry> {
+  const row = await client.platformSetting.findUnique({ where: { key: IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY } });
+  if (!row) return { version: 1, channels: [emptyFluxPortRecord()] };
+  let parsed: unknown;
+  try { parsed = JSON.parse(row.value_json); } catch { throw new ImageGenerationChannelError('图片供应商注册表数据损坏，已停止使用配置', 500, 'image_channel_registry_invalid'); }
+  if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.channels)) {
+    throw new ImageGenerationChannelError('图片供应商注册表版本无效，已停止使用配置', 500, 'image_channel_registry_invalid');
+  }
+  const channels: ManagedChannelRegistryRecord[] = [emptyFluxPortRecord()];
+  const seen = new Set<string>(['fluxport']);
+  for (const raw of parsed.channels) {
+    if (!isRecord(raw)) throw new ImageGenerationChannelError('图片供应商注册表包含无效配置，已停止写入', 500, 'image_channel_registry_invalid');
+    if (raw.id === 'fluxport') continue;
+    if (!isDynamicImageChannelId(raw.id) || seen.has(raw.id)
+      || typeof raw.label !== 'string' || typeof raw.supplierName !== 'string'
+      || (raw.supplierKind !== 'musk' && raw.supplierKind !== 'other')
+      || (raw.protocol !== 'gemini_native' && raw.protocol !== 'openai_images')
+      || typeof raw.baseUrl !== 'string'
+      || typeof raw.enabled !== 'boolean' || typeof raw.deleted !== 'boolean') {
+      throw new ImageGenerationChannelError('图片供应商注册表包含无效配置，已停止写入', 500, 'image_channel_registry_invalid');
+    }
+    const modelCapabilities: Partial<Record<ImageStudioModel, ImageGenerationModelCapability>> = {};
+    if (isRecord(raw.modelCapabilities)) {
+      if (Object.keys(raw.modelCapabilities).some(key => !IMAGE_STUDIO_MODELS.includes(key as ImageStudioModel))) {
+        throw new ImageGenerationChannelError('图片供应商包含未知型号能力，已停止写入', 500, 'image_channel_registry_invalid');
+      }
+      for (const model of IMAGE_STUDIO_MODELS) {
+        const capability = readPersistedCapability(raw.modelCapabilities[model], model);
+        if (capability) modelCapabilities[model] = capability;
+        else if (Object.prototype.hasOwnProperty.call(raw.modelCapabilities, model)) {
+          throw new ImageGenerationChannelError('图片供应商能力数据损坏，已停止写入', 500, 'image_channel_registry_invalid');
+        }
+      }
+    } else if (raw.modelCapabilities !== undefined) {
+      throw new ImageGenerationChannelError('图片供应商能力数据损坏，已停止写入', 500, 'image_channel_registry_invalid');
+    }
+    const configRevision = raw.configRevision === null ? null
+      : typeof raw.configRevision === 'string' && /^[0-9a-f-]{36}$/i.test(raw.configRevision)
+        ? raw.configRevision : null;
+    if (raw.configRevision !== undefined && configRevision === null) {
+      throw new ImageGenerationChannelError('图片供应商修订数据损坏，已停止写入', 500, 'image_channel_registry_invalid');
+    }
+    channels.push({
+      id: raw.id,
+      label: raw.label.slice(0, 120),
+      supplierName: raw.supplierName.slice(0, 120),
+      supplierKind: raw.supplierKind,
+      protocol: raw.protocol,
+      baseUrl: raw.baseUrl,
+      enabled: raw.enabled === true,
+      deleted: raw.deleted === true,
+      configRevision,
+      modelCapabilities,
+    });
+    seen.add(raw.id);
+  }
+  const storedFluxPorts = parsed.channels.filter((item: unknown) => isRecord(item) && item.id === 'fluxport');
+  if (storedFluxPorts.length > 1) throw new ImageGenerationChannelError('FluxPort 预设重复，已停止写入', 500, 'image_channel_registry_invalid');
+  const storedFluxPort = storedFluxPorts[0];
+  if (isRecord(storedFluxPort)) {
+    if (storedFluxPort.enabled !== undefined && typeof storedFluxPort.enabled !== 'boolean') {
+      throw new ImageGenerationChannelError('FluxPort 状态数据损坏，已停止写入', 500, 'image_channel_registry_invalid');
+    }
+    const base = emptyFluxPortRecord();
+    const capabilities: Partial<Record<ImageStudioModel, ImageGenerationModelCapability>> = {};
+    if (isRecord(storedFluxPort.modelCapabilities)) {
+      if (Object.keys(storedFluxPort.modelCapabilities).some(key => !IMAGE_STUDIO_MODELS.includes(key as ImageStudioModel))) {
+        throw new ImageGenerationChannelError('FluxPort 包含未知型号能力，已停止写入', 500, 'image_channel_registry_invalid');
+      }
+      for (const model of IMAGE_STUDIO_MODELS) {
+        const capability = readPersistedCapability(storedFluxPort.modelCapabilities[model], model);
+        if (capability) capabilities[model] = capability;
+        else if (Object.prototype.hasOwnProperty.call(storedFluxPort.modelCapabilities, model)) {
+          throw new ImageGenerationChannelError('FluxPort 能力数据损坏，已停止写入', 500, 'image_channel_registry_invalid');
+        }
+      }
+    } else if (storedFluxPort.modelCapabilities !== undefined) {
+      throw new ImageGenerationChannelError('FluxPort 能力数据损坏，已停止写入', 500, 'image_channel_registry_invalid');
+    }
+    const fluxRevision = storedFluxPort.configRevision === null || storedFluxPort.configRevision === undefined
+      ? null
+      : typeof storedFluxPort.configRevision === 'string' && /^[0-9a-f-]{36}$/i.test(storedFluxPort.configRevision)
+        ? storedFluxPort.configRevision : null;
+    if (storedFluxPort.configRevision !== null && storedFluxPort.configRevision !== undefined && fluxRevision === null) {
+      throw new ImageGenerationChannelError('FluxPort 修订数据损坏，已停止写入', 500, 'image_channel_registry_invalid');
+    }
+    channels[0] = {
+      ...base,
+      label: typeof storedFluxPort.label === 'string' ? storedFluxPort.label.slice(0, 120) : base.label,
+      enabled: storedFluxPort.enabled === true,
+      deleted: false,
+      configRevision: fluxRevision,
+      modelCapabilities: Object.keys(capabilities).length ? capabilities : base.modelCapabilities,
+    };
+  }
+  return { version: 1, channels };
+}
+
+function privateVersionKey(channelId: string, revision: string) {
+  return `${IMAGE_GENERATION_CHANNEL_VERSION_PREFIX}${channelId}:${revision}`;
+}
+
+async function writePrivateChannelVersion(
+  client: Prisma.TransactionClient | typeof prisma,
+  version: PrivateImageGenerationChannelVersion,
+  updatedBy: string,
+) {
+  await client.platformSetting.create({
+    data: {
+      key: privateVersionKey(version.channelId, version.configRevision),
+      value_json: JSON.stringify(version),
+      updated_by: updatedBy,
+    },
+  });
+}
+
+async function readPrivateChannelVersion(
+  client: Prisma.TransactionClient | typeof prisma,
+  channelId: string,
+  revision: string,
+): Promise<PrivateImageGenerationChannelVersion> {
+  const row = await client.platformSetting.findUnique({ where: { key: privateVersionKey(channelId, revision) } });
+  if (!row) throw new ImageGenerationChannelError('图片供应商配置修订不存在，不能替换为当前配置', 404, 'image_channel_revision_not_found');
+  let parsed: unknown;
+  try { parsed = JSON.parse(row.value_json); } catch { throw new ImageGenerationChannelError('图片供应商配置修订损坏，不能继续执行', 500, 'image_channel_revision_invalid'); }
+  if (!isRecord(parsed) || parsed.version !== 1 || parsed.channelId !== channelId || parsed.configRevision !== revision
+    || !isRecord(parsed.settings) || !isRecord(parsed.modelCapabilities)) {
+    throw new ImageGenerationChannelError('图片供应商配置修订与任务引用不匹配', 500, 'image_channel_revision_invalid');
+  }
+  const storedProvider = parsed.settings.provider;
+  const knownProvider = storedProvider === 'musk' || storedProvider === 'ai_media_vip' || storedProvider === 'seedream'
+    || storedProvider === 'fluxport' || storedProvider === 'managed';
+  if (!knownProvider || (parsed.protocol !== 'gemini_native' && parsed.protocol !== 'openai_images' && parsed.protocol !== 'mixed' && parsed.protocol !== 'legacy')
+    || !['fluxport', 'musk', 'other', 'legacy'].includes(String(parsed.supplierKind))) {
+    throw new ImageGenerationChannelError('图片供应商修订包含无效协议或供应商信息', 500, 'image_channel_revision_invalid');
+  }
+  if (typeof parsed.settings.base_url !== 'string' || (parsed.settings.api_key !== null && parsed.settings.api_key !== undefined
+    && (typeof parsed.settings.api_key !== 'string' || parsed.settings.api_key.length > 500))) {
+    throw new ImageGenerationChannelError('图片供应商修订的地址或凭据格式无效', 500, 'image_channel_revision_invalid');
+  }
+  if (parsed.billingIntentRevision !== undefined
+    && (typeof parsed.billingIntentRevision !== 'number'
+      || !Number.isSafeInteger(parsed.billingIntentRevision) || parsed.billingIntentRevision < 0)) {
+    throw new ImageGenerationChannelError('图片供应商修订的计费意图版本无效', 500, 'image_channel_revision_invalid');
+  }
+  const rawProvider = knownProvider ? storedProvider : 'musk';
+  const managedProvider = rawProvider === 'fluxport' || rawProvider === 'managed';
+  const normalizedSettings = normalizeImageGenerationApiSettings({
+    ...parsed.settings,
+    provider: managedProvider ? 'musk' : rawProvider,
+  });
+  const settings = {
+    ...normalizedSettings,
+    provider: managedProvider ? rawProvider as 'fluxport' | 'managed' : normalizedSettings.provider,
+    base_url: typeof parsed.settings.base_url === 'string' ? parsed.settings.base_url : normalizedSettings.base_url,
+    api_key: typeof parsed.settings.api_key === 'string' && parsed.settings.api_key.length <= 500 ? parsed.settings.api_key : null,
+    supports_async_task: false,
+  } as ImageGenerationApiSettings;
+  const modelCapabilities: Partial<Record<ImageStudioModel, ImageGenerationModelCapability>> = {};
+  if (Object.keys(parsed.modelCapabilities).some(key => !IMAGE_STUDIO_MODELS.includes(key as ImageStudioModel))) {
+    throw new ImageGenerationChannelError('图片供应商修订包含未知型号能力', 500, 'image_channel_revision_invalid');
+  }
+  for (const model of IMAGE_STUDIO_MODELS) {
+    const capability = readPersistedCapability(parsed.modelCapabilities[model], model,
+      parsed.managedChannel !== true && parsed.settings.provider === 'ai_media_vip');
+    if (capability) modelCapabilities[model] = capability;
+    else if (Object.prototype.hasOwnProperty.call(parsed.modelCapabilities, model)) {
+      throw new ImageGenerationChannelError('图片供应商修订能力数据损坏', 500, 'image_channel_revision_invalid');
+    }
+  }
+  return {
+    version: 1,
+    channelId,
+    configRevision: revision,
+    label: typeof parsed.label === 'string' ? parsed.label.slice(0, 120) : '图片供应商',
+    supplierName: typeof parsed.supplierName === 'string' ? parsed.supplierName : '未知供应商',
+    supplierKind: parsed.supplierKind === 'fluxport' || parsed.supplierKind === 'musk' || parsed.supplierKind === 'other' || parsed.supplierKind === 'legacy'
+      ? parsed.supplierKind : 'other',
+    sourceChannelId: parsed.sourceChannelId === 'shared' || parsed.sourceChannelId === 'banana' ? parsed.sourceChannelId : undefined,
+    sourceFingerprint: typeof parsed.sourceFingerprint === 'string' ? parsed.sourceFingerprint : undefined,
+    billingIntentRevision: typeof parsed.billingIntentRevision === 'number' && Number.isSafeInteger(parsed.billingIntentRevision)
+      ? parsed.billingIntentRevision : undefined,
+    protocol: parsed.protocol === 'gemini_native' || parsed.protocol === 'openai_images' || parsed.protocol === 'mixed'
+      ? parsed.protocol : 'legacy',
+    managedChannel: parsed.managedChannel === true,
+    settings,
+    modelCapabilities,
+    deleted: parsed.deleted === true,
+  };
+}
+
+function providerSupplierName(provider: ImageGenerationProvider): string | null {
+  if (provider === 'musk') return 'MuskAPI';
+  if (provider === 'ai_media_vip') return 'AI Media VIP';
+  if (provider === 'seedream') return 'Seedream';
+  if (provider === 'fluxport') return 'FluxPort';
+  return null;
+}
+
+function legacyProtocol(provider: ImageGenerationProvider, model: string): ImageGenerationResolvedProtocol {
+  if (provider === 'ai_media_vip') return 'openai_images';
+  if (provider === 'musk') return isGeminiImageModel(model) ? 'gemini_native' : 'openai_images';
+  return 'legacy';
+}
+
+function legacyStudioProtocol(provider: ImageGenerationProvider, model: ImageStudioModel): ImageGenerationChannelProtocol | null {
+  if (provider === 'seedream') return null;
+  if (provider === 'musk' && GEMINI_CHANNEL_MODELS.has(model)) return 'gemini_native';
+  if (provider === 'musk' || provider === 'ai_media_vip') return 'openai_images';
+  return null;
+}
+
+function legacyModelCapabilities(
+  settings: ImageGenerationApiSettings,
+  channelId: 'original' | 'shared' | 'banana',
+  prices?: Record<ImageStudioModel, number | null>,
+): Partial<Record<ImageStudioModel, ImageGenerationModelCapability>> {
+  const capabilities: Partial<Record<ImageStudioModel, ImageGenerationModelCapability>> = {};
+  for (const model of IMAGE_STUDIO_MODELS) {
+    // Original keeps the historical model routing and its capability contract.
+    // Selectable legacy slots expose only combinations implemented by the Studio adapter.
+    const protocol: ImageGenerationChannelProtocol | null = channelId === 'original'
+      ? legacyProtocol(settings.provider, model) === 'gemini_native' ? 'gemini_native' : 'openai_images'
+      : legacyStudioProtocol(settings.provider, model);
+    if (!protocol) continue;
+    const legacyPrice = prices?.[model];
+    const fixedPoints = Number.isSafeInteger(legacyPrice) && Number(legacyPrice) >= 0 ? Number(legacyPrice) : null;
+    capabilities[model] = {
+      enabled: true,
+      protocol,
+      qualities: IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model],
+      resolutions: IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[model],
+      ratios: channelId === 'original' ? null : ['auto', ...STUDIO_RATIOS.filter(ratio => ratio !== '4:1' || supportsStudioFourToOne(model, settings.provider))],
+      maxReferences: channelId === 'original' ? null : settings.supports_image_to_image ? MAX_REFERENCE_IMAGES : 0,
+      billingMode: channelId === 'original' ? null : 'fixed',
+      fixedPoints: channelId === 'original' ? null : fixedPoints,
+      billingSource: 'legacy_image_studio_contract',
+    };
+  }
+  return capabilities;
+}
+
+function resolveLegacySettings(settings: ImageGenerationApiSettings, model: string, channelId: 'original' | 'shared' | 'banana',
+  prices?: Record<ImageStudioModel, number | null>): ImageGenerationResolvedSettings {
+  const provider = settings.provider;
+  return {
+    ...settings,
+    channelId,
+    configRevision: 'legacy-current',
+    supplierName: settings.api_key ? providerSupplierName(provider) || '未知供应商' : '未知供应商',
+    supplierKind: 'legacy',
+    protocol: channelId === 'original' ? 'legacy' : legacyProtocol(provider, model),
+    modelCapabilities: legacyModelCapabilities(settings, channelId, prices),
+    managedChannel: false,
+    default_model: model,
+  };
+}
+
+function modelCapabilityCompleteness(capability: ImageGenerationModelCapability | undefined) {
+  if (!capability || !capability.enabled) return '该型号尚未加入可用白名单';
+  if (!capability.qualities || capability.qualities.length === 0) return '尚未确认该型号支持的图片质量';
+  if (!capability.resolutions || capability.resolutions.length === 0) return '尚未确认该型号支持的分辨率';
+  if (!capability.ratios || capability.ratios.length === 0) return '尚未确认该型号支持的图片比例';
+  if (capability.maxReferences === null) return '尚未确认该型号的参考图上限';
+  if (!capability.billingMode) return '尚未设置该型号计费方式';
+  if (capability.billingMode === 'fixed' && capability.fixedPoints === null) return '固定点数未填写，明确免费时请填写 0';
+  return null;
+}
+
+export function isMuskImageGenerationChannel(settings: ImageGenerationApiSettings) {
+  const candidate = settings as ImageGenerationResolvedSettings;
+  return settings.provider === 'musk'
+    && Boolean(settings.api_key)
+    && (candidate.supplierKind === undefined || candidate.supplierKind === 'musk' || candidate.supplierKind === 'legacy');
+}
+
+async function isActualBillingReady(
+  settings: ImageGenerationApiSettings,
+  model: string,
+  client: Prisma.TransactionClient | typeof prisma,
+) {
+  if (!isMuskImageGenerationChannel(settings)) return false;
+  try {
+    if (new URL(settings.base_url).origin !== 'https://api.muskapis.com') return false;
+    const [{ imageBillingScope }, { imageBillingReady }] = await Promise.all([
+      import('@/lib/image-studio/billing-scope'),
+      import('@/lib/image-studio/billing-readiness'),
+    ]);
+    const scope = imageBillingScope(settings);
+    return (await imageBillingReady(scope, model, client)).ready;
+  } catch {
+    return false;
+  }
+}
+
+async function legacyBillingIntentState(
+  settings: ImageGenerationApiSettings,
+  model: string,
+  client: Prisma.TransactionClient | typeof prisma,
+) {
+  const { imageBillingIntent, imageBillingReady } = await import('@/lib/image-studio/billing-readiness');
+  const intent = await imageBillingIntent(client);
+  const selected = intent.enabled && intent.enabledModels.includes(model);
+  if (!selected) return { selected: false, revision: intent.revision, quoteReady: false };
+  if (!isMuskImageGenerationChannel(settings)) return { selected: true, revision: intent.revision, quoteReady: false };
+  try {
+    if (new URL(settings.base_url).origin !== 'https://api.muskapis.com') {
+      return { selected: true, revision: intent.revision, quoteReady: false };
+    }
+  } catch {
+    return { selected: true, revision: intent.revision, quoteReady: false };
+  }
+  const { imageBillingScope } = await import('@/lib/image-studio/billing-scope');
+  const readiness = await imageBillingReady(imageBillingScope(settings), model, client);
+  return { selected: true, revision: intent.revision, quoteReady: readiness.ready };
+}
+
+async function hydrateActualBilling(
+  settings: ImageGenerationResolvedSettings,
+  client: Prisma.TransactionClient | typeof prisma,
+): Promise<ImageGenerationResolvedSettings> {
+  const modelCapabilities = { ...settings.modelCapabilities };
+  for (const model of IMAGE_STUDIO_MODELS) {
+    const capability = modelCapabilities[model];
+    if (capability?.billingMode !== 'actual') continue;
+    const legacyAlias = settings.channelId === 'shared' || settings.channelId === 'banana';
+    modelCapabilities[model] = {
+      ...capability,
+      actualQuoteRequired: legacyAlias
+        ? (await legacyBillingIntentState(settings, model, client)).quoteReady
+        : await isActualBillingReady(settings, model, client),
+    };
+  }
+  return { ...settings, modelCapabilities };
+}
+
+async function modelDisabledReason(
+  settings: ImageGenerationResolvedSettings,
+  model: ImageStudioModel,
+  client: Prisma.TransactionClient | typeof prisma,
+) {
+  if (settings.deleted) return '该配置已归档，只保留已受理任务查询与结算';
+  if (!settings.enabled) return '通道已停用';
+  if (!settings.api_key) return '尚未配置 API Key';
+  const capability = settings.modelCapabilities[model];
+  const incomplete = modelCapabilityCompleteness(capability);
+  if (incomplete) return incomplete;
+  if (capability?.billingMode === 'actual') {
+    if (!isMuskImageGenerationChannel(settings)) return '实际计费仅适用于已确认的 Musk 供应商与同一 API Key';
+    if (capability.actualQuoteRequired !== true || !await isActualBillingReady(settings, model, client)) {
+      return '该 API Key 与型号暂无有效的精确账单证明，实际计费未就绪';
+    }
+  }
+  return null;
+}
+
+function managedSettingsFromVersion(version: PrivateImageGenerationChannelVersion): ImageGenerationResolvedSettings {
+  return {
+    ...version.settings,
+    channelId: version.channelId,
+    configRevision: version.configRevision,
+    supplierName: version.supplierName,
+    supplierKind: version.supplierKind,
+    protocol: version.protocol,
+    modelCapabilities: version.modelCapabilities,
+    managedChannel: version.managedChannel,
+    label: version.label,
+    deleted: version.deleted === true,
+  } as ImageGenerationResolvedSettings;
+}
+
+function emptyFluxPortSettings(): ImageGenerationResolvedSettings {
+  const record = emptyFluxPortRecord();
+  return {
+    ...DEFAULT_IMAGE_GENERATION_API_SETTINGS,
+    enabled: false,
+    provider: 'fluxport',
+    base_url: FLUXPORT_IMAGE_GENERATION_BASE_URL,
+    api_key: null,
+    supports_async_task: false,
+    channelId: 'fluxport',
+    configRevision: 'unconfigured',
+    supplierName: 'FluxPort',
+    supplierKind: 'fluxport',
+    protocol: 'mixed',
+    modelCapabilities: record.modelCapabilities,
+    managedChannel: true,
+    deleted: false,
+  } as ImageGenerationResolvedSettings;
+}
+
+async function resolveCurrentManagedSettings(record: ManagedChannelRegistryRecord, client: Prisma.TransactionClient | typeof prisma) {
+  if (!record.configRevision) {
+    if (record.id === 'fluxport') return { ...emptyFluxPortSettings(), enabled: record.enabled, modelCapabilities: record.modelCapabilities };
+    return emptyManagedSettings(record);
+  }
+  const version = await readPrivateChannelVersion(client, record.id, record.configRevision);
+  return { ...managedSettingsFromVersion(version), enabled: record.enabled, deleted: record.deleted };
+}
+
+function emptyManagedSettings(record: ManagedChannelRegistryRecord): ImageGenerationResolvedSettings {
+  return {
+    ...DEFAULT_IMAGE_GENERATION_API_SETTINGS,
+    enabled: false,
+    provider: record.supplierKind === 'musk' ? 'musk' : 'managed',
+    base_url: record.baseUrl,
+    api_key: null,
+    supports_async_task: false,
+    channelId: record.id,
+    configRevision: 'unconfigured',
+    supplierName: record.supplierName,
+    supplierKind: record.supplierKind,
+    protocol: record.protocol === 'legacy' ? 'openai_images' : record.protocol,
+    modelCapabilities: record.modelCapabilities,
+    managedChannel: true,
+    deleted: record.deleted,
+  } as ImageGenerationResolvedSettings;
+}
+
+export async function captureImageGenerationChannel(
+  model: string,
+  channelId: ImageGenerationChannelId = 'original',
+  tx: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<ImageGenerationChannelSnapshot> {
+  assertImageGenerationChannelId(channelId);
+  if (!IMAGE_STUDIO_MODELS.includes(model as ImageStudioModel)) {
+    throw new ImageGenerationChannelError('所选图片型号不在允许列表中', 400, 'image_channel_model_not_allowed');
+  }
+  if (channelId !== 'original' && channelId !== 'shared' && channelId !== 'banana') {
+    const channels = await getImageGenerationChannels(tx);
+    const current = selectImageGenerationSettings(channels, model, channelId);
+    if (!current.configRevision || current.configRevision === 'unconfigured' || current.deleted || !current.enabled || !current.api_key) {
+      throw new ImageGenerationChannelError('该图片供应商尚未配置或已停用，不能提交新任务', 409, 'image_channel_not_available');
+    }
+    const validation = validateImageGenerationChannel(current, { model });
+    if (!validation.ok && validation.code !== 'image_channel_actual_billing_requires_async_quote') {
+      throw new ImageGenerationChannelError(validation.error, 409, validation.code);
+    }
+    return { channelId, configRevision: current.configRevision };
+  }
+
+  const sourceChannelId = channelId === 'original' ? (isGeminiImageModel(model) ? 'banana' : 'shared') : channelId;
+  const settings = await getImageGenerationApiSettings(tx, sourceChannelId === 'banana' ? 'banana' : 'default');
+  const studioSettings = await getImageStudioSettings(tx).catch(() => null);
+  const prices = studioSettings?.prices || Object.fromEntries(IMAGE_STUDIO_MODELS.map(item => [item, null])) as Record<ImageStudioModel, number | null>;
+  if (channelId !== 'original' && !isImageGenerationApiReady(settings)) {
+    throw new ImageGenerationChannelError('所选图片接口未启用或配置不完整', 409, 'image_channel_not_available');
+  }
+  const resolved = resolveLegacySettings(settings, model, channelId, prices);
+  if (channelId !== 'original') {
+    let capability = resolved.modelCapabilities[model as ImageStudioModel];
+    if (!capability?.enabled) {
+      throw new ImageGenerationChannelError('当前旧接口协议未确认支持该型号，未创建报价', 409, 'image_channel_capability_unknown');
+    }
+    const billingIntent = await legacyBillingIntentState(resolved, model, tx);
+    if (billingIntent.selected) {
+      capability = {
+        ...capability,
+        billingMode: 'actual',
+        billingSource: 'same_scope_actual_billing_proof',
+        actualQuoteRequired: billingIntent.quoteReady,
+      };
+      resolved.modelCapabilities = { ...resolved.modelCapabilities, [model]: capability };
+    }
+    const reason = await modelDisabledReason(resolved, model as ImageStudioModel, tx);
+    if (reason) throw new ImageGenerationChannelError(reason, 409, 'image_channel_not_ready');
+    const configRevision = randomUUID();
+    const version: PrivateImageGenerationChannelVersion = {
+      version: 1,
+      channelId,
+      configRevision,
+      label: channelId === 'shared' ? '共享接口' : 'Banana 专用接口',
+      supplierName: settings.api_key ? providerSupplierName(settings.provider) || '未知供应商' : '未知供应商',
+      supplierKind: 'legacy',
+      sourceChannelId,
+      sourceFingerprint: createHash('sha256').update(JSON.stringify(settings)).digest('hex'),
+      billingIntentRevision: billingIntent.revision,
+      protocol: legacyProtocol(settings.provider, model),
+      managedChannel: false,
+      settings,
+      modelCapabilities: resolved.modelCapabilities,
+    };
+    await writePrivateChannelVersion(tx, version, 'image-generation-task');
+    return { channelId, configRevision };
+  }
+  const configRevision = randomUUID();
+  const version: PrivateImageGenerationChannelVersion = {
+    version: 1,
+    channelId,
+    configRevision,
+    label: channelId === 'original' ? '原接口' : channelId === 'shared' ? '共享接口' : 'Banana 专用接口',
+    supplierName: settings.api_key ? providerSupplierName(settings.provider) || '未知供应商' : '未知供应商',
+    supplierKind: 'legacy',
+    sourceChannelId,
+    sourceFingerprint: createHash('sha256').update(JSON.stringify(settings)).digest('hex'),
+    protocol: channelId === 'original' ? 'legacy' : legacyProtocol(settings.provider, model),
+    managedChannel: false,
+    settings,
+    modelCapabilities: resolved.modelCapabilities,
+  };
+  await writePrivateChannelVersion(tx, version, 'image-generation-task');
+  return { channelId, configRevision };
+}
+
+export async function resolveImageGenerationChannelSnapshot(
+  snapshot: ImageGenerationChannelSnapshot,
+  tx: Prisma.TransactionClient | typeof prisma = prisma,
+  forSubmission = false,
+): Promise<ImageGenerationResolvedSettings> {
+  assertImageGenerationChannelId(snapshot.channelId);
+  if (!/^[0-9a-f-]{36}$/i.test(snapshot.configRevision)) {
+    throw new ImageGenerationChannelError('图片供应商配置修订无效', 400, 'image_channel_invalid_revision');
+  }
+  const version = await readPrivateChannelVersion(tx, snapshot.channelId, snapshot.configRevision);
+  const settings = managedSettingsFromVersion(version);
+  if (forSubmission) {
+    if (snapshot.channelId === 'original' || snapshot.channelId === 'shared' || snapshot.channelId === 'banana') {
+      if (!version.sourceChannelId || !version.sourceFingerprint) {
+        throw new ImageGenerationChannelError('原接口快照缺少报价版本信息', 409, 'image_channel_quote_snapshot_invalid');
+      }
+      const current = await getImageGenerationApiSettings(tx, version.sourceChannelId === 'banana' ? 'banana' : 'default');
+      if (snapshot.channelId !== 'original' && version.billingIntentRevision !== undefined) {
+        const { imageBillingIntent } = await import('@/lib/image-studio/billing-readiness');
+        const currentIntent = await imageBillingIntent(tx);
+        if (currentIntent.revision !== version.billingIntentRevision) {
+          throw new ImageGenerationChannelError('实际计费意图已变化，请重新获取报价后再提交', 409, 'image_channel_quote_stale');
+        }
+      }
+      const fingerprint = createHash('sha256').update(JSON.stringify(current)).digest('hex');
+      if (fingerprint !== version.sourceFingerprint) {
+        throw new ImageGenerationChannelError('原接口配置已变化，请重新获取报价后再提交', 409, 'image_channel_quote_stale');
+      }
+      if (snapshot.channelId !== 'original' && !isImageGenerationApiReady(current)) {
+        throw new ImageGenerationChannelError('所选图片接口已停用或配置不完整，请重新选择', 409, 'image_channel_not_available');
+      }
+      return hydrateActualBilling(settings, tx);
+    }
+    const registry = await readManagedChannelRegistry(tx);
+    const current = registry.channels.find(item => item.id === snapshot.channelId);
+    if (!current || current.deleted || !current.enabled || current.configRevision !== snapshot.configRevision) {
+      throw new ImageGenerationChannelError('图片供应商配置已停用或修订过期，请重新报价', 409, 'image_channel_revision_stale');
+    }
+  }
+  return hydrateActualBilling(settings, tx);
+}
+
+/** Live admission switch only; never substitutes live credentials for a frozen version. */
+export async function assertImageGenerationChannelDispatchOpen(
+  snapshot: ImageGenerationChannelSnapshot,
+  client: Prisma.TransactionClient | typeof prisma = prisma,
+) {
+  if (snapshot.channelId === 'original') return;
+  if (snapshot.channelId === 'shared' || snapshot.channelId === 'banana') {
+    const current = await getImageGenerationApiSettings(client, snapshot.channelId === 'banana' ? 'banana' : 'default');
+    if (current.enabled && current.api_key && current.base_url) return;
+  } else {
+    const registry = await readManagedChannelRegistry(client);
+    const current = registry.channels.find(item => item.id === snapshot.channelId);
+    if (current?.enabled && !current.deleted && current.configRevision) return;
+  }
+  throw new ImageGenerationChannelError('生成时供应商已停用或归档；未请求上游，原任务和预留保留。恢复该配置后按原修订继续，或取消未受理任务。', 409, 'image_channel_dispatch_paused');
+}
+
+export function validateImageGenerationChannel(
+  settings: ImageGenerationResolvedSettings,
+  args: { model: string; quality?: string; resolution?: string; ratio?: string; referenceCount?: number },
+): { ok: true; capability: ImageGenerationModelCapability } | { ok: false; code: string; error: string } {
+  const model = args.model as ImageStudioModel;
+  if (!IMAGE_STUDIO_MODELS.includes(model)) return { ok: false, code: 'image_channel_model_not_allowed', error: '所选图片型号不在允许列表中' };
+  const capability = settings.modelCapabilities[model];
+  if (settings.channelId === 'original') {
+    if (!isImageGenerationApiReady(settings)) return { ok: false, code: 'image_generation_api_not_configured', error: '原接口未启用或配置不完整' };
+    return { ok: true, capability: capability || blankCapability(legacyProtocol(settings.provider, model) === 'gemini_native' ? 'gemini_native' : 'openai_images') };
+  }
+  if (!settings.enabled || settings.deleted || !settings.api_key || !settings.base_url) {
+    return { ok: false, code: 'image_channel_not_available', error: '该图片供应商尚未配置、已停用或已归档' };
+  }
+  if (!capability || !capability.enabled) return { ok: false, code: 'image_channel_model_not_enabled', error: '该供应商未开放此图片型号' };
+  const missingCapability = modelCapabilityCompleteness(capability);
+  if (missingCapability) return { ok: false, code: 'image_channel_capability_unknown', error: missingCapability };
+  if (capability.billingMode === 'actual') {
+    if (!isMuskImageGenerationChannel(settings)) return { ok: false, code: 'image_channel_actual_billing_unavailable', error: '此供应商没有可用的实际计费账单证明' };
+    if (capability.actualQuoteRequired !== true) {
+      return { ok: false, code: 'image_channel_actual_billing_not_ready', error: '同一 API Key 与型号尚无有效账单证明' };
+    }
+  }
+  if (capability.billingMode === 'fixed' && capability.fixedPoints === null) {
+    return { ok: false, code: 'image_channel_fixed_price_missing', error: '固定点数未填写，明确免费时请填写 0' };
+  }
+  const tests: Array<[string | undefined, string[] | null, string]> = [
+    [args.quality, capability.qualities, '图片质量'],
+    [args.resolution, capability.resolutions, '分辨率'],
+    [args.ratio, capability.ratios, '图片比例'],
+  ];
+  for (const [value, allowed, label] of tests) {
+    if (value !== undefined && (!allowed || !allowed.includes(value))) {
+      return { ok: false, code: 'image_channel_capability_mismatch', error: `当前供应商未确认支持所选${label}` };
+    }
+  }
+  if (args.referenceCount !== undefined && (capability.maxReferences === null || args.referenceCount > capability.maxReferences)) {
+    return { ok: false, code: 'image_channel_reference_limit_unknown', error: capability.maxReferences === null
+      ? '当前供应商尚未确认参考图上限' : `当前供应商最多支持 ${capability.maxReferences} 张参考图` };
+  }
+  return { ok: true, capability };
+}
+
+async function channelOption(
+  settings: ImageGenerationResolvedSettings,
+  label: string,
+  supplierName: string | null,
+  configured: boolean,
+  enabled: boolean,
+  client: Prisma.TransactionClient | typeof prisma,
+): Promise<ImageGenerationChannelDto> {
+  const models: ImageGenerationChannelDto['models'] = {};
+  for (const model of IMAGE_STUDIO_MODELS) {
+    const capability = settings.modelCapabilities[model];
+    const legacySlot = settings.channelId === 'shared' || settings.channelId === 'banana';
+    const legacyIntent = legacySlot
+      ? await legacyBillingIntentState(settings, model, client)
+      : null;
+    const actualReady = legacySlot
+      ? legacyIntent?.quoteReady === true
+      : capability?.billingMode === 'actual' && await isActualBillingReady(settings, model, client);
+    const effectiveCapability = capability && legacySlot && legacyIntent?.selected
+      ? { ...capability, billingMode: 'actual' as const, billingSource: 'same_scope_actual_billing_proof', actualQuoteRequired: actualReady }
+      : capability && actualReady
+        ? { ...capability, billingMode: 'actual' as const, actualQuoteRequired: true }
+      : capability;
+    const effectiveSettings = effectiveCapability
+      ? { ...settings, modelCapabilities: { ...settings.modelCapabilities, [model]: effectiveCapability } }
+      : settings;
+    let reason = !configured ? '尚未配置 API Key' : !enabled ? '通道已停用' : null;
+    if (!reason && settings.channelId === 'original') reason = null;
+    else if (!reason) reason = await modelDisabledReason(effectiveSettings, model, client);
+    models[model] = {
+      ready: settings.channelId === 'original' ? true : !reason,
+      disabledReason: settings.channelId === 'original' ? null : reason,
+      billingMode: effectiveCapability?.billingMode || null,
+      fixedPoints: capability?.fixedPoints ?? null,
+      billingSource: capability?.billingSource || (settings.channelId === 'shared' || settings.channelId === 'banana' ? 'legacy_image_studio_contract' : null),
+      actualQuoteRequired: Boolean(actualReady && isMuskImageGenerationChannel(settings)),
+      qualities: capability?.qualities ?? null,
+      resolutions: capability?.resolutions ?? null,
+      ratios: capability?.ratios ?? null,
+      maxReferences: capability?.maxReferences ?? null,
+    };
+  }
+  const ready = Object.values(models).some(item => item.ready);
+  const disabledReason = !configured ? '尚未配置 API Key' : !enabled ? '通道已停用' : ready ? null : '尚无能力完整且计费就绪的型号';
+  return {
+    id: settings.channelId,
+    label,
+    supplierName,
+    ready,
+    enabled,
+    configured,
+    disabledReason,
+    models,
+  };
+}
+
+export async function getImageGenerationChannelOptions(
+  client: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<ImageGenerationChannelsDto> {
+  const channels = await getImageGenerationChannels(client);
+  const items: ImageGenerationChannelDto[] = [{
+    id: 'original', label: '原接口', supplierName: null, ready: true, enabled: true, configured: true, disabledReason: null, models: {},
+  }];
+  const shared = resolveLegacySettings(channels.shared, IMAGE_STUDIO_MODELS[2], 'shared', channels.legacyPrices);
+  const banana = resolveLegacySettings(channels.banana, IMAGE_STUDIO_MODELS[0], 'banana', channels.legacyPrices);
+  items.push(await channelOption(shared, '共享接口', channels.shared.api_key ? providerSupplierName(channels.shared.provider) : null,
+    Boolean(channels.shared.api_key && channels.shared.base_url), channels.shared.enabled, client));
+  items.push(await channelOption(banana, 'Banana 专用接口', channels.banana.api_key ? providerSupplierName(channels.banana.provider) : null,
+    Boolean(channels.banana.api_key && channels.banana.base_url), channels.banana.enabled, client));
+  const fluxport = channels.fluxport;
+  items.push(await channelOption(fluxport, fluxport.label || 'FluxPort', 'FluxPort', Boolean(fluxport.api_key && fluxport.base_url), fluxport.enabled, client));
+  for (const settings of channels.managed) {
+    if (settings.deleted) continue;
+    items.push(await channelOption(settings, settings.label || settings.supplierName, settings.supplierName,
+      Boolean(settings.api_key && settings.base_url), settings.enabled, client));
+  }
+  return { items };
+}
+
+async function registryDto(
+  record: ManagedChannelRegistryRecord,
+  settings: ImageGenerationResolvedSettings,
+  client: Prisma.TransactionClient | typeof prisma,
+): Promise<ImageGenerationManagedChannelDto> {
+  settings = await hydrateActualBilling(settings, client);
+  const models: ImageGenerationManagedChannelDto['models'] = {};
+  for (const model of IMAGE_STUDIO_MODELS) {
+    const capability = settings.modelCapabilities[model];
+    const actualReady = capability?.billingMode === 'actual' && await isActualBillingReady(settings, model, client);
+    const reason = await modelDisabledReason(settings, model, client);
+    models[model] = {
+      enabled: capability?.enabled === true,
+      ready: !reason,
+      disabledReason: reason,
+      billingMode: capability?.billingMode || null,
+      fixedPoints: capability?.fixedPoints ?? null,
+      billingSource: capability?.billingSource || null,
+      actualQuoteRequired: Boolean(actualReady && isMuskImageGenerationChannel(settings)),
+      qualities: capability?.qualities ?? null,
+      resolutions: capability?.resolutions ?? null,
+      ratios: capability?.ratios ?? null,
+      maxReferences: capability?.maxReferences ?? null,
+    };
+  }
+  return {
+    id: record.id,
+    label: record.label,
+    supplierName: record.supplierName,
+    supplierKind: record.supplierKind,
+    protocol: record.protocol === 'legacy' ? 'openai_images' : record.protocol,
+    baseUrl: record.baseUrl,
+    enabled: record.enabled,
+    deleted: record.deleted,
+    configRevision: record.configRevision,
+    apiKeyConfigured: Boolean(settings.api_key),
+    models,
+  };
+}
+
+export async function getManagedImageGenerationChannels(
+  client: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<ImageGenerationManagedChannelDto[]> {
+  const registry = await readManagedChannelRegistry(client);
+  return Promise.all(registry.channels.map(async record => registryDto(record, await resolveCurrentManagedSettings(record, client), client)));
+}
+
+async function validateManagedBaseUrl(value: unknown, fallback?: string) {
+  const candidate = typeof value === 'string' && value.trim() ? value.trim() : fallback;
+  if (!candidate) throw new ImageGenerationChannelError('请填写 API 地址', 400, 'image_channel_base_url_required');
+  const { validateStudioProviderApiBaseUrl } = await import('@/lib/image-studio/provider');
+  const validation = await validateStudioProviderApiBaseUrl(candidate);
+  if (!validation.ok) throw new ImageGenerationChannelError('API 地址必须是安全的 HTTPS 公网地址', 400, validation.code);
+  return validation.url;
+}
+
+async function saveManagedRecord(
+  input: ManagedImageGenerationChannelInput,
+  updatedBy: string,
+  operation: 'create' | 'update' | 'archive' | 'restore',
+) {
+  const requestedId = input.id;
+  const createId = operation === 'create' ? `image-${randomUUID()}` : null;
+  const id = createId || requestedId;
+  assertImageGenerationChannelId(id);
+  if (id === 'original' || id === 'shared' || id === 'banana') {
+    throw new ImageGenerationChannelError('原接口及其兼容别名不可新增、改名或删除', 400, 'image_channel_reserved_id');
+  }
+  const isFluxPort = id === 'fluxport';
+  if (operation === 'create' && isFluxPort) throw new ImageGenerationChannelError('FluxPort 是预设通道，不能重复新增', 409, 'image_channel_already_exists');
+  if (operation === 'archive' && isFluxPort) throw new ImageGenerationChannelError('FluxPort 预设不能删除，只能停用', 400, 'image_channel_reserved_id');
+  const beforeRegistry = await readManagedChannelRegistry(prisma);
+  const beforeRecord = beforeRegistry.channels.find(item => item.id === id);
+  const baseUrl = operation === 'archive' || operation === 'restore'
+    ? (isFluxPort ? FLUXPORT_IMAGE_GENERATION_BASE_URL : beforeRecord?.baseUrl || '')
+    : isFluxPort
+      ? await validateManagedBaseUrl(FLUXPORT_IMAGE_GENERATION_BASE_URL)
+      : await validateManagedBaseUrl(input.baseUrl, beforeRecord?.baseUrl);
+  if (!baseUrl) throw new ImageGenerationChannelError('图片供应商配置不存在', 404, 'image_channel_not_found');
+
+  return prisma.$transaction(async tx => {
+    const registryRowBefore = await tx.platformSetting.findUnique({ where: { key: IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY } });
+    const registry = await readManagedChannelRegistry(tx);
+    const existingIndex = registry.channels.findIndex(item => item.id === id);
+    const existing = existingIndex >= 0 ? registry.channels[existingIndex] : null;
+    if (operation === 'create' && existing) throw new ImageGenerationChannelError('该图片供应商已存在', 409, 'image_channel_already_exists');
+    if (operation !== 'create' && !existing) throw new ImageGenerationChannelError('图片供应商配置不存在', 404, 'image_channel_not_found');
+    const expectedRevision = input.expectedRevision === null || input.expectedRevision === undefined || input.expectedRevision === ''
+      ? null : String(input.expectedRevision);
+    if (operation !== 'create' && expectedRevision !== existing?.configRevision) {
+      throw new ImageGenerationChannelError('配置已被其他管理员修改，请刷新后重试；未覆盖较新的设置', 409, 'image_channel_revision_conflict');
+    }
+    const previous = existing ? await resolveCurrentManagedSettings(existing, tx) : null;
+    const supplierKind = isFluxPort ? 'fluxport'
+      : input.supplierKind === 'musk' ? 'musk' : input.supplierKind === 'other' ? 'other'
+        : existing?.supplierKind === 'musk' ? 'musk' : 'other';
+    const supplierName = isFluxPort ? 'FluxPort'
+      : cleanString(input.supplierName, existing?.supplierName || '').slice(0, 120);
+    const label = isFluxPort ? cleanString(input.label, existing?.label || 'FluxPort').slice(0, 120)
+      : cleanString(input.label, existing?.label || '').slice(0, 120);
+    if (!label) throw new ImageGenerationChannelError('请填写配置名称', 400, 'image_channel_label_required');
+    if (!supplierName) throw new ImageGenerationChannelError('请填写供应商真实名称', 400, 'image_channel_supplier_required');
+    const protocol: ImageGenerationResolvedProtocol = isFluxPort ? 'mixed'
+      : input.protocol === 'gemini_native' || input.protocol === 'openai_images'
+        ? input.protocol
+        : existing?.protocol || 'openai_images';
+    const modelsInput = operation === 'create' ? input.models ?? {} : input.models ?? existing?.modelCapabilities ?? {};
+    const modelCapabilities = operation === 'archive' || operation === 'restore'
+      ? existing!.modelCapabilities
+      : parseManagedCapabilities(modelsInput, id, protocol);
+    const inputKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
+    if (inputKey.length > 500) throw new ImageGenerationChannelError('API Key 过长，请核对输入内容', 400, 'image_channel_invalid_api_key');
+    const apiKey = input.clearApiKey === true ? null : inputKey || previous?.api_key || null;
+    const enabled = operation === 'create' ? false
+      : operation === 'archive' ? false
+        : operation === 'restore' ? false
+          : input.enabled === true && Boolean(apiKey);
+    const deleted = operation === 'archive' ? true : operation === 'restore' ? false : existing?.deleted === true;
+    const configRevision = randomUUID();
+    const provider: ImageGenerationProvider = isFluxPort ? 'fluxport' : supplierKind === 'musk' ? 'musk' : 'managed';
+    const settings: ImageGenerationApiSettings = {
+      ...DEFAULT_IMAGE_GENERATION_API_SETTINGS,
+      enabled,
+      provider,
+      base_url: baseUrl,
+      default_model: IMAGE_STUDIO_MODELS.find(model => modelCapabilities[model]?.enabled) || IMAGE_STUDIO_MODELS[0],
+      api_key: apiKey,
+      timeout_ms: clampInteger(previous?.timeout_ms, DEFAULT_IMAGE_GENERATION_API_SETTINGS.timeout_ms, 5000, 300000),
+      max_outputs_per_request: 8,
+      default_ratio: '16:9',
+      default_size: '2K',
+      output_format: 'png',
+      response_format: 'url',
+      watermark: false,
+      supports_text_to_image: true,
+      supports_image_to_image: Object.values(modelCapabilities).some(capability => capability.maxReferences !== null && capability.maxReferences > 0),
+      supports_async_task: false,
+    };
+    const record: ManagedChannelRegistryRecord = {
+      id,
+      label,
+      supplierName,
+      supplierKind,
+      protocol,
+      baseUrl,
+      enabled,
+      deleted,
+      configRevision,
+      modelCapabilities,
+    };
+    const version: PrivateImageGenerationChannelVersion = {
+      version: 1,
+      channelId: id,
+      configRevision,
+      label,
+      supplierName,
+      supplierKind,
+      protocol,
+      managedChannel: true,
+      settings,
+      modelCapabilities,
+      deleted,
+    };
+    await writePrivateChannelVersion(tx, version, updatedBy);
+    if (existingIndex >= 0) registry.channels[existingIndex] = record;
+    else registry.channels.push(record);
+    const serializedRegistry = JSON.stringify(registry);
+    try {
+      if (registryRowBefore) {
+        const swapped = await tx.platformSetting.updateMany({
+          where: { key: IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY, value_json: registryRowBefore.value_json },
+          data: { value_json: serializedRegistry, updated_by: updatedBy },
+        });
+        if (swapped.count !== 1) {
+          throw new ImageGenerationChannelError('配置已被其他管理员修改，请刷新后重试；未覆盖较新的设置', 409, 'image_channel_revision_conflict');
+        }
+      } else {
+        await tx.platformSetting.create({
+          data: { key: IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY, value_json: serializedRegistry, updated_by: updatedBy },
+        });
+      }
+    } catch (error) {
+      if (error instanceof ImageGenerationChannelError) throw error;
+      if (isRecord(error) && error.code === 'P2002') {
+        throw new ImageGenerationChannelError('该图片供应商配置已被其他管理员创建，请刷新后重试', 409, 'image_channel_revision_conflict');
+      }
+      throw error;
+    }
+    const resolved = await hydrateActualBilling(managedSettingsFromVersion(version), tx);
+    if (enabled && !deleted) {
+      const readiness = await Promise.all(IMAGE_STUDIO_MODELS.filter(model => modelCapabilities[model]?.enabled)
+        .map(model => modelDisabledReason(resolved, model, tx)));
+      if (!readiness.some(reason => reason === null)) {
+        throw new ImageGenerationChannelError(readiness.find(reason => reason) || '没有可启用的完整型号能力', 400, 'image_channel_not_ready');
+      }
+    }
+    const result = await registryDto(record, resolved, tx);
+    await tx.operationLog.create({
+      data: {
+        operator_id: updatedBy,
+        action: `image_generation_channel_${operation}`,
+        target_type: 'PlatformSetting',
+        target_id: id,
+        detail: JSON.stringify({
+          revision: configRevision,
+          enabled,
+          deleted,
+          api_key_configured: Boolean(apiKey),
+          model_count: Object.values(modelCapabilities).filter(capability => capability.enabled).length,
+        }),
+      },
+    });
+    return result;
+  });
+}
+
+export async function createManagedImageGenerationChannel(input: ManagedImageGenerationChannelInput, updatedBy: string) {
+  if (input.supplierKind === 'fluxport') throw new ImageGenerationChannelError('FluxPort 是预设通道，不作为新供应商重复创建', 400, 'image_channel_reserved_supplier');
+  return saveManagedRecord(input, updatedBy, 'create');
+}
+
+export async function updateManagedImageGenerationChannel(input: ManagedImageGenerationChannelInput, updatedBy: string) {
+  return saveManagedRecord(input, updatedBy, 'update');
+}
+
+export async function archiveManagedImageGenerationChannel(input: ManagedImageGenerationChannelInput, updatedBy: string) {
+  return saveManagedRecord(input, updatedBy, 'archive');
+}
+
+export async function restoreManagedImageGenerationChannel(input: ManagedImageGenerationChannelInput, updatedBy: string) {
+  return saveManagedRecord(input, updatedBy, 'restore');
 }
 
 export function isImageGenerationApiReady(settings: ImageGenerationApiSettings) {
@@ -626,6 +1859,13 @@ export async function createImageGeneration(params: {
   try {
     if (isStudioImageGenerationProvider(params.settings.provider)
       && IMAGE_STUDIO_MODELS.includes(params.settings.default_model as typeof IMAGE_STUDIO_MODELS[number])) {
+      const resolvedSettings = params.settings as ImageGenerationResolvedSettings;
+      const managedProtocol = resolvedSettings.managedChannel
+        ? resolvedSettings.modelCapabilities[params.settings.default_model as ImageStudioModel]?.protocol
+        : undefined;
+      if (resolvedSettings.managedChannel && !managedProtocol) {
+        throw new ImageGenerationApiError('所选图片供应商修订缺少该型号的明确请求协议', 409, 'image_generation_channel_protocol_missing');
+      }
       const images: StudioImageInput[] = [];
       for (const source of normalizeReferenceImages(params.referenceImages, 10)) {
         const inline = source.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=]+)$/i);
@@ -639,7 +1879,8 @@ export async function createImageGeneration(params: {
       const request = {
         baseUrl: params.settings.base_url,
         apiKey: params.settings.api_key || '',
-        provider: params.settings.provider as 'musk' | 'ai_media_vip',
+        provider: params.settings.provider === 'musk' ? 'musk' as const : 'ai_media_vip' as const,
+        ...(managedProtocol ? { protocol: managedProtocol } : {}),
         model: params.settings.default_model,
         prompt: params.prompt,
         quality: normalizeImageStudioQuality(params.settings.default_model, params.quality || 'auto'),
@@ -651,7 +1892,10 @@ export async function createImageGeneration(params: {
       };
       // Gemini generateContent produces one image per call; count is not an API parameter.
       // Each slot is requested once, never retried after an uncertain upstream result.
-      const attempts = params.settings.provider === 'musk' && GEMINI_IMAGE_MODELS.has(params.settings.default_model)
+      const usesGeminiProtocol = managedProtocol
+        ? managedProtocol === 'gemini_native'
+        : params.settings.provider === 'musk' && GEMINI_IMAGE_MODELS.has(params.settings.default_model);
+      const attempts = usesGeminiProtocol
         ? Array.from({ length: count }, () => requestStudioImages({ ...request, count: 1 }))
         : [requestStudioImages(request)];
       const completed = await Promise.allSettled(attempts);
