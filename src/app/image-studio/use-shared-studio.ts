@@ -107,7 +107,7 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
             if (cursor && seenCursors.has(cursor)) throw new Error('模板目录暂不可用');
             if (cursor) seenCursors.add(cursor);
           } while (cursor && pages < targetPages);
-          commit({ owner: userId, items: [...items.values()], revision: revision.catalogRevision, cursor, pages, ready: true });
+          commit({ owner: userId, items: Array.from(items.values()), revision: revision.catalogRevision, cursor, pages, ready: true });
         }
         if (presetId && revision.activeAvailable === false) {
           appliedToken = '';
