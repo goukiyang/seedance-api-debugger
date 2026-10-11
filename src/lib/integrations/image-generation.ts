@@ -20,6 +20,9 @@ import {
   parseImageGenerationDefaultRoutes,
 } from '@/lib/integrations/image-generation-defaults';
 import {
+  IMAGE_API_GROUPS, imageApiGroupModels,
+  type ImageApiGroup, type ImageApiGroupFormDto, type ImageApiGroupSettings,
+  type ImageApiGroupSaveReceipt,
   type ImageGenerationChannelDto,
   type ImageGenerationChannelId,
   type ImageGenerationChannelProtocol,
@@ -790,7 +793,7 @@ function parseManagedCapabilities(
     };
     const qualities = parseCapabilityList('qualities', IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model]);
     const resolutions = parseCapabilityList('resolutions', IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[model]);
-    const ratios = parseCapabilityList('ratios', STUDIO_RATIOS);
+    const ratios = parseCapabilityList('ratios', ['auto', ...STUDIO_RATIOS]);
     const rawMaxReferences = source.maxReferences;
     const maxReferences = rawMaxReferences === null || rawMaxReferences === undefined || rawMaxReferences === ''
       ? null
@@ -1574,7 +1577,9 @@ export async function getImageGenerationChannelOptions(
   items.push(await channelOption(fluxport, fluxport.label || 'FluxPort', 'FluxPort', Boolean((fluxport.api_key || Object.values(fluxport.modelApiKeys || {}).some(Boolean)) && fluxport.base_url), fluxport.enabled, client));
   for (const settings of channels.managed) {
     if (settings.deleted) continue;
-    items.push(await channelOption(settings, settings.label || settings.supplierName, settings.supplierName,
+    const group = IMAGE_API_GROUPS.find(item => imageApiGroupSources(channels).some(id => imageApiGroupChannelId(item, id) === settings.channelId));
+    const label = `${settings.label || settings.supplierName}${group ? `（${group === 'banana' ? 'Banana' : 'Image'}组）` : ''}`;
+    items.push(await channelOption(settings, label, settings.supplierName,
       Boolean((settings.api_key || Object.values(settings.modelApiKeys || {}).some(Boolean)) && settings.base_url), settings.enabled, client));
   }
 
@@ -1749,46 +1754,336 @@ export async function setImageGenerationModelDefaultRoute(
   });
 }
 
+// Group copies use the existing managed-channel/immutable-version protocol.
+// The stable id also identifies copies without adding a second routing table.
+function imageApiGroupChannelId(group: ImageApiGroup, sourceId: string) {
+  const hex = modelApiSourceRevision(['image-api-group.v1', group, sourceId]);
+  return `image-${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+function imageApiGroupSources(channels: ImageGenerationChannels) {
+  const ids = ['shared', 'banana', ...channels.registry.channels.map(channel => channel.id)];
+  const copies = new Set(ids.flatMap(id => IMAGE_API_GROUPS.map(group => imageApiGroupChannelId(group, id))));
+  return ids.filter(id => !copies.has(id));
+}
+
+const IMAGE_API_GROUP_READONLY_SETTINGS = {
+  defaultModel: 'default_model', timeoutMs: 'timeout_ms', maxOutputs: 'max_outputs_per_request',
+  defaultRatio: 'default_ratio', defaultSize: 'default_size', outputFormat: 'output_format',
+  responseFormat: 'response_format', watermark: 'watermark', supportsTextToImage: 'supports_text_to_image',
+  supportsImageToImage: 'supports_image_to_image', supportsAsyncTask: 'supports_async_task',
+} as const;
+type ImageApiGroupRetainedSettings = Partial<Pick<ImageGenerationApiSettings,
+  typeof IMAGE_API_GROUP_READONLY_SETTINGS[keyof typeof IMAGE_API_GROUP_READONLY_SETTINGS]>>;
+
+// Admin saves preserve stored parameters without changing runtime normalization.
+async function readImageApiGroupRetainedSettings(client: Prisma.TransactionClient | typeof prisma,
+  key: string | null, versioned: boolean, settings: ImageGenerationApiSettings): Promise<ImageApiGroupRetainedSettings> {
+  if (!key) return {};
+  const row = await client.platformSetting.findUnique({ where: { key } });
+  if (!row) return {};
+  let parsed: unknown;
+  try { parsed = JSON.parse(row.value_json); } catch {
+    throw new ImageGenerationChannelError('原参数记录无法读取，已停止保存，请保留输入', 500, 'image_group_retained_settings_invalid');
+  }
+  const stored = versioned && isRecord(parsed) ? parsed.settings : parsed;
+  if (!isRecord(stored)) throw new ImageGenerationChannelError('原参数记录格式无效，已停止保存，请保留输入', 500, 'image_group_retained_settings_invalid');
+  const retained: Record<string, unknown> = {};
+  for (const field of Object.values(IMAGE_API_GROUP_READONLY_SETTINGS)) {
+    if (!Object.prototype.hasOwnProperty.call(stored, field)) continue;
+    if (typeof stored[field] !== typeof settings[field]) {
+      throw new ImageGenerationChannelError('原参数记录类型无效，已停止保存，请保留输入', 500, 'image_group_retained_settings_invalid');
+    }
+    retained[field] = stored[field];
+  }
+  return retained as ImageApiGroupRetainedSettings;
+}
+
+async function imageApiGroupSource(channels: ImageGenerationChannels, group: ImageApiGroup, id: string,
+  client: Prisma.TransactionClient | typeof prisma) {
+  if (!imageApiGroupSources(channels).includes(id)) throw new ImageGenerationChannelError('所选供应商不在原配置列表中');
+  const models = imageApiGroupModels(group);
+  const rootRecord = channels.registry.channels.find(channel => channel.id === id);
+  const copyId = imageApiGroupChannelId(group, id);
+  const copyRecord = channels.registry.channels.find(channel => channel.id === copyId);
+  const legacy = id === 'shared' || id === 'banana';
+  const root = legacy ? selectImageGenerationSettings(channels, models[0], id)
+    : await resolveCurrentManagedSettings(rootRecord!, client);
+  const settings = copyRecord ? await resolveCurrentManagedSettings(copyRecord, client) : root;
+  const versionRecord = copyRecord || rootRecord;
+  const retainedSettingsKey = versionRecord
+    ? versionRecord.configRevision ? privateVersionKey(versionRecord.id, versionRecord.configRevision) : null
+    : legacy ? id === 'banana' ? BANANA_IMAGE_API_SETTING_KEY : IMAGE_GENERATION_API_SETTING_KEY : null;
+  const retainedSettings = await readImageApiGroupRetainedSettings(client, retainedSettingsKey,
+    Boolean(versionRecord?.configRevision), settings);
+  const modelCapabilities: Partial<Record<ImageStudioModel, ImageGenerationModelCapability>> = {};
+  for (const model of models) {
+    const resolved = !copyRecord && legacy ? selectImageGenerationSettings(channels, model, id) : settings;
+    let capability = resolved.modelCapabilities[model];
+    if (capability && !copyRecord && legacy) {
+      const intent = await legacyBillingIntentState(resolved, model, client);
+      if (intent.selected) capability = { ...capability, billingMode: 'actual', billingSource: 'same_scope_actual_billing_proof', actualQuoteRequired: intent.quoteReady };
+    }
+    if (capability) modelCapabilities[model] = { ...capability };
+  }
+  const modelApiKeys = Object.fromEntries(models.flatMap(model => settings.modelApiKeys?.[model] ? [[model, settings.modelApiKeys[model]]] : []));
+  const sourceRevision = modelApiSourceRevision([group, id,
+    legacy ? [channels[id as 'shared' | 'banana'], channels.legacyModelApis[id as 'shared' | 'banana'], modelCapabilities] : rootRecord,
+    copyRecord || null, retainedSettings]);
+  const label = root.label || (id === 'shared' ? '原图片接口' : id === 'banana' ? '原Banana接口' : root.supplierName);
+  const supplierName = (legacy ? providerSupplierName(root.provider) : root.supplierName) || '原供应商';
+  return { settings: { ...settings, label: settings.label || label, supplierName: copyRecord ? settings.supplierName : supplierName,
+    default_model: !copyRecord && legacy ? channels[id as 'shared' | 'banana'].default_model : settings.default_model,
+    modelCapabilities, modelApiKeys }, retainedSettings, sourceRevision, root, rootRecord, copyRecord, copyId,
+    deleted: root.deleted === true || copyRecord?.deleted === true,
+    label, supplierName };
+}
+
+function imageApiGroupSettings(settings: ImageGenerationResolvedSettings): ImageApiGroupSettings {
+  return { label: settings.label || '图片接口', supplierName: settings.supplierName || providerSupplierName(settings.provider) || '原供应商',
+    provider: settings.provider, baseUrl: settings.inherited_base_url || settings.base_url,
+    defaultModel: settings.default_model,
+    timeoutMs: settings.timeout_ms, maxOutputs: settings.max_outputs_per_request, defaultRatio: settings.default_ratio,
+    defaultSize: settings.default_size, outputFormat: settings.output_format, responseFormat: settings.response_format,
+    watermark: settings.watermark, supportsTextToImage: settings.supports_text_to_image,
+    supportsImageToImage: settings.supports_image_to_image, supportsAsyncTask: settings.supports_async_task };
+}
+
+export async function getImageApiGroupForms(client: Prisma.TransactionClient | typeof prisma = prisma): Promise<ImageApiGroupFormDto[]> {
+  const defaults = await getImageGenerationDefaultRoutes(client);
+  const channels = await getImageGenerationChannels(client);
+  const forms: ImageApiGroupFormDto[] = [];
+  for (const group of IMAGE_API_GROUPS) {
+    const models = imageApiGroupModels(group);
+    const defaultChannelIds = Object.fromEntries(models.map(model => [model, defaults.models[model] || (group === 'banana' ? 'banana' : 'shared')]));
+    const providers: ImageApiGroupFormDto['providers'] = [];
+    for (const id of imageApiGroupSources(channels)) {
+      const source = await imageApiGroupSource(channels, group, id, client);
+      const settings = await hydrateActualBilling(source.settings, client);
+      const modelDtos: ImageApiGroupFormDto['providers'][number]['models'] = {};
+      for (const model of models) {
+        const capability = settings.modelCapabilities[model];
+        const reason = source.deleted ? '该供应商已归档，未恢复原配置'
+          : !isStudioImageGenerationProvider(settings.provider) ? '现有接口类型未支持本组型号，仍可编辑并保存停用配置'
+            : await modelDisabledReason(settings, model, client);
+        modelDtos[model] = { enabled: capability?.enabled === true,
+          protocol: capability?.protocol || (group === 'banana' ? 'gemini_native' : 'openai_images'),
+          upstreamModel: capability?.upstreamModel || null, baseUrl: capability?.baseUrl || null,
+          apiKeyConfigured: Boolean(resolveImageGenerationModelSettings(settings, model).api_key),
+          apiKeyOverrideConfigured: Boolean(settings.modelApiKeys?.[model]), ready: !reason, disabledReason: reason,
+          billingMode: capability?.billingMode || null, fixedPoints: capability?.fixedPoints ?? null,
+          billingSource: capability?.billingSource || null, actualQuoteRequired: capability?.actualQuoteRequired === true,
+          qualities: capability?.qualities ?? null, resolutions: capability?.resolutions ?? null, ratios: capability?.ratios ?? null,
+          maxReferences: capability?.maxReferences ?? null };
+      }
+      providers.push({ id, channelId: source.copyRecord ? source.copyId : id,
+        label: settings.label === settings.supplierName ? settings.supplierName : `${settings.supplierName}（${settings.label}）`,
+        supplierName: settings.supplierName, groupConfigured: Boolean(source.copyRecord), enabled: settings.enabled, deleted: source.deleted, sourceRevision: source.sourceRevision,
+        apiKeyConfigured: Boolean(settings.inherited_api_key !== undefined ? settings.inherited_api_key : settings.api_key),
+        settings: imageApiGroupSettings({ ...settings, ...source.retainedSettings }), models: modelDtos });
+    }
+    const selected = providers.find(provider => models.every(model => defaultChannelIds[model] === provider.channelId));
+    forms.push({ group, defaultProviderId: selected?.id || null, defaultChannelIds, providers });
+  }
+  return forms;
+}
+
+function imageApiGroupReceiptId(actorId: string, mutationId: string) {
+  return `image-group-save-${modelApiSourceRevision([actorId, mutationId])}`;
+}
+export async function readImageApiGroupSaveReceipt(actorId: string, mutationId: string,
+  client: Prisma.TransactionClient | typeof prisma = prisma) {
+  if (!/^[A-Za-z0-9_-]{1,160}$/.test(mutationId)) throw new ImageGenerationChannelError('保存操作编号无效');
+  const row = await client.operationLog.findUnique({ where: { id: imageApiGroupReceiptId(actorId, mutationId) } });
+  if (!row || row.operator_id !== actorId || row.action !== 'image_generation_group_api_save') return null;
+  const value: unknown = JSON.parse(row.detail || '{}');
+  if (!isRecord(value) || !isRecord(value.receipt) || typeof value.requestHash !== 'string') {
+    throw new ImageGenerationChannelError('原保存回执无法读取，请保留输入', 409, 'image_group_receipt_invalid');
+  }
+  return { requestHash: value.requestHash, receipt: value.receipt as ImageApiGroupSaveReceipt };
+}
+
+function imageApiGroupKey(value: unknown) {
+  if (typeof value !== 'string' || value.length > 500) throw new ImageGenerationChannelError('API Key 格式无效');
+  const key = value.trim();
+  if (key && (/[*•●…]{3,}/.test(key) || /[\r\n\x00-\x1f\x7f]/.test(key))) {
+    throw new ImageGenerationChannelError('请填写真实 API Key，不能保存掩码');
+  }
+  return key;
+}
+
+function patchImageApiGroupSettings(current: ImageApiGroupSettings, patch: unknown): ImageApiGroupSettings {
+  if (patch === undefined) return current;
+  if (!isRecord(patch) || Object.keys(patch).some(key => !Object.prototype.hasOwnProperty.call(current, key))) {
+    throw new ImageGenerationChannelError('共用设置包含不支持的字段');
+  }
+  if (Object.keys(IMAGE_API_GROUP_READONLY_SETTINGS).some(field => Object.prototype.hasOwnProperty.call(patch, field)
+    && !Object.is(patch[field], current[field as keyof ImageApiGroupSettings]))) {
+    throw new ImageGenerationChannelError('原默认参数和共用能力标记在此只读；本组普通生图仍为每任务 1 张、PNG、300000ms，输入未保存', 400, 'image_group_readonly_setting');
+  }
+  const next = { ...current, ...patch };
+  if (typeof next.label !== 'string' || !next.label.trim() || next.label.length > 120
+    || typeof next.supplierName !== 'string' || !next.supplierName.trim() || next.supplierName.length > 120
+    || !['musk', 'ai_media_vip', 'seedream', 'fluxport', 'managed'].includes(String(next.provider))
+    || typeof next.baseUrl !== 'string' || next.baseUrl.length > 2048) {
+    throw new ImageGenerationChannelError('供应商名称、接口类型或共用地址无效，输入未保存');
+  }
+  return next;
+}
+
+/** Group configuration, immutable version and only this group's defaults commit together. */
+export async function saveImageApiGroupForm(input: Record<string, unknown>, actorId: string) {
+  if (Object.keys(input).some(key => !['channel_action', 'mutation_id', 'group', 'channelId', 'apiKey', 'clearApiKey', 'enabled', 'settings', 'models', 'expectedSourceRevision', 'expectedDefaultRevision'].includes(key))
+    || input.channel_action !== 'save-api-group' || !IMAGE_API_GROUPS.includes(input.group as ImageApiGroup)
+    || typeof input.mutation_id !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(input.mutation_id)
+    || typeof input.channelId !== 'string' || typeof input.enabled !== 'boolean'
+    || input.clearApiKey !== undefined && typeof input.clearApiKey !== 'boolean'
+    || !Number.isSafeInteger(input.expectedDefaultRevision) || Number(input.expectedDefaultRevision) < 0
+    || typeof input.expectedSourceRevision !== 'string' || !/^[a-f0-9]{64}$/.test(input.expectedSourceRevision)) {
+    throw new ImageGenerationChannelError('分组、供应商或保存版本无效，请保留输入重新读取');
+  }
+  const group = input.group as ImageApiGroup, id = input.channelId, mutationId = input.mutation_id, enabled = input.enabled;
+  const models = imageApiGroupModels(group), key = imageApiGroupKey(input.apiKey);
+  if (input.clearApiKey === true && key) throw new ImageGenerationChannelError('共用密钥不能同时替换和清除');
+  const modelPatch = input.models === undefined ? {} : input.models;
+  const modelFields = ['enabled', 'protocol', 'upstreamModel', 'baseUrl', 'apiKey', 'clearApiKey', 'qualities', 'resolutions', 'ratios', 'maxReferences', 'billingMode', 'fixedPoints'];
+  if (!isRecord(modelPatch) || Object.entries(modelPatch).some(([model, value]) => !models.includes(model as ImageStudioModel)
+    || !isRecord(value) || Object.keys(value).some(field => !modelFields.includes(field)))) {
+    throw new ImageGenerationChannelError('只能保存本组的合法型号设置，其他分组未改');
+  }
+  const requestHash = modelApiSourceRevision({ ...input, apiKey: key });
+  const replay = async (client: Prisma.TransactionClient | typeof prisma) => {
+    const saved = await readImageApiGroupSaveReceipt(actorId, mutationId, client);
+    if (!saved) return null;
+    if (saved.requestHash !== requestHash) throw new ImageGenerationChannelError('保存编号已用于不同输入，原结果未覆盖', 409, 'image_group_mutation_conflict');
+    return { receipt: saved.receipt, replayed: true };
+  };
+  const prior = await replay(prisma);
+  if (prior) return prior;
+  const before = await imageApiGroupSource(await getImageGenerationChannels(), group, id, prisma);
+  if (before.deleted) throw new ImageGenerationChannelError('供应商已归档，本次保存不会恢复它', 409, 'image_channel_archived');
+  const shared = patchImageApiGroupSettings(imageApiGroupSettings({ ...before.settings, ...before.retainedSettings }), input.settings);
+  if (id === 'fluxport' && shared.provider !== 'fluxport' || id !== 'fluxport' && shared.provider === 'fluxport') {
+    throw new ImageGenerationChannelError('FluxPort 使用固定供应商身份，请选择对应供应商，不合并其他通道');
+  }
+  if (enabled && !isStudioImageGenerationProvider(shared.provider)) {
+    throw new ImageGenerationChannelError('此接口类型尚未支持本组型号；可停用后保存，不会假称可生成');
+  }
+  const baseUrl = shared.baseUrl.trim() ? await validateManagedBaseUrl(shared.baseUrl) : '';
+  if (enabled && !baseUrl) throw new ImageGenerationChannelError('启用本组前请填写 API 地址；停用时可保留未完整设置');
+  const validatedBases: Partial<Record<ImageStudioModel, string>> = {};
+  for (const model of models) {
+    const patch = modelPatch[model];
+    if (!isRecord(patch)) continue;
+    if (patch.enabled !== undefined && typeof patch.enabled !== 'boolean'
+      || patch.clearApiKey !== undefined && typeof patch.clearApiKey !== 'boolean'
+      || patch.billingMode !== undefined && patch.billingMode !== null && patch.billingMode !== 'fixed' && patch.billingMode !== 'actual') {
+      throw new ImageGenerationChannelError(`型号 ${model} 的开关或计费选择无效`);
+    }
+    const modelKey = patch.apiKey === undefined ? '' : imageApiGroupKey(patch.apiKey);
+    if (modelKey && patch.clearApiKey === true) throw new ImageGenerationChannelError('型号密钥不能同时替换和改为继承');
+    for (const field of ['qualities', 'resolutions', 'ratios']) {
+      const value = patch[field];
+      if (value !== undefined && value !== null && typeof value !== 'string'
+        && (!Array.isArray(value) || value.some(item => typeof item !== 'string'))) throw new ImageGenerationChannelError(`型号 ${model} 的规格格式无效`);
+    }
+    if (patch.baseUrl !== undefined && patch.baseUrl !== null && typeof patch.baseUrl !== 'string') throw new ImageGenerationChannelError('型号地址格式无效');
+    if (typeof patch.baseUrl === 'string' && patch.baseUrl.trim()) validatedBases[model] = await validateManagedBaseUrl(patch.baseUrl);
+  }
+  try {
+    return await prisma.$transaction(async tx => {
+      const existing = await replay(tx);
+      if (existing) return existing;
+      const defaultRow = await tx.platformSetting.findUnique({ where: { key: IMAGE_GENERATION_MODEL_DEFAULTS_SETTING_KEY } });
+      const defaults = parseImageGenerationDefaultRoutes(defaultRow?.value_json);
+      if (defaults.revision !== input.expectedDefaultRevision || defaults.revision >= Number.MAX_SAFE_INTEGER) {
+        throw new ImageGenerationChannelError('默认供应商已变化，输入已保留，请重新读取核对', 409, 'image_generation_default_revision_conflict');
+      }
+      const channels = await getImageGenerationChannels(tx);
+      const source = await imageApiGroupSource(channels, group, id, tx);
+      if (source.deleted || source.sourceRevision !== input.expectedSourceRevision) {
+        throw new ImageGenerationChannelError('供应商配置已变化，输入已保留，请重新读取核对', 409, 'image_channel_revision_conflict');
+      }
+      const modelCapabilities = { ...source.settings.modelCapabilities }, modelApiKeys = { ...source.settings.modelApiKeys };
+      for (const model of models) {
+        const patch = modelPatch[model];
+        if (!isRecord(patch)) continue;
+        const current = modelCapabilities[model];
+        const capability = parseManagedCapabilities({ [model]: { ...current, ...patch } }, source.copyId,
+          group === 'banana' ? 'gemini_native' : 'openai_images')[model];
+        if (!capability) throw new ImageGenerationChannelError(`型号 ${model} 缺少合法协议，输入未保存`);
+        if (current && patch.billingMode === undefined && patch.fixedPoints === undefined) capability.billingSource = current.billingSource;
+        if (validatedBases[model]) capability.baseUrl = validatedBases[model];
+        modelCapabilities[model] = capability;
+        const modelKey = patch.apiKey === undefined ? '' : imageApiGroupKey(patch.apiKey);
+        if (patch.clearApiKey === true) delete modelApiKeys[model];
+        else if (modelKey) modelApiKeys[model] = modelKey;
+      }
+      const oldKey = source.settings.inherited_api_key !== undefined ? source.settings.inherited_api_key : source.settings.api_key;
+      const apiKey = input.clearApiKey === true ? null : key || oldKey || null;
+      if (enabled && !apiKey && !Object.values(modelApiKeys).some(Boolean)) {
+        throw new ImageGenerationChannelError('启用本组前请填写共用 Key 或型号独立 Key；输入未保存');
+      }
+      const settings: ImageGenerationApiSettings = {
+        enabled, provider: shared.provider, base_url: baseUrl, default_model: shared.defaultModel,
+        api_key: apiKey, timeout_ms: shared.timeoutMs, max_outputs_per_request: shared.maxOutputs,
+        default_ratio: shared.defaultRatio, default_size: shared.defaultSize, output_format: shared.outputFormat,
+        response_format: shared.responseFormat, watermark: shared.watermark, supports_text_to_image: shared.supportsTextToImage,
+        supports_image_to_image: shared.supportsImageToImage, supports_async_task: shared.supportsAsyncTask,
+      };
+      const configRevision = randomUUID();
+      const version: PrivateImageGenerationChannelVersion = {
+        version: 1, channelId: source.copyId, configRevision, label: shared.label.trim(),
+        supplierName: shared.supplierName.trim(),
+        supplierKind: shared.provider === source.settings.provider ? source.settings.supplierKind : shared.provider === 'musk' ? 'musk' : 'other',
+        protocol: source.settings.protocol,
+        managedChannel: true, settings, modelCapabilities, modelApiKeys, deleted: false,
+      };
+      const registry = channels.registry;
+      const registryRow = await tx.platformSetting.findUnique({ where: { key: IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY } });
+      const record: ManagedChannelRegistryRecord = {
+        id: source.copyId, label: version.label, supplierName: version.supplierName,
+        supplierKind: version.supplierKind === 'musk' || shared.provider === 'musk' ? 'musk' : 'other',
+        protocol: group === 'banana' ? 'gemini_native' : 'openai_images', baseUrl,
+        enabled, deleted: false, configRevision, modelCapabilities,
+      };
+      const index = registry.channels.findIndex(channel => channel.id === record.id);
+      if (index < 0) registry.channels.push(record); else registry.channels[index] = record;
+      await writePrivateChannelVersion(tx, version, actorId);
+      await swapSimpleModelSetting(tx, IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY, registryRow?.value_json, JSON.stringify(registry), actorId);
+      const defaultRoutes = { revision: defaults.revision + 1,
+        models: { ...defaults.models, ...Object.fromEntries(models.map(model => [model, source.copyId])) } };
+      await swapSimpleModelSetting(tx, IMAGE_GENERATION_MODEL_DEFAULTS_SETTING_KEY, defaultRow?.value_json,
+        JSON.stringify({ version: 1, ...defaultRoutes }), actorId);
+      const receipt: ImageApiGroupSaveReceipt = { mutationId, group, providerId: id, channelId: source.copyId,
+        enabled, apiKeyConfigured: Boolean(apiKey), defaultRoutes, savedAt: new Date().toISOString() };
+      await tx.operationLog.create({ data: { id: imageApiGroupReceiptId(actorId, mutationId), operator_id: actorId,
+        action: 'image_generation_group_api_save', target_type: 'PlatformSetting', target_id: source.copyId,
+        detail: JSON.stringify({ requestHash, receipt }) } });
+      return { receipt, replayed: false };
+    }, { timeout: 15000 });
+  } catch (error) {
+    if (isRecord(error) && ['P2002', 'P2034', 'P1008', 'P2028'].includes(String(error.code))) {
+      const receipt = await replay(prisma);
+      if (receipt) return receipt;
+      throw new ImageGenerationChannelError('保存结果尚未确认，请查询原保存回执，不要重复提交', 409, 'image_group_save_unknown');
+    }
+    throw error;
+  }
+}
+
 export type ImageModelApiFormDto = {
   model: ImageStudioModel; defaultChannelId: string;
   providers: { id: string; label: string; supplierName: string; revision: string | null;
     sourceRevision: string; apiKeyConfigured: boolean; canSave: boolean; reason: string | null }[];
 };
 export type ImageModelApiSaveReceipt = {
-  mutationId: string; model: ImageStudioModel; channelId: string; apiKeyConfigured: true;
+  mutationId: string; model: ImageStudioModel; channelId: string; apiKeyConfigured: boolean; enabled: boolean;
   defaultRoutes: Awaited<ReturnType<typeof getImageGenerationDefaultRoutes>>; savedAt: string;
 };
 
 function modelApiSourceRevision(value: unknown) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
-}
-
-async function simpleManagedCapability(record: ManagedChannelRegistryRecord, model: ImageStudioModel,
-  client: Prisma.TransactionClient | typeof prisma) {
-  const existing = record.modelCapabilities[model];
-  if (!existing) return undefined;
-  let capability = { ...existing, enabled: true };
-  // Only the already-supported narrow Flare preset may fill missing values.
-  if (record.id === 'fluxport' && model === 'gpt-image-2.5-flare') {
-    const settings = await getImageStudioSettings(client);
-    const { imageBillingIntent } = await import('@/lib/image-studio/billing-readiness');
-    const intent = await imageBillingIntent(client);
-    const points = settings.prices[model];
-    if (!(intent.enabled && intent.enabledModels.includes(model)) && Number.isSafeInteger(points) && Number(points) >= 0) {
-      capability = { ...capability, qualities: capability.qualities ?? ['auto'], resolutions: capability.resolutions ?? ['1K'],
-        ratios: capability.ratios ?? ['1:1'], maxReferences: capability.maxReferences ?? 0,
-        billingMode: capability.billingMode ?? 'fixed',
-        ...(!capability.billingMode || capability.billingMode === 'fixed' ? {
-          fixedPoints: capability.fixedPoints ?? Number(points), billingSource: capability.billingSource ?? 'legacy_image_studio_contract',
-        } : {}) };
-    }
-  }
-  return capability;
-}
-
-function sharedEnablementReason(record: ManagedChannelRegistryRecord, model: ImageStudioModel) {
-  return !record.enabled && Object.entries(record.modelCapabilities).some(([id, capability]) => id !== model && capability?.enabled)
-    ? '此供应商的公共开关已关闭；开启它会连带其他型号，本表单不能安全单独启用。' : null;
 }
 
 export async function getImageModelApiForms(client: Prisma.TransactionClient | typeof prisma = prisma): Promise<ImageModelApiFormDto[]> {
@@ -1800,23 +2095,19 @@ export async function getImageModelApiForms(client: Prisma.TransactionClient | t
     const providers: ImageModelApiFormDto['providers'] = [];
     for (const id of ['shared', 'banana'] as const) {
       const settings = selectImageGenerationSettings(legacy, model, id);
-      const reason = !isStudioImageGenerationProvider(settings.provider) ? '该接口没有此型号的合法生图协议。'
-        : !settings.enabled ? '此原供应商的公共通道已关闭；开启会影响其他型号，本表单不能安全单独启用。'
-          : !settings.base_url ? '此供应商缺少已确认的API地址。' : modelCapabilityCompleteness(settings.modelCapabilities[model]);
+      const reason = await modelDisabledReason(settings, model, client);
       const sourceRevision = modelApiSourceRevision([legacy[id], legacy.legacyModelApis[id]]);
       providers.push({ id, label: `${providerSupplierName(settings.provider) || '原供应商'}（${id === 'shared' ? '通道1' : '通道2'}）`,
         supplierName: providerSupplierName(settings.provider) || '原供应商', revision: legacy.legacyModelApis[id].revision,
-        sourceRevision, apiKeyConfigured: Boolean(settings.api_key), canSave: !reason, reason });
+        sourceRevision, apiKeyConfigured: Boolean(settings.api_key), canSave: true, reason });
     }
     for (const channel of registry.channels) {
       if (channel.deleted) continue;
       const settings = await resolveCurrentManagedSettings(channel, client);
-      const capability = await simpleManagedCapability(channel, model, client);
-      const reason = sharedEnablementReason(channel, model) || modelCapabilityCompleteness(capability)
-        || (!channel.baseUrl ? '此供应商缺少已确认的API地址。' : null);
+      const reason = await modelDisabledReason(settings, model, client);
       providers.push({ id: channel.id, label: channel.label === channel.supplierName ? channel.supplierName : `${channel.supplierName}（${channel.label}）`,
         supplierName: channel.supplierName, revision: channel.configRevision, sourceRevision: modelApiSourceRevision(channel),
-        apiKeyConfigured: Boolean(resolveImageGenerationModelSettings(settings, model).api_key), canSave: !reason, reason });
+        apiKeyConfigured: Boolean(resolveImageGenerationModelSettings(settings, model).api_key), canSave: true, reason });
     }
     forms.push({ model, defaultChannelId: defaults.models[model] || (model.startsWith('gemini-') ? 'banana' : 'shared'), providers });
   }
@@ -1838,7 +2129,7 @@ export async function readImageModelApiSaveReceipt(actorId: string, mutationId: 
   return { requestHash: value.requestHash, receipt: value.receipt as ImageModelApiSaveReceipt };
 }
 
-/** Key, target enablement, immutable supplier version and default route commit together. */
+/** Compatibility writer preserves enablement; group enablement uses saveImageApiGroupForm. */
 export async function saveImageModelApiForm(input: Record<string, unknown>, actorId: string) {
   if (Object.keys(input).some(key => !['channel_action', 'mutation_id', 'model', 'channelId', 'apiKey', 'expectedRevision', 'expectedSourceRevision', 'expectedDefaultRevision'].includes(key))
     || input.channel_action !== 'save-model-api'
@@ -1868,7 +2159,7 @@ export async function saveImageModelApiForm(input: Record<string, unknown>, acto
   const selected = forms.find(form => form.model === model)?.providers.find(provider => provider.id === id);
   if (!selected || !selected.canSave) throw new ImageGenerationChannelError(selected?.reason || '供应商未配置或已归档', 409, 'image_model_preset_unavailable');
   const before = await getImageGenerationSettingsForModel(model, prisma, id);
-  await validateManagedBaseUrl(before.base_url);
+  if (before.base_url) await validateManagedBaseUrl(before.base_url);
   if (before.modelCapabilities[model]?.baseUrl) await validateManagedBaseUrl(before.modelCapabilities[model]!.baseUrl);
   try {
     return await prisma.$transaction(async tx => {
@@ -1886,10 +2177,6 @@ export async function saveImageModelApiForm(input: Record<string, unknown>, acto
         if (old.revision !== input.expectedRevision || modelApiSourceRevision([channels[id], old]) !== input.expectedSourceRevision) {
           throw new ImageGenerationChannelError('供应商设置已变化，请保留输入重新读取', 409, 'image_channel_revision_conflict');
         }
-        if (!channels[id].enabled) throw new ImageGenerationChannelError('公共通道已关闭，不能连带开启其他型号', 409, 'image_model_shared_enablement_blocked');
-        const current = selectImageGenerationSettings(channels, model, id);
-        if (!isStudioImageGenerationProvider(current.provider)) throw new ImageGenerationChannelError('此接口没有合法型号预设');
-        if (!key && !current.api_key) throw new ImageGenerationChannelError('请填写该供应商的API Key');
         const next: LegacyModelApiRegistry = { version: 1, revision: randomUUID(), models: { ...old.models,
           [model]: { ...old.models[model], ...(key ? { apiKey: key } : {}) } } };
         const settingKey = `${IMAGE_GENERATION_LEGACY_MODEL_API_SETTING_PREFIX}${id}`;
@@ -1909,21 +2196,15 @@ export async function saveImageModelApiForm(input: Record<string, unknown>, acto
         if (channel.configRevision !== input.expectedRevision || modelApiSourceRevision(channel) !== input.expectedSourceRevision) {
           throw new ImageGenerationChannelError('供应商设置已变化，请保留输入重新读取', 409, 'image_channel_revision_conflict');
         }
-        const blocked = sharedEnablementReason(channel, model);
-        if (blocked) throw new ImageGenerationChannelError(blocked, 409, 'image_model_shared_enablement_blocked');
-        const capability = await simpleManagedCapability(channel, model, tx);
-        const missing = modelCapabilityCompleteness(capability);
-        if (missing || !capability) throw new ImageGenerationChannelError(missing || '缺少合法型号预设', 409, 'image_model_preset_unavailable');
         const previous = await resolveCurrentManagedSettings(channel, tx);
         const modelApiKeys = { ...previous.modelApiKeys, ...(key ? { [model]: key } : {}) };
-        if (!key && !resolveImageGenerationModelSettings(previous, model).api_key) throw new ImageGenerationChannelError('请填写该供应商的API Key');
         const configRevision = randomUUID();
-        const modelCapabilities = { ...channel.modelCapabilities, [model]: capability };
-        const next = { ...channel, enabled: true, configRevision, modelCapabilities };
+        const modelCapabilities = { ...previous.modelCapabilities };
+        const next = { ...channel, configRevision, modelCapabilities };
         const version: PrivateImageGenerationChannelVersion = { version: 1, channelId: id, configRevision,
           label: channel.label, supplierName: channel.supplierName, supplierKind: channel.supplierKind,
           protocol: channel.protocol, managedChannel: true,
-          settings: { ...previous, enabled: true, api_key: previous.inherited_api_key !== undefined ? previous.inherited_api_key : previous.api_key,
+          settings: { ...previous, enabled: channel.enabled, api_key: previous.inherited_api_key !== undefined ? previous.inherited_api_key : previous.api_key,
             base_url: previous.inherited_base_url || previous.base_url }, modelCapabilities, modelApiKeys, deleted: false };
         await writePrivateChannelVersion(tx, version, actorId);
         registry.channels[index] = next;
@@ -1931,12 +2212,11 @@ export async function saveImageModelApiForm(input: Record<string, unknown>, acto
         savedSettings = managedSettingsFromVersion(version);
       }
       savedSettings = await hydrateActualBilling(savedSettings, tx);
-      const validation = validateImageGenerationChannel(savedSettings, { model });
-      if (!validation.ok) throw new ImageGenerationChannelError(validation.error, 409, validation.code);
       const defaultRoutes = { revision: defaults.revision + 1, models: { ...defaults.models, [model]: id } };
       await swapSimpleModelSetting(tx, IMAGE_GENERATION_MODEL_DEFAULTS_SETTING_KEY, defaultRow?.value_json,
         JSON.stringify({ version: 1, ...defaultRoutes }), actorId);
-      const receipt: ImageModelApiSaveReceipt = { mutationId, model, channelId: id, apiKeyConfigured: true,
+      const receipt: ImageModelApiSaveReceipt = { mutationId, model, channelId: id,
+        apiKeyConfigured: Boolean(resolveImageGenerationModelSettings(savedSettings, model).api_key), enabled: savedSettings.enabled,
         defaultRoutes, savedAt: new Date().toISOString() };
       await tx.operationLog.create({ data: { id: modelApiReceiptId(actorId, mutationId), operator_id: actorId,
         action: 'image_generation_model_api_save', target_type: 'PlatformSetting', target_id: id,

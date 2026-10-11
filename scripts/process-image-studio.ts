@@ -22,6 +22,7 @@ async function main() {
     'scripts/process-image-studio.ts',
     'src/lib/image-studio/worker.ts', 'src/lib/image-studio/provider.ts',
     'src/lib/integrations/image-generation.ts', 'src/lib/integrations/image-generation-defaults.ts',
+    'src/lib/integrations/image-generation-channel.ts',
     'src/lib/image-studio/batches.ts',
     'src/lib/image-studio/billing.ts', 'src/lib/tools/toolflow-runtime.ts',
   ].map(file => [file, createHash('sha256').update(fs.readFileSync(path.join(process.cwd(), file))).digest('hex')]));

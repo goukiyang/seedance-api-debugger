@@ -10,7 +10,7 @@ import ImageModelApiSettings from './ImageModelApiSettings';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { displayUserSubtitle } from '@/lib/users/display';
 import { VOLCENGINE_IP_MODEL_OPTIONS } from '@/lib/integrations/volcengine-ip-models';
-import { IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
+import { IMAGE_API_GROUPS } from '@/lib/integrations/image-generation-channel';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 
 type UserSelectorType = 'id' | 'email' | 'username';
@@ -268,7 +268,7 @@ export default function AdminIntegrationsClient() {
   const [h3QueueMessage, setH3QueueMessage] = useState<SubmitState>(null);
   const [imageDrafts, setImageDrafts] = useState<Record<string, boolean>>({});
   const onImageDraftChange = useCallback((drafts: Record<string, boolean>) => setImageDrafts(drafts), []);
-  const imageDraftSnapshot = Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [`imageModel:${model}`, Boolean(imageDrafts[model])]));
+  const imageDraftSnapshot = Object.fromEntries(IMAGE_API_GROUPS.map(group => [`imageGroup:${group}`, Boolean(imageDrafts[group])]));
   const settingsSubmit = useSettingsPageSubmit({
     codex: { config, entered: Boolean(token), clearToken },
     musk: { config: muskConfig, entered: Boolean(muskApiKey), clearMuskApiKey },
@@ -1410,7 +1410,7 @@ export default function AdminIntegrationsClient() {
       </form>
 
       <ImageModelApiSettings accountId={currentUser?.id || null} onDraftChange={onImageDraftChange}
-        onSaveStart={settingsSubmit.start} onSaveFinish={(model, saved) => settingsSubmit.finish(`imageModel:${model}`, saved)} />
+        onSaveStart={settingsSubmit.start} onSaveFinish={(group, saved) => settingsSubmit.finish(`imageGroup:${group}`, saved)} />
 
       <form className="card codex-config-form" onSubmit={saveConfig}>
         <div className="codex-config-head">

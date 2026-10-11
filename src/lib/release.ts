@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '图片API设置简化为按型号选择供应商、填写Key和保存，一次保存同步设置后续默认调用；左侧新增独立API设置入口。已有任务和其他型号配置保持不变。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '图片API按Image和Banana两组管理，选供应商后可打开编辑。停用配置也能保存，明确启用只作用于本组；型号独立设置和已提交任务保留。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

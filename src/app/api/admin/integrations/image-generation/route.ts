@@ -26,6 +26,9 @@ import {
   getImageModelApiForms,
   saveImageModelApiForm,
   readImageModelApiSaveReceipt,
+  getImageApiGroupForms,
+  saveImageApiGroupForm,
+  readImageApiGroupSaveReceipt,
 } from '@/lib/integrations/image-generation';
 
 export const dynamic = 'force-dynamic';
@@ -76,6 +79,10 @@ async function updateImageGenerationConfig(request: NextRequest) {
     const admin = await getAdminUser(request);
     const body = await request.json() as Record<string, unknown>;
     const channelAction = body.channel_action ?? body.channelAction;
+    if (channelAction === 'save-api-group') {
+      const result = await saveImageApiGroupForm(body, admin.id);
+      return NextResponse.json({ ok: true, ...result }, { headers: privateHeaders });
+    }
     if (channelAction === 'save-model-api') {
       const result = await saveImageModelApiForm(body, admin.id);
       return NextResponse.json({ ok: true, ...result }, { headers: privateHeaders });
@@ -186,6 +193,15 @@ async function updateImageGenerationConfig(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const admin = await getAdminUser(request);
+    const groupMutationId = request.nextUrl.searchParams.get('group_mutation_id');
+    if (groupMutationId !== null) {
+      const result = await readImageApiGroupSaveReceipt(admin.id, groupMutationId);
+      return NextResponse.json({ ok: true, found: Boolean(result), receipt: result?.receipt || null }, { headers: privateHeaders });
+    }
+    if (request.nextUrl.searchParams.get('view') === 'api-groups') {
+      const result = await prisma.$transaction(async tx => ({ forms: await getImageApiGroupForms(tx), defaultRoutes: await getImageGenerationDefaultRoutes(tx) }));
+      return NextResponse.json({ ok: true, ...result }, { headers: privateHeaders });
+    }
     const mutationId = request.nextUrl.searchParams.get('mutation_id');
     if (mutationId !== null) {
       const result = await readImageModelApiSaveReceipt(admin.id, mutationId);
