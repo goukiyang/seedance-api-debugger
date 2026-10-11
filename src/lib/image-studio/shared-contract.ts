@@ -13,7 +13,7 @@ import { normalizeStudioRatio } from './ratios';
 import { getImageStudioSettings } from './settings';
 import { MAX_REFERENCE_IMAGES } from './limits';
 import { studioTemplateAssetUrl } from './media';
-import type { SharedStudioCatalog, SharedStudioCatalogItem, SharedStudioDefaults, SharedStudioIntent, SharedStudioPersonalOverrides, SharedStudioPublicDefinition } from './shared-types';
+import type { SharedStudioCatalog, SharedStudioCatalogItem, SharedStudioDefaults, SharedStudioDefinitionPersonalInput, SharedStudioIntent, SharedStudioPersonalOverrides, SharedStudioPublicDefinition } from './shared-types';
 
 export type { SharedStudioIntent, SharedStudioPersonalOverrides } from './shared-types';
 export const SHARED_STUDIO_PROTOCOL = 'shared-live-v1' as const;
@@ -374,7 +374,37 @@ async function historicalDefinition(actor: ImageStudioIdentity, taskId: string, 
     globalContext: snapshot.globalContext, templateFixedReferences: refs };
 }
 
-export type PublishSharedStudioModuleInput = Record<string, unknown> & { requestId: unknown; expectedRevision: unknown };
+type SharedStudioPersonalPatch = { personalOverrides?: unknown; resetFields?: unknown; referenceIds?: unknown; referencePolicy?: unknown };
+// Shared personal text lives only in overrides; retain the legacy module text.
+async function writeSharedStudioPersonalState(actor: ImageStudioIdentity,
+  module: { id: string; reference_ids: string; reference_limit: number }, input: SharedStudioPersonalPatch, tx: SharedStudioClient) {
+  const changes: Pick<Prisma.ImageStudioModuleUpdateManyMutationInput, 'reference_ids'> = {};
+  if (has(input, 'personalOverrides') || has(input, 'resetFields')) {
+    const overrides = await getSharedStudioPersonalOverrides(actor.id, module.id, tx);
+    if (has(input, 'personalOverrides')) Object.assign(overrides, parseSharedStudioPersonalOverrides(input.personalOverrides));
+    const reset = input.resetFields ?? [];
+    if (!Array.isArray(reset) || reset.some(field => !overrideFields.includes(field))) throw new StudioSharingError('个人设置重置字段无效', 400);
+    for (const field of reset as Array<typeof overrideFields[number]>) delete overrides[field];
+    await writeSetting(tx, overridesKey(module.id), actor.id, { ownerId: actor.id, overrides });
+  }
+  if (has(input, 'referenceIds') || has(input, 'referencePolicy')) {
+    const ids = has(input, 'referenceIds') ? referenceIds(input.referenceIds) : storedIds(module.reference_ids);
+    const assets = await tx.asset.count({ where: { id: { in: ids }, owner_id: actor.id, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(actor, tx)] } });
+    if (assets !== ids.length) throw new StudioSharingError('本次图片已不可用或无权使用', 403);
+    if (has(input, 'referencePolicy')) {
+      const policy = parseStudioReferencePolicy(input.referencePolicy, ids);
+      const prior = await getStudioModuleReferencePolicy(actor.id, module.id, ids, module.reference_limit, tx);
+      // Keep the personal selection valid; live generation limits still come from the source.
+      await writeSetting(tx, `studio_reference_policy_v1:module:${actor.id}:${module.id}`, actor.id, { ownerId: actor.id,
+        policy: { ...prior, primaryMax: Math.max(prior.primaryMax, policy.primaryIds.length), primaryIds: policy.primaryIds } });
+    }
+    if (has(input, 'referenceIds')) changes.reference_ids = JSON.stringify(ids);
+  }
+  return changes;
+}
+
+export type PublishSharedStudioModuleInput = Record<string, unknown> & { requestId: unknown; expectedRevision: unknown }
+  & { [Field in keyof SharedStudioDefinitionPersonalInput]?: unknown };
 export async function publishSharedStudioModule(user: ImageStudioIdentity, moduleId: string, input: PublishSharedStudioModuleInput, client?: SharedStudioClient) {
   return inTransaction(client, async tx => {
     const actor = await assertStudioActor(user.id, tx);
@@ -484,15 +514,16 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
     await setStudioPresetFixedReferences(actor.id, presetId, fixedReferences, tx);
     await setStudioPresetReferencePolicy(actor.id, presetId, referencePolicy, templateIds, tx);
     await setStudioPresetStyleIds(actor, presetId, styleGroupIds, tx);
+    const personalChanges = await writeSharedStudioPersonalState(actor, module, {
+      ...(has(input, 'personalOverrides') ? { personalOverrides: input.personalOverrides } : {}),
+      ...(has(input, 'resetFields') ? { resetFields: input.resetFields } : {}),
+      ...(has(input, 'personalReferenceIds') ? { referenceIds: input.personalReferenceIds } : {}),
+      ...(has(input, 'personalReferencePolicy') ? { referencePolicy: input.personalReferencePolicy } : {}),
+    }, tx);
     const changed = await tx.imageStudioModule.updateMany({ where: { id: moduleId, owner_id: actor.id, revision: module.revision },
-      data: { source_preset_id: presetId, revision: module.revision + 1 } });
+      data: { ...personalChanges, source_preset_id: presetId, revision: module.revision + 1 } });
     if (changed.count !== 1) throw new StudioSharingError('模板已在其他页面保存，当前草稿仍保留', 409);
     await bindStudioModule(tx, moduleId, { protocol: SHARED_STUDIO_PROTOCOL, ownerId: actor.id, presetId, mode: 'publisher' });
-    // An existing author's input is explicit personal state, not a comparison with defaults.
-    if (!binding) await writeSetting(tx, overridesKey(moduleId), actor.id, { ownerId: actor.id, overrides: {
-      prompt: module.prompt, model: module.model || settings.model, quality: module.quality, resolution: module.resolution,
-      count: module.count, aspectRatio: module.aspect_ratio,
-    } });
     await restoreStudioDefaultGroup(actor.id, groupName, tx);
     const { definition } = await resolveSharedStudioDefinition(actor, presetId, tx);
     const result = { moduleId, presetId, beforeRevision: module.revision, revision: module.revision + 1,
@@ -537,24 +568,9 @@ export async function saveSharedStudioPersonal(user: ImageStudioIdentity, module
     if (!module || module.revision !== body.revision) throw new StudioSharingError('个人设置已在其他页面保存，当前草稿仍保留', 409);
     const forbidden = ['sourcePresetId', 'source_preset_id', 'ownerId', 'owner_id', 'templatePrompt', 'context', 'globalContext', 'fixedReferences', 'styleGroupIds', 'skillIds', 'isShared'];
     if (forbidden.some(field => has(body, field))) throw new StudioSharingError('个人保存不能修改共享模板定义', 403);
-    const overrides = await getSharedStudioPersonalOverrides(actor.id, moduleId, tx);
-    const incoming = parseSharedStudioPersonalOverrides(body.personalOverrides);
-    Object.assign(overrides, incoming);
-    const reset = body.resetFields ?? [];
-    if (!Array.isArray(reset) || reset.some(field => !overrideFields.includes(field))) throw new StudioSharingError('个人设置重置字段无效', 400);
-    for (const field of reset as Array<typeof overrideFields[number]>) delete overrides[field];
-    const ids = has(body, 'referenceIds') ? referenceIds(body.referenceIds) : storedIds(module.reference_ids);
-    const assets = await tx.asset.count({ where: { id: { in: ids }, owner_id: actor.id, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(actor, tx)] } });
-    if (assets !== ids.length) throw new StudioSharingError('本次图片已不可用或无权使用', 403);
-    if (has(body, 'referencePolicy')) {
-      const policy = parseStudioReferencePolicy(body.referencePolicy, ids);
-      const prior = await getStudioModuleReferencePolicy(actor.id, moduleId, ids, module.reference_limit, tx);
-      // Only the selection of primary images is personal; template limits stay server-owned.
-      await writeSetting(tx, `studio_reference_policy_v1:module:${actor.id}:${moduleId}`, actor.id, { ownerId: actor.id, policy: { ...prior, primaryIds: policy.primaryIds } });
-    }
-    await writeSetting(tx, overridesKey(moduleId), actor.id, { ownerId: actor.id, overrides });
+    const personalChanges = await writeSharedStudioPersonalState(actor, module, body, tx);
     const changed = await tx.imageStudioModule.updateMany({ where: { id: moduleId, owner_id: actor.id, revision: module.revision },
-      data: { prompt: overrides.prompt ?? '', reference_ids: JSON.stringify(ids), revision: module.revision + 1 } });
+      data: { ...personalChanges, revision: module.revision + 1 } });
     if (changed.count !== 1) throw new StudioSharingError('个人设置已在其他页面保存，当前草稿仍保留', 409);
     await writeReceipt(tx, actor.id, body.requestId, fingerprint, { moduleId, revision: module.revision + 1 });
     return tx.imageStudioModule.findUniqueOrThrow({ where: { id: moduleId } });

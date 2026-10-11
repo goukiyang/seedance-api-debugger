@@ -26,6 +26,7 @@ type PresetDraft = {
   presetId?: unknown; revision?: unknown;
   reproduceFromTaskId?: unknown;
   isShared?: unknown; requestId?: unknown; moduleRevision?: unknown; expectedRevision?: unknown; expectedDefinitionToken?: unknown; templatePrompt?: unknown;
+  personalOverrides?: unknown; resetFields?: unknown; personalReferenceIds?: unknown; personalReferencePolicy?: unknown;
 };
 
 function parseIds(value: unknown) {
@@ -160,7 +161,6 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
       if (!workspace) throw new StudioModuleError('模板来源模块不存在或无权使用', 403);
       const published = await publishSharedStudioModule(actor, moduleId, { ...body, requestId: body.requestId,
         expectedRevision: body.sourceModuleId ? body.moduleRevision ?? body.expectedRevision : 1 }, tx);
-      if (!body.sourceModuleId && !priorWorkspace) await tx.platformSetting.deleteMany({ where: { key: `studio_shared_overrides_v1:${moduleId}` } });
       return tx.imageStudioPreset.findUniqueOrThrow({ where: { id: published.presetId } });
     }, { timeout: 15000 });
   }

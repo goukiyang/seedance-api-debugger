@@ -17,6 +17,13 @@ export type SharedStudioDefaults = {
 };
 export type SharedStudioPersonalOverrides = Partial<Pick<SharedStudioDefaults, 'model' | 'quality' | 'resolution' | 'count' | 'aspectRatio'>> & { prompt?: string };
 export type SharedStudioOverrideField = keyof SharedStudioPersonalOverrides;
+// Optional personal changes submitted alongside an explicit definition save.
+export type SharedStudioDefinitionPersonalInput = {
+  personalOverrides?: SharedStudioPersonalOverrides;
+  resetFields?: SharedStudioOverrideField[];
+  personalReferenceIds?: string[];
+  personalReferencePolicy?: StudioReferencePolicy;
+};
 export type SharedStudioLiveDTO = SharedStudioIntent & {
   intent: SharedStudioIntent;
   mode: 'publisher' | 'live';

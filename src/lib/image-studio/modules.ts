@@ -180,7 +180,7 @@ async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: 
   const sharedLive: SharedStudioLiveDTO = { ...intent, intent, mode: binding.mode, available: Boolean(resolved),
     ...(unavailableReason ? { unavailableReason } : {}), overriddenFields: Object.keys(overrides) as SharedStudioLiveDTO['overriddenFields'], ...(defaults ? { defaults } : {}) };
   return { id: row.id, name: dto?.name || (canRepair ? unavailableSource!.name : '模板已不可用'), groupName: dto?.groupName || (canRepair ? unavailableSource!.group_name : '未分组'),
-    prompt: overrides.prompt ?? row.prompt, personalPrompt: overrides.prompt ?? row.prompt, templatePrompt: dto?.templatePrompt ?? (canRepair ? unavailableSource!.prompt : ''),
+    prompt: overrides.prompt ?? '', personalPrompt: overrides.prompt ?? '', templatePrompt: dto?.templatePrompt ?? (canRepair ? unavailableSource!.prompt : ''),
     context: dto?.context ?? (canRepair ? unavailableSource!.context : ''), contextConfigured: dto?.contextConfigured ?? Boolean(canRepair && unavailableSource!.context.trim()),
     contextEditable: binding.mode === 'publisher' && (Boolean(dto?.contextEditable) || canRepair),
     fixedReferencesEditable: actor.role === 'admin' && binding.mode === 'publisher' && (Boolean(dto?.ownedByViewer) || canRepair),
