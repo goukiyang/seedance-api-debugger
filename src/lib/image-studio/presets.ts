@@ -14,7 +14,7 @@ import { studioVisibleAssetWhere } from './protected-assets';
 import { getStudioModuleStyleIds, parseStudioStyleIds, resolveStudioStyleReferences, setStudioModuleStyleIds, setStudioPresetStyleIds } from './style-groups';
 import { cloneHistoricalSkills, getSkillSelection, parseSkillIds, resolveSkills, setSkillSelection } from './skills';
 import { defaultStudioReferencePolicy, getStudioPresetReferencePolicy, parseStudioReferencePolicy, setStudioModuleReferencePolicy, setStudioPresetReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
-import { assertStudioActor, automaticStudioModuleId, publishSharedStudioModule, replaceSharedStudioPreset, resolveSharedStudioDefinition, restoreStudioDefaultGroup, studioPublisherModule, studioSharedBinding, StudioSharingError } from './shared-contract';
+import { assertStudioActor, saveSharedStudioPresetAs, replaceSharedStudioPreset, resolveSharedStudioDefinition, restoreStudioDefaultGroup, studioPublisherModule, studioSharedBinding, StudioSharingError } from './shared-contract';
 
 export { canUseCompanyTemplatesForUser as canUseCompanyTemplates };
 
@@ -94,7 +94,7 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
           moduleContextVersion: await resolveModuleContextVersion(publicDTO.context).catch(() => null), createdAt: row.created_at, updatedAt: row.updated_at };
       } catch (error) {
         if (!(error instanceof StudioSharingError) || ![403, 404, 409].includes(error.status)) throw error;
-        return { id: row.id, name: row.name, scope: row.scope, groupName: row.group_name, revision: row.updated_at.toISOString(),
+        return { id: row.id, name: row.name, scope: row.scope, groupName: row.group_name, revision: row.updated_at.toISOString(), model: row.model,
           isShared: row.is_shared, ownedByViewer: row.owner_id === user.id, canManageSharing: canManageStudioPreset(user, row),
           unavailable: true, unavailableReason: error.message, prompt: '', context: '', contextConfigured: false, referencesAvailable: false,
           images: [], banner: null, fixedReferences: [], fixedReferenceCount: 0, skillIds: [] };
@@ -151,18 +151,10 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
       return replaceSharedStudioPreset(user, String(body.presetId || ''), body as Record<string, unknown>);
     }
   } else if (body.isShared === true) {
-    return prisma.$transaction(async tx => {
-      const actor = await assertStudioActor(user.id, tx);
-      const moduleId = typeof body.sourceModuleId === 'string' ? body.sourceModuleId : automaticStudioModuleId(actor.id, `new-preset:${String(body.requestId)}`);
-      if (!validStudioModuleId(moduleId, actor.id)) throw new StudioModuleError('模板来源模块无效', 400);
-      const priorWorkspace = await tx.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: actor.id } });
-      const workspace = priorWorkspace || (!body.sourceModuleId
-        ? await tx.imageStudioModule.create({ data: { id: moduleId, owner_id: actor.id, name: typeof body.name === 'string' ? body.name : '未命名模块', revision: 1 } }) : null);
-      if (!workspace) throw new StudioModuleError('模板来源模块不存在或无权使用', 403);
-      const published = await publishSharedStudioModule(actor, moduleId, { ...body, requestId: body.requestId,
-        expectedRevision: body.sourceModuleId ? body.moduleRevision ?? body.expectedRevision : 1 }, tx);
-      return tx.imageStudioPreset.findUniqueOrThrow({ where: { id: published.presetId } });
-    }, { timeout: 15000 });
+    if (body.sourceModuleId !== undefined && (typeof body.sourceModuleId !== 'string' || !validStudioModuleId(body.sourceModuleId, user.id))) {
+      throw new StudioModuleError('模板来源模块无效', 400);
+    }
+    return saveSharedStudioPresetAs(user, body as Record<string, unknown>);
   }
   if (!canUseCompanyTemplatesForUser(user)) throw new StudioModuleError('仅限公司飞书账号使用共享模板', 403);
   const userId = user.id;

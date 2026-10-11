@@ -533,6 +533,79 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
   });
 }
 
+export async function saveSharedStudioPresetAs(user: ImageStudioIdentity, input: Record<string, unknown>): Promise<ImageStudioPreset & { publisherModuleId: string }> {
+  return inTransaction(undefined, async tx => {
+    const actor = await assertStudioActor(user.id, tx);
+    const fingerprint = digest(['save-as-shared-preset', input]);
+    const receipt = await readReceipt(tx, actor.id, input.requestId, fingerprint);
+    // Replay before checking the original revision: the first save may have promoted it.
+    if (receipt) {
+      const publisherModuleId = String(receipt.moduleId);
+      const preset = await tx.imageStudioPreset.findUnique({ where: { id: String(receipt.presetId) } });
+      const workspace = await tx.imageStudioModule.findFirst({ where: { id: publisherModuleId, owner_id: actor.id } });
+      if (!preset || !canManageStudioPreset(actor, preset) || !workspace || workspace.source_preset_id !== preset.id
+        || await studioPresetArchived(preset.id, tx) || await studioPublisherModule(actor.id, preset.id, tx) !== publisherModuleId) {
+        throw new StudioSharingError('原保存模板或工作区已不可用，不会重复创建', 409);
+      }
+      return { ...preset, publisherModuleId };
+    }
+    if (input.isShared !== true) throw new StudioSharingError('请选择共享后再保存模板', 400);
+    const sourceModuleId = typeof input.sourceModuleId === 'string' ? input.sourceModuleId : undefined;
+    const original = sourceModuleId ? await tx.imageStudioModule.findFirst({ where: { id: sourceModuleId, owner_id: actor.id } }) : null;
+    if (sourceModuleId && !original) throw new StudioSharingError('模板来源模块不存在或无权使用', 403);
+    let publisherModuleId = original?.id || automaticStudioModuleId(actor.id, `new-preset:${String(input.requestId)}`);
+    let expectedRevision: unknown = input.moduleRevision ?? input.expectedRevision;
+    let expectedDefinitionToken: unknown = input.expectedDefinitionToken;
+    if (original && (!Number.isInteger(expectedRevision) || original.revision !== expectedRevision)) {
+      throw new StudioSharingError('模板已在其他页面保存，当前草稿仍保留', 409);
+    }
+    const binding = original ? await studioSharedBinding(actor.id, original.id, tx) : null;
+    if (original && binding) {
+      if (binding.mode !== 'publisher' || original.source_preset_id !== binding.presetId) throw new StudioSharingError('只能由创建者另存共享原模板', 403);
+      const source = await tx.imageStudioPreset.findUnique({ where: { id: binding.presetId } });
+      if (!source || !canManageStudioPreset(actor, source) || await studioPublisherModule(actor.id, source.id, tx) !== original.id) {
+        throw new StudioSharingError('原模板创建者身份无法确认', 403);
+      }
+      const { definition } = await resolveSharedStudioDefinition(actor, source.id, tx);
+      if (expectedDefinitionToken !== definition.intent.definitionToken) throw new StudioSharingError('模板已更新，请重新打开设置核对；当前草稿仍保留', 409);
+      if (['personalOverrides', 'resetFields', 'personalReferenceIds', 'personalReferencePolicy'].some(field => has(input, field))) {
+        throw new StudioSharingError('另存共享模板不包含个人输入和主图，请在原工作区保存这些内容', 400);
+      }
+      const scope = has(input, 'scope') ? input.scope : source.scope;
+      if (!['admin', 'creator'].includes(String(scope)) || scope === 'admin' && actor.role !== 'admin') throw new StudioSharingError('没有保存该模板类型的权限', 403);
+      publisherModuleId = automaticStudioModuleId(actor.id, `save-as-shared:${String(input.requestId)}`);
+      const presetId = `module-source:${publisherModuleId}`;
+      if (await tx.imageStudioModule.findUnique({ where: { id: publisherModuleId } }) || await tx.imageStudioPreset.findUnique({ where: { id: presetId } })) {
+        throw new StudioSharingError('另存模板编号已占用，请核对原保存结果', 409);
+      }
+      // Seed only the owned definition, never the original workspace's personal fields.
+      await tx.imageStudioModule.create({ data: { id: publisherModuleId, owner_id: actor.id, source_preset_id: presetId,
+        name: definition.name, group_name: definition.groupName, revision: 1 } });
+      const copied = await tx.imageStudioPreset.create({ data: { id: presetId, owner_id: actor.id, scope: String(scope), is_shared: true,
+        name: definition.name, group_name: definition.groupName, prompt: definition.templatePrompt, context: definition.context,
+        model: source.model, quality: source.quality, resolution: source.resolution, count: source.count,
+        reference_limit: source.reference_limit, aspect_ratio: source.aspect_ratio, banner_asset_id: definition.bannerAssetId,
+        reference_ids: JSON.stringify(definition.templateReferenceIds) } });
+      if (definition.reproduction) await writeSetting(tx, studioSharedReproductionKey(presetId), actor.id, definition.reproduction);
+      await setStudioPresetFixedReferences(actor.id, presetId, definition.fixedReferences, tx);
+      await setStudioPresetReferencePolicy(actor.id, presetId, definition.referencePolicy, definition.templateReferenceIds, tx);
+      await setStudioPresetStyleIds(actor, presetId, definition.styleGroupIds, tx);
+      await bindStudioModule(tx, publisherModuleId, { protocol: SHARED_STUDIO_PROTOCOL, ownerId: actor.id, presetId, mode: 'publisher' });
+      expectedRevision = 1;
+      expectedDefinitionToken = await sharedDefinitionToken(copied, tx);
+    } else if (!original) {
+      if (await tx.imageStudioModule.findUnique({ where: { id: publisherModuleId } })) throw new StudioSharingError('另存模板工作区已存在，请核对原保存结果', 409);
+      await tx.imageStudioModule.create({ data: { id: publisherModuleId, owner_id: actor.id,
+        name: typeof input.name === 'string' ? input.name : '未命名模块', revision: 1 } });
+      expectedRevision = 1;
+    }
+    const published = await publishSharedStudioModule(actor, publisherModuleId, { ...input,
+      requestId: `save-as-definition:${digest([input.requestId, publisherModuleId])}`, expectedRevision, expectedDefinitionToken }, tx);
+    await writeReceipt(tx, actor.id, input.requestId, fingerprint, published.receipt);
+    return { ...await tx.imageStudioPreset.findUniqueOrThrow({ where: { id: published.presetId } }), publisherModuleId };
+  });
+}
+
 export async function replaceSharedStudioPreset(user: ImageStudioIdentity, presetId: string, input: Record<string, unknown>) {
   return inTransaction(undefined, async tx => {
     const actor = await assertStudioActor(user.id, tx);
