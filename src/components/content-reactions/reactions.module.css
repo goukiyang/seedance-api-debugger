@@ -1,5 +1,6 @@
 .controls { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; vertical-align: middle; }
 .reactionActions { display: inline-flex; align-items: center; gap: 4px; }
+.secondaryAction { display: inline-flex; }
 .parentOverlayControls { position: absolute; top: 6px; left: 6px; z-index: 4; max-width: calc(100% - 12px); padding: 3px; }
 .parentOverlayControls :is(.error, .busy) { padding: 4px 6px; border-radius: 4px; background: rgb(12 17 19 / 86%); max-width: min(52vw, 320px); white-space: normal; overflow-wrap: anywhere; }
 .favoriteTitleRow { display: flex; align-items: center; gap: 8px; width: fit-content; max-width: 100%; min-width: 0; flex-wrap: nowrap; }
@@ -15,8 +16,9 @@
 .busyIcon { animation: reaction-busy-spin .8s linear infinite; }
 .overlayControls { position: absolute; top: 6px; left: 6px; z-index: 4; max-width: calc(100% - 12px); flex-wrap: wrap; padding: 3px; border-radius: 7px; background: transparent; opacity: 0; pointer-events: none; }
 .controls.overlayControls button { opacity: 0; pointer-events: none; }
-.overlayControls:has(button[data-reaction-action][aria-pressed="true"]) { opacity: 1; }
-.controls.overlayControls button[data-reaction-action][aria-pressed="true"] { opacity: 1; pointer-events: auto; }
+.overlayControls:has(button[data-reaction-action][aria-pressed="true"], button[data-bloom]) { opacity: 1; }
+.controls.overlayControls button[data-reaction-action][aria-pressed="true"],
+.controls.overlayControls button[data-bloom] { opacity: 1; pointer-events: auto; }
 .controls.overlayControls:where(:hover, :focus-within, :has(.busy), :has(.error)) button,
 :where([data-reaction-surface]:hover, [data-reaction-surface]:focus-within) .controls.overlayControls button { opacity: 1; pointer-events: auto; }
 .controls.overlayControls button[data-reaction-action][aria-pressed="true"]:disabled,

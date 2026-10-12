@@ -4,13 +4,16 @@ import type { SessionUser } from '@/lib/auth/session';
 import { canUseCompanyTemplates, canViewStudioPreset, canViewStudioModule } from '@/lib/image-studio/access';
 import { archivedPresetKey } from '@/lib/image-studio/preset-lifecycle';
 import { readableStudioCoverIds } from '@/lib/image-studio/protected-assets';
+import { studioFixedCoverDTO } from '@/lib/image-studio/module-cover';
+import { studioSharedBinding } from '@/lib/image-studio/shared-contract';
+import type { ModuleCoverTarget } from '@/lib/image-studio/module-cover-types';
 import type { HomeTemplate, HomeTemplates } from '@/lib/home/types';
 import type { ContentKey } from './types';
 import { parseContentKey, ReactionError } from './content';
 import { tryContentKeyParts } from './key';
 
 const presetSelect = { id: true, owner_id: true, scope: true, is_shared: true, name: true, banner_asset_id: true } as const;
-type Projection = { key: ContentKey; title: string; href: string; kind: 'definition' | 'workpage'; ownerId: string; bannerId: string | null };
+type Projection = { key: ContentKey; title: string; href: string; kind: 'definition' | 'workpage'; ownerId: string; bannerId: string | null; fixedTarget: ModuleCoverTarget };
 
 async function projectTemplates(user: SessionUser, keys: ContentKey[]): Promise<Projection[]> {
   if (!canUseCompanyTemplates(user)) return [];
@@ -30,11 +33,11 @@ async function projectTemplates(user: SessionUser, keys: ContentKey[]): Promise<
       const legacy = id.startsWith('module-source:') ? byModule.get(id.slice('module-source:'.length)) : null;
       const row = byId.get(id) || (legacy?.source_preset_id ? byId.get(legacy.source_preset_id) : null);
       return row && canViewStudioPreset(user, row) ? [{ key, title: row.name, href: `/template-studio?type=image&presetId=${encodeURIComponent(row.id)}`,
-        kind: 'definition' as const, ownerId: row.owner_id, bannerId: row.banner_asset_id }] : [];
+        kind: 'definition' as const, ownerId: row.owner_id, bannerId: row.banner_asset_id, fixedTarget: { kind: 'preset', id: row.id } }] : [];
     }
     const row = byModule.get(id), source = row?.source_preset_id ? byId.get(row.source_preset_id) || null : null;
     return row && canViewStudioModule(user, row, source) ? [{ key, title: row.name, href: `/template-studio?type=image&moduleId=${encodeURIComponent(id)}`,
-      kind: 'workpage' as const, ownerId: row.owner_id, bannerId: row.banner_asset_id }] : [];
+      kind: 'workpage' as const, ownerId: row.owner_id, bannerId: row.banner_asset_id, fixedTarget: { kind: 'module', id: row.id } }] : [];
   });
 }
 
@@ -91,10 +94,19 @@ export async function homeTemplates(user: SessionUser, params: URLSearchParams):
     if (selected.length === limit) break;
   }
   const coverByKey = await covers(user, selected.map(item => item.projection));
+  const fixedByKey = new Map(await Promise.all(selected.map(async ({ projection }) => {
+    let target = projection.fixedTarget;
+    if (target.kind === 'module') {
+      const binding = await studioSharedBinding(user.id, target.id);
+      if (binding) target = { kind: 'preset', id: binding.presetId };
+    }
+    return [projection.key, await studioFixedCoverDTO(user, target)] as const;
+  })));
   const items: HomeTemplate[] = selected.map(({ row, projection }) => {
     const asset = coverByKey.get(projection.key);
+    const fixedCover = fixedByKey.get(projection.key);
     return { key: projection.key, title: projection.title, href: projection.href, kind: projection.kind,
-      thumbnailUrl: asset ? `/api/image-studio/template-assets/${encodeURIComponent(asset.id)}?thumbnail=1&homeContentKey=${encodeURIComponent(projection.key)}` : null,
+      thumbnailUrl: fixedCover ? fixedCover.thumbnailUrl : asset ? `/api/image-studio/template-assets/${encodeURIComponent(asset.id)}?thumbnail=1&homeContentKey=${encodeURIComponent(projection.key)}` : null,
       state: { key: projection.key, liked: row.liked, favorited: row.favorited, version: row.version, available: true, likeCount: null } };
   });
   const last = batch[consumed - 1];

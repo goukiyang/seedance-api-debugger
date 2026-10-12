@@ -6,6 +6,7 @@ import { StudioStyleError } from '@/lib/image-studio/style-groups';
 import { StudioSharingError } from '@/lib/image-studio/shared-contract';
 import { StudioFixedReferenceError } from '@/lib/image-studio/fixed-references';
 import { StudioReferencePolicyError } from '@/lib/image-studio/reference-policy';
+import { ModuleCoverError } from '@/lib/image-studio/module-cover';
 
 export const dynamic = 'force-dynamic';
 const privateHeaders = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
@@ -19,7 +20,7 @@ export async function GET(request: NextRequest) {
     if (presetId && presetId.length > 160) return NextResponse.json({ error: '模板读取参数无效' }, { status: 400, headers: privateHeaders });
     return NextResponse.json({ presets: await listStudioPresets(user, moduleId, presetId) }, { headers: privateHeaders });
   } catch (error) {
-    if (error instanceof StudioModuleError || error instanceof StudioStyleError || error instanceof StudioSharingError || error instanceof StudioFixedReferenceError || error instanceof StudioReferencePolicyError) return NextResponse.json({ error: error.message }, { status: error.status, headers: privateHeaders });
+    if (error instanceof StudioModuleError || error instanceof StudioStyleError || error instanceof StudioSharingError || error instanceof StudioFixedReferenceError || error instanceof StudioReferencePolicyError || error instanceof ModuleCoverError) return NextResponse.json({ error: error.message }, { status: error.status, headers: privateHeaders });
     return NextResponse.json({ error: '模板读取失败，请重试' }, { status: 503 });
   }
 }
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(await saveStudioPreset(user, body));
   } catch (error) {
     if (error instanceof SyntaxError) return NextResponse.json({ error: '模板内容无效' }, { status: 400, headers: privateHeaders });
-    if (error instanceof StudioModuleError || error instanceof StudioStyleError || error instanceof StudioSharingError || error instanceof StudioFixedReferenceError || error instanceof StudioReferencePolicyError) return NextResponse.json({ error: error.message }, { status: error.status, headers: privateHeaders });
+    if (error instanceof StudioModuleError || error instanceof StudioStyleError || error instanceof StudioSharingError || error instanceof StudioFixedReferenceError || error instanceof StudioReferencePolicyError || error instanceof ModuleCoverError) return NextResponse.json({ error: error.message }, { status: error.status, headers: privateHeaders });
     return NextResponse.json({ error: '模板操作失败，请重试' }, { status: 503 });
   }
 }

@@ -23,7 +23,8 @@
 .sd2-like .lk-glyph { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; }
 .sd2-like .lk-glyph svg { width: 19px; height: 19px; stroke-width: 2.3; }
 .sd2-like[aria-pressed="true"] .lk-glyph svg { fill: currentColor; }
-.sd2-like[data-bloom] .lk-glyph { animation: lk-heart 760ms cubic-bezier(.3, 1.6, .4, 1) both; }
+.sd2-like[data-bloom] .lk-glyph:not(.lk-static-glyph) { animation: lk-heart 760ms cubic-bezier(.3, 1.6, .4, 1) both; }
+.sd2-like .lk-animated-glyph { position: absolute; left: -10px; top: -10px; width: 20px; height: 20px; z-index: 1; display: grid; place-items: center; color: var(--lk-on); animation: lk-heart 760ms cubic-bezier(.3, 1.6, .4, 1) both; }
 .sd2-like .lk-burst { --fly: .5; position: absolute; left: 50%; top: 50%; pointer-events: none; }
 .sd2-like .lk-bloom { position: absolute; left: -17px; top: -17px; width: 34px; height: 34px; box-sizing: border-box; border-radius: 50%; border: 17px solid #cc8ef5; animation: lk-bloom 560ms cubic-bezier(.25, .8, .35, 1) both; }
 .sd2-like .lk-spoke { position: absolute; left: 0; top: 0; rotate: var(--a); }
@@ -45,6 +46,6 @@
 @media (prefers-reduced-motion: reduce) {
   .sd2-like { transition: none; }
   .sd2-like:active:not(:disabled) { scale: 1; }
-  .sd2-like[data-bloom] .lk-glyph, .sd2-like .lk-bloom, .sd2-like .lk-spoke i, .sd2-like .lk-digit { animation: none; }
+  .sd2-like[data-bloom] .lk-glyph, .sd2-like .lk-animated-glyph, .sd2-like .lk-bloom, .sd2-like .lk-spoke i, .sd2-like .lk-digit { animation: none; }
   .sd2-like .lk-burst, .sd2-like .lk-digit-out { display: none; }
 }

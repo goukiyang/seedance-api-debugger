@@ -6,6 +6,37 @@ import { siteUploadBaseUrls, siteUploadPathFromUrl } from '@/lib/assets/site-url
 type Client = Pick<Prisma.TransactionClient, 'platformSetting' | 'asset'>;
 type Protection = { assetId: string; ownerId: string; kind: 'template' | 'style' };
 
+export class StudioCoverReferenceError extends Error {
+  readonly status = 409;
+}
+// Cover history is deliberately retained for recovery; task deletion never removes
+// these references. Include file aliases so a copied Asset cannot erase the source.
+export async function assertStudioCoverAssetNotReferenced(assetId: string,
+  client: Pick<Prisma.TransactionClient, 'asset' | '$queryRaw'> = prisma) {
+  const asset = await client.asset.findUnique({ where: { id: assetId }, select: { original_url: true, thumbnail_url: true } });
+  if (!asset) return;
+  const urls = [asset.original_url, ...(asset.thumbnail_url ? [asset.thumbnail_url] : [])].flatMap(url => {
+    const pathname = siteUploadPathFromUrl(url);
+    return pathname ? [url, pathname, ...siteUploadBaseUrls().map(base => `${base}${pathname}`)] : [url];
+  });
+  const aliases = await client.asset.findMany({ where: { OR: [{ id: assetId }, { original_url: { in: urls } }, { thumbnail_url: { in: urls } }] }, select: { id: true } });
+  const corrupt = await client.$queryRaw<Array<{ key: string }>>(Prisma.sql`
+    SELECT key FROM PlatformSetting WHERE (key GLOB 'studio_module_cover_v1:*'
+      OR key GLOB 'studio_module_cover_history_v1:*' OR key GLOB 'studio_module_cover_request_v1:*')
+    AND CASE WHEN json_valid(value_json) THEN
+      json_type(value_json, '$.recipe.sources') IS NOT 'array'
+      OR EXISTS (SELECT 1 FROM json_each(value_json, '$.recipe.sources') s WHERE json_type(s.value, '$.assetId') IS NOT 'text')
+    ELSE 1 END LIMIT 1`);
+  if (corrupt.length) throw new StudioCoverReferenceError('封面引用无法确认，暂不能移除原图');
+  const rows = await client.$queryRaw<Array<{ key: string }>>(Prisma.sql`
+    SELECT p.key FROM PlatformSetting p, json_each(p.value_json, '$.recipe.sources') s
+    WHERE (p.key GLOB 'studio_module_cover_v1:*' OR p.key GLOB 'studio_module_cover_history_v1:*'
+      OR (p.key GLOB 'studio_module_cover_request_v1:*' AND json_extract(p.value_json, '$.status') = 'pending'
+        AND json_extract(p.value_json, '$.expiresAt') > ${Date.now()}))
+      AND json_extract(s.value, '$.assetId') IN (${Prisma.join(aliases.map(item => item.id))}) LIMIT 1`);
+  if (rows.length) throw new StudioCoverReferenceError('这张原图用于永久封面或封面恢复，不能移除；普通生成记录仍可隐藏');
+}
+
 export function studioProtectedBindings(rows: Array<{ key: string; value_json: string }>): Protection[] {
   return rows.flatMap(row => {
     let value: Record<string, unknown>;

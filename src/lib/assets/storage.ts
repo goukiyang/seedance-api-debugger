@@ -14,6 +14,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '@/lib/prisma';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { generateAssetVideoThumbnail } from '@/lib/assets/video-thumbnail';
+import { assertStudioCoverAssetNotReferenced } from '@/lib/image-studio/protected-assets';
 
 // ============================================================================
 // 目录配置
@@ -465,7 +466,14 @@ export async function getAssetById(id: string) {
 }
 
 export async function deleteAsset(id: string) {
-  const asset = await prisma.asset.findUnique({ where: { id } });
+  const asset = await prisma.$transaction(async tx => {
+    const current = await tx.asset.findUnique({ where: { id } });
+    if (!current) return null;
+    await assertStudioCoverAssetNotReferenced(id, tx);
+    // Serialize removal against cover reservation/publication before removing bytes.
+    await tx.asset.delete({ where: { id } });
+    return current;
+  });
   if (!asset) return;
 
   // 删除文件
@@ -482,5 +490,4 @@ export async function deleteAsset(id: string) {
     }
   }
 
-  await prisma.asset.delete({ where: { id } });
 }

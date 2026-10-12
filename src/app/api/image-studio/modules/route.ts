@@ -6,11 +6,12 @@ import { openSharedStudioModule, StudioSharingError } from '@/lib/image-studio/s
 import { StudioStyleError } from '@/lib/image-studio/style-groups';
 import { StudioFixedReferenceError } from '@/lib/image-studio/fixed-references';
 import { StudioReferencePolicyError } from '@/lib/image-studio/reference-policy';
+import { ModuleCoverError } from '@/lib/image-studio/module-cover';
 
 export const dynamic = 'force-dynamic';
 const privateHeaders = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
 function businessError(error: unknown) {
-  return error instanceof StudioModuleError || error instanceof StudioSharingError || error instanceof StudioStyleError || error instanceof StudioFixedReferenceError || error instanceof StudioReferencePolicyError;
+  return error instanceof StudioModuleError || error instanceof StudioSharingError || error instanceof StudioStyleError || error instanceof StudioFixedReferenceError || error instanceof StudioReferencePolicyError || error instanceof ModuleCoverError;
 }
 export async function GET(request: NextRequest) {
   const user = await getSession();

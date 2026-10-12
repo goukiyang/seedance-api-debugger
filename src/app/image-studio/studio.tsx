@@ -40,6 +40,8 @@ function studioUploadProgress(file: File, index: number, count: number, progress
   };
 }
 import { ZoomableImagePreview, type ImagePreviewMetadata, type ImageComparisonSource } from '@/components/ZoomableImagePreview';
+import { ModuleCoverEditor } from '@/components/ModuleCoverEditor';
+import type { ModuleCoverDTO } from '@/lib/image-studio/module-cover-types';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 
 import TemplateFavoriteTitle from '@/components/content-reactions/TemplateFavoriteTitle';
@@ -84,7 +86,7 @@ function studioTaskPhase(task: StudioTask) {
   return ({ queued: '等待生成', provider: '生成中', unknown: '生成结果待确认', download: '原图下载中', recover: '恢复原图中', validate: '图片校验中', save: '保存中', stopped: '原图交付停止', failed: '未能交付图片', ready: studioTaskHasDeliveredAsset(task) ? '已完成' : task.status === 'succeeded' ? '图片已移除' : '生成结果待确认' } as Record<string, string>)[phase || '']
     || (task.status === 'running' ? '生成中' : task.status === 'queued' ? '等待生成' : task.status === 'uncertain' ? '生成结果待确认' : '未能交付图片');
 }
-type StudioModule = { sharedLive?: SharedStudioView | null; templateImages?: UploadedAssetPayload[]; templateReferenceIds?: string[]; templatePrompt?: string; personalPrompt?: string; fixedReferences?: FixedStudioReference[]; contextEditable?: boolean; referencePolicy?: StudioReferencePolicy; id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sourcePresetOwnedByViewer?: boolean; sourcePresetCanManageSharing?: boolean; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string; fixedReferenceCount?: number; fixedReferencesEditable?: boolean; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[]; reproductionState?: { fixedReferenceCount: number; styleGroups: StudioStyleSummary[] } | null };
+type StudioModule = { fixedCover?: ModuleCoverDTO | null; coverEditable?: boolean; sharedLive?: SharedStudioView | null; templateImages?: UploadedAssetPayload[]; templateReferenceIds?: string[]; templatePrompt?: string; personalPrompt?: string; fixedReferences?: FixedStudioReference[]; contextEditable?: boolean; referencePolicy?: StudioReferencePolicy; id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sourcePresetOwnedByViewer?: boolean; sourcePresetCanManageSharing?: boolean; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string; fixedReferenceCount?: number; fixedReferencesEditable?: boolean; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[]; reproductionState?: { fixedReferenceCount: number; styleGroups: StudioStyleSummary[] } | null };
 type StudioPreset = { id: string; name: string; revision: string; moduleContextVersion?: string | null; scope: 'admin' | 'creator'; isShared: boolean; canManageSharing?: boolean; ownedByViewer?: boolean; groupName: string; model: string; quality: string; resolution: ImageResolution; count: number; referenceLimit: number; aspectRatio: string; images: UploadedAssetPayload[]; banner: UploadedAssetPayload | null; contextConfigured: boolean; createdAt: string };
 type QuickStudioPreset = StudioPreset & { prompt: string; context: string; referencesAvailable: boolean; referencePolicy?: StudioReferencePolicy; fixedReferences?: FixedStudioReference[]; styleGroupIds: string[] };
 type PresetSource = { draft: Record<string, unknown>; blocked: string | null; groupDeleteBlocked?: boolean };
@@ -92,14 +94,14 @@ type PresetSourceReader = () => PresetSource;
 type StudioFeedback = { message: string; tone: 'progress' | 'info' | 'success' | 'warning' | 'error' };
 type StudioImageQuote = { billingMode: 'fixed' | 'actual'; billingQuoteId: string | null; unitCredits: number; estimatedCredits: number; expiresAt?: string; imageChannel?: ImageGenerationChannelSnapshot };
 type CachedStudioImageQuote = { signature: string; requestId: string; quote: StudioImageQuote };
-type ImagePreviewState = { contentKey?: `asset:${string}`; taskId?: string; resultVersion?: string | null; src: string; thumbnailSrc?: string; alt: string; title?: string; fileName?: string; width?: number; height?: number; fileSize?: number; metadata?: ImagePreviewMetadata; comparison?: ImageComparisonSource };
+type ImagePreviewState = { contentKey?: `asset:${string}`; sourceRole?: ImageComparisonSource['role']; taskId?: string; resultVersion?: string | null; src: string; thumbnailSrc?: string; alt: string; title?: string; fileName?: string; width?: number; height?: number; fileSize?: number; metadata?: ImagePreviewMetadata; comparison?: ImageComparisonSource };
 type RatioPreferences = { custom: string[]; busy: boolean; error: string; onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean> };
 type ModuleScrollRequest = { target: 'module' | 'header'; id: string; group: string; token: number; behavior: ScrollBehavior; markViewed: boolean; expansionRevision?: number };
 type ModuleNavigationOptions = { ensureLoaded?: boolean; markViewed?: boolean; behavior?: ScrollBehavior; expandParents?: boolean };
 type PersonalStudioOverrides = Partial<Pick<StudioModule, 'prompt' | 'model' | 'quality' | 'resolution' | 'count' | 'aspectRatio'>>;
 type SharedStudioView = { intent: SharedStudioIntent; mode: 'publisher' | 'live'; available: boolean; unavailableReason?: string;
   overriddenFields: Array<keyof PersonalStudioOverrides>; defaults?: import('@/lib/image-studio/shared-types').SharedStudioDefaults };
-type StudioNavigationEntry = Pick<StudioModule, 'id' | 'name' | 'groupName' | 'sourcePresetId'> & { sharedLive?: Pick<SharedStudioView, 'intent' | 'mode' | 'available'> | null; canManageGroup?: boolean; presetId?: string; banner?: UploadedAssetPayload | null; shared?: boolean };
+type StudioNavigationEntry = Pick<StudioModule, 'id' | 'name' | 'groupName' | 'sourcePresetId' | 'sourcePresetShared'> & { sharedLive?: Pick<SharedStudioView, 'intent' | 'mode' | 'available'> | null; canManageGroup?: boolean; presetId?: string; banner?: UploadedAssetPayload | null; fixedCover?: ModuleCoverDTO | null; shared?: boolean };
 function canManageStudioGroupEntry(item: StudioNavigationEntry) {
   if (item.sharedLive?.mode === 'live') return false;
   if (typeof item.canManageGroup === 'boolean') return item.canManageGroup;
@@ -131,10 +133,20 @@ async function readResponse(response: Response) {
   return value;
 }
 
+function FixedCoverVisual({ cover, name }: { cover: ModuleCoverDTO; name: string }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [cover.thumbnailUrl]);
+  return <span className={styles.coverVisual} data-cover-source="固定封面">
+    {cover.available && cover.thumbnailUrl && !failed ? <img decoding="async" src={cover.thumbnailUrl} loading="lazy" alt={`${name}封面`} onError={() => setFailed(true)} /> : <span>封面暂不可用</span>}
+  </span>;
+}
+
 function TemplateCoverVisual({ module }: { module: StudioModule }) {
   const [failed, setFailed] = useState(false);
   const resultUrl = module.cover?.thumbnailUrl || module.banner?.thumbnailUrl || module.images[0]?.thumbnailUrl || '';
   const referenceUrl = module.cover?.referenceUrl || '';
+  useEffect(() => setFailed(false), [resultUrl, referenceUrl]);
+  if (module.fixedCover) return <FixedCoverVisual cover={module.fixedCover} name={module.name} />;
   if (module.cover?.referenceUrl && !failed) {
     return <span className={styles.coverVisual} data-cover-source="前后对比">
       <span className={styles.coverComparisonPane}><img decoding="async" src={referenceUrl} loading="lazy" alt="生成前参考图" onError={() => setFailed(true)} /><small>参考图</small></span>
@@ -150,14 +162,14 @@ function singleReferenceComparison(task: StudioTask) {
   const references = task.snapshot?.primaryReferenceImages ?? task.snapshot?.transientReferenceImages ?? task.snapshot?.referenceImages ?? [];
   const reference = references[0];
   const src = reference?.originalUrl || reference?.thumbnailUrl;
-  return src ? { src, thumbnailSrc: reference.thumbnailUrl || src, alt: '主图 1', fileName: reference.fileName || undefined, width: reference.width || undefined, height: reference.height || undefined, fileSize: reference.fileSize, ...(reference.id ? { contentKey: `asset:${reference.id}` as const } : {}) } : undefined;
+  return src ? { src, role: 'original' as const, thumbnailSrc: reference.thumbnailUrl || src, alt: '主图 1', fileName: reference.fileName || undefined, width: reference.width || undefined, height: reference.height || undefined, fileSize: reference.fileSize, ...(reference.id ? { contentKey: `asset:${reference.id}` as const } : {}) } : undefined;
 }
 
 function taskComparisonCandidates(task?: StudioTask): ImageComparisonSource[] {
   const snapshot = task?.snapshot;
   const references = [...(snapshot?.primaryReferenceImages ?? snapshot?.transientReferenceImages ?? snapshot?.referenceImages ?? []),
     ...(snapshot?.auxiliaryReferenceImages || []), ...(snapshot?.fixedReferenceImages || [])];
-  return references.flatMap((image, index) => image.originalUrl ? [{ src: image.originalUrl, thumbnailSrc: image.thumbnailUrl || undefined, alt: `参考图 ${index + 1}`, width: image.width || undefined, height: image.height || undefined, fileSize: image.fileSize, ...(image.id ? { contentKey: `asset:${image.id}` as const } : {}) }] : []);
+  return references.flatMap((image, index) => image.originalUrl ? [{ src: image.originalUrl, role: 'reference' as const, thumbnailSrc: image.thumbnailUrl || undefined, alt: `参考图 ${index + 1}`, width: image.width || undefined, height: image.height || undefined, fileSize: image.fileSize, ...(image.id ? { contentKey: `asset:${image.id}` as const } : {}) }] : []);
 }
 
 function studioTaskPreviewState(task: StudioTask): ImagePreviewState {
@@ -166,6 +178,7 @@ function studioTaskPreviewState(task: StudioTask): ImagePreviewState {
   const quality = IMAGE_STUDIO_QUALITY_LABELS[normalizeImageStudioQuality(task.model, task.quality) as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || task.quality || '自动';
   return {
     taskId: task.id,
+    sourceRole: 'generated',
     resultVersion: studioResultVersion(task),
     contentKey: task.asset?.id ? `asset:${task.asset.id}` : undefined,
     src: task.asset?.original_url || '',
@@ -272,6 +285,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   const invalidateSharedDefinition = useCallback((presetId: string | null, reason: string) => {
     setModules(current => current.map(item => !item.sharedLive || presetId && item.sharedLive.intent.presetId !== presetId ? item : {
       ...item, name: '模板已不可用', groupName: '未分组', banner: null, context: undefined, templatePrompt: undefined, contextConfigured: false,
+      fixedCover: item.fixedCover ? { ...item.fixedCover, available: false, imageUrl: null, thumbnailUrl: null, unavailableReason: reason } : null,
       templateImages: [], templateReferenceIds: [], fixedReferences: [], fixedReferenceCount: 0, styleGroups: [], styleGroupIds: [], skills: [], skillIds: [], reproductionState: null,
       sharedLive: { ...item.sharedLive, available: false, unavailableReason: reason, defaults: undefined },
     }));
@@ -681,15 +695,15 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
         const previous = liveModules.get(item.sharedLive.intent.presetId);
         if (previous) items.delete(previous.id);
         liveModules.set(item.sharedLive.intent.presetId, item);
-        if (!item.sharedLive.available) items.set(item.id, { ...item, name: '模板已不可用 · 历史', groupName: canManageStudioGroupEntry(item) ? item.groupName : '未分组' });
-        else items.set(item.id, { ...item, presetId: item.sharedLive.intent.presetId, shared: true });
+        if (!item.sharedLive.available) items.set(item.id, { ...item, shared: false, fixedCover: item.fixedCover ? { ...item.fixedCover, available: false, thumbnailUrl: null, imageUrl: null } : null, name: '模板已不可用 · 历史', groupName: canManageStudioGroupEntry(item) ? item.groupName : '未分组' });
+        else items.set(item.id, { ...item, presetId: item.sharedLive.intent.presetId, shared: item.sourcePresetShared === true });
       }
-      else items.set(item.id, item);
+      else items.set(item.id, { ...item, shared: item.sourcePresetShared === true });
     });
     shared.items.filter(item => item.available).forEach(item => {
       const binding = liveModules.get(item.presetId);
       items.set(binding?.id || `shared:${item.presetId}`, { ...binding, id: binding?.id || `shared:${item.presetId}`, presetId: item.presetId,
-        name: item.name, groupName: item.groupName, banner: item.banner, shared: true });
+        name: item.name, groupName: item.groupName, banner: item.banner, fixedCover: item.fixedCover, shared: item.isShared === true });
     });
     return Array.from(items.values()).sort((a, b) => Number(b.id === `default-${userId}`) - Number(a.id === `default-${userId}`));
   }, [directory, modules, userId, shared.items]);
@@ -972,7 +986,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       </div>
     </nav>}
     <div className={styles.content}>
-    <header id="image-generation" className={`${styles.header} ${styles.generationHeader}`}><div><h1>{coverView ? (templateWorkbench ? '模块封面' : '模板封面') : '图片生成'}</h1><p className={styles.muted}>{coverView ? (templateWorkbench ? '所有模块的 3:4 封面预览' : '所有模板的 3:4 封面预览') : `当前分组：${selectedGroup || '未分组'}`}</p></div><div className={styles.counts}>
+    <header id="image-generation" className={`${styles.header} ${styles.generationHeader}`}><div><h1>{coverView ? (templateWorkbench ? '模块封面' : '模板封面') : '图片生成'}</h1><p className={styles.muted}>{coverView ? (templateWorkbench ? '全部模块，按已保存封面展示' : '全部模板，按已保存封面展示') : `当前分组：${selectedGroup || '未分组'}`}</p></div><div className={styles.counts}>
       <button type="button" onClick={() => void openPresetLibrary()}>模板库</button>
       <button type="button" onClick={() => setGlobalSettingsOpen(true)}><Settings size={17} />通用设置</button>
       <button type="button" disabled={creating || !modules.length} onClick={() => void createModule()}><Plus size={17} />{creating ? '新建中' : '新建模块'}</button></div></header>
@@ -986,8 +1000,8 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     {coverView && <section className={styles.coverGrid} aria-label={templateWorkbench ? '模块封面' : '模板封面'}>{coverPagination}<div className={styles.coverGridInner} ref={coverPages.gridRef}>{coverPages.pageItems.map(entry => {
       const coverModule = modules.find(item => item.id === entry.id);
       if (entry.presetId) return <button key={entry.id} type="button" className={styles.coverCard} disabled={sharedOpening} onClick={() => navigateToEntry(entry)}>
-        <span className={styles.coverVisual}>{entry.banner?.thumbnailUrl ? <img decoding="async" src={entry.banner.thumbnailUrl} loading="lazy" alt={`${entry.name}封面`} /> : <span>暂无代表图</span>}</span>
-        <span className={styles.coverDescription}><strong className={styles.navName} title={entry.name}>{entry.name}</strong><small className={styles.sharedOrigin}>共享模板</small></span>
+        {entry.fixedCover ? <FixedCoverVisual cover={entry.fixedCover} name={entry.name} /> : <span className={styles.coverVisual}>{entry.banner?.thumbnailUrl ? <img decoding="async" src={entry.banner.thumbnailUrl} loading="lazy" alt={`${entry.name}封面`} /> : <span>暂无代表图</span>}</span>}
+        <span className={styles.coverDescription}><strong className={styles.navName} title={entry.name}>{entry.name}</strong>{entry.shared && <small className={styles.sharedOrigin}>共享模板</small>}</span>
       </button>;
       if (!coverModule) return <div key={entry.id} className={`${styles.coverCard} sd2-loading-surface`} data-busy={!error} role="status"><strong>{entry.name}</strong><span>{error ? '封面未能读取，请重试' : '读取封面中'}</span></div>;
       return <button key={coverModule.id} type="button" className={styles.coverCard} onClick={() => navigateToModule(coverModule.groupName || '未分组', coverModule.id)}>
@@ -1122,6 +1136,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   function setQuality(value: string) { setQualityValue(value); markPersonalOverride('quality', value); }
   const [groupName, setGroupName] = useState(module.groupName || '未分组');
   const [banner, setBanner] = useState<UploadedAssetPayload | null>(module.banner || null);
+  const [coverEditorOpen, setCoverEditorOpen] = useState(false);
   const [ratioEditing, setRatioEditing] = useState(false);
   const [images, setImages] = useState<UploadedAssetPayload[]>(module.images.filter(image => !module.referencePolicy || module.referencePolicy.primaryIds.includes(image.id || '')));
   const [auxiliaryImages, setAuxiliaryImages] = useState<UploadedAssetPayload[]>(module.referencePolicy ? module.images.filter(image => !module.referencePolicy!.primaryIds.includes(image.id || '')) : []);
@@ -2401,12 +2416,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       downloadDisabled: downloadBusy,
       downloadMessage: '已选择这张图片，请确认下载',
       media: image ? {
-        src: image.src, thumbnailSrc: image.thumbnailSrc, alt: image.alt, title: image.title,
+        src: image.src, sourceRole: image.sourceRole, thumbnailSrc: image.thumbnailSrc, alt: image.alt, title: image.title,
         contentKey: image.contentKey, fileName: image.fileName, previewKey: task.id,
-        sourceVersion: image.resultVersion || undefined,
+        // Unread observation IDs are not image-file versions. The reader validates
+        // the original response's real version and keeps its cache permission checks.
         safeDetails: { ...image.metadata, width: image.width, height: image.height, fileSize: image.fileSize },
         comparison: image.comparison,
-        comparisonCandidates: [...taskComparisonCandidates(task), ...previewableTasks.filter(other => other.batchId === task.batchId).map(other => ({ src: other.asset!.original_url, thumbnailSrc: other.asset!.thumbnail_url, alt: `生成结果 ${other.ordinal}`, contentKey: `asset:${other.asset!.id}` as const }))],
+        comparisonCandidates: [...taskComparisonCandidates(task), ...previewableTasks.filter(other => other.batchId === task.batchId).map(other => ({ src: other.asset!.original_url, role: 'generated' as const, thumbnailSrc: other.asset!.thumbnail_url, alt: `生成结果 ${other.ordinal}`, contentKey: `asset:${other.asset!.id}` as const }))],
         onImageLoaded: (src: string) => { if (src === image.src) observeResultVersion(image.resultVersion || null); },
       } : undefined,
     } satisfies GeneratedImageResult & { task: StudioTask };
@@ -2514,14 +2530,21 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     <header className={styles.header}>
       <TemplateFavoriteTitle className={styles.moduleTitleRow} contentKey={sharedLive?.available ? `image_template:${sharedLive.intent.presetId}` : module.saved && !sharedLive ? `image_module:${module.id}` : undefined}>
         {!definitionEditable || sharedLive?.available === false ? <strong className={styles.moduleNameDisplay}>{name}</strong> : nameEditing ? <input ref={nameInput} className={styles.moduleName} aria-label="模块名称" value={name} maxLength={80} onChange={event => setName(event.target.value)} onBlur={() => setNameEditing(false)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); setNameEditing(false); } }} /> : <button type="button" className={styles.moduleNameDisplay} title={name} aria-label={`编辑模块标题：${name}`} onClick={() => setNameEditing(true)}>{name}</button>}
-        {sharedLive && <small className={styles.sharedOrigin}>{sharedLive.available ? '共享模板' : '历史保留'}</small>}
+        {sharedLive && (!sharedLive.available || module.sourcePresetShared === true) && <small className={styles.sharedOrigin}>{sharedLive.available ? '共享模板' : '历史保留'}</small>}
       </TemplateFavoriteTitle>
       <div className={styles.counts}>
-        {module.sourcePresetCanManageSharing && module.sourcePresetId && <button type="button" role="switch" aria-checked={module.sourcePresetShared === true} className={`${styles.presetSharing} ${styles.moduleSharing}`} title={templateWorkbench ? '只改变原模板的共享，不会发布当前模块草稿' : undefined} disabled={sharingId === module.sourcePresetId} onClick={() => void onToggleSharing(module)}>{templateWorkbench ? (module.sourcePresetShared === true ? '原模板已共享' : '共享原模板') : (module.sourcePresetShared === true ? '共享给同事' : '仅自己可见')}</button>}
+        {module.sourcePresetCanManageSharing && module.sourcePresetId && <label className={`toggle-switch ${styles.moduleShareSwitch}`} title="共享该模块">
+          <input type="checkbox" role="switch" aria-label="共享该模块" checked={module.sourcePresetShared === true} disabled={sharingId === module.sourcePresetId} onChange={() => void onToggleSharing(module)} />
+          <span className="toggle-slider" />
+        </label>}
         <ModuleGroupPicker value={groupName} groups={groups} protectedGroups={protectedGroups} disabled={!definitionEditable || sharedLive?.available === false || !draftLoaded || draftRestoring || moduleSaving || !sharedLive && automaticDirty || moduleDeleting || submitting || uploading || Boolean(pendingSubmission)} deleting={groupDeleting}
           onChange={value => void changeGroup(value)} onDelete={onDeleteGroup} />
         {(moduleSaving || moduleSaveError) && <span role="status" className={styles.muted}>{moduleSaving ? '保存中' : '保存失败'}</span>}
         <span className={styles.contextEntry}><button type="button" disabled={!draftLoaded || draftRestoring} onClick={openModuleDialog}><Settings size={17} />模块上下文</button></span>
+        {(module.coverEditable || !module.saved && !sharedLive) && <button type="button" disabled={!draftLoaded || draftRestoring || moduleSaving || moduleDeleting || bannerUploading} onClick={() => void (async () => {
+          if (!module.saved && !await saveModule(reproduceSourceTaskId, revisionRef.current, false)) return;
+          setCoverEditorOpen(true);
+        })()}><ImagePlus size={17} />设置封面</button>}
         <button type="button" className={templateWorkbench ? styles.moduleDeleteIcon : undefined} title={module.id === `default-${userId}` ? (templateWorkbench ? '默认模块需要保留' : '默认模板需要保留') : (templateWorkbench ? '删除模块' : '删除模板')} aria-label={moduleDeleting ? '正在删除模块' : `删除${templateWorkbench ? '模块' : '模板'}：${name}`} aria-busy={moduleDeleting || undefined}
           disabled={module.id === `default-${userId}` || moduleDeleting || moduleSaving || submitting || uploading || bannerUploading || Boolean(pendingSubmission)}
           onClick={() => void deleteModule()}>{moduleDeleting ? <LoaderCircle size={17} className={styles.spinner} /> : <Trash2 size={17} />}{!templateWorkbench && (moduleDeleting ? '删除中' : '删除模板')}</button>
@@ -2531,11 +2554,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       {banner?.originalUrl ? <>
         {/* 固定 banner 高度并完整等比显示图片，不裁切。 */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img decoding="async" className={styles.moduleBannerImage} src={banner.thumbnailUrl || undefined} alt={templateWorkbench ? '模块封面' : '模块 banner'} />
-        <span className={styles.bannerLabel}>{templateWorkbench ? '模块封面' : '模块 banner'}</span>
+        <img decoding="async" className={styles.moduleBannerImage} src={banner.thumbnailUrl || undefined} alt={templateWorkbench ? '模块横幅' : '模块横幅'} />
+        <span className={styles.bannerLabel}>{templateWorkbench ? '模块横幅' : '模块横幅'}</span>
         {definitionEditable && sharedLive?.available !== false && <><button type="button" className={styles.bannerReplace} disabled={bannerUploading || submitting} onClick={() => openImageSource('banner')}>{bannerUploading ? '上传中' : '更换图片'}</button>
-        <button type="button" className={styles.bannerRemove} disabled={bannerUploading || submitting} onClick={() => setBanner(null)} aria-label={templateWorkbench ? '移除模块封面' : '移除模块 banner'}><X size={16} /></button></>}
-      </> : definitionEditable && sharedLive?.available !== false ? <button type="button" className={styles.bannerEmpty} disabled={bannerUploading || submitting} onClick={() => openImageSource('banner')}><ImagePlus size={20} />{bannerUploading ? '上传中' : templateWorkbench ? '添加模块封面' : '添加模块 banner'}</button> : <span className={styles.bannerEmpty}>暂无封面</span>}
+        <button type="button" className={styles.bannerRemove} disabled={bannerUploading || submitting} onClick={() => setBanner(null)} aria-label={templateWorkbench ? '移除模块横幅' : '移除模块横幅'}><X size={16} /></button></>}
+      </> : definitionEditable && sharedLive?.available !== false ? <button type="button" className={styles.bannerEmpty} disabled={bannerUploading || submitting} onClick={() => openImageSource('banner')}><ImagePlus size={20} />{bannerUploading ? '上传中' : templateWorkbench ? '添加模块横幅' : '添加模块横幅'}</button> : <span className={styles.bannerEmpty}>暂无横幅</span>}
     </div>
     <input ref={bannerFileInput} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void uploadBanner(file); event.target.value = ''; }} />
     {bannerProgress && <UploadProgressIndicator {...bannerProgress} />}
@@ -2773,8 +2796,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     </div>
     {assetPickerOpen && <UploadedImagePicker open imageOnly target="image-studio"
       initialSource={templateWorkbench ? 'template-image' : 'all'}
-      title={imageSourceTarget === 'template' ? '添加共享参考图' : imageSourceTarget === 'banner' ? '替换封面' : imageSourceTarget === 'fixed' ? '添加固定参考图' : imageSourceTarget === 'auxiliary' ? '添加参考图' : referenceLimit === 1 && images.length ? '替换主图' : '添加主图'}
-      confirmLabel={imageSourceTarget === 'template' ? '加入共享模板' : imageSourceTarget === 'banner' ? '替换封面' : imageSourceTarget === 'fixed' ? '添加到固定参考区' : imageSourceTarget === 'auxiliary' ? '添加到参考区' : referenceLimit === 1 && images.length ? '替换主图' : '添加到主图'}
+      title={imageSourceTarget === 'template' ? '添加共享参考图' : imageSourceTarget === 'banner' ? '替换横幅' : imageSourceTarget === 'fixed' ? '添加固定参考图' : imageSourceTarget === 'auxiliary' ? '添加参考图' : referenceLimit === 1 && images.length ? '替换主图' : '添加主图'}
+      confirmLabel={imageSourceTarget === 'template' ? '加入共享模板' : imageSourceTarget === 'banner' ? '替换横幅' : imageSourceTarget === 'fixed' ? '添加到固定参考区' : imageSourceTarget === 'auxiliary' ? '添加到参考区' : referenceLimit === 1 && images.length ? '替换主图' : '添加到主图'}
       purpose={imageSourceTarget === 'template' ? 'auxiliary' : imageSourceTarget}
       avatarTarget={imageSourceTarget==='reference'||imageSourceTarget==='auxiliary' ? {kind:'image-module',id:module.id,revision:module.revision,currentAssetIds:[...images,...auxiliaryImages].flatMap(image=>image.id?[image.id]:[]),capacity:Math.max(0,imageSourceTarget==='auxiliary'?currentAuxiliaryCap-auxiliaryImages.length:currentReferenceCap-images.length),sourceSignature:JSON.stringify([module.id,module.revision,generationDraft,imageSourceTarget,images,auxiliaryImages])} : undefined}
       onAvatarConfirm={async (_ids, assets) => {
@@ -2852,14 +2875,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         {contextEditable && <ContextClipboardActions value={moduleContext} textareaRef={moduleContextInput} onPaste={changeModuleContext} maxLength={20000} disabled={moduleSaving} />}
       </div>
       {unifiedDefaultsError && <p role="alert" className={styles.error}>{unifiedDefaultsError}</p>}
-      {sharedLive && typeof module.templatePrompt === 'string' && <label className={styles.templatePrompt}>模板画面描述<textarea aria-label="模板画面描述" rows={4} maxLength={20000} value={templatePrompt} readOnly={!definitionEditable} disabled={moduleSaving || !sharedLive.available} onChange={event => setTemplatePrompt(event.target.value)} /></label>}
-      {sharedLive && <section aria-label="共享模板参考图">
-        <label className={styles.label}>共享参考图 <span>{templateImages.length} 张</span></label>
-        <StudioReferenceGrid items={templateImages} onChange={setTemplateImages} onPreview={(image, number) => previewReference(image, number, true)} labels="auxiliary" compact
-          disabled={!definitionEditable || !sharedReady || moduleSaving || uploading || submitting || Boolean(pendingSubmission)}>
-          {definitionEditable && sharedReady && <button type="button" className={styles.add} disabled={moduleSaving || uploading || submitting || Boolean(pendingSubmission) || templateImages.length >= currentTemplateCap} onClick={() => openImageSource('template')}><ImagePlus size={20} />添加共享参考图</button>}
-        </StudioReferenceGrid>
-      </section>}
+      {/* 隐藏旧模板说明和共享参考编辑区，历史值及已保存生成合同继续保留。 */}
       {contextEditable ? <>
         <textarea ref={moduleContextInput} aria-label="模块上下文" rows={12} maxLength={20000} value={moduleContext} onCompositionStart={() => setContextComposing(true)} onCompositionEnd={event => { setContextComposing(false); changeModuleContext(event.currentTarget.value); }} onChange={event => changeModuleContext(event.target.value)} />
       </> : <p className={styles.muted}>共享模板的内部上下文由创建者维护，生成时自动使用。</p>}
@@ -2919,7 +2935,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         </label>
       </div>
     </dialog>
-    {preview && !preview.taskId && <ZoomableImagePreview contentKey={preview.contentKey} src={preview.src} thumbnailSrc={preview.thumbnailSrc} alt={preview.alt} title={preview.title} previewKey={preview.taskId || preview.src} sourceVersion={preview.resultVersion || undefined} fileName={preview.fileName} safeDetails={{ ...preview.metadata, width: preview.width, height: preview.height, fileSize: preview.fileSize }} comparison={preview.comparison}
+    {coverEditorOpen && <ModuleCoverEditor moduleId={module.id} moduleName={name} onClose={() => setCoverEditorOpen(false)} onSaved={fixedCover => { onModuleChange({ ...module, fixedCover }); onSharedRefresh(); }} />}
+    {preview && !preview.taskId && <ZoomableImagePreview contentKey={preview.contentKey} src={preview.src} sourceRole={preview.sourceRole} thumbnailSrc={preview.thumbnailSrc} alt={preview.alt} title={preview.title} previewKey={preview.taskId || preview.src} fileName={preview.fileName} safeDetails={{ ...preview.metadata, width: preview.width, height: preview.height, fileSize: preview.fileSize }} comparison={preview.comparison}
  onClose={() => { setPreview(null); if (resumeModulePreview.current) { resumeModulePreview.current = false; moduleDialog.current?.showModal(); } }} />}
   </section>)}</>;
 }

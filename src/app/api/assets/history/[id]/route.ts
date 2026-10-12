@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
-import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
+import { canReadStudioAsset, assertStudioCoverAssetNotReferenced, StudioCoverReferenceError } from '@/lib/image-studio/protected-assets';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,13 +28,14 @@ export async function DELETE(
       return NextResponse.json({ success: true, hidden: true });
     }
 
-    await prisma.asset.update({
-      where: { id: asset.id },
-      data: { status: 'hidden' },
+    await prisma.$transaction(async tx => {
+      await assertStudioCoverAssetNotReferenced(asset.id, tx);
+      await tx.asset.update({ where: { id: asset.id }, data: { status: 'hidden' } });
     });
 
     return NextResponse.json({ success: true, hidden: true });
   } catch (error) {
+    if (error instanceof StudioCoverReferenceError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error('[AssetHistory] Hide error:', error);
     return NextResponse.json(
       { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },

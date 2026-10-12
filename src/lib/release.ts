@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '生图等待卡片压暗参考图并增加刷光，明确标识的时间模拟进度最多到95%，真实图片显示后结束；正常等待与查询异常分别提示。模型、质量和分辨率选择框随设置栏宽度换行。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '模块可保存单图、左右或上下裁剪封面，新结果不再替换；共享开关与标记更清楚。对比图固定原图在左、生成图在右，红心常显且动画完整。修复普通大图查看，原图可直接下载。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

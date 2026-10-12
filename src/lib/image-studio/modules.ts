@@ -16,6 +16,7 @@ import { getStudioModuleReferencePolicy, parseStudioReferencePolicy, removeStudi
 import { studioTemplateDefaultPolicy } from './template-defaults';
 import { assertStudioActor, deleteStudioGroup, getSharedStudioPersonalOverrides, getStudioRemovedDefaultGroups, publishSharedStudioModule, readSharedStudioModules, restoreStudioDefaultGroup, saveSharedStudioPersonal, studioPublisherKey, studioSharedBinding, StudioSharingError, type SharedStudioModuleRead } from './shared-contract';
 import type { SharedStudioLiveDTO } from './shared-types';
+import { studioFixedCoverDTO } from './module-cover';
 
 export { deleteStudioGroup };
 
@@ -120,9 +121,11 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     if (isAdmin && typeof representative?.id === 'string') representativeReference = studioTemplateAssetUrl(representative.id, true);
   } catch { representativeReference = null; }
   const banner = row.banner_asset_id ? assets.find(item => item.id === row.banner_asset_id) : null;
+  const fixedCover = saved ? await studioFixedCoverDTO(user, { kind: 'module', id: row.id }) : null;
   return { id: row.id, name: row.name, prompt: row.prompt, count: row.count, referenceLimit, referencePolicy, aspectRatio: row.aspect_ratio || 'auto', resolution: generation.resolution, revision: row.revision, saved,
     model: generation.model, quality, groupName: row.group_name || '未分组', banner: banner ? { id: banner.id, originalUrl: studioTemplateAssetUrl(banner.id), thumbnailUrl: studioTemplateAssetUrl(banner.id, true), width: banner.width, height: banner.height } : null,
-    cover: latestResult ? { resultUrl: studioAssetUrl(latestResult.id), thumbnailUrl: studioAssetUrl(latestResult.id, true), referenceUrl: representativeReference } : null,
+    fixedCover, coverEditable: saved,
+    cover: !fixedCover && latestResult ? { resultUrl: studioAssetUrl(latestResult.id), thumbnailUrl: studioAssetUrl(latestResult.id, true), referenceUrl: representativeReference } : null,
     prices: generation.prices, unitCredits: generation.prices[generation.model],
     reproduceFromTaskId: row.reproduce_task_id || null, sourcePresetId: row.source_preset_id || null,
     sourcePresetShared: row.source_preset_id ? Boolean(sourcePreset?.is_shared) : null,
@@ -173,6 +176,7 @@ async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: 
   const intent = resolved?.definition.intent || unavailableIntent || { protocol: 'shared-live-v1' as const, presetId: binding.presetId, definitionToken: '' };
   const sharedLive: SharedStudioLiveDTO = { ...intent, intent, mode: binding.mode, available: Boolean(resolved),
     ...(unavailableReason ? { unavailableReason } : {}), overriddenFields: Object.keys(overrides) as SharedStudioLiveDTO['overriddenFields'], ...(defaults ? { defaults } : {}) };
+  const fixedCover = dto?.fixedCover ?? await studioFixedCoverDTO(actor, { kind: 'preset', id: binding.presetId });
   return { id: row.id, name: dto?.name || (canRepair ? unavailableSource!.name : '模板已不可用'), groupName: dto?.groupName || (canRepair ? unavailableSource!.group_name : '未分组'),
     prompt: overrides.prompt ?? '', personalPrompt: overrides.prompt ?? '', templatePrompt: dto?.templatePrompt ?? (canRepair ? unavailableSource!.prompt : ''),
     context: dto?.context ?? (canRepair ? unavailableSource!.context : ''), contextConfigured: dto?.contextConfigured ?? Boolean(canRepair && unavailableSource!.context.trim()),
@@ -181,7 +185,10 @@ async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: 
     model, quality, resolution, count: overrides.count ?? defaults?.count ?? row.count,
     aspectRatio: overrides.aspectRatio ?? defaults?.aspectRatio ?? row.aspect_ratio ?? 'auto',
     referenceLimit: defaults?.referenceLimit ?? row.reference_limit ?? DEFAULT_STUDIO_PRIMARY_MAX, referencePolicy,
-    revision: row.revision, saved: true, banner: dto?.banner || null, cover: latestResult ? { resultUrl: studioAssetUrl(latestResult.id), thumbnailUrl: studioAssetUrl(latestResult.id, true), referenceUrl: null } : null,
+    revision: row.revision, saved: true, banner: dto?.banner || null,
+    fixedCover,
+    coverEditable: binding.mode === 'publisher' && (Boolean(dto?.coverEditable) || canRepair),
+    cover: !fixedCover && latestResult ? { resultUrl: studioAssetUrl(latestResult.id), thumbnailUrl: studioAssetUrl(latestResult.id, true), referenceUrl: null } : null,
     prices: settings.prices, unitCredits: settings.prices[model], images, templateImages: dto?.images || [],
     templateReferenceIds: dto?.templateReferenceIds || [], fixedReferences: dto?.fixedReferences || [], fixedReferenceCount: dto?.fixedReferenceCount || 0,
     styleGroupIds: dto?.styleGroupIds || [], styleGroups: dto?.styleGroups || [], skillIds: [], skills: [],
@@ -232,14 +239,17 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
   const projectedDirectory = directory ? await Promise.all(directory.map(async item => {
     const sharedRead = sharedReads.get(item.id)!;
     const binding = sharedRead.binding;
-    if (!binding) return { id: item.id, name: item.name, groupName: item.group_name || '未分组', sourcePresetId: item.source_preset_id, revision: item.revision, canManageGroup: true };
+    if (!binding) return { id: item.id, name: item.name, groupName: item.group_name || '未分组', sourcePresetId: item.source_preset_id,
+      sourcePresetShared: Boolean(item.source_preset_id && sourceById.get(item.source_preset_id)?.is_shared), revision: item.revision, canManageGroup: true, coverEditable: true };
     try {
       if (sharedRead.unavailable) throw sharedRead.unavailable;
       const resolved = sharedRead.resolved!;
       const { definition, personalOverrides } = resolved;
       const sharedLive: SharedStudioLiveDTO = { ...definition.intent, intent: definition.intent, mode: binding.mode, available: true,
         overriddenFields: Object.keys(personalOverrides) as SharedStudioLiveDTO['overriddenFields'], defaults: resolved.publicDTO.defaults };
-      return { id: item.id, name: definition.name, groupName: definition.groupName, sourcePresetId: binding.presetId, revision: item.revision, canManageGroup: binding.mode === 'publisher' && resolved.publicDTO.canManageSharing, sharedLive };
+      return { id: item.id, name: definition.name, groupName: definition.groupName, sourcePresetId: binding.presetId,
+        sourcePresetShared: resolved.publicDTO.isShared, coverEditable: binding.mode === 'publisher' && resolved.publicDTO.coverEditable,
+        revision: item.revision, canManageGroup: binding.mode === 'publisher' && resolved.publicDTO.canManageSharing, sharedLive };
     } catch (error) {
       if (error instanceof StudioSharingError && [403, 404, 409].includes(error.status)) {
         const intent = error.intent || { protocol: 'shared-live-v1' as const, presetId: binding.presetId, definitionToken: '' };
@@ -248,7 +258,8 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
           ? await prisma.imageStudioPreset.findFirst({ where: { id: binding.presetId, owner_id: ownerId } }) : null;
         const canManageGroup = Boolean(source && canManageStudioPreset(actor, source) && !(await studioPresetArchived(source.id)));
         return { id: item.id, name: canManageGroup ? source!.name : '模板已不可用', groupName: canManageGroup ? source!.group_name || '未分组' : '未分组',
-          sourcePresetId: binding.presetId, revision: item.revision, canManageGroup, sharedLive, unavailable: true };
+          sourcePresetId: binding.presetId, sourcePresetShared: Boolean(source?.is_shared), coverEditable: canManageGroup,
+          revision: item.revision, canManageGroup, sharedLive, unavailable: true };
       }
       throw error;
     }

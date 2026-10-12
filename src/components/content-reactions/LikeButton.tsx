@@ -31,10 +31,11 @@ function Roll({ value, animate }: { value: number; animate: boolean }) {
   })}</span>;
 }
 
-export default function LikeButton({ active, count, showCount, animateCount, disabled, bloom, onClick }: {
-  active: boolean; count?: number | null; showCount: boolean; animateCount: boolean; disabled: boolean; bloom: number; onClick: () => void;
+export default function LikeButton({ active, count, showCount, animateCount, disabled, bloom, parentControlled = false, onClick }: {
+  active: boolean; count?: number | null; showCount: boolean; animateCount: boolean; disabled: boolean; bloom: number; parentControlled?: boolean; onClick: () => void;
 }) {
   const [settledBloom, setSettledBloom] = useState(0);
+  const [animationBloom, setAnimationBloom] = useState(0);
   const [reducedMotion, setReducedMotion] = useState(false);
   useEffect(() => {
     const media = matchMedia('(prefers-reduced-motion: reduce)');
@@ -43,17 +44,20 @@ export default function LikeButton({ active, count, showCount, animateCount, dis
     return () => media.removeEventListener('change', update);
   }, []);
   useEffect(() => {
-    if (!active || !bloom) return;
-    const timer = setTimeout(() => setSettledBloom(bloom), 900);
-    return () => clearTimeout(timer);
+    if (active && bloom > 0) setAnimationBloom(bloom);
   }, [active, bloom]);
-  const bursting = active && bloom > 0 && settledBloom !== bloom && !reducedMotion;
+  useEffect(() => {
+    if (!animationBloom) return;
+    const timer = setTimeout(() => setSettledBloom(animationBloom), 900);
+    return () => clearTimeout(timer);
+  }, [animationBloom]);
+  const bursting = animationBloom > 0 && settledBloom !== animationBloom && !reducedMotion;
   const label = active ? '取消喜欢' : '喜欢';
   const hint = active ? '取消喜欢，从我的喜欢移除' : '喜欢，加入我的喜欢';
-  return <button className="sd2-like" type="button" data-reaction-action="like" data-bloom={bursting ? bloom : undefined}
+  return <button className="sd2-like" type="button" data-reaction-action="like" data-bloom={bursting ? animationBloom : undefined} data-result-secondary={parentControlled && !active && !bursting || undefined}
     title={count == null ? hint : `${hint} · 公开喜欢人数 ${format(count)}`} aria-label={count == null ? label : `${label}，公开喜欢人数 ${format(count)}`} aria-pressed={active} disabled={disabled} onClick={onClick}>
-    <span className="lk-heart"><span key={bursting ? `glyph-${bloom}` : 'glyph-still'} className="lk-glyph" onAnimationEnd={event => { if (event.target === event.currentTarget) setSettledBloom(bloom); }}><Heart size={19} strokeWidth={2.3} fill={active ? 'currentColor' : 'none'} /></span>
-      {bursting && <span className="lk-burst" key={`burst-${bloom}`} aria-hidden="true"><span className="lk-bloom" />{colors.map((color, index) => <span key={index} className="lk-spoke" style={{ '--a': `${index * (360 / 7) - 90}deg` } as CSSProperties}><i style={{ '--c': color } as CSSProperties} /><i style={{ '--c': colors[(index + 3) % colors.length] } as CSSProperties} /></span>)}</span>}
+    <span className="lk-heart"><span className="lk-glyph lk-static-glyph"><Heart size={19} strokeWidth={2.3} fill={active ? 'currentColor' : 'none'} /></span>
+      {bursting && <span className="lk-burst" key={`burst-${animationBloom}`} aria-hidden="true"><span className="lk-animated-glyph"><Heart size={19} strokeWidth={2.3} fill="currentColor" /></span><span className="lk-bloom" />{colors.map((color, index) => <span key={index} className="lk-spoke" style={{ '--a': `${index * (360 / 7) - 90}deg` } as CSSProperties}><i style={{ '--c': color } as CSSProperties} /><i style={{ '--c': colors[(index + 3) % colors.length] } as CSSProperties} onAnimationEnd={index === colors.length - 1 ? event => { if (event.target === event.currentTarget) setSettledBloom(animationBloom); } : undefined} /></span>)}</span>}
     </span>
     {showCount && (count != null ? <Roll value={count} animate={animateCount} /> : <span className="lk-count" aria-hidden="true">-</span>)}
   </button>;
