@@ -1,5 +1,5 @@
 import { getSession } from '@/lib/auth/session';
-import { deleteSkill, listSkills, saveSkill } from '@/lib/image-studio/skills';
+import { deleteSkill, listSkills, listSkillsPage, parseSkillIds, saveSkill } from '@/lib/image-studio/skills';
 import { StudioStyleError } from '@/lib/image-studio/style-groups';
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
@@ -19,7 +19,20 @@ async function handle(request: Request) {
   try {
     const user = await getSession();
     if (!user) return Response.json({ error: '请先登录' }, { status: 401, headers });
-    if (request.method === 'GET') return Response.json({ skills: await listSkills(user) }, { headers });
+    if (request.method === 'GET') {
+      const params = new URL(request.url).searchParams;
+      if (params.has('ids')) {
+        const selected = parseSkillIds(params.get('ids')?.split(',').filter(Boolean) || []);
+        const page = await listSkillsPage(user, { keys: selected });
+        const byId = new Map(page.skills.map(skill => [skill.id, skill]));
+        return Response.json({ skills: selected.map(id => byId.get(id) || { id, name: 'Skills 不可用', unavailable: true }), nextCursor: null }, { headers });
+      }
+      if (params.get('page') === '1') return Response.json(await listSkillsPage(user, {
+        cursor: params.get('cursor') || undefined, query: params.get('query') || undefined,
+        ...(params.has('keys') ? { keys: params.get('keys')?.split(',').filter(Boolean) || [] } : {}),
+      }), { headers });
+      return Response.json({ skills: await listSkills(user) }, { headers });
+    }
     if (!validRequestOrigin(request)) return Response.json({ error: '请求来源无效' }, { status: 403, headers });
     if (Number(request.headers.get('content-length') || 0) > 64 * 1024) throw new StudioStyleError('skills内容过大');
     const reader = request.body?.getReader();

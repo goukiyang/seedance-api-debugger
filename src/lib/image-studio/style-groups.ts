@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { canUseCompanyTemplates, type ImageStudioIdentity } from './access';
 import { parseStudioFixedReferences, type StudioFixedReference } from './fixed-references';
@@ -70,6 +70,32 @@ export async function listStudioStyleGroups(user: ImageStudioIdentity, cursor?: 
   const page = rows.slice(0, 48);
   const groups = page.map(row => decode(row.value_json)).filter(group => !group.deleted);
   return { groups: await Promise.all(groups.map(group => studioStyleDTO(user, group))),
+    nextCursor: rows.length > 48 ? page[page.length - 1].key.slice(PREFIX.length) : null };
+}
+export type StudioSelectorPageOptions = { cursor?: string; query?: string; keys?: string[] };
+export function validateStudioSelectorPage(options: StudioSelectorPageOptions) {
+  if (options.query && options.query.length > 160 || options.cursor && !/^[0-9a-f-]{36}$/i.test(options.cursor)
+    || options.keys && (options.keys.length > 100 || options.keys.some(id => !/^[0-9a-f-]{36}$/i.test(id)))) {
+    throw new StudioStyleError('选择列表的搜索或分页条件无效');
+  }
+}
+export async function listStudioStyleGroupsPage(user: ImageStudioIdentity, options: StudioSelectorPageOptions = {}) {
+  identity(user); validateStudioSelectorPage(options);
+  if (options.keys && !options.keys.length) return { groups: [], nextCursor: null };
+  const query = options.query?.trim() || '';
+  // Every company user may read names/covers. Notes remain searchable only by their existing managers.
+  const rows = await prisma.$queryRaw<Array<{ key: string; value_json: string }>>(Prisma.sql`
+    SELECT key, value_json FROM PlatformSetting
+    WHERE key >= ${PREFIX} AND key < ${PREFIX + '\uffff'}
+      AND json_valid(value_json) AND COALESCE(json_extract(value_json, '$.deleted'), 0) != 1
+      ${options.cursor ? Prisma.sql`AND key > ${PREFIX + options.cursor}` : Prisma.empty}
+      ${options.keys ? Prisma.sql`AND key IN (${Prisma.join(options.keys.map(id => PREFIX + id))})` : Prisma.empty}
+      AND (${query} = '' OR instr(lower(json_extract(value_json, '$.name')), lower(${query})) > 0
+        OR ((${user.role === 'admin' ? 1 : 0} = 1 OR json_extract(value_json, '$.ownerId') = ${user.id})
+          AND instr(lower(COALESCE(json_extract(value_json, '$.note'), '')), lower(${query})) > 0))
+    ORDER BY key ASC LIMIT 49`);
+  const page = rows.slice(0, 48);
+  return { groups: await Promise.all(page.map(row => studioStyleDTO(user, decode(row.value_json)))),
     nextCursor: rows.length > 48 ? page[page.length - 1].key.slice(PREFIX.length) : null };
 }
 export async function getStudioModuleStyleIds(ownerId: string, moduleId: string, client: Client = prisma, kind: 'module' | 'preset' = 'module') {

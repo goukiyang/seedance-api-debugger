@@ -12,7 +12,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
-import { ensureSiteAssetPublicUrl } from '@/lib/assets/site-upload';
+import { sameOriginPublicUrlForLocalUpload } from '@/lib/assets/site-upload';
+import { releaseVerifiedUpload, verifyExistingUpload } from '@/lib/assets/verified-upload';
 import { createAsset } from '@/lib/provider/seedance-assets';
 import { seedanceAssetRepository } from '@/lib/assets/seedanceAssetRepository';
 import { isPubliclyReachableUrl } from '@/lib/assets/public-storage';
@@ -241,7 +242,7 @@ export async function POST(request: NextRequest) {
     return jsonUploadAndCreateError('ASSET_NOT_FOUND', '素材不存在或已不可用，请重新上传。', 404);
   }
 
-  if (user.role !== 'admin' && assetRecord.owner_id !== user.id) {
+  if (assetRecord.owner_id !== user.id) {
     return jsonUploadAndCreateError('ASSET_FORBIDDEN', '当前账号无权使用这个素材。', 403);
   }
 
@@ -262,9 +263,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let publicAsset: Awaited<ReturnType<typeof ensureSiteAssetPublicUrl>>;
+  let publicAsset: { asset: { original_url: string }; isPubliclyReachable: boolean; storageProvider?: string; publicUploadWarning?: string };
   try {
-    publicAsset = await ensureSiteAssetPublicUrl(assetRecord.id);
+    const full = await prisma.asset.findUnique({ where: { id: assetRecord.id } });
+    if (!full) throw new Error('asset_unavailable');
+    const proof = await verifyExistingUpload(full, user.id);
+    if (!proof) throw new Error('original_unverifiable');
+    await releaseVerifiedUpload(proof);
+    const url = sameOriginPublicUrlForLocalUpload(full.original_url) || full.original_url;
+    publicAsset = { asset: { original_url: url }, isPubliclyReachable: isPubliclyReachableUrl(url), storageProvider: sameOriginPublicUrlForLocalUpload(full.original_url) ? 'local-public' : 'asset' };
   } catch (error) {
     return jsonUploadAndCreateError(
       'ASSET_PUBLIC_URL_FAILED',
@@ -291,11 +298,22 @@ export async function POST(request: NextRequest) {
 
   const fileHash = assetRecord.hash || null;
   const assetName = name || assetRecord.file_name || 'Untitled';
+  async function providerReuseIsOwned(localId: string) {
+    const provider = await prisma.seedanceAsset.findUnique({ where: { id: localId } });
+    if (!provider || provider.local_status !== 'Active' || !provider.storage_key || provider.file_hash !== fileHash) return false;
+    const owned = await prisma.asset.findUnique({ where: { id: provider.storage_key } });
+    if (!owned || owned.owner_id !== user!.id || owned.hash !== fileHash || owned.mime_type !== assetRecord!.mime_type || owned.file_size !== assetRecord!.file_size
+      || (sameOriginPublicUrlForLocalUpload(owned.original_url) || owned.original_url) !== provider.original_url) return false;
+    const proof = await verifyExistingUpload(owned, user!.id);
+    if (!proof) return false;
+    await releaseVerifiedUpload(proof); return true;
+  }
 
   if (fileHash) {
     try {
       const existingByHash = await seedanceAssetRepository.findActiveByFileHash(fileHash);
       if (existingByHash) {
+        if (!await providerReuseIsOwned(existingByHash.localId)) return jsonUploadAndCreateError('PROVIDER_REUSE_UNVERIFIED', '供应商已有同文件记录，但无法确认属于本人可用素材；原记录保留，未新增收费调用。', 409);
         return NextResponse.json({
           success: true,
           closedLoop: true,
@@ -321,6 +339,7 @@ export async function POST(request: NextRequest) {
   try {
     const existingByUrl = await seedanceAssetRepository.findActiveByOriginalUrl(publicUrl);
     if (existingByUrl) {
+      if (!await providerReuseIsOwned(existingByUrl.localId)) return jsonUploadAndCreateError('PROVIDER_REUSE_UNVERIFIED', '供应商已有同地址记录，但无法确认本人可合法复用；未新增收费调用。', 409);
       return NextResponse.json({
         success: true,
         closedLoop: true,

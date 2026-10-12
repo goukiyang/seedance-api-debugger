@@ -19,7 +19,7 @@ export function ResultImageCover({ src, alt, selected, applied, onSelect, onPrev
   useEffect(() => cancelPreview, [identity, active]);
   if (failed === identity) return <button type="button" className={styles.cover} aria-label={`重试读取${alt}`} onClick={() => { setFailed(''); setAttempt(value => value + 1); }}><span className={styles.readState}><RefreshCw size={18} />图片未能读取，点击重试</span></button>;
   return <button type="button" className={styles.cover} data-result-cover data-selected={selected || undefined}
-    aria-label={`查看${alt}`} aria-pressed={selected} title={onQuickUse ? '单击查看图片，双击替换主图' : undefined}
+    aria-label={`查看${alt}`} aria-pressed={selected} title={onQuickUse ? '单击查看图片，双击取回本次输入主图' : undefined}
     onClick={event => {
       event.stopPropagation();
       if (!active) return;

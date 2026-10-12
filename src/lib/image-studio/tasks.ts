@@ -120,6 +120,42 @@ export function studioSharedGenerationSource(shared: NonNullable<Awaited<ReturnT
     } : {}) };
 }
 
+function normalizeSharedAuthorDraftForUse(actor: ImageStudioIdentity,
+  shared: NonNullable<Awaited<ReturnType<typeof resolveStudioTaskSharedUse>>>, input: ReturnType<typeof parseStudioRequest>) {
+  const draft = input.draft;
+  const hasDefinition = input.reproduceFromTaskId !== undefined || draft?.moduleContext !== undefined
+    || draft?.fixedReferences !== undefined || draft?.styleGroupIds !== undefined
+    || draft?.skillIds !== undefined || draft?.skillVersions !== undefined;
+  if (!hasDefinition) return;
+  if (shared.binding.mode !== 'publisher' || shared.binding.ownerId !== actor.id || shared.definition.sourceOwnerId !== actor.id) {
+    throw new StudioError('共享模板的历史定义不能直接用于生成；请重新读取当前模板，个人设置仍保留', 409);
+  }
+  const definition = shared.definition;
+  const sameReferences = draft?.fixedReferences === undefined || draft.fixedReferences.length === definition.fixedReferences.length
+    && draft.fixedReferences.every((reference, index) => reference.assetId === definition.fixedReferences[index].assetId
+      && reference.note === definition.fixedReferences[index].note);
+  const sameStyles = draft?.styleGroupIds === undefined || draft.styleGroupIds.length === definition.styleGroupIds.length
+    && draft.styleGroupIds.every((id, index) => id === definition.styleGroupIds[index]);
+  const sameReproduction = input.reproduceFromTaskId === undefined || Boolean(definition.reproduction
+    && definition.reproduction.sourceOwnerId === actor.id && input.reproduceFromTaskId === definition.reproduction.sourceTaskId
+    && (draft?.globalContext === undefined || draft.globalContext === definition.reproduction.globalContext));
+  if (draft?.moduleContext !== undefined && draft.moduleContext !== definition.context || !sameReferences || !sameStyles
+    || draft?.skillIds !== undefined && draft.skillIds.length !== 0
+    || draft?.skillVersions !== undefined && Object.keys(draft.skillVersions).length !== 0 || !sameReproduction) {
+    throw new StudioError('恢复的模板内容尚未保存，请先保存恢复设置或重新读取当前模板后生成', 409);
+  }
+  // Only discard proven redundant author fields, after the original request fingerprint
+  // and accepted-request recovery have been fixed. The fresh source still drives generation.
+  input.reproduceFromTaskId = undefined;
+  if (draft) {
+    delete draft.moduleContext;
+    delete draft.fixedReferences;
+    delete draft.styleGroupIds;
+    delete draft.skillIds;
+    delete draft.skillVersions;
+  }
+}
+
 export const STUDIO_SHARED_WORKER_KEY = 'studio_shared_worker_v1';
 export const STUDIO_SHARED_WORKER_FILES = [
   'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-types.ts',
@@ -378,10 +414,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const sharedUse = await resolveStudioTaskSharedUse(identity, typeof moduleId === 'string' ? moduleId : undefined, input.sharedLive, tx);
     if (sharedUse) {
       await assertSharedStudioWorkerReady(tx);
-      if (input.reproduceFromTaskId || input.draft?.moduleContext !== undefined || input.draft?.fixedReferences !== undefined
-        || input.draft?.styleGroupIds !== undefined || input.draft?.skillIds !== undefined || input.draft?.skillVersions !== undefined) {
-        throw new StudioError('共享模板定义只能由作者保存；请重新读取模板后生成', 409);
-      }
+      normalizeSharedAuthorDraftForUse(identity, sharedUse, input);
     }
     const sharedDefinition = sharedUse?.definition;
     if (sharedUse && input.personalOverrides !== undefined && !preparation?.batchItem
@@ -1152,6 +1185,8 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json'
   try { sharedLive = parseSharedStudioIntent(parsed.sharedLive); } catch {}
   return {
     ...(sharedLive ? { sharedLive } : {}),
+    ...(sharedLive && typeof parsed.personalPrompt === 'string' ? { personalPrompt: parsed.personalPrompt } : {}),
+    ...(sharedLive && typeof parsed.templatePrompt === 'string' ? { templatePrompt: parsed.templatePrompt } : {}),
     ...(imageChannel ? { imageChannel } : {}),
     ...(imageChannel && imageChannelLabel ? { imageChannelLabel } : {}),
     ...(imageChannel && imageSupplierName ? { imageSupplierName } : {}),

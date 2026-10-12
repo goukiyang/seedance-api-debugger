@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
+import { assertUploadOwner, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
 import { signMultipartUploadPart } from '@/lib/assets/direct-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 
@@ -12,6 +13,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 type MultipartSignPartBody = {
+  ownerId?: string;
   uploadToken?: string;
   partNumber?: number;
 };
@@ -24,8 +26,10 @@ export async function POST(request: NextRequest) {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
     userId = user.id;
+    assertUploadOwner(request.headers.get('x-upload-owner-id'), user.id);
 
     const body = await request.json() as MultipartSignPartBody;
+    assertUploadOwner(body.ownerId, user.id);
     if (typeof body.uploadToken !== 'string' || !body.uploadToken.trim()) {
       return NextResponse.json({ error: '缺少上传票据，请重新上传。' }, { status: 400 });
     }
@@ -46,6 +50,7 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json(ticket);
   } catch (error) {
+    if (error instanceof VerifiedUploadError) return NextResponse.json(verifiedUploadFailure(error), { status: error.status });
     const message = error instanceof Error ? error.message : '分块上传签名失败';
     if (userId) {
       await recordAssetUploadLog({

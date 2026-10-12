@@ -23,7 +23,9 @@ import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { RelativeTime } from '@/components/RelativeTime';
 import { calculateEnhanceVideoEstimatedCostClient } from '@/lib/pricing-client';
 import { taskDetailHref } from '@/lib/navigation/return-to';
-import { uploadFileAsAsset, type UploadProgressSnapshot } from '@/lib/http/file-upload';
+import { uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
+import { uploadSession } from '@/lib/http/upload-session';
+import { UploadSimilarityReview } from '@/components/UploadSimilarityReview';
 import MediaPreview from '@/components/MediaPreview';
 import { InlineVideoCover } from '@/components/InlineVideoCover';
 import { AssetPreviewMedia } from '@/components/AssetPreviewMedia';
@@ -841,6 +843,11 @@ function AssetsPageContent() {
   const [assetUploadFile, setAssetUploadFile] = useState<File | null>(null);
   const [assetUploading, setAssetUploading] = useState(false);
   const [assetUploadProgress, setAssetUploadProgress] = useState<AssetLibraryUploadProgress | null>(null);
+  const [assetUploadReceipt, setAssetUploadReceipt] = useState<{ ownerId: string; assets: UploadedAssetPayload[] } | null>(null);
+  const assetUploadOwner = useRef(user?.id); assetUploadOwner.current = user?.id;
+  useEffect(() => {
+    setAssetUploadReceipt(null); setAssetUploadFile(null); setAssetUploadProgress(null); setAssetUploading(false);
+  }, [user?.id]);
 
   const cardRefs = useRef(new Map<AssetLibraryItemId, HTMLDivElement>());
   const detailDrawerRef = useRef<HTMLElement>(null);
@@ -1811,6 +1818,7 @@ function AssetsPageContent() {
   };
 
   const handleAssetUpload = async () => {
+    if (assetUploading || !user?.id) return;
     if (!assetUploadFile) {
       assetUploadInputRef.current?.click();
       return;
@@ -1822,14 +1830,19 @@ function AssetsPageContent() {
       label: '准备上传',
       detail: `${assetUploadFile.name} · ${formatAssetUploadBytes(assetUploadFile.size)}`,
     });
+    const ownerId = user.id;
+    const uploadEpoch = uploadSession().epoch;
+    const currentUpload = () => assetUploadOwner.current === ownerId && uploadSession().ownerId === ownerId && uploadSession().epoch === uploadEpoch;
     try {
       const selectedFile = assetUploadFile;
       const uploadedAsset = await uploadFileAsAsset(selectedFile, {
+        ownerId,
         invalidJsonMessage: '素材上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。',
         onProgress: (progress) => {
-          setAssetUploadProgress(buildAssetLibraryUploadProgress(selectedFile, progress));
+          if (currentUpload()) setAssetUploadProgress(buildAssetLibraryUploadProgress(selectedFile, progress));
         },
       });
+      if (!currentUpload()) return;
       const nextType = assetLibraryTypeFromFile(selectedFile);
       setAssetView('history');
       rememberReactionView('history');
@@ -1840,7 +1853,12 @@ function AssetsPageContent() {
       setKeyword('');
       setKeywordDraft('');
       clearSelection();
-      setMessage(`${assetUploadTypeLabel(selectedFile)}上传成功，正在刷新资产列表。${uploadedAsset.reused ? '已复用相同素材。' : ''}`);
+      const disposition = uploadedAsset.upload?.verified ? uploadedAsset.upload.assetDisposition : uploadedAsset.reused === true ? 'reused' : null;
+      setMessage(disposition ? `${assetUploadTypeLabel(selectedFile)}已加入资产库：新增 ${disposition === 'new' ? 1 : 0}，复用 ${disposition === 'reused' ? 1 : 0}。正在刷新列表。`
+        : `${assetUploadTypeLabel(selectedFile)}已加入资产库，新增或复用状态未确认。正在刷新列表。`);
+      setAssetUploadReceipt({ ownerId, assets: selectedFile.type.startsWith('image/') ? [{ ...uploadedAsset,
+        fileName: uploadedAsset.fileName || selectedFile.name,
+        mimeType: uploadedAsset.mimeType || selectedFile.type }] : [] });
       setAssetUploadFile(null);
       setAssetUploadProgress({
         label: uploadedAsset.reused ? '已复用相同素材' : '上传完成',
@@ -1851,10 +1869,12 @@ function AssetsPageContent() {
       await invalidateAssetCache();
       setReloadToken((value) => value + 1);
     } catch (err) {
-      setAssetUploadProgress(null);
-      setError(err instanceof Error ? err.message : '素材上传失败，请重新选择后重试');
+      if (currentUpload()) {
+        setAssetUploadProgress(null);
+        setError(err instanceof Error ? err.message : '素材上传失败，请重新选择后重试');
+      }
     } finally {
-      setAssetUploading(false);
+      if (currentUpload()) setAssetUploading(false);
     }
   };
 
@@ -2172,7 +2192,13 @@ function AssetsPageContent() {
       </section>
 
       {showUploadedAssets && (
-        <section className="asset-library-upload-panel" aria-label="上传素材到资产库">
+        <section className="asset-library-upload-panel" aria-label="上传素材到资产库" tabIndex={0} onPaste={event => {
+          if (assetUploading) return;
+          const image = Array.from(event.clipboardData.items).find(item => item.kind === 'file' && item.type.startsWith('image/'))?.getAsFile();
+          if (!image) return;
+          event.preventDefault(); setAssetUploadFile(image); setAssetUploadProgress(null); setError('');
+          setMessage(`已选择图片：${image.name}，点击开始上传加入资产库。`);
+        }}>
           <input
             ref={assetUploadInputRef}
             type="file"
@@ -2185,7 +2211,7 @@ function AssetsPageContent() {
             <span>
               {assetUploadFile
                 ? `${assetUploadTypeLabel(assetUploadFile)} · ${assetUploadFile.name} · ${formatAssetUploadBytes(assetUploadFile.size)}`
-                : '支持图片、视频、音频上传；音频最大 15MB。生成前会按当前模型规则检查时长、格式和分辨率。'}
+                : '支持图片、视频、音频，也可在此粘贴图片；音频最大 15MB。生成前会按当前模型规则检查时长、格式和分辨率。'}
             </span>
           </div>
           {assetUploadProgress && (
@@ -2218,6 +2244,10 @@ function AssetsPageContent() {
           </button>
         </div>
       )}
+
+      {showUploadedAssets && assetUploadReceipt && assetUploadReceipt.ownerId === user?.id && assetUploadReceipt.assets.length > 0 && <UploadSimilarityReview
+        key={`${assetUploadReceipt.ownerId}:${assetUploadReceipt.assets[0].upload?.requestId || assetUploadReceipt.assets[0].id}`}
+        ownerId={assetUploadReceipt.ownerId} assets={assetUploadReceipt.assets} onDismiss={() => setAssetUploadReceipt(null)} />}
 
       {syncingAssets && showingCachedAssets && !error && (
         <div className="asset-library-sync-note sd2-loading-surface" data-busy="true" aria-live="polite">

@@ -46,7 +46,7 @@ function deliveryFor(key: string, directory?: BatchDirectoryHandle | null) {
   return deliveries.get(key)!;
 }
 
-type BatchResultsProps = { id: string; userId: string; outputDirectory?: BatchDirectoryHandle | null; compact?: boolean; deliveryOnly?: boolean; autoPack?: boolean; onQuickUse?: (assetId: string) => void; visible?: boolean; onSourceChanged?: () => void };
+type BatchResultsProps = { id: string; userId: string; outputDirectory?: BatchDirectoryHandle | null; compact?: boolean; deliveryOnly?: boolean; autoPack?: boolean; onQuickUse?: (taskId: string) => void; visible?: boolean; onSourceChanged?: () => void };
 export function BatchResults(props: BatchResultsProps) {
   return <BatchResultsWorkspace key={`${props.userId}:${props.id}`} {...props} />;
 }
@@ -328,7 +328,7 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
       </div>}
       {!deliveryOnly && batch.failed > 0 && <div className={styles.retry}><span>选中失败项 {selected.length} 张，本次重试预计 {selected.length * batch.unitCredits} 点；每项最多重试 3 次</span><button type="button" disabled={busy || !selected.length} onClick={() => void action('retry')}><RotateCcw size={16} />重试选中失败项</button></div>}
       {!deliveryOnly && <GeneratedImageResults items={resultItems} scope={`sd2-image-studio-batch-page:${userId}:${id}`}
-        visible={visible} onQuickUse={onQuickUse ? item => { if (item.image) onQuickUse(item.image.id); } : undefined}
+        visible={visible} onQuickUse={onQuickUse ? item => { if (item.taskId && item.image) onQuickUse(item.taskId); } : undefined}
         busy={reading} emptyLabel="暂无本批图片" renderSupplement={item => <>
           {saved[item.ordinal] && <p>已保存并核对大小</p>}
           {item.generationStatus === 'failed' && <label><input type="checkbox" disabled={busy} aria-label={`重试第 ${item.ordinal} 项`} checked={selected.includes(item.ordinal)} onChange={event => setSelected(previous => event.target.checked ? [...previous, item.ordinal] : previous.filter(value => value !== item.ordinal))} />重试此项</label>}

@@ -6,15 +6,17 @@
  */
 
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
 import sharp from 'sharp';
-import { v4 as uuidv4 } from 'uuid';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { prisma } from '@/lib/prisma';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { generateAssetVideoThumbnail } from '@/lib/assets/video-thumbnail';
 import { assertStudioCoverAssetNotReferenced } from '@/lib/image-studio/protected-assets';
+import { findVerifiedOwnUpload, privateUploadDirectory, publishVerifiedFile, registerVerifiedUpload, releaseVerifiedUpload, stageVerifiedUpload, uploadFileVersion, uploadIdentity, VerifiedUploadError, type UploadReceipt, type VerifiedUpload } from './verified-upload';
+import { enqueueUploadSimilarity, uploadSimilarityStatus, type UploadSimilarityStatus } from './upload-similarity';
 
 // ============================================================================
 // 目录配置
@@ -23,6 +25,7 @@ import { assertStudioCoverAssetNotReferenced } from '@/lib/image-studio/protecte
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
 const ASSETS_DIR = path.join(UPLOAD_DIR, 'assets');
 const THUMBS_DIR = path.join(UPLOAD_DIR, 'thumbs');
+const execFileAsync = promisify(execFile);
 
 // 确保目录存在
 function ensureDirs() {
@@ -48,24 +51,6 @@ function localPublicPath(url: string): string {
   return resolvedPath;
 }
 
-function localUploadExists(url: string | null | undefined): boolean {
-  if (!url || !localUploadUrlFromAssetUrl(url)) return true;
-  return fs.existsSync(localPublicPath(url));
-}
-
-function restoreMissingLocalUploadFile(url: string | null | undefined, buffer: Buffer) {
-  if (!url || localUploadExists(url) || !localUploadUrlFromAssetUrl(url)) return false;
-  const filePath = localPublicPath(url);
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, buffer);
-  return true;
-}
-
-function existingLocalUploadPath(url: string | null | undefined) {
-  if (!url || !localUploadUrlFromAssetUrl(url)) return null;
-  const filePath = localPublicPath(url);
-  return fs.existsSync(filePath) ? filePath : null;
-}
 
 // ============================================================================
 // Hash 计算（去重）
@@ -86,7 +71,7 @@ async function generateThumbnail(
   const thumbWidth = 640;
   const thumbHeight = 640;
 
-  const { data: thumbBuffer, info } = await sharp(buffer, { animated: false }).rotate()
+  const { data: thumbBuffer, info } = await sharp(buffer, { animated: false, limitInputPixels: 40_000_000 }).timeout({ seconds: 45 }).rotate()
     .resize(thumbWidth, thumbHeight, {
       fit: 'inside',
       withoutEnlargement: true,
@@ -97,9 +82,9 @@ async function generateThumbnail(
   const thumbHash = computeHash(thumbBuffer);
   const ext = 'webp';
   const thumbFileName = `${thumbHash}_thumb.${ext}`;
-  const thumbPath = path.join(THUMBS_DIR, thumbFileName);
 
-  fs.writeFileSync(thumbPath, thumbBuffer);
+  const proof = await stageVerifiedUpload((async function* () { yield thumbBuffer; })(), 'image/webp', thumbBuffer.length);
+  try { await publishVerifiedFile(proof, THUMBS_DIR, thumbFileName); } finally { await releaseVerifiedUpload(proof); }
 
   return {
     thumbPath: `/uploads/thumbs/${thumbFileName}`,
@@ -107,50 +92,51 @@ async function generateThumbnail(
     height: info.height,
   };
 }
+export async function prepareVerifiedUploadThumbnail(proof: VerifiedUpload) {
+  if (proof.mimeType === 'image/bmp') {
+    if (await uploadFileVersion(proof.file) !== proof.version) throw new VerifiedUploadError('UPLOAD_SOURCE_CHANGED', 'BMP 原件已变化');
+    const directory = await fs.promises.mkdtemp(path.join(await privateUploadDirectory(), 'bmp-thumbnail-'));
+    const temporary = path.join(directory, 'thumbnail.png');
+    let preview: VerifiedUpload | null = null;
+    try {
+      // Decode the verified original into a small private derivative only. The
+      // BMP bytes/hash are never converted, overwritten, or used as a preview.
+      await execFileAsync(process.env.FFMPEG_PATH || 'ffmpeg', ['-nostdin', '-v', 'error', '-xerror', '-err_detect', 'explode',
+        '-threads', '2', '-f', 'bmp_pipe', '-i', proof.file, '-map', '0:v:0', '-frames:v', '1',
+        '-vf', "scale=w='min(640,iw)':h='min(640,ih)':force_original_aspect_ratio=decrease",
+        '-threads', '2', '-c:v', 'png', '-fs', String(2 * 1024 * 1024), '-f', 'image2', temporary], { timeout: 45000, maxBuffer: 65536 });
+      await fs.promises.chmod(temporary, 0o600);
+      const stat = await fs.promises.lstat(temporary);
+      if (!stat.isFile() || stat.size <= 0 || stat.size > 2 * 1024 * 1024) throw new VerifiedUploadError('UPLOAD_PREVIEW_INVALID', 'BMP 缩略图无法安全验证');
+      const bytes = await fs.promises.readFile(temporary);
+      preview = await stageVerifiedUpload((async function* () { yield bytes; })(), 'image/png', bytes.length);
+      if (!preview.width || !preview.height || preview.width > 640 || preview.height > 640
+        || await uploadFileVersion(proof.file) !== proof.version) throw new VerifiedUploadError('UPLOAD_PREVIEW_INVALID', 'BMP 原件或缩略图已变化');
+      return (await generateThumbnail(bytes, 'image/png')).thumbPath;
+    } finally {
+      await releaseVerifiedUpload(preview);
+      await fs.promises.unlink(temporary).catch(() => {});
+      await fs.promises.rmdir(directory).catch(() => {});
+    }
+  }
+  if (proof.type === 'image') return (await generateThumbnail(await fs.promises.readFile(proof.file), proof.mimeType)).thumbPath;
+  if (proof.type === 'video') return generateVideoThumbnailFromFile(proof.file, proof.hash);
+  return null;
+}
 
 // ============================================================================
 // 工具函数
 // ============================================================================
 
-function mimeTypeToExt(mimeType: string): string {
-  const map: Record<string, string> = {
-    'image/jpeg': 'jpg',
-    'image/png': 'png',
-    'image/gif': 'gif',
-    'image/webp': 'webp',
-    'image/bmp': 'bmp',
-    'video/mp4': 'mp4',
-    'video/quicktime': 'mov',
-    'video/webm': 'webm',
-    'audio/mpeg': 'mp3',
-    'audio/wav': 'wav',
-    'audio/ogg': 'ogg',
-  };
-  return map[mimeType] || 'bin';
-}
-
-function mimeTypeToSharpFormat(mimeType: string): keyof sharp.FormatEnum {
-  const map: Record<string, keyof sharp.FormatEnum> = {
-    'image/jpeg': 'jpeg',
-    'image/png': 'png',
-    'image/gif': 'gif',
-    'image/webp': 'webp',
-  };
-  return map[mimeType] || 'jpeg';
-}
-
-function getAssetType(mimeType: string): 'image' | 'video' | 'audio' {
-  if (mimeType.startsWith('image/')) return 'image';
-  if (mimeType.startsWith('video/')) return 'video';
-  if (mimeType.startsWith('audio/')) return 'audio';
-  return 'image';
-}
 
 // ============================================================================
 // 核心 API
 // ============================================================================
 
 export interface UploadResult {
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
   assetId: string;
   originalUrl: string;
   thumbnailUrl: string | null;
@@ -158,6 +144,8 @@ export interface UploadResult {
   reused: boolean;
   width?: number;
   height?: number;
+  upload?: UploadReceipt;
+  similarity?: UploadSimilarityStatus;
 }
 
 export type UploadAssetMetadata = {
@@ -187,270 +175,47 @@ async function generateVideoThumbnailFromFile(sourcePath: string, outputName: st
   return `/uploads/thumbs/${path.basename(result.thumbnailPath)}`;
 }
 
-async function generateVideoThumbnailFromBuffer(buffer: Buffer, ext: string, outputName: string) {
-  const tempPath = path.join(os.tmpdir(), `sd2-asset-video-${process.pid}-${Date.now()}-${uuidv4()}.${ext}`);
-  fs.writeFileSync(tempPath, buffer);
-  try {
-    return await generateVideoThumbnailFromFile(tempPath, outputName);
-  } finally {
-    fs.rmSync(tempPath, { force: true });
-  }
-}
-
-async function generateVideoThumbnailForUpload(
-  originalUrl: string | null | undefined,
-  buffer: Buffer,
-  ext: string,
-  outputName: string,
-) {
-  const localSourcePath = existingLocalUploadPath(originalUrl);
-  if (localSourcePath) {
-    return generateVideoThumbnailFromFile(localSourcePath, outputName);
-  }
-  return generateVideoThumbnailFromBuffer(buffer, ext, outputName);
-}
 
 export async function uploadAsset(
   buffer: Buffer,
   fileName: string,
   mimeType: string,
   ownerId = 'default-user',
-  mediaMetadata: UploadAssetMetadata | null = null
+  mediaMetadata: UploadAssetMetadata | null = null,
+  requestId?: string,
+  receiptFingerprint?: string,
 ): Promise<UploadResult> {
+  await uploadIdentity(ownerId);
+  await privateUploadDirectory();
   ensureDirs();
-
-  const hash = computeHash(buffer);
-  const ext = mimeTypeToExt(mimeType);
-  const assetType = getAssetType(mimeType);
-  const providedWidth = assetType === 'video' ? normalizeStoredDimension(mediaMetadata?.width) : null;
-  const providedHeight = assetType === 'video' ? normalizeStoredDimension(mediaMetadata?.height) : null;
-
-  // 同一用户重复上传同一文件时复用自己的记录，并恢复历史隐藏/删除状态。
-  const existing = await prisma.asset.findFirst({
-    where: { owner_id: ownerId, hash },
-    orderBy: { created_at: 'desc' },
-  });
-  if (existing) {
-    const updates: {
-      original_url?: string;
-      thumbnail_url?: string | null;
-      width?: number | null;
-      height?: number | null;
-      status?: string;
-    } = {};
-    let thumbnailUrl = existing.thumbnail_url;
-    let width = existing.width;
-    let height = existing.height;
-
-    if (existing.status !== 'active') {
-      updates.status = 'active';
+  const proof = await stageVerifiedUpload((async function* () { yield buffer; })(), mimeType, buffer.length);
+  let reusedProof: VerifiedUpload | undefined;
+  try {
+    const existing = await findVerifiedOwnUpload(ownerId, proof.hash, proof.mimeType, proof.bytes);
+    reusedProof = existing?.proof;
+    let originalUrl = existing?.asset.original_url || '', thumbnailUrl = existing?.asset.thumbnail_url || null;
+    if (!existing) {
+      const filename = `${proof.hash}.${proof.extension}`;
+      const original = await publishVerifiedFile(proof, ASSETS_DIR, filename);
+      originalUrl = `/uploads/assets/${filename}`;
+      thumbnailUrl = proof.type === 'image' ? await prepareVerifiedUploadThumbnail(proof)
+        : proof.type === 'video' ? await generateVideoThumbnailFromFile(original, proof.hash) : null;
     }
-
-    restoreMissingLocalUploadFile(existing.original_url, buffer);
-
-    if (assetType === 'image' && (!existing.thumbnail_url || !localUploadExists(existing.thumbnail_url))) {
-      const metadata = await sharp(buffer).metadata();
-      width = metadata.width ?? null;
-      height = metadata.height ?? null;
-      const thumbResult = await generateThumbnail(buffer, mimeType);
-      thumbnailUrl = thumbResult.thumbPath;
-      updates.thumbnail_url = thumbResult.thumbPath;
-      updates.width = width;
-      updates.height = height;
-    }
-    if (assetType === 'video') {
-      if (width == null && providedWidth != null) {
-        width = providedWidth;
-        updates.width = providedWidth;
-      }
-      if (height == null && providedHeight != null) {
-        height = providedHeight;
-        updates.height = providedHeight;
-      }
-      if (!existing.thumbnail_url || !localUploadExists(existing.thumbnail_url)) {
-        const videoThumbUrl = await generateVideoThumbnailForUpload(existing.original_url, buffer, ext, hash);
-        if (videoThumbUrl) {
-          thumbnailUrl = videoThumbUrl;
-          updates.thumbnail_url = videoThumbUrl;
-        }
-      }
-    }
-
-    if (Object.keys(updates).length > 0) {
-      await prisma.asset.update({
-        where: { id: existing.id },
-        data: updates,
-      });
-    }
-
-    return {
-      assetId: existing.id,
-      originalUrl: (updates.original_url as string | undefined) ?? existing.original_url,
-      thumbnailUrl,
-      hash: existing.hash ?? '',
-      reused: true,
-      width: width ?? undefined,
-      height: height ?? undefined,
-    };
-  }
-
-  // 别的用户已经上传过同一文件时，不重复上传文件，只给当前用户创建自己的可见记录。
-  const sharedExisting = await prisma.asset.findFirst({
-    where: {
-      hash,
-      type: assetType,
-      status: { not: 'deleted' },
-    },
-    orderBy: { created_at: 'desc' },
-  });
-  if (sharedExisting) {
-    const updates: {
-      original_url?: string;
-      thumbnail_url?: string | null;
-      width?: number | null;
-      height?: number | null;
-      owner_id?: string;
-      status?: string;
-    } = {};
-    let originalUrl = sharedExisting.original_url;
-    let thumbnailUrl = sharedExisting.thumbnail_url;
-    let width = sharedExisting.width;
-    let height = sharedExisting.height;
-
-    if (sharedExisting.owner_id === 'default-user' && ownerId !== 'default-user') {
-      updates.owner_id = ownerId;
-    }
-    if (sharedExisting.status !== 'active') {
-      updates.status = 'active';
-    }
-
-    restoreMissingLocalUploadFile(sharedExisting.original_url, buffer);
-
-    if (assetType === 'image' && (!sharedExisting.thumbnail_url || !localUploadExists(sharedExisting.thumbnail_url))) {
-      const metadata = await sharp(buffer).metadata();
-      width = metadata.width ?? null;
-      height = metadata.height ?? null;
-      const thumbResult = await generateThumbnail(buffer, mimeType);
-      thumbnailUrl = thumbResult.thumbPath;
-      updates.thumbnail_url = thumbResult.thumbPath;
-      updates.width = width;
-      updates.height = height;
-    }
-    if (assetType === 'video') {
-      if (width == null && providedWidth != null) {
-        width = providedWidth;
-        updates.width = providedWidth;
-      }
-      if (height == null && providedHeight != null) {
-        height = providedHeight;
-        updates.height = providedHeight;
-      }
-      if (!sharedExisting.thumbnail_url || !localUploadExists(sharedExisting.thumbnail_url)) {
-        const videoThumbUrl = await generateVideoThumbnailForUpload(sharedExisting.original_url, buffer, ext, hash);
-        if (videoThumbUrl) {
-          thumbnailUrl = videoThumbUrl;
-          updates.thumbnail_url = videoThumbUrl;
-        }
-      }
-    }
-
-    if (Object.keys(updates).length > 0) {
-      await prisma.asset.update({
-        where: { id: sharedExisting.id },
-        data: updates,
-      });
-    }
-
-    if (updates.owner_id === ownerId) {
-      return {
-        assetId: sharedExisting.id,
-        originalUrl,
-        thumbnailUrl,
-        hash: sharedExisting.hash ?? '',
-        reused: true,
-        width: width ?? undefined,
-        height: height ?? undefined,
-      };
-    }
-
-    const asset = await prisma.asset.create({
-      data: {
-        id: uuidv4(),
-        owner_id: ownerId,
-        type: assetType,
-        original_url: originalUrl,
-        thumbnail_url: thumbnailUrl,
-        file_name: fileName,
-        mime_type: mimeType,
-        width,
-        height,
-        file_size: buffer.length,
-        hash,
-        status: 'active',
-      },
-    });
-
-    return {
-      assetId: asset.id,
-      originalUrl: asset.original_url,
-      thumbnailUrl: asset.thumbnail_url,
-      hash: asset.hash ?? '',
-      reused: true,
-      width: asset.width ?? undefined,
-      height: asset.height ?? undefined,
-    };
-  }
-
-  // 保存原始文件
-  const storedFileName = `${hash}.${ext}`;
-  const filePath = path.join(ASSETS_DIR, storedFileName);
-  fs.writeFileSync(filePath, buffer);
-
-  let thumbnailUrl: string | null = null;
-  let width: number | null = null;
-  let height: number | null = null;
-
-  // 图片生成缩略图 + 读取尺寸
-  if (assetType === 'image') {
-    const metadata = await sharp(buffer).metadata();
-    width = metadata.width ?? null;
-    height = metadata.height ?? null;
-
-    const thumbResult = await generateThumbnail(buffer, mimeType);
-    thumbnailUrl = thumbResult.thumbPath;
-  }
-  if (assetType === 'video') {
-    width = providedWidth;
-    height = providedHeight;
-    thumbnailUrl = await generateVideoThumbnailFromFile(filePath, hash);
-  }
-
-  // 写入数据库
-  const asset = await prisma.asset.create({
-    data: {
-      id: uuidv4(),
-      owner_id: ownerId,
-      type: assetType,
-      original_url: `/uploads/assets/${storedFileName}`,
-      thumbnail_url: thumbnailUrl,
-      file_name: fileName,
-      mime_type: mimeType,
-      width,
-      height,
-      file_size: buffer.length,
-      hash,
-    },
-  });
-
-  return {
-    assetId: asset.id,
-    originalUrl: asset.original_url,
-    thumbnailUrl: asset.thumbnail_url,
-    hash: asset.hash ?? '',
-    reused: false,
-    width: asset.width ?? undefined,
-    height: asset.height ?? undefined,
-  };
+    const registered = await registerVerifiedUpload({ ownerId, proof, fileName, originalUrl, thumbnailUrl, requestId, fingerprint: receiptFingerprint,
+      width: normalizeStoredDimension(mediaMetadata?.width), height: normalizeStoredDimension(mediaMetadata?.height) });
+    const asset = registered.asset;
+    // Queue/index failure never turns an already committed upload into a failure.
+    if (!registered.reused && proof.type === 'image') void enqueueUploadSimilarity(asset).catch(() => {});
+    const similarity = await uploadSimilarityStatus(ownerId, asset.id).catch(() => ({ state: 'unavailable' as const, coverage: 'new_uploads_only' as const }));
+    const source = siteUploadPathFromUrl(asset.original_url);
+    const sourceVersion = existing && existing.asset.id === asset.id ? existing.proof.sourceVersion || existing.proof.version
+      : source ? await uploadFileVersion(path.join(process.cwd(), 'public', source.replace(/^\/+/, ''))) : '';
+    if (!sourceVersion) throw new Error('原文件身份暂无法确认');
+    return { assetId: asset.id, originalUrl: asset.original_url, thumbnailUrl: asset.thumbnail_url, hash: proof.hash,
+      fileName: asset.file_name, fileSize: asset.file_size, mimeType: asset.mime_type,
+      reused: registered.reused, width: asset.width ?? undefined, height: asset.height ?? undefined,
+      upload: { requestId: requestId || proof.hash, verified: true, assetDisposition: registered.reused ? 'reused' : 'new', sourceVersion }, similarity };
+  } finally { await releaseVerifiedUpload(reusedProof); await releaseVerifiedUpload(proof); }
 }
 
 export async function getAssetById(id: string) {

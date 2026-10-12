@@ -13,7 +13,7 @@ import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { useProductDialog } from '@/components/useProductDialog';
 import { readJsonResponse } from '@/lib/http/json-response';
-import type { UploadProgressHandler, UploadProgressSnapshot, UploadedAssetPayload } from '@/lib/http/file-upload';
+import { uniqueUploadFiles, type UploadProgressHandler, type UploadProgressSnapshot, type UploadedAssetPayload } from '@/lib/http/file-upload';
 import type { AssetType } from '@/types';
 import type { PickerAlbum, PickerItem, PickerResponse, PickerScope } from '@/lib/assets/picker-types';
 import type { UploadedAssetSelection, UploadedImagePickerConfirmResult } from '@/components/UploadedImagePicker';
@@ -41,6 +41,7 @@ export interface ResourceLibraryPickerProps {
   onUploadFile: (file: File, onProgress?: UploadProgressHandler) => Promise<string | UploadedAssetPayload>;
   onConfirm: (ids: string[], assets?: UploadedAssetSelection[]) => Promise<UploadedImagePickerConfirmResult>;
   onConfirmSelection?: (items: PickerItem[]) => Promise<UploadedImagePickerConfirmResult>;
+  onUploadedAssetsConfirmed?: (assets: UploadedAssetPayload[]) => void;
   avatarTarget?: AvatarReturnTarget;
   onAvatarApplied?: () => Promise<void>;
   onAvatarConfirm?: ResourceLibraryPickerProps['onConfirm'];
@@ -67,7 +68,7 @@ function Thumbnail({ item }: { item: PickerItem }) {
   return <img src={item.thumbnailUrl} alt={item.fileName} loading="lazy" onError={() => setFailed(true)} />;
 }
 
-export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'image-studio' : 'assets', title = '添加参考素材', confirmLabel = '添加到参考区', purpose = 'reference', initialSource = 'all', maxSelection, typeLimits, acceptedTypes, currentCount, currentAssetIds, currentReferenceImageIds = [], portalContainer, onClose, onUploadFile, onConfirm, onConfirmSelection, avatarTarget, onAvatarApplied, onAvatarConfirm }: ResourceLibraryPickerProps) {
+export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'image-studio' : 'assets', title = '添加参考素材', confirmLabel = '添加到参考区', purpose = 'reference', initialSource = 'all', maxSelection, typeLimits, acceptedTypes, currentCount, currentAssetIds, currentReferenceImageIds = [], portalContainer, onClose, onUploadFile, onConfirm, onConfirmSelection, onUploadedAssetsConfirmed, avatarTarget, onAvatarApplied, onAvatarConfirm }: ResourceLibraryPickerProps) {
   const { user } = useAppSession();
   const { confirm: askConfirm, productDialog } = useProductDialog();
   const [removedItem, setRemovedItem] = useState<Pick<PickerItem,'assetId'|'identity'|'fileName'|'canRemoveFromLibrary'> | null>(null);
@@ -122,6 +123,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const [sessionOwner, setSessionOwner] = useState('');
   const [notice, setNotice] = useState('');
   const imports = useRef(new Map<string, PickerItem>()), importOwner = useRef('');
+  const uploadReceipts = useRef(new Map<string, UploadedAssetPayload>());
   const [items, setItems] = useState<PickerItem[]>([]), [albums, setAlbums] = useState<PickerAlbum[]>([]), [selected, setSelected] = useState<PickerItem[]>([]), [preview, setPreview] = useState<PickerItem | null>(null);
   const [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [total, setTotal] = useState(0), [hasMore, setHasMore] = useState(false), [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState(false), [navigationOpen, setNavigationOpen] = useState(false), [failedFiles, setFailedFiles] = useState<File[]>([]), [progress, setProgress] = useState<UploadProgressSnapshot | null>(null), [uploadLabel, setUploadLabel] = useState(''), [container, setContainer] = useState<Element | null>(null), [epoch, setEpoch] = useState(0);
@@ -136,7 +138,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
 
   useEffect(() => {
     if (!open || !user || !prefsKey) { setReady(false); sequence.current++; session.current++; return; }
-    if (importOwner.current !== recentKey) { imports.current.clear(); importOwner.current = recentKey; }
+    if (importOwner.current !== recentKey) { imports.current.clear(); uploadReceipts.current.clear(); importOwner.current = recentKey; }
     const raw = stored<Partial<Preferences>>(prefsKey, {}), next = { ...defaults, source: initialSource as string };
     if (['library', 'favorites', 'recent'].includes(raw.view || '')) next.view = raw.view!;
     if (scopes.some(([s]) => s === raw.scope)) next.scope = raw.scope!;
@@ -239,10 +241,16 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   }, [resultPages.start, resultPages.restoring]);
   const upload = async (files: File[]) => {
     if (locked.current || !files.length) return;
-    const kinds = files.map(f => f.type.split('/')[0] as AssetType);
-    if (kinds.some(t => !types.includes(t))) { setError(`请选择${types.map(t => labels[t]).join('、')}文件`); return; }
-    const issue = canSelect([...selected, ...kinds.map((type, index) => ({ type, identity: `upload:${index}` } as PickerItem))]); if (issue) { setError(issue); return; }
+    if (files.some(file => !types.includes(file.type.split('/')[0] as AssetType))) { setError(`请选择${types.map(t => labels[t]).join('、')}文件`); return; }
     locked.current = true; setBusy(true); setError(''); setFailedFiles([]); const token = session.current;
+    let duplicates = 0;
+    try {
+      const unique = await uniqueUploadFiles(files); files = unique.files; duplicates = unique.duplicates;
+      if (token !== session.current || !active.current) { locked.current = false; return; }
+      const issue = canSelect([...selected, ...files.map((file, index) => ({ type: file.type.split('/')[0] as AssetType, identity: `upload:${index}` } as PickerItem))]);
+      if (issue) throw new Error(issue);
+    } catch (cause) { if (token === session.current) { setError(cause instanceof Error ? cause.message : '文件核对失败'); setBusy(false); } locked.current = false; return; }
+    const kinds = files.map(file => file.type.split('/')[0] as AssetType);
     const uploaded: PickerItem[] = [], failed: File[] = []; let detail = '';
     for (let index = 0; index < files.length; index++) {
       const file = files[index]; setUploadLabel(`${index + 1}/${files.length} ${file.name}`); setProgress(null);
@@ -252,6 +260,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         if (token !== session.current) break;
         const id = typeof result === 'string' ? result : result.id; uploadedId = id;
         if (!id) throw new Error('上传结果缺少素材编号');
+        if (typeof result !== 'string') uploadReceipts.current.set(id, result);
         // Keep uploaded IDs even when metadata retrieval fails, so a retry never retransmits them.
         const fallback: PickerItem = { key: `asset:${id}`, identity: `asset:${id}`, assetId: id, id, type: kinds[index], originalUrl: typeof result === 'string' ? '' : result.originalUrl || '', thumbnailUrl: typeof result === 'string' ? null : result.thumbnailUrl || null, fileName: file.name, width: typeof result === 'string' ? null : result.width || null, height: typeof result === 'string' ? null : result.height || null, duration: null, createdAt: new Date().toISOString(), source: 'uploaded' };
         uploaded.push(fallback);
@@ -265,6 +274,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
       setSelected(old => [...old, ...uploaded.filter(i => !existing(i) && !old.some(o => o.identity === i.identity))]);
       change({ view: 'library', scope: 'mine', source: 'all', type: 'all', album: '', project: '', query: '' }); setQuery(''); setEpoch(e => e + 1);
       setFailedFiles(failed); setError(detail); setProgress(null); setUploadLabel(''); setBusy(false);
+      setNotice(`已上传或复用 ${uploaded.length} 个素材${duplicates ? `，本批 ${duplicates} 个相同文件已合并选择` : ''}；点击“${confirmLabel}”后才会加入。`);
     }
     if (token !== session.current) setBusy(false);
     locked.current = false;
@@ -312,6 +322,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         const id = typeof result === 'string' ? result : result.id;
         if (!id) throw new Error('素材导入结果缺少编号');
         if (!active.current || confirmationSession !== session.current) return;
+        if (typeof result !== 'string') uploadReceipts.current.set(id, result);
         const fallback: PickerItem = { ...item, id, assetId: id, referenceImageId: undefined, importUrl: undefined, key: `asset:${id}`, identity: `asset:${id}`, originalUrl: typeof result === 'string' ? '' : result.originalUrl || '' };
         imports.current.set(item.identity, fallback);
         const metadataResponse = await fetch(`/api/assets/picker?target=${target}&keys=${encodeURIComponent(`asset:${id}`)}&types=${item.type}`, { cache: 'no-store' });
@@ -326,6 +337,10 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
       const uniqueItems = attachedItems.filter((item, index, all) => all.findIndex(other => other.identity === item.identity) === index);
       const result = onConfirmSelection ? await onConfirmSelection(uniqueItems) : await onConfirm(uniqueItems.map(i => i.id), uniqueItems);
       const message = failure(result); if (message) throw new Error(message);
+      if (active.current && confirmationSession === session.current && onUploadedAssetsConfirmed) {
+        const confirmedUploads = uniqueItems.flatMap(item => { const receipt = uploadReceipts.current.get(item.id); return receipt ? [receipt] : []; });
+        if (confirmedUploads.length) onUploadedAssetsConfirmed(confirmedUploads);
+      }
       if (active.current && confirmationSession === session.current) for (const item of uniqueItems.filter(item => item.type === 'image')) {
         const descriptor = imageDisplaySource(item.originalUrl, 'hd-description');
         if (descriptor === item.originalUrl) continue;

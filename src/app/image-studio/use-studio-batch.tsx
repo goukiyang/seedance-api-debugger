@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { FolderOpen, RefreshCw, RotateCcw } from 'lucide-react';
-import { uploadFileAsAsset } from '@/lib/http/file-upload';
+import { createUploadBatch, uploadFileAsAsset } from '@/lib/http/file-upload';
 import { useUnsavedNavigation } from '@/lib/hooks/use-unsaved-navigation';
 import { useProductDialog } from '@/components/useProductDialog';
 import { STUDIO_BATCH_LIMITS } from '@/lib/image-studio/batch-contract';
@@ -191,11 +191,12 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
       if (!valid()) return false;
       const sources: Array<{ name: string; assetId?: string }> = [];
       if (source === 'folder') {
+        const uploadBatch = createUploadBatch(userId);
         for (let index = 0; index < localFiles.length; index++) {
           if (!valid()) throw new Error('已离开或切换本批，未继续上传或生成');
           const local = localFiles[index];
           if (!local.assetId) {
-            const asset = await uploadFileAsAsset(local.file, { onProgress: progress => { if (valid()) setProgress(`上传素材 ${index + 1}/${localFiles.length} · ${progress.label}`); } });
+            const asset = await uploadFileAsAsset(local.file, { ownerId: userId, batch: uploadBatch, onProgress: progress => { if (valid()) setProgress(`上传素材 ${index + 1}/${localFiles.length} · ${progress.label}`); } });
             if (!asset.id) throw new Error('素材上传尚未确认，请重新核对');
             local.assetId = asset.id;
             if (!valid()) throw new Error('素材已保存，但原页面已变化；未提交生成');

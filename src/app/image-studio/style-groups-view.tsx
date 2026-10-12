@@ -2,7 +2,7 @@
 
 import { useProductDialog } from '@/components/useProductDialog';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState } from 'react';
 import { Combine, Layers, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import { UploadedImagePicker } from '@/components/UploadedImagePicker';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
@@ -22,10 +22,12 @@ async function responseValue(response: Response) {
   return value;
 }
 
-export function StudioStyleGroups({ userId, selected, onChange, currentImages, disabled, tiles = false, maxReferences = MAX_REFERENCE_IMAGES }: {
+export type StudioStyleGroupsHandle = { open: () => void; edit: (group?: StudioStyleSummary) => void };
+export const StudioStyleGroups = forwardRef<StudioStyleGroupsHandle, {
   userId: string; selected: StudioStyleSummary[]; onChange: (groups: StudioStyleSummary[]) => void;
   currentImages: UploadedAssetPayload[]; disabled?: boolean; tiles?: boolean; maxReferences?: number;
-}) {
+  managementOnly?: boolean; onUpdated?: (group: StudioStyleSummary) => void; onClose?: () => void;
+}>(function StudioStyleGroups({ userId, selected, onChange, currentImages, disabled, tiles = false, maxReferences = MAX_REFERENCE_IMAGES, managementOnly = false, onUpdated, onClose }, ref) {
   const { confirm, prompt, productDialog } = useProductDialog();
   const [open, setOpen] = useState(false);
   const [groups, setGroups] = useState<StudioStyleSummary[]>([]);
@@ -44,11 +46,14 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
   const editor = useRef<HTMLDialogElement>(null);
   const uploadLock = useRef(false);
   const request = useRef(0);
+  const alive = useRef(true), actor = useRef(userId); actor.current = userId;
   const dirty = draft !== null && JSON.stringify(draft) !== savedDraft;
 
-  useEffect(() => { if (open && !preview) dialog.current?.showModal(); else dialog.current?.close(); }, [open, preview]);
-  useEffect(() => { if (draft && !preview) editor.current?.showModal(); else editor.current?.close(); }, [Boolean(draft), preview]);
+  useEffect(() => { if (open && (!preview || managementOnly)) dialog.current?.showModal(); else dialog.current?.close(); }, [open, preview, managementOnly]);
+  useEffect(() => { if (draft && (!preview || managementOnly)) editor.current?.showModal(); else editor.current?.close(); }, [Boolean(draft), preview, managementOnly]);
   useEffect(() => () => { request.current += 1; }, [userId]);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => { if (!open) onClose?.(); }, [open, onClose]);
 
   async function load(next?: string) {
     const current = ++request.current;
@@ -69,6 +74,7 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
   useDialogDismiss({ open: open && !preview, dialogRef: dialog, nativeDialog: true, onDismiss: () => { if (!busy && !draft) setOpen(false); } });
   useDialogDismiss({ open: Boolean(draft) && !preview, dialogRef: editor, nativeDialog: true, onDismiss: closeEditor });
   function edit(group?: StudioStyleSummary) {
+    if (managementOnly && disabled) return;
     if (group && !group.canManage) return;
     const refs = group ? group.references || [] : currentImages.map(image => ({ ...image, note: '', available: true }));
     const next: Draft = { ...(group ? { id: group.id, revision: group.revision } : {}), name: group?.name || '',
@@ -78,54 +84,70 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
   function reflect(group: StudioStyleSummary) {
     setGroups(existing => existing.some(item => item.id === group.id) ? existing.map(item => item.id === group.id ? group : item) : [group, ...existing]);
     if (selected.some(item => item.id === group.id)) onChange(selected.map(item => item.id === group.id ? group : item));
+    onUpdated?.(group);
   }
   async function save() {
-    if (!draft || busy || uploading) return;
+    if (!draft || busy || uploading || managementOnly && disabled) return;
+    const owner = userId;
     setBusy(true); setError('');
     try {
       const group = await responseValue(await fetch('/api/image-studio/style-groups', { method: draft.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...draft, references: draft.references.map(ref => ({ assetId: ref.id, note: ref.note || '' })) }) }));
+      if (!alive.current || actor.current !== owner) return;
       reflect(group); setDraft(null);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '保存失败'); }
-    finally { setBusy(false); }
+      if (managementOnly) setOpen(false);
+    } catch (cause) { if (alive.current && actor.current === owner) setError(cause instanceof Error ? cause.message : '保存失败'); }
+    finally { if (alive.current && actor.current === owner) setBusy(false); }
   }
   async function remove(group: StudioStyleSummary) {
+    if (managementOnly && disabled) return;
+    const owner = userId;
     if (busy || !(await confirm(`删除风格组“${group.name}”？原始图片和生成记录保留，已选择该组的模板需要重新选择。`, { title: '删除风格组', confirmLabel: '删除风格组', danger: true }))) return;
+    if (!alive.current || actor.current !== owner) return;
     setBusy(true); setError('');
     try {
       await responseValue(await fetch('/api/image-studio/style-groups', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: group.id, revision: group.revision }) }));
+      if (!alive.current || actor.current !== owner) return;
       setGroups(existing => existing.filter(item => item.id !== group.id));
       setMergeIds(existing => existing.filter(id => id !== group.id));
-      if (selected.some(item => item.id === group.id)) onChange(selected.filter(item => item.id !== group.id));
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '删除失败'); }
-    finally { setBusy(false); }
+      if (selected.some(item => item.id === group.id)) onChange(managementOnly ? selected.map(item => item.id === group.id ? { ...item, unavailable: true, canManage: false } : item) : selected.filter(item => item.id !== group.id));
+      onUpdated?.({ ...group, unavailable: true, canManage: false });
+    } catch (cause) { if (alive.current && actor.current === owner) setError(cause instanceof Error ? cause.message : '删除失败'); }
+    finally { if (alive.current && actor.current === owner) setBusy(false); }
   }
   async function merge() {
+    if (managementOnly && disabled) return;
+    const owner = userId;
     const name = await prompt('合并后的风格组名称（原组会保留）', '合并风格', { title: '合并风格组', confirmLabel: '合并风格组', maxLength: 80 });
-    if (!name?.trim() || busy) return;
+    if (!name?.trim() || busy || !alive.current || actor.current !== owner) return;
     setBusy(true); setError('');
     try {
       const group = await responseValue(await fetch('/api/image-studio/style-groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), references: [], mergeIds }) }));
+      if (!alive.current || actor.current !== owner) return;
       reflect(group); setMergeIds([]); edit(group);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '合并失败'); }
-    finally { setBusy(false); }
+    } catch (cause) { if (alive.current && actor.current === owner) setError(cause instanceof Error ? cause.message : '合并失败'); }
+    finally { if (alive.current && actor.current === owner) setBusy(false); }
   }
   async function upload(files: File[]) {
     if (!draft || uploadLock.current || uploading || busy || !files.length) return;
     if (draft.references.length + files.length > MAX_REFERENCE_IMAGES) { setError(`最多 ${MAX_REFERENCE_IMAGES} 张图片`); return; }
     uploadLock.current = true; setUploading(true); setError('');
+    const owner = userId;
     const added: FixedStudioReference[] = [];
     try {
       for (const file of files) {
         if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 20 * 1024 * 1024) throw new Error('请使用 20MB 以内的 JPG、PNG 或 WebP 图片');
         const asset = await uploadFileAsAsset(file);
+        if (!alive.current || actor.current !== owner) return;
         if (!asset.id || !asset.originalUrl) throw new Error('上传结果不完整，请重试');
         added.push({ ...asset, note: '', available: true });
       }
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '上传失败'); }
+    } catch (cause) { if (alive.current && actor.current === owner) setError(cause instanceof Error ? cause.message : '上传失败'); }
     finally {
-      if (added.length) setDraft(current => current ? { ...current, coverAssetId: current.coverAssetId || added[0].id || '', references: [...current.references, ...added] } : current);
-      uploadLock.current = false; setUploading(false);
+      if (alive.current && actor.current === owner) {
+        if (added.length) setDraft(current => current ? { ...current, coverAssetId: current.coverAssetId || added[0].id || '', references: [...current.references, ...added] } : current);
+        uploadLock.current = false; setUploading(false);
+      }
     }
   }
   function changeReferences(references: FixedStudioReference[]) {
@@ -133,7 +155,9 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
   }
   const selectedCount = selected.reduce((total, group) => total + group.referenceCount, 0);
   const openSelector = () => { setOpen(true); void load(); };
-  return <>{productDialog}{(<div className={tiles ? styles.styleGroupsTiles : styles.styleGroups}>
+  useImperativeHandle(ref, () => ({ open: openSelector, edit: group => { setOpen(true); edit(group); void load(); } }));
+  return <>{productDialog}{(<div className={managementOnly ? undefined : tiles ? styles.styleGroupsTiles : styles.styleGroups}>
+    {!managementOnly && <>
     {!tiles && <div className={styles.header}><strong>风格组</strong><button type="button" disabled={disabled} onClick={openSelector}><Layers size={16} />选择风格组</button></div>}
     {tiles ? <div className={styles.materialGrid}>{selected.map(group => <div key={group.id} className={styles.styleTile}>
       <button type="button" className={styles.styleTilePreview} disabled={disabled} onClick={openSelector} aria-label={`查看风格组${group.name}`} title={`${group.name} · ${group.referenceCount} 张${group.unavailable ? ' · 不可用' : ''}`}>
@@ -145,8 +169,9 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
       {group.coverUrl && <img src={group.coverUrl} alt={`${group.name}封面`} />}
       <span>{group.name}</span><button type="button" title="移除风格组" aria-label={`移除${group.name}`} disabled={disabled} onClick={() => onChange(selected.filter(item => item.id !== group.id))}><X size={14} /></button>
     </div>)}</div>}
-    <dialog ref={dialog} className={`${styles.dialog} ${styles.styleDialog}`} aria-label="风格组">
-      <header className={styles.header}><h2>风格组</h2><button type="button" disabled={busy} aria-label="关闭风格组" onClick={() => setOpen(false)}><X size={20} /></button></header>
+    </>}
+    <dialog ref={dialog} className={`${styles.dialog} ${styles.styleDialog}`} aria-label={managementOnly ? '管理风格组' : '风格组'}>
+      <header className={styles.header}><h2>{managementOnly ? '管理风格组' : '风格组'}</h2><button type="button" disabled={busy || Boolean(draft)} aria-label="关闭风格组" onClick={() => setOpen(false)}><X size={20} /></button></header>
       <div className={styles.counts}><button type="button" disabled={busy} onClick={() => edit()}><Plus size={16} />新建</button>
         {mergeIds.length > 0 && <button type="button" disabled={busy || mergeIds.length < 2} onClick={() => void merge()}><Combine size={16} />合并 {mergeIds.length} 组</button>}
       </div>
@@ -156,7 +181,7 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
       <div className={styles.styleGrid}>{groups.map(group => {
         const used = selected.some(item => item.id === group.id);
         const exceedsLimit = !used && (selectedCount + group.referenceCount > maxReferences || selected.length >= MAX_REFERENCE_IMAGES);
-        const selectionDisabled = Boolean(disabled || busy || exceedsLimit);
+        const selectionDisabled = Boolean(managementOnly || disabled || busy || exceedsLimit);
         const toggleSelection = () => {
           if (!selectionDisabled) onChange(used ? selected.filter(item => item.id !== group.id) : [...selected, group]);
         };
@@ -169,7 +194,7 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
             <strong title={group.name}>{group.name}</strong>
           </button>
           {group.canManage && <div className={styles.styleActions} onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
-            <button type="button" disabled={busy} title="编辑风格组" aria-label={`编辑${group.name}`} onClick={() => edit(group)}><Pencil size={16} /></button>
+            <button type="button" disabled={busy || managementOnly && disabled} title="编辑风格组" aria-label={`编辑${group.name}`} onClick={() => edit(group)}><Pencil size={16} /></button>
               <button type="button" disabled={busy} title="删除风格组" aria-label={`删除${group.name}`} onClick={() => void remove(group)}><Trash2 size={16} /></button>
               <input type="checkbox" aria-label={`选择${group.name}用于合并`} checked={mergeIds.includes(group.id)} disabled={busy} onChange={event => setMergeIds(current => event.target.checked ? [...current, group.id] : current.filter(id => id !== group.id))} />
           </div>}
@@ -199,6 +224,7 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
         {error && <p role="alert" className={styles.error}>{error}</p>}
         <div className={styles.resultActions}><button type="button" className={styles.primary} disabled={busy || uploading || !draft.name.trim() || !draft.references.length || !dirty} onClick={() => void save()}><Save size={16} />{busy ? '正在保存' : '保存风格组'}</button></div>
       </>}
+      {preview?.originalUrl && <ZoomableImagePreview src={preview.originalUrl} thumbnailSrc={preview.thumbnailUrl || undefined} alt="风格参考图" title="风格参考图" previewKey={preview.id} onClose={() => setPreview(null)} />}
     </dialog>
     {picker && draft && <UploadedImagePicker open imageOnly portalContainer={editor.current} title="添加风格参考图" confirmLabel="添加到风格组" purpose="style-group"
       currentCount={draft.references.length} currentAssetIds={draft.references.flatMap(ref => ref.id ? [ref.id] : [])} maxSelection={MAX_REFERENCE_IMAGES - draft.references.length}
@@ -211,6 +237,5 @@ export function StudioStyleGroups({ userId, selected, onChange, currentImages, d
         if (refs.length !== _ids.length || draft.references.length + refs.length > MAX_REFERENCE_IMAGES) throw new Error('选择图片数量无效');
         changeReferences([...draft.references, ...refs]);
       }} />}
-    {preview?.originalUrl && <ZoomableImagePreview src={preview.originalUrl} thumbnailSrc={preview.thumbnailUrl || undefined} alt="风格参考图" title="风格参考图" previewKey={preview.id} onClose={() => setPreview(null)} />}
   </div>)}</>;
-}
+});

@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '模块可保存单图、左右或上下裁剪封面，新结果不再替换；共享开关与标记更清楚。对比图固定原图在左、生成图在右，红心常显且动画完整。修复普通大图查看，原图可直接下载。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '风格与 Skills 合并选择，模板可长按排序。双击结果可取回本次输入主图；简化生成等待，修复视频悬停封面交接，完善本人快捷保存与重复上传保护。相似图片提醒尚未启用。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

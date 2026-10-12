@@ -21,7 +21,15 @@
 .moduleRailSubgroups[hidden], .moduleRailChildren[hidden] { display: none; }
 .moduleRailGroup { display: grid; gap: 2px; }
 .moduleRailGroup > span { padding: 0 6px 4px; color: #849098; font-size: 11px; font-weight: 700; }
-.moduleRailGroupHeader { display: block; }
+.moduleRailGroupHeader { display: flex; align-items: center; min-width: 0; }
+.moduleRailGroupHeader > button:first-child { flex: 1; min-width: 0; }
+.moduleRailSortableRow { display: flex; align-items: center; min-width: 0; }
+.moduleRailSortableRow > button:first-child { flex: 1; min-width: 0; touch-action: pan-y; }
+.page .moduleRail .moduleRailSortableRow > button:last-child:not(:first-child), .page .moduleRail .moduleRailGroupHeader > button:last-child:not(:first-child) { flex: 0 0 24px; width: 24px; min-height: 32px; padding: 3px; justify-content: center; }
+.orderDialogGroup { padding: 8px 0; border-bottom: 1px solid #314047; }
+.orderDialogGroup > div + div { margin-left: 16px; }
+.definitionPending { display: grid; gap: 7px; padding: 12px; border: 1px solid #7f6d43; border-radius: 8px; color: #eadab3; }
+.definitionPending > div { display: flex; flex-wrap: wrap; gap: 8px; }
 .page .moduleRail .moduleRailGroupTitle { display: flex; justify-content: space-between; gap: 8px; width: 100%; min-width: 0; height: 36px; padding: 6px 6px 6px 8px; font-size: 13px; font-weight: 600; }
 .page .moduleRail .moduleRailGroupCurrent { border-left: 2px solid #79daca; color: #d8e6e1; }
 .moduleRailGroupTitle .navLabel { flex: 1 1 auto; gap: 2px; }
@@ -377,6 +385,13 @@
 .dialog.contextDialog { width: min(820px, calc(100vw - 32px)); }
 .dialog > p { margin: 16px 0; line-height: 1.6; }
 .dialog::backdrop { background: rgb(0 0 0 / 65%); }
+.inputMainGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+.inputMainOption { display: grid; gap: 8px; padding: 8px; border: 1px solid #465057; border-radius: 6px; cursor: pointer; }
+.inputMainOption[data-selected="true"] { border-color: #8ce5d2; background: #203d38; }
+.inputMainOption:focus-within { outline: 2px solid #8ce5d2; outline-offset: 2px; }
+.inputMainOption > img { width: 100%; aspect-ratio: 1; object-fit: contain; background: #0b0e0f; }
+.inputMainOption > span { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.inputMainOption input { width: auto; }
 .dialog select { width: 100%; }
 .presetList { display: grid; gap: 8px; }
 .presetItem { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid #2d383d; border-radius: 6px; background: #151a1d; }

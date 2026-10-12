@@ -1,4 +1,5 @@
 import { readJsonResponse } from './json-response';
+import { uploadSession } from './upload-session';
 import {
   calculateUploadTimeoutMs,
   notifyUploadProgress,
@@ -34,13 +35,37 @@ export type UploadedAssetPayload = {
   isPubliclyReachable?: boolean;
   storageProvider?: string;
   warning?: string;
+  upload?: { requestId: string; verified: true; assetDisposition: 'new' | 'reused'; sourceVersion: string };
+  similarity?: { state: 'disabled' | 'queued' | 'running' | 'ready' | 'failed' | 'unsupported' | 'unavailable'; coverage: 'new_uploads_only'; algorithmVersion?: string };
 };
+
+export type UploadBatch = { ownerId: string; epoch: number; requests: Map<string, Promise<UploadedAssetPayload>> };
+export function createUploadBatch(ownerId: string): UploadBatch { return { ownerId, epoch: uploadSession().epoch, requests: new Map() }; }
+type UploadOptions = { invalidJsonMessage?: string; fallbackToRaw?: boolean; onProgress?: UploadProgressHandler;
+  ownerId?: string; batch?: UploadBatch; requestId?: string; preserveUnknown?: boolean;
+  beforeUpload?: (context: { hash: string; fileSize: number; mimeType: string }) => Promise<UploadedAssetPayload | null> };
+const fileHashes = new WeakMap<File, Promise<string>>();
+const fileRequests = new WeakMap<File, Map<string, string>>();
+const inFlightUploads = new Map<string, Promise<UploadedAssetPayload>>();
+const directReceipts = new WeakMap<File, { scope: string; ticket: DirectUploadTicketResponse }>();
+
+/** Collapse reference selection, not generation items, by full client bytes. Server verification remains authoritative. */
+export async function uniqueUploadFiles(files: File[]) {
+  const seen = new Set<string>(), unique: File[] = [];
+  for (const file of files) {
+    const key = `${await sha256File(file)}:${file.size}:${file.type}`;
+    if (!seen.has(key)) { seen.add(key); unique.push(file); }
+  }
+  return { files: unique, duplicates: files.length - unique.length };
+}
 
 type UploadAssetResponse = {
   success?: boolean;
   asset?: UploadedAssetPayload;
   error?: string;
   message?: string;
+  code?: string;
+  notAccepted?: boolean;
 };
 
 type DirectUploadTicketResponse = {
@@ -90,6 +115,8 @@ type UploadContext = {
   width: number | null;
   height: number | null;
   durationSeconds: number | null;
+  ownerId?: string;
+  requestId?: string;
 };
 
 type MultipartUploadedPart = {
@@ -107,6 +134,7 @@ type MultipartResumeState = {
   partSize: number;
   expiresAt: string;
   parts: MultipartUploadedPart[];
+  phase?: 'uploading' | 'completing';
 };
 
 export function buildRawFileUploadRequest(file: File, context?: Partial<UploadContext>): RequestInit {
@@ -118,6 +146,8 @@ export function buildRawFileUploadRequest(file: File, context?: Partial<UploadCo
   if (context?.width != null) headers['X-Media-Width'] = String(context.width);
   if (context?.height != null) headers['X-Media-Height'] = String(context.height);
   if (context?.durationSeconds != null) headers['X-Media-Duration'] = String(context.durationSeconds);
+  if (context?.requestId) headers['X-Upload-Request-Id'] = context.requestId;
+  if (context?.ownerId) headers['X-Upload-Owner-Id'] = context.ownerId;
   return {
     method: 'POST',
     headers,
@@ -281,38 +311,17 @@ async function uploadWithServerProxy(
   return data.asset;
 }
 
-async function uploadWithServerProxyOrRawFallback(
-  ticket: DirectUploadTicketResponse,
-  file: File,
-  context: UploadContext,
-  invalidJsonMessage: string,
-  fallbackToRaw: boolean,
-  reasonPrefix: string,
-  onProgress?: UploadProgressHandler,
-) {
-  if (shouldUseRawFallback(file, fallbackToRaw)) {
-    return uploadWithRawFallback(file, invalidJsonMessage, onProgress, context);
-  }
-
-  try {
-    return await uploadWithServerProxy(ticket, file, context, invalidJsonMessage, onProgress);
-  } catch (proxyError) {
-    const proxyMessage = proxyError instanceof Error ? proxyError.message : '服务端中转上传失败';
-    throw new Error(rawFallbackUnavailableMessage(`${reasonPrefix}；服务端中转也失败：${proxyMessage}`, file));
-  }
-}
-
 function shouldUseMultipartUpload(file: File) {
   return file.type.startsWith('video/') && file.size > MULTIPART_UPLOAD_MIN_SIZE_BYTES;
 }
 
-function multipartResumeKey(file: File, hash: string) {
-  return `${MULTIPART_RESUME_STORAGE_PREFIX}${hash}:${file.size}:${file.type || 'application/octet-stream'}`;
+function multipartResumeKey(file: File, hash: string, ownerId?: string) {
+  return `${MULTIPART_RESUME_STORAGE_PREFIX}v2:${ownerId}:${hash}:${file.size}:${file.type || 'application/octet-stream'}`;
 }
 
-function readMultipartResumeState(file: File, hash: string): MultipartResumeState | null {
-  if (typeof window === 'undefined') return null;
-  const raw = sessionStorage.getItem(multipartResumeKey(file, hash));
+function readMultipartResumeState(file: File, hash: string, ownerId?: string): MultipartResumeState | null {
+  if (typeof window === 'undefined' || !ownerId) return null;
+  const raw = sessionStorage.getItem(multipartResumeKey(file, hash, ownerId));
   if (!raw) return null;
   try {
     const state = JSON.parse(raw) as MultipartResumeState;
@@ -324,9 +333,9 @@ function readMultipartResumeState(file: File, hash: string): MultipartResumeStat
       !state.uploadId ||
       !Number.isFinite(state.partSize) ||
       state.partSize <= 0 ||
-      new Date(state.expiresAt).getTime() <= Date.now()
+      new Date(state.expiresAt).getTime() <= Date.now() && state.phase !== 'completing'
     ) {
-      sessionStorage.removeItem(multipartResumeKey(file, hash));
+      sessionStorage.removeItem(multipartResumeKey(file, hash, ownerId));
       return null;
     }
     return {
@@ -334,19 +343,19 @@ function readMultipartResumeState(file: File, hash: string): MultipartResumeStat
       parts: Array.isArray(state.parts) ? state.parts.filter((part) => part.partNumber > 0 && part.eTag) : [],
     };
   } catch {
-    sessionStorage.removeItem(multipartResumeKey(file, hash));
+    sessionStorage.removeItem(multipartResumeKey(file, hash, ownerId));
     return null;
   }
 }
 
-function writeMultipartResumeState(file: File, state: MultipartResumeState) {
-  if (typeof window === 'undefined') return;
-  sessionStorage.setItem(multipartResumeKey(file, state.hash), JSON.stringify(state));
+function writeMultipartResumeState(file: File, state: MultipartResumeState, ownerId?: string) {
+  if (typeof window === 'undefined' || !ownerId) return;
+  sessionStorage.setItem(multipartResumeKey(file, state.hash, ownerId), JSON.stringify(state));
 }
 
-function clearMultipartResumeState(file: File, hash: string) {
-  if (typeof window === 'undefined') return;
-  sessionStorage.removeItem(multipartResumeKey(file, hash));
+function clearMultipartResumeState(file: File, hash: string, ownerId?: string) {
+  if (typeof window === 'undefined' || !ownerId) return;
+  sessionStorage.removeItem(multipartResumeKey(file, hash, ownerId));
 }
 
 function normalizePartEtag(value: string | null) {
@@ -457,11 +466,11 @@ async function uploadWithMultipart(
   context: UploadContext,
   invalidJsonMessage: string,
   onProgress?: UploadProgressHandler,
-  preserveUnknown = false,
+  preserveUnknown = true,
 ): Promise<UploadedAssetPayload | null> {
   if (!shouldUseMultipartUpload(file)) return null;
 
-  let state = readMultipartResumeState(file, context.hash);
+  let state = readMultipartResumeState(file, context.hash, context.ownerId);
   if (!state) {
     notifyUploadProgress(onProgress, {
       phase: 'multipart_start',
@@ -480,6 +489,8 @@ async function uploadWithMultipart(
           width: context.width,
           height: context.height,
           durationSeconds: context.durationSeconds,
+          requestId: context.requestId,
+          ownerId: context.ownerId,
         }),
       });
     } catch (error) {
@@ -517,7 +528,7 @@ async function uploadWithMultipart(
       expiresAt: start.expiresAt,
       parts: [],
     };
-    writeMultipartResumeState(file, state);
+    writeMultipartResumeState(file, state, context.ownerId);
   }
 
   const completedParts = new Map<number, string>();
@@ -554,7 +565,7 @@ async function uploadWithMultipart(
       state!.parts = Array.from(completedParts.entries())
         .map(([currentPartNumber, currentETag]) => ({ partNumber: currentPartNumber, eTag: currentETag }))
         .sort((a, b) => a.partNumber - b.partNumber);
-      writeMultipartResumeState(file, state!);
+      writeMultipartResumeState(file, state!, context.ownerId);
     }
   };
 
@@ -563,7 +574,7 @@ async function uploadWithMultipart(
   } catch (error) {
     if (state && !preserveUnknown && !shouldKeepMultipartResumeState(error)) {
       await abortMultipartUpload(state.uploadToken, invalidJsonMessage);
-      clearMultipartResumeState(file, context.hash);
+      clearMultipartResumeState(file, context.hash, context.ownerId);
     }
     throw error;
   }
@@ -574,6 +585,8 @@ async function uploadWithMultipart(
     loadedBytes: file.size,
     totalBytes: file.size,
   });
+  state.phase = 'completing';
+  writeMultipartResumeState(file, state, context.ownerId);
 
   let completeRes: Response;
   try {
@@ -600,16 +613,16 @@ async function uploadWithMultipart(
   if (!completeRes.ok) {
     if (preserveUnknown) throw new Error(complete.error || complete.message || '分块上传结果待确认，请查询原上传');
     await abortMultipartUpload(state.uploadToken, invalidJsonMessage);
-    clearMultipartResumeState(file, context.hash);
+    clearMultipartResumeState(file, context.hash, context.ownerId);
     throw new Error(complete.error || complete.message || '分块上传完成登记失败');
   }
   if (!complete.asset?.id) {
     if (preserveUnknown) throw new Error('分块上传结果未知，请查询原上传');
     await abortMultipartUpload(state.uploadToken, invalidJsonMessage);
-    clearMultipartResumeState(file, context.hash);
+    clearMultipartResumeState(file, context.hash, context.ownerId);
     throw new Error('分块上传完成但没有返回素材 ID');
   }
-  clearMultipartResumeState(file, context.hash);
+  clearMultipartResumeState(file, context.hash, context.ownerId);
   notifyUploadProgress(onProgress, {
     phase: 'done',
     label: '上传完成',
@@ -623,10 +636,14 @@ async function sha256File(file: File) {
   if (!globalThis.crypto?.subtle) {
     throw new Error('当前浏览器不支持文件校验，已回退到普通上传。');
   }
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', await file.arrayBuffer());
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('');
+  let value = fileHashes.get(file);
+  if (!value) {
+    value = file.arrayBuffer().then(bytes => globalThis.crypto.subtle.digest('SHA-256', bytes))
+      .then(digest => Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join(''));
+    fileHashes.set(file, value);
+    void value.catch(() => fileHashes.delete(file));
+  }
+  return value;
 }
 
 function readImageDimensions(file: File): Promise<{ width: number | null; height: number | null }> {
@@ -714,10 +731,9 @@ function putFileToStorage(
   });
 }
 
-export async function uploadFileToHistory(
+async function uploadFileToHistoryInternal(
   file: File,
-  options: { invalidJsonMessage?: string; fallbackToRaw?: boolean; onProgress?: UploadProgressHandler;
-    preserveUnknown?: boolean; beforeUpload?: (context: { hash: string; fileSize: number; mimeType: string }) => Promise<UploadedAssetPayload | null> } = {},
+  options: UploadOptions = {},
 ) {
   const invalidJsonMessage = options.invalidJsonMessage || DEFAULT_UPLOAD_INVALID_JSON_MESSAGE;
   const fallbackToRaw = options.preserveUnknown ? false : options.fallbackToRaw !== false;
@@ -748,7 +764,7 @@ export async function uploadFileToHistory(
       error instanceof Error &&
       error.message.includes('当前浏览器不支持文件校验')
     ) {
-      return uploadWithRawFallback(file, invalidJsonMessage, onProgress);
+      return uploadWithRawFallback(file, invalidJsonMessage, onProgress, { requestId: options.requestId, ownerId: options.ownerId });
     }
     throw error;
   }
@@ -760,10 +776,48 @@ export async function uploadFileToHistory(
     width,
     height,
     durationSeconds,
+    ownerId: options.ownerId,
+    requestId: options.requestId,
   };
   const restored = await options.beforeUpload?.({ hash, fileSize: file.size, mimeType: file.type });
   if (restored?.id) return restored;
-  const multipartAsset = await uploadWithMultipart(file, uploadContext, invalidJsonMessage, onProgress, options.preserveUnknown);
+  const receiptScope = `${options.ownerId || 'unscoped'}:${uploadSession().epoch}`;
+  const receiptKey = options.ownerId ? `sd2:direct-upload:v1:${options.ownerId}:${hash}:${file.size}:${file.type}` : null;
+  let pendingTicket = directReceipts.get(file)?.scope === receiptScope ? directReceipts.get(file)?.ticket : undefined;
+  if (!pendingTicket && receiptKey) {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(receiptKey) || 'null');
+      if (saved && typeof saved.uploadToken === 'string' && saved.uploadToken.length < 20000) pendingTicket = saved;
+    } catch { throw new Error('原上传凭据无法读取，未重新发送文件。请先核对我的素材。'); }
+  }
+  const retainTicket = (ticket: DirectUploadTicketResponse) => {
+    // Keep exact signed identity before sending bytes. Never save credentials or public URLs.
+    const receipt = { uploadToken: ticket.uploadToken, storageProvider: ticket.storageProvider };
+    directReceipts.set(file, { scope: receiptScope, ticket: receipt });
+    if (receiptKey) sessionStorage.setItem(receiptKey, JSON.stringify(receipt));
+  };
+  const finishTicket = async (ticket: DirectUploadTicketResponse) => {
+    notifyUploadProgress(onProgress, { phase: 'complete', label: '正在核对原上传结果' });
+    let response: Response;
+    try { response = await fetch('/api/assets/upload-complete', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uploadToken: ticket.uploadToken, hash, width, height, durationSeconds }), signal: AbortSignal.timeout(calculateUploadTimeoutMs(file.size)) }); }
+    catch { throw new Error('原上传登记结果待确认；再次点击上传只核对原凭据，不会重传文件。'); }
+    const result = await readUploadJsonResponse<UploadAssetResponse>(response, '原上传登记', invalidJsonMessage);
+    if (!response.ok && result.notAccepted === true && result.code === 'UPLOAD_NOT_ACCEPTED') {
+      directReceipts.delete(file); if (receiptKey) sessionStorage.removeItem(receiptKey);
+      throw new UploadNotAcceptedError(result.error || '服务器确认原文件未被接收，可以安全重试上传。');
+    }
+    if (!response.ok || !result.asset?.id) throw new Error(result.error || result.message || '原上传结果尚未确认，未重传文件。');
+    directReceipts.delete(file);
+    if (receiptKey) sessionStorage.removeItem(receiptKey);
+    notifyUploadProgress(onProgress, { phase: 'done', label: result.asset.reused ? '已复用相同素材' : '上传完成', loadedBytes: file.size, totalBytes: file.size });
+    return result.asset;
+  };
+  if (pendingTicket) {
+    try { return await finishTicket(pendingTicket); }
+    catch (cause) { if (!(cause instanceof UploadNotAcceptedError)) throw cause; }
+  }
+  const multipartAsset = await uploadWithMultipart(file, uploadContext, invalidJsonMessage, onProgress, true);
   if (multipartAsset?.id) return multipartAsset;
 
   notifyUploadProgress(onProgress, {
@@ -785,6 +839,8 @@ export async function uploadFileToHistory(
         width,
         height,
         durationSeconds,
+        requestId: options.requestId,
+        ownerId: options.ownerId,
       }),
     });
   } catch (error) {
@@ -819,8 +875,11 @@ export async function uploadFileToHistory(
       return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, ticket.reason || '直传暂不可用', onProgress, uploadContext);
     }
     if (ticket.uploadToken && ticket.storageProvider === 'r2') {
+      retainTicket(ticket);
       try {
-        return await uploadWithServerProxy(ticket, file, uploadContext, invalidJsonMessage, onProgress);
+        const asset = await uploadWithServerProxy(ticket, file, uploadContext, invalidJsonMessage, onProgress);
+        directReceipts.delete(file); if (receiptKey) sessionStorage.removeItem(receiptKey);
+        return asset;
       } catch (proxyError) {
         const proxyMessage = proxyError instanceof Error ? proxyError.message : '服务端中转上传失败';
         throw new Error(rawFallbackUnavailableMessage(`${ticket.reason || '直传暂不可用'}；服务端中转也失败：${proxyMessage}`, file));
@@ -832,63 +891,60 @@ export async function uploadFileToHistory(
     throw new Error('上传票据内容不完整，请刷新后重试。');
   }
 
+  retainTicket(ticket);
   try {
     await putFileToStorage(ticket.uploadUrl, ticket.headers || {}, file, onProgress);
   } catch (error) {
     const message = error instanceof Error ? error.message : '上传到对象存储失败';
-    if (options.preserveUnknown) throw new Error(`${message}；原上传结果待确认，未切换链路重传`);
-    return uploadWithServerProxyOrRawFallback(
-      ticket,
-      file,
-      uploadContext,
-      invalidJsonMessage,
-      fallbackToRaw,
-      message,
-      onProgress,
-    );
+    throw new Error(`${message}；原上传结果待确认，未切换链路重传。再次上传将核对原凭据。`);
   }
+  return finishTicket(ticket);
+}
 
-  notifyUploadProgress(onProgress, {
-    phase: 'complete',
-    label: '正在登记上传结果',
+export async function uploadFileToHistory(file: File, options: UploadOptions = {}): Promise<UploadedAssetPayload> {
+  const session = uploadSession();
+  const ownerId = options.ownerId || options.batch?.ownerId || session.ownerId || undefined;
+  if (session.ownerId && ownerId !== session.ownerId || options.batch && (options.batch.ownerId !== ownerId || options.batch.epoch !== session.epoch)) {
+    throw new Error('账号已变化，请重新选择素材；原上传不会跨账号套用。');
+  }
+  const scope = `${ownerId || 'unscoped'}:${session.epoch}`;
+  let identities = fileRequests.get(file);
+  if (!identities) { identities = new Map(); fileRequests.set(file, identities); }
+  let key = '';
+  if (ownerId && !options.beforeUpload) {
+    try { key = `${scope}:${await sha256File(file)}:${file.size}:${file.type}`; }
+    catch (cause) { if (!(cause instanceof Error) || !cause.message.includes('当前浏览器不支持文件校验')) throw cause; }
+  }
+  const existing = key ? options.batch?.requests.get(key) || inFlightUploads.get(key) : undefined;
+  if (existing) {
+    notifyUploadProgress(options.onProgress, { phase: 'preparing', label: '正在复用本批相同文件' });
+    const result = await existing;
+    if (uploadSession().epoch !== session.epoch) throw new Error('账号已变化，原上传结果未套用。');
+    notifyUploadProgress(options.onProgress, { phase: 'done', label: '已复用相同素材', loadedBytes: file.size, totalBytes: file.size });
+    return { ...result, reused: true, ...(result.upload ? { upload: { ...result.upload, assetDisposition: 'reused' } } : {}) };
+  }
+  const identityKey = key ? `sd2:upload-request:v1:${key}` : null;
+  let persistedId: string | null = null;
+  if (identityKey) {
+    try {
+      persistedId = sessionStorage.getItem(identityKey);
+      if (persistedId && !/^[a-zA-Z0-9-]{16,100}$/.test(persistedId)) throw new Error('Invalid receipt');
+    } catch { throw new Error('原上传编号无法读取，未发送文件，请先核对我的素材。'); }
+  }
+  const requestId = options.requestId || persistedId || identities.get(scope) || crypto.randomUUID();
+  identities.set(scope, requestId);
+  if (identityKey) {
+    try { sessionStorage.setItem(identityKey, requestId); }
+    catch { throw new Error('上传编号未能保存，文件尚未发送。请允许本机存储后重试。'); }
+  }
+  const request = uploadFileToHistoryInternal(file, { ...options, ownerId, requestId }).then(result => {
+    if (uploadSession().epoch !== session.epoch) throw new Error('账号已变化，文件已由原账号处理，当前页面未套用。');
+    if (identityKey) sessionStorage.removeItem(identityKey);
+    return result;
   });
-
-  let complete: UploadAssetResponse;
-  let completeRes: Response;
-  try {
-    completeRes = await fetch('/api/assets/upload-complete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        uploadToken: ticket.uploadToken,
-        hash,
-        width,
-        height,
-        durationSeconds,
-      }),
-    });
-  } catch (error) {
-    const message = uploadStageConnectionMessage('上传完成登记', error);
-    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message, onProgress, uploadContext);
-  }
-  try {
-    complete = await readUploadJsonResponse<UploadAssetResponse>(completeRes, '上传完成登记接口', invalidJsonMessage);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '上传完成登记接口解析失败';
-    return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, message, onProgress, uploadContext);
-  }
-  if (!completeRes.ok) {
-    throw new Error(complete.error || complete.message || (options.preserveUnknown
-      ? '原上传登记结果待确认，请查询原上传；未重新发送文件' : '上传完成但入库失败，请重新上传。'));
-  }
-  if (!complete.asset?.id) throw new Error('上传完成但没有返回素材 ID');
-  notifyUploadProgress(onProgress, {
-    phase: 'done',
-    label: '上传完成',
-    loadedBytes: file.size,
-    totalBytes: file.size,
-  });
-  return complete.asset;
+  if (key) { inFlightUploads.set(key, request); options.batch?.requests.set(key, request); }
+  try { return await request; }
+  finally { if (key && inFlightUploads.get(key) === request) inFlightUploads.delete(key); }
 }
 
 export const uploadFileAsAsset = uploadFileToHistory;

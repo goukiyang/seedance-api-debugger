@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { uploadFileToHistory } from '@/lib/http/file-upload';
+import { uploadSession } from '@/lib/http/upload-session';
 import { readJsonResponse } from '@/lib/http/json-response';
 import type { Workspace, WorkspaceAssetItem, UploadStatus, FrameRole } from '@/types';
 import type { UploadProgressHandler } from '@/lib/http/file-upload';
@@ -46,6 +47,32 @@ type PendingWorkspaceAttach = {
   fileNames: string[];
   statusIds: string[];
 };
+
+// File upload and placement are separate operations. Keep the same placement
+// receipt after an unknown response so retry never resets an existing role/order.
+async function postWorkspaceAssociation(tabId: string, body: Record<string, unknown>) {
+  const session = uploadSession();
+  if (!session.ownerId) throw new Error('当前账号尚未确认，请重新登录后再加入素材');
+  const bytes = new TextEncoder().encode(JSON.stringify([session.ownerId, session.epoch, tabId, body]));
+  const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('');
+  const key = `sd2:workspace-association:v1:${digest}`;
+  let requestId: string;
+  try {
+    requestId = sessionStorage.getItem(key) || crypto.randomUUID();
+    sessionStorage.setItem(key, requestId);
+  } catch { throw new Error('当前浏览器无法保留加入记录，素材未关联；请检查存储设置后重试'); }
+  const current = () => { const now = uploadSession(); return now.ownerId === session.ownerId && now.epoch === session.epoch; };
+  if (!current()) throw new Error('当前账号已变化，素材未关联');
+  const response = await fetch('/api/workspace/assets', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-tab-id': tabId, 'x-upload-owner-id': session.ownerId },
+    body: JSON.stringify({ ...body, ownerId: session.ownerId, requestId }), signal: AbortSignal.timeout(30000),
+  });
+  const data = await readJsonResponse<ApiMessageResponse & { association?: { requestId?: string; associated?: boolean } }>(response, { invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE });
+  if (!current()) throw new Error('当前账号已变化，原账号的加入结果未写入当前页面');
+  if (!response.ok) throw new Error(data.error || data.message || '素材加入结果未确认，请重试原操作；不用重新上传文件');
+  if (data.association?.requestId !== requestId || data.association.associated !== true) throw new Error('素材加入回执未确认，请重试原操作；不用重新上传文件');
+  try { sessionStorage.removeItem(key); } catch { /* A confirmed receipt is safe to replay. */ }
+}
 
 function getOrCreateTabId(): string {
   if (typeof window === 'undefined') return 'default';
@@ -128,18 +155,7 @@ export function useWorkspace(): UseWorkspaceResult {
   }, []);
 
   const attachUploadedAssetsToWorkspace = useCallback(async (assetIds: string[], role?: FrameRole) => {
-    const res = await fetch('/api/workspace/assets', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-tab-id': tabIdRef.current,
-      },
-      body: JSON.stringify({ assetIds, role }),
-    });
-    const data = await readJsonResponse<ApiMessageResponse>(res, {
-      invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
-    });
-    if (!res.ok) throw new Error(data.error || data.message || '素材加入参考区失败');
+    await postWorkspaceAssociation(tabIdRef.current, { assetIds, ...(role ? { role } : {}) });
     await fetchWorkspace();
   }, [fetchWorkspace]);
 
@@ -201,19 +217,12 @@ export function useWorkspace(): UseWorkspaceResult {
       const targetAsset = currentAssets.find((asset) => asset.assetId === assetId);
 
       const nextAssetId = await uploadAssetToHistory(file, onProgress);
-
-      const addRes = await fetch('/api/workspace/assets', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tab-id': tabIdRef.current,
-        },
-        body: JSON.stringify({ assetId: nextAssetId, role: targetAsset?.role || 'reference_image' }),
-      });
-      const addData = await readJsonResponse<ApiMessageResponse>(addRes, {
-        invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
-      });
-      if (!addRes.ok) throw new Error(addData.error || addData.message || '替换素材失败');
+      if (nextAssetId === assetId) {
+        await fetchWorkspace();
+        setUploadStatuses(previous => { const next = { ...previous }; delete next[assetId]; return next; });
+        return;
+      }
+      await postWorkspaceAssociation(tabIdRef.current, { assetId: nextAssetId, role: targetAsset?.role || 'reference_image' });
 
       const removeRes = await fetch(`/api/workspace/assets/${assetId}`, {
         method: 'DELETE',
@@ -261,18 +270,7 @@ export function useWorkspace(): UseWorkspaceResult {
     if (cleanAssetIds.length === 0) return;
     setLoading(true);
     try {
-      const res = await fetch('/api/workspace/assets', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tab-id': tabIdRef.current,
-        },
-        body: JSON.stringify({ assetIds: cleanAssetIds }),
-      });
-      const data = await readJsonResponse<ApiMessageResponse>(res, {
-        invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
-      });
-      if (!res.ok) throw new Error(data.error || data.message || '加入参考素材失败');
+      await postWorkspaceAssociation(tabIdRef.current, { assetIds: cleanAssetIds });
       await fetchWorkspace();
     } catch (err) {
       setError(err instanceof Error ? err.message : '加入参考素材失败');
@@ -285,9 +283,7 @@ export function useWorkspace(): UseWorkspaceResult {
     if (!selection.length) return;
     setLoading(true);
     try {
-      const response = await fetch('/api/workspace/assets', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-tab-id': tabIdRef.current }, body: JSON.stringify({ selection }) });
-      const data = await readJsonResponse<ApiMessageResponse>(response, { invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE });
-      if (!response.ok) throw new Error(data.error || data.message || '加入参考素材失败');
+      await postWorkspaceAssociation(tabIdRef.current, { selection });
       await fetchWorkspace();
     } catch (err) { setError(err instanceof Error ? err.message : '加入参考素材失败'); setLoading(false); throw err; }
   }, [fetchWorkspace]);
@@ -296,18 +292,7 @@ export function useWorkspace(): UseWorkspaceResult {
     if (referenceImageIds.length === 0) return;
     setLoading(true);
     try {
-      const res = await fetch('/api/workspace/assets', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tab-id': tabIdRef.current,
-        },
-        body: JSON.stringify({ referenceImageIds }),
-      });
-      const data = await readJsonResponse<ApiMessageResponse>(res, {
-        invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE,
-      });
-      if (!res.ok) throw new Error(data.error || data.message || '加入参考素材失败');
+      await postWorkspaceAssociation(tabIdRef.current, { referenceImageIds });
       await fetchWorkspace();
     } catch (err) {
       setError(err instanceof Error ? err.message : '加入参考素材失败');

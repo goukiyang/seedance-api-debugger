@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
+import { assertUploadOwner, uploadRequestId, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
 import { createDirectUploadTicket } from '@/lib/assets/direct-upload';
 import { getSiteUploadKind } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
@@ -13,6 +14,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 type UploadTicketBody = {
+  ownerId?: string;
+  requestId?: string;
   fileName?: string;
   mimeType?: string;
   fileSize?: number;
@@ -31,8 +34,11 @@ export async function POST(request: NextRequest) {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
     userId = user.id;
+    assertUploadOwner(request.headers.get('x-upload-owner-id'), user.id);
 
     const body = await request.json() as UploadTicketBody;
+    assertUploadOwner(body.ownerId, user.id);
+    const requestId = uploadRequestId(body.requestId);
     fileName = typeof body.fileName === 'string' ? body.fileName : 'upload.bin';
     mimeType = typeof body.mimeType === 'string' ? body.mimeType : '';
     const hash = typeof body.hash === 'string' ? body.hash : '';
@@ -55,6 +61,7 @@ export async function POST(request: NextRequest) {
 
     const ticket = await createDirectUploadTicket({
       ownerId: user.id,
+      requestId,
       fileName,
       mimeType,
       fileSize,
@@ -81,6 +88,7 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json(ticket);
   } catch (error) {
+    if (error instanceof VerifiedUploadError) return NextResponse.json(verifiedUploadFailure(error), { status: error.status });
     const message = error instanceof Error ? error.message : '上传票据创建失败';
     if (userId) {
       await recordAssetUploadLog({

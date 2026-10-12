@@ -1,4 +1,5 @@
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
+import type { Prisma } from '@prisma/client';
 import { resolveModuleContextVersion } from './context-version';
 import { archivedPresetKey, studioPresetArchived } from './preset-lifecycle';
 import { prisma } from '@/lib/prisma';
@@ -15,7 +16,8 @@ import { studioFixedCoverDTO, assertPresetCoverShareable } from './module-cover'
 import { getStudioModuleStyleIds, parseStudioStyleIds, resolveStudioStyleReferences, setStudioModuleStyleIds, setStudioPresetStyleIds } from './style-groups';
 import { cloneHistoricalSkills, getSkillSelection, parseSkillIds, resolveSkills, setSkillSelection } from './skills';
 import { defaultStudioReferencePolicy, getStudioPresetReferencePolicy, parseStudioReferencePolicy, setStudioModuleReferencePolicy, setStudioPresetReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
-import { assertStudioActor, saveSharedStudioPresetAs, replaceSharedStudioPreset, resolveSharedStudioDefinition, restoreStudioDefaultGroup, studioPublisherModule, studioSharedBinding, StudioSharingError } from './shared-contract';
+import { assertStudioActor, saveSharedStudioPresetAs, replaceSharedStudioPreset, resolveSharedStudioDefinition, restoreStudioDefaultGroup, studioPublisherModule, studioSharedBinding, parseSharedStudioPersonalOverrides, StudioSharingError } from './shared-contract';
+import type { SharedStudioPersonalOverrides } from './shared-types';
 
 export { canUseCompanyTemplatesForUser as canUseCompanyTemplates };
 
@@ -28,6 +30,7 @@ type PresetDraft = {
   reproduceFromTaskId?: unknown;
   isShared?: unknown; requestId?: unknown; moduleRevision?: unknown; expectedRevision?: unknown; expectedDefinitionToken?: unknown; templatePrompt?: unknown;
   personalOverrides?: unknown; resetFields?: unknown; personalReferenceIds?: unknown; personalReferencePolicy?: unknown;
+  saveIntent?: unknown;
 };
 
 function parseIds(value: unknown) {
@@ -42,6 +45,42 @@ function parsePreset(row: { reference_ids: string }) {
 }
 
 const quickPresetKey = (moduleId: string) => `studio_quick_presets_v1:${moduleId}`;
+const personalQuickPresetKey = (presetId: string) => `studio_personal_quick_preset_v1:${presetId}`;
+const personalQuickRequestKey = (ownerId: string, requestId: string) => `studio_personal_quick_request_v1:${createHash('sha256').update(JSON.stringify([ownerId, requestId])).digest('hex')}`;
+type PersonalQuickPresetMetadata = {
+  version: 1; ownerId: string; presetId: string; overrides: SharedStudioPersonalOverrides; referenceIds: string[];
+};
+function decodePersonalQuickPreset(value: string | undefined, ownerId: string, presetId: string): PersonalQuickPresetMetadata | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || parsed.version !== 1 || parsed.ownerId !== ownerId || parsed.presetId !== presetId) throw new Error();
+    return { version: 1, ownerId, presetId, overrides: parseSharedStudioPersonalOverrides(parsed.overrides), referenceIds: parseIds(parsed.referenceIds) };
+  } catch { throw new StudioModuleError('个人快捷设置无法读取，请重试；原模板仍保留', 503); }
+}
+function personalQuickFingerprint(value: unknown): string {
+  const canonical = (item: unknown): unknown => Array.isArray(item) ? item.map(canonical)
+    : item && typeof item === 'object' ? Object.fromEntries(Object.entries(item).filter(([key, child]) => key !== 'requestId' && child !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => [key, canonical(child)])) : item;
+  return createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
+}
+async function recoverPersonalQuickPreset(tx: Prisma.TransactionClient, ownerId: string, sourceModuleId: string,
+  requestKey: string, fingerprint: string) {
+  const receipt = await tx.platformSetting.findUnique({ where: { key: requestKey }, select: { value_json: true } });
+  if (!receipt) return null;
+  let saved: { version?: unknown; ownerId?: unknown; sourceModuleId?: unknown; inputFingerprint?: unknown; presetId?: unknown };
+  try { saved = JSON.parse(receipt.value_json); } catch { throw new StudioModuleError('快捷保存回执无法确认，请保留原提交编号重试', 409); }
+  if (!saved || saved.version !== 1 || saved.ownerId !== ownerId || saved.sourceModuleId !== sourceModuleId
+    || saved.inputFingerprint !== fingerprint || typeof saved.presetId !== 'string') {
+    throw new StudioModuleError('该保存编号已用于其他设置，请读取原快捷设置或使用新的保存编号', 409);
+  }
+  const preset = await tx.imageStudioPreset.findFirst({ where: { id: saved.presetId, owner_id: ownerId, is_shared: false } });
+  if (!preset || await studioPresetArchived(preset.id, tx)) throw new StudioModuleError('原快捷设置已不可用，不能重复创建；请重新读取', 409);
+  const metadata = await tx.platformSetting.findUnique({ where: { key: personalQuickPresetKey(preset.id) }, select: { value_json: true } });
+  const personal = decodePersonalQuickPreset(metadata?.value_json, ownerId, preset.id);
+  if (!personal) throw new StudioModuleError('原快捷设置回执不完整，请保留原提交编号重试', 409);
+  return { ...preset, saveIntent: 'personal-quick' as const, personalOverrides: personal.overrides };
+}
 function decodeQuickPresetIds(value: string | undefined, ownerId: string): string[] {
   if (!value) return [];
   try {
@@ -76,13 +115,19 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
   const archivedKeys = new Set(archived.map(item => item.key));
   const visibleRows = rows.filter(row => canViewStudioPreset(user, row) && !archivedKeys.has(archivedPresetKey(row.id)));
   const privateRows = visibleRows.filter(row => !row.is_shared);
+  const personalMetadata = await prisma.platformSetting.findMany({ where: { key: { in: privateRows.filter(row => row.owner_id === user.id)
+    .map(row => personalQuickPresetKey(row.id)) } }, select: { key: true, value_json: true } });
+  const personalMetadataByKey = new Map(personalMetadata.map(row => [row.key, row.value_json]));
+  const personalByPreset = new Map(privateRows.filter(row => row.owner_id === user.id).map(row =>
+    [row.id, decodePersonalQuickPreset(personalMetadataByKey.get(personalQuickPresetKey(row.id)), user.id, row.id)] as const));
   const fixedByPreset = await getStudioPresetsFixedReferences(user, privateRows);
   const referencePolicies = await Promise.all(privateRows.map(async row => [row.id, await getStudioPresetReferencePolicy(row.owner_id, row.id, parsePreset(row), row.reference_limit)] as const));
   const policyByPreset = new Map(referencePolicies);
   const styleIdsByPreset = moduleId === undefined ? new Map<string, string[]>() : new Map(await Promise.all(privateRows.map(async row =>
     [row.id, await getStudioModuleStyleIds(row.owner_id, row.id, prisma, 'preset')] as const)));
   const reusableIds = (row: typeof visibleRows[number]) => parsePreset(row).filter(id => !policyByPreset.get(row.id)?.primaryIds.includes(id));
-  const assetIds = privateRows.flatMap(row => [...reusableIds(row), ...(fixedByPreset.get(row.id) || []).map(reference => reference.assetId)]);
+  const assetIds = privateRows.flatMap(row => [...reusableIds(row), ...(fixedByPreset.get(row.id) || []).map(reference => reference.assetId),
+    ...(personalByPreset.get(row.id)?.referenceIds || [])]);
   const bannerIds = privateRows.map(row => row.banner_asset_id).filter((id): id is string => Boolean(id));
   const assets = await prisma.asset.findMany({ where: { id: { in: Array.from(new Set([...assetIds, ...bannerIds])) }, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(user)] }, select: { id: true, owner_id: true, original_url: true, thumbnail_url: true, width: true, height: true } });
   const byId = new Map(assets.map(asset => [asset.id, asset]));
@@ -117,9 +162,13 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
       if (!asset || asset.owner_id !== row.owner_id) return null;
       return { id, originalUrl: studioTemplateAssetUrl(id), thumbnailUrl: studioTemplateAssetUrl(id, true), width: asset.width, height: asset.height };
     };
+    const personal = personalByPreset.get(row.id);
     return {
       id: row.id, name: row.name, scope: row.scope, groupName: row.group_name, prompt: row.prompt, context: canSeeContext ? row.context : '', revision: row.updated_at.toISOString(),
       isShared: row.is_shared,
+      ...(personal ? { saveIntent: 'personal-quick' as const, personalOverrides: personal.overrides,
+        personalImages: personal.referenceIds.map(toPayload).filter((item): item is NonNullable<ReturnType<typeof toPayload>> => Boolean(item)),
+        personalReferencesAvailable: personal.referenceIds.every(id => Boolean(toPayload(id))) } : {}),
       moduleContextVersion: await resolveModuleContextVersion(row.context).catch(() => null),
       ownedByViewer: row.owner_id === user.id,
       referencesAvailable: visibleIds.length === ids.length && (fixedByPreset.get(row.id) || []).every(reference => byId.get(reference.assetId)?.owner_id === row.owner_id),
@@ -147,6 +196,12 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
 
 export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDraft, replace = false) {
   user = await assertStudioActor(user.id);
+  if (body.saveIntent !== undefined && body.saveIntent !== 'personal-quick') throw new StudioModuleError('模板保存方式无效', 400);
+  const personalQuick = body.saveIntent === 'personal-quick';
+  if (personalQuick && (replace || body.isShared !== false || typeof body.sourceModuleId !== 'string'
+    || typeof body.requestId !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(body.requestId))) {
+    throw new StudioModuleError('个人快捷设置须在自己的模块中另存，请保留草稿重新保存', 400);
+  }
   if (body.isShared !== undefined && typeof body.isShared !== 'boolean') throw new StudioModuleError('模板共享设置无效');
   if (replace) {
     const target = await prisma.imageStudioPreset.findUnique({ where: { id: String(body.presetId || '') } });
@@ -186,6 +241,15 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
   const incomingPolicy = referencePolicy || defaultStudioReferencePolicy(requestedIds, referenceLimit);
   const ids = requestedIds.filter(id => !incomingPolicy.primaryIds.includes(id));
   referencePolicy = { ...incomingPolicy, primaryIds: [] };
+  const personalOverrides = personalQuick ? body.personalOverrides === undefined ? {} : parseSharedStudioPersonalOverrides(body.personalOverrides) : undefined;
+  const requestedPersonalIds = personalQuick && body.personalReferenceIds !== undefined ? parseIds(body.personalReferenceIds) : [];
+  let personalReferenceIds = Array.from(new Set(requestedPersonalIds.filter(id => !incomingPolicy.primaryIds.includes(id))));
+  if (personalQuick && body.personalReferencePolicy !== undefined) {
+    try {
+      const policy = parseStudioReferencePolicy(body.personalReferencePolicy, requestedPersonalIds);
+      personalReferenceIds = personalReferenceIds.filter(id => !policy.primaryIds.includes(id));
+    } catch (error) { throw new StudioModuleError((error as Error).message, Number((error as { status?: unknown }).status) || 400); }
+  }
   let fixedReferences: StudioFixedReference[] | undefined;
   if (body.fixedReferences !== undefined) {
     if (!isAdmin) throw new StudioModuleError('固定模板图只能由管理员修改', 403);
@@ -199,9 +263,27 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
   const bannerAssetId = body.bannerAssetId == null ? null : String(body.bannerAssetId);
   const sourceModuleId = body.sourceModuleId == null ? null : String(body.sourceModuleId);
   if (sourceModuleId && !validStudioModuleId(sourceModuleId, userId)) throw new StudioModuleError('模板来源模块无效', 403);
+  const quickRequestKey = personalQuick ? personalQuickRequestKey(userId, body.requestId as string) : undefined;
+  const quickFingerprint = personalQuick ? personalQuickFingerprint(body) : undefined;
   return prisma.$transaction(async tx => {
     user = await assertStudioActor(user.id, tx);
     if (scope === 'admin' && user.role !== 'admin' || fixedReferences !== undefined && user.role !== 'admin') throw new StudioModuleError('当前账号没有保存管理员配置的权限', 403);
+    if (personalQuick) {
+      const source = await tx.imageStudioModule.findFirst({ where: { id: sourceModuleId!, owner_id: userId } });
+      if (!source) throw new StudioModuleError('请先保存自己的模块，再另存个人快捷设置', 409);
+      const binding = await studioSharedBinding(userId, source.id, tx);
+      const original = source.source_preset_id ? await tx.imageStudioPreset.findUnique({ where: { id: source.source_preset_id } }) : null;
+      if (source.source_preset_id && (!original || original.owner_id !== userId || !canViewStudioPreset(user, original)
+        || await studioPresetArchived(original.id, tx)) || binding && (binding.mode !== 'publisher'
+          || binding.ownerId !== userId || binding.presetId !== source.source_preset_id || original?.owner_id !== userId)) {
+        throw new StudioModuleError('个人快捷设置只能另存自己创建的模板，不能另存他人的共享定义', 403);
+      }
+      const recovered = await recoverPersonalQuickPreset(tx, userId, source.id, quickRequestKey!, quickFingerprint!);
+      if (recovered) return recovered;
+      if (body.moduleRevision !== undefined && (!Number.isInteger(body.moduleRevision) || body.moduleRevision !== source.revision)) {
+        throw new StudioModuleError('模板工作区已更新，请重新读取后保存；当前草稿仍保留', 409);
+      }
+    }
     const target = replace ? await tx.imageStudioPreset.findFirst({ where: { id: String(body.presetId || ''), owner_id: userId } }) : null;
     if (target && await studioPresetArchived(target.id, tx)) throw new StudioModuleError('模板已删除，请重新读取', 409);
     if (target && !canManageStudioPreset(user, target)) throw new StudioModuleError('当前账号没有修改该模板的权限', 403);
@@ -217,7 +299,7 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
     if (sourceModuleId) {
       const sourceModule = await tx.imageStudioModule.findFirst({ where: { id: sourceModuleId, owner_id: userId }, select: { id: true, context: true, source_preset_id: true } });
       if (!sourceModule) throw new StudioModuleError('模板来源模块不存在或无权使用', 403);
-      if (user.role !== 'admin' && sourceModule.source_preset_id) {
+      if ((personalQuick || user.role !== 'admin') && sourceModule.source_preset_id) {
         const original = await tx.imageStudioPreset.findUnique({ where: { id: sourceModule.source_preset_id }, select: { owner_id: true } });
         if (!original || original.owner_id !== userId) throw new StudioModuleError('共享模板的内部配置只能由创建者另存', 403);
       }
@@ -232,9 +314,9 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
     if (!body.reproduceFromTaskId) await resolveSkills(user, skillIds, tx);
     if (target?.is_shared && skillIds.length) throw new StudioModuleError('skills仅自己可见，请先关闭模板共享，或移除skills后再保存', 409);
     const styles = await resolveStudioStyleReferences(user, styleIds, tx);
-    try { validateStudioReferenceCounts(referencePolicy || defaultStudioReferencePolicy(ids, referenceLimit), ids, presetFixedReferences.length, styles.references.length); }
+    try { validateStudioReferenceCounts(referencePolicy || defaultStudioReferencePolicy(ids, referenceLimit), [...ids, ...personalReferenceIds], presetFixedReferences.length, styles.references.length); }
     catch (error) { throw new StudioModuleError((error as Error).message); }
-    const assetIds = Array.from(new Set([...ids, ...presetFixedReferences.map(reference => reference.assetId), ...(bannerAssetId ? [bannerAssetId] : [])]));
+    const assetIds = Array.from(new Set([...ids, ...personalReferenceIds, ...presetFixedReferences.map(reference => reference.assetId), ...(bannerAssetId ? [bannerAssetId] : [])]));
     const owned = await tx.asset.findMany({ where: { id: { in: assetIds }, owner_id: userId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(user, tx)] }, select: { id: true } });
     if (owned.length !== assetIds.length) throw new StudioModuleError('模板参考图片不存在或无权使用', 403);
     let effectiveContext = context;
@@ -249,7 +331,7 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
       if (originalId) {
         const original = await tx.imageStudioPreset.findUnique({ where: { id: originalId } });
         if (!original || !canViewStudioPreset(user, original)) throw new StudioModuleError('原模板已不可用', 403);
-        if (user.role !== 'admin' && original.owner_id !== userId) throw new StudioModuleError('共享模板的内部配置只能由创建者另存', 403);
+        if ((personalQuick || user.role !== 'admin') && original.owner_id !== userId) throw new StudioModuleError('共享模板的内部配置只能由创建者另存', 403);
       }
       effectiveContext = snapshot.moduleContext;
       skillIds = await cloneHistoricalSkills(user, snapshot.skills, tx);
@@ -266,6 +348,15 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
       created = await tx.imageStudioPreset.findUniqueOrThrow({ where: { id: target.id } });
     } else {
       created = await tx.imageStudioPreset.create({ data: { ...data, id: randomUUID(), owner_id: userId, scope, is_shared: false } });
+    }
+    if (personalQuick) {
+      const personal: PersonalQuickPresetMetadata = { version: 1, ownerId: userId, presetId: created.id,
+        overrides: personalOverrides!, referenceIds: personalReferenceIds };
+      await tx.platformSetting.create({ data: { key: personalQuickPresetKey(created.id), value_json: JSON.stringify(personal), updated_by: userId } });
+      // Unique owner/request receipt and the private snapshot commit together. A failed
+      // transaction cannot leave a second preset or a successful-looking receipt behind.
+      await tx.platformSetting.create({ data: { key: quickRequestKey!, value_json: JSON.stringify({ version: 1, ownerId: userId,
+        sourceModuleId, inputFingerprint: quickFingerprint, presetId: created.id }), updated_by: userId } });
     }
     await setStudioPresetFixedReferences(userId, created.id, presetFixedReferences, tx);
     await setStudioPresetStyleIds(user, created.id, styleIds, tx);
@@ -288,7 +379,7 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
       }
     }
     await restoreStudioDefaultGroup(userId, groupName, tx);
-    return created;
+    return personalQuick ? { ...created, saveIntent: 'personal-quick' as const, personalOverrides: personalOverrides! } : created;
   });
 }
 

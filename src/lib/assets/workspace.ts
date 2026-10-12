@@ -35,10 +35,11 @@ function workspaceNameForTab(tabId: string) {
  * 每个浏览器 tab 有独立 workspace（通过 tabId 区分）
  */
 export async function getOrCreateWorkspace(tabId: string, ownerId = 'default-user'): Promise<{ id: string }> {
+  return prisma.$transaction(async db => {
   const workspaceName = workspaceNameForTab(tabId);
 
   // 尝试查找当前 tab 的 active workspace，避免复用同用户其他 tab 的旧参考素材。
-  let workspace = await prisma.workspace.findFirst({
+  let workspace = await db.workspace.findFirst({
     where: {
       owner_id: ownerId,
       status: 'active',
@@ -48,7 +49,7 @@ export async function getOrCreateWorkspace(tabId: string, ownerId = 'default-use
   });
 
   if (!workspace) {
-    workspace = await prisma.workspace.create({
+    workspace = await db.workspace.create({
       data: {
         id: uuidv4(),
         owner_id: ownerId,
@@ -59,6 +60,7 @@ export async function getOrCreateWorkspace(tabId: string, ownerId = 'default-use
   }
 
   return { id: workspace.id };
+  });
 }
 
 /**
@@ -166,8 +168,9 @@ export async function addAssetToWorkspace(
     _max: { sort_order: true },
   });
 
-  return db.workspaceAsset.create({
-    data: {
+  return db.workspaceAsset.upsert({
+    where: { workspace_id_asset_id: { workspace_id: workspaceId, asset_id: assetId } },
+    create: {
       id: uuidv4(),
       workspace_id: workspaceId,
       asset_id: assetId,
@@ -175,6 +178,8 @@ export async function addAssetToWorkspace(
       sort_order: (maxOrder._max.sort_order ?? 0) + 1,
       role: role,
     },
+    // Only the caller's explicit target intent may change the concurrent winner.
+    update: { ...(role !== undefined ? { role } : {}), ...(options?.referenceImageId ? { reference_image_id: options.referenceImageId } : {}) },
   }).then((r) => r.id);
 }
 
