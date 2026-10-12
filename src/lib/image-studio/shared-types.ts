@@ -1,5 +1,6 @@
 import type { ImageStudioModel, ImageStudioQuality, ImageResolution } from './model-catalog';
 import type { StudioReferencePolicy } from './reference-policy';
+import type { ModuleCoverDTO } from './module-cover-types';
 
 export type SharedStudioIntent = {
   protocol: 'shared-live-v1';
@@ -40,6 +41,8 @@ export type SharedStudioPublicDefinition = {
   name: string;
   groupName: string;
   banner: SharedStudioImageDTO | null;
+  fixedCover: ModuleCoverDTO | null;
+  coverEditable: boolean;
   templatePrompt: string;
   context: string;
   contextConfigured: boolean;
@@ -58,9 +61,12 @@ export type SharedStudioPublicDefinition = {
 };
 export type SharedStudioCatalogItem = {
   presetId: string;
+  isShared: boolean;
   name: string;
   groupName: string;
   banner: SharedStudioImageDTO | null;
+  fixedCover: ModuleCoverDTO | null;
+  coverEditable: boolean;
   revision: string;
   available: boolean;
 };

@@ -11,6 +11,7 @@ import { canManageStudioPreset, canUseCompanyTemplates as canUseCompanyTemplates
 import { studioTemplateAssetUrl } from './media';
 import { getStudioModuleFixedReferences, getStudioPresetsFixedReferences, getStudioPresetFixedReferences, parseStudioFixedReferences, setStudioModuleFixedReferences, setStudioPresetFixedReferences, type StudioFixedReference } from './fixed-references';
 import { studioVisibleAssetWhere } from './protected-assets';
+import { studioFixedCoverDTO, assertPresetCoverShareable } from './module-cover';
 import { getStudioModuleStyleIds, parseStudioStyleIds, resolveStudioStyleReferences, setStudioModuleStyleIds, setStudioPresetStyleIds } from './style-groups';
 import { cloneHistoricalSkills, getSkillSelection, parseSkillIds, resolveSkills, setSkillSelection } from './skills';
 import { defaultStudioReferencePolicy, getStudioPresetReferencePolicy, parseStudioReferencePolicy, setStudioModuleReferencePolicy, setStudioPresetReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
@@ -97,6 +98,7 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
         return { id: row.id, name: row.name, scope: row.scope, groupName: row.group_name, revision: row.updated_at.toISOString(), model: row.model,
           isShared: row.is_shared, ownedByViewer: row.owner_id === user.id, canManageSharing: canManageStudioPreset(user, row),
           unavailable: true, unavailableReason: error.message, prompt: '', context: '', contextConfigured: false, referencesAvailable: false,
+          fixedCover: await studioFixedCoverDTO(user, { kind: 'preset', id: row.id }), coverEditable: canManageStudioPreset(user, row),
           images: [], banner: null, fixedReferences: [], fixedReferenceCount: 0, skillIds: [] };
       }
     }
@@ -137,6 +139,7 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
           note: canSeeContext ? reference.note : '', available };
       }),
       banner: row.banner_asset_id ? toPayload(row.banner_asset_id) : null,
+      fixedCover: await studioFixedCoverDTO(user, { kind: 'preset', id: row.id }), coverEditable: canManageStudioPreset(user, row),
       createdAt: row.created_at, updatedAt: row.updated_at,
     };
   }));
@@ -340,7 +343,10 @@ export async function setStudioPresetSharing(user: ImageStudioIdentity, presetId
     }
     if (await studioPresetArchived(preset.id, tx)) throw new StudioModuleError('模板已删除，请重新读取', 409);
     if (revision !== undefined && revision !== preset.updated_at.toISOString()) throw new StudioModuleError('模板已在其他页面更新，请重新读取', 409);
-    if (isShared) await resolveSharedStudioDefinition(user, presetId, tx);
+    if (isShared) {
+      await resolveSharedStudioDefinition(user, presetId, tx);
+      await assertPresetCoverShareable(user, presetId, tx);
+    }
     const changed = await tx.imageStudioPreset.updateMany({ where: { id: presetId, owner_id: user.id, updated_at: preset.updated_at },
       data: { is_shared: isShared, updated_at: new Date(Math.max(Date.now(), preset.updated_at.getTime() + 1)) } });
     if (changed.count !== 1) throw new StudioModuleError('模板共享状态已变化，请重新读取', 409);

@@ -5,6 +5,8 @@ import { isSafeIdentifier, sourceFingerprint, type MediaPreviewZoomMode } from '
 
 export type ImageComparisonSource = {
   src: string; alt: string; fileName?: string; thumbnailSrc?: string;
+  /** Supplied only when the caller knows this image's relationship to the result. */
+  role?: 'original' | 'generated' | 'reference';
   contentKey?: ContentKey; pickerKey?: string; id?: string; version?: string;
   width?: number; height?: number; fileSize?: number;
 };

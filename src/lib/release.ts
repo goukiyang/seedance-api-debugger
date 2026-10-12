@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '生图等待卡片压暗参考图并增加刷光，明确标识的时间模拟进度最多到95%，真实图片显示后结束；正常等待与查询异常分别提示。模型、质量和分辨率选择框随设置栏宽度换行。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '兼容回退版本：保留已保存的固定封面、共享权限与原图保护，保留高清处理和安全查看修复。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

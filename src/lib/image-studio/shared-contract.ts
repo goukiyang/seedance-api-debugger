@@ -14,6 +14,7 @@ import { getImageStudioSettings } from './settings';
 import { MAX_REFERENCE_IMAGES } from './limits';
 import { studioTemplateAssetUrl } from './media';
 import { readSharedStudioSnapshot } from './read-snapshot';
+import { moduleCoverKey, promoteModuleCover, copyModuleCover, studioFixedCoverDTO, assertPresetCoverShareable } from './module-cover';
 import type { SharedStudioCatalog, SharedStudioCatalogItem, SharedStudioDefaults, SharedStudioDefinitionPersonalInput, SharedStudioIntent, SharedStudioPersonalOverrides, SharedStudioPublicDefinition } from './shared-types';
 
 export type { SharedStudioIntent, SharedStudioPersonalOverrides } from './shared-types';
@@ -222,6 +223,7 @@ async function resolveSharedStudioDefinitionData(actor: ImageStudioIdentity, sou
   const canSeeContext = actor.role === 'admin' || source.owner_id === actor.id;
   const publicDTO: SharedStudioPublicDefinition = { intent, presetId, revision: sourceRevision, name: definition.name, groupName: definition.groupName,
     banner: source.banner_asset_id && readableIds.has(source.banner_asset_id) ? image(source.banner_asset_id) : null,
+    fixedCover: await studioFixedCoverDTO(actor, { kind: 'preset', id: presetId }, client), coverEditable: canManageStudioPreset(actor, source),
     templatePrompt: source.prompt, context: canSeeContext ? context : '', contextConfigured: Boolean(context.trim()),
     contextEditable: canManageStudioPreset(actor, source), canManageSharing: canManageStudioPreset(actor, source),
     ownedByViewer: source.owner_id === actor.id, isShared: source.is_shared, defaults: generationDefaults,
@@ -540,6 +542,8 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
     await setStudioPresetFixedReferences(actor.id, presetId, fixedReferences, tx);
     await setStudioPresetReferencePolicy(actor.id, presetId, referencePolicy, templateIds, tx);
     await setStudioPresetStyleIds(actor, presetId, styleGroupIds, tx);
+    if (!binding) await promoteModuleCover(actor, moduleId, presetId, tx);
+    if (data.is_shared) await assertPresetCoverShareable(actor, presetId, tx);
     const personalChanges = await writeSharedStudioPersonalState(actor, workspace, {
       ...(has(input, 'personalOverrides') ? { personalOverrides: input.personalOverrides } : {}),
       ...(has(input, 'resetFields') ? { resetFields: input.resetFields } : {}),
@@ -616,6 +620,7 @@ export async function saveSharedStudioPresetAs(user: ImageStudioIdentity, input:
       await setStudioPresetFixedReferences(actor.id, presetId, definition.fixedReferences, tx);
       await setStudioPresetReferencePolicy(actor.id, presetId, definition.referencePolicy, definition.templateReferenceIds, tx);
       await setStudioPresetStyleIds(actor, presetId, definition.styleGroupIds, tx);
+      await copyModuleCover(actor, { kind: 'preset', id: source.id }, { kind: 'preset', id: presetId }, tx);
       await bindStudioModule(tx, publisherModuleId, { protocol: SHARED_STUDIO_PROTOCOL, ownerId: actor.id, presetId, mode: 'publisher' });
       expectedRevision = 1;
       expectedDefinitionToken = await sharedDefinitionToken(copied, tx);
@@ -736,6 +741,7 @@ async function sharedDependencyState(rows: Array<{ id: string; owner_id: string;
   const keys = rows.flatMap(row => [
     `studio_fixed_references_v1:preset:${row.id}`, `studio_reference_policy_v1:preset:${row.owner_id}:${row.id}`,
     `studio_style_preset_selection_v1:${row.id}`, `studio_skill_selection_v1:preset:${row.id}`, studioSharedReproductionKey(row.id),
+    moduleCoverKey({ kind: 'preset', id: row.id }),
   ]);
   const dependencies = await client.platformSetting.findMany({ where: { key: { in: keys } }, select: { key: true, value_json: true }, orderBy: { key: 'asc' } });
   const styleIds = new Set<string>();
@@ -754,6 +760,7 @@ async function sharedDependencyState(rows: Array<{ id: string; owner_id: string;
       if (row.key.startsWith('studio_style_preset_selection_v1:') && Array.isArray(value?.ids)) for (const id of value.ids) if (typeof id === 'string') styleIds.add(id);
       collectReferences(value?.references);
       collectReferences(value?.templateFixedReferences);
+      collectReferences(value?.recipe?.sources);
     } catch { /* Corrupt settings remain in the token and fail closed in the resolver. */ }
   }
   const styles = await client.platformSetting.findMany({ where: { key: { in: Array.from(styleIds, id => `studio_style_group_v1:${id}`) } }, select: { key: true, value_json: true }, orderBy: { key: 'asc' } });
@@ -798,7 +805,8 @@ export async function listSharedStudioCatalog(user: ImageStudioIdentity, options
     let available = true;
     try { await resolveSharedStudioDefinition(actor, row.id, client); }
     catch (error) { if (!(error instanceof StudioSharingError) || ![403, 404, 409].includes(error.status)) throw error; available = false; }
-    return { presetId: row.id, name: row.name, groupName: row.group_name || '未分组', revision: row.updated_at.toISOString(), available,
+    return { presetId: row.id, isShared: row.is_shared, name: row.name, groupName: row.group_name || '未分组', revision: row.updated_at.toISOString(), available,
+      fixedCover: await studioFixedCoverDTO(actor, { kind: 'preset', id: row.id }, client), coverEditable: canManageStudioPreset(actor, row),
       banner: asset && asset.owner_id === row.owner_id ? { id: asset.id, originalUrl: studioTemplateAssetUrl(asset.id), thumbnailUrl: studioTemplateAssetUrl(asset.id, true), width: asset.width, height: asset.height } : null };
   }));
   return { items, nextCursor: remaining.length > 100 ? page[page.length - 1].id : null, catalogRevision };

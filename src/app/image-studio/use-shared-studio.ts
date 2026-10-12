@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { UploadedAssetPayload } from '@/lib/http/file-upload';
 import type { SharedStudioDefaults, SharedStudioIntent } from '@/lib/image-studio/shared-types';
+import type { ModuleCoverDTO } from '@/lib/image-studio/module-cover-types';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS } from '@/lib/image-studio/model-catalog';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 
@@ -23,6 +24,7 @@ export function hasSharedDefaults(value: unknown): value is SharedStudioDefaults
 
 export type SharedStudioEntry = {
   presetId: string; name: string; groupName: string; banner?: UploadedAssetPayload | null;
+  isShared: boolean; fixedCover?: ModuleCoverDTO | null;
   revision?: string; available: boolean; unavailableReason?: string;
 };
 type SharedModule = { id: string; sharedLive?: { intent: SharedStudioIntent; available: boolean } | null };
@@ -108,6 +110,7 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
             if (cursor && seenCursors.has(cursor)) throw new Error('模板目录暂不可用');
             if (cursor) seenCursors.add(cursor);
           } while (cursor && pages < targetPages);
+          if (!cursor) for (const prior of initial.items) if (!items.has(prior.presetId)) latest.current.onUnavailable(prior.presetId, '模板已停止共享或不可用');
           commit({ owner: userId, items: Array.from(items.values()), revision: revision.catalogRevision, cursor, pages, ready: true });
         }
         if (presetId && revision.activeAvailable === false) {

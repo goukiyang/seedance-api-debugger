@@ -16,6 +16,8 @@ import { type ContentKey, type ContentSummary, type ContentCategory } from './ty
 import { resolveCutoutResult, type CutoutContentContext } from './cutout-content';
 import { tryContentKeyParts } from './key';
 import { studioPresetArchived } from '@/lib/image-studio/preset-lifecycle';
+import { studioFixedCoverDTO } from '@/lib/image-studio/module-cover';
+import { studioSharedBinding } from '@/lib/image-studio/shared-contract';
 
 export class ReactionError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -129,6 +131,8 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
       const item = summary(input, 'template', row.name, `/template-studio?type=image&presetId=${encodeURIComponent(row.id)}`);
       item.templateKind = 'definition'; item.templateMedium = 'image';
       item.actionLabel = '使用模板'; item.versionLabel = row.updated_at.toISOString(); item.owner = await owner(row.owner_id);
+      const fixedCover = await studioFixedCoverDTO(user, { kind: 'preset', id: row.id });
+      if (fixedCover) { item.thumbnailUrl = fixedCover.thumbnailUrl; item.previewUrl = fixedCover.imageUrl; }
       return { summary: item };
     }
     if (type === 'image_module') {
@@ -140,6 +144,9 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
       const item = summary(input, 'template', row.name, `/template-studio?type=image&moduleId=${id}`);
       item.templateKind = 'workpage'; item.templateMedium = 'image';
       item.actionLabel = '继续编辑'; item.versionLabel = String(row.revision); item.owner = await owner(row.owner_id);
+      const binding = await studioSharedBinding(user.id, row.id);
+      const fixedCover = await studioFixedCoverDTO(user, binding ? { kind: 'preset', id: binding.presetId } : { kind: 'module', id: row.id });
+      if (fixedCover) { item.thumbnailUrl = fixedCover.thumbnailUrl; item.previewUrl = fixedCover.imageUrl; }
       return { summary: item };
     }
     if (type === 'video_template') {
