@@ -73,7 +73,7 @@ import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChanne
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
 
 type StudioSnapshot = { imageChannelLabel?: string | null; imageSupplierName?: string | null; referencePolicy?: StudioReferencePolicy; primaryReferenceImages?: UploadedAssetPayload[]; auxiliaryReferenceImages?: UploadedAssetPayload[]; prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; contextAvailable?: boolean; contextConfigured?: boolean; referenceImages: UploadedAssetPayload[]; fixedReferenceImages?: FixedStudioReference[]; transientReferenceImages?: UploadedAssetPayload[]; fixedReferenceCount?: number; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[] };
-type StudioTask = { id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; error?: string; unitCredits: number; billing?: ImageBillingView | null; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; finishedAt?: string | null; snapshot?: StudioSnapshot & { moduleContextVersion?: string | null; moduleContextVersionState?: string }; delivery?: { phase: string; receivedBytes?: number; expectedBytes?: number; recoveryAvailable: boolean; checkpointRetained: boolean; requestId?: string; upstreamRequestId?: string; validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string } }; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number } | null };
+type StudioTask = { id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; error?: string; unitCredits: number; billing?: ImageBillingView | null; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; finishedAt?: string | null; snapshot?: StudioSnapshot & { moduleContextVersion?: string | null; moduleContextVersionState?: string }; delivery?: { phase: string; acceptedAt?: number; waitingStatus?: 'pending' | 'retrying' | 'unconfirmed'; receivedBytes?: number; expectedBytes?: number; recoveryAvailable: boolean; checkpointRetained: boolean; requestId?: string; upstreamRequestId?: string; validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string } }; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number } | null };
 function studioTaskHasDeliveredAsset(task: StudioTask): task is StudioTask & { asset: NonNullable<StudioTask['asset']> } {
   return task.status === 'succeeded' && Boolean(task.asset?.original_url);
 }
@@ -1908,7 +1908,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         const query = new URLSearchParams({ moduleId: module.id });
         if (next) query.set('cursor', next);
         if (entry && read === 0 && !cursor) query.set('attention', 'entry');
-        const page = await readResponse(await fetch(`/api/image-studio/tasks?${query}`, { cache: 'no-store', signal }));
+        const deadline = AbortSignal.timeout(20000);
+        const page = await readResponse(await fetch(`/api/image-studio/tasks?${query}`, { cache: 'no-store', signal: signal ? AbortSignal.any([signal, deadline]) : deadline }));
         rows.push(...page.tasks);
         entrySnapshot ||= page.entrySnapshot;
         result = { ...page, entrySnapshot };
@@ -2384,12 +2385,17 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   function chooseResultFilter(liked: boolean) { setSelected([]); setDownloadMode(false); likedResults.choose(liked); setResultView('images'); }
   const sharedResults = resultTasks.map(task => {
     const image = studioTaskHasDeliveredAsset(task) ? studioTaskPreviewState(task) : null;
+    const pending = ['queued', 'running'].includes(task.status);
+    const ordinaryWait = task.status === 'running' && task.delivery?.phase === 'provider' && task.delivery.waitingStatus === 'pending';
+    const waitingStatus = task.delivery?.phase === 'provider' && task.delivery.acceptedAt && !ordinaryWait ? '状态暂未更新' : studioTaskPhase(task);
     return {
       id: task.id, task, label: `生成结果 ${task.ordinal}`, status: studioTaskPhase(task), billing: task.billing,
-      pending: ['queued', 'running'].includes(task.status),
+      pending,
+      generationWait: pending || image ? { acceptedAt: task.delivery?.acceptedAt, normal: ordinaryWait, status: waitingStatus,
+        connectionIssue: Boolean(resultError), detail: task.status === 'queued' ? '排队中，尚未开始生成' : undefined } : undefined,
       waitingThumbnail: task.snapshot?.primaryReferenceImages?.[0]?.thumbnailUrl || task.snapshot?.primaryReferenceImages?.[0]?.originalUrl || undefined,
       applied: sourceApplied && appliedSource?.taskId === task.id,
-      error: task.error,
+      error: ordinaryWait ? undefined : task.error,
       onViewed: () => observeResultVersion(studioResultVersion(task)),
       download: image ? () => { setSelected([task.id]); setDownloadMode(true); } : undefined,
       downloadDisabled: downloadBusy,

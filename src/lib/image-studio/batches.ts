@@ -9,6 +9,7 @@ import { submitStudioBatch, parseStudioRequest, parseSharedStudioIntent, sameSha
   assertSharedStudioWorkerReady, studioSharedGenerationSource, publicImageTaskStatus, cancelQueuedChannelTask, SharedStudioDefinitionError, StudioError } from './tasks';
 import { STUDIO_BATCH_LIMITS, type StudioBatchView } from './batch-contract';
 import { studioAssetUrl } from './media';
+import { studioDeliveryStatus } from './delivery';
 import { studioVisibleAssetWhere } from './protected-assets';
 import { resolveStudioStyleReferences } from './style-groups';
 import { historicalSkills } from './skills';
@@ -329,7 +330,10 @@ export async function studioBatchView(owner: string, id: string, includeItems = 
   const identity = await prisma.user.findUniqueOrThrow({ where: { id: owner }, select: { id: true, role: true, account_type: true, feature_profile_id: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
   const taskIds = batch.items.flatMap(item => item.taskId ? [item.taskId] : []);
   const tasks = await prisma.imageStudioTask.findMany({ where: { id: { in: taskIds }, owner_id: owner }, select: { id: true, status: true, error: true, asset_id: true, deleted_at: true,
-    owner_id: true, billing_status: true, actual_amount_micros: true, actual_credits: true, billing_contract_json: true, unit_credits: true, billing_settled_at: true } });
+    owner_id: true, snapshot_json: includeItems, billing_status: true, actual_amount_micros: true, actual_credits: true, billing_contract_json: true, unit_credits: true, billing_settled_at: true } });
+  // 仅当前活跃项读取回执；批次目录不取快照，已完成历史不读逐图文件。
+  const deliveryByTask = new Map(includeItems ? await Promise.all(tasks.filter(task => ['running', 'channel_running'].includes(task.status))
+    .map(async task => { const delivery = await studioDeliveryStatus(task); return [task.id, { phase: delivery.phase, acceptedAt: delivery.acceptedAt, waitingStatus: delivery.waitingStatus }] as const; })) : []);
   const assets = includeItems ? await prisma.asset.findMany({ where: { id: { in: tasks.flatMap(task => !task.deleted_at && task.asset_id ? [task.asset_id] : []) }, owner_id: owner, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity)] }, select: { id: true, file_size: true } }) : [];
   const statuses = batch.items.map(item => item.cancelled ? 'cancelled' : item.taskId
     ? publicImageTaskStatus(tasks.find(task => task.id === item.taskId)?.status || 'uncertain') : batch.definitionConfirmationRequired ? 'needs-confirmation' : 'pending');
@@ -344,6 +348,7 @@ export async function studioBatchView(owner: string, id: string, includeItems = 
       const task = tasks.find(task => task.id === item.taskId);
       const asset = assets.find(asset => asset.id === task?.asset_id);
       return { ordinal: item.ordinal, sourceName: item.sourceName, taskId: item.taskId, status: statuses[index], error: task?.error,
+        ...(task && deliveryByTask.has(task.id) ? { delivery: deliveryByTask.get(task.id) } : {}),
         billing: task ? imageBillingView(task, owner, false) : null, image: asset ? { id: asset.id, url: studioAssetUrl(asset.id), thumbnail: studioAssetUrl(asset.id, true), fileSize: asset.file_size || 0 } : null };
     }) } : {}) };
 }

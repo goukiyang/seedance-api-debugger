@@ -44,7 +44,7 @@ export type StudioReceipt = { taskId: string; ownerId: string; localRequestId: s
 type AsyncIdentity = Identity & { snapshot_json: string | null };
 export type StudioAsyncReceipt = { schema: 'image.async-receipt.v1'; taskId: string; ownerId: string;
   channelId: string; configRevision: string; providerTaskId: string; pollAfterMs: number; acceptedAt: number;
-  expiresAt?: string; state: 'accepted' | 'success' | 'failed' };
+  expiresAt?: string; state: 'accepted' | 'success' | 'failed'; waitingStatus?: 'pending' | 'retrying' | 'unconfirmed' };
 function asyncIdentity(task: AsyncIdentity) {
   let snapshot;
   try { snapshot = JSON.parse(task.snapshot_json || '{}').imageChannel; } catch {}
@@ -83,12 +83,12 @@ export async function createStudioAsyncReceipt(task: AsyncIdentity, accepted: { 
   const receipt: StudioAsyncReceipt = { schema: 'image.async-receipt.v1', taskId: task.id, ownerId: task.owner_id, ...identity,
     providerTaskId: accepted.taskId, pollAfterMs: Math.min(30000, Math.max(2000, Math.floor(accepted.pollAfterMs || 2000))),
     ...(typeof accepted.expiresAt === 'string' && Number.isFinite(Date.parse(accepted.expiresAt)) ? { expiresAt: accepted.expiresAt } : {}),
-    acceptedAt: Date.now(), state: 'accepted' };
+    acceptedAt: Date.now(), state: 'accepted', waitingStatus: 'pending' };
   await writePrivate(task.id, 'async.json', JSON.stringify(receipt));
   await writePrivate(task.id, 'async.json', JSON.stringify(receipt), true);
   return receipt;
 }
-export async function updateStudioAsyncReceipt(receipt: StudioAsyncReceipt, changes: { state?: StudioAsyncReceipt['state']; pollAfterMs?: number }) {
+export async function updateStudioAsyncReceipt(receipt: StudioAsyncReceipt, changes: { state?: StudioAsyncReceipt['state']; pollAfterMs?: number; waitingStatus?: StudioAsyncReceipt['waitingStatus'] }) {
   Object.assign(receipt, changes, { pollAfterMs: Math.min(30000, Math.max(2000, Math.floor(changes.pollAfterMs || receipt.pollAfterMs))) });
   await writePrivate(receipt.taskId, 'async.json', JSON.stringify(receipt));
   await writePrivate(receipt.taskId, 'async.json', JSON.stringify(receipt), true);
@@ -188,6 +188,8 @@ export async function studioDeliveryStatus(task: Identity & { status: string; us
   return { phase: task.status === 'queued' || task.status === 'channel_queued' ? 'queued' : task.status === 'succeeded' ? 'ready'
     : running ? record?.phase || 'provider' : record ? 'stopped' : task.status === 'uncertain' ? 'unknown' : 'failed',
     accepted: Boolean(asyncReceipt),
+    acceptedAt: asyncReceipt && Number.isFinite(asyncReceipt.acceptedAt) && asyncReceipt.acceptedAt > 0 ? asyncReceipt.acceptedAt : undefined,
+    waitingStatus: asyncReceipt && ['pending', 'retrying', 'unconfirmed'].includes(asyncReceipt.waitingStatus || '') ? asyncReceipt.waitingStatus : undefined,
     receivedBytes: record?.receivedBytes, expectedBytes: record?.expectedBytes,
     recoveryAvailable: running && Boolean(asyncReceipt && asyncReceipt.state !== 'failed' || record && studioDeliveryCanRetry(record)),
     checkpointRetained: Boolean(record), validation: record?.validation || completed.validation,

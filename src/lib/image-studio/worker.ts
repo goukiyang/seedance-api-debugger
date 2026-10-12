@@ -369,8 +369,11 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
         await updateStudioDelivery(delivery, { phase: 'recover', code });
       }
       const delay = Math.max(30_000, Math.min(5 * 60_000, asyncReceipt.pollAfterMs * 4));
-      await updateStudioAsyncReceipt(asyncReceipt, { state: 'accepted' });
-      await retainChannelTask(task, '图片任务已由供应商受理，正在按原任务编号恢复；不会重复提交生成。', delay);
+      const waitingStatus = code === 'async_pending' ? 'pending' : code === 'async_query_unconfirmed' ? 'unconfirmed' : 'retrying';
+      await updateStudioAsyncReceipt(asyncReceipt, { state: 'accepted', waitingStatus });
+      await retainChannelTask(task, waitingStatus === 'pending' ? '图片任务已受理，仍在生成，完成后自动显示。'
+        : waitingStatus === 'unconfirmed' ? '供应商状态暂未确认，正在查询原任务，不会重新生成。'
+        : '状态暂未更新，正在重新连接原任务，不会重复提交生成。', delay);
       return;
     }
     if (delivery && studioDeliveryCanRetry(delivery)

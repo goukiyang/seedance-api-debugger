@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '无限画布工作流新增可移动需求、岗位协作与问答、成果修改回应和本人验收；图片视频可关联原工作，支持复用工作流及明确采纳角色规则。角色文字默认关闭，由管理员确认风险后启用，已有模板和历史保留。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '生图等待卡片压暗参考图并增加刷光，明确标识的时间模拟进度最多到95%，真实图片显示后结束；正常等待与查询异常分别提示。模型、质量和分辨率选择框随设置栏宽度换行。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

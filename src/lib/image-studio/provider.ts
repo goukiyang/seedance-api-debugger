@@ -171,16 +171,22 @@ export async function requestStudioImages(params: {
     const queryDeadline = AbortSignal.timeout(60000);
     const querySignal = AbortSignal.any([params.signal, queryDeadline]);
     let pollDelay = boundedPollDelay(asyncTask.pollAfterMs);
+    let lastObservation: 'pending' | 'interrupted' | 'unconfirmed' = 'interrupted';
+    let readingQuery = false;
     for (;;) {
       try {
         await delay(pollDelay, undefined, { signal: querySignal });
+        readingQuery = true;
         const polled = await transport(pollUrl, { method: 'GET', headers: { Authorization: `Bearer ${params.apiKey}` }, signal: querySignal, redirect: 'error' });
-        if (!polled.ok) { await polled.body?.cancel().catch(() => {}); pollDelay = Math.min(10000, Math.max(5000, pollDelay * 2)); continue; }
+        if (!polled.ok) { lastObservation = 'interrupted'; readingQuery = false; await polled.body?.cancel().catch(() => {}); pollDelay = Math.min(10000, Math.max(5000, pollDelay * 2)); continue; }
         const task = await boundedJson(polled, 1024 * 1024);
         if ((task.task_id || task.id) && (task.task_id || task.id) !== asyncTask.taskId) throw new StudioProviderError('response', 'async_task_identity_conflict');
         if (task.status === 'failed') throw new StudioProviderError('response', 'async_failed', polled.status);
         if (['uncertain', 'client_disconnected', 'paused', 'canceled'].includes(task.status)) throw new StudioProviderError('response', 'async_unconfirmed', polled.status);
-        if (task.status !== 'success') { pollDelay = boundedPollDelay(task.poll_after_ms); continue; }
+        if (task.status !== 'success') {
+          lastObservation = ['pending', 'queued', 'running', 'processing'].includes(task.status) ? 'pending' : 'unconfirmed';
+          readingQuery = false; pollDelay = boundedPollDelay(task.poll_after_ms); continue;
+        }
         const assets = Array.isArray(task.assets) ? task.assets : [];
         if (assets.length) {
           value = { data: assets.map((asset: any) => {
@@ -192,13 +198,14 @@ export async function requestStudioImages(params: {
           // Only after success: the raw result is not a polling endpoint.
           const resultUrl = new URL(pollUrl); resultUrl.search = '';
           const result = await transport(resultUrl, { method: 'GET', headers: { Authorization: `Bearer ${params.apiKey}` }, signal: querySignal, redirect: 'error' });
-          if (!result.ok) { await result.body?.cancel().catch(() => {}); throw new StudioProviderError('response', 'async_pending', result.status, undefined, true); }
+          if (!result.ok) { await result.body?.cancel().catch(() => {}); throw new StudioProviderError('response', 'async_query_interrupted', result.status, undefined, true); }
           value = await boundedJson(result, params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024);
         }
         break;
       } catch (error) {
         if (error instanceof StudioProviderError && ['async_failed', 'async_unconfirmed', 'async_task_identity_conflict'].includes(error.code)) throw error;
-        if (querySignal.aborted) throw new StudioProviderError('response', 'async_pending', undefined, undefined, true);
+        if (querySignal.aborted) throw new StudioProviderError('response', readingQuery || params.signal.aborted || lastObservation === 'interrupted' ? 'async_query_interrupted' : lastObservation === 'pending' ? 'async_pending' : 'async_query_unconfirmed', undefined, undefined, true);
+        lastObservation = 'interrupted'; readingQuery = false;
         pollDelay = Math.min(10000, Math.max(5000, pollDelay * 2));
       }
     }

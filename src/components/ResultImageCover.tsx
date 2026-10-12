@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Check, RefreshCw } from 'lucide-react';
 import styles from './ResultImageCover.module.css';
 
-export function ResultImageCover({ src, alt, selected, applied, onSelect, onPreview, onViewed, onQuickUse, active = true }: {
+export function ResultImageCover({ src, alt, selected, applied, onSelect, onPreview, onViewed, onQuickUse, active = true, loadingOverlay }: {
   src?: string; alt: string; selected: boolean; applied: boolean; onSelect: () => void; onPreview: () => void; onViewed?: () => void;
   onQuickUse?: () => void; active?: boolean;
+  loadingOverlay?: ReactNode;
 }) {
   const [loaded, setLoaded] = useState('');
   const [failed, setFailed] = useState('');
@@ -36,7 +37,7 @@ export function ResultImageCover({ src, alt, selected, applied, onSelect, onPrev
     }}>
     {/* eslint-disable-next-line @next/next/no-img-element */}
     <img key={identity} decoding="async" src={src} alt={alt} loading="lazy" onError={() => setFailed(identity)} onLoad={event => { setLoaded(identity); if (selected && event.currentTarget.naturalWidth > 0) onViewed?.(); }} />
-    {loaded !== identity && <span className={styles.readState} role="status">正在读取图片</span>}
+    {loaded !== identity && (loadingOverlay || <span className={styles.readState} role="status">正在读取图片</span>)}
     {applied && <span className={styles.applied}><Check size={13} />已套用</span>}
   </button>;
 }

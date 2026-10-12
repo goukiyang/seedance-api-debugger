@@ -287,12 +287,18 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
   const resultItems = useMemo(() => (batch?.items || []).map(item => ({
     ...item, id: String(item.ordinal), label: `${item.ordinal}. ${item.sourceName}`, generationStatus: item.status,
     status: statusLabel(item.status), pending: ['pending', 'queued', 'running'].includes(item.status),
+    generationWait: ['pending', 'queued', 'running'].includes(item.status) || item.image ? {
+      acceptedAt: item.delivery?.acceptedAt, normal: item.status === 'running' && item.delivery?.phase === 'provider' && item.delivery.waitingStatus === 'pending',
+      status: item.delivery?.phase === 'provider' && item.delivery.acceptedAt && item.delivery.waitingStatus !== 'pending' ? '状态暂未更新' : statusLabel(item.status),
+      connectionIssue: Boolean(error), detail: ['pending', 'queued'].includes(item.status) ? '排队中，尚未开始生成' : undefined,
+    } : undefined,
+    error: item.delivery?.phase === 'provider' && item.delivery.waitingStatus === 'pending' ? undefined : item.error,
     media: item.image ? { src: item.image.url, thumbnailSrc: item.image.thumbnail, alt: `第 ${item.ordinal} 张结果`, fileName: 'batch-image.png',
       contentKey: `asset:${item.image.id}` as const,
       comparisonCandidates: (batch?.items || []).flatMap(other => other.image ? [{ src: other.image.url, thumbnailSrc: other.image.thumbnail, alt: `生成结果 ${other.ordinal}`, contentKey: `asset:${other.image.id}` as const }] : []),
     } : undefined,
     download: item.image && item.taskId ? () => handImageDownloadToBrowser(`/api/image-studio/download?id=${encodeURIComponent(item.taskId!)}`, 'batch-image.png', () => scope.current === `${userId}:${id}`) : undefined,
-  } satisfies GeneratedImageResult & { generationStatus: string })), [batch?.items, id, userId]);
+  } satisfies GeneratedImageResult & { generationStatus: string })), [batch?.items, error, id, userId]);
   return <div className={styles.results} aria-label="批次结果">
     <div className={styles.actions}><strong>{batch?.moduleName || '本批结果'}</strong><button type="button" title="刷新批次" aria-label="刷新批次" disabled={reading} onClick={() => void load()}><RefreshCw size={16} /></button>{deliveryOnly && <a href={`/assets?imageBatchId=${encodeURIComponent(id)}`}>本批资产</a>}</div>
     {error && <p role="alert" className={styles.error}>{error}</p>}

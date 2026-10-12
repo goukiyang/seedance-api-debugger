@@ -8,6 +8,19 @@
 .pending[aria-pressed=true] { box-shadow: inset 0 0 0 2px #79daca; }
 .pending:focus-visible { outline: 2px solid #79daca; outline-offset: -3px; }
 .waitingImage { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: blur(2.4px); }
+.generationPending .waitingImage { filter: blur(2.4px) brightness(.55); }
+.waitExperience { position: absolute; inset: 0; overflow: hidden; pointer-events: none; color: #eef3f1; background: rgb(17 22 20 / 22%); }
+.waitSweep { position: absolute; top: -30%; bottom: -30%; left: -45%; width: 28%; background: linear-gradient(90deg, transparent, rgb(204 235 226 / 13%) 25%, rgb(224 245 239 / 36%) 50%, rgb(204 235 226 / 13%) 75%, transparent); transform: translateX(0) skewX(-15deg); opacity: 0; }
+.waitExperience[data-sweeping=true] .waitSweep { animation: imageWaitSweep 2.4s linear infinite; }
+.waitCopy { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px 10px; text-align: center; text-shadow: 0 1px 5px #101715; }
+.waitCopy strong { color: #eef3f1; font-size: 18px; font-weight: 750; }
+.waitPercent { font-size: 13px; color: #d7e8e3; font-variant-numeric: tabular-nums; }
+.waitTrack { width: 65%; height: 4px; overflow: hidden; border-radius: 4px; background: rgb(212 235 226 / 25%); }
+.waitTrack > span { display: block; width: 100%; height: 100%; background: #79daca; transform-origin: left; transition: transform 1s linear; }
+.waitCopy small { max-width: 100%; font-size: 11px; line-height: 1.5; color: #cfdbd8; overflow-wrap: anywhere; }
+.waitDetail { max-width: 100%; font-size: 12px; line-height: 1.5; color: #c4d4cf; overflow-wrap: anywhere; }
+@keyframes imageWaitSweep { 0% { transform: translateX(0) skewX(-15deg); opacity: 0; } 8% { opacity: 1; } 66.67% { transform: translateX(540%) skewX(-15deg); opacity: 1; } 67%, 100% { transform: translateX(540%) skewX(-15deg); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .waitExperience[data-sweeping=true] .waitSweep { animation: none; } .waitTrack > span { transition: none; } }
 .phase { position: absolute; bottom: 8px; right: 8px; left: 8px; padding: 5px 8px; border-radius: 4px; background: #151a1de6; font-size: 13px; text-align: center; }
 .heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; padding: 8px 0; font-size: 13px; overflow-wrap: anywhere; }
 .heading span, .empty { color: #aab8b4; }

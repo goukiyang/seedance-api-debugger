@@ -12,6 +12,7 @@ import { useResultPages } from './useResultPages';
 import styles from './GeneratedImageResults.module.css';
 import { ImageBillingBadge } from './ImageBillingBadge';
 import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
+import { ImageGenerationWaiting, type ImageGenerationWait } from './ImageGenerationWaiting';
 
 export type GeneratedImageResult = {
   id: string;
@@ -19,6 +20,7 @@ export type GeneratedImageResult = {
   status: string;
   pending?: boolean;
   waitingThumbnail?: string;
+  generationWait?: ImageGenerationWait;
   media?: Omit<ZoomableImagePreviewProps, 'onClose' | 'hasNavigation' | 'onPrevious' | 'onNext'>;
   transparent?: boolean;
   applied?: boolean;
@@ -149,13 +151,13 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
           <article key={item.id} className={styles.card} data-result-id={item.id} data-result-controls-parent>
             <div className={styles.media} data-transparent={item.transparent || undefined} data-reaction-surface>
               {item.media ? <>
-                <ResultImageCover key={`${scope}:${item.id}`} src={item.media.thumbnailSrc || item.media.src} alt={item.label} selected={currentSelection === item.id} applied={Boolean(item.applied)} onSelect={() => select(item)} onPreview={() => changePreview(item, true)} onViewed={item.onViewed} active={visible} onQuickUse={onQuickUse ? () => onQuickUse(item) : undefined} />
+                <ResultImageCover key={`${scope}:${item.id}`} src={item.media.thumbnailSrc || item.media.src} alt={item.label} selected={currentSelection === item.id} applied={Boolean(item.applied)} onSelect={() => select(item)} onPreview={() => changePreview(item, true)} onViewed={item.onViewed} active={visible} onQuickUse={onQuickUse ? () => onQuickUse(item) : undefined} loadingOverlay={item.generationWait ? <ImageGenerationWaiting wait={item.generationWait} visible={visible} loadingImage /> : undefined} />
                 {item.media.contentKey && <ContentReactions contentKey={item.media.contentKey} imageSharing={item.media.imageSharing} overlay parentControlled />}
-              </> : <div className={`${styles.pending} sd2-loading-surface`} data-busy={item.pending || undefined}
+              </> : <div className={`${styles.pending}${item.generationWait ? ` ${styles.generationPending}` : ' sd2-loading-surface'}`} data-busy={item.pending || undefined}
                 data-result-choice={onSelect ? '' : undefined} role={onSelect ? 'button' : undefined} tabIndex={onSelect ? 0 : undefined} aria-label={onSelect ? `选择${item.label}` : undefined} aria-pressed={onSelect ? currentSelection === item.id : undefined}
                 onClick={onSelect ? () => select(item) : undefined}
                 onKeyDown={onSelect ? event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(item); } } : undefined}>
-                <WaitingImage src={item.waitingThumbnail} /><span role="status" className={styles.phase}>{item.status}</span>
+                <WaitingImage src={item.waitingThumbnail} />{item.generationWait ? <ImageGenerationWaiting wait={item.generationWait} visible={visible} /> : <span role="status" className={styles.phase}>{item.status}</span>}
               </div>}
               {renderOverlay?.(item, { openPreview: () => changePreview(item) })}
               <ImageBillingBadge billing={item.billing} />
