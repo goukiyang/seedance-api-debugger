@@ -22,6 +22,8 @@ export async function GET(request: NextRequest) {
   try { return NextResponse.json(await listStudioModules(user.id, request.nextUrl.searchParams.get('cursor') || undefined, user.role === 'admin', ids, user), { headers: privateHeaders }); }
   catch (error) {
     if (businessError(error)) return NextResponse.json({ error: (error as StudioModuleError).message }, { status: (error as StudioModuleError).status, headers: privateHeaders });
+    console.error('[image-studio/modules] read failed', { name: error instanceof Error ? error.name : 'UnknownError',
+      code: error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' && /^P\d{4}$/.test(error.code) ? error.code : undefined });
     return NextResponse.json({ error: '模块读取失败，请重试' }, { status: 503, headers: privateHeaders });
   }
 }

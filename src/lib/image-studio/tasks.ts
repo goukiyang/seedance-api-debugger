@@ -122,6 +122,7 @@ export function studioSharedGenerationSource(shared: NonNullable<Awaited<ReturnT
 export const STUDIO_SHARED_WORKER_KEY = 'studio_shared_worker_v1';
 export const STUDIO_SHARED_WORKER_FILES = [
   'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-types.ts',
+  'src/lib/image-studio/read-snapshot.ts',
   'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/batches.ts', 'src/lib/image-studio/worker.ts',
 ] as const;
 let sharedWorkerModuleHashes: Record<string, string> | undefined;

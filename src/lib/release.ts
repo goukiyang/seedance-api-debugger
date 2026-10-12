@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '共享模板会跟随创建者保存的内容更新，同时保留你的主图和个人输入。模板更新后，未受理的批量任务可重新确认并继续；本人分组支持删除，历史结果继续保留。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '修复图片模板模块读取失败和封面目录一直等待的问题；同步暂时失败时减少重复读取，保留你的模板、主图、个人输入与历史结果。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

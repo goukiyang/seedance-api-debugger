@@ -62,6 +62,7 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let running = false, queued = false, force = true, more = false;
+    let consecutiveFailures = 0;
     let appliedToken = '';
     const valid = () => scope.current === current && !controller.signal.aborted;
     const online = () => !document.hidden && navigator.onLine;
@@ -123,9 +124,13 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
             latest.current.onDefinition(workspace);
           }
         }
-        if (currentRead()) setFeedback({ owner: userId, error: '', loading: false });
+        if (currentRead()) {
+          consecutiveFailures = 0;
+          setFeedback({ owner: userId, error: '', loading: false });
+        }
       } catch (cause) {
         if (!currentRead()) return;
+        consecutiveFailures++;
         if (cause instanceof SharedReadError && [401, 403].includes(cause.status)) {
           commit({ owner: userId, items: [], revision: '', cursor: null, pages: 0, ready: true });
           latest.current.onUnavailable(null, '模板已不可用');
@@ -135,7 +140,8 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
         setFeedback({ owner: userId, error: '模板同步暂不可用', loading: false });
       } finally {
         running = false;
-        if (valid() && online()) timer = setTimeout(() => { void run(); }, queued ? 0 : 2000);
+        const delay = consecutiveFailures ? Math.min(30000, 2000 * 2 ** Math.min(consecutiveFailures, 4)) : queued ? 0 : 2000;
+        if (valid() && online()) timer = setTimeout(() => { void run(); }, delay);
       }
     };
     wake.current = (fresh = false, next = false) => {

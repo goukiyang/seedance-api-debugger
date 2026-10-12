@@ -823,7 +823,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   const coverPagination = <nav className={styles.pagination} style={{ flexWrap: 'wrap' }} aria-label="封面分页">
     <button type="button" aria-label="回到第一页封面" title="回到第一页封面" disabled={loading || hydrating || !directoryReady || !coverPages.start && !coverPages.restoring} onClick={coverPages.reset}><ChevronFirst size={17} /></button>
     <button type="button" aria-label="上一页封面" title="上一页封面" disabled={loading || hydrating || !directoryReady || !coverPages.start} onClick={coverPages.previous}><ChevronLeft size={17} /></button>
-    <span role="status">{directoryReady ? `第 ${coverPages.page} / ${coverPages.pages} 页，共 ${navigation.length} 个封面` : '正在读取封面目录'}</span>
+    <span role="status">{directoryReady ? `第 ${coverPages.page} / ${coverPages.pages} 页，共 ${navigation.length} 个封面` : loading ? '正在读取封面目录' : error ? '封面目录读取失败' : '封面目录尚未读取'}</span>
     <button type="button" aria-label="下一页封面" title="下一页封面" disabled={loading || hydrating || !directoryReady || !coverPages.canNext} onClick={coverPages.next}><ChevronRight size={17} /></button>
     <button type="button" aria-label="最后一页封面" title="最后一页" disabled={loading || hydrating || !directoryReady || !coverPages.canLast || coverPages.restoring} onClick={coverPages.last}><ChevronLast size={17} /></button>
   </nav>;

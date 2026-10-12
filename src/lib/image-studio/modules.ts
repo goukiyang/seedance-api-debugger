@@ -14,7 +14,7 @@ import { getSkill, getSkillSelection, setSkillSelection, skillDTO } from './skil
 import { studioVisibleAssetWhere } from './protected-assets';
 import { getStudioModuleReferencePolicy, parseStudioReferencePolicy, removeStudioModuleReferencePolicy, setStudioModuleReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
 import { studioTemplateDefaultPolicy } from './template-defaults';
-import { assertStudioActor, deleteStudioGroup, getSharedStudioPersonalOverrides, getStudioRemovedDefaultGroups, publishSharedStudioModule, resolveSharedStudioModule, restoreStudioDefaultGroup, saveSharedStudioPersonal, studioPublisherKey, studioSharedBinding, StudioSharingError } from './shared-contract';
+import { assertStudioActor, deleteStudioGroup, getSharedStudioPersonalOverrides, getStudioRemovedDefaultGroups, publishSharedStudioModule, readSharedStudioModules, restoreStudioDefaultGroup, saveSharedStudioPersonal, studioPublisherKey, studioSharedBinding, StudioSharingError, type SharedStudioModuleRead } from './shared-contract';
 import type { SharedStudioLiveDTO } from './shared-types';
 
 export { deleteStudioGroup };
@@ -56,9 +56,9 @@ type StudioModuleRow = {
   count: number; reference_limit?: number; aspect_ratio?: string; resolution?: string | null; reference_ids: string[] | string; revision: number; created_at: Date; updated_at: Date;
 };
 
-async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageStudioSettings, saved = true, isAdmin = false, sourcePreset?: StudioPresetAccessRow & { id: string }, identity?: ImageStudioIdentity) {
-  const binding = saved ? await studioSharedBinding(ownerId, row.id) : null;
-  if (binding) return sharedModuleDTO(row, ownerId, settings, identity);
+async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageStudioSettings, saved = true, isAdmin = false, sourcePreset?: StudioPresetAccessRow & { id: string }, identity?: ImageStudioIdentity, sharedReads?: Map<string, SharedStudioModuleRead>) {
+  const sharedRead = saved ? sharedReads?.get(row.id) ?? (await readSharedStudioModules(ownerId, [row.id])).get(row.id) : undefined;
+  if (sharedRead?.binding) return sharedModuleDTO(row, ownerId, settings, sharedRead, identity);
   const ids = Array.isArray(row.reference_ids) ? row.reference_ids : JSON.parse(row.reference_ids) as string[];
   const protectedSource = !isAdmin && Boolean(row.source_preset_id) && sourcePreset?.owner_id !== ownerId;
   const fixedReferences = await getStudioModuleFixedReferences(ownerId, row.id);
@@ -145,18 +145,12 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
         width: asset?.width || null, height: asset?.height || null, note: protectedSource ? '' : reference.note, available };
     }) };
 }
-async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: ImageStudioSettings, identity?: ImageStudioIdentity) {
-  const actor = await assertStudioActor(ownerId);
-  const binding = await studioSharedBinding(ownerId, row.id);
+async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: ImageStudioSettings, sharedRead: SharedStudioModuleRead, identity?: ImageStudioIdentity) {
+  const actor = identity || await assertStudioActor(ownerId);
+  const { binding, resolved } = sharedRead;
   if (!binding) throw new StudioModuleError('共享绑定已变化，请重新读取', 409);
-  let resolved: Awaited<ReturnType<typeof resolveSharedStudioModule>> = null;
-  let unavailableReason: string | undefined;
-  let unavailableIntent: SharedStudioLiveDTO['intent'] | undefined;
-  try { resolved = await resolveSharedStudioModule(identity || actor, row.id); }
-  catch (error) {
-    if (error instanceof StudioSharingError && [403, 404, 409].includes(error.status)) { unavailableReason = error.message; unavailableIntent = error.intent; }
-    else throw error;
-  }
+  const unavailableReason = sharedRead.unavailable?.message;
+  const unavailableIntent = sharedRead.unavailable?.intent;
   const ids = Array.isArray(row.reference_ids) ? row.reference_ids : JSON.parse(row.reference_ids) as string[];
   const assets = await prisma.asset.findMany({ where: { id: { in: ids }, owner_id: ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(actor)] }, select: { id: true, width: true, height: true } });
   const images = ids.flatMap(id => {
@@ -217,27 +211,31 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
   const sourceIds = [...rows, ...(defaultRow ? [defaultRow] : [])].map(row => row.source_preset_id).filter((id): id is string => Boolean(id));
   const sourceRows = sourceIds.length ? await prisma.imageStudioPreset.findMany({ where: { id: { in: sourceIds } }, select: { id: true, owner_id: true, scope: true, is_shared: true } }) : [];
   const sourceById = new Map(sourceRows.map(row => [row.id, row]));
-  // Keep an old personal copy visible after sharing is turned off so its
-  // already-submitted results remain discoverable. The task transaction is
-  // the authoritative check for whether a new generation may start.
-  const visible = rows.slice(0, 12);
-  const modules = await Promise.all(visible.map(row => moduleDTO(row, ownerId, settings, true, isAdmin, row.source_preset_id ? sourceById.get(row.source_preset_id) : undefined, identity)));
-  if (includeDefault) {
-    const defaults = settings.templateDefaults;
-    modules.unshift(await moduleDTO(defaultRow || { id: defaultId, name: '模块 1', prompt: '', context: '',
-      model: defaults.model, quality: defaults.quality, resolution: defaults.resolution, count: defaults.count,
-      aspect_ratio: defaults.aspectRatio, reference_limit: defaults.primaryMax, reference_ids: [], revision: 0, created_at: new Date(0), updated_at: new Date(0) }, ownerId, settings, Boolean(defaultRow), isAdmin, defaultRow?.source_preset_id ? sourceById.get(defaultRow.source_preset_id) : undefined, identity));
-  }
-  // Navigation must describe all saved modules, not just the first content page.
   const directory = !cursor && !requestedIds ? await prisma.imageStudioModule.findMany({
     where: { owner_id: ownerId }, orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
     select: { id: true, name: true, group_name: true, source_preset_id: true, revision: true },
   }) : undefined;
+  // Keep an old personal copy visible after sharing is turned off so its
+  // already-submitted results remain discoverable. The task transaction is
+  // the authoritative check for whether a new generation may start.
+  const visible = rows.slice(0, 12);
+  // Resolve shared definitions once in one snapshot, reused by cards and navigation.
+  const sharedReads = await readSharedStudioModules(ownerId, [...visible, ...(defaultRow ? [defaultRow] : []), ...(directory || [])].map(row => row.id));
+  const modules = await Promise.all(visible.map(row => moduleDTO(row, ownerId, settings, true, isAdmin, row.source_preset_id ? sourceById.get(row.source_preset_id) : undefined, identity, sharedReads)));
+  if (includeDefault) {
+    const defaults = settings.templateDefaults;
+    modules.unshift(await moduleDTO(defaultRow || { id: defaultId, name: '模块 1', prompt: '', context: '',
+      model: defaults.model, quality: defaults.quality, resolution: defaults.resolution, count: defaults.count,
+      aspect_ratio: defaults.aspectRatio, reference_limit: defaults.primaryMax, reference_ids: [], revision: 0, created_at: new Date(0), updated_at: new Date(0) }, ownerId, settings, Boolean(defaultRow), isAdmin, defaultRow?.source_preset_id ? sourceById.get(defaultRow.source_preset_id) : undefined, identity, sharedReads));
+  }
+  // Navigation must describe all saved modules, not just the first content page.
   const projectedDirectory = directory ? await Promise.all(directory.map(async item => {
-    const binding = await studioSharedBinding(ownerId, item.id);
+    const sharedRead = sharedReads.get(item.id)!;
+    const binding = sharedRead.binding;
     if (!binding) return { id: item.id, name: item.name, groupName: item.group_name || '未分组', sourcePresetId: item.source_preset_id, revision: item.revision, canManageGroup: true };
     try {
-      const resolved = (await resolveSharedStudioModule(actor, item.id))!;
+      if (sharedRead.unavailable) throw sharedRead.unavailable;
+      const resolved = sharedRead.resolved!;
       const { definition, personalOverrides } = resolved;
       const sharedLive: SharedStudioLiveDTO = { ...definition.intent, intent: definition.intent, mode: binding.mode, available: true,
         overriddenFields: Object.keys(personalOverrides) as SharedStudioLiveDTO['overriddenFields'], defaults: resolved.publicDTO.defaults };

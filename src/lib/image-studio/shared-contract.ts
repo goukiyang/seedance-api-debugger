@@ -13,6 +13,7 @@ import { normalizeStudioRatio } from './ratios';
 import { getImageStudioSettings } from './settings';
 import { MAX_REFERENCE_IMAGES } from './limits';
 import { studioTemplateAssetUrl } from './media';
+import { readSharedStudioSnapshot } from './read-snapshot';
 import type { SharedStudioCatalog, SharedStudioCatalogItem, SharedStudioDefaults, SharedStudioDefinitionPersonalInput, SharedStudioIntent, SharedStudioPersonalOverrides, SharedStudioPublicDefinition } from './shared-types';
 
 export type { SharedStudioIntent, SharedStudioPersonalOverrides } from './shared-types';
@@ -157,7 +158,7 @@ async function reproductionForPreset(client: SharedStudioClient, ownerId: string
 
 export async function resolveSharedStudioDefinition(user: ImageStudioIdentity, presetId: string, client: SharedStudioClient = prisma) {
   try {
-    return await (client === prisma ? prisma.$transaction(tx => resolveSharedStudioDefinitionInternal(user, presetId, tx), { timeout: 15000 })
+    return await (client === prisma ? readSharedStudioSnapshot(tx => resolveSharedStudioDefinitionInternal(user, presetId, tx))
       : resolveSharedStudioDefinitionInternal(user, presetId, client));
   }
   catch (error) { throw normalizeSharedError(error); }
@@ -277,6 +278,31 @@ export async function resolveSharedStudioModule(user: ImageStudioIdentity, modul
   if (binding.mode === 'publisher' && definition.sourceOwnerId !== user.id) throw new StudioSharingError('无权管理他人的原模板', 403);
   const personalOverrides = await getSharedStudioPersonalOverrides(user.id, moduleId, client);
   return { binding, definition, personalOverrides, publicDTO };
+}
+
+export type SharedStudioModuleRead = {
+  binding: SharedStudioBinding | null;
+  resolved: Awaited<ReturnType<typeof resolveSharedStudioModule>>;
+  unavailable?: StudioSharingError;
+};
+
+export async function readSharedStudioModules(ownerId: string, moduleIds: string[]): Promise<Map<string, SharedStudioModuleRead>> {
+  if (!moduleIds.length) return new Map();
+  return readSharedStudioSnapshot(async tx => {
+    const actor = await assertStudioActor(ownerId, tx);
+    const entries = await Promise.all(Array.from(new Set(moduleIds), async moduleId => {
+      const binding = await studioSharedBinding(ownerId, moduleId, tx);
+      if (!binding) return [moduleId, { binding: null, resolved: null }] as const;
+      try { return [moduleId, { binding, resolved: await resolveSharedStudioModule(actor, moduleId, tx) }] as const; }
+      catch (error) {
+        if (error instanceof StudioSharingError && [403, 404, 409].includes(error.status)) {
+          return [moduleId, { binding, resolved: null, unavailable: error }] as const;
+        }
+        throw error;
+      }
+    }));
+    return new Map<string, SharedStudioModuleRead>(entries);
+  });
 }
 
 type Receipt = { fingerprint: string; result: Record<string, unknown> };
@@ -761,7 +787,7 @@ async function sharedCatalogState(user: ImageStudioIdentity, client: SharedStudi
   return { actor, visible, byId, catalogRevision };
 }
 export async function listSharedStudioCatalog(user: ImageStudioIdentity, options: { cursor?: string; catalogRevision?: string } = {}, client: SharedStudioClient = prisma): Promise<SharedStudioCatalog> {
-  if (client === prisma) return prisma.$transaction(tx => listSharedStudioCatalog(user, options, tx), { timeout: 15000 });
+  if (client === prisma) return readSharedStudioSnapshot(tx => listSharedStudioCatalog(user, options, tx));
   const { actor, visible, byId, catalogRevision } = await sharedCatalogState(user, client);
   if (options.catalogRevision && options.catalogRevision !== catalogRevision) throw new StudioSharingError('共享目录已变化，请重新读取', 409);
   if (options.cursor && (!options.catalogRevision || !visible.some(row => row.id === options.cursor))) throw new StudioSharingError('共享目录已变化，请重新读取', 409);
@@ -778,7 +804,7 @@ export async function listSharedStudioCatalog(user: ImageStudioIdentity, options
   return { items, nextCursor: remaining.length > 100 ? page[page.length - 1].id : null, catalogRevision };
 }
 export async function sharedStudioRevision(user: ImageStudioIdentity, activePresetId?: string) {
-  return prisma.$transaction(async tx => {
+  return readSharedStudioSnapshot(async tx => {
     const catalog = await sharedCatalogState(user, tx);
     let activeDefinitionToken: string | null = null;
     let activeAvailable = false;
@@ -790,5 +816,5 @@ export async function sharedStudioRevision(user: ImageStudioIdentity, activePres
       }
     }
     return { catalogRevision: catalog.catalogRevision, activeDefinitionToken, activeAvailable };
-  }, { timeout: 15000 });
+  });
 }
