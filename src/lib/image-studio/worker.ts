@@ -17,6 +17,7 @@ import { imageBillingScope } from './billing-scope';
 import { parseImageBillingContract } from './billing-contract';
 import { imageBillingReady } from './billing-readiness';
 import { reserveImageStudioQueueCapacity } from './queue-capacity';
+import { finishRejectedStudioDimensions } from './dimension-rejection';
 
 export async function assertStudioPostAuthorization(task: ImageStudioTask) {
   const current = await prisma.imageStudioTask.findUnique({ where: { id: task.id } });
@@ -165,6 +166,7 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
   let providerStarted = Boolean(recovery || resumeReceipt);
   let delivery = recovery;
   let asyncReceipt = resumeReceipt;
+  let original: Buffer | undefined;
   let preparedRequest = false;
   let stage = 'prepare';
   const started = Date.now();
@@ -180,8 +182,6 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
     const owner = await prisma.user.findUnique({ where: { id: task.owner_id }, select: { status: true } });
     if (owner?.status !== 'active') throw new Error('当前账号无法生成');
     let usage: unknown;
-    let original: Buffer | undefined;
-
     // A valid same-result local checkpoint is always consumed before querying
     // the provider again. Expired checkpoints may be replaced only by GET of
     // the stored async task id, never by a new generation POST.
@@ -340,6 +340,14 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
       httpStatus: detail?.status || downloadError?.status, download: detail?.diagnostics || downloadError?.diagnostics,
       elapsedMs: Date.now() - started }));
     if (code === 'delivery_lease_lost') return;
+    if (mediaError?.code === 'generated_dimensions_mismatch' && original) {
+      const finished = await finishRejectedStudioDimensions(task, original);
+      if (finished) {
+        if (delivery) await updateStudioDelivery(delivery, { phase: 'stopped', code });
+        await completeToolFlowTask(task.id);
+      }
+      return;
+    }
     if (code === 'async_failed' && asyncReceipt) {
       await updateStudioAsyncReceipt(asyncReceipt, { state: 'failed' });
       const finished = await finishStudioTask(task, 'failed', { error: '原异步图片任务已明确失败，未重新生成；预留已按原合同处理。' });

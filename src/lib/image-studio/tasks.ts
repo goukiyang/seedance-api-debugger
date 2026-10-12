@@ -841,8 +841,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   return batchId;
 }
 
-export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded' | 'failed' | 'uncertain', data: { assetId?: string; preparedAsset?: Prisma.AssetUncheckedCreateInput; error?: string; usage?: unknown } = {}) {
-  return prisma.$transaction(async tx => {
+export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded' | 'failed' | 'uncertain', data: { assetId?: string; preparedAsset?: Prisma.AssetUncheckedCreateInput; error?: string; usage?: unknown } = {}, transaction?: Prisma.TransactionClient) {
+  const finish = async (tx: Prisma.TransactionClient) => {
     const activeStatus = task.status === 'channel_running' ? 'channel_running' : 'running';
     const changed = await tx.imageStudioTask.updateMany({
       where: { id: task.id, status: activeStatus, lease_token: task.lease_token, lease_until: { gt: new Date() } },
@@ -900,7 +900,8 @@ export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded
     await tx.imageStudioTask.update({ where: { id: task.id }, data: { actual_credits: settlement.actualCost,
       billing_settled_at: new Date() } });
     return true;
-  }, { timeout: 15000 });
+  };
+  return transaction ? finish(transaction) : prisma.$transaction(finish, { timeout: 15000 });
 }
 
 export async function claimStudioTask() {

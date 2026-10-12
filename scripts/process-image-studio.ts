@@ -22,6 +22,7 @@ async function main() {
   const loadedModuleSha = Object.fromEntries(Array.from(new Set([
     'scripts/process-image-studio.ts',
     'src/lib/image-studio/worker.ts', 'src/lib/image-studio/provider.ts',
+    'src/lib/image-studio/dimension-rejection.ts',
     'src/lib/integrations/image-generation.ts', 'src/lib/integrations/image-generation-defaults.ts',
     'src/lib/integrations/image-generation-channel.ts',
     'src/lib/image-studio/batches.ts',
