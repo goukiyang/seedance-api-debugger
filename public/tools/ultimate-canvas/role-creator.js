@@ -484,8 +484,8 @@
                 '<main class="role-creator-body" ' + (value.loadingSource ? 'aria-busy="true"' : '') + '>' +
                 (snap.contextGaps?.length ? '<section class="role-error-state"><strong>岗位要求待补齐</strong>' + snap.contextGaps.map(gap => '<label class="role-check-row"><input type="checkbox" data-role-gap="' + html(gap) + '"' + (disabled ? ' disabled' : '') + '>已在职责 / 交付中补齐：' + html(gap) + '</label>').join('') + '</section>' : '') +
                 '<div class="role-form-row role-name-row"><label for="role-name-' + html(value.domId) + '">名称</label><input id="role-name-' + html(value.domId) + '" data-role-name maxlength="80" value="' + html(snap.name) + '" placeholder="角色名称" ' + (disabled ? 'disabled' : '') + '></div>' +
-                '<button type="button" class="role-summary-row" data-role-edit-field="responsibilities" ' + (disabled ? 'disabled' : '') + '><span>职责</span><span class="role-summary-value">' + html(summary(snap.responsibilities, '填写职责')) + (value.childDrafts.responsibilities ? '<small class="role-field-pending">有未确定输入</small>' : '') + '</span>' + icon('ChevronRight') + '</button>' +
-                '<button type="button" class="role-summary-row" data-role-edit-field="delivery" ' + (disabled ? 'disabled' : '') + '><span>交付</span><span class="role-summary-value">' + html(summary(snap.delivery, '填写交付')) + (value.childDrafts.delivery ? '<small class="role-field-pending">有未确定输入</small>' : '') + '</span>' + icon('ChevronRight') + '</button>' +
+                '<button type="button" class="role-summary-row" data-role-edit-field="responsibilities" ' + (disabled ? 'disabled' : '') + '><span>职责</span><span class="role-summary-value">' + html(summary(snap.responsibilities, '填写职责')) + (snap.boundary || snap.reviewAuthority ? '<small class="role-summary-meta">' + html([snap.boundary ? '已设边界' : '', reviewAuthorityLabel(snap.reviewAuthority)].filter(Boolean).join(' · ')) + '</small>' : '') + (value.childDrafts.responsibilities ? '<small class="role-field-pending">有未确定输入</small>' : '') + '</span>' + icon('ChevronRight') + '</button>' +
+                '<button type="button" class="role-summary-row" data-role-edit-field="delivery" ' + (disabled ? 'disabled' : '') + '><span>交付</span><span class="role-summary-value">' + html(summary(snap.delivery, '填写交付')) + (snap.requiredItems.length || snap.criteria ? '<small class="role-summary-meta">' + html([snap.requiredItems.length ? '必交项 ' + snap.requiredItems.length : '', snap.criteria ? '已设验收要求' : ''].filter(Boolean).join(' · ')) + '</small>' : '') + (value.childDrafts.delivery ? '<small class="role-field-pending">有未确定输入</small>' : '') + '</span>' + icon('ChevronRight') + '</button>' +
                 '<fieldset class="role-executor-field" ' + (disabled ? 'disabled' : '') + '><legend>执行者</legend><div class="role-segmented" role="group" aria-label="执行者类型">' +
                 [['ai', 'AI'], ['person', '本人'], ['unassigned', '稍后指定']].map(item => '<button type="button" aria-pressed="' + (snap.executor.kind === item[0]) + '" data-role-executor="' + item[0] + '" class="' + (snap.executor.kind === item[0] ? 'is-selected' : '') + '">' + item[1] + '</button>').join('') +
                 '</div>' + (snap.executor.kind === 'ai' ? modelOptionsMarkup(snap, ctx) : snap.executor.kind === 'person' ? '<p class="role-muted-note">仅可指定本人；同事权限尚未开放。</p>' : '') + '</fieldset>' +
@@ -774,6 +774,10 @@
             else { persistCreator(value); renderCreator(value); }
         }
 
+        function reviewAuthorityLabel(authority) {
+            return { none: '不承担专业检查', content: '内容检查', final: '最终检查' }[authority] || '';
+        }
+
         function openTextEditor(value, field) {
             if (creator !== value || creatorLocked(value) || !topLayer(value.layer)
                 || !['responsibilities', 'delivery'].includes(field) || !sameContext(value.token)) return;
@@ -781,11 +785,14 @@
             const saved = value.childDrafts[field];
             const draft = saved ? {
                 main: String(saved.main || ''), secondary: String(saved.secondary || ''),
-                requiredItems: Array.isArray(saved.requiredItems) ? saved.requiredItems.map(String) : []
+                requiredItems: Array.isArray(saved.requiredItems) ? saved.requiredItems.map(String) : [],
+                reviewAuthority: ['none', 'content', 'final'].includes(saved.reviewAuthority) ? saved.reviewAuthority : value.snapshot.reviewAuthority || '',
+                optionsOpen: saved.optionsOpen === true
             } : {
                 main: duty ? value.snapshot.responsibilities : value.snapshot.delivery,
                 secondary: duty ? value.snapshot.boundary : value.snapshot.criteria,
-                requiredItems: value.snapshot.requiredItems.slice()
+                requiredItems: value.snapshot.requiredItems.slice(), reviewAuthority: value.snapshot.reviewAuthority || '',
+                optionsOpen: Boolean(duty ? value.snapshot.boundary || value.snapshot.reviewAuthority : value.snapshot.requiredItems.length || value.snapshot.criteria)
             };
             const id = 'role-subtitle-' + uuid().replace(/[^a-zA-Z0-9_-]/g, '');
             let root = null, dirty = !!saved;
@@ -811,7 +818,8 @@
             });
             root = openRoot(layer, '[data-role-secondary-root]');
             function persistChild() {
-                value.childDrafts[field] = { main: draft.main, secondary: draft.secondary, requiredItems: draft.requiredItems.slice() };
+                value.childDrafts[field] = { main: draft.main, secondary: draft.secondary, requiredItems: draft.requiredItems.slice(),
+                    reviewAuthority: draft.reviewAuthority, optionsOpen: draft.optionsOpen };
                 value.childDirty = true;
                 return persistCreator(value);
             }
@@ -823,10 +831,13 @@
                 if (!root || layer.closed || creator !== value || !sameContext(value.token)) return;
                 const itemRows = draft.requiredItems.map((item, index) => '<div class="role-required-item"><input type="text" maxlength="160" data-required-item="' + index + '" aria-label="必交项 ' + (index + 1) + '" value="' + html(item) + '"><button type="button" class="role-icon-button" data-remove-required="' + index + '" aria-label="移除必交项" title="移除必交项">' + icon('X') + '</button></div>').join('');
                 const secondary = '<label class="role-field-label">' + (duty ? '职责边界与方法' : '验收要求（可选）') + '<textarea data-secondary-secondary rows="3" maxlength="8000" placeholder="可留空">' + html(draft.secondary) + '</textarea></label>';
+                const authority = '<label class="role-field-label">检查职责<select data-secondary-authority>' +
+                    [['', '未单独指定'], ['none', '不承担专业检查'], ['content', '内容检查'], ['final', '最终检查']].map(([key, label]) => '<option value="' + key + '" ' + (draft.reviewAuthority === key ? 'selected' : '') + '>' + label + '</option>').join('') + '</select></label>';
+                const required = '<section class="role-required-list"><div class="role-secondary-section-head"><strong>必交项</strong><button type="button" class="role-inline-action" data-add-required ' + (draft.requiredItems.length >= 30 ? 'disabled' : '') + '>' + icon('Plus') + '添加</button></div>' + (itemRows || '<p class="role-muted-note">未配置必交项，不会自动判断是否齐全。</p>') + '</section>';
                 root.innerHTML = '<div class="role-module-root role-secondary-root"><header class="role-module-head"><h2 id="' + id + '">' + title + '</h2><button type="button" class="role-icon-button" data-sub-close aria-label="关闭" title="关闭">' + icon('X') + '</button></header>' +
                     '<main class="role-secondary-body"><label class="role-field-label">' + (duty ? '职责内容' : '交付内容') + '<textarea data-secondary-main rows="5" maxlength="12000">' + html(draft.main) + '</textarea></label>' +
-                    (duty ? '<details class="role-secondary-options" ' + (draft.secondary ? 'open' : '') + '><summary>边界与方法（可选）</summary>' + secondary + '</details>' : secondary) +
-                    (!duty ? '<section class="role-required-list"><div class="role-secondary-section-head"><strong>必交项</strong><button type="button" class="role-inline-action" data-add-required ' + (draft.requiredItems.length >= 30 ? 'disabled' : '') + '>' + icon('Plus') + '添加</button></div>' + (itemRows || '<p class="role-muted-note">未配置必交项，不会自动判断是否齐全。</p>') + '</section>' : '') +
+                    '<details class="role-secondary-options" data-secondary-options ' + (draft.optionsOpen ? 'open' : '') + '><summary>' + (duty ? '边界与检查职责' : '必交项与验收要求') + '</summary>' + secondary + (duty ? authority : required) + '</details>' +
+                    '<p class="role-muted-note">' + (duty ? '检查对象和是否可通过，仍由每次任务的检查关系与授权决定。' : '填写实际需要提交的内容或原件名称；不授予自动生成权限。') + '</p>' +
                     '<p class="role-module-status" data-role-status role="status">' + (value.localSafe === false ? '本地草稿保存失败，刷新可能丢失输入。' : '') + '</p></main><footer class="role-secondary-footer"><button type="button" class="role-secondary-command" data-sub-close>取消</button><button type="button" class="role-primary-command" data-sub-apply>确定</button></footer></div>';
                 root.onclick = onClick;
                 root.oninput = event => {
@@ -834,10 +845,15 @@
                     const target = event.target;
                     if (target.matches('[data-secondary-main]')) draft.main = target.value;
                     else if (target.matches('[data-secondary-secondary]')) draft.secondary = target.value;
+                    else if (target.matches('[data-secondary-authority]')) draft.reviewAuthority = target.value;
                     else if (target.matches('[data-required-item]')) draft.requiredItems[Number(target.dataset.requiredItem)] = target.value;
                     else return;
                     changed();
                 };
+                root.querySelector('[data-secondary-options]').addEventListener('toggle', event => {
+                    draft.optionsOpen = event.currentTarget.open;
+                    if (dirty) persistChild();
+                });
             }
             async function onClick(event) {
                 const button = event.target.closest('button');
@@ -860,13 +876,17 @@
                 }
                 const items = draft.requiredItems.map(item => item.trim()).filter(Boolean);
                 if (!duty && (draft.requiredItems.some(item => !item.trim()) || new Set(items).size !== items.length)) {
-                    status(root, '请填写或移除空白必交项，名称不能重复。', 'warning'); return;
+                    status(root, '请填写或移除空白必交项，名称不能重复。', 'warning');
+                    const seen = new Set(), bad = draft.requiredItems.findIndex(item => !item.trim() || seen.has(item.trim()) || !seen.add(item.trim()));
+                    root.querySelector('[data-required-item="' + bad + '"]')?.focus(); return;
                 }
                 if (draft.main.length > 12000 || draft.secondary.length > 8000 || items.length > 30 || items.some(item => item.length > 160)) {
                     status(root, '输入内容过长，请缩短后再确定。', 'warning'); return;
                 }
                 if (duty) {
                     value.snapshot.responsibilities = draft.main.trim(); value.snapshot.boundary = draft.secondary.trim();
+                    if (['none', 'content', 'final'].includes(draft.reviewAuthority)) value.snapshot.reviewAuthority = draft.reviewAuthority;
+                    else delete value.snapshot.reviewAuthority;
                 } else {
                     value.snapshot.delivery = draft.main.trim(); value.snapshot.criteria = draft.secondary.trim();
                     value.snapshot.requiredItems = items;
@@ -887,6 +907,7 @@
                 '<div><dt>执行者</dt><dd>' + html(executor) + '</dd></div>' +
                 '<div><dt>职责</dt><dd>' + html(snap.responsibilities || '未填写') + '</dd></div>' +
                 (snap.boundary ? '<div><dt>边界</dt><dd>' + html(snap.boundary) + '</dd></div>' : '') +
+                (snap.reviewAuthority ? '<div><dt>检查职责</dt><dd>' + html(reviewAuthorityLabel(snap.reviewAuthority)) + '</dd></div>' : '') +
                 '<div><dt>交付</dt><dd>' + html(snap.delivery || '未填写') + '</dd></div>' +
                 (snap.criteria ? '<div><dt>验收要求</dt><dd>' + html(snap.criteria) + '</dd></div>' : '') +
                 (snap.requiredItems.length ? '<div><dt>必交项</dt><dd><ul>' + snap.requiredItems.map(item => '<li>' + html(item) + '</li>').join('') + '</ul></dd></div>' : '') +

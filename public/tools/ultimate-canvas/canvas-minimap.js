@@ -145,7 +145,11 @@
                 nodes: readNodes(),
                 viewport: { scale: engine.scale, offsetX: engine.offsetX, offsetY: engine.offsetY },
                 viewportSize: containerSize,
-                connections: engine.connections
+                connections: [...engine.connections, ...(engine.roleWorkflows || []).flatMap(flow => (flow.relations || []).map(edge => ({
+                    from: edge.from === 'requirement' ? [...engine.nodes.values()].find(node => node.type === 'role-requirement'
+                        && node.data?.roleRequirement?.workflowId === flow.id && (node.data?.roleRequirement?.runId || '') === engine.roleCollaboration?.selectedRunId())?.id : edge.from,
+                    to: edge.to
+                })).filter(edge => edge.from))]
             });
             const selected = new Set(engine.getSelectedNodeIds?.() || [engine.selectedNodeId].filter(Boolean));
             context.beginPath();

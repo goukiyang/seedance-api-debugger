@@ -984,6 +984,11 @@ model CanvasRoleTaskRun {
   requirements             CanvasRoleTaskRevision[]
   works                    CanvasRoleWork[]
   events                   CanvasRoleEvent[]
+  control                  CanvasRoleRunControl?
+  authorizations           CanvasRoleAuthorization[]
+  dispatches               CanvasRoleDispatch[]
+  questions                CanvasRoleQuestion[]
+  media_bindings           CanvasRoleMediaBinding[]
 
   @@index([owner_user_id, document_id, updated_at, id])
 }
@@ -1024,6 +1029,10 @@ model CanvasRoleWork {
   role_version          CanvasRoleVersion @relation(fields: [role_version_id], references: [id], onDelete: Restrict)
   deliveries            CanvasRoleDelivery[]
   attempts              CanvasRoleAttempt[]
+  dispatches            CanvasRoleDispatch[]
+  questions_from        CanvasRoleQuestion[] @relation("RoleQuestionFrom")
+  questions_to          CanvasRoleQuestion[] @relation("RoleQuestionTarget")
+  media_bindings        CanvasRoleMediaBinding[]
 
   @@unique([role_task_run_id, requirements_revision, node_id, round])
   @@index([role_task_run_id, phase, updated_at, id])
@@ -1060,6 +1069,8 @@ model CanvasRoleEvent {
   created_at            DateTime @default(now())
   run                   CanvasRoleTaskRun @relation(fields: [role_task_run_id], references: [id], onDelete: Restrict)
 
+  authorization         CanvasRoleAuthorization?
+
   @@index([role_task_run_id, created_at, id])
   @@index([work_id, created_at, id])
 }
@@ -1087,6 +1098,8 @@ model CanvasRoleAttempt {
   started_at            DateTime @default(now())
   finished_at           DateTime?
   work                  CanvasRoleWork @relation(fields: [work_id], references: [id], onDelete: Restrict)
+  dispatch              CanvasRoleDispatch?
+  questions             CanvasRoleQuestion[]
 
   @@unique([work_id, round, purpose, attempt])
   @@unique([provider_scope, provider_reference])
@@ -1116,6 +1129,163 @@ model CanvasRoleMutationReceipt {
   created_at     DateTime @default(now())
 
   @@unique([owner_user_id, mutation_id])
+}
+
+// Collaboration v2 is additive. Existing runs without a control row stay manual.
+model CanvasRoleRunControl {
+  run_id                    String   @id
+  workflow_id               String
+  schema                    String   @default("role.collaboration.v2")
+  mode                      String   @default("manual")
+  revision                  Int      @default(1)
+  active_grant_id            String?
+  pause_reason              String?
+  current_manifest_event_id String?
+  acceptance_event_id        String?
+  next_wake_at              DateTime?
+  created_at                DateTime @default(now())
+  updated_at                DateTime @updatedAt
+  run                       CanvasRoleTaskRun @relation(fields: [run_id], references: [id], onDelete: Restrict)
+
+  @@index([workflow_id, updated_at, run_id])
+  @@index([mode, next_wake_at, run_id])
+}
+
+model CanvasRoleAuthorization {
+  id                    String   @id
+  run_id                String
+  sequence              Int
+  requirements_revision Int
+  consent_event_id       String   @unique
+  snapshot_json         String
+  snapshot_digest       String
+  granted_by            String
+  granted_at            DateTime @default(now())
+  expires_at            DateTime
+  run                   CanvasRoleTaskRun @relation(fields: [run_id], references: [id], onDelete: Restrict)
+  consent_event         CanvasRoleEvent @relation(fields: [consent_event_id], references: [id], onDelete: Restrict)
+  dispatches            CanvasRoleDispatch[]
+
+  @@unique([run_id, sequence])
+}
+
+model CanvasRoleDispatch {
+  id                    String   @id
+  run_id                String
+  work_id               String?
+  grant_id              String?
+  attempt_id            String?  @unique
+  requirements_revision Int
+  lease_epoch           Int      @default(0)
+  action                String
+  target_key            String
+  dedupe_key            String
+  state                 String   @default("queued")
+  payload_json          String
+  lease_owner           String?
+  lease_token           String?
+  last_error            String?
+  lease_until           DateTime?
+  due_at                DateTime
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+  run                   CanvasRoleTaskRun @relation(fields: [run_id], references: [id], onDelete: Restrict)
+  work                  CanvasRoleWork? @relation(fields: [work_id], references: [id], onDelete: Restrict)
+  grant                 CanvasRoleAuthorization? @relation(fields: [grant_id], references: [id], onDelete: Restrict)
+  attempt               CanvasRoleAttempt? @relation(fields: [attempt_id], references: [id], onDelete: Restrict)
+
+  @@unique([run_id, dedupe_key])
+  @@index([state, due_at, id])
+  @@index([run_id, state, requirements_revision])
+}
+
+model CanvasRoleQuestion {
+  id                    String   @id
+  run_id                String
+  from_work_id          String
+  target_work_id        String?
+  source_attempt_id     String?
+  requirements_revision Int
+  exchange_count        Int      @default(0)
+  no_progress_count     Int      @default(0)
+  revision              Int      @default(1)
+  question_digest       String
+  input_digest          String
+  status                String   @default("open")
+  body_json             String
+  blocking              Boolean  @default(true)
+  answer_event_id       String?
+  resolution_event_id   String?
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+  run                   CanvasRoleTaskRun @relation(fields: [run_id], references: [id], onDelete: Restrict)
+  from_work             CanvasRoleWork @relation("RoleQuestionFrom", fields: [from_work_id], references: [id], onDelete: Restrict)
+  target_work           CanvasRoleWork? @relation("RoleQuestionTarget", fields: [target_work_id], references: [id], onDelete: Restrict)
+  source_attempt        CanvasRoleAttempt? @relation(fields: [source_attempt_id], references: [id], onDelete: Restrict)
+
+  @@unique([run_id, requirements_revision, from_work_id, input_digest, question_digest])
+  @@index([run_id, status, updated_at, id])
+  @@index([target_work_id, status, updated_at, id])
+}
+
+model CanvasRoleMediaBinding {
+  id                    String   @id
+  run_id                String
+  work_id               String
+  requirements_revision Int
+  batch_ordinal         Int
+  reserved_points       Int
+  settlement_applied    Boolean  @default(false)
+  settled_points        Int?
+  input_digest          String
+  context_digest        String
+  generation_node_id    String
+  output_slot_id        String
+  source_kind           String
+  source_task_id        String
+  source_request_id     String
+  state                 String
+  fee_state             String
+  original_refs_json    String   @default("[]")
+  receipt_json          String   @default("{}")
+  next_check_at         DateTime?
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+  run                   CanvasRoleTaskRun @relation(fields: [run_id], references: [id], onDelete: Restrict)
+  work                  CanvasRoleWork @relation(fields: [work_id], references: [id], onDelete: Restrict)
+
+  @@unique([source_kind, source_task_id])
+  @@unique([work_id, source_request_id, batch_ordinal])
+  @@index([run_id, state, updated_at, id])
+  @@index([state, next_check_at, id])
+}
+
+model CanvasRoleWorkflowTemplate {
+  id              String   @id
+  owner_user_id   String
+  name            String
+  status          String   @default("active")
+  current_version Int      @default(1)
+  revision        Int      @default(1)
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+  versions        CanvasRoleWorkflowTemplateVersion[]
+
+  @@index([owner_user_id, status, updated_at, id])
+}
+
+model CanvasRoleWorkflowTemplateVersion {
+  id             String   @id
+  template_id    String
+  version        Int
+  schema         String   @default("role.workflow-template.v2")
+  content_digest String
+  snapshot_json  String
+  provenance_json String
+  created_at     DateTime @default(now())
+  template       CanvasRoleWorkflowTemplate @relation(fields: [template_id], references: [id], onDelete: Restrict)
+
+  @@unique([template_id, version])
 }
 
 model ToolFlow {

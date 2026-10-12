@@ -38,6 +38,7 @@ import { studioTemplateTaskWhere } from './task-visibility';
 import { getSkillSelection, historicalSkills, parseSkillIds, resolveSkills, type SkillSnapshot } from './skills';
 import type { SessionUser } from '@/lib/auth/session';
 import { resolveCanvasStudioReferenceUse } from '@/lib/canvas-studio-reference-use';
+import { bindRoleMediaTask, roleMediaFingerprint, type RoleMediaSubmission } from '@/lib/canvas-roles/media-bindings';
 import { resolveSharedStudioModule, parseSharedStudioPersonalOverrides } from './shared-contract';
 import type { SharedStudioIntent } from './shared-types';
 
@@ -286,9 +287,12 @@ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] 
   catch { throw new StudioError('历史固定参考图快照无效', 409); }
 }
 
-export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean }, canvasUse?: { user: SessionUser; referenceImageIds: string[] }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }) {
+export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean }, canvasUse?: { user: SessionUser; referenceImageIds: string[] }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission) {
+  if (body.roleMediaContext !== undefined && !roleMedia) throw new StudioError('角色媒体来源只能由原画布确认入口提交', 403);
+  if (roleMedia && (roleMedia.user.id !== ownerId || !canvasUse || avatar || preparation)) throw new StudioError('角色媒体必须沿原图片任务创建和扣点流程', 403);
+  const roleContextFingerprint = roleMedia ? roleMediaFingerprint(roleMedia.context) : undefined;
   // An accepted request is recovered before any current definition/configuration checks.
-  if (typeof body?.requestId === 'string' && /^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) {
+  if (!roleMedia && typeof body?.requestId === 'string' && /^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) {
     const acceptedBatchId = createHash('sha256').update(`${ownerId}:${body.requestId}`).digest('hex');
     const accepted = await prisma.imageStudioTask.findFirst({ where: { batch_id: acceptedBatchId, owner_id: ownerId } });
     if (accepted) {
@@ -324,6 +328,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   const requestFingerprint = createHash('sha256').update(JSON.stringify({ ...fingerprintInput,
     requestId: undefined, ...(moduleId ? { moduleId } : {}), ...(canvasUse ? { canvasReferenceImageIds: canvasUse.referenceImageIds } : {}),
     ...(canvasPrompt ? { canvasPromptMentions: parseCanvasPromptMentions(canvasPrompt.mentions), canvasPromptAssets: canvasPrompt.referenceAssets } : {}),
+    ...(roleContextFingerprint ? { roleMediaContext: roleContextFingerprint } : {}),
     ...(avatar ? { avatar: avatar.candidates, ...(sheet ? { avatarLayout: avatar!.layout } : {}) } : {}) })).digest('hex');
   const matchesRequest = (task: ImageStudioTask) => {
     try {
@@ -829,6 +834,9 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       };
       if (preparation) await preparation.save(tx, taskData);
       else await tx.imageStudioTask.create({ data: taskData });
+      if (roleMedia) await bindRoleMediaTask(tx, roleMedia, { kind: 'image', taskId: id,
+        requestId: input.requestId, ordinal: i + 1, model: generation.model,
+        providerId: quoteImageChannel?.channelId || imageApi.channelId || 'original', reservedPoints: price });
       if (freeze) await tx.creditLedger.create({ data: {
         user_id: ownerId, type: 'task_freeze', amount: -price,
         balance_before: freeze.balance_before, balance_after: freeze.balance_after,

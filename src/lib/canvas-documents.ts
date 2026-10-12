@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from 'crypto';
 import { workflowSnapshots, remapWorkflows, WORKFLOW_CAPABILITY } from '@/lib/canvas-roles/workflow-schema';
+import { COLLABORATION_CAPABILITY } from '@/lib/canvas-roles/types';
+import { isRoleCollaborationReadOnly } from '@/lib/canvas-roles/guard';
 import { Prisma, type CanvasDocument } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
@@ -80,7 +82,7 @@ export function parseCanvasSnapshot(raw: string, projectId: string | null, v2: b
   checkJson(parsed);
   if (!object(parsed) || !object(parsed.canvas)) invalid('画布缺少 canvas 快照');
   if (parsed.schema !== undefined && parsed.schema !== 'ultimate_canvas.v1') invalid('不支持此画布格式');
-  if (parsed.schemaVersion !== undefined && (typeof parsed.schemaVersion !== 'number' || ![1, 2, 3, 4].includes(parsed.schemaVersion))) {
+  if (parsed.schemaVersion !== undefined && (typeof parsed.schemaVersion !== 'number' || ![1, 2, 3, 4, 5].includes(parsed.schemaVersion))) {
     throw new CanvasDocumentError('画布版本较新，请刷新后重试', 426, 'schema_upgrade_required');
   }
   const graph = parsed.canvas;
@@ -90,7 +92,7 @@ export function parseCanvasSnapshot(raw: string, projectId: string | null, v2: b
   if (graph.nodes.length > 1000 || graph.connections.length > 5000) invalid('画布节点或连线过多，请拆分保存');
   const nodeIds = new Set<string>();
   const types = new Set(['text', 'script', 'image', 'video', 'audio', 'director',
-    'flow-input', 'flow-template', 'flow-select', 'flow-confirm', 'flow-output', 'role']);
+    'flow-input', 'flow-template', 'flow-select', 'flow-confirm', 'flow-output', 'role', 'role-requirement']);
   for (const node of graph.nodes) {
     if (!object(node) || !id(node.id) || nodeIds.has(node.id)) invalid('节点 ID 无效或重复');
     if (typeof node.type !== 'string' || !types.has(node.type)) invalid('不支持的节点类型');
@@ -103,6 +105,12 @@ export function parseCanvasSnapshot(raw: string, projectId: string | null, v2: b
       // Business state lives in the durable role ledger, never in reversible canvas JSON.
       node.data = { title: typeof node.data.title === 'string' ? node.data.title.slice(0, 80) : '',
         roleConfig: { definitionId: config.definitionId, version: config.version, ...(object(config.snapshot) ? { snapshot: config.snapshot } : {}) } };
+    }
+    else if (node.type === 'role-requirement') {
+      const value = node.data.roleRequirement;
+      if (!object(value) || !id(value.workflowId) || (value.runId !== undefined && !id(value.runId))) invalid('需求卡缺少合法工作流引用');
+      node.data = { title: typeof node.data.title === 'string' ? node.data.title.slice(0, 80) : '需求',
+        roleRequirement: { workflowId: value.workflowId, ...(value.runId ? { runId: value.runId } : {}) } };
     }
   }
   const connections = new Set<string>();
@@ -124,6 +132,7 @@ export function parseCanvasSnapshot(raw: string, projectId: string | null, v2: b
     connections.add(key);
     const from = graph.nodes.find(n => object(n) && n.id === edge.from) as NodeSnapshot;
     const to = graph.nodes.find(n => object(n) && n.id === edge.to) as NodeSnapshot;
+    if (from.type === 'role-requirement' || to.type === 'role-requirement') invalid('需求关系须在所属工作流配置，不能作为媒体连线');
     if ((from.type === 'role' && to.type.startsWith('flow-')) || (to.type === 'role' && from.type.startsWith('flow-'))) invalid('角色不能接入图片工具执行流');
     if (from.type === 'role' && to.type === 'role') {
       const a = flows.find(f => f.nodeIds.includes(String(edge.from))), b = flows.find(f => f.nodeIds.includes(String(edge.to)));
@@ -155,11 +164,16 @@ export function parseCanvasSnapshot(raw: string, projectId: string | null, v2: b
   const context = object(parsed.context) ? parsed.context : {};
   if (context.project_id != null && context.project_id !== projectId) invalid('画布内容与所属项目不一致');
   if (v2) {
-    parsed.schemaVersion = parsed.schemaVersion === 4 || (Array.isArray(graph.roleWorkflows) && graph.roleWorkflows.length) ? 4
+    parsed.schemaVersion = parsed.schemaVersion === 5 || flows.some(flow => flow.relations !== undefined)
+      || graph.nodes.some(n => object(n) && n.type === 'role-requirement') ? 5
+      : parsed.schemaVersion === 4 || (Array.isArray(graph.roleWorkflows) && graph.roleWorkflows.length) ? 4
       : parsed.schemaVersion === 3 || graph.nodes.some(n => object(n) && n.type === 'role') ? 3 : 2;
     parsed.context = { ...context, project_id: projectId };
   }
-  if (parsed.schemaVersion === 4 || (Array.isArray(graph.roleWorkflows) && graph.roleWorkflows.length)) {
+  if (parsed.schemaVersion === 5 || flows.some(flow => flow.relations !== undefined)
+    || graph.nodes.some(n => object(n) && n.type === 'role-requirement')) {
+    parsed.schemaVersion = 5; parsed.requiredCapabilities = ['role.v1', WORKFLOW_CAPABILITY, COLLABORATION_CAPABILITY];
+  } else if (parsed.schemaVersion === 4 || (Array.isArray(graph.roleWorkflows) && graph.roleWorkflows.length)) {
     parsed.schemaVersion = 4; parsed.requiredCapabilities = ['role.v1', WORKFLOW_CAPABILITY];
   } else if (graph.nodes.some(n => object(n) && n.type === 'role')) {
     parsed.schemaVersion = 3;
@@ -169,6 +183,9 @@ export function parseCanvasSnapshot(raw: string, projectId: string | null, v2: b
 }
 
 export function requireCanvasRoleCapability(schemaVersion: number, capabilities: unknown) {
+  if (schemaVersion >= 5 && (!Array.isArray(capabilities) || !capabilities.includes(COLLABORATION_CAPABILITY))) {
+    throw new CanvasDocumentError('此画布包含新版角色协作，请刷新后继续；需求和关系不会被旧页面覆盖', 426, 'collaboration_capability_required');
+  }
   if (schemaVersion >= 4 && (!Array.isArray(capabilities) || !capabilities.includes(WORKFLOW_CAPABILITY))) {
     throw new CanvasDocumentError('此画布包含角色工作流，请刷新后继续；原工作流不会被旧页面覆盖', 426, 'workflow_capability_required');
   }
@@ -440,6 +457,9 @@ function duplicateSnapshot(snapshot: Snapshot): Snapshot {
     'source', 'executionMode', 'inputSource', 'retryCount', 'outputMode', 'canvasStyle',
     'planSource', 'planReferences', 'planParameterSource', 'videoCardId', 'videoBranchId', 'storyWorkflow', 'storySource', 'canvasGroup', 'roleConfig']);
   const remap = new Map(snapshot.canvas.nodes.map(node => [node.id, `node-${randomUUID()}`]));
+  const oldFlows = workflowSnapshots(snapshot.canvas.roleWorkflows);
+  const newFlows = remapWorkflows(snapshot.canvas.roleWorkflows, remap);
+  const flowRemap = new Map(oldFlows.map((flow, index) => [flow.id, newFlows[index]?.id]));
   const groups = new Map<string, string>();
   const plans = object(snapshot.canvas.planSplits)
     ? JSON.parse(JSON.stringify(snapshot.canvas.planSplits)) as ObjectValue : null;
@@ -462,9 +482,12 @@ function duplicateSnapshot(snapshot: Snapshot): Snapshot {
     canvas: {
       version: 1, viewport: snapshot.canvas.viewport, selectedNodeId: null,
       ...(plans ? { planSplits: plans } : {}),
-      ...(snapshot.canvas.roleWorkflows ? { roleWorkflows: remapWorkflows(snapshot.canvas.roleWorkflows, remap) } : {}),
+      ...(snapshot.canvas.roleWorkflows ? { roleWorkflows: newFlows } : {}),
       nodes: snapshot.canvas.nodes.map(node => {
         const data = Object.fromEntries(Object.entries(node.data).filter(([key]) => configKeys.has(key)));
+        if (node.type === 'role-requirement' && object(node.data.roleRequirement)) {
+          data.roleRequirement = { workflowId: flowRemap.get(String(node.data.roleRequirement.workflowId)) };
+        }
         if (object(data.canvasGroup) && typeof data.canvasGroup.id === 'string') {
           const old = data.canvasGroup.id;
           if (!groups.has(old)) groups.set(old, `group-${randomUUID()}`);
@@ -504,6 +527,7 @@ function withoutLiveTasks(snapshot: Snapshot): Snapshot {
     'videosubmission', 'videosubmissionlegacy', 'videohistory', 'selectedvideoresult', 'generationpayload', 'previewvideotaskid',
     'taskstatus', 'runstatus', 'batchstatus', 'statusendpoint', 'pollingurl', 'pollurl',
     'roletaskrunid', 'roleworkid', 'roleattemptid', 'roledeliveryid', 'roleconfirmation', 'rolehandoff', 'rolefees',
+    'rolemediaorigin', 'rolemediacontext',
   ]);
   const mediaKeys = new Set([
     'previewimage', 'referenceimage', 'referenceimages', 'thumbnail', 'thumbnails',
@@ -529,13 +553,34 @@ function withoutLiveTasks(snapshot: Snapshot): Snapshot {
   return detached;
 }
 
-async function prepareDetachedSnapshot(db: Db, user: SessionUser, snapshot: Snapshot, projectId: string | null) {
+async function prepareDetachedSnapshot(db: Db, user: SessionUser, snapshot: Snapshot, projectId: string | null, preserveMediaFrom?: Snapshot) {
   const detached = withoutLiveTasks(snapshot);
+  if (preserveMediaFrom) for (const node of detached.canvas.nodes) {
+    const original = preserveMediaFrom.canvas.nodes.find(item => item.id === node.id && item.type === node.type);
+    if (!object(original?.data.roleMediaOrigin)) continue;
+    const origin = original.data.roleMediaOrigin;
+    const binding = await db.canvasRoleMediaBinding.findFirst({ where: { generation_node_id: node.id,
+      work_id: String(origin.workId || ''), run_id: String(origin.runId || ''), run: { owner_user_id: user.id,
+        document_id: String(origin.documentId || '') } }, select: { id: true } });
+    if (binding) node.data.roleMediaOrigin = { ...origin };
+  }
   await validateAssets(db, user, detached, true);
   return parseCanvasSnapshot(JSON.stringify(detached), projectId, true);
 }
 
-async function validateRoles(db: Db, user: SessionUser, snapshot: Snapshot, retainedSource: Snapshot | null, remapped = false) {
+async function validateRoles(db: Db, user: SessionUser, snapshot: Snapshot, retainedSource: Snapshot | null, remapped = false, documentId?: string) {
+  const flows = workflowSnapshots(snapshot.canvas.roleWorkflows), boundRuns = new Set<string>();
+  for (const node of snapshot.canvas.nodes.filter(n => n.type === 'role-requirement')) {
+    const ref = node.data.roleRequirement as ObjectValue;
+    if (!flows.some(flow => flow.id === ref.workflowId)) invalid('需求卡所属工作流不存在');
+    if (ref.runId) {
+      if (boundRuns.has(String(ref.runId))) invalid('同一任务只能有一张需求卡');
+      boundRuns.add(String(ref.runId));
+      const run = await db.canvasRoleTaskRun.findFirst({ where: { id: String(ref.runId), owner_user_id: user.id,
+        document_id: documentId || '', control: { is: { workflow_id: String(ref.workflowId) } } }, select: { id: true } });
+      if (!run) throw new CanvasDocumentError('需求卡任务归属不一致，请重新读取画布', 409, 'role_task_conflict');
+    }
+  }
   const roles = snapshot.canvas.nodes.filter(n => n.type === 'role');
   if (!roles.length) return;
   const oldNodes = retainedSource?.canvas.nodes || [];
@@ -645,6 +690,9 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
       const existing = documentId ? await db.canvasDocument.findUnique({ where: { id: documentId } }) : null;
       if (documentId) await assertDocument(user, existing, true);
       if (existing && ['save', 'duplicate', 'restore_revision'].includes(action)) requireCanvasRoleCapability(existing.schema_version, body.required_capabilities);
+      if (existing && existing.schema_version >= 5 && isRoleCollaborationReadOnly()) {
+        throw new CanvasDocumentError('新版角色协作处于保护模式，原画布可查看，暂不保存修改', 503, 'collaboration_guard');
+      }
       if (existing && !v2 && existing.protocol_version >= 2) {
         throw new CanvasDocumentError('此画布已使用新版保存，请刷新页面并保留本地草稿', 426, 'protocol_upgrade_required');
       }
@@ -695,7 +743,7 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
         if (!revision) throw new CanvasDocumentError('历史版本已过期或不存在', 404, 'revision_not_found');
         retainedRoleSource = parseCanvasSnapshot(revision.document_json, projectId, true);
         snapshot = await prepareDetachedSnapshot(db, user,
-          retainedRoleSource, projectId);
+          retainedRoleSource, projectId, parseCanvasSnapshot(existing!.document_json, projectId, true));
         title = revision.title;
         activeNode = null;
       } else if (action === 'rename' && body.title === undefined) invalid('请输入新的画布名称');
@@ -704,10 +752,14 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
         // Once upgraded, removing/restoring the last role must not reopen old-client writes.
         if (existing && existing.schema_version >= 3) {
           snapshot.schemaVersion = Math.max(existing.schema_version, Number(snapshot.schemaVersion) || 2);
-          snapshot.requiredCapabilities = existing.schema_version >= 4 ? ['role.v1', WORKFLOW_CAPABILITY] : ['role.v1'];
+          snapshot.requiredCapabilities = Number(snapshot.schemaVersion) >= 5 ? ['role.v1', WORKFLOW_CAPABILITY, COLLABORATION_CAPABILITY]
+            : existing.schema_version >= 4 ? ['role.v1', WORKFLOW_CAPABILITY] : ['role.v1'];
         }
         requireCanvasRoleCapability(Number(snapshot.schemaVersion) || 1, body.required_capabilities);
-        await validateRoles(db, user, snapshot, retainedRoleSource, action === 'duplicate');
+        if (Number(snapshot.schemaVersion) >= 5 && isRoleCollaborationReadOnly()) {
+          throw new CanvasDocumentError('新版角色协作处于保护模式，暂不创建或写入', 503, 'collaboration_guard');
+        }
+        await validateRoles(db, user, snapshot, retainedRoleSource, action === 'duplicate', existing?.id);
       }
 
       const newDocument = !existing || action === 'duplicate';

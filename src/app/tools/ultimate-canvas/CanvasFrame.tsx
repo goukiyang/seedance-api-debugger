@@ -24,6 +24,7 @@ type CanvasMediaPreview = {
 type ReferenceRequest = { requestId: string; userId: string; nodeId: string; documentId: string | null;
   projectId: string | null; cardId: string | null; capacity: number; currentReferenceImageIds: string[]; currentAssetIds: string[] };
 type ReferenceChild = Window & { UltimateCanvasReferenceContextMatches?: (requestId: string) => boolean;
+  UltimateCanvasRoleMediaContextMatches?: (requestId: string) => boolean;
   UltimateCanvasMentionContextMatches?: (requestId: string) => boolean;
   UltimateCanvasUploadContextMatches?: (requestId: string) => boolean };
 type MentionRequest = { requestId: string; prompt: string; cursor: number; candidates: PromptMentionCandidate[]; left: number; top: number };
@@ -232,6 +233,40 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin || event.source !== frame.current?.contentWindow) return;
       const value = event.data;
+      if (value?.type === 'sd2-canvas-role-media-context') {
+        const matches = () => alive && value.userId === userId.current
+          && Boolean((frame.current?.contentWindow as ReferenceChild | null)?.UltimateCanvasRoleMediaContextMatches?.(value.requestId));
+        if (!validId(value.requestId) || !validId(value.workId) || !validId(value.documentId) || !validId(value.nodeId)
+          || !Number.isSafeInteger(value.contextEpoch) || !value.body || typeof value.body !== 'object'
+          || value.body.generation_node_id !== value.nodeId || !['image', 'video'].includes(value.body.kind)
+          || !validId(value.body.mutation_id) || !matches()) return;
+        void (async () => {
+          const response = await fetch(`/api/tools/ultimate-canvas/role-work/${encodeURIComponent(value.workId)}/media-context`, {
+            method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000),
+            headers: { 'Content-Type': 'application/json', 'x-canvas-capabilities': 'role.v1,role.workflow.v1,role.collaboration.v2' },
+            body: JSON.stringify({ mutation_id: value.body.mutation_id, base_revision: value.body.base_revision,
+              requirements_revision: value.body.requirements_revision, generation_node_id: value.nodeId,
+              kind: value.body.kind, outputSlotId: value.body.outputSlotId }),
+          });
+          const result = await readJsonResponse<{ context?: { ownerId?: string; documentId?: string; workId?: string; generationNodeId?: string }; error?: string }>(response);
+          if (!response.ok) throw new Error(result.error || '媒体来源未确认，请保留原任务');
+          if (!matches() || !result.context || result.context.ownerId !== userId.current || result.context.documentId !== value.documentId
+            || result.context.workId !== value.workId || result.context.generationNodeId !== value.nodeId) throw new Error('画布或账号已变化，未打开旧媒体来源');
+          frame.current?.contentWindow?.postMessage({ type: 'sd2-canvas-role-media-context-receipt', requestId: value.requestId,
+            success: true, result }, location.origin);
+        })().catch(error => {
+          if (alive) frame.current?.contentWindow?.postMessage({ type: 'sd2-canvas-role-media-context-receipt', requestId: value.requestId,
+            success: false, error: error instanceof Error ? error.message : '媒体来源未确认' }, location.origin);
+        });
+        return;
+      }
+      if (value?.type === 'sd2-canvas-role-media-changed') {
+        if (value.userId === userId.current && [value.workId, value.runId, value.documentId, value.nodeId].every(validId)) {
+          window.dispatchEvent(new CustomEvent('rolemedia:changed', { detail: { workId: value.workId, runId: value.runId,
+            documentId: value.documentId, nodeId: value.nodeId } }));
+        }
+        return;
+      }
       if (value?.type === 'sd2-canvas-billing-settled') {
         if (value.userId === userId.current) void refreshCredits({ force: true });
         return;

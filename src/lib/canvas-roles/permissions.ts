@@ -5,9 +5,15 @@ import { isExternalUser } from '@/lib/access/external-role';
 import { assertCanEditCanvasDocument, assertCanReadCanvasDocument } from '@/lib/canvas-documents';
 import { RoleError, record, digest } from './types';
 import { prisma } from '@/lib/prisma';
+import { isRoleCollaborationReadOnly } from './guard';
 
 export type RoleDb = Prisma.TransactionClient;
 const requestAccounts = new WeakMap<SessionUser, string>();
+export function assertRoleCollaborationWritable() {
+  if (isRoleCollaborationReadOnly()) {
+    throw new RoleError('角色协作当前处于保护模式，历史可查看，暂不开始新操作', 503, 'collaboration_guard');
+  }
+}
 export function assertRoleUser(user: SessionUser) {
   assertInternalOnly(user, '外部账号无权使用无限画布角色。');
   if (user.status !== 'active') throw new RoleError('账号当前不可用', 403, 'account_unavailable');
@@ -32,6 +38,22 @@ export async function assertCurrentRoleUser(db: RoleDb, user: SessionUser) {
   const before = requestAccounts.get(user);
   if (before && before !== fingerprint) throw new RoleError('账号在处理期间已变化，未继续原操作', 403, 'account_unavailable');
   requestAccounts.set(user, fingerprint);
+}
+export async function roleAccountFingerprint(db: RoleDb, user: SessionUser) {
+  await assertCurrentRoleUser(db, user);
+  return requestAccounts.get(user)!;
+}
+export async function coordinatorUser(db: RoleDb, ownerId: string): Promise<SessionUser> {
+  const current = await db.user.findUnique({ where: { id: ownerId } });
+  if (!current) throw new RoleError('原任务账号不可用', 403, 'account_unavailable');
+  const user: SessionUser = { id: current.id, name: current.name, username: current.username, email: current.email,
+    role: current.role as SessionUser['role'], account_type: current.account_type as SessionUser['account_type'],
+    user_profile: current.user_profile, feature_profile_id: current.feature_profile_id,
+    status: current.status as SessionUser['status'], expires_at: current.expires_at,
+    feishu: { user_id: current.feishu_user_id, open_id: current.feishu_open_id, union_id: current.feishu_union_id,
+      tenant_key: null, employee_no: null, department_ids: [], last_sync_at: null } };
+  await assertCurrentRoleUser(db, user);
+  return user;
 }
 export async function roleDocument(user: SessionUser, documentId: string, write = false) {
   await assertCurrentRoleUser(prisma, user);

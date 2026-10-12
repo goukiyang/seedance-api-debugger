@@ -11,6 +11,13 @@ export function GET(request: NextRequest, { params }: { params: { deliveryId: st
   return roleRoute(request, false, async user => {
     if (!/^\d{1,2}$/.test(params.index)) throw new RoleError('原件位置无效');
     const source = await deliveryAttachmentSource(user, params.deliveryId, Number(params.index));
+    if (request.nextUrl.searchParams.get('view') === 'metadata') {
+      const ref = source.snapshot;
+      return NextResponse.json({ attachment: ref, url: request.nextUrl.pathname, mimeType: source.mimeType,
+        libraryIdentity: ref.assetId ? `asset:${ref.assetId}` : ref.taskId ? `video_task:${ref.taskId}`
+          : ref.referenceImageId ? `reference_image:${ref.referenceImageId}` : null,
+      }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
+    }
     if ('content' in source.snapshot && typeof source.snapshot.content === 'string') {
       return new NextResponse(request.method === 'HEAD' ? null : source.snapshot.content, { headers: {
         'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff',
@@ -18,7 +25,7 @@ export function GET(request: NextRequest, { params }: { params: { deliveryId: st
       } });
     }
     if (!source.internalSource) return NextResponse.redirect(new URL(source.url, request.url), { headers: { 'Cache-Control': 'private, no-store' } });
-    const file = !['image', 'video', 'audio'].includes(source.snapshot.type);
+    const file = typeof source.snapshot.type !== 'string' || !['image', 'video', 'audio'].includes(source.snapshot.type);
     if (file && !source.url.startsWith('/') && !siteUploadPathFromUrl(source.url)) {
       const url = new URL(source.url);
       if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || isPrivateNetworkHost(url.hostname)) throw new RoleError('文件原件地址不可用', 503);

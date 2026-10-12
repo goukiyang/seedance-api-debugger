@@ -21,7 +21,7 @@
         'duration', 'cameraPresets', 'templateId', 'template_id', 'templateVersion', 'moduleId', 'module_id',
         'source', 'executionMode', 'inputSource', 'retryCount', 'outputMode', 'canvasStyle', 'planSource',
         'planReferences', 'planParameterSource', 'videoCardId', 'videoBranchId', 'storyWorkflow', 'storySource', 'canvasGroup',
-        'referenceImageIds', 'reference_image_ids', 'provider', 'promptMentions', 'roleConfig'
+        'referenceImageIds', 'reference_image_ids', 'provider', 'promptMentions', 'roleConfig', 'roleRequirement'
     ]);
     const TRANSIENT_KEYS = new Set([
         'status', 'state', 'error', 'result', 'results', 'progress', 'generatedtext', 'generationsummary',
@@ -34,7 +34,8 @@
         'generationpayload', 'previewvideotaskid', 'taskstatus', 'runstatus', 'batchstatus', 'statusendpoint',
         'pollingurl', 'pollurl', 'frozencost', 'quotedcost', 'pointquote', 'quote', 'reservation', 'settlement',
         'ledgerentry', 'chargedpoints', 'costfreeze', 'providerresponse',
-        'roletaskrunid', 'roleworkid', 'roleattemptid', 'roledeliveryid', 'roleconfirmation', 'rolehandoff', 'rolefees'
+        'roletaskrunid', 'roleworkid', 'roleattemptid', 'roledeliveryid', 'roleconfirmation', 'rolehandoff', 'rolefees',
+        'rolemediaorigin', 'rolemediacontext'
     ]);
     const MEDIA_KEYS = new Set([
         'previewimage', 'referenceimage', 'referenceimages', 'thumbnail', 'thumbnails', 'poster', 'cover',
@@ -133,6 +134,7 @@
                 result[key] = item.map(safeIdentifier).filter(Boolean);
                 return;
             }
+            if (key === 'roleMediaContext' && isRecord(item)) { result[key] = clone(item); return; }
             if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') result[key] = item;
         });
         return Object.keys(result).length ? result : null;
@@ -150,6 +152,13 @@
 
     function captureRuntimeReferences(data = {}) {
         const refs = {};
+        if (isRecord(data.roleMediaOrigin)) refs.roleMediaOrigin = pickFields(data.roleMediaOrigin,
+            ['ownerId', 'documentId', 'workId', 'runId', 'outputSlotId', 'kind']);
+        if (isRecord(data.roleMediaContext)) refs.roleMediaContext = clone(data.roleMediaContext);
+        if (data.styleJob?.input?.roleMediaContext && safeIdentifier(data.styleJob.requestId)) {
+            refs.styleJob = clone(data.styleJob);
+            refs.styleJob.state = 'unconfirmed';
+        }
         if (data.generationStatus && data.generationStatus !== 'idle' || data.generatedText || data.result
             || data.generationResult || data.storyRequest) refs.hadGeneration = true;
         if (data.storyRequest) refs.storyRequest = { state: 'unconfirmed', stage: data.storyRequest.stage,
@@ -163,7 +172,7 @@
             const requestId = safeIdentifier(submission.requestId);
             const taskId = safeIdentifier(submission.taskId);
             const input = pickFields(submission.input, ['model', 'ratio', 'duration', 'resolution', 'prompt', 'promptMentions']);
-            const generationPayload = pickFields(submission.generationPayload, REQUEST_INPUT_FIELDS);
+            const generationPayload = pickFields(submission.generationPayload, [...REQUEST_INPUT_FIELDS, 'roleMediaContext']);
             if (requestId || taskId) {
                 refs.videoSubmission = {
                     ...(requestId ? { requestId } : {}),
@@ -192,7 +201,8 @@
                 type: node.type,
                 x: Number(node.x) || 0,
                 y: Number(node.y) || 0,
-                data: sanitize(node.data || {}),
+                data: node.type === 'role-requirement' ? { title: String(node.data?.title || '').slice(0, 160),
+                    roleRequirement: { workflowId: safeIdentifier(node.data?.roleRequirement?.workflowId) } } : sanitize(node.data || {}),
                 runtimeReferences: captureRuntimeReferences(node.data || {})
             })),
             connections: engine.connections.map(({ from, to }) => ({ from, to })),
@@ -242,6 +252,10 @@
             const clean = sanitize(value, key);
             if (clean !== undefined) data[key] = clean;
         });
+        if (node.type === 'role-requirement') {
+            data.roleRequirement = { workflowId: groupIdMap.get('workflow:' + source.roleRequirement?.workflowId)
+                || safeIdentifier(source.roleRequirement?.workflowId) };
+        }
         const sourceAsset = ['upload', 'asset', 'reference_image'].includes(String(source.source))
             && !source.taskId && !source.generationResult && source.generationStatus !== 'succeeded';
         if (node.type === 'flow-input') {
@@ -372,6 +386,9 @@
             const requiresReconciliation = [];
             const nodes = snapshot.nodes.map(node => {
                 const data = clone(node.data || {});
+                if (node.type === 'role-requirement') {
+                    data.roleRequirement = { workflowId: safeIdentifier(data.roleRequirement?.workflowId) };
+                }
                 if (current.has(node.id)) {
                     Object.assign(data, extractCurrentRuntime(current.get(node.id)));
                 } else {
@@ -498,16 +515,21 @@
                 });
                 for (const flow of before.roleWorkflows || []) {
                     const nodeIds = flow.nodeIds.filter(id => idMap.has(id)).map(id => idMap.get(id));
-                    if (!nodeIds.length) continue;
-                    const finalNodeId = idMap.get(flow.finalNodeId) || nodeIds[0];
+                    const hasRequirement = originals.some(node => node.type === 'role-requirement' && node.data?.roleRequirement?.workflowId === flow.id);
+                    if (!nodeIds.length && !hasRequirement) continue;
+                    const workflowId = 'workflow-' + uniqueToken();
+                    groupIdMap.set('workflow:' + flow.id, workflowId);
+                    const finalNodeId = idMap.get(flow.finalNodeId) || nodeIds[0] || '';
                     const participants = flow.participants.filter(p => idMap.has(p.nodeId)).map(p => ({ ...clone(p), nodeId: idMap.get(p.nodeId),
                         participation: idMap.get(p.nodeId) === finalNodeId ? 'required' : p.participation,
                         reviewerNodeId: idMap.get(p.reviewerNodeId) || null,
                         dependencies: p.dependencies.filter(d => idMap.has(d.nodeId)).map(d => ({ ...d, nodeId: idMap.get(d.nodeId) })) }));
-                    engine.roleWorkflows = [...(engine.roleWorkflows || []), { ...clone(flow), id: 'workflow-' + uniqueToken(),
+                    engine.roleWorkflows = [...(engine.roleWorkflows || []), { ...clone(flow), id: workflowId,
                         name: (flow.name + ' 副本').slice(0, 80), nodeIds, participants, finalNodeId,
-                        coordinatorNodeId: idMap.get(flow.coordinatorNodeId) || nodeIds[0],
-                        guidance: flow.guidance.filter(e => idMap.has(e.from) && idMap.has(e.to)).map(e => ({ from: idMap.get(e.from), to: idMap.get(e.to) })) }];
+                        coordinatorNodeId: idMap.get(flow.coordinatorNodeId) || nodeIds[0] || '',
+                        guidance: (flow.guidance || []).filter(e => idMap.has(e.from) && idMap.has(e.to)).map(e => ({ from: idMap.get(e.from), to: idMap.get(e.to) })),
+                        ...(Array.isArray(flow.relations) ? { relations: flow.relations.filter(e => (e.from === 'requirement' || idMap.has(e.from)) && idMap.has(e.to))
+                            .map(e => ({ ...clone(e), id: 'relation-' + uniqueToken(), from: e.from === 'requirement' ? e.from : idMap.get(e.from), to: idMap.get(e.to) })) } : {}) }];
                 }
                 originals.forEach(node => {
                     const references = duplicateOptions.referencesForNode?.(node.id);

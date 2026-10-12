@@ -120,6 +120,7 @@ import { authorizeStudioRunForGeneration } from '@/lib/template-studio/handoff';
 import { StudioError } from '@/lib/template-studio/errors';
 import type { StudioAssetInput, StudioGenerationHandoff, StudioJsonValue } from '@/lib/template-studio/types';
 import { generationRequestFingerprint } from '@/lib/template-studio-video-fingerprint';
+import { bindRoleMediaTask, roleMediaFingerprint } from '@/lib/canvas-roles/media-bindings';
 import {
   buildStudioTaskSnapshot,
   decideGenerationIdempotency,
@@ -860,7 +861,20 @@ export async function POST(request: NextRequest) {
       requestSource.source_metadata?.canvas_document_id,
     ].filter((value): value is string => typeof value === 'string' && Boolean(value.trim())).map(value => value.trim()));
     if (canvasDocumentIds.size > 1) throw new AuthError('画布归属信息不一致', 400);
-    for (const canvasDocumentId of Array.from(canvasDocumentIds)) await assertCanEditCanvasDocument(user, canvasDocumentId, project.id);
+    if (body.roleMediaContext !== undefined) {
+      roleMediaFingerprint(body.roleMediaContext);
+      const context = body.roleMediaContext;
+      if (hasCodexApiAuthSignal(request) || context.ownerId !== user.id || context.kind !== 'video'
+        || canvasDocumentIds.size !== 1 || !canvasDocumentIds.has(context.documentId)
+        || context.generationNodeId !== (cleanSourceMetadata(body.source_metadata).canvas_node_id || body.canvas_node_id)
+        || body.client_name !== 'ultimate_canvas') throw new AuthError('角色视频必须由本人在原画布生成器确认', 403);
+    }
+    for (const canvasDocumentId of Array.from(canvasDocumentIds)) {
+      const document = await assertCanEditCanvasDocument(user, canvasDocumentId, project.id);
+      const nodeId = cleanSourceMetadata(body.source_metadata).canvas_node_id || body.canvas_node_id;
+      const node = JSON.parse(document.document_json).canvas.nodes.find((item: { id: string }) => item.id === nodeId);
+      if (node?.data?.roleMediaOrigin && body.roleMediaContext === undefined) throw new AuthError('此视频节点属于固定角色工作，请从原岗位重新打开生成器', 409);
+    }
     for (const canvasDocumentId of Array.from(canvasDocumentIds)) await assertCanvasPromptCompatibility(user, canvasDocumentId,
       cleanSourceMetadata(body.source_metadata).canvas_node_id || body.canvas_node_id || null, body.prompt, body.promptMentions);
     if (body.promptMentions != null) {
@@ -1001,6 +1015,7 @@ export async function POST(request: NextRequest) {
   if (body.idempotency_key !== undefined && (!idempotencyKey || idempotencyKey.length > 200)) {
     return errorJson('idempotency_key 无效', 400);
   }
+  if (body.roleMediaContext !== undefined && !idempotencyKey) return errorJson('角色媒体必须保留原请求编号，未生成', 400);
   const studioAssetsForFingerprint = Array.isArray(body.template_studio_assets)
     ? body.template_studio_assets.map((item: Record<string, unknown>) => ({
         assetId: item?.assetId,
@@ -1048,6 +1063,7 @@ export async function POST(request: NextRequest) {
     priceCeiling: body.max_estimated_cost ?? null,
     resolutionApprovalId: requestedResolutionApprovalId,
     resolutionApprovalConfirmed,
+    ...(body.roleMediaContext === undefined ? {} : { roleMediaContext: roleMediaFingerprint(body.roleMediaContext) }),
   };
   const requestFingerprint = generationRequestFingerprint(fingerprintPayload);
   if (idempotencyKey) {
@@ -1961,6 +1977,11 @@ export async function POST(request: NextRequest) {
         data: { credit_freeze_snapshot: freezeSnapshot },
       });
 
+      if (body.roleMediaContext !== undefined) await bindRoleMediaTask(tx, { user, context: body.roleMediaContext,
+        generationNodeId: String(cleanSourceMetadata(body.source_metadata).canvas_node_id || body.canvas_node_id) },
+      { kind: 'video', taskId: task.id, requestId: idempotencyKey || task.id, ordinal: 1,
+        model: selectedModel, providerId: requestedProvider, reservedPoints: estimatedCost });
+
       await tx.operationLog.create({
         data: {
           operator_id: user.id,
@@ -2067,6 +2088,7 @@ export async function POST(request: NextRequest) {
         });
       }
     }
+    if (err instanceof AuthError) return errorJson(err.message, err.status);
     if (err instanceof CreditError) {
       if (err.code === 'INSUFFICIENT_PROJECT_BUDGET') {
         await prisma.$transaction((tx) => notifyProjectOwner(tx, {

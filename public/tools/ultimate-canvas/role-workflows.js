@@ -51,6 +51,7 @@
             templates.append(command('使用导演组协作', 'director-group.v1', true), command('空白协作', 'blank.v1'));
             templates.querySelectorAll('button').forEach(b => { b.disabled = busy || Boolean(pending) || !bridge.context().writable; });
             host.append(templates);
+            host.append(command('我的工作流模板', 'my-templates'));
             if (pending) host.append(el('p', '模板保存结果待确认，原请求已保留。', 'role-module-status'), command('核对并继续原请求', 'recover', true));
             if (error) host.append(el('p', error, 'role-error-state'));
             const label = el('label', '当前角色工作流', 'workflow-select-label'), select = el('select');
@@ -62,7 +63,7 @@
             const flow = flows.find(f => f.id === selectedId);
             if (flow) {
                 const actions = el('div', '', 'workflow-template-actions');
-                actions.append(command('加入岗位', 'add-role'), command('任务与关系', 'task', true), command('重命名', 'rename'));
+                actions.append(command('提需求', 'request', true), command('本次工作', 'task'), command('加入岗位', 'add-role'), command('重命名', 'rename'));
                 host.append(actions);
                 const nodes = bridge.nodes().filter(n => flow.nodeIds.includes(n.id));
                 if (!nodes.length) host.append(el('p', '尚未加入岗位', 'role-module-status'));
@@ -135,12 +136,14 @@
                 const action = b.dataset.workflowAction, flow = current();
                 if (['director-group.v1', 'blank.v1'].includes(action)) return createFlow(action);
                 if (action === 'recover') return resolve();
+                if (action === 'my-templates') return bridge.engine?.roleCollaboration?.openTemplates();
                 if (action === 'reset') { selectedId = ''; kind = 'roles'; persist(); render(); return; }
                 if (action === 'open') return bridge.openWork(b.dataset.nodeId);
                 if (action === 'settings') return bridge.openSettings(b.dataset.nodeId);
                 if (!flow) return;
                 if (action === 'add-role') return bridge.openCreator({ saveMode: 'join' });
-                if (action === 'task') {
+                if (action === 'task' || action === 'request') {
+                    if (bridge.engine?.roleCollaboration) return bridge.engine.roleCollaboration.openWorkflow(flow.id, { newTask: action === 'request' });
                     const node = flow.nodeIds.find(id => bridge.nodes().some(n => n.id === id));
                     if (!node) throw new Error('请先加入岗位。');
                     return bridge.openWork(node, { configure: true });

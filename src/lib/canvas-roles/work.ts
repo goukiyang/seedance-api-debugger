@@ -4,12 +4,14 @@ import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
 import { assertCanUseReferenceImage } from '@/lib/reference-albums/permissions';
 import { assertCanViewTask } from '@/lib/projects/permissions';
-import { parseCanvasSnapshot } from '@/lib/canvas-documents';
+import { canvasMetadata, parseCanvasSnapshot, saveCanvasHistory } from '@/lib/canvas-documents';
 import { executionView } from './execution';
 import { assertDeliveryOriginals, authoredCanvasText, originalIdentity, submissionAttachments } from './media';
-import { assertLiveNode, ownedDefinition, ownedRun, roleDocument, type RoleDb } from './permissions';
+import { assertLiveNode, assertRoleCollaborationWritable, ownedDefinition, ownedRun, roleDocument, type RoleDb } from './permissions';
+import { isRoleCollaborationReadOnly } from './guard';
 import { roleMutation } from './repository';
 import { workflowSnapshots } from './workflow-schema';
+import { applyCollaborationReview, deliveryPhase } from './results';
 import { assertRolePrepared, digest, identifier, integer, pointCents, roleRunView, record, requirements, RoleError, text,
   type JsonRecord, type RoleParticipant, type RoleSnapshot, type TaskRequirements } from './types';
 
@@ -75,14 +77,14 @@ export async function materialSnapshot(db: RoleDb, user: SessionUser, documentJs
   }
   return result;
 }
-async function event(db: RoleDb, user: SessionUser, runId: string, revision: number, kind: string,
+export async function event(db: RoleDb, user: SessionUser, runId: string, revision: number, kind: string,
   workId: string | null, detail: JsonRecord, deliveryId?: string, from?: string, to?: string) {
   return db.canvasRoleEvent.create({ data: { id: randomUUID(), role_task_run_id: runId,
     requirements_revision: revision, work_id: workId, actor_user_id: user.id,
     actor_kind: 'person', kind, detail_json: JSON.stringify(detail),
     delivery_id: deliveryId, from_node_id: from, to_node_id: to } });
 }
-async function makeWork(db: RoleDb, user: SessionUser, runId: string, revision: number,
+export async function makeWork(db: RoleDb, user: SessionUser, runId: string, revision: number,
   p: RoleParticipant, documentJson: string, round = 1, supersedes?: CanvasRoleWork) {
   const nodes = JSON.parse(documentJson).canvas.nodes;
   const node = nodes.find((n: { id: string; type: string }) => n.id === p.nodeId && n.type === 'role');
@@ -110,15 +112,22 @@ async function makeWork(db: RoleDb, user: SessionUser, runId: string, revision: 
 export async function createTaskRun(user: SessionUser, body: JsonRecord) {
   const documentId = identifier(body.document_id);
   return roleMutation(user, body, 'role_task_create', async () => roleDocument(user, documentId, true), async db => {
-    const document = await roleDocument(user, documentId, true);
+    await roleDocument(user, documentId, true);
+    const document = await db.canvasDocument.findUniqueOrThrow({ where: { id: documentId } });
     if (integer(body.document_revision, 0) !== document.revision) throw new RoleError('画布已更新，请读取后再配置任务', 409, 'revision_conflict');
     const graph = parseCanvasSnapshot(document.document_json, document.project_id, false);
     const req = requirements(body.requirements, user.id, new Set(graph.canvas.nodes.filter(n => n.type === 'role').map(n => n.id)));
+    const collaboration = req.schema === 'role.requirements.v2';
+    if (collaboration) {
+      assertRoleCollaborationWritable();
+      const flow = workflowSnapshots(graph.canvas.roleWorkflows).find(item => item.id === req.workflowId);
+      if (!flow || req.participants.some(p => !flow.nodeIds.includes(p.nodeId))) throw new RoleError('本次任务须属于当前工作流', 409, 'workflow_scope_conflict');
+    }
     assertWorkflowParticipants(graph.canvas.roleWorkflows, req);
     assertReviewAuthorities(graph.canvas.nodes, req);
     req.materials = await materialSnapshot(db, user, document.document_json, req);
     const run = await db.canvasRoleTaskRun.create({ data: { id: randomUUID(), owner_user_id: user.id,
-      document_id: documentId, max_rounds: integer(body.max_rounds, 1, 100),
+      document_id: documentId, status: collaboration ? 'draft' : 'active', max_rounds: integer(body.max_rounds ?? (collaboration ? 3 : undefined), 1, 100),
       wait_limit_seconds: body.wait_limit_seconds == null ? null : integer(body.wait_limit_seconds, 1, 365 * 86400),
       budget_points_limit: body.budget_points_limit == null ? null : pointCents(body.budget_points_limit),
       budget_usd_micros_limit: body.budget_usd_micros_limit == null ? null : integer(body.budget_usd_micros_limit, 0, 1_000_000_000),
@@ -128,6 +137,26 @@ export async function createTaskRun(user: SessionUser, body: JsonRecord) {
     const works = [];
     for (const p of req.participants.filter(p => p.participation !== 'excluded')) works.push(await makeWork(db, user, run.id, 1, p, document.document_json));
     await event(db, user, run.id, 1, 'task_created', null, { goal: req.goal, endpoint: req.endpoint });
+    if (collaboration) {
+      const control = await db.canvasRoleRunControl.create({ data: { run_id: run.id, workflow_id: req.workflowId! } });
+      const existing = body.requirement_node_id ? graph.canvas.nodes.find(n => n.id === identifier(body.requirement_node_id)
+        && n.type === 'role-requirement' && record(n.data.roleRequirement) && n.data.roleRequirement.workflowId === req.workflowId && !n.data.roleRequirement.runId) : null;
+      if (body.requirement_node_id && !existing) throw new RoleError('需求草稿已变化，请重新读取画布', 409, 'requirement_node_conflict');
+      const pos = record(body.position) ? body.position : {};
+      const node = existing || { id: 'requirement-' + randomUUID(), type: 'role-requirement',
+        x: typeof pos.x === 'number' && Number.isFinite(pos.x) ? pos.x : 100,
+        y: typeof pos.y === 'number' && Number.isFinite(pos.y) ? pos.y : 100, data: {} as JsonRecord };
+      node.data = { title: req.goal.slice(0, 80), roleRequirement: { workflowId: req.workflowId, runId: run.id } };
+      if (!existing) graph.canvas.nodes.push(node);
+      graph.schemaVersion = 5;
+      const raw = JSON.stringify(parseCanvasSnapshot(JSON.stringify(graph), document.project_id, true));
+      const changed = await db.canvasDocument.updateMany({ where: { id: document.id, revision: document.revision, status: 'active', owner_user_id: user.id },
+        data: { document_json: raw, schema_version: 5, protocol_version: 2, revision: { increment: 1 } } });
+      if (changed.count !== 1) throw new RoleError('画布已变化，需求尚未保存，请保留草稿', 409, 'revision_conflict');
+      const updated = await db.canvasDocument.findUniqueOrThrow({ where: { id: document.id } });
+      await saveCanvasHistory(db, updated);
+      return { objectId: run.id, result: { run: roleRunView(run), works, requirements: req, control, document: canvasMetadata(updated), node } };
+    }
     return { objectId: run.id, result: { run: roleRunView(run), works, requirements: req } };
   });
 }
@@ -136,23 +165,36 @@ export async function latestWorks(db: RoleDb, runId: string, revision: number) {
   const seen = new Set<string>();
   return rows.filter(row => { if (seen.has(row.node_id)) return false; seen.add(row.node_id); return true; });
 }
-async function refreshInputs(db: RoleDb, user: SessionUser, runId: string, revision: number, req: TaskRequirements) {
+export function handoffContent(content: JsonRecord, items: string[] = [], deliverableItems: string[] = []): JsonRecord {
+  if (!items.length) return content;
+  const selected: JsonRecord = {};
+  for (const name of items) selected[name] = text(record(content.items) ? content.items[name] : undefined, 16000, true);
+  const attachments = Array.isArray(content.attachments) ? content.attachments.filter(ref => record(ref)
+    && (items.includes(String(ref.outputSlotId)) || /^item-\d+$/.test(String(ref.outputSlotId))
+      && items.includes(deliverableItems[Number(String(ref.outputSlotId).slice(5))]))) : [];
+  return { text: items.map(name => `${name}\n${selected[name]}`).join('\n\n'), items: selected, attachments,
+    selectedItems: items, omittedAttachmentCount: Array.isArray(content.attachments) ? content.attachments.length - attachments.length : 0 };
+}
+export async function refreshInputs(db: RoleDb, user: SessionUser, runId: string, revision: number, req: TaskRequirements) {
   const works = await latestWorks(db, runId, revision);
   for (const work of works) {
-    if (!['offered', 'needs_material', 'ready', 'rejected'].includes(work.phase)) continue;
+      if (!['offered', 'needs_material', 'ready', 'rejected', 'revision'].includes(work.phase)) continue;
     const p = participant(req, work.node_id), inputs = [], missing = [];
     for (const dep of p.dependencies) {
       const source = works.find(row => row.node_id === dep.nodeId);
       if (source?.phase === 'delivered' && source.current_delivery_id) {
         const delivery = await db.canvasRoleDelivery.findUnique({ where: { id: source.current_delivery_id } });
         if (!delivery || delivery.requirements_revision !== revision) throw new RoleError('有效材料版本不一致', 409, 'delivery_conflict');
-        inputs.push({ sourceWorkId: source.id, deliveryId: delivery.id, version: delivery.version, nodeId: source.node_id });
+        const selectedItems = req.relations?.find(r => r.type === 'handoff' && r.from === source.node_id && r.to === work.node_id)?.items || [];
+        const sourceContent = handoffContent(JSON.parse(delivery.content_json), selectedItems, participant(req, source.node_id).deliverableItems);
+        inputs.push({ sourceWorkId: source.id, deliveryId: delivery.id, version: delivery.version, nodeId: source.node_id,
+          ...(req.schema === 'role.requirements.v2' ? { selectedItems } : {}) });
         await db.canvasRoleHandoff.upsert({ where: {
           source_delivery_id_target_work_id_requirements_revision: {
             source_delivery_id: delivery.id, target_work_id: work.id, requirements_revision: revision },
         }, update: {}, create: { id: randomUUID(), role_task_run_id: runId, requirements_revision: revision,
           source_work_id: source.id, source_delivery_id: delivery.id, target_work_id: work.id,
-          bundle_json: JSON.stringify({ requirementsRevision: revision, deliveryId: delivery.id, content: JSON.parse(delivery.content_json) }) } });
+          bundle_json: JSON.stringify({ requirementsRevision: revision, deliveryId: delivery.id, content: sourceContent }) } });
       } else if (dep.required) missing.push(dep.nodeId);
     }
     const manualWait = work.wait_reason?.startsWith('请补材料：');
@@ -171,6 +213,11 @@ export async function finalizeDelivered(db: RoleDb, user: SessionUser, run: Canv
   const complete = req.participants.filter(p => p.participation === 'required').every(p => works.find(w => w.node_id === p.nodeId)?.phase === 'delivered')
     && works.find(w => w.node_id === req.finalNodeId)?.phase === 'delivered';
   if (!complete) return;
+  if (req.schema === 'role.requirements.v2') {
+    const { refreshResultManifest } = await import('./results');
+    await refreshResultManifest(db, user, run, req);
+    return;
+  }
   const updated = await db.canvasRoleTaskRun.updateMany({ where: { id: run.id, requirements_revision: run.requirements_revision, status: { not: 'delivered' } },
     data: { status: 'delivered', revision: { increment: 1 } } });
   if (!updated.count) return;
@@ -181,8 +228,11 @@ export async function finalizeDelivered(db: RoleDb, user: SessionUser, run: Canv
 export async function readWork(user: SessionUser, workId: string, params = new URLSearchParams()) {
   const work = await prisma.canvasRoleWork.findUnique({ where: { id: identifier(workId) } });
   if (!work) throw new RoleError('工作不存在', 404, 'work_not_found');
-  const { run, document } = await ownedRun(prisma, user, work.role_task_run_id);
+  let { run, document } = await ownedRun(prisma, user, work.role_task_run_id);
   const req = await taskRequirements(prisma, run.id, work.requirements_revision);
+  const media = req.schema === 'role.requirements.v2'
+    ? await (await import('./media-bindings')).reconcileRoleMediaBindings(user, run.id) : null;
+  if (media) ({ run, document } = await ownedRun(prisma, user, run.id));
   const before = params.get('cursor') || params.get('before');
   let eventId: string | undefined;
   if (before) {
@@ -216,7 +266,8 @@ export async function readWork(user: SessionUser, workId: string, params = new U
   const inputs = [];
   for (const input of JSON.parse(work.inputs_json)) {
     const delivery = await prisma.canvasRoleDelivery.findUnique({ where: { id: input.deliveryId } });
-    if (delivery) inputs.push({ ...input, content: JSON.parse(delivery.content_json) });
+    if (delivery) inputs.push({ ...input, content: handoffContent(JSON.parse(delivery.content_json), input.selectedItems,
+      req.participants.find(p => p.nodeId === input.nodeId)?.deliverableItems) });
   }
   const elapsed = work.wait_since ? Math.max(0, Math.floor((Date.now() - work.wait_since.getTime()) / 1000)) : 0;
   const waitingExpired = Boolean(work.wait_since && run.wait_limit_seconds && elapsed >= run.wait_limit_seconds);
@@ -230,13 +281,14 @@ export async function readWork(user: SessionUser, workId: string, params = new U
     catch (error) { actionUnavailableReason = error instanceof Error ? error.message : '原角色不可继续工作'; }
   }
   if (document.status !== 'active') actionUnavailableReason = '画布已归档，当前仅可回查历史';
+  if (isRoleCollaborationReadOnly()) actionUnavailableReason = '角色协作处于保护模式，历史可查看，暂不开始新操作';
   const contextGaps: string[] = JSON.parse(work.snapshot_json).role.contextGaps || [];
   const reviewerWork = currentWorks.find(w => w.node_id === work.reviewer_node_id);
   const reviewerContextGaps: string[] = reviewerWork ? JSON.parse(reviewerWork.snapshot_json).role.contextGaps || [] : [];
   const required = req.participants.filter(p => p.participation === 'required');
   const ownerReceipt = await prisma.canvasRoleEvent.findFirst({ where: { role_task_run_id: run.id,
     requirements_revision: work.requirements_revision, kind: 'owner_result_available' }, orderBy: { created_at: 'desc' } });
-  return { run: roleRunView(run), work: { ...work, snapshot: JSON.parse(work.snapshot_json) }, requirements: req, inputs,
+  return { run: roleRunView(run), work: { ...work, snapshot: JSON.parse(work.snapshot_json) }, requirements: req, inputs, media,
     draft_content: JSON.parse(work.snapshot_json).draftContent || { text: work.draft_text, items: {}, attachments: [] },
     revision_source: JSON.parse(work.snapshot_json).revisionSource || null,
     deliveries, attempts: attempts.slice(0, 30).map(a => ({ ...a, result_available: Boolean(a.result_json), result_json: undefined, reserved_points: a.reserved_points / 100,
@@ -254,8 +306,8 @@ export async function readWork(user: SessionUser, workId: string, params = new U
       action_available: !actionUnavailableReason, action_unavailable_reason: actionUnavailableReason,
       context_gaps: contextGaps,
       reviewer_context_gaps: reviewerContextGaps,
-      task_update_available: isCurrentWork && document.status === 'active',
-      task_control_available: isCurrentWork && document.status === 'active',
+      task_update_available: isCurrentWork && document.status === 'active' && !isRoleCollaborationReadOnly(),
+      task_control_available: isCurrentWork && document.status === 'active' && !isRoleCollaborationReadOnly(),
       completed_required: required.filter(p => currentWorks.find(w => w.node_id === p.nodeId)?.phase === 'delivered').length,
       required_count: required.length,
       pending_node_ids: required.filter(p => currentWorks.find(w => w.node_id === p.nodeId)?.phase !== 'delivered').map(p => p.nodeId),
@@ -285,6 +337,71 @@ export async function listWorks(user: SessionUser, params: URLSearchParams) {
   }
   return { runs: runs.map(roleRunView), works, scope: 'current_document', limited_to_runs: 30, next_cursor: page.length > 30 ? runs[29].id : null };
 }
+
+export async function listTaskRuns(user: SessionUser, params: URLSearchParams) {
+  const documentId = identifier(params.get('document_id'));
+  await roleDocument(user, documentId);
+  const workflowId = params.get('workflow_id') ? identifier(params.get('workflow_id')) : null;
+  const where = { owner_user_id: user.id, document_id: documentId,
+    ...(workflowId ? { control: { is: { workflow_id: workflowId } } } : {}) };
+  const cursor = params.get('cursor');
+  if (cursor && !await prisma.canvasRoleTaskRun.findFirst({ where: { ...where, id: identifier(cursor) }, select: { id: true } })) throw new RoleError('任务分页位置已失效');
+  const rows = await prisma.canvasRoleTaskRun.findMany({ where, orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+    take: 31, include: { control: true }, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
+  const runs = [];
+  for (const row of rows.slice(0, 30)) {
+    const req = await taskRequirements(prisma, row.id, row.requirements_revision);
+    runs.push({ ...roleRunView(row), goal: req.goal.slice(0, 240) });
+  }
+  return { runs, next_cursor: rows.length > 30 ? rows[29].id : null };
+}
+
+export async function readTaskRun(user: SessionUser, runId: string, params = new URLSearchParams()) {
+  let { run } = await ownedRun(prisma, user, identifier(runId));
+  if (params.get('event_id')) {
+    const entry = await prisma.canvasRoleEvent.findFirst({ where: { id: identifier(params.get('event_id')), role_task_run_id: run.id } });
+    if (!entry) throw new RoleError('记录不存在或不可访问', 404, 'event_not_found');
+    return { event: entry };
+  }
+  if (params.get('delivery_id')) {
+    const delivery = await prisma.canvasRoleDelivery.findFirst({ where: { id: identifier(params.get('delivery_id')), work: { role_task_run_id: run.id } } });
+    if (!delivery) throw new RoleError('稿件不存在或不可访问', 404, 'delivery_not_found');
+    return { delivery };
+  }
+  const control = await prisma.canvasRoleRunControl.findUnique({ where: { run_id: run.id } });
+  const req = await taskRequirements(prisma, run.id, run.requirements_revision);
+  const media = control ? await (await import('./media-bindings')).reconcileRoleMediaBindings(user, run.id) : null;
+  if (media) ({ run } = await ownedRun(prisma, user, run.id));
+  const works = (await latestWorks(prisma, run.id, run.requirements_revision)).map(work => ({ ...work,
+    snapshot: JSON.parse(work.snapshot_json), assignment: req.participants.find(p => p.nodeId === work.node_id) }));
+  const cursor = params.get('question_cursor');
+  if (cursor && !await prisma.canvasRoleQuestion.findFirst({ where: { id: identifier(cursor), run_id: run.id,
+    requirements_revision: run.requirements_revision }, select: { id: true } })) throw new RoleError('问题分页位置失效');
+  const questionRows = control ? await prisma.canvasRoleQuestion.findMany({ where: { run_id: run.id, requirements_revision: run.requirements_revision },
+    orderBy: [{ created_at: 'desc' }, { id: 'desc' }], take: 31, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) }) : [];
+  const questions = [];
+  for (const question of questionRows.slice(0, 30)) {
+    const opened = await prisma.canvasRoleEvent.findFirst({ where: { role_task_run_id: run.id,
+      work_id: question.from_work_id, requirements_revision: question.requirements_revision,
+      kind: 'question_opened', detail_json: { contains: `"questionId":${JSON.stringify(question.id)}` } },
+      select: { actor_kind: true } });
+    const authorKind = opened?.actor_kind === 'ai' || opened?.actor_kind === 'person' ? opened.actor_kind : 'unknown';
+    const answer = question.answer_event_id ? await prisma.canvasRoleEvent.findFirst({ where: { id: question.answer_event_id, role_task_run_id: run.id } }) : null;
+    questions.push({ ...question, author_kind: authorKind, body: JSON.parse(question.body_json), answer: answer ? { ...answer,
+      author_kind: answer.actor_kind === 'ai' || answer.actor_kind === 'person' ? answer.actor_kind : 'unknown',
+      detail: JSON.parse(answer.detail_json) } : null });
+  }
+  const manifest = control?.current_manifest_event_id ? await prisma.canvasRoleEvent.findFirst({ where: { id: control.current_manifest_event_id, role_task_run_id: run.id, kind: 'result_manifest' } }) : null;
+  const { roleTextReadiness } = await import('./text-billing');
+  const manualOnly = works.length > 0 && works.every(work => work.snapshot.role?.executor?.kind === 'person');
+  return { run: roleRunView(run), control: control ? await prisma.canvasRoleRunControl.findUnique({ where: { run_id: run.id } }) : null,
+    requirements: req, works, questions, media, readOnly: isRoleCollaborationReadOnly(),
+    question_next_cursor: questionRows.length > 30 ? questionRows[29].id : null,
+    manifest: manifest ? { ...JSON.parse(manifest.detail_json), eventId: manifest.id } : null,
+    readiness: isRoleCollaborationReadOnly() ? { enabled: false, code: 'collaboration_guard', reason: '角色协作处于保护模式，历史可查看，暂不开始新操作。', pointsPerUsd: 35 }
+      : manualOnly ? { enabled: true, code: 'manual_only', reason: '本次由本人执行，不会调用文字模型。', pointsPerUsd: 35 }
+      : await roleTextReadiness(prisma) };
+}
 export async function readRoleAttempt(user: SessionUser, attemptId: string) {
   const attempt = await prisma.canvasRoleAttempt.findUnique({ where: { id: identifier(attemptId) }, select: {
     id: true, work_id: true, request_id: true, purpose: true, state: true, fee_state: true, started_at: true, finished_at: true,
@@ -293,14 +410,21 @@ export async function readRoleAttempt(user: SessionUser, attemptId: string) {
   } });
   if (!attempt) throw new RoleError('原请求不存在', 404, 'attempt_not_found');
   const work = await prisma.canvasRoleWork.findUniqueOrThrow({ where: { id: attempt.work_id } });
-  await ownedRun(prisma, user, work.role_task_run_id);
+  const { run } = await ownedRun(prisma, user, work.role_task_run_id);
   return { attempt: { ...attempt, reserved_points: attempt.reserved_points / 100,
+    base_revision: run.revision,
+    receipt_digest: attempt.settlement_receipt ? digest(JSON.parse(attempt.settlement_receipt)) : null,
+    budget_points_limit: run.budget_points_limit == null ? null : run.budget_points_limit / 100,
+    budget_usd_micros_limit: run.budget_usd_micros_limit,
     settled_points: attempt.settled_points == null ? null : attempt.settled_points / 100,
     confirmed_bill_usd_micros: attempt.settlement_receipt ? JSON.parse(attempt.settlement_receipt).amountMicros ?? null : null,
     settlement_receipt: undefined }, resend: false };
 }
 export function workInputDigest(work: CanvasRoleWork, req: TaskRequirements) {
-  return digest({ requirementsRevision: work.requirements_revision, materials: req.materials || [], inputs: JSON.parse(work.inputs_json) });
+  return digest({ requirementsRevision: work.requirements_revision, materials: req.materials || [], inputs: JSON.parse(work.inputs_json),
+    ...(req.schema === 'role.requirements.v2' ? { goal: req.goal, criteria: req.criteria,
+      assignment: req.participants.find(p => p.nodeId === work.node_id),
+      relations: req.relations?.filter(r => r.from === work.node_id || r.to === work.node_id) } : {}) });
 }
 export async function assertCurrentMaterials(db: RoleDb, user: SessionUser, documentJson: string, req: TaskRequirements) {
   if (digest(await materialSnapshot(db, user, documentJson, req)) !== digest(req.materials || [])) {
@@ -309,7 +433,7 @@ export async function assertCurrentMaterials(db: RoleDb, user: SessionUser, docu
 }
 export async function assertEffectiveInputs(db: RoleDb, work: CanvasRoleWork, req: TaskRequirements, documentJson: string, user: SessionUser) {
   const works = await latestWorks(db, work.role_task_run_id, work.requirements_revision);
-  const inputs = JSON.parse(work.inputs_json) as Array<{ nodeId: string; sourceWorkId: string; deliveryId: string }>;
+  const inputs = JSON.parse(work.inputs_json) as Array<{ nodeId: string; sourceWorkId: string; deliveryId: string; selectedItems?: string[] }>;
   const deps = participant(req, work.node_id).dependencies;
   for (const dep of deps) {
     const input = inputs.find(i => i.nodeId === dep.nodeId);
@@ -325,23 +449,41 @@ export async function assertEffectiveInputs(db: RoleDb, work: CanvasRoleWork, re
       throw new RoleError('交接材料已被修订，不能继续采用旧成果', 409, 'input_conflict');
     }
     assertLiveNode(source, documentJson);
-    await assertDeliveryOriginals(db, user, JSON.parse(delivery.content_json));
+    const items = req.relations?.find(r => r.type === 'handoff' && r.from === source.node_id && r.to === work.node_id)?.items || [];
+    if (req.schema === 'role.requirements.v2' && digest(items) !== digest(input.selectedItems || [])) throw new RoleError('交接范围已变化，请更新当前任务', 409, 'input_conflict');
+    await assertDeliveryOriginals(db, user, handoffContent(JSON.parse(delivery.content_json), items,
+      req.participants.find(p => p.nodeId === source.node_id)?.deliverableItems));
   }
   if (inputs.some(i => !deps.some(d => d.nodeId === i.nodeId))) throw new RoleError('交接关系与本次要求不一致', 409, 'input_conflict');
 }
 export async function updateTaskRun(user: SessionUser, runId: string, body: JsonRecord) {
   return roleMutation(user, body, `role_task_update:${identifier(runId)}`, db => ownedRun(db, user, runId, true), async db => {
     const { run, document } = await ownedRun(db, user, runId, true);
+    const control = await db.canvasRoleRunControl.findUnique({ where: { run_id: run.id } });
+    if (control) {
+      assertRoleCollaborationWritable();
+      if (run.status !== 'draft' && body.apply_current !== true) throw new RoleError('请明确将修改用于当前任务；原运行不会随配置改变', 409, 'revision_confirmation_required');
+    }
     if (integer(body.base_revision) !== run.revision || integer(body.document_revision, 0) !== document.revision) throw new RoleError('任务或画布已更新，请重新核对', 409, 'revision_conflict');
     // Uncertain external requests cannot be bypassed by changing requirements.
     const inFlight = await db.canvasRoleAttempt.count({ where: { work: { role_task_run_id: run.id }, OR: [{ state: { in: ['reserved', 'sending', 'unknown'] } }, { fee_state: { in: ['pending', 'unknown', 'authorization_required'] } }] } });
-    if (inFlight) throw new RoleError('尚有模型请求或费用待核对，请先恢复原回执', 409, 'attempt_unresolved');
+    if (inFlight) {
+      if (!control) throw new RoleError('尚有模型请求或费用待核对，请先恢复原回执', 409, 'attempt_unresolved');
+      const updated = await db.canvasRoleTaskRun.update({ where: { id: run.id }, data: { paused: true, revision: { increment: 1 } } });
+      const pending = await event(db, user, run.id, run.requirements_revision, 'revision_waiting', null, {
+        reason: '原请求或费用未确认，请保留编辑内容；已暂停新派发，核清后再应用', applied: false });
+      const updatedControl = await db.canvasRoleRunControl.update({ where: { run_id: run.id }, data: { mode: 'paused', pause_reason: 'revision_waiting',
+        active_grant_id: null, revision: { increment: 1 } } });
+      await db.canvasRoleDispatch.updateMany({ where: { run_id: run.id, state: 'queued' }, data: { state: 'held', last_error: 'revision_waiting' } });
+      return { objectId: run.id, result: { run: roleRunView(updated), control: updatedControl, pending: true, pending_event_id: pending.id, applied: false } };
+    }
     const graph = parseCanvasSnapshot(document.document_json, document.project_id, false).canvas;
     const nodes = graph.nodes;
     const previous = await taskRequirements(db, run.id, run.requirements_revision);
     const oldWorks = await latestWorks(db, run.id, run.requirements_revision);
     const limitsOnly = body.update_kind === 'limits' || body.requirements === undefined;
     const req = limitsOnly ? previous : requirements(body.requirements, user.id, new Set(nodes.filter(n => n.type === 'role').map(n => n.id)));
+    if (control && (req.schema !== 'role.requirements.v2' || req.workflowId !== control.workflow_id)) throw new RoleError('不能更换任务所属工作流或退回旧格式', 409, 'workflow_scope_conflict');
     if (!limitsOnly) assertWorkflowParticipants(graph.roleWorkflows, req);
     if (!limitsOnly) assertReviewAuthorities(nodes, req);
     const configuredChanged = digest({ ...req, materials: undefined }) !== digest({ ...previous, materials: undefined });
@@ -381,10 +523,17 @@ export async function updateTaskRun(user: SessionUser, runId: string, body: Json
     if (maximum && maxRounds < maximum.round) throw new RoleError('修订上限不能低于已经发生的轮次', 409, 'round_limit');
     const updated = await db.canvasRoleTaskRun.update({ where: { id: run.id }, data: {
       requirements_revision: revision, revision: { increment: 1 }, ...(contentChanged ? { status: 'active' } : {}),
+      ...(control ? { paused: true, status: run.status === 'draft' ? 'draft' : 'active' } : {}),
       ...limits,
       max_rounds: maxRounds,
       ...(body.wait_limit_seconds !== undefined ? { wait_limit_seconds: body.wait_limit_seconds === null ? null : integer(body.wait_limit_seconds, 1, 365 * 86400) } : {}),
     } });
+    if (control) {
+      await db.canvasRoleRunControl.update({ where: { run_id: run.id }, data: { active_grant_id: null, mode: 'paused', pause_reason: 'requirements_changed',
+        current_manifest_event_id: null, acceptance_event_id: null, revision: { increment: 1 } } });
+      await db.canvasRoleDispatch.updateMany({ where: { run_id: run.id, state: { in: ['queued', 'held', 'leased'] }, attempt_id: null },
+        data: { state: 'cancelled', last_error: 'requirements_changed' } });
+    }
     if (!contentChanged) {
       await event(db, user, run.id, revision, 'task_limits_changed', null, { workIdsRetained: true, requirementsRetained: true, feesRetained: true });
       return { objectId: run.id, result: { run: roleRunView(updated), works: oldWorks, requirements: previous, content_changed: false } };
@@ -452,6 +601,11 @@ export async function actOnWork(user: SessionUser, workId: string, body: JsonRec
     if (integer(body.base_revision) !== work.revision || integer(body.requirements_revision) !== run.requirements_revision
       || work.requirements_revision !== run.requirements_revision) throw new RoleError('任务已更新，请保留草稿并重新核对', 409, 'revision_conflict');
     const req = await taskRequirements(db, run.id, run.requirements_revision), p = participant(req, work.node_id);
+    if (req.schema === 'role.requirements.v2') {
+      assertRoleCollaborationWritable();
+      if (['pause', 'resume'].includes(String(body.action))) throw new RoleError('请从本次任务栏暂停或继续，不能绕过任务授权', 409, 'task_control_required');
+      if (run.status === 'cancelled' && body.action !== 'message') throw new RoleError('本次任务已取消，记录仍可查看', 409, 'task_cancelled');
+    }
     if ((await latestWorks(db, run.id, run.requirements_revision)).find(w => w.node_id === work.node_id)?.id !== work.id) {
       throw new RoleError('这是历史修订，记录保留；请打开当前工作后操作', 409, 'work_superseded');
     }
@@ -465,6 +619,21 @@ export async function actOnWork(user: SessionUser, workId: string, body: JsonRec
       if (run.paused) throw new RoleError('任务已暂停，请先继续', 409, 'task_paused');
       assertLiveNode(work, document.document_json);
       await assertCurrentMaterials(db, user, document.document_json, req);
+    }
+    if (req.schema === 'role.requirements.v2' && ['approve', 'return', 'confirm', 'revise', 'suggest'].includes(action)) {
+      return { objectId: work.id, result: await applyCollaborationReview(db, user, run, work, req, body) };
+    }
+    if (req.schema === 'role.requirements.v2' && action === 'adopt_media') {
+      const { adoptRoleMediaBinding } = await import('./media-bindings');
+      const adopted = await adoptRoleMediaBinding(db, user, work, identifier(body.binding_id));
+      const snapshot = JSON.parse(work.snapshot_json), draft = snapshot.draftContent || { text: work.draft_text, items: {}, attachments: [] };
+      const attachments = [...(draft.attachments || []), ...adopted.attachments].filter((item, index, all) =>
+        all.findIndex(ref => ref.mediaBindingId === item.mediaBindingId && ref.sourceDigest === item.sourceDigest) === index);
+      if (attachments.length > 20) throw new RoleError('本稿原件最多20项，请整理后再采用');
+      const updated = await db.canvasRoleWork.update({ where: { id: work.id }, data: { snapshot_json: JSON.stringify({ ...snapshot,
+        draftContent: { ...draft, attachments } }), revision: { increment: 1 } } });
+      await event(db, user, run.id, run.requirements_revision, 'media_adopted', work.id, { bindingId: adopted.bindingId, submitted: false });
+      return { objectId: work.id, result: { work: updated, adopted, submitted: false } };
     }
     let next = work.phase, detail: JsonRecord = {}, deliveryId = work.current_delivery_id;
     let successor: CanvasRoleWork | null = null;
@@ -499,14 +668,17 @@ export async function actOnWork(user: SessionUser, workId: string, body: JsonRec
       if (snap.executor.kind !== 'person' && !(p.ownerMaySubmit && body.owner_proxy === true)) throw new RoleError('未允许本人代提交，请在本次任务中明确配置', 403, 'submission_not_authorized');
       if (snap.executor.kind === 'person' && snap.executor.userId !== user.id) throw new RoleError('不是本次执行者', 403, 'executor_mismatch');
       await assertEffectiveInputs(db, work, req, document.document_json, user);
-      const attachments = await submissionAttachments(db, user, document.document_json, run.id, body.attachments);
+      const attachments = await submissionAttachments(db, user, document.document_json, run.id, body.attachments, work.id);
       const content = text(body.text, 100000);
+      if (body.changes !== undefined && (!Array.isArray(body.changes) || body.changes.length > 30
+        || body.changes.some(item => typeof item !== 'string'))) throw new RoleError('修改说明须为最多30条文字');
+      const changes = Array.isArray(body.changes) ? body.changes.map(item => text(item, 4000, true)) : [];
       if (action === 'submit' && !content && !attachments.length) throw new RoleError('请填写成果正文或选择合法原件');
       const items: Record<string, string> = Object.create(null);
       if (body.items !== undefined && !record(body.items)) throw new RoleError('必交项格式无效');
-      for (const name of snap.requiredItems) items[name] = text(record(body.items) ? body.items[name] : undefined, 16000, action === 'submit');
+      for (const name of Array.from(new Set([...snap.requiredItems, ...(p.deliverableItems || [])]))) items[name] = text(record(body.items) ? body.items[name] : undefined, 16000, action === 'submit');
       await db.canvasRoleWork.update({ where: { id: work.id }, data: { draft_text: content,
-        snapshot_json: JSON.stringify({ ...JSON.parse(work.snapshot_json), draftContent: { text: content, items, attachments } }) } });
+        snapshot_json: JSON.stringify({ ...JSON.parse(work.snapshot_json), draftContent: { text: content, items, attachments, changes } }) } });
       if (action === 'draft') {
         next = 'working'; detail = { saved: true, submitted: false };
       } else {
@@ -514,10 +686,10 @@ export async function actOnWork(user: SessionUser, workId: string, body: JsonRec
         if (body.input_digest !== inputDigest) throw new RoleError('材料版本已变，请重新核对', 409, 'input_conflict');
         const count = await db.canvasRoleDelivery.count({ where: { work_id: work.id } });
         const delivery = await db.canvasRoleDelivery.create({ data: { id: randomUUID(), work_id: work.id,
-          version: count + 1, requirements_revision: run.requirements_revision, content_json: JSON.stringify({ text: content, items, attachments }),
+          version: count + 1, requirements_revision: run.requirements_revision, content_json: JSON.stringify({ text: content, items, attachments, changes }),
           input_digest: inputDigest, submitted_by: user.id, submission_kind: snap.executor.kind === 'person' ? 'person' : 'owner_proxy' } });
         deliveryId = delivery.id;
-        next = work.reviewer_node_id ? 'review' : work.confirm_required ? 'confirmation' : 'delivered';
+        next = deliveryPhase(work, req);
         detail = { deliveryVersion: delivery.version, submissionKind: delivery.submission_kind };
       }
     } else if (['approve', 'return', 'confirm', 'revise'].includes(action)) {

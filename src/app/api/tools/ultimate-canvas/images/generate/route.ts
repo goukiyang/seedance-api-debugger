@@ -8,6 +8,7 @@ import { resolveCanvasStudioReferenceUse } from '@/lib/canvas-studio-reference-u
 import { getCanvasImageQuote } from '@/lib/canvas-quote';
 import { defaultStudioModuleId, saveStudioModule, validStudioModuleId } from '@/lib/image-studio/modules';
 import { submitStudioBatch } from '@/lib/image-studio/tasks';
+import { roleMediaFingerprint } from '@/lib/canvas-roles/media-bindings';
 import { prepareImageBillingQuote } from '@/lib/image-studio/billing-quote-service';
 import { canvasImageReferencePolicy } from '@/lib/canvas-image-references';
 import { validateStudioReferenceCounts } from '@/lib/image-studio/reference-policy';
@@ -35,12 +36,19 @@ export async function POST(request: NextRequest) {
     const body = await readCanvasStyleJson(request);
     const context = parseCanvasStyleContext(body);
     await assertCanvasStyleContext(user, context);
+    if (body.roleMediaContext !== undefined) {
+      roleMediaFingerprint(body.roleMediaContext);
+      const roleContext = body.roleMediaContext as Record<string, unknown>;
+      if (roleContext.ownerId !== user.id || roleContext.documentId !== context.documentId
+        || roleContext.generationNodeId !== context.nodeId || roleContext.kind !== 'image') throw new AuthError('角色媒体来源与原生成器不匹配', 403);
+    }
     await assertCanvasPromptCompatibility(user, context.documentId, context.nodeId, String(body.prompt || ''), body.promptMentions);
     if (!context.documentId || !context.nodeId || !validStudioModuleId(body.moduleId, user.id)
       || typeof body.requestId !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) throw new AuthError('图片任务归属或编号无效', 400);
     const doc = await prisma.canvasDocument.findUniqueOrThrow({ where: { id: context.documentId } });
     const graph = JSON.parse(doc.document_json);
     const node = graph.canvas.nodes.find((item: { id: string }) => item.id === context.nodeId);
+    if (node?.data?.roleMediaOrigin && body.roleMediaContext === undefined) throw new AuthError('此生成节点属于固定角色工作，请从原岗位重新打开生成器', 409);
     const job = node?.data?.styleJob;
     if (node?.type !== 'image' || body.action !== 'quote' && (job?.kind !== 'ordinary' || job.requestId !== body.requestId
       || job.moduleId !== body.moduleId || JSON.stringify(job.input) !== JSON.stringify(body))) throw new AuthError('请先保存本次图片请求，再确认提交', 409);
@@ -82,7 +90,8 @@ export async function POST(request: NextRequest) {
       imageChannel: body.imageChannel, quality: settings.quality, resolution: settings.resolution, aspectRatio: settings.ratio };
     const promptBinding = mentions ? { mentions, referenceAssets } : undefined;
     if (body.action === 'quote') return canvasStyleJson(await prepareImageBillingQuote(user.id, submission, undefined, { user, referenceImageIds }, promptBinding));
-    const batchId = await submitStudioBatch(user.id, submission, undefined, undefined, { user, referenceImageIds }, promptBinding);
+    const batchId = await submitStudioBatch(user.id, submission, undefined, undefined, { user, referenceImageIds }, promptBinding,
+      body.roleMediaContext === undefined ? undefined : { user, context: body.roleMediaContext, generationNodeId: context.nodeId });
     return canvasStyleJson({ batchId, moduleId: body.moduleId, count: Number(settings.count) }, 202);
   } catch (error) { return canvasStyleFailure(error, '提交结果未确认，请查询原图片请求，不要重新生成'); }
 }

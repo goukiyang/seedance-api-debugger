@@ -5,8 +5,8 @@ import type { SessionUser } from '@/lib/auth/session';
 import { assertRoleUser, assertCurrentRoleUser, ownedDefinition, type RoleDb } from './permissions';
 import { digest, identifier, integer, record, roleSnapshot, RoleError, ROLE_PAGE_SIZE, text, type JsonRecord, type RoleSnapshot } from './types';
 
-export async function roleMutation<T>(user: SessionUser, body: JsonRecord, kind: string,
-  authorize: (db: RoleDb) => Promise<unknown>, perform: (db: RoleDb) => Promise<{ objectId: string; result: T }>) {
+export async function roleMutation<T extends { objectId: string; result: unknown }>(user: SessionUser, body: JsonRecord, kind: string,
+  authorize: (db: RoleDb) => Promise<unknown>, perform: (db: RoleDb) => Promise<T>) {
   assertRoleUser(user);
   const mutationId = identifier(body.mutation_id), requestHash = digest({ kind, body });
   async function replay(db: RoleDb) {
@@ -78,6 +78,7 @@ export async function getRole(user: SessionUser, roleId: string, version?: numbe
 export async function createRole(user: SessionUser, body: JsonRecord) {
   return roleMutation(user, body, 'role_create', async () => assertRoleUser(user), async db => {
     const snapshot = roleSnapshot(body.snapshot, user.id);
+    snapshot.provenance = { kind: 'user', version: '1', source: '本人创建' };
     const roleId = `role-${digest([user.id, body.mutation_id])}`;
     const role = await db.canvasRoleDefinition.create({ data: { id: roleId, owner_user_id: user.id, name: snapshot.name } });
     const version = await db.canvasRoleVersion.create({ data: {
@@ -103,6 +104,8 @@ export async function editRole(user: SessionUser, roleId: string, body: JsonReco
     if (action === 'edit') {
       if (role.status !== 'active') throw new RoleError('请先恢复角色再编辑', 409, 'role_archived');
       snapshot = roleSnapshot(body.snapshot, user.id);
+      snapshot.provenance = { kind: 'user', version: String(role.current_version + 1),
+        source: `本人编辑；原角色版本${role.current_version}及其来源保留在历史中` };
       if (previousSnapshot.workflowOnly && !snapshot.workflowOnly) throw new RoleError('此岗位属于工作流，请保留归属；历史角色不受影响', 409, 'workflow_required');
       if (previousSnapshot.reviewAuthority && snapshot.reviewAuthority !== previousSnapshot.reviewAuthority) throw new RoleError('请保留此岗位的审核职责；其他职责可另建角色', 409, 'role_authority_changed');
       if ((previousSnapshot.contextGaps?.length || 0) > (snapshot.contextGaps?.length || 0)) {
@@ -132,6 +135,10 @@ export async function roleReceipt(user: SessionUser, mutationId: string) {
     const { roleDocument } = await import('./permissions');
     await roleDocument(user, receipt.object_id);
   } else if (response.role?.id === receipt.object_id) await ownedDefinition(prisma, user, receipt.object_id);
+  else if (response.template?.id === receipt.object_id) {
+    const { ownedRoleTemplate } = await import('./templates');
+    await ownedRoleTemplate(prisma, user, receipt.object_id);
+  }
   else {
     const { ownedRun } = await import('./permissions');
     const work = await prisma.canvasRoleWork.findUnique({ where: { id: receipt.object_id } });

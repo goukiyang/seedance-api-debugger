@@ -30,6 +30,8 @@ async function main() {
     ...STUDIO_SHARED_WORKER_FILES,
     'src/lib/image-studio/billing-quote-service.ts', 'src/lib/image-studio/billing-quote-store.ts',
     'src/lib/image-studio/batch-billing-quote.ts', 'src/lib/image-studio/batch-contract.ts',
+    ...fs.readdirSync(path.join(process.cwd(), 'src/lib/canvas-roles')).filter(file => file.endsWith('.ts'))
+      .sort().map(file => `src/lib/canvas-roles/${file}`),
   ])).map(file => [file, createHash('sha256').update(fs.readFileSync(path.join(process.cwd(), file))).digest('hex')]));
   console.log('[image-studio-source]', JSON.stringify({ source: /^[a-f0-9]{40}$/.test(source) ? source : 'unknown',
     version: packageInfo.version, billingContract: IMAGE_BILLING_VERSION, sharedContract: 'shared-live-v1', loadedModuleSha }));

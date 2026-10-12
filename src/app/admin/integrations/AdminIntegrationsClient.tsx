@@ -1,12 +1,17 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import PageBanner from '@/components/PageBanner';
 import { useProductDialog } from '@/components/useProductDialog';
 import { useSettingsPageSubmit } from '@/lib/hooks/use-settings-page-submit';
 import { RelativeTime } from '@/components/RelativeTime';
 import { LoadingSkeleton } from '@/components/LoadingState';
 import ImageModelApiSettings from './ImageModelApiSettings';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
+import dialogStyles from '@/components/ProductDialog.module.css';
+import { Settings, X } from 'lucide-react';
+import { STUDIO_TEXT_MODELS } from '@/lib/template-studio/text-models';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { displayUserSubtitle } from '@/lib/users/display';
 import { VOLCENGINE_IP_MODEL_OPTIONS } from '@/lib/integrations/volcengine-ip-models';
@@ -227,6 +232,160 @@ function linkedUserSubtitle(config: CodexConfig) {
   return `${displayUserSubtitle(user) || user.id.slice(0, 8)} · ${user.status}`;
 }
 
+type RoleTextPolicyDto = {
+  revision: number; enabled: boolean; allowUnpricedText: boolean; allowedModels: string[];
+  maxInputBytes: number; maxOutputTokens: number; consentValid: boolean; needsConsent: boolean;
+  pointsPerUsd: 35; riskNoticeVersion: string;
+};
+type RoleTextPolicyDraft = Pick<RoleTextPolicyDto, 'enabled' | 'allowUnpricedText' | 'allowedModels' | 'maxInputBytes' | 'maxOutputTokens'>;
+
+function isRoleTextPolicyDto(value: unknown): value is RoleTextPolicyDto {
+  if (!value || typeof value !== 'object') return false;
+  const policy = value as RoleTextPolicyDto;
+  return Number.isSafeInteger(policy.revision) && policy.revision >= 0 && policy.pointsPerUsd === 35
+    && typeof policy.enabled === 'boolean' && typeof policy.allowUnpricedText === 'boolean'
+    && typeof policy.consentValid === 'boolean' && typeof policy.needsConsent === 'boolean'
+    && typeof policy.riskNoticeVersion === 'string' && Array.isArray(policy.allowedModels)
+    && policy.allowedModels.every(id => STUDIO_TEXT_MODELS.some(model => model.id === id))
+    && Number.isSafeInteger(policy.maxInputBytes) && policy.maxInputBytes > 0 && policy.maxInputBytes <= 131072
+    && Number.isSafeInteger(policy.maxOutputTokens) && policy.maxOutputTokens > 0 && policy.maxOutputTokens <= 4096;
+}
+
+function policyDraft(policy: RoleTextPolicyDto): RoleTextPolicyDraft {
+  return { enabled: policy.enabled, allowUnpricedText: policy.allowUnpricedText, allowedModels: policy.allowedModels,
+    maxInputBytes: policy.maxInputBytes, maxOutputTokens: policy.maxOutputTokens };
+}
+
+function RoleTextPolicySettings({ accountId, onClose, onDirtyChange, onSavingChange, confirm }: {
+  accountId: string; onClose: () => void; onDirtyChange: (dirty: boolean) => void;
+  onSavingChange: (saving: boolean) => void; confirm: ReturnType<typeof useProductDialog>['confirm'];
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const lock = useRef(false);
+  const alive = useRef(false);
+  const generation = useRef(0);
+  const dismissing = useRef(false);
+  const [policy, setPolicy] = useState<RoleTextPolicyDto | null>(null);
+  const [draft, setDraft] = useState<RoleTextPolicyDraft | null>(null);
+  const [baseline, setBaseline] = useState('');
+  const [providerReady, setProviderReady] = useState(false);
+  const [riskAcknowledged, setRiskAcknowledged] = useState(false);
+  const [reading, setReading] = useState(true);
+  const [savingPolicy, setSavingPolicy] = useState(false);
+  const [needsRead, setNeedsRead] = useState(false);
+  const [error, setError] = useState('');
+  const dirty = Boolean(draft && (JSON.stringify(draft) !== baseline || riskAcknowledged));
+
+  useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
+  async function read(preserve = false) {
+    if (lock.current) return;
+    const epoch = generation.current;
+    lock.current = true; setReading(true); setError('');
+    try {
+      const response = await fetch('/api/admin/integrations/musk', { cache: 'no-store' });
+      const data = await response.json();
+      if (!alive.current || generation.current !== epoch) return;
+      if (!response.ok || data.ok !== true || !isRoleTextPolicyDto(data.role_text_policy)) {
+        throw new Error(data.role_text_policy_error || data.error || '未读取到有效角色文字政策，未按默认启用处理。');
+      }
+      const next: RoleTextPolicyDto = data.role_text_policy;
+      setPolicy(next); setNeedsRead(false); setRiskAcknowledged(false);
+      setProviderReady(data.config?.enabled === true && data.config?.api_key_configured === true
+        && typeof data.config.base_url === 'string' && new URL(data.config.base_url).origin === 'https://api.muskapis.com');
+      if (!preserve) { const values = policyDraft(next); setDraft(values); setBaseline(JSON.stringify(values)); }
+    } catch (cause) {
+      if (alive.current && generation.current === epoch) { setNeedsRead(true); setError(cause instanceof Error ? cause.message : '读取角色文字政策失败'); }
+    } finally {
+      if (alive.current && generation.current === epoch) { lock.current = false; setReading(false); }
+    }
+  }
+  useDialogDismiss({ open: true, dialogRef: dialog, nativeDialog: true, onDismiss: () => { void dismiss(); } });
+  useEffect(() => {
+    generation.current++; alive.current = true; lock.current = false; dialog.current?.showModal(); void read();
+    return () => { generation.current++; alive.current = false; onDirtyChange(false); onSavingChange(false); };
+  }, [accountId]);
+
+  async function dismiss() {
+    if (savingPolicy || dismissing.current) return;
+    dismissing.current = true;
+    try {
+      if (dirty && !await confirm('角色文字设置尚未保存，放弃本次修改？', { title: '放弃修改', confirmLabel: '放弃修改' })) return;
+      if (alive.current) onClose();
+    } finally { dismissing.current = false; }
+  }
+  function change(patch: Partial<RoleTextPolicyDraft>) {
+    setDraft(current => current ? { ...current, ...patch } : current);
+    setRiskAcknowledged(false);
+  }
+  async function savePolicy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!policy || !draft || lock.current || needsRead) return;
+    if (!draft.allowedModels.length) { setError('至少选择一个可用模型。'); return; }
+    if (draft.enabled && (!providerReady || !draft.allowUnpricedText || !riskAcknowledged)) {
+      setError('请先保存可用的主文字配置，并明确确认无报价费用风险。'); return;
+    }
+    const epoch = generation.current;
+    let definiteFailure = false;
+    lock.current = true; setSavingPolicy(true); onSavingChange(true); setError('');
+    try {
+      const response = await fetch('/api/admin/integrations/musk', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role_text_policy: { ...draft, riskAcknowledged }, base_revision: policy.revision }) });
+      const data = await response.json();
+      if (!alive.current || generation.current !== epoch) return;
+      if (!response.ok || data.ok !== true) {
+        definiteFailure = !response.ok && response.status < 500;
+        if (response.status >= 500 || response.status === 409) setNeedsRead(true);
+        throw new Error(data.error || '保存结果未确认，输入已保留。');
+      }
+      if (!isRoleTextPolicyDto(data.role_text_policy) || data.role_text_policy.revision !== policy.revision + 1
+        || JSON.stringify(policyDraft(data.role_text_policy)) !== JSON.stringify(draft)
+        || draft.enabled && !data.role_text_policy.consentValid) {
+        setNeedsRead(true); throw new Error('未收到匹配的保存回执，输入已保留，请重新读取。');
+      }
+      onDirtyChange(false); onClose();
+    } catch (cause) {
+      if (alive.current && generation.current === epoch) { setError(cause instanceof Error ? cause.message : '保存结果未确认，输入已保留。');
+        if (!definiteFailure) setNeedsRead(true); }
+    } finally {
+      if (alive.current && generation.current === epoch) { lock.current = false; setSavingPolicy(false); onSavingChange(false); }
+    }
+  }
+
+  return createPortal(<dialog ref={dialog} className={dialogStyles.dialog} aria-modal="true" aria-labelledby="role-text-policy-title">
+    <form onSubmit={savePolicy} aria-busy={reading || savingPolicy}>
+      <header className={dialogStyles.header}><h2 id="role-text-policy-title">角色文字</h2>
+        <button type="button" className={dialogStyles.close} title="关闭" aria-label="关闭" disabled={savingPolicy} onClick={() => void dismiss()}><X size={18} /></button></header>
+      <p className={dialogStyles.message}>仅控制角色协作的文字调用，不代替本人任务授权。启用后仍须本人明确确认模型、期限和预算，保存不会调用模型。</p>
+      {reading && <p role="status">正在读取已保存政策</p>}
+      {draft && <fieldset disabled={reading || savingPolicy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+        <label className={dialogStyles.checkbox}><input type="checkbox" checked={draft.enabled} onChange={event => change({ enabled: event.target.checked })} />允许角色文字调用</label>
+        {!providerReady && <p className={dialogStyles.message}>主文字配置尚未就绪；请先在Musk API区域保存已启用、已设置Key的配置。角色开关不会代开主配置。</p>}
+        {policy?.needsConsent && <p className={dialogStyles.message}>尚无有效风险同意，或账号范围已变化；启用须重新确认。</p>}
+        <div className="form-group"><span className="form-label">允许模型</span>
+          {STUDIO_TEXT_MODELS.map(model => <label key={model.id} className={dialogStyles.checkbox}>
+            <input type="checkbox" checked={draft.allowedModels.includes(model.id)} onChange={event => change({
+              allowedModels: STUDIO_TEXT_MODELS.filter(item => item.id === model.id ? event.target.checked : draft.allowedModels.includes(item.id)).map(item => item.id),
+            })} />{model.label}</label>)}</div>
+        <div className="form-group"><label className="form-label" htmlFor="role-text-input-limit">单次输入上限（字节）</label>
+          <input id="role-text-input-limit" type="number" className={dialogStyles.input} min={1} max={131072} step={1} required value={draft.maxInputBytes || ''} onChange={event => change({ maxInputBytes: Number(event.target.value) })} /></div>
+        <div className="form-group"><label className="form-label" htmlFor="role-text-output-limit">单次输出上限（Token）</label>
+          <input id="role-text-output-limit" type="number" className={dialogStyles.input} min={1} max={4096} step={1} required value={draft.maxOutputTokens || ''} onChange={event => change({ maxOutputTokens: Number(event.target.value) })} /></div>
+        <label className={dialogStyles.checkbox}><input type="checkbox" checked={draft.allowUnpricedText} onChange={event => change({ allowUnpricedText: event.target.checked })} />允许没有预先报价的文字调用</label>
+        <p className={dialogStyles.message}>实际美元账单按1美元＝35点结算，预留点数向上取整。本人授权预留不是供应商报价，也不保证封顶；没有可匹配账单时费用保持待确认，超出预留须本人另行授权差额。</p>
+        {draft.enabled && <label className={dialogStyles.checkbox}><input type="checkbox" checked={riskAcknowledged} onChange={event => setRiskAcknowledged(event.target.checked)} />我已了解无报价调用可能产生超出预留的供应商费用，确认本次模型及限制。</label>}
+      </fieldset>}
+      {error && <p role="alert" className={dialogStyles.message}>{error}</p>}
+      {needsRead && <p className={dialogStyles.message}>输入仍保留。重新读取只更新设置版本，不代表此前保存成功；请核对后再决定是否保存。</p>}
+      <footer className={dialogStyles.actions}>
+        {(needsRead || !draft) && <button type="button" className={dialogStyles.secondary} disabled={reading || savingPolicy} onClick={() => void read(Boolean(draft))}>重新读取</button>}
+        <button type="button" className={dialogStyles.secondary} disabled={savingPolicy} onClick={() => void dismiss()}>取消</button>
+        <button type="submit" className={dialogStyles.primary} disabled={!draft || reading || savingPolicy || needsRead
+          || draft.enabled && (!providerReady || !draft.allowUnpricedText || !riskAcknowledged)}>{savingPolicy ? '正在保存' : '保存'}</button>
+      </footer>
+    </form>
+  </dialog>, document.body);
+}
+
 export default function AdminIntegrationsClient() {
   const { confirm, productDialog } = useProductDialog();
   const { user: currentUser, hasLoadedUser, refreshUser } = useAppSession();
@@ -267,6 +426,10 @@ export default function AdminIntegrationsClient() {
   const [h3QueueReason, setH3QueueReason] = useState('');
   const [h3QueueMessage, setH3QueueMessage] = useState<SubmitState>(null);
   const [imageDrafts, setImageDrafts] = useState<Record<string, boolean>>({});
+  const [rolePolicyOpen, setRolePolicyOpen] = useState(false);
+  const [rolePolicyDirty, setRolePolicyDirty] = useState(false);
+  const [rolePolicySaving, setRolePolicySaving] = useState(false);
+  const rolePolicyAccount = useRef(currentUser?.id);
   const onImageDraftChange = useCallback((drafts: Record<string, boolean>) => setImageDrafts(drafts), []);
   const imageDraftSnapshot = Object.fromEntries(IMAGE_API_GROUPS.map(group => [`imageGroup:${group}`, Boolean(imageDrafts[group])]));
   const settingsSubmit = useSettingsPageSubmit({
@@ -275,10 +438,15 @@ export default function AdminIntegrationsClient() {
     volcengine: { config: volcengineConfig, entered: Boolean(volcengineApiKey), clearVolcengineApiKey },
     mediakit: { config: aiMediaKitConfig, entered: Boolean(aiMediaKitApiKey), clearAiMediaKitApiKey },
     h3: { config: h3Config, apiEntered: Boolean(h3ApiToken), adminEntered: Boolean(h3AdminToken), clearH3ApiToken, clearH3AdminToken },
+    roleText: rolePolicyDirty,
     ...imageDraftSnapshot,
-  }, !loading, '/admin', confirm, muskTesting || h3Testing || h3QueueLoading);
+  }, !loading, '/admin', confirm, muskTesting || h3Testing || h3QueueLoading || rolePolicySaving);
 
-  useEffect(() => { setImageDrafts({}); }, [currentUser?.id]);
+  useEffect(() => {
+    if (rolePolicyAccount.current === currentUser?.id) return;
+    rolePolicyAccount.current = currentUser?.id;
+    setRolePolicyOpen(false); setRolePolicyDirty(false); setRolePolicySaving(false); setImageDrafts({});
+  }, [currentUser?.id]);
 
   useEffect(() => {
     if (!hasLoadedUser) void refreshUser();
@@ -1389,6 +1557,9 @@ export default function AdminIntegrationsClient() {
           >
             {muskTesting ? '正在测试' : '测试连接'}
           </button>
+          <button type="button" className="btn btn-secondary" title="角色文字设置" onClick={() => setRolePolicyOpen(true)} disabled={!currentUser?.id}>
+            <Settings size={16} aria-hidden="true" /> 角色文字
+          </button>
           <button className="btn btn-primary sd2-loading-surface" data-busy={muskSaving} type="submit" disabled={muskSaving}>
             {muskSaving ? '正在保存' : '保存 Musk API'}
           </button>
@@ -1524,6 +1695,8 @@ export default function AdminIntegrationsClient() {
         </div>
 
       </form>
+      {rolePolicyOpen && currentUser?.id && <RoleTextPolicySettings key={currentUser.id} accountId={currentUser.id}
+        onClose={() => setRolePolicyOpen(false)} onDirtyChange={setRolePolicyDirty} onSavingChange={setRolePolicySaving} confirm={confirm} />}
     </fieldset>
   );
 }

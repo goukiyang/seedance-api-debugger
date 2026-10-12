@@ -19,6 +19,8 @@
     let videoRecheck = null;
     let lastVideoRecheck = 0;
     let roleCreator = null, roleWorkflow = null, roleInstanceLayer = null, workflowHub = null;
+    const roleMediaContexts = new Map();
+    const roleMediaRequests = new Map();
 
     function ensureNoticeStack() {
         let stack = document.getElementById('canvas-notice-stack');
@@ -393,9 +395,11 @@
                 if (canvasBillingViews.size >= 1024 && !canvasBillingViews.has(target)) canvasBillingViews.delete(canvasBillingViews.keys().next().value);
                 canvasBillingViews.set(target, { owner, documentId: canvasRuntime.documentId, assetId: item.assetId, taskId: item.taskId, billing: item.billing });
                 renderCanvasBilling(target);
+                if (!previous || previous.billing.status !== item.billing.status || previous.billing.chargedCredits !== item.billing.chargedCredits) notifyRoleMediaChanged(engine.nodes.get(nodeId));
             });
         },
         request: requestJson,
+        attachRoleMediaContext: attachRoleImageContext,
         confirm: requestCanvasConfirmation,
         getQuoteSnapshot: canvasGenerationQuoteSnapshot,
         getGenerationPayload: canvasGenerationQuotePayload,
@@ -423,7 +427,8 @@
             const input = nodeEl && promptInputFor(nodeEl, 'image');
             if (input) input.value = prompt || '';
         },
-        render: renderGenerationNodeControls, save: scheduleCanvasSave, flush: flushCanvasSave,
+        render: renderGenerationNodeControls, save: scheduleCanvasSave,
+        flush: flushCanvasSave,
         notice: showCanvasNotice,
         status: (nodeId, status, message) => setNodeGenerationStatus(document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`), status, message),
         apply: (nodeId, payload, result) => {
@@ -489,7 +494,7 @@
         }
         const hasPayload = options.payload !== undefined;
         const payload = hasPayload && endpoint.split('?')[0] === '/api/tools/ultimate-canvas/document'
-            ? { ...options.payload, required_capabilities: ['role.v1', 'role.workflow.v1'] } : options.payload;
+            ? { ...options.payload, required_capabilities: ['role.v1', 'role.workflow.v1', 'role.collaboration.v2'] } : options.payload;
         const body = options.body !== undefined
             ? options.body
             : hasPayload
@@ -498,7 +503,7 @@
         const requestHeaders = {
             ...(hasPayload ? { 'Content-Type': 'application/json' } : {}),
             ...workspaceHeaders(),
-            ...(endpoint.startsWith('/api/tools/ultimate-canvas/') ? { 'x-canvas-capabilities': 'role.v1,role.workflow.v1' } : {}),
+            ...(endpoint.startsWith('/api/tools/ultimate-canvas/') ? { 'x-canvas-capabilities': 'role.v1,role.workflow.v1,role.collaboration.v2' } : {}),
             ...(options.headers || {})
         };
         const res = await fetch(endpoint, {
@@ -1133,6 +1138,7 @@
                     payload = { ...payload, referenceImageIds: payload.referenceImageIds || collectReferenceImageIds(payload) };
                     const result = await canvasStyles.generateOrdinary(payload, promptWithConnectedText(payload));
                     if (!result.legacyRequired) return result;
+                    if (engine.nodes.get(payload.nodeId)?.data?.roleMediaOrigin) throw Error('此旧图片通道无法固定回传角色任务，未生成。');
                     const descriptor = window.UltimateCanvasGenerationNodes.imageRequest({
                         projectId: canvasRuntime.selectedProjectId,
                         cardId: canvasRuntime.selectedVideoCardId,
@@ -1187,6 +1193,8 @@
                         settings: payload.settings || {}
                     });
                     descriptor.url = backendEndpoint(descriptor.url, '', 'video');
+                    const roleMediaContext = roleMediaContextForNode(payload.nodeId, 'video');
+                    if (roleMediaContext) descriptor.payload.roleMediaContext = structuredClone(roleMediaContext);
                     if (unsent) descriptor.payload = structuredClone(prior.input);
                     const submission = unsent ? prior : { requestId: payload.requestId, state: 'unconfirmed',
                         userId: canvasRuntime.bootstrap?.user?.id, documentId: canvasRuntime.documentId,
@@ -1211,6 +1219,7 @@
                         payload: descriptor.payload,
                         policy: 'video'
                     });
+                    notifyRoleMediaChanged(node);
                     const normalized = window.UltimateCanvasGenerationNodes.normalizeVideoCreate(data);
                     return {
                         ...data,
@@ -2053,6 +2062,9 @@
         cancelReferenceImport();
         canvasRuntime.pendingGenerationSubmissions.releaseAll(entry => entry.release?.(true));
         canvasRuntime.contextEpoch += 1;
+        roleMediaContexts.clear();
+        for (const request of roleMediaRequests.values()) request.reject(Error('画布已切换，未继续媒体来源操作。'));
+        roleMediaRequests.clear();
         roleInstanceLayer?.close(); roleInstanceLayer = null;
         roleCreator?.contextChanged();
         roleWorkflow?.contextChanged();
@@ -3009,7 +3021,7 @@
             if (Array.isArray(value)) return value.map(clean);
             if (!value || typeof value !== 'object') return value;
             return Object.fromEntries(Object.entries(value)
-                .filter(([key]) => !/^(role_?(?:task_?run_?id|work_?id|attempt_?id|delivery_?id|confirmation|handoff|fees)|task_?ids?|provider_?task_?id|run_?id|batch_?id|generationResult|generationError|statusEndpoint|frozenCost|styleJob|imageBillingJob|videoSubmission|videoSubmissionLegacy|videoHistory|selectedVideoResult|previewVideoTaskId|generationPayload)$/i.test(key))
+                .filter(([key]) => !/^(roleMediaOrigin|roleMediaContext|role_?(?:task_?run_?id|work_?id|attempt_?id|delivery_?id|confirmation|handoff|fees)|task_?ids?|provider_?task_?id|run_?id|batch_?id|generationResult|generationError|statusEndpoint|frozenCost|styleJob|imageBillingJob|videoSubmission|videoSubmissionLegacy|videoHistory|selectedVideoResult|previewVideoTaskId|generationPayload)$/i.test(key))
                 .map(([key, item]) => [key, key === 'generationStatus' ? 'idle' : clean(item)]));
         };
         return JSON.stringify(clean(JSON.parse(raw)));
@@ -3288,9 +3300,11 @@
         syncAllNodesFromDom();
         return {
             schema: 'ultimate_canvas.v1',
-            schemaVersion: canvasRuntime.documentSchemaVersion >= 4 || engine.roleWorkflows?.length ? 4
+            schemaVersion: canvasRuntime.documentSchemaVersion >= 5 || [...engine.nodes.values()].some(n => n.type === 'role-requirement')
+                || engine.roleWorkflows?.some(flow => Array.isArray(flow.relations)) ? 5
+                : canvasRuntime.documentSchemaVersion >= 4 || engine.roleWorkflows?.length ? 4
                 : canvasRuntime.documentSchemaVersion === 3 || [...engine.nodes.values()].some(n => n.type === 'role') ? 3 : 2,
-            requiredCapabilities: ['role.v1', 'role.workflow.v1'],
+            requiredCapabilities: ['role.v1', 'role.workflow.v1', 'role.collaboration.v2'],
             savedAt: new Date().toISOString(),
             context: {
                 project_id: context.projectId ?? canvasRuntime.selectedProjectId,
@@ -3325,7 +3339,7 @@
                 project_id: projectId,
                 title: canvasRuntime.documentTitle,
                 protocol_version: 2,
-                required_capabilities: ['role.v1', 'role.workflow.v1'],
+                required_capabilities: ['role.v1', 'role.workflow.v1', 'role.collaboration.v2'],
                 base_revision: canvasRuntime.documentRevision,
                 mutation_id: documentMutationId(),
                 active_generation_node_id: engine.selectedNodeId,
@@ -5654,6 +5668,7 @@
             downloadUrl: normalized.originalUrl || imageUrl
         });
         renderGenerationNodeControls(payload.nodeId);
+        notifyRoleMediaChanged(node);
         if (node) {
             const sourceElement = document.querySelector(`[data-node-id="${CSS.escape(node.id)}"]`);
             const stepX = Math.max(400, sourceElement?.offsetWidth || 0) + 40;
@@ -6063,6 +6078,7 @@
         else setNodeGenerationStatus(nodeEl, ['queued', 'submitted', 'running', 'processing', 'pending'].includes(nextStatus) ? 'loading' : 'warn', videoStageLabel(nextStatus));
         if (nextStatus !== previousStatus || ['succeeded', 'failed', 'cancelled'].includes(nextStatus)) {
             scheduleCanvasSave('video_status');
+            if (nextStatus !== previousStatus) notifyRoleMediaChanged(node);
         }
         return true;
     }
@@ -7713,6 +7729,150 @@
         if (time?.textContent === '0分钟前') time.textContent = '刚刚';
         return wrapper.innerHTML;
     }
+
+    function roleMediaContextForNode(nodeId, kind) {
+        const node = engine.nodes.get(nodeId), origin = node?.data?.roleMediaOrigin;
+        if (!origin) return null;
+        const ctx = roleContext(), context = roleMediaContexts.get(nodeId);
+        if (!ctx.writable || origin.ownerId !== ctx.userId || origin.documentId !== ctx.documentId || node.type !== kind
+            || !context || context.ownerId !== ctx.userId || context.documentId !== ctx.documentId
+            || context.generationNodeId !== nodeId || context.workId !== origin.workId || context.kind !== kind
+            || Date.parse(context.expiresAt) <= Date.now()) {
+            throw Error('角色媒体来源已失效，请从原岗位重新打开生成器；未知请求只查询，不重发。');
+        }
+        return context;
+    }
+
+    function attachRoleImageContext(input) {
+        const node = engine.nodes.get(input.nodeId);
+        if (!node?.data?.roleMediaOrigin) return;
+        // The saved request retains its original signature, including on unknown-response recovery.
+        if (input.roleMediaContext) {
+            if (input.roleMediaContext.ownerId !== canvasRuntime.bootstrap?.user?.id
+                || input.roleMediaContext.documentId !== canvasRuntime.documentId
+                || input.roleMediaContext.generationNodeId !== input.nodeId
+                || input.roleMediaContext.workId !== node.data.roleMediaOrigin.workId) throw Error('原图片请求的角色来源不匹配，未提交。');
+            return;
+        }
+        input.roleMediaContext = structuredClone(roleMediaContextForNode(input.nodeId, 'image'));
+    }
+
+    function notifyRoleMediaChanged(node) {
+        const origin = node?.data?.roleMediaOrigin;
+        if (!origin || origin.ownerId !== canvasRuntime.bootstrap?.user?.id || origin.documentId !== canvasRuntime.documentId) return;
+        const detail = { workId: origin.workId, runId: origin.runId, documentId: origin.documentId, nodeId: node.id };
+        document.dispatchEvent(new CustomEvent('rolemedia:changed', { detail, bubbles: true }));
+        if (window.parent !== window) window.parent.postMessage({ type: 'sd2-canvas-role-media-changed', userId: origin.ownerId, ...detail }, location.origin);
+    }
+
+    window.UltimateCanvasRoleMediaContextMatches = requestId => {
+        const pending = roleMediaRequests.get(requestId), ctx = roleContext();
+        return Boolean(pending && ctx.writable && pending.ctx.userId === ctx.userId
+            && pending.ctx.documentId === ctx.documentId && pending.ctx.contextEpoch === ctx.contextEpoch
+            && engine.nodes.get(pending.node.id) === pending.node);
+    };
+    window.addEventListener('message', event => {
+        if (event.origin !== location.origin || event.source !== window.parent || event.data?.type !== 'sd2-canvas-role-media-context-receipt') return;
+        const pending = roleMediaRequests.get(event.data.requestId);
+        if (!pending) return;
+        const current = window.UltimateCanvasRoleMediaContextMatches(event.data.requestId);
+        roleMediaRequests.delete(event.data.requestId);
+        if (!current || !event.data.success) { pending.reject(Error(event.data.error || '画布目标已变化，媒体来源未打开。')); return; }
+        pending.resolve(event.data.result);
+    });
+
+    async function openRoleMedia({ workId, kind, outputSlotId }) {
+        if (!/^[A-Za-z0-9_-]{1,160}$/.test(workId || '') || !['image', 'video'].includes(kind)
+            || typeof outputSlotId !== 'string' || !outputSlotId.trim() || outputSlotId.length > 160) throw Error('请选择本次工作及交付项。');
+        let ctx = await roleBridge.saveDocument('before_role_media');
+        const detail = await roleBridge.request(`/api/tools/ultimate-canvas/role-work/${encodeURIComponent(workId)}`, { cache: 'no-store' });
+        if (ctx.contextEpoch !== roleContext().contextEpoch || ctx.documentId !== roleContext().documentId) throw Error('画布已切换，未打开媒体生成器。');
+        const work = detail.work, run = detail.run;
+        if (!work || work.id !== workId || run?.document_id !== ctx.documentId || !Number.isInteger(work.revision)
+            || !Number.isInteger(run.requirements_revision)) throw Error('原工作来源未确认，请重新读取任务。');
+        let node = [...engine.nodes.values()].find(item => item.type === kind && item.data?.roleMediaOrigin?.workId === workId
+            && item.data.roleMediaOrigin.outputSlotId === outputSlotId && item.data.roleMediaOrigin.ownerId === ctx.userId
+            && item.data.roleMediaOrigin.documentId === ctx.documentId && !item.data.styleJob && !item.data.taskId
+            && item.data.videoSubmission?.state !== 'unconfirmed');
+        if (!node) {
+            const source = engine.nodes.get(work.node_id), center = canvasCenter();
+            const id = engine.addNode(kind, source ? source.x + 720 : center.x, source ? source.y + 480 : center.y,
+                { title: kind === 'image' ? '本次工作图片' : '本次工作视频' });
+            node = engine.nodes.get(id);
+        }
+        if (!node) throw Error('生成节点未建立。');
+        node.data.roleMediaOrigin = { ownerId: ctx.userId, documentId: ctx.documentId, workId, runId: run.id, outputSlotId, kind };
+        ctx = await roleBridge.saveDocument('role_media_node');
+        const body = { mutation_id: crypto.randomUUID(), base_revision: work.revision,
+            requirements_revision: run.requirements_revision, generation_node_id: node.id, kind, outputSlotId };
+        let result;
+        if (window.parent === window) result = await roleBridge.request(`/api/tools/ultimate-canvas/role-work/${encodeURIComponent(workId)}/media-context`, { method: 'POST', payload: body });
+        else {
+            const requestId = crypto.randomUUID();
+            result = await new Promise((resolve, reject) => {
+                roleMediaRequests.set(requestId, { ctx, node, resolve, reject });
+                window.parent.postMessage({ type: 'sd2-canvas-role-media-context', requestId, userId: ctx.userId,
+                    documentId: ctx.documentId, contextEpoch: ctx.contextEpoch, nodeId: node.id, workId, body }, location.origin);
+            });
+        }
+        const context = result?.context;
+        if (ctx.contextEpoch !== roleContext().contextEpoch || ctx.documentId !== roleContext().documentId || engine.nodes.get(node.id) !== node
+            || context?.ownerId !== ctx.userId || context.documentId !== ctx.documentId || context.workId !== workId
+            || context.kind !== kind || context.generationNodeId !== node.id || context.outputSlotId !== outputSlotId
+            || Date.parse(context.expiresAt) <= Date.now()) throw Error('媒体来源未确认，未开始生成。');
+        roleMediaContexts.set(node.id, context);
+        engine.selectNode(node.id);
+        planSplit.focus([node.id], { includeControls: true });
+        renderGenerationNodeControls(node.id);
+        document.querySelector(`[data-node-id="${CSS.escape(node.id)}"] .image-props-textarea, [data-node-id="${CSS.escape(node.id)}"] .video-props-textarea`)?.focus();
+        showCanvasNotice('已打开原生成器，确认生成后原件将回到这个岗位。', 'info');
+        return { nodeId: node.id, workId, runId: run.id, expiresAt: context.expiresAt };
+    }
+    async function adoptRoleDocumentReceipt(result, payload, kind) {
+        const ctx = roleContext(), document = result?.document;
+        if (!document || document.id !== ctx.documentId || document.owner_user_id !== ctx.userId
+            || payload.document_id !== ctx.documentId) throw new Error('操作已保存到原画布，请回原画布读取结果。');
+        const already = kind === 'run'
+            ? Boolean(result.node?.data?.roleRequirement?.runId && engine.nodes.get(result.node.id)?.data?.roleRequirement?.runId === result.node.data.roleRequirement.runId)
+            : (engine.roleWorkflows || []).some(flow => flow.id === result.workflow?.id);
+        if (already && canvasRuntime.documentRevision >= document.revision) return;
+        if (canvasRuntime.documentRevision !== payload.document_revision || canvasRuntime.documentDirty) {
+            throw new Error('服务端已保存，但当前画布还有新改动；请保留草稿后重新读取，不会重复创建。');
+        }
+        await withDocumentOperation(async () => {
+            if (ctx.contextEpoch !== canvasRuntime.contextEpoch || canvasRuntime.documentRevision !== payload.document_revision
+                || canvasRuntime.documentDirty) throw new Error('画布已变化，原回执仍保留，请重新读取。');
+            canvasRuntime.documentRestoring = true;
+            try {
+                const token = graphCommands.begin(kind === 'run' ? 'role_requirement_create' : 'role_workflow_template');
+                if (kind === 'run') {
+                    const node = result.node, existing = engine.nodes.get(node.id);
+                    if (existing) {
+                        existing.data = structuredClone(node.data);
+                        const card = engine.canvas.querySelector(`[data-node-id="${CSS.escape(node.id)}"]`);
+                        const title = card?.querySelector('.role-requirement-summary > strong');
+                        if (title) title.textContent = node.data.title || '本次需求';
+                        const goal = card?.querySelector('[data-role-goal]');
+                        if (goal) goal.textContent = '正在读取已保存需求';
+                    }
+                    else engine.addNode('role-requirement', node.x, node.y, { ...node.data, id: node.id });
+                } else {
+                    engine.roleWorkflows = [...(engine.roleWorkflows || []).filter(flow => flow.id !== result.workflow.id), structuredClone(result.workflow)];
+                    for (const node of result.nodes || []) if (!engine.nodes.has(node.id)) engine.addNode(node.type || 'role', node.x, node.y, { ...node.data, id: node.id });
+                    for (const edge of result.connections || []) engine.connectNodesForCommand(edge.from, edge.to);
+                }
+                graphCommands.commit(token);
+            } finally { canvasRuntime.documentRestoring = false; }
+            canvasRuntime.documentRevision = document.revision;
+            canvasRuntime.documentSchemaVersion = Math.max(canvasRuntime.documentSchemaVersion, document.schema_version || 5);
+            canvasRuntime.documentDirty = false; canvasRuntime.saveState = 'saved';
+            try { const key = draftStorageKey(); if (key) localStorage.removeItem(key); } catch {}
+            const nodeId = kind === 'run' ? result.node.id : result.nodes?.[0]?.id;
+            if (nodeId) engine.selectNode(nodeId);
+            workflowHub?.render(); updateSaveIndicator();
+        });
+    }
+    const roleAttachmentPlacements = new Map();
     const roleBridge = {
         engine, libraryRoot: document.getElementById('roles-panel-body'), workRoot: document.getElementById('role-work-panel'),
         formatUsdMicros: value => {
@@ -7725,12 +7885,14 @@
                 minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(converted).replace('￥', '¥');
         },
         usdToCnyRateText: () => canvasRuntime.bootstrap?.money_display?.rate_text || '人民币换算汇率未确认',
+        usdToCnyRate: () => canvasRuntime.bootstrap?.money_display?.usd_to_cny_rate ?? NaN,
         context: roleContext, icon: name => window.UltimateCanvasIcons(name)
             || window.UltimateCanvasIcons(String(name || '').split('-').map(part => part ? part[0].toUpperCase() + part.slice(1) : '').join(''))
             || window.UltimateCanvasIcons('CircleHelp'),
         escape: escapeHtml, renderTime: roleTime, dialog: openCanvasProductDialog,
         confirm: options => requestCanvasConfirmation({ ...options, confirmLabel: options.confirmText || options.confirmLabel }),
         notice: showCanvasNotice,
+        openRoleMedia,
         request: async (url, options) => {
             try { return await requestJson(url, options); }
             catch (error) { error.data = error.response; throw error; }
@@ -7747,6 +7909,60 @@
                 || (engine.roleWorkflows || []).find(f => f.nodeIds.includes(nodeId)).nodeIds.includes(n.id)))
             .map(n => ({ id: n.id, title: n.data?.title, roleConfig: structuredClone(n.data?.roleConfig || {}) })),
         workflowForNode: nodeId => (engine.roleWorkflows || []).find(f => f.nodeIds.includes(nodeId)) || null,
+        saveRoleWorkflowConfiguration: async (workflowId, values) => {
+            const ctx = await roleBridge.saveDocument('before_role_configuration');
+            const flow = (engine.roleWorkflows || []).find(item => item.id === workflowId);
+            if (!flow || !graphEditAllowed()) throw new Error('工作流已变化或画布正在处理，请保留配置草稿。');
+            if (values.participants && (!Array.isArray(values.participants) || values.participants.some(p => !flow.nodeIds.includes(p.nodeId)))) throw new Error('参与岗位已变化，请重新读取。');
+            globalThis.UltimateCanvasRoleRouting?.validate(flow, values.relations);
+            const token = graphCommands.begin('role_workflow_configuration');
+            flow.relations = structuredClone(values.relations);
+            if (values.participants) flow.participants = structuredClone(values.participants);
+            if (values.finalNodeId !== undefined) flow.finalNodeId = values.finalNodeId;
+            canvasRuntime.documentSchemaVersion = Math.max(5, canvasRuntime.documentSchemaVersion);
+            graphCommands.commit(token); scheduleCanvasSave('role_workflow_configuration');
+            if (!await flushCanvasSave('role_workflow_configuration', true)) throw new Error('配置尚未确认保存，当前草稿仍保留。');
+            if (ctx.contextEpoch !== canvasRuntime.contextEpoch) throw new Error('配置已保存到原画布，请回原画布查看。');
+            workflowHub?.render();
+        },
+        adoptRoleRunReceipt: (result, payload) => adoptRoleDocumentReceipt(result, payload, 'run'),
+        adoptRoleWorkflowTemplateReceipt: (result, payload) => adoptRoleDocumentReceipt(result, payload, 'template'),
+        useRoleDeliveryAttachment: async ({ deliveryId, index, action }) => {
+            if (!/^[a-zA-Z0-9_-]{1,100}$/.test(deliveryId) || !Number.isInteger(index) || index < 0 || index > 19
+                || !['canvas', 'asset'].includes(action)) throw new Error('原件使用目标无效。');
+            const ctx = roleContext();
+            const result = await requestJson(`/api/tools/ultimate-canvas/role-deliveries/${encodeURIComponent(deliveryId)}/attachments/${index}?view=metadata`);
+            if (ctx.contextEpoch !== canvasRuntime.contextEpoch) throw new Error('画布目标已变化，未使用原件。');
+            if (action === 'asset') {
+                if (!result.libraryIdentity) throw new Error('文字原件请放回画布；资产库目前只收媒体原件。');
+                const saved = await postJson('/api/assets/library/removal', { identity: result.libraryIdentity, removed: false });
+                if (saved.identity !== result.libraryIdentity || saved.removed !== false) throw new Error('资产保存结果未确认。');
+                loadLibraryPanels(true); return { saved: true };
+            }
+            await roleBridge.saveDocument('before_role_attachment');
+            if (!graphEditAllowed() || ctx.contextEpoch !== canvasRuntime.contextEpoch) throw new Error('当前画布暂不可编辑，原件未改变。');
+            const ref = result.attachment, key = `${ctx.scopeKey}:${deliveryId}:${index}`;
+            let nodeId = roleAttachmentPlacements.get(key);
+            if (!nodeId || !engine.nodes.has(nodeId)) {
+                const type = ref.sourceKind === 'canvas_text' ? 'text' : ref.type;
+                if (!['image', 'video', 'audio', 'text'].includes(type)) throw new Error('此文件可直接查看下载，画布目前不能展示该文件类型。');
+                const x = (engine.container.clientWidth / 2 - engine.offsetX) / engine.scale;
+                const y = (engine.container.clientHeight / 2 - engine.offsetY) / engine.scale;
+                const token = graphCommands.begin('role_delivery_attachment');
+                nodeId = engine.addNode(type, x, y, { title: ref.title || '工作成果', assetId: ref.assetId || null,
+                    referenceImageId: ref.referenceImageId || null, taskId: ref.taskId || null,
+                    ...(type === 'text' ? { authoredText: ref.content, prompt: ref.content }
+                        : { originalUrl: result.url, previewImage: type === 'image' ? result.url : '',
+                            imageUrl: type === 'image' ? result.url : '', videoPreviewUrl: type === 'video' ? result.url : '', source: 'role_delivery' }) });
+                if (type !== 'text') decorateGeneratedNode(nodeId, ref.title || '工作成果', '', type === 'image' ? result.url : '',
+                    { mediaType: type, mediaUrl: result.url, ...(type === 'image' ? { imageUrl: result.url, downloadUrl: result.url } : {}) });
+                graphCommands.commit(token); roleAttachmentPlacements.set(key, nodeId);
+                scheduleCanvasSave('role_delivery_attachment');
+            }
+            if (!await flushCanvasSave('role_delivery_attachment', true)) throw new Error('原件已放入当前草稿，尚未保存；重试不会重复加入。');
+            if (ctx.contextEpoch !== canvasRuntime.contextEpoch) throw new Error('原件已保存到原画布，请回原画布查看。');
+            roleAttachmentPlacements.delete(key); engine.selectNode(nodeId); return { saved: true, nodeId };
+        },
         saveWorkflowRelations: async (nodeId, values) => {
             const ctx = await roleBridge.saveDocument('before_workflow_relations');
             const flow = roleBridge.workflowForNode(nodeId);
@@ -7860,7 +8076,7 @@
                 for (const edge of result.connections || []) engine.connectNodesForCommand(edge.from, edge.to);
                 graphCommands.commit(token);
             } finally { canvasRuntime.documentRestoring = false; }
-            canvasRuntime.documentRevision = result.document.revision; canvasRuntime.documentSchemaVersion = 4;
+            canvasRuntime.documentRevision = result.document.revision; canvasRuntime.documentSchemaVersion = Math.max(canvasRuntime.documentSchemaVersion, result.document.schema_version || 5);
             canvasRuntime.documentDirty = false; canvasRuntime.saveState = 'saved';
             try { const k = draftStorageKey(); if (k) localStorage.removeItem(k); } catch {}
             if (result.nodes[0]) engine.selectNode(result.nodes[0].id);

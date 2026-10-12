@@ -3,6 +3,7 @@ import { AuthError } from '@/lib/auth/session';
 import { isStudioTextModel } from '@/lib/template-studio/text-models';
 
 export const ROLE_CAPABILITY = 'role.v1';
+export const COLLABORATION_CAPABILITY = 'role.collaboration.v2';
 export const ROLE_PAGE_SIZE = 30;
 export type JsonRecord = Record<string, unknown>;
 export type RoleExecutor = { kind: 'person' | 'ai' | 'unassigned'; userId?: string; model?: string };
@@ -10,6 +11,7 @@ export type RoleSnapshot = {
   schema: 'role.v1'; name: string; responsibilities: string; delivery: string;
   criteria: string; boundary: string; executor: RoleExecutor;
   tools: ('manual' | 'text')[]; requiredItems: string[]; contextGaps?: string[]; reviewAuthority?: 'none' | 'content' | 'final'; workflowOnly?: true;
+  provenance?: { kind: 'original' | 'designed' | 'user'; version: string; source: string };
 };
 export type RoleNodeConfig = { definitionId: string; version: number; snapshot?: RoleSnapshot };
 export type WorkPhase = 'offered' | 'needs_material' | 'rejected' | 'ready' | 'working'
@@ -19,12 +21,28 @@ export type RoleParticipant = {
   reviewerNodeId: string | null; confirmRequired: boolean;
   ownerMaySubmit: boolean; ownerMayReview: boolean;
   dependencies: { nodeId: string; required: boolean }[];
+  assignment?: string; deliverableItems?: string[]; requiredInputs?: string[]; acceptanceCriteria?: string;
+};
+export type RoleRelation = {
+  id: string; type: 'accepts_requirement' | 'handoff' | 'guidance' | 'review';
+  from: string; to: string; required: boolean; items: string[];
+  stage: 'effective'; authority: 'suggestion' | 'approve';
 };
 export type TaskRequirements = {
+  schema?: 'role.requirements.v2'; workflowId?: string; relations?: RoleRelation[];
   goal: string; criteria: string; participants: RoleParticipant[];
   finalNodeId: string; endpoint: 'owner_result'; decisionOwnerId: string;
   materialNodes: string[];
   materials?: JsonRecord[];
+};
+export type RoleGrant = {
+  schema: 'role.authorization.v2'; requirementsRevision: number; requirementsDigest: string;
+  scope: string; policyRevision: number; pointsPerUsd: 35;
+  reserveUsdMicros: number; reservePointCents: number; maxInputBytes: number; maxOutputTokens: number;
+  pointLimit: number; usdMicrosLimit: number; maxCalls: number; maxRounds: number;
+  executors: { nodeId: string; roleVersionId: string; roleDigest: string; model: string | null; purposes: ('work' | 'answer' | 'review')[] }[];
+  media: { kind: 'image' | 'video'; model: string; providerId: string | null; maxPoints: number }[];
+  confirmationNodes: string[]; expiresAt: string;
 };
 export class RoleError extends AuthError {
   constructor(message: string, status = 400, public readonly code = 'invalid_role', public readonly details: JsonRecord = {}) {
@@ -101,6 +119,9 @@ export function roleSnapshot(raw: unknown, ownerId: string): RoleSnapshot {
     ...(contextGaps.length ? { contextGaps } : {}),
     ...(raw.reviewAuthority !== undefined ? { reviewAuthority: raw.reviewAuthority as RoleSnapshot['reviewAuthority'] } : {}),
     ...(raw.workflowOnly === true ? { workflowOnly: true } : {}),
+    ...(record(raw.provenance) && ['original', 'designed', 'user'].includes(String(raw.provenance.kind))
+      ? { provenance: { kind: raw.provenance.kind as 'original' | 'designed' | 'user',
+        version: text(raw.provenance.version, 80, true), source: text(raw.provenance.source, 240, true) } } : {}),
   };
 }
 
@@ -109,7 +130,8 @@ export function assertRolePrepared(snapshot: RoleSnapshot) {
 }
 
 export function requirements(raw: unknown, ownerId: string, nodeIds: Set<string>): TaskRequirements {
-  if (!record(raw) || !Array.isArray(raw.participants) || raw.participants.length < 1 || raw.participants.length > 100) {
+  const v2 = record(raw) && raw.schema === 'role.requirements.v2';
+  if (!record(raw) || !Array.isArray(raw.participants) || (!v2 && raw.participants.length < 1) || raw.participants.length > 100) {
     throw new RoleError('请配置本次参与角色');
   }
   const seen = new Set<string>();
@@ -132,7 +154,9 @@ export function requirements(raw: unknown, ownerId: string, nodeIds: Set<string>
     if (new Set(dependencies.map(dep => dep.nodeId)).size !== dependencies.length) throw new RoleError('材料依赖重复');
     return { nodeId, participation: item.participation as RoleParticipant['participation'], reviewerNodeId,
       confirmRequired: item.confirmRequired === true, ownerMaySubmit: item.ownerMaySubmit as boolean,
-      ownerMayReview: item.ownerMayReview as boolean, dependencies };
+      ownerMayReview: item.ownerMayReview as boolean, dependencies,
+      ...(v2 ? { assignment: text(item.assignment, 12000), acceptanceCriteria: text(item.acceptanceCriteria, 8000),
+        deliverableItems: stringList(item.deliverableItems, 30, 160), requiredInputs: stringList(item.requiredInputs, 30, 240) } : {}) };
   });
   const active = new Set(participants.filter(item => item.participation !== 'excluded').map(item => item.nodeId));
   for (const p of participants) {
@@ -144,15 +168,64 @@ export function requirements(raw: unknown, ownerId: string, nodeIds: Set<string>
     if (visiting.has(node)) throw new RoleError('材料流向存在互等，请调整依赖；交流与检查关系不受此限制');
     if (visited.has(node)) return;
     visiting.add(node);
-    participants.find(p => p.nodeId === node)!.dependencies.forEach(dep => visit(dep.nodeId));
+    participants.find(p => p.nodeId === node)!.dependencies.filter(dep => !v2 || dep.required).forEach(dep => visit(dep.nodeId));
     visiting.delete(node); visited.add(node);
   }
   participants.forEach(p => visit(p.nodeId));
-  const finalNodeId = identifier(raw.finalNodeId);
-  if (!active.has(finalNodeId)) throw new RoleError('请指定参与本次工作的最终交付角色');
+  const finalNodeId = v2 && !raw.finalNodeId ? '' : identifier(raw.finalNodeId);
+  if (finalNodeId && !active.has(finalNodeId)) throw new RoleError('请指定参与本次工作的最终交付角色');
   if (raw.endpoint !== 'owner_result' || raw.decisionOwnerId !== ownerId) throw new RoleError('本次只交付给本人，不新增外发或他人决策权限');
   if (!Array.isArray(raw.materialNodes) || raw.materialNodes.length > 100) throw new RoleError('输入材料配置无效');
-  return { goal: text(raw.goal, 12000, true), criteria: text(raw.criteria, 8000), participants,
+  const relations = v2 ? roleRelations(raw.relations || [], active) : undefined;
+  if (relations) {
+    for (const p of participants) {
+      p.dependencies = relations.filter(r => r.type === 'handoff' && r.to === p.nodeId).map(r => ({ nodeId: r.from, required: r.required }));
+      p.reviewerNodeId = null;
+    }
+  }
+  return { ...(v2 ? { schema: 'role.requirements.v2' as const, workflowId: identifier(raw.workflowId), relations } : {}),
+    goal: text(raw.goal, 12000, true), criteria: text(raw.criteria, 8000), participants,
     finalNodeId, endpoint: 'owner_result', decisionOwnerId: ownerId,
     materialNodes: Array.from(new Set(raw.materialNodes.map(identifier))) };
+}
+
+export function stringList(value: unknown, limit: number, length: number): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > limit) throw new RoleError('条目数量超出限制');
+  const values = value.map(item => text(item, length, true));
+  if (new Set(values).size !== values.length) throw new RoleError('条目不能重复');
+  return values;
+}
+
+export function roleRelations(raw: unknown, nodeIds: Set<string>): RoleRelation[] {
+  if (!Array.isArray(raw) || raw.length > 500) throw new RoleError('关系配置超出限制');
+  const ids = new Set<string>(), keys = new Set<string>();
+  const relations = raw.map(value => {
+    if (!record(value)) throw new RoleError('关系配置无效');
+    const id = identifier(value.id), from = identifier(value.from), to = identifier(value.to);
+    const type = value.type as RoleRelation['type'];
+    if (!['accepts_requirement', 'handoff', 'guidance', 'review'].includes(type)
+      || !nodeIds.has(to) || (type === 'accepts_requirement' ? from !== 'requirement' : !nodeIds.has(from)) || from === to) {
+      throw new RoleError('关系须连接本工作流内不同岗位');
+    }
+    const key = [from, to, type].join(':');
+    if (ids.has(id) || keys.has(key)) throw new RoleError('相同用途的关系已存在');
+    ids.add(id); keys.add(key);
+    if (value.required !== undefined && typeof value.required !== 'boolean') throw new RoleError('必交关系设置无效');
+    if (value.authority !== undefined && !['suggestion', 'approve'].includes(String(value.authority))) throw new RoleError('检查权限无效');
+    if (value.stage !== undefined && value.stage !== 'effective') throw new RoleError('仅可采用有效稿件');
+    return { id, from, to, type, required: type === 'handoff' && value.required !== false,
+      items: stringList(value.items, 30, 160), stage: 'effective' as const,
+      authority: type === 'review' && value.authority === 'approve' ? 'approve' as const : 'suggestion' as const };
+  });
+  const visiting = new Set<string>(), visited = new Set<string>();
+  const visit = (nodeId: string) => {
+    if (visiting.has(nodeId)) throw new RoleError('必交材料存在互等，请调整交接关系');
+    if (visited.has(nodeId)) return;
+    visiting.add(nodeId);
+    relations.filter(r => r.type === 'handoff' && r.required && r.to === nodeId).forEach(r => visit(r.from));
+    visiting.delete(nodeId); visited.add(nodeId);
+  };
+  nodeIds.forEach(visit);
+  return relations;
 }

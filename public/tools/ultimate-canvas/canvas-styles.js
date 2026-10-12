@@ -44,6 +44,7 @@
         const json = (url, payload, signal) => hooks.request(url, {
             ...(payload ? { method: 'POST', payload } : {}), cache: 'no-store', signal: signal || AbortSignal.timeout(30000)
         });
+        const roleInput = input => { hooks.attachRoleMediaContext?.(input); return input; };
         const quoteSnapshot = nodeId => hooks.getQuoteSnapshot?.(nodeId) || '';
         const quoteInputsMatch = (node, context, snapshot) => current(node, context)
             && context.writable === hooks.context().writable
@@ -127,20 +128,20 @@
                 return {
                     endpoint: `${endpoint}/generate`,
                     revision: style.settingsRevision,
-                    input: { ...context, nodeId: node.id, moduleId: style.moduleId, requestId,
+                    input: roleInput({ ...context, nodeId: node.id, moduleId: style.moduleId, requestId,
                         settingsRevision: style.settingsRevision, moduleRevision: style.moduleRevision,
                         ...(channelId ? { channelId, imageChannel } : safeQuote.imageChannel ? { channelId: 'original', imageChannel: safeQuote.imageChannel } : {}),
                         prompt, ...(payload.promptMentions ? { promptMentions: payload.promptMentions } : {}),
                         referenceImageIds: payload.referenceImageIds || [],
                         settings: { model: style.model, quality: style.quality, resolution: style.resolution,
-                            count: style.count, ratio: style.aspectRatio, ...(channelId ? { channelId } : {}) } }
+                            count: style.count, ratio: style.aspectRatio, ...(channelId ? { channelId } : {}) } })
                 };
             }
             const settings = payload.settings || {};
             return {
                 endpoint: '/api/tools/ultimate-canvas/images/generate',
                 revision: safeQuote.revision,
-                input: { projectId: context.projectId, cardId: context.cardId, documentId: context.documentId,
+                input: roleInput({ projectId: context.projectId, cardId: context.cardId, documentId: context.documentId,
                     nodeId: node.id, requestId, moduleId: ordinaryModuleId(node, context), prompt,
                     ...(payload.promptMentions ? { promptMentions: payload.promptMentions } : {}),
                     settingsRevision: safeQuote.revision, referenceImageIds: payload.referenceImageIds || [],
@@ -149,7 +150,7 @@
                     } : {}),
                     settings: { model: settings.model, quality: settings.quality, resolution: settings.resolution,
                         ratio: settings.requestedRatio || settings.ratio, count: settings.count,
-                        ...(imageChannelFor(settings) ? { channelId: settings.channelId } : {}) } }
+                        ...(imageChannelFor(settings) ? { channelId: settings.channelId } : {}) } })
             };
         }
 
@@ -350,7 +351,9 @@
                     if (result.status === 'not_found') {
                         job.state = 'unconfirmed';
                         hooks.save('canvas_style_submission_unknown');
-                        throw new Error(job.kind === 'ordinary' ? '提交尚未确认，请查看生成状态；不会重新发送或扣点。' : '提交尚未确认。点击生成可安全重试原请求，不会重复扣费。');
+                        throw new Error(job.kind === 'ordinary' || job.input?.roleMediaContext
+                            ? '提交尚未确认，请查看生成状态；不会重新发送或扣点。'
+                            : '提交尚未确认。点击生成可安全重试原请求，不会重复扣费。');
                     }
                     if (result.submission_unconfirmed || result.status === 'unconfirmed') {
                         job.state = 'unconfirmed';
@@ -392,6 +395,9 @@
             const selectedChannelId = imageChannelFor(payload.settings);
             let job = node.data.styleJob;
             if (job && !sameContext(job.context, context)) throw new Error('此任务属于原项目或视频卡，请返回原画布查看。');
+            if (job?.input?.roleMediaContext && !job.batchId) {
+                return { ...await waitForResult(node, job), canvasStylePayload: job.payload };
+            }
             if (job?.quoteExpiresAt && !job.batchId && Date.parse(job.quoteExpiresAt) <= Date.now()) {
                 clearQuote(node.id);
                 try {
@@ -413,6 +419,7 @@
                             count: style.count, ratio: style.aspectRatio, ...(selectedChannelId ? { channelId: selectedChannelId } : {}) } }
                 };
                 job.input.requestId = job.requestId;
+                roleInput(job.input);
                 const snapshot = quoteSnapshot(node.id);
                 let quote;
                 try {
@@ -563,6 +570,7 @@
                     quality: settings.quality, resolution: settings.resolution, ratio: settings.requestedRatio || settings.ratio, count: settings.count,
                     ...(imageChannelFor(settings) ? { channelId: settings.channelId } : {}) },
                 ...(imageChannelFor(settings) || quote.imageChannel ? { channelId: settings.channelId || 'original', imageChannel: quote.imageChannel } : {}) };
+            roleInput(job.input);
             if (quote?.kind !== 'image' || quote.projectId !== context.projectId
                 || quote.model !== settings.model || quote.count !== settings.count
                 || quote.status !== 'estimate' || quote.chargeEnabled !== false

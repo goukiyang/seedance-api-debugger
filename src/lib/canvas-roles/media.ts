@@ -14,7 +14,10 @@ export function authoredCanvasText(data: JsonRecord, max = 100000) {
 }
 
 // Persist identities and a source fingerprint, never a caller-supplied media URL.
-export async function originalIdentity(db: RoleDb, user: SessionUser, ref: JsonRecord) {
+export async function originalIdentity(db: RoleDb, user: SessionUser, ref: JsonRecord): Promise<{
+  snapshot: JsonRecord; url: string; mimeType: string; internalSource: boolean;
+}> {
+  if (ref.imageTaskId) return imageTaskOriginal(db, user, identifier(ref.imageTaskId));
   if (ref.sourceKind === 'canvas_text') {
     const content = authoredCanvasText({ authoredText: ref.content });
     return { snapshot: { sourceKind: 'canvas_text', nodeId: identifier(ref.nodeId), type: 'file', title: text(ref.title, 120),
@@ -50,7 +53,16 @@ export async function originalIdentity(db: RoleDb, user: SessionUser, ref: JsonR
     url: `/api/video/play/${task.id}`, mimeType: 'video/mp4', internalSource: false };
 }
 
-export async function submissionAttachments(db: RoleDb, user: SessionUser, documentJson: string, runId: string, raw: unknown) {
+export async function imageTaskOriginal(db: RoleDb, user: SessionUser, taskId: string) {
+  const task = await db.imageStudioTask.findUnique({ where: { id: identifier(taskId) } });
+  if (!task || task.owner_id !== user.id || task.deleted_at || task.status !== 'succeeded' || !task.asset_id) {
+    throw new RoleError('图片原任务尚无可用原件', 409, 'material_unavailable');
+  }
+  const source = await originalIdentity(db, user, { assetId: task.asset_id });
+  return { ...source, snapshot: { ...source.snapshot, imageTaskId: task.id } };
+}
+
+export async function submissionAttachments(db: RoleDb, user: SessionUser, documentJson: string, runId: string, raw: unknown, targetWorkId: string) {
   if (raw == null) return [];
   if (!Array.isArray(raw) || raw.length > 20) throw new RoleError('交付原件最多20项');
   const nodes = JSON.parse(documentJson).canvas.nodes;
@@ -66,6 +78,8 @@ export async function submissionAttachments(db: RoleDb, user: SessionUser, docum
       retained = attachments[integer(selection.index, 0, 19)];
       if (!record(retained)) throw new RoleError('原成果没有此原件', 404, 'material_unavailable');
       ref = retained;
+    } else if (selection.mediaBindingId) {
+      ref = selection;
     } else {
       const node = nodes.find((n: JsonRecord) => n.id === identifier(selection.nodeId));
       if (!node || !record(node.data) || node.type === 'role') throw new RoleError('原件节点已移除', 409, 'material_unavailable');
@@ -73,8 +87,22 @@ export async function submissionAttachments(db: RoleDb, user: SessionUser, docum
         ? { sourceKind: 'canvas_text', nodeId: node.id, title: text(node.data.title, 120) || '文字成果.txt', content: authoredCanvasText(node.data) }
         : node.data;
     }
-    const resolved = await originalIdentity(db, user, ref);
     const expected = retained?.sourceDigest || selection.sourceDigest;
+    const bindingId = retained?.mediaBindingId || selection.mediaBindingId || ref.mediaBindingId;
+    if (bindingId) {
+      const target = await db.canvasRoleWork.findFirst({ where: { id: identifier(targetWorkId), role_task_run_id: runId } });
+      if (!target) throw new RoleError('媒体交付目标不属于本任务', 403, 'media_binding_conflict');
+      const { adoptRoleMediaBinding } = await import('./media-bindings');
+      const adopted = await adoptRoleMediaBinding(db, user, target, identifier(bindingId));
+      const source = expected ? adopted.attachments.find(item => item.sourceDigest === expected)
+        : adopted.attachments.length === 1 ? adopted.attachments[0] : null;
+      if (!source || (selection.outputSlotId !== undefined && selection.outputSlotId !== source.outputSlotId)) {
+        throw new RoleError('固定媒体原件或交付项不匹配，未采用替代内容', 409, 'original_changed');
+      }
+      result.push({ ...source, selection: { mediaBindingId: adopted.bindingId, sourceDigest: source.sourceDigest } });
+      continue;
+    }
+    const resolved = await originalIdentity(db, user, ref);
     if (expected && expected !== resolved.snapshot.sourceDigest) throw new RoleError('固定原件已变化，未采用新文件替代', 409, 'original_changed');
     result.push({ ...resolved.snapshot, ...(selection.nodeId ? { nodeId: identifier(selection.nodeId) } : {}),
       selection: selection.sourceDeliveryId ? { sourceDeliveryId: identifier(selection.sourceDeliveryId), index: integer(selection.index, 0, 19) }

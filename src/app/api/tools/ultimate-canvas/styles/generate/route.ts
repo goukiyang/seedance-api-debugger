@@ -8,6 +8,7 @@ import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { resolveStudioModuleGenerationConfig, validStudioModuleId } from '@/lib/image-studio/modules';
 import { submitStudioBatch, safeImageChannelSnapshot, StudioError } from '@/lib/image-studio/tasks';
+import { roleMediaFingerprint } from '@/lib/canvas-roles/media-bindings';
 import { prepareImageBillingQuote } from '@/lib/image-studio/billing-quote-service';
 import { imageBillingReady } from '@/lib/image-studio/billing-readiness';
 import { imageBillingScope } from '@/lib/image-studio/billing-scope';
@@ -42,6 +43,22 @@ export async function POST(request: NextRequest) {
     const body = await readCanvasStyleJson(request);
     const context = parseCanvasStyleContext(body);
     await assertCanvasStyleContext(user, context);
+    if (body.roleMediaContext !== undefined) {
+      roleMediaFingerprint(body.roleMediaContext);
+      const roleContext = body.roleMediaContext as Record<string, unknown>;
+      if (roleContext.ownerId !== user.id || roleContext.documentId !== context.documentId
+        || roleContext.generationNodeId !== context.nodeId || roleContext.kind !== 'image') throw new AuthError('角色媒体来源与原生成器不匹配', 403);
+    }
+    if (context.documentId && context.nodeId) {
+      const doc = await prisma.canvasDocument.findUniqueOrThrow({ where: { id: context.documentId } });
+      const node = JSON.parse(doc.document_json).canvas.nodes.find((item: { id: string }) => item.id === context.nodeId);
+      if (node?.data?.roleMediaOrigin && body.roleMediaContext === undefined) throw new AuthError('此生成节点属于固定角色工作，请从原岗位重新打开生成器', 409);
+      if (body.roleMediaContext !== undefined && (node?.type !== 'image' || body.action !== 'quote'
+        && (node.data?.styleJob?.kind === 'ordinary' || node.data?.styleJob?.requestId !== body.requestId
+          || node.data?.styleJob?.moduleId !== body.moduleId || JSON.stringify(node.data?.styleJob?.input) !== JSON.stringify(body)))) {
+        throw new AuthError('请先保存本次角色风格请求，再确认提交', 409);
+      }
+    }
     await assertCanvasPromptCompatibility(user, context.documentId, context.nodeId, String(body.prompt || ''), body.promptMentions);
 
     const moduleId = typeof body.moduleId === 'string' ? body.moduleId : '';
@@ -158,11 +175,13 @@ export async function POST(request: NextRequest) {
       model: generation.model, ...(requestedChannelId !== undefined || !suppliedImageChannel ? { channelId } : {}), imageChannel: body.imageChannel || imageChannel, quality: generation.quality, resolution: generation.resolution, aspectRatio,
       billingQuoteId: body.billingQuoteId, maxEstimatedCost: body.maxEstimatedCost };
     const promptBinding = mentions ? { mentions, referenceAssets } : undefined;
-    if (body.action === 'quote') return canvasStyleJson(await prepareImageBillingQuote(user.id, submission, undefined, undefined, promptBinding));
+    const canvasUse = body.roleMediaContext === undefined ? undefined : { user, referenceImageIds: requestedReferenceIds };
+    if (body.action === 'quote') return canvasStyleJson(await prepareImageBillingQuote(user.id, submission, undefined, canvasUse, promptBinding));
 
     let batchId: string;
     try {
-      batchId = await submitStudioBatch(user.id, submission, undefined, undefined, undefined, promptBinding);
+      batchId = await submitStudioBatch(user.id, submission, undefined, undefined, canvasUse, promptBinding,
+        body.roleMediaContext === undefined ? undefined : { user, context: body.roleMediaContext, generationNodeId: context.nodeId! });
     } catch (error) {
       if (error instanceof StudioError && error.status === 409) {
         if (error.message.includes('模块已在其他页面更新')) throw new StudioError(MODULE_CHANGED_MESSAGE, 409);

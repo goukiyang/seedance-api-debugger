@@ -18,7 +18,10 @@
         revise: '继续修订', message: '交流', pause: '暂停任务', resume: '继续任务',
         materials_waiting: '等待必交材料', materials_ready: '必交材料已齐', upstream_revision: '上游成果已更新',
         owner_result_available: '最终成果已交给你', execution_started: '已开始执行', execution_finished: '执行回执已更新',
-        ai_review_recommendation: 'AI 检查建议', task_limits_changed: '任务限额已更新', branch_retained: '独立分支原成果已保留'
+        ai_review_recommendation: 'AI 检查建议', task_limits_changed: '任务限额已更新', branch_retained: '独立分支原成果已保留',
+        collaboration_review: '成果检查', owner_result_accepted: '本人已验收', revision_waiting: '新需求等待应用',
+        rule_proposed: '提出规则', rule_adopted: '采用规则', rule_verified: '规则验证记录', retained: '保留规则', reverted: '撤回规则',
+        question_opened: '提出问题', question_answered: '答复问题', question_resolved: '问题已解决'
     };
 
     function create(bridge) {
@@ -37,7 +40,7 @@
             messageDraft: '', messageDirty: false, pendingMutation: null, pendingNoticeShown: false,
             storageNoticeShown: false, lastFocused: null, activeDeliveryId: '',
             eventCursor: null, loadingEarlier: false, extraEvents: [], loadingWorkHistory: false, loadingAttempts: false,
-            editorItems: Object.create(null), editorAttachments: [], editorBaseline: null,
+            editorItems: Object.create(null), editorChanges: [], editorAttachments: [], editorBaseline: null,
             messageFrom: '', draftMeta: null, draftConflict: false,
             taskConflict: false, actionSaving: false, modalContent: null, modalContext: null,
             drafts: emptyDrafts(), expanded: {}, restoredScope: '',
@@ -46,6 +49,15 @@
         const scopedMemory = new Map();
         const attachmentViews = new WeakMap();
         const previewControllers = new Set();
+        const collaboration = { workflowId: '', runId: '', detail: null, runs: [], cursor: null, questionsCursor: null,
+            relationMode: 'related', draft: null, dirty: false, busy: false, sequence: 0, editingRequirements: false,
+            scroll: {}, drafts: {}, templates: [], templateCursor: null };
+        let taskBar = null, authorizationDraft = null, collaborationReadTimer = null, mediaRefreshPending = false;
+        const routing = globalThis.UltimateCanvasRoleRouting?.create({ engine: bridge.engine, context: currentContext,
+            runId: () => collaboration.runId, requirementId: () => state.selectedNodeId, legacyRelations: relationsFromFlow,
+            activeNodes: () => recordList(collaboration.detail?.works)
+                .filter(work => ['working', 'revision', 'confirmation', 'unknown'].includes(work.phase)).map(work => work.node_id),
+            save: saveCollaborationRelations, notice: (message, tone) => bridge.notice?.(message, tone) });
 
         function safeContext() {
             try { return bridge.context() || {}; } catch { return {}; }
@@ -168,15 +180,21 @@
         }
         function attachmentSelection(value) {
             if (!isRecord(value)) return null;
+            const metadata = { ...(validId(value.sourceDigest) ? { sourceDigest: value.sourceDigest } : {}),
+                ...(typeof value.outputSlotId === 'string' && value.outputSlotId.length <= 160 ? { outputSlotId: value.outputSlotId } : {}) };
+            if (validId(value.mediaBindingId) && !value.nodeId && !value.sourceDeliveryId
+                && validId(value.sourceDigest)) {
+                return { mediaBindingId: value.mediaBindingId, ...metadata };
+            }
+            if (value.mediaBindingId) return null;
             if (validId(value.sourceDeliveryId) && !value.nodeId && finiteInteger(value.index, 0, 19) !== null) {
-                return { sourceDeliveryId: value.sourceDeliveryId, index: Number(value.index) };
+                return { sourceDeliveryId: value.sourceDeliveryId, index: Number(value.index), ...metadata };
             }
             if (!validId(value.nodeId) || value.sourceDeliveryId) return null;
-            const selection = { nodeId: value.nodeId };
-            if (typeof value.sourceDigest === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value.sourceDigest)) selection.sourceDigest = value.sourceDigest;
-            return selection;
+            return { nodeId: value.nodeId, ...metadata };
         }
         function attachmentKey(value) {
+            if (value.mediaBindingId) return 'media:' + value.mediaBindingId + ':' + value.sourceDigest;
             return value.sourceDeliveryId ? 'delivery:' + value.sourceDeliveryId + ':' + value.index : 'node:' + value.nodeId;
         }
         function attachmentSelections(value) {
@@ -190,21 +208,43 @@
             const snapshot = { selection, title: typeof value.title === 'string' ? value.title.slice(0, 1000) : '',
                 type: typeof value.type === 'string' ? value.type.slice(0, 80) : '' };
             if (value.sourceKind === 'canvas_text') snapshot.sourceKind = 'canvas_text';
-            ['nodeId', 'assetId', 'referenceImageId', 'taskId'].forEach(key => { if (validId(value[key])) snapshot[key] = value[key]; });
+            ['nodeId', 'assetId', 'referenceImageId', 'taskId', 'imageTaskId', 'mediaBindingId', 'sourceWorkId'].forEach(key => { if (validId(value[key])) snapshot[key] = value[key]; });
+            if (typeof value.outputSlotId === 'string' && value.outputSlotId.length <= 160) snapshot.outputSlotId = value.outputSlotId;
+            if (Number.isSafeInteger(value.sourceRequirementsRevision)) snapshot.sourceRequirementsRevision = value.sourceRequirementsRevision;
             if (typeof value.sourceDigest === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value.sourceDigest)) snapshot.sourceDigest = value.sourceDigest;
             return snapshot;
         }
         function savedEditorContent(value) {
             const content = parseJson(value, {});
             return { text: typeof content.text === 'string' ? content.text.slice(0, 100000) : '', items: boundedItems(content.items),
+                changes: savedChanges(content.changes),
                 attachments: recordList(content.attachments).slice(0, 20).map(attachmentSnapshot).filter(Boolean) };
         }
+        function savedChanges(value) {
+            return recordList(value).filter(item => typeof item === 'string').slice(0, 30).map(item => item.slice(0, 4000));
+        }
+        function submissionChanges() {
+            if (state.editorChanges.length > 30 || state.editorChanges.some(item => typeof item !== 'string' || item.length > 4000)) {
+                throw new Error('修改回应最多30条，每条不超过4000字；当前输入已保留。');
+            }
+            return state.editorChanges.map(item => item.trim()).filter(Boolean);
+        }
         function validPending(value, ctx) {
-            const kinds = ['task_create', 'task_update', 'work_action', 'work_execute'];
+            const kinds = ['task_create', 'task_update', 'work_action', 'work_execute', 'collaboration', 'collaboration_update'];
             if (!isRecord(value) || !validId(value.mutationId) || !kinds.includes(value.kind)
                 || (value.workId && !validId(value.workId))) return null;
             if (!value.url && !value.method && !value.payload) return { mutationId: value.mutationId, kind: value.kind,
-                workId: value.workId || '', receiptOnly: true };
+                workId: value.workId || '', receiptOnly: true,
+                ...(value.kind.startsWith('collaboration') && value.documentId === ctx.documentId && Number.isSafeInteger(value.documentRevision)
+                    ? { documentId: value.documentId, documentRevision: value.documentRevision,
+                        workflowId: validId(value.workflowId) ? value.workflowId : '',
+                        runId: validId(value.runId) ? value.runId : '', pausedWaiting: value.pausedWaiting === true,
+                        submittedDraft: validCollaborationDraft(value.submittedDraft) } : {}) };
+            if (value.kind.startsWith('collaboration')) {
+                if (typeof value.url !== 'string' || !/^\/api\/tools\/ultimate-canvas\/(role-runs(?:\/[A-Za-z0-9_-]+(?:\/(?:control|questions|results))?)?|role-questions\/[A-Za-z0-9_-]+|role-workflow-templates(?:\/[A-Za-z0-9_-]+)?|role-attempts\/[A-Za-z0-9_-]+)$/.test(value.url)) return null;
+                if (value.payload?.mutation_id !== value.mutationId) return null;
+                return copyJson(value);
+            }
             if (typeof value.url !== 'string' || !isRecord(value.payload) || value.payload.mutation_id !== value.mutationId) return null;
             let expected;
             if (value.kind === 'task_create') expected = API + '/role-runs';
@@ -227,6 +267,7 @@
                     || typeof item.editorText !== 'string' || item.editorText.length > 100000
                     || typeof item.messageText !== 'string' || item.messageText.length > 16000) return;
                 drafts.works[id] = { meta: copyJson(item.meta), editorText: item.editorText, items: boundedItems(item.items),
+                    changes: savedChanges(item.changes),
                     attachments: attachmentSelections(item.attachments), baseline: item.baseline ? savedEditorContent(item.baseline) : null,
                     messageText: item.messageText, messageFrom: validId(item.messageFrom) ? item.messageFrom : '',
                     editorDirty: item.editorDirty === true, messageDirty: item.messageDirty === true, updatedAt: Number(item.updatedAt) };
@@ -270,9 +311,11 @@
                     if (/^[A-Za-z0-9:_-]{1,200}$/.test(name) && typeof open === 'boolean') expanded[name] = open;
                 });
                 return {
+                    open: value.open === true, mode: value.mode === 'collaboration' ? 'collaboration' : 'role',
                     selectedNodeId: validId(value.selectedNodeId) ? value.selectedNodeId : '',
                     selectedWorkId: validId(value.selectedWorkId) ? value.selectedWorkId : '',
-                    tab: ['work', 'talk', 'history'].includes(value.tab) ? value.tab : 'work',
+                    tab: ['work', 'talk', 'history', 'results'].includes(value.tab) ? value.tab : 'work',
+                    collaboration: isRecord(value.collaboration) ? value.collaboration : {},
                     pendingMutation: validPending(value.pendingMutation, ctx), expanded,
                     drafts: sanitizeDrafts(value.drafts)
                 };
@@ -282,7 +325,14 @@
         function writeStored(ctx, value) {
             const key = storageKey(ctx);
             if (!key) return;
-            const serialized = JSON.stringify(Object.assign({ version: 2 }, value));
+            const safe = { ...value };
+            if (safe.pendingMutation?.kind?.startsWith('collaboration')) safe.pendingMutation = {
+                mutationId: safe.pendingMutation.mutationId, kind: safe.pendingMutation.kind, receiptOnly: true,
+                documentId: safe.pendingMutation.documentId, documentRevision: safe.pendingMutation.documentRevision,
+                workflowId: safe.pendingMutation.workflowId, runId: safe.pendingMutation.runId,
+                pausedWaiting: safe.pendingMutation.pausedWaiting === true,
+                submittedDraft: validCollaborationDraft(safe.pendingMutation.submittedDraft) };
+            const serialized = JSON.stringify(Object.assign({ version: 2 }, safe));
             scopedMemory.set(key, serialized);
             try { localStorage.setItem(key, serialized); }
             catch {
@@ -297,6 +347,7 @@
             const now = Date.now();
             if (state.draftMeta && (state.editorDirty || state.messageDirty)) {
                 state.drafts.works[state.draftMeta.workId] = { meta: copyJson(state.draftMeta), editorText: state.editorDraft,
+                    changes: [...state.editorChanges],
                     items: copyJson(state.editorItems), attachments: copyJson(state.editorAttachments), baseline: copyJson(state.editorBaseline),
                     messageText: state.messageDraft, messageFrom: state.messageFrom,
                     editorDirty: state.editorDirty, messageDirty: state.messageDirty, updatedAt: now };
@@ -307,11 +358,14 @@
         }
 
         function persistView() {
+            captureReadingAnchor();
             captureDrafts();
             writeStored(state.ctx, {
+                open: state.open, mode: state.mode,
                 selectedNodeId: state.selectedNodeId,
                 selectedWorkId: state.selectedWorkId,
                 tab: state.tab,
+                collaboration: collaborationView(),
                 pendingMutation: state.pendingMutation, drafts: state.drafts, expanded: state.expanded
             });
         }
@@ -338,7 +392,7 @@
             try {
                 const receipt = await requestJson(apiUrl('/role-receipts/' + encodeURIComponent(pending.mutationId)), { method: 'GET' });
                 if (receipt && receipt.mutation_id === pending.mutationId) {
-                    clearPendingMutation(ctx, pending);
+                    if (!collaborationReceiptNeedsAdoption(pending, receipt)) clearPendingMutation(ctx, pending);
                     return isCurrent(ctx) ? receipt : null;
                 }
             } catch (error) {
@@ -351,14 +405,25 @@
             return null;
         }
 
-        async function sendMutation(url, payload, kind, workId) {
+        function collaborationReceiptNeedsAdoption(pending, result) {
+            // Keep the original receipt until its saved document is adopted or its pause is acknowledged.
+            return pending?.kind?.startsWith('collaboration') && Boolean(pending.submittedDraft
+                || result?.document && (result.node || result.workflow) || result?.pending === true || result?.applied === false);
+        }
+
+        async function sendMutation(url, payload, kind, workId, submittedDraft) {
             const ctx = currentContext();
             if (!isCurrent(ctx) || ctx.writable === false) throw new Error('画布正在切换或当前不可编辑；原输入已保留，未发送操作。');
             if (state.pendingMutation) throw new Error('原操作结果尚未确认，请先查询原回执；当前输入已保留。');
             const id = payload.mutation_id || mutationId();
             const body = copyJson(Object.assign({}, payload, { mutation_id: id }));
-            const method = kind === 'task_update' ? 'PATCH' : 'POST';
+            const method = kind === 'task_update' || kind === 'collaboration_update' ? 'PATCH' : 'POST';
             const pending = { mutationId: id, kind, workId: workId || '', url, method, payload: copyJson(body) };
+            if (kind.startsWith('collaboration')) {
+                pending.documentId = ctx.documentId; pending.documentRevision = body.document_revision ?? ctx.documentRevision;
+                pending.workflowId = collaboration.workflowId; pending.runId = collaboration.runId;
+                pending.submittedDraft = validCollaborationDraft(submittedDraft);
+            }
             if (kind.startsWith('task_') && state.taskDraft) pending.draftKey = taskDraftKey(state.taskDraft);
             if (!validPending(pending, ctx)) throw new Error('操作目标与当前画布不匹配，未发送请求。');
             state.pendingMutation = pending;
@@ -366,7 +431,7 @@
             persistView(); updatePendingControls();
             try {
                 const result = await requestJson(url, { method, payload: body });
-                if (result && result.mutation_id === id) clearPendingMutation(ctx, pending);
+                if (result && result.mutation_id === id && !collaborationReceiptNeedsAdoption(pending, result)) clearPendingMutation(ctx, pending);
                 if (!isCurrent(ctx)) return null;
                 if (!result || result.mutation_id !== id) throw Object.assign(new Error('接口未确认原请求编号，请查原回执。'), { code: 'role_operation_unconfirmed' });
                 return result;
@@ -434,6 +499,7 @@
             if (saved) {
                 state.draftMeta = copyJson(saved.meta); state.editorDraft = saved.editorText;
                 state.editorItems = copyJson(saved.items); state.messageDraft = saved.messageText;
+                state.editorChanges = savedChanges(saved.changes);
                 state.editorAttachments = attachmentSelections(saved.attachments);
                 state.editorBaseline = saved.baseline ? savedEditorContent(saved.baseline) : savedEditorContent({});
                 state.messageFrom = saved.messageFrom; state.editorDirty = saved.editorDirty;
@@ -441,6 +507,7 @@
             } else {
                 const baseline = savedEditorContent(detail.draft_content || { text: detail.work.draft_text });
                 state.draftMeta = meta; state.editorDraft = baseline.text; state.editorItems = copyJson(baseline.items);
+                state.editorChanges = [...baseline.changes];
                 state.editorBaseline = baseline; state.editorAttachments = attachmentSelections(baseline.attachments.map(item => item.selection));
                 state.messageDraft = ''; state.messageFrom = '';
                 state.editorDirty = false; state.messageDirty = false; state.draftConflict = false;
@@ -468,6 +535,16 @@
             state.pendingMutation = stored.pendingMutation || null; state.drafts = stored.drafts || emptyDrafts();
             state.expanded = stored.expanded || {}; state.tab = stored.tab || 'work';
             state.selectedNodeId = stored.selectedNodeId || ''; state.selectedWorkId = stored.selectedWorkId || '';
+            const view = stored.collaboration || {};
+            collaboration.workflowId = validId(view.workflowId) ? view.workflowId : '';
+            collaboration.runId = validId(view.runId) ? view.runId : '';
+            collaboration.relationMode = view.relationMode === 'all' ? 'all' : 'related';
+            collaboration.scroll = isRecord(view.scroll) ? view.scroll : {};
+            collaboration.drafts = Object.fromEntries(Object.entries(isRecord(view.drafts) ? view.drafts : {}).slice(-20)
+                .map(([key, draft]) => [key, validCollaborationDraft(draft)]).filter(([, draft]) => draft));
+            collaboration.draft = validCollaborationDraft(view.draft); collaboration.dirty = Boolean(collaboration.draft);
+            collaboration.editingRequirements = view.editingRequirements === true;
+            routing?.setMode(collaboration.relationMode);
             return stored;
         }
 
@@ -498,7 +575,7 @@
             const meta = workMeta(detail), task = state.taskDraft, actionDraft = state.actionDraft;
             if (target.dataset.action === 'draft-copy') {
                 const value = kind === 'task' ? JSON.stringify(task, null, 2) : kind === 'action' ? actionDraft?.value || ''
-                    : [state.editorDraft, JSON.stringify(state.editorItems, null, 2), JSON.stringify(state.editorAttachments, null, 2), state.messageDraft].join('\n\n');
+                    : [state.editorDraft, JSON.stringify(state.editorItems, null, 2), state.editorChanges.join('\n\n'), JSON.stringify(state.editorAttachments, null, 2), state.messageDraft].join('\n\n');
                 try {
                     await navigator.clipboard.writeText(value);
                     if (isCurrent(ctx)) bridge.notice?.('草稿已复制。', 'success');
@@ -562,6 +639,7 @@
             state.root.setAttribute('aria-label', '角色工作面板');
             state.root.setAttribute('data-ultimate-canvas-role-workflow', '');
             bindEvents(state.root);
+            state.root.addEventListener('scroll', () => { captureReadingAnchor(); persistView(); }, { passive: true });
             host.append(state.root);
             return state.root;
         }
@@ -578,6 +656,7 @@
 
         function isEventSurface(target) {
             return Boolean(target && sameContext(state.ctx, currentContext()) && (state.root?.contains(target)
+                || taskBar?.contains(target)
                 || (state.modalContent?.contains(target) && sameContext(state.modalContext, currentContext()))));
         }
 
@@ -637,7 +716,7 @@
         }
 
         function hasUnsaved() {
-            return state.editorDirty || state.messageDirty || state.taskDraftDirty || state.actionDraftDirty;
+            return state.editorDirty || state.messageDirty || state.taskDraftDirty || state.actionDraftDirty || collaboration.dirty;
         }
 
         function clearTransientDrafts() {
@@ -645,7 +724,7 @@
             state.actionDraft = null; state.actionDraftDirty = false;
             state.editorDraft = ''; state.editorDirty = false;
             state.messageDraft = ''; state.messageDirty = false;
-            state.editorItems = Object.create(null); state.editorAttachments = []; state.editorBaseline = null;
+            state.editorItems = Object.create(null); state.editorChanges = []; state.editorAttachments = []; state.editorBaseline = null;
             state.messageFrom = ''; state.draftMeta = null;
             state.draftConflict = false; state.taskConflict = false; state.actionSaving = false;
             state.loadingEarlier = false; state.loadingWorkHistory = false; state.loadingAttempts = false;
@@ -653,6 +732,10 @@
 
         async function confirmDiscard(reason) {
             if (!hasUnsaved()) return true;
+            if (state.modalKind === 'collab-prompt' && state.actionDraftDirty) {
+                if (!await bridge.confirm({ title: '放弃这次输入？', message: '这里的输入尚未提交，离开会放弃本次输入；已保存任务与历史保留。', confirmText: '放弃输入并离开' })) return false;
+                state.actionDraftDirty = false; state.actionDraft = null;
+            }
             const ctx = currentContext(); persistView();
             const leave = await bridge.confirm({ title: '保留草稿并离开？',
                 message: '未提交内容会保留在当前账号和画布的草稿中，重新打开后可继续编辑。',
@@ -713,6 +796,7 @@
         }
 
         async function loadPage(options) {
+            if (state.mode === 'collaboration') return refreshCollaboration(Boolean(options?.append));
             const append = Boolean(options?.append);
             const ctx = currentContext();
             if (state.restoredScope !== contextKey(ctx)) { await contextChanged(); return; }
@@ -797,6 +881,14 @@
             const id = textOf(nodeId, '');
             if (!id) throw new Error('请先选择画布中的角色');
             if (state.restoredScope !== contextKey(currentContext())) await contextChanged();
+            const requirement = bridge.engine?.nodes.get(id);
+            if (requirement?.type === 'role-requirement') return openWorkflow(requirement.data?.roleRequirement?.workflowId,
+                { ...options, runId: requirement.data?.roleRequirement?.runId || '', requirementId: id });
+            const flow = bridge.workflowForNode?.(id);
+            if (!options?.legacy && (Array.isArray(flow?.relations) || options?.runId
+                || flow?.id === collaboration.workflowId && collaboration.runId)) return openWorkflow(flow?.id, { ...options, nodeId: id });
+            if (taskBar) taskBar.hidden = true;
+            if (state.restoredScope !== contextKey(currentContext())) await contextChanged();
             if (state.open && (state.selectedNodeId !== id || (options?.workId && state.selectedWorkId !== options.workId))) {
                 if (!await confirmDiscard('切换角色会放弃当前未提交的文字。')) return false;
                 persistView(); closeModal();
@@ -812,6 +904,7 @@
         }
 
         async function openPending() {
+            if (taskBar) taskBar.hidden = true;
             if (state.restoredScope !== contextKey(currentContext())) await contextChanged();
             if (state.open && !await confirmDiscard('打开待处理列表会放弃当前未提交的文字。')) return false;
             persistView(); closeModal();
@@ -829,6 +922,8 @@
             persistView(); clearTransientDrafts(); abortReads(); closeModal(); state.open = false;
             state.root?.remove(); state.root = null; state.detail = null;
             bridge.workRoot.hidden = true;
+            document.body.classList.remove('role-collaboration-panel-open');
+            persistView();
             return true;
         }
 
@@ -841,9 +936,15 @@
             state.detail = null; state.cursor = null; state.scope = ''; state.selectedNodeId = '';
             state.selectedWorkId = ''; state.eventCursor = null; state.extraEvents = [];
             clearTransientDrafts();
-            restoreScope(next); state.billedAttempts = new Set();
-            state.open = Boolean(state.root && state.root.isConnected);
+            collaboration.sequence += 1; collaboration.detail = null; collaboration.runs = []; collaboration.draft = null;
+            clearTimeout(collaborationReadTimer); collaborationReadTimer = null; mediaRefreshPending = false; collaboration.drafts = {};
+            collaboration.dirty = false; collaboration.busy = false; routing?.cancel(); taskBar?.remove(); taskBar = null;
+            const restored = restoreScope(next); state.billedAttempts = new Set();
+            if (restored.mode === 'collaboration') state.mode = 'collaboration';
+            state.open = Boolean(state.root && state.root.isConnected) || restored.mode === 'collaboration' && restored.open === true;
+            if (state.mode === 'collaboration' && !collaborationFlow()) { state.open = false; bridge.workRoot.hidden = true; }
             if (state.open) {
+                ensureRoot();
                 render();
                 if (next.userId && next.documentId) await refresh();
             }
@@ -851,6 +952,7 @@
 
         function render() {
             if (!state.open) return;
+            document.body.classList.toggle('role-collaboration-panel-open', state.mode === 'collaboration');
             const host = ensureRoot();
             host.replaceChildren();
             host.dataset.mode = state.mode;
@@ -861,6 +963,7 @@
                 host.append(panelMessage('正在读取本画布的角色任务…', 'quiet'));
                 return;
             }
+            if (state.mode === 'collaboration') { host.append(renderCollaboration()); updatePendingControls(); restoreReadingAnchor(); return; }
             if (state.mode === 'pending') host.append(renderPendingList());
             else host.append(renderRoleView());
             if (state.loadingMore) host.append(panelMessage('正在加载下一批…', 'quiet'));
@@ -869,9 +972,10 @@
         function renderHeader() {
             const header = el('header', 'crw-header');
             const copy = el('div', 'crw-header-copy');
-            copy.append(el('h2', 'crw-title', state.mode === 'pending' ? '待我处理' : '角色工作'));
+            copy.append(el('h2', 'crw-title', state.mode === 'pending' ? '待我处理' : state.mode === 'collaboration' ? '本次工作' : '角色工作'));
             const role = selectedNode();
-            copy.append(el('p', 'crw-subtitle', state.mode === 'pending' ? '当前画布' : (role ? nodeTitle(role) : '请选择画布角色')));
+            copy.append(el('p', 'crw-subtitle', state.mode === 'pending' ? '当前画布' : state.mode === 'collaboration'
+                ? collaborationFlow()?.name || '角色协作' : (role ? nodeTitle(role) : '请选择画布角色')));
             header.append(copy);
             const actions = el('div', 'crw-header-actions');
             if (typeof bridge.openLibrary === 'function') actions.append(actionIcon('users', 'return-library', '返回角色库'));
@@ -1169,6 +1273,9 @@
                 const view = button(attempt.result_available === true || attempt.result_json ? '查看原回复与费用' : '查看原调用回执', 'view-attempt', '', 'file-text');
                 view.dataset.attemptId = attempt.id; row.append(view);
             }
+            if (state.mode === 'collaboration' && feeState === 'authorization_required') {
+                const authorize = button('核对差额并授权结原单', 'collab-settlement', '', 'check'); authorize.dataset.attemptId = attempt.id; row.append(authorize);
+            }
             return row;
         }
 
@@ -1253,6 +1360,7 @@
                 const row = el('div', 'crw-delivery-row');
                 const label = delivery.id === currentId ? '当前成果 · v' : '历史成果 · v';
                 row.append(el('span', delivery.id === currentId ? 'crw-delivery-current' : 'crw-muted', label + (Number(delivery.version) || '?')));
+                row.append(el('span', 'crw-muted', authorLabel(delivery)));
                 const submitted = el('span', 'crw-muted'); addTime(submitted, delivery.created_at); row.append(submitted);
                 const action = button('查看', 'view-delivery', '', 'file-text'); action.dataset.deliveryId = delivery.id; row.append(action);
                 const snippet = textOf(content.text, '');
@@ -1353,7 +1461,19 @@
                 item.maxLength = 16000; item.value = state.editorItems[name] || '';
                 label.append(item); box.append(label);
             });
-            box.append(renderAttachmentEditor());
+            const changes = el('section', 'crw-change-editor');
+            changes.append(el('h3', '', '修改回应'));
+            if (detail.revision_source?.opinion) changes.append(summaryRow('修改意见', detail.revision_source.opinion));
+            state.editorChanges.forEach((value, index) => {
+                const row = el('div', 'crw-change-row'), field = el('label', 'crw-field');
+                field.append(el('span', 'crw-field-label', '回应 ' + (index + 1)));
+                const input = el('textarea', 'crw-textarea'); input.dataset.changeIndex = String(index);
+                input.rows = 2; input.maxLength = 4000; input.value = value; field.append(input);
+                const remove = actionIcon('trash-2', 'remove-change', '移除此条修改回应'); remove.dataset.changeIndex = String(index);
+                row.append(field, remove); changes.append(row);
+            });
+            const add = button('添加回应', 'add-change', '', 'plus'); add.disabled = state.editorChanges.length >= 30;
+            changes.append(add); box.append(changes, renderAttachmentEditor());
             const save = button('保存草稿', 'work-draft', '', 'save'), submit = button('提交成果', 'work-submit', 'primary', 'send');
             save.disabled = submit.disabled = state.draftConflict;
             box.append(save, submit);
@@ -1370,10 +1490,11 @@
                 if (original) return original;
             }
             const node = state.materials.find(item => item.id === selection.nodeId);
-            return { title: node?.title || (selection.sourceDeliveryId ? '原成果附件' : '画布节点已移除'), type: node?.type || '', ...selection };
+            return { title: node?.title || (selection.mediaBindingId ? '本次媒体原件' : selection.sourceDeliveryId ? '原成果附件' : '画布节点已移除'), type: node?.type || '', ...selection };
         }
 
         function attachmentDescription(attachment, selection) {
+            if (selection?.mediaBindingId) return '固定媒体原件' + (attachment.outputSlotId ? ' · ' + attachment.outputSlotId : '');
             return selection?.sourceDeliveryId ? '固定原成果 · 第' + (selection.index + 1) + '项'
                 : attachment.nodeId || selection?.nodeId ? '已选画布原件，提交时固定版本' : '固定交付原件';
         }
@@ -1381,7 +1502,9 @@
         function attachmentRecord(attachment, selection) {
             const rows = [['成果编号', selection?.sourceDeliveryId], ['原件序号', selection?.sourceDeliveryId ? String(selection.index + 1) : ''],
                 ['画布节点', attachment.nodeId || selection?.nodeId], ['资产编号', attachment.assetId],
-                ['参考编号', attachment.referenceImageId], ['媒体任务', attachment.taskId], ['原件指纹', attachment.sourceDigest]];
+                ['参考编号', attachment.referenceImageId], ['媒体任务', attachment.taskId || attachment.imageTaskId],
+                ['媒体绑定', attachment.mediaBindingId || selection?.mediaBindingId], ['交付项', attachment.outputSlotId || selection?.outputSlotId],
+                ['来源工作', attachment.sourceWorkId], ['原件指纹', attachment.sourceDigest || selection?.sourceDigest]];
             return recordDetails(rows);
         }
 
@@ -1475,13 +1598,13 @@
             if (detail.summary?.action_available === false) { section.append(renderReadOnlyWork(detail)); return section; }
             if (state.draftConflict) section.append(renderDraftConflict('work'));
             const composer = el('div', 'crw-composer');
-            const to = state.nodes.find(node => node.id === state.selectedNodeId);
+            const to = state.nodes.find(node => node.id === detail.work.node_id);
             composer.append(el('p', 'crw-muted', '发给：' + (to ? nodeTitle(to) : '当前角色')));
             const fromSelect = el('select', 'crw-select'); fromSelect.dataset.messageFrom = '';
             appendOption(fromSelect, '', '以本人名义');
             recordList(detail.requirements?.participants).filter(item => item.participation !== 'excluded').forEach(item => {
                 const node = state.nodes.find(candidate => candidate.id === item.nodeId);
-                if (node && node.id !== state.selectedNodeId) appendOption(fromSelect, node.id, '以' + nodeTitle(node) + '身份转达');
+                if (node && node.id !== detail.work.node_id) appendOption(fromSelect, node.id, '以' + nodeTitle(node) + '身份转达');
             });
             fromSelect.value = state.messageFrom; composer.append(fromSelect);
             const textarea = el('textarea', 'crw-textarea'); textarea.dataset.message = '';
@@ -1497,11 +1620,36 @@
             const from = state.nodes.find(node => node.id === event.from_node_id);
             const row = el('article', 'crw-message-row');
             const heading = el('div', 'crw-message-head');
-            heading.append(el('strong', '', from ? nodeTitle(from) + ' · 代为转达' : '你'));
-            heading.append(el('span', 'crw-muted', event.to_node_id === state.selectedNodeId ? '发给当前角色' : '任务内交流'));
+            const author = actualAuthor(event);
+            const avatar = el('span', 'crw-avatar'); setIcon(avatar, authorIcon(author));
+            heading.append(avatar, el('strong', '', (from ? nodeTitle(from) + ' · ' : '') + authorLabel(event)));
+            heading.append(el('span', 'crw-muted', event.to_node_id === currentDetail()?.work?.node_id ? '发给当前角色' : '任务内交流'));
             addTime(heading, event.created_at); row.append(heading);
             row.append(el('p', 'crw-message-copy', textOf(detail.text, '消息内容待同步')));
             return row;
+        }
+
+        function actualAuthor(record) {
+            if (['ai', 'person', 'unknown'].includes(record?.author_kind)) return record.author_kind;
+            if (['ai', 'person', 'unknown'].includes(record?.actor_kind)) return record.actor_kind;
+            if (record?.submission_kind === 'ai') return 'ai';
+            if (['person', 'owner_proxy'].includes(record?.submission_kind)) return 'person';
+            const detail = parseJson(record?.detail_json || record?.detail, {});
+            if (detail.attribution === 'owner_answer') return 'person';
+            if (validId(record?.source_attempt_id) || validId(detail.attemptId)) return 'ai';
+            return 'unknown';
+        }
+
+        function authorIcon(kind) { return kind === 'ai' ? 'bot' : kind === 'person' ? 'user-round' : 'circle-help'; }
+        function authorLabel(record) {
+            const kind = actualAuthor(record), detail = parseJson(record?.detail_json || record?.detail, {});
+            if (kind === 'ai') return 'AI';
+            if (kind !== 'person') return '作者未确认';
+            if (record.submission_kind === 'owner_proxy' || detail.ownerProxy === true) return '本人代提交';
+            if (record.actor_user_id === state.ctx.userId || record.submitted_by === state.ctx.userId || detail.attribution === 'owner_answer') {
+                return record.from_node_id && record.kind === 'message' ? '本人转达' : '本人';
+            }
+            return '人工';
         }
 
         function renderHistory() {
@@ -1551,8 +1699,7 @@
             row.append(el('strong', '', EVENT_LABELS[kind] || '任务记录'));
             addTime(row, event.created_at);
             const detail = parseJson(event.detail_json || event.detail, {});
-            if (event.actor_user_id) row.append(el('span', 'crw-muted', (event.actor_kind === 'ai' ? 'AI · 发起人：' : '操作人：')
-                + (event.actor_user_id === state.ctx.userId ? '本人 · ' : '') + String(event.actor_user_id)));
+            row.append(el('span', 'crw-muted', authorLabel(event)));
             if (kind === 'ai_review_recommendation') {
                 row.append(el('p', 'crw-muted', 'AI 建议 · ' + textOf(detail.model, '模型未提供') + '；不是检查通过或本人确认。'));
                 const content = parseJson(detail.content, {});
@@ -1575,8 +1722,10 @@
                 });
                 row.append(el('p', 'crw-muted', detail.feeCleared === true ? '此回执确认无模型调用费用。' : '交付回执未确认费用结清，请另核账单。'));
             }
-            const copy = textOf(detail.opinion || detail.reason || detail.goal, '');
+            const copy = textOf(detail.opinion || detail.reason || detail.goal || detail.text, '');
             if (copy) row.append(el('p', 'crw-muted', copy));
+            if (kind === 'collaboration_review') row.append(el('span', 'crw-muted',
+                ({ suggest: '检查建议', approve: '检查通过', return: '退回修改', confirm: '本人确认', revise: '继续修改' }[detail.action] || '动作待核对')));
             if (detail.deliveryVersion) row.append(el('span', 'crw-muted', '成果 v' + detail.deliveryVersion));
             return row;
         }
@@ -1607,14 +1756,26 @@
 
         function renderPendingReceipt() {
             const box = el('aside', 'crw-receipt');
-            const copy = el('p', '', '有一项操作结果尚未确认。查询同一回执不会重发或再次收费。');
+            const copy = el('p', '', state.pendingMutation?.pausedWaiting
+                ? '原操作仅暂停新派发，新需求尚未保存。完整草稿和原回执已保留。'
+                : '有一项操作待确认或待同步到画布。查询同一回执不会重发或再次收费。');
             box.append(copy, button('查询原回执', 'recover-receipt', '', 'search'));
+            if (state.pendingMutation?.pausedWaiting) box.append(button('核对后继续编辑', 'collab-recheck-paused', '', 'pencil'));
             return box;
         }
 
         function updatePendingControls() {
             [state.root, state.modalContent].forEach(surface => {
                 if (!surface) return;
+                surface.querySelectorAll('[data-action="collab-save-request"], [data-action="collab-save-current"], [data-action="collab-save-configuration"]').forEach(control => {
+                    const label = control.lastChild;
+                    if (label?.nodeType === 3) {
+                        control.dataset.idleLabel ||= label.textContent;
+                        label.textContent = state.taskSaving ? '正在保存…' : control.dataset.idleLabel;
+                    }
+                    control.disabled = state.taskSaving || Boolean(state.pendingMutation) || state.ctx.writable === false;
+                    control.setAttribute('aria-busy', String(state.taskSaving));
+                });
                 surface.querySelector(':scope > .crw-receipt')?.remove();
                 if (!state.pendingMutation) return;
                 const box = renderPendingReceipt();
@@ -1844,8 +2005,16 @@
         async function dismissModal(content, ctx) {
             if (state.modalContent !== content || !isCurrent(ctx)) return;
             if (state.taskSaving || state.actionSaving) { bridge.notice?.('正在确认原操作结果，请先等待回执。', 'info'); return; }
+            if (state.modalKind === 'collab-requirement' && collaboration.dirty
+                && !await bridge.confirm({ title: '保留草稿并关闭？', message: '需求和分工仍未提交，保留在本账号与画布草稿中。', confirmText: '保留草稿并关闭' })) return;
             const dirty = state.modalKind === 'task' ? state.taskDraftDirty : state.actionDraftDirty && state.actionDraft?.kind === state.modalKind;
             persistView();
+            if (dirty && state.modalKind === 'collab-prompt') {
+                if (!await bridge.confirm({ title: '放弃这次输入？', message: '此操作尚未提交。关闭会放弃这里的输入，已保存任务与历史不变。', confirmText: '放弃输入' })) return;
+                state.actionDraftDirty = false; state.actionDraft = null;
+                if (state.modalContent === content && isCurrent(ctx)) closeModal();
+                return;
+            }
             if (dirty && !await bridge.confirm({ title: '保留草稿并关闭？', message: '未提交内容会保留在当前账号和画布的草稿中。', confirmText: '保留草稿并关闭' })) return;
             if (state.modalContent === content && isCurrent(ctx)) closeModal();
         }
@@ -1915,10 +2084,16 @@
         function handleInput(event) {
             const target = event.target;
             if (!isEventSurface(target)) return;
+            if (target.matches('[data-collaboration-field]')) { updateCollaborationDraft(target); persistView(); return; }
             if (target.matches('[data-editor="main"]')) {
                 state.editorDraft = target.value; state.editorDirty = true;
             } else if (target.matches('[data-required-item]')) {
                 state.editorItems[target.dataset.requiredItem] = target.value; state.editorDirty = true;
+            } else if (target.matches('textarea[data-change-index]')) {
+                const index = Number(target.dataset.changeIndex);
+                if (Number.isInteger(index) && index >= 0 && index < state.editorChanges.length) {
+                    state.editorChanges[index] = target.value; state.editorDirty = true;
+                }
             } else if (target.matches('[data-message]')) {
                 state.messageDraft = target.value; state.messageDirty = true;
             } else if (target.matches('[data-action-text]') && state.actionDraft) {
@@ -1932,6 +2107,8 @@
         function handleChange(event) {
             const target = event.target;
             if (!isEventSurface(target)) return;
+            if (target.matches('[data-collaboration-field]')) { updateCollaborationDraft(target); persistView(); return; }
+            if (target.matches('[data-collaboration-run]')) { void switchCollaborationRun(target.value).catch(showCollaborationError); return; }
             if (target.matches('[data-action="select-work"]')) { handleClick(event); return; }
             if (target.matches('[data-message-from]')) { state.messageFrom = target.value; state.messageDirty = true; }
             if (target.matches('[data-task-field]')) { updateTaskDraftField(target.dataset.taskField, target.type === 'checkbox' ? target.checked : target.value); state.taskDraftDirty = true; }
@@ -2025,10 +2202,11 @@
             const target = event.target.closest('[data-action]');
             if (!target || !isEventSurface(target) || target.disabled) return;
             const action = target.dataset.action;
+            if (action.startsWith('collab-')) { await collaborationAction(action, target); return; }
             if (action.startsWith('draft-')) { await resolveDraft(target); return; }
             if (action === 'tab') {
                 const tab = target.dataset.tab;
-                if (!['work', 'talk', 'history'].includes(tab)) return;
+                if (!['work', 'talk', 'history', 'results'].includes(tab)) return;
                 state.tab = tab; persistView(); render(); return;
             }
             if (action === 'close') { await close(); return; }
@@ -2088,7 +2266,20 @@
             if (action === 'view-input') { openInputDelivery(target); return; }
             if (action === 'view-delivery') { openDelivery(target.dataset.deliveryId); return; }
             if (action === 'view-adopted') { await openAdoptedDelivery(target); return; }
-            if (action === 'view-revision-source') { openRevisionSource(); return; }
+            if (action === 'view-revision-source') { await openRevisionSource(); return; }
+            if (action === 'add-change' || action === 'remove-change') {
+                if (action === 'add-change' && state.editorChanges.length < 30) state.editorChanges.push('');
+                else if (action === 'remove-change') {
+                    const index = Number(target.dataset.changeIndex);
+                    if (!Number.isInteger(index) || index < 0 || index >= state.editorChanges.length) return;
+                    state.editorChanges.splice(index, 1);
+                } else return;
+                state.editorDirty = true; persistView(); render();
+                const focusIndex = action === 'add-change' ? state.editorChanges.length - 1 : Math.min(Number(target.dataset.changeIndex), state.editorChanges.length - 1);
+                if (focusIndex >= 0) state.root?.querySelector('textarea[data-change-index="' + focusIndex + '"]')?.focus();
+                else state.root?.querySelector('[data-action="add-change"]')?.focus();
+                return;
+            }
             if (action === 'preview-attachment') { await previewAttachment(target); return; }
             if (action === 'add-attachment') { await addAttachment(target); return; }
             if (action === 'remove-attachment' || action === 'retain-attachment') { changeAttachment(target); return; }
@@ -2102,6 +2293,7 @@
             if (action === 'work-approve') { await approveWork(); return; }
             if (action === 'work-return') { showTextDialog('work-return', '退回修订', '写清当前成果版本需要修改的内容。旧稿会保留。', true, '退回修订'); return; }
             if (action === 'work-revise') {
+                if (state.mode === 'collaboration') return promptCollaborationReview('revise');
                 const ctx = currentContext(), meta = workMeta(currentDetail());
                 if (await bridge.confirm({ title: '继续修订？', message: '将重开当前角色及依赖它的下游；独立分支保留。已交付成果和费用记录继续留在历史中，修订次数不会自动增加。', confirmText: '新开修订轮' })) {
                     assertWorkUnchanged(ctx, meta); await performWorkAction('revise', {}, meta);
@@ -2109,13 +2301,14 @@
                 return;
             }
             if (action === 'run-pause') {
+                if (state.mode === 'collaboration') { await collaborationControl('pause'); return; }
                 const ctx = currentContext(), meta = workMeta(currentDetail());
                 if (await bridge.confirm({ title: '暂停本次任务？', message: '暂停会停止新的调用，不代表已发请求被取消或退款。', confirmText: '暂停任务' })) {
                     assertWorkUnchanged(ctx, meta); await performWorkAction('pause', {}, meta);
                 }
                 return;
             }
-            if (action === 'run-resume') { await runAction('resume'); return; }
+            if (action === 'run-resume') { if (state.mode === 'collaboration') await collaborationControl('resume'); else await runAction('resume'); return; }
             if (action === 'work-execute') { await executeWork(target); return; }
         }
 
@@ -2317,6 +2510,13 @@
                 const result = await recoverReceipt(ctx, pending);
                 if (!isCurrent(ctx)) return;
                 if (result) {
+                    if (pending?.kind?.startsWith('collaboration')) {
+                        await adoptCollaborationReceipt(ctx, pending, result);
+                        if (!isCurrent(ctx)) return;
+                        if (collaborationFlow()) { state.mode = 'collaboration'; await refreshCollaboration(false); }
+                        else await refresh();
+                        return;
+                    }
                     adoptTaskReceipt(pending, result);
                     notifyBillingSettled(result);
                     bridge.notice?.('已找到原操作回执，将重读实际状态；预留回执不代表 AI 成果已完成。', 'success');
@@ -2376,7 +2576,7 @@
             } finally { if (isCurrent(ctx, sequence) && currentDetail() === detail) target.disabled = false; }
         }
 
-        async function performWorkAction(action, extra, expectedMeta) {
+        async function performWorkAction(action, extra, expectedMeta, editorChangesAtSubmit) {
             const ctx = currentContext();
             const detail = currentDetail();
             if (!detail?.work) throw new Error('当前工作已变化，请刷新后重新打开。');
@@ -2388,6 +2588,7 @@
             const work = detail.work;
             const editor = typeof extra?.text === 'string' ? extra.text : state.editorDraft,
                 items = JSON.stringify(extra?.items || state.editorItems), attachments = JSON.stringify(extra?.attachments || state.editorAttachments),
+                changes = JSON.stringify(editorChangesAtSubmit || state.editorChanges),
                 message = state.messageDraft, from = state.messageFrom;
             const payload = Object.assign({
                 base_revision: meta.workRevision,
@@ -2398,7 +2599,7 @@
             if (!result || !isCurrent(ctx) || state.selectedWorkId !== work.id) return null;
             const successor = result.successor || result.result?.successor;
             if (['draft', 'submit'].includes(action) && state.editorDraft === editor && JSON.stringify(state.editorItems) === items
-                && JSON.stringify(state.editorAttachments) === attachments) {
+                && JSON.stringify(state.editorAttachments) === attachments && JSON.stringify(state.editorChanges) === changes) {
                 state.editorDirty = false;
             }
             if (action === 'message' && state.messageDraft === message && state.messageFrom === from) {
@@ -2453,33 +2654,38 @@
 
         async function saveWorkDraft(target) {
             const ctx = currentContext(), detail = currentDetail(), meta = state.draftMeta, text = state.editorDraft;
+            const changes = [...state.editorChanges];
             assertWorkUnchanged(ctx, meta);
             const role = parseJson(detail?.work?.snapshot?.role, {});
             const participant = recordList(detail?.requirements?.participants).find(item => item.nodeId === detail?.work?.node_id) || {};
-            const body = { text, items: copyJson(state.editorItems), attachments: copyJson(state.editorAttachments),
+            const body = { text, items: copyJson(state.editorItems), changes: submissionChanges(), attachments: copyJson(state.editorAttachments),
                 ...(participant.ownerMaySubmit === true && role.executor?.kind !== 'person' ? { owner_proxy: true } : {}) };
             target.disabled = true;
             try {
                 await prepareAttachmentWrite(ctx, meta, body.attachments);
-                await performWorkAction('draft', body, meta);
+                await performWorkAction('draft', body, meta, changes);
             } finally { if (isCurrent(ctx)) target.disabled = false; }
         }
 
         async function submitWork(target) {
             const ctx = currentContext(), detail = currentDetail(), meta = state.draftMeta, text = state.editorDraft;
+            const changes = [...state.editorChanges];
             assertWorkUnchanged(ctx, meta);
             if (!text.trim() && !state.editorAttachments.length) { bridge.notice?.('请填写成果正文或选择交付原件。', 'warning'); return; }
             const items = Object.create(null), role = parseJson(detail.work?.snapshot?.role, {});
-            recordList(role.requiredItems).forEach(name => { items[name] = state.editorItems[name] || ''; });
+            const assignment = recordList(detail.requirements?.participants).find(item => item.nodeId === detail.work?.node_id);
+            const required = [...new Set([...recordList(role.requiredItems),
+                ...recordList(detail.requirements?.schema === 'role.requirements.v2' ? assignment?.deliverableItems : [])])];
+            required.forEach(name => { items[name] = state.editorItems[name] || ''; });
             const missing = Object.entries(items).filter(([, value]) => !value.trim());
             if (missing.length) { bridge.notice?.('请填写全部必交项。', 'warning'); return; }
             const participant = recordList(detail.requirements?.participants).find(item => item.nodeId === detail.work?.node_id) || {};
-            const body = { text, items, attachments: copyJson(state.editorAttachments), input_digest: meta.inputDigest,
+            const body = { text, items, changes: submissionChanges(), attachments: copyJson(state.editorAttachments), input_digest: meta.inputDigest,
                 ...(participant.ownerMaySubmit === true && role.executor?.kind !== 'person' ? { owner_proxy: true } : {}) };
             target.disabled = true;
             try {
                 await prepareAttachmentWrite(ctx, meta, body.attachments);
-                await performWorkAction('submit', body, meta);
+                await performWorkAction('submit', body, meta, changes);
             } finally { if (isCurrent(ctx)) target.disabled = false; }
         }
 
@@ -2514,13 +2720,13 @@
         }
 
         async function sendMessage(target) {
-            const ctx = currentContext(), meta = state.draftMeta, text = state.messageDraft.trim(), from = state.messageFrom;
+            const ctx = currentContext(), meta = state.draftMeta, text = state.messageDraft.trim(), from = state.mode === 'collaboration' ? '' : state.messageFrom;
             assertWorkUnchanged(ctx, meta);
             if (!text) { bridge.notice?.('请先填写要发送的内容。', 'warning'); return; }
             target.disabled = true;
             try {
                 await performWorkAction('message', {
-                    to_node_id: state.selectedNodeId,
+                    to_node_id: currentDetail().work.node_id,
                     ...(from ? { from_node_id: from } : {}), text, category: 'message'
                 }, meta);
             } finally { if (isCurrent(ctx)) target.disabled = false; }
@@ -2656,6 +2862,7 @@
             if (isRecord(contentData.items)) Object.entries(contentData.items).forEach(([name, value]) => {
                 body.append(el('h3', 'crw-delivery-item-title', name), el('pre', 'crw-delivery-fulltext', typeof value === 'string' ? value : JSON.stringify(value ?? '')));
             });
+            appendTextList(body, '修改回应', contentData.changes, '本稿未记录修改回应。');
             if (validId(deliveryId)) recordList(contentData.attachments).slice(0, 20).forEach((attachment, index) => {
                 if (!isRecord(attachment)) return;
                 const row = el('section', 'crw-readonly-attachment');
@@ -2666,6 +2873,12 @@
                 const host = el('div', 'crw-attachment-preview'); host.setAttribute('aria-live', 'polite');
                 attachmentViews.set(preview, { deliveryId, index, attachment: copyJson(attachment), host });
                 row.append(preview, host); body.append(row);
+                if (state.mode === 'collaboration') {
+                    for (const [action, label] of [['canvas', '放回画布'], ['asset', '存入资产']]) {
+                        const use = button(label, 'collab-attachment-' + action, '', action === 'canvas' ? 'plus' : 'save');
+                        use.dataset.deliveryId = deliveryId; use.dataset.attachmentIndex = String(index); row.append(use);
+                    }
+                }
             });
             parent.append(body);
         }
@@ -2724,9 +2937,24 @@
             }
         }
 
-        function openRevisionSource() {
-            const source = currentDetail()?.revision_source;
-            if (source?.readonly !== true || !validId(source.deliveryId) || !isRecord(source.content)) throw new Error('固定修订原稿暂不可读，不采用当前稿替代。');
+        async function readFixedDelivery(runId, deliveryId) {
+            if (!validId(runId) || !validId(deliveryId)) throw new Error('原稿身份无效，未读取其他稿件。');
+            const result = await requestJson(apiUrl('/role-runs/' + encodeURIComponent(runId), { delivery_id: deliveryId }), { method: 'GET' });
+            if (!result?.delivery || result.delivery.id !== deliveryId) throw new Error('指定原稿不可读，未用其他稿替代。');
+            return result.delivery;
+        }
+
+        async function openRevisionSource() {
+            const ctx = currentContext(), detail = currentDetail(), source = detail?.revision_source;
+            if (source?.readonly !== true || !validId(source.deliveryId)) throw new Error('固定修订原稿暂不可读，不采用当前稿替代。');
+            if (!isRecord(source.content)) {
+                const delivery = await readFixedDelivery(detail.run?.id, source.deliveryId);
+                if (!isCurrent(ctx) || currentDetail() !== detail) return;
+                const original = parseJson(delivery.content_json, null);
+                if (!isRecord(original)) throw new Error('固定原稿内容不可读；不会使用当前草稿替代。');
+                source.content = original;
+                render();
+            }
             const content = el('div', 'crw-dialog-content'); content.append(el('h2', 'crw-dialog-title', '固定修订原稿'));
             content.append(recordDetails([['原成果', source.deliveryId]]));
             if (typeof source.opinion === 'string') content.append(summaryRow('修订意见', source.opinion));
@@ -2747,13 +2975,1112 @@
             const contentData = parseJson(delivery.content_json || delivery.content, {});
             const content = el('div', 'crw-dialog-content');
             content.append(el('h2', 'crw-dialog-title', title));
+            content.append(el('p', 'crw-muted', authorLabel(delivery)));
             content.append(recordDetails([['成果编号', delivery.id]]));
             appendReadonlyContent(content, contentData, delivery.id);
             const footer = el('div', 'crw-dialog-footer'); footer.append(button('关闭', 'dialog-readonly-close', 'primary')); content.append(footer);
             openModal('delivery', content);
         }
 
-        return { open, openPending, refresh, contextChanged, hasUnsaved, close };
+        function collaborationFlow() {
+            return (bridge.engine?.roleWorkflows || []).find(flow => flow.id === collaboration.workflowId) || null;
+        }
+
+        function collaborationView() {
+            if (collaboration.dirty && collaboration.draft) {
+                collaboration.drafts[collaborationDraftKey(collaboration.draft)] = validCollaborationDraft(collaboration.draft);
+            }
+            collaboration.drafts = Object.fromEntries(Object.entries(collaboration.drafts).filter(([, draft]) => draft).slice(-20));
+            return { workflowId: collaboration.workflowId, runId: collaboration.runId,
+                relationMode: collaboration.relationMode, scroll: collaboration.scroll, editingRequirements: collaboration.editingRequirements,
+                draft: collaboration.dirty ? collaboration.draft : null, drafts: collaboration.drafts };
+        }
+
+        function collaborationDraftKey(draft) { return draft.workflowId + ':' + (draft.runId || 'new'); }
+        function forgetCollaborationDraft(draft) { if (draft) delete collaboration.drafts[collaborationDraftKey(draft)]; }
+        async function adoptCollaborationReceipt(ctx, pending, result) {
+            if (!isCurrent(ctx) || !pending || result?.mutation_id !== pending.mutationId) return false;
+            if (pending.workflowId && pending.workflowId !== collaboration.workflowId) {
+                throw new Error('这是另一工作流的原回执，请回原工作流后查询；草稿和回执均保留。');
+            }
+            if (pending.runId && pending.runId !== collaboration.runId) throw new Error('请回原任务查询此回执，当前任务和草稿未改变。');
+            if (pending.submittedDraft && !pending.submittedDraft.runId && collaboration.runId && result.run?.id !== collaboration.runId) {
+                throw new Error('请回原新需求草稿查询此回执，当前任务未改变。');
+            }
+            if (pending.submittedDraft && collaboration.dirty && collaboration.draft
+                && collaborationDraftKey(collaboration.draft) !== collaborationDraftKey(pending.submittedDraft)) {
+                throw new Error('当前另有需求草稿，请返回原需求后查询回执；两份输入均保留。');
+            }
+            if (result.run && result.run.document_id !== ctx.documentId) throw new Error('回执不属于当前画布，未接纳。');
+            const payload = { document_id: pending.documentId || ctx.documentId,
+                document_revision: pending.documentRevision ?? ctx.documentRevision };
+            if (result.document && (result.node || result.workflow)) {
+                const adopt = result.node ? bridge.adoptRoleRunReceipt : bridge.adoptRoleWorkflowTemplateReceipt;
+                if (typeof adopt !== 'function') throw new Error('原操作已保存，画布同步暂不可用；原回执已保留，请稍后再查。');
+                await adopt(result, payload);
+                if (!isCurrent(ctx)) return false;
+            }
+            if (result.pending === true || result.applied === false) {
+                pending.pausedWaiting = true;
+                if (state.pendingMutation?.mutationId === pending.mutationId) state.pendingMutation = pending;
+                const saved = pending.submittedDraft;
+                if (saved && !collaboration.draft) { collaboration.draft = copyJson(saved); collaboration.dirty = true; }
+                if (collaboration.draft?.runId === result.run?.id) {
+                    collaboration.draft.pauseReceiptId = pending.mutationId; collaboration.dirty = true;
+                }
+                state.taskConflict = true; collaboration.editingRequirements = true;
+                persistView(); updatePendingControls();
+                bridge.notice?.('已暂停新派发，但新需求尚未保存。请先核对原请求与费用，再继续编辑并明确保存；不会自动重发。', 'warning');
+                return false;
+            }
+            if (pending.submittedDraft) {
+                if (!validId(result.run?.id) || result.requirements?.schema !== 'role.requirements.v2'
+                    || result.requirements.workflowId !== pending.submittedDraft.workflowId
+                    || pending.submittedDraft.runId && result.run.id !== pending.submittedDraft.runId) throw new Error('需求保存结果尚未确认，草稿和原回执保留。');
+                const submitted = pending.submittedDraft, key = collaborationDraftKey(submitted);
+                const draft = collaboration.draft && collaborationDraftKey(collaboration.draft) === key
+                    ? collaboration.draft : collaboration.drafts[key];
+                const unchanged = draft && JSON.stringify(validCollaborationDraft(draft)) === JSON.stringify(submitted);
+                if (unchanged) {
+                    forgetCollaborationDraft(draft);
+                    if (!collaboration.dirty || draft === collaboration.draft) { collaboration.draft = null; collaboration.dirty = false; collaboration.editingRequirements = false; }
+                } else if (draft) {
+                    forgetCollaborationDraft(draft); draft.runId = result.run.id;
+                    collaboration.drafts[collaborationDraftKey(draft)] = validCollaborationDraft(draft);
+                    if (!collaboration.dirty || !collaboration.draft || draft === collaboration.draft) {
+                        collaboration.draft = draft; collaboration.dirty = true; state.taskConflict = true;
+                    }
+                }
+                collaboration.runId = result.run.id;
+                bridge.notice?.(unchanged ? '需求已保存，尚未授权或开始协作。' : '原需求已保存；之后编辑的内容仍是草稿，请核对后再保存。', unchanged ? 'success' : 'warning');
+            }
+            clearPendingMutation(ctx, pending);
+            return true;
+        }
+        function restoreCollaborationDraft() {
+            collaboration.draft = validCollaborationDraft(collaboration.drafts[collaboration.workflowId + ':' + (collaboration.runId || 'new')]);
+            collaboration.dirty = Boolean(collaboration.draft);
+        }
+
+        function validCollaborationDraft(value) {
+            if (!isRecord(value) || !validId(value.workflowId) || (value.runId && !validId(value.runId))
+                || typeof value.goal !== 'string' || value.goal.length > 12000
+                || typeof value.criteria !== 'string' || value.criteria.length > 8000
+                || !Array.isArray(value.participants) || value.participants.length > 100
+                || !Array.isArray(value.relations) || value.relations.length > 500
+                || !Array.isArray(value.materialNodes) || value.materialNodes.some(id => !validId(id))
+                || value.participants.some(p => !isRecord(p) || !validId(p.nodeId))) return null;
+            return { workflowId: value.workflowId, runId: value.runId || '', title: textOf(value.title, '').slice(0, 80),
+                pauseReceiptId: validId(value.pauseReceiptId) ? value.pauseReceiptId : '',
+                baseRevision: finiteInteger(value.baseRevision, 0, Number.MAX_SAFE_INTEGER) ?? 0,
+                requirementsRevision: finiteInteger(value.requirementsRevision, 0, Number.MAX_SAFE_INTEGER) ?? 0,
+                goal: value.goal, criteria: value.criteria, finalNodeId: validId(value.finalNodeId) ? value.finalNodeId : '',
+                materialNodes: value.materialNodes.slice(0, 100),
+                participants: value.participants.map(p => ({ ...cloneParticipant(p), assignment: textOf(p.assignment, '').slice(0, 8000),
+                    deliverableItems: recordList(p.deliverableItems).filter(item => typeof item === 'string').slice(0, 50).map(item => item.slice(0, 160)),
+                    requiredInputs: recordList(p.requiredInputs).filter(item => typeof item === 'string').slice(0, 50).map(item => item.slice(0, 160)),
+                    acceptanceCriteria: textOf(p.acceptanceCriteria, '').slice(0, 8000) })),
+                relations: value.relations.filter(r => isRecord(r) && validId(r.id) && ['accepts_requirement', 'handoff', 'guidance', 'review'].includes(r.type)
+                    && (r.from === 'requirement' || validId(r.from)) && validId(r.to)).map(r => ({ id: r.id, type: r.type, from: r.from, to: r.to,
+                        required: r.required === true, items: recordList(r.items).filter(item => typeof item === 'string').slice(0, 50).map(item => item.slice(0, 160)),
+                        stage: 'effective', authority: r.authority === 'approve' ? 'approve' : 'suggestion' })) };
+        }
+
+        function collaborationRequirements(draft) {
+            return { schema: 'role.requirements.v2', workflowId: draft.workflowId, goal: clean(draft.goal), criteria: clean(draft.criteria),
+                participants: draft.participants.map(p => ({ ...cloneParticipant(p), assignment: clean(p.assignment),
+                    deliverableItems: recordList(p.deliverableItems), requiredInputs: recordList(p.requiredInputs),
+                    acceptanceCriteria: clean(p.acceptanceCriteria), reviewerNodeId: null,
+                    dependencies: draft.relations.filter(r => r.type === 'handoff' && r.to === p.nodeId).map(r => ({ nodeId: r.from, required: r.required })) })),
+                relations: copyJson(draft.relations), finalNodeId: draft.finalNodeId || '', endpoint: 'owner_result',
+                decisionOwnerId: state.ctx.userId, materialNodes: [...draft.materialNodes] };
+        }
+
+        function relationsFromFlow(flow) {
+            if (Array.isArray(flow.relations)) return copyJson(flow.relations);
+            const rows = [];
+            const add = value => { if (!rows.some(edge => edge.from === value.from && edge.to === value.to && edge.type === value.type))
+                rows.push({ ...value, id: 'legacy-' + flow.id.slice(0, 120) + '-' + rows.length }); };
+            for (const p of flow.participants || []) {
+                if (p.participation === 'excluded') continue;
+                for (const dep of p.dependencies || []) add({ type: 'handoff', from: dep.nodeId,
+                    to: p.nodeId, required: dep.required, items: [], stage: 'effective', authority: 'suggestion' });
+                if (p.reviewerNodeId) add({ type: 'review', from: p.nodeId, to: p.reviewerNodeId,
+                    required: false, items: [], stage: 'effective', authority: 'suggestion' });
+            }
+            for (const edge of flow.guidance || []) add({ type: 'guidance', from: edge.from, to: edge.to,
+                required: false, items: [], stage: 'effective', authority: 'suggestion' });
+            return rows;
+        }
+
+        function newCollaborationDraft() {
+            const flow = collaborationFlow(), result = collaboration.detail, req = result?.requirements || {};
+            const sameRun = result?.run?.id === collaboration.runId;
+            return { workflowId: flow.id, runId: sameRun ? result.run.id : '', title: textOf(req.goal, '本次需求').slice(0, 80),
+                baseRevision: Number(sameRun ? result.run.revision : 0), requirementsRevision: Number(sameRun ? result.run.requirements_revision : 0),
+                goal: textOf(req.goal, ''), criteria: textOf(req.criteria, ''), materialNodes: copyJson(req.materialNodes || []),
+                participants: (sameRun ? req.participants || [] : flow.participants || []).map(p => ({ ...cloneParticipant(p),
+                    assignment: textOf(p.assignment, ''), deliverableItems: recordList(p.deliverableItems),
+                    requiredInputs: recordList(p.requiredInputs), acceptanceCriteria: textOf(p.acceptanceCriteria, '') })),
+                relations: sameRun ? copyJson(req.relations || []) : relationsFromFlow(flow), finalNodeId: sameRun ? req.finalNodeId || '' : flow.finalNodeId || '' };
+        }
+
+        function currentCollaborationWork() {
+            return recordList(collaboration.detail?.works).find(work => work.id === state.selectedWorkId) || null;
+        }
+
+        function readingKey() { return [collaboration.workflowId, collaboration.runId, state.selectedWorkId, state.tab].join(':'); }
+        function captureReadingAnchor() {
+            if (state.mode !== 'collaboration' || !state.root) return;
+            const parent = state.root.getBoundingClientRect();
+            const anchor = [...state.root.querySelectorAll('[data-reading-id]')].find(item => item.getBoundingClientRect().bottom >= parent.top + 60);
+            collaboration.scroll[readingKey()] = { id: anchor?.dataset.readingId || '', offset: anchor ? anchor.getBoundingClientRect().top - parent.top : 0,
+                top: Math.min(1000000, Math.max(0, state.root.scrollTop)) };
+        }
+        function restoreReadingAnchor() {
+            const saved = collaboration.scroll[readingKey()]; if (!saved || !state.root) return;
+            const anchor = typeof saved.id === 'string' && saved.id.length <= 200
+                ? [...state.root.querySelectorAll('[data-reading-id]')].find(item => item.dataset.readingId === saved.id) : null;
+            if (anchor && Number.isFinite(saved.offset)) state.root.scrollTop += anchor.getBoundingClientRect().top - state.root.getBoundingClientRect().top - saved.offset;
+            else if (Number.isFinite(saved.top)) state.root.scrollTop = Math.min(1000000, Math.max(0, saved.top));
+        }
+
+        function showCollaborationError(error) {
+            state.error = normalizeError(error).message; render();
+        }
+
+        async function openWorkflow(workflowId, options) {
+            options = options || {};
+            if (!validId(workflowId)) throw new Error('工作流已不可用，请从工作流列表重新打开。');
+            if (state.restoredScope !== contextKey(currentContext())) await contextChanged();
+            if (state.open && !await confirmDiscard()) return false;
+            captureReadingAnchor(); persistView(); closeModal(); clearTransientDrafts();
+            const previous = collaboration.workflowId;
+            const rememberedWork = state.selectedWorkId;
+            state.open = true; state.mode = 'collaboration'; collaboration.workflowId = workflowId;
+            if (!collaborationFlow()) throw new Error('工作流不属于当前画布。');
+            const deep = new URLSearchParams(location.search);
+            const explicitRun = options.runId !== undefined ? options.runId : deep.get('role_run_id') || currentContext().roleRunId;
+            collaboration.runId = options.newTask ? '' : validId(explicitRun) ? explicitRun : explicitRun === '' ? '' : previous === workflowId ? collaboration.runId : '';
+            state.selectedNodeId = options.nodeId || options.requirementId || '';
+            state.selectedWorkId = options.workId || deep.get('role_work_id') || (previous === workflowId ? rememberedWork : '');
+            state.messageFrom = ''; state.detail = null; state.error = ''; collaboration.detail = null;
+            state.tab = ['work', 'talk', 'results'].includes(options.tab) ? options.tab : ['work', 'talk', 'results'].includes(state.tab) ? state.tab : 'work';
+            collaboration.editingRequirements = false;
+            if (collaboration.draft?.workflowId !== workflowId || collaboration.draft?.runId !== collaboration.runId) restoreCollaborationDraft();
+            ensureRoot(); await refreshCollaboration(false, options.newTask || Boolean(options.requirementId && !options.runId));
+            if (options.newTask || options.configure || !collaboration.runId) openRequirementEditor();
+            return true;
+        }
+
+        async function refreshCollaboration(append, noRestore, quiet) {
+            const ctx = currentContext(), flow = collaborationFlow(); if (!flow || !isCurrent(ctx)) return;
+            captureReadingAnchor();
+            const before = quiet ? JSON.stringify([collaboration.detail, state.detail, collaboration.runs]) : '';
+            const sequence = ++collaboration.sequence; state.loading = !append && !quiet; state.loadingMore = append; state.error = ''; if (!quiet) render();
+            try {
+                await loadNodes(ctx);
+                const params = { document_id: ctx.documentId, workflow_id: flow.id };
+                if (append && collaboration.cursor) params.cursor = collaboration.cursor;
+                const list = await requestJson(apiUrl('/role-runs', params), { method: 'GET' });
+                if (!isCurrent(ctx) || sequence !== collaboration.sequence || collaboration.workflowId !== flow.id) return;
+                const rows = recordList(list.runs).filter(run => run.document_id === ctx.documentId);
+                collaboration.runs = append ? mergeById(collaboration.runs, rows) : rows;
+                collaboration.cursor = list.next_cursor || null;
+                const pendingNew = state.pendingMutation?.submittedDraft;
+                if (!collaboration.runId && !noRestore && !(pendingNew?.workflowId === flow.id && !pendingNew.runId)) {
+                    const active = rows.find(run => run.control && !['delivered', 'cancelled'].includes(run.status));
+                    collaboration.runId = active?.id || '';
+                    restoreCollaborationDraft();
+                }
+                if (collaboration.runId) {
+                    const detail = await requestJson(apiUrl('/role-runs/' + encodeURIComponent(collaboration.runId)), { method: 'GET' });
+                    if (!isCurrent(ctx) || sequence !== collaboration.sequence) return;
+                    if (detail.run?.document_id !== ctx.documentId || (detail.requirements?.workflowId && detail.requirements.workflowId !== flow.id)
+                        || (detail.control?.workflow_id && detail.control.workflow_id !== flow.id)) throw new Error('任务与当前工作流不符，未显示私人内容。');
+                    collaboration.detail = detail; collaboration.questionsCursor = detail.question_next_cursor || detail.next_question_cursor || detail.question_cursor || null;
+                    if (!detail.control || detail.requirements?.schema !== 'role.requirements.v2') {
+                        const work = recordList(detail.works).find(item => item.node_id === state.selectedNodeId) || recordList(detail.works)[0];
+                        if (work) { state.mode = 'role'; await open(work.node_id, { workId: work.id, legacy: true }); return; }
+                    }
+                    const selected = recordList(detail.works).find(work => work.id === state.selectedWorkId)
+                        || recordList(detail.works).find(work => work.node_id === state.selectedNodeId && work.phase !== 'superseded');
+                    state.selectedWorkId = selected?.id || ''; state.detail = null;
+                    state.runs = [detail.run]; state.works = recordList(detail.works);
+                    if (selected) await fetchDetail(selected.id, ctx, state.sequence, false);
+                    if (collaboration.draft?.runId === detail.run.id && collaboration.draft.baseRevision !== Number(detail.run.revision)) {
+                        state.taskConflict = true;
+                    } else state.taskConflict = false;
+                } else { collaboration.detail = null; state.selectedWorkId = ''; state.detail = null; }
+                if (!isCurrent(ctx) || sequence !== collaboration.sequence) return;
+                state.loading = false; state.loadingMore = false;
+                const changed = !quiet || before !== JSON.stringify([collaboration.detail, state.detail, collaboration.runs]);
+                if (changed) { updateCollaborationCards(); renderTaskBar(); routing?.render(); render(); }
+                persistView();
+            } catch (error) {
+                if (!isCurrent(ctx) || sequence !== collaboration.sequence) return;
+                state.loading = false; state.loadingMore = false;
+                if ([401, 403, 404].includes(normalizeError(error).status)) { collaboration.detail = null; state.detail = null; state.works = []; updateCollaborationCards(); }
+                showCollaborationError(error);
+            } finally { scheduleCollaborationRead(); }
+        }
+
+        function scheduleCollaborationRead() {
+            clearTimeout(collaborationReadTimer); collaborationReadTimer = null;
+            if (state.mode !== 'collaboration' || !collaborationFlow() || !collaboration.detail?.run
+                || !mediaRefreshPending && ['draft', 'delivered', 'cancelled'].includes(collaboration.detail.run.status)) return;
+            const ctx = currentContext(), runId = collaboration.runId;
+            collaborationReadTimer = setTimeout(async () => {
+                if (!isCurrent(ctx) || state.mode !== 'collaboration' || runId !== collaboration.runId) return;
+                if (document.hidden || hasUnsaved() || state.modalContent || state.loading || state.actionSaving || state.taskSaving || collaboration.busy || state.pendingMutation) {
+                    scheduleCollaborationRead(); return;
+                }
+                mediaRefreshPending = false; await refreshCollaboration(false, false, true);
+            }, 15000);
+        }
+
+        async function switchCollaborationRun(runId) {
+            if (runId && !validId(runId)) return;
+            if (!await confirmDiscard()) return;
+            captureReadingAnchor(); persistView(); closeModal(); clearTransientDrafts();
+            collaboration.runId = runId; collaboration.detail = null; restoreCollaborationDraft();
+            state.selectedWorkId = ''; state.detail = null; await refreshCollaboration(false, !runId);
+            if (!runId) openRequirementEditor();
+        }
+
+        function runLabel(result) {
+            const run = result?.run;
+            if (!run) return '未创建任务';
+            if (run.paused || result.control?.pause_reason) return textOf(result.control?.pause_reason, '已暂停');
+            return { draft: '需求已保存', active: '协作中', ready_for_acceptance: '待你验收', delivered: '本人已验收', cancelled: '已取消' }[run.status] || '等待处理';
+        }
+
+        function pendingWorks() { return recordList(collaboration.detail?.works).filter(work => ['offered', 'review', 'confirmation', 'unknown', 'failed', 'needs_material', 'revision'].includes(work.phase)); }
+        function pendingQuestions() { return recordList(collaboration.detail?.questions).filter(q => ['open', 'answered', 'escalated'].includes(q.status)); }
+        function renderTaskBar() {
+            if (!bridge.engine || !collaborationFlow()) return;
+            if (!taskBar) { taskBar = el('section', 'role-collaboration-taskbar'); taskBar.setAttribute('aria-label', '当前协作任务'); bindEvents(taskBar); document.body.append(taskBar); }
+            taskBar.replaceChildren();
+            taskBar.hidden = false;
+            const detail = collaboration.detail, copy = el('div', 'role-taskbar-copy');
+            copy.append(el('strong', '', textOf(detail?.requirements?.goal, collaborationFlow().name).slice(0, 80)), el('span', 'crw-muted', runLabel(detail)));
+            const working = recordList(detail?.works).filter(work => work.phase === 'working');
+            if (working.length) copy.append(el('small', '', working.map(work => work.snapshot?.role?.name || work.node_id).join('、') + '处理中'));
+            taskBar.append(copy);
+            const actions = el('div', 'role-taskbar-actions');
+            const pending = button('待我处理 ' + (pendingWorks().length + pendingQuestions().length), 'collab-pending', '', 'bell');
+            if (collaboration.questionsCursor) { pending.title = '已读取的待处理项，更多问题可分批读取'; pending.append(el('span', '', '+')); }
+            actions.append(pending, button('本次成果', 'collab-results', '', 'clipboard-list'));
+            if (detail?.run && !['draft', 'cancelled', 'delivered'].includes(detail.run.status)) actions.append(actionIcon(detail.run.paused ? 'play' : 'pause',
+                detail.run.paused ? 'collab-resume' : 'collab-pause', detail.run.paused ? '继续任务' : '暂停任务'));
+            actions.append(actionIcon('ellipsis', 'collab-more', '任务更多操作')); taskBar.append(actions);
+        }
+
+        function updateCollaborationCards() {
+            const engine = bridge.engine, detail = collaboration.detail; if (!engine) return;
+            for (const node of engine.nodes.values()) {
+                const card = engine.canvas.querySelector('[data-node-id="' + CSS.escape(node.id) + '"]'); if (!card) continue;
+                if (node.type === 'role-requirement' && node.data?.roleRequirement?.workflowId === collaboration.workflowId) {
+                    const match = node.data.roleRequirement.runId === collaboration.runId && Boolean(detail);
+                    const goal = card.querySelector('[data-role-goal]'); if (goal) goal.textContent = match ? detail.requirements.goal : node.data.roleRequirement.runId ? '打开查看此任务需求' : '未绑定草稿';
+                    const status = card.querySelector('[data-role-run-status]'); if (status) status.textContent = match ? runLabel(detail) : '未读取';
+                    const start = card.querySelector('[data-role-requirement-start]'); if (start) start.textContent = match && detail.run.status !== 'draft' ? '查看当前工作' : '开始协作';
+                }
+                if (node.type === 'role' && collaborationFlow()?.nodeIds.includes(node.id)) {
+                    const work = recordList(detail?.works).find(item => item.node_id === node.id && item.phase !== 'superseded');
+                    const participant = recordList(detail?.requirements?.participants).find(p => p.nodeId === node.id);
+                    const title = card.querySelector('[data-role-current-work]'); if (title) title.textContent = work ? textOf(participant?.assignment, '本次工作') + ' · 第' + (work.round || 1) + '轮' : '待安排';
+                    const status = card.querySelector('[data-role-current-phase]'); if (status) { status.textContent = work ? displayPhase(work.phase) : '未参与当前任务'; status.dataset.phase = work?.phase || ''; }
+                    const reason = card.querySelector('[data-role-current-reason]'); if (reason) reason.textContent = work?.wait_reason || '';
+                }
+            }
+        }
+
+        function renderCollaboration() {
+            const view = el('div', 'crw-view crw-collaboration');
+            if (collaboration.editingRequirements) { view.append(buildRequirementEditor()); return view; }
+            const selector = el('select', 'crw-select'); selector.dataset.collaborationRun = ''; selector.setAttribute('aria-label', '当前任务');
+            appendOption(selector, '', '新需求草稿');
+            collaboration.runs.forEach(run => appendOption(selector, run.id, textOf(run.goal, '本次需求').slice(0, 80) + ' · ' + runLabel({ run, control: run.control })));
+            if (collaboration.runId && !collaboration.runs.some(run => run.id === collaboration.runId)) appendOption(selector, collaboration.runId, '当前指定任务');
+            selector.value = collaboration.runId; view.append(selector);
+            if (collaboration.cursor) view.append(button('更早任务', 'collab-more-runs', '', 'chevron-down'));
+            const tabs = el('nav', 'crw-tabs'); tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', '本次工作');
+            [['work', '工作'], ['talk', '交流'], ['results', '成果']].forEach(([id, text]) => { const b = button(text, 'collab-tab'); b.dataset.tab = id;
+                b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', String(id === state.tab)); b.tabIndex = id === state.tab ? 0 : -1; tabs.append(b); });
+            view.append(tabs);
+            if (state.tab === 'results') view.append(renderCollaborationResults());
+            else if (state.tab === 'talk') view.append(renderCollaborationTalk());
+            else view.append(renderCollaborationWork());
+            const footer = el('footer', 'crw-collaboration-footer'); footer.append(button('本次成果', 'collab-results', '', 'clipboard-list'), button('查看历史', 'collab-history', '', 'history'));
+            view.append(footer); return view;
+        }
+
+        function renderCollaborationWork() {
+            const panel = el('section', 'crw-work'), detail = collaboration.detail;
+            const req = detail?.requirements;
+            if (!detail) { panel.append(renderEmpty('提需求', '先保存目标，之后再加入岗位与材料。'), button('提需求', 'collab-edit-requirement', 'primary', 'pencil')); return panel; }
+            panel.append(el('h3', '', runLabel(detail)), summaryRow('目标', req.goal));
+            const actions = el('div', 'crw-actions');
+            actions.append(button('需求与分工', 'collab-edit-requirement', '', 'pencil'), button('范围与预算', 'collab-authorize', detail.run.status === 'draft' ? 'primary' : '', 'sliders-horizontal'));
+            panel.append(actions);
+            if (!detail.readiness?.enabled) panel.append(panelMessage(textOf(detail.readiness?.reason, '角色文字能力尚未启用；草稿与人工成果可保留。'), 'quiet'));
+            if (detail.run.paused || detail.control?.pause_reason) panel.append(panelMessage(textOf(detail.control?.pause_reason, '任务已暂停，已发请求与原稿继续保留。'), 'warning'));
+            const list = el('section', 'crw-work-list');
+            recordList(detail.works).filter(work => work.phase !== 'superseded').forEach(work => {
+                const row = el('div', 'crw-pending-row'); row.dataset.readingId = work.id;
+                const copy = el('div', 'crw-pending-copy'), avatar = el('span', 'crw-avatar'); setIcon(avatar, work.snapshot?.role?.executor?.kind === 'ai' ? 'bot' : 'user-round');
+                const p = req.participants.find(item => item.nodeId === work.node_id);
+                copy.append(el('strong', '', work.snapshot?.role?.name || nodeTitle(state.nodes.find(n => n.id === work.node_id))),
+                    el('span', '', textOf(p?.assignment, '本次分工待填写')), el('small', 'crw-muted', displayPhase(work.phase) + (work.wait_reason ? ' · ' + work.wait_reason : '')));
+                const open = button('查看', 'collab-select-work', '', 'arrow-right'); open.dataset.workId = work.id;
+                row.append(avatar, copy, open); list.append(row);
+            });
+            panel.append(list, renderRelationsList());
+            const work = currentCollaborationWork(), workDetail = currentDetail();
+            if (work && workDetail) {
+                const p = req.participants.find(item => item.nodeId === work.node_id) || {};
+                const section = el('section', 'crw-selected-work'); section.dataset.readingId = 'selected:' + work.id;
+                section.append(el('h3', '', work.snapshot?.role?.name || '本次岗位'), summaryRow('分工', p.assignment || '待填写'),
+                    summaryRow('交付', recordList(p.deliverableItems).join('、') || '按岗位长期交付要求'), summaryRow('验收', p.acceptanceCriteria || req.criteria || '待补充'));
+                section.append(renderInputs(workDetail), renderDeliveries(workDetail));
+                if (['offered', 'rejected'].includes(work.phase) && workDetail.summary?.action_available !== false) section.append(button('接收任务', 'work-accept', 'primary', 'check'),
+                    button('申请补充材料', 'work-request-material', '', 'paperclip'), button('拒绝任务', 'work-reject', '', 'x'));
+                if (work.phase === 'confirmation' && workDetail.summary?.action_available !== false) section.append(button('确认当前稿', 'work-approve', 'primary', 'check'), button('退回修改', 'work-return', '', 'undo-2'));
+                if (work.phase === 'delivered' && workDetail.summary?.action_available !== false) section.append(button('继续修改', 'work-revise', '', 'pencil'));
+                if (work.phase === 'review' && workDetail.summary?.action_available !== false) section.append(renderCollaborationReviewers(work, p));
+                if (state.draftConflict) section.append(renderDraftConflict('work'));
+                if (workDetail.summary?.action_available !== false && canOwnerSubmit(work.snapshot?.role?.executor, p)
+                    && ['ready', 'working', 'revision'].includes(work.phase)) section.append(renderSubmissionEditor(workDetail,
+                        { ...work.snapshot?.role, requiredItems: [...new Set([...recordList(work.snapshot?.role?.requiredItems), ...recordList(p.deliverableItems)])] }, p));
+                const media = el('div', 'crw-actions');
+                for (const kind of ['image', 'video']) { const b = button(kind === 'image' ? '生成图片' : '生成视频', 'collab-media', '', kind === 'image' ? 'image' : 'video'); b.dataset.kind = kind; media.append(b); }
+                section.append(media);
+                for (const binding of recordList(workDetail.media?.bindings).filter(binding => binding.workId === work.id)) {
+                    const row = el('div', 'crw-pending-row'); row.append(el('span', '', textOf(binding.outputSlotId, '生成原件') + ' · '
+                        + ({ pending: '生成中', unknown: '结果待确认', failed: '生成失败', ready: '原件已就绪', late: '迟到原件，仅归原工作' }[binding.state] || '状态待核对')));
+                    const adopt = button('采用本次原件', 'collab-adopt-media'); adopt.dataset.bindingId = binding.id;
+                    adopt.disabled = !['late', 'ready'].includes(binding.state); row.append(adopt); section.append(row);
+                    row.append(el('small', 'crw-muted', Number.isFinite(binding.settledPoints) ? '已结算 ' + formatPoints(binding.settledPoints) + ' 点' : '费用待核对'));
+                }
+                if (workDetail.media?.limited) section.append(el('p', 'crw-muted', '媒体读取已到本次上限，部分旧记录未列出；不代表原件丢失或费用为零。'));
+                if (work.phase === 'unknown') section.append(panelMessage('原请求结果未知，只读取原状态，不重发生成。', 'warning'));
+                const history = button('工作历史', 'collab-work-history', '', 'history'); section.append(history); panel.append(section);
+            }
+            return panel;
+        }
+
+        function renderCollaborationReviewers(work, participant) {
+            const box = el('section', 'crw-reviewers'); box.append(el('h4', '', '检查当前稿'));
+            const relations = recordList(collaboration.detail?.requirements?.relations).filter(r => r.type === 'review' && r.from === work.node_id);
+            for (const relation of relations) {
+                const reviewer = recordList(collaboration.detail?.works).find(w => w.node_id === relation.to && w.phase !== 'superseded');
+                const role = reviewer?.snapshot?.role, executor = role?.executor;
+                const canAct = role?.reviewAuthority !== 'none' && Boolean(executor)
+                    && (executor.kind === 'person' ? executor.userId === state.ctx.userId : participant.ownerMayReview === true);
+                const row = el('div', 'crw-reviewer-row');
+                row.append(el('strong', '', role?.name || '检查岗位'), el('span', 'crw-muted', executor?.kind === 'ai' ? 'AI 检查；本人代检查需明确授权' : '指定本人检查'));
+                if (!canAct) row.append(el('p', 'crw-muted', '此岗位当前不可由本人代检查，原稿与检查关系保留。'));
+                for (const [action, label] of [['approve', '检查通过'], ['return', '退回修改'], ['suggest', '补充建议']]) {
+                    if (relation.authority !== 'approve' && action !== 'suggest') continue;
+                    const b = button(label, 'collab-review-' + action, action === 'approve' ? 'primary' : '', action === 'approve' ? 'check' : action === 'return' ? 'undo-2' : 'message-square');
+                    b.dataset.reviewerId = relation.to; b.disabled = !canAct; row.append(b);
+                }
+                box.append(row);
+            }
+            return box;
+        }
+
+        async function promptCollaborationReview(action, reviewerId) {
+            const ctx = currentContext(), detail = currentDetail(), work = detail?.work, meta = workMeta(detail);
+            if (!work?.current_delivery_id || !detail.input_digest) throw new Error('当前稿与输入版本未齐，请刷新后核对。');
+            const reviewer = recordList(collaboration.detail?.works).find(w => w.node_id === reviewerId && w.phase !== 'superseded');
+            if (action !== 'revise' && !reviewer) throw new Error('检查岗位已变化，请重读本次分工。');
+            const role = reviewer?.snapshot?.role;
+            const body = { delivery_id: meta.deliveryId, input_digest: meta.inputDigest,
+                ...(reviewerId ? { reviewer_node_id: reviewerId } : {}),
+                ...(role?.executor?.kind !== 'person' && reviewerId ? { owner_proxy: true } : {}) };
+            if (action === 'approve') {
+                if (!await bridge.confirm({ title: '通过当前稿？', message: '以本人名义确认 ' + (role.name || '检查岗位') + ' 对成果 v' + currentDeliveryVersion(detail)
+                    + ' 的检查。不是 AI 自动批准，其他版本结论不沿用。', confirmText: '确认检查通过' })) return;
+                assertWorkUnchanged(ctx, meta); return performWorkAction('approve', body, meta);
+            }
+            return collaborationPrompt(action === 'suggest' ? '补充检查建议' : '提出修改', [{ key: 'opinion', label: action === 'suggest'
+                ? '建议以本人名义记录，不代表已通过。' : '写清当前稿 v' + currentDeliveryVersion(detail) + ' 需要修改什么；旧稿、原件和费用保留。' }],
+                action === 'suggest' ? '保存建议' : '建立修订轮', async values => {
+                    if (!clean(values.opinion)) throw new Error('请填写具体意见。');
+                    assertWorkUnchanged(ctx, meta); return performWorkAction(action, { ...body, opinion: values.opinion }, meta);
+                });
+        }
+
+        function renderRelationsList() {
+            const flow = collaborationFlow(), section = el('details', 'crw-dependencies'); rememberDetails(section, 'relations:' + flow.id);
+            section.append(el('summary', '', '关系 · ' + (flow.relations?.length || 0)));
+            const visibility = button(collaboration.relationMode === 'all' ? '只突出相关关系' : '查看全部关系', 'collab-relation-mode', '', 'eye'); section.append(visibility);
+            const search = el('input', 'crw-input'); search.type = 'search'; search.placeholder = '搜索关系'; search.setAttribute('aria-label', '搜索关系'); section.append(search);
+            const rows = el('div');
+            const name = id => id === 'requirement' ? '本次需求' : nodeTitle(state.nodes.find(node => node.id === id));
+            const types = { accepts_requirement: '接收需求', handoff: '交接成果', guidance: '指导协作', review: '请对方检查' };
+            (flow.relations || []).forEach(edge => { const b = button(name(edge.from) + ' → ' + name(edge.to) + ' · ' + types[edge.type], 'collab-edit-relation');
+                b.dataset.relationId = edge.id; rows.append(b); });
+            search.addEventListener('input', () => rows.querySelectorAll('button').forEach(b => { b.hidden = !b.textContent.includes(search.value.trim()); }));
+            section.append(rows, button('撤销上次关系修改', 'collab-undo-relation', '', 'undo-2'));
+            section.append(el('p', 'crw-muted', '配置修改默认下次任务生效，当前任务需明确应用新修订。')); return section;
+        }
+
+        function renderCollaborationTalk() {
+            const panel = el('section', 'crw-talk'), detail = collaboration.detail;
+            if (!detail) return renderEmpty('还没有已保存任务', '先保存需求，再进行交流。');
+            if (currentDetail()) {
+                const talk = renderTalk(); talk.querySelector('[data-message-from]')?.remove(); panel.append(talk);
+            } else panel.append(el('p', 'crw-muted', '选择一个岗位，可给它补充要求或回应修改意见。'));
+            const questions = el('section', 'crw-questions'); questions.append(el('h3', '', '需要回应的问题'));
+            recordList(detail.questions).forEach(question => {
+                const body = parseJson(question.body_json || question.body, {}), row = el('article', 'crw-question'); row.dataset.readingId = question.id;
+                const source = recordList(detail.works).find(w => w.id === question.from_work_id), target = recordList(detail.works).find(w => w.id === question.target_work_id);
+                const heading = el('div', 'crw-message-head'), avatar = el('span', 'crw-avatar'); setIcon(avatar, authorIcon(actualAuthor(question)));
+                heading.append(avatar, el('strong', '', (source?.snapshot?.role?.name || '岗位') + ' · ' + authorLabel(question) + ' → ' + (target?.snapshot?.role?.name || '本人'))); addTime(heading, question.created_at);
+                row.append(heading, el('p', 'crw-message-copy', textOf(body.question || question.question, '问题正文待读取')),
+                    el('small', 'crw-muted', ({ open: '待答复', answering: '答复中', answered: '已答复，未解除阻塞', resolved: '已解决', escalated: '转本人处理', cancelled: '已取消' }[question.status] || '状态待同步') + (question.blocking ? ' · 阻塞相关工作' : '')));
+                if (question.answer) {
+                    const answer = question.answer, answerDetail = parseJson(answer.detail_json || answer.detail, {});
+                    const answerHead = el('div', 'crw-message-head'), answerAvatar = el('span', 'crw-avatar');
+                    setIcon(answerAvatar, authorIcon(actualAuthor(answer)));
+                    answerHead.append(answerAvatar, el('strong', '', '答复 · ' + authorLabel(answer))); addTime(answerHead, answer.created_at);
+                    row.append(answerHead, el('p', 'crw-message-copy', textOf(answerDetail.text, '答复待读取')));
+                }
+                for (const [action, text] of [['answer', '答复'], ['resolve', '确认已解决'], ['escalate', '转本人'], ['cancel', '取消问题']]) {
+                    if (action === 'answer' && (question.answer || !['open', 'escalated'].includes(question.status))) continue;
+                    if (['resolved', 'cancelled'].includes(question.status) || action === 'resolve' && question.status !== 'answered') continue;
+                    const b = button(text, 'collab-question-' + action, action === 'answer' ? 'primary' : ''); b.dataset.questionId = question.id; row.append(b);
+                }
+                questions.append(row);
+            });
+            if (collaboration.questionsCursor) questions.append(button('更早问题', 'collab-more-questions', '', 'chevron-down'));
+            if (currentCollaborationWork()) questions.append(button('提出问题', 'collab-ask', '', 'message-square'));
+            panel.append(questions); return panel;
+        }
+
+        function renderCollaborationResults() {
+            const panel = el('section', 'crw-results'), detail = collaboration.detail;
+            if (!detail) return renderEmpty('还没有成果', '需求与分工保存后，可在这里查看实际提交稿。');
+            const manifest = detail.manifest;
+            panel.append(el('h3', '', detail.run.status === 'delivered' ? '本人已验收' : manifest ? '本次成果' : '成果待齐'));
+            if (!manifest) {
+                panel.append(el('p', 'crw-muted', '尚未形成有效整合稿，已有成果仍可查看。'));
+                const required = new Set(recordList(detail.requirements?.participants).filter(p => p.participation === 'required').map(p => p.nodeId));
+                if (validId(detail.requirements?.finalNodeId)) required.add(detail.requirements.finalNodeId);
+                if (!detail.requirements?.finalNodeId) panel.append(el('p', '', '最终整合岗位尚未指定。'));
+                for (const nodeId of required) {
+                    const work = recordList(detail.works).find(w => w.node_id === nodeId && w.phase !== 'superseded'
+                        && w.requirements_revision === detail.run.requirements_revision);
+                    if (work?.phase === 'delivered' && validId(work.current_delivery_id)) continue;
+                    panel.append(el('p', '', (work?.snapshot?.role?.name || nodeTitle(state.nodes.find(n => n.id === nodeId)))
+                        + ' · ' + (work ? displayPhase(work.phase) : '尚无当前工作')));
+                }
+            }
+            const deliveries = manifest ? recordList(manifest.deliveries) : recordList(detail.works)
+                .filter(w => w.phase !== 'superseded' && validId(w.current_delivery_id) && w.requirements_revision === detail.run.requirements_revision)
+                .map(w => ({ workId: w.id, deliveryId: w.current_delivery_id }));
+            for (const delivery of deliveries) {
+                const id = delivery.deliveryId || delivery.id; if (!validId(id)) continue;
+                const row = el('div', 'crw-delivery-row'); row.dataset.readingId = id;
+                const work = recordList(detail.works).find(w => w.id === delivery.workId);
+                row.append(el('strong', '', work?.snapshot?.role?.name || '有效成果'), el('span', 'crw-muted',
+                    (delivery.version ? 'v' + delivery.version + ' · ' : '') + (work ? displayPhase(work.phase) : '版本待核对')));
+                if (delivery.acceptanceCriteria) row.append(summaryRow('验收要求', delivery.acceptanceCriteria));
+                const b = button('查看原稿与原件', 'collab-delivery', '', 'file-text'); b.dataset.deliveryId = id; row.append(b); panel.append(row);
+            }
+            if (manifest) {
+                appendTextList(panel, '验收要求', manifest.criteria, '未记录验收要求。');
+                const changes = el('section', 'crw-result-changes'); changes.append(el('h3', '', '修改意见与回应'));
+                if (!recordList(manifest.changes).length) changes.append(el('p', 'crw-muted', '本次没有返工记录。'));
+                for (const change of recordList(manifest.changes)) {
+                    if (!isRecord(change)) continue;
+                    const row = el('section', 'crw-result-change'), work = recordList(detail.works).find(w => w.id === change.workId);
+                    row.append(el('h4', '', work?.snapshot?.role?.name || '成果修订'), summaryRow('修改意见', textOf(change.opinion, '原记录未提供修改意见')));
+                    appendTextList(row, '本稿回应', change.response, '本稿未记录修改回应。');
+                    for (const [id, label] of [[change.sourceDeliveryId, '查看修订原稿'], [change.currentDeliveryId, '查看修改后稿件']]) {
+                        if (!validId(id)) continue;
+                        const open = button(label, 'collab-delivery', '', 'file-text'); open.dataset.deliveryId = id; row.append(open);
+                    }
+                    changes.append(row);
+                }
+                panel.append(changes);
+                if (detail.run.status !== 'delivered') panel.append(button('验收本次成果', 'collab-accept-result', 'primary', 'check'), button('需要修改', 'collab-reject-result', '', 'undo-2'));
+            }
+            if (currentDetail()) panel.append(renderDeliveries(currentDetail()));
+            panel.append(renderCost(detail.run, currentDetail()?.attempts, currentDetail()?.execution));
+            panel.append(el('p', 'crw-muted', '成果验收与费用结清分开；费用待核对不因验收消失。'));
+            panel.append(button('事实回顾与规则', 'collab-retrospective', '', 'history'), button('保存为工作流模板', 'collab-save-template', '', 'save'));
+            return panel;
+        }
+
+        function appendTextList(parent, title, value, empty) {
+            const section = el('section', 'crw-text-list'); section.append(el('h3', 'crw-delivery-item-title', title));
+            const rows = typeof value === 'string' ? [value] : recordList(value).filter(item => typeof item === 'string');
+            const texts = rows.filter(item => item.trim());
+            if (texts.length) {
+                const list = el('ol'); texts.forEach(text => list.append(el('li', 'crw-delivery-fulltext', text))); section.append(list);
+            } else section.append(el('p', 'crw-muted', empty));
+            parent.append(section);
+        }
+
+        function collabField(parent, label, key, value, options) {
+            options = options || {};
+            const field = el('label', 'crw-field'); field.append(el('span', 'crw-field-label', label));
+            const input = el(options.type === 'select' ? 'select' : options.multiline ? 'textarea' : 'input', options.multiline ? 'crw-textarea' : options.type === 'select' ? 'crw-select' : 'crw-input');
+            input.dataset.collaborationField = key; if (options.nodeId) input.dataset.nodeId = options.nodeId;
+            if (options.multiline) { input.rows = options.rows || 3; input.maxLength = options.maxLength || 12000; }
+            else if (options.type === 'number') { input.type = 'number'; input.min = options.min ?? '0'; input.max = options.max ?? '1000000'; input.step = options.step || '1'; }
+            if (options.type === 'select') for (const [id, text] of options.options || []) appendOption(input, id, text);
+            input.value = value ?? ''; field.append(input); parent.append(field); return input;
+        }
+
+        function updateCollaborationDraft(target) {
+            const key = target.dataset.collaborationField;
+            if (state.modalKind === 'collab-authorization' && authorizationDraft) {
+                authorizationDraft[key] = target.value; return;
+            }
+            const draft = collaboration.draft; if (!draft) return;
+            if (target.dataset.nodeId) {
+                const p = draft.participants.find(item => item.nodeId === target.dataset.nodeId); if (!p) return;
+                if (['deliverableItems', 'requiredInputs'].includes(key)) p[key] = target.value.split('\n').map(s => s.trim()).filter(Boolean);
+                else p[key] = target.type === 'checkbox' ? target.checked : target.value;
+            } else if (key === 'materialNodes') draft.materialNodes = [...(state.modalContent || state.root).querySelectorAll('[data-collaboration-field="materialNodes"]:checked')].map(n => n.value);
+            else if (['goal', 'criteria', 'title', 'finalNodeId'].includes(key)) draft[key] = target.value;
+            collaboration.dirty = true;
+        }
+
+        function openRequirementEditor() {
+            collaboration.editingRequirements = true; state.open = true; state.mode = 'collaboration'; persistView(); render();
+        }
+
+        function buildRequirementEditor() {
+            if (!collaborationFlow()) return;
+            if (!collaboration.draft || collaboration.draft.workflowId !== collaboration.workflowId || collaboration.draft.runId !== collaboration.runId) collaboration.draft = newCollaborationDraft();
+            const draft = collaboration.draft, content = el('div', 'crw-requirement-editor');
+            content.append(el('h2', 'crw-dialog-title', collaboration.runId ? '需求与分工' : '提需求'));
+            if (collaboration.runId) content.append(panelMessage('默认只改下次任务配置。明确用于当前任务时，新修订会暂停旧授权，保留在途请求与原稿。', 'quiet'));
+            if (draft.runId && draft.baseRevision !== Number(collaboration.detail?.run?.revision)) {
+                const conflict = el('aside', 'crw-draft-conflict');
+                conflict.append(panelMessage('任务版本已变化，以下是保留的草稿。先核对已保存需求，再决定是否继续用于当前任务。', 'warning'),
+                    button('核对已保存需求', 'collab-rebase-draft', '', 'search'));
+                content.append(conflict);
+            }
+            if (draft.pauseReceiptId) {
+                const pause = el('div', 'crw-actions');
+                pause.append(el('span', 'crw-muted', '此草稿曾因原请求未确认而暂停，尚未自动应用。'), button('查看暂停回执', 'collab-view-pause-receipt', '', 'file-text'));
+                content.append(pause);
+            }
+            collabField(content, '目标', 'goal', draft.goal, { multiline: true, rows: 4 });
+            collabField(content, '验收要求', 'criteria', draft.criteria, { multiline: true, maxLength: 8000 });
+            for (const nodeId of collaborationFlow().nodeIds) if (!draft.participants.some(p => p.nodeId === nodeId)) draft.participants.push({
+                nodeId, participation: 'excluded', reviewerNodeId: null, confirmRequired: false, ownerMaySubmit: false, ownerMayReview: false,
+                dependencies: [], assignment: '', deliverableItems: [], requiredInputs: [], acceptanceCriteria: '' });
+            content.append(el('h3', 'crw-form-section-title', '本次分工'));
+            for (const p of draft.participants) {
+                const node = state.nodes.find(n => n.id === p.nodeId), details = el('details', 'crw-participant');
+                details.append(el('summary', '', node ? nodeTitle(node) : '岗位已移除'));
+                collabField(details, '本次参与', 'participation', p.participation, { type: 'select', nodeId: p.nodeId, options: [['required', '必交'], ['optional', '可选'], ['excluded', '不参与']] });
+                collabField(details, '本次工作', 'assignment', p.assignment, { nodeId: p.nodeId, multiline: true });
+                collabField(details, '交付项（每行一项）', 'deliverableItems', recordList(p.deliverableItems).join('\n'), { nodeId: p.nodeId, multiline: true, maxLength: 4800 });
+                collabField(details, '需要的输入（每行一项）', 'requiredInputs', recordList(p.requiredInputs).join('\n'), { nodeId: p.nodeId, multiline: true, maxLength: 7200 });
+                collabField(details, '本次验收要求', 'acceptanceCriteria', p.acceptanceCriteria, { nodeId: p.nodeId, multiline: true, maxLength: 8000 });
+                for (const [key, label] of [['confirmRequired', '此岗位交付需要本人确认'], ['ownerMaySubmit', '允许本人代提交'], ['ownerMayReview', '允许本人代检查']]) {
+                    const row = el('label', 'crw-check-row'), check = el('input'); check.type = 'checkbox'; check.dataset.collaborationField = key; check.dataset.nodeId = p.nodeId; check.checked = p[key]; row.append(check, el('span', '', label)); details.append(row);
+                }
+                content.append(details);
+            }
+            collabField(content, '最终整合岗位', 'finalNodeId', draft.finalNodeId, { type: 'select', options: [['', '稍后选择'],
+                ...state.nodes.filter(node => collaborationFlow().nodeIds.includes(node.id)).map(node => [node.id, nodeTitle(node)])] });
+            const materials = el('details', 'crw-dependencies'); materials.append(el('summary', '', '材料 · ' + draft.materialNodes.length));
+            state.materials.forEach(node => { if (node.type === 'role-requirement') return; const row = el('label', 'crw-check-row'), check = el('input');
+                check.type = 'checkbox'; check.value = node.id; check.dataset.collaborationField = 'materialNodes'; check.checked = draft.materialNodes.includes(node.id); row.append(check, el('span', '', node.title)); materials.append(row); });
+            if (typeof bridge.selectRoleMaterials === 'function') materials.append(button('选择或上传材料', 'collab-pick-materials', '', 'paperclip'));
+            else materials.append(el('p', 'crw-muted', '先在原画布上传或粘贴材料，再从这里选取。'));
+            content.append(materials);
+            const error = el('p', 'crw-message crw-message--error'); error.dataset.actionError = ''; error.hidden = true; content.append(error);
+            const footer = el('footer', 'crw-dialog-footer'); footer.append(button('返回', 'collab-close-editor', 'quiet'));
+            if (collaboration.runId) footer.append(button('保存下次任务配置', 'collab-save-configuration', 'primary', 'save'), button('用于当前任务', 'collab-save-current', '', 'check'));
+            else footer.append(button('保存需求草稿', 'collab-save-request', 'primary', 'save'));
+            content.append(footer); return content;
+        }
+
+        async function saveCollaborationRelations(workflowId, relations, extra) {
+            if (typeof bridge.saveRoleWorkflowConfiguration !== 'function') throw new Error('关系保存桥接尚未集成，未写入当前任务。');
+            if (state.pendingMutation) throw new Error('请先查询原操作回执；关系输入保留，未改变当前任务。');
+            const flow = (bridge.engine.roleWorkflows || []).find(f => f.id === workflowId); if (!flow) throw new Error('工作流已变化。');
+            const ctx = currentContext();
+            globalThis.UltimateCanvasRoleRouting?.validate(flow, relations);
+            const values = { ...extra, relations: copyJson(relations) };
+            await bridge.saveRoleWorkflowConfiguration(workflowId, values);
+            if (isCurrent(ctx) && collaboration.workflowId === workflowId) { routing?.render(); persistView(); }
+        }
+
+        async function saveCollaborationRequest(applyCurrent) {
+            const draft = collaboration.draft, ctx = currentContext(); if (!draft || collaboration.busy) return;
+            if (state.pendingMutation) throw new Error('先查询或核对原操作回执；当前需求草稿保留，未再次保存。');
+            const submitted = validCollaborationDraft(draft);
+            if (!submitted) throw new Error('需求草稿格式不完整，请核对当前输入。');
+            const req = collaborationRequirements(submitted);
+            if (!req.goal) throw new Error('请填写目标，其余内容可稍后补齐。');
+            if (req.participants.some(p => p.participation !== 'excluded' && !state.nodes.some(n => n.id === p.nodeId))) throw new Error('参与岗位已移除，请先调整分工。');
+            globalThis.UltimateCanvasRoleRouting?.validate(collaborationFlow(), req.relations);
+            if (draft.runId && draft.baseRevision !== Number(collaboration.detail?.run?.revision)) throw new Error('任务已更新，原草稿保留；先刷新核对，再明确采用当前版本。');
+            if (!draft.runId && typeof bridge.adoptRoleRunReceipt !== 'function') throw new Error('需求卡同事务回执桥接尚未集成，未提交新任务。');
+            if (draft.runId && applyCurrent) {
+                const affected = recordList(collaboration.detail?.works).filter(w => w.phase !== 'superseded').map(w => w.snapshot?.role?.name || '岗位');
+                if (!await bridge.confirm({ title: '用于当前任务？', message: '将按本次分工重新核对受影响工作（' + affected.join('、') + '）。旧授权撤销并暂停；已发请求与账单归原版本，不重发。', confirmText: '保存当前修订' })) return;
+            }
+            if (!isCurrent(ctx) || collaboration.draft !== draft || JSON.stringify(validCollaborationDraft(draft)) !== JSON.stringify(submitted)) {
+                throw new Error('确认期间需求草稿已变化，请核对后重新保存。');
+            }
+            collaboration.busy = true; state.taskSaving = true;
+            collaboration.dirty = true; persistView(); updatePendingControls();
+            try {
+                const saved = await bridge.saveDocument('before_role_requirements_v2');
+                if (!isCurrent(ctx) || draft !== collaboration.draft) return;
+                if (!saved || !sameContext(saved, ctx) || !Number.isSafeInteger(saved.documentRevision)) throw new Error('原画布保存结果未确认，需求草稿保留。');
+                const payload = { document_id: saved.documentId, document_revision: saved.documentRevision, requirements: req,
+                    ...(submitted.runId ? { base_revision: submitted.baseRevision, requirements_revision: submitted.requirementsRevision, apply_current: applyCurrent === true }
+                        : { ...(bridge.engine.nodes.get(state.selectedNodeId)?.type === 'role-requirement'
+                            && !bridge.engine.nodes.get(state.selectedNodeId).data?.roleRequirement?.runId ? { requirement_node_id: state.selectedNodeId } : {}),
+                            position: { x: (bridge.engine.container.clientWidth / 2 - bridge.engine.offsetX) / bridge.engine.scale,
+                            y: (bridge.engine.container.clientHeight / 2 - bridge.engine.offsetY) / bridge.engine.scale } }) };
+                const result = await sendMutation(apiUrl('/role-runs' + (submitted.runId ? '/' + encodeURIComponent(submitted.runId) : '')), payload,
+                    submitted.runId ? 'collaboration_update' : 'collaboration', '', submitted);
+                if (!result || !isCurrent(ctx)) return;
+                await adoptCollaborationReceipt(ctx, state.pendingMutation, result);
+                if (isCurrent(ctx)) await refreshCollaboration(false);
+            } finally { if (isCurrent(ctx)) { collaboration.busy = false; state.taskSaving = false; persistView(); updatePendingControls(); } }
+        }
+
+        async function rebaseCollaborationDraft(paused) {
+            const ctx = currentContext(), draft = collaboration.draft, pending = state.pendingMutation;
+            if (!draft?.runId || collaboration.busy) return;
+            if (pending && (!paused || !pending.pausedWaiting || pending.runId !== draft.runId)) throw new Error('请先查询原操作回执。');
+            const runId = draft.runId;
+            if (paused) {
+                const receipt = await recoverReceipt(ctx, pending);
+                if (!isCurrent(ctx) || collaboration.draft !== draft) return;
+                if (!receipt || receipt.run?.id !== runId || receipt.applied !== false || receipt.pending !== true) {
+                    throw new Error('尚未确认原暂停回执，继续保留草稿与原请求编号。');
+                }
+            }
+            const latest = await requestJson(apiUrl('/role-runs/' + encodeURIComponent(runId)), { method: 'GET' });
+            if (!isCurrent(ctx) || collaboration.draft !== draft || collaboration.runId !== runId) return;
+            if (latest.run?.id !== runId || latest.run.document_id !== ctx.documentId || latest.requirements?.workflowId !== draft.workflowId
+                || !Number.isSafeInteger(latest.run.revision) || !Number.isSafeInteger(latest.run.requirements_revision)) throw new Error('当前任务版本未确认，未改变草稿。');
+            const approved = await bridge.confirm({ title: '继续编辑草稿？',
+                message: '已保存目标：' + textOf(latest.requirements.goal, '未记录') + '\n已保存验收要求：' + textOf(latest.requirements.criteria, '未记录')
+                    + '\n保留你的完整草稿，以此版本继续编辑。此操作不保存新需求、不恢复授权；再次保存时仍会核对原请求与费用。',
+                confirmText: '保留草稿继续编辑' });
+            if (!approved || !isCurrent(ctx) || collaboration.draft !== draft || collaboration.runId !== runId || state.pendingMutation !== pending) return;
+            draft.baseRevision = latest.run.revision; draft.requirementsRevision = latest.run.requirements_revision;
+            collaboration.dirty = true; state.taskConflict = false; collaboration.editingRequirements = true;
+            if (paused) { draft.pauseReceiptId = pending.mutationId; clearPendingMutation(ctx, pending); }
+            persistView(); await refreshCollaboration(false);
+        }
+
+        function openAuthorization() {
+            const detail = collaboration.detail; if (!detail) throw new Error('请先保存需求草稿。');
+            authorizationDraft = { budget_points_limit: '', budget_cny: '', reserve_cny: '', max_calls: String(Math.min(3 * detail.requirements.participants.filter(p => p.participation !== 'excluded').length + 4, 100)),
+                max_rounds: '3', expires_in_seconds: '86400', media: [] };
+            const content = el('div', 'crw-dialog-content'); content.append(el('h2', 'crw-dialog-title', '范围与预算'));
+            content.append(panelMessage('授权仅用于本任务。离开页面后可继续；暂停只停止新调用，已发请求不取消或退款。', 'quiet'));
+            for (const p of detail.requirements.participants.filter(p => p.participation !== 'excluded')) {
+                const work = detail.works.find(w => w.node_id === p.nodeId), role = work?.snapshot?.role || roleConfig(state.nodes.find(n => n.id === p.nodeId)).snapshot;
+                content.append(summaryRow(role.name || '岗位', (p.assignment || '本次分工未填') + '\n' + executorLabel(role.executor) + ' · ' + (role.tools || []).join('、') + (p.confirmRequired ? '\n交付须本人确认' : '')));
+            }
+            const reviews = detail.requirements.relations.filter(r => r.type === 'review');
+            content.append(summaryRow('检查', reviews.length ? reviews.map(r => nodeTitle(state.nodes.find(n => n.id === r.from)) + ' → ' + nodeTitle(state.nodes.find(n => n.id === r.to))
+                + (r.authority === 'approve' ? '（可通过或退回）' : '（仅建议）')).join('\n') : '未指定角色检查；最终成果仍由本人验收'));
+            collabField(content, '本任务总点数上限（含绑定图片视频）', 'budget_points_limit', '', { type: 'number', step: '0.01' });
+            collabField(content, '文字调用控制额度（人民币等值）', 'budget_cny', '', { type: 'number', step: '0.000007', max: 7000 });
+            collabField(content, '单次文字预留（人民币等值）', 'reserve_cny', '', { type: 'number', step: '0.000007', max: 7000 });
+            collabField(content, '最多模型调用次数', 'max_calls', authorizationDraft.max_calls, { type: 'number', min: 1, max: 1000 });
+            collabField(content, '最多修订轮次', 'max_rounds', '3', { type: 'number', min: 1, max: 100 });
+            collabField(content, '授权有效期（秒）', 'expires_in_seconds', '86400', { type: 'number', min: 1, max: 86400 });
+            content.append(el('p', 'crw-muted', '文字按实费 1 美元 = 35 点，人民币按 1 美元 = ' + currencyRate() + ' 元显示。预留不是报价，也不是供应商硬限额。金额不自动填入。'));
+            const media = el('details', 'crw-dependencies'); media.append(el('summary', '', '允许使用的图片视频范围'));
+            const rows = el('div'); media.append(rows);
+            const add = button('添加明确媒体范围', 'collab-add-media');
+            add.addEventListener('click', () => {
+                if (authorizationDraft.media.length >= 20) return;
+                const entry = { kind: 'image', model: '', providerId: null, maxPoints: '' }; authorizationDraft.media.push(entry);
+                const line = el('fieldset', 'crw-participant'); line.append(el('legend', '', '媒体范围'));
+                const addField = (name, key, type, values) => { const l = el('label', 'crw-field'); l.append(el('span', 'crw-field-label', name));
+                    const input = el(type === 'select' ? 'select' : 'input', 'crw-input'); if (values) values.forEach(v => appendOption(input, v, v === 'image' ? '图片' : '视频'));
+                    else { input.type = type || 'text'; if (type === 'number') { input.min = '0'; input.step = '0.01'; } }
+                    input.value = entry[key] || ''; input.addEventListener('input', () => { entry[key] = key === 'providerId' ? input.value || null : input.value; }); l.append(input); line.append(l); };
+                addField('类型', 'kind', 'select', ['image', 'video']); addField('模型标识', 'model'); addField('供应商标识（沿默认可留空）', 'providerId'); addField('本项点数上限', 'maxPoints', 'number');
+                const remove = el('button', 'crw-icon-button'); remove.type = 'button'; remove.setAttribute('aria-label', '移除此范围'); setIcon(remove, 'trash-2');
+                remove.addEventListener('click', () => { authorizationDraft.media = authorizationDraft.media.filter(item => item !== entry); line.remove(); }); line.append(remove); rows.append(line);
+            });
+            media.append(add); content.append(media);
+            if (!detail.readiness?.enabled) content.append(panelMessage(textOf(detail.readiness?.reason, '角色文字政策未启用。'), 'warning'));
+            const error = el('p', 'crw-message crw-message--error'); error.dataset.actionError = ''; error.hidden = true; content.append(error);
+            const footer = el('footer', 'crw-dialog-footer'); footer.append(button('取消', 'dialog-cancel', 'quiet'));
+            const start = button('授权并开始协作', 'collab-authorize-start', 'primary', 'play'); start.disabled = !detail.readiness?.enabled; footer.append(start);
+            content.append(footer); openModal('collab-authorization', content);
+        }
+
+        function controlVersions() {
+            const detail = collaboration.detail; if (!detail?.run || !detail.control) throw new Error('任务控制状态尚未读取。');
+            return { base_revision: Number(detail.run.revision), requirements_revision: Number(detail.run.requirements_revision), control_revision: Number(detail.control.revision) };
+        }
+
+        async function collaborationControl(action, extra) {
+            if (collaboration.busy) return;
+            const ctx = currentContext(), id = collaboration.runId, detail = collaboration.detail;
+            if (!id || !detail) throw new Error('先选择已保存的任务。');
+            const payload = { action, ...controlVersions(), ...extra };
+            if (['revoke_authorization', 'cancel', 'pause'].includes(action)) {
+                if (!await bridge.confirm({ title: action === 'cancel' ? '取消任务？' : action === 'pause' ? '暂停任务？' : '撤销授权？',
+                    message: '停止新的调用。保留已发请求、成果、历史及费用，不代表供应商请求取消或退款。', confirmText: action === 'cancel' ? '取消任务' : action === 'pause' ? '暂停任务' : '撤销授权' })) return;
+            }
+            if (!isCurrent(ctx) || collaboration.detail !== detail) throw new Error('任务状态已变化，未提交旧操作。');
+            collaboration.busy = true; state.actionSaving = true;
+            try {
+                const result = await sendMutation(apiUrl('/role-runs/' + encodeURIComponent(id) + '/control'), payload, 'collaboration');
+                if (!result || !isCurrent(ctx) || collaboration.runId !== id) return;
+                if (action === 'authorize') { authorizationDraft = null; closeModal(); }
+                bridge.notice?.(result.queued ? '已保存并入队，尚未证明已执行完成。' : '操作已保存，将读取实际状态。', 'success');
+                await refreshCollaboration(false);
+            } finally { collaboration.busy = false; state.actionSaving = false; persistView(); }
+        }
+
+        async function authorizeStart() {
+            const draft = authorizationDraft; if (!draft) return;
+            const points = scaledAmount(draft.budget_points_limit, 100, 1000000), rate = currencyRate();
+            const usd = draft.budget_cny === '' ? null : scaledAmount(Number(draft.budget_cny) / rate, 1000000, 1000);
+            const reserve = draft.reserve_cny === '' ? null : scaledAmount(Number(draft.reserve_cny) / rate, 1000000, 1000);
+            if (points === null || points <= 0 || usd === null || usd <= 0 || reserve === null || reserve <= 0 || reserve > usd) throw new Error('请明确总点数、文字额度及单次预留，单次预留不能高于文字总额度。');
+            const maxCalls = finiteInteger(draft.max_calls, 1, 1000), maxRounds = finiteInteger(draft.max_rounds, 1, 100), expiry = finiteInteger(draft.expires_in_seconds, 1, 86400);
+            if (!maxCalls || !maxRounds || !expiry) throw new Error('请核对调用次数、轮次与授权有效期。');
+            const media = draft.media.map(entry => { const max = scaledAmount(entry.maxPoints, 100, 1000000);
+                if (!clean(entry.model) || clean(entry.model).length > 120 || entry.providerId && !validId(entry.providerId) || max === null) throw new Error('每项媒体范围须明确模型、供应商及点数上限。');
+                return { kind: entry.kind, model: clean(entry.model), providerId: entry.providerId, maxPoints: max / 100 }; });
+            await collaborationControl('authorize', { start: true, budget_points_limit: points / 100, budget_usd_micros_limit: usd,
+                reserve_usd_micros: reserve, max_calls: maxCalls, max_rounds: maxRounds, expires_in_seconds: expiry, media });
+        }
+
+        async function collaborationPrompt(title, fields, submitText, onSubmit) {
+            const content = el('div', 'crw-dialog-content'); content.append(el('h2', 'crw-dialog-title', title));
+            const inputs = {};
+            fields.forEach(field => { const l = el('label', 'crw-field'); l.append(el('span', 'crw-field-label', field.label));
+                if (field.note) l.append(el('span', 'crw-muted', field.note));
+                const input = el(field.options ? 'select' : field.check ? 'input' : 'textarea', field.check ? '' : field.options ? 'crw-select' : 'crw-textarea');
+                if (field.options) field.options.forEach(([id, name]) => appendOption(input, id, name));
+                if (field.check) { input.type = 'checkbox'; input.checked = Boolean(field.value); } else { input.value = field.value || ''; input.maxLength = field.maxLength || 16000; }
+                l.append(input); content.append(l); inputs[field.key] = input;
+            });
+            const error = el('p', 'crw-message crw-message--error'); error.hidden = true; error.setAttribute('role', 'alert'); content.append(error);
+            const footer = el('footer', 'crw-dialog-footer'); footer.append(button('取消', 'dialog-cancel', 'quiet'));
+            const submit = el('button', 'crw-button crw-button--primary', submitText); submit.type = 'button';
+            const ctx = currentContext(), runId = collaboration.runId, workId = state.selectedWorkId;
+            state.actionDraft = { kind: 'collab-prompt' }; state.actionDraftDirty = false;
+            Object.values(inputs).forEach(input => input.addEventListener('input', () => { state.actionDraftDirty = true; }));
+            submit.addEventListener('click', async () => {
+                if (submit.disabled || !isCurrent(ctx) || runId !== collaboration.runId || workId !== state.selectedWorkId) return;
+                submit.disabled = true; state.actionSaving = true;
+                const values = Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, input.type === 'checkbox' ? input.checked : input.value]));
+                try {
+                    await onSubmit(values);
+                    if (state.pendingMutation) throw new Error('原操作结果尚未确认，输入保留；只查询原回执，不重发。');
+                    if (isCurrent(ctx) && runId === collaboration.runId) { state.actionDraftDirty = false; state.actionDraft = null; closeModal(); await refreshCollaboration(false); }
+                }
+                catch (e) { if (isCurrent(ctx)) { error.textContent = normalizeError(e).message; error.hidden = false; } }
+                finally { submit.disabled = false; state.actionSaving = false; }
+            });
+            footer.append(submit); content.append(footer); openModal('collab-prompt', content);
+        }
+
+        async function collaborationAction(action, target) {
+            if (action.startsWith('collab-review-')) return promptCollaborationReview(action.slice('collab-review-'.length), target.dataset.reviewerId);
+            if (action === 'collab-close-editor') { if (!await confirmDiscard()) return; collaboration.editingRequirements = false; render(); return; }
+            if (action === 'collab-tab') { captureReadingAnchor(); state.tab = target.dataset.tab; persistView(); render(); return; }
+            if (action === 'collab-results') { state.open = true; state.mode = 'collaboration'; state.tab = 'results'; persistView(); render(); return; }
+            if (action === 'collab-edit-requirement') return openRequirementEditor();
+            if (action === 'collab-save-request') return saveCollaborationRequest(false);
+            if (action === 'collab-save-current') return saveCollaborationRequest(true);
+            if (action === 'collab-rebase-draft') return rebaseCollaborationDraft(false);
+            if (action === 'collab-recheck-paused') return rebaseCollaborationDraft(true);
+            if (action === 'collab-view-pause-receipt') {
+                const ctx = currentContext(), draft = collaboration.draft, id = draft?.pauseReceiptId;
+                if (!validId(id)) return;
+                const receipt = await requestJson(apiUrl('/role-receipts/' + encodeURIComponent(id)), { method: 'GET' });
+                if (!isCurrent(ctx) || collaboration.draft !== draft) return;
+                if (receipt?.mutation_id !== id || receipt.run?.id !== draft.runId) throw new Error('原暂停回执身份未确认。');
+                const content = el('div', 'crw-dialog-content'); content.append(el('h2', '', '原暂停回执'),
+                    panelMessage(receipt.applied === false ? '此操作只暂停了新派发，当时未保存新需求。当前状态请以本次任务为准。' : '原操作结果请核对当前任务。', 'quiet'),
+                    recordDetails([['请求编号', id]]), button('关闭', 'dialog-readonly-close', 'primary'));
+                openModal('pause-receipt', content); return;
+            }
+            if (action === 'collab-save-configuration') {
+                const draft = collaboration.draft, ctx = currentContext(); if (!draft || collaboration.busy) return;
+                if (state.pendingMutation) throw new Error('先核对原操作回执；当前草稿仍保留。');
+                const req = collaborationRequirements(draft), version = JSON.stringify(draft), savedReq = collaboration.detail?.requirements;
+                const hasUnsavedRequirements = draft.goal !== (savedReq?.goal || '') || draft.criteria !== (savedReq?.criteria || '')
+                    || JSON.stringify(draft.materialNodes) !== JSON.stringify(savedReq?.materialNodes || []) || Boolean(draft.pauseReceiptId);
+                collaboration.busy = true; state.taskSaving = true; updatePendingControls();
+                try {
+                    await saveCollaborationRelations(draft.workflowId, req.relations, { participants: req.participants, finalNodeId: req.finalNodeId });
+                    if (!isCurrent(ctx) || collaboration.draft !== draft) return;
+                    const preserve = hasUnsavedRequirements || JSON.stringify(draft) !== version;
+                    if (!preserve) { forgetCollaborationDraft(draft); collaboration.dirty = false; collaboration.draft = null; }
+                    else collaboration.dirty = true;
+                    collaboration.editingRequirements = false; persistView(); render();
+                    bridge.notice?.(preserve ? '下次分工已保存；目标、验收和材料等未保存内容仍在需求草稿中。当前任务未变化。' : '分工已保存，下次任务生效。当前任务未变化。', 'success');
+                } finally { if (isCurrent(ctx)) { collaboration.busy = false; state.taskSaving = false; persistView(); updatePendingControls(); } } return;
+            }
+            if (action === 'collab-authorize') return openAuthorization();
+            if (action === 'collab-authorize-start') return authorizeStart();
+            if (action === 'collab-add-media') return;
+            if (action === 'collab-settlement') return authorizeSettlement(target.dataset.attemptId);
+            if (action.startsWith('collab-attachment-')) {
+                if (typeof bridge.useRoleDeliveryAttachment !== 'function') throw new Error('原件使用桥接尚未集成，未修改画布或资产。');
+                const result = await bridge.useRoleDeliveryAttachment({ deliveryId: target.dataset.deliveryId, index: Number(target.dataset.attachmentIndex),
+                    action: action.slice('collab-attachment-'.length) });
+                if (!result || result.saved !== true) throw new Error('尚未确认原件使用结果，未显示成功。');
+                bridge.notice?.(action.endsWith('canvas') ? '原件已放回画布。' : '原件已存入资产。', 'success'); return;
+            }
+            if (action === 'collab-adopt-media') {
+                if (!validId(target.dataset.bindingId)) throw new Error('绑定编号无效。');
+                if (state.editorDirty) throw new Error('请先保存当前成果草稿，再采用原件；当前输入仍保留。');
+                if (!await bridge.confirm({ title: '采用本次原件？', message: '原件加入当前工作草稿，不自动提交成果或重发生成。', confirmText: '采用原件' })) return;
+                return performWorkAction('adopt_media', { binding_id: target.dataset.bindingId });
+            }
+            if (action === 'collab-pause' || action === 'collab-resume') return collaborationControl(action === 'collab-pause' ? 'pause' : 'resume');
+            if (action === 'collab-more-runs') return refreshCollaboration(true);
+            if (action === 'collab-select-work') {
+                if (!await confirmDiscard()) return;
+                const work = recordList(collaboration.detail?.works).find(w => w.id === target.dataset.workId); if (!work) return;
+                captureReadingAnchor(); persistView(); clearTransientDrafts(); state.selectedWorkId = work.id; state.selectedNodeId = work.node_id;
+                await fetchDetail(work.id, currentContext(), state.sequence, false); persistView(); render(); return;
+            }
+            if (action === 'collab-relation-mode') { collaboration.relationMode = collaboration.relationMode === 'all' ? 'related' : 'all'; routing?.setMode(collaboration.relationMode); persistView(); render(); return; }
+            if (action === 'collab-edit-relation') { const flow = collaborationFlow(), edge = flow?.relations?.find(r => r.id === target.dataset.relationId); if (edge) routing?.edit(flow, edge); return; }
+            if (action === 'collab-undo-relation') return routing?.undo();
+            if (action === 'collab-pick-materials') { const ids = await bridge.selectRoleMaterials(); if (Array.isArray(ids) && collaboration.draft) { collaboration.draft.materialNodes = ids.filter(validId); collaboration.dirty = true; openRequirementEditor(); } return; }
+            if (action === 'collab-more') {
+                const content = el('div', 'crw-dialog-content'); content.append(el('h2', '', '任务操作'));
+                content.append(button('撤销本任务授权', 'collab-revoke', '', 'shield'), button('取消本次任务', 'collab-cancel', '', 'x'),
+                    button('新需求', 'collab-new', '', 'plus'), button('工作流模板', 'collab-templates', '', 'copy'), button('关闭', 'dialog-readonly-close'));
+                openModal('collab-more', content); return;
+            }
+            if (action === 'collab-revoke' || action === 'collab-cancel') { closeModal(); return collaborationControl(action === 'collab-revoke' ? 'revoke_authorization' : 'cancel'); }
+            if (action === 'collab-new') { closeModal(); return switchCollaborationRun(''); }
+            if (action === 'collab-pending') {
+                const content = el('div', 'crw-dialog-content'); content.append(el('h2', '', '待我处理'));
+                pendingWorks().forEach(work => { const b = button((work.snapshot?.role?.name || '岗位') + ' · ' + displayPhase(work.phase), 'collab-select-work'); b.dataset.workId = work.id;
+                    b.addEventListener('click', () => closeModal()); content.append(b); });
+                pendingQuestions().forEach(q => { const b = button('问题 · ' + (parseJson(q.body_json || q.body, {}).question || q.question || q.status), 'collab-show-question'); b.dataset.questionId = q.id; content.append(b); });
+                if (!pendingWorks().length && !pendingQuestions().length) content.append(el('p', 'crw-muted', '当前已读取记录中没有待处理项。'));
+                if (collaboration.questionsCursor) content.append(button('读取更多问题', 'collab-more-questions'));
+                content.append(button('关闭', 'dialog-readonly-close')); openModal('collab-pending', content); return;
+            }
+            if (action === 'collab-show-question') { closeModal(); state.tab = 'talk'; render(); state.root.querySelector('[data-reading-id="' + CSS.escape(target.dataset.questionId) + '"]')?.scrollIntoView({ block: 'nearest' }); return; }
+            if (action === 'collab-more-questions') {
+                const ctx = currentContext(), runId = collaboration.runId, cursor = collaboration.questionsCursor;
+                const result = await requestJson(apiUrl('/role-runs/' + encodeURIComponent(runId), { question_cursor: cursor || '' }));
+                if (!isCurrent(ctx) || runId !== collaboration.runId) return;
+                collaboration.detail.questions = mergeById(collaboration.detail.questions, result.questions); collaboration.questionsCursor = result.question_next_cursor || result.next_question_cursor || result.question_cursor || null; render(); return;
+            }
+            if (action === 'collab-ask') {
+                const work = currentCollaborationWork(), version = controlVersions(); if (!work) return;
+                return collaborationPrompt('提出问题', [{ key: 'target_work_id', label: '交给谁处理', options: [['', '本人'], ...collaboration.detail.works.filter(w => w.id !== work.id && w.phase !== 'superseded').map(w => [w.id, w.snapshot?.role?.name || '岗位'])] },
+                    { key: 'question', label: '问题' }, { key: 'blocking', label: '没有答案无法继续本工作', check: true }], '提交问题', values => {
+                    if (!clean(values.question)) throw new Error('请填写问题。');
+                    return sendMutation(apiUrl('/role-runs/' + collaboration.runId + '/questions'), { ...version, from_work_id: work.id, target_work_id: values.target_work_id || null, question: values.question, blocking: values.blocking }, 'collaboration');
+                });
+            }
+            if (action.startsWith('collab-question-')) {
+                const question = recordList(collaboration.detail?.questions).find(q => q.id === target.dataset.questionId); if (!question) return;
+                const method = action.slice('collab-question-'.length), version = { base_revision: Number(question.revision), requirements_revision: Number(question.requirements_revision) };
+                if (method === 'answer' && (question.answer || !['open', 'escalated'].includes(question.status))) throw new Error('此问题已答复或正在处理，请刷新查看，不会重复答复。');
+                if (method === 'answer') return collaborationPrompt('答复问题', [{ key: 'text', label: '答复以本人名义记录，不冒充 AI；答复不等于解除阻塞。' }], '保存答复', values => {
+                    if (!clean(values.text)) throw new Error('请填写答复。'); return sendMutation(apiUrl('/role-questions/' + question.id), { ...version, action: method, text: values.text }, 'collaboration'); });
+                if (!await bridge.confirm({ title: method === 'resolve' ? '确认已解决？' : method === 'cancel' ? '取消问题？' : '转本人处理？', message: '只处理此问题，保留原话与答复历史。', confirmText: '确认' })) return;
+                await sendMutation(apiUrl('/role-questions/' + question.id), { ...version, action: method }, 'collaboration'); return refreshCollaboration(false);
+            }
+            if (action === 'collab-media') {
+                const work = currentCollaborationWork(); if (!work) throw new Error('先选择当前岗位工作。');
+                if (typeof bridge.openRoleMedia !== 'function') throw new Error('原生成器媒体桥接尚未集成。');
+                const items = [...new Set([...recordList(work.snapshot?.role?.requiredItems),
+                    ...recordList(collaboration.detail.requirements.participants.find(p => p.nodeId === work.node_id)?.deliverableItems)])];
+                if (!items.length) throw new Error('请先在需求与分工中明确本次交付项，再从原生成器生成。');
+                return collaborationPrompt('选择本次交付项', [{ key: 'outputSlotId', label: '生成结果归入此岗位的交付项', options: items.map(name => [name, name]) }], '打开原生成器', async values => {
+                    if (!values.outputSlotId) throw new Error('请先在本次分工中填写交付项。'); await bridge.openRoleMedia({ workId: work.id, kind: target.dataset.kind, outputSlotId: values.outputSlotId }); });
+            }
+            if (action === 'collab-accept-result') {
+                const manifest = collaboration.detail?.manifest; if (!manifest) throw new Error('当前成果清单未齐。');
+                if (!await bridge.confirm({ title: '验收本次成果？', message: '确认当前整合稿及清单中的有效原件。费用结清仍按原账单另行核对。', confirmText: '验收当前版' })) return;
+                return collaborationControl('accept_result', { manifest_event_id: manifest.eventId, manifest_digest: manifest.digest });
+            }
+            if (action === 'collab-reject-result') return collaborationPrompt('需要修改', [{ key: 'reason', label: '写清本版需要修改什么' }], '提交修改意见', values => {
+                if (!clean(values.reason)) throw new Error('请填写修改意见。'); return collaborationControl('reject_result', { reason: values.reason }); });
+            if (action === 'collab-delivery') {
+                const ctx = currentContext(), runId = collaboration.runId, id = target.dataset.deliveryId;
+                const delivery = await readFixedDelivery(runId, id);
+                if (!isCurrent(ctx) || runId !== collaboration.runId) return;
+                showReadonlyDelivery(delivery, '成果 v' + (delivery.version || '?')); return;
+            }
+            if (action === 'collab-work-history') { state.tab = 'results'; const content = el('div', 'crw-dialog-content'); content.append(el('h2', '', '工作历史'), renderHistory(), button('关闭', 'dialog-readonly-close')); openModal('collab-history', content); return; }
+            if (action === 'collab-history') return openCollaborationHistory();
+            if (action === 'collab-retrospective') return openRetrospective();
+            if (action === 'collab-save-template') return saveTemplate();
+            if (action === 'collab-templates') return openTemplates(false);
+            if (action === 'collab-more-templates') return openTemplates(true);
+            if (action === 'collab-use-template') return useTemplate(target.dataset.templateId);
+        }
+
+        async function openCollaborationHistory() {
+            const content = el('div', 'crw-dialog-content'); content.append(el('h2', '', '任务历史'));
+            for (const run of collaboration.runs) {
+                const b = button(textOf(run.goal, '任务') + ' · ' + runLabel({ run, control: run.control }), 'collab-history-run');
+                b.addEventListener('click', () => { closeModal(); void switchCollaborationRun(run.id).catch(showCollaborationError); });
+                content.append(b);
+            }
+            const fields = el('div');
+            const input = el('input', 'crw-input'); input.placeholder = '消息或稿件记录编号'; input.setAttribute('aria-label', '精确历史记录编号');
+            const read = button('读取指定历史', 'collab-read-exact');
+            read.addEventListener('click', async () => {
+                if (!validId(input.value)) return;
+                const ctx = currentContext(), runId = collaboration.runId;
+                try { const result = await requestJson(apiUrl('/role-runs/' + runId, { event_id: input.value }));
+                    if (!isCurrent(ctx) || collaboration.runId !== runId) return;
+                    const event = result.event; if (!event) throw new Error('指定记录不可读。'); fields.replaceChildren(renderEvent(event)); }
+                catch (e) { fields.replaceChildren(panelMessage(normalizeError(e).message, 'error')); }
+            });
+            content.append(input, read, fields, button('关闭', 'dialog-readonly-close')); openModal('collab-history', content);
+        }
+
+        async function openRetrospective() {
+            const ctx = currentContext(), runId = collaboration.runId;
+            const result = await requestJson(apiUrl('/role-runs/' + runId + '/results'));
+            if (!isCurrent(ctx) || runId !== collaboration.runId) return;
+            const content = el('div', 'crw-dialog-content'); content.append(el('h2', '', '事实回顾'));
+            const facts = result.facts || result.review || result.events || [];
+            if (typeof facts === 'string') content.append(el('pre', 'crw-event-content', facts));
+            else recordList(facts).forEach(fact => content.append(isRecord(fact) && fact.kind ? renderEvent(fact) : el('p', '', typeof fact === 'string' ? fact : JSON.stringify(fact))));
+            content.append(el('p', 'crw-muted', '提议与正式采用分开。采用生成角色新版本，不替换旧任务；后续验证须关联实际稿件。'));
+            for (const [action, text] of [['rule_proposed', '提出规则'], ['rule_adopted', '采用规则'], ['rule_verified', '记录后续验证'], ['retained', '保留规则'], ['reverted', '撤回规则']]) {
+                const b = button(text, 'collab-rule-' + action);
+                b.addEventListener('click', () => {
+                    const works = recordList(collaboration.detail?.works);
+                    void collaborationPrompt(text, [{ key: 'work_id', label: '对应岗位工作', options: works.map(w => [w.id, w.snapshot?.role?.name || '岗位']) },
+                        { key: 'proposal_event_id', label: '原提议记录编号（采用或后续验证时填写）' }, { key: 'text', label: '规则与依据' },
+                        { key: 'evidence_delivery_id', label: '实际稿件依据编号（后续验证）' }], text, async values => {
+                        const work = works.find(w => w.id === values.work_id); if (!work) throw new Error('请指定岗位工作。');
+                        if (values.proposal_event_id && !validId(values.proposal_event_id) || values.evidence_delivery_id && !validId(values.evidence_delivery_id)) throw new Error('记录编号无效。');
+                        let role = null;
+                        if (['rule_adopted', 'reverted'].includes(action)) {
+                            const definitionId = work.snapshot?.definitionId;
+                            if (!validId(definitionId)) throw new Error('原岗位版本引用不可读，未采用规则。');
+                            const current = await requestJson(apiUrl('/roles/' + definitionId)); role = current.role;
+                            if (!role || !Number.isSafeInteger(role.revision) || !Number.isSafeInteger(role.current_version)) throw new Error('长期角色当前版本未确认。');
+                            if (!await bridge.confirm({ title: text, message: '将从角色当前 v' + role.current_version + ' 保存新版本，不修改旧任务。', confirmText: text })) throw new Error('已取消，原输入保留。');
+                        }
+                        await sendMutation(apiUrl('/role-runs/' + runId + '/results'), { action, work_id: work.id, text: values.text,
+                            ...controlVersions(), proposal_event_id: values.proposal_event_id || undefined, evidence_delivery_id: values.evidence_delivery_id || undefined,
+                            base_role_revision: role?.revision, base_role_version: role?.current_version }, 'collaboration');
+                    }).catch(showCollaborationError);
+                }); content.append(b);
+            }
+            content.append(button('关闭', 'dialog-readonly-close')); openModal('collab-retrospective', content);
+        }
+
+        async function saveTemplate() {
+            const flow = collaborationFlow(); if (!flow) return;
+            return collaborationPrompt('保存工作流模板', [{ key: 'name', label: '模板名称', value: flow.name, maxLength: 80 }], '保存模板', async values => {
+                if (!clean(values.name)) throw new Error('请填写模板名称。');
+                const saved = await bridge.saveDocument('role_template_save');
+                await sendMutation(apiUrl('/role-workflow-templates'), { action: 'save', name: clean(values.name), document_id: saved.documentId, workflow_id: flow.id }, 'collaboration');
+                bridge.notice?.('模板已保存，不携带材料、运行、授权或预算。', 'success');
+            });
+        }
+
+        async function openTemplates(append) {
+            const ctx = currentContext(); const params = append && collaboration.templateCursor ? { cursor: collaboration.templateCursor } : {};
+            const result = await requestJson(apiUrl('/role-workflow-templates', params)); if (!isCurrent(ctx)) return;
+            collaboration.templates = append ? mergeById(collaboration.templates, result.templates) : recordList(result.templates);
+            collaboration.templateCursor = result.next_cursor || null;
+            const content = el('div', 'crw-dialog-content'); content.append(el('h2', '', '我的工作流模板'));
+            collaboration.templates.forEach(template => { const row = el('div', 'crw-pending-row'); row.append(el('span', '', template.name + ' · v' + template.current_version));
+                const use = button('使用', 'collab-use-template', 'primary'); use.dataset.templateId = template.id; row.append(use);
+                const version = button('保存新版', 'collab-template-version'), archive = button('归档', 'collab-template-archive');
+                version.disabled = !collaborationFlow();
+                version.addEventListener('click', () => void (async () => { const saved = await bridge.saveDocument('role_template_version');
+                    await sendMutation(apiUrl('/role-workflow-templates/' + template.id), { action: 'save_version', base_revision: template.revision,
+                        document_id: saved.documentId, workflow_id: collaboration.workflowId, name: template.name }, 'collaboration_update'); await openTemplates(false); })().catch(showCollaborationError));
+                archive.addEventListener('click', () => void (async () => { if (!await bridge.confirm({ title: '归档模板？', message: '已有画布实例与任务不改变。', confirmText: '归档' })) return;
+                    await sendMutation(apiUrl('/role-workflow-templates/' + template.id), { action: 'archive', base_revision: template.revision }, 'collaboration_update'); await openTemplates(false); })().catch(showCollaborationError));
+                row.append(version, archive); content.append(row); });
+            if (collaboration.templateCursor) content.append(button('加载更多', 'collab-more-templates', '', 'chevron-down'));
+            content.append(button('关闭', 'dialog-readonly-close')); openModal('collab-templates', content);
+        }
+
+        async function useTemplate(id) {
+            const template = collaboration.templates.find(t => t.id === id); if (!template) return;
+            if (typeof bridge.adoptRoleWorkflowTemplateReceipt !== 'function') throw new Error('模板使用回执桥接尚未集成，未提交。');
+            const ctx = currentContext(), saved = await bridge.saveDocument('before_role_template_use');
+            const payload = { action: 'use', template_id: id, version: template.current_version, document_id: saved.documentId,
+                document_revision: saved.documentRevision, position: { x: (bridge.engine.container.clientWidth / 2 - bridge.engine.offsetX) / bridge.engine.scale,
+                    y: (bridge.engine.container.clientHeight / 2 - bridge.engine.offsetY) / bridge.engine.scale } };
+            const result = await sendMutation(apiUrl('/role-workflow-templates'), payload, 'collaboration');
+            if (!result || !isCurrent(ctx)) return;
+            if (!await adoptCollaborationReceipt(ctx, state.pendingMutation, result)) return;
+            closeModal(); await openWorkflow(result.workflow?.id || result.workflowId, { newTask: true });
+        }
+
+        function currencyRate() {
+            const rate = typeof bridge.usdToCnyRate === 'function' ? Number(bridge.usdToCnyRate()) : 7;
+            if (!Number.isFinite(rate) || rate <= 0) throw new Error('人民币换算汇率未确认。');
+            return rate;
+        }
+
+        async function authorizeSettlement(id) {
+            if (!validId(id)) return;
+            const ctx = currentContext(), runId = collaboration.runId;
+            const result = await requestJson(apiUrl('/role-attempts/' + id));
+            if (!isCurrent(ctx) || runId !== collaboration.runId) return;
+            const attempt = result.attempt || result;
+            if (attempt.work_id !== state.selectedWorkId || !attempt.receipt_digest || !Number.isSafeInteger(attempt.base_revision)) throw new Error('精确账单摘要、原工作或任务修订未确认，不能授权差额。');
+            return collaborationPrompt('差额授权', [{ key: 'points', label: '本任务累计总点数上限（结此原单）',
+                note: '原单实际文字费用：' + formatUsdMicros(attempt.confirmed_bill_usd_micros) + '；本任务原上限 ' + formatPoints(attempt.budget_points_limit) + ' 点。其他已结算与待核预留也计入上限。' },
+                { key: 'cny', label: '本任务累计文字费用上限（人民币等值）' }], '授权结原单', async values => {
+                const points = scaledAmount(values.points, 100, 1000000), usd = values.cny === '' ? null : scaledAmount(Number(values.cny) / currencyRate(), 1000000, 1000);
+                if (points === null || usd === null) throw new Error('请明确累计点数和费用上限。');
+                if (!await bridge.confirm({ title: '授权原单差额？', message: '只结算已核对的原请求，不生成或重发；累计上限 ' + formatPoints(points / 100) + ' 点。', confirmText: '授权结原单' })) throw new Error('已取消，未结算。');
+                await sendMutation(apiUrl('/role-attempts/' + id), { action: 'authorize_settlement', base_revision: attempt.base_revision,
+                    receipt_digest: attempt.receipt_digest, authorized_total_points_limit: points / 100, authorized_total_usd_micros_limit: usd }, 'collaboration');
+            });
+        }
+
+        document.addEventListener('click', event => {
+            const request = event.target.closest('[data-role-requirement-open], [data-role-requirement-start]'); if (!request) return;
+            event.preventDefault(); event.stopPropagation();
+            const id = request.dataset.roleRequirementOpen || request.dataset.roleRequirementStart;
+            void open(id).then(() => { if (request.dataset.roleRequirementStart && collaboration.detail?.run?.status === 'draft') openAuthorization(); }).catch(showCollaborationError);
+        });
+        document.addEventListener('rolemedia:changed', event => {
+            const value = event.detail, ctx = currentContext();
+            if (state.mode !== 'collaboration' || !value || value.documentId !== ctx.documentId || value.runId !== collaboration.runId
+                || !recordList(collaboration.detail?.works).some(work => work.id === value.workId)) return;
+            mediaRefreshPending = true;
+            if (!hasUnsaved() && !state.modalContent && !state.loading && !collaboration.busy && !state.pendingMutation) {
+                mediaRefreshPending = false; void refreshCollaboration(false, false, true);
+            } else { bridge.notice?.('原岗位媒体状态已变化；当前输入保留，保存或离开编辑后再同步。', 'info'); scheduleCollaborationRead(); }
+        });
+        document.addEventListener('visibilitychange', () => { if (document.hidden) { captureReadingAnchor(); persistView(); }
+            else if (state.mode === 'collaboration' && collaborationFlow() && !hasUnsaved() && !state.modalContent && !state.pendingMutation) void refreshCollaboration(false, false, true); });
+        window.addEventListener('pagehide', () => { captureReadingAnchor(); persistView(); });
+        if (bridge.engine) bridge.engine.roleCollaboration = { openWorkflow, openTemplates: () => openTemplates(false),
+            selectedRunId: () => collaboration.runId, refresh: () => refreshCollaboration(false), hasPending: () => Boolean(collaboration.busy || routing?.hasPending()) };
+
+        return { open, openPending, refresh, contextChanged, hasUnsaved, close, openWorkflow, openTemplates: () => openTemplates(false) };
     }
 
     return { create };

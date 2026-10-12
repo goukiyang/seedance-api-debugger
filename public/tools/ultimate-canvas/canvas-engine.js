@@ -506,8 +506,11 @@ class CanvasEngine {
     }
 
     serialize() {
+        const collaboration = (this.roleWorkflows || []).some(flow => Array.isArray(flow.relations))
+            || [...this.nodes.values()].some(node => node.type === 'role-requirement');
         return {
             version: 1,
+            ...(collaboration ? { schemaVersion: 5, requiredCapabilities: ['role.v1', 'role.workflow.v1', 'role.collaboration.v2'] } : {}),
             planSplits: this.planSplits || window.UltimateCanvasPlanSplit?.empty(),
             roleWorkflows: this.roleWorkflows || [],
             viewport: {
@@ -690,7 +693,7 @@ class CanvasEngine {
         const wrap = document.createElement('div');
         wrap.className = `canvas-node node-type-${type}${type === 'image' || type === 'video' ? ' generation-node' : ''}${type.startsWith('flow-') ? ' toolflow-node' : ''}`;
         wrap.dataset.nodeId = id;
-        if (type === 'role') { wrap.tabIndex = 0; wrap.setAttribute('aria-label', nd.data?.roleConfig?.snapshot?.name || '角色'); }
+        if (type === 'role' || type === 'role-requirement') { wrap.tabIndex = 0; wrap.setAttribute('aria-label', nd.data?.roleConfig?.snapshot?.name || nd.data?.title || '需求'); }
         wrap.style.left = x + 'px';
         wrap.style.top = y + 'px';
 
@@ -706,11 +709,20 @@ class CanvasEngine {
             ${roleFlow ? `<small>${this._escapeHtml(roleFlow.name)}</small>` : ''}
             <span>${this._escapeHtml(role?.executor?.kind === 'ai' ? 'AI · ' + (role.executor.model || '未指定模型') : role?.executor?.kind === 'person' ? '人员' : '稍后指定')}</span>
             ${role?.contextGaps?.length ? `<small>岗位要求待补齐（${role.contextGaps.length}项）</small>` : ''}
-            <p>${this._escapeHtml(role?.responsibilities || '职责待配置')}</p>
+            <p data-role-current-work>尚未选择本次任务</p>
+            <span data-role-current-phase>待安排</span>
+            <small data-role-current-reason></small>
             <button type="button" data-role-open="${this._escapeHtml(id)}">${window.UltimateCanvasIcons('ClipboardList')}工作</button>
             <button type="button" data-role-instance-settings="${this._escapeHtml(id)}" aria-label="角色实例配置" title="角色实例配置">${window.UltimateCanvasIcons('SlidersHorizontal')}</button>
         </div>` : null;
-        const body = roleBody || (editableText !== false && editableText !== null
+        const requirementBody = type === 'role-requirement' ? `<div class="role-requirement-summary">
+            <strong>${this._escapeHtml(nd.data?.title || '本次需求')}</strong>
+            <p data-role-goal>${nd.data?.roleRequirement?.runId ? '正在读取已保存需求' : '未绑定草稿'}</p>
+            <span data-role-run-status>待读取</span>
+            <div class="role-requirement-actions"><button type="button" data-role-requirement-open="${this._escapeHtml(id)}">${window.UltimateCanvasIcons('Pencil')}需求</button>
+            <button type="button" data-role-requirement-start="${this._escapeHtml(id)}">${window.UltimateCanvasIcons('Play')}开始协作</button></div>
+        </div>` : null;
+        const body = requirementBody || roleBody || (editableText !== false && editableText !== null
             ? `<div class="node-text-content" contenteditable="true" style="white-space:pre-wrap" data-placeholder="在这里输入你的故事...">${this._escapeHtml(editableText)}</div>`
             : this._body(type, id));
         const generationBody = type === 'image' || type === 'video' ? `
@@ -768,10 +780,23 @@ class CanvasEngine {
             wrap.classList.add('dragging');
             this._selectDragNodes(id);
         });
+        if (type === 'role' || type === 'role-requirement') {
+            let touchPointer = null;
+            lbl.addEventListener('pointerdown', event => {
+                if (event.pointerType === 'mouse' || this.roleCollaboration?.hasPending()) return;
+                event.preventDefault(); event.stopPropagation(); touchPointer = event.pointerId; lbl.setPointerCapture(event.pointerId);
+                this.isDraggingNode = true; this.dragNode = wrap; this.dragStartX = event.clientX; this.dragStartY = event.clientY;
+                this.nodeStartX = nd.x; this.nodeStartY = nd.y; this._selectDragNodes(id); wrap.classList.add('dragging');
+            });
+            lbl.addEventListener('pointermove', event => { if (event.pointerId === touchPointer) this._onMouseMove(event); });
+            const finish = event => { if (event.pointerId === touchPointer) { this._onMouseUp(event); touchPointer = null; } };
+            lbl.addEventListener('pointerup', finish); lbl.addEventListener('pointercancel', finish);
+        }
 
         // Also drag via card header area (but not inputs/buttons inside)
         wrap.querySelector('.node-card').addEventListener('mousedown', (e) => {
             if (e.button !== 0) return;
+            if (type === 'role' || type === 'role-requirement') return;
             if (e.target.closest('.node-connector')
                 || e.target.closest('textarea, input, select, button, a, details, summary, video, audio, [contenteditable]')
                 || e.target.closest('.node-action-row') || e.target.closest('.video-props-tab')
@@ -803,11 +828,18 @@ class CanvasEngine {
 
         // Connectors
         wrap.querySelectorAll('.node-connector').forEach(c => {
+            if (type === 'role-requirement' || (type === 'role' && roleFlow)) {
+                c.classList.add('role-relation-handle');
+                c.dataset.roleRelationHandle = id;
+                c.dataset.roleRelationSide = c.classList.contains('input') ? 'input' : 'output';
+            }
             c.tabIndex = 0;
             c.setAttribute('role', 'button');
             c.setAttribute('aria-label', c.classList.contains('input') ? '添加上下文' : '引用该节点生成');
+            if (c.classList.contains('role-relation-handle')) c.setAttribute('aria-label', '连接协作关系');
             c.title = c.getAttribute('aria-label');
             c.addEventListener('keydown', e => {
+                if (c.classList.contains('role-relation-handle') && this.roleCollaboration) return;
                 if (e.key !== 'Enter' && e.key !== ' ') return;
                 e.preventDefault();
                 e.stopPropagation();
@@ -816,6 +848,7 @@ class CanvasEngine {
                     connectRole: c.classList.contains('input') ? 'input' : 'output', anchor: c });
             });
             c.addEventListener('mousedown', (e) => {
+                if (c.classList.contains('role-relation-handle') && this.roleCollaboration) { e.stopPropagation(); return; }
                 e.stopPropagation();
                 this.isDrawingConnection = true;
                 this.connectionStartConnector = c;
@@ -831,12 +864,13 @@ class CanvasEngine {
 
     _label(type, id) {
         const n = { text:'文本节点', image:'图片节点', video:'视频', audio:'音频',
-                    'video-compose':'视频合成', director:'导演台', script:'脚本', role:'角色' }[type] || '节点';
+                    'video-compose':'视频合成', director:'导演台', script:'脚本', role:'角色', 'role-requirement':'需求' }[type] || '节点';
         const num = id.replace('node-','');
         return `${n} ${num}`;
     }
     _icon(type) {
         if (type === 'role') return window.UltimateCanvasIcons('UserRound');
+        if (type === 'role-requirement') return window.UltimateCanvasIcons('ClipboardList');
         const map = {
             text: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/></svg>`,
             image: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`,

@@ -2,8 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { AuthError, getSession, type SessionUser } from '@/lib/auth/session';
 import { CanvasDocumentError } from '@/lib/canvas-documents';
-import { assertRoleUser } from './permissions';
-import { record, RoleError, type JsonRecord } from './types';
+import { assertRoleCollaborationWritable, assertRoleUser } from './permissions';
+import { digest, record, RoleError, type JsonRecord } from './types';
+
+export function roleReadResponse(request: NextRequest, data: unknown) {
+  const etag = '"' + digest(data) + '"';
+  const headers = { ETag: etag, 'Cache-Control': 'private, no-cache', Vary: 'Cookie' };
+  return request.headers.get('if-none-match') === etag ? new NextResponse(null, { status: 304, headers })
+    : NextResponse.json(data, { headers });
+}
 
 export async function roleRoute(request: NextRequest, mutate: boolean,
   action: (user: SessionUser, body: JsonRecord) => Promise<unknown>) {
@@ -14,6 +21,7 @@ export async function roleRoute(request: NextRequest, mutate: boolean,
     assertRoleUser(user);
     let body: JsonRecord = {};
     if (mutate) {
+      assertRoleCollaborationWritable();
       // Same-site is an additional CSRF boundary; no Host/proxy inference grants cross-origin access.
       const origin = request.headers.get('origin'), site = request.headers.get('sec-fetch-site');
       if (site === 'cross-site' || (origin && new URL(origin).host !== request.headers.get('host'))) throw new RoleError('请求来源不匹配', 403, 'invalid_origin');
