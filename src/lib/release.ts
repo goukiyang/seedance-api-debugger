@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '无限画布工作流新增可移动需求、岗位协作与问答、成果修改回应和本人验收；图片视频可关联原工作，支持复用工作流及明确采纳角色规则。角色文字默认关闭，由管理员确认风险后启用，已有模板和历史保留。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '角色协作已切回保护模式，历史和原件可查看，暂不开始新的角色操作；其他已上线功能保留。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
