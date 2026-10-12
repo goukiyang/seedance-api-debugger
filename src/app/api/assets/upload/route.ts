@@ -7,11 +7,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
+import { assertUploadOwner, uploadIdentity, uploadRequestId, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
 import {
   getSiteUploadKind,
-  readSiteUploadMediaMetadata,
   uploadSiteAsset,
-  validateSiteUploadDuration,
   validateSiteUploadInput,
   validateSiteUploadMetadata,
 } from '@/lib/assets/site-upload';
@@ -43,6 +42,23 @@ function parseContentLength(value: string | null) {
   if (!value) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+async function readBoundedBody(request: NextRequest, expected: number) {
+  if (!request.body) throw new VerifiedUploadError('UPLOAD_BODY_MISSING', '没有收到上传文件', 400);
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = []; let size = 0;
+  try {
+    while (true) {
+      const part = await reader.read();
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > expected) throw new VerifiedUploadError('UPLOAD_SIZE_MISMATCH', '实际文件大小与声明不一致', 400);
+      chunks.push(part.value);
+    }
+    if (size !== expected) throw new VerifiedUploadError('UPLOAD_SIZE_MISMATCH', '文件没有完整上传', 400);
+    return Buffer.concat(chunks, size);
+  } catch (error) { await reader.cancel().catch(() => {}); throw error; }
+  finally { reader.releaseLock(); }
 }
 
 async function readUploadPayload(request: NextRequest): Promise<
@@ -104,7 +120,7 @@ async function readUploadPayload(request: NextRequest): Promise<
     return { response: NextResponse.json({ error: metadataError }, { status: 400 }) };
   }
 
-  const buffer = Buffer.from(await request.arrayBuffer());
+  const buffer = await readBoundedBody(request, declaredSize!);
   const actualValidationError = validateSiteUploadMetadata({
     mimeType: contentType,
     fileSize: buffer.byteLength,
@@ -133,31 +149,16 @@ export async function POST(request: NextRequest) {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
     userId = user.id;
+    assertUploadOwner(request.headers.get('x-upload-owner-id'), user.id);
+    await uploadIdentity(user.id);
+    const requestId = uploadRequestId(request.headers.get('x-upload-request-id'));
 
     const upload = await readUploadPayload(request);
     if (upload.response) return upload.response;
 
     ({ fileName, mimeType, fileSize } = upload.payload);
     const { buffer } = upload.payload;
-    let mediaMetadata: Awaited<ReturnType<typeof readSiteUploadMediaMetadata>> | null = null;
-    try {
-      mediaMetadata = await readSiteUploadMediaMetadata(buffer, fileName, mimeType);
-    } catch (error) {
-      const kind = getSiteUploadKind(mimeType);
-      if (kind === 'video' || kind === 'audio') {
-        console.warn('[Upload] Media metadata unreadable, accepting asset ingestion:', {
-          fileName,
-          kind,
-          message: error instanceof Error ? error.message : String(error),
-        });
-      } else {
-        throw error;
-      }
-    }
-    const mediaValidationError = validateSiteUploadDuration(mimeType, mediaMetadata?.durationSeconds);
-    if (mediaValidationError) return NextResponse.json({ error: mediaValidationError }, { status: 400 });
-
-    const uploadResult = await uploadSiteAsset(buffer, fileName, mimeType, fileSize, user.id, mediaMetadata);
+    const uploadResult = await uploadSiteAsset(buffer, fileName, mimeType, fileSize, user.id, null, requestId);
     if (mimeType.startsWith('image/')) void requestHd(uploadResult.originalUrl, 0).catch(() => {});
 
     await recordAssetUploadLog({
@@ -178,6 +179,8 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({
       success: true,
+      upload: uploadResult.upload,
+      similarity: uploadResult.similarity,
       asset: {
         id: uploadResult.assetId,
         originalUrl: uploadResult.originalUrl,
@@ -192,9 +195,12 @@ export async function POST(request: NextRequest) {
         isPubliclyReachable: uploadResult.isPubliclyReachable,
         storageProvider: uploadResult.storageProvider,
         warning: uploadResult.publicUploadWarning,
+        upload: uploadResult.upload,
+        similarity: uploadResult.similarity,
       },
     });
   } catch (error) {
+    if (error instanceof VerifiedUploadError) return NextResponse.json(verifiedUploadFailure(error), { status: error.status });
     console.error('[Upload] Error:', error);
     if (userId) {
       await recordAssetUploadLog({

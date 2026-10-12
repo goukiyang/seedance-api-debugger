@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
+import { assertUploadOwner, uploadRequestId, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
 import { completeMultipartUpload } from '@/lib/assets/direct-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 
@@ -12,6 +13,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 type MultipartCompleteBody = {
+  ownerId?: string;
+  requestId?: string;
   uploadToken?: string;
   hash?: string;
   width?: number | null;
@@ -28,8 +31,11 @@ export async function POST(request: NextRequest) {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
     userId = user.id;
+    assertUploadOwner(request.headers.get('x-upload-owner-id'), user.id);
 
     const body = await request.json() as MultipartCompleteBody;
+    assertUploadOwner(body.ownerId, user.id);
+    uploadRequestId(body.requestId);
     if (typeof body.uploadToken !== 'string' || !body.uploadToken.trim()) {
       return NextResponse.json({ error: '缺少上传票据，请重新上传。' }, { status: 400 });
     }
@@ -66,6 +72,8 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({
       success: true,
+      upload: uploadResult.upload,
+      similarity: uploadResult.similarity,
       asset: {
         id: uploadResult.assetId,
         originalUrl: uploadResult.originalUrl,
@@ -79,9 +87,12 @@ export async function POST(request: NextRequest) {
         reused: uploadResult.reused,
         isPubliclyReachable: uploadResult.isPubliclyReachable,
         storageProvider: uploadResult.storageProvider,
+        upload: uploadResult.upload,
+        similarity: uploadResult.similarity,
       },
     });
   } catch (error) {
+    if (error instanceof VerifiedUploadError) return NextResponse.json(verifiedUploadFailure(error), { status: error.status });
     const message = error instanceof Error ? error.message : '分块上传完成失败';
     if (userId) {
       await recordAssetUploadLog({

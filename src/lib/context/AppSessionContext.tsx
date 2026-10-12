@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { setUploadSessionOwner } from '@/lib/http/upload-session';
 
 export interface AppSessionUser {
   id: string;
@@ -66,6 +67,7 @@ export function AppSessionProvider({ children }: { children: React.ReactNode }) 
       if (!response.ok) throw new Error('auth status failed');
       const data = await response.json();
       const nextUser = (data.user || null) as AppSessionUser | null;
+      setUploadSessionOwner(nextUser?.id || null);
       userRef.current = nextUser;
       setUser(nextUser);
       setUserLoadError(null);
@@ -78,6 +80,7 @@ export function AppSessionProvider({ children }: { children: React.ReactNode }) 
       setHasLoadedUser(true);
       return nextUser;
     } catch {
+      setUploadSessionOwner(null);
       hasLoadedUserRef.current = true;
       setHasLoadedUser(true);
       setUserLoadError('登录状态确认失败，请刷新后重试。');
@@ -128,6 +131,7 @@ export function AppSessionProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   const clearSession = useCallback(() => {
+    setUploadSessionOwner(null);
     userRef.current = null;
     creditsRef.current = null;
     loadingUserRef.current = false;

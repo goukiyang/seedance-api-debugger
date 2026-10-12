@@ -1,4 +1,5 @@
 import path from 'path';
+import { createHash } from 'node:crypto';
 import type { Asset, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
@@ -103,9 +104,11 @@ async function getOrCreateReferenceAlbum(
     orderBy: { updated_at: 'desc' },
   });
   if (existing) return existing;
-
-  return db.referenceAlbum.create({
-    data: {
+  const id = `upload_album_${createHash('sha256').update(JSON.stringify([user.id, albumName])).digest('hex')}`;
+  const album = await db.referenceAlbum.upsert({
+    where: { id }, update: {},
+    create: {
+      id,
       owner_user_id: user.id,
       name: albumName,
       description: albumDescription,
@@ -114,6 +117,8 @@ async function getOrCreateReferenceAlbum(
       status: 'active',
     },
   });
+  if (album.owner_user_id !== user.id || album.status !== 'active' || album.name !== albumName || album.album_type !== 'personal' || album.project_id !== null) throw new ReferenceImportError('原参考图集不可用，未恢复或覆盖', 409, 'reference_album_conflict');
+  return album;
 }
 
 async function ensureReferenceImageRecord(
@@ -140,34 +145,24 @@ async function ensureReferenceImageRecord(
     where: {
       album_id: album.id,
       asset_id: asset.id,
+      workspace_id: context.workspaceId,
+      project_id: context.projectId || null,
       status: 'active',
     },
     orderBy: { updated_at: 'desc' },
   });
 
   let referenceImage = existing;
-  if (referenceImage) {
-    referenceImage = await db.referenceImage.update({
-      where: { id: referenceImage.id },
-      data: {
-        workspace_id: context.workspaceId,
-        project_id: context.projectId || referenceImage.project_id,
-        url: originalUrl,
-        thumbnail_url: thumbnailUrl,
-        metadata_json: JSON.stringify({
-          source: metadataSource,
-          source_request_id: context.sourceRequestId || null,
-          source_label: context.sourceLabel || null,
-        }),
-      },
-    });
-  } else {
+  if (!referenceImage) {
     const currentMax = await db.referenceImage.aggregate({
       where: { album_id: album.id },
       _max: { sort_order: true },
     });
-    referenceImage = await db.referenceImage.create({
-      data: {
+    const id = `upload_ref_${createHash('sha256').update(JSON.stringify([context.user.id, album.id, context.workspaceId, asset.id, context.projectId || null])).digest('hex')}`;
+    referenceImage = await db.referenceImage.upsert({
+      where: { id }, update: {},
+      create: {
+        id,
         album_id: album.id,
         workspace_id: context.workspaceId,
         project_id: context.projectId || null,
@@ -187,6 +182,8 @@ async function ensureReferenceImageRecord(
       },
     });
   }
+  if (referenceImage.owner_user_id !== context.user.id || referenceImage.status !== 'active' || referenceImage.asset_id !== asset.id
+    || referenceImage.workspace_id !== context.workspaceId || referenceImage.album_id !== album.id) throw new ReferenceImportError('原参考图关联不可用，未恢复或覆盖', 409, 'reference_image_conflict');
 
   if (!album.cover_image_id) {
     await db.referenceAlbum.update({
@@ -207,7 +204,13 @@ async function ensureReferenceImageForAsset(
   context: ReferenceImportContext,
   asset: Pick<Asset, 'id' | 'type' | 'original_url' | 'thumbnail_url' | 'file_name'>,
 ): Promise<ImportedReferenceImage> {
-  if (!await canReadStudioAsset(context.user, asset, context.db || prisma)) throw new ReferenceImportError('无权使用此素材', 403, 'reference_asset_forbidden');
+  if (!context.db) return prisma.$transaction(db => ensureReferenceImageForAsset({ ...context, db }, asset));
+  const fresh = await context.db.asset.findUnique({ where: { id: asset.id } });
+  if (!fresh || fresh.status === 'deleted' || fresh.original_url !== asset.original_url) throw new ReferenceImportError('素材已变化，未关联', 409, 'reference_asset_changed');
+  const currentUser = await context.db.user.findUnique({ where: { id: context.user.id } });
+  if (!currentUser || currentUser.status !== 'active') throw new ReferenceImportError('账号不可使用', 403, 'reference_asset_forbidden');
+  if (!context.allowSharedAsset && fresh.owner_id !== context.user.id && currentUser.role !== 'admin') throw new ReferenceImportError('无权使用此素材', 403, 'reference_asset_forbidden');
+  if (!await canReadStudioAsset(currentUser, fresh, context.db)) throw new ReferenceImportError('无权使用此素材', 403, 'reference_asset_forbidden');
   const { referenceImage } = await ensureReferenceImageRecord(context, asset);
   const workspaceAssetId = await addAssetToWorkspace(
     context.workspaceId,

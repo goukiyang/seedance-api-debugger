@@ -1,5 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { uploadAsset } from '@/lib/assets/storage';
+import type { UploadReceipt } from './verified-upload';
+import type { UploadSimilarityStatus } from './upload-similarity';
 import { isPubliclyReachableUrl, uploadPublicAsset } from '@/lib/assets/public-storage';
 import {
   isSiteUploadUrl,
@@ -35,6 +37,8 @@ export const SITE_UPLOAD_MAX_SIZE_BY_KIND: Record<SiteUploadKind, number> = {
 };
 
 export type SiteUploadResult = {
+  upload?: UploadReceipt;
+  similarity?: UploadSimilarityStatus;
   assetId: string;
   originalUrl: string;
   thumbnailUrl: string | null;
@@ -312,27 +316,18 @@ export async function uploadSiteAsset(
   fileSize: number,
   ownerId: string,
   mediaMetadata?: SiteUploadMediaMetadata | null,
+  requestId?: string,
 ): Promise<SiteUploadResult> {
-  const localResult = await uploadAsset(buffer, fileName, mimeType, ownerId, mediaMetadata);
+  const localResult = await uploadAsset(buffer, fileName, mimeType, ownerId, mediaMetadata, requestId);
   const sameOriginPublicUrl = sameOriginPublicUrlForLocalUpload(localResult.originalUrl);
   if (sameOriginPublicUrl) {
     const sameOriginThumbnailUrl = localResult.thumbnailUrl
       ? sameOriginPublicUrlForLocalUpload(localResult.thumbnailUrl)
       : null;
-    await prisma.asset.update({
-      where: { id: localResult.assetId },
-      data: {
-        original_url: sameOriginPublicUrl,
-        ...(sameOriginThumbnailUrl ? { thumbnail_url: sameOriginThumbnailUrl } : {}),
-      },
-    });
     return {
       ...localResult,
       originalUrl: sameOriginPublicUrl,
       thumbnailUrl: sameOriginThumbnailUrl || localResult.thumbnailUrl,
-      fileName,
-      fileSize,
-      mimeType,
       isPubliclyReachable: true,
       storageProvider: 'local-public',
     };
@@ -342,40 +337,13 @@ export async function uploadSiteAsset(
   if (localUrlIsPublic) {
     return {
       ...localResult,
-      fileName,
-      fileSize,
-      mimeType,
       isPubliclyReachable: true,
       storageProvider: isSameOriginPublicUploadUrl(localResult.originalUrl) ? 'local-public' : undefined,
     };
   }
 
-  try {
-    const pubResult = await uploadPublicAsset(buffer, fileName, mimeType);
-
-    await prisma.asset.update({
-      where: { id: localResult.assetId },
-      data: { original_url: pubResult.publicUrl },
-    });
-
-    return {
-      ...localResult,
-      originalUrl: pubResult.publicUrl,
-      fileName,
-      fileSize,
-      mimeType,
-      isPubliclyReachable: pubResult.isPubliclyReachable,
-      storageProvider: pubResult.storageProvider,
-      publicUploadWarning: pubResult.warning,
-    };
-  } catch (pubError) {
-    return {
-      ...localResult,
-      fileName,
-      fileSize,
-      mimeType,
-      isPubliclyReachable: false,
-      publicUploadWarning: `公网上传失败: ${pubError instanceof Error ? pubError.message : String(pubError)}，已回退到本地存储。Seedance 无法访问本地 URL，请配置 R2/TOS 或公网静态存储后重新上传。`,
-    };
-  }
+  // Registration is already committed. Never change an existing row's original
+  // URL, including an unknown-response retry, to another storage location.
+  return { ...localResult, isPubliclyReachable: false, storageProvider: 'local-public',
+    publicUploadWarning: '文件已保存；当前站点未配置可供外部服务访问的原文件地址。' };
 }

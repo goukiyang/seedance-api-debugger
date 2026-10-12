@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { deleteStudioStyleGroup, getStudioStyleGroup, listStudioStyleGroups, parseStudioStyleIds, saveStudioStyleGroup, StudioStyleError, studioStyleDTO } from '@/lib/image-studio/style-groups';
+import { deleteStudioStyleGroup, getStudioStyleGroup, listStudioStyleGroups, listStudioStyleGroupsPage, parseStudioStyleIds, saveStudioStyleGroup, StudioStyleError, studioStyleDTO } from '@/lib/image-studio/style-groups';
 
 export const dynamic = 'force-dynamic';
 function failure(error: unknown) {
@@ -26,7 +26,12 @@ export async function GET(request: NextRequest) {
       }));
       return NextResponse.json({ groups, nextCursor: null }, { headers: { 'Cache-Control': 'no-store' } });
     }
-    return NextResponse.json(await listStudioStyleGroups(user, request.nextUrl.searchParams.get('cursor') || undefined), { headers: { 'Cache-Control': 'no-store' } });
+    const params = request.nextUrl.searchParams;
+    if (params.get('page') === '1') return NextResponse.json(await listStudioStyleGroupsPage(user, {
+      cursor: params.get('cursor') || undefined, query: params.get('query') || undefined,
+      ...(params.has('keys') ? { keys: params.get('keys')?.split(',').filter(Boolean) || [] } : {}),
+    }), { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
+    return NextResponse.json(await listStudioStyleGroups(user, params.get('cursor') || undefined), { headers: { 'Cache-Control': 'no-store' } });
   }
   catch (error) { return failure(error); }
 }

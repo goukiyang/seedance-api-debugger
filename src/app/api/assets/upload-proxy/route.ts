@@ -6,6 +6,7 @@
 import { Readable } from 'stream';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
+import { assertUploadOwner, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
 import { proxyDirectUploadToStorage } from '@/lib/assets/direct-upload';
 import { getSiteUploadKind } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
@@ -36,6 +37,7 @@ export async function POST(request: NextRequest) {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
     userId = user.id;
+    assertUploadOwner(request.headers.get('x-upload-owner-id'), user.id);
     if (!request.body) return NextResponse.json({ error: '缺少上传文件内容，请重新上传。' }, { status: 400 });
 
     const uploadResult = await proxyDirectUploadToStorage({
@@ -67,6 +69,8 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({
       success: true,
+      upload: uploadResult.upload,
+      similarity: uploadResult.similarity,
       asset: {
         id: uploadResult.assetId,
         originalUrl: uploadResult.originalUrl,
@@ -80,9 +84,12 @@ export async function POST(request: NextRequest) {
         reused: uploadResult.reused,
         isPubliclyReachable: uploadResult.isPubliclyReachable,
         storageProvider: uploadResult.storageProvider,
+        upload: uploadResult.upload,
+        similarity: uploadResult.similarity,
       },
     });
   } catch (error) {
+    if (error instanceof VerifiedUploadError) return NextResponse.json(verifiedUploadFailure(error), { status: error.status });
     const message = error instanceof Error ? error.message : '服务端中转上传失败';
     if (userId) {
       await recordAssetUploadLog({

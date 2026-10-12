@@ -18,6 +18,7 @@ import {
 import { ensureSiteAssetPublicUrl } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
+import { assertUploadOwner, uploadDigest, uploadRequestId, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
 
 function referenceRoleForAssetType(type: string | null | undefined, requestedRole?: string | null) {
   if (type === 'video') return 'reference_video';
@@ -49,6 +50,9 @@ export async function POST(request: NextRequest) {
     userId = user.id;
 
     const body = await request.json();
+    assertUploadOwner(request.headers.get('x-upload-owner-id'), user.id);
+    assertUploadOwner(body.ownerId, user.id);
+    const requestId = uploadRequestId(body.requestId);
     const selection: Array<{ assetId?: string; referenceImageId?: string }> | null = body.selection === undefined ? null : body.selection;
     if (body.selection !== undefined && (!Array.isArray(selection) || selection.length > 80 || selection.some(item => !item ||
       Boolean(item.assetId) === Boolean(item.referenceImageId) ||
@@ -75,8 +79,11 @@ export async function POST(request: NextRequest) {
 
     const tabId = request.headers.get('x-tab-id') || 'default';
     const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
+    const receiptKey = requestId ? `upload_association_v1:${uploadDigest(user.id)}:${uploadDigest(JSON.stringify([workspaceId, requestId]))}` : null;
+    const fingerprint = uploadDigest(JSON.stringify([workspaceId, assetIds, referenceImageIds, selection, role || null, shouldReplace]));
 
     if (shouldReplace && assetIds.length === 0 && referenceImageIds.length === 0) {
+      if (requestId) throw new VerifiedUploadError('UPLOAD_ASSOCIATION_EMPTY', '上传关联请求缺少素材，未清空工作区', 400);
       await prisma.workspaceAsset.deleteMany({ where: { workspace_id: workspaceId } });
       return NextResponse.json({ success: true, workspaceAssetIds: [], workspaceId });
     }
@@ -113,6 +120,27 @@ export async function POST(request: NextRequest) {
     }
 
     const { workspaceAssetIds, referenceImageIdsFromAssets } = await prisma.$transaction(async (tx) => {
+      const currentUser = await tx.user.findUnique({ where: { id: user.id } });
+      const currentWorkspace = await tx.workspace.findUnique({ where: { id: workspaceId } });
+      if (!currentUser || currentUser.status !== 'active' || !currentWorkspace || currentWorkspace.owner_id !== user.id) throw new VerifiedUploadError('SESSION_CHANGED', '当前账号或工作区已变化，未关联素材');
+      for (const expected of assets) {
+        const fresh = await tx.asset.findUnique({ where: { id: expected.id } });
+        if (!fresh || fresh.status === 'deleted' || fresh.original_url !== expected.original_url || fresh.owner_id !== expected.owner_id || !await canReadStudioAsset(currentUser, fresh, tx)) throw new VerifiedUploadError('UPLOAD_ASSOCIATION_UNAVAILABLE', '所选素材已变化，未关联');
+      }
+      if (receiptKey) {
+        const receipt = await tx.platformSetting.findUnique({ where: { key: receiptKey } });
+        if (receipt) {
+          const saved = JSON.parse(receipt.value_json) as { fingerprint: string; workspaceAssetIds: string[]; referenceImageIdsFromAssets: string[] };
+          if (saved.fingerprint !== fingerprint) throw new VerifiedUploadError('UPLOAD_REQUEST_CONFLICT', '关联编号已用于其它操作');
+          const mounted = await tx.workspaceAsset.count({ where: { workspace_id: workspaceId, id: { in: saved.workspaceAssetIds } } });
+          if (mounted !== saved.workspaceAssetIds.length) throw new VerifiedUploadError('UPLOAD_ASSOCIATION_CHANGED', '原关联已被修改，未自动恢复');
+          return saved;
+        }
+      }
+      const saveResult = async (result: { workspaceAssetIds: string[]; referenceImageIdsFromAssets: string[] }) => {
+        if (receiptKey) await tx.platformSetting.create({ data: { key: receiptKey, value_json: JSON.stringify({ fingerprint, ...result }), updated_by: user.id } });
+        return result;
+      };
       const previous = selection && !shouldReplace ? await tx.workspaceAsset.findMany({ where: { workspace_id: workspaceId }, select: { id: true, asset_id: true, sort_order: true } }) : [];
       const previouslyMounted = new Map(previous.map(item => [item.asset_id, item.id]));
       if (shouldReplace) await tx.workspaceAsset.deleteMany({ where: { workspace_id: workspaceId } });
@@ -156,9 +184,9 @@ export async function POST(request: NextRequest) {
         const ordered = uniquePreserveOrder(selection.map(item => byAsset.get(item.referenceImageId ? referenceAssets.get(item.referenceImageId)! : item.assetId!) || ''));
         let nextOrder = previous.reduce((max, item) => Math.max(max, item.sort_order), 0) + 1;
         for (const id of ordered) if (!beforeIds.has(id)) await tx.workspaceAsset.update({ where: { id }, data: { sort_order: nextOrder++ } });
-        return { workspaceAssetIds: ordered, referenceImageIdsFromAssets };
+        return saveResult({ workspaceAssetIds: ordered, referenceImageIdsFromAssets });
       }
-      return { workspaceAssetIds, referenceImageIdsFromAssets };
+      return saveResult({ workspaceAssetIds, referenceImageIdsFromAssets });
     });
 
     await recordAssetUploadLog({
@@ -172,6 +200,7 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({
       success: true,
+      ...(requestId ? { association: { requestId, associated: true, workspaceId } } : {}),
       workspaceAssetId: workspaceAssetIds[0] || null,
       workspaceAssetIds,
       referenceImageId: referenceImageIdsFromAssets[0] || null,
@@ -180,6 +209,7 @@ export async function POST(request: NextRequest) {
       count: workspaceAssetIds.length,
     });
   } catch (error) {
+    if (error instanceof VerifiedUploadError) return NextResponse.json(verifiedUploadFailure(error), { status: error.status });
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }

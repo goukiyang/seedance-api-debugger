@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { canUseCompanyTemplates, type ImageStudioIdentity } from './access';
-import { StudioStyleError } from './style-groups';
+import { StudioStyleError, validateStudioSelectorPage, type StudioSelectorPageOptions } from './style-groups';
 import { studioVisibleAssetWhere } from './protected-assets';
 type Client = Pick<Prisma.TransactionClient, 'platformSetting' | 'asset'>;
 const PREFIX = 'studio_skill_v1:';
@@ -77,6 +77,25 @@ export async function listSkills(user: ImageStudioIdentity) {
   identity(user);
   const rows = await prisma.platformSetting.findMany({ where: { key: { startsWith: `${PREFIX}${user.id}:` } }, select: { value_json: true } });
   return rows.map(row => JSON.parse(row.value_json) as StudioSkill).filter(s => !s.deleted && s.ownerId === user.id).map(skillDTO);
+}
+export async function listSkillsPage(user: ImageStudioIdentity, options: StudioSelectorPageOptions = {}) {
+  identity(user); validateStudioSelectorPage(options);
+  if (options.keys && !options.keys.length) return { skills: [], nextCursor: null };
+  const prefix = `${PREFIX}${user.id}:`, query = options.query?.trim() || '';
+  // Ownership is filtered before matching any prompt; even admins keep the existing own-list scope.
+  const rows = await prisma.$queryRaw<Array<{ key: string; value_json: string }>>(Prisma.sql`
+    SELECT key, value_json FROM PlatformSetting
+    WHERE key >= ${prefix} AND key < ${prefix + '\uffff'}
+      AND json_valid(value_json) AND json_extract(value_json, '$.ownerId') = ${user.id}
+      AND COALESCE(json_extract(value_json, '$.deleted'), 0) != 1
+      ${options.cursor ? Prisma.sql`AND key > ${prefix + options.cursor}` : Prisma.empty}
+      ${options.keys ? Prisma.sql`AND key IN (${Prisma.join(options.keys.map(id => prefix + id))})` : Prisma.empty}
+      AND (${query} = '' OR instr(lower(json_extract(value_json, '$.name')), lower(${query})) > 0
+        OR instr(lower(COALESCE(json_extract(value_json, '$.prompt'), '')), lower(${query})) > 0)
+    ORDER BY key ASC LIMIT 49`);
+  const page = rows.slice(0, 48);
+  return { skills: page.map(row => skillDTO(JSON.parse(row.value_json) as StudioSkill)),
+    nextCursor: rows.length > 48 ? page[page.length - 1].key.slice(prefix.length) : null };
 }
 export async function saveSkill(user: ImageStudioIdentity, body: Record<string, unknown>) {
   identity(user);

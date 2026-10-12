@@ -22,6 +22,8 @@
 .moduleRailGroup { display: grid; gap: 2px; }
 .moduleRailGroup > span { padding: 0 6px 4px; color: #849098; font-size: 11px; font-weight: 700; }
 .moduleRailGroupHeader { display: block; }
+.definitionPending { display: grid; gap: 7px; padding: 12px; border: 1px solid #7f6d43; border-radius: 8px; color: #eadab3; }
+.definitionPending > div { display: flex; flex-wrap: wrap; gap: 8px; }
 .page .moduleRail .moduleRailGroupTitle { display: flex; justify-content: space-between; gap: 8px; width: 100%; min-width: 0; height: 36px; padding: 6px 6px 6px 8px; font-size: 13px; font-weight: 600; }
 .page .moduleRail .moduleRailGroupCurrent { border-left: 2px solid #79daca; color: #d8e6e1; }
 .moduleRailGroupTitle .navLabel { flex: 1 1 auto; gap: 2px; }

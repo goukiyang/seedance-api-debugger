@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import fs from 'fs';
 import path from 'path';
 import { Transform } from 'stream';
 import {
@@ -7,6 +6,7 @@ import {
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
   HeadObjectCommand,
+  GetObjectCommand,
   PutObjectCommand,
   S3Client,
   UploadPartCommand,
@@ -14,7 +14,6 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuidv4 } from 'uuid';
-import { prisma } from '@/lib/prisma';
 import {
   getSiteUploadKind,
   localUploadPathFromSiteUploadUrl,
@@ -23,7 +22,10 @@ import {
   validateSiteUploadMetadata,
 } from '@/lib/assets/site-upload';
 import { isPubliclyReachableUrl } from '@/lib/assets/public-storage';
-import { generateAssetVideoThumbnail } from '@/lib/assets/video-thumbnail';
+import { findVerifiedOwnUpload, publishVerifiedFile, registerVerifiedUpload, readVerifiedUploadReceipt, releaseVerifiedUpload, stageVerifiedUpload, uploadDigest, uploadIdentity, uploadRequestId,
+  verifyExistingUpload, VerifiedUploadError, type UploadReceipt, type VerifiedUpload } from './verified-upload';
+import { prepareVerifiedUploadThumbnail } from './storage';
+import { enqueueUploadSimilarity, uploadSimilarityStatus, type UploadSimilarityStatus } from './upload-similarity';
 
 const DIRECT_UPLOAD_EXPIRES_SECONDS = 10 * 60;
 const DIRECT_UPLOAD_PREFIX = 'seedance-direct-uploads';
@@ -69,6 +71,8 @@ export type DirectUploadAssetPayload = {
   reused: boolean;
   isPubliclyReachable: boolean;
   storageProvider: DirectUploadStorageProvider;
+  upload?: UploadReceipt;
+  similarity?: UploadSimilarityStatus;
 };
 
 export type DirectUploadReusedTicket = {
@@ -126,6 +130,7 @@ type DirectUploadTokenPayload = {
   uploadMode?: 'single' | 'multipart';
   uploadId?: string;
   partSize?: number;
+  requestId?: string;
 };
 
 type CreateDirectUploadTicketInput = {
@@ -136,6 +141,7 @@ type CreateDirectUploadTicketInput = {
   hash: string;
   width?: number | null;
   height?: number | null;
+  requestId?: string;
 };
 
 type CompleteDirectUploadInput = {
@@ -183,6 +189,8 @@ export type DirectUploadAssetResult = {
   reused: boolean;
   isPubliclyReachable: boolean;
   storageProvider: DirectUploadStorageProvider;
+  upload?: UploadReceipt;
+  similarity?: UploadSimilarityStatus;
 };
 
 type DirectUploadAssetRecord = {
@@ -195,6 +203,8 @@ type DirectUploadAssetRecord = {
   file_size: number | null;
   mime_type: string;
   hash: string | null;
+  upload?: UploadReceipt;
+  similarity?: UploadSimilarityStatus;
 };
 
 type R2DirectUploadConfig = {
@@ -298,7 +308,7 @@ function signToken(payload: DirectUploadTokenPayload) {
   return `${body}.${signature}`;
 }
 
-function verifyToken(token: string, ownerId: string): DirectUploadTokenPayload {
+function verifyToken(token: string, ownerId: string, allowExpired = false): DirectUploadTokenPayload {
   const [body, signature] = token.split('.');
   if (!body || !signature) throw new Error('上传票据格式无效，请重新上传。');
   const expected = crypto.createHmac('sha256', SESSION_SECRET).update(body).digest('base64url');
@@ -312,27 +322,29 @@ function verifyToken(token: string, ownerId: string): DirectUploadTokenPayload {
   }
 
   const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as DirectUploadTokenPayload;
+  if (typeof payload.key !== 'string' || payload.key.includes('..') || typeof payload.expiresAt !== 'number'
+    || !Number.isSafeInteger(payload.fileSize) || payload.fileSize <= 0 || !/^[a-f0-9]{64}$/.test(payload.hash)) throw new Error('上传票据内容无效。');
   if (payload.version !== DIRECT_UPLOAD_TOKEN_VERSION) throw new Error('上传票据版本无效，请重新上传。');
   if (payload.ownerHash !== userUploadOwnerHash(ownerId)) {
-    throw new Error('上传票据不属于当前账号，请重新登录后重试。');
+    throw new VerifiedUploadError('SESSION_CHANGED', '上传票据不属于当前账号，请重新打开上传入口');
   }
-  if (payload.expiresAt <= Date.now()) throw new Error('上传票据已过期，请重新上传。');
+  if (!allowExpired && payload.expiresAt <= Date.now()) throw new VerifiedUploadError('UPLOAD_TICKET_EXPIRED', '上传票据已过期，结果未确认，请保留原票据');
   if (!payload.key.startsWith(`${userUploadPrefix(ownerId)}/`)) {
     throw new Error('上传对象路径无效，请重新上传。');
   }
   return payload;
 }
 
-function verifySingleUploadToken(token: string, ownerId: string) {
-  const payload = verifyToken(token, ownerId);
+function verifySingleUploadToken(token: string, ownerId: string, allowExpired = false) {
+  const payload = verifyToken(token, ownerId, allowExpired);
   if (payload.uploadMode === 'multipart') {
     throw new Error('上传票据类型不匹配，请重新上传。');
   }
   return payload;
 }
 
-function verifyMultipartUploadToken(token: string, ownerId: string) {
-  const payload = verifyToken(token, ownerId);
+function verifyMultipartUploadToken(token: string, ownerId: string, allowExpired = false) {
+  const payload = verifyToken(token, ownerId, allowExpired);
   if (payload.uploadMode !== 'multipart' || !payload.uploadId || !payload.partSize) {
     throw new Error('分块上传票据无效，请重新上传。');
   }
@@ -373,77 +385,6 @@ function publicUrlForAssetUrl(url: string) {
   return sameOriginPublicUrlForLocalUpload(url) || url;
 }
 
-function localUploadUrlFromAssetUrl(url: string) {
-  return localUploadPathFromSiteUploadUrl(url);
-}
-
-function assetUrlCanBeReusedWithoutBody(url: string) {
-  const localUploadUrl = localUploadUrlFromAssetUrl(url);
-  if (!localUploadUrl) return true;
-  const publicRoot = path.resolve(process.cwd(), 'public');
-  const resolvedPath = path.resolve(publicRoot, localUploadUrl.replace(/^\/+/, ''));
-  if (!resolvedPath.startsWith(`${publicRoot}${path.sep}`)) return false;
-  return fs.existsSync(resolvedPath);
-}
-
-async function generateDirectUploadVideoThumbnail(originalUrl: string, outputName: string) {
-  const result = await generateAssetVideoThumbnail({
-    sourcePath: publicUrlForAssetUrl(originalUrl),
-    outputDir: path.resolve(process.cwd(), 'public', 'uploads', 'thumbs'),
-    outputName,
-  });
-  if (!result.success || !result.thumbnailPath) {
-    console.warn('[DirectUpload] Video thumbnail skipped:', {
-      originalUrl,
-      error: result.error,
-    });
-    return null;
-  }
-  return `/uploads/thumbs/${path.basename(result.thumbnailPath)}`;
-}
-
-async function thumbnailUrlForCompletedUpload(
-  kind: ReturnType<typeof getSiteUploadKind> | 'image',
-  originalUrl: string,
-  outputName: string,
-) {
-  if (kind === 'image') return originalUrl;
-  if (kind !== 'video') return null;
-  return generateDirectUploadVideoThumbnail(originalUrl, outputName);
-}
-
-async function fillMissingAssetMetadata(
-  asset: DirectUploadAssetRecord,
-  kind: ReturnType<typeof getSiteUploadKind> | 'image',
-  width: number | null,
-  height: number | null,
-  outputName: string,
-): Promise<DirectUploadAssetRecord> {
-  const data: { width?: number; height?: number; thumbnail_url?: string | null } = {};
-  if (width != null && asset.width == null) data.width = width;
-  if (height != null && asset.height == null) data.height = height;
-  if (!asset.thumbnail_url && kind === 'video') {
-    const thumbnailUrl = await generateDirectUploadVideoThumbnail(asset.original_url, outputName);
-    if (thumbnailUrl) data.thumbnail_url = thumbnailUrl;
-  }
-  if (Object.keys(data).length === 0) return asset;
-
-  return prisma.asset.update({
-    where: { id: asset.id },
-    data,
-    select: {
-      id: true,
-      original_url: true,
-      thumbnail_url: true,
-      width: true,
-      height: true,
-      file_name: true,
-      file_size: true,
-      mime_type: true,
-      hash: true,
-    },
-  });
-}
 
 function createR2Client(config: R2DirectUploadConfig) {
   return new S3Client({
@@ -475,6 +416,8 @@ function assetRecordToPayload(
     reused,
     isPubliclyReachable: isPubliclyReachableUrl(originalUrl),
     storageProvider: storageProviderForAssetUrl(asset.original_url),
+    upload: asset.upload,
+    similarity: asset.similarity,
   };
 }
 
@@ -496,58 +439,21 @@ function assetRecordToResult(
     reused: payload.reused,
     isPubliclyReachable: payload.isPubliclyReachable,
     storageProvider: payload.storageProvider,
+    upload: payload.upload,
+    similarity: payload.similarity,
   };
 }
 
-async function findActiveAssetByTrustedHash(ownerId: string, trustedHash: string, mimeType?: string | null) {
-  const mimeTypeWhere = mimeType ? { mime_type: mimeType } : {};
-  const ownAsset = await prisma.asset.findFirst({
-    where: {
-      owner_id: ownerId,
-      hash: trustedHash,
-      ...mimeTypeWhere,
-    },
-    orderBy: [
-      { created_at: 'desc' },
-    ],
-  });
-  if (ownAsset) {
-    if (!assetUrlCanBeReusedWithoutBody(ownAsset.original_url)) return null;
-    if (ownAsset.status === 'active') return ownAsset;
-    return prisma.asset.update({
-      where: { id: ownAsset.id },
-      data: { status: 'active' },
-    });
-  }
-
-  const sharedAsset = await prisma.asset.findFirst({
-    where: {
-      hash: trustedHash,
-      status: 'active',
-      ...mimeTypeWhere,
-    },
-    orderBy: [
-      { created_at: 'desc' },
-    ],
-  });
-  if (!sharedAsset || !assetUrlCanBeReusedWithoutBody(sharedAsset.original_url)) return null;
-
-  return prisma.asset.create({
-    data: {
-      id: uuidv4(),
-      owner_id: ownerId,
-      type: getSiteUploadKind(sharedAsset.mime_type) || 'image',
-      original_url: sharedAsset.original_url,
-      thumbnail_url: sharedAsset.thumbnail_url,
-      file_name: sharedAsset.file_name,
-      mime_type: sharedAsset.mime_type,
-      width: sharedAsset.width,
-      height: sharedAsset.height,
-      file_size: sharedAsset.file_size,
-      hash: trustedHash,
-      status: 'active',
-    },
-  });
+async function findActiveAssetByTrustedHash(ownerId: string, hash: string, mimeType?: string | null, bytes?: number, requestId?: string) {
+  const found = await findVerifiedOwnUpload(ownerId, hash, mimeType || undefined, bytes);
+  if (!found) return null;
+  try {
+    if (requestId) await registerVerifiedUpload({ ownerId, proof: found.proof, fileName: found.asset.file_name,
+      originalUrl: found.asset.original_url, thumbnailUrl: found.asset.thumbnail_url, requestId });
+    return { ...found.asset, upload: { requestId: requestId || hash, verified: true as const, assetDisposition: 'reused' as const,
+      sourceVersion: found.proof.sourceVersion || found.proof.version },
+      similarity: await uploadSimilarityStatus(ownerId, found.asset.id).catch(() => ({ state: 'unavailable' as const, coverage: 'new_uploads_only' as const })) };
+  } finally { await releaseVerifiedUpload(found.proof); }
 }
 
 async function createAssetFromCompletedUpload(input: {
@@ -558,81 +464,48 @@ async function createAssetFromCompletedUpload(input: {
   trustedHash?: string | null;
   reused?: boolean;
   config: R2DirectUploadConfig;
+  proof: VerifiedUpload;
 }): Promise<DirectUploadAssetResult> {
-  const trustedHash = input.trustedHash ? assertSha256Hash(input.trustedHash) : null;
-  if (trustedHash && trustedHash !== input.payload.hash) {
+  const trustedHash = input.proof.hash;
+  if (trustedHash !== input.payload.hash) {
     throw new Error('上传文件内容和上传票据不一致，请重新上传。');
   }
-  const kind = getSiteUploadKind(input.payload.mimeType) || 'image';
-  const width = kind === 'audio' ? null : normalizeOptionalInt(input.width);
-  const height = kind === 'audio' ? null : normalizeOptionalInt(input.height);
-
-  if (trustedHash) {
-    const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, trustedHash, input.payload.mimeType);
-    if (existingAsset) {
-      const updatedAsset = await fillMissingAssetMetadata(existingAsset, kind, width, height, trustedHash);
-      return assetRecordToResult(updatedAsset, true);
-    }
-  }
-
-  const publicUrl = `${input.config.publicBaseUrl}/${input.payload.key}`;
-  const ownAsset = await prisma.asset.findFirst({
-    where: {
-      owner_id: input.ownerId,
-      hash: trustedHash,
-      mime_type: input.payload.mimeType,
-    },
-    orderBy: [
-      { created_at: 'desc' },
-    ],
-  });
-  const completedThumbnailUrl = ownAsset?.thumbnail_url
-    || await thumbnailUrlForCompletedUpload(kind, publicUrl, trustedHash || input.payload.hash);
-  if (ownAsset) {
-    const updatedAsset = await prisma.asset.update({
-      where: { id: ownAsset.id },
-      data: {
-        type: kind,
-        original_url: publicUrl,
-        thumbnail_url: completedThumbnailUrl || ownAsset.thumbnail_url,
-        file_name: input.payload.fileName,
-        mime_type: input.payload.mimeType,
-        width,
-        height,
-        file_size: input.payload.fileSize,
-        hash: trustedHash,
-        status: 'active',
-      },
-    });
-    return assetRecordToResult(updatedAsset, input.reused || false);
-  }
-
-  const asset = await prisma.asset.create({
-    data: {
-      owner_id: input.ownerId,
-      type: kind,
-      original_url: publicUrl,
-      thumbnail_url: completedThumbnailUrl,
-      file_name: input.payload.fileName,
-      mime_type: input.payload.mimeType,
-      width,
-      height,
-      file_size: input.payload.fileSize,
-      hash: trustedHash,
-      status: 'active',
-    },
-  });
-
-  return assetRecordToResult(asset, input.reused || false);
+  // A presigned PUT can remain writable after completion. Freeze only new upload
+  // bytes at the immutable local content address before exposing an Asset URL.
+  await publishVerifiedFile(input.proof, path.join(process.cwd(), 'public/uploads/assets'), `${input.proof.hash}.${input.proof.extension}`);
+  const publicUrl = `/uploads/assets/${input.proof.hash}.${input.proof.extension}`;
+  const requestId = input.payload.requestId || input.payload.key;
+  const fingerprint = completedUploadFingerprint(input.payload);
+  const thumbnailUrl = await prepareVerifiedUploadThumbnail(input.proof);
+  const registered = await registerVerifiedUpload({ ownerId: input.ownerId, proof: input.proof, fileName: input.payload.fileName,
+    originalUrl: publicUrl, thumbnailUrl, requestId, fingerprint });
+  if (!registered.reused && registered.asset.type === 'image') void enqueueUploadSimilarity(registered.asset).catch(() => {});
+  const actual = await verifyExistingUpload(registered.asset, input.ownerId);
+  if (!actual) throw new VerifiedUploadError('UPLOAD_EXISTING_FILE_INVALID', '上传原文件暂无法完整确认');
+  try {
+    return assetRecordToResult({ ...registered.asset,
+      upload: { requestId, verified: true, assetDisposition: registered.reused ? 'reused' : 'new', sourceVersion: actual.sourceVersion || actual.version },
+      similarity: await uploadSimilarityStatus(input.ownerId, registered.asset.id).catch(() => ({ state: 'unavailable' as const, coverage: 'new_uploads_only' as const })) }, registered.reused);
+  } finally { await releaseVerifiedUpload(actual); }
+}
+const completedUploadFingerprint = (payload: DirectUploadTokenPayload) => uploadDigest(JSON.stringify([payload.hash, payload.fileSize, payload.mimeType]));
+async function completedUploadReceipt(ownerId: string, payload: DirectUploadTokenPayload) {
+  const found = await readVerifiedUploadReceipt(ownerId, payload.requestId || payload.key, completedUploadFingerprint(payload));
+  if (!found) return null;
+  try { return assetRecordToResult({ ...found.asset, upload: { requestId: payload.requestId || payload.key, verified: true,
+    assetDisposition: found.reused ? 'reused' : 'new', sourceVersion: found.proof.sourceVersion || found.proof.version },
+    similarity: await uploadSimilarityStatus(ownerId, found.asset.id).catch(() => ({ state: 'unavailable' as const, coverage: 'new_uploads_only' as const })) }, found.reused); }
+  finally { await releaseVerifiedUpload(found.proof); }
 }
 
-function createHashingUploadBody(body: NonNullable<PutObjectCommandInput['Body']>) {
+function createHashingUploadBody(body: NonNullable<PutObjectCommandInput['Body']>, expectedBytes: number) {
   const hash = crypto.createHash('sha256');
   let byteLength = 0;
   let finalized = false;
 
   const updateHash = (chunk: Buffer) => {
     byteLength += chunk.length;
+    if (byteLength > expectedBytes) throw new VerifiedUploadError('UPLOAD_SIZE_MISMATCH', '上传内容超过票据规定大小', 400);
     hash.update(chunk);
   };
 
@@ -666,11 +539,13 @@ function createHashingUploadBody(body: NonNullable<PutObjectCommandInput['Body']
 
   const hashingStream = new Transform({
     transform(chunk, _encoding, callback) {
-      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      updateHash(buffer);
-      callback(null, chunk);
+      try {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        updateHash(buffer); callback(null, chunk);
+      } catch (error) { callback(error as Error); }
     },
   });
+  source.once('error', error => hashingStream.destroy(error as Error));
 
   return {
     body: source.pipe(hashingStream) as NonNullable<PutObjectCommandInput['Body']>,
@@ -680,6 +555,7 @@ function createHashingUploadBody(body: NonNullable<PutObjectCommandInput['Body']
 }
 
 export async function createDirectUploadTicket(input: CreateDirectUploadTicketInput): Promise<DirectUploadTicketResult> {
+  await uploadIdentity(input.ownerId); uploadRequestId(input.requestId);
   const mimeType = input.mimeType.split(';')[0]?.trim().toLowerCase() || '';
   const metadataError = validateSiteUploadMetadata({ mimeType, fileSize: input.fileSize });
   if (metadataError) throw new Error(metadataError);
@@ -688,9 +564,9 @@ export async function createDirectUploadTicket(input: CreateDirectUploadTicketIn
   const width = kind === 'audio' ? null : normalizeOptionalInt(input.width);
   const height = kind === 'audio' ? null : normalizeOptionalInt(input.height);
 
-  const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, hash, mimeType);
+  const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, hash, mimeType, input.fileSize, input.requestId);
   if (existingAsset) {
-    const updatedAsset = await fillMissingAssetMetadata(existingAsset, kind, width, height, hash);
+    const updatedAsset = existingAsset;
     return {
       directUploadAvailable: false,
       reused: true,
@@ -719,6 +595,7 @@ export async function createDirectUploadTicket(input: CreateDirectUploadTicketIn
     fileSize: input.fileSize,
     hash,
     expiresAt,
+    requestId: input.requestId,
   };
   const client = createR2Client(config);
   const command = new PutObjectCommand({
@@ -755,7 +632,11 @@ export async function createDirectUploadTicket(input: CreateDirectUploadTicketIn
 }
 
 export async function completeDirectUpload(input: CompleteDirectUploadInput): Promise<DirectUploadAssetResult> {
-  const payload = verifySingleUploadToken(input.uploadToken, input.ownerId);
+  await uploadIdentity(input.ownerId);
+  const payload = verifySingleUploadToken(input.uploadToken, input.ownerId, true);
+  if (assertSha256Hash(input.hash) !== payload.hash) throw new VerifiedUploadError('UPLOAD_IDENTITY_MISMATCH', '文件身份与原票据不一致');
+  const receipt = await completedUploadReceipt(input.ownerId, payload);
+  if (receipt) return receipt;
   const config = getR2DirectUploadConfig();
   if (!config) throw new Error('R2 直传配置不可用，请刷新后重试。');
 
@@ -763,8 +644,15 @@ export async function completeDirectUpload(input: CompleteDirectUploadInput): Pr
   if (durationError) throw new Error(durationError);
 
   const client = createR2Client(config);
-  const head = await client.send(new HeadObjectCommand({ Bucket: config.bucket, Key: payload.key }));
-  if (head.ContentLength != null && head.ContentLength !== payload.fileSize) {
+  let head;
+  try { head = await client.send(new HeadObjectCommand({ Bucket: config.bucket, Key: payload.key }), { abortSignal: AbortSignal.timeout(30000) }); }
+  catch (error) {
+    if (['NotFound', 'NoSuchKey'].includes((error as { name?: string }).name || '') && !await completedUploadReceipt(input.ownerId, payload)) {
+      throw new VerifiedUploadError('UPLOAD_NOT_ACCEPTED', '原上传对象不存在且尚未登记，可重新上传同一文件', 409);
+    }
+    throw error;
+  }
+  if (head.ContentLength !== payload.fileSize || !head.ETag) {
     throw new Error('上传文件大小和票据不一致，请重新上传。');
   }
   const actualMimeType = (head.ContentType || payload.mimeType).split(';')[0]?.trim().toLowerCase();
@@ -776,22 +664,22 @@ export async function completeDirectUpload(input: CompleteDirectUploadInput): Pr
   if (hash !== payload.hash) {
     throw new Error('文件校验信息和上传票据不一致，请重新上传。');
   }
-  const trustedHash = input.trustedHash ? assertSha256Hash(input.trustedHash) : null;
-  if (trustedHash && trustedHash !== payload.hash) {
-    throw new Error('上传文件内容和上传票据不一致，请重新上传。');
-  }
-  return createAssetFromCompletedUpload({
-    ownerId: input.ownerId,
-    payload,
-    width: input.width,
-    height: input.height,
-    trustedHash,
-    config,
-  });
+  const object = await client.send(new GetObjectCommand({ Bucket: config.bucket, Key: payload.key }), { abortSignal: AbortSignal.timeout(180000) });
+  if (!object.Body || object.ETag !== head.ETag) throw new VerifiedUploadError('UPLOAD_SOURCE_CHANGED', '上传对象已变化，尚未登记');
+  const proof = await stageVerifiedUpload(object.Body as AsyncIterable<Uint8Array>, payload.mimeType, payload.fileSize, payload.hash);
+  try {
+    const after = await client.send(new HeadObjectCommand({ Bucket: config.bucket, Key: payload.key }), { abortSignal: AbortSignal.timeout(30000) });
+    if (after.ETag !== head.ETag || after.ContentLength !== head.ContentLength) throw new VerifiedUploadError('UPLOAD_SOURCE_CHANGED', '上传对象校验期间已变化');
+    proof.sourceVersion = `r2:${uploadDigest(payload.key)}:${head.ETag}:${head.ContentLength}:${proof.hash}`;
+    return await createAssetFromCompletedUpload({ ownerId: input.ownerId, payload, config, proof });
+  } finally { await releaseVerifiedUpload(proof); }
 }
 
 export async function proxyDirectUploadToStorage(input: ProxyDirectUploadInput): Promise<DirectUploadAssetResult> {
+  await uploadIdentity(input.ownerId);
   const payload = verifySingleUploadToken(input.uploadToken, input.ownerId);
+  const receipt = await completedUploadReceipt(input.ownerId, payload);
+  if (receipt) return receipt;
   const config = getR2DirectUploadConfig();
   if (!config) throw new Error('R2 直传配置不可用，请刷新后重试。');
 
@@ -808,14 +696,14 @@ export async function proxyDirectUploadToStorage(input: ProxyDirectUploadInput):
   if (durationError) throw new Error(durationError);
 
   const client = createR2Client(config);
-  const hashingBody = createHashingUploadBody(input.body);
+  const hashingBody = createHashingUploadBody(input.body, payload.fileSize);
   await client.send(new PutObjectCommand({
     Bucket: config.bucket,
     Key: payload.key,
     ContentType: payload.mimeType,
     ContentLength: payload.fileSize,
     Body: hashingBody.body,
-  }));
+  }), { abortSignal: AbortSignal.timeout(180000) });
   if (hashingBody.byteLength() !== payload.fileSize) {
     throw new Error('上传文件大小和票据不一致，请重新上传。');
   }
@@ -828,6 +716,7 @@ export async function proxyDirectUploadToStorage(input: ProxyDirectUploadInput):
 }
 
 export async function createMultipartUploadTicket(input: CreateMultipartUploadTicketInput): Promise<MultipartUploadTicketResult> {
+  await uploadIdentity(input.ownerId); uploadRequestId(input.requestId);
   const mimeType = input.mimeType.split(';')[0]?.trim().toLowerCase() || '';
   const metadataError = validateSiteUploadMetadata({ mimeType, fileSize: input.fileSize });
   if (metadataError) throw new Error(metadataError);
@@ -836,9 +725,9 @@ export async function createMultipartUploadTicket(input: CreateMultipartUploadTi
   const width = kind === 'audio' ? null : normalizeOptionalInt(input.width);
   const height = kind === 'audio' ? null : normalizeOptionalInt(input.height);
 
-  const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, hash, mimeType);
+  const existingAsset = await findActiveAssetByTrustedHash(input.ownerId, hash, mimeType, input.fileSize, input.requestId);
   if (existingAsset) {
-    const updatedAsset = await fillMissingAssetMetadata(existingAsset, kind, width, height, hash);
+    const updatedAsset = existingAsset;
     return {
       directUploadAvailable: false,
       reused: true,
@@ -886,6 +775,7 @@ export async function createMultipartUploadTicket(input: CreateMultipartUploadTi
     uploadMode: 'multipart',
     uploadId: multipart.UploadId,
     partSize: MULTIPART_UPLOAD_PART_SIZE_BYTES,
+    requestId: input.requestId,
   };
 
   return {
@@ -901,6 +791,7 @@ export async function createMultipartUploadTicket(input: CreateMultipartUploadTi
 }
 
 export async function signMultipartUploadPart(input: SignMultipartUploadPartInput): Promise<MultipartUploadPartTicket> {
+  await uploadIdentity(input.ownerId);
   const payload = verifyMultipartUploadToken(input.uploadToken, input.ownerId);
   const config = getR2DirectUploadConfig();
   if (!config) throw new Error('R2 分块上传配置不可用，请重新上传。');
@@ -932,7 +823,11 @@ export async function signMultipartUploadPart(input: SignMultipartUploadPartInpu
 }
 
 export async function completeMultipartUpload(input: CompleteMultipartUploadInput): Promise<DirectUploadAssetResult> {
-  const payload = verifyMultipartUploadToken(input.uploadToken, input.ownerId);
+  await uploadIdentity(input.ownerId);
+  const payload = verifyMultipartUploadToken(input.uploadToken, input.ownerId, true);
+  if (assertSha256Hash(input.hash) !== payload.hash) throw new VerifiedUploadError('UPLOAD_IDENTITY_MISMATCH', '文件身份与原票据不一致');
+  const receipt = await completedUploadReceipt(input.ownerId, payload);
+  if (receipt) return receipt;
   const config = getR2DirectUploadConfig();
   if (!config) throw new Error('R2 分块上传配置不可用，请重新上传。');
 
@@ -947,31 +842,41 @@ export async function completeMultipartUpload(input: CompleteMultipartUploadInpu
   const partCount = Math.ceil(payload.fileSize / payload.partSize!);
   const parts = normalizeCompletedParts(input.parts, partCount);
   const client = createR2Client(config);
-  await client.send(new CompleteMultipartUploadCommand({
-    Bucket: config.bucket,
-    Key: payload.key,
-    UploadId: payload.uploadId,
-    MultipartUpload: {
-      Parts: parts.map((part) => ({ PartNumber: part.partNumber, ETag: part.eTag })),
-    },
-  }));
+  let objectExists = false;
+  try { await client.send(new HeadObjectCommand({ Bucket: config.bucket, Key: payload.key }), { abortSignal: AbortSignal.timeout(30000) }); objectExists = true; }
+  catch (error) { if (!['NotFound', 'NoSuchKey'].includes((error as { name?: string }).name || '')) throw error; }
+  if (!objectExists) {
+    try { await client.send(new CompleteMultipartUploadCommand({ Bucket: config.bucket, Key: payload.key, UploadId: payload.uploadId,
+      MultipartUpload: { Parts: parts.map(part => ({ PartNumber: part.partNumber, ETag: part.eTag })) } }), { abortSignal: AbortSignal.timeout(60000) }); }
+    catch (error) {
+      if ((error as { name?: string }).name !== 'NoSuchUpload') throw error;
+      // A lost Complete response can leave an existing object, never retry its bytes.
+      try { await client.send(new HeadObjectCommand({ Bucket: config.bucket, Key: payload.key }), { abortSignal: AbortSignal.timeout(30000) }); }
+      catch (headError) {
+        if (['NotFound', 'NoSuchKey'].includes((headError as { name?: string }).name || '') && !await completedUploadReceipt(input.ownerId, payload)) throw new VerifiedUploadError('UPLOAD_NOT_ACCEPTED', '原分块上传不存在且尚未登记，可重新上传同一文件', 409);
+        throw headError;
+      }
+    }
+  }
 
   const head = await client.send(new HeadObjectCommand({ Bucket: config.bucket, Key: payload.key }));
-  if (head.ContentLength != null && head.ContentLength !== payload.fileSize) {
+  if (head.ContentLength !== payload.fileSize || !head.ETag) {
     throw new Error('分块上传文件大小和票据不一致，请重新上传。');
   }
 
-  return createAssetFromCompletedUpload({
-    ownerId: input.ownerId,
-    payload,
-    width: input.width,
-    height: input.height,
-    trustedHash: null,
-    config,
-  });
+  const object = await client.send(new GetObjectCommand({ Bucket: config.bucket, Key: payload.key }), { abortSignal: AbortSignal.timeout(180000) });
+  if (!object.Body || object.ETag !== head.ETag) throw new VerifiedUploadError('UPLOAD_SOURCE_CHANGED', '分块对象已变化');
+  const proof = await stageVerifiedUpload(object.Body as AsyncIterable<Uint8Array>, payload.mimeType, payload.fileSize, payload.hash);
+  try {
+    const after = await client.send(new HeadObjectCommand({ Bucket: config.bucket, Key: payload.key }), { abortSignal: AbortSignal.timeout(30000) });
+    if (after.ETag !== head.ETag || after.ContentLength !== head.ContentLength) throw new VerifiedUploadError('UPLOAD_SOURCE_CHANGED', '分块对象校验期间已变化');
+    proof.sourceVersion = `r2:${uploadDigest(payload.key)}:${head.ETag}:${head.ContentLength}:${proof.hash}`;
+    return await createAssetFromCompletedUpload({ ownerId: input.ownerId, payload, config, proof });
+  } finally { await releaseVerifiedUpload(proof); }
 }
 
 export async function abortMultipartUpload(input: AbortMultipartUploadInput) {
+  await uploadIdentity(input.ownerId);
   const payload = verifyMultipartUploadToken(input.uploadToken, input.ownerId);
   const config = getR2DirectUploadConfig();
   if (!config) throw new Error('R2 分块上传配置不可用，请重新上传。');

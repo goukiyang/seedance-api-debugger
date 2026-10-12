@@ -1,0 +1,8 @@
+ImageHash==4.3.2
+Pillow==11.3.0
+numpy==2.2.6
+scipy==1.15.3
+PyWavelets==1.8.0
+# Private runtime only; official PyPI versions. No global/environment install.
+# ImageHash BSD-2-Clause; Pillow MIT-CMU; numpy/scipy BSD; PyWavelets MIT.
+# Release metadata and Linux cp312 wheels were inspected, not executed.
