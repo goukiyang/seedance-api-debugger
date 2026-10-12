@@ -9,7 +9,8 @@ import {
   type ImageGenerationResolvedSettings,
 } from '@/lib/integrations/image-generation';
 import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
-import { submitStudioBatch, safeImageChannelSnapshot, StudioError } from './tasks';
+import { submitStudioBatch, safeImageChannelSnapshot, parseSharedStudioIntent, sameSharedStudioIntent, resolveOwnedStudioTaskSharedUse, StudioError } from './tasks';
+import type { SharedStudioIntent } from './shared-types';
 import { parseImageBillingContract, type ImageBillingContract } from './billing-contract';
 import { imageBillingReady } from './billing-readiness';
 import { imageBillingScope } from './billing-scope';
@@ -27,6 +28,7 @@ type PreparedImageQuoteResult = {
   revision: unknown;
   actualChargeEnabled: boolean;
   imageChannel?: ImageGenerationChannelSnapshot;
+  sharedLive?: SharedStudioIntent;
   estimate?: {
     source: string;
     confidence?: string;
@@ -97,7 +99,7 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
   canvasUse?: Parameters<typeof submitStudioBatch>[4], canvasPrompt?: Parameters<typeof submitStudioBatch>[5], additionalInputCharacters = 0): Promise<PreparedImageQuoteResult> {
   const prepared: Prisma.ImageStudioTaskUncheckedCreateInput[] = [];
   await submitStudioBatch(owner, { ...body, billingQuoteId: undefined, maxEstimatedCost: undefined }, avatar,
-    { save: async (_tx, data) => { prepared.push(data); } }, canvasUse, canvasPrompt);
+    { batchItem: additionalInputCharacters > 0, save: async (_tx, data) => { prepared.push(data); } }, canvasUse, canvasPrompt);
   if (!prepared.length) throw new StudioError('本次提交已存在，请直接查询生成记录', 409);
 
   const task = prepared[0];
@@ -106,6 +108,15 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
   let taskSnapshot: Record<string, unknown>;
   try { taskSnapshot = JSON.parse(String(task.snapshot_json)) as Record<string, unknown>; }
   catch { throw new StudioError('图片报价快照无效，请重新报价', 409); }
+  const sharedLive = parseSharedStudioIntent(taskSnapshot.sharedLive);
+  if (prepared.some(item => !sameSharedStudioIntent(sharedLive, parseSharedStudioIntent(JSON.parse(String(item.snapshot_json)).sharedLive)))) {
+    throw new StudioError('模板已更新，请确认本次生成', 409);
+  }
+  const sharedResult = sharedLive ? { sharedLive } : {};
+  const confirmDefinition = async () => {
+    if (sharedLive) await prisma.$transaction(tx => resolveOwnedStudioTaskSharedUse(owner,
+      typeof body.moduleId === 'string' ? body.moduleId : undefined, sharedLive, tx));
+  };
   const imageChannel = imageChannelFromPreparedTask(task)
     || await captureImageGenerationChannel(base.model, 'original');
   const requestedChannelId = imageChannel?.channelId
@@ -143,7 +154,9 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
       || base.authorizedCredits !== capability.fixedPoints) {
       throw new StudioError('固定点数已变化，请重新获取报价', 409);
     }
+    await confirmDefinition();
     return {
+      ...sharedResult,
       billingMode: 'fixed', billingQuoteId: null, unitCredits: capability.fixedPoints,
       estimatedCredits: capability.fixedPoints * prepared.length, revision: body.revision,
       expiresAt: base.expiresAt, actualChargeEnabled: false, ...(imageChannel ? { imageChannel: publicImageChannel(imageChannel) } : {}),
@@ -162,7 +175,8 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
   } else if (!state.ready) {
     // The original channel keeps its previous fixed-contract behavior when
     // no exact same-scope billing intent is available.
-    return { billingMode: 'fixed', billingQuoteId: null, unitCredits: base.authorizedCredits,
+    await confirmDefinition();
+    return { ...sharedResult, billingMode: 'fixed', billingQuoteId: null, unitCredits: base.authorizedCredits,
       estimatedCredits: base.authorizedCredits * prepared.length, revision: body.revision,
       expiresAt: base.expiresAt, actualChargeEnabled: false,
       ...(imageChannel ? { imageChannel: publicImageChannel(imageChannel) } : {}) };
@@ -205,18 +219,19 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
   }
 
   const now = Date.now();
+  await confirmDefinition();
   const contract: ImageBillingContract = { ...base, mode: 'actual', authorizedCredits: selectedEstimate.credits,
     issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + 60000).toISOString(),
     deadline: new Date(now + 48 * 3600000).toISOString(), estimateSource: selectedEstimate.source, estimateVersion: selectedEstimate.version };
   const id = randomUUID();
   const quote: StoredImageQuote & { imageChannel?: ImageGenerationChannelSnapshot } = {
     owner, count: prepared.length, fingerprint: base.specification,
-    intentRevision: state.intentRevision, contract, ...(imageChannel ? { imageChannel } : {}),
+    intentRevision: state.intentRevision, contract, ...sharedResult, ...(imageChannel ? { imageChannel } : {}),
   };
   await prisma.platformSetting.deleteMany({ where: { key: { startsWith: `image_billing_quote_v1:${owner}:` },
     created_at: { lt: new Date(now - 120000) } } });
   await prisma.platformSetting.create({ data: { key: imageQuoteKey(owner, id), value_json: JSON.stringify(quote), updated_by: owner } });
-  return { billingMode: 'actual', billingQuoteId: id, unitCredits: selectedEstimate.credits,
+  return { ...sharedResult, billingMode: 'actual', billingQuoteId: id, unitCredits: selectedEstimate.credits,
     estimatedCredits: selectedEstimate.credits * prepared.length, expiresAt: contract.expiresAt, revision: body.revision,
     actualChargeEnabled: true, ...(imageChannel ? { imageChannel: publicImageChannel(imageChannel) } : {}),
     estimate: { source: selectedEstimate.source, confidence: selectedEstimate.confidence,

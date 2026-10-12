@@ -6,7 +6,8 @@ import { imageBillingScope } from './billing-scope';
 import { resolveImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation';
 import { prepareImageBillingQuote } from './billing-quote-service';
 import { imageQuoteKey, type StoredImageQuote } from './billing-quote-store';
-import { parseStudioRequest, safeImageChannelSnapshot, StudioError } from './tasks';
+import { parseStudioRequest, safeImageChannelSnapshot, parseSharedStudioIntent, sameSharedStudioIntent, resolveOwnedStudioTaskSharedUse, studioSharedGenerationSource, studioBusinessErrorStatus, StudioError } from './tasks';
+import type { SharedStudioIntent } from './shared-types';
 import { STUDIO_BATCH_LIMITS } from './batch-contract';
 import { parseImageBillingContract, type ImageBillingContract } from './billing-contract';
 import { imageBillingReady } from './billing-readiness';
@@ -69,6 +70,7 @@ type StoredBatchQuote = {
   total: number;
   unitCredits: number;
   imageChannel?: ImageGenerationChannelSnapshot;
+  sharedLive?: SharedStudioIntent;
 };
 
 export async function quoteStudioBatch(owner: string, body: Record<string, unknown>) {
@@ -83,7 +85,10 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
   const workspace = await prisma.imageStudioModule.findFirst({ where: { id: body.moduleId, owner_id: owner }, select: { model: true, quality: true, resolution: true } });
   if (!workspace) throw new StudioError('模板不存在或无权使用', 404);
   const settings = await getImageStudioSettings();
-  const model = input.model || resolveStudioModuleGenerationConfig(workspace, settings).model;
+  const sharedUse = await prisma.$transaction(tx => resolveOwnedStudioTaskSharedUse(owner, body.moduleId as string, input.sharedLive, tx));
+  const sharedLive = sharedUse?.definition.intent;
+  const generationSource = sharedUse ? studioSharedGenerationSource(sharedUse, input) : { ...workspace, ...(input.model ? { model: input.model } : {}) };
+  const model = resolveStudioModuleGenerationConfig(generationSource, settings).model;
   const requestedChannelId = typeof body.channelId === 'string' ? body.channelId : undefined;
   const effectiveChannelId = requestedChannelId === undefined && suppliedImageChannel
     ? suppliedImageChannel.channelId
@@ -109,6 +114,7 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
         }
         imageChannel = quote.imageChannel;
       }
+      if (!sameSharedStudioIntent(sharedLive, quote.sharedLive)) throw new StudioError('模板已更新，请确认本次生成', 409);
       const isPinned = isPinnedChannelId(imageChannel?.channelId);
       if (isPinned) {
         assertImageChannelPairMatches(imageChannel, imageChannel?.channelId || '');
@@ -127,6 +133,7 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
       const row = await prisma.platformSetting.findUniqueOrThrow({ where: { key: imageQuoteKey(owner, quote.billingQuoteId) } });
       const stored = JSON.parse(row.value_json) as StoredImageQuote & { imageChannel?: ImageGenerationChannelSnapshot };
       if (stored.owner !== owner || !stored.contract || stored.contract.mode !== 'actual'
+        || !sameSharedStudioIntent(sharedLive, parseSharedStudioIntent(stored.sharedLive))
         || imageChannel && !sameImageChannel(stored.imageChannel, imageChannel)) {
         throw new StudioError('单项报价与整批图片通道不匹配，未报价', 409);
       }
@@ -137,14 +144,20 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
       intentRevision = stored.intentRevision;
       await prisma.platformSetting.delete({ where: { id: row.id } });
     }
-  } catch (error) { throw error instanceof StudioError ? error : new StudioError('整批报价未确认，未派发生成', 503); }
+  } catch (error) {
+    const status = studioBusinessErrorStatus(error);
+    if (status && error instanceof Error) throw new StudioError(error.message, status);
+    throw new StudioError('整批报价未确认，未派发生成', 503);
+  }
 
   const publicChannel = imageChannel ? { channelId: imageChannel.channelId, configRevision: imageChannel.configRevision } : undefined;
+  await prisma.$transaction(tx => resolveOwnedStudioTaskSharedUse(owner, body.moduleId as string, sharedLive, tx));
+  const sharedResult = sharedLive ? { sharedLive } : {};
   if (imageChannel) {
     try { await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, model); }
     catch { throw new StudioError('整批准备期间图片通道已停用或修订过期，请重新报价', 409); }
   }
-  if (contracts.every(contract => contract === null)) return { billingMode: 'fixed' as const, batchQuoteId: null,
+  if (contracts.every(contract => contract === null)) return { ...sharedResult, billingMode: 'fixed' as const, batchQuoteId: null,
     unitCredits: fixedUnit, estimatedCredits: total, expiresAt: new Date(Date.now() + 60000).toISOString(),
     ...(publicChannel ? { imageChannel: publicChannel } : {}) };
   if (contracts.some(contract => !contract)) throw new StudioError('批量准备期间计费状态发生变化，请重新报价', 409);
@@ -169,10 +182,10 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
     created_at: { lt: new Date(Date.now() - 120000) } } });
   const storedQuote: StoredBatchQuote = { owner, fingerprint: batchQuoteFingerprint(body, imageChannel),
     intentRevision: intentRevision ?? 0, contracts: exactContracts, expiresAt, total,
-    unitCredits: Math.max(...exactContracts.map(contract => contract.authorizedCredits)), ...(imageChannel ? { imageChannel } : {}) };
+    unitCredits: Math.max(...exactContracts.map(contract => contract.authorizedCredits)), ...sharedResult, ...(imageChannel ? { imageChannel } : {}) };
   await prisma.platformSetting.create({ data: { key: key(owner, id), updated_by: owner,
     value_json: JSON.stringify(storedQuote) } });
-  return { billingMode: 'actual' as const, batchQuoteId: id, unitCredits: storedQuote.unitCredits,
+  return { ...sharedResult, billingMode: 'actual' as const, batchQuoteId: id, unitCredits: storedQuote.unitCredits,
     estimatedCredits: total, expiresAt, ...(publicChannel ? { imageChannel: publicChannel } : {}) };
 }
 
@@ -190,7 +203,12 @@ export async function consumeBatchQuote(tx: Prisma.TransactionClient, owner: str
     : null;
   if (!workspace) throw new StudioError('模板不存在或无权使用', 404);
   const settings = await getImageStudioSettings();
-  const model = input.model || resolveStudioModuleGenerationConfig(workspace, settings).model;
+  const sharedUse = await resolveOwnedStudioTaskSharedUse(owner, body.moduleId as string, input.sharedLive, tx);
+  if (!sameSharedStudioIntent(parseSharedStudioIntent(stored.sharedLive), sharedUse?.definition.intent)) {
+    throw new StudioError('模板已更新，请确认本次生成', 409);
+  }
+  const generationSource = sharedUse ? studioSharedGenerationSource(sharedUse, input) : { ...workspace, ...(input.model ? { model: input.model } : {}) };
+  const model = resolveStudioModuleGenerationConfig(generationSource, settings).model;
   const requestedChannelId = typeof body.channelId === 'string' ? body.channelId : undefined;
   if (requestedChannelId === 'original' && storedChannel) {
     const currentDefault = await resolveImageGenerationRequestChannel(model, 'original', tx) || 'original';
@@ -200,11 +218,11 @@ export async function consumeBatchQuote(tx: Prisma.TransactionClient, owner: str
   if (stored.owner !== owner || !Array.isArray(stored.contracts) || !stored.contracts.length
     || !Number.isFinite(stored.total) || stored.total < 0 || !Number.isFinite(stored.unitCredits) || stored.unitCredits < 0
     || !Number.isInteger(stored.intentRevision) || stored.intentRevision < 0
-    || !Number.isFinite(Date.parse(stored.expiresAt)) || stored.fingerprint !== batchQuoteFingerprint(body)
+    || !Number.isFinite(Date.parse(stored.expiresAt)) || stored.fingerprint !== batchQuoteFingerprint(body, storedChannel)
     || !sameImageChannel(suppliedChannel, storedChannel)
     || Date.parse(stored.expiresAt) <= Date.now() || !Array.isArray(body.sources)
     || stored.contracts.length !== body.sources.length || stored.total > Number(body.budget)
-    || input.channelId && storedChannel && input.channelId !== storedChannel.channelId) {
+    || input.channelId && input.channelId !== 'original' && storedChannel && input.channelId !== storedChannel.channelId) {
     throw new StudioError('本批条件、报价、通道修订或预算已变化', 409);
   }
   const contracts = stored.contracts.map(contract => parseImageBillingContract(JSON.stringify(contract)));
@@ -215,5 +233,6 @@ export async function consumeBatchQuote(tx: Prisma.TransactionClient, owner: str
   }
   if ((await tx.platformSetting.deleteMany({ where: { id: row.id, value_json: row.value_json } })).count !== 1) throw new StudioError('整批报价已被使用', 409);
   return { contracts: contracts as ImageBillingContract[], total: stored.total, unitCredits: stored.unitCredits,
+    ...(sharedUse ? { sharedLive: sharedUse.definition.intent } : {}),
     ...(storedChannel ? { imageChannel: storedChannel } : {}) };
 }

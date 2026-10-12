@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { compileCanvasPromptReferences, parseCanvasPromptMentions } from '@/lib/canvas-prompt-references';
 import { bindModuleContextVersion, MODULE_CONTEXT_VERSION_RULE, snapshotModuleContextVersion, withContextVersionRetry } from './context-version';
 import type { ImageStudioTask, Prisma } from '@prisma/client';
@@ -36,9 +38,108 @@ import { studioTemplateTaskWhere } from './task-visibility';
 import { getSkillSelection, historicalSkills, parseSkillIds, resolveSkills, type SkillSnapshot } from './skills';
 import type { SessionUser } from '@/lib/auth/session';
 import { resolveCanvasStudioReferenceUse } from '@/lib/canvas-studio-reference-use';
+import { resolveSharedStudioModule, parseSharedStudioPersonalOverrides } from './shared-contract';
+import type { SharedStudioIntent } from './shared-types';
 
 export class StudioError extends Error {
   constructor(message: string, public status = 400) { super(message); }
+}
+
+export class SharedStudioDefinitionError extends StudioError {
+  constructor(message = '模板已更新，请确认本次生成', status = 409) { super(message, status); }
+}
+
+export function studioBusinessErrorStatus(error: unknown): number | null {
+  if (error instanceof StudioError) return error.status;
+  const status = error instanceof Error ? (error as Error & { status?: unknown }).status : undefined;
+  return typeof status === 'number' && [400, 403, 404, 409].includes(status) ? status : null;
+}
+
+export function parseSharedStudioIntent(value: unknown): SharedStudioIntent | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new StudioError('共享模板请求无效', 400);
+  const intent = value as Record<string, unknown>;
+  if (Object.keys(intent).some(key => !['protocol', 'presetId', 'definitionToken'].includes(key))
+    || intent.protocol !== 'shared-live-v1' || typeof intent.presetId !== 'string'
+    || (!/^[a-zA-Z0-9-]{1,120}$/.test(intent.presetId)
+      && !/^module-source:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(intent.presetId))
+    || typeof intent.definitionToken !== 'string' || !intent.definitionToken || intent.definitionToken.length > 256) {
+    throw new StudioError('共享模板协议或版本无效，请重新读取模板', 409);
+  }
+  return { protocol: intent.protocol, presetId: intent.presetId, definitionToken: intent.definitionToken };
+}
+
+export function sameSharedStudioIntent(left: SharedStudioIntent | undefined, right: SharedStudioIntent | undefined) {
+  return left?.protocol === right?.protocol && left?.presetId === right?.presetId
+    && left?.definitionToken === right?.definitionToken;
+}
+
+export function assertFrozenSharedStudioTask(task: Pick<ImageStudioTask, 'snapshot_json' | 'source_preset_id' | 'context' | 'model' | 'quality' | 'billing_contract_json'>) {
+  const snapshot = JSON.parse(task.snapshot_json || '{}') as Record<string, unknown>;
+  if (snapshot.sharedLive === undefined) return;
+  const intent = parseSharedStudioIntent(snapshot.sharedLive);
+  const channel = safeImageChannelSnapshot(snapshot.imageChannel);
+  if (!intent || intent.presetId !== task.source_preset_id || snapshot.sourcePresetId !== intent.presetId
+    || snapshot.effectiveContext !== task.context || snapshot.model !== task.model || snapshot.quality !== task.quality
+    || !channel || !/^[0-9a-f-]{36}$/i.test(channel.configRevision)
+    || !parseImageBillingContract(task.billing_contract_json)) {
+    throw new StudioError('共享模板受理快照或协议无法确认，原任务保留，不能重新生成', 409);
+  }
+}
+
+export async function resolveStudioTaskSharedUse(user: ImageStudioIdentity, moduleId: string | undefined,
+  intent: SharedStudioIntent | undefined, tx: Prisma.TransactionClient) {
+  const shared = moduleId ? await resolveSharedStudioModule(user, moduleId, tx) : null;
+  if (!shared) {
+    if (intent) throw new SharedStudioDefinitionError('共享模板绑定不存在，请重新打开模板');
+    return null;
+  }
+  if (!sameSharedStudioIntent(intent, shared.definition.intent)) {
+    throw new SharedStudioDefinitionError();
+  }
+  return shared;
+}
+
+export async function resolveOwnedStudioTaskSharedUse(ownerId: string, moduleId: string | undefined,
+  intent: SharedStudioIntent | undefined, tx: Prisma.TransactionClient) {
+  const user = await tx.user.findUnique({ where: { id: ownerId }, select: {
+    id: true, role: true, account_type: true, status: true, user_profile: true, feature_profile_id: true,
+    feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true,
+  } });
+  if (!user || user.status !== 'active' || !canUseCompanyTemplates(user)) throw new StudioError('当前账号无法生成', 403);
+  return resolveStudioTaskSharedUse(user, moduleId, intent, tx);
+}
+
+export function studioSharedGenerationSource(shared: NonNullable<Awaited<ReturnType<typeof resolveStudioTaskSharedUse>>>,
+  input: ReturnType<typeof parseStudioRequest>) {
+  return { ...shared.definition.generationDefaults, ...(input.personalOverrides ?? shared.personalOverrides),
+    ...(input.personalOverrides === undefined ? {
+      ...(input.model ? { model: input.model } : {}), ...(input.quality !== undefined ? { quality: input.quality } : {}),
+      ...(input.resolution ? { resolution: input.resolution } : {}), ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}),
+    } : {}) };
+}
+
+export const STUDIO_SHARED_WORKER_KEY = 'studio_shared_worker_v1';
+export const STUDIO_SHARED_WORKER_FILES = [
+  'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-types.ts',
+  'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/batches.ts', 'src/lib/image-studio/worker.ts',
+] as const;
+let sharedWorkerModuleHashes: Record<string, string> | undefined;
+
+export async function assertSharedStudioWorkerReady(tx: Prisma.TransactionClient) {
+  const row = await tx.platformSetting.findUnique({ where: { key: STUDIO_SHARED_WORKER_KEY } });
+  try {
+    const receipt = JSON.parse(row?.value_json || 'null');
+    if (!sharedWorkerModuleHashes) sharedWorkerModuleHashes = Object.fromEntries(STUDIO_SHARED_WORKER_FILES
+      .map(file => [file, createHash('sha256').update(readFileSync(path.join(process.cwd(), file))).digest('hex')]));
+    if (!receipt || receipt.protocol !== 'shared-live-v1' || !Number.isFinite(Date.parse(receipt.expiresAt))
+      || Date.parse(receipt.expiresAt) <= Date.now()
+      || STUDIO_SHARED_WORKER_FILES.some(file => receipt.loadedModuleSha?.[file] !== sharedWorkerModuleHashes![file])) {
+      throw new Error('worker_protocol_mismatch');
+    }
+  } catch {
+    throw new StudioError('共享模板处理服务尚未就绪，本次未受理；请稍后重新确认', 409);
+  }
 }
 
 export { ACTIVE_IMAGE_TASK_STATUSES };
@@ -123,6 +224,9 @@ export function parseStudioRequest(body: Record<string, unknown>) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new StudioError('提交内容无效');
   if (typeof body.requestId !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) throw new StudioError('提交编号无效');
   if (typeof body.prompt !== 'string' || body.prompt.length > 20000) throw new StudioError('画面描述不能超过 20000 字');
+  if (body.personalPrompt !== undefined && (typeof body.personalPrompt !== 'string' || body.personalPrompt.length > 20000)) throw new StudioError('本次画面描述不能超过 20000 字');
+  const sharedLive = parseSharedStudioIntent(body.sharedLive);
+  const personalOverrides = body.personalOverrides === undefined ? undefined : parseSharedStudioPersonalOverrides(body.personalOverrides);
   if (!Number.isInteger(body.count) || Number(body.count) < 1 || Number(body.count) > 8) throw new StudioError('生成张数必须为 1 到 8');
   if (!Number.isInteger(body.revision)) throw new StudioError('请刷新生成设置');
   if (!Array.isArray(body.referenceIds) || body.referenceIds.length > MAX_REFERENCE_IMAGES || body.referenceIds.some(id => typeof id !== 'string' || id.length > 100)) throw new StudioError(`最多使用 ${MAX_REFERENCE_IMAGES} 张有效参考图`);
@@ -161,6 +265,9 @@ export function parseStudioRequest(body: Record<string, unknown>) {
   const reproduceFromTaskId = body.reproduceFromTaskId === undefined ? undefined : body.reproduceFromTaskId;
   if (reproduceFromTaskId !== undefined && (typeof reproduceFromTaskId !== 'string' || reproduceFromTaskId.length > 120)) throw new StudioError('历史生成记录无效', 400);
   return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), moduleRevision, reproduceFromTaskId, referenceIds,
+    ...(sharedLive ? { sharedLive } : {}),
+    ...(personalOverrides ? { personalOverrides } : {}),
+    ...(typeof body.personalPrompt === 'string' ? { personalPrompt: body.personalPrompt.trim() } : {}),
     ...(channelId !== undefined ? { channelId: channelId as string } : imageChannel ? { channelId: imageChannel.channelId } : {}),
     ...(imageChannel ? { imageChannel } : {}),
     ...(maxEstimatedCost !== undefined ? { maxEstimatedCost: maxEstimatedCost as number } : {}), ...(evolution ? { evolution } : {}), ...(draft !== undefined ? { draft } : {}), ...(aspectRatio !== undefined ? { aspectRatio } : {}), ...(resolution !== undefined ? { resolution } : {}), ...(model !== undefined ? { model: model as typeof IMAGE_STUDIO_MODELS[number] } : {}), ...(quality !== undefined ? { quality: quality as string } : {}) };
@@ -178,13 +285,27 @@ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] 
   catch { throw new StudioError('历史固定参考图快照无效', 409); }
 }
 
-export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void> }, canvasUse?: { user: SessionUser; referenceImageIds: string[] }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }) {
+export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean }, canvasUse?: { user: SessionUser; referenceImageIds: string[] }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }) {
+  // An accepted request is recovered before any current definition/configuration checks.
+  if (typeof body?.requestId === 'string' && /^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) {
+    const acceptedBatchId = createHash('sha256').update(`${ownerId}:${body.requestId}`).digest('hex');
+    const accepted = await prisma.imageStudioTask.findFirst({ where: { batch_id: acceptedBatchId, owner_id: ownerId } });
+    if (accepted) {
+      let snapshot: Record<string, unknown> = {};
+      try { snapshot = JSON.parse(accepted.snapshot_json || '{}'); } catch {}
+      if (snapshot.sharedLive !== undefined || body.sharedLive !== undefined) {
+        if (body.moduleId !== undefined && body.moduleId !== accepted.module_id) throw new StudioError('提交编号已用于其他请求，请查询原记录', 409);
+        return acceptedBatchId;
+      }
+    }
+  }
   const input = parseStudioRequest(body);
+  const personalPrompt = input.personalPrompt ?? input.prompt;
   const billingQuoteId = typeof body.billingQuoteId === 'string' ? body.billingQuoteId : undefined;
   const rawCanvasPrompt = input.prompt;
   const moduleId = body.moduleId;
   const sheet = Boolean(avatar && isAvatarSheet(avatar));
-  if (avatar && (moduleId !== undefined || input.draft !== undefined || input.reproduceFromTaskId || (sheet ? input.count !== 1 || input.aspectRatio !== '1:1' : avatar.candidates.length !== input.count))) throw new StudioError('人物任务排版无效或继承了模板设置');
+  if (avatar && (moduleId !== undefined || input.sharedLive || input.draft !== undefined || input.reproduceFromTaskId || (sheet ? input.count !== 1 || input.aspectRatio !== '1:1' : avatar.candidates.length !== input.count))) throw new StudioError('人物任务排版无效或继承了模板设置');
   if (sheet) { try { validateSheetCandidates(avatar!.candidates, input.referenceIds, avatar!.layout); } catch (e) { throw new StudioError((e as Error).message); } }
   if (moduleId !== undefined && !validStudioModuleId(moduleId, ownerId)) throw new StudioError('模块编号无效');
   const batchId = createHash('sha256').update(`${ownerId}:${input.requestId}`).digest('hex');
@@ -219,8 +340,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     // Legacy tasks used the same hash over the input before channel fields existed.
     return requestedChannelId === 'original' && task.fingerprint === requestFingerprint;
   };
-  const deferOriginalSnapshotCheck = requestedChannelId === 'original' && Boolean(input.imageChannel);
-  const previous = deferOriginalSnapshotCheck ? null : await prisma.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
+  const previous = await prisma.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
   if (previous) {
     if (!matchesRequest(previous)) throw new StudioError('提交编号已用于其他请求，请重新提交', 409);
     return batchId;
@@ -228,8 +348,12 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   const settings = await getImageStudioSettings();
   if (settings.revision !== input.revision) throw new StudioError('生成规则或通用上下文已更新，请重新读取设置后确认提交', 409);
   await withContextVersionRetry(() => prisma.$transaction(async tx => {
-    const duplicate = deferOriginalSnapshotCheck ? null : await tx.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
+    const duplicate = await tx.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
     if (duplicate) {
+      if (input.sharedLive) {
+        if (moduleId !== undefined && moduleId !== duplicate.module_id) throw new StudioError('提交编号已用于其他请求，请查询原记录', 409);
+        return;
+      }
       if (!matchesRequest(duplicate)) throw new StudioError('提交编号冲突', 409);
       return;
     }
@@ -245,8 +369,22 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (canvasUse && (canvasReferenceOwners.size !== new Set(input.referenceIds).size || input.referenceIds.some(id => !canvasReferenceOwners.has(id)))) throw new StudioError('画布参考图与持久请求不匹配', 403);
     const workspace = moduleId ? await tx.imageStudioModule.findFirst({ where: { id: moduleId as string, owner_id: ownerId } }) : null;
     if (moduleId && moduleId !== defaultStudioModuleId(ownerId) && !workspace) throw new StudioError('模块不存在或无权使用', 403);
-    const reproduceFromTaskId = input.reproduceFromTaskId || (!input.draft ? workspace?.reproduce_task_id : undefined);
-    let sourcePresetId = workspace?.source_preset_id || null;
+    const sharedUse = await resolveStudioTaskSharedUse(identity, typeof moduleId === 'string' ? moduleId : undefined, input.sharedLive, tx);
+    if (sharedUse) {
+      await assertSharedStudioWorkerReady(tx);
+      if (input.reproduceFromTaskId || input.draft?.moduleContext !== undefined || input.draft?.fixedReferences !== undefined
+        || input.draft?.styleGroupIds !== undefined || input.draft?.skillIds !== undefined || input.draft?.skillVersions !== undefined) {
+        throw new StudioError('共享模板定义只能由作者保存；请重新读取模板后生成', 409);
+      }
+    }
+    const sharedDefinition = sharedUse?.definition;
+    if (sharedUse && input.personalOverrides !== undefined && !preparation?.batchItem
+      && input.count !== (input.personalOverrides.count ?? sharedUse.definition.generationDefaults.count)) {
+      throw new SharedStudioDefinitionError();
+    }
+    if (sharedDefinition) input.prompt = [sharedDefinition.templatePrompt, personalPrompt].filter(Boolean).join('\n\n本次个人要求：\n');
+    const reproduceFromTaskId = sharedUse ? undefined : input.reproduceFromTaskId || (!input.draft ? workspace?.reproduce_task_id : undefined);
+    let sourcePresetId = sharedUse?.definition.intent.presetId || workspace?.source_preset_id || null;
     if (reproduceFromTaskId) sourcePresetId = null;
     let sourcePresetOwnerId: string | null = null;
     if (workspace?.source_preset_id) {
@@ -260,9 +398,17 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (input.draft?.fixedReferences !== undefined && !fixedReferencesEditable) throw new StudioError('固定模板图只能由管理员修改原模板', 403);
     if (input.draft?.globalContext !== undefined && user.role !== 'admin') throw new StudioError('通用上下文只能由管理员修改', 403);
     if (workspace && input.moduleRevision !== undefined && workspace.revision !== input.moduleRevision) throw new StudioError('模块已在其他页面更新，请刷新后核对', 409);
-    const requestedModel = input.model || workspace?.model || settings.model;
-    if (input.quality !== undefined && !(IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[requestedModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] as readonly string[] | undefined)?.includes(input.quality)) throw new StudioError('当前模型不支持所选图片质量');
-    const generation = resolveStudioModuleGenerationConfig({ ...workspace, ...(input.model ? { model: input.model } : {}), ...(input.quality !== undefined ? { quality: input.quality } : {}) }, settings);
+    const generationSource = sharedUse
+      ? studioSharedGenerationSource(sharedUse, input)
+      : { ...workspace, ...(input.model ? { model: input.model } : {}), ...(input.quality !== undefined ? { quality: input.quality } : {}) };
+    const requestedModel = generationSource.model || settings.model;
+    const requestedQuality = sharedUse ? generationSource.quality : input.quality;
+    if (requestedQuality !== undefined && requestedQuality !== null
+      && !(IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[requestedModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] as readonly string[] | undefined)?.includes(requestedQuality)) throw new StudioError('当前模型不支持所选图片质量');
+    const generation = resolveStudioModuleGenerationConfig(generationSource, settings);
+    const sharedGeneration = sharedUse ? studioSharedGenerationSource(sharedUse, input) : null;
+    const effectiveResolution = sharedGeneration?.resolution || input.resolution || generation.resolution;
+    const effectiveAspectRatio = sharedGeneration?.aspectRatio || input.aspectRatio || 'auto';
     let effectiveRequestedChannelId = requestedChannelId;
     if (explicitChannelId === undefined && input.imageChannel) {
       // A snapshot without a channel choice is the older explicit-snapshot
@@ -286,23 +432,27 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       throw new StudioError('当前型号默认供应商已变化或旧报价缺少通道版本，请重新获取报价并确认；未派发生成', 409);
     }
     let imageChannel: ImageGenerationChannelSnapshot | undefined;
+    let originalSharedChannel: ImageGenerationChannelSnapshot | undefined;
     let imageApi;
     if (effectiveRequestedChannelId === 'original') {
-      // The protected legacy worker always resolves the original settings itself.
-      // A supplied pair is only a freshness check for a quote/avatar plan, never
-      // an execution snapshot that could be mistaken for a pinned legacy worker.
+      // Ordinary legacy tasks keep their existing worker contract; new shared
+      // tasks additionally freeze the same private original configuration below.
       if (input.imageChannel) {
         try { await resolveImageGenerationChannelSnapshot(input.imageChannel, tx, true, generation.model); }
         catch { throw new StudioError('原图片通道配置已变化，请重新报价并确认', 409); }
       }
       imageApi = await getImageGenerationSettingsForModel(generation.model, tx);
+      if (sharedDefinition) {
+        originalSharedChannel = input.imageChannel || await captureImageGenerationChannel(generation.model, 'original', tx);
+        imageApi = await resolveImageGenerationChannelSnapshot(originalSharedChannel, tx, false, generation.model);
+      }
     } else {
       imageChannel = input.imageChannel || await captureImageGenerationChannel(generation.model, effectiveRequestedChannelId, tx);
       if (imageChannel.channelId !== effectiveRequestedChannelId) throw new StudioError('图片通道与配置版本不匹配', 409);
       imageApi = await resolveImageGenerationChannelSnapshot(imageChannel, tx, true, generation.model);
       const channelCapability = imageApi.modelCapabilities[generation.model as keyof typeof imageApi.modelCapabilities];
       const validation = validateImageGenerationChannel(imageApi, { model: generation.model, quality: generation.quality,
-        resolution: input.resolution || generation.resolution, ratio: input.aspectRatio || 'auto', referenceCount: input.referenceIds.length });
+        resolution: effectiveResolution, ratio: effectiveAspectRatio, referenceCount: input.referenceIds.length });
       const actualQuotePreparation = Boolean(preparation) && channelCapability?.billingMode === 'actual'
         && channelCapability.actualQuoteRequired === true
         && isMuskImageGenerationChannel(imageApi)
@@ -311,13 +461,6 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       if (!validation.ok) throw new StudioError(validation.error, 400);
       if (preparation && channelCapability?.billingMode === 'actual' && !actualQuotePreparation) {
         throw new StudioError('同一图片通道与型号尚无有效账单证明，暂不能准备实际计费报价', 409);
-      }
-    }
-    if (deferOriginalSnapshotCheck) {
-      const duplicate = await tx.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
-      if (duplicate) {
-        if (!matchesRequest(duplicate)) throw new StudioError('提交编号冲突', 409);
-        return;
       }
     }
     if(avatar && (input.referenceIds.length ? !imageApi.supports_image_to_image : !imageApi.supports_text_to_image)) throw new StudioError('当前图片通道不支持本次文字或原图参考生成',409);
@@ -341,6 +484,10 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (!billingQuoteId && input.maxEstimatedCost !== undefined && price * input.count > input.maxEstimatedCost) throw new StudioError('图片价格已变化，请重新确认点数', 409);
     let snapshotGlobalContext = avatar ? '' : user.role === 'admin' && input.draft?.globalContext !== undefined ? input.draft.globalContext : settings.context;
     let snapshotModuleContext = input.draft?.moduleContext !== undefined ? input.draft.moduleContext : workspace?.context || '';
+    if (sharedDefinition) {
+      snapshotModuleContext = sharedDefinition.reproduction?.moduleContext ?? sharedDefinition.context;
+      if (sharedDefinition.reproduction) snapshotGlobalContext = sharedDefinition.reproduction.globalContext;
+    }
     let templateFixedReferences: StudioFixedReference[] = [];
     let styleGroupIds: string[] = [];
     let styleGroupSnapshot: StudioTaskStyleGroupSnapshot[] = [];
@@ -416,6 +563,13 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         if (error instanceof StudioStyleError) throw new StudioError(error.message, error.status);
         throw new StudioError('历史记录缺少可恢复上下文，请按当前模块重新生成', 409);
       }
+    } else if (sharedDefinition) {
+      templateFixedReferences = sharedDefinition.reproduction?.templateFixedReferences ?? sharedDefinition.fixedReferences;
+      styleGroupIds = sharedDefinition.styleGroupIds;
+      const styleGroups = sharedDefinition.styleGroups;
+      styleGroupSnapshot = styleGroups.map(group => ({ id: group.id, name: group.name, revision: group.revision,
+        referenceCount: group.references.length, ownerId: group.ownerId, ...(group.note ? { note: group.note } : {}) }));
+      styleReferenceGroups = styleGroups.map((group, index) => ({ ...styleGroupSnapshot[index], references: group.references }));
     } else {
       if (workspace) templateFixedReferences = await getStudioModuleFixedReferences(ownerId, workspace.id, tx);
       if (!reproduceFromTaskId && input.draft?.fixedReferences !== undefined) {
@@ -449,11 +603,15 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       }
     }
     let referencePolicy: StudioReferencePolicy;
-    if (!avatar) skills = reproduceFromTaskId && input.draft?.skillIds === undefined
+    if (!avatar && !sharedDefinition) skills = reproduceFromTaskId && input.draft?.skillIds === undefined
       ? await historicalSkills(identity, historicalSnapshot?.skills, tx)
       : await resolveSkills(identity, input.draft?.skillIds ?? (workspace ? await getSkillSelection(ownerId, workspace.id, tx) : []), tx);
     if (input.draft?.skillVersions && skills.some(skill => input.draft!.skillVersions![skill.id] !== skill.promptVersion)) throw new StudioError('skills文字已更新，请重新选择后生成', 409);
     if (avatar) referencePolicy = { ...defaultStudioReferencePolicy(referenceIds), primaryIds: avatar.candidates[0]?.baselineAssetId ? [avatar.candidates[0].baselineAssetId] : [], useFixedReferences: false };
+    else if (sharedDefinition) {
+      const primaryIds = input.draft?.referencePolicy?.primaryIds ?? input.referenceIds;
+      referencePolicy = { ...sharedDefinition.referencePolicy, primaryIds: referenceIds.filter(id => primaryIds.includes(id)) };
+    }
     else if (input.draft?.referencePolicy) referencePolicy = input.draft.referencePolicy;
     else if (reproduceFromTaskId && historicalSnapshot?.referencePolicy !== undefined) {
       try { referencePolicy = mapStudioReferencePolicy(historicalSnapshot.referencePolicy, referenceIds); }
@@ -474,22 +632,24 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const auxiliaryTransientIds = uniqueTransientIds.filter(id => !primaryIdSet.has(id));
     const includeTemplateFixed = referencePolicy.useFixedReferences;
     const actualTemplateFixedReferences = includeTemplateFixed ? templateFixedReferences : [];
+    const sourceTemplateReferenceIds = sharedDefinition?.templateReferenceIds || [];
     const actualStyleReferenceGroups = styleReferenceGroups;
     const actualFixedReferences = [...actualTemplateFixedReferences, ...actualStyleReferenceGroups.flatMap(group => group.references)];
-    const auxiliaryCount = auxiliaryTransientIds.length + actualFixedReferences.length;
-    try { validateStudioReferenceCounts(referencePolicy, referenceIds, templateFixedReferences.length, actualStyleReferenceGroups.reduce((total, group) => total + group.references.length, 0), true); }
+    const auxiliaryCount = auxiliaryTransientIds.length + sourceTemplateReferenceIds.length + actualFixedReferences.length;
+    try { validateStudioReferenceCounts(referencePolicy, [...referenceIds, ...sourceTemplateReferenceIds], templateFixedReferences.length, actualStyleReferenceGroups.reduce((total, group) => total + group.references.length, 0), true); }
     catch (error) { throw new StudioError((error as Error).message); }
     const baseContext = [snapshotGlobalContext.trim(), snapshotModuleContext.trim()].filter(Boolean).join('\n\n---\n模块上下文：\n');
     if (!input.prompt.trim() && !baseContext.trim() && !skills.length && primaryReferenceIds.length + auxiliaryCount === 0) throw new StudioError('请填写画面描述、上下文、选择skills或添加参考图片');
-    const referenceDescriptors: Array<{ id: string; role: 'primary' | 'transient-auxiliary' | 'template-fixed' | 'style-fixed'; label: string; note?: string; styleGroupId?: string }> = [];
+    const referenceDescriptors: Array<{ id: string; role: 'primary' | 'transient-auxiliary' | 'template-reference' | 'template-fixed' | 'style-fixed'; label: string; note?: string; styleGroupId?: string }> = [];
     primaryReferenceIds.forEach((id, index) => referenceDescriptors.push({ id, role: 'primary', label: `主图 ${index + 1}（主图${'一二三四五六七八九十'[index]}，主要内容）` }));
     auxiliaryTransientIds.forEach((id, index) => referenceDescriptors.push({ id, role: 'transient-auxiliary', label: `辅助参考图 ${index + 1}` }));
+    sourceTemplateReferenceIds.forEach((id, index) => referenceDescriptors.push({ id, role: 'template-reference', label: `模板参考图 ${index + 1}（辅助参考）` }));
     actualTemplateFixedReferences.forEach((reference, index) => referenceDescriptors.push({ id: reference.assetId, role: 'template-fixed', label: `模板${String.fromCharCode(65 + index)}（辅助参考）`, note: reference.note }));
     for (const group of actualStyleReferenceGroups) {
       group.references.forEach((reference, index) => referenceDescriptors.push({ id: reference.assetId, role: 'style-fixed', label: `风格组「${group.name}」图片 ${index + 1}（辅助参考）`, note: reference.note, styleGroupId: group.id }));
     }
     const orderedReferenceIds = referenceDescriptors.map(reference => reference.id);
-    const actualFixedIds = Array.from(new Set(actualFixedReferences.map(reference => reference.assetId)));
+    const actualFixedIds = Array.from(new Set([...actualFixedReferences.map(reference => reference.assetId), ...sourceTemplateReferenceIds]));
     const referenceInstructions = referenceDescriptors.map((reference, index) =>
       `实际第 ${index + 1} 张：${reference.label}${reference.note !== undefined ? `；备注（JSON 字符串）：${JSON.stringify(reference.note)}` : ''}`
     ).join('\n');
@@ -525,7 +685,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const actualReferenceIds = Array.from(new Set(orderedReferenceIds));
     if (imageChannel) {
       const validation = validateImageGenerationChannel(imageApi, { model: generation.model, quality: generation.quality,
-        resolution: input.resolution || generation.resolution, ratio: input.aspectRatio || 'auto', referenceCount: orderedReferenceIds.length });
+        resolution: effectiveResolution, ratio: effectiveAspectRatio, referenceCount: orderedReferenceIds.length });
       if (!validation.ok) throw new StudioError(validation.error, 400);
     }
     const references = await tx.asset.findMany({ where: { id: { in: actualReferenceIds }, status: 'active', type: 'image',
@@ -556,7 +716,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const transientReferenceSnapshot = referenceSnapshot.filter(reference => reference.referenceRole === 'primary' || reference.referenceRole === 'transient-auxiliary');
     const primaryReferenceSnapshot = referenceSnapshot.filter(reference => reference.referenceRole === 'primary');
     const auxiliaryReferenceSnapshot = referenceSnapshot.filter(reference => reference.referenceRole !== 'primary');
-    const requestedAspectRatio = input.aspectRatio || 'auto';
+    const requestedAspectRatio = effectiveAspectRatio;
     const firstReference = primaryReferenceIds.map(id => referencesById.get(id)).find(reference => reference?.width && reference?.height) || null;
     const ratioResolution = resolveStudioAspectRatio(requestedAspectRatio, firstReference);
     const aspectRatio = ratioResolution.requested;
@@ -564,7 +724,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const aspectRatioSource = ratioResolution.source;
     const ratioIssue = studioFourToOneIssue(resolvedAspectRatio, supportsStudioFourToOne(generation.model, imageApi.provider));
     if (ratioIssue) throw new StudioError(ratioIssue);
-    const resolution = normalizeImageResolution(generation.model, input.resolution || generation.resolution, imageApi.provider);
+    const resolution = normalizeImageResolution(generation.model, effectiveResolution, imageApi.provider);
     const outputSize = imageGenerationModelOutputSize(imageApi, generation.model, resolution, resolvedAspectRatio);
     const moduleContextVersion = await bindModuleContextVersion(snapshotModuleContext, tx);
     const billingScope = imageBillingScope(imageApi);
@@ -581,14 +741,16 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         inputCharacters: context.length + input.prompt.length,
         inputDigest: createHash('sha256').update(JSON.stringify({ context, prompt: input.prompt,
           avatar: avatar?.candidates, references: referenceSnapshot.map(ref => ({ id: ref.id, hash: ref.hash })),
-          imageChannel: imageChannel || input.imageChannel || null,
-          revision: settings.revision, moduleRevision: workspace?.revision })).digest('hex') }) });
+          imageChannel: imageChannel || originalSharedChannel || input.imageChannel || null,
+          revision: settings.revision, moduleRevision: sharedDefinition ? undefined : workspace?.revision,
+          ...(sharedDefinition ? { sharedLive: sharedDefinition.intent } : {}) })).digest('hex') }) });
     if (billingQuoteId) {
       if (preparation) throw new StudioError('批量准备不能沿用已确认的单次报价', 409);
       try {
         billingContract = await consumeImageQuote(tx, { owner: ownerId, id: billingQuoteId,
           count: input.count, fingerprint: billingContract.specification, specification: billingContract.specification,
-          scope: billingScope, model: generation.model, imageChannel: imageChannel || input.imageChannel });
+          scope: billingScope, model: generation.model, imageChannel: imageChannel || originalSharedChannel || input.imageChannel,
+          ...(sharedDefinition ? { sharedLive: sharedDefinition.intent } : {}) });
       } catch { throw new StudioError('实扣报价已过期、被使用或参数已变化，请重新报价', 409); }
       price = billingContract.authorizedCredits;
       if (input.maxEstimatedCost === undefined || price * input.count > input.maxEstimatedCost) throw new StudioError('请先确认本次预估及最高扣点授权', 409);
@@ -596,7 +758,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const fingerprint = imageChannel
       ? createHash('sha256').update(`${requestFingerprint}\0${imageChannel.channelId}\0${imageChannel.configRevision}`).digest('hex')
       : requestFingerprint;
-    const quoteImageChannel = imageChannel || input.imageChannel
+    const quoteImageChannel = imageChannel || originalSharedChannel || input.imageChannel
       || (preparation && effectiveRequestedChannelId === 'original'
         ? await captureImageGenerationChannel(generation.model, 'original', tx)
         : undefined);
@@ -608,6 +770,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         imageSupplierName: imageApi.supplierName } : {}),
       ...(canvasPrompt ? { canvasPromptMentions: parseCanvasPromptMentions(canvasPrompt.mentions), canvasPromptFingerprint } : {}),
       referenceImages: referenceSnapshot,
+      ...(sharedDefinition ? { templateReferenceImages: referenceSnapshot.filter(reference => reference.referenceRole === 'template-reference') } : {}),
       fixedReferenceImages: fixedReferenceSnapshot,
       templateFixedCount: actualTemplateFixedReferences.length,
       primaryReferenceImages: primaryReferenceSnapshot,
@@ -623,8 +786,10 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       moduleContextVersion, moduleContextVersionRule: MODULE_CONTEXT_VERSION_RULE,
       moduleId: workspace?.id || moduleId || null,
       sourcePresetId,
+      ...(sharedDefinition ? { sharedLive: sharedDefinition.intent, templatePrompt: sharedDefinition.templatePrompt, personalPrompt,
+        sharedSourceRevision: sharedDefinition.sourceRevision, sharedSourceOwnerId: sharedDefinition.sourceOwnerId } : {}),
       reproducedFromTaskId: reproduceFromTaskId || null,
-      moduleName: workspace?.name || null,
+      moduleName: sharedDefinition?.name || workspace?.name || null,
       prompt: input.prompt,
       ...(evolution ? { evolution } : {}),
       model: generation.model,
@@ -676,8 +841,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   return batchId;
 }
 
-export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded' | 'failed' | 'uncertain', data: { assetId?: string; preparedAsset?: Prisma.AssetUncheckedCreateInput; error?: string; usage?: unknown } = {}) {
-  return prisma.$transaction(async tx => {
+export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded' | 'failed' | 'uncertain', data: { assetId?: string; preparedAsset?: Prisma.AssetUncheckedCreateInput; error?: string; usage?: unknown } = {}, transaction?: Prisma.TransactionClient) {
+  const finish = async (tx: Prisma.TransactionClient) => {
     const activeStatus = task.status === 'channel_running' ? 'channel_running' : 'running';
     const changed = await tx.imageStudioTask.updateMany({
       where: { id: task.id, status: activeStatus, lease_token: task.lease_token, lease_until: { gt: new Date() } },
@@ -735,7 +900,8 @@ export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded
     await tx.imageStudioTask.update({ where: { id: task.id }, data: { actual_credits: settlement.actualCost,
       billing_settled_at: new Date() } });
     return true;
-  }, { timeout: 15000 });
+  };
+  return transaction ? finish(transaction) : prisma.$transaction(finish, { timeout: 15000 });
 }
 
 export async function claimStudioTask() {
@@ -745,6 +911,12 @@ export async function claimStudioTask() {
     const candidates = await prisma.imageStudioTask.findMany({ where: { status: { in: ['queued', 'channel_queued'] } },
       orderBy: [{ created_at: 'asc' }, { id: 'asc' }], take: 32, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
     for (const row of candidates) {
+      try { assertFrozenSharedStudioTask(row); }
+      catch {
+        const message = '任务快照或共享模板协议无法确认；原任务与费用预留保留，请管理员核对，未请求生成';
+        if (row.error !== message) await prisma.imageStudioTask.updateMany({ where: { id: row.id, status: row.status }, data: { error: message } });
+        continue;
+      }
       if (row.status === 'channel_queued') {
         try {
           const snapshot = safeImageChannelSnapshot(JSON.parse(row.snapshot_json || '{}').imageChannel);
@@ -842,7 +1014,7 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
     return { id: task.id, batchId: task.batch_id, ordinal: task.ordinal,
       owner: publicOwner,
       delivery: deliveries.get(task.id),
-      prompt: task.prompt, model: task.model, quality: task.quality, status: publicImageTaskStatus(task.status), error: task.error, unitCredits: task.unit_credits,
+      prompt: snapshot.prompt, model: task.model, quality: task.quality, status: publicImageTaskStatus(task.status), error: task.error, unitCredits: task.unit_credits,
       providerCostUsd: task.provider_cost_usd,
       billing: imageBillingView(task, ownerId, isAdmin),
       aspectRatio: task.aspect_ratio, outputSize: task.output_size,
@@ -967,11 +1139,15 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json'
   const imageChannel = safeImageChannelSnapshot(parsed.imageChannel);
   const imageChannelLabel = typeof parsed.imageChannelLabel === 'string' && parsed.imageChannelLabel.length <= 120 ? parsed.imageChannelLabel : null;
   const imageSupplierName = typeof parsed.imageSupplierName === 'string' && parsed.imageSupplierName.length <= 120 ? parsed.imageSupplierName : null;
+  let sharedLive: SharedStudioIntent | undefined;
+  try { sharedLive = parseSharedStudioIntent(parsed.sharedLive); } catch {}
   return {
+    ...(sharedLive ? { sharedLive } : {}),
     ...(imageChannel ? { imageChannel } : {}),
     ...(imageChannel && imageChannelLabel ? { imageChannelLabel } : {}),
     ...(imageChannel && imageSupplierName ? { imageSupplierName } : {}),
-    prompt: typeof parsed.prompt === 'string' ? parsed.prompt : task.prompt,
+    prompt: sharedLive && typeof parsed.personalPrompt === 'string' ? parsed.personalPrompt
+      : typeof parsed.prompt === 'string' ? parsed.prompt : task.prompt,
     skills: Array.isArray(parsed.skills) ? parsed.skills.filter(skill => skill && typeof skill === 'object'
       && (isAdmin || skill.ownerId === viewerOwnerId) && typeof skill.prompt === 'string') : [],
     evolution: parsed.evolution && typeof parsed.evolution === 'object' && ['increase', 'decrease'].includes(String((parsed.evolution as Record<string, unknown>).direction))

@@ -72,6 +72,15 @@ export async function getStudioModuleFixedReferences(ownerId: string, moduleId: 
     const source = await client.imageStudioPreset.findUnique({ where: { id: workspace.source_preset_id }, select: { id: true, owner_id: true } });
     // Shared copies keep a server-side binding instead of granting ownership of hidden images.
     if (source) {
+      const binding = await client.platformSetting.findUnique({ where: { key: `studio_shared_binding_v1:${moduleId}` }, select: { value_json: true } });
+      if (binding) {
+        let value: Record<string, unknown>;
+        try { value = JSON.parse(binding.value_json); }
+        catch { throw new StudioFixedReferenceError('共享模板绑定无法读取', 409); }
+        if (!value || typeof value !== 'object' || Array.isArray(value) || value.protocol !== 'shared-live-v1' || value.ownerId !== ownerId
+          || value.presetId !== source.id || !['publisher', 'live'].includes(String(value.mode))) throw new StudioFixedReferenceError('共享模板来源无法确认', 409);
+        return readSetting(client, presetKey(source.id), source.owner_id);
+      }
       if (source.owner_id !== ownerId) return readSetting(client, presetKey(source.id), source.owner_id);
       const own = await client.platformSetting.findUnique({ where: { key: moduleKey(moduleId) }, select: { value_json: true } });
       return own ? decodeSetting(own.value_json, ownerId) : readSetting(client, presetKey(source.id), source.owner_id);
@@ -83,6 +92,9 @@ export async function getStudioModuleFixedReferences(ownerId: string, moduleId: 
 export async function setStudioModuleFixedReferences(ownerId: string, moduleId: string, references: StudioFixedReference[], client: FixedReferenceClient = prisma) {
   const workspace = await client.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: ownerId }, select: { id: true } });
   if (!workspace) throw new StudioFixedReferenceError('模块不存在或无权使用', 403);
+  if (await client.platformSetting.findUnique({ where: { key: `studio_shared_binding_v1:${moduleId}` }, select: { id: true } })) {
+    throw new StudioFixedReferenceError('实时共享固定图只能通过原模板保存', 403);
+  }
   await writeSetting(client, moduleKey(moduleId), ownerId, references);
 }
 
@@ -110,6 +122,17 @@ export async function setStudioPresetFixedReferences(ownerId: string, presetId: 
   const preset = await client.imageStudioPreset.findFirst({ where: { id: presetId, owner_id: ownerId }, select: { id: true } });
   if (!preset) throw new StudioFixedReferenceError('模板不存在或无权使用', 403);
   await writeSetting(client, presetKey(presetId), ownerId, references);
+  const key = `studio_shared_reproduction_v1:${presetId}`;
+  const historical = await client.platformSetting.findUnique({ where: { key }, select: { value_json: true } });
+  if (historical) {
+    let value: Record<string, unknown>;
+    try { value = JSON.parse(historical.value_json); }
+    catch { throw new StudioFixedReferenceError('历史模板定义无法读取', 409); }
+    if (!value || typeof value !== 'object' || Array.isArray(value) || value.sourceOwnerId !== ownerId || value.version !== 1) throw new StudioFixedReferenceError('历史模板定义所有者不匹配', 403);
+    const changed = await client.platformSetting.updateMany({ where: { key, value_json: historical.value_json },
+      data: { value_json: JSON.stringify({ ...value, templateFixedReferences: references }), updated_by: ownerId } });
+    if (changed.count !== 1) throw new StudioFixedReferenceError('历史模板固定图已变化，请重新读取', 409);
+  }
 }
 
 export async function studioPresetHasFixedReference(user: ImageStudioIdentity, preset: StudioFixedReferencePreset, assetId: string) {

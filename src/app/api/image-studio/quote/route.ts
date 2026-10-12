@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { prepareImageBillingQuote } from '@/lib/image-studio/billing-quote-service';
-import { StudioError } from '@/lib/image-studio/tasks';
+import { studioBusinessErrorStatus } from '@/lib/image-studio/tasks';
 import { ImageGenerationChannelError } from '@/lib/integrations/image-generation';
 
 export const dynamic = 'force-dynamic';
@@ -13,6 +13,7 @@ export async function POST(request: NextRequest) {
   try { return NextResponse.json(await prepareImageBillingQuote(user.id, await request.json()), { headers: { 'Cache-Control': 'private, no-store' } }); }
   catch (error) {
     if (error instanceof ImageGenerationChannelError) return NextResponse.json({ error: error.message, code: error.code, submitted: false }, { status: error.status });
-    return NextResponse.json({ error: error instanceof StudioError ? error.message : '报价未确认，未发起图片生成' }, { status: error instanceof StudioError ? error.status : 503 });
+    const status = studioBusinessErrorStatus(error);
+    return NextResponse.json({ error: status && error instanceof Error ? error.message : '报价未确认，未发起图片生成', submitted: false }, { status: status || 503 });
   }
 }

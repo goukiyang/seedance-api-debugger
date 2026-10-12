@@ -2,7 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider,
   resolveImageGenerationChannelSnapshot, isMuskImageGenerationChannel, validateImageGenerationChannel, assertImageGenerationChannelDispatchOpen, ImageGenerationChannelError,
   type ImageGenerationResolvedSettings } from '@/lib/integrations/image-generation';
-import { claimStudioTask, finishStudioTask, safeImageChannelSnapshot } from './tasks';
+import { claimStudioTask, finishStudioTask, safeImageChannelSnapshot, assertFrozenSharedStudioTask } from './tasks';
 import { requestStudioImages, StudioProviderError } from './provider';
 import { normalizeStudioImage, validateGeneratedStudioImage, readStudioImage, StudioImageDeliveryError, StudioImageDownloadError } from './media';
 import { STUDIO_EXECUTION_MS } from './limits';
@@ -17,12 +17,15 @@ import { imageBillingScope } from './billing-scope';
 import { parseImageBillingContract } from './billing-contract';
 import { imageBillingReady } from './billing-readiness';
 import { reserveImageStudioQueueCapacity } from './queue-capacity';
+import { finishRejectedStudioDimensions } from './dimension-rejection';
 
 export async function assertStudioPostAuthorization(task: ImageStudioTask) {
   const current = await prisma.imageStudioTask.findUnique({ where: { id: task.id } });
   const activeStatus = task.status === 'channel_running' ? 'channel_running' : 'running';
   if (!current || current.status !== activeStatus || current.lease_token !== task.lease_token
     || !current.lease_until || current.lease_until <= new Date()) throw new StudioImageDownloadError('delivery_lease_lost');
+  // Only validate the accepted snapshot; never resolve today's shared source here.
+  assertFrozenSharedStudioTask(current);
   if (current.billing_mode === 'actual') {
     const contract = parseImageBillingContract(current.billing_contract_json);
     const billingStatus = activeStatus === 'channel_running' ? 'channel_awaiting_response' : 'awaiting_response';
@@ -70,11 +73,15 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
         const contract = parseImageBillingContract(task.billing_contract_json);
         if (!contract || contract.mode !== 'actual' || Date.parse(contract.deadline!) <= Date.now()) throw new Error('图片费用授权已过期，未向供应商提交');
       }
-      const settings = await getImageGenerationSettingsForModel(task.model);
+      const snapshot = task.snapshot_json ? JSON.parse(task.snapshot_json) : {};
+      const frozenChannel = safeImageChannelSnapshot(snapshot.imageChannel);
+      if (snapshot.sharedLive !== undefined) assertFrozenSharedStudioTask(task);
+      const settings = snapshot.sharedLive !== undefined && frozenChannel
+        ? await resolveImageGenerationChannelSnapshot(frozenChannel, prisma, false, task.model)
+        : await getImageGenerationSettingsForModel(task.model);
       if (!isStudioImageGenerationProvider(settings.provider) || !isImageGenerationApiReady(settings)) throw new Error('图片专用 API 暂不可用');
       if (task.billing_scope && imageBillingScope(settings) !== task.billing_scope) throw new Error('提交时的图片通道已变化，请核对原任务');
       const images = [];
-      const snapshot = task.snapshot_json ? JSON.parse(task.snapshot_json) : {};
       const owners: Record<string, string> = snapshot.authorizedReferenceOwners || {};
       for (const id of JSON.parse(task.reference_ids) as string[]) {
         const asset = await prisma.asset.findFirst({ where: { id, owner_id: owners[id] || task.owner_id, status: 'active', type: 'image' } });
@@ -159,6 +166,7 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
   let providerStarted = Boolean(recovery || resumeReceipt);
   let delivery = recovery;
   let asyncReceipt = resumeReceipt;
+  let original: Buffer | undefined;
   let preparedRequest = false;
   let stage = 'prepare';
   const started = Date.now();
@@ -174,8 +182,6 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
     const owner = await prisma.user.findUnique({ where: { id: task.owner_id }, select: { status: true } });
     if (owner?.status !== 'active') throw new Error('当前账号无法生成');
     let usage: unknown;
-    let original: Buffer | undefined;
-
     // A valid same-result local checkpoint is always consumed before querying
     // the provider again. Expired checkpoints may be replaced only by GET of
     // the stored async task id, never by a new generation POST.
@@ -334,6 +340,14 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
       httpStatus: detail?.status || downloadError?.status, download: detail?.diagnostics || downloadError?.diagnostics,
       elapsedMs: Date.now() - started }));
     if (code === 'delivery_lease_lost') return;
+    if (mediaError?.code === 'generated_dimensions_mismatch' && original) {
+      const finished = await finishRejectedStudioDimensions(task, original);
+      if (finished) {
+        if (delivery) await updateStudioDelivery(delivery, { phase: 'stopped', code });
+        await completeToolFlowTask(task.id);
+      }
+      return;
+    }
     if (code === 'async_failed' && asyncReceipt) {
       await updateStudioAsyncReceipt(asyncReceipt, { state: 'failed' });
       const finished = await finishStudioTask(task, 'failed', { error: '原异步图片任务已明确失败，未重新生成；预留已按原合同处理。' });
