@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { listStudioModules, saveStudioModule, deleteStudioModule, deleteStudioGroup, studioModuleDTOForUser, StudioModuleError } from '@/lib/image-studio/modules';
+import { listStudioModules, saveStudioModule, chooseStudioModuleSharing, deleteStudioModule, deleteStudioGroup, studioModuleDTOForUser, StudioModuleError } from '@/lib/image-studio/modules';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { openSharedStudioModule, StudioSharingError } from '@/lib/image-studio/shared-contract';
 import { StudioStyleError } from '@/lib/image-studio/style-groups';
 import { StudioFixedReferenceError } from '@/lib/image-studio/fixed-references';
 import { StudioReferencePolicyError } from '@/lib/image-studio/reference-policy';
 import { ModuleCoverError } from '@/lib/image-studio/module-cover';
+import { StudioSharingPreferenceError } from '@/lib/image-studio/module-sharing-preference';
 
 export const dynamic = 'force-dynamic';
 const privateHeaders = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
 function businessError(error: unknown) {
-  return error instanceof StudioModuleError || error instanceof StudioSharingError || error instanceof StudioStyleError || error instanceof StudioFixedReferenceError || error instanceof StudioReferencePolicyError || error instanceof ModuleCoverError;
+  return error instanceof StudioModuleError || error instanceof StudioSharingError || error instanceof StudioSharingPreferenceError || error instanceof StudioStyleError || error instanceof StudioFixedReferenceError || error instanceof StudioReferencePolicyError || error instanceof ModuleCoverError;
 }
 export async function GET(request: NextRequest) {
   const user = await getSession();
@@ -35,6 +36,7 @@ async function save(request: NextRequest, createOnly: boolean) {
   try {
     const body = await request.json();
     if (!body || typeof body !== 'object' || Array.isArray(body)) return NextResponse.json({ error: '模块内容无效' }, { status: 400, headers: privateHeaders });
+    if (!createOnly && body.action === 'set-sharing-preference') return NextResponse.json(await chooseStudioModuleSharing(user.id, body), { headers: privateHeaders });
     if (createOnly && body.action === 'open-shared') {
       if (typeof body.presetId !== 'string' || !body.presetId || body.presetId.length > 160) return NextResponse.json({ error: '共享模板编号无效' }, { status: 400, headers: privateHeaders });
       const workspace = await openSharedStudioModule(user, body.presetId, body.requestId);
