@@ -66,7 +66,7 @@ export default function MultiviewPage() {
   useUnsavedNavigation(!saved || exporting, confirm, { unsaved: saved ? [] : ['多角度选帧尚未保存到本机'], busy: exporting ? ['拼图文件仍在准备'] : [], revision: JSON.stringify(draft) });
 
   const clearUrls = useCallback(() => {
-    for (const url of objectUrls.current) URL.revokeObjectURL(url);
+    for (const url of Array.from(objectUrls.current)) URL.revokeObjectURL(url);
     objectUrls.current.clear(); requests.current.clear(); setFrames({}); setExportFile(null); setPreview(null);
   }, []);
   const load = useCallback(async (recheck = false) => {
