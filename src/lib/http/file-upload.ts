@@ -48,36 +48,102 @@ const fileHashes = new WeakMap<File, Promise<string>>();
 const fileRequests = new WeakMap<File, Map<string, string>>();
 const inFlightUploads = new Map<string, Promise<UploadedAssetPayload>>();
 const directReceipts = new WeakMap<File, { scope: string; ticket: DirectUploadTicketResponse }>();
-const rawReceipts = new WeakMap<File, { scope: string; requestId: string }>();
+type RawUploadIdentity = { ownerId: string; requestId: string; hash: string; fileSize: number; mimeType: string };
+type RawUploadMarker = RawUploadIdentity & { version: 2; phase: 'preparing' | 'prepared' | 'sending' | 'retryable'; nonce?: string };
+type LegacyRawUploadMarker = RawUploadIdentity & { version: 1 };
+type RawUploadProof = RawUploadIdentity & { phase: 'absent' | 'prepared' | 'receiving' | 'writing' | 'notAccepted' | 'completed'; nonce?: string };
+const rawReceipts = new WeakMap<File, { scope: string; marker: RawUploadMarker | LegacyRawUploadMarker }>();
 
 function rawReceiptKey(file: File, context?: Partial<UploadContext>) {
   return context?.ownerId && context.hash
     ? `sd2:raw-upload:v1:${context.ownerId}:${context.hash}:${file.size}:${file.type || 'application/octet-stream'}` : null;
 }
 
-async function recoverRawUpload(file: File, context: Partial<UploadContext>, invalidJsonMessage: string, onProgress?: UploadProgressHandler) {
+function rawIdentityMatches(value: RawUploadIdentity, expected: RawUploadIdentity) {
+  return value.ownerId === expected.ownerId && value.requestId === expected.requestId && value.hash === expected.hash
+    && value.fileSize === expected.fileSize && value.mimeType === expected.mimeType;
+}
+function saveRawMarker(file: File, context: Partial<UploadContext>, marker: RawUploadMarker) {
+  const key = rawReceiptKey(file, context);
+  if (!key) throw new Error('原上传身份无法安全保存，文件尚未发送。');
+  try {
+    const value = JSON.stringify(marker);
+    sessionStorage.setItem(key, value);
+    if (sessionStorage.getItem(key) !== value) throw new Error('Raw marker unavailable');
+  } catch { throw new Error('原上传状态未能保存，文件尚未发送。请允许本机存储后重试。'); }
+  rawReceipts.set(file, { scope: `${context.ownerId}:${uploadSession().epoch}`, marker });
+}
+function clearRawMarker(file: File, context: Partial<UploadContext>) {
+  rawReceipts.delete(file);
+  const key = rawReceiptKey(file, context);
+  // Cleanup failure cannot invalidate a fully verified completed receipt.
+  // A retained marker will query that same receipt on the next explicit use.
+  if (key) { try { sessionStorage.removeItem(key); } catch { /* Preserve the confirmed result. */ } }
+}
+function readRawMarker(file: File, context: Partial<UploadContext>) {
   const scope = `${context.ownerId || 'unscoped'}:${uploadSession().epoch}`;
   const key = rawReceiptKey(file, context);
-  let requestId = rawReceipts.get(file)?.scope === scope ? rawReceipts.get(file)?.requestId : undefined;
-  if (key) {
-    try { requestId = sessionStorage.getItem(key) || requestId; }
-    catch { throw new Error('原上传编号无法读取，未重新发送文件。请先核对我的素材。'); }
+  if (!key || !context.ownerId || !context.hash) return null;
+  let value: string | null;
+  try { value = sessionStorage.getItem(key); }
+  catch { throw new Error('原上传编号无法读取，未重新发送文件。请先核对我的素材。'); }
+  if (!value) return rawReceipts.get(file)?.scope === scope ? rawReceipts.get(file)!.marker : null;
+  const identity = { ownerId: context.ownerId, hash: context.hash, fileSize: file.size, mimeType: file.type || 'application/octet-stream' };
+  // v0.82.2 stored only a string. Its missing server receipt never proves that
+  // no bytes were sent; only the explicitly saved v2 preparing phase can do so.
+  if (/^[a-zA-Z0-9_-]{1,160}$/.test(value)) return { ...identity, requestId: value, version: 1 as const };
+  try {
+    const marker = JSON.parse(value) as RawUploadMarker;
+    if (!marker || marker.version !== 2 || !/^[a-zA-Z0-9_-]{1,160}$/.test(marker.requestId)
+      || !rawIdentityMatches(marker, { ...identity, requestId: marker.requestId })
+      || !['preparing', 'prepared', 'sending', 'retryable'].includes(marker.phase)
+      || (marker.phase === 'preparing' ? marker.nonce !== undefined : !/^[a-f0-9]{48}$/.test(marker.nonce || ''))) throw new Error('Invalid marker');
+    return marker;
+  } catch { throw new Error('原上传状态无法确认，未重新发送文件。请先核对我的素材。'); }
+}
+function requireRawProof(value: RawUploadProof | undefined, identity: RawUploadIdentity) {
+  if (!value || !rawIdentityMatches(value, identity) || !['absent', 'prepared', 'receiving', 'writing', 'notAccepted', 'completed'].includes(value.phase)
+    || (value.phase === 'absent' ? value.nonce !== undefined : !/^[a-f0-9]{48}$/.test(value.nonce || ''))) {
+    throw new Error('原上传状态尚未确认，未重新发送文件。');
   }
-  if (!requestId) return null;
-  if (!/^[a-zA-Z0-9_-]{1,160}$/.test(requestId) || !context.ownerId || !context.hash) {
-    throw new Error('原上传结果待确认，当前无法核对文件身份，未重新发送文件。请先核对我的素材。');
-  }
+  return value;
+}
+function finishRawAsset(file: File, context: Partial<UploadContext>, identity: RawUploadIdentity, asset: UploadedAssetPayload, onProgress?: UploadProgressHandler) {
+  if (!asset.id || asset.hash !== identity.hash || asset.fileSize !== identity.fileSize || asset.mimeType !== identity.mimeType
+    || asset.upload?.verified !== true || asset.upload.requestId !== identity.requestId) throw new Error('原上传结果身份无法确认，未重新发送文件。');
+  clearRawMarker(file, context);
+  notifyUploadProgress(onProgress, { phase: 'done', label: asset.reused ? '已复用相同素材' : '上传完成', loadedBytes: file.size, totalBytes: file.size });
+  return asset;
+}
+async function recoverRawUpload(file: File, context: Partial<UploadContext>, invalidJsonMessage: string, onProgress?: UploadProgressHandler) {
+  const marker = readRawMarker(file, context);
+  if (!marker) return null;
   notifyUploadProgress(onProgress, { phase: 'complete', label: '正在核对原上传结果' });
-  const query = new URLSearchParams({ requestId, hash: context.hash, fileSize: String(file.size), mimeType: file.type || 'application/octet-stream' });
+  const query = new URLSearchParams({ requestId: marker.requestId, hash: marker.hash, fileSize: String(marker.fileSize), mimeType: marker.mimeType });
   let response: Response;
-  try { response = await fetch(`/api/assets/upload?${query}`, { headers: { 'X-Upload-Owner-Id': context.ownerId }, cache: 'no-store', signal: AbortSignal.timeout(calculateUploadTimeoutMs(file.size)) }); }
+  try { response = await fetch(`/api/assets/upload?${query}`, { headers: { 'X-Upload-Owner-Id': marker.ownerId }, cache: 'no-store', signal: AbortSignal.timeout(calculateUploadTimeoutMs(file.size)) }); }
   catch { throw new Error('原上传结果待确认；再次点击上传只查询原结果，不会重传文件。'); }
   const result = await readUploadJsonResponse<UploadAssetResponse>(response, '原上传查询', invalidJsonMessage);
-  if (!response.ok || !result.asset?.id) throw new Error(result.message || result.error || '原上传结果尚未确认，未重传文件。');
-  rawReceipts.delete(file);
-  if (key) sessionStorage.removeItem(key);
-  notifyUploadProgress(onProgress, { phase: 'done', label: result.asset.reused ? '已复用相同素材' : '上传完成', loadedBytes: file.size, totalBytes: file.size });
-  return result.asset;
+  if (!response.ok) throw new Error(result.message || result.error || '原上传结果尚未确认，未重传文件。');
+  if (result.asset?.id) return finishRawAsset(file, context, marker, result.asset, onProgress);
+  const proof = requireRawProof(result.rawUpload, marker);
+  if (proof.phase === 'absent' && marker.version === 2 && marker.phase === 'preparing') {
+    return performRawUpload(file, context, marker, invalidJsonMessage, onProgress);
+  }
+  if (proof.phase === 'prepared' && marker.version === 2 && ['preparing', 'prepared'].includes(marker.phase)) {
+    const prepared: RawUploadMarker = { ...marker, phase: 'prepared', nonce: proof.nonce };
+    saveRawMarker(file, context, prepared);
+    return performRawUpload(file, context, prepared, invalidJsonMessage, onProgress);
+  }
+  if (['prepared', 'notAccepted'].includes(proof.phase)) {
+    if (marker.version === 2 && marker.phase === 'retryable' && marker.nonce === proof.nonce) {
+      return performRawUpload(file, context, marker, invalidJsonMessage, onProgress);
+    }
+    saveRawMarker(file, context, { ownerId: marker.ownerId, requestId: marker.requestId, hash: marker.hash,
+      fileSize: marker.fileSize, mimeType: marker.mimeType, version: 2, phase: 'retryable', nonce: proof.nonce });
+    throw new UploadNotAcceptedError('原上传确认尚未写入文件。请再次主动点击上传，系统会先核对并更新原准备信息。');
+  }
+  throw new Error('原上传仍在处理或结果未知，未重新发送文件。请稍后查询。');
 }
 
 /** Collapse reference selection, not generation items, by full client bytes. Server verification remains authoritative. */
@@ -97,6 +163,7 @@ type UploadAssetResponse = {
   message?: string;
   code?: string;
   notAccepted?: boolean;
+  rawUpload?: RawUploadProof;
 };
 
 type DirectUploadTicketResponse = {
@@ -226,27 +293,46 @@ async function uploadWithRawFallback(
   }
   const recovered = context ? await recoverRawUpload(file, context, invalidJsonMessage, onProgress) : null;
   if (recovered) return recovered;
-  let result: { ok: boolean; status: number; data: UploadAssetResponse };
-  const request = buildRawFileUploadRequest(file, context);
-  const receiptKey = rawReceiptKey(file, context);
-  if (!receiptKey) throw new Error('上传编号无法安全保存，文件尚未发送。');
-  if (context?.requestId) {
-    // Save the original request before sending bytes. Missing receipts remain
-    // unknown; neither a failed query nor a rollback authorizes retransmission.
-    if (receiptKey) {
-      try {
-        sessionStorage.setItem(receiptKey, context.requestId);
-        if (sessionStorage.getItem(receiptKey) !== context.requestId) throw new Error('Upload receipt unavailable');
-      }
-      catch { throw new Error('上传编号未能保存，文件尚未发送。请允许本机存储后重试。'); }
+  const marker: RawUploadMarker = { version: 2, ownerId: context.ownerId, requestId: context.requestId, hash: context.hash!,
+    fileSize: file.size, mimeType: file.type || 'application/octet-stream', phase: 'preparing' };
+  saveRawMarker(file, context, marker);
+  return performRawUpload(file, context, marker, invalidJsonMessage, onProgress);
+}
+
+async function performRawUpload(file: File, context: Partial<UploadContext>, original: RawUploadMarker, invalidJsonMessage: string, onProgress?: UploadProgressHandler) {
+  let marker = original;
+  if (marker.phase === 'preparing' || marker.phase === 'retryable') {
+    notifyUploadProgress(onProgress, { phase: 'ticket', label: '正在准备普通上传' });
+    let response: Response;
+    try {
+      response = await fetch('/api/assets/upload-ticket', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Upload-Owner-Id': marker.ownerId },
+        body: JSON.stringify({ mode: 'raw', ownerId: marker.ownerId, requestId: marker.requestId, hash: marker.hash,
+          fileSize: marker.fileSize, mimeType: marker.mimeType, ...(marker.phase === 'retryable' ? { previousNonce: marker.nonce } : {}) }),
+        signal: AbortSignal.timeout(30000) });
+    } catch { throw new Error('普通上传准备结果待确认，尚未发送文件。请再次点击核对原准备信息。'); }
+    const result = await readUploadJsonResponse<UploadAssetResponse>(response, '普通上传准备', invalidJsonMessage);
+    if (!response.ok) throw new Error(result.message || result.error || '普通上传准备未完成，尚未发送文件。');
+    if (result.asset?.id) return finishRawAsset(file, context, marker, result.asset, onProgress);
+    const proof = requireRawProof(result.rawUpload, marker);
+    if (proof.phase !== 'prepared' || marker.phase === 'retryable' && proof.nonce === marker.nonce) {
+      throw new Error('原上传执行权尚未确认，未发送文件。');
     }
-    rawReceipts.set(file, { scope: `${context.ownerId || 'unscoped'}:${uploadSession().epoch}`, requestId: context.requestId });
+    marker = { ...marker, phase: 'prepared', nonce: proof.nonce };
+    saveRawMarker(file, context, marker);
   }
+  if (marker.phase !== 'prepared' || !/^[a-f0-9]{48}$/.test(marker.nonce || '')) throw new Error('原上传尚未准备完成，未发送文件。');
+  // Persist sending before the request can emit bytes. A crash at this point
+  // must recover by server state and nonce rotation, never by marker absence.
+  marker = { ...marker, phase: 'sending' };
+  saveRawMarker(file, context, marker);
+  const request = buildRawFileUploadRequest(file, { ...context, ownerId: marker.ownerId, requestId: marker.requestId, hash: marker.hash });
+  const headers = { ...request.headers as Record<string, string>, 'X-File-Hash': marker.hash, 'X-Raw-Upload-Version': '2', 'X-Raw-Upload-Nonce': marker.nonce! };
+  let result: { ok: boolean; status: number; data: UploadAssetResponse };
   try {
     result = await requestJsonWithUploadProgress<UploadAssetResponse>({
       url: '/api/assets/upload',
       method: 'POST',
-      headers: request.headers as Record<string, string>,
+      headers,
       body: file,
       invalidJsonMessage: uploadStageInvalidJsonMessage('普通上传接口', invalidJsonMessage),
       connectionMessage: uploadStageConnectionMessage('普通上传', new Error('网络中断')),
@@ -258,23 +344,18 @@ async function uploadWithRawFallback(
       },
       onProgress,
     });
-  } catch (error) {
-    if (context?.requestId) throw new Error('普通上传结果待确认；再次点击上传只核对原结果，不会重传文件。');
-    if (error instanceof Error && error.message.includes('系统没有拿到有效上传结果')) throw error;
-    throw new Error(uploadStageConnectionMessage('普通上传', error));
-  }
+  } catch { throw new Error('普通上传结果待确认；再次点击上传只核对原结果，不会立即重传文件。'); }
   const data = result.data;
-  if (!result.ok) throw new Error(data.error || data.message || '素材上传失败，请重新选择后重试');
-  if (!data.asset?.id) throw new Error('素材上传成功，但没有返回素材 ID');
-  rawReceipts.delete(file);
-  if (receiptKey) sessionStorage.removeItem(receiptKey);
-  notifyUploadProgress(onProgress, {
-    phase: 'done',
-    label: data.asset.reused ? '已复用相同素材' : '上传完成',
-    loadedBytes: file.size,
-    totalBytes: file.size,
-  });
-  return data.asset;
+  if (!result.ok) {
+    if (data.notAccepted === true && data.code === 'RAW_UPLOAD_NOT_ACCEPTED') {
+      const proof = requireRawProof(data.rawUpload, marker);
+      if (proof.phase !== 'notAccepted' || proof.nonce !== marker.nonce) throw new Error('原上传结果尚未确认，未重传文件。');
+      saveRawMarker(file, context, { ...marker, phase: 'retryable' });
+    }
+    throw new Error(data.message || data.error || '原上传结果尚未确认，请核对原上传。');
+  }
+  if (!data.asset?.id) throw new Error('普通上传结果尚未确认，请查询原上传。');
+  return finishRawAsset(file, context, marker, data.asset, onProgress);
 }
 
 function canUseRawFallback(file: File) {
@@ -957,6 +1038,10 @@ export async function uploadFileToHistory(file: File, options: UploadOptions = {
   let identities = fileRequests.get(file);
   if (!identities) { identities = new Map(); fileRequests.set(file, identities); }
   const hash = await sha256File(file);
+  const pendingRaw = readRawMarker(file, { ownerId, hash });
+  if (pendingRaw && options.requestId && options.requestId !== pendingRaw.requestId) {
+    throw new Error('原上传尚待确认，不能切换上传编号；请先查询原上传。');
+  }
   const key = options.beforeUpload ? '' : `${scope}:${hash}:${file.size}:${file.type}`;
   const existing = key ? options.batch?.requests.get(key) || inFlightUploads.get(key) : undefined;
   if (existing) {
@@ -974,7 +1059,7 @@ export async function uploadFileToHistory(file: File, options: UploadOptions = {
       if (persistedId && !/^[a-zA-Z0-9-]{16,100}$/.test(persistedId)) throw new Error('Invalid receipt');
     } catch { throw new Error('原上传编号无法读取，未发送文件，请先核对我的素材。'); }
   }
-  const requestId = options.requestId || persistedId || identities.get(scope) || crypto.randomUUID();
+  const requestId = pendingRaw?.requestId || options.requestId || persistedId || identities.get(scope) || crypto.randomUUID();
   identities.set(scope, requestId);
   if (identityKey) {
     try {

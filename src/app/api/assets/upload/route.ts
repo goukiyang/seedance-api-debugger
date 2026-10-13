@@ -7,19 +7,17 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { assertUploadOwner, uploadDigest, uploadIdentity, uploadRequestId, readVerifiedUploadReceipt, releaseVerifiedUpload, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
+import { randomUUID } from 'node:crypto';
+import { assertUploadOwner, uploadDigest, uploadIdentity, uploadRequestId, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
+import { claimLegacyRawUpload, rawUploadIdentity, rawUploadProof, readRawUploadResult, readRawUploadState, transitionRawUpload, type RawUploadIdentity } from '@/lib/assets/raw-upload-state';
 import {
   getSiteUploadKind,
-  isLocalPublicUploadUrl,
-  sameOriginPublicUrlForLocalUpload,
   uploadSiteAsset,
   validateSiteUploadInput,
   validateSiteUploadMetadata,
 } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 import { requestHd } from '@/lib/media/hd-derivatives';
-import { isPubliclyReachableUrl } from '@/lib/assets/public-storage';
-import { uploadSimilarityStatus } from '@/lib/assets/upload-similarity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,8 +25,8 @@ export const maxDuration = 180;
 
 const MULTIPART_COMPAT_MAX_SIZE_BYTES = 8 * 1024 * 1024;
 
-// Read the original committed receipt only. Absence can also mean the original
-// request is still running, so it must never be reported as not accepted.
+// Read the original receipt and preparation state without changing either.
+// Absence alone never proves that the original request was not accepted.
 export async function GET(request: NextRequest) {
   try {
     const user = await getSession();
@@ -36,27 +34,11 @@ export async function GET(request: NextRequest) {
     assertUploadOwner(request.headers.get('x-upload-owner-id'), user.id);
     await uploadIdentity(user.id);
     const query = request.nextUrl.searchParams;
-    const requestId = uploadRequestId(query.get('requestId'));
-    const hash = query.get('hash') || '';
-    const fileSize = Number(query.get('fileSize'));
-    const mimeType = (query.get('mimeType') || '').split(';')[0].trim().toLowerCase();
-    if (!requestId || !/^[a-f0-9]{64}$/.test(hash) || !Number.isSafeInteger(fileSize) || fileSize <= 0
-      || validateSiteUploadMetadata({ mimeType, fileSize })) throw new VerifiedUploadError('UPLOAD_IDENTITY_INVALID', '原上传文件身份无法确认', 400);
-    const found = await readVerifiedUploadReceipt(user.id, requestId, uploadDigest(JSON.stringify([hash, fileSize, mimeType])));
-    if (!found) throw new VerifiedUploadError('UPLOAD_RESULT_UNKNOWN', '原上传结果尚未确认，请稍后查询；未重新发送文件');
-    try {
-      const asset = found.asset;
-      const originalUrl = sameOriginPublicUrlForLocalUpload(asset.original_url) || asset.original_url;
-      const thumbnailUrl = asset.thumbnail_url ? sameOriginPublicUrlForLocalUpload(asset.thumbnail_url) || asset.thumbnail_url : null;
-      const similarity = await uploadSimilarityStatus(user.id, asset.id).catch(() => ({ state: 'unavailable' as const, coverage: 'new_uploads_only' as const }));
-      return NextResponse.json({ success: true, asset: { id: asset.id, originalUrl, thumbnailUrl,
-        width: asset.width, height: asset.height, fileName: asset.file_name, fileSize: asset.file_size, mimeType: asset.mime_type,
-        hash: asset.hash, reused: found.reused, similarity, isPubliclyReachable: isPubliclyReachableUrl(originalUrl),
-        storageProvider: isLocalPublicUploadUrl(asset.original_url) ? 'local-public' : undefined,
-        ...(!isPubliclyReachableUrl(originalUrl) ? { warning: '文件已保存；当前站点未配置可供外部服务访问的原文件地址。' } : {}),
-        upload: { requestId, verified: true, assetDisposition: found.reused ? 'reused' : 'new',
-          sourceVersion: found.proof.sourceVersion || found.proof.version } } }, { headers: { 'Cache-Control': 'private, no-store' } });
-    } finally { await releaseVerifiedUpload(found.proof); }
+    const identity = rawUploadIdentity(user.id, { requestId: query.get('requestId'), hash: query.get('hash'), fileSize: query.get('fileSize'), mimeType: query.get('mimeType') });
+    const asset = await readRawUploadResult(identity);
+    if (asset) return NextResponse.json({ success: true, asset }, { headers: { 'Cache-Control': 'private, no-store' } });
+    const state = await readRawUploadState(identity);
+    return NextResponse.json({ rawUpload: state ? rawUploadProof(state) : { ...identity, phase: 'absent' } }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     if (error instanceof VerifiedUploadError) return NextResponse.json(verifiedUploadFailure(error), { status: error.status });
     return NextResponse.json({ error: '原上传结果暂时无法核对，请稍后查询；未重新发送文件' }, { status: 503 });
@@ -98,7 +80,13 @@ async function readBoundedBody(request: NextRequest, expected: number) {
     }
     if (size !== expected) throw new VerifiedUploadError('UPLOAD_SIZE_MISMATCH', '文件没有完整上传', 400);
     return Buffer.concat(chunks, size);
-  } catch (error) { await reader.cancel().catch(() => {}); throw error; }
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    if (error instanceof VerifiedUploadError) throw error;
+    // This request has stopped receiving bytes in memory and has not acquired
+    // writing. Only its current receiving nonce may record this rejection.
+    throw new VerifiedUploadError('UPLOAD_BODY_INTERRUPTED', '文件接收已中断，尚未保存；请重新选择后重试', 400);
+  }
   finally { reader.releaseLock(); }
 }
 
@@ -186,6 +174,7 @@ export async function POST(request: NextRequest) {
   let fileName: string | null = decodeFileName(request.headers.get('x-file-name'));
   let mimeType: string | null = request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() || null;
   let fileSize: number | null = parseContentLength(request.headers.get('x-file-size') || request.headers.get('content-length'));
+  let receiving: { identity: RawUploadIdentity; nonce: string } | null = null;
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -193,13 +182,46 @@ export async function POST(request: NextRequest) {
     assertUploadOwner(request.headers.get('x-upload-owner-id'), user.id);
     await uploadIdentity(user.id);
     const requestId = uploadRequestId(request.headers.get('x-upload-request-id'));
+    const suppliedNonce = request.headers.get('x-raw-upload-nonce');
+    const preparedRequest = suppliedNonce !== null || request.headers.get('x-raw-upload-version') !== null;
+    if (preparedRequest) {
+      if (request.headers.get('x-raw-upload-version') !== '2' || !suppliedNonce || !/^[a-f0-9]{48}$/.test(suppliedNonce)) throw new VerifiedUploadError('UPLOAD_PREPARATION_REQUIRED', '原上传准备信息无法确认，未接收文件', 409);
+      const identity = rawUploadIdentity(user.id, { requestId, hash: request.headers.get('x-file-hash'), fileSize, mimeType });
+      const asset = await readRawUploadResult(identity);
+      if (asset) return NextResponse.json({ success: true, asset });
+      await transitionRawUpload(identity, suppliedNonce, 'prepared', 'receiving');
+      receiving = { identity, nonce: suppliedNonce };
+    }
 
     const upload = await readUploadPayload(request);
-    if (upload.response) return upload.response;
+    if (upload.response) {
+      if (receiving) {
+        const state = await transitionRawUpload(receiving.identity, receiving.nonce, 'receiving', 'notAccepted');
+        return NextResponse.json({ error: '文件校验未通过，尚未保存；请重新选择后重试', code: 'RAW_UPLOAD_NOT_ACCEPTED', notAccepted: true,
+          rawUpload: rawUploadProof(state) }, { status: upload.response.status });
+      }
+      return upload.response;
+    }
 
     ({ fileName, mimeType, fileSize } = upload.payload);
     const { buffer } = upload.payload;
-    const uploadResult = await uploadSiteAsset(buffer, fileName, mimeType, fileSize, user.id, null, requestId);
+    const identity = rawUploadIdentity(user.id, { requestId: requestId || randomUUID(), hash: uploadDigest(buffer), fileSize, mimeType });
+    if (receiving) {
+      if (identity.hash !== receiving.identity.hash || identity.fileSize !== receiving.identity.fileSize || identity.mimeType !== receiving.identity.mimeType) {
+        throw new VerifiedUploadError('UPLOAD_HASH_MISMATCH', '实际上传内容与原准备信息不一致，尚未保存', 400);
+      }
+    } else {
+      const asset = await readRawUploadResult(identity);
+      if (asset) return NextResponse.json({ success: true, asset });
+      const claim = await claimLegacyRawUpload(identity);
+      receiving = { identity, nonce: claim.nonce };
+    }
+    await transitionRawUpload(identity, receiving.nonce, 'receiving', 'writing');
+    // Once writing has been acquired, no failure may declare notAccepted.
+    const writing = receiving;
+    receiving = null;
+    const uploadResult = await uploadSiteAsset(buffer, fileName, mimeType, fileSize, user.id, null, identity.requestId);
+    await transitionRawUpload(identity, writing.nonce, 'writing', 'completed').catch(() => {});
     if (mimeType.startsWith('image/')) void requestHd(uploadResult.originalUrl, 0).catch(() => {});
 
     await recordAssetUploadLog({
@@ -241,6 +263,13 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
+    if (receiving && error instanceof VerifiedUploadError && error.status === 400
+      && ['UPLOAD_BODY_MISSING', 'UPLOAD_SIZE_MISMATCH', 'UPLOAD_HASH_MISMATCH', 'UPLOAD_BODY_INTERRUPTED'].includes(error.code)) {
+      try {
+        const state = await transitionRawUpload(receiving.identity, receiving.nonce, 'receiving', 'notAccepted');
+        return NextResponse.json({ ...verifiedUploadFailure(error), code: 'RAW_UPLOAD_NOT_ACCEPTED', notAccepted: true, rawUpload: rawUploadProof(state) }, { status: error.status });
+      } catch { return NextResponse.json({ error: '原上传状态已变化，结果尚未确认', code: 'UPLOAD_RESULT_UNKNOWN' }, { status: 409 }); }
+    }
     if (error instanceof VerifiedUploadError) return NextResponse.json(verifiedUploadFailure(error), { status: error.status });
     console.error('[Upload] Error:', error);
     if (userId) {
