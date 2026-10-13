@@ -6,6 +6,9 @@ import { ContextVersionError } from '@/lib/image-studio/context-version';
 import { studioTemplateEntrySnapshot } from '@/lib/image-studio/viewer-receipts';
 import { QueueCapacityError, QueueMaintenanceError } from '@/lib/image-studio/queue-capacity';
 import { ImageGenerationChannelError } from '@/lib/integrations/image-generation';
+import { listStudioResultFeed } from '@/lib/image-studio/result-feed';
+import { StudioPinError } from '@/lib/image-studio/result-pins';
+import { STUDIO_RESULT_FEED } from '@/lib/image-studio/result-pin-types';
 
 export const dynamic = 'force-dynamic';
 export async function PATCH(request: NextRequest) {
@@ -41,10 +44,13 @@ export async function GET(request: NextRequest) {
     const likedOnly = params.get('liked') === '1';
     const entering = !likedOnly && params.get('attention') === 'entry' && moduleId && !params.has('cursor') && !params.has('taskId') && !params.has('requestId');
     const entrySnapshot = entering ? await studioTemplateEntrySnapshot(user.id, moduleId) : undefined;
-    const result = await listStudioTasks(user.id, params.get('cursor') || undefined, moduleId, user.role === 'admin', params.get('taskId') || undefined, params.get('requestId') || undefined, likedOnly);
+    const pinnedFeed = params.get('feed') === STUDIO_RESULT_FEED && moduleId && !params.has('taskId') && !params.has('requestId');
+    const result = pinnedFeed
+      ? await listStudioResultFeed(user, moduleId, params.get('cursor') || undefined, likedOnly)
+      : await listStudioTasks(user.id, params.get('cursor') || undefined, moduleId, user.role === 'admin', params.get('taskId') || undefined, params.get('requestId') || undefined, likedOnly);
     return NextResponse.json({ ...result, ...(likedOnly ? { viewerId: user.id } : {}), ...(entrySnapshot ? { entrySnapshot } : {}) }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   }
-  catch (error) { return NextResponse.json({ error: error instanceof StudioError ? error.message : '生成记录读取失败，请重试' }, { status: error instanceof StudioError ? error.status : 503 }); }
+  catch (error) { return NextResponse.json({ error: error instanceof StudioError || error instanceof StudioPinError ? error.message : '生成记录读取失败，请重试' }, { status: error instanceof StudioError || error instanceof StudioPinError ? error.status : 503 }); }
 }
 export async function POST(request: NextRequest) {
   const user = await getSession();

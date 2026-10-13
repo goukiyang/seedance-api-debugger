@@ -1039,6 +1039,13 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
       orderBy: [{ created_at: 'desc' }, { id: 'desc' }], take: 25,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
   const items = taskId !== undefined ? rows : rows.slice(0, 24);
+  return { total, tasks: await studioTaskDTOs(ownerId, isAdmin, items),
+    ...(taskId !== undefined ? {} : { nextCursor: rows.length > 24 ? items[items.length - 1].id : null }) };
+}
+
+/** Owner-scoped callers only. Shared pins use a separate output-only projection. */
+export async function studioTaskDTOs(ownerId: string, isAdmin: boolean, items: ImageStudioTask[]) {
+  if (items.some(item => item.owner_id !== ownerId)) throw new StudioError('生成记录归属不匹配', 403);
   const outputAssetIds = items.flatMap(item => item.asset_id ? [item.asset_id] : []);
   const referenceIds = Array.from(new Set(items.flatMap(item => {
     try { return JSON.parse(item.reference_ids) as string[]; } catch { return []; }
@@ -1051,7 +1058,7 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
   const publicOwner = owner ? { id: owner.id, name: displayUserName(owner), avatar_url: owner.avatar_url } : null;
   const deliveries = new Map(await Promise.all(items.map(async task => [task.id, await studioDeliveryStatus(task)] as const)));
   const contextVersions = new Map(await Promise.all(items.map(async task => [task.id, await snapshotModuleContextVersion(task.snapshot_json)] as const)));
-  return { total, tasks: items.map(task => {
+  return items.map(task => {
     const snapshot = publicStudioSnapshot(task, assetById, isAdmin, ownerId);
     return { id: task.id, batchId: task.batch_id, ordinal: task.ordinal,
       owner: publicOwner,
@@ -1064,7 +1071,7 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
       snapshot: { ...snapshot, moduleContextVersion: contextVersions.get(task.id)?.code ?? null, moduleContextVersionState: contextVersions.get(task.id)?.state ?? 'missing' },
       asset: assetById.get(task.asset_id || '') ? { ...assetById.get(task.asset_id || '')!, original_url: studioAssetUrl(task.asset_id!), thumbnail_url: studioAssetUrl(task.asset_id!, true) } : null,
     };
-  }), ...(taskId !== undefined ? {} : { nextCursor: rows.length > 24 ? items[items.length - 1].id : null }) };
+  });
 }
 
 export async function listAdminStudioTasks(cursor?: string, moduleId?: string, ownerId?: string) {

@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '风格与 Skills 合并选择，模板可长按排序。双击结果可取回本次输入主图；简化生成等待，修复视频悬停封面交接，完善本人快捷保存与重复上传保护。相似图片提醒尚未启用。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '模板结果卡可置顶本人生成的单张图片，同一共享模板的用户都能优先看到并点赞，原分享与输入隐私保持。生成等待条按原开始时间缓慢前进，刷新不重新计时。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

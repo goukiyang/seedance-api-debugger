@@ -17,9 +17,12 @@
 .waitTrack { width: 65%; height: 6px; overflow: hidden; border-radius: 4px; background: rgb(212 235 226 / 25%); }
 .waitTrack > span { display: block; width: 38%; height: 100%; background: #79daca; transform: translateX(-110%); }
 .waitExperience[data-sweeping=true] .waitTrack > span { animation: imageWaitIndeterminate 1.6s ease-in-out infinite; }
+.waitTrack[data-timed=true] > span { width: 100%; transform-origin: left; transform: scaleX(var(--image-wait-ratio, 0)); transition: transform 1s linear; }
+.waitExperience[data-sweeping=true] .waitTrack[data-timed=true] > span { animation: none; }
 @keyframes imageWaitIndeterminate { to { transform: translateX(365%); } }
 @keyframes imageWaitSweep { 0% { transform: translateX(0); opacity: 0; } 8% { opacity: 1; } 66.67% { transform: translateX(320%); opacity: 1; } 67%, 100% { transform: translateX(320%); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .waitExperience[data-sweeping=true] .waitSweep, .waitExperience[data-sweeping=true] .waitTrack > span { animation: none; } .waitTrack > span { transform: translateX(80%); } }
+@media (prefers-reduced-motion: reduce) { .waitTrack[data-timed=true] > span { transform: scaleX(var(--image-wait-ratio, 0)); transition: none; } }
 .phase { position: absolute; bottom: 8px; right: 8px; left: 8px; padding: 5px 8px; border-radius: 4px; background: #151a1de6; font-size: 13px; text-align: center; }
 .heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; padding: 8px 0; font-size: 13px; overflow-wrap: anywhere; }
 .heading span, .empty { color: #aab8b4; }

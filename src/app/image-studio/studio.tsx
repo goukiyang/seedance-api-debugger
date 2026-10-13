@@ -19,6 +19,8 @@ import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
 import { scrollToWorkbenchHeader } from '@/lib/navigation/scroll-to-workbench-header';
 import { replaceImageModuleLocation } from '@/lib/navigation/image-module-location';
 import { GeneratedImageResults, type GeneratedImageResult } from '@/components/GeneratedImageResults';
+import { StudioResultPinButton } from './result-pin-button';
+import { STUDIO_RESULT_FEED, type StudioResultFeedExtras, type SharedStudioPinnedImage } from '@/lib/image-studio/result-pin-types';
 import { useLikedStudioResults } from './liked-results';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { RelativeTime } from '@/components/RelativeTime';
@@ -1242,6 +1244,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const sharedReferencePreviewId = useRef<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<{ id: string; text: string } | null>(null);
   const [tasks, setTasks] = useState<StudioTask[]>([]);
+  const [resultFeed, setResultFeed] = useState<StudioResultFeedExtras | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [taskTotal, setTaskTotal] = useState<number | null>(null);
   const loadedTaskPages = useRef(1);
@@ -2023,22 +2026,26 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     const readPages = async (signal?: AbortSignal, entry = false) => {
       const count = cursor ? 1 : Math.min(20, loadedTaskPages.current);
       let next: string | undefined = cursor;
-      let result: { tasks: StudioTask[]; nextCursor: string | null; total: number; entrySnapshot?: string } | null = null;
+      let result: { tasks: StudioTask[]; nextCursor: string | null; total: number; entrySnapshot?: string } & Partial<StudioResultFeedExtras> | null = null;
       let entrySnapshot: string | undefined;
       const rows: StudioTask[] = [];
+      const sharedPins: SharedStudioPinnedImage[] = [], resultOrder: string[] = [];
       for (let read = 0; read < count; read++) {
         const query = new URLSearchParams({ moduleId: module.id });
+        if (templateWorkbench) query.set('feed', STUDIO_RESULT_FEED);
         if (next) query.set('cursor', next);
         if (entry && read === 0 && !cursor) query.set('attention', 'entry');
         const deadline = AbortSignal.timeout(20000);
         const page = await readResponse(await fetch(`/api/image-studio/tasks?${query}`, { cache: 'no-store', signal: signal ? AbortSignal.any([signal, deadline]) : deadline }));
+        if (templateWorkbench && (page.protocol !== STUDIO_RESULT_FEED || page.viewerId !== userId || !Array.isArray(page.sharedPins) || !Array.isArray(page.resultOrder) || !page.pinState)) throw new Error('置顶目录协议尚未就绪，请刷新页面');
         rows.push(...page.tasks);
+        sharedPins.push(...page.sharedPins || []); resultOrder.push(...page.resultOrder || []);
         entrySnapshot ||= page.entrySnapshot;
         result = { ...page, entrySnapshot };
         next = page.nextCursor || undefined;
         if (!next) break;
       }
-      return { ...result!, tasks: Array.from(new Map(rows.map(task => [task.id, task])).values()) };
+      return { ...result!, sharedPins, resultOrder, tasks: Array.from(new Map(rows.map(task => [task.id, task])).values()) };
     };
     if (templateWorkbench) {
       const scope = `${userId}:${module.id}`;
@@ -2066,6 +2073,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           return cursor ? [...previous, ...fresh] : fresh;
         });
         setNextCursor(result.nextCursor); setTaskTotal(result.total);
+        setResultFeed(previous => ({ protocol: STUDIO_RESULT_FEED, viewerId: userId, pinState: result.pinState!,
+          sharedPins: Array.from(new Map([...(cursor ? previous?.sharedPins || [] : []), ...result.sharedPins].map(pin => [pin.id, pin])).values()),
+          resultOrder: Array.from(new Set([...(cursor ? previous?.resultOrder || [] : []), ...result.resultOrder])) }));
         if (cursor) { loadedMore.current = true; loadedTaskPages.current++; }
         setTasksError('');
         void onResultsAvailable();
@@ -2101,7 +2111,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     finally { if (taskReadScopeRef.current === scope) { listLock.current = false; setLoadingTasks(false); } }
   }, [module.id, userId, templateWorkbench, onResultsAvailable, onTemplateEntered]);
   useEffect(() => {
-    setTasks([]); setSelected([]); setPreview(null); setNextCursor(null); setTaskTotal(null); loadedTaskPages.current = 1; setTasksError('');
+    setTasks([]); setResultFeed(null); setSelected([]); setPreview(null); setNextCursor(null); setTaskTotal(null); loadedTaskPages.current = 1; setTasksError('');
     listLock.current = false;
     setViewedResults(null); requestedReadToken.current = 0; readAttemptToken.current = 0;
     setLoadingTasks(true); setTaskReadAction('initial'); loadedMore.current = false; taskReadLoaded.current = false;
@@ -2131,7 +2141,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   useEffect(() => {
     const refresh = () => { if (!document.hidden && visible) void loadTasks(undefined, 'silent'); };
     document.addEventListener('visibilitychange', refresh);
-    return () => document.removeEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('sd2-studio-pins-changed', refresh);
+    return () => { document.removeEventListener('visibilitychange', refresh); window.removeEventListener('focus', refresh); window.removeEventListener('sd2-studio-pins-changed', refresh); };
   }, [loadTasks, visible]);
   useEffect(() => () => { taskReadScopeRef.current = ''; }, []);
 
@@ -2570,7 +2582,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     else if (nextCursor) await loadTasks(nextCursor);
   }, [likedResults.liked, likedResults.more, loadTasks, nextCursor]);
   function chooseResultFilter(liked: boolean) { setSelected([]); setDownloadMode(false); likedResults.choose(liked); setResultView('images'); }
-  const sharedResults = resultTasks.map(task => {
+  const visibleFeed = likedResults.liked ? likedResults.feed : resultFeed;
+  type StudioResultItem = GeneratedImageResult & { task?: StudioTask; sharedPin?: SharedStudioPinnedImage };
+  const ownResults: StudioResultItem[] = resultTasks.map(task => {
     const image = studioTaskHasDeliveredAsset(task) ? studioTaskPreviewState(task) : null;
     const pending = ['queued', 'running'].includes(task.status);
     const ordinaryWait = task.status === 'running' && task.delivery?.phase === 'provider' && task.delivery.waitingStatus === 'pending';
@@ -2599,6 +2613,16 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       } : undefined,
     } satisfies GeneratedImageResult & { task: StudioTask };
   });
+  const pinnedResults: StudioResultItem[] = (templateWorkbench ? visibleFeed?.sharedPins || [] : []).map(pin => ({
+    id: pin.id, sharedPin: pin, label: '模板置顶图片', status: '已置顶', viewOnly: true,
+    media: { src: pin.previewUrl, thumbnailSrc: pin.thumbnailUrl, alt: '模板置顶图片', title: '模板置顶图片',
+      contentKey: `asset:${pin.assetId}`, imageSharing: false, previewOnly: true, previewKey: pin.id,
+      safeDetails: { width: pin.width || undefined, height: pin.height || undefined, time: pin.createdAt } },
+  }));
+  const resultById = new Map([...ownResults, ...pinnedResults].map(item => [item.id, item]));
+  const sharedResults = templateWorkbench && visibleFeed
+    ? visibleFeed.resultOrder.flatMap(id => resultById.has(id) ? [resultById.get(id)!] : [])
+    : ownResults;
 
   function changeFixedReferences(next: FixedStudioReference[]) {
     if (!fixedEditable) return;
@@ -2949,7 +2973,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         {resultView === 'batch' ? batch.id ? <BatchResults key={`${userId}:${batch.id}`} id={batch.id} userId={userId} autoPack={batch.pack} visible={visible && active && !hidden} onSourceChanged={onSharedRefresh} onQuickUse={taskId => void replaceMainFromResult(taskId)} /> : <p>暂无选中批次，可开始批量生成或从<a href="/assets">资产库的“我的批次”</a>找回。</p> : <>
         {downloadReady && <p role="status">已交给浏览器下载。<a href={downloadReady.url} download={downloadReady.name}>再次下载</a></p>}
         <GeneratedImageResults key={likedResults.liked ? 'liked' : 'all'} items={sharedResults}
-          onQuickUse={item => void replaceMainFromResult(item.task.id)}
+          onQuickUse={item => { if (item.task) void replaceMainFromResult(item.task.id); }}
+          renderReactionAction={templateWorkbench ? item => item.task?.asset?.id
+            ? <StudioResultPinButton userId={userId} moduleId={module.id} taskId={item.task.id} assetId={item.task.asset.id} state={visibleFeed?.pinState || null} onSaved={refreshResults} />
+            : item.sharedPin ? <span title="同一模板的用户可查看和点赞；只有生成者可取消置顶">已置顶</span> : null : undefined}
           paginationSlot={templateWorkbench ? resultPaginationSlot : undefined}
           scope={`sd2-image-studio-${likedResults.liked ? 'liked-' : ''}result-page:${taskReadScope}`}
           visible={visible && active && !hidden && resultView === 'images'} loading={resultLoading} busy={resultBusy}
@@ -2958,18 +2985,20 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           onRetry={() => { if (likedResults.liked) likedResults.refresh(); else void loadTasks(taskRetryCursor); }}
           selectedId={selectedResultId} onSelect={item => setSelectedResultId(item.id)}
           previewId={preview?.taskId || null} onPreviewChange={item => {
-            if (item) setPreview(studioTaskPreviewState(item.task));
+            if (item?.task) setPreview(studioTaskPreviewState(item.task));
+            else if (item?.sharedPin && item.media) setPreview({ taskId: item.id, src: item.media.src, thumbnailSrc: item.media.thumbnailSrc, alt: item.label });
             else { setPreview(null); if (resumeModulePreview.current) { resumeModulePreview.current = false; moduleDialog.current?.showModal(); } }
           }}
-          renderOverlay={({task}) => <>
+          renderOverlay={({task}) => task ? <>
             {downloadMode && studioTaskHasDeliveredAsset(task) && <input className={styles.select} data-result-secondary type="checkbox" aria-label={`选择第 ${task.ordinal} 张图片`} checked={selected.includes(task.id)} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onChange={event => {
               if (event.target.checked && selected.length >= 8) { setError('每次最多下载 8 张'); return; }
               setSelected(current => event.target.checked ? [...current, task.id] : current.filter(id => id !== task.id));
             }} />}
-          </>}
-          renderDelete={({task}) => <button type="button" disabled={deleting || downloadBusy} title="删除生成记录" aria-label={`删除第 ${task.ordinal} 张生成记录`} onClick={() => { setDeleteError(''); setDeleteTarget(task); }}><Trash2 size={17} /></button>}
-          renderMetadata={({task}) => <>          <div className={styles.resultHeading}>
+          </> : null}
+          renderDelete={({task}) => task ? <button type="button" disabled={deleting || downloadBusy} title="删除生成记录" aria-label={`删除第 ${task.ordinal} 张生成记录`} onClick={() => { setDeleteError(''); setDeleteTarget(task); }}><Trash2 size={17} /></button> : null}
+          renderMetadata={({task, sharedPin}) => task ? <>          <div className={styles.resultHeading}>
             <p className={styles.prompt} title={`${name} · ${task.ordinal}`}>{name} · {task.ordinal}</p>
+            {templateWorkbench && task.asset?.id && visibleFeed?.pinState.assetIds.includes(task.asset.id) && <span className={styles.muted}>已置顶</span>}
             <span className={styles.resultOwner} aria-label="生成者"><UserIdentityBadge user={task.owner} size="sm" className="asset-card-user" /></span>
           </div>
           <div className={styles.resultMeta}>
@@ -2986,8 +3015,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             </div>
             <RelativeTime className={styles.resultTime} value={task.createdAt} />
           </div>
-</>}
-          renderPrimaryActions={({task}) => task.status === 'queued' && task.snapshot?.imageChannelLabel ? <button type="button" disabled={submitting} onClick={() => void (async () => {
+</> : sharedPin ? <><div className={styles.resultHeading}><p className={styles.prompt}>{name} · 置顶图片</p><span className={styles.resultOwner}>{sharedPin.owner?.name || '模板使用者'}</span></div>
+            <div className={styles.resultMeta}><span className={styles.muted}>查看与点赞</span><RelativeTime className={styles.resultTime} value={sharedPin.createdAt} /></div></> : null}
+          renderPrimaryActions={({task}) => !task ? null : task.status === 'queued' && task.snapshot?.imageChannelLabel ? <button type="button" disabled={submitting} onClick={() => void (async () => {
             if (!await confirm('只取消尚未向供应商请求的排队任务并释放原预留；已受理或结果未知的任务不会取消。', { title: '取消排队', confirmLabel: '取消排队', danger: true })) return;
             try {
               const response = await fetch('/api/image-studio/tasks', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cancel', id: task.id }) });
@@ -2996,7 +3026,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
               await loadTasks();
             } catch (cause) { setError(cause instanceof Error ? cause.message : '取消未确认，请刷新原任务'); }
           })()}>取消未受理排队</button> : task.delivery?.recoveryAvailable ? <button type="button" disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks()}>{templateWorkbench ? '刷新恢复状态' : '查看原图恢复'}</button> : null}
-          renderActions={({task}) => (isAdmin && task.snapshot?.sourceAvailable || studioTaskHasDeliveredAsset(task)) ? <>{isAdmin && task.snapshot?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制文字上下文" aria-label="复制文字上下文" onClick={() => void copyTaskContext(task)}><ClipboardList size={15} /></button>}
+          renderActions={({task}) => task && (isAdmin && task.snapshot?.sourceAvailable || studioTaskHasDeliveredAsset(task)) ? <>{isAdmin && task.snapshot?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制文字上下文" aria-label="复制文字上下文" onClick={() => void copyTaskContext(task)}><ClipboardList size={15} /></button>}
             {studioTaskHasDeliveredAsset(task) && <button type="button" className={styles.restoreResult} disabled={Boolean(restoreDisabledReason(task))} title={restoreDisabledReason(task) || '恢复设置和风格组，保留当前主图，不生成图片'} aria-label="恢复设置，保留主图" aria-describedby={`studio-restore-${task.id}`} onClick={event => {
               event.stopPropagation();
               void (async () => {
@@ -3005,11 +3035,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
               })();
             }}><RotateCcw size={15} /><span id={`studio-restore-${task.id}`} role="tooltip" className={styles.resolutionTooltip}>恢复设置</span></button>}
 </> : null}
-          renderSupplement={({task}) => <>
+          renderSupplement={({task}) => task ? <>
             {copyFeedback?.id === task.id && <span className={styles.copyFeedback} role="status">{copyFeedback.text}</span>}
             {['download', 'recover'].includes(task.delivery?.phase || '') && Number(task.delivery?.expectedBytes) > 0 && task.delivery?.receivedBytes != null && <p role="status">{Math.min(100, Math.floor(task.delivery.receivedBytes / task.delivery.expectedBytes! * 100))}% 字节已接收</p>}
             {task.delivery?.checkpointRetained && task.status === 'uncertain' && <p className={styles.muted}>恢复资料暂留供协查，已退款任务不能自动领取原图。请联系管理员。</p>}
-          </>}
+          </> : null}
         />
         </>}
       </section>

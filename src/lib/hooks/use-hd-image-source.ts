@@ -12,15 +12,15 @@ export function versionedHdSource(source: string, mode: 'hd' | 'hd-download', ve
   if (version) url.searchParams.set('hd-version', version);
   return url.origin === window.location.origin ? `${url.pathname}${url.search}` : url.href;
 }
-export function useHdImageSource(source: string, original: boolean, attempt: number, sourceVersion: string) {
+export function useHdImageSource(source: string, original: boolean, attempt: number, sourceVersion: string, previewOnly = false) {
   const { user, hasLoadedUser, userLoadError } = useAppSession();
   const account = hasLoadedUser && !userLoadError ? `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` : '';
   const [refreshAttempt, setRefreshAttempt] = useState(0);
   const refresh = useCallback(() => setRefreshAttempt(value => value + 1), []);
-  const key = `${account}:${source}:${sourceVersion}:${attempt}:${refreshAttempt}`;
+  const key = `${account}:${source}:${sourceVersion}:${attempt}:${refreshAttempt}:${previewOnly}`;
   const [state, setState] = useState<(HdSourceState & { key: string }) | null>(null);
   const descriptionSource = imageDisplaySource(source, 'hd-description');
-  const supported = descriptionSource !== source && !/^(blob:|data:)/i.test(source);
+  const supported = !previewOnly && descriptionSource !== source && !/^(blob:|data:)/i.test(source);
   useEffect(() => {
     if (!account || !supported || original) return;
     setImageReadSessionOwner(account);
@@ -30,7 +30,7 @@ export function useHdImageSource(source: string, original: boolean, attempt: num
   const description = original ? undefined : current?.description || (account && supported ? hdImageHint(account, descriptionSource, sourceVersion, true) : undefined);
   const pending = supported && !original && !current?.error && (!description || ['queued', 'running'].includes(description.status));
   const raw = original || description?.status !== 'ready';
-  const readSource = raw ? imageDisplaySource(source, 'original') : versionedHdSource(source, 'hd', description.sourceVersion);
+  const readSource = previewOnly ? imageDisplaySource(source, 'preview') : raw ? imageDisplaySource(source, 'original') : versionedHdSource(source, 'hd', description.sourceVersion);
   return { readSource, description, pending, denied: current?.denied, error: current?.error,
-    refresh, version: raw ? sourceVersion : description?.sourceVersion || sourceVersion, fullSize: raw || description?.status === 'ready' || source.startsWith('blob:') };
+    refresh, version: raw ? sourceVersion : description?.sourceVersion || sourceVersion, fullSize: !previewOnly && (raw || description?.status === 'ready' || source.startsWith('blob:')) };
 }

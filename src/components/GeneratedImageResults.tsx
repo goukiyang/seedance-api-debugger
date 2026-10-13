@@ -28,6 +28,7 @@ export type GeneratedImageResult = {
   download?: () => void | Promise<unknown>;
   downloadDisabled?: boolean;
   downloadMessage?: string;
+  viewOnly?: boolean;
   error?: string | null;
   billing?: ImageBillingView | null;
 };
@@ -39,7 +40,7 @@ function WaitingImage({ src }: { src?: string }) {
   return src && failed !== src ? <img className={styles.waitingImage} src={src} alt="本次输入图片" onError={() => setFailed(src)} /> : <ImagePlus size={24} aria-hidden="true" />;
 }
 
-export function GeneratedImageResults<T extends GeneratedImageResult>({ items, scope, visible = true, loading = false, busy = false, error = '', emptyLabel = '暂无生成结果', hasMore = false, total, loadMore = noMore, onRetry, selectedId, onSelect, previewId, onPreviewChange, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, paginationSlot, onQuickUse }: {
+export function GeneratedImageResults<T extends GeneratedImageResult>({ items, scope, visible = true, loading = false, busy = false, error = '', emptyLabel = '暂无生成结果', hasMore = false, total, loadMore = noMore, onRetry, selectedId, onSelect, previewId, onPreviewChange, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, renderReactionAction, paginationSlot, onQuickUse }: {
   items: T[]; scope: string; visible?: boolean; loading?: boolean; busy?: boolean; error?: string; emptyLabel?: string;
   hasMore?: boolean; loadMore?: () => Promise<unknown>; onRetry?: () => void;
   total?: number | null;
@@ -51,6 +52,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
   renderMetadata?: (item: T) => ReactNode; renderActions?: (item: T) => ReactNode;
   renderPrimaryActions?: (item: T) => ReactNode; renderDelete?: (item: T) => ReactNode;
   renderOverlay?: (item: T, controls: { openPreview: () => void }) => ReactNode; renderSupplement?: (item: T) => ReactNode;
+  renderReactionAction?: (item: T) => ReactNode;
 }) {
   const [localPreview, setLocalPreview] = useState<string | null>(null);
   const [localSelection, setLocalSelection] = useState<string | null>(null);
@@ -85,7 +87,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
   const preview = previewable.find(item => item.id === activePreview);
   const previewIndex = previewable.findIndex(item => item.id === activePreview);
   const imageNeighbors = Array.from(new Set([previewable[previewIndex - 1], previewable[previewIndex + 1]]))
-    .filter(item => item?.media).map(item => ({ source: item.media!.src, sourceVersion: item.media!.sourceVersion,
+    .filter(item => item?.media && !item.viewOnly).map(item => ({ source: item.media!.src, sourceVersion: item.media!.sourceVersion,
       thumbnail: item.media!.thumbnailSrc, width: item.media!.safeDetails?.width, height: item.media!.safeDetails?.height, bytes: item.media!.safeDetails?.fileSize }));
   const changePreview = useCallback((item: T | null, alreadySelected = false) => {
     if (item && !activePreview) previewTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -151,8 +153,8 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
           <article key={item.id} className={styles.card} data-result-id={item.id} data-result-controls-parent>
             <div className={styles.media} data-transparent={item.transparent || undefined} data-reaction-surface>
               {item.media ? <>
-                <ResultImageCover key={`${scope}:${item.id}`} src={item.media.thumbnailSrc || item.media.src} alt={item.label} selected={currentSelection === item.id} applied={Boolean(item.applied)} onSelect={() => select(item)} onPreview={() => changePreview(item, true)} onViewed={item.onViewed} active={visible} onQuickUse={onQuickUse ? () => onQuickUse(item) : undefined} loadingOverlay={item.generationWait ? <ImageGenerationWaiting wait={item.generationWait} visible={visible} loadingImage /> : undefined} />
-                {item.media.contentKey && <ContentReactions contentKey={item.media.contentKey} imageSharing={item.media.imageSharing} overlay parentControlled />}
+                <ResultImageCover key={`${scope}:${item.id}`} src={item.media.thumbnailSrc || item.media.src} alt={item.label} selected={currentSelection === item.id} applied={Boolean(item.applied)} onSelect={() => select(item)} onPreview={() => changePreview(item, true)} onViewed={item.onViewed} active={visible} onQuickUse={onQuickUse && !item.viewOnly ? () => onQuickUse(item) : undefined} loadingOverlay={item.generationWait ? <ImageGenerationWaiting wait={item.generationWait} visible={visible} loadingImage /> : undefined} />
+                {item.media.contentKey && <ContentReactions contentKey={item.media.contentKey} imageSharing={item.media.imageSharing} secondaryAction={renderReactionAction?.(item)} overlay parentControlled />}
               </> : <div className={`${styles.pending}${item.generationWait ? ` ${styles.generationPending}` : ' sd2-loading-surface'}`} data-busy={item.pending || undefined}
                 data-result-choice={onSelect ? '' : undefined} role={onSelect ? 'button' : undefined} tabIndex={onSelect ? 0 : undefined} aria-label={onSelect ? `选择${item.label}` : undefined} aria-pressed={onSelect ? currentSelection === item.id : undefined}
                 onClick={onSelect ? () => select(item) : undefined}
@@ -165,7 +167,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
               {(item.media || secondaryActions) && <div className={styles.mediaActions} data-result-secondary aria-busy={feedback?.id === item.id && feedback.busy || undefined} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
                 {item.media && <div className={styles.commonActions}>
                   {item.download && <button type="button" aria-label="下载图片" title="下载图片" disabled={item.downloadDisabled || Boolean(feedback?.busy)} onClick={() => void operate(item, 'download')}><Download size={15} /></button>}
-                  <button type="button" aria-label="复制图片" title="复制图片" disabled={Boolean(feedback?.busy)} onClick={() => void operate(item, 'copy')}><ImageIcon size={15} /></button>
+                  {!item.viewOnly && <button type="button" aria-label="复制图片" title="复制图片" disabled={Boolean(feedback?.busy)} onClick={() => void operate(item, 'copy')}><ImageIcon size={15} /></button>}
                   <button type="button" aria-label="查看图片" title="查看图片" onClick={() => changePreview(item)}><Eye size={15} /></button>
                 </div>}
                 {secondaryActions && <div className={styles.specialtyActions}>{secondaryActions}</div>}

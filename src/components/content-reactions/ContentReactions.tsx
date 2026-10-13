@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import type { ContentKey, ReactionAction, ReactionMutation, ReactionState } from '@/lib/content-reactions/types';
@@ -130,12 +130,14 @@ export async function writeReaction(userId: string, key: ContentKey, action: Rea
   }
 }
 
-export default function ContentReactions({ contentKey, initialState, onChange, disabled = false, overlay = false, parentControlled = false, imageSharing = true, favoriteOnly = false }: {
+export default function ContentReactions({ contentKey, initialState, onChange, disabled = false, overlay = false, parentControlled = false, imageSharing = true, favoriteOnly = false, secondaryAction }: {
   contentKey: ContentKey; initialState?: ReactionState; disabled?: boolean;
   overlay?: boolean;
   parentControlled?: boolean;
   imageSharing?: boolean;
   favoriteOnly?: boolean;
+  /** A caller-owned replacement for the share slot; undefined preserves existing sharing. */
+  secondaryAction?: ReactNode;
   onChange?: (state: ReactionState, action: ReactionAction, active: boolean, previous?: ReactionState) => void;
 }) {
   const { user } = useAppSession();
@@ -185,7 +187,8 @@ export default function ContentReactions({ contentKey, initialState, onChange, d
       disabled={Boolean(disabled || entry.busy || uncertain || !state || (!state.available && !(state.liked || state.favorited)))}
       animateCount={Boolean(pulse?.identity === identity && pulse.version === state?.version && pulse.count === state?.likeCount)}
       bloom={pulse?.identity === identity && pulse.version === state?.version && pulse.active ? pulse.beat : 0} parentControlled={overlay && parentControlled} onClick={() => void act()} />}
-    {state?.available && imageSharing && !favoriteOnly && <span className={styles.secondaryAction} data-result-secondary={overlay && parentControlled || undefined}><ImageShareButton key={`share:${identity}`} contentKey={contentKey} userId={userId} disabled={disabled} /></span>}
+    {!favoriteOnly && secondaryAction !== undefined ? <span className={styles.secondaryAction} data-result-secondary={overlay && parentControlled || undefined}>{secondaryAction}</span>
+      : state?.available && imageSharing && !favoriteOnly && <span className={styles.secondaryAction} data-result-secondary={overlay && parentControlled || undefined}><ImageShareButton key={`share:${identity}`} contentKey={contentKey} userId={userId} disabled={disabled} /></span>}
     </span>
     {entry.busy && <span className={styles.busy} role="status"><RefreshCw size={13} className={styles.busyIcon} />保存中</span>}
     {(entry.error || uncertain && !entry.busy) && <span className={styles.error} role="status">{entry.error || '上次操作尚未确认，请重试'}<button type="button" disabled={entry.busy} aria-label="重试喜欢" title="重试" onClick={() => {

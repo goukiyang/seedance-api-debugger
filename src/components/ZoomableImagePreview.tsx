@@ -49,6 +49,8 @@ export type ZoomableImagePreviewProps = {
   previewKey?: string;
   contentKey?: ContentKey;
   imageSharing?: boolean;
+  /** View/like-only sources must never request originals, HD downloads or copying. */
+  previewOnly?: boolean;
   metadata?: ImagePreviewMetadata;
   safeDetails?: SafeImagePreviewDetails;
   comparison?: ImageComparisonSource;
@@ -115,7 +117,7 @@ function formatImageBytes(bytes: number) {
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${unit}`;
 }
 
-function PreviewImage({ src, thumbnailSrc, alt, original, version = '', className, style, onReady, onThumbnailReady, onUnavailable }: { src: string; thumbnailSrc?: string; alt: string; original: boolean; version?: string; className: string; style: CSSProperties; onReady?: (size: IntrinsicSize, decoded: DecodedImage) => void; onThumbnailReady?: (size: IntrinsicSize) => void; onUnavailable?: () => void }) {
+function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, version = '', className, style, onReady, onThumbnailReady, onUnavailable }: { src: string; thumbnailSrc?: string; alt: string; original: boolean; previewOnly?: boolean; version?: string; className: string; style: CSSProperties; onReady?: (size: IntrinsicSize, decoded: DecodedImage) => void; onThumbnailReady?: (size: IntrinsicSize) => void; onUnavailable?: () => void }) {
   const { user } = useAppSession();
   const image = useRef<HTMLImageElement>(null);
   const thumbnailImage = useRef<HTMLImageElement>(null);
@@ -127,10 +129,10 @@ function PreviewImage({ src, thumbnailSrc, alt, original, version = '', classNam
   const [attempt, setAttempt] = useState(0);
   const [loadedKey, setLoadedKey] = useState('');
   const [failedKey, setFailedKey] = useState('');
-  const hd = useHdImageSource(src, original, attempt, version);
+  const hd = useHdImageSource(src, original, attempt, version, previewOnly);
   const [fallbackKey, setFallbackKey] = useState('');
   const fallbackIdentity = `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}:${src}:${version}:${attempt}`;
-  const rawFallback = fallbackKey === fallbackIdentity;
+  const rawFallback = !previewOnly && fallbackKey === fallbackIdentity;
   const displaySrc = rawFallback ? displaySource(src, 'original') : hd.readSource;
   const originalSrc = displaySource(src, 'original');
   const [retainOriginal, setRetainOriginal] = useState(displaySrc === originalSrc);
@@ -150,7 +152,7 @@ function PreviewImage({ src, thumbnailSrc, alt, original, version = '', classNam
       }
     }
   }, [hasThumbnail, thumbnail, onThumbnailReady]);
-  const originalResult = useImageReadProgress(originalSrc, attempt, displaySrc === originalSrc || retainOriginal, version);
+  const originalResult = useImageReadProgress(originalSrc, attempt, !previewOnly && (displaySrc === originalSrc || retainOriginal), version);
   const clearResult = useImageReadProgress(displaySrc, attempt, Boolean(displaySrc) && displaySrc !== originalSrc, hd.version);
   const readResult = displaySrc === originalSrc ? originalResult : clearResult;
   const readProgress = readResult.progress;
@@ -159,7 +161,7 @@ function PreviewImage({ src, thumbnailSrc, alt, original, version = '', classNam
   currentKeyRef.current = imageIdentity;
   const unsupported = readProgress.phase === 'unsupported';
   const failed = failedKey === imageIdentity || unsupported || readProgress.phase === 'unavailable' || readResult.refreshSource === true || readResult.unconfirmed === true;
-  const blocked = readResult.denied || originalResult.denied || hd.denied;
+  const blocked = readResult.denied || !previewOnly && originalResult.denied || hd.denied;
   const loaded = !failed && !blocked && isImagePreviewReady(readResult, loadedKey === imageIdentity);
   useEffect(() => { if (blocked || failed) onUnavailableRef.current?.(); }, [blocked, failed, key]);
   useEffect(() => {
@@ -206,7 +208,7 @@ function PreviewImage({ src, thumbnailSrc, alt, original, version = '', classNam
       ? readProgress.message || '当前来源无法提供读取进度'
       : readProgress.phase === 'decoding' ? '正在解码' : '正在读取';
   return <>
-    {!loaded && !blocked && displaySrc !== originalSrc && originalResult.imageSrc && !originalResult.denied && !originalResult.unconfirmed && <img src={originalResult.imageSrc} alt={alt} className={className} style={style} draggable={false} />}
+    {!previewOnly && !loaded && !blocked && displaySrc !== originalSrc && originalResult.imageSrc && !originalResult.denied && !originalResult.unconfirmed && <img src={originalResult.imageSrc} alt={alt} className={className} style={style} draggable={false} />}
     {hasThumbnail && !loaded && !blocked && !(displaySrc !== originalSrc && originalResult.imageSrc) && <img ref={thumbnailImage} key={`thumbnail:${accountIdentity}:${thumbnail}`} src={thumbnail} alt={alt} className={className} style={style} draggable={false} data-image-preview-thumbnail
       onLoad={event => { setThumbnailLoaded(thumbnail); onThumbnailReadyRef.current?.({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); }} />}
     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -239,7 +241,7 @@ type ImageRequest = { token: number; controller: AbortController; resolve: (appl
 const sides: Side[] = ['current', 'comparison'];
 const viewIdentity = (side: Side, image: ImageComparisonSource) => imageSourceIdentity(image) + ':' + side;
 
-export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, previewKey, sourceVersion, sourceRole, imageNeighbors = [], contentKey, imageSharing = true, metadata, safeDetails, comparison, comparisonCandidates = [], details, notice, hasNavigation, onPrevious, onNext, onImageLoaded, resolveDownload, onClose }: ZoomableImagePreviewProps) {
+export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, previewKey, sourceVersion, sourceRole, imageNeighbors = [], contentKey, imageSharing = true, previewOnly = false, metadata, safeDetails, comparison, comparisonCandidates = [], details, notice, hasNavigation, onPrevious, onNext, onImageLoaded, resolveDownload, onClose }: ZoomableImagePreviewProps) {
   const { user, hasLoadedUser } = useAppSession();
   const owner = user?.id || '';
   const backdropRef = useRef<HTMLDivElement>(null), toolbarRef = useRef<HTMLDivElement>(null), stageRef = useRef<HTMLDivElement>(null);
@@ -284,9 +286,9 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const safeSide = comparisonMode && comparisonImage ? activeSide : 'current';
   const safeSideRef = useRef(safeSide); safeSideRef.current = safeSide;
   const selectedImage = sources[safeSide] || currentImage;
-  const downloadSelectedSource = resolveDownload?.(selectedImage.src);
+  const downloadSelectedSource = previewOnly ? undefined : resolveDownload?.(selectedImage.src);
   const originalDownloadSource = displaySource(selectedImage.src, 'download');
-  const hasOriginalDownloadUrl = originalDownloadSource !== selectedImage.src;
+  const hasOriginalDownloadUrl = !previewOnly && originalDownloadSource !== selectedImage.src;
   function downloadOriginal() {
     if (!downloadSelectedSource || downloadLock.current) return;
     downloadLock.current = true; setDownloadBusy(true);
@@ -633,7 +635,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
       {image && (() => {
         const id = identity(image), view = views[viewIdentity(side, image)] || fittedImageView, base = baseSize(side, image);
         const dimensionsKnown = Boolean(thumbnailFrames[id] || sizes[id] || image.width && image.height);
-        return <PreviewImage key={`${id}:${image.src}:${image.version || ''}`} src={image.src} thumbnailSrc={image.thumbnailSrc} version={image.version} alt={sideLabel(side)} original={originals[viewIdentity(side, image)] || false}
+        return <PreviewImage key={`${id}:${image.src}:${image.version || ''}`} src={image.src} thumbnailSrc={image.thumbnailSrc} version={image.version} alt={sideLabel(side)} previewOnly={previewOnly} original={!previewOnly && (originals[viewIdentity(side, image)] || false)}
           className={styles.compareImage}
           style={{ width: dimensionsKnown ? base.width : undefined, height: dimensionsKnown ? base.height : undefined,
             transform: 'translate(calc(-50% + ' + (view.x * base.width) + 'px), calc(-50% + ' + (view.y * base.height) + 'px)) scale(' + view.scale + ')' }}
@@ -645,7 +647,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const activeOriginal = originals[viewIdentity(safeSide, selectedImage)] || false;
   const candidateDecoded = decodedImages[viewIdentity(safeSide, selectedImage)];
   const decoded = candidateDecoded?.account === `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` ? candidateDecoded : undefined;
-  const copySource = decoded?.fullSize ? decoded.source : '';
+  const copySource = !previewOnly && decoded?.fullSize ? decoded.source : '';
   const visibleMetadata = isOriginalSubject ? { model: safeMetadataValue(safeDetails?.model ?? metadata?.model), quality: safeMetadataValue(safeDetails?.quality ?? metadata?.quality),
     supplier: safeMetadataValue(safeDetails?.supplier ?? metadata?.supplier),
     ratio: safeMetadataValue(safeDetails?.ratio ?? metadata?.ratio), resolution: safeMetadataValue(safeDetails?.resolution ?? metadata?.resolution), time: safeMetadataTime(safeDetails?.time ?? metadata?.time) } : {};
@@ -686,10 +688,10 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
           <div className={styles.popoverRow}><button type="button" onClick={() => zoomFromControls(1 / SCALE_STEP)} title="缩小选中图" aria-label="缩小选中图"><ZoomOut size={16} /></button><span>{Math.round(selectedView.scale * 100)}%</span><button type="button" onClick={() => zoomFromControls(SCALE_STEP)} title="放大选中图" aria-label="放大选中图"><ZoomIn size={16} /></button><button type="button" onClick={() => reset()} title="还原选中图" aria-label="还原选中图"><RotateCcw size={16} /></button></div>
         </> : <>
           {selectedImage.contentKey && <ContentReactions key={`reactions:${owner}:${selectedImage.contentKey}`} contentKey={selectedImage.contentKey} imageSharing={imageSharing} />}
-          <button type="button" className={styles.menuAction} disabled={copyState?.busy || !copySource} onClick={() => {
+          {!previewOnly && <button type="button" className={styles.menuAction} disabled={copyState?.busy || !copySource} onClick={() => {
             setCopyState({ src: copySource, busy: true }); void copyImage(copySource).then(() => { if (alive.current) setCopyState({ src: copySource, success: true, message: '原尺寸图片已复制' }); }).catch(error => { if (alive.current) setCopyState({ src: copySource, message: error instanceof Error ? error.message : '复制失败，请重试' }); });
-          }}>{copyState?.success && copyState.src === copySource ? <Check size={16} /> : <Copy size={16} />}{copyState?.busy ? '正在复制' : safeSide === 'current' ? '复制当前图' : '复制对比图'}</button>
-          {displaySource(selectedImage.src, 'preview') !== displaySource(selectedImage.src, 'original') && <button type="button" className={styles.menuAction} aria-pressed={activeOriginal} onClick={() => { userAction.current++; stopGestures(); setOriginals(value => ({ ...value, [viewIdentity(safeSide, selectedImage)]: !activeOriginal })); }}><ZoomIn size={16} />{activeOriginal ? '切换高清预览' : '加载完整原图'}</button>}
+          }}>{copyState?.success && copyState.src === copySource ? <Check size={16} /> : <Copy size={16} />}{copyState?.busy ? '正在复制' : safeSide === 'current' ? '复制当前图' : '复制对比图'}</button>}
+          {!previewOnly && displaySource(selectedImage.src, 'preview') !== displaySource(selectedImage.src, 'original') && <button type="button" className={styles.menuAction} aria-pressed={activeOriginal} onClick={() => { userAction.current++; stopGestures(); setOriginals(value => ({ ...value, [viewIdentity(safeSide, selectedImage)]: !activeOriginal })); }}><ZoomIn size={16} />{activeOriginal ? '切换高清预览' : '加载完整原图'}</button>}
           {hasOriginalDownloadUrl && <>
             {decoded?.hd?.status === 'ready' ? <a className={styles.menuAction} href={versionedHdSource(selectedImage.src, 'hd-download', decoded.hd.sourceVersion)}><Download size={16} />下载高清 {decoded.hd.format?.toUpperCase()}{decoded.hd.bytes ? ` · ${formatImageBytes(decoded.hd.bytes)}` : ''}</a> : <span className={styles.menuAction}>高清压缩档尚未就绪</span>}
           </>}
