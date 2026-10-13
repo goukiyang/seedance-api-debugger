@@ -67,8 +67,7 @@ export async function readCutoutWorkspaceDraft(accountId: string): Promise<Cutou
   const value = await transaction<CutoutWorkspaceDraft | undefined>(accountId, 'readonly', store => store.get(accountId));
   if (!value) return null;
   if (!validDraft(value)) {
-    await clearCutoutWorkspaceDraft(accountId);
-    throw new Error('本机草稿已过期或无法读取，请重新选图；服务器结果仍保留');
+    throw new Error('本机草稿已过期或无法读取，原草稿保留；服务器结果仍保留');
   }
   return value;
 }

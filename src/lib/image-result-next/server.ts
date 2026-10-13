@@ -176,12 +176,26 @@ export async function prepareCutoutImageHandoff(request: Request, user: SessionU
   }
   return getCutoutImageHandoff(request, user, id);
 }
+function checkedCutoutSettings(value: unknown): CutoutSettings {
+  if (!isRecord(value)) throw new ImageResultNextError('普通抠图参数不完整，请重新确认；尚未提交任务');
+  const normalized = normalizeCutoutSettings(value);
+  if (Object.entries(normalized).some(([key, expected]) => value[key] !== expected)
+    || Object.keys(value).some(key => !Object.hasOwn(normalized, key))) {
+    throw new ImageResultNextError('普通抠图参数无效或版本已变化，请重新确认；没有用默认参数替代或提交任务');
+  }
+  return value as unknown as CutoutSettings;
+}
 export async function startCutoutImageHandoff(request: Request, user: SessionUser, id: string, settingsInput: unknown, confirmUnknownPrice: boolean) {
   const { record, raw, key } = await readStored(user, id);
   if (record.intent !== 'cutout') throw new ImageResultNextError('导入目标无效');
   if (!['awaiting-confirmation', 'not-submitted'].includes(record.stage) || !record.asset) return getCutoutImageHandoff(request, user, id);
   if (!confirmUnknownPrice) throw new ImageResultNextError(PRICE_MESSAGE, 409);
-  const settings = record.settings || normalizeCutoutSettings(settingsInput);
+  const requestedSettings = checkedCutoutSettings(settingsInput);
+  const settings = record.settings ? checkedCutoutSettings(record.settings) : requestedSettings;
+  if (record.settings && Array.from(new Set([...Object.keys(settings), ...Object.keys(requestedSettings)]))
+    .some(key => settings[key as keyof CutoutSettings] !== requestedSettings[key as keyof CutoutSettings])) {
+    throw new ImageResultNextError('原抠图参数已冻结，本次设置与原参数不同，尚未提交任务。请恢复原参数后重试同一次处理。', 409);
+  }
   const capsResponse = await cutoutCall(request, user, ['v1', 'capabilities']);
   const caps = await capsResponse.json().catch(() => null) as CutoutCapabilities | null;
   if (!capsResponse.ok || !caps?.integration?.ready) throw new ImageResultNextError(caps?.integration?.message || '抠图服务暂不可用，尚未提交', 503);
@@ -189,7 +203,7 @@ export async function startCutoutImageHandoff(request: Request, user: SessionUse
   const submitting: Stored = { ...record, settings, stage: 'submitting', phaseAt: Date.now(), message: '正在确认这次普通抠图提交。' };
   if (!await replace(key, raw, submitting)) return getCutoutImageHandoff(request, user, id);
   try {
-    const response = await cutoutCall(request, user, ['v1', 'jobs'], 'POST', JSON.stringify({ asset_id: record.asset.asset_id, kind: 'cutout', parameters: settings }),
+    const response = await cutoutCall(request, user, ['v1', 'jobs'], 'POST', JSON.stringify({ asset_id: record.asset.asset_id, kind: 'cutout', parameters: { settings } }),
       { 'Content-Type': 'application/json', 'Idempotency-Key': `image-next-${id}` });
     const body: unknown = await response.json().catch(() => null);
     const success = response.ok && isCutoutJob(body, { kind: 'cutout' });

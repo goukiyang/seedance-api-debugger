@@ -57,6 +57,7 @@ export default function CutoutWorkspacePreview({ scope, originalUrl, resultUrl, 
   const showOriginal = view === 'original' || !resultUrl || view === 'compare' && !canCompare;
   const displayedUrl = showOriginal ? originalUrl : resultUrl;
   const size = comparing || showOriginal ? originalSize : resultSize;
+  const gridSize = Math.max(8, (size?.width || 320) / 40);
 
   return <>
     <div className={`${styles.workspaceStage} ${background === 'light' ? styles.previewLight : background === 'dark' ? styles.previewDark : ''}`} style={{ touchAction: scale > 1 ? 'none' : 'pan-y' }} tabIndex={0} aria-label="图片预览，放大后可用方向键移动"
@@ -76,7 +77,7 @@ export default function CutoutWorkspacePreview({ scope, originalUrl, resultUrl, 
       {resultUrl && <img className={styles.dimensionProbe} src={resultUrl} alt="" onLoad={event => setResultSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} onError={() => setFailed('结果预览无法读取，原图和可用文件保留；可重新查询或重试下载。')} />}
       {size && displayedUrl && <svg className={styles.workspaceImage} viewBox={`0 0 ${size.width} ${size.height}`} role="img" aria-label={comparing ? '原图与结果对照' : showOriginal ? '当前原图' : '透明结果'} style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }} onDoubleClick={() => onZoom(displayedUrl)}>
         {comparing ? <>
-          <defs><clipPath id={clipId}><rect x={size.width * split / 100} y={0} width={size.width} height={size.height} /></clipPath><pattern id={`${clipId}grid`} width={Math.max(8, size.width / 40)} height={Math.max(8, size.width / 40)} patternUnits="userSpaceOnUse"><rect width="100%" height="100%" fill="var(--bg-input)" /><rect width="50%" height="50%" fill="var(--bg-hover)" /><rect x="50%" y="50%" width="50%" height="50%" fill="var(--bg-hover)" /></pattern></defs>
+          <defs><clipPath id={clipId}><rect x={size.width * split / 100} y={0} width={size.width} height={size.height} /></clipPath><pattern id={`${clipId}grid`} width={gridSize} height={gridSize} patternUnits="userSpaceOnUse"><rect width={gridSize} height={gridSize} fill="var(--bg-input)" /><rect width={gridSize / 2} height={gridSize / 2} fill="var(--bg-hover)" /><rect x={gridSize / 2} y={gridSize / 2} width={gridSize / 2} height={gridSize / 2} fill="var(--bg-hover)" /></pattern></defs>
           <image href={originalUrl} width={size.width} height={size.height} />
           <g clipPath={`url(#${clipId})`}>
             <rect width={size.width} height={size.height} fill={background === 'checker' ? `url(#${clipId}grid)` : background === 'dark' ? 'oklch(0.18 0.005 160)' : 'oklch(0.96 0.005 160)'} />

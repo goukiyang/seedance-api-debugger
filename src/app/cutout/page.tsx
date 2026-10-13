@@ -276,6 +276,9 @@ export default function CutoutPage() {
   const [characterOpen, setCharacterOpen] = useState(false);
   const [selectedOutputId, setSelectedOutputId] = useState('');
   const [draftReady, setDraftReady] = useState(false);
+  const [draftWriteAllowed, setDraftWriteAllowed] = useState(false);
+  const draftWriteAllowedRef = useRef(false);
+  const [draftRestoreRetry, setDraftRestoreRetry] = useState(0);
   const [draftStatus, setDraftStatus] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
   const [draftMessage, setDraftMessage] = useState('');
   const draftWriteSequence = useRef(0);
@@ -404,9 +407,13 @@ export default function CutoutPage() {
 
   const sourceFromResult = useCallback(async (url: string, name: string, fullCanvas: boolean) => {
     if (actionLock.current || pendingSubmissionRef.current || getPageExitRisk().busy.length) return;
+    if (!draftReady) { setNotice({ kind: 'info', text: '正在确认本机草稿，请稍后再切换图片。' }); return; }
+    if (!draftWriteAllowedRef.current && !await confirm('上次草稿尚未恢复，仍保留在本机。使用这张图片会替换原本机草稿，服务器原图和任务不变。是否替换？', { title: '替换草稿', confirmLabel: '替换草稿' })) return;
     if ((sourceNeedsGuard || regionBox || repairDirty || localRepair || boxes.length || prompts.length) && !await confirm('切换图片会替换当前本机草稿、修图和框选。请先下载需要保留的本地结果；原图和服务器结果不会被修改。', { title: '切换图片', confirmLabel: '切换' })) return;
     try {
       const reference = cutoutResultReference(url);
+      draftWriteAllowedRef.current = true;
+      setDraftWriteAllowed(true);
       setSource({ id: makeId(), kind: 'result', url, reference, name, fullCanvas });
       handoffSelection.current = false;
       setView('original');
@@ -423,7 +430,7 @@ export default function CutoutPage() {
     } catch {
       setNotice({ kind: 'error', text: '这张图片暂时不能作为后续任务的来源，请重新打开结果。' });
     }
-  }, [boxes.length, confirm, localRepair, prompts.length, regionBox, repairDirty, sourceNeedsGuard]);
+  }, [boxes.length, confirm, draftReady, localRepair, prompts.length, regionBox, repairDirty, sourceNeedsGuard]);
 
   useEffect(() => {
     mounted.current = true;
@@ -631,6 +638,13 @@ export default function CutoutPage() {
     if (!accountId || !preferencesReady) return;
     let active = true;
     const token = sourceSelection.current;
+    const accountGeneration = accountGenerationRef.current;
+    const controller = new AbortController();
+    const current = () => active && accountIdRef.current === accountId
+      && accountGenerationRef.current === accountGeneration && sourceSelection.current === token;
+    draftWriteAllowedRef.current = false;
+    setDraftWriteAllowed(false);
+    draftWriteSequence.current += 1;
     const views = readCutoutViewPreferences(accountId);
     setView(views.view || 'result');
     setPreviewBackground(views.background || 'checker');
@@ -642,13 +656,40 @@ export default function CutoutPage() {
     const params = new URLSearchParams(window.location.search);
     const receipt = params.get('handoff') || '';
     if (/^[\w-]{1,128}$/.test(receipt)) setHandoffId(receipt);
-    void readCutoutWorkspaceDraft(accountId).then(value => {
-      if (!active || accountIdRef.current !== accountId || sourceSelection.current !== token || !value) return;
-      // Explicit new sources win; the stored draft is retained until the user chooses to replace it.
+    void readCutoutWorkspaceDraft(accountId).then(async value => {
+      if (!current()) return;
+      if (!value) { draftWriteAllowedRef.current = true; setDraftWriteAllowed(true); return; }
+      // A new explicit handoff must not consume or overwrite another stored workspace.
+      if (receipt && value.source && value.source.handoffId !== receipt) {
+        setDraftStatus('failed');
+        setDraftMessage('当前链接与上次草稿不同。原草稿已保留；导入新图片前请确认替换，或返回上次草稿。');
+        return;
+      }
+      let authorizedHandoff: CutoutImageHandoff | null = null;
+      if (value.source?.handoffId) {
+        // This GET rechecks the signed-in owner, current original permissions and frozen source version on the server.
+        authorizedHandoff = await getImageResultCutoutHandoff(value.source.handoffId, controller.signal);
+        if (!current()) return;
+        if (authorizedHandoff.receiptId !== value.source.handoffId || authorizedHandoff.intent !== 'cutout'
+          || authorizedHandoff.source.originalUrl !== `/api/image-result-next/${value.source.handoffId}/original`) {
+          throw new Error('来源授权记录不一致，原草稿保留，请重新检查。');
+        }
+      }
+      if (value.repair) {
+        const job = await getCutoutJob(value.repair.jobId, controller.signal);
+        if (!current()) return;
+        const filename = job.result?.filename || 'cutout.png';
+        if (job.job_id !== value.repair.jobId || job.status !== 'succeeded'
+          || value.repair.sourceVersion !== `${job.job_id}:${job.updated_at}:${filename}`) {
+          throw new Error('修复草稿对应的结果版本暂未确认，原草稿保留，请重新检查。');
+        }
+      }
+      if (!current()) return;
       if (value.source) {
         if (value.source.handoffId && (!receipt || receipt === value.source.handoffId)) {
           handoffSelection.current = true;
           setHandoffId(value.source.handoffId);
+          setHandoff(authorizedHandoff);
         }
         if (value.source.file) {
           const file = new File([value.source.file], value.source.name, { type: value.source.file.type });
@@ -661,15 +702,17 @@ export default function CutoutPage() {
         if (value.editor) { setBoxes(value.editor.boxes); setPrompts(value.editor.prompts); setRegionBox(value.editor.region); }
       }
       if (value.repair) setLocalRepair(value.repair);
+      draftWriteAllowedRef.current = true;
+      setDraftWriteAllowed(true);
       setDraftStatus('saved');
       setDraftMessage(receipt ? '本机有上次草稿。导入新图片前会确认替换；原任务和结果保留。' : '已恢复本机草稿；任务状态会重新查询。');
     }).catch(error => {
-      if (!active) return;
+      if (!current() || controller.signal.aborted) return;
       setDraftStatus('failed');
-      setDraftMessage(error instanceof Error ? error.message : '本机草稿恢复失败，请重新选图；服务器结果仍保留。');
+      setDraftMessage(`${error instanceof Error ? error.message : '本机草稿恢复失败'} 原草稿保留，尚未显示或覆盖；可重新检查。`);
     }).finally(() => { if (active) setDraftReady(true); });
-    return () => { active = false; };
-  }, [accountId, preferencesReady]);
+    return () => { active = false; controller.abort(); };
+  }, [accountId, preferencesReady, draftRestoreRetry]);
 
   useEffect(() => {
     if (!draftReady || !accountId) return;
@@ -679,14 +722,14 @@ export default function CutoutPage() {
   }, [accountId, adjustmentsOpen, characterOpen, characterSettings, draftReady, previewBackground, selectedOutputId, view]);
 
   useEffect(() => {
-    if (!draftReady || !accountId) return;
+    if (!draftReady || !accountId || !draftWriteAllowed || !draftWriteAllowedRef.current) return;
     const sequence = ++draftWriteSequence.current;
     const account = accountId;
     const sourceJobId = source ? Array.from(originalSourceByJob.current.entries()).find(([, id]) => id === source.id)?.[0] || null : null;
     setDraftStatus('saving');
     const timer = window.setTimeout(() => {
       draftWriteQueue.current = draftWriteQueue.current.catch(() => {}).then(async () => {
-        if (sequence !== draftWriteSequence.current || accountIdRef.current !== account) return;
+        if (sequence !== draftWriteSequence.current || accountIdRef.current !== account || !draftWriteAllowedRef.current) return;
         try {
           if (!source && !localRepair) await clearCutoutWorkspaceDraft(account);
           else await saveCutoutWorkspaceDraft(account, { version: 1, savedAt: Date.now(),
@@ -703,7 +746,7 @@ export default function CutoutPage() {
       });
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [acceptedSourceId, accountId, boxes, draftReady, handoffId, localRepair, prompts, regionBox, source]);
+  }, [acceptedSourceId, accountId, boxes, draftReady, draftWriteAllowed, handoffId, localRepair, prompts, regionBox, source]);
 
   useEffect(() => {
     if (source?.kind !== 'local') {
@@ -838,9 +881,12 @@ export default function CutoutPage() {
 
   const acceptFile = useCallback(async (file: File | null, preserveRepair = false, fromHandoff = false) => {
     if (actionLock.current || isBusy || pendingSubmission || !fromHandoff && getPageExitRisk().busy.length) return false;
+    if (!draftReady) { setNotice({ kind: 'info', text: '正在确认本机草稿，请稍后再选择图片。' }); return false; }
     const token = ++sourceSelection.current;
+    if (!draftWriteAllowedRef.current && !await confirm('上次草稿尚未恢复，仍保留在本机。此次选择会替换原本机草稿，服务器原图和任务不变。是否替换？', { title: '替换草稿', confirmLabel: '替换草稿' })) return false;
     if ((sourceNeedsGuard || regionBox || repairDirty || (!preserveRepair && localRepair) || boxes.length || prompts.length) && !await confirm('更换图片会替换当前本机草稿、修图和框选。请先下载需要保留的本地结果；原图和服务器结果不会被修改。', { title: '更换图片', confirmLabel: '继续' })) return false;
     if (!file) {
+      draftWriteAllowedRef.current = true; setDraftWriteAllowed(true);
       setSource(null); setCachedAsset(null); setBoxes([]); setPrompts([]); setRegionBox(null); setRepairTarget(null); setRepairDirty(false); setLocalRepair(null);
       return true;
     }
@@ -856,6 +902,8 @@ export default function CutoutPage() {
     try { const image = await createImageBitmap(file); image.close(); }
     catch { setNotice({ kind: 'error', text: '所选图片未能读取，原图和旧结果仍保留。' }); return false; }
     if (!mounted.current || sourceSelection.current !== token || actionLock.current || pendingSubmissionRef.current || !fromHandoff && getPageExitRisk().busy.length) return false;
+    draftWriteAllowedRef.current = true;
+    setDraftWriteAllowed(true);
     setSource({ id: makeId(), kind: 'local', file, name: file.name || 'image.png' });
     handoffSelection.current = false;
     setView('original');
@@ -870,7 +918,7 @@ export default function CutoutPage() {
     setLocalRepair(null);
     setNotice(null);
     return true;
-  }, [boxes.length, capabilities?.limits?.max_upload_mb, confirm, isBusy, localRepair, pendingSubmission, prompts.length, regionBox, repairDirty, sourceNeedsGuard]);
+  }, [boxes.length, capabilities?.limits?.max_upload_mb, confirm, draftReady, isBusy, localRepair, pendingSubmission, prompts.length, regionBox, repairDirty, sourceNeedsGuard]);
 
   async function selectLibraryImage(items: PickerItem[]) {
     const item = items[0], token = ++sourceSelection.current;
@@ -1080,13 +1128,13 @@ export default function CutoutPage() {
   };
 
   useEffect(() => {
-    if (!handoff || !draftReady || handoffBusy || source || localRepair || boxes.length || prompts.length || pendingSubmission || automaticHandoffImport.current === handoff.receiptId) return;
+    if (!handoff || !draftReady || !draftWriteAllowed || handoffBusy || source || localRepair || boxes.length || prompts.length || pendingSubmission || automaticHandoffImport.current === handoff.receiptId) return;
     automaticHandoffImport.current = handoff.receiptId;
     // Loading the authorized original is read-only. This effect never prepares or starts a job.
     void importHandoffImage();
     // The import owns its selection token; later user selections cancel its result.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handoff, draftReady, handoffBusy, source, localRepair, boxes.length, prompts.length, pendingSubmission]);
+  }, [handoff, draftReady, draftWriteAllowed, handoffBusy, source, localRepair, boxes.length, prompts.length, pendingSubmission]);
 
   const submitHandoff = async () => {
     if (!handoffId || !handoffSelection.current || !source || !sourceSize || !actionReady || handoffBusy || actionLock.current) return;
@@ -1274,7 +1322,7 @@ export default function CutoutPage() {
     setNotice({ kind: 'info', text: '修复已应用到本地结果，正在保存本机草稿；原图和服务器结果未修改。' });
   };
 
-  const useLocalRepair = () => {
+  const loadRepairAsNewImage = () => {
     if (!localRepair) return;
     const file = new File([localRepair.result], localRepair.filename, { type: 'image/png' });
     void acceptFile(file, true);
@@ -1362,6 +1410,7 @@ export default function CutoutPage() {
         {handoff && <button className={styles.secondaryButton} type="button" onClick={() => void importHandoffImage()} disabled={handoffBusy || isBusy || Boolean(pendingSubmission)}>导入来源图片</button>}
         <button className={styles.quietButton} type="button" disabled={handoffBusy} onClick={() => void getImageResultCutoutHandoff(handoffId).then(setHandoff).catch(error => setHandoffError(error instanceof Error ? error.message : '接续记录暂时无法读取'))}>查询接续状态</button>
         {handoff?.job && <button className={styles.quietButton} type="button" onClick={() => void selectHistoryJob(handoff.job!)}>查看原任务</button>}
+        {handoff?.stage === 'not-submitted' && handoff.settings && <><button className={styles.quietButton} type="button" disabled={handoffBusy || isBusy || Boolean(pendingSubmission)} onClick={() => { if (handoff.settings) setSettings({ ...handoff.settings }); }}>恢复原参数</button><span>重试沿用原提交参数</span></>}
         {handoffError && <span className={styles.statusError}>{handoffError}</span>}
       </div>}
       <div className={styles.layout}>
@@ -1387,7 +1436,7 @@ export default function CutoutPage() {
             {mainResultUrl && <div className={styles.operationBar}>
               <button className={styles.primaryButton} type="button" onClick={() => localRepairVisible ? saveCutoutBlob(localRepair!.result, localRepair!.filename) : void downloadResult(activeOutput!.url, activeOutput!.filename)}><Download size={15} />下载透明PNG</button>
               {activeOutput?.main && outputJob?.kind === 'cutout' && <button className={styles.secondaryButton} type="button" onClick={() => setRepairTarget({ url: mainResultUrl, originalUrl: matchingOriginal?.src, cropMeta: resultCrop, filename: activeOutput.filename })}><Brush size={15} />修一下</button>}
-              <button className={styles.secondaryButton} type="button" disabled={isBusy || handoffBlocked || Boolean(pendingSubmission)} onClick={() => localRepairVisible ? useLocalRepair() : void sourceFromResult(activeOutput!.url, activeOutput!.filename, activeOutput!.main)}>继续处理这张图</button>
+              <button className={styles.secondaryButton} type="button" disabled={isBusy || handoffBlocked || Boolean(pendingSubmission)} onClick={() => localRepairVisible ? loadRepairAsNewImage() : void sourceFromResult(activeOutput!.url, activeOutput!.filename, activeOutput!.main)}>继续处理这张图</button>
             </div>}
             {localRepairVisible && <div className={styles.draftStrip} role="status">
               <span>{draftStatus === 'saving' ? '修复已应用，正在保存本机草稿…' : draftStatus === 'saved' ? '本机修复草稿 · 7天内可恢复' : '修复仅在当前页面，离开前请下载'}</span>
@@ -1395,6 +1444,7 @@ export default function CutoutPage() {
               <button className={styles.quietButton} type="button" onClick={async () => { if (await confirm('放弃本机修复草稿？原图和服务器结果仍保留。', { title: '放弃修复', confirmLabel: '放弃草稿', danger: true })) setLocalRepair(null); }}><Trash2 size={14} />放弃草稿</button>
             </div>}
             {draftMessage && <p className={styles.strategyCopy} role="status">{draftMessage}</p>}
+            {draftReady && !draftWriteAllowed && <div className={styles.buttonRow}><button className={styles.secondaryButton} type="button" onClick={() => setDraftRestoreRetry(value => value + 1)}>重新检查草稿</button><Link className={styles.quietButton} href="/cutout">返回上次草稿</Link></div>}
           </section>
           <section className={styles.section} aria-labelledby="cutout-result-title">
             <div className={styles.resultHeader}>

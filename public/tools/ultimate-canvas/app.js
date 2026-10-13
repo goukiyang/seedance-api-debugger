@@ -5826,7 +5826,7 @@
         if (!video || !host) return;
         const previousControl = Array.from(videoLoopControls).find(control => control.video === video);
         for (const control of videoLoopControls) {
-            if (!control.video.isConnected || control.video === video) videoLoopControls.delete(control);
+            if (!control.video.isConnected || control.video === video) control.dispose();
         }
         const userId = canvasRuntime.bootstrap?.user?.id || null;
         const taskId = /^video_task:([a-z\d_-]+)$/i.exec(contentKey || '')?.[1];
@@ -5851,14 +5851,20 @@
             button.innerHTML = `${window.UltimateCanvasIcons('RefreshCw', 14)}<span>${video.loop ? '循环已开' : '循环'}</span>`;
             button.style.color = video.loop ? 'var(--accent-teal)' : 'var(--text-primary)';
         };
-        const control = { video, key, sync: () => {
+        const listeners = new AbortController();
+        const control = { video, key, userId, dispose: () => {
+            listeners.abort();
+            videoLoopControls.delete(control);
+        }, sync: () => {
             if (!current() || canvasRuntime.bootstrap?.user?.id !== userId) { set(false); return; }
             try { set(read()); } catch { /* Preserve the local setting when storage is unavailable. */ }
         } };
-        try { set(previousControl?.key === key ? video.loop : read()); } catch { set(video.loop); }
+        const sameScope = previousControl?.key === key && previousControl.userId === userId;
+        try { set(sameScope ? video.loop : read()); } catch { set(sameScope && video.loop); }
         videoLoopControls.add(control);
         const stop = event => event.stopPropagation();
-        button.addEventListener('pointerdown', stop); button.addEventListener('mousedown', stop); button.addEventListener('keydown', stop);
+        const listenerOptions = { signal: listeners.signal };
+        button.addEventListener('pointerdown', stop, listenerOptions); button.addEventListener('mousedown', stop, listenerOptions); button.addEventListener('keydown', stop, listenerOptions);
         button.addEventListener('click', event => {
             event.stopPropagation();
             if (!current() || (canvasRuntime.bootstrap?.user?.id || null) !== userId) return;
@@ -5875,12 +5881,12 @@
                     const notice = document.createElement('small'); notice.dataset.videoLoopNotice = ''; notice.setAttribute('role', 'status'); notice.textContent = '本次设置无法记住'; host.append(notice);
                 }
             }
-        });
+        }, listenerOptions);
     }
 
     const syncVideoLoops = key => {
         for (const control of videoLoopControls) {
-            if (!control.video.isConnected) videoLoopControls.delete(control);
+            if (!control.video.isConnected) control.dispose();
             else if (control.key === key) control.sync();
         }
     };
@@ -5894,6 +5900,9 @@
             window.clearTimeout(state.retryTimer);
             state.retryResolve?.();
             state.listeners?.abort();
+            for (const control of videoLoopControls) {
+                if (control.video === state.video || !control.video.isConnected) control.dispose();
+            }
             inlineVideoPlayers.delete(id);
             state.video.pause();
             state.video.removeAttribute('src');

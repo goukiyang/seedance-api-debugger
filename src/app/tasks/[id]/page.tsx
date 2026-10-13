@@ -907,14 +907,19 @@ export default function TaskDetailPage() {
     : null;
 
   useEffect(() => {
+    const source = sourceCompareVideoRef.current;
+    const enhanced = enhancedCompareVideoRef.current;
+    const single = singleResultVideoRef.current;
     return () => {
       compareCycleRef.current += 1;
       compareRestartingRef.current = false;
-      sourceCompareVideoRef.current?.pause();
-      enhancedCompareVideoRef.current?.pause();
-      singleResultVideoRef.current?.pause();
+      source?.pause();
+      enhanced?.pause();
+      single?.pause();
     };
-  }, [task?.id, currentEnhanceSourceTaskId]);
+  }, [task?.id, task?.local_status, task?.public_video_url, task?.local_video_path, task?.result_video_url,
+    task?.public_video_storage_provider, currentEnhanceSourceTaskId, enhanceSourceTask?.id,
+    enhanceSourceTask?.public_video_url, enhanceSourceTask?.local_video_path, enhanceSourceTask?.result_video_url]);
 
   const fetchTask = useCallback(async (forceProviderRefresh = false): Promise<VideoTask | null> => {
     try {
@@ -1494,9 +1499,11 @@ export default function TaskDetailPage() {
 
   const handleComparePlay = (side: CompareSide) => {
     if (compareRestartingRef.current) return;
+    const { from, to } = compareVideos(side);
+    // A queued play event may arrive after the user has already paused.
+    if (!from || !to || from.paused || from.ended || from.error) return;
     compareCycleRef.current += 1;
     syncCompareTime(side);
-    const { to } = compareVideos(side);
     if (to?.paused) {
       void to.play().catch(() => undefined);
     }
@@ -1504,6 +1511,7 @@ export default function TaskDetailPage() {
 
   const handleComparePause = (side: CompareSide) => {
     const { from } = compareVideos(side);
+    if (!from?.paused) return;
     // An ended follower waits for the source boundary; a user pause stops both.
     if (synchronizedLoop.enabled && from?.ended) return;
     compareCycleRef.current += 1;
@@ -1522,15 +1530,19 @@ export default function TaskDetailPage() {
     if (side !== 'source') return;
     const source = sourceCompareVideoRef.current;
     const enhanced = enhancedCompareVideoRef.current;
-    if (!source || !enhanced || source.error || enhanced.error || compareRestartingRef.current) return;
+    if (!source || !enhanced || !source.ended || source.error || enhanced.error || compareRestartingRef.current) return;
     const cycle = ++compareCycleRef.current;
     compareRestartingRef.current = true;
     source.currentTime = 0;
     enhanced.currentTime = 0;
+    const currentPair = () => sourceCompareVideoRef.current === source && enhancedCompareVideoRef.current === enhanced
+      && source.isConnected && enhanced.isConnected;
     void Promise.all([source.play(), enhanced.play()]).then(() => {
+      if (!currentPair()) { source.pause(); enhanced.pause(); return; }
       if (cycle !== compareCycleRef.current) return;
       compareRestartingRef.current = false;
     }).catch(() => {
+      if (!currentPair()) { source.pause(); enhanced.pause(); return; }
       if (cycle !== compareCycleRef.current) return;
       compareRestartingRef.current = false;
       source.pause(); enhanced.pause();

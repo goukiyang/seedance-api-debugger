@@ -19,6 +19,7 @@ const MAX_CACHE = 1024 * 1024 * 1024;
 const TTL = 24 * 60 * 60 * 1000;
 const inflight = new Map<string, Promise<unknown>>();
 let workCount = 0;
+let exportCount = 0;
 export class MultiviewError extends Error {
   constructor(message: string, public status = 400) { super(message); }
 }
@@ -56,7 +57,7 @@ async function cacheRoot() {
     if (data.dev === system.dev || !data.isDirectory()) throw new MultiviewError('数据盘暂不可用，原视频保持不变', 503);
   }
   const root = process.env.NODE_ENV === 'production'
-    ? '/data/video-api-debugger/cache/multiview' : path.join(process.cwd(), '.cache', 'multiview');
+    ? '/data/video-api-debugger/var-lib/storage/multiview-cache' : path.join(process.cwd(), '.cache', 'multiview');
   await mkdir(root, { recursive: true, mode: 0o700 });
   return root;
 }
@@ -195,6 +196,13 @@ export async function multiviewFrame(user: SessionUser, id: string, request: Req
   return readFile(output);
 }
 export async function multiviewExport(user: SessionUser, id: string, request: Request, body: Record<string, unknown>) {
+  // Limit the entire export, including cached-frame buffers, not only the final encoder.
+  if (exportCount >= 1) throw new MultiviewError('另一个导出正在准备，请稍后重试；当前选帧保持不变', 429);
+  exportCount += 1;
+  try { return await createMultiviewExport(user, id, request, body); }
+  finally { exportCount -= 1; }
+}
+async function createMultiviewExport(user: SessionUser, id: string, request: Request, body: Record<string, unknown>) {
   if (typeof body.version !== 'string' || !/^[a-f0-9]{64}$/.test(body.version) || !Array.isArray(body.frames)
     || !body.frames.length || body.frames.length > 8 || !body.frames.every(Number.isInteger) || !validMultiviewLayout(body.layout)
     || !['png', 'zip'].includes(String(body.format))) throw new MultiviewError('导出设置无效');
