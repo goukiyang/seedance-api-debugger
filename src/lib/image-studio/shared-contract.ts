@@ -631,7 +631,13 @@ export async function saveSharedStudioPresetAs(user: ImageStudioIdentity, input:
       await bindStudioModule(tx, publisherModuleId, { protocol: SHARED_STUDIO_PROTOCOL, ownerId: actor.id, presetId, mode: 'publisher' });
       expectedRevision = 1;
       expectedDefinitionToken = await sharedDefinitionToken(copied, tx);
-    } else if (!original) {
+    } else {
+      // Save-as always creates another definition workspace. The original
+      // private workspace, source binding and personal inputs stay untouched.
+      if (['personalOverrides', 'resetFields', 'personalReferenceIds', 'personalReferencePolicy'].some(field => has(input, field))) {
+        throw new StudioSharingError('另存共享模板不包含个人输入和主图，原工作区内容保持不变', 400);
+      }
+      publisherModuleId = automaticStudioModuleId(actor.id, `new-preset:${String(input.requestId)}`);
       if (await tx.imageStudioModule.findUnique({ where: { id: publisherModuleId } })) throw new StudioSharingError('另存模板工作区已存在，请核对原保存结果', 409);
       await tx.imageStudioModule.create({ data: { id: publisherModuleId, owner_id: actor.id,
         name: typeof input.name === 'string' ? input.name : '未命名模块', revision: 1 } });
