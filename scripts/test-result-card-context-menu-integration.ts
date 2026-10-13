@@ -86,7 +86,7 @@ function event(extra: Props = {}) {
     preventDefault() { this.defaultPrevented = true; }, stopPropagation() {},
     currentTarget: { querySelector: () => ({ complete: true, naturalWidth: 10 }) }, ...extra };
 }
-function flushTimers() { const pending = [...timers.values()]; timers.clear(); pending.forEach(callback => callback()); }
+function flushTimers() { const pending = Array.from(timers.values()); timers.clear(); pending.forEach(callback => callback()); }
 const Cover = load(coverSource, {}).ResultImageCover;
 const results = load(resultSource, {
   'react-dom': { createPortal: (content: unknown) => content }, './ResultImageCover': { ResultImageCover: Cover },
@@ -183,7 +183,7 @@ async function run() {
   invoke(button, 'onClick', event()); assert.equal(previews, 0); flushTimers(); assert.equal(previews, 1);
   assert.equal(selections, 1); assert.equal(viewed, 1);
   for (const [handler, extras] of triggerEvents) {
-    invoke(button, 'onClick', event()); const oldPreviews = previews;
+    invoke(button, 'onClick', event()); const oldPreviews: number = previews;
     invoke(button, handler, event(extras)); flushTimers(); assert.equal(previews, oldPreviews, `${handler} must cancel the 500ms preview`);
   }
   let canceledBeforeForward = false;
