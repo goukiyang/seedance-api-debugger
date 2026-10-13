@@ -15,6 +15,7 @@ import { MAX_REFERENCE_IMAGES } from './limits';
 import { studioTemplateAssetUrl } from './media';
 import { readSharedStudioSnapshot } from './read-snapshot';
 import { moduleCoverKey, promoteModuleCover, copyModuleCover, studioFixedCoverDTO, assertPresetCoverShareable } from './module-cover';
+import { readStudioModuleSharingPreference } from './module-sharing-preference';
 import type { SharedStudioCatalog, SharedStudioCatalogItem, SharedStudioDefaults, SharedStudioDefinitionPersonalInput, SharedStudioIntent, SharedStudioPersonalOverrides, SharedStudioPublicDefinition } from './shared-types';
 
 export type { SharedStudioIntent, SharedStudioPersonalOverrides } from './shared-types';
@@ -448,6 +449,12 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
     if (!Number.isInteger(input.expectedRevision) || workspace.revision !== input.expectedRevision) throw new StudioSharingError('模板已在其他页面保存，当前草稿仍保留', 409);
     const binding = await studioSharedBinding(actor.id, moduleId, tx);
     if (binding && binding.mode !== 'publisher') throw new StudioSharingError('只能由创建者修改共享原模板', 403);
+    if (!binding && has(input, 'sharingPreferenceRevision')) {
+      const preference = await readStudioModuleSharingPreference(actor.id, moduleId, tx);
+      if (!preference?.enabled || preference.revision !== input.sharingPreferenceRevision) {
+        throw new StudioSharingError('共享选择已变化，未发布；当前输入保留，请核对后保存', 409);
+      }
+    }
     if (!binding && input.isShared !== true) throw new StudioSharingError('请选择共享后再保存模板，个人输入不会自动公开', 400);
     if (has(input, 'isShared') && typeof input.isShared !== 'boolean') throw new StudioSharingError('模板共享设置无效', 400);
     if (!binding && workspace.source_preset_id) {

@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '上传中断后可安全继续：已完成的文件直接复用，确认未开始保存的上传允许重试，状态不明时不会重复发送。保留空白关闭图片与比例卡片。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '回退相容版本：保留模板共享选择、共享原件与上传恢复合同；模板界面退回上一版。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

@@ -17,6 +17,7 @@ import { studioTemplateDefaultPolicy } from './template-defaults';
 import { assertStudioActor, deleteStudioGroup, getSharedStudioPersonalOverrides, getStudioRemovedDefaultGroups, publishSharedStudioModule, readSharedStudioModules, restoreStudioDefaultGroup, saveSharedStudioPersonal, studioPublisherKey, studioSharedBinding, StudioSharingError, type SharedStudioModuleRead } from './shared-contract';
 import type { SharedStudioLiveDTO } from './shared-types';
 import { studioFixedCoverDTO } from './module-cover';
+import { readStudioModuleSharingPreference, writeStudioModuleSharingPreference, studioModuleSharingPreferenceKey } from './module-sharing-preference';
 
 export { deleteStudioGroup };
 
@@ -131,6 +132,8 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     sourcePresetShared: row.source_preset_id ? Boolean(sourcePreset?.is_shared) : null,
     sourcePresetOwnedByViewer: Boolean(sourcePreset && sourcePreset.owner_id === ownerId),
     sourcePresetCanManageSharing: Boolean(sourcePreset && canManageStudioPreset(user, sourcePreset) && !(await studioPresetArchived(sourcePreset.id))),
+    sharingPreference: saved ? await readStudioModuleSharingPreference(ownerId, row.id) : null,
+    canChooseSharing: saved && !row.id.startsWith('default-') && (!row.source_preset_id || Boolean(sourcePreset && sourcePreset.owner_id === ownerId && !(await studioPresetArchived(sourcePreset.id)))),
     contextEditable: !protectedSource,
     evolution: evolutionCapability(row),
     fixedReferencesEditable: isAdmin && (!sourcePreset || sourcePreset.owner_id === ownerId),
@@ -287,7 +290,7 @@ export async function deleteStudioModule(ownerId: string, id: unknown, revision:
     await removeStudioModuleReferencePolicy(ownerId, id, tx);
     const binding = await studioSharedBinding(ownerId, id, tx);
     if (binding?.mode === 'publisher') await tx.platformSetting.deleteMany({ where: { key: studioPublisherKey(binding.presetId) } });
-    await tx.platformSetting.deleteMany({ where: { key: { in: [`studio_shared_binding_v1:${id}`, `studio_shared_overrides_v1:${id}`] } } });
+    await tx.platformSetting.deleteMany({ where: { key: { in: [`studio_shared_binding_v1:${id}`, `studio_shared_overrides_v1:${id}`, studioModuleSharingPreferenceKey(id)] } } });
     await tx.imageStudioModule.deleteMany({ where: { id, owner_id: ownerId, revision: current.revision } });
   });
 }
@@ -429,6 +432,11 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
         if (!changed.count) throw new StudioModuleError('模块已在其他页面保存，请刷新后核对', 409);
         return tx.imageStudioModule.findUniqueOrThrow({ where: { id } });
       })();
+    // Only the explicit new-template action opts in. Old modules and the
+    // automatically initialized default workspace never change visibility.
+    if (initializeDefaults && !id.startsWith('default-')) {
+      await writeStudioModuleSharingPreference({ version: 1, ownerId, moduleId: id, enabled: body.sharingDefault !== false, revision: 1 }, tx);
+    }
     if (fixedReferences) {
       try { await setStudioModuleFixedReferences(ownerId, id, fixedReferences, tx); }
       catch (error) {
@@ -460,4 +468,32 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
   }, { timeout: 15000 });
   const source = row.source_preset_id ? await prisma.imageStudioPreset.findUnique({ where: { id: row.source_preset_id }, select: { id: true, owner_id: true, scope: true, is_shared: true } }) : undefined;
   return moduleDTO(row, ownerId, await getImageStudioSettings(), true, isAdmin, source || undefined, sourceIdentity);
+}
+
+export async function chooseStudioModuleSharing(ownerId: string, body: Record<string, unknown>) {
+  if (!validStudioModuleId(body.id, ownerId) || body.id.startsWith('default-') || typeof body.isShared !== 'boolean'
+    || typeof body.requestId !== 'string' || !/^[a-zA-Z0-9_-]{16,100}$/.test(body.requestId)
+    || !Number.isInteger(body.revision)) throw new StudioModuleError('共享设置参数无效');
+  const id = body.id;
+  await prisma.$transaction(async tx => {
+    await assertStudioActor(ownerId, tx);
+    const current = await tx.imageStudioModule.findFirst({ where: { id, owner_id: ownerId } });
+    if (!current) throw new StudioModuleError('模板不存在或无权设置共享', 403);
+    if (await studioSharedBinding(ownerId, id, tx)) throw new StudioModuleError('模板已发布，请重新读取后设置共享范围', 409);
+    if (current.source_preset_id) {
+      const source = await tx.imageStudioPreset.findUnique({ where: { id: current.source_preset_id } });
+      if (!source || source.owner_id !== ownerId || await studioPresetArchived(source.id, tx)) throw new StudioModuleError('不能共享他人的模板定义', 403);
+    }
+    const previous = await readStudioModuleSharingPreference(ownerId, id, tx);
+    if (previous?.requestId === body.requestId) {
+      if (previous.enabled !== body.isShared) throw new StudioModuleError('请先确认原共享设置，不会改写未确认操作', 409);
+      return;
+    }
+    const changed = await tx.imageStudioModule.updateMany({ where: { id, owner_id: ownerId, revision: Number(body.revision) }, data: { revision: { increment: 1 } } });
+    if (changed.count !== 1) throw new StudioModuleError('模板已在其他页面更新，当前输入保留，请重新核对共享设置', 409);
+    await writeStudioModuleSharingPreference({ version: 1, ownerId, moduleId: id, enabled: body.isShared as boolean,
+      revision: (previous?.revision || 0) + 1, requestId: body.requestId as string }, tx);
+  });
+  const actor = await assertStudioActor(ownerId);
+  return studioModuleDTOForUser(actor, id);
 }
