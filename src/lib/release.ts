@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '结果图的置顶按钮直接可见、可点击。图片比例改为点开下拉后选卡片，16种标准比例和自动均可选，切换模型不再改掉已选比例；实际出图按供应商返回说明。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '抠图改为大画面工作区，设置与历史分层，细修草稿可恢复。生成图可接续抠图或带入视频首帧；视频新增循环开关，并可选帧制作多角度拼图、导出单帧。带入图片不会自动生成或产生未知费用。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

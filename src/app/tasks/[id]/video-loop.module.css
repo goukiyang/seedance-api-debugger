@@ -1,0 +1,8 @@
+.compareStage.compareStage { grid-template-rows: auto minmax(0, 1fr); }
+.compareToolbar { grid-column: 1 / -1; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 8px 12px; background: var(--bg-secondary); }
+.singleToolbar { display: flex; justify-content: flex-end; padding: 8px 0; }
+.compareStage.compareStage:global(.is-compare-fullscreen), .compareStage.compareStage:fullscreen, .compareStage.compareStage:-webkit-full-screen { grid-template-rows: auto minmax(0, 1fr); padding: 0 8px 10px; }
+.compareStage.compareStage:global(.is-compare-fullscreen) :global(.task-compare-video-panel), .compareStage.compareStage:fullscreen :global(.task-compare-video-panel), .compareStage.compareStage:-webkit-full-screen :global(.task-compare-video-panel) { min-height: 0; }
+@media (max-width: 720px) {
+  .compareStage.compareStage:not(:global(.is-compare-fullscreen)):not(:fullscreen) { grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr); }
+}

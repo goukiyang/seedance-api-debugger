@@ -16,6 +16,7 @@ import { normalizeH3VideoConfig, h3DisabledReason, type H3VideoConfig } from '@/
 import { SEEDANCE_VIDEO_MODEL_OPTIONS } from '@/lib/provider/seedance-models';
 import { videoDeliveryStageForTask } from '@/lib/video/delivery-status';
 import MediaPreview from '@/components/MediaPreview';
+import { MultiviewEntry } from '@/components/MultiviewEntry';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
 import { UploadedImagePicker, type UploadedAssetSelection, type UploadedImagePickerConfirmResult } from '@/components/UploadedImagePicker';
@@ -2192,6 +2193,7 @@ function RunDetailPanel({
               {task.status === 'succeeded' && <ContentReactions contentKey={`video_task:${task.taskId}`} overlay />}
             </div>
             <div className={styles.taskRow}><span>视频状态</span><span>{videoTaskStage(task).label}</span></div>
+            {task.status === 'succeeded' && task.playUrl && <MultiviewEntry contentKey={`video_task:${task.taskId}`} />}
             <div className={styles.taskRow}><RelativeTime value={task.createdAt} /><span className={styles.promptTools}>
               {task.playUrl && <button className={styles.iconButton} type="button" title="预览视频" aria-label={`预览任务 ${task.taskId}`} onClick={() => setPreviewTask(task)}><Eye size={16} /></button>}
               <a href={task.playUrl || task.downloadUrl || `/tasks/${encodeURIComponent(task.taskId)}`} target={task.playUrl || task.downloadUrl ? '_blank' : undefined} rel={task.playUrl || task.downloadUrl ? 'noreferrer' : undefined}>{task.playUrl ? '打开视频' : task.downloadUrl ? '下载视频' : '查看任务'}</a>

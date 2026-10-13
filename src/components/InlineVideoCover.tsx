@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { LoaderCircle, Pause, Play, RotateCcw } from 'lucide-react';
-import { useMediaPreviewState } from '@/lib/hooks/use-media-preview-state';
+import { useMediaPreviewState, useVideoLoopState } from '@/lib/hooks/use-media-preview-state';
+import { VideoLoopButton } from '@/components/VideoLoopButton';
 import type { ContentKey } from '@/lib/content-reactions/types';
 import { ASSET_HOVER_DWELL_MS, releaseAssetMediaSource, settleAssetHoverPlay, type AssetPlaybackBoundary, type AssetPlaybackLease, type ReleaseAssetHover } from '@/lib/media/asset-playback';
 import styles from './InlineVideoCover.module.css';
@@ -38,6 +39,7 @@ function ClickVideoCover({ src, contentKey, title, active, onActivate, onPause, 
   const playRequested = useRef(false);
   const playSequence = useRef(0);
   const state = useMediaPreviewState(contentKey, contentKey, src || undefined);
+  const loop = useVideoLoopState(src || undefined, contentKey);
   const stateRef = useRef(state);
   stateRef.current = state;
   useEffect(() => { if (!active) { playSequence.current += 1; playRequested.current = false; setStarting(false); video.current?.pause(); } }, [active]);
@@ -58,9 +60,9 @@ function ClickVideoCover({ src, contentKey, title, active, onActivate, onPause, 
     catch { if (sequence === playSequence.current) { setError('视频未能播放，点击重试或使用查看按钮。'); onPause(); } }
     finally { if (sequence === playSequence.current) { playRequested.current = false; setStarting(false); } }
   }
-  return <span className={styles.stage} data-playing={playing || undefined} data-starting={starting || undefined} data-error={Boolean(error) || undefined} onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
+  return <span className={`${styles.stage} ${styles.clickStage}`} data-playing={playing || undefined} data-starting={starting || undefined} data-error={Boolean(error) || undefined} onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
     <span className={styles.poster} hidden={started && !error}>{children}</span>
-    {src && <video ref={video} src={src} playsInline preload="none" muted className={styles.video} hidden={!started || Boolean(error)}
+    {src && <video ref={video} src={src} playsInline preload="none" muted loop={loop.enabled} className={styles.video} hidden={!started || Boolean(error)}
       onLoadedMetadata={event => {
         const saved = stateRef.current;
         if (!restored.current && saved.ready && Number.isFinite(event.currentTarget.duration)) {
@@ -75,6 +77,7 @@ function ClickVideoCover({ src, contentKey, title, active, onActivate, onPause, 
       disabled={!src} onClick={event => { event.stopPropagation(); if (error) video.current?.load(); void toggle(); }}>
       <span className={styles.icon}>{starting ? <LoaderCircle size={22} className={styles.spinner} /> : error ? <RotateCcw size={22} /> : playing ? <Pause size={22} /> : <Play size={22} />}</span>
     </button>
+    <VideoLoopButton className={styles.loopControl} enabled={loop.enabled} onToggle={loop.toggle} disabled={!src || !loop.ready} storageUnavailable={loop.storageUnavailable} />
     {(!src || error) && <span className={styles.notice} role="status">{error || '暂无可播放视频，详情请点查看'}</span>}
   </span>;
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useId } from 'react';
+import { useId, useRef } from 'react';
 import { RotateCcw } from 'lucide-react';
 import type { ModelOption, CutoutSettings } from '@/lib/cutout/types';
 import { CUTOUT_PRESETS, type CutoutPresetKey } from '@/lib/cutout/settings';
@@ -10,9 +10,11 @@ type Props = {
   settings: CutoutSettings;
   modelOptions: ModelOption[];
   advancedOpen: boolean;
+  adjustmentsOpen: boolean;
   disabled?: boolean;
   onChange: (settings: CutoutSettings) => void;
   onAdvancedOpenChange: (open: boolean) => void;
+  onAdjustmentsOpenChange: (open: boolean) => void;
   onReset: () => void;
 };
 
@@ -55,12 +57,15 @@ export default function CutoutSettingsPanel({
   settings,
   modelOptions,
   advancedOpen,
+  adjustmentsOpen,
   disabled = false,
   onChange,
   onAdvancedOpenChange,
+  onAdjustmentsOpenChange,
   onReset,
 }: Props) {
   const advancedId = useId();
+  const previousPreset = useRef<CutoutSettings | null>(null);
   const update = (key: keyof CutoutSettings, value: number | boolean | string | undefined) => {
     onChange({ ...settings, [key]: value, preset: undefined });
   };
@@ -69,7 +74,7 @@ export default function CutoutSettingsPanel({
     <section className={styles.settingsPanel} aria-labelledby="cutout-settings-title">
       <div className={styles.sectionHeading}>
         <div>
-          <h2 id="cutout-settings-title">抠图参数</h2>
+          <h2 id="cutout-settings-title">效果预设</h2>
         </div>
         <button className={styles.quietButton} type="button" onClick={onReset} disabled={disabled}>
           <RotateCcw size={15} aria-hidden="true" />
@@ -84,29 +89,18 @@ export default function CutoutSettingsPanel({
             type="button"
             className={`${styles.presetButton} ${settings.preset === key ? styles.presetActive : ''}`}
             aria-pressed={settings.preset === key}
-            onClick={() => onChange({ ...CUTOUT_PRESETS[key].settings })}
+            onClick={() => { previousPreset.current = settings; onChange({ ...CUTOUT_PRESETS[key].settings }); }}
             disabled={disabled}
           >
             {CUTOUT_PRESETS[key].name}
           </button>
         ))}
       </div>
-
-      <label className={styles.controlLabel} htmlFor="cutout-model-select">抠图模型</label>
-      <select
-        id="cutout-model-select"
-        className={styles.selectControl}
-        value={settings.model_preference}
-        onChange={(event) => update('model_preference', event.target.value)}
-        disabled={disabled || modelOptions.length === 0}
-      >
-        {modelOptions.map((model) => (
-          <option key={model.id} value={model.id} disabled={!model.available}>
-            {model.label || model.id}{model.available ? '' : `（暂不可用：${model.reason || '服务未就绪'}）`}
-          </option>
-        ))}
-      </select>
-
+      <p className={styles.strategyCopy}>{settings.preset ? CUTOUT_PRESETS[settings.preset as CutoutPresetKey]?.name || '已保存预设' : '自定义效果'} · 背景移除 {Math.round(settings.background_removal)} · 细节保护 {Math.round(settings.detail_protection)}</p>
+      <p className={styles.strategyCopy}>选择预设会替换当前效果设置，重新处理后生效。</p>
+      {previousPreset.current && <button className={styles.textButton} type="button" disabled={disabled} onClick={() => { const previous = previousPreset.current; previousPreset.current = null; if (previous) onChange(previous); }}>恢复上次设置</button>}
+      <details className={styles.advancedSettings} open={adjustmentsOpen} onToggle={event => onAdjustmentsOpenChange(event.currentTarget.open)}>
+      <summary>调整效果 · 六项调节</summary>
       <div className={styles.sliderList}>
         {MAIN_SLIDERS.map((field) => (
           <label className={styles.sliderField} key={field.key} title={field.hint}>
@@ -123,17 +117,23 @@ export default function CutoutSettingsPanel({
               onChange={(event) => update(field.key, Number(event.target.value))}
               disabled={disabled}
             />
+            <span className={styles.fieldHint}>{field.hint}</span>
           </label>
         ))}
       </div>
+      </details>
 
       <details
         className={styles.advancedSettings}
         open={advancedOpen}
         onToggle={(event) => onAdvancedOpenChange(event.currentTarget.open)}
       >
-        <summary aria-controls={advancedId}>高级参数</summary>
+        <summary aria-controls={advancedId}>高级设置 · 模型与阈值</summary>
         <div id={advancedId} className={styles.advancedBody}>
+          <label className={styles.controlLabel} htmlFor="cutout-model-select">抠图模型</label>
+          <select id="cutout-model-select" className={styles.selectControl} value={settings.model_preference} onChange={event => update('model_preference', event.target.value)} disabled={disabled || modelOptions.length === 0}>
+            {modelOptions.map(model => <option key={model.id} value={model.id} disabled={!model.available}>{model.label || model.id}{model.available ? '' : `（暂不可用：${model.reason || '服务未就绪'}）`}</option>)}
+          </select>
           <div className={styles.toggleGrid}>
             {ADVANCED_TOGGLES.map((field) => (
               <label className={styles.toggleField} key={field.key}>

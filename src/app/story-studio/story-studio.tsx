@@ -1,5 +1,7 @@
 'use client';
 
+import { MultiviewEntry } from '@/components/MultiviewEntry';
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, ArrowDown, ArrowUp, Clapperboard, ImagePlus, Plus, RefreshCw, Save, Trash2, WandSparkles } from 'lucide-react';
@@ -13,6 +15,7 @@ import { ResourceLibraryPicker } from '@/components/ResourceLibraryPicker';
 import { GeneratedImageResults, type GeneratedImageResult } from '@/components/GeneratedImageResults';
 import { uploadFileAsAsset } from '@/lib/http/file-upload';
 import { RelativeTime } from '@/components/RelativeTime';
+import { LoopVideo } from '@/components/LoopVideo';
 import type { PickerItem } from '@/lib/assets/picker-types';
 import type { ContentKey } from '@/lib/content-reactions/types';
 import styles from './story-studio.module.css';
@@ -817,7 +820,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
         <details><summary>可选镜头设置与素材</summary><div className={styles.shotFields}>{(['framing', 'lighting', 'camera'] as const).map(field => <label key={field}>{({ framing: '景别', lighting: '光线', camera: '运镜' })[field]}<select disabled={blocked} value={shot[field] || ''} onChange={event => editShot(shot.id, { [field]: event.target.value })}><option value="">由描述决定</option>{({ framing: ['全景', '中景', '近景', '特写'], lighting: ['自然光', '柔光', '逆光', '夜景'], camera: ['固定镜头', '推进', '拉远', '跟随', '环绕'] })[field].map(value => <option key={value} value={value}>{value}</option>)}</select></label>)}</div>
           <div className={styles.bindings}>{(work.materials || []).map(item => <label key={item.id}><input type="checkbox" disabled={blocked} checked={shot.materialIds?.includes(item.id) || false} onChange={event => editShot(shot.id, { materialIds: event.target.checked ? [...(shot.materialIds || []), item.id] : shot.materialIds?.filter(id => id !== item.id) })} />{item.name}</label>)}</div></details>
         {work.references[shot.id] && <img className={styles.media} src={work.references[shot.id].thumbnailUrl || work.references[shot.id].originalUrl} alt={shot.title} />}
-        {work.videoRuns?.[shot.id]?.status === 'succeeded' && work.videoRuns[shot.id].previewAvailable && work.videoRuns[shot.id].taskId && <video className={styles.media} controls preload="metadata" src={`/api/video/play/${encodeURIComponent(work.videoRuns[shot.id].taskId!)}`} />}
+        {work.videoRuns?.[shot.id]?.status === 'succeeded' && work.videoRuns[shot.id].previewAvailable && work.videoRuns[shot.id].taskId && <><LoopVideo key={work.videoRuns[shot.id].taskId} className={styles.media} controls playsInline preload="metadata" contentKey={`video_task:${work.videoRuns[shot.id].taskId}`} src={`/api/video/play/${encodeURIComponent(work.videoRuns[shot.id].taskId!)}`} /><MultiviewEntry contentKey={`video_task:${work.videoRuns[shot.id].taskId}`} /></>}
         {work.videoRuns?.[shot.id]?.stableDownloadReady && work.videoRuns[shot.id].taskId && <a className={styles.link} href={`/api/video/download/${encodeURIComponent(work.videoRuns[shot.id].taskId!)}`}>下载此镜视频</a>}
         <div className={styles.actions}><button className={styles.primary} disabled={blocked || !imageAllowed || Boolean(channelIssue) || !(shot.imagePrompt || shot.description).trim()} onClick={() => void operate('确认单镜生图', () => dispatchShots('image', [shot.id]))}><ImagePlus size={16} />生成此镜图片</button>
           <button disabled={blocked || !(shot.videoPrompt || shot.description).trim()} onClick={() => void operate('确认单镜视频', () => dispatchShots('video', [shot.id]))}><Clapperboard size={16} />生成此镜视频</button>

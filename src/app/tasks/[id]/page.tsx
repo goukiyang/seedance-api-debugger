@@ -1,6 +1,11 @@
 'use client';
+
+import { MultiviewEntry } from '@/components/MultiviewEntry';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import MediaPreview from '@/components/MediaPreview';
+import { VideoLoopButton } from '@/components/VideoLoopButton';
+import { useVideoLoopState } from '@/lib/hooks/use-media-preview-state';
+import loopStyles from './video-loop.module.css';
 import { LoadingSkeleton } from '@/components/LoadingState';
 import { RelativeTime } from '@/components/RelativeTime';
 
@@ -886,6 +891,10 @@ export default function TaskDetailPage() {
   const compareSyncingRef = useRef(false);
   const [isCompareFullscreen, setIsCompareFullscreen] = useState(false);
   const [compareFullscreenFallback, setCompareFullscreenFallback] = useState(false);
+  const resultLoop = useVideoLoopState(undefined, task ? `video_task:${task.id}` : undefined);
+  const synchronizedLoop = useVideoLoopState(undefined, undefined, task ? `video-compare:${task.id}` : undefined);
+  const compareRestartingRef = useRef(false);
+  const compareCycleRef = useRef(0);
 
   // 显示原始响应
   const [showCreateResponse, setShowCreateResponse] = useState(false);
@@ -896,6 +905,16 @@ export default function TaskDetailPage() {
   const currentEnhanceSourceTaskId = currentIsEnhanceTask
     ? pickStringValue(currentTaskParams, ['source_task_id'])
     : null;
+
+  useEffect(() => {
+    return () => {
+      compareCycleRef.current += 1;
+      compareRestartingRef.current = false;
+      sourceCompareVideoRef.current?.pause();
+      enhancedCompareVideoRef.current?.pause();
+      singleResultVideoRef.current?.pause();
+    };
+  }, [task?.id, currentEnhanceSourceTaskId]);
 
   const fetchTask = useCallback(async (forceProviderRefresh = false): Promise<VideoTask | null> => {
     try {
@@ -1474,6 +1493,8 @@ export default function TaskDetailPage() {
   };
 
   const handleComparePlay = (side: CompareSide) => {
+    if (compareRestartingRef.current) return;
+    compareCycleRef.current += 1;
     syncCompareTime(side);
     const { to } = compareVideos(side);
     if (to?.paused) {
@@ -1482,12 +1503,39 @@ export default function TaskDetailPage() {
   };
 
   const handleComparePause = (side: CompareSide) => {
+    const { from } = compareVideos(side);
+    // An ended follower waits for the source boundary; a user pause stops both.
+    if (synchronizedLoop.enabled && from?.ended) return;
+    compareCycleRef.current += 1;
+    compareRestartingRef.current = false;
     const { to } = compareVideos(side);
     if (to && !to.paused) to.pause();
   };
 
   const handleCompareSeeked = (side: CompareSide) => {
+    if (compareRestartingRef.current) return;
     syncCompareTime(side);
+  };
+
+  const handleCompareEnded = (side: CompareSide) => {
+    if (!synchronizedLoop.enabled) { handleComparePause(side); return; }
+    if (side !== 'source') return;
+    const source = sourceCompareVideoRef.current;
+    const enhanced = enhancedCompareVideoRef.current;
+    if (!source || !enhanced || source.error || enhanced.error || compareRestartingRef.current) return;
+    const cycle = ++compareCycleRef.current;
+    compareRestartingRef.current = true;
+    source.currentTime = 0;
+    enhanced.currentTime = 0;
+    void Promise.all([source.play(), enhanced.play()]).then(() => {
+      if (cycle !== compareCycleRef.current) return;
+      compareRestartingRef.current = false;
+    }).catch(() => {
+      if (cycle !== compareCycleRef.current) return;
+      compareRestartingRef.current = false;
+      source.pause(); enhanced.pause();
+      setOpenError('同步循环未能继续，请点击播放重试。');
+    });
   };
 
   const handleToggleCompareFullscreen = async () => {
@@ -1862,14 +1910,16 @@ export default function TaskDetailPage() {
 
               <div
                 ref={compareStageRef}
-                className={`task-result-stage ${showEnhanceCompare ? 'task-result-compare-stage' : ''} ${hasResultVideo && !showEnhanceCompare ? 'is-single-media' : ''} ${isCompareFullscreen ? 'is-compare-fullscreen' : ''}`}
+                className={`task-result-stage ${showEnhanceCompare ? `task-result-compare-stage ${loopStyles.compareStage}` : ''} ${hasResultVideo && !showEnhanceCompare ? 'is-single-media' : ''} ${isCompareFullscreen ? 'is-compare-fullscreen' : ''}`}
               >
                 {hasResultVideo ? (
                   showEnhanceCompare ? (
                     <>
+                      <div className={loopStyles.compareToolbar}>
+                      <VideoLoopButton synchronized enabled={synchronizedLoop.enabled} onToggle={synchronizedLoop.toggle} disabled={!synchronizedLoop.ready} storageUnavailable={synchronizedLoop.storageUnavailable} />
                       <button
                         type="button"
-                        className="task-compare-fullscreen-button"
+                        className="btn btn-secondary"
                         onClick={handleToggleCompareFullscreen}
                         aria-label={isCompareFullscreen ? '退出全屏对比' : '全屏对比播放'}
                         aria-pressed={isCompareFullscreen}
@@ -1881,6 +1931,7 @@ export default function TaskDetailPage() {
                         )}
                         {isCompareFullscreen ? '退出全屏' : '全屏对比'}
                       </button>
+                      </div>
                       <div className="task-compare-video-panel">
                         <span className="task-compare-badge">原视频</span>
                         <video
@@ -1891,9 +1942,11 @@ export default function TaskDetailPage() {
                           muted
                           preload="metadata"
                           src={enhanceSourceVideoSrc}
+                          onError={() => { setVideoError(true); sourceCompareVideoRef.current?.pause(); enhancedCompareVideoRef.current?.pause(); }}
                           onPlay={() => handleComparePlay('source')}
                           onPause={() => handleComparePause('source')}
                           onSeeked={() => handleCompareSeeked('source')}
+                          onEnded={() => handleCompareEnded('source')}
                         >
                           您的浏览器不支持视频播放
                         </video>
@@ -1910,11 +1963,12 @@ export default function TaskDetailPage() {
                           playsInline
                           preload="metadata"
                           src={videoSrc}
-                          onError={() => setVideoError(true)}
+                          onError={() => { setVideoError(true); sourceCompareVideoRef.current?.pause(); enhancedCompareVideoRef.current?.pause(); }}
                           onCanPlay={() => setVideoError(false)}
                           onPlay={() => handleComparePlay('enhanced')}
                           onPause={() => handleComparePause('enhanced')}
                           onSeeked={() => handleCompareSeeked('enhanced')}
+                          onEnded={() => handleCompareEnded('enhanced')}
                         >
                           您的浏览器不支持视频播放
                         </video>
@@ -1925,6 +1979,7 @@ export default function TaskDetailPage() {
                       ref={singleResultVideoRef}
                       key={videoSrc}
                       controls
+                      loop={resultLoop.enabled}
                       playsInline
                       preload="metadata"
                       src={videoSrc}
@@ -1961,6 +2016,9 @@ export default function TaskDetailPage() {
                   </button>
                 )}
               </div>
+              {hasResultVideo && !showEnhanceCompare && <div className={loopStyles.singleToolbar}>
+                <VideoLoopButton enabled={resultLoop.enabled} onToggle={resultLoop.toggle} disabled={!resultLoop.ready} storageUnavailable={resultLoop.storageUnavailable} />
+              </div>}
 
               {showSingleResultPreview && hasResultVideo && !showEnhanceCompare && (
                 <MediaPreview
@@ -2009,6 +2067,7 @@ export default function TaskDetailPage() {
               )}
 
               <div className="task-result-actions">
+                {hasResultVideo && <MultiviewEntry contentKey={`video_task:${task.id}`} />}
                 {shouldShowRefresh && resultPrimaryAction !== 'refresh' && (
                   <button className="btn btn-secondary" onClick={queryStatus} disabled={querying}>
                     <RefreshCcw size={16} aria-hidden="true" />

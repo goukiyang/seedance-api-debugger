@@ -1,0 +1,4 @@
+.videoShell { position: absolute; inset: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; justify-items: center; min-width: 0; min-height: 0; }
+.videoShell > video { display: block; min-width: 0; min-height: 0; object-fit: contain; }
+.videoShell > span { padding: 4px; }
+.actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; padding: 4px; }

@@ -15,6 +15,7 @@ const PROTECTED_PREFIXES = [
   '/help',
   '/config',
   '/tools',
+  '/multiview',
 ];
 
 function normalizedHost(value: string | null | undefined) {

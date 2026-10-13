@@ -17,3 +17,6 @@
 @keyframes playback-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 .notice { position: absolute; bottom: 6px; left: 6px; right: 6px; padding: 4px 6px; background: rgb(16 22 25 / 90%); color: #eef4f1; font-size: 11px; overflow-wrap: anywhere; pointer-events: none; }
+.clickStage > .poster, .clickStage > .video, .clickStage > .toggle { bottom: 40px; height: auto; }
+.clickStage > .notice { bottom: 44px; }
+.loopControl { position: absolute; right: 4px; bottom: 2px; z-index: 2; }

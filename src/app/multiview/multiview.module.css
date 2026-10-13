@@ -1,0 +1,76 @@
+.page { max-width: 1440px; margin: 0 auto; padding: 24px; color: var(--text-primary, #18222e); }
+.page button, .page select, .page input { font: inherit; }
+.page button, .page select { min-height: 36px; border: 1px solid var(--border-color, #d8dee5); border-radius: 8px; background: var(--surface, #fff); color: inherit; padding: 7px 12px; }
+.page button { cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.page button:disabled { opacity: .48; cursor: not-allowed; }
+.page button:focus-visible, .page input:focus-visible, .page select:focus-visible, .page summary:focus-visible { outline: 2px solid var(--primary, #2563eb); outline-offset: 3px; }
+.page .primary { background: var(--primary, #2463eb); border-color: var(--primary, #2463eb); color: #fff; font-weight: 650; text-decoration: none; border-radius: 8px; padding: 10px 16px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.toolbar, .exportActions, .count, .caption, .cardTitle, .cardActions, .editor header, .editor footer, .neighbors, .settingsFields, .partial { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.toolbar { justify-content: space-between; margin: 24px 0 10px; }
+.count > span { margin-right: 3px; color: var(--text-secondary, #536373); }
+.count button[aria-pressed=true], .neighbors button[aria-pressed=true] { color: var(--primary, #2463eb); border-color: currentColor; background: var(--primary-light, #edf4ff); }
+.caption { justify-content: space-between; font-size: 13px; color: var(--text-secondary, #536373); margin-bottom: 16px; }
+.board { display: grid; grid-template-columns: repeat(var(--columns, 4), minmax(0, 1fr)); gap: 16px; align-items: start; }
+.card { min-width: 0; border: 1px solid var(--border-color, #d8dee5); border-radius: 12px; overflow: hidden; background: var(--surface, #fff); }
+.card[data-editing=true] { border-color: var(--primary, #2463eb); box-shadow: 0 0 0 1px var(--primary, #2463eb); }
+.page .image { display: flex; width: 100%; height: auto; padding: 0; border: 0; border-radius: 0; overflow: hidden; }
+.image img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.image span { padding: 20px; color: var(--text-secondary, #536373); font-size: 13px; }
+.cardTitle { padding: 12px 12px 6px; justify-content: space-between; gap: 4px; }
+.cardTitle strong { font-size: 14px; }
+.cardTitle small { color: var(--text-secondary, #536373); font-size: 12px; }
+.card > input { width: calc(100% - 24px); box-sizing: border-box; border: 1px solid transparent; border-bottom-color: var(--border-color, #d8dee5); background: transparent; color: inherit; margin: 0 12px; padding: 6px 0; font-size: 13px; }
+.cardActions { padding: 10px 12px 12px; gap: 6px; }
+.cardActions button:first-child { margin-right: auto; }
+.cardActions button:not(:first-child) { padding: 7px; }
+.frameError { font-size: 12px; padding: 0 12px 12px; color: #9c4b19; }
+.frameError button { margin-top: 6px; }
+.empty { padding: 60px 24px; text-align: center; border: 1px dashed var(--border-color, #d8dee5); border-radius: 12px; margin-top: 24px; }
+.notice, .warning, .partial { padding: 12px 16px; border-radius: 10px; margin: 12px 0; background: var(--primary-light, #edf4ff); font-size: 14px; }
+.notice a { margin-left: 12px; }
+.warning { background: #fff6df; color: #74551b; }
+.page .quiet { border: 0; background: transparent; color: var(--text-secondary, #536373); padding-left: 0; margin-bottom: 10px; }
+.editor, .retain { margin: 20px 0; padding: 20px; border: 1px solid var(--border-color, #d8dee5); border-radius: 12px; background: var(--surface, #fff); }
+.editor header { justify-content: space-between; margin-bottom: 16px; }
+.editor h2, .retain h2 { margin: 0; font-size: 18px; }
+.editorBody { display: grid; grid-template-columns: 1fr 1fr; align-items: start; gap: 20px; }
+.candidate { min-height: 220px; display: grid; place-items: center; background: #edf0f3; border-radius: 8px; overflow: hidden; }
+.candidate img { display: block; max-width: 100%; max-height: 420px; object-fit: contain; }
+.videoArea { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.videoArea video { display: block; width: 100%; max-height: 420px; background: #111; border-radius: 8px; }
+.videoArea small { font-size: 12px; color: var(--text-secondary, #536373); }
+.timeline { display: block; margin: 20px 0 10px; font-size: 13px; }
+.timeline input { display: block; width: 100%; height: 32px; margin-top: 8px; accent-color: var(--primary, #2463eb); }
+.neighbors { margin-bottom: 18px; }
+.neighbors button { flex-direction: column; width: 88px; padding: 5px; font-size: 12px; }
+.neighbors img { width: 100%; height: 66px; object-fit: contain; }
+.collagePreview { max-width: 600px; margin: 18px 0; }
+.collagePreview svg { display: block; width: 100%; height: auto; border: 1px solid var(--border-color, #d8dee5); }
+.collagePreview small { display: block; margin-top: 8px; color: var(--text-secondary, #536373); }
+.partialPreview { flex-basis: 100%; }
+.partialPreview > button { margin-right: 8px; }
+.editor footer .primary { margin-left: auto; }
+.retain > div { display: flex; flex-wrap: wrap; gap: 16px; margin: 18px 0; }
+.retain > button { margin-right: 8px; }
+.settings, .original { margin-top: 24px; border-top: 1px solid var(--border-color, #d8dee5); padding-top: 16px; }
+.settings summary, .original summary { cursor: pointer; font-weight: 600; padding: 4px 0 10px; }
+.settingsFields { align-items: flex-end; }
+.settingsFields label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-secondary, #536373); }
+.settingsFields input { min-height: 34px; width: 90px; box-sizing: border-box; border-radius: 6px; border: 1px solid var(--border-color, #d8dee5); background: var(--surface, #fff); color: inherit; padding: 5px 8px; }
+.settings p, .footnote { color: var(--text-secondary, #536373); font-size: 12px; line-height: 1.6; }
+.original .videoArea { max-width: 620px; }
+.footnote { margin: 24px 0 0; }
+@media (max-width: 760px) {
+  .page { padding: 16px; }
+  .board { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .toolbar { align-items: flex-start; }
+  .exportActions { width: 100%; }
+  .exportActions .primary { flex: 1; }
+  .page button { min-height: 44px; }
+  .cardTitle { align-items: flex-start; flex-direction: column; }
+  .cardActions { flex-wrap: wrap; padding: 8px; }
+  .cardActions button:first-child { width: 100%; }
+  .editorBody { grid-template-columns: 1fr; }
+  .editor { padding: 14px; }
+  .editor footer .primary { margin-left: 0; flex: 1; }
+}

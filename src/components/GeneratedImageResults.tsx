@@ -13,6 +13,8 @@ import styles from './GeneratedImageResults.module.css';
 import { ImageBillingBadge } from './ImageBillingBadge';
 import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
 import { ImageGenerationWaiting, type ImageGenerationWait } from './ImageGenerationWaiting';
+import { ImageResultNextActions } from './ImageResultNextActions';
+import type { ContentKey } from '@/lib/content-reactions/types';
 
 export type GeneratedImageResult = {
   id: string;
@@ -86,6 +88,30 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
   const previewable = items.filter(item => item.media?.src);
   const preview = previewable.find(item => item.id === activePreview);
   const previewIndex = previewable.findIndex(item => item.id === activePreview);
+  const supportsNextActions = scope.startsWith('sd2-image-studio-') || scope.startsWith('story:');
+  const nextSources = supportsNextActions ? items.filter(item => item.media?.contentKey?.startsWith('asset:') && !item.pending && !item.viewOnly && !item.media.previewOnly).map(item => item.media!.contentKey!) : [];
+  const nextSourceSet = new Set(nextSources);
+  const focusRestored = useRef('');
+  const focusPositioned = useRef('');
+  useEffect(() => {
+    if (!supportsNextActions || !visible) return;
+    const focusId = new URLSearchParams(window.location.search).get('image_result_focus');
+    if (!focusId || focusRestored.current === `${scope}:${focusId}` || !items.some(item => item.id === focusId)) return;
+    const focusKey = `${scope}:${focusId}`;
+    if (focusPositioned.current !== focusKey) {
+      focusPositioned.current = focusKey;
+      pages.goToId(focusId); setLocalSelection(focusId);
+      const item = items.find(item => item.id === focusId); if (item) onSelect?.(item);
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      const card = document.getElementById(`image-result-${focusId}`);
+      if (!card) return;
+      focusRestored.current = `${scope}:${focusId}`;
+      card.scrollIntoView({ block: 'nearest' }); card.querySelector<HTMLElement>('[data-result-cover], [data-result-choice]')?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [items, onSelect, pages, scope, supportsNextActions, visible]);
   const imageNeighbors = Array.from(new Set([previewable[previewIndex - 1], previewable[previewIndex + 1]]))
     .filter(item => item?.media && !item.viewOnly).map(item => ({ source: item.media!.src, sourceVersion: item.media!.sourceVersion,
       thumbnail: item.media!.thumbnailSrc, width: item.media!.safeDetails?.width, height: item.media!.safeDetails?.height, bytes: item.media!.safeDetails?.fileSize }));
@@ -152,7 +178,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
         const reactions = item.media?.contentKey ? <ContentReactions contentKey={item.media.contentKey} imageSharing={item.media.imageSharing}
           secondaryAction={renderReactionAction?.(item)} overlay={!renderReactionAction} parentControlled={!renderReactionAction} /> : null;
         return (
-          <article key={item.id} className={styles.card} data-result-id={item.id} data-result-controls-parent>
+          <article key={item.id} id={supportsNextActions ? `image-result-${item.id}` : undefined} className={styles.card} data-result-id={item.id} data-result-controls-parent>
             <div className={styles.media} data-transparent={item.transparent || undefined} data-reaction-surface>
               {item.media ? <>
                 <ResultImageCover key={`${scope}:${item.id}`} src={item.media.thumbnailSrc || item.media.src} alt={item.label} selected={currentSelection === item.id} applied={Boolean(item.applied)} onSelect={() => select(item)} onPreview={() => changePreview(item, true)} onViewed={item.onViewed} active={visible} onQuickUse={onQuickUse && !item.viewOnly ? () => onQuickUse(item) : undefined} loadingOverlay={item.generationWait ? <ImageGenerationWaiting wait={item.generationWait} visible={visible} loadingImage /> : undefined} />
@@ -176,6 +202,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
               </div>}
             </div>
             {renderReactionAction && reactions && <div className={styles.reactionRow}>{reactions}</div>}
+            {item.media?.contentKey && nextSourceSet.has(item.media.contentKey) && <ImageResultNextActions sourceKey={item.media.contentKey} resultId={item.id} className={styles.nextActions} />}
             {renderMetadata ? renderMetadata(item) : <div className={styles.heading}><strong title={item.label}>{item.label}</strong><span>{item.status}</span></div>}
             {primaryActions && <div className={styles.actions} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{primaryActions}</div>}
             {feedback?.id === item.id && <p className={styles.feedback} role="status">{feedback.message}</p>}
@@ -186,6 +213,6 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
       })}
     </div>
     {paginationSlot === undefined && pagination('bottom')}
-    {preview?.media && <ZoomableImagePreview {...preview.media} imageNeighbors={imageNeighbors} resolveDownload={src => items.find(item => item.media?.src === src)?.download} previewKey={preview.media.previewKey || `${scope}:${preview.id}`} hasNavigation={previewable.length > 1} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => changePreview(null)} />}
+    {preview?.media && <ZoomableImagePreview {...preview.media} nextActionSources={nextSources as ContentKey[]} nextActionResultId={preview.id} imageNeighbors={imageNeighbors} resolveDownload={src => items.find(item => item.media?.src === src)?.download} previewKey={preview.media.previewKey || `${scope}:${preview.id}`} hasNavigation={previewable.length > 1} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => changePreview(null)} />}
   </div>;
 }

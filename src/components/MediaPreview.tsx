@@ -9,7 +9,9 @@ import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import type { SafeImagePreviewDetails } from '@/components/ZoomableImagePreview';
 import type { ImageReadCandidate } from '@/lib/hooks/use-image-neighbors';
 import type { ContentKey } from '@/lib/content-reactions/types';
-import { useMediaPreviewState } from '@/lib/hooks/use-media-preview-state';
+import { useMediaPreviewState, useVideoLoopState } from '@/lib/hooks/use-media-preview-state';
+import { VideoLoopButton } from '@/components/VideoLoopButton';
+import { MultiviewEntry } from '@/components/MultiviewEntry';
 import { isTopmostDialogLayer, useDialogDismiss } from '@/components/useDialogDismiss';
 import styles from './MediaPreview.module.css';
 
@@ -89,6 +91,7 @@ function MediaFilePreview({
   const interactedRef = useRef(false);
   const restoredKeyRef = useRef<string | null>(null);
   const previewState = useMediaPreviewState(previewKey, contentKey, src);
+  const loop = useVideoLoopState(type === 'video' ? src : undefined, contentKey, previewKey);
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [loading, setLoading] = useState(Boolean(src.trim()));
@@ -295,11 +298,13 @@ function MediaFilePreview({
         <div className={styles.leading}>
           {contentKey && <ContentReactions contentKey={contentKey} />}
           <strong className={styles.title}>{titleText}</strong>
+          {type === 'video' && <MultiviewEntry contentKey={contentKey} />}
         </div>
         <div className={styles.actions}>
           {hasNavigation && onPrevious && <button type="button" onClick={onPrevious} title="上一项" aria-label="上一项"><ArrowLeft size={16} /></button>}
           {hasNavigation && onNext && <button type="button" onClick={onNext} title="下一项" aria-label="下一项"><ArrowRight size={16} /></button>}
           <button type="button" onClick={resetPlayback} title="回到开头" aria-label="重置播放位置"><RotateCcw size={16} /></button>
+          {type === 'video' && <VideoLoopButton enabled={loop.enabled} onToggle={loop.toggle} disabled={!src.trim() || !loop.ready} storageUnavailable={loop.storageUnavailable} />}
           <button type="button" onClick={onClose} title="关闭" aria-label="关闭预览"><X size={16} /></button>
         </div>
         {notice != null && <div className={styles.notice}>{notice}</div>}
@@ -322,6 +327,7 @@ function MediaFilePreview({
             src={src.trim() ? src : undefined}
             poster={poster || undefined}
             controls
+            loop={loop.enabled}
             playsInline
             preload="metadata"
             aria-label={titleText}

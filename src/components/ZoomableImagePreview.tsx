@@ -18,6 +18,7 @@ import { RelativeTime } from '@/components/RelativeTime';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { useImagePreviewHistoryDismiss } from './useImagePreviewHistoryDismiss';
 import { ImageComparisonPicker } from './ImageComparisonPicker';
+import { ImageResultNextActions } from './ImageResultNextActions';
 import {
   fittedImageView, imageSourceIdentity, imageDisplaySource as displaySource, sourcePickerKey, resolveComparisonImage,
   readComparisonPreferences, saveComparisonPreferences, readImageView, saveImageView,
@@ -48,6 +49,9 @@ export type ZoomableImagePreviewProps = {
   title?: string;
   previewKey?: string;
   contentKey?: ContentKey;
+  /** Explicit successful generated sources supplied by the result host only. */
+  nextActionSources?: ContentKey[];
+  nextActionResultId?: string;
   imageSharing?: boolean;
   /** View/like-only sources must never request originals, HD downloads or copying. */
   previewOnly?: boolean;
@@ -241,7 +245,7 @@ type ImageRequest = { token: number; controller: AbortController; resolve: (appl
 const sides: Side[] = ['current', 'comparison'];
 const viewIdentity = (side: Side, image: ImageComparisonSource) => imageSourceIdentity(image) + ':' + side;
 
-export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, previewKey, sourceVersion, sourceRole, imageNeighbors = [], contentKey, imageSharing = true, previewOnly = false, metadata, safeDetails, comparison, comparisonCandidates = [], details, notice, hasNavigation, onPrevious, onNext, onImageLoaded, resolveDownload, onClose }: ZoomableImagePreviewProps) {
+export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, previewKey, sourceVersion, sourceRole, imageNeighbors = [], contentKey, nextActionSources = [], nextActionResultId, imageSharing = true, previewOnly = false, metadata, safeDetails, comparison, comparisonCandidates = [], details, notice, hasNavigation, onPrevious, onNext, onImageLoaded, resolveDownload, onClose }: ZoomableImagePreviewProps) {
   const { user, hasLoadedUser } = useAppSession();
   const owner = user?.id || '';
   const backdropRef = useRef<HTMLDivElement>(null), toolbarRef = useRef<HTMLDivElement>(null), stageRef = useRef<HTMLDivElement>(null);
@@ -723,6 +727,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
         <button ref={moreTriggerRef} type="button" title="图片与对比更多操作" aria-label="图片与对比更多操作" aria-expanded={controlsOpen === 'more'} aria-controls={controlsOpen === 'more' ? controlsId : undefined} aria-haspopup="dialog" onClick={() => setControlsOpen(value => value === 'more' ? null : 'more')}><MoreHorizontal size={18} /></button>
         <button type="button" className={styles.closeButton} onClick={dismissPreview} title="关闭大图" aria-label="关闭大图"><X size={18} /></button>
       </div>
+      {!previewOnly && selectedImage.contentKey && nextActionSources.includes(selectedImage.contentKey) && <ImageResultNextActions key={`next:${owner}:${selectedImage.contentKey}`} sourceKey={selectedImage.contentKey} resultId={isOriginalSubject ? nextActionResultId : undefined} className={styles.nextActions} />}
       {controlsOpen && <div ref={controlsRef} id={controlsId} className={styles.controlsPopover} role="dialog" aria-label={controlsOpen === 'zoom' ? '缩放选中图' : '图片与对比更多操作'}>
         <header><strong>{sideLabel(safeSide)}{controlsOpen === 'zoom' ? '缩放' : '操作'}</strong><button type="button" title="收起操作" aria-label="收起操作" onClick={() => setControlsOpen(null)}><X size={16} /></button></header>
         {controlsOpen === 'zoom' ? <>

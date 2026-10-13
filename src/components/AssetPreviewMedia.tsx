@@ -1,7 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useRef } from 'react';
-import { useMediaPreviewState } from '@/lib/hooks/use-media-preview-state';
+import { useMediaPreviewState, useVideoLoopState } from '@/lib/hooks/use-media-preview-state';
+import { VideoLoopButton } from '@/components/VideoLoopButton';
+import { MultiviewEntry } from '@/components/MultiviewEntry';
+import styles from './AssetPreviewMedia.module.css';
 import type { ContentKey } from '@/lib/content-reactions/types';
 import { replaceAssetMedia, type AssetPlaybackLease } from '@/lib/media/asset-playback';
 
@@ -17,6 +20,7 @@ type AssetPreviewMediaProps = {
 
 export function AssetPreviewMedia({ kind, contentKey, src, poster, title, onClaim, onRelease }: AssetPreviewMediaProps) {
   const state = useMediaPreviewState(contentKey, contentKey, src);
+  const loop = useVideoLoopState(kind === 'video' ? src : undefined, contentKey);
   const stateRef = useRef(state);
   stateRef.current = state;
   const mediaRef = useRef<HTMLMediaElement | null>(null);
@@ -100,11 +104,13 @@ export function AssetPreviewMedia({ kind, contentKey, src, poster, title, onClai
 
   if (kind === 'video') {
     return (
-      // eslint-disable-next-line jsx-a11y/media-has-caption
+      <div className={styles.videoShell}>
+      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
       <video
         ref={setMediaRef}
         src={src}
         controls
+        loop={loop.enabled}
         playsInline
         preload="metadata"
         poster={poster || undefined}
@@ -117,6 +123,9 @@ export function AssetPreviewMedia({ kind, contentKey, src, poster, title, onClai
         onEnded={event => { if (event.currentTarget.ended) releaseLease(event.currentTarget, true, true); }}
         onError={event => releaseLease(event.currentTarget, true)}
       />
+      <div className={styles.actions}><VideoLoopButton enabled={loop.enabled} onToggle={loop.toggle} disabled={!src || !loop.ready} storageUnavailable={loop.storageUnavailable} />
+      <MultiviewEntry contentKey={contentKey} /></div>
+      </div>
     );
   }
 

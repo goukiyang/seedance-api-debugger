@@ -36,6 +36,8 @@ import { SEEDANCE_2_5_MODEL_ID, SEEDANCE_VIDEO_MODEL_OPTIONS, isSeedanceVideoDur
 import { orderRecentTaskCards, recentTaskHasVisualPreview } from '@/lib/video/recent-task-card-order';
 import type { StudioGenerationHandoff } from '@/lib/template-studio/types';
 import { stableGenerationPayloadJson } from '@/lib/template-studio-video-handoff';
+import { readImageResultHandoff, resumeImageResultVideoImport } from '@/lib/image-result-next/client';
+import type { ImageResultVideoHandoff } from '@/lib/image-result-next/video-draft';
 
 // ============================================================================
 // Types
@@ -105,6 +107,7 @@ type GenerationSubmitParams = {
   h3LoraId?: string | null;
   draft?: boolean;
   templateStudioRunId: string | null;
+  imageResultReceiptId?: string | null;
   templateStudioAssets: Array<{
     assetId: string;
     role: 'reference' | 'first' | 'last';
@@ -586,10 +589,38 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [studioWorkspaceTabId, setStudioWorkspaceTabId] = useState<string | null>(null);
   const [studioHandoffLoading, setStudioHandoffLoading] = useState(false);
   const [studioHandoffError, setStudioHandoffError] = useState<string | null>(null);
+  const [imageResultHandoff, setImageResultHandoff] = useState<ImageResultVideoHandoff | null>(null);
+  const [imageResultLoading, setImageResultLoading] = useState(false);
+  const [imageResultError, setImageResultError] = useState('');
+  const [imageResultRequested, setImageResultRequested] = useState<boolean | null>(null);
+  const [imageResultPendingReceipt, setImageResultPendingReceipt] = useState('');
   const [unconfirmedGenerationRequest, setUnconfirmedGenerationRequest] = useState(false);
   const studioHandoffRequestRef = useRef<string | null>(null);
   const forceNewGenerationRef = useRef(false);
   const unconfirmedGenerationParamsRef = useRef<GenerationSubmitParams | null>(null);
+
+  useEffect(() => {
+    if (loadingUser) return;
+    const query = new URLSearchParams(window.location.search), id = query.get('image_result_handoff');
+    setImageResultRequested(Boolean(id)); setImageResultHandoff(null); setImageResultError(''); setImageResultPendingReceipt('');
+    if (!id) { setImageResultLoading(false); return; }
+    if (!currentUser || isIpSurface || query.has('template_studio_run_id') || query.has('reuse_task_id')) {
+      setImageResultLoading(false); setImageResultError('请用当前内部账户重新打开图片接续入口，不能与旧任务恢复混用。'); return;
+    }
+    const ownerId = currentUser.id, controller = new AbortController();
+    setImageResultLoading(true);
+    readImageResultHandoff(id, controller.signal).then(value => {
+      if (controller.signal.aborted || activeAccountIdRef.current !== ownerId) return;
+      if (value.intent !== 'video' || !value.workspaceTabId) throw new Error('这次原图尚未准备为视频首帧，请返回原结果');
+      if (!value.ready) { setImageResultPendingReceipt(value.receiptId); throw new Error('原导入已经记录，首帧准备尚未完成。可继续准备同一次导入，不会生成视频。'); }
+      sessionStorage.setItem('workspace_tab_id', value.workspaceTabId);
+      setStudioWorkspaceTabId(value.workspaceTabId);
+      setImageResultHandoff({ ...value, ownerId });
+    }).catch(cause => {
+      if (!controller.signal.aborted) setImageResultError(cause instanceof Error ? cause.message : '原图尚未读到，请返回原结果');
+    }).finally(() => { if (!controller.signal.aborted) setImageResultLoading(false); });
+    return () => controller.abort();
+  }, [currentUser?.id, loadingUser, isIpSurface]);
 
   useEffect(() => {
     if (loadingUser) return;
@@ -2179,7 +2210,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         last_frame_asset_id: params.templateStudioAssets.find((asset) => asset.role === 'last')?.assetId,
       };
       const requestFingerprint = stableGenerationPayloadJson(requestBody);
-      const requestStorageKey = `sd2-generation-request-v1:${currentUser?.id || 'session'}:${surface}:${params.templateStudioRunId || 'standard'}`;
+      const requestStorageKey = `sd2-generation-request-v1:${currentUser?.id || 'session'}:${surface}:${params.imageResultReceiptId || params.templateStudioRunId || 'standard'}`;
       const readPendingRequest = () => {
         try {
           const raw = sessionStorage.getItem(requestStorageKey);
@@ -3056,7 +3087,22 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           <p className="composer-prefill-notice">请登录后选择参考素材。<Link href="/login">重新登录</Link></p>
         )}
 
-        <GenerationComposer
+        {imageResultRequested && <p className="composer-prefill-notice" role={imageResultError ? 'alert' : 'status'}>
+          {imageResultLoading ? '正在重新核对原图与独立视频草稿…' : imageResultError || imageResultHandoff?.message}
+          {imageResultHandoff && <Link href={imageResultHandoff.returnPath}>返回原结果</Link>}
+          {imageResultPendingReceipt && <button type="button" className="btn btn-secondary" disabled={imageResultLoading} onClick={() => {
+            const ownerId = currentUser?.id, receipt = imageResultPendingReceipt;
+            if (!ownerId) return;
+            setImageResultLoading(true); setImageResultError('');
+            void resumeImageResultVideoImport(receipt).then(value => {
+              if (activeAccountIdRef.current !== ownerId || !value.workspaceTabId) return;
+              sessionStorage.setItem('workspace_tab_id', value.workspaceTabId); setStudioWorkspaceTabId(value.workspaceTabId);
+              setImageResultHandoff({ ...value, ownerId }); setImageResultPendingReceipt('');
+            }).catch(cause => { if (activeAccountIdRef.current === ownerId) setImageResultError(cause instanceof Error ? cause.message : '原导入尚未确认'); })
+              .finally(() => { if (activeAccountIdRef.current === ownerId) setImageResultLoading(false); });
+          }}>继续准备原首帧</button>}
+        </p>}
+        {(imageResultRequested === false || Boolean(imageResultHandoff)) && <GenerationComposer
           key={`${currentUser?.id || 'anonymous'}:${studioHandoff?.runId || 'standard'}:${studioWorkspaceTabId || 'workspace'}`}
           collections={collections}
           initialSettings={generationDefaults}
@@ -3065,6 +3111,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           videoCardDefaults={selectedVideoCardDefaults}
           reuseDraft={reuseDraft}
           studioHandoff={studioHandoff}
+          imageResultHandoff={imageResultHandoff}
           selectedVideoCardId={selectedVideoCardId}
           canManageTemplates={currentUser?.role === 'admin'}
           require1080pApproval={Boolean(selectedProject && selectedProject.type !== 'personal')}
@@ -3104,7 +3151,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
             createEnabled: seedanceDraftCapability.create_enabled,
             message: seedanceDraftCapability.message,
           }}
-        />
+        />}
 
         {/* 最近任务 */}
         {showRecentTaskSurface && (

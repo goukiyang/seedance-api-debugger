@@ -14,6 +14,7 @@
     window.canvasEngine = engine;
     let pendingReferenceImport = null;
     const inlineVideoPlayers = new Map();
+    const videoLoopControls = new Set();
     const videoReadOrders = new Map();
     let videoReadSequence = 0;
     let videoRecheck = null;
@@ -2947,7 +2948,7 @@
 
     function safeVideoReadInteraction(target, event) {
         if (event.type === 'keydown' && event.key === 'Tab' && !event.ctrlKey && !event.metaKey && !event.altKey) return true;
-        if (!target?.closest('[data-canvas-inline-video], [data-video-play], [data-video-read-retry], [data-canvas-media-preview]')) return false;
+        if (!target?.closest('[data-canvas-inline-video], [data-video-loop], [data-video-play], [data-video-read-retry], [data-canvas-media-preview]')) return false;
         if (['click', 'pointerdown', 'mousedown'].includes(event.type)) return true;
         return event.type === 'keydown' && !event.ctrlKey && !event.metaKey && !event.altKey
             && [' ', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'Escape'].includes(event.key);
@@ -5802,6 +5803,90 @@
         inlineVideoPlayers.forEach(({ video }) => { if (video !== except) video.pause(); });
     }
 
+    // Match the React media-preview v1 identity; loop remains a private viewing preference.
+    function videoLoopFingerprint(source) {
+        if (!source || source.length > 4096 || /^(?:data:|blob:)/i.test(source)) return '';
+        try {
+            const url = new URL(source, 'https://preview-state.invalid');
+            for (const name of Array.from(url.searchParams.keys())) {
+                if (/^(?:token|access_token|auth|authorization|signature|sig|credential|expires?|exp|jwt|session|thumbnail|preview|x-amz-.+)$/i.test(name)) url.searchParams.delete(name);
+            }
+            url.searchParams.sort();
+            const normalized = `${url.host}${url.pathname}${url.search}`;
+            let first = 0x811c9dc5, second = 0x9e3779b9;
+            for (let index = 0; index < normalized.length; index++) {
+                const code = normalized.charCodeAt(index);
+                first = Math.imul(first ^ code, 0x01000193); second = Math.imul(second ^ code, 0x85ebca6b);
+            }
+            return `${(first >>> 0).toString(16).padStart(8, '0')}${(second >>> 0).toString(16).padStart(8, '0')}`;
+        } catch { return ''; }
+    }
+
+    function attachVideoLoop(video, host, contentKey, source, current = () => video.isConnected) {
+        if (!video || !host) return;
+        const previousControl = Array.from(videoLoopControls).find(control => control.video === video);
+        for (const control of videoLoopControls) {
+            if (!control.video.isConnected || control.video === video) videoLoopControls.delete(control);
+        }
+        const userId = canvasRuntime.bootstrap?.user?.id || null;
+        const taskId = /^video_task:([a-z\d_-]+)$/i.exec(contentKey || '')?.[1];
+        const version = taskId ? `/api/video/play/${taskId}` : source;
+        const fingerprint = videoLoopFingerprint(version);
+        const resource = typeof contentKey === 'string' && contentKey.length <= 200 && /^[a-z][a-z\d_-]*:[a-z\d_.:@-]+$/i.test(contentKey)
+            ? contentKey : `video-source:${fingerprint || 'unavailable'}`;
+        const key = userId && fingerprint ? `sd2:media-preview:v1:${encodeURIComponent(userId)}:${encodeURIComponent(resource)}:${fingerprint}` : null;
+        const button = host.querySelector('[data-video-loop]') || document.createElement('button');
+        button.type = 'button'; button.dataset.videoLoop = '';
+        button.title = '只循环当前视频；手机系统全屏中请先退出全屏再调整';
+        button.style.cssText = 'display:inline-flex;align-items:center;gap:4px;width:auto;min-height:34px;height:auto;padding:5px 8px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-secondary);font-size:12px;white-space:nowrap;cursor:pointer';
+        if (!button.isConnected) host.append(button);
+        const read = () => {
+            if (!key) return false;
+            const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+            return parsed?.version === 1 && parsed.state?.loop === true;
+        };
+        const set = enabled => {
+            video.loop = Boolean(enabled);
+            button.setAttribute('aria-pressed', String(video.loop));
+            button.innerHTML = `${window.UltimateCanvasIcons('RefreshCw', 14)}<span>${video.loop ? '循环已开' : '循环'}</span>`;
+            button.style.color = video.loop ? 'var(--accent-teal)' : 'var(--text-primary)';
+        };
+        const control = { video, key, sync: () => {
+            if (!current() || canvasRuntime.bootstrap?.user?.id !== userId) { set(false); return; }
+            try { set(read()); } catch { /* Preserve the local setting when storage is unavailable. */ }
+        } };
+        try { set(previousControl?.key === key ? video.loop : read()); } catch { set(video.loop); }
+        videoLoopControls.add(control);
+        const stop = event => event.stopPropagation();
+        button.addEventListener('pointerdown', stop); button.addEventListener('mousedown', stop); button.addEventListener('keydown', stop);
+        button.addEventListener('click', event => {
+            event.stopPropagation();
+            if (!current() || (canvasRuntime.bootstrap?.user?.id || null) !== userId) return;
+            set(!video.loop);
+            try {
+                if (!key) throw new Error('No private preference scope');
+                const previous = JSON.parse(localStorage.getItem(key) || 'null');
+                const state = previous?.version === 1 && previous.state && typeof previous.state === 'object' ? previous.state : {};
+                localStorage.setItem(key, JSON.stringify({ version: 1, state: { ...state, loop: video.loop } }));
+                window.dispatchEvent(new CustomEvent('sd2:media-preview-state', { detail: { key, patch: { loop: video.loop } } }));
+                host.querySelector('[data-video-loop-notice]')?.remove();
+            } catch {
+                if (!host.querySelector('[data-video-loop-notice]')) {
+                    const notice = document.createElement('small'); notice.dataset.videoLoopNotice = ''; notice.setAttribute('role', 'status'); notice.textContent = '本次设置无法记住'; host.append(notice);
+                }
+            }
+        });
+    }
+
+    const syncVideoLoops = key => {
+        for (const control of videoLoopControls) {
+            if (!control.video.isConnected) videoLoopControls.delete(control);
+            else if (control.key === key) control.sync();
+        }
+    };
+    window.addEventListener('storage', event => { if (event.key) syncVideoLoops(event.key); });
+    window.addEventListener('sd2:media-preview-state', event => { if (event.detail?.key) syncVideoLoops(event.detail.key); });
+
     function releaseInlineVideos(nodeId = '') {
         inlineVideoPlayers.forEach((state, id) => {
             if (nodeId && id !== nodeId) return;
@@ -5822,6 +5907,9 @@
         const node = engine.nodes.get(nodeId);
         if (!video || !node) return;
         if (inlineVideoPlayers.get(nodeId)?.video === video) {
+            const existing = inlineVideoPlayers.get(nodeId);
+            attachVideoLoop(video, nodeEl.querySelector('[data-video-result-meta]'), `video_task:${taskId}`, playUrl,
+                () => inlineVideoPlayers.get(nodeId) === existing && existing.epoch === canvasRuntime.contextEpoch && video.isConnected);
             const label = nodeEl.querySelector('[data-video-read-state]');
             if (label) label.textContent = video.dataset.readState || '';
             return;
@@ -5830,6 +5918,7 @@
         inlineVideoPlayers.set(nodeId, state);
         const current = () => inlineVideoPlayers.get(nodeId) === state && engine.nodes.get(nodeId) === node
             && state.epoch === canvasRuntime.contextEpoch && node.data.taskId === taskId && video.isConnected;
+        attachVideoLoop(video, nodeEl.querySelector('[data-video-result-meta]'), `video_task:${taskId}`, playUrl, current);
         const label = message => {
             if (!current()) return;
             const target = nodeEl.querySelector('[data-video-read-state]');
@@ -9624,6 +9713,11 @@
                     ? `<img class="generated-frame-preview" src="${escapeHtml(previewImage)}" alt="${escapeHtml(title)}" draggable="false">`
                     : '<div class="generated-result-placeholder" aria-hidden="true"></div>'}
             </div>`);
+        if (options.mediaType === 'video' && options.mediaUrl) {
+            const video = resultRegion.querySelector('video');
+            const contentKey = node?.data?.taskId ? `video_task:${node.data.taskId}` : node?.data?.assetId ? `asset:${node.data.assetId}` : undefined;
+            attachVideoLoop(video, resultRegion.querySelector('.generated-reference-card'), contentKey, options.mediaUrl);
+        }
         syncImageResultActionsTrigger(nodeEl, node, options);
         if (node?.type === 'image') renderCanvasBilling(nodeId);
         if (node?.type === 'video') syncVideoTaskActionsTrigger(nodeEl, node, options);
