@@ -18,6 +18,7 @@ import { tryContentKeyParts } from './key';
 import { studioPresetArchived } from '@/lib/image-studio/preset-lifecycle';
 import { studioFixedCoverDTO } from '@/lib/image-studio/module-cover';
 import { studioSharedBinding } from '@/lib/image-studio/shared-contract';
+import { resolveStudioPinnedAsset } from '@/lib/image-studio/result-pins';
 
 export class ReactionError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -94,7 +95,16 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
         const presets = await prisma.imageStudioPreset.findMany({ where: { OR: [{ owner_id: user.id }, { is_shared: true }] } });
         allowed = presets.some(preset => canViewStudioPreset(user, preset) && isExplicitPresetAsset(preset, id));
       }
-      if (!allowed) return null;
+      if (!allowed) {
+        const pin = asset.type === 'image' ? await resolveStudioPinnedAsset(user, id) : null;
+        if (!pin) return null;
+        const item = summary(input, 'image', '模板置顶图片', `/template-studio?type=image&presetId=${encodeURIComponent(pin.presetId)}`);
+        item.owner = await owner(asset.owner_id);
+        // Only the output image is shared. Never expose its filename, generation origin,
+        // private task route, inputs, prompt, reuse or download permissions.
+        return { summary: withMedia(item, false), source: { url: asset.original_url, thumbnail: asset.thumbnail_url,
+          canPreviewOriginal: false, mimeType: asset.mime_type || undefined, fileName: 'template-pinned-image' } };
+      }
       const item = summary(input, asset.type as ContentCategory, asset.file_name || '素材', `/assets?content=${encodeURIComponent(input)}`);
       if (asset.type === 'image') item.generationOrigin = assetGenerationOrigin(asset, await generationOrigins(user, [asset]));
       item.owner = await owner(asset.owner_id);
