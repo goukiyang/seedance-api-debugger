@@ -5,7 +5,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { assertUploadOwner, uploadRequestId, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
+import { assertUploadOwner, uploadIdentity, uploadRequestId, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
+import { prepareRawUpload, rawUploadIdentity } from '@/lib/assets/raw-upload-state';
 import { createDirectUploadTicket } from '@/lib/assets/direct-upload';
 import { getSiteUploadKind } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
@@ -14,6 +15,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 type UploadTicketBody = {
+  mode?: 'raw';
+  previousNonce?: string;
   ownerId?: string;
   requestId?: string;
   fileName?: string;
@@ -43,6 +46,11 @@ export async function POST(request: NextRequest) {
     mimeType = typeof body.mimeType === 'string' ? body.mimeType : '';
     const hash = typeof body.hash === 'string' ? body.hash : '';
     fileSize = Number(body.fileSize);
+    if (body.mode === 'raw') {
+      await uploadIdentity(user.id);
+      const identity = rawUploadIdentity(user.id, { requestId, hash, fileSize, mimeType });
+      return NextResponse.json(await prepareRawUpload(identity, body.previousNonce), { headers: { 'Cache-Control': 'private, no-store' } });
+    }
     if (!Number.isFinite(fileSize) || fileSize < 0) {
       await recordAssetUploadLog({
         operatorId: user.id,
