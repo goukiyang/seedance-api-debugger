@@ -485,7 +485,7 @@ export async function chooseStudioModuleSharing(ownerId: string, body: Record<st
       if (!source || source.owner_id !== ownerId || await studioPresetArchived(source.id, tx)) throw new StudioModuleError('不能共享他人的模板定义', 403);
     }
     const previous = await readStudioModuleSharingPreference(ownerId, id, tx);
-    if (previous?.requestId === body.requestId) {
+    if (previous && previous.requestId === body.requestId) {
       if (previous.enabled !== body.isShared) throw new StudioModuleError('请先确认原共享设置，不会改写未确认操作', 409);
       return;
     }
