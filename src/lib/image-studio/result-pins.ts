@@ -34,11 +34,11 @@ function decode(raw: string | undefined, presetId: string): Document {
 }
 export async function studioPinScope(user: SessionUser, moduleId: string, db: SharedStudioClient = prisma) {
   if (user.status !== 'active' || user.expires_at && user.expires_at <= new Date() || !canUseCompanyTemplates(user) || !validId(moduleId)) throw new StudioPinError('无权访问模板', 403);
-  const module = await db.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: user.id } });
-  if (!module) return null;
+  const studioModule = await db.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: user.id } });
+  if (!studioModule) return null;
   const binding = await studioSharedBinding(user.id, moduleId, db);
-  const presetId = binding?.presetId || module.source_preset_id;
-  if (!presetId || module.source_preset_id !== presetId) return null;
+  const presetId = binding?.presetId || studioModule.source_preset_id;
+  if (!presetId || studioModule.source_preset_id !== presetId) return null;
   const preset = await db.imageStudioPreset.findUnique({ where: { id: presetId } });
   if (!preset || !preset.is_shared || !canViewStudioPreset(user, preset) || await studioPresetArchived(presetId, db)) return null;
   return { presetId, moduleId, binding };
