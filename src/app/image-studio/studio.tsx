@@ -1767,7 +1767,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       const draft = currentPresetDraft();
       const sharedDraft = { ...draft, prompt: templatePrompt, templatePrompt,
         referenceIds: sharedLive ? templateImageIds : [],
-        personalOverrides: undefined, personalReferenceIds: undefined, personalReferencePolicy: undefined };
+        personalOverrides: sharedLive ? undefined : { prompt, model: moduleModel, quality, resolution, count, aspectRatio },
+        personalReferenceIds: sharedLive ? undefined : moduleDraft.referenceIds,
+        personalReferencePolicy: sharedLive ? undefined : referencePolicy };
       const request: NonNullable<typeof presetCreateRequest.current> = presetCreateRequest.current ||= { requestId: crypto.randomUUID(),
         payload: { ...(isShared === true ? sharedDraft : draft), name: presetName, isShared: isShared === true,
           ...(isShared === true ? {} : { saveIntent: 'personal-quick' }) }, generationSignature: generationDraft };
