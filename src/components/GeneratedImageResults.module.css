@@ -1,4 +1,10 @@
 .results { min-width: 0; }
+.contextHint { display: inline; margin-inline-start: 10px; color: #aab8b4; font-size: 13px; font-weight: 400; line-height: 1.5; }
+.touchHint { display: none; }
+@media (hover: none), (any-pointer: coarse) { .pointerHint { display: none; } .touchHint { display: inline; } }
+.nextFeedback { margin: 5px 0; }
+.nextFeedback a { margin-inline-start: 8px; color: #a5e5d7; text-decoration: underline; }
+.nextFeedback a:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 14px; }
 .card { min-width: 0; }
 .coverReactions { position: absolute; top: 6px; left: 6px; z-index: 7; width: calc(100% - 12px); color: #e0e9e5; pointer-events: none; }

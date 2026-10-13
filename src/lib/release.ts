@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '侧栏拖动和比例下拉更顺手，风格组恢复图片式添加；点赞与置顶回到封面左上角。个人信息可直接查看并安全切换账号。高清准备在服务器忙碌后可自动继续，单张异常不拖住其他图片，等待时仍可查看完整原图。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '模板结果图片支持右键或长按打开操作菜单，查看、下载、恢复设置和继续创作更集中；删除仍需确认。导入进度与失败提示留在卡片上，关闭菜单也不会中断。点赞、置顶和其他页面保持原样。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

@@ -1,6 +1,6 @@
 {
   "name": "video-api-debugger",
-  "version": "0.84.0",
+  "version": "0.85.0",
   "private": true,
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",
@@ -12,6 +12,7 @@
     "db:studio": "prisma studio",
     "seed:admin": "tsx scripts/seed-admin.ts",
     "test:api": "tsx scripts/test-seedance-api.ts",
+    "test:result-context-menu": "tsx scripts/test-image-result-next-controller.ts && tsx scripts/test-result-image-context-menu.ts && tsx scripts/test-result-card-context-menu-integration.ts",
     "test:hd-stability": "tsx scripts/test-hd-stability.ts && tsx scripts/test-hd-display.ts",
     "test:ui-account-boundaries": "tsx scripts/test-client-session-boundary.ts && tsx scripts/test-studio-navigation-visibility.ts",
     "test:reference-media": "tsx scripts/reference-media-chain-smoke.ts",
@@ -32,6 +33,7 @@
     "@aws-sdk/client-s3": "^3.1041.0",
     "@aws-sdk/s3-request-presigner": "^3.1041.0",
     "@prisma/client": "^5.16.1",
+    "@radix-ui/react-context-menu": "2.4.1",
     "@volcengine/tos-sdk": "^2.9.1",
     "@xyflow/react": "^12.10.2",
     "dotenv": "^16.4.5",

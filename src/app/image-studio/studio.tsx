@@ -18,7 +18,8 @@ import { SessionPreviewImage } from '@/components/SessionPreviewImage';
 import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
 import { scrollToWorkbenchHeader } from '@/lib/navigation/scroll-to-workbench-header';
 import { replaceImageModuleLocation } from '@/lib/navigation/image-module-location';
-import { GeneratedImageResults, type GeneratedImageResult } from '@/components/GeneratedImageResults';
+import { GeneratedImageResults, ResultImageContextMenuHint, type GeneratedImageResult } from '@/components/GeneratedImageResults';
+import type { ResultImageContextMenuItem } from '@/components/ResultImageContextMenu';
 import { StudioResultPinButton, StudioResultPinnedIndicator } from './result-pin-button';
 import { STUDIO_RESULT_FEED, type StudioResultFeedExtras, type SharedStudioPinnedImage } from '@/lib/image-studio/result-pin-types';
 import { useLikedStudioResults } from './liked-results';
@@ -2551,6 +2552,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     setCopyFeedback({ id: task.id, text: copied ? '已复制' : '复制失败，请重试' });
     window.setTimeout(() => setCopyFeedback(current => current?.id === task.id ? null : current), copied ? 1800 : 2600);
   }
+  function requestResultDelete(task: StudioTask) { setDeleteError(''); setDeleteTarget(task); }
+  async function restoreResultSettings(task: StudioTask) {
+    if ((unpersistedDraft || moduleContext !== savedModuleContext || fixedDirty || dirty || automaticDirty) && !(await confirm('除当前主图外，未保存的设置将被这张图片的历史设置替换，继续恢复？', { title: '恢复设置', confirmLabel: '恢复设置' }))) return;
+    const reason = restoreTask(task); if (reason) setError(reason);
+  }
   const estimatePayload = settings ? generationPayload(undefined, '') : null;
   const estimateSignature = estimatePayload ? JSON.stringify([userId, Object.fromEntries(Object.entries(estimatePayload).filter(([key]) => key !== 'requestId')), effectiveImageChannelId, imageChannelId === 'original' ? imageChannels.defaultRoutes?.revision : undefined]) : '';
   liveGenerationSignature.current = estimateSignature;
@@ -3058,7 +3064,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         {error && <p role="alert" className={styles.error}>{error}</p>}
       </section>
       <section className={styles.outputs} aria-label="生成结果">
-        <header className={`${styles.header}${templateWorkbench ? ` ${styles.resultHeader}` : ''}`}><h2>生成结果</h2>
+        <header className={`${styles.header}${templateWorkbench ? ` ${styles.resultHeader}` : ''}`}><h2>生成结果{templateWorkbench && resultView === 'images' && <ResultImageContextMenuHint />}</h2>
           {templateWorkbench && resultView === 'images' && <div className={styles.resultPaginationSlot} ref={setResultPaginationSlot} />}
           <div className={styles.counts}>
           {templateWorkbench && <button type="button" title={likedResults.liked ? '返回当前模板全部结果' : '只看当前模板中我喜欢的结果'} aria-label={likedResults.liked ? '返回当前模板全部结果' : '只看当前模板中我喜欢的结果'} aria-pressed={likedResults.liked} onClick={() => chooseResultFilter(!likedResults.liked)}><Heart size={16} fill={likedResults.liked ? 'currentColor' : 'none'} />喜欢</button>}
@@ -3071,6 +3077,23 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         {resultView === 'batch' ? batch.id ? <BatchResults key={`${userId}:${batch.id}`} id={batch.id} userId={userId} autoPack={batch.pack} visible={visible && active && !hidden} onSourceChanged={onSharedRefresh} onQuickUse={taskId => void replaceMainFromResult(taskId)} /> : <p>暂无选中批次，可开始批量生成或从<a href="/assets">资产库的“我的批次”</a>找回。</p> : <>
         {downloadReady && <p role="status">已交给浏览器下载。<a href={downloadReady.url} download={downloadReady.name}>再次下载</a></p>}
         <GeneratedImageResults key={likedResults.liked ? 'liked' : 'all'} items={sharedResults}
+          contextActionsEnabled={templateWorkbench}
+          contextActions={item => {
+            const task = item.task;
+            if (!task || item.viewOnly || item.media?.previewOnly || task.owner && task.owner.id !== userId) return [];
+            const actions: ResultImageContextMenuItem[] = [];
+            if (studioTaskHasDeliveredAsset(task)) actions.push({ id: 'restore', label: '恢复这张图的设置', group: 'continue', icon: <RotateCcw size={15} />,
+              disabled: Boolean(restoreDisabledReason(task)), description: restoreDisabledReason(task) || '保留当前主图，不生成图片',
+              transferFocus: true, onSelect: () => void restoreResultSettings(task) });
+            if (isAdmin && task.snapshot?.sourceAvailable) actions.push({ id: 'context', label: '复制文字上下文', group: 'manage', icon: <ClipboardList size={15} />,
+              disabled: copyFeedback?.id === task.id && copyFeedback.text === '复制中…',
+              description: copyFeedback?.id === task.id && copyFeedback.text === '复制中…' ? '正在复制，请稍后' : undefined,
+              onSelect: () => void copyTaskContext(task) });
+            actions.push({ id: 'delete', label: '删除生成记录', group: 'danger', icon: <Trash2 size={15} />, disabled: deleting || downloadBusy,
+              description: deleting ? '正在删除，请稍后' : downloadBusy ? '正在准备下载，请稍后' : undefined,
+              transferFocus: true, onSelect: () => requestResultDelete(task) });
+            return actions;
+          }}
           onQuickUse={item => { if (item.task) void replaceMainFromResult(item.task.id); }}
           renderReactionAction={templateWorkbench ? item => item.task?.asset?.id
             ? <StudioResultPinButton userId={userId} moduleId={module.id} taskId={item.task.id} assetId={item.task.asset.id} state={visibleFeed?.pinState || null} onSaved={refreshResults} />
@@ -3093,7 +3116,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
               setSelected(current => event.target.checked ? [...current, task.id] : current.filter(id => id !== task.id));
             }} />}
           </> : null}
-          renderDelete={({task}) => task ? <button type="button" disabled={deleting || downloadBusy} title="删除生成记录" aria-label={`删除第 ${task.ordinal} 张生成记录`} onClick={() => { setDeleteError(''); setDeleteTarget(task); }}><Trash2 size={17} /></button> : null}
+          renderDelete={({task}) => task ? <button type="button" disabled={deleting || downloadBusy} title="删除生成记录" aria-label={`删除第 ${task.ordinal} 张生成记录`} onClick={() => requestResultDelete(task)}><Trash2 size={17} /></button> : null}
           renderMetadata={({task, sharedPin}) => task ? <>          <div className={styles.resultHeading}>
             <p className={styles.prompt} title={`${name} · ${task.ordinal}`}>{name} · {task.ordinal}</p>
             {templateWorkbench && task.asset?.id && visibleFeed?.pinState.assetIds.includes(task.asset.id) && <span className={styles.muted}>已置顶</span>}
@@ -3127,10 +3150,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           renderActions={({task}) => task && (isAdmin && task.snapshot?.sourceAvailable || studioTaskHasDeliveredAsset(task)) ? <>{isAdmin && task.snapshot?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制文字上下文" aria-label="复制文字上下文" onClick={() => void copyTaskContext(task)}><ClipboardList size={15} /></button>}
             {studioTaskHasDeliveredAsset(task) && <button type="button" className={styles.restoreResult} disabled={Boolean(restoreDisabledReason(task))} title={restoreDisabledReason(task) || '恢复设置和风格组，保留当前主图，不生成图片'} aria-label="恢复设置，保留主图" aria-describedby={`studio-restore-${task.id}`} onClick={event => {
               event.stopPropagation();
-              void (async () => {
-                if ((unpersistedDraft || moduleContext !== savedModuleContext || fixedDirty || dirty || automaticDirty) && !(await confirm('除当前主图外，未保存的设置将被这张图片的历史设置替换，继续恢复？', { title: '恢复设置', confirmLabel: '恢复设置' }))) return;
-                const reason = restoreTask(task); if (reason) setError(reason);
-              })();
+              void restoreResultSettings(task);
             }}><RotateCcw size={15} /><span id={`studio-restore-${task.id}`} role="tooltip" className={styles.resolutionTooltip}>恢复设置</span></button>}
 </> : null}
           renderSupplement={({task}) => task ? <>
