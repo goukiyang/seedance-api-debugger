@@ -12,6 +12,7 @@ export interface MediaPreviewStoredState {
   offsetY: number;
   zoomMode: MediaPreviewZoomMode;
   currentTime: number;
+  loop: boolean;
 }
 
 interface StoredEntry {
@@ -28,6 +29,7 @@ const DEFAULT_STATE: MediaPreviewStoredState = {
   offsetY: 0,
   zoomMode: 'fit',
   currentTime: 0,
+  loop: false,
 };
 const ZOOM_MODES = new Set<MediaPreviewZoomMode>(['fit', 'width', 'actual', 'custom']);
 
@@ -99,17 +101,24 @@ function parseStoredState(input: string | null): MediaPreviewStoredState {
       offsetY: clampNumber(state.offsetY, -50_000, 50_000, DEFAULT_STATE.offsetY),
       zoomMode,
       currentTime: clampNumber(state.currentTime, 0, 604_800, DEFAULT_STATE.currentTime),
+      loop: state.loop === true,
     };
   } catch {
     return DEFAULT_STATE;
   }
 }
 
-function writeStoredState(key: string, value: MediaPreviewStoredState) {
+const STATE_EVENT = 'sd2:media-preview-state';
+
+function writeStoredState(key: string, patch: Partial<MediaPreviewStoredState>) {
   try {
+    const value = { ...parseStoredState(window.localStorage.getItem(key)), ...patch };
     window.localStorage.setItem(key, JSON.stringify({ version: 1, state: value }));
+    window.dispatchEvent(new CustomEvent(STATE_EVENT, { detail: { key, patch } }));
+    return true;
   } catch {
     // Storage can be disabled or full; preview interactions must remain usable.
+    return false;
   }
 }
 
@@ -119,24 +128,38 @@ export function useMediaPreviewState(previewKey?: string, contentKey?: ContentKe
   const [entry, setEntry] = useState<StoredEntry>(() => ({ key: null, ready: false, value: DEFAULT_STATE }));
   const entryRef = useRef(entry);
   entryRef.current = entry;
+  const pendingRef = useRef<Partial<MediaPreviewStoredState>>({});
+  const [storageUnavailable, setStorageUnavailable] = useState(false);
 
   useEffect(() => {
     if (!key) {
+      pendingRef.current = {};
       setEntry({ key: null, ready: hasLoadedUser, value: DEFAULT_STATE });
       return;
     }
     let value = DEFAULT_STATE;
+    pendingRef.current = {};
+    setStorageUnavailable(false);
     try {
       value = parseStoredState(window.localStorage.getItem(key));
     } catch {
       // Storage can be unavailable in private or restricted browser contexts.
+      setStorageUnavailable(true);
     }
     setEntry({ key, ready: true, value });
   }, [hasLoadedUser, key]);
 
+  const flush = useCallback(() => {
+    if (entryRef.current.key !== key || !Object.keys(pendingRef.current).length) return;
+    if (!key) { pendingRef.current = {}; setStorageUnavailable(true); return; }
+    const patch = pendingRef.current;
+    pendingRef.current = {};
+    setStorageUnavailable(!writeStoredState(key, patch));
+  }, [key]);
+
   const update = useCallback((patch: Partial<MediaPreviewStoredState>) => {
-    setEntry(current => {
-      if (!key || !current.ready || current.key !== key) return current;
+      const current = entryRef.current;
+      if (!current.ready || current.key !== key) return;
       const value = {
         scale: clampNumber(patch.scale ?? current.value.scale, 0.5, MAX_STORED_SCALE, DEFAULT_STATE.scale),
         offsetX: clampNumber(patch.offsetX ?? current.value.offsetX, -50_000, 50_000, DEFAULT_STATE.offsetX),
@@ -145,39 +168,35 @@ export function useMediaPreviewState(previewKey?: string, contentKey?: ContentKe
           ? (patch.zoomMode ?? current.value.zoomMode) as MediaPreviewZoomMode
           : DEFAULT_STATE.zoomMode,
         currentTime: clampNumber(patch.currentTime ?? current.value.currentTime, 0, 604_800, DEFAULT_STATE.currentTime),
+        loop: typeof patch.loop === 'boolean' ? patch.loop : current.value.loop,
       };
       if (value.scale === current.value.scale
         && value.offsetX === current.value.offsetX
         && value.offsetY === current.value.offsetY
         && value.zoomMode === current.value.zoomMode
-        && value.currentTime === current.value.currentTime) return current;
-      return { ...current, value };
-    });
-  }, [key]);
+        && value.currentTime === current.value.currentTime && value.loop === current.value.loop) return;
+      const next = { ...current, value };
+      entryRef.current = next;
+      setEntry(next);
+      for (const field of Object.keys(patch) as Array<keyof MediaPreviewStoredState>) {
+        Object.assign(pendingRef.current, { [field]: value[field] });
+      }
+      if (typeof patch.loop === 'boolean') flush();
+  }, [flush, key]);
 
   const reset = useCallback(() => {
-    setEntry(current => {
-      if (current.key !== key || !current.ready) return current;
-      const value = current.value;
-      if (value.scale === DEFAULT_STATE.scale && value.offsetX === DEFAULT_STATE.offsetX
-        && value.offsetY === DEFAULT_STATE.offsetY && value.zoomMode === DEFAULT_STATE.zoomMode
-        && value.currentTime === DEFAULT_STATE.currentTime) return current;
-      return { ...current, value: DEFAULT_STATE };
-    });
-  }, [key]);
+    // Reset viewing position only; a replay preference is not a position.
+    update({ scale: 1, offsetX: 0, offsetY: 0, zoomMode: 'fit', currentTime: 0 });
+  }, [update]);
 
   useEffect(() => {
     if (!key || !entry.ready || entry.key !== key) return;
-    const timeout = window.setTimeout(() => writeStoredState(key, entry.value), 300);
+    const timeout = window.setTimeout(flush, 300);
     return () => window.clearTimeout(timeout);
-  }, [entry, key]);
+  }, [entry, flush, key]);
 
   useEffect(() => {
     if (!key) return;
-    const flush = () => {
-      const current = entryRef.current;
-      if (current.ready && current.key === key) writeStoredState(key, current.value);
-    };
     const visibility = () => {
       if (document.visibilityState === 'hidden') flush();
     };
@@ -188,6 +207,28 @@ export function useMediaPreviewState(previewKey?: string, contentKey?: ContentKe
       document.removeEventListener('visibilitychange', visibility);
       flush();
     };
+  }, [flush, key]);
+
+  useEffect(() => {
+    if (!key) return;
+    const merge = (patch: Partial<MediaPreviewStoredState>) => {
+      const current = entryRef.current;
+      if (!current.ready || current.key !== key) return;
+      const value = { ...current.value, ...patch, ...pendingRef.current };
+      const next = { ...current, value };
+      entryRef.current = next;
+      setEntry(next);
+    };
+    const local = (event: Event) => {
+      const detail = (event as CustomEvent<{ key: string; patch: Partial<MediaPreviewStoredState> }>).detail;
+      if (detail?.key === key) merge(detail.patch);
+    };
+    const storage = (event: StorageEvent) => {
+      if (event.key === key) merge(parseStoredState(event.newValue));
+    };
+    window.addEventListener(STATE_EVENT, local);
+    window.addEventListener('storage', storage);
+    return () => { window.removeEventListener(STATE_EVENT, local); window.removeEventListener('storage', storage); };
   }, [key]);
 
   const ready = entry.ready && entry.key === key;
@@ -197,5 +238,28 @@ export function useMediaPreviewState(previewKey?: string, contentKey?: ContentKe
     value: ready ? entry.value : DEFAULT_STATE,
     update,
     reset,
+    storageUnavailable,
+  };
+}
+
+/** Task outputs are immutable versions. Signed delivery URLs are not their identity. */
+export function useVideoLoopState(source?: string, contentKey?: ContentKey, previewKey?: string) {
+  let taskKey = contentKey?.startsWith('video_task:') ? contentKey : undefined;
+  if (!taskKey && source) {
+    try {
+      const match = new URL(source, 'https://preview-state.invalid').pathname.match(/^\/api\/video\/play\/([a-z\d_-]+)$/i);
+      if (match) taskKey = `video_task:${match[1]}`;
+    } catch { /* An unrecognised source uses its fingerprint, never a guessed filename. */ }
+  }
+  const identity = taskKey || (isSafeIdentifier(contentKey, true) ? contentKey : undefined)
+    || (isSafeIdentifier(previewKey) ? previewKey : undefined)
+    || `video-source:${sourceFingerprint(source) || 'unavailable'}`;
+  const versionSource = taskKey ? `/api/video/play/${taskKey.slice('video_task:'.length)}` : source;
+  const state = useMediaPreviewState(identity, taskKey, versionSource);
+  return {
+    enabled: state.value.loop,
+    ready: state.ready,
+    storageUnavailable: state.storageUnavailable,
+    toggle: () => state.update({ loop: !state.value.loop }),
   };
 }

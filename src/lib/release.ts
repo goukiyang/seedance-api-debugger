@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '结果图的置顶按钮直接可见、可点击。图片比例改为点开下拉后选卡片，16种标准比例和自动均可选，切换模型不再改掉已选比例；实际出图按供应商返回说明。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '回退相容版本：界面返回上一版，保留图片接续记录、已受理任务、多角度素材、共享模板和上传恢复。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
