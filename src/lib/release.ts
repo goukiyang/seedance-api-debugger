@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '模板结果图片支持右键或长按打开操作菜单，查看、下载、恢复设置和继续创作更集中；删除仍需确认。导入进度与失败提示留在卡片上，关闭菜单也不会中断。点赞、置顶和其他页面保持原样。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '图片生成等待增加平稳百分比，结果可下载时清除过期提示并补满100%后完成。图片比例按常用、横向、竖向分组。修复失败视频复用输入时来源丢失，保留原参数与明确的继续入口；复用不会自动生成。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

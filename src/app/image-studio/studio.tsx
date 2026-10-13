@@ -2658,19 +2658,21 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const ownResults: StudioResultItem[] = resultTasks.map(task => {
     const image = studioTaskHasDeliveredAsset(task) ? studioTaskPreviewState(task) : null;
     const pending = ['queued', 'running'].includes(task.status);
-    const ordinaryWait = task.status === 'running' && task.delivery?.phase === 'provider' && task.delivery.waitingStatus === 'pending';
-    const waitingStatus = task.delivery?.phase === 'provider' && task.delivery.acceptedAt && !ordinaryWait ? '状态暂未更新' : studioTaskPhase(task);
     return {
       id: task.id, task, label: `生成结果 ${task.ordinal}`, status: studioTaskPhase(task), billing: task.billing,
       pending,
-      generationWait: pending || image ? { acceptedAt: task.delivery?.acceptedAt, normal: ordinaryWait, status: waitingStatus,
-        connectionIssue: Boolean(resultError), detail: task.status === 'queued' ? '排队中，尚未开始生成' : undefined } : undefined,
+      generationWait: { taskKey: task.id, acceptedAt: task.delivery?.acceptedAt, createdAt: task.createdAt,
+        status: task.status, phase: task.delivery?.phase, waitingStatus: task.delivery?.waitingStatus, label: studioTaskPhase(task),
+        resultReady: Boolean(image), progress: Number(task.delivery?.expectedBytes) > 0 && task.delivery?.receivedBytes != null
+          ? task.delivery.receivedBytes / task.delivery.expectedBytes! * 100 : undefined,
+        connectionIssue: Boolean(resultError), connectionDetail: resultError, detail: task.error, recoveryAvailable: task.delivery?.recoveryAvailable },
       waitingThumbnail: task.snapshot?.primaryReferenceImages?.[0]?.thumbnailUrl || task.snapshot?.primaryReferenceImages?.[0]?.originalUrl || undefined,
       applied: sourceApplied && appliedSource?.taskId === task.id,
-      error: ordinaryWait ? undefined : task.error,
+      error: task.error,
       onViewed: () => observeResultVersion(studioResultVersion(task)),
       download: image ? () => { setSelected([task.id]); setDownloadMode(true); } : undefined,
       downloadDisabled: downloadBusy,
+      downloadTemporarilyBusy: downloadBusy,
       downloadMessage: '已选择这张图片，请确认下载',
       media: image ? {
         src: image.src, sourceRole: image.sourceRole, thumbnailSrc: image.thumbnailSrc, alt: image.alt, title: image.title,
@@ -3138,7 +3140,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           </div>
 </> : sharedPin ? <><div className={styles.resultHeading}><p className={styles.prompt}>{name} · 置顶图片</p><span className={styles.resultOwner}>{sharedPin.owner?.name || '模板使用者'}</span></div>
             <div className={styles.resultMeta}><span className={styles.muted}>查看与点赞</span><RelativeTime className={styles.resultTime} value={sharedPin.createdAt} /></div></> : null}
-          renderPrimaryActions={({task}) => !task ? null : task.status === 'queued' && task.snapshot?.imageChannelLabel ? <button type="button" disabled={submitting} onClick={() => void (async () => {
+          renderPrimaryActions={({task}, waitDisplay) => !task ? null : task.status === 'queued' && task.snapshot?.imageChannelLabel ? <button type="button" disabled={submitting} onClick={() => void (async () => {
             if (!await confirm('只取消尚未向供应商请求的排队任务并释放原预留；已受理或结果未知的任务不会取消。', { title: '取消排队', confirmLabel: '取消排队', danger: true })) return;
             try {
               const response = await fetch('/api/image-studio/tasks', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cancel', id: task.id }) });
@@ -3146,7 +3148,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
               if (!response.ok) throw new Error(result.error || '取消未确认，请刷新原任务');
               await loadTasks();
             } catch (cause) { setError(cause instanceof Error ? cause.message : '取消未确认，请刷新原任务'); }
-          })()}>取消未受理排队</button> : task.delivery?.recoveryAvailable ? <button type="button" disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks()}>{templateWorkbench ? '刷新恢复状态' : '查看原图恢复'}</button> : null}
+          })()}>取消未受理排队</button> : (waitDisplay?.showRecovery ?? task.delivery?.recoveryAvailable) ? <button type="button" disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks()}>{templateWorkbench ? '刷新恢复状态' : '查看原图恢复'}</button> : null}
           renderActions={({task}) => task && (isAdmin && task.snapshot?.sourceAvailable || studioTaskHasDeliveredAsset(task)) ? <>{isAdmin && task.snapshot?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制文字上下文" aria-label="复制文字上下文" onClick={() => void copyTaskContext(task)}><ClipboardList size={15} /></button>}
             {studioTaskHasDeliveredAsset(task) && <button type="button" className={styles.restoreResult} disabled={Boolean(restoreDisabledReason(task))} title={restoreDisabledReason(task) || '恢复设置和风格组，保留当前主图，不生成图片'} aria-label="恢复设置，保留主图" aria-describedby={`studio-restore-${task.id}`} onClick={event => {
               event.stopPropagation();

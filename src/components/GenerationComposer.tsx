@@ -13,6 +13,7 @@ import type {
 } from '@/types';
 import { checkPrompt } from '@/components/PromptChecker';
 import { useWorkspace } from '@/lib/hooks/useWorkspace';
+import type { ComposerReuseState } from '@/lib/navigation/task-reuse-intent';
 import { ImageSetToolbar } from '@/components/ImageSetToolbar';
 import { ReferenceStrip } from '@/components/ReferenceStrip';
 import { PromptEditor } from '@/components/PromptEditor';
@@ -415,6 +416,8 @@ interface Props {
   interactionLocked?: boolean;
   onWorkspaceBusyChange?: (busy: boolean, reason?: 'read-error' | 'pending-attach' | 'uploading' | 'upload-failed' | 'saving' | 'picker-open' | 'loading' | null) => void;
   onWorkspaceRefreshReady?: (refresh: (() => Promise<void>) | null) => void;
+  onReuseStateChange?: (state: ComposerReuseState) => void;
+  onReuseDraftApplied?: (taskId: string, reuseKey: number) => void;
   onCollectionLoad: (collectionId: string) => Promise<void>;
   onCollectionSave: (name: string) => Promise<void>;
   onCollectionNew: (name: string) => Promise<void>;
@@ -510,6 +513,8 @@ export function GenerationComposer({
   interactionLocked = false,
   onWorkspaceBusyChange,
   onWorkspaceRefreshReady,
+  onReuseStateChange,
+  onReuseDraftApplied,
   require1080pApproval,
   selectedVideoCardId,
   canManageTemplates = false,
@@ -546,6 +551,9 @@ export function GenerationComposer({
   const appliedInitialSettingsRef = React.useRef(false);
   const appliedVideoCardDefaultsRef = React.useRef<string | null>(null);
   const settingsTouchedRef = React.useRef(false);
+  const reuseEditRevisionRef = React.useRef(0);
+  const [reuseReadCompleteKey, setReuseReadCompleteKey] = useState<string | null>(null);
+  const reportedReuseAppliedRef = React.useRef<string | null>(null);
   const appliedTemplateDefaultsRef = React.useRef<string | null>(null);
   const [previewMedia, setPreviewMedia] = useState<ReferencePreviewRequest | null>(null);
   const [showAlbumPicker, setShowAlbumPicker] = useState(false);
@@ -626,9 +634,25 @@ export function GenerationComposer({
                   ? 'loading'
                   : null;
     onWorkspaceBusyChange?.(reason !== null, reason);
-  }, [agentBusy, moduleBuilderBusy, muskConfigLoading, onWorkspaceBusyChange, showAlbumPicker, showUploadedImagePicker, studioHandoff, studioSettingsReady, templateDrawerOpen, templateLoading, templateSaveBusy, workspace.error, workspace.loading, workspace.pendingWorkspaceAttach, workspace.uploadStatuses]);
+    // Preserve the older busy contract for every existing caller. This page's
+    // optional bridge can additionally distinguish reads from user operations.
+    const conflict = reason !== null && (reason !== 'loading' || agentBusy || moduleBuilderBusy);
+    onReuseStateChange?.({
+      initializing: reason === 'loading' && !conflict,
+      conflict,
+      editRevision: reuseEditRevisionRef.current,
+    });
+  }, [agentBusy, moduleBuilderBusy, muskConfigLoading, onWorkspaceBusyChange, onReuseStateChange, showAlbumPicker, showUploadedImagePicker, studioHandoff, studioSettingsReady, templateDrawerOpen, templateLoading, templateSaveBusy, workspace.error, workspace.loading, workspace.pendingWorkspaceAttach, workspace.uploadStatuses]);
 
-  const runWorkspaceOperation = useCallback(async <T,>(operation: () => Promise<T>): Promise<T> => {
+  const markReuseInputChanged = useCallback(() => {
+    if (!onReuseStateChange || interactionLocked) return;
+    reuseEditRevisionRef.current += 1;
+    settingsTouchedRef.current = true;
+    reportWorkspaceBusy();
+  }, [interactionLocked, onReuseStateChange, reportWorkspaceBusy]);
+
+  const runWorkspaceOperation = useCallback(async <T,>(operation: () => Promise<T>, userChange = true): Promise<T> => {
+    if (userChange) markReuseInputChanged();
     workspaceOperationCountRef.current += 1;
     reportWorkspaceBusy();
     try {
@@ -637,10 +661,10 @@ export function GenerationComposer({
       workspaceOperationCountRef.current = Math.max(0, workspaceOperationCountRef.current - 1);
       reportWorkspaceBusy();
     }
-  }, [reportWorkspaceBusy]);
+  }, [markReuseInputChanged, reportWorkspaceBusy]);
 
   const refreshWorkspaceForParent = useCallback(
-    () => runWorkspaceOperation(() => workspace.refresh()),
+    () => runWorkspaceOperation(() => workspace.refresh(), false),
     [runWorkspaceOperation, workspace.refresh],
   );
 
@@ -737,9 +761,10 @@ export function GenerationComposer({
   }, [studioHandoff, studioCorrectedParameters, modelOptions, auxiliaryOptions, selectedProvider]);
 
   const markStudioParameterCorrected = useCallback((field: string) => {
+    markReuseInputChanged();
     settingsTouchedRef.current = true;
     setStudioCorrectedParameters((current) => current.includes(field) ? current : [...current, field]);
-  }, []);
+  }, [markReuseInputChanged]);
 
   const need1080pApproval = require1080pApproval && resolution === '1080p';
 
@@ -1164,8 +1189,22 @@ export function GenerationComposer({
     setResolutionApprovalConfirmed(
       require1080pApproval && reuseDraft.resolution === '1080p' ? Boolean(reuseDraft.resolutionApprovalConfirmed) : false,
     );
-    void runWorkspaceOperation(() => workspace.refresh());
+    setReuseReadCompleteKey(null);
+    void runWorkspaceOperation(() => workspace.refresh(), false).then(() => setReuseReadCompleteKey(reuseKey));
   }, [reuseDraft, studioHandoff, require1080pApproval, workspace, modelOptions, onModelChange, runWorkspaceOperation]);
+
+  useEffect(() => {
+    if (!reuseDraft || !onReuseDraftApplied || studioHandoff || workspace.loading || workspace.error) return;
+    const reuseKey = `${reuseDraft.taskId}:${reuseDraft.reuseKey}`;
+    if (reuseReadCompleteKey !== reuseKey || reportedReuseAppliedRef.current === reuseKey) return;
+    if (prompt !== reuseDraft.prompt || generationMode !== reuseDraft.generationMode || ratio !== reuseDraft.ratio
+      || duration !== reuseDraft.duration || resolution !== reuseDraft.resolution || seed !== reuseDraft.seed
+      || generateAudio !== reuseDraft.generateAudio || returnLastFrame !== reuseDraft.returnLastFrame
+      || watermark !== reuseDraft.watermark || (reuseDraft.model && selectedModel !== reuseDraft.model)) return;
+    reportedReuseAppliedRef.current = reuseKey;
+    onReuseDraftApplied(reuseDraft.taskId, reuseDraft.reuseKey);
+  }, [reuseDraft, reuseReadCompleteKey, onReuseDraftApplied, studioHandoff, workspace.loading, workspace.error,
+    prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, selectedModel]);
 
   useEffect(() => {
     if (imageResultHandoff) return;
@@ -1354,27 +1393,30 @@ export function GenerationComposer({
   ]);
 
   const handlePromptChange = useCallback((nextPrompt: string) => {
+    markReuseInputChanged();
     setPrompt(nextPrompt);
     if (agentPromptSnapshot !== null && nextPrompt !== agentPromptSnapshot) {
       setPromptUserEdited(true);
     }
-  }, [agentPromptSnapshot]);
+  }, [agentPromptSnapshot, markReuseInputChanged]);
 
   const toggleModifier = useCallback((modifier: string) => {
+    markReuseInputChanged();
     setSelectedModifiers((current) => {
       return current.includes(modifier)
         ? current.filter((item) => item !== modifier)
         : [...current, modifier];
     });
-  }, []);
+  }, [markReuseInputChanged]);
 
   const handleSelectTemplate = useCallback((templateId: string | null) => {
+    markReuseInputChanged();
     setSelectedTemplateId(templateId);
     setAgentPlans([]);
     setSelectedPlanKey(null);
     setAgentRunId(null);
     setAgentPromptSnapshot(null);
-  }, []);
+  }, [markReuseInputChanged]);
 
   const handleGeneratePlans = useCallback(async () => {
     if (!selectedTemplate) {
@@ -1506,11 +1548,12 @@ export function GenerationComposer({
   }, [moduleBuilderDraft]);
 
   const handleSelectPlan = useCallback((plan: AgentPlan) => {
+    markReuseInputChanged();
     setSelectedPlanKey(plan.key);
     setAgentPromptSnapshot(plan.prompt);
     setPromptUserEdited(false);
     setPrompt(plan.prompt);
-  }, []);
+  }, [markReuseInputChanged]);
 
   const handleSaveTemplate = useCallback(async (payload: Record<string, unknown>) => {
     if (!selectedTemplate) return false;
@@ -1752,6 +1795,7 @@ export function GenerationComposer({
       <div
         ref={generationComposerRef}
         className="generation-composer"
+        onChangeCapture={markReuseInputChanged}
         aria-busy={interactionLocked || Boolean(imageResultHandoff && !imageResultDraftReady) || workspace.loading || workspaceOperationCountRef.current > 0}
       >
         {imageResultHandoff && <p className="composer-prefill-notice" role="status">这次图片已放在首帧，生成时请选择首尾帧模式；模型、时长和画面设置沿用有效个人偏好。请填写动作并确认费用后生成。{imageResultDraftMessage && <span>{imageResultDraftMessage}</span>}</p>}

@@ -271,6 +271,7 @@ export async function POST(
         snapshot_id: true,
         project_id: true,
         video_card_id: true,
+        video_branch_id: true,
         video_card: { select: { id: true, title: true, objective: true, status: true, project_id: true } },
         owner_user_id: true,
         user_id: true,
@@ -630,6 +631,27 @@ export async function POST(
       || candidates.length > 0
       || hasLegacyMaterials
       || hasUnparsedMaterialRecord;
+    // Parameter recovery does not require mutating the reference workspace.
+    // This same authorized projection also explains the definite no-write 409.
+    const draft = {
+      task_id: task.id,
+      provider,
+      prompt: task.prompt,
+      generation_mode: generationMode,
+      model,
+      ratio,
+      duration,
+      resolution,
+      seed,
+      generate_audio: generateAudio,
+      return_last_frame: returnLastFrame,
+      watermark,
+      resolution_approval_confirmed: false,
+      project_id: task.project_id,
+      video_card_id: task.video_card_id,
+      video_branch_id: task.video_branch_id,
+      video_card: task.video_card,
+    };
     if (hasSourceMaterials && preparedItems.length === 0) {
       return NextResponse.json({
         error: '原任务素材均无法安全恢复，当前工作区未更改。',
@@ -637,6 +659,7 @@ export async function POST(
         restored_references: 0,
         skipped_references: skippedReferences,
         inputWarnings: Array.from(warnings),
+        draft,
       }, { status: 409 });
     }
 
@@ -658,24 +681,7 @@ export async function POST(
     });
 
     return NextResponse.json({
-      draft: {
-        task_id: task.id,
-        provider,
-        prompt: task.prompt,
-        generation_mode: generationMode,
-        model,
-        ratio,
-        duration,
-        resolution,
-        seed,
-        generate_audio: generateAudio,
-        return_last_frame: returnLastFrame,
-        watermark,
-        resolution_approval_confirmed: false,
-        project_id: task.project_id,
-        video_card_id: task.video_card_id,
-        video_card: task.video_card,
-      },
+      draft,
       workspace_id: workspaceId,
       restored_references: preparedItems.length,
       skipped_references: skippedReferences,

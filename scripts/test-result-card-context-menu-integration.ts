@@ -96,6 +96,7 @@ const results = load(resultSource, {
   './useResultPages': { useResultPages: (options: Props) => ({ page: 1, pages: 1, pageItems: options.items, capacity: 3, gridRef: { current: null },
     goToId() {}, retry() {}, reset() {}, previous() {}, next() {}, last() {} }) },
   './ImageBillingBadge': { ImageBillingBadge: Symbol('billing') }, './ImageGenerationWaiting': { ImageGenerationWaiting: Symbol('waiting') },
+  './useImageGenerationWaitDisplay': { useImageGenerationWaitDisplay: () => undefined },
   './ImageResultNextActions': { ImageResultNextActions: LegacyNext, ImageResultNextActionFeedback: Feedback },
   './useImageResultNextActions': { useImageResultNextActions: controllerHook }, './ResultImageContextMenu': { ResultImageContextMenu: Menu },
   '@/lib/context/AppSessionContext': { useAppSession: () => session },

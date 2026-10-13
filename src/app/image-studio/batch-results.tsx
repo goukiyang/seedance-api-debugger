@@ -283,16 +283,17 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
   // The terminal result set determines packages; exporting never creates image tasks.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoPack, batch?.state, batch?.generated, batch?.active, batch?.pending, batch?.uncertain]);
-  const statusLabel = (state: string) => ({ pending: '等待派发', 'needs-confirmation': '模板已更新，待确认后继续', queued: '已受理，排队中', running: '生成中', succeeded: '已生成', failed: '生成失败', uncertain: '结果待确认', cancelled: '未派发，已取消' } as Record<string, string>)[state] || '状态待确认';
+  const statusLabel = (state: string, phase?: string) => state === 'running' && phase && ({ download: '原图下载中', recover: '恢复原图中', validate: '图片校验中', save: '保存中' } as Record<string, string>)[phase]
+    || ({ pending: '等待派发', 'needs-confirmation': '模板已更新，待确认后继续', queued: '已受理，排队中', running: '生成中', succeeded: '已生成', failed: '生成失败', uncertain: '结果待确认', cancelled: '未派发，已取消' } as Record<string, string>)[state] || '状态待确认';
   const resultItems = useMemo(() => (batch?.items || []).map(item => ({
     ...item, id: String(item.ordinal), label: `${item.ordinal}. ${item.sourceName}`, generationStatus: item.status,
     status: statusLabel(item.status), pending: ['pending', 'queued', 'running'].includes(item.status),
-    generationWait: ['pending', 'queued', 'running'].includes(item.status) || item.image ? {
-      acceptedAt: item.delivery?.acceptedAt, normal: item.status === 'running' && item.delivery?.phase === 'provider' && item.delivery.waitingStatus === 'pending',
-      status: item.delivery?.phase === 'provider' && item.delivery.acceptedAt && item.delivery.waitingStatus !== 'pending' ? '状态暂未更新' : statusLabel(item.status),
-      connectionIssue: Boolean(error), detail: ['pending', 'queued'].includes(item.status) ? '排队中，尚未开始生成' : undefined,
-    } : undefined,
-    error: item.delivery?.phase === 'provider' && item.delivery.waitingStatus === 'pending' ? undefined : item.error,
+    generationWait: {
+      taskKey: item.taskId || undefined, acceptedAt: item.delivery?.acceptedAt, status: item.status, phase: item.delivery?.phase, waitingStatus: item.delivery?.waitingStatus,
+      resultReady: Boolean(item.image && item.taskId),
+      label: statusLabel(item.status, item.delivery?.phase), connectionIssue: Boolean(error), connectionDetail: error, detail: item.error,
+    },
+    error: item.error,
     media: item.image ? { src: item.image.url, thumbnailSrc: item.image.thumbnail, alt: `第 ${item.ordinal} 张结果`, fileName: 'batch-image.png',
       contentKey: `asset:${item.image.id}` as const,
       comparisonCandidates: (batch?.items || []).flatMap(other => other.image ? [{ src: other.image.url, thumbnailSrc: other.image.thumbnail, alt: `生成结果 ${other.ordinal}`, contentKey: `asset:${other.image.id}` as const }] : []),
@@ -329,6 +330,7 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
       {!deliveryOnly && batch.failed > 0 && <div className={styles.retry}><span>选中失败项 {selected.length} 张，本次重试预计 {selected.length * batch.unitCredits} 点；每项最多重试 3 次</span><button type="button" disabled={busy || !selected.length} onClick={() => void action('retry')}><RotateCcw size={16} />重试选中失败项</button></div>}
       {!deliveryOnly && <GeneratedImageResults items={resultItems} scope={`sd2-image-studio-batch-page:${userId}:${id}`}
         visible={visible} onQuickUse={onQuickUse ? item => { if (item.taskId && item.image) onQuickUse(item.taskId); } : undefined}
+        renderPrimaryActions={(item, waitDisplay) => item.taskId && waitDisplay?.showRecovery ? <button type="button" disabled={reading} onClick={() => void load()}>刷新原任务状态</button> : null}
         busy={reading} emptyLabel="暂无本批图片" renderSupplement={item => <>
           {saved[item.ordinal] && <p>已保存并核对大小</p>}
           {item.generationStatus === 'failed' && <label><input type="checkbox" disabled={busy} aria-label={`重试第 ${item.ordinal} 项`} checked={selected.includes(item.ordinal)} onChange={event => setSelected(previous => event.target.checked ? [...previous, item.ordinal] : previous.filter(value => value !== item.ordinal))} />重试此项</label>}

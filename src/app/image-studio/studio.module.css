@@ -324,6 +324,9 @@
 .ratioTrigger[aria-expanded=true] > svg { transform: rotate(180deg); }
 .ratioPopover { position: absolute; top: calc(100% + 6px); z-index: 30; box-sizing: border-box; width: 100%; max-width: calc(100vw - 24px); max-height: min(420px, 60dvh); overflow-y: auto; overscroll-behavior: contain; padding: 10px; border: 1px solid #465057; border-radius: 7px; background: #1b2226; box-shadow: 0 10px 28px #0b1014aa; }
 .ratioPopover[data-above=true] { top: auto; bottom: calc(100% + 6px); }
+.ratioGroups { display: grid; gap: 12px; }
+.ratioGroup { display: grid; gap: 6px; min-width: 0; }
+.ratioGroupTitle { color: #adb6bd; font-size: 12px; font-weight: 500; line-height: 1.4; }
 .ratioCards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
 .ratioCardWrap { position: relative; min-width: 0; }
 .ratioAuto { grid-column: 1 / -1; }

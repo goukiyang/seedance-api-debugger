@@ -3,8 +3,9 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronDown, Info, Trash2, X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
-import { resolveStudioAspectRatio, normalizeStudioRatio, STUDIO_RATIOS } from '@/lib/image-studio/ratios';
+import { resolveStudioAspectRatio, normalizeStudioRatio } from '@/lib/image-studio/ratios';
 import { imageOutputSize } from '@/lib/image-generation/resolution';
+import { buildRatioPickerGroups, type RatioPickerRow } from './ratio-picker-groups';
 import styles from './studio.module.css';
 
 export function RatioPicker({ value, onChange, reference, model, resolution, custom, busy, disabled, error, onRetry, onCustom, onEditing }: {
@@ -127,20 +128,20 @@ export function RatioPicker({ value, onChange, reference, model, resolution, cus
   let size = '', sizeIssue = '';
   try { size = imageOutputSize(model, resolution, ratioResolution.resolved); }
   catch { sizeIssue = '请求尺寸无法确定，请调整分辨率。'; }
-  const cardOrder = ['1:1', '1:2', '2:1', '9:16', '16:9', '3:4', '4:3', '3:2', '2:3', '5:4', '4:5', '21:9', '9:21'];
-  const presetRows = [...cardOrder, ...STUDIO_RATIOS.filter(ratio => !cardOrder.includes(ratio))].map(label => ({ label, ratio: normalizeStudioRatio(label), removable: false }));
-  const existing = new Set(['auto', ...presetRows.map(item => item.ratio)]);
-  const customRows = custom.flatMap(item => {
-    let ratio: string;
-    try { ratio = normalizeStudioRatio(item); } catch { return []; }
-    if (existing.has(ratio)) return [];
-    existing.add(ratio);
-    return [{ label: ratio, ratio, removable: true }];
-  });
-  const rows = [{ label: '自动（跟随原图）', ratio: 'auto', removable: false }, ...presetRows, ...customRows];
-  if (value !== 'auto' && !rows.some(item => item.ratio === value)) rows.push({ label: `${value}（当前参数）`, ratio: value, removable: false });
+  const groups = buildRatioPickerGroups(custom, value);
   const nativeSize = ratioResolution.resolved === '4:1'
     ? ({ '0.5K': '1024 × 256', '1K': '2048 × 512', '2K': '4096 × 1024', '4K': '8192 × 2048' } as Record<string, string>)[size] : '';
+  const renderRatioRow = ({ label, ratio, removable }: RatioPickerRow) => {
+    const [width, height] = ratio === 'auto' ? [1, 1] : ratio.split(':').map(Number);
+    const scale = 28 / Math.max(width, height);
+    return <div className={`${styles.ratioCardWrap} ${ratio === 'auto' ? styles.ratioAuto : ''}`} key={ratio} title={label}>
+      <button type="button" data-ratio-option className={styles.ratioCard} aria-label={label} aria-pressed={!other && value === ratio} disabled={disabled || busy} onClick={() => select(ratio)}>
+        {ratio !== 'auto' && <span className={styles.ratioShapeSpace} aria-hidden="true"><span className={styles.ratioShape} style={{ width: width * scale, height: height * scale }} /></span>}
+        <span>{label}</span>
+      </button>
+      {removable && <button type="button" className={styles.ratioDelete} title={`删除比例 ${label}`} aria-label={`删除比例 ${label}`} disabled={busy || disabled} onClick={async () => { await onCustom(ratio, true); }}><Trash2 size={13} /></button>}
+    </div>;
+  };
   return <div ref={root} className={styles.ratioPicker} onKeyDown={event => {
     if (menuOpen && menu.current?.contains(event.target as Node) && ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) && !(event.target instanceof HTMLInputElement)) {
       const buttons = Array.from(menu.current?.querySelectorAll<HTMLButtonElement>('[data-ratio-option]:not(:disabled)') || []);
@@ -160,19 +161,14 @@ export function RatioPicker({ value, onChange, reference, model, resolution, cus
       </button>
       {menuOpen && <div ref={menu} id={`${id}-menu`} data-ratio-menu className={styles.ratioPopover} role="dialog" aria-labelledby={`${id}-label`} data-above={placement.above}
         style={{ maxHeight: placement.height, width: placement.width, left: placement.left }}>
-      <div className={styles.ratioCards} role="group" aria-labelledby={`${id}-label`}>
-      {rows.map(({ label, ratio, removable }) => {
-        const [width, height] = ratio === 'auto' ? [1, 1] : ratio.split(':').map(Number);
-        const scale = 28 / Math.max(width, height);
-        return <div className={`${styles.ratioCardWrap} ${ratio === 'auto' ? styles.ratioAuto : ''}`} key={ratio} title={label}>
-          <button type="button" data-ratio-option className={styles.ratioCard} aria-label={label} aria-pressed={!other && value === ratio} disabled={disabled || busy} onClick={() => select(ratio)}>
-            {ratio !== 'auto' && <span className={styles.ratioShapeSpace} aria-hidden="true"><span className={styles.ratioShape} style={{ width: width * scale, height: height * scale }} /></span>}
-            <span>{label}</span>
-          </button>
-          {removable && <button type="button" className={styles.ratioDelete} title={`删除比例 ${label}`} aria-label={`删除比例 ${label}`} disabled={busy || disabled} onClick={async () => { await onCustom(ratio, true); }}><Trash2 size={13} /></button>}
-        </div>;
-      })}
-      <button type="button" data-ratio-option className={styles.ratioOther} aria-pressed={other} disabled={busy || disabled} onClick={() => { setMenuOpen(false); setOther(true); setText(''); setValidation(''); }}>其他比例</button>
+      <div className={styles.ratioGroups}>
+      {groups.map(group => <div className={styles.ratioGroup} key={group.id} role="group" aria-labelledby={group.title ? `${id}-group-${group.id}` : `${id}-label`}>
+        {group.title && <div id={`${id}-group-${group.id}`} className={styles.ratioGroupTitle}>{group.title}</div>}
+        <div className={styles.ratioCards}>
+          {group.rows.map(renderRatioRow)}
+          {group.id === 'custom' && <button type="button" data-ratio-option className={styles.ratioOther} aria-pressed={other} disabled={busy || disabled} onClick={() => { setMenuOpen(false); setOther(true); setText(''); setValidation(''); }}>其他比例</button>}
+        </div>
+      </div>)}
       </div>
       </div>}
     </div>

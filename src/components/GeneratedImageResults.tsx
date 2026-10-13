@@ -13,6 +13,8 @@ import styles from './GeneratedImageResults.module.css';
 import { ImageBillingBadge } from './ImageBillingBadge';
 import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
 import { ImageGenerationWaiting, type ImageGenerationWait } from './ImageGenerationWaiting';
+import { useImageGenerationWaitDisplay } from './useImageGenerationWaitDisplay';
+import type { ImageGenerationWaitDisplay } from '@/lib/image-studio/wait-display';
 import { ImageResultNextActions, ImageResultNextActionFeedback } from './ImageResultNextActions';
 import { useImageResultNextActions } from './useImageResultNextActions';
 import { ResultImageContextMenu, type ResultImageContextMenuItem } from './ResultImageContextMenu';
@@ -33,6 +35,7 @@ export type GeneratedImageResult = {
   onViewed?: () => void;
   download?: () => void | Promise<unknown>;
   downloadDisabled?: boolean;
+  downloadTemporarilyBusy?: boolean;
   downloadMessage?: string;
   viewOnly?: boolean;
   error?: string | null;
@@ -43,7 +46,7 @@ const noMore = async () => undefined;
 
 type ResultRenderers<T> = {
   renderMetadata?: (item: T) => ReactNode; renderActions?: (item: T) => ReactNode;
-  renderPrimaryActions?: (item: T) => ReactNode; renderDelete?: (item: T) => ReactNode;
+  renderPrimaryActions?: (item: T, waitDisplay?: ImageGenerationWaitDisplay) => ReactNode; renderDelete?: (item: T) => ReactNode;
   renderOverlay?: (item: T, controls: { openPreview: () => void }) => ReactNode; renderSupplement?: (item: T) => ReactNode;
   renderReactionAction?: (item: T) => ReactNode;
   contextActionsEnabled?: boolean;
@@ -67,6 +70,11 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
   onSelect?: (item: T) => void; onQuickUse?: (item: T) => void;
 }) {
   const { user, sessionChanged } = useAppSession();
+  const downloadableResult = Boolean(item.generationWait?.resultReady && item.media?.src && item.download && !item.viewOnly
+    && (!item.downloadDisabled || item.downloadTemporarilyBusy) && !item.media?.previewOnly && !sessionChanged && !isClientSessionBlocked());
+  const waitDisplay = useImageGenerationWaitDisplay(item.generationWait ? { ...item.generationWait, resultReady: downloadableResult } : undefined,
+    `${scope}:${user?.id || ''}:${item.id}:${item.generationWait?.taskKey || ''}`, visible);
+  const resultError = waitDisplay ? waitDisplay.showIssue ? waitDisplay.detail || item.error : null : item.error;
   const [menuOpen, setMenuOpen] = useState(false);
   const cancelPreviewRef = useRef<(() => void) | null>(null);
   const nextEnabled = Boolean(item.media?.contentKey && nextSourceSet.has(item.media.contentKey));
@@ -97,17 +105,17 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
     menuItems.push(...pageActions.filter(action => action.group !== 'continue'));
   }
   const secondaryActions = contextActionsEnabled && readOnly ? null : renderActions?.(item);
-  const primaryActions = renderPrimaryActions?.(item);
+  const primaryActions = renderPrimaryActions?.(item, waitDisplay);
         const coverReactions = Boolean(renderReactionAction && item.media?.contentKey);
         const reactions = item.media?.contentKey ? <ContentReactions contentKey={item.media.contentKey} imageSharing={item.media.imageSharing}
           secondaryAction={renderReactionAction?.(item)} overlay={!renderReactionAction} parentControlled={!renderReactionAction} /> : null;
-  const cover = item.media ? <ResultImageCover key={`${scope}:${item.id}`} src={item.media.thumbnailSrc || item.media.src} alt={item.label} selected={currentSelection === item.id} applied={Boolean(item.applied)} onSelect={() => select(item)} onPreview={() => changePreview(item, true)} onViewed={item.onViewed} active={visible} onQuickUse={onQuickUse && !item.viewOnly && (!contextActionsEnabled || !readOnly) ? () => onQuickUse(item) : undefined} loadingOverlay={item.generationWait ? <ImageGenerationWaiting wait={item.generationWait} visible={visible} loadingImage /> : undefined}
+  const cover = item.media ? <ResultImageCover key={`${scope}:${item.id}`} src={item.media.thumbnailSrc || item.media.src} alt={item.label} selected={currentSelection === item.id} applied={Boolean(item.applied)} onSelect={() => select(item)} onPreview={() => changePreview(item, true)} onViewed={item.onViewed} active={visible} onQuickUse={onQuickUse && !item.viewOnly && (!contextActionsEnabled || !readOnly) ? () => onQuickUse(item) : undefined} loadingOverlay={waitDisplay?.finishing ? <span aria-hidden="true" /> : waitDisplay ? <ImageGenerationWaiting display={waitDisplay} visible={visible} loadingImage /> : undefined}
     contextMenuEnabled={contextActionsEnabled} menuOpen={menuOpen && menuActive} cancelPreviewRef={cancelPreviewRef} />
-    : <div className={`${styles.pending}${item.generationWait ? ` ${styles.generationPending}` : ' sd2-loading-surface'}`} data-busy={item.pending || undefined}
+    : <div className={`${styles.pending}${item.generationWait && item.pending ? ` ${styles.generationPending}` : ' sd2-loading-surface'}`} data-busy={item.pending || undefined}
       data-result-choice={onSelect ? '' : undefined} role={onSelect || contextActionsEnabled ? 'button' : undefined} tabIndex={onSelect || contextActionsEnabled ? 0 : undefined} aria-label={onSelect ? `选择${item.label}` : contextActionsEnabled ? `${item.label}，图片操作` : undefined} aria-pressed={onSelect ? currentSelection === item.id : undefined}
       onClick={onSelect ? event => { if (!event.defaultPrevented) select(item); } : undefined}
       onKeyDown={onSelect ? event => { if (!event.defaultPrevented && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); select(item); } } : undefined}>
-      <WaitingImage src={item.waitingThumbnail} />{item.generationWait ? <ImageGenerationWaiting wait={item.generationWait} visible={visible} /> : <span role="status" className={styles.phase}>{item.status}</span>}
+      <WaitingImage src={item.waitingThumbnail} />{waitDisplay && item.pending ? <ImageGenerationWaiting display={waitDisplay} visible={visible} /> : <span role="status" className={styles.phase}>{waitDisplay?.label || item.status}</span>}
     </div>;
   return <article id={supportsNextActions ? `image-result-${item.id}` : undefined} className={styles.card} data-result-id={item.id} data-result-controls-parent>
     <div className={styles.media} data-transparent={item.transparent || undefined} data-reaction-surface>
@@ -115,6 +123,7 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
         if (open) cancelPreviewRef.current?.();
         setMenuOpen(open);
       }}>{cover}</ResultImageContextMenu> : cover}
+      {waitDisplay?.finishing && <ImageGenerationWaiting display={waitDisplay} visible={visible} />}
                 {coverReactions ? <div className={styles.coverReactions}>{reactions}</div> : reactions}
       {renderOverlay?.(item, { openPreview: () => changePreview(item) })}
       <ImageBillingBadge billing={item.billing} />
@@ -132,7 +141,7 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
     {renderMetadata ? renderMetadata(item) : <div className={styles.heading}><strong title={item.label}>{item.label}</strong><span>{item.status}</span></div>}
     {primaryActions && <div className={styles.actions} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{primaryActions}</div>}
     {feedback?.id === item.id && <p className={styles.feedback} role="status">{feedback.message}</p>}
-    {item.error && <p role="alert" className={styles.error}>{item.error}</p>}
+    {resultError && <p role="alert" className={styles.error}>{resultError}</p>}
     {renderSupplement?.(item)}
   </article>;
 }
