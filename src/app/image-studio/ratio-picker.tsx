@@ -46,22 +46,53 @@ export function RatioPicker({ value, onChange, reference, model, resolution, cus
   }, [menuOpen]);
   useLayoutEffect(() => {
     if (!menuOpen) return;
+    const ancestors: HTMLElement[] = [];
+    for (let ancestor = trigger.current?.parentElement; ancestor; ancestor = ancestor.parentElement) ancestors.push(ancestor);
+    const clips = (overflow: string) => /^(auto|scroll|hidden|clip|overlay)$/.test(overflow);
     const position = () => {
       if (!trigger.current || !menu.current) return;
       const bounds = trigger.current.getBoundingClientRect();
       const viewport = window.visualViewport;
       const top = viewport?.offsetTop || 0, left = viewport?.offsetLeft || 0;
       const height = viewport?.height || window.innerHeight, width = viewport?.width || window.innerWidth;
-      const below = Math.max(0, top + height - bounds.bottom - 18);
-      const above = Math.max(0, bounds.top - top - 18);
+      let visibleTop = top, visibleLeft = left, visibleBottom = top + height, visibleRight = left + width;
+      // The native settings dialog and other scroll containers clip in their own client boxes.
+      for (const ancestor of ancestors) {
+        const style = window.getComputedStyle(ancestor);
+        const clipX = clips(style.overflowX), clipY = clips(style.overflowY);
+        if (!clipX && !clipY) continue;
+        const rect = ancestor.getBoundingClientRect();
+        const scaleX = ancestor.offsetWidth ? rect.width / ancestor.offsetWidth : 1;
+        const scaleY = ancestor.offsetHeight ? rect.height / ancestor.offsetHeight : 1;
+        const clientLeft = rect.left + ancestor.clientLeft * scaleX;
+        const clientTop = rect.top + ancestor.clientTop * scaleY;
+        if (clipX) {
+          visibleLeft = Math.max(visibleLeft, clientLeft);
+          visibleRight = Math.min(visibleRight, clientLeft + ancestor.clientWidth * scaleX);
+        }
+        if (clipY) {
+          visibleTop = Math.max(visibleTop, clientTop);
+          visibleBottom = Math.min(visibleBottom, clientTop + ancestor.clientHeight * scaleY);
+        }
+      }
+      if (bounds.bottom <= visibleTop || bounds.top >= visibleBottom || bounds.right <= visibleLeft || bounds.left >= visibleRight) {
+        setMenuOpen(false);
+        return;
+      }
+      const below = Math.max(0, visibleBottom - bounds.bottom - 18);
+      const above = Math.max(0, bounds.top - visibleTop - 18);
       const flipped = below < Math.min(menu.current.scrollHeight, 300) && above > below;
-      const menuWidth = Math.min(bounds.width, Math.max(0, width - 24));
-      const menuLeft = Math.max(left + 12, Math.min(bounds.left, left + width - menuWidth - 12));
+      const menuWidth = Math.min(bounds.width, Math.max(0, visibleRight - visibleLeft - 24));
+      const menuLeft = Math.max(visibleLeft + 12, Math.min(bounds.left, visibleRight - menuWidth - 12));
       setPlacement({ above: flipped, height: Math.min(420, flipped ? above : below), width: menuWidth, left: menuLeft - bounds.left });
     };
     position();
     const observer = new ResizeObserver(position);
     if (trigger.current) observer.observe(trigger.current);
+    for (const ancestor of ancestors) {
+      const style = window.getComputedStyle(ancestor);
+      if (clips(style.overflowX) || clips(style.overflowY)) observer.observe(ancestor);
+    }
     window.addEventListener('resize', position);
     window.addEventListener('scroll', position, true);
     window.visualViewport?.addEventListener('resize', position);
@@ -124,7 +155,7 @@ export function RatioPicker({ value, onChange, reference, model, resolution, cus
         <span id={`${id}-value`}>{value === 'auto' ? '自动（跟随原图）' : value}</span><ChevronDown size={16} aria-hidden="true" />
       </button>
       {menuOpen && <div ref={menu} id={`${id}-menu`} data-ratio-menu className={styles.ratioPopover} role="dialog" aria-labelledby={`${id}-label`} data-above={placement.above}
-        style={{ maxHeight: placement.height, width: placement.width || undefined, left: placement.left }}>
+        style={{ maxHeight: placement.height, width: placement.width, left: placement.left }}>
       <div className={styles.ratioCards} role="group" aria-labelledby={`${id}-label`}>
       {rows.map(({ label, ratio, removable }) => {
         const [width, height] = ratio === 'auto' ? [1, 1] : ratio.split(':').map(Number);
