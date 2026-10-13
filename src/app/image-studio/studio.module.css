@@ -230,6 +230,10 @@
 .counts button[aria-pressed=true] { border-color: #79daca; color: #a4f2df; background: #123b33; }
 .counts input { width: 68px; }
 .modelQualityRow { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 10px; margin-top: 20px; min-width: 0; }
+.modelQualityRow.templateModelQualityRow { grid-template-columns: minmax(0, 1fr) minmax(76px, .5fr) minmax(64px, .42fr); gap: 8px; margin-top: 16px; }
+.templateModelQualityRow .compactField { gap: 6px; font-size: 13px; }
+.templateModelQualityRow .compactField strong { white-space: nowrap; }
+.page .templateModelQualityRow select { padding: 8px 6px; min-height: 38px; }
 .compactField { display: grid; gap: 8px; min-width: 0; font-size: 14px; }
 .compactField strong { font-weight: 750; }
 .compactField select { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
@@ -292,17 +296,15 @@
 .materialCluster { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 12px; padding: 10px; margin-bottom: 12px; }
 .materialCluster .materialSection { box-sizing: border-box; min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 0; }
 .materialCluster .primaryMaterials { --material-tile-size: 128px; }
-.materialCluster .styleMaterials { --material-tile-size: 96px; display: grid; grid-template-columns: repeat(auto-fill, minmax(0, min(var(--material-tile-size), 100%))); justify-content: start; align-content: start; gap: 8px; }
+.materialCluster .styleMaterials { display: block; width: 100%; }
 .materialCluster .auxiliaryMaterials { --material-tile-size: 72px; }
 .materialCluster .primaryMaterials .materialGrid, .materialCluster .auxiliaryMaterials .materialGrid { grid-template-columns: repeat(auto-fill, minmax(0, min(var(--material-tile-size), 100%))); justify-content: start; max-width: none; }
-.materialCluster .styleMaterials .styleGroupsTiles, .materialCluster .styleMaterials .materialGrid { display: contents; }
 .materialCluster .referenceToggle, .materialCluster .materialFooter { margin: 0; }
 .materialCluster [aria-label="参考图片"]:focus-visible { outline: none; }
 .materialCluster [aria-label="参考图片"]:focus-visible .materialAdd { outline: 2px solid #70cfbd; outline-offset: 2px; }
 .materialCluster .materialFooter { padding: 4px 2px 2px; }
 @media (max-width: 600px) {
   .materialCluster .primaryMaterials { --material-tile-size: 112px; }
-  .materialCluster .styleMaterials { --material-tile-size: 88px; }
   .materialCluster .auxiliaryMaterials { --material-tile-size: 64px; }
 }
 @media (max-width: 420px) { .generationHeader { flex-wrap: wrap; } .generationActions { grid-template-columns: minmax(0, 1fr); } .generationModes { justify-self: start; } }

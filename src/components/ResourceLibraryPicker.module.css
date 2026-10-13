@@ -28,6 +28,11 @@
 .segments { display: flex; border: 1px solid var(--border, #3b4145); border-radius: 6px; overflow: hidden; }
 .segments button { padding: 9px 14px; min-height: 38px; border-radius: 0; white-space: nowrap; }
 .segments button[aria-pressed=true] { color: #153a2d; background: var(--accent, #8ef0c2); font-weight: 600; }
+.sourceControl { display: flex; align-items: center; gap: 8px; flex: 1 1 100%; min-width: 0; max-width: 100%; }
+.sourceControl > span { flex: none; color: var(--text-secondary, #b4bec4); font-size: 12px; white-space: nowrap; }
+.sourceSegments { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; padding: 3px; scrollbar-width: thin; }
+.sourceSegments button { flex: none; min-height: 36px; padding: 7px 10px; border-bottom-width: 2px; font-size: 13px; white-space: nowrap; }
+.sourceSegments button[aria-pressed=true] { color: var(--accent, #8ef0c2); border-bottom-color: var(--accent, #8ef0c2); background: rgba(122, 223, 182, .13); font-weight: 600; }
 .filters select, .scopeControl select { min-width: 0; max-width: 100%; background: var(--bg-tertiary, #252d31); border: 1px solid var(--border, #3b4145); border-radius: 5px; padding: 9px 10px; height: 40px; }
 .filters > button { display: inline-flex; align-items: center; gap: 6px; min-height: 38px; padding: 8px; }
 .filters .mobileNavigation { display: none; }
@@ -90,7 +95,7 @@
   .topbar { padding: 0 14px 12px; flex-wrap: wrap; gap: 8px; } .tabs { gap: 20px; } .tabs button { font-size: 14px; padding: 10px 0; } .search { width: 100%; }
   .layout { grid-template-columns: minmax(0, 1fr); } .sidebar { display: none; } .navigationOpen { display: block; position: absolute; z-index: 4; left: 0; top: 58px; bottom: 0; width: min(260px, 85%); background: var(--bg-secondary, #1e2327); box-shadow: 10px 0 30px rgba(7, 10, 12, .25); } .sidebarScope { display: none; }
   .filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; padding: 10px 14px; } .filters .mobileNavigation { display: inline-flex; grid-column: 1; min-width: 0; } .mobileScope { display: flex; flex-direction: row; align-items: center; gap: 6px; grid-column: 2; min-width: 0; max-width: 100%; margin: 0; } .mobileScope > span { white-space: nowrap; } .mobileScope select { width: auto; flex: 1; font-size: 12px; padding: 8px; }
-  .typeSegments, .sourceSegments { grid-column: 1 / -1; justify-self: start; } .segments button { font-size: 13px; padding: 8px 10px; } .sortControl { grid-column: 1; margin-left: 0; } .sortControl select { font-size: 12px; } .filters .resetFilter { grid-column: 2; justify-self: end; }
+  .typeSegments { grid-column: 1 / -1; justify-self: start; } .sourceControl { grid-column: 1 / -1; } .segments button { font-size: 13px; padding: 8px 10px; } .sortControl { grid-column: 1; margin-left: 0; } .sortControl select { font-size: 12px; } .filters .resetFilter { grid-column: 2; justify-self: end; }
   .body { padding: 0 14px 14px; } .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .footer { padding: 12px 14px; grid-template-columns: minmax(0, 1fr) max-content; grid-template-areas: "count upload" "selection selection" "actions actions"; gap: 10px; } .count { min-width: 0; } .selection { width: 100%; } .selectedThumb { width: 48px; height: 48px; } .footerActions { justify-content: flex-end; } .footerActions .primary { flex: 1; }
 }
@@ -103,4 +108,4 @@
 .cardDetails summary { cursor: pointer; width: fit-content; min-height: 32px; display: flex; align-items: center; }
 .cardDetails summary:focus-visible { outline: 2px solid var(--accent, #8ef0c2); outline-offset: 2px; border-radius: 3px; }
 .meta .originalName { overflow-wrap: anywhere; }
-@media (hover: none), (pointer: coarse) { .pagination button { flex-basis: 44px; width: 44px; height: 44px; } .card .removeButton { width: 44px; height: 44px; } .cardDetails summary { min-width: 44px; min-height: 44px; } }
+@media (hover: none), (pointer: coarse) { .sourceSegments button { min-height: 44px; } .pagination button { flex-basis: 44px; width: 44px; height: 44px; } .card .removeButton { width: 44px; height: 44px; } .cardDetails summary { min-width: 44px; min-height: 44px; } }

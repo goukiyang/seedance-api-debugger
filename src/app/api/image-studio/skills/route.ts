@@ -25,7 +25,7 @@ async function handle(request: Request) {
         const selected = parseSkillIds(params.get('ids')?.split(',').filter(Boolean) || []);
         const page = await listSkillsPage(user, { keys: selected });
         const byId = new Map(page.skills.map(skill => [skill.id, skill]));
-        return Response.json({ skills: selected.map(id => byId.get(id) || { id, name: 'Skills 不可用', unavailable: true }), nextCursor: null }, { headers });
+        return Response.json({ skills: selected.map(id => byId.get(id) || { id, name: '提示词组不可用', unavailable: true }), nextCursor: null }, { headers });
       }
       if (params.get('page') === '1') return Response.json(await listSkillsPage(user, {
         cursor: params.get('cursor') || undefined, query: params.get('query') || undefined,
@@ -34,17 +34,17 @@ async function handle(request: Request) {
       return Response.json({ skills: await listSkills(user) }, { headers });
     }
     if (!validRequestOrigin(request)) return Response.json({ error: '请求来源无效' }, { status: 403, headers });
-    if (Number(request.headers.get('content-length') || 0) > 64 * 1024) throw new StudioStyleError('skills内容过大');
+    if (Number(request.headers.get('content-length') || 0) > 64 * 1024) throw new StudioStyleError('提示词组内容过大');
     const reader = request.body?.getReader();
-    if (!reader) throw new StudioStyleError('skills内容无效');
+    if (!reader) throw new StudioStyleError('提示词组内容无效');
     const chunks: Uint8Array[] = []; let size = 0;
     try { while (true) { const { done, value } = await reader.read(); if (done) break; size += value.length;
-      if (size > 64 * 1024) { await reader.cancel(); throw new StudioStyleError('skills内容过大'); } chunks.push(value); }
+      if (size > 64 * 1024) { await reader.cancel(); throw new StudioStyleError('提示词组内容过大'); } chunks.push(value); }
     } finally { reader.releaseLock(); }
     const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new StudioStyleError('skills内容无效');
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new StudioStyleError('提示词组内容无效');
     if (request.method === 'DELETE') { await deleteSkill(user, body); return Response.json({ ok: true }, { headers }); }
     return Response.json(await saveSkill(user, body), { headers });
-  } catch (error) { return Response.json({ error: error instanceof StudioStyleError ? error.message : error instanceof SyntaxError ? 'skills内容无效' : 'skills操作尚未确认，请重新读取' }, { status: error instanceof StudioStyleError ? error.status : error instanceof SyntaxError ? 400 : 503, headers }); }
+  } catch (error) { return Response.json({ error: error instanceof StudioStyleError ? error.message : error instanceof SyntaxError ? '提示词组内容无效' : '提示词组操作尚未确认，请重新读取' }, { status: error instanceof StudioStyleError ? error.status : error instanceof SyntaxError ? 400 : 503, headers }); }
 }
 export const GET = handle, POST = handle, PUT = handle, DELETE = handle;

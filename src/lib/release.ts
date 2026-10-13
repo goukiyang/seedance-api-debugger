@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '模板结果卡可置顶本人生成的单张图片，同一共享模板的用户都能优先看到并点赞，原分享与输入隐私保持。生成等待条按原开始时间缓慢前进，刷新不重新计时。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '素材来源改为直接点选的小页签；模板模型、质量和分辨率合并一行；风格与提示词组重新排版，名称更清楚。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

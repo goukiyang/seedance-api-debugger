@@ -1,18 +1,22 @@
-.root { min-width: 0; }
+.root { width: 100%; min-width: 0; }
 .mainHeader, .dialogHeader, .sectionHeader { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .mainHeader { margin-block-end: 8px; font-size: 13px; }
+.mainHeader > strong { font-weight: 650; white-space: nowrap; }
+.mainHeader > button { flex: 0 0 auto; white-space: nowrap; }
 .root :where(.mainHeader, .selectedChips, .dialog) button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 6px 9px; border: 1px solid #414d50; border-radius: 5px; background: #20292b; color: #dbe4e5; font: inherit; font-size: 13px; cursor: pointer; }
 .root :where(.mainHeader, .selectedChips, .dialog) button:disabled { opacity: .55; cursor: default; }
 .root :where(.mainHeader, .selectedChips, .dialog) button:not(:disabled):hover { background: #2b3838; border-color: #6e8983; }
 .root :where(.mainHeader, .selectedChips, .dialog) button:focus-visible, .root > .dialog input:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
 .root .primary { min-width: 76px; background: #287664; border-color: #419880; color: #eef7f3; font-weight: 650; }
 .muted { color: #a7b5b7; font-size: 12px; line-height: 1.5; margin: 6px 0; }
-.selectedChips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip { display: inline-flex; align-items: center; max-width: 100%; border: 1px solid #3c4a4c; border-radius: 5px; background: #182124; }
+.selectedChips { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px; }
+.chip { display: inline-flex; align-items: stretch; min-width: 0; max-width: 100%; border: 1px solid #3c4a4c; border-radius: 5px; background: #182124; }
 .root .chip button { border: 0; background: transparent; min-width: 36px; }
 .chip > button:first-child { justify-content: flex-start; min-width: 0; max-width: calc(100% - 36px); }
-.chip > button:first-child > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chip img { width: 28px; height: 28px; object-fit: cover; border-radius: 3px; }
+.chipLabel { display: grid; gap: 2px; min-width: 0; text-align: left; }
+.chipLabel > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.root .chip > button:last-child { flex: 0 0 36px; padding-inline: 6px; border-inline-start: 1px solid #3c4a4c; border-start-start-radius: 0; border-end-start-radius: 0; }
+.chip img { flex: 0 0 28px; width: 28px; height: 28px; object-fit: cover; border-radius: 3px; }
 .chip small { color: #9daeb0; font-size: 11px; white-space: nowrap; }
 .chip[data-unavailable] { border-color: #95614e; }
 .dialog { width: min(840px, calc(100vw - 24px)); max-width: calc(100vw - 24px); height: min(760px, calc(100dvh - 32px)); max-height: calc(100dvh - 32px); box-sizing: border-box; padding: 0; border: 1px solid #526166; border-radius: 8px; background: #141c20; color: #e0e8e9; overflow: hidden; }

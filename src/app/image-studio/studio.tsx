@@ -1359,7 +1359,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     groupName !== baseline.groupName ? '分组' : '', (banner?.id || null) !== baseline.bannerAssetId ? '封面' : '',
     JSON.stringify({ ...referencePolicy, primaryIds: [] }) !== JSON.stringify({ ...baseline.referencePolicy, primaryIds: [] }) ? '参考图规则' : '',
     JSON.stringify(moduleDraft.styleGroupIds) !== JSON.stringify(baseline.styleGroupIds) ? '风格' : '',
-    JSON.stringify(moduleDraft.skillIds) !== JSON.stringify(baseline.skillIds) ? 'Skills' : '',
+    JSON.stringify(moduleDraft.skillIds) !== JSON.stringify(baseline.skillIds) ? '提示词组' : '',
   ].filter(Boolean) : [];
   const authorDefinitionDirty = definitionChanges.length > 0;
   const batch = useStudioBatch({ userId, moduleId: module.id, actualQuoteRequired, sharedLive: sharedLive?.intent, sourceAvailable: sharedReady, onSourceChanged: onSharedRefresh, quotePayload: settings && !authorDefinitionDirty ? generationPayload(undefined, '') : null, unitCredits: moduleUnitCredits, effectiveChannelId: effectiveImageChannelId,
@@ -1861,7 +1861,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           if ((!sharedLive || authorDraft) && Array.isArray(skillInput)) {
             const ids = skillInput.filter((id: unknown): id is string => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)).slice(0, 12);
             const exact: SkillSummary[] = ids.length ? (await readResponse(await fetch(`/api/image-studio/skills?ids=${encodeURIComponent(ids.join(','))}`, { cache: 'no-store' }))).skills : [];
-            restoredSkills = ids.map((id: string) => exact.find(skill => skill.id === id) || { id, name: 'Skills 不可用', unavailable: true });
+            restoredSkills = ids.map((id: string) => exact.find(skill => skill.id === id) || { id, name: '提示词组不可用', unavailable: true });
           }
           if (authorDraft && bannerId) {
             const restored = module.banner?.id === bannerId ? module.banner : available.find(image => image.id === bannerId);
@@ -2818,7 +2818,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             </StudioReferenceGrid>
           </div>
         </section>
-        <section className={`${styles.materialSection} ${styles.styleMaterials}`} aria-label="风格组与文字 skills">
+        <section className={`${styles.materialSection} ${styles.styleMaterials}`} aria-label="风格与提示词">
           {!templateWorkbench && <header className={styles.materialHeading}><h3>风格组</h3>
             <select aria-label="风格图片数量上限" value={styleLimit} disabled={uploading || submitting || Boolean(pendingSubmission)} onChange={event => setStyleLimit(Number(event.target.value))}>
               {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>最多 {value} 张</option>)}
@@ -2829,7 +2829,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             currentImages={auxiliaryImages} maxReferences={currentStyleCap}
             disabled={!definitionEditable || sharedLive?.available === false || uploading || submitting || Boolean(pendingSubmission)}
             onStylesChange={next => { if (reproduceSourceTaskId) exitReproductionMode('风格组已修改，接下来使用当前模板和风格组。'); setStyleGroups(next); }}
-            onSkillsChange={next => { if (reproduceSourceTaskId) exitReproductionMode('Skills已修改，接下来使用当前模板和所选文字。'); setSkills(next); }} />
+            onSkillsChange={next => { if (reproduceSourceTaskId) exitReproductionMode('提示词组已修改，接下来使用当前模板和所选文字。'); setSkills(next); }} />
         </section>
         <section className={`${styles.materialSection} ${templateWorkbench ? styles.auxiliaryMaterials : ''}`} aria-label="参考图">
           {!templateWorkbench && <header className={styles.materialHeading}><h3>参考图</h3>
@@ -2914,9 +2914,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         <textarea id={`studio-prompt-${module.id}`} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} value={prompt} maxLength={20000} onChange={event => setPrompt(event.target.value)} placeholder={evolution ? '什么发生变化' : '补充想生成的画面'} rows={9} />
         {evolutionConflict && <p role="alert" className={styles.error}>{evolutionConflict}</p>}
         <RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={effectiveReferences.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} fourToOneSupported={selectedFourToOne} allowedRatios={selectedChannelModel?.ratios ?? undefined} restrictToAllowedRatios={!legacyImageRoute} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
-        <div className={styles.modelQualityRow}>
+        <div className={`${styles.modelQualityRow} ${templateWorkbench ? styles.templateModelQualityRow : ''}`}>
           <label className={styles.compactField} htmlFor={`studio-model-${module.id}`}><strong>生成模型</strong>
-            <select id={`studio-model-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={moduleModel} onChange={event => setModuleModel(event.target.value)}>
+            <select id={`studio-model-${module.id}`} title={templateWorkbench ? `${IMAGE_STUDIO_MODEL_LABELS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || moduleModel}${imageChannelReady && !imageStudioChannelReadyForModel(selectedChannel, moduleModel, settings?.modelReady?.[moduleModel] ?? settings?.providerReady) ? '（未就绪）' : ''}` : undefined} disabled={submitting || Boolean(pendingSubmission)} value={moduleModel} onChange={event => setModuleModel(event.target.value)}>
               {modelChoices.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model}{imageChannelReady && !imageStudioChannelReadyForModel(selectedChannel, model, settings?.modelReady?.[model] ?? settings?.providerReady) ? '（未就绪）' : ''}</option>)}
             </select>
           </label>
@@ -2924,13 +2924,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             <ImageGenerationChannelSelect id={`studio-channel-${module.id}`} channels={imageChannels} value={imageChannelId} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onChange={onImageChannelChange} model={moduleModel} legacyReady={settings?.modelReady?.[moduleModel] ?? settings?.providerReady} />
           </label>}
           <label className={styles.compactField} htmlFor={`studio-quality-${module.id}`}><strong>图片质量</strong>
-            <select id={`studio-quality-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={quality} onChange={event => setQuality(event.target.value)}>
+            <select id={`studio-quality-${module.id}`} title={templateWorkbench ? `${IMAGE_STUDIO_QUALITY_LABELS[quality as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || quality}${!qualityChoices.includes(quality) ? qualityChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）' : ''}` : undefined} disabled={submitting || Boolean(pendingSubmission)} value={quality} onChange={event => setQuality(event.target.value)}>
               {!qualityChoices.includes(quality) && <option value={quality} disabled>{IMAGE_STUDIO_QUALITY_LABELS[quality as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || quality}{qualityChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）'}</option>}
               {qualityChoices.map(option => <option key={option} value={option}>{IMAGE_STUDIO_QUALITY_LABELS[option as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || option}</option>)}
             </select>
           </label>
           <label className={styles.compactField} htmlFor={`studio-resolution-${module.id}`}><strong>分辨率</strong>
-            <select id={`studio-resolution-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} value={resolution} onChange={event => setResolution(event.target.value as ImageResolution)}>
+            <select id={`studio-resolution-${module.id}`} title={templateWorkbench ? `${resolution}${!resolutionChoices.includes(resolution) ? resolutionChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）' : ''}` : undefined} disabled={submitting || Boolean(pendingSubmission)} value={resolution} onChange={event => setResolution(event.target.value as ImageResolution)}>
               {!resolutionChoices.includes(resolution) && <option value={resolution} disabled>{resolution}{resolutionChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）'}</option>}
               {resolutionChoices.map(option => <option key={option} value={option}>{option}</option>)}
             </select>
@@ -3181,7 +3181,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       </div>
       <input ref={fixedFileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={event => { void addImages(Array.from(event.target.files || []), true); event.target.value = ''; }} /></>}
       <button type="button" disabled={!definitionEditable || sharedLive?.available === false || uploading || submitting || Boolean(pendingSubmission)}
-        onClick={() => styleSkillSelector.current?.open('styles')}>选择风格与 Skills</button>
+        onClick={() => styleSkillSelector.current?.open('styles')}>选择风格与提示词</button>
       {uploadProgress && <UploadProgressIndicator busy {...uploadProgress} />}
       {error && <p role="status" className={styles.error}>{error}</p>}
       <div className={styles.modelQualityRow}>

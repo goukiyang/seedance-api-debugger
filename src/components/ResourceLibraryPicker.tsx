@@ -206,6 +206,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     const issue = canSelect(next); if (issue) { setError(issue); return; } setSelected(next); setError('');
   };
   const change = (patch: Partial<Preferences>) => { restoring.current = false; body.current?.scrollTo({ top: 0 }); setPrefs(p => ({ ...p, ...patch, scroll: 0, pages: 1 })); };
+  const changeSource = (source: string) => { if (prefs.source !== source) change({ source, template: '' }); };
   const removeItem = async (item: Pick<PickerItem,'assetId'|'identity'|'fileName'|'canRemoveFromLibrary'>, restore = false) => {
     if (!item.canRemoveFromLibrary || !/^(asset|reference_image|video_task):[a-zA-Z0-9_-]{1,100}$/.test(item.identity) || locked.current) return;
     const removalSession = session.current;
@@ -379,7 +380,19 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         <div className={styles.filters}><button type="button" className={styles.mobileNavigation} aria-expanded={navigationOpen} onClick={() => setNavigationOpen(v => !v)}><Menu size={17} />图集／项目</button>
           <label className={`${styles.scopeControl} ${styles.mobileScope}`}><span>范围</span><select aria-label="素材范围" value={prefs.scope} onChange={e => change({ scope: e.target.value as PickerScope, album: '', project: '' })}>{availableScopes.map(([s, label]) => <option key={s} value={s}>{label}</option>)}{!availableScopes.some(([s]) => s === prefs.scope) && <option value={prefs.scope}>此范围已不可用</option>}</select></label>
           {types.length > 1 && <div className={`${styles.segments} ${styles.typeSegments}`} aria-label="素材类型">{['all', ...types].map(t => <button key={t} type="button" aria-pressed={prefs.type === t} onClick={() => change({ type: t })}>{t === 'all' ? '全部' : labels[t as AssetType]}</button>)}</div>}
-          <label className={styles.sortControl}><span>来源</span><select aria-label="素材来源" value={prefs.source} onChange={e => change({ source: e.target.value, template: '' })}><option value="all">全部来源</option><option value="uploaded">上传的</option><option value="generated">全部生成</option>{types.includes('image') && <><option value="template-image">模板生图</option><option value="random-person">随机人物</option><option value="other-generated">其他生成</option><option value="unknown">来源待识别</option></>}{types.includes('video') && <option value="video-generated">视频生成</option>}<option value="other">其他素材</option></select></label>
+          <div className={styles.sourceControl} role="group" aria-label="素材来源"><span>来源</span><div className={styles.sourceSegments}>
+            <button type="button" aria-pressed={prefs.source === 'all'} onClick={() => changeSource('all')}>全部来源</button>
+            <button type="button" aria-pressed={prefs.source === 'uploaded'} onClick={() => changeSource('uploaded')}>上传的</button>
+            <button type="button" aria-pressed={prefs.source === 'generated'} onClick={() => changeSource('generated')}>全部生成</button>
+            {types.includes('image') && <>
+              <button type="button" aria-pressed={prefs.source === 'template-image'} onClick={() => changeSource('template-image')}>模板生图</button>
+              <button type="button" aria-pressed={prefs.source === 'random-person'} onClick={() => changeSource('random-person')}>随机人物</button>
+              <button type="button" aria-pressed={prefs.source === 'other-generated'} onClick={() => changeSource('other-generated')}>其他生成</button>
+              <button type="button" aria-pressed={prefs.source === 'unknown'} onClick={() => changeSource('unknown')}>来源待识别</button>
+            </>}
+            {types.includes('video') && <button type="button" aria-pressed={prefs.source === 'video-generated'} onClick={() => changeSource('video-generated')}>视频生成</button>}
+            <button type="button" aria-pressed={prefs.source === 'other'} onClick={() => changeSource('other')}>其他素材</button>
+          </div></div>
           {prefs.source === 'template-image' && <label className={styles.sortControl}><span>模板</span><select aria-label="具体模板" value={prefs.template} onChange={e => change({ template: e.target.value })}><option value="">全部模板</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>}
           <label className={styles.sortControl}><span>排序</span><select aria-label="排序" value={prefs.sort} onChange={e => change({ sort: e.target.value })}><option value="newest">最新添加</option><option value="name">名称</option></select></label>
           <button type="button" className={styles.resetFilter} title="重置筛选和浏览位置" aria-label="重置筛选和浏览位置" onClick={() => { setQuery(''); change(defaults); }}><RotateCcw size={16} /></button>
