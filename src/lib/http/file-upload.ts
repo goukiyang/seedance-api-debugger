@@ -48,6 +48,37 @@ const fileHashes = new WeakMap<File, Promise<string>>();
 const fileRequests = new WeakMap<File, Map<string, string>>();
 const inFlightUploads = new Map<string, Promise<UploadedAssetPayload>>();
 const directReceipts = new WeakMap<File, { scope: string; ticket: DirectUploadTicketResponse }>();
+const rawReceipts = new WeakMap<File, { scope: string; requestId: string }>();
+
+function rawReceiptKey(file: File, context?: Partial<UploadContext>) {
+  return context?.ownerId && context.hash
+    ? `sd2:raw-upload:v1:${context.ownerId}:${context.hash}:${file.size}:${file.type || 'application/octet-stream'}` : null;
+}
+
+async function recoverRawUpload(file: File, context: Partial<UploadContext>, invalidJsonMessage: string, onProgress?: UploadProgressHandler) {
+  const scope = `${context.ownerId || 'unscoped'}:${uploadSession().epoch}`;
+  const key = rawReceiptKey(file, context);
+  let requestId = rawReceipts.get(file)?.scope === scope ? rawReceipts.get(file)?.requestId : undefined;
+  if (key) {
+    try { requestId = sessionStorage.getItem(key) || requestId; }
+    catch { throw new Error('原上传编号无法读取，未重新发送文件。请先核对我的素材。'); }
+  }
+  if (!requestId) return null;
+  if (!/^[a-zA-Z0-9_-]{1,160}$/.test(requestId) || !context.ownerId || !context.hash) {
+    throw new Error('原上传结果待确认，当前无法核对文件身份，未重新发送文件。请先核对我的素材。');
+  }
+  notifyUploadProgress(onProgress, { phase: 'complete', label: '正在核对原上传结果' });
+  const query = new URLSearchParams({ requestId, hash: context.hash, fileSize: String(file.size), mimeType: file.type || 'application/octet-stream' });
+  let response: Response;
+  try { response = await fetch(`/api/assets/upload?${query}`, { headers: { 'X-Upload-Owner-Id': context.ownerId }, cache: 'no-store', signal: AbortSignal.timeout(calculateUploadTimeoutMs(file.size)) }); }
+  catch { throw new Error('原上传结果待确认；再次点击上传只查询原结果，不会重传文件。'); }
+  const result = await readUploadJsonResponse<UploadAssetResponse>(response, '原上传查询', invalidJsonMessage);
+  if (!response.ok || !result.asset?.id) throw new Error(result.message || result.error || '原上传结果尚未确认，未重传文件。');
+  rawReceipts.delete(file);
+  if (key) sessionStorage.removeItem(key);
+  notifyUploadProgress(onProgress, { phase: 'done', label: result.asset.reused ? '已复用相同素材' : '上传完成', loadedBytes: file.size, totalBytes: file.size });
+  return result.asset;
+}
 
 /** Collapse reference selection, not generation items, by full client bytes. Server verification remains authoritative. */
 export async function uniqueUploadFiles(files: File[]) {
@@ -190,8 +221,27 @@ async function uploadWithRawFallback(
   onProgress?: UploadProgressHandler,
   context?: Partial<UploadContext>,
 ) {
+  if (!context?.ownerId || !context.requestId || !/^[a-f0-9]{64}$/.test(context.hash || '')) {
+    throw new Error('当前无法安全核验账号和文件，未上传。请重新登录后再选择文件。');
+  }
+  const recovered = context ? await recoverRawUpload(file, context, invalidJsonMessage, onProgress) : null;
+  if (recovered) return recovered;
   let result: { ok: boolean; status: number; data: UploadAssetResponse };
   const request = buildRawFileUploadRequest(file, context);
+  const receiptKey = rawReceiptKey(file, context);
+  if (!receiptKey) throw new Error('上传编号无法安全保存，文件尚未发送。');
+  if (context?.requestId) {
+    // Save the original request before sending bytes. Missing receipts remain
+    // unknown; neither a failed query nor a rollback authorizes retransmission.
+    if (receiptKey) {
+      try {
+        sessionStorage.setItem(receiptKey, context.requestId);
+        if (sessionStorage.getItem(receiptKey) !== context.requestId) throw new Error('Upload receipt unavailable');
+      }
+      catch { throw new Error('上传编号未能保存，文件尚未发送。请允许本机存储后重试。'); }
+    }
+    rawReceipts.set(file, { scope: `${context.ownerId || 'unscoped'}:${uploadSession().epoch}`, requestId: context.requestId });
+  }
   try {
     result = await requestJsonWithUploadProgress<UploadAssetResponse>({
       url: '/api/assets/upload',
@@ -209,12 +259,15 @@ async function uploadWithRawFallback(
       onProgress,
     });
   } catch (error) {
+    if (context?.requestId) throw new Error('普通上传结果待确认；再次点击上传只核对原结果，不会重传文件。');
     if (error instanceof Error && error.message.includes('系统没有拿到有效上传结果')) throw error;
     throw new Error(uploadStageConnectionMessage('普通上传', error));
   }
   const data = result.data;
   if (!result.ok) throw new Error(data.error || data.message || '素材上传失败，请重新选择后重试');
   if (!data.asset?.id) throw new Error('素材上传成功，但没有返回素材 ID');
+  rawReceipts.delete(file);
+  if (receiptKey) sessionStorage.removeItem(receiptKey);
   notifyUploadProgress(onProgress, {
     phase: 'done',
     label: data.asset.reused ? '已复用相同素材' : '上传完成',
@@ -634,12 +687,13 @@ async function uploadWithMultipart(
 
 async function sha256File(file: File) {
   if (!globalThis.crypto?.subtle) {
-    throw new Error('当前浏览器不支持文件校验，已回退到普通上传。');
+    throw new Error('当前浏览器无法安全核验文件，未上传。请刷新或使用支持文件校验的浏览器。');
   }
   let value = fileHashes.get(file);
   if (!value) {
     value = file.arrayBuffer().then(bytes => globalThis.crypto.subtle.digest('SHA-256', bytes))
-      .then(digest => Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join(''));
+      .then(digest => Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join(''))
+      .catch(() => { throw new Error('当前浏览器无法安全核验文件，未上传。请刷新或使用支持文件校验的浏览器。'); });
     fileHashes.set(file, value);
     void value.catch(() => fileHashes.delete(file));
   }
@@ -748,26 +802,15 @@ async function uploadFileToHistoryInternal(
     label: '正在读取文件信息',
   });
 
-  try {
-    const [nextHash, imageDimensions, mediaMetadata] = await Promise.all([
-      sha256File(file),
-      readImageDimensions(file),
-      readMediaMetadata(file),
-    ]);
-    hash = nextHash;
-    width = mediaMetadata?.width ?? imageDimensions.width;
-    height = mediaMetadata?.height ?? imageDimensions.height;
-    durationSeconds = mediaMetadata?.durationSeconds ?? null;
-  } catch (error) {
-    if (
-      shouldUseRawFallback(file, fallbackToRaw) &&
-      error instanceof Error &&
-      error.message.includes('当前浏览器不支持文件校验')
-    ) {
-      return uploadWithRawFallback(file, invalidJsonMessage, onProgress, { requestId: options.requestId, ownerId: options.ownerId });
-    }
-    throw error;
-  }
+  const [nextHash, imageDimensions, mediaMetadata] = await Promise.all([
+    sha256File(file),
+    readImageDimensions(file),
+    readMediaMetadata(file),
+  ]);
+  hash = nextHash;
+  width = mediaMetadata?.width ?? imageDimensions.width;
+  height = mediaMetadata?.height ?? imageDimensions.height;
+  durationSeconds = mediaMetadata?.durationSeconds ?? null;
 
   validateClientMediaDuration(file, durationSeconds);
 
@@ -779,6 +822,8 @@ async function uploadFileToHistoryInternal(
     ownerId: options.ownerId,
     requestId: options.requestId,
   };
+  const recoveredRaw = await recoverRawUpload(file, uploadContext, invalidJsonMessage, onProgress);
+  if (recoveredRaw) return recoveredRaw;
   const restored = await options.beforeUpload?.({ hash, fileSize: file.size, mimeType: file.type });
   if (restored?.id) return restored;
   const receiptScope = `${options.ownerId || 'unscoped'}:${uploadSession().epoch}`;
@@ -904,17 +949,15 @@ async function uploadFileToHistoryInternal(
 export async function uploadFileToHistory(file: File, options: UploadOptions = {}): Promise<UploadedAssetPayload> {
   const session = uploadSession();
   const ownerId = options.ownerId || options.batch?.ownerId || session.ownerId || undefined;
+  if (!ownerId) throw new Error('当前账号尚未确认，文件未上传。请重新登录后再选择文件。');
   if (session.ownerId && ownerId !== session.ownerId || options.batch && (options.batch.ownerId !== ownerId || options.batch.epoch !== session.epoch)) {
     throw new Error('账号已变化，请重新选择素材；原上传不会跨账号套用。');
   }
   const scope = `${ownerId || 'unscoped'}:${session.epoch}`;
   let identities = fileRequests.get(file);
   if (!identities) { identities = new Map(); fileRequests.set(file, identities); }
-  let key = '';
-  if (ownerId && !options.beforeUpload) {
-    try { key = `${scope}:${await sha256File(file)}:${file.size}:${file.type}`; }
-    catch (cause) { if (!(cause instanceof Error) || !cause.message.includes('当前浏览器不支持文件校验')) throw cause; }
-  }
+  const hash = await sha256File(file);
+  const key = options.beforeUpload ? '' : `${scope}:${hash}:${file.size}:${file.type}`;
   const existing = key ? options.batch?.requests.get(key) || inFlightUploads.get(key) : undefined;
   if (existing) {
     notifyUploadProgress(options.onProgress, { phase: 'preparing', label: '正在复用本批相同文件' });
@@ -934,7 +977,10 @@ export async function uploadFileToHistory(file: File, options: UploadOptions = {
   const requestId = options.requestId || persistedId || identities.get(scope) || crypto.randomUUID();
   identities.set(scope, requestId);
   if (identityKey) {
-    try { sessionStorage.setItem(identityKey, requestId); }
+    try {
+      sessionStorage.setItem(identityKey, requestId);
+      if (sessionStorage.getItem(identityKey) !== requestId) throw new Error('Upload request unavailable');
+    }
     catch { throw new Error('上传编号未能保存，文件尚未发送。请允许本机存储后重试。'); }
   }
   const request = uploadFileToHistoryInternal(file, { ...options, ownerId, requestId }).then(result => {
@@ -944,6 +990,10 @@ export async function uploadFileToHistory(file: File, options: UploadOptions = {
   });
   if (key) { inFlightUploads.set(key, request); options.batch?.requests.set(key, request); }
   try { return await request; }
+  catch (error) {
+    if (key && options.batch?.requests.get(key) === request) options.batch.requests.delete(key);
+    throw error;
+  }
   finally { if (key && inFlightUploads.get(key) === request) inFlightUploads.delete(key); }
 }
 

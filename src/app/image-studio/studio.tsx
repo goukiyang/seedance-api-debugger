@@ -2654,41 +2654,65 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     const source = asset.originalUrl.startsWith('/api/') || !asset.id ? asset.originalUrl : `/api/content-reactions/media?key=${encodeURIComponent(`asset:${asset.id}`)}&variant=preview`;
     setPreview({ contentKey: asset.id ? `asset:${asset.id}` : undefined, src: source, thumbnailSrc: asset.thumbnailUrl || undefined, alt: `参考图 ${number}`, fileName: asset.fileName, width: asset.width || undefined, height: asset.height || undefined, fileSize: asset.fileSize });
   }
+  const uploadTargets = useRef({ images, auxiliaryImages, fixedReferences, banner });
+  uploadTargets.current = { images, auxiliaryImages, fixedReferences, banner };
   const addImages = useCallback(async (files: File[], fixed = false, auxiliary = false) => {
     if (uploadLock.current || submitting || pendingSubmission || !files.length) return;
     if (fixed && !fixedEditable) return;
     if (files.some(file => !['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 20 * 1024 * 1024)) {
       setError('请使用 20MB 以内的 PNG、JPG 或 WebP 图片'); return;
     }
+    const expectedScope = taskReadScope, expectedView = currentView.current.token, signature = liveGenerationSignature.current;
+    const targetSignature = JSON.stringify(uploadTargets.current);
+    const current = () => taskReadScopeRef.current === expectedScope && currentView.current.active && currentView.current.token === expectedView
+      && liveGenerationSignature.current === signature && JSON.stringify(uploadTargets.current) === targetSignature;
     uploadLock.current = true; setUploading(true); setError('');
     const completed: UploadedAssetPayload[] = [];
+    const cap = fixed ? MAX_REFERENCE_IMAGES : auxiliary ? currentAuxiliaryCap : currentReferenceCap;
+    const initial = fixed ? fixedReferences : auxiliary ? auxiliaryImages : images;
+    const replacing = !fixed && !auxiliary && referenceLimit === 1 && initial.length > 0;
+    let skipAfterSuccess = false, duplicates = 0, uploadError = '', applySelection = true;
     try {
-      const { files: uploadFiles, duplicates } = await uniqueUploadFiles(files);
-      const cap = fixed ? MAX_REFERENCE_IMAGES : auxiliary ? currentAuxiliaryCap : currentReferenceCap;
-      const existing = fixed ? fixedReferences.length : auxiliary ? auxiliaryImages.length : images.length;
+      const unique = await uniqueUploadFiles(files);
+      if (!current()) return;
+      const uploadFiles = unique.files; duplicates = unique.duplicates;
       const singleMain = !fixed && !auxiliary && referenceLimit === 1;
       if (singleMain && uploadFiles.length > 1) throw new Error('主图上限为 1 张，请一次只选择一张不同的图片。');
-      const replacing = singleMain && existing > 0;
-      if (!cap || (!replacing && uploadFiles.length + existing > cap)) throw new Error(fixed ? `固定参考图最多 ${MAX_REFERENCE_IMAGES} 张` : auxiliary ? `本次可选辅助参考最多 ${cap} 张，模板和风格组已占 ${activeFixedCount} 张。` : `本次可选主图最多 ${cap} 张，请调整数量或减少辅助参考。`);
-      let skipAfterSuccess = false;
-      if (replacing && !skipMainImageReminder(userId) && !(await confirm(`确认用「${uploadFiles[0].name}」替换当前主图？上传成功前旧主图会保留；取消不会更改当前内容。`, { title: '替换主图', confirmLabel: '替换主图', checkbox: { label: '以后替换主图不再提醒', onConfirm: checked => { skipAfterSuccess = checked; } } }))) return;
       const uploadBatch = createUploadBatch(userId);
       for (let index = 0; index < uploadFiles.length; index++) {
+        if (!current()) return;
         const file = uploadFiles[index];
-        const asset = await uploadFileAsAsset(file, { ownerId: userId, batch: uploadBatch, onProgress: progress => setUploadProgress(studioUploadProgress(file, index, uploadFiles.length, progress)) });
+        const asset = await uploadFileAsAsset(file, { ownerId: userId, batch: uploadBatch, onProgress: progress => {
+          if (current()) setUploadProgress(studioUploadProgress(file, index, uploadFiles.length, progress));
+        } });
+        if (!current()) return;
         if (!asset.id || !asset.originalUrl) throw new Error('上传结果不完整，请重试');
-        completed.push(asset);
-        if (fixed) {
-          setFixedReferences(current => current.some(item => item.id === asset.id) ? current : [...current, { ...asset, note: '', available: true }]);
-          setReproduceSourceTaskId(null);
-        } else if (auxiliary) setAuxiliaryImages(current => current.some(item => item.id === asset.id) ? current : [...current, asset]);
-        else setImages(current => replacing ? [asset] : current.some(item => item.id === asset.id) ? current : [...current, asset]);
-        if (replacing && skipAfterSuccess) saveMainImageReminder(userId, true);
+        if (!completed.some(item => item.id === asset.id)) completed.push(asset);
       }
-      if (duplicates) setSaveStatus(`本批 ${duplicates} 个重复文件已合并选择，未增加参考图数量。`);
-    } catch (e) { setError(e instanceof Error ? e.message : '上传失败'); }
-    finally { if (completed.length) { setUploadSummaryTarget(fixed ? 'fixed' : auxiliary ? 'auxiliary' : 'primary'); setUploadedSummary(completed); } uploadLock.current = false; setUploading(false); setUploadProgress(null); }
-  }, [userId, confirm, images.length, auxiliaryImages.length, currentReferenceCap, currentAuxiliaryCap, fixedReferences.length, activeFixedCount, submitting, pendingSubmission, fixedEditable, referenceLimit]);
+      if (replacing && completed[0]?.id !== initial[0]?.id && !skipMainImageReminder(userId)) {
+        applySelection = await confirm(`确认用「${uploadFiles[0].name}」替换当前主图？取消会保留原主图，已上传图片仍可从素材库选用。`, { title: '替换主图', confirmLabel: '替换主图', checkbox: { label: '以后替换主图不再提醒', onConfirm: checked => { skipAfterSuccess = checked; } } });
+      }
+    } catch (e) { uploadError = e instanceof Error ? e.message : '上传失败'; }
+    finally {
+      if (current() && applySelection) {
+        const additions = completed.filter(asset => !initial.some(item => item.id === asset.id));
+        const nextCount = replacing && completed.length ? 1 : initial.length + additions.length;
+        if (additions.length && nextCount > cap) {
+          uploadError = `${fixed ? `固定参考图最多 ${MAX_REFERENCE_IMAGES} 张` : auxiliary ? `本次可选辅助参考最多 ${cap} 张，模板和风格组已占 ${activeFixedCount} 张` : `本次可选主图最多 ${cap} 张`}。原选择未变，已上传图片保留在素材库。`;
+        } else if (completed.length) {
+          if (fixed && additions.length) { setFixedReferences([...fixedReferences, ...additions.map(asset => ({ ...asset, note: '', available: true }))]); setReproduceSourceTaskId(null); }
+          else if (auxiliary && additions.length) setAuxiliaryImages([...auxiliaryImages, ...additions]);
+          else if (!fixed && !auxiliary && (replacing || additions.length)) setImages(replacing ? [completed[0]] : [...images, ...additions]);
+          if (replacing && skipAfterSuccess) saveMainImageReminder(userId, true);
+          setUploadSummaryTarget(fixed ? 'fixed' : auxiliary ? 'auxiliary' : 'primary'); setUploadedSummary(completed);
+          if (duplicates || !additions.length) setSaveStatus('相同文件已复用，当前参考区不会重复加入。');
+        }
+        if (uploadError) setError(uploadError);
+      }
+      uploadLock.current = false;
+      if (taskReadScopeRef.current === expectedScope) { setUploading(false); setUploadProgress(null); }
+    }
+  }, [userId, taskReadScope, confirm, images, auxiliaryImages, currentReferenceCap, currentAuxiliaryCap, fixedReferences, activeFixedCount, submitting, pendingSubmission, fixedEditable, referenceLimit]);
 
   async function chooseSimilarExisting(candidate: UploadedAssetPayload, uploaded: UploadedAssetPayload) {
     if (!candidate.id || !uploaded.id || !active || uploadLock.current || uploading || bannerUploading || submitting || pendingSubmission
@@ -2727,14 +2751,19 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 20 * 1024 * 1024) {
       setError('banner 请使用 20MB 以内的 PNG、JPG 或 WebP 图片'); return;
     }
+    const expectedScope = taskReadScope, expectedView = currentView.current.token, signature = liveGenerationSignature.current;
+    const targetSignature = JSON.stringify(uploadTargets.current);
+    const current = () => taskReadScopeRef.current === expectedScope && currentView.current.active && currentView.current.token === expectedView
+      && liveGenerationSignature.current === signature && JSON.stringify(uploadTargets.current) === targetSignature;
     setBannerUploading(true); setError('');
     try {
-      const asset = await uploadFileAsAsset(file, { ownerId: userId, onProgress: progress => setBannerProgress(studioUploadProgress(file, 0, 1, progress)) });
+      const asset = await uploadFileAsAsset(file, { ownerId: userId, onProgress: progress => { if (current()) setBannerProgress(studioUploadProgress(file, 0, 1, progress)); } });
+      if (!current()) return;
       if (!asset.id || !asset.originalUrl) throw new Error('banner 上传结果不完整，请重试');
       setBanner(asset);
       setUploadSummaryTarget('banner'); setUploadedSummary([asset]);
-    } catch (e) { setError(e instanceof Error ? e.message : 'banner 上传失败'); }
-    finally { setBannerUploading(false); setBannerProgress(null); }
+    } catch (e) { if (current()) setError(e instanceof Error ? e.message : 'banner 上传失败'); }
+    finally { if (taskReadScopeRef.current === expectedScope) { setBannerUploading(false); setBannerProgress(null); } }
   }
 
   useEffect(() => {

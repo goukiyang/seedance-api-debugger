@@ -264,10 +264,12 @@
 .moduleQuickActions button { padding: 7px 9px; font-size: 12px; }
 .batchInputPreview { aspect-ratio: 1; background: #161c20; overflow: hidden; }
 .batchInputPreview img { width: 100%; height: 100%; object-fit: contain; opacity: .7; }
-.ratioInfoButton { position: absolute; top: 24px; right: 0; width: 32px; height: 36px; justify-content: center; }
-.ratioHint { display: none; position: absolute; top: 100%; left: 0; z-index: 22; box-sizing: border-box; width: max-content; max-width: min(360px, 100%); margin: 4px 0 0; padding: 8px 10px; border: 1px solid #52616a; border-radius: 6px; background: #192126; color: #d9e2e8; font-size: 12px; }
-.ratioTrigger:focus ~ .ratioHint, .ratioHint[data-open="true"] { display: block; }
-@media (hover: hover) { .ratioPicker:hover .ratioHint { display: block; } }
+.ratioHeading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.ratioHeading .label { margin: 0; }
+.page .ratioInfoButton { min-height: 28px; width: 32px; height: 28px; padding: 4px; justify-content: center; border-color: transparent; background: transparent; }
+.ratioHint { display: none; position: absolute; top: 32px; right: 0; z-index: 22; box-sizing: border-box; width: max-content; max-width: min(360px, 100%); margin: 4px 0 0; padding: 8px 10px; border: 1px solid #52616a; border-radius: 6px; background: #192126; color: #d9e2e8; font-size: 12px; }
+.ratioHint[data-open="true"], .ratioPicker:has(.ratioInfoButton:focus-visible) .ratioHint { display: block; }
+@media (hover: hover) { .ratioPicker:has(.ratioInfoButton:hover) .ratioHint { display: block; } }
 .moduleQuickActions .saveReady { border-color: #79daca; color: #a4f2df; }
 .quickPresetRow { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex: 1 1 100%; min-width: 0; order: 2; }
 .quickPresetRow > button { flex: 0 0 auto; }
@@ -311,14 +313,16 @@
 .page .select { position: absolute; bottom: 10px; left: 10px; width: 20px; height: 20px; accent-color: #2ba98e; }
 .page .danger { color: #ffb4ab; border-color: #a44949; }
 .ratioPicker { position: relative; }
-.page .ratioTrigger { width: calc(100% - 38px); justify-content: space-between; }
-.ratioMenu { position: absolute; top: 76px; left: 0; width: 100%; max-height: 300px; overflow-y: auto; z-index: 10; border: 1px solid #465057; background: #171c1f; border-radius: 6px; padding: 6px; box-sizing: border-box; box-shadow: 0 8px 24px #0006; }
-.ratioRow { display: flex; align-items: center; min-height: 38px; }
-.ratioRow > button:first-child { flex: 1; justify-content: space-between; border: 0; background: transparent; }
-.ratioRow button[aria-pressed=true] { color: #a4f2df; background: #123b33; }
-.page .ratioDelete { opacity: 0; padding: 6px; width: 32px; height: 32px; }
-.ratioRow:hover .ratioDelete, .ratioRow:focus-within .ratioDelete { opacity: 1; }
-.page .ratioOther { width: 100%; margin-top: 4px; }
+.ratioCards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.ratioCardWrap { position: relative; min-width: 0; }
+.ratioAuto { grid-column: 1 / -1; }
+.page .ratioCard { display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: center; width: 100%; min-width: 0; min-height: 66px; height: 100%; padding: 8px 3px; border: 1px solid #465057; border-radius: 7px; background: #171c1f; color: #c5cdd2; font-size: 12px; white-space: nowrap; }
+.page .ratioAuto .ratioCard { min-height: 36px; padding: 7px 8px; }
+.page .ratioCard[aria-pressed=true], .page .ratioOther[aria-pressed=true] { border-color: #79daca; color: #a4f2df; background: #123b33; }
+.ratioShapeSpace { display: grid; place-items: center; width: 30px; height: 28px; }
+.ratioShape { display: block; box-sizing: border-box; border: 1.5px solid currentColor; border-radius: 2px; }
+.page .ratioDelete { position: absolute; top: 0; right: 0; padding: 5px; width: 25px; min-height: 25px; height: 25px; border: 0; background: transparent; }
+.page .ratioOther { width: 100%; min-width: 0; padding: 5px; min-height: 44px; font-size: 12px; }
 .customRatio { display: flex; gap: 8px; margin-top: 8px; }
 .customRatio input { min-width: 0; flex: 1; }
 @media (hover: none) { .page .ratioDelete, .resultCommands { opacity: 1; } }

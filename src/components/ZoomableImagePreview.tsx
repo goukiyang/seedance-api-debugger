@@ -245,7 +245,9 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const { user, hasLoadedUser } = useAppSession();
   const owner = user?.id || '';
   const backdropRef = useRef<HTMLDivElement>(null), toolbarRef = useRef<HTMLDivElement>(null), stageRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
   const paneRefs = useRef<Partial<Record<Side, HTMLDivElement>>>({});
+  const blankPress = useRef<{ surface: HTMLElement; pointerId: number; x: number; y: number; cancelled: boolean; released: boolean } | null>(null);
   const portalAnchorRef = useRef<HTMLSpanElement>(null);
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
   const incoming: ImageComparisonSource = { src, thumbnailSrc, alt, fileName, id: previewKey, version: sourceVersion, role: sourceRole, contentKey, width: safeDetails?.width, height: safeDetails?.height, fileSize: safeDetails?.fileSize };
@@ -400,8 +402,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
     catch { setPortalRoot(document.body); }
   }, []);
   useDialogDismiss({ open: Boolean(portalRoot), dialogRef: backdropRef, dismissSurfaceRef: backdropRef,
-    onDismiss: dismissPreview, initialFocusRef: backdropRef,
-    isDismissTarget: target => target === backdropRef.current || target === stageRef.current });
+    onDismiss: dismissPreview, initialFocusRef: backdropRef, dismissOnOutside: false });
   useDialogDismiss({ open: Boolean(controlsOpen && portalRoot), dialogRef: controlsRef, modal: false,
     branchRefs: [zoomTriggerRef, moreTriggerRef], onDismiss: () => setControlsOpen(null) });
   useEffect(() => {
@@ -539,6 +540,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   useEffect(() => {
     const wheel = (event: WheelEvent) => {
       if (!isTopmostDialogLayer(backdropRef.current) || !event.deltaY || !(event.target instanceof Element)) return;
+      blankPress.current = null;
       const pane = event.target.closest<HTMLElement>('[data-image-preview-pane]'); if (!pane || !stageRef.current?.contains(pane)) return;
       event.preventDefault(); event.stopImmediatePropagation();
       const side = pane.dataset.imagePreviewPane as Side, point = pointInPane(side, { x: event.clientX, y: event.clientY });
@@ -562,6 +564,37 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
     window.addEventListener('keydown', handle, true); return () => window.removeEventListener('keydown', handle, true);
   }, [hasNavigation, onNext, onPrevious, reset, zoomFromControls]);
 
+  function blankSurface(target: EventTarget | null) {
+    if (!(target instanceof HTMLElement)) return null;
+    return target === backdropRef.current || target === stageRef.current || target === frameRef.current
+      || sides.some(side => target === paneRefs.current[side]) ? target : null;
+  }
+  function blankPointerDown(event: PointerEvent<HTMLDivElement>) {
+    blankPress.current = null;
+    if (!isTopmostDialogLayer(backdropRef.current) || !event.isPrimary
+      || event.pointerType !== 'touch' && event.button !== 0
+      || sides.some(side => points.current[side].size > 0)) return;
+    const surface = blankSurface(event.target);
+    if (!surface) return;
+    blankPress.current = { surface, pointerId: event.pointerId, x: event.clientX, y: event.clientY, cancelled: false, released: false };
+  }
+  function blankPointerMove(event: PointerEvent<HTMLDivElement>) {
+    const press = blankPress.current;
+    if (!press || press.pointerId !== event.pointerId || press.released) return;
+    // Remember any drag, including one that returns to its starting point.
+    if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > 5) press.cancelled = true;
+  }
+  function blankPointerUp(event: PointerEvent<HTMLDivElement>) {
+    const press = blankPress.current;
+    if (!press || press.pointerId !== event.pointerId) return;
+    // Pane capture retargets pointerup; inspect the actual surface under the release.
+    const target = event.currentTarget.ownerDocument.elementFromPoint(event.clientX, event.clientY);
+    press.released = !press.cancelled && event.isPrimary && isTopmostDialogLayer(backdropRef.current)
+      && Math.hypot(event.clientX - press.x, event.clientY - press.y) <= 5
+      && sides.reduce((total, side) => total + points.current[side].size, 0) <= 1
+      && blankSurface(target) === press.surface;
+    if (!press.released) blankPress.current = null;
+  }
   function pointerDown(side: Side, event: PointerEvent<HTMLDivElement>) {
     if (!isTopmostDialogLayer(backdropRef.current) || event.target instanceof Element && event.target.closest('button, a[href], input, select') || event.pointerType !== 'touch' && event.button !== 0) return;
     event.preventDefault(); userAction.current++; setActiveSide(side);
@@ -665,7 +698,16 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
     </button>;
   }
   return <><span ref={portalAnchorRef} hidden />{portalRoot && createPortal(<div ref={backdropRef} className={styles.backdrop} data-media-preview="sd2-media-preview" role="dialog" aria-modal="true" aria-label={imageTitle} tabIndex={-1}
-    onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onPointerMove={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()}
+    onClick={event => {
+      event.stopPropagation();
+      const press = blankPress.current; blankPress.current = null;
+      // Consume the original click before closing, so it cannot reach a lower layer.
+      if (press?.released && !event.defaultPrevented && event.detail > 0 && blankSurface(event.target) === press.surface && isTopmostDialogLayer(backdropRef.current)) dismissPreview();
+    }}
+    onPointerDownCapture={blankPointerDown} onPointerMoveCapture={blankPointerMove} onPointerUpCapture={blankPointerUp}
+    onPointerCancelCapture={() => { blankPress.current = null; }}
+    onLostPointerCaptureCapture={() => { if (!blankPress.current?.released) blankPress.current = null; }}
+    onPointerDown={event => event.stopPropagation()} onPointerMove={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()}
     onDoubleClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onKeyUp={event => event.stopPropagation()}>
     <div ref={toolbarRef} className={styles.toolbar}>
       <div className={styles.sourceGroup}>
@@ -713,7 +755,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
     </div>
     <div ref={stageRef} className={styles.stage} data-image-preview-stage onAuxClick={event => event.preventDefault()}>
       {(message || copyState?.src === copySource && copyState.message || isOriginalSubject && notice != null) && <div className={styles.notice} role="status">{message || (copyState?.src === copySource ? copyState.message : null)}{isOriginalSubject && notice}</div>}
-      <div className={styles.compareFrame + ' ' + (comparisonMode ? axis === 'vertical' ? styles.compareVertical : styles.compareHorizontal : styles.singleFrame)} data-image-preview-compare-frame>
+      <div ref={frameRef} className={styles.compareFrame + ' ' + (comparisonMode ? axis === 'vertical' ? styles.compareVertical : styles.compareHorizontal : styles.singleFrame)} data-image-preview-compare-frame>
         {comparisonMode ? paneOrder.map(side => pane(side)) : pane('current')}
       </div>
     </div>

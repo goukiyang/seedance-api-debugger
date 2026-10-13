@@ -2,7 +2,6 @@ import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_M
   defaultImageStudioQuality, defaultImageResolution, type ImageStudioModel, type ImageStudioQuality, type ImageResolution } from './model-catalog';
 import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from './limits';
 import { normalizeStudioRatio } from './ratios';
-import { supportsStudioFourToOne } from '@/lib/image-generation/resolution';
 import type { StudioReferencePolicy } from './reference-policy';
 
 export type StudioTemplateDefaults = {
@@ -32,7 +31,8 @@ export function parseStudioTemplateDefaults(value: unknown): StudioTemplateDefau
   if (!IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model].includes(record.quality as ImageStudioQuality)
     || !IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[model].includes(record.resolution as ImageResolution)) throw new Error('当前默认模型不支持所选质量或分辨率');
   const aspectRatio = normalizeStudioRatio(record.aspectRatio);
-  if (aspectRatio === '4:1' && !supportsStudioFourToOne(model)) throw new Error('当前默认模型不支持4:1比例');
+  // Supplier support is checked against the resolved channel when saving or submitting.
+  // Reading historical defaults must not depend on today's channel configuration.
   // Explicit projection excludes content, asset IDs and any future administrator-only fields.
   return { primaryMin: Number(record.primaryMin), primaryMax: Number(record.primaryMax), styleMax: Number(record.styleMax),
     referenceMax: Number(record.referenceMax), auxiliaryMax: Number(record.auxiliaryMax), useFixedReferences: record.useFixedReferences,

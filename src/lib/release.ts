@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '素材来源改为直接点选的小页签；模板模型、质量和分辨率合并一行；风格与提示词组重新排版，名称更清楚。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '放大图片可点空白关闭；重复上传安全复用并恢复原上传结果；比例改为形状卡片，已配置通道支持更多比例。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

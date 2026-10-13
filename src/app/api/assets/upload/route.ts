@@ -7,20 +7,61 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { assertUploadOwner, uploadIdentity, uploadRequestId, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
+import { assertUploadOwner, uploadDigest, uploadIdentity, uploadRequestId, readVerifiedUploadReceipt, releaseVerifiedUpload, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
 import {
   getSiteUploadKind,
+  isLocalPublicUploadUrl,
+  sameOriginPublicUrlForLocalUpload,
   uploadSiteAsset,
   validateSiteUploadInput,
   validateSiteUploadMetadata,
 } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 import { requestHd } from '@/lib/media/hd-derivatives';
+import { isPubliclyReachableUrl } from '@/lib/assets/public-storage';
+import { uploadSimilarityStatus } from '@/lib/assets/upload-similarity';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 export const maxDuration = 180;
 
 const MULTIPART_COMPAT_MAX_SIZE_BYTES = 8 * 1024 * 1024;
+
+// Read the original committed receipt only. Absence can also mean the original
+// request is still running, so it must never be reported as not accepted.
+export async function GET(request: NextRequest) {
+  try {
+    const user = await getSession();
+    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertUploadOwner(request.headers.get('x-upload-owner-id'), user.id);
+    await uploadIdentity(user.id);
+    const query = request.nextUrl.searchParams;
+    const requestId = uploadRequestId(query.get('requestId'));
+    const hash = query.get('hash') || '';
+    const fileSize = Number(query.get('fileSize'));
+    const mimeType = (query.get('mimeType') || '').split(';')[0].trim().toLowerCase();
+    if (!requestId || !/^[a-f0-9]{64}$/.test(hash) || !Number.isSafeInteger(fileSize) || fileSize <= 0
+      || validateSiteUploadMetadata({ mimeType, fileSize })) throw new VerifiedUploadError('UPLOAD_IDENTITY_INVALID', '原上传文件身份无法确认', 400);
+    const found = await readVerifiedUploadReceipt(user.id, requestId, uploadDigest(JSON.stringify([hash, fileSize, mimeType])));
+    if (!found) throw new VerifiedUploadError('UPLOAD_RESULT_UNKNOWN', '原上传结果尚未确认，请稍后查询；未重新发送文件');
+    try {
+      const asset = found.asset;
+      const originalUrl = sameOriginPublicUrlForLocalUpload(asset.original_url) || asset.original_url;
+      const thumbnailUrl = asset.thumbnail_url ? sameOriginPublicUrlForLocalUpload(asset.thumbnail_url) || asset.thumbnail_url : null;
+      const similarity = await uploadSimilarityStatus(user.id, asset.id).catch(() => ({ state: 'unavailable' as const, coverage: 'new_uploads_only' as const }));
+      return NextResponse.json({ success: true, asset: { id: asset.id, originalUrl, thumbnailUrl,
+        width: asset.width, height: asset.height, fileName: asset.file_name, fileSize: asset.file_size, mimeType: asset.mime_type,
+        hash: asset.hash, reused: found.reused, similarity, isPubliclyReachable: isPubliclyReachableUrl(originalUrl),
+        storageProvider: isLocalPublicUploadUrl(asset.original_url) ? 'local-public' : undefined,
+        ...(!isPubliclyReachableUrl(originalUrl) ? { warning: '文件已保存；当前站点未配置可供外部服务访问的原文件地址。' } : {}),
+        upload: { requestId, verified: true, assetDisposition: found.reused ? 'reused' : 'new',
+          sourceVersion: found.proof.sourceVersion || found.proof.version } } }, { headers: { 'Cache-Control': 'private, no-store' } });
+    } finally { await releaseVerifiedUpload(found.proof); }
+  } catch (error) {
+    if (error instanceof VerifiedUploadError) return NextResponse.json(verifiedUploadFailure(error), { status: error.status });
+    return NextResponse.json({ error: '原上传结果暂时无法核对，请稍后查询；未重新发送文件' }, { status: 503 });
+  }
+}
 
 type UploadPayload = {
   buffer: Buffer;

@@ -85,10 +85,10 @@ export function UploadSimilarityReview({ ownerId, assets, onChooseExisting, choo
   const epoch = uploadSession().epoch;
   const scope = `${ownerId}:${user?.id || ''}:${user?.role || ''}:${user?.account_type || ''}:${epoch}`;
   const permitted = Boolean(hasLoadedUser && ownerId && user?.id === ownerId && uploadSession().ownerId === ownerId);
-  const inputSignature = JSON.stringify(assets.filter(asset => identifier(asset.id)).map(asset => [asset.id, asset.upload?.sourceVersion || '', asset.upload?.requestId || '']));
+  const inputSignature = JSON.stringify(assets.filter(asset => identifier(asset.id)).map(asset => [asset.id, asset.upload?.sourceVersion || '', asset.upload?.requestId || '', asset.similarity?.state || '']));
   const inputRef = useRef(assets); inputRef.current = assets;
   const images = useMemo(() => Array.from(new Map(inputRef.current.filter(asset => identifier(asset.id)
-    && (!asset.mimeType || asset.mimeType.startsWith('image/'))).map(asset => [asset.id!, asset])).values()).slice(0, MAX_ASSETS), [inputSignature]);
+    && asset.similarity?.state !== 'disabled' && (!asset.mimeType || asset.mimeType.startsWith('image/'))).map(asset => [asset.id!, asset])).values()).slice(0, MAX_ASSETS), [inputSignature]);
   const [data, setData] = useState<{ scope: string; checks: Record<string, Check> }>({ scope: '', checks: {} });
   const checks = data.scope === scope ? data.checks : {};
   const [expanded, setExpanded] = useState(false);
@@ -189,7 +189,6 @@ export function UploadSimilarityReview({ ownerId, assets, onChooseExisting, choo
   const pending = images.some(asset => !checks[asset.id!] || ['checking', 'queued', 'running'].includes(checks[asset.id!].state));
   const disabled = images.length > 0 && images.every(asset => checks[asset.id!]?.state === 'disabled');
   const unsupported = images.some(asset => checks[asset.id!]?.state === 'unsupported');
-  const partiallyDisabled = images.some(asset => checks[asset.id!]?.state === 'disabled');
   const failures = images.some(asset => ['failed', 'unavailable'].includes(checks[asset.id!]?.state || ''));
   async function act(choose: boolean) {
     if (actionLock.current || !uploaded || !candidate || check?.state !== 'ready' || !check.sourceVersion || !check.algorithmVersion) return;
@@ -225,12 +224,12 @@ export function UploadSimilarityReview({ ownerId, assets, onChooseExisting, choo
       if (current(savedScope, savedSequence)) setActionError(error instanceof Error && error.message !== 'stale_review' ? error.message : '结果尚未确认，请重新检查');
     } finally { if (current(savedScope, savedSequence)) { actionLock.current = false; setActionBusy(false); } }
   }
-  if (!permitted || dismissed || !images.length) return null;
+  if (!permitted || dismissed || !images.length || disabled) return null;
   return <section className={styles.root} aria-label="上传图片相似检查">
     <div ref={summaryRef} className={styles.summary} aria-live="polite">
-      <span>{found ? `发现相似图片 · ${found} 张上传图片` : disabled ? '相似检查尚未启用'
+      <span>{found ? `发现相似图片 · ${found} 张上传图片`
         : failures ? '部分相似检查暂未完成，上传已成功' : pending ? '图片已加入，相似检查可稍后查看'
-          : unsupported ? '部分图片暂不支持相似检查，上传已成功' : partiallyDisabled ? '部分相似检查尚未启用' : '本次已索引图片中未发现相似候选'}</span>
+          : unsupported ? '部分图片暂不支持相似检查，上传已成功' : '本次已索引图片中未发现相似候选'}</span>
       <button type="button" aria-expanded={expanded} aria-controls={reviewId} onClick={() => {
         if (expanded) collapse(); else { setExpanded(true); setActionError(''); startReads(); }
       }}>{expanded ? '收起' : '查看'}</button>
