@@ -175,6 +175,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
       {pages.pageItems.map(item => {
         const secondaryActions = renderActions?.(item);
         const primaryActions = renderPrimaryActions?.(item);
+        const coverReactions = Boolean(renderReactionAction && item.media?.contentKey);
         const reactions = item.media?.contentKey ? <ContentReactions contentKey={item.media.contentKey} imageSharing={item.media.imageSharing}
           secondaryAction={renderReactionAction?.(item)} overlay={!renderReactionAction} parentControlled={!renderReactionAction} /> : null;
         return (
@@ -182,7 +183,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
             <div className={styles.media} data-transparent={item.transparent || undefined} data-reaction-surface>
               {item.media ? <>
                 <ResultImageCover key={`${scope}:${item.id}`} src={item.media.thumbnailSrc || item.media.src} alt={item.label} selected={currentSelection === item.id} applied={Boolean(item.applied)} onSelect={() => select(item)} onPreview={() => changePreview(item, true)} onViewed={item.onViewed} active={visible} onQuickUse={onQuickUse && !item.viewOnly ? () => onQuickUse(item) : undefined} loadingOverlay={item.generationWait ? <ImageGenerationWaiting wait={item.generationWait} visible={visible} loadingImage /> : undefined} />
-                {!renderReactionAction && reactions}
+                {coverReactions ? <div className={styles.coverReactions}>{reactions}</div> : reactions}
               </> : <div className={`${styles.pending}${item.generationWait ? ` ${styles.generationPending}` : ' sd2-loading-surface'}`} data-busy={item.pending || undefined}
                 data-result-choice={onSelect ? '' : undefined} role={onSelect ? 'button' : undefined} tabIndex={onSelect ? 0 : undefined} aria-label={onSelect ? `选择${item.label}` : undefined} aria-pressed={onSelect ? currentSelection === item.id : undefined}
                 onClick={onSelect ? () => select(item) : undefined}
@@ -201,7 +202,6 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
                 {secondaryActions && <div className={styles.specialtyActions}>{secondaryActions}</div>}
               </div>}
             </div>
-            {renderReactionAction && reactions && <div className={styles.reactionRow}>{reactions}</div>}
             {item.media?.contentKey && nextSourceSet.has(item.media.contentKey) && <ImageResultNextActions sourceKey={item.media.contentKey} resultId={item.id} className={styles.nextActions} />}
             {renderMetadata ? renderMetadata(item) : <div className={styles.heading}><strong title={item.label}>{item.label}</strong><span>{item.status}</span></div>}
             {primaryActions && <div className={styles.actions} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{primaryActions}</div>}

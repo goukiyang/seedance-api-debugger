@@ -4,7 +4,9 @@ import path from 'node:path';
 import os from 'node:os';
 import sharp from 'sharp';
 import { hdReadonlyDb as prisma } from '../src/lib/media/hd-readonly-db';
-import { atomicHdJson, hdCapacity, hdControl, hdDirectory, hdEligibility, hdSource, hdStatus, listHdJobs, processHdJob, readHdJob, requestHd, retryFailedHd, retryHdKey, setHdControl } from '../src/lib/media/hd-derivatives';
+import { atomicHdJson, hdCapacity, hdControl, hdDirectory, hdEligibility, hdSource, hdStatus, listHdJobs, processHdJob, readHdJob, recheckHdResources, requestHd, retryFailedHd, retryHdKey, selectHdJob, setHdControl } from '../src/lib/media/hd-derivatives';
+import { HD_RESOURCE_POLICY } from '../src/lib/media/hd-resource-state';
+import { advanceHdDiscovery, commitHdDiscoveryItem, hdSourceIsolationReason, readHdDiscoveryCheckpoint, retryHdDiscoveryIsolations, withHdDiscovery } from '../src/lib/media/hd-discovery';
 
 const mode = process.argv[2] || 'status';
 const batch = 'ui30-old-20261007';
@@ -33,7 +35,7 @@ async function inventory(enqueue: boolean) {
       if (!local) { remoteSources.add(item.source); continue; }
       const prior = sources.get(local.file);
       sources.set(local.file, { ...item, preserveText: item.preserveText || Boolean(prior?.preserveText) });
-    } catch { unavailable++; }
+    } catch (error) { if (!hdSourceIsolationReason(error)) throw error; unavailable++; }
   }
   const result = { batch, capturedAt: new Date().toISOString(), uniqueLocalOriginals: sources.size, totalBytes: 0,
     types: {} as Record<string, number>, eligible: 0, cacheHits: 0, skipped: 0, reasons: {} as Record<string, number>,
@@ -52,13 +54,19 @@ async function inventory(enqueue: boolean) {
       const cached = existing.get(item.source);
       if (cached?.status === 'ready' && cached.version === input.version && cached.preserveText === item.preserveText) result.cacheHits++;
       if (enqueue) { const job = await requestHd(item.source, 3, item.preserveText, batch); if (job) result.jobs.push(job.key); }
-    } catch { result.skipped++; result.reasons.unreadable = (result.reasons.unreadable || 0) + 1; }
+    } catch (error) { if (!hdSourceIsolationReason(error)) throw error; result.skipped++; result.reasons.unreadable = (result.reasons.unreadable || 0) + 1; }
   }
   if (enqueue) await atomicHdJson(path.join(hdDirectory(), `${batch}.inventory.json`), result);
   return result;
 }
 async function main() {
-  if (mode === 'pause' || mode === 'resume') { await setHdControl(mode === 'pause', mode === 'pause' ? 'operator_pause' : undefined); console.log(JSON.stringify(await hdStatus())); return; }
+  if (mode === 'pause') { await setHdControl(true, 'operator_pause'); console.log(JSON.stringify(await hdStatus())); return; }
+  if (mode === 'resume' || mode === 'recheck') {
+    const observed = await hdControl();
+    const result = await recheckHdResources({ expectedToken: observed.token, allowManualResume: mode === 'resume' });
+    if (result.conflict) throw new Error('hd_control_conflict');
+    console.log(JSON.stringify(await hdStatus())); return;
+  }
   if (mode === 'retry') { await retryFailedHd(); console.log(JSON.stringify(await hdStatus())); return; }
   if (mode === 'retry-key' || mode === 'process-key') {
     const key = process.argv[3], version = process.argv[4];
@@ -90,43 +98,68 @@ async function main() {
   let stopping = false;
   process.on('SIGTERM', () => { stopping = true; });
   process.on('SIGINT', () => { stopping = true; });
-  const checkpoint = path.join(hdDirectory(), 'discovery.json');
   const fairnessCheckpoint = path.join(hdDirectory(), 'fairness.json');
   let consecutiveNew = await fs.readFile(fairnessCheckpoint, 'utf8').then(text => {
     const state = JSON.parse(text);
     if (!Number.isInteger(state.consecutiveNew) || state.consecutiveNew < 0 || state.consecutiveNew > 4) throw new Error('invalid_hd_fairness_checkpoint');
     return state.consecutiveNew as number;
   }).catch(error => { if (error.code === 'ENOENT') return 0; throw error; });
-  let since = await fs.readFile(checkpoint, 'utf8').then(text => new Date(JSON.parse(text).since))
-    .catch(() => new Date(Date.now() - 24 * 60 * 60 * 1000));
-  if (!Number.isFinite(since.getTime())) throw new Error('invalid_discovery_checkpoint');
+  await readHdDiscoveryCheckpoint();
+  let lastDiscoveryAt = 0;
   while (!stopping) {
-    if (!(await hdControl()).paused) {
-      const captured = new Date();
-      // Read-only discovery keeps generation/upload success independent of derivative completion.
-      const successes = await prisma.imageStudioTask.findMany({ where: { status: 'succeeded', deleted_at: null, finished_at: { gte: since, lte: captured }, asset_id: { not: null } }, select: { asset_id: true } });
-      const assets = await prisma.asset.findMany({ where: { status: 'active', type: 'image', OR: [{ created_at: { gte: since, lte: captured } }, { id: { in: successes.map(task => task.asset_id!) } }] },
-        select: { original_url: true, metadata_json: true } });
-      let discovered = true;
-      for (const asset of assets) {
-        try { await requestHd(asset.original_url, 0); }
-        catch { discovered = false; }
+    let control = await hdControl();
+    const legacyLoad = control.state === 'hard_pause' && control.reason === 'load_guard';
+    if (control.state === 'active' || (legacyLoad && (!control.wait || Date.parse(control.wait.nextCheckAt) <= Date.now()))
+      || (control.state === 'resource_wait' && Date.parse(control.wait!.nextCheckAt) <= Date.now())) {
+      control = (await recheckHdResources({ expectedToken: control.token })).control;
+    }
+    if (control.state === 'active' || control.state === 'resource_wait') {
+      if (Date.now() - lastDiscoveryAt >= HD_RESOURCE_POLICY.discoveryIntervalMs) {
+        await withHdDiscovery(async () => {
+          // Capacity and shared permissions are checked before discovery writes,
+          // independently of CPU/memory wait. Discovery is bounded on both streams.
+          if (!(await hdCapacity()).safe) { await setHdControl(true, 'capacity_guard'); return; }
+          const captured = new Date();
+          const checkpoint = await readHdDiscoveryCheckpoint();
+          const assets = await prisma.asset.findMany({ where: { status: 'active', type: 'image', created_at: { lte: captured },
+            OR: [{ created_at: { gt: new Date(checkpoint.assets.at) } }, { created_at: new Date(checkpoint.assets.at), id: { gt: checkpoint.assets.id } }] },
+            orderBy: [{ created_at: 'asc' }, { id: 'asc' }], take: HD_RESOURCE_POLICY.discoveryLimit / 2,
+            select: { id: true, created_at: true, original_url: true, metadata_json: true } });
+          for (const asset of assets) {
+            if (stopping || !['active', 'resource_wait'].includes((await hdControl()).state)) return;
+            const result = await commitHdDiscoveryItem('assets', { at: asset.created_at.toISOString(), id: asset.id },
+              { id: asset.id, source: asset.original_url, preserveText: textFlag(asset.metadata_json) });
+            if (!result.durable) break;
+          }
+          const successes = await prisma.imageStudioTask.findMany({ where: { status: 'succeeded', deleted_at: null, asset_id: { not: null }, finished_at: { lte: captured },
+            OR: [{ finished_at: { gt: new Date(checkpoint.tasks.at) } }, { finished_at: new Date(checkpoint.tasks.at), id: { gt: checkpoint.tasks.id } }] },
+            orderBy: [{ finished_at: 'asc' }, { id: 'asc' }], take: HD_RESOURCE_POLICY.discoveryLimit / 2,
+            select: { id: true, finished_at: true, asset_id: true } });
+          for (const task of successes) {
+            if (stopping || !['active', 'resource_wait'].includes((await hdControl()).state)) return;
+            const asset = await prisma.asset.findFirst({ where: { id: task.asset_id!, status: 'active', type: 'image' },
+              select: { id: true, original_url: true, metadata_json: true } });
+            const cursor = { at: task.finished_at!.toISOString(), id: task.id };
+            if (!asset) {
+              // Record a durable, explicit exclusion before advancing this stream.
+              await atomicHdJson(path.join(hdDirectory(), 'discovery-exclusions', `${task.id.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`),
+                { taskId: task.id, assetId: task.asset_id, reason: 'inactive_or_missing', at: captured.toISOString() });
+              await advanceHdDiscovery('tasks', cursor); continue;
+            }
+            const result = await commitHdDiscoveryItem('tasks', cursor, { id: asset.id, source: asset.original_url, preserveText: textFlag(asset.metadata_json) });
+            if (!result.durable) break;
+          }
+          await retryHdDiscoveryIsolations(10);
+        });
+        lastDiscoveryAt = Date.now();
       }
-      if (!discovered) { await setHdControl(true, 'discovery_source_failure'); continue; }
-      since = captured;
-      await atomicHdJson(checkpoint, { since: since.toISOString() });
-      if (!(await hdCapacity()).safe) await setHdControl(true, 'capacity_guard');
-      else if (os.loadavg()[0] > Math.max(4, os.cpus().length * 1.5) || await availableMemory() < 1024 * 1024 * 1024) {
-        await setHdControl(true, 'load_guard');
-      } else {
-        const jobs = (await listHdJobs()).filter(j => j.status === 'queued' || j.status === 'running')
-          .sort((a, b) => a.priority - b.priority || a.updatedAt.localeCompare(b.updatedAt));
-        // Keep the normal priority order, but reserve every fifth opportunity for
-        // the fixed old inventory while it still has a queued item.
-        const job = (consecutiveNew >= 4 ? jobs.find(j => j.status === 'queued' && j.batch === batch) : undefined) || jobs[0];
+      control = await hdControl();
+      if (control.state === 'active' && !stopping) {
+        const job = selectHdJob(await listHdJobs(), consecutiveNew, batch);
         if (job) {
           const previousAttempt = job.attemptHistory?.[job.attemptHistory.length - 1]?.startedAt;
-          await processHdJob(job.key);
+          const result = await processHdJob(job.key);
+          if (result === null) throw new Error('hd_lease_conflict');
           const after = await readHdJob(job.key);
           const completed = after?.attemptHistory?.[after.attemptHistory.length - 1];
           if (completed?.finishedAt && completed.startedAt !== previousAttempt) {
@@ -137,7 +170,7 @@ async function main() {
         }
       }
     }
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    await new Promise(resolve => setTimeout(resolve, HD_RESOURCE_POLICY.minimumCheckMs));
   }
 }
 main().catch(async error => { if (mode === 'worker') await setHdControl(true, 'worker_integrity_failure').catch(() => {}); console.error(error instanceof Error && /^(invalid_discovery_checkpoint|invalid_hd_fairness_checkpoint|batch_paused_or_capacity_guard|invalid_hd_manifest|invalid_hd_retry_target|invalid_hd_process_target|invalid_hd_targeted_arguments|hd_retry_source_changed|hd_retry_requires_failed|hd_targeted_requires_safe_pause|hd_targeted_requires_worker_lock|hd_targeted_requires_queued|hd_targeted_source_changed|hd_targeted_control_changed|hd_targeted_lease_busy|hd_targeted_load_guard)$/.test(error.message) ? error.message : 'hd_worker_failed'); process.exitCode = 1; })

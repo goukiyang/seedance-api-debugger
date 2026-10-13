@@ -6,6 +6,8 @@ import type { SharedStudioDefaults, SharedStudioIntent } from '@/lib/image-studi
 import type { ModuleCoverDTO } from '@/lib/image-studio/module-cover-types';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS } from '@/lib/image-studio/model-catalog';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
+import { useAppSession } from '@/lib/context/AppSessionContext';
+import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 
 export function hasSharedDefaults(value: unknown): value is SharedStudioDefaults {
   if (!value || typeof value !== 'object') return false;
@@ -44,6 +46,7 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
   userId: string; activeModule?: T; onDefinition: (module: T) => void;
   onUnavailable: (presetId: string | null, reason: string) => void;
 }) {
+  const { sessionChanged } = useAppSession();
   const presetId = activeModule?.sharedLive?.intent.presetId || '';
   const moduleId = activeModule?.id || '';
   const scopeKey = `${userId}:${presetId}:${moduleId}`;
@@ -60,13 +63,14 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
   const loadMore = useCallback(() => wake.current(false, true), []);
 
   useEffect(() => {
+    if (sessionChanged || isClientSessionBlocked()) return;
     const current = scope.current;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let running = false, queued = false, force = true, more = false;
     let consecutiveFailures = 0;
     let appliedToken = '';
-    const valid = () => scope.current === current && !controller.signal.aborted;
+    const valid = () => !isClientSessionBlocked() && scope.current === current && !controller.signal.aborted;
     const online = () => !document.hidden && navigator.onLine;
     if (catalogRef.current.owner !== userId) {
       const empty: Catalog = { owner: userId, items: [], revision: '', cursor: null, pages: 0, ready: false };
@@ -148,6 +152,7 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
       }
     };
     wake.current = (fresh = false, next = false) => {
+      if (!valid()) return;
       if (fresh) generation.current++;
       force ||= fresh; more ||= next;
       if (timer) clearTimeout(timer);
@@ -170,7 +175,7 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
       window.removeEventListener('online', resume);
       window.removeEventListener('offline', resume);
     };
-  }, [scopeKey, userId, presetId, moduleId]);
+  }, [sessionChanged, scopeKey, userId, presetId, moduleId]);
 
   const visible = catalog.owner === userId ? catalog : null;
   return { items: visible?.items || [], ready: visible?.ready || false, hasMore: Boolean(visible?.cursor),

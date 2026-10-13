@@ -13,11 +13,14 @@ import { watchGenerationCompletion } from '@/components/GenerationCompletion';
 import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
 import { imageStudioEffectiveChannelId, normalizeImageStudioChannels } from '@/lib/image-studio/channels';
 import type { SharedStudioIntent } from '@/lib/image-studio/shared-types';
+import { useAppSession } from '@/lib/context/AppSessionContext';
+import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 
 type StudioBatchQuote = { billingMode: 'fixed' | 'actual'; batchQuoteId: string | null; estimatedCredits: number; unitCredits: number; expiresAt: string; imageChannel?: ImageGenerationChannelSnapshot };
 type CachedStudioBatchQuote = { signature: string; requestId: string; quote: StudioBatchQuote; expired?: boolean };
 
 export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, actualQuoteRequired = false, quotePayload, effectiveChannelId, sharedLive, sourceAvailable = true, onSourceChanged }: { userId: string; moduleId: string; unitCredits: number | null; draftSignature: string; actualQuoteRequired?: boolean; quotePayload?: Record<string, unknown> | null; effectiveChannelId?: string; sharedLive?: SharedStudioIntent; sourceAvailable?: boolean; onSourceChanged?: () => void }) {
+  const { sessionChanged } = useAppSession();
   const channelQuoteMatches = (quote: StudioBatchQuote, payload: Record<string, unknown>) => !payload.channelId
     || (payload.channelId === 'original' && (!effectiveChannelId || effectiveChannelId === 'original'))
     || (quote.imageChannel?.channelId === (effectiveChannelId || payload.channelId) && typeof quote.imageChannel.configRevision === 'string' && Boolean(quote.imageChannel.configRevision));
@@ -65,18 +68,18 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
   const { confirm, productDialog } = useProductDialog();
   const automaticPayload = quotePayload ? JSON.stringify({ ...quotePayload, ...(sharedLive ? { sharedLive } : {}) }) : '';
   useEffect(() => {
-    if (!sourceAvailable || !actualQuoteRequired || !quoteVisible || mode !== 'batch' || !loaded || busy || previewing || pending || !automaticPayload
+    if (sessionChanged || isClientSessionBlocked() || !sourceAvailable || !actualQuoteRequired || !quoteVisible || mode !== 'batch' || !loaded || busy || previewing || pending || !automaticPayload
       || !quoteInputReady) return;
     if (billingQuote?.signature === quoteSignature && !billingQuote.expired && Date.parse(billingQuote.quote.expiresAt) > Date.now()) return;
     const abort = new AbortController();
     const timer = window.setTimeout(() => {
-      if (document.hidden) return;
+      if (isClientSessionBlocked() || document.hidden) return;
       const requestId = crypto.randomUUID();
       const payload = { ...JSON.parse(automaticPayload), action: 'quote', count: 1, requestId, sources: JSON.parse(quoteSignature)[1] };
       void fetch('/api/image-studio/batches', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload), signal: AbortSignal.any([abort.signal, AbortSignal.timeout(120000)]) })
-        .then(response => { if (response.status === 409 && !abort.signal.aborted) sourceChanged.current?.(); return readBatchResponse(response); }).then((quote: StudioBatchQuote) => {
-          if (abort.signal.aborted || !Number.isFinite(quote.estimatedCredits) || quote.estimatedCredits < 0
+        .then(response => { if (!isClientSessionBlocked() && response.status === 409 && !abort.signal.aborted) sourceChanged.current?.(); return readBatchResponse(response); }).then((quote: StudioBatchQuote) => {
+          if (isClientSessionBlocked() || abort.signal.aborted || !Number.isFinite(quote.estimatedCredits) || quote.estimatedCredits < 0
             || !Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= Date.now()
             || quote.billingMode === 'actual' && !quote.batchQuoteId
             || !channelQuoteMatches(quote, JSON.parse(automaticPayload))) return;
@@ -85,7 +88,7 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
         }).catch(() => {});
     }, 500);
     return () => { window.clearTimeout(timer); abort.abort(); };
-  }, [sourceAvailable, actualQuoteRequired, quoteVisible, mode, loaded, busy, previewing, pending, automaticPayload, quoteSignature, quoteInputReady, billingQuote, effectiveChannelId]);
+  }, [sessionChanged, sourceAvailable, actualQuoteRequired, quoteVisible, mode, loaded, busy, previewing, pending, automaticPayload, quoteSignature, quoteInputReady, billingQuote, effectiveChannelId]);
   useEffect(() => { live.current.mounted = true; return () => { live.current.mounted = false; fileRef.current.forEach(file => URL.revokeObjectURL(file.preview)); }; }, []);
   useEffect(() => { if (previousQuoteSignature.current !== quoteSignature) setBillingQuote(null); previousQuoteSignature.current = quoteSignature; }, [quoteSignature]);
   useEffect(() => {
@@ -122,51 +125,54 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
   }, [loaded, scopedKey, mode, source, quantity, perFile, pack, id]);
   useEffect(() => { fileRef.current = files; }, [files]);
   async function previewFiles(selected: File[], label = '所选素材', initialSkipped: string[] = []) {
-    if (lock.current || !selected.length) return;
+    if (isClientSessionBlocked() || lock.current || !selected.length) return;
     const scope = scopedKey;
     lock.current = true; setPreviewing(true); setError('');
     try {
       const result = await previewBatchFiles(selected, initialSkipped);
-      if (!live.current.mounted || live.current.scope !== scope) { result.accepted.forEach(file => URL.revokeObjectURL(file.preview)); return; }
+      if (isClientSessionBlocked() || !live.current.mounted || live.current.scope !== scope) { result.accepted.forEach(file => URL.revokeObjectURL(file.preview)); return; }
       if (!result.accepted.length) { setSkipped(result.skipped); throw new Error('没有可用图片，原素材选择保留'); }
       fileRef.current.forEach(file => URL.revokeObjectURL(file.preview));
       fileRef.current = result.accepted; setFiles(result.accepted); setSkipped(result.skipped); setFolderName(label);
-    } catch (error) { if (live.current.mounted && live.current.scope === scope) setError(error instanceof Error ? error.message : '本机素材读取失败，尚未上传'); }
+    } catch (error) { if (!isClientSessionBlocked() && live.current.mounted && live.current.scope === scope) setError(error instanceof Error ? error.message : '本机素材读取失败，尚未上传'); }
     finally { lock.current = false; if (live.current.mounted && live.current.scope === scope) setPreviewing(false); }
   }
   async function chooseSources() {
+    if (isClientSessionBlocked()) return;
     if (!canSelectBatchDirectory()) { directoryInput.current?.click(); return; }
     const scope = scopedKey;
     try {
       const directory = await selectBatchDirectory('read');
       const selected = await readBatchDirectory(directory);
-      if (live.current.mounted && live.current.scope === scope) await previewFiles(selected.files, directory.name, selected.skipped);
-    } catch (error) { if (live.current.mounted && live.current.scope === scope && !(error instanceof DOMException && error.name === 'AbortError')) setError(error instanceof Error ? error.message : '素材目录权限失效或无法读取，请重新选择'); }
+      if (!isClientSessionBlocked() && live.current.mounted && live.current.scope === scope) await previewFiles(selected.files, directory.name, selected.skipped);
+    } catch (error) { if (!isClientSessionBlocked() && live.current.mounted && live.current.scope === scope && !(error instanceof DOMException && error.name === 'AbortError')) setError(error instanceof Error ? error.message : '素材目录权限失效或无法读取，请重新选择'); }
   }
   async function query() {
-    if (!pending || lock.current) return;
+    if (isClientSessionBlocked() || !pending || lock.current) return;
     const scope = scopedKey;
     lock.current = true; setBusy(true); setError('');
     try {
       const result = await readBatchResponse(await fetch(`/api/image-studio/batches?requestId=${encodeURIComponent(pending)}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }), true);
-      if (!live.current.mounted || live.current.scope !== scope) return;
+      if (isClientSessionBlocked() || !live.current.mounted || live.current.scope !== scope) return;
       setId(result.batch.id); setPending(null); localStorage.removeItem(pendingKey);
-    } catch { if (live.current.mounted && live.current.scope === scope) setError('原提交尚未核对，不会自动再生成；请稍后查询或联系管理员'); }
+    } catch { if (!isClientSessionBlocked() && live.current.mounted && live.current.scope === scope) setError('原提交尚未核对，不会自动再生成；请稍后查询或联系管理员'); }
     finally { lock.current = false; if (live.current.mounted && live.current.scope === scope) setBusy(false); }
   }
   async function submit(payload: Record<string, unknown>) {
+    if (isClientSessionBlocked()) return false;
     if (pending) { await query(); return false; }
     if (!sourceAvailable) { setError('模板已不可用，不能新建批次；原批次和素材保留。'); return false; }
     if (lock.current || !loaded) return false;
     if (!Number.isInteger(total) || total < 1 || total > STUDIO_BATCH_LIMITS.images || !Number.isInteger(perFile) || perFile < 1 || perFile > 8) { setError('本批总图数须为1至100张，请选择有效素材或调整次级数量设置'); return false; }
     if (estimated == null || !Number.isInteger(estimated) || estimated < 0 || estimated > 10000000) { setError('本批报价尚未就绪，请重新读取设置'); return false; }
     const scope = scopedKey, expected = signature, snapshot = JSON.parse(JSON.stringify({ ...payload, ...(sharedLive ? { sharedLive } : {}) })), localFiles = [...files];
-    const sameScope = () => live.current.mounted && live.current.scope === scope;
+    const sameScope = () => !isClientSessionBlocked() && live.current.mounted && live.current.scope === scope;
     const valid = () => sameScope() && live.current.signature === expected;
     lock.current = true; setBusy(true); setError('');
     let submittedRequest: string | null = null;
     try {
       const checkSettings = async () => {
+        if (!valid()) throw new Error('账号或当前设置已变化，尚未生成');
         const current = await readBatchResponse(await fetch('/api/image-studio/settings', { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
         if (!valid() || current.revision !== snapshot.revision) throw new Error('素材、模型或报价已变化，请重新读取设置后确认；尚未生成');
         const channelId = typeof snapshot.channelId === 'string' ? snapshot.channelId : 'original';
@@ -207,13 +213,15 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
       } else for (let index = 0; index < total; index++) sources.push({ name: `image-${index + 1}` });
       if (!valid()) throw new Error('当前设置已变化，未提交生成');
       await checkSettings();
+      if (!valid()) return false;
       const quoteKey = JSON.stringify([expected, sources]);
       const priorQuote = billingQuote?.signature === quoteKey ? billingQuote : null;
       const requestId = priorQuote?.requestId || crypto.randomUUID();
       const quoteRequest = { ...snapshot, action: 'quote', requestId, count: 1, sources };
       const readQuote = async () => {
+        if (!valid()) throw new Error('账号或当前设置已变化，尚未生成');
         const response = await fetch('/api/image-studio/batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(quoteRequest), signal: AbortSignal.timeout(120000) });
-        if (response.status === 409) sourceChanged.current?.();
+        if (valid() && response.status === 409) sourceChanged.current?.();
         const result = await readBatchResponse(response) as StudioBatchQuote;
         if (!valid()) throw new Error('当前设置已变化，报价未用于生成');
         if (!['fixed', 'actual'].includes(result.billingMode) || !Number.isFinite(result.estimatedCredits) || result.estimatedCredits < 0
@@ -237,6 +245,7 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
       if (!await confirm(`${source === 'folder' ? localFiles.length + '张已上传素材' : '当前正文'} · 生成${total}张\n${model} · ${quality} · ${String(snapshot.resolution || '默认')} · ${String(snapshot.aspectRatio || '自动')}\n本批预计合计 ${quoteTotal} 点`, { title: '确认生成', confirmLabel: `确认生成 · ${quoteTotal}点`, anchor: null })) return false;
       if (!valid()) throw new Error('当前设置已变化，尚未生成，请重新确认');
       await checkSettings();
+      if (!valid()) return false;
       let confirmedTotal = quoteTotal;
       if (Date.parse(quote.expiresAt) <= Date.now()) {
         setProgress('报价已过期，正在重新获取本批报价');
@@ -255,14 +264,18 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
         setError('本批报价再次过期，尚未生成；请重新获取并确认报价。');
         return false;
       }
+      if (!valid()) return false;
       localStorage.setItem(pendingKey, requestId);
       if (localStorage.getItem(pendingKey) !== requestId) throw new Error('提交编号未能保存，尚未提交生成');
       submittedRequest = requestId; setPending(requestId); setProgress('正在登记本批素材和设置');
       setBillingQuote(null);
+      if (!valid()) return false;
       const response = await fetch('/api/image-studio/batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...snapshot, requestId, count: 1, budget: confirmedTotal, sources, ...(quote.imageChannel ? { imageChannel: quote.imageChannel } : {}), ...(quote.batchQuoteId ? { batchQuoteId: quote.batchQuoteId } : {}) }), signal: AbortSignal.timeout(120000) });
+      if (!sameScope()) return false;
       if (response.status === 409) sourceChanged.current?.();
       if (response.status >= 400 && response.status < 500) { localStorage.removeItem(pendingKey); submittedRequest = null; if (sameScope()) setPending(null); }
       const result = await readBatchResponse(response, true);
+      if (!sameScope()) return false;
       localStorage.removeItem(pendingKey);
       if (!sameScope()) return false;
       watchGenerationCompletion(userId, result.batch.id, 'batch', total);

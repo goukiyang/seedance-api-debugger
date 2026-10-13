@@ -1,11 +1,15 @@
-.control { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; max-width: 100%; min-width: 0; }
-.control .button[data-studio-result-pin] { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; gap: 6px; min-width: 68px; min-height: 36px; height: auto; box-sizing: border-box; padding: 8px 10px; border: 1px solid #414b48; border-radius: 6px; background: #202725; color: #e0e9e5; font-size: 13px; line-height: 18px; white-space: nowrap; cursor: pointer; }
+.control { display: inline-flex; align-items: flex-start; flex-wrap: wrap; gap: 0; max-width: 100%; min-width: 0; }
+.control .button[data-studio-result-pin] { position: relative; isolation: isolate; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 44px; min-width: 44px; width: 44px; min-height: 44px; height: 44px; box-sizing: border-box; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #e0e9e5; font-size: 13px; line-height: 18px; white-space: nowrap; cursor: pointer; }
+.control .button[data-studio-result-pin]::before { content: ''; position: absolute; inset: 6.6px; z-index: -1; border: 1px solid #414b48; border-radius: 5px; background: #202725e8; pointer-events: none; }
 .control .button[data-studio-result-pin] svg { flex: 0 0 auto; }
-.control .button[data-studio-result-pin]:hover:not(:disabled) { background: #303c37; }
-.control .button[data-studio-result-pin][aria-pressed="true"] { border-color: #79daca; background: #163e35; color: #c9fff1; }
+.control .button[data-studio-result-pin]:hover:not(:disabled)::before { background: #303c37; }
+.control .button[data-studio-result-pin][aria-pressed="true"] { color: #c9fff1; }
+.control .button[data-studio-result-pin][aria-pressed="true"]::before { border-color: #79daca; background: #163e35; }
 .control .button[data-studio-result-pin]:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
 .control .button[data-studio-result-pin]:disabled { opacity: .55; cursor: default; }
 .feedback { flex-basis: 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.readonly { position: relative; isolation: isolate; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; color: #c9fff1; }
+.readonly::before { content: ''; position: absolute; inset: 6.6px; z-index: -1; border: 1px solid #79daca; border-radius: 5px; background: #163e35; }
 @media (hover: none), (any-pointer: coarse) {
-  .control .button[data-studio-result-pin] { min-height: 44px; padding-block: 12px; }
+  .control .button[data-studio-result-pin] { min-height: 44px; }
 }

@@ -5,4 +5,15 @@
 .handle:focus-visible { outline: 2px solid #79daca; outline-offset: -2px; }
 .handle:active { cursor: grabbing; }
 .handle:disabled { opacity: .35; cursor: default; }
+@media (hover: hover) and (pointer: fine) {
+  .handle, .handle:disabled { opacity: 0; pointer-events: none; }
+  /* A group row contains its nested list: do not reveal every child handle on group hover. */
+  .item:hover > :first-child > :first-child > .handle,
+  .item:focus-within > :first-child > :first-child > .handle,
+  .item:hover > :first-child > .handle,
+  .item:focus-within > :first-child > .handle,
+  .item[data-dragging] > :first-child > .handle,
+  .handle:focus-visible { opacity: 1; pointer-events: auto; }
+}
+@media (hover: none), (pointer: coarse) { .handle { min-width: 32px; min-height: 40px; } }
 @media (prefers-reduced-motion: reduce) { .item { transition: none !important; } }

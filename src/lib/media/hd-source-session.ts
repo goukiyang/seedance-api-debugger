@@ -3,7 +3,7 @@
 export type HdDescription = { status: 'queued' | 'running' | 'ready' | 'failed' | 'skipped'; sourceVersion: string | null; policy: string; reason?: string; format?: string; mime?: string; bytes?: number; width?: number; height?: number; original?: boolean };
 export type HdSourceState = { description?: HdDescription; denied?: boolean; error?: boolean };
 type Listener = (state: HdSourceState) => void;
-type Descriptor = { key: string; account: string; source: string; state: HdSourceState; at: number; retryAfter: number; listeners: Set<Listener>; prefetches: number; controller?: AbortController; pending?: Promise<HdSourceState>; timer?: ReturnType<typeof setTimeout> };
+type Descriptor = { key: string; account: string; source: string; state: HdSourceState; at: number; retryAfter: number; unchangedPolls: number; listeners: Set<Listener>; prefetches: number; controller?: AbortController; pending?: Promise<HdSourceState>; timer?: ReturnType<typeof setTimeout> };
 type ImageReadFamilyInvalidator = (source: string, account: string) => void;
 const descriptors = new Map<string, Descriptor>();
 const READY_TTL = 60_000, IDLE_TTL = 10 * 60_000;
@@ -46,7 +46,7 @@ function getEntry(account: string, source: string, version: string) {
   if (!entry) {
     for (const [id, value] of Array.from(descriptors)) if (!value.listeners.size && !value.prefetches && (descriptors.size >= 32 || Date.now() - value.at >= IDLE_TTL)) { stop(value); descriptors.delete(id); }
     if (descriptors.size >= 32) return null;
-    entry = { key, account, source: canonical(source), state: {}, at: 0, retryAfter: 0, listeners: new Set(), prefetches: 0 };
+    entry = { key, account, source: canonical(source), state: {}, at: 0, retryAfter: 0, unchangedPolls: 0, listeners: new Set(), prefetches: 0 };
     descriptors.set(key, entry);
   }
   return entry;
@@ -60,7 +60,16 @@ function parseDescription(value: unknown): HdDescription {
 }
 function poll(entry: Descriptor) {
   clearTimeout(entry.timer); entry.timer = undefined;
-  if (entry.listeners.size && !document.hidden && ['queued', 'running'].includes(entry.state.description?.status || '')) entry.timer = setTimeout(() => { void read(entry, false); }, 5000);
+  if (!entry.listeners.size || document.hidden || entry.state.denied) return;
+  const ready = entry.state.description?.status === 'ready';
+  const pending = ['queued', 'running'].includes(entry.state.description?.status || '');
+  if (!ready && !pending && !entry.state.error) return;
+  // A temporary status-read failure must not permanently stop an open viewer.
+  // Ready checks are read-only, while unchanged queue checks back off to 30s.
+  const delay = entry.state.error ? Math.max(1000, entry.retryAfter - Date.now())
+    : ready ? Math.max(1000, READY_TTL - (Date.now() - entry.at))
+      : Math.min(30_000, 5000 * 2 ** Math.min(entry.unchangedPolls, 3));
+  entry.timer = setTimeout(() => { void read(entry, ready); }, delay);
 }
 async function read(entry: Descriptor, readonly: boolean): Promise<HdSourceState> {
   if (entry.pending) return entry.pending;
@@ -80,9 +89,12 @@ async function read(entry: Descriptor, readonly: boolean): Promise<HdSourceState
     if (state.error) {
       const notPrepared = status === 409;
       entry.state = !notPrepared && previous.description?.status === 'ready' ? { ...previous, error: true } : { error: true };
-      if (notPrepared) { entry.at = Date.now(); entry.retryAfter = 0; }
+      if (notPrepared) { entry.at = Date.now(); entry.retryAfter = Date.now() + READY_TTL; }
       else entry.retryAfter = Date.now() + READY_TTL;
     } else {
+      entry.unchangedPolls = previous.description?.status === state.description?.status
+        && previous.description?.sourceVersion === state.description?.sourceVersion
+        && previous.description?.reason === state.description?.reason ? Math.min(3, entry.unchangedPolls + 1) : 0;
       entry.state = state; entry.at = Date.now(); entry.retryAfter = 0;
     }
     descriptors.delete(entry.key); descriptors.set(entry.key, entry);
@@ -106,12 +118,15 @@ export function acquireHdImageSource(account: string, source: string, version: s
   if (!entry.pending) {
     if (ready) {
       if (Date.now() - entry.at >= READY_TTL && Date.now() >= entry.retryAfter) void read(entry, true);
-    } else void read(entry, false);
+      else poll(entry);
+    } else if (Date.now() >= entry.retryAfter) void read(entry, false);
+    else { listener(entry.state); poll(entry); }
   }
   const foreground = () => {
     if (document.hidden) { clearTimeout(entry.timer); entry.timer = undefined; }
-    else if (['queued', 'running'].includes(entry.state.description?.status || '')) void read(entry, false);
+    else if ((['queued', 'running'].includes(entry.state.description?.status || '') || entry.state.error) && Date.now() >= entry.retryAfter) void read(entry, entry.state.description?.status === 'ready');
     else if (entry.state.description?.status === 'ready' && Date.now() - entry.at >= READY_TTL && Date.now() >= entry.retryAfter) void read(entry, true);
+    else poll(entry);
   };
   document.addEventListener('visibilitychange', foreground);
   return () => {

@@ -1,6 +1,6 @@
 {
   "name": "video-api-debugger",
-  "version": "0.83.0",
+  "version": "0.84.0",
   "private": true,
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",
@@ -12,6 +12,8 @@
     "db:studio": "prisma studio",
     "seed:admin": "tsx scripts/seed-admin.ts",
     "test:api": "tsx scripts/test-seedance-api.ts",
+    "test:hd-stability": "tsx scripts/test-hd-stability.ts && tsx scripts/test-hd-display.ts",
+    "test:ui-account-boundaries": "tsx scripts/test-client-session-boundary.ts && tsx scripts/test-studio-navigation-visibility.ts",
     "test:reference-media": "tsx scripts/reference-media-chain-smoke.ts",
     "test:image-api": "tsx scripts/image-generation-api-smoke.ts",
     "test:toolflow": "tsx scripts/toolflow-smoke.ts",

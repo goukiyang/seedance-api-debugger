@@ -19,12 +19,14 @@ import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
 import { scrollToWorkbenchHeader } from '@/lib/navigation/scroll-to-workbench-header';
 import { replaceImageModuleLocation } from '@/lib/navigation/image-module-location';
 import { GeneratedImageResults, type GeneratedImageResult } from '@/components/GeneratedImageResults';
-import { StudioResultPinButton } from './result-pin-button';
+import { StudioResultPinButton, StudioResultPinnedIndicator } from './result-pin-button';
 import { STUDIO_RESULT_FEED, type StudioResultFeedExtras, type SharedStudioPinnedImage } from '@/lib/image-studio/result-pin-types';
 import { useLikedStudioResults } from './liked-results';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useUnsavedNavigation } from '@/lib/hooks/use-unsaved-navigation';
+import { useAppSession } from '@/lib/context/AppSessionContext';
+import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 
 import { ModuleGroupPicker } from './group-picker';
 import { hasSharedDefaults, useSharedStudio } from './use-shared-studio';
@@ -53,7 +55,7 @@ import TemplateFavoriteTitle from '@/components/content-reactions/TemplateFavori
 import { studioResultVersion } from '@/lib/image-studio/result-attention';
 import { useResultAttention } from './use-result-attention';
 import { SortableStudioList } from './sortable-studio-list';
-import { orderStudioItems, studioOrderKey, useStudioOrder } from './use-studio-order';
+import { orderStudioItems, studioOrderKey, useStudioOrder, useStudioNavigationVisibility } from './use-studio-order';
 import styles from './studio.module.css';
 import { StudioReferenceGrid, type FixedStudioReference } from './reference-grid';
 import { RatioPicker } from './ratio-picker';
@@ -245,6 +247,7 @@ export default function ImageStudio(props: ImageStudioProps) {
 function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favoritesRequest = 0 }: ImageStudioProps) {
   const router = useRouter();
   const routeQuery = useSearchParams()?.toString() || '';
+  const hiddenHistoryTarget = useRef<string | null>(new URLSearchParams(routeQuery).get('moduleId'));
   const routedContentHandled = useRef('');
   const sidebarInteraction = useRef(0);
   const { confirm, prompt: askPresetName, productDialog } = useProductDialog();
@@ -275,6 +278,8 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   const [removedDefaultGroups, setRemovedDefaultGroups] = useState<string[]>([]);
   const [directoryReady, setDirectoryReady] = useState(false);
   const studioOrder = useStudioOrder(userId);
+  const navigationVisibility = useStudioNavigationVisibility(userId, templateWorkbench);
+  const hiddenNavigationIds = useMemo(() => new Set(navigationVisibility.hiddenModuleIds), [navigationVisibility.hiddenModuleIds]);
   const removedModuleIds = useRef(new Set<string>());
   const moduleReadScope = useRef({ owner: userId, generation: 0 });
   if (moduleReadScope.current.owner !== userId) moduleReadScope.current = { owner: userId, generation: moduleReadScope.current.generation + 1 };
@@ -472,6 +477,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     finally { if (moduleReadScope.current === scope) { requested.forEach(id => hydratingIds.current.delete(id)); setHydrating(hydratingIds.current.size > 0); } }
   }, [userId]);
   const navigateToModule = useCallback((group: string, id: string, options: ModuleNavigationOptions = {}) => {
+    if (navigationVisibility.ready) hiddenHistoryTarget.current = hiddenNavigationIds.has(id) ? id : null;
     replaceImageModuleLocation(id);
     routedContentHandled.current = `${userId}:${window.location.search}`;
     setError('');
@@ -485,7 +491,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     if (options.markViewed === false) setRequestedView({ viewerId: userId, moduleId: '', token: 0 });
     setPendingModuleScroll({ target: 'module', id, group, token: ++moduleScrollSequence.current, behavior: options.behavior || 'smooth', markViewed: templateWorkbench && options.markViewed !== false, expansionRevision: options.expandParents === false ? -1 : sidebarInteraction.current });
     if (options.ensureLoaded !== false && !modules.some(module => module.id === id)) void hydrateModules([id]);
-  }, [hydrateModules, modules, templateWorkbench, userId]);
+  }, [hydrateModules, modules, templateWorkbench, userId, navigationVisibility.ready, hiddenNavigationIds]);
   async function openSharedPreset(presetId: string, options: ModuleNavigationOptions = {}) {
     const installed = modules.find(item => item.sharedLive?.intent.presetId === presetId && item.sharedLive.available);
     if (installed) { navigateToModule(installed.groupName || '未分组', installed.id, options); return true; }
@@ -726,6 +732,26 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     (groups[group] ||= []).push(item);
     return groups;
   }, {}), [navigation]);
+  const sidebarNavigation = useMemo(() => navigationVisibility.ready
+    ? navigation.filter(item => !hiddenNavigationIds.has(item.id)) : [], [navigation, navigationVisibility.ready, hiddenNavigationIds]);
+  const sidebarGroupedModules = useMemo(() => sidebarNavigation.reduce<Record<string, typeof navigation>>((groups, item) => {
+    (groups[item.groupName || '未分组'] ||= []).push(item);
+    return groups;
+  }, {}), [sidebarNavigation]);
+  const hiddenNavigation = useMemo(() => navigation.filter(item => hiddenNavigationIds.has(item.id)), [navigation, hiddenNavigationIds]);
+  useEffect(() => {
+    if (navigationVisibility.ready && hiddenHistoryTarget.current && !hiddenNavigationIds.has(hiddenHistoryTarget.current)) hiddenHistoryTarget.current = null;
+    // Let an explicit route finish selecting its target before considering a cached selection.
+    const linkedModuleId = new URLSearchParams(window.location.search).get('moduleId');
+    if (linkedModuleId && linkedModuleId !== active) return;
+    if (!templateWorkbench || !navigationVisibility.ready || !viewRestored || !directoryReady || loading || !hiddenNavigationIds.has(active)
+      || hiddenHistoryTarget.current === active || pendingModuleScroll) return;
+    const fallback = sidebarNavigation[0];
+    setRequestedView({ viewerId: userId, moduleId: '', token: 0 });
+    setActive(fallback?.id || ''); setSelectedGroup(fallback?.groupName || '未分组');
+    setCoverView(!fallback); replaceImageModuleLocation(fallback?.id || null, !fallback);
+    routedContentHandled.current = `${userId}:${window.location.search}`;
+  }, [templateWorkbench, navigationVisibility.ready, viewRestored, directoryReady, loading, hiddenNavigationIds, active, sidebarNavigation, pendingModuleScroll, userId]);
   const orderedModules = useMemo(() => orderStudioItems(modules, navigation.map(item => item.id), item => item.id), [modules, navigation]);
   const reorderNavigation = (ids: string[]) => {
     const moved = new Set(ids);
@@ -748,7 +774,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       return valid.length === current.length ? current : valid;
     });
   }, [viewRestored, directoryReady, loading, groupedModules]);
-  const hasAnyUnread = useMemo(() => navigation.some(item => attention.unread.has(item.id)), [navigation, attention.unread]);
+  const hasAnyUnread = useMemo(() => sidebarNavigation.some(item => attention.unread.has(item.id)), [sidebarNavigation, attention.unread]);
   const updateModuleMetadata = useCallback((id: string, name: string, groupName: string, followGroup = false) => {
     setModules(current => current.map(item => item.id === id && !item.sharedLive && (item.name !== name || item.groupName !== groupName)
       ? { ...item, name, groupName } : item));
@@ -957,17 +983,17 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
             </button>
           </div>
           <div id="template-image-groups" className={styles.moduleRailSubgroups} hidden={!imageSectionOpen}>
-            <SortableStudioList items={Object.entries(groupedModules)} identify={entry => entry[0]} label={entry => entry[0]}
+            <SortableStudioList items={Object.entries(sidebarGroupedModules)} identify={entry => entry[0]} label={entry => entry[0]}
               disabled={!studioOrder.ready || !directoryReady || sharedOpening || loading || groupDeleting}
               onReorder={reorderGroups}
-              render={([group, items], groupActivator, groupHandle) => {
+              render={([group, items], groupHandle) => {
               const groupHasUnread = items.some(item => attention.unread.has(item.id));
               const expanded = expandedGroups.includes(group);
               const listId = `template-module-group-${encodeURIComponent(group)}`;
               return <div key={group} className={styles.moduleRailGroup}>
                 <div className={styles.moduleRailGroupHeader}>
                   <button type="button" className={`${styles.moduleRailGroupTitle} ${!coverView && items.some(item => item.id === active) ? styles.moduleRailGroupCurrent : ''}`} aria-expanded={expanded} aria-controls={listId} disabled={!items.length}
-                    {...groupActivator} onClick={() => toggleModuleGroup(group)}>
+                    onClick={() => toggleModuleGroup(group)}>
                     <span className={styles.navLabel}><span className={styles.navName} title={group}>{group}</span>{groupHasUnread && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</span><small title={`共 ${items.length} 个模块`}>{items.length}项</small>
                     {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
                   </button>
@@ -976,8 +1002,8 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
                 <div id={listId} className={styles.moduleRailChildren} hidden={!expanded}>
                   <SortableStudioList items={items} identify={studioOrderKey} label={item => item.name}
                     disabled={!studioOrder.ready || sharedOpening || loading || groupDeleting} onReorder={reorderNavigation}
-                    render={(item, activator, handle) => <div className={styles.moduleRailSortableRow}>
-                      <button type="button" {...activator} className={`${styles.moduleRailChild} ${!coverView && active === item.id ? styles.moduleRailActive : ''}`} aria-current={!coverView && active === item.id ? 'page' : undefined}
+                    render={(item, handle) => <div className={styles.moduleRailSortableRow}>
+                      <button type="button" className={`${styles.moduleRailChild} ${!coverView && active === item.id ? styles.moduleRailActive : ''}`} aria-current={!coverView && active === item.id ? 'page' : undefined}
                         disabled={sharedOpening} onClick={() => navigateToEntry(item)}><span className={styles.navName} title={item.name}>{item.name}</span>{item.shared && <small className={styles.sharedOrigin}>共享</small>}{attention.unread.has(item.id) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</button>{handle}
                     </div>} />
                 </div>
@@ -985,8 +1011,11 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
             }} />
           </div>
           <div className={styles.moduleRailFooter}><button type="button" title="重置侧栏展开状态" aria-label="重置侧栏展开状态" onClick={resetSidebarExpansion}><RotateCcw size={15} /><span>重置展开状态</span></button>
+            <button type="button" disabled={!navigationVisibility.ready || !directoryReady || loading} onClick={() => orderDialog.current?.showModal()}>调整顺序</button>
             <button type="button" title="恢复本机默认排序，不修改共享模板" disabled={!studioOrder.ready} onClick={studioOrder.reset}><RotateCcw size={15} /><span>重置本机排序</span></button>
             {studioOrder.error && <p role="status">{studioOrder.error}</p>}
+            {!navigationVisibility.ready && <p role="status">{navigationVisibility.loading ? '正在读取侧栏设置…' : '侧栏设置尚未读取'}</p>}
+            {navigationVisibility.error && <p role="status">{navigationVisibility.error}<button type="button" disabled={navigationVisibility.loading} onClick={() => void navigationVisibility.reload()}>重新读取</button></p>}
           </div>
         </section>
       </> : <>
@@ -1008,36 +1037,41 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       </div>
       <div id="template-favorites-mobile" className={styles.mobileFavoriteList} hidden={!favoritesExpanded}><TemplateFavoritesList data={favorites} selected={selectedFavorite} busy={favoriteSelecting || loading} onSelect={item => void selectFavorite(item)} /></div>
       <div id="template-mobile-image-groups" className={styles.mobileImageGroups} hidden={!imageSectionOpen}>
-      <label className={styles.mobileGroupPicker}><span>分组</span><select aria-label="选择图片分组" value={selectedGroup} onChange={event => setSelectedGroup(event.target.value)}>
-        {!Object.keys(groupedModules).length && <option value="">暂无分组</option>}
-        {Object.entries(groupedModules).map(([group, items]) => <option key={group} value={group}>{group} ({items.length}项){items.some(item => attention.unread.has(item.id)) ? ' · 未读' : ''}</option>)}
+      <label className={styles.mobileGroupPicker}><span>分组</span><select aria-label="选择图片分组" value={sidebarGroupedModules[selectedGroup] ? selectedGroup : ''} onChange={event => setSelectedGroup(event.target.value)}>
+        {!sidebarGroupedModules[selectedGroup] && <option value="">{navigationVisibility.ready ? '选择分组' : '正在读取侧栏…'}</option>}
+        {Object.entries(sidebarGroupedModules).map(([group, items]) => <option key={group} value={group}>{group} ({items.length}项){items.some(item => attention.unread.has(item.id)) ? ' · 未读' : ''}</option>)}
       </select></label>
       <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-pressed={coverView} onClick={navigateToCovers}>全部封面{navigation.some(item => attention.unread.has(item.id)) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />} <small title={`共 ${navigation.length} 个模块`}>{navigation.length}项</small></button>
-      <label className={styles.mobileModulePicker}><span>模块</span><select aria-label="选择图片模块" value={!coverView && groupedModules[selectedGroup]?.some(item => item.id === active) ? active : ''} onChange={event => {
+      <label className={styles.mobileModulePicker}><span>模块</span><select aria-label="选择图片模块" value={!coverView && sidebarGroupedModules[selectedGroup]?.some(item => item.id === active) ? active : ''} onChange={event => {
         const entry = navigation.find(item => item.id === event.target.value);
         if (entry) navigateToEntry(entry);
       }}>
         <option value="">{coverView ? '选择模块返回编辑' : '选择模块'}</option>
-        {(groupedModules[selectedGroup] || []).map(item => <option key={item.id} value={item.id}>{item.name}{item.shared ? ' · 共享' : ''}{attention.unread.has(item.id) ? ' · 未读' : ''}</option>)}
+        {(sidebarGroupedModules[selectedGroup] || []).map(item => <option key={item.id} value={item.id}>{item.name}{item.shared ? ' · 共享' : ''}{attention.unread.has(item.id) ? ' · 未读' : ''}</option>)}
       </select></label>
       {!coverView && attention.unread.has(active) && <button type="button" title="读取当前模板的新结果" aria-label="读取当前模板的新结果" onClick={() => navigateToModule(selectedGroup, active)}><Eye size={16} /><span className={styles.unreadDot} /></button>}
       {shared.hasMore && <button type="button" disabled={shared.loading} onClick={shared.loadMore}>{shared.loading ? '读取中' : '更多共享模板'}</button>}
-      <button type="button" disabled={!studioOrder.ready || !directoryReady || sharedOpening || loading || groupDeleting} onClick={() => orderDialog.current?.showModal()}>调整顺序</button>
+      <button type="button" disabled={!navigationVisibility.ready || !studioOrder.ready || !directoryReady || sharedOpening || loading || groupDeleting} onClick={() => orderDialog.current?.showModal()}>调整顺序</button>
+      {navigationVisibility.error && <p role="status">{navigationVisibility.error}<button type="button" disabled={navigationVisibility.loading} onClick={() => void navigationVisibility.reload()}>重新读取</button></p>}
       </div>
     </nav>}
     {templateWorkbench && <dialog ref={orderDialog} className={styles.dialog} aria-labelledby="studio-order-title">
       <header className={styles.header}><h2 id="studio-order-title">调整顺序</h2><button type="button" onClick={() => orderDialog.current?.close()} aria-label="关闭排序"><X size={18} /></button></header>
-      <p className={styles.muted}>长按拖动右侧手柄。仅在本账号的这个浏览器保存，不改变同事的顺序。</p>
-      <SortableStudioList items={Object.keys(groupedModules)} identify={group => group} label={group => group}
+      <p className={styles.muted}>拖动右侧手柄，触屏请长按。仅在本账号的这个浏览器保存，不改变同事的顺序。</p>
+      <SortableStudioList items={Object.keys(sidebarGroupedModules)} identify={group => group} label={group => group}
         disabled={!studioOrder.ready || sharedOpening || loading || groupDeleting} onReorder={reorderGroups}
-        render={(group, activator, handle) => <section className={styles.orderDialogGroup}>
-          <div className={styles.moduleRailSortableRow}><button type="button" {...activator} onClick={() => setSelectedGroup(group)}>{group}</button>{handle}</div>
-          {selectedGroup === group && <SortableStudioList items={groupedModules[group]} identify={studioOrderKey} label={item => item.name}
+        render={(group, handle) => <section className={styles.orderDialogGroup}>
+          <div className={styles.moduleRailSortableRow}><button type="button" onClick={() => setSelectedGroup(group)}>{group}</button>{handle}</div>
+          {selectedGroup === group && <SortableStudioList items={sidebarGroupedModules[group]} identify={studioOrderKey} label={item => item.name}
             disabled={!studioOrder.ready || sharedOpening || loading || groupDeleting} onReorder={reorderNavigation}
-            render={(item, itemActivator, itemHandle) => <div className={styles.moduleRailSortableRow}><button type="button" {...itemActivator}>{item.name}</button>{itemHandle}</div>} />}
+            render={(item, itemHandle) => <div className={styles.moduleRailSortableRow}><button type="button">{item.name}</button>{itemHandle}</div>} />}
         </section>} />
       {studioOrder.error && <p role="alert" className={styles.error}>{studioOrder.error}</p>}
       <button type="button" onClick={studioOrder.reset}>恢复默认顺序</button>
+      {hiddenNavigation.length > 0 && <section aria-label="已从侧栏移除"><h3>已从侧栏移除</h3><p className={styles.muted}>模块和历史仍保留。恢复后重新出现在侧栏。</p>
+        {hiddenNavigation.map(item => <div className={styles.moduleRailSortableRow} key={item.id}><span className={styles.navName}>{item.name}</span><button type="button" disabled={Boolean(navigationVisibility.restoring)} onClick={() => void navigationVisibility.restore(item.id)}>{navigationVisibility.restoring === item.id ? '正在恢复' : '恢复入口'}</button></div>)}
+        {navigationVisibility.error && <p role="status" className={styles.error}>{navigationVisibility.error}</p>}
+      </section>}
     </dialog>}
     <div className={styles.content}>
     <header id="image-generation" className={`${styles.header} ${styles.generationHeader}`}><div><h1>{coverView ? (templateWorkbench ? '模块封面' : '模板封面') : '图片生成'}</h1><p className={styles.muted}>{coverView ? (templateWorkbench ? '全部模块，按已保存封面展示' : '全部模板，按已保存封面展示') : `当前分组：${selectedGroup || '未分组'}`}</p></div><div className={styles.counts}>
@@ -1123,6 +1157,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
 }) {
   const { confirm, prompt: askName, productDialog } = useProductDialog();
   const styleSkillSelector = useRef<StudioStyleSkillSelectorHandle>(null);
+  const { sessionChanged } = useAppSession();
   const sharedLive = module.sharedLive;
   const sharedReady = !sharedLive || sharedLive.available && hasSharedDefaults(sharedLive.defaults);
   const definitionEditable = !sharedLive || sharedLive.mode === 'publisher';
@@ -1262,13 +1297,14 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const readAttemptToken = useRef(0);
   const requestedReadToken = useRef(0);
   useEffect(() => {
-    if (templateWorkbench && !hidden && active && viewedResults?.scope === taskReadScope && viewedResults.token === viewToken && readAttemptToken.current !== viewedResults.sequence) {
+    if (!sessionChanged && !isClientSessionBlocked() && templateWorkbench && !hidden && active && viewedResults?.scope === taskReadScope && viewedResults.token === viewToken && readAttemptToken.current !== viewedResults.sequence) {
       readAttemptToken.current = viewedResults.sequence;
       for (let offset = 0; offset < viewedResults.versions.length; offset += 24) {
+        if (isClientSessionBlocked()) break;
         void onResultsViewed(module.id, viewedResults.versions.slice(offset, offset + 24));
       }
     }
-  }, [templateWorkbench, hidden, active, viewedResults, viewToken, taskReadScope, module.id, onResultsViewed]);
+  }, [sessionChanged, templateWorkbench, hidden, active, viewedResults, viewToken, taskReadScope, module.id, onResultsViewed]);
   function observeResultVersion(version: string | null) {
     if (!templateWorkbench || hidden || document.hidden || !version) return;
     const token = currentView.current.token;
@@ -1580,6 +1616,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   }, []);
 
   async function saveModule(reproduceTaskId = reproduceSourceTaskId, revisionOverride = revisionRef.current, manualSettings = true, fixedOverride?: FixedStudioReference[]) {
+    if (isClientSessionBlocked()) return false;
     if (!sharedReady) { setModuleSaveError('模板暂不可用，本人草稿和历史保留'); return false; }
     if (moduleSaveLock.current || moduleDeleteLock.current || presetSaveLock.current || quickPresetLock.current || uploading || bannerUploading) return false;
     moduleSaveLock.current = true; setModuleSaving(true); setError(''); setModuleSaveError('');
@@ -1608,6 +1645,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     const request = moduleSaveRequest.current?.signature === signature ? moduleSaveRequest.current : { signature, requestId: crypto.randomUUID() };
     moduleSaveRequest.current = request;
     try {
+      if (isClientSessionBlocked()) return false;
       const result = await readResponse(await fetch('/api/image-studio/modules', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...savePayload, ...(sharedLive || publishNew ? { requestId: request.requestId } : {}) }) }));
       if (!Number.isInteger(result.revision) || result.revision <= revisionOverride
@@ -2040,16 +2078,16 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
 
   const saveAutomatically = useRef(() => {});
   saveAutomatically.current = () => {
-    if (moduleDeleteLock.current) return;
+    if (sessionChanged || isClientSessionBlocked() || moduleDeleteLock.current) return;
     autoSaveAttempt.current = automaticSnapshot;
     void saveModule(reproduceSourceTaskId, revisionRef.current, false);
   };
   useEffect(() => {
-    if (sharedLive || !draftLoaded || !automaticDirty || moduleSaving || moduleDeleting || uploading || bannerUploading || submitting || pendingSubmission
+    if (sessionChanged || isClientSessionBlocked() || sharedLive || !draftLoaded || !automaticDirty || moduleSaving || moduleDeleting || uploading || bannerUploading || submitting || pendingSubmission
       || presetSaving || quickPresetApplying || draftRestoring || !name.trim() || !Number.isInteger(count) || count < 1 || count > 8 || autoSaveAttempt.current === automaticSnapshot) return;
     const timer = window.setTimeout(() => saveAutomatically.current(), 500);
     return () => window.clearTimeout(timer);
-  }, [draftLoaded, automaticDirty, automaticSnapshot, moduleSaving, moduleDeleting, uploading, bannerUploading, submitting, pendingSubmission, presetSaving, quickPresetApplying, draftRestoring, name, count]);
+  }, [sessionChanged, draftLoaded, automaticDirty, automaticSnapshot, moduleSaving, moduleDeleting, uploading, bannerUploading, submitting, pendingSubmission, presetSaving, quickPresetApplying, draftRestoring, name, count]);
 
   async function changeGroup(value: string) {
     const next = value !== '__other__' ? value : (await askName('输入新分组名称（最多 40 字）', '未命名分组', { title: '创建分组', confirmLabel: '创建分组', maxLength: 40 }))?.trim().slice(0, 40);
@@ -2057,6 +2095,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   }
 
   const loadTasks = useCallback(async (cursor?: string, action: 'initial' | 'refresh' | 'silent' | 'view' = 'refresh') => {
+    if (isClientSessionBlocked()) return;
     const readPages = async (signal?: AbortSignal, entry = false) => {
       const count = cursor ? 1 : Math.min(20, loadedTaskPages.current);
       let next: string | undefined = cursor;
@@ -2089,7 +2128,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       const request = { scope, controller: new AbortController(), action };
       const requestedToken = currentView.current.token;
       taskReadRequest.current = request;
-      const currentRequest = () => taskReadRequest.current === request && taskReadScopeRef.current === scope && !request.controller.signal.aborted;
+      const currentRequest = () => !isClientSessionBlocked() && taskReadRequest.current === request && taskReadScopeRef.current === scope && !request.controller.signal.aborted;
       if (action !== 'silent') {
         setTaskReadAction(cursor ? 'more' : action === 'view' ? 'refresh' : action);
         setLoadingTasks(action === 'initial');
@@ -2113,7 +2152,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         if (cursor) { loadedMore.current = true; loadedTaskPages.current++; }
         setTasksError('');
         void onResultsAvailable();
-        if (action === 'view' && !cursor && currentView.current.active && currentView.current.token === requestedToken && typeof result.entrySnapshot === 'string') {
+        if (!isClientSessionBlocked() && action === 'view' && !cursor && currentView.current.active && currentView.current.token === requestedToken && typeof result.entrySnapshot === 'string') {
           await onTemplateEntered(module.id, result.entrySnapshot, request.controller.signal);
         }
       } catch (cause) {
@@ -2182,7 +2221,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   useEffect(() => () => { taskReadScopeRef.current = ''; }, []);
 
   async function querySubmission() {
-    if (!pendingSubmission || submitLock.current || moduleDeleteLock.current) return;
+    if (isClientSessionBlocked() || !pendingSubmission || submitLock.current || moduleDeleteLock.current) return;
     submitLock.current = true; setQueryingSubmission(true); setSubmitting(true); setError('');
     try {
       const value = await readResponse(await fetch(`/api/image-studio/tasks?requestId=${encodeURIComponent(String(pendingSubmission.requestId))}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
@@ -2212,7 +2251,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     if (pendingSubmission) { await querySubmission(); return; }
     if (authorDefinitionDirty) { setError(`模板的${definitionChanges.join('、')}尚未保存，请先保存模板内容，或放弃这些修改后生成。`); return; }
     if (sourceSharingBlocked) { setError('模板已不可用，不能新建任务；本人输入和历史保留。'); return; }
-    if (!settings || submitLock.current || moduleDeleteLock.current || quickPresetLock.current || presetSaveLock.current || ratioEditing || draftRestoring) return;
+    if (isClientSessionBlocked() || !settings || submitLock.current || moduleDeleteLock.current || quickPresetLock.current || presetSaveLock.current || ratioEditing || draftRestoring) return;
     if (evolutionConflict) { setError(evolutionConflict); return; }
     if (batch.mode === 'batch' && !retryTask) {
       submitLock.current = true; setSubmitting(true);
@@ -2266,6 +2305,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       submitLock.current = false; setSubmitting(false);
       return;
     }
+    if (isClientSessionBlocked()) { submitLock.current = false; setSubmitting(false); return; }
     if (!confirmedQuote) { setError('本次报价未确认，尚未提交图片。'); submitLock.current = false; setSubmitting(false); return; }
     if (!requestLegacyRoute && (confirmedQuote.imageChannel?.channelId !== requestChannelId
       || typeof confirmedQuote.imageChannel.configRevision !== 'string' || !confirmedQuote.imageChannel.configRevision)) {
@@ -2515,26 +2555,27 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const estimateSignature = estimatePayload ? JSON.stringify([userId, Object.fromEntries(Object.entries(estimatePayload).filter(([key]) => key !== 'requestId')), effectiveImageChannelId, imageChannelId === 'original' ? imageChannels.defaultRoutes?.revision : undefined]) : '';
   liveGenerationSignature.current = estimateSignature;
   useEffect(() => {
-    if (authorDefinitionDirty || sourceSharingBlocked || !actualQuoteRequired || !estimateSignature || hidden || !active || !quoteVisible || !draftLoaded || draftRestoring
+    if (sessionChanged || isClientSessionBlocked() || authorDefinitionDirty || sourceSharingBlocked || !actualQuoteRequired || !estimateSignature || hidden || !active || !quoteVisible || !draftLoaded || draftRestoring
       || submitting || pendingSubmission || batch.mode !== 'single'
       || !Number.isInteger(count) || count < 1 || count > 8) return;
     if (billingQuote?.signature === estimateSignature && billingQuote.quote.expiresAt
       && Date.parse(billingQuote.quote.expiresAt) > Date.now()) return;
     const abort = new AbortController();
     const timer = window.setTimeout(() => {
+      if (isClientSessionBlocked()) return;
       const requestId = crypto.randomUUID();
       const payload = { ...JSON.parse(estimateSignature)[1], requestId };
       void fetch('/api/image-studio/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload), signal: AbortSignal.any([abort.signal, AbortSignal.timeout(20000)]) })
         .then(readResponse).then((quote: StudioImageQuote) => {
-          if (abort.signal.aborted || liveGenerationSignature.current !== estimateSignature) return;
+          if (isClientSessionBlocked() || abort.signal.aborted || liveGenerationSignature.current !== estimateSignature) return;
           if (!Number.isFinite(quote.estimatedCredits) || quote.estimatedCredits < 0 || !quote.expiresAt
             || Date.parse(quote.expiresAt) <= Date.now() || quote.billingMode === 'actual' && !quote.billingQuoteId) return;
           setBillingQuote({ signature: estimateSignature, requestId, quote });
         }).catch(cause => { if (!abort.signal.aborted && sharedLive && [401, 403, 404, 409].includes(Number(cause?.status))) onSharedRefresh(); });
     }, 500);
     return () => { window.clearTimeout(timer); abort.abort(); };
-  }, [authorDefinitionDirty, sourceSharingBlocked, actualQuoteRequired, estimateSignature, hidden, active, quoteVisible, draftLoaded, draftRestoring, submitting, pendingSubmission, batch.mode, count, billingQuote, onSharedRefresh]);
+  }, [sessionChanged, authorDefinitionDirty, sourceSharingBlocked, actualQuoteRequired, estimateSignature, hidden, active, quoteVisible, draftLoaded, draftRestoring, submitting, pendingSubmission, batch.mode, count, billingQuote, onSharedRefresh]);
   const visibleQuote = billingQuote?.signature === estimateSignature
     && (!billingQuote.quote.expiresAt || Date.parse(billingQuote.quote.expiresAt) > Date.now()) ? billingQuote.quote : null;
   useEffect(() => {
@@ -3033,7 +3074,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           onQuickUse={item => { if (item.task) void replaceMainFromResult(item.task.id); }}
           renderReactionAction={templateWorkbench ? item => item.task?.asset?.id
             ? <StudioResultPinButton userId={userId} moduleId={module.id} taskId={item.task.id} assetId={item.task.asset.id} state={visibleFeed?.pinState || null} onSaved={refreshResults} />
-            : item.sharedPin ? <span title="同一模板的用户可查看和点赞；只有生成者可取消置顶">已置顶</span> : null : undefined}
+            : item.sharedPin ? <StudioResultPinnedIndicator /> : null : undefined}
           paginationSlot={templateWorkbench ? resultPaginationSlot : undefined}
           scope={`sd2-image-studio-${likedResults.liked ? 'liked-' : ''}result-page:${taskReadScope}`}
           visible={visible && active && !hidden && resultView === 'images'} loading={resultLoading} busy={resultBusy}

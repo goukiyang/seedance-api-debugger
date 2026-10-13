@@ -1,7 +1,24 @@
 .results { min-width: 0; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 14px; }
 .card { min-width: 0; }
-.reactionRow { min-width: 0; padding-block: 8px 2px; color: #e0e9e5; }
+.coverReactions { position: absolute; top: 6px; left: 6px; z-index: 7; width: calc(100% - 12px); color: #e0e9e5; pointer-events: none; }
+.coverReactions > [data-content-reactions] { align-items: flex-start; max-width: 100%; }
+.coverReactions > [data-content-reactions] > span:first-child { align-items: flex-start; min-width: 0; flex-wrap: wrap; }
+.coverReactions button, .coverReactions [data-studio-pin-control], .coverReactions [role="status"] { pointer-events: auto; }
+.coverReactions > [data-content-reactions] > span:first-child > span { min-width: 0; max-width: 100%; }
+/* Shrink the painted backing by 30%, retaining a 44px input target. */
+.coverReactions button:global(.sd2-like)[data-reaction-action="like"] { height: 44px; min-width: 44px; padding: 0 10px; gap: 5px; border: 0; background: transparent; font-size: 13px; }
+.coverReactions button:global(.sd2-like)[data-reaction-action="like"]:has(:global(.lk-count)) { min-width: 78px; }
+.coverReactions button:global(.sd2-like)[data-reaction-action="like"]::before { content: ''; position: absolute; inset: 6.6px 15%; border-radius: 22px; background: #202725e8; z-index: -1; pointer-events: none; }
+.coverReactions button[data-reaction-action="like"][aria-pressed="true"]::before { background: #38262ce8; }
+.coverReactions [role="status"] { max-width: min(320px, 100%); padding: 4px 6px; border-radius: 4px; background: #111614ed; white-space: normal; overflow-wrap: anywhere; }
+.coverReactions [data-studio-pin-readonly] { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; color: #c9fff1; }
+@media (hover: hover) and (pointer: fine) {
+  .coverReactions button[data-reaction-action="like"]:not([aria-pressed="true"]):not([data-bloom]),
+  .coverReactions [data-studio-pin-control]:not([data-active]):not([data-feedback]):not([aria-busy="true"]) { opacity: 0; pointer-events: none; }
+  .media:hover .coverReactions button[data-reaction-action="like"], .media:focus-within .coverReactions button[data-reaction-action="like"],
+  .media:hover .coverReactions [data-studio-pin-control], .media:focus-within .coverReactions [data-studio-pin-control] { opacity: 1; pointer-events: auto; }
+}
 .nextActions { padding-block: 7px 3px; min-width: 0; color: #c4d7cd; }
 .nextActions > div { display: flex; flex-wrap: wrap; gap: 6px; }
 .nextActions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 34px; padding: 6px 8px; border: 1px solid #414b48; border-radius: 4px; background: #202725; color: #e0e9e5; font-size: 13px; cursor: pointer; }
@@ -12,10 +29,6 @@
 .nextActions p { margin: 5px 0; font-size: 13px; overflow-wrap: anywhere; }
 .nextActions a { margin-left: 8px; color: #a5e5d7; text-decoration: underline; }
 @media (any-pointer: coarse) { .nextActions button { min-height: 40px; } }
-.reactionRow > [data-content-reactions] { display: flex; width: 100%; min-width: 0; gap: 6px; }
-/* Caller-owned template actions stay outside the image's clipping and hover controls. */
-.reactionRow > [data-content-reactions] > span:first-child { display: flex; flex-wrap: wrap; width: 100%; min-width: 0; gap: 6px; }
-.reactionRow > [data-content-reactions] > span:first-child > span { flex: 0 0 auto; flex-wrap: wrap; max-width: 100%; }
 .media { position: relative; aspect-ratio: 1; overflow: hidden; border: 1px solid #333b40; border-radius: 6px; background: #080a0b; }
 .media[data-transparent] { background-color: #d3dad8; background-image: repeating-conic-gradient(#aab4b1 0% 25%, transparent 0% 50%); background-size: 20px 20px; }
 .pending { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #adb6bd; }

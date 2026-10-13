@@ -58,6 +58,10 @@ export function RatioPicker({ value, onChange, reference, model, resolution, cus
       let visibleTop = top, visibleLeft = left, visibleBottom = top + height, visibleRight = left + width;
       // The native settings dialog and other scroll containers clip in their own client boxes.
       for (const ancestor of ancestors) {
+        // Root overflow clips the viewport, not the root's scrolled document rectangle.
+        // Combining rect.top (-scrollY) with clientHeight (viewport height) would close
+        // a perfectly visible picker as soon as it opens further down the page.
+        if (ancestor === document.documentElement || ancestor === document.scrollingElement) continue;
         const style = window.getComputedStyle(ancestor);
         const clipX = clips(style.overflowX), clipY = clips(style.overflowY);
         if (!clipX && !clipY) continue;

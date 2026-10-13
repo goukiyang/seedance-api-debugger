@@ -26,6 +26,9 @@
 .moduleRailSortableRow { display: flex; align-items: center; min-width: 0; }
 .moduleRailSortableRow > button:first-child { flex: 1; min-width: 0; touch-action: pan-y; }
 .page .moduleRail .moduleRailSortableRow > button:last-child:not(:first-child), .page .moduleRail .moduleRailGroupHeader > button:last-child:not(:first-child) { flex: 0 0 24px; width: 24px; min-height: 32px; padding: 3px; justify-content: center; }
+@media (hover: none), (pointer: coarse) {
+  .page .moduleRail .moduleRailSortableRow > [data-sort-handle], .page .moduleRail .moduleRailGroupHeader > [data-sort-handle] { flex-basis: 36px; width: 36px; min-height: 40px; }
+}
 .orderDialogGroup { padding: 8px 0; border-bottom: 1px solid #314047; }
 .orderDialogGroup > div + div { margin-left: 16px; }
 .definitionPending { display: grid; gap: 7px; padding: 12px; border: 1px solid #7f6d43; border-radius: 8px; color: #eadab3; }

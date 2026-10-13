@@ -12,6 +12,7 @@ import { isSafeIdentifier, useMediaPreviewState, type MediaPreviewZoomMode } fro
 import { isImagePreviewReady, useImageReadProgress } from '@/lib/hooks/use-image-read-progress';
 import { resetImageReadForRetry } from '@/lib/media/image-read-session';
 import { useHdImageSource, versionedHdSource, type HdDescription } from '@/lib/hooks/use-hd-image-source';
+import { hdAvailabilityLabel, hdDescriptionUsesOriginal, hdDisplayLabel, type HdDisplayKind } from '@/lib/media/hd-display-policy';
 import { useImageNeighbors, type ImageReadCandidate } from '@/lib/hooks/use-image-neighbors';
 import { isTopmostDialogLayer, useDialogDismiss } from '@/components/useDialogDismiss';
 import { RelativeTime } from '@/components/RelativeTime';
@@ -78,7 +79,7 @@ const MAX_SCALE = 24;
 const SCALE_STEP = 1.2;
 
 type IntrinsicSize = { width: number; height: number };
-type DecodedImage = { source: string; fullSize: boolean; hd?: HdDescription; mime?: string; bytes?: number; account: string };
+type DecodedImage = { source: string; fullSize: boolean; displayKind: HdDisplayKind; hd?: HdDescription; mime?: string; bytes?: number; account: string };
 
 function safeImageLabel(title?: string, fileName?: string) {
   const trimmedTitle = title?.trim();
@@ -181,13 +182,13 @@ function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, v
     }
   }, [failed, displaySrc, originalSrc, readResult.refreshSource, blocked, hd.description?.status, hd.refresh, rawFallback, original, fallbackIdentity]);
   const reportReady = (target?: HTMLImageElement | null) => {
-    const readyIdentity = imageIdentity;
+    const readyIdentity = `${imageIdentity}:${hd.displayKind}:${hd.description?.status || ''}:${hd.description?.sourceVersion || ''}:${hd.description?.original || false}:${hd.description?.reason || ''}:${rawFallback}`;
     if (readyKeyRef.current === readyIdentity) return;
     const width = readResult.width || target?.naturalWidth || 0, height = readResult.height || target?.naturalHeight || 0;
     if (width <= 0 || height <= 0) return;
     readyKeyRef.current = readyIdentity;
     onReadyRef.current?.({ width, height },
-      { source: imageSrc || target?.src || displaySrc, fullSize: hd.fullSize || rawFallback, hd: hd.description, mime: readResult.mime, bytes: readResult.bytes, account: accountIdentity });
+      { source: imageSrc || target?.src || displaySrc, fullSize: hd.fullSize || rawFallback, displayKind: rawFallback ? 'original' : hd.displayKind, hd: hd.description, mime: readResult.mime, bytes: readResult.bytes, account: accountIdentity });
   };
   useEffect(() => {
     if (!displaySrc || failed || blocked) return;
@@ -205,7 +206,7 @@ function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, v
     const timer = window.setTimeout(() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); }, 30000);
     return () => window.clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imageIdentity, loaded, readProgress.phase, failed, blocked, displaySrc, imageSrc, readResult.decoded]);
+  }, [imageIdentity, loaded, readProgress.phase, failed, blocked, displaySrc, imageSrc, readResult.decoded, hd.description, hd.displayKind, rawFallback]);
   const progressLabel = readProgress.phase === 'unsupported'
     ? readProgress.message || '该来源不是图片，未读取文件内容'
     : readProgress.phase === 'unavailable'
@@ -219,7 +220,8 @@ function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, v
     {imageSrc && !blocked && !failed && <img ref={image} key={`preview:${imageIdentity}`} src={imageSrc} alt={alt} className={className} style={{ ...style, opacity: loaded ? 1 : 0 }} draggable={false} data-image-preview-image
       onLoad={event => { const target = event.currentTarget; void (readResult.decoded ? Promise.resolve() : target.decode()).then(() => { if (currentKeyRef.current !== imageIdentity) return; setLoadedKey(imageIdentity); reportReady(target); }).catch(() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); }); }} onError={() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); }} />}
     {(!loaded || displaySrc === originalSrc || rawFallback || hd.error) && <div className={styles.imageStatus} role="status">
-      <span>{blocked ? readProgress.message || '图片权限或来源不可用' : failed ? (unsupported ? progressLabel : thumbnailLoaded === thumbnail ? '图片未能加载，缩略图仍可查看，请重试' : '图片未能加载，请重试') : loaded ? rawFallback ? '高清图未能显示，当前为完整原图，可重试' : displaySrc === originalSrc ? '当前为完整原图' : '当前图片仍可查看' : hd.pending ? '高清图正在准备，缩略图仍可查看' : `${alt} · ${displaySrc === originalSrc ? '完整原图' : hd.description?.status === 'ready' ? '原尺寸高清' : '轻量预览'} · ${progressLabel}`}</span>
+      <span>{blocked ? readProgress.message || '图片权限或来源不可用' : failed ? (unsupported ? progressLabel : thumbnailLoaded === thumbnail ? '图片未能加载，缩略图仍可查看，请重试' : '图片未能加载，请重试') : loaded ? `当前为${hdDisplayLabel(rawFallback ? 'original' : hd.displayKind, hd.description, rawFallback)}${rawFallback ? '，可重试高清' : ''}` : `${alt} · ${hdDisplayLabel(rawFallback ? 'original' : hd.displayKind, hd.description, rawFallback)} · ${progressLabel}`}</span>
+      {hd.pending && !blocked && <span>高清压缩在后台准备，不影响查看完整原图</span>}
       {hd.error && !blocked && <span>高清状态读取失败，可重试或查看原图</span>}
       {failed && !unsupported && readProgress.phase === 'unavailable' && <span>{readProgress.message || '当前来源无法提供读取进度'}</span>}
       {!loaded && !failed && readProgress.phase === 'reading' && readProgress.percent != null && <>
@@ -740,7 +742,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
           }}>{copyState?.success && copyState.src === copySource ? <Check size={16} /> : <Copy size={16} />}{copyState?.busy ? '正在复制' : safeSide === 'current' ? '复制当前图' : '复制对比图'}</button>}
           {!previewOnly && displaySource(selectedImage.src, 'preview') !== displaySource(selectedImage.src, 'original') && <button type="button" className={styles.menuAction} aria-pressed={activeOriginal} onClick={() => { userAction.current++; stopGestures(); setOriginals(value => ({ ...value, [viewIdentity(safeSide, selectedImage)]: !activeOriginal })); }}><ZoomIn size={16} />{activeOriginal ? '切换高清预览' : '加载完整原图'}</button>}
           {hasOriginalDownloadUrl && <>
-            {decoded?.hd?.status === 'ready' ? <a className={styles.menuAction} href={versionedHdSource(selectedImage.src, 'hd-download', decoded.hd.sourceVersion)}><Download size={16} />下载高清 {decoded.hd.format?.toUpperCase()}{decoded.hd.bytes ? ` · ${formatImageBytes(decoded.hd.bytes)}` : ''}</a> : <span className={styles.menuAction}>高清压缩档尚未就绪</span>}
+            {decoded?.hd?.status === 'ready' && !hdDescriptionUsesOriginal(decoded.hd) ? <a className={styles.menuAction} href={versionedHdSource(selectedImage.src, 'hd-download', decoded.hd.sourceVersion)}><Download size={16} />下载高清 {decoded.hd.format?.toUpperCase()}{decoded.hd.bytes ? ` · ${formatImageBytes(decoded.hd.bytes)}` : ''}</a> : <span className={styles.menuAction}>{hdAvailabilityLabel(decoded?.hd)}</span>}
           </>}
           {hasNavigation && <div className={styles.mobileNavigation}><button type="button" className={styles.menuAction} onClick={onPrevious}><ArrowLeft size={16} />当前图上一张</button><button type="button" className={styles.menuAction} onClick={onNext}><ArrowRight size={16} />当前图下一张</button></div>}
           {comparisonMode && <div className={styles.compareOptions}>
@@ -750,7 +752,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
           <div className={styles.metadata}>{visibleMetadata.model && <span>模型：{visibleMetadata.model}</span>}{visibleMetadata.quality && <span>质量：{visibleMetadata.quality}</span>}{visibleMetadata.supplier && <span>供应商：{visibleMetadata.supplier}</span>}{visibleMetadata.ratio && <span>比例：{visibleMetadata.ratio}</span>}{visibleMetadata.resolution && <span>分辨率：{visibleMetadata.resolution}</span>}
             <span>原图尺寸：{visibleSize ? `${visibleSize.width} × ${visibleSize.height} 像素` : '未知'}</span>
             <span>原文件大小：{knownFileSize ? formatImageBytes(fileSize) : '未知'}</span>
-            {decoded?.mime && <span>当前显示：{decoded.mime.replace('image/', '').toUpperCase()}{decoded.bytes ? ` · ${formatImageBytes(decoded.bytes)}` : ''}</span>}
+            {decoded?.mime && <span>当前显示：{hdDisplayLabel(decoded.displayKind, decoded.hd)} · {decoded.mime.replace('image/', '').toUpperCase()}{decoded.bytes ? ` · ${formatImageBytes(decoded.bytes)}` : ''}</span>}
             {!visibleSize && previewSize && <span>当前预览：{previewSize.width} × {previewSize.height} 像素（非原图尺寸）</span>}
             {visibleMetadata.time && <span>{rawTime && Number.isFinite(Date.parse(rawTime)) ? <RelativeTime value={rawTime} /> : visibleMetadata.time}</span>}
           </div>

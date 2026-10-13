@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '抠图改为大画面工作区，设置与历史分层，细修草稿可恢复。生成图可接续抠图或带入视频首帧；视频新增循环开关，并可选帧制作多角度拼图、导出单帧。带入图片不会自动生成或产生未知费用。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '侧栏拖动和比例下拉更顺手，风格组恢复图片式添加；点赞与置顶回到封面左上角。个人信息可直接查看并安全切换账号。高清准备在服务器忙碌后可自动继续，单张异常不拖住其他图片，等待时仍可查看完整原图。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
