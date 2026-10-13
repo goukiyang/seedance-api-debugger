@@ -1754,8 +1754,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   async function saveAsPreset() {
     if (!contextEditable) { setError('共享模板的内部上下文由创建者维护，不能另存内部配置；本次参数仍可直接生成。'); return; }
     if (presetSaveLock.current || quickPresetLock.current || moduleSaving || draftRestoring || submitting || pendingSubmission) return;
-    await askName('模板名称', presetCreateRequest.current?.payload.name || name, { title: '另存为模板', confirmLabel: '保存模板', maxLength: 80,
-      checkbox: { label: '共享给同事', checked: presetCreateRequest.current?.payload.isShared ?? false }, onSubmit: async (presetName, isShared) => {
+    await askName('模板名称（共享不包含本次描述、主图和临时参考）', presetCreateRequest.current?.payload.name || name, { title: '另存为模板', confirmLabel: '保存模板', maxLength: 80,
+      checkbox: { label: '共享给同事', checked: presetCreateRequest.current?.payload.isShared ?? module.sharingPreference?.enabled ?? (sharedLive ? module.sourcePresetShared === true : true) }, onSubmit: async (presetName, isShared) => {
       if (presetSaveLock.current) return;
       if (presetCreateRequest.current && (presetCreateRequest.current.payload.name !== presetName || presetCreateRequest.current.payload.isShared !== (isShared === true))) {
         throw new Error('上次保存尚未确认，请先按原名称和共享范围重试，不会重复另存');
@@ -1764,8 +1764,14 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         if (await saveModule() === false) throw new Error('自己的模块尚未保存，快捷设置未另存；当前输入保留。');
       }
       presetSaveLock.current = true; setPresetSaving(true);
+      const draft = currentPresetDraft();
+      const sharedDraft = { ...draft, prompt: templatePrompt, templatePrompt,
+        referenceIds: sharedLive ? templateImageIds : [],
+        personalOverrides: sharedLive ? undefined : { prompt, model: moduleModel, quality, resolution, count, aspectRatio },
+        personalReferenceIds: sharedLive ? undefined : moduleDraft.referenceIds,
+        personalReferencePolicy: sharedLive ? undefined : referencePolicy };
       const request: NonNullable<typeof presetCreateRequest.current> = presetCreateRequest.current ||= { requestId: crypto.randomUUID(),
-        payload: { ...currentPresetDraft(), name: presetName, isShared: isShared === true,
+        payload: { ...(isShared === true ? sharedDraft : draft), name: presetName, isShared: isShared === true,
           ...(isShared === true ? {} : { saveIntent: 'personal-quick' }) }, generationSignature: generationDraft };
       try {
         const created = request.result || await readResponse(await fetch('/api/image-studio/presets', { method: 'POST', headers: { 'Content-Type': 'application/json' },
