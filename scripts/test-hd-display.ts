@@ -3,6 +3,7 @@ import { hdAvailabilityLabel, hdDescriptionUsesOriginal, hdDisplayLabel, hdDispl
 import { acquireHdImageSource, hdImageHint, invalidateHdImageSource, prefetchHdImageSource, registerImageReadFamilyInvalidator, setHdImageSessionOwner, type HdDescription, type HdSourceState } from '../src/lib/media/hd-source-session';
 
 // In-memory engineering matrix only. No browser, server, files, or production requests.
+async function main() {
 const ready: HdDescription = { policy: 'hd-f-v1', status: 'ready', sourceVersion: 'source-v1', format: 'avif', mime: 'image/avif', bytes: 900, width: 100, height: 200 };
 const option = { original: false, previewOnly: false, supported: true };
 assert.equal(hdDisplayPolicy({ ...option, description: ready }).kind, 'hd');
@@ -120,3 +121,6 @@ try {
     if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key);
   }
 }
+}
+
+void main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -89,7 +89,7 @@ export async function commitHdDiscoveryItem(stream: 'assets' | 'tasks', cursor: 
   if (outcome.durable) await advanceHdDiscovery(stream, cursor);
   return outcome;
 }
-export async function retryHdDiscoveryIsolations(limit = HD_RESOURCE_POLICY.discoveryLimit) {
+export async function retryHdDiscoveryIsolations(limit: number = HD_RESOURCE_POLICY.discoveryLimit) {
   let handled = 0;
   for (const item of await listHdIsolations()) {
     if (handled >= limit) break;
