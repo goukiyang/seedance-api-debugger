@@ -4,9 +4,7 @@ import { AuthError } from '@/lib/auth/session';
 import { executeResolutionOperation, readResolutionOperations, ResolutionApplyError } from '@/lib/image-studio/resolution-apply';
 import { StudioSettingsClearConfirmationError } from '@/lib/image-studio/settings';
 import { parseStudioTemplateDefaults } from '@/lib/image-studio/template-defaults';
-import { captureImageGenerationChannel, getImageGenerationChannels, ImageGenerationChannelError, resolveImageGenerationChannelSnapshot, selectImageGenerationSettings, imageGenerationSupportsStudioFourToOne } from '@/lib/integrations/image-generation';
-import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
-import { studioFourToOneIssue } from '@/lib/image-generation/resolution';
+import { ImageGenerationChannelError } from '@/lib/integrations/image-generation';
 
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
@@ -37,18 +35,8 @@ export async function POST(request: NextRequest) {
     const body = JSON.parse(text);
     if (!body || typeof body !== 'object' || Array.isArray(body)) return response({ error: '操作内容无效' }, 400);
     if ((body.action === 'prepare' || body.action === 'commit') && body.settings?.templateDefaults) {
-      let defaults;
-      try { defaults = parseStudioTemplateDefaults(body.settings.templateDefaults); }
+      try { parseStudioTemplateDefaults(body.settings.templateDefaults); }
       catch { return response({ error: '模板默认值无效' }, 400); }
-      if (defaults.aspectRatio === '4:1') {
-        const channels = await getImageGenerationChannels();
-        const channelId = await resolveImageGenerationRequestChannel(defaults.model);
-        const api = channelId
-          ? await resolveImageGenerationChannelSnapshot(await captureImageGenerationChannel(defaults.model, channelId), undefined, true, defaults.model)
-          : selectImageGenerationSettings(channels, defaults.model);
-        const issue = studioFourToOneIssue(defaults.aspectRatio, imageGenerationSupportsStudioFourToOne(api, defaults.model));
-        if (issue) return response({ error: issue }, 400);
-      }
     }
     return response(await executeResolutionOperation(user.id, body));
   } catch (error) { return failure(error); }

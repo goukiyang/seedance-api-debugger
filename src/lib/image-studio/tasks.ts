@@ -757,8 +757,13 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const auxiliaryReferenceSnapshot = referenceSnapshot.filter(reference => reference.referenceRole !== 'primary');
     const requestedAspectRatio = effectiveAspectRatio;
     const firstReference = primaryReferenceIds.map(id => referencesById.get(id)).find(reference => reference?.width && reference?.height) || null;
+    if (requestedAspectRatio === 'auto' && primaryReferenceIds.length && !firstReference) {
+      throw new StudioError('主图尺寸尚未确认，暂时不能自动跟随原图比例；请选择明确比例，或重新上传主图');
+    }
     const fourToOneSupported = imageGenerationSupportsStudioFourToOne(imageApi, generation.model);
-    const ratioResolution = resolveStudioAspectRatio(requestedAspectRatio, firstReference, fourToOneSupported);
+    let ratioResolution: ReturnType<typeof resolveStudioAspectRatio>;
+    try { ratioResolution = resolveStudioAspectRatio(requestedAspectRatio, firstReference, fourToOneSupported, true); }
+    catch (error) { throw new StudioError(error instanceof Error ? error.message : '原图比例无法确认，请选择明确比例'); }
     const aspectRatio = ratioResolution.requested;
     const resolvedAspectRatio = ratioResolution.resolved;
     const aspectRatioSource = ratioResolution.source;
@@ -841,6 +846,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       aspectRatio,
       resolvedAspectRatio,
       aspectRatioSource,
+      ratioContractVersion: 2,
       resolution,
       outputSize: outputSize || null,
       resolvedOutputSize: outputSize || null,

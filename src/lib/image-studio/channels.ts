@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { isGeminiImageModel } from '@/lib/image-generation/resolution';
 import { IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
+import { isStandardStudioRatio, normalizeStudioRatio } from './ratios';
 import type { ImageGenerationChannelDto, ImageGenerationChannelsDto, ImageGenerationModelCapabilityDto } from '@/lib/integrations/image-generation-channel';
 
 export const ORIGINAL_IMAGE_CHANNEL_ID = 'original';
@@ -198,7 +199,6 @@ export function imageStudioChannelIssue(channel: ImageStudioChannel | undefined,
     const missing = [
       !capability.qualities?.length ? '图片质量' : null,
       !capability.resolutions?.length ? '分辨率' : null,
-      !capability.ratios?.length ? '图片比例' : null,
       capability.maxReferences == null ? '参考图上限' : null,
       !capability.billingMode ? '计费方式' : null,
       capability.billingMode === 'fixed' && capability.fixedPoints == null
@@ -219,10 +219,12 @@ export function imageStudioChannelIssue(channel: ImageStudioChannel | undefined,
   if (capability.resolutions && values.resolution !== undefined && !capability.resolutions.includes(values.resolution)) {
     return '当前生图通道不支持所选分辨率，请手动调整后再生成。';
   }
-  if (capability.ratios && values.ratio !== undefined && !capability.ratios.includes(values.ratio)) {
+  if (values.ratio !== undefined && !isStandardStudioRatio(values.ratio) && !capability.ratios?.some(value => {
+    try { return normalizeStudioRatio(value) === normalizeStudioRatio(values.ratio); } catch { return false; }
+  })) {
     return '当前生图通道不支持所选比例，请手动调整后再生成。';
   }
-  if (!capability.qualities || !capability.resolutions || !capability.ratios || capability.maxReferences == null) {
+  if (!capability.qualities || !capability.resolutions || capability.maxReferences == null) {
     return '当前生图通道的图片参数支持范围尚未确认，暂不能生成；请联系管理员补全配置。';
   }
   if (Number.isSafeInteger(capability.maxReferences) && values.referenceCount !== undefined

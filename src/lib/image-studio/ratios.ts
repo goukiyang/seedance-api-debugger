@@ -10,14 +10,25 @@ export function normalizeStudioRatio(value: unknown): string {
   const match = value.trim().match(/^(\d{1,5}(?:\.\d{1,2})?)\s*[:：/]\s*(\d{1,5}(?:\.\d{1,2})?)$/);
   if (!match) throw new Error('请输入宽:高，例如 16:9，最多两位小数');
   const width = Math.round(Number(match[1]) * 100), height = Math.round(Number(match[2]) * 100);
-  if (!width || !height || (width / height > 3 && width !== height * 4) || height / width > 3) throw new Error('宽高须大于 0，支持 1:3 至 3:1，以及 4:1（须模型与通道支持）');
+  if (!width || !height || (width / height > 3 && width !== height * 4) || height / width > 3) throw new Error('宽高须大于 0，支持 1:3 至 3:1，以及 4:1');
   const gcd = (a: number, b: number): number => b ? gcd(b, a % b) : a;
   const divisor = gcd(width, height);
   if (width / divisor > 99999 || height / divisor > 99999) throw new Error('比例数值过于精细，请简化后重新输入');
-  return `${width / divisor}:${height / divisor}`;
+  // Keep standard names stable through saving, quoting and provider requests.
+  // In particular, 21:9 and 9:21 must not become unregistered 7:3 and 3:7.
+  const standard = STUDIO_RATIOS.find(item => {
+    const [w, h] = item.split(':').map(Number);
+    return width * h === height * w;
+  });
+  return standard || `${width / divisor}:${height / divisor}`;
 }
 
-export function ratioFromImageDimensions(width: unknown, height: unknown, allowFourToOne = false): string | null {
+export function isStandardStudioRatio(value: unknown): boolean {
+  try { return value === 'auto' || STUDIO_RATIOS.includes(normalizeStudioRatio(value)); }
+  catch { return false; }
+}
+
+export function ratioFromImageDimensions(width: unknown, height: unknown, allowFourToOne = true): string | null {
   const w = typeof width === 'number' ? width : Number(width);
   const h = typeof height === 'number' ? height : Number(height);
   if (!Number.isInteger(w) || !Number.isInteger(h) || w <= 0 || h <= 0
@@ -25,7 +36,7 @@ export function ratioFromImageDimensions(width: unknown, height: unknown, allowF
   try { return normalizeStudioRatio(`${w}:${h}`); } catch { return null; }
 }
 
-export function resolveStudioAspectRatio(value: unknown, reference?: StudioRatioReference, allowFourToOne = false): {
+export function resolveStudioAspectRatio(value: unknown, reference?: StudioRatioReference, allowFourToOne = true, requireReferenceRatio = false): {
   requested: string;
   resolved: string;
   source: StudioAspectRatioSource;
@@ -33,13 +44,14 @@ export function resolveStudioAspectRatio(value: unknown, reference?: StudioRatio
   const requested = normalizeStudioRatio(value);
   if (requested !== 'auto') return { requested, resolved: requested, source: 'explicit' };
   const referenceRatio = ratioFromImageDimensions(reference?.width, reference?.height, allowFourToOne);
+  if (requireReferenceRatio && reference && !referenceRatio) throw new Error('原图比例无法在当前安全范围内表达，请明确选择图片比例；未改为1:1');
   return referenceRatio
     ? { requested, resolved: referenceRatio, source: 'reference' }
     : { requested, resolved: DEFAULT_STUDIO_ASPECT_RATIO, source: 'model-default' };
 }
 
 // Keep near the requested pixel budget; prefer exact ratios, otherwise disclose 16px rounding in the UI.
-export function studioRatioSize(value: unknown, resolution: string = '1K', allowFourToOne = false): string | undefined {
+export function studioRatioSize(value: unknown, resolution: string = '1K', allowFourToOne = true): string | undefined {
   const ratio = normalizeStudioRatio(value);
   if (ratio === 'auto') return undefined;
   if (ratio === '4:1' && !allowFourToOne) throw new Error('当前像素尺寸通道未确认支持4:1，请选择其他比例');
@@ -58,6 +70,6 @@ export function studioRatioSize(value: unknown, resolution: string = '1K', allow
     const areaDistance = Math.abs(area - targetArea);
     if (error < best.error - 1e-10 || Math.abs(error - best.error) < 1e-10 && areaDistance < best.areaDistance) best = { width, height, error, areaDistance };
   }
-  if (ratio === '4:1' && !Number.isFinite(best.error)) throw new Error('当前像素尺寸通道不支持4:1，请选择其他比例');
+  if (!Number.isFinite(best.error)) throw new Error('所选比例与分辨率无法在安全像素范围内表达，请调整分辨率');
   return `${best.width}x${best.height}`;
 }

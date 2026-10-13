@@ -38,7 +38,7 @@ export function normalizeImageResolution(model: string, value: unknown, provider
   return options.includes(value as ImageResolution) ? value as ImageResolution : options[options.length - 1] || '1K';
 }
 
-export function imageOutputSize(model: string, resolution: unknown, ratio: string, provider?: string, allowFourToOne = false): string {
+export function imageOutputSize(model: string, resolution: unknown, ratio: string, provider?: string, allowFourToOne = true): string {
   const issue = studioFourToOneIssue(ratio, allowFourToOne || supportsStudioFourToOne(model, provider));
   if (issue) throw new Error(issue);
   const normalized = normalizeImageResolution(model, resolution, provider);

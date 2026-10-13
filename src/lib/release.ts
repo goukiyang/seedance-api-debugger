@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '新建模板默认共享，保存模板后同事即可使用，也可关闭共享。本次描述、主图和临时参考仍只属于自己；已有私人模板不会自动公开。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '回退相容版本：界面退回上一版，保留已选比例、新旧任务协议、模板共享和上传恢复合同。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

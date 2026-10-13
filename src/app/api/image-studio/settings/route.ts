@@ -6,7 +6,6 @@ import { getImageGenerationChannelOptions, getImageGenerationChannels, ImageGene
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import { imageBillingReadinessPayload } from '@/lib/image-studio/billing-readiness';
 import { parseStudioTemplateDefaults } from '@/lib/image-studio/template-defaults';
-import { studioFourToOneIssue } from '@/lib/image-generation/resolution';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,13 +57,6 @@ export async function PUT(request: NextRequest) {
     if (body.templateDefaults !== undefined) {
       try { templateDefaults = parseStudioTemplateDefaults(body.templateDefaults); }
       catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : '统一默认设置无效' }, { status: 400 }); }
-      if (templateDefaults.aspectRatio === '4:1') {
-        const channels = await getImageGenerationChannels();
-        const api = await settingsForModel(channels, templateDefaults.model);
-        if (!api) return NextResponse.json({ error: '该型号的默认图片供应商已删除或不存在；未切换到其他供应商，暂时无法确认 4:1 支持' }, { status: 409 });
-        const issue = studioFourToOneIssue(templateDefaults.aspectRatio, imageGenerationSupportsStudioFourToOne(api, templateDefaults.model));
-        if (issue) return NextResponse.json({ error: issue }, { status: 400 });
-      }
     }
     const current = await getImageStudioSettings();
     const settings = await saveImageStudioSettings({ context: body.context ?? current.context, revision: body.revision, model: body.model ?? current.model,
