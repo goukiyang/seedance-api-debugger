@@ -10,9 +10,6 @@ import styles from './studio.module.css';
 export function RatioPicker({ value, onChange, reference, model, resolution, custom, busy, disabled, error, onRetry, onCustom, onEditing }: {
   value: string; onChange: (ratio: string) => void; reference?: { width?: unknown; height?: unknown } | null; model: string; resolution: string; custom: string[]; busy: boolean; disabled: boolean; error: string;
   onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean>; onEditing: (editing: boolean) => void;
-  fourToOneSupported: boolean;
-  allowedRatios?: string[];
-  restrictToAllowedRatios?: boolean;
 }) {
   const [showInfo, setShowInfo] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);

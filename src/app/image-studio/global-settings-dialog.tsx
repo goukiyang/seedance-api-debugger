@@ -11,7 +11,6 @@ import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUAL
   IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality,
   type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
-import { supportsStudioFourToOne } from '@/lib/image-generation/resolution';
 import type { StudioTemplateDefaults } from '@/lib/image-studio/template-defaults';
 import { RatioPicker } from './ratio-picker';
 import { usePageExitRisk } from '@/lib/hooks/page-exit-guard';
@@ -33,8 +32,6 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
   const [ratioEditing, setRatioEditing] = useState(false);
   const batch = useResolutionApply({ open, ownerId, canEdit, editor, getExcluded, onDeltas });
   const defaults = editor.draft?.templateDefaults;
-  const supportsFourToOne = (model: ImageStudioModel) => editor.settings?.modelFourToOne?.[model] ?? supportsStudioFourToOne(model);
-  const fourToOneAvailable = defaults ? supportsFourToOne(defaults.model) : false;
   const selectedModelReady = defaults
     ? editor.settings?.modelReady?.[defaults.model] ?? editor.settings?.providerReady
     : undefined;
@@ -106,8 +103,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
           <label className={styles.compactField}><strong>生成模型</strong>
             <select value={defaults.model} disabled={!canEdit || editor.loading} onChange={event => {
               const model = event.target.value as ImageStudioModel;
-              editor.controller.editTemplateDefaults({ model, quality: defaultImageStudioQuality(model), resolution: defaultImageResolution(model),
-                ...(defaults.aspectRatio === '4:1' && !supportsFourToOne(model) ? { aspectRatio: 'auto' } : {}) });
+              editor.controller.editTemplateDefaults({ model, quality: defaultImageStudioQuality(model), resolution: defaultImageResolution(model) });
             }}>
               {IMAGE_STUDIO_MODELS.map(model => {
                 const ready = editor.settings?.modelReady?.[model] ?? editor.settings?.providerReady;
@@ -143,7 +139,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
             </select>
           </label>
           <RatioPicker value={defaults.aspectRatio} onChange={aspectRatio => editor.controller.editTemplateDefaults({ aspectRatio })}
-            model={defaults.model} resolution={defaults.resolution} fourToOneSupported={fourToOneAvailable}
+            model={defaults.model} resolution={defaults.resolution}
             {...ratios} disabled={!canEdit || editor.loading || editor.saving || !open} onEditing={setRatioEditing} />
           <label className={styles.referenceToggle}>
             <input type="checkbox" checked={defaults.useFixedReferences} disabled={!canEdit || editor.loading}

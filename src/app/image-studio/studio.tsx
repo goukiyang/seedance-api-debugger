@@ -66,7 +66,6 @@ import { StudioStyleSkillSelector, type StudioStyleSkillSelectorHandle } from '.
 import type { SettingsValue } from './settings-controller';
 import { parseStudioTemplateDefaults } from '@/lib/image-studio/template-defaults';
 import { normalizeStudioRatio, resolveStudioAspectRatio } from '@/lib/image-studio/ratios';
-import { studioFourToOneIssue } from '@/lib/image-generation/resolution';
 import { useStudioBatch } from './use-studio-batch';
 import { BatchResults } from './batch-results';
 import { watchGenerationCompletion } from '@/components/GenerationCompletion';
@@ -1713,8 +1712,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     try {
       if (!settings?.templateDefaults) throw new Error('统一默认设置尚未读取，请重新读取通用设置后再试。');
       const defaults = parseStudioTemplateDefaults(settings.templateDefaults);
-      const ratioIssue = studioFourToOneIssue(defaults.aspectRatio, settings.modelFourToOne?.[defaults.model] === true);
-      if (ratioIssue) throw new Error(ratioIssue);
       if (styleGroups.some(group => group.unavailable)) throw new Error('当前风格组不可用，请先处理后再套用统一默认。');
       const styles = styleGroups.reduce((total, group) => total + group.referenceCount, 0);
       const fixedCount = fixedEditable ? fixedReferences.length : module.fixedReferenceCount ?? savedFixedReferences.length;
@@ -2230,16 +2227,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     const currentPayload = generationPayload(retryTask);
     const requestLegacyRoute = imageStudioUsesLegacyRoute(imageChannels, currentPayload.model, imageChannelId);
     const requestChannelId = imageStudioEffectiveChannelId(imageChannels, currentPayload.model, imageChannelId);
-    const requestCapability = imageStudioChannelModel(selectedChannel, currentPayload.model);
     const expectedFormSignature = liveGenerationSignature.current;
     const signature = JSON.stringify([userId, Object.fromEntries(Object.entries(currentPayload).filter(([key]) => key !== 'requestId')), requestChannelId, imageChannelId === 'original' ? imageChannels.defaultRoutes?.revision : undefined]);
     const reusableQuote = billingQuote?.signature === signature
       && (!billingQuote.quote.expiresAt || Date.parse(billingQuote.quote.expiresAt) > Date.now()) ? billingQuote : null;
     const payload = reusableQuote ? generationPayload(retryTask, reusableQuote.requestId) : currentPayload;
-    const ratioIssue = studioFourToOneIssue(payload.aspectRatio, !requestLegacyRoute
-      ? requestCapability?.ratios?.includes('4:1') === true
-      : settings.modelFourToOne?.[payload.model] === true);
-    if (ratioIssue) { setError(ratioIssue); return; }
     submitLock.current = true; setSubmitting(true); setError('');
     let confirmedQuote = reusableQuote?.quote || null;
     try {
@@ -2557,10 +2549,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     return () => window.clearTimeout(timer);
   }, [billingQuote]);
   const selectedProviderReady = imageStudioChannelReadyForModel(selectedChannel, moduleModel, settings?.modelReady?.[moduleModel] ?? settings?.providerReady);
-  const selectedFourToOne = !legacyImageRoute
-    ? selectedChannelModel?.ratios?.includes('4:1') === true
-    : settings?.modelFourToOne?.[moduleModel] === true;
-  const ratioIssue = studioFourToOneIssue(aspectRatio, selectedFourToOne);
   const channelIssue = !imageChannelReady ? '正在读取生图通道，请稍候。' : imageStudioChannelIssue(selectedChannel, moduleModel, {
     legacyReady: settings?.modelReady?.[moduleModel] ?? settings?.providerReady,
     legacyRoute: legacyImageRoute,
@@ -2586,7 +2574,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     : !settings ? { message: '正在读取生成设置，请稍候；长时间无变化请刷新页面。', tone: 'progress' }
     : channelIssue ? { message: channelIssue, tone: imageChannelMessage ? 'info' : 'warning' }
     : !selectedProviderReady ? { message: '当前模型的图片服务尚未就绪，请换一个模型或联系管理员检查接口。', tone: 'warning' }
-    : ratioIssue ? { message: ratioIssue, tone: 'warning' }
     : !actualQuoteRequired && moduleUnitCredits === null ? { message: '当前模型尚未设置点数，请换一个模型或联系管理员配置。', tone: 'warning' }
     : activeFixedReferences.some(item => item.available === false) ? { message: '固定参考图已不可用，请关闭、移除或更换。', tone: 'error' }
     : activeStyles.some(group => group.unavailable) ? { message: '已选风格组不可用，请移除或重新选择。', tone: 'error' }
@@ -2983,7 +2970,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         <label className={styles.label} htmlFor={`studio-prompt-${module.id}`}>{evolution ? '演化内容' : '补充'} {!evolution && <span>有图片时选填</span>}</label>
         <textarea id={`studio-prompt-${module.id}`} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} value={prompt} maxLength={20000} onChange={event => setPrompt(event.target.value)} placeholder={evolution ? '什么发生变化' : '补充想生成的画面'} rows={9} />
         {evolutionConflict && <p role="alert" className={styles.error}>{evolutionConflict}</p>}
-        <RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={effectiveReferences.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} fourToOneSupported={selectedFourToOne} allowedRatios={selectedChannelModel?.ratios ?? undefined} restrictToAllowedRatios={!legacyImageRoute} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
+        <RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={effectiveReferences.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
         <div className={`${styles.modelQualityRow} ${templateWorkbench ? styles.templateModelQualityRow : ''}`}>
           <label className={styles.compactField} htmlFor={`studio-model-${module.id}`}><strong>生成模型</strong>
             <select id={`studio-model-${module.id}`} title={templateWorkbench ? `${IMAGE_STUDIO_MODEL_LABELS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || moduleModel}${imageChannelReady && !imageStudioChannelReadyForModel(selectedChannel, moduleModel, settings?.modelReady?.[moduleModel] ?? settings?.providerReady) ? '（未就绪）' : ''}` : undefined} disabled={submitting || Boolean(pendingSubmission)} value={moduleModel} onChange={event => setModuleModel(event.target.value)}>
