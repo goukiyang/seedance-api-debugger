@@ -6,6 +6,18 @@ const channelName = 'sd2-session-exit';
 const localEvent = 'sd2-local-session-exit';
 let blocked = false;
 export type SessionBoundaryReason = 'logged_out' | 'unconfirmed';
+type SessionBoundaryEvent = { eventId: string; reason: SessionBoundaryReason };
+export function parseClientSessionEvent(value: unknown): SessionBoundaryEvent | null {
+  if (typeof value === 'string') {
+    try { value = JSON.parse(value); }
+    catch { value = { eventId: value, reason: 'logged_out' }; }
+  }
+  if (!value || typeof value !== 'object') return null;
+  const event = value as { eventId?: unknown; reason?: unknown };
+  if (typeof event.eventId !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(event.eventId)
+    || (event.reason !== 'logged_out' && event.reason !== 'unconfirmed')) return null;
+  return { eventId: event.eventId, reason: event.reason };
+}
 export type LogoutOutcome = 'confirmed' | 'known_failure' | 'unknown';
 export function logoutResponseOutcome(response: { ok: boolean; status: number }, body: unknown): LogoutOutcome {
   const result = body && typeof body === 'object' ? body as { ok?: unknown } : null;
@@ -23,13 +35,13 @@ export function lockClientSession(reason: SessionBoundaryReason = 'logged_out') 
   window.dispatchEvent(new CustomEvent(localEvent, { detail: { eventId: crypto.randomUUID(), reason } }));
 }
 
-export function broadcastSessionExit() {
-  const eventId = crypto.randomUUID();
-  try { localStorage.setItem(key, eventId); } catch { /* BroadcastChannel remains available independently. */ }
+export function broadcastSessionExit(reason: SessionBoundaryReason = 'logged_out') {
+  const event: SessionBoundaryEvent = { eventId: crypto.randomUUID(), reason };
+  try { localStorage.setItem(key, JSON.stringify(event)); } catch { /* BroadcastChannel remains available independently. */ }
   if (typeof BroadcastChannel !== 'undefined') {
     try {
       const channel = new BroadcastChannel(channelName);
-      channel.postMessage(eventId);
+      channel.postMessage(event);
       channel.close();
     } catch { /* Storage delivery still works when channels are unavailable. */ }
   }
@@ -37,14 +49,14 @@ export function broadcastSessionExit() {
 
 export function watchSessionExit(onExit: (reason: SessionBoundaryReason) => void) {
   let latest: string | null = null;
-  try { latest = localStorage.getItem(key); } catch { /* Storage is optional. */ }
+  // Existing markers establish a baseline; a fresh login must not replay them.
+  try { latest = parseClientSessionEvent(localStorage.getItem(key))?.eventId || null; } catch { /* Storage is optional. */ }
   const receive = (value: unknown) => {
-    const event = typeof value === 'string' ? { eventId: value, reason: 'logged_out' } : value as { eventId?: unknown; reason?: unknown } | null;
-    if (!event || typeof event.eventId !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(event.eventId) || event.eventId === latest || blocked
-      || !['logged_out', 'unconfirmed'].includes(String(event.reason))) return;
+    const event = parseClientSessionEvent(value);
+    if (!event || event.eventId === latest || blocked) return;
     latest = event.eventId;
     blocked = true;
-    onExit(event.reason as SessionBoundaryReason);
+    onExit(event.reason);
   };
   const storage = (event: StorageEvent) => {
     try { if (event.key === key && event.storageArea === localStorage) receive(event.newValue); } catch { /* Storage may be disabled after mount. */ }
