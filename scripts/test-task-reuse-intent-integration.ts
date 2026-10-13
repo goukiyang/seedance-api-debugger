@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import * as intentContract from '../src/lib/navigation/task-reuse-intent';
+import type { TaskReuseContext } from '../src/lib/navigation/task-reuse-intent';
 
 // Runs the actual production callbacks and route with offline boundaries. No
 // browser, network, DB, task creation, payment or upload is permitted here.
@@ -73,7 +74,7 @@ const draft = {
 
 function pageHarness(storage = new Map<string, string>()) {
   const state: Scope = { message: '', confirms: 0, requests: [], draft: null, unknown: false, refreshes: 0 };
-  const context = {
+  const context: TaskReuseContext = {
     accountId: 'fixture-owner', workspaceBridgeKey: 'fixture-owner:standard', tabId: 'fixture-tab',
     projectId: 'fixture-project', videoCardId: 'fixture-card', videoBranchId: 'fixture-branch',
     editEpoch: 0, initializing: false, conflict: null, busy: false,

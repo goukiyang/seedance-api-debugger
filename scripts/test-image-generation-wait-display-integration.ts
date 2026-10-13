@@ -166,7 +166,7 @@ function card(wait: ImageGenerationWait, primary: (item: Props, display?: ImageG
     || nodes(tree).find(node => node.props.className === 'phase')?.props.children;
   const progressNode = nodes(waitingTree).find(node => node.props.role === 'progressbar');
   const percentNode = nodes(waitingTree).find(node => node.props.className === 'waitPercent');
-  if (progressNode) { assert.ok(Number(progressNode.props['aria-valuenow']) <= 100); assert.ok(percentNode); assert.equal(percentNode.props['aria-hidden'], true); assert.equal(percentNode.props['aria-live'], undefined); }
+  if (progressNode) { assert.ok(Number(progressNode.props['aria-valuenow']) <= 100); assert.ok(percentNode); assert.equal(String(percentNode.props['aria-hidden']), 'true'); assert.equal(percentNode.props['aria-live'], undefined); }
   return { tree, received: received!, track, title, alerts: nodes(tree).filter(node => node.props.role === 'alert'),
     buttons: nodes(primaryTree).filter(node => node.type === 'button'), allButtons: nodes(tree).filter(node => node.type === 'button'),
     percent: percentNode ? text(percentNode) : undefined };
