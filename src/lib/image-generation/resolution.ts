@@ -17,7 +17,7 @@ export function supportsStudioFourToOne(model: string, provider?: string) {
 }
 
 export function studioFourToOneIssue(ratio: string, supported: boolean) {
-  return ratio === '4:1' && !supported ? '当前模型或通道不支持4:1，请使用支持4:1的 Banana 2 原生通道，或选择其他比例。' : '';
+  return ratio === '4:1' && !supported ? '当前模型或通道未确认支持4:1，请选择已支持的通道或其他比例。' : '';
 }
 
 export function imageResolutionOptions(model: string, provider?: string): ImageResolution[] {
@@ -38,21 +38,21 @@ export function normalizeImageResolution(model: string, value: unknown, provider
   return options.includes(value as ImageResolution) ? value as ImageResolution : options[options.length - 1] || '1K';
 }
 
-export function imageOutputSize(model: string, resolution: unknown, ratio: string, provider?: string): string {
-  const issue = studioFourToOneIssue(ratio, supportsStudioFourToOne(model, provider));
+export function imageOutputSize(model: string, resolution: unknown, ratio: string, provider?: string, allowFourToOne = false): string {
+  const issue = studioFourToOneIssue(ratio, allowFourToOne || supportsStudioFourToOne(model, provider));
   if (issue) throw new Error(issue);
   const normalized = normalizeImageResolution(model, resolution, provider);
   return isGeminiImageModel(model) && provider !== 'ai_media_vip'
     ? normalized
-    : studioRatioSize(ratio, normalized) || studioRatioSize('1:1', normalized) || '1024x1024';
+    : studioRatioSize(ratio, normalized, allowFourToOne) || studioRatioSize('1:1', normalized) || '1024x1024';
 }
 
-export function isValidImageDimension(value: unknown): value is string {
+export function isValidImageDimension(value: unknown, allowFourToOne = false): value is string {
   if (typeof value !== 'string' || !/^\d+x\d+$/.test(value)) return false;
   const [width, height] = value.split('x').map(Number);
   return Number.isInteger(width) && Number.isInteger(height)
     && width % 16 === 0 && height % 16 === 0
     && width >= 16 && height >= 16 && Math.max(width, height) <= 3840
-    && width / height <= 3 && height / width <= 3
+    && (width / height <= 3 || allowFourToOne && width === height * 4) && height / width <= 3
     && width * height >= 655360 && width * height <= 8294400;
 }

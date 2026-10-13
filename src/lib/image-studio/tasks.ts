@@ -14,14 +14,14 @@ import { fixedImageBillingContract, imageSpecification } from './billing-quote';
 import { imageBillingView, parseImageBillingContract } from './billing-contract';
 import { consumeImageQuote } from './billing-quote-store';
 import { imageBillingReady } from './billing-readiness';
-import { captureImageGenerationChannel, resolveImageGenerationChannelSnapshot, validateImageGenerationChannel, imageGenerationModelOutputSize,
+import { captureImageGenerationChannel, resolveImageGenerationChannelSnapshot, validateImageGenerationChannel, imageGenerationModelOutputSize, imageGenerationSupportsStudioFourToOne,
   getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider, isMuskImageGenerationChannel, ImageGenerationChannelError,
   type ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import { defaultStudioModuleId, resolveStudioModuleGenerationConfig, validStudioModuleId } from './modules';
 import { canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from './access';
 import { resolveStudioAspectRatio, normalizeStudioRatio } from './ratios';
-import { normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS, supportsStudioFourToOne, studioFourToOneIssue } from '@/lib/image-generation/resolution';
+import { normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS, studioFourToOneIssue } from '@/lib/image-generation/resolution';
 import { MAX_REFERENCE_IMAGES } from './limits';
 import { IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS } from './model-catalog';
 import { studioAssetUrl, studioTemplateAssetUrl } from './media';
@@ -757,11 +757,12 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const auxiliaryReferenceSnapshot = referenceSnapshot.filter(reference => reference.referenceRole !== 'primary');
     const requestedAspectRatio = effectiveAspectRatio;
     const firstReference = primaryReferenceIds.map(id => referencesById.get(id)).find(reference => reference?.width && reference?.height) || null;
-    const ratioResolution = resolveStudioAspectRatio(requestedAspectRatio, firstReference);
+    const fourToOneSupported = imageGenerationSupportsStudioFourToOne(imageApi, generation.model);
+    const ratioResolution = resolveStudioAspectRatio(requestedAspectRatio, firstReference, fourToOneSupported);
     const aspectRatio = ratioResolution.requested;
     const resolvedAspectRatio = ratioResolution.resolved;
     const aspectRatioSource = ratioResolution.source;
-    const ratioIssue = studioFourToOneIssue(resolvedAspectRatio, supportsStudioFourToOne(generation.model, imageApi.provider));
+    const ratioIssue = studioFourToOneIssue(resolvedAspectRatio, fourToOneSupported);
     if (ratioIssue) throw new StudioError(ratioIssue);
     const resolution = normalizeImageResolution(generation.model, effectiveResolution, imageApi.provider);
     const outputSize = imageGenerationModelOutputSize(imageApi, generation.model, resolution, resolvedAspectRatio);

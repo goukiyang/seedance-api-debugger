@@ -45,9 +45,9 @@ export function RatioPicker({ value, onChange, reference, model, resolution, fou
     try { if (await onCustom(ratio, false)) select(ratio); }
     finally { saving.current = false; }
   }
-  const ratioResolution = resolveStudioAspectRatio(value, reference);
+  const ratioResolution = resolveStudioAspectRatio(value, reference, fourToOneSupported);
   const ratioIssue = studioFourToOneIssue(ratioResolution.resolved, fourToOneSupported);
-  const size = ratioIssue ? '' : imageOutputSize(model, resolution, ratioResolution.resolved);
+  const size = ratioIssue ? '' : imageOutputSize(model, resolution, ratioResolution.resolved, undefined, fourToOneSupported);
   const preset = STUDIO_RATIOS.find(item => normalizeStudioRatio(item) === value);
   const presetRows = STUDIO_RATIOS.map(label => ({ label, ratio: normalizeStudioRatio(label), removable: false }));
   const existing = new Set(['auto', ...presetRows.map(item => item.ratio)]);

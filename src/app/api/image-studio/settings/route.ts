@@ -2,9 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession, AuthError } from '@/lib/auth/session';
 import { getAdminUser } from '@/lib/auth/api-helpers';
 import { getImageStudioSettings, saveImageStudioSettings, imageStudioSettingsPayload, StudioSettingsClearConfirmationError, IMAGE_STUDIO_MODELS } from '@/lib/image-studio/settings';
-import { getImageGenerationChannelOptions, getImageGenerationChannels, ImageGenerationChannelError, selectImageGenerationSettings, isImageGenerationApiReady, isStudioImageGenerationProvider } from '@/lib/integrations/image-generation';
+import { getImageGenerationChannelOptions, getImageGenerationChannels, ImageGenerationChannelError, selectImageGenerationSettings, isImageGenerationApiReady, isStudioImageGenerationProvider, imageGenerationSupportsStudioFourToOne } from '@/lib/integrations/image-generation';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
-import { supportsStudioFourToOne } from '@/lib/image-generation/resolution';
 import { imageBillingReadinessPayload } from '@/lib/image-studio/billing-readiness';
 import { parseStudioTemplateDefaults } from '@/lib/image-studio/template-defaults';
 import { studioFourToOneIssue } from '@/lib/image-generation/resolution';
@@ -35,7 +34,7 @@ export async function GET() {
     }));
     const providerReady = Object.values(modelReady).some(Boolean);
     const modelFourToOne = Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [model, byModel.get(model)
-      ? supportsStudioFourToOne(model, byModel.get(model)!.provider) : false]));
+      ? imageGenerationSupportsStudioFourToOne(byModel.get(model)!, model) : false]));
     return NextResponse.json({ ...imageStudioSettingsPayload(settings, user.role === 'admin'), providerReady, modelReady, modelFourToOne, imageChannels: await getImageGenerationChannelOptions(),
       billingReadiness: await imageBillingReadinessPayload() }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   } catch {
@@ -63,7 +62,7 @@ export async function PUT(request: NextRequest) {
         const channels = await getImageGenerationChannels();
         const api = await settingsForModel(channels, templateDefaults.model);
         if (!api) return NextResponse.json({ error: '该型号的默认图片供应商已删除或不存在；未切换到其他供应商，暂时无法确认 4:1 支持' }, { status: 409 });
-        const issue = studioFourToOneIssue(templateDefaults.aspectRatio, supportsStudioFourToOne(templateDefaults.model, api.provider));
+        const issue = studioFourToOneIssue(templateDefaults.aspectRatio, imageGenerationSupportsStudioFourToOne(api, templateDefaults.model));
         if (issue) return NextResponse.json({ error: issue }, { status: 400 });
       }
     }

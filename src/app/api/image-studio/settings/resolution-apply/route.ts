@@ -4,9 +4,9 @@ import { AuthError } from '@/lib/auth/session';
 import { executeResolutionOperation, readResolutionOperations, ResolutionApplyError } from '@/lib/image-studio/resolution-apply';
 import { StudioSettingsClearConfirmationError } from '@/lib/image-studio/settings';
 import { parseStudioTemplateDefaults } from '@/lib/image-studio/template-defaults';
-import { captureImageGenerationChannel, getImageGenerationChannels, ImageGenerationChannelError, resolveImageGenerationChannelSnapshot, selectImageGenerationSettings } from '@/lib/integrations/image-generation';
+import { captureImageGenerationChannel, getImageGenerationChannels, ImageGenerationChannelError, resolveImageGenerationChannelSnapshot, selectImageGenerationSettings, imageGenerationSupportsStudioFourToOne } from '@/lib/integrations/image-generation';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
-import { studioFourToOneIssue, supportsStudioFourToOne } from '@/lib/image-generation/resolution';
+import { studioFourToOneIssue } from '@/lib/image-generation/resolution';
 
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
         const api = channelId
           ? await resolveImageGenerationChannelSnapshot(await captureImageGenerationChannel(defaults.model, channelId), undefined, true, defaults.model)
           : selectImageGenerationSettings(channels, defaults.model);
-        const issue = studioFourToOneIssue(defaults.aspectRatio, supportsStudioFourToOne(defaults.model, api.provider));
+        const issue = studioFourToOneIssue(defaults.aspectRatio, imageGenerationSupportsStudioFourToOne(api, defaults.model));
         if (issue) return response({ error: issue }, 400);
       }
     }

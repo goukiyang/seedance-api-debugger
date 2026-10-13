@@ -17,30 +17,32 @@ export function normalizeStudioRatio(value: unknown): string {
   return `${width / divisor}:${height / divisor}`;
 }
 
-export function ratioFromImageDimensions(width: unknown, height: unknown): string | null {
+export function ratioFromImageDimensions(width: unknown, height: unknown, allowFourToOne = false): string | null {
   const w = typeof width === 'number' ? width : Number(width);
   const h = typeof height === 'number' ? height : Number(height);
-  if (!Number.isInteger(w) || !Number.isInteger(h) || w <= 0 || h <= 0 || w / h > 3 || h / w > 3) return null;
+  if (!Number.isInteger(w) || !Number.isInteger(h) || w <= 0 || h <= 0
+    || (w / h > 3 && !(allowFourToOne && w === h * 4)) || h / w > 3) return null;
   try { return normalizeStudioRatio(`${w}:${h}`); } catch { return null; }
 }
 
-export function resolveStudioAspectRatio(value: unknown, reference?: StudioRatioReference): {
+export function resolveStudioAspectRatio(value: unknown, reference?: StudioRatioReference, allowFourToOne = false): {
   requested: string;
   resolved: string;
   source: StudioAspectRatioSource;
 } {
   const requested = normalizeStudioRatio(value);
   if (requested !== 'auto') return { requested, resolved: requested, source: 'explicit' };
-  const referenceRatio = ratioFromImageDimensions(reference?.width, reference?.height);
+  const referenceRatio = ratioFromImageDimensions(reference?.width, reference?.height, allowFourToOne);
   return referenceRatio
     ? { requested, resolved: referenceRatio, source: 'reference' }
     : { requested, resolved: DEFAULT_STUDIO_ASPECT_RATIO, source: 'model-default' };
 }
 
 // Keep near the requested pixel budget; prefer exact ratios, otherwise disclose 16px rounding in the UI.
-export function studioRatioSize(value: unknown, resolution: string = '1K'): string | undefined {
+export function studioRatioSize(value: unknown, resolution: string = '1K', allowFourToOne = false): string | undefined {
   const ratio = normalizeStudioRatio(value);
   if (ratio === 'auto') return undefined;
+  if (ratio === '4:1' && !allowFourToOne) throw new Error('当前像素尺寸通道未确认支持4:1，请选择其他比例');
   const [w, h] = ratio.split(':').map(Number);
   const targetArea = resolution === '4K' ? 8294400 : resolution === '2K' ? 4194304 : resolution === '0.5K' ? 262144 : 1048576;
   const maxEdge = resolution === '4K' ? 3840 : resolution === '2K' ? 2880 : resolution === '0.5K' ? 1024 : 2048;
@@ -49,7 +51,9 @@ export function studioRatioSize(value: unknown, resolution: string = '1K'): stri
   for (let width = 16; width <= maxEdge; width += 16) {
     const height = Math.round(width * h / w / 16) * 16;
     const area = width * height;
-    if (height < minEdge || height > maxEdge || area < (resolution === '0.5K' ? 131072 : 655360) || area > targetArea || width / height > 3 || height / width > 3) continue;
+    if (ratio === '4:1' && width !== height * 4) continue;
+    if (height < minEdge || height > maxEdge || area < (resolution === '0.5K' ? 131072 : 655360) || area > targetArea
+      || (width / height > 3 && !(allowFourToOne && ratio === '4:1' && width === height * 4)) || height / width > 3) continue;
     const error = Math.abs(width / height / (w / h) - 1);
     const areaDistance = Math.abs(area - targetArea);
     if (error < best.error - 1e-10 || Math.abs(error - best.error) < 1e-10 && areaDistance < best.areaDistance) best = { width, height, error, areaDistance };

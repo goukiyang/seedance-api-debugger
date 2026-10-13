@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider,
   resolveImageGenerationChannelSnapshot, isMuskImageGenerationChannel, validateImageGenerationChannel, assertImageGenerationChannelDispatchOpen, ImageGenerationChannelError,
-  type ImageGenerationResolvedSettings } from '@/lib/integrations/image-generation';
+  imageGenerationSupportsStudioFourToOne, type ImageGenerationResolvedSettings } from '@/lib/integrations/image-generation';
 import { claimStudioTask, finishStudioTask, safeImageChannelSnapshot, assertFrozenSharedStudioTask } from './tasks';
 import { requestStudioImages, StudioProviderError } from './provider';
 import { normalizeStudioImage, validateGeneratedStudioImage, readStudioImage, StudioImageDeliveryError, StudioImageDownloadError } from './media';
@@ -264,11 +264,14 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
         await setStudioUnsentRequestState(task, 'attempted');
         preparedRequest = false;
         providerStarted = true;
+        const allowFourToOne = imageGenerationSupportsStudioFourToOne(settings, task.model);
         const result = await generate({ baseUrl: settings.base_url, apiKey: settings.api_key, model: task.model,
           upstreamModel: capability.upstreamModel,
           provider: settings.provider === 'ai_media_vip' ? 'ai_media_vip' : 'musk', protocol: capability.protocol,
           idempotencyKey: task.id, prompt: task.prompt.trim() ? `${task.context}\n\n---\n本次画面要求：\n${task.prompt}` : task.context,
-          count: 1, images, size: task.output_size || undefined, ratio: task.aspect_ratio, quality: task.quality,
+          count: 1, images, size: task.output_size || undefined,
+          ratio: allowFourToOne && snapshot.resolvedAspectRatio === '4:1' ? '4:1' : task.aspect_ratio, quality: task.quality,
+          allowFourToOne,
           signal: AbortSignal.any([taskSignal, AbortSignal.timeout(300000)]), downloadSignal: taskSignal,
           recordResponse: response => recordStudioResponse(task, response),
           onAsyncAccepted: async receipt => { asyncReceipt = await createStudioAsyncReceipt(task, receipt); },

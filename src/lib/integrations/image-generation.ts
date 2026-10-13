@@ -388,12 +388,24 @@ export function resolveImageGenerationModelSettings(settings: ImageGenerationRes
   };
 }
 
+/** Only an explicit managed pixel-protocol capability extends the native 4:1 support. */
+export function imageGenerationSupportsStudioFourToOne(settings: ImageGenerationApiSettings, model: string): boolean {
+  const resolved = settings as ImageGenerationResolvedSettings;
+  const capability = resolved.modelCapabilities?.[model as ImageStudioModel];
+  if (resolved.managedChannel && capability?.protocol === 'openai_images') {
+    return capability.ratios?.includes('4:1') === true;
+  }
+  const protocol = resolved.managedChannel || resolved.explicitModelApi ? capability?.protocol : undefined;
+  return supportsStudioFourToOne(model, protocol === 'openai_images' ? 'ai_media_vip' : settings.provider);
+}
+
 /** Convert the existing local resolution/ratio to the explicitly chosen adapter. */
 export function imageGenerationModelOutputSize(settings: ImageGenerationApiSettings, model: string, resolution: unknown, ratio: string) {
   const resolved = settings as ImageGenerationResolvedSettings;
   const protocol = resolved.managedChannel || resolved.explicitModelApi ? resolved.modelCapabilities[model as ImageStudioModel]?.protocol : undefined;
   if (protocol === 'gemini_native') return normalizeImageResolution(model, resolution, settings.provider);
-  return imageOutputSize(model, resolution, ratio, protocol === 'openai_images' ? 'ai_media_vip' : settings.provider);
+  return imageOutputSize(model, resolution, ratio, protocol === 'openai_images' ? 'ai_media_vip' : settings.provider,
+    imageGenerationSupportsStudioFourToOne(settings, model));
 }
 
 /** New requests resolve the model's default route explicitly; historical callers keep using original semantics. */
@@ -2602,7 +2614,11 @@ function imageGenerationSize(params: {
   size?: string;
   settings: ImageGenerationApiSettings;
 }) {
-  if (isValidImageDimension(params.size)) return params.size;
+  const resolved = params.settings as ImageGenerationResolvedSettings;
+  const allowFourToOne = resolved.managedChannel === true
+    && resolved.modelCapabilities?.[params.settings.default_model as ImageStudioModel]?.protocol === 'openai_images'
+    && imageGenerationSupportsStudioFourToOne(params.settings, params.settings.default_model);
+  if (isValidImageDimension(params.size, allowFourToOne)) return params.size;
   return normalizeSize(params.size, params.settings.default_size);
 }
 
@@ -2776,6 +2792,9 @@ export async function createImageGeneration(params: {
   try {
     if (isStudioImageGenerationProvider(params.settings.provider)
       && IMAGE_STUDIO_MODELS.includes(params.settings.default_model as typeof IMAGE_STUDIO_MODELS[number])) {
+      if (params.ratio === '4:1' && !imageGenerationSupportsStudioFourToOne(params.settings, params.settings.default_model)) {
+        throw new ImageGenerationApiError('当前模型或通道未确认支持4:1', 400, 'image_generation_ratio_not_supported');
+      }
       const resolvedSettings = params.settings as ImageGenerationResolvedSettings;
       const managedProtocol = resolvedSettings.managedChannel || resolvedSettings.explicitModelApi
         ? resolvedSettings.modelCapabilities[params.settings.default_model as ImageStudioModel]?.protocol
@@ -2806,6 +2825,7 @@ export async function createImageGeneration(params: {
         images,
         ratio: params.ratio,
         size: params.size,
+        allowFourToOne: imageGenerationSupportsStudioFourToOne(params.settings, params.settings.default_model),
         signal: controller.signal,
       };
       // Gemini generateContent produces one image per call; count is not an API parameter.
