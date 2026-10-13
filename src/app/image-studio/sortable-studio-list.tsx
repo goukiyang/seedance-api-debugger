@@ -19,7 +19,7 @@ function SortableRow<T>({ id, item, disabled, label, render }: {
       {...attributes} {...listeners} data-sort-handle={id}
       onMouseDown={event => { event.stopPropagation(); if (event.button === 0) listeners?.onMouseDown?.(event); }}
       onTouchStart={event => { event.stopPropagation(); listeners?.onTouchStart?.(event); }}
-      onKeyDown={listeners?.onKeyDown}
+      onKeyDown={event => { listeners?.onKeyDown?.(event); }}
       disabled={disabled} aria-label={`调整${label}顺序`} title="拖动调整；触屏长按，键盘空格开始，方向键调整，Esc取消">
       <GripVertical size={14} />
     </button>)}
