@@ -2,6 +2,7 @@ import { IMAGE_STUDIO_MODELS } from './settings';
 import { readStudioImage, StudioImageDownloadError, type StudioDownloadDiagnostics } from './media';
 import { MAX_REFERENCE_IMAGES, MAX_STUDIO_GENERATED_BASE64, MAX_STUDIO_GENERATED_BYTES } from './limits';
 import { isGeminiImageModel, isValidImageDimension } from '@/lib/image-generation/resolution';
+import { normalizeStudioRatio } from './ratios';
 import type { ImageGenerationChannelProtocol } from '@/lib/integrations/image-generation-channel';
 import { isPrivateNetworkHost } from '@/lib/media/public-url';
 import { lookup } from 'node:dns/promises';
@@ -109,19 +110,23 @@ export async function requestStudioImages(params: {
   recordResponse?: (response: Response) => Promise<void>;
   size?: string;
   allowFourToOne?: boolean;
+  ratioContractVersion?: 2;
 }, fetcher: typeof fetch = fetch, readImage: typeof readStudioImage = readStudioImage): Promise<{ images: string[]; usage: unknown }> {
   if (!IMAGE_STUDIO_MODELS.includes(params.model as typeof IMAGE_STUDIO_MODELS[number])) throw new Error('不支持的图片模型');
   if (params.upstreamModel !== undefined && !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,199}$/.test(params.upstreamModel)) throw new Error('供应商型号名称无效');
   if (!Number.isInteger(params.count) || params.count < 1 || params.count > 8) throw new Error('生成张数必须为 1 到 8');
   if (params.images.length > MAX_REFERENCE_IMAGES) throw new Error(`最多使用 ${MAX_REFERENCE_IMAGES} 张参考图`);
-  const allowFourToOne = params.allowFourToOne === true && params.protocol === 'openai_images';
+  const standardRatioContract = params.ratioContractVersion === 2;
+  const requestRatio = standardRatioContract && params.ratio ? normalizeStudioRatio(params.ratio) : params.ratio;
+  const allowFourToOne = standardRatioContract || params.allowFourToOne === true && params.protocol === 'openai_images';
+  const sendRatio = Boolean(requestRatio && (standardRatioContract || allowFourToOne && requestRatio === '4:1'));
   if (params.size && params.protocol !== 'gemini_native' && (params.protocol === 'openai_images' || !isGeminiImageModel(params.model) || params.provider === 'ai_media_vip') && !isValidImageDimension(params.size, allowFourToOne)) {
     throw new Error('生成尺寸无效');
   }
   const transport: typeof fetch = params.protocol && fetcher === fetch ? fetchPinnedApi as typeof fetch : fetcher;
   if (params.protocol === 'gemini_native' || !params.protocol && params.provider !== 'ai_media_vip' && GEMINI_IMAGE_MODELS.has(params.model)) {
     if (params.resumeAsync) throw new StudioProviderError('request', 'gemini_async_not_supported');
-    return requestGeminiStudioImages(params, transport);
+    return requestGeminiStudioImages(standardRatioContract ? { ...params, ratio: requestRatio === 'auto' ? undefined : requestRatio } : params, transport);
   }
   const url = new URL(params.baseUrl);
   const basePath = url.pathname.replace(/\/$/, '').replace(/\/v1(?:\/images\/(?:generations|edits))?$/, '');
@@ -140,7 +145,7 @@ export async function requestStudioImages(params: {
     form.set('output_format', 'png');
     if (params.quality && params.quality !== 'auto') form.set('quality', params.quality);
     if (params.size) form.set('size', params.size);
-    if (allowFourToOne && params.ratio === '4:1') form.set('ratio', params.ratio);
+    if (sendRatio) form.set('ratio', requestRatio!);
     params.images.forEach((image, index) => {
       form.append('image[]', new Blob([new Uint8Array(image.bytes)], { type: image.mimeType }), `reference-${index + 1}.${image.mimeType === 'image/jpeg' ? 'jpg' : image.mimeType === 'image/webp' ? 'webp' : 'png'}`);
     });
@@ -148,7 +153,7 @@ export async function requestStudioImages(params: {
   } else {
     headers['Content-Type'] = 'application/json';
     body = JSON.stringify({ model: params.upstreamModel || params.model, prompt: params.prompt, n: params.count, output_format: 'png', ...(params.size ? { size: params.size } : {}),
-      ...(allowFourToOne && params.ratio === '4:1' ? { ratio: params.ratio } : {}), ...(params.quality && params.quality !== 'auto' ? { quality: params.quality } : {}) });
+      ...(sendRatio ? { ratio: requestRatio } : {}), ...(params.quality && params.quality !== 'auto' ? { quality: params.quality } : {}) });
   }
   let value: any;
   let response: Response | undefined;

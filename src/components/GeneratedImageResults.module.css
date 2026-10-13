@@ -1,6 +1,11 @@
 .results { min-width: 0; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 14px; }
 .card { min-width: 0; }
+.reactionRow { min-width: 0; padding-block: 8px 2px; color: #e0e9e5; }
+.reactionRow > [data-content-reactions] { display: flex; width: 100%; min-width: 0; gap: 6px; }
+/* Caller-owned template actions stay outside the image's clipping and hover controls. */
+.reactionRow > [data-content-reactions] > span:first-child { display: flex; flex-wrap: wrap; width: 100%; min-width: 0; gap: 6px; }
+.reactionRow > [data-content-reactions] > span:first-child > span { flex: 0 0 auto; flex-wrap: wrap; max-width: 100%; }
 .media { position: relative; aspect-ratio: 1; overflow: hidden; border: 1px solid #333b40; border-radius: 6px; background: #080a0b; }
 .media[data-transparent] { background-color: #d3dad8; background-image: repeating-conic-gradient(#aab4b1 0% 25%, transparent 0% 50%); background-size: 20px 20px; }
 .pending { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #adb6bd; }

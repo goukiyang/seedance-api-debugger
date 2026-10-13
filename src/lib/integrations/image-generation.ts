@@ -10,7 +10,7 @@ import {
   type ImageStudioModel,
 } from '@/lib/image-studio/model-catalog';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
-import { STUDIO_RATIOS } from '@/lib/image-studio/ratios';
+import { STUDIO_RATIOS, isStandardStudioRatio, normalizeStudioRatio } from '@/lib/image-studio/ratios';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { requestStudioImages, StudioProviderError, type StudioImageInput } from '@/lib/image-studio/provider';
 import { readStudioImage, normalizeStudioImage } from '@/lib/image-studio/media';
@@ -388,8 +388,9 @@ export function resolveImageGenerationModelSettings(settings: ImageGenerationRes
   };
 }
 
-/** Only an explicit managed pixel-protocol capability extends the native 4:1 support. */
-export function imageGenerationSupportsStudioFourToOne(settings: ImageGenerationApiSettings, model: string): boolean {
+/** Standard ratios are application choices; old frozen tasks retain their original capability gate. */
+export function imageGenerationSupportsStudioFourToOne(settings: ImageGenerationApiSettings, model: string, legacyRatioContract = false): boolean {
+  if (!legacyRatioContract) return isStudioImageGenerationProvider(settings.provider) && IMAGE_STUDIO_MODELS.includes(model as ImageStudioModel);
   const resolved = settings as ImageGenerationResolvedSettings;
   const capability = resolved.modelCapabilities?.[model as ImageStudioModel];
   if (resolved.managedChannel && capability?.protocol === 'openai_images') {
@@ -404,8 +405,13 @@ export function imageGenerationModelOutputSize(settings: ImageGenerationApiSetti
   const resolved = settings as ImageGenerationResolvedSettings;
   const protocol = resolved.managedChannel || resolved.explicitModelApi ? resolved.modelCapabilities[model as ImageStudioModel]?.protocol : undefined;
   if (protocol === 'gemini_native') return normalizeImageResolution(model, resolution, settings.provider);
-  return imageOutputSize(model, resolution, ratio, protocol === 'openai_images' ? 'ai_media_vip' : settings.provider,
+  const size = imageOutputSize(model, resolution, ratio, protocol === 'openai_images' ? 'ai_media_vip' : settings.provider,
     imageGenerationSupportsStudioFourToOne(settings, model));
+  const pixelProtocol = protocol === 'openai_images' || !isGeminiImageModel(model) || settings.provider === 'ai_media_vip';
+  if (pixelProtocol && !isValidImageDimension(size, true)) {
+    throw new ImageGenerationChannelError('所选比例与分辨率无法在安全像素范围内表达，请调整分辨率；尚未向供应商提交', 400, 'image_generation_invalid_dimensions');
+  }
+  return size;
 }
 
 /** New requests resolve the model's default route explicitly; historical callers keep using original semantics. */
@@ -1127,7 +1133,6 @@ function modelCapabilityMissingRequirements(capability: ImageGenerationModelCapa
   const missing: string[] = [];
   if (!capability.qualities || capability.qualities.length === 0) missing.push('尚未确认支持的图片质量');
   if (!capability.resolutions || capability.resolutions.length === 0) missing.push('尚未确认支持的分辨率');
-  if (!capability.ratios || capability.ratios.length === 0) missing.push('尚未确认支持的图片比例');
   if (capability.maxReferences === null) missing.push('尚未确认参考图上限');
   if (!capability.billingMode) missing.push('尚未设置计费方式');
   if (capability.billingMode === 'fixed' && capability.fixedPoints === null) missing.push('固定点数未填写，明确免费时请填写 0');
@@ -1474,6 +1479,7 @@ export async function assertImageGenerationChannelDispatchOpen(
 export function validateImageGenerationChannel(
   settings: ImageGenerationResolvedSettings,
   args: { model: string; quality?: string; resolution?: string; ratio?: string; referenceCount?: number },
+  legacyRatioContract = false,
 ): { ok: true; capability: ImageGenerationModelCapability } | { ok: false; code: string; error: string } {
   const model = args.model as ImageStudioModel;
   if (!IMAGE_STUDIO_MODELS.includes(model)) return { ok: false, code: 'image_channel_model_not_allowed', error: '所选图片型号不在允许列表中' };
@@ -1489,6 +1495,9 @@ export function validateImageGenerationChannel(
   if (!capability || !capability.enabled) return { ok: false, code: 'image_channel_model_not_enabled', error: '该供应商未开放此图片型号' };
   const missingCapability = modelCapabilityCompleteness(capability);
   if (missingCapability) return { ok: false, code: 'image_channel_capability_unknown', error: missingCapability };
+  if (legacyRatioContract && !capability.ratios?.length) {
+    return { ok: false, code: 'image_channel_capability_unknown', error: '尚未确认支持的图片比例' };
+  }
   if (capability.billingMode === 'actual') {
     if (!isMuskImageGenerationChannel(settings)) return { ok: false, code: 'image_channel_actual_billing_unavailable', error: '此供应商没有可用的实际计费账单证明' };
     if (capability.actualQuoteRequired !== true) {
@@ -1501,12 +1510,18 @@ export function validateImageGenerationChannel(
   const tests: Array<[string | undefined, string[] | null, string]> = [
     [args.quality, capability.qualities, '图片质量'],
     [args.resolution, capability.resolutions, '分辨率'],
-    [args.ratio, capability.ratios, '图片比例'],
   ];
   for (const [value, allowed, label] of tests) {
     if (value !== undefined && (!allowed || !allowed.includes(value))) {
       return { ok: false, code: 'image_channel_capability_mismatch', error: `当前供应商未确认支持所选${label}` };
     }
+  }
+  if (args.ratio !== undefined && (legacyRatioContract || !isStandardStudioRatio(args.ratio))) {
+    const allowed = capability.ratios;
+    const matches = legacyRatioContract ? allowed?.includes(args.ratio) : allowed?.some(value => {
+      try { return normalizeStudioRatio(value) === normalizeStudioRatio(args.ratio); } catch { return false; }
+    });
+    if (!matches) return { ok: false, code: 'image_channel_capability_mismatch', error: '当前供应商未确认支持所选自定义图片比例' };
   }
   if (args.referenceCount !== undefined && (capability.maxReferences === null || args.referenceCount > capability.maxReferences)) {
     return { ok: false, code: 'image_channel_reference_limit_unknown', error: capability.maxReferences === null
@@ -1553,7 +1568,7 @@ async function channelOption(
       actualQuoteRequired: Boolean(actualReady && isMuskImageGenerationChannel(resolveImageGenerationModelSettings(settings, model))),
       qualities: capability?.qualities ?? null,
       resolutions: capability?.resolutions ?? null,
-      ratios: capability?.ratios ?? null,
+      ratios: ['auto', ...STUDIO_RATIOS],
       maxReferences: capability?.maxReferences ?? null,
     };
   }
@@ -1876,7 +1891,7 @@ function imageApiGroupModelStatuses(settings: ImageGenerationResolvedSettings, g
       providerSupported: isStudioImageGenerationProvider(settings.provider),
       baseUrlConfigured: Boolean(effective.base_url), apiKeyConfigured: Boolean(effective.api_key),
       protocol: capability?.protocol, qualities: capability?.qualities, resolutions: capability?.resolutions,
-      ratios: capability?.ratios, maxReferences: capability?.maxReferences,
+      ratios: ['auto', ...STUDIO_RATIOS], maxReferences: capability?.maxReferences,
       billingMode: capability?.billingMode, fixedPoints: capability?.fixedPoints,
     }, actualBillingReasons);
     const blockingReasons: string[] = [];
@@ -2617,7 +2632,7 @@ function imageGenerationSize(params: {
   const resolved = params.settings as ImageGenerationResolvedSettings;
   const allowFourToOne = resolved.managedChannel === true
     && resolved.modelCapabilities?.[params.settings.default_model as ImageStudioModel]?.protocol === 'openai_images'
-    && imageGenerationSupportsStudioFourToOne(params.settings, params.settings.default_model);
+    && imageGenerationSupportsStudioFourToOne(params.settings, params.settings.default_model, true);
   if (isValidImageDimension(params.size, allowFourToOne)) return params.size;
   return normalizeSize(params.size, params.settings.default_size);
 }
@@ -2792,7 +2807,7 @@ export async function createImageGeneration(params: {
   try {
     if (isStudioImageGenerationProvider(params.settings.provider)
       && IMAGE_STUDIO_MODELS.includes(params.settings.default_model as typeof IMAGE_STUDIO_MODELS[number])) {
-      if (params.ratio === '4:1' && !imageGenerationSupportsStudioFourToOne(params.settings, params.settings.default_model)) {
+      if (params.ratio === '4:1' && !imageGenerationSupportsStudioFourToOne(params.settings, params.settings.default_model, true)) {
         throw new ImageGenerationApiError('当前模型或通道未确认支持4:1', 400, 'image_generation_ratio_not_supported');
       }
       const resolvedSettings = params.settings as ImageGenerationResolvedSettings;
@@ -2825,7 +2840,7 @@ export async function createImageGeneration(params: {
         images,
         ratio: params.ratio,
         size: params.size,
-        allowFourToOne: imageGenerationSupportsStudioFourToOne(params.settings, params.settings.default_model),
+        allowFourToOne: imageGenerationSupportsStudioFourToOne(params.settings, params.settings.default_model, true),
         signal: controller.signal,
       };
       // Gemini generateContent produces one image per call; count is not an API parameter.

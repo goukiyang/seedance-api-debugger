@@ -80,6 +80,9 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
         ? await resolveImageGenerationChannelSnapshot(frozenChannel, prisma, false, task.model)
         : await getImageGenerationSettingsForModel(task.model);
       if (!isStudioImageGenerationProvider(settings.provider) || !isImageGenerationApiReady(settings)) throw new Error('图片专用 API 暂不可用');
+      if (snapshot.ratioContractVersion === 2 && (typeof snapshot.resolvedAspectRatio !== 'string' || snapshot.resolvedAspectRatio === 'auto')) {
+        throw new Error('图片任务缺少冻结的实际比例；未向供应商提交');
+      }
       if (task.billing_scope && imageBillingScope(settings) !== task.billing_scope) throw new Error('提交时的图片通道已变化，请核对原任务');
       const images = [];
       const owners: Record<string, string> = snapshot.authorizedReferenceOwners || {};
@@ -97,7 +100,9 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
       const result = await generate({ baseUrl: settings.base_url, apiKey: settings.api_key!, model: task.model,
         provider: settings.provider === 'ai_media_vip' ? 'ai_media_vip' : 'musk',
         prompt: task.prompt.trim() ? `${task.context}\n\n---\n本次画面要求：\n${task.prompt}` : task.context,
-        count: 1, images, size: task.output_size || undefined, ratio: task.aspect_ratio, quality: task.quality,
+        count: 1, images, size: task.output_size || undefined,
+        ratio: snapshot.ratioContractVersion === 2 ? snapshot.resolvedAspectRatio : task.aspect_ratio, quality: task.quality,
+        ...(snapshot.ratioContractVersion === 2 ? { ratioContractVersion: 2 as const } : {}),
         signal: AbortSignal.any([taskSignal, AbortSignal.timeout(300000)]), downloadSignal: taskSignal,
         recordResponse: response => recordStudioResponse(task, response),
         persistBase64Image: async (value, outputUsage) => { await assertLease(); delivery = await createStudioBase64Delivery(task, value, outputUsage); },
@@ -228,7 +233,7 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
         await assertImageGenerationChannelDispatchOpen(imageChannel);
         const validation = validateImageGenerationChannel(settings, { model: task.model, quality: task.quality,
           resolution: typeof snapshot.resolution === 'string' ? snapshot.resolution : undefined,
-          ratio: task.aspect_ratio || undefined, referenceCount: JSON.parse(task.reference_ids).length });
+          ratio: task.aspect_ratio || undefined, referenceCount: JSON.parse(task.reference_ids).length }, snapshot.ratioContractVersion !== 2);
         if (!validation.ok) throw new Error(validation.error);
         capability = validation.capability;
         if (!settings.api_key || !settings.base_url || !capability.protocol) throw new Error('图片通道接口暂不可用');
@@ -245,6 +250,11 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
           }
         } else if (capability.billingMode !== 'fixed' || capability.fixedPoints !== task.unit_credits) {
           throw new Error('图片通道固定点数已变化，未向供应商提交');
+        }
+        const standardRatioContract = snapshot.ratioContractVersion === 2;
+        const allowFourToOne = imageGenerationSupportsStudioFourToOne(settings, task.model, !standardRatioContract);
+        if (standardRatioContract && (typeof snapshot.resolvedAspectRatio !== 'string' || snapshot.resolvedAspectRatio === 'auto')) {
+          throw new Error('图片任务缺少冻结的实际比例；未向供应商提交');
         }
         const images = [];
         const owners = (snapshot.authorizedReferenceOwners || {}) as Record<string, string>;
@@ -264,14 +274,15 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
         await setStudioUnsentRequestState(task, 'attempted');
         preparedRequest = false;
         providerStarted = true;
-        const allowFourToOne = imageGenerationSupportsStudioFourToOne(settings, task.model);
         const result = await generate({ baseUrl: settings.base_url, apiKey: settings.api_key, model: task.model,
           upstreamModel: capability.upstreamModel,
           provider: settings.provider === 'ai_media_vip' ? 'ai_media_vip' : 'musk', protocol: capability.protocol,
           idempotencyKey: task.id, prompt: task.prompt.trim() ? `${task.context}\n\n---\n本次画面要求：\n${task.prompt}` : task.context,
           count: 1, images, size: task.output_size || undefined,
-          ratio: allowFourToOne && snapshot.resolvedAspectRatio === '4:1' ? '4:1' : task.aspect_ratio, quality: task.quality,
+          ratio: standardRatioContract ? snapshot.resolvedAspectRatio as string
+            : allowFourToOne && snapshot.resolvedAspectRatio === '4:1' ? '4:1' : task.aspect_ratio, quality: task.quality,
           allowFourToOne,
+          ...(standardRatioContract ? { ratioContractVersion: 2 as const } : {}),
           signal: AbortSignal.any([taskSignal, AbortSignal.timeout(300000)]), downloadSignal: taskSignal,
           recordResponse: response => recordStudioResponse(task, response),
           onAsyncAccepted: async receipt => { asyncReceipt = await createStudioAsyncReceipt(task, receipt); },
