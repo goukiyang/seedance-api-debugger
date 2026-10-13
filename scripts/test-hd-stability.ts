@@ -208,7 +208,7 @@ await inPrivateRoot('resource wait permits bounded discovery; good/missing/trans
   const good = await image('good'), transparent = await image('transparent', 'transparent');
   await recheck(8);
   const found = await discovery.withHdDiscovery(async () => {
-    for (const [index, source] of [good.source, '/uploads/missing.png', transparent.source].entries()) {
+    for (const [index, source] of Array.from([good.source, '/uploads/missing.png', transparent.source].entries())) {
       await discovery.commitHdDiscoveryItem('assets', { at: new Date(clock).toISOString(), id: `asset-${index}` },
         { id: `asset-${index}`, source, preserveText: false });
     }
