@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { ArrowLeft, ArrowRight, Download, RefreshCw, Undo2, X } from 'lucide-react';
@@ -25,7 +25,7 @@ function initialDraft(info: MultiviewInfo): MultiviewDraft {
   return { schema: 1, sourceVersion: info.sourceVersion, slots: candidateFrames(info.timestamps.length, 8).map(slot), reserve: [],
     layout: { ...DEFAULT_MULTIVIEW_LAYOUT }, editing: null };
 }
-export default function MultiviewPage() {
+function MultiviewPageContent() {
   const query = useSearchParams();
   const taskId = query.get('taskId') || '';
   const backHref = sourceReturn(query.get('returnTo'), taskId);
@@ -333,4 +333,10 @@ export default function MultiviewPage() {
     </>}
     {productDialog}
   </div>;
+}
+
+export default function MultiviewPage() {
+  return <Suspense fallback={<div className={styles.page} role="status" aria-busy="true">正在载入多角度工作区…</div>}>
+    <MultiviewPageContent />
+  </Suspense>;
 }
