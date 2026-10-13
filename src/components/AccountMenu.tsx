@@ -116,6 +116,7 @@ export default function AccountMenu({
     } catch {
       if (outcome === 'unknown') {
         setLogoutError('退出结果尚未确认，服务器可能已退出。本页输入仍保留，请前往登录重新确认账号。');
+        broadcastSessionExit('unconfirmed');
         lockClientSession('unconfirmed');
       } else if (outcome === 'confirmed') lockClientSession('logged_out');
       else setLogoutError('退出未成功，请重试。当前输入仍保留。');
