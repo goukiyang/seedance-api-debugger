@@ -1788,7 +1788,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         } else if (!request.payload.isShared && !sharedLive) {
           const data = await readResponse(await fetch(`/api/image-studio/modules?ids=${encodeURIComponent(module.id)}`, { cache: 'no-store' }));
           const saved: StudioModule | undefined = data.modules?.find((item: StudioModule) => item.id === module.id);
-          if (!saved?.saved || saved.sourcePresetId !== created.id) throw new Error('快捷模板已保存，模块状态尚未确认；请按原保存继续核对，不会重复新建');
+          if (!saved?.saved || saved.sourcePresetId !== created.id || saved.sharingPreference?.enabled !== false) throw new Error('快捷模板已保存，关闭共享的状态尚未确认；请按原保存继续核对，不会重复新建');
           onModuleChange(saved);
         }
         await onPresetSaved();

@@ -18,6 +18,7 @@ import { cloneHistoricalSkills, getSkillSelection, parseSkillIds, resolveSkills,
 import { defaultStudioReferencePolicy, getStudioPresetReferencePolicy, parseStudioReferencePolicy, setStudioModuleReferencePolicy, setStudioPresetReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
 import { assertStudioActor, saveSharedStudioPresetAs, replaceSharedStudioPreset, resolveSharedStudioDefinition, restoreStudioDefaultGroup, studioPublisherModule, studioSharedBinding, parseSharedStudioPersonalOverrides, StudioSharingError } from './shared-contract';
 import type { SharedStudioPersonalOverrides } from './shared-types';
+import { readStudioModuleSharingPreference, writeStudioModuleSharingPreference } from './module-sharing-preference';
 
 export { canUseCompanyTemplatesForUser as canUseCompanyTemplates };
 
@@ -267,6 +268,7 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
   const quickFingerprint = personalQuick ? personalQuickFingerprint(body) : undefined;
   return prisma.$transaction(async tx => {
     user = await assertStudioActor(user.id, tx);
+    let privateQuickSourceRevision: number | null = null;
     if (scope === 'admin' && user.role !== 'admin' || fixedReferences !== undefined && user.role !== 'admin') throw new StudioModuleError('当前账号没有保存管理员配置的权限', 403);
     if (personalQuick) {
       const source = await tx.imageStudioModule.findFirst({ where: { id: sourceModuleId!, owner_id: userId } });
@@ -283,6 +285,7 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
       if (body.moduleRevision !== undefined && (!Number.isInteger(body.moduleRevision) || body.moduleRevision !== source.revision)) {
         throw new StudioModuleError('模板工作区已更新，请重新读取后保存；当前草稿仍保留', 409);
       }
+      if (!binding) privateQuickSourceRevision = source.revision;
     }
     const target = replace ? await tx.imageStudioPreset.findFirst({ where: { id: String(body.presetId || ''), owner_id: userId } }) : null;
     if (target && await studioPresetArchived(target.id, tx)) throw new StudioModuleError('模板已删除，请重新读取', 409);
@@ -375,7 +378,19 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
       const valueJson = JSON.stringify({ ownerId: userId, ids });
       await tx.platformSetting.upsert({ where: { key }, create: { key, value_json: valueJson, updated_by: userId }, update: { value_json: valueJson, updated_by: userId } });
       if (!(await studioSharedBinding(userId, sourceModuleId, tx))) {
-        await tx.imageStudioModule.update({ where: { id: sourceModuleId }, data: { source_preset_id: created.id } });
+        if (personalQuick) {
+          if (privateQuickSourceRevision === null) throw new StudioModuleError('模板共享状态已更新，请重新读取后保存', 409);
+          const changed = await tx.imageStudioModule.updateMany({ where: { id: sourceModuleId, owner_id: userId, revision: privateQuickSourceRevision },
+            data: { source_preset_id: created.id, revision: { increment: 1 } } });
+          if (changed.count !== 1) throw new StudioModuleError('模板工作区已更新，请重新读取后保存；当前草稿仍保留', 409);
+          const preference = await readStudioModuleSharingPreference(userId, sourceModuleId, tx);
+          // Explicitly choosing a private save closes this unpublished template's
+          // sharing intent in the same transaction as its idempotent save receipt.
+          await writeStudioModuleSharingPreference({ version: 1, ownerId: userId, moduleId: sourceModuleId,
+            enabled: false, revision: (preference?.revision ?? 0) + 1, requestId: body.requestId as string }, tx);
+        } else {
+          await tx.imageStudioModule.update({ where: { id: sourceModuleId }, data: { source_preset_id: created.id } });
+        }
       }
     }
     await restoreStudioDefaultGroup(userId, groupName, tx);
