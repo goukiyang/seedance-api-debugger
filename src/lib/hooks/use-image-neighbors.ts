@@ -5,6 +5,7 @@ import { useAppSession } from '@/lib/context/AppSessionContext';
 import { imageDisplaySource } from '@/lib/media/image-comparison';
 import { canPrefetchImages, prefetchImageRead, setImageReadSessionOwner } from '@/lib/media/image-read-session';
 import { prefetchHdImageSource } from '@/lib/media/hd-source-session';
+import { hdDescriptionUsesOriginal } from '@/lib/media/hd-display-policy';
 import { versionedHdSource } from './use-hd-image-source';
 
 export type ImageReadCandidate = { source: string; sourceVersion?: string; thumbnail?: string; width?: number; height?: number; bytes?: number; variant?: 'original' | 'hd' | 'preview' };
@@ -17,8 +18,8 @@ function sourceFamily(source: string) {
   } catch { return source; }
 }
 export function useImageNeighbors(candidates: ImageReadCandidate[], enabled: boolean, currentSource = '') {
-  const { user, hasLoadedUser, userLoadError } = useAppSession();
-  const account = hasLoadedUser && !userLoadError ? `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` : '';
+  const { user, hasLoadedUser, userLoadError, sessionChanged } = useAppSession();
+  const account = hasLoadedUser && !userLoadError && !sessionChanged ? `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` : '';
   const current = sourceFamily(currentSource);
   const movement = useRef<1 | -1 | 0>(0);
   const history = useRef<{ current: string; neighbors: string[] }>({ current: '', neighbors: [] });
@@ -49,8 +50,9 @@ export function useImageNeighbors(candidates: ImageReadCandidate[], enabled: boo
       void request.result.then(state => {
         if (state.denied) return;
         const hd = state.description;
-        start(hd?.status === 'ready' ? versionedHdSource(candidate.source, 'hd', hd.sourceVersion) : original,
-          hd?.status === 'ready' ? hd.sourceVersion || candidate.sourceVersion || '' : candidate.sourceVersion || '');
+        const useHd = hd?.status === 'ready' && !hdDescriptionUsesOriginal(hd);
+        start(useHd ? versionedHdSource(candidate.source, 'hd', hd!.sourceVersion) : original,
+          useHd ? hd!.sourceVersion || candidate.sourceVersion || '' : candidate.sourceVersion || '');
       });
     }
     const stop = () => { active = false; for (const release of releases.splice(0)) release(); };

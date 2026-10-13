@@ -6,8 +6,8 @@ export type { ImageReadProgress } from '@/lib/media/image-read-session';
 export { isImagePreviewReady };
 
 export function useImageReadProgress(source: string, attempt: number, enabled = true, version = ''): ImageReadResult {
-  const { user, hasLoadedUser, userLoadError } = useAppSession();
-  const account = hasLoadedUser && !userLoadError ? `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` : '';
+  const { user, hasLoadedUser, userLoadError, sessionChanged } = useAppSession();
+  const account = hasLoadedUser && !userLoadError && !sessionChanged ? `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` : '';
   const key = `${account}\u0000${source}\u0000${version}\u0000${attempt}`;
   const [entry, setEntry] = useState<(ImageReadResult & { key: string }) | null>(null);
   useEffect(() => {

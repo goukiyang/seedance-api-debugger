@@ -1,9 +1,13 @@
 import fs from 'node:fs/promises';
+import { constants } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import os from 'node:os';
 import sharp from 'sharp';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { hdReadonlyDb } from './hd-readonly-db';
+import { HD_CONTROL_PROTOCOL, HD_RESOURCE_POLICY, HdControl, HdResourceSample, hdManualReason, hdResourceTransition, hdRunState, sampleHdResources } from './hd-resource-state';
+export type { HdControl, HdResourceSample } from './hd-resource-state';
 
 export const HD_POLICY = 'hd-f-v1';
 export const HD_VALIDATION_VERSION = 'hd-output-integrity-v2';
@@ -28,22 +32,47 @@ export type HdJob = {
   width?: number; height?: number; file?: string; batch?: string;
   attemptLimit?: number; attemptHistory?: HdAttempt[]; integrity?: HdIntegrity;
   retryHistory?: Array<{ at: string; previousAttempts: number; reason?: string; manifest: string }>;
+  retryAt?: string; isolatedReason?: 'source_missing' | 'source_unreadable';
 };
 export const hdDirectory = () => path.join(process.cwd(), 'storage', 'hd-derivatives');
 const jobPath = (key: string) => path.join(hdDirectory(), `${key}.json`);
 const now = () => new Date().toISOString();
+export const HD_UPLOAD_DIRECTORY_ACCESS = constants.R_OK | constants.X_OK;
+export const HD_OUTPUT_DIRECTORY_ACCESS = constants.R_OK | constants.W_OK | constants.X_OK;
+export async function assertHdDirectoryAccess(access: typeof fs.access = fs.access) {
+  await access(await fs.realpath(path.join(process.cwd(), 'public/uploads')), HD_UPLOAD_DIRECTORY_ACCESS);
+  await access(await fs.realpath(hdDirectory()), HD_OUTPUT_DIRECTORY_ACCESS);
+}
 export async function atomicHdJson(file: string, value: unknown) {
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.${randomUUID()}.tmp`;
-  try { await fs.writeFile(tmp, JSON.stringify(value), { mode: 0o600 }); await fs.rename(tmp, file); }
+  try {
+    const handle = await fs.open(tmp, 'wx', 0o600);
+    try { await handle.writeFile(JSON.stringify(value)); await handle.sync(); } finally { await handle.close(); }
+    await fs.rename(tmp, file);
+    const directory = await fs.open(path.dirname(file), 'r');
+    try { await directory.sync(); } finally { await directory.close(); }
+  }
   finally { await fs.unlink(tmp).catch(() => {}); }
 }
 export async function hdSource(source: string) {
   const local = siteUploadPathFromUrl(source);
   if (!local) return null;
+  // Failure of the shared root is a global storage problem. Only errors from an
+  // individual path inside a readable root may be isolated.
   const root = await fs.realpath(path.join(process.cwd(), 'public/uploads'));
-  const file = await fs.realpath(path.resolve(process.cwd(), 'public', decodeURIComponent(local).replace(/^\/+/, '')));
+  await fs.access(root, HD_UPLOAD_DIRECTORY_ACCESS);
+  let file: string;
+  try { file = await fs.realpath(path.resolve(process.cwd(), 'public', decodeURIComponent(local).replace(/^\/+/, ''))); }
+  catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') throw new Error('source_missing');
+    if (code === 'EACCES') throw new Error('source_unreadable');
+    throw error;
+  }
   if (!file.startsWith(`${root}${path.sep}`)) throw new Error('source_boundary');
+  try { await fs.access(file, 4); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'EACCES') throw new Error('source_unreadable'); throw error; }
   const stat = await fs.stat(file);
   if (!stat.isFile() || !stat.size) throw new Error('source_missing');
   const version = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
@@ -64,21 +93,48 @@ export async function readHdJob(key: string): Promise<HdJob | null> {
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
 }
 // Short manifest lease, shared by web, inventory and the dedicated worker.
-async function withLease<T>(key: string, action: () => Promise<T>): Promise<T | null> {
+export async function withHdLease<T>(key: string, action: () => Promise<T>): Promise<T | null> {
+  if (!/^(?:[a-f0-9]{64}|control|discovery)$/.test(key)) throw new Error('invalid_hd_lease');
   const lock = path.join(hdDirectory(), `${key}.lock`);
   await fs.mkdir(hdDirectory(), { recursive: true, mode: 0o700 });
   try { await fs.mkdir(lock); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    const age = Date.now() - (await fs.stat(lock)).mtimeMs;
-    if (age < 180000) return null;
+    let owner: { pid: number; host: string; token: string };
+    try { owner = JSON.parse(await fs.readFile(path.join(lock, 'owner.json'), 'utf8')); }
+    catch {
+      // Another owner may still be durably writing its identity. Do not reclaim
+      // or classify that short creation window as an unknown stale lease.
+      if (Date.now() - (await fs.stat(lock)).mtimeMs < 5000) return null;
+      throw new Error('hd_lease_conflict');
+    }
+    if (!Number.isSafeInteger(owner.pid) || owner.pid <= 0 || owner.host !== os.hostname() || typeof owner.token !== 'string') throw new Error('hd_lease_conflict');
+    try { process.kill(owner.pid, 0); return null; }
+    catch (cause) { if ((cause as NodeJS.ErrnoException).code !== 'ESRCH') throw new Error('hd_lease_conflict'); }
     const stale = `${lock}.${randomUUID()}.expired`;
-    try { await fs.rename(lock, stale); await fs.rmdir(stale); } catch { return null; }
+    try { await fs.rename(lock, stale); await fs.unlink(path.join(stale, 'owner.json')); await fs.rmdir(stale); } catch { throw new Error('hd_lease_conflict'); }
     try { await fs.mkdir(lock); } catch { return null; }
   }
+  const token = randomUUID();
+  await atomicHdJson(path.join(lock, 'owner.json'), { pid: process.pid, host: os.hostname(), token });
   const heartbeat = setInterval(() => { const date = new Date(); void fs.utimes(lock, date, date).catch(() => {}); }, 15000);
   try { return await action(); }
-  finally { clearInterval(heartbeat); await fs.rmdir(lock).catch(() => {}); }
+  finally {
+    clearInterval(heartbeat);
+    const owned = await fs.readFile(path.join(lock, 'owner.json'), 'utf8').then(text => JSON.parse(text).token === token).catch(() => false);
+    if (owned) { await fs.unlink(path.join(lock, 'owner.json')); await fs.rmdir(lock); }
+  }
+}
+const withLease = withHdLease;
+async function withControlLease<T>(action: () => Promise<T>): Promise<T | null> {
+  // A live short control write is contention, not permission to overwrite it.
+  // Wait on the lock condition for at most half a second, then return conflict.
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const result = await withLease('control', action);
+    if (result !== null) return result;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  return null;
 }
 async function hdRequestIdentity(source: string, preserveText?: boolean) {
   const current = await hdSource(source);
@@ -145,8 +201,9 @@ export async function requestHd(source: string, priority = 1, preserveText?: boo
     await atomicHdJson(jobPath(key), job);
     return job;
   });
-  return result || existing || { key, source, version: current.version, policy: HD_POLICY, priority,
-    preserveText: Boolean(preserveText), attempts: 0, status: 'queued' as const, updatedAt: now() };
+  // A claim held by another process is not a durable registration receipt.
+  if (!result && !existing) throw new Error('hd_registration_pending');
+  return result || existing!;
 }
 export async function listHdJobs() {
   const names = await fs.readdir(hdDirectory()).catch(error => {
@@ -169,17 +226,73 @@ export async function hdCapacity(reserve = 0) {
     separateDataMount: rootDevice !== dataDevice,
     safe: rootFree > ROOT_RESERVE && dataFree > DATA_RESERVE + reserve && rootDevice !== dataDevice };
 }
-export async function hdControl() {
+export async function hdControl(): Promise<HdControl> {
+  let raw = '';
   try {
-    const control = JSON.parse(await fs.readFile(path.join(hdDirectory(), 'control.json'), 'utf8')) as { paused: boolean; reason?: string; updatedAt?: string };
+    raw = await fs.readFile(path.join(hdDirectory(), 'control.json'), 'utf8');
+    const control = JSON.parse(raw) as HdControl;
     if (typeof control.paused !== 'boolean' || (control.reason !== undefined && typeof control.reason !== 'string')
       || (control.updatedAt !== undefined && (typeof control.updatedAt !== 'string' || !Number.isFinite(Date.parse(control.updatedAt))))) throw new Error('invalid_hd_control');
-    return control;
+    if (control.protocol !== undefined && control.protocol !== HD_CONTROL_PROTOCOL) throw new Error('invalid_hd_control');
+    if (control.revision !== undefined && (!Number.isSafeInteger(control.revision) || control.revision < 0)) throw new Error('invalid_hd_control');
+    if (control.history !== undefined && !Array.isArray(control.history)) throw new Error('invalid_hd_control');
+    if (control.reason === 'resource_wait' && (!control.wait || !Number.isFinite(Date.parse(control.wait.since))
+      || !Number.isFinite(Date.parse(control.wait.nextCheckAt)) || !Number.isInteger(control.wait.stableSamples)
+      || control.wait.stableSamples < 0 || !Number.isInteger(control.wait.checks) || control.wait.checks < 0
+      || (control.wait.stableSince !== undefined && !Number.isFinite(Date.parse(control.wait.stableSince))))) throw new Error('invalid_hd_control');
+    return { ...control, revision: control.revision || 0, state: hdRunState(control), token: createHash('sha256').update(raw).digest('hex') };
   }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { paused: false, updatedAt: undefined }; throw error; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { paused: false, updatedAt: undefined, state: 'active', revision: 0, token: 'absent' }; throw error; }
 }
-export async function setHdControl(paused: boolean, reason?: string) {
-  await atomicHdJson(path.join(hdDirectory(), 'control.json'), { paused, reason, updatedAt: now() });
+async function writeHdControl(current: HdControl, value: Omit<HdControl, 'token'>) {
+  const changedState = value.state !== current.state || value.reason !== current.reason;
+  const revision = current.revision + 1;
+  const history = [...(current.history || []), ...(changedState ? [{ at: now(), state: value.state, reason: value.reason, revision, resource: value.resource }] : [])].slice(-40);
+  // token is derived from the actual bytes, including legacy revisions, never trusted from JSON.
+  const persisted = { ...value, token: undefined };
+  await atomicHdJson(path.join(hdDirectory(), 'control.json'), { ...persisted, protocol: HD_CONTROL_PROTOCOL, revision, updatedAt: changedState ? now() : current.updatedAt, history });
+  return hdControl();
+}
+export async function setHdControl(paused: boolean, reason?: string, expectedToken?: string) {
+  if (!paused) return (await recheckHdResources({ expectedToken, allowManualResume: true })).control;
+  const result = await withControlLease(async () => {
+    const current = await hdControl();
+    if (expectedToken && current.token !== expectedToken) throw new Error('hd_control_conflict');
+    if (hdManualReason(reason) && current.state === 'hard_pause' && current.reason !== 'load_guard') return current;
+    if (current.state === 'hard_pause' && current.reason !== 'load_guard' && !hdManualReason(reason)) return current;
+    const state = hdRunState({ paused, reason });
+    if (state === 'resource_wait') throw new Error('hd_resource_check_required');
+    return writeHdControl(current, { ...current, paused, reason, state, wait: undefined });
+  });
+  if (!result) throw new Error('hd_control_conflict');
+  return result;
+}
+export type HdResourceCheckOptions = {
+  expectedToken?: string; allowManualResume?: boolean;
+  sample?: () => Promise<HdResourceSample>; clock?: () => number;
+};
+export async function recheckHdResources(options: HdResourceCheckOptions = {}) {
+  const before = await hdControl();
+  if (options.expectedToken && options.expectedToken !== before.token) throw new Error('hd_control_conflict');
+  if (before.state === 'hard_pause' && before.reason !== 'load_guard') throw new Error('hd_hard_pause_requires_review');
+  if (before.state === 'manual_pause' && !options.allowManualResume) return { control: before, changed: false, conflict: false };
+  const clock = options.clock || Date.now;
+  const sample = options.sample ? await options.sample() : await (async () => {
+    let safe: boolean | null = null;
+    try {
+      await assertHdDirectoryAccess();
+      safe = (await hdCapacity()).safe;
+    } catch { /* Shared permissions, mount and capacity unknown are hard stops. */ }
+    return sampleHdResources(safe, clock);
+  })();
+  const result = await withControlLease(async () => {
+    const current = await hdControl();
+    if (current.token !== before.token) return { control: current, changed: false, conflict: true };
+    const next = hdResourceTransition(current, sample, clock(), options.allowManualResume);
+    if (!next) return { control: current, changed: false, conflict: false };
+    return { control: await writeHdControl(current, next), changed: true, conflict: false };
+  });
+  return result || { control: await hdControl(), changed: false, conflict: true };
 }
 async function preserveFailedHd(job: HdJob) {
   const manifest = path.join('history', job.key, `${randomUUID()}.json`);
@@ -245,13 +358,25 @@ export async function hdStatus() {
   for (const job of jobs) if (!oldKeys.has(job.key)) newCounts[job.status]++;
   const control = await hdControl();
   const stallThresholdMs = 10 * 60 * 1000;
-  const resumedMs = !control.paused && control.updatedAt ? Date.parse(control.updatedAt) : NaN;
+  const resumedMs = control.wait?.since ? Date.parse(control.wait.since) : control.updatedAt ? Date.parse(control.updatedAt) : NaN;
   const capturedMs = Date.now();
-  const stalled = counts.queued + counts.running > 0 && !control.paused && Number.isFinite(resumedMs)
-    && capturedMs - resumedMs > stallThresholdMs && (lastProgressMs === null || capturedMs - lastProgressMs > stallThresholdMs);
+  const pending = counts.queued + counts.running > 0;
+  const started = Number.isFinite(resumedMs) ? resumedMs : Math.min(...jobs.filter(job => ['queued', 'running'].includes(job.status)).map(job => Date.parse(job.updatedAt)));
+  const stalled = pending && control.state !== 'manual_pause' && Number.isFinite(started)
+    && capturedMs - started > stallThresholdMs && (lastProgressMs === null || capturedMs - lastProgressMs > stallThresholdMs);
+  const isolated = await (await import('./hd-discovery')).listHdIsolations();
+  const isolation = { total: isolated.filter(item => !item.resolvedAt).length,
+    retrying: isolated.filter(item => !item.resolvedAt && item.retryAt).length,
+    held: isolated.filter(item => !item.resolvedAt && !item.retryAt).length };
   return { policy: HD_POLICY, counts, reasons, batches, newCounts, control, capacity: await hdCapacity(), total: jobs.length,
+    state: control.state, resource: control.resource || null, waitSince: control.wait?.since || null, isolation,
     lastSuccessAt: lastSuccessMs === null ? null : new Date(lastSuccessMs).toISOString(),
     lastProgressAt: lastProgressMs === null ? null : new Date(lastProgressMs).toISOString(), stalled, stallThresholdMs };
+}
+export function selectHdJob(jobs: HdJob[], consecutiveNew: number, batch: string, clock = Date.now()) {
+  const pending = jobs.filter(job => ['queued', 'running'].includes(job.status) && (!job.retryAt || Date.parse(job.retryAt) <= clock))
+    .sort((a, b) => a.priority - b.priority || a.updatedAt.localeCompare(b.updatedAt));
+  return (consecutiveNew >= 4 ? pending.find(job => job.status === 'queued' && job.batch === batch) : undefined) || pending[0];
 }
 export function hdEligibility(meta: sharp.Metadata) {
   if (meta.format === 'webp') return 'existing_webp';
@@ -327,9 +452,15 @@ async function assertTargetedHdWorkerLock() {
   });
   if (!held) throw new Error('hd_targeted_requires_worker_lock');
 }
-export async function processHdJob(key: string, pausedSourceVersion?: string) {
+export type HdProcessDependencies = {
+  capacity?: typeof hdCapacity; clock?: () => number; validate?: typeof validateHdOutput;
+  assertWorkerLock?: () => Promise<void>; beforePublish?: () => Promise<void>;
+};
+export async function processHdJob(key: string, pausedSourceVersion?: string, dependencies: HdProcessDependencies = {}) {
   if (!/^[a-f0-9]{64}$/.test(key)) throw new Error('invalid_hd_process_target');
-  if (pausedSourceVersion !== undefined) await assertTargetedHdWorkerLock();
+  const capacity = dependencies.capacity || hdCapacity;
+  const timestamp = () => new Date((dependencies.clock || Date.now)()).toISOString();
+  if (pausedSourceVersion !== undefined) await (dependencies.assertWorkerLock || assertTargetedHdWorkerLock)();
   return withLease(key, async () => {
     const job = await readHdJob(key);
     const control = await hdControl();
@@ -340,22 +471,80 @@ export async function processHdJob(key: string, pausedSourceVersion?: string) {
       if (job.version !== pausedSourceVersion || (await hdSource(job.source))?.version !== pausedSourceVersion) throw new Error('hd_targeted_source_changed');
     } else if (!job || !['queued', 'running'].includes(job.status) || control.paused) return;
     if (!job) return;
+    if (job.retryAt && Date.parse(job.retryAt) > (dependencies.clock || Date.now)()) return;
+    const receiptFile = path.join(hdDirectory(), `${key}.publish.json`);
+    const receipt = await fs.readFile(receiptFile, 'utf8').then(text => JSON.parse(text) as { job: HdJob; temporary: string }).catch(error => {
+      if (error.code === 'ENOENT') return null; throw error;
+    });
+    if (receipt) {
+      // A crash after output rename must finish the durable registration, not
+      // spend another encoding attempt. Unknown receipts remain a hard stop.
+      if (receipt.job.key !== key || receipt.job.version !== job.version || receipt.job.status !== 'ready'
+        || receipt.job.integrity?.version !== HD_VALIDATION_VERSION || receipt.job.integrity.failedChecks.length
+        || (await hdSource(job.source))?.version !== job.version) throw new Error('hd_publish_receipt_invalid');
+      const source = await hdSource(job.source);
+      if (!source) throw new Error('hd_publish_receipt_invalid');
+      const meta = await sharp(source.file, { limitInputPixels: MAX_PIXELS, failOn: 'warning' }).metadata();
+      // A durable receipt proves the publication intent, not that a file left on
+      // disk still decodes correctly. Recheck before completing ready registration.
+      try {
+        if (receipt.job.format === 'original') {
+          if (receipt.job.bytes !== source.size || receipt.job.width !== ([5, 6, 7, 8].includes(meta.orientation || 1) ? meta.height : meta.width)
+            || receipt.job.height !== ([5, 6, 7, 8].includes(meta.orientation || 1) ? meta.width : meta.height)) throw new Error('hd_publish_receipt_invalid');
+          await sharp(source.file, { limitInputPixels: MAX_PIXELS, failOn: 'warning' }).timeout({ seconds: 120 }).stats();
+        } else {
+          if (!['avif', 'webp'].includes(receipt.job.format || '') || !new RegExp(`^${key}\\.(avif|webp)$`).test(receipt.job.file || '')) throw new Error('hd_publish_receipt_invalid');
+          const target = path.join(hdDirectory(), receipt.job.file!);
+          const exists = await fs.stat(target).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+          if (!exists && !new RegExp(`^${key}\\.(avif|webp)\\.[a-f0-9-]+\\.tmp$`).test(receipt.temporary)) throw new Error('hd_publish_receipt_invalid');
+          await (dependencies.validate || validateHdOutput)(source.file, meta, exists ? target : path.join(hdDirectory(), receipt.temporary), receipt.job.format as 'avif' | 'webp');
+        }
+      } catch (error) {
+        await setHdControl(true, error instanceof HdOutputIntegrityError ? 'output_integrity' : 'worker_integrity_failure');
+        throw error;
+      }
+      const resumed = await withControlLease(async () => {
+        const fresh = await hdControl();
+        if (fresh.state === 'hard_pause') return false;
+        if (receipt.job.format !== 'original') {
+          if (!/^[a-f0-9]{64}\.(avif|webp)$/.test(receipt.job.file || '') || !receipt.job.file!.startsWith(key)) throw new Error('hd_publish_receipt_invalid');
+          const destination = path.join(hdDirectory(), receipt.job.file!);
+          const exists = await fs.stat(destination).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+          if (!exists) {
+            if (!new RegExp(`^${key}\\.(avif|webp)\\.[a-f0-9-]+\\.tmp$`).test(receipt.temporary)) throw new Error('hd_publish_receipt_invalid');
+            await fs.rename(path.join(hdDirectory(), receipt.temporary), destination);
+          }
+          const info = await fs.stat(destination);
+          if (!info.isFile() || info.size !== receipt.job.bytes) throw new Error('hd_publish_receipt_invalid');
+        }
+        await atomicHdJson(jobPath(key), receipt.job);
+        await fs.unlink(receiptFile);
+        return true;
+      });
+      if (!resumed) throw new Error('hd_control_conflict');
+      return;
+    }
     let temporary = '';
     let attempt: HdAttempt | undefined;
     try {
       if (job.attempts >= (job.attemptLimit ?? 3)) { job.status = 'failed'; job.reason = 'retry_limit'; return; }
-      job.status = 'running'; job.attempts++; job.updatedAt = now();
-      job.reason = undefined; job.integrity = undefined;
+      const interrupted = job.attemptHistory?.[job.attemptHistory.length - 1];
+      if (interrupted?.status === 'running' && !interrupted.finishedAt) Object.assign(interrupted, { finishedAt: timestamp(), status: 'failed', reason: 'worker_interrupted' });
+      job.status = 'running'; job.attempts++; job.updatedAt = timestamp();
+      job.reason = undefined; job.integrity = undefined; job.retryAt = undefined; job.isolatedReason = undefined;
       attempt = { attempt: job.attempts, startedAt: job.updatedAt, sourceVersion: job.version, status: 'running' };
       job.attemptHistory = [...(job.attemptHistory || []), attempt];
       await atomicHdJson(jobPath(key), job);
       const input = await hdSource(job.source);
       if (!input || input.version !== job.version) { job.status = 'skipped'; job.reason = 'source_changed'; return; }
-      const meta = await sharp(input.file, { limitInputPixels: false, animated: true }).metadata();
+      const meta = await sharp(input.file, { limitInputPixels: false, animated: true }).metadata().catch(error => {
+        if (!(error as NodeJS.ErrnoException).code && /unsupported image format|corrupt header|invalid.*(?:image|header)|improper image header|premature end|Input file is missing/i.test((error as Error).message)) throw new Error('source_incompatible');
+        throw error;
+      });
       const reason = hdEligibility(meta);
       if (reason) { job.status = 'skipped'; job.reason = reason; return; }
       const reserve = input.size * 3 + meta.width! * meta.height! * 8;
-      if (!(await hdCapacity(reserve)).safe) {
+      if (!(await capacity(reserve)).safe) {
         job.status = 'queued'; job.attempts--; job.reason = 'capacity_guard';
         if (pausedSourceVersion === undefined) await setHdControl(true, 'capacity_guard');
         return;
@@ -370,42 +559,62 @@ export async function processHdJob(key: string, pausedSourceVersion?: string) {
       const image = sharp(input.file, { limitInputPixels: MAX_PIXELS, failOn: 'warning' }).rotate().timeout({ seconds: 120 });
       await (format === 'webp' ? image.webp({ lossless: true, effort: 6 }) : image.avif({ quality: 95, chromaSubsampling: '4:4:4', effort: 6, bitdepth: 8 })).toFile(temporary);
       await fs.chmod(temporary, 0o600);
-      job.integrity = await validateHdOutput(input.file, meta, temporary, format);
+      job.integrity = await (dependencies.validate || validateHdOutput)(input.file, meta, temporary, format);
       attempt.integrity = job.integrity;
       const rotated = [5, 6, 7, 8].includes(meta.orientation || 1);
       const width = rotated ? meta.height : meta.width, height = rotated ? meta.width : meta.height;
       const outputStat = await fs.stat(temporary);
+      const outputHandle = await fs.open(temporary, 'r');
+      try { await outputHandle.sync(); } finally { await outputHandle.close(); }
       if ((await hdSource(job.source))?.version !== job.version) { job.status = 'skipped'; job.reason = 'source_changed'; return; }
-      if (!(await hdCapacity()).safe) {
+      if (!(await capacity()).safe) {
         if (pausedSourceVersion === undefined) await setHdControl(true, 'capacity_guard');
         job.status = 'queued'; job.reason = 'capacity_guard'; return;
-      }
-      if (pausedSourceVersion !== undefined) {
-        const freshControl = await hdControl();
-        if (freshControl.paused !== control.paused || freshControl.reason !== control.reason) throw new Error('hd_targeted_control_changed');
       }
       Object.assign(job, { width, height, bytes: outputStat.size, format, mime: `image/${format}` });
       if (format === 'avif' && outputStat.size >= input.size) {
         Object.assign(job, { status: 'ready', format: 'original', mime: `image/${meta.format === 'jpg' ? 'jpeg' : meta.format}`, bytes: input.size, reason: 'original_smaller', file: undefined });
       } else {
-        await fs.rename(temporary, path.join(hdDirectory(), filename)); temporary = '';
         Object.assign(job, { status: 'ready', file: filename, reason: undefined });
       }
+      if (attempt) Object.assign(attempt, { finishedAt: timestamp(), status: 'ready', reason: job.reason });
+      job.updatedAt = timestamp();
+      await dependencies.beforePublish?.();
+      const published = await withControlLease(async () => {
+        const freshControl = await hdControl();
+        if (pausedSourceVersion !== undefined && freshControl.token !== control.token) throw new Error('hd_targeted_control_changed');
+        if (pausedSourceVersion === undefined && freshControl.state === 'hard_pause') throw new Error('hd_publish_control_hold');
+        // The receipt, rename and ready manifest all sit inside the same control
+        // and job leases. Administrative/hard stops cannot interleave publication.
+        await atomicHdJson(receiptFile, { job, temporary: temporary ? path.basename(temporary) : '' });
+        if (job.format !== 'original') { await fs.rename(temporary, path.join(hdDirectory(), filename)); temporary = ''; }
+        await atomicHdJson(jobPath(key), job);
+        await fs.unlink(receiptFile);
+        return true;
+      });
+      if (!published) throw new Error('hd_publish_control_hold');
     } catch (error) {
       if (error instanceof HdOutputIntegrityError) {
         job.integrity = error.integrity;
         if (attempt) attempt.integrity = error.integrity;
       }
-      const code = (error as NodeJS.ErrnoException).code;
-      const transient = ['EIO', 'EBUSY', 'EAGAIN', 'ETIMEDOUT'].includes(code || '');
-      job.status = transient && job.attempts < (job.attemptLimit ?? 3) ? 'queued' : 'failed';
       const message = (error as Error).message;
-      job.reason = message === 'output_integrity' ? 'output_integrity' : message === 'hd_targeted_control_changed' ? message : transient ? 'temporary_io' : 'decode_or_source_failed';
-      if (job.reason === 'output_integrity' && pausedSourceVersion === undefined) await setHdControl(true, 'output_integrity');
+      const sourceFailure = ['source_missing', 'source_unreadable'].includes(message);
+      const held = ['hd_publish_control_hold', 'hd_targeted_control_changed'].includes(message);
+      job.status = sourceFailure && job.attempts < (job.attemptLimit ?? 3) || held ? 'queued' : message === 'source_incompatible' ? 'skipped' : 'failed';
+      job.reason = sourceFailure || held || message === 'source_incompatible' || message === 'output_integrity' ? message : 'worker_integrity_failure';
+      if (sourceFailure) {
+        job.isolatedReason = message as HdJob['isolatedReason'];
+        if (job.status === 'queued') job.retryAt = new Date((dependencies.clock || Date.now)() + Math.min(30 * 60_000, 60_000 * 5 ** (job.attempts - 1))).toISOString();
+      } else if (!held && message !== 'source_incompatible' && pausedSourceVersion === undefined) await setHdControl(true, job.reason);
     } finally {
-      if (temporary) await fs.unlink(temporary).catch(() => {});
-      if (attempt) Object.assign(attempt, { finishedAt: now(), status: job.status, reason: job.reason });
-      job.updatedAt = now(); await atomicHdJson(jobPath(key), job);
+      // Never destroy an output still referenced by an interrupted publish receipt.
+      const publicationPending = await fs.stat(receiptFile).then(() => true).catch(error => { if (error.code === 'ENOENT') return false; throw error; });
+      if (!publicationPending) {
+        if (temporary) await fs.unlink(temporary).catch(() => {});
+        if (attempt) Object.assign(attempt, { finishedAt: timestamp(), status: job.status, reason: job.reason });
+        job.updatedAt = timestamp(); await atomicHdJson(jobPath(key), job);
+      }
     }
   });
 }
