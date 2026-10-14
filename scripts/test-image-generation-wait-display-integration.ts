@@ -206,6 +206,19 @@ now = acceptedAt + 10;
 });
 const validating = card({ ...singleWait, phase: 'validate', label: '图片校验中', detail: '交付阶段说明' }, studioPrimary, 'validating');
 assert.equal(validating.title, '图片校验中'); assert.equal(validating.track, true); assert.equal(validating.alerts.length, 1); assert.equal(validating.buttons.length, 1);
+[['single', studioSource, studioPrimary], ['batch', batchSource, batchPrimary]].forEach(([name, source, primary]) => {
+  ['download', 'validate', 'save'].forEach(phase => {
+    const value = { ...task, taskId: task.id, delivery: { ...task.delivery, phase, generationDetailSuperseded: true }, error: '图片任务已受理，仍在生成' };
+    const wait = mappedWait(source as string, value);
+    assert.equal(wait.generationDetailSuperseded, true, 'actual DTO mapping carries the proof');
+    const normal = card(wait, primary as typeof studioPrimary, name + '-normal-' + phase);
+    assert.equal(normal.track, true); assert.equal(normal.alerts.length, 0); assert.equal(normal.buttons.length, 0);
+    const unread = card({ ...wait, connectionIssue: true, connectionDetail: '本次读取无权限' }, primary as typeof studioPrimary, name + '-unread-' + phase);
+    assert.equal(unread.alerts.length, 1); assert.equal(unread.received.detail, '本次读取无权限'); assert.equal(unread.buttons.length, 1);
+    const current = card({ ...wait, generationDetailSuperseded: false, detail: '真实交付错误' }, primary as typeof studioPrimary, name + '-error-' + phase);
+    assert.equal(current.alerts.length, 1); assert.equal(current.received.detail, '真实交付错误');
+  });
+});
 
 now = acceptedAt + 100;
 const foregroundIdentity = 'foreground';

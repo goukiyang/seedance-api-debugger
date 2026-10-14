@@ -333,7 +333,8 @@ export async function studioBatchView(owner: string, id: string, includeItems = 
     owner_id: true, snapshot_json: includeItems, billing_status: true, actual_amount_micros: true, actual_credits: true, billing_contract_json: true, unit_credits: true, billing_settled_at: true } });
   // 仅当前活跃项读取回执；批次目录不取快照，已完成历史不读逐图文件。
   const deliveryByTask = new Map(includeItems ? await Promise.all(tasks.filter(task => ['running', 'channel_running'].includes(task.status))
-    .map(async task => { const delivery = await studioDeliveryStatus(task); return [task.id, { phase: delivery.phase, acceptedAt: delivery.acceptedAt, waitingStatus: delivery.waitingStatus }] as const; })) : []);
+    .map(async task => { const delivery = await studioDeliveryStatus(task); return [task.id, { phase: delivery.phase, acceptedAt: delivery.acceptedAt, waitingStatus: delivery.waitingStatus,
+      generationDetailSuperseded: delivery.generationDetailSuperseded }] as const; })) : []);
   const assets = includeItems ? await prisma.asset.findMany({ where: { id: { in: tasks.flatMap(task => !task.deleted_at && task.asset_id ? [task.asset_id] : []) }, owner_id: owner, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity)] }, select: { id: true, file_size: true } }) : [];
   const statuses = batch.items.map(item => item.cancelled ? 'cancelled' : item.taskId
     ? publicImageTaskStatus(tasks.find(task => task.id === item.taskId)?.status || 'uncertain') : batch.definitionConfirmationRequired ? 'needs-confirmation' : 'pending');

@@ -4,6 +4,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { MAX_STUDIO_GENERATED_BYTES, MAX_STUDIO_GENERATED_BASE64, STUDIO_RECOVERY_MS, STUDIO_CHECKPOINT_RETENTION_MS, STUDIO_MAX_DOWNLOAD_ATTEMPTS, STUDIO_DOWNLOAD_WINDOW_MS, STUDIO_DOWNLOAD_EXTENDED_MS } from './limits';
 import { prisma } from '@/lib/prisma';
 import { openStudioImageStream, classifyStudioDownloadError, StudioImageDownloadError, type StudioDownloadDiagnostics } from './media';
+import { studioGenerationDetailSuperseded } from './delivery-display';
 
 const root = () => path.join(process.cwd(), 'storage', 'studio-delivery');
 let lastCleanup = 0;
@@ -190,6 +191,7 @@ export async function studioDeliveryStatus(task: Identity & { status: string; us
     accepted: Boolean(asyncReceipt),
     acceptedAt: asyncReceipt && Number.isFinite(asyncReceipt.acceptedAt) && asyncReceipt.acceptedAt > 0 ? asyncReceipt.acceptedAt : undefined,
     waitingStatus: asyncReceipt && ['pending', 'retrying', 'unconfirmed'].includes(asyncReceipt.waitingStatus || '') ? asyncReceipt.waitingStatus : undefined,
+    generationDetailSuperseded: studioGenerationDetailSuperseded(task.status, record, asyncReceipt),
     receivedBytes: record?.receivedBytes, expectedBytes: record?.expectedBytes,
     recoveryAvailable: running && Boolean(asyncReceipt && asyncReceipt.state !== 'failed' || record && studioDeliveryCanRetry(record)),
     checkpointRetained: Boolean(record), validation: record?.validation || completed.validation,

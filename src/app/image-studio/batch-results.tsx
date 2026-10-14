@@ -292,6 +292,7 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
       taskKey: item.taskId || undefined, acceptedAt: item.delivery?.acceptedAt, status: item.status, phase: item.delivery?.phase, waitingStatus: item.delivery?.waitingStatus,
       resultReady: Boolean(item.image && item.taskId),
       label: statusLabel(item.status, item.delivery?.phase), connectionIssue: Boolean(error), connectionDetail: error, detail: item.error,
+      generationDetailSuperseded: item.delivery?.generationDetailSuperseded,
     },
     error: item.error,
     media: item.image ? { src: item.image.url, thumbnailSrc: item.image.thumbnail, alt: `第 ${item.ordinal} 张结果`, fileName: 'batch-image.png',

@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '图片生成等待增加平稳百分比，结果可下载时清除过期提示并补满100%后完成。图片比例按常用、横向、竖向分组。修复失败视频复用输入时来源丢失，保留原参数与明确的继续入口；复用不会自动生成。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '图片保存、校验时不再带出上一阶段的生成提示，真实异常仍保留恢复入口。结果可下载后补满100%再完成，失败视频可恢复输入且不会自动生成。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { IMAGE_GENERATION_WAIT_GRACE_MS, advanceImageGenerationWaitDisplay, imageGenerationDisplayProgress, imageGenerationWaitDisplay, type ImageGenerationWait } from '../src/lib/image-studio/wait-display';
+import { studioGenerationDetailSuperseded } from '../src/lib/image-studio/delivery-display';
 
 // Offline display contracts only. These assertions never submit/query a task.
 const acceptedAt = 1_000_000;
@@ -43,6 +44,26 @@ assert.equal(at(300_000, { phase: 'unknown', waitingStatus: 'unconfirmed' }).sho
   assert.equal(terminal.busy, false); assert.equal(terminal.showIssue, true); assert.equal(terminal.nextCheckAt, undefined);
 });
 ['ready', 'failed', 'stopped'].forEach(phase => assert.equal(at(0, { phase }).showTrack, false));
+['download', 'validate', 'save'].forEach(phase => {
+  const checkpoint = { phase }, receipt = { state: 'success', waitingStatus: 'pending' };
+  assert.equal(studioGenerationDetailSuperseded('running', checkpoint, receipt), true);
+  assert.equal(studioGenerationDetailSuperseded('channel_running', checkpoint, receipt), true);
+  assert.equal(studioGenerationDetailSuperseded('running', { ...checkpoint, code: 'download_failed' }, receipt), false);
+  assert.equal(studioGenerationDetailSuperseded('running', checkpoint, { ...receipt, state: 'accepted' }), false);
+  assert.equal(studioGenerationDetailSuperseded('running', checkpoint, { ...receipt, waitingStatus: 'retrying' }), false);
+  const delivery = at(0, { phase, detail: '图片任务已受理，仍在生成', generationDetailSuperseded: true });
+  assert.equal(delivery.showIssue, false); assert.equal(delivery.showRecovery, false); assert.equal(delivery.detail, undefined);
+  const disconnected = at(0, { phase, detail: '旧生成提示', generationDetailSuperseded: true }, false);
+  assert.equal(disconnected.showIssue, true); assert.equal(disconnected.showRecovery, true); assert.match(disconnected.detail || '', /网络连接/);
+  const unreadDelivery = at(0, { phase, detail: '旧生成提示', generationDetailSuperseded: true, connectionIssue: true, connectionDetail: '本次读取无权限' });
+  assert.equal(unreadDelivery.detail, '本次读取无权限'); assert.equal(unreadDelivery.showRecovery, true);
+});
+assert.equal(studioGenerationDetailSuperseded('running', null, { state: 'success', waitingStatus: 'pending' }), false);
+assert.equal(studioGenerationDetailSuperseded('running', { phase: 'save' }, null), false);
+['failed', 'uncertain', 'succeeded'].forEach(status => assert.equal(studioGenerationDetailSuperseded(status, { phase: 'save' }, { state: 'success', waitingStatus: 'pending' }), false));
+['recover', 'stopped', 'provider'].forEach(phase => assert.equal(studioGenerationDetailSuperseded('running', { phase }, { state: 'success', waitingStatus: 'pending' }), false));
+const recovery = at(0, { phase: 'recover', detail: '真实下载异常', generationDetailSuperseded: true });
+assert.equal(recovery.detail, '真实下载异常'); assert.equal(recovery.showRecovery, true);
 ['download', 'recover', 'validate', 'save', 'settle'].forEach(phase => {
   const delivery = at(0, { phase, label: `真实${phase}`, detail: '交付阶段说明' });
   assert.equal(delivery.label, `真实${phase}`); assert.equal(delivery.showTrack, true);

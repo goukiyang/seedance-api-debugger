@@ -11,6 +11,7 @@ export type ImageGenerationWait = {
   connectionIssue?: boolean;
   connectionDetail?: string;
   detail?: string | null;
+  generationDetailSuperseded?: boolean;
   recoveryAvailable?: boolean;
   resultReady?: boolean;
   progress?: number;
@@ -60,10 +61,17 @@ export function imageGenerationWaitDisplay(wait: ImageGenerationWait, now: numbe
       ? { ...base, showIssue: false, showRecovery: false, detail: undefined, progress: 100, ready: true }
       : base;
   }
-  if (['download', 'recover', 'validate', 'save', 'settle'].includes(wait.phase || '')) return {
-    ...base, busy: true, pending: true, showTrack: true, progress: imageGenerationDisplayProgress(wait, now),
-    timeSource: originalTime(wait.acceptedAt, now) !== undefined ? 'acceptedAt' : originalTime(wait.createdAt, now) !== undefined ? 'createdAt' : undefined,
-  };
+  if (['download', 'recover', 'validate', 'save', 'settle'].includes(wait.phase || '')) {
+    const superseded = wait.generationDetailSuperseded === true && ['download', 'validate', 'save'].includes(wait.phase || '');
+    const connectionIssue = !online || Boolean(wait.connectionIssue);
+    return {
+      ...base, ...(superseded ? { showIssue: connectionIssue, showRecovery: connectionIssue,
+        detail: !online ? '网络连接已中断，请恢复网络后查询原任务。'
+          : wait.connectionIssue ? wait.connectionDetail || '原任务状态暂未读取，请刷新查询原任务。' : undefined } : {}),
+      busy: true, pending: true, showTrack: true, progress: imageGenerationDisplayProgress(wait, now),
+      timeSource: originalTime(wait.acceptedAt, now) !== undefined ? 'acceptedAt' : originalTime(wait.createdAt, now) !== undefined ? 'createdAt' : undefined,
+    };
+  }
   if (['queued', 'channel_queued', 'needs-confirmation'].includes(wait.status) || wait.phase === 'queued') return { ...base, pending: true };
   const generation = ['provider', 'unknown'].includes(wait.phase || '')
     || !wait.phase && ['running', 'channel_running', 'retrying', 'unconfirmed'].includes(wait.status);
