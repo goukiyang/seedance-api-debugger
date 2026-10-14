@@ -1147,7 +1147,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       </div>}
       items={coverPages.pageItems.map(entry => {
       const coverModule = modules.find(item => item.id === entry.id);
-      const onReadError = () => setGalleryReadErrors(current => new Set([...current, entry.key]));
+      const onReadError = () => setGalleryReadErrors(current => new Set(Array.from(current).concat(entry.key)));
       return { key: entry.key, id: entry.id, name: entry.name, groupName: entry.groupName, mine: entry.mine, shared: entry.shared,
         lastOpenedAt: gallery.lastOpened[entry.key], unread: attention.unread.has(entry.id),
         loading: !entry.presetId && !coverModule && !error, error: galleryReadErrors.has(entry.key) || !entry.presetId && !coverModule && Boolean(error),
