@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, FolderOpen, Pause, Play, RefreshCw, RotateCcw, Save, X } from 'lucide-react';
 import { GeneratedImageResults, type GeneratedImageResult } from '@/components/GeneratedImageResults';
 import { RelativeTime } from '@/components/RelativeTime';
+import { TaskNotice } from '@/components/TaskNotice';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useProductDialog } from '@/components/useProductDialog';
 import { watchGenerationCompletion } from '@/components/GenerationCompletion';
@@ -303,7 +304,7 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
   } satisfies GeneratedImageResult & { generationStatus: string })), [batch?.items, error, id, userId]);
   return <div className={styles.results} aria-label="批次结果">
     <div className={styles.actions}><strong>{batch?.moduleName || '本批结果'}</strong><button type="button" title="刷新批次" aria-label="刷新批次" disabled={reading} onClick={() => void load()}><RefreshCw size={16} /></button>{deliveryOnly && <a href={`/assets?imageBatchId=${encodeURIComponent(id)}`}>本批资产</a>}</div>
-    {error && <p role="alert" className={styles.error}>{error}</p>}
+    {error && <TaskNotice kind="recoverable">{error}</TaskNotice>}
     {continuationMessage && <p role="status">{continuationMessage}</p>}
     {!batch && <p role="status">{reading ? '正在读取原批次' : '尚未读取批次'}，不会重新提交生成。</p>}
     {batch && <>
@@ -326,7 +327,7 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
         {directory && <p>保存至所选位置的新批次子目录，不覆盖已有文件。关网页后不会继续写本机。</p>}
         {provided.length > 0 && <p role="status">已提供 {provided.length} 张下载，尚未确认本机落盘。</p>}
         {zipReady && <a href={zipReady.url} download={zipReady.name}>再次下载已准备的包</a>}
-        {saveError && <p role="alert" className={styles.error}>{saveError}，只补保存，不重新生成。</p>}
+        {saveError && <TaskNotice kind="recoverable">{saveError}，只补保存，不重新生成。</TaskNotice>}
       </div>}
       {!deliveryOnly && batch.failed > 0 && <div className={styles.retry}><span>选中失败项 {selected.length} 张，本次重试预计 {selected.length * batch.unitCredits} 点；每项最多重试 3 次</span><button type="button" disabled={busy || !selected.length} onClick={() => void action('retry')}><RotateCcw size={16} />重试选中失败项</button></div>}
       {!deliveryOnly && <GeneratedImageResults items={resultItems} scope={`sd2-image-studio-batch-page:${userId}:${id}`}
@@ -360,7 +361,7 @@ export function StudioBatchHistory({ userId, initialId }: { userId: string; init
     <header className={styles.actions}><h2 id="batch-history-title">我的批次</h2><button type="button" aria-label="关闭我的批次" onClick={() => setOpen(false)}><X size={18} /></button></header>
     {id ? <><button type="button" onClick={() => setId(null)}>返回批次列表</button><BatchResults key={`${userId}:${id}`} id={id} userId={userId} /></> : <>
       <div className={styles.actions}><button type="button" disabled={busy} onClick={() => void load()}><RefreshCw size={16} />刷新批次</button></div>
-      {error && <p role="alert" className={styles.error}>{error}</p>}
+      {error && <TaskNotice kind="recoverable">{error}</TaskNotice>}
       {!batches.length && !busy && !error && <p>暂无批次</p>}
       {batches.map(batch => <article className={styles.historyItem} key={batch.id}><button type="button" onClick={() => setId(batch.id)}><strong>{batch.moduleName}</strong><span>{batchStateLabel(batch.state)} · 已生成 {batch.generated}/{batch.total}</span></button><RelativeTime value={batch.createdAt} /></article>)}
       {cursor && <button type="button" disabled={busy} onClick={() => void load(true)}>加载更多</button>}

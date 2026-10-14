@@ -82,7 +82,7 @@
   .card:hover [data-result-secondary], .card:focus-within [data-result-secondary],
   .card:has([aria-busy="true"]) [data-result-secondary], .card:has([data-busy="true"]) [data-result-secondary] { opacity: 1; pointer-events: auto; }
 }
-.actions button, .mediaActions button, .pagination button, .error button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 5px 8px; border: 1px solid #414b48; border-radius: 4px; background: #202725; color: #e0e9e5; font-size: 13px; cursor: pointer; }
+.actions button, .mediaActions button, .pagination button, .notice button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 5px 8px; border: 1px solid #414b48; border-radius: 4px; background: #202725; color: #e0e9e5; font-size: 13px; cursor: pointer; }
 .actions button:hover, .mediaActions button:hover, .pagination button:hover { background: #303c37; }
 .actions button:focus-visible, .mediaActions button:focus-visible, .pagination button:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
 .actions button:disabled, .mediaActions button:disabled, .pagination button:disabled { opacity: .45; cursor: default; }
@@ -94,5 +94,5 @@
 @media (hover: none), (any-pointer: coarse) {
   .headerPagination button { flex-basis: 40px; width: 40px; min-height: 40px; }
 }
-.error { color: #efb0a6; font-size: 13px; overflow-wrap: anywhere; }
+.notice { font-size: 13px; overflow-wrap: anywhere; }
 .feedback { color: #c4d7cd; font-size: 13px; overflow-wrap: anywhere; }

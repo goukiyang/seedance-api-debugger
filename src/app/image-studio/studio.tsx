@@ -22,6 +22,7 @@ import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
 import { scrollToWorkbenchHeader } from '@/lib/navigation/scroll-to-workbench-header';
 import { replaceImageModuleLocation } from '@/lib/navigation/image-module-location';
 import { GeneratedImageResults, ResultImageContextMenuHint, type GeneratedImageResult } from '@/components/GeneratedImageResults';
+import { TaskNotice } from '@/components/TaskNotice';
 import type { ResultImageContextMenuItem } from '@/components/ResultImageContextMenu';
 import { StudioResultPinButton, StudioResultPinnedIndicator } from './result-pin-button';
 import { STUDIO_RESULT_FEED, type StudioResultFeedExtras, type SharedStudioPinnedImage } from '@/lib/image-studio/result-pin-types';
@@ -2711,21 +2712,21 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     : queryingSubmission ? { message: '正在查询这次提交，不会再次生成。', tone: 'progress' }
     : pendingSubmission ? submitting ? { message: '正在处理当前请求，请稍候再查询。', tone: 'progress' }
       : moduleDeleting ? { message: '正在删除模板，请等待操作结束后再查询。', tone: 'progress' } : null
-    : sourceSharingBlocked ? { message: '该模板暂不可用，请刷新模板或换一个可用模板。', tone: 'error' }
+    : sourceSharingBlocked ? { message: '该模板暂不可用，请刷新模板或换一个可用模板。', tone: 'info' }
     : submitting ? { message: '正在提交，请等待结果，不要重复点击。', tone: 'progress' }
     : moduleSaving || globalSettingsSaving ? { message: '正在保存设置，请等待操作结束。', tone: 'progress' }
     : quickPresetApplying || presetSaving ? { message: quickPresetApplying ? '正在套用快捷模板。' : '正在保存快捷模板。', tone: 'progress' }
     : uploading || bannerUploading ? { message: '图片还在上传或处理，请等待图片显示后再生成。', tone: 'progress' }
     : draftRestoring ? { message: '正在恢复上次使用的图片和设置。', tone: 'progress' }
     : ratioEditing ? { message: '图片比例尚未确认，请先完成比例设置。', tone: 'info' }
-    : settingsError ? { message: `设置暂不可用：${settingsError}`, tone: 'error' }
+    : settingsError ? { message: `设置暂不可用：${settingsError}`, tone: 'info' }
     : !settings ? { message: '正在读取生成设置，请稍候；长时间无变化请刷新页面。', tone: 'progress' }
     : channelIssue ? { message: channelIssue, tone: imageChannelMessage ? 'info' : 'warning' }
     : !selectedProviderReady ? { message: '当前模型的图片服务尚未就绪，请换一个模型或联系管理员检查接口。', tone: 'warning' }
     : !actualQuoteRequired && moduleUnitCredits === null ? { message: '当前模型尚未设置点数，请换一个模型或联系管理员配置。', tone: 'warning' }
-    : generationFixedReferences.some(item => item.available === false) ? { message: '已保存模板的固定参考图不可用，请在设置中处理。', tone: 'error' }
-    : generationStyles.some(group => group.unavailable) ? { message: '已保存模板的风格组不可用，请在设置中处理。', tone: 'error' }
-    : generationSkills.some(group => group.unavailable) ? { message: '已保存模板的提示词组不可用，请在设置中处理。', tone: 'error' }
+    : generationFixedReferences.some(item => item.available === false) ? { message: '已保存模板的固定参考图不可用，请在设置中处理。', tone: 'info' }
+    : generationStyles.some(group => group.unavailable) ? { message: '已保存模板的风格组不可用，请在设置中处理。', tone: 'info' }
+    : generationSkills.some(group => group.unavailable) ? { message: '已保存模板的提示词组不可用，请在设置中处理。', tone: 'info' }
     : batch.mode === 'batch' && batch.source === 'folder' && generationReferencePolicy.primaryMin > 1 ? { message: `这个模板至少需要 ${generationReferencePolicy.primaryMin} 张主图，素材逐图每项只有 1 张；请选择当前正文模式。`, tone: 'warning' }
     : images.length < generationReferencePolicy.primaryMin && !(batch.mode === 'batch' && batch.source === 'folder') ? { message: `这个模板至少需要 ${generationReferencePolicy.primaryMin} 张主图，当前 ${images.length} 张。`, tone: 'warning' }
     : images.length > generationReferencePolicy.primaryMax ? { message: `主图最多 ${generationReferencePolicy.primaryMax} 张，请移除多余主图。`, tone: 'warning' }
@@ -3111,7 +3112,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           </p>}
           {generationFeedback && <p id={`generation-blocker-${module.id}`} role="status" className={styles.generationFeedback} data-tone={generationFeedback.tone}>{generationFeedback.message}</p>}
           {settingsError && <button type="button" onClick={() => onReloadSettings(true)}><RefreshCw size={16} />重新读取设置</button>}
-          {sourceSharingBlocked && <p role="alert" className={styles.error}>模板已不可用，不能新建任务；本人输入、已提交任务和历史结果仍保留。</p>}
+          {sourceSharingBlocked && <TaskNotice kind="recoverable">模板已不可用，不能新建任务；本人输入、已提交任务和历史结果仍保留。</TaskNotice>}
           {pendingSubmission && <p className={styles.muted}>提交结果待确认，只查询原请求，不会再次生成。<button type="button" disabled={submitting} onClick={async () => {
             if ((await confirm('上次提交可能已受理。放弃核对后，再次生成会新建任务，可能再次产生上游费用。确定放弃核对吗？', { title: '放弃核对', confirmLabel: '放弃核对' }))) { setPendingSubmission(null); try { localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch {} }
           }}>放弃核对</button></p>}
@@ -3120,7 +3121,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         {evolution && <div className={styles.counts} role="group" aria-label="演化方向">{(['increase', 'decrease'] as const).map(direction => <button type="button" key={direction} aria-pressed={(evolutionInput.manual ? evolutionInput.direction : bodyDirection || evolution.defaultDirection) === direction} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onClick={() => setEvolutionInput({ direction, manual: true })}>{direction === 'increase' ? '递进' : '递减'}</button>)}{evolutionInput.manual && <button type="button" title="按正文和模板默认方向" onClick={() => setEvolutionInput({ direction: evolution.defaultDirection, manual: false })}><RotateCcw size={14} /></button>}</div>}
         <label className={styles.label} htmlFor={`studio-prompt-${module.id}`}>{evolution ? '演化内容' : '补充'} {!evolution && <span>有图片时选填</span>}</label>
         <textarea id={`studio-prompt-${module.id}`} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} value={prompt} maxLength={20000} onChange={event => setPrompt(event.target.value)} placeholder={evolution ? '什么发生变化' : '补充想生成的画面'} rows={9} />
-        {evolutionConflict && <p role="alert" className={styles.error}>{evolutionConflict}</p>}
+        {evolutionConflict && <TaskNotice kind="recoverable">{evolutionConflict}</TaskNotice>}
         <RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={generationReferences.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
         <div className={`${styles.modelQualityRow} ${templateWorkbench ? styles.templateModelQualityRow : ''}`}>
           <label className={styles.compactField} htmlFor={`studio-model-${module.id}`}><strong>生成模型</strong>
@@ -3161,7 +3162,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         {quickPresetsLoading && <p role="status" className={styles.muted}>正在读取快捷模板…</p>}
         {quickPresetsError && <p role="alert" className={styles.error}>{quickPresetsError}<button type="button" disabled={quickPresetsLoading} onClick={() => void loadQuickPresets()}>重试</button></p>}
         {saveStatus && <p role="status" className={styles.muted}>{saveStatus}</p>}
-        {error && <p role="alert" className={styles.error}>{error}</p>}
+        {error && <TaskNotice kind="recoverable">{error}</TaskNotice>}
       </section>
       <section className={styles.outputs} aria-label="生成结果">
         <header className={`${styles.header}${templateWorkbench ? ` ${styles.resultHeader}` : ''}`}><h2>生成结果{templateWorkbench && resultView === 'images' && <ResultImageContextMenuHint />}</h2>
@@ -3239,7 +3240,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
 </> : sharedPin ? <><div className={styles.resultHeading}><p className={styles.prompt}>{name} · 置顶图片</p><span className={styles.resultOwner}>{sharedPin.owner?.name || '模板使用者'}</span></div>
             <div className={styles.resultMeta}><span className={styles.muted}>查看与点赞</span><RelativeTime className={styles.resultTime} value={sharedPin.createdAt} /></div></> : null}
           renderPrimaryActions={({task}, waitDisplay) => !task ? null : task.status === 'queued' && task.snapshot?.imageChannelLabel ? <button type="button" disabled={submitting} onClick={() => void (async () => {
-            if (!await confirm('只取消尚未向供应商请求的排队任务并释放原预留；已受理或结果未知的任务不会取消。', { title: '取消排队', confirmLabel: '取消排队', danger: true })) return;
+            if (!await confirm('只取消尚未向供应商请求的排队任务并释放原预留；已受理或结果未知的任务不会取消。', { title: '取消排队', confirmLabel: '取消排队' })) return;
             try {
               const response = await fetch('/api/image-studio/tasks', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cancel', id: task.id }) });
               const result = await response.json();

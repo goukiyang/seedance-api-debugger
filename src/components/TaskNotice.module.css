@@ -1,0 +1,2 @@
+.notice { color: #c4d7cd; overflow-wrap: anywhere; }
+.notice[data-task-notice="danger"] { color: #ffb4ab; }

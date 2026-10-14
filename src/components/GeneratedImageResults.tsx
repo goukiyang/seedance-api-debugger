@@ -20,6 +20,7 @@ import { useImageResultNextActions } from './useImageResultNextActions';
 import { ResultImageContextMenu, type ResultImageContextMenuItem } from './ResultImageContextMenu';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
+import { TaskNotice } from './TaskNotice';
 import type { ContentKey } from '@/lib/content-reactions/types';
 
 export type GeneratedImageResult = {
@@ -141,7 +142,7 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
     {renderMetadata ? renderMetadata(item) : <div className={styles.heading}><strong title={item.label}>{item.label}</strong><span>{item.status}</span></div>}
     {primaryActions && <div className={styles.actions} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{primaryActions}</div>}
     {feedback?.id === item.id && <p className={styles.feedback} role="status">{feedback.message}</p>}
-    {resultError && <p role="alert" className={styles.error}>{resultError}</p>}
+    {resultError && <TaskNotice kind={waitDisplay?.pending && !waitDisplay.showRecovery ? 'status' : 'recoverable'} className={styles.notice}>{resultError}</TaskNotice>}
     {renderSupplement?.(item)}
   </article>;
 }
@@ -257,7 +258,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
   </nav>;
   return <div className={styles.results} data-generated-image-results>
     {paginationSlot && createPortal(pagination('header'), paginationSlot)}
-    {(readError || pages.navigationIssue) && <p role="alert" className={styles.error}>{readError || pages.navigationIssue}<button type="button" disabled={readBusy} onClick={() => { setReadState({ scope, busy: false, error: '' }); pages.retry(); if (pages.restoring && hasMore) return; if (onRetry) onRetry(); else void readMore().catch(() => undefined); }}>{!readError && pages.restoring && hasMore ? '继续翻页' : '重试读取'}</button>{pages.restoring && onRetry && readError && <button type="button" disabled={readBusy} onClick={() => { pages.retry(); onRetry(); }}>刷新目录</button>}</p>}
+    {(readError || pages.navigationIssue) && <TaskNotice kind="recoverable" className={styles.notice}>{readError || pages.navigationIssue}<button type="button" disabled={readBusy} onClick={() => { setReadState({ scope, busy: false, error: '' }); pages.retry(); if (pages.restoring && hasMore) return; if (onRetry) onRetry(); else void readMore().catch(() => undefined); }}>{!readError && pages.restoring && hasMore ? '继续翻页' : '重试读取'}</button>{pages.restoring && onRetry && readError && <button type="button" disabled={readBusy} onClick={() => { pages.retry(); onRetry(); }}>刷新目录</button>}</TaskNotice>}
     {loading && (items.length ? <LoadingStatus>正在更新结果，已有图片保留</LoadingStatus> : <LoadingSkeleton label="正在读取生成结果" grid />)}
     {!loading && !items.length && !error && <p className={styles.empty}>{emptyLabel}</p>}
     {paginationSlot === undefined && ((pages.pages ?? 1) > 1 || hasMore) && pagination('top')}
