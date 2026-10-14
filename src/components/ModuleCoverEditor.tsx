@@ -7,6 +7,8 @@ import { ArrowLeftRight, ImagePlus, RotateCcw, Save, X } from 'lucide-react';
 import { UploadedImagePicker } from '@/components/UploadedImagePicker';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useProductDialog } from '@/components/useProductDialog';
+import { useAppSession } from '@/lib/context/AppSessionContext';
+import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { uploadFileAsAsset } from '@/lib/http/file-upload';
 import { useUnsavedNavigation } from '@/lib/hooks/use-unsaved-navigation';
 import type { ModuleCoverDTO, ModuleCoverCrop, ModuleCoverEditorState, ModuleCoverLayout, ModuleCoverRecipe, ModuleCoverRequestResult, ModuleCoverSaveInput, ModuleCoverSaveResult, ModuleCoverSourceDTO } from '@/lib/image-studio/module-cover-types';
@@ -47,10 +49,34 @@ function CropPreview({ slot }: { slot: Slot }) {
   }} /></span>;
 }
 
-export function ModuleCoverEditor({ moduleId, moduleName, onClose, onSaved }: { moduleId: string; moduleName: string; onClose: () => void; onSaved: (cover: ModuleCoverDTO) => void }) {
+type CurrentPreview = { imageUrl: string; referenceUrl?: string | null };
+type PreviewModule = { id: string; fixedCover?: ModuleCoverDTO | null; sharedLive?: { intent: { presetId: string }; available: boolean } | null;
+  cover?: { thumbnailUrl?: string | null; referenceUrl?: string | null } | null; banner?: { thumbnailUrl?: string | null } | null; images?: Array<{ thumbnailUrl?: string | null }> };
+function CurrentCover({ cover, preview, error }: { cover: ModuleCoverDTO | null; preview: CurrentPreview | null; error: string }) {
+  const [failed, setFailed] = useState(false);
+  const src = cover ? cover.available ? cover.imageUrl || cover.thumbnailUrl : null : preview?.imageUrl;
+  return <div className={styles.currentCover}>
+    <span>{cover ? '当前已保存封面' : '当前显示封面，尚未固定'}</span>
+    {src && !failed ? <div className={styles.currentPreview}>
+      {!cover && preview?.referenceUrl && <img src={preview.referenceUrl} alt="当前封面中的生成前参考图" draggable={false} onError={() => setFailed(true)} />}
+      <img src={src} alt={cover ? '当前已保存封面' : '当前封面代表图'} draggable={false} onError={() => setFailed(true)} />
+    </div> : <p role="status">{cover ? cover.unavailableReason || '当前封面暂时无法读取，请稍后重新打开。'
+      : error || (failed ? '当前封面图片暂时无法读取，请重新打开。' : '暂无合法代表图，可选图设置固定封面。')}</p>}
+  </div>;
+}
+
+export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSaved }: { userId: string; moduleId: string; moduleName: string; onClose: () => void; onSaved: (cover: ModuleCoverDTO) => void }) {
+  const { user, sessionChanged } = useAppSession();
+  const scopeKey = `${userId}:${moduleId}:${user?.id || ''}:${sessionChanged}`;
+  const scope = useRef({ key: scopeKey });
+  if (scope.current.key !== scopeKey) scope.current = { key: scopeKey };
+  const expectedScope = scope.current;
+  const sessionAllowed = user?.id === userId && !sessionChanged && !isClientSessionBlocked();
   const dialog = useRef<HTMLDialogElement>(null);
   const { confirm, productDialog } = useProductDialog();
   const [state, setState] = useState<ModuleCoverEditorState | null>(null);
+  const [preview, setPreview] = useState<CurrentPreview | null>(null);
+  const [previewError, setPreviewError] = useState('');
   const [layout, setLayout] = useState<ModuleCoverLayout>('single');
   const [slots, setSlots] = useState<Slot[]>([null, null]);
   const [loading, setLoading] = useState(true);
@@ -64,15 +90,17 @@ export function ModuleCoverEditor({ moduleId, moduleName, onClose, onSaved }: { 
   const busyRef = useRef(false), alive = useRef(true), sequence = useRef(0);
   const endpoint = `/api/image-studio/modules/${encodeURIComponent(moduleId)}/cover`;
   const count = layout === 'single' ? 1 : 2;
-  const disabled = busy || reading || Boolean(pending);
+  const disabled = !sessionAllowed || busy || reading || Boolean(pending);
+  const current = useCallback(() => alive.current && scope.current === expectedScope && sessionAllowed && !isClientSessionBlocked(), [expectedScope, sessionAllowed]);
   const modified = () => { if (!disabled) setDirty(true); };
   useUnsavedNavigation(dirty || busy || Boolean(pending), confirm, { unsaved: dirty ? ['模块封面'] : [], busy: busy || pending ? ['封面保存结果待确认'] : [] });
 
   const initialize = useCallback(async () => {
-    setLoading(true); setError('');
+    if (!current()) return;
+    setLoading(true); setError(''); setState(null); setPreview(null); setPreviewError('');
     try {
       const value = await json<ModuleCoverEditorState>(await fetch(endpoint, { cache: 'no-store' }));
-      if (!alive.current) return;
+      if (!current()) return;
       setState(value); setLayout(value.recipe?.layout || 'single');
       const restored = value.recipe?.sources.map(item => {
         const source = value.sources.find(source => source.assetId === item.assetId && source.version === item.version);
@@ -80,9 +108,21 @@ export function ModuleCoverEditor({ moduleId, moduleName, onClose, onSaved }: { 
       }) || [];
       setSlots([restored[0] || null, restored[1] || null]);
       setDirty(false); setError(value.sourceError || '');
-    } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : '封面读取失败'); }
-    finally { if (alive.current) setLoading(false); }
-  }, [endpoint]);
+      if (!value.fixedCover) {
+        try {
+          const data = await json<{ modules: PreviewModule[] }>(await fetch(`/api/image-studio/modules?ids=${encodeURIComponent(moduleId)}`, { cache: 'no-store' }));
+          if (!current()) return;
+          const module = data.modules?.find(item => item.id === moduleId);
+          if (!module || (value.target.kind === 'preset' ? module.sharedLive?.intent.presetId !== value.target.id || module.sharedLive.available === false
+            : value.target.id !== moduleId || Boolean(module.sharedLive))) throw new Error('当前封面归属或权限未能确认，请重新读取。');
+          if (module.fixedCover) throw new Error('固定封面刚有变化，请重新读取当前封面。');
+          const imageUrl = module.cover?.thumbnailUrl || module.banner?.thumbnailUrl || module.images?.[0]?.thumbnailUrl;
+          setPreview(imageUrl ? { imageUrl, referenceUrl: module.cover?.referenceUrl } : null);
+        } catch (cause) { if (current()) setPreviewError(cause instanceof Error ? cause.message : '当前显示封面未能读取，请重新打开。'); }
+      }
+    } catch (cause) { if (current()) setError(cause instanceof Error ? cause.message : '封面读取失败'); }
+    finally { if (current()) setLoading(false); }
+  }, [endpoint, moduleId, current]);
   useEffect(() => {
     alive.current = true; dialog.current?.showModal(); void initialize();
     return () => { alive.current = false; };
@@ -91,18 +131,19 @@ export function ModuleCoverEditor({ moduleId, moduleName, onClose, onSaved }: { 
     if (busyRef.current || pending || pickerSlot !== null) return;
     void (async () => {
       if (dirty && !await confirm('封面裁剪还未保存，放弃这次调整吗？', { title: '放弃调整', confirmLabel: '放弃调整' })) return;
+      if (!current()) return;
       onClose();
     })();
   };
   useDialogDismiss({ open: true, dialogRef: dialog, nativeDialog: true, onDismiss: dismiss });
 
   function complete(result: ModuleCoverSaveResult) {
-    if (!alive.current) return;
+    if (!current()) return;
     setPending(null); setDirty(false); onSaved(result.fixedCover); onClose();
   }
   async function check(input: ModuleCoverSaveInput) {
     const result = await json<ModuleCoverRequestResult>(await fetch(`${endpoint}?requestId=${encodeURIComponent(input.requestId)}`, { cache: 'no-store' }));
-    if (!alive.current) return;
+    if (!current()) return;
     if (result.status === 'saved') { complete(result); return; }
     if (result.status === 'failed') {
       setPending(null); setRetryAllowed(false); setError(result.error || '封面保存失败，原封面保留，请重试'); return;
@@ -111,7 +152,7 @@ export function ModuleCoverEditor({ moduleId, moduleName, onClose, onSaved }: { 
     setError(result.status === 'pending' ? '正在确认这次保存，原封面保留。请稍后检查结果。' : '暂未查到这次保存，可用同一次请求重试，避免重复保存。');
   }
   async function save(retry?: ModuleCoverSaveInput) {
-    if (busyRef.current || !state?.canManage) return;
+    if (!current() || busyRef.current || !state?.canManage) return;
     const selected = slots.slice(0, count);
     if (!retry && selected.some(slot => !slot?.crop)) return;
     const recipe: ModuleCoverRecipe = { version: 1, layout, sources: selected.map(slot => ({ assetId: slot!.source.assetId, version: slot!.source.version, crop: slot!.crop! })), output };
@@ -119,35 +160,38 @@ export function ModuleCoverEditor({ moduleId, moduleName, onClose, onSaved }: { 
     busyRef.current = true; setBusy(true); setError(''); setPending(input); setRetryAllowed(false);
     try {
       const result = await json<ModuleCoverRequestResult>(await fetch(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal: AbortSignal.timeout(90000) }));
+      if (!current()) return;
       if (result.status === 'saved') complete(result);
       else await check(input);
     } catch (cause) {
-      if (!alive.current) return;
+      if (!current()) return;
       const status = (cause as { status?: number }).status;
       if (status && status < 500) { setPending(null); setError(cause instanceof Error ? cause.message : '封面保存未完成'); }
       else {
         try { await check(input); }
         catch { setError('保存结果暂时无法确认，输入与原封面都已保留。请检查这次保存结果。'); }
       }
-    } finally { busyRef.current = false; if (alive.current) setBusy(false); }
+    } finally { if (current()) { busyRef.current = false; setBusy(false); } }
   }
   async function checkPending() {
-    if (!pending || busyRef.current) return;
+    if (!current() || !pending || busyRef.current) return;
     busyRef.current = true; setBusy(true);
     try { await check(pending); }
-    catch { setError('仍无法确认保存结果，请稍后再次检查；不要重复创建新封面。'); }
-    finally { busyRef.current = false; if (alive.current) setBusy(false); }
+    catch { if (current()) setError('仍无法确认保存结果，请稍后再次检查；不要重复创建新封面。'); }
+    finally { if (current()) { busyRef.current = false; setBusy(false); } }
   }
   async function choose(assetId: string, index: number) {
+    if (!current()) return;
     setReading(true);
     try {
       const value = await json<ModuleCoverEditorState>(await fetch(`${endpoint}?sourceAssetIds=${encodeURIComponent(assetId)}`, { cache: 'no-store' }));
-      if (!alive.current) return;
+      if (!current()) return;
       const source = value.sources.find(item => item.assetId === assetId);
       if (!source) throw new Error('这张图片不能用于当前模块封面，请选择本人有展示权的图片');
       setSlots(current => current.map((item, i) => i === index ? { source, key: ++sequence.current } : item));
       setDirty(true); setError('');
-    } finally { if (alive.current) setReading(false); }
+      return true;
+    } finally { if (current()) setReading(false); }
   }
   function changeLayout(value: ModuleCoverLayout) {
     if (disabled || value === layout) return;
@@ -157,8 +201,9 @@ export function ModuleCoverEditor({ moduleId, moduleName, onClose, onSaved }: { 
   }
   return createPortal(<>{productDialog}<dialog ref={dialog} className={styles.dialog} aria-label={`设置封面：${moduleName}`} aria-busy={busy || undefined}>
     <header className={styles.header}><div><h2>设置封面</h2><p>{moduleName}</p></div><button type="button" onClick={dismiss} disabled={busy || Boolean(pending)} aria-label="关闭封面编辑"><X size={20} /></button></header>
-    {loading ? <p role="status">正在读取已保存封面…</p> : !state ? <div role="alert"><p>{error}</p><button type="button" onClick={() => void initialize()}>重新读取</button></div> : <>
+    {!sessionAllowed ? <p role="status">账号状态已变化，当前封面操作已暂停。</p> : loading ? <p role="status">正在读取当前封面…</p> : !state ? <div role="alert"><p>{error}</p><button type="button" onClick={() => void initialize()}>重新读取</button></div> : <>
       {!state.canManage && <p role="status">封面由模块创建者维护。</p>}
+      <CurrentCover key={`${state.target.kind}:${state.target.id}:${state.revision}:${state.fixedCover?.imageUrl || state.fixedCover?.thumbnailUrl || preview?.imageUrl || ''}`} cover={state.fixedCover} preview={preview} error={previewError} />
       <div className={styles.toolbar}><div className={styles.layouts} role="group" aria-label="封面排版">{layouts.map(([value, label]) => <button key={value} type="button" aria-pressed={layout === value} disabled={disabled || !state.canManage} onClick={() => changeLayout(value)}>{label}</button>)}</div>
         {count === 2 && <button type="button" disabled={disabled || !state.canManage || !slots[0] || !slots[1]} onClick={() => { setSlots(([left, right]) => [right, left].map(slot => slot ? { ...slot, restore: slot.crop, key: ++sequence.current } : null)); setDirty(true); }}><ArrowLeftRight size={16} />交换位置</button>}
       </div>
@@ -169,7 +214,7 @@ export function ModuleCoverEditor({ moduleId, moduleName, onClose, onSaved }: { 
         <div className={styles.cellActions}><button type="button" disabled={disabled || !state.canManage} onClick={() => setPickerSlot(index)}><ImagePlus size={16} />{slot ? '换图' : '选择图片'}</button>
           {slot && <button type="button" title="重置这张图的裁剪" aria-label="重置这张图的裁剪" disabled={disabled || !state.canManage} onClick={() => { setSlots(current => current.map((item, i) => i === index && item ? { source: item.source, key: ++sequence.current } : item)); setDirty(true); }}><RotateCcw size={16} /></button>}</div>
       </div>)}</div>
-      <div className={styles.previewRow}><span>封面预览</span><div className={`${styles.preview} ${styles[layout]}`}>{slots.slice(0, count).map((slot, index) => <CropPreview key={index} slot={slot} />)}</div></div>
+      <div className={styles.previewRow}><span>草稿预览{dirty ? '（未保存）' : ''}</span><div className={`${styles.preview} ${styles[layout]}`}>{slots.slice(0, count).map((slot, index) => <CropPreview key={index} slot={slot} />)}</div></div>
       {error && <p className={styles.error} role="alert">{error}</p>}
       <footer className={styles.footer}><button type="button" onClick={dismiss} disabled={busy || Boolean(pending)}>取消</button>
         {pending ? <><button type="button" disabled={busy} onClick={() => void checkPending()}>{busy ? '确认中…' : '检查保存结果'}</button>{retryAllowed && <button type="button" disabled={busy} onClick={() => void save(pending)}>重试本次保存</button>}</>
@@ -178,6 +223,6 @@ export function ModuleCoverEditor({ moduleId, moduleName, onClose, onSaved }: { 
     </>}
     {pickerSlot !== null && <UploadedImagePicker open imageOnly target="image-studio" title="选择封面图片" confirmLabel="使用这张图片" purpose="module-cover" maxSelection={1} currentCount={0} currentAssetIds={[]} portalContainer={dialog.current}
       onClose={() => setPickerSlot(null)} onUploadFile={(file, onProgress) => uploadFileAsAsset(file, { onProgress })}
-      onConfirm={async ids => { if (!ids[0]) return false; await choose(ids[0], pickerSlot); setPickerSlot(null); return true; }} />}
+      onConfirm={async ids => { if (!ids[0] || !await choose(ids[0], pickerSlot) || !current()) return false; setPickerSlot(null); return true; }} />}
   </dialog></>, document.body);
 }

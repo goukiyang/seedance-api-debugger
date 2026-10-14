@@ -49,6 +49,9 @@ export interface ResourceLibraryPickerProps {
 type Preferences = { view: 'library' | 'favorites' | 'recent'; scope: PickerScope; source: string; template: string; type: string; query: string; sort: string; album: string; project: string; scroll: number; pages: number };
 const defaults: Preferences = { view: 'library', scope: 'mine', source: 'all', template: '', type: 'all', query: '', sort: 'newest', album: '', project: '', scroll: 0, pages: 1 };
 const labels = { image: '图片', video: '视频', audio: '音频' };
+function pickerFilterKey(typesKey: string, prefs: Preferences) {
+  return JSON.stringify([typesKey, prefs.view, prefs.scope, prefs.source, prefs.template, prefs.type, prefs.query, prefs.sort, prefs.album, prefs.project]);
+}
 
 function selectionName(item: PickerItem) {
   if (item.generationOrigin?.templateName) return item.generationOrigin.templateName;
@@ -130,7 +133,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const dialog = useRef<HTMLDivElement>(null), backdrop = useRef<HTMLDivElement>(null), body = useRef<HTMLDivElement>(null), input = useRef<HTMLInputElement>(null);
   const sequence = useRef(0), session = useRef(0), locked = useRef(false), restoring = useRef(false), restoration = useRef(0);
   const readingMore = useRef(false);
-  const filterKey = JSON.stringify([typesKey, prefs.view, prefs.scope, prefs.source, prefs.template, prefs.type, prefs.query, prefs.sort, prefs.album, prefs.project]);
+  const filterKey = pickerFilterKey(typesKey, prefs);
   const [loadedFilter, setLoadedFilter] = useState('');
   const active = useRef(open); active.current = open;
   const close = () => { if (locked.current) { setError('上传或添加尚未结束，请等待完成'); return; } onClose(); };
@@ -240,6 +243,17 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     if (resultPages.restoring || loading) return;
     body.current?.scrollTo({ top: 0 });
   }, [resultPages.start, resultPages.restoring]);
+  const refreshDirectory = (next: Preferences = { ...prefs, query }) => {
+    if (locked.current) return;
+    // Invalidate in-flight reads before changing the complete filter snapshot.
+    sequence.current++; readCursor.current = null;
+    resultPages.reset();
+    try { localStorage.removeItem(`${prefsKey}:page:v1:${pickerFilterKey(typesKey, next)}`); } catch { /* Optional browse position. */ }
+    setQuery(next.query); change(next); setNavigationOpen(false);
+    setPage(1); setTotal(0); setHasMore(false); setLoadedFilter(''); setLoading(true);
+    setEpoch(value => value + 1);
+  };
+  const showAllGenerated = () => refreshDirectory({ ...defaults, source: 'generated' });
   const upload = async (files: File[]) => {
     if (locked.current || !files.length) return;
     if (files.some(file => !types.includes(file.type.split('/')[0] as AssetType))) { setError(`请选择${types.map(t => labels[t]).join('、')}文件`); return; }
@@ -358,6 +372,9 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const scopedAlbums = albums.filter(a => a.scope === prefs.scope), projects = Array.from(new Map(scopedAlbums.flatMap(a => a.project ? [[a.project.id, a.project] as const] : [])).values());
   const selectedCounts = { image: selected.filter(i => i.type === 'image').length, video: selected.filter(i => i.type === 'video').length, audio: selected.filter(i => i.type === 'audio').length };
   const availableScopes = scopes.filter(([s]) => s === 'mine' || albums.some(a => a.scope === s));
+  const generatedLabel = prefs.view === 'favorites' ? '喜欢的生成' : prefs.view === 'recent' ? '最近用过的生成' : '全部生成';
+  const generatedViewNotice = prefs.source === 'generated' && prefs.view !== 'library'
+    ? prefs.view === 'favorites' ? '当前仅显示我喜欢的生成素材' : '当前仅显示本账号在本浏览器最近用过的生成素材' : '';
   return createPortal(<div ref={backdrop} className={styles.backdrop}>
     <div ref={dialog} role="dialog" aria-modal="true" aria-label={title} className={`${styles.dialog} ${expanded ? styles.expanded : ''}`}
       onDragOver={e => { if (Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault(); }}
@@ -383,7 +400,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
           <div className={styles.sourceControl} role="group" aria-label="素材来源"><span>来源</span><div className={styles.sourceSegments}>
             <button type="button" aria-pressed={prefs.source === 'all'} onClick={() => changeSource('all')}>全部来源</button>
             <button type="button" aria-pressed={prefs.source === 'uploaded'} onClick={() => changeSource('uploaded')}>上传的</button>
-            <button type="button" aria-pressed={prefs.source === 'generated'} onClick={() => changeSource('generated')}>全部生成</button>
+            <button type="button" aria-pressed={prefs.source === 'generated'} onClick={() => changeSource('generated')}>{generatedLabel}</button>
             {types.includes('image') && <>
               <button type="button" aria-pressed={prefs.source === 'template-image'} onClick={() => changeSource('template-image')}>模板生图</button>
               <button type="button" aria-pressed={prefs.source === 'random-person'} onClick={() => changeSource('random-person')}>随机人物</button>
@@ -395,8 +412,10 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
           </div></div>
           {prefs.source === 'template-image' && <label className={styles.sortControl}><span>模板</span><select aria-label="具体模板" value={prefs.template} onChange={e => change({ template: e.target.value })}><option value="">全部模板</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>}
           <label className={styles.sortControl}><span>排序</span><select aria-label="排序" value={prefs.sort} onChange={e => change({ sort: e.target.value })}><option value="newest">最新添加</option><option value="name">名称</option></select></label>
-          <button type="button" className={styles.resetFilter} title="重置筛选和浏览位置" aria-label="重置筛选和浏览位置" onClick={() => { setQuery(''); change(defaults); }}><RotateCcw size={16} /></button>
+          <button type="button" className={styles.refreshDirectory} disabled={busy || loading} onClick={() => refreshDirectory()}>刷新列表</button>
+          <button type="button" className={styles.resetFilter} title="重置筛选和浏览位置" aria-label="重置筛选和浏览位置" disabled={busy} onClick={() => refreshDirectory(defaults)}><RotateCcw size={16} /></button>
         </div>
+        {generatedViewNotice && <div className={styles.generatedScope}><span>{generatedViewNotice}</span><button type="button" disabled={busy} onClick={showAllGenerated}>查看我的全部生成</button></div>}
         {uploadLabel && <UploadProgressIndicator busy label={progress?.label || '准备上传'} detail={uploadLabel} percent={progress?.percent} />}
         {notice && <div role="status" className={styles.notice}>{notice}</div>}
         {removedItem && <div role="status" className={styles.notice}>已从我的素材库删除，文件和已有引用保留。<button type="button" disabled={busy} onClick={() => void removeItem(removedItem, true)}>撤销删除</button></div>}
@@ -416,8 +435,8 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
               <details className={styles.cardDetails}><summary>详情</summary><small className={styles.originalName}>{item.fileName}</small><small>{item.source === 'generated' ? '生成' : item.source === 'uploaded' ? '上传' : '图集'}{item.width && item.height ? ` · ${item.width} × ${item.height}` : ''} · <RelativeTime value={item.createdAt} /></small></details>
             </div>
           </article>; })}</div>
-          {loading && <div className={styles.empty} role="status">正在读取素材</div>}{!loading && !items.length && <div className={styles.empty}>{prefs.view === 'recent' ? '本机还没有符合筛选的最近选用素材' : '没有符合筛选的可用素材'}</div>}
-          <div className={styles.more}><span>{total} 个素材</span><nav className={styles.pagination} aria-label="素材分页">
+          {loading && <div className={styles.empty} role="status">正在读取素材</div>}{!loading && !error && !resultPages.navigationIssue && loadedFilter === filterKey && !items.length && <div className={styles.empty}>{prefs.view === 'recent' ? '本机还没有符合筛选的最近选用素材' : '没有符合筛选的可用素材'}</div>}
+          <div className={styles.more}><span>{loadedFilter === filterKey ? `${total} 个素材` : loading ? '正在读取目录' : '目录尚未读取成功'}</span><nav className={styles.pagination} aria-label="素材分页">
             <button type="button" title="回到第一页" aria-label="回到第一页素材" disabled={loading || busy || (!resultPages.start && !resultPages.restoring)} onClick={resultPages.reset}><ChevronFirst size={17} /></button>
             <button type="button" title="上一页" aria-label="上一页素材" disabled={!resultPages.start || loading || busy || (resultPages.restoring && !error && !resultPages.navigationIssue)} onClick={resultPages.previous}><ChevronLeft size={17} /></button>
             <span role="status">第 {resultPages.page}{resultPages.pages === null ? ' 页，仍有更多' : ` / ${resultPages.pages} 页`}{resultPages.restoring && !resultPages.navigationIssue && !error ? '，正在读取目标页' : ''}</span>

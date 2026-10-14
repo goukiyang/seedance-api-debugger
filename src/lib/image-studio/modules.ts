@@ -16,16 +16,19 @@ import { getStudioModuleReferencePolicy, parseStudioReferencePolicy, removeStudi
 import { studioTemplateDefaultPolicy } from './template-defaults';
 import { assertStudioActor, deleteStudioGroup, getSharedStudioPersonalOverrides, getStudioRemovedDefaultGroups, publishSharedStudioModule, readSharedStudioModules, restoreStudioDefaultGroup, saveSharedStudioPersonal, studioPublisherKey, studioSharedBinding, StudioSharingError, type SharedStudioModuleRead } from './shared-contract';
 import type { SharedStudioLiveDTO } from './shared-types';
-import { studioFixedCoverDTO } from './module-cover';
+import { moduleCoverKey, studioFixedCoverDTO } from './module-cover';
 import { readStudioModuleSharingPreference, writeStudioModuleSharingPreference, studioModuleSharingPreferenceKey } from './module-sharing-preference';
 import { projectSharedStudioCapabilities } from './shared-capabilities';
 import { readReceipt, readOwnedReceipt, writeReceipt, sharedCommandFingerprint, publicStudioReceipt } from './shared-command-storage';
+import { assertStudioDeletionIdle, assertStudioWorkspaceNotDeleted, listStudioDeletedSources, parseStudioDeletionReceipt,
+  recordStudioWorkspaceDeletion, studioWorkspaceDeletionCapability } from './workspace-deletion';
+import type { StudioDeletionCommandStatus, StudioDeletionNotApplied, StudioDeletionReceipt } from './shared-types';
 
 export { deleteStudioGroup };
 
 export const defaultStudioModuleId = (ownerId: string) => `default-${ownerId}`;
 export class StudioModuleError extends Error {
-  commandOutcome?: { status: 'not-applied'; actorId: string; moduleId: string; requestId: string };
+  commandOutcome?: { status: 'not-applied'; actorId: string; moduleId: string; requestId: string } | StudioDeletionNotApplied;
   constructor(message: string, public status = 400) { super(message); }
 }
 export function validStudioModuleId(id: unknown, ownerId: string): id is string {
@@ -142,7 +145,7 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     state.capabilities.editDefinition = state.capabilities.editPersonalDraft;
     state.capabilities.saveDefinition = state.capabilities.editPersonalDraft;
   }
-  return { ...state, id: row.id, name: row.name, prompt: row.prompt, count: row.count, referenceLimit, referencePolicy, aspectRatio: row.aspect_ratio || 'auto', resolution: generation.resolution, revision: row.revision, saved,
+  return { ...state, deletion: studioWorkspaceDeletionCapability(ownerId, row.id, row.revision, saved), id: row.id, name: row.name, prompt: row.prompt, count: row.count, referenceLimit, referencePolicy, aspectRatio: row.aspect_ratio || 'auto', resolution: generation.resolution, revision: row.revision, saved,
     model: generation.model, quality, groupName: row.group_name || '未分组', banner: banner ? { id: banner.id, originalUrl: studioTemplateAssetUrl(banner.id), thumbnailUrl: studioTemplateAssetUrl(banner.id, true), width: banner.width, height: banner.height } : null,
     fixedCover, coverEditable: saved,
     cover: !fixedCover && latestResult ? { resultUrl: studioAssetUrl(latestResult.id), thumbnailUrl: studioAssetUrl(latestResult.id, true), referenceUrl: representativeReference } : null,
@@ -204,7 +207,7 @@ async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: 
     ...(unavailableReason ? { unavailableReason } : {}), overriddenFields: Object.keys(overrides) as SharedStudioLiveDTO['overriddenFields'],
     ...(defaults ? { defaults } : {}), ...(repairDefinition ? { repairDefinition } : {}) };
   const fixedCover = dto?.fixedCover ?? await studioFixedCoverDTO(actor, { kind: 'preset', id: binding.presetId });
-  return { ...state, ...(repairDefinition ? { repairDefinition } : {}), id: row.id,
+  return { ...state, deletion: studioWorkspaceDeletionCapability(ownerId, row.id, row.revision), ...(repairDefinition ? { repairDefinition } : {}), id: row.id,
     name: dto?.name || repairDefinition?.name || row.name.trim() || `历史模板 · ${row.id.slice(0, 8)}`,
     groupName: dto?.groupName || repairDefinition?.groupName || row.group_name?.trim() || '未分组',
     prompt: overrides.prompt ?? '', personalPrompt: overrides.prompt ?? '', templatePrompt: dto?.templatePrompt ?? repairDefinition?.templatePrompt ?? '',
@@ -288,7 +291,8 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
       sharing: source ? source.is_shared ? 'shared' : 'private' : item.source_preset_id ? 'unknown' : 'private', dependency: 'unknown', reasonCode,
       sourceRevision: source && canViewSource ? source.updated_at.toISOString() : null, moduleRevision: item.revision, definitionToken: null,
       actorAllowed: true, ownsWorkspace: true, canViewSource, canManageSource });
-    if (!binding) return { ...state, id: item.id, name: item.name.trim() || `历史模板 · ${item.id.slice(0, 8)}`,
+    const deletion = studioWorkspaceDeletionCapability(ownerId, item.id, item.revision);
+    if (!binding) return { ...state, deletion, id: item.id, name: item.name.trim() || `历史模板 · ${item.id.slice(0, 8)}`,
       groupName: item.group_name?.trim() || '未分组', sourcePresetId: item.source_preset_id,
       sourcePresetShared: source ? source.is_shared : item.source_preset_id ? null : false, revision: item.revision, canManageGroup: true, coverEditable: true };
     const resolved = sharedRead?.resolved;
@@ -304,7 +308,7 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
       ...(sharedRead?.unavailable ? { unavailableReason: sharedRead.unavailable.message } : {}) };
     const legalNavigationSource = source && canViewSource && !archived ? source : null;
     const canManageGroup = binding.mode === 'publisher' && canManageSource && !archived;
-    return { ...state, id: item.id, name: resolved?.definition.name || repair?.name || legalNavigationSource?.name || item.name.trim() || `历史模板 · ${item.id.slice(0, 8)}`,
+    return { ...state, deletion, id: item.id, name: resolved?.definition.name || repair?.name || legalNavigationSource?.name || item.name.trim() || `历史模板 · ${item.id.slice(0, 8)}`,
       groupName: resolved?.definition.groupName || repair?.groupName || legalNavigationSource?.group_name || item.group_name?.trim() || '未分组',
       sourcePresetId: binding.presetId, sourcePresetShared: state.sharing === 'unknown' ? null : state.sharing === 'shared',
       sourcePresetOwnedByViewer: source?.owner_id === ownerId, coverEditable: canManageGroup, revision: item.revision, canManageGroup, sharedLive,
@@ -312,29 +316,94 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
   })) : undefined;
   return { modules, nextCursor: rows.length > 12 ? visible[visible.length - 1].id : null,
     removedDefaultGroups: await getStudioRemovedDefaultGroups(ownerId),
+    deletedSourcePresetIds: (await listStudioDeletedSources(ownerId)).filter(item => !item.reopenedModuleId).map(item => item.presetId),
     ...(directory ? { directory: [
-      ...(directory.some(item => item.id === defaultId) ? [] : [{ id: defaultId, name: '模块 1', groupName: '未分组' }]),
+      ...(directory.some(item => item.id === defaultId) ? [] : [{ id: defaultId, name: '模块 1', groupName: '未分组',
+        deletion: studioWorkspaceDeletionCapability(ownerId, defaultId, 0, false) }]),
       ...projectedDirectory!,
     ] } : {}) };
 }
-export async function deleteStudioModule(ownerId: string, id: unknown, revision: unknown) {
-  if (!validStudioModuleId(id, ownerId) || !Number.isInteger(revision)) throw new StudioModuleError('模板参数无效');
+export async function deleteStudioModule(ownerId: string, id: unknown, revision: unknown, requestId?: unknown): Promise<StudioDeletionReceipt> {
+  if (typeof requestId !== 'string' || !/^[A-Za-z0-9:_-]{1,160}$/.test(requestId)) {
+    throw new StudioModuleError('请刷新页面后删除，并保留有效的原请求编号', 428);
+  }
+  if (!validStudioModuleId(id, ownerId) || !Number.isSafeInteger(revision) || Number(revision) < 0) throw new StudioModuleError('模板参数无效');
   if (id === defaultStudioModuleId(ownerId)) throw new StudioModuleError('默认模板需要保留，请删除其他模板');
-  await prisma.$transaction(async tx => {
+  // The old server-call shape remains callable, but cannot perform an
+  // unreceipted deletion. Never synthesize a new request id on the caller's behalf.
+  const originalRequestId = requestId;
+  const fingerprint = sharedCommandFingerprint(['delete-module', id, revision]);
+  try {
+    return await prisma.$transaction(async tx => {
+      await assertStudioActor(ownerId, tx);
+      const prior = await readReceipt(tx, ownerId, originalRequestId, fingerprint);
+      if (prior) return parseStudioDeletionReceipt(prior, ownerId, 'workspace', id);
+      const current = await tx.imageStudioModule.findFirst({ where: { id, owner_id: ownerId } });
+      if (!current) throw new StudioModuleError('工作区不存在或已删除，请核对原请求结果', 409);
+      await assertStudioWorkspaceNotDeleted(ownerId, id, tx);
+      if (current.revision !== revision) throw new StudioModuleError('模板已更新，请刷新后再删除', 409);
+      await assertStudioDeletionIdle(tx, ownerId, id);
+      const binding = await studioSharedBinding(ownerId, id, tx);
+      if (binding && binding.presetId !== current.source_preset_id) throw new StudioModuleError('模板来源绑定已变化，请重新读取后删除', 409);
+      // Remove only configuration owned through this verified workspace. Source
+      // definitions, assets, tasks, receipts and their history are independent.
+      await removeStudioModuleFixedReferences(ownerId, id, tx);
+      await removeStudioModuleReferencePolicy(ownerId, id, tx);
+      if (binding?.mode === 'publisher') {
+        const pointer = await tx.platformSetting.findUnique({ where: { key: studioPublisherKey(binding.presetId) }, select: { value_json: true } });
+        if (pointer) {
+          let publisher: { ownerId?: unknown; moduleId?: unknown; presetId?: unknown; protocol?: unknown };
+          try { publisher = JSON.parse(pointer.value_json); } catch { throw new StudioModuleError('模板创建者绑定无法确认', 409); }
+          if (!publisher || publisher.ownerId !== ownerId || publisher.moduleId !== id || publisher.presetId !== binding.presetId || publisher.protocol !== binding.protocol) {
+            throw new StudioModuleError('模板创建者绑定已变化，请重新读取后删除', 409);
+          }
+          await tx.platformSetting.deleteMany({ where: { key: studioPublisherKey(binding.presetId), value_json: pointer.value_json } });
+        }
+      }
+      await tx.platformSetting.deleteMany({ where: { key: { in: [`studio_style_selection_v1:${id}`, `studio_skill_selection_v1:module:${id}`,
+        `studio_quick_presets_v1:${id}`, moduleCoverKey({ kind: 'module', id }),
+        `studio_shared_binding_v1:${id}`, `studio_shared_overrides_v1:${id}`, studioModuleSharingPreferenceKey(id)] } } });
+      const changed = await tx.imageStudioModule.deleteMany({ where: { id, owner_id: ownerId, revision: current.revision } });
+      if (changed.count !== 1) throw new StudioModuleError('模板已更新，请重新读取后删除', 409);
+      const committedAt = new Date().toISOString();
+      await recordStudioWorkspaceDeletion(tx, ownerId, id, current.revision, current.source_preset_id,
+        originalRequestId as string, committedAt);
+      const result: StudioDeletionReceipt = { version: 1, actorId: ownerId, deleted: true, objectKind: 'workspace', id,
+        moduleRevision: current.revision, sourcePresetId: current.source_preset_id,
+        requestId: originalRequestId as string, committedAt, noOp: false };
+      await writeReceipt(tx, ownerId, originalRequestId, fingerprint, { ...result, action: 'delete-module' });
+      return result;
+    });
+  } catch (error) {
+    // Only a known business rejection from the rolled-back transaction may
+    // unlock this command. Transport/DB errors and any original own receipt stay unknown.
+    if (error instanceof StudioModuleError || error instanceof StudioSharingError) {
+      try {
+        await assertStudioActor(ownerId);
+        if (!await readOwnedReceipt(prisma, ownerId, originalRequestId)) {
+          const rejected = new StudioModuleError(error.message, error.status);
+          rejected.commandOutcome = { status: 'not-applied', actorId: ownerId, objectKind: 'workspace', id, requestId: originalRequestId as string };
+          throw rejected;
+        }
+      } catch (proofError) {
+        if (proofError instanceof StudioModuleError && proofError.commandOutcome) throw proofError;
+      }
+    }
+    throw error;
+  }
+}
+
+export async function studioModuleDeletionStatus(ownerId: string, id: unknown, requestId: unknown): Promise<StudioDeletionCommandStatus> {
+  if (!validStudioModuleId(id, ownerId)) throw new StudioModuleError('删除查询参数无效');
+  return prisma.$transaction(async tx => {
     await assertStudioActor(ownerId, tx);
-    const current = await tx.imageStudioModule.findFirst({ where: { id, owner_id: ownerId } });
-    if (!current) return;
-    if (current.revision !== revision) throw new StudioModuleError('模板已更新，请刷新后再删除', 409);
-    const pending = await tx.imageStudioTask.count({ where: { owner_id: ownerId, module_id: id, status: { in: ['queued', 'running', 'channel_queued', 'channel_running'] } } });
-    if (pending) throw new StudioModuleError('模板还有生成中的任务，请完成后再删除', 409);
-    // Tasks and assets have independent ownership and remain available in assets.
-    await removeStudioModuleFixedReferences(ownerId, id, tx);
-    await tx.platformSetting.deleteMany({ where: { key: `studio_style_selection_v1:${id}` } });
-    await removeStudioModuleReferencePolicy(ownerId, id, tx);
-    const binding = await studioSharedBinding(ownerId, id, tx);
-    if (binding?.mode === 'publisher') await tx.platformSetting.deleteMany({ where: { key: studioPublisherKey(binding.presetId) } });
-    await tx.platformSetting.deleteMany({ where: { key: { in: [`studio_shared_binding_v1:${id}`, `studio_shared_overrides_v1:${id}`, studioModuleSharingPreferenceKey(id)] } } });
-    await tx.imageStudioModule.deleteMany({ where: { id, owner_id: ownerId, revision: current.revision } });
+    const saved = await readOwnedReceipt(tx, ownerId, requestId);
+    if (!saved) return { status: 'not-found' };
+    const receipt = parseStudioDeletionReceipt(saved.result, ownerId, 'workspace', id);
+    if (saved.fingerprint !== sharedCommandFingerprint(['delete-module', id, receipt.objectKind === 'workspace' ? receipt.moduleRevision : null])
+      || receipt.requestId !== requestId) throw new StudioModuleError('原删除请求与对象不匹配，请保留原请求编号核对', 409);
+    const current = await tx.imageStudioModule.findFirst({ where: { id, owner_id: ownerId }, select: { revision: true } });
+    return { status: 'completed', receipt, current: { exists: Boolean(current), moduleRevision: current?.revision ?? null } };
   });
 }
 
@@ -434,6 +503,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
   }
   const row = await prisma.$transaction(async tx => {
     const identity = await assertStudioActor(ownerId, tx);
+    await assertStudioWorkspaceNotDeleted(ownerId, id, tx);
     if (fixedReferences !== undefined && identity.role !== 'admin') throw new StudioModuleError('固定模板图只能由管理员修改', 403);
     const current = await tx.imageStudioModule.findUnique({ where: { id } });
     if (current && current.owner_id !== ownerId) throw new StudioModuleError('无权修改这个模块', 403);

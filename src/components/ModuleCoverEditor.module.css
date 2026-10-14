@@ -1,4 +1,4 @@
-.dialog { width: min(900px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 22px; border: 1px solid #485358; border-radius: 14px; color: #edf1f2; background: #171d20; overflow: auto; }
+.dialog { position: fixed; inset: 0; margin: auto; box-sizing: border-box; width: min(900px, calc(100vw - 32px)); max-width: calc(100vw - 32px); height: fit-content; max-height: calc(100dvh - 32px); padding: 22px; border: 1px solid #485358; border-radius: 14px; color: #edf1f2; background: #171d20; overflow: auto; }
 .dialog::backdrop { background: rgb(5 9 11 / .78); }
 .dialog button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 7px 12px; border: 1px solid #4b585f; border-radius: 7px; color: inherit; background: #242d32; cursor: pointer; }
 .dialog button:hover:not(:disabled) { background: #33424a; }
@@ -11,6 +11,10 @@
 .toolbar { flex-wrap: wrap; justify-content: space-between; }
 .layouts button[aria-pressed="true"] { color: #c5f4ed; border-color: #529f94; background: #255d57; }
 .hint { margin: 12px 0; color: #bac5cb; font-size: 14px; line-height: 1.55; }
+.currentCover { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin: 0 0 18px; color: #b3c2ca; font-size: 13px; }
+.currentPreview { display: flex; width: 180px; max-width: 100%; aspect-ratio: 1; background: #0d1215; }
+.currentPreview img { display: block; width: 100%; min-width: 0; flex: 1 1 0; object-fit: contain; }
+.currentCover p { margin: 0; max-width: 60ch; line-height: 1.5; overflow-wrap: anywhere; }
 .editFrame { display: grid; width: 100%; aspect-ratio: 4 / 3; background: #0d1215; overflow: hidden; border: 1px solid #52616b; }
 .horizontal { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .vertical { grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
@@ -35,4 +39,4 @@
 .footer { justify-content: flex-end; flex-wrap: wrap; position: sticky; bottom: -22px; margin-top: 18px; padding: 14px 0; background: #171d20; }
 .dialog .primary { background: #236b62; border-color: #539d94; font-weight: 650; }
 .dialog .primary:hover:not(:disabled) { background: #2d8479; }
-@media (max-width: 600px) { .dialog { padding: 14px; width: calc(100vw - 16px); max-height: calc(100dvh - 16px); } .header h2 { font-size: 20px; } .cellActions { top: 5px; right: 5px; gap: 4px; } .cellActions button { min-height: 32px; padding: 4px 8px; } .zoom { gap: 4px; left: 5px; right: 5px; font-size: 11px; padding: 4px; } .zoom input { width: 75px; } .footer { bottom: -14px; } }
+@media (max-width: 600px) { .dialog { padding: 14px; width: calc(100vw - 16px); max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); } .header h2 { font-size: 20px; } .cellActions { top: 5px; right: 5px; gap: 4px; } .cellActions button { min-height: 32px; padding: 4px 8px; } .zoom { gap: 4px; left: 5px; right: 5px; font-size: 11px; padding: 4px; } .zoom input { width: 75px; } .footer { bottom: -14px; } }

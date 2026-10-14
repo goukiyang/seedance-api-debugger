@@ -51,6 +51,7 @@ type ResultRenderers<T> = {
   renderOverlay?: (item: T, controls: { openPreview: () => void }) => ReactNode; renderSupplement?: (item: T) => ReactNode;
   renderReactionAction?: (item: T) => ReactNode;
   contextActionsEnabled?: boolean;
+  coverDeleteWithContextActions?: boolean;
   contextActions?: (item: T) => ResultImageContextMenuItem[];
 };
 
@@ -63,7 +64,7 @@ function WaitingImage({ src }: { src?: string }) {
   return src && failed !== src ? <img className={styles.waitingImage} src={src} alt="本次输入图片" onError={() => setFailed(src)} /> : <ImagePlus size={24} aria-hidden="true" />;
 }
 
-function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope, visible, currentSelection, supportsNextActions, nextSourceSet, select, changePreview, operate, feedback, onSelect, onQuickUse, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, renderReactionAction, contextActionsEnabled = false, contextActions }: ResultRenderers<T> & {
+function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope, visible, currentSelection, supportsNextActions, nextSourceSet, select, changePreview, operate, feedback, onSelect, onQuickUse, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, renderReactionAction, contextActionsEnabled = false, coverDeleteWithContextActions = false, contextActions }: ResultRenderers<T> & {
   item: T; scope: string; visible: boolean; currentSelection: string | null | undefined; supportsNextActions: boolean; nextSourceSet: Set<ContentKey>;
   select: (item: T) => void; changePreview: (item: T | null, alreadySelected?: boolean) => void;
   operate: (item: T, kind: 'copy' | 'download') => Promise<void>;
@@ -128,7 +129,7 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
                 {coverReactions ? <div className={styles.coverReactions}>{reactions}</div> : reactions}
       {renderOverlay?.(item, { openPreview: () => changePreview(item) })}
       <ImageBillingBadge billing={item.billing} />
-      {!contextActionsEnabled && renderDelete && <div className={styles.deleteSlot} data-result-secondary onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{renderDelete(item)}</div>}
+      {(!contextActionsEnabled || coverDeleteWithContextActions) && renderDelete && <div className={styles.deleteSlot} data-cover-context-delete={coverDeleteWithContextActions || undefined} data-result-secondary onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{renderDelete(item)}</div>}
       {(item.media || secondaryActions) && <div className={styles.mediaActions} data-result-secondary aria-busy={feedback?.id === item.id && feedback.busy || undefined} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
         {item.media && <div className={styles.commonActions}>
           {item.download && (!contextActionsEnabled || !readOnly) && <button type="button" aria-label="下载图片" title="下载图片" disabled={item.downloadDisabled || Boolean(feedback?.busy)} onClick={() => void operate(item, 'download')}><Download size={15} /></button>}
@@ -147,7 +148,7 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
   </article>;
 }
 
-export function GeneratedImageResults<T extends GeneratedImageResult>({ items, scope, visible = true, loading = false, busy = false, error = '', emptyLabel = '暂无生成结果', hasMore = false, total, loadMore = noMore, onRetry, selectedId, onSelect, previewId, onPreviewChange, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, renderReactionAction, paginationSlot, onQuickUse, contextActionsEnabled = false, contextActions }: ResultRenderers<T> & {
+export function GeneratedImageResults<T extends GeneratedImageResult>({ items, scope, visible = true, loading = false, busy = false, error = '', emptyLabel = '暂无生成结果', hasMore = false, total, loadMore = noMore, onRetry, selectedId, onSelect, previewId, onPreviewChange, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, renderReactionAction, paginationSlot, onQuickUse, contextActionsEnabled = false, coverDeleteWithContextActions = false, contextActions }: ResultRenderers<T> & {
   items: T[]; scope: string; visible?: boolean; loading?: boolean; busy?: boolean; error?: string; emptyLabel?: string;
   hasMore?: boolean; loadMore?: () => Promise<unknown>; onRetry?: () => void;
   total?: number | null;
@@ -277,7 +278,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
         supportsNextActions={supportsNextActions} nextSourceSet={nextSourceSet} select={select} changePreview={changePreview} operate={operate} feedback={feedback}
         onSelect={onSelect} onQuickUse={onQuickUse} renderMetadata={renderMetadata} renderActions={renderActions} renderPrimaryActions={renderPrimaryActions}
         renderDelete={renderDelete} renderOverlay={renderOverlay} renderSupplement={renderSupplement} renderReactionAction={renderReactionAction}
-        contextActionsEnabled={contextActionsEnabled} contextActions={contextActions} />)}
+        contextActionsEnabled={contextActionsEnabled} coverDeleteWithContextActions={coverDeleteWithContextActions} contextActions={contextActions} />)}
     </div>
     {paginationSlot === undefined && pagination('bottom')}
     {preview?.media && <ZoomableImagePreview {...preview.media} nextActionSources={nextSources as ContentKey[]} nextActionResultId={preview.id} imageNeighbors={imageNeighbors} resolveDownload={src => items.find(item => item.media?.src === src)?.download} previewKey={preview.media.previewKey || `${scope}:${preview.id}`} hasNavigation={previewable.length > 1} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => changePreview(null)} />}

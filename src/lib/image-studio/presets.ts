@@ -23,6 +23,8 @@ import { readOwnedReceipt, readReceipt, writeReceipt, sharedCommandFingerprint, 
 import { recordStudioLifecycleEvent, studioDefinitionChangedFields, publicStudioLifecycleDetail } from './shared-lifecycle-audit';
 import { readSharedStudioSnapshot } from './read-snapshot';
 import { projectSharedStudioCapabilities, studioStateReason } from './shared-capabilities';
+import { assertStudioDeletionIdle, parseStudioDeletionReceipt, recordStudioSourceReselection, studioSourceDeletionCapability } from './workspace-deletion';
+import type { StudioDeletionCommandStatus, StudioDeletionReceipt } from './shared-types';
 import type { SharedStudioSharingCurrent, SharedStudioSharingReceipt, SharedStudioCommandStatus, SharedStudioLifecycleHistory } from './shared-types';
 
 export { canUseCompanyTemplatesForUser as canUseCompanyTemplates };
@@ -139,6 +141,7 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
   const assets = await prisma.asset.findMany({ where: { id: { in: Array.from(new Set([...assetIds, ...bannerIds])) }, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(user)] }, select: { id: true, owner_id: true, original_url: true, thumbnail_url: true, width: true, height: true } });
   const byId = new Map(assets.map(asset => [asset.id, asset]));
   return Promise.all(visibleRows.map(async row => {
+    const deletion = studioSourceDeletionCapability(user, row);
     if (row.is_shared) {
       try {
         const { publicDTO } = await resolveSharedStudioDefinition(user, row.id);
@@ -153,7 +156,7 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
           canManageSource: canManageStudioPreset(user, row), reasonCode: error.reasonCode });
         state.capabilities.editDefinition = { allowed: false, reasonCode: error.reasonCode, reason: studioStateReason[error.reasonCode] };
         state.capabilities.saveDefinition = { allowed: false, reasonCode: error.reasonCode, reason: studioStateReason[error.reasonCode] };
-        return { ...state, id: row.id, name: row.name, scope: row.scope, groupName: row.group_name, revision: row.updated_at.toISOString(), model: row.model,
+        return { ...state, deletion, id: row.id, name: row.name, scope: row.scope, groupName: row.group_name, revision: row.updated_at.toISOString(), model: row.model,
           isShared: row.is_shared, ownedByViewer: row.owner_id === user.id, canManageSharing: canManageStudioPreset(user, row),
           unavailable: true, unavailableReason: studioStateReason[error.reasonCode], prompt: '', context: '', contextConfigured: false, referencesAvailable: false,
           fixedCover: await studioFixedCoverDTO(user, { kind: 'preset', id: row.id }), coverEditable: canManageStudioPreset(user, row),
@@ -177,7 +180,7 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
     };
     const personal = personalByPreset.get(row.id);
     return {
-      id: row.id, name: row.name, scope: row.scope, groupName: row.group_name, prompt: row.prompt, context: canSeeContext ? row.context : '', revision: row.updated_at.toISOString(),
+      deletion, id: row.id, name: row.name, scope: row.scope, groupName: row.group_name, prompt: row.prompt, context: canSeeContext ? row.context : '', revision: row.updated_at.toISOString(),
       isShared: row.is_shared,
       ...(personal ? { saveIntent: 'personal-quick' as const, personalOverrides: personal.overrides,
         personalImages: personal.referenceIds.map(toPayload).filter((item): item is NonNullable<ReturnType<typeof toPayload>> => Boolean(item)),
@@ -418,8 +421,17 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
 
 export async function manageStudioPreset(user: ImageStudioIdentity, presetId: string, revision: unknown, action: 'rename' | 'delete', value?: unknown,
   metadata?: { requestId?: unknown; entryPoint?: unknown }) {
-  return prisma.$transaction(async tx => {
+  const originalRequestId = metadata?.requestId;
+  if (action === 'delete' && (typeof originalRequestId !== 'string' || !/^[A-Za-z0-9:_-]{1,160}$/.test(originalRequestId))) {
+    throw new StudioModuleError('请刷新页面后删除，并保留有效的原请求编号', 428);
+  }
+  const deletionFingerprint = sharedCommandFingerprint(['delete-source', presetId, revision]);
+  try { return await prisma.$transaction(async tx => {
     user = await assertStudioActor(user.id, tx);
+    if (action === 'delete') {
+      const prior = await readReceipt(tx, user.id, originalRequestId, deletionFingerprint);
+      if (prior) return parseStudioDeletionReceipt(prior, user.id, 'source', presetId);
+    }
     const preset = await tx.imageStudioPreset.findFirst({ where: { id: presetId, owner_id: user.id } });
     if (!preset || !canManageStudioPreset(user, preset)) throw new StudioModuleError('只能管理自己的模板', 403);
     if (await studioPresetArchived(preset.id, tx)) throw new StudioModuleError('模板已删除，请重新读取', 409);
@@ -432,6 +444,11 @@ export async function manageStudioPreset(user: ImageStudioIdentity, presetId: st
       const updated = await tx.imageStudioPreset.updateMany({ where, data: { name, updated_at: new Date(Math.max(Date.now(), preset.updated_at.getTime() + 1)) } });
       if (updated.count !== 1) throw new StudioModuleError('模板已在其他页面更新，请重新读取后修改', 409);
     } else {
+      const active = await tx.imageStudioTask.count({ where: { source_preset_id: presetId,
+        status: { notIn: ['succeeded', 'failed', 'cancelled', 'canceled'] } } });
+      if (active) throw new StudioModuleError('模板还有生成中或结果未确认的任务，请先核对原任务再删除', 409);
+      const workspaces = await tx.imageStudioModule.findMany({ where: { owner_id: user.id, source_preset_id: presetId }, select: { id: true } });
+      for (const workspace of workspaces) await assertStudioDeletionIdle(tx, user.id, workspace.id);
       const deleted = await tx.imageStudioPreset.updateMany({ where, data: { updated_at: new Date(Math.max(Date.now(), preset.updated_at.getTime() + 1)) } });
       if (deleted.count !== 1) throw new StudioModuleError('模板已在其他页面更新，请重新读取后修改', 409);
       // Keep the source row for authorized historical restoration, without exposing a recycle bin.
@@ -444,7 +461,43 @@ export async function manageStudioPreset(user: ImageStudioIdentity, presetId: st
       action: action === 'rename' ? 'definition-renamed' : 'source-archived', requestId: metadata?.requestId, entryPoint: metadata?.entryPoint,
       before: { sourceRevision: preset.updated_at.toISOString(), isShared: preset.is_shared },
       after: { sourceRevision: updated.updated_at.toISOString(), isShared: updated.is_shared }, changedFields: action === 'rename' ? ['name'] : [] });
+    if (action === 'delete') {
+      const receipt: StudioDeletionReceipt = { version: 1, actorId: user.id, deleted: true, objectKind: 'source', id: presetId,
+        sourceRevision: preset.updated_at.toISOString(), appliedRevision: updated.updated_at.toISOString(),
+        requestId: originalRequestId as string, committedAt: new Date().toISOString(), noOp: false };
+      await writeReceipt(tx, user.id, originalRequestId, deletionFingerprint, { ...receipt, action: 'delete-source', presetId });
+      return receipt;
+    }
     return { id: presetId };
+  }); } catch (error) {
+    if (action === 'delete' && (error instanceof StudioModuleError || error instanceof StudioSharingError)) {
+      try {
+        await assertStudioActor(user.id);
+        if (!await readOwnedReceipt(prisma, user.id, originalRequestId)) {
+          const rejected = new StudioModuleError(error.message, error.status);
+          rejected.commandOutcome = { status: 'not-applied', actorId: user.id, objectKind: 'source', id: presetId, requestId: originalRequestId as string };
+          throw rejected;
+        }
+      } catch (proofError) {
+        if (proofError instanceof StudioModuleError && proofError.commandOutcome) throw proofError;
+      }
+    }
+    throw error;
+  }
+}
+
+export async function studioPresetDeletionStatus(user: ImageStudioIdentity, presetId: string, requestId: unknown): Promise<StudioDeletionCommandStatus> {
+  if (!presetId || presetId.length > 160) throw new StudioModuleError('删除查询参数无效');
+  return readSharedStudioSnapshot(async tx => {
+    const actor = await assertStudioActor(user.id, tx);
+    const saved = await readOwnedReceipt(tx, actor.id, requestId);
+    if (!saved) return { status: 'not-found' };
+    const receipt = parseStudioDeletionReceipt(saved.result, actor.id, 'source', presetId);
+    if (saved.fingerprint !== sharedCommandFingerprint(['delete-source', presetId, receipt.objectKind === 'source' ? receipt.sourceRevision : null])
+      || receipt.requestId !== requestId) throw new StudioModuleError('原删除请求与对象不匹配，请保留原请求编号核对', 409);
+    const source = await tx.imageStudioPreset.findFirst({ where: { id: presetId, owner_id: actor.id }, select: { updated_at: true } });
+    return { status: 'completed', receipt, current: { exists: Boolean(source), archived: Boolean(source && await studioPresetArchived(presetId, tx)),
+      sourceRevision: source?.updated_at.toISOString() ?? null } };
   });
 }
 
@@ -601,6 +654,9 @@ export async function applyStudioPreset(user: ImageStudioIdentity, presetId: str
     await setStudioModuleStyleIds(user, id, styleGroupIds, tx);
     await setSkillSelection(user, id, skillIds, tx);
     await restoreStudioDefaultGroup(userId, preset.group_name, tx);
+    // apply is the existing explicit template-library selection, not a refresh
+    // or restoration path. Its new copy must not revive any deleted workspace id.
+    await recordStudioSourceReselection(tx, userId, preset.id, id);
     return id;
   }, { timeout: 15000 });
   return studioModuleDTOForUser(user, moduleId);

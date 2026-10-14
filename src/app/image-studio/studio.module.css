@@ -25,9 +25,21 @@
 .moduleRailGroupHeader > button:first-child { flex: 1; min-width: 0; }
 .moduleRailSortableRow { display: flex; align-items: center; min-width: 0; }
 .moduleRailSortableRow > button:first-child { flex: 1; min-width: 0; touch-action: pan-y; }
-.page .moduleRail .moduleRailSortableRow > button:last-child:not(:first-child), .page .moduleRail .moduleRailGroupHeader > button:last-child:not(:first-child) { flex: 0 0 24px; width: 24px; min-height: 32px; padding: 3px; justify-content: center; }
+.page .moduleRail .moduleRailSortableRow > [data-sort-handle], .page .moduleRail .moduleRailGroupHeader > [data-sort-handle] { flex: 0 0 24px; width: 24px; min-height: 32px; padding: 3px; justify-content: center; }
+.page .moduleRailDelete { display: inline-flex; flex: 0 0 32px; align-items: center; justify-content: center; width: 32px; min-height: 36px; padding: 0; border: 0; background: transparent; color: #f5b3b8; }
+.page .moduleRailDelete:hover { background: #38242a; }
+.page .moduleRailDelete[data-pending] { color: #aeb9bf; }
+.page .moduleRailDelete:focus-visible { outline: 2px solid #79daca; outline-offset: -2px; }
+.deletionPending { margin: 12px 0; color: #aeb9bf; }
+.deletionPending p { margin: 0 0 8px; }
+.deletionPending button { margin-right: 8px; }
+@media (hover: hover) and (pointer: fine) {
+  .moduleRailSortableRow .moduleRailDelete:not([data-pending]) { opacity: 0; pointer-events: none; }
+  .moduleRailSortableRow:hover .moduleRailDelete, .moduleRailSortableRow:focus-within .moduleRailDelete { opacity: 1; pointer-events: auto; }
+}
 @media (hover: none), (pointer: coarse) {
   .page .moduleRail .moduleRailSortableRow > [data-sort-handle], .page .moduleRail .moduleRailGroupHeader > [data-sort-handle] { flex-basis: 36px; width: 36px; min-height: 40px; }
+  .page .moduleRailDelete { flex-basis: 44px; width: 44px; min-height: 44px; }
 }
 .orderDialogGroup { padding: 8px 0; border-bottom: 1px solid #314047; }
 .orderDialogGroup > div + div { margin-left: 16px; }

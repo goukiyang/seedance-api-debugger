@@ -21,7 +21,7 @@
 .coverReactions [data-studio-pin-readonly] { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; color: #c9fff1; }
 @media (hover: hover) and (pointer: fine) {
   .coverReactions button[data-reaction-action="like"]:not([aria-pressed="true"]):not([data-bloom]),
-  .coverReactions [data-studio-pin-control]:not([data-active]):not([data-feedback]):not([aria-busy="true"]) { opacity: 0; pointer-events: none; }
+  .coverReactions [data-studio-pin-control]:where(:not([data-active]):not([data-feedback]):not([aria-busy="true"])) { opacity: 0; pointer-events: none; }
   .media:hover .coverReactions button[data-reaction-action="like"], .media:focus-within .coverReactions button[data-reaction-action="like"],
   .media:hover .coverReactions [data-studio-pin-control], .media:focus-within .coverReactions [data-studio-pin-control] { opacity: 1; pointer-events: auto; }
 }
@@ -73,6 +73,10 @@
 .deleteSlot button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 1px solid #414b48; border-radius: 4px; background: #202725e6; color: #e0e9e5; cursor: pointer; }
 .deleteSlot button:disabled { opacity: .45; cursor: default; }
 .deleteSlot button:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
+.deleteSlot[data-cover-context-delete] button { position: relative; isolation: isolate; width: 44px; height: 44px; border: 0; background: transparent; }
+.deleteSlot[data-cover-context-delete] button::before { content: ''; position: absolute; inset: 6px; z-index: -1; border: 1px solid #414b48; border-radius: 4px; background: #202725e6; pointer-events: none; }
+.media:has(.deleteSlot[data-cover-context-delete]:not(:empty)) .mediaActions { max-inline-size: calc(100% - 68px); }
+.media:has(input[data-result-secondary]) .deleteSlot[data-cover-context-delete] { bottom: 48px; }
 .commonActions, .specialtyActions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 32px; }
 .commonActions { flex-shrink: 0; }
 .specialtyActions { min-width: 0; }
