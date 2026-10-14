@@ -43,16 +43,18 @@ export type SharedStudioLifecycleHistory = { items: SharedStudioLifecycleHistory
 // This is a dedicated author-only read. Ordinary unavailable DTOs never supply
 // placeholder empty collections as an editable definition.
 export type SharedStudioRepairReference = { id: string; status: 'valid' | 'missing' | 'inaccessible'; image?: SharedStudioImageDTO };
+export type SharedStudioFixedReferenceRepair = { sourceIndex: number; originalAssetId: string; replacementAssetId: string | null };
 export type SharedStudioRepairDefinition = {
   sourceRevision: string; definitionToken: string; name: string; groupName: string; templatePrompt: string;
   context: string; defaults: SharedStudioDefaults;
   templateReferences: SharedStudioRepairReference[];
-  fixedReferences: Array<SharedStudioRepairReference & { note?: string }>;
+  fixedReferences: Array<SharedStudioRepairReference & { note?: string; sourceIndex?: number; repairable?: boolean }>;
   styleGroups: Array<{ id: string; status: 'valid' | 'missing' | 'inaccessible'; name?: string; revision?: number }>;
   skillIds: string[];
   skillGroups: Array<{ id: string; status: 'valid' | 'missing' | 'inaccessible'; name?: string; revision?: number }>;
   banner?: SharedStudioRepairReference | null;
   fixedReferencesEditable?: boolean;
+  fixedReferenceRepairAllowed?: boolean;
   fixedReferenceRestriction?: string;
   skillRestriction?: string;
   reproductionConfigured?: boolean;

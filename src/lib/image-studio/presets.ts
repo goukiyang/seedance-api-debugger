@@ -227,6 +227,7 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
     }
     return saveSharedStudioPresetAs(user, body as Record<string, unknown>);
   }
+  if (Object.prototype.hasOwnProperty.call(body, 'fixedReferenceRepairs')) throw new StudioModuleError('固定参考修复仅限本人已有原模板，不用于普通另存或快捷设置', 403);
   if (!canUseCompanyTemplatesForUser(user)) throw new StudioModuleError('仅限公司飞书账号使用共享模板', 403);
   const userId = user.id;
   const isAdmin = user.role === 'admin';

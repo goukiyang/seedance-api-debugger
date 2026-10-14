@@ -3,7 +3,7 @@
 import { useId } from 'react';
 import { ImagePlus, X } from 'lucide-react';
 import type { UploadedAssetPayload } from '@/lib/http/file-upload';
-import type { SharedStudioRepairDefinition, SharedStudioRepairReference } from '@/lib/image-studio/shared-types';
+import type { SharedStudioFixedReferenceRepair, SharedStudioRepairDefinition, SharedStudioRepairReference } from '@/lib/image-studio/shared-types';
 import { StudioReferenceGrid, type FixedStudioReference } from './reference-grid';
 import type { StudioStyleSummary } from './style-groups-view';
 import type { SkillSummary } from './skills-view';
@@ -24,6 +24,9 @@ export type StudioRepairFieldsProps = {
   banner: UploadedAssetPayload | null;
   onBanner: (next: UploadedAssetPayload | null) => void;
   fixedEditable: boolean;
+  fixedRepairs: SharedStudioFixedReferenceRepair[];
+  onRepairFixed: (sourceIndex: number, replacementAssetId: string | null | undefined) => void;
+  onReplaceFixed: (sourceIndex: number) => void;
   disabled: boolean;
   onAddTemplate: () => void;
   onReplaceBanner: () => void;
@@ -47,14 +50,19 @@ function restoreSelection<T extends UploadedAssetPayload>(next: UploadedAssetPay
 
 export function StudioRepairFields({ repair, templatePrompt, onTemplatePrompt, templateImages, onTemplateImages,
   fixedReferences, onFixedReferences, styleGroups, onStyleGroups, skills, onSkills, banner, onBanner,
-  fixedEditable, disabled, onAddTemplate, onReplaceBanner, onPreview }: StudioRepairFieldsProps): JSX.Element {
+  fixedEditable, fixedRepairs, onRepairFixed, onReplaceFixed, disabled, onAddTemplate, onReplaceBanner, onPreview }: StudioRepairFieldsProps): JSX.Element {
   const promptId = useId();
   const canEditFixed = fixedEditable && repair.fixedReferencesEditable !== false;
   const selectedRestrictedSkills = Boolean(repair.skillRestriction && skills.some(item => repair.skillIds.includes(item.id)));
   const templateSource = (id?: string) => repair.templateReferences.find(item => item.id === id);
   const fixedSource = (id?: string) => repair.fixedReferences.find(item => item.id === id);
   const templateDisplay = templateImages.map(item => displayReference(item, templateSource(item.id)));
-  const fixedDisplay = fixedReferences.map(item => displayReference(item, fixedSource(item.id)));
+  const fixedDisplay = fixedReferences.map((item, index) => {
+    const source = canEditFixed ? fixedSource(item.id) : repair.fixedReferences[index];
+    // A valid but intentionally protected fixed slot must not reuse old local
+    // media URLs or notes as an implicit new author read permission.
+    return source && !source.image ? { id: item.id } : displayReference(item, source);
+  });
   const bannerSource = banner && repair.banner && repair.banner.id === banner.id ? repair.banner : undefined;
   const bannerDisplay = banner ? displayReference(banner, bannerSource) : null;
   const pending = (source: SharedStudioRepairReference | undefined, image: UploadedAssetPayload) =>
@@ -90,16 +98,27 @@ export function StudioRepairFields({ repair, templatePrompt, onTemplatePrompt, t
       {repair.fixedReferenceRestriction ? <p className={styles.muted}>{repair.fixedReferenceRestriction}</p>
         : !canEditFixed && <p className={styles.muted}>固定参考需管理员修复，未改项仍保留。</p>}
       <StudioReferenceGrid items={fixedDisplay} compact materialTiles labels="template" disabled={disabled || !canEditFixed}
+        unavailableLabel={(image, index) => (canEditFixed ? fixedSource(image.id) : repair.fixedReferences[index])?.status === 'valid' ? '正常参考 · 受保护' : '失效参考'}
         onChange={next => { if (!disabled && canEditFixed) onFixedReferences(restoreSelection(next, fixedReferences)); }} onPreview={onPreview}
         renderDetails={(image, index) => {
-          const source = fixedSource(image.id);
+          const source = canEditFixed ? fixedSource(image.id) : repair.fixedReferences[index];
           const issue = pending(source, image);
-          const sourceIndex = repair.fixedReferences.findIndex(item => item.id === image.id);
+          const sourceIndex = source?.sourceIndex ?? repair.fixedReferences.findIndex(item => item.id === image.id);
           const number = sourceIndex >= 0 ? sourceIndex + 1 : index + 1;
+          const repairIndex = source?.sourceIndex ?? sourceIndex;
+          const canRepair = !canEditFixed && repair.fixedReferenceRepairAllowed === true && source?.repairable === true;
+          const proposed = fixedRepairs.find(item => item.sourceIndex === repairIndex && item.originalAssetId === source?.id);
           const protectedNote = Boolean(source && source.status !== 'valid');
           const note = protectedNote ? source?.note || '' : fixedReferences[index].note;
           return <div className={styles.referenceNote}>
-            {issue && <p className={styles.muted} role="status">固定参考 {number} 待处理：{issue}。{canEditFixed ? '可明确移除当前引用。' : '请联系管理员修复。'}</p>}
+            {source?.status === 'valid' && !source.image && <p className={styles.muted}>正常固定参考，原图和备注保持原权限。</p>}
+            {source?.status !== 'valid' && issue && <p className={styles.muted} role="status">固定参考 {number} 待处理：{issue}。{canEditFixed || canRepair ? '可移除或替换失效引用。' : '请联系具有原权限的管理员修复。'}</p>}
+            {canRepair && <div className={styles.materialFooter}>
+              <span role="status">{proposed ? proposed.replacementAssetId === null ? '已移除，待保存' : '替换图已选择，待保存' : '未修改'}</span>
+              <button type="button" disabled={disabled} onClick={() => onRepairFixed(repairIndex, null)}>移除失效项</button>
+              <button type="button" disabled={disabled} onClick={() => onReplaceFixed(repairIndex)}>选择替换图</button>
+              {proposed && <button type="button" disabled={disabled} onClick={() => onRepairFixed(repairIndex, undefined)}>撤销修改</button>}
+            </div>}
             {canEditFixed && !protectedNote ? <textarea aria-label={`固定参考 ${number} 备注`} rows={2} maxLength={2000}
               disabled={disabled} value={note} onChange={event => {
                 if (!disabled) onFixedReferences(fixedReferences.map((item, position) => position === index ? { ...item, note: event.target.value } : item));

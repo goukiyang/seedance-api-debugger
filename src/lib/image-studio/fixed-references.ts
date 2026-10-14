@@ -1,7 +1,9 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { canViewStudioPreset, type ImageStudioIdentity, type StudioPresetAccessRow } from './access';
+import { canManageStudioPreset, canViewStudioPreset, type ImageStudioIdentity, type StudioPresetAccessRow } from './access';
 import { MAX_REFERENCE_IMAGES } from './limits';
+import { studioVisibleAssetWhere } from './protected-assets';
+import type { SharedStudioFixedReferenceRepair } from './shared-types';
 
 export type StudioFixedReference = { assetId: string; note: string };
 export type StudioFixedReferencePreset = StudioPresetAccessRow & { id: string };
@@ -13,6 +15,58 @@ const presetKey = (id: string) => `${SETTING_PREFIX}:preset:${id}`;
 
 export class StudioFixedReferenceError extends Error {
   constructor(message: string, public status = 400) { super(message); }
+}
+
+// Fixed references are deliberately hidden from ordinary authors. That media
+// read restriction is NOT evidence that an otherwise valid stored slot failed.
+export function studioFixedReferenceStatus(ownerId: string, asset?: { owner_id: string; status: string; type: string }) {
+  if (!asset || asset.status !== 'active' || asset.type !== 'image') return 'missing' as const;
+  return asset.owner_id === ownerId ? 'valid' as const : 'inaccessible' as const;
+}
+
+export async function repairStudioFixedReferences(actor: ImageStudioIdentity, preset: StudioFixedReferencePreset,
+  stored: StudioFixedReference[], value: unknown, client: FixedReferenceClient): Promise<StudioFixedReference[]> {
+  if (preset.owner_id !== actor.id || !canManageStudioPreset(actor, preset)) {
+    throw new StudioFixedReferenceError('只能修复自己有权管理的原模板固定参考', 403);
+  }
+  if (!Array.isArray(value) || value.length > stored.length) throw new StudioFixedReferenceError('固定参考修复指令无效');
+  const changes = new Map<number, SharedStudioFixedReferenceRepair>();
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new StudioFixedReferenceError('固定参考修复指令无效');
+    const item = raw as Record<string, unknown>;
+    if (Object.keys(item).some(key => !['sourceIndex', 'originalAssetId', 'replacementAssetId'].includes(key))
+      || !Number.isInteger(item.sourceIndex) || Number(item.sourceIndex) < 0 || Number(item.sourceIndex) >= stored.length
+      || typeof item.originalAssetId !== 'string' || stored[Number(item.sourceIndex)].assetId !== item.originalAssetId
+      || changes.has(Number(item.sourceIndex)) || item.replacementAssetId !== null
+        && (typeof item.replacementAssetId !== 'string' || !item.replacementAssetId || item.replacementAssetId.length > 100)) {
+      throw new StudioFixedReferenceError('固定参考来源或槽位已变化，请重新读取；当前草稿保留', 409);
+    }
+    changes.set(Number(item.sourceIndex), { sourceIndex: Number(item.sourceIndex), originalAssetId: item.originalAssetId,
+      replacementAssetId: item.replacementAssetId as string | null });
+  }
+  const originals = await client.asset.findMany({ where: { id: { in: Array.from(new Set(stored.map(item => item.assetId))) } },
+    select: { id: true, owner_id: true, status: true, type: true } });
+  const byId = new Map(originals.map(asset => [asset.id, asset]));
+  for (const item of Array.from(changes.values())) {
+    if (studioFixedReferenceStatus(preset.owner_id, byId.get(item.originalAssetId)) === 'valid') {
+      throw new StudioFixedReferenceError('正常固定参考仍由管理员管理，不能移除、替换或改序', 403);
+    }
+  }
+  // Query failures escape; they never turn into missing slots or edit grants.
+  // Replacement media must be an actually readable own image BEFORE it becomes
+  // protected fixed content. No opaque id can restore hidden/private media.
+  const replacementIds = Array.from(new Set(Array.from(changes.values()).flatMap(item => item.replacementAssetId ? [item.replacementAssetId] : [])));
+  if (replacementIds.length) {
+    const readable = await client.asset.count({ where: { id: { in: replacementIds }, owner_id: actor.id,
+      status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(actor, client)] } });
+    if (readable !== replacementIds.length) throw new StudioFixedReferenceError('替换图片已不可用或无权读取，固定参考未修改', 403);
+  }
+  // A slot has exactly one replacement or is removed. Untouched identities,
+  // relative order and ALL original notes are copied from server storage.
+  return stored.flatMap((item, index) => {
+    const change = changes.get(index);
+    return !change ? [item] : change.replacementAssetId === null ? [] : [{ assetId: change.replacementAssetId, note: item.note }];
+  });
 }
 
 export function parseStudioFixedReferences(value: unknown): StudioFixedReference[] {

@@ -3,7 +3,7 @@ import type { ImageStudioPreset, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { canManageStudioPreset, canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from './access';
 import { archivedPresetKey, studioPresetArchived } from './preset-lifecycle';
-import { getStudioModuleFixedReferences, getStudioPresetFixedReferences, parseStudioFixedReferences, setStudioPresetFixedReferences, StudioFixedReferenceError, type StudioFixedReference } from './fixed-references';
+import { getStudioModuleFixedReferences, getStudioPresetFixedReferences, parseStudioFixedReferences, repairStudioFixedReferences, studioFixedReferenceStatus, setStudioPresetFixedReferences, StudioFixedReferenceError, type StudioFixedReference } from './fixed-references';
 import { getStudioModuleReferencePolicy, getStudioPresetReferencePolicy, parseStudioReferencePolicy, setStudioPresetReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
 import { getStudioModuleStyleIds, getStudioStyleGroup, parseStudioStyleIds, resolveStudioStyleReferences, setStudioPresetStyleIds, StudioStyleError, type StudioStyleGroup } from './style-groups';
 import { getSkill, getSkillSelection, setSkillSelection } from './skills';
@@ -299,11 +299,15 @@ async function readAuthorRepairDefinition(actor: ImageStudioIdentity, source: Im
   const defaults: SharedStudioDefaults = { model, quality: normalizeImageStudioQuality(model, source.quality),
     resolution: normalizeImageResolution(model, source.resolution), count: source.count, aspectRatio: sharedRatio(source.aspect_ratio),
     referenceLimit: source.reference_limit, referencePolicy: { ...storedPolicy, primaryIds: [] } };
+  const fixedStates = fixed.map(item => studioFixedReferenceStatus(source.owner_id, byId.get(item.assetId)));
+  const authorFixedRepair = fixedStates.some(status => status !== 'valid');
   return { sourceRevision: source.updated_at.toISOString(), definitionToken, name: source.name, groupName: source.group_name || '未分组',
     templatePrompt: source.prompt, context: reproduction?.moduleContext ?? source.context, defaults,
-    templateReferences: templateIds.map(reference), fixedReferences: fixed.map(item => {
-      const projected = reference(item.assetId);
-      return projected.status === 'valid' ? { ...projected, note: item.note } : projected;
+    templateReferences: templateIds.map(reference), fixedReferences: fixed.map((item, sourceIndex) => {
+      const status = fixedStates[sourceIndex];
+      const projected = actor.role === 'admin' && status === 'valid' ? reference(item.assetId) : { id: item.assetId, status };
+      return { ...projected, sourceIndex, repairable: status !== 'valid',
+        ...(actor.role === 'admin' && status === 'valid' ? { note: item.note } : {}) };
     }), styleGroups: styles.map(item => {
       if (!('group' in item)) return item;
       const missing = item.group.references.some(ref => {
@@ -313,9 +317,10 @@ async function readAuthorRepairDefinition(actor: ImageStudioIdentity, source: Im
         : { id: item.id, status: 'valid' as const, name: item.group.name, revision: item.group.revision };
     }), skillIds, skillGroups, banner: source.banner_asset_id ? reference(source.banner_asset_id) : null,
     fixedReferencesEditable: actor.role === 'admin',
-    ...(actor.role !== 'admin' && fixed.length ? { fixedReferenceRestriction: fixed.some(item => reference(item.assetId).status !== 'valid')
-      ? '需管理员先修复固定参考；修复前整次模板定义保存受限，当前编辑保留'
-      : '固定参考图由管理员管理；未修改的引用会保留' } : {}),
+    fixedReferenceRepairAllowed: authorFixedRepair,
+    ...(actor.role !== 'admin' && fixed.length ? { fixedReferenceRestriction: authorFixedRepair
+      ? '可移除或替换本人模板的失效固定参考；正常项、原顺序和备注保留，保存后生效'
+      : '正常固定参考图仍由管理员管理；原图、备注及未改项保持原权限' } : {}),
     ...(skillIds.length ? { skillRestriction: '提示词组仅本人可见，实时模板定义保存前需要明确移除；原共享选择会保留' } : {}),
     reproductionConfigured: Boolean(reproduction), ...(reproduction && actor.role === 'admin' ? { globalContext: reproduction.globalContext } : {}) };
 }
@@ -404,7 +409,7 @@ export async function readSharedStudioModules(ownerId: string, moduleIds: string
             ? 'source-archived' : !canViewStudioPreset(actor, source) ? source.is_shared ? 'access-revoked' : 'source-withdrawn' : error.reasonCode;
           let repairDefinition: SharedStudioRepairDefinition | undefined;
           if (reason === 'dependency-invalid' && error.intent && binding.mode === 'publisher' && source?.owner_id === actor.id
-            && !archived && canManageStudioPreset(actor, source)) {
+            && !archived && canManageStudioPreset(actor, source) && await studioPublisherModule(actor.id, source.id, tx) === moduleId) {
             try { repairDefinition = await readAuthorRepairDefinition(actor, source, error.intent.definitionToken, tx); }
             catch (projectionError) {
               const problem = normalizeSharedError(projectionError);
@@ -418,7 +423,8 @@ export async function readSharedStudioModules(ownerId: string, moduleIds: string
             state.capabilities.editDefinition = { allowed: false, reasonCode: reason, reason: studioStateReason[reason] };
             state.capabilities.saveDefinition = { allowed: false, reasonCode: reason, reason: studioStateReason[reason] };
           }
-          if (repairDefinition?.fixedReferencesEditable === false && repairDefinition.fixedReferences.some(item => item.status !== 'valid')) {
+          if (repairDefinition?.fixedReferencesEditable === false && !repairDefinition.fixedReferenceRepairAllowed
+            && repairDefinition.fixedReferences.some(item => item.status !== 'valid')) {
             state.capabilities.saveDefinition = { allowed: false, reasonCode: 'dependency-invalid',
               reason: '需管理员先修复固定参考；修复前整次模板定义保存受限，当前编辑保留' };
           }
@@ -620,10 +626,18 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
     const templateIds = rawIds.filter(id => !incomingPolicy.primaryIds.includes(id));
     const referencePolicy = { ...incomingPolicy, primaryIds: [] };
     let fixedReferences: StudioFixedReference[];
+    if (has(input, 'fixedReferences') && has(input, 'fixedReferenceRepairs')) throw new StudioSharingError('不能同时提交固定参考全量编辑和槽位修复', 400);
     if (has(input, 'fixedReferences')) {
       if (actor.role !== 'admin') throw new StudioSharingError('固定模板图只能由管理员修改', 403);
       fixedReferences = parseStudioFixedReferences(input.fixedReferences);
     } else fixedReferences = reproduction?.templateFixedReferences ?? (source ? await getStudioPresetFixedReferences(actor, source, tx) : await getStudioModuleFixedReferences(actor.id, moduleId, tx));
+    if (has(input, 'fixedReferenceRepairs')) {
+      if (!source || !binding || binding.mode !== 'publisher' || binding.presetId !== source.id
+        || await studioPublisherModule(actor.id, source.id, tx) !== moduleId) {
+        throw new StudioSharingError('固定参考修复仅限本人已有原模板，不用于新建、另存或他人副本', 403);
+      }
+      fixedReferences = await repairStudioFixedReferences(actor, source, fixedReferences, input.fixedReferenceRepairs, tx);
+    }
     const styleGroupIds = has(input, 'styleGroupIds') ? parseStudioStyleIds(input.styleGroupIds) : await getStudioModuleStyleIds(actor.id, source ? presetId : moduleId, tx, source ? 'preset' : 'module');
     const styles = await resolveStudioStyleReferences(actor, styleGroupIds, tx);
     validateStudioReferenceCounts(referencePolicy, templateIds, fixedReferences.length, styles.references.length);
@@ -705,6 +719,7 @@ export async function saveSharedStudioPresetAs(user: ImageStudioIdentity, input:
       }
       return { ...preset, publisherModuleId };
     }
+    if (has(input, 'fixedReferenceRepairs')) throw new StudioSharingError('另存或新建不能使用固定参考修复指令', 403);
     if (input.isShared !== true) throw new StudioSharingError('请选择共享后再保存模板', 400);
     const sourceModuleId = typeof input.sourceModuleId === 'string' ? input.sourceModuleId : undefined;
     const original = sourceModuleId ? await tx.imageStudioModule.findFirst({ where: { id: sourceModuleId, owner_id: actor.id } }) : null;
@@ -797,7 +812,7 @@ export async function saveSharedStudioPersonal(user: ImageStudioIdentity, module
     if (!binding) throw new StudioSharingError('该模块不是实时共享工作区', 400);
     const workspace = await tx.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: actor.id } });
     if (!workspace || workspace.revision !== body.revision) throw new StudioSharingError('个人设置已在其他页面保存，当前草稿仍保留', 409);
-    const forbidden = ['sourcePresetId', 'source_preset_id', 'ownerId', 'owner_id', 'templatePrompt', 'context', 'globalContext', 'fixedReferences', 'styleGroupIds', 'skillIds', 'isShared'];
+    const forbidden = ['sourcePresetId', 'source_preset_id', 'ownerId', 'owner_id', 'templatePrompt', 'context', 'globalContext', 'fixedReferences', 'fixedReferenceRepairs', 'styleGroupIds', 'skillIds', 'isShared'];
     if (forbidden.some(field => has(body, field))) throw new StudioSharingError('个人保存不能修改共享模板定义', 403);
     const personalChanges = await writeSharedStudioPersonalState(actor, workspace, body, tx);
     const changed = await tx.imageStudioModule.updateMany({ where: { id: moduleId, owner_id: actor.id, revision: workspace.revision },
