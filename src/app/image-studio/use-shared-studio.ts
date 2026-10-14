@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { UploadedAssetPayload } from '@/lib/http/file-upload';
-import type { SharedStudioCapabilities, SharedStudioDefaults, SharedStudioLiveDTO, SharedStudioReasonCode, SharedStudioStateProjection } from '@/lib/image-studio/shared-types';
+import type { SharedStudioCapabilities, SharedStudioDefaults, SharedStudioLiveDTO, SharedStudioReasonCode, SharedStudioStateProjection, StudioDeletionTarget } from '@/lib/image-studio/shared-types';
 import type { ModuleCoverDTO } from '@/lib/image-studio/module-cover-types';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS } from '@/lib/image-studio/model-catalog';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
@@ -25,6 +25,7 @@ export function hasSharedDefaults(value: unknown): value is SharedStudioDefaults
 }
 
 export type SharedStudioEntry = {
+  deletion?: StudioDeletionTarget;
   presetId: string; name: string; groupName: string; banner?: UploadedAssetPayload | null;
   isShared: boolean; fixedCover?: ModuleCoverDTO | null; coverEditable?: boolean;
   revision?: string; available: boolean; unavailableReason?: string;

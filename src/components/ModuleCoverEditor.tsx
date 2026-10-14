@@ -112,12 +112,12 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
         try {
           const data = await json<{ modules: PreviewModule[] }>(await fetch(`/api/image-studio/modules?ids=${encodeURIComponent(moduleId)}`, { cache: 'no-store' }));
           if (!current()) return;
-          const module = data.modules?.find(item => item.id === moduleId);
-          if (!module || (value.target.kind === 'preset' ? module.sharedLive?.intent.presetId !== value.target.id || module.sharedLive.available === false
-            : value.target.id !== moduleId || Boolean(module.sharedLive))) throw new Error('当前封面归属或权限未能确认，请重新读取。');
-          if (module.fixedCover) throw new Error('固定封面刚有变化，请重新读取当前封面。');
-          const imageUrl = module.cover?.thumbnailUrl || module.banner?.thumbnailUrl || module.images?.[0]?.thumbnailUrl;
-          setPreview(imageUrl ? { imageUrl, referenceUrl: module.cover?.referenceUrl } : null);
+          const previewModule = data.modules?.find(item => item.id === moduleId);
+          if (!previewModule || (value.target.kind === 'preset' ? previewModule.sharedLive?.intent.presetId !== value.target.id || previewModule.sharedLive.available === false
+            : value.target.id !== moduleId || Boolean(previewModule.sharedLive))) throw new Error('当前封面归属或权限未能确认，请重新读取。');
+          if (previewModule.fixedCover) throw new Error('固定封面刚有变化，请重新读取当前封面。');
+          const imageUrl = previewModule.cover?.thumbnailUrl || previewModule.banner?.thumbnailUrl || previewModule.images?.[0]?.thumbnailUrl;
+          setPreview(imageUrl ? { imageUrl, referenceUrl: previewModule.cover?.referenceUrl } : null);
         } catch (cause) { if (current()) setPreviewError(cause instanceof Error ? cause.message : '当前显示封面未能读取，请重新打开。'); }
       }
     } catch (cause) { if (current()) setError(cause instanceof Error ? cause.message : '封面读取失败'); }
