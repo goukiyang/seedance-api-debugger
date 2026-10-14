@@ -36,12 +36,15 @@ export async function claimFixedReferenceSave(command: FixedReferenceSavePending
     return parse(raw, command.actorId, command.moduleId)!;
   });
 }
-export function clearFixedReferenceSave(command: FixedReferenceSavePending) {
-  const current = readFixedReferenceSave(command.actorId, command.moduleId);
-  if (current && current.requestId !== command.requestId) throw new Error('原保存记录已变化，请继续核对，不会重新提交');
+export async function clearFixedReferenceSave(command: FixedReferenceSavePending) {
   const key = fixedReferenceSaveKey(command.actorId, command.moduleId);
-  if (current) localStorage.removeItem(key);
-  if (localStorage.getItem(key) !== null) throw new Error('原保存已确认，但本机记录尚未清理，请再次核对');
+  if (!navigator.locks) throw new Error('浏览器暂不能安全清理原保存记录，请保留草稿');
+  return navigator.locks.request(key, () => {
+    const current = readFixedReferenceSave(command.actorId, command.moduleId);
+    if (current && current.requestId !== command.requestId) throw new Error('原保存记录已变化，请继续核对，不会重新提交');
+    if (current) localStorage.removeItem(key);
+    if (localStorage.getItem(key) !== null) throw new Error('原保存已确认，但本机记录尚未清理，请再次核对');
+  });
 }
 export function fixedReferenceReceiptMatches(value: unknown, command: FixedReferenceSavePending): boolean {
   if (!plain(value) || value.status !== 'completed' || !plain(value.receipt)) return false;

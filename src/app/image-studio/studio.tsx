@@ -1429,6 +1429,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   useEffect(() => {
     const current = fixedSaveScope.current;
     current.active = true;
+    moduleSaveLock.current = false; setModuleSaving(false);
     pendingFixedSaveRef.current = null; setPendingFixedSave(null); setFixedSaveStorageError(''); setCheckingFixedSave(false);
     const read = () => {
       if (fixedSaveScope.current !== current || !current.active || sessionChanged || isClientSessionBlocked()) return;
@@ -1917,7 +1918,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         if (!intent?.presetId || !intent.definitionToken || !validSaveScope()) throw new Error('原模板版本尚未确认，本次尚未提交');
         repairSave = await claimFixedReferenceSave({ version: 1, actorId: userId, moduleId: module.id, presetId: intent.presetId,
           requestId: request.requestId, expectedRevision: revisionOverride, definitionToken: intent.definitionToken });
-        if (!validSaveScope()) { clearFixedReferenceSave(repairSave); return false; }
+        if (!validSaveScope()) { await clearFixedReferenceSave(repairSave); return false; }
         pendingFixedSaveRef.current = repairSave; setPendingFixedSave(repairSave);
       }
       postStarted = true;
@@ -1928,7 +1929,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         || !fixedReferenceReceiptMatches({ status: 'completed', receipt: result.commandReceipt }, repairSave))) throw new Error('原修复保存回执尚未确认，请核对原保存');
       if (!Number.isInteger(result.revision) || result.revision <= revisionOverride
         || publishNew && (result.sharedLive?.mode !== 'publisher' || result.sourcePresetShared !== true || result.sourcePresetId !== `module-source:${module.id}`)) throw new Error('保存结果尚未确认，当前草稿已保留，请核对后重试');
-      if (repairSave) { clearFixedReferenceSave(repairSave); pendingFixedSaveRef.current = null; setPendingFixedSave(null); }
+      if (repairSave) { await clearFixedReferenceSave(repairSave); if (!validSaveScope()) return false;
+        pendingFixedSaveRef.current = null; setPendingFixedSave(null); }
       revisionRef.current = result.revision;
       setModuleRevision(result.revision); setModuleSaved(JSON.stringify({ ...snapshot, context: contextSnapshot }));
       setSavedModuleContext(contextSnapshot);
@@ -1955,15 +1957,16 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         catch { setFixedSaveStorageError('本机修复保存记录无法读取，本次尚未提交'); }
       }
       if (repairSave && (!postStarted || fixedReferenceSaveRejected(e, repairSave))) {
-        try { clearFixedReferenceSave(repairSave); pendingFixedSaveRef.current = null; setPendingFixedSave(null); moduleSaveRequest.current = null; }
-        catch { setFixedSaveStorageError('保存结果已确认，但本机记录未清理，请核对原保存'); }
+        try { await clearFixedReferenceSave(repairSave); if (!validSaveScope()) return false;
+          pendingFixedSaveRef.current = null; setPendingFixedSave(null); moduleSaveRequest.current = null; }
+        catch { if (!validSaveScope()) return false; setFixedSaveStorageError('保存结果已确认，但本机记录未清理，请核对原保存'); }
       }
       const message = e instanceof Error ? e.message : '保存失败'; setError(message); setModuleSaveError(message);
       if (saveDefinition && Number((e as { status?: number })?.status) === 409) setDefinitionConflict(true);
       if (sharedLive && [401, 403, 404, 409].includes(Number((e as { status?: number })?.status))) onSharedRefresh();
       return false;
     }
-    finally { moduleSaveLock.current = false; setModuleSaving(false); }
+    finally { if (validSaveScope()) { moduleSaveLock.current = false; setModuleSaving(false); } }
   }
 
   async function queryFixedReferenceSave() {
@@ -1980,7 +1983,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       if (!valid()) return;
       if (!fixedReferenceReceiptMatches(result, command)) throw new Error(result.status === 'not-found'
         ? '尚未查到原保存回执，结果仍待确认；不会重新提交' : '原保存回执尚未确认，请继续核对原保存');
-      clearFixedReferenceSave(command); pendingFixedSaveRef.current = null; setPendingFixedSave(null); setFixedSaveStorageError('');
+      await clearFixedReferenceSave(command); if (!valid()) return;
+      pendingFixedSaveRef.current = null; setPendingFixedSave(null); setFixedSaveStorageError('');
       moduleSaveRequest.current = null; setDefinitionConflict(true); setModuleSaveError('原修复保存已确认。当前编辑保留，请核对最新模板后再保存');
       setSaveStatus('原修复保存已确认，当前草稿未自动覆盖或提交');
       // Refresh current facts separately; do not adopt receipt/current as the
