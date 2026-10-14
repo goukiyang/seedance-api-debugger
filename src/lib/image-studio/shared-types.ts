@@ -30,6 +30,37 @@ export type SharedStudioSharingCurrent = {
 export type SharedStudioCommandStatus = { status: 'not-found' } | {
   status: 'completed'; receipt: Record<string, unknown>; current: SharedStudioSharingCurrent | null;
 };
+export type StudioDeletionTarget = { version: 1; actorId: string } & ({
+  objectKind: 'workspace'; id: string; moduleRevision: number; allowed: boolean; reason: string | null;
+} | {
+  objectKind: 'source'; id: string; sourceRevision: string; allowed: boolean; reason: string | null;
+});
+export type StudioDeletionCapability = StudioDeletionTarget;
+export type StudioDeletionReceipt = { version: 1; actorId: string } & ({
+  deleted: true; objectKind: 'workspace'; id: string; moduleRevision: number; sourcePresetId: string | null;
+  requestId: string; committedAt: string; noOp: boolean;
+} | {
+  deleted: true; objectKind: 'source'; id: string; sourceRevision: string; appliedRevision: string;
+  requestId: string; committedAt: string; noOp: boolean;
+});
+export type StudioDeletionCommandStatus = { status: 'not-found' } | {
+  status: 'completed'; receipt: StudioDeletionReceipt; current: {
+    exists: boolean; moduleRevision: number | null;
+  } | { exists: boolean; archived: boolean; sourceRevision: string | null };
+};
+export type StudioDeletionNotApplied = {
+  status: 'not-applied'; actorId: string; objectKind: 'workspace' | 'source'; id: string; requestId: string;
+};
+export type StudioDeletionStatus = StudioDeletionCommandStatus;
+export type StudioRetiredOpenProof = {
+  version: 1; status: 'workspace-deleted'; actorId: string; presetId: string; requestId: string; moduleId: string;
+};
+export type StudioOpenCommandStatus = { status: 'not-found' } | {
+  status: 'opened'; version: 1; actorId: string; presetId: string; requestId: string; moduleId: string;
+} | { status: 'retired'; retiredOpen: StudioRetiredOpenProof };
+export type StudioOpenNotApplied = {
+  status: 'not-applied'; actorId: string; presetId: string; requestId: string;
+};
 export type SharedStudioLifecycleRevisionState = { sourceRevision?: string | null; moduleRevision?: number | null; isShared?: boolean };
 export type SharedStudioLifecycleDetail = {
   requestId?: string; entryPoint?: SharedStudioEntryPoint; before?: SharedStudioLifecycleRevisionState;
@@ -95,6 +126,7 @@ export type SharedStudioLiveDTO = SharedStudioIntent & Partial<SharedStudioState
 };
 export type SharedStudioImageDTO = { id: string; originalUrl: string; thumbnailUrl: string; width: number | null; height: number | null };
 export type SharedStudioPublicDefinition = Partial<SharedStudioStateProjection> & {
+  deletion?: StudioDeletionCapability;
   intent: SharedStudioIntent;
   presetId: string;
   revision: string;
@@ -120,6 +152,7 @@ export type SharedStudioPublicDefinition = Partial<SharedStudioStateProjection> 
   reproductionConfigured: boolean;
 };
 export type SharedStudioCatalogItem = Partial<SharedStudioStateProjection> & {
+  deletion?: StudioDeletionCapability;
   presetId: string;
   isShared: boolean;
   name: string;

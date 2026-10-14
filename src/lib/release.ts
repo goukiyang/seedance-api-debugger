@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '模板作者可移除或替换自己模板中已失效的固定参考；正常参考、他人模板和原权限不变，保存后才生效。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '安全相容回退：保留作者修复与共享回执、删除防重造合同，旧界面缺新指令时要求刷新。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
