@@ -1,4 +1,4 @@
-.page { position: relative; display: block; padding: 24px 32px 64px 268px; max-width: none; margin: 0; color: #e6e8eb; background: #101315; min-height: calc(100dvh - 73px); }
+.page { --module-banner-height: 180px; --module-banner-edge-gap: 32px; position: relative; display: block; padding: 24px 32px 64px 268px; max-width: none; margin: 0; color: #e6e8eb; background: #101315; min-height: calc(100dvh - 73px); }
 .content { min-width: 0; }
 /* Keep document scrolling: overflow-x:hidden also makes body a sticky scroll ancestor. */
 :global(body):has(.templateWorkbench) { overflow-x: clip; }
@@ -98,6 +98,9 @@
 .mobileFavoriteList[hidden] { display: none; }
 .moduleBanner { position: relative; min-height: 96px; margin: -8px 0 24px; border: 1px dashed #465057; border-radius: 8px; background-color: #151a1d; overflow: hidden; }
 .moduleBannerHasImage { block-size: 180px; min-height: 0; }
+/* A fixed-height module header, full-bleed within the workspace, never over the rail. */
+.templateWorkbench .module { position: relative; padding-block-start: calc(var(--module-banner-height) + 28px); }
+.templateWorkbench .moduleBanner { position: absolute; inset-block-start: 0; inset-inline: calc(-1 * var(--module-banner-edge-gap)); box-sizing: border-box; block-size: var(--module-banner-height); min-block-size: var(--module-banner-height); max-block-size: var(--module-banner-height); margin: 0; border-radius: 0; }
 .moduleBanner::before { content: ''; position: absolute; inset: 0; background: rgb(8 10 11 / 42%); }
 .moduleBannerImage { display: block; position: relative; z-index: 0; inline-size: 100%; max-inline-size: none; block-size: 100%; object-fit: contain; margin: 0; }
 .bannerLabel { position: absolute; top: 12px; left: 14px; color: #eef0f2; font-size: 12px; font-weight: 700; }
@@ -426,7 +429,7 @@
 @media (max-width: 1000px) { .page { display: grid; grid-template-columns: 1fr; min-height: auto; padding: 16px; } .moduleRail { position: sticky; left: auto; top: var(--composer-topbar-height, 48px); bottom: auto; z-index: 5; width: auto; max-height: none; display: flex; gap: 10px; overflow-x: auto; padding: 8px; border: 1px solid #2d383d; border-radius: 8px; } .moduleRailTitle, .moduleRailGroup > span { display: none; } .moduleRailGroup { display: flex; margin: 0; } .moduleRailGroup button { white-space: nowrap; } }
 @media (max-width: 800px) { .page { padding: 16px; } .workspace { grid-template-columns: 1fr; gap: 24px; } .inputs { border-right: 0; padding-right: 0; } .references { max-width: 360px; } .header { flex-wrap: wrap; } .dialog { padding: 16px; } .modelQualityRow { grid-template-columns: 1fr; } .page .coverCard { grid-template-rows: auto minmax(122px, auto); } .coverDescription strong { font-size: 20px; } .moduleBannerHasImage { block-size: 120px; } }
 @media (max-width: 1200px) {
-  .page.templateWorkbench { padding: 16px; }
+  .page.templateWorkbench { --module-banner-edge-gap: 16px; padding: 16px; }
   .templateWorkbench .moduleRail { display: none; }
   .templateWorkbench .mobileModuleNav { position: sticky; top: var(--composer-topbar-height, 48px); z-index: 15; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 8px; margin-bottom: 16px; background: #151a1d; border-bottom: 1px solid #2d383d; }
   .mobileMajorLinks { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
