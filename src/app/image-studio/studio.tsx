@@ -40,6 +40,8 @@ import { useSharingCommand } from './use-sharing-command';
 import { useStudioNavigationMemory } from './use-studio-navigation-memory';
 import { StudioLifecycleHistory } from './StudioLifecycleHistory';
 import { StudioRepairFields } from './StudioRepairFields';
+import { claimFixedReferenceSave, clearFixedReferenceSave, fixedReferenceReceiptMatches, fixedReferenceSaveKey,
+  fixedReferenceSaveRejected, readFixedReferenceSave, type FixedReferenceSavePending } from './fixed-reference-save-state';
 import { TemplateFavoritesList, useTemplateFavorites } from './template-favorites';
 import { tryContentKeyParts } from '@/lib/content-reactions/key';
 import type { ReactionListItem } from '@/lib/content-reactions/types';
@@ -178,7 +180,7 @@ function moduleReferencePolicy(module: StudioModule): StudioReferencePolicy {
 }
 async function readResponse(response: Response) {
   const value = await response.json().catch(() => { throw new Error('服务暂时无法响应，请重试'); });
-  if (!response.ok) throw Object.assign(new Error(value.error || '请求失败，请重试'), { status: response.status });
+  if (!response.ok) throw Object.assign(new Error(value.error || '请求失败，请重试'), { status: response.status, commandOutcome: value.commandOutcome });
   return value;
 }
 
@@ -1416,10 +1418,40 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const [fixedReferences, setFixedReferences] = useState<FixedStudioReference[]>(module.fixedReferences || []);
   const [savedFixedReferences, setSavedFixedReferences] = useState<FixedStudioReference[]>(module.fixedReferences || []);
   const [fixedReferenceRepairs, setFixedReferenceRepairs] = useState<SharedStudioFixedReferenceRepair[]>([]);
+  const [pendingFixedSave, setPendingFixedSave] = useState<FixedReferenceSavePending | null>(null);
+  const pendingFixedSaveRef = useRef<FixedReferenceSavePending | null>(null);
+  const [fixedSaveStorageError, setFixedSaveStorageError] = useState('');
+  const [checkingFixedSave, setCheckingFixedSave] = useState(false);
+  const fixedSaveScopeKey = `${userId}:${module.id}:${sessionChanged}`;
+  const fixedSaveScope = useRef({ key: fixedSaveScopeKey, active: false });
+  if (fixedSaveScope.current.key !== fixedSaveScopeKey) fixedSaveScope.current = { key: fixedSaveScopeKey, active: false };
+  const fixedSaveUnknown = Boolean(pendingFixedSave || fixedSaveStorageError);
+  useEffect(() => {
+    const current = fixedSaveScope.current;
+    current.active = true;
+    pendingFixedSaveRef.current = null; setPendingFixedSave(null); setFixedSaveStorageError(''); setCheckingFixedSave(false);
+    const read = () => {
+      if (fixedSaveScope.current !== current || !current.active || sessionChanged || isClientSessionBlocked()) return;
+      try {
+        const command = readFixedReferenceSave(userId, module.id);
+        // Removing local storage in another tab is not an original receipt.
+        if (!command) return;
+        if (pendingFixedSaveRef.current && pendingFixedSaveRef.current.requestId !== command.requestId) {
+          setFixedSaveStorageError('原修复保存记录已变化，请保留草稿并核对'); return;
+        }
+        pendingFixedSaveRef.current = command; setPendingFixedSave(command);
+      } catch { setFixedSaveStorageError('原修复保存记录暂无法读取，本模板保存暂未提交，请保留草稿'); }
+    };
+    read();
+    const receive = (event: StorageEvent) => { if (event.key === fixedReferenceSaveKey(userId, module.id)) read(); };
+    window.addEventListener('storage', receive);
+    return () => { current.active = false; window.removeEventListener('storage', receive); };
+  }, [userId, module.id, sessionChanged, fixedSaveScopeKey]);
   const unresolvedFixedRepairs = fixedRepairAllowed && Boolean(repairDefinition?.fixedReferences.some((item, sourceIndex) => item.repairable
     && !fixedReferenceRepairs.some(change => change.sourceIndex === sourceIndex && change.originalAssetId === item.id)));
-  const definitionSaveBlocked = definitionEditable && sharedLive?.capabilities?.saveDefinition.allowed === false || unresolvedFixedRepairs;
-  const definitionSaveReason = unresolvedFixedRepairs ? '请先移除或替换全部失效固定参考，再保存；正常项和当前编辑保留'
+  const definitionSaveBlocked = fixedSaveUnknown || definitionEditable && sharedLive?.capabilities?.saveDefinition.allowed === false || unresolvedFixedRepairs;
+  const definitionSaveReason = fixedSaveUnknown ? fixedSaveStorageError || '原修复保存结果待确认，请先核对原保存；当前编辑保留'
+    : unresolvedFixedRepairs ? '请先移除或替换全部失效固定参考，再保存；正常项和当前编辑保留'
     : definitionSaveBlocked ? sharedLive?.capabilities?.saveDefinition.reason || '模板定义暂不能保存，当前编辑保留' : '';
   const [reproductionReferences, setReproductionReferences] = useState<FixedStudioReference[]>([]);
   const fixedDirty = fixedReferenceRepairs.length > 0 || JSON.stringify(fixedReferencePayload(fixedReferences)) !== JSON.stringify(fixedReferencePayload(savedFixedReferences));
@@ -1818,6 +1850,15 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
 
   async function saveModule(reproduceTaskId = reproduceSourceTaskId, revisionOverride = revisionRef.current, manualSettings = true, fixedOverride?: FixedStudioReference[]) {
     if (isClientSessionBlocked()) return false;
+    // Re-read the original object's persistent lock even if repair instructions
+    // were undone or the latest projection no longer offers repair capability.
+    if (manualSettings) {
+      try {
+        const original = pendingFixedSaveRef.current || readFixedReferenceSave(userId, module.id);
+        if (original) { pendingFixedSaveRef.current = original; setPendingFixedSave(original);
+          setModuleSaveError('原修复保存结果待确认，请先核对原保存，不会换号重发'); return false; }
+      } catch { setFixedSaveStorageError('本机修复保存记录无法读取，本次尚未提交'); return false; }
+    }
     if (manualSettings && definitionSaveBlocked) { setModuleSaveError(definitionSaveReason); return false; }
     if (!sharedReady && !(manualSettings && definitionReady && sharedLive?.capabilities?.saveDefinition.allowed)) { setModuleSaveError('模板暂不可用，本人草稿和历史保留'); return false; }
     if (moduleSaveLock.current || moduleDeleteLock.current || presetSaveLock.current || quickPresetLock.current || uploading || bannerUploading) return false;
@@ -1865,12 +1906,29 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     const signature = JSON.stringify(savePayload);
     const request = moduleSaveRequest.current?.signature === signature ? moduleSaveRequest.current : { signature, requestId: crypto.randomUUID() };
     moduleSaveRequest.current = request;
+    const currentSaveScope = fixedSaveScope.current;
+    const validSaveScope = () => fixedSaveScope.current === currentSaveScope && currentSaveScope.active && !sessionChanged && !isClientSessionBlocked();
+    let repairSave: FixedReferenceSavePending | null = null;
+    let postStarted = false;
     try {
       if (isClientSessionBlocked()) return false;
+      if (saveDefinition && fixedRepairAllowed && fixedReferenceRepairs.length) {
+        const intent = definitionBaseline.current.sharedLive?.intent;
+        if (!intent?.presetId || !intent.definitionToken || !validSaveScope()) throw new Error('原模板版本尚未确认，本次尚未提交');
+        repairSave = await claimFixedReferenceSave({ version: 1, actorId: userId, moduleId: module.id, presetId: intent.presetId,
+          requestId: request.requestId, expectedRevision: revisionOverride, definitionToken: intent.definitionToken });
+        if (!validSaveScope()) { clearFixedReferenceSave(repairSave); return false; }
+        pendingFixedSaveRef.current = repairSave; setPendingFixedSave(repairSave);
+      }
+      postStarted = true;
       const result = await readResponse(await fetch('/api/image-studio/modules', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...savePayload, ...(sharedLive || publishNew ? { requestId: request.requestId } : {}) }) }));
+      if (!validSaveScope()) return false;
+      if (repairSave && (result.commandReceipt?.requestId !== repairSave.requestId
+        || !fixedReferenceReceiptMatches({ status: 'completed', receipt: result.commandReceipt }, repairSave))) throw new Error('原修复保存回执尚未确认，请核对原保存');
       if (!Number.isInteger(result.revision) || result.revision <= revisionOverride
         || publishNew && (result.sharedLive?.mode !== 'publisher' || result.sourcePresetShared !== true || result.sourcePresetId !== `module-source:${module.id}`)) throw new Error('保存结果尚未确认，当前草稿已保留，请核对后重试');
+      if (repairSave) { clearFixedReferenceSave(repairSave); pendingFixedSaveRef.current = null; setPendingFixedSave(null); }
       revisionRef.current = result.revision;
       setModuleRevision(result.revision); setModuleSaved(JSON.stringify({ ...snapshot, context: contextSnapshot }));
       setSavedModuleContext(contextSnapshot);
@@ -1890,12 +1948,47 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       moduleSaveRequest.current = null;
       return result.revision as number;
     } catch (e) {
+      if (!validSaveScope()) return false;
+      if (!repairSave && saveDefinition && fixedRepairAllowed && fixedReferenceRepairs.length) {
+        try { const original = readFixedReferenceSave(userId, module.id);
+          if (original) { pendingFixedSaveRef.current = original; setPendingFixedSave(original); } }
+        catch { setFixedSaveStorageError('本机修复保存记录无法读取，本次尚未提交'); }
+      }
+      if (repairSave && (!postStarted || fixedReferenceSaveRejected(e, repairSave))) {
+        try { clearFixedReferenceSave(repairSave); pendingFixedSaveRef.current = null; setPendingFixedSave(null); moduleSaveRequest.current = null; }
+        catch { setFixedSaveStorageError('保存结果已确认，但本机记录未清理，请核对原保存'); }
+      }
       const message = e instanceof Error ? e.message : '保存失败'; setError(message); setModuleSaveError(message);
       if (saveDefinition && Number((e as { status?: number })?.status) === 409) setDefinitionConflict(true);
       if (sharedLive && [401, 403, 404, 409].includes(Number((e as { status?: number })?.status))) onSharedRefresh();
       return false;
     }
     finally { moduleSaveLock.current = false; setModuleSaving(false); }
+  }
+
+  async function queryFixedReferenceSave() {
+    const current = fixedSaveScope.current;
+    const valid = () => fixedSaveScope.current === current && current.active && !sessionChanged && !isClientSessionBlocked();
+    if (!valid() || checkingFixedSave || moduleSaveLock.current) return;
+    setCheckingFixedSave(true);
+    try {
+      const command = pendingFixedSaveRef.current || readFixedReferenceSave(userId, module.id);
+      if (!command) throw new Error('原保存记录暂无法确认，请保留草稿并核对本机存储');
+      pendingFixedSaveRef.current = command; setPendingFixedSave(command);
+      const result = await readResponse(await fetch(`/api/image-studio/presets?mode=command-status&requestId=${encodeURIComponent(command.requestId)}`,
+        { method: 'GET', credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) }));
+      if (!valid()) return;
+      if (!fixedReferenceReceiptMatches(result, command)) throw new Error(result.status === 'not-found'
+        ? '尚未查到原保存回执，结果仍待确认；不会重新提交' : '原保存回执尚未确认，请继续核对原保存');
+      clearFixedReferenceSave(command); pendingFixedSaveRef.current = null; setPendingFixedSave(null); setFixedSaveStorageError('');
+      moduleSaveRequest.current = null; setDefinitionConflict(true); setModuleSaveError('原修复保存已确认。当前编辑保留，请核对最新模板后再保存');
+      setSaveStatus('原修复保存已确认，当前草稿未自动覆盖或提交');
+      // Refresh current facts separately; do not adopt receipt/current as the
+      // current editor's baseline or consume a successor revision silently.
+      onSharedRefresh();
+    } catch (cause) {
+      if (valid()) setModuleSaveError(cause instanceof Error ? cause.message : '原保存结果仍待确认，请继续核对');
+    } finally { if (valid()) setCheckingFixedSave(false); }
   }
 
   async function changeModuleSharing(anchor?: HTMLElement) {
@@ -3331,6 +3424,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         {quickPresetsError && <p role="alert" className={styles.error}>{quickPresetsError}<button type="button" disabled={quickPresetsLoading} onClick={() => void loadQuickPresets()}>重试</button></p>}
         {saveStatus && <p role="status" className={styles.muted}>{saveStatus}</p>}
         {definitionSaveReason && <p role="status" className={styles.muted}>{definitionSaveReason}</p>}
+        {fixedSaveUnknown && <p role="status" className={styles.muted}><button type="button" disabled={checkingFixedSave || moduleSaving || sessionChanged}
+          onClick={() => void queryFixedReferenceSave()}>{checkingFixedSave ? '正在核对原保存' : '核对原保存'}</button></p>}
         {error && <TaskNotice kind="recoverable">{error}</TaskNotice>}
       </section>
       <section id={`studio-results-${module.id}`} className={styles.outputs} aria-label="生成结果">
@@ -3572,7 +3667,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} title={definitionSaveReason || undefined} disabled={definitionSaveBlocked || !sharedReady && !definitionReady || moduleSaving || sharingPreferenceSaving || uploading || bannerUploading || !settingsDirty && !unpublishedSharing} onClick={() => void saveModuleSettings()}><Save size={16} />{moduleSaving ? '正在保存' : sharedLive ? definitionEditable ? '保存共享模板' : '保存本次设置' : unpublishedSharing ? '保存并共享模板' : templateWorkbench ? '保存模块设置' : '保存模板设置'}</button>
       </div>
       {definitionSaveReason && <p role="status" className={styles.muted}>{definitionSaveReason}</p>}
-      {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}{definitionConflict && definitionReady ? <button type="button" disabled={moduleSaving || uploading || bannerUploading} onClick={() => void (async () => {
+      {fixedSaveUnknown && <p role="status" className={styles.muted}><button type="button" disabled={checkingFixedSave || moduleSaving || sessionChanged}
+        onClick={() => void queryFixedReferenceSave()}>{checkingFixedSave ? '正在核对原保存' : '核对原保存'}</button></p>}
+      {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}{fixedSaveUnknown ? null : definitionConflict && definitionReady ? <button type="button" disabled={moduleSaving || uploading || bannerUploading} onClick={() => void (async () => {
         if (!await confirm('当前编辑会保留。请核对最新模板后再继续；确认后只采用最新版本作为保存依据，不会立即保存或生成。', { title: '核对更新', confirmLabel: '已核对，继续编辑' })) return;
         definitionBaseline.current = studioRepairModule(module); revisionRef.current = module.revision; setModuleRevision(module.revision);
         setDefinitionConflict(false); setModuleSaveError('');

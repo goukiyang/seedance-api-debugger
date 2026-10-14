@@ -19,12 +19,13 @@ import type { SharedStudioLiveDTO } from './shared-types';
 import { studioFixedCoverDTO } from './module-cover';
 import { readStudioModuleSharingPreference, writeStudioModuleSharingPreference, studioModuleSharingPreferenceKey } from './module-sharing-preference';
 import { projectSharedStudioCapabilities } from './shared-capabilities';
-import { readReceipt, writeReceipt, sharedCommandFingerprint, publicStudioReceipt } from './shared-command-storage';
+import { readReceipt, readOwnedReceipt, writeReceipt, sharedCommandFingerprint, publicStudioReceipt } from './shared-command-storage';
 
 export { deleteStudioGroup };
 
 export const defaultStudioModuleId = (ownerId: string) => `default-${ownerId}`;
 export class StudioModuleError extends Error {
+  commandOutcome?: { status: 'not-applied'; actorId: string; moduleId: string; requestId: string };
   constructor(message: string, public status = 400) { super(message); }
 }
 export function validStudioModuleId(id: unknown, ownerId: string): id is string {
@@ -345,8 +346,34 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
   sourceIdentity = actor;
   const binding = await studioSharedBinding(ownerId, id);
   if (!createOnly && body.saveIntent === 'definition') {
-    await publishSharedStudioModule(actor, id, { ...body, requestId: body.requestId, expectedRevision: body.revision });
-    return studioModuleDTOForUser(actor, id);
+    let published: Awaited<ReturnType<typeof publishSharedStudioModule>>;
+    try {
+      published = await publishSharedStudioModule(actor, id, { ...body, requestId: body.requestId, expectedRevision: body.revision });
+    } catch (error) {
+      // The awaited standalone publish transaction has rolled back a known
+      // business rejection. A post-commit DTO read is deliberately OUTSIDE this
+      // catch. Neither transport/Prisma uncertainty nor a prior own receipt can
+      // be labelled not-applied, even when the HTTP status looks recoverable.
+      const businessRejected = error instanceof StudioSharingError || error instanceof StudioFixedReferenceError
+        || error instanceof StudioReferencePolicyError || error instanceof StudioStyleError;
+      let noOriginalReceipt = false;
+      if (businessRejected && Object.prototype.hasOwnProperty.call(body, 'fixedReferenceRepairs')
+        && typeof body.requestId === 'string' && /^[A-Za-z0-9:_-]{1,160}$/.test(body.requestId)) {
+        try {
+          const fresh = await assertStudioActor(ownerId);
+          noOriginalReceipt = !await readOwnedReceipt(prisma, fresh.id, body.requestId);
+        } catch { /* An unreadable receipt or revoked identity remains unknown. */ }
+      }
+      if (businessRejected && noOriginalReceipt) {
+        const rejected = new StudioModuleError(error.message, error.status);
+        rejected.commandOutcome = { status: 'not-applied', actorId: ownerId, moduleId: id, requestId: body.requestId as string };
+        throw rejected;
+      }
+      throw error;
+    }
+    const dto = await studioModuleDTOForUser(actor, id);
+    return Object.prototype.hasOwnProperty.call(body, 'fixedReferenceRepairs')
+      ? { ...dto, commandReceipt: { ...publicStudioReceipt(published.receipt), requestId: body.requestId } } : dto;
   }
   if (!createOnly && binding) {
     if (body.saveIntent !== 'personal') throw new StudioModuleError('请明确保存个人输入或模板定义，当前草稿仍保留', 400);

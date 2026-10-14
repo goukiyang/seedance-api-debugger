@@ -61,6 +61,7 @@ export function StudioRepairFields({ repair, templatePrompt, onTemplatePrompt, t
     const source = canEditFixed ? fixedSource(item.id) : repair.fixedReferences[index];
     // A valid but intentionally protected fixed slot must not reuse old local
     // media URLs or notes as an implicit new author read permission.
+    if (!canEditFixed) return source?.status === 'valid' && source.image ? { ...source.image } : { id: item.id };
     return source && !source.image ? { id: item.id } : displayReference(item, source);
   });
   const bannerSource = banner && repair.banner && repair.banner.id === banner.id ? repair.banner : undefined;
@@ -109,7 +110,7 @@ export function StudioRepairFields({ repair, templatePrompt, onTemplatePrompt, t
           const canRepair = !canEditFixed && repair.fixedReferenceRepairAllowed === true && source?.repairable === true;
           const proposed = fixedRepairs.find(item => item.sourceIndex === repairIndex && item.originalAssetId === source?.id);
           const protectedNote = Boolean(source && source.status !== 'valid');
-          const note = protectedNote ? source?.note || '' : fixedReferences[index].note;
+          const note = !canEditFixed ? '' : protectedNote ? source?.note || '' : fixedReferences[index]?.note || '';
           return <div className={styles.referenceNote}>
             {source?.status === 'valid' && !source.image && <p className={styles.muted}>正常固定参考，原图和备注保持原权限。</p>}
             {source?.status !== 'valid' && issue && <p className={styles.muted} role="status">固定参考 {number} 待处理：{issue}。{canEditFixed || canRepair ? '可移除或替换失效引用。' : '请联系具有原权限的管理员修复。'}</p>}
@@ -119,10 +120,10 @@ export function StudioRepairFields({ repair, templatePrompt, onTemplatePrompt, t
               <button type="button" disabled={disabled} onClick={() => onReplaceFixed(repairIndex)}>选择替换图</button>
               {proposed && <button type="button" disabled={disabled} onClick={() => onRepairFixed(repairIndex, undefined)}>撤销修改</button>}
             </div>}
-            {canEditFixed && !protectedNote ? <textarea aria-label={`固定参考 ${number} 备注`} rows={2} maxLength={2000}
+            {canEditFixed && (!protectedNote ? <textarea aria-label={`固定参考 ${number} 备注`} rows={2} maxLength={2000}
               disabled={disabled} value={note} onChange={event => {
                 if (!disabled) onFixedReferences(fixedReferences.map((item, position) => position === index ? { ...item, note: event.target.value } : item));
-              }} /> : note && <p className={styles.muted}>{note}</p>}
+              }} /> : note && <p className={styles.muted}>{note}</p>)}
           </div>;
         }} />
     </section>

@@ -49,7 +49,9 @@ async function save(request: NextRequest, createOnly: boolean) {
   }
   catch (error) {
     if (error instanceof SyntaxError) return NextResponse.json({ error: '模块内容无效' }, { status: 400, headers: privateHeaders });
-    if (businessError(error)) return NextResponse.json({ error: (error as StudioModuleError).message, reasonCode: errorReason(error) }, { status: (error as StudioModuleError).status, headers: privateHeaders });
+    if (businessError(error)) return NextResponse.json({ error: (error as StudioModuleError).message, reasonCode: errorReason(error),
+      ...(error instanceof StudioModuleError && error.commandOutcome ? { commandOutcome: error.commandOutcome } : {}) },
+    { status: (error as StudioModuleError).status, headers: privateHeaders });
     return NextResponse.json({ error: '保存未确认，草稿仍保留，请保留原请求编号查询', reasonCode: 'read-unavailable' }, { status: 503, headers: privateHeaders });
   }
 }
