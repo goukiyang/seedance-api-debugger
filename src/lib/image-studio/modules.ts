@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { evolutionCapability } from './evolution';
 import { resolveModuleContextVersion } from './context-version';
-import { studioPresetArchived } from './preset-lifecycle';
+import { archivedPresetKey, studioPresetArchived } from './preset-lifecycle';
 import { normalizeStudioRatio } from './ratios';
 import { getImageStudioSettings, IMAGE_STUDIO_MODELS, type ImageStudioSettings } from './settings';
 import { defaultImageStudioQuality, defaultImageResolution, normalizeImageStudioQuality, normalizeImageResolution, type ImageResolution } from './model-catalog';
@@ -18,6 +18,8 @@ import { assertStudioActor, deleteStudioGroup, getSharedStudioPersonalOverrides,
 import type { SharedStudioLiveDTO } from './shared-types';
 import { studioFixedCoverDTO } from './module-cover';
 import { readStudioModuleSharingPreference, writeStudioModuleSharingPreference, studioModuleSharingPreferenceKey } from './module-sharing-preference';
+import { projectSharedStudioCapabilities } from './shared-capabilities';
+import { readReceipt, writeReceipt, sharedCommandFingerprint, publicStudioReceipt } from './shared-command-storage';
 
 export { deleteStudioGroup };
 
@@ -58,7 +60,7 @@ type StudioModuleRow = {
   count: number; reference_limit?: number; aspect_ratio?: string; resolution?: string | null; reference_ids: string[] | string; revision: number; created_at: Date; updated_at: Date;
 };
 
-async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageStudioSettings, saved = true, isAdmin = false, sourcePreset?: StudioPresetAccessRow & { id: string }, identity?: ImageStudioIdentity, sharedReads?: Map<string, SharedStudioModuleRead>) {
+async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageStudioSettings, saved = true, isAdmin = false, sourcePreset?: StudioPresetAccessRow & { id: string; updated_at?: Date }, identity?: ImageStudioIdentity, sharedReads?: Map<string, SharedStudioModuleRead>) {
   const sharedRead = saved ? sharedReads?.get(row.id) ?? (await readSharedStudioModules(ownerId, [row.id])).get(row.id) : undefined;
   if (sharedRead?.binding) return sharedModuleDTO(row, ownerId, settings, sharedRead, identity);
   const ids = Array.isArray(row.reference_ids) ? row.reference_ids : JSON.parse(row.reference_ids) as string[];
@@ -123,17 +125,33 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
   } catch { representativeReference = null; }
   const banner = row.banner_asset_id ? assets.find(item => item.id === row.banner_asset_id) : null;
   const fixedCover = saved ? await studioFixedCoverDTO(user, { kind: 'module', id: row.id }) : null;
-  return { id: row.id, name: row.name, prompt: row.prompt, count: row.count, referenceLimit, referencePolicy, aspectRatio: row.aspect_ratio || 'auto', resolution: generation.resolution, revision: row.revision, saved,
+  const sourceArchived = sourcePreset ? await studioPresetArchived(sourcePreset.id) : false;
+  const state = projectSharedStudioCapabilities({ objectKind: row.source_preset_id ? 'legacy-copy' : 'local',
+    lifecycle: row.source_preset_id ? sourcePreset ? sourceArchived ? 'archived' : 'active' : 'missing' : 'active',
+    sharing: sourcePreset ? sourcePreset.is_shared ? 'shared' : 'private' : row.source_preset_id ? 'unknown' : 'private',
+    dependency: visibleTransientIds.length === ids.length && !skills.some(item => 'unavailable' in item && item.unavailable)
+      && !styleGroups.some(item => 'unavailable' in item && item.unavailable) ? 'ready' : 'invalid',
+    sourceRevision: sourcePreset && canViewStudioPreset(user, sourcePreset) ? sourcePreset.updated_at?.toISOString() ?? null : null,
+    moduleRevision: row.revision, definitionToken: null, actorAllowed: true, ownsWorkspace: true,
+    canViewSource: !row.source_preset_id || Boolean(sourcePreset && canViewStudioPreset(user, sourcePreset)),
+    canManageSource: Boolean(sourcePreset && canManageStudioPreset(user, sourcePreset)) });
+  // A local definition is owned through its workspace; source management remains
+  // separate for legacy copies and is never inferred from administrator status.
+  if (!row.source_preset_id) {
+    state.capabilities.editDefinition = state.capabilities.editPersonalDraft;
+    state.capabilities.saveDefinition = state.capabilities.editPersonalDraft;
+  }
+  return { ...state, id: row.id, name: row.name, prompt: row.prompt, count: row.count, referenceLimit, referencePolicy, aspectRatio: row.aspect_ratio || 'auto', resolution: generation.resolution, revision: row.revision, saved,
     model: generation.model, quality, groupName: row.group_name || '未分组', banner: banner ? { id: banner.id, originalUrl: studioTemplateAssetUrl(banner.id), thumbnailUrl: studioTemplateAssetUrl(banner.id, true), width: banner.width, height: banner.height } : null,
     fixedCover, coverEditable: saved,
     cover: !fixedCover && latestResult ? { resultUrl: studioAssetUrl(latestResult.id), thumbnailUrl: studioAssetUrl(latestResult.id, true), referenceUrl: representativeReference } : null,
     prices: generation.prices, unitCredits: generation.prices[generation.model],
     reproduceFromTaskId: row.reproduce_task_id || null, sourcePresetId: row.source_preset_id || null,
-    sourcePresetShared: row.source_preset_id ? Boolean(sourcePreset?.is_shared) : null,
+    sourcePresetShared: row.source_preset_id ? sourcePreset?.is_shared ?? null : null,
     sourcePresetOwnedByViewer: Boolean(sourcePreset && sourcePreset.owner_id === ownerId),
     sourcePresetCanManageSharing: Boolean(sourcePreset && canManageStudioPreset(user, sourcePreset) && !(await studioPresetArchived(sourcePreset.id))),
     sharingPreference: saved ? await readStudioModuleSharingPreference(ownerId, row.id) : null,
-    canChooseSharing: saved && !row.id.startsWith('default-') && (!row.source_preset_id || Boolean(sourcePreset && sourcePreset.owner_id === ownerId && !(await studioPresetArchived(sourcePreset.id)))),
+    canChooseSharing: saved && !row.id.startsWith('default-') && (!row.source_preset_id || Boolean(sourcePreset && canManageStudioPreset(user, sourcePreset) && !sourceArchived)),
     contextEditable: !protectedSource,
     evolution: evolutionCapability(row),
     fixedReferencesEditable: isAdmin && (!sourcePreset || sourcePreset.owner_id === ownerId),
@@ -164,9 +182,8 @@ async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: 
     return asset ? [{ id, originalUrl: studioTemplateAssetUrl(id), thumbnailUrl: studioTemplateAssetUrl(id, true), width: asset.width, height: asset.height }] : [];
   });
   const dto = resolved?.publicDTO;
-  const unavailableSource = !resolved && unavailableIntent && binding.mode === 'publisher'
-    ? await prisma.imageStudioPreset.findFirst({ where: { id: binding.presetId, owner_id: ownerId } }) : null;
-  const canRepair = Boolean(unavailableSource && canManageStudioPreset(actor, unavailableSource) && !(await studioPresetArchived(unavailableSource.id)));
+  const repairDefinition = sharedRead.repairDefinition;
+  const canRepair = Boolean(repairDefinition && binding.mode === 'publisher');
   const overrides = resolved?.personalOverrides || await getSharedStudioPersonalOverrides(ownerId, row.id);
   const defaults = dto?.defaults;
   const model = overrides.model ?? defaults?.model ?? settings.model;
@@ -177,12 +194,20 @@ async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: 
   const latestTask = await prisma.imageStudioTask.findFirst({ where: { module_id: row.id, owner_id: ownerId, status: 'succeeded', deleted_at: null, asset_id: { not: null } }, orderBy: { finished_at: 'desc' }, select: { asset_id: true } });
   const latestResult = latestTask?.asset_id ? await prisma.asset.findFirst({ where: { id: latestTask.asset_id, owner_id: ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(actor)] }, select: { id: true } }) : null;
   const intent = resolved?.definition.intent || unavailableIntent || { protocol: 'shared-live-v1' as const, presetId: binding.presetId, definitionToken: '' };
-  const sharedLive: SharedStudioLiveDTO = { ...intent, intent, mode: binding.mode, available: Boolean(resolved),
-    ...(unavailableReason ? { unavailableReason } : {}), overriddenFields: Object.keys(overrides) as SharedStudioLiveDTO['overriddenFields'], ...(defaults ? { defaults } : {}) };
+  const state = sharedRead.state ?? projectSharedStudioCapabilities({ objectKind: binding.mode, lifecycle: dto || repairDefinition ? 'active' : 'missing',
+    sharing: dto ? dto.isShared ? 'shared' : 'private' : 'unknown', dependency: resolved ? 'ready' : canRepair ? 'invalid' : 'unknown',
+    sourceRevision: dto?.revision ?? repairDefinition?.sourceRevision ?? null, moduleRevision: row.revision, definitionToken: intent.definitionToken || null,
+    actorAllowed: true, ownsWorkspace: true, canViewSource: Boolean(resolved || canRepair), canManageSource: binding.mode === 'publisher' && Boolean(dto?.canManageSharing || canRepair),
+    reasonCode: resolved ? null : sharedRead.unavailable?.reasonCode });
+  const sharedLive: SharedStudioLiveDTO = { ...state, ...intent, intent, mode: binding.mode, available: Boolean(resolved),
+    ...(unavailableReason ? { unavailableReason } : {}), overriddenFields: Object.keys(overrides) as SharedStudioLiveDTO['overriddenFields'],
+    ...(defaults ? { defaults } : {}), ...(repairDefinition ? { repairDefinition } : {}) };
   const fixedCover = dto?.fixedCover ?? await studioFixedCoverDTO(actor, { kind: 'preset', id: binding.presetId });
-  return { id: row.id, name: dto?.name || (canRepair ? unavailableSource!.name : '模板已不可用'), groupName: dto?.groupName || (canRepair ? unavailableSource!.group_name : '未分组'),
-    prompt: overrides.prompt ?? '', personalPrompt: overrides.prompt ?? '', templatePrompt: dto?.templatePrompt ?? (canRepair ? unavailableSource!.prompt : ''),
-    context: dto?.context ?? (canRepair ? unavailableSource!.context : ''), contextConfigured: dto?.contextConfigured ?? Boolean(canRepair && unavailableSource!.context.trim()),
+  return { ...state, ...(repairDefinition ? { repairDefinition } : {}), id: row.id,
+    name: dto?.name || repairDefinition?.name || row.name.trim() || `历史模板 · ${row.id.slice(0, 8)}`,
+    groupName: dto?.groupName || repairDefinition?.groupName || row.group_name?.trim() || '未分组',
+    prompt: overrides.prompt ?? '', personalPrompt: overrides.prompt ?? '', templatePrompt: dto?.templatePrompt ?? repairDefinition?.templatePrompt ?? '',
+    context: dto?.context ?? repairDefinition?.context ?? '', contextConfigured: dto?.contextConfigured ?? Boolean(repairDefinition?.context.trim()),
     contextEditable: binding.mode === 'publisher' && (Boolean(dto?.contextEditable) || canRepair),
     fixedReferencesEditable: actor.role === 'admin' && binding.mode === 'publisher' && (Boolean(dto?.ownedByViewer) || canRepair),
     model, quality, resolution, count: overrides.count ?? defaults?.count ?? row.count,
@@ -196,8 +221,10 @@ async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: 
     templateReferenceIds: dto?.templateReferenceIds || [], fixedReferences: dto?.fixedReferences || [], fixedReferenceCount: dto?.fixedReferenceCount || 0,
     styleGroupIds: dto?.styleGroupIds || [], styleGroups: dto?.styleGroups || [], skillIds: [], skills: [],
     reproductionState: dto?.reproductionConfigured ? { fixedReferenceCount: dto.fixedReferenceCount, skills: [], styleGroups: dto.styleGroups } : null,
-    reproduceFromTaskId: row.reproduce_task_id || null, sourcePresetId: binding.presetId, sourcePresetShared: dto?.isShared ?? false,
-    sourcePresetOwnedByViewer: dto?.ownedByViewer ?? canRepair, sourcePresetCanManageSharing: binding.mode === 'publisher' && (Boolean(dto?.canManageSharing) || canRepair),
+    reproduceFromTaskId: row.reproduce_task_id || null, sourcePresetId: binding.presetId,
+    sourcePresetShared: state.sharing === 'unknown' ? null : state.sharing === 'shared',
+    sourcePresetOwnedByViewer: sharedRead.ownedByViewer ?? dto?.ownedByViewer ?? canRepair,
+    sourcePresetCanManageSharing: state.capabilities.changeSharing.allowed,
     moduleContextVersion: await resolveModuleContextVersion(dto?.context || '').catch(() => null),
     evolution: evolutionCapability({ context: dto?.context || '' }), sharedLive, createdAt: row.created_at, updatedAt: row.updated_at };
 }
@@ -205,7 +232,7 @@ export async function studioModuleDTOForUser(user: ImageStudioIdentity, moduleId
   user = await assertStudioActor(user.id);
   const row = await prisma.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: user.id } });
   if (!row) throw new StudioModuleError('模块不存在或无权使用', 404);
-  const source = row.source_preset_id ? await prisma.imageStudioPreset.findUnique({ where: { id: row.source_preset_id }, select: { id: true, owner_id: true, scope: true, is_shared: true } }) : null;
+  const source = row.source_preset_id ? await prisma.imageStudioPreset.findUnique({ where: { id: row.source_preset_id }, select: { id: true, owner_id: true, scope: true, is_shared: true, updated_at: true } }) : null;
   return moduleDTO(row, user.id, await getImageStudioSettings(), true, user.role === 'admin', source || undefined, user);
 }
 export async function listStudioModules(ownerId: string, cursor?: string, isAdmin = false, requestedIds?: string[], identity?: ImageStudioIdentity) {
@@ -218,19 +245,24 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
     orderBy: [{ created_at: 'asc' }, { id: 'asc' }], take: 13, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
   const includeDefault = !cursor && (!requestedIds || requestedIds.includes(defaultId));
   const defaultRow = includeDefault ? await prisma.imageStudioModule.findFirst({ where: { id: defaultId, owner_id: ownerId } }) : null;
-  const sourceIds = [...rows, ...(defaultRow ? [defaultRow] : [])].map(row => row.source_preset_id).filter((id): id is string => Boolean(id));
-  const sourceRows = sourceIds.length ? await prisma.imageStudioPreset.findMany({ where: { id: { in: sourceIds } }, select: { id: true, owner_id: true, scope: true, is_shared: true } }) : [];
-  const sourceById = new Map(sourceRows.map(row => [row.id, row]));
   const directory = !cursor && !requestedIds ? await prisma.imageStudioModule.findMany({
     where: { owner_id: ownerId }, orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
     select: { id: true, name: true, group_name: true, source_preset_id: true, revision: true },
   }) : undefined;
+  const sourceIds = Array.from(new Set([...(directory || []), ...rows, ...(defaultRow ? [defaultRow] : [])]
+    .map(row => row.source_preset_id).filter((id): id is string => Boolean(id))));
+  const sourceRows = sourceIds.length ? await prisma.imageStudioPreset.findMany({ where: { id: { in: sourceIds } },
+    select: { id: true, owner_id: true, scope: true, is_shared: true, name: true, group_name: true, updated_at: true } }) : [];
+  const sourceById = new Map(sourceRows.map(row => [row.id, row]));
+  const archivedSources = sourceIds.length ? await prisma.platformSetting.findMany({ where: { key: { in: sourceIds.map(archivedPresetKey) } }, select: { key: true } }) : [];
+  const archivedSourceIds = new Set(archivedSources.map(row => row.key));
   // Keep an old personal copy visible after sharing is turned off so its
   // already-submitted results remain discoverable. The task transaction is
   // the authoritative check for whether a new generation may start.
   const visible = rows.slice(0, 12);
-  // Resolve shared definitions once in one snapshot, reused by cards and navigation.
-  const sharedReads = await readSharedStudioModules(ownerId, [...visible, ...(defaultRow ? [defaultRow] : []), ...(directory || [])].map(row => row.id));
+  // Only the content page resolves full definitions/assets. The full directory
+  // receives source metadata below and never hydrates every saved workspace.
+  const sharedReads = await readSharedStudioModules(ownerId, [...visible, ...(defaultRow ? [defaultRow] : [])].map(row => row.id));
   const modules = await Promise.all(visible.map(row => moduleDTO(row, ownerId, settings, true, isAdmin, row.source_preset_id ? sourceById.get(row.source_preset_id) : undefined, identity, sharedReads)));
   if (includeDefault) {
     const defaults = settings.templateDefaults;
@@ -240,32 +272,42 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
   }
   // Navigation must describe all saved modules, not just the first content page.
   const projectedDirectory = directory ? await Promise.all(directory.map(async item => {
-    const sharedRead = sharedReads.get(item.id)!;
-    const binding = sharedRead.binding;
-    if (!binding) return { id: item.id, name: item.name, groupName: item.group_name || '未分组', sourcePresetId: item.source_preset_id,
-      sourcePresetShared: Boolean(item.source_preset_id && sourceById.get(item.source_preset_id)?.is_shared), revision: item.revision, canManageGroup: true, coverEditable: true };
-    try {
-      if (sharedRead.unavailable) throw sharedRead.unavailable;
-      const resolved = sharedRead.resolved!;
-      const { definition, personalOverrides } = resolved;
-      const sharedLive: SharedStudioLiveDTO = { ...definition.intent, intent: definition.intent, mode: binding.mode, available: true,
-        overriddenFields: Object.keys(personalOverrides) as SharedStudioLiveDTO['overriddenFields'], defaults: resolved.publicDTO.defaults };
-      return { id: item.id, name: definition.name, groupName: definition.groupName, sourcePresetId: binding.presetId,
-        sourcePresetShared: resolved.publicDTO.isShared, coverEditable: binding.mode === 'publisher' && resolved.publicDTO.coverEditable,
-        revision: item.revision, canManageGroup: binding.mode === 'publisher' && resolved.publicDTO.canManageSharing, sharedLive };
-    } catch (error) {
-      if (error instanceof StudioSharingError && [403, 404, 409].includes(error.status)) {
-        const intent = error.intent || { protocol: 'shared-live-v1' as const, presetId: binding.presetId, definitionToken: '' };
-        const sharedLive: SharedStudioLiveDTO = { ...intent, intent, mode: binding.mode, available: false, unavailableReason: error.message, overriddenFields: [] };
-        const source = binding.mode === 'publisher' && error.intent
-          ? await prisma.imageStudioPreset.findFirst({ where: { id: binding.presetId, owner_id: ownerId } }) : null;
-        const canManageGroup = Boolean(source && canManageStudioPreset(actor, source) && !(await studioPresetArchived(source.id)));
-        return { id: item.id, name: canManageGroup ? source!.name : '模板已不可用', groupName: canManageGroup ? source!.group_name || '未分组' : '未分组',
-          sourcePresetId: binding.presetId, sourcePresetShared: Boolean(source?.is_shared), coverEditable: canManageGroup,
-          revision: item.revision, canManageGroup, sharedLive, unavailable: true };
-      }
-      throw error;
-    }
+    const sharedRead = sharedReads.get(item.id);
+    const binding = sharedRead ? sharedRead.binding : await studioSharedBinding(ownerId, item.id);
+    if (binding && binding.presetId !== item.source_preset_id) throw new StudioSharingError('共享模板工作区来源不匹配', 409);
+    const source = item.source_preset_id ? sourceById.get(item.source_preset_id) : undefined;
+    const archived = Boolean(source && archivedSourceIds.has(archivedPresetKey(source.id)));
+    const canViewSource = !item.source_preset_id || Boolean(source && canViewStudioPreset(actor, source));
+    const canManageSource = Boolean(source && canManageStudioPreset(actor, source) && (!binding || binding.mode === 'publisher'));
+    const reasonCode = !item.source_preset_id ? null : !source ? 'source-missing' as const
+      : archived && canViewSource ? 'source-archived' as const : !canViewSource ? source.is_shared ? 'access-revoked' as const : 'source-withdrawn' as const
+      : binding?.mode === 'publisher' && source.owner_id !== ownerId ? 'access-revoked' as const : null;
+    const state = sharedRead?.state ?? projectSharedStudioCapabilities({ objectKind: binding?.mode ?? (item.source_preset_id ? 'legacy-copy' : 'local'),
+      lifecycle: source ? archived ? 'archived' : 'active' : item.source_preset_id ? 'missing' : 'active',
+      sharing: source ? source.is_shared ? 'shared' : 'private' : item.source_preset_id ? 'unknown' : 'private', dependency: 'unknown', reasonCode,
+      sourceRevision: source && canViewSource ? source.updated_at.toISOString() : null, moduleRevision: item.revision, definitionToken: null,
+      actorAllowed: true, ownsWorkspace: true, canViewSource, canManageSource });
+    if (!binding) return { ...state, id: item.id, name: item.name.trim() || `历史模板 · ${item.id.slice(0, 8)}`,
+      groupName: item.group_name?.trim() || '未分组', sourcePresetId: item.source_preset_id,
+      sourcePresetShared: source ? source.is_shared : item.source_preset_id ? null : false, revision: item.revision, canManageGroup: true, coverEditable: true };
+    const resolved = sharedRead?.resolved;
+    const repair = sharedRead?.repairDefinition;
+    const intent = resolved?.definition.intent || sharedRead?.unavailable?.intent || { protocol: 'shared-live-v1' as const, presetId: binding.presetId, definitionToken: '' };
+    // For unhydrated navigation only, the compatibility flag describes the
+    // source's current authorization/lifecycle. Unknown dependencies never grant
+    // generate; opening the workspace still performs the full strict read.
+    const available = sharedRead ? Boolean(resolved) : canViewSource && !archived && reasonCode === null;
+    const sharedLive: SharedStudioLiveDTO = { ...state, ...intent, intent, mode: binding.mode, available,
+      overriddenFields: Object.keys(resolved?.personalOverrides || {}) as SharedStudioLiveDTO['overriddenFields'],
+      ...(resolved ? { defaults: resolved.publicDTO.defaults } : {}),
+      ...(sharedRead?.unavailable ? { unavailableReason: sharedRead.unavailable.message } : {}) };
+    const legalNavigationSource = source && canViewSource && !archived ? source : null;
+    const canManageGroup = binding.mode === 'publisher' && canManageSource && !archived;
+    return { ...state, id: item.id, name: resolved?.definition.name || repair?.name || legalNavigationSource?.name || item.name.trim() || `历史模板 · ${item.id.slice(0, 8)}`,
+      groupName: resolved?.definition.groupName || repair?.groupName || legalNavigationSource?.group_name || item.group_name?.trim() || '未分组',
+      sourcePresetId: binding.presetId, sourcePresetShared: state.sharing === 'unknown' ? null : state.sharing === 'shared',
+      sourcePresetOwnedByViewer: source?.owner_id === ownerId, coverEditable: canManageGroup, revision: item.revision, canManageGroup, sharedLive,
+      ...(sharedRead?.unavailable || reasonCode ? { unavailable: true } : {}) };
   })) : undefined;
   return { modules, nextCursor: rows.length > 12 ? visible[visible.length - 1].id : null,
     removedDefaultGroups: await getStudioRemovedDefaultGroups(ownerId),
@@ -435,7 +477,8 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
     // Only the explicit new-template action opts in. Old modules and the
     // automatically initialized default workspace never change visibility.
     if (initializeDefaults && !id.startsWith('default-')) {
-      await writeStudioModuleSharingPreference({ version: 1, ownerId, moduleId: id, enabled: body.sharingDefault !== false, revision: 1 }, tx);
+      await writeStudioModuleSharingPreference({ version: 1, ownerId, moduleId: id, enabled: body.sharingDefault !== false, revision: 1 }, tx,
+        { entryPoint: body.entryPoint, beforeModuleRevision: 0, afterModuleRevision: saved.revision });
     }
     if (fixedReferences) {
       try { await setStudioModuleFixedReferences(ownerId, id, fixedReferences, tx); }
@@ -466,7 +509,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
     if (groupName !== undefined) await restoreStudioDefaultGroup(ownerId, groupName.trim() || '未分组', tx);
     return saved;
   }, { timeout: 15000 });
-  const source = row.source_preset_id ? await prisma.imageStudioPreset.findUnique({ where: { id: row.source_preset_id }, select: { id: true, owner_id: true, scope: true, is_shared: true } }) : undefined;
+  const source = row.source_preset_id ? await prisma.imageStudioPreset.findUnique({ where: { id: row.source_preset_id }, select: { id: true, owner_id: true, scope: true, is_shared: true, updated_at: true } }) : undefined;
   return moduleDTO(row, ownerId, await getImageStudioSettings(), true, isAdmin, source || undefined, sourceIdentity);
 }
 
@@ -475,25 +518,41 @@ export async function chooseStudioModuleSharing(ownerId: string, body: Record<st
     || typeof body.requestId !== 'string' || !/^[a-zA-Z0-9_-]{16,100}$/.test(body.requestId)
     || !Number.isInteger(body.revision)) throw new StudioModuleError('共享设置参数无效');
   const id = body.id;
-  await prisma.$transaction(async tx => {
-    await assertStudioActor(ownerId, tx);
+  const receipt = await prisma.$transaction(async tx => {
+    const actor = await assertStudioActor(ownerId, tx);
+    const fingerprint = sharedCommandFingerprint(['set-sharing-preference', id, body.isShared, body.revision]);
+    const saved = await readReceipt(tx, ownerId, body.requestId, fingerprint);
+    if (saved) return saved;
     const current = await tx.imageStudioModule.findFirst({ where: { id, owner_id: ownerId } });
     if (!current) throw new StudioModuleError('模板不存在或无权设置共享', 403);
     if (await studioSharedBinding(ownerId, id, tx)) throw new StudioModuleError('模板已发布，请重新读取后设置共享范围', 409);
     if (current.source_preset_id) {
       const source = await tx.imageStudioPreset.findUnique({ where: { id: current.source_preset_id } });
-      if (!source || source.owner_id !== ownerId || await studioPresetArchived(source.id, tx)) throw new StudioModuleError('不能共享他人的模板定义', 403);
+      if (!source || !canManageStudioPreset(actor, source) || await studioPresetArchived(source.id, tx)) {
+        throw new StudioSharingError('当前账号不能设置这个模板的共享选择', 403, 'access-revoked');
+      }
     }
     const previous = await readStudioModuleSharingPreference(ownerId, id, tx);
     if (previous && previous.requestId === body.requestId) {
-      if (previous.enabled !== body.isShared) throw new StudioModuleError('请先确认原共享设置，不会改写未确认操作', 409);
-      return;
+      throw new StudioModuleError('旧共享选择缺少可核对的原请求回执，请读取后重新确认，不会重复写入', 409);
+    }
+    if (current.revision !== body.revision) throw new StudioModuleError('模板已在其他页面更新，当前输入保留，请重新核对共享设置', 409);
+    if (previous?.enabled === body.isShared) {
+      const result = { action: 'set-sharing-preference', requestId: body.requestId, moduleId: id, revision: current.revision,
+        expectedRevision: current.revision, noOp: true, committedAt: new Date().toISOString() };
+      await writeReceipt(tx, ownerId, body.requestId, fingerprint, result);
+      return result;
     }
     const changed = await tx.imageStudioModule.updateMany({ where: { id, owner_id: ownerId, revision: Number(body.revision) }, data: { revision: { increment: 1 } } });
     if (changed.count !== 1) throw new StudioModuleError('模板已在其他页面更新，当前输入保留，请重新核对共享设置', 409);
     await writeStudioModuleSharingPreference({ version: 1, ownerId, moduleId: id, enabled: body.isShared as boolean,
-      revision: (previous?.revision || 0) + 1, requestId: body.requestId as string }, tx);
+      revision: (previous?.revision || 0) + 1, requestId: body.requestId as string }, tx,
+      { entryPoint: body.entryPoint, beforeModuleRevision: current.revision, afterModuleRevision: current.revision + 1 });
+    const result = { action: 'set-sharing-preference', requestId: body.requestId, moduleId: id, revision: current.revision + 1,
+      expectedRevision: current.revision, noOp: false, committedAt: new Date().toISOString() };
+    await writeReceipt(tx, ownerId, body.requestId, fingerprint, result);
+    return result;
   });
   const actor = await assertStudioActor(ownerId);
-  return studioModuleDTOForUser(actor, id);
+  return { ...await studioModuleDTOForUser(actor, id), sharingCommandReceipt: publicStudioReceipt(receipt) };
 }

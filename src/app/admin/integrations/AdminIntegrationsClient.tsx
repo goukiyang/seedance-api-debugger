@@ -801,7 +801,7 @@ export default function AdminIntegrationsClient() {
       return;
     }
     if ((h3QueueAction === 'cancel' || h3QueueAction === 'stop')
-      && !await confirm(`确认执行 H3 ${h3QueueAction === 'cancel' ? '取消排队任务' : '停止运行任务'}？`, { title: '确认停止', confirmLabel: '确认', danger: true })) {
+      && !await confirm(`确认执行 H3 ${h3QueueAction === 'cancel' ? '取消排队任务' : '停止运行任务'}？`, { title: '确认停止', confirmLabel: '确认' })) {
       return;
     }
     setH3QueueLoading(true);

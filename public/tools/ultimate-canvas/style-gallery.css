@@ -570,7 +570,7 @@
 
 .uc-sg-apply-error {
     flex: 0 1 190px;
-    color: #ffb5b9;
+    color: var(--text-secondary, #a3a3a3);
     font-size: 11px;
 }
 

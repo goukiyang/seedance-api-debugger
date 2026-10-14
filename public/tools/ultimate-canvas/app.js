@@ -779,7 +779,7 @@
                 message: `\u786e\u8ba4\u5904\u7406\u65b9\u5411\u300c${branch?.title || branchId}\u300d\uff1f`,
                 detail: branch?.description || branch?.status || '',
                 confirmLabel: labels[action] || videoCardUiText.operations,
-                danger: action === 'close'
+                danger: false
             });
             if (!confirmed) return;
         }

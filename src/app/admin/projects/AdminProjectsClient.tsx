@@ -381,7 +381,7 @@ export default function AdminProjectsClient() {
 
       <div className="card admin-projects-shell">
         {message && <p className="text-green">{message}</p>}
-        {error && <p className="text-red">{error}</p>}
+        {error && <p className="text-gray">{error}</p>}
 
         <div className="admin-projects-toolbar">
           <input
@@ -527,7 +527,7 @@ export default function AdminProjectsClient() {
               <button className="btn btn-secondary" type="button" onClick={() => setMergeOpen(false)} disabled={mergeLoading}>关闭</button>
             </header>
 
-            {mergeError && <p className="text-red">{mergeError}</p>}
+            {mergeError && <p className="text-gray">{mergeError}</p>}
 
             <section>
               <h3>源项目</h3>

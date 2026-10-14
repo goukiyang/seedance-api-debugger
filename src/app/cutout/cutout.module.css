@@ -557,9 +557,9 @@
 }
 
 .statusError {
-  border-color: var(--tone-danger-border);
-  background: var(--tone-danger-bg);
-  color: var(--tone-danger-text);
+  border-color: var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
 }
 
 .statusWarning {
@@ -702,8 +702,8 @@
 }
 
 .statusFailed {
-  background: var(--tone-danger-bg);
-  color: var(--tone-danger-text);
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .statusRunning {

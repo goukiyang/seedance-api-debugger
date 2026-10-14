@@ -554,7 +554,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
             {sheet && item.candidateIndex >= 0 && plan && <button type="button" disabled={busy} onClick={()=>void run(async()=>{await downloadAvatarCell(item.media!.src,avatarLayout(plan),index);setNotice('已在本机裁出所选格并交给浏览器下载；没有生成、上传或收费。');})}><Download size={15}/>裁出此格</button>}
           </> : null}
           renderPrimaryActions={item => item.output?.status === 'queued' && item.output.snapshot?.imageChannelLabel ? <button type="button" disabled={busy} onClick={() => void run(async () => {
-            if (!await confirm('只取消尚未向供应商请求的排队任务；已受理或结果未知的任务不取消。', { title: '取消排队', confirmLabel: '取消排队', danger: true })) return;
+            if (!await confirm('只取消尚未向供应商请求的排队任务；已受理或结果未知的任务不取消。', { title: '取消排队', confirmLabel: '取消排队' })) return;
             const response = await fetch('/api/image-studio/tasks', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cancel', id: item.output!.id }) });
             const result = await response.json();
             if (!response.ok) throw new Error(result.error || '取消未确认，请重新查询原任务');

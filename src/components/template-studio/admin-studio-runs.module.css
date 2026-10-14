@@ -75,9 +75,9 @@
 
 .errorNotice {
   align-items: center;
-  background: var(--tone-danger-bg);
-  border-color: #bd3b2d;
-  color: var(--tone-danger-text);
+  background: var(--bg-input);
+  border-color: var(--border-color);
+  color: var(--text-secondary);
   justify-content: space-between;
 }
 
@@ -174,7 +174,7 @@
 
 .status { background: var(--bg-hover); border-radius: 4px; color: var(--text-secondary); font-size: 12px; font-style: normal; font-weight: 700; padding: 4px 7px; width: fit-content; }
 .statusUnknown { background: var(--tone-warning-bg); color: var(--tone-warning-text); }
-.statusFailed { background: var(--tone-danger-bg); color: var(--tone-danger-text); }
+.statusFailed { background: var(--bg-input); color: var(--text-secondary); }
 .runRow time,
 .taskRow time { color: var(--text-secondary); font-size: 12px; }
 .taskCount { color: var(--text-secondary); font-size: 13px; }

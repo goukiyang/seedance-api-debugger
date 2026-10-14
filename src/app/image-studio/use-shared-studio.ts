@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { UploadedAssetPayload } from '@/lib/http/file-upload';
-import type { SharedStudioDefaults, SharedStudioIntent } from '@/lib/image-studio/shared-types';
+import type { SharedStudioCapabilities, SharedStudioDefaults, SharedStudioLiveDTO, SharedStudioReasonCode, SharedStudioStateProjection } from '@/lib/image-studio/shared-types';
 import type { ModuleCoverDTO } from '@/lib/image-studio/module-cover-types';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS } from '@/lib/image-studio/model-catalog';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
@@ -29,22 +29,23 @@ export type SharedStudioEntry = {
   isShared: boolean; fixedCover?: ModuleCoverDTO | null; coverEditable?: boolean;
   revision?: string; available: boolean; unavailableReason?: string;
 };
-type SharedModule = { id: string; sharedLive?: { intent: SharedStudioIntent; available: boolean } | null };
+type SharedModule = { id: string; sharedLive?: Pick<SharedStudioLiveDTO, 'intent' | 'available'> & Partial<SharedStudioLiveDTO> | null };
 type Catalog = { owner: string; items: SharedStudioEntry[]; revision: string; cursor: string | null; pages: number; ready: boolean };
 class SharedReadError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string, public reasonCode?: SharedStudioReasonCode) { super(message); }
 }
 async function readShared<T>(url: string, signal: AbortSignal): Promise<T> {
   const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]) });
-  const value = await response.json();
-  if (!response.ok) throw new SharedReadError(response.status, value.error || '模板同步暂不可用');
+  const value = await response.json().catch(() => null);
+  if (!response.ok) throw new SharedReadError(response.status, value?.error || '模板同步暂不可用', value?.reasonCode);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('模板同步暂不可用');
   return value as T;
 }
 
 // One serial loop owns revision, catalog pages and active definition reads.
 export function useSharedStudio<T extends SharedModule>({ userId, activeModule, onDefinition, onUnavailable, completeCatalog = false }: {
   userId: string; activeModule?: T; onDefinition: (module: T) => void;
-  onUnavailable: (presetId: string | null, reason: string) => void;
+  onUnavailable: (presetId: string | null, reason: string, reasonCode?: SharedStudioReasonCode, capabilities?: SharedStudioCapabilities) => void;
   completeCatalog?: boolean;
 }) {
   const { sessionChanged } = useAppSession();
@@ -57,7 +58,7 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
   latest.current = { activeModule, onDefinition, onUnavailable };
   const [catalog, setCatalog] = useState<Catalog>({ owner: userId, items: [], revision: '', cursor: null, pages: 0, ready: false });
   const catalogRef = useRef(catalog); catalogRef.current = catalog;
-  const [feedback, setFeedback] = useState({ owner: userId, error: '', loading: true });
+  const [feedback, setFeedback] = useState<{ owner: string; error: string; loading: boolean; sync: 'ready' | 'loading' | 'stale' | 'error' }>({ owner: userId, error: '', loading: true, sync: 'loading' });
   const wake = useRef<(force?: boolean, more?: boolean) => void>(() => {});
   const generation = useRef(0);
   const refresh = useCallback(() => wake.current(true), []);
@@ -71,6 +72,7 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
     let running = false, queued = false, force = true, more = false;
     let consecutiveFailures = 0;
     let appliedToken = '';
+    let appliedStateToken = '';
     const valid = () => !isClientSessionBlocked() && scope.current === current && !controller.signal.aborted;
     const online = () => !document.hidden && navigator.onLine;
     if (catalogRef.current.owner !== userId) {
@@ -87,10 +89,10 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
       const forced = force, append = more;
       force = false; more = false;
       const initial = catalogRef.current;
-      if (!initial.ready || append || completeCatalog && initial.cursor) setFeedback({ owner: userId, error: '', loading: true });
+      if (!initial.ready || append || completeCatalog && initial.cursor) setFeedback({ owner: userId, error: '', loading: true, sync: initial.ready ? 'stale' : 'loading' });
       try {
-        const revision = await readShared<{ catalogRevision: string; activeDefinitionToken: string | null; activeAvailable: boolean }>(
-          `/api/image-studio/shared?mode=revision${presetId ? `&activePresetId=${encodeURIComponent(presetId)}` : ''}`, controller.signal);
+        const revision = await readShared<{ catalogRevision: string; activeDefinitionToken: string | null; activeAvailable: boolean; activeState?: SharedStudioStateProjection | null }>(
+          `/api/image-studio/shared?mode=revision${presetId ? `&activePresetId=${encodeURIComponent(presetId)}` : ''}${moduleId ? `&activeModuleId=${encodeURIComponent(moduleId)}` : ''}`, controller.signal);
         if (!currentRead()) return;
         if (typeof revision.catalogRevision !== 'string') throw new Error('模板同步暂不可用');
         const changed = initial.revision !== revision.catalogRevision;
@@ -115,37 +117,46 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
             if (cursor && seenCursors.has(cursor)) throw new Error('模板目录暂不可用');
             if (cursor) seenCursors.add(cursor);
           } while (cursor && (completeCatalog || pages < targetPages));
-          if (!cursor) for (const prior of initial.items) if (!items.has(prior.presetId)) latest.current.onUnavailable(prior.presetId, '模板已停止共享或不可用');
+          // Missing catalog entries only leave this authorized catalog. A bound
+          // workspace is confirmed by its own module projection below.
           commit({ owner: userId, items: Array.from(items.values()), revision: revision.catalogRevision, cursor, pages, ready: true });
         }
-        if (presetId && revision.activeAvailable === false) {
-          appliedToken = '';
-          latest.current.onUnavailable(presetId, '模板已不可用');
-        } else if (presetId && (forced || revision.activeDefinitionToken !== appliedToken)) {
+        const stateToken = JSON.stringify([revision.activeAvailable, revision.activeState || null]);
+        if (presetId && moduleId && (forced || revision.activeDefinitionToken !== appliedToken || stateToken !== appliedStateToken)) {
           const data = await readShared<{ modules: T[] }>(`/api/image-studio/modules?ids=${encodeURIComponent(moduleId)}`, controller.signal);
           if (!currentRead()) return;
+          if (!Array.isArray(data.modules)) throw new Error('模板同步暂不可用');
           const workspace = data.modules.find(item => item.id === moduleId && item.sharedLive?.intent.presetId === presetId);
-          if (!workspace?.sharedLive?.available) latest.current.onUnavailable(presetId, '模板已不可用');
-          else {
+          if (!workspace?.sharedLive) throw new Error('模板状态暂未确认');
+          const live = workspace.sharedLive;
+          if (live.available || live.repairDefinition) {
             // A definition can change between revision and detail. Its own token is authoritative.
-            appliedToken = workspace.sharedLive.intent.definitionToken;
+            appliedToken = live.intent.definitionToken;
             latest.current.onDefinition(workspace);
+          } else if (live.reasonCode && live.reasonCode !== 'read-unavailable') {
+            latest.current.onDefinition(workspace);
+            latest.current.onUnavailable(presetId, live.unavailableReason || '模板已不可用', live.reasonCode, live.capabilities);
+            appliedToken = revision.activeDefinitionToken || '';
+          } else {
+            throw new Error('模板状态暂未确认');
           }
+          appliedStateToken = stateToken;
         }
         if (currentRead()) {
           consecutiveFailures = 0;
-          setFeedback({ owner: userId, error: '', loading: false });
+          setFeedback({ owner: userId, error: '', loading: false, sync: 'ready' });
         }
       } catch (cause) {
         if (!currentRead()) return;
         consecutiveFailures++;
         if (cause instanceof SharedReadError && [401, 403].includes(cause.status)) {
           commit({ owner: userId, items: [], revision: '', cursor: null, pages: 0, ready: true });
-          latest.current.onUnavailable(null, '模板已不可用');
-        } else if (cause instanceof SharedReadError && cause.status === 404 && presetId) {
-          latest.current.onUnavailable(presetId, '模板已不可用');
+          latest.current.onUnavailable(null, cause.status === 401 ? '请先登录' : '当前账号无权读取模板', cause.status === 401 ? 'login-required' : 'access-revoked');
+        } else if (cause instanceof SharedReadError && presetId && cause.reasonCode
+          && ['source-withdrawn', 'source-archived', 'access-revoked'].includes(cause.reasonCode)) {
+          latest.current.onUnavailable(presetId, cause.message, cause.reasonCode);
         } else if (cause instanceof SharedReadError && cause.status === 409) force = true;
-        setFeedback({ owner: userId, error: '模板同步暂不可用', loading: false });
+        setFeedback({ owner: userId, error: '模板同步暂不可用', loading: false, sync: catalogRef.current.ready ? 'stale' : 'error' });
       } finally {
         running = false;
         const delay = consecutiveFailures ? Math.min(30000, 2000 * 2 ** Math.min(consecutiveFailures, 4)) : queued ? 0 : 2000;
@@ -162,7 +173,10 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
     const resume = () => {
       if (timer) clearTimeout(timer);
       if (online()) wake.current(true);
-      else generation.current++;
+      else {
+        generation.current++;
+        if (valid()) setFeedback({ owner: userId, error: '', loading: false, sync: catalogRef.current.ready ? 'stale' : 'loading' });
+      }
     };
     document.addEventListener('visibilitychange', resume);
     window.addEventListener('focus', resume);
@@ -178,9 +192,10 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
     };
   }, [sessionChanged, scopeKey, userId, presetId, moduleId, completeCatalog]);
 
-  const visible = catalog.owner === userId ? catalog : null;
+  const visible = !sessionChanged && !isClientSessionBlocked() && catalog.owner === userId ? catalog : null;
   return { items: visible?.items || [], ready: visible?.ready || false,
     catalogReady: Boolean(visible?.ready && !visible.cursor), hasMore: Boolean(visible?.cursor),
     catalogRevision: visible?.revision || '', loading: feedback.owner !== userId || feedback.loading,
-    error: feedback.owner === userId ? feedback.error : '', refresh, loadMore };
+    error: feedback.owner === userId ? feedback.error : '',
+    sync: feedback.owner === userId ? feedback.sync : 'loading', refresh, loadMore };
 }

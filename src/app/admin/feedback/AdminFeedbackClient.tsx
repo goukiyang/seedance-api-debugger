@@ -314,9 +314,9 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
           marginBottom: 14,
           padding: '10px 12px',
           borderRadius: 8,
-          color: error ? '#ff9b9b' : '#86efac',
-          background: error ? 'rgba(255,80,80,0.10)' : 'rgba(80,255,140,0.10)',
-          border: error ? '1px solid rgba(255,80,80,0.25)' : '1px solid rgba(80,255,140,0.25)',
+          color: error ? 'var(--text-secondary)' : '#86efac',
+          background: error ? 'var(--bg-input)' : 'rgba(80,255,140,0.10)',
+          border: error ? '1px solid var(--border-color)' : '1px solid rgba(80,255,140,0.25)',
         }}>
           {error || message}
         </div>
@@ -456,7 +456,7 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
               <h2 id="feedback-detail-title" style={{ margin: 0, fontSize: 20 }}>反馈详情</h2>
               <button type="button" disabled={actionBusy} onClick={() => void closeDetail()} aria-label="关闭" title="关闭" style={miniButtonStyle}><X size={16} /></button>
             </header>
-            {error && <p role="alert" style={{ color: '#ff9b9b', margin: '0 0 14px', overflowWrap: 'anywhere' }}>{error}</p>}
+            {error && <p role="alert" style={{ color: 'var(--text-secondary)', margin: '0 0 14px', overflowWrap: 'anywhere' }}>{error}</p>}
             <p style={{ margin: '0 0 16px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: 15, lineHeight: 1.65 }}>{active.content}</p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', alignItems: 'center', color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>
               <UserIdentityBadge user={active.user} size="sm" />

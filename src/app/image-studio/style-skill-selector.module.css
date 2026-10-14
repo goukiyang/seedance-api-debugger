@@ -31,7 +31,7 @@
 }
 .chip img { flex: 0 0 28px; width: 28px; height: 28px; object-fit: cover; border-radius: 3px; }
 .chip small { color: #9daeb0; font-size: 11px; white-space: nowrap; }
-.chip[data-unavailable] { border-color: #95614e; }
+.chip[data-unavailable] { border-color: #485158; }
 .dialog { width: min(840px, calc(100vw - 24px)); max-width: calc(100vw - 24px); height: min(760px, calc(100dvh - 32px)); max-height: calc(100dvh - 32px); box-sizing: border-box; padding: 0; border: 1px solid #526166; border-radius: 8px; background: #141c20; color: #e0e8e9; overflow: hidden; }
 .dialog[open] { display: flex; flex-direction: column; }
 .dialog::backdrop { background: rgb(7 12 14 / 76%); }
@@ -63,10 +63,10 @@
 .summary { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; line-height: 1.5; color: #b9c8cb; }
 .cardActions { display: flex; justify-content: space-between; gap: 6px; padding: 0 8px 8px; }
 .root .cardActions button { min-height: 32px; background: transparent; border-color: transparent; }
-.limit { display: block; padding: 0 10px 8px; color: #e0b297; font-size: 11px; }
+.limit { display: block; padding: 0 10px 8px; color: #a7b5b7; font-size: 11px; }
 .pagination { display: flex; justify-content: center; align-items: center; gap: 6px; padding-top: 10px; }
 .pagination > span { min-width: 28px; text-align: center; color: #a7b5b7; font-size: 12px; }
-.error { color: #e8b4a0; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.error { color: #a7b5b7; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .error button { margin-inline-start: 6px; }
 .footer { flex: 0 0 auto; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 16px; border-top: 1px solid #3b4a4e; background: #1a2429; }
 .footer > div { display: grid; gap: 4px; min-width: 0; }

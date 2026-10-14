@@ -3181,7 +3181,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                                 >
                                   <button
                                     type="button"
-                                    className="composer-project-option-danger"
+                                    className={removalAction === 'delete' ? 'composer-project-option-danger' : 'composer-project-option-action'}
                                     onClick={(event) => {
                                       event.stopPropagation();
                                       void handleProjectRemoval(project);
@@ -3244,7 +3244,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                   ×
                 </button>
               </div>
-              <div className="project-removal-summary">
+              <div className="project-removal-summary" data-action={pendingProjectRemoval.action}>
                 <strong>{projectDisplayName(pendingProjectRemoval.project)}</strong>
                 <span>{projectMetaLabel(pendingProjectRemoval.project)}</span>
               </div>
@@ -3259,7 +3259,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                 </button>
                 <button
                   type="button"
-                  className="btn btn-danger"
+                  className={pendingProjectRemoval.action === 'delete' ? 'btn btn-danger' : 'btn btn-primary'}
                   onClick={() => void confirmProjectRemoval()}
                   disabled={projectBusy || reuseUiLocked}
                 >

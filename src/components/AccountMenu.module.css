@@ -10,7 +10,7 @@
 .info dt, .hint { color: #b7c5c0; }
 .info dd { margin: 0; overflow-wrap: anywhere; }
 .hint, .error { font-size: 13px; line-height: 1.6; }
-.error { color: #efb0a6; }
+.error { color: var(--text-secondary, #bdc8c5); }
 .actions { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
 .primary, .secondary { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 8px 12px; box-sizing: border-box; border-radius: 6px; font-size: 14px; text-decoration: none; cursor: pointer; }
 .primary { border: 1px solid #79daca; background: #79daca; color: #123a31; font-weight: 650; }

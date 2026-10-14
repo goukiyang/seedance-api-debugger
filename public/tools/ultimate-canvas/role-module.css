@@ -215,7 +215,8 @@ dialog.canvas-role-template-dialog {
 .role-split-menu button[aria-checked=true] { color: var(--accent-teal, #65d5c2); background: #34423e; }
 .role-module-status { flex: 0 0 auto; margin: 0; padding: 8px 20px; color: var(--text-secondary, #aaafb5); overflow-wrap: anywhere; }
 .role-module-status:empty { padding-top: 0; padding-bottom: 0; }
-.role-module-status[data-tone=warning], .role-module-status[data-tone=error] { color: #f2c471; }
+.role-module-status[data-tone=warning] { color: #f2c471; }
+.role-module-status[data-tone=error] { color: var(--text-secondary, #aaafb5); }
 .role-error-state, .role-pending-strip, .role-conflict-strip {
     display: flex;
     flex: 0 0 auto;
@@ -230,6 +231,7 @@ dialog.canvas-role-template-dialog {
     color: oklch(89% .07 80);
     overflow-wrap: anywhere;
 }
+.role-error-state { border-color: var(--border-default, #393b3e); background: var(--bg-input, #303235); color: var(--text-secondary, #aaafb5); }
 .role-conflict-strip { display: block; }
 .role-conflict-strip p { margin: 0 0 8px; }
 .role-conflict-strip > div { display: flex; flex-wrap: wrap; gap: 8px; }

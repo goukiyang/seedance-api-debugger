@@ -514,7 +514,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 0 10px 10px;
-  color: var(--tone-danger-text);
+  color: var(--text-primary);
   font-size: 11px;
   line-height: 1.4;
   overflow-wrap: anywhere;

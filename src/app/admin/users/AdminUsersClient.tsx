@@ -1007,7 +1007,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
   const toggleUser = async (user: AdminUser) => {
     const action = user.status === 'active' ? 'disable' : 'enable';
     const label = action === 'disable' ? '禁用' : '启用';
-    const ok = await confirm(`确认${label}用户 ${displayUserName(user)}？`, { title: `${label}用户`, confirmLabel: label, danger: action === 'disable' });
+    const ok = await confirm(`确认${label}用户 ${displayUserName(user)}？`, { title: `${label}用户`, confirmLabel: label });
     if (!ok) return;
     setError('');
     setMessage('');

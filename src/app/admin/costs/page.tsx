@@ -605,7 +605,7 @@ export default async function AdminCostsPage({
             <h2 className="section-title mb-0">账本自检</h2>
             <p className="text-gray text-sm mt-2">用于确认总账、分摊、任务状态和 Provider 请求之间没有断链。</p>
           </div>
-          <span className={auditSummary.issue_count === 0 ? 'text-green' : 'text-red'}>
+          <span className={auditSummary.issue_count === 0 ? 'text-green' : 'text-gray'}>
             {auditSummary.issue_count === 0 ? '自检通过' : `发现 ${auditSummary.issue_count} 项待处理`}
           </span>
         </div>
@@ -647,7 +647,7 @@ export default async function AdminCostsPage({
             {auditChecks.map((check) => (
               <tr key={check.label}>
                 <td>{check.label}</td>
-                <td className={check.count === 0 ? 'text-green' : 'text-red'}>{auditStatusText(check.count)}</td>
+                <td className={check.count === 0 ? 'text-green' : 'text-gray'}>{auditStatusText(check.count)}</td>
                 <td className="text-gray">{check.detail}</td>
               </tr>
             ))}
@@ -721,7 +721,7 @@ export default async function AdminCostsPage({
                     {task.project ? (
                       <Link className="link" href={`/projects/${task.project.id}`}>{task.project.name}</Link>
                     ) : (
-                      <span className="text-red">未归属</span>
+                      <span className="text-gray">未归属</span>
                     )}
                   </td>
                   <td><UserIdentityBadge user={taskOwnerUser(task)} size="sm" /></td>

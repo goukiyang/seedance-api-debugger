@@ -928,8 +928,8 @@ function ProjectsPageContent() {
       />
 
       {(notice || actionError) && (
-        <div className="card" role={actionError ? 'alert' : 'status'} style={{ borderColor: actionError ? 'var(--tone-danger-border, var(--border-color))' : 'var(--tone-success-border, var(--border-color))' }}>
-          <p className={actionError ? 'text-red' : 'text-green'}>{actionError || notice}</p>
+        <div className="card" role={actionError ? 'alert' : 'status'} style={{ borderColor: actionError ? 'var(--border-color)' : 'var(--tone-success-border, var(--border-color))' }}>
+          <p className={actionError ? 'text-gray' : 'text-green'}>{actionError || notice}</p>
         </div>
       )}
 
@@ -1185,7 +1185,7 @@ function ProjectsPageContent() {
             </div>
             <form onSubmit={(event) => void createProject(event)} style={{ display: 'grid', gap: 14 }}>
               <label style={{ display: 'grid', gap: 6 }}>
-                <span>项目名称 <span aria-hidden="true" style={{ color: 'var(--tone-danger-text, var(--text-secondary))' }}>*</span></span>
+                <span>项目名称 <span aria-hidden="true" style={{ color: 'var(--text-secondary)' }}>*</span></span>
                 <input ref={createNameRef} className="input" value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：夏季广告短片" required disabled={createSubmitting} />
               </label>
               <label style={{ display: 'grid', gap: 6 }}>
@@ -1220,7 +1220,7 @@ function ProjectsPageContent() {
                   )}
                 </>
               )}
-              {createError && <p role="alert" className="text-red" style={{ margin: 0 }}>{createError}</p>}
+              {createError && <p role="alert" className="text-gray" style={{ margin: 0 }}>{createError}</p>}
               {createUnknown && (
                 <div role="status" className="card" style={{ margin: 0 }}>
                   <strong>创建结果待确认</strong>

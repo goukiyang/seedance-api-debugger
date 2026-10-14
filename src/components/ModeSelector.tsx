@@ -136,7 +136,7 @@ export function ModeSelector({ value, onChange, assetCount, imageAssetCount }: P
               <span className="mode-feedback-icon">⚠️</span>
               <span>
                 首尾帧模式至少需要 <strong>2 个图片参考</strong>
-                {missing > 0 && <span className="text-red-500 ml-1">（还差 {missing} 个）</span>}
+                {missing > 0 && <span className="text-gray ml-1">（还差 {missing} 个）</span>}
               </span>
             </>
           )}
@@ -158,7 +158,7 @@ export function ModeSelector({ value, onChange, assetCount, imageAssetCount }: P
               <span className="mode-feedback-icon">⚠️</span>
               <span>
                 智能多帧模式至少需要 <strong>3 个图片参考</strong>
-                {missing > 0 && <span className="text-red-500 ml-1">（还差 {missing} 个）</span>}
+                {missing > 0 && <span className="text-gray ml-1">（还差 {missing} 个）</span>}
               </span>
             </>
           )}

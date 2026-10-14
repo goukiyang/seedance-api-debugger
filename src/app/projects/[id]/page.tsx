@@ -556,7 +556,7 @@ function MemberRemovalConfirmModal({
         <div className="project-removal-summary"><strong>{memberName}</strong></div>
         <div className="modal-actions">
           <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={busy}>取消</button>
-          <button type="button" className="btn btn-danger" onClick={onConfirm} disabled={busy}>
+          <button type="button" className="btn btn-primary" onClick={onConfirm} disabled={busy}>
             {busy ? '处理中...' : '移除成员'}
           </button>
         </div>
@@ -1239,7 +1239,7 @@ export default function ProjectDetailPage() {
   if (!project) {
     return (
       <div className="card">
-        <p className="text-red">{error || '项目不存在或无权访问'}</p>
+        <p className="text-gray">{error || '项目不存在或无权访问'}</p>
         <div className="flex items-center mt-4" style={{ gap: 10, flexWrap: 'wrap' }}>
           {error && <button type="button" className="btn btn-secondary" onClick={() => void loadProject()}>重试读取</button>}
           <Link href={projectListReturnTo} className="btn btn-secondary">返回项目列表</Link>
@@ -1280,8 +1280,8 @@ export default function ProjectDetailPage() {
       />
 
       {(message || error) && (
-        <div className="card" style={{ borderColor: error ? 'rgba(248,113,113,0.35)' : 'rgba(74,222,128,0.35)' }}>
-          <p className={error ? 'text-red' : 'text-green'}>{error || message}</p>
+        <div className="card" style={{ borderColor: error ? 'var(--border-color)' : 'rgba(74,222,128,0.35)' }}>
+          <p className={error ? 'text-gray' : 'text-green'}>{error || message}</p>
           {joinUrl && (
             <p className="text-sm mt-2">
               邀请链接：<a className="link" href={joinUrl}>{joinUrl}</a>
@@ -1834,7 +1834,7 @@ export default function ProjectDetailPage() {
                 {permissions.can_manage_members && (
                   <td>
                     <button
-                      className="btn btn-danger"
+                      className="btn btn-secondary"
                       type="button"
                       onClick={() => removeMember(member.user_id, member.user.name || member.user.username || member.user.email || `ID ${member.user.id.slice(0, 8)}`)}
                       disabled={member.user_id === project.owner_user_id}
@@ -1893,7 +1893,7 @@ export default function ProjectDetailPage() {
       )}
 
       {permissions.can_manage_project && (
-        <div className="card" style={{ borderColor: 'rgba(248,113,113,0.25)' }}>
+        <div className="card">
           <h2 className="section-title">危险操作</h2>
           <div className="flex items-center" style={{ gap: 10, flexWrap: 'wrap' }}>
             {project.status === 'archived' ? (

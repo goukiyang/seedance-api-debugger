@@ -66,7 +66,7 @@
 .estimate { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .prompt { white-space: pre-wrap; font-size: 12px; max-height: 240px; overflow: auto; overflow-wrap: anywhere; }
 .notice { margin: 10px 0; padding: 10px 12px; background: var(--bg-secondary); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
-.error { color: #d35b63; }
+.error { color: var(--text-primary); }
 .records { margin-top: 22px; border-top: 1px solid var(--border-color); padding-top: 14px; }
 .record { display: flex; gap: 12px; padding: 12px 0; align-items: center; border-bottom: 1px solid var(--border-color); flex-wrap: wrap; }
 .record img, .recordCover { width: 64px; height: 64px; flex-shrink: 0; object-fit: cover; background: var(--bg-secondary); }

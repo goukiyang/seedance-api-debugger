@@ -1527,7 +1527,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
 
   async function archiveTemplate(template: StudioTemplateDto) {
     if (!template.canManage) return;
-    const confirmed = (await confirm(`停用「${template.name}」后，新用户将不能再应用它；已有历史记录保留。`, { title: '停用模板', confirmLabel: '停用模板', danger: true }));
+    const confirmed = (await confirm(`停用「${template.name}」后，新用户将不能再应用它；已有历史记录保留。`, { title: '停用模板', confirmLabel: '停用模板' }));
     if (!confirmed) return;
     setTemplateEditBusy(true);
     try {

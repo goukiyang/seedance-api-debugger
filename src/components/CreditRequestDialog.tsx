@@ -134,7 +134,7 @@ export default function CreditRequestDialog({ autoOpen = false }: { autoOpen?: b
           </>}
           <div className={styles.actions}>
             <button ref={safeButton} type="button" className="btn btn-secondary" disabled={busy} onClick={() => setDecision(null)}>取消</button>
-            <button type="submit" className="btn btn-danger" disabled={busy || (decision.action === 'reject' && (!decisionReason.trim() || decisionReason.trim().length > 300))}>{busy ? '处理中…' : decision.action === 'withdraw' ? '确认撤回' : '确认不予发放'}</button>
+            <button type="submit" className="btn btn-primary" disabled={busy || (decision.action === 'reject' && (!decisionReason.trim() || decisionReason.trim().length > 300))}>{busy ? '处理中…' : decision.action === 'withdraw' ? '确认撤回' : '确认不予发放'}</button>
           </div>
         </form> : confirmation ? <>
           <p>当前可用 {confirmation.available} 点，本次增加 <strong>{confirmation.amount} 点</strong>个人长期积分。</p>

@@ -231,8 +231,8 @@ export default function ApprovalsPage() {
       />
 
       {(message || error) && (
-        <div className="card" style={{ borderColor: error ? 'rgba(248,113,113,0.35)' : 'rgba(74,222,128,0.35)' }}>
-          <p className={error ? 'text-red' : 'text-green'}>{error || message}</p>
+        <div className="card" style={{ borderColor: error ? 'var(--border-color)' : 'rgba(74,222,128,0.35)' }}>
+          <p className={error ? 'text-gray' : 'text-green'}>{error || message}</p>
         </div>
       )}
 
@@ -368,7 +368,7 @@ export default function ApprovalsPage() {
                     {approval.status === 'pending' ? (
                       <div className="approval-actions">
                         <button className="btn btn-secondary" type="button" onClick={() => decide(approval, 'approve')}>通过</button>
-                        <button className="btn btn-danger" type="button" onClick={() => decide(approval, 'reject')}>拒绝</button>
+                        <button className="btn btn-secondary" type="button" onClick={() => decide(approval, 'reject')}>拒绝</button>
                       </div>
                     ) : (
                       <span className="text-gray">{approval.approver ? `处理人：${approval.approver.name}` : statusLabel(approval.status)}</span>

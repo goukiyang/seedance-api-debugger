@@ -2,7 +2,7 @@
  * MIT License - Copyright (c) 2026 Lorenzo Cabra.
  * Full notice: like-button.LICENSE.txt. No photographs or branding included. */
 .sd2-like.sd2-like {
-  --lk-on: #e5484d;
+  --lk-on: #f3bb64;
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   flex: 0 0 auto; min-width: 44px; height: 44px; box-sizing: border-box;
   padding: 0 18px 0 15px; border: 0; border-radius: 22px;

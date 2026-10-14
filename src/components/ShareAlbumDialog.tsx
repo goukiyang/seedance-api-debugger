@@ -332,7 +332,7 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
 
   const revokeShare = async (share: ShareItem) => {
     const label = share.grantee?.label || share.grantee_id;
-    if (!await confirm(`取消共享给「${label}」？对方将不能继续访问这个图集。`, { title: '取消共享', confirmLabel: '取消共享', danger: true })) return;
+    if (!await confirm(`取消共享给「${label}」？对方将不能继续访问这个图集。`, { title: '取消共享', confirmLabel: '取消共享' })) return;
 
     setSavingKey(`share-${share.id}`);
     setError(null);
@@ -352,7 +352,7 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
 
   const revokeAllShares = async () => {
     if (shares.length === 0) return;
-    if (!await confirm(`关闭「${album.name}」的全部共享？所有被授权对象都会失去访问权限。`, { title: '关闭全部共享', confirmLabel: '关闭共享', danger: true })) return;
+    if (!await confirm(`关闭「${album.name}」的全部共享？所有被授权对象都会失去访问权限。`, { title: '关闭全部共享', confirmLabel: '关闭共享' })) return;
 
     setSavingKey('revoke-all');
     setError(null);

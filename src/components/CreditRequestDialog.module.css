@@ -15,6 +15,6 @@
 .list { padding: 0; margin: 0; list-style: none; }
 .list li { padding: 16px 0; border-top: 1px solid #374246; }
 .row strong { font-size: 13px; }
-.error { color: #ffafa5; }
+.error { color: var(--text-secondary, #bdc8c5); }
 .dialog button:disabled { opacity: .5; cursor: not-allowed; }
 .dialog button:focus-visible, .body textarea:focus-visible { outline: 2px solid #7acfc2; outline-offset: 2px; }

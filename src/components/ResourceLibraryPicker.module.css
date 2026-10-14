@@ -64,7 +64,7 @@
 .cardTools > span:first-child { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-secondary, #b4bec4); }
 .cardTools [data-content-reactions] > button:first-child { display: none; }
 .empty { min-height: 130px; display: grid; place-items: center; color: var(--text-secondary, #b4bec4); font-size: 14px; }
-.error { margin: 0 20px 12px; padding: 10px; background: #42272b; color: #ffd1d7; font-size: 13px; overflow-wrap: anywhere; }
+.error { margin: 0 20px 12px; padding: 10px; background: var(--bg-input, #252e2e); color: var(--text-secondary, #bdc8c5); font-size: 13px; overflow-wrap: anywhere; }
 .error button { margin-left: 10px; text-decoration: underline; }
 .notice { margin: 0 20px 12px; font-size: 13px; color: var(--text-secondary, #b4bec4); line-height: 1.5; }
 .meta .compatibility { flex-basis: 100%; min-width: 0; margin-top: 2px; color: #ffd7a3; overflow-wrap: anywhere; }

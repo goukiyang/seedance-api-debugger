@@ -232,7 +232,6 @@ interface ReferenceImageDebugProps {
 
 function referenceDebugStatusClass(status: RefImageDebugEntry['status']) {
   if (status === 'resolved') return 'bg-green-200 text-green-800';
-  if (status === 'failed') return 'bg-red-200 text-red-800';
   return 'bg-gray-200 text-zinc-900';
 }
 
@@ -309,8 +308,7 @@ function ReferenceImageDebug({ task, refImagesDebug, providerPayload }: Referenc
             <div className="space-y-1">
               {refImagesDebug.map((img) => (
                 <div key={img.index} className={`text-xs p-2 rounded ${
-                  img.status === 'resolved' ? 'bg-green-50' :
-                  img.status === 'failed' ? 'bg-red-50' : 'bg-gray-50'
+                  img.status === 'resolved' ? 'bg-green-50' : 'bg-gray-50'
                 }`}>
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{img.label}</span>
@@ -1594,7 +1592,7 @@ export default function TaskDetailPage() {
   if (!task) {
     return (
       <div className="card">
-        <p className="text-red">{taskLoadError || '任务不存在'}</p>
+        <p className="text-gray">{taskLoadError || '任务不存在'}</p>
         <Link href={returnTo} className="btn btn-secondary mt-4">
           {returnLabel}
         </Link>
@@ -2124,7 +2122,7 @@ export default function TaskDetailPage() {
                   </button>
                 )}
                 {task.local_status === 'failed' && (
-                  <button className="btn btn-danger" onClick={handleRetry} disabled={retrying}>
+                  <button className="btn btn-primary" onClick={handleRetry} disabled={retrying}>
                     <RotateCcw size={16} aria-hidden="true" />
                     {retrying ? '重试中...' : '重新生成'}
                   </button>

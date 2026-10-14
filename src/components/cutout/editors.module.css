@@ -590,10 +590,10 @@
 .errorNotice {
   margin: 0;
   padding: 8px 10px;
-  border: 1px solid var(--tone-danger-border);
+  border: 1px solid var(--border-color);
   border-radius: 5px;
-  background: var(--tone-danger-bg);
-  color: var(--tone-danger-text);
+  background: var(--bg-input);
+  color: var(--text-secondary);
   font-size: 12px;
   line-height: 1.45;
 }

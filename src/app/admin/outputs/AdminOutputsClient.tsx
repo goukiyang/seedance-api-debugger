@@ -376,7 +376,7 @@ export default function AdminOutputsClient() {
 
       {(message || error) && (
         <div className="outputs-message" data-tone={error ? 'error' : 'success'}>
-          <p className={error ? 'text-red' : 'text-green'}>{error || message}</p>
+          <p className={error ? 'text-gray' : 'text-green'}>{error || message}</p>
         </div>
       )}
 
@@ -627,7 +627,7 @@ export default function AdminOutputsClient() {
                       )}
                       {output.retention_status !== 'admin_hidden' && (
                         <button
-                          className="btn btn-danger"
+                          className="btn btn-secondary"
                           type="button"
                           disabled={actingId === output.id}
                           onClick={() => {

@@ -303,7 +303,7 @@ export default function VideoCardDetailPage() {
   if (!videoCard) {
     return (
       <div className="card">
-        <p className="text-red">{error || '视频卡不存在或无权访问'}</p>
+        <p className="text-gray">{error || '视频卡不存在或无权访问'}</p>
         <Link className="btn btn-secondary mt-4" href="/projects">返回项目</Link>
       </div>
     );
@@ -326,8 +326,8 @@ export default function VideoCardDetailPage() {
       />
 
       {(message || error) && (
-        <div className="card" style={{ borderColor: error ? 'rgba(248,113,113,0.35)' : 'rgba(74,222,128,0.35)' }}>
-          <p className={error ? 'text-red' : 'text-green'}>{error || message}</p>
+        <div className="card" style={{ borderColor: error ? 'var(--border-color)' : 'rgba(74,222,128,0.35)' }}>
+          <p className={error ? 'text-gray' : 'text-green'}>{error || message}</p>
         </div>
       )}
 

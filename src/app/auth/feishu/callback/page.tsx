@@ -97,7 +97,7 @@ export default function FeishuCallbackPage({
         <div style={{
           fontSize: 14,
           lineHeight: 1.7,
-          color: errorMessage ? '#ff8080' : 'rgba(255,255,255,0.55)',
+          color: errorMessage ? '#cbd5e1' : 'rgba(255,255,255,0.55)',
           marginBottom: errorMessage ? 24 : 0,
         }}>
           {errorMessage || message}

@@ -89,7 +89,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
       });
       const data = await res.json();
       if (!res.ok) {
-        setActionMsg(`❌ 创建失败：${data.error}`);
+        setActionMsg(`× 创建失败：${data.error}`);
       } else if (data.reused === true) {
         // 复用已有资产
         setActionMsg(`🔄 ${data.message}`);
@@ -101,7 +101,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
         await loadAssets();
       }
     } catch {
-      setActionMsg('❌ 网络错误');
+      setActionMsg('× 网络错误');
     } finally {
       setCreating(false);
     }
@@ -132,14 +132,14 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
       });
       const data = await res.json();
       if (!res.ok) {
-        setActionMsg(`❌ 重命名失败：${data.error}`);
+        setActionMsg(`× 重命名失败：${data.error}`);
       } else {
         setActionMsg('✅ 重命名成功');
         setEditId(null);
         await loadAssets();
       }
     } catch {
-      setActionMsg('❌ 网络错误');
+      setActionMsg('× 网络错误');
     }
   }, [editName, loadAssets]);
 
@@ -150,14 +150,14 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
       const res = await fetch(`/api/assets/${localId}`, { method: 'DELETE' });
       const data = await res.json();
       if (!res.ok) {
-        setActionMsg(`❌ 移除失败：${data.error}`);
+        setActionMsg(`× 移除失败：${data.error}`);
       } else {
         setActionMsg('✅ 已从素材库移除（官方资产保留）');
         if (detailId === localId) { setDetail(null); setDetailId(null); }
         await loadAssets();
       }
     } catch {
-      setActionMsg('❌ 网络错误');
+      setActionMsg('× 网络错误');
     }
   }, [detailId, loadAssets]);
 
@@ -170,14 +170,14 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
       const res = await fetch(`/api/assets/${localId}/provider-delete`, { method: 'DELETE' });
       const data = await res.json();
       if (!res.ok) {
-        setActionMsg(`❌ 彻底删除失败：${data.error}`);
+        setActionMsg(`× 彻底删除失败：${data.error}`);
       } else {
         setActionMsg('✅ 官方资产已删除');
         if (detailId === localId) { setDetail(null); setDetailId(null); }
         await loadAssets();
       }
     } catch {
-      setActionMsg('❌ 网络错误');
+      setActionMsg('× 网络错误');
     }
   }, [detailId, loadAssets, confirm]);
 
@@ -205,7 +205,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
       });
       const data = await response.json().catch(() => ({ error: '官方资产创建服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。' })) as UploadAndCreateResponse;
       if (!response.ok) {
-        setUploadMsg(`❌ ${data.error || data.message || '上传失败'}`);
+        setUploadMsg(`× ${data.error || data.message || '上传失败'}`);
       } else if (data.reused === true) {
         // 复用已有资产
         setUploadMsg(
@@ -227,7 +227,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
           msgs.push('⚠️ 当前 URL 不是公网，Seedance 官方无法访问。');
           msgs.push('请配置公网对象存储（TOS/R2）以完成闭环。');
         } else if (data.reason === 'PROVIDER_CREATE_FAILED') {
-          msgs.push(`❌ 官方 create 失败：${data.error}`);
+          msgs.push(`× 官方 create 失败：${data.error}`);
         }
         setUploadMsg(msgs.join('\n'));
         // 半闭环也刷新列表
@@ -246,7 +246,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
         await loadAssets();
       }
     } catch (uploadError) {
-      setUploadMsg(`❌ ${uploadError instanceof Error ? uploadError.message : '网络错误'}`);
+      setUploadMsg(`× ${uploadError instanceof Error ? uploadError.message : '网络错误'}`);
     } finally {
       setUploading(false);
       setUploadProgress(null);
@@ -258,7 +258,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
   const statusBadge = (s: string) => {
     const cls = s === 'Active' ? 'bg-green-900 text-green-300'
       : s === 'Deleted' ? 'bg-yellow-900 text-yellow-300'
-      : s === 'ProviderDeleted' ? 'bg-red-900 text-red-300'
+      : s === 'ProviderDeleted' ? 'bg-gray-800 text-gray-300'
       : s === 'DeleteFailed' ? 'bg-orange-900 text-orange-300'
       : 'bg-gray-700 text-gray-300';
     return <span className={`text-xs px-2 py-0.5 rounded-full font-mono ${cls}`}>{s}</span>;
@@ -321,7 +321,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
               </button>
             </div>
             {actionMsg && (
-              <div style={{ fontSize: 11, color: actionMsg.startsWith('✅') ? '#4ade80' : '#f87171', marginTop: 8 }}>{actionMsg}</div>
+              <div style={{ fontSize: 11, color: actionMsg.startsWith('✅') ? '#4ade80' : 'rgba(255,255,255,0.76)', marginTop: 8 }}>{actionMsg}</div>
             )}
           </div>
 
@@ -372,7 +372,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
               />
             )}
             {uploadMsg && (
-              <div style={{ fontSize: 11, color: uploadMsg.startsWith('✅') ? '#4ade80' : uploadMsg.includes('⚠️') ? '#fbbf24' : '#f87171', marginTop: 8, whiteSpace: 'pre-line' }}>{uploadMsg}</div>
+              <div style={{ fontSize: 11, color: uploadMsg.startsWith('✅') ? '#4ade80' : uploadMsg.includes('⚠️') ? '#fbbf24' : 'rgba(255,255,255,0.76)', marginTop: 8, whiteSpace: 'pre-line' }}>{uploadMsg}</div>
             )}
           </div>
 
@@ -483,7 +483,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
               点击「查详情」获取官方同步信息
             </div>
           ) : detail.error ? (
-            <div style={{ fontSize: 12, color: '#f87171', padding: 12, backgroundColor: 'rgba(239,68,68,0.1)', borderRadius: 8, border: '1px solid rgba(239,68,68,0.2)' }}>
+            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.76)', padding: 12, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.18)' }}>
               官方查询失败：{detail.error}
             </div>
           ) : detail.asset ? (

@@ -66,7 +66,7 @@
 .uc-doc-sort, .uc-doc-count { font-size: 12px; color: var(--text-tertiary, #919191); }
 .uc-doc-message { min-height: 32px; padding: 8px 0; color: var(--text-secondary, #a3a3a3); font-size: 12px; }
 .uc-doc-resume { display: block; margin-top: 16px; max-width: 100%; background: none; border: 0; color: var(--accent-teal, #4ecdc4); text-align: left; overflow-wrap: anywhere; padding: 6px 0; }
-.uc-doc-error { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 12px 0 !important; padding: 12px; border: 1px solid #784044; border-radius: 6px; background: #302022; color: #ffb5b9; overflow-wrap: anywhere; }
+.uc-doc-error { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 12px 0 !important; padding: 12px; border: 1px solid var(--border-default, #363636); border-radius: 6px; background: var(--bg-input, #1a1a1a); color: var(--text-secondary, #a3a3a3); overflow-wrap: anywhere; }
 .uc-doc-error button { flex-shrink: 0; }
 .uc-doc-list { list-style: none; padding: 0; margin: 0; }
 .uc-doc-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 240px) 36px; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-default, #363636); padding: 14px 0; min-width: 0; }

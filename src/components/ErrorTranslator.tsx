@@ -703,19 +703,19 @@ function DiagnosticsPanel({ debugInfo }: { debugInfo: DebugInfo }) {
                 <span className="ml-2">· base64 估算 ~{debugInfo.base64EstimateKb} KB</span>
               )}
               {debugInfo.hasLocalUrls && <span className="ml-2 text-yellow-500">⚠ 含本地图片</span>}
-              {debugInfo.hasNonPublicUrls && <span className="ml-2 text-red-400">⚠ 含不可公网访问的 URL</span>}
+              {debugInfo.hasNonPublicUrls && <span className="ml-2 text-gray">⚠ 含不可公网访问的 URL</span>}
             </div>
           )}
 
           {diags?.map((d) => (
-            <div key={d.index} className={`text-xs p-1.5 rounded ${d.status === 'ok' ? 'bg-gray-800' : d.status === 'warning' ? 'bg-yellow-900/30 border border-yellow-700' : 'bg-red-900/30 border border-red-700'}`}>
+            <div key={d.index} className={`text-xs p-1.5 rounded ${d.status === 'ok' ? 'bg-gray-800' : d.status === 'warning' ? 'bg-yellow-900/30 border border-yellow-700' : 'bg-gray-800 border border-gray-600'}`}>
               <div className="flex items-center gap-2">
                 <span className="font-medium text-gray-300">[{d.index}] {d.label}</span>
                 <span className="text-gray-500">{d.urlType}</span>
                 <span className="text-gray-400">{d.urlHost}</span>
                 <span className="text-gray-500">{d.mimeType}</span>
                 {d.fileSizeBytes > 0 && <span className="text-gray-500">{formatBytes(d.fileSizeBytes)}</span>}
-                <span className={`ml-auto text-xs px-1.5 py-0.5 rounded ${d.status === 'ok' ? 'bg-green-900 text-green-400' : d.status === 'warning' ? 'bg-yellow-900 text-yellow-400' : 'bg-red-900 text-red-400'}`}>
+                <span className={`ml-auto text-xs px-1.5 py-0.5 rounded ${d.status === 'ok' ? 'bg-green-900 text-green-400' : d.status === 'warning' ? 'bg-yellow-900 text-yellow-400' : 'bg-gray-800 text-gray'}`}>
                   {d.status}
                 </span>
               </div>
@@ -760,7 +760,7 @@ export function ErrorTranslator({ error, rawError, debugInfo, onRetry, onCopy }:
         <div className="text-xs">{error}</div>
         <div className="mt-2 flex gap-2">
           {onRetry && (
-            <button className="btn btn-sm btn-danger" onClick={onRetry}>重新提交</button>
+            <button className="btn btn-sm btn-primary" onClick={onRetry}>重新提交</button>
           )}
           <button className="btn btn-sm btn-secondary" onClick={handleCopy}>复制错误</button>
         </div>

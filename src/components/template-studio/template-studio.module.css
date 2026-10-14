@@ -110,7 +110,7 @@
 .primaryButton:active:not(:disabled) { background: oklch(0.73 0.11 166); }
 .quietButton { border-color: var(--line); color: var(--text); background: var(--panel); }
 .quietButton:disabled, .primaryButton:disabled, .iconButton:disabled, .listAction:disabled { opacity: .48; cursor: not-allowed; }
-.dangerButton { color: oklch(0.78 0.12 25); }
+.dangerButton { color: var(--muted); }
 .iconButton { width: 34px; min-width: 34px; padding: 6px; border-color: var(--line); background: var(--panel); }
 .buttonLabel { display: inline; }
 
@@ -190,7 +190,7 @@
 }
 
 .statusSuccess { color: oklch(0.8 0.13 150); border-color: oklch(0.45 0.07 150); background: oklch(0.25 0.025 150); }
-.statusError { color: oklch(0.79 0.14 25); border-color: oklch(0.43 0.08 25); background: oklch(0.245 0.025 25); }
+.statusError { color: var(--muted); border-color: var(--line); background: var(--panel-raised); }
 .statusWarning { color: oklch(0.82 0.13 80); border-color: oklch(0.48 0.08 80); background: oklch(0.26 0.025 80); }
 .statusActive { color: oklch(0.79 0.11 220); border-color: oklch(0.46 0.07 220); background: oklch(0.245 0.023 220); }
 .content { min-width: 0; padding: 18px 22px 36px; }
@@ -202,7 +202,7 @@
 .field { display: grid; gap: 6px; min-width: 0; }
 .field > label, .fieldLabel { color: var(--muted); font-size: 12px; font-weight: 650; }
 .fieldHint { color: var(--muted); font-size: 11px; line-height: 1.45; }
-.fieldError { color: oklch(0.79 0.14 25); font-size: 12px; }
+.fieldError { color: var(--muted); font-size: 12px; }
 .twoFields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
 .sectionRule { border-top: 1px solid var(--line); padding-top: 15px; }
 .sectionTitle { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 10px; font-size: 13px; font-weight: 730; }
@@ -244,19 +244,19 @@
 .saveState[data-tone="progress"] { color: var(--accent); }
 .saveState[data-tone="info"] { color: var(--muted); }
 .saveState[data-tone="success"] { color: oklch(0.8 0.13 150); }
-.saveState[data-tone="error"] { color: oklch(0.79 0.14 25); }
+.saveState[data-tone="error"] { color: var(--muted); }
 .saveState[data-tone="warning"] { color: oklch(0.82 0.13 80); }
 .blockerStatus { font-size: 12px; }
 .blockerStatus[data-tone="progress"] { color: var(--accent); }
 .blockerStatus[data-tone="info"] { color: var(--muted); }
 .blockerStatus[data-tone="success"] { color: oklch(0.8 0.13 150); }
 .blockerStatus[data-tone="warning"] { color: oklch(0.82 0.13 80); }
-.blockerStatus[data-tone="error"] { color: oklch(0.79 0.14 25); }
+.blockerStatus[data-tone="error"] { color: var(--muted); }
 .callout { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: var(--panel); font-size: 12px; line-height: 1.5; }
 .callout strong { color: var(--text); }
 .calloutLink { display: inline-flex; align-items: center; min-height: 34px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 5px; color: var(--text); text-decoration: none; background: var(--panel); }
 .calloutLink:hover { background: var(--panel-raised); }
-.calloutError { border-color: oklch(0.43 0.08 25); background: oklch(0.225 0.018 25); }
+.calloutError { border-color: var(--line); background: var(--panel-raised); }
 .calloutWarning { border-color: oklch(0.48 0.08 80); background: oklch(0.23 0.018 80); }
 .previewColumn { min-width: 0; border-left: 1px solid var(--line); padding-left: 20px; }
 .resultTabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }

@@ -345,10 +345,10 @@
 .error,
 .retryRow {
   align-items: center;
-  background: var(--tone-danger-bg);
-  border: 1px solid var(--tone-danger-border);
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
   border-radius: 6px;
-  color: var(--tone-danger-text);
+  color: var(--text-secondary);
   display: flex;
   flex-wrap: wrap;
   font-size: 12px;
@@ -378,7 +378,7 @@
 }
 
 .errorText {
-  color: var(--tone-danger-text);
+  color: var(--text-secondary);
 }
 
 .successText {

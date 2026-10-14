@@ -25,13 +25,13 @@
 .empty { display: grid; height: 100%; place-items: center; color: #a1b2bc; }
 .zoom { position: absolute; z-index: 2; bottom: 10px; left: 10px; right: 10px; display: flex; align-items: center; gap: 10px; width: fit-content; max-width: calc(100% - 20px); padding: 5px 9px; color: #d5e0e6; background: rgb(20 29 36 / .9); border-radius: 7px; font-size: 12px; }
 .zoom input { min-width: 40px; max-width: 180px; width: 100%; accent-color: #65b4aa; }
-.imageError { position: absolute; inset: 40% 10px auto; color: #f2b5b5; text-align: center; }
+.imageError { position: absolute; inset: 40% 10px auto; color: var(--text-secondary, #bdc8c5); text-align: center; }
 .previewRow { display: flex; align-items: center; gap: 16px; margin-top: 16px; color: #b3c2ca; font-size: 13px; }
 .preview { display: grid; width: 180px; aspect-ratio: 4 / 3; overflow: hidden; background: #0d1215; }
 .previewCell { position: relative; display: block; min-width: 0; min-height: 0; overflow: hidden; }
 .previewCell img { position: absolute; display: block; max-width: none; object-fit: fill; }
 .previewEmpty { background: #2d383e; }
-.error { color: #f4b3b3; line-height: 1.5; }
+.error { color: var(--text-secondary, #bdc8c5); line-height: 1.5; }
 .footer { justify-content: flex-end; flex-wrap: wrap; position: sticky; bottom: -22px; margin-top: 18px; padding: 14px 0; background: #171d20; }
 .dialog .primary { background: #236b62; border-color: #539d94; font-weight: 650; }
 .dialog .primary:hover:not(:disabled) { background: #2d8479; }

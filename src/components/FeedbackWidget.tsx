@@ -407,7 +407,7 @@ export default function FeedbackWidget() {
                 <div key={item.id} style={{ position: 'relative' }}>
                   <img src={item.previewUrl || item.imageUrl} alt="反馈图片预览" style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 8 }} />
                   <button type="button" onClick={() => removeUpload(item.id)} aria-label="移除图片" title="移除图片" style={{ ...iconButtonStyle, position: 'absolute', top: 4, right: 4 }}><X size={14} /></button>
-                  <div style={{ marginTop: 4, minHeight: 18, color: item.error ? '#fca5a5' : 'rgba(255,255,255,0.58)', fontSize: 11 }}>
+                  <div style={{ marginTop: 4, minHeight: 18, color: 'rgba(255,255,255,0.76)', fontSize: 11 }}>
                     {item.uploading ? '上传中' : item.error ? item.error : '已上传'}
                   </div>
                   {item.error && !item.uploading && !item.imageUrl && (
@@ -421,7 +421,7 @@ export default function FeedbackWidget() {
           {error && (
             <div style={{
               marginTop: 12,
-              color: '#fca5a5',
+              color: 'rgba(255,255,255,0.76)',
               fontSize: 13,
             }}>
               {error}

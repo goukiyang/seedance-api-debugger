@@ -26,5 +26,5 @@
 .root .primary { background: oklch(0.38 0.07 188); border-color: oklch(0.62 0.07 188); font-weight: 650; }
 .root .primary:hover:not(:disabled) { background: oklch(0.43 0.075 188); }
 .root .retry { background: transparent; }
-.error { color: oklch(0.83 0.09 25); margin-block: 10px; line-height: 1.5; }
+.error { color: var(--text-secondary); margin-block: 10px; line-height: 1.5; }
 @media (max-width: 560px) { .review { padding: 13px; } .pair { grid-template-columns: minmax(0, 1fr); gap: 14px; } .heading { gap: 9px; } .actions > button { flex: 1 1 auto; } }

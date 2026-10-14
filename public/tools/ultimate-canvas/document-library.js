@@ -411,7 +411,7 @@
                     if (action === 'history') showHistory(doc, summary);
                     else if (action === 'rename' || action === 'archive') showDialog(action, doc, summary);
                     else mutate(action, doc);
-                }, action === 'archive' ? 'uc-doc-danger' : 'uc-doc-menu-button'));
+                }, 'uc-doc-menu-button'));
             });
             details.append(summary, menu);
             row.append(open, meta, details);

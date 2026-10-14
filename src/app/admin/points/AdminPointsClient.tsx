@@ -91,7 +91,7 @@ function ledgerTypeLabel(type: string) {
 
 function amountClass(amount: number) {
   if (amount > 0) return 'text-green';
-  if (amount < 0) return 'text-red';
+  if (amount < 0) return 'text-gray';
   return 'text-gray';
 }
 
@@ -355,7 +355,7 @@ export default function AdminPointsClient({
         </div>
       </section>
 
-      {error && <p className="text-red">{error}</p>}
+      {error && <p className="text-gray">{error}</p>}
 
       <section className="admin-points-layout">
         <div className="card admin-points-ledger-card">

@@ -95,7 +95,7 @@ function ThumbnailCard({
       )}
       {showRemove && !isSelected && (
         <button
-          className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+          className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-gray-600 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
           onClick={(e) => {
             e.stopPropagation();
             onRemove?.();
@@ -178,7 +178,7 @@ function AssetGrid({
               <div className="text-center text-white/50 py-8">加载中...</div>
             )}
             {error && (
-              <div className="text-center text-red-400 py-8">{error}</div>
+              <div className="text-center text-gray py-8">{error}</div>
             )}
             {!loading && !error && assets.length === 0 && (
               <div className="text-center text-white/40 py-8">
@@ -331,7 +331,7 @@ export function SeedanceAssetSelector({
 
               {/* 删除按钮 */}
               <button
-                className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gray-600 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                 onClick={() => handleRemove(asset.localAssetId)}
                 title="移除"
               >
@@ -375,7 +375,7 @@ export function SeedanceAssetSelector({
 
         {/* 警告 */}
         {showWarning && (
-          <div className="text-xs text-red-400">最多选择 {max} 张参考图</div>
+          <div className="text-xs text-gray">最多选择 {max} 张参考图</div>
         )}
 
         {/* 说明 */}

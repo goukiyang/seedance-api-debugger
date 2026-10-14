@@ -52,7 +52,7 @@ export default function ProjectActionConfirmModal({
   });
 
   const copy = ACTION_COPY[action];
-  const confirmClassName = action === 'restore' ? 'btn btn-primary' : 'btn btn-danger';
+  const confirmClassName = action === 'delete' ? 'btn btn-danger' : 'btn btn-primary';
 
   return (
     <div ref={overlayRef} className="modal-overlay" role="dialog" aria-modal="true" aria-label={`${copy.title}确认`}>

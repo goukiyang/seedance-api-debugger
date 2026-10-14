@@ -2,6 +2,63 @@ import type { ImageStudioModel, ImageStudioQuality, ImageResolution } from './mo
 import type { StudioReferencePolicy } from './reference-policy';
 import type { ModuleCoverDTO } from './module-cover-types';
 
+export type SharedStudioReasonCode = 'login-required' | 'access-revoked' | 'source-withdrawn' | 'source-archived'
+  | 'source-missing' | 'dependency-invalid' | 'state-conflict' | 'read-unavailable';
+export type SharedStudioCapability = { allowed: boolean; reasonCode: SharedStudioReasonCode | null; reason: string | null };
+export type SharedStudioCapabilities = Record<'viewOwnHistory' | 'editPersonalDraft' | 'editDefinition' | 'saveDefinition'
+  | 'changeSharing' | 'deleteSource' | 'generate', SharedStudioCapability>;
+export type SharedStudioStateProjection = {
+  objectKind: 'publisher' | 'live' | 'legacy-copy' | 'local';
+  lifecycle: 'active' | 'archived' | 'missing';
+  sharing: 'shared' | 'private' | 'unknown';
+  dependency: 'ready' | 'invalid' | 'unknown';
+  reasonCode: SharedStudioReasonCode | null;
+  sourceRevision: string | null;
+  moduleRevision: number | null;
+  definitionToken: string | null;
+  capabilities: SharedStudioCapabilities;
+};
+export type SharedStudioEntryPoint = 'template-library' | 'workbench' | 'unknown';
+export type SharedStudioSharingReceipt = {
+  action: 'set-sharing'; requestId: string; presetId: string; expectedRevision: string;
+  appliedRevision: string; appliedState: { isShared: boolean; lifecycle: 'active' };
+  committedAt: string; noOp: boolean; moduleRevision: number | null;
+};
+export type SharedStudioSharingCurrent = {
+  presetId: string; sourceRevision: string; isShared: boolean; lifecycle: 'active' | 'archived'; moduleRevision: number | null;
+};
+export type SharedStudioCommandStatus = { status: 'not-found' } | {
+  status: 'completed'; receipt: Record<string, unknown>; current: SharedStudioSharingCurrent | null;
+};
+export type SharedStudioLifecycleRevisionState = { sourceRevision?: string | null; moduleRevision?: number | null; isShared?: boolean };
+export type SharedStudioLifecycleDetail = {
+  requestId?: string; entryPoint?: SharedStudioEntryPoint; before?: SharedStudioLifecycleRevisionState;
+  after?: SharedStudioLifecycleRevisionState; changedFields?: string[];
+};
+export type SharedStudioLifecycleHistoryItem = {
+  id: string; action: string; actorUserId: string | null; ownerUserId: string | null; createdAt: string;
+  detail: SharedStudioLifecycleDetail;
+};
+export type SharedStudioLifecycleHistory = { items: SharedStudioLifecycleHistoryItem[]; nextCursor: string | null };
+// This is a dedicated author-only read. Ordinary unavailable DTOs never supply
+// placeholder empty collections as an editable definition.
+export type SharedStudioRepairReference = { id: string; status: 'valid' | 'missing' | 'inaccessible'; image?: SharedStudioImageDTO };
+export type SharedStudioRepairDefinition = {
+  sourceRevision: string; definitionToken: string; name: string; groupName: string; templatePrompt: string;
+  context: string; defaults: SharedStudioDefaults;
+  templateReferences: SharedStudioRepairReference[];
+  fixedReferences: Array<SharedStudioRepairReference & { note?: string }>;
+  styleGroups: Array<{ id: string; status: 'valid' | 'missing' | 'inaccessible'; name?: string; revision?: number }>;
+  skillIds: string[];
+  skillGroups: Array<{ id: string; status: 'valid' | 'missing' | 'inaccessible'; name?: string; revision?: number }>;
+  banner?: SharedStudioRepairReference | null;
+  fixedReferencesEditable?: boolean;
+  fixedReferenceRestriction?: string;
+  skillRestriction?: string;
+  reproductionConfigured?: boolean;
+  globalContext?: string;
+};
+
 export type SharedStudioIntent = {
   protocol: 'shared-live-v1';
   presetId: string;
@@ -25,16 +82,17 @@ export type SharedStudioDefinitionPersonalInput = {
   personalReferenceIds?: string[];
   personalReferencePolicy?: StudioReferencePolicy;
 };
-export type SharedStudioLiveDTO = SharedStudioIntent & {
+export type SharedStudioLiveDTO = SharedStudioIntent & Partial<SharedStudioStateProjection> & {
   intent: SharedStudioIntent;
   mode: 'publisher' | 'live';
   available: boolean;
   unavailableReason?: string;
   overriddenFields: SharedStudioOverrideField[];
   defaults?: SharedStudioDefaults;
+  repairDefinition?: SharedStudioRepairDefinition;
 };
 export type SharedStudioImageDTO = { id: string; originalUrl: string; thumbnailUrl: string; width: number | null; height: number | null };
-export type SharedStudioPublicDefinition = {
+export type SharedStudioPublicDefinition = Partial<SharedStudioStateProjection> & {
   intent: SharedStudioIntent;
   presetId: string;
   revision: string;
@@ -59,7 +117,7 @@ export type SharedStudioPublicDefinition = {
   styleGroups: Array<{ id: string; name: string; revision: number; referenceCount: number; coverUrl: string; canManage: boolean }>;
   reproductionConfigured: boolean;
 };
-export type SharedStudioCatalogItem = {
+export type SharedStudioCatalogItem = Partial<SharedStudioStateProjection> & {
   presetId: string;
   isShared: boolean;
   name: string;
@@ -69,5 +127,10 @@ export type SharedStudioCatalogItem = {
   coverEditable: boolean;
   revision: string;
   available: boolean;
+  unavailableReason?: string;
 };
 export type SharedStudioCatalog = { items: SharedStudioCatalogItem[]; nextCursor: string | null; catalogRevision: string };
+export type SharedStudioRevision = {
+  catalogRevision: string; activeDefinitionToken: string | null; activeAvailable: boolean;
+  activeState?: SharedStudioStateProjection | null;
+};

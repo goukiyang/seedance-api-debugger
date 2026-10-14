@@ -195,7 +195,7 @@ audio.crw-original-media { height: 54px; }
 .crw-message { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--border-default, #363636); border-radius: 5px; background: var(--bg-input, #1a1a1a); white-space: pre-wrap; }
 .crw-root > .crw-message { margin: 10px 14px; }
 .crw-message--warning { border-color: #f2c471; color: #f2d391; }
-.crw-message--error { border-color: #ed7777; color: #f5a0a0; }
+.crw-message--error { border-color: var(--border-default, #363636); color: var(--text-secondary, #a3a3a3); }
 .crw-message--success { border-color: #7bcb91; color: #98d6a9; }
 .crw-message--quiet { color: var(--text-secondary, #a3a3a3); }
 .crw-receipt, .crw-draft-conflict { padding: 10px 0; }

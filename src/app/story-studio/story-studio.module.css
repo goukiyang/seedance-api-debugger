@@ -17,7 +17,7 @@
 .storyText { min-height: 280px !important; }
 .scriptText { min-height: 380px !important; }
 .status { font-size: 13px; margin: 12px 0; line-height: 1.6; overflow-wrap: anywhere; }
-.error { color: #f4a4a4; }
+.error { color: var(--text-primary, #e5e7eb); }
 .shots { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--border-color, #374151); }
 .shot { padding: 18px 0; border-top: 1px solid var(--border-color, #374151); }
 .shotHeader { justify-content: space-between; margin-bottom: 12px; }

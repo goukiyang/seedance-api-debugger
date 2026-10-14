@@ -205,7 +205,7 @@ function FavoriteList({ data, selected, busy, onSelect }: { data: ReturnType<typ
           {item.personalAlias && <button type="button" onClick={() => void data.manage({ action: 'rename', key: item.key, name: null }).then(() => setMenu(null)).catch(() => undefined)}><RotateCcw size={14} />恢复原名</button>}
         </div>, document.body)}
       </div>
-      <button type="button" className={styles.heart} title="取消喜欢" aria-label={`取消喜欢${name(item)}`} disabled={busy || data.writing || data.unconfirmed} onClick={() => { setMenu(null); void confirm(`取消喜欢“${name(item)}”？模板和历史结果不会删除。`, { title: '取消喜欢', confirmLabel: '取消喜欢', danger: true, onSubmit: () => data.cancelLike(item) }); }}><Heart size={17} /></button>
+      <button type="button" className={styles.heart} title="取消喜欢" aria-label={`取消喜欢${name(item)}`} disabled={busy || data.writing || data.unconfirmed} onClick={() => { setMenu(null); void confirm(`取消喜欢“${name(item)}”？模板和历史结果不会删除。`, { title: '取消喜欢', confirmLabel: '取消喜欢', onSubmit: () => data.cancelLike(item) }); }}><Heart size={17} /></button>
     </div>)}
     {data.allowed && data.loaded && !data.loading && !data.error && !data.items.length && <p role="status">{data.group === 'all' ? '还没有喜欢的模板' : '这个分组还没有模板'}</p>}
     {data.cursor && <button type="button" className={styles.more} disabled={data.loading || busy} onClick={data.more}>加载更多</button>}

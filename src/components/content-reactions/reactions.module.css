@@ -8,10 +8,10 @@
 .favoriteOnly { position: relative; flex: 0 0 auto; flex-wrap: nowrap; }
 .favoriteOnly :is(.busy, .error) { position: absolute; top: calc(100% + 5px); left: 0; z-index: 30; width: max-content; max-width: min(260px, 65vw); padding: 6px 8px; border: 1px solid #465057; border-radius: 5px; background: #1c2529; box-shadow: 0 3px 12px #10141680; white-space: normal; overflow-wrap: anywhere; }
 .controls button:not([data-reaction-action]) { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 32px; height: 32px; padding: 4px 7px; border: 1px solid var(--border, #394449); border-radius: 6px; background: transparent; color: inherit; cursor: pointer; font-size: 12px; letter-spacing: 0; }
-.controls button:not([data-reaction-action])[aria-pressed="true"] { color: #ff6677; background: #ff66771c; border-color: #ff66775c; }
+.controls button:not([data-reaction-action])[aria-pressed="true"] { color: #f3bb64; background: #f3bb641c; border-color: #f3bb645c; }
 .controls button:disabled { opacity: .45; cursor: default; }
 .controls button:focus-visible { outline: 2px solid #70cfbd; outline-offset: 2px; }
-.error { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #ffb3a7; }
+.error { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary, #bdc8c5); }
 .busy { display: inline-flex; align-items: center; gap: 4px; color: #f3d68c; font-size: 11px; white-space: nowrap; }
 .busyIcon { animation: reaction-busy-spin .8s linear infinite; }
 .overlayControls { position: absolute; top: 6px; left: 6px; z-index: 4; max-width: calc(100% - 12px); flex-wrap: wrap; padding: 3px; border-radius: 7px; background: transparent; opacity: 0; pointer-events: none; }
