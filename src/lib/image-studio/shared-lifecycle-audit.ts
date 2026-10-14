@@ -19,7 +19,7 @@ function state(value: RevisionState | undefined) {
 const definitionFields = new Set(['name', 'groupName', 'templatePrompt', 'context', 'globalContext', 'model', 'quality', 'resolution', 'count', 'aspectRatio',
   'referenceLimit', 'referenceIds', 'referencePolicy', 'fixedReferences', 'styleGroupIds', 'skillIds', 'bannerAssetId', 'reproduceFromTaskId']);
 export function studioDefinitionChangedFields(input: Record<string, unknown>) {
-  return Array.from(new Set(Object.keys(input).map(key => key === 'prompt' ? 'templatePrompt' : key).filter(key => definitionFields.has(key)))).sort();
+  return Array.from(new Set(Object.keys(input).map(key => key === 'prompt' ? 'templatePrompt' : key === 'fixedReferenceRepairs' ? 'fixedReferences' : key).filter(key => definitionFields.has(key)))).sort();
 }
 export async function recordStudioLifecycleEvent(client: Client, params: {
   actorUserId: string; ownerUserId: string; contentId: string; contentType?: 'image_studio_preset' | 'image_studio_module';

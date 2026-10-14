@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '普通提示不再标红，删除和真正危险的问题保留红色；共享状态统一确认，失效模板保留名称和本人历史，作者可修复有权限修改的引用。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '保留原界面与共享回执；作者失效固定参考的槽位校验和原权限保护保持。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

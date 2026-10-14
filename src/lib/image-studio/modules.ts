@@ -353,6 +353,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
     await saveSharedStudioPersonal(actor, id, body);
     return studioModuleDTOForUser(actor, id);
   }
+  if (Object.prototype.hasOwnProperty.call(body, 'fixedReferenceRepairs')) throw new StudioModuleError('固定参考修复须通过本人已有原模板的定义保存', 403);
   if (body.saveIntent !== undefined && body.saveIntent !== 'personal') throw new StudioModuleError('模板保存意图无效', 400);
   let aspectRatio: string | undefined;
   try { if (body.aspectRatio !== undefined) aspectRatio = normalizeStudioRatio(body.aspectRatio); }
