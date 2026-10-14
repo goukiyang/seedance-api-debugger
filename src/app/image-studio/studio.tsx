@@ -302,6 +302,8 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   const gallery = useModuleGalleryState(userId);
   const [galleryCoverModuleId, setGalleryCoverModuleId] = useState<string | null>(null);
   const [galleryReadErrors, setGalleryReadErrors] = useState<Set<string>>(new Set());
+  const [galleryOwnedPresets, setGalleryOwnedPresets] = useState<{ owner: string; revision: string; ids: string[] }>({ owner: '', revision: '', ids: [] });
+  const [galleryOwnershipError, setGalleryOwnershipError] = useState('');
   useEffect(() => { setGalleryReadErrors(new Set()); setGalleryCoverModuleId(null); }, [userId]);
   const [sharedOpening, setSharedOpening] = useState(false);
   const sharedOpenLock = useRef(false);
@@ -901,10 +903,28 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   useEffect(() => {
     if (!coverView && active && navigation.some(item => item.id === active) && !modules.some(item => item.id === active)) void hydrateModules([active]);
   }, [active, navigation, modules, hydrateModules, coverView]);
+  useEffect(() => {
+    if (!coverView || gallery.scope !== 'mine' || !shared.catalogReady
+      || galleryOwnedPresets.owner === userId && galleryOwnedPresets.revision === shared.catalogRevision) return;
+    const scope = moduleReadScope.current, abort = new AbortController();
+    setGalleryOwnershipError('');
+    // The existing library DTO supplies ownership; edit permission is not ownership.
+    // Read this metadata only for the My filter, without hydrating images or definitions into modules.
+    void fetch('/api/image-studio/presets', { cache: 'no-store', signal: AbortSignal.any([abort.signal, AbortSignal.timeout(20000)]) })
+      .then(readResponse).then(data => {
+        if (abort.signal.aborted || moduleReadScope.current !== scope) return;
+        if (!Array.isArray(data.presets)) throw new Error('模块归属未能读取');
+        setGalleryOwnedPresets({ owner: userId, revision: shared.catalogRevision,
+          ids: data.presets.filter((item: StudioPreset) => item.ownedByViewer === true && typeof item.id === 'string').map((item: StudioPreset) => item.id) });
+      }).catch(() => { if (!abort.signal.aborted && moduleReadScope.current === scope) setGalleryOwnershipError('模块归属未能读取，请重试；已读取的模块仍可打开。'); });
+    return () => abort.abort();
+  }, [coverView, gallery.scope, shared.catalogReady, shared.catalogRevision, userId, coverRetry, galleryOwnedPresets.owner, galleryOwnedPresets.revision]);
+  const galleryOwnershipReady = gallery.scope !== 'mine' || galleryOwnedPresets.owner === userId && galleryOwnedPresets.revision === shared.catalogRevision;
   const galleryCatalog = useMemo(() => navigation.map(entry => ({ ...entry, key: galleryEntryKey(entry),
     groupName: entry.groupName || '未分组', shared: entry.shared === true,
-    mine: entry.sharedLive ? entry.sharedLive.mode === 'publisher' : !entry.presetId })), [navigation]);
-  const galleryDirectoryReady = directoryReady && shared.catalogReady && !shared.error;
+    mine: entry.sharedLive?.mode === 'publisher' || !entry.sharedLive && !entry.presetId
+      || galleryOwnedPresets.owner === userId && Boolean(entry.presetId && galleryOwnedPresets.ids.includes(entry.presetId)) })), [navigation, galleryOwnedPresets, userId]);
+  const galleryDirectoryReady = directoryReady && shared.catalogReady && !shared.error && galleryOwnershipReady && (gallery.scope !== 'mine' || !galleryOwnershipError);
   const galleryDerived = useMemo(() => deriveModuleGallery(galleryCatalog, { query: gallery.query,
     scope: gallery.scope, sort: gallery.sort, lastOpened: gallery.lastOpened }),
   [galleryCatalog, gallery.query, gallery.scope, gallery.sort, gallery.lastOpened]);
@@ -1129,6 +1149,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       <button type="button" disabled={creating || !modules.length} onClick={() => void createModule()}><Plus size={17} />{creating ? '新建中' : '新建模块'}</button></div></header>}
     {error && <p role="alert" className={styles.error}>{error}<button onClick={() => { if (coverView && directoryReady) { setError(''); setCoverRetry(value => value + 1); } else void loadModules(cursor || undefined); }}>重试读取</button></p>}
     {shared.error && <p role="status" className={styles.muted}>{shared.error}</p>}
+    {coverView && gallery.scope === 'mine' && galleryOwnershipError && <p role="status" className={styles.error}>{galleryOwnershipError}</p>}
     {sharedOpening && <p role="status" className={styles.muted}>正在打开模板，本人输入和历史保留</p>}
     {attention.error && <p role="status" className={styles.muted}>{attention.error}<button type="button" onClick={() => {
       const target = attention.retryModuleId && directory.find(item => item.id === attention.retryModuleId);
@@ -1138,8 +1159,8 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       total={galleryDirectoryReady ? galleryDerived.total : null} filteredTotal={galleryDirectoryReady ? galleryDerived.filteredTotal : null}
       query={gallery.query} onQueryChange={changeGalleryQuery} scope={gallery.scope} onScopeChange={changeGalleryScope}
       sort={gallery.sort} onSortChange={changeGallerySort} onReset={resetGallery} gridRef={coverPages.gridRef} pagination={coverPagination}
-      loading={loading || shared.loading || !gallery.ready} error={Boolean(error || shared.error || galleryReadErrors.size)} opening={sharedOpening || Boolean(galleryCoverModuleId && !galleryCoverModule)}
-      onRetry={() => { setGalleryReadErrors(new Set()); shared.refresh(); if (directoryReady) { setError(''); setCoverRetry(value => value + 1); } else void loadModules(); }}
+      loading={loading || shared.loading || !gallery.ready || !galleryOwnershipReady && !galleryOwnershipError} error={Boolean(error || shared.error || gallery.scope === 'mine' && galleryOwnershipError || galleryReadErrors.size)} opening={sharedOpening || Boolean(galleryCoverModuleId && !galleryCoverModule)}
+      onRetry={() => { setGalleryReadErrors(new Set()); setGalleryOwnershipError(''); shared.refresh(); if (directoryReady) { setError(''); setCoverRetry(value => value + 1); } else void loadModules(); }}
       headerActions={<div className={styles.counts}>
         <button type="button" onClick={() => void openPresetLibrary()}>模板库</button>
         <button type="button" onClick={() => setGlobalSettingsOpen(true)}><Settings size={17} />通用设置</button>
