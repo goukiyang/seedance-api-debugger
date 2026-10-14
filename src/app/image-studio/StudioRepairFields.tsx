@@ -54,7 +54,11 @@ export function StudioRepairFields({ repair, templatePrompt, onTemplatePrompt, t
   const templateSource = (id?: string) => repair.templateReferences.find(item => item.id === id);
   const fixedSource = (id?: string) => repair.fixedReferences.find(item => item.id === id);
   const templateDisplay = templateImages.map(item => displayReference(item, templateSource(item.id)));
-  const fixedDisplay = fixedReferences.map(item => displayReference(item, fixedSource(item.id)));
+  const fixedDisplay = fixedReferences.map((item, index) => {
+    const source = canEditFixed ? fixedSource(item.id) : repair.fixedReferences[index];
+    if (!canEditFixed) return source?.status === 'valid' && source.image ? { ...source.image } : { id: item.id };
+    return source && !source.image ? { id: item.id } : displayReference(item, source);
+  });
   const bannerSource = banner && repair.banner && repair.banner.id === banner.id ? repair.banner : undefined;
   const bannerDisplay = banner ? displayReference(banner, bannerSource) : null;
   const pending = (source: SharedStudioRepairReference | undefined, image: UploadedAssetPayload) =>
@@ -92,18 +96,19 @@ export function StudioRepairFields({ repair, templatePrompt, onTemplatePrompt, t
       <StudioReferenceGrid items={fixedDisplay} compact materialTiles labels="template" disabled={disabled || !canEditFixed}
         onChange={next => { if (!disabled && canEditFixed) onFixedReferences(restoreSelection(next, fixedReferences)); }} onPreview={onPreview}
         renderDetails={(image, index) => {
-          const source = fixedSource(image.id);
+          const source = canEditFixed ? fixedSource(image.id) : repair.fixedReferences[index];
           const issue = pending(source, image);
           const sourceIndex = repair.fixedReferences.findIndex(item => item.id === image.id);
           const number = sourceIndex >= 0 ? sourceIndex + 1 : index + 1;
           const protectedNote = Boolean(source && source.status !== 'valid');
-          const note = protectedNote ? source?.note || '' : fixedReferences[index].note;
+          const note = !canEditFixed ? '' : protectedNote ? source?.note || '' : fixedReferences[index]?.note || '';
           return <div className={styles.referenceNote}>
-            {issue && <p className={styles.muted} role="status">固定参考 {number} 待处理：{issue}。{canEditFixed ? '可明确移除当前引用。' : '请联系管理员修复。'}</p>}
-            {canEditFixed && !protectedNote ? <textarea aria-label={`固定参考 ${number} 备注`} rows={2} maxLength={2000}
+            {source?.status === 'valid' && !source.image && <p className={styles.muted}>正常固定参考，原图和备注保持原权限。</p>}
+            {source?.status !== 'valid' && issue && <p className={styles.muted} role="status">固定参考 {number} 待处理：{issue}。{canEditFixed ? '可明确移除当前引用。' : '请联系管理员修复。'}</p>}
+            {canEditFixed && (!protectedNote ? <textarea aria-label={`固定参考 ${number} 备注`} rows={2} maxLength={2000}
               disabled={disabled} value={note} onChange={event => {
                 if (!disabled) onFixedReferences(fixedReferences.map((item, position) => position === index ? { ...item, note: event.target.value } : item));
-              }} /> : note && <p className={styles.muted}>{note}</p>}
+              }} /> : note && <p className={styles.muted}>{note}</p>)}
           </div>;
         }} />
     </section>
