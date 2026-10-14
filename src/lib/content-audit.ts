@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 
-type ContentAuditClient = typeof prisma | Prisma.TransactionClient;
+type ContentAuditClient = Pick<Prisma.TransactionClient, 'contentAuditLog'>;
 
 export type ContentAuditParams = {
   actorUserId: string | null;

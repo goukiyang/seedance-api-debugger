@@ -5,8 +5,8 @@ import { canManageStudioPreset, canUseCompanyTemplates, canViewStudioPreset, typ
 import { archivedPresetKey, studioPresetArchived } from './preset-lifecycle';
 import { getStudioModuleFixedReferences, getStudioPresetFixedReferences, parseStudioFixedReferences, setStudioPresetFixedReferences, StudioFixedReferenceError, type StudioFixedReference } from './fixed-references';
 import { getStudioModuleReferencePolicy, getStudioPresetReferencePolicy, parseStudioReferencePolicy, setStudioPresetReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
-import { getStudioModuleStyleIds, parseStudioStyleIds, resolveStudioStyleReferences, setStudioPresetStyleIds, StudioStyleError, type StudioStyleGroup } from './style-groups';
-import { getSkillSelection, setSkillSelection } from './skills';
+import { getStudioModuleStyleIds, getStudioStyleGroup, parseStudioStyleIds, resolveStudioStyleReferences, setStudioPresetStyleIds, StudioStyleError, type StudioStyleGroup } from './style-groups';
+import { getSkill, getSkillSelection, setSkillSelection } from './skills';
 import { studioVisibleAssetWhere } from './protected-assets';
 import { IMAGE_STUDIO_MODELS, normalizeImageStudioQuality, normalizeImageResolution } from './model-catalog';
 import { normalizeStudioRatio } from './ratios';
@@ -16,15 +16,15 @@ import { studioTemplateAssetUrl } from './media';
 import { readSharedStudioSnapshot } from './read-snapshot';
 import { moduleCoverKey, promoteModuleCover, copyModuleCover, studioFixedCoverDTO, assertPresetCoverShareable } from './module-cover';
 import { readStudioModuleSharingPreference } from './module-sharing-preference';
-import type { SharedStudioCatalog, SharedStudioCatalogItem, SharedStudioDefaults, SharedStudioDefinitionPersonalInput, SharedStudioIntent, SharedStudioPersonalOverrides, SharedStudioPublicDefinition } from './shared-types';
+import { StudioSharingError, readReceipt, writeReceipt } from './shared-command-storage';
+import { projectSharedStudioCapabilities, studioStateReason } from './shared-capabilities';
+import { recordStudioLifecycleEvent, studioDefinitionChangedFields } from './shared-lifecycle-audit';
+import type { SharedStudioCatalog, SharedStudioCatalogItem, SharedStudioDefaults, SharedStudioDefinitionPersonalInput, SharedStudioIntent, SharedStudioPersonalOverrides, SharedStudioPublicDefinition, SharedStudioRepairDefinition, SharedStudioRepairReference, SharedStudioRevision, SharedStudioStateProjection } from './shared-types';
 
 export type { SharedStudioIntent, SharedStudioPersonalOverrides } from './shared-types';
 export const SHARED_STUDIO_PROTOCOL = 'shared-live-v1' as const;
-export class StudioSharingError extends Error {
-  intent?: SharedStudioIntent;
-  constructor(message: string, public status = 409) { super(message); }
-}
-export type SharedStudioClient = Pick<Prisma.TransactionClient, 'platformSetting' | 'imageStudioPreset' | 'imageStudioModule' | 'imageStudioTask' | 'asset' | 'user'>;
+export { StudioSharingError } from './shared-command-storage';
+export type SharedStudioClient = Pick<Prisma.TransactionClient, 'platformSetting' | 'imageStudioPreset' | 'imageStudioModule' | 'imageStudioTask' | 'asset' | 'user' | 'contentAuditLog'>;
 export type SharedStudioBinding = { protocol: typeof SHARED_STUDIO_PROTOCOL; ownerId: string; presetId: string; mode: 'publisher' | 'live' };
 export type SharedStudioReproduction = {
   version: 1;
@@ -76,7 +76,7 @@ export async function assertStudioActor(ownerId: string, client: SharedStudioCli
     feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true,
   } });
   if (!user || user.status !== 'active' || user.expires_at && user.expires_at.getTime() <= Date.now() || !canUseCompanyTemplates(user)) {
-    throw new StudioSharingError('当前账号没有模板使用权限，本人草稿和历史仍保留', 403);
+    throw new StudioSharingError('当前账号没有模板使用权限，本人草稿和历史仍保留', 403, 'access-revoked');
   }
   return user;
 }
@@ -103,7 +103,8 @@ function sharedRatio(value: unknown) {
 }
 function normalizeSharedError(error: unknown) {
   if (error instanceof StudioFixedReferenceError || error instanceof StudioReferencePolicyError || error instanceof StudioStyleError) {
-    return new StudioSharingError(error.message, [400, 403, 404, 409].includes(error.status) ? error.status : 409);
+    if (![400, 403, 404, 409].includes(error.status)) return new StudioSharingError('暂时无法读取模板依赖，请稍后重试', 503, 'read-unavailable');
+    return new StudioSharingError(error.message, error.status, 'dependency-invalid');
   }
   return error;
 }
@@ -168,15 +169,17 @@ export async function resolveSharedStudioDefinition(user: ImageStudioIdentity, p
 async function resolveSharedStudioDefinitionInternal(user: ImageStudioIdentity, presetId: string, client: SharedStudioClient) {
   const actor = await assertStudioActor(user.id, client);
   const source = await client.imageStudioPreset.findUnique({ where: { id: presetId } });
-  if (!source) throw new StudioSharingError('模板已不存在，本人历史结果仍保留', 404);
-  if (!canViewStudioPreset(actor, source)) throw new StudioSharingError('模板已停止共享或无权使用，本人历史结果仍保留', 403);
-  if (await studioPresetArchived(presetId, client)) throw new StudioSharingError('模板已删除，本人历史结果仍保留', 409);
+  // An arbitrary id cannot reveal whether someone else's private source exists.
+  // Verified owned bindings project their specific unavailable reason separately.
+  if (!source || !canViewStudioPreset(actor, source)) throw new StudioSharingError('模板不存在或无权使用，本人历史结果仍保留', 404, 'access-revoked');
+  if (await studioPresetArchived(presetId, client)) throw new StudioSharingError('模板已删除，本人历史结果仍保留', 409, 'source-archived');
   const intent: SharedStudioIntent = { protocol: SHARED_STUDIO_PROTOCOL, presetId, definitionToken: await sharedDefinitionToken(source, client) };
   try { return await resolveSharedStudioDefinitionData(actor, source, intent, client); }
   catch (error) {
     const problem = normalizeSharedError(error);
     if (problem instanceof StudioSharingError && problem.status === 400) problem.status = 409;
-    if (problem instanceof StudioSharingError && canManageStudioPreset(actor, source)) problem.intent = intent;
+    if (problem instanceof StudioSharingError && [403, 404, 409].includes(problem.status)) problem.reasonCode = 'dependency-invalid';
+    if (problem instanceof StudioSharingError && problem.reasonCode === 'dependency-invalid' && canManageStudioPreset(actor, source)) problem.intent = intent;
     throw problem;
   }
 }
@@ -222,7 +225,10 @@ async function resolveSharedStudioDefinitionData(actor: ImageStudioIdentity, sou
     return { id, originalUrl: studioTemplateAssetUrl(id), thumbnailUrl: studioTemplateAssetUrl(id, true), width: asset.width, height: asset.height };
   };
   const canSeeContext = actor.role === 'admin' || source.owner_id === actor.id;
-  const publicDTO: SharedStudioPublicDefinition = { intent, presetId, revision: sourceRevision, name: definition.name, groupName: definition.groupName,
+  const sourceState = projectSharedStudioCapabilities({ objectKind: source.owner_id === actor.id ? 'publisher' : 'live', lifecycle: 'active',
+    sharing: source.is_shared ? 'shared' : 'private', dependency: 'ready', sourceRevision, moduleRevision: null, definitionToken: intent.definitionToken,
+    actorAllowed: true, ownsWorkspace: false, canViewSource: true, canManageSource: canManageStudioPreset(actor, source) });
+  const publicDTO: SharedStudioPublicDefinition = { ...sourceState, intent, presetId, revision: sourceRevision, name: definition.name, groupName: definition.groupName,
     banner: source.banner_asset_id && readableIds.has(source.banner_asset_id) ? image(source.banner_asset_id) : null,
     fixedCover: await studioFixedCoverDTO(actor, { kind: 'preset', id: presetId }, client), coverEditable: canManageStudioPreset(actor, source),
     templatePrompt: source.prompt, context: canSeeContext ? context : '', contextConfigured: Boolean(context.trim()),
@@ -235,6 +241,81 @@ async function resolveSharedStudioDefinitionData(actor: ImageStudioIdentity, sou
       canManage: canUseCompanyTemplates(actor) && (actor.role === 'admin' || group.ownerId === actor.id) })),
     reproductionConfigured: Boolean(reproduction) };
   return { definition, publicDTO };
+}
+
+async function readAuthorRepairDefinition(actor: ImageStudioIdentity, source: ImageStudioPreset, definitionToken: string,
+  client: SharedStudioClient): Promise<SharedStudioRepairDefinition> {
+  if (source.owner_id !== actor.id || !canManageStudioPreset(actor, source) || await studioPresetArchived(source.id, client)) {
+    throw new StudioSharingError('当前账号不能修复这个模板', 403, 'access-revoked');
+  }
+  const rawIds = storedIds(source.reference_ids);
+  const storedPolicy = await getStudioPresetReferencePolicy(source.owner_id, source.id, rawIds, source.reference_limit, client);
+  const templateIds = rawIds.filter(id => !storedPolicy.primaryIds.includes(id));
+  const reproduction = await reproductionForPreset(client, source.owner_id, source.id);
+  const fixed = reproduction?.templateFixedReferences ?? await getStudioPresetFixedReferences(actor, source, client);
+  const styleIds = await getStudioModuleStyleIds(source.owner_id, source.id, client, 'preset');
+  const skillIds = await getSkillSelection(source.owner_id, source.id, client, 'preset');
+  const missingSelection = (id: string, error: unknown): { id: string; status: 'missing' | 'inaccessible' } => {
+    if (error instanceof StudioStyleError && [403, 404, 409].includes(error.status)) {
+      return { id, status: error.status === 403 ? 'inaccessible' : 'missing' };
+    }
+    throw normalizeSharedError(error);
+  };
+  const styles = await Promise.all(styleIds.map(async id => {
+    try { return { id, group: await getStudioStyleGroup(actor, id, client) }; }
+    catch (error) { return missingSelection(id, error); }
+  }));
+  const skillGroups = await Promise.all(skillIds.map(async id => {
+    try {
+      const skill = await getSkill(actor, id, client);
+      // The existing administrator read is not permission to select another
+      // person's private prompt group in this author's definition.
+      if (skill.ownerId !== actor.id) return { id, status: 'inaccessible' as const };
+      return { id, status: 'valid' as const,
+        ...(typeof skill.name === 'string' ? { name: skill.name } : {}),
+        ...(Number.isSafeInteger(skill.revision) && skill.revision > 0 ? { revision: skill.revision } : {}) };
+    } catch (error) { return missingSelection(id, error); }
+  }));
+  const ownReferenceIds = Array.from(new Set([...templateIds, ...fixed.map(ref => ref.assetId), ...(source.banner_asset_id ? [source.banner_asset_id] : [])]));
+  const assetIds = Array.from(new Set([...ownReferenceIds, ...styles.flatMap(item => 'group' in item ? item.group.references.map(ref => ref.assetId) : [])]));
+  const assets = await client.asset.findMany({ where: { id: { in: assetIds } },
+    select: { id: true, owner_id: true, status: true, type: true, width: true, height: true } });
+  const byId = new Map(assets.map(asset => [asset.id, asset]));
+  const readable = await client.asset.findMany({ where: { id: { in: ownReferenceIds }, owner_id: actor.id, status: 'active', type: 'image',
+    AND: [await studioVisibleAssetWhere(actor, client)] }, select: { id: true } });
+  const readableIds = new Set(readable.map(asset => asset.id));
+  const reference = (id: string): SharedStudioRepairReference => {
+    const asset = byId.get(id);
+    if (!asset || asset.status !== 'active' || asset.type !== 'image') return { id, status: 'missing' };
+    if (asset.owner_id !== actor.id || !readableIds.has(id)) return { id, status: 'inaccessible' };
+    return { id, status: 'valid', image: { id, originalUrl: studioTemplateAssetUrl(id), thumbnailUrl: studioTemplateAssetUrl(id, true),
+      width: asset.width, height: asset.height } };
+  };
+  const model = source.model as SharedStudioDefaults['model'];
+  if (!IMAGE_STUDIO_MODELS.includes(model) || !Number.isInteger(source.count) || source.count < 1 || source.count > 8
+    || !Number.isInteger(source.reference_limit) || source.reference_limit < 1 || source.reference_limit > MAX_REFERENCE_IMAGES) {
+    throw new StudioSharingError('模板参数无法完整读取，请先核对原定义', 409, 'dependency-invalid');
+  }
+  const defaults: SharedStudioDefaults = { model, quality: normalizeImageStudioQuality(model, source.quality),
+    resolution: normalizeImageResolution(model, source.resolution), count: source.count, aspectRatio: sharedRatio(source.aspect_ratio),
+    referenceLimit: source.reference_limit, referencePolicy: { ...storedPolicy, primaryIds: [] } };
+  return { sourceRevision: source.updated_at.toISOString(), definitionToken, name: source.name, groupName: source.group_name || '未分组',
+    templatePrompt: source.prompt, context: reproduction?.moduleContext ?? source.context, defaults,
+    templateReferences: templateIds.map(reference), fixedReferences: fixed.map(item => {
+      const projected = reference(item.assetId);
+      return projected.status === 'valid' ? { ...projected, note: item.note } : projected;
+    }), styleGroups: styles.map(item => {
+      if (!('group' in item)) return item;
+      const missing = item.group.references.some(ref => {
+        const asset = byId.get(ref.assetId); return !asset || asset.status !== 'active' || asset.type !== 'image';
+      });
+      return missing ? { id: item.id, status: 'missing' as const }
+        : { id: item.id, status: 'valid' as const, name: item.group.name, revision: item.group.revision };
+    }), skillIds, skillGroups, banner: source.banner_asset_id ? reference(source.banner_asset_id) : null,
+    fixedReferencesEditable: actor.role === 'admin',
+    ...(actor.role !== 'admin' && fixed.length ? { fixedReferenceRestriction: '固定参考图由管理员管理；未修改的引用会保留，失效项需要管理员修复' } : {}),
+    ...(skillIds.length ? { skillRestriction: '提示词组仅本人可见，实时模板定义保存前需要明确移除；原共享选择会保留' } : {}),
+    reproductionConfigured: Boolean(reproduction), ...(reproduction && actor.role === 'admin' ? { globalContext: reproduction.globalContext } : {}) };
 }
 
 export async function getSharedStudioPersonalOverrides(ownerId: string, moduleId: string, client: SharedStudioClient = prisma) {
@@ -278,7 +359,7 @@ export async function resolveSharedStudioModule(user: ImageStudioIdentity, modul
   const workspace = await client.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: user.id } });
   if (!workspace || workspace.source_preset_id !== binding.presetId) throw new StudioSharingError('共享模板工作区不存在或来源不匹配', 409);
   const { definition, publicDTO } = await resolveSharedStudioDefinition(user, binding.presetId, client);
-  if (binding.mode === 'publisher' && definition.sourceOwnerId !== user.id) throw new StudioSharingError('无权管理他人的原模板', 403);
+  if (binding.mode === 'publisher' && definition.sourceOwnerId !== user.id) throw new StudioSharingError('无权管理他人的原模板', 403, 'access-revoked');
   const personalOverrides = await getSharedStudioPersonalOverrides(user.id, moduleId, client);
   return { binding, definition, personalOverrides, publicDTO };
 }
@@ -287,44 +368,65 @@ export type SharedStudioModuleRead = {
   binding: SharedStudioBinding | null;
   resolved: Awaited<ReturnType<typeof resolveSharedStudioModule>>;
   unavailable?: StudioSharingError;
+  state?: SharedStudioStateProjection;
+  repairDefinition?: SharedStudioRepairDefinition;
+  ownedByViewer?: boolean;
 };
 
-export async function readSharedStudioModules(ownerId: string, moduleIds: string[]): Promise<Map<string, SharedStudioModuleRead>> {
+export async function readSharedStudioModules(ownerId: string, moduleIds: string[], client?: SharedStudioClient): Promise<Map<string, SharedStudioModuleRead>> {
   if (!moduleIds.length) return new Map();
-  return readSharedStudioSnapshot(async tx => {
+  if (!client) return readSharedStudioSnapshot(tx => readSharedStudioModules(ownerId, moduleIds, tx));
+  const tx = client;
     const actor = await assertStudioActor(ownerId, tx);
     const entries = await Promise.all(Array.from(new Set(moduleIds), async moduleId => {
       const binding = await studioSharedBinding(ownerId, moduleId, tx);
       if (!binding) return [moduleId, { binding: null, resolved: null }] as const;
-      try { return [moduleId, { binding, resolved: await resolveSharedStudioModule(actor, moduleId, tx) }] as const; }
+      const workspace = await tx.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: actor.id }, select: { source_preset_id: true, revision: true } });
+      if (!workspace || workspace.source_preset_id !== binding.presetId) throw new StudioSharingError('共享模板工作区不存在或来源不匹配', 409);
+      const source = await tx.imageStudioPreset.findUnique({ where: { id: binding.presetId } });
+      const archived = source ? await studioPresetArchived(source.id, tx) : false;
+      const project = (dependency: SharedStudioStateProjection['dependency'], token: string | null, reasonCode?: SharedStudioStateProjection['reasonCode']) =>
+        projectSharedStudioCapabilities({ objectKind: binding.mode, lifecycle: source ? archived ? 'archived' : 'active' : 'missing',
+          sharing: source ? source.is_shared ? 'shared' : 'private' : 'unknown', dependency,
+          sourceRevision: source && (source.owner_id === actor.id || canViewStudioPreset(actor, source)) ? source.updated_at.toISOString() : null,
+          moduleRevision: workspace.revision, definitionToken: token, actorAllowed: true, ownsWorkspace: true,
+          canViewSource: Boolean(source && canViewStudioPreset(actor, source)),
+          canManageSource: binding.mode === 'publisher' && Boolean(source && canManageStudioPreset(actor, source)), reasonCode });
+      try {
+        const resolved = await resolveSharedStudioModule(actor, moduleId, tx);
+        return [moduleId, { binding, resolved, state: project('ready', resolved?.definition.intent.definitionToken ?? null), ownedByViewer: source?.owner_id === actor.id }] as const;
+      }
       catch (error) {
         if (error instanceof StudioSharingError && [403, 404, 409].includes(error.status)) {
-          return [moduleId, { binding, resolved: null, unavailable: error }] as const;
+          const reason = !source ? 'source-missing' : archived && (canViewStudioPreset(actor, source) || source.owner_id === actor.id)
+            ? 'source-archived' : !canViewStudioPreset(actor, source) ? source.is_shared ? 'access-revoked' : 'source-withdrawn' : error.reasonCode;
+          let repairDefinition: SharedStudioRepairDefinition | undefined;
+          if (reason === 'dependency-invalid' && error.intent && binding.mode === 'publisher' && source?.owner_id === actor.id
+            && !archived && canManageStudioPreset(actor, source)) {
+            try { repairDefinition = await readAuthorRepairDefinition(actor, source, error.intent.definitionToken, tx); }
+            catch (projectionError) {
+              const problem = normalizeSharedError(projectionError);
+              // An incomplete stored definition is never converted into empty
+              // editable collections. Unknown storage/network failures escape.
+              if (!(problem instanceof StudioSharingError) || ![400, 403, 404, 409].includes(problem.status)) throw problem;
+            }
+          }
+          const state = project(reason === 'dependency-invalid' ? 'invalid' : 'unknown', error.intent?.definitionToken ?? null, reason);
+          if (reason === 'dependency-invalid' && !repairDefinition) {
+            state.capabilities.editDefinition = { allowed: false, reasonCode: reason, reason: studioStateReason[reason] };
+            state.capabilities.saveDefinition = { allowed: false, reasonCode: reason, reason: studioStateReason[reason] };
+          }
+          const unavailable = new StudioSharingError(reason === 'dependency-invalid' && source?.owner_id === actor.id ? error.message : studioStateReason[reason], error.status, reason);
+          unavailable.intent = error.intent;
+          return [moduleId, { binding, resolved: null, unavailable, state, ownedByViewer: source?.owner_id === actor.id,
+            ...(repairDefinition ? { repairDefinition } : {}) }] as const;
         }
         throw error;
       }
     }));
     return new Map<string, SharedStudioModuleRead>(entries);
-  });
 }
 
-type Receipt = { fingerprint: string; result: Record<string, unknown> };
-function requestKey(ownerId: string, requestId: unknown) {
-  if (typeof requestId !== 'string' || !requestId || requestId.length > 160 || !/^[A-Za-z0-9:_-]+$/.test(requestId)) throw new StudioSharingError('请使用有效的保存请求编号', 400);
-  return `studio_shared_request_v1:${digest([ownerId, requestId])}`;
-}
-async function readReceipt(client: SharedStudioClient, ownerId: string, requestId: unknown, fingerprint: string): Promise<Receipt['result'] | null> {
-  const row = await client.platformSetting.findUnique({ where: { key: requestKey(ownerId, requestId) }, select: { value_json: true } });
-  if (!row) return null;
-  const value = parseRecord(row.value_json, '原保存回执无法读取');
-  if (value.ownerId !== ownerId || value.fingerprint !== fingerprint || !value.result || typeof value.result !== 'object' || Array.isArray(value.result)) {
-    throw new StudioSharingError('该请求编号已用于其他操作，请核对原保存结果', 409);
-  }
-  return value.result as Receipt['result'];
-}
-async function writeReceipt(client: SharedStudioClient, ownerId: string, requestId: unknown, fingerprint: string, result: Receipt['result']) {
-  await client.platformSetting.create({ data: { key: requestKey(ownerId, requestId), value_json: JSON.stringify({ ownerId, fingerprint, result }), updated_by: ownerId } });
-}
 function inTransaction<T>(client: SharedStudioClient | undefined, action: (tx: SharedStudioClient) => Promise<T>) {
   return client ? action(client) : prisma.$transaction(tx => action(tx), { timeout: 15000 });
 }
@@ -434,7 +536,8 @@ async function writeSharedStudioPersonalState(actor: ImageStudioIdentity,
 
 export type PublishSharedStudioModuleInput = Record<string, unknown> & { requestId: unknown; expectedRevision: unknown }
   & { [Field in keyof SharedStudioDefinitionPersonalInput]?: unknown };
-export async function publishSharedStudioModule(user: ImageStudioIdentity, moduleId: string, input: PublishSharedStudioModuleInput, client?: SharedStudioClient) {
+export async function publishSharedStudioModule(user: ImageStudioIdentity, moduleId: string, input: PublishSharedStudioModuleInput, client?: SharedStudioClient,
+  lifecycle?: { firstPublication?: boolean; requestId?: unknown }) {
   return inTransaction(client, async tx => {
     const actor = await assertStudioActor(user.id, tx);
     const fingerprint = digest(['publish-shared', moduleId, input]);
@@ -565,6 +668,16 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
     const { definition } = await resolveSharedStudioDefinition(actor, presetId, tx);
     const result = { moduleId, presetId, beforeRevision: workspace.revision, revision: workspace.revision + 1,
       sourceRevision: definition.sourceRevision, definitionToken: definition.intent.definitionToken };
+    const firstPublication = !source || lifecycle?.firstPublication === true;
+    await recordStudioLifecycleEvent(tx, { actorUserId: actor.id, ownerUserId: actor.id, contentId: presetId,
+      action: firstPublication ? 'published' : 'definition-saved', requestId: lifecycle?.requestId ?? input.requestId, entryPoint: input.entryPoint,
+      before: { sourceRevision: firstPublication ? null : source?.updated_at.toISOString() ?? null, moduleRevision: workspace.revision, ...(firstPublication ? {} : { isShared: source?.is_shared }) },
+      after: { sourceRevision: definition.sourceRevision, moduleRevision: workspace.revision + 1, isShared: data.is_shared },
+      changedFields: studioDefinitionChangedFields(input) });
+    if (!firstPublication && source && source.is_shared !== data.is_shared) await recordStudioLifecycleEvent(tx, {
+      actorUserId: actor.id, ownerUserId: actor.id, contentId: presetId, action: data.is_shared ? 'sharing-enabled' : 'sharing-disabled',
+      requestId: lifecycle?.requestId ?? input.requestId, entryPoint: input.entryPoint,
+      before: { sourceRevision: source.updated_at.toISOString(), isShared: source.is_shared }, after: { sourceRevision: definition.sourceRevision, isShared: data.is_shared } });
     await writeReceipt(tx, actor.id, input.requestId, fingerprint, result);
     return { module: await tx.imageStudioModule.findUniqueOrThrow({ where: { id: moduleId } }), presetId, receipt: result };
   });
@@ -638,7 +751,8 @@ export async function saveSharedStudioPresetAs(user: ImageStudioIdentity, input:
       expectedRevision = 1;
     }
     const published = await publishSharedStudioModule(actor, publisherModuleId, { ...input,
-      requestId: `save-as-definition:${digest([input.requestId, publisherModuleId])}`, expectedRevision, expectedDefinitionToken }, tx);
+      requestId: `save-as-definition:${digest([input.requestId, publisherModuleId])}`, expectedRevision, expectedDefinitionToken }, tx,
+      { firstPublication: true, requestId: input.requestId });
     await writeReceipt(tx, actor.id, input.requestId, fingerprint, published.receipt);
     return { ...await tx.imageStudioPreset.findUniqueOrThrow({ where: { id: published.presetId } }), publisherModuleId };
   });
@@ -657,7 +771,7 @@ export async function replaceSharedStudioPreset(user: ImageStudioIdentity, prese
     if (input.expectedDefinitionToken !== undefined && input.expectedDefinitionToken !== definitionToken) throw new StudioSharingError('模板依赖已更新，当前草稿仍保留', 409);
     const workspace = await openSharedStudioModule(actor, presetId, `replace-open:${digest([input.requestId, presetId])}`, tx);
     const published = await publishSharedStudioModule(actor, workspace.id, { ...input, requestId: `replace-definition:${digest([input.requestId, presetId])}`,
-      expectedRevision: workspace.revision, expectedDefinitionToken: definitionToken }, tx);
+      expectedRevision: workspace.revision, expectedDefinitionToken: definitionToken }, tx, { requestId: input.requestId });
     await writeReceipt(tx, actor.id, input.requestId, fingerprint, published.receipt);
     return tx.imageStudioPreset.findUniqueOrThrow({ where: { id: presetId } });
   });
@@ -731,6 +845,11 @@ export async function deleteStudioGroup(user: ImageStudioIdentity, body: Record<
         const changed = await tx.imageStudioPreset.updateMany({ where: { id: source.id, owner_id: actor.id, updated_at: source.updated_at },
           data: { group_name: '未分组', updated_at: new Date(Math.max(Date.now(), source.updated_at.getTime() + 1)) } });
         if (changed.count !== 1) throw new StudioSharingError('共享模板已变化，分组未删除', 409);
+        const updated = await tx.imageStudioPreset.findUniqueOrThrow({ where: { id: source.id } });
+        await recordStudioLifecycleEvent(tx, { actorUserId: actor.id, ownerUserId: source.owner_id, contentId: source.id,
+          action: 'definition-saved', requestId: body.requestId, entryPoint: body.entryPoint,
+          before: { sourceRevision: source.updated_at.toISOString(), moduleRevision: row.revision, isShared: source.is_shared },
+          after: { sourceRevision: updated.updated_at.toISOString(), moduleRevision: row.revision + 1, isShared: updated.is_shared }, changedFields: ['groupName'] });
       }
       const changed = await tx.imageStudioModule.updateMany({ where: { id: row.id, owner_id: actor.id, revision: row.revision }, data: { group_name: '未分组', revision: row.revision + 1 } });
       if (changed.count !== 1) throw new StudioSharingError('分组内容已变化，分组未删除', 409);
@@ -810,26 +929,72 @@ export async function listSharedStudioCatalog(user: ImageStudioIdentity, options
   const items: SharedStudioCatalogItem[] = await Promise.all(page.map(async row => {
     const asset = row.banner_asset_id ? byId.get(row.banner_asset_id) : null;
     let available = true;
-    try { await resolveSharedStudioDefinition(actor, row.id, client); }
-    catch (error) { if (!(error instanceof StudioSharingError) || ![403, 404, 409].includes(error.status)) throw error; available = false; }
-    return { presetId: row.id, isShared: row.is_shared, name: row.name, groupName: row.group_name || '未分组', revision: row.updated_at.toISOString(), available,
+    let definitionToken: string | null = null;
+    let reasonCode: SharedStudioStateProjection['reasonCode'] = null;
+    try { definitionToken = (await resolveSharedStudioDefinition(actor, row.id, client)).definition.intent.definitionToken; }
+    catch (error) {
+      if (!(error instanceof StudioSharingError) || ![403, 404, 409].includes(error.status)) throw error;
+      available = false; reasonCode = error.reasonCode; definitionToken = error.intent?.definitionToken ?? null;
+    }
+    const state = projectSharedStudioCapabilities({ objectKind: row.owner_id === actor.id ? 'publisher' : 'live', lifecycle: 'active', sharing: 'shared',
+      dependency: available ? 'ready' : reasonCode === 'dependency-invalid' ? 'invalid' : 'unknown', sourceRevision: row.updated_at.toISOString(),
+      moduleRevision: null, definitionToken, actorAllowed: true, ownsWorkspace: false, canViewSource: true,
+      canManageSource: canManageStudioPreset(actor, row), reasonCode });
+    // The catalog has no complete author repair value. Editing is unlocked only
+    // by a full, owned publisher-workspace read, never by these empty summaries.
+    if (!available) {
+      state.capabilities.editDefinition = { allowed: false, reasonCode, reason: reasonCode ? studioStateReason[reasonCode] : studioStateReason['read-unavailable'] };
+      state.capabilities.saveDefinition = { allowed: false, reasonCode, reason: reasonCode ? studioStateReason[reasonCode] : studioStateReason['read-unavailable'] };
+    }
+    return { ...state, presetId: row.id, isShared: row.is_shared, name: row.name, groupName: row.group_name || '未分组', revision: row.updated_at.toISOString(), available,
+      ...(reasonCode ? { unavailableReason: studioStateReason[reasonCode] } : {}),
       fixedCover: await studioFixedCoverDTO(actor, { kind: 'preset', id: row.id }, client), coverEditable: canManageStudioPreset(actor, row),
       banner: asset && asset.owner_id === row.owner_id ? { id: asset.id, originalUrl: studioTemplateAssetUrl(asset.id), thumbnailUrl: studioTemplateAssetUrl(asset.id, true), width: asset.width, height: asset.height } : null };
   }));
   return { items, nextCursor: remaining.length > 100 ? page[page.length - 1].id : null, catalogRevision };
 }
-export async function sharedStudioRevision(user: ImageStudioIdentity, activePresetId?: string) {
+export async function sharedStudioRevision(user: ImageStudioIdentity, activePresetId?: string, activeModuleId?: string): Promise<SharedStudioRevision> {
   return readSharedStudioSnapshot(async tx => {
     const catalog = await sharedCatalogState(user, tx);
     let activeDefinitionToken: string | null = null;
     let activeAvailable = false;
+    let activeState: SharedStudioStateProjection | null = null;
     if (activePresetId) {
-      try { activeDefinitionToken = (await resolveSharedStudioDefinition(user, activePresetId, tx)).definition.intent.definitionToken; activeAvailable = true; }
-      catch (error) {
-        if (!(error instanceof StudioSharingError) || ![403, 404, 409].includes(error.status)) throw error;
-        activeDefinitionToken = error.intent?.definitionToken ?? null;
+      const workspaces = await tx.imageStudioModule.findMany({ where: { owner_id: catalog.actor.id, source_preset_id: activePresetId,
+        ...(activeModuleId ? { id: activeModuleId } : {}) }, select: { id: true }, orderBy: { id: 'asc' } });
+      let boundModuleId: string | undefined;
+      for (const workspace of workspaces) {
+        const binding = await studioSharedBinding(catalog.actor.id, workspace.id, tx);
+        if (binding?.presetId === activePresetId) { boundModuleId = workspace.id; break; }
+      }
+      if (boundModuleId) {
+        const read = (await readSharedStudioModules(catalog.actor.id, [boundModuleId], tx)).get(boundModuleId)!;
+        activeState = read.state ?? null;
+        activeDefinitionToken = activeState?.definitionToken ?? null;
+        activeAvailable = Boolean(read.resolved);
+      } else {
+        // Without a verified owned binding, missing/private/archived arbitrary
+        // ids produce the same empty active projection. Public active sources
+        // remain readable through the existing catalog authorization.
+        const source = await tx.imageStudioPreset.findUnique({ where: { id: activePresetId }, select: { id: true, owner_id: true, scope: true, is_shared: true, updated_at: true } });
+        if (source && canViewStudioPreset(catalog.actor, source) && !(await studioPresetArchived(source.id, tx))) {
+          let reasonCode: SharedStudioStateProjection['reasonCode'] = null;
+          try { activeDefinitionToken = (await resolveSharedStudioDefinition(catalog.actor, activePresetId, tx)).definition.intent.definitionToken; activeAvailable = true; }
+          catch (error) {
+            if (!(error instanceof StudioSharingError) || ![403, 404, 409].includes(error.status)) throw error;
+            reasonCode = error.reasonCode; activeDefinitionToken = error.intent?.definitionToken ?? null;
+          }
+          activeState = projectSharedStudioCapabilities({ objectKind: source.owner_id === catalog.actor.id ? 'publisher' : 'live', lifecycle: 'active',
+            sharing: source.is_shared ? 'shared' : 'private', dependency: activeAvailable ? 'ready' : reasonCode === 'dependency-invalid' ? 'invalid' : 'unknown',
+            sourceRevision: source.updated_at.toISOString(), moduleRevision: null, definitionToken: activeDefinitionToken,
+            actorAllowed: true, ownsWorkspace: false, canViewSource: true, canManageSource: canManageStudioPreset(catalog.actor, source), reasonCode });
+          if (!activeAvailable) {
+            activeState.capabilities.editDefinition = { allowed: false, reasonCode, reason: reasonCode ? studioStateReason[reasonCode] : studioStateReason['read-unavailable'] };
+            activeState.capabilities.saveDefinition = { allowed: false, reasonCode, reason: reasonCode ? studioStateReason[reasonCode] : studioStateReason['read-unavailable'] };
+          }
+        }
       }
     }
-    return { catalogRevision: catalog.catalogRevision, activeDefinitionToken, activeAvailable };
+    return { catalogRevision: catalog.catalogRevision, activeDefinitionToken, activeAvailable, activeState };
   });
 }
