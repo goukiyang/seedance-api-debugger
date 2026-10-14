@@ -55,7 +55,7 @@ export function StudioRepairFields({ repair, templatePrompt, onTemplatePrompt, t
   const fixedSource = (id?: string) => repair.fixedReferences.find(item => item.id === id);
   const templateDisplay = templateImages.map(item => displayReference(item, templateSource(item.id)));
   const fixedDisplay = fixedReferences.map(item => displayReference(item, fixedSource(item.id)));
-  const bannerSource = banner && repair.banner?.id === banner.id ? repair.banner : undefined;
+  const bannerSource = banner && repair.banner && repair.banner.id === banner.id ? repair.banner : undefined;
   const bannerDisplay = banner ? displayReference(banner, bannerSource) : null;
   const pending = (source: SharedStudioRepairReference | undefined, image: UploadedAssetPayload) =>
     source?.status === 'missing' ? '原图已不可用' : source?.status === 'inaccessible' ? '当前无权读取原图'
