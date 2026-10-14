@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '图片保存、校验时不再带出上一阶段的生成提示，真实异常仍保留恢复入口。结果可下载后补满100%再完成，失败视频可恢复输入且不会自动生成。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '模板封面改为大图浏览，支持搜索、筛选和本机最近使用。未保存的模板修改不再提醒或阻挡生成，生成使用已保存模板，保留本次主图、描述和参数。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

@@ -26,7 +26,7 @@ export function hasSharedDefaults(value: unknown): value is SharedStudioDefaults
 
 export type SharedStudioEntry = {
   presetId: string; name: string; groupName: string; banner?: UploadedAssetPayload | null;
-  isShared: boolean; fixedCover?: ModuleCoverDTO | null;
+  isShared: boolean; fixedCover?: ModuleCoverDTO | null; coverEditable?: boolean;
   revision?: string; available: boolean; unavailableReason?: string;
 };
 type SharedModule = { id: string; sharedLive?: { intent: SharedStudioIntent; available: boolean } | null };
@@ -42,9 +42,10 @@ async function readShared<T>(url: string, signal: AbortSignal): Promise<T> {
 }
 
 // One serial loop owns revision, catalog pages and active definition reads.
-export function useSharedStudio<T extends SharedModule>({ userId, activeModule, onDefinition, onUnavailable }: {
+export function useSharedStudio<T extends SharedModule>({ userId, activeModule, onDefinition, onUnavailable, completeCatalog = false }: {
   userId: string; activeModule?: T; onDefinition: (module: T) => void;
   onUnavailable: (presetId: string | null, reason: string) => void;
+  completeCatalog?: boolean;
 }) {
   const { sessionChanged } = useAppSession();
   const presetId = activeModule?.sharedLive?.intent.presetId || '';
@@ -86,14 +87,14 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
       const forced = force, append = more;
       force = false; more = false;
       const initial = catalogRef.current;
-      if (!initial.ready || append) setFeedback({ owner: userId, error: '', loading: true });
+      if (!initial.ready || append || completeCatalog && initial.cursor) setFeedback({ owner: userId, error: '', loading: true });
       try {
         const revision = await readShared<{ catalogRevision: string; activeDefinitionToken: string | null; activeAvailable: boolean }>(
           `/api/image-studio/shared?mode=revision${presetId ? `&activePresetId=${encodeURIComponent(presetId)}` : ''}`, controller.signal);
         if (!currentRead()) return;
         if (typeof revision.catalogRevision !== 'string') throw new Error('模板同步暂不可用');
         const changed = initial.revision !== revision.catalogRevision;
-        if (forced || changed || !initial.ready || append && initial.cursor) {
+        if (forced || changed || !initial.ready || (append || completeCatalog) && initial.cursor) {
           const items = new Map<string, SharedStudioEntry>();
           let cursor: string | null = null, pages = 0;
           if (!forced && !changed && initial.ready && append) {
@@ -113,7 +114,7 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
             cursor = page.nextCursor || null; pages++;
             if (cursor && seenCursors.has(cursor)) throw new Error('模板目录暂不可用');
             if (cursor) seenCursors.add(cursor);
-          } while (cursor && pages < targetPages);
+          } while (cursor && (completeCatalog || pages < targetPages));
           if (!cursor) for (const prior of initial.items) if (!items.has(prior.presetId)) latest.current.onUnavailable(prior.presetId, '模板已停止共享或不可用');
           commit({ owner: userId, items: Array.from(items.values()), revision: revision.catalogRevision, cursor, pages, ready: true });
         }
@@ -175,10 +176,11 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
       window.removeEventListener('online', resume);
       window.removeEventListener('offline', resume);
     };
-  }, [sessionChanged, scopeKey, userId, presetId, moduleId]);
+  }, [sessionChanged, scopeKey, userId, presetId, moduleId, completeCatalog]);
 
   const visible = catalog.owner === userId ? catalog : null;
-  return { items: visible?.items || [], ready: visible?.ready || false, hasMore: Boolean(visible?.cursor),
+  return { items: visible?.items || [], ready: visible?.ready || false,
+    catalogReady: Boolean(visible?.ready && !visible.cursor), hasMore: Boolean(visible?.cursor),
     catalogRevision: visible?.revision || '', loading: feedback.owner !== userId || feedback.loading,
     error: feedback.owner === userId ? feedback.error : '', refresh, loadMore };
 }
