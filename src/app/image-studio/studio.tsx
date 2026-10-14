@@ -1327,6 +1327,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const repairDefinition = sharedLive?.repairDefinition;
   const definitionEditable = !sharedLive || (sharedLive.capabilities ? sharedLive.capabilities.editDefinition.allowed : sharedLive.mode === 'publisher' && sharedReady);
   const definitionReady = !sharedLive || definitionEditable && (sharedReady || Boolean(repairDefinition));
+  const definitionSaveBlocked = definitionEditable && sharedLive?.capabilities?.saveDefinition.allowed === false;
+  const definitionSaveReason = definitionSaveBlocked ? sharedLive?.capabilities?.saveDefinition.reason || '模板定义暂不能保存，当前编辑保留' : '';
   const contextEditable = definitionEditable && module.contextEditable !== false && definitionReady;
   const fixedEditable = definitionEditable && isAdmin && module.fixedReferencesEditable !== false && definitionReady;
   const [personalOverrides, setPersonalOverrides] = useState<PersonalStudioOverrides>(() => storedPersonalOverrides(Object.fromEntries(
@@ -1762,7 +1764,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         setSkills(items => items.map((item, index) => invalidSkills.has(item.id) ? { id: item.id, name: `待处理提示词组 ${index + 1}`, unavailable: true } : item));
         const badBanner = repairDefinition.banner && repairDefinition.banner.status !== 'valid' ? repairDefinition.banner : null;
         if (badBanner) setBanner(item => item && item.id === badBanner.id ? { id: item.id } : item);
-        const invalidMedia = new Set([...invalidTemplates, ...invalidFixed, ...(repairDefinition.banner && repairDefinition.banner.status !== 'valid' ? [repairDefinition.banner.id] : [])]);
+        const invalidMedia = new Set([...Array.from(invalidTemplates), ...Array.from(invalidFixed), ...(repairDefinition.banner && repairDefinition.banner.status !== 'valid' ? [repairDefinition.banner.id] : [])]);
         if (preview?.contentKey?.startsWith('asset:') && invalidMedia.has(preview.contentKey.slice(6))) setPreview(null);
       }
       if (changed) { setDefinitionConflict(true); setModuleSaveError('模板已在另一处保存，当前编辑保留；请核对后再保存，不会自动覆盖。'); }
@@ -1810,6 +1812,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
 
   async function saveModule(reproduceTaskId = reproduceSourceTaskId, revisionOverride = revisionRef.current, manualSettings = true, fixedOverride?: FixedStudioReference[]) {
     if (isClientSessionBlocked()) return false;
+    if (manualSettings && definitionSaveBlocked) { setModuleSaveError(definitionSaveReason); return false; }
     if (!sharedReady && !(manualSettings && definitionReady && sharedLive?.capabilities?.saveDefinition.allowed)) { setModuleSaveError('模板暂不可用，本人草稿和历史保留'); return false; }
     if (moduleSaveLock.current || moduleDeleteLock.current || presetSaveLock.current || quickPresetLock.current || uploading || bannerUploading) return false;
     moduleSaveLock.current = true; setModuleSaving(true); setError(''); setModuleSaveError('');
@@ -3275,12 +3278,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
                 onClick={() => void applyQuickPreset(preset)}>{preset.name}</button>)}
             </div>
           </div>
-          <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={!sharedReady && !definitionReady || moduleSaving || sharingPreferenceSaving || presetSaving || Boolean(quickPresetApplying) || uploading || bannerUploading || !settingsDirty && !unpublishedSharing} onClick={() => void saveModule()}><Save size={16} />{sharedLive ? definitionEditable ? '保存共享模板' : '保存本次设置' : unpublishedSharing ? '保存并共享模板' : templateWorkbench ? '保存设置' : '保存上下文'}</button>
+          <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} title={definitionSaveReason || undefined} disabled={definitionSaveBlocked || !sharedReady && !definitionReady || moduleSaving || sharingPreferenceSaving || presetSaving || Boolean(quickPresetApplying) || uploading || bannerUploading || !settingsDirty && !unpublishedSharing} onClick={() => void saveModule()}><Save size={16} />{sharedLive ? definitionEditable ? '保存共享模板' : '保存本次设置' : unpublishedSharing ? '保存并共享模板' : templateWorkbench ? '保存设置' : '保存上下文'}</button>
           <button type="button" title={!contextEditable && !recoverableDraft ? '共享模板的内部配置只能由创建者另存；当前草稿仍可生成' : undefined} disabled={presetSaving || Boolean(quickPresetApplying) || draftRestoring || moduleSaving || uploading || bannerUploading || submitting || Boolean(pendingSubmission) || (!recoverableDraft && (!contextEditable || !generationChanged && !authorDefinitionDirty || !authorDefinitionDirty && generationDraft === savedAsSignature))} className={recoverableDraft || (contextEditable && (generationChanged || authorDefinitionDirty) && generationDraft !== savedAsSignature) ? styles.saveReady : ''} onClick={() => recoverableDraft ? restoreTemporaryDraft() : void saveAsPreset()}><Save size={16} />{recoverableDraft ? '恢复上一次' : templateWorkbench ? '另存为模板' : '另存为'}</button>
         </div>
         {quickPresetsLoading && <p role="status" className={styles.muted}>正在读取快捷模板…</p>}
         {quickPresetsError && <p role="alert" className={styles.error}>{quickPresetsError}<button type="button" disabled={quickPresetsLoading} onClick={() => void loadQuickPresets()}>重试</button></p>}
         {saveStatus && <p role="status" className={styles.muted}>{saveStatus}</p>}
+        {definitionSaveReason && <p role="status" className={styles.muted}>{definitionSaveReason}</p>}
         {error && <TaskNotice kind="recoverable">{error}</TaskNotice>}
       </section>
       <section id={`studio-results-${module.id}`} className={styles.outputs} aria-label="生成结果">
@@ -3511,13 +3515,14 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       </fieldset>
       {templateWorkbench && <button type="button" title="替换主图提醒设置" onClick={() => void confirm('此设置仅影响替换主图提醒，不影响生成费用、变价或权限确认。', { title: '主图提醒', confirmLabel: '保存设置', checkbox: { label: '每次替换主图前提醒', checked: !skipMainImageReminder(userId) }, onSubmit: async (_value, checked) => saveMainImageReminder(userId, !checked) })}><Settings size={16} />主图提醒</button>}
       <div className={styles.moduleSettingsActions}>
-        <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={!sharedReady && !definitionReady || moduleSaving || sharingPreferenceSaving || uploading || bannerUploading || !settingsDirty && !unpublishedSharing} onClick={() => void saveModuleSettings()}><Save size={16} />{moduleSaving ? '正在保存' : sharedLive ? definitionEditable ? '保存共享模板' : '保存本次设置' : unpublishedSharing ? '保存并共享模板' : templateWorkbench ? '保存模块设置' : '保存模板设置'}</button>
+        <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} title={definitionSaveReason || undefined} disabled={definitionSaveBlocked || !sharedReady && !definitionReady || moduleSaving || sharingPreferenceSaving || uploading || bannerUploading || !settingsDirty && !unpublishedSharing} onClick={() => void saveModuleSettings()}><Save size={16} />{moduleSaving ? '正在保存' : sharedLive ? definitionEditable ? '保存共享模板' : '保存本次设置' : unpublishedSharing ? '保存并共享模板' : templateWorkbench ? '保存模块设置' : '保存模板设置'}</button>
       </div>
+      {definitionSaveReason && <p role="status" className={styles.muted}>{definitionSaveReason}</p>}
       {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}{definitionConflict && definitionReady ? <button type="button" disabled={moduleSaving || uploading || bannerUploading} onClick={() => void (async () => {
         if (!await confirm('当前编辑会保留。请核对最新模板后再继续；确认后只采用最新版本作为保存依据，不会立即保存或生成。', { title: '核对更新', confirmLabel: '已核对，继续编辑' })) return;
         definitionBaseline.current = studioRepairModule(module); revisionRef.current = module.revision; setModuleRevision(module.revision);
         setDefinitionConflict(false); setModuleSaveError('');
-      })()}>核对最新版本</button> : <button type="button" disabled={moduleSaving || uploading || bannerUploading} onClick={() => void saveModuleSettings()}>重试保存</button>}</p>}
+      })()}>核对最新版本</button> : <button type="button" disabled={definitionSaveBlocked || moduleSaving || uploading || bannerUploading} onClick={() => void saveModuleSettings()}>重试保存</button>}</p>}
       <div className={styles.imageSectionHeading}><label className={styles.referenceToggle}><input type="checkbox" checked={useFixedReferences} disabled={!definitionReady || submitting || Boolean(pendingSubmission)} onChange={event => setUseFixedReferences(event.target.checked)} />使用模板固定参考图</label>
         <button type="button" disabled={uploading || submitting || Boolean(pendingSubmission) || !auxiliaryCount} onClick={clearAllReferences}><X size={15} />一键清空参考</button></div>
       {isAdmin && <><label className={styles.label}>固定模板图 <span>{fixedReferences.length}/{MAX_REFERENCE_IMAGES}</span></label>

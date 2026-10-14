@@ -313,7 +313,9 @@ async function readAuthorRepairDefinition(actor: ImageStudioIdentity, source: Im
         : { id: item.id, status: 'valid' as const, name: item.group.name, revision: item.group.revision };
     }), skillIds, skillGroups, banner: source.banner_asset_id ? reference(source.banner_asset_id) : null,
     fixedReferencesEditable: actor.role === 'admin',
-    ...(actor.role !== 'admin' && fixed.length ? { fixedReferenceRestriction: '固定参考图由管理员管理；未修改的引用会保留，失效项需要管理员修复' } : {}),
+    ...(actor.role !== 'admin' && fixed.length ? { fixedReferenceRestriction: fixed.some(item => reference(item.assetId).status !== 'valid')
+      ? '需管理员先修复固定参考；修复前整次模板定义保存受限，当前编辑保留'
+      : '固定参考图由管理员管理；未修改的引用会保留' } : {}),
     ...(skillIds.length ? { skillRestriction: '提示词组仅本人可见，实时模板定义保存前需要明确移除；原共享选择会保留' } : {}),
     reproductionConfigured: Boolean(reproduction), ...(reproduction && actor.role === 'admin' ? { globalContext: reproduction.globalContext } : {}) };
 }
@@ -415,6 +417,10 @@ export async function readSharedStudioModules(ownerId: string, moduleIds: string
           if (reason === 'dependency-invalid' && !repairDefinition) {
             state.capabilities.editDefinition = { allowed: false, reasonCode: reason, reason: studioStateReason[reason] };
             state.capabilities.saveDefinition = { allowed: false, reasonCode: reason, reason: studioStateReason[reason] };
+          }
+          if (repairDefinition?.fixedReferencesEditable === false && repairDefinition.fixedReferences.some(item => item.status !== 'valid')) {
+            state.capabilities.saveDefinition = { allowed: false, reasonCode: 'dependency-invalid',
+              reason: '需管理员先修复固定参考；修复前整次模板定义保存受限，当前编辑保留' };
           }
           const unavailable = new StudioSharingError(reason === 'dependency-invalid' && source?.owner_id === actor.id ? error.message : studioStateReason[reason], error.status, reason);
           unavailable.intent = error.intent;
