@@ -1,6 +1,6 @@
 'use client';
 import { useRef, useState } from 'react';
-import { Pin, PinOff, RefreshCw } from 'lucide-react';
+import { Pin, RefreshCw } from 'lucide-react';
 import type { StudioPinMutation, StudioPinState } from '@/lib/image-studio/result-pin-types';
 import styles from '@/components/content-reactions/reactions.module.css';
 import pinStyles from './result-pin-button.module.css';
@@ -8,7 +8,7 @@ import pinStyles from './result-pin-button.module.css';
 // An uncertain request is retried only by the user, with its original identity and intent.
 const pending = new Map<string, StudioPinMutation>();
 export function StudioResultPinnedIndicator() {
-  return <span className={pinStyles.readonly} data-studio-pin-readonly role="img" aria-label="已置顶" title="同一模板的用户可查看和点赞；只有生成者可取消置顶"><Pin size={16} aria-hidden="true" /></span>;
+  return <span className={pinStyles.readonly} data-studio-pin-readonly role="img" aria-label="已置顶" title="同一模板的用户可查看和点赞；只有生成者可取消置顶"><Pin size={16} className={pinStyles.pinIcon} aria-hidden="true" /></span>;
 }
 export function StudioResultPinButton({ userId, moduleId, taskId, assetId, state, onSaved }: {
   userId: string; moduleId: string; taskId: string; assetId: string; state: StudioPinState | null;
@@ -55,7 +55,7 @@ export function StudioResultPinButton({ userId, moduleId, taskId, assetId, state
     <button type="button" className={pinStyles.button} data-studio-result-pin aria-pressed={active} aria-busy={busy}
       title={reason || (active ? '取消本模板置顶；原公共分享保留' : '置顶后，同一模板的用户可查看和点赞这张结果图')}
       aria-label={label} disabled={busy || Boolean(reason)} onClick={() => void save()}>
-      {busy ? <RefreshCw size={16} className={styles.busyIcon} aria-hidden="true" /> : active ? <PinOff size={16} aria-hidden="true" /> : <Pin size={16} aria-hidden="true" />}
+      {busy ? <RefreshCw size={16} className={styles.busyIcon} aria-hidden="true" /> : <Pin size={16} className={pinStyles.pinIcon} aria-hidden="true" />}
     </button>
     {(error || uncertain && !busy) && <span className={`${styles.error} ${pinStyles.feedback}`} role="status">{error || '上次置顶尚未确认，请点置顶重试'}</span>}
   </span>;

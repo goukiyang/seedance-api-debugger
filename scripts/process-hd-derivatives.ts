@@ -109,7 +109,7 @@ async function main() {
   while (!stopping) {
     let control = await hdControl();
     const legacyLoad = control.state === 'hard_pause' && control.reason === 'load_guard';
-    if (control.state === 'active' || (legacyLoad && (!control.wait || Date.parse(control.wait.nextCheckAt) <= Date.now()))
+    if ((legacyLoad && (!control.wait || Date.parse(control.wait.nextCheckAt) <= Date.now()))
       || (control.state === 'resource_wait' && Date.parse(control.wait!.nextCheckAt) <= Date.now())) {
       control = (await recheckHdResources({ expectedToken: control.token })).control;
     }
@@ -157,6 +157,13 @@ async function main() {
       if (control.state === 'active' && !stopping) {
         const job = selectHdJob(await listHdJobs(), consecutiveNew, batch);
         if (job) {
+          // Admission protects actual encoding work. An empty queue is idle,
+          // not a resource pause caused by the previous encode or another service.
+          control = (await recheckHdResources({ expectedToken: control.token })).control;
+          if (control.state !== 'active' || stopping) {
+            await new Promise(resolve => setTimeout(resolve, HD_RESOURCE_POLICY.minimumCheckMs));
+            continue;
+          }
           const previousAttempt = job.attemptHistory?.[job.attemptHistory.length - 1]?.startedAt;
           const result = await processHdJob(job.key);
           if (result === null) throw new Error('hd_lease_conflict');

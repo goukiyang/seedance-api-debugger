@@ -8,7 +8,9 @@
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 14px; }
 .card { min-width: 0; }
 .coverReactions { position: absolute; top: 6px; left: 6px; z-index: 7; width: calc(100% - 12px); color: #e0e9e5; pointer-events: none; }
-.coverReactions > [data-content-reactions] { align-items: flex-start; max-width: 100%; }
+.coverReactions > [data-content-reactions] { align-items: flex-start; max-width: calc(100% - 50px); }
+.coverPin { position: absolute; top: 0; right: 0; display: flex; justify-content: flex-end; max-width: calc(100% - 84px); }
+.coverPin > [data-studio-pin-control] { justify-content: flex-end; }
 .coverReactions > [data-content-reactions] > span:first-child { align-items: flex-start; min-width: 0; flex-wrap: wrap; }
 .coverReactions button, .coverReactions [data-studio-pin-control], .coverReactions [role="status"] { pointer-events: auto; }
 .coverReactions > [data-content-reactions] > span:first-child > span { min-width: 0; max-width: 100%; }
@@ -18,7 +20,7 @@
 .coverReactions button:global(.sd2-like)[data-reaction-action="like"]::before { content: ''; position: absolute; inset: 6.6px 15%; border-radius: 22px; background: #202725e8; z-index: -1; pointer-events: none; }
 .coverReactions button[data-reaction-action="like"][aria-pressed="true"]::before { background: #38262ce8; }
 .coverReactions [role="status"] { max-width: min(320px, 100%); padding: 4px 6px; border-radius: 4px; background: #111614ed; white-space: normal; overflow-wrap: anywhere; }
-.coverReactions [data-studio-pin-readonly] { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; color: #c9fff1; }
+.coverReactions [data-studio-pin-readonly] { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; }
 @media (hover: hover) and (pointer: fine) {
   .coverReactions button[data-reaction-action="like"]:not([aria-pressed="true"]):not([data-bloom]),
   .coverReactions [data-studio-pin-control]:where(:not([data-active]):not([data-feedback]):not([aria-busy="true"])) { opacity: 0; pointer-events: none; }
@@ -73,10 +75,8 @@
 .deleteSlot button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 1px solid #414b48; border-radius: 4px; background: #202725e6; color: #e0e9e5; cursor: pointer; }
 .deleteSlot button:disabled { opacity: .45; cursor: default; }
 .deleteSlot button:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
-.deleteSlot[data-cover-context-delete] button { position: relative; isolation: isolate; width: 44px; height: 44px; border: 0; background: transparent; }
-.deleteSlot[data-cover-context-delete] button::before { content: ''; position: absolute; inset: 6px; z-index: -1; border: 1px solid #414b48; border-radius: 4px; background: #202725e6; pointer-events: none; }
-.media:has(.deleteSlot[data-cover-context-delete]:not(:empty)) .mediaActions { max-inline-size: calc(100% - 68px); }
-.media:has(input[data-result-secondary]) .deleteSlot[data-cover-context-delete] { bottom: 48px; }
+.mediaActions[data-cover-context-delete] { max-inline-size: calc(100% - 16px); }
+.mediaActions[data-cover-context-delete] .commonActions { flex-shrink: 1; }
 .commonActions, .specialtyActions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 32px; }
 .commonActions { flex-shrink: 0; }
 .specialtyActions { min-width: 0; }
@@ -91,6 +91,9 @@
 .actions button:focus-visible, .mediaActions button:focus-visible, .pagination button:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
 .actions button:disabled, .mediaActions button:disabled, .pagination button:disabled { opacity: .45; cursor: default; }
 .mediaActions .commonActions button { padding: 0; }
+@media (hover: none), (any-pointer: coarse) {
+  .mediaActions[data-cover-context-delete] .commonActions button { flex-basis: 44px; width: 44px; height: 44px; min-height: 44px; }
+}
 .pagination { justify-content: center; padding: 10px 0; font-size: 13px; }
 .headerPagination { flex-wrap: nowrap; padding: 0; min-height: 36px; max-inline-size: 100%; }
 .headerPagination span { min-inline-size: 0; text-align: center; }

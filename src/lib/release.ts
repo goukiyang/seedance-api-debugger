@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '图片预览优先准备当前高清图，下载复用完整高清缓存；删除确认更简洁、贴近图片。双击回填、原图、画质与权限保持。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '结果图片的删除按钮归入操作组，置顶移到右上角；高清准备区分空闲和资源等待，有新图时继续安全准备。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

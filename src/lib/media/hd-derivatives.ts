@@ -325,6 +325,8 @@ export async function retryFailedHd() {
   });
 }
 export async function hdStatus() {
+  const discovery = await import('./hd-discovery');
+  const checkpoint = await discovery.readHdDiscoveryCheckpoint().catch(() => null);
   const jobs = await listHdJobs();
   const counts = { queued: 0, running: 0, ready: 0, failed: 0, skipped: 0 };
   const reasons: Record<string, number> = {};
@@ -364,12 +366,13 @@ export async function hdStatus() {
   const started = Number.isFinite(resumedMs) ? resumedMs : Math.min(...jobs.filter(job => ['queued', 'running'].includes(job.status)).map(job => Date.parse(job.updatedAt)));
   const stalled = pending && control.state !== 'manual_pause' && Number.isFinite(started)
     && capturedMs - started > stallThresholdMs && (lastProgressMs === null || capturedMs - lastProgressMs > stallThresholdMs);
-  const isolated = await (await import('./hd-discovery')).listHdIsolations();
+  const isolated = await discovery.listHdIsolations();
   const isolation = { total: isolated.filter(item => !item.resolvedAt).length,
     retrying: isolated.filter(item => !item.resolvedAt && item.retryAt).length,
     held: isolated.filter(item => !item.resolvedAt && !item.retryAt).length };
   return { policy: HD_POLICY, counts, reasons, batches, newCounts, control, capacity: await hdCapacity(), total: jobs.length,
     state: control.state, resource: control.resource || null, waitSince: control.wait?.since || null, isolation,
+    discovery: await discovery.hdDiscoveryStatus(checkpoint),
     lastSuccessAt: lastSuccessMs === null ? null : new Date(lastSuccessMs).toISOString(),
     lastProgressAt: lastProgressMs === null ? null : new Date(lastProgressMs).toISOString(), stalled, stallThresholdMs };
 }

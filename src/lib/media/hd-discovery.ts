@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { atomicHdJson, hdControl, hdDirectory, requestHd, withHdLease } from './hd-derivatives';
 import { HD_RESOURCE_POLICY } from './hd-resource-state';
+import { hdReadonlyDb } from './hd-readonly-db';
 
 export type HdDiscoveryItem = { id: string; source: string; preserveText: boolean };
 export type HdDiscoveryIsolation = HdDiscoveryItem & {
@@ -11,6 +12,7 @@ export type HdDiscoveryIsolation = HdDiscoveryItem & {
 };
 export type HdDiscoveryCursor = { at: string; id: string };
 export type HdDiscoveryCheckpoint = { assets: HdDiscoveryCursor; tasks: HdDiscoveryCursor };
+export type HdDiscoveryStatus = { checkedAt: string; current: boolean | null };
 export const hdIsolationDirectory = () => path.join(hdDirectory(), 'discovery-isolation');
 export function hdSourceIsolationReason(error: unknown): 'source_missing' | 'source_unreadable' | null {
   const message = error instanceof Error ? error.message : '';
@@ -32,6 +34,26 @@ export async function readHdDiscoveryCheckpoint(clock = Date.now): Promise<HdDis
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     const at = new Date(clock() - 24 * 60 * 60 * 1000).toISOString();
     return { assets: { at, id: '' }, tasks: { at, id: '' } };
+  }
+}
+export async function hdDiscoveryStatus(checkpoint: HdDiscoveryCheckpoint | null): Promise<HdDiscoveryStatus> {
+  const checkedAt = new Date();
+  if (!checkpoint) return { checkedAt: checkedAt.toISOString(), current: null };
+  try {
+    const [asset, task] = await Promise.all([
+      hdReadonlyDb.asset.findFirst({ where: { status: 'active', type: 'image', created_at: { lte: checkedAt },
+        OR: [{ created_at: { gt: new Date(checkpoint.assets.at) } }, { created_at: new Date(checkpoint.assets.at), id: { gt: checkpoint.assets.id } }] }, select: { id: true } }),
+      hdReadonlyDb.imageStudioTask.findFirst({ where: { status: 'succeeded', deleted_at: null, asset_id: { not: null }, finished_at: { lte: checkedAt },
+        OR: [{ finished_at: { gt: new Date(checkpoint.tasks.at) } }, { finished_at: new Date(checkpoint.tasks.at), id: { gt: checkpoint.tasks.id } }] }, select: { id: true } }),
+    ]);
+    // A moving cursor means the queue snapshot and discovery view may straddle a
+    // registration. Report unknown until the next read instead of claiming idle.
+    const after = await readHdDiscoveryCheckpoint();
+    const same = after.assets.at === checkpoint.assets.at && after.assets.id === checkpoint.assets.id
+      && after.tasks.at === checkpoint.tasks.at && after.tasks.id === checkpoint.tasks.id;
+    return { checkedAt: checkedAt.toISOString(), current: same ? !asset && !task : null };
+  } catch {
+    return { checkedAt: checkedAt.toISOString(), current: null };
   }
 }
 export async function listHdIsolations(): Promise<HdDiscoveryIsolation[]> {

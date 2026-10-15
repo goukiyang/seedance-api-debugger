@@ -11,6 +11,7 @@ type Status = { total: number; counts: Counts; reasons: Counts; control: HdContr
   batches: Array<{ id: string; knownLocalOriginals: number; counts: Counts; notQueued: number; remoteVersionUnknown: number; unavailable: number }>;
   newCounts: Counts; lastSuccessAt?: string | null; lastProgressAt?: string | null; stalled?: boolean;
   resource?: HdResourceSample | null; waitSince?: string | null; isolation?: { total: number; retrying: number; held: number };
+  discovery?: { checkedAt: string; current: boolean | null };
   canResume: boolean; retryableCount: number; retrySummary?: { queued: number; held: number } };
 const reasonLabel: Record<string, string> = { admin_pause: '管理员暂停', operator_pause: '操作员暂停', capacity_guard: '剩余空间不足', load_guard: '服务器忙碌', multi_frame: '多帧原件', pixel_limit: '像素数量超限', high_bit_depth: '高位深原件', wide_gamut: '色彩范围不适用', unverified_color_profile: '色彩配置未确认', existing_webp: '已有WebP，保留原件', original_smaller: '原件更小，使用原件', source_changed: '原件版本已变化', decode_or_source_failed: '读取或解码失败', temporary_io: '临时读取失败', output_integrity: '新文件校验异常', published_integrity: '已准备文件异常', discovery_source_failure: '新原件读取异常', retry_limit: '自动重试已用尽', worker_integrity_failure: '后台文件或读取状态异常' };
 const countText = (value: Counts) => `可用 ${value.ready} · 等待 ${value.queued} · 处理中 ${value.running} · 失败 ${value.failed} · 不适配 ${value.skipped}`;
@@ -73,10 +74,13 @@ export function HdDerivativeManagement() {
   }, [account, load]);
   const state = data?.control.state;
   const hardStop = state === 'hard_pause' && data?.control.reason !== 'load_guard';
-  const label = state === 'resource_wait' ? '等待服务器空闲，将自动继续' : state === 'manual_pause' ? '管理员已暂停'
-    : state === 'hard_pause' ? '需要处理异常' : data?.counts.running ? '正在准备' : data && data.counts.queued ? '正在等待下一项准备' : '当前没有待准备项';
-  const sampleLabel = data?.resource?.result === 'safe' ? (state === 'resource_wait' ? '资源已回落，正在确认稳定' : '可继续准备')
-    : data?.resource?.result === 'busy' ? '服务器仍忙碌' : data?.resource?.result === 'unsafe' ? '存储安全检查未通过' : '资源状态待确认';
+  const pending = Boolean(data && data.counts.queued + data.counts.running > 0);
+  const label = state === 'manual_pause' ? '管理员已暂停' : state === 'hard_pause' ? '需要处理异常'
+    : data && !pending ? data.discovery?.current === true ? '当前没有待准备项'
+      : data.discovery?.current === false ? '新图片等待登记' : '新图片登记状态待确认'
+    : state === 'resource_wait' ? '等待服务器空闲，将自动继续' : data?.counts.running ? '正在准备' : '正在等待下一项准备';
+  const sampleLabel = data?.resource?.result === 'safe' ? (pending && state === 'resource_wait' ? '资源已回落，正在确认稳定' : '上次检查资源正常')
+    : data?.resource?.result === 'busy' ? '上次检查服务器忙碌' : data?.resource?.result === 'unsafe' ? '存储安全检查未通过' : '资源状态待确认';
   function toggle(key: keyof Expanded, open: boolean) { setExpanded(value => value[key] === open ? value : { ...value, [key]: open }); }
   return <section className={styles.section} aria-labelledby="hd-management-title" aria-busy={busy}><h2 id="hd-management-title">高清图准备</h2>
     {!data && !error && <p role="status">{sessionChanged || isClientSessionBlocked() ? '账号已退出，请刷新页面重新确认账号。' : '正在读取准备状态…'}</p>}{data && <>
@@ -85,7 +89,7 @@ export function HdDerivativeManagement() {
     <div className={styles.times}><p>最新检查：{sampleLabel}{data.resource && <> · <RelativeTime value={data.resource.checkedAt} /></>}</p>
       {data.waitSince && <p>开始等待：<RelativeTime value={data.waitSince} /></p>}
       <p>最后成功：{data.lastSuccessAt ? <RelativeTime value={data.lastSuccessAt} /> : '尚无成功记录'} · 最后处理进展：{data.lastProgressAt ? <RelativeTime value={data.lastProgressAt} /> : '尚无处理记录'}</p></div>
-    {state === 'resource_wait' && <p role="status">后台会自动复核。资源持续稳定后继续准备，原图仍可查看和下载。</p>}
+    {state === 'resource_wait' && pending && <p role="status">后台会自动复核。资源持续稳定后继续准备，原图仍可查看和下载。</p>}
     {state === 'manual_pause' && <p>重新检查后会按当前资源决定继续或等待；不会重发图片生成。</p>}
     {data.control.reason === 'load_guard' && <p role="status">上次资源检查留下了暂停。重新检查会先确认当前资源和安全状态，再进入自动等待。</p>}
     {hardStop && <p role="status">{reasonLabel[data.control.reason || ''] || '暂停原因待核对'}。请由维护人员处理异常后核对恢复。原图仍可查看和下载。</p>}
