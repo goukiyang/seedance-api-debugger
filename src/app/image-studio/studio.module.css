@@ -418,6 +418,10 @@
 .generationFeedback[data-tone="error"] { color: var(--text-secondary, #adb6bd); }
 .dialog { box-sizing: border-box; margin: auto; width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; background: #171c1f; color: #eef0f2; border: 1px solid #465057; border-radius: 8px; padding: 24px; }
 .dialog.contextDialog { width: min(820px, calc(100vw - 32px)); }
+.dialog.resultDeleteDialog { position: fixed; width: min(300px, calc(100vw - 32px)); padding: 16px; }
+.resultDeleteDialog h2 { margin: 0 0 20px; font-size: 18px; line-height: 1.4; }
+.resultDeleteActions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.resultDeleteActions button { min-height: 40px; }
 .dialog > p { margin: 16px 0; line-height: 1.6; }
 .dialog::backdrop { background: rgb(0 0 0 / 65%); }
 .inputMainGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }

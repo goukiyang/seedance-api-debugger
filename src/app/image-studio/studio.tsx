@@ -1673,6 +1673,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const deletedIds = useRef(new Set<string>());
   const deleteLock = useRef(false);
   const deleteDialog = useRef<HTMLDialogElement>(null);
+  const deleteCancel = useRef<HTMLButtonElement>(null);
+  const deleteAnchor = useRef<HTMLElement | null>(null);
   const [downloadReady, setDownloadReady] = useState<{ url: string; name: string } | null>(null);
   const submitLock = useRef(false);
   const listLock = useRef(false);
@@ -1855,7 +1857,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     moduleDialog.current?.close();
   }
   useDialogDismiss({ open: true, dialogRef: moduleDialog, nativeDialog: true, onDismiss: closeModuleDialog });
-  useDialogDismiss({ open: Boolean(deleteTarget), dialogRef: deleteDialog, nativeDialog: true, onDismiss: () => { if (!deleting) setDeleteTarget(null); } });
+  useDialogDismiss({ open: Boolean(deleteTarget), dialogRef: deleteDialog, nativeDialog: true, initialFocusRef: deleteCancel, onDismiss: () => { if (!deleting) setDeleteTarget(null); } });
   const closeInputMainChoice = () => { inputMainSequence.current++; setInputMainChoice(null); setInputMainError(''); };
   useDialogDismiss({ open: Boolean(inputMainChoice), dialogRef: inputMainDialog, nativeDialog: true, onDismiss: closeInputMainChoice });
   useEffect(() => { if (inputMainChoice) inputMainDialog.current?.showModal(); else inputMainDialog.current?.close(); }, [Boolean(inputMainChoice)]);
@@ -1960,7 +1962,55 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     setModuleSaved(current => current ? JSON.stringify({ ...JSON.parse(current), groupName: module.groupName || '未分组' }) : current);
   }, [module.revision, module.groupName, resolutionDelta]);
 
-  useEffect(() => { if (deleteTarget) deleteDialog.current?.showModal(); else deleteDialog.current?.close(); }, [deleteTarget]);
+  useEffect(() => {
+    const panel = deleteDialog.current;
+    if (!panel) return;
+    if (!deleteTarget) { panel.close(); return; }
+    panel.showModal();
+    if (!templateWorkbench) return;
+    // Match the existing product-dialog placement while keeping this delete contract.
+    const place = () => {
+      const viewport = window.visualViewport;
+      const margin = 16, gap = 8;
+      const width = viewport?.width ?? window.innerWidth;
+      const height = viewport?.height ?? window.innerHeight;
+      const left = (viewport?.offsetLeft ?? 0) + margin;
+      const top = (viewport?.offsetTop ?? 0) + margin;
+      const right = left + width - margin * 2;
+      const bottom = top + height - margin * 2;
+      panel.style.width = `${Math.min(300, Math.max(0, width - margin * 2))}px`;
+      panel.style.maxHeight = `${Math.max(0, height - margin * 2)}px`;
+      const w = panel.offsetWidth, h = panel.offsetHeight;
+      const clampX = (x: number) => Math.max(left, Math.min(x, right - w));
+      const clampY = (y: number) => Math.max(top, Math.min(y, bottom - h));
+      const rect = deleteAnchor.current?.isConnected ? deleteAnchor.current.getBoundingClientRect() : null;
+      // A cramped viewport or a removed/offscreen card uses the compact center fallback.
+      let x = left + (right - left - w) / 2, y = top + (bottom - top - h) / 2;
+      if (rect && rect.width > 0 && rect.height > 0 && rect.bottom > top && rect.top < bottom && rect.right > left && rect.left < right) {
+        if (rect.bottom + gap + h <= bottom) { x = clampX(rect.left); y = rect.bottom + gap; }
+        else if (rect.top - gap - h >= top) { x = clampX(rect.left); y = rect.top - gap - h; }
+        else if (rect.right + gap + w <= right) { x = rect.right + gap; y = clampY(rect.top); }
+        else if (rect.left - gap - w >= left) { x = rect.left - gap - w; y = clampY(rect.top); }
+      }
+      Object.assign(panel.style, { left: `${x}px`, top: `${y}px`, right: 'auto', bottom: 'auto', margin: '0' });
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    window.visualViewport?.addEventListener('resize', place);
+    window.visualViewport?.addEventListener('scroll', place);
+    const observer = new ResizeObserver(place);
+    observer.observe(panel);
+    if (deleteAnchor.current?.isConnected) observer.observe(deleteAnchor.current);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+      window.visualViewport?.removeEventListener('resize', place);
+      window.visualViewport?.removeEventListener('scroll', place);
+      observer.disconnect();
+      panel.style.cssText = '';
+    };
+  }, [deleteTarget, templateWorkbench]);
   useEffect(() => { if (nameEditing) nameInput.current?.focus(); }, [nameEditing]);
 
   useEffect(() => {
@@ -3021,7 +3071,16 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     setCopyFeedback({ id: task.id, text: copied ? '已复制' : '复制失败，请重试' });
     window.setTimeout(() => setCopyFeedback(current => current?.id === task.id ? null : current), copied ? 1800 : 2600);
   }
-  function requestResultDelete(task: StudioTask) { setDeleteError(''); setDeleteTarget(task); }
+  function requestResultDelete(task: StudioTask, trigger?: HTMLElement) {
+    if (templateWorkbench) {
+      const card = Array.from(section.current?.querySelectorAll<HTMLElement>('[data-result-id]') || [])
+        .find(element => element.dataset.resultId === task.id);
+      deleteAnchor.current = trigger || card || null;
+      // Menu items unmount on selection; restore focus to their actual result cover.
+      (trigger || card?.querySelector<HTMLElement>('[data-result-cover], [data-result-choice]'))?.focus({ preventScroll: true });
+    }
+    setDeleteError(''); setDeleteTarget(task);
+  }
   function canDeleteResult(item: GeneratedImageResult & { task?: StudioTask }) {
     return Boolean(item.task && !item.viewOnly && !item.media?.previewOnly
       && (!item.task.owner || item.task.owner.id === userId));
@@ -3607,7 +3666,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             }} />}
           </> : null}
           coverDeleteWithContextActions={templateWorkbench}
-          renderDelete={item => item.task && canDeleteResult(item) ? <button type="button" disabled={deleting || downloadBusy} title="删除生成记录" aria-label={`删除第 ${item.task.ordinal} 张生成记录`} onClick={event => { event.stopPropagation(); requestResultDelete(item.task!); }}><Trash2 size={17} /></button> : null}
+          renderDelete={item => item.task && canDeleteResult(item) ? <button type="button" disabled={deleting || downloadBusy} title="删除生成记录" aria-label={`删除第 ${item.task.ordinal} 张生成记录`} onClick={event => { event.stopPropagation(); requestResultDelete(item.task!, event.currentTarget); }}><Trash2 size={17} /></button> : null}
           renderMetadata={({task, sharedPin}) => task ? <>          <div className={styles.resultHeading}>
             <p className={styles.prompt} title={templateWorkbench ? name : `${name} · ${task.ordinal}`}>{templateWorkbench ? name : `${name} · ${task.ordinal}`}</p>
             {templateWorkbench && task.asset?.id && visibleFeed?.pinState.assetIds.includes(task.asset.id) && <span className={styles.muted}>已置顶</span>}
@@ -3743,11 +3802,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       {inputMainError && <p role="alert" className={styles.error}>{inputMainError}</p>}
       <div className={styles.presetActions}><button type="button" onClick={closeInputMainChoice}>取消</button><button type="button" className={styles.primary} disabled={inputMainBusy || !inputMainChoice?.selectedIds.length || inputMainChoice.selectedIds.length > currentReferenceCap} onClick={() => void applyInputMainChoice()}>{inputMainBusy ? '正在核对原件' : '取回所选主图'}</button></div>
     </dialog>
-    <dialog ref={deleteDialog} className={styles.dialog} aria-labelledby={`delete-title-${module.id}`}>
+    <dialog ref={deleteDialog} className={`${styles.dialog}${templateWorkbench ? ` ${styles.resultDeleteDialog}` : ''}`} aria-labelledby={`delete-title-${module.id}`}>
       <h2 id={`delete-title-${module.id}`}>删除这张图片？</h2>
-      <p>将从本模块的生成结果中移除，不退还已消耗积分。其他模块、参考图和已保存的副本不受影响。</p>
+      {!templateWorkbench && <p>将从本模块的生成结果中移除，不退还已消耗积分。其他模块、参考图和已保存的副本不受影响。</p>}
       {deleteError && <p role="alert" className={styles.error}>{deleteError}</p>}
-      <div className={styles.resultActions}><button type="button" autoFocus disabled={deleting} onClick={() => setDeleteTarget(null)}>取消</button><button type="button" className={styles.danger} disabled={deleting} onClick={() => void deleteResult()}><Trash2 size={16} />{deleting ? '删除中' : '确认删除'}</button></div>
+      <div className={templateWorkbench ? styles.resultDeleteActions : styles.resultActions}><button ref={deleteCancel} type="button" autoFocus disabled={deleting} onClick={() => setDeleteTarget(null)}>取消</button><button type="button" className={styles.danger} disabled={deleting} onClick={() => void deleteResult()}><Trash2 size={16} />{deleting ? '删除中' : templateWorkbench ? '删除' : '确认删除'}</button></div>
     </dialog>
     <dialog ref={moduleDialog} className={`${styles.dialog} ${styles.contextDialog}`} onPaste={event => {
       if (!fixedEditable || assetPickerOpen) return;

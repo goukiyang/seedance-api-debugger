@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '点开图片即开始准备，优先读取当前高清图；下载前重新确认权限并复用完整高清缓存，双击回填、原图和画质保持。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '图片预览优先准备当前高清图，下载复用完整高清缓存；删除确认更简洁、贴近图片。双击回填、原图、画质与权限保持。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
