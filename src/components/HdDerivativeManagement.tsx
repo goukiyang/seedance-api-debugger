@@ -24,6 +24,7 @@ export function HdDerivativeManagement() {
   const [snapshot, setData] = useState<Status | null>(null), [snapshotOwner, setSnapshotOwner] = useState('');
   const data = account && snapshotOwner === account ? snapshot : null;
   const [error, setError] = useState(''), [busy, setBusy] = useState(false);
+  const [statusClock, setStatusClock] = useState(0);
   const [expanded, setExpanded] = useState<Expanded>(collapsed), [preferenceOwner, setPreferenceOwner] = useState('');
   const lock = useRef(false), owner = useRef(account), valueRef = useRef(data);
   const sequence = useRef(0), activeRequest = useRef<AbortController | null>(null);
@@ -69,13 +70,13 @@ export function HdDerivativeManagement() {
   }, [expanded, preferenceKey, preferenceOwner]);
   useEffect(() => {
     if (!account || isClientSessionBlocked()) return;
-    void load(); const interval = setInterval(() => { if (!document.hidden && !isClientSessionBlocked()) void load(); }, 30_000);
+    void load(); const interval = setInterval(() => { if (!document.hidden && !isClientSessionBlocked()) { setStatusClock(Date.now()); void load(); } }, 30_000);
     return () => { clearInterval(interval); sequence.current++; activeRequest.current?.abort(); activeRequest.current = null; lock.current = false; };
   }, [account, load]);
   const state = data?.control.state;
   const hardStop = state === 'hard_pause' && data?.control.reason !== 'load_guard';
   const pending = Boolean(data && data.counts.queued + data.counts.running > 0);
-  const discoveryAge = data?.discovery ? Date.now() - Date.parse(data.discovery.checkedAt) : NaN;
+  const discoveryAge = data?.discovery ? Math.max(statusClock, Date.now()) - Date.parse(data.discovery.checkedAt) : NaN;
   const discoveryCurrent = discoveryAge >= 0 && discoveryAge <= 90_000 ? data?.discovery?.current : null;
   const label = state === 'manual_pause' ? '管理员已暂停' : state === 'hard_pause' ? '需要处理异常'
     : data && !pending ? discoveryCurrent === true ? '当前没有待准备项'
