@@ -75,9 +75,11 @@ export function HdDerivativeManagement() {
   const state = data?.control.state;
   const hardStop = state === 'hard_pause' && data?.control.reason !== 'load_guard';
   const pending = Boolean(data && data.counts.queued + data.counts.running > 0);
+  const discoveryAge = data?.discovery ? Date.now() - Date.parse(data.discovery.checkedAt) : NaN;
+  const discoveryCurrent = discoveryAge >= 0 && discoveryAge <= 90_000 ? data?.discovery?.current : null;
   const label = state === 'manual_pause' ? '管理员已暂停' : state === 'hard_pause' ? '需要处理异常'
-    : data && !pending ? data.discovery?.current === true ? '当前没有待准备项'
-      : data.discovery?.current === false ? '新图片等待登记' : '新图片登记状态待确认'
+    : data && !pending ? discoveryCurrent === true ? '当前没有待准备项'
+      : discoveryCurrent === false ? '新图片等待登记' : '新图片登记状态待确认'
     : state === 'resource_wait' ? '等待服务器空闲，将自动继续' : data?.counts.running ? '正在准备' : '正在等待下一项准备';
   const sampleLabel = data?.resource?.result === 'safe' ? (pending && state === 'resource_wait' ? '资源已回落，正在确认稳定' : '上次检查资源正常')
     : data?.resource?.result === 'busy' ? '上次检查服务器忙碌' : data?.resource?.result === 'unsafe' ? '存储安全检查未通过' : '资源状态待确认';
