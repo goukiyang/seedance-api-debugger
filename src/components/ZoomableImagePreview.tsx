@@ -183,6 +183,10 @@ function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, v
   const failed = failedKey === imageIdentity || unsupported || readProgress.phase === 'unavailable' || readResult?.unconfirmed === true;
   const blocked = !account || state?.denied || readResult?.denied;
   const loaded = !failed && !blocked && Boolean(imageSrc) && loadedKey === imageIdentity;
+  const latestSnapshot = current?.handle.getSnapshot();
+  const retained = !loaded && !blocked && current?.handle.isCurrent() && !latestSnapshot?.denied
+    && latestSnapshot?.retained === state?.retained ? state?.retained : undefined;
+  const retainedSrc = retained?.result.decoded && !retained.result.denied && !retained.result.unconfirmed ? retained.result.imageSrc : null;
   useEffect(() => { if (!loaded) onUnavailableRef.current?.(); }, [loaded, imageIdentity]);
   useEffect(() => {
     if (!imageSrc || failed || blocked || !current) return;
@@ -218,14 +222,15 @@ function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, v
       ? readProgress.message || '当前来源无法提供读取进度'
       : readProgress.phase === 'decoding' ? '正在解码' : '正在读取';
   return <>
-    {hasThumbnail && !loaded && !blocked && <img ref={thumbnailImage} key={`thumbnail:${account}:${thumbnail}`} src={thumbnail} alt={alt} className={className} style={style} draggable={false} data-image-preview-thumbnail
+    {retainedSrc && <img key={`retained:${identity}:${retainedSrc}`} src={retainedSrc} alt={alt} className={className} style={style} draggable={false} data-image-preview-retained />}
+    {hasThumbnail && !loaded && !blocked && !retainedSrc && <img ref={thumbnailImage} key={`thumbnail:${account}:${thumbnail}`} src={thumbnail} alt={alt} className={className} style={style} draggable={false} data-image-preview-thumbnail
       onLoad={event => { setThumbnailLoaded(thumbnail); onThumbnailReadyRef.current?.({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); }} />}
     {/* eslint-disable-next-line @next/next/no-img-element */}
     {imageSrc && !blocked && !failed && <img ref={image} key={`preview:${imageIdentity}`} src={imageSrc} alt={alt} className={className} style={{ ...style, opacity: loaded ? 1 : 0 }} draggable={false} data-image-preview-image
       onLoad={event => { const target = event.currentTarget; void (readResult?.decoded ? Promise.resolve() : target.decode()).then(() => { if (currentKeyRef.current === imageIdentity && current?.handle.isCurrent()) setLoadedKey(imageIdentity); }).catch(() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); }); }} onError={() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); }} />}
     {(!loaded || displayKind === 'original' || state?.fallback || state?.error) && <div className={styles.imageStatus} role="status">
-      <span>{blocked ? readProgress.message || '图片权限或来源不可用' : failed ? (unsupported ? progressLabel : thumbnailLoaded === thumbnail ? '图片未能加载，缩略图仍可查看，请重试' : '图片未能加载，请重试') : loaded ? `当前为${hdDisplayLabel(displayKind, state?.description, state?.fallback)}` : `${alt} · ${hdDisplayLabel(displayKind, state?.description, state?.fallback)} · ${progressLabel}`}</span>
-      {state?.descriptorPending && !blocked && <span>{displayKind === 'pending' ? '正在确认图片版本，先显示小图' : '高清压缩尚未完成，当前读取完整原图'}</span>}
+      <span>{blocked ? readProgress.message || '图片权限或来源不可用' : failed ? (unsupported ? progressLabel : retainedSrc ? '图片未能加载，当前图片保留，请重试' : thumbnailLoaded === thumbnail ? '图片未能加载，缩略图仍可查看，请重试' : '图片未能加载，请重试') : retainedSrc ? `正在读取${displayKind === 'hd' ? '高清' : '图片'}，当前图片保留` : loaded ? `当前为${hdDisplayLabel(displayKind, state?.description, state?.fallback)}` : `${alt} · ${hdDisplayLabel(displayKind, state?.description, state?.fallback)} · ${progressLabel}`}</span>
+      {state?.descriptorPending && !blocked && <span>{retainedSrc ? '正在确认高清版本，当前图片保留' : displayKind === 'pending' ? '正在确认图片版本，先显示小图' : '高清压缩尚未完成，当前读取完整原图'}</span>}
       {state?.error && !blocked && <span>高清状态暂无法确认，可重试或主动查看原图</span>}
       {failed && !unsupported && readProgress.phase === 'unavailable' && <span>{readProgress.message || '当前来源无法提供读取进度'}</span>}
       {!loaded && !failed && readProgress.phase === 'reading' && readProgress.percent != null && <>

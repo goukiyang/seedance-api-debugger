@@ -10,6 +10,8 @@ export type ImagePreviewPreparationOptions = { account: string; source: string; 
 export type PreparedImagePreviewState = {
   readSource: string; version: string; displayKind: HdDisplayKind; fullSize: boolean;
   description?: HdDescription; descriptorPending: boolean; denied?: boolean; error?: boolean; fallback: boolean; result: ImageReadResult;
+  /** An already displayed same-object representation, never another source. */
+  retained?: { result: ImageReadResult; displayKind: HdDisplayKind; fullSize: boolean; description?: HdDescription; version: string };
 };
 export type ImagePreviewPreparation = {
   readonly account: string; readonly source: string; readonly sourceVersion: string; readonly previewOnly: boolean; readonly original: boolean;
@@ -29,20 +31,27 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
   const listeners = new Set<(state: PreparedImagePreviewState) => void>();
   let initialLease = true, disposed = false, readSequence = 0, readKey = '', recovering = false, recovered409 = false, stoppedAutomatic = false;
   let releaseRead: (() => void) | undefined, releaseHd: (() => void) | undefined, releasePriority: (() => void) | undefined;
+  let displayedReadKey = '', displayedImage = '';
+  let retainedRead: { release: () => void; sequence: number; descriptorVersion: string } | undefined;
   let state: PreparedImagePreviewState = { readSource: '', version: sourceVersion, displayKind: 'pending', fullSize: false, descriptorPending: !previewOnly && !original, fallback: false, result: waiting() };
   if (account) setImageReadSessionOwner(account);
   const sameScope = captureImageReadSessionScope(account);
   const notify = () => { for (const listener of Array.from(listeners)) listener(state); };
   const endPriority = () => { releasePriority?.(); releasePriority = undefined; };
+  const dropRetained = () => {
+    const previous = retainedRead; retainedRead = undefined;
+    state = { ...state, retained: undefined }; previous?.release();
+  };
   const dispose = () => {
     if (disposed) return;
     disposed = true; initialLease = false; readSequence++;
     releaseRead?.(); releaseRead = undefined; releaseHd?.(); releaseHd = undefined;
+    dropRetained();
     endPriority(); listeners.clear();
   };
   const deny = (message = '图片权限或来源不可用，请重新打开') => {
     if (disposed) return;
-    state = { ...state, readSource: '', denied: true, descriptorPending: false, result: { imageSrc: null, denied: true, progress: { phase: 'unavailable', loadedBytes: 0, message } } };
+    state = { ...state, readSource: '', retained: undefined, denied: true, descriptorPending: false, result: { imageSrc: null, denied: true, progress: { phase: 'unavailable', loadedBytes: 0, message } } };
     notify(); dispose();
   };
   const active = () => {
@@ -53,6 +62,7 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
   const unconfirmed = () => {
     if (!active()) return;
     stoppedAutomatic = true;
+    dropRetained();
     releaseRead?.(); releaseRead = undefined; readSequence++; readKey = '';
     state = { ...state, readSource: '', descriptorPending: false, error: true,
       result: { imageSrc: null, unconfirmed: true, progress: { phase: 'unavailable', loadedBytes: 0, message: '图片版本暂时无法确认，请重试或主动查看原图' } } };
@@ -64,18 +74,41 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
       : imageDisplaySource(source, kind === 'preview' ? 'preview' : 'original');
     const version = kind === 'hd' ? description?.sourceVersion || '' : sourceVersion;
     const key = JSON.stringify([kind, readSource, version]);
+    const previous = state, previousKey = readKey, previousSequence = readSequence;
     state = { ...state, readSource, version, displayKind: kind, fullSize: kind !== 'preview', description,
       descriptorPending: ['queued', 'running'].includes(description?.status || ''), error: descriptorError, fallback };
+    if (retainedRead && (kind !== 'hd' || !description?.sourceVersion || description.sourceVersion !== retainedRead.descriptorVersion || descriptorError)) dropRetained();
     if (key === readKey) { notify(); return; }
     // A later authorized version/representation change becomes foreground
     // again before releasing the old body or allowing any neighbor bytes.
     releasePriority ||= beginImageForegroundPreparation(account);
+    // A queued/running descriptor and its later ready descriptor identify the
+    // same underlying source version. Keep only a body already authorized,
+    // decoded AND actually displayed under that version. Its own consumer
+    // continues observing revocation/version invalidation while HD is prepared.
+    // Original validators and HD versions are deliberately not compared.
+    if (!retainedRead && kind === 'hd' && !descriptorError && description?.sourceVersion
+      && previous.description?.sourceVersion === description.sourceVersion
+      && previousKey === displayedReadKey && previous.result.imageSrc === displayedImage
+      && previous.result.decoded && !previous.result.denied && !previous.result.unconfirmed && !previous.result.refreshSource && releaseRead) {
+      retainedRead = { release: releaseRead, sequence: previousSequence, descriptorVersion: description.sourceVersion };
+      releaseRead = undefined;
+      state = { ...state, retained: { result: previous.result, displayKind: previous.displayKind, fullSize: previous.fullSize, description: previous.description, version: previous.version } };
+    }
     readKey = key; const sequence = ++readSequence;
     releaseRead?.(); releaseRead = undefined;
     state = { ...state, result: waiting() }; notify();
     const release = acquireImageRead(account, readSource, version, 0, result => {
-      if (!active() || sequence !== readSequence) return;
+      if (!active()) return;
+      if (sequence !== readSequence) {
+        if (retainedRead?.sequence === sequence && (result.denied || result.unconfirmed || result.refreshSource || !result.imageSrc || !result.decoded || result.imageSrc !== state.retained?.result.imageSrc)) {
+          if (result.denied) deny(result.progress.message);
+          else { dropRetained(); notify(); }
+        }
+        return;
+      }
       if (result.denied) { deny(result.progress.message); return; }
+      if (result.refreshSource || result.unconfirmed) dropRetained();
       state = { ...state, result }; notify();
       if (result.refreshSource && kind === 'hd') {
         if (recovered409 || recovering) { if (!recovering) unconfirmed(); return; }
@@ -128,7 +161,11 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
       let released = false;
       return () => { if (released) return; released = true; listeners.delete(consumer); if (!initialLease && !listeners.size) dispose(); };
     },
-    markDisplayed: endPriority,
+    markDisplayed: () => {
+      if (!active() || !state.result.decoded || !state.result.imageSrc) return;
+      displayedReadKey = readKey; displayedImage = state.result.imageSrc;
+      dropRetained(); endPriority(); notify();
+    },
     release: () => { if (!initialLease) return; initialLease = false; if (!listeners.size) dispose(); },
   };
   if (!account || !source) { deny('请先确认登录状态后重新打开图片'); return handle; }
