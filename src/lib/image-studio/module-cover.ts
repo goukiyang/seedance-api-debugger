@@ -10,7 +10,7 @@ import { assertStudioActor, studioSharedBinding, type SharedStudioClient } from 
 import { studioPresetArchived } from './preset-lifecycle';
 import { studioHiddenAssetUrls } from './protected-assets';
 import { readStudioImage, studioTemplateAssetUrl } from './media';
-import { MODULE_COVER_OUTPUT, type ModuleCoverDTO, type ModuleCoverEditorState, type ModuleCoverRecipe,
+import { LEGACY_MODULE_COVER_OUTPUT, MODULE_COVER_OUTPUT, type ModuleCoverDTO, type ModuleCoverEditorState, type ModuleCoverRecipe,
   type ModuleCoverRequestResult, type ModuleCoverSaveInput, type ModuleCoverSourceDTO, type ModuleCoverTarget } from './module-cover-types';
 
 export class ModuleCoverError extends Error {
@@ -33,10 +33,11 @@ function readObject<T>(value: string): T {
 }
 function parseRecipe(value: unknown): ModuleCoverRecipe {
   const item = value as ModuleCoverRecipe | undefined;
-  if (!item || item.version !== 1 || !['single', 'horizontal', 'vertical'].includes(item.layout)
-    || item.output?.width !== 1280 || item.output?.height !== 960 || !Array.isArray(item.sources)
+  const output = item?.version === 1 ? LEGACY_MODULE_COVER_OUTPUT : MODULE_COVER_OUTPUT;
+  if (!item || item.version !== 1 && item.version !== 2 || !['single', 'horizontal', 'vertical'].includes(item.layout)
+    || item.output?.width !== output.width || item.output?.height !== output.height || !Array.isArray(item.sources)
     || item.sources.length !== (item.layout === 'single' ? 1 : 2)) throw new ModuleCoverError('封面排版或尺寸无效');
-  return { version: 1, layout: item.layout, output: { width: 1280, height: 960 }, sources: item.sources.map(source => {
+  const sources = item.sources.map(source => {
     if (!source || !validId(source.assetId) || typeof source.version !== 'string' || !/^[a-f0-9]{64}$/.test(source.version)) throw new ModuleCoverError('封面来源无效');
     const crop = source.crop;
     if (!crop || [crop.x, crop.y, crop.width, crop.height].some(n => typeof n !== 'number' || !Number.isFinite(n))
@@ -44,17 +45,28 @@ function parseRecipe(value: unknown): ModuleCoverRecipe {
       throw new ModuleCoverError('裁剪范围超出图片，请重新调整');
     }
     return { assetId: source.assetId, version: source.version, crop: { x: crop.x, y: crop.y, width: crop.width, height: crop.height } };
-  }) };
+  });
+  // Keep v1's original property order and exact normalized values: its saved
+  // request fingerprint includes JSON.stringify(recipe), not a sorted object.
+  return item.version === 1
+    ? { version: 1, layout: item.layout, output: { width: LEGACY_MODULE_COVER_OUTPUT.width, height: LEGACY_MODULE_COVER_OUTPUT.height }, sources }
+    : { version: 2, layout: item.layout, output: { width: MODULE_COVER_OUTPUT.width, height: MODULE_COVER_OUTPUT.height }, sources };
+}
+function coverOutput(recipe: ModuleCoverRecipe) {
+  return recipe.version === 1 ? LEGACY_MODULE_COVER_OUTPUT : MODULE_COVER_OUTPUT;
+}
+function parseRecord(record: CoverRecord, target: ModuleCoverTarget): CoverRecord {
+  if (record.version !== 1 || !validId(record.ownerId) || !Number.isSafeInteger(record.revision) || record.revision < 1
+    || !validId(record.requestId) || record.target?.kind !== target.kind || record.target.id !== target.id || !record.files
+    || !/^[a-f0-9]{64}-640\.webp$/.test(record.files.thumbnail) || !/^[a-f0-9]{64}-1280\.webp$/.test(record.files.image)
+    || typeof record.updatedAt !== 'string' || !Number.isFinite(Date.parse(record.updatedAt))) throw new ModuleCoverError('封面记录无法确认', 409);
+  record.recipe = parseRecipe(record.recipe);
+  return record;
 }
 async function readRecord(target: ModuleCoverTarget, client: SharedStudioClient): Promise<{ record: CoverRecord; raw: string } | null> {
   const row = await client.platformSetting.findUnique({ where: { key: moduleCoverKey(target) }, select: { value_json: true } });
   if (!row) return null;
-  const record = readObject<CoverRecord>(row.value_json);
-  if (record.version !== 1 || !validId(record.ownerId) || !Number.isSafeInteger(record.revision) || record.revision < 1
-    || record.target?.kind !== target.kind || record.target.id !== target.id || !record.files
-    || !/^[a-f0-9]{64}-640\.webp$/.test(record.files.thumbnail) || !/^[a-f0-9]{64}-1280\.webp$/.test(record.files.image)
-    || typeof record.updatedAt !== 'string' || !Number.isFinite(Date.parse(record.updatedAt))) throw new ModuleCoverError('封面记录无法确认', 409);
-  record.recipe = parseRecipe(record.recipe);
+  const record = parseRecord(readObject<CoverRecord>(row.value_json), target);
   return { record, raw: row.value_json };
 }
 async function targetForPreset(actor: ImageStudioIdentity, presetId: string, client: SharedStudioClient): Promise<TargetState> {
@@ -122,13 +134,14 @@ async function recordDTO(actor: ImageStudioIdentity, state: TargetState, record:
   } catch { unavailableReason = '封面原图已不可用或权限已变化，请管理者换图'; }
   return { target: state.target, revision: record.revision, available: !unavailableReason,
     thumbnailUrl: unavailableReason ? null : imageURL(state.target, record.revision, 640), imageUrl: unavailableReason ? null : imageURL(state.target, record.revision, 1280),
-    width: 1280, height: 960, updatedAt: record.updatedAt, ...(unavailableReason ? { unavailableReason } : {}) };
+    width: coverOutput(record.recipe).width, height: coverOutput(record.recipe).height, updatedAt: record.updatedAt, ...(unavailableReason ? { unavailableReason } : {}) };
 }
 export async function studioFixedCoverDTO(actor: ImageStudioIdentity, target: ModuleCoverTarget, client: SharedStudioClient = prisma): Promise<ModuleCoverDTO | null> {
   const stored = await readRecord(target, client);
   if (!stored) return null;
   try { return await recordDTO(actor, await targetForImage(actor, target, client), stored.record, client); }
-  catch { return { target, revision: stored.record.revision, available: false, thumbnailUrl: null, imageUrl: null, width: 1280, height: 960,
+  catch { return { target, revision: stored.record.revision, available: false, thumbnailUrl: null, imageUrl: null,
+    width: coverOutput(stored.record.recipe).width, height: coverOutput(stored.record.recipe).height,
     updatedAt: stored.record.updatedAt, unavailableReason: '模板已不可用或停止共享' }; }
 }
 async function inspectSources(actor: ImageStudioIdentity, state: TargetState, ids: string[], client: SharedStudioClient): Promise<ModuleCoverSourceDTO[]> {
@@ -202,6 +215,7 @@ async function renderCover(actor: ImageStudioIdentity, state: TargetState, recip
   if (activeJobs >= 2) throw new ModuleCoverError('正在保存其他封面，请稍后重试', 429);
   activeJobs += 1;
   try {
+    const output = coverOutput(recipe);
     const sources = await authorizedSources(actor, state, recipe.sources.map(source => source.assetId), prisma);
     const tiles: Array<{ input: Buffer; left: number; top: number }> = [];
     for (let index = 0; index < sources.length; index++) {
@@ -214,8 +228,8 @@ async function renderCover(actor: ImageStudioIdentity, state: TargetState, recip
       if ((metadata.pages ?? 1) > 1) throw new ModuleCoverError('请选择普通静态图片');
       const oriented = await sharp(bytes, { limitInputPixels: 40_000_000, animated: false, failOn: 'warning' }).timeout({ seconds: 30 }).rotate().raw().toBuffer({ resolveWithObject: true });
       const { width, height, channels } = oriented.info;
-      const tileWidth = recipe.layout === 'horizontal' ? 640 : 1280;
-      const tileHeight = recipe.layout === 'vertical' ? 480 : 960;
+      const tileWidth = recipe.layout === 'horizontal' ? output.width / 2 : output.width;
+      const tileHeight = recipe.layout === 'vertical' ? output.height / 2 : output.height;
       // Cropper emits percentages of the oriented original. Use matching pixel rounding.
       const left = Math.min(width - 1, Math.round(width * input.crop.x / 100));
       const top = Math.min(height - 1, Math.round(height * input.crop.y / 100));
@@ -226,12 +240,12 @@ async function renderCover(actor: ImageStudioIdentity, state: TargetState, recip
       }
       const tile = await sharp(oriented.data, { raw: { width, height, channels } }).timeout({ seconds: 30 })
         .extract({ left, top, width: cropWidth, height: cropHeight }).resize(tileWidth, tileHeight, { fit: 'fill' }).png().toBuffer();
-      tiles.push({ input: tile, left: recipe.layout === 'horizontal' ? index * 640 : 0, top: recipe.layout === 'vertical' ? index * 480 : 0 });
+      tiles.push({ input: tile, left: recipe.layout === 'horizontal' ? index * tileWidth : 0, top: recipe.layout === 'vertical' ? index * tileHeight : 0 });
       if (version !== await sourceVersion(asset)) throw new ModuleCoverError('原图刚刚变化，请重新选择', 409);
     }
-    const image = await sharp({ create: { width: 1280, height: 960, channels: 4, background: '#0b0e0f' } })
+    const image = await sharp({ create: { width: output.width, height: output.height, channels: 4, background: '#0b0e0f' } })
       .composite(tiles).timeout({ seconds: 30 }).webp({ quality: 84 }).toBuffer();
-    const thumbnail = await sharp(image).resize(MODULE_COVER_OUTPUT.thumbnailWidth, MODULE_COVER_OUTPUT.thumbnailHeight).webp({ quality: 80 }).toBuffer();
+    const thumbnail = await sharp(image).resize(output.thumbnailWidth, output.thumbnailHeight).webp({ quality: 80 }).toBuffer();
     return { image, thumbnail };
   } finally { activeJobs -= 1; }
 }
@@ -241,7 +255,15 @@ async function writeReceipt(client: SharedStudioClient, key: string, receipt: Co
 }
 function validReceipt(value: CoverReceipt, ownerId: string, moduleId: string, requestId: string) {
   if (value.ownerId !== ownerId || value.moduleId !== moduleId || value.requestId !== requestId
-    || !['saved', 'pending', 'failed'].includes(value.status) || !validId(value.target?.id)) throw new ModuleCoverError('封面保存回执无法确认', 409);
+    || !['saved', 'pending', 'failed'].includes(value.status) || !['module', 'preset'].includes(value.target?.kind) || !validId(value.target?.id)
+    || !/^[a-f0-9]{64}$/.test(value.fingerprint) || !validId(value.lease) || !Number.isFinite(value.expiresAt)) throw new ModuleCoverError('封面保存回执无法确认', 409);
+  value.recipe = parseRecipe(value.recipe);
+  if (value.record) {
+    value.record = parseRecord(value.record, value.target);
+    if (value.record.ownerId !== ownerId || value.record.requestId !== requestId || hash(value.record.recipe) !== hash(value.recipe)) {
+      throw new ModuleCoverError('封面保存回执与成品记录不匹配', 409);
+    }
+  }
 }
 async function receiptResult(actor: ImageStudioIdentity, state: TargetState, receipt: CoverReceipt, client: SharedStudioClient): Promise<ModuleCoverRequestResult> {
   if (!sameTarget(state.target, receipt.target)) throw new ModuleCoverError('模块共享关系已变化，请重新读取', 409);
@@ -282,9 +304,9 @@ export async function saveModuleCover(user: ImageStudioIdentity, moduleId: strin
     if (priorRow) {
       const prior = readObject<CoverReceipt>(priorRow.value_json);
       validReceipt(prior, actor.id, moduleId, body.requestId);
-      if (prior.fingerprint !== fingerprint) throw new ModuleCoverError('同一个保存编号不能提交不同封面', 409);
+      if (!sameTarget(prior.target, body.target) || prior.fingerprint !== fingerprint) throw new ModuleCoverError('同一个保存编号不能提交不同封面', 409);
       if (prior.status === 'saved' || prior.status === 'pending' && prior.expiresAt > Date.now()) return { state, prior };
-    }
+    } else if (recipe.version !== 2) throw new ModuleCoverError('封面已升级为正方形，请刷新页面后重新取景保存；旧裁剪不会自动改动', 428);
     const stored = await readRecord(state.target, tx);
     if ((stored?.record.revision ?? 0) !== body.expectedRevision) throw new ModuleCoverError('封面已被其他页面修改，请重新打开核对', 409);
     const sources = await authorizedSources(freshActor, state, recipe.sources.map(source => source.assetId), tx);
@@ -310,6 +332,8 @@ export async function saveModuleCover(user: ImageStudioIdentity, moduleId: strin
       if (!state.canManage || !sameTarget(state.target, receipt.target)) throw new ModuleCoverError('共享关系或管理权限已变化，旧封面仍保留', 409);
       const savedReceipt = await tx.platformSetting.findUniqueOrThrow({ where: { key }, select: { value_json: true } });
       const pending = readObject<CoverReceipt>(savedReceipt.value_json);
+      validReceipt(pending, actor.id, moduleId, body.requestId);
+      if (!sameTarget(pending.target, receipt.target) || pending.fingerprint !== fingerprint) throw new ModuleCoverError('封面保存回执已变化，请保留原请求编号核对', 409);
       if (pending.status !== 'pending' || pending.lease !== lease || pending.expiresAt <= Date.now()) throw new ModuleCoverError('本次保存已过期，请先核对结果', 409);
       const sources = await authorizedSources(freshActor, state, recipe.sources.map(source => source.assetId), tx);
       if (sources.some((source, index) => source.version !== recipe.sources[index].version)) throw new ModuleCoverError('原图或展示权限已变化，旧封面仍保留', 409);
@@ -351,6 +375,15 @@ export async function readModuleCoverImage(user: ImageStudioIdentity, target: Mo
   if (!info.isFile() || info.size <= 0 || info.size > 4 * 1024 * 1024) throw new ModuleCoverError('封面文件不可用', 503);
   const bytes = await fs.readFile(file);
   if (!bytes.length || bytes.length > 4 * 1024 * 1024) throw new ModuleCoverError('封面文件不可用', 503);
+  const output = coverOutput(stored.record.recipe);
+  const width = size === 640 ? output.thumbnailWidth : output.width;
+  const height = size === 640 ? output.thumbnailHeight : output.height;
+  let metadata;
+  try { metadata = await sharp(bytes, { limitInputPixels: 40_000_000, animated: false, failOn: 'warning' }).metadata(); }
+  catch { throw new ModuleCoverError('封面文件无法读取，请管理者重新设置', 503); }
+  if (metadata.format !== 'webp' || metadata.width !== width || metadata.height !== height || (metadata.pages ?? 1) > 1) {
+    throw new ModuleCoverError('封面文件尺寸与保存记录不一致，请管理者重新设置', 503);
+  }
   return bytes;
 }
 

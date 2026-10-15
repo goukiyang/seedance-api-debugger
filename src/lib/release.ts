@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '模板可自行删除且不会自动造回；结果封面按钮恢复、卡片文字精简，封面设置和生成素材筛选更清楚。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '封面兼容回退版本：保留新旧封面及原保存请求，新封面编辑请恢复新版。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

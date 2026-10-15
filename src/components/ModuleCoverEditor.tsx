@@ -17,6 +17,8 @@ import styles from './ModuleCoverEditor.module.css';
 type Slot = { source: ModuleCoverSourceDTO; crop?: ModuleCoverCrop; restore?: ModuleCoverCrop; key: number } | null;
 const layouts: Array<[ModuleCoverLayout, string]> = [['single', '单图'], ['horizontal', '左右'], ['vertical', '上下']];
 const output = { width: 1280, height: 960 } as const;
+// Keep the v0.89 editor as a viewer on guard; only the original accepted body may be retried.
+const guardReadOnly = true;
 
 async function json<T>(response: Response): Promise<T> {
   const value = await response.json().catch(() => null);
@@ -90,7 +92,7 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
   const busyRef = useRef(false), alive = useRef(true), sequence = useRef(0);
   const endpoint = `/api/image-studio/modules/${encodeURIComponent(moduleId)}/cover`;
   const count = layout === 'single' ? 1 : 2;
-  const disabled = !sessionAllowed || busy || reading || Boolean(pending);
+  const disabled = guardReadOnly || !sessionAllowed || busy || reading || Boolean(pending);
   const current = useCallback(() => alive.current && scope.current === expectedScope && sessionAllowed && !isClientSessionBlocked(), [expectedScope, sessionAllowed]);
   const modified = () => { if (!disabled) setDirty(true); };
   useUnsavedNavigation(dirty || busy || Boolean(pending), confirm, { unsaved: dirty ? ['模块封面'] : [], busy: busy || pending ? ['封面保存结果待确认'] : [] });
@@ -204,6 +206,8 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
     {!sessionAllowed ? <p role="status">账号状态已变化，当前封面操作已暂停。</p> : loading ? <p role="status">正在读取当前封面…</p> : !state ? <div role="alert"><p>{error}</p><button type="button" onClick={() => void initialize()}>重新读取</button></div> : <>
       {!state.canManage && <p role="status">封面由模块创建者维护。</p>}
       <CurrentCover key={`${state.target.kind}:${state.target.id}:${state.revision}:${state.fixedCover?.imageUrl || state.fixedCover?.thumbnailUrl || preview?.imageUrl || ''}`} cover={state.fixedCover} preview={preview} error={previewError} />
+      <p role="status">当前回退版本保留封面查看；请恢复新版后编辑。原保存请求仍可核对。</p>
+      {!guardReadOnly && <>
       <div className={styles.toolbar}><div className={styles.layouts} role="group" aria-label="封面排版">{layouts.map(([value, label]) => <button key={value} type="button" aria-pressed={layout === value} disabled={disabled || !state.canManage} onClick={() => changeLayout(value)}>{label}</button>)}</div>
         {count === 2 && <button type="button" disabled={disabled || !state.canManage || !slots[0] || !slots[1]} onClick={() => { setSlots(([left, right]) => [right, left].map(slot => slot ? { ...slot, restore: slot.crop, key: ++sequence.current } : null)); setDirty(true); }}><ArrowLeftRight size={16} />交换位置</button>}
       </div>
@@ -215,6 +219,7 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
           {slot && <button type="button" title="重置这张图的裁剪" aria-label="重置这张图的裁剪" disabled={disabled || !state.canManage} onClick={() => { setSlots(current => current.map((item, i) => i === index && item ? { source: item.source, key: ++sequence.current } : item)); setDirty(true); }}><RotateCcw size={16} /></button>}</div>
       </div>)}</div>
       <div className={styles.previewRow}><span>草稿预览{dirty ? '（未保存）' : ''}</span><div className={`${styles.preview} ${styles[layout]}`}>{slots.slice(0, count).map((slot, index) => <CropPreview key={index} slot={slot} />)}</div></div>
+      </>}
       {error && <p className={styles.error} role="alert">{error}</p>}
       <footer className={styles.footer}><button type="button" onClick={dismiss} disabled={busy || Boolean(pending)}>取消</button>
         {pending ? <><button type="button" disabled={busy} onClick={() => void checkPending()}>{busy ? '确认中…' : '检查保存结果'}</button>{retryAllowed && <button type="button" disabled={busy} onClick={() => void save(pending)}>重试本次保存</button>}</>
