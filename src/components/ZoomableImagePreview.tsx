@@ -201,6 +201,8 @@ function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, v
     const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => {
       const target = image.current;
       if (document.hidden || currentKeyRef.current !== imageIdentity || !current.handle.isCurrent() || !target?.complete || !target.naturalWidth || target.getAttribute('src') !== imageSrc) return;
+      const latest = current.handle.getSnapshot();
+      if (latest.denied || latest.readSource !== state?.readSource || latest.version !== state?.version || latest.result.imageSrc !== imageSrc) return;
       readyKeyRef.current = readyIdentity;
       // At least one committed visible frame, not merely a downloaded Blob or
       // an image decoded off-screen, unlocks speculative neighboring bytes.
@@ -209,7 +211,7 @@ function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, v
         { source: imageSrc, fullSize: Boolean(state?.fullSize), displayKind, hd: state?.description, mime: readResult.mime, bytes: readResult.bytes, account });
     }); });
     return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
-  }, [loaded, imageIdentity, current, readResult, imageSrc, displayKind, state?.description, state?.fullSize, account]);
+  }, [loaded, imageIdentity, current, readResult, imageSrc, displayKind, state?.description, state?.fullSize, state?.readSource, state?.version, account]);
   const progressLabel = readProgress.phase === 'unsupported'
     ? readProgress.message || '该来源不是图片，未读取文件内容'
     : readProgress.phase === 'unavailable'
