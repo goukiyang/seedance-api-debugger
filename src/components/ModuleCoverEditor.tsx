@@ -23,9 +23,15 @@ function sameCrop(left: ModuleCoverCrop, right: ModuleCoverCrop) {
 }
 
 function validCrop(crop: ModuleCoverCrop, source: ModuleCoverSourceDTO, aspect: number) {
-  return Object.values(crop).every(Number.isFinite) && crop.x >= 0 && crop.y >= 0 && crop.width > 0 && crop.height > 0
-    && crop.x + crop.width <= 100.001 && crop.y + crop.height <= 100.001 && source.width > 0 && source.height > 0
-    && Math.abs((crop.width * source.width) / (crop.height * source.height) / aspect - 1) < 0.01;
+  if (!Object.values(crop).every(Number.isFinite) || crop.x < 0 || crop.y < 0 || crop.width <= 0 || crop.height <= 0
+    || crop.x + crop.width > 100.00001 || crop.y + crop.height > 100.00001
+    || !Number.isInteger(source.width) || !Number.isInteger(source.height) || source.width < 1 || source.height < 1) return false;
+  // Match renderCover's rounding and clamping on the oriented original pixels.
+  const left = Math.min(source.width - 1, Math.round(source.width * crop.x / 100));
+  const top = Math.min(source.height - 1, Math.round(source.height * crop.y / 100));
+  const cropWidth = Math.min(source.width - left, Math.round(source.width * crop.width / 100));
+  const cropHeight = Math.min(source.height - top, Math.round(source.height * crop.height / 100));
+  return cropWidth >= 1 && cropHeight >= 1 && Math.abs(cropWidth / cropHeight - aspect) <= Math.max(0.01, 3 / cropHeight);
 }
 
 async function json<T>(response: Response): Promise<T> {
@@ -58,7 +64,15 @@ function CropSlot({ slot, aspect, disabled, onCrop, onInteract }: { slot: NonNul
       onCropAreaChange={publishCrop} onInteractionStart={() => { if (ready && !disabled) onInteract(); }}
       onMediaLoaded={media => {
         if (!(media.naturalWidth > 0 && media.naturalHeight > 0)) return;
-        if (Math.abs((media.naturalWidth / media.naturalHeight) / (slot.source.width / slot.source.height) - 1) >= 0.01) {
+        // readStudioPreview fits inside 1600x1600 without enlargement. Compare
+        // dimensions with its at-most-one-pixel resize quantization, not a ratio.
+        const scale = Math.min(1, 1600 / Math.max(slot.source.width, slot.source.height));
+        const rounding = scale < 1 ? 1 : 0;
+        if (!Number.isInteger(slot.source.width) || !Number.isInteger(slot.source.height) || slot.source.width < 1 || slot.source.height < 1
+          || !Number.isInteger(media.naturalWidth) || !Number.isInteger(media.naturalHeight)
+          || media.naturalWidth > Math.min(1600, slot.source.width) || media.naturalHeight > Math.min(1600, slot.source.height)
+          || Math.abs(media.naturalWidth - Math.max(1, slot.source.width * scale)) > rounding
+          || Math.abs(media.naturalHeight - Math.max(1, slot.source.height * scale)) > rounding) {
           loaded.current = false; setFailed(true); setReady(false); onCrop(); return;
         }
         loaded.current = true; setFailed(false);
