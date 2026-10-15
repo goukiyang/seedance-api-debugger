@@ -155,10 +155,13 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
   }
   async function save(retry?: ModuleCoverSaveInput) {
     if (!current() || busyRef.current || !state?.canManage) return;
-    const selected = slots.slice(0, count);
-    if (!retry && selected.some(slot => !slot?.crop)) return;
-    const recipe: ModuleCoverRecipe = { version: 1, layout, sources: selected.map(slot => ({ assetId: slot!.source.assetId, version: slot!.source.version, crop: slot!.crop! })), output };
-    const input = retry || { requestId: crypto.randomUUID(), expectedRevision: state.revision, target: state.target, recipe };
+    let input = retry;
+    if (!input) {
+      const selected = slots.slice(0, count);
+      if (selected.some(slot => !slot?.crop)) return;
+      const recipe: ModuleCoverRecipe = { version: 1, layout, sources: selected.map(slot => ({ assetId: slot!.source.assetId, version: slot!.source.version, crop: slot!.crop! })), output };
+      input = { requestId: crypto.randomUUID(), expectedRevision: state.revision, target: state.target, recipe };
+    }
     busyRef.current = true; setBusy(true); setError(''); setPending(input); setRetryAllowed(false);
     try {
       const result = await json<ModuleCoverRequestResult>(await fetch(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal: AbortSignal.timeout(90000) }));
