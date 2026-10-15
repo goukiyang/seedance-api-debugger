@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '结果图片的删除按钮归入操作组，置顶移到右上角；高清准备区分空闲和资源等待，有新图时继续安全准备。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '修复 Banana Pro 因供应商能力资料未填齐而无法提交的问题，保留所选参数和素材，沿用已配置点数。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

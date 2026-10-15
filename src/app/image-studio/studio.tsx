@@ -1701,13 +1701,16 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const baseline = moduleSaved ? JSON.parse(moduleSaved) as typeof moduleDraft : moduleDraft;
   const selectedChannel = imageChannels.items.find(item => item.id === imageChannelId);
   const selectedChannelModel = imageStudioChannelModel(selectedChannel, moduleModel);
+  const allowsUnconfirmedParameters = moduleModel === 'gemini-3-pro-image-preview' && selectedChannelModel?.allowsUnconfirmedParameters === true;
+  const qualitySupportUnconfirmed = allowsUnconfirmedParameters && selectedChannelModel?.qualities == null;
+  const resolutionSupportUnconfirmed = allowsUnconfirmedParameters && selectedChannelModel?.resolutions == null;
   const legacyImageRoute = imageStudioUsesLegacyRoute(imageChannels, moduleModel, imageChannelId);
   const effectiveImageChannelId = imageStudioEffectiveChannelId(imageChannels, moduleModel, imageChannelId);
   const channelModels = imageStudioChannelModels(imageChannels, models);
   const modelChoices = channelModels.includes(moduleModel) ? channelModels : [moduleModel, ...channelModels];
-  const qualityChoices = selectedChannelModel?.qualities ?? (legacyImageRoute
+  const qualityChoices = selectedChannelModel?.qualities ?? (legacyImageRoute || qualitySupportUnconfirmed
     ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [] : []);
-  const resolutionChoices = selectedChannelModel?.resolutions ?? (legacyImageRoute
+  const resolutionChoices = selectedChannelModel?.resolutions ?? (legacyImageRoute || resolutionSupportUnconfirmed
     ? IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] || [] : []);
   const generationInputs = { sharedLive: sharedLive?.intent, personalOverrides: sharedLive ? personalOverrides : undefined, evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, aspectRatio, resolution: legacyImageRoute ? normalizeImageResolution(moduleModel, resolution) : resolution, referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: legacyImageRoute ? normalizeImageStudioQuality(moduleModel, quality) : quality, channelId: imageChannelId, referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), skillIds: moduleDraft.skillIds, skillVersions: Object.fromEntries(skills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])), styleGroupIds: moduleDraft.styleGroupIds };
   const generationDraft = JSON.stringify(generationInputs);
@@ -3578,19 +3581,19 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             <ImageGenerationChannelSelect id={`studio-channel-${module.id}`} channels={imageChannels} value={imageChannelId} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onChange={onImageChannelChange} model={moduleModel} legacyReady={settings?.modelReady?.[moduleModel] ?? settings?.providerReady} />
           </label>}
           <label className={styles.compactField} htmlFor={`studio-quality-${module.id}`}><strong>图片质量</strong>
-            <select id={`studio-quality-${module.id}`} title={templateWorkbench ? `${IMAGE_STUDIO_QUALITY_LABELS[quality as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || quality}${!qualityChoices.includes(quality) ? qualityChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）' : ''}` : undefined} disabled={submitting || Boolean(pendingSubmission)} value={quality} onChange={event => setQuality(event.target.value)}>
-              {!qualityChoices.includes(quality) && <option value={quality} disabled>{IMAGE_STUDIO_QUALITY_LABELS[quality as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || quality}{qualityChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）'}</option>}
+            <select id={`studio-quality-${module.id}`} title={templateWorkbench ? `${IMAGE_STUDIO_QUALITY_LABELS[quality as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || quality}${!qualitySupportUnconfirmed && !qualityChoices.includes(quality) ? qualityChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）' : ''}` : undefined} disabled={submitting || Boolean(pendingSubmission)} value={quality} onChange={event => setQuality(event.target.value)}>
+              {!qualityChoices.includes(quality) && <option value={quality} disabled={!qualitySupportUnconfirmed}>{IMAGE_STUDIO_QUALITY_LABELS[quality as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || quality}{!qualitySupportUnconfirmed ? qualityChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）' : ''}</option>}
               {qualityChoices.map(option => <option key={option} value={option}>{IMAGE_STUDIO_QUALITY_LABELS[option as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || option}</option>)}
             </select>
           </label>
           <label className={styles.compactField} htmlFor={`studio-resolution-${module.id}`}><strong>分辨率</strong>
-            <select id={`studio-resolution-${module.id}`} title={templateWorkbench ? `${resolution}${!resolutionChoices.includes(resolution) ? resolutionChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）' : ''}` : undefined} disabled={submitting || Boolean(pendingSubmission)} value={resolution} onChange={event => setResolution(event.target.value as ImageResolution)}>
-              {!resolutionChoices.includes(resolution) && <option value={resolution} disabled>{resolution}{resolutionChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）'}</option>}
+            <select id={`studio-resolution-${module.id}`} title={templateWorkbench ? `${resolution}${!resolutionSupportUnconfirmed && !resolutionChoices.includes(resolution) ? resolutionChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）' : ''}` : undefined} disabled={submitting || Boolean(pendingSubmission)} value={resolution} onChange={event => setResolution(event.target.value as ImageResolution)}>
+              {!resolutionChoices.includes(resolution) && <option value={resolution} disabled={!resolutionSupportUnconfirmed}>{resolution}{!resolutionSupportUnconfirmed ? resolutionChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）' : ''}</option>}
               {resolutionChoices.map(option => <option key={option} value={option}>{option}</option>)}
             </select>
           </label>
         </div>
-        {qualityChoices.length > 0 && !qualityChoices.some(option => option !== 'auto') && <p className={styles.muted}>当前供应商只配置了模型默认质量。</p>}
+        {!allowsUnconfirmedParameters && qualityChoices.length > 0 && !qualityChoices.some(option => option !== 'auto') && <p className={styles.muted}>当前供应商只配置了模型默认质量。</p>}
         <div className={styles.moduleQuickActions} aria-label="模板快捷设置">
           <div className={styles.quickPresetRow}>
             <button type="button" title="管理模板" aria-label="管理模板" onClick={onManagePresets}><FolderCog size={16} /></button>

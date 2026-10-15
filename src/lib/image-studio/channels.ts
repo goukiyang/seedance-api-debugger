@@ -58,6 +58,8 @@ export function normalizeImageStudioChannels(value: unknown): ImageStudioChannel
             fixedPoints: Number.isFinite(capability.fixedPoints) && Number(capability.fixedPoints) >= 0 ? Number(capability.fixedPoints) : null,
             billingSource: typeof capability.billingSource === 'string' && capability.billingSource.length <= 160 ? capability.billingSource : null,
             actualQuoteRequired: capability.actualQuoteRequired === true,
+            ...(model === 'gemini-3-pro-image-preview' && capability.allowsUnconfirmedParameters === true
+              ? { allowsUnconfirmedParameters: true } : {}),
             qualities: stringList(capability.qualities) ?? null,
             resolutions: stringList(capability.resolutions) ?? null,
             ratios: stringList(capability.ratios) ?? null,
@@ -192,14 +194,15 @@ export function imageStudioChannelIssue(channel: ImageStudioChannel | undefined,
     return values.legacyReady === false ? '当前模型的原接口尚未就绪，请联系管理员检查接口。' : null;
   }
   const capability = imageStudioChannelModel(channel, model);
+  const allowsUnconfirmedParameters = model === 'gemini-3-pro-image-preview' && capability?.allowsUnconfirmedParameters === true;
   if (channel.id === ORIGINAL_IMAGE_CHANNEL_ID && !capability && values.legacyRoute !== false) {
     return values.legacyReady === false ? '当前模型的原接口尚未就绪，请联系管理员检查接口。' : null;
   }
   if (capability) {
     const missing = [
-      !capability.qualities?.length ? '图片质量' : null,
-      !capability.resolutions?.length ? '分辨率' : null,
-      capability.maxReferences == null ? '参考图上限' : null,
+      !allowsUnconfirmedParameters && !capability.qualities?.length ? '图片质量' : null,
+      !allowsUnconfirmedParameters && !capability.resolutions?.length ? '分辨率' : null,
+      !allowsUnconfirmedParameters && capability.maxReferences == null ? '参考图上限' : null,
       !capability.billingMode ? '计费方式' : null,
       capability.billingMode === 'fixed' && capability.fixedPoints == null
         && !['shared', 'banana'].includes(channel.id) ? '固定点数' : null,
@@ -213,10 +216,10 @@ export function imageStudioChannelIssue(channel: ImageStudioChannel | undefined,
     && channel.id !== 'shared' && channel.id !== 'banana') {
     return '当前生图通道的固定点数尚未配置，暂不能生成；请联系管理员检查配置。';
   }
-  if (capability.qualities && values.quality !== undefined && !capability.qualities.includes(values.quality)) {
+  if (capability.qualities && (!capability.qualities.length || values.quality !== undefined && !capability.qualities.includes(values.quality))) {
     return '当前生图通道不支持所选图片质量，请手动调整后再生成。';
   }
-  if (capability.resolutions && values.resolution !== undefined && !capability.resolutions.includes(values.resolution)) {
+  if (capability.resolutions && (!capability.resolutions.length || values.resolution !== undefined && !capability.resolutions.includes(values.resolution))) {
     return '当前生图通道不支持所选分辨率，请手动调整后再生成。';
   }
   if (values.ratio !== undefined && !isStandardStudioRatio(values.ratio) && !capability.ratios?.some(value => {
@@ -224,7 +227,7 @@ export function imageStudioChannelIssue(channel: ImageStudioChannel | undefined,
   })) {
     return '当前生图通道不支持所选比例，请手动调整后再生成。';
   }
-  if (!capability.qualities || !capability.resolutions || capability.maxReferences == null) {
+  if (!allowsUnconfirmedParameters && (!capability.qualities || !capability.resolutions || capability.maxReferences == null)) {
     return '当前生图通道的图片参数支持范围尚未确认，暂不能生成；请联系管理员补全配置。';
   }
   if (Number.isSafeInteger(capability.maxReferences) && values.referenceCount !== undefined

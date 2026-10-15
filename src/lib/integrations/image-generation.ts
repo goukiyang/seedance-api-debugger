@@ -20,7 +20,7 @@ import {
   parseImageGenerationDefaultRoutes,
 } from '@/lib/integrations/image-generation-defaults';
 import {
-  IMAGE_API_GROUPS, imageApiGroupModels, imageApiGroupModelMissingRequirements,
+  IMAGE_API_GROUPS, imageApiGroupModels, imageApiGroupModelMissingRequirements, allowsUnconfirmedGeminiProParameters,
   type ImageApiGroup, type ImageApiGroupFormDto, type ImageApiGroupSettings,
   type ImageApiGroupSaveReceipt, type ImageApiGroupModelDto,
   type ImageGenerationChannelDto,
@@ -1128,19 +1128,20 @@ function resolveLegacySettings(settings: ImageGenerationApiSettings, model: stri
   };
 }
 
-function modelCapabilityMissingRequirements(capability: ImageGenerationModelCapability | undefined) {
+function modelCapabilityMissingRequirements(capability: ImageGenerationModelCapability | undefined, model: string) {
   if (!capability || !capability.enabled) return ['该型号尚未加入可用白名单'];
+  const allowsUnconfirmed = allowsUnconfirmedGeminiProParameters(model, capability);
   const missing: string[] = [];
-  if (!capability.qualities || capability.qualities.length === 0) missing.push('尚未确认支持的图片质量');
-  if (!capability.resolutions || capability.resolutions.length === 0) missing.push('尚未确认支持的分辨率');
-  if (capability.maxReferences === null) missing.push('尚未确认参考图上限');
+  if (capability.qualities === null ? !allowsUnconfirmed : capability.qualities.length === 0) missing.push('尚未确认支持的图片质量');
+  if (capability.resolutions === null ? !allowsUnconfirmed : capability.resolutions.length === 0) missing.push('尚未确认支持的分辨率');
+  if (capability.maxReferences === null && !allowsUnconfirmed) missing.push('尚未确认参考图上限');
   if (!capability.billingMode) missing.push('尚未设置计费方式');
   if (capability.billingMode === 'fixed' && capability.fixedPoints === null) missing.push('固定点数未填写，明确免费时请填写 0');
   return missing;
 }
 
-function modelCapabilityCompleteness(capability: ImageGenerationModelCapability | undefined) {
-  return modelCapabilityMissingRequirements(capability)[0] || null;
+function modelCapabilityCompleteness(capability: ImageGenerationModelCapability | undefined, model: string) {
+  return modelCapabilityMissingRequirements(capability, model)[0] || null;
 }
 
 export function isMuskImageGenerationChannel(settings: ImageGenerationApiSettings) {
@@ -1236,7 +1237,7 @@ async function modelDisabledReason(
   if (!settings.enabled) return '通道已停用';
   if (!settings.api_key) return '尚未配置 API Key';
   const capability = settings.modelCapabilities[model];
-  const incomplete = modelCapabilityCompleteness(capability);
+  const incomplete = modelCapabilityCompleteness(capability, model);
   if (incomplete) return incomplete;
   if (capability?.billingMode === 'actual') {
     if (capability.upstreamModel && capability.upstreamModel !== model) return '供应商型号名称与本站型号不同，尚无对应的精确账单证明；请使用已确认的固定点数';
@@ -1493,7 +1494,7 @@ export function validateImageGenerationChannel(
     return { ok: false, code: 'image_channel_not_available', error: '该图片供应商尚未配置、已停用或已归档' };
   }
   if (!capability || !capability.enabled) return { ok: false, code: 'image_channel_model_not_enabled', error: '该供应商未开放此图片型号' };
-  const missingCapability = modelCapabilityCompleteness(capability);
+  const missingCapability = modelCapabilityCompleteness(capability, model);
   if (missingCapability) return { ok: false, code: 'image_channel_capability_unknown', error: missingCapability };
   if (legacyRatioContract && !capability.ratios?.length) {
     return { ok: false, code: 'image_channel_capability_unknown', error: '尚未确认支持的图片比例' };
@@ -1511,7 +1512,9 @@ export function validateImageGenerationChannel(
     [args.quality, capability.qualities, '图片质量'],
     [args.resolution, capability.resolutions, '分辨率'],
   ];
+  const allowsUnconfirmed = allowsUnconfirmedGeminiProParameters(model, capability);
   for (const [value, allowed, label] of tests) {
+    if (allowed === null && allowsUnconfirmed) continue;
     if (value !== undefined && (!allowed || !allowed.includes(value))) {
       return { ok: false, code: 'image_channel_capability_mismatch', error: `当前供应商未确认支持所选${label}` };
     }
@@ -1523,7 +1526,7 @@ export function validateImageGenerationChannel(
     });
     if (!matches) return { ok: false, code: 'image_channel_capability_mismatch', error: '当前供应商未确认支持所选自定义图片比例' };
   }
-  if (args.referenceCount !== undefined && (capability.maxReferences === null || args.referenceCount > capability.maxReferences)) {
+  if (args.referenceCount !== undefined && (capability.maxReferences === null ? !allowsUnconfirmed : args.referenceCount > capability.maxReferences)) {
     return { ok: false, code: 'image_channel_reference_limit_unknown', error: capability.maxReferences === null
       ? '当前供应商尚未确认参考图上限' : `当前供应商最多支持 ${capability.maxReferences} 张参考图` };
   }
@@ -1570,6 +1573,7 @@ async function channelOption(
       resolutions: capability?.resolutions ?? null,
       ratios: ['auto', ...STUDIO_RATIOS],
       maxReferences: capability?.maxReferences ?? null,
+      allowsUnconfirmedParameters: allowsUnconfirmedGeminiProParameters(model, effectiveCapability),
     };
   }
   const ready = Object.values(models).some(item => item.ready);
