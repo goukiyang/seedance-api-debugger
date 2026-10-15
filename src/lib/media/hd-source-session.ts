@@ -1,9 +1,9 @@
 'use client';
 
 export type HdDescription = { status: 'queued' | 'running' | 'ready' | 'failed' | 'skipped'; sourceVersion: string | null; policy: string; reason?: string; format?: string; mime?: string; bytes?: number; width?: number; height?: number; original?: boolean };
-export type HdSourceState = { description?: HdDescription; denied?: boolean; error?: boolean };
+export type HdSourceState = { description?: HdDescription; denied?: boolean; error?: boolean; httpStatus?: number };
 type Listener = (state: HdSourceState) => void;
-type Descriptor = { key: string; account: string; source: string; state: HdSourceState; at: number; retryAfter: number; unchangedPolls: number; listeners: Set<Listener>; prefetches: number; controller?: AbortController; pending?: Promise<HdSourceState>; timer?: ReturnType<typeof setTimeout> };
+type Descriptor = { key: string; account: string; source: string; state: HdSourceState; at: number; retryAfter: number; unchangedPolls: number; generation: number; listeners: Set<Listener>; prefetches: number; controller?: AbortController; pending?: Promise<HdSourceState>; refreshing?: Promise<HdSourceState>; timer?: ReturnType<typeof setTimeout> };
 type ImageReadFamilyInvalidator = (source: string, account: string) => void;
 const descriptors = new Map<string, Descriptor>();
 const READY_TTL = 60_000, IDLE_TTL = 10 * 60_000;
@@ -19,7 +19,7 @@ function sourceFamily(source: string) {
   url.searchParams.sort();
   return url.origin === location.origin ? `${url.pathname}${url.search}` : url.href;
 }
-function stop(entry: Descriptor) { entry.controller?.abort(); clearTimeout(entry.timer); entry.timer = undefined; }
+function stop(entry: Descriptor) { entry.generation++; entry.controller?.abort(); entry.refreshing = undefined; clearTimeout(entry.timer); entry.timer = undefined; }
 function notify(entry: Descriptor) { for (const listener of Array.from(entry.listeners)) listener(entry.state); }
 export function setHdImageSessionOwner(next: string) {
   if (owner === next) return;
@@ -31,13 +31,16 @@ export function registerImageReadFamilyInvalidator(invalidator: ImageReadFamilyI
   invalidateImageReadFamily = invalidator;
 }
 export function invalidateHdImageSource(source: string, account = owner, options: { propagateToImageReads?: boolean } = {}) {
+  invalidateFamily(source, account, options.propagateToImageReads !== false);
+}
+function invalidateFamily(source: string, account: string, propagate: boolean, httpStatus?: number) {
   if (!account || account !== owner) return;
   const family = sourceFamily(source);
   for (const [id, entry] of Array.from(descriptors)) if (entry.account === account && sourceFamily(entry.source) === family) {
-    stop(entry); descriptors.delete(id); entry.state = { denied: true, error: true }; notify(entry);
+    stop(entry); descriptors.delete(id); entry.state = { denied: true, error: true, ...(httpStatus ? { httpStatus } : {}) }; notify(entry);
   }
   // Image-read invalidation is a sink; callers already invalidating that family suppress the return edge.
-  if (options.propagateToImageReads !== false) invalidateImageReadFamily?.(source, account);
+  if (propagate) invalidateImageReadFamily?.(source, account);
 }
 function getEntry(account: string, source: string, version: string) {
   setHdImageSessionOwner(account);
@@ -46,7 +49,7 @@ function getEntry(account: string, source: string, version: string) {
   if (!entry) {
     for (const [id, value] of Array.from(descriptors)) if (!value.listeners.size && !value.prefetches && (descriptors.size >= 32 || Date.now() - value.at >= IDLE_TTL)) { stop(value); descriptors.delete(id); }
     if (descriptors.size >= 32) return null;
-    entry = { key, account, source: canonical(source), state: {}, at: 0, retryAfter: 0, unchangedPolls: 0, listeners: new Set(), prefetches: 0 };
+    entry = { key, account, source: canonical(source), state: {}, at: 0, retryAfter: 0, unchangedPolls: 0, generation: 0, listeners: new Set(), prefetches: 0 };
     descriptors.set(key, entry);
   }
   return entry;
@@ -73,22 +76,23 @@ function poll(entry: Descriptor) {
 }
 async function read(entry: Descriptor, readonly: boolean): Promise<HdSourceState> {
   if (entry.pending) return entry.pending;
-  const previous = entry.state, controller = new AbortController(), expected = epoch; entry.controller = controller;
+  const previous = entry.state, controller = new AbortController(), expected = epoch, generation = entry.generation; entry.controller = controller;
   const pending = (async () => {
     let state: HdSourceState, status = 0;
     try {
       const response = await fetch(entry.source, { credentials: 'same-origin', cache: 'no-store', headers: readonly ? { 'X-Image-Read-Intent': 'prefetch' } : {}, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
       status = response.status;
-      state = response.ok ? { description: parseDescription(await response.json()) } : { denied: [401, 403, 404].includes(status), error: true };
-    } catch { state = { error: true }; }
-    if (expected !== epoch || controller.signal.aborted || descriptors.get(entry.key) !== entry) return { error: true };
+      state = response.ok ? { description: parseDescription(await response.json()), httpStatus: status } : { denied: [401, 403, 404].includes(status), error: true, httpStatus: status };
+    } catch { state = { error: true, ...(status ? { httpStatus: status } : {}) }; }
+    if (expected !== epoch || generation !== entry.generation || controller.signal.aborted || descriptors.get(entry.key) !== entry) return { error: true };
     if (state.denied) {
-      invalidateHdImageSource(entry.source, entry.account);
+      invalidateFamily(entry.source, entry.account, true, state.httpStatus);
       return state;
     }
     if (state.error) {
       const notPrepared = status === 409;
-      entry.state = !notPrepared && previous.description?.status === 'ready' ? { ...previous, error: true } : { error: true };
+      entry.state = !notPrepared && previous.description?.status === 'ready'
+        ? { ...previous, error: true, httpStatus: state.httpStatus } : { error: true, httpStatus: state.httpStatus };
       if (notPrepared) { entry.at = Date.now(); entry.retryAfter = Date.now() + READY_TTL; }
       else entry.retryAfter = Date.now() + READY_TTL;
     } else {
@@ -109,6 +113,27 @@ export function hdImageHint(account: string, source: string, version = '', allow
   const entry = account === owner ? descriptors.get(JSON.stringify([account, canonical(source), version])) : undefined;
   return entry && (allowExpired || Date.now() - entry.at < READY_TTL) && entry.state.description?.status === 'ready' ? entry.state.description : undefined;
 }
+// A current HD byte 409 can request one new descriptor lookup. Coalesce callers
+// on that descriptor, but do not mistake an older pending read for a fresh check
+// or restart work after its last consumer has canceled.
+export async function refreshHdImageSource(account: string, source: string, version = ''): Promise<HdSourceState> {
+  if (!account || account !== owner) return { error: true };
+  let entry: Descriptor | undefined;
+  try { entry = descriptors.get(JSON.stringify([account, canonical(source), version])); } catch { return { error: true }; }
+  if (!entry) return { error: true };
+  if (entry.refreshing) return entry.refreshing;
+  const current = entry, expected = epoch, generation = entry.generation;
+  clearTimeout(entry.timer); entry.timer = undefined;
+  const pending = (async () => {
+    if (current.pending) await current.pending;
+    if (owner !== account || epoch !== expected || current.generation !== generation || descriptors.get(current.key) !== current) return { error: true };
+    return read(current, true);
+  })();
+  entry.refreshing = pending;
+  const state = await pending;
+  if (entry.refreshing === pending) entry.refreshing = undefined;
+  return state;
+}
 export function acquireHdImageSource(account: string, source: string, version: string, listener: Listener) {
   const entry = getEntry(account, source, version);
   if (!entry) { listener({ error: true }); return () => {}; }
@@ -119,7 +144,10 @@ export function acquireHdImageSource(account: string, source: string, version: s
     if (ready) {
       if (Date.now() - entry.at >= READY_TTL && Date.now() >= entry.retryAfter) void read(entry, true);
       else poll(entry);
-    } else if (Date.now() >= entry.retryAfter) void read(entry, false);
+    // A speculative readonly 409 means "not prepared", not a foreground
+    // failure. The first actual viewer must obtain its own current descriptor
+    // now, instead of inheriting the neighbor's quiet retry interval.
+    } else if (entry.state.httpStatus === 409 || Date.now() >= entry.retryAfter) void read(entry, false);
     else { listener(entry.state); poll(entry); }
   }
   const foreground = () => {

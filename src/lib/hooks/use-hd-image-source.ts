@@ -32,7 +32,7 @@ export function useHdImageSource(source: string, original: boolean, attempt: num
   // descriptor requests, but does not pretend a known ready file is missing.
   const description = current?.description || (account && supported ? hdImageHint(account, descriptionSource, sourceVersion, true) : undefined);
   const display = hdDisplayPolicy({ original, previewOnly, supported, description, error: current?.error });
-  const readSource = display.kind === 'preview' ? imageDisplaySource(source, 'preview') : display.kind === 'original' ? imageDisplaySource(source, 'original') : versionedHdSource(source, 'hd', description?.sourceVersion);
+  const readSource = display.kind === 'pending' ? '' : display.kind === 'preview' ? imageDisplaySource(source, 'preview') : display.kind === 'original' ? imageDisplaySource(source, 'original') : versionedHdSource(source, 'hd', description?.sourceVersion);
   return { readSource, description, pending: display.pending, displayKind: display.kind, denied: current?.denied, error: current?.error,
     refresh, version: display.kind === 'hd' ? description?.sourceVersion || sourceVersion : sourceVersion, fullSize: display.fullSize };
 }

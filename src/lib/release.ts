@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '新保存的模板封面和裁剪预览统一为正方形，旧封面与原图保留，已有保存请求继续按原样核对。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '点开图片即开始准备，优先读取当前高清图；下载前重新确认权限并复用完整高清缓存，双击回填、原图和画质保持。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

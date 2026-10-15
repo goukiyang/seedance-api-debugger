@@ -20,6 +20,7 @@ import { useImageResultNextActions } from './useImageResultNextActions';
 import { ResultImageContextMenu, type ResultImageContextMenuItem } from './ResultImageContextMenu';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
+import { prepareImagePreview, type ImagePreviewPreparation, type ImagePreviewPreparationOptions } from '@/lib/media/image-preview-session';
 import { TaskNotice } from './TaskNotice';
 import type { ContentKey } from '@/lib/content-reactions/types';
 
@@ -44,6 +45,16 @@ export type GeneratedImageResult = {
 };
 
 const noMore = async () => undefined;
+type PreviewPreparation = { scope: string; itemId: string; handle: ImagePreviewPreparation };
+
+function previewPreparationOptions(item: GeneratedImageResult, account: string): ImagePreviewPreparationOptions | null {
+  return item.media?.src ? { account, source: item.media.src, sourceVersion: item.media.sourceVersion, previewOnly: Boolean(item.viewOnly || item.media.previewOnly) } : null;
+}
+
+function preparationMatches(handle: ImagePreviewPreparation, options: ImagePreviewPreparationOptions) {
+  return handle.account === options.account && handle.source === options.source
+    && (handle.sourceVersion || '') === (options.sourceVersion || '') && Boolean(handle.previewOnly) === Boolean(options.previewOnly);
+}
 
 type ResultRenderers<T> = {
   renderMetadata?: (item: T) => ReactNode; renderActions?: (item: T) => ReactNode;
@@ -64,9 +75,10 @@ function WaitingImage({ src }: { src?: string }) {
   return src && failed !== src ? <img className={styles.waitingImage} src={src} alt="本次输入图片" onError={() => setFailed(src)} /> : <ImagePlus size={24} aria-hidden="true" />;
 }
 
-function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope, visible, currentSelection, supportsNextActions, nextSourceSet, select, changePreview, operate, feedback, onSelect, onQuickUse, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, renderReactionAction, contextActionsEnabled = false, coverDeleteWithContextActions = false, contextActions }: ResultRenderers<T> & {
+function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope, visible, previewAccount, currentSelection, supportsNextActions, nextSourceSet, select, changePreview, operate, feedback, onSelect, onQuickUse, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, renderReactionAction, contextActionsEnabled = false, coverDeleteWithContextActions = false, contextActions }: ResultRenderers<T> & {
   item: T; scope: string; visible: boolean; currentSelection: string | null | undefined; supportsNextActions: boolean; nextSourceSet: Set<ContentKey>;
-  select: (item: T) => void; changePreview: (item: T | null, alreadySelected?: boolean) => void;
+  previewAccount: string;
+  select: (item: T) => void; changePreview: (item: T | null, alreadySelected?: boolean, prepared?: ImagePreviewPreparation) => void;
   operate: (item: T, kind: 'copy' | 'download') => Promise<void>;
   feedback: { id: string; message: string; busy: boolean } | null;
   onSelect?: (item: T) => void; onQuickUse?: (item: T) => void;
@@ -111,7 +123,7 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
         const coverReactions = Boolean(renderReactionAction && item.media?.contentKey);
         const reactions = item.media?.contentKey ? <ContentReactions contentKey={item.media.contentKey} imageSharing={item.media.imageSharing}
           secondaryAction={renderReactionAction?.(item)} overlay={!renderReactionAction} parentControlled={!renderReactionAction} /> : null;
-  const cover = item.media ? <ResultImageCover key={`${scope}:${item.id}`} src={item.media.thumbnailSrc || item.media.src} alt={item.label} selected={currentSelection === item.id} applied={Boolean(item.applied)} onSelect={() => select(item)} onPreview={() => changePreview(item, true)} onViewed={item.onViewed} active={visible} onQuickUse={onQuickUse && !item.viewOnly && (!contextActionsEnabled || !readOnly) ? () => onQuickUse(item) : undefined} loadingOverlay={waitDisplay?.finishing ? <span aria-hidden="true" /> : waitDisplay ? <ImageGenerationWaiting display={waitDisplay} visible={visible} loadingImage /> : undefined}
+  const cover = item.media ? <ResultImageCover key={`${scope}:${item.id}`} src={item.media.thumbnailSrc || item.media.src} alt={item.label} selected={currentSelection === item.id} applied={Boolean(item.applied)} onSelect={() => select(item)} onPreview={prepared => changePreview(item, true, prepared)} previewSource={previewAccount ? previewPreparationOptions(item, previewAccount) || undefined : undefined} onViewed={item.onViewed} active={visible && Boolean(previewAccount)} onQuickUse={onQuickUse && !item.viewOnly && (!contextActionsEnabled || !readOnly) ? () => onQuickUse(item) : undefined} loadingOverlay={waitDisplay?.finishing ? <span aria-hidden="true" /> : waitDisplay ? <ImageGenerationWaiting display={waitDisplay} visible={visible} loadingImage /> : undefined}
     contextMenuEnabled={contextActionsEnabled} menuOpen={menuOpen && menuActive} cancelPreviewRef={cancelPreviewRef} />
     : <div className={`${styles.pending}${item.generationWait && item.pending ? ` ${styles.generationPending}` : ' sd2-loading-surface'}`} data-busy={item.pending || undefined}
       data-result-choice={onSelect ? '' : undefined} role={onSelect || contextActionsEnabled ? 'button' : undefined} tabIndex={onSelect || contextActionsEnabled ? 0 : undefined} aria-label={onSelect ? `选择${item.label}` : contextActionsEnabled ? `${item.label}，图片操作` : undefined} aria-pressed={onSelect ? currentSelection === item.id : undefined}
@@ -158,18 +170,34 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
   onQuickUse?: (item: T) => void;
   previewId?: string | null; onPreviewChange?: (item: T | null) => void;
 }) {
+  const { user, hasLoadedUser, userLoadError, sessionChanged } = useAppSession();
+  const previewAccount = user ? `${user.id}:${user.role}:${user.account_type || ''}` : '';
+  const previewSessionAllowed = Boolean(user && hasLoadedUser && !userLoadError && !sessionChanged && !isClientSessionBlocked());
   const [localPreview, setLocalPreview] = useState<string | null>(null);
+  const [previewPreparation, setPreviewPreparation] = useState<PreviewPreparation | null>(null);
+  const previewPreparationRef = useRef<PreviewPreparation | null>(null);
   const [localSelection, setLocalSelection] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ id: string; message: string; busy: boolean } | null>(null);
   const [readState, setReadState] = useState({ scope, busy: false, error: '' });
   const readLock = useRef(false);
-  const activePreview = previewId === undefined ? localPreview : previewId;
+  const requestedPreview = previewId === undefined ? localPreview : previewId;
+  const previewOwner = useRef({ scope, account: previewAccount, id: requestedPreview });
+  if (previewOwner.current.id !== requestedPreview || !previewOwner.current.account && previewOwner.current.scope === scope) {
+    previewOwner.current = { scope, account: previewAccount, id: requestedPreview };
+  }
+  const previewOwned = previewOwner.current.scope === scope && previewOwner.current.account === previewAccount;
+  const activePreview = previewOwned ? requestedPreview : null;
   const currentSelection = selectedId === undefined ? localSelection : selectedId;
   const currentScope = useRef(scope); currentScope.current = scope;
   const pendingOperation = useRef(false);
   const alive = useRef(true);
   const previewTrigger = useRef<HTMLElement | null>(null);
-  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const previewContext = useRef({ scope, account: previewAccount, allowed: previewSessionAllowed, visible, items });
+  previewContext.current = { scope, account: previewAccount, allowed: previewSessionAllowed, visible, items };
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; previewPreparationRef.current?.handle.release(); previewPreparationRef.current = null; };
+  }, []);
   const readMore = useCallback(async () => {
     if (readLock.current) return;
     readLock.current = true;
@@ -215,22 +243,57 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
     return () => cancelAnimationFrame(frame);
   }, [items, onSelect, pages, scope, supportsNextActions, visible]);
   const imageNeighbors = Array.from(new Set([previewable[previewIndex - 1], previewable[previewIndex + 1]]))
-    .filter(item => item?.media && !item.viewOnly).map(item => ({ source: item.media!.src, sourceVersion: item.media!.sourceVersion,
+    .filter(item => item?.media && !item.viewOnly && !item.media.previewOnly).map(item => ({ source: item.media!.src, sourceVersion: item.media!.sourceVersion,
       thumbnail: item.media!.thumbnailSrc, width: item.media!.safeDetails?.width, height: item.media!.safeDetails?.height, bytes: item.media!.safeDetails?.fileSize }));
-  const changePreview = useCallback((item: T | null, alreadySelected = false) => {
+  const changePreview = useCallback((item: T | null, alreadySelected = false, prepared?: ImagePreviewPreparation) => {
+    const context = previewContext.current;
+    if (!alive.current || context.scope !== scope || context.account !== previewAccount) { prepared?.release(); return; }
+    let nextPreparation: PreviewPreparation | null = null;
+    if (item) {
+      const currentItem = context.items.find(value => value.id === item.id);
+      const options = currentItem && previewPreparationOptions(currentItem, context.account);
+      const requested = previewPreparationOptions(item, context.account);
+      if (!context.allowed || !context.visible || isClientSessionBlocked() || !options || !requested
+        || options.source !== requested.source || options.sourceVersion !== requested.sourceVersion || options.previewOnly !== requested.previewOnly
+        || prepared && !preparationMatches(prepared, options)) { prepared?.release(); return; }
+      // The card's first-click lease is transferred intact. Menu and navigation
+      // entry points acquire their current-image lease before changing the view.
+      nextPreparation = { scope, itemId: item.id, handle: prepared || prepareImagePreview(options) };
+    } else prepared?.release();
+    const previous = previewPreparationRef.current;
+    previewPreparationRef.current = nextPreparation;
+    if (previous?.handle !== nextPreparation?.handle) previous?.handle.release();
+    setPreviewPreparation(nextPreparation);
+    previewOwner.current = { scope, account: previewAccount, id: item?.id || null };
     if (item && !activePreview) previewTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    if (item && !alreadySelected) { pages.goToId(item.id); setLocalSelection(item.id); onSelect?.(item); }
-    setLocalPreview(item?.id || null);
-    onPreviewChange?.(item);
+    try {
+      if (item && !alreadySelected) { pages.goToId(item.id); setLocalSelection(item.id); onSelect?.(item); }
+      setLocalPreview(item?.id || null);
+      onPreviewChange?.(item);
+    } catch (cause) {
+      if (previewPreparationRef.current === nextPreparation) { nextPreparation?.handle.release(); previewPreparationRef.current = null; setPreviewPreparation(null); }
+      throw cause;
+    }
     if (!item) {
       const trigger = previewTrigger.current;
       previewTrigger.current = null;
       requestAnimationFrame(() => { if (trigger?.isConnected) trigger.focus({ preventScroll: true }); });
     }
-  }, [activePreview, onPreviewChange, onSelect, pages]);
+  }, [activePreview, onPreviewChange, onSelect, pages, previewAccount, scope]);
+  const previewOptions = preview && previewPreparationOptions(preview, previewAccount);
+  const currentPreparation = previewPreparation?.scope === scope && previewPreparation.itemId === preview?.id
+    && previewOptions && preparationMatches(previewPreparation.handle, previewOptions) ? previewPreparation.handle : undefined;
   useEffect(() => {
-    if (activePreview && !preview) { setLocalPreview(null); onPreviewChange?.(null); }
-  }, [activePreview, preview, onPreviewChange]);
+    const pending = previewPreparationRef.current;
+    if (!pending) return;
+    if (!visible || !previewSessionAllowed || isClientSessionBlocked() || pending.scope !== scope || pending.itemId !== preview?.id
+      || !previewOptions || !preparationMatches(pending.handle, previewOptions)) {
+      pending.handle.release(); previewPreparationRef.current = null; setPreviewPreparation(null);
+    }
+  }, [activePreview, preview, previewOptions, previewPreparation, previewSessionAllowed, scope, visible]);
+  useEffect(() => {
+    if (requestedPreview && (!previewOwned || !preview || !visible || !previewSessionAllowed)) { setLocalPreview(null); onPreviewChange?.(null); }
+  }, [requestedPreview, previewOwned, preview, onPreviewChange, previewSessionAllowed, visible]);
   function movePreview(direction: -1 | 1) {
     const index = previewable.findIndex(item => item.id === activePreview);
     if (index >= 0) changePreview(previewable[(index + direction + previewable.length) % previewable.length]);
@@ -274,13 +337,13 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
       const next = items[Math.max(0, Math.min(items.length - 1, index + offset))]; select(next);
       requestAnimationFrame(() => { const card = Array.from(pages.gridRef.current?.querySelectorAll<HTMLElement>('[data-result-id]') || []).find(element => element.dataset.resultId === next.id); card?.querySelector<HTMLElement>('[data-result-cover], [data-result-choice]')?.focus(); });
     }}>
-      {pages.pageItems.map(item => <GeneratedImageResultCard key={`${scope}:${item.id}`} item={item} scope={scope} visible={visible} currentSelection={currentSelection}
+      {pages.pageItems.map(item => <GeneratedImageResultCard key={`${scope}:${item.id}`} item={item} scope={scope} visible={visible} previewAccount={previewSessionAllowed ? previewAccount : ''} currentSelection={currentSelection}
         supportsNextActions={supportsNextActions} nextSourceSet={nextSourceSet} select={select} changePreview={changePreview} operate={operate} feedback={feedback}
         onSelect={onSelect} onQuickUse={onQuickUse} renderMetadata={renderMetadata} renderActions={renderActions} renderPrimaryActions={renderPrimaryActions}
         renderDelete={renderDelete} renderOverlay={renderOverlay} renderSupplement={renderSupplement} renderReactionAction={renderReactionAction}
         contextActionsEnabled={contextActionsEnabled} coverDeleteWithContextActions={coverDeleteWithContextActions} contextActions={contextActions} />)}
     </div>
     {paginationSlot === undefined && pagination('bottom')}
-    {preview?.media && <ZoomableImagePreview {...preview.media} nextActionSources={nextSources as ContentKey[]} nextActionResultId={preview.id} imageNeighbors={imageNeighbors} resolveDownload={src => items.find(item => item.media?.src === src)?.download} previewKey={preview.media.previewKey || `${scope}:${preview.id}`} hasNavigation={previewable.length > 1} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => changePreview(null)} />}
+    {visible && previewSessionAllowed && preview?.media && <ZoomableImagePreview {...preview.media} preparation={currentPreparation} previewOnly={Boolean(preview.viewOnly || preview.media.previewOnly)} nextActionSources={nextSources as ContentKey[]} nextActionResultId={preview.id} imageNeighbors={imageNeighbors} resolveDownload={src => items.find(item => item.media?.src === src)?.download} previewKey={preview.media.previewKey || `${scope}:${preview.id}`} hasNavigation={previewable.length > 1} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => changePreview(null)} />}
   </div>;
 }

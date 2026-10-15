@@ -39,20 +39,20 @@ export function useImageNeighbors(candidates: ImageReadCandidate[], enabled: boo
     let active = true;
     for (const candidate of JSON.parse(key) as ImageReadCandidate[]) {
       if (!active || !canPrefetchImages(candidate.bytes || 0) || /^(blob:|data:)/i.test(candidate.source)) continue;
-      const original = imageDisplaySource(candidate.source, 'original');
       const start = (source: string, version: string) => { if (active && canPrefetchImages(candidate.bytes || 0)) releases.push(prefetchImageRead(account, source, version)); };
-      if (candidate.variant === 'original') { start(original, candidate.sourceVersion || ''); continue; }
+      // An explicit original belongs to the foreground user action, not a
+      // speculative neighbor. Never spend its full PNG bytes in the background.
+      if (candidate.variant === 'original') continue;
       if (candidate.variant === 'preview') { start(imageDisplaySource(candidate.source, 'preview'), candidate.sourceVersion || ''); continue; }
       const description = imageDisplaySource(candidate.source, 'hd-description');
-      if (description === candidate.source) { start(original, candidate.sourceVersion || ''); continue; }
+      if (description === candidate.source) continue;
       const request = prefetchHdImageSource(account, description, candidate.sourceVersion || '');
       releases.push(request.release);
       void request.result.then(state => {
-        if (state.denied) return;
+        if (state.denied || state.error) return;
         const hd = state.description;
-        const useHd = hd?.status === 'ready' && !hdDescriptionUsesOriginal(hd);
-        start(useHd ? versionedHdSource(candidate.source, 'hd', hd!.sourceVersion) : original,
-          useHd ? hd!.sourceVersion || candidate.sourceVersion || '' : candidate.sourceVersion || '');
+        if (hd?.status !== 'ready' || hdDescriptionUsesOriginal(hd)) return;
+        start(versionedHdSource(candidate.source, 'hd', hd.sourceVersion), hd.sourceVersion || '');
       });
     }
     const stop = () => { active = false; for (const release of releases.splice(0)) release(); };

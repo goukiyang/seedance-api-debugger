@@ -9,9 +9,10 @@ import styles from './ZoomableImagePreview.module.css';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import type { ContentKey } from '@/lib/content-reactions/types';
 import { isSafeIdentifier, useMediaPreviewState, type MediaPreviewZoomMode } from '@/lib/hooks/use-media-preview-state';
-import { isImagePreviewReady, useImageReadProgress } from '@/lib/hooks/use-image-read-progress';
-import { resetImageReadForRetry } from '@/lib/media/image-read-session';
-import { useHdImageSource, versionedHdSource, type HdDescription } from '@/lib/hooks/use-hd-image-source';
+import { beginImageForegroundPreparation, captureImageReadSessionScope, resetImageReadForRetry, type ImageReadProgress } from '@/lib/media/image-read-session';
+import type { HdDescription } from '@/lib/media/hd-source-session';
+import { prepareImagePreview, type ImagePreviewPreparation, type PreparedImagePreviewState } from '@/lib/media/image-preview-session';
+import { handHdImageDownloadToBrowser } from '@/lib/media/native-download';
 import { hdAvailabilityLabel, hdDescriptionUsesOriginal, hdDisplayLabel, type HdDisplayKind } from '@/lib/media/hd-display-policy';
 import { useImageNeighbors, type ImageReadCandidate } from '@/lib/hooks/use-image-neighbors';
 import { isTopmostDialogLayer, useDialogDismiss } from '@/components/useDialogDismiss';
@@ -63,6 +64,8 @@ export type ZoomableImagePreviewProps = {
   sourceRole?: ImageComparisonSource['role'];
   sourceVersion?: string;
   imageNeighbors?: ImageReadCandidate[];
+  /** Same-session first-click lease, adopted before the initiating lease ends. */
+  preparation?: ImagePreviewPreparation;
   /** Caller-provided status/reactions/file metadata only; remove prompts before passing. */
   details?: ReactNode;
   notice?: ReactNode;
@@ -122,8 +125,9 @@ function formatImageBytes(bytes: number) {
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${unit}`;
 }
 
-function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, version = '', className, style, onReady, onThumbnailReady, onUnavailable }: { src: string; thumbnailSrc?: string; alt: string; original: boolean; previewOnly?: boolean; version?: string; className: string; style: CSSProperties; onReady?: (size: IntrinsicSize, decoded: DecodedImage) => void; onThumbnailReady?: (size: IntrinsicSize) => void; onUnavailable?: () => void }) {
-  const { user } = useAppSession();
+function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, version = '', preparation, className, style, onReady, onThumbnailReady, onUnavailable }: { src: string; thumbnailSrc?: string; alt: string; original: boolean; previewOnly?: boolean; version?: string; preparation?: ImagePreviewPreparation; className: string; style: CSSProperties; onReady?: (size: IntrinsicSize, decoded: DecodedImage) => void; onThumbnailReady?: (size: IntrinsicSize) => void; onUnavailable?: () => void }) {
+  const { user, hasLoadedUser, userLoadError, sessionChanged } = useAppSession();
+  const account = hasLoadedUser && !userLoadError && !sessionChanged ? `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` : '';
   const image = useRef<HTMLImageElement>(null);
   const thumbnailImage = useRef<HTMLImageElement>(null);
   const onReadyRef = useRef(onReady);
@@ -134,19 +138,37 @@ function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, v
   const [attempt, setAttempt] = useState(0);
   const [loadedKey, setLoadedKey] = useState('');
   const [failedKey, setFailedKey] = useState('');
-  const hd = useHdImageSource(src, original, attempt, version, previewOnly);
-  const [fallbackKey, setFallbackKey] = useState('');
-  const fallbackIdentity = `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}:${src}:${version}:${attempt}`;
-  const rawFallback = !previewOnly && fallbackKey === fallbackIdentity;
-  const displaySrc = rawFallback ? displaySource(src, 'original') : hd.readSource;
-  const originalSrc = displaySource(src, 'original');
-  const [retainOriginal, setRetainOriginal] = useState(displaySrc === originalSrc);
+  const [visible, setVisible] = useState(true);
+  const identity = JSON.stringify([account, src, version, previewOnly, original, attempt]);
+  const [prepared, setPrepared] = useState<{ identity: string; handle: ImagePreviewPreparation; state: PreparedImagePreviewState } | null>(null);
+  useEffect(() => {
+    const change = () => setVisible(!document.hidden); change();
+    document.addEventListener('visibilitychange', change);
+    return () => document.removeEventListener('visibilitychange', change);
+  }, []);
+  useEffect(() => {
+    if (!account || !visible || document.hidden) return;
+    const reusable = !attempt && preparation?.account === account && preparation.source === src && preparation.sourceVersion === version
+      && preparation.previewOnly === previewOnly && preparation.original === original && preparation.isCurrent();
+    const handle = reusable && preparation ? preparation : prepareImagePreview({ account, source: src, sourceVersion: version, previewOnly, original });
+    // Subscribe first: closing the click's lease must never abort and relaunch
+    // the already accepted foreground read between the card and this dialog.
+    const unsubscribe = handle.subscribe(state => setPrepared({ identity, handle, state }));
+    handle.release();
+    return unsubscribe;
+  }, [account, identity, src, version, previewOnly, original, attempt, preparation, visible]);
+  const current = prepared?.identity === identity && visible ? prepared : null;
+  const state = current?.state;
+  const readResult = state?.result;
+  const readProgress: ImageReadProgress = readResult?.progress || { phase: 'reading', loadedBytes: 0 };
+  const displayKind = state?.displayKind || 'pending';
+  const displaySrc = state?.readSource || '';
+  const imageSrc = readResult?.imageSrc || undefined;
   const thumbnail = thumbnailSrc || displaySource(src, 'thumbnail');
-  const hasThumbnail = thumbnail !== displaySource(src, 'preview');
-  const accountIdentity = `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}`;
-  const key = `${accountIdentity}:${hd.version}:${displaySrc}:${attempt}`;
+  const hasThumbnail = thumbnail !== src && thumbnail !== displaySource(src, 'original') && thumbnail !== displaySource(src, 'preview');
   const [thumbnailLoaded, setThumbnailLoaded] = useState('');
-  const currentKeyRef = useRef(key);
+  const imageIdentity = `${identity}:${displaySrc}:${imageSrc || ''}`;
+  const currentKeyRef = useRef(imageIdentity); currentKeyRef.current = imageIdentity;
   const readyKeyRef = useRef('');
   useEffect(() => {
     if (!hasThumbnail) return;
@@ -157,82 +179,62 @@ function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, v
       }
     }
   }, [hasThumbnail, thumbnail, onThumbnailReady]);
-  const originalResult = useImageReadProgress(originalSrc, attempt, !previewOnly && (displaySrc === originalSrc || retainOriginal), version);
-  const clearResult = useImageReadProgress(displaySrc, attempt, Boolean(displaySrc) && displaySrc !== originalSrc, hd.version);
-  const readResult = displaySrc === originalSrc ? originalResult : clearResult;
-  const readProgress = readResult.progress;
-  const imageSrc = readResult.imageSrc || undefined;
-  const imageIdentity = `${key}:${imageSrc || ''}`;
-  currentKeyRef.current = imageIdentity;
   const unsupported = readProgress.phase === 'unsupported';
-  const failed = failedKey === imageIdentity || unsupported || readProgress.phase === 'unavailable' || readResult.refreshSource === true || readResult.unconfirmed === true;
-  const blocked = readResult.denied || !previewOnly && originalResult.denied || hd.denied;
-  const loaded = !failed && !blocked && isImagePreviewReady(readResult, loadedKey === imageIdentity);
-  useEffect(() => { if (blocked || failed) onUnavailableRef.current?.(); }, [blocked, failed, key]);
+  const failed = failedKey === imageIdentity || unsupported || readProgress.phase === 'unavailable' || readResult?.unconfirmed === true;
+  const blocked = !account || state?.denied || readResult?.denied;
+  const loaded = !failed && !blocked && Boolean(imageSrc) && loadedKey === imageIdentity;
+  useEffect(() => { if (!loaded) onUnavailableRef.current?.(); }, [loaded, imageIdentity]);
   useEffect(() => {
-    if (displaySrc === originalSrc) setRetainOriginal(true);
-    else if (loaded && loadedKey === imageIdentity) setRetainOriginal(false);
-  }, [displaySrc, originalSrc, loaded, loadedKey, imageIdentity]);
-  useEffect(() => {
-    // A ready descriptor does not prove that its file can be read or decoded.
-    // Only the same image's authorized original can replace a failed HD stream.
-    if (failed && !blocked && displaySrc !== originalSrc && hd.description?.status === 'ready' && !rawFallback && !original) {
-      if (readResult.refreshSource) hd.refresh();
-      setFallbackKey(fallbackIdentity);
+    if (!imageSrc || failed || blocked || !current) return;
+    if (image.current?.complete && image.current.naturalWidth > 0 && image.current.getAttribute('src') === imageSrc) {
+      const target = image.current;
+      void (readResult?.decoded ? Promise.resolve() : target.decode()).then(() => {
+        if (currentKeyRef.current === imageIdentity && current.handle.isCurrent()) setLoadedKey(imageIdentity);
+      }).catch(() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); });
     }
-  }, [failed, displaySrc, originalSrc, readResult.refreshSource, blocked, hd.description?.status, hd.refresh, rawFallback, original, fallbackIdentity]);
-  const reportReady = (target?: HTMLImageElement | null) => {
-    const readyIdentity = `${imageIdentity}:${hd.displayKind}:${hd.description?.status || ''}:${hd.description?.sourceVersion || ''}:${hd.description?.original || false}:${hd.description?.reason || ''}:${rawFallback}`;
+  }, [imageIdentity, failed, blocked, imageSrc, current, readResult?.decoded]);
+  useEffect(() => {
+    if (!loaded || !current || !readResult || !imageSrc) return;
+    const readyIdentity = `${imageIdentity}:${displayKind}:${state?.description?.sourceVersion || ''}:${state?.description?.reason || ''}`;
     if (readyKeyRef.current === readyIdentity) return;
-    const width = readResult.width || target?.naturalWidth || 0, height = readResult.height || target?.naturalHeight || 0;
-    if (width <= 0 || height <= 0) return;
-    readyKeyRef.current = readyIdentity;
-    onReadyRef.current?.({ width, height },
-      { source: imageSrc || target?.src || displaySrc, fullSize: hd.fullSize || rawFallback, displayKind: rawFallback ? 'original' : hd.displayKind, hd: hd.description, mime: readResult.mime, bytes: readResult.bytes, account: accountIdentity });
-  };
-  useEffect(() => {
-    if (!displaySrc || failed || blocked) return;
-    if (readResult.decoded) {
+    let second = 0;
+    const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => {
       const target = image.current;
-      if (target?.complete && target.naturalWidth > 0 && target.getAttribute('src') === imageSrc) setLoadedKey(imageIdentity);
-      reportReady(target); return;
-    }
-    if (loaded) return;
-    if (image.current?.complete && image.current.naturalWidth > 0) {
-      const target = image.current;
-      void target.decode().then(() => { if (currentKeyRef.current === imageIdentity) { setLoadedKey(imageIdentity); reportReady(target); } }).catch(() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); });
-    }
-    if (readProgress.phase === 'reading') return;
-    const timer = window.setTimeout(() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); }, 30000);
-    return () => window.clearTimeout(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imageIdentity, loaded, readProgress.phase, failed, blocked, displaySrc, imageSrc, readResult.decoded, hd.description, hd.displayKind, rawFallback]);
+      if (document.hidden || currentKeyRef.current !== imageIdentity || !current.handle.isCurrent() || !target?.complete || !target.naturalWidth || target.getAttribute('src') !== imageSrc) return;
+      readyKeyRef.current = readyIdentity;
+      // At least one committed visible frame, not merely a downloaded Blob or
+      // an image decoded off-screen, unlocks speculative neighboring bytes.
+      current.handle.markDisplayed();
+      onReadyRef.current?.({ width: readResult.width || target.naturalWidth, height: readResult.height || target.naturalHeight },
+        { source: imageSrc, fullSize: Boolean(state?.fullSize), displayKind, hd: state?.description, mime: readResult.mime, bytes: readResult.bytes, account });
+    }); });
+    return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
+  }, [loaded, imageIdentity, current, readResult, imageSrc, displayKind, state?.description, state?.fullSize, account]);
   const progressLabel = readProgress.phase === 'unsupported'
     ? readProgress.message || '该来源不是图片，未读取文件内容'
     : readProgress.phase === 'unavailable'
       ? readProgress.message || '当前来源无法提供读取进度'
       : readProgress.phase === 'decoding' ? '正在解码' : '正在读取';
   return <>
-    {!previewOnly && !loaded && !blocked && displaySrc !== originalSrc && originalResult.imageSrc && !originalResult.denied && !originalResult.unconfirmed && <img src={originalResult.imageSrc} alt={alt} className={className} style={style} draggable={false} />}
-    {hasThumbnail && !loaded && !blocked && !(displaySrc !== originalSrc && originalResult.imageSrc) && <img ref={thumbnailImage} key={`thumbnail:${accountIdentity}:${thumbnail}`} src={thumbnail} alt={alt} className={className} style={style} draggable={false} data-image-preview-thumbnail
+    {hasThumbnail && !loaded && !blocked && <img ref={thumbnailImage} key={`thumbnail:${account}:${thumbnail}`} src={thumbnail} alt={alt} className={className} style={style} draggable={false} data-image-preview-thumbnail
       onLoad={event => { setThumbnailLoaded(thumbnail); onThumbnailReadyRef.current?.({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); }} />}
     {/* eslint-disable-next-line @next/next/no-img-element */}
     {imageSrc && !blocked && !failed && <img ref={image} key={`preview:${imageIdentity}`} src={imageSrc} alt={alt} className={className} style={{ ...style, opacity: loaded ? 1 : 0 }} draggable={false} data-image-preview-image
-      onLoad={event => { const target = event.currentTarget; void (readResult.decoded ? Promise.resolve() : target.decode()).then(() => { if (currentKeyRef.current !== imageIdentity) return; setLoadedKey(imageIdentity); reportReady(target); }).catch(() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); }); }} onError={() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); }} />}
-    {(!loaded || displaySrc === originalSrc || rawFallback || hd.error) && <div className={styles.imageStatus} role="status">
-      <span>{blocked ? readProgress.message || '图片权限或来源不可用' : failed ? (unsupported ? progressLabel : thumbnailLoaded === thumbnail ? '图片未能加载，缩略图仍可查看，请重试' : '图片未能加载，请重试') : loaded ? `当前为${hdDisplayLabel(rawFallback ? 'original' : hd.displayKind, hd.description, rawFallback)}${rawFallback ? '，可重试高清' : ''}` : `${alt} · ${hdDisplayLabel(rawFallback ? 'original' : hd.displayKind, hd.description, rawFallback)} · ${progressLabel}`}</span>
-      {hd.pending && !blocked && <span>高清压缩在后台准备，不影响查看完整原图</span>}
-      {hd.error && !blocked && <span>高清状态读取失败，可重试或查看原图</span>}
+      onLoad={event => { const target = event.currentTarget; void (readResult?.decoded ? Promise.resolve() : target.decode()).then(() => { if (currentKeyRef.current === imageIdentity && current?.handle.isCurrent()) setLoadedKey(imageIdentity); }).catch(() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); }); }} onError={() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); }} />}
+    {(!loaded || displayKind === 'original' || state?.fallback || state?.error) && <div className={styles.imageStatus} role="status">
+      <span>{blocked ? readProgress.message || '图片权限或来源不可用' : failed ? (unsupported ? progressLabel : thumbnailLoaded === thumbnail ? '图片未能加载，缩略图仍可查看，请重试' : '图片未能加载，请重试') : loaded ? `当前为${hdDisplayLabel(displayKind, state?.description, state?.fallback)}` : `${alt} · ${hdDisplayLabel(displayKind, state?.description, state?.fallback)} · ${progressLabel}`}</span>
+      {state?.descriptorPending && !blocked && <span>{displayKind === 'pending' ? '正在确认图片版本，先显示小图' : '高清压缩尚未完成，当前读取完整原图'}</span>}
+      {state?.error && !blocked && <span>高清状态暂无法确认，可重试或主动查看原图</span>}
       {failed && !unsupported && readProgress.phase === 'unavailable' && <span>{readProgress.message || '当前来源无法提供读取进度'}</span>}
       {!loaded && !failed && readProgress.phase === 'reading' && readProgress.percent != null && <>
         <progress className={styles.imageProgress} max={100} value={readProgress.percent} aria-label={`${alt}读取进度 ${readProgress.percent}%`} />
         {readProgress.totalBytes != null && <span>{readProgress.percent}% · {formatImageBytes(readProgress.loadedBytes)} / {formatImageBytes(readProgress.totalBytes)}</span>}
       </>}
-      {!loaded && !failed && readProgress.phase === 'reading' && readProgress.percent == null && <span>已读取 {formatImageBytes(readProgress.loadedBytes)}</span>}
+      {!loaded && !failed && displaySrc && readProgress.phase === 'reading' && readProgress.percent == null && <span>已读取 {formatImageBytes(readProgress.loadedBytes)}</span>}
       {!loaded && !failed && readProgress.phase === 'decoding' && <span>已读取 {formatImageBytes(readProgress.loadedBytes)}</span>}
-      {(failed || rawFallback || hd.error) && <button type="button" title="重新加载" aria-label="重新加载图片" onPointerDown={event => event.stopPropagation()} onClick={event => {
+      {(failed || state?.fallback || state?.error) && <button type="button" title="重新加载" aria-label="重新加载图片" onPointerDown={event => event.stopPropagation()} onClick={event => {
         event.stopPropagation();
-        if (failed || rawFallback) resetImageReadForRetry(rawFallback ? hd.readSource : displaySrc, accountIdentity);
+        if (displaySrc) resetImageReadForRetry(displaySrc, account);
         setAttempt(value => value + 1);
       }}><RotateCcw size={16} /></button>}
     </div>}
@@ -243,13 +245,16 @@ function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, v
 type Side = 'current' | 'comparison';
 type Point = { x: number; y: number };
 type Frames = Record<Side, IntrinsicSize>;
-type ImageRequest = { token: number; controller: AbortController; resolve: (applied: boolean) => void; reject: (error: Error) => void };
+type ImageRequest = { token: number; controller: AbortController; releasePriority: () => void; resolve: (applied: boolean) => void; reject: (error: Error) => void };
 const sides: Side[] = ['current', 'comparison'];
 const viewIdentity = (side: Side, image: ImageComparisonSource) => imageSourceIdentity(image) + ':' + side;
 
-export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, previewKey, sourceVersion, sourceRole, imageNeighbors = [], contentKey, nextActionSources = [], nextActionResultId, imageSharing = true, previewOnly = false, metadata, safeDetails, comparison, comparisonCandidates = [], details, notice, hasNavigation, onPrevious, onNext, onImageLoaded, resolveDownload, onClose }: ZoomableImagePreviewProps) {
-  const { user, hasLoadedUser } = useAppSession();
+export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, previewKey, sourceVersion, sourceRole, imageNeighbors = [], preparation, contentKey, nextActionSources = [], nextActionResultId, imageSharing = true, previewOnly = false, metadata, safeDetails, comparison, comparisonCandidates = [], details, notice, hasNavigation, onPrevious, onNext, onImageLoaded, resolveDownload, onClose }: ZoomableImagePreviewProps) {
+  const { user, hasLoadedUser, userLoadError, sessionChanged } = useAppSession();
   const owner = user?.id || '';
+  const account = hasLoadedUser && !userLoadError && !sessionChanged ? `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` : '';
+  const readScopeRef = useRef({ account, preparation, previewOnly }); readScopeRef.current = { account, preparation, previewOnly };
+  const internalPreparations = useRef<Partial<Record<Side, ImagePreviewPreparation>>>({});
   const backdropRef = useRef<HTMLDivElement>(null), toolbarRef = useRef<HTMLDivElement>(null), stageRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
   const paneRefs = useRef<Partial<Record<Side, HTMLDivElement>>>({});
@@ -267,7 +272,6 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const sideLabel = (side: Side) => sources[side]?.role === 'generated' ? '生成图' : sources[side]?.role === 'original' ? '原图' : sources[side]?.role === 'reference' ? '参考图' : side === 'current' ? '当前图' : '对比图';
   const sourcesRef = useRef(sources); sourcesRef.current = sources;
   const [comparisonMode, setComparisonMode] = useState(false), [linked, setLinked] = useState(false);
-  useImageNeighbors(imageNeighbors, Boolean(hasNavigation) && !comparisonMode && currentImage.src === src, currentImage.src);
   const [axis, setAxis] = useState<'horizontal' | 'vertical'>('horizontal'), [activeSide, setActiveSide] = useState<Side>('current');
   const [pickerSide, setPickerSide] = useState<Side | null>(null);
   const requests = useRef<Partial<Record<Side, ImageRequest>>>({}), sequence = useRef(0);
@@ -278,6 +282,9 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const [thumbnailFrames, setThumbnailFrames] = useState<Record<string, IntrinsicSize>>({});
   const [originals, setOriginals] = useState<Record<string, boolean>>({});
   const [decodedImages, setDecodedImages] = useState<Record<string, DecodedImage>>({});
+  const [displayedCurrent, setDisplayedCurrent] = useState('');
+  const currentDisplayKey = JSON.stringify([account, imageSourceIdentity(currentImage), currentImage.src, currentImage.version, originals[viewIdentity('current', currentImage)] || false]);
+  useImageNeighbors(imageNeighbors, Boolean(portalRoot && hasNavigation && !comparisonMode && currentImage.src === src && displayedCurrent === currentDisplayKey), currentImage.src);
   const [frames, setFrames] = useState<Frames>({ current: { width: 1, height: 1 }, comparison: { width: 1, height: 1 } });
   const [message, setMessage] = useState(''), [copyState, setCopyState] = useState<{ src: string; busy?: boolean; success?: boolean; message?: string } | null>(null);
   const [downloadBusy, setDownloadBusy] = useState(false);
@@ -294,13 +301,26 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const safeSide = comparisonMode && comparisonImage ? activeSide : 'current';
   const safeSideRef = useRef(safeSide); safeSideRef.current = safeSide;
   const selectedImage = sources[safeSide] || currentImage;
-  const downloadSelectedSource = previewOnly ? undefined : resolveDownload?.(selectedImage.src);
+  const downloadSelectedSource = !account || previewOnly ? undefined : resolveDownload?.(selectedImage.src);
   const originalDownloadSource = displaySource(selectedImage.src, 'download');
-  const hasOriginalDownloadUrl = !previewOnly && originalDownloadSource !== selectedImage.src;
+  const hasOriginalDownloadUrl = Boolean(account) && !previewOnly && originalDownloadSource !== selectedImage.src;
   function downloadOriginal() {
     if (!downloadSelectedSource || downloadLock.current) return;
+    const selected = selectedImage, expectedAccount = account, expectedScope = captureImageReadSessionScope(account);
+    const current = () => alive.current && expectedScope() && readScopeRef.current.account === expectedAccount && sourcesRef.current[safeSide] === selected;
     downloadLock.current = true; setDownloadBusy(true);
-    void Promise.resolve().then(downloadSelectedSource).catch(error => { if (alive.current) setMessage(error instanceof Error ? error.message : '下载未完成，请重试'); }).finally(() => { downloadLock.current = false; if (alive.current) setDownloadBusy(false); });
+    void Promise.resolve().then(() => { if (current()) return downloadSelectedSource(); }).catch(error => { if (current()) setMessage(error instanceof Error ? error.message : '下载未完成，请重试'); }).finally(() => { downloadLock.current = false; if (alive.current) setDownloadBusy(false); });
+  }
+  function downloadHd() {
+    const selected = selectedImage, hd = decodedImages[viewIdentity(safeSide, selected)]?.hd;
+    if (previewOnly || !account || hd?.status !== 'ready' || !hd.sourceVersion || hdDescriptionUsesOriginal(hd) || downloadLock.current) return;
+    const side = safeSide, expectedAccount = account;
+    const isCurrent = () => alive.current && readScopeRef.current.account === expectedAccount && !readScopeRef.current.previewOnly && sourcesRef.current[side] === selected;
+    downloadLock.current = true; setDownloadBusy(true);
+    void handHdImageDownloadToBrowser({ account, source: selected.src, sourceVersion: hd.sourceVersion, fileName: selected.fileName || 'image', isCurrent })
+      .then(result => { if (isCurrent()) setMessage(`高清文件已交给浏览器 · ${formatImageBytes(result.bytes)}（未确认落盘）`); })
+      .catch(error => { if (isCurrent()) setMessage(error instanceof Error ? error.message : '高清下载准备失败，请重试'); })
+      .finally(() => { downloadLock.current = false; if (alive.current) setDownloadBusy(false); });
   }
   const identity = (image: ImageComparisonSource) => imageSourceIdentity(image);
   const selectedId = identity(selectedImage);
@@ -322,44 +342,57 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
     }
   }, []);
   const cancelRequests = useCallback(() => {
-    for (const request of Object.values(requests.current)) { request?.controller.abort(); request?.resolve(false); }
+    for (const request of Object.values(requests.current)) { request?.controller.abort(); request?.releasePriority(); request?.resolve(false); }
     requests.current = {};
   }, []);
   useEffect(() => {
     alive.current = true;
-    return () => { alive.current = false; stopGestures(); for (const request of Object.values(requests.current)) { request?.controller.abort(); request?.resolve(false); }
+    return () => { alive.current = false; stopGestures(); for (const request of Object.values(requests.current)) { request?.controller.abort(); request?.releasePriority(); request?.resolve(false); }
+      for (const handle of Object.values(internalPreparations.current)) handle?.release(); internalPreparations.current = {};
       for (const url of Array.from(localUrls.current)) URL.revokeObjectURL(url); localUrls.current.clear(); };
   }, [stopGestures]);
 
   const requestImage = useCallback((side: Side, image: ImageComparisonSource, verify = true): Promise<boolean> => {
+    const scope = readScopeRef.current, isSameScope = captureImageReadSessionScope(scope.account);
+    // The foreground click wins even while fresh picker authorization is read.
+    const releasePriority = scope.account ? beginImageForegroundPreparation(scope.account) : () => {};
     stopGestures();
-    const previous = requests.current[side]; previous?.controller.abort(); previous?.resolve(false);
+    const previous = requests.current[side]; previous?.controller.abort(); previous?.releasePriority(); previous?.resolve(false);
     const token = ++sequence.current, controller = new AbortController();
     return new Promise((resolve, reject) => {
-      const request = { token, controller, resolve, reject }; requests.current[side] = request;
+      const request = { token, controller, releasePriority, resolve, reject }; requests.current[side] = request;
       void (async () => {
         const key = sourcePickerKey(image);
         const refreshed = verify && key ? await resolveComparisonImage(key, controller.signal) : image;
-        if (!alive.current || requests.current[side] !== request) { resolve(false); return; }
+        if (!alive.current || requests.current[side] !== request || scope.account !== readScopeRef.current.account || !isSameScope()) { releasePriority(); resolve(false); return; }
         // Keep caller metadata for the same version, but always use the freshly authorized URL.
         const next = { ...image, ...refreshed, alt: image.alt, ...(image.version ? { version: image.version } : {}) };
         const existing = sourcesRef.current[side];
         if (side === 'current' && existing?.src === next.src && existing.version === next.version && imageSourceIdentity(existing) === imageSourceIdentity(next)) {
-          delete requests.current[side]; resolve(true); return;
+          delete requests.current[side]; releasePriority(); resolve(true); return;
         }
+        const provided = readScopeRef.current.preparation;
+        const handle = side === 'current' && provided?.isCurrent() && provided.account === scope.account && provided.source === next.src && provided.sourceVersion === (next.version || '') && provided.previewOnly === scope.previewOnly && !provided.original
+          ? provided : prepareImagePreview({ account: scope.account, source: next.src, sourceVersion: next.version, previewOnly: scope.previewOnly });
+        const oldHandle = internalPreparations.current[side]; internalPreparations.current[side] = handle;
+        oldHandle?.release(); releasePriority();
         setMessage('');
         delete requests.current[side];
         if (side === 'current') setCurrentImage(next);
         else { setComparisonImage(next); setComparisonMode(true); }
         setActiveSide(side); resolve(true);
       })().catch(error => {
-        if (requests.current[side] !== request || !alive.current) { resolve(false); return; }
+        releasePriority();
+        if (requests.current[side] !== request || !alive.current || scope.account !== readScopeRef.current.account || !isSameScope()) { resolve(false); return; }
         delete requests.current[side];
         const failure = error instanceof Error ? error : new Error('图片无法加载，原图保留');
         setMessage(failure.message); reject(failure);
       });
     });
   }, [stopGestures]);
+  useEffect(() => {
+    if (!comparisonMode) { internalPreparations.current.comparison?.release(); delete internalPreparations.current.comparison; }
+  }, [comparisonMode]);
 
   const originalOwner = useRef<string | null>(null);
   useEffect(() => {
@@ -630,6 +663,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
     const id = imageSourceIdentity(image);
     setSizes(value => value[id]?.width === size.width && value[id]?.height === size.height ? value : { ...value, [id]: size });
     setDecodedImages(value => ({ ...value, [viewIdentity(side, image)]: decoded }));
+    if (side === 'current') setDisplayedCurrent(currentDisplayKey);
     if (decoded.fullSize) setOriginalSizes(value => value[id]?.width === size.width && value[id]?.height === size.height ? value : { ...value, [id]: size });
     onImageLoaded?.(image.src);
   }
@@ -675,17 +709,18 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
         const id = identity(image), view = views[viewIdentity(side, image)] || fittedImageView, base = baseSize(side, image);
         const dimensionsKnown = Boolean(thumbnailFrames[id] || sizes[id] || image.width && image.height);
         return <PreviewImage key={`${id}:${image.src}:${image.version || ''}`} src={image.src} thumbnailSrc={image.thumbnailSrc} version={image.version} alt={sideLabel(side)} previewOnly={previewOnly} original={!previewOnly && (originals[viewIdentity(side, image)] || false)}
+          preparation={side === 'current' && preparation?.source === image.src && preparation.sourceVersion === (image.version || '') ? preparation : internalPreparations.current[side]}
           className={styles.compareImage}
           style={{ width: dimensionsKnown ? base.width : undefined, height: dimensionsKnown ? base.height : undefined,
             transform: 'translate(calc(-50% + ' + (view.x * base.width) + 'px), calc(-50% + ' + (view.y * base.height) + 'px)) scale(' + view.scale + ')' }}
           onThumbnailReady={size => thumbnailReady(side, image, size)} onReady={(size, decoded) => ready(side, image, size, decoded)}
-          onUnavailable={() => setDecodedImages(current => { const key = viewIdentity(side, image); if (!current[key]) return current; const next = { ...current }; delete next[key]; return next; })} />;
+          onUnavailable={() => { if (side === 'current' && sourcesRef.current.current === image) setDisplayedCurrent(''); setDecodedImages(current => { const key = viewIdentity(side, image); if (!current[key]) return current; const next = { ...current }; delete next[key]; return next; }); }} />;
       })()}
     </div>;
   }
   const activeOriginal = originals[viewIdentity(safeSide, selectedImage)] || false;
   const candidateDecoded = decodedImages[viewIdentity(safeSide, selectedImage)];
-  const decoded = candidateDecoded?.account === `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` ? candidateDecoded : undefined;
+  const decoded = account && candidateDecoded?.account === account ? candidateDecoded : undefined;
   const copySource = !previewOnly && decoded?.fullSize ? decoded.source : '';
   const visibleMetadata = isOriginalSubject ? { model: safeMetadataValue(safeDetails?.model ?? metadata?.model), quality: safeMetadataValue(safeDetails?.quality ?? metadata?.quality),
     supplier: safeMetadataValue(safeDetails?.supplier ?? metadata?.supplier),
@@ -742,7 +777,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
           }}>{copyState?.success && copyState.src === copySource ? <Check size={16} /> : <Copy size={16} />}{copyState?.busy ? '正在复制' : safeSide === 'current' ? '复制当前图' : '复制对比图'}</button>}
           {!previewOnly && displaySource(selectedImage.src, 'preview') !== displaySource(selectedImage.src, 'original') && <button type="button" className={styles.menuAction} aria-pressed={activeOriginal} onClick={() => { userAction.current++; stopGestures(); setOriginals(value => ({ ...value, [viewIdentity(safeSide, selectedImage)]: !activeOriginal })); }}><ZoomIn size={16} />{activeOriginal ? '切换高清预览' : '加载完整原图'}</button>}
           {hasOriginalDownloadUrl && <>
-            {decoded?.hd?.status === 'ready' && !hdDescriptionUsesOriginal(decoded.hd) ? <a className={styles.menuAction} href={versionedHdSource(selectedImage.src, 'hd-download', decoded.hd.sourceVersion)}><Download size={16} />下载高清 {decoded.hd.format?.toUpperCase()}{decoded.hd.bytes ? ` · ${formatImageBytes(decoded.hd.bytes)}` : ''}</a> : <span className={styles.menuAction}>{hdAvailabilityLabel(decoded?.hd)}</span>}
+            {decoded?.hd?.status === 'ready' && !hdDescriptionUsesOriginal(decoded.hd) ? <button type="button" className={styles.menuAction} disabled={downloadBusy} onClick={downloadHd}><Download size={16} />{downloadBusy ? '正在准备下载' : `下载高清 ${decoded.hd.format?.toUpperCase() || ''}${decoded.hd.bytes ? ` · ${formatImageBytes(decoded.hd.bytes)}` : ''}`}</button> : <span className={styles.menuAction}>{hdAvailabilityLabel(decoded?.hd)}</span>}
           </>}
           {hasNavigation && <div className={styles.mobileNavigation}><button type="button" className={styles.menuAction} onClick={onPrevious}><ArrowLeft size={16} />当前图上一张</button><button type="button" className={styles.menuAction} onClick={onNext}><ArrowRight size={16} />当前图下一张</button></div>}
           {comparisonMode && <div className={styles.compareOptions}>

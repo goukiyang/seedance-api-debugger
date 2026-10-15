@@ -6,6 +6,7 @@ import { acquireHdImageSource, hdImageHint, invalidateHdImageSource, prefetchHdI
 async function main() {
 const ready: HdDescription = { policy: 'hd-f-v1', status: 'ready', sourceVersion: 'source-v1', format: 'avif', mime: 'image/avif', bytes: 900, width: 100, height: 200 };
 const option = { original: false, previewOnly: false, supported: true };
+assert.deepEqual(hdDisplayPolicy(option), { kind: 'pending', pending: true, fullSize: false });
 assert.equal(hdDisplayPolicy({ ...option, description: ready }).kind, 'hd');
 for (const status of ['queued', 'running', 'failed', 'skipped'] as const) {
   const result = hdDisplayPolicy({ ...option, description: { policy: 'hd-f-v1', status, sourceVersion: 'source-v1' } });
@@ -22,7 +23,8 @@ for (const description of [{ ...ready, original: true }, { ...ready, format: 'or
   assert.match(hdDisplayLabel('original', description), /无需额外压缩/);
   assert.doesNotMatch(hdAvailabilityLabel(description), /未就绪|失败|丢失/);
 }
-assert.match(hdDisplayLabel('original', ready, true), /完整原图.*高清显示失败/);
+assert.match(hdDisplayLabel('original', ready, true), /完整原图.*高清暂不可用/);
+assert.match(hdAvailabilityLabel({ ...ready, status: 'skipped', reason: 'remote_version_unknown' }), /版本暂无法确认/);
 assert.match(hdAvailabilityLabel({ ...ready, status: 'failed' }), /完整原图/);
 
 const originals = { fetch: globalThis.fetch, setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout, now: Date.now,
@@ -106,7 +108,7 @@ try {
   assert.equal(requests.at(-1)?.readonly, true);
   replies.push(response(ready));
   release = acquireHdImageSource('owner-b', source, '', value => states.push(value)); await drain();
-  await advance();
+  assert.equal(requests.at(-1)?.readonly, false, 'actual viewer does not inherit a speculative 409 wait');
   assert.equal(states.at(-1)?.description?.status, 'ready');
   release(); release = undefined;
   invalidateHdImageSource(source, 'owner-b', { propagateToImageReads: false });
