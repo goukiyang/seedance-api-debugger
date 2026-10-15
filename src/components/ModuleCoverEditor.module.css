@@ -15,7 +15,7 @@
 .currentPreview { display: flex; width: 180px; max-width: 100%; aspect-ratio: 1; background: #0d1215; }
 .currentPreview img { display: block; width: 100%; min-width: 0; flex: 1 1 0; object-fit: contain; }
 .currentCover p { margin: 0; max-width: 60ch; line-height: 1.5; overflow-wrap: anywhere; }
-.editFrame { display: grid; width: 100%; aspect-ratio: 4 / 3; background: #0d1215; overflow: hidden; border: 1px solid #52616b; }
+.editFrame { display: grid; width: 100%; aspect-ratio: 1; background: #0d1215; overflow: hidden; border: 1px solid #52616b; }
 .horizontal { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .vertical { grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
 .single { grid-template-columns: minmax(0, 1fr); }
@@ -31,7 +31,7 @@
 .zoom input { min-width: 40px; max-width: 180px; width: 100%; accent-color: #65b4aa; }
 .imageError { position: absolute; inset: 40% 10px auto; color: var(--text-secondary, #bdc8c5); text-align: center; }
 .previewRow { display: flex; align-items: center; gap: 16px; margin-top: 16px; color: #b3c2ca; font-size: 13px; }
-.preview { display: grid; width: 180px; aspect-ratio: 4 / 3; overflow: hidden; background: #0d1215; }
+.preview { display: grid; width: 180px; aspect-ratio: 1; overflow: hidden; background: #0d1215; }
 .previewCell { position: relative; display: block; min-width: 0; min-height: 0; overflow: hidden; }
 .previewCell img { position: absolute; display: block; max-width: none; object-fit: fill; }
 .previewEmpty { background: #2d383e; }

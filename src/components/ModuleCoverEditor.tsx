@@ -11,12 +11,22 @@ import { useAppSession } from '@/lib/context/AppSessionContext';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { uploadFileAsAsset } from '@/lib/http/file-upload';
 import { useUnsavedNavigation } from '@/lib/hooks/use-unsaved-navigation';
-import type { ModuleCoverDTO, ModuleCoverCrop, ModuleCoverEditorState, ModuleCoverLayout, ModuleCoverRecipe, ModuleCoverRequestResult, ModuleCoverSaveInput, ModuleCoverSaveResult, ModuleCoverSourceDTO } from '@/lib/image-studio/module-cover-types';
+import { MODULE_COVER_OUTPUT, type ModuleCoverDTO, type ModuleCoverCrop, type ModuleCoverEditorState, type ModuleCoverLayout, type ModuleCoverSquareRecipe, type ModuleCoverRequestResult, type ModuleCoverSaveInput, type ModuleCoverSaveResult, type ModuleCoverSourceDTO } from '@/lib/image-studio/module-cover-types';
 import styles from './ModuleCoverEditor.module.css';
 
 type Slot = { source: ModuleCoverSourceDTO; crop?: ModuleCoverCrop; restore?: ModuleCoverCrop; key: number } | null;
 const layouts: Array<[ModuleCoverLayout, string]> = [['single', '单图'], ['horizontal', '左右'], ['vertical', '上下']];
-const output = { width: 1280, height: 960 } as const;
+const output = { width: MODULE_COVER_OUTPUT.width, height: MODULE_COVER_OUTPUT.height } as const;
+
+function sameCrop(left: ModuleCoverCrop, right: ModuleCoverCrop) {
+  return (['x', 'y', 'width', 'height'] as const).every(key => Math.abs(left[key] - right[key]) < 0.001);
+}
+
+function validCrop(crop: ModuleCoverCrop, source: ModuleCoverSourceDTO, aspect: number) {
+  return Object.values(crop).every(Number.isFinite) && crop.x >= 0 && crop.y >= 0 && crop.width > 0 && crop.height > 0
+    && crop.x + crop.width <= 100.001 && crop.y + crop.height <= 100.001 && source.width > 0 && source.height > 0
+    && Math.abs((crop.width * source.width) / (crop.height * source.height) / aspect - 1) < 0.01;
+}
 
 async function json<T>(response: Response): Promise<T> {
   const value = await response.json().catch(() => null);
@@ -24,19 +34,42 @@ async function json<T>(response: Response): Promise<T> {
   return value as T;
 }
 
-function CropSlot({ slot, aspect, disabled, onCrop, onInteract }: { slot: NonNullable<Slot>; aspect: number; disabled: boolean; onCrop: (crop: ModuleCoverCrop) => void; onInteract: () => void }) {
+function CropSlot({ slot, aspect, disabled, onCrop, onInteract }: { slot: NonNullable<Slot>; aspect: number; disabled: boolean; onCrop: (crop?: ModuleCoverCrop) => void; onInteract: () => void }) {
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [failed, setFailed] = useState(false);
-  return <div className={styles.cropSlot} aria-disabled={disabled || undefined}>
+  const [ready, setReady] = useState(false);
+  const loaded = useRef(false), restored = useRef(false), latestArea = useRef<Area | null>(null);
+  const publishCrop = (area: Area) => {
+    latestArea.current = area;
+    if (!loaded.current || !validCrop(area, slot.source, aspect)) return;
+    // v6.2.4 emits the default area before setInitialCrop. Only accept the
+    // restored percentages after they agree, including when no state change is needed.
+    if (!restored.current && slot.restore && !sameCrop(area, slot.restore)) return;
+    restored.current = true;
+    setReady(true);
+    onCrop(area);
+  };
+  return <div className={styles.cropSlot} aria-disabled={disabled || !ready || undefined}>
     <Cropper image={slot.source.previewUrl} crop={position} zoom={zoom} aspect={aspect} maxZoom={12}
-      initialCroppedAreaPercentages={slot.restore} onCropChange={value => { if (!disabled) setPosition(value); }} onZoomChange={value => { if (!disabled) setZoom(value); }}
-      onCropComplete={(area: Area) => onCrop(area)} onInteractionStart={onInteract}
-      onWheelRequest={() => !disabled} onTouchRequest={() => !disabled}
-      showGrid={!disabled} keyboardStep={5} cropperProps={{ tabIndex: disabled ? -1 : 0, 'aria-label': '拖动图片选择封面局部，可用方向键微调' }}
-      mediaProps={{ onError: () => setFailed(true), onLoad: () => setFailed(false) }} />
+      initialCroppedAreaPercentages={slot.restore}
+      onCropChange={value => { if (!restored.current || !disabled) setPosition(value); }}
+      onZoomChange={value => { if (!restored.current || !disabled) setZoom(value); }}
+      onCropAreaChange={publishCrop} onInteractionStart={() => { if (ready && !disabled) onInteract(); }}
+      onMediaLoaded={media => {
+        if (!(media.naturalWidth > 0 && media.naturalHeight > 0)) return;
+        if (Math.abs((media.naturalWidth / media.naturalHeight) / (slot.source.width / slot.source.height) - 1) >= 0.01) {
+          loaded.current = false; setFailed(true); setReady(false); onCrop(); return;
+        }
+        loaded.current = true; setFailed(false);
+        if (latestArea.current) publishCrop(latestArea.current);
+      }}
+      onWheelRequest={() => ready && !disabled} onTouchRequest={() => ready && !disabled}
+      showGrid={!disabled} keyboardStep={5} cropperProps={{ tabIndex: disabled || !ready ? -1 : 0, 'aria-label': '拖动图片选择封面局部，可用方向键微调' }}
+      mediaProps={{ onError: () => { loaded.current = false; restored.current = false; setFailed(true); setReady(false); onCrop(); } }} />
     {failed && <span className={styles.imageError}>图片无法读取，请重新选择</span>}
-    <label className={styles.zoom}>缩放<input type="range" min="1" max="12" step="0.01" value={zoom} disabled={disabled || failed}
+    {!failed && !ready && <span className={styles.imageError} role="status">正在准备裁剪；若未能恢复，可重置裁剪或重新选图。</span>}
+    <label className={styles.zoom}>缩放<input type="range" min="1" max="12" step="0.01" value={zoom} disabled={disabled || !ready}
       onChange={event => { onInteract(); setZoom(Number(event.target.value)); }} aria-label="封面图片缩放" /></label>
   </div>;
 }
@@ -90,9 +123,10 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
   const busyRef = useRef(false), alive = useRef(true), sequence = useRef(0);
   const endpoint = `/api/image-studio/modules/${encodeURIComponent(moduleId)}/cover`;
   const count = layout === 'single' ? 1 : 2;
+  const legacyDraft = state?.recipe?.version === 1;
   const disabled = !sessionAllowed || busy || reading || Boolean(pending);
   const current = useCallback(() => alive.current && scope.current === expectedScope && sessionAllowed && !isClientSessionBlocked(), [expectedScope, sessionAllowed]);
-  const modified = () => { if (!disabled) setDirty(true); };
+  const modified = () => { if (current() && !disabled) setDirty(true); };
   useUnsavedNavigation(dirty || busy || Boolean(pending), confirm, { unsaved: dirty ? ['模块封面'] : [], busy: busy || pending ? ['封面保存结果待确认'] : [] });
 
   const initialize = useCallback(async () => {
@@ -104,7 +138,9 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
       setState(value); setLayout(value.recipe?.layout || 'single');
       const restored = value.recipe?.sources.map(item => {
         const source = value.sources.find(source => source.assetId === item.assetId && source.version === item.version);
-        return source ? { source, crop: item.crop, restore: item.crop, key: ++sequence.current } : null;
+        // A legacy 4:3 percentage crop is not a square crop. Reframe the same
+        // authorized original; keep the saved cover intact until explicit Save.
+        return source ? { source, restore: value.recipe?.version === 2 ? item.crop : undefined, key: ++sequence.current } : null;
       }) || [];
       setSlots([restored[0] || null, restored[1] || null]);
       setDirty(false); setError(value.sourceError || '');
@@ -155,8 +191,11 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
     if (!current() || busyRef.current || !state?.canManage) return;
     const selected = slots.slice(0, count);
     if (!retry && selected.some(slot => !slot?.crop)) return;
-    const recipe: ModuleCoverRecipe = { version: 1, layout, sources: selected.map(slot => ({ assetId: slot!.source.assetId, version: slot!.source.version, crop: slot!.crop! })), output };
-    const input = retry || { requestId: crypto.randomUUID(), expectedRevision: state.revision, target: state.target, recipe };
+    let input = retry;
+    if (!input) {
+      const recipe: ModuleCoverSquareRecipe = { version: 2, layout, sources: selected.map(slot => ({ assetId: slot!.source.assetId, version: slot!.source.version, crop: slot!.crop! })), output };
+      input = { requestId: crypto.randomUUID(), expectedRevision: state.revision, target: state.target, recipe };
+    }
     busyRef.current = true; setBusy(true); setError(''); setPending(input); setRetryAllowed(false);
     try {
       const result = await json<ModuleCoverRequestResult>(await fetch(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal: AbortSignal.timeout(90000) }));
@@ -205,20 +244,20 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
       {!state.canManage && <p role="status">封面由模块创建者维护。</p>}
       <CurrentCover key={`${state.target.kind}:${state.target.id}:${state.revision}:${state.fixedCover?.imageUrl || state.fixedCover?.thumbnailUrl || preview?.imageUrl || ''}`} cover={state.fixedCover} preview={preview} error={previewError} />
       <div className={styles.toolbar}><div className={styles.layouts} role="group" aria-label="封面排版">{layouts.map(([value, label]) => <button key={value} type="button" aria-pressed={layout === value} disabled={disabled || !state.canManage} onClick={() => changeLayout(value)}>{label}</button>)}</div>
-        {count === 2 && <button type="button" disabled={disabled || !state.canManage || !slots[0] || !slots[1]} onClick={() => { setSlots(([left, right]) => [right, left].map(slot => slot ? { ...slot, restore: slot.crop, key: ++sequence.current } : null)); setDirty(true); }}><ArrowLeftRight size={16} />交换位置</button>}
+        {count === 2 && <button type="button" disabled={disabled || !state.canManage || !slots[0]?.crop || !slots[1]?.crop} onClick={() => { setSlots(([left, right]) => [right, left].map(slot => slot ? { ...slot, crop: undefined, restore: slot.crop, key: ++sequence.current } : null)); setDirty(true); }}><ArrowLeftRight size={16} />交换位置</button>}
       </div>
-      <p className={styles.hint}>分别选图，拖动或缩放选择局部。保存后，所有有权查看模块的人会看到同一封面。</p>
+      <p className={styles.hint}>分别选图，拖动或缩放选择局部。保存为 1:1 方形封面，所有有权查看模块的人会看到同一封面。{legacyDraft ? '旧封面保持原样，只有保存后才替换。' : ''}</p>
       <div className={`${styles.editFrame} ${styles[layout]}`}>{slots.slice(0, count).map((slot, index) => <div key={index} className={styles.cell}>
-        {slot ? <CropSlot key={`${index}:${slot.key}`} slot={slot} aspect={layout === 'horizontal' ? 2 / 3 : layout === 'vertical' ? 8 / 3 : 4 / 3} disabled={disabled || !state.canManage}
-          onInteract={modified} onCrop={crop => setSlots(current => current.map((item, i) => i === index && item?.key === slot.key ? { ...item, crop } : item))} /> : <span className={styles.empty}>选择图片</span>}
+        {slot ? <CropSlot key={`${scopeKey}:${index}:${slot.key}`} slot={slot} aspect={layout === 'horizontal' ? 1 / 2 : layout === 'vertical' ? 2 : 1} disabled={disabled || !state.canManage}
+          onInteract={modified} onCrop={crop => { if (current()) setSlots(previous => previous.map((item, i) => i === index && item?.key === slot.key && !(item.crop && crop && sameCrop(item.crop, crop)) ? { ...item, crop } : item)); }} /> : <span className={styles.empty}>选择图片</span>}
         <div className={styles.cellActions}><button type="button" disabled={disabled || !state.canManage} onClick={() => setPickerSlot(index)}><ImagePlus size={16} />{slot ? '换图' : '选择图片'}</button>
           {slot && <button type="button" title="重置这张图的裁剪" aria-label="重置这张图的裁剪" disabled={disabled || !state.canManage} onClick={() => { setSlots(current => current.map((item, i) => i === index && item ? { source: item.source, key: ++sequence.current } : item)); setDirty(true); }}><RotateCcw size={16} /></button>}</div>
       </div>)}</div>
-      <div className={styles.previewRow}><span>草稿预览{dirty ? '（未保存）' : ''}</span><div className={`${styles.preview} ${styles[layout]}`}>{slots.slice(0, count).map((slot, index) => <CropPreview key={index} slot={slot} />)}</div></div>
+      <div className={styles.previewRow}><span>草稿预览{dirty ? '（未保存）' : legacyDraft ? '（保存后生效）' : ''}</span><div className={`${styles.preview} ${styles[layout]}`}>{slots.slice(0, count).map((slot, index) => <CropPreview key={index} slot={slot} />)}</div></div>
       {error && <p className={styles.error} role="alert">{error}</p>}
       <footer className={styles.footer}><button type="button" onClick={dismiss} disabled={busy || Boolean(pending)}>取消</button>
         {pending ? <><button type="button" disabled={busy} onClick={() => void checkPending()}>{busy ? '确认中…' : '检查保存结果'}</button>{retryAllowed && <button type="button" disabled={busy} onClick={() => void save(pending)}>重试本次保存</button>}</>
-          : <button type="button" className={styles.primary} disabled={disabled || !state.canManage || !dirty || slots.slice(0, count).some(slot => !slot?.crop)} onClick={() => void save()}><Save size={16} />{busy ? '正在保存…' : '保存封面'}</button>}
+          : <button type="button" className={styles.primary} disabled={disabled || !state.canManage || (!dirty && !legacyDraft) || slots.slice(0, count).some(slot => !slot?.crop)} onClick={() => void save()}><Save size={16} />{busy ? '正在保存…' : legacyDraft ? '保存正方形封面' : '保存封面'}</button>}
       </footer>
     </>}
     {pickerSlot !== null && <UploadedImagePicker open imageOnly target="image-studio" title="选择封面图片" confirmLabel="使用这张图片" purpose="module-cover" maxSelection={1} currentCount={0} currentAssetIds={[]} portalContainer={dialog.current}
