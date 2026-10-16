@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '图片异常时保留安全核对信息，并暂存可验证的返回图片，方便核对原请求；参数、原任务和点数规则不变。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '修正图片接口返回文件链接时无法取图，并支持原任务接续保存，不重复生成；参数和点数规则不变。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

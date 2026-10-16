@@ -34,7 +34,8 @@ export type StudioResponseDiagnostics = {
 
 export type StudioResponseOutputCandidate = {
   kind: 'inline_data' | 'b64_json' | 'url';
-  location: 'candidate_content_part_inlineData' | 'candidate_content_part_inline_data' | 'data_b64_json' | 'data_url';
+  location: 'candidate_content_part_inlineData' | 'candidate_content_part_inline_data'
+    | 'candidate_content_part_fileData' | 'candidate_content_part_file_data' | 'data_b64_json' | 'data_url';
   wrapperPath: StudioResponseWrapper[];
   ordinal: number;
   mimeType: StudioResponseMime;
@@ -344,6 +345,14 @@ export function collectStudioResponseOutputCandidates(value: unknown): StudioRes
           const data = field(inline, 'data');
           if (strictBase64(data)) add({ kind: 'inline_data', location: key === 'inlineData' ? 'candidate_content_part_inlineData' : 'candidate_content_part_inline_data',
             mimeType: mime(field(inline, 'mimeType') ?? field(inline, 'mime_type')), value: data });
+        }
+        for (const key of ['fileData', 'file_data'] as const) {
+          const file = field(part, key);
+          if (!claim(file)) continue;
+          const mimeType = mime(field(file, 'mimeType') ?? field(file, 'mime_type'));
+          const url = field(file, 'fileUri') ?? field(file, 'file_uri');
+          if (mimeType !== 'unknown' && safeCandidateUrl(url)) add({ kind: 'url',
+            location: key === 'fileData' ? 'candidate_content_part_fileData' : 'candidate_content_part_file_data', mimeType, value: url });
         }
       }
     }

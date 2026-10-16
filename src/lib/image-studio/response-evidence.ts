@@ -29,7 +29,7 @@ type CandidateSource = Pick<StudioResponseOutputCandidate, 'kind' | 'location' |
 type ImageCandidate = CandidateSource & {
   storageKind: 'image'; file: string; bytes: number; sha256: string; format: string; mimeType: string; width: number; height: number;
 };
-type UrlCandidate = CandidateSource & { storageKind: 'url'; url: string; urlLength: number; urlSha256: string };
+type UrlCandidate = CandidateSource & { storageKind: 'url'; url: string; urlLength: number; urlSha256: string; mimeType?: StudioResponseOutputCandidate['mimeType'] };
 type Rejection = { ordinal: number; reason: 'candidate_limit' | 'source_invalid' | 'response_incomplete' | 'base64_invalid'
   | 'total_bytes_limit' | 'image_invalid' | 'mime_mismatch' | 'url_invalid' };
 type Manifest = {
@@ -41,7 +41,7 @@ export type StudioResponseEvidence = {
   diagnostic: StudioResponseDiagnostics; responseSha256: string; createdAt: number; expiresAt: number;
   confirmedOutput: false; recoveryAuthorized: false;
   candidates: Array<CandidateSource & ({ storageKind: 'image'; bytes: number; sha256: string; format: string; mimeType: string; width: number; height: number }
-    | { storageKind: 'url'; hasUrl: true; urlLength: number })>;
+    | { storageKind: 'url'; hasUrl: true; urlLength: number; mimeType?: StudioResponseOutputCandidate['mimeType'] })>;
   rejected: Rejection[];
 };
 
@@ -136,11 +136,15 @@ async function readManifest(dir: string): Promise<Manifest> {
   return JSON.parse(bytes.toString('utf8')) as Manifest;
 }
 function sourceFor(candidate: Pick<StudioResponseOutputCandidate, 'kind' | 'location' | 'wrapperPath' | 'ordinal'>): CandidateSource | null {
-  const pairs: Record<string, string[]> = { inline_data: ['candidate_content_part_inlineData', 'candidate_content_part_inline_data'], b64_json: ['data_b64_json'], url: ['data_url'] };
+  const pairs: Record<string, string[]> = { inline_data: ['candidate_content_part_inlineData', 'candidate_content_part_inline_data'], b64_json: ['data_b64_json'],
+    url: ['data_url', 'candidate_content_part_fileData', 'candidate_content_part_file_data'] };
   if (!candidate || !['inline_data', 'b64_json', 'url'].includes(candidate.kind) || !pairs[candidate.kind].includes(candidate.location) || !Array.isArray(candidate.wrapperPath)
     || candidate.wrapperPath.length > 2 || !candidate.wrapperPath.every(value => WRAPPERS.includes(value))
     || !integer(candidate.ordinal) || candidate.ordinal >= MAX_CANDIDATES) return null;
   return { kind: candidate.kind, location: candidate.location, wrapperPath: [...candidate.wrapperPath], ordinal: candidate.ordinal, unconfirmed: true };
+}
+function imageMime(value: unknown): value is Exclude<StudioResponseOutputCandidate['mimeType'], 'unknown'> {
+  return typeof value === 'string' && Object.values(MIME).includes(value);
 }
 function safeUrl(value: unknown): value is string {
   if (typeof value !== 'string' || !value.length || value.length > 16384 || value !== value.trim() || /[\u0000-\u0020\u007f\\]/.test(value)) return false;
@@ -174,7 +178,8 @@ function safeEvidence(manifest: Manifest, diagnostic: StudioResponseDiagnostics)
     confirmedOutput: false, recoveryAuthorized: false, rejected: manifest.rejected.map(value => ({ ordinal: value.ordinal, reason: value.reason })),
     candidates: manifest.candidates.map((candidate): StudioResponseEvidence['candidates'][number] => ({ kind: candidate.kind, location: candidate.location,
       wrapperPath: [...candidate.wrapperPath], ordinal: candidate.ordinal, unconfirmed: true,
-      ...(candidate.storageKind === 'url' ? { storageKind: 'url' as const, hasUrl: true as const, urlLength: candidate.urlLength }
+      ...(candidate.storageKind === 'url' ? { storageKind: 'url' as const, hasUrl: true as const, urlLength: candidate.urlLength,
+        ...(candidate.location !== 'data_url' && imageMime(candidate.mimeType) ? { mimeType: candidate.mimeType } : {}) }
         : { storageKind: 'image' as const, bytes: candidate.bytes, sha256: candidate.sha256, format: candidate.format,
           mimeType: candidate.mimeType, width: candidate.width, height: candidate.height }) })) };
 }
@@ -205,6 +210,7 @@ export async function readStudioResponseEvidence(task: StudioResponseEvidenceTas
       seen.add(candidate.ordinal);
       if (candidate.storageKind === 'url') {
         if (candidate.kind !== 'url' || !safeUrl(candidate.url) || candidate.url.length !== candidate.urlLength || sha256(candidate.url) !== candidate.urlSha256) throw failure('invalid');
+        if (candidate.location !== 'data_url' && !imageMime(candidate.mimeType)) throw failure('invalid');
       } else if (candidate.storageKind === 'image') {
         if (candidate.kind === 'url' || candidate.file !== `candidate-${candidate.ordinal}.image`
           || !integer(candidate.bytes) || candidate.bytes <= 0 || !isHash(candidate.sha256) || !FORMATS.includes(candidate.format)
@@ -251,7 +257,9 @@ export async function recordStudioResponseEvidence(task: StudioResponseEvidenceT
       if (!diagnostic.observation.bodyComplete || diagnostic.observation.parseOutcome !== 'valid_json') { reject('response_incomplete'); continue; }
       if (source.kind === 'url') {
         if (!safeUrl(candidate.value)) { reject('url_invalid'); continue; }
-        manifest.candidates.push({ ...source, storageKind: 'url', url: candidate.value, urlLength: candidate.value.length, urlSha256: sha256(candidate.value) });
+        if (source.location !== 'data_url' && !imageMime(candidate.mimeType)) { reject('mime_mismatch'); continue; }
+        manifest.candidates.push({ ...source, storageKind: 'url', url: candidate.value, urlLength: candidate.value.length, urlSha256: sha256(candidate.value),
+          ...(source.location !== 'data_url' ? { mimeType: candidate.mimeType } : {}) });
         continue;
       }
       // Check the remaining aggregate budget before allocating the next decoded buffer.

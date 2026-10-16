@@ -56,6 +56,32 @@ assert.equal(collectStudioResponseOutputCandidates({ response: { result: { data:
 assert.equal(collectStudioResponseOutputCandidates({ response: { result: { body: { data: [{ b64_json: 'AAAA' }] } } } }).length, 0);
 assert.equal(collectStudioResponseOutputCandidates({ input: { data: [{ b64_json: 'AAAA' }] }, contents: [{ parts: [{ inlineData: { data: 'AAAA' } }] }] }).length, 0);
 
+const nativeFileUrl = `https://example.com/image.png?private=${secret}`;
+for (const container of ['fileData', 'file_data'] as const) {
+  for (const uriField of ['fileUri', 'file_uri'] as const) {
+    const native = { candidates: [{ content: { parts: [{ [container]: { mimeType: 'image/png', [uriField]: nativeFileUrl } }] } }] };
+    const found = collectStudioResponseOutputCandidates(native);
+    assert.equal(found.length, 1);
+    assert.equal(found[0].kind, 'url');
+    assert.equal(found[0].location, container === 'fileData' ? 'candidate_content_part_fileData' : 'candidate_content_part_file_data');
+    assert.equal(found[0].mimeType, 'image/png');
+    assert.equal(found[0].value, nativeFileUrl);
+    assert.equal(JSON.stringify(buildStudioResponseDiagnostics(native, observation)).includes(secret), false);
+    for (const mimeType of ['unknown', 'text/plain', 'video/mp4', 'IMAGE/PNG', undefined]) {
+      assert.equal(collectStudioResponseOutputCandidates({ candidates: [{ content: { parts: [{ [container]: { mimeType, [uriField]: nativeFileUrl } }] } }] }).length, 0);
+    }
+    for (const url of urlValues) {
+      assert.equal(collectStudioResponseOutputCandidates({ candidates: [{ content: { parts: [{ [container]: { mimeType: 'image/png', [uriField]: url } }] } }] }).length, 0);
+    }
+  }
+}
+assert.equal(collectStudioResponseOutputCandidates({ candidates: [{ content: { parts: [{ file_data: { mime_type: 'image/webp', file_uri: nativeFileUrl } }] } }] })[0]?.mimeType, 'image/webp');
+assert.equal(collectStudioResponseOutputCandidates({ candidates: [{ content: { parts: [{ text: nativeFileUrl }, { FileData: { mimeType: 'image/png', fileUri: nativeFileUrl } }, { fileData: { mimeType: 'image/png', url: nativeFileUrl } }] } }] }).length, 0);
+assert.equal(collectStudioResponseOutputCandidates({ fileData: { mimeType: 'image/png', fileUri: nativeFileUrl }, contents: [{ parts: [{ fileData: { mimeType: 'image/png', fileUri: nativeFileUrl } }] }] }).length, 0);
+const manyNativeFiles = { candidates: [{ content: { parts: Array.from({ length: 8 }, () => ({ fileData: { mimeType: 'image/png', fileUri: nativeFileUrl } })) } }] };
+assert.equal(collectStudioResponseOutputCandidates(manyNativeFiles).length, 4);
+assert.deepEqual(collectStudioResponseOutputCandidates({ response: { result: { candidates: [{ content: { parts: [{ fileData: { mimeType: 'image/png', fileUri: nativeFileUrl } }] } }] } } })[0]?.wrapperPath, ['response', 'result']);
+
 const cycle: Record<string, unknown> = { candidates: Array.from({ length: 40 }, () => ({ content: { parts: Array.from({ length: 40 }, () => ({ text: secret })) } })) };
 cycle.response = cycle;
 const bounded = buildStudioResponseDiagnostics(cycle, observation);

@@ -152,7 +152,7 @@ export async function requestStudioImages(params: {
   const transport: typeof fetch = params.protocol && fetcher === fetch ? fetchPinnedApi as typeof fetch : fetcher;
   if (params.protocol === 'gemini_native' || !params.protocol && params.provider !== 'ai_media_vip' && GEMINI_IMAGE_MODELS.has(params.model)) {
     if (params.resumeAsync) throw new StudioProviderError('request', 'gemini_async_not_supported');
-    return requestGeminiStudioImages(standardRatioContract ? { ...params, ratio: requestRatio === 'auto' ? undefined : requestRatio } : params, transport);
+    return requestGeminiStudioImages(standardRatioContract ? { ...params, ratio: requestRatio === 'auto' ? undefined : requestRatio } : params, transport, readImage);
   }
   const url = new URL(params.baseUrl);
   const basePath = url.pathname.replace(/\/$/, '').replace(/\/v1(?:\/images\/(?:generations|edits))?$/, '');
@@ -287,8 +287,10 @@ async function requestGeminiStudioImages(params: {
   recordResponse?: (response: Response) => Promise<void>;
   recordResponseEvidence?: StudioResponseEvidenceRecorder;
   persistBase64Image?: (value: string, usage: unknown) => Promise<void>;
+  deliverRemoteImage?: (url: string, usage: unknown) => Promise<Buffer>;
+  downloadSignal?: AbortSignal;
   protocol?: ImageGenerationChannelProtocol;
-}, fetcher: typeof fetch): Promise<{ images: string[]; usage: unknown }> {
+}, fetcher: typeof fetch, readImage: typeof readStudioImage): Promise<{ images: string[]; usage: unknown }> {
   const url = new URL(params.baseUrl);
   const basePath = url.pathname.replace(/\/$/, '').replace(/\/v1$/, '').replace(/\/v1beta$/, '');
   url.pathname = `${basePath}/v1beta/models/${encodeURIComponent(params.upstreamModel || params.model)}:generateContent`;
@@ -335,25 +337,56 @@ async function requestGeminiStudioImages(params: {
       } : undefined);
   } catch (error) { await recordEvidence(); throw error; }
   if (!response.ok) { await recordEvidence(); throw new StudioProviderError('request', 'http_error', response.status); }
-  let images: string[];
+  type NativeOutput = { kind: 'inline' | 'url'; value: string };
+  let outputs: NativeOutput[];
   try {
-    images = (value?.candidates || []).flatMap((candidate: { content?: { parts?: Array<Record<string, unknown>> } }) => candidate.content?.parts || [])
+    outputs = (value?.candidates || []).flatMap((candidate: { content?: { parts?: Array<Record<string, unknown>> } }) => candidate.content?.parts || [])
       .map((part: Record<string, unknown>) => {
         const inline = (part.inlineData || part.inline_data) as { data?: unknown } | undefined;
-        return typeof inline?.data === 'string' ? inline.data : null;
+        if (typeof inline?.data === 'string' && inline.data.length) return { kind: 'inline' as const, value: inline.data };
+        const file = (part.fileData || part.file_data) as { mimeType?: unknown; mime_type?: unknown; fileUri?: unknown; file_uri?: unknown } | undefined;
+        if (!file) return null;
+        const mime = file.mimeType ?? file.mime_type;
+        if (typeof mime !== 'string' || !['image/png', 'image/jpeg', 'image/webp', 'image/avif', 'image/tiff'].includes(mime)) {
+          throw new StudioProviderError('response', 'unsupported_output', response.status);
+        }
+        const source = file.fileUri ?? file.file_uri;
+        if (typeof source !== 'string' || !source.length || source.length > 16384 || source !== source.trim()
+          || /[\u0000-\u0020\u007f\\]/.test(source)) throw new StudioImageDownloadError('download_unsafe_url');
+        let parsed: URL;
+        try { parsed = new URL(source); } catch { throw new StudioImageDownloadError('download_unsafe_url'); }
+        if (parsed.protocol !== 'https:' || parsed.username || parsed.password) throw new StudioImageDownloadError('download_unsafe_url');
+        return { kind: 'url' as const, value: source };
       })
-      .filter((image: unknown): image is string => typeof image === 'string' && image.length > 0);
-  } catch { await recordEvidence(); throw new StudioProviderError('response', 'unsupported_output', response.status); }
-  if (!images.length) { await recordEvidence(); throw new StudioProviderError('response', evidenceUnavailable ? 'response_evidence_unavailable' : 'empty_output', response.status); }
-  if (images.length !== params.count) { await recordEvidence(); throw new StudioProviderError('response', 'unexpected_count', response.status); }
+      .filter((output: NativeOutput | null): output is NativeOutput => output !== null);
+  } catch (error) {
+    await recordEvidence();
+    if (error instanceof StudioProviderError) throw error;
+    if (error instanceof StudioImageDownloadError) throw new StudioProviderError('download', error.code, error.status, error.diagnostics, error.retryable);
+    throw new StudioProviderError('response', 'unsupported_output', response.status);
+  }
+  if (!outputs.length) { await recordEvidence(); throw new StudioProviderError('response', evidenceUnavailable ? 'response_evidence_unavailable' : 'empty_output', response.status); }
+  if (outputs.length !== params.count) { await recordEvidence(); throw new StudioProviderError('response', 'unexpected_count', response.status); }
   const usage = safeUsage(value.usageMetadata || value.usage);
+  const images: string[] = [];
+  for (const output of outputs) {
+    if (output.kind === 'inline') { images.push(output.value); continue; }
+    try {
+      const downloaded = params.deliverRemoteImage ? await params.deliverRemoteImage(output.value, usage)
+        : await readImage(output.value, params.downloadSignal || params.signal);
+      images.push(downloaded.toString('base64'));
+    } catch (error) {
+      await recordEvidence();
+      throw new StudioProviderError('download', error instanceof StudioImageDownloadError ? error.code : 'download_invalid_or_unreadable', error instanceof StudioImageDownloadError ? error.status : undefined, error instanceof StudioImageDownloadError ? error.diagnostics : undefined, error instanceof StudioImageDownloadError && error.retryable);
+    }
+  }
   // Only the instrumented native channel uses the early original checkpoint.
   // It precedes diagnostic I/O; do not duplicate its bytes in the isolated sidecar.
   let trustedImage: string | undefined;
-  if (params.recordResponseEvidence && params.persistBase64Image && images.length === 1) {
+  if (params.recordResponseEvidence && params.persistBase64Image && outputs.length === 1 && outputs[0].kind === 'inline') {
     try { await params.persistBase64Image(images[0], usage); trustedImage = images[0]; }
     catch (error) { await recordEvidence(); throw error; }
   }
   await recordEvidence(trustedImage);
-  return { images: images.slice(0, params.count), usage };
+  return { images, usage };
 }
