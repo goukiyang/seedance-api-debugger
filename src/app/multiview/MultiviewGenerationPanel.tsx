@@ -41,6 +41,7 @@ const keyFor = (owner: string, part: string) => `sd2:multiview-generation:v1:${o
 const tabKey = (owner: string, tab: string, part: string) => keyFor(owner, `tab:${tab}:${part}`);
 const receiptKey = (owner: string, key: string) => keyFor(owner, `receipt:${key}`);
 const TAB_STORAGE_KEY = 'sd2:multiview-generation:v1:tab';
+let documentTab: { id: string; resumeTab: string | null } | null = null;
 const MAX_SCAN_KEYS = 8192;
 type RequestScan = { records: RequestReceipt[]; incomplete: boolean; invalid: boolean; next: number | null };
 const pendingActive = (receipt: RequestReceipt | null) => receipt?.phase === 'unknown' || receipt?.phase === 'accepted';
@@ -71,17 +72,23 @@ function persistPointer(key: string, value: string) {
   localStorage.setItem(key, value);
   if (localStorage.getItem(key) !== value) throw new Error('本页记录未能保存，未提交。');
 }
-function readTabId() {
+function readDocumentTab() {
+  if (typeof window === 'undefined') throw new Error('页面现场尚未就绪，未新建请求。');
+  if (documentTab) return documentTab;
   const previous = sessionStorage.getItem(TAB_STORAGE_KEY);
   if (previous && !identifier(previous)) throw new Error('本标签的原现场编号无法确认，不能新建生成请求。');
-  const next = previous || `mvtab-${crypto.randomUUID()}`;
-  sessionStorage.setItem(TAB_STORAGE_KEY, next);
-  if (sessionStorage.getItem(TAB_STORAGE_KEY) !== next) throw new Error('本标签记录无法保存，不能新建生成请求。');
-  return next;
+  // An opener/duplicated tab may clone sessionStorage. Its old ID is read-only recovery input,
+  // never the writable ID of this Document. Keep the new ID stable across effect/navigation remounts.
+  documentTab = { id: `mvtab-${crypto.randomUUID()}`, resumeTab: previous || null };
+  return documentTab;
 }
-function readCurrentReceipt(owner: string, tab: string): RequestReceipt | null {
-  const own = tab ? localStorage.getItem(tabKey(owner, tab, 'request-key')) : null;
-  const pointer = own ?? localStorage.getItem(keyFor(owner, 'last-request-key'));
+function readTabValue(owner: string, tab: string, resumeTab: string | null, part: string) {
+  const own = tab ? localStorage.getItem(tabKey(owner, tab, part)) : null;
+  return own ?? (resumeTab ? localStorage.getItem(tabKey(owner, resumeTab, part)) : null);
+}
+function readCurrentReceipt(owner: string, tab: string, resumeTab: string | null): RequestReceipt | null {
+  const pointer = readTabValue(owner, tab, resumeTab, 'request-key') ?? localStorage.getItem(keyFor(owner, 'last-request-key'));
+  if (pointer === 'null') return null; // This Document has explicitly restored an empty current slot.
   if (pointer !== null) {
     if (!identifier(pointer)) throw new Error('原请求编号无法确认，未新建请求。');
     const result = parseReceipt(localStorage.getItem(receiptKey(owner, pointer)), owner);
@@ -91,8 +98,8 @@ function readCurrentReceipt(owner: string, tab: string): RequestReceipt | null {
   // Read-only compatibility for the original account-wide slot. Never remove it.
   return parseReceipt(localStorage.getItem(keyFor(owner, 'request')), owner);
 }
-function readAssociation(owner: string, tab: string) {
-  const own = tab ? localStorage.getItem(tabKey(owner, tab, 'association')) : null;
+function readAssociation(owner: string, tab: string, resumeTab: string | null) {
+  const own = readTabValue(owner, tab, resumeTab, 'association');
   if (own !== null) return parseAssociation(own, owner);
   const previousTab = localStorage.getItem(keyFor(owner, 'last-association-tab'));
   if (previousTab !== null) {
@@ -245,23 +252,43 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     setProjectLoading(false); setCardLoading(false); setProjectName(''); setCardTitle(''); setCreating(null);
     setQuote(null); setQuoteError(''); setError(''); setStatus(''); setSaved(true); setSaveNotice(''); setRequestStorageFailed(false); setRecoveryBlocked(false);
     if (!owner || !hasLoadedUser) return;
-    let tab = '';
-    try { tab = readTabId(); setSessionTab(tab); }
-    catch (cause) { setRecoveryBlocked(true); setError(message(cause, '本标签记录无法读取，未提交。')); }
+    let tab = ''; let resumeTab: string | null = null; let restorationValid = true;
+    try { const identity = readDocumentTab(); tab = identity.id; resumeTab = identity.resumeTab; setSessionTab(tab); }
+    catch (cause) { restorationValid = false; setRecoveryBlocked(true); setError(message(cause, '本标签记录无法读取，未提交。')); }
     let restored: MultiviewGenerationDraft | null = null;
-    try { restored = parseMultiviewGenerationDraft((tab ? localStorage.getItem(tabKey(owner, tab, 'draft')) : null) ?? localStorage.getItem(keyFor(owner, 'draft'))); }
-    catch { setSaved(false); }
+    try {
+      restored = (tab ? parseMultiviewGenerationDraft(localStorage.getItem(tabKey(owner, tab, 'draft'))) : null)
+        ?? (resumeTab ? parseMultiviewGenerationDraft(localStorage.getItem(tabKey(owner, resumeTab, 'draft'))) : null)
+        ?? parseMultiviewGenerationDraft(localStorage.getItem(keyFor(owner, 'draft')));
+    } catch { restorationValid = false; setSaved(false); setRecoveryBlocked(true); }
     const next = restored || defaultMultiviewGenerationDraft(`multiview-${crypto.randomUUID()}`);
     if (propsRef.current.initialProjectId && identifier(propsRef.current.initialProjectId)) next.projectId = propsRef.current.initialProjectId;
     if (propsRef.current.initialVideoCardId && identifier(propsRef.current.initialVideoCardId)) next.videoCardId = propsRef.current.initialVideoCardId;
     setDraft(next);
+    let restoredReceipt: RequestReceipt | null = null;
     try {
-      const restoredReceipt = readCurrentReceipt(owner, tab);
+      restoredReceipt = readCurrentReceipt(owner, tab, resumeTab);
       setReceipt(restoredReceipt?.phase === 'ready' ? { ...restoredReceipt, phase: 'accepted' } : restoredReceipt);
     }
-    catch (cause) { setRecoveryBlocked(true); setError(message(cause, '原请求记录无法读取，不能重新生成。')); }
-    try { setAssociation(readAssociation(owner, tab)); }
-    catch (cause) { setRecoveryBlocked(true); setError(message(cause, '原素材加入记录无法读取。')); }
+    catch (cause) { restorationValid = false; setRecoveryBlocked(true); setError(message(cause, '原请求记录无法读取，不能重新生成。')); }
+    let restoredAssociation: Association | null = null;
+    try { restoredAssociation = readAssociation(owner, tab, resumeTab); setAssociation(restoredAssociation); }
+    catch (cause) { restorationValid = false; setRecoveryBlocked(true); setError(message(cause, '原素材加入记录无法读取。')); }
+    if (restorationValid && tab) {
+      try {
+        // Copy only into this Document's slots before publishing its reload recovery pointer.
+        // Existing independent receipts and the read-only resume slots are never overwritten here.
+        persist(tabKey(owner, tab, 'draft'), next);
+        if (restoredReceipt) {
+          const original = localStorage.getItem(receiptKey(owner, restoredReceipt.key));
+          if (original === null) persist(receiptKey(owner, restoredReceipt.key), restoredReceipt);
+          persistPointer(tabKey(owner, tab, 'request-key'), restoredReceipt.key);
+        } else persist(tabKey(owner, tab, 'request-key'), null);
+        persist(tabKey(owner, tab, 'association'), restoredAssociation);
+        sessionStorage.setItem(TAB_STORAGE_KEY, tab);
+        if (sessionStorage.getItem(TAB_STORAGE_KEY) !== tab) throw new Error('本标签恢复记录未能保存，未新建请求。');
+      } catch (cause) { setRecoveryBlocked(true); setSaved(false); setError(message(cause, '本标签恢复记录未能保存，未新建请求。')); }
+    }
     setLoadedOwner(owner);
     const scanned = scanRequests(owner); scanRef.current = scanned; setRequestScan(scanned);
     return () => { epoch.current++; checkAbort.current?.abort(); };
