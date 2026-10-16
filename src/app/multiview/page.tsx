@@ -356,7 +356,7 @@ function MultiviewPageContent() {
     setDraft(current => current ? { ...current, editorFrame: value } : current);
     if (video.current) { video.current.pause(); video.current.currentTime = info.timestamps[value]; }
   }
-  async function useTask(nextTask: string, automatic = false) {
+  async function selectTask(nextTask: string, automatic = false) {
     if (!safeTask(nextTask) || ownerRef.current !== owner || isClientSessionBlocked()) return;
     if (nextTask === taskId) { setPickerOpen(false); setPendingResult(null); return; }
     if (operation.current && !await confirm('拼图仍在准备或复制。切换后停止使用本次临时文件，原选帧会保留。', { title: '切换视频', confirmLabel: '停止并切换' })) return;
@@ -372,7 +372,7 @@ function MultiviewPageContent() {
     const key = `${result.ownerId}:${result.requestKey}`;
     if (seenReady.current.has(key) && !result.explicitOpen) return;
     seenReady.current.add(key);
-    if (result.explicitOpen || !operation.current && result.startedFromSourceKey === sourceKeyRef.current) void useTask(result.taskId, !result.explicitOpen); else setPendingResult(result);
+    if (result.explicitOpen || !operation.current && result.startedFromSourceKey === sourceKeyRef.current) void selectTask(result.taskId, !result.explicitOpen); else setPendingResult(result);
   }
   function finishOperation(op: ArtifactOperation) { if (operation.current?.token === op.token) { operation.current = null; setExporting(false); } }
   function beginArtifact(format: 'png' | 'zip', selected: MultiviewSlot[]) {
@@ -506,8 +506,8 @@ function MultiviewPageContent() {
     <div ref={generationArea}><MultiviewGenerationPanel currentSourceKey={currentSourceKey} hasResult={Boolean(visible)} expanded={expanded} onExpandedChange={changeExpanded}
       onUseExisting={() => setPickerOpen(true)} onReady={generationReady} onStateChange={setGeneration}
       initialProjectId={query.get('projectId') || undefined} initialVideoCardId={query.get('videoCardId') || undefined} /></div>
-    {pendingResult && pendingResult.ownerId === owner && <div className={styles.notice} role="status">新视频已就绪，当前选帧未被覆盖。<button type="button" onClick={() => void useTask(pendingResult.taskId)}>打开新结果</button></div>}
-    {previousTask && previousTask !== taskId && <button type="button" className={styles.quiet} onClick={() => void useTask(previousTask)}>返回上次结果</button>}
+    {pendingResult && pendingResult.ownerId === owner && <div className={styles.notice} role="status">新视频已就绪，当前选帧未被覆盖。<button type="button" onClick={() => void selectTask(pendingResult.taskId)}>打开新结果</button></div>}
+    {previousTask && previousTask !== taskId && <button type="button" className={styles.quiet} onClick={() => void selectTask(previousTask)}>返回上次结果</button>}
     {loading && <p className={styles.empty} role="status">正在核对原视频并读取候选图片…</p>}
     {error && <div className={styles.empty} role="status"><p>{error}</p><button type="button" onClick={() => void load()}>重新读取原视频</button><button type="button" onClick={() => setPickerOpen(true)}>使用已有视频</button></div>}
     {visible && info && draft && <section className={styles.result} aria-label="多角度成品工作台">
@@ -547,7 +547,7 @@ function MultiviewPageContent() {
       <div className={styles.footnote}><details open={originalOpen} onToggle={event => { const open = event.currentTarget.open; setOriginalOpen(open); setView(value => value.originalOpen === open ? value : { ...value, originalOpen: open }); }}><summary>查看原视频</summary>{originalOpen && !editing && player}{editing && <p>原视频正在右侧换帧工具中显示。</p>}</details><button type="button" className={styles.quiet} disabled={exporting} onClick={() => void clearWorkspace()}>清除本机选帧</button><p>草稿仅属本账号与此原片版本。失权时停止显示；提帧或导出失败不会重跑视频。</p></div>
       {preview !== null && frames[preview]?.url && <ZoomableImagePreview src={frames[preview].url!} alt="多角度原尺寸帧" imageSharing={false} sourceVersion={info.sourceVersion} previewKey={`multiview-${taskId}-${info.sourceVersion}-${preview}`} onClose={() => setPreview(null)} safeDetails={{ width: info.width, height: info.height }} />}
     </section>}
-    <MultiviewSourcePicker open={pickerOpen} onClose={() => setPickerOpen(false)} onSelect={id => void useTask(id)} currentTaskId={taskId} />
+    <MultiviewSourcePicker open={pickerOpen} onClose={() => setPickerOpen(false)} onSelect={id => void selectTask(id)} currentTaskId={taskId} />
     {productDialog}
   </div>;
 }
