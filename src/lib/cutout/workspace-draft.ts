@@ -71,6 +71,47 @@ const draftBytes = (value: CutoutWorkspaceDraft | null | undefined) => (value?.s
 const newStorageRevision = () => globalThis.crypto.randomUUID?.()
   || Array.from(globalThis.crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
 
+// IndexedDB clones Blobs, so object identity cannot establish that an older
+// workspace is redundant. Compare the retained content, with bounded byte reads.
+export async function cutoutWorkspaceDraftContentEqual(left: CutoutWorkspaceDraft, right: CutoutWorkspaceDraft, isCurrent: () => boolean): Promise<boolean> {
+  const box = (value: Box | null | undefined) => value ? [value.x, value.y, value.w, value.h] : null;
+  const content = (value: CutoutWorkspaceDraft) => [
+    value.source ? [value.source.id, value.source.reference ?? null, value.source.name, value.source.accepted,
+      value.source.fullCanvas === true, value.source.handoffId ?? null] : null,
+    value.sourceJobId,
+    value.repair ? [value.repair.filename, value.repair.jobId, value.repair.sourceVersion] : null,
+    (value.editor?.boxes || []).map(value => [value.id, value.name, box(value)]),
+    (value.editor?.prompts || []).map(value => [value.id, value.points, value.labels, value.mask_index ?? null]),
+    box(value.editor?.region),
+  ];
+  const sameBlob = async (a: Blob | undefined, b: Blob | undefined) => {
+    if (!a || !b) return !a && !b;
+    if (a.size !== b.size || a.type !== b.type) return false;
+    const chunkBytes = 256 * 1024;
+    for (let offset = 0; offset < a.size; offset += chunkBytes) {
+      if (!isCurrent()) return false;
+      const [aChunk, bChunk] = await Promise.all([
+        a.slice(offset, offset + chunkBytes).arrayBuffer(), b.slice(offset, offset + chunkBytes).arrayBuffer(),
+      ]);
+      if (!isCurrent()) return false;
+      const aBytes = new Uint8Array(aChunk), bBytes = new Uint8Array(bChunk);
+      if (aBytes.length !== bBytes.length || aBytes.some((byte, index) => byte !== bBytes[index])) return false;
+    }
+    return true;
+  };
+  try {
+    if (!isCurrent() || !validDraft(left) || !validDraft(right) || draftBytes(left) > MAX_BYTES || draftBytes(right) > MAX_BYTES
+      || JSON.stringify(content(left)) !== JSON.stringify(content(right))) return false;
+    return await sameBlob(left.source?.file, right.source?.file)
+      && await sameBlob(left.repair?.result, right.repair?.result)
+      && await sameBlob(left.repair?.mask, right.repair?.mask)
+      && isCurrent();
+  } catch {
+    // Unreadable bytes are not proof that the unique older workspace is safe to replace.
+    return false;
+  }
+}
+
 export async function readCutoutWorkspaceDraft(accountId: string, slot: DraftSlot = 'current'): Promise<CutoutWorkspaceDraft | null> {
   const value = await transaction<CutoutWorkspaceDraft | undefined>(accountId, 'readonly', store => store.get(draftKey(accountId, slot)));
   if (!value) return null;

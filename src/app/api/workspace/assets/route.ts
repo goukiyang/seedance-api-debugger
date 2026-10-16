@@ -62,6 +62,22 @@ export async function POST(request: NextRequest) {
     }
     const { assetId, role } = body;
     const shouldReplace = body.replace === true;
+    const recoveryClear = body.recoveryClear as { workspaceId: string; expectedWorkspaceAssets: Array<{ id: string; assetId: string; role: string; sortOrder: number }> } | undefined;
+    if (body.recoveryClear !== undefined) {
+      const validId = (value: unknown) => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
+      if (!recoveryClear || typeof recoveryClear !== 'object' || Array.isArray(recoveryClear)
+        || !requestId || !shouldReplace || !selection || selection.length !== 0
+        || !validId(recoveryClear.workspaceId) || !Array.isArray(recoveryClear.expectedWorkspaceAssets)
+        || recoveryClear.expectedWorkspaceAssets.length > 80
+        || recoveryClear.expectedWorkspaceAssets.some(item => !item || !validId(item.id) || !validId(item.assetId)
+          || typeof item.role !== 'string' || item.role.length > 64 || !Number.isSafeInteger(item.sortOrder))
+        || new Set(recoveryClear.expectedWorkspaceAssets.map(item => item.id)).size !== recoveryClear.expectedWorkspaceAssets.length) {
+        throw new VerifiedUploadError('UPLOAD_RECOVERY_INVALID', '恢复现场无效，当前素材未改变', 400);
+      }
+      if (request.headers.get('x-upload-owner-id') !== user.id || body.ownerId !== user.id) {
+        throw new VerifiedUploadError('SESSION_CHANGED', '当前账号已变化，未恢复素材');
+      }
+    }
     const assetIds = uniquePreserveOrder(
       selection ? selection.flatMap(item => item.assetId ? [item.assetId] : []) : Array.isArray(body.assetIds)
         ? body.assetIds
@@ -80,15 +96,18 @@ export async function POST(request: NextRequest) {
     const tabId = request.headers.get('x-tab-id') || 'default';
     const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
     const receiptKey = requestId ? `upload_association_v1:${uploadDigest(user.id)}:${uploadDigest(JSON.stringify([workspaceId, requestId]))}` : null;
-    const fingerprint = uploadDigest(JSON.stringify([workspaceId, assetIds, referenceImageIds, selection, role || null, shouldReplace]));
+    if (recoveryClear && recoveryClear.workspaceId !== workspaceId) throw new VerifiedUploadError('UPLOAD_ASSOCIATION_CHANGED', '工作区已变化，未恢复素材');
+    const fingerprint = uploadDigest(JSON.stringify([workspaceId, assetIds, referenceImageIds, selection, role || null, shouldReplace, ...(recoveryClear ? [recoveryClear] : [])]));
 
     if (shouldReplace && assetIds.length === 0 && referenceImageIds.length === 0) {
-      if (requestId) throw new VerifiedUploadError('UPLOAD_ASSOCIATION_EMPTY', '上传关联请求缺少素材，未清空工作区', 400);
-      await prisma.workspaceAsset.deleteMany({ where: { workspace_id: workspaceId } });
-      return NextResponse.json({ success: true, workspaceAssetIds: [], workspaceId });
+      if (requestId && !recoveryClear) throw new VerifiedUploadError('UPLOAD_ASSOCIATION_EMPTY', '上传关联请求缺少素材，未清空工作区', 400);
+      if (!requestId) {
+        await prisma.workspaceAsset.deleteMany({ where: { workspace_id: workspaceId } });
+        return NextResponse.json({ success: true, workspaceAssetIds: [], workspaceId });
+      }
     }
 
-    if (assetIds.length === 0 && referenceImageIds.length === 0) {
+    if (assetIds.length === 0 && referenceImageIds.length === 0 && !recoveryClear) {
       return NextResponse.json({ error: 'assetId required' }, { status: 400 });
     }
 
@@ -136,6 +155,16 @@ export async function POST(request: NextRequest) {
           if (mounted !== saved.workspaceAssetIds.length) throw new VerifiedUploadError('UPLOAD_ASSOCIATION_CHANGED', '原关联已被修改，未自动恢复');
           return saved;
         }
+      }
+      if (recoveryClear) {
+        // First application clears only the exact associations the user saw.
+        // A receipt replay above never clears later additions or edits again.
+        const mounted = await tx.workspaceAsset.findMany({ where: { workspace_id: workspaceId }, select: { id: true, asset_id: true, role: true, sort_order: true } });
+        const expected = new Map(recoveryClear.expectedWorkspaceAssets.map(item => [item.id, item]));
+        if (mounted.length !== expected.size || mounted.some(item => {
+          const seen = expected.get(item.id);
+          return !seen || seen.assetId !== item.asset_id || seen.role !== item.role || seen.sortOrder !== item.sort_order;
+        })) throw new VerifiedUploadError('UPLOAD_ASSOCIATION_CHANGED', '素材已在其他操作中变化，当前素材保留，请重新核对');
       }
       const saveResult = async (result: { workspaceAssetIds: string[]; referenceImageIdsFromAssets: string[] }) => {
         if (receiptKey) await tx.platformSetting.create({ data: { key: receiptKey, value_json: JSON.stringify({ fingerprint, ...result }), updated_by: user.id } });

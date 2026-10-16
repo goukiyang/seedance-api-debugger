@@ -15,7 +15,7 @@
 .coverReactions button, .coverReactions [data-studio-pin-control], .coverReactions [role="status"] { pointer-events: auto; }
 .coverReactions > [data-content-reactions] > span:first-child > span { min-width: 0; max-width: 100%; }
 /* Shrink the painted backing by 30%, retaining a 44px input target. */
-.coverReactions button:global(.sd2-like)[data-reaction-action="like"] { --lk-on: #ef748b; color: #e0e9e5; height: 44px; min-width: 44px; padding: 0 10px; gap: 5px; border: 0; background: transparent; font-size: 13px; }
+.coverReactions button:global(.sd2-like)[data-reaction-action="like"] { --lk-on: #ef4444; color: #e0e9e5; height: 44px; min-width: 44px; padding: 0 10px; gap: 5px; border: 0; background: transparent; font-size: 13px; }
 .coverReactions button:global(.sd2-like)[data-reaction-action="like"]:has(:global(.lk-count)) { min-width: 78px; }
 .coverReactions button:global(.sd2-like)[data-reaction-action="like"]::before { content: ''; position: absolute; inset: 6.6px 15%; border-radius: 22px; background: #202725e8; z-index: -1; pointer-events: none; }
 .coverReactions button[data-reaction-action="like"][aria-pressed="true"]::before { background: #202725e8; }

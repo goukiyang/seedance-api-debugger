@@ -71,7 +71,10 @@ async function postWorkspaceAssociation(tabId: string, body: Record<string, unkn
   if (!current()) throw new Error('当前账号已变化，原账号的加入结果未写入当前页面');
   if (!response.ok) throw new Error(data.error || data.message || '素材加入结果未确认，请重试原操作；不用重新上传文件');
   if (data.association?.requestId !== requestId || data.association.associated !== true) throw new Error('素材加入回执未确认，请重试原操作；不用重新上传文件');
-  try { sessionStorage.removeItem(key); } catch { /* A confirmed receipt is safe to replay. */ }
+  const releaseReceipt = () => { try { sessionStorage.removeItem(key); } catch { /* A confirmed receipt remains safe to read. */ } };
+  // A clear retry must read its first CAS receipt, not clear a later attachment.
+  if (!body.recoveryClear) releaseReceipt();
+  return releaseReceipt;
 }
 
 function getOrCreateTabId(): string {
@@ -116,6 +119,8 @@ export interface UseWorkspaceResult {
 }
 export type WorkspaceInputRecovery = { ownerId: string; epoch: number; tabId: string; workspaceId: string;
   items: Array<Pick<WorkspaceAssetItem, 'assetId' | 'referenceImageId' | 'role' | 'sortOrder'>> };
+type WorkspaceRecoveryClear = { workspaceId: string;
+  expectedWorkspaceAssets: Array<Pick<WorkspaceAssetItem, 'id' | 'assetId' | 'role' | 'sortOrder'>> };
 export class WorkspaceInputRecoveryError extends Error {
   constructor(message: string, readonly associationConfirmed: boolean) { super(message); }
 }
@@ -128,6 +133,7 @@ export function useWorkspace(): UseWorkspaceResult {
   // P0-1: 上传状态映射
   const [uploadStatuses, setUploadStatuses] = useState<Record<string, UploadStatus>>({});
   const [pendingWorkspaceAttach, setPendingWorkspaceAttach] = useState<PendingWorkspaceAttach | null>(null);
+  const recoveryClearSnapshots = useRef(new WeakMap<WorkspaceInputRecovery, WorkspaceRecoveryClear>());
   const captureRecovery = useCallback((): WorkspaceInputRecovery | null => {
     const session = uploadSession();
     if (!workspace || workspace.owner_id !== session.ownerId || loading || error || pendingWorkspaceAttach
@@ -137,13 +143,22 @@ export function useWorkspace(): UseWorkspaceResult {
   }, [workspace, loading, error, pendingWorkspaceAttach, uploadStatuses]);
   const restoreRecovery = useCallback(async (snapshot: WorkspaceInputRecovery) => {
     const current = () => { const session = uploadSession(); return session.ownerId === snapshot.ownerId && session.epoch === snapshot.epoch
-      && tabIdRef.current === snapshot.tabId && workspace?.id === snapshot.workspaceId; };
+      && tabIdRef.current === snapshot.tabId && workspace?.id === snapshot.workspaceId && workspace.owner_id === snapshot.ownerId; };
     if (!current()) throw new Error('账号或工作区已变化，原输入未套用到新位置。');
     setLoading(true); setError(null);
     let associationConfirmed = false;
     try {
-      await postWorkspaceAssociation(snapshot.tabId, { replace: true, selection: snapshot.items.map(item => item.referenceImageId
-        ? { referenceImageId: item.referenceImageId } : { assetId: item.assetId }) });
+      let recoveryClear: WorkspaceRecoveryClear | undefined;
+      if (!snapshot.items.length) {
+        recoveryClear = recoveryClearSnapshots.current.get(snapshot);
+        if (!recoveryClear) {
+          recoveryClear = { workspaceId: snapshot.workspaceId, expectedWorkspaceAssets: [...workspace!.assets]
+            .sort((a, b) => a.sortOrder - b.sortOrder).map(({ id, assetId, role, sortOrder }) => ({ id, assetId, role, sortOrder })) };
+          recoveryClearSnapshots.current.set(snapshot, recoveryClear);
+        }
+      }
+      const releaseReceipt = await postWorkspaceAssociation(snapshot.tabId, { replace: true, selection: snapshot.items.map(item => item.referenceImageId
+        ? { referenceImageId: item.referenceImageId } : { assetId: item.assetId }), ...(recoveryClear ? { recoveryClear } : {}) });
       associationConfirmed = true;
       for (const item of snapshot.items) {
         if (!current()) throw new Error('账号或工作区已变化，已停止恢复。');
@@ -162,13 +177,14 @@ export function useWorkspace(): UseWorkspaceResult {
         throw new Error(result.error || result.message || '素材顺序或角色尚未完整确认，原快照保留，请重试恢复。');
       }
       setWorkspace(result.workspace);
+      if (recoveryClear) { releaseReceipt(); recoveryClearSnapshots.current.delete(snapshot); }
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : '原输入恢复未确认';
       if (current()) setError(message);
       throw new WorkspaceInputRecoveryError(message, associationConfirmed);
     }
     finally { if (current()) setLoading(false); }
-  }, [workspace?.id]);
+  }, [workspace]);
 
   const fetchWorkspace = useCallback(async () => {
     try {

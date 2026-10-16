@@ -10,7 +10,7 @@ import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import CutoutWorkspacePreview from '@/components/cutout/CutoutWorkspacePreview';
-import { clearCutoutWorkspaceDraft, readCutoutWorkspaceDraft, saveCutoutWorkspaceDraft, swapCutoutWorkspaceDraft, readCutoutViewPreferences, saveCutoutViewPreferences, type CutoutViewPreferences, type CutoutWorkspaceDraft } from '@/lib/cutout/workspace-draft';
+import { clearCutoutWorkspaceDraft, cutoutWorkspaceDraftContentEqual, readCutoutWorkspaceDraft, saveCutoutWorkspaceDraft, swapCutoutWorkspaceDraft, readCutoutViewPreferences, saveCutoutViewPreferences, type CutoutViewPreferences, type CutoutWorkspaceDraft } from '@/lib/cutout/workspace-draft';
 import { getImageResultCutoutHandoff, prepareImageResultCutoutHandoff, startImageResultCutoutHandoff, type CutoutImageHandoff } from '@/lib/cutout/image-result-bridge';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useProductDialog } from '@/components/useProductDialog';
@@ -441,13 +441,14 @@ export default function CutoutPage() {
       previous = await readCutoutWorkspaceDraft(account, 'previous');
       const storedCurrent = draftWriteAllowedRef.current ? null : await readCutoutWorkspaceDraft(account);
       retained = snapshot.source || snapshot.repair ? snapshot : storedCurrent;
-      if (!retainsStoredCurrent && storedCurrent && retained !== storedCurrent && storedCurrent.source?.id !== retained?.source?.id) losses.push('尚未恢复的原本机草稿');
+      if (!retainsStoredCurrent && storedCurrent && retained && !await cutoutWorkspaceDraftContentEqual(storedCurrent, retained, current)) losses.push('尚未恢复的原本机草稿');
     } catch (error) {
       saveFailure = error instanceof Error ? error.message : '本机草稿暂时无法读取';
       losses.push('当前图片、修复、框选和未恢复的旧草稿（本机存储不可用，不能保证恢复）');
     }
     if (!current()) return false;
-    const replacesPrevious = !saveFailure && Boolean(previous && retained && previous.source?.id !== retained.source?.id);
+    const replacesPrevious = !saveFailure && Boolean(previous && retained && !await cutoutWorkspaceDraftContentEqual(previous, retained, current));
+    if (!current()) return false;
     if (replacesPrevious) losses.push('更早的上次图片草稿（本机只保留一个上次现场）');
     if (!saveFailure && !replacesPrevious && retained) {
       try { await saveCutoutWorkspaceDraft(account, { ...retained, savedAt: Date.now() }, 'previous', { expectedRevision: previous?.storageRevision || null, isCurrent: current }); }
