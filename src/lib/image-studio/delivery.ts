@@ -5,6 +5,7 @@ import { MAX_STUDIO_GENERATED_BYTES, MAX_STUDIO_GENERATED_BASE64, STUDIO_RECOVER
 import { prisma } from '@/lib/prisma';
 import { openStudioImageStream, classifyStudioDownloadError, StudioImageDownloadError, type StudioDownloadDiagnostics } from './media';
 import { studioGenerationDetailSuperseded } from './delivery-display';
+import { cleanupStudioResponseEvidence } from './response-evidence';
 
 const root = () => path.join(process.cwd(), 'storage', 'studio-delivery');
 let lastCleanup = 0;
@@ -385,6 +386,10 @@ export async function downloadStudioDelivery(record: StudioDelivery, signal: Abo
 
 export async function cleanupStudioDeliveries(now = Date.now()) {
   if (now - lastCleanup < 5 * 60_000) return;
+  await cleanupStudioResponseEvidence(now).catch(() => {
+    // An unreadable diagnostic sidecar must not stop the original delivery queue.
+    console.error('[image-response-evidence]', JSON.stringify({ code: 'cleanup_unavailable' }));
+  });
   const entries = await fs.readdir(root(), { withFileTypes: true }).catch(error => {
     if (error.code === 'ENOENT') return [];
     throw error;

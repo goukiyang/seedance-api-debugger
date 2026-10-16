@@ -10,6 +10,9 @@ import type { LookupAddress } from 'node:dns';
 import https from 'node:https';
 import { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
+import { createHash } from 'node:crypto';
+import { buildStudioResponseDiagnostics, collectStudioResponseOutputCandidates, type StudioResponseDiagnostics,
+  type StudioResponseOutputCandidate, type StudioResponseObservation } from './response-diagnostics';
 
 function unsafeAddress(value: string) {
   return isPrivateNetworkHost(value) || /^(0\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|1(9[28])\.0\.0\.|198\.(18|19)\.|2(2[4-9]|[3-5]\d)\.)/.test(value);
@@ -56,15 +59,31 @@ async function fetchPinnedApi(url: URL, init: RequestInit): Promise<Response> {
     upstream.end(bytes);
   });
 }
-async function boundedJson(response: Response, maximum: number) {
-  if (!response.body) throw new StudioProviderError('response', 'empty_response', response.status);
-  const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let size = 0;
+type StudioResponseEvidenceRecorder = (diagnostic: StudioResponseDiagnostics, candidates: StudioResponseOutputCandidate[]) => Promise<void>;
+type StudioJsonObserver = (value: unknown, observation: StudioResponseObservation) => Promise<void>;
+async function boundedJson(response: Response, maximum: number, observe?: StudioJsonObserver) {
+  const hash = observe ? createHash('sha256') : undefined;
+  let size = 0; let complete = false;
+  const record = (value: unknown, parseOutcome: StudioResponseObservation['parseOutcome']) => observe?.(value, {
+    httpStatus: response.status, contentType: response.headers.get('content-type'), responseBytes: size,
+    responseSha256: hash!.digest('hex'), bodyComplete: complete, parseOutcome,
+  });
+  if (!response.body) { await record(undefined, 'empty_body'); throw new StudioProviderError('response', 'empty_response', response.status); }
+  const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let oversize = false;
   try {
-    for (;;) { const next = await reader.read(); if (next.done) break; size += next.value.byteLength;
-      if (size > maximum) throw new Error('oversize'); chunks.push(next.value); }
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
-  } catch { throw new StudioProviderError('response', 'invalid_or_oversize_response', response.status); }
+    for (;;) { const next = await reader.read(); if (next.done) { complete = true; break; }
+      size += next.value.byteLength; hash?.update(next.value);
+      if (size > maximum) { oversize = true; throw new Error('oversize'); } chunks.push(next.value); }
+  } catch {
+    await record(undefined, oversize ? 'oversize' : 'read_error');
+    throw new StudioProviderError('response', 'invalid_or_oversize_response', response.status);
+  }
   finally { await reader.cancel().catch(() => {}); }
+  let value: unknown;
+  try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+  catch { await record(undefined, 'invalid_json'); throw new StudioProviderError('response', 'invalid_or_oversize_response', response.status); }
+  await record(value, 'valid_json');
+  return value as any;
 }
 
 export type StudioImageInput = { bytes: Uint8Array; mimeType: string };
@@ -109,6 +128,7 @@ export async function requestStudioImages(params: {
   deliverRemoteImage?: (url: string, usage: unknown) => Promise<Buffer>;
   persistBase64Image?: (value: string, usage: unknown) => Promise<void>;
   recordResponse?: (response: Response) => Promise<void>;
+  recordResponseEvidence?: StudioResponseEvidenceRecorder;
   size?: string;
   allowFourToOne?: boolean;
   ratioContractVersion?: 2;
@@ -265,6 +285,8 @@ async function requestGeminiStudioImages(params: {
   upstreamModel?: string;
   count: number; images: StudioImageInput[]; signal: AbortSignal; ratio?: string; size?: string;
   recordResponse?: (response: Response) => Promise<void>;
+  recordResponseEvidence?: StudioResponseEvidenceRecorder;
+  persistBase64Image?: (value: string, usage: unknown) => Promise<void>;
   protocol?: ImageGenerationChannelProtocol;
 }, fetcher: typeof fetch): Promise<{ images: string[]; usage: unknown }> {
   const url = new URL(params.baseUrl);
@@ -296,15 +318,42 @@ async function requestGeminiStudioImages(params: {
     throw new StudioProviderError('request', params.signal.aborted ? 'timeout' : 'network');
   }
   await params.recordResponse?.(response);
-  const value = await boundedJson(response, params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024);
-  if (!response.ok) throw new StudioProviderError('request', 'http_error', response.status);
-  const images = (value?.candidates || []).flatMap((candidate: { content?: { parts?: Array<Record<string, unknown>> } }) => candidate.content?.parts || [])
-    .map((part: Record<string, unknown>) => {
-      const inline = (part.inlineData || part.inline_data) as { data?: unknown } | undefined;
-      return typeof inline?.data === 'string' ? inline.data : null;
-    })
-    .filter((image: unknown): image is string => typeof image === 'string' && image.length > 0);
-  if (!images.length) throw new StudioProviderError('response', 'empty_output', response.status);
-  if (images.length !== params.count) throw new StudioProviderError('response', 'unexpected_count', response.status);
-  return { images: images.slice(0, params.count), usage: safeUsage(value.usageMetadata || value.usage) };
+  let captured: { diagnostic: StudioResponseDiagnostics; candidates: StudioResponseOutputCandidate[] } | undefined;
+  let evidenceUnavailable = false;
+  const recordEvidence = async (trustedImage?: string) => {
+    if (!captured || !params.recordResponseEvidence) return;
+    const candidates = trustedImage ? captured.candidates.filter(candidate => candidate.value !== trustedImage) : captured.candidates;
+    try { await params.recordResponseEvidence(captured.diagnostic, candidates); }
+    catch { evidenceUnavailable = true; } // The caller logs only a fixed safe code; valid delivery is not blocked.
+  };
+  let value: any;
+  try {
+    value = await boundedJson(response, params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024,
+      params.recordResponseEvidence ? async (body, observation) => {
+        captured = { diagnostic: buildStudioResponseDiagnostics(body, observation),
+          candidates: response.ok && observation.parseOutcome === 'valid_json' ? collectStudioResponseOutputCandidates(body) : [] };
+      } : undefined);
+  } catch (error) { await recordEvidence(); throw error; }
+  if (!response.ok) { await recordEvidence(); throw new StudioProviderError('request', 'http_error', response.status); }
+  let images: string[];
+  try {
+    images = (value?.candidates || []).flatMap((candidate: { content?: { parts?: Array<Record<string, unknown>> } }) => candidate.content?.parts || [])
+      .map((part: Record<string, unknown>) => {
+        const inline = (part.inlineData || part.inline_data) as { data?: unknown } | undefined;
+        return typeof inline?.data === 'string' ? inline.data : null;
+      })
+      .filter((image: unknown): image is string => typeof image === 'string' && image.length > 0);
+  } catch { await recordEvidence(); throw new StudioProviderError('response', 'unsupported_output', response.status); }
+  if (!images.length) { await recordEvidence(); throw new StudioProviderError('response', evidenceUnavailable ? 'response_evidence_unavailable' : 'empty_output', response.status); }
+  if (images.length !== params.count) { await recordEvidence(); throw new StudioProviderError('response', 'unexpected_count', response.status); }
+  const usage = safeUsage(value.usageMetadata || value.usage);
+  // Only the instrumented native channel uses the early original checkpoint.
+  // It precedes diagnostic I/O; do not duplicate its bytes in the isolated sidecar.
+  let trustedImage: string | undefined;
+  if (params.recordResponseEvidence && params.persistBase64Image && images.length === 1) {
+    try { await params.persistBase64Image(images[0], usage); trustedImage = images[0]; }
+    catch (error) { await recordEvidence(); throw error; }
+  }
+  await recordEvidence(trustedImage);
+  return { images: images.slice(0, params.count), usage };
 }

@@ -18,6 +18,7 @@ import { parseImageBillingContract } from './billing-contract';
 import { imageBillingReady } from './billing-readiness';
 import { reserveImageStudioQueueCapacity } from './queue-capacity';
 import { finishRejectedStudioDimensions } from './dimension-rejection';
+import { recordStudioResponseEvidence } from './response-evidence';
 
 export async function assertStudioPostAuthorization(task: ImageStudioTask) {
   const current = await prisma.imageStudioTask.findUnique({ where: { id: task.id } });
@@ -285,6 +286,18 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
           ...(standardRatioContract ? { ratioContractVersion: 2 as const } : {}),
           signal: AbortSignal.any([taskSignal, AbortSignal.timeout(300000)]), downloadSignal: taskSignal,
           recordResponse: response => recordStudioResponse(task, response),
+          recordResponseEvidence: capability.protocol === 'gemini_native' && ['gemini-nano-banana-2.1', 'gemini-3-pro-image-preview'].includes(task.model)
+            ? async (diagnostic, candidates) => {
+              try {
+                const receipt = await readStudioRequestReceipt(task);
+                if (!receipt) throw new StudioImageDownloadError('response_evidence_identity_unavailable');
+                await recordStudioResponseEvidence(task, receipt, diagnostic, candidates);
+              }
+              catch {
+                console.error('[image-response-evidence]', JSON.stringify({ taskId: task.id, code: 'capture_unavailable' }));
+                throw new StudioImageDownloadError('response_evidence_unavailable');
+              }
+            } : undefined,
           onAsyncAccepted: async receipt => { asyncReceipt = await createStudioAsyncReceipt(task, receipt); },
           persistBase64Image: async (value, outputUsage) => { await assertLease(); delivery = await createStudioBase64Delivery(task, value, outputUsage); },
           deliverRemoteImage: async (url, outputUsage) => {
