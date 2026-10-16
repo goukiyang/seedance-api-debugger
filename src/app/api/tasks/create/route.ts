@@ -3,6 +3,8 @@ import { compileCanvasVideoPrompt } from '@/lib/canvas-video-prompt';
 import { assertCanvasPromptCompatibility } from '@/lib/canvas-prompt-compatibility';
 import { parseCanvasPromptMentions, compileCanvasPromptReferences, CanvasPromptReferenceError } from '@/lib/canvas-prompt-references';
 import { resolveImageInputUrls } from '@/lib/assets/original-image-input';
+import { multiviewRequestIntent, claimMultiviewRequest, assertMultiviewRequestFence, acceptMultiviewRequest,
+  rejectMultiviewRequest, type MultiviewRequestClaim } from '@/lib/video/multiview-request-receipt';
 import { composeMultiviewGenerationPrompt, MULTIVIEW_REFERENCE_PROMPT_PREFIX, isMultiviewGenerationSeed, parseMultiviewGenerationSnapshot,
   type MultiviewGenerationSnapshot } from '@/lib/video/multiview-generation-contract';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
@@ -665,6 +667,32 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
+  let requestClaim: MultiviewRequestClaim | null = null;
+  let committedTaskId: string | null = null;
+  const receiptIntentKey = multiviewRequestIntent(body, request.headers.get('x-tab-id'));
+  if (!receiptIntentKey) return runCreate();
+  try {
+    const admission = await claimMultiviewRequest(user.id, receiptIntentKey, body);
+    if (admission.kind === 'blocked') {
+      const receipt = admission.receipt;
+      return NextResponse.json({ error: receipt?.code || 'MULTIVIEW_REQUEST_PENDING',
+        message: receipt?.message || '原提交结果待确认，请查询同一请求号，不会再次提交。', safeToResubmit: false,
+        ...(receipt ? { request_receipt: receipt, new_request_allowed: true } : {}) }, { status: admission.status });
+    }
+    if (admission.kind === 'claimed') requestClaim = admission.claim;
+    const response = await runCreate();
+    if (!requestClaim || response.status < 400 || response.status >= 500) return response;
+    const payload = await response.clone().json().catch(() => null);
+    // A task-bearing response must never be replaced by a pre-acceptance rejection.
+    if (payload?.id || payload?.task_id || payload?.existing_task_id) return response;
+    const receipt = await rejectMultiviewRequest(requestClaim, response.status, payload);
+    return receipt ? NextResponse.json({ ...payload, request_receipt: receipt, new_request_allowed: true, safeToResubmit: false }, { status: response.status }) : response;
+  } catch {
+    return NextResponse.json({ error: 'MULTIVIEW_REQUEST_UNKNOWN', message: '原提交结果暂时无法确认，请查询原请求号，不要重新提交。',
+      ...(committedTaskId ? { task_id: committedTaskId } : {}), safeToResubmit: false }, { status: 503 });
+  }
+
+  async function runCreate() {
   try { await resolveImageInputUrls(user, body); }
   catch (error) { if (error instanceof AuthError) return errorJson(error.message, error.status); throw error; }
   let requestedProvider: GenerationProvider;
@@ -1889,6 +1917,7 @@ export async function POST(request: NextRequest) {
   };
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await assertMultiviewRequestFence(tx, user.id, idempotencyKey, requestClaim);
       const task = await tx.videoTask.create({
         data: {
           provider: requestedProvider,
@@ -2116,10 +2145,12 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      await acceptMultiviewRequest(tx, requestClaim, task.id);
       return task;
     });
 
     taskId = result.id;
+    committedTaskId = taskId;
     createdTask = result;
   } catch (err) {
     if (idempotencyKey && err && typeof err === 'object' && 'code' in err && (err as { code?: unknown }).code === 'P2002') {
@@ -2458,6 +2489,7 @@ export async function POST(request: NextRequest) {
       },
       { status: userFacingFailure.status },
     );
+  }
   }
 }
 

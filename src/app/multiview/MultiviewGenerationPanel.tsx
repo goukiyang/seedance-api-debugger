@@ -19,7 +19,7 @@ import {
 } from '@/lib/video/multiview-generation-contract';
 import styles from './multiview-generation.module.css';
 
-export type MultiviewGenerationPhase = 'empty' | 'ready' | 'submitting' | 'submitted' | 'unknown' | 'failed' | 'video_ready';
+export type MultiviewGenerationPhase = 'empty' | 'ready' | 'submitting' | 'submitted' | 'unknown' | 'failed' | 'closed' | 'video_ready';
 export type MultiviewGenerationPanelState = { phase: MultiviewGenerationPhase; busy: boolean; taskId?: string; unsaved?: boolean; leavingBusy?: boolean };
 export type MultiviewGenerationReady = { taskId: string; requestKey: string; ownerId: string;
   startedFromSourceKey: string | null; explicitOpen: boolean };
@@ -32,13 +32,66 @@ type Project = { id: string; name: string; type: string; status?: string; can_ge
 type VideoCard = { id: string; project_id: string; title: string; status: string };
 // Match the server's VIDEO_CARD_GENERATABLE_STATUSES without importing its Prisma module.
 const canGenerateInCard = (card: VideoCard) => ['draft', 'active', 'reviewing'].includes(card.status);
+type RejectedRequestReceipt = { version: 1; key: string; state: 'rejected'; accepted: false;
+  code: string; message: string; rejectedAt: string };
+type ClosedRequestReceipt = { version: 1; key: string; state: 'closed'; accepted: false;
+  code: 'MULTIVIEW_REQUEST_CLOSED_BEFORE_ACCEPTANCE'; message: string; closedAt: string };
+type RequestObservation = { httpStatus: number | null; code?: string; message: string };
 type RequestReceipt = { schema: 1; ownerId: string; key: string; fingerprint: string; taskId: string | null;
-  phase: 'unknown' | 'accepted' | 'ready' | 'failed' | 'rejected'; startedFromSourceKey: string | null };
+  phase: 'unknown' | 'accepted' | 'ready' | 'failed' | 'rejected' | 'closed'; startedFromSourceKey: string | null;
+  observation?: RequestObservation; closeObservation?: RequestObservation; rejection?: RejectedRequestReceipt; closure?: ClosedRequestReceipt;
+  closeAttempted?: boolean; newRequestAllowed?: boolean };
 type Association = { schema: 1; ownerId: string; requestId: string; workspaceTabId: string; assetId: string; referenceImageId?: string };
 type ApiError = { error?: string; message?: string; code?: string; task_id?: string; existing_task_id?: string };
 type TaskStatus = ApiError & { id: string; local_status: string; idempotency_key?: string | null; submission_unconfirmed?: boolean };
 type Quote = { key: string; points: number };
+type RequestCheckOutcome = 'pending' | 'stop';
+type RequestResponse = ApiError & { request_receipt?: unknown; new_request_allowed?: unknown };
 const identifier = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(value);
+const responseCode = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(value);
+function safeResponseMessage(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim() || value.length > 400
+    || /https?:\/\/|data:|bearer\s|authorization|api[_ -]?key|cookie|token\s*[:=]|[<>]|\/(?:Users|Volumes|data|home)\//i.test(value)) return null;
+  return value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+}
+const shortReason = (value: string) => value.length > 100 ? `${value.slice(0, 100)}…` : value;
+function responseObservation(httpStatus: number | null, value?: ApiError): RequestObservation {
+  return { httpStatus, ...(responseCode(value?.code) ? { code: value.code } : {}),
+    message: safeResponseMessage(value?.message || value?.error) || '服务未返回可确认的提交结果，原请求编号已保留。' };
+}
+function parseObservation(value: unknown): RequestObservation | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.httpStatus !== null && !(typeof record.httpStatus === 'number' && Number.isInteger(record.httpStatus) && record.httpStatus >= 100 && record.httpStatus <= 599)) return undefined;
+  return responseObservation(record.httpStatus as number | null, {
+    ...(typeof record.code === 'string' ? { code: record.code } : {}), ...(typeof record.message === 'string' ? { message: record.message } : {}),
+  });
+}
+function parseRejectedReceipt(value: unknown, key: string): RejectedRequestReceipt | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const reason = safeResponseMessage(record.message);
+  if (record.version !== 1 || record.key !== key || record.state !== 'rejected' || record.accepted !== false
+    || !responseCode(record.code) || !reason || typeof record.rejectedAt !== 'string' || record.rejectedAt.length > 40
+    || !/^\d{4}-\d{2}-\d{2}T/.test(record.rejectedAt) || !Number.isFinite(Date.parse(record.rejectedAt))) return null;
+  return { version: 1, key, state: 'rejected', accepted: false, code: record.code, message: reason, rejectedAt: record.rejectedAt };
+}
+function rejectionFromResponse(value: RequestResponse, key: string) {
+  return value.new_request_allowed === true ? parseRejectedReceipt(value.request_receipt, key) : null;
+}
+function parseClosedReceipt(value: unknown, key: string): ClosedRequestReceipt | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const reason = safeResponseMessage(record.message);
+  if (record.version !== 1 || record.key !== key || record.state !== 'closed' || record.accepted !== false
+    || record.code !== 'MULTIVIEW_REQUEST_CLOSED_BEFORE_ACCEPTANCE' || !reason
+    || typeof record.closedAt !== 'string' || record.closedAt.length > 40 || !/^\d{4}-\d{2}-\d{2}T/.test(record.closedAt)
+    || !Number.isFinite(Date.parse(record.closedAt))) return null;
+  return { version: 1, key, state: 'closed', accepted: false, code: record.code, message: reason, closedAt: record.closedAt };
+}
+function closureFromResponse(value: RequestResponse, key: string) {
+  return value.new_request_allowed === true ? parseClosedReceipt(value.request_receipt, key) : null;
+}
 const keyFor = (owner: string, part: string) => `sd2:multiview-generation:v1:${owner}:${part}`;
 const tabKey = (owner: string, tab: string, part: string) => keyFor(owner, `tab:${tab}:${part}`);
 const receiptKey = (owner: string, key: string) => keyFor(owner, `receipt:${key}`);
@@ -52,9 +105,17 @@ function parseReceipt(raw: string | null, owner: string): RequestReceipt | null 
   if (raw.length > 4096) throw new Error('原请求记录无法确认，请先核对任务，不会重新生成。');
   const value = JSON.parse(raw) as RequestReceipt;
   if (value?.schema !== 1 || value.ownerId !== owner || !identifier(value.key) || !/^[a-f0-9]{64}$/.test(value.fingerprint)
-    || value.taskId !== null && !identifier(value.taskId) || !['unknown', 'accepted', 'ready', 'failed', 'rejected'].includes(value.phase)
+    || value.taskId !== null && !identifier(value.taskId) || !['unknown', 'accepted', 'ready', 'failed', 'rejected', 'closed'].includes(value.phase)
     || value.startedFromSourceKey !== null && (typeof value.startedFromSourceKey !== 'string' || value.startedFromSourceKey.length > 4096)) throw new Error('原请求记录无法确认，请先核对任务，不会重新生成。');
-  return value;
+  const rejection = value.newRequestAllowed === true ? parseRejectedReceipt(value.rejection, value.key) : null;
+  const closure = value.newRequestAllowed === true ? parseClosedReceipt(value.closure, value.key) : null;
+  const observation = parseObservation(value.observation);
+  const closeObservation = parseObservation(value.closeObservation);
+  return { schema: 1, ownerId: owner, key: value.key, fingerprint: value.fingerprint, taskId: value.taskId,
+    phase: (value.phase === 'rejected' && !rejection || value.phase === 'closed' && !closure) ? 'unknown' : value.phase,
+    startedFromSourceKey: value.startedFromSourceKey, ...(value.closeAttempted === true ? { closeAttempted: true } : {}),
+    ...(observation ? { observation } : {}), ...(closeObservation ? { closeObservation } : {}), ...(rejection ? { rejection, newRequestAllowed: true } : {}),
+    ...(closure ? { closure, newRequestAllowed: true } : {}) };
 }
 function parseAssociation(raw: string | null, owner: string): Association | null {
   if (!raw || raw === 'null') return null;
@@ -164,6 +225,8 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const [working, setWorking] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [closeRetryKey, setCloseRetryKey] = useState('');
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteError, setQuoteError] = useState('');
   const [error, setError] = useState('');
@@ -193,6 +256,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const uploadLock = useRef<object | null>(null);
   const submitLock = useRef<object | null>(null);
   const checkLock = useRef<object | null>(null);
+  const closeLock = useRef<object | null>(null);
   const checkAbort = useRef<AbortController | null>(null);
   const createLock = useRef<object | null>(null);
   const emittedReady = useRef('');
@@ -221,6 +285,14 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     const store = () => {
       const existing = parseReceipt(localStorage.getItem(receiptKey(value.ownerId, value.key)), value.ownerId);
       if (existing && (existing.fingerprint !== value.fingerprint || existing.taskId && value.taskId && existing.taskId !== value.taskId)) throw new Error('原请求记录发生冲突，未切换编号。');
+      if (existing) {
+        value = { ...existing, ...value, ...(existing.closeAttempted ? { closeAttempted: true } : {}),
+          ...(!value.observation && existing.observation ? { observation: existing.observation } : {}) };
+        // A late empty/error observation cannot erase an already proven terminal fence.
+        if (['rejected', 'closed'].includes(existing.phase) && pendingActive(value) && !value.taskId) {
+          value = { ...existing, ...(value.observation ? { observation: value.observation } : {}) };
+        }
+      }
       persist(receiptKey(value.ownerId, value.key), value);
       if (!identifier(tabRef.current)) throw new Error('本标签的原请求现场无法保存，未提交。');
       persistPointer(tabKey(value.ownerId, tabRef.current, 'request-key'), value.key);
@@ -228,7 +300,8 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     };
     if (beforeSubmission) {
       const previous = receiptRef.current;
-      if (previous && ['ready', 'failed', 'rejected'].includes(previous.phase)) persist(receiptKey(previous.ownerId, previous.key), previous);
+      if (previous && ['ready', 'failed', 'rejected', 'closed'].includes(previous.phase)
+        && localStorage.getItem(receiptKey(previous.ownerId, previous.key)) === null) persist(receiptKey(previous.ownerId, previous.key), previous);
       store(); setRequestStorageFailed(false);
     }
     else { try { store(); setRequestStorageFailed(false); } catch { setRequestStorageFailed(true); } }
@@ -250,10 +323,10 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   useEffect(() => { if (!hasLoadedUser) void refreshUser(); }, [hasLoadedUser, refreshUser]);
   useEffect(() => {
     checkAbort.current?.abort(); checkAbort.current = null;
-    epoch.current++; uploadLock.current = null; submitLock.current = null; checkLock.current = null; createLock.current = null; emittedReady.current = '';
+    epoch.current++; uploadLock.current = null; submitLock.current = null; checkLock.current = null; closeLock.current = null; createLock.current = null; emittedReady.current = '';
     setLoadedOwner(''); setDraft(null); setReceipt(null); setAssociation(null); setProjects([]); setCards([]);
     setSessionTab(''); setHistoryPage(0); scanRef.current = { records: [], incomplete: true, invalid: false, next: null }; setRequestScan(scanRef.current);
-    setImageReady(false); setPickerOpen(false); setWorking(false); setSubmitting(false); setChecking(false); setProgress(null);
+    setImageReady(false); setPickerOpen(false); setWorking(false); setSubmitting(false); setChecking(false); setClosing(false); setCloseRetryKey(''); setProgress(null);
     setProjectLoading(false); setCardLoading(false); setProjectName(''); setCardTitle(''); setCreating(null);
     setQuote(null); setQuoteError(''); setError(''); setStatus(''); setSaved(true); setSaveNotice(''); setRequestStorageFailed(false); setRecoveryBlocked(false);
     if (!owner || !hasLoadedUser) return;
@@ -301,9 +374,9 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   useEffect(() => {
     // Session exit retains the old user object for draft safety. That object is not current authority.
     epoch.current++; checkAbort.current?.abort(); checkAbort.current = null;
-    uploadLock.current = null; submitLock.current = null; checkLock.current = null; createLock.current = null;
+    uploadLock.current = null; submitLock.current = null; checkLock.current = null; closeLock.current = null; createLock.current = null;
     setImageReady(false); setPickerOpen(false); setProgress(null); setQuote(null); setProjects([]); setCards([]);
-    setWorking(false); setSubmitting(false); setChecking(false); setCreating(null); setProjectLoading(false); setCardLoading(false);
+    setWorking(false); setSubmitting(false); setChecking(false); setClosing(false); setCloseRetryKey(''); setCreating(null); setProjectLoading(false); setCardLoading(false);
     setLoadedAuthority(sessionReady ? authorityKey : '');
     // Draft and original request/association receipts deliberately remain untouched.
   }, [authorityKey, sessionReady]);
@@ -448,68 +521,92 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     finally { if (uploadLock.current === token) { uploadLock.current = null; setWorking(false); } }
   }
 
-  const checkRequest = useCallback(async () => {
+  const checkRequest = useCallback(async (): Promise<RequestCheckOutcome> => {
     const previous = receiptRef.current;
-    if (!previous || !owner || loadedOwner !== owner || !liveSessionReady.current || isClientSessionBlocked() || checkLock.current || submitting) return;
+    if (!previous || !owner || loadedOwner !== owner || !liveSessionReady.current || isClientSessionBlocked() || checkLock.current || closeLock.current || submitting) return 'stop';
     const token = {}; checkLock.current = token; const scope = capture(); const controller = new AbortController(); checkAbort.current = controller; setChecking(true);
-    const requestCurrent = () => current(scope) && receiptRef.current?.key === previous.key;
+    const requestCurrent = () => current(scope) && !controller.signal.aborted && !closeLock.current && receiptRef.current?.key === previous.key;
     try {
       let next = previous;
       if (!next.taskId) {
         const response = await fetch(`/api/tasks/request-status?idempotency_key=${encodeURIComponent(next.key)}`, { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]) });
-        const payload = await readJsonResponse<ApiError & { task?: { id: string } | null; lookup?: string; safeToResubmit?: boolean }>(response);
-        if (!requestCurrent()) return;
+        const payload = await readJsonResponse<RequestResponse & { task?: { id: string } | null; lookup?: string; safeToResubmit?: boolean }>(response);
+        if (!requestCurrent()) return 'stop';
         if (!response.ok) { if ([401, 403].includes(response.status)) invalidateMedia(); throw new Error(payload.message || payload.error || '原提交暂未确认，请稍后重新查询。'); }
-        if (!payload.task?.id) { setStatus('提交结果待确认，暂未查到原任务。请求编号已保留，不会再次提交。'); return; }
+        if (payload.task != null && !identifier(payload.task.id)) throw new Error('原任务编号无法确认，原记录已保留。');
+        const rejection = rejectionFromResponse(payload, next.key);
+        if (!payload.task?.id && payload.lookup === 'rejected' && rejection) {
+          saveReceipt({ ...next, phase: 'rejected', rejection, newRequestAllowed: true }); setStatus(''); return 'stop';
+        }
+        const closure = closureFromResponse(payload, next.key);
+        if (!payload.task?.id && payload.lookup === 'closed' && closure) {
+          saveReceipt({ ...next, phase: 'closed', closure, newRequestAllowed: true }); setStatus(''); return 'stop';
+        }
+        if (!payload.task?.id) {
+          if (next.closeAttempted && ['pending', 'not_found'].includes(payload.lookup || '')) setCloseRetryKey(next.key);
+          setStatus(payload.lookup === 'pending' ? '原提交仍在核对中，尚未确认视频任务。' : '暂未查到原任务，尚不能确认是否受理。请保留原编号，按需查询原请求。');
+          return payload.lookup === 'pending' ? 'pending' : 'stop';
+        }
         if (!identifier(payload.task.id)) throw new Error('原任务编号无法确认。');
         next = { ...next, taskId: payload.task.id, phase: 'accepted' }; saveReceipt(next);
       }
       const response = await fetch(`/api/video/status/${encodeURIComponent(next.taskId!)}`, { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]) });
       const task = await readJsonResponse<TaskStatus>(response);
-      if (!requestCurrent()) return;
+      if (!requestCurrent()) return 'stop';
       if (!response.ok || task.id !== next.taskId || task.idempotency_key !== next.key) { if ([401, 403, 404].includes(response.status)) invalidateMedia(); throw new Error(task.message || task.error || '原任务状态或请求编号暂不可确认，已保留原记录。'); }
-      if (['failed', 'cancelled'].includes(task.local_status)) { saveReceipt({ ...next, phase: 'failed' }); setStatus(task.message || '原视频任务未完成，输入已保留。不会自动重新生成。'); void refreshCredits(); return; }
-      if (task.local_status !== 'succeeded' || task.submission_unconfirmed) { setStatus(task.submission_unconfirmed ? '原任务受理结果待确认，请勿重复生成。' : task.local_status === 'running' ? '视频正在生成，可继续编辑下一次的设置。' : '原视频任务已受理，正在等待处理。'); return; }
+      if (['failed', 'cancelled'].includes(task.local_status)) { saveReceipt({ ...next, phase: 'failed' }); setStatus(task.message || '原视频任务未完成，输入已保留。不会自动重新生成。'); void refreshCredits(); return 'stop'; }
+      if (task.local_status !== 'succeeded' || task.submission_unconfirmed) { setStatus(task.submission_unconfirmed ? '原任务受理结果待确认，请勿重复生成。' : task.local_status === 'running' ? '视频正在生成，可继续编辑下一次的设置。' : '原视频任务已受理，正在等待处理。'); return 'pending'; }
       const media = await fetch(`/api/video/multiview/${encodeURIComponent(next.taskId!)}`, { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]) });
       const result = await readJsonResponse<ApiError & { info?: { taskId: string; sourceVersion: string } }>(media);
-      if (!requestCurrent()) return;
+      if (!requestCurrent()) return 'stop';
       if (!media.ok || result.info?.taskId !== next.taskId || !/^[a-f0-9]{64}$/.test(result.info.sourceVersion)) {
         if ([401, 403, 404].includes(media.status)) invalidateMedia();
-        setStatus(result.error || '视频已生成，原片或视图还在准备，将继续查询同一任务。'); return;
+        setStatus(result.error || '视频已生成，原片或视图还在准备，将继续查询同一任务。'); return 'pending';
       }
       next = { ...next, phase: 'ready' }; saveReceipt(next); setStatus('视频已可读取，可打开八视图。'); void refreshCredits();
       if (emittedReady.current !== next.key) {
         emittedReady.current = next.key;
         propsRef.current.onReady({ taskId: next.taskId!, requestKey: next.key, ownerId: owner, startedFromSourceKey: next.startedFromSourceKey, explicitOpen: false });
       }
-    } catch (cause) { if (requestCurrent()) setStatus(message(cause, '原请求暂未确认，请重新查询。')); }
+      return 'stop';
+    } catch (cause) {
+      if (requestCurrent() && !controller.signal.aborted) setStatus(message(cause, '原请求暂未确认，请重新查询。'));
+      return !controller.signal.aborted && previous.taskId && pendingActive(previous) ? 'pending' : 'stop';
+    }
     finally { if (checkLock.current === token) { checkLock.current = null; setChecking(false); } if (checkAbort.current === controller) checkAbort.current = null; }
     // The ref contains the immutable original receipt; draft edits must not restart polling or change its request.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [owner, loadedOwner, submitting, refreshCredits]);
   useEffect(() => {
     if (!ready || !allowed || !receipt || !['unknown', 'accepted', 'ready'].includes(receipt.phase)) return;
-    let cancelled = false; let timer: ReturnType<typeof setTimeout> | undefined;
-    const poll = async () => { await checkRequest(); if (!cancelled && pendingActive(receiptRef.current)) timer = setTimeout(() => void poll(), 5000); };
+    let cancelled = false; let timer: ReturnType<typeof setTimeout> | undefined; let pendingChecks = 0;
+    const poll = async () => {
+      const outcome = await checkRequest();
+      if (cancelled || outcome !== 'pending' || !pendingActive(receiptRef.current)) return;
+      if (!receiptRef.current?.taskId && ++pendingChecks >= 12) {
+        setStatus('本次自动核对已暂停，原请求仍待确认。可继续查询原请求，不会重新提交。'); return;
+      }
+      timer = setTimeout(() => void poll(), 5000);
+    };
     void poll();
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, [ready, allowed, owner, receipt?.key, receipt?.phase, checkRequest]);
   const phase: MultiviewGenerationPhase = submitting ? 'submitting' : receipt?.phase === 'unknown' ? 'unknown'
     : receipt?.phase === 'accepted' ? 'submitted' : receipt?.phase === 'ready' ? 'video_ready'
-      : receipt?.phase === 'failed' || receipt?.phase === 'rejected' ? 'failed' : imageReady ? 'ready' : 'empty';
+      : receipt?.phase === 'closed' ? 'closed' : receipt?.phase === 'failed' || receipt?.phase === 'rejected' ? 'failed' : imageReady ? 'ready' : 'empty';
   useEffect(() => {
     propsRef.current.onStateChange?.({
       phase: ready ? phase : 'empty',
-      busy: ready && (working || submitting || active),
+      busy: ready && (working || submitting || closing || active),
       ...(ready && receipt?.taskId ? { taskId: receipt.taskId } : {}),
       unsaved: !saved || requestStorageFailed,
-      leavingBusy: working || submitting || Boolean(creating),
+      leavingBusy: working || submitting || closing || Boolean(creating),
     });
-  }, [ready, phase, working, submitting, active, receipt?.taskId, saved, requestStorageFailed, creating]);
+  }, [ready, phase, working, submitting, closing, active, receipt?.taskId, saved, requestStorageFailed, creating]);
 
   async function generate() {
     if (!draft || !ready || !allowed || !imageReady || !currentProject || cardSelectionInvalid || approvalBlocked || !currentQuote || !prompt.valid
-      || !seedValid || !current(capture()) || working || uploadLock.current || createLock.current || association || submitLock.current || pendingActive(receiptRef.current) || recoveryBlocked) return;
+      || !seedValid || !current(capture()) || working || uploadLock.current || createLock.current || closeLock.current || association || submitLock.current || pendingActive(receiptRef.current) || recoveryBlocked) return;
     const scanned = refreshRequests();
     if (scanned.invalid || scanned.incomplete || scanned.records.some(pendingActive)) { setStatus('本账号仍有未确认的原请求，或本机记录尚未查全。请先查询下面的原请求，不会新建编号。'); return; }
     const scope = capture(); const token = {}; submitLock.current = token; setSubmitting(true); setError(''); setStatus('');
@@ -517,6 +614,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     const startedFromSourceKey = props.currentSourceKey;
     let pending: RequestReceipt | null = null;
     let storedBeforeSubmission = false;
+    let submissionHttpStatus: number | null = null;
     try {
       const key = crypto.randomUUID();
       const body = buildMultiviewGenerationRequest(frozen, { idempotencyKey: key, maxEstimatedCost: currentQuote.points });
@@ -529,28 +627,87 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
       saveReceipt(pending, true);
       storedBeforeSubmission = true;
       const response = await fetch('/api/tasks/create', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-tab-id': frozen.workspaceTabId }, body: JSON.stringify(body), signal: AbortSignal.timeout(120000) });
-      const result = await readJsonResponse<ApiError & { id?: string; submission_unconfirmed?: boolean }>(response);
+      submissionHttpStatus = response.status;
+      const result = await readJsonResponse<RequestResponse & { id?: string; submission_unconfirmed?: boolean }>(response);
       if (!current(scope)) return;
+      const rejection = rejectionFromResponse(result, pending.key);
+      if (!identifier(result.id) && !identifier(result.task_id) && rejection) {
+        saveReceipt({ ...pending, observation: responseObservation(response.status, result), phase: 'rejected', rejection, newRequestAllowed: true }); setStatus(''); return;
+      }
       if (!response.ok) {
+        pending = { ...pending, observation: responseObservation(response.status, result) };
         if ([401, 403].includes(response.status)) invalidateMedia();
         if (identifier(result.task_id)) {
           saveReceipt({ ...pending, taskId: result.task_id, phase: 'accepted' });
           setStatus(result.message || result.error || '原任务已记录，正在查询原任务结果；不会重新提交。'); return;
         }
         // A 4xx alone cannot prove this key was never accepted by a concurrent original request.
-        setStatus(result.message || result.error || '提交结果待确认，已保留原请求编号，请查询原任务。'); return;
+        saveReceipt(pending); setStatus(''); return;
       }
       if (!identifier(result.id)) throw new Error('提交结果待确认，原请求编号已保留。');
       saveReceipt({ ...pending, taskId: result.id, phase: 'accepted' }); setStatus('原视频任务已受理，正在查询成品。'); void refreshCredits();
     } catch (cause) {
       if (current(scope)) {
-        if (storedBeforeSubmission && receiptRef.current?.phase !== 'rejected') setStatus('提交结果待确认，原请求编号已保留。请查询原任务，不会自动再次提交。');
+        if (storedBeforeSubmission && pending && receiptRef.current && receiptRef.current.key === pending.key && pendingActive(receiptRef.current)) {
+          saveReceipt({ ...receiptRef.current, observation: responseObservation(submissionHttpStatus) });
+          setStatus('提交结果尚未确认，请查询原任务，不会自动再次提交。');
+        }
         else setError(message(cause, '尚未提交，请检查输入。'));
       }
     } finally { if (submitLock.current === token) { submitLock.current = null; setSubmitting(false); } }
   }
+  async function closeOriginalRequest() {
+    const previous = receiptRef.current;
+    if (!ready || !allowed || !previous || previous.phase !== 'unknown' || previous.taskId || previous.closeAttempted && closeRetryKey !== previous.key
+      || closing || closeLock.current || submitLock.current || uploadLock.current || createLock.current) return;
+    const scope = capture(); if (!current(scope)) return;
+    const token = {}; closeLock.current = token; setClosing(true); setCloseRetryKey(''); setError('');
+    checkAbort.current?.abort(); checkAbort.current = null; checkLock.current = null; setChecking(false);
+    const requestCurrent = () => current(scope) && receiptRef.current?.key === previous.key;
+    let attempted = false;
+    try {
+      const stored = parseReceipt(localStorage.getItem(receiptKey(owner, previous.key)), owner);
+      if (!stored || stored.key !== previous.key || stored.fingerprint !== previous.fingerprint) throw new Error('原请求记录尚未确认，未发送结束操作。');
+      if (stored.taskId || stored.phase !== 'unknown' || stored.closeAttempted && closeRetryKey !== previous.key) {
+        saveReceipt(stored);
+        setStatus(pendingActive(stored) ? '原核对记录已保留，请查询原请求；不会再次发送结束操作。' : ''); return;
+      }
+      // Each explicit attempt keeps the same key. Unknown results require GET before another explicit attempt.
+      saveReceipt({ ...stored, closeAttempted: true }, true);
+      attempted = true;
+      const response = await fetch('/api/tasks/request-status', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'close_unaccepted', idempotency_key: previous.key }), signal: AbortSignal.timeout(30000) });
+      const result = await readJsonResponse<RequestResponse & { task?: { id: string } | null; lookup?: string }>(response);
+      if (!requestCurrent()) return;
+      const original = receiptRef.current!;
+      if ([401, 403].includes(response.status)) invalidateMedia();
+      if (result.task?.id && identifier(result.task.id)) {
+        saveReceipt({ ...original, taskId: result.task.id, phase: 'accepted' });
+        setStatus('已找到原视频任务，将继续查询；没有结束或取消该任务。'); return;
+      }
+      if (result.task != null) throw new Error('原任务编号尚未确认，请查询原请求。');
+      const closure = closureFromResponse(result, previous.key);
+      if (response.ok && result.lookup === 'closed' && closure) {
+        saveReceipt({ ...original, phase: 'closed', closure, newRequestAllowed: true }); setStatus(''); return;
+      }
+      const rejection = rejectionFromResponse(result, previous.key);
+      if (response.ok && result.lookup === 'rejected' && rejection) {
+        saveReceipt({ ...original, phase: 'rejected', rejection, newRequestAllowed: true }); setStatus(''); return;
+      }
+      const closeObservation = responseObservation(response.status, result);
+      saveReceipt({ ...original, closeObservation });
+      setStatus(`尚未确认结束：${shortReason(closeObservation.message)} 请先查询原请求，仍无法结束时可再次核对或联系管理员。`);
+    } catch (cause) {
+      if (requestCurrent()) {
+        if (attempted) {
+          saveReceipt({ ...receiptRef.current!, closeObservation: responseObservation(null, { message: '服务未返回可确认的结束结果，请先查询原请求。' }) });
+          setStatus('核对结束的结果尚未确认，请先查询原请求；不会自动再次发送结束操作，也不会生成视频。');
+        } else setStatus(message(cause, '原记录尚未保存，未发送结束操作。'));
+      }
+    } finally { if (closeLock.current === token) { closeLock.current = null; setClosing(false); } }
+  }
   function chooseOriginalRequest(record: RequestReceipt) {
-    if (!ready || !current(capture()) || submitting || working || creating || record.ownerId !== owner) return;
+    if (!ready || !current(capture()) || submitting || closing || working || creating || record.ownerId !== owner) return;
     try {
       const stored = parseReceipt(localStorage.getItem(receiptKey(owner, record.key)), owner)
         || parseReceipt(localStorage.getItem(keyFor(owner, 'request')), owner);
@@ -558,6 +715,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
       persist(receiptKey(owner, stored.key), stored);
       persistPointer(tabKey(owner, tabRef.current, 'request-key'), stored.key);
       checkAbort.current?.abort(); checkAbort.current = null; checkLock.current = null; setChecking(false); emittedReady.current = '';
+      setCloseRetryKey('');
       const next: RequestReceipt = stored.phase === 'ready' ? { ...stored, phase: 'accepted' } : stored;
       receiptRef.current = next; setReceipt(next); setStatus('已选回原请求，只查询该编号，不会再次提交。');
     } catch (cause) { setError(message(cause, '原请求记录读取失败。')); }
@@ -588,9 +746,13 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   if (!ready || !draft) return <section className={styles.panel} role="status">正在恢复本账号的设置…</section>;
   const selectedModel = SEEDANCE_VIDEO_MODEL_OPTIONS.find(item => item.id === draft.model);
   const durationOptions = seedanceVideoDurationOptions(draft.model);
-  const formDisabled = submitting || working || Boolean(creating);
+  const formDisabled = submitting || closing || working || Boolean(creating);
   const blocked = formDisabled || active || accountRequestBlocked || recoveryBlocked || Boolean(association) || !imageReady || !currentProject
     || cardSelectionInvalid || approvalBlocked || !currentQuote || !prompt.valid || !seedValid;
+  const requestSummary = receipt?.phase === 'rejected' && receipt.rejection
+    ? `未开始生成：${shortReason(receipt.rejection.message)} 请调整当前设置后再主动生成。`
+    : receipt?.phase === 'closed' && receipt.closure ? '本次提交已结束，未开始生成。材料与设置已保留，可主动生成新的请求。'
+      : receipt?.phase === 'unknown' ? `提交结果待确认。${receipt.observation ? `上次反馈：${shortReason(receipt.observation.message)}` : '原提交反馈未保存，尚不能确认是否受理。'}` : '';
   return <section className={styles.panel} aria-label="原图与生成设置" onPaste={event => {
     const images = Array.from(event.clipboardData.files).filter(item => item.type.startsWith('image/'));
     if (!images.length || formDisabled) return;
@@ -655,22 +817,31 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         </div>
         {needsApproval && <p className={styles.feedback}>当前项目的1080p生成需要关联已有候选、当前最佳或最终版的视频卡，并通过该卡审批。</p>}
         {needsApproval && currentCard && !cardSelectionInvalid && <label className={styles.approval}><input type="checkbox" checked={draft.resolutionApprovalConfirmed} disabled={formDisabled} onChange={event => change({ resolutionApprovalConfirmed: event.target.checked, resolutionApprovalId: '' })} /><span>我已确认审批中心存在当前视频卡的有效1080p审批。<a href="/approvals" target="_blank" rel="noreferrer">查看审批</a></span></label>}
-        <div className={styles.generateRow}><button type="button" className={styles.primary} disabled={Boolean(blocked)} onClick={() => void generate()}>{submitting ? '正在提交…' : active ? '原视频处理中' : '生成视频'}</button><span>{currentQuote ? `本次预计 ${currentQuote.points} 点` : '报价待确认'}</span></div>
+        <div className={styles.generateRow}><button type="button" className={styles.primary} disabled={Boolean(blocked)} onClick={() => void generate()}>{submitting ? '正在提交…' : receipt?.phase === 'unknown' ? '提交结果待确认' : receipt?.phase === 'accepted' ? '视频任务已记录' : '生成视频'}</button><span>{currentQuote ? `本次预计 ${currentQuote.points} 点` : '报价待确认'}</span></div>
         {quoteError && <p className={styles.feedback} role="status">{quoteError}<button type="button" className={styles.quiet} onClick={() => setRevision(value => value + 1)}>重新报价</button></p>}
       </div>
     </div>}
     {(error || status || !saved || requestStorageFailed || accountRequestBlocked || requestScan.records.length > 0 || recoveryBlocked || active || receipt?.phase === 'ready') && <footer className={styles.footer}>
+      {requestSummary && <p role="status">{requestSummary}</p>}
       {error && <p role="status">{error}</p>}{status && <p role="status">{status}</p>}
       {!saved && <p role="status">{saveNotice || '本次修改无法保存在此设备，刷新可能丢失输入。'}</p>}
       {requestStorageFailed && <p role="status">原任务已保留在当前页面，但最新查询记录无法保存到此设备。请保留任务编号后再离开。</p>}
       {receipt && <div className={styles.requestActions}><a href={receipt.taskId ? `/tasks/${encodeURIComponent(receipt.taskId)}` : '/tasks'} target="_blank" rel="noreferrer">{receipt.taskId ? '查看原视频任务' : '核对任务列表'}</a>
-        {pendingActive(receipt) && <button type="button" disabled={checking || submitting} onClick={() => void checkRequest()}>{checking ? '正在查询…' : '查询原请求'}</button>}
+        {receipt.phase !== 'ready' && <button type="button" disabled={checking || submitting || closing} onClick={() => void checkRequest()}>{checking ? '正在查询…' : '查询原请求'}</button>}
+        {receipt.phase === 'unknown' && !receipt.taskId && (!receipt.closeAttempted || closeRetryKey === receipt.key || closing) && <button type="button" disabled={formDisabled || Boolean(association)} onClick={() => void closeOriginalRequest()}>{closing ? '正在核对结束…' : '核对并结束本次提交'}</button>}
         {receipt.phase === 'ready' && receipt.taskId && <button type="button" onClick={() => { if (current(capture())) props.onReady({ taskId: receipt.taskId!, requestKey: receipt.key, ownerId: owner, startedFromSourceKey: receipt.startedFromSourceKey, explicitOpen: true }); }}>打开新结果</button>}</div>}
+      {receipt && (receipt.observation || receipt.closeObservation || receipt.rejection || receipt.closure) && <details>
+        <summary>查看原提交记录</summary>
+        {receipt.observation && <p>上次提交反馈{receipt.observation.httpStatus ? `（HTTP ${receipt.observation.httpStatus}）` : ''}：{receipt.observation.message}</p>}
+        {receipt.closeObservation && <p>上次核对结束反馈：{receipt.closeObservation.message}</p>}
+        {receipt.rejection && <p>服务器已确认未开始生成：{receipt.rejection.message}</p>}
+        {receipt.closure && <p>{receipt.closure.message} 结束本次提交不代表已查明原提交失败的具体原因。</p>}
+      </details>}
       <details className={styles.requestHistory} open={accountRequestBlocked}>
         <summary>本账号原请求{requestScan.records.some(pendingActive) ? '（仍有待确认）' : ''}</summary>
         {(requestScan.invalid || requestScan.incomplete) && <p role="status">本机原请求记录未能完整确认，未列出的记录不代表不存在；新生成暂不放行。</p>}
         {requestScan.records.slice(historyPage * 8, historyPage * 8 + 8).map(record => <div className={styles.historyRow} key={record.key}>
-          <span>{record.taskId ? `任务 ${record.taskId}` : `请求 ${record.key}`} · {pendingActive(record) ? '待确认' : record.phase === 'ready' ? '视频可查询' : '原请求已结束'}</span>
+          <span>{record.taskId ? `任务 ${record.taskId}` : `请求 ${record.key}`} · {record.phase === 'unknown' ? '提交结果待确认' : record.phase === 'accepted' ? '任务已记录' : record.phase === 'rejected' ? '未开始生成' : record.phase === 'closed' ? '本次提交已结束' : record.phase === 'ready' ? '视频可查询' : '原任务已结束'}</span>
           <button type="button" disabled={formDisabled || !pendingActive(record) && record.key === receipt?.key} onClick={() => chooseOriginalRequest(record)}>查询原记录</button>
         </div>)}
         <div className={styles.requestActions}><button type="button" disabled={historyPage === 0} onClick={() => setHistoryPage(value => value - 1)}>上一页</button>

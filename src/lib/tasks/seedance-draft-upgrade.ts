@@ -1,5 +1,6 @@
 import type { SessionUser } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
+import { assertMultiviewRequestFence } from '@/lib/video/multiview-request-receipt';
 import { calculateEstimatedCost } from '@/lib/pricing';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import { getProjectForGeneration } from '@/lib/projects/permissions';
@@ -357,6 +358,7 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
   };
 
   let task = await prisma.$transaction(async (tx) => {
+    await assertMultiviewRequestFence(tx, input.user.id, idempotencyKey);
     const created = await tx.videoTask.create({
       data: {
         provider: 'seedance',
