@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '多角度生成只需选择项目，视频卡可选；需要审批的1080p仍沿原流程，已有视频、选帧和草稿保留。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '保护回退：保留多角度原请求查询和防重复受理；旧界面的核对结束操作需恢复新版后使用。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

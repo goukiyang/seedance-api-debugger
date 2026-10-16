@@ -7,6 +7,7 @@ import { Prisma } from '@prisma/client';
 import path from 'path';
 import fs from 'fs';
 import { prisma } from '@/lib/prisma';
+import { assertMultiviewRequestFence } from '@/lib/video/multiview-request-receipt';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { calculateEstimatedCost } from '@/lib/pricing';
 import { generationRequestFingerprint } from '@/lib/template-studio-video-fingerprint';
@@ -1283,6 +1284,7 @@ export async function POST(request: NextRequest) {
   };
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await assertMultiviewRequestFence(tx, user.id, idempotencyKey);
       const task = await tx.videoTask.create({
         data: {
           provider: VOLCENGINE_IP_VIDEO_PROVIDER,

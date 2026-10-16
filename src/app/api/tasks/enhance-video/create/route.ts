@@ -3,6 +3,7 @@ import path from 'path';
 import { readFile, stat } from 'fs/promises';
 import type { VideoTask } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { assertMultiviewRequestFence } from '@/lib/video/multiview-request-receipt';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
@@ -382,6 +383,7 @@ export async function POST(request: NextRequest) {
   let createdTask: VideoTask;
   try {
     createdTask = await prisma.$transaction(async (tx) => {
+      await assertMultiviewRequestFence(tx, user.id, idempotencyKey);
       const task = await tx.videoTask.create({
         data: {
           provider: 'volcengine_mediakit',
@@ -495,6 +497,7 @@ export async function POST(request: NextRequest) {
       return updatedTask;
     });
   } catch (error) {
+    if (error instanceof AuthError) return errorJson(error.message, error.status);
     if (error instanceof CreditError) {
       return NextResponse.json({ error: error.code, message: error.message }, { status: 400 });
     }
