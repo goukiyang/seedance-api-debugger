@@ -73,7 +73,7 @@ import {
   type SeedanceReferenceMediaItem,
 } from '@/lib/provider/reference-media-policy';
 import { providerCreateFailureUserMessage } from '@/lib/provider/error-message';
-import { AuthError } from '@/lib/auth/session';
+import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertFeatureAllowed } from '@/lib/access/feature-guard';
 import { getProjectForGeneration } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
@@ -626,7 +626,7 @@ function buildReferenceMediaFailureSummary(input: {
 }
 
 export async function POST(request: NextRequest) {
-  let user;
+  let user: SessionUser;
   let editPilotSettings: unknown;
   let requestSource: GenerationRequestSource = webRequestSource(request);
 
