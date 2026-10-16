@@ -232,6 +232,8 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
   const [saved, setSaved] = useState(true);
+  const [draftEdited, setDraftEdited] = useState(false);
+  const [retainedDraft, setRetainedDraft] = useState('');
   const [saveNotice, setSaveNotice] = useState('');
   const [requestStorageFailed, setRequestStorageFailed] = useState(false);
   const [recoveryBlocked, setRecoveryBlocked] = useState(false);
@@ -279,7 +281,11 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const invalidateMedia = () => { setImageReady(false); setPickerOpen(false); };
   function change(patch: Partial<MultiviewGenerationDraft>) {
     if (!ready || !current(capture()) || submitLock.current) return;
-    setDraft(value => value ? { ...value, ...patch } : value); setError(''); setSaved(false);
+    const previous = draftRef.current;
+    if (!previous) return;
+    const next = { ...previous, ...patch };
+    if (JSON.stringify(next) === JSON.stringify(previous)) return;
+    draftRef.current = next; setDraft(next); setError(''); setSaved(false); setDraftEdited(true);
   }
   function saveReceipt(value: RequestReceipt, beforeSubmission = false) {
     const store = () => {
@@ -328,7 +334,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     setSessionTab(''); setHistoryPage(0); scanRef.current = { records: [], incomplete: true, invalid: false, next: null }; setRequestScan(scanRef.current);
     setImageReady(false); setPickerOpen(false); setWorking(false); setSubmitting(false); setChecking(false); setClosing(false); setCloseRetryKey(''); setProgress(null);
     setProjectLoading(false); setCardLoading(false); setProjectName(''); setCardTitle(''); setCreating(null);
-    setQuote(null); setQuoteError(''); setError(''); setStatus(''); setSaved(true); setSaveNotice(''); setRequestStorageFailed(false); setRecoveryBlocked(false);
+    setQuote(null); setQuoteError(''); setError(''); setStatus(''); setSaved(true); setDraftEdited(false); setSaveNotice(''); setRequestStorageFailed(false); setRecoveryBlocked(false);
     if (!owner || !hasLoadedUser) return;
     let tab = ''; let resumeTab: string | null = null; let restorationValid = true;
     try { const identity = readDocumentTab(); tab = identity.id; resumeTab = identity.resumeTab; setSessionTab(tab); }
@@ -342,7 +348,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     const next = restored || defaultMultiviewGenerationDraft(`multiview-${crypto.randomUUID()}`);
     if (propsRef.current.initialProjectId && identifier(propsRef.current.initialProjectId)) next.projectId = propsRef.current.initialProjectId;
     if (propsRef.current.initialVideoCardId && identifier(propsRef.current.initialVideoCardId)) next.videoCardId = propsRef.current.initialVideoCardId;
-    setDraft(next);
+    setDraft(next); setRetainedDraft(JSON.stringify(next));
     let restoredReceipt: RequestReceipt | null = null;
     try {
       restoredReceipt = readCurrentReceipt(owner, tab, resumeTab);
@@ -385,7 +391,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     if (!parseMultiviewGenerationDraft(draft)) {
       setSaved(false); setSaveNotice('本次内容过长或设置无效，未能保存到本机；原已保存草稿未被覆盖。'); return;
     }
-    try { persistDraft(owner, sessionTab, draft); setSaved(true); setSaveNotice(''); }
+    try { persistDraft(owner, sessionTab, draft); setRetainedDraft(JSON.stringify(draft)); setSaved(true); setSaveNotice(''); }
     catch { setSaved(false); setSaveNotice('本次修改无法保存在此设备，刷新可能丢失输入。'); }
   }, [ready, draft, owner, sessionTab]);
   useEffect(() => {
@@ -490,7 +496,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     if (!check.ok || workspace.workspace?.assets.length !== 1 || !image?.referenceImageId) throw new Error('素材已保留，但唯一主图编号尚未确认。请重试原加入。');
     const nextDraft = { ...draftRef.current!, workspaceTabId: record.workspaceTabId, mainImage: { assetId: image.assetId, referenceImageId: image.referenceImageId } };
     setDraft(nextDraft);
-    setImageReady(true); setSaved(false); setAssociation(null); setError('');
+    setImageReady(true); setSaved(false); setDraftEdited(true); setAssociation(null); setError('');
     try { persistDraft(owner, tabRef.current, nextDraft); persist(tabKey(owner, tabRef.current, 'association'), null); }
     catch { /* Retain the original association so a later explicit check can recover this known asset. */ }
   }
@@ -599,10 +605,10 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
       phase: ready ? phase : 'empty',
       busy: ready && (working || submitting || closing || active),
       ...(ready && receipt?.taskId ? { taskId: receipt.taskId } : {}),
-      unsaved: !saved || requestStorageFailed,
+      unsaved: ready && draftEdited && !saved && JSON.stringify(draft) !== retainedDraft || requestStorageFailed,
       leavingBusy: working || submitting || closing || Boolean(creating),
     });
-  }, [ready, phase, working, submitting, closing, active, receipt?.taskId, saved, requestStorageFailed, creating]);
+  }, [ready, phase, working, submitting, closing, active, receipt?.taskId, saved, draftEdited, draft, retainedDraft, requestStorageFailed, creating]);
 
   async function generate() {
     if (!draft || !ready || !allowed || !imageReady || !currentProject || cardSelectionInvalid || approvalBlocked || !currentQuote || !prompt.valid

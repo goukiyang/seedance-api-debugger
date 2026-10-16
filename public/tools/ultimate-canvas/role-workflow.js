@@ -324,7 +324,7 @@
 
         function writeStored(ctx, value) {
             const key = storageKey(ctx);
-            if (!key) return;
+            if (!key) return false;
             const safe = { ...value };
             if (safe.pendingMutation?.kind?.startsWith('collaboration')) safe.pendingMutation = {
                 mutationId: safe.pendingMutation.mutationId, kind: safe.pendingMutation.kind, receiptOnly: true,
@@ -334,12 +334,17 @@
                 submittedDraft: validCollaborationDraft(safe.pendingMutation.submittedDraft) };
             const serialized = JSON.stringify(Object.assign({ version: 2 }, safe));
             scopedMemory.set(key, serialized);
-            try { localStorage.setItem(key, serialized); }
+            try {
+                localStorage.setItem(key, serialized);
+                if (localStorage.getItem(key) !== serialized) throw new Error('storage_not_retained');
+                return true;
+            }
             catch {
                 if (sameContext(ctx, state.ctx) && !state.storageNoticeShown) {
                     state.storageNoticeShown = true;
                     bridge.notice?.('草稿暂时只能保留在当前页；请勿关闭后再继续。', 'info');
                 }
+                return false;
             }
         }
 
@@ -360,14 +365,22 @@
         function persistView() {
             captureReadingAnchor();
             captureDrafts();
-            writeStored(state.ctx, {
+            const collaborationState = collaborationView();
+            const recoverable = sanitizeDrafts(state.drafts);
+            const saved = writeStored(state.ctx, {
                 open: state.open, mode: state.mode,
                 selectedNodeId: state.selectedNodeId,
                 selectedWorkId: state.selectedWorkId,
                 tab: state.tab,
-                collaboration: collaborationView(),
+                collaboration: collaborationState,
                 pendingMutation: state.pendingMutation, drafts: state.drafts, expanded: state.expanded
             });
+            // The normal restore readers must accept each active draft too.
+            return saved && (!(state.editorDirty || state.messageDirty) || Boolean(recoverable.works[state.draftMeta?.workId]))
+                && (!state.taskDraftDirty || Boolean(recoverable.tasks[taskDraftKey(state.taskDraft || {})]))
+                && (!state.actionDraftDirty || state.modalKind === 'collab-prompt'
+                    || Boolean(recoverable.actions[state.actionDraft?.meta?.workId + ':' + state.actionDraft?.kind]))
+                && (!collaboration.dirty || Boolean(validCollaborationDraft(collaborationState.draft)));
         }
 
         function clearPendingMutation(ctx, pending) {
@@ -732,14 +745,17 @@
 
         async function confirmDiscard(reason) {
             if (!hasUnsaved()) return true;
+            const ctx = currentContext();
             if (state.modalKind === 'collab-prompt' && state.actionDraftDirty) {
                 if (!await bridge.confirm({ title: '放弃这次输入？', message: '这里的输入尚未提交，离开会放弃本次输入；已保存任务与历史保留。', confirmText: '放弃输入并离开' })) return false;
+                if (!isCurrent(ctx)) return false;
                 state.actionDraftDirty = false; state.actionDraft = null;
+                if (!hasUnsaved()) return true;
             }
-            const ctx = currentContext(); persistView();
-            const leave = await bridge.confirm({ title: '保留草稿并离开？',
-                message: '未提交内容会保留在当前账号和画布的草稿中，重新打开后可继续编辑。',
-                confirmText: '保留草稿并离开' });
+            if (persistView()) return isCurrent(ctx);
+            const leave = await bridge.confirm({ title: '离开当前草稿？',
+                message: '本地保存失败，未提交输入只保留在当前页；离开后可能无法恢复。',
+                confirmText: '仍然离开' });
             return Boolean(leave && isCurrent(ctx));
         }
 
@@ -2005,17 +2021,17 @@
         async function dismissModal(content, ctx) {
             if (state.modalContent !== content || !isCurrent(ctx)) return;
             if (state.taskSaving || state.actionSaving) { bridge.notice?.('正在确认原操作结果，请先等待回执。', 'info'); return; }
-            if (state.modalKind === 'collab-requirement' && collaboration.dirty
-                && !await bridge.confirm({ title: '保留草稿并关闭？', message: '需求和分工仍未提交，保留在本账号与画布草稿中。', confirmText: '保留草稿并关闭' })) return;
-            const dirty = state.modalKind === 'task' ? state.taskDraftDirty : state.actionDraftDirty && state.actionDraft?.kind === state.modalKind;
-            persistView();
+            const dirty = state.modalKind === 'collab-requirement' ? collaboration.dirty
+                : state.modalKind === 'task' ? state.taskDraftDirty : state.actionDraftDirty && state.actionDraft?.kind === state.modalKind;
+            const localSafe = persistView();
             if (dirty && state.modalKind === 'collab-prompt') {
                 if (!await bridge.confirm({ title: '放弃这次输入？', message: '此操作尚未提交。关闭会放弃这里的输入，已保存任务与历史不变。', confirmText: '放弃输入' })) return;
+                if (state.modalContent !== content || !isCurrent(ctx)) return;
                 state.actionDraftDirty = false; state.actionDraft = null;
                 if (state.modalContent === content && isCurrent(ctx)) closeModal();
                 return;
             }
-            if (dirty && !await bridge.confirm({ title: '保留草稿并关闭？', message: '未提交内容会保留在当前账号和画布的草稿中。', confirmText: '保留草稿并关闭' })) return;
+            if (dirty && !localSafe && !await bridge.confirm({ title: '关闭当前草稿？', message: '本地保存失败，输入只保留在当前页；刷新或关闭网页可能无法恢复。', confirmText: '仍然关闭' })) return;
             if (state.modalContent === content && isCurrent(ctx)) closeModal();
         }
 
@@ -3848,8 +3864,7 @@
             }
             if (action === 'collab-adopt-media') {
                 if (!validId(target.dataset.bindingId)) throw new Error('绑定编号无效。');
-                if (state.editorDirty) throw new Error('请先保存当前成果草稿，再采用原件；当前输入仍保留。');
-                if (!await bridge.confirm({ title: '采用本次原件？', message: '原件加入当前工作草稿，不自动提交成果或重发生成。', confirmText: '采用原件' })) return;
+                if (!persistView()) throw new Error('本地草稿未能保存，尚未采用原件；请先保存当前成果草稿。');
                 return performWorkAction('adopt_media', { binding_id: target.dataset.bindingId });
             }
             if (action === 'collab-pause' || action === 'collab-resume') return collaborationControl(action === 'collab-pause' ? 'pause' : 'resume');

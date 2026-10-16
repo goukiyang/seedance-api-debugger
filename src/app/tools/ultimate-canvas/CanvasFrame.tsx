@@ -69,6 +69,7 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
   const previewRequest = useRef(0);
   const [preview, setPreview] = useState<CanvasMediaPreview | null>(null);
   const [styleGalleryOpen, setStyleGalleryOpen] = useState(false);
+  const [exitNotice, setExitNotice] = useState('');
   const { user, refreshCredits } = useAppSession();
   const userId = useRef(user?.id); userId.current = user?.id;
   const [mention, setMention] = useState<MentionRequest | null>(null);
@@ -219,9 +220,10 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
       try {
         const risk = getPageExitRisk();
         if (risk.busy.length) {
-          await confirm(`${risk.busy.join('、')}，请完成后再离开。`, { title: '操作进行中', confirmLabel: '返回等待' });
+          setExitNotice(`${risk.busy.join('、')}，请完成后再离开。`);
           return false;
         }
+        setExitNotice('');
         if (risk.unsaved.length && (!await confirm(`${risk.unsaved.join('、')}尚未保存，确定放弃并离开吗？`, { title: '离开画布', confirmLabel: '放弃并离开', danger: true }) || !alive)) return false;
         if (getPageExitRisk().signature !== risk.signature) return false;
         approvedUrl = destination;
@@ -486,6 +488,7 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
     };
   }, [confirm, closeReferencePicker, closeMention, selectMention, runUploads, refreshCredits]);
   return <>
+    {exitNotice && <div role="status" style={{ position: 'fixed', bottom: 20, left: 20, zIndex: 10006, maxWidth: 'min(42ch, calc(100vw - 40px))', padding: '10px 14px', borderRadius: 8, background: 'var(--bg-secondary, #20232b)', color: 'var(--text-primary, #e5e7eb)', boxShadow: '0 3px 16px #10121866' }}>{exitNotice}</div>}
     <iframe ref={frame} title="无限画布" src={`/tools/ultimate-canvas/index.html${initialDocumentId.current ? `?document_id=${encodeURIComponent(initialDocumentId.current)}` : ''}${initialFocusNodeId.current ? `${initialDocumentId.current ? '&' : '?'}focus_node=${encodeURIComponent(initialFocusNodeId.current)}` : ''}`} className="ultimate-canvas-frame" referrerPolicy="no-referrer" allow="fullscreen"
       onLoad={() => { setStyleGalleryOpen(false); closeReferencePicker(); closeMention(); }}
       style={styleGalleryOpen ? { position: 'fixed', inset: 0, width: '100vw', height: '100dvh', zIndex: 10000, borderRadius: 0 } : undefined} />

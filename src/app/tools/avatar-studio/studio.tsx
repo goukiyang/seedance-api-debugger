@@ -131,7 +131,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   const activeParse=parseBinding===analysisBinding?parseStatus:null;
   const canContinueOriginal=activeParse?.state==='unknown'&&activeParse.canContinueOriginal===true&&!activeParse.canRecheck;
   const needsAnalysis=!!rules.description.trim()&&activeParse?.state!=='succeeded';
-  const [recentConfigs,setRecentConfigs]=useState<AvatarRecord[]>([]),[sourceTask,setSourceTask]=useState<Task|null>(null),[storedSignature,setStoredSignature]=useState('');
+  const [recentConfigs,setRecentConfigs]=useState<AvatarRecord[]>([]),[sourceTask,setSourceTask]=useState<Task|null>(null);
   const [previousImageTask,setPreviousImageTask]=useState<Task|null>(null);
   const [imagePreview, setImagePreview] = useState<{ src: string; alt: string } | null>(null);
   useEffect(() => { setImagePreview(null); }, [ownerId]);
@@ -139,11 +139,16 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   const [runningPlans,setRunningPlans]=useState<string[]>([]);
   const editing = useRef<AvatarRecord | null>(null), lock = useRef(false), alive = useRef(true);
   const initializedOwner=useRef<string|null>(null);
+  const initialDraft=useRef<{owner:string;signature:string}|null>(null);
+  const [storedEditableSignature,setStoredEditableSignature]=useState('');
   const settledTaskPhases = useRef(new Set<string>());
   const querySequences = useRef(new Map<string, number>());
   const planRef=useRef<string|null>(null), filterRef=useRef({tab,deleted}); filterRef.current={tab,deleted};
   const draftSignature=JSON.stringify({rules,planId:plan?.id,index,model,quality,resolution,channelId:imageChannel.channelId,advanced,tab,deleted,previousImageTaskId:previousImageTask?.id,runningPlans});
-  usePageExitRisk({ unsaved: ready&&storedSignature===draftSignature ? [] : ['人物工作现场尚未保存'], busy: busy || referenceUploading ? ['人物操作或参考图上传处理中'] : [], revision: draftSignature });
+  const editableSignature=JSON.stringify({rules,model,quality,resolution,channelId:imageChannel.channelId});
+  usePageExitRisk({ unsaved: ready && initializedOwner.current===ownerId && initialDraft.current?.owner===ownerId
+    && editableSignature!==initialDraft.current.signature && storedEditableSignature!==`${ownerId}:${editableSignature}` ? ['人物工作现场尚未保存'] : [],
+    busy: busy || referenceUploading || pending || tasks.some(task=>task.status==='uncertain') ? ['人物操作、参考图上传或原请求尚未确认'] : [], revision: draftSignature });
   const load = useCallback(async (append = false, nextCursor?: string | null) => {
     const owner = liveDraft.current.ownerId, filter = { ...filterRef.current }, sequence = ++historySequence.current;
     const scope = `${owner}:${filter.tab}:${filter.deleted}`;
@@ -211,7 +216,12 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     const resumeId=pendingId||saved.planId;
     if (resumeId && /^[a-zA-Z0-9-]{1,100}$/.test(resumeId)) { planRef.current=resumeId;if(pendingId)setPending(true);try { const recovered = await queryPlan(resumeId);if(!active)return;setPlan(recovered.plan);if(!saved.model)setModel(recovered.plan.model);if(!saved.quality)setQuality(recovered.plan.quality);if(!saved.resolution)setResolution(recovered.plan.resolution); setIndex(Math.max(0, Math.min(recovered.plan.candidates.length - 1, Number(saved.index) || 0))); } catch { if(active)setNotice('上次人物草稿暂不可读取，未重复提交；已保留可读设置。'); } }
   } catch (e) { if(active)setError((e as Error).message); } finally { if (active) {initializedOwner.current=ownerId;setReady(true);} } })(); return () => { active=false;alive.current = false; }; }, [key, ownerId, load, management, queryPlan]);
-  useEffect(() => { if (!ready||initializedOwner.current!==ownerId) return; try { localStorage.setItem(key, draftSignature);setStoredSignature(draftSignature); } catch { setNotice('本机无法保存工作现场，请勿刷新；本次仍可编辑或另存。'); } }, [key, ownerId, ready, draftSignature]);
+  useEffect(() => {
+    if (!ready||initializedOwner.current!==ownerId) { initialDraft.current=null; return; }
+    if (initialDraft.current?.owner!==ownerId) initialDraft.current={owner:ownerId,signature:editableSignature};
+    try { localStorage.setItem(key, draftSignature); if(localStorage.getItem(key)!==draftSignature)throw Error('草稿未保留'); setStoredEditableSignature(`${ownerId}:${editableSignature}`); }
+    catch { setNotice('本机无法保存工作现场，请勿刷新；本次仍可编辑或另存。'); }
+  }, [key, ownerId, ready, draftSignature, editableSignature]);
   useEffect(() => { if (!ready) return; const scrollKey=`${key}:scroll:${management?'configs':'studio'}`;let position=0;try{position=Number(localStorage.getItem(scrollKey));}catch{} const frame=requestAnimationFrame(()=>{if(Number.isFinite(position)&&position>0)window.scrollTo(0,position);}); const save=()=>{try{localStorage.setItem(scrollKey,String(window.scrollY));}catch{}};window.addEventListener('scroll',save,{passive:true});return()=>{cancelAnimationFrame(frame);window.removeEventListener('scroll',save);}; },[key,management,ready]);
   useEffect(() => { if (!plan || !tasks.some(t => ['queued','running'].includes(t.status))) return; const timer = setInterval(() => { if (!document.hidden) void queryPlan(plan.id).catch(e => setError(e.message)); }, 5000); return () => clearInterval(timer); }, [plan?.id, tasks, queryPlan]);
   useEffect(()=>{if(!ready||!runningPlans.length)return;let active=true,busy=false;const refresh=async()=>{if(busy||document.hidden)return;busy=true;try{for(const id of runningPlans){try{const data=await api<{tasks:Task[]}>(undefined,`?plan=${encodeURIComponent(id)}`);if(!active)return;setRecordTasks(old=>({...old,...Object.fromEntries(data.tasks.map(task=>[task.id,task]))}));if(data.tasks.length&&data.tasks.every(task=>!['queued','running','uncertain'].includes(task.status)&&!imageBillingPending(task.billing)))setRunningPlans(old=>old.filter(value=>value!==id));}catch{}}}finally{busy=false;}};void refresh();const timer=setInterval(()=>void refresh(),5000);return()=>{active=false;clearInterval(timer);};},[ready,runningPlans]);

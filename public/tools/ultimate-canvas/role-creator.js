@@ -66,7 +66,11 @@
             update(current.value);
             if (!current.key) return false;
             memory.set(current.key, current.value);
-            try { localStorage.setItem(current.key, JSON.stringify(current.value)); return true; }
+            try {
+                const serialized = JSON.stringify(current.value);
+                localStorage.setItem(current.key, serialized);
+                return localStorage.getItem(current.key) === serialized;
+            }
             catch (_) { return false; }
         }
         function prefs(token) {
@@ -629,6 +633,7 @@
             const dirty = hasCreatorChanges(value);
             if (dirty) {
                 const localSafe = persistCreator(value);
+                if (localSafe) return true;
                 const outcome = value.savedRole ? '角色已存到角色库，不会重新创建。'
                     : value.pendingMutation ? '保存结果未确认，原请求编号与内容不会改变。' : '修改尚未提交。';
                 const close = await confirm({ title: '关闭角色？', message: outcome + (localSafe
@@ -803,6 +808,7 @@
                 onDismiss: async () => {
                     if (!dirty) return true;
                     const localSafe = persistChild();
+                    if (localSafe) return true;
                     return confirm({ title: '保留输入？', message: localSafe
                         ? '这层还未确定，内容已保留为本地草稿，未应用到角色。'
                         : '本地保存失败。这层还未确定，刷新或关闭网页可能丢失输入。',

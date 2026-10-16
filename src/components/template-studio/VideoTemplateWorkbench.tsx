@@ -247,7 +247,9 @@ function templateRecoveryKey(userId: string, templateId: string) {
 }
 
 function saveTemplateRecovery(userId: string, template: StudioTemplateDto) {
-  try { window.localStorage.setItem(templateRecoveryKey(userId, template.id), JSON.stringify(template)); } catch { /* Keep the editor state available in memory. */ }
+  try { const raw = JSON.stringify(template); const key = templateRecoveryKey(userId, template.id);
+    window.localStorage.setItem(key, raw); return window.localStorage.getItem(key) === raw;
+  } catch { return false; }
 }
 
 function clearTemplateRecovery(userId: string, templateId: string) {
@@ -1404,9 +1406,9 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
     const dirty = templateEditBaseline.current === null
       || templateEditSignature(templateEdit) !== templateEditBaseline.current;
     if (dirty) {
-      saveTemplateRecovery(userId, templateEdit);
-      setTemplateRecoveryAvailable(true);
-      if (!(await confirm('当前模板编辑尚未保存。关闭后会保留为本机草稿，可稍后恢复。是否关闭？', { title: '关闭编辑', confirmLabel: '关闭编辑' }))) return;
+      const retained = saveTemplateRecovery(userId, templateEdit);
+      setTemplateRecoveryAvailable(retained);
+      if (!retained && !(await confirm('本机未能保留模板草稿，关闭会丢失本次模板修改。是否关闭？', { title: '关闭编辑', confirmLabel: '放弃修改并关闭' }))) return;
     } else {
       clearTemplateRecovery(userId, templateEdit.id);
       setTemplateRecoveryAvailable(false);
@@ -1451,11 +1453,13 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
       setNotice('已载入模板最新版本；请检查后重新编辑或执行操作。');
     } catch (error) {
       if (currentUserId.current === userId && currentRouteKeyRef.current === routeAtStart) handleAuthExpired(error);
+      let retained: boolean | undefined;
       if (currentRouteKeyRef.current === routeAtStart && error instanceof ApiFailure && error.status === 401 && templateEdit) {
-        saveTemplateRecovery(userId, templateEdit);
-        setTemplateRecoveryAvailable(true);
+        retained = saveTemplateRecovery(userId, templateEdit);
+        setTemplateRecoveryAvailable(retained);
       }
-      if (currentRouteKeyRef.current === routeAtStart) setNotice(messageForFailure(error));
+      if (currentRouteKeyRef.current === routeAtStart) setNotice(retained === false
+        ? '登录已失效，本机未能保存模板编辑副本；请保留当前页面并复制需要的内容，再重新登录。' : messageForFailure(error));
     } finally {
       setTemplateEditBusy(false);
     }
@@ -1487,17 +1491,19 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
       setTemplateRecoveryAvailable(false);
       setNotice('模板草稿已保存。');
     } catch (error) {
+      let retained: boolean | undefined;
       if (error instanceof ApiFailure && (error.status === 409 || error.code === 'CONFLICT')) {
         setTemplateConflict({ id: templateEdit.id, source: templateEdit.source });
-        saveTemplateRecovery(userId, templateEdit);
-        setTemplateRecoveryAvailable(true);
+        retained = saveTemplateRecovery(userId, templateEdit);
+        setTemplateRecoveryAvailable(retained);
       }
       if (error instanceof ApiFailure && error.status === 401) {
-        saveTemplateRecovery(userId, templateEdit);
-        setTemplateRecoveryAvailable(true);
+        retained = saveTemplateRecovery(userId, templateEdit);
+        setTemplateRecoveryAvailable(retained);
         handleAuthExpired(error);
       }
-      setNotice(messageForFailure(error));
+      setNotice(retained === false
+        ? '模板尚未保存，本机也未能保留编辑副本；请保留当前页面并复制需要的内容，再处理登录或版本冲突。' : messageForFailure(error));
     }
     finally { templateSaveLock.current = false; setTemplateEditBusy(false); }
   }

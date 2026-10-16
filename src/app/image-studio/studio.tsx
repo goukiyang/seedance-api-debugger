@@ -1695,6 +1695,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const bannerFileInput = useRef<HTMLInputElement>(null);
   const suffix = module.id === `default-${userId}` ? userId : `${userId}:${module.id}`;
   const draftKey = `sd2-image-studio-draft:${suffix}`;
+  const defaultsRecoveryKey = `${draftKey}:before-defaults`;
   const pendingKey = `sd2-image-studio-pending:${suffix}`;
   const effectiveGlobalContext = reproduceSourceTaskId && reproductionGlobalContext !== null ? reproductionGlobalContext : settings?.context;
   const referencePolicy: StudioReferencePolicy = { primaryIds: images.flatMap(image => image.id ? [image.id] : []), primaryMin, primaryMax: referenceLimit, auxiliaryMax: auxiliaryLimit, styleMax: styleLimit, referenceMax: referenceImageLimit, useFixedReferences };
@@ -1849,6 +1850,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     unsaved: [],
     busy: [globalSettingsSaving ? '通用设置正在保存' : '', moduleSaving || presetSaving ? '模板正在保存' : '', quickPresetApplying ? '快捷模板正在套用' : '', uploading ? '参考素材正在上传' : '', bannerUploading ? '封面正在上传' : ''].filter(Boolean),
     revision: automaticSnapshot + generationDraft + templatePrompt,
+    onBlocked: setError,
   });
   const settingsDirty = moduleContext !== savedModuleContext || fixedDirty || generationDraft !== defaultGenerationDraft
     || Boolean(sharedLive && (automaticDirty || authorDefinitionDirty || resetFields.length || templatePrompt !== savedTemplatePrompt.current || JSON.stringify(personalOverrides) !== savedPersonalOverrides.current));
@@ -2205,9 +2207,14 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   }
 
   async function restoreDefaults() {
-    if (quickPresetLock.current || presetSaveLock.current || submitting || pendingSubmission || moduleSaving || uploading || bannerUploading || draftRestoring) return;
-    if (!(await confirm(sharedLive ? '恢复共享模板当前已保存的设置？本人主图保留，当前草稿仍可恢复。' : templateWorkbench ? '恢复当前模块默认参数和参考图？上次临时草稿仍可恢复。' : '恢复当前模板默认参数和参考图？上次临时草稿仍可恢复。', { title: '恢复默认', confirmLabel: '恢复默认' }))) return;
-    try { const saved = JSON.parse(localStorage.getItem(draftKey) || 'null'); if (saved) setRecoverableDraft(saved); } catch {}
+    if (!draftLoaded || quickPresetLock.current || presetSaveLock.current || submitting || pendingSubmission || moduleSaving || uploading || bannerUploading || draftRestoring) return;
+    if (sharedLive && (!sharedLive.available || !hasSharedDefaults(sharedLive.defaults))) { setError('模板暂不可用，本人草稿和历史保留'); return; }
+    const snapshot = temporaryDraftPayload();
+    let retained = false;
+    try { const raw = JSON.stringify(snapshot); localStorage.setItem(defaultsRecoveryKey, raw); retained = localStorage.getItem(defaultsRecoveryKey) === raw; } catch { /* The visible snapshot can still be restored until this page closes. */ }
+    if (!retained && (generationChanged || authorDefinitionDirty)
+      && !(await confirm('本机未能保存当前草稿。恢复默认后只能在本页找回，刷新或离开后可能丢失本次修改。是否继续？', { title: '恢复默认', confirmLabel: '继续恢复默认' }))) return;
+    setRecoverableDraft(snapshot);
     blockedDraftSignature.current = null;
     if (sharedLive) {
       if (!sharedLive.available || !hasSharedDefaults(sharedLive.defaults)) { setError('模板暂不可用，本人草稿和历史保留'); return; }
@@ -2234,19 +2241,19 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       }
       setPrimaryMin(policy.primaryMin); setReferenceLimit(policy.primaryMax); setAuxiliaryLimit(policy.auxiliaryMax);
       setStyleLimit(policy.styleMax ?? MAX_REFERENCE_IMAGES); setReferenceImageLimit(policy.referenceMax ?? MAX_REFERENCE_IMAGES); setUseFixedReferences(policy.useFixedReferences);
-      setSaveStatus('已恢复当前模板默认参数，主图保留');
+      setSaveStatus(retained ? '已恢复当前模板默认参数，主图保留；可点“恢复上一次”找回刚才的草稿。' : '已恢复默认，主图保留；刚才的草稿仅本页可恢复，刷新后可能丢失。');
       return;
     }
     setPrompt(baseline.prompt); setCount(baseline.count); setReferenceLimit(baseline.referenceLimit); setAspectRatio(baseline.aspectRatio); setModuleModel(baseline.model);
     setEvolutionInput({ direction: evolution?.defaultDirection || 'increase', manual: false });
     setQuality(baseline.quality); setResolution(baseline.resolution);
-    setImages(module.images.filter(image => baseline.referencePolicy.primaryIds.includes(image.id || '')));
     setAuxiliaryImages(module.images.filter(image => !baseline.referencePolicy.primaryIds.includes(image.id || '')));
     setPrimaryMin(baseline.referencePolicy.primaryMin); setAuxiliaryLimit(baseline.referencePolicy.auxiliaryMax); setUseFixedReferences(baseline.referencePolicy.useFixedReferences);
     setStyleLimit(baseline.referencePolicy.styleMax ?? MAX_REFERENCE_IMAGES); setReferenceImageLimit(baseline.referencePolicy.referenceMax ?? MAX_REFERENCE_IMAGES);
     setFixedReferences(savedFixedReferences); setModuleContext(savedModuleContext); setStyleGroups(module.styleGroups || []); setSkills(module.skills || []); setReproductionSkills([]); setReproduceSourceTaskId(null); setReproductionReferencePolicy(null);
     setReproductionGlobalContext(null); setAppliedSource(null);
     setModuleSaveError('');
+    setSaveStatus(retained ? '已恢复默认，主图保留；可点“恢复上一次”找回刚才的草稿。' : '已恢复默认，主图保留；刚才的草稿仅本页可恢复，刷新后可能丢失。');
   }
 
   function applyUnifiedDefaults() {
@@ -2382,6 +2389,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
 
   async function restoreTemporaryDraft(saved = recoverableDraft, automatic = false, preservePrimary = false) {
       const sequence = ++draftRestoreSequence.current;
+      const recoveryRaw = saved ? JSON.stringify(saved) : null;
       setDraftRestoring(true);
       if (saved) {
         const authorDraft = sharedLive?.mode === 'publisher' && definitionReady && saved.authorDefinition && typeof saved.authorDefinition === 'object' ? saved.authorDefinition : null;
@@ -2561,6 +2569,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       blockedDraftSignature.current = null;
       setSavedAsSignature('');
       setDraftRestoring(false);
+      if (!automatic && recoveryRaw) {
+        try { if (localStorage.getItem(defaultsRecoveryKey) === recoveryRaw) localStorage.removeItem(defaultsRecoveryKey); } catch { /* A retained snapshot remains safe to read again. */ }
+      }
       if (!automatic) setSaveStatus('已恢复设置');
       return true;
   }
@@ -2572,8 +2583,20 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       if (saved && typeof saved === 'object') {
         blockedDraftSignature.current = generationDraft;
         setRecoverableDraft(saved);
-        void restoreTemporaryDraft(saved, true).finally(() => setDraftLoaded(true));
-      } else setDraftLoaded(true);
+        const restoring = restoreTemporaryDraft(saved, true);
+        const sequence = draftRestoreSequence.current;
+        void restoring.then(restored => {
+          if (sequence !== draftRestoreSequence.current || restoredDraftKey.current !== draftKey) return;
+          if (restored) {
+            try { const previous = JSON.parse(localStorage.getItem(defaultsRecoveryKey) || 'null'); if (previous && typeof previous === 'object') setRecoverableDraft(previous); } catch { /* Keep the current draft. */ }
+          }
+          setDraftLoaded(true);
+        });
+      } else {
+        const previous = JSON.parse(localStorage.getItem(defaultsRecoveryKey) || 'null');
+        if (previous && typeof previous === 'object') setRecoverableDraft(previous);
+        setDraftLoaded(true);
+      }
     } catch { setDraftLoaded(true); /* A damaged local draft must not block the page. */ }
     try {
       const pending = JSON.parse(localStorage.getItem(pendingKey) ?? sessionStorage.getItem(pendingKey) ?? 'null');
@@ -3352,7 +3375,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           if (fixed && additions.length) setFixedReferences([...fixedReferences, ...additions.map(asset => ({ ...asset, note: '', available: true }))]);
           else if (auxiliary && additions.length) setAuxiliaryImages([...auxiliaryImages, ...additions]);
           else if (!fixed && !auxiliary && (replacing || additions.length)) setImages(replacing ? [completed[0]] : [...images, ...additions]);
-          if (replacing && skipAfterSuccess) saveMainImageReminder(userId, true);
+          if (replacing && skipAfterSuccess) {
+            try { saveMainImageReminder(userId, true); }
+            catch { uploadError = '主图已替换，但提醒设置未能确认保存；可从主图提醒设置重试。'; }
+          }
           setUploadSummaryTarget(fixed ? 'fixed' : auxiliary ? 'auxiliary' : 'primary'); setUploadedSummary(completed);
           if (duplicates || !additions.length) setSaveStatus('相同文件已复用，当前参考区不会重复加入。');
         }
@@ -3625,7 +3651,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         <div className={styles.moduleQuickActions} aria-label="模板快捷设置">
           <div className={styles.quickPresetRow}>
             <button type="button" title="管理模板" aria-label="管理模板" onClick={onManagePresets}><FolderCog size={16} /></button>
-            <button type="button" title="恢复默认" aria-label="恢复默认" disabled={presetSaving || Boolean(quickPresetApplying) || draftRestoring || submitting || Boolean(pendingSubmission) || moduleSaving || uploading || bannerUploading} onClick={restoreDefaults}><RefreshCw size={16} /></button>
+            <button type="button" title="恢复默认" aria-label="恢复默认" disabled={!draftLoaded || presetSaving || Boolean(quickPresetApplying) || draftRestoring || submitting || Boolean(pendingSubmission) || moduleSaving || uploading || bannerUploading} onClick={restoreDefaults}><RefreshCw size={16} /></button>
             <div className={styles.quickPresetChoices} aria-label="已保存快捷模板">
               {quickPresets.map(preset => <button type="button" key={preset.id} title={`套用：${preset.name}`} className="sd2-loading-surface" data-busy={quickPresetApplying === preset.id}
                 disabled={!draftLoaded || draftRestoring || presetSaving || Boolean(quickPresetApplying) || submitting || Boolean(pendingSubmission) || uploading || bannerUploading || moduleSaving || moduleDeleting || ratioEditing}

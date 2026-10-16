@@ -147,7 +147,8 @@ export function TemplateFavoritesList(props: { data: ReturnType<typeof useTempla
 
 function FavoriteList({ data, selected, busy, onSelect }: { data: ReturnType<typeof useTemplateFavorites>; selected: string; busy: boolean; onSelect: (item: ReactionListItem) => void }) {
   const { confirm, prompt, productDialog } = useProductDialog();
-  usePageExitRisk({ unsaved: productDialog || data.unconfirmed ? ['我的喜欢尚未完成的设置'] : [], busy: data.writing ? ['我的喜欢保存'] : [] });
+  const [namingDirty, setNamingDirty] = useState(false);
+  usePageExitRisk({ unsaved: namingDirty ? ['我的喜欢尚未保存的名称'] : [], busy: data.writing || data.unconfirmed ? ['我的喜欢保存结果待确认'] : [], revision: String(namingDirty) });
   const [menu, setMenu] = useState<string | null>(null);
   const panel = useRef<HTMLDivElement>(null);
   const menuPanel = useRef<HTMLDivElement>(null), menuTrigger = useRef<HTMLElement | null>(null);
@@ -177,7 +178,7 @@ function FavoriteList({ data, selected, busy, onSelect }: { data: ReturnType<typ
   async function renameGroup() {
     if (!group) return;
     setMenu(null);
-    await prompt('分组名称', group.name, { title: '改名', confirmLabel: '保存', maxLength: 60, onSubmit: value => data.manage({ action: 'rename-group', groupId: group.id, name: value }) });
+    await prompt('分组名称', group.name, { title: '改名', confirmLabel: '保存', maxLength: 60, onDraftChange: setNamingDirty, onSubmit: value => data.manage({ action: 'rename-group', groupId: group.id, name: value }) });
   }
   return <div ref={panel} className={styles.list} data-template-favorites aria-label="喜欢的模板" aria-busy={data.loading || data.writing || busy}>
     {data.allowed && <div className={styles.toolbar}>
@@ -185,7 +186,7 @@ function FavoriteList({ data, selected, busy, onSelect }: { data: ReturnType<typ
         <option value="all">全部 · {data.organization?.total ?? '—'}</option><option value="ungrouped">未分组 · {data.organization?.ungroupedCount ?? '—'}</option>
         {data.organization?.groups.map(item => <option key={item.id} value={item.id}>{item.name} · {item.count}</option>)}
       </select>
-      <button type="button" title="新建分组" aria-label="新建分组" disabled={disabled || data.unconfirmed} onClick={() => { const groupId = crypto.randomUUID(); void prompt('分组名称', '', { title: '新建分组', confirmLabel: '创建', maxLength: 60, onSubmit: value => data.manage({ action: 'create-group', groupId, name: value }) }); }}><Plus size={16} /></button>
+      <button type="button" title="新建分组" aria-label="新建分组" disabled={disabled || data.unconfirmed} onClick={() => { const groupId = crypto.randomUUID(); void prompt('分组名称', '', { title: '新建分组', confirmLabel: '创建', maxLength: 60, onDraftChange: setNamingDirty, onSubmit: value => data.manage({ action: 'create-group', groupId, name: value }) }); }}><Plus size={16} /></button>
       {group && <div className={styles.menuHost}><button type="button" title="管理分组" aria-label="管理分组" aria-expanded={menu === 'group'} disabled={disabled || data.unconfirmed} onClick={() => setMenu(menu === 'group' ? null : 'group')}><MoreHorizontal size={16} /></button>
         {menu === 'group' && createPortal(<div ref={menuPanel} className={styles.menu} style={menuPosition}><button type="button" onClick={() => void renameGroup()}><Pencil size={14} />改名</button><button type="button" onClick={() => { setMenu(null); void confirm(`删除“${group.name}”？其中的模板将回到未分组，喜欢仍保留。`, { title: '删除分组', confirmLabel: '删除分组', danger: true, onSubmit: () => data.manage({ action: 'delete-group', groupId: group.id }) }); }}><Trash2 size={14} />删除分组</button></div>, document.body)}
       </div>}
@@ -201,11 +202,11 @@ function FavoriteList({ data, selected, busy, onSelect }: { data: ReturnType<typ
       <div className={styles.menuHost}><button type="button" className={styles.rowAction} title="管理这条喜欢" aria-label={`管理${name(item)}`} disabled={disabled || data.unconfirmed} aria-expanded={menu === item.key} onClick={() => setMenu(menu === item.key ? null : item.key)}><MoreHorizontal size={16} /></button>
         {menu === item.key && createPortal(<div ref={menuPanel} className={styles.menu} style={menuPosition}>
           <label>移到分组<select aria-label="移到分组" value={item.groupId || ''} disabled={disabled} onChange={event => { const groupId = event.target.value || null; void data.manage({ action: 'move', key: item.key, groupId }).then(() => setMenu(null)).catch(() => undefined); }}><option value="">未分组</option>{data.organization?.groups.map(value => <option key={value.id} value={value.id}>{value.name}</option>)}</select></label>
-          <button type="button" onClick={() => { setMenu(null); void prompt('只修改我看到的名称', name(item), { title: '改名', confirmLabel: '保存', maxLength: 120, onSubmit: value => data.manage({ action: 'rename', key: item.key, name: value }) }); }}><Pencil size={14} />改名</button>
+          <button type="button" onClick={() => { setMenu(null); void prompt('只修改我看到的名称', name(item), { title: '改名', confirmLabel: '保存', maxLength: 120, onDraftChange: setNamingDirty, onSubmit: value => data.manage({ action: 'rename', key: item.key, name: value }) }); }}><Pencil size={14} />改名</button>
           {item.personalAlias && <button type="button" onClick={() => void data.manage({ action: 'rename', key: item.key, name: null }).then(() => setMenu(null)).catch(() => undefined)}><RotateCcw size={14} />恢复原名</button>}
         </div>, document.body)}
       </div>
-      <button type="button" className={styles.heart} title="取消喜欢" aria-label={`取消喜欢${name(item)}`} disabled={busy || data.writing || data.unconfirmed} onClick={() => { setMenu(null); void confirm(`取消喜欢“${name(item)}”？模板和历史结果不会删除。`, { title: '取消喜欢', confirmLabel: '取消喜欢', onSubmit: () => data.cancelLike(item) }); }}><Heart size={17} /></button>
+      <button type="button" className={styles.heart} title="取消喜欢" aria-label={`取消喜欢${name(item)}`} disabled={busy || data.writing || data.unconfirmed} onClick={() => { setMenu(null); void data.cancelLike(item).catch(() => undefined); }}><Heart size={17} /></button>
     </div>)}
     {data.allowed && data.loaded && !data.loading && !data.error && !data.items.length && <p role="status">{data.group === 'all' ? '还没有喜欢的模板' : '这个分组还没有模板'}</p>}
     {data.cursor && <button type="button" className={styles.more} disabled={data.loading || busy} onClick={data.more}>加载更多</button>}

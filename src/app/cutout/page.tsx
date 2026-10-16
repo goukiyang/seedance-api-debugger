@@ -10,7 +10,7 @@ import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import CutoutWorkspacePreview from '@/components/cutout/CutoutWorkspacePreview';
-import { clearCutoutWorkspaceDraft, readCutoutWorkspaceDraft, saveCutoutWorkspaceDraft, readCutoutViewPreferences, saveCutoutViewPreferences, type CutoutViewPreferences } from '@/lib/cutout/workspace-draft';
+import { clearCutoutWorkspaceDraft, readCutoutWorkspaceDraft, saveCutoutWorkspaceDraft, swapCutoutWorkspaceDraft, readCutoutViewPreferences, saveCutoutViewPreferences, type CutoutViewPreferences, type CutoutWorkspaceDraft } from '@/lib/cutout/workspace-draft';
 import { getImageResultCutoutHandoff, prepareImageResultCutoutHandoff, startImageResultCutoutHandoff, type CutoutImageHandoff } from '@/lib/cutout/image-result-bridge';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useProductDialog } from '@/components/useProductDialog';
@@ -279,11 +279,19 @@ export default function CutoutPage() {
   const [draftWriteAllowed, setDraftWriteAllowed] = useState(false);
   const draftWriteAllowedRef = useRef(false);
   const [draftRestoreRetry, setDraftRestoreRetry] = useState(0);
+  const [draftSaveRetry, setDraftSaveRetry] = useState(0);
   const [draftStatus, setDraftStatus] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
   const [draftMessage, setDraftMessage] = useState('');
+  const [savedSnapshot, setSavedSnapshot] = useState<CutoutWorkspaceDraft | null>(null);
+  const restoredSnapshotRef = useRef<CutoutWorkspaceDraft | null>(null);
+  const [previousDraftAvailable, setPreviousDraftAvailable] = useState<boolean | 'unknown'>(false);
+  const restorePreviousRef = useRef(false);
+  const restorePreviousTargetRef = useRef<CutoutWorkspaceDraft | null>(null);
+  const replacementBusy = useRef(false);
   const draftWriteSequence = useRef(0);
   const draftWriteQueue = useRef<Promise<void>>(Promise.resolve());
   const [handoffId, setHandoffId] = useState('');
+  const [sourceHandoffId, setSourceHandoffId] = useState('');
   const [handoff, setHandoff] = useState<CutoutImageHandoff | null>(null);
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [handoffError, setHandoffError] = useState('');
@@ -326,20 +334,30 @@ export default function CutoutPage() {
     && capabilities.dispatch?.available !== false,
   );
   const isBusy = mutation !== null;
-  const sourceNeedsGuard = source?.kind === 'local' && acceptedSourceId !== source.id;
-  const dirtyCharacterDraft = boxes.length > 0 || prompts.length > 0;
+  const workspaceSnapshot = useMemo<CutoutWorkspaceDraft>(() => ({
+    version: 1, savedAt: Date.now(),
+    source: source ? { id: source.id, ...(source.kind === 'local' ? { file: source.file } : { reference: source.reference, fullCanvas: source.fullCanvas }), name: source.name.slice(0, 240), accepted: acceptedSourceId === source.id, ...(sourceHandoffId ? { handoffId: sourceHandoffId } : {}) } : null,
+    sourceJobId: source ? Array.from(originalSourceByJob.current.entries()).find(([, id]) => id === source.id)?.[0] || null : null,
+    repair: localRepair, editor: source ? { boxes, prompts, region: regionBox } : undefined,
+  }), [acceptedSourceId, boxes, localRepair, prompts, regionBox, source, sourceHandoffId]);
+  const latestSnapshotRef = useRef(workspaceSnapshot);
+  latestSnapshotRef.current = workspaceSnapshot;
+  const matchesStoredContent = (stored: CutoutWorkspaceDraft | null) => Boolean(stored
+    && stored.source?.id === workspaceSnapshot.source?.id && stored.source?.file === workspaceSnapshot.source?.file
+    && stored.source?.reference === workspaceSnapshot.source?.reference && stored.source?.name === workspaceSnapshot.source?.name
+    && stored.source?.fullCanvas === workspaceSnapshot.source?.fullCanvas && stored.source?.handoffId === workspaceSnapshot.source?.handoffId
+    && stored.repair === workspaceSnapshot.repair && JSON.stringify(stored.editor) === JSON.stringify(workspaceSnapshot.editor));
+  const hasUnsavedSnapshot = Boolean((source?.kind === 'local' || localRepair || boxes.length || prompts.length || regionBox)
+    && !matchesStoredContent(savedSnapshot) && !matchesStoredContent(restoredSnapshotRef.current));
 
   usePageExitRisk({
     unsaved: [
-      ...(sourceNeedsGuard ? ['已选图片尚未提交任务'] : []),
-      ...(dirtyCharacterDraft ? ['角色框选或点提示尚未提交'] : []),
-      ...(regionBox ? ['区域框选尚未提交'] : []),
+      ...(hasUnsavedSnapshot ? ['当前图片、修复或框选尚未保存在本机'] : []),
       ...(repairDirty ? ['画笔修改尚未应用'] : []),
-      ...(localRepair && draftStatus !== 'saved' ? ['本地修复结果尚未保存，离开前请下载'] : []),
       ...(pendingSubmission ? ['任务提交结果尚未确认'] : []),
     ],
     busy: isBusy || handoffBusy ? [handoffBusy ? '正在处理接续图片' : mutation === 'upload' ? '图片上传中' : mutation === 'cancel' ? '正在取消任务' : '正在提交任务'] : [],
-    revision: `${source?.id || ''}:${selectedJobId}:${boxes.length}:${prompts.length}:${regionBox ? `${regionBox.x},${regionBox.y},${regionBox.w},${regionBox.h}` : ''}:${repairDirty}:${draftStatus}:${pendingSubmission?.key || ''}`,
+    revision: JSON.stringify([source?.id, selectedJobId, boxes, prompts, regionBox, repairDirty, draftStatus, workspaceSnapshot.savedAt, pendingSubmission?.key]),
   });
 
   useEffect(() => {
@@ -405,16 +423,65 @@ export default function CutoutPage() {
     setSelectedJobId(jobId);
   }, [setJobContext]);
 
+  const preserveBeforeSourceChange = useCallback(async (token: number, fromHandoff = false, retainsStoredCurrent = false) => {
+    const account = accountIdRef.current, generation = accountGenerationRef.current;
+    const snapshot = latestSnapshotRef.current;
+    const current = () => mounted.current && accountIdRef.current === account && accountGenerationRef.current === generation
+      && sourceSelection.current === token && latestSnapshotRef.current === snapshot && !actionLock.current
+      && !pendingSubmissionRef.current && (fromHandoff || !getPageExitRisk().busy.length);
+    const losses = repairDirty ? ['尚未应用的画笔修改'] : [];
+    let previous: CutoutWorkspaceDraft | null = null;
+    let retained: CutoutWorkspaceDraft | null = null;
+    let saveFailure = '';
+    // Stop an older debounce from replacing the snapshot we are about to retain.
+    draftWriteSequence.current += 1;
+    await draftWriteQueue.current.catch(() => {});
+    if (!current()) return false;
+    try {
+      previous = await readCutoutWorkspaceDraft(account, 'previous');
+      const storedCurrent = draftWriteAllowedRef.current ? null : await readCutoutWorkspaceDraft(account);
+      retained = snapshot.source || snapshot.repair ? snapshot : storedCurrent;
+      if (!retainsStoredCurrent && storedCurrent && retained !== storedCurrent && storedCurrent.source?.id !== retained?.source?.id) losses.push('尚未恢复的原本机草稿');
+    } catch (error) {
+      saveFailure = error instanceof Error ? error.message : '本机草稿暂时无法读取';
+      losses.push('当前图片、修复、框选和未恢复的旧草稿（本机存储不可用，不能保证恢复）');
+    }
+    if (!current()) return false;
+    const replacesPrevious = !saveFailure && Boolean(previous && retained && previous.source?.id !== retained.source?.id);
+    if (replacesPrevious) losses.push('更早的上次图片草稿（本机只保留一个上次现场）');
+    if (!saveFailure && !replacesPrevious && retained) {
+      try { await saveCutoutWorkspaceDraft(account, { ...retained, savedAt: Date.now() }, 'previous', { expectedRevision: previous?.storageRevision || null, isCurrent: current }); }
+      catch (error) { saveFailure = error instanceof Error ? error.message : '本机草稿未保存'; losses.push('当前图片、已应用修复和框选（本机保存失败）'); }
+    }
+    if (!current()) return false;
+    if (losses.length && !await confirm(`继续会丢失：${losses.join('；')}。${saveFailure ? `${saveFailure}。` : ''}请先下载需要保留的本地结果。`, { title: '更换图片', confirmLabel: '继续更换' })) return false;
+    if (!current()) return false;
+    if (replacesPrevious && retained) {
+      try { await saveCutoutWorkspaceDraft(account, { ...retained, savedAt: Date.now() }, 'previous', { expectedRevision: previous?.storageRevision || null, isCurrent: current }); }
+      catch (error) {
+        if (current()) setNotice({ kind: 'warning', text: `${error instanceof Error ? error.message : '草稿未保存'}。尚未切换，当前图片和旧草稿保留。` });
+        return false;
+      }
+    }
+    if (!current()) return false;
+    setPreviousDraftAvailable(Boolean(retained && !saveFailure || previous));
+    setSavedSnapshot(null);
+    restoredSnapshotRef.current = null;
+    return true;
+  }, [confirm, repairDirty]);
+
   const sourceFromResult = useCallback(async (url: string, name: string, fullCanvas: boolean) => {
-    if (actionLock.current || pendingSubmissionRef.current || getPageExitRisk().busy.length) return;
+    if (replacementBusy.current || actionLock.current || pendingSubmissionRef.current || getPageExitRisk().busy.length) return;
     if (!draftReady) { setNotice({ kind: 'info', text: '正在确认本机草稿，请稍后再切换图片。' }); return; }
-    if (!draftWriteAllowedRef.current && !await confirm('上次草稿尚未恢复，仍保留在本机。使用这张图片会替换原本机草稿，服务器原图和任务不变。是否替换？', { title: '替换草稿', confirmLabel: '替换草稿' })) return;
-    if ((sourceNeedsGuard || regionBox || repairDirty || localRepair || boxes.length || prompts.length) && !await confirm('切换图片会替换当前本机草稿、修图和框选。请先下载需要保留的本地结果；原图和服务器结果不会被修改。', { title: '切换图片', confirmLabel: '切换' })) return;
+    const token = ++sourceSelection.current;
     try {
       const reference = cutoutResultReference(url);
+      replacementBusy.current = true;
+      if (!await preserveBeforeSourceChange(token)) return;
       draftWriteAllowedRef.current = true;
       setDraftWriteAllowed(true);
       setSource({ id: makeId(), kind: 'result', url, reference, name, fullCanvas });
+      setSourceHandoffId('');
       handoffSelection.current = false;
       setView('original');
       setCachedAsset(null);
@@ -429,8 +496,11 @@ export default function CutoutPage() {
       setNotice(null);
     } catch {
       setNotice({ kind: 'error', text: '这张图片暂时不能作为后续任务的来源，请重新打开结果。' });
+    } finally {
+      replacementBusy.current = false;
+      if (mounted.current) setDraftSaveRetry(value => value + 1);
     }
-  }, [boxes.length, confirm, draftReady, localRepair, prompts.length, regionBox, repairDirty, sourceNeedsGuard]);
+  }, [draftReady, preserveBeforeSourceChange]);
 
   useEffect(() => {
     mounted.current = true;
@@ -560,8 +630,10 @@ export default function CutoutPage() {
     setSelectedJobId('');
     setSource(null); setLocalRepair(null); setRepairTarget(null); setRepairDirty(false);
     setBoxes([]); setPrompts([]); setRegionBox(null); setCachedAsset(null); setAcceptedSourceId('');
-    setRetainedResultJob(null); setHandoff(null); setHandoffId(''); handoffSelection.current = false;
+    setRetainedResultJob(null); setHandoff(null); setHandoffId(''); setSourceHandoffId(''); handoffSelection.current = false;
     automaticHandoffImport.current = '';
+    setSavedSnapshot(null); restoredSnapshotRef.current = null; setPreviousDraftAvailable(false);
+    replacementBusy.current = false; restorePreviousRef.current = false; restorePreviousTargetRef.current = null;
     originalSourceByJob.current.clear(); terminalHandledRef.current.clear();
     pendingSubmissionRef.current = null; setPendingSubmission(null);
     latestProgressRef.current = null;
@@ -639,9 +711,19 @@ export default function CutoutPage() {
     let active = true;
     const token = sourceSelection.current;
     const accountGeneration = accountGenerationRef.current;
+    const startingSnapshot = latestSnapshotRef.current;
+    const writeAllowedAtStart = draftWriteAllowedRef.current;
+    const restoringPrevious = restorePreviousRef.current;
+    const expectedPrevious = restorePreviousTargetRef.current;
+    restorePreviousRef.current = false;
+    restorePreviousTargetRef.current = null;
     const controller = new AbortController();
-    const current = () => active && accountIdRef.current === accountId
+    let recoveryApplied = false;
+    const contextCurrent = () => active && accountIdRef.current === accountId
       && accountGenerationRef.current === accountGeneration && sourceSelection.current === token;
+    const current = () => contextCurrent()
+      && (!restoringPrevious || recoveryApplied || latestSnapshotRef.current === startingSnapshot && !actionLock.current
+        && !pendingSubmissionRef.current && !getPageExitRisk().busy.length);
     draftWriteAllowedRef.current = false;
     setDraftWriteAllowed(false);
     draftWriteSequence.current += 1;
@@ -654,15 +736,21 @@ export default function CutoutPage() {
     setSelectedOutputId(views.outputId || '');
     setDraftReady(false);
     const params = new URLSearchParams(window.location.search);
-    const receipt = params.get('handoff') || '';
+    const receipt = restoringPrevious ? '' : params.get('handoff') || '';
     if (/^[\w-]{1,128}$/.test(receipt)) setHandoffId(receipt);
-    void readCutoutWorkspaceDraft(accountId).then(async value => {
+    void readCutoutWorkspaceDraft(accountId, restoringPrevious ? 'previous' : 'current').then(async value => {
+      if (!current()) return;
+      try { setPreviousDraftAvailable(Boolean(await readCutoutWorkspaceDraft(accountId, 'previous'))); }
+      catch { if (current()) setPreviousDraftAvailable('unknown'); }
       if (!current()) return;
       if (!value) { draftWriteAllowedRef.current = true; setDraftWriteAllowed(true); return; }
+      if (restoringPrevious && (!expectedPrevious?.storageRevision || value.storageRevision !== expectedPrevious.storageRevision)) {
+        throw new Error('上次草稿已在其他页面变化，尚未恢复，请重新选择。');
+      }
       // A new explicit handoff must not consume or overwrite another stored workspace.
       if (receipt && value.source && value.source.handoffId !== receipt) {
         setDraftStatus('failed');
-        setDraftMessage('当前链接与上次草稿不同。原草稿已保留；导入新图片前请确认替换，或返回上次草稿。');
+        setDraftMessage('当前链接与上次草稿不同。原草稿已保留，导入新图片时会保留可恢复现场，也可返回上次草稿。');
         return;
       }
       let authorizedHandoff: CutoutImageHandoff | null = null;
@@ -675,6 +763,7 @@ export default function CutoutPage() {
           throw new Error('来源授权记录不一致，原草稿保留，请重新检查。');
         }
       }
+      let repairedJob: CutoutJob | null = null;
       if (value.repair) {
         const job = await getCutoutJob(value.repair.jobId, controller.signal);
         if (!current()) return;
@@ -683,8 +772,19 @@ export default function CutoutPage() {
           || value.repair.sourceVersion !== `${job.job_id}:${job.updated_at}:${filename}`) {
           throw new Error('修复草稿对应的结果版本暂未确认，原草稿保留，请重新检查。');
         }
+        repairedJob = job;
       }
       if (!current()) return;
+      // Apply the authorized bytes before the durable swap completes. Later edits now
+      // belong to the recovered image; no delayed setter can overwrite those edits.
+      const recoveryWrite = restoringPrevious ? swapCutoutWorkspaceDraft(accountId, value, contextCurrent) : null;
+      recoveryApplied = true;
+      setSource(null); setAcceptedSourceId(''); setCachedAsset(null); setSourceSize(null);
+      setSourceHandoffId(value.source?.handoffId || '');
+      setBoxes([]); setPrompts([]); setRegionBox(null); setRepairTarget(null); setRepairDirty(false); setLocalRepair(null);
+      handoffSelection.current = false;
+      if (restoringPrevious) { setHandoff(null); setHandoffId(''); }
+      let restoredFile: File | undefined;
       if (value.source) {
         if (value.source.handoffId && (!receipt || receipt === value.source.handoffId)) {
           handoffSelection.current = true;
@@ -693,6 +793,7 @@ export default function CutoutPage() {
         }
         if (value.source.file) {
           const file = new File([value.source.file], value.source.name, { type: value.source.file.type });
+          restoredFile = file;
           setSource({ id: value.source.id, kind: 'local', file, name: value.source.name });
         } else if (value.source.reference) {
           setSource({ id: value.source.id, kind: 'result', reference: value.source.reference, url: value.source.reference.replace(/^\/api\/v1\/results\//, `${RESULT_ROUTE}/`), name: value.source.name, fullCanvas: value.source.fullCanvas === true });
@@ -702,17 +803,39 @@ export default function CutoutPage() {
         if (value.editor) { setBoxes(value.editor.boxes); setPrompts(value.editor.prompts); setRegionBox(value.editor.region); }
       }
       if (value.repair) setLocalRepair(value.repair);
+      if (restoringPrevious) {
+        setView(value.repair ? 'result' : 'original');
+        if (repairedJob) { chooseJob(repairedJob); setRetainedResultJob(null); setSelectedOutputId(`${repairedJob.job_id}:result`); }
+      }
+      if (recoveryWrite) {
+        setDraftStatus('saving');
+        await recoveryWrite;
+        if (!contextCurrent()) return;
+        setPreviousDraftAvailable(Boolean(startingSnapshot.source || startingSnapshot.repair || !writeAllowedAtStart));
+      }
+      restoredSnapshotRef.current = { ...value, source: value.source ? { ...value.source, ...(restoredFile ? { file: restoredFile } : {}) } : null,
+        editor: value.source ? value.editor || { boxes: [], prompts: [], region: null } : undefined };
       draftWriteAllowedRef.current = true;
       setDraftWriteAllowed(true);
       setDraftStatus('saved');
-      setDraftMessage(receipt ? '本机有上次草稿。导入新图片前会确认替换；原任务和结果保留。' : '已恢复本机草稿；任务状态会重新查询。');
+      setDraftMessage(restoringPrevious ? '已恢复上次图片草稿；任务状态会重新查询。' : '已恢复本机草稿；任务状态会重新查询。');
     }).catch(error => {
       if (!current() || controller.signal.aborted) return;
+      if (restoringPrevious && !recoveryApplied) { draftWriteAllowedRef.current = writeAllowedAtStart; setDraftWriteAllowed(writeAllowedAtStart); }
       setDraftStatus('failed');
-      setDraftMessage(`${error instanceof Error ? error.message : '本机草稿恢复失败'} 原草稿保留，尚未显示或覆盖；可重新检查。`);
-    }).finally(() => { if (active) setDraftReady(true); });
+      setDraftMessage(`${error instanceof Error ? error.message : '本机草稿恢复失败'} ${restoringPrevious && recoveryApplied ? '图片已读取，但草稿切换未完成；当前编辑仍在页面，旧草稿未被覆盖，请先下载需要保留的结果。' : restoringPrevious ? '本次未应用恢复，当前图片和原草稿保留。' : '原草稿保留，尚未显示或覆盖；可重新检查。'}`);
+    }).finally(() => {
+      if (active) {
+        if (restoringPrevious && !recoveryApplied && accountIdRef.current === accountId && accountGenerationRef.current === accountGeneration && !current()) {
+          // A new edit wins over an asynchronous recovery, including its persistence gate.
+          draftWriteAllowedRef.current = writeAllowedAtStart; setDraftWriteAllowed(writeAllowedAtStart);
+          setDraftMessage('恢复期间内容已变化，已保留当前编辑。上次草稿仍可重新检查。');
+        }
+        setDraftReady(true); replacementBusy.current = false;
+      }
+    });
     return () => { active = false; controller.abort(); };
-  }, [accountId, preferencesReady, draftRestoreRetry]);
+  }, [accountId, chooseJob, preferencesReady, draftRestoreRetry]);
 
   useEffect(() => {
     if (!draftReady || !accountId) return;
@@ -725,18 +848,17 @@ export default function CutoutPage() {
     if (!draftReady || !accountId || !draftWriteAllowed || !draftWriteAllowedRef.current) return;
     const sequence = ++draftWriteSequence.current;
     const account = accountId;
-    const sourceJobId = source ? Array.from(originalSourceByJob.current.entries()).find(([, id]) => id === source.id)?.[0] || null : null;
+    const snapshot = workspaceSnapshot;
     setDraftStatus('saving');
     const timer = window.setTimeout(() => {
       draftWriteQueue.current = draftWriteQueue.current.catch(() => {}).then(async () => {
         if (sequence !== draftWriteSequence.current || accountIdRef.current !== account || !draftWriteAllowedRef.current) return;
         try {
           if (!source && !localRepair) await clearCutoutWorkspaceDraft(account);
-          else await saveCutoutWorkspaceDraft(account, { version: 1, savedAt: Date.now(),
-            source: source ? { id: source.id, ...(source.kind === 'local' ? { file: source.file } : { reference: source.reference, fullCanvas: source.fullCanvas }), name: source.name.slice(0, 240), accepted: acceptedSourceId === source.id, ...(handoffSelection.current && handoffId ? { handoffId } : {}) } : null,
-            sourceJobId, repair: localRepair, editor: source ? { boxes, prompts, region: regionBox } : undefined });
+          else await saveCutoutWorkspaceDraft(account, { ...snapshot, savedAt: Date.now() });
           if (mounted.current && sequence === draftWriteSequence.current && accountIdRef.current === account) {
             setDraftStatus('saved'); setDraftMessage(localRepair ? '修复草稿已保存在本机，7天内可恢复；不是云端历史。' : '');
+            setSavedSnapshot(snapshot);
           }
         } catch (error) {
           if (mounted.current && sequence === draftWriteSequence.current && accountIdRef.current === account) {
@@ -746,7 +868,7 @@ export default function CutoutPage() {
       });
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [acceptedSourceId, accountId, boxes, draftReady, draftWriteAllowed, handoffId, localRepair, prompts, regionBox, source]);
+  }, [accountId, draftReady, draftWriteAllowed, draftSaveRetry, localRepair, source, workspaceSnapshot]);
 
   useEffect(() => {
     if (source?.kind !== 'local') {
@@ -879,55 +1001,102 @@ export default function CutoutPage() {
     return options;
   }, [capabilities?.models, settings.model_preference]);
 
-  const acceptFile = useCallback(async (file: File | null, preserveRepair = false, fromHandoff = false) => {
-    if (actionLock.current || isBusy || pendingSubmission || !fromHandoff && getPageExitRisk().busy.length) return false;
+  const recheckWorkspaceDraft = async () => {
+    if (replacementBusy.current || actionLock.current || pendingSubmissionRef.current || getPageExitRisk().busy.length || !draftReady) return;
+    const token = ++sourceSelection.current;
+    replacementBusy.current = true;
+    try {
+      if ((source || localRepair) && !await preserveBeforeSourceChange(token, false, true)) return;
+      setDraftReady(false);
+      setDraftRestoreRetry(value => value + 1);
+    } finally {
+      replacementBusy.current = false;
+      if (mounted.current) setDraftSaveRetry(value => value + 1);
+    }
+  };
+
+  const restorePreviousWorkspace = useCallback(async () => {
+    if (replacementBusy.current || actionLock.current || pendingSubmissionRef.current || getPageExitRisk().busy.length || !draftReady) return;
+    const token = ++sourceSelection.current;
+    const account = accountIdRef.current, generation = accountGenerationRef.current, snapshot = latestSnapshotRef.current;
+    const current = () => mounted.current && accountIdRef.current === account && accountGenerationRef.current === generation
+      && sourceSelection.current === token && latestSnapshotRef.current === snapshot && !actionLock.current && !pendingSubmissionRef.current && !getPageExitRisk().busy.length;
+    replacementBusy.current = true;
+    try {
+      const target = await readCutoutWorkspaceDraft(account, 'previous');
+      if (!current()) return;
+      if (!target) { setPreviousDraftAvailable(false); setNotice({ kind: 'info', text: '没有可恢复的上次图片草稿，当前图片保留。' }); return; }
+      if (repairDirty && !await confirm('恢复上次图片会放弃尚未应用的画笔修改。当前已应用的图片、修复和框选会保留。', { title: '恢复草稿', confirmLabel: '恢复上次图片' })) return;
+      if (!current()) return;
+      draftWriteSequence.current += 1;
+      await draftWriteQueue.current.catch(() => {});
+      if (!current()) return;
+      if (draftWriteAllowedRef.current) {
+        if (snapshot.source || snapshot.repair) await saveCutoutWorkspaceDraft(account, { ...snapshot, savedAt: Date.now() });
+        else await clearCutoutWorkspaceDraft(account);
+      }
+      if (!current()) return;
+      restorePreviousRef.current = true;
+      restorePreviousTargetRef.current = target;
+      setDraftRestoreRetry(value => value + 1);
+      setDraftReady(false);
+    } catch (error) {
+      if (current()) setNotice({ kind: 'warning', text: `${error instanceof Error ? error.message : '当前现场未能保存'}。尚未恢复，当前图片与上次草稿保留。` });
+    } finally {
+      replacementBusy.current = false;
+      if (mounted.current) setDraftSaveRetry(value => value + 1);
+    }
+  }, [confirm, draftReady, repairDirty]);
+
+  const acceptFile = useCallback(async (file: File | null, fromHandoff = false) => {
+    if (replacementBusy.current || actionLock.current || isBusy || pendingSubmission || !fromHandoff && getPageExitRisk().busy.length) return false;
     if (!draftReady) { setNotice({ kind: 'info', text: '正在确认本机草稿，请稍后再选择图片。' }); return false; }
     const token = ++sourceSelection.current;
-    if (!draftWriteAllowedRef.current && !await confirm('上次草稿尚未恢复，仍保留在本机。此次选择会替换原本机草稿，服务器原图和任务不变。是否替换？', { title: '替换草稿', confirmLabel: '替换草稿' })) return false;
-    if ((sourceNeedsGuard || regionBox || repairDirty || (!preserveRepair && localRepair) || boxes.length || prompts.length) && !await confirm('更换图片会替换当前本机草稿、修图和框选。请先下载需要保留的本地结果；原图和服务器结果不会被修改。', { title: '更换图片', confirmLabel: '继续' })) return false;
-    if (!file) {
-      draftWriteAllowedRef.current = true; setDraftWriteAllowed(true);
-      setSource(null); setCachedAsset(null); setBoxes([]); setPrompts([]); setRegionBox(null); setRepairTarget(null); setRepairDirty(false); setLocalRepair(null);
-      return true;
-    }
-    if (!IMAGE_TYPES.has(file.type)) {
+    const account = accountIdRef.current, generation = accountGenerationRef.current;
+    if (file && !IMAGE_TYPES.has(file.type)) {
       setNotice({ kind: 'error', text: '请使用 PNG、JPG 或 WebP 图片。' });
       return false;
     }
     const limit = (capabilities?.limits?.max_upload_mb || 15) * 1024 * 1024;
-    if (file.size > limit) {
+    if (file && file.size > limit) {
       setNotice({ kind: 'error', text: `图片超过当前 ${Math.round(limit / 1024 / 1024)} MB 上限。` });
       return false;
     }
-    try { const image = await createImageBitmap(file); image.close(); }
+    try { if (file) { const image = await createImageBitmap(file); image.close(); } }
     catch { setNotice({ kind: 'error', text: '所选图片未能读取，原图和旧结果仍保留。' }); return false; }
-    if (!mounted.current || sourceSelection.current !== token || actionLock.current || pendingSubmissionRef.current || !fromHandoff && getPageExitRisk().busy.length) return false;
-    draftWriteAllowedRef.current = true;
-    setDraftWriteAllowed(true);
-    setSource({ id: makeId(), kind: 'local', file, name: file.name || 'image.png' });
-    handoffSelection.current = false;
-    setView('original');
-    setCachedAsset(null);
-    setAcceptedSourceId('');
-    setSourceSize(null);
-    setBoxes([]);
-    setPrompts([]);
-    setRegionBox(null);
-    setRepairTarget(null);
-    setRepairDirty(false);
-    setLocalRepair(null);
-    setNotice(null);
-    return true;
-  }, [boxes.length, capabilities?.limits?.max_upload_mb, confirm, draftReady, isBusy, localRepair, pendingSubmission, prompts.length, regionBox, repairDirty, sourceNeedsGuard]);
+    if (!mounted.current || sourceSelection.current !== token || accountIdRef.current !== account || accountGenerationRef.current !== generation || actionLock.current || pendingSubmissionRef.current || !fromHandoff && getPageExitRisk().busy.length) return false;
+    replacementBusy.current = true;
+    try {
+      if (!await preserveBeforeSourceChange(token, fromHandoff)) return false;
+      draftWriteAllowedRef.current = true;
+      setDraftWriteAllowed(true);
+      setSource(file ? { id: makeId(), kind: 'local', file, name: file.name || 'image.png' } : null);
+      setSourceHandoffId(file && fromHandoff ? handoffId : '');
+      handoffSelection.current = false;
+      setView('original');
+      setCachedAsset(null);
+      setAcceptedSourceId('');
+      setSourceSize(null);
+      setBoxes([]);
+      setPrompts([]);
+      setRegionBox(null);
+      setRepairTarget(null);
+      setRepairDirty(false);
+      setLocalRepair(null);
+      setNotice(null);
+      return true;
+    } finally { replacementBusy.current = false; if (mounted.current) setDraftSaveRetry(value => value + 1); }
+  }, [capabilities?.limits?.max_upload_mb, draftReady, handoffId, isBusy, pendingSubmission, preserveBeforeSourceChange]);
 
   async function selectLibraryImage(items: PickerItem[]) {
     const item = items[0], token = ++sourceSelection.current;
+    const account = accountIdRef.current, generation = accountGenerationRef.current;
     if (!item || item.type !== 'image' || !item.originalUrl) return { success: false, message: '原图不可用或未授权读取，已有输入保留；请重新选择可读取原件的图片' };
     try {
       const response = await fetch(item.originalUrl, { cache: 'no-store', signal: AbortSignal.timeout(120000) });
       if (!response.ok) throw new Error('所选原图无法读取，原图和旧结果保留');
       const blob = await response.blob();
-      if (!mounted.current || token !== sourceSelection.current || pendingSubmissionRef.current || actionLock.current) return false;
+      if (!mounted.current || accountIdRef.current !== account || accountGenerationRef.current !== generation || token !== sourceSelection.current || pendingSubmissionRef.current || actionLock.current) return false;
       return await acceptFile(new File([blob], item.fileName || 'image.png', { type: blob.type.split(';')[0] }));
     } catch (error) { return { success: false, message: error instanceof Error ? error.message : '图片读取失败，原图保留' }; }
   }
@@ -1118,7 +1287,7 @@ export default function CutoutPage() {
       if (!response.ok) throw new Error('来源原图无法读取或已失去权限，当前草稿保留。');
       const blob = await response.blob();
       if (!mounted.current || sourceSelection.current !== token || accountIdRef.current !== account) return;
-      const imported = await acceptFile(new File([blob], handoff.source.fileName || 'image.png', { type: blob.type.split(';')[0] }), false, true);
+      const imported = await acceptFile(new File([blob], handoff.source.fileName || 'image.png', { type: blob.type.split(';')[0] }), true);
       if (!imported) return;
       handoffSelection.current = true;
       setMode('cutout'); setView('original');
@@ -1325,7 +1494,7 @@ export default function CutoutPage() {
   const loadRepairAsNewImage = () => {
     if (!localRepair) return;
     const file = new File([localRepair.result], localRepair.filename, { type: 'image/png' });
-    void acceptFile(file, true);
+    void acceptFile(file);
   };
 
   const nextPage = () => {
@@ -1444,7 +1613,8 @@ export default function CutoutPage() {
               <button className={styles.quietButton} type="button" onClick={async () => { if (await confirm('放弃本机修复草稿？原图和服务器结果仍保留。', { title: '放弃修复', confirmLabel: '放弃草稿', danger: true })) setLocalRepair(null); }}><Trash2 size={14} />放弃草稿</button>
             </div>}
             {draftMessage && <p className={styles.strategyCopy} role="status">{draftMessage}</p>}
-            {draftReady && !draftWriteAllowed && <div className={styles.buttonRow}><button className={styles.secondaryButton} type="button" onClick={() => setDraftRestoreRetry(value => value + 1)}>重新检查草稿</button><Link className={styles.quietButton} href="/cutout">返回上次草稿</Link></div>}
+            {draftReady && !draftWriteAllowed && <div className={styles.buttonRow}><button className={styles.secondaryButton} type="button" onClick={() => void recheckWorkspaceDraft()}>重新检查草稿</button><Link className={styles.quietButton} href="/cutout">返回上次草稿</Link></div>}
+            {previousDraftAvailable && <div className={styles.buttonRow}><button className={styles.quietButton} type="button" onClick={() => void restorePreviousWorkspace()} disabled={!draftReady || isBusy || handoffBusy || Boolean(pendingSubmission)}>{previousDraftAvailable === 'unknown' ? '检查上次图片草稿' : '恢复上次图片草稿'}</button><span className={styles.strategyCopy}>{previousDraftAvailable === 'unknown' ? '暂时无法读取，可重新检查' : '本机保留一个上次现场，7天内可恢复'}</span></div>}
           </section>
           <section className={styles.section} aria-labelledby="cutout-result-title">
             <div className={styles.resultHeader}>

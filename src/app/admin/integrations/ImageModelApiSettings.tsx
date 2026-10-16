@@ -165,8 +165,8 @@ export default function ImageModelApiSettings({ accountId, onDraftChange, onSave
     if (!editor || lock.current) return;
     const epoch = generation.current, target = editor, id = draftKey(target.group, target.providerId);
     const changed = JSON.stringify(drafts[id] || target.initial) !== JSON.stringify(target.initial);
-    if (pending || changed) {
-      const discard = await confirm(pending ? '保存结果尚未确认。关闭后保留输入与原操作编号，仍只能查询原回执。' : '放弃本次设置层内的修改？打开前的输入会保留。', { title: '关闭设置', confirmLabel: '关闭', anchor: null });
+    if (!pending && changed) {
+      const discard = await confirm('放弃本次设置层内的修改？打开前的输入会保留。', { title: '关闭设置', confirmLabel: '关闭', anchor: null });
       if (!discard || epoch !== generation.current || lock.current) return;
     }
     if (!pending) setDrafts(current => ({ ...current, [id]: target.initial }));

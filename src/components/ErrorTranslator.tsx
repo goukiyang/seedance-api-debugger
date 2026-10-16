@@ -738,7 +738,7 @@ export function ErrorTranslator({ error, rawError, debugInfo, onRetry, onCopy }:
   const reload = async () => {
     const risk = getPageExitRisk();
     if (risk.busy.length) {
-      await confirm(`${risk.busy.join('、')}，请完成后再刷新。`, { title: '操作进行中', confirmLabel: '返回等待' });
+      setRefreshError(`${risk.busy.join('、')}，请完成后再刷新。`);
       return;
     }
     if (risk.unsaved.length && !await confirm(`${risk.unsaved.join('、')}尚未保存，刷新会丢失这些修改。`, { title: '未保存内容', confirmLabel: '放弃修改并刷新', danger: true })) return;

@@ -42,6 +42,7 @@ function preservedSlotOrder(order: string[] | undefined, slots: MultiviewSlot[],
 function contentKey(owner: string, taskId: string, draft: MultiviewDraft, format: 'png' | 'zip', slots = draft.slots) {
   return JSON.stringify([owner, taskId, draft.sourceVersion, slots.map(item => [item.frame, item.name]), draft.layout, format]);
 }
+const editingSignature = (draft: MultiviewDraft) => JSON.stringify([draft.slots, draft.reserve, draft.layout, draft.restoreOrder]);
 function readView(raw: string | null, draft: MultiviewDraft): ViewPreferences {
   try {
     if (!raw || raw.length > 4000) return emptyView();
@@ -75,6 +76,8 @@ function MultiviewPageContent() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [saved, setSaved] = useState(true);
+  const [draftEdited, setDraftEdited] = useState(false);
+  const [retainedDraft, setRetainedDraft] = useState('');
   const [viewSaved, setViewSaved] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [exportFile, setExportFile] = useState<Artifact | null>(null);
@@ -84,7 +87,6 @@ function MultiviewPageContent() {
   const [retained, setRetained] = useState<string[]>([]);
   const [undo, setUndo] = useState<MultiviewDraft | null>(null);
   const [originalOpen, setOriginalOpen] = useState(false);
-  const [partialFormat, setPartialFormat] = useState<'png' | 'zip' | null>(null);
   const [view, setView] = useState<ViewPreferences>(emptyView);
   const [expanded, setExpanded] = useState(true);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -124,10 +126,12 @@ function MultiviewPageContent() {
   const visible = sessionReady && authorized && loadedOwner === owner && loadedAuthority === authority && info?.taskId === taskId;
   const currentSourceKey = `${owner}:${taskId}:${loadedOwner === owner && info?.taskId === taskId ? info.sourceVersion : ''}:${activity}`;
   const sourceKeyRef = useRef(currentSourceKey); sourceKeyRef.current = currentSourceKey;
-  useUnsavedNavigation(!saved || !viewSaved || Boolean(generation.unsaved) || exporting || Boolean(generation.leavingBusy), confirm, {
-    unsaved: [...(saved && viewSaved ? [] : ['多角度选帧现场暂未保存到本机']), ...(generation.unsaved ? ['生成输入或原请求记录暂未完整保存到本机'] : [])],
+  const unsavedFrames = Boolean(draftEdited && !saved && draft && editingSignature(draft) !== retainedDraft);
+  useUnsavedNavigation(unsavedFrames || Boolean(generation.unsaved) || exporting || Boolean(generation.leavingBusy), confirm, {
+    unsaved: [...(unsavedFrames ? ['本次选帧或排版修改暂未保存到本机'] : []), ...(generation.unsaved ? ['生成输入或原请求记录暂未完整保存到本机'] : [])],
     busy: [...(exporting ? ['拼图文件仍在准备或复制'] : []), ...(generation.leavingBusy ? ['主图或视频提交仍在处理中'] : [])],
     revision: JSON.stringify([draft, generation.unsaved, generation.leavingBusy, generation.taskId]),
+    onBlocked: setNotice,
   });
 
   const clearArtifacts = useCallback(() => {
@@ -188,7 +192,9 @@ function MultiviewPageContent() {
         try { restored = parseMultiviewDraft(localStorage.getItem(key), next); setSaved(true); }
         catch { setSaved(false); }
         const keepCurrent = previous?.sourceVersion === next.sourceVersion && preferencesReady.current === `${key}:view:v1`;
+        if (!keepCurrent) setDraftEdited(false);
         const state = keepCurrent ? previous! : restored || initialDraft(next);
+        if (!keepCurrent) setRetainedDraft(editingSignature(state));
         try { preference = keepCurrent ? { ...viewRef.current, x: window.scrollX, y: window.scrollY } : readView(localStorage.getItem(`${key}:view:v1`), state); }
         catch { setViewSaved(false); }
         preferencesReady.current = `${key}:view:v1`;
@@ -220,7 +226,12 @@ function MultiviewPageContent() {
   }, [load]);
   useEffect(() => {
     if (!draft || !storageKey || !visible) return;
-    try { localStorage.setItem(storageKey, JSON.stringify(draft)); setSaved(true); } catch { setSaved(false); }
+    try {
+      const bytes = JSON.stringify(draft);
+      localStorage.setItem(storageKey, bytes);
+      if (localStorage.getItem(storageKey) !== bytes) throw new Error('draft_not_retained');
+      setRetainedDraft(editingSignature(draft)); setSaved(true);
+    } catch { setSaved(false); }
   }, [draft, storageKey, visible]);
   useEffect(() => {
     if (!visible || !viewKey || preferencesReady.current !== viewKey) return;
@@ -324,12 +335,14 @@ function MultiviewPageContent() {
     try { localStorage.setItem(`sd2:multiview:preferences:v1:${owner}`, JSON.stringify({ expanded: value })); } catch { setViewSaved(false); }
   }
   function update(next: MultiviewDraft, allowUndo = false) {
+    if (JSON.stringify(draft) === JSON.stringify(next)) return;
     const changed = Boolean(draft && contentKey(owner, taskId, draft, 'png') !== contentKey(owner, taskId, next, 'png'));
     if (operation.current && changed) return;
     if (draft && (draft.slots.length !== next.slots.length || draft.slots.some(item => !next.slots.some(current => current.id === item.id)))) setReduceCount(null);
     if (allowUndo) setUndo(draft);
     if (changed) clearArtifacts();
-    draftRef.current = next; setDraft(next); if (!operation.current) setNotice(''); setSaved(false); setPartialFormat(null); setActivity(value => value + 1);
+    if (changed || draft && (JSON.stringify(draft.reserve) !== JSON.stringify(next.reserve) || JSON.stringify(draft.restoreOrder) !== JSON.stringify(next.restoreOrder))) setDraftEdited(true);
+    draftRef.current = next; setDraft(next); if (!operation.current) setNotice(''); setSaved(false); setActivity(value => value + 1);
   }
   function chooseCount(count: number) {
     if (!draft || !info || count === draft.slots.length) return;
@@ -428,7 +441,6 @@ function MultiviewPageContent() {
   async function download(format: 'png' | 'zip', onlyReady = false) {
     if (!draft) return;
     const selected = onlyReady ? validSlots : draft.slots;
-    if (selected.length !== draft.slots.length && !await confirm(`仅导出当前已就绪的 ${selected.length} 张，按当前顺序重新排版。原草稿数量不变。`, { title: '部分导出', confirmLabel: '下载所选图片' })) return;
     const op = beginArtifact(format, selected); if (!op) return;
     try {
       const file = await artifactFor(op); checkOperation(op); setExportFile(file);
@@ -552,7 +564,7 @@ function MultiviewPageContent() {
             <label>外侧留白（像素）<input type="number" min={0} max={128} step={1} value={draft.layout.margin} disabled={exporting} onChange={event => update({ ...draft, layout: { ...draft.layout, margin: Math.round(Math.max(0, Math.min(128, Number(event.target.value) || 0))) } })} /></label><label>图片间距（像素）<input type="number" min={0} max={128} step={1} value={draft.layout.gap} disabled={exporting} onChange={event => update({ ...draft, layout: { ...draft.layout, gap: Math.round(Math.max(0, Math.min(128, Number(event.target.value) || 0))) } })} /></label><label>留白底色<input type="color" value={draft.layout.background} disabled={exporting} onChange={event => update({ ...draft, layout: { ...draft.layout, background: event.target.value } })} /></label><button type="button" disabled={exporting} onClick={() => update({ ...draft, layout: { ...DEFAULT_MULTIVIEW_LAYOUT } }, true)}>重置排版</button><p>只调整留白，不去背景、不裁剪原帧。单图包仍为原尺寸。</p></div>}
         </aside>
       </div>
-      {validSlots.length > 0 && validSlots.length < draft.slots.length && <div className={styles.partial} role="status"><p>{validSlots.length} / {draft.slots.length} 张就绪。可重试未就绪格，或明确只导出当前可用图片。</p><div className={styles.inlineActions}><button type="button" disabled={exporting} onClick={() => setPartialFormat('png')}>仅导出可用拼图</button><button type="button" disabled={exporting} onClick={() => setPartialFormat('zip')}>仅下载可用单图</button></div>{partialFormat && <div className={styles.partialPreview}>{collage(validSlots, false)}<p>本次 {validSlots.length} 张，原草稿仍为 {draft.slots.length} 张；复制完整拼图仍需全部就绪。</p><button type="button" className={styles.primary} disabled={exporting} onClick={() => void download(partialFormat, true)}>确认并下载这 {validSlots.length} 张</button><button type="button" onClick={() => setPartialFormat(null)}>取消</button></div>}</div>}
+      {validSlots.length > 0 && validSlots.length < draft.slots.length && <div className={styles.partial} role="status"><p>{validSlots.length} / {draft.slots.length} 张就绪。原草稿数量不变，复制完整拼图仍需全部就绪。</p><div className={styles.inlineActions}><button type="button" disabled={exporting} onClick={() => void download('png', true)}>下载已就绪 {validSlots.length} / {draft.slots.length} 张（PNG拼图）</button><button type="button" disabled={exporting} onClick={() => void download('zip', true)}>下载已就绪 {validSlots.length} / {draft.slots.length} 张（ZIP单图包）</button></div></div>}
       {notice && <div className={styles.notice} role="status">{notice}{exportFile && <button type="button" disabled={exporting} onClick={() => void downloadPrepared(exportFile)}>下载已准备文件</button>}</div>}
       {(!saved || !viewSaved) && <p className={styles.warning} role="status">本机存储暂不可用，刷新可能丢失本次工作现场；当前编辑和原图导出仍可使用。</p>}
       <footer className={styles.exportBar}><div><strong>{validSlots.length} / {draft.slots.length} 张就绪</strong><small>{dimensions?.width} × {dimensions?.height} · {saved && viewSaved ? '已保存到此设备' : '本机保存未完成'}</small></div><div className={styles.exportActions}><button type="button" className={styles.primary} disabled={exporting || validSlots.length !== draft.slots.length} onClick={copyCollage}><Copy size={16} />{exporting ? '正在准备…' : '一键复制拼图'}</button><button type="button" disabled={exporting || validSlots.length !== draft.slots.length} onClick={() => void download('png')}><Download size={16} />下载拼图</button><button type="button" disabled={exporting || validSlots.length !== draft.slots.length} onClick={() => void download('zip')}>下载单图包</button></div></footer>

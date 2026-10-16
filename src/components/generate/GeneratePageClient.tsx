@@ -545,6 +545,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const selectedVideoBranchIdRef = useRef('');
   const workspaceBridgeKeyRef = useRef('');
   const workspaceRefreshRef = useRef<{ key: string; refresh: () => Promise<void> } | null>(null);
+  const inputRecoveryRef = useRef<{ key: string; capture: () => boolean } | null>(null);
+  const [inputRecoveryTarget, setInputRecoveryTarget] = useState<{ projectId: string; videoCardId: string; videoBranchId: string } | null>(null);
   const composerMainRef = useRef<HTMLElement | null>(null);
   const projectPanelRef = useRef<HTMLDivElement | null>(null);
   const videoCardPanelRef = useRef<HTMLDivElement | null>(null);
@@ -697,6 +699,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
   // ---- Current Project ----
   const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const projectsRef = useRef(projects); projectsRef.current = projects;
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
@@ -888,6 +891,32 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     setWorkspaceRefreshReadyKey(refresh ? workspaceBridgeKey : '');
   }, [workspaceBridgeKey]);
 
+  const reportInputRecoveryReady = useCallback((capture: (() => boolean) | null) => {
+    if (workspaceBridgeKeyRef.current !== workspaceBridgeKey) return;
+    inputRecoveryRef.current = capture ? { key: workspaceBridgeKey, capture } : null;
+  }, [workspaceBridgeKey]);
+
+  const captureInputRecoveryTarget = useCallback(() => {
+    const context = readReuseContext();
+    return () => {
+      if (activeAccountIdRef.current !== context.accountId || workspaceBridgeKeyRef.current !== context.workspaceBridgeKey
+        || readReuseContext().tabId !== context.tabId) return;
+      userChangedProjectRef.current = true;
+      userChangedVideoCardRef.current = true;
+      userChangedVideoBranchRef.current = true;
+      setReuseDraft(null);
+      const available = !context.projectId || projectsRef.current.some(project => project.id === context.projectId && project.can_generate !== false);
+      const target = available
+        ? { projectId: context.projectId, videoCardId: context.videoCardId, videoBranchId: context.videoBranchId }
+        : { projectId: '', videoCardId: '', videoBranchId: '' };
+      setInputRecoveryTarget(target);
+      setSelectedProjectId(target.projectId);
+      setSelectedVideoCardId(target.videoCardId);
+      setSelectedVideoBranchId(target.videoBranchId);
+      if (!available) setProjectMessage({ type: 'info', text: '原项目当前不可用，输入已恢复，请重新选择保存位置。' });
+    };
+  }, [readReuseContext]);
+
   const requestWorkspaceReadAfterUnknownReuse = useCallback(async () => {
     const entry = workspaceRefreshRef.current;
     if (!entry || entry.key !== workspaceBridgeKey) return;
@@ -954,6 +983,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     setStudioHandoff(null);
     setStudioWorkspaceTabId(null);
     setReuseDraft(null);
+    setInputRecoveryTarget(null);
     setReuseLoading(false);
     setReusingTaskId(null);
     setReusePreflightPending(false);
@@ -1375,7 +1405,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
   const loadVideoCards = useCallback(async (
     projectId: string,
-    options: { preferredVideoCardId?: string | null; keepSelected?: boolean; forcePreferred?: boolean } = {},
+    options: { preferredVideoCardId?: string | null; keepSelected?: boolean; forcePreferred?: boolean; strictPreferred?: boolean } = {},
   ) => {
     const accountId = currentUser?.id || null;
     const requestId = ++videoCardsRequestIdRef.current;
@@ -1411,6 +1441,10 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       if (!res.ok) throw new Error(data.message || data.error || '视频卡列表加载失败');
       const list: VideoCardOption[] = data.video_cards || [];
       setVideoCards(list);
+      if (options.strictPreferred && options.preferredVideoCardId
+        && !list.some(card => card.id === options.preferredVideoCardId && ['draft', 'active', 'reviewing'].includes(card.status))) {
+        setVideoCardMessage({ type: 'info', text: '原视频卡当前不可用，未另选视频卡，请重新选择。' });
+      }
       const requestedVideoCardId = new URLSearchParams(window.location.search).get('video_card_id');
       const preferredId = options.forcePreferred
         ? options.preferredVideoCardId || ''
@@ -1424,8 +1458,10 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           : null;
         if (!options.forcePreferred && userChangedVideoCardRef.current && currentCard) return currentCard.id;
 
-        const preferred = preferredId ? list.find((card) => card.id === preferredId) : null;
+        const preferred = preferredId ? list.find((card) => card.id === preferredId
+          && (!options.strictPreferred || ['draft', 'active', 'reviewing'].includes(card.status))) : null;
         if (preferred) return preferred.id;
+        if (options.strictPreferred) return '';
         if (currentCard) return currentCard.id;
         const active = list.find((card) => card.status !== 'sealed' && card.status !== 'archived');
         return (active || list[0])?.id || '';
@@ -1446,12 +1482,14 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
 
   useEffect(() => {
+    const recovery = inputRecoveryTarget?.projectId === selectedProjectId ? inputRecoveryTarget : null;
     void loadVideoCards(selectedProjectId, {
-      preferredVideoCardId: reuseDraft?.videoCardId || null,
+      preferredVideoCardId: recovery ? recovery.videoCardId : reuseDraft?.videoCardId || null,
       keepSelected: true,
-      forcePreferred: Boolean(reuseDraft && reuseDraft.projectId === selectedProjectId),
+      forcePreferred: Boolean(recovery || reuseDraft && reuseDraft.projectId === selectedProjectId),
+      strictPreferred: Boolean(recovery),
     });
-  }, [loadVideoCards, selectedProjectId, reuseDraft?.videoCardId]);
+  }, [loadVideoCards, selectedProjectId, reuseDraft?.videoCardId, inputRecoveryTarget]);
 
 	  useEffect(() => {
 	    const requestId = ++videoBranchesRequestIdRef.current;
@@ -1496,6 +1534,10 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 	        const list: VideoBranchOption[] = Array.isArray(data.branches) ? data.branches : [];
 	        const active = list.filter((branch) => ['exploring', 'candidate', 'primary'].includes(branch.status));
 	        setVideoBranches(active);
+	        if (inputRecoveryTarget?.videoCardId === selectedVideoCardId) {
+            setSelectedVideoBranchId(active.some(branch => branch.id === inputRecoveryTarget.videoBranchId) ? inputRecoveryTarget.videoBranchId : '');
+            return;
+          }
 	        const requestedBranchId = userChangedVideoBranchRef.current
 	          ? null
 	          : reuseDraft?.videoCardId === selectedVideoCardId
@@ -1523,7 +1565,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 	    return () => {
 	      cancelled = true;
 	    };
-	  }, [currentUser?.id, loadingUser, selectedVideoCardId, reuseDraft?.videoCardId, reuseDraft?.videoBranchId]);
+	  }, [currentUser?.id, loadingUser, selectedVideoCardId, reuseDraft?.videoCardId, reuseDraft?.videoBranchId, inputRecoveryTarget]);
 
   useEffect(() => {
     if (appliedPreferenceProjectRef.current) return;
@@ -1793,7 +1835,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     reuseInFlightRef.current = true;
     let postMayHaveWritten = false;
     setReusePreflightPending(true);
-    setReuseMessage('请先确认：将用旧任务替换本页当前参数与参考素材，不会另存旧草稿。');
+    setReuseMessage('正在保留替换前输入...');
     try {
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
       if (!contextStillMatches()) {
@@ -1802,15 +1844,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           ? 'waiting' : 'blocked', explainBusyContext());
         return;
       }
-      const approved = await confirm(
-        '继续后会覆盖本页当前生成参数和参考素材；旧草稿不会另存。确定继续复用吗？',
-        { title: '替换当前输入', confirmLabel: '继续复用' },
-      );
-      if (!isCurrentAccountRequest()) return;
-      if (!approved) {
-        consumeQuery('cancelled');
-        updateReuseIntent({ ...intent, phase: 'done' });
-        setReuseMessage('已取消复用，当前参数与参考素材未被替换。');
+      const recovery = inputRecoveryRef.current;
+      if (recovery?.key !== capturedContext.workspaceBridgeKey || !recovery.capture()) {
+        retainIntent('blocked', '当前输入尚未能保留，未发送复用请求；请完成素材准备后点“继续复用”。');
         return;
       }
       if (!contextStillMatches()) {
@@ -1949,6 +1985,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       userChangedProjectRef.current = true;
       userChangedVideoCardRef.current = false;
       userChangedVideoBranchRef.current = false;
+      setInputRecoveryTarget(null);
       setSelectedProjectId(targetProjectId);
       setSelectedVideoCardId(targetCardId);
       setSelectedVideoBranchId(targetBranchId);
@@ -1994,14 +2031,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           }
           setReusePreflightPending(true);
           try {
-            const approved = await confirm('原参考素材无法恢复。继续只替换当前文字与参数，当前参考素材保留，请生成前自行核对。',
-              { title: '仅恢复参数', confirmLabel: '恢复参数' });
             if (!isCurrentAccountRequest()) return;
-            if (!approved) {
-              consumeQuery('cancelled');
-              updateReuseIntent({ ...intent, phase: 'done' });
-              setReuseMessage('已取消复用，当前输入和参考素材保留。');
-            } else if (!applyResponse()) retainIntent('failed', explainBusyContext());
+            if (!applyResponse()) retainIntent('failed', explainBusyContext());
             parameterOnlyReuseRef.current = null;
             setReuseParameterOnlyAvailable(false);
           } catch {
@@ -2027,7 +2058,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         setReusePreflightPending(false);
       }
     }
-  }, [confirm, currentUser?.id, isIpSurface, loadingUser, projects, readReuseContext, updateReuseIntent, transitionReuseSourceUrl]);
+  }, [currentUser?.id, isIpSurface, loadingUser, projects, readReuseContext, updateReuseIntent, transitionReuseSourceUrl]);
 
   const cancelReuseIntent = useCallback(() => {
     const intent = reuseIntentRef.current;
@@ -2139,12 +2170,15 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       return;
     }
     const action = taskReuseAutoAction(intent, context);
-    if (action === 'wait') setReuseMessage('正在准备旧任务复用，来源已保留；准备好后会询问是否替换当前输入。');
+    if (action === 'wait') setReuseMessage('正在准备旧任务复用，来源已保留；准备好后可点“继续复用”。');
     if (action === 'block') {
       updateReuseIntent({ ...intent, phase: 'blocked' });
       setReuseMessage(context.conflict || '你已修改当前输入或保存位置，当前现场保留；准备好后可点“继续复用”。');
     }
-    if (action === 'confirm') void loadReusableTask(intent.taskId, { clearUrl: intent.fromUrl });
+    if (action === 'confirm') {
+      updateReuseIntent({ ...intent, phase: 'blocked' });
+      setReuseMessage('旧任务来源已保留；点击“继续复用”后替换本页输入。');
+    }
   }, [currentUser?.id, loadReusableTask, loadingUser, reuseContextBusy, parentReuseInitializing, parentReuseConflict,
     composerReuseState, reuseIntent, reuseLoading, reuseOutcomeUnknown, reusePreflightPending, readReuseContext, updateReuseIntent, transitionReuseSourceUrl]);
 
@@ -3132,6 +3166,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                           const selectProject = () => {
                             if (projectBusy || reuseUiLocked) return;
                             markReuseSelectionChanged();
+                            setInputRecoveryTarget(null);
                             userChangedProjectRef.current = true;
                             userChangedVideoCardRef.current = false;
                             userChangedVideoBranchRef.current = false;
@@ -3307,6 +3342,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                   value={selectedVideoCardId}
                   onChange={(event) => {
                     markReuseSelectionChanged();
+                    setInputRecoveryTarget(null);
                     userChangedVideoCardRef.current = true;
                     userChangedVideoBranchRef.current = false;
                     setSelectedVideoCardId(event.target.value);
@@ -3503,6 +3539,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           interactionLocked={reuseUiLocked}
           onWorkspaceBusyChange={reportWorkspaceBusy}
           onWorkspaceRefreshReady={reportWorkspaceRefreshReady}
+          onInputRecoveryReady={reportInputRecoveryReady}
+          onCaptureInputRecoveryTarget={captureInputRecoveryTarget}
+          inputRecoveryScope={() => { const context = readReuseContext(); return JSON.stringify([context.projectId, context.videoCardId, context.videoBranchId, context.editEpoch]); }}
           onReuseStateChange={reportComposerReuseState}
           onReuseDraftApplied={completeReuseDraftApplication}
           onSubmit={handleSubmit}

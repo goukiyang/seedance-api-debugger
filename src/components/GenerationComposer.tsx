@@ -1,7 +1,5 @@
 'use client';
 
-import { useProductDialog } from '@/components/useProductDialog';
-
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import type {
   GenerationMode,
@@ -12,7 +10,8 @@ import type {
   WorkspaceAssetItem,
 } from '@/types';
 import { checkPrompt } from '@/components/PromptChecker';
-import { useWorkspace } from '@/lib/hooks/useWorkspace';
+import { useWorkspace, WorkspaceInputRecoveryError, type WorkspaceInputRecovery } from '@/lib/hooks/useWorkspace';
+import { uploadSession } from '@/lib/http/upload-session';
 import type { ComposerReuseState } from '@/lib/navigation/task-reuse-intent';
 import { ImageSetToolbar } from '@/components/ImageSetToolbar';
 import { ReferenceStrip } from '@/components/ReferenceStrip';
@@ -416,6 +415,9 @@ interface Props {
   interactionLocked?: boolean;
   onWorkspaceBusyChange?: (busy: boolean, reason?: 'read-error' | 'pending-attach' | 'uploading' | 'upload-failed' | 'saving' | 'picker-open' | 'loading' | null) => void;
   onWorkspaceRefreshReady?: (refresh: (() => Promise<void>) | null) => void;
+  inputRecoveryScope?: string | (() => string);
+  onInputRecoveryReady?: (capture: (() => boolean) | null) => void;
+  onCaptureInputRecoveryTarget?: () => (() => void);
   onReuseStateChange?: (state: ComposerReuseState) => void;
   onReuseDraftApplied?: (taskId: string, reuseKey: number) => void;
   onCollectionLoad: (collectionId: string) => Promise<void>;
@@ -513,6 +515,9 @@ export function GenerationComposer({
   interactionLocked = false,
   onWorkspaceBusyChange,
   onWorkspaceRefreshReady,
+  inputRecoveryScope = '',
+  onInputRecoveryReady,
+  onCaptureInputRecoveryTarget,
   onReuseStateChange,
   onReuseDraftApplied,
   require1080pApproval,
@@ -542,7 +547,6 @@ export function GenerationComposer({
     message: '供应商 Draft 能力尚未完成核验，暂不可用。',
   },
 }: Props) {
-  const { confirm, productDialog } = useProductDialog();
   const workspace = useWorkspace();
   const generationComposerRef = React.useRef<HTMLDivElement | null>(null);
   const workspaceOperationCountRef = React.useRef(0);
@@ -610,6 +614,12 @@ export function GenerationComposer({
   const [studioSettingsReady, setStudioSettingsReady] = useState(false);
   const [imageResultDraftReady, setImageResultDraftReady] = useState(false);
   const [imageResultDraftMessage, setImageResultDraftMessage] = useState('');
+  type InputRecovery = { workspace: WorkspaceInputRecovery; restoreFields: () => void };
+  const [inputRecovery, setInputRecovery] = useState<InputRecovery | null>(null);
+  const [inputRecoveryPair, setInputRecoveryPair] = useState<{ previous: InputRecovery; next: InputRecovery; pendingTarget: InputRecovery | null } | null>(null);
+  const [inputRecoveryBusy, setInputRecoveryBusy] = useState(false);
+  const [inputRecoveryMessage, setInputRecoveryMessage] = useState('');
+  const recoveryScopeRef = React.useRef(inputRecoveryScope); recoveryScopeRef.current = inputRecoveryScope;
   const [studioCorrectedParameters, setStudioCorrectedParameters] = useState<string[]>([]);
   const appliedStudioBaseRunRef = React.useRef<string | null>(null);
   const appliedStudioProviderRunRef = React.useRef<string | null>(null);
@@ -667,13 +677,64 @@ export function GenerationComposer({
     () => runWorkspaceOperation(() => workspace.refresh(), false),
     [runWorkspaceOperation, workspace.refresh],
   );
+  const makeInputRecovery = useCallback(() => {
+    const snapshot = workspace.captureRecovery();
+    if (!snapshot) return null;
+    const restoreTarget = onCaptureInputRecoveryTarget?.();
+    return { workspace: snapshot, restoreFields: () => {
+      settingsTouchedRef.current = true; appliedVideoCardDefaultsRef.current = selectedVideoCardId || null;
+      setPrompt(prompt); setGenerationMode(generationMode); setRatio(ratio); setDuration(duration); setResolution(resolution); setSeed(seed);
+      setGenerateAudio(generateAudio); setReturnLastFrame(returnLastFrame); setWatermark(watermark); setDraftMode(draftMode);
+      setResolutionApprovalConfirmed(resolutionApprovalConfirmed); setSelectedModel(selectedModel);
+      setCurrentReferenceAlbumId(currentReferenceAlbumId); setCurrentReferenceAlbumName(currentReferenceAlbumName);
+      if (selectedProvider) onProviderChange?.(selectedProvider);
+      onModelChange?.(selectedModel); if (selectedAuxiliary != null) onAuxiliaryChange?.(selectedAuxiliary);
+      restoreTarget?.();
+    } };
+  }, [workspace.captureRecovery, selectedVideoCardId, prompt, generationMode, ratio, duration, resolution, seed, generateAudio,
+    returnLastFrame, watermark, draftMode, resolutionApprovalConfirmed, selectedModel, selectedProvider, selectedAuxiliary, onProviderChange, onModelChange, onAuxiliaryChange,
+    currentReferenceAlbumId, currentReferenceAlbumName, onCaptureInputRecoveryTarget]);
+  const captureInputRecovery = useCallback(() => {
+    const value = makeInputRecovery();
+    if (!value) { setInputRecoveryMessage('当前输入或素材尚未确认，未替换；请先完成素材准备后重试。'); return false; }
+    setInputRecovery(value); setInputRecoveryMessage('替换前输入已保留在本页，可恢复。'); return true;
+  }, [makeInputRecovery]);
+  useEffect(() => { onInputRecoveryReady?.(captureInputRecovery); return () => onInputRecoveryReady?.(null); }, [onInputRecoveryReady, captureInputRecovery]);
+  const readRecoveryScope = () => typeof recoveryScopeRef.current === 'function' ? recoveryScopeRef.current() : recoveryScopeRef.current;
+  const restoreInputRecovery = async (target = inputRecovery) => {
+    if (!target || inputRecoveryBusy || interactionLocked || workspace.loading || workspace.pendingWorkspaceAttach) return;
+    if (inputRecoveryPair?.pendingTarget && inputRecoveryPair.pendingTarget !== target) {
+      setInputRecoveryMessage('原恢复的素材关联结果尚未确认，请先继续原恢复；两份输入仍保留在本页。'); return;
+    }
+    const pair = inputRecoveryPair || { previous: target, next: makeInputRecovery(), pendingTarget: null };
+    if (!pair.next) { setInputRecoveryMessage('当前素材尚未确认，未开始恢复；请先完成素材准备。'); return; }
+    const previous = target, next = target === pair.previous ? pair.next : pair.previous;
+    // Retain both sides before the first write, including when a later role/read step fails.
+    setInputRecoveryPair({ previous: pair.previous, next: pair.next, pendingTarget: target });
+    markReuseInputChanged(); const edit = reuseEditRevisionRef.current, scope = readRecoveryScope();
+    setInputRecoveryBusy(true);
+    let associationConfirmed = false;
+    try {
+      await runWorkspaceOperation(() => workspace.restoreRecovery(previous.workspace), false);
+      associationConfirmed = true;
+      const session = uploadSession();
+      if (session.ownerId !== previous.workspace.ownerId || session.epoch !== previous.workspace.epoch
+        || readRecoveryScope() !== scope || reuseEditRevisionRef.current !== edit) throw new Error('账号、保存位置或输入已变化，参数未覆盖；两份输入仍保留。');
+      previous.restoreFields(); setInputRecovery(next); setInputRecoveryPair(null); setInputRecoveryMessage('已恢复所选输入，另一份输入也保留在本页。');
+    } catch (cause) {
+      if (cause instanceof WorkspaceInputRecoveryError) associationConfirmed = cause.associationConfirmed;
+      setInputRecoveryPair({ previous: pair.previous, next: pair.next, pendingTarget: associationConfirmed ? null : target });
+      setInputRecoveryMessage(`${cause instanceof Error ? cause.message : '恢复尚未完成。'} 两份输入仍保留在本页。${associationConfirmed ? '可重试原恢复，或返回刚才输入。' : '请先继续原恢复，核对原素材关联。'}`);
+    }
+    finally { setInputRecoveryBusy(false); }
+  };
 
   useEffect(() => {
     const element = generationComposerRef.current;
     if (!element) return;
-    if (interactionLocked || imageResultHandoff && !imageResultDraftReady) element.setAttribute('inert', '');
+    if (interactionLocked || inputRecoveryBusy || inputRecoveryPair || imageResultHandoff && !imageResultDraftReady) element.setAttribute('inert', '');
     else element.removeAttribute('inert');
-  }, [interactionLocked, imageResultHandoff, imageResultDraftReady]);
+  }, [interactionLocked, inputRecoveryBusy, inputRecoveryPair, imageResultHandoff, imageResultDraftReady]);
 
   useEffect(() => {
     reportWorkspaceBusy();
@@ -1578,12 +1639,9 @@ export function GenerationComposer({
   }, [loadTemplates, selectedTemplate]);
 
   const handleLoadCollection = useCallback(async (collectionId: string) => {
-    if (workspace.assets.length > 0) {
-      const ok = await confirm('加载图集将替换当前素材，确定继续？', { title: '替换当前素材', confirmLabel: '加载并替换' });
-      if (!ok) return;
-    }
-    await runWorkspaceOperation(() => onCollectionLoad(collectionId));
-  }, [workspace.assets.length, onCollectionLoad, confirm, runWorkspaceOperation]);
+    if (!captureInputRecovery()) return;
+    await runWorkspaceOperation(async () => { await onCollectionLoad(collectionId); await workspace.refresh(); });
+  }, [captureInputRecovery, onCollectionLoad, runWorkspaceOperation, workspace.refresh]);
 
   const handleSaveCollection = useCallback(async (name: string) => {
     await runWorkspaceOperation(() => onCollectionSave(name));
@@ -1757,14 +1815,11 @@ export function GenerationComposer({
   }, []);
 
   const handleLoadReferenceAlbum = useCallback(async (albumId: string, albumName: string) => {
-    if (workspace.assets.length > 0) {
-      const ok = await confirm('切换图集会替换当前参考素材列表，确定继续？', { title: '替换参考素材', confirmLabel: '切换并替换' });
-      if (!ok) return;
-    }
+    if (!captureInputRecovery()) return;
     await runWorkspaceOperation(() => workspace.loadReferenceAlbum(albumId, seedanceReferenceMediaCapabilities(selectedModel).imageLimit));
     setCurrentReferenceAlbumId(albumId);
     setCurrentReferenceAlbumName(albumName);
-  }, [workspace, selectedModel, confirm, runWorkspaceOperation]);
+  }, [workspace, selectedModel, captureInputRecovery, runWorkspaceOperation]);
 
   const handleSaveCurrentAsReferenceAlbum = useCallback(async (name: string) => {
     if (workspace.assets.length === 0) throw new Error('当前没有可保存的参考素材');
@@ -1791,7 +1846,10 @@ export function GenerationComposer({
 
   return (
     <>
-      {productDialog}
+      {(inputRecovery || inputRecoveryMessage) && <p className="composer-prefill-notice" role="status">{inputRecoveryMessage}
+        {inputRecovery && <button type="button" disabled={inputRecoveryBusy || interactionLocked || workspace.loading || Boolean(inputRecoveryPair?.pendingTarget && inputRecoveryPair.pendingTarget !== inputRecoveryPair.previous)} onClick={() => void restoreInputRecovery(inputRecoveryPair?.previous || inputRecovery)}>{inputRecoveryBusy ? '正在恢复输入…' : inputRecoveryPair ? '继续原恢复' : '恢复替换前输入'}</button>}
+        {inputRecoveryPair && <button type="button" disabled={inputRecoveryBusy || interactionLocked || workspace.loading || Boolean(inputRecoveryPair.pendingTarget && inputRecoveryPair.pendingTarget !== inputRecoveryPair.next)} onClick={() => void restoreInputRecovery(inputRecoveryPair.next)}>返回刚才输入</button>}
+      </p>}
       <div
         ref={generationComposerRef}
         className="generation-composer"

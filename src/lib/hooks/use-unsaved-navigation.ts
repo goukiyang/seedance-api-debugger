@@ -4,7 +4,8 @@ import { useEffect, useId } from 'react';
 import { cancelPageExit, getPageExitRisk, runApprovedPageExit, usePageExitRisk } from './page-exit-guard';
 
 type ConfirmNavigation = (message: string, options: { title: string; confirmLabel: string }) => Promise<boolean>;
-const pending = new Map<string, ConfirmNavigation>();
+type NavigationHandler = { confirm: ConfirmNavigation; onBlocked?: (message: string) => void };
+const pending = new Map<string, NavigationHandler>();
 let deciding = false;
 
 async function navigate(event: MouseEvent) {
@@ -17,13 +18,14 @@ async function navigate(event: MouseEvent) {
   event.stopImmediatePropagation();
   if (deciding) return;
   const href = link.href;
-  const confirm = Array.from(pending.values()).pop();
-  if (!confirm) return;
+  const handler = Array.from(pending.values()).pop();
+  if (!handler) return;
+  const { confirm, onBlocked } = handler;
   deciding = true;
   try {
     const risk = getPageExitRisk();
     if (risk.busy.length) {
-      await confirm(`${risk.busy.join('、')}，请完成后再离开。`, { title: '操作进行中', confirmLabel: '返回等待' });
+      onBlocked?.(`${risk.busy.join('、')}，请完成后再离开。`);
       return;
     }
     if (risk.unsaved.length && !await confirm(`${risk.unsaved.join('、')}尚未保存，确定放弃并离开吗？`, { title: '离开页面', confirmLabel: '放弃并离开' })) return;
@@ -31,15 +33,16 @@ async function navigate(event: MouseEvent) {
   } finally { deciding = false; }
 }
 
-export function useUnsavedNavigation(unsaved: boolean, confirm: ConfirmNavigation, details?: { unsaved: string[]; busy: string[]; revision?: string }) {
+export function useUnsavedNavigation(unsaved: boolean, confirm: ConfirmNavigation, details?: { unsaved: string[]; busy: string[]; revision?: string; onBlocked?: (message: string) => void }) {
   const id = useId();
+  const onBlocked = details?.onBlocked;
   usePageExitRisk(details || { unsaved: unsaved ? ['当前设置'] : [], busy: [] });
   useEffect(() => {
     if (!unsaved) return;
     if (!pending.size) {
       document.addEventListener('click', navigate, true);
     }
-    pending.set(id, confirm);
+    pending.set(id, { confirm, onBlocked });
     return () => {
       pending.delete(id);
       if (!pending.size) {
@@ -47,5 +50,5 @@ export function useUnsavedNavigation(unsaved: boolean, confirm: ConfirmNavigatio
         cancelPageExit();
       }
     };
-  }, [id, unsaved, confirm]);
+  }, [id, unsaved, confirm, onBlocked]);
 }

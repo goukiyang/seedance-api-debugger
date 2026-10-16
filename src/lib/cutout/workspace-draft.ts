@@ -4,6 +4,7 @@ import type { Box, CharacterBox, PromptOverride } from './types';
 export type CutoutWorkspaceDraft = {
   version: 1;
   savedAt: number;
+  storageRevision?: string;
   source: { id: string; file?: Blob; reference?: string; name: string; accepted: boolean; fullCanvas?: boolean; handoffId?: string } | null;
   sourceJobId: string | null;
   repair: { result: Blob; mask: Blob; filename: string; jobId: string; sourceVersion: string } | null;
@@ -51,6 +52,7 @@ function validDraft(value: CutoutWorkspaceDraft) {
       && prompt.points.every(point => Array.isArray(point) && point.length === 2 && point.every(number => Number.isFinite(number) && number >= 0 && number <= 32000)))
     && (!value.editor.region || validBox(value.editor.region)));
   return value?.version === 1 && Number.isFinite(value.savedAt) && value.savedAt <= Date.now() + 60_000
+    && (value.storageRevision === undefined || typeof value.storageRevision === 'string' && /^[\w-]{16,128}$/.test(value.storageRevision))
     && Date.now() - value.savedAt <= LIFETIME
     && validEditor
     && (!value.source || (/^[\w-]{1,128}$/.test(value.source.id) && (validBlob(value.source.file)
@@ -63,8 +65,14 @@ function validDraft(value: CutoutWorkspaceDraft) {
       && value.repair.sourceVersion.length <= 500 && typeof value.repair.filename === 'string' && value.repair.filename.length <= 240));
 }
 
-export async function readCutoutWorkspaceDraft(accountId: string): Promise<CutoutWorkspaceDraft | null> {
-  const value = await transaction<CutoutWorkspaceDraft | undefined>(accountId, 'readonly', store => store.get(accountId));
+type DraftSlot = 'current' | 'previous';
+const draftKey = (accountId: string, slot: DraftSlot) => slot === 'current' ? accountId : ['previous', accountId];
+const draftBytes = (value: CutoutWorkspaceDraft | null | undefined) => (value?.source?.file?.size || 0) + (value?.repair?.result.size || 0) + (value?.repair?.mask.size || 0);
+const newStorageRevision = () => globalThis.crypto.randomUUID?.()
+  || Array.from(globalThis.crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
+
+export async function readCutoutWorkspaceDraft(accountId: string, slot: DraftSlot = 'current'): Promise<CutoutWorkspaceDraft | null> {
+  const value = await transaction<CutoutWorkspaceDraft | undefined>(accountId, 'readonly', store => store.get(draftKey(accountId, slot)));
   if (!value) return null;
   if (!validDraft(value)) {
     throw new Error('本机草稿已过期或无法读取，原草稿保留；服务器结果仍保留');
@@ -72,18 +80,71 @@ export async function readCutoutWorkspaceDraft(accountId: string): Promise<Cutou
   return value;
 }
 
-export async function saveCutoutWorkspaceDraft(accountId: string, value: CutoutWorkspaceDraft): Promise<void> {
+export async function saveCutoutWorkspaceDraft(accountId: string, value: CutoutWorkspaceDraft, slot: DraftSlot = 'current', guard?: { expectedRevision: string | null; isCurrent: () => boolean }): Promise<void> {
   if (!validDraft(value)) throw new Error('草稿内容无法安全保存');
-  const bytes = (value.source?.file?.size || 0) + (value.repair?.result.size || 0) + (value.repair?.mask.size || 0);
+  if (!accountId || accountId.length > 200) throw new Error('未确认账号，暂不保存草稿');
+  const bytes = draftBytes(value);
   if (bytes > MAX_BYTES) throw new Error('草稿超过本机 64 MB 上限，请先下载修复结果');
   const estimate = await navigator.storage?.estimate?.();
   // Replacement may temporarily need both records; keep the existing draft on failure.
   if (estimate?.quota && estimate.usage != null && estimate.quota - estimate.usage < bytes) throw new Error('本机空间不足，请先下载修复结果');
-  await transaction(accountId, 'readwrite', store => store.put(value, accountId));
+  const storageRevision = newStorageRevision();
+  const database = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const tx = database.transaction(STORE, 'readwrite');
+    const store = tx.objectStore(STORE);
+    let failure = '本机草稿未保存，可能空间不足或存储被禁用';
+    const other = store.get(draftKey(accountId, slot === 'current' ? 'previous' : 'current'));
+    other.onsuccess = () => {
+      const retained = other.result as CutoutWorkspaceDraft | undefined;
+      if (retained && validDraft(retained) && bytes + draftBytes(retained) > MAX_BYTES) {
+        failure = '当前与上次草稿合计超过本机 64 MB 上限，请先下载需要保留的结果';
+        tx.abort();
+        return;
+      }
+      const write = () => store.put({ ...value, storageRevision }, draftKey(accountId, slot));
+      if (!guard) { write(); return; }
+      const target = store.get(draftKey(accountId, slot));
+      target.onsuccess = () => {
+        if (!guard.isCurrent() || (target.result?.storageRevision || null) !== guard.expectedRevision) {
+          failure = '上次草稿已在其他页面变化，尚未切换，请重新选择';
+          tx.abort();
+          return;
+        }
+        write();
+      };
+    };
+    tx.oncomplete = () => { database.close(); resolve(); };
+    tx.onerror = tx.onabort = () => { database.close(); reject(new Error(failure)); };
+  });
 }
 
 export async function clearCutoutWorkspaceDraft(accountId: string): Promise<void> {
   await transaction(accountId, 'readwrite', store => store.delete(accountId));
+}
+
+// Swap only the draft that was read and authorized; a different tab must not retarget recovery.
+export async function swapCutoutWorkspaceDraft(accountId: string, expected: CutoutWorkspaceDraft, isCurrent: () => boolean): Promise<void> {
+  if (!expected.storageRevision) throw new Error('旧草稿缺少恢复标识，尚未切换，请先重新保留草稿');
+  const currentRevision = newStorageRevision(), previousRevision = newStorageRevision();
+  await transaction(accountId, 'readwrite', store => {
+    const request = store.get(draftKey(accountId, 'previous'));
+    request.onsuccess = () => {
+      const previous = request.result as CutoutWorkspaceDraft | undefined;
+      if (!isCurrent() || !previous || !validDraft(previous) || previous.storageRevision !== expected.storageRevision) {
+        store.transaction.abort();
+        return;
+      }
+      const current = store.get(accountId);
+      current.onsuccess = () => {
+        if (!isCurrent()) { store.transaction.abort(); return; }
+        if (current.result) store.put({ ...current.result, storageRevision: previousRevision }, draftKey(accountId, 'previous'));
+        else store.delete(draftKey(accountId, 'previous'));
+        store.put({ ...previous, storageRevision: currentRevision }, accountId);
+      };
+    };
+    return request;
+  });
 }
 
 export type CutoutViewPreferences = {

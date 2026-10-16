@@ -99,7 +99,7 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
     const timer = window.setTimeout(() => setBillingQuote(current => current?.requestId === billingQuote.requestId ? { ...current, expired: true } : current), delay);
     return () => window.clearTimeout(timer);
   }, [billingQuote]);
-  useUnsavedNavigation(busy || previewing || files.some(file => !file.assetId), confirm, { unsaved: files.some(file => !file.assetId) ? ['尚未上传的本机批量素材，离开后需重新选择'] : [], busy: busy ? ['批次素材或提交正在处理'] : previewing ? ['本机图片正在读取'] : [], revision: signature });
+  useUnsavedNavigation(busy || previewing || files.some(file => !file.assetId), confirm, { unsaved: files.some(file => !file.assetId) ? ['尚未上传的本机批量素材，离开后需重新选择'] : [], busy: busy ? ['批次素材或提交正在处理'] : previewing ? ['本机图片正在读取'] : [], revision: signature, onBlocked: setError });
   useEffect(() => {
     setRecoveryKnownScope('');
     fileRef.current.forEach(file => URL.revokeObjectURL(file.preview)); fileRef.current = []; setFiles([]); setSkipped([]); setFolderName(''); setError(''); setId(null); setPending(null); setBillingQuote(null);

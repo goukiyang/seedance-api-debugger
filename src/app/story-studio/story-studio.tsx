@@ -93,6 +93,8 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
   const [work, setWork] = useState<Work>({ draft: blank(), images: {}, references: {}, mediaNodes: {}, lineage: {}, versions: [] });
   const [busy, setBusy] = useState('');
   const [dirty, setDirty] = useState(false);
+  const [cachedWork, setCachedWork] = useState('');
+  const [localChoice, setLocalChoice] = useState<{ work: Work; pending: SaveRequest | null } | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(true);
@@ -114,6 +116,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
   const lock = useRef(false);
   const sequence = useRef(0);
   const failedSave = useRef<SaveRequest | null>(null);
+  const reviewRequired = useRef(false);
   const alive = useRef(true);
   const { confirm, productDialog } = useProductDialog();
   const key = `sd2:story:v1:${userId}:${documentId}:${nodeId}`;
@@ -123,10 +126,17 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
   function assertCurrentContext() {
     if (!alive.current || loadedContext.current !== key || documentRef.current?.id !== documentId) throw Error('故事页面已切换，请回到原故事查询；不会继续派发');
   }
-  usePageExitRisk({ unsaved: dirty ? ['故事与分镜草稿'] : [], busy: busy ? [busy] : [] });
+  usePageExitRisk({ unsaved: dirty && cachedWork !== JSON.stringify(work) ? ['故事与分镜草稿'] : [],
+    busy: busy ? [busy] : failedSave.current || localChoice?.pending ? ['故事保存结果尚未确认']
+      : [work.request, localChoice?.work.request].some(item => item && ['pending', 'unconfirmed'].includes(item.state)) ? ['文字请求结果尚未确认'] : [], revision: JSON.stringify(work) });
   const cache = useCallback((value: Work, pending: SaveRequest | null = failedSave.current) => {
-    try { localStorage.setItem(key, JSON.stringify({ userId, documentId, nodeId, revision: documentRef.current?.revision,
-      work: value, pending })); } catch { setError('本地草稿无法保存，请保持页面打开并保存到画布'); }
+    try {
+      const serialized = JSON.stringify({ userId, documentId, nodeId, revision: documentRef.current?.revision,
+        requiresReview: reviewRequired.current, work: value, pending });
+      localStorage.setItem(key, serialized);
+      if (localStorage.getItem(key) !== serialized) throw Error('草稿未保留');
+      setCachedWork(JSON.stringify(value)); return true;
+    } catch { setCachedWork(''); setError('本地草稿无法保存，请保持页面打开并保存到画布'); return false; }
   }, [key, userId, documentId, nodeId]);
   function change(value: Work) {
     current.current = value; setWork(value); sequence.current += 1; setDirty(true); cache(value);
@@ -164,6 +174,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
   useEffect(() => {
     alive.current = true;
     loadedContext.current = key;
+    setLocalChoice(null); setCachedWork(''); setDirty(false); setConflict(false); failedSave.current = null; reviewRequired.current = false;
     async function load() {
       try {
         if (!documentId || !nodeId) return;
@@ -191,16 +202,18 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
           const local = JSON.parse(localStorage.getItem(key) || 'null');
           if (local?.userId === userId && local.documentId === documentId && local.nodeId === nodeId && local.work) {
             validateStoryDraft(local.work.draft);
-            if (local.revision === doc.revision || await confirm('本地故事草稿基于较早画布。保留该草稿继续核对？不会自动覆盖服务器。', { title: '恢复草稿', confirmLabel: '保留草稿' })) {
-              restored = { ...value, ...local.work, lineage: local.work.lineage || {}, versions: local.work.versions || [] };
-              if (!isStudioTextModel(restored.textModel)) restored.textModel = value.textModel;
-              if (restored.request?.state === 'pending') restored.request = { ...restored.request, state: 'unconfirmed' };
+            const candidate: Work = { ...value, ...local.work, lineage: local.work.lineage || {}, versions: local.work.versions || [] };
+            if (!isStudioTextModel(candidate.textModel)) candidate.textModel = value.textModel;
+            if (candidate.request?.state === 'pending') candidate.request = { ...candidate.request, state: 'unconfirmed' };
+            if (local.revision === doc.revision && local.requiresReview !== true) {
+              restored = candidate;
               failedSave.current = local.pending || null;
               sequence.current = 1; setDirty(true);
-              if (local.revision !== doc.revision) {
-                setConflict(true);
-                setError('画布已有新版本，草稿尚未覆盖服务器；请核对后合并故事草稿');
-              }
+              setCachedWork(JSON.stringify(restored));
+            } else {
+              reviewRequired.current = true;
+              setLocalChoice({ work: candidate, pending: local.pending || null });
+              setAutosavePaused(true);
             }
           }
         } catch { /* Invalid local data never replaces the authorized document. */ }
@@ -219,7 +232,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     assertCurrentContext();
     const doc = documentRef.current;
     if (!doc || !snapshot.current) throw Error('画布尚未就绪');
-    if (conflict) throw Error('请先读取最新画布并核对故事草稿');
+    if (conflict && !failedSave.current) throw Error('请先读取最新画布并核对故事草稿');
     validateStoryDraft(value.draft);
     const captured = sequence.current;
     async function persist(body: SaveRequest) {
@@ -228,7 +241,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
       try { result = await request<{ document: Omit<Document, 'document_json'> }>(DOC_API, body); }
       catch (cause) {
         const status = Number((cause as { status?: number })?.status);
-        if (status === 409) setConflict(true);
+        if (status === 409) { reviewRequired.current = true; setConflict(true); }
         if (status && status < 500 && ![408, 429].includes(status)) {
           failedSave.current = null; cache(current.current, null);
         }
@@ -238,7 +251,10 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
       documentRef.current = next; setDocument(next); snapshot.current = JSON.parse(body.document_json);
       failedSave.current = null;
     }
-    if (failedSave.current) await persist(failedSave.current);
+    if (failedSave.current) {
+      await persist(failedSave.current);
+      if (reviewRequired.current) throw Error('原保存回执已确认；请读取最新画布并核对草稿后再保存');
+    }
     const graph: Snapshot = JSON.parse(JSON.stringify(snapshot.current));
     const node = graph.canvas.nodes.find(item => item.id === nodeId);
     if (!node) throw Error('故事节点不存在，未保存');
@@ -270,14 +286,15 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     finally { lock.current = false; if (alive.current) setBusy(''); }
   }
   useEffect(() => {
-    if (!dirty || loading || busy || failedSave.current || conflict || autosavePaused || !document) return;
+    if (!dirty || loading || busy || failedSave.current || localChoice || conflict || autosavePaused || !document) return;
     const timer = setTimeout(() => { void operate('保存草稿', async () => { await save(); }); }, 1000);
     return () => clearTimeout(timer);
     // Save the latest ref, including edits made while a previous save was in flight.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [work, dirty, busy, loading, document, conflict, autosavePaused]);
+  }, [work, dirty, busy, loading, document, conflict, autosavePaused, localChoice]);
 
   async function reconcile() {
+    if (failedSave.current) throw Error('原保存结果尚未确认，请先点击保存草稿核对原请求；不会换号保存');
     const data = await request<{ document: Document }>(`${DOC_API}?document_id=${encodeURIComponent(documentId)}`);
     const doc = data.document;
     if (!doc || doc.owner_user_id !== userId || doc.status !== 'active') throw Error('画布不可编辑，当前草稿保留');
@@ -294,7 +311,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     }
     // A definitive conflict needs an explicit fresh baseline, never a silent CAS retry.
     documentRef.current = doc; setDocument(doc); snapshot.current = graph;
-    failedSave.current = null; setConflict(false); setAutosavePaused(true);
+    failedSave.current = null; reviewRequired.current = false; setConflict(false); setAutosavePaused(true);
     setNotice('已读取最新画布，请核对本页草稿后点击保存');
     cache(current.current, null);
   }
@@ -513,7 +530,6 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     parseStoryMaterials(JSON.stringify({ materials: bound }));
     if (current.current.draft.shots.some(shot => shot.materialIds?.some(id => !current.current.materials?.some(item => item.id === id)))) throw Error('镜头绑定含已不存在的素材，请重新选择');
     if (bound.some(item => !current.current.materialReferences?.[item.id])) throw Error('请为镜头实际绑定的素材选用原图；也可取消不需要的绑定');
-    if (!await confirm('按已确认的素材与镜头描述合成图、视频要求？原要求保留在旧稿中，新要求仍可编辑；不会生成或扣点。', { title: '确认素材', confirmLabel: '确认并合成' })) return;
     const previous = current.current;
     change({ ...previous, materialsConfirmed: materialSignature(previous), versions: [...previous.versions, archived(previous)].slice(-10),
       draft: { ...previous.draft, shots: previous.draft.shots.map(shot => ({ ...shot, ...composeStoryShot(shot, previous.materials || []) })) } });
@@ -735,14 +751,26 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     setNotice('本次手动派发已完成，请查询原任务；这不代表媒体生成成功');
   }
   const ready = Boolean(document && !loading);
-  const blocked = busy !== '' || !ready || conflict;
+  const blocked = busy !== '' || !ready || conflict || Boolean(localChoice);
   const awaiting = work.request && ['pending', 'unconfirmed'].includes(work.request.state);
   return <main className={styles.studio}>
     <header className={styles.header}><div><h1>故事与分镜</h1>{document && <small>{document.title} · <RelativeTime value={document.updated_at} /></small>}</div>
       <div className={styles.actions}><Link className={styles.link} href={`/tools/ultimate-canvas${documentId ? `?document_id=${encodeURIComponent(documentId)}${focusVideoId ? `&focus_node=${encodeURIComponent(focusVideoId)}` : ''}` : ''}`}><ArrowLeft size={16} />画布</Link>
-        <button disabled={blocked} onClick={() => void operate('保存草稿', async () => { await save(); setNotice('故事与分镜已保存'); })}><Save size={16} />{dirty || failedSave.current ? '保存草稿' : '已保存'}</button></div></header>
+        <button disabled={Boolean(busy) || !ready || Boolean(localChoice) || (conflict && !failedSave.current)} onClick={() => void operate('保存草稿', async () => { await save(); setNotice('故事与分镜已保存'); })}><Save size={16} />{dirty || failedSave.current ? '保存草稿' : '已保存'}</button></div></header>
     <p role={error ? 'alert' : 'status'} className={`${styles.status} ${error ? styles.error : ''}`}>{error || busy || notice || (loading ? '正在读取故事' : !ready ? '请从画布选择故事节点打开' : '文字生成不扣本站点数；图视频生成在原工作区另行确认点数。')}</p>
     {conflict && <button disabled={Boolean(busy)} onClick={() => void operate('读取最新画布', reconcile)}><RefreshCw size={16} />读取最新画布并保留故事草稿</button>}
+    {localChoice && <section className={styles.status}><p>画布已有更新。当前显示画布稿，本机草稿仍保留，选择后才继续编辑；不会自动覆盖或生成。</p>
+      <button disabled={Boolean(busy)} onClick={() => {
+        const choice = localChoice; failedSave.current = choice.pending; reviewRequired.current = true;
+        setLocalChoice(null); change(choice.work); setConflict(true); setAutosavePaused(true);
+        setNotice('已恢复本机草稿；请读取最新画布并核对后保存');
+      }}>恢复本机草稿并核对</button>
+      <button disabled={Boolean(busy) || Boolean(localChoice.pending) || Boolean(localChoice.work.request && ['pending', 'unconfirmed'].includes(localChoice.work.request.state))} onClick={() => {
+        const value = { ...current.current, versions: [...current.current.versions, archived(localChoice.work)].slice(-10) };
+        if (!cache(value, null)) return;
+        reviewRequired.current = false;
+        setLocalChoice(null); change(value); setAutosavePaused(true); setNotice('继续使用画布稿；本机稿可从保留的旧稿中恢复');
+      }}>使用画布稿并保留本机旧稿</button></section>}
     {work.request && <section className={styles.status}><strong>{work.request.state === 'review' ? '返回内容待核对' : work.request.state === 'rejected' ? '文字请求被拒绝' : work.request.state === 'not_sent' ? '文字请求未发出' : '文字结果未确认'}</strong><p>{work.request.message || '不会自动重发文字请求'}</p>
       {work.request.raw && <pre className={styles.raw}>{work.request.raw}</pre>}<button disabled={blocked} onClick={() => void operate('处理文字请求', dismissRequest)}>保留原稿并结束等待</button></section>}
     {ready && <><div className={styles.grid}><section className={styles.section}><h2>故事</h2>
@@ -750,11 +778,11 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
         <option value="">后台默认模型</option>
         {STUDIO_TEXT_MODELS.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
       </select></label>
-      <label>故事内容<textarea className={styles.storyText} disabled={Boolean(busy)} value={work.draft.story} onChange={event => updateDraft({ story: event.target.value })} /></label>
+      <label>故事内容<textarea className={styles.storyText} disabled={Boolean(busy) || Boolean(localChoice)} value={work.draft.story} onChange={event => updateDraft({ story: event.target.value })} /></label>
       <button className={styles.primary} disabled={blocked || Boolean(awaiting) || !work.draft.story.trim()} onClick={() => void operate('生成完整剧本', () => generate('script'))}><WandSparkles size={16} />生成完整剧本</button>
     </section><section className={styles.section}><h2>完整剧本</h2>
       {work.lineage.scriptStory !== undefined && work.lineage.scriptStory !== work.draft.story && <p className={styles.status}>故事已修改，当前剧本仍是原故事版本，请核对。</p>}
-      <label>剧本内容<textarea className={styles.scriptText} disabled={Boolean(busy)} value={work.draft.script} onChange={event => updateDraft({ script: event.target.value })} /></label>
+      <label>剧本内容<textarea className={styles.scriptText} disabled={Boolean(busy) || Boolean(localChoice)} value={work.draft.script} onChange={event => updateDraft({ script: event.target.value })} /></label>
       <button className={styles.primary} disabled={blocked || Boolean(awaiting) || !work.draft.script.trim()} onClick={() => void operate('生成分镜', () => generate('storyboard'))}><Clapperboard size={16} />生成分镜</button>
     </section></div>
     <section className={styles.shots}><div className={styles.toolbar}><h2>本故事素材 · {work.materials?.length || 0}</h2><div className={styles.actions}>
@@ -800,7 +828,6 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
       {work.versions.length > 0 && <details><summary>保留的旧稿 · {work.versions.length}</summary>{work.versions.map(version => <section key={version.id} className={styles.shot}>
         <p><RelativeTime value={version.createdAt} /> · {version.draft.shots.length} 个镜头</p><pre className={styles.raw}>{version.draft.script || version.draft.story}</pre>
         <button disabled={blocked} onClick={() => void operate('恢复旧稿', async () => {
-          if (!await confirm('当前故事稿将保留。恢复旧稿不会重发生成；已有图视频任务仍保留。', { title: '恢复旧稿', confirmLabel: '恢复' })) return;
           const previous = current.current;
           change({ ...version, versions: [...previous.versions.filter(item => item.id !== version.id), archived(previous)].slice(-10), request: previous.request });
           await save();
@@ -811,12 +838,12 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
         <button title="删除镜头" aria-label="删除镜头" disabled={blocked} onClick={() => void operate('删除镜头', async () => {
           if (await confirm('只删除此分镜草稿，已创建的图视频工作区和结果保留。', { title: '删除镜头', confirmLabel: '删除', danger: true })) { updateDraft({ shots: current.current.draft.shots.filter(item => item.id !== shot.id) }); await save(); }
         })}><Trash2 size={16} /></button></div></header>
-        <div className={styles.shotFields}><label>镜头名称<input disabled={Boolean(busy)} value={shot.title} onChange={event => editShot(shot.id, { title: event.target.value })} /></label>
-          <label className={styles.duration}>时长（秒）<input type="number" min={1} max={15} disabled={Boolean(busy)} value={shot.durationSeconds} onChange={event => {
+        <div className={styles.shotFields}><label>镜头名称<input disabled={Boolean(busy) || Boolean(localChoice)} value={shot.title} onChange={event => editShot(shot.id, { title: event.target.value })} /></label>
+          <label className={styles.duration}>时长（秒）<input type="number" min={1} max={15} disabled={Boolean(busy) || Boolean(localChoice)} value={shot.durationSeconds} onChange={event => {
             const value = Number(event.target.value);
             if (Number.isInteger(value) && value >= 1 && value <= 15) editShot(shot.id, { durationSeconds: value });
           }} /></label>
-          {(['description', 'dialogue', 'imagePrompt', 'videoPrompt'] as const).map(field => <label key={field}>{({ description: '画面与动作', dialogue: '台词', imagePrompt: '生图要求', videoPrompt: '视频要求' })[field]}<textarea disabled={Boolean(busy)} value={shot[field]} onChange={event => editShot(shot.id, { [field]: event.target.value })} /></label>)}</div>
+          {(['description', 'dialogue', 'imagePrompt', 'videoPrompt'] as const).map(field => <label key={field}>{({ description: '画面与动作', dialogue: '台词', imagePrompt: '生图要求', videoPrompt: '视频要求' })[field]}<textarea disabled={Boolean(busy) || Boolean(localChoice)} value={shot[field]} onChange={event => editShot(shot.id, { [field]: event.target.value })} /></label>)}</div>
         <details><summary>可选镜头设置与素材</summary><div className={styles.shotFields}>{(['framing', 'lighting', 'camera'] as const).map(field => <label key={field}>{({ framing: '景别', lighting: '光线', camera: '运镜' })[field]}<select disabled={blocked} value={shot[field] || ''} onChange={event => editShot(shot.id, { [field]: event.target.value })}><option value="">由描述决定</option>{({ framing: ['全景', '中景', '近景', '特写'], lighting: ['自然光', '柔光', '逆光', '夜景'], camera: ['固定镜头', '推进', '拉远', '跟随', '环绕'] })[field].map(value => <option key={value} value={value}>{value}</option>)}</select></label>)}</div>
           <div className={styles.bindings}>{(work.materials || []).map(item => <label key={item.id}><input type="checkbox" disabled={blocked} checked={shot.materialIds?.includes(item.id) || false} onChange={event => editShot(shot.id, { materialIds: event.target.checked ? [...(shot.materialIds || []), item.id] : shot.materialIds?.filter(id => id !== item.id) })} />{item.name}</label>)}</div></details>
         {work.references[shot.id] && <img className={styles.media} src={work.references[shot.id].thumbnailUrl || work.references[shot.id].originalUrl} alt={shot.title} />}

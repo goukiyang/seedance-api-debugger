@@ -15,6 +15,7 @@ export function MultiviewEntry({ contentKey, className }: { contentKey?: Content
   const { confirm, productDialog } = useProductDialog();
   const { user } = useAppSession();
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
   const button = useRef<HTMLButtonElement>(null);
   const match = /^video_task:([a-z0-9_-]{8,80})$/i.exec(contentKey || '');
   const taskId = match?.[1] || '';
@@ -36,7 +37,8 @@ export function MultiviewEntry({ contentKey, className }: { contentKey?: Content
     setBusy(true);
     try {
       const risk = getPageExitRisk();
-      if (risk.busy.length) { await confirm(`${risk.busy.join('、')}，请完成后再打开多角度图。`, { title: '操作进行中', confirmLabel: '返回等待' }); return; }
+      if (risk.busy.length) { setNotice(`${risk.busy.join('、')}，请完成后再打开多角度图。`); return; }
+      setNotice('');
       if (risk.unsaved.length && !await confirm(`${risk.unsaved.join('、')}尚未保存，确定离开吗？`, { title: '离开当前页', confirmLabel: '放弃并继续' })) return;
       const returnTo = `${pathname}${search.toString() ? `?${search}` : ''}${window.location.hash}`;
       try { if (returnKey) sessionStorage.setItem(returnKey, JSON.stringify({ href: returnTo, x: window.scrollX, y: window.scrollY, at: Date.now() })); } catch {}
@@ -44,5 +46,5 @@ export function MultiviewEntry({ contentKey, className }: { contentKey?: Content
     } finally { setBusy(false); }
   }
   return <><button ref={button} type="button" className={`${styles.button} ${className || ''}`} disabled={busy} onPointerDown={event => event.stopPropagation()}
-    onClick={event => { event.stopPropagation(); void open(); }}><Grid2X2 size={15} aria-hidden="true" />制作多角度图</button>{productDialog}</>;
+    onClick={event => { event.stopPropagation(); void open(); }}><Grid2X2 size={15} aria-hidden="true" />制作多角度图</button>{notice && <span className={styles.notice} role="status">{notice}</span>}{productDialog}</>;
 }

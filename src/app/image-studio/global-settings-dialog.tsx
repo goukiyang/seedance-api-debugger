@@ -43,7 +43,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
   }, [open]);
   const close = async () => {
     if (canEdit && (editor.saving || ratios.busy || batch.busy)) return;
-    if (canEdit && (editor.dirty || ratioEditing) && !(await confirm('修改尚未保存。关闭后会保留当前草稿，确定关闭吗？', { title: '关闭编辑', confirmLabel: '关闭编辑' }))) return;
+    if (canEdit && ratioEditing && !(await confirm('比例编辑尚未完成，关闭会丢失这部分输入。确定关闭吗？', { title: '关闭编辑', confirmLabel: '关闭编辑' }))) return;
     onClose();
   };
   useDialogDismiss({ open, dialogRef: dialog, nativeDialog: true, onDismiss: close });
@@ -131,9 +131,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
           <label><input type="radio" name="studio-resolution-scope" checked={!batch.scope} disabled={batch.busy} onChange={() => batch.setScope(false)} />仅新建模板</label>
           <label><input type="radio" name="studio-resolution-scope" checked={batch.scope} disabled={batch.busy} onChange={() => batch.setScope(true)} />新建模板 + 我的已有模板</label>
         </fieldset>
-        <ResolutionApplyPanel batch={batch} onContinue={() => { void (async () => { if (await batch.continue()) onClose(); })(); }} onRestore={() => { void (async () => {
-          if (await confirm('只撤销这次仍未被后来修改的分辨率。通用默认值不会撤销，其它参数不变。', { title: '撤销分辨率', confirmLabel: '撤销已应用' })) await batch.restore();
-        })(); }} />
+        <ResolutionApplyPanel batch={batch} onContinue={() => { void (async () => { if (await batch.continue()) onClose(); })(); }} onRestore={() => { void batch.restore(); }} />
         <div className={styles.modelQualityRow}>
           <label className={styles.compactField}><strong>生成张数</strong>
             <select value={defaults.count} disabled={!canEdit || editor.loading}

@@ -141,7 +141,7 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
   const disabled = !sessionAllowed || busy || reading || Boolean(pending);
   const current = useCallback(() => alive.current && scope.current === expectedScope && sessionAllowed && !isClientSessionBlocked(), [expectedScope, sessionAllowed]);
   const modified = () => { if (current() && !disabled) setDirty(true); };
-  useUnsavedNavigation(dirty || busy || Boolean(pending), confirm, { unsaved: dirty ? ['模块封面'] : [], busy: busy || pending ? ['封面保存结果待确认'] : [] });
+  useUnsavedNavigation(dirty || busy || Boolean(pending), confirm, { unsaved: dirty ? ['模块封面'] : [], busy: busy || pending ? ['封面保存结果待确认'] : [], onBlocked: setError });
 
   const initialize = useCallback(async () => {
     if (!current()) return;

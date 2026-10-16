@@ -2856,14 +2856,18 @@
             recovery = document.createElement('div');
             recovery.id = 'canvas-save-recovery';
             recovery.className = 'canvas-save-recovery';
-            recovery.innerHTML = '<span>修改尚未同步</span><button type="button" data-canvas-save-copy>另存副本</button><button type="button" data-canvas-reload>重新读取</button><button type="button" data-canvas-recover-backup>恢复冲突备份</button>';
+            recovery.innerHTML = '<span>修改尚未同步</span><button type="button" data-canvas-save-copy>另存副本</button><button type="button" data-canvas-reload>重新读取</button><button type="button" data-canvas-recover-backup>恢复冲突备份</button><button type="button" data-canvas-restore-startup>恢复本机草稿</button><button type="button" data-canvas-use-server>继续使用服务器稿</button>';
             document.body.appendChild(recovery);
         }
         const failed = ['conflict', 'error', 'offline'].includes(canvasRuntime.saveState);
         const backup = readConflictBackups().length > 0;
         recovery.hidden = !failed && !backup;
-        recovery.querySelector('span').textContent = failed ? '修改尚未同步' : '此设备保留了冲突备份';
-        recovery.querySelector('[data-canvas-recover-backup]').hidden = !backup;
+        const startupDraft = canvasRuntime.startupDraftDocumentId === canvasRuntime.documentId;
+        recovery.querySelector('span').textContent = failed ? '修改尚未同步' : startupDraft
+            ? '当前只读显示服务器稿；请选择本机草稿或服务器稿。服务器已有更新时，本机稿会另存副本' : '此设备保留了冲突备份';
+        recovery.querySelector('[data-canvas-recover-backup]').hidden = !backup || startupDraft;
+        recovery.querySelector('[data-canvas-restore-startup]').hidden = !startupDraft;
+        recovery.querySelector('[data-canvas-use-server]').hidden = !startupDraft;
         recovery.querySelector('[data-canvas-save-copy]').hidden = !failed || !canvasRuntime.documentWritable;
         recovery.querySelector('[data-canvas-reload]').hidden = !failed;
         recovery.querySelectorAll('button').forEach(button => { button.disabled = canvasRuntime.documentOperation; });
@@ -2911,7 +2915,7 @@
         } catch { /* Unavailable storage is not proof of a recoverable draft. */ }
         if ((canvasRuntime.documentDirty || canvasRuntime.failedSaveRequest) && !recoverable) unsaved.push('未存入浏览器的画布内容');
         return { unsaved, busy, revision: JSON.stringify([canvasRuntime.editSequence, canvasRuntime.documentTitle, contentSignature,
-            rules?._nodeDraft, rules?._purpose, rules?._draft]) };
+            rules?._nodeDraft, rules?._purpose, rules?._draft, rules?._historyRecovery?.draft]) };
     }
 
     function updateDocumentInteraction() {
@@ -2989,7 +2993,9 @@
         const key = draftStorageKey();
         if (!key || !snapshot?.request) return false;
         try {
-            localStorage.setItem(key, JSON.stringify({ baseRevision: canvasRuntime.documentRevision, savedAt: Date.now(), request: snapshot.request }));
+            const serialized = JSON.stringify({ baseRevision: canvasRuntime.documentRevision, savedAt: Date.now(), request: snapshot.request });
+            localStorage.setItem(key, serialized);
+            if (localStorage.getItem(key) !== serialized) throw new Error('draft_not_retained');
             return true;
         } catch {
             showCanvasNotice('本地草稿空间不足，请保持页面打开并保存到服务器。', 'warn');
@@ -3013,7 +3019,12 @@
         if (!items.some(item => item.request.document_json === snapshot.request.document_json)) {
             items.push({ request: snapshot.request, baseRevision: snapshot.request.base_revision, savedAt: Date.now() });
         }
-        try { localStorage.setItem(key.replace('sd2:canvas-draft:', 'sd2:canvas-conflict:'), JSON.stringify(items)); }
+        try {
+            const backupKey = key.replace('sd2:canvas-draft:', 'sd2:canvas-conflict:');
+            const serialized = JSON.stringify(items);
+            localStorage.setItem(backupKey, serialized);
+            if (localStorage.getItem(backupKey) !== serialized) throw new Error('backup_not_retained');
+        }
         catch { throw new Error('本地空间不足，备份未保存；请先另存副本。'); }
     }
 
@@ -3090,7 +3101,7 @@
             const bootstrap = await loadCanvasBootstrap(nextProjectId, parsed?.context?.video_card_id || null, { restoreDocument: false });
             if (!bootstrap) throw new Error('项目读取失败，未覆盖原画布。');
             canvasRuntime.documentLoaded = false;
-            const loaded = await loadCanvasDocument({ document: data.document, skipDraft: options.skipDraft });
+            const loaded = await loadCanvasDocument({ document: data.document, skipDraft: options.skipDraft, recoverDraft: options.recoverDraft });
             if (!loaded) throw new Error('画布未恢复，请重试。');
             window.UltimateCanvasDocuments?.hide();
         } catch (error) {
@@ -3206,7 +3217,6 @@
                 });
             } else if (event.target.closest('[data-canvas-reload]')) {
                 await withDocumentOperation(async () => {
-                    if (!await requestCanvasConfirmation({ title: '重新读取画布', message: '未同步内容会独立保留为冲突备份，之后可另存恢复。', confirmLabel: '重新读取' })) return;
                     await canvasRuntime.saveCoordinator.flush();
                     preserveConflictBackup(canvasSaveSnapshot('before_reload'));
                     await openManagedDocumentNow({ id: canvasRuntime.documentId }, { skipSave: true, skipDraft: true });
@@ -3220,6 +3230,22 @@
                     const copy = await createRecoveryCopy(backup, `${String(backup.request.title || '画布').slice(0, 108)}（恢复副本）`);
                     await openManagedDocumentNow(copy, { skipSave: true, skipDraft: true });
                 });
+            } else if (event.target.closest('[data-canvas-restore-startup]')) {
+                await withDocumentOperation(async () => {
+                    const draft = canvasRuntime.startupDraft;
+                    if (!draft || canvasRuntime.startupDraftDocumentId !== canvasRuntime.documentId) return;
+                    const data = await requestJson(`/api/tools/ultimate-canvas/document?document_id=${encodeURIComponent(canvasRuntime.documentId)}`, { cache: 'no-store' });
+                    if (data.document?.status !== 'active') throw new Error('画布已变化，原草稿仍在备份中。');
+                    if (draft.baseRevision === data.document.revision) {
+                        await openManagedDocumentNow(data.document, { skipSave: true, recoverDraft: draft });
+                    } else {
+                        const copy = await createRecoveryCopy(draft, `${String(draft.request.title || '画布').slice(0, 108)}（恢复副本）`);
+                        await openManagedDocumentNow(copy, { skipSave: true, skipDraft: true });
+                    }
+                });
+            } else if (event.target.closest('[data-canvas-use-server]')) {
+                if (canvasRuntime.documentOperation || canvasRuntime.startupDraftDocumentId !== canvasRuntime.documentId) return;
+                await withDocumentOperation(() => openManagedDocumentNow({ id: canvasRuntime.documentId }, { skipSave: true, skipDraft: true }));
             } else if (event.target.closest('[data-canvas-library]')) {
                 await showManagedLibrary();
             } else if (event.target.closest('[data-canvas-new]')) {
@@ -3596,23 +3622,29 @@
             const draftKey = userId ? `sd2:canvas-draft:${userId}:${projectId}:${documentToRestore.id}` : null;
             let draft = null;
             try { if (draftKey) draft = JSON.parse(localStorage.getItem(draftKey) || 'null'); } catch {}
-            if (!options.skipDraft && documentToRestore.status === 'active' && draft?.request?.document_json
+            if (options.recoverDraft && documentToRestore.status === 'active') {
+                if (options.recoverDraft.baseRevision !== documentToRestore.revision) throw new Error('服务器版本已变化，本机草稿仍保留，请重新选择。');
+                draft = options.recoverDraft;
+                parsed = JSON.parse(draft.request.document_json);
+                recoveredDraft = true;
+                canvasRuntime.startupDraftDocumentId = null;
+                canvasRuntime.startupDraft = null;
+            } else if (!options.skipDraft && documentToRestore.status === 'active' && draft?.request?.document_json
                 && draft.request.document_json !== documentToRestore.document_json) {
-                const sameRevision = draft.baseRevision === documentToRestore.revision;
-                const recover = await requestCanvasConfirmation({ title: '发现未保存草稿',
-                    message: sameRevision ? '要恢复这台设备的未保存修改吗？' : '服务器内容已更新。恢复草稿会另存新画布，不覆盖原画布。', confirmLabel: '恢复草稿' });
-                if (!isCurrent()) return false;
-                if (recover) {
-                    if (sameRevision) {
-                        parsed = JSON.parse(draft.request.document_json);
-                        recoveredDraft = true;
-                    } else {
-                        documentToRestore = await createRecoveryCopy(draft, `${documentToRestore.title.slice(0, 108)}（恢复副本）`);
-                        if (!isCurrent()) return false;
-                        // New documents are restored exclusively from the server's sanitized body.
-                        parsed = JSON.parse(documentToRestore.document_json);
-                    }
-                }
+                // Show the authorized server document first. Retain this device's draft
+                // before any subsequent edit can replace its normal cache slot.
+                const backupKey = draftKey.replace('sd2:canvas-draft:', 'sd2:canvas-conflict:');
+                const backups = JSON.parse(localStorage.getItem(backupKey) || '[]');
+                if (!Array.isArray(backups)) throw new Error('本机备份暂不可读取，原草稿未覆盖，请保持页面打开。');
+                if (!backups.some(item => item?.request?.document_json === draft.request.document_json)) backups.push(draft);
+                const serialized = JSON.stringify(backups);
+                localStorage.setItem(backupKey, serialized);
+                if (localStorage.getItem(backupKey) !== serialized) throw new Error('本机草稿未能保留，已停止读取。');
+                canvasRuntime.startupDraftDocumentId = documentToRestore.id;
+                canvasRuntime.startupDraft = draft;
+            } else {
+                canvasRuntime.startupDraftDocumentId = null;
+                canvasRuntime.startupDraft = null;
             }
             const savedVideoBranchId = parsed?.context?.video_branch_id || null;
             let branchId = savedVideoBranchId;
@@ -3649,7 +3681,7 @@
             canvasRuntime.documentProjectId = projectId;
             canvasRuntime.documentVideoCardId = parsed?.context?.video_card_id || canvasRuntime.selectedVideoCardId;
             canvasRuntime.selectedVideoBranchId = branchId;
-            canvasRuntime.documentWritable = documentToRestore.status === 'active';
+            canvasRuntime.documentWritable = documentToRestore.status === 'active' && canvasRuntime.startupDraftDocumentId !== documentToRestore.id;
             engine.restore(parsed.canvas || parsed);
             window.UltimateCanvasToolflow?.normalizeLoadedFlowNodes?.();
             recoveredTasklessVideoStatus = hydrateNodeViews();
@@ -3666,7 +3698,9 @@
             canvasRuntime.editSequence += 1;
             syncDocumentUrl();
             renderRuntimeContextControls();
-            if (!canvasRuntime.documentWritable) {
+            if (canvasRuntime.startupDraftDocumentId === canvasRuntime.documentId) {
+                showCanvasNotice('发现本机草稿，请在下方选择；两份内容均未覆盖。', 'info');
+            } else if (!canvasRuntime.documentWritable) {
                 stopAllVideoPolling();
                 showCanvasNotice('此画布已归档，只能查看。请到画布列表恢复后编辑。', 'info');
             }
@@ -7230,7 +7264,7 @@
             : Boolean(modal._node?._pendingTextRules) || modal._nodeDraft !== modal._nodeInitial || modal._purpose !== modal._purposeInitial;
     }
     function rulesModalDirty(modal) {
-        return Boolean(modal && (rulesScopeDirty(modal, 'node') || rulesScopeDirty(modal, 'global')));
+        return Boolean(modal && (rulesScopeDirty(modal, 'node') || rulesScopeDirty(modal, 'global') || modal._historyRecovery?.unique));
     }
     function rulePurposeForModal(modal) {
         const kind = modal._node?.data?.generationIntent?.kind || modal._node?.type;
@@ -7367,7 +7401,8 @@
                     + (modal._mergeLegacy ? ' disabled' : '') + '>保留两份，加入未启用规则</button></aside>' : '')
                 + '<details><summary>版本存档</summary><label>最近版本<select data-rules-history><option value="">选择版本</option>'
                 + modal._settings.history.map(item => '<option value="' + item.revision + '">版本 ' + item.revision + '</option>').join('')
-                + '</select></label><button type="button" data-rule-action="history">恢复为未启用草稿</button><button type="button" data-rule-action="original">找回原始基础正文</button></details>'
+                + '</select></label><button type="button" data-rule-action="history">恢复为未启用草稿</button><button type="button" data-rule-action="original">找回原始基础正文</button>'
+                + (modal._historyRecovery ? '<button type="button" data-rule-action="history-undo">恢复刚才的工作稿</button>' : '') + '</details>'
                 + '<div data-rules-conflicts></div></main>';
             renderRuleList(modal);
             renderRulesConflicts(modal);
@@ -7424,7 +7459,7 @@
         if (!force && (modal?._saving || modal?._closing)) return false;
         if (!force && rulesModalDirty(modal)) {
             modal._closing = true;
-            const accepted = await requestCanvasConfirmation({ title: '放弃修改', message: '规则有未保存修改，确定关闭吗？', confirmLabel: '放弃并关闭' });
+            const accepted = await requestCanvasConfirmation({ title: '放弃修改', message: '规则工作稿或恢复备份有未保存修改，关闭后无法找回，确定关闭吗？', confirmLabel: '放弃并关闭' });
             modal._closing = false;
             if (!accepted || !modal.isConnected) return false;
         }
@@ -7538,16 +7573,32 @@
         else if (action === 'legacy') {
             const retained = add('旧版修改（待合并）', modal._settings.legacyCurrent.context, 'basic');
             if (retained) { modal._mergeLegacy = true; modal._mergeLegacyRuleId = retained.id; }
+        } else if (action === 'history-undo' && modal._historyRecovery) {
+            const previous = { draft: modal._draft, restored: modal._restored,
+                unique: rulesScopeDirty(modal, 'global') && JSON.stringify(modal._draft) !== modal._historyApplied };
+            modal._draft = modal._historyRecovery.draft;
+            modal._restored = modal._historyRecovery.restored;
+            modal._historyRecovery = previous;
+            modal._historyApplied = JSON.stringify(modal._draft);
         } else if (action === 'history') {
             const snapshot = modal._settings.history.find(item => String(item.revision) === modal.querySelector('[data-rules-history]').value);
             if (!snapshot) return;
-            if (!await requestCanvasConfirmation({ title: '恢复规则版本', message: '恢复为未启用草稿；当前规则仍保留，保存才生效。', confirmLabel: '恢复草稿' }) || !rulesOwnerMatches(modal)) return;
+            if (modal._historyRecovery?.unique) {
+                // Keep the only pre-restore working copy. A later hand edit is a
+                // separate unique draft, not another saved history version.
+                if (JSON.stringify(modal._draft) !== modal._historyApplied) {
+                    if (!await requestCanvasConfirmation({ title: '替换当前工作稿', message: '当前新增编辑尚未另存，继续会替换这些编辑。先前保留的工作稿仍可恢复。', confirmLabel: '替换当前稿' }) || !rulesOwnerMatches(modal)) return;
+                }
+            } else {
+                modal._historyRecovery = { draft: JSON.parse(JSON.stringify(modal._draft)), restored: new Set(modal._restored), unique: rulesScopeDirty(modal, 'global') };
+            }
             for (const old of snapshot.rules) {
                 const current = modal._draft.find(rule => rule.id === old.id);
                 if (!current) continue;
                 Object.assign(current, { name: old.name, purpose: old.purpose, body: old.body, order: old.order, deletedAt: old.deletedAt, enabled: false });
                 modal._restored.add(current.id);
             }
+            modal._historyApplied = JSON.stringify(modal._draft);
         }
         renderRulesEditor(modal);
         if (action === 'new' || action === 'copy') modal.querySelector('[data-rule-field="name"]')?.focus();

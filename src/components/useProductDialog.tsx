@@ -6,7 +6,7 @@ import { X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import styles from './ProductDialog.module.css';
 
-type Options = { title?: string; confirmLabel?: string; danger?: boolean; maxLength?: number | null; allowEmpty?: boolean; multiline?: boolean; anchor?: HTMLElement | null; checkbox?: { label: string; checked?: boolean; onConfirm?: (checked: boolean) => void }; onSubmit?: (value: string, checked: boolean) => Promise<void> };
+type Options = { title?: string; confirmLabel?: string; danger?: boolean; maxLength?: number | null; allowEmpty?: boolean; multiline?: boolean; anchor?: HTMLElement | null; onDraftChange?: (dirty: boolean) => void; checkbox?: { label: string; checked?: boolean; onConfirm?: (checked: boolean) => void }; onSubmit?: (value: string, checked: boolean) => Promise<void> };
 type Request = Options & { message: string; value?: string; anchor: HTMLElement | null };
 
 function ProductDialog({ request, onResolve }: { request: Request; onResolve: (value: string | null) => void }) {
@@ -23,6 +23,8 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
   const dismiss = () => { if (!busy.current) onResolve(null); };
   const [position, setPosition] = useState<{ left: number; top: number; anchored: boolean } | null>(null);
   const naming = request.value !== undefined;
+  useEffect(() => { request.onDraftChange?.(naming && value !== (request.value || '')); }, [request, naming, value]);
+  useEffect(() => () => request.onDraftChange?.(false), [request]);
   const maxLength = request.maxLength === undefined ? 120 : request.maxLength;
   const valid = !naming || ((request.allowEmpty || Boolean(value.trim())) && (maxLength === null || value.trim().length <= maxLength));
   useDialogDismiss({ open: true, dialogRef: dialog, nativeDialog: true, initialFocusRef: naming ? input : cancel, onDismiss: dismiss });

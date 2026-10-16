@@ -107,10 +107,17 @@ export interface UseWorkspaceResult {
   reorderAssets: (newOrder: Array<{ assetId: string; sortOrder: number }>) => Promise<void>;
   validatePrompt: (prompt: string) => Promise<{ valid: boolean; missing: string[] }>;
   refresh: () => Promise<void>;
+  captureRecovery: () => WorkspaceInputRecovery | null;
+  restoreRecovery: (snapshot: WorkspaceInputRecovery) => Promise<void>;
   // P0-1: 替换素材
   replaceAsset: (assetId: string, file: File, onProgress?: UploadProgressHandler) => Promise<void>;
   // P0-1: 设置 frame 角色
   setAssetFrameRole: (assetId: string, role: FrameRole) => Promise<void>;
+}
+export type WorkspaceInputRecovery = { ownerId: string; epoch: number; tabId: string; workspaceId: string;
+  items: Array<Pick<WorkspaceAssetItem, 'assetId' | 'referenceImageId' | 'role' | 'sortOrder'>> };
+export class WorkspaceInputRecoveryError extends Error {
+  constructor(message: string, readonly associationConfirmed: boolean) { super(message); }
 }
 
 export function useWorkspace(): UseWorkspaceResult {
@@ -121,6 +128,47 @@ export function useWorkspace(): UseWorkspaceResult {
   // P0-1: 上传状态映射
   const [uploadStatuses, setUploadStatuses] = useState<Record<string, UploadStatus>>({});
   const [pendingWorkspaceAttach, setPendingWorkspaceAttach] = useState<PendingWorkspaceAttach | null>(null);
+  const captureRecovery = useCallback((): WorkspaceInputRecovery | null => {
+    const session = uploadSession();
+    if (!workspace || workspace.owner_id !== session.ownerId || loading || error || pendingWorkspaceAttach
+      || Object.values(uploadStatuses).some(status => status === 'uploading' || status === 'failed') || workspace.assets.length > 80) return null;
+    return { ownerId: session.ownerId!, epoch: session.epoch, tabId: tabIdRef.current, workspaceId: workspace.id,
+      items: workspace.assets.map(({ assetId, referenceImageId, role, sortOrder }) => ({ assetId, referenceImageId, role, sortOrder })).sort((a, b) => a.sortOrder - b.sortOrder) };
+  }, [workspace, loading, error, pendingWorkspaceAttach, uploadStatuses]);
+  const restoreRecovery = useCallback(async (snapshot: WorkspaceInputRecovery) => {
+    const current = () => { const session = uploadSession(); return session.ownerId === snapshot.ownerId && session.epoch === snapshot.epoch
+      && tabIdRef.current === snapshot.tabId && workspace?.id === snapshot.workspaceId; };
+    if (!current()) throw new Error('账号或工作区已变化，原输入未套用到新位置。');
+    setLoading(true); setError(null);
+    let associationConfirmed = false;
+    try {
+      await postWorkspaceAssociation(snapshot.tabId, { replace: true, selection: snapshot.items.map(item => item.referenceImageId
+        ? { referenceImageId: item.referenceImageId } : { assetId: item.assetId }) });
+      associationConfirmed = true;
+      for (const item of snapshot.items) {
+        if (!current()) throw new Error('账号或工作区已变化，已停止恢复。');
+        const response = await fetch(`/api/workspace/assets/${encodeURIComponent(item.assetId)}`, { method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'x-tab-id': snapshot.tabId, 'x-upload-owner-id': snapshot.ownerId }, body: JSON.stringify({ role: item.role }), signal: AbortSignal.timeout(30000) });
+        const result = await readJsonResponse<ApiMessageResponse & { success?: boolean }>(response);
+        if (!current()) throw new Error('账号或工作区已变化，已停止恢复。');
+        if (!response.ok || result.success !== true) throw new Error(result.error || result.message || '素材角色尚未完整恢复，原快照保留，请核对后重试恢复。');
+      }
+      const response = await fetch('/api/workspace', { headers: { 'x-tab-id': snapshot.tabId }, cache: 'no-store', signal: AbortSignal.timeout(30000) });
+      const result = await readJsonResponse<WorkspaceResponse>(response);
+      if (!current()) throw new Error('账号或工作区已变化，原输入未套用到新位置。');
+      const assets = result.workspace?.assets;
+      if (!response.ok || result.workspace?.id !== snapshot.workspaceId || result.workspace.owner_id !== snapshot.ownerId
+        || !assets || assets.length !== snapshot.items.length || assets.some((item, index) => item.assetId !== snapshot.items[index].assetId || item.role !== snapshot.items[index].role)) {
+        throw new Error(result.error || result.message || '素材顺序或角色尚未完整确认，原快照保留，请重试恢复。');
+      }
+      setWorkspace(result.workspace);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : '原输入恢复未确认';
+      if (current()) setError(message);
+      throw new WorkspaceInputRecoveryError(message, associationConfirmed);
+    }
+    finally { if (current()) setLoading(false); }
+  }, [workspace?.id]);
 
   const fetchWorkspace = useCallback(async () => {
     try {
@@ -508,6 +556,8 @@ export function useWorkspace(): UseWorkspaceResult {
     reorderAssets,
     validatePrompt,
     refresh: fetchWorkspace,
+    captureRecovery,
+    restoreRecovery,
     replaceAsset,
     setAssetFrameRole,
   };
