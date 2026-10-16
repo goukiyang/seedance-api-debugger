@@ -135,7 +135,7 @@ async function readManifest(dir: string): Promise<Manifest> {
   const bytes = await readFile(dir, 'manifest.json', MAX_MANIFEST_BYTES, undefined, digest);
   return JSON.parse(bytes.toString('utf8')) as Manifest;
 }
-function sourceFor(candidate: StudioResponseOutputCandidate): CandidateSource | null {
+function sourceFor(candidate: Pick<StudioResponseOutputCandidate, 'kind' | 'location' | 'wrapperPath' | 'ordinal'>): CandidateSource | null {
   const pairs: Record<string, string[]> = { inline_data: ['candidate_content_part_inlineData', 'candidate_content_part_inline_data'], b64_json: ['data_b64_json'], url: ['data_url'] };
   if (!candidate || !['inline_data', 'b64_json', 'url'].includes(candidate.kind) || !pairs[candidate.kind].includes(candidate.location) || !Array.isArray(candidate.wrapperPath)
     || candidate.wrapperPath.length > 2 || !candidate.wrapperPath.every(value => WRAPPERS.includes(value))
@@ -201,7 +201,7 @@ export async function readStudioResponseEvidence(task: StudioResponseEvidenceTas
     const rejectionReasons = ['candidate_limit', 'source_invalid', 'response_incomplete', 'base64_invalid', 'total_bytes_limit', 'image_invalid', 'mime_mismatch', 'url_invalid'];
     for (const rejected of manifest.rejected) if (!integer(rejected?.ordinal) || rejected.ordinal > MAX_CANDIDATES || !rejectionReasons.includes(rejected.reason)) throw failure('invalid');
     for (const candidate of manifest.candidates) {
-      if (!sourceFor(candidate as StudioResponseOutputCandidate) || candidate.unconfirmed !== true || seen.has(candidate.ordinal)) throw failure('invalid');
+      if (!sourceFor(candidate) || candidate.unconfirmed !== true || seen.has(candidate.ordinal)) throw failure('invalid');
       seen.add(candidate.ordinal);
       if (candidate.storageKind === 'url') {
         if (candidate.kind !== 'url' || !safeUrl(candidate.url) || candidate.url.length !== candidate.urlLength || sha256(candidate.url) !== candidate.urlSha256) throw failure('invalid');

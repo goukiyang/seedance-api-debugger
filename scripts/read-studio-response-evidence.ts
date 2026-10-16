@@ -24,10 +24,10 @@ import sqlite3,json,sys
 db,task_id,request_id=sys.argv[1:]
 c=sqlite3.connect('file:'+db+'?mode=ro',uri=True);c.row_factory=sqlite3.Row
 c.execute('PRAGMA query_only=ON');c.execute('BEGIN')
-r=c.execute('SELECT id,owner_id,batch_id,fingerprint,model,json_extract(snapshot_json,\'$.requestId\') AS request_id,json_extract(snapshot_json,\'$.imageChannel\') AS image_channel FROM ImageStudioTask WHERE id=?',(task_id,)).fetchone()
+r=c.execute('SELECT id,owner_id,batch_id,fingerprint,model,json_extract(snapshot_json,\'$.model\') AS snapshot_model,json_extract(snapshot_json,\'$.requestId\') AS request_id,json_extract(snapshot_json,\'$.imageChannel\') AS image_channel FROM ImageStudioTask WHERE id=?',(task_id,)).fetchone()
 if not r or r['request_id']!=request_id:raise RuntimeError('exact_task_request_mismatch')
 t={k:r[k] for k in ['id','owner_id','batch_id','fingerprint','model']}
-t['snapshot_json']=json.dumps({'requestId':r['request_id'],'model':r['model'],'imageChannel':json.loads(r['image_channel']) if r['image_channel'] else None})
+t['snapshot_json']=json.dumps({'requestId':r['request_id'],'model':r['snapshot_model'],'imageChannel':json.loads(r['image_channel']) if r['image_channel'] else None})
 c.rollback();c.close();print(json.dumps(t))
 `;
   const task = JSON.parse(execFileSync('python3', ['-c', query, database, taskId, requestId], {
