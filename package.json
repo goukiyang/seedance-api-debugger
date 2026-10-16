@@ -1,6 +1,6 @@
 {
   "name": "video-api-debugger",
-  "version": "0.90.3",
+  "version": "0.90.3+banana21-guard.1",
   "private": true,
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",

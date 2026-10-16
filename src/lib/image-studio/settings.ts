@@ -14,10 +14,10 @@ export type ImageStudioSettings = {
   templateDefaults?: StudioTemplateDefaults;
 };
 
-// Pro keeps an explicit opt-in price because its upstream cost is higher.
+// Newly introduced models require an explicit site price; unknown is never a default charge.
 export const DEFAULT_STUDIO_PRICES = Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [
   model,
-  model === 'gemini-3-pro-image-preview' ? null : 20,
+  model === 'gemini-3-pro-image-preview' || model === 'gemini-nano-banana-2.1' ? null : 20,
 ])) as ImageStudioSettings['prices'];
 
 function decodeSettings(value: ImageStudioSettings): ImageStudioSettings & { templateDefaults: StudioTemplateDefaults } {

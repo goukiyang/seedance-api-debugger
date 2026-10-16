@@ -4,7 +4,7 @@ import { resolveModuleContextVersion } from './context-version';
 import { archivedPresetKey, studioPresetArchived } from './preset-lifecycle';
 import { normalizeStudioRatio } from './ratios';
 import { getImageStudioSettings, IMAGE_STUDIO_MODELS, type ImageStudioSettings } from './settings';
-import { defaultImageStudioQuality, defaultImageResolution, normalizeImageStudioQuality, normalizeImageResolution, type ImageResolution } from './model-catalog';
+import { defaultImageStudioQuality, defaultImageResolution, normalizeImageStudioQuality, normalizeImageResolution, imageStudioModelForNewSelection, type ImageResolution } from './model-catalog';
 import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from './limits';
 import { canManageStudioPreset, canViewStudioPreset, type ImageStudioIdentity, type StudioPresetAccessRow } from './access';
 import { studioAssetUrl, studioTemplateAssetUrl } from './media';
@@ -538,7 +538,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
     const defaults = settings.templateDefaults;
     const initializeDefaults = !current && createOnly && !forcedSourcePresetId;
     if (initializeDefaults) referencePolicy = studioTemplateDefaultPolicy(defaults);
-    const selectedModel = initializeDefaults ? defaults.model : model || current?.model || settings.model;
+    const selectedModel = initializeDefaults ? imageStudioModelForNewSelection(defaults.model) : model || current?.model || settings.model;
     const selectedQuality = quality !== undefined
       ? normalizeImageStudioQuality(String(selectedModel), String(quality))
       : initializeDefaults
@@ -549,7 +549,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
     const data = { name: name.trim(), prompt, count: initializeDefaults ? defaults.count : Number(count),
       reference_limit: initializeDefaults ? defaults.primaryMax : referenceLimit, reference_ids: JSON.stringify(ids), revision: Number(revision) + 1,
       ...(initializeDefaults ? { aspect_ratio: defaults.aspectRatio } : aspectRatio !== undefined ? { aspect_ratio: aspectRatio } : {}),
-      ...(initializeDefaults ? { model: defaults.model } : model !== undefined ? { model: model as string } : {}),
+      ...(initializeDefaults ? { model: selectedModel } : model !== undefined ? { model: model as string } : {}),
       quality: initializeDefaults ? defaults.quality : selectedQuality, resolution: selectedResolution,
       ...(groupName !== undefined ? { group_name: groupName.trim() || '未分组' } : {}),
       ...(bannerAssetId !== undefined ? { banner_asset_id: bannerAssetId } : {}),

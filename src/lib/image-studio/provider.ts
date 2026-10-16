@@ -1,7 +1,7 @@
 import { IMAGE_STUDIO_MODELS } from './settings';
 import { readStudioImage, StudioImageDownloadError, type StudioDownloadDiagnostics } from './media';
 import { MAX_REFERENCE_IMAGES, MAX_STUDIO_GENERATED_BASE64, MAX_STUDIO_GENERATED_BYTES } from './limits';
-import { isGeminiImageModel, isValidImageDimension } from '@/lib/image-generation/resolution';
+import { assertImageResolutionSupported, isGeminiImageModel, isValidImageDimension } from '@/lib/image-generation/resolution';
 import { normalizeStudioRatio } from './ratios';
 import type { ImageGenerationChannelProtocol } from '@/lib/integrations/image-generation-channel';
 import { isPrivateNetworkHost } from '@/lib/media/public-url';
@@ -79,6 +79,7 @@ function safeUsage(value: unknown, depth = 0): unknown {
 }
 
 const GEMINI_IMAGE_MODELS = new Set([
+  'gemini-nano-banana-2.1',
   'gemini-3.1-flash-image-preview',
   'gemini-3-pro-image-preview',
 ]);
@@ -113,6 +114,11 @@ export async function requestStudioImages(params: {
   ratioContractVersion?: 2;
 }, fetcher: typeof fetch = fetch, readImage: typeof readStudioImage = readStudioImage): Promise<{ images: string[]; usage: unknown }> {
   if (!IMAGE_STUDIO_MODELS.includes(params.model as typeof IMAGE_STUDIO_MODELS[number])) throw new Error('不支持的图片模型');
+  if (params.model === 'gemini-nano-banana-2.1') {
+    if (params.quality !== undefined && params.quality !== 'auto') throw new Error('Banana 2.1 不支持所选图片质量；尚未向供应商提交');
+    const native = params.protocol === 'gemini_native' || !params.protocol && params.provider !== 'ai_media_vip';
+    if (native && params.size !== undefined) assertImageResolutionSupported(params.model, params.size);
+  }
   if (params.upstreamModel !== undefined && !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,199}$/.test(params.upstreamModel)) throw new Error('供应商型号名称无效');
   if (!Number.isInteger(params.count) || params.count < 1 || params.count > 8) throw new Error('生成张数必须为 1 到 8');
   if (params.images.length > MAX_REFERENCE_IMAGES) throw new Error(`最多使用 ${MAX_REFERENCE_IMAGES} 张参考图`);
