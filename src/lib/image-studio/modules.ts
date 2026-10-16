@@ -538,7 +538,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
     const defaults = settings.templateDefaults;
     const initializeDefaults = !current && createOnly && !forcedSourcePresetId;
     if (initializeDefaults) referencePolicy = studioTemplateDefaultPolicy(defaults);
-    const selectedModel = initializeDefaults ? imageStudioModelForNewSelection(defaults.model) : model || current?.model || settings.model;
+    const selectedModel = initializeDefaults ? imageStudioModelForNewSelection(defaults.model) : (typeof model === 'string' ? model : undefined) || current?.model || settings.model;
     const selectedQuality = quality !== undefined
       ? normalizeImageStudioQuality(String(selectedModel), String(quality))
       : initializeDefaults
