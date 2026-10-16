@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '多角度工作台支持图片生成旋转视频、同页选帧排版，并可复制或下载原尺寸拼图；已有视频和草稿继续保留。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '多角度图已加入工具和创作首页，支持图片生成旋转视频、同页选帧排版与原尺寸复制下载；已有视频和草稿保留。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

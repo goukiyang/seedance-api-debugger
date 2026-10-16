@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Clapperboard, Film, Folder, Image as ImageIcon, LayoutTemplate, ListTodo, Menu, Network, Plus, RefreshCw, RotateCcw, Scissors, UserRound } from 'lucide-react';
+import { ArrowRight, Clapperboard, Film, Folder, Image as ImageIcon, LayoutTemplate, ListTodo, Menu, Network, Plus, RefreshCw, RotateCcw, RotateCw, Scissors, UserRound } from 'lucide-react';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import LikeButton from '@/components/content-reactions/LikeButton';
@@ -272,6 +272,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin }: { 
     { title: '分镜提示词', href: '/template-studio?type=video&view=prompts', icon: ListTodo, visible: internal, tone: 'rose' },
     { title: '随机真人', href: '/tools/avatar-studio', icon: UserRound, visible: images, tone: 'violet' },
     { title: 'AI 抠图', href: '/cutout', icon: Scissors, visible: admin, tone: 'cyan' },
+    { title: '多角度图', href: '/multiview', icon: RotateCw, visible: true, tone: 'blue' },
   ];
 
   return <div className={styles.page}>
