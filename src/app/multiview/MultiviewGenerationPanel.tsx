@@ -20,7 +20,7 @@ import {
 import styles from './multiview-generation.module.css';
 
 export type MultiviewGenerationPhase = 'empty' | 'ready' | 'submitting' | 'submitted' | 'unknown' | 'failed' | 'video_ready';
-export type MultiviewGenerationPanelState = { phase: MultiviewGenerationPhase; busy: boolean; taskId?: string };
+export type MultiviewGenerationPanelState = { phase: MultiviewGenerationPhase; busy: boolean; taskId?: string; unsaved?: boolean; leavingBusy?: boolean };
 export type MultiviewGenerationReady = { taskId: string; requestKey: string; ownerId: string;
   startedFromSourceKey: string | null; explicitOpen: boolean };
 export type MultiviewGenerationPanelProps = {
@@ -492,7 +492,15 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const phase: MultiviewGenerationPhase = submitting ? 'submitting' : receipt?.phase === 'unknown' ? 'unknown'
     : receipt?.phase === 'accepted' ? 'submitted' : receipt?.phase === 'ready' ? 'video_ready'
       : receipt?.phase === 'failed' || receipt?.phase === 'rejected' ? 'failed' : imageReady ? 'ready' : 'empty';
-  useEffect(() => { propsRef.current.onStateChange?.(ready ? { phase, busy: working || submitting || active, ...(receipt?.taskId ? { taskId: receipt.taskId } : {}) } : { phase: 'empty', busy: false }); }, [ready, phase, working, submitting, active, receipt?.taskId]);
+  useEffect(() => {
+    propsRef.current.onStateChange?.({
+      phase: ready ? phase : 'empty',
+      busy: ready && (working || submitting || active),
+      ...(ready && receipt?.taskId ? { taskId: receipt.taskId } : {}),
+      unsaved: !saved || requestStorageFailed,
+      leavingBusy: working || submitting || Boolean(creating),
+    });
+  }, [ready, phase, working, submitting, active, receipt?.taskId, saved, requestStorageFailed, creating]);
 
   async function generate() {
     if (!draft || !ready || !allowed || !imageReady || !currentProject || !currentCard || !currentQuote || !prompt.valid

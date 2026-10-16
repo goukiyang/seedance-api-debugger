@@ -119,8 +119,10 @@ function MultiviewPageContent() {
   const visible = sessionReady && authorized && loadedOwner === owner && loadedAuthority === authority && info?.taskId === taskId;
   const currentSourceKey = `${owner}:${taskId}:${loadedOwner === owner && info?.taskId === taskId ? info.sourceVersion : ''}:${activity}`;
   const sourceKeyRef = useRef(currentSourceKey); sourceKeyRef.current = currentSourceKey;
-  useUnsavedNavigation(!saved || !viewSaved || exporting, confirm, {
-    unsaved: saved && viewSaved ? [] : ['多角度工作现场暂未保存到本机'], busy: exporting ? ['拼图文件仍在准备或复制'] : [], revision: JSON.stringify(draft),
+  useUnsavedNavigation(!saved || !viewSaved || Boolean(generation.unsaved) || exporting || Boolean(generation.leavingBusy), confirm, {
+    unsaved: [...(saved && viewSaved ? [] : ['多角度选帧现场暂未保存到本机']), ...(generation.unsaved ? ['生成输入或原请求记录暂未完整保存到本机'] : [])],
+    busy: [...(exporting ? ['拼图文件仍在准备或复制'] : []), ...(generation.leavingBusy ? ['主图或视频提交仍在处理中'] : [])],
+    revision: JSON.stringify([draft, generation.unsaved, generation.leavingBusy, generation.taskId]),
   });
 
   const clearArtifacts = useCallback(() => {
