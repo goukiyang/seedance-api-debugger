@@ -833,30 +833,69 @@ export async function POST(request: NextRequest) {
       ? body.videoBranchId.trim()
       : null;
 
-  if (!requestedVideoCardId) {
+  const idempotencyKey = typeof body.idempotency_key === 'string' && body.idempotency_key.trim()
+    ? body.idempotency_key.trim()
+    : undefined;
+  let multiviewGeneration: MultiviewGenerationSnapshot | null = null;
+  if (body.multiview_generation !== undefined) {
+    multiviewGeneration = parseMultiviewGenerationSnapshot(body.multiview_generation);
+    if (!multiviewGeneration) return errorJson('多角度旋转预设版本或主图记录无效，已有输入保留', 400);
+    const composed = composeMultiviewGenerationPrompt(multiviewGeneration.supplement, multiviewGeneration.presetVersion);
+    if (!composed.valid) return errorJson(composed.error || '完整旋转文案无效', 400);
+    // Only the complete rotation contract may omit a card; a source label alone is not sufficient.
+    if (!idempotencyKey || request.headers.get('x-tab-id') !== multiviewGeneration.workspaceTabId
+      || body.client_name !== 'multiview' || cleanSourceMetadata(body.source_metadata).source !== 'multiview'
+      || cleanSourceMetadata(body.source_metadata).mode !== 'rotation'
+      || body.prompt !== composed.prompt || body.final_prompt_snapshot !== composed.prompt
+      || requestedProvider !== 'seedance' || body.provider !== 'seedance' || generationMode !== 'all_in_one_reference'
+      || body.generation_mode !== 'all_in_one_reference' || body.model !== selectedModel || body.ratio !== ratio
+      || body.duration !== duration || body.resolution !== resolution || !requestedProjectId || body.project_id !== requestedProjectId
+      || (body.video_card_id ?? null) !== requestedVideoCardId || body.videoCardId !== undefined
+      || !isMultiviewGenerationSeed(body.seed)
+      || typeof body.generate_audio !== 'boolean' || typeof body.return_last_frame !== 'boolean' || typeof body.watermark !== 'boolean'
+      || typeof body.resolution_approval_confirmed !== 'boolean' || body.draft !== false
+      || typeof body.max_estimated_cost !== 'number' || !Number.isFinite(body.max_estimated_cost) || body.max_estimated_cost < 0) {
+      return errorJson('多角度生成设置与原文案、归属或报价不一致，未提交生成', 400);
+    }
+    if (!Array.isArray(body.reference_image_ids) || body.reference_image_ids.length !== 1
+      || body.reference_image_ids[0] !== multiviewGeneration.mainReferenceImageId) return errorJson('多角度生成必须且只能使用当前明确选择的一张主图', 400);
+    const alternateArrays = ['referenceImageIds', 'reference_image_urls', 'referenceImageUrls', 'reference_video_urls', 'reference_audio_urls', 'frame_image_urls', 'template_studio_assets'];
+    if (alternateArrays.some(key => body[key] != null && (!Array.isArray(body[key]) || body[key].length !== 0))
+      || ['first_frame_url', 'last_frame_url', 'first_frame_asset_id', 'last_frame_asset_id', 'template_id', 'agent_run_id', 'template_studio_run_id',
+        'template_studio_parameters', 'roleMediaContext', 'promptMentions', 'canvas_document_id', 'canvas_node_id'].some(key => body[key] != null && body[key] !== '')
+      || cleanSourceMetadata(body.source_metadata).canvas_document_id || cleanSourceMetadata(body.source_metadata).canvas_node_id) {
+      return errorJson('多角度旋转请求不能混入其他素材、模板运行记录或角色工作流', 400);
+    }
+  }
+
+  if (!requestedVideoCardId && !multiviewGeneration) {
     return errorJson('必须先选择视频卡，生成任务才能写入项目成本闭环', 400);
   }
 
-  const requestedVideoCard = await prisma.videoCard.findUnique({
+  const requestedVideoCard = requestedVideoCardId ? await prisma.videoCard.findUnique({
     where: { id: requestedVideoCardId },
     select: { id: true, project_id: true },
-  });
-  if (!requestedVideoCard) {
+  }) : null;
+  if (requestedVideoCardId && !requestedVideoCard) {
     return errorJson('视频卡不存在', 404);
   }
-  if (requestedProjectId && requestedProjectId !== requestedVideoCard.project_id) {
+  if (requestedVideoCard && requestedProjectId && requestedProjectId !== requestedVideoCard.project_id) {
     return errorJson('视频卡不属于当前项目', 400);
   }
-  if (videoEditRequested && !isSeedanceEditPilotAllowed(editPilotSettings, requestedVideoCard.project_id)) {
+  if (videoEditRequested && requestedVideoCard && !isSeedanceEditPilotAllowed(editPilotSettings, requestedVideoCard.project_id)) {
     return errorJson('当前项目未获准使用视频编辑试验。', 403);
   }
 
   let project;
-  let videoCard;
+  let videoCard: NonNullable<Awaited<ReturnType<typeof assertCanGenerateInVideoCard>>['videoCard']> | null = null;
   try {
-    project = await getProjectForGeneration(user, requestedVideoCard.project_id);
-    const videoCardAccess = await assertCanGenerateInVideoCard(user, project.id, requestedVideoCard.id);
-    videoCard = videoCardAccess.videoCard;
+    const projectId = requestedVideoCard?.project_id || requestedProjectId;
+    if (!projectId) throw new AuthError('请先明确保存到的项目', 400);
+    project = await getProjectForGeneration(user, projectId);
+    if (requestedVideoCard) {
+      const videoCardAccess = await assertCanGenerateInVideoCard(user, project.id, requestedVideoCard.id);
+      videoCard = videoCardAccess.videoCard;
+    }
     const canvasDocumentIds = new Set([
       body.canvas_document_id,
       cleanSourceMetadata(body.source_metadata).canvas_document_id,
@@ -890,6 +929,9 @@ export async function POST(request: NextRequest) {
     throw error;
   }
 
+  const videoCardId = videoCard?.id || null;
+  if (studioHandoff && !videoCard) return errorJson('模板生成必须明确关联视频卡', 400);
+
   let generationTemplate: { id: string; status: string } | null = null;
   if (requestedTemplateId) {
     generationTemplate = await prisma.generationTemplate.findFirst({
@@ -911,7 +953,7 @@ export async function POST(request: NextRequest) {
     if (!agentRun) return errorJson('Agent 执行链路不存在', 404);
     if (agentRun.user_id !== user.id && user.role !== 'admin') return errorJson('Agent 执行链路不属于当前用户', 403);
     if (generationTemplate && agentRun.template_id !== generationTemplate.id) return errorJson('Agent 执行链路与当前模板不一致', 400);
-    if (agentRun.video_card_id && agentRun.video_card_id !== videoCard.id) return errorJson('Agent 执行链路与当前视频卡不一致', 400);
+    if (agentRun.video_card_id && agentRun.video_card_id !== videoCardId) return errorJson('Agent 执行链路与当前视频卡不一致', 400);
     if (!generationTemplate) {
       generationTemplate = await prisma.generationTemplate.findFirst({
         where: {
@@ -925,6 +967,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (project.type !== 'personal' && resolution === '1080p') {
+    if (!videoCard) return errorJson('非个人项目的 1080p 生成必须选择视频卡，并通过该视频卡的基准任务审批', 403);
     if (!resolutionApprovalConfirmed) {
       return errorJson('1080p 生成需要先确认审批通过', 403);
     }
@@ -997,6 +1040,7 @@ export async function POST(request: NextRequest) {
 
   let videoBranch: { id: string; title: string; status: string; is_primary: boolean } | null = null;
   if (requestedVideoBranchId) {
+    if (!videoCard) return errorJson('选择方向分支前必须明确关联视频卡', 400);
     const branch = await prisma.videoBranch.findUnique({
       where: { id: requestedVideoBranchId },
       select: { id: true, video_card_id: true, title: true, status: true, is_primary: true },
@@ -1011,40 +1055,12 @@ export async function POST(request: NextRequest) {
   }
 
   // --- Idempotency ---
-  const idempotencyKey = typeof body.idempotency_key === 'string' && body.idempotency_key.trim()
-    ? body.idempotency_key.trim()
-    : undefined;
   if (body.idempotency_key !== undefined && (!idempotencyKey || idempotencyKey.length > 200)) {
     return errorJson('idempotency_key 无效', 400);
   }
   if (body.roleMediaContext !== undefined && !idempotencyKey) return errorJson('角色媒体必须保留原请求编号，未生成', 400);
-  let multiviewGeneration: MultiviewGenerationSnapshot | null = null;
-  if (body.multiview_generation !== undefined) {
-    multiviewGeneration = parseMultiviewGenerationSnapshot(body.multiview_generation);
-    if (!multiviewGeneration) return errorJson('多角度旋转预设版本或主图记录无效，已有输入保留', 400);
-    const composed = composeMultiviewGenerationPrompt(multiviewGeneration.supplement, multiviewGeneration.presetVersion);
-    if (!composed.valid) return errorJson(composed.error || '完整旋转文案无效', 400);
-    if (!idempotencyKey || request.headers.get('x-tab-id') !== multiviewGeneration.workspaceTabId
-      || body.client_name !== 'multiview' || cleanSourceMetadata(body.source_metadata).source !== 'multiview'
-      || body.prompt !== composed.prompt || body.final_prompt_snapshot !== composed.prompt
-      || requestedProvider !== 'seedance' || body.provider !== 'seedance' || generationMode !== 'all_in_one_reference'
-      || body.generation_mode !== 'all_in_one_reference' || body.model !== selectedModel || body.ratio !== ratio
-      || body.duration !== duration || body.resolution !== resolution || body.project_id !== project.id || body.video_card_id !== videoCard.id
-      || !isMultiviewGenerationSeed(body.seed)
-      || typeof body.generate_audio !== 'boolean' || typeof body.return_last_frame !== 'boolean' || typeof body.watermark !== 'boolean'
-      || typeof body.resolution_approval_confirmed !== 'boolean' || body.draft !== false
-      || typeof body.max_estimated_cost !== 'number' || !Number.isFinite(body.max_estimated_cost) || body.max_estimated_cost < 0) {
-      return errorJson('多角度生成设置与原文案、归属或报价不一致，未提交生成', 400);
-    }
-    if (!Array.isArray(body.reference_image_ids) || body.reference_image_ids.length !== 1
-      || body.reference_image_ids[0] !== multiviewGeneration.mainReferenceImageId) return errorJson('多角度生成必须且只能使用当前明确选择的一张主图', 400);
-    const alternateArrays = ['referenceImageIds', 'reference_image_urls', 'referenceImageUrls', 'reference_video_urls', 'reference_audio_urls', 'frame_image_urls', 'template_studio_assets'];
-    if (alternateArrays.some(key => body[key] != null && (!Array.isArray(body[key]) || body[key].length !== 0))
-      || ['first_frame_url', 'last_frame_url', 'first_frame_asset_id', 'last_frame_asset_id', 'template_id', 'agent_run_id', 'template_studio_run_id',
-        'template_studio_parameters', 'roleMediaContext', 'promptMentions', 'canvas_document_id', 'canvas_node_id'].some(key => body[key] != null && body[key] !== '')
-      || cleanSourceMetadata(body.source_metadata).canvas_document_id || cleanSourceMetadata(body.source_metadata).canvas_node_id) {
-      return errorJson('多角度旋转请求不能混入其他素材、模板运行记录或角色工作流', 400);
-    }
+  if (multiviewGeneration && (body.project_id !== project.id || (body.video_card_id ?? null) !== videoCardId)) {
+    return errorJson('多角度生成归属与当前有权使用的项目或视频卡不一致，未提交生成', 400);
   }
   const studioAssetsForFingerprint = Array.isArray(body.template_studio_assets)
     ? body.template_studio_assets.map((item: Record<string, unknown>) => ({
@@ -1070,7 +1086,7 @@ export async function POST(request: NextRequest) {
     draft: draftRequested,
     h3LoraId: selectedH3Lora?.id || null,
     projectId: project.id,
-    videoCardId: videoCard.id,
+    videoCardId,
     videoBranchId: requestedVideoBranchId,
     referenceImageIds: uniquePreserveOrder(Array.isArray(body.reference_image_ids) ? body.reference_image_ids : Array.isArray(body.referenceImageIds) ? body.referenceImageIds : []),
     referenceImageUrls: uniquePreserveOrder(Array.isArray(body.reference_image_urls) ? body.reference_image_urls : Array.isArray(body.referenceImageUrls) ? body.referenceImageUrls : []),
@@ -1104,7 +1120,7 @@ export async function POST(request: NextRequest) {
     if (existing) {
       const decision = decideGenerationIdempotency(existing, {
         requestFingerprint,
-        videoCardId: videoCard.id,
+        videoCardId,
         templateStudioRunId: requestedStudioRunId,
       });
       if (decision.kind !== 'deduplicated') {
@@ -1772,7 +1788,7 @@ export async function POST(request: NextRequest) {
     generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed,
     referenceAlbumIds: generationReferenceAlbumIds,
     referenceImageIds: generationReferenceImageIds,
-    videoCardId: videoCard.id,
+    videoCardId,
     videoBranchId: videoBranch?.id || null,
     templateId: generationTemplate?.id || null,
     agentRunId: agentRun?.id || null,
@@ -1823,7 +1839,7 @@ export async function POST(request: NextRequest) {
     draft: draftRequested,
     h3LoraId: selectedH3Lora?.id || null,
   };
-  const templateStudioSnapshotJson = studioHandoff && studioSubmission
+  const templateStudioSnapshotJson = studioHandoff && studioSubmission && videoCard
     ? JSON.stringify(buildStudioTaskSnapshot(studioHandoff, {
         prompt: body.prompt,
         parameters: actualStudioParameters,
@@ -1905,7 +1921,7 @@ export async function POST(request: NextRequest) {
           user_id: user.id,
           owner_user_id: user.id,
           project_id: project.id,
-          video_card_id: videoCard.id,
+          video_card_id: videoCardId,
           video_branch_id: videoBranch?.id || null,
           template_id: generationTemplate?.id || null,
           agent_run_id: agentRun?.id || null,
@@ -1931,6 +1947,7 @@ export async function POST(request: NextRequest) {
       });
 
       if (project.type !== 'personal' && resolution === '1080p') {
+        if (!videoCard) throw new Error('非个人项目的 1080p 生成必须选择视频卡');
         const approval = requestedResolutionApprovalId
           ? await tx.approvalRecord.findFirst({
               where: {
@@ -1966,7 +1983,7 @@ export async function POST(request: NextRequest) {
           userId: user.id,
           metadata: {
             project_id: project.id,
-            video_card_id: videoCard.id,
+            video_card_id: videoCardId,
             baseline_task_id: approval.task_id,
             resolution,
             estimated_cost: estimatedCost,
@@ -2046,7 +2063,7 @@ export async function POST(request: NextRequest) {
           target_id: task.id,
           detail: JSON.stringify({
             project_id: project.id,
-            video_card_id: videoCard.id,
+            video_card_id: videoCardId,
             template_id: generationTemplate?.id || null,
             agent_run_id: agentRun?.id || null,
             selected_agent_plan_key: selectedAgentPlanKey,
@@ -2076,7 +2093,7 @@ export async function POST(request: NextRequest) {
           where: { id: agentRun.id },
           data: {
             video_task_id: task.id,
-            video_card_id: videoCard.id,
+            video_card_id: videoCardId,
             status: 'submitted',
             selected_plan_key: selectedAgentPlanKey || undefined,
               final_prompt_snapshot: storedFinalPromptSnapshot,
@@ -2112,7 +2129,7 @@ export async function POST(request: NextRequest) {
       if (racedTask) {
         const decision = decideGenerationIdempotency(racedTask, {
           requestFingerprint,
-          videoCardId: videoCard.id,
+          videoCardId,
           templateStudioRunId: requestedStudioRunId,
         });
         if (decision.kind !== 'deduplicated') {
@@ -2155,7 +2172,7 @@ export async function POST(request: NextRequest) {
           body: err.message,
           metadata: {
             attempted_cost: estimatedCost,
-            video_card_id: videoCard.id,
+            video_card_id: videoCardId,
           },
         })).catch((notificationError) => {
           console.error('[TasksCreate] Failed to notify project budget shortage:', notificationError);
@@ -2322,7 +2339,7 @@ export async function POST(request: NextRequest) {
       pricing,
       workspace_id: workspaceId,
       project_id: project.id,
-      video_card_id: videoCard.id,
+      video_card_id: videoCardId,
       template_id: generationTemplate?.id || null,
       agent_run_id: agentRun?.id || null,
       selected_agent_plan_key: selectedAgentPlanKey,

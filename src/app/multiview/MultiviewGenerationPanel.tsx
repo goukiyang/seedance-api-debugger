@@ -30,6 +30,8 @@ export type MultiviewGenerationPanelProps = {
 };
 type Project = { id: string; name: string; type: string; status?: string; can_generate?: boolean };
 type VideoCard = { id: string; project_id: string; title: string; status: string };
+// Match the server's VIDEO_CARD_GENERATABLE_STATUSES without importing its Prisma module.
+const canGenerateInCard = (card: VideoCard) => ['draft', 'active', 'reviewing'].includes(card.status);
 type RequestReceipt = { schema: 1; ownerId: string; key: string; fingerprint: string; taskId: string | null;
   phase: 'unknown' | 'accepted' | 'ready' | 'failed' | 'rejected'; startedFromSourceKey: string | null };
 type Association = { schema: 1; ownerId: string; requestId: string; workspaceTabId: string; assetId: string; referenceImageId?: string };
@@ -198,6 +200,9 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const active = pendingActive(receipt);
   const currentProject = projects.find(item => item.id === draft?.projectId);
   const currentCard = cards.find(item => item.id === draft?.videoCardId && item.project_id === draft?.projectId);
+  const cardSelectionInvalid = Boolean(draft?.videoCardId && (!currentCard || !canGenerateInCard(currentCard)));
+  const needsApproval = Boolean(currentProject && currentProject.type !== 'personal' && draft?.resolution === '1080p');
+  const approvalBlocked = needsApproval && (!currentCard || !draft?.resolutionApprovalConfirmed);
   const prompt = useMemo(() => composeMultiviewGenerationPrompt(draft?.supplement || '', draft?.presetVersion), [draft?.supplement, draft?.presetVersion]);
   const quoteKey = draft ? JSON.stringify([draft.provider, draft.model, draft.duration, draft.resolution]) : '';
   const currentQuote = quote?.key === quoteKey ? quote : null;
@@ -503,7 +508,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   }, [ready, phase, working, submitting, active, receipt?.taskId, saved, requestStorageFailed, creating]);
 
   async function generate() {
-    if (!draft || !ready || !allowed || !imageReady || !currentProject || !currentCard || !currentQuote || !prompt.valid
+    if (!draft || !ready || !allowed || !imageReady || !currentProject || cardSelectionInvalid || approvalBlocked || !currentQuote || !prompt.valid
       || !seedValid || !current(capture()) || working || uploadLock.current || createLock.current || association || submitLock.current || pendingActive(receiptRef.current) || recoveryBlocked) return;
     const scanned = refreshRequests();
     if (scanned.invalid || scanned.incomplete || scanned.records.some(pendingActive)) { setStatus('本账号仍有未确认的原请求，或本机记录尚未查全。请先查询下面的原请求，不会新建编号。'); return; }
@@ -581,12 +586,11 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   if (!sessionReady) return <section className={styles.panel} role="status">当前登录或权限状态尚未确认，生成已暂停。输入和原请求记录仍保留。</section>;
   if (!allowed) return <section className={styles.panel}><p>当前账号不能使用普通视频生成。已有视频仍按原权限查看。</p><button type="button" onClick={props.onUseExisting}>使用已有视频</button></section>;
   if (!ready || !draft) return <section className={styles.panel} role="status">正在恢复本账号的设置…</section>;
-  const needsApproval = currentProject && currentProject.type !== 'personal' && draft.resolution === '1080p';
   const selectedModel = SEEDANCE_VIDEO_MODEL_OPTIONS.find(item => item.id === draft.model);
   const durationOptions = seedanceVideoDurationOptions(draft.model);
   const formDisabled = submitting || working || Boolean(creating);
-  const blocked = formDisabled || active || accountRequestBlocked || recoveryBlocked || Boolean(association) || !imageReady || !currentProject || !currentCard
-    || ['sealed', 'archived'].includes(currentCard.status) || !currentQuote || !prompt.valid || !seedValid || needsApproval && !draft.resolutionApprovalConfirmed;
+  const blocked = formDisabled || active || accountRequestBlocked || recoveryBlocked || Boolean(association) || !imageReady || !currentProject
+    || cardSelectionInvalid || approvalBlocked || !currentQuote || !prompt.valid || !seedValid;
   return <section className={styles.panel} aria-label="原图与生成设置" onPaste={event => {
     const images = Array.from(event.clipboardData.files).filter(item => item.type.startsWith('image/'));
     if (!images.length || formDisabled) return;
@@ -638,15 +642,19 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
           <p className={styles.fullPrompt}>{prompt.prompt}</p><small>完整文案 {prompt.characters} 字，可再补充 {Math.max(0, prompt.remainingCharacters)} 字。</small>
           <button type="button" disabled={formDisabled} onClick={() => { const defaults = defaultMultiviewGenerationDraft(draft.workspaceTabId); change({ ...defaults, mainImage: draft.mainImage, projectId: draft.projectId, videoCardId: draft.videoCardId, supplement: draft.supplement }); }}>恢复模板参数</button>
         </details>
-        <div className={styles.destination}><span>保存到：{currentProject?.name || '未选择项目'} / {currentCard?.title || '未选择视频卡'}</span><details open={!draft.projectId || !draft.videoCardId}>
-          <summary>选择或新建保存位置</summary><div className={styles.parameters}>
-            <label>项目<select value={draft.projectId} disabled={formDisabled || projectLoading} onChange={event => change({ projectId: event.target.value, videoCardId: '', resolutionApprovalConfirmed: false, resolutionApprovalId: '' })}><option value="">{projectLoading ? '正在读取项目…' : '选择项目'}</option>{draft.projectId && !currentProject && <option value={draft.projectId}>原项目暂不可用，请重新选择</option>}{projects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-            <label>视频卡<select value={draft.videoCardId} disabled={formDisabled || cardLoading || !currentProject} onChange={event => change({ videoCardId: event.target.value, resolutionApprovalConfirmed: false, resolutionApprovalId: '' })}><option value="">{cardLoading ? '正在读取视频卡…' : '选择视频卡'}</option>{draft.videoCardId && !currentCard && <option value={draft.videoCardId}>原视频卡暂不可用，请重新选择</option>}{cards.map(item => <option key={item.id} value={item.id} disabled={['sealed', 'archived'].includes(item.status)}>{item.title}{['sealed', 'archived'].includes(item.status) ? '（不可生成）' : ''}</option>)}</select></label></div>
+        <div className={styles.destination}>
+          <label>保存到项目<select value={draft.projectId} disabled={formDisabled || projectLoading} onChange={event => change({ projectId: event.target.value, videoCardId: '', resolutionApprovalConfirmed: false, resolutionApprovalId: '' })}><option value="">{projectLoading ? '正在读取项目…' : '选择项目'}</option>{draft.projectId && !currentProject && <option value={draft.projectId}>原项目暂不可用，请重新选择</option>}{projects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <details open={cardSelectionInvalid || needsApproval && !currentCard}>
+            <summary>关联视频卡（可选）{currentCard ? `：${currentCard.title}` : ''}</summary>
+            <label>视频卡（可选）<select value={draft.videoCardId} disabled={formDisabled || cardLoading || !currentProject} onChange={event => change({ videoCardId: event.target.value, resolutionApprovalConfirmed: false, resolutionApprovalId: '' })}><option value="">{cardLoading ? '正在读取视频卡…' : '不关联视频卡'}</option>{draft.videoCardId && !currentCard && <option value={draft.videoCardId}>原视频卡暂不可用，请重新选择或取消关联</option>}{cards.map(item => <option key={item.id} value={item.id} disabled={!canGenerateInCard(item)}>{item.title}{!canGenerateInCard(item) ? '（不可生成）' : ''}</option>)}</select></label>
+            {cardSelectionInvalid && !cardLoading && <p className={styles.feedback} role="status">原视频卡暂不可用于生成，请重新选择或明确取消关联，其他输入已保留。</p>}
+          </details>
           <button type="button" className={styles.quiet} disabled={formDisabled} onClick={() => setRevision(value => value + 1)}><RefreshCw size={13} />刷新列表</button>
           <details><summary>新建项目或视频卡</summary><div className={styles.createRow}><input aria-label="新项目名称" value={projectName} maxLength={80} placeholder="新项目名称" disabled={formDisabled} onChange={event => setProjectName(event.target.value)} /><button type="button" disabled={formDisabled || !projectName.trim()} onClick={() => void createDestination('project')}>新建项目</button></div>
             <div className={styles.createRow}><input aria-label="新视频卡标题" value={cardTitle} maxLength={100} placeholder="新视频卡标题" disabled={formDisabled} onChange={event => setCardTitle(event.target.value)} /><button type="button" disabled={formDisabled || !currentProject || !cardTitle.trim()} onClick={() => void createDestination('card')}>新建视频卡</button></div></details>
-        </details></div>
-        {needsApproval && <label className={styles.approval}><input type="checkbox" checked={draft.resolutionApprovalConfirmed} disabled={formDisabled} onChange={event => change({ resolutionApprovalConfirmed: event.target.checked, resolutionApprovalId: '' })} /><span>我已确认审批中心存在当前视频卡的有效1080p审批。<a href="/approvals" target="_blank" rel="noreferrer">查看审批</a></span></label>}
+        </div>
+        {needsApproval && <p className={styles.feedback}>当前项目的1080p生成需要关联已有候选、当前最佳或最终版的视频卡，并通过该卡审批。</p>}
+        {needsApproval && currentCard && !cardSelectionInvalid && <label className={styles.approval}><input type="checkbox" checked={draft.resolutionApprovalConfirmed} disabled={formDisabled} onChange={event => change({ resolutionApprovalConfirmed: event.target.checked, resolutionApprovalId: '' })} /><span>我已确认审批中心存在当前视频卡的有效1080p审批。<a href="/approvals" target="_blank" rel="noreferrer">查看审批</a></span></label>}
         <div className={styles.generateRow}><button type="button" className={styles.primary} disabled={Boolean(blocked)} onClick={() => void generate()}>{submitting ? '正在提交…' : active ? '原视频处理中' : '生成视频'}</button><span>{currentQuote ? `本次预计 ${currentQuote.points} 点` : '报价待确认'}</span></div>
         {quoteError && <p className={styles.feedback} role="status">{quoteError}<button type="button" className={styles.quiet} onClick={() => setRevision(value => value + 1)}>重新报价</button></p>}
       </div>

@@ -204,7 +204,7 @@ export type GenerationIdempotencyDecision =
 
 export function decideGenerationIdempotency(
   existing: GenerationIdempotencyRecord,
-  current: { requestFingerprint: string; videoCardId: string; templateStudioRunId: string | null },
+  current: { requestFingerprint: string; videoCardId: string | null; templateStudioRunId: string | null },
 ): GenerationIdempotencyDecision {
   if (current.templateStudioRunId) {
     if (existing.template_studio_run_id !== current.templateStudioRunId) {

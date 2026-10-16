@@ -28,7 +28,7 @@ export type MultiviewGenerationRequest = {
   prompt: string; final_prompt_snapshot: string; prompt_user_edited: boolean;
   provider: 'seedance'; model: string; generation_mode: 'all_in_one_reference'; ratio: VideoRatio; duration: number; resolution: VideoResolution;
   seed: number; generate_audio: boolean; return_last_frame: boolean; watermark: boolean; draft: false;
-  project_id: string; video_card_id: string; reference_image_ids: [string];
+  project_id: string; video_card_id?: string; reference_image_ids: [string];
   reference_video_urls: []; reference_audio_urls: []; resolution_approval_confirmed: boolean;
   resolution_approval_id?: string; idempotency_key: string; max_estimated_cost: number;
   client_name: 'multiview'; source_metadata: { source: 'multiview'; mode: 'rotation' };
@@ -111,7 +111,8 @@ export function buildMultiviewGenerationRequest(draft: MultiviewGenerationDraft,
   if (!isSeedanceVideoDuration(draft.duration, draft.model)) throw new Error('当前型号不支持所选时长，已有选择保留');
   if (!RATIO_OPTIONS.includes(draft.ratio as VideoRatio) || !RESOLUTION_OPTIONS.includes(draft.resolution as VideoResolution)) throw new Error('所选比例或清晰度当前不可用，已有选择保留');
   if (!isMultiviewGenerationSeed(draft.seed)) throw new Error('随机种子须为 -1（随机）或 0–2147483647 的整数，已有输入保留');
-  if (!identity(draft.projectId) || !identity(draft.videoCardId)) throw new Error('请先明确保存到的项目和视频卡');
+  if (!identity(draft.projectId)) throw new Error('请先明确保存到的项目');
+  if (draft.videoCardId && !identity(draft.videoCardId)) throw new Error('所选视频卡无效，请明确重新选择或取消关联');
   if (!isMultiviewWorkspaceTabId(draft.workspaceTabId)) throw new Error('本页素材工作区尚未确认，已有输入保留');
   if (!draft.mainImage || !identity(draft.mainImage.assetId) || !identity(draft.mainImage.referenceImageId)) throw new Error('请先准备一张有权用于生成的主图');
   if (draft.resolutionApprovalId && !identity(draft.resolutionApprovalId)) throw new Error('清晰度审批编号无效，已有选择保留');
@@ -122,7 +123,7 @@ export function buildMultiviewGenerationRequest(draft: MultiviewGenerationDraft,
     provider: 'seedance', model: draft.model, generation_mode: 'all_in_one_reference', ratio: draft.ratio as VideoRatio,
     duration: draft.duration, resolution: draft.resolution as VideoResolution, seed: draft.seed,
     generate_audio: draft.generateAudio, return_last_frame: draft.returnLastFrame, watermark: draft.watermark, draft: false,
-    project_id: draft.projectId, video_card_id: draft.videoCardId, reference_image_ids: [draft.mainImage.referenceImageId],
+    project_id: draft.projectId, ...(draft.videoCardId ? { video_card_id: draft.videoCardId } : {}), reference_image_ids: [draft.mainImage.referenceImageId],
     reference_video_urls: [], reference_audio_urls: [], resolution_approval_confirmed: draft.resolutionApprovalConfirmed,
     ...(draft.resolutionApprovalId ? { resolution_approval_id: draft.resolutionApprovalId } : {}),
     idempotency_key: options.idempotencyKey, max_estimated_cost: options.maxEstimatedCost,
