@@ -326,6 +326,7 @@ function MultiviewPageContent() {
   function update(next: MultiviewDraft, allowUndo = false) {
     const changed = Boolean(draft && contentKey(owner, taskId, draft, 'png') !== contentKey(owner, taskId, next, 'png'));
     if (operation.current && changed) return;
+    if (draft && (draft.slots.length !== next.slots.length || draft.slots.some(item => !next.slots.some(current => current.id === item.id)))) setReduceCount(null);
     if (allowUndo) setUndo(draft);
     if (changed) clearArtifacts();
     draftRef.current = next; setDraft(next); if (!operation.current) setNotice(''); setSaved(false); setPartialFormat(null); setActivity(value => value + 1);
