@@ -16,6 +16,7 @@ export type MultiviewDraft = {
   layout: MultiviewLayout;
   editing: string | null;
   editorFrame?: number;
+  restoreOrder?: string[];
 };
 export const DEFAULT_MULTIVIEW_LAYOUT: MultiviewLayout = { columns: 4, margin: 12, gap: 12, background: '#ffffff' };
 export function candidateFrames(frameCount: number, count: number) {
@@ -45,6 +46,7 @@ export function parseMultiviewDraft(raw: string | null, info: MultiviewInfo): Mu
       || ![3, 4, 8].includes(data.slots.length) || !validMultiviewLayout(data.layout)) return null;
     if (new Set([...data.slots, ...data.reserve].map(slot => slot.id)).size !== data.slots.length + data.reserve.length) return null;
     return { ...data, editing: data.slots.some(slot => slot.id === data.editing) ? data.editing : null,
+      restoreOrder: Array.isArray(data.restoreOrder) && data.restoreOrder.length <= 24 && data.restoreOrder.every(id => typeof id === 'string' && [...data.slots, ...data.reserve].some(slot => slot.id === id)) ? Array.from(new Set(data.restoreOrder)) : undefined,
       editorFrame: Number.isInteger(data.editorFrame) && data.editorFrame! >= 0 && data.editorFrame! < info.timestamps.length ? data.editorFrame : undefined };
   } catch { return null; }
 }

@@ -210,7 +210,7 @@ async function createMultiviewExport(user: SessionUser, id: string, request: Req
   const frames = body.frames as number[];
   const layout: MultiviewLayout = body.layout;
   const dimensions = multiviewDimensions(prepared.info, frames.length, layout);
-  if (dimensions.width * dimensions.height > 64000000) throw new MultiviewError('拼图超过 6400 万像素，请减少图片数量或留白；不会缩小原图');
+  if (body.format === 'png' && dimensions.width * dimensions.height > 64000000) throw new MultiviewError('拼图超过 6400 万像素，请减少图片数量或留白，或下载原尺寸单图包；不会缩小原图');
   const files: Buffer[] = [];
   for (const frame of frames) files.push(await readFile(await frameFile(prepared, frame, request)));
   if ((await authorizedSource(user, id)).version !== body.version) throw new MultiviewError('原视频已改变，请重新打开', 409);

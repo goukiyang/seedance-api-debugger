@@ -34,3 +34,17 @@ export function copyImage(src: string): Promise<void> {
   // Start the clipboard request inside the click event, before image loading yields.
   return navigator.clipboard.write([new ClipboardItem({ 'image/png': imagePng(src) })]);
 }
+
+/** Keep the clipboard call in the user event; callers may prepare an authorized PNG asynchronously. */
+export function copyPngBlob(input: Blob | Promise<Blob>): Promise<void> {
+  const png = Promise.resolve(input).then(blob => {
+    if (blob.type !== 'image/png' || !blob.size) throw new Error('拼图尚未准备好，请重试或下载');
+    return blob;
+  });
+  // A rejected preparation must still be consumed when clipboard support is absent or denied synchronously.
+  void png.catch(() => undefined);
+  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') return Promise.reject(new Error('浏览器不支持按钮复制，请下载拼图'));
+  // Do not await png before write: Safari and other browsers require the original user activation.
+  try { return navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]); }
+  catch (error) { return Promise.reject(error); }
+}

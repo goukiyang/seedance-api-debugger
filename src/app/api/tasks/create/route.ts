@@ -3,6 +3,8 @@ import { compileCanvasVideoPrompt } from '@/lib/canvas-video-prompt';
 import { assertCanvasPromptCompatibility } from '@/lib/canvas-prompt-compatibility';
 import { parseCanvasPromptMentions, compileCanvasPromptReferences, CanvasPromptReferenceError } from '@/lib/canvas-prompt-references';
 import { resolveImageInputUrls } from '@/lib/assets/original-image-input';
+import { composeMultiviewGenerationPrompt, MULTIVIEW_REFERENCE_PROMPT_PREFIX, isMultiviewGenerationSeed, parseMultiviewGenerationSnapshot,
+  type MultiviewGenerationSnapshot } from '@/lib/video/multiview-generation-contract';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import path from 'path';
 import fs from 'fs';
@@ -1016,6 +1018,34 @@ export async function POST(request: NextRequest) {
     return errorJson('idempotency_key 无效', 400);
   }
   if (body.roleMediaContext !== undefined && !idempotencyKey) return errorJson('角色媒体必须保留原请求编号，未生成', 400);
+  let multiviewGeneration: MultiviewGenerationSnapshot | null = null;
+  if (body.multiview_generation !== undefined) {
+    multiviewGeneration = parseMultiviewGenerationSnapshot(body.multiview_generation);
+    if (!multiviewGeneration) return errorJson('多角度旋转预设版本或主图记录无效，已有输入保留', 400);
+    const composed = composeMultiviewGenerationPrompt(multiviewGeneration.supplement, multiviewGeneration.presetVersion);
+    if (!composed.valid) return errorJson(composed.error || '完整旋转文案无效', 400);
+    if (!idempotencyKey || request.headers.get('x-tab-id') !== multiviewGeneration.workspaceTabId
+      || body.client_name !== 'multiview' || cleanSourceMetadata(body.source_metadata).source !== 'multiview'
+      || body.prompt !== composed.prompt || body.final_prompt_snapshot !== composed.prompt
+      || requestedProvider !== 'seedance' || body.provider !== 'seedance' || generationMode !== 'all_in_one_reference'
+      || body.generation_mode !== 'all_in_one_reference' || body.model !== selectedModel || body.ratio !== ratio
+      || body.duration !== duration || body.resolution !== resolution || body.project_id !== project.id || body.video_card_id !== videoCard.id
+      || !isMultiviewGenerationSeed(body.seed)
+      || typeof body.generate_audio !== 'boolean' || typeof body.return_last_frame !== 'boolean' || typeof body.watermark !== 'boolean'
+      || typeof body.resolution_approval_confirmed !== 'boolean' || body.draft !== false
+      || typeof body.max_estimated_cost !== 'number' || !Number.isFinite(body.max_estimated_cost) || body.max_estimated_cost < 0) {
+      return errorJson('多角度生成设置与原文案、归属或报价不一致，未提交生成', 400);
+    }
+    if (!Array.isArray(body.reference_image_ids) || body.reference_image_ids.length !== 1
+      || body.reference_image_ids[0] !== multiviewGeneration.mainReferenceImageId) return errorJson('多角度生成必须且只能使用当前明确选择的一张主图', 400);
+    const alternateArrays = ['referenceImageIds', 'reference_image_urls', 'referenceImageUrls', 'reference_video_urls', 'reference_audio_urls', 'frame_image_urls', 'template_studio_assets'];
+    if (alternateArrays.some(key => body[key] != null && (!Array.isArray(body[key]) || body[key].length !== 0))
+      || ['first_frame_url', 'last_frame_url', 'first_frame_asset_id', 'last_frame_asset_id', 'template_id', 'agent_run_id', 'template_studio_run_id',
+        'template_studio_parameters', 'roleMediaContext', 'promptMentions', 'canvas_document_id', 'canvas_node_id'].some(key => body[key] != null && body[key] !== '')
+      || cleanSourceMetadata(body.source_metadata).canvas_document_id || cleanSourceMetadata(body.source_metadata).canvas_node_id) {
+      return errorJson('多角度旋转请求不能混入其他素材、模板运行记录或角色工作流', 400);
+    }
+  }
   const studioAssetsForFingerprint = Array.isArray(body.template_studio_assets)
     ? body.template_studio_assets.map((item: Record<string, unknown>) => ({
         assetId: item?.assetId,
@@ -1064,6 +1094,7 @@ export async function POST(request: NextRequest) {
     resolutionApprovalId: requestedResolutionApprovalId,
     resolutionApprovalConfirmed,
     ...(body.roleMediaContext === undefined ? {} : { roleMediaContext: roleMediaFingerprint(body.roleMediaContext) }),
+    ...(multiviewGeneration ? { multiviewGeneration } : {}),
   };
   const requestFingerprint = generationRequestFingerprint(fingerprintPayload);
   if (idempotencyKey) {
@@ -1134,11 +1165,15 @@ export async function POST(request: NextRequest) {
   const clientName = cleanClientName(body.client_name);
   const isUltimateCanvasRequest = clientName === 'ultimate_canvas'
     || cleanedSourceMetadata.source === 'ultimate_canvas';
-  const effectiveSourceLabel = isUltimateCanvasRequest ? '无限画布' : requestSource.source_label;
+  const effectiveSourceLabel = multiviewGeneration ? '多角度图' : isUltimateCanvasRequest ? '无限画布' : requestSource.source_label;
   const sourceMetadata: Record<string, unknown> = {
     ...requestSource.source_metadata,
     ...cleanedSourceMetadata,
     ...(isUltimateCanvasRequest ? { source: 'ultimate_canvas' } : {}),
+    ...(multiviewGeneration ? { source: 'multiview', multiview_generation: {
+      presetId: multiviewGeneration.presetId, presetVersion: multiviewGeneration.presetVersion,
+      mainAssetId: multiviewGeneration.mainAssetId, mainReferenceImageId: multiviewGeneration.mainReferenceImageId,
+    } } : {}),
     tab_id: tabId,
     idempotency_key: idempotencyKey || null,
     body_source_request_id: bodySourceRequestId,
@@ -1152,7 +1187,21 @@ export async function POST(request: NextRequest) {
     } : {}),
     paid_generation_guard: paidGenerationGuard.metadata,
   };
-  const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
+  const workspace = multiviewGeneration ? await prisma.workspace.findFirst({
+    where: { owner_id: user.id, status: 'active', name: `默认工作台:${multiviewGeneration.workspaceTabId}` },
+    orderBy: { updated_at: 'desc' }, select: { id: true },
+  }) : await getOrCreateWorkspace(tabId, user.id);
+  if (!workspace) return errorJson('本页主图工作区尚未准备好，原输入保留，请重新核对素材', 409);
+  const workspaceId = workspace.id;
+  if (multiviewGeneration) {
+    const rows = await prisma.workspaceAsset.findMany({ where: { workspace_id: workspaceId }, take: 2,
+      select: { asset_id: true, reference_image_id: true, role: true, asset: { select: { status: true, type: true } } } });
+    if (rows.length !== 1 || rows[0].asset_id !== multiviewGeneration.mainAssetId
+      || rows[0].reference_image_id !== multiviewGeneration.mainReferenceImageId
+      || rows[0].asset.status !== 'active' || rows[0].asset.type !== 'image' || rows[0].role && rows[0].role !== 'reference_image') {
+      return errorJson('本页主图与工作区关联已变化，请核对原图；未自动添加或删除素材', 409);
+    }
+  }
 
   let requestedReferenceImageIds = uniquePreserveOrder(
     Array.isArray(body.reference_image_ids)
@@ -1336,7 +1385,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const workspaceReferenceBackfill = studioHandoff ? [] : await ensureWorkspaceImageAssetsHaveReferenceImages({
+  const workspaceReferenceBackfill = studioHandoff || multiviewGeneration ? [] : await ensureWorkspaceImageAssetsHaveReferenceImages({
     user,
     workspaceId,
     projectId: project.id,
@@ -1574,6 +1623,12 @@ export async function POST(request: NextRequest) {
     if ('canvasPromptFingerprint' in rendered) sourceMetadata.canvas_prompt_fingerprint = rendered.canvasPromptFingerprint;
   } catch (error) { if (error instanceof AuthError) return errorJson(error.message, error.status); throw error; }
 
+  if (multiviewGeneration) {
+    if (assetMapping['图1'] !== multiviewGeneration.mainAssetId || Object.keys(assetMapping).length !== 2
+      || promptRendered !== MULTIVIEW_REFERENCE_PROMPT_PREFIX + body.prompt) return errorJson('主图引用顺序或工作区已变化，原请求未提交，请重新核对', 409);
+    if (exceedsGenerationPromptLimit(promptRendered)) return errorJson(GENERATION_PROMPT_LIMIT_MESSAGE, 400);
+  }
+
   // --- Build provider input ---
   const seed = body.seed ?? -1;
   const generateAudio = body.generate_audio ?? true;
@@ -1708,6 +1763,7 @@ export async function POST(request: NextRequest) {
           ...(videoEditRequested ? { requested_duration: duration, source_video: editReference, ...seedanceVideoEditParameters(providerInput) } : {}) }),
   });
   const taskParams = {
+    ...(multiviewGeneration ? { multiviewGeneration } : {}),
     ...(body.max_estimated_cost !== undefined ? { max_estimated_cost: body.max_estimated_cost } : {}),
     ...(videoEditRequested ? { omni_reference_task_type: 'edit', seedance_edit_reference: editReference } : {}),
     provider: requestedProvider,

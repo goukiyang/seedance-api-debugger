@@ -33,6 +33,7 @@ export const shellRoutes = [
   '/projects',
   '/collections',
   '/cutout',
+  '/multiview',
   '/tools/ultimate-canvas',
   '/generate/enhance',
   '/admin',
@@ -73,7 +74,7 @@ export const topbarQuickItems: NavItem[] = [
   { label: '资产', href: '/assets', match: ['/assets'], prefixMatch: true },
   { label: 'IP生成', href: '/generate/ip', match: ['/generate/ip'], prefixMatch: true },
   { label: '无限画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'], prefixMatch: true, externalHidden: true },
-  { label: '工具', href: '/tools/avatar-studio', match: ['/cutout', '/tools/avatar-studio'], prefixMatch: true },
+  { label: '工具', href: '/tools/avatar-studio', match: ['/cutout', '/tools/avatar-studio', '/multiview'], prefixMatch: true },
   { label: '管理中心', href: '/admin', match: ['/admin'], prefixMatch: true, adminOnly: true },
 ];
 
@@ -108,6 +109,7 @@ export const userNavGroups: NavGroup[] = [
     items: [
       { label: '人物生成', href: '/tools/avatar-studio', prefixMatch: true, imageStudioOnly: true },
       { label: 'AI 抠图', href: '/cutout', prefixMatch: true, adminOnly: true },
+      { label: '多角度图', href: '/multiview', prefixMatch: true },
       { label: 'API 设置', href: '/admin/integrations', prefixMatch: true, adminOnly: true },
     ],
   },
