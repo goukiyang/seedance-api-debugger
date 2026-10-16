@@ -34,6 +34,11 @@ function initialDraft(info: MultiviewInfo): MultiviewDraft {
   return { schema: 1, sourceVersion: info.sourceVersion, slots: candidateFrames(info.timestamps.length, 8).map(slot), reserve: [],
     layout: { ...DEFAULT_MULTIVIEW_LAYOUT }, editing: null };
 }
+function preservedSlotOrder(order: string[] | undefined, slots: MultiviewSlot[], reserve: MultiviewSlot[]) {
+  const ids = [...slots, ...reserve].map(item => item.id);
+  const present = new Set(ids);
+  return Array.from(new Set([...(order || []).filter(id => present.has(id)), ...ids]));
+}
 function contentKey(owner: string, taskId: string, draft: MultiviewDraft, format: 'png' | 'zip', slots = draft.slots) {
   return JSON.stringify([owner, taskId, draft.sourceVersion, slots.map(item => [item.frame, item.name]), draft.layout, format]);
 }
@@ -330,9 +335,12 @@ function MultiviewPageContent() {
     if (count < draft.slots.length) { setReduceCount(count); setRetained(draft.slots.slice(0, count).map(item => item.id)); return; }
     const restored = draft.reserve.slice(0, count - draft.slots.length);
     const slots = [...draft.slots, ...restored];
-    if (draft.restoreOrder) slots.sort((a, b) => draft.restoreOrder!.indexOf(a.id) - draft.restoreOrder!.indexOf(b.id));
+    const reserve = draft.reserve.slice(restored.length);
+    const restoreOrder = preservedSlotOrder(draft.restoreOrder, slots, reserve);
+    slots.sort((a, b) => restoreOrder.indexOf(a.id) - restoreOrder.indexOf(b.id));
     for (const frame of [...candidateFrames(info.timestamps.length, count), ...Array.from({ length: info.timestamps.length }, (_, index) => index)]) { if (slots.length >= count) break; if (!slots.some(item => item.frame === frame)) slots.push(slot(frame)); }
-    update({ ...draft, slots, reserve: draft.reserve.slice(restored.length) }, true);
+    if (slots.length !== count) { setNotice(`原视频可用帧不足，无法补齐 ${count} 张；原选帧和数量已保留。`); return; }
+    update({ ...draft, slots, reserve, restoreOrder: preservedSlotOrder(restoreOrder, slots, reserve) }, true);
   }
   function move(index: number, delta: number) {
     if (!draft || index + delta < 0 || index + delta >= draft.slots.length) return;
@@ -513,7 +521,10 @@ function MultiviewPageContent() {
     {visible && info && draft && <section className={styles.result} aria-label="多角度成品工作台">
       <header className={styles.resultHeader}><div><h2>最终拼图</h2><p>时间候选，角度由你确认 · 点击一格调整</p></div><div className={styles.count} aria-label="图片数量">{[3, 4, 8].map(count => <button type="button" key={count} aria-pressed={draft.slots.length === count} disabled={exporting} onClick={() => chooseCount(count)}>{count} 张</button>)}</div></header>
       {reduceCount !== null && <section className={styles.retain} aria-label="选择保留图片"><h3>保留哪 {reduceCount} 张？</h3><p>其余留在本次草稿，增加数量或撤销时可找回。</p><div className={styles.retainOptions}>{draft.slots.map((item, index) => <label key={item.id}><input type="checkbox" checked={retained.includes(item.id)} onChange={event => setRetained(value => event.target.checked ? [...value, item.id] : value.filter(id => id !== item.id))} />第 {index + 1} 张{item.manual ? ' · 已手选' : ''}{item.name && ` · ${item.name}`}</label>)}</div><button type="button" className={styles.primary} disabled={retained.length !== reduceCount} onClick={() => {
-        update({ ...draft, slots: draft.slots.filter(item => retained.includes(item.id)), reserve: [...draft.slots.filter(item => !retained.includes(item.id)), ...draft.reserve].slice(0, 16), restoreOrder: draft.restoreOrder || [...draft.slots, ...draft.reserve].map(item => item.id), editing: null }, true); setReduceCount(null);
+        const slots = draft.slots.filter(item => retained.includes(item.id));
+        const reserve = [...draft.slots.filter(item => !retained.includes(item.id)), ...draft.reserve].slice(0, 16);
+        const restoreOrder = preservedSlotOrder(draft.restoreOrder || [...draft.slots, ...draft.reserve].map(item => item.id), slots, reserve);
+        update({ ...draft, slots, reserve, restoreOrder, editing: null }, true); setReduceCount(null);
       }}>保留所选 {retained.length} 张</button><button type="button" onClick={() => setReduceCount(null)}>取消</button></section>}
       <div className={styles.workbench}>
         <div className={styles.resultMain}><div className={styles.previewToolbar}><span>拼图预览</span><label>显示大小<select aria-label="拼图显示大小" value={view.zoom} onChange={event => setView(value => ({ ...value, zoom: Number(event.target.value) }))}>{[.5, .75, 1, 1.5, 2, 3, 4].map(zoom => <option value={zoom} key={zoom}>{zoom === 1 ? '适合窗口' : `${zoom * 100}%`}</option>)}</select></label>{undo && <button type="button" disabled={exporting} onClick={() => { const value = undo; update(value); setUndo(null); }}><Undo2 size={14} />撤销</button>}</div>
