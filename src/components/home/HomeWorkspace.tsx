@@ -272,7 +272,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin }: { 
     { title: '分镜提示词', href: '/template-studio?type=video&view=prompts', icon: ListTodo, visible: internal, tone: 'rose' },
     { title: '随机真人', href: '/tools/avatar-studio', icon: UserRound, visible: images, tone: 'violet' },
     { title: 'AI 抠图', href: '/cutout', icon: Scissors, visible: admin, tone: 'cyan' },
-    { title: '多角度图', href: '/multiview', icon: RotateCw, visible: true, tone: 'blue' },
+    { title: '3D多视图', href: '/multiview', icon: RotateCw, visible: true, tone: 'blue' },
   ];
 
   return <div className={styles.page}>

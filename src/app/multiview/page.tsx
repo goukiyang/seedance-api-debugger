@@ -522,7 +522,7 @@ function MultiviewPageContent() {
   }
 
   return <div className={styles.page}>
-    <PageBanner title="多角度图" description="一张主图生成旋转视频，再选帧排版。已有视频也可直接制作，不会重新生成。" backHref={backHref} backLabel={taskId ? '返回原视频' : '返回创作首页'} />
+    <PageBanner title="3D多视图" description="一张主图生成旋转视频，再选帧排版。已有视频也可直接制作，不会重新生成。" backHref={backHref} backLabel={taskId ? '返回原视频' : '返回创作首页'} />
     <ol className={styles.stages} aria-label="当前制作阶段">{['导入图片', '生成视频', '提取视图', '调整与导出'].map((label, index) => <li key={label} aria-current={stage === index + 1 ? 'step' : undefined} data-done={existingSource && index < 2 ? 'existing' : stage > index + 1 || undefined}><span>{index + 1}</span>{existingSource && index < 2 ? index === 0 ? '已有视频' : '直接使用成品' : label}</li>)}</ol>
     <div ref={generationArea}><MultiviewGenerationPanel currentSourceKey={currentSourceKey} hasResult={Boolean(visible)} expanded={expanded} onExpandedChange={changeExpanded}
       onUseExisting={() => setPickerOpen(true)} onReady={generationReady} onStateChange={setGeneration}
@@ -531,7 +531,7 @@ function MultiviewPageContent() {
     {previousTask && previousTask !== taskId && <button type="button" className={styles.quiet} onClick={() => void selectTask(previousTask)}>返回上次结果</button>}
     {loading && <p className={styles.empty} role="status">正在核对原视频并读取候选图片…</p>}
     {error && <div className={styles.empty} role="status"><p>{error}</p><button type="button" onClick={() => void load()}>重新读取原视频</button><button type="button" onClick={() => setPickerOpen(true)}>使用已有视频</button></div>}
-    {visible && info && draft && <section className={styles.result} aria-label="多角度成品工作台">
+    {visible && info && draft && <section className={styles.result} aria-label="3D多视图成品工作台">
       <header className={styles.resultHeader}><div><h2>最终拼图</h2><p>时间候选，角度由你确认 · 点击一格调整</p></div><div className={styles.count} aria-label="图片数量">{[3, 4, 8].map(count => <button type="button" key={count} aria-pressed={draft.slots.length === count} disabled={exporting} onClick={() => chooseCount(count)}>{count} 张</button>)}</div></header>
       {reduceCount !== null && <section className={styles.retain} aria-label="选择保留图片"><h3>保留哪 {reduceCount} 张？</h3><p>其余留在本次草稿，增加数量或撤销时可找回。</p><div className={styles.retainOptions}>{draft.slots.map((item, index) => <label key={item.id}><input type="checkbox" checked={retained.includes(item.id)} onChange={event => setRetained(value => event.target.checked ? [...value, item.id] : value.filter(id => id !== item.id))} />第 {index + 1} 张{item.manual ? ' · 已手选' : ''}{item.name && ` · ${item.name}`}</label>)}</div><button type="button" className={styles.primary} disabled={retained.length !== reduceCount} onClick={() => {
         const slots = draft.slots.filter(item => retained.includes(item.id));
@@ -569,12 +569,12 @@ function MultiviewPageContent() {
       {(!saved || !viewSaved) && <p className={styles.warning} role="status">本机存储暂不可用，刷新可能丢失本次工作现场；当前编辑和原图导出仍可使用。</p>}
       <footer className={styles.exportBar}><div><strong>{validSlots.length} / {draft.slots.length} 张就绪</strong><small>{dimensions?.width} × {dimensions?.height} · {saved && viewSaved ? '已保存到此设备' : '本机保存未完成'}</small></div><div className={styles.exportActions}><button type="button" className={styles.primary} disabled={exporting || validSlots.length !== draft.slots.length} onClick={copyCollage}><Copy size={16} />{exporting ? '正在准备…' : '一键复制拼图'}</button><button type="button" disabled={exporting || validSlots.length !== draft.slots.length} onClick={() => void download('png')}><Download size={16} />下载拼图</button><button type="button" disabled={exporting || validSlots.length !== draft.slots.length} onClick={() => void download('zip')}>下载单图包</button></div></footer>
       <div className={styles.footnote}><details open={originalOpen} onToggle={event => { const open = event.currentTarget.open; setOriginalOpen(open); setView(value => value.originalOpen === open ? value : { ...value, originalOpen: open }); }}><summary>查看原视频</summary>{originalOpen && !editing && player}{editing && <p>原视频正在右侧换帧工具中显示。</p>}</details><button type="button" className={styles.quiet} disabled={exporting} onClick={() => void clearWorkspace()}>清除本机选帧</button><p>草稿仅属本账号与此原片版本。失权时停止显示；提帧或导出失败不会重跑视频。</p></div>
-      {preview !== null && frames[preview]?.url && <ZoomableImagePreview src={frames[preview].url!} alt="多角度原尺寸帧" imageSharing={false} sourceVersion={info.sourceVersion} previewKey={`multiview-${taskId}-${info.sourceVersion}-${preview}`} onClose={() => setPreview(null)} safeDetails={{ width: info.width, height: info.height }} />}
+      {preview !== null && frames[preview]?.url && <ZoomableImagePreview src={frames[preview].url!} alt="3D多视图原尺寸帧" imageSharing={false} sourceVersion={info.sourceVersion} previewKey={`multiview-${taskId}-${info.sourceVersion}-${preview}`} onClose={() => setPreview(null)} safeDetails={{ width: info.width, height: info.height }} />}
     </section>}
     <MultiviewSourcePicker open={pickerOpen} onClose={() => setPickerOpen(false)} onSelect={id => void selectTask(id)} currentTaskId={taskId} />
     {productDialog}
   </div>;
 }
 export default function MultiviewPage() {
-  return <Suspense fallback={<div className={styles.page} role="status" aria-busy="true">正在载入多角度工作区…</div>}><MultiviewPageContent /></Suspense>;
+  return <Suspense fallback={<div className={styles.page} role="status" aria-busy="true">正在载入3D多视图工作区…</div>}><MultiviewPageContent /></Suspense>;
 }

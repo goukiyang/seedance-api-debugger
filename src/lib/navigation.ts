@@ -109,7 +109,7 @@ export const userNavGroups: NavGroup[] = [
     items: [
       { label: '人物生成', href: '/tools/avatar-studio', prefixMatch: true, imageStudioOnly: true },
       { label: 'AI 抠图', href: '/cutout', prefixMatch: true, adminOnly: true },
-      { label: '多角度图', href: '/multiview', prefixMatch: true },
+      { label: '3D多视图', href: '/multiview', prefixMatch: true },
       { label: 'API 设置', href: '/admin/integrations', prefixMatch: true, adminOnly: true },
     ],
   },

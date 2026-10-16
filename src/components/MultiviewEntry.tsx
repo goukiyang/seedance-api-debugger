@@ -37,7 +37,7 @@ export function MultiviewEntry({ contentKey, className }: { contentKey?: Content
     setBusy(true);
     try {
       const risk = getPageExitRisk();
-      if (risk.busy.length) { setNotice(`${risk.busy.join('、')}，请完成后再打开多角度图。`); return; }
+      if (risk.busy.length) { setNotice(`${risk.busy.join('、')}，请完成后再打开3D多视图。`); return; }
       setNotice('');
       if (risk.unsaved.length && !await confirm(`${risk.unsaved.join('、')}尚未保存，确定离开吗？`, { title: '离开当前页', confirmLabel: '放弃并继续' })) return;
       const returnTo = `${pathname}${search.toString() ? `?${search}` : ''}${window.location.hash}`;
@@ -46,5 +46,5 @@ export function MultiviewEntry({ contentKey, className }: { contentKey?: Content
     } finally { setBusy(false); }
   }
   return <><button ref={button} type="button" className={`${styles.button} ${className || ''}`} disabled={busy} onPointerDown={event => event.stopPropagation()}
-    onClick={event => { event.stopPropagation(); void open(); }}><Grid2X2 size={15} aria-hidden="true" />制作多角度图</button>{notice && <span className={styles.notice} role="status">{notice}</span>}{productDialog}</>;
+    onClick={event => { event.stopPropagation(); void open(); }}><Grid2X2 size={15} aria-hidden="true" />制作3D多视图</button>{notice && <span className={styles.notice} role="status">{notice}</span>}{productDialog}</>;
 }

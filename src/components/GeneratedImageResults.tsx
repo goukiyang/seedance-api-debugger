@@ -121,6 +121,7 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
   const secondaryActions = contextActionsEnabled && readOnly ? null : renderActions?.(item);
   const primaryActions = renderPrimaryActions?.(item, waitDisplay);
   const groupedDelete = coverDeleteWithContextActions ? renderDelete?.(item) : null;
+  const hasCommonActions = Boolean(groupedDelete || item.media && (!coverDeleteWithContextActions || item.download && (!contextActionsEnabled || !readOnly)));
   const coverReactions = Boolean(renderReactionAction && item.media?.contentKey);
   const reactions = item.media?.contentKey ? <ContentReactions contentKey={item.media.contentKey} imageSharing={item.media.imageSharing}
     secondaryAction={renderReactionAction ? null : undefined} overlay={!renderReactionAction} parentControlled={!renderReactionAction} /> : null;
@@ -143,12 +144,12 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
       {renderOverlay?.(item, { openPreview: () => changePreview(item) })}
       <ImageBillingBadge billing={item.billing} />
       {!contextActionsEnabled && !coverDeleteWithContextActions && renderDelete && <div className={styles.deleteSlot} data-result-secondary onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{renderDelete(item)}</div>}
-      {(item.media || secondaryActions || groupedDelete) && <div className={styles.mediaActions} data-cover-context-delete={coverDeleteWithContextActions || undefined} data-result-secondary aria-busy={feedback?.id === item.id && feedback.busy || undefined} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
-        {(item.media || groupedDelete) && <div className={styles.commonActions}>
+      {(hasCommonActions || secondaryActions) && <div className={styles.mediaActions} data-cover-context-delete={coverDeleteWithContextActions || undefined} data-result-secondary aria-busy={feedback?.id === item.id && feedback.busy || undefined} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
+        {hasCommonActions && <div className={styles.commonActions}>
           {item.media && <>
             {item.download && (!contextActionsEnabled || !readOnly) && <button type="button" aria-label="下载图片" title="下载图片" disabled={item.downloadDisabled || Boolean(feedback?.busy)} onClick={() => void operate(item, 'download')}><Download size={15} /></button>}
-            {!item.viewOnly && (!contextActionsEnabled || !readOnly) && <button type="button" aria-label="复制图片" title="复制图片" disabled={Boolean(feedback?.busy)} onClick={() => void operate(item, 'copy')}><ImageIcon size={15} /></button>}
-            <button type="button" aria-label="查看图片" title="查看图片" onClick={() => changePreview(item)}><Eye size={15} /></button>
+            {!coverDeleteWithContextActions && !item.viewOnly && (!contextActionsEnabled || !readOnly) && <button type="button" aria-label="复制图片" title="复制图片" disabled={Boolean(feedback?.busy)} onClick={() => void operate(item, 'copy')}><ImageIcon size={15} /></button>}
+            {!coverDeleteWithContextActions && <button type="button" aria-label="查看图片" title="查看图片" onClick={() => changePreview(item)}><Eye size={15} /></button>}
           </>}
           {groupedDelete}
         </div>}

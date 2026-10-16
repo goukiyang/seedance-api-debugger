@@ -867,7 +867,7 @@ export async function POST(request: NextRequest) {
   let multiviewGeneration: MultiviewGenerationSnapshot | null = null;
   if (body.multiview_generation !== undefined) {
     multiviewGeneration = parseMultiviewGenerationSnapshot(body.multiview_generation);
-    if (!multiviewGeneration) return errorJson('多角度旋转预设版本或主图记录无效，已有输入保留', 400);
+    if (!multiviewGeneration) return errorJson('3D多视图旋转预设版本或主图记录无效，已有输入保留', 400);
     const composed = composeMultiviewGenerationPrompt(multiviewGeneration.supplement, multiviewGeneration.presetVersion);
     if (!composed.valid) return errorJson(composed.error || '完整旋转文案无效', 400);
     // Only the complete rotation contract may omit a card; a source label alone is not sufficient.
@@ -883,16 +883,16 @@ export async function POST(request: NextRequest) {
       || typeof body.generate_audio !== 'boolean' || typeof body.return_last_frame !== 'boolean' || typeof body.watermark !== 'boolean'
       || typeof body.resolution_approval_confirmed !== 'boolean' || body.draft !== false
       || typeof body.max_estimated_cost !== 'number' || !Number.isFinite(body.max_estimated_cost) || body.max_estimated_cost < 0) {
-      return errorJson('多角度生成设置与原文案、归属或报价不一致，未提交生成', 400);
+      return errorJson('3D多视图生成设置与原文案、归属或报价不一致，未提交生成', 400);
     }
     if (!Array.isArray(body.reference_image_ids) || body.reference_image_ids.length !== 1
-      || body.reference_image_ids[0] !== multiviewGeneration.mainReferenceImageId) return errorJson('多角度生成必须且只能使用当前明确选择的一张主图', 400);
+      || body.reference_image_ids[0] !== multiviewGeneration.mainReferenceImageId) return errorJson('3D多视图生成必须且只能使用当前明确选择的一张主图', 400);
     const alternateArrays = ['referenceImageIds', 'reference_image_urls', 'referenceImageUrls', 'reference_video_urls', 'reference_audio_urls', 'frame_image_urls', 'template_studio_assets'];
     if (alternateArrays.some(key => body[key] != null && (!Array.isArray(body[key]) || body[key].length !== 0))
       || ['first_frame_url', 'last_frame_url', 'first_frame_asset_id', 'last_frame_asset_id', 'template_id', 'agent_run_id', 'template_studio_run_id',
         'template_studio_parameters', 'roleMediaContext', 'promptMentions', 'canvas_document_id', 'canvas_node_id'].some(key => body[key] != null && body[key] !== '')
       || cleanSourceMetadata(body.source_metadata).canvas_document_id || cleanSourceMetadata(body.source_metadata).canvas_node_id) {
-      return errorJson('多角度旋转请求不能混入其他素材、模板运行记录或角色工作流', 400);
+      return errorJson('3D多视图旋转请求不能混入其他素材、模板运行记录或角色工作流', 400);
     }
   }
 
@@ -1088,7 +1088,7 @@ export async function POST(request: NextRequest) {
   }
   if (body.roleMediaContext !== undefined && !idempotencyKey) return errorJson('角色媒体必须保留原请求编号，未生成', 400);
   if (multiviewGeneration && (body.project_id !== project.id || (body.video_card_id ?? null) !== videoCardId)) {
-    return errorJson('多角度生成归属与当前有权使用的项目或视频卡不一致，未提交生成', 400);
+    return errorJson('3D多视图生成归属与当前有权使用的项目或视频卡不一致，未提交生成', 400);
   }
   const studioAssetsForFingerprint = Array.isArray(body.template_studio_assets)
     ? body.template_studio_assets.map((item: Record<string, unknown>) => ({
@@ -1209,7 +1209,7 @@ export async function POST(request: NextRequest) {
   const clientName = cleanClientName(body.client_name);
   const isUltimateCanvasRequest = clientName === 'ultimate_canvas'
     || cleanedSourceMetadata.source === 'ultimate_canvas';
-  const effectiveSourceLabel = multiviewGeneration ? '多角度图' : isUltimateCanvasRequest ? '无限画布' : requestSource.source_label;
+  const effectiveSourceLabel = multiviewGeneration ? '3D多视图' : isUltimateCanvasRequest ? '无限画布' : requestSource.source_label;
   const sourceMetadata: Record<string, unknown> = {
     ...requestSource.source_metadata,
     ...cleanedSourceMetadata,

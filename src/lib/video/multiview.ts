@@ -43,7 +43,7 @@ async function authorizedSource(user: SessionUser, id: string): Promise<Source> 
     const allowed = await Promise.all(['videos', 'uploads'].map(dir => realpath(path.join(root, dir)).catch(() => null)));
     if (!file || !allowed.some(base => base && file.startsWith(`${base}${path.sep}`))) throw new MultiviewError('原视频文件暂不可用', 404);
     const info = await stat(file);
-    if (!info.isFile() || !info.size || info.size > MAX_VIDEO) throw new MultiviewError('多角度图目前支持 128MB 以内的视频');
+    if (!info.isFile() || !info.size || info.size > MAX_VIDEO) throw new MultiviewError('3D多视图目前支持 128MB 以内的视频');
     return { source, local: file, version: digest(`${id}:${file}:${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}`) };
   }
   // Only persisted, already-authorized sources enter the existing pinned-DNS media transport.
@@ -112,7 +112,7 @@ async function downloadSource(source: Source, dir: string, request: Request) {
       while (true) {
         const chunk = await reader.read(); if (chunk.done) break;
         bytes += chunk.value.length;
-        if (bytes > MAX_VIDEO) throw new MultiviewError('多角度图目前支持 128MB 以内的视频');
+        if (bytes > MAX_VIDEO) throw new MultiviewError('3D多视图目前支持 128MB 以内的视频');
         chunks.push(Buffer.from(chunk.value));
       }
     } finally { await reader.cancel().catch(() => undefined); }

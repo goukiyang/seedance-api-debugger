@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '普通复用、换图和可恢复草稿不再重复确认，真正未保存内容和待确认请求仍受保护；结果操作按钮更统一，已点赞爱心恢复红色，多角度可直接下载已就绪图片。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '多角度工具统一更名为3D多视图；模板结果图片操作更紧凑，移除封面上的复制图片和查看按钮，原预览、参数恢复、下载及删除仍保留。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
