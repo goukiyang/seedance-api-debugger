@@ -36,7 +36,8 @@ import {
 import { DURATION_OPTIONS, RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
 import { seedanceVideoDurationCapabilities } from '@/lib/provider/seedance-models';
 import { defaultImageResolution, imageResolutionOptions } from '@/lib/image-generation/resolution';
-import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS } from '@/lib/image-studio/model-catalog';
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_NEW_REQUEST_MODELS, IMAGE_STUDIO_MODEL_LABELS, imageStudioModelForNewSelection } from '@/lib/image-studio/model-catalog';
+import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import { STUDIO_TEXT_MODELS, isStudioTextModel } from '@/lib/template-studio/text-models';
 import { AUDIO_CAPABILITY } from '@/lib/provider/audio-contract';
 import { USD_TO_CNY_RATE, usdToCnyRateText } from '@/lib/costs/currency';
@@ -119,7 +120,8 @@ function imageModelCapabilities(provider: string, model: string, unavailable = f
     };
   }
   return {
-    reference_image_limit: 9,
+    reference_image_limit: model === 'gemini-nano-banana-2.1' ? MAX_REFERENCE_IMAGES : 9,
+    ...(model === 'gemini-nano-banana-2.1' ? { supplier_reference_image_limit: null } : {}),
     max_outputs_per_request: 8,
     size_options: sizeOptions,
     default_resolution: defaultImageResolution(model, provider),
@@ -128,7 +130,7 @@ function imageModelCapabilities(provider: string, model: string, unavailable = f
     supports_sequential_generation: false,
     quality_options: IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [],
     default_quality: defaultImageStudioQuality(model),
-    notes: ['通用草图', '兼容现有图片生成流程'],
+    notes: model === 'gemini-nano-banana-2.1' ? ['本站最多使用 10 张参考图；供应商上限尚未确认', '质量与分辨率为本站可选项，供应商支持情况尚未确认'] : ['通用草图', '兼容现有图片生成流程'],
   };
 }
 
@@ -164,7 +166,9 @@ export async function GET(request: NextRequest) {
     getImageGenerationChannels(),
     getH3ApiSettings(),
   ]);
-  const imageSettings = await imageSettingsForModel(imageChannels, imageChannels.shared.default_model);
+  const newDefaultImageModel = imageChannels.shared.default_model === 'gemini-3.1-flash-image-preview'
+    ? imageStudioModelForNewSelection(imageChannels.shared.default_model) : imageChannels.shared.default_model;
+  const imageSettings = await imageSettingsForModel(imageChannels, newDefaultImageModel);
   const videoConfig = getProviderConfig();
   const h3VideoConfig = safeH3ConfigDto(h3Settings);
   const creditSummary = await prisma.$transaction((tx) => getCreditSummary(tx, user));
@@ -368,8 +372,9 @@ export async function GET(request: NextRequest) {
 
   const textReady = isMuskApiReady(muskSettings);
   const imageModels = imageChannels.shared.provider === 'seedream'
-    ? [imageChannels.shared.default_model, 'gemini-3.1-flash-image-preview', 'gemini-3-pro-image-preview']
-    : Array.from(new Set([...IMAGE_STUDIO_MODELS, imageChannels.shared.default_model]));
+    ? [imageChannels.shared.default_model, 'gemini-nano-banana-2.1', 'gemini-3-pro-image-preview']
+    : Array.from(new Set([...IMAGE_STUDIO_NEW_REQUEST_MODELS,
+      ...(imageChannels.shared.default_model === 'gemini-3.1-flash-image-preview' ? [] : [imageChannels.shared.default_model])]));
   const imageSettingsByModel = new Map(await Promise.all(imageModels.map(async model => [model, await imageSettingsForModel(imageChannels, model)] as const)));
   const imageReady = imageModels.some(model => isImageGenerationApiReady(imageSettingsByModel.get(model)!));
   const imageLabel = imageSettings.label || imageModelLabel(imageSettings.provider, imageSettings.default_model);

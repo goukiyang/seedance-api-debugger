@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '修复 Banana Pro 因供应商能力资料未填齐而无法提交的问题，保留所选参数和素材，沿用已配置点数。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: 'Banana 2 的新选择升级为 Banana 2.1，沿用当前参数和素材；旧结果与已提交任务保持原样。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

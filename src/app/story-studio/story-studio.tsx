@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { ArrowLeft, ArrowDown, ArrowUp, Clapperboard, ImagePlus, Plus, RefreshCw, Save, Trash2, WandSparkles } from 'lucide-react';
 import { buildStoryPrompt, parseStoryShots, validateStoryDraft, parseStoryMaterials, composeStoryShot, separateStoryPrompt, storyGenerationPrompt, type StoryMaterial, type StoryDraft, type StoryShot } from '@/lib/story-workflow';
 import { canvasImageReferencePolicy } from '@/lib/canvas-image-references';
-import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, imageResolutionOptions } from '@/lib/image-studio/model-catalog';
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, imageStudioModelForNewSelection, IMAGE_STUDIO_QUALITY_LABELS, imageResolutionOptions } from '@/lib/image-studio/model-catalog';
 import { STUDIO_RATIOS } from '@/lib/image-studio/ratios';
 import { useProductDialog } from '@/components/useProductDialog';
 import { usePageExitRisk } from '@/lib/hooks/page-exit-guard';
@@ -133,7 +133,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     if (!lock.current && !conflict && !failedSave.current) setAutosavePaused(false);
   }
   const updateDraft = (patch: Partial<StoryDraft>) => change({ ...current.current, draft: { ...current.current.draft, ...patch } });
-  const mediaSettings = work.mediaSettings || { imageModel: mediaCapabilities?.image.model || 'gemini-3.1-flash-image-preview', quality: 'auto', resolution: '2K', ratio: '16:9',
+  const mediaSettings = work.mediaSettings || { imageModel: mediaCapabilities?.image.model === 'gemini-3.1-flash-image-preview' ? imageStudioModelForNewSelection(mediaCapabilities.image.model) : mediaCapabilities?.image.model || 'gemini-nano-banana-2.1', quality: 'auto', resolution: '2K', ratio: '16:9',
     videoModel: mediaCapabilities?.video.model || '', provider: 'seedance', videoResolution: '720p' };
   const selectedImageChannelModel = imageStudioChannelModel(imageChannel.channel, mediaSettings.imageModel);
   const legacyImageRoute = imageStudioUsesLegacyRoute(imageChannel.channels, mediaSettings.imageModel, imageChannel.channelId);

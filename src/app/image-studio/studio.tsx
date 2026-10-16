@@ -94,7 +94,7 @@ import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
 import type { StudioReferencePolicy } from '@/lib/image-studio/reference-policy';
 import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, imageStudioChannelReadyForModel, imageStudioChannelUnitCredits, imageStudioUsesLegacyRoute, imageStudioEffectiveChannelId, useImageStudioChannel } from '@/lib/image-studio/channels';
 import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChannelSelect';
-import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_NEW_REQUEST_MODELS, imageStudioModelForNewSelection, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
 
 type StudioSnapshot = { imageChannelLabel?: string | null; imageSupplierName?: string | null; referencePolicy?: StudioReferencePolicy; primaryReferenceImages?: UploadedAssetPayload[]; auxiliaryReferenceImages?: UploadedAssetPayload[]; prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; contextAvailable?: boolean; contextConfigured?: boolean; referenceImages: UploadedAssetPayload[]; fixedReferenceImages?: FixedStudioReference[]; transientReferenceImages?: UploadedAssetPayload[]; fixedReferenceCount?: number; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[] };
 type StudioTask = { id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; error?: string; unitCredits: number; billing?: ImageBillingView | null; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; finishedAt?: string | null; snapshot?: StudioSnapshot & { moduleContextVersion?: string | null; moduleContextVersionState?: string }; delivery?: { phase: string; acceptedAt?: number; waitingStatus?: 'pending' | 'retrying' | 'unconfirmed'; receivedBytes?: number; expectedBytes?: number; generationDetailSuperseded?: boolean; recoveryAvailable: boolean; checkpointRetained: boolean; requestId?: string; upstreamRequestId?: string; validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string } }; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number } | null };
@@ -1509,8 +1509,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const [aspectRatio, setAspectRatioValue] = useState(module.aspectRatio || 'auto');
   function setAspectRatio(value: string) { setAspectRatioValue(value); markPersonalOverride('aspectRatio', value); }
   const [moduleModel, setModuleModelValue] = useState(module.model);
+  const preserveSelectedBananaParameters = moduleModel === 'gemini-nano-banana-2.1';
   function setModuleModel(value: string) { setModuleModelValue(value); markPersonalOverride('model', value); }
-  const [resolution, setResolutionValue] = useState<ImageResolution>(normalizeImageResolution(module.model, module.resolution || defaultImageResolution(module.model)));
+  const [resolution, setResolutionValue] = useState<ImageResolution>(module.model === 'gemini-nano-banana-2.1'
+    ? module.resolution || defaultImageResolution(module.model) : normalizeImageResolution(module.model, module.resolution || defaultImageResolution(module.model)));
   function setResolution(value: ImageResolution) { setResolutionValue(value); markPersonalOverride('resolution', value); }
   const [quality, setQualityValue] = useState(module.quality || defaultImageStudioQuality(module.model));
   function setQuality(value: string) { setQualityValue(value); markPersonalOverride('quality', value); }
@@ -1649,6 +1651,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const liveGenerationSignature = useRef('');
   const [queryingSubmission, setQueryingSubmission] = useState(false);
   const [pendingSubmission, setPendingSubmission] = useState<Record<string, unknown> | null>(null);
+  const [submissionRecoveryScope, setSubmissionRecoveryScope] = useState('');
   const [reproduceSourceTaskId, setReproduceSourceTaskId] = useState<string | null>(sharedLive ? null : module.reproduceFromTaskId || null);
   const [reproductionGlobalContext, setReproductionGlobalContext] = useState<string | null>(null);
   const [reproductionContextConfigured, setReproductionContextConfigured] = useState(false);
@@ -1695,24 +1698,33 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const pendingKey = `sd2-image-studio-pending:${suffix}`;
   const effectiveGlobalContext = reproduceSourceTaskId && reproductionGlobalContext !== null ? reproductionGlobalContext : settings?.context;
   const referencePolicy: StudioReferencePolicy = { primaryIds: images.flatMap(image => image.id ? [image.id] : []), primaryMin, primaryMax: referenceLimit, auxiliaryMax: auxiliaryLimit, styleMax: styleLimit, referenceMax: referenceImageLimit, useFixedReferences };
-  const moduleDraft = { name, prompt, context: moduleContext, count, referenceLimit, aspectRatio, model: moduleModel, quality: normalizeImageStudioQuality(moduleModel, quality), resolution: normalizeImageResolution(moduleModel, resolution), groupName, bannerAssetId: banner?.id || null, referenceIds: [...images, ...auxiliaryImages].map(image => image.id), reproduceFromTaskId: reproduceSourceTaskId || null, sourcePresetId: module.sourcePresetId || null, skillIds: skills.map(group => group.id), styleGroupIds: styleGroups.map(group => group.id), referencePolicy };
+  const moduleDraft = { name, prompt, context: moduleContext, count, referenceLimit, aspectRatio, model: moduleModel, quality: preserveSelectedBananaParameters ? quality : normalizeImageStudioQuality(moduleModel, quality), resolution: preserveSelectedBananaParameters ? resolution : normalizeImageResolution(moduleModel, resolution), groupName, bannerAssetId: banner?.id || null, referenceIds: [...images, ...auxiliaryImages].map(image => image.id), reproduceFromTaskId: reproduceSourceTaskId || null, sourcePresetId: module.sourcePresetId || null, skillIds: skills.map(group => group.id), styleGroupIds: styleGroups.map(group => group.id), referencePolicy };
   const moduleSaveSnapshot = { ...moduleDraft };
   const moduleDirty = JSON.stringify(moduleSaveSnapshot) !== moduleSaved;
   const baseline = moduleSaved ? JSON.parse(moduleSaved) as typeof moduleDraft : moduleDraft;
   const selectedChannel = imageChannels.items.find(item => item.id === imageChannelId);
   const selectedChannelModel = imageStudioChannelModel(selectedChannel, moduleModel);
-  const allowsUnconfirmedParameters = moduleModel === 'gemini-3-pro-image-preview' && selectedChannelModel?.allowsUnconfirmedParameters === true;
+  const allowsUnconfirmedParameters = (moduleModel === 'gemini-3-pro-image-preview' || moduleModel === 'gemini-nano-banana-2.1') && selectedChannelModel?.allowsUnconfirmedParameters === true;
   const qualitySupportUnconfirmed = allowsUnconfirmedParameters && selectedChannelModel?.qualities == null;
   const resolutionSupportUnconfirmed = allowsUnconfirmedParameters && selectedChannelModel?.resolutions == null;
   const legacyImageRoute = imageStudioUsesLegacyRoute(imageChannels, moduleModel, imageChannelId);
   const effectiveImageChannelId = imageStudioEffectiveChannelId(imageChannels, moduleModel, imageChannelId);
-  const channelModels = imageStudioChannelModels(imageChannels, models);
+  const channelModels = imageStudioChannelModels(imageChannels, IMAGE_STUDIO_NEW_REQUEST_MODELS);
   const modelChoices = channelModels.includes(moduleModel) ? channelModels : [moduleModel, ...channelModels];
+  function selectModuleModel(value: string, resetParameters = false) {
+    if (!draftLoaded || draftRestoring || submissionRecoveryScope !== pendingKey || !batch.recoveryKnown || submitting || pendingSubmission || batch.pending) return;
+    const next = imageStudioModelForNewSelection(value);
+    const replacesLegacyBanana = moduleModel === 'gemini-3.1-flash-image-preview' && next === 'gemini-nano-banana-2.1';
+    setModuleModel(next);
+    if (resetParameters && !replacesLegacyBanana) {
+      setQuality(defaultImageStudioQuality(next)); setResolution(defaultImageResolution(next));
+    }
+  }
   const qualityChoices = selectedChannelModel?.qualities ?? (legacyImageRoute || qualitySupportUnconfirmed
     ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [] : []);
   const resolutionChoices = selectedChannelModel?.resolutions ?? (legacyImageRoute || resolutionSupportUnconfirmed
     ? IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] || [] : []);
-  const generationInputs = { sharedLive: sharedLive?.intent, personalOverrides: sharedLive ? personalOverrides : undefined, evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, aspectRatio, resolution: legacyImageRoute ? normalizeImageResolution(moduleModel, resolution) : resolution, referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: legacyImageRoute ? normalizeImageStudioQuality(moduleModel, quality) : quality, channelId: imageChannelId, referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), skillIds: moduleDraft.skillIds, skillVersions: Object.fromEntries(skills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])), styleGroupIds: moduleDraft.styleGroupIds };
+  const generationInputs = { sharedLive: sharedLive?.intent, personalOverrides: sharedLive ? personalOverrides : undefined, evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, aspectRatio, resolution: legacyImageRoute && !preserveSelectedBananaParameters ? normalizeImageResolution(moduleModel, resolution) : resolution, referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: legacyImageRoute && !preserveSelectedBananaParameters ? normalizeImageStudioQuality(moduleModel, quality) : quality, channelId: imageChannelId, referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), skillIds: moduleDraft.skillIds, skillVersions: Object.fromEntries(skills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])), styleGroupIds: moduleDraft.styleGroupIds };
   const generationDraft = JSON.stringify(generationInputs);
   // `module` is the server-confirmed definition. Editor fields and browser drafts
   // stay separate; even a publisher's unfinished edits are not generation inputs.
@@ -1843,7 +1855,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const contextDialogSnapshot = JSON.stringify({ templatePrompt, templateImageIds, context: moduleContext, primaryMin, primaryMax: referenceLimit,
     auxiliaryMax: auxiliaryLimit, styleMax: styleLimit, referenceMax: referenceImageLimit, useFixedReferences,
     fixedReferences: fixedReferencePayload(fixedReferences), skillIds: skills.map(group => group.id), styleGroupIds: styleGroups.map(group => group.id),
-    model: moduleModel, resolution: normalizeImageResolution(moduleModel, resolution), quality: normalizeImageStudioQuality(moduleModel, quality) });
+    model: moduleModel, resolution: moduleDraft.resolution, quality: moduleDraft.quality });
   const latestSettingsDraft = useRef('');
   latestSettingsDraft.current = JSON.stringify({ moduleDraft, contextDialogSnapshot, personalOverrides, name, groupName, bannerAssetId: banner?.id || null });
   async function saveModuleSettings() {
@@ -2480,7 +2492,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         if (Number.isInteger(saved.count) && saved.count >= 1 && saved.count <= 8 && restores('count')) setCount(saved.count);
         if (!sharedLive && Number.isInteger(saved.referenceLimit) && saved.referenceLimit >= 1 && saved.referenceLimit <= MAX_REFERENCE_IMAGES) setReferenceLimit(saved.referenceLimit);
         if (typeof saved.model === 'string' && models.includes(saved.model as typeof models[number]) && restores('model')) setModuleModel(saved.model);
-        if (typeof saved.resolution === 'string' && restores('resolution')) setResolution(normalizeImageResolution(typeof saved.model === 'string' ? saved.model : module.model, saved.resolution));
+        if (typeof saved.resolution === 'string' && restores('resolution')) setResolution(saved.model === 'gemini-nano-banana-2.1'
+          ? saved.resolution as ImageResolution : normalizeImageResolution(typeof saved.model === 'string' ? saved.model : module.model, saved.resolution));
         if (typeof saved.quality === 'string' && restores('quality')) setQuality(saved.quality);
         if (typeof saved.aspectRatio === 'string' && restores('aspectRatio')) { try { setAspectRatio(normalizeStudioRatio(saved.aspectRatio)); } catch {} }
         const policy = saved.referencePolicy;
@@ -2561,14 +2574,29 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         setRecoverableDraft(saved);
         void restoreTemporaryDraft(saved, true).finally(() => setDraftLoaded(true));
       } else setDraftLoaded(true);
-      const pending = JSON.parse(localStorage.getItem(pendingKey) || sessionStorage.getItem(pendingKey) || 'null');
+    } catch { setDraftLoaded(true); /* A damaged local draft must not block the page. */ }
+    try {
+      const pending = JSON.parse(localStorage.getItem(pendingKey) ?? sessionStorage.getItem(pendingKey) ?? 'null');
       if (pending && typeof pending.requestId === 'string' && /^[a-zA-Z0-9-]{16,80}$/.test(pending.requestId)) {
         const identity = { requestId: pending.requestId };
         setPendingSubmission(identity);
         localStorage.setItem(pendingKey, JSON.stringify(identity)); sessionStorage.removeItem(pendingKey);
-      }
-    } catch { setDraftLoaded(true); /* A damaged local draft must not block the page. */ }
+        setSubmissionRecoveryScope(pendingKey);
+      } else if (pending === null) setSubmissionRecoveryScope(pendingKey);
+    } catch { /* An unreadable request record is not proof that no submission is pending. */ }
   }, [draftKey, pendingKey, module.saved, module.revision, module.model, isAdmin]);
+  useEffect(() => {
+    if (moduleModel !== 'gemini-3.1-flash-image-preview' || !draftLoaded || draftRestoring
+      || submissionRecoveryScope !== pendingKey || !batch.recoveryKnown || pendingSubmission || queryingSubmission
+      || submitting || submitLock.current || batch.pending || batch.busy || batch.previewing
+      || moduleSaving || moduleDeleting || moduleSaveRequest.current?.unknown || fixedSaveUnknown
+      || presetSaving || quickPresetApplying || presetCreateRequest.current || sharingPending
+      || uploading || bannerUploading || sessionChanged || isClientSessionBlocked()) return;
+    // Only the next unsubmitted choice changes; frozen requests and restored parameters remain intact.
+    setModuleModel(imageStudioModelForNewSelection(moduleModel));
+  }, [moduleModel, draftLoaded, draftRestoring, submissionRecoveryScope, pendingKey, batch.recoveryKnown,
+    pendingSubmission, queryingSubmission, submitting, batch.pending, batch.busy, batch.previewing, moduleSaving,
+    moduleDeleting, fixedSaveUnknown, presetSaving, quickPresetApplying, sharingPending, uploading, bannerUploading, sessionChanged]);
   function temporaryDraftPayload(nextImages = images, nextAuxiliary = auxiliaryImages, nextPolicy = referencePolicy) {
     return { schemaVersion: sharedLive ? 3 : 2, ...(sharedLive ? { personalOverrides, resetFields } : {}),
       ...(authorDefinitionDirty ? { authorDefinition: { templatePrompt, context: moduleContext, name, groupName, bannerAssetId: banner?.id || null,
@@ -3573,8 +3601,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         <RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={generationReferences.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
         <div className={`${styles.modelQualityRow} ${templateWorkbench ? styles.templateModelQualityRow : ''}`}>
           <label className={styles.compactField} htmlFor={`studio-model-${module.id}`}><strong>生成模型</strong>
-            <select id={`studio-model-${module.id}`} title={templateWorkbench ? `${IMAGE_STUDIO_MODEL_LABELS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || moduleModel}${imageChannelReady && !imageStudioChannelReadyForModel(selectedChannel, moduleModel, settings?.modelReady?.[moduleModel] ?? settings?.providerReady) ? '（未就绪）' : ''}` : undefined} disabled={submitting || Boolean(pendingSubmission)} value={moduleModel} onChange={event => setModuleModel(event.target.value)}>
-              {modelChoices.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model}{imageChannelReady && !imageStudioChannelReadyForModel(selectedChannel, model, settings?.modelReady?.[model] ?? settings?.providerReady) ? '（未就绪）' : ''}</option>)}
+            <select id={`studio-model-${module.id}`} title={templateWorkbench ? `${IMAGE_STUDIO_MODEL_LABELS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || moduleModel}${imageChannelReady && !imageStudioChannelReadyForModel(selectedChannel, moduleModel, settings?.modelReady?.[moduleModel] ?? settings?.providerReady) ? '（未就绪）' : ''}` : undefined} disabled={!draftLoaded || draftRestoring || submissionRecoveryScope !== pendingKey || !batch.recoveryKnown || submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} value={moduleModel} onChange={event => selectModuleModel(event.target.value)}>
+              {modelChoices.map(model => <option key={model} value={model} disabled={model === 'gemini-3.1-flash-image-preview'}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model}{imageChannelReady && !imageStudioChannelReadyForModel(selectedChannel, model, settings?.modelReady?.[model] ?? settings?.providerReady) ? '（未就绪）' : ''}</option>)}
             </select>
           </label>
           {!templateWorkbench && <label className={styles.compactField} htmlFor={`studio-channel-${module.id}`}><strong>供应商</strong>
@@ -3880,17 +3908,20 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       {error && <p role="status" className={styles.error}>{error}</p>}
       <div className={styles.modelQualityRow}>
         <label className={styles.compactField} htmlFor={`studio-module-model-${module.id}`}><strong>模块模型</strong>
-          <select id={`studio-module-model-${module.id}`} value={moduleModel} onChange={event => { const next = event.target.value; setModuleModel(next); setQuality(defaultImageStudioQuality(next)); setResolution(defaultImageResolution(next)); }}>
-            {models.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model]}</option>)}
+          <select id={`studio-module-model-${module.id}`} value={moduleModel} disabled={!draftLoaded || draftRestoring || submissionRecoveryScope !== pendingKey || !batch.recoveryKnown || submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onChange={event => selectModuleModel(event.target.value, true)}>
+            {moduleModel === 'gemini-3.1-flash-image-preview' && <option value={moduleModel} disabled>{IMAGE_STUDIO_MODEL_LABELS[moduleModel]}</option>}
+            {IMAGE_STUDIO_NEW_REQUEST_MODELS.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model]}</option>)}
           </select>
         </label>
         <label className={styles.compactField} htmlFor={`studio-module-resolution-${module.id}`}><strong>模块分辨率</strong>
-          <select id={`studio-module-resolution-${module.id}`} value={normalizeImageResolution(moduleModel, resolution)} onChange={event => setResolution(normalizeImageResolution(moduleModel, event.target.value))}>
+          <select id={`studio-module-resolution-${module.id}`} value={moduleDraft.resolution} onChange={event => setResolution(normalizeImageResolution(moduleModel, event.target.value))}>
+            {preserveSelectedBananaParameters && !(IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] || []).includes(resolution) && <option value={resolution} disabled>{resolution}（当前模型不支持）</option>}
             {(IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] || ['1K', '2K']).map(option => <option key={option} value={option}>{option}</option>)}
           </select>
         </label>
         <label className={styles.compactField} htmlFor={`studio-module-quality-${module.id}`}><strong>图片质量</strong>
-          <select id={`studio-module-quality-${module.id}`} value={normalizeImageStudioQuality(moduleModel, quality)} onChange={event => setQuality(event.target.value)}>
+          <select id={`studio-module-quality-${module.id}`} value={moduleDraft.quality} onChange={event => setQuality(event.target.value)}>
+            {preserveSelectedBananaParameters && !((IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || []) as readonly string[]).includes(quality) && <option value={quality} disabled>{IMAGE_STUDIO_QUALITY_LABELS[quality as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || quality}（当前模型不支持）</option>}
             {(IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || ['auto']).map(option => <option key={option} value={option}>{IMAGE_STUDIO_QUALITY_LABELS[option]}</option>)}
           </select>
         </label>

@@ -35,6 +35,7 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
   const [quoteVisible, setQuoteVisible] = useState(true);
   useEffect(() => { const update = () => setQuoteVisible(!document.hidden); update(); document.addEventListener('visibilitychange', update); return () => document.removeEventListener('visibilitychange', update); }, []);
   const [loadedScope, setLoadedScope] = useState('');
+  const [recoveryKnownScope, setRecoveryKnownScope] = useState('');
   const fileInput = useRef<HTMLInputElement>(null), directoryInput = useRef<HTMLInputElement>(null), lock = useRef(false), fileRef = useRef<BatchLocalFile[]>([]);
   const scopedKey = `sd2-studio-batch-draft:v1:${userId}:${moduleId}`, pendingKey = `${scopedKey}:request`;
   const loaded = loadedScope === scopedKey;
@@ -100,6 +101,7 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
   }, [billingQuote]);
   useUnsavedNavigation(busy || previewing || files.some(file => !file.assetId), confirm, { unsaved: files.some(file => !file.assetId) ? ['尚未上传的本机批量素材，离开后需重新选择'] : [], busy: busy ? ['批次素材或提交正在处理'] : previewing ? ['本机图片正在读取'] : [], revision: signature });
   useEffect(() => {
+    setRecoveryKnownScope('');
     fileRef.current.forEach(file => URL.revokeObjectURL(file.preview)); fileRef.current = []; setFiles([]); setSkipped([]); setFolderName(''); setError(''); setId(null); setPending(null); setBillingQuote(null);
     setMode('single'); setSource('folder'); setQuantity(8); setPerFile(1); setPack(false); setBusy(false); setPreviewing(false); setProgress('');
     try {
@@ -113,9 +115,13 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
         setPack(saved.pack === true);
         if (typeof saved.id === 'string' && /^[a-f0-9]{64}$/.test(saved.id)) setId(saved.id);
       }
-      const request = localStorage.getItem(pendingKey);
-      if (request && /^[a-zA-Z0-9-]{16,80}$/.test(request)) { setPending(request); setMode('batch'); }
     } catch { /* A broken cache never replays generation. */ }
+    try {
+      const request = localStorage.getItem(pendingKey);
+      if (request !== null && /^[a-zA-Z0-9-]{16,80}$/.test(request)) {
+        setPending(request); setMode('batch'); setRecoveryKnownScope(scopedKey);
+      } else if (request === null) setRecoveryKnownScope(scopedKey);
+    } catch { /* Unreadable request storage does not prove the absence of pending work. */ }
     setLoadedScope(scopedKey);
   }, [scopedKey, pendingKey]);
   useEffect(() => {
@@ -300,5 +306,5 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
     {pending && <p>原提交待核对，不会重新生成。<button type="button" disabled={busy} onClick={() => void query()}><RefreshCw size={16} />查询原批次</button></p>}
     {productDialog}
   </div>;
-  return { mode, setMode, source, busy, previewing, pending, blocker, submit, query, controls, id, pack, localPreviews: files.slice(0, 24).map(file => file.preview) };
+  return { mode, setMode, source, busy, previewing, pending, recoveryKnown: recoveryKnownScope === scopedKey, blocker, submit, query, controls, id, pack, localPreviews: files.slice(0, 24).map(file => file.preview) };
 }

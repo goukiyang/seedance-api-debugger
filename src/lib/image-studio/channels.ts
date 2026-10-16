@@ -58,7 +58,7 @@ export function normalizeImageStudioChannels(value: unknown): ImageStudioChannel
             fixedPoints: Number.isFinite(capability.fixedPoints) && Number(capability.fixedPoints) >= 0 ? Number(capability.fixedPoints) : null,
             billingSource: typeof capability.billingSource === 'string' && capability.billingSource.length <= 160 ? capability.billingSource : null,
             actualQuoteRequired: capability.actualQuoteRequired === true,
-            ...(model === 'gemini-3-pro-image-preview' && capability.allowsUnconfirmedParameters === true
+            ...((model === 'gemini-3-pro-image-preview' || model === 'gemini-nano-banana-2.1') && capability.allowsUnconfirmedParameters === true
               ? { allowsUnconfirmedParameters: true } : {}),
             qualities: stringList(capability.qualities) ?? null,
             resolutions: stringList(capability.resolutions) ?? null,
@@ -194,7 +194,7 @@ export function imageStudioChannelIssue(channel: ImageStudioChannel | undefined,
     return values.legacyReady === false ? '当前模型的原接口尚未就绪，请联系管理员检查接口。' : null;
   }
   const capability = imageStudioChannelModel(channel, model);
-  const allowsUnconfirmedParameters = model === 'gemini-3-pro-image-preview' && capability?.allowsUnconfirmedParameters === true;
+  const allowsUnconfirmedParameters = (model === 'gemini-3-pro-image-preview' || model === 'gemini-nano-banana-2.1') && capability?.allowsUnconfirmedParameters === true;
   if (channel.id === ORIGINAL_IMAGE_CHANNEL_ID && !capability && values.legacyRoute !== false) {
     return values.legacyReady === false ? '当前模型的原接口尚未就绪，请联系管理员检查接口。' : null;
   }

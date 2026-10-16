@@ -7,7 +7,7 @@ import { GenerationCompletionSettings } from '@/components/GenerationCompletion'
 import { useEffect, useRef, useState, type ComponentProps } from 'react';
 import { RefreshCw, Save, X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
-import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS,
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_NEW_REQUEST_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS,
   IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality,
   type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
@@ -103,9 +103,12 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
           <label className={styles.compactField}><strong>生成模型</strong>
             <select value={defaults.model} disabled={!canEdit || editor.loading} onChange={event => {
               const model = event.target.value as ImageStudioModel;
-              editor.controller.editTemplateDefaults({ model, quality: defaultImageStudioQuality(model), resolution: defaultImageResolution(model) });
+              const replacesLegacyBanana = defaults.model === 'gemini-3.1-flash-image-preview' && model === 'gemini-nano-banana-2.1';
+              editor.controller.editTemplateDefaults(replacesLegacyBanana ? { model }
+                : { model, quality: defaultImageStudioQuality(model), resolution: defaultImageResolution(model) });
             }}>
-              {IMAGE_STUDIO_MODELS.map(model => {
+              {defaults.model === 'gemini-3.1-flash-image-preview' && <option value={defaults.model} disabled>{IMAGE_STUDIO_MODEL_LABELS[defaults.model]}</option>}
+              {IMAGE_STUDIO_NEW_REQUEST_MODELS.map(model => {
                 const ready = editor.settings?.modelReady?.[model] ?? editor.settings?.providerReady;
                 return <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model]}{ready === false ? '（服务未就绪）' : ''}</option>;
               })}

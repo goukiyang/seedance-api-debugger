@@ -79,13 +79,13 @@ export type ImageGenerationChannelProtocol = 'gemini_native' | 'openai_images';
 export type ImageGenerationResolvedProtocol = ImageGenerationChannelProtocol | 'legacy' | 'mixed';
 export type ImageGenerationBillingMode = 'fixed' | 'actual';
 
-/** Pro's existing native adapter can send parameters without a supplier capability declaration.
+/** These explicitly approved native models can send parameters without a supplier declaration.
  * This is not a support claim: explicit limits, enablement and a real fixed price still apply.
  */
 export function allowsUnconfirmedGeminiProParameters(model: string, capability: {
   enabled?: boolean; protocol?: string; billingMode?: string | null; fixedPoints?: number | null;
 } | undefined) {
-  return model === 'gemini-3-pro-image-preview' && capability?.enabled === true
+  return (model === 'gemini-3-pro-image-preview' || model === 'gemini-nano-banana-2.1') && capability?.enabled === true
     && capability.protocol === 'gemini_native' && capability.billingMode === 'fixed'
     && Number.isSafeInteger(capability.fixedPoints) && Number(capability.fixedPoints) >= 0;
 }

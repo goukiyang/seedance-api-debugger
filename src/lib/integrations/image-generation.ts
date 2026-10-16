@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
-import { imageOutputSize, normalizeImageResolution, isGeminiImageModel, isValidImageDimension, supportsStudioFourToOne } from '@/lib/image-generation/resolution';
+import { imageOutputSize, normalizeImageResolution, assertImageResolutionSupported, isGeminiImageModel, isValidImageDimension, supportsStudioFourToOne } from '@/lib/image-generation/resolution';
 import {
   IMAGE_STUDIO_MODELS,
   IMAGE_STUDIO_MODEL_QUALITY_OPTIONS,
@@ -404,7 +404,11 @@ export function imageGenerationSupportsStudioFourToOne(settings: ImageGeneration
 export function imageGenerationModelOutputSize(settings: ImageGenerationApiSettings, model: string, resolution: unknown, ratio: string) {
   const resolved = settings as ImageGenerationResolvedSettings;
   const protocol = resolved.managedChannel || resolved.explicitModelApi ? resolved.modelCapabilities[model as ImageStudioModel]?.protocol : undefined;
-  if (protocol === 'gemini_native') return normalizeImageResolution(model, resolution, settings.provider);
+  if (protocol === 'gemini_native') {
+    const normalized = normalizeImageResolution(model, resolution, settings.provider);
+    assertImageResolutionSupported(model, normalized);
+    return normalized;
+  }
   const size = imageOutputSize(model, resolution, ratio, protocol === 'openai_images' ? 'ai_media_vip' : settings.provider,
     imageGenerationSupportsStudioFourToOne(settings, model));
   const pixelProtocol = protocol === 'openai_images' || !isGeminiImageModel(model) || settings.provider === 'ai_media_vip';
@@ -559,6 +563,7 @@ export class ImageGenerationChannelError extends Error {
 }
 
 const GEMINI_CHANNEL_MODELS = new Set<ImageStudioModel>([
+  'gemini-nano-banana-2.1',
   'gemini-3.1-flash-image-preview',
   'gemini-3-pro-image-preview',
 ]);
@@ -568,6 +573,7 @@ const GPT_IMAGE_CHANNEL_MODELS = new Set<ImageStudioModel>([
   'gpt-image-2.5-sunburst',
 ]);
 const FLUXPORT_PROTOCOL_BY_MODEL: Record<ImageStudioModel, ImageGenerationChannelProtocol> = {
+  'gemini-nano-banana-2.1': 'gemini_native',
   'gemini-3.1-flash-image-preview': 'gemini_native',
   'gemini-3-pro-image-preview': 'gemini_native',
   'gpt-image-2': 'openai_images',
@@ -1089,6 +1095,11 @@ function legacyModelCapabilities(
 ): Partial<Record<ImageStudioModel, ImageGenerationModelCapability>> {
   const capabilities: Partial<Record<ImageStudioModel, ImageGenerationModelCapability>> = {};
   for (const model of IMAGE_STUDIO_MODELS) {
+    // An older legacy configuration never implicitly enables a newly introduced model.
+    if (model === 'gemini-nano-banana-2.1') {
+      capabilities[model] = blankCapability('gemini_native');
+      continue;
+    }
     // Original keeps the historical model routing and its capability contract.
     // Selectable legacy slots expose only combinations implemented by the Studio adapter.
     const protocol: ImageGenerationChannelProtocol | null = channelId === 'original'
@@ -1484,9 +1495,18 @@ export function validateImageGenerationChannel(
 ): { ok: true; capability: ImageGenerationModelCapability } | { ok: false; code: string; error: string } {
   const model = args.model as ImageStudioModel;
   if (!IMAGE_STUDIO_MODELS.includes(model)) return { ok: false, code: 'image_channel_model_not_allowed', error: '所选图片型号不在允许列表中' };
+  if (model === 'gemini-nano-banana-2.1') {
+    if (args.quality !== undefined && !(IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model] as readonly string[]).includes(args.quality)) {
+      return { ok: false, code: 'image_channel_capability_mismatch', error: 'Banana 2.1 不支持所选图片质量；当前选择未被替换' };
+    }
+    if (args.resolution !== undefined && !(IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[model] as readonly string[]).includes(args.resolution)) {
+      return { ok: false, code: 'image_channel_capability_mismatch', error: 'Banana 2.1 不支持所选分辨率；请明确选择 1K、2K 或 4K，当前选择未被替换' };
+    }
+  }
   settings = resolveImageGenerationModelSettings(settings, model);
   const capability = settings.modelCapabilities[model];
   if (settings.channelId === 'original') {
+    if (model === 'gemini-nano-banana-2.1' && !capability?.enabled) return { ok: false, code: 'image_channel_model_not_enabled', error: '原接口未明确开放 Banana 2.1，请使用已配置的型号供应商' };
     if (!isImageGenerationApiReady(settings)) return { ok: false, code: 'image_generation_api_not_configured', error: '原接口未启用或配置不完整' };
     return { ok: true, capability: capability || blankCapability(legacyProtocol(settings.provider, model) === 'gemini_native' ? 'gemini_native' : 'openai_images') };
   }
@@ -1598,7 +1618,7 @@ export async function getImageGenerationChannelOptions(
     getImageGenerationDefaultRoutes(client),
   ]);
   const items: ImageGenerationChannelDto[] = [];
-  const shared = selectImageGenerationSettings(channels, IMAGE_STUDIO_MODELS[2], 'shared');
+  const shared = selectImageGenerationSettings(channels, 'gpt-image-2', 'shared');
   const banana = selectImageGenerationSettings(channels, IMAGE_STUDIO_MODELS[0], 'banana');
   items.push(await channelOption(shared, '共享接口', channels.shared.api_key ? providerSupplierName(channels.shared.provider) : null,
     Boolean((channels.shared.api_key || Object.values(shared.modelApiKeys || {}).some(Boolean)) && channels.shared.base_url), channels.shared.enabled, client));
@@ -2682,6 +2702,7 @@ function upstreamErrorMessage(data: Record<string, unknown>, fallbackStatus: num
 }
 
 const GEMINI_IMAGE_MODELS = new Set([
+  'gemini-nano-banana-2.1',
   'gemini-3.1-flash-image-preview',
   'gemini-3-pro-image-preview',
 ]);
@@ -2798,6 +2819,19 @@ export async function createImageGeneration(params: {
   if (!isImageGenerationApiReady(params.settings)) {
     throw new ImageGenerationApiError('图形生成 API 未启用或缺少配置', 503, 'image_generation_api_not_configured');
   }
+  if (params.settings.default_model === 'gemini-nano-banana-2.1') {
+    const resolved = params.settings as ImageGenerationResolvedSettings;
+    if (!resolved.modelCapabilities?.[params.settings.default_model]) {
+      throw new ImageGenerationApiError('所选供应商修订未明确开放 Banana 2.1，尚未向供应商提交', 409, 'image_channel_model_not_enabled');
+    }
+    const validation = validateImageGenerationChannel(resolved, { model: params.settings.default_model,
+      quality: params.quality, ratio: params.ratio, referenceCount: params.referenceImages?.length,
+      ...(resolved.modelCapabilities[params.settings.default_model]?.protocol === 'gemini_native' ? { resolution: params.size } : {}) });
+    if (!validation.ok) throw new ImageGenerationApiError(validation.error, 400, validation.code);
+    if ((params.referenceImages?.length || 0) > MAX_REFERENCE_IMAGES) {
+      throw new ImageGenerationApiError(`本站最多使用 ${MAX_REFERENCE_IMAGES} 张参考图；当前素材未被删减，尚未向供应商提交`, 400, 'image_generation_reference_limit');
+    }
+  }
 
   const count = clampInteger(
     params.count,
@@ -2811,7 +2845,7 @@ export async function createImageGeneration(params: {
   try {
     if (isStudioImageGenerationProvider(params.settings.provider)
       && IMAGE_STUDIO_MODELS.includes(params.settings.default_model as typeof IMAGE_STUDIO_MODELS[number])) {
-      if (params.ratio === '4:1' && !imageGenerationSupportsStudioFourToOne(params.settings, params.settings.default_model, true)) {
+      if (params.ratio === '4:1' && !imageGenerationSupportsStudioFourToOne(params.settings, params.settings.default_model, params.settings.default_model !== 'gemini-nano-banana-2.1')) {
         throw new ImageGenerationApiError('当前模型或通道未确认支持4:1', 400, 'image_generation_ratio_not_supported');
       }
       const resolvedSettings = params.settings as ImageGenerationResolvedSettings;
@@ -2839,12 +2873,13 @@ export async function createImageGeneration(params: {
         model: params.settings.default_model,
         upstreamModel: resolvedSettings.modelCapabilities?.[params.settings.default_model as ImageStudioModel]?.upstreamModel,
         prompt: params.prompt,
-        quality: normalizeImageStudioQuality(params.settings.default_model, params.quality || 'auto'),
+        quality: normalizeImageStudioQuality(params.settings.default_model, params.settings.default_model === 'gemini-nano-banana-2.1' ? params.quality ?? 'auto' : params.quality || 'auto'),
         count,
         images,
         ratio: params.ratio,
         size: params.size,
-        allowFourToOne: imageGenerationSupportsStudioFourToOne(params.settings, params.settings.default_model, true),
+        allowFourToOne: imageGenerationSupportsStudioFourToOne(params.settings, params.settings.default_model, params.settings.default_model !== 'gemini-nano-banana-2.1'),
+        ...(params.settings.default_model === 'gemini-nano-banana-2.1' ? { ratioContractVersion: 2 as const } : {}),
         signal: controller.signal,
       };
       // Gemini generateContent produces one image per call; count is not an API parameter.

@@ -36,7 +36,7 @@ import { assertCanUseReferenceImage, uniquePreserveOrder } from '@/lib/reference
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { resolveStudioAspectRatio, normalizeStudioRatio } from '@/lib/image-studio/ratios';
-import { isValidImageDimension, normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS } from '@/lib/image-generation/resolution';
+import { isGeminiImageModel, isValidImageDimension, normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS } from '@/lib/image-generation/resolution';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 
 export const dynamic = 'force-dynamic';
@@ -404,7 +404,7 @@ export async function POST(request: NextRequest) {
       : channelId === 'original' ? null : channelId;
     const effectiveChannelId = routedChannelId || 'original';
     if (effectiveChannelId === 'original' && channelId === 'original' && requestedModel && requestedModel !== channels.shared.default_model) {
-      const banana = requestedModel === 'gemini-3.1-flash-image-preview' || requestedModel === 'gemini-3-pro-image-preview';
+      const banana = isGeminiImageModel(requestedModel);
       if ((!banana && channels.shared.provider === 'seedream') || !IMAGE_STUDIO_MODELS.includes(requestedModel as ImageStudioModel)) {
         return NextResponse.json({ error: '当前图片接口不支持所选模型，请重新选择' }, { status: 400 });
       }
