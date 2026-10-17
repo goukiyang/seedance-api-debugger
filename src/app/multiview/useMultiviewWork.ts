@@ -25,7 +25,7 @@ function workFrom(value: unknown): MultiviewWorkDto | null {
     || !['waiting_source', 'queued', 'rendering', 'ready', 'failed', 'source_changed'].includes(work.status)
     || !['current', 'changed', 'unavailable'].includes(work.sourceState) || typeof work.removed !== 'boolean'
     || work.sourceVersion !== null && !/^[a-f0-9]{64}$/.test(work.sourceVersion)) return null;
-  if (work.info && (!Array.isArray(work.info.timestamps) || !work.info.timestamps.length || work.info.timestamps.length > 20000
+  if (work.info && (!Array.isArray(work.info.timestamps) || !work.info.timestamps.length || work.info.timestamps.length > 21600
     || work.info.taskId !== work.sourceTaskId || work.info.sourceVersion !== work.sourceVersion
     || !Number.isSafeInteger(work.info.width) || work.info.width < 1 || !Number.isSafeInteger(work.info.height) || work.info.height < 1
     || !Number.isFinite(work.info.duration) || work.info.timestamps.some(time => !Number.isFinite(time) || time < 0))) return null;
