@@ -434,7 +434,7 @@ async function main() {
     const receipt = path.join(directory, 'receipt.json');
     writeFileSync(receipt, JSON.stringify({ schema: 'image-dispatch-fairness-engineering.v1', runId, mode, startedAt, finishedAt: new Date().toISOString(),
       fixtureSha256, sourceSha256, dependency, databasePath, checks, summary, calls, completed, forbiddenCalls,
-      productionWrites: 0, paidRequests: 0, browserRuns: 0,
+      synthetic: true, productionWrites: 0, paidRequests: 0, browserRuns: 0,
       scope: 'Actual dispatch metadata and SQLite CAS only; no original provider query, image generation, full media delivery or production incident reproduction.' }, null, 2), { mode: 0o600 });
     console.log(`Image dispatch fairness engineering receipt: ${receipt}`);
   }
