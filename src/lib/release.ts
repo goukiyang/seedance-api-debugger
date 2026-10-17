@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '3D多视图可在每格直接前后调帧、拖放排序。作品自动保存到本人作品库，支持拼图与单张快速浏览、继续编辑、另存和恢复移出作品；原视频、素材、设置与请求记录保留，不会重新生成或扣费。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '修复旧图片任务反复查询导致后续图片迟迟不显示的问题，已受理图片沿原请求继续取回；保留素材、参数和原任务，不会重新生成或重复扣费。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

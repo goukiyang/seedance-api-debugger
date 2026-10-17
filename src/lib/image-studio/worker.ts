@@ -422,7 +422,9 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
 export async function recoverStudioTasks() {
   await cleanupStudioDeliveries();
   const expired = await prisma.imageStudioTask.findMany({ where: { status: { in: ['running', 'channel_running'] }, lease_until: { lt: new Date() } },
-    orderBy: { created_at: 'asc' }, take: 1 });
+    // A retained slow query must fall behind untouched expired leases, even if
+    // it expires again while the next original task is being queried.
+    orderBy: [{ lease_until: 'asc' }, { created_at: 'asc' }, { id: 'asc' }], take: 1 });
   for (const task of expired) {
     const channel = task.status === 'channel_running';
     const token = randomUUID();
