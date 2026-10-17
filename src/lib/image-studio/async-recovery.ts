@@ -85,7 +85,8 @@ function matches(record: RecoveryRecord, receipt: StudioAsyncReceipt, requestId:
     && record.expiresAt === receipt.expiresAt && record.requestId === requestId;
 }
 function view(record: RecoveryRecord, task: ImageStudioTask): StudioAsyncRecoveryView {
-  return { binding: record.binding, state: record.state, reason: record.reason, providerStatus: record.providerStatus,
+  return { binding: record.binding, state: record.manualOnce && record.state === 'stopped' ? 'scheduled' : record.state,
+    reason: record.reason, providerStatus: record.providerStatus,
     attempts: record.attempts, maxAttempts: MAX_ATTEMPTS, deadlineAt: record.deadlineAt,
     nextCheckAt: ['scheduled', 'checking'].includes(record.state) ? record.nextCheckAt : null,
     canRequestRecheck: task.status === 'uncertain' && !record.manualOnce
@@ -107,7 +108,7 @@ export async function retainStudioAsyncCheckpoint(task: ImageStudioTask): Promis
   if (!row) return false;
   const record = parse(row.value_json, task);
   if (!record) throw new Error('async_recovery_retention_identity_unavailable');
-  return record.state === 'scheduled' || record.state === 'checking';
+  return record.state === 'scheduled' || record.state === 'checking' || record.manualOnce;
 }
 
 /** Only exact upstream JSON statuses release an execution slot. expiresAt is not task-retention evidence. */

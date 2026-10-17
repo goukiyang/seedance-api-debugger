@@ -3856,7 +3856,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
               <details className={styles.muted}><summary>核对详情</summary>
                 <p>不占生成名额；原请求和费用预留保留，不会重新生成。</p>
                 {task.delivery?.asyncRecovery?.state === 'checking' && <p>后台正在核对原任务。</p>}
-                {task.delivery?.asyncRecovery?.state === 'scheduled' && <p>后台将按原计划继续核对，最多 {task.delivery.asyncRecovery.maxAttempts} 轮。</p>}
+                {task.delivery?.asyncRecovery?.state === 'scheduled' && <p>后台将核对同一个原请求，不会重新生成。</p>}
                 {task.error && <p>原状态说明：{task.error}</p>}
               </details>
             </>}

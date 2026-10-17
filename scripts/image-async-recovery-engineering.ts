@@ -346,15 +346,26 @@ async function main() {
       assert.equal(queries.length, retainedQueryCount); assert.equal((await fresh(retentionTask.id)).status, 'uncertain');
       for (const receipt of receipts) writeFileSync(receipt.file, receipt.bytes, { mode: 0o600 });
       assert.ok(await recovery.readStudioAsyncRecovery(retentionTask));
-      await patch(retentionTask.id, { state: 'stopped', stopCode: 'deadline' });
-      assert.equal(await recovery.retainStudioAsyncCheckpoint(retentionTask), false);
+      await patch(retentionTask.id, { state: 'stopped', stopCode: 'auto_budget', attempts: 12, lastRequestedAt: clock - 301000 });
+      const retentionView = await recovery.readStudioAsyncRecovery(retentionTask); assert.ok(retentionView?.canRequestRecheck);
+      const manualRetention = await recovery.requestStudioAsyncRecheck(owner, retentionTask.id, retentionView.binding);
+      assert.equal(manualRetention.scheduled, true); assert.equal(manualRetention.recovery.state, 'scheduled');
+      assert.equal((await record(retentionTask.id)).state, 'stopped');
+      assert.equal(await recovery.retainStudioAsyncCheckpoint(retentionTask), true);
       await delivery.cleanupStudioDeliveries(cleanupAt + 300001);
+      assert.deepEqual(readFileSync(imageFile), imageBytes);
+      // Isolate the ordinary stopped/non-pending retention case after proving
+      // that a real manual request protects bytes while awaiting its lease.
+      await patch(retentionTask.id, { manualOnce: false });
+      assert.equal(await recovery.retainStudioAsyncCheckpoint(retentionTask), false);
+      await delivery.cleanupStudioDeliveries(cleanupAt + 600002);
       assert.equal(existsSync(deliveryDirectory), false, 'Stopped temporary delivery still follows the original retention policy');
       assert.deepEqual(readFileSync(path.join(billingDirectory, 'async.json')), receipts[1].bytes);
       assert.deepEqual(readFileSync(path.join(billingDirectory, 'request.json')), requestBytes);
       assert.equal(queries.length, retainedQueryCount);
       assert.equal(await db.creditLedger.count({ where: { related_task_id: retentionTask.id } }), 0);
-      summary.unreadableReceiptKeptCompleteCheckpoint = true; summary.stoppedTemporaryCheckpointCleaned = true;
+      summary.unreadableReceiptKeptCompleteCheckpoint = true; summary.manualPendingKeptCompleteCheckpoint = true;
+      summary.stoppedTemporaryCheckpointCleaned = true;
 
       for (const task of originals) assert.deepEqual(freeze(await fresh(task.id)), freeze(task));
       summary.originalsCompared = originals.length;
