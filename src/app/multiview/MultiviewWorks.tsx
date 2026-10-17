@@ -235,7 +235,7 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
   return <div className={styles.library}>
     {pending && <div className={styles.notice} role="status">保存结果待确认，不会重复操作。<button type="button" className={styles.button} disabled={checking} onClick={() => void checkMutation()}>{checking ? '正在核对…' : '核对原操作'}</button></div>}
     {notice && <p role="status" className={styles.notice}>{notice}</p>}
-    {work ? <MultiviewWorkViewer owner={owner} authority={authority} work={work} busy={Boolean(pending) || checking} onBack={() => {
+    {work ? <MultiviewWorkViewer key={`${identity}:${work.id}`} owner={owner} authority={authority} work={work} busy={Boolean(pending) || checking} onBack={() => {
       const y = preferenceRef.current.y; navigate(''); requestAnimationFrame(() => window.scrollTo({ top: y }));
     }} onPrevious={selectedIndex > 0 ? () => navigate(items[selectedIndex - 1].id) : undefined}
       onNext={selectedIndex >= 0 && selectedIndex + 1 < items.length ? () => navigate(items[selectedIndex + 1].id) : cursor ? () => {
