@@ -13,6 +13,9 @@ import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { isSafeTaskId } from './thumbnail';
 import { multiviewDimensions, validMultiviewLayout, type MultiviewInfo, type MultiviewLayout } from './multiview-contract';
 import { parseMultiviewWorkRecipe, type MultiviewWorkRecipe } from './multiview-work-contract';
+import { buildAllMultiviewPreviews, buildMultiviewPreviewChunk, previewDirectoryMetrics,
+  readMultiviewPreviewChunk, readMultiviewPreviewManifest } from './multiview-preview';
+import { MULTIVIEW_PREVIEW_CHUNK_SIZE } from './multiview-preview-contract';
 
 const exec = promisify(execFile);
 const MAX_VIDEO = 128 * 1024 * 1024;
@@ -21,6 +24,7 @@ const TTL = 24 * 60 * 60 * 1000;
 const inflight = new Map<string, Promise<unknown>>();
 let workCount = 0;
 let exportCount = 0;
+let previewCount = 0;
 export class MultiviewError extends Error {
   constructor(message: string, public status = 400) { super(message); }
 }
@@ -69,9 +73,8 @@ async function pruneCache(root: string, keep: string) {
   const directories = (await readdir(root, { withFileTypes: true })).filter(entry => entry.isDirectory() && /^[a-f0-9]{64}$/.test(entry.name));
   const items = await Promise.all(directories.map(async entry => {
     const dir = path.join(root, entry.name);
-    const files = await readdir(dir, { withFileTypes: true });
-    const sizes = await Promise.all(files.filter(file => file.isFile()).map(file => stat(path.join(dir, file.name)).catch(() => null)));
-    return { dir, key: entry.name, size: sizes.reduce((n, file) => n + (file?.size || 0), 0), time: Math.max(0, ...sizes.map(file => file?.mtimeMs || 0)) };
+    const metrics = await previewDirectoryMetrics(dir);
+    return { dir, key: entry.name, size: metrics.bytes, time: metrics.time };
   }));
   let total = items.reduce((n, item) => n + item.size, 0);
   let count = items.length;
@@ -93,6 +96,14 @@ async function once<T>(key: string, action: () => Promise<T>): Promise<T> {
   const pending = action();
   inflight.set(key, pending);
   try { return await pending; } finally { inflight.delete(key); workCount -= 1; }
+}
+async function oncePreview<T>(key: string, action: () => Promise<T>): Promise<T> {
+  const existing = inflight.get(key);
+  if (existing) return existing as Promise<T>;
+  if (previewCount >= 1 || workCount >= 1) throw new MultiviewError('预览图正在准备，请稍后继续；当前选帧保持不变', 429);
+  previewCount += 1;
+  try { return await once(key, action); }
+  finally { previewCount -= 1; }
 }
 async function atomicWrite(file: string, data: Buffer | string) {
   const temp = `${file}.${randomUUID()}.tmp`;
@@ -211,6 +222,40 @@ export async function multiviewFrame(user: SessionUser, id: string, request: Req
   const output = await frameFile(prepared, frame, request);
   if ((await authorizedSource(user, id)).version !== version) throw new MultiviewError('原视频已改变，请重新打开', 409);
   return readFile(output);
+}
+export async function multiviewPreviewManifest(user: SessionUser, id: string, request: Request, version: string) {
+  const prepared = await preparation(user, id, request, version);
+  const started = performance.now();
+  let manifest = await readMultiviewPreviewManifest(prepared.dir, prepared.info);
+  if (manifest.eager && !manifest.chunks.every(chunk => chunk.ready)) {
+    manifest = await oncePreview(`${prepared.source.version}:preview:all`, async () => {
+      const file = await downloadSource(prepared.source, prepared.dir, request);
+      try { return await buildAllMultiviewPreviews({ source: file, dir: prepared.dir, info: prepared.info, signal: request.signal }); }
+      catch (error) {
+        if (error instanceof Error && error.message === 'preview_cache_limit') throw new MultiviewError('预览缓存空间不足，仍可使用原视频慢速选帧', 503);
+        throw error;
+      }
+    });
+  }
+  if ((await authorizedSource(user, id)).version !== version) throw new MultiviewError('原视频已改变，请重新打开', 409);
+  return { manifest, duration: performance.now() - started };
+}
+export async function multiviewPreviewAtlas(user: SessionUser, id: string, request: Request, version: string, index: number) {
+  const prepared = await preparation(user, id, request, version);
+  const chunkCount = Math.ceil(prepared.info.timestamps.length / MULTIVIEW_PREVIEW_CHUNK_SIZE);
+  if (!Number.isInteger(index) || index < 0 || index >= chunkCount) throw new MultiviewError('预览图片位置无效');
+  const started = performance.now();
+  const cached = await readMultiviewPreviewChunk(prepared.dir, prepared.info, index);
+  const result = cached || await oncePreview(`${prepared.source.version}:preview:${index}`, async () => {
+    const file = await downloadSource(prepared.source, prepared.dir, request);
+    try { return await buildMultiviewPreviewChunk({ source: file, dir: prepared.dir, info: prepared.info, index, signal: request.signal }); }
+    catch (error) {
+      if (error instanceof Error && error.message === 'preview_cache_limit') throw new MultiviewError('预览缓存空间不足，仍可使用原视频慢速选帧', 503);
+      throw error;
+    }
+  });
+  if ((await authorizedSource(user, id)).version !== version) throw new MultiviewError('原视频已改变，请重新打开', 409);
+  return { data: result.data, etag: result.etag, duration: performance.now() - started };
 }
 export async function multiviewExport(user: SessionUser, id: string, request: Request, body: Record<string, unknown>) {
   // Limit the entire export, including cached-frame buffers, not only the final encoder.

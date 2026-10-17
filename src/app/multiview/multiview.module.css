@@ -28,7 +28,14 @@
 .count { gap: 4px; }
 .count button { min-width: 48px; }
 .count button[aria-pressed=true], .neighbors button[aria-pressed=true], .slotStrip button[aria-pressed=true] { color: var(--primary, #2463eb); border-color: currentColor; background: var(--primary-light, #edf4ff); }
-.workbench { display: grid; grid-template-columns: minmax(0, 2fr) minmax(310px, 1fr); align-items: start; gap: 24px; }
+.commandBar { display: flex; align-items: center; gap: 8px; overflow-x: auto; padding: 8px 0 12px; margin-bottom: 4px; white-space: nowrap; }
+.commandBar > button[aria-pressed=true] { color: var(--primary); border-color: currentColor; background: var(--primary-light); }
+.commandSpacer { flex: 1 1 auto; min-width: 12px; }
+.displaySize { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-secondary); }
+.displaySize select { min-height: 34px; padding-block: 4px; }
+.originalPanel { margin: 0 0 14px; padding: 12px; border: 1px solid var(--border-color); border-radius: 9px; background: var(--bg-panel); }
+.originalPanel .videoArea { max-width: 960px; }
+.workbench { display: flex; flex-direction: column; align-items: stretch; gap: 16px; }
 .resultMain { min-width: 0; }
 .previewToolbar { min-height: 36px; justify-content: space-between; font-size: 12px; margin-bottom: 8px; color: var(--text-secondary, #627080); }
 .previewToolbar label { display: flex; gap: 7px; align-items: center; margin-left: auto; }
@@ -40,6 +47,8 @@
 .page .frameImage { display: flex; width: 100%; height: auto; min-height: 0; padding: 0; border-radius: 3px; border: 0; overflow: hidden; background: var(--bg-input); touch-action: pan-y; user-select: none; cursor: grab; }
 .frameImage img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 .frameImage > span { padding: 10px; font-size: 12px; }
+.frameImage > .atlasFrame { padding: 0; }
+.atlasFrame { display: block; width: 100%; height: 100%; background-repeat: no-repeat; background-color: var(--bg-input); pointer-events: none; }
 .frameImage[aria-pressed=true] { outline: 2px solid var(--primary); outline-offset: -2px; }
 .frameCell[data-dragging=true] { z-index: 2; }
 .frameCell[data-dragging=true] .frameImage { opacity: .65; cursor: grabbing; }
@@ -56,12 +65,13 @@
 .slotStrip { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 5px; }
 .slotStrip button { padding: 5px; flex: 0 0 78px; min-width: 0; display: flex; flex-direction: column; font-size: 11px; }
 .slotStrip img { width: 62px; height: 62px; object-fit: contain; }
+.slotStrip .atlasFrame { width: 62px; height: 62px; flex: 0 0 62px; }
 .slotStrip span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tools { position: sticky; top: 64px; display: flex; flex-direction: column; max-height: var(--tool-height, calc(100dvh - 168px)); min-height: 0; overflow: hidden; border: 1px solid var(--border-color, #d8dee5); border-radius: 9px; background: var(--bg-secondary, #fff); min-width: 0; }
-.toolTabs { display: flex; flex-shrink: 0; border-bottom: 1px solid var(--border-color, #d8dee5); padding: 4px 12px 0; gap: 14px; }
-.page .toolTabs button { flex: 1; border: 0; border-radius: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-secondary, #627080); }
+.tools { position: static; display: flex; flex-direction: column; min-height: 0; overflow: visible; border: 1px solid var(--border-color, #d8dee5); border-radius: 9px; background: var(--bg-secondary, #fff); min-width: 0; }
+.toolTabs { display: flex; flex-shrink: 0; gap: 4px; }
+.page .toolTabs button { flex: 0 0 auto; border-radius: 7px; background: transparent; color: var(--text-secondary, #627080); }
 .page .toolTabs button[aria-selected=true] { color: var(--text-primary, #18222e); border-bottom-color: var(--primary, #2463eb); font-weight: 650; }
-.toolBody { padding: 12px; display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.toolBody { padding: 14px; display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: visible; }
 .toolBody > * { flex-shrink: 0; }
 .selectionTitle { justify-content: space-between; font-size: 12px; color: var(--text-secondary, #627080); }
 .selectionTitle h3 { color: var(--text-primary, #18222e); }
@@ -93,6 +103,11 @@
 .neighbors { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
 .neighbors button { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 3px; font-size: 10px; }
 .neighbors img { width: 100%; height: 42px; object-fit: contain; }
+.neighbors .atlasThumb { display: block; width: 100%; height: 42px; background-repeat: no-repeat; }
+.frameStepper { display: grid; grid-template-columns: auto auto minmax(100px, 1fr) auto auto auto; gap: 6px; align-items: end; }
+.frameStepper label { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 11px; color: var(--text-secondary); }
+.frameStepper input { box-sizing: border-box; width: 100%; min-height: 36px; border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 8px; background: var(--bg-input); color: var(--text-primary); }
+.frameStepper label span { font-size: 11px; color: var(--text-secondary); }
 .exportBar { position: fixed; bottom: 0; z-index: 30; box-sizing: border-box; max-height: calc(100dvh - 80px); overflow-y: auto; padding: 10px 12px max(10px, env(safe-area-inset-bottom)); border: 1px solid var(--border-color, #d8dee5); border-bottom: 0; border-radius: 9px 9px 0 0; background: var(--bg-panel); box-shadow: 0 -4px 18px #00000010; justify-content: space-between; }
 .exportBar strong, .exportBar small { display: block; font-size: 12px; line-height: 1.7; }
 .exportBar small { color: var(--text-secondary, #627080); }
@@ -116,18 +131,20 @@
 .empty { padding: 28px 20px; text-align: center; border: 1px dashed var(--border-color, #d8dee5); border-radius: 8px; margin-top: 20px; font-size: 14px; }
 .empty button { margin: 4px; }
 .page .quiet { border: 0; background: transparent; color: var(--text-secondary, #627080); padding-left: 0; font-size: 12px; }
-.footnote { padding: 15px 0; display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: start; }
+.footnote { padding: 15px 0; display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: flex-start; }
 .footnote details { flex: 1 1 65%; font-size: 12px; }
 .footnote summary { cursor: pointer; min-height: 32px; }
 .footnote .videoArea { max-width: 600px; }
 .footnote p { flex-basis: 100%; }
-@media (max-width: 1000px) { .page { padding: 18px; } .workbench { grid-template-columns: minmax(0, 1.65fr) minmax(285px, 1fr); gap: 16px; } .stages { gap: 14px; } }
+@media (max-width: 1000px) { .page { padding: 18px; } .stages { gap: 14px; } }
 @media (max-width: 760px) {
   .page { padding: 14px; } .stages { gap: 7px; justify-content: space-between; font-size: 11px; } .stages li { gap: 4px; } .stages li > span { width: 20px; height: 20px; }
-  .workbench { display: flex; flex-direction: column; gap: 18px; } .resultMain, .tools { width: 100%; } .tools { position: static; }
+  .workbench { gap: 18px; } .resultMain, .tools { width: 100%; }
   .collageViewport { padding: 8px; max-height: 65vh; } .exportBar { gap: 8px; } .exportActions { width: 100%; } .exportActions button { flex: 1 1 auto; min-height: 40px; padding-inline: 8px; }
   .toolBody { padding: 12px; } .editorStage { height: clamp(120px, 27dvh, 230px); } .originalStage video { max-height: 320px; }
   .slotStrip button { flex-basis: 65px; } .slotStrip img { width: 52px; height: 52px; }
+  .slotStrip .atlasFrame { width: 52px; height: 52px; flex-basis: 52px; }
+  .commandSpacer { min-width: 0; } .frameStepper { grid-template-columns: repeat(4, minmax(0, 1fr)); } .frameStepper label { grid-column: 1 / -1; grid-row: 1; }
 }
 @media (max-height: 500px) { .exportBar { padding-block: 6px; gap: 4px; } .exportBar > div:first-child { display: none; } .exportActions { width: 100%; } .exportActions button { flex: 1; min-height: 36px; } .editorStage { height: 120px; } }
 @media (prefers-reduced-motion: reduce) { .page * { scroll-behavior: auto !important; } }

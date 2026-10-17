@@ -1,6 +1,6 @@
 {
   "name": "video-api-debugger",
-  "version": "0.94.5",
+  "version": "0.95.0",
   "private": true,
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",
@@ -20,6 +20,7 @@
     "test:reference-media": "tsx scripts/reference-media-chain-smoke.ts",
     "test:image-api": "tsx scripts/image-generation-api-smoke.ts",
     "test:toolflow": "tsx scripts/toolflow-smoke.ts",
+    "test:multiview-preview": "tsx scripts/multiview-preview-engineering.ts",
     "test:template-studio": "node scripts/template-studio-release-check.mjs",
     "template:prompts": "node --import tsx scripts/process-template-prompts.ts",
     "credits:refresh": "node --import tsx scripts/process-periodic-credits.ts",

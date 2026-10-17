@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { ArrowLeft, ArrowRight, Copy, Download, Expand, RefreshCw, Undo2, X } from 'lucide-react';
 import { DndContext, KeyboardCode, KeyboardSensor, MouseSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
@@ -22,9 +22,12 @@ import { MultiviewSourcePicker } from './MultiviewSourcePicker';
 import { MultiviewWorks } from './MultiviewWorks';
 import { appliedWorkRecipe, useMultiviewWork } from './useMultiviewWork';
 import { multiviewWorkRecipesEqual, type MultiviewWorkDto, type MultiviewWorkRecipe } from '@/lib/video/multiview-work-contract';
+import { createMultiviewLatestTargetGate, multiviewPreviewChunkIndex, multiviewPreviewRetainedChunks,
+  type MultiviewPreviewManifest } from '@/lib/video/multiview-preview-contract';
 import styles from './multiview.module.css';
 
 type FrameState = { url?: string; error?: string; loading?: boolean };
+type PreviewState = { manifest: MultiviewPreviewManifest | null; urls: Record<number, string>; loading: boolean; error: string };
 type Artifact = { blob: Blob; url: string; name: string; key: string; format: 'png' | 'zip'; slots: MultiviewSlot[] };
 type ArtifactOperation = { token: symbol; generation: number; controller: AbortController; key: string;
   owner: string; authority: string; taskId: string; version: string; format: 'png' | 'zip'; slots: MultiviewSlot[]; layout: MultiviewDraft['layout'] };
@@ -35,6 +38,15 @@ function SortableFrame({ id, disabled, children }: { id: string; disabled: boole
   const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, transition, isDragging } = useSortable({ id, disabled });
   return <figure ref={setNodeRef} className={styles.frameCell} data-mv-slot={id} data-dragging={isDragging || undefined}
     style={{ transform: CSS.Transform.toString(transform), transition }}>{children({ attributes, listeners, setActivatorNodeRef })}</figure>;
+}
+function AtlasFrame({ manifest, url, frame, alt, className }: { manifest: MultiviewPreviewManifest; url: string; frame: number; alt: string; className?: string }) {
+  const local = frame % manifest.chunkSize;
+  const column = local % manifest.columns;
+  const row = Math.floor(local / manifest.columns);
+  return <span role="img" aria-label={alt} className={className || styles.atlasFrame} style={{
+    backgroundImage: `url(${url})`, backgroundSize: `${manifest.columns * 100}% ${manifest.rows * 100}%`,
+    backgroundPosition: `${column / (manifest.columns - 1) * 100}% ${row / (manifest.rows - 1) * 100}%`,
+  }} />;
 }
 const emptyView = (): ViewPreferences => ({ tab: 'frames', selected: '', zoom: 1, time: 0, x: 0, y: 0, panX: 0, panY: 0, originalOpen: false });
 const safeTask = (id: string) => /^[a-z0-9_-]{8,80}$/i.test(id);
@@ -98,6 +110,8 @@ function MultiviewPageContent() {
   const [exportFile, setExportFile] = useState<Artifact | null>(null);
   const [preview, setPreview] = useState<number | null>(null);
   const [editorFrame, setEditorFrame] = useState(0);
+  const [frameInput, setFrameInput] = useState('1');
+  const [frameInputError, setFrameInputError] = useState('');
   const [editorMode, setEditorMode] = useState<'frame' | 'video'>('frame');
   const [dock, setDock] = useState<{ left: number; width: number; bottom: number; height: number; toolHeight: number } | null>(null);
   const [reduceCount, setReduceCount] = useState<number | null>(null);
@@ -112,6 +126,9 @@ function MultiviewPageContent() {
   const [pendingResult, setPendingResult] = useState<MultiviewGenerationReady | null>(null);
   const [previousTask, setPreviousTask] = useState('');
   const [quickFrame, setQuickFrame] = useState<string | null>(null);
+  const [quickPreview, setQuickPreview] = useState<Record<string, number>>({});
+  const [applyingFrame, setApplyingFrame] = useState(false);
+  const [previewState, setPreviewState] = useState<PreviewState>({ manifest: null, urls: {}, loading: false, error: '' });
   const [localPresent, setLocalPresent] = useState(false);
   const [allowWorkCreate, setAllowWorkCreate] = useState(false);
   const { confirm, productDialog } = useProductDialog();
@@ -126,7 +143,7 @@ function MultiviewPageContent() {
   const toolsArea = useRef<HTMLElement>(null);
   const exportBar = useRef<HTMLElement>(null);
   const requests = useRef(new Map<number, Promise<boolean>>());
-  const frameQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const previewRequests = useRef(new Map<number, Promise<boolean>>());
   const objectUrls = useRef(new Set<string>());
   const artifacts = useRef(new Map<string, Artifact>());
   const artifactInflight = useRef(new Map<string, Promise<Artifact>>());
@@ -140,12 +157,16 @@ function MultiviewPageContent() {
   const accountHydrated = useRef('');
   const locationRef = useRef(location); locationRef.current = location;
   const viewRef = useRef(view); viewRef.current = view;
+  const previewRef = useRef(previewState); previewRef.current = previewState;
+  const quickPreviewRef = useRef(quickPreview); quickPreviewRef.current = quickPreview;
   const preferencesReady = useRef('');
   const restoreScroll = useRef<{ key: string; x: number; y: number } | null>(null);
   const allowScrollRestore = useRef(true);
   const seenReady = useRef(new Set<string>());
   const collapsedFor = useRef('');
   const quickFrameLock = useRef<symbol | null>(null);
+  const quickFrameTimer = useRef<number | null>(null);
+  const quickFrameGate = useRef(createMultiviewLatestTargetGate());
   const slotDrag = useRef<SlotDrag | null>(null);
   const suppressSlotClick = useRef('');
   const boundDraft = useRef<{ owner: string; workId: string; taskId: string; draft: MultiviewDraft; preserveLocal: boolean } | null>(null);
@@ -259,10 +280,13 @@ function MultiviewPageContent() {
   }, []);
   const clearUrls = useCallback(() => {
     clearArtifacts();
+    if (quickFrameTimer.current !== null) window.clearTimeout(quickFrameTimer.current);
+    quickFrameTimer.current = null; quickFrameGate.current.cancel();
     quickFrameLock.current = null; setQuickFrame(null); slotDrag.current = null; suppressSlotClick.current = '';
     for (const url of Array.from(objectUrls.current)) URL.revokeObjectURL(url);
-    objectUrls.current.clear(); requests.current.clear(); frameQueue.current = Promise.resolve();
-    frameRef.current = {}; setFrames({}); setPreview(null);
+    objectUrls.current.clear(); requests.current.clear(); previewRequests.current.clear();
+    frameRef.current = {}; setFrames({}); setPreviewState({ manifest: null, urls: {}, loading: false, error: '' });
+    setQuickPreview({}); setApplyingFrame(false); setPreview(null);
   }, [clearArtifacts]);
   const rejectSource = useCallback((message: string) => {
     context.current += 1; abort.current?.abort(); clearUrls();
@@ -333,7 +357,8 @@ function MultiviewPageContent() {
         setView(preference); setOriginalOpen(preference.originalOpen); restoreScroll.current = allowScrollRestore.current ? { key, x: preference.x, y: preference.y } : null;
         allowScrollRestore.current = true;
         draftRef.current = state; setDraft(state); setUndo(null); setReduceCount(null);
-        setEditorFrame(state.editorFrame ?? state.slots.find(item => item.id === state.editing)?.frame ?? 0);
+        const restoredFrame = state.editorFrame ?? state.slots.find(item => item.id === state.editing)?.frame ?? 0;
+        setEditorFrame(restoredFrame); setFrameInput(String(restoredFrame + 1)); setFrameInputError('');
         if (recheck && previous) setNotice('原视频版本已变化，已载入对应候选；旧草稿单独保留。');
       }
       setInfo(next); setLoadedOwner(owner); setLoadedAuthority(authority); setAuthorized(true);
@@ -400,11 +425,9 @@ function MultiviewPageContent() {
     if (requests.current.has(frame)) return requests.current.get(frame)!;
     if (frameRef.current[frame]?.error && !retry) return false;
     const epoch = context.current;
-    const previous = frameQueue.current;
     const pending = (async () => {
       if (epoch === context.current) setFrames(value => ({ ...value, [frame]: { loading: true } }));
       try {
-        await previous.catch(() => undefined);
         if (epoch !== context.current || isClientSessionBlocked()) return false;
         const response = await fetch(`/api/video/multiview/${encodeURIComponent(taskId)}?version=${info.sourceVersion}&frame=${frame}`, { cache: 'no-store', signal: abort.current ? AbortSignal.any([abort.current.signal, AbortSignal.timeout(90000)]) : AbortSignal.timeout(90000) });
         if (!response.ok) {
@@ -423,8 +446,68 @@ function MultiviewPageContent() {
         return false;
       } finally { if (epoch === context.current) requests.current.delete(frame); }
     })();
-    frameQueue.current = pending; requests.current.set(frame, pending); return pending;
+    requests.current.set(frame, pending); return pending;
   }, [authority, info, owner, rejectSource, taskId, visible]);
+  const loadPreviewManifest = useCallback(async () => {
+    if (!info || !visible || previewRef.current.manifest?.sourceVersion === info.sourceVersion) return;
+    const epoch = context.current;
+    setPreviewState(value => ({ ...value, loading: true, error: '' }));
+    try {
+      const response = await fetch(`/api/video/multiview/${encodeURIComponent(taskId)}/previews?version=${info.sourceVersion}`,
+        { cache: 'no-store', signal: abort.current ? AbortSignal.any([abort.current.signal, AbortSignal.timeout(120000)]) : AbortSignal.timeout(120000) });
+      const value = await response.json();
+      if (!response.ok) {
+        if ([401, 403, 404, 409].includes(response.status) && epoch === context.current) rejectSource(value.error || '原视频权限或版本已变化，请重新读取');
+        throw new Error(value.error || '快速预览暂不可用');
+      }
+      const manifest = value.manifest as MultiviewPreviewManifest;
+      if (epoch !== context.current || manifest?.schema !== 1 || manifest.sourceVersion !== info.sourceVersion
+        || manifest.totalFrames !== info.timestamps.length || !Array.isArray(manifest.chunks)) return;
+      setPreviewState(current => ({ ...current, manifest, loading: false, error: '' }));
+    } catch (cause) {
+      if (epoch === context.current && !abort.current?.signal.aborted) setPreviewState(current => ({ ...current, loading: false,
+        error: cause instanceof Error ? cause.message : '快速预览暂不可用' }));
+    }
+  }, [info, rejectSource, taskId, visible]);
+  const loadPreviewChunk = useCallback(async (frame: number): Promise<boolean> => {
+    const manifest = previewRef.current.manifest;
+    if (!manifest || frame < 0 || frame >= manifest.totalFrames || !visible) return false;
+    const index = multiviewPreviewChunkIndex(frame);
+    if (previewRef.current.urls[index]) return true;
+    const pending = previewRequests.current.get(index);
+    if (pending) return pending;
+    const epoch = context.current;
+    const request = (async () => {
+      try {
+        const response = await fetch(`/api/video/multiview/${encodeURIComponent(taskId)}/previews?version=${manifest.sourceVersion}&chunk=${index}`,
+          { cache: 'no-store', signal: abort.current ? AbortSignal.any([abort.current.signal, AbortSignal.timeout(90000)]) : AbortSignal.timeout(90000) });
+        if (!response.ok) {
+          const value = await response.json().catch(() => ({}));
+          if ([401, 403, 404, 409].includes(response.status) && epoch === context.current) rejectSource(value.error || '原视频权限或版本已变化，请重新读取');
+          throw new Error(value.error || '快速预览暂不可用');
+        }
+        const blob = await response.blob();
+        if (!blob.size || blob.type !== 'image/jpeg') throw new Error('快速预览未完整收到');
+        if (epoch !== context.current || ownerRef.current !== owner || authorityRef.current !== authority || isClientSessionBlocked()) return false;
+        const url = URL.createObjectURL(blob); objectUrls.current.add(url);
+        setPreviewState(current => {
+          const urls = { ...current.urls, [index]: url };
+          const keep = new Set(multiviewPreviewRetainedChunks(index, Object.keys(urls).map(Number)));
+          const remove = Object.keys(urls).map(Number).filter(key => !keep.has(key));
+          for (const key of remove) { URL.revokeObjectURL(urls[key]); objectUrls.current.delete(urls[key]); delete urls[key]; }
+          return { ...current, urls, error: '' };
+        });
+        return true;
+      } catch (cause) {
+        if (epoch === context.current && !abort.current?.signal.aborted) setPreviewState(current => ({ ...current,
+          error: cause instanceof Error ? cause.message : '快速预览暂不可用' }));
+        return false;
+      } finally { if (epoch === context.current) previewRequests.current.delete(index); }
+    })();
+    previewRequests.current.set(index, request);
+    return request;
+  }, [authority, owner, rejectSource, taskId, visible]);
+  useEffect(() => { if (visible && info) void loadPreviewManifest(); }, [info, loadPreviewManifest, visible]);
   const frameSignature = draft?.slots.map(item => item.frame).join(',') || '';
   useEffect(() => {
     if (!visible) return;
@@ -433,17 +516,13 @@ function MultiviewPageContent() {
     return () => { cancelled = true; };
   }, [frameSignature, loadFrame, visible]);
   useEffect(() => {
-    if (!draft?.editing || !visible || view.tab !== 'frames') return;
-    let cancelled = false;
-    const timer = window.setTimeout(() => { void (async () => {
-      await loadFrame(editorFrame);
-      for (const adjacent of [editorFrame - 1, editorFrame + 1, editorFrame - 2, editorFrame + 2]) {
-        if (cancelled) break;
-        if (adjacent >= 0 && info && adjacent < info.timestamps.length) await loadFrame(adjacent);
-      }
-    })(); }, 180);
-    return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [draft?.editing, editorFrame, info, loadFrame, view.tab, visible]);
+    if (!draft?.editing || !visible || view.tab !== 'frames' || !previewState.manifest) return;
+    const timer = window.setTimeout(() => {
+      void loadPreviewChunk(editorFrame);
+      for (const adjacent of [editorFrame - 2, editorFrame + 2]) if (adjacent >= 0 && adjacent < previewState.manifest!.totalFrames) void loadPreviewChunk(adjacent);
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [draft?.editing, editorFrame, loadPreviewChunk, previewState.manifest, view.tab, visible]);
   useEffect(() => {
     if (Object.keys(frames).length <= 24 || !draft) return;
     const keep = new Set([...draft.slots.map(item => item.frame), ...(draft.editing ? [-2, -1, 0, 1, 2].map(delta => editorFrame + delta) : []), ...(preview !== null ? [preview] : [])]);
@@ -493,23 +572,33 @@ function MultiviewPageContent() {
     const slots = [...draft.slots]; [slots[index], slots[index + delta]] = [slots[index + delta], slots[index]];
     update({ ...draft, slots, restoreOrder: undefined }, true);
   }
-  async function stepSlot(id: string, delta: -1 | 1) {
+  function stepSlot(id: string, delta: -1 | 1) {
     const before = draftRef.current;
     const item = before?.slots.find(value => value.id === id);
-    if (!before || !item || !info || !visible || operation.current || quickFrameLock.current || isClientSessionBlocked()) return;
-    const frame = item.frame + delta;
+    if (!before || !item || !info || !visible || operation.current || quickFrame && quickFrame !== id || isClientSessionBlocked()) return;
+    const frame = (quickPreviewRef.current[id] ?? item.frame) + delta;
     if (frame < 0 || frame >= info.timestamps.length) return;
-    const token = Symbol(); quickFrameLock.current = token; setQuickFrame(id);
+    const token = Symbol(); const target = quickFrameGate.current.issue(frame);
+    quickFrameLock.current = token; setQuickFrame(id);
+    setQuickPreview(value => { const next = { ...value, [id]: frame }; quickPreviewRef.current = next; return next; });
     const generation = context.current; const sourceKey = sourceKeyRef.current;
-    try {
-      const ready = await loadFrame(frame, true);
-      if (quickFrameLock.current !== token || generation !== context.current || sourceKey !== sourceKeyRef.current
-        || before !== draftRef.current || isClientSessionBlocked() || operation.current) return;
-      if (!ready) { setNotice('这一帧暂未就绪，当前图片未替换；可再次点击原方向重试。'); return; }
-      video.current?.pause();
-      update({ ...before, slots: before.slots.map(value => value.id === id ? { ...value, frame, manual: true } : value),
-        editing: before.editing === id ? null : before.editing }, true);
-    } finally { if (quickFrameLock.current === token) { quickFrameLock.current = null; setQuickFrame(null); } }
+    void loadPreviewChunk(frame);
+    if (quickFrameTimer.current !== null) window.clearTimeout(quickFrameTimer.current);
+    quickFrameTimer.current = window.setTimeout(() => {
+      quickFrameTimer.current = null;
+      void loadFrame(frame, true).then(ready => {
+        if (!quickFrameGate.current.isCurrent(target) || quickFrameLock.current !== token || generation !== context.current
+          || sourceKey !== sourceKeyRef.current || before !== draftRef.current || isClientSessionBlocked() || operation.current) return;
+        if (!ready) { setNotice('这一帧暂未就绪，当前图片未替换；可再次点击原方向重试。'); return; }
+        video.current?.pause();
+        update({ ...before, slots: before.slots.map(value => value.id === id ? { ...value, frame, manual: true } : value),
+          editing: before.editing === id ? null : before.editing }, true);
+      }).finally(() => {
+        if (!quickFrameGate.current.isCurrent(target) || quickFrameLock.current !== token) return;
+        quickFrameLock.current = null; setQuickFrame(null);
+        setQuickPreview(value => { const next = { ...value }; delete next[id]; quickPreviewRef.current = next; return next; });
+      });
+    }, 120);
   }
   function startSlotDrag(event: DragStartEvent) {
     const before = draftRef.current;
@@ -530,7 +619,7 @@ function MultiviewPageContent() {
   }
   function openEditor(item: MultiviewSlot) {
     if (!draft) return;
-    video.current?.pause(); setEditorMode('frame'); setEditorFrame(item.frame); setView(value => ({ ...value, tab: 'frames', selected: item.id }));
+    video.current?.pause(); setEditorMode('frame'); setEditorFrame(item.frame); setFrameInput(String(item.frame + 1)); setFrameInputError(''); setView(value => ({ ...value, tab: 'frames', selected: item.id }));
     if (video.current && info) video.current.currentTime = info.timestamps[item.frame];
     update({ ...draft, editing: item.id, editorFrame: item.frame });
   }
@@ -541,9 +630,38 @@ function MultiviewPageContent() {
   function seek(frame: number) {
     if (!info) return;
     const value = Math.min(info.timestamps.length - 1, Math.max(0, frame));
-    setEditorMode('frame'); setEditorFrame(value); setSaved(false); setActivity(count => count + 1);
+    setEditorMode('frame'); setEditorFrame(value); setFrameInput(String(value + 1)); setFrameInputError(''); setSaved(false); setActivity(count => count + 1);
     setDraft(current => current ? { ...current, editorFrame: value } : current);
     if (video.current) { video.current.pause(); video.current.currentTime = info.timestamps[value]; }
+  }
+  function jumpToInput() {
+    const frame = Number(frameInput);
+    if (!info || !Number.isInteger(frame) || frame < 1 || frame > info.timestamps.length) {
+      setFrameInputError(`请输入 1 到 ${info?.timestamps.length || 1} 的整数`); return;
+    }
+    seek(frame - 1);
+  }
+  function editorKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.target instanceof HTMLElement && event.target.matches('input, textarea, select, [contenteditable=true]')) return;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault(); seek(editorFrame + (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 10 : 1));
+    } else if (event.key === 'Home') { event.preventDefault(); seek(0); }
+    else if (event.key === 'End' && info) { event.preventDefault(); seek(info.timestamps.length - 1); }
+  }
+  async function applySelectedFrame() {
+    const before = draftRef.current;
+    const selectedEditing = before?.slots.find(item => item.id === before.editing);
+    if (!before || !selectedEditing || applyingFrame || exporting) return;
+    const generation = context.current; setApplyingFrame(true);
+    try {
+      const ready = await loadFrame(editorFrame, true);
+      if (!ready || generation !== context.current || before !== draftRef.current || isClientSessionBlocked()) {
+        if (!ready && generation === context.current) setNotice('原尺寸帧暂未就绪，当前图片未替换；快速预览仍可继续选择。');
+        return;
+      }
+      video.current?.pause();
+      update({ ...before, slots: before.slots.map(item => item.id === selectedEditing.id ? { ...item, frame: editorFrame, manual: true } : item), editing: null }, true);
+    } finally { if (generation === context.current) setApplyingFrame(false); }
   }
   async function selectTask(nextTask: string, automatic = false) {
     if (!safeTask(nextTask) || ownerRef.current !== owner || isClientSessionBlocked()) return;
@@ -659,14 +777,18 @@ function MultiviewPageContent() {
   const selected = draft?.slots.find(item => item.id === view.selected) || draft?.slots[0];
   const selectedIndex = draft && selected ? draft.slots.indexOf(selected) : 0;
   const currentFrame = frames[editorFrame];
+  const previewManifest = previewState.manifest;
+  const atlasUrl = (frame: number) => previewManifest ? previewState.urls[multiviewPreviewChunkIndex(frame)] : undefined;
+  const frameVisual = (frame: number, alt: string, className?: string) => frames[frame]?.url
+    ? <img src={frames[frame].url} alt={alt} draggable={false} />
+    : previewManifest && atlasUrl(frame) ? <AtlasFrame manifest={previewManifest} url={atlasUrl(frame)!} frame={frame} alt={alt} className={className} /> : null;
   const stage = visible ? validSlots.length === draft?.slots.length ? 4 : 3 : ['submitting', 'submitted', 'unknown', 'video_ready'].includes(generation.phase) ? 2 : 1;
   const existingSource = visible && generation.taskId !== taskId;
   const playerEpoch = context.current;
   const mediaCurrent = () => playerEpoch === context.current && authorityRef.current === authority && !isClientSessionBlocked();
   const player = info && <div className={styles.videoArea}>
-    {editing && <div className={styles.previewModes} aria-label="主预览模式"><button type="button" aria-pressed={editorMode === 'frame'} onClick={() => { video.current?.pause(); setEditorMode('frame'); }}>精确选帧</button><button type="button" aria-pressed={editorMode === 'video'} onClick={() => setEditorMode('video')}>播放视频</button></div>}
     <div className={editing ? styles.editorStage : styles.originalStage}>
-    {editing && editorMode === 'frame' && <button type="button" className={styles.candidate} disabled={!currentFrame?.url} onClick={() => setPreview(editorFrame)} aria-label="放大待选帧">{currentFrame?.url ? <img src={currentFrame.url} alt="待选帧，尚未应用" /> : <span>{currentFrame?.error || '正在读取这一帧…'}</span>}</button>}
+    {editing && editorMode === 'frame' && <button type="button" className={styles.candidate} disabled={!currentFrame?.url && !atlasUrl(editorFrame)} onClick={() => { void loadFrame(editorFrame, true).then(ready => { if (ready) setPreview(editorFrame); }); }} aria-label="放大待选帧">{frameVisual(editorFrame, '待选帧，尚未应用') || <span>{previewState.loading ? '正在准备快速预览…' : currentFrame?.error || previewState.error || '正在读取预览…'}</span>}</button>}
     {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
     <video ref={video} src={source} hidden={Boolean(editing && editorMode !== 'video')} controls playsInline preload="metadata" loop={loop.enabled}
       onLoadedMetadata={event => { if (!mediaCurrent()) return; event.currentTarget.pause(); event.currentTarget.currentTime = Math.min(info.duration, editing ? info.timestamps[editorFrame] : viewRef.current.time); }}
@@ -693,7 +815,7 @@ function MultiviewPageContent() {
     <div className={styles.frameGrid} role="group" aria-label={`${slots.length} 张最终拼图，${size.width}乘${size.height}像素；图片可拖放排序`}
       style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gap: `calc(100cqw * ${draft.layout.gap / size.width})`, padding: `calc(100cqw * ${draft.layout.margin / size.width})`, background: draft.layout.background }}>
       {slots.map((item, index) => <SortableFrame key={item.id} id={item.id} disabled={exporting || quickFrame !== null}>
-        {({ attributes, listeners, setActivatorNodeRef }) => <><button type="button" ref={setActivatorNodeRef} {...attributes} {...listeners}
+        {({ attributes, listeners, setActivatorNodeRef }) => { const displayFrame = quickPreview[item.id] ?? item.frame; return <><button type="button" ref={setActivatorNodeRef} {...attributes} {...listeners}
           className={styles.frameImage} style={{ aspectRatio: `${info.width} / ${info.height}` }} aria-pressed={selected?.id === item.id}
           aria-label={`选择第 ${index + 1} 张${item.name ? `：${item.name}` : ''}，长按或拖放排序，空格开始键盘排序，Alt加左右方向键调整顺序`} aria-keyshortcuts="Space Alt+ArrowLeft Alt+ArrowRight"
           disabled={exporting || quickFrame !== null} onMouseDown={event => { suppressSlotClick.current = ''; listeners?.onMouseDown?.(event); }}
@@ -704,20 +826,19 @@ function MultiviewPageContent() {
             listeners?.onKeyDown?.(event);
           }}
           onClick={() => { if (suppressSlotClick.current === item.id) { suppressSlotClick.current = ''; return; } selectSlot(item); }}>
-          {frames[item.frame]?.url ? <img src={frames[item.frame].url} alt={item.name || `第 ${index + 1} 张时间候选`} draggable={false} />
-            : <span>{frames[item.frame]?.error ? '这一帧未就绪' : '正在提取…'}</span>}
+          {frameVisual(displayFrame, item.name || `第 ${index + 1} 张时间候选`) || <span>{frames[displayFrame]?.error ? '这一帧未就绪' : '正在提取…'}</span>}
         </button>
         <figcaption className={styles.frameFooter}>
           <input aria-label={`第 ${index + 1} 张方向名称`} maxLength={40} value={item.name} placeholder={`第 ${index + 1} 张名称`} disabled={exporting}
             onChange={event => update({ ...draft, slots: draft.slots.map(value => value.id === item.id ? { ...value, name: event.target.value } : value) })} />
           <small>{info.timestamps[item.frame].toFixed(3)} 秒 · 第 {item.frame + 1} 帧{item.manual ? ' · 已手选' : ''}</small>
           <div className={styles.frameActions}>
-            <button type="button" disabled={exporting || quickFrame !== null || item.frame === 0} aria-label={`第 ${index + 1} 张前一帧`} title="前一帧" onClick={() => void stepSlot(item.id, -1)}><ArrowLeft size={14} /></button>
-            <button type="button" disabled={exporting || quickFrame !== null || item.frame === info.timestamps.length - 1} aria-label={`第 ${index + 1} 张后一帧`} title="后一帧" onClick={() => void stepSlot(item.id, 1)}><ArrowRight size={14} /></button>
+            <button type="button" disabled={exporting || Boolean(quickFrame && quickFrame !== item.id) || displayFrame === 0} aria-label={`第 ${index + 1} 张前一帧`} title="前一帧" onClick={() => stepSlot(item.id, -1)}><ArrowLeft size={14} /></button>
+            <button type="button" disabled={exporting || Boolean(quickFrame && quickFrame !== item.id) || displayFrame === info.timestamps.length - 1} aria-label={`第 ${index + 1} 张后一帧`} title="后一帧" onClick={() => stepSlot(item.id, 1)}><ArrowRight size={14} /></button>
             <button type="button" disabled={exporting} onClick={() => openEditor(item)}>换帧</button>
           </div>
-          {quickFrame === item.id && <small role="status">正在读取相邻帧…</small>}
-        </figcaption></>}
+          {quickFrame === item.id && <small role="status">第 {displayFrame + 1} 帧预览已切换，正在核对原尺寸帧…</small>}
+        </figcaption></>; }}
       </SortableFrame>)}
     </div></SortableContext></DndContext>;
   }
@@ -745,7 +866,7 @@ function MultiviewPageContent() {
     {error && <div className={styles.empty} role="status"><p>{error}</p><button type="button" onClick={() => void load()}>重新读取原视频</button><button type="button" onClick={() => setPickerOpen(true)}>使用已有视频</button></div>}
     {editingWorkId && !workState.work && <div className={styles.notice} role="status">{workState.loading ? '正在读取指定作品…' : workState.message || '指定作品尚未读取，当前生成设置保留。'}{!workState.loading && <button type="button" onClick={workState.retry}>重新读取作品</button>}</div>}
     {visible && info && draft && (!editingWorkId || workState.work?.id === editingWorkId && workState.work.sourceTaskId === taskId) && <section ref={resultArea} className={styles.result} style={{ '--export-height': `${dock?.height ?? 88}px`, '--tool-height': `${dock?.toolHeight ?? 600}px` } as CSSProperties} aria-label="3D多视图成品工作台">
-      <header className={styles.resultHeader}><div><h2>最终拼图</h2><p>时间候选，角度由你确认 · 点击一格调整</p></div><div className={styles.count} aria-label="图片数量">{[3, 4, 8].map(count => <button type="button" key={count} aria-pressed={draft.slots.length === count} disabled={exporting} onClick={() => chooseCount(count)}>{count} 张</button>)}</div></header>
+      <header className={styles.resultHeader}><div><h2>最终拼图</h2><p>时间候选，角度由你确认 · 点击一格调整，按住图片可拖放排序</p></div></header>
       <div className={styles.workStatus}>
         {workState.work && <label>作品名称<input value={workState.title} maxLength={120} disabled={workState.busy || workState.pending} onChange={event => { workState.setTitle(event.target.value); setActivity(value => value + 1); }} /></label>}
         <span role="status">{workState.loading ? '正在读取作品…' : workState.phase === 'saved' ? '已保存到我的作品' : workState.phase === 'saving' ? '正在确认保存…' : workState.phase === 'unknown' ? '保存结果待确认' : workState.phase === 'preparing' ? workState.work?.recipe ? '选帧已保存，正在准备拼图' : '作品正在准备，当前修改仅此设备保留' : workState.phase === 'failed' ? '选帧已保存，拼图准备未完成' : '仅此设备保留，尚未保存到作品'}</span>
@@ -762,35 +883,44 @@ function MultiviewPageContent() {
         const restoreOrder = preservedSlotOrder(draft.restoreOrder || [...draft.slots, ...draft.reserve].map(item => item.id), slots, reserve);
         update({ ...draft, slots, reserve, restoreOrder, editing: null }, true); setReduceCount(null);
       }}>保留所选 {retained.length} 张</button><button type="button" onClick={() => setReduceCount(null)}>取消</button></section>}
+      <div className={styles.commandBar} aria-label="拼图工具">
+        <div className={styles.toolTabs} role="tablist" aria-label="拼图设置"><button type="button" id="mv-frames-tab" role="tab" aria-controls="mv-frames-panel" aria-selected={view.tab === 'frames' && !originalOpen} onClick={() => { video.current?.pause(); setOriginalOpen(false); setView(value => ({ ...value, tab: 'frames', originalOpen: false })); }}>选帧</button><button type="button" id="mv-layout-tab" role="tab" aria-controls="mv-layout-panel" aria-selected={view.tab === 'layout' && !originalOpen} onClick={() => { video.current?.pause(); setOriginalOpen(false); setView(value => ({ ...value, tab: 'layout', originalOpen: false })); }}>排版</button></div>
+        <button type="button" aria-pressed={editing ? editorMode === 'video' : originalOpen} onClick={() => { if (editing) setEditorMode(value => value === 'video' ? 'frame' : 'video'); else { const open = !originalOpen; setOriginalOpen(open); setView(value => ({ ...value, originalOpen: open })); } }}>查看原视频</button>
+        <div className={styles.commandSpacer} />
+        <div className={styles.count} aria-label="图片数量">{[3, 4, 8].map(count => <button type="button" key={count} aria-pressed={draft.slots.length === count} disabled={exporting} onClick={() => chooseCount(count)}>{count} 张</button>)}</div>
+        <label className={styles.displaySize}>显示大小<select aria-label="拼图显示大小" value={view.zoom} onChange={event => setView(value => ({ ...value, zoom: Number(event.target.value) }))}>{[.5, .75, 1, 1.5, 2, 3, 4].map(zoom => <option value={zoom} key={zoom}>{zoom === 1 ? '适合窗口' : `${zoom * 100}%`}</option>)}</select></label>
+        {undo && <button type="button" disabled={exporting} onClick={() => { const value = undo; update(value); setUndo(null); }}><Undo2 size={14} />撤销</button>}
+      </div>
+      {originalOpen && !editing && <section className={styles.originalPanel} aria-label="原视频">{player}</section>}
       <div className={styles.workbench}>
-        <div className={styles.resultMain}><div className={styles.previewToolbar}><span>拼图预览</span><label>显示大小<select aria-label="拼图显示大小" value={view.zoom} onChange={event => setView(value => ({ ...value, zoom: Number(event.target.value) }))}>{[.5, .75, 1, 1.5, 2, 3, 4].map(zoom => <option value={zoom} key={zoom}>{zoom === 1 ? '适合窗口' : `${zoom * 100}%`}</option>)}</select></label>{undo && <button type="button" disabled={exporting} onClick={() => { const value = undo; update(value); setUndo(null); }}><Undo2 size={14} />撤销</button>}</div>
+        <div className={styles.resultMain}><div className={styles.previewToolbar}><span>拼图预览</span><span>{previewState.loading ? '正在准备快速选帧…' : previewState.manifest ? '快速选帧已就绪' : previewState.error ? '快速预览不可用，保留原帧读取' : ''}</span></div>
           <div ref={collageViewport} className={styles.collageViewport} onScroll={event => { const { scrollLeft: panX, scrollTop: panY } = event.currentTarget; setView(value => value.panX === panX && value.panY === panY ? value : { ...value, panX, panY }); }}><div className={styles.collage} style={{ width: `${view.zoom * 100}%` }}>{collage(draft.slots)}</div></div>
           <p className={styles.caption}>每张 {info.width} × {info.height} · 拼图 {dimensions?.width} × {dimensions?.height} · 原图不裁剪、不放大；格下操作信息不进入导出</p>
-          <div className={styles.slotStrip} aria-label="选择要调整的图片">{draft.slots.map((item, index) => <button type="button" key={item.id} aria-pressed={selected?.id === item.id} onClick={() => selectSlot(item)}>{frames[item.frame]?.url && <img src={frames[item.frame].url} alt="" />}<span>{item.name || `第 ${index + 1} 张`}</span>{frames[item.frame]?.error && <span>未就绪</span>}</button>)}</div>
+          <div className={styles.slotStrip} aria-label="选择要调整的图片">{draft.slots.map((item, index) => <button type="button" key={item.id} aria-pressed={selected?.id === item.id} onClick={() => selectSlot(item)}>{frameVisual(item.frame, '')}<span>{item.name || `第 ${index + 1} 张`}</span>{frames[item.frame]?.error && <span>未就绪</span>}</button>)}</div>
         </div>
-        <aside ref={toolsArea} className={styles.tools} aria-label="当前拼图工具"><div className={styles.toolTabs} role="tablist" aria-label="拼图工具"><button type="button" id="mv-frames-tab" role="tab" aria-controls="mv-frames-panel" aria-selected={view.tab === 'frames'} onClick={() => { video.current?.pause(); setView(value => ({ ...value, tab: 'frames' })); }}>选帧</button><button type="button" id="mv-layout-tab" role="tab" aria-controls="mv-layout-panel" aria-selected={view.tab === 'layout'} onClick={() => { video.current?.pause(); setView(value => ({ ...value, tab: 'layout' })); }}>排版</button></div>
+        {(!originalOpen || editing) && <aside ref={toolsArea} className={styles.tools} aria-label="当前拼图工具">
           {view.tab === 'frames' && selected && <div role="tabpanel" id="mv-frames-panel" aria-labelledby="mv-frames-tab" className={styles.toolBody}>
             <header className={styles.selectionTitle}><h3>第 {selectedIndex + 1} 张</h3><span>{info.timestamps[selected.frame].toFixed(3)} 秒{selected.manual ? ' · 已手选' : ''}</span></header>
             <label>方向名称（可选）<input maxLength={40} value={selected.name} placeholder="例如：正面，由你确认" disabled={exporting} onChange={event => update({ ...draft, slots: draft.slots.map(item => item.id === selected.id ? { ...item, name: event.target.value } : item) })} /></label>
-            <div className={styles.inlineActions}><button type="button" disabled={exporting || selectedIndex === 0} onClick={() => move(selectedIndex, -1)}><ArrowLeft size={15} />向前</button><button type="button" disabled={exporting || selectedIndex === draft.slots.length - 1} onClick={() => move(selectedIndex, 1)}>向后<ArrowRight size={15} /></button><button type="button" disabled={!frames[selected.frame]?.url} onClick={() => setPreview(selected.frame)}><Expand size={15} />放大</button></div>
+            <div className={styles.inlineActions}><button type="button" disabled={exporting || Boolean(quickFrame && quickFrame !== selected.id) || (quickPreview[selected.id] ?? selected.frame) === 0} onClick={() => stepSlot(selected.id, -1)}><ArrowLeft size={15} />上一帧</button><button type="button" disabled={exporting || Boolean(quickFrame && quickFrame !== selected.id) || (quickPreview[selected.id] ?? selected.frame) === info.timestamps.length - 1} onClick={() => stepSlot(selected.id, 1)}>下一帧<ArrowRight size={15} /></button><button type="button" disabled={!frames[selected.frame]?.url} onClick={() => setPreview(selected.frame)}><Expand size={15} />放大</button></div>
             {frames[selected.frame]?.error && <div className={styles.frameError} role="status">{frames[selected.frame].error}<button type="button" onClick={() => void loadFrame(selected.frame, true)}><RefreshCw size={13} />重试这一格</button></div>}
             {!editing && <button type="button" className={styles.primary} onClick={() => openEditor(selected)}>换一帧</button>}
-            {editing && <section className={styles.editor} aria-label={`替换第 ${draft.slots.indexOf(editing) + 1} 张`}><header><h3>替换第 {draft.slots.indexOf(editing) + 1} 张</h3><button type="button" aria-label="取消换帧" onClick={() => update({ ...draft, editing: null })}><X size={16} /></button></header>
-              {player}<label className={styles.timeline}>第 {editorFrame + 1} / {info.timestamps.length} 帧 · {info.timestamps[editorFrame].toFixed(3)} 秒<input aria-label="选择视频帧" type="range" min={0} max={info.timestamps.length - 1} step={1} value={editorFrame} onChange={event => seek(Number(event.target.value))} /></label>
-              <div className={styles.neighbors}>{[-2, -1, 0, 1, 2].map(delta => editorFrame + delta).filter(frame => frame >= 0 && frame < info.timestamps.length).map(frame => <button type="button" key={frame} aria-pressed={frame === editorFrame} onClick={() => seek(frame)}>{frames[frame]?.url && <img src={frames[frame].url} alt={`第 ${frame + 1} 帧`} />}<span>{frame === editorFrame ? '当前' : frame < editorFrame ? `前 ${editorFrame - frame}` : `后 ${frame - editorFrame}`}</span></button>)}</div>
-              <div className={styles.inlineActions}><button type="button" disabled={editorFrame === 0} onClick={() => seek(editorFrame - 1)}>上一帧</button><button type="button" disabled={editorFrame === info.timestamps.length - 1} onClick={() => seek(editorFrame + 1)}>下一帧</button>{currentFrame?.error && <button type="button" onClick={() => void loadFrame(editorFrame, true)}>重试此帧</button>}</div>
+            {editing && <section className={styles.editor} aria-label={`替换第 ${draft.slots.indexOf(editing) + 1} 张`} tabIndex={-1} onKeyDown={editorKeyDown}><header><h3>替换第 {draft.slots.indexOf(editing) + 1} 张</h3><button type="button" aria-label="取消换帧" onClick={() => update({ ...draft, editing: null })}><X size={16} /></button></header>
+              {player}<label className={styles.timeline}>第 {editorFrame + 1} / {info.timestamps.length} 帧 · {info.timestamps[editorFrame].toFixed(3)} 秒<input aria-label="选择视频帧" aria-valuetext={`第 ${editorFrame + 1} 帧，${info.timestamps[editorFrame].toFixed(3)} 秒`} type="range" min={0} max={info.timestamps.length - 1} step={1} value={editorFrame} onChange={event => seek(Number(event.target.value))} /></label>
+              <div className={styles.neighbors}>{[-2, -1, 0, 1, 2].map(delta => editorFrame + delta).filter(frame => frame >= 0 && frame < info.timestamps.length).map(frame => <button type="button" key={frame} aria-pressed={frame === editorFrame} onClick={() => seek(frame)}>{frameVisual(frame, `第 ${frame + 1} 帧`, styles.atlasThumb)}<span>{frame === editorFrame ? '当前' : frame < editorFrame ? `前 ${editorFrame - frame}` : `后 ${frame - editorFrame}`}</span></button>)}</div>
+              <div className={styles.frameStepper}><button type="button" disabled={editorFrame === 0} onClick={() => seek(editorFrame - 10)} aria-label="向前十帧">−10</button><button type="button" disabled={editorFrame === 0} onClick={() => seek(editorFrame - 1)}><ArrowLeft size={15} />上一帧</button><label>指定帧<input type="number" min={1} max={info.timestamps.length} value={frameInput} aria-invalid={Boolean(frameInputError)} onChange={event => { setFrameInput(event.target.value); setFrameInputError(''); }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); jumpToInput(); } }} />{frameInputError && <span role="status">{frameInputError}</span>}</label><button type="button" onClick={jumpToInput}>跳到</button><button type="button" disabled={editorFrame === info.timestamps.length - 1} onClick={() => seek(editorFrame + 1)}>下一帧<ArrowRight size={15} /></button><button type="button" disabled={editorFrame === info.timestamps.length - 1} onClick={() => seek(editorFrame + 10)} aria-label="向后十帧">+10</button>{currentFrame?.error && <button type="button" onClick={() => void loadFrame(editorFrame, true)}>重试原帧</button>}</div>
             </section>}
           </div>}
           {view.tab === 'layout' && <div role="tabpanel" id="mv-layout-panel" aria-labelledby="mv-layout-tab" className={styles.toolBody}><h3>拼图排版</h3><label>拼图列数<select value={draft.layout.columns} disabled={exporting} onChange={event => update({ ...draft, layout: { ...draft.layout, columns: Number(event.target.value) } })}>{[1, 2, 3, 4, 8].map(value => <option key={value} value={value}>{value} 列</option>)}</select></label>
             <label>外侧留白（像素）<input type="number" min={0} max={128} step={1} value={draft.layout.margin} disabled={exporting} onChange={event => update({ ...draft, layout: { ...draft.layout, margin: Math.round(Math.max(0, Math.min(128, Number(event.target.value) || 0))) } })} /></label><label>图片间距（像素）<input type="number" min={0} max={128} step={1} value={draft.layout.gap} disabled={exporting} onChange={event => update({ ...draft, layout: { ...draft.layout, gap: Math.round(Math.max(0, Math.min(128, Number(event.target.value) || 0))) } })} /></label><label>留白底色<input type="color" value={draft.layout.background} disabled={exporting} onChange={event => update({ ...draft, layout: { ...draft.layout, background: event.target.value } })} /></label><button type="button" disabled={exporting} onClick={() => update({ ...draft, layout: { ...DEFAULT_MULTIVIEW_LAYOUT } }, true)}>重置排版</button><p>只调整留白，不去背景、不裁剪原帧。单图包仍为原尺寸。</p></div>}
-          {view.tab === 'frames' && editing && <div className={styles.editorActions}><button type="button" className={styles.primary} disabled={!currentFrame?.url || exporting} onClick={() => { video.current?.pause(); update({ ...draft, slots: draft.slots.map(item => item.id === editing.id ? { ...item, frame: editorFrame, manual: true } : item), editing: null }, true); }}>使用这一帧</button><button type="button" onClick={() => { video.current?.pause(); update({ ...draft, editing: null }); }}>取消</button></div>}
-        </aside>
+          {view.tab === 'frames' && editing && <div className={styles.editorActions}><button type="button" className={styles.primary} disabled={applyingFrame || exporting} onClick={() => void applySelectedFrame()}>{applyingFrame ? '正在读取原尺寸帧…' : currentFrame?.url ? '使用这一帧' : '读取原尺寸并使用'}</button><button type="button" disabled={applyingFrame} onClick={() => { video.current?.pause(); update({ ...draft, editing: null }); }}>取消</button></div>}
+        </aside>}
       </div>
       {validSlots.length > 0 && validSlots.length < draft.slots.length && <div className={styles.partial} role="status"><p>{validSlots.length} / {draft.slots.length} 张就绪。原草稿数量不变，复制完整拼图仍需全部就绪。</p><div className={styles.inlineActions}><button type="button" disabled={exporting} onClick={() => void download('png', true)}>下载已就绪 {validSlots.length} / {draft.slots.length} 张（PNG拼图）</button><button type="button" disabled={exporting} onClick={() => void download('zip', true)}>下载已就绪 {validSlots.length} / {draft.slots.length} 张（ZIP单图包）</button></div></div>}
       {notice && <div className={styles.notice} role="status">{notice}{exportFile && <button type="button" disabled={exporting} onClick={() => void downloadPrepared(exportFile)}>下载已准备文件</button>}</div>}
       {(!saved || !viewSaved) && <p className={styles.warning} role="status">本机存储暂不可用，刷新可能丢失本次工作现场；当前编辑和原图导出仍可使用。</p>}
       <footer ref={exportBar} className={styles.exportBar} style={dock && dock.width >= 160 ? { left: dock.left, width: dock.width, bottom: dock.bottom } : { visibility: 'hidden', width: 'min(100%, 600px)' }}><div><strong>{validSlots.length} / {draft.slots.length} 张就绪</strong><small>{dimensions?.width} × {dimensions?.height} · {saved && viewSaved ? '已保存到此设备' : '本机保存未完成'}</small></div><div className={styles.exportActions}><button type="button" className={styles.primary} disabled={exporting || validSlots.length !== draft.slots.length} onClick={copyCollage}><Copy size={16} />{exporting ? '正在准备…' : '一键复制拼图'}</button><button type="button" disabled={exporting || validSlots.length !== draft.slots.length} onClick={() => void download('png')}><Download size={16} />下载拼图</button><button type="button" disabled={exporting || validSlots.length !== draft.slots.length} onClick={() => void download('zip')}>下载单图包</button></div></footer>
-      <div className={styles.footnote}><details open={originalOpen} onToggle={event => { const open = event.currentTarget.open; setOriginalOpen(open); setView(value => value.originalOpen === open ? value : { ...value, originalOpen: open }); }}><summary>查看原视频</summary>{originalOpen && !editing && player}{editing && <p>原视频正在右侧换帧工具中显示。</p>}</details><button type="button" className={styles.quiet} disabled={exporting || workState.pending || workState.busy} onClick={() => void clearWorkspace()}>清除本机选帧</button><p>草稿仅属本账号与此原片版本。失权时停止显示；提帧或导出失败不会重跑视频。</p></div>
+      <div className={styles.footnote}><button type="button" className={styles.quiet} disabled={exporting || workState.pending || workState.busy} onClick={() => void clearWorkspace()}>清除本机选帧</button><p>草稿仅属本账号与此原片版本。失权时停止显示；快速预览不进入导出，提帧或导出失败不会重跑视频。</p></div>
       {preview !== null && frames[preview]?.url && <ZoomableImagePreview src={frames[preview].url!} alt="3D多视图原尺寸帧" imageSharing={false} sourceVersion={info.sourceVersion} previewKey={`multiview-${taskId}-${info.sourceVersion}-${preview}`} onClose={() => setPreview(null)} safeDetails={{ width: info.width, height: info.height }} />}
     </section>}
     <MultiviewSourcePicker open={pickerOpen} onClose={() => setPickerOpen(false)} onSelect={id => void selectTask(id)} currentTaskId={taskId} />
