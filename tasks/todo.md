@@ -2,6 +2,8 @@
 
 ## 当前入口
 
+- [ ] PAGE03图片结果翻页已部署v0.94.5，待用户手动验收：单张/批量及原请求确认受理后回当前模板全部结果最新页，顶部/底部复用同一翻页；图片结果卡与资产图片卡移除“已对账”徽标，真实账务不改。实际Web源`ad6f6bdf916de1e3a5e642a16ef6e5d8c977a153`、BUILD`sphjfz9ljJjkXayv0bRJv`；服务器完整候选构建和公网版本/静态资源检查通过，图片worker未重启，无生成扣费。待验：真实生成后的自动跳页、两处翻页同步、手机布局及旧客户端更新提醒。
+
 - [x] B18工程交付：同v0.50.0已部署60b/BUILD WfltAR1-_emLNggnJQikz，统一隔离及主管同产物10项实页PASS，包含cursor真正新24条仍三行与reset；主管session已停止，源码不再改/测/部署。原17并未全完成，CUT-A2/NAV2/PIN1、真实付费ZIP/物理touch/clipboard缺口及新FB未实施保留；私人JSON/作品截图不推公开Git。
 
 - [ ] 当前60b/Wflt同产物主管最小实页复核PASS：SIDE sticky/URL刷新/明确链接、CMP modeoff换图/两pane/分层返回、PAGE18横竖屏三行/next/刷新/resize恢复；无新生成/上传/费用。数据cursor-more主管补证中，三原受阻及付费ZIP/物理touch/clipboard缺口不变，不能原17整单结项。两张真实作品像素只私有归档，源码/运行冻结，lead不再改源/测试/部署。
