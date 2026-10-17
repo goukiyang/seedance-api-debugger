@@ -1,7 +1,6 @@
 /* eslint-disable @next/next/no-img-element */
 'use client';
 import { SessionPreviewImage } from '@/components/SessionPreviewImage';
-import { ImageBillingBadge } from '@/components/ImageBillingBadge';
 import { handBulkVideoZipToBrowser } from '@/lib/video/native-bulk-download';
 import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 
@@ -2482,7 +2481,6 @@ function AssetsPageContent() {
                           )}
                         </span>
                       )}
-                      {item.kind === 'image' && <ImageBillingBadge billing={item.imageBilling} />}
                       {duration && <span className="asset-card-duration">{duration}</span>}
                       {(item.status === 'succeeded' || item.source !== 'video_task') && <ContentReactions contentKey={item.id} overlay />}
                     </span>

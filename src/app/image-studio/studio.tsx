@@ -1505,6 +1505,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const evolutionConflict = evolution && evolutionInput.manual && bodyDirection && bodyDirection !== evolutionInput.direction ? '正文方向与手选方向冲突，请调整正文或方向' : '';
   const [resultView, setResultView] = useState<'images' | 'batch'>('images');
   const [resultPaginationSlot, setResultPaginationSlot] = useState<HTMLDivElement | null>(null);
+  const [latestResultsRequestId, setLatestResultsRequestId] = useState<string | null>(null);
+  const showLatestResults = useRef<(requestId: string) => void>(requestId => {
+    setResultView('images');
+    setLatestResultsRequestId(requestId);
+  });
   const [count, setCountValue] = useState(module.count);
   function setCount(value: number) { setCountValue(value); markPersonalOverride('count', value); }
   const [referenceLimit, setReferenceLimit] = useState(module.referencePolicy?.primaryMax ?? Math.max(1, Math.min(MAX_REFERENCE_IMAGES, module.referenceLimit || DEFAULT_STUDIO_PRIMARY_MAX)));
@@ -2821,6 +2826,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       if (!Array.isArray(value.tasks) || !value.tasks.length) {
         setError('暂未查到这次提交，仍不能确认是否受理。请稍后查询或联系管理员，不会自动再生成。'); return;
       }
+      showLatestResults.current(String(pendingSubmission.requestId));
       setPendingSubmission(null); localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey);
       await loadTasks();
     } catch (cause) { setError(cause instanceof Error ? cause.message : '查询暂不可用，原提交编号仍保留。'); }
@@ -2848,7 +2854,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     if (evolutionConflict) { setError(evolutionConflict); return; }
     if (batch.mode === 'batch' && !retryTask) {
       submitLock.current = true; setSubmitting(true);
-      try { if (await batch.submit(generationPayload())) { onGenerationAccepted(); setResultView('images'); await loadTasks(undefined, 'silent'); } }
+      const batchPayload = generationPayload();
+      try { if (await batch.submit(batchPayload)) { onGenerationAccepted(); showLatestResults.current(batchPayload.requestId); await loadTasks(undefined, 'silent'); } }
       finally { submitLock.current = false; setSubmitting(false); }
       return;
     }
@@ -2926,6 +2933,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         const value = await readResponse(response);
         if (typeof value.batchId !== 'string' || !/^[a-f0-9]{64}$/.test(value.batchId)) throw new Error('提交结果待确认，请查询这次提交。');
         onGenerationAccepted();
+        showLatestResults.current(payload.requestId);
         watchGenerationCompletion(userId, payload.requestId, 'images', payload.count);
         setPendingSubmission(null); try { localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch {} await loadTasks();
       }
@@ -3245,6 +3253,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     : batch.mode === 'single' && (!Number.isInteger(count) || count < 1 || count > 8) ? { message: '生成张数应为1到8的整数，请修改张数。', tone: 'warning' }
     : !ready ? { message: '生成条件尚未就绪，请检查模型和上下文设置。', tone: 'warning' } : null;
   const likedResults = useLikedStudioResults<StudioTask>(userId, module.id, visible && !hidden && resultView === 'images', templateWorkbench);
+  showLatestResults.current = requestId => {
+    likedResults.choose(false);
+    setResultView('images');
+    setLatestResultsRequestId(requestId);
+  };
   useEffect(() => { if (likedResults.liked) setResultView('images'); }, [likedResults.liked, resultView]);
   useEffect(() => {
     if (!likedResults.liked || likedResults.loading) return;
@@ -3781,6 +3794,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             ? <StudioResultPinButton userId={userId} moduleId={module.id} taskId={item.task.id} assetId={item.task.asset.id} state={visibleFeed?.pinState || null} onSaved={refreshResults} />
             : item.sharedPin ? <StudioResultPinnedIndicator /> : null : undefined}
           paginationSlot={templateWorkbench ? resultPaginationSlot : undefined}
+          latestPageRequest={latestResultsRequestId}
+          onLatestPageRequestHandled={requestId => setLatestResultsRequestId(current => current === requestId ? null : current)}
           scope={`sd2-image-studio-${likedResults.liked ? 'liked-' : ''}result-page:${taskReadScope}`}
           visible={visible && active && !hidden && resultView === 'images'} loading={resultLoading} busy={resultBusy}
           error={resultError} emptyLabel={likedResults.liked ? '当前模板还没有喜欢的结果' : '暂无生成记录'}

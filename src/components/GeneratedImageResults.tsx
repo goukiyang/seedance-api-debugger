@@ -10,7 +10,6 @@ import { LoadingSkeleton, LoadingStatus } from './LoadingState';
 import { copyImage } from '@/lib/media/copy-image';
 import { useResultPages } from './useResultPages';
 import styles from './GeneratedImageResults.module.css';
-import { ImageBillingBadge } from './ImageBillingBadge';
 import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
 import { ImageGenerationWaiting, type ImageGenerationWait } from './ImageGenerationWaiting';
 import { useImageGenerationWaitDisplay } from './useImageGenerationWaitDisplay';
@@ -142,7 +141,6 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
       {waitDisplay?.finishing && <ImageGenerationWaiting display={waitDisplay} visible={visible} />}
       {coverReactions ? <div className={styles.coverReactions}>{reactions}<div className={styles.coverPin}>{renderReactionAction?.(item)}</div></div> : reactions}
       {renderOverlay?.(item, { openPreview: () => changePreview(item) })}
-      <ImageBillingBadge billing={item.billing} />
       {!contextActionsEnabled && !coverDeleteWithContextActions && renderDelete && <div className={styles.deleteSlot} data-result-secondary onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{renderDelete(item)}</div>}
       {(hasCommonActions || secondaryActions) && <div className={styles.mediaActions} data-cover-context-delete={coverDeleteWithContextActions || undefined} data-result-secondary aria-busy={feedback?.id === item.id && feedback.busy || undefined} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
         {hasCommonActions && <div className={styles.commonActions}>
@@ -165,12 +163,15 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
   </article>;
 }
 
-export function GeneratedImageResults<T extends GeneratedImageResult>({ items, scope, visible = true, loading = false, busy = false, error = '', emptyLabel = '暂无生成结果', hasMore = false, total, loadMore = noMore, onRetry, selectedId, onSelect, previewId, onPreviewChange, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, renderReactionAction, paginationSlot, onQuickUse, contextActionsEnabled = false, coverDeleteWithContextActions = false, contextActions }: ResultRenderers<T> & {
+export function GeneratedImageResults<T extends GeneratedImageResult>({ items, scope, visible = true, loading = false, busy = false, error = '', emptyLabel = '暂无生成结果', hasMore = false, total, loadMore = noMore, onRetry, selectedId, onSelect, previewId, onPreviewChange, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, renderReactionAction, paginationSlot, latestPageRequest, onLatestPageRequestHandled, onQuickUse, contextActionsEnabled = false, coverDeleteWithContextActions = false, contextActions }: ResultRenderers<T> & {
   items: T[]; scope: string; visible?: boolean; loading?: boolean; busy?: boolean; error?: string; emptyLabel?: string;
   hasMore?: boolean; loadMore?: () => Promise<unknown>; onRetry?: () => void;
   total?: number | null;
   /** A supplied slot owns pagination placement; null reserves it until mounted. */
   paginationSlot?: HTMLElement | null;
+  /** A confirmed generation request asks this list to replace restored paging with its newest page. */
+  latestPageRequest?: string | null;
+  onLatestPageRequestHandled?: (requestId: string) => void;
   selectedId?: string | null; onSelect?: (item: T) => void;
   onQuickUse?: (item: T) => void;
   previewId?: string | null; onPreviewChange?: (item: T | null) => void;
@@ -219,6 +220,13 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
   const readBusy = busy || loading || readState.scope === scope && readState.busy;
   const readError = error || (readState.scope === scope ? readState.error : '');
   const pages = useResultPages({ items, storageKey: scope, visible, busy: readBusy, error: Boolean(readError), hasMore, total, loadMore: readMore, currentId: activePreview || currentSelection || null });
+  const handledLatestPageRequest = useRef<string | null>(null);
+  useEffect(() => {
+    if (!latestPageRequest || handledLatestPageRequest.current === latestPageRequest) return;
+    handledLatestPageRequest.current = latestPageRequest;
+    pages.reset();
+    onLatestPageRequestHandled?.(latestPageRequest);
+  }, [latestPageRequest, onLatestPageRequestHandled, pages]);
   useEffect(() => { setLocalPreview(null); setLocalSelection(null); setFeedback(null); }, [scope]);
   const previewable = items.filter(item => item.media?.src);
   const preview = previewable.find(item => item.id === activePreview);
@@ -348,7 +356,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
         renderDelete={renderDelete} renderOverlay={renderOverlay} renderSupplement={renderSupplement} renderReactionAction={renderReactionAction}
         contextActionsEnabled={contextActionsEnabled} coverDeleteWithContextActions={coverDeleteWithContextActions} contextActions={contextActions} />)}
     </div>
-    {paginationSlot === undefined && pagination('bottom')}
+    {pagination('bottom')}
     {visible && previewSessionAllowed && preview?.media && <ZoomableImagePreview {...preview.media} preparation={currentPreparation} previewOnly={Boolean(preview.viewOnly || preview.media.previewOnly)} nextActionSources={nextSources as ContentKey[]} nextActionResultId={preview.id} imageNeighbors={imageNeighbors} resolveDownload={src => items.find(item => item.media?.src === src)?.download} previewKey={preview.media.previewKey || `${scope}:${preview.id}`} hasNavigation={previewable.length > 1} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => changePreview(null)} />}
   </div>;
 }
