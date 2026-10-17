@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '生成图片后会自动回到当前模板的最新结果页；结果区顶部和底部使用同一套翻页控件，并移除图片卡上的“已对账”徽标。账务记录和扣费核对不受影响。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '3D多视图改为全宽工作台，选帧、排版和原视频集中在顶部；新增滑轨、跳帧与指定帧，并用轻量预览加快连续选帧。导出、作品保存和最终使用仍读取原尺寸帧。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
