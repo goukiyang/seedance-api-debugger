@@ -19,7 +19,7 @@ async function main() {
   Object.assign(process.env, { NODE_ENV: 'test' });
   Reflect.set(globalThis, 'AsyncLocalStorage', AsyncLocalStorage);
   globalThis.fetch = async () => { throw new Error('Network prohibited in MV05 isolated engineering'); };
-  const env: Record<string, string> = {};
+  const env: NodeJS.ProcessEnv = { NODE_ENV: 'test' };
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'TZ']) if (process.env[key]) env[key] = process.env[key]!;
   Object.assign(env, { DATABASE_URL: process.env.DATABASE_URL, PRISMA_GENERATE_SKIP_AUTOINSTALL: '1' });
   execFileSync(process.execPath, [path.join(root, 'node_modules/prisma/build/index.js'), 'db', 'push', '--skip-generate',
