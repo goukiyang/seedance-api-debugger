@@ -37,7 +37,7 @@ function matchedReceipt(value: unknown, original: Pending): value is MultiviewWo
   const receipt = value as MultiviewWorkReceipt;
   return receipt.state === 'committed' && receipt.mutationId === original.mutationId && receipt.action === original.action
     && validId(receipt.workId) && (original.action === 'branch' || receipt.workId === original.workId)
-    && Number.isSafeInteger(receipt.revision) && receipt.revision >= 1 && Number.isSafeInteger(receipt.draftRevision) && receipt.draftRevision >= 1;
+    && Number.isSafeInteger(receipt.revision) && receipt.revision >= 1 && Number.isSafeInteger(receipt.draftRevision) && receipt.draftRevision >= 0;
 }
 function readPreferences(key: string): LibraryPreferences {
   const empty = { projectId: '', q: '', removed: false, selected: '', y: 0 };
@@ -211,7 +211,7 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
     }
     catch { setNotice('无法保留本次保存回执，请先恢复本机存储；作品与输入保持不变'); return; }
     pendingRef.current = original; setPending(original); setNotice('正在保存…');
-    const payload = { ...original, baseRevision: target.revision, ...(action === 'save' || action === 'branch' ? { recipe: target.recipe, title: title || target.title } : {}),
+    const payload = { mutationId: original.mutationId, action, baseRevision: target.revision, ...(action === 'save' || action === 'branch' ? { recipe: target.recipe, title: title || target.title } : {}),
       ...(action === 'branch' ? { branchKey: original.mutationId } : {}) };
     try {
       const response = await request(`${base}/${encodeURIComponent(target.id)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
@@ -225,7 +225,8 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
       if (!matchedReceipt(data.receipt, original) || !data.work || data.work.id !== data.receipt.workId) throw new Error('保存结果待确认，请核对原操作；当前作品与输入保持不变');
       const stillViewing = workRef.current?.id === target.id;
       clearPending(); if (stillViewing) setWork(data.work);
-      setNotice(action === 'remove' ? '已移出，可在“已移出”恢复' : action === 'restore' ? '已恢复到作品库' : action === 'branch' ? '已另存一版，正在准备拼图'
+      setNotice(data.work.revision !== data.receipt.revision ? '原操作已确认，服务器另有更新；当前输入保留，请重新核对作品。'
+        : action === 'remove' ? '已移出，可在“已移出”恢复' : action === 'restore' ? '已恢复到作品库' : action === 'branch' ? '已另存一版，正在准备拼图'
         : target.status === 'failed' ? '选帧已保存，正在重新准备拼图；不会重新生成或扣费' : '作品名称已保存');
       void fetchList(); if (action === 'branch' && stillViewing) navigate(data.work.id);
     } catch (error) { if (alive(captured)) setNotice(error instanceof Error ? error.message : '保存结果待确认，请核对原操作'); }
