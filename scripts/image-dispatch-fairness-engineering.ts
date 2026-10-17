@@ -349,9 +349,9 @@ async function main() {
       const { imageStudioQueueCapacity, reserveImageStudioQueueCapacity, QueueCapacityError } = await import('../src/lib/image-studio/queue-capacity');
       assert.equal(imageStudioQueueCapacity(7, 1).allowed, true);
       assert.equal(new QueueCapacityError(imageStudioQueueCapacity(7, 2)).message,
-        '当前账号全部图片任务已有 7 张未结束，本次 2 张会超过同时 8 张上限，请等待已有任务结束。');
+        '当前账号已有 7 张排队或生成，本次 2 张会超过同时 8 张上限；待核对原请求不占生成名额。');
       assert.equal(new QueueCapacityError(imageStudioQueueCapacity(3, 2, 4)).message,
-        '当前账号全部图片任务已有 3 张未结束，本次 2 张会超过同时 4 张上限，请等待已有任务结束。');
+        '当前账号已有 3 张排队或生成，本次 2 张会超过同时 4 张上限；待核对原请求不占生成名额。');
       assert.equal(new QueueCapacityError().message, '当前账号图片任务已达容量限制，请等待已有任务结束。');
       const activeStatuses = ['queued', 'running', 'channel_queued', 'channel_running'];
       const activeCount = await database.imageStudioTask.count({ where: { owner_id: owners[0], status: { in: activeStatuses } } });
@@ -364,7 +364,7 @@ async function main() {
       await assert.rejects(database.$transaction(tx => reserveImageStudioQueueCapacity(tx, owners[0], 1)),
         (error: unknown) => {
           assert.ok(error instanceof QueueCapacityError);
-          assert.equal(error.message, '当前账号全部图片任务已有 8 张未结束，本次 1 张会超过同时 8 张上限，请等待已有任务结束。');
+          assert.equal(error.message, '当前账号已有 8 张排队或生成，本次 1 张会超过同时 8 张上限；待核对原请求不占生成名额。');
           assert.equal(error.code, 'image_queue_capacity'); assert.equal(error.status, 429);
           return true;
         });
