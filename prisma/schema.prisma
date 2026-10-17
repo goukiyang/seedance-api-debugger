@@ -441,6 +441,61 @@ model ImageStudioTask {
   @@index([billing_scope, gateway_request_id])
 }
 
+model MultiviewWork {
+  id                  String   @id @default(cuid())
+  owner_id            String
+  source_task_id      String
+  project_id          String?
+  video_card_id       String?
+  base_key            String?
+  branch_key          String?
+  parent_work_id      String?
+  title               String   @default("3D多视图作品")
+  schema_version      Int      @default(1)
+  revision            Int      @default(1)
+  source_version      String?
+  source_info_json    String?
+  draft_revision      Int      @default(0)
+  recipe_json         String?
+  recipe_hash         String?
+  ready_revision      Int?
+  ready_recipe_json   String?
+  ready_manifest_json String?
+  status              String   @default("waiting_source")
+  removed_at          DateTime?
+  lease_token         String?
+  lease_until         DateTime?
+  attempts            Int      @default(0)
+  next_attempt_at     DateTime @default(now())
+  last_error          String?
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  mutations MultiviewWorkMutation[]
+
+  @@unique([owner_id, source_task_id, base_key])
+  @@unique([owner_id, branch_key])
+  @@index([owner_id, removed_at, updated_at, id])
+  @@index([status, next_attempt_at, lease_until])
+}
+
+model MultiviewWorkMutation {
+  id             String   @id @default(cuid())
+  actor_id       String
+  mutation_id    String
+  work_id        String
+  request_hash   String
+  base_revision  Int?
+  action         String
+  receipt_json   String
+  created_at     DateTime @default(now())
+
+  work MultiviewWork @relation(fields: [work_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([actor_id, mutation_id])
+  @@index([work_id, created_at])
+}
+
 model PlatformSetting {
   id         String   @id @default(cuid())
   key        String   @unique

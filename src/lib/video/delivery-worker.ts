@@ -6,6 +6,7 @@ import {
   type VideoDeliveryJobRecord,
 } from './delivery-queue';
 import { ensurePublicVideoDeliveryFromProvider } from './public-delivery';
+import { wakeMultiviewWorkForTask } from './multiview-works';
 
 type WorkerOptions = {
   workerId?: string;
@@ -59,12 +60,16 @@ export async function processVideoDeliveryJob(job: VideoDeliveryJobRecord) {
     throw new Error(result.message || result.error || '稳定视频交付未完成');
   }
 
-  return completeVideoDeliveryJob(job, {
+  const completed = await completeVideoDeliveryJob(job, {
     publicVideoUrl: result.public_video_url,
     storageProvider: result.storage_provider ?? null,
     storageKey: result.storage_key ?? null,
     fileSize: result.file_size ?? null,
   });
+  // This only wakes an existing intent. A work failure must never reverse successful video delivery.
+  try { await wakeMultiviewWorkForTask(task.id); }
+  catch { console.warn('[video-delivery-worker] multiview work wake deferred to its persistent consumer'); }
+  return completed;
 }
 
 export async function processVideoDeliveryQueueBatch(options: WorkerOptions = {}): Promise<VideoDeliveryWorkerResult> {

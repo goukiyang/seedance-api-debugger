@@ -5,6 +5,14 @@
 .page button:disabled { opacity: .48; cursor: not-allowed; }
 .page button:focus-visible, .page input:focus-visible, .page select:focus-visible, .page summary:focus-visible, .collageCell:focus-visible { outline: 2px solid var(--primary, #2563eb); outline-offset: 3px; }
 .page .primary { background: var(--primary, #2463eb); border-color: var(--primary, #2463eb); color: #fff; font-weight: 650; text-decoration: none; }
+.pageTabs { display: flex; gap: 6px; margin: 18px 0; border-bottom: 1px solid var(--border-color); }
+.page .pageTabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--text-secondary); }
+.page .pageTabs button[aria-pressed=true] { border-bottom-color: var(--primary); color: var(--text-primary); }
+.workStatus { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 16px; font-size: 12px; color: var(--text-secondary); }
+.workStatus label { display: flex; align-items: center; gap: 8px; max-width: 100%; }
+.workStatus input { box-sizing: border-box; width: min(220px, 45vw); min-width: 0; min-height: 32px; padding: 5px 8px; border: 1px solid var(--border-color); border-radius: 5px; background: var(--bg-input); color: var(--text-primary); }
+.page .workStatus button { font-size: 12px; min-height: 32px; padding: 5px 8px; }
+.workStatus p { width: 100%; margin: 0; line-height: 1.7; }
 .stages { list-style: none; display: flex; align-items: center; gap: 24px; padding: 0; margin: 24px 0; font-size: 13px; color: var(--text-secondary, #627080); }
 .stages li { display: flex; gap: 8px; align-items: center; }
 .stages li > span { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--border-color, #d8dee5); border-radius: 50%; font-size: 12px; }
@@ -26,7 +34,22 @@
 .previewToolbar label { display: flex; gap: 7px; align-items: center; margin-left: auto; }
 .previewToolbar select { font-size: 12px; min-height: 30px; padding: 3px 6px; }
 .collageViewport { overflow: auto; min-height: 200px; max-height: 76vh; padding: 16px; border: 1px solid var(--border-color, #d8dee5); border-radius: 8px; background: var(--bg-tertiary, #e9edf1); }
-.collage { margin: 0 auto; flex-shrink: 0; }
+.collage { margin: 0 auto; flex-shrink: 0; container-type: inline-size; }
+.frameGrid { display: grid; box-sizing: border-box; align-items: start; }
+.frameCell { position: relative; margin: 0; min-width: 0; }
+.page .frameImage { display: flex; width: 100%; height: auto; min-height: 0; padding: 0; border-radius: 3px; border: 0; overflow: hidden; background: var(--bg-input); touch-action: pan-y; user-select: none; cursor: grab; }
+.frameImage img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.frameImage > span { padding: 10px; font-size: 12px; }
+.frameImage[aria-pressed=true] { outline: 2px solid var(--primary); outline-offset: -2px; }
+.frameCell[data-dragging=true] { z-index: 2; }
+.frameCell[data-dragging=true] .frameImage { opacity: .65; cursor: grabbing; }
+.frameFooter { display: flex; flex-direction: column; gap: 4px; padding: 6px 4px 8px; background: var(--bg-panel); min-width: 0; }
+.frameFooter input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 28px; padding: 3px 5px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-input); color: inherit; font-size: 11px; }
+.frameFooter small { color: var(--text-secondary); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.frameActions { display: flex; flex-wrap: wrap; gap: 3px; }
+.page .frameActions button { min-height: 28px; min-width: 28px; padding: 3px 5px; font-size: 11px; }
+@media (prefers-reduced-motion: reduce) { .frameCell { transition: none !important; } }
+@media (pointer: coarse) { .page .frameActions button { min-width: 36px; min-height: 36px; } .frameFooter input { min-height: 36px; } }
 .collage svg, .partialPreview svg { display: block; width: 100%; height: auto; box-shadow: 0 3px 16px #00000010; }
 .collageCell { cursor: pointer; }
 .caption { margin: 9px 0; }

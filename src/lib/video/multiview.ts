@@ -12,6 +12,7 @@ import { mediaPreviewResponse } from '@/lib/media/preview-response';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { isSafeTaskId } from './thumbnail';
 import { multiviewDimensions, validMultiviewLayout, type MultiviewInfo, type MultiviewLayout } from './multiview-contract';
+import { parseMultiviewWorkRecipe, type MultiviewWorkRecipe } from './multiview-work-contract';
 
 const exec = promisify(execFile);
 const MAX_VIDEO = 128 * 1024 * 1024;
@@ -24,6 +25,9 @@ export class MultiviewError extends Error {
   constructor(message: string, public status = 400) { super(message); }
 }
 type Source = { version: string; source: string; local: string | null };
+// Background work is authorized by its explicit user, never by a fabricated HTTP session.
+// Without an HTTP transport context it waits for the existing delivery worker's local original.
+type MultiviewContext = { signal: AbortSignal; url?: string };
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 
 async function authorizedSource(user: SessionUser, id: string): Promise<Source> {
@@ -95,10 +99,11 @@ async function atomicWrite(file: string, data: Buffer | string) {
   try { await writeFile(temp, data, { mode: 0o600 }); await rename(temp, file); }
   finally { await rm(temp, { force: true }); }
 }
-async function downloadSource(source: Source, dir: string, request: Request) {
+async function downloadSource(source: Source, dir: string, request: MultiviewContext) {
   if (source.local) return source.local;
   const target = path.join(dir, 'source.mp4');
   if (await stat(target).then(info => info.size > 0 && info.size <= MAX_VIDEO).catch(() => false)) return target;
+  if (!request.url) throw new MultiviewError('原视频还在保存，作品会在原片就绪后继续准备', 409);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 90000);
   try {
@@ -122,7 +127,7 @@ async function downloadSource(source: Source, dir: string, request: Request) {
   } finally { clearTimeout(timeout); controller.abort(); }
 }
 const inputFlags = ['-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov,matroska,webm,avi'];
-async function preparation(user: SessionUser, id: string, request: Request, expected?: string | null) {
+async function preparation(user: SessionUser, id: string, request: MultiviewContext, expected?: string | null) {
   const source = await authorizedSource(user, id);
   if (expected && expected !== source.version) throw new MultiviewError('原视频版本已改变，请重新打开；旧选帧不会覆盖新原片', 409);
   const root = await cacheRoot();
@@ -131,7 +136,10 @@ async function preparation(user: SessionUser, id: string, request: Request, expe
   let info: MultiviewInfo | undefined;
   try {
     const saved = JSON.parse(await readFile(path.join(dir, 'info.json'), 'utf8')) as MultiviewInfo;
-    if (saved.sourceVersion === source.version && saved.taskId === id && saved.timestamps.length) info = saved;
+    if (saved.sourceVersion === source.version && saved.taskId === id && Number.isInteger(saved.width) && Number.isInteger(saved.height)
+      && saved.width > 0 && saved.height > 0 && saved.width * saved.height <= 16777216 && Number.isFinite(saved.duration)
+      && saved.duration > 0 && saved.duration <= 180 && Array.isArray(saved.timestamps) && saved.timestamps.length >= 8 && saved.timestamps.length <= 21600
+      && saved.timestamps.every((time, index) => Number.isFinite(time) && time >= 0 && (index === 0 || time >= saved.timestamps[index - 1]))) info = saved;
   } catch {}
   if (!info) info = await once(`${source.version}:prepare`, async () => {
     await pruneCache(root, source.version);
@@ -161,7 +169,16 @@ export async function multiviewInfo(user: SessionUser, id: string, request: Requ
   if ((await authorizedSource(user, id)).version !== prepared.source.version) throw new MultiviewError('原视频已改变，请重新打开', 409);
   return prepared.info;
 }
-async function frameFile(prepared: Awaited<ReturnType<typeof preparation>>, frame: number, request: Request) {
+export async function multiviewSourceVersion(user: SessionUser, id: string) {
+  return (await authorizedSource(user, id)).version;
+}
+export async function multiviewInfoForWork(user: SessionUser, id: string, expectedVersion?: string, signal?: AbortSignal) {
+  const context: MultiviewContext = { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(90000)]) : AbortSignal.timeout(90000) };
+  const prepared = await preparation(user, id, context, expectedVersion);
+  if ((await authorizedSource(user, id)).version !== prepared.source.version) throw new MultiviewError('原视频已改变，请重新打开', 409);
+  return prepared.info;
+}
+async function frameFile(prepared: Awaited<ReturnType<typeof preparation>>, frame: number, request: MultiviewContext) {
   if (!Number.isInteger(frame) || frame < 0 || frame >= prepared.info.timestamps.length) throw new MultiviewError('帧位置无效');
   const output = path.join(prepared.dir, `frame-${frame}.png`);
   if (await stat(output).then(info => info.isFile() && info.size > 0).catch(() => false)) return output;
@@ -202,6 +219,50 @@ export async function multiviewExport(user: SessionUser, id: string, request: Re
   try { return await createMultiviewExport(user, id, request, body); }
   finally { exportCount -= 1; }
 }
+function composeMultiviewPng(info: MultiviewInfo, files: Buffer[], layout: MultiviewLayout) {
+  const dimensions = multiviewDimensions(info, files.length, layout);
+  if (dimensions.width * dimensions.height > 64000000) throw new MultiviewError('拼图超过 6400 万像素，请减少图片数量或留白，或下载原尺寸单图包；不会缩小原图');
+  const columns = Math.min(layout.columns, files.length);
+  return sharp({ create: { ...dimensions, channels: 3, background: layout.background } }).composite(files.map((input, index) => ({ input,
+    left: layout.margin + (index % columns) * (info.width + layout.gap),
+    top: layout.margin + Math.floor(index / columns) * (info.height + layout.gap) }))).timeout({ seconds: 60 }).png().toBuffer();
+}
+function packMultiviewFrames(info: MultiviewInfo, files: Buffer[], frames: number[], names: string[]) {
+  const zip = new ZipFile();
+  files.forEach((file, index) => zip.addBuffer(file, `view-${String(index + 1).padStart(2, '0')}.png`, { compress: false }));
+  zip.addBuffer(Buffer.from(JSON.stringify({ taskId: info.taskId, sourceVersion: info.sourceVersion, width: info.width, height: info.height,
+    frames: frames.map((frame, index) => ({ file: `view-${String(index + 1).padStart(2, '0')}.png`, frame, time: info.timestamps[frame], name: names[index] || '' })),
+    note: '从原视频选帧，角度由用户确认；未缩放、裁剪或去除背景。' }, null, 2)), 'frames.json');
+  const chunks: Buffer[] = [];
+  const result = new Promise<Buffer>((resolve, reject) => {
+    zip.outputStream.on('data', chunk => chunks.push(chunk)); zip.outputStream.on('end', () => resolve(Buffer.concat(chunks)));
+    zip.outputStream.on('error', reject); zip.on('error', reject);
+  });
+  zip.end();
+  return result;
+}
+/** Same authorized preparation/decoder/export core as HTTP; no fabricated Request or self-call. */
+export async function renderMultiviewWork(user: SessionUser, id: string, recipe: MultiviewWorkRecipe, signal: AbortSignal) {
+  signal.throwIfAborted();
+  const context: MultiviewContext = { signal };
+  const prepared = await preparation(user, id, context, recipe.sourceVersion);
+  const parsed = parseMultiviewWorkRecipe(recipe, prepared.info);
+  if (!parsed) throw new MultiviewError('作品选帧设置无效，原配方保持不变');
+  const dimensions = multiviewDimensions(prepared.info, parsed.slots.length, parsed.layout);
+  if (dimensions.width * dimensions.height > 64000000) throw new MultiviewError('拼图超过 6400 万像素，请减少图片数量或留白；原配方保持不变');
+  const files: Buffer[] = [];
+  for (const slot of parsed.slots) {
+    signal.throwIfAborted();
+    files.push(await readFile(await frameFile(prepared, slot.frame, context)));
+  }
+  signal.throwIfAborted();
+  const collage = await composeMultiviewPng(prepared.info, files, parsed.layout);
+  signal.throwIfAborted();
+  const zip = await packMultiviewFrames(prepared.info, files, parsed.slots.map(slot => slot.frame), parsed.slots.map(slot => slot.name));
+  signal.throwIfAborted();
+  if ((await authorizedSource(user, id)).version !== recipe.sourceVersion) throw new MultiviewError('原视频已改变，请重新打开；旧选帧保持不变', 409);
+  return { info: prepared.info, frames: parsed.slots.map((slot, index) => ({ slotId: slot.id, data: files[index] })), collage, zip };
+}
 async function createMultiviewExport(user: SessionUser, id: string, request: Request, body: Record<string, unknown>) {
   if (typeof body.version !== 'string' || !/^[a-f0-9]{64}$/.test(body.version) || !Array.isArray(body.frames)
     || !body.frames.length || body.frames.length > 8 || !body.frames.every(Number.isInteger) || !validMultiviewLayout(body.layout)
@@ -215,27 +276,11 @@ async function createMultiviewExport(user: SessionUser, id: string, request: Req
   for (const frame of frames) files.push(await readFile(await frameFile(prepared, frame, request)));
   if ((await authorizedSource(user, id)).version !== body.version) throw new MultiviewError('原视频已改变，请重新打开', 409);
   if (body.format === 'png') {
-    const columns = Math.min(layout.columns, frames.length);
-    const data = await once(`${prepared.source.version}:export:${digest(JSON.stringify(body))}`, () => sharp({ create: { ...dimensions, channels: 3, background: layout.background } }).composite(files.map((input, index) => ({ input,
-      left: layout.margin + (index % columns) * (prepared.info.width + layout.gap),
-      top: layout.margin + Math.floor(index / columns) * (prepared.info.height + layout.gap) }))).png().toBuffer());
+    const data = await once(`${prepared.source.version}:export:${digest(JSON.stringify(body))}`, () => composeMultiviewPng(prepared.info, files, layout));
     return { data, mime: 'image/png', name: `multiview-${id}.png` };
   }
-  const data = await once(`${prepared.source.version}:export:${digest(JSON.stringify(body))}`, async () => {
-  const zip = new ZipFile();
-  files.forEach((file, index) => zip.addBuffer(file, `view-${String(index + 1).padStart(2, '0')}.png`, { compress: false }));
-  zip.addBuffer(Buffer.from(JSON.stringify({ taskId: id, sourceVersion: body.version, width: prepared.info.width, height: prepared.info.height,
-    frames: frames.map((frame, index) => ({ file: `view-${String(index + 1).padStart(2, '0')}.png`, frame, time: prepared.info.timestamps[frame],
-      name: Array.isArray(body.names) && typeof body.names[index] === 'string' ? body.names[index].slice(0, 40) : '' })),
-    note: '从原视频选帧，角度由用户确认；未缩放、裁剪或去除背景。' }, null, 2)), 'frames.json');
-  const chunks: Buffer[] = [];
-  const result = new Promise<Buffer>((resolve, reject) => {
-    zip.outputStream.on('data', chunk => chunks.push(chunk)); zip.outputStream.on('end', () => resolve(Buffer.concat(chunks)));
-    zip.outputStream.on('error', reject); zip.on('error', reject);
-  });
-  zip.end();
-  return result;
-  });
+  const names = frames.map((_, index) => Array.isArray(body.names) && typeof body.names[index] === 'string' ? body.names[index].slice(0, 40) : '');
+  const data = await once(`${prepared.source.version}:export:${digest(JSON.stringify(body))}`, () => packMultiviewFrames(prepared.info, files, frames, names));
   return { data, mime: 'application/zip', name: `multiview-${id}.zip` };
 }
 export function multiviewFailure(error: unknown) {

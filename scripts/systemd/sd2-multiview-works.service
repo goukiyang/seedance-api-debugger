@@ -1,0 +1,31 @@
+[Unit]
+Description=sd2 private multiview work renderer
+After=network.target
+RequiresMountsFor=/data/video-api-debugger/var-lib/storage
+
+[Service]
+Type=simple
+User=gouki
+Group=gouki
+# Release tooling must bind this to the exact verified /data release via a source drop-in.
+# The unbound sample deliberately cannot start against the old /srv application.
+WorkingDirectory=/data/video-api-debugger/releases/UNBOUND_MULTIVIEW_WORK_SOURCE
+EnvironmentFile=/srv/video-api-debugger/app/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node --import tsx scripts/process-multiview-works.ts
+UMask=0077
+Restart=on-failure
+RestartSec=30
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=12min
+SendSIGKILL=no
+CPUQuota=100%
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
