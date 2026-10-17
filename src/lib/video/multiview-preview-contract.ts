@@ -42,7 +42,7 @@ export function multiviewPreviewChunkIndex(frame: number) {
 }
 
 export function multiviewPreviewRetainedChunks(target: number, available: number[], limit = 2) {
-  return [...new Set(available)].sort((a, b) => Math.abs(a - target) - Math.abs(b - target) || a - b).slice(0, limit);
+  return Array.from(new Set(available)).sort((a, b) => Math.abs(a - target) - Math.abs(b - target) || a - b).slice(0, limit);
 }
 
 export function createMultiviewLatestTargetGate() {
