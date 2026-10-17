@@ -225,7 +225,8 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
       if (!matchedReceipt(data.receipt, original) || !data.work || data.work.id !== data.receipt.workId) throw new Error('保存结果待确认，请核对原操作；当前作品与输入保持不变');
       const stillViewing = workRef.current?.id === target.id;
       clearPending(); if (stillViewing) setWork(data.work);
-      setNotice(action === 'remove' ? '已移出，可在“已移出”恢复' : action === 'restore' ? '已恢复到作品库' : action === 'branch' ? '已另存一版，正在准备拼图' : '作品名称已保存');
+      setNotice(action === 'remove' ? '已移出，可在“已移出”恢复' : action === 'restore' ? '已恢复到作品库' : action === 'branch' ? '已另存一版，正在准备拼图'
+        : target.status === 'failed' ? '选帧已保存，正在重新准备拼图；不会重新生成或扣费' : '作品名称已保存');
       void fetchList(); if (action === 'branch' && stillViewing) navigate(data.work.id);
     } catch (error) { if (alive(captured)) setNotice(error instanceof Error ? error.message : '保存结果待确认，请核对原操作'); }
   };
@@ -242,7 +243,8 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
         const captured = identity, id = work.id;
         void fetchList(true).then(next => { if (alive(captured) && workRef.current?.id === id && next?.[0]) navigate(next[0].id); });
       } : undefined}
-      onEdit={onEdit} onRename={rename} onBranch={() => void mutate('branch')} onRemove={() => void mutate(work.removed ? 'restore' : 'remove')} onRefresh={() => void fetchDetail(work.id)} /> : <>
+      onEdit={onEdit} onRename={rename} onBranch={() => void mutate('branch')} onRemove={() => void mutate(work.removed ? 'restore' : 'remove')}
+      onRefresh={() => void fetchDetail(work.id)} onRetry={() => void mutate('save', work.title)} /> : <>
       <div className={styles.filters}>
         <label>项目<select value={preferences.projectId} onChange={event => savePreferences({ ...preferences, projectId: event.target.value, selected: '', y: 0 })}>
           <option value="">全部项目</option>{projects.map(project => <option key={project.id} value={project.id}>{project.title}</option>)}</select></label>

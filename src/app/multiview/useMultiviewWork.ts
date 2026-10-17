@@ -306,9 +306,13 @@ export function useMultiviewWork(options: Options) {
   return { work, title, phase, loading, busy, pending: Boolean(pending), conflict, message, storageFailed, changed,
     unsaved: storageFailed && (editedTitle.current || Boolean(pending)),
     canBranch: Boolean(work?.recipe && options.info && work.sourceVersion === options.info.sourceVersion && work.sourceState === 'current' && !work.removed && title.trim() && !pending && !busy),
-    canRetrySave: Boolean(stopped && hydrated && work?.recipe && !conflict && !pending && !storageFailed),
+    canRetrySave: Boolean((stopped || work?.status === 'failed') && hydrated && work?.recipe && work.sourceState === 'current'
+      && !work.removed && !conflict && !pending && !busy && !storageFailed),
     setTitle: (value: string) => { editedTitle.current = true; setTitle(value); }, openServer,
     create: () => send('create'), branch: () => send('branch'), queryOriginal,
-    retry: () => { setRetry(value => value + 1); }, retrySave: () => { setStopped(false); setMessage(''); },
+    retry: () => { setRetry(value => value + 1); }, retrySave: () => {
+      if (workRef.current?.status === 'failed') void sendRef.current('save');
+      else { setStopped(false); setMessage(''); }
+    },
   };
 }

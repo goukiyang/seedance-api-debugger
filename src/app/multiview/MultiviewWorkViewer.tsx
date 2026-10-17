@@ -18,7 +18,7 @@ export type WorkViewerProps = {
   owner: string; authority: string; work: MultiviewWorkDto; busy: boolean;
   onBack: () => void; onPrevious?: () => void; onNext?: () => void;
   onEdit: (work: MultiviewWorkDto) => void; onRename: (title: string) => void;
-  onBranch: () => void; onRemove: () => void; onRefresh: () => void;
+  onBranch: () => void; onRemove: () => void; onRefresh: () => void; onRetry: () => void;
 };
 const statusText = (work: MultiviewWorkDto) => work.sourceState === 'changed' ? '原视频已变化，保留上次成品'
   : work.ready?.revision === work.draftRevision && work.status === 'ready' ? '已保存'
@@ -173,6 +173,7 @@ export function MultiviewWorkViewer(props: WorkViewerProps) {
       <button type="button" className={styles.button} disabled={!ready || reading || busy} onClick={() => perform('png')}><Download size={16} />下载PNG</button>
       <button type="button" className={styles.button} disabled={!ready || reading || busy} onClick={() => perform('zip')}>下载单图ZIP</button>
       {mode === 'single' && <button type="button" className={styles.button} disabled={!slot || reading || busy} onClick={() => perform('single')}>下载当前单张</button>}
+      {work.status === 'failed' && <button type="button" className={styles.button} disabled={busy || work.removed || !work.recipe || work.sourceState !== 'current'} onClick={props.onRetry}>重新准备拼图</button>}
       <button type="button" className={styles.button} disabled={busy} onClick={props.onRefresh}><RefreshCw size={15} />重新核对</button>
     </footer>
     <p role="status" className={styles.notice}>{notice || work.lastError || ''}</p>
