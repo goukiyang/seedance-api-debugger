@@ -4,7 +4,7 @@
   z-index: 4000;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  background: oklch(0.11 0 0 / 0.92);
+  background: rgb(0 0 0 / 72%);
   color: oklch(0.97 0 0);
   overscroll-behavior: none;
   touch-action: auto;
@@ -53,6 +53,7 @@
 .sourceThumb[data-active="true"] { border-color: #70cfbd; box-shadow: inset 0 0 0 1px #70cfbd; }
 .sourceThumb[data-active="true"]::after { content: ''; position: absolute; right: 2px; bottom: 2px; width: 5px; height: 5px; border-radius: 50%; background: #70cfbd; }
 .toolbar .zoomTrigger { width: 76px; gap: 4px; font-variant-numeric: tabular-nums; }
+.toolbar .fitButton { width: auto; padding-inline: 8px; white-space: nowrap; }
 .toolbar .compareToggle[aria-pressed="true"] { background: #214a42; border-color: #70cfbd; }
 .toolbar .closeButton { background: #20272b; }
 .toolbar .downloadAction { width: auto; min-width: 38px; padding-inline: 8px; gap: 6px; text-decoration: none; white-space: nowrap; }
@@ -60,12 +61,10 @@
 
 .controlsPopover {
   box-sizing: border-box;
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 8px;
+  z-index: 5;
   width: 280px;
-  max-width: calc(100vw - 16px);
-  max-height: calc(100dvh - 76px);
+  max-width: min(calc(100vw - 16px), var(--radix-popper-available-width, calc(100vw - 16px)));
+  max-height: min(calc(100dvh - 16px), var(--radix-popper-available-height, calc(100dvh - 16px)));
   overflow-y: auto;
   overscroll-behavior: contain;
   touch-action: auto;
@@ -109,7 +108,7 @@
 .compareHorizontal { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .compareVertical { grid-template-rows: repeat(2, minmax(0, 1fr)); }
 .singleFrame { grid-template-columns: minmax(0, 1fr); }
-.comparePane { position: relative; min-width: 0; min-height: 0; overflow: hidden; border: 1px solid oklch(0.9 0 0 / 0.12); background: oklch(0.12 0 0); cursor: grab; touch-action: none; }
+.comparePane { position: relative; min-width: 0; min-height: 0; overflow: hidden; border: 1px solid oklch(0.9 0 0 / 0.12); background: transparent; cursor: grab; touch-action: none; }
 .comparePane:active { cursor: grabbing; }
 .comparePane[data-active="true"] { border-color: oklch(0.9 0 0 / 0.4); box-shadow: none; }
 .comparePane:focus-visible { outline: 2px solid oklch(0.9 0 0); outline-offset: -3px; }
@@ -123,21 +122,13 @@
 
 @media (max-width: 640px) {
   .toolbar { padding-inline: 8px; gap: 4px; }
-  .toolbar .zoomTrigger { width: 38px; }
-  .zoomTrigger > span { display: none; }
   .toolbar .downloadAction { width: 38px; padding: 0; }
   .downloadAction > span { display: none; }
   .desktopNavigation { display: none; }
   .mobileNavigation { display: grid; gap: 8px; }
   .compareFrame { inset: 8px; gap: 6px; }
 }
-.nextActions { grid-column: 1 / -1; justify-self: center; min-width: 0; max-width: 100%; }
-.nextActions > div { display: flex; flex-wrap: wrap; gap: 5px; }
-.nextActions > div button { display: inline-flex; align-items: center; gap: 5px; min-height: 34px; width: auto; height: auto; padding: 6px 9px; border: 1px solid #414b48; border-radius: 4px; background: #202725; color: #e0e9e5; font-size: 13px; cursor: pointer; }
-.nextActions > div button:hover { background: #303c37; }
-.nextActions > div button:disabled { opacity: .5; cursor: default; }
-.nextActions small { display: block; margin-top: 3px; font-size: 12px; color: #bbcfc6; line-height: 1.45; }
-.nextActions p { margin: 5px 0; max-width: 36ch; font-size: 13px; color: #d5e5dc; overflow-wrap: anywhere; }
-.nextActions a { margin-left: 7px; color: #a5e5d7; text-decoration: underline; }
-.nextActions button:focus-visible, .nextActions a:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
-@media (max-width: 640px) { .nextActions { flex-basis: 100%; max-width: none; } .nextActions > div button { min-height: 40px; } }
+@media (max-width: 560px) {
+  .toolbar { grid-template-columns: minmax(0, 1fr) auto; }
+  .compareSources { grid-column: 1 / -1; grid-row: 2; }
+}

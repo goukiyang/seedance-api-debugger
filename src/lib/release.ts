@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '加固图片链路构建与发布检查，防止未完成检查误报通过；补齐同类队列的公平扫描，保留素材、参数及原请求，不会重新生成或重复扣费。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '图片上限提示显示已有任务数与本次数量；大图恢复半透明黑底，直接适合窗口，精简创作按钮并让选项靠近入口。保留原图、参数与原请求，不会重新生成或扣费。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

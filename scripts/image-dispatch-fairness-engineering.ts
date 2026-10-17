@@ -14,7 +14,7 @@ type Kind = 'batch' | 'toolflow';
 type Call = { kind: Kind; candidateQueries: number; loaded: number[]; checked: string[] };
 type ObservedBatch = { id?: string; key?: string; updated_at?: Date };
 type ObservedRun = { id?: string; created_at?: Date };
-const sourcePaths = ['src/lib/image-studio/batches.ts', 'src/lib/tools/toolflow-runtime.ts'];
+const sourcePaths = ['src/lib/image-studio/batches.ts', 'src/lib/tools/toolflow-runtime.ts', 'src/lib/image-studio/queue-capacity.ts'];
 const sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 
 /** Fresh SQLite and actual dispatch functions only. No generation worker is started. */
@@ -346,7 +346,13 @@ async function main() {
       assert.equal(staleWrite.count, 0, 'The unchanged expected-JSON CAS rejects the stale write in real SQLite');
       checks.push('candidate_exception_does_not_pin_scan');
 
-      const { reserveImageStudioQueueCapacity, QueueCapacityError } = await import('../src/lib/image-studio/queue-capacity');
+      const { imageStudioQueueCapacity, reserveImageStudioQueueCapacity, QueueCapacityError } = await import('../src/lib/image-studio/queue-capacity');
+      assert.equal(imageStudioQueueCapacity(7, 1).allowed, true);
+      assert.equal(new QueueCapacityError(imageStudioQueueCapacity(7, 2)).message,
+        '当前账号全部图片任务已有 7 张未结束，本次 2 张会超过同时 8 张上限，请等待已有任务结束。');
+      assert.equal(new QueueCapacityError(imageStudioQueueCapacity(3, 2, 4)).message,
+        '当前账号全部图片任务已有 3 张未结束，本次 2 张会超过同时 4 张上限，请等待已有任务结束。');
+      assert.equal(new QueueCapacityError().message, '当前账号图片任务已达容量限制，请等待已有任务结束。');
       const activeStatuses = ['queued', 'running', 'channel_queued', 'channel_running'];
       const activeCount = await database.imageStudioTask.count({ where: { owner_id: owners[0], status: { in: activeStatuses } } });
       assert.ok(activeCount <= 8);
@@ -356,7 +362,12 @@ async function main() {
         reference_ids: '[]', unit_credits: 0, status: 'queued',
       } });
       await assert.rejects(database.$transaction(tx => reserveImageStudioQueueCapacity(tx, owners[0], 1)),
-        (error: unknown) => error instanceof QueueCapacityError);
+        (error: unknown) => {
+          assert.ok(error instanceof QueueCapacityError);
+          assert.equal(error.message, '当前账号全部图片任务已有 8 张未结束，本次 1 张会超过同时 8 张上限，请等待已有任务结束。');
+          assert.equal(error.code, 'image_queue_capacity'); assert.equal(error.status, 429);
+          return true;
+        });
 
       // A real new Node process reloads both modules with absent memory cursors.
       // Its database path is this freshly created fixture, never a caller URL.

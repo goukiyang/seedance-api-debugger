@@ -8,8 +8,10 @@ export const ACTIVE_IMAGE_TASK_STATUSES = ['queued', 'running', 'channel_queued'
 export class QueueCapacityError extends Error {
   readonly code = 'image_queue_capacity';
   readonly status = 429;
-  constructor() {
-    super('最多同时生成 8 张，请等待当前任务完成');
+  constructor(capacity?: { active: number; requested: number; limit: number }) {
+    super(capacity
+      ? `当前账号全部图片任务已有 ${capacity.active} 张未结束，本次 ${capacity.requested} 张会超过同时 ${capacity.limit} 张上限，请等待已有任务结束。`
+      : '当前账号图片任务已达容量限制，请等待已有任务结束。');
     this.name = 'QueueCapacityError';
   }
 }
@@ -54,6 +56,6 @@ export async function reserveImageStudioQueueCapacity(
   });
   const synchronousCount = await countSynchronousImageAdmissions(tx, ownerId);
   const capacity = imageStudioQueueCapacity(activeCount + synchronousCount, requestedCount);
-  if (!capacity.allowed) throw new QueueCapacityError();
+  if (!capacity.allowed) throw new QueueCapacityError(capacity);
   return capacity;
 }

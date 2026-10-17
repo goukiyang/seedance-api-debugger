@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import * as Popper from '@radix-ui/react-popper';
 import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, Check, Copy, Download, Lock, Unlock, MoreHorizontal, Plus, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { copyImage } from '@/lib/media/copy-image';
 import styles from './ZoomableImagePreview.module.css';
@@ -20,7 +21,6 @@ import { RelativeTime } from '@/components/RelativeTime';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { useImagePreviewHistoryDismiss } from './useImagePreviewHistoryDismiss';
 import { ImageComparisonPicker } from './ImageComparisonPicker';
-import { ImageResultNextActions } from './ImageResultNextActions';
 import {
   fittedImageView, imageSourceIdentity, imageDisplaySource as displaySource, sourcePickerKey, resolveComparisonImage,
   readComparisonPreferences, saveComparisonPreferences, readImageView, saveImageView,
@@ -256,7 +256,7 @@ type ImageRequest = { token: number; controller: AbortController; releasePriorit
 const sides: Side[] = ['current', 'comparison'];
 const viewIdentity = (side: Side, image: ImageComparisonSource) => imageSourceIdentity(image) + ':' + side;
 
-export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, previewKey, sourceVersion, sourceRole, imageNeighbors = [], preparation, contentKey, nextActionSources = [], nextActionResultId, imageSharing = true, previewOnly = false, metadata, safeDetails, comparison, comparisonCandidates = [], details, notice, hasNavigation, onPrevious, onNext, onImageLoaded, resolveDownload, onClose }: ZoomableImagePreviewProps) {
+export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, previewKey, sourceVersion, sourceRole, imageNeighbors = [], preparation, contentKey, imageSharing = true, previewOnly = false, metadata, safeDetails, comparison, comparisonCandidates = [], details, notice, hasNavigation, onPrevious, onNext, onImageLoaded, resolveDownload, onClose }: ZoomableImagePreviewProps) {
   const { user, hasLoadedUser, userLoadError, sessionChanged } = useAppSession();
   const owner = user?.id || '';
   const account = hasLoadedUser && !userLoadError && !sessionChanged ? `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` : '';
@@ -281,6 +281,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const [comparisonMode, setComparisonMode] = useState(false), [linked, setLinked] = useState(false);
   const [axis, setAxis] = useState<'horizontal' | 'vertical'>('horizontal'), [activeSide, setActiveSide] = useState<Side>('current');
   const [pickerSide, setPickerSide] = useState<Side | null>(null);
+  const pickerTriggerRef = useRef<HTMLButtonElement | null>(null);
   const requests = useRef<Partial<Record<Side, ImageRequest>>>({}), sequence = useRef(0);
   const [views, setViews] = useState<Record<string, ImageView>>({});
   const viewsRef = useRef(views); viewsRef.current = views;
@@ -304,6 +305,8 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const controlsId = useId();
   const [controlsOpen, setControlsOpen] = useState<'zoom' | 'more' | null>(null);
   const controlsRef = useRef<HTMLDivElement>(null), zoomTriggerRef = useRef<HTMLButtonElement>(null), moreTriggerRef = useRef<HTMLButtonElement>(null);
+  const controlsAnchorRef = controlsOpen === 'zoom' ? zoomTriggerRef : moreTriggerRef;
+  const closeControls = () => { setControlsOpen(null); controlsAnchorRef.current?.focus({ preventScroll: true }); };
   const dismissPreview = useImagePreviewHistoryDismiss(Boolean(portalRoot), controlsOpen ? controlsRef : backdropRef, onClose);
   const safeSide = comparisonMode && comparisonImage ? activeSide : 'current';
   const safeSideRef = useRef(safeSide); safeSideRef.current = safeSide;
@@ -450,7 +453,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   useDialogDismiss({ open: Boolean(portalRoot), dialogRef: backdropRef, dismissSurfaceRef: backdropRef,
     onDismiss: dismissPreview, initialFocusRef: backdropRef, dismissOnOutside: false });
   useDialogDismiss({ open: Boolean(controlsOpen && portalRoot), dialogRef: controlsRef, modal: false,
-    branchRefs: [zoomTriggerRef, moreTriggerRef], onDismiss: () => setControlsOpen(null) });
+    branchRefs: [zoomTriggerRef, moreTriggerRef], restoreFocus: false, onDismiss: closeControls });
   useEffect(() => {
     if (!controlsOpen) return;
     stopGestures();
@@ -740,7 +743,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const candidates = Array.from(new Map([incoming, ...(comparison ? [comparison] : []), ...comparisonCandidates].filter(image => image.src).map(image => [identity(image), image])).values());
   function thumbnail(side: Side) {
     const image = sources[side];
-    return <button type="button" className={styles.sourceThumb} data-active={safeSide === side} title={`选择或更换${sideLabel(side)}`} aria-label={`选择或更换${sideLabel(side)}${safeSide === side ? '，当前选中' : ''}`} onClick={() => { userAction.current++; stopGestures(); setControlsOpen(null); setPickerSide(side); }}>
+    return <button type="button" className={styles.sourceThumb} data-active={safeSide === side} title={`选择或更换${sideLabel(side)}`} aria-label={`选择或更换${sideLabel(side)}${safeSide === side ? '，当前选中' : ''}`} aria-haspopup="dialog" aria-expanded={pickerSide === side} onClick={event => { pickerTriggerRef.current = event.currentTarget; event.currentTarget.focus({ preventScroll: true }); userAction.current++; stopGestures(); setControlsOpen(null); setPickerSide(side); }}>
       {image ? <img src={image.thumbnailSrc || displaySource(image.src, 'thumbnail')} alt="" draggable={false} /> : <Plus size={20} />}
       <span className={styles.srOnly}>{sideLabel(side)}</span>
     </button>;
@@ -757,23 +760,26 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
     onLostPointerCaptureCapture={() => { if (!blankPress.current?.released) blankPress.current = null; }}
     onPointerDown={event => event.stopPropagation()} onPointerMove={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()}
     onDoubleClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onKeyUp={event => event.stopPropagation()}>
-    <div ref={toolbarRef} className={styles.toolbar}>
+    <div ref={toolbarRef} className={styles.toolbar} onClickCapture={event => {
+      // Keep nested shared confirmations tied to the real clicked control, including Safari.
+      if (event.target instanceof Element) event.target.closest<HTMLButtonElement>('button')?.focus({ preventScroll: true });
+    }}>
       <div className={styles.sourceGroup}>
         {hasNavigation && <div className={styles.desktopNavigation}><button type="button" title="当前图上一张" aria-label="当前图上一张" onClick={onPrevious}><ArrowLeft size={16} /></button><button type="button" title="当前图下一张" aria-label="当前图下一张" onClick={onNext}><ArrowRight size={16} /></button></div>}
         <button ref={zoomTriggerRef} type="button" className={styles.zoomTrigger} title="缩放选中图" aria-label={`${safeSide === 'current' ? '当前图' : '对比图'}缩放 ${Math.round(selectedView.scale * 100)}%${comparisonMode && linked ? '，联动已开启' : ''}`} aria-expanded={controlsOpen === 'zoom'} aria-controls={controlsOpen === 'zoom' ? controlsId : undefined} aria-haspopup="dialog" onClick={() => setControlsOpen(value => value === 'zoom' ? null : 'zoom')}><ZoomIn size={16} /><span>{Math.round(selectedView.scale * 100)}%</span></button>
+        <button type="button" className={styles.fitButton} aria-pressed={selectedView.mode === 'fit'} title={`让${sideLabel(safeSide)}适合窗口`} onClick={() => applyMode('fit')}>适合窗口</button>
       </div>
       <div className={styles.compareSources} role="group" aria-label="图片对比">{thumbnail(paneOrder[0])}<button type="button" className={styles.compareToggle} data-image-preview-compare aria-pressed={comparisonMode} title={comparisonMode ? '退出对比' : '开启对比'} aria-label={comparisonMode ? '退出对比' : '开启对比'}
-          onClick={() => { userAction.current++; stopGestures(); if (comparisonMode) { setComparisonMode(false); setActiveSide('current'); }
-            else if (comparisonImage) setComparisonMode(true); else { setControlsOpen(null); setPickerSide('comparison'); } }}><ArrowLeftRight size={16} /></button>{thumbnail(paneOrder[1])}</div>
+          onClick={event => { userAction.current++; stopGestures(); if (comparisonMode) { setComparisonMode(false); setActiveSide('current'); }
+            else if (comparisonImage) setComparisonMode(true); else { pickerTriggerRef.current = event.currentTarget; setControlsOpen(null); setPickerSide('comparison'); } }}><ArrowLeftRight size={16} /></button>{thumbnail(paneOrder[1])}</div>
       <div className={styles.actions}>
         {hasOriginalDownloadUrl ? <a className={styles.downloadAction} href={originalDownloadSource} download={selectedImage.fileName || 'original-image'} title={`下载${sideLabel(safeSide)}原图`} aria-label={`下载${sideLabel(safeSide)}原图`}><Download size={16} /><span>下载原图</span></a>
           : downloadSelectedSource && <button type="button" className={styles.downloadAction} disabled={downloadBusy} title={downloadBusy ? '准备下载原图' : `下载${sideLabel(safeSide)}原图`} aria-label={downloadBusy ? '准备下载原图' : `下载${sideLabel(safeSide)}原图`} aria-busy={downloadBusy} onClick={downloadOriginal}><Download size={16} /><span>{downloadBusy ? '准备下载' : '下载原图'}</span></button>}
         <button ref={moreTriggerRef} type="button" title="图片与对比更多操作" aria-label="图片与对比更多操作" aria-expanded={controlsOpen === 'more'} aria-controls={controlsOpen === 'more' ? controlsId : undefined} aria-haspopup="dialog" onClick={() => setControlsOpen(value => value === 'more' ? null : 'more')}><MoreHorizontal size={18} /></button>
         <button type="button" className={styles.closeButton} onClick={dismissPreview} title="关闭大图" aria-label="关闭大图"><X size={18} /></button>
       </div>
-      {!previewOnly && selectedImage.contentKey && nextActionSources.includes(selectedImage.contentKey) && <ImageResultNextActions key={`next:${owner}:${selectedImage.contentKey}`} sourceKey={selectedImage.contentKey} resultId={isOriginalSubject ? nextActionResultId : undefined} className={styles.nextActions} />}
-      {controlsOpen && <div ref={controlsRef} id={controlsId} className={styles.controlsPopover} role="dialog" aria-label={controlsOpen === 'zoom' ? '缩放选中图' : '图片与对比更多操作'}>
-        <header><strong>{sideLabel(safeSide)}{controlsOpen === 'zoom' ? '缩放' : '操作'}</strong><button type="button" title="收起操作" aria-label="收起操作" onClick={() => setControlsOpen(null)}><X size={16} /></button></header>
+      {controlsOpen && <Popper.Root key={controlsOpen}><Popper.Anchor virtualRef={controlsAnchorRef} /><Popper.Content ref={controlsRef} id={controlsId} className={styles.controlsPopover} role="dialog" aria-label={controlsOpen === 'zoom' ? '缩放选中图' : '图片与对比更多操作'} side="bottom" align={controlsOpen === 'zoom' ? 'start' : 'end'} sideOffset={6} collisionPadding={8} sticky="always" hideWhenDetached>
+        <header><strong>{sideLabel(safeSide)}{controlsOpen === 'zoom' ? '缩放' : '操作'}</strong><button type="button" title="收起操作" aria-label="收起操作" onClick={closeControls}><X size={16} /></button></header>
         {controlsOpen === 'zoom' ? <>
           <label className={styles.zoomMode}><span>显示比例</span><select aria-label="选中图显示比例" value={selectedView.mode} onChange={event => applyMode(event.target.value as MediaPreviewZoomMode)}><option value="fit">适合窗口</option><option value="width">适合宽度</option><option value="actual">实际像素</option><option value="custom" disabled>手动缩放</option></select></label>
           <div className={styles.popoverRow}><button type="button" onClick={() => zoomFromControls(1 / SCALE_STEP)} title="缩小选中图" aria-label="缩小选中图"><ZoomOut size={16} /></button><span>{Math.round(selectedView.scale * 100)}%</span><button type="button" onClick={() => zoomFromControls(SCALE_STEP)} title="放大选中图" aria-label="放大选中图"><ZoomIn size={16} /></button><button type="button" onClick={() => reset()} title="还原选中图" aria-label="还原选中图"><RotateCcw size={16} /></button></div>
@@ -800,7 +806,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
           </div>
           {isOriginalSubject && details != null && <details className={styles.detailDisclosure}><summary>详情</summary><div className={styles.detailContent}>{details}</div></details>}
         </>}
-      </div>}
+      </Popper.Content></Popper.Root>}
     </div>
     <div ref={stageRef} className={styles.stage} data-image-preview-stage onAuxClick={event => event.preventDefault()}>
       {(message || copyState?.src === copySource && copyState.message || isOriginalSubject && notice != null) && <div className={styles.notice} role="status">{message || (copyState?.src === copySource ? copyState.message : null)}{isOriginalSubject && notice}</div>}
@@ -809,7 +815,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
       </div>
     </div>
   </div>, portalRoot)}
-  {portalRoot && pickerSide && <ImageComparisonPicker side={pickerSide} container={portalRoot} candidates={candidates}
+  {portalRoot && pickerSide && <ImageComparisonPicker side={pickerSide} container={portalRoot} anchorRef={pickerTriggerRef} candidates={candidates}
     onSelect={image => choose(pickerSide, image)} onLocal={file => chooseLocal(pickerSide, file)}
     onClose={() => { cancelRequests(); setPickerSide(null); }} />}
   </>;

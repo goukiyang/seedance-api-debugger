@@ -30,7 +30,7 @@ const fixtures = [
     sources: ['src/lib/image-studio/worker.ts', 'src/lib/image-studio/provider.ts'] },
   { file: 'scripts/image-dispatch-fairness-engineering.ts', schema: 'image-dispatch-fairness-engineering.v1',
     marker: 'Image dispatch fairness engineering receipt: ', checks: dispatchChecks,
-    sources: ['src/lib/image-studio/batches.ts', 'src/lib/tools/toolflow-runtime.ts'] },
+    sources: ['src/lib/image-studio/batches.ts', 'src/lib/tools/toolflow-runtime.ts', 'src/lib/image-studio/queue-capacity.ts'] },
 ];
 const sourceFiles = ['package.json', entry, ...fixtures.flatMap(fixture => [fixture.file, ...fixture.sources])];
 const hash = value => createHash('sha256').update(value).digest('hex');

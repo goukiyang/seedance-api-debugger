@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import type { RefObject } from 'react';
 import { createPortal } from 'react-dom';
+import * as Popper from '@radix-ui/react-popper';
 import { FolderOpen, ImagePlus, RotateCcw, Search, X } from 'lucide-react';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { readJsonResponse } from '@/lib/http/json-response';
@@ -11,13 +13,13 @@ import { useDialogDismiss } from './useDialogDismiss';
 import { useImagePreviewHistoryDismiss } from './useImagePreviewHistoryDismiss';
 import styles from './ImageComparisonPicker.module.css';
 
-type Props = { side: 'current' | 'comparison'; candidates: ImageComparisonSource[]; container: HTMLElement;
+type Props = { side: 'current' | 'comparison'; candidates: ImageComparisonSource[]; container: HTMLElement; anchorRef: RefObject<HTMLElement | null>;
   onSelect: (image: ImageComparisonSource) => Promise<boolean>; onLocal: (file: File) => Promise<boolean>; onClose: () => void };
 type Preferences = { view: 'context' | 'library' | 'favorites' | 'recent'; scope: PickerScope; source: string; query: string; album: string; project: string; sort: string };
 const defaults: Preferences = { view: 'context', scope: 'mine', source: 'all', query: '', album: '', project: '', sort: 'newest' };
 const scopeLabels = { mine: '我的素材', project: '项目素材', shared: '共享给我', public: '公共素材' };
 
-export function ImageComparisonPicker({ side, candidates, container, onSelect, onLocal, onClose }: Props) {
+export function ImageComparisonPicker({ side, candidates, container, anchorRef, onSelect, onLocal, onClose }: Props) {
   const { user } = useAppSession();
   const owner = user?.id || '';
   const prefsKey = owner ? `sd2:resource-picker:comparison:v1:${owner}` : '';
@@ -89,8 +91,8 @@ export function ImageComparisonPicker({ side, candidates, container, onSelect, o
     finally { if (sequence === selectionSequence.current) setChoosing(false); }
   };
   const visibleCandidates = candidates.filter(image => !prefs.query || (image.alt + (image.fileName || '')).toLowerCase().includes(prefs.query.toLowerCase()));
-  return createPortal(<div ref={backdrop} className={styles.backdrop}>
-    <div ref={dialog} className={styles.dialog} role="dialog" aria-modal="true" aria-label={side === 'current' ? '选择当前图' : '选择对比图'} tabIndex={-1}>
+  return createPortal(<Popper.Root><Popper.Anchor virtualRef={anchorRef} /><div ref={backdrop} className={styles.backdrop}>
+    <Popper.Content ref={dialog} className={styles.dialog} side="bottom" align="center" sideOffset={8} collisionPadding={8} sticky="always" hideWhenDetached role="dialog" aria-modal="true" aria-label={side === 'current' ? '选择当前图' : '选择对比图'} tabIndex={-1}>
       <header className={styles.header}><h2>{side === 'current' ? '选择当前图' : '选择对比图'}</h2><button type="button" title="关闭选图" aria-label="关闭选图" onClick={close}><X size={18} /></button></header>
       <div className={styles.filters}>
         <div className={styles.tabs} role="tablist" aria-label="图片来源">{([['context', '本次图片'], ['library', '素材库'], ['favorites', '我的喜欢'], ['recent', '最近选用']] as const).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={prefs.view === value} disabled={value === 'context' && !candidates.length} onClick={() => change({ view: value })}>{label}</button>)}</div>
@@ -116,6 +118,6 @@ export function ImageComparisonPicker({ side, candidates, container, onSelect, o
         {prefs.view !== 'context' && hasMore && <button type="button" className={styles.more} disabled={loading} onClick={() => setPage(value => value + 1)}>加载更多</button>}
         {prefs.view === 'context' && visibleCandidates.length > contextLimit && <button type="button" className={styles.more} onClick={() => setContextLimit(value => value + 24)}>加载更多</button>}
       </div>
-    </div>
-  </div>, container);
+    </Popper.Content>
+  </div></Popper.Root>, container);
 }
