@@ -89,6 +89,8 @@
 
 ## sd2 服务器生产托管规则
 
+- MVF01–MVF10 已保护部署（2026-10-17 当地，UTC 次日）：实际应用源 `5a59c00aaba195c42d90c612a37224ad59b12ee0`、v0.95.1、BUILD `Jm1epHEo3L4CXMlMABTM1`；Web 与 `sd2-multiview-works` 同源运行，5 条既有工作均为 ready。`/multiview` 已改为全宽顶部工作台，JPEG 图集 v1、滑轨、±1/±10、指定帧和最后目标胜出已工程交付；应用、复制、PNG/ZIP和作品仍走原尺寸帧，权限/源版本重验保持。定向工程脚本和完整候选构建通过；公网 release/config、登录跳转、预览未登录 401 及主管运行薄核有证。完整回退为 `28c128f441aaf8bca4e21d1f74e95e27c4025e0c`/v0.95.0/BUILD `ijoUR1pa6F7bvv0ZgkYak`，只回程序及可重建预览缓存，不回 DB/媒体/任务/作品/账单，未演练。图片队列继续运行原独立源，数据库身份保持；0 生成/扣费/重发/DDL。已部署待用户按正式工单 A01–A12 手动验收；真实热切帧 p95、冷准备、手机/失权/长片压力未验，不冒称稳定秒开。正式工单 §14 与固定 todo 为入口，后继发布须鲜核实际源、BUILD、在途任务与回退点。
+
 - PAGE03已保护部署（2026-10-17当地，UTC次日02:00后收尾）：实际Web源`ad6f6bdf916de1e3a5e642a16ef6e5d8c977a153`、v0.94.5、BUILD`sphjfz9ljJjkXayv0bRJv`；新生成确认受理后回最新结果页，顶部/底部共用翻页，图片卡“已对账”徽标移除，账务数据/管理端状态不改。服务器完整候选构建含原图片恢复门通过，公网release/config/login及两实际静态资源有证；第一次切换因错误要求公开release摘要而自动恢复v0.94.4，纠正为真实接口合同后再切成功。仅Web重启，图片worker保持`e92fea7479c248376a98dc43ad1c315fb1720f98`原PID/Invocation/运行目录，未重发、未收费生成、未改DB/配置/媒体/权限；功能待用户手验。回退标签`rollback/2026-10-17-before-result-latest-pagination`指完整v0.94.4，服务器原release/BUILD及切换前drop-in保留，回退未演练；后继须鲜核运行源/BUILD/配置与在途状态，不回DB/账本/媒体或重发。
 
 - CAP08/API01保护发布事实（2026-10-17）：实际源`e92fea7479c248376a98dc43ad1c315fb1720f98`、v0.94.4、BUILD`E2621a3FEs0ft0-zjqsEU`，16:31:31Z同run闭环，主管16:32Z运行／公网薄核一致；主／相容guard完整构建各19断言与10负证、内置类型lint及同lead Review有证。回退仅完整`c8fd8418cd56f3566fc823a2d54ac1c2d0a66c88`／v0.94.3+image-async-lifecycle-guard.1／BUILD`QhmWt854-hROySwA0jm_9`，保新恢复reader；其旧UI缺完整人工核对入口，需恢复主client，未演练，不直接回旧8ba writer或回DB／配置／媒体／回执／control。原8自然脱槽5、40原预留与身份／隐藏保持，HD649与works原进程未动。主管新增授权在“转写实（推荐）”仅测1张，正常受理且无8拒绝，但供应商JSON uncertain，首轮原号自动核对仍无Asset，5点仅冻结、0结算退款；系统占位修复已部署，目标出图未测通、API内部原因与最终供应商账单未知，不冒整单功能通过。原单§17.3.4／固定todo／私有inc04为入口，文档HEAD不冒运行源。
