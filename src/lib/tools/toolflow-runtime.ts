@@ -775,19 +775,39 @@ export async function advanceToolFlowRun(runId: string) {
   }, { timeout: 30000 });
 }
 
+type ToolFlowDispatchPosition = { at: Date; id: string };
+let toolFlowDispatchSweep: { cursor: ToolFlowDispatchPosition | null; ceiling: ToolFlowDispatchPosition } | null = null;
+
 /** Called by the sole image coordinator when capacity becomes available. */
 export async function dispatchWaitingToolFlowRuns() {
+  const eligible: Prisma.ToolFlowRunWhereInput = { status: { in: ['queued', 'running'] }, node_runs: { some: { status: 'pending' } } };
+  if (!toolFlowDispatchSweep) {
+    const last = await prisma.toolFlowRun.findFirst({ where: eligible, orderBy: [{ created_at: 'desc' }, { id: 'desc' }], select: { created_at: true, id: true } });
+    if (!last) return;
+    toolFlowDispatchSweep = { cursor: null, ceiling: { at: last.created_at, id: last.id } };
+  }
+  const sweep = toolFlowDispatchSweep;
+  const bounds: Prisma.ToolFlowRunWhereInput[] = [{ OR: [
+    { created_at: { lt: sweep.ceiling.at } }, { created_at: sweep.ceiling.at, id: { lte: sweep.ceiling.id } },
+  ] }];
+  if (sweep.cursor) bounds.push({ OR: [
+    { created_at: { gt: sweep.cursor.at } }, { created_at: sweep.cursor.at, id: { gt: sweep.cursor.id } },
+  ] });
   const runs = await prisma.toolFlowRun.findMany({
-    where: { status: { in: ['queued', 'running'] }, node_runs: { some: { status: 'pending' } } },
-    orderBy: { created_at: 'asc' }, take: 10, select: { id: true },
+    where: { ...eligible, AND: bounds }, orderBy: [{ created_at: 'asc' }, { id: 'asc' }], take: 32, select: { id: true, created_at: true },
   });
-  for (const run of runs) {
+  if (!runs.length) { toolFlowDispatchSweep = null; return; }
+  // Fixed sweep ceiling excludes new tails until the next wrap. Store the
+  // loaded tuple so deletion/reordering never jumps past unchecked entries.
+  for (const run of runs.slice(0, 10)) {
+    sweep.cursor = { at: run.created_at, id: run.id };
     await advanceToolFlowRun(run.id).catch(() => {
       // Leave the durable run and its node numbers intact; don't synthesize
       // failed tasks or change their quoted price just to release capacity.
       console.error('[toolflow] pending image dispatch deferred');
     });
   }
+  if (runs.length <= 10) toolFlowDispatchSweep = null;
 }
 
 export async function createToolFlowRun(user: SessionUser, flowId: string, inputAssetIds: string[], submittedQuote: unknown, quoteProof?: string) {

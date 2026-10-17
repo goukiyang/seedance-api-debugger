@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import dns from 'node:dns/promises';
 import { EventEmitter } from 'node:events';
@@ -12,10 +12,26 @@ import { PassThrough } from 'node:stream';
 import { mock } from 'node:test';
 import sharp from 'sharp';
 import type { ImageStudioTask } from '@prisma/client';
+import type { StudioPollDiagnostics } from '../src/lib/image-studio/provider';
+
+// An unresolved Promise does not keep Node alive. Early event-loop exhaustion is failure.
+process.exitCode = 1;
 
 /** Offline recovery/lease evidence only; never accepts a database or provider from the caller. */
 async function main() {
+  const startedAt = new Date().toISOString();
   const root = realpathSync(process.cwd());
+  const runId = process.env.IMAGE_RECOVERY_GATE_RUN_ID;
+  assert.ok(runId && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(runId),
+    'IMAGE_RECOVERY_GATE_RUN_ID must identify this run with a UUID');
+  // Captured only by this synthetic fixture's private gate log; no response text or credentials.
+  const markPhase = (phase: string, syntheticCase?: string) => console.error('[image-recovery-fixture-phase]',
+    JSON.stringify({ synthetic: true, phase, syntheticCase, at: new Date().toISOString() }));
+  const fixturePath = path.join(root, 'scripts/image-studio-recovery-fairness-engineering.ts');
+  const workerPath = path.join(root, 'src/lib/image-studio/worker.ts');
+  const providerPath = path.join(root, 'src/lib/image-studio/provider.ts');
+  const sourceSha256 = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
+  const fixtureSha256 = sourceSha256(fixturePath), workerSha256 = sourceSha256(workerPath), providerSha256 = sourceSha256(providerPath);
   const scratch = path.join(root, '.role-tests');
   mkdirSync(scratch, { recursive: true, mode: 0o700 });
   const directory = mkdtempSync(path.join(scratch, 'image-recovery-fairness-'));
@@ -28,9 +44,11 @@ async function main() {
   const env: NodeJS.ProcessEnv = { NODE_ENV: 'test' };
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'TZ']) if (process.env[key]) env[key] = process.env[key]!;
   Object.assign(env, { DATABASE_URL: process.env.DATABASE_URL, PRISMA_GENERATE_SKIP_AUTOINSTALL: '1', NEXT_TELEMETRY_DISABLED: '1' });
+  markPhase('isolated_schema_start');
   const schemaLog = execFileSync(process.execPath, [path.join(root, 'node_modules/prisma/build/index.js'), 'db', 'push',
     '--skip-generate', '--schema', path.join(root, 'prisma/schema.prisma')], { cwd: directory, env, encoding: 'utf8', timeout: 120000 });
   writeFileSync(path.join(directory, 'schema.log'), schemaLog, { mode: 0o600 });
+  markPhase('isolated_schema_complete');
 
   const { PrismaClient } = await import('@prisma/client');
   const database = new PrismaClient();
@@ -63,6 +81,8 @@ async function main() {
   const queries: Array<{ providerTaskId: string; view: 'summary' | 'result' }> = [];
   const outputs = new Map<string, Buffer>();
   const interrupted = new Set(['provider-old-a', 'provider-old-b']);
+  const pendingIoTimers = new Set<NodeJS.Timeout>();
+  const pendingIoFailures: string[] = [];
   let forbiddenCalls = 0;
   let completed = false;
   const blocked = () => { forbiddenCalls++; throw new Error('Real network and generation are prohibited in recovery engineering'); };
@@ -88,15 +108,30 @@ async function main() {
     assert.ok(url.search === '?view=summary' || url.search === '');
     const signal = options.signal; assert.ok(signal);
     const request = new EventEmitter() as EventEmitter & { end: () => void };
+    let abort: (() => void) | undefined;
+    // A real socket is referenced while pending; this fake request needs the same liveness.
+    // The bounded timer also fails the fixture if its original-query abort never arrives.
+    const pendingIo = setTimeout(() => {
+      pendingIoFailures.push(providerTaskId);
+      request.emit('error', Object.assign(new Error('Synthetic pending HTTPS exceeded ten seconds'), { code: 'FIXTURE_PENDING_IO_TIMEOUT' }));
+    }, 10_000);
+    pendingIo.ref();
+    pendingIoTimers.add(pendingIo);
+    const cleanup = () => {
+      clearTimeout(pendingIo); pendingIoTimers.delete(pendingIo);
+      if (abort) signal.removeEventListener('abort', abort);
+    };
+    request.once('error', cleanup);
     request.end = () => queueMicrotask(() => {
       queries.push({ providerTaskId, view: url.search ? 'summary' : 'result' });
       if (interrupted.has(providerTaskId)) {
-        const abort = () => request.emit('error', Object.assign(new Error('Synthetic original-query interruption'), { code: 'ABORT_ERR' }));
+        abort = () => { request.emit('error', Object.assign(new Error('Synthetic original-query interruption'), { code: 'ABORT_ERR' })); };
         if (signal.aborted) abort(); else signal.addEventListener('abort', abort, { once: true });
         return;
       }
       const response = new PassThrough() as PassThrough & { statusCode: number; headers: Record<string, string> };
       response.statusCode = 200; response.headers = { 'content-type': 'application/json' };
+      response.once('end', cleanup); response.once('close', cleanup); response.once('error', cleanup);
       onResponse(response as unknown as IncomingMessage);
       response.end(JSON.stringify(url.search ? { task_id: providerTaskId, status: 'success', assets: [] }
         : { data: [{ b64_json: outputs.get(providerTaskId)!.toString('base64') }] }));
@@ -129,16 +164,21 @@ async function main() {
       context: row.context, fingerprint: row.fingerprint, snapshot: row.snapshot_json, references: row.reference_ids,
       credits: row.unit_credits, freeze: row.freeze_snapshot, scope: row.billing_scope, contract: row.billing_contract_json });
     const makeTask = async (id: string, createdAt: number, leaseUntil: number, color: number) => {
+      markPhase('synthetic_task_create_start', id);
       const task = await database.imageStudioTask.create({ data: { id, owner_id: owner, batch_id: id, ordinal: 1,
         fingerprint: `frozen-${id}`, prompt: 'Synthetic frozen prompt', context: 'Synthetic frozen context', revision: 1,
         model, reference_ids: '[]', unit_credits: 1, freeze_snapshot: JSON.stringify([{ source_type: 'balance', amount: 1 }]),
         billing_mode: 'fixed', billing_status: 'channel_unmatched', status: 'channel_running',
         snapshot_json: JSON.stringify({ imageChannel: { channelId, configRevision } }), error: 'Original query retained',
         created_at: new Date(createdAt), lease_until: new Date(leaseUntil), lease_token: `dead-worker-${id}` } });
+      markPhase('synthetic_task_row_created', id);
       const providerTaskId = `provider-${id}`;
+      markPhase('synthetic_async_receipt_start', id);
       await delivery.createStudioAsyncReceipt(task, { taskId: providerTaskId, pollAfterMs: 2000 });
+      markPhase('synthetic_async_receipt_complete', id);
       if (!interrupted.has(providerTaskId)) outputs.set(providerTaskId,
         await sharp({ create: { width: 16, height: 16, channels: 3, background: { r: color, g: 90, b: 120 } } }).png().toBuffer());
+      markPhase('synthetic_task_prepared', id);
       return task;
     };
     const ids = ['old-a', 'old-b', 'new-a', 'new-b', 'new-c', 'new-d', 'new-e'];
@@ -158,7 +198,10 @@ async function main() {
         assert.equal(historical?.id, 'old-a', 'Creation-first selection would repeat an old task before the five untouched tasks');
         checks.push('isolated_creation_first_counterexample_repeats_old_task_after_two_slow_queries');
       }
+      markPhase('original_recovery_start', ids[i]);
       await recoverStudioTasks();
+      markPhase('original_recovery_complete', ids[i]);
+      assert.deepEqual(pendingIoFailures, [], 'Synthetic pending HTTPS must settle within ten seconds');
       assert.equal(selected[selected.length - 1], ids[i]);
       assert.equal(selected.length, i + 1, 'Each production recovery still selects at most one task');
       const row = await database.imageStudioTask.findUniqueOrThrow({ where: { id: ids[i] } });
@@ -194,7 +237,10 @@ async function main() {
     await makeTask('tie-a', createdBase + 1000, tieLease, 62);
     const live = await makeTask('live', createdBase - 1000, Date.now() + 600_000, 63);
     for (const expected of ['tie-z', 'tie-a', 'tie-b']) {
+      markPhase('tie_recovery_start', expected);
       await recoverStudioTasks(); assert.equal(selected[selected.length - 1], expected);
+      markPhase('tie_recovery_complete', expected);
+      assert.deepEqual(pendingIoFailures, [], 'Synthetic pending HTTPS must settle within ten seconds');
     }
     const liveAfter = await database.imageStudioTask.findUniqueOrThrow({ where: { id: live.id } });
     assert.equal(liveAfter.lease_token, live.lease_token); assert.deepEqual(frozen(liveAfter), frozen(live));
@@ -204,29 +250,105 @@ async function main() {
     const race = await makeTask('race', createdBase, Date.now() - 10_000, 64);
     competeFor = race.id;
     const beforeQueries = queries.length;
+    markPhase('competing_recovery_start', race.id);
     await recoverStudioTasks();
+    markPhase('competing_recovery_complete', race.id);
     const competed = await database.imageStudioTask.findUniqueOrThrow({ where: { id: race.id } });
     assert.equal(competed.lease_token, 'synthetic-competing-worker'); assert.equal(competed.status, 'channel_running');
     assert.deepEqual(frozen(competed), frozen(race)); assert.equal(queries.length, beforeQueries);
     assert.equal(await finishStudioTask(race, 'uncertain'), false);
     const beforeIdle = selected.length;
+    markPhase('idle_recovery_start');
     await recoverStudioTasks();
+    markPhase('idle_recovery_complete');
     assert.equal(selected.length, beforeIdle); assert.equal(queries.length, beforeQueries);
     assert.equal(forbiddenCalls, 0);
     assert.equal(await database.creditLedger.count({ where: { type: 'task_success_deduct' } }), 8);
     assert.equal((await database.creditAccount.findUniqueOrThrow({ where: { user_id: owner } })).frozen_credits, 4);
     checks.push('real_sqlite_competing_claim_loses_cas_without_query_refund_repost_or_duplicate_settlement');
+    markPhase('original_recovery_assertions_complete');
+
+    // Exercise the real original-task poll with only an in-memory read-only transport.
+    // These facts do not prove an HTTP request was sent or diagnose DNS/TCP/TLS.
+    const { requestStudioImages, StudioProviderError } = await import('../src/lib/image-studio/provider');
+    const pollTaskId = 'provider-old-a';
+    const sensitive = 'https://private.invalid/original?token=synthetic-sensitive BODY-synthetic-sensitive';
+    const noPoll: StudioPollDiagnostics = { scope: 'original_task_poll_window', phaseAtStop: 'waiting', lastAttemptPhase: null,
+      getTransportCalls: 0, lastHttpStatus: null, lastProviderStatus: null, lastErrorCategory: null };
+    const pollFailure = async (reply: () => Response, code: string, expected: StudioPollDiagnostics, signal = new AbortController().signal) => {
+      const syntheticCase = `${code}:${expected.lastErrorCategory || expected.lastProviderStatus || 'none'}`;
+      markPhase('poll_diagnostic_start', syntheticCase);
+      let transportCalls = 0;
+      const readOnlyTransport: typeof fetch = async (input, init) => {
+        const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+        assert.equal(init?.method, 'GET', 'Original-task diagnostics must never submit a generation POST');
+        assert.equal(url.origin, 'https://recovery-fixture.invalid');
+        assert.equal(url.pathname, `/v1/images/tasks/${pollTaskId}`);
+        assert.equal(url.search, '?view=summary');
+        transportCalls++;
+        return reply();
+      };
+      await assert.rejects(() => requestStudioImages({ baseUrl: 'https://recovery-fixture.invalid', apiKey: 'synthetic-not-a-credential',
+        model, protocol: 'openai_images', prompt: '', count: 1, images: [], signal,
+        resumeAsync: { taskId: pollTaskId, pollAfterMs: 2000 } }, readOnlyTransport), error => {
+        assert.ok(error instanceof StudioProviderError);
+        assert.equal(error.stage, 'response'); assert.equal(error.code, code); assert.equal(error.retryable, true);
+        assert.equal(error.status, undefined, 'Window diagnostics do not replace the existing business status');
+        assert.ok(error.poll);
+        assert.deepEqual(Object.keys(error.poll).sort(), Object.keys(noPoll).sort(), 'Poll diagnostics have a fixed private shape');
+        assert.deepEqual(error.poll, expected);
+        assert.equal(error.poll.getTransportCalls, transportCalls, 'Count only calls actually made to the supplied transport');
+        const serialized = JSON.stringify(error.poll);
+        for (const secret of [sensitive, 'private.invalid', 'synthetic-sensitive', 'BODY-', 'synthetic-not-a-credential']) {
+          assert.equal(serialized.includes(secret), false, 'Poll diagnostics must not contain raw transport text, URLs or credentials');
+        }
+        return true;
+      });
+      assert.equal(transportCalls, expected.getTransportCalls);
+      markPhase('poll_diagnostic_complete', syntheticCase);
+    };
+    const alreadyAborted = new AbortController(); alreadyAborted.abort();
+    await pollFailure(() => { assert.fail('An already-aborted original query must make zero transport calls'); },
+      'async_query_interrupted', noPoll, alreadyAborted.signal);
+    await pollFailure(() => { throw new Error(sensitive); }, 'async_query_interrupted',
+      { ...noPoll, getTransportCalls: 1, lastAttemptPhase: 'summary_request', lastErrorCategory: 'transport_or_abort' });
+    await pollFailure(() => new Response(sensitive, { status: 503 }), 'async_query_interrupted',
+      { ...noPoll, getTransportCalls: 1, lastAttemptPhase: 'summary_request', lastHttpStatus: 503, lastErrorCategory: 'http_non_success' });
+    await pollFailure(() => new Response(JSON.stringify({ task_id: pollTaskId, status: sensitive, message: sensitive }), { status: 200 }),
+      'async_query_unconfirmed', { ...noPoll, getTransportCalls: 1, lastAttemptPhase: 'summary_body', lastHttpStatus: 200 });
+    await pollFailure(() => new Response(JSON.stringify({ task_id: pollTaskId, status: 'pending', message: sensitive }), { status: 200 }),
+      'async_pending', { ...noPoll, getTransportCalls: 1, lastAttemptPhase: 'summary_body', lastHttpStatus: 200, lastProviderStatus: 'pending' });
+    await pollFailure(() => new Response(`invalid JSON ${sensitive}`, { status: 200 }), 'async_query_interrupted',
+      { ...noPoll, getTransportCalls: 1, lastAttemptPhase: 'summary_body', lastHttpStatus: 200, lastErrorCategory: 'invalid_or_oversize_response' });
+    checks.push('original_poll_diagnostics_are_bounded_factual_and_private');
+    assert.equal(checks.length, 5);
+    assert.equal(selected.length, 11);
+    assert.equal(queries.length, 18);
+    assert.equal(forbiddenCalls, 0);
+    assert.deepEqual(pendingIoFailures, [], 'Synthetic pending HTTPS must settle within ten seconds');
+    assert.equal(pendingIoTimers.size, 0, 'All synthetic HTTPS I/O must finish before success');
+    assert.equal(sourceSha256(fixturePath), fixtureSha256, 'Fixture source must remain unchanged throughout this run');
+    assert.equal(sourceSha256(workerPath), workerSha256, 'Worker source must remain unchanged throughout this run');
+    assert.equal(sourceSha256(providerPath), providerSha256, 'Provider source must remain unchanged throughout this run');
     completed = true;
   } finally {
+    markPhase('cleanup_start');
+    for (const timer of Array.from(pendingIoTimers)) clearTimeout(timer);
+    pendingIoTimers.clear();
     mock.restoreAll();
     await database.$disconnect();
     process.chdir(originalCwd);
+    markPhase('cleanup_complete');
     const receipt = path.join(directory, 'receipt.json');
-    writeFileSync(receipt, JSON.stringify({ schema: 'image-recovery-fairness-engineering.v1', synthetic: true, databasePath,
+    const finishedAt = new Date().toISOString();
+    markPhase('receipt_write_start');
+    writeFileSync(receipt, JSON.stringify({ schema: 'image-recovery-fairness-engineering.v1', runId, fixtureSha256, workerSha256, providerSha256,
+      startedAt, finishedAt, synthetic: true, databasePath,
       checks, selected, queries, forbiddenCalls, completed, productionWrites: 0, paidRequests: 0, browserRuns: 0,
       scope: 'Real recovery selection/CAS and local PNG delivery against fresh SQLite, simulated original-task HTTP only; not real image-generation acceptance.' }, null, 2), { mode: 0o600 });
+    markPhase('receipt_write_complete');
     console.log(`Image recovery fairness engineering receipt: ${receipt}`);
   }
 }
 
-void main().catch(error => { console.error(error); process.exitCode = 1; });
+void main().then(() => { process.exitCode = 0; }).catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '修复旧图片任务反复查询导致后续图片迟迟不显示的问题，已受理图片沿原请求继续取回；保留素材、参数和原任务，不会重新生成或重复扣费。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '加固图片链路构建与发布检查，防止未完成检查误报通过；补齐同类队列的公平扫描，保留素材、参数及原请求，不会重新生成或重复扣费。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

@@ -106,8 +106,21 @@ function boundedPollDelay(value: unknown) {
   return Math.min(30000, Math.max(2000, typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : 2000));
 }
 
+type StudioPollPhase = 'waiting' | 'summary_request' | 'summary_body' | 'result_request' | 'result_body';
+type StudioPollStatus = 'pending' | 'queued' | 'running' | 'processing' | 'success' | 'failed'
+  | 'uncertain' | 'client_disconnected' | 'paused' | 'canceled';
+export type StudioPollDiagnostics = {
+  scope: 'original_task_poll_window'; phaseAtStop: StudioPollPhase;
+  lastAttemptPhase: Exclude<StudioPollPhase, 'waiting'> | null;
+  getTransportCalls: number; lastHttpStatus: number | null; lastProviderStatus: StudioPollStatus | null;
+  lastErrorCategory: 'http_non_success' | 'invalid_or_oversize_response' | 'empty_response'
+    | 'transport_or_abort' | 'provider_terminal' | 'identity_conflict' | null;
+};
+const POLL_STATUSES = new Set<StudioPollStatus>(['pending', 'queued', 'running', 'processing', 'success', 'failed',
+  'uncertain', 'client_disconnected', 'paused', 'canceled']);
+
 export class StudioProviderError extends Error {
-  constructor(public stage: 'request' | 'response' | 'download', public code: string, public status?: number, public diagnostics?: StudioDownloadDiagnostics, public retryable = false) {
+  constructor(public stage: 'request' | 'response' | 'download', public code: string, public status?: number, public diagnostics?: StudioDownloadDiagnostics, public retryable = false, public poll?: StudioPollDiagnostics) {
     super(`图片服务处理失败（${code}）`);
     this.name = 'StudioProviderError';
   }
@@ -208,13 +221,24 @@ export async function requestStudioImages(params: {
     let pollDelay = boundedPollDelay(asyncTask.pollAfterMs);
     let lastObservation: 'pending' | 'interrupted' | 'unconfirmed' = 'interrupted';
     let readingQuery = false;
+    // These are application polling phases, not DNS/TCP/TLS timing. Only values
+    // actually observed in this window are recorded; no upstream text is copied.
+    const poll: StudioPollDiagnostics = { scope: 'original_task_poll_window', phaseAtStop: 'waiting', lastAttemptPhase: null,
+      getTransportCalls: 0, lastHttpStatus: null, lastProviderStatus: null, lastErrorCategory: null };
+    const phase = (value: StudioPollPhase) => { poll.phaseAtStop = value; if (value !== 'waiting') poll.lastAttemptPhase = value; };
     for (;;) {
       try {
+        phase('waiting');
         await delay(pollDelay, undefined, { signal: querySignal });
         readingQuery = true;
+        phase('summary_request'); poll.getTransportCalls++; poll.lastErrorCategory = null;
         const polled = await transport(pollUrl, { method: 'GET', headers: { Authorization: `Bearer ${params.apiKey}` }, signal: querySignal, redirect: 'error' });
-        if (!polled.ok) { lastObservation = 'interrupted'; readingQuery = false; await polled.body?.cancel().catch(() => {}); pollDelay = Math.min(10000, Math.max(5000, pollDelay * 2)); continue; }
+        poll.lastHttpStatus = polled.status;
+        if (!polled.ok) { poll.lastErrorCategory = 'http_non_success'; lastObservation = 'interrupted'; readingQuery = false; await polled.body?.cancel().catch(() => {}); pollDelay = Math.min(10000, Math.max(5000, pollDelay * 2)); continue; }
+        phase('summary_body');
         const task = await boundedJson(polled, 1024 * 1024);
+        poll.lastErrorCategory = null;
+        poll.lastProviderStatus = typeof task?.status === 'string' && POLL_STATUSES.has(task.status as StudioPollStatus) ? task.status as StudioPollStatus : null;
         if ((task.task_id || task.id) && (task.task_id || task.id) !== asyncTask.taskId) throw new StudioProviderError('response', 'async_task_identity_conflict');
         if (task.status === 'failed') throw new StudioProviderError('response', 'async_failed', polled.status);
         if (['uncertain', 'client_disconnected', 'paused', 'canceled'].includes(task.status)) throw new StudioProviderError('response', 'async_unconfirmed', polled.status);
@@ -232,14 +256,26 @@ export async function requestStudioImages(params: {
         } else {
           // Only after success: the raw result is not a polling endpoint.
           const resultUrl = new URL(pollUrl); resultUrl.search = '';
+          phase('result_request'); poll.getTransportCalls++; poll.lastErrorCategory = null;
           const result = await transport(resultUrl, { method: 'GET', headers: { Authorization: `Bearer ${params.apiKey}` }, signal: querySignal, redirect: 'error' });
-          if (!result.ok) { await result.body?.cancel().catch(() => {}); throw new StudioProviderError('response', 'async_query_interrupted', result.status, undefined, true); }
+          poll.lastHttpStatus = result.status;
+          if (!result.ok) { poll.lastErrorCategory = 'http_non_success'; await result.body?.cancel().catch(() => {}); throw new StudioProviderError('response', 'async_query_interrupted', result.status, undefined, true); }
+          phase('result_body');
           value = await boundedJson(result, params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024);
+          poll.lastErrorCategory = null;
         }
         break;
       } catch (error) {
-        if (error instanceof StudioProviderError && ['async_failed', 'async_unconfirmed', 'async_task_identity_conflict'].includes(error.code)) throw error;
-        if (querySignal.aborted) throw new StudioProviderError('response', readingQuery || params.signal.aborted || lastObservation === 'interrupted' ? 'async_query_interrupted' : lastObservation === 'pending' ? 'async_pending' : 'async_query_unconfirmed', undefined, undefined, true);
+        if (error instanceof StudioProviderError && ['async_failed', 'async_unconfirmed', 'async_task_identity_conflict'].includes(error.code)) {
+          poll.lastErrorCategory = error.code === 'async_task_identity_conflict' ? 'identity_conflict' : 'provider_terminal';
+          error.poll = { ...poll }; throw error;
+        }
+        if (poll.phaseAtStop !== 'waiting') {
+          poll.lastErrorCategory = error instanceof StudioProviderError && error.code === 'invalid_or_oversize_response' ? 'invalid_or_oversize_response'
+            : error instanceof StudioProviderError && error.code === 'empty_response' ? 'empty_response'
+              : poll.lastErrorCategory === 'http_non_success' ? 'http_non_success' : 'transport_or_abort';
+        }
+        if (querySignal.aborted) throw new StudioProviderError('response', readingQuery || params.signal.aborted || lastObservation === 'interrupted' ? 'async_query_interrupted' : lastObservation === 'pending' ? 'async_pending' : 'async_query_unconfirmed', undefined, undefined, true, { ...poll });
         lastObservation = 'interrupted'; readingQuery = false;
         pollDelay = Math.min(10000, Math.max(5000, pollDelay * 2));
       }

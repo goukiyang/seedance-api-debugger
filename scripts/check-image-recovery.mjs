@@ -1,0 +1,163 @@
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+
+// The build and the protected release controller use the same offline gate.
+// No application database, credentials, provider or browser is accepted here.
+const root = realpathSync(process.cwd());
+const entry = 'scripts/check-image-recovery.mjs';
+const command = `node ${entry}`;
+const recoveryChecks = [
+  'isolated_creation_first_counterexample_repeats_old_task_after_two_slow_queries',
+  'real_recovery_rotates_seven_expired_leases_preserves_unknowns_then_original_get_decodes_publishes_and_settles_once',
+  'equal_expired_deadline_orders_created_at_then_id_and_does_not_claim_live_lease',
+  'real_sqlite_competing_claim_loses_cas_without_query_refund_repost_or_duplicate_settlement',
+  'original_poll_diagnostics_are_bounded_factual_and_private',
+];
+const dispatchChecks = [
+  'blocked_prefix_suffix_reached',
+  'bounded_sweep_revisits_unlocked_items_with_continuous_tail',
+  'captured_cursor_survives_move_and_delete',
+  'cold_start_and_wrap_are_safe',
+  'candidate_exception_does_not_pin_scan',
+  'original_identity_cas_admission_and_credits_preserved',
+];
+const fixtures = [
+  { file: 'scripts/image-studio-recovery-fairness-engineering.ts', schema: 'image-recovery-fairness-engineering.v1',
+    marker: 'Image recovery fairness engineering receipt: ', checks: recoveryChecks,
+    sources: ['src/lib/image-studio/worker.ts', 'src/lib/image-studio/provider.ts'] },
+  { file: 'scripts/image-dispatch-fairness-engineering.ts', schema: 'image-dispatch-fairness-engineering.v1',
+    marker: 'Image dispatch fairness engineering receipt: ', checks: dispatchChecks,
+    sources: ['src/lib/image-studio/batches.ts', 'src/lib/tools/toolflow-runtime.ts'] },
+];
+const sourceFiles = ['package.json', entry, ...fixtures.flatMap(fixture => [fixture.file, ...fixture.sources])];
+const hash = value => createHash('sha256').update(value).digest('hex');
+const hashes = () => Object.fromEntries(sourceFiles.map(file => [file, hash(readFileSync(path.join(root, file)))]));
+const time = value => typeof value === 'number' ? value : Date.parse(value);
+
+function assertConfig(candidate = root) {
+  assert.equal(realpathSync(candidate), root, 'Gate must run in the exact candidate root');
+  const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
+  assert.equal(pkg.scripts?.prebuild, command, 'Candidate is missing the mandatory image recovery prebuild gate');
+  assert.equal(pkg.scripts?.['test:image-recovery'], command, 'Manual and build gates must use the same entry');
+  assert.equal(pkg.scripts?.build, 'next build', 'Unexpected build contract');
+  hashes(); // Missing fixtures or production modules must fail before npm starts.
+}
+
+function readPrivateReceipt(file) {
+  assert.equal(typeof file, 'string');
+  const absolute = path.resolve(file);
+  const scratch = path.join(root, '.role-tests');
+  assert.ok(absolute.startsWith(scratch + path.sep), 'Receipt must belong to this candidate');
+  assert.equal(realpathSync(absolute), absolute, 'Receipt symlinks are not accepted');
+  const stat = lstatSync(absolute);
+  assert.ok(stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1 && stat.size > 0 && stat.size <= 131072);
+  assert.equal(stat.mode & 0o077, 0, 'Receipt must be private');
+  if (typeof process.getuid === 'function') assert.equal(stat.uid, process.getuid());
+  const bytes = readFileSync(absolute);
+  return { value: JSON.parse(bytes.toString('utf8')), sha256: hash(bytes) };
+}
+
+function validateFixture(fixture, file, runId, startedAt, finishedAt, sourceSha256) {
+  const receipt = readPrivateReceipt(file);
+  const value = receipt.value;
+  assert.equal(value.schema, fixture.schema);
+  assert.equal(value.synthetic, true);
+  assert.equal(value.runId, runId, 'Stale or unrelated engineering receipt');
+  assert.equal(value.completed, true, 'Engineering process did not finish all assertions');
+  for (const key of ['forbiddenCalls', 'productionWrites', 'paidRequests', 'browserRuns']) assert.equal(value[key], 0, key);
+  assert.ok(time(value.startedAt) >= startedAt && time(value.finishedAt) >= time(value.startedAt)
+    && time(value.finishedAt) <= finishedAt + 1000, 'Engineering receipt time does not match this run');
+  assert.equal(value.fixtureSha256, sourceSha256[fixture.file]);
+  assert.ok(Array.isArray(value.checks) && value.checks.length > 0 && new Set(value.checks).size === value.checks.length);
+  if (fixture.checks) assert.deepEqual(value.checks, fixture.checks);
+  for (const source of fixture.sources) {
+    const recorded = value.sourceSha256?.[source] ?? (source === 'src/lib/image-studio/worker.ts' ? value.workerSha256
+      : source === 'src/lib/image-studio/provider.ts' ? value.providerSha256 : undefined);
+    assert.equal(recorded, sourceSha256[source], 'Engineering receipt does not cover the candidate module');
+  }
+  if (fixture.schema === 'image-recovery-fairness-engineering.v1') {
+    assert.deepEqual(value.selected, ['old-a', 'old-b', 'new-a', 'new-b', 'new-c', 'new-d', 'new-e', 'tie-z', 'tie-a', 'tie-b', 'race']);
+    assert.equal(value.queries?.length, 18);
+    assert.ok(value.queries.every(query => /^provider-(?:old-[ab]|new-[a-e]|tie-[abz])$/.test(query.providerTaskId)
+      && ['summary', 'result'].includes(query.view)));
+  } else {
+    assert.equal(value.mode, 'verify');
+    for (const kind of ['batch', 'toolflow']) {
+      const summary = value.summary?.[kind];
+      assert.ok(summary && summary.prefixCount > 10 && summary.calls > 0);
+      assert.ok(summary.maxCandidateQueriesPerCall <= 2 && summary.maxCandidateChecksPerCall <= 10
+        && summary.maxLoadedPerQuery <= 32);
+      for (const key of ['suffixReachedAtCall', 'unlockedReachedAtCall']) assert.ok(summary[key] > 0 && summary[key] <= summary.calls);
+      for (const key of ['cursorMoveAndDeleteSurvived', 'exceptionBypassed', 'coldStartSafe']) assert.equal(summary[key], true, key);
+    }
+  }
+  return receipt.sha256;
+}
+
+function verify(file, since) {
+  assertConfig();
+  assert.ok(Number.isFinite(since) && since > 0, 'A real npm start time is required');
+  const { value } = readPrivateReceipt(file);
+  assert.equal(value.schema, 'image-recovery-build-gate.v1');
+  assert.match(value.runId, /^[0-9a-f-]{36}$/);
+  assert.equal(value.completed, true);
+  assert.equal(value.candidateRoot, root);
+  assert.ok(value.startedAt >= since && value.finishedAt >= value.startedAt && value.finishedAt <= Date.now() + 1000);
+  assert.ok(Date.now() - value.startedAt <= 30 * 60_000, 'Build gate receipt is stale');
+  assert.deepEqual(value.sourceSha256, hashes(), 'Candidate source changed after the gate ran');
+  assert.equal(value.fixtures?.length, fixtures.length);
+  for (let i = 0; i < fixtures.length; i++) {
+    const recorded = value.fixtures[i];
+    assert.equal(recorded.file, fixtures[i].file);
+    assert.equal(validateFixture(fixtures[i], recorded.receipt, value.runId, value.startedAt, value.finishedAt,
+      value.sourceSha256), recorded.sha256);
+  }
+  console.log('Image recovery build gate verified');
+}
+
+function run() {
+  assertConfig();
+  const startedAt = Date.now();
+  const runId = randomUUID();
+  const sourceSha256 = hashes();
+  const scratch = path.join(root, '.role-tests');
+  mkdirSync(scratch, { recursive: true, mode: 0o700 });
+  const directory = mkdtempSync(path.join(scratch, 'image-recovery-gate-'));
+  const recorded = [];
+  for (const fixture of fixtures) {
+    const result = spawnSync(process.execPath, ['--import', 'tsx', path.join(root, fixture.file)], {
+      cwd: root, env: { ...process.env, IMAGE_RECOVERY_GATE_RUN_ID: runId },
+      encoding: 'utf8', timeout: 180_000, maxBuffer: 2 * 1024 * 1024,
+    });
+    // Preserve actual child evidence, including a nonzero exit, without accepting
+    // an empty successful wrapper as a completed test.
+    writeFileSync(path.join(directory, `${path.basename(fixture.file)}.log`), (result.stdout || '') + (result.stderr || ''), { mode: 0o600 });
+    assert.ifError(result.error);
+    assert.equal(result.signal, null, 'Engineering process was interrupted');
+    assert.equal(result.status, 0, `Engineering process failed: ${fixture.file}`);
+    const lines = (result.stdout || '').split(/\r?\n/).filter(line => line.startsWith(fixture.marker));
+    assert.equal(lines.length, 1, 'A unique completed engineering receipt is required');
+    const receipt = lines[0].slice(fixture.marker.length);
+    const sha256 = validateFixture(fixture, receipt, runId, startedAt, Date.now(), sourceSha256);
+    recorded.push({ file: fixture.file, receipt, sha256 });
+    console.log(`Image recovery engineering complete: ${fixture.file}`);
+  }
+  assert.deepEqual(hashes(), sourceSha256, 'Candidate source changed during the gate');
+  const receipt = path.join(directory, 'receipt.json');
+  writeFileSync(receipt, JSON.stringify({ schema: 'image-recovery-build-gate.v1', runId, candidateRoot: root,
+    startedAt, finishedAt: Date.now(), sourceSha256, fixtures: recorded, completed: true }, null, 2), { mode: 0o600, flag: 'wx' });
+  verify(receipt, startedAt);
+  console.log(`IMAGE_RECOVERY_GATE_RECEIPT=${receipt}`);
+}
+
+try {
+  if (process.argv[2] === '--assert-config' && process.argv.length <= 4) assertConfig(process.argv[3]);
+  else if (process.argv[2] === '--verify' && process.argv[4] === '--since' && process.argv.length === 6) verify(process.argv[3], Number(process.argv[5]));
+  else { assert.equal(process.argv.length, 2, 'Unknown gate arguments'); run(); }
+} catch (error) {
+  console.error('Image recovery build gate rejected:', error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+}

@@ -139,7 +139,7 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
     const downloadError = error instanceof StudioImageDownloadError ? error : null;
     const mediaError = error instanceof StudioImageDeliveryError ? error : null;
     const code = detail?.code || downloadError?.code || mediaError?.code || 'processing_failed';
-    console.error('[image-studio]', JSON.stringify({ taskId: task.id, stage: detail?.stage || stage, code, imageBytes: mediaError?.bytes,
+    console.error('[image-studio]', JSON.stringify({ taskId: task.id, stage: detail?.stage || stage, code, poll: detail?.poll, imageBytes: mediaError?.bytes,
       model: task.model, outputSize: task.output_size, httpStatus: detail?.status || downloadError?.status,
       download: detail?.diagnostics || downloadError?.diagnostics, elapsedMs: Date.now() - started }));
     if (code === 'delivery_lease_lost') return;
@@ -362,7 +362,7 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
     const downloadError = error instanceof StudioImageDownloadError ? error : null;
     const mediaError = error instanceof StudioImageDeliveryError ? error : null;
     const code = detail?.code || downloadError?.code || mediaError?.code || 'processing_failed';
-    console.error('[image-studio-channel]', JSON.stringify({ taskId: task.id, stage: detail?.stage || stage, code,
+    console.error('[image-studio-channel]', JSON.stringify({ taskId: task.id, stage: detail?.stage || stage, code, poll: detail?.poll,
       imageBytes: mediaError?.bytes, model: task.model, outputSize: task.output_size,
       httpStatus: detail?.status || downloadError?.status, download: detail?.diagnostics || downloadError?.diagnostics,
       elapsedMs: Date.now() - started }));

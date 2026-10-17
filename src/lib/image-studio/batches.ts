@@ -430,11 +430,39 @@ export async function updateStudioBatch(owner: string, body: Record<string, unkn
   if (shouldPrepare) await prepareBatch(owner, body.id as string);
 }
 
+type BatchDispatchPosition = { at: Date; id: string };
+let batchDispatchSweep: { cursor: BatchDispatchPosition | null; ceiling: BatchDispatchPosition } | null = null;
+
 // Only the existing worker dispatches paid tasks; all GET routes are observation-only.
 export async function dispatchStudioBatches() {
-  const rows = await prisma.platformSetting.findMany({ where: { OR: [{ key: { startsWith: PREFIX } }, { key: { startsWith: CHANNEL_PREFIX } }], value_json: { contains: '"state":"ready"' } }, orderBy: { updated_at: 'asc' }, take: 10 });
-  for (const candidate of rows) {
-    const original = parse(candidate.value_json);
+  const eligible: Prisma.PlatformSettingWhereInput = { OR: [{ key: { startsWith: PREFIX } }, { key: { startsWith: CHANNEL_PREFIX } }], value_json: { contains: '"state":"ready"' } };
+  if (!batchDispatchSweep) {
+    const last = await prisma.platformSetting.findFirst({ where: eligible, orderBy: [{ updated_at: 'desc' }, { id: 'desc' }], select: { updated_at: true, id: true } });
+    if (!last) return;
+    batchDispatchSweep = { cursor: null, ceiling: { at: last.updated_at, id: last.id } };
+  }
+  const sweep = batchDispatchSweep;
+  // Capture tuples, not a cursor row's later position. The fixed upper bound
+  // makes a sweep finish even while new tail entries keep arriving.
+  const bounds: Prisma.PlatformSettingWhereInput[] = [{ OR: [
+    { updated_at: { lt: sweep.ceiling.at } }, { updated_at: sweep.ceiling.at, id: { lte: sweep.ceiling.id } },
+  ] }];
+  if (sweep.cursor) bounds.push({ OR: [
+    { updated_at: { gt: sweep.cursor.at } }, { updated_at: sweep.cursor.at, id: { gt: sweep.cursor.id } },
+  ] });
+  const rows = await prisma.platformSetting.findMany({ where: { ...eligible, AND: bounds }, orderBy: [{ updated_at: 'asc' }, { id: 'asc' }], take: 32 });
+  if (!rows.length) { batchDispatchSweep = null; return; }
+  // Keep the original ten-candidate work/admission budget. Unchecked entries
+  // from the loaded page are not skipped by the next call's cursor.
+  for (const candidate of rows.slice(0, 10)) {
+    sweep.cursor = { at: candidate.updated_at, id: candidate.id };
+    let original: BatchRecord;
+    try { original = parse(candidate.value_json); }
+    catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      console.error('[image-batch-dispatch]', JSON.stringify({ candidateId: candidate.id, code: 'invalid_candidate_deferred' }));
+      continue;
+    }
     try {
       await prisma.$transaction(async tx => {
         const { row, batch } = await readOwned(original.ownerId, original.id, tx);
@@ -507,23 +535,31 @@ export async function dispatchStudioBatches() {
       }, { timeout: 15000 });
     } catch (error) {
       if (error instanceof QueueCapacityError || error instanceof QueueMaintenanceError) continue;
-      await prisma.$transaction(async tx => {
-        const { row, batch } = await readOwned(original.ownerId, original.id, tx);
-        if (batch.state !== 'ready') return;
-        if (error instanceof SharedStudioDefinitionError || batch.input.sharedLive && sharedDefinitionError(error)) {
-          try { await recoverAcceptedBatchItems(tx, batch); }
-          catch (acceptanceError) {
-            batch.state = 'blocked'; batch.note = acceptanceError instanceof Error ? acceptanceError.message : '原费用受理记录待核对，未重新生成';
-            await writeBatch(tx, row, batch); return;
+      try {
+        await prisma.$transaction(async tx => {
+          const { row, batch } = await readOwned(original.ownerId, original.id, tx);
+          if (batch.state !== 'ready') return;
+          if (error instanceof SharedStudioDefinitionError || batch.input.sharedLive && sharedDefinitionError(error)) {
+            try { await recoverAcceptedBatchItems(tx, batch); }
+            catch (acceptanceError) {
+              batch.state = 'blocked'; batch.note = acceptanceError instanceof Error ? acceptanceError.message : '原费用受理记录待核对，未重新生成';
+              await writeBatch(tx, row, batch); return;
+            }
+            await invalidateUnacceptedDefinition(tx, batch, error instanceof Error ? error.message : '模板已更新，请确认本次生成');
+          } else {
+            batch.state = 'blocked'; batch.note = error instanceof StudioError || error instanceof ImageGenerationChannelError ? error.message : error instanceof Error && error.message.startsWith('点数不足') ? '可用点数不足，已停止新派发；补足点数后可继续' : '批次派发暂时中断，已受理项保留，请重新读取后继续';
           }
-          await invalidateUnacceptedDefinition(tx, batch, error instanceof Error ? error.message : '模板已更新，请确认本次生成');
-        } else {
-          batch.state = 'blocked'; batch.note = error instanceof StudioError || error instanceof ImageGenerationChannelError ? error.message : error instanceof Error && error.message.startsWith('点数不足') ? '可用点数不足，已停止新派发；补足点数后可继续' : '批次派发暂时中断，已受理项保留，请重新读取后继续';
-        }
-        await writeBatch(tx, row, batch);
-      });
+          await writeBatch(tx, row, batch);
+        });
+      } catch (deferred) {
+        // A removed/invalid individual target must not pin the scan. Shared
+        // database/infrastructure errors still propagate to the coordinator.
+        if (!(deferred instanceof StudioError) || deferred.status < 400 || deferred.status >= 500) throw deferred;
+        console.error('[image-batch-dispatch]', JSON.stringify({ candidateId: candidate.id, code: 'candidate_unavailable_deferred', status: deferred.status }));
+      }
     }
   }
+  if (rows.length <= 10) batchDispatchSweep = null;
 }
 
 async function batchBillingCommitted(tx: Pick<Prisma.TransactionClient, 'imageStudioTask'>, batch: BatchRecord) {
