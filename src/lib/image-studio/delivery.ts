@@ -187,11 +187,17 @@ export async function studioDeliveryStatus(task: Identity & { status: string; us
   const running = task.status === 'running' || task.status === 'channel_running';
   let asyncReceipt: StudioAsyncReceipt | null = null;
   if ('snapshot_json' in task) asyncReceipt = await readStudioAsyncReceipt(task as AsyncIdentity).catch(() => null);
+  // The recovery record is identity-bound and contains no provider URL or key.
+  // A financial unknown is not an active generation and does not reopen POST.
+  const asyncRecovery = task.status === 'uncertain' && 'snapshot_json' in task
+    ? await (await import('./async-recovery')).readStudioAsyncRecovery(task as import('@prisma/client').ImageStudioTask).catch(() => null)
+    : null;
   return { phase: task.status === 'queued' || task.status === 'channel_queued' ? 'queued' : task.status === 'succeeded' ? 'ready'
     : running ? record?.phase || 'provider' : record ? 'stopped' : task.status === 'uncertain' ? 'unknown' : 'failed',
     accepted: Boolean(asyncReceipt),
     acceptedAt: asyncReceipt && Number.isFinite(asyncReceipt.acceptedAt) && asyncReceipt.acceptedAt > 0 ? asyncReceipt.acceptedAt : undefined,
     waitingStatus: asyncReceipt && ['pending', 'retrying', 'unconfirmed'].includes(asyncReceipt.waitingStatus || '') ? asyncReceipt.waitingStatus : undefined,
+    ...(asyncRecovery ? { asyncRecovery } : {}),
     generationDetailSuperseded: studioGenerationDetailSuperseded(task.status, record, asyncReceipt),
     receivedBytes: record?.receivedBytes, expectedBytes: record?.expectedBytes,
     recoveryAvailable: running && Boolean(asyncReceipt && asyncReceipt.state !== 'failed' || record && studioDeliveryCanRetry(record)),
@@ -402,7 +408,18 @@ export async function cleanupStudioDeliveries(now = Date.now()) {
     if (now - stat.mtimeMs > STUDIO_CHECKPOINT_RETENTION_MS) {
       const active = await prisma.imageStudioTask.findFirst({ where: { id: entry.name, status: { in: ['queued', 'running', 'channel_queued', 'channel_running'] } }, select: { id: true } });
       if (!active) {
-        const task = await prisma.imageStudioTask.findUnique({ where: { id: entry.name }, select: { id: true, owner_id: true } });
+        const task = await prisma.imageStudioTask.findUnique({ where: { id: entry.name } });
+        if (task?.status === 'uncertain') {
+          try {
+            const recovery = await (await import('./async-recovery')).readStudioAsyncRecovery(task);
+            if (recovery && ['scheduled', 'checking'].includes(recovery.state)) continue;
+          } catch {
+            // Missing permission or a damaged schedule is not permission to
+            // erase the only retained result before the worker can inspect it.
+            console.error('[image-async-recovery]', JSON.stringify({ taskId: task.id, code: 'cleanup_recovery_unavailable' }));
+            continue;
+          }
+        }
         if (task) await preserveStudioBillingReceipt(task);
         await fs.rm(dir, { recursive: true, force: true });
       }

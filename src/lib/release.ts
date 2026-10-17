@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '图片上限提示显示已有任务数与本次数量；大图恢复半透明黑底，直接适合窗口，精简创作按钮并让选项靠近入口。保留原图、参数与原请求，不会重新生成或扣费。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '图片异常结果改为独立待核对，不再长期占用生成名额；保留原请求和费用预留，后台有限核对，也可手动核对原任务。执行上限仍为8张，不会重新生成或重复扣费。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

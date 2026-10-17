@@ -24,6 +24,16 @@ const dispatchChecks = [
   'candidate_exception_does_not_pin_scan',
   'original_identity_cas_admission_and_credits_preserved',
 ];
+const asyncRecoveryChecks = [
+  'explicit_provider_states_release_without_refund',
+  'owner_shared_capacity_includes_synchronous_running',
+  'expiry_timeout_and_non_summary_404_do_not_release',
+  'two_independent_original_summary_404_observations',
+  'original_get_delivers_once_preserving_frozen_identity',
+  'durable_claim_cas_restart_and_bounded_fair_scan',
+  'manual_once_after_auto_budget_keeps_limits',
+  'legacy_identity_and_partial_checkpoint_fail_closed',
+];
 const fixtures = [
   { file: 'scripts/image-studio-recovery-fairness-engineering.ts', schema: 'image-recovery-fairness-engineering.v1',
     marker: 'Image recovery fairness engineering receipt: ', checks: recoveryChecks,
@@ -31,6 +41,11 @@ const fixtures = [
   { file: 'scripts/image-dispatch-fairness-engineering.ts', schema: 'image-dispatch-fairness-engineering.v1',
     marker: 'Image dispatch fairness engineering receipt: ', checks: dispatchChecks,
     sources: ['src/lib/image-studio/batches.ts', 'src/lib/tools/toolflow-runtime.ts', 'src/lib/image-studio/queue-capacity.ts'] },
+  { file: 'scripts/image-async-recovery-engineering.ts', schema: 'image-async-recovery-engineering.v1',
+    marker: 'Image async recovery engineering receipt: ', checks: asyncRecoveryChecks,
+    sources: ['src/lib/image-studio/worker.ts', 'src/lib/image-studio/provider.ts', 'src/lib/image-studio/tasks.ts',
+      'src/lib/image-studio/async-recovery.ts', 'src/lib/image-studio/delivery.ts', 'src/lib/image-studio/queue-capacity.ts',
+      'src/lib/image-studio/synchronous-admission.ts', 'src/app/api/image-studio/tasks/route.ts'] },
 ];
 const sourceFiles = ['package.json', entry, ...fixtures.flatMap(fixture => [fixture.file, ...fixture.sources])];
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -83,7 +98,7 @@ function validateFixture(fixture, file, runId, startedAt, finishedAt, sourceSha2
     assert.equal(value.queries?.length, 18);
     assert.ok(value.queries.every(query => /^provider-(?:old-[ab]|new-[a-e]|tie-[abz])$/.test(query.providerTaskId)
       && ['summary', 'result'].includes(query.view)));
-  } else {
+  } else if (fixture.schema === 'image-dispatch-fairness-engineering.v1') {
     assert.equal(value.mode, 'verify');
     for (const kind of ['batch', 'toolflow']) {
       const summary = value.summary?.[kind];
@@ -93,6 +108,8 @@ function validateFixture(fixture, file, runId, startedAt, finishedAt, sourceSha2
       for (const key of ['suffixReachedAtCall', 'unlockedReachedAtCall']) assert.ok(summary[key] > 0 && summary[key] <= summary.calls);
       for (const key of ['cursorMoveAndDeleteSurvived', 'exceptionBypassed', 'coldStartSafe']) assert.equal(summary[key], true, key);
     }
+  } else if (fixture.schema === 'image-async-recovery-engineering.v1') {
+    assert.equal(value.mode, 'verify', 'An old-source counterexample is not a completed candidate check');
   }
   return receipt.sha256;
 }
