@@ -10,7 +10,7 @@ export class QueueCapacityError extends Error {
   readonly status = 429;
   constructor(capacity?: { active: number; requested: number; limit: number }) {
     super(capacity
-      ? `当前账号全部图片任务已有 ${capacity.active} 张未结束，本次 ${capacity.requested} 张会超过同时 ${capacity.limit} 张上限，请等待已有任务结束。`
+      ? `当前账号已有 ${capacity.active} 张排队或生成，本次 ${capacity.requested} 张会超过同时 ${capacity.limit} 张上限；待核对原请求不占生成名额。`
       : '当前账号图片任务已达容量限制，请等待已有任务结束。');
     this.name = 'QueueCapacityError';
   }

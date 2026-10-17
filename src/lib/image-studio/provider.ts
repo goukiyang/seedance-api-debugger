@@ -107,16 +107,17 @@ function boundedPollDelay(value: unknown) {
 }
 
 type StudioPollPhase = 'waiting' | 'summary_request' | 'summary_body' | 'result_request' | 'result_body';
-type StudioPollStatus = 'pending' | 'queued' | 'running' | 'processing' | 'success' | 'failed'
+type StudioPollStatus = 'pending' | 'queued' | 'dispatching' | 'running' | 'processing' | 'success' | 'failed'
   | 'uncertain' | 'client_disconnected' | 'paused' | 'canceled';
 export type StudioPollDiagnostics = {
   scope: 'original_task_poll_window'; phaseAtStop: StudioPollPhase;
   lastAttemptPhase: Exclude<StudioPollPhase, 'waiting'> | null;
   getTransportCalls: number; lastHttpStatus: number | null; lastProviderStatus: StudioPollStatus | null;
+  summaryNotFound?: true;
   lastErrorCategory: 'http_non_success' | 'invalid_or_oversize_response' | 'empty_response'
     | 'transport_or_abort' | 'provider_terminal' | 'identity_conflict' | null;
 };
-const POLL_STATUSES = new Set<StudioPollStatus>(['pending', 'queued', 'running', 'processing', 'success', 'failed',
+const POLL_STATUSES = new Set<StudioPollStatus>(['pending', 'queued', 'dispatching', 'running', 'processing', 'success', 'failed',
   'uncertain', 'client_disconnected', 'paused', 'canceled']);
 
 export class StudioProviderError extends Error {
@@ -134,6 +135,7 @@ export async function requestStudioImages(params: {
   protocol?: ImageGenerationChannelProtocol;
   idempotencyKey?: string;
   resumeAsync?: { taskId: string; pollAfterMs?: number; expiresAt?: string };
+  asyncQueryMode?: 'single';
   onAsyncAccepted?: (receipt: { taskId: string; pollAfterMs?: number; expiresAt?: string }) => Promise<void>;
   quality?: string;
   count: number; images: StudioImageInput[]; signal: AbortSignal; ratio?: string;
@@ -146,6 +148,7 @@ export async function requestStudioImages(params: {
   allowFourToOne?: boolean;
   ratioContractVersion?: 2;
 }, fetcher: typeof fetch = fetch, readImage: typeof readStudioImage = readStudioImage): Promise<{ images: string[]; usage: unknown }> {
+  if (params.asyncQueryMode === 'single' && !params.resumeAsync) throw new StudioProviderError('request', 'async_original_identity_required');
   if (!IMAGE_STUDIO_MODELS.includes(params.model as typeof IMAGE_STUDIO_MODELS[number])) throw new Error('不支持的图片模型');
   if (params.model === 'gemini-nano-banana-2.1') {
     if (params.quality !== undefined && params.quality !== 'auto') throw new Error('Banana 2.1 不支持所选图片质量；尚未向供应商提交');
@@ -216,7 +219,8 @@ export async function requestStudioImages(params: {
   if (asyncTask) {
     if (!/^[a-zA-Z0-9_-]{1,180}$/.test(asyncTask.taskId)) throw new StudioProviderError('response', 'async_receipt_invalid');
     const pollUrl = new URL(url); pollUrl.pathname = `${basePath}/v1/images/tasks/${encodeURIComponent(asyncTask.taskId)}`; pollUrl.search = '?view=summary';
-    const queryDeadline = AbortSignal.timeout(60000);
+    const single = params.asyncQueryMode === 'single';
+    const queryDeadline = AbortSignal.timeout(single ? 10000 : 60000);
     const querySignal = AbortSignal.any([params.signal, queryDeadline]);
     let pollDelay = boundedPollDelay(asyncTask.pollAfterMs);
     let lastObservation: 'pending' | 'interrupted' | 'unconfirmed' = 'interrupted';
@@ -229,12 +233,16 @@ export async function requestStudioImages(params: {
     for (;;) {
       try {
         phase('waiting');
-        await delay(pollDelay, undefined, { signal: querySignal });
+        if (!single) await delay(pollDelay, undefined, { signal: querySignal });
+        querySignal.throwIfAborted();
         readingQuery = true;
         phase('summary_request'); poll.getTransportCalls++; poll.lastErrorCategory = null;
         const polled = await transport(pollUrl, { method: 'GET', headers: { Authorization: `Bearer ${params.apiKey}` }, signal: querySignal, redirect: 'error' });
         poll.lastHttpStatus = polled.status;
-        if (!polled.ok) { poll.lastErrorCategory = 'http_non_success'; lastObservation = 'interrupted'; readingQuery = false; await polled.body?.cancel().catch(() => {}); pollDelay = Math.min(10000, Math.max(5000, pollDelay * 2)); continue; }
+        if (polled.status === 404) poll.summaryNotFound = true; else delete poll.summaryNotFound;
+        if (!polled.ok) { poll.lastErrorCategory = 'http_non_success'; lastObservation = 'interrupted'; readingQuery = false; await polled.body?.cancel().catch(() => {});
+          if (single) throw new StudioProviderError('response', 'async_query_interrupted', polled.status, undefined, true, { ...poll });
+          pollDelay = Math.min(10000, Math.max(5000, pollDelay * 2)); continue; }
         phase('summary_body');
         const task = await boundedJson(polled, 1024 * 1024);
         poll.lastErrorCategory = null;
@@ -243,7 +251,8 @@ export async function requestStudioImages(params: {
         if (task.status === 'failed') throw new StudioProviderError('response', 'async_failed', polled.status);
         if (['uncertain', 'client_disconnected', 'paused', 'canceled'].includes(task.status)) throw new StudioProviderError('response', 'async_unconfirmed', polled.status);
         if (task.status !== 'success') {
-          lastObservation = ['pending', 'queued', 'running', 'processing'].includes(task.status) ? 'pending' : 'unconfirmed';
+          lastObservation = ['pending', 'queued', 'dispatching', 'running', 'processing'].includes(task.status) ? 'pending' : 'unconfirmed';
+          if (single) throw new StudioProviderError('response', lastObservation === 'pending' ? 'async_pending' : 'async_query_unconfirmed', polled.status, undefined, true, { ...poll });
           readingQuery = false; pollDelay = boundedPollDelay(task.poll_after_ms); continue;
         }
         const assets = Array.isArray(task.assets) ? task.assets : [];
@@ -251,7 +260,9 @@ export async function requestStudioImages(params: {
           value = { data: assets.map((asset: any) => {
             if (typeof asset.signed_url === 'string' && asset.signed_url) return { url: asset.signed_url };
             const authenticatedUrl = asset.download_url || asset.url;
-            return { url: authenticatedUrl, authenticatedAsset: true, expiresAt: task.expires_at || asyncTask!.expiresAt };
+            // An asset/link expiry is never written back as task status or a
+            // query-retention deadline. Keep it local to this download only.
+            return { url: authenticatedUrl, authenticatedAsset: true, expiresAt: asset.expires_at || task.expires_at || asyncTask!.expiresAt };
           }), usage: task.usage };
         } else {
           // Only after success: the raw result is not a polling endpoint.
@@ -275,6 +286,8 @@ export async function requestStudioImages(params: {
             : error instanceof StudioProviderError && error.code === 'empty_response' ? 'empty_response'
               : poll.lastErrorCategory === 'http_non_success' ? 'http_non_success' : 'transport_or_abort';
         }
+        if (single) throw new StudioProviderError('response', error instanceof StudioProviderError ? error.code : 'async_query_interrupted',
+          error instanceof StudioProviderError ? error.status : undefined, undefined, true, { ...poll });
         if (querySignal.aborted) throw new StudioProviderError('response', readingQuery || params.signal.aborted || lastObservation === 'interrupted' ? 'async_query_interrupted' : lastObservation === 'pending' ? 'async_pending' : 'async_query_unconfirmed', undefined, undefined, true, { ...poll });
         lastObservation = 'interrupted'; readingQuery = false;
         pollDelay = Math.min(10000, Math.max(5000, pollDelay * 2));

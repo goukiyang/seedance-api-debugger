@@ -19,6 +19,7 @@ import { imageBillingReady } from './billing-readiness';
 import { reserveImageStudioQueueCapacity } from './queue-capacity';
 import { finishRejectedStudioDimensions } from './dimension-rejection';
 import { recordStudioResponseEvidence } from './response-evidence';
+import { claimStudioAsyncRecovery, deferStudioAsyncRecovery, releaseStudioAsyncSlot, studioAsyncReleaseReason, observeStudioAsyncQueryUnavailable } from './async-recovery';
 
 export async function assertStudioPostAuthorization(task: ImageStudioTask) {
   const current = await prisma.imageStudioTask.findUnique({ where: { id: task.id } });
@@ -168,7 +169,8 @@ async function retainChannelTask(task: ImageStudioTask, message: string, delayMs
 }
 
 async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof requestStudioImages,
-  recovery?: StudioDelivery, resumeReceipt?: StudioAsyncReceipt) {
+  recovery?: StudioDelivery, resumeReceipt?: StudioAsyncReceipt, recoveryDeadlineAt?: number, manualRecovery = false, localOnly = false) {
+  const recovering = task.status === 'uncertain';
   let providerStarted = Boolean(recovery || resumeReceipt);
   let delivery = recovery;
   let asyncReceipt = resumeReceipt;
@@ -179,7 +181,7 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
   const taskSignal = AbortSignal.timeout(STUDIO_EXECUTION_MS);
   const assertLease = async () => {
     taskSignal.throwIfAborted();
-    const held = await prisma.imageStudioTask.findFirst({ where: { id: task.id, status: 'channel_running',
+    const held = await prisma.imageStudioTask.findFirst({ where: { id: task.id, status: recovering ? 'uncertain' : 'channel_running',
       lease_token: task.lease_token, lease_until: { gt: new Date() } }, select: { id: true } });
     if (!held) throw new StudioImageDownloadError('delivery_lease_lost');
   };
@@ -187,11 +189,22 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
   try {
     const owner = await prisma.user.findUnique({ where: { id: task.owner_id }, select: { status: true } });
     if (owner?.status !== 'active') throw new Error('当前账号无法生成');
+    if (recovering && !asyncReceipt) throw new Error('原异步请求身份不可用，未重新生成');
+    if (asyncReceipt?.state === 'failed') throw new StudioProviderError('response', 'async_failed');
+    if (recovering && localOnly && !delivery?.complete) {
+      await deferStudioAsyncRecovery(task, 'auto_budget', true);
+      return;
+    }
+    if (recovering && !manualRecovery && recoveryDeadlineAt && recoveryDeadlineAt <= Date.now()
+      && !delivery?.complete && delivery?.kind !== 'base64') {
+      await deferStudioAsyncRecovery(task, 'query_budget', true);
+      return;
+    }
     let usage: unknown;
     // A valid same-result local checkpoint is always consumed before querying
     // the provider again. Expired checkpoints may be replaced only by GET of
     // the stored async task id, never by a new generation POST.
-    if (delivery && (delivery.complete || studioDeliveryCanRetry(delivery))) {
+    if (delivery && (delivery.complete || recovering && delivery.kind === 'base64' || !manualRecovery && studioDeliveryCanRetry(delivery))) {
       stage = 'download';
       await assertLease();
       if (!delivery.complete) await updateStudioDelivery(delivery, { recoveries: (delivery.recoveries || 0) + 1 });
@@ -214,6 +227,12 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
       let capability: ImageGenerationResolvedSettings['modelCapabilities'][keyof ImageGenerationResolvedSettings['modelCapabilities']] | undefined;
 
       if (resuming) {
+        // Complete local output was consumed above, even after the local check budget.
+        // Neither the 202 expires_at nor an asset URL expiry proves the task stopped.
+        if (recovering && !manualRecovery && (!recoveryDeadlineAt || recoveryDeadlineAt <= Date.now())) {
+          await deferStudioAsyncRecovery(task, 'query_budget', true);
+          return;
+        }
         // Historical, frozen credentials are intentionally used only for the
         // same provider task GET, even if the live channel is disabled or rotated.
         settings = await resolveImageGenerationChannelSnapshot(imageChannel, prisma, false, task.model);
@@ -318,6 +337,7 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
           provider: settings.provider === 'ai_media_vip' ? 'ai_media_vip' : 'musk', protocol: capability!.protocol,
           idempotencyKey: task.id, resumeAsync: { taskId: asyncReceipt!.providerTaskId,
             pollAfterMs: asyncReceipt!.pollAfterMs, expiresAt: asyncReceipt!.expiresAt },
+          ...(recovering ? { asyncQueryMode: 'single' as const } : {}),
           prompt: '', count: 1, images: [], signal: AbortSignal.any([taskSignal, AbortSignal.timeout(300000)]),
           downloadSignal: taskSignal,
           persistBase64Image: async (value, outputUsage) => { await assertLease(); delivery = await createStudioBase64Delivery(task, value, outputUsage); },
@@ -367,6 +387,13 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
       httpStatus: detail?.status || downloadError?.status, download: detail?.diagnostics || downloadError?.diagnostics,
       elapsedMs: Date.now() - started }));
     if (code === 'delivery_lease_lost') return;
+    if (recovering && mediaError) {
+      // The original dimension-rejection/refund helper only authorizes active
+      // execution. A late invalid output stays unknown with its reservation intact.
+      if (delivery) await updateStudioDelivery(delivery, { phase: 'stopped', code });
+      await deferStudioAsyncRecovery(task, code, true);
+      return;
+    }
     if (mediaError?.code === 'generated_dimensions_mismatch' && original) {
       const finished = await finishRejectedStudioDimensions(task, original);
       if (finished) {
@@ -381,12 +408,27 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
       if (finished) await completeToolFlowTask(task.id);
       return;
     }
+    if (recovering) {
+      const permanent = code === 'async_task_identity_conflict' || ['generated_checkpoint_incomplete', 'download_incomplete',
+        'unsupported_output', 'unexpected_count', 'image_too_large', 'empty_output'].includes(code);
+      await deferStudioAsyncRecovery(task, code, permanent);
+      return;
+    }
     if (code === 'async_task_identity_conflict' && asyncReceipt) {
       const finished = await finishStudioTask(task, 'uncertain', { error: '供应商返回的任务编号与原回执不一致；原任务和费用预留已保留，停止自动查询和重提。请管理员核对。' });
       if (finished) await completeToolFlowTask(task.id);
       return;
     }
     if (asyncReceipt) {
+      const releaseReason = studioAsyncReleaseReason(asyncReceipt, detail || undefined);
+      if (releaseReason) {
+        await releaseStudioAsyncSlot(task, asyncReceipt, releaseReason, detail?.poll?.lastProviderStatus);
+        return;
+      }
+      if (await observeStudioAsyncQueryUnavailable(task, asyncReceipt, detail || undefined)) {
+        await releaseStudioAsyncSlot(task, asyncReceipt, 'query_unavailable');
+        return;
+      }
       const retryLocal = delivery && studioDeliveryCanRetry(delivery)
         && (taskSignal.aborted || detail?.retryable || downloadError?.retryable || ['save', 'settle'].includes(stage));
       if (delivery && !retryLocal) {
@@ -420,6 +462,20 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
 }
 
 export async function recoverStudioTasks() {
+  // This path never claims an execution slot or calls generation POST. Each
+  // invocation checks at most one durable original-request recovery.
+  const pending = await claimStudioAsyncRecovery();
+  if (pending) {
+    let checkpointRead = false;
+    try {
+      const local = await readStudioDelivery(pending.task);
+      checkpointRead = true;
+      await executeChannelStudioTask(pending.task, requestStudioImages, local || undefined, pending.receipt, pending.deadlineAt, pending.manualOnce, pending.localOnly);
+    } catch (error) {
+      await deferStudioAsyncRecovery(pending.task, checkpointRead ? 'recovery_interrupted' : 'recovery_checkpoint_unreadable', !checkpointRead);
+      console.error('[image-async-recovery]', JSON.stringify({ taskId: pending.task.id, code: checkpointRead ? 'recovery_interrupted' : 'recovery_stopped' }));
+    } finally { await deferStudioAsyncRecovery(pending.task, 'recovery_interrupted'); }
+  }
   await cleanupStudioDeliveries();
   const expired = await prisma.imageStudioTask.findMany({ where: { status: { in: ['running', 'channel_running'] }, lease_until: { lt: new Date() } },
     // A retained slow query must fall behind untouched expired leases, even if

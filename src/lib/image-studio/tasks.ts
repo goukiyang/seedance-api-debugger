@@ -161,6 +161,7 @@ export const STUDIO_SHARED_WORKER_FILES = [
   'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-types.ts',
   'src/lib/image-studio/read-snapshot.ts',
   'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/batches.ts', 'src/lib/image-studio/worker.ts',
+  'src/lib/image-studio/async-recovery.ts',
 ] as const;
 let sharedWorkerModuleHashes: Record<string, string> | undefined;
 
@@ -892,13 +893,21 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
 
 export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded' | 'failed' | 'uncertain', data: { assetId?: string; preparedAsset?: Prisma.AssetUncheckedCreateInput; error?: string; usage?: unknown } = {}, transaction?: Prisma.TransactionClient) {
   const finish = async (tx: Prisma.TransactionClient) => {
-    const activeStatus = task.status === 'channel_running' ? 'channel_running' : 'running';
+    const recovering = task.status === 'uncertain';
+    if (recovering && status === 'uncertain') return false;
+    const recovery = recovering ? await import('./async-recovery') : null;
+    if (recovery && !await recovery.studioAsyncRecoveryLease(tx, task)) return false;
+    const activeStatus = recovering ? 'uncertain' : task.status === 'channel_running' ? 'channel_running' : 'running';
+    const channel = activeStatus === 'channel_running' || recovering;
+    // Complete the same recovery CAS before changing task state; both roll back
+    // with asset/ledger settlement if any later step fails.
+    if (recovery && status !== 'uncertain') await recovery.completeStudioAsyncRecovery(tx, task);
     const changed = await tx.imageStudioTask.updateMany({
       where: { id: task.id, status: activeStatus, lease_token: task.lease_token, lease_until: { gt: new Date() } },
       data: { status, asset_id: data.assetId, error: status === 'succeeded' ? null : data.error, usage_json: data.usage ? JSON.stringify(data.usage) : undefined,
         lease_until: null, lease_token: null, finished_at: new Date() },
     });
-    if (!changed.count) return false;
+    if (!changed.count) { if (recovery) throw new Error('async_recovery_finish_lease_lost'); return false; }
     if (status === 'succeeded' && data.preparedAsset) {
       const prepared = data.preparedAsset;
       if (prepared.owner_id !== task.owner_id || !prepared.hash || prepared.type !== 'image') throw new Error('Output ownership mismatch');
@@ -910,21 +919,21 @@ export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded
     }
     // A channel request with an unknown result must remain visible and retain
     // its original reservation. It is not permission to refund or re-submit.
-    if (activeStatus === 'channel_running' && status === 'uncertain') return true;
+    if (channel && status === 'uncertain') return true;
     const billing = parseImageBillingContract(task.billing_contract_json);
     if (task.billing_mode === 'actual') {
       if (!billing || billing.mode !== 'actual' || billing.scope !== task.billing_scope
         || billing.authorizedCredits !== task.unit_credits) throw new Error('图片收费合同无效');
       if (status === 'succeeded') {
-        await tx.imageStudioTask.update({ where: { id: task.id }, data: { billing_status: activeStatus === 'channel_running' ? 'channel_pending' : 'pending',
+        await tx.imageStudioTask.update({ where: { id: task.id }, data: { billing_status: channel ? 'channel_pending' : 'pending',
           billing_deadline: new Date(billing.deadline!), billing_next_check_at: new Date() } });
         return true;
       }
     }
-    if (task.billing_mode !== 'actual' && activeStatus === 'channel_running') {
+    if (task.billing_mode !== 'actual' && channel) {
       await tx.imageStudioTask.update({ where: { id: task.id }, data: { billing_status: status === 'succeeded' ? 'channel_confirmed' : 'channel_provider_loss',
         billing_next_check_at: null } });
-    } else if (task.billing_mode === 'actual' && activeStatus === 'channel_running') {
+    } else if (task.billing_mode === 'actual' && channel) {
       const persisted = await tx.imageStudioTask.findUnique({ where: { id: task.id }, select: { gateway_request_id: true } });
       await tx.imageStudioTask.update({ where: { id: task.id }, data: { billing_status: persisted?.gateway_request_id ? 'channel_pending' : 'channel_unmatched',
         billing_next_check_at: new Date() } });

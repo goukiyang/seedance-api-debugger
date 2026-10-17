@@ -1,6 +1,6 @@
 {
   "name": "video-api-debugger",
-  "version": "0.94.3",
+  "version": "0.94.3+image-async-lifecycle-guard.1",
   "private": true,
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",

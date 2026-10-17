@@ -9,19 +9,33 @@ import { ImageGenerationChannelError } from '@/lib/integrations/image-generation
 import { listStudioResultFeed } from '@/lib/image-studio/result-feed';
 import { StudioPinError } from '@/lib/image-studio/result-pins';
 import { STUDIO_RESULT_FEED } from '@/lib/image-studio/result-pin-types';
+import { requestStudioAsyncRecheck, StudioAsyncRecoveryError } from '@/lib/image-studio/async-recovery';
 
 export const dynamic = 'force-dynamic';
 export async function PATCH(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   if (user.status !== 'active' || !canUseCompanyTemplates(user)) return NextResponse.json({ error: '无权操作图片任务' }, { status: 403 });
+  let recheck = false;
   try {
     const body = await request.json();
+    if (body.action === 'recheck') {
+      recheck = true;
+      if (typeof body.id !== 'string' || !/^[a-zA-Z0-9-]{1,120}$/.test(body.id)
+        || typeof body.requestId !== 'string' || body.requestId.length > 180) throw new StudioError('原任务核对参数无效', 400);
+      const result = await requestStudioAsyncRecheck(user.id, body.id, body.requestId);
+      return NextResponse.json(result, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
+    }
     if (body.action !== 'cancel' || typeof body.id !== 'string' || !/^[a-zA-Z0-9-]{1,120}$/.test(body.id)) throw new StudioError('取消参数无效', 400);
     const cancelled = await cancelQueuedChannelTask(user.id, body.id);
     return NextResponse.json({ cancelled, message: '未受理排队任务已取消，原记录保留；没有取消供应商任务' });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof StudioError ? error.message : '取消未确认，请重新读取原任务；未承诺释放费用' }, { status: error instanceof StudioError ? error.status : 503 });
+    const expected = error instanceof StudioError || error instanceof StudioAsyncRecoveryError;
+    return NextResponse.json({ error: expected ? error.message : recheck
+      ? '原任务核对状态暂未确认，请刷新原记录；没有重新生成或改变费用预留'
+      : '取消未确认，请重新读取原任务；未承诺释放费用',
+    ...(error instanceof StudioAsyncRecoveryError ? { code: error.code } : {}) },
+    { status: expected ? error.status : 503, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   }
 }
 export async function DELETE(request: NextRequest) {
