@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import dns from 'node:dns/promises';
 import { EventEmitter } from 'node:events';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import http, { type IncomingMessage } from 'node:http';
 import https, { type RequestOptions } from 'node:https';
 import { createRequire } from 'node:module';
@@ -316,7 +316,46 @@ async function main() {
       assert.equal(await recovery.readStudioAsyncRecovery(native), null); assert.equal(await finishStudioTask(native, 'succeeded'), false);
       await assert.rejects(recovery.requestStudioAsyncRecheck(owner, native.id, 'legacy'), recovery.StudioAsyncRecoveryError);
       for (let n = 0; n < 4; n++) await recoverStudioTasks(); assert.equal(queries.length, beforeLegacy);
-      recordCheck('legacy_identity_and_partial_checkpoint_fail_closed');
+
+      // Filesystem evidence failure must deny query authority without deleting
+      // the only complete local output. Run cleanup only after old file cases.
+      markPhase('checkpoint_retention_with_unreadable_receipts');
+      await waitAll();
+      const retentionOriginal = await make('checkpoint-retention', 'uncertain');
+      await recoverStudioTasks();
+      const retentionTask = await fresh(retentionOriginal.id);
+      assert.equal(retentionTask.status, 'uncertain'); assert.equal((await record(retentionTask.id)).state, 'scheduled');
+      await delivery.createStudioBase64Delivery(retentionTask, png.toString('base64'), {});
+      const deliveryDirectory = path.join(directory, 'storage', 'studio-delivery', retentionTask.id);
+      const billingDirectory = path.join(directory, 'storage', 'studio-billing', retentionTask.id);
+      const sourceFile = path.join(deliveryDirectory, 'source.json'), imageFile = path.join(deliveryDirectory, 'image.part');
+      const sourceBytes = readFileSync(sourceFile), imageBytes = readFileSync(imageFile);
+      assert.deepEqual(imageBytes, png); assert.equal(JSON.parse(sourceBytes.toString()).complete, true);
+      const requestBytes = readFileSync(path.join(deliveryDirectory, 'request.json'));
+      const receipts = [deliveryDirectory, billingDirectory].map(base => {
+        const file = path.join(base, 'async.json'); return { file, bytes: readFileSync(file) };
+      });
+      for (const receipt of receipts) writeFileSync(receipt.file, '{invalid-json', { mode: 0o600 });
+      assert.equal(await recovery.readStudioAsyncRecovery(retentionTask), null);
+      assert.equal(await recovery.retainStudioAsyncCheckpoint(retentionTask), true);
+      utimesSync(deliveryDirectory, new Date(1000), new Date(1000));
+      const retainedQueryCount = queries.length, cleanupAt = clock + 300001;
+      assert.equal(process.cwd(), directory);
+      await delivery.cleanupStudioDeliveries(cleanupAt);
+      assert.deepEqual(readFileSync(sourceFile), sourceBytes); assert.deepEqual(readFileSync(imageFile), imageBytes);
+      assert.equal(queries.length, retainedQueryCount); assert.equal((await fresh(retentionTask.id)).status, 'uncertain');
+      for (const receipt of receipts) writeFileSync(receipt.file, receipt.bytes, { mode: 0o600 });
+      assert.ok(await recovery.readStudioAsyncRecovery(retentionTask));
+      await patch(retentionTask.id, { state: 'stopped', stopCode: 'deadline' });
+      assert.equal(await recovery.retainStudioAsyncCheckpoint(retentionTask), false);
+      await delivery.cleanupStudioDeliveries(cleanupAt + 300001);
+      assert.equal(existsSync(deliveryDirectory), false, 'Stopped temporary delivery still follows the original retention policy');
+      assert.deepEqual(readFileSync(path.join(billingDirectory, 'async.json')), receipts[1].bytes);
+      assert.deepEqual(readFileSync(path.join(billingDirectory, 'request.json')), requestBytes);
+      assert.equal(queries.length, retainedQueryCount);
+      assert.equal(await db.creditLedger.count({ where: { related_task_id: retentionTask.id } }), 0);
+      summary.unreadableReceiptKeptCompleteCheckpoint = true; summary.stoppedTemporaryCheckpointCleaned = true;
+
       for (const task of originals) assert.deepEqual(freeze(await fresh(task.id)), freeze(task));
       summary.originalsCompared = originals.length;
       summary.successSettlements = await db.imageStudioTask.count({ where: { status: 'succeeded' } });
@@ -332,6 +371,7 @@ async function main() {
       summary.manualChecks = recoveryRecords.reduce((total, value) => total + (value.manualChecks || 0), 0);
       assert.equal(summary.maxAutomaticAttempts, 12); assert.equal(summary.manualChecks, 3);
       summary.manualCrashDidNotRequery = true; summary.checkpointBudgetCrashCases = 2;
+      recordCheck('legacy_identity_and_partial_checkpoint_fail_closed');
     }
     assert.deepEqual(checks, baseline ? ['baseline_explicit_unknown_retains_execution_slot'] : expectedChecks);
     assert.equal(forbiddenCalls, 0); assert.equal(timers.size, 0); assert.deepEqual(pendingIoFailures, []);

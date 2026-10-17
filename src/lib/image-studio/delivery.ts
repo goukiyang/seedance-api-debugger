@@ -411,8 +411,7 @@ export async function cleanupStudioDeliveries(now = Date.now()) {
         const task = await prisma.imageStudioTask.findUnique({ where: { id: entry.name } });
         if (task?.status === 'uncertain') {
           try {
-            const recovery = await (await import('./async-recovery')).readStudioAsyncRecovery(task);
-            if (recovery && ['scheduled', 'checking'].includes(recovery.state)) continue;
+            if (await (await import('./async-recovery')).retainStudioAsyncCheckpoint(task)) continue;
           } catch {
             // Missing permission or a damaged schedule is not permission to
             // erase the only retained result before the worker can inspect it.

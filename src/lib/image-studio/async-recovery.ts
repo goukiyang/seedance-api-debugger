@@ -100,6 +100,16 @@ export async function readStudioAsyncRecovery(task: ImageStudioTask): Promise<St
   catch { return null; } // Unreadable or mismatched evidence never grants recovery authority.
 }
 
+/** Retention only, never query/settlement authority. Do not make preservation of
+ * the only local output depend on a successful read of that output's receipts. */
+export async function retainStudioAsyncCheckpoint(task: ImageStudioTask): Promise<boolean> {
+  const row = await prisma.platformSetting.findUnique({ where: { key: key(task.id) } });
+  if (!row) return false;
+  const record = parse(row.value_json, task);
+  if (!record) throw new Error('async_recovery_retention_identity_unavailable');
+  return record.state === 'scheduled' || record.state === 'checking';
+}
+
 /** Only exact upstream JSON statuses release an execution slot. expiresAt is not task-retention evidence. */
 export function studioAsyncReleaseReason(receipt: StudioAsyncReceipt, detail?: { code: string; poll?: { lastProviderStatus: unknown; lastHttpStatus: number | null } }) {
   if (!receipt.providerTaskId || !Number.isFinite(receipt.acceptedAt) || receipt.acceptedAt <= 0) return null;
