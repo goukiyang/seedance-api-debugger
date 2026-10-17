@@ -31,6 +31,7 @@ const safeReasons: Record<string, string> = {
   PROMPT_REFERENCE_ERROR: '主图引用暂时无法确认，请核对主图与当前工作区。',
   INSUFFICIENT_CREDITS: '本次可用点数不足，请核对额度后再生成。',
   INSUFFICIENT_PROJECT_BUDGET: '项目可用预算不足，请核对项目预算后再生成。',
+  MULTIVIEW_PRESET_CHANGED: '模板提示词已更新，原输入已保留；请重新读取当前模板并确认报价后再生成。',
 };
 const safeLiteralReasons = new Set([
   '请先明确保存到的项目', '项目不存在', '无权在此项目中生成内容', '视频卡不存在', '视频卡不属于当前项目',

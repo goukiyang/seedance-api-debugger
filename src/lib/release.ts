@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '多角度工具统一更名为3D多视图；模板结果图片操作更紧凑，移除封面上的复制图片和查看按钮，原预览、参数恢复、下载及删除仍保留。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '3D多视图模板提示词相容保护版：保留新模板修订与原请求读取，旧界面无法管理模板；模板已更新时请恢复新版界面后再主动生成。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

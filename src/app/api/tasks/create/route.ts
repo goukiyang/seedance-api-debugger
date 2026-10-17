@@ -7,6 +7,7 @@ import { multiviewRequestIntent, claimMultiviewRequest, assertMultiviewRequestFe
   rejectMultiviewRequest, type MultiviewRequestClaim } from '@/lib/video/multiview-request-receipt';
 import { composeMultiviewGenerationPrompt, MULTIVIEW_REFERENCE_PROMPT_PREFIX, isMultiviewGenerationSeed, parseMultiviewGenerationSnapshot,
   type MultiviewGenerationSnapshot } from '@/lib/video/multiview-generation-contract';
+import { assertCurrentMultiviewRotationPreset, readMultiviewRotationPresetVersion, MultiviewPresetError } from '@/lib/video/multiview-preset.server';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import path from 'path';
 import fs from 'fs';
@@ -868,7 +869,15 @@ export async function POST(request: NextRequest) {
   if (body.multiview_generation !== undefined) {
     multiviewGeneration = parseMultiviewGenerationSnapshot(body.multiview_generation);
     if (!multiviewGeneration) return errorJson('3D多视图旋转预设版本或主图记录无效，已有输入保留', 400);
-    const composed = composeMultiviewGenerationPrompt(multiviewGeneration.supplement, multiviewGeneration.presetVersion);
+    // Resolve only the immutable revision here. Existing task/receipt lookup must
+    // not substitute today's preset into an already accepted request.
+    let preset;
+    try { preset = await readMultiviewRotationPresetVersion(multiviewGeneration.presetVersion); }
+    catch (error) {
+      if (error instanceof MultiviewPresetError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+      throw error;
+    }
+    const composed = composeMultiviewGenerationPrompt(multiviewGeneration.supplement, multiviewGeneration.presetVersion, preset);
     if (!composed.valid) return errorJson(composed.error || '完整旋转文案无效', 400);
     // Only the complete rotation contract may omit a card; a source label alone is not sufficient.
     if (!idempotencyKey || request.headers.get('x-tab-id') !== multiviewGeneration.workspaceTabId
@@ -1184,6 +1193,14 @@ export async function POST(request: NextRequest) {
         billing_scope: existing.billing_scope,
         billing_account_id: existing.billing_account_id,
       });
+    }
+  }
+
+  if (multiviewGeneration) {
+    try { await assertCurrentMultiviewRotationPreset(multiviewGeneration.presetVersion); }
+    catch (error) {
+      if (error instanceof MultiviewPresetError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+      throw error;
     }
   }
 
@@ -1918,6 +1935,7 @@ export async function POST(request: NextRequest) {
   try {
     const result = await prisma.$transaction(async (tx) => {
       await assertMultiviewRequestFence(tx, user.id, idempotencyKey, requestClaim);
+      if (multiviewGeneration) await assertCurrentMultiviewRotationPreset(multiviewGeneration.presetVersion, tx);
       const task = await tx.videoTask.create({
         data: {
           provider: requestedProvider,
@@ -2192,6 +2210,7 @@ export async function POST(request: NextRequest) {
         });
       }
     }
+    if (err instanceof MultiviewPresetError) return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
     if (err instanceof AuthError) return errorJson(err.message, err.status);
     if (err instanceof CreditError) {
       if (err.code === 'INSUFFICIENT_PROJECT_BUDGET') {

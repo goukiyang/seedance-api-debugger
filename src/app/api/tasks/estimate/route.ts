@@ -8,6 +8,7 @@ import { authenticateCodexVideoApi, hasCodexApiAuthSignal, CodexApiAuthError } f
 import type { VideoResolution } from '@/types';
 import { getVolcengineIpApiSettings, isVolcengineIpApiReady } from '@/lib/integrations/volcengine-ip';
 import { isVolcengineIpModelId, volcengineIpModelResolutions } from '@/lib/integrations/volcengine-ip-models';
+import { assertCurrentMultiviewRotationPreset, MultiviewPresetError } from '@/lib/video/multiview-preset.server';
 
 export async function GET(request: NextRequest) {
   let user;
@@ -41,6 +42,26 @@ export async function GET(request: NextRequest) {
   if (!['480p', '720p', '1080p'].includes(resolution)) return errorJson('resolution 无效', 400);
 
   const pricing = calculateEstimatedCost(resolution, duration, parsedModel.model);
+  const multiviewPresetVersion = searchParams.get('multiview_preset_version');
+  let multiviewPresetRevision: number | undefined;
+  if (multiviewPresetVersion !== null) {
+    try {
+      assertInternalOnly(user, '外部账号无权使用3D多视图生成。');
+      if (user.status !== 'active') throw new AuthError('账号已被禁用', 403);
+      if (provider !== 'seedance') return errorJson('3D多视图当前只支持普通视频生成通道。', 400);
+      multiviewPresetRevision = (await assertCurrentMultiviewRotationPreset(multiviewPresetVersion)).revision;
+    } catch (error) {
+      if (error instanceof AuthError || error instanceof MultiviewPresetError) return NextResponse.json({ error: error.message,
+        ...(error instanceof MultiviewPresetError ? { code: error.code } : {}) }, {
+        status: error.status, headers: { 'Cache-Control': 'private, no-store' },
+      });
+      return NextResponse.json({ error: '模板提示词暂时无法确认，请重新读取后再报价。' }, {
+        status: 503, headers: { 'Cache-Control': 'private, no-store' },
+      });
+    }
+  }
 
-  return NextResponse.json({ ...pricing, provider, modelId: parsedModel.model }, { headers: { 'Cache-Control': 'private, no-store' } });
+  return NextResponse.json({ ...pricing, provider, modelId: parsedModel.model,
+    ...(multiviewPresetVersion === null ? {} : { multiviewPresetVersion, multiviewPresetRevision }),
+  }, { headers: { 'Cache-Control': 'private, no-store' } });
 }
