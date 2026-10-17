@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '3D多视图换帧更紧凑，复制与下载操作稳定可达，不再把同一历史结果提示为新结果。管理员可查看和修改模板提示词，保存后用于后续新生成；原任务与个人补充要求保留。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '保留3D多视图作品、原请求与模板提示词的兼容保护版本；作品库完整操作需恢复新版界面。原视频、已保存成果、配置与费用记录保留，不会重新生成。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

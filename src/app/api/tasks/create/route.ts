@@ -8,6 +8,7 @@ import { multiviewRequestIntent, claimMultiviewRequest, assertMultiviewRequestFe
 import { composeMultiviewGenerationPrompt, MULTIVIEW_REFERENCE_PROMPT_PREFIX, isMultiviewGenerationSeed, parseMultiviewGenerationSnapshot,
   type MultiviewGenerationSnapshot } from '@/lib/video/multiview-generation-contract';
 import { assertCurrentMultiviewRotationPreset, readMultiviewRotationPresetVersion, MultiviewPresetError } from '@/lib/video/multiview-preset.server';
+import { registerMultiviewWorkIntent } from '@/lib/video/multiview-works';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import path from 'path';
 import fs from 'fs';
@@ -2164,6 +2165,8 @@ export async function POST(request: NextRequest) {
       }
 
       await acceptMultiviewRequest(tx, requestClaim, task.id);
+      if (multiviewGeneration) await registerMultiviewWorkIntent(tx, { ownerId: user.id, taskId: task.id,
+        projectId: project.id, videoCardId });
       return task;
     });
 

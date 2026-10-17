@@ -1,6 +1,6 @@
 {
   "name": "video-api-debugger",
-  "version": "0.93.0",
+  "version": "0.93.0+multiview-works-guard.1",
   "private": true,
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",
