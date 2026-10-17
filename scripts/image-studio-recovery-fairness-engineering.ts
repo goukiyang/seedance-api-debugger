@@ -42,7 +42,10 @@ async function main() {
     async findMany({ args, query }) {
       const rows = await query(args);
       if (args.take === 1 && args.where?.lease_until) {
-        for (const row of rows) selected.push(row.id);
+        for (const row of rows) {
+          assert.ok(typeof row.id === 'string', 'Recovery selection must return a task ID');
+          selected.push(row.id);
+        }
         if (competeFor && rows[0]?.id === competeFor) {
           const id = competeFor; competeFor = null;
           await database.imageStudioTask.update({ where: { id }, data: {
