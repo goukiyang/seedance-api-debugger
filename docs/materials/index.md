@@ -7,7 +7,7 @@
 | 资料与原文件名 | 来源／日期／版本 | 内容、用途与关系 | 正式入口与校验 |
 |---|---|---|---|
 | `codex-clipboard-6993f579-d989-4071-a2db-9a9c89e09078.png` | 用户剪贴板附件；2026-10-17；原件首次归档 | 当前3D多视图两栏页面，显示右侧工具下方大面积空白；用于本轮全宽布局、顶部入口与逐帧控件规划，不是实现或验收截图 | [本机原件](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-17-multiview-instant-frame-workbench/codex-clipboard-6993f579-d989-4071-a2db-9a9c89e09078.png)；2799×1555 PNG；源与副本 `cmp` 一致；SHA-256 `89cd8b95013053ee97d2bdc3943eaa3f528e68528c7b1322057e4567f017b5fc`；含用户现场内容，仅本机保存、不提交公开 Git |
-| 3D多视图即时选帧与全宽工作台实施计划 | 当前需求、实际源码与既有R05/D01–D20；2026-10-17；计划v1 | 约1秒卡顿根因、双层帧源最优解、页面结构、滑轨／倍速／指定帧、实施任务、验收、停止条件与交接正文 | [完整工单](../../tasks/todo/2026-10-17-multiview-instant-frame-workbench.md)；UTF-8可读；状态待实施，不替代既有`2026-10-16-multiview-workbench.md`或冒充线上完成 |
+| 3D多视图即时选帧与全宽工作台实施计划 | 当前需求、实际源码与既有R05/D01–D20；2026-10-17；计划v2终审 | 约1秒卡顿根因、JPEG图集v1、页面结构、滑轨／倍速／指定帧、资源/权限/恢复/发布风险矩阵、实施任务、验收、停止条件与交接正文 | [完整工单](../../tasks/todo/2026-10-17-multiview-instant-frame-workbench.md)；UTF-8可读；状态待实施，不替代既有`2026-10-16-multiview-workbench.md`或冒充线上完成 |
 
 ## PAGE18及三review fixes（2026-10-07）
 
