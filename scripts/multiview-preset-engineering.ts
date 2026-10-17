@@ -22,7 +22,7 @@ async function main() {
   // request storage. Supply the same primitive, never a mock auth function.
   Reflect.set(globalThis, 'AsyncLocalStorage', AsyncLocalStorage);
   globalThis.fetch = async () => { throw new Error('External requests prohibited in isolated MV-PROMPT engineering'); };
-  const childEnv: Record<string, string> = {};
+  const childEnv: NodeJS.ProcessEnv = { NODE_ENV: 'test' };
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'TZ']) if (process.env[key]) childEnv[key] = process.env[key]!;
   Object.assign(childEnv, { DATABASE_URL: process.env.DATABASE_URL, PRISMA_GENERATE_SKIP_AUTOINSTALL: '1', NEXT_TELEMETRY_DISABLED: '1' });
   // Schema preparation applies only to the just-created synthetic file. No
