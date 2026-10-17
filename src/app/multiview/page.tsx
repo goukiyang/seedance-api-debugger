@@ -319,7 +319,7 @@ function MultiviewPageContent() {
     if (!safeTask(taskId)) { setLoading(false); setError('视频编号无效，当前生成草稿不受影响'); return; }
     const epoch = ++context.current;
     abort.current?.abort(); const controller = new AbortController(); abort.current = controller;
-    clearArtifacts(); requests.current.clear(); frameQueue.current = Promise.resolve();
+    clearArtifacts(); requests.current.clear();
     setAuthorized(false); setLoading(true); setError(''); setPreview(null);
     try {
       const response = await fetch(`/api/video/multiview/${encodeURIComponent(taskId)}`, { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]) });
