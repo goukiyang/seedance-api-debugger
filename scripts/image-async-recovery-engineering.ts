@@ -91,19 +91,41 @@ async function main() {
     const request = new EventEmitter() as EventEmitter & { end: () => void }, signal = options.signal; assert.ok(signal);
     const ref = setTimeout(() => { pendingIoFailures.push(id); request.emit('error', new Error('Synthetic I/O exceeded ten seconds')); }, 10000);
     ref.ref(); timers.add(ref);
-    const abort = () => request.emit('error', new Error('Synthetic request aborted'));
-    const cleanup = () => { clearTimeout(ref); timers.delete(ref); signal.removeEventListener('abort', abort); };
+    let response: (PassThrough & { statusCode: number; headers: Record<string, string> }) | undefined;
+    let body: NodeJS.Immediate | undefined;
+    let aborted = false;
+    const abort = () => {
+      if (aborted) return;
+      aborted = true; response?.destroy();
+      request.emit('error', Object.assign(new Error('Synthetic request aborted'), { code: 'ABORT_ERR' }));
+    };
+    const cleanup = () => {
+      clearTimeout(ref); timers.delete(ref);
+      if (body) { clearImmediate(body); body = undefined; }
+      signal.removeEventListener('abort', abort);
+    };
     request.once('error', cleanup); signal.addEventListener('abort', abort, { once: true });
     request.end = () => queueMicrotask(() => {
+      if (signal.aborted) { abort(); return; }
       queries.push({ id, path: url.pathname + url.search });
       if (status === 'hang') return;
-      const response = new PassThrough() as PassThrough & { statusCode: number; headers: Record<string, string> };
+      response = new PassThrough() as PassThrough & { statusCode: number; headers: Record<string, string> };
       response.statusCode = status === 'summary404' && url.search || status === 'result404' && !url.search ? 404 : 200;
       response.headers = { 'content-type': 'application/json' };
       response.once('end', cleanup); response.once('close', cleanup); response.once('error', cleanup);
       onResponse(response as unknown as IncomingMessage);
-      response.end(JSON.stringify(url.search ? { task_id: id, status: status === 'result404' ? 'success' : status, assets: [] }
-        : { data: [{ b64_json: png.toString('base64') }] }));
+      // Deliver body bytes on a separate I/O turn, as opposed to buffering them
+      // inside the promise-resolution microtask. In Node20 the latter creates
+      // an artificial toWeb/cancel race absent from the real HTTP control.
+      // A canceled response must never receive a pending synthetic body.
+      const output = response;
+      body = setImmediate(() => {
+        body = undefined;
+        if (signal.aborted) { abort(); return; }
+        if (!output.destroyed) output.end(JSON.stringify(url.search
+          ? { task_id: id, status: status === 'result404' ? 'success' : status, assets: [] }
+          : { data: [{ b64_json: png.toString('base64') }] }));
+      });
     });
     return request;
   });
