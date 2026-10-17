@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import dns from 'node:dns/promises';
 import { EventEmitter } from 'node:events';
@@ -113,7 +113,7 @@ async function main() {
     const { recoverStudioTasks } = await import('../src/lib/image-studio/worker');
     const { finishStudioTask } = await import('../src/lib/image-studio/tasks');
     const delivery = await import('../src/lib/image-studio/delivery');
-    const owner = 'async-fixture-owner', model = 'gpt-image-2.5-sunburst', channelId = 'async-fixture-channel', configRevision = 'frozen-revision';
+    const owner = 'async-fixture-owner', model = 'gpt-image-2.5-sunburst', channelId = `image-${randomUUID()}`, configRevision = randomUUID();
     await db.user.create({ data: { id: owner, name: 'Isolated owner', username: owner, email: `${owner}@fixture.invalid`,
       password_hash: 'synthetic-not-a-login', role: 'admin', account_type: 'internal' } });
     await db.creditAccount.create({ data: { user_id: owner, balance: 100, frozen_credits: 0 } });
