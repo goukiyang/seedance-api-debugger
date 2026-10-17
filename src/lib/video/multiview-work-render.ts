@@ -162,7 +162,7 @@ const crcTable = Array.from({ length: 256 }, (_, initial) => {
 });
 function crc32(data: Buffer) {
   let value = 0xffffffff;
-  for (const byte of data) value = crcTable[(value ^ byte) & 255] ^ (value >>> 8);
+  for (let index = 0; index < data.length; index++) value = crcTable[(value ^ data[index]) & 255] ^ (value >>> 8);
   return (value ^ 0xffffffff) >>> 0;
 }
 /** Validate the bounded archive, including each stored PNG and the original frame mapping. */

@@ -46,7 +46,7 @@ export async function readMultiviewWorkFile(owner: string, work: MultiviewWorkDt
   const blob = await response.blob();
   if (!isCurrent() || signal.aborted || blob.size !== file.bytes || blob.type !== file.mime) throw new Error('作品读取未完成，请重试当前操作');
   if (etag && blob.size <= MAX_CACHE) {
-    let bytes = [...files.values()].reduce((sum, entry) => sum + entry.bytes, 0);
+    let bytes = Array.from(files.values()).reduce((sum, entry) => sum + entry.bytes, 0);
     while (files.size >= 4 || bytes + blob.size > MAX_CACHE) {
       const oldest = files.keys().next().value as string | undefined;
       if (!oldest) break;
