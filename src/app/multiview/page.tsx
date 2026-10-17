@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { ArrowLeft, ArrowRight, Copy, Download, Expand, RefreshCw, Undo2, X } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
@@ -83,6 +83,8 @@ function MultiviewPageContent() {
   const [exportFile, setExportFile] = useState<Artifact | null>(null);
   const [preview, setPreview] = useState<number | null>(null);
   const [editorFrame, setEditorFrame] = useState(0);
+  const [editorMode, setEditorMode] = useState<'frame' | 'video'>('frame');
+  const [dock, setDock] = useState<{ left: number; width: number; bottom: number; height: number; toolHeight: number } | null>(null);
   const [reduceCount, setReduceCount] = useState<number | null>(null);
   const [retained, setRetained] = useState<string[]>([]);
   const [undo, setUndo] = useState<MultiviewDraft | null>(null);
@@ -98,6 +100,9 @@ function MultiviewPageContent() {
   const video = useRef<HTMLVideoElement>(null);
   const generationArea = useRef<HTMLDivElement>(null);
   const collageViewport = useRef<HTMLDivElement>(null);
+  const resultArea = useRef<HTMLElement>(null);
+  const toolsArea = useRef<HTMLElement>(null);
+  const exportBar = useRef<HTMLElement>(null);
   const requests = useRef(new Map<number, Promise<boolean>>());
   const frameQueue = useRef<Promise<unknown>>(Promise.resolve());
   const objectUrls = useRef(new Set<string>());
@@ -127,6 +132,36 @@ function MultiviewPageContent() {
   const currentSourceKey = `${owner}:${taskId}:${loadedOwner === owner && info?.taskId === taskId ? info.sourceVersion : ''}:${activity}`;
   const sourceKeyRef = useRef(currentSourceKey); sourceKeyRef.current = currentSourceKey;
   const unsavedFrames = Boolean(draftEdited && !saved && draft && editingSignature(draft) !== retainedDraft);
+  useEffect(() => {
+    if (!visible) { setDock(null); return; }
+    let raf = 0;
+    const measure = () => {
+      raf = 0;
+      if (!resultArea.current || !exportBar.current) return;
+      const viewport = window.visualViewport;
+      const leftEdge = viewport?.offsetLeft ?? 0;
+      const bottomEdge = (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight);
+      const bounds = resultArea.current.getBoundingClientRect();
+      const left = Math.max(leftEdge + 8, bounds.left);
+      const width = Math.max(0, Math.min(bounds.right, leftEdge + (viewport?.width ?? window.innerWidth) - 8) - left);
+      const height = width >= 160 ? Math.ceil(exportBar.current.getBoundingClientRect().height) : 0;
+      const toolsTop = Math.max((viewport?.offsetTop ?? 0) + 64, toolsArea.current?.getBoundingClientRect().top ?? 64);
+      // Do not collapse the focused tool body when a software keyboard reduces the visual viewport.
+      const typing = document.activeElement instanceof HTMLElement && document.activeElement.matches('input, textarea, select, [contenteditable=true]');
+      const toolsBottom = typing && viewport && viewport.height < window.innerHeight * .7 ? window.innerHeight : bottomEdge;
+      const next = { left, width, height, bottom: Math.max(0, window.innerHeight - bottomEdge), toolHeight: Math.max(96, Math.floor(toolsBottom - toolsTop - height - 16)) };
+      setDock(value => value && Object.keys(next).every(key => value[key as keyof typeof next] === next[key as keyof typeof next]) ? value : next);
+    };
+    const schedule = () => { if (!raf) raf = requestAnimationFrame(measure); };
+    const focus = () => { schedule(); const active = document.activeElement; if (active instanceof HTMLElement && resultArea.current?.contains(active)) active.scrollIntoView({ block: 'nearest', inline: 'nearest' }); };
+    const observer = new ResizeObserver(schedule);
+    if (resultArea.current) observer.observe(resultArea.current);
+    if (exportBar.current) observer.observe(exportBar.current);
+    measure();
+    window.addEventListener('resize', schedule); window.addEventListener('scroll', schedule, true);
+    window.visualViewport?.addEventListener('resize', focus); window.visualViewport?.addEventListener('scroll', schedule);
+    return () => { observer.disconnect(); cancelAnimationFrame(raf); window.removeEventListener('resize', schedule); window.removeEventListener('scroll', schedule, true); window.visualViewport?.removeEventListener('resize', focus); window.visualViewport?.removeEventListener('scroll', schedule); };
+  }, [visible]);
   useUnsavedNavigation(unsavedFrames || Boolean(generation.unsaved) || exporting || Boolean(generation.leavingBusy), confirm, {
     unsaved: [...(unsavedFrames ? ['本次选帧或排版修改暂未保存到本机'] : []), ...(generation.unsaved ? ['生成输入或原请求记录暂未完整保存到本机'] : [])],
     busy: [...(exporting ? ['拼图文件仍在准备或复制'] : []), ...(generation.leavingBusy ? ['主图或视频提交仍在处理中'] : [])],
@@ -363,7 +398,7 @@ function MultiviewPageContent() {
   }
   function openEditor(item: MultiviewSlot) {
     if (!draft) return;
-    video.current?.pause(); setEditorFrame(item.frame); setView(value => ({ ...value, tab: 'frames', selected: item.id }));
+    video.current?.pause(); setEditorMode('frame'); setEditorFrame(item.frame); setView(value => ({ ...value, tab: 'frames', selected: item.id }));
     if (video.current && info) video.current.currentTime = info.timestamps[item.frame];
     update({ ...draft, editing: item.id, editorFrame: item.frame });
   }
@@ -374,7 +409,7 @@ function MultiviewPageContent() {
   function seek(frame: number) {
     if (!info) return;
     const value = Math.min(info.timestamps.length - 1, Math.max(0, frame));
-    setEditorFrame(value); setSaved(false); setActivity(count => count + 1);
+    setEditorMode('frame'); setEditorFrame(value); setSaved(false); setActivity(count => count + 1);
     setDraft(current => current ? { ...current, editorFrame: value } : current);
     if (video.current) { video.current.pause(); video.current.currentTime = info.timestamps[value]; }
   }
@@ -392,6 +427,11 @@ function MultiviewPageContent() {
   function generationReady(result: MultiviewGenerationReady) {
     if (result.ownerId !== ownerRef.current || isClientSessionBlocked()) return;
     const key = `${result.ownerId}:${result.requestKey}`;
+    if (result.taskId === taskId) {
+      seenReady.current.add(key);
+      setPendingResult(value => value?.taskId === result.taskId ? null : value);
+      return;
+    }
     if (seenReady.current.has(key) && !result.explicitOpen) return;
     seenReady.current.add(key);
     if (result.explicitOpen || !operation.current && result.startedFromSourceKey === sourceKeyRef.current) void selectTask(result.taskId, !result.explicitOpen); else setPendingResult(result);
@@ -486,8 +526,11 @@ function MultiviewPageContent() {
   const playerEpoch = context.current;
   const mediaCurrent = () => playerEpoch === context.current && authorityRef.current === authority && !isClientSessionBlocked();
   const player = info && <div className={styles.videoArea}>
+    {editing && <div className={styles.previewModes} aria-label="主预览模式"><button type="button" aria-pressed={editorMode === 'frame'} onClick={() => { video.current?.pause(); setEditorMode('frame'); }}>精确选帧</button><button type="button" aria-pressed={editorMode === 'video'} onClick={() => setEditorMode('video')}>播放视频</button></div>}
+    <div className={editing ? styles.editorStage : styles.originalStage}>
+    {editing && editorMode === 'frame' && <button type="button" className={styles.candidate} disabled={!currentFrame?.url} onClick={() => setPreview(editorFrame)} aria-label="放大待选帧">{currentFrame?.url ? <img src={currentFrame.url} alt="待选帧，尚未应用" /> : <span>{currentFrame?.error || '正在读取这一帧…'}</span>}</button>}
     {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-    <video ref={video} src={source} controls playsInline preload="metadata" loop={loop.enabled}
+    <video ref={video} src={source} hidden={Boolean(editing && editorMode !== 'video')} controls playsInline preload="metadata" loop={loop.enabled}
       onLoadedMetadata={event => { if (!mediaCurrent()) return; event.currentTarget.pause(); event.currentTarget.currentTime = Math.min(info.duration, editing ? info.timestamps[editorFrame] : viewRef.current.time); }}
       onTimeUpdate={event => { if (!mediaCurrent()) return; const time = event.currentTarget.currentTime; setView(value => Math.abs(value.time - time) >= 1 ? { ...value, time } : value); }}
       onPause={event => {
@@ -497,6 +540,7 @@ function MultiviewPageContent() {
         let nearest = 0; for (let i = 1; i < info.timestamps.length; i++) if (Math.abs(info.timestamps[i] - time) < Math.abs(info.timestamps[nearest] - time)) nearest = i;
         setEditorFrame(nearest); setDraft(current => current ? { ...current, editorFrame: nearest } : current);
       }} />
+    </div>
     <VideoLoopButton enabled={loop.enabled} onToggle={loop.toggle} disabled={!loop.ready} storageUnavailable={loop.storageUnavailable} />
     <small>原视频实际版本／原生成轮次未知 · 原视频预览，不会重新生成</small>
   </div>;
@@ -524,14 +568,14 @@ function MultiviewPageContent() {
   return <div className={styles.page}>
     <PageBanner title="3D多视图" description="一张主图生成旋转视频，再选帧排版。已有视频也可直接制作，不会重新生成。" backHref={backHref} backLabel={taskId ? '返回原视频' : '返回创作首页'} />
     <ol className={styles.stages} aria-label="当前制作阶段">{['导入图片', '生成视频', '提取视图', '调整与导出'].map((label, index) => <li key={label} aria-current={stage === index + 1 ? 'step' : undefined} data-done={existingSource && index < 2 ? 'existing' : stage > index + 1 || undefined}><span>{index + 1}</span>{existingSource && index < 2 ? index === 0 ? '已有视频' : '直接使用成品' : label}</li>)}</ol>
-    <div ref={generationArea}><MultiviewGenerationPanel currentSourceKey={currentSourceKey} hasResult={Boolean(visible)} expanded={expanded} onExpandedChange={changeExpanded}
+    <div ref={generationArea}><MultiviewGenerationPanel currentSourceKey={currentSourceKey} currentTaskId={visible ? taskId : undefined} hasResult={Boolean(visible)} expanded={expanded} onExpandedChange={changeExpanded}
       onUseExisting={() => setPickerOpen(true)} onReady={generationReady} onStateChange={setGeneration}
       initialProjectId={query.get('projectId') || undefined} initialVideoCardId={query.get('videoCardId') || undefined} /></div>
-    {pendingResult && pendingResult.ownerId === owner && <div className={styles.notice} role="status">新视频已就绪，当前选帧未被覆盖。<button type="button" onClick={() => void selectTask(pendingResult.taskId)}>打开新结果</button></div>}
+    {pendingResult && pendingResult.ownerId === owner && pendingResult.taskId !== taskId && <div className={styles.notice} role="status">新视频已就绪，当前选帧未被覆盖。<button type="button" onClick={() => void selectTask(pendingResult.taskId)}>打开新结果</button></div>}
     {previousTask && previousTask !== taskId && <button type="button" className={styles.quiet} onClick={() => void selectTask(previousTask)}>返回上次结果</button>}
     {loading && <p className={styles.empty} role="status">正在核对原视频并读取候选图片…</p>}
     {error && <div className={styles.empty} role="status"><p>{error}</p><button type="button" onClick={() => void load()}>重新读取原视频</button><button type="button" onClick={() => setPickerOpen(true)}>使用已有视频</button></div>}
-    {visible && info && draft && <section className={styles.result} aria-label="3D多视图成品工作台">
+    {visible && info && draft && <section ref={resultArea} className={styles.result} style={{ '--export-height': `${dock?.height ?? 88}px`, '--tool-height': `${dock?.toolHeight ?? 600}px` } as CSSProperties} aria-label="3D多视图成品工作台">
       <header className={styles.resultHeader}><div><h2>最终拼图</h2><p>时间候选，角度由你确认 · 点击一格调整</p></div><div className={styles.count} aria-label="图片数量">{[3, 4, 8].map(count => <button type="button" key={count} aria-pressed={draft.slots.length === count} disabled={exporting} onClick={() => chooseCount(count)}>{count} 张</button>)}</div></header>
       {reduceCount !== null && <section className={styles.retain} aria-label="选择保留图片"><h3>保留哪 {reduceCount} 张？</h3><p>其余留在本次草稿，增加数量或撤销时可找回。</p><div className={styles.retainOptions}>{draft.slots.map((item, index) => <label key={item.id}><input type="checkbox" checked={retained.includes(item.id)} onChange={event => setRetained(value => event.target.checked ? [...value, item.id] : value.filter(id => id !== item.id))} />第 {index + 1} 张{item.manual ? ' · 已手选' : ''}{item.name && ` · ${item.name}`}</label>)}</div><button type="button" className={styles.primary} disabled={retained.length !== reduceCount} onClick={() => {
         const slots = draft.slots.filter(item => retained.includes(item.id));
@@ -545,7 +589,7 @@ function MultiviewPageContent() {
           <p className={styles.caption}>每张 {info.width} × {info.height} · 拼图 {dimensions?.width} × {dimensions?.height} · 原图不裁剪、不放大</p>
           <div className={styles.slotStrip} aria-label="选择要调整的图片">{draft.slots.map((item, index) => <button type="button" key={item.id} aria-pressed={selected?.id === item.id} onClick={() => selectSlot(item)}>{frames[item.frame]?.url && <img src={frames[item.frame].url} alt="" />}<span>{item.name || `第 ${index + 1} 张`}</span>{frames[item.frame]?.error && <span>未就绪</span>}</button>)}</div>
         </div>
-        <aside className={styles.tools} aria-label="当前拼图工具"><div className={styles.toolTabs} role="tablist" aria-label="拼图工具"><button type="button" id="mv-frames-tab" role="tab" aria-controls="mv-frames-panel" aria-selected={view.tab === 'frames'} onClick={() => setView(value => ({ ...value, tab: 'frames' }))}>选帧</button><button type="button" id="mv-layout-tab" role="tab" aria-controls="mv-layout-panel" aria-selected={view.tab === 'layout'} onClick={() => setView(value => ({ ...value, tab: 'layout' }))}>排版</button></div>
+        <aside ref={toolsArea} className={styles.tools} aria-label="当前拼图工具"><div className={styles.toolTabs} role="tablist" aria-label="拼图工具"><button type="button" id="mv-frames-tab" role="tab" aria-controls="mv-frames-panel" aria-selected={view.tab === 'frames'} onClick={() => { video.current?.pause(); setView(value => ({ ...value, tab: 'frames' })); }}>选帧</button><button type="button" id="mv-layout-tab" role="tab" aria-controls="mv-layout-panel" aria-selected={view.tab === 'layout'} onClick={() => { video.current?.pause(); setView(value => ({ ...value, tab: 'layout' })); }}>排版</button></div>
           {view.tab === 'frames' && selected && <div role="tabpanel" id="mv-frames-panel" aria-labelledby="mv-frames-tab" className={styles.toolBody}>
             <header className={styles.selectionTitle}><h3>第 {selectedIndex + 1} 张</h3><span>{info.timestamps[selected.frame].toFixed(3)} 秒{selected.manual ? ' · 已手选' : ''}</span></header>
             <label>方向名称（可选）<input maxLength={40} value={selected.name} placeholder="例如：正面，由你确认" disabled={exporting} onChange={event => update({ ...draft, slots: draft.slots.map(item => item.id === selected.id ? { ...item, name: event.target.value } : item) })} /></label>
@@ -553,21 +597,20 @@ function MultiviewPageContent() {
             {frames[selected.frame]?.error && <div className={styles.frameError} role="status">{frames[selected.frame].error}<button type="button" onClick={() => void loadFrame(selected.frame, true)}><RefreshCw size={13} />重试这一格</button></div>}
             {!editing && <button type="button" className={styles.primary} onClick={() => openEditor(selected)}>换一帧</button>}
             {editing && <section className={styles.editor} aria-label={`替换第 ${draft.slots.indexOf(editing) + 1} 张`}><header><h3>替换第 {draft.slots.indexOf(editing) + 1} 张</h3><button type="button" aria-label="取消换帧" onClick={() => update({ ...draft, editing: null })}><X size={16} /></button></header>
-              <button type="button" className={styles.candidate} disabled={!currentFrame?.url} onClick={() => setPreview(editorFrame)} aria-label="放大待选帧">{currentFrame?.url ? <img src={currentFrame.url} alt="待选帧，尚未应用" /> : <span>{currentFrame?.error || '正在读取这一帧…'}</span>}</button>
               {player}<label className={styles.timeline}>第 {editorFrame + 1} / {info.timestamps.length} 帧 · {info.timestamps[editorFrame].toFixed(3)} 秒<input aria-label="选择视频帧" type="range" min={0} max={info.timestamps.length - 1} step={1} value={editorFrame} onChange={event => seek(Number(event.target.value))} /></label>
               <div className={styles.neighbors}>{[-2, -1, 0, 1, 2].map(delta => editorFrame + delta).filter(frame => frame >= 0 && frame < info.timestamps.length).map(frame => <button type="button" key={frame} aria-pressed={frame === editorFrame} onClick={() => seek(frame)}>{frames[frame]?.url && <img src={frames[frame].url} alt={`第 ${frame + 1} 帧`} />}<span>{frame === editorFrame ? '当前' : frame < editorFrame ? `前 ${editorFrame - frame}` : `后 ${frame - editorFrame}`}</span></button>)}</div>
               <div className={styles.inlineActions}><button type="button" disabled={editorFrame === 0} onClick={() => seek(editorFrame - 1)}>上一帧</button><button type="button" disabled={editorFrame === info.timestamps.length - 1} onClick={() => seek(editorFrame + 1)}>下一帧</button>{currentFrame?.error && <button type="button" onClick={() => void loadFrame(editorFrame, true)}>重试此帧</button>}</div>
-              <div className={styles.inlineActions}><button type="button" className={styles.primary} disabled={!currentFrame?.url || exporting} onClick={() => { video.current?.pause(); update({ ...draft, slots: draft.slots.map(item => item.id === editing.id ? { ...item, frame: editorFrame, manual: true } : item), editing: null }, true); }}>使用这一帧</button><button type="button" onClick={() => update({ ...draft, editing: null })}>取消</button></div>
             </section>}
           </div>}
           {view.tab === 'layout' && <div role="tabpanel" id="mv-layout-panel" aria-labelledby="mv-layout-tab" className={styles.toolBody}><h3>拼图排版</h3><label>拼图列数<select value={draft.layout.columns} disabled={exporting} onChange={event => update({ ...draft, layout: { ...draft.layout, columns: Number(event.target.value) } })}>{[1, 2, 3, 4, 8].map(value => <option key={value} value={value}>{value} 列</option>)}</select></label>
             <label>外侧留白（像素）<input type="number" min={0} max={128} step={1} value={draft.layout.margin} disabled={exporting} onChange={event => update({ ...draft, layout: { ...draft.layout, margin: Math.round(Math.max(0, Math.min(128, Number(event.target.value) || 0))) } })} /></label><label>图片间距（像素）<input type="number" min={0} max={128} step={1} value={draft.layout.gap} disabled={exporting} onChange={event => update({ ...draft, layout: { ...draft.layout, gap: Math.round(Math.max(0, Math.min(128, Number(event.target.value) || 0))) } })} /></label><label>留白底色<input type="color" value={draft.layout.background} disabled={exporting} onChange={event => update({ ...draft, layout: { ...draft.layout, background: event.target.value } })} /></label><button type="button" disabled={exporting} onClick={() => update({ ...draft, layout: { ...DEFAULT_MULTIVIEW_LAYOUT } }, true)}>重置排版</button><p>只调整留白，不去背景、不裁剪原帧。单图包仍为原尺寸。</p></div>}
+          {view.tab === 'frames' && editing && <div className={styles.editorActions}><button type="button" className={styles.primary} disabled={!currentFrame?.url || exporting} onClick={() => { video.current?.pause(); update({ ...draft, slots: draft.slots.map(item => item.id === editing.id ? { ...item, frame: editorFrame, manual: true } : item), editing: null }, true); }}>使用这一帧</button><button type="button" onClick={() => { video.current?.pause(); update({ ...draft, editing: null }); }}>取消</button></div>}
         </aside>
       </div>
       {validSlots.length > 0 && validSlots.length < draft.slots.length && <div className={styles.partial} role="status"><p>{validSlots.length} / {draft.slots.length} 张就绪。原草稿数量不变，复制完整拼图仍需全部就绪。</p><div className={styles.inlineActions}><button type="button" disabled={exporting} onClick={() => void download('png', true)}>下载已就绪 {validSlots.length} / {draft.slots.length} 张（PNG拼图）</button><button type="button" disabled={exporting} onClick={() => void download('zip', true)}>下载已就绪 {validSlots.length} / {draft.slots.length} 张（ZIP单图包）</button></div></div>}
       {notice && <div className={styles.notice} role="status">{notice}{exportFile && <button type="button" disabled={exporting} onClick={() => void downloadPrepared(exportFile)}>下载已准备文件</button>}</div>}
       {(!saved || !viewSaved) && <p className={styles.warning} role="status">本机存储暂不可用，刷新可能丢失本次工作现场；当前编辑和原图导出仍可使用。</p>}
-      <footer className={styles.exportBar}><div><strong>{validSlots.length} / {draft.slots.length} 张就绪</strong><small>{dimensions?.width} × {dimensions?.height} · {saved && viewSaved ? '已保存到此设备' : '本机保存未完成'}</small></div><div className={styles.exportActions}><button type="button" className={styles.primary} disabled={exporting || validSlots.length !== draft.slots.length} onClick={copyCollage}><Copy size={16} />{exporting ? '正在准备…' : '一键复制拼图'}</button><button type="button" disabled={exporting || validSlots.length !== draft.slots.length} onClick={() => void download('png')}><Download size={16} />下载拼图</button><button type="button" disabled={exporting || validSlots.length !== draft.slots.length} onClick={() => void download('zip')}>下载单图包</button></div></footer>
+      <footer ref={exportBar} className={styles.exportBar} style={dock && dock.width >= 160 ? { left: dock.left, width: dock.width, bottom: dock.bottom } : { visibility: 'hidden', width: 'min(100%, 600px)' }}><div><strong>{validSlots.length} / {draft.slots.length} 张就绪</strong><small>{dimensions?.width} × {dimensions?.height} · {saved && viewSaved ? '已保存到此设备' : '本机保存未完成'}</small></div><div className={styles.exportActions}><button type="button" className={styles.primary} disabled={exporting || validSlots.length !== draft.slots.length} onClick={copyCollage}><Copy size={16} />{exporting ? '正在准备…' : '一键复制拼图'}</button><button type="button" disabled={exporting || validSlots.length !== draft.slots.length} onClick={() => void download('png')}><Download size={16} />下载拼图</button><button type="button" disabled={exporting || validSlots.length !== draft.slots.length} onClick={() => void download('zip')}>下载单图包</button></div></footer>
       <div className={styles.footnote}><details open={originalOpen} onToggle={event => { const open = event.currentTarget.open; setOriginalOpen(open); setView(value => value.originalOpen === open ? value : { ...value, originalOpen: open }); }}><summary>查看原视频</summary>{originalOpen && !editing && player}{editing && <p>原视频正在右侧换帧工具中显示。</p>}</details><button type="button" className={styles.quiet} disabled={exporting} onClick={() => void clearWorkspace()}>清除本机选帧</button><p>草稿仅属本账号与此原片版本。失权时停止显示；提帧或导出失败不会重跑视频。</p></div>
       {preview !== null && frames[preview]?.url && <ZoomableImagePreview src={frames[preview].url!} alt="3D多视图原尺寸帧" imageSharing={false} sourceVersion={info.sourceVersion} previewKey={`multiview-${taskId}-${info.sourceVersion}-${preview}`} onClose={() => setPreview(null)} safeDetails={{ width: info.width, height: info.height }} />}
     </section>}

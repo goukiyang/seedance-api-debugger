@@ -60,6 +60,10 @@
 .historyRow > span { min-width: 0; overflow-wrap: anywhere; }
 .historyRow > button { flex-shrink: 0; }
 .fileInput { position: absolute; width: 1px !important; height: 1px; padding: 0 !important; overflow: hidden; clip-path: inset(50%); }
+.promptDialog { width: min(680px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); background: var(--bg-panel); color: var(--text-primary); border-color: var(--border-color); }
+.promptDialog textarea { min-height: 180px; max-height: 48dvh; background: var(--bg-input); color: var(--text-primary); border-color: var(--border-color); line-height: 1.65; }
+.promptDialog p { color: var(--text-secondary); }
+.promptText { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 48dvh; overflow: auto; line-height: 1.7; font-size: 14px; }
 @media (max-width: 850px) {
   .body { grid-template-columns: 1fr; gap: 22px; }
   .panel .imageButton { min-height: 200px; max-height: 340px; }

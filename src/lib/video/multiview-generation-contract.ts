@@ -9,6 +9,15 @@ export const MULTIVIEW_ROTATION_PRESET = Object.freeze({
     ratio: '1:1', duration: 4, resolution: '480p', seed: -1, generateAudio: true, returnLastFrame: false, watermark: false }),
 } as const);
 
+export type MultiviewRotationPreset = { id: typeof MULTIVIEW_ROTATION_PRESET.id; version: string; prompt: string };
+export type MultiviewRotationPresetState = { preset: MultiviewRotationPreset; revision: number };
+export type MultiviewRotationPresetSaveReceipt = MultiviewRotationPresetState & { state: 'saved'; mutationId: string };
+
+export function isMultiviewPresetVersion(value: unknown): value is string {
+  return typeof value === 'string' && /^1\.0\.(?:0|[1-9]\d{0,15})$/.test(value)
+    && Number.isSafeInteger(Number(value.slice(4)));
+}
+
 // The existing renderer's exact preamble for one reference-image workspace row.
 export const MULTIVIEW_REFERENCE_PROMPT_PREFIX = '【参考素材说明】图1（参考图）。\n';
 const SUPPLEMENT_SEPARATOR = '\n\n补充要求（仅补充细节，保持固定镜头、角色静止及完整旋转约束）：\n';
@@ -21,7 +30,7 @@ export type MultiviewGenerationDraft = {
   resolutionApprovalConfirmed: boolean; resolutionApprovalId: string;
 };
 export type MultiviewGenerationSnapshot = {
-  schema: 1; presetId: typeof MULTIVIEW_ROTATION_PRESET.id; presetVersion: typeof MULTIVIEW_ROTATION_PRESET.version;
+  schema: 1; presetId: typeof MULTIVIEW_ROTATION_PRESET.id; presetVersion: string;
   supplement: string; workspaceTabId: string; mainAssetId: string; mainReferenceImageId: string;
 };
 export type MultiviewGenerationRequest = {
@@ -79,13 +88,15 @@ export function parseMultiviewGenerationDraft(value: unknown): MultiviewGenerati
   };
 }
 
-export function composeMultiviewGenerationPrompt(supplement: string, presetVersion: string = MULTIVIEW_ROTATION_PRESET.version): {
+export function composeMultiviewGenerationPrompt(supplement: string, presetVersion: string = MULTIVIEW_ROTATION_PRESET.version,
+  preset: MultiviewRotationPreset = MULTIVIEW_ROTATION_PRESET): {
   prompt: string; characters: number; remainingCharacters: number; valid: boolean; error: string | null;
 } {
-  if (typeof supplement !== 'string' || presetVersion !== MULTIVIEW_ROTATION_PRESET.version) {
-    return { prompt: '', characters: 0, remainingCharacters: 0, valid: false, error: '固定旋转模板版本尚未确认，已有输入保留，请明确恢复当前预设后再生成' };
+  if (typeof supplement !== 'string' || !isMultiviewPresetVersion(presetVersion) || presetVersion !== preset.version
+    || preset.id !== MULTIVIEW_ROTATION_PRESET.id || typeof preset.prompt !== 'string' || !preset.prompt.trim()) {
+    return { prompt: '', characters: 0, remainingCharacters: 0, valid: false, error: '模板提示词暂时无法确认，原输入已保留；请重新读取模板后再生成' };
   }
-  const prompt = MULTIVIEW_ROTATION_PRESET.prompt + (supplement.length ? SUPPLEMENT_SEPARATOR + supplement : '');
+  const prompt = preset.prompt + (supplement.length ? SUPPLEMENT_SEPARATOR + supplement : '');
   const characters = MULTIVIEW_REFERENCE_PROMPT_PREFIX.length + prompt.length;
   // Reserve the separator before the first supplementary character is entered.
   const remainingCharacters = MAX_GENERATION_PROMPT_CHARS - characters - (supplement.length ? 0 : SUPPLEMENT_SEPARATOR.length);
@@ -94,17 +105,17 @@ export function composeMultiviewGenerationPrompt(supplement: string, presetVersi
 }
 
 export function parseMultiviewGenerationSnapshot(value: unknown): MultiviewGenerationSnapshot | null {
-  if (!record(value) || value.schema !== 1 || value.presetId !== MULTIVIEW_ROTATION_PRESET.id || value.presetVersion !== MULTIVIEW_ROTATION_PRESET.version
+  if (!record(value) || value.schema !== 1 || value.presetId !== MULTIVIEW_ROTATION_PRESET.id || !isMultiviewPresetVersion(value.presetVersion)
     || !boundedString(value.supplement, 40000) || !isMultiviewWorkspaceTabId(value.workspaceTabId) || !identity(value.mainAssetId) || !identity(value.mainReferenceImageId)) return null;
-  return { schema: 1, presetId: MULTIVIEW_ROTATION_PRESET.id, presetVersion: MULTIVIEW_ROTATION_PRESET.version,
+  return { schema: 1, presetId: MULTIVIEW_ROTATION_PRESET.id, presetVersion: value.presetVersion,
     supplement: value.supplement, workspaceTabId: value.workspaceTabId, mainAssetId: value.mainAssetId, mainReferenceImageId: value.mainReferenceImageId };
 }
 
 export function buildMultiviewGenerationRequest(draft: MultiviewGenerationDraft, options: {
-  idempotencyKey: string; maxEstimatedCost: number;
+  idempotencyKey: string; maxEstimatedCost: number; preset?: MultiviewRotationPreset;
 }): MultiviewGenerationRequest {
   if (!parseMultiviewGenerationDraft(draft)) throw new Error('生成设置无法安全读取，原输入保留');
-  const composed = composeMultiviewGenerationPrompt(draft.supplement, draft.presetVersion);
+  const composed = composeMultiviewGenerationPrompt(draft.supplement, draft.presetVersion, options.preset);
   if (!composed.valid) throw new Error(composed.error || '完整文案无效');
   if (draft.provider !== 'seedance' || draft.generationMode !== 'all_in_one_reference') throw new Error('当前旋转预设不支持所选生成通道或模式，已有选择保留');
   if (!isSeedanceVideoModelId(draft.model)) throw new Error('当前型号不在可用普通视频型号中，已有选择保留，请明确选择可用型号');
@@ -128,7 +139,7 @@ export function buildMultiviewGenerationRequest(draft: MultiviewGenerationDraft,
     ...(draft.resolutionApprovalId ? { resolution_approval_id: draft.resolutionApprovalId } : {}),
     idempotency_key: options.idempotencyKey, max_estimated_cost: options.maxEstimatedCost,
     client_name: 'multiview', source_metadata: { source: 'multiview', mode: 'rotation' },
-    multiview_generation: { schema: 1, presetId: MULTIVIEW_ROTATION_PRESET.id, presetVersion: MULTIVIEW_ROTATION_PRESET.version,
+    multiview_generation: { schema: 1, presetId: MULTIVIEW_ROTATION_PRESET.id, presetVersion: draft.presetVersion,
       supplement: draft.supplement, workspaceTabId: draft.workspaceTabId,
       mainAssetId: draft.mainImage.assetId, mainReferenceImageId: draft.mainImage.referenceImageId },
   };
