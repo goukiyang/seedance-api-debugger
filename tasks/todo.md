@@ -2,7 +2,7 @@
 
 ## 当前入口
 
-- [ ] MAT-M01／MAT-M02／RELEASE（2026-10-18）：手机添加/上传素材弹窗专用紧凑布局及12–24张自适应分页正在实施。保留常显来源、全部筛选、上传/选择/权限与恢复，取代只按三行限制；完整构建与保护部署后用户手验。[正式计划](todo/2026-10-02-unified-resource-library.md#mat-m01mat-m02-手机素材选择与分页2026-10-18)。
+- [ ] MAT-M01／MAT-M02（2026-10-18）：v0.95.4／2339086c 已部署，待用户手验手机添加/上传素材弹窗、筛选与已选展开、键盘/横竖屏及12–24张自适应分页。RELEASE已完成：最终完整候选构建、27组内置门、Git推送、30公网资源同字节及后台/DB保护有证；未做浏览器或功能验收。[正式记录与手验清单](todo/2026-10-02-unified-resource-library.md#mat-m01mat-m02-手机素材选择与分页2026-10-18)。
 
 - [ ] IMG-VIS01／IMG-VIS02／RELEASE（2026-10-18）：已部署 v0.95.3，待用户手动验收。完整返图尺寸/格式不符仍显示并保留普通操作；用户指定原图已同字节恢复原任务/本人结果列表，原参数与退款账本不变。实际80d5cf6f／BUILD rTIGsl4F2099Dbb_cnZSp，主/相容guard完整构建及各27组内置检查、30公网资源与访问保护通过；web/image同源，HD/作品/角色/DB/配置保持，无生成/重发/DDL。相容b4f489ff回退保新reader，不能直接退旧e92，未演练。正式工单为项目主目录 `tasks/todo/2026-10-10-fluxport-image-api.md` §17.5，私有原图及恢复/发布证据在同根 `docs/materials/2026-10-17-image-content-incident/inc24/`，不推公开Git。
 
@@ -516,3 +516,7 @@
 | `src/lib/navigation.ts`、`src/components/template-studio/TemplateStudioShell.tsx`、`src/app/image-studio/page.tsx` | 统一入口、账号隔离恢复、旧地址兼容 |
 | `src/app/projects/[id]/page.tsx`、`video-cards/[cardId]/page.tsx`、`src/app/tasks/[id]/page.tsx`、`src/app/approvals/page.tsx`、`src/components/generate/GeneratePageClient.tsx`、`src/components/templates/TemplateGenerateClient.tsx`、`src/lib/notifications/display.ts` | 隐藏视频卡管理和直达，保留生成归属和原数据 |
 | `package.json`、`package-lock.json`、`src/lib/release.ts`、`.gitignore`、`docs/materials/index.md`、`tasks/todo.md` | 版本/升级摘要、敏感截图本地归档与完整交接 |
+
+## MAT-M01/MAT-M02 Review（2026-10-18）
+
+手机素材布局与12–24张分页工程已部署v0.95.4（2339086c）；完整最终候选、27组门、Git、公网静态及持久数据/后台保护有证。主控聚焦源码复核，未派独立审核或运行功能/浏览器验收；按项目默认规则，真实手机画幅、操作连续性及旧客户端提醒待用户手验，原任务不以发布成功冒完成。详见统一素材库原单MAT回执；无分级误判。

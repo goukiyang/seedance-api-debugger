@@ -2,7 +2,9 @@
 
 ## MAT-M01/MAT-M02 手机素材选择与分页（2026-10-18）
 
-来源：2026-10-18用户当前文字要求（America/Los_Angeles当地2026-10-17）；项目video-api-debugger；主题：手机素材弹窗、上传、筛选折叠、12–24张自适应分页。无新附件/原文件名不适用。[正式原文及设计/开源源码记录](../../tasks/todo/2026-10-02-unified-resource-library.md#mat-m01mat-m02-手机素材选择与分页2026-10-18)；v1实施中，取代REF33仅按三行限制，不替代常显来源/权限/原请求合同。沿用[2026-10-12来源页签截图](2026-10-12-studio-ui-clarity/codex-clipboard-6d9b008a-156e-40c2-8609-323ee99d6146.png)与[REF33分页原图](2026-10-08-canvas-reference-asset-pagination/codex-clipboard-5bee373b-c708-4a18-9ff0-8460b4e2211d.png)作历史参考，不冒充新手机效果。开源Uppy/TanStack源码和MIT许可已在线读取；未安装依赖、未作功能验收。正式根保存原始参考附件；辅助说明不逐项哈希。
+来源：2026-10-18用户当前文字要求（America/Los_Angeles当地2026-10-18）；项目video-api-debugger；主题：手机素材弹窗、上传、筛选折叠、12–24张自适应分页。无新附件/原文件名不适用。[正式原文及设计/开源源码记录](../../tasks/todo/2026-10-02-unified-resource-library.md#mat-m01mat-m02-手机素材选择与分页2026-10-18)；记录v2／应用v0.95.4已部署，待用户手验，取代REF33仅按三行限制，不替代常显来源/权限/原请求合同。沿用[2026-10-12来源页签截图](2026-10-12-studio-ui-clarity/codex-clipboard-6d9b008a-156e-40c2-8609-323ee99d6146.png)与[REF33分页原图](2026-10-08-canvas-reference-asset-pagination/codex-clipboard-5bee373b-c708-4a18-9ff0-8460b4e2211d.png)作历史参考，不冒充新手机效果。开源Uppy/TanStack源码和MIT许可已在线读取；未安装依赖、未作功能验收。正式根保存原始参考附件；辅助说明不逐项哈希。
+
+交付证据：源2339086c／BUILD Jrif7LGtA47uKTF0P_XKt；[最终完整构建](2026-10-18-mobile-materials/candidate-build.log)、[27组总回执](2026-10-18-mobile-materials/candidate-gate-receipt.json)及同目录四组子回执、[发布保护](2026-10-18-mobile-materials/switch-complete.json)、[公网30资源同字节](2026-10-18-mobile-materials/public-proof.json)、[运行后核](2026-10-18-mobile-materials/runtime-after.json)、[精确源码清单](2026-10-18-mobile-materials/source-manifest.json)。来源为本次构建/发布工具；日期同上；用途为复现、交付核对与程序回退。私有资料留正式根，JSON可读，子回执SHA与总回执一致；未包含密码或生产DB，辅助日志不重复逐项哈希。完整80d5回退点及Git标签保留，未演练；无新手机截图或功能验收。
 
 ## 模板工具栏文案与变更记录归位（2026-10-17）
 

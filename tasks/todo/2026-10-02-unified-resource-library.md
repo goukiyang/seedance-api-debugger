@@ -380,15 +380,15 @@ B1/B2采用项目已安装Prisma5.22.0的事务客户端，预先检查整组权
 
 ## MAT-M01/MAT-M02 手机素材选择与分页（2026-10-18）
 
-项目：video-api-debugger；正式根：`/Volumes/Data/Projects/video-api-debugger`；版本来源：package.json；状态：实施中，发布后用户手动验收；更新：2026-10-18 UTC / 2026-10-17 America/Los_Angeles。起点已核为实际应用80d5cf6f、v0.95.3，发布前重核运行源。UI为L2，发布执行持久数据与回退保护，不自动功能/浏览器验收。
+项目：video-api-debugger；正式根：`/Volumes/Data/Projects/video-api-debugger`；版本来源：package.json；状态：v0.95.4已部署，待用户手动验收；更新：2026-10-18 UTC / America/Los_Angeles当地同日。实际应用2339086c，BUILD Jrif7LGtA47uKTF0P_XKt；发布前已鲜核80d5cf6f并保完整程序回退。UI为L2，发布执行持久数据与回退保护，不自动功能/浏览器验收。
 
 用户要求：“添加或者上传素材”的手机弹窗减轻画幅压力，并替换只按最多3行的限制，综合列数与总数，查开源并落地。“每月”按上下文理解为每页，不改月额度。
 
 | 编号 | 任务内容 | 完成标准 | 状态 |
 |---|---|---|---|
-| MAT-M01 | 手机素材弹窗重设计 | 内容、选择和上传操作适合小屏，不被大面积固定区域挤压 | 进行中 |
-| MAT-M02 | 调整单页图片数量 | 同时考虑每行张数、行数与总数，小屏不只显示3张 | 进行中 |
-| RELEASE | 发布更新 | 完成构建、提交推送与保护部署，交你手动验收 | 未开始 |
+| MAT-M01 | 手机素材弹窗重设计 | 内容、选择和上传操作适合小屏，不被大面积固定区域挤压 | 进行中：工程已部署，实际手机效果待手验 |
+| MAT-M02 | 调整单页图片数量 | 同时考虑每行张数、行数与总数，小屏不只显示3张 | 进行中：12–24张规则已部署，实际操作待手验 |
+| RELEASE | 发布更新 | 完成构建、提交推送与保护部署，交你手动验收 | 已完成：完整候选／Git／公网及保护有证 |
 
 实施选择：复用ResourceLibraryPicker共享入口。手机重排为紧凑标题/关闭、浏览页签/搜索、常显横向来源小页签、按需筛选、可滚动素材主体与紧凑上传/已选/添加底栏；已选缩略图按需展开可移除。来源不回隐藏下拉。短屏、键盘、安全区、嵌套预览、失败恢复、数量限制与账号/目标隔离保持。桌面原能力保持；不改上传业务、权限、原请求回执、账单、原图、生成与历史。安全展开偏好复用原隔离存储，重置入口有效。
 
@@ -401,3 +401,15 @@ Git计划：既有清洁worktree `context-toolbar-ui-20261017/video-api-debugger
 待手验：手机竖横屏及键盘下素材主体可滚动；来源/筛选/上传/选择/移除/确认/取消/失败恢复可达；窄屏与桌面分页符合容量并保持当前图片、筛选和选择；刷新/重开偏好不串账号；既有更新提醒可用。工程构建和部署不代替真实手机体验。
 
 相关已有资料：2026-10-12来源常显截图 [codex-clipboard-6d9b008a-156e-40c2-8609-323ee99d6146.png](../../docs/materials/2026-10-12-studio-ui-clarity/codex-clipboard-6d9b008a-156e-40c2-8609-323ee99d6146.png) 用于保留来源入口；REF33的[分页原图](../../docs/materials/2026-10-08-canvas-reference-asset-pagination/codex-clipboard-5bee373b-c708-4a18-9ff0-8460b4e2211d.png)及[原工单](2026-10-07-feedback-24h.md#ref33-画布参考图与素材卡片翻页2026-10-08)是历史参考，三行上限由本节替代。本轮无新附件，不生成假手机效果图；关键历史图片本地可读性另核。
+
+### MAT 手机素材工程与发布回执（2026-10-18）
+
+- 已部署，待用户手动验收：源`2339086c326a66f0123a12569190446eba36493e`、v0.95.4、BUILD `Jrif7LGtA47uKTF0P_XKt`，2026-10-18T09:26:03Z完成仅web自然退出后切换，09:26Z公网与独立运行薄核一致。入口沿[原网站](https://sd2.youdooart.com/template-studio?type=image)，原账号访问范围不变。
+- 工程范围仅6个应用文件：`src/components/ResourceLibraryPicker.tsx`、同名CSS、`src/components/useResultPages.ts`、`src/lib/release.ts`与两份package文件。手机目录改为主体滚动，保留常显横向来源、紧凑搜索/筛选入口与底部上传/已选/添加；低频筛选及已选缩略图按需展开，偏好沿账号/目标/用途保存。加入安全区、键盘视口与窄屏适应；原上传、确认、权限、回执与关闭保护未改。
+- 分页同时看列数、完整行与总数：1–4列各12张，5–8列为15/18/21/24张，9–12列为18/20/22/24张，更宽也不超过24张，不足一页用真实数量；保原游标、有界恢复、未知总数及可见对象锚点，不改变选取额度。此为项目选择，不是开源标准。
+- 同执行者源码Review及主控聚焦复核完成，无独立审核线程。首轮本地完整构建只对应初批93d2981b；最终2339086c在Linux候选完整`npm run build`退出0，四组5＋6＋8＋8共27个工程门、内置types/lint及87静态页完成；有既有非阻断img/hooks/CSS/Browserslist警告，未借机升级依赖。最终源码1455个跟踪文件和归档哈希核对，构建用独立候选目录和/data内隔离DB副本，不写生产DB。
+- 现有升级提醒仍复用ReleaseNotice及package唯一版本源，本次摘要对应手机窗口与分页；已有自动/手动检查、稍后去重和刷新保护源码核对，实际旧客户端提醒仍待用户手验，不把版本API当弹窗实测。
+- Web实际PID775187、cwd为2339086c；image原738738/80d5、HD原1361715/649、works原61154/5a59、role原1459688及Invocation全部保持，DB身份64784:171442216、环境配置、nginx和受保护设置摘要前后相同。真实/data挂载/dev/vdb，候选、日志及备份均在数据盘。0浏览器验收、0新生成/重发/扣费/DDL/生产数据覆盖；启动初次健康连接尚未就绪后正常重试通过，无回退发生。
+- Git已推`codex/context-toolbar-ui-20261017`，远端精确2339086c；回退标签`rollback/2026-10-18-before-mobile-materials`指向完整80d5cf6f/v0.95.3/BUILD rTIGsl4F2099Dbb_cnZSp。只回web程序，不回DB、媒体、账单、配置、回执或后台消费者；未演练。正式根旧脏改保留，应用由原清洁worktree交付；后续文档提交不冒充运行源。
+- 关键证据：[最终构建](../../docs/materials/2026-10-18-mobile-materials/candidate-build.log)、[同构建27组总回执](../../docs/materials/2026-10-18-mobile-materials/candidate-gate-receipt.json)、[发布与保护](../../docs/materials/2026-10-18-mobile-materials/switch-complete.json)、[公网30资源同字节与访问跳转](../../docs/materials/2026-10-18-mobile-materials/public-proof.json)、[后核运行](../../docs/materials/2026-10-18-mobile-materials/runtime-after.json)、[精确源码清单](../../docs/materials/2026-10-18-mobile-materials/source-manifest.json)。同目录保存四组子回执，与总回执SHA相符；关键JSON可读，辅助日志不逐项哈希，私有证据不推公共源码。相关两张历史参考图仍见上节，不冒新手机截图。
+- 守门员语义：手机UI L2＋发布保护；raw关键词含上传/queue不扩大为收费生成或自动验收。原三项目标均保留，RELEASE已完成，MAT-M01/MAT-M02工程已部署且待用户完成实页标准。分级误判：无。尚未验证手机横竖屏/键盘、真实选择上传/恢复及旧客户端弹窗；按项目默认手动验收约定保留，不新增自动验收任务。
