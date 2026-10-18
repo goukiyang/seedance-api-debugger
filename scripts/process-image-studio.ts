@@ -10,7 +10,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import packageInfo from '../package.json';
 import { IMAGE_BILLING_VERSION } from '../src/lib/image-studio/billing-contract';
 import { STUDIO_SHARED_WORKER_KEY, STUDIO_SHARED_WORKER_FILES } from '../src/lib/image-studio/tasks';
-import { assertStudioWorkerMode, runStudioWorkerCycle, publishStudioWorkerReadiness } from '../src/lib/image-studio/worker-mode';
+import { assertStudioWorkerMode, runStudioWorkerCycle, publishStudioWorkerReadiness, studioWorkerBillingEnabled } from '../src/lib/image-studio/worker-mode';
 
 loadEnvConfig(process.cwd());
 let stopping = false;
@@ -62,7 +62,7 @@ async function main() {
       if (acceptedOnly && !draining()) throw new Error('image_accepted_only_requires_shared_drain');
       if (initialHold && !draining()) initialHold = false;
       if (!acceptedOnly && !initialHold && draining()) break;
-      if (!initialHold && !billingWork) billingWork = reconcileImageBilling().catch(() => {
+      if (studioWorkerBillingEnabled({ acceptedOnly, initialHold }) && !billingWork) billingWork = reconcileImageBilling().catch(() => {
         console.error('[image-billing] reconciliation deferred; no supplier generation repeated');
       }).finally(() => { billingWork = null; });
       const continued = await runStudioWorkerCycle({ acceptedOnly, initialHold, draining, stopping: () => stopping,

@@ -75,7 +75,7 @@ const providerContractChecks = [
   'durable_wait_survives_restart_manual_check_and_local_backoff',
   'wait_beyond_auto_deadline_stops_without_spending_attempts_or_money',
   'old_v1_receipt_stays_readable_and_optional_diagnostics_are_private',
-  'guard_accepted_only_requires_shared_drain_and_never_dispatches_new_work',
+  'guard_accepted_only_requires_shared_drain_and_never_dispatches_new_work_or_global_billing',
   'active_wait_manual_original_check_requires_time_owner_lease_cas_and_single_consumption',
   'original_v3_202_restart_uses_same_get_identity_and_settles_once_without_repost',
   'original_v3_unknown_keeps_reservation_but_fresh_and_late_complete_mismatch_refund_once_and_keep_image',
@@ -122,7 +122,7 @@ const fixtures = [
   { file: 'scripts/image-provider-contract-engineering.ts', schema: 'image-provider-contract-engineering.v1',
     marker: 'Image provider contract engineering receipt: ', checks: providerContractChecks,
     negativeChecks: ['legacy_wait_schema_rejected', 'conflicting_core_accounting_copy_rejected'],
-    sources: ['scripts/image-trace-engineering-fixture.ts', 'src/lib/image-studio/provider.ts',
+    sources: ['scripts/image-trace-engineering-fixture.ts', 'scripts/process-image-studio.ts', 'src/lib/image-studio/provider.ts',
       'src/lib/image-studio/provider-wait.ts', 'src/lib/image-studio/delivery.ts', 'src/lib/image-studio/async-recovery.ts',
       'src/lib/image-studio/worker.ts', 'src/lib/image-studio/worker-mode.ts', 'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/response-diagnostics.ts',
       'src/lib/image-studio/response-evidence.ts', 'src/lib/image-generation/output-plan.ts',
@@ -134,8 +134,8 @@ const packageView = { actualVersion, fixtureVersion: guardPackage ? actualVersio
   kind: guardPackage ? 'in-memory-ordinary' : 'actual', productionFilesChanged: false };
 if (guardPackage) fixtures.push({ file: 'scripts/image-guard-admission-engineering.ts', schema: 'image-guard-admission-engineering.v1',
   marker: 'Image guard admission engineering receipt: ', checks: ['actual_guard_package_rejects_new_queue_admission',
-    'guard_requires_env_and_shared_drain_and_only_recovers_accepted'], actualGuard: true,
-  sources: ['scripts/image-trace-engineering-fixture.ts', 'src/lib/image-studio/queue-capacity.ts', 'src/lib/image-studio/worker-mode.ts'] });
+    'guard_requires_env_and_shared_drain_and_only_recovers_accepted_without_global_billing'], actualGuard: true,
+  sources: ['scripts/image-trace-engineering-fixture.ts', 'scripts/process-image-studio.ts', 'src/lib/image-studio/queue-capacity.ts', 'src/lib/image-studio/worker-mode.ts'] });
 const sourceFiles = ['package.json', 'prisma/schema.prisma', entry, 'scripts/image-engineering-package-view.cjs',
   'scripts/image-guard-admission-engineering.ts', ...fixtures.flatMap(fixture => [fixture.file, ...fixture.sources])];
 const hash = value => createHash('sha256').update(value).digest('hex');

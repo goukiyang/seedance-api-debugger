@@ -6,10 +6,10 @@ import { traceFixture } from './image-trace-engineering-fixture';
 async function main() {
   assert.equal(Reflect.get(globalThis, Symbol.for('image-engineering-package-view')), undefined,
     'Guard admission must run against the actual package, without an ordinary test view');
-  const checks = ['actual_guard_package_rejects_new_queue_admission', 'guard_requires_env_and_shared_drain_and_only_recovers_accepted'];
+  const checks = ['actual_guard_package_rejects_new_queue_admission', 'guard_requires_env_and_shared_drain_and_only_recovers_accepted_without_global_billing'];
   const fixture = await traceFixture({ file: 'scripts/image-guard-admission-engineering.ts',
     schema: 'image-guard-admission-engineering.v1', marker: 'Image guard admission engineering receipt: ', checks,
-    sources: ['scripts/image-trace-engineering-fixture.ts', 'src/lib/image-studio/queue-capacity.ts', 'src/lib/image-studio/worker-mode.ts'] });
+    sources: ['scripts/image-trace-engineering-fixture.ts', 'scripts/process-image-studio.ts', 'src/lib/image-studio/queue-capacity.ts', 'src/lib/image-studio/worker-mode.ts'] });
   const actualVersion = JSON.parse(readFileSync(path.join(fixture.root, 'package.json'), 'utf8')).version;
   assert.match(actualVersion, /\+trace03-guard\.\d+$/);
   const queue = await import('../src/lib/image-studio/queue-capacity');
@@ -18,6 +18,16 @@ async function main() {
   assert.equal(await fixture.db.imageStudioTask.count(), 0); assert.equal(await fixture.db.creditLedger.count(), 0);
   fixture.check(checks[0]);
   const modes = await import('../src/lib/image-studio/worker-mode');
+  const billingModes = [
+    { acceptedOnly: false, initialHold: false, expected: true },
+    { acceptedOnly: false, initialHold: true, expected: false },
+    { acceptedOnly: true, initialHold: false, expected: false },
+    { acceptedOnly: true, initialHold: true, expected: false },
+  ].map(input => {
+    const enabled = modes.studioWorkerBillingEnabled(input);
+    assert.equal(enabled, input.expected, 'Guard and initial hold must never start global billing work');
+    return { ...input, enabled };
+  });
   assert.throws(() => modes.assertStudioWorkerMode({ version: actualVersion, acceptedOnlyEnv: '0', draining: true }));
   assert.throws(() => modes.assertStudioWorkerMode({ version: actualVersion, acceptedOnlyEnv: '1', draining: false }));
   const mode = modes.assertStudioWorkerMode({ version: actualVersion, acceptedOnlyEnv: '1', draining: true });
@@ -27,6 +37,6 @@ async function main() {
     dispatchBatches: async () => { calls.push('new-batch'); }, dispatchToolflows: async () => { calls.push('new-toolflow'); },
     processQueued: async () => { calls.push('new-queue'); } });
   assert.deepEqual(calls, ['recover-accepted']); fixture.check(checks[1]);
-  await fixture.finish({ actualGuardVersion: actualVersion, packageView: 'actual-guard-without-preload' });
+  await fixture.finish({ actualGuardVersion: actualVersion, packageView: 'actual-guard-without-preload', billingModes });
 }
 main().catch(error => { console.error(error); process.exit(1); });

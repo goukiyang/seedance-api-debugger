@@ -14,7 +14,7 @@ import sharp from 'sharp';
 import { traceFixture, sha256 } from './image-trace-engineering-fixture';
 import type { StudioAsyncAccepted } from '../src/lib/image-studio/provider';
 
-const sourcePaths = ['scripts/image-trace-engineering-fixture.ts', 'src/lib/image-studio/provider.ts',
+const sourcePaths = ['scripts/image-trace-engineering-fixture.ts', 'scripts/process-image-studio.ts', 'src/lib/image-studio/provider.ts',
   'src/lib/image-studio/provider-wait.ts', 'src/lib/image-studio/delivery.ts', 'src/lib/image-studio/async-recovery.ts',
   'src/lib/image-studio/worker.ts', 'src/lib/image-studio/worker-mode.ts', 'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/response-diagnostics.ts',
   'src/lib/image-studio/response-evidence.ts', 'src/lib/image-generation/output-plan.ts',
@@ -30,7 +30,7 @@ const expectedChecks = [
   'durable_wait_survives_restart_manual_check_and_local_backoff',
   'wait_beyond_auto_deadline_stops_without_spending_attempts_or_money',
   'old_v1_receipt_stays_readable_and_optional_diagnostics_are_private',
-  'guard_accepted_only_requires_shared_drain_and_never_dispatches_new_work',
+  'guard_accepted_only_requires_shared_drain_and_never_dispatches_new_work_or_global_billing',
   'active_wait_manual_original_check_requires_time_owner_lease_cas_and_single_consumption',
   'original_v3_202_restart_uses_same_get_identity_and_settles_once_without_repost',
   'original_v3_unknown_keeps_reservation_but_fresh_and_late_complete_mismatch_refund_once_and_keep_image',
@@ -221,6 +221,16 @@ async function main() {
   assert.deepEqual(optionalFailure.images, ['AAAA']);
   fixture.check(expectedChecks[9]);
   const modes = await import('../src/lib/image-studio/worker-mode');
+  const billingModes = [
+    { acceptedOnly: false, initialHold: false, expected: true },
+    { acceptedOnly: false, initialHold: true, expected: false },
+    { acceptedOnly: true, initialHold: false, expected: false },
+    { acceptedOnly: true, initialHold: true, expected: false },
+  ].map(input => {
+    const enabled = modes.studioWorkerBillingEnabled(input);
+    assert.equal(enabled, input.expected, 'Only ordinary main mode may start global billing work');
+    return { ...input, enabled };
+  });
   assert.throws(() => modes.assertStudioWorkerMode({ version: '0.95.4+trace03-guard.1', acceptedOnlyEnv: '0', draining: true }));
   assert.throws(() => modes.assertStudioWorkerMode({ version: '0.95.4+trace03-guard.1', acceptedOnlyEnv: '1', draining: false }));
   const mode = modes.assertStudioWorkerMode({ version: '0.95.4+trace03-guard.1', acceptedOnlyEnv: '1', draining: true });
@@ -443,7 +453,7 @@ async function main() {
   assert.equal(originalCalls.length, 3, 'Mismatch retention and late completion never submit or query a provider');
   fixture.check(expectedChecks[13]);
   await fixture.finish({ negativeChecks: ['legacy_wait_schema_rejected', 'conflicting_core_accounting_copy_rejected'], calls,
-    manualOriginalGets: manualGets, initialHoldDispatchCalls: heldCalls, originalCalls, cancellationEvidence,
+    manualOriginalGets: manualGets, initialHoldDispatchCalls: heldCalls, originalCalls, cancellationEvidence, billingModes,
     originalSettlementCount: await db.creditLedger.count({ where: { idempotency_key: `image-studio:settle:${originalId}` } }) });
 }
 

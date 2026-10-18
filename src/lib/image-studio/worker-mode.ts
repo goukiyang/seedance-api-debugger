@@ -21,6 +21,11 @@ export function assertStudioWorkerMode(input: { version: string; acceptedOnlyEnv
   return { acceptedOnly, initialHold: !acceptedOnly && input.releaseHoldEnv === '1' && input.draining };
 }
 
+/** Global billing scans are normal-worker work, never accepted-only or startup-hold work. */
+export function studioWorkerBillingEnabled(input: { acceptedOnly: boolean; initialHold: boolean }) {
+  return !input.acceptedOnly && !input.initialHold;
+}
+
 /** The same cycle used by the real worker and the isolated no-new-POST fixture. */
 export async function runStudioWorkerCycle(input: {
   acceptedOnly: boolean; initialHold?: boolean; draining: () => boolean; stopping: () => boolean;
