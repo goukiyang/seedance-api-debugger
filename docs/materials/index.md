@@ -2,6 +2,8 @@
 
 ## GEN12 最近12小时生成原因核查（2026-10-18）
 
+TRACE03-FIX实施与统一工程检查（2026-10-18当前记录）：项目video-api-debugger，来源为用户“开始落地”与本轮候选工程执行；TF01–TF04业务/配套已实现，TF05统一门及Review未闭环，TF06未部署，取代本索引早期仅规划口径。正式[原单与完整TF01–TF06](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-10-fluxport-image-api.md#1763-trace03-fix-首次统一工程检查与同批纠正2026-10-18)、[私有收据目录](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/)、[第二轮分层诊断](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/9968c96e-90b9-41aa-b7fd-a362e28c3142/diagnostics-receipt.json)及[真实指纹对照](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/9968c96e-90b9-41aa-b7fd-a362e28c3142/batch-fingerprint-evidence.json)仅保正式根，不复制或推送私有内容。关键词：2K单一计划、旧合同隔离、核心受理回执、长退避、确定序列化、相容guard；用途为当前实施追踪/恢复，不替代旧GEN12原证、真实供应商样本或用户功能手验。原日志/失败source保留，文本JSON已可读；本轮无新增用户媒体附件，未部署。
+
 原设计报告补注至[v1.5.1](2026-10-17-image-content-incident/inc24/gen12-report-2026-10-18.md)：仅标明后续§17.6规划v1.1.0为当前执行依据、核心回执分类纠正及HD发布依赖；原诊断与未验边界保留，不代表应用升级或修复上线。
 
 TRACE03-FIX规划v1.1.0（2026-10-18风险复核）：[正式生图原单§17.6及A01–A06](../../tasks/todo/2026-10-10-fluxport-image-api.md#176-trace03-fix-已确认问题修复任务规划2026-10-18)补齐5组P1/1组P2缺口；来源为用户查漏补缺、真实代码与SSH只读元数据、纯数学枚举及公开协议。新增[私有审查收据](2026-10-17-image-content-incident/inc24/code-trace/plan-audit-2026-10-18.json)：18相关文件匹配实际Web2339/image80d5，2K旧2880帽会误拒4比例，核心回执/旧父批次/长退避风险有代码证；HD成品根仍分叉，TF06受阻。JSON/UTF-8及关键入口存在已核；无新增用户媒体，旧Word/原图/恢复证据沿原入口，未变原件不重复哈希。新工程门尚未接入，源码/业务数据/费用/部署不动；服务器release0.95.4可读，Mac公网未核通。资料仅正式根私有留存，不推公开仓库，不替代供应商实单或页面验收。
