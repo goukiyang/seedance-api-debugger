@@ -36,6 +36,7 @@ const expectedChecks = [
   'canvas_actual_original_confirmation_and_max_authorization_are_unchanged',
   'canvas_role_context_and_unknown_job_identity_survive_query_only_reentry_without_repost',
   'versioned_batch_quote_canonical_keys_preserve_array_order_and_reject_changed_authorization',
+  'toolflow_authenticated_frozen_channels_create_only_with_fresh_configuration_and_unchanged_quote_identity',
 ];
 
 async function main() {
@@ -120,13 +121,14 @@ async function main() {
   // The remaining checks enter the real quote, batch preparation and avatar paths.
   const batchFingerprintEvidence = await verifySavedPlans(fixture, owner, model);
   assert.equal(synchronousPosts, 1); fixture.check(expectedChecks[11]);
-  await verifyToolFlows(fixture, owner, model);
+  const toolFlowQuoteEvidence = await verifyToolFlows(fixture, owner, model);
   const { verifyCanvasQuoteContract } = await import('./image-canvas-quote-fixture');
   const canvasQuoteEvidence = await verifyCanvasQuoteContract(fixture.root, plans.publicImageOutputPlan(referencePlan)!, fixture.check);
   fixture.check(expectedChecks[18]);
+  fixture.check(expectedChecks[19]);
   assert.throws(() => assertPixelBudget(ratios.legacyStudioRatioSize('58:77', '2K')!, '58:77'));
-  await fixture.finish({ negativeChecks: ['legacy_gcd_rejected_by_current_pixel_budget', 'legacy_batch_object_key_order_rejects_equivalent_submission'],
-    canvasQuoteEvidence, batchFingerprintEvidence,
+  await fixture.finish({ negativeChecks: ['legacy_gcd_rejected_by_current_pixel_budget', 'legacy_batch_object_key_order_rejects_equivalent_submission',
+    'toolflow_quote_hmac_and_fresh_context_reject_changed_intent'], canvasQuoteEvidence, batchFingerprintEvidence, toolFlowQuoteEvidence,
     wire: wire.map(body => ({ size: body.size, ratio: body.ratio })) });
 }
 
@@ -152,11 +154,51 @@ async function verifyToolFlows(fixture: Awaited<ReturnType<typeof traceFixture>>
   await assert.rejects(flows.createToolFlowRun(user, flow.id, ids, oldQuote, flows.createToolFlowQuoteProof(owner, oldQuote)));
   await assert.rejects(flows.createToolFlowRun(user, flow.id, nextIds, quote, proof));
   assert.equal(await db.toolFlowRun.count(), 0); assert.equal(await db.creditLedger.count(), 0);
+  const baselineTasks = await db.imageStudioTask.count(), baselineAccount = await db.creditAccount.findUniqueOrThrow({ where: { user_id: owner } });
+  const rejected: string[] = [];
+  const rejectQuote = async (name: string, value: typeof quote, signed = proof) => {
+    await assert.rejects(flows.createToolFlowRun(user, flow.id, ids, value, signed), name);
+    assert.equal(await db.toolFlowRun.count(), 0); assert.equal(await db.imageStudioTask.count(), baselineTasks);
+    assert.equal(await db.creditLedger.count(), 0);
+    assert.deepEqual(await db.creditAccount.findUniqueOrThrow({ where: { user_id: owner } }), baselineAccount);
+    rejected.push(name);
+  };
+  assert.ok(quote.steps[0].imageChannel); assert.ok(quote.steps[0].outputPlan);
+  const changedChannel = structuredClone(quote);
+  changedChannel.steps[0].imageChannel = { ...quote.steps[0].imageChannel, configRevision: randomUUID() };
+  await rejectQuote('channel_tamper_with_original_hmac', changedChannel);
+  const changedPlan = structuredClone(quote);
+  changedPlan.steps[0].outputPlan = { ...quote.steps[0].outputPlan, outputSize: '1024x1024' };
+  await rejectQuote('plan_tamper_with_original_hmac', changedPlan);
+  await rejectQuote('input_tamper_with_original_hmac', { ...quote, inputAssetIds: nextIds });
+  const apiSetting = await db.platformSetting.findUniqueOrThrow({ where: { key: 'image_generation_api_v1' } });
+  await db.platformSetting.update({ where: { id: apiSetting.id }, data: { value_json: JSON.stringify({ ...JSON.parse(apiSetting.value_json), base_url: 'https://changed-fixture.invalid' }) } });
+  try { await rejectQuote('real_original_configuration_changed', quote); }
+  finally { await db.platformSetting.update({ where: { id: apiSetting.id }, data: { value_json: apiSetting.value_json } }); }
+  await db.toolFlow.update({ where: { id: flow.id }, data: { version: flow.version + 1 } });
+  try { await rejectQuote('real_flow_version_changed', quote); }
+  finally { await db.toolFlow.update({ where: { id: flow.id }, data: { version: flow.version } }); }
+  const other = await db.user.create({ data: { id: 'trace-toolflow-other-owner', name: 'Synthetic other owner', username: 'trace-toolflow-other-owner',
+    email: 'trace-toolflow-other-owner@fixture.invalid', password_hash: 'not-a-login', role: 'admin', account_type: 'internal' } });
+  await db.toolFlow.update({ where: { id: flow.id }, data: { owner_id: other.id } });
+  try { await rejectQuote('real_flow_owner_changed', quote); }
+  finally { await db.toolFlow.update({ where: { id: flow.id }, data: { owner_id: owner } }); }
+  const expiredQuote = { ...quote, expiresAt: new Date(Date.now() - 1).toISOString() };
+  await rejectQuote('authentic_but_expired_quote', expiredQuote, flows.createToolFlowQuoteProof(owner, expiredQuote));
+  for (const [name, steps] of [
+    ['missing_authenticated_node', quote.steps.slice(1)],
+    ['duplicate_authenticated_node', [quote.steps[0], quote.steps[0]]],
+    ['reordered_authenticated_nodes', [...quote.steps].reverse()],
+  ] as const) {
+    const malformed = { ...quote, steps: [...steps] };
+    await rejectQuote(name, malformed, flows.createToolFlowQuoteProof(owner, malformed));
+  }
   const run = await flows.createToolFlowRun(user, flow.id, ids, quote, proof);
   assert.equal(JSON.parse(run.snapshot_json).ratioContractVersion, 3);
   const first = await db.imageStudioTask.findFirstOrThrow({ where: { tool_flow_run_id: run.id, tool_flow_node_id: 'image' } });
   const firstSnapshot = JSON.parse(first.snapshot_json!);
   assert.equal(first.unit_credits, 5); assert.equal(firstSnapshot.outputPlan.resolvedRatio, '58:77');
+  assert.deepEqual(firstSnapshot.imageChannel, quote.steps[0].imageChannel);
   assert.equal(firstSnapshot.outputPlan.outputSize, first.output_size); assert.match(firstSnapshot.outputPlanHash, /^[a-f0-9]{64}$/);
   assert.equal(await db.imageStudioTask.count({ where: { tool_flow_run_id: run.id, tool_flow_node_id: 'future' } }), 0);
   // The next node receives a real result's dimensions, never the quote-time input's assumed shape.
@@ -164,6 +206,7 @@ async function verifyToolFlows(fixture: Awaited<ReturnType<typeof traceFixture>>
   await flows.completeToolFlowTask(first.id); await flows.advanceToolFlowRun(run.id);
   const future = await db.imageStudioTask.findFirstOrThrow({ where: { tool_flow_run_id: run.id, tool_flow_node_id: 'future' } });
   assert.equal(JSON.parse(future.snapshot_json!).outputPlan.resolvedRatio, '16:9'); assert.equal(future.unit_credits, 5);
+  assert.deepEqual(JSON.parse(future.snapshot_json!).imageChannel, quote.steps[1].imageChannel);
   const publicRun = await flows.getToolFlowRun(user, run.id);
   for (const node of publicRun.node_runs) if (JSON.parse(node.result_json || '{}').outputPlans) {
     const publicPlans = JSON.stringify(JSON.parse(node.result_json!).outputPlans);
@@ -207,6 +250,7 @@ async function verifyToolFlows(fixture: Awaited<ReturnType<typeof traceFixture>>
   assert.deepEqual(await db.creditAccount.findUniqueOrThrow({ where: { user_id: owner } }), money);
   assert.equal((await db.toolFlowRun.findUniqueOrThrow({ where: { id: run.id } })).frozen_credits, 5);
   fixture.check(expectedChecks[14]);
+  return { authenticatedFrozenChannelsPreserved: true, futureAutoQuotedPlan: null, rejected, rejectedNewRuns: 0, rejectedNewTasks: 0, rejectedNewLedgerEntries: 0 };
 }
 
 async function verifySavedPlans(fixture: Awaited<ReturnType<typeof traceFixture>>, owner: string, model: string) {

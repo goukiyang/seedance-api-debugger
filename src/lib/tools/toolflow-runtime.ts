@@ -12,7 +12,7 @@ import { getImageGenerationChannelOptions, getImageGenerationSettingsForModel, g
   captureImageGenerationChannel, resolveImageGenerationChannelSnapshot, imageGenerationModelOutputPlan, type ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation';
 import { normalizeImageResolution, isValidImageDimension, IMAGE_RESOLUTION_OPTIONS } from '@/lib/image-generation/resolution';
 import { imageOutputPlanHash, publicImageOutputPlan, savedImageRatioContractVersion, type ImageOutputPlan, type ImageRatioContractVersion, type PublicImageOutputPlan } from '@/lib/image-generation/output-plan';
-import { assertSharedStudioWorkerReady } from '@/lib/image-studio/tasks';
+import { assertSharedStudioWorkerReady, safeImageChannelSnapshot } from '@/lib/image-studio/tasks';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import { imageBillingScope } from '@/lib/image-studio/billing-scope';
 import { fixedImageBillingContract, imageSpecification } from '@/lib/image-studio/billing-quote';
@@ -226,6 +226,38 @@ export function assertToolFlowQuoteProof(userId: string, quote: unknown, proof: 
   }
 }
 
+// A new run may reuse only the channels authenticated by the existing quote
+// proof. This private map is never accepted from a client or used for old runs.
+function authenticatedToolFlowQuoteChannels(userId: string, value: unknown, proof: string | undefined,
+  current: { flowId: string; flowVersion: number; settingsRevision: number; inputAssetIds: string[]; nodeIds: string[] }) {
+  assertToolFlowQuoteProof(userId, value, proof);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AuthError('工具流报价无效，请重新报价', 409);
+  const quote = value as Partial<ToolFlowQuote>;
+  const now = Date.now(), expiresAt = typeof quote.expiresAt === 'string' ? Date.parse(quote.expiresAt) : NaN;
+  if (!Number.isFinite(expiresAt) || expiresAt <= now || expiresAt > now + 60_000
+    || quote.ratioContractVersion !== 3 || quote.billingMode !== 'fixed'
+    || quote.flowId !== current.flowId || quote.flowVersion !== current.flowVersion
+    || quote.settingsRevision !== current.settingsRevision
+    || typeof quote.estimatedCredits !== 'number' || !Number.isFinite(quote.estimatedCredits) || quote.estimatedCredits < 0
+    || JSON.stringify(quote.inputAssetIds) !== JSON.stringify(current.inputAssetIds)
+    || !Array.isArray(quote.steps) || quote.steps.length !== current.nodeIds.length) {
+    throw new AuthError('工具流报价已过期或设置已变化，请重新报价', 409);
+  }
+  const channels = new Map<string, ImageGenerationChannelSnapshot>();
+  for (let index = 0; index < current.nodeIds.length; index++) {
+    const step = quote.steps[index];
+    const channel = step && safeImageChannelSnapshot(step.imageChannel);
+    if (!step || typeof step !== 'object' || Array.isArray(step)
+      || step.nodeId !== current.nodeIds[index] || channels.has(step.nodeId)
+      || !step.outputIntent || typeof step.outputIntent !== 'object' || Array.isArray(step.outputIntent)
+      || !channel || channel.channelId !== 'original' || !/^[0-9a-f-]{36}$/i.test(channel.configRevision)) {
+      throw new AuthError('工具流图片规格报价节点不完整或已变化，请重新报价', 409);
+    }
+    channels.set(step.nodeId, channel);
+  }
+  return channels;
+}
+
 async function currentImageSettingsRevision(tx: Tx) {
   const row = await tx.platformSetting.findUnique({ where: { key: IMAGE_STUDIO_SETTING_KEY } });
   if (!row) return 0;
@@ -353,7 +385,7 @@ async function resolveTemplate(
   identity: ImageStudioIdentity,
   options: { cloneReferenceAssets?: boolean; allowUnknownModel?: boolean; allowUnknownPrice?: boolean;
     ratioContractVersion?: ImageRatioContractVersion; deferAuto?: boolean; outputIntent?: ToolFlowOutputIntent;
-    imageChannel?: ImageGenerationChannelSnapshot } = {},
+    imageChannel?: ImageGenerationChannelSnapshot; forSubmission?: boolean } = {},
 ): Promise<TemplateConfig> {
   const data = node.data || {};
   const templateId = clean(data.template_id || data.templateId) || null;
@@ -458,7 +490,7 @@ async function resolveTemplate(
       throw new AuthError('工具流图片规格已变化，请重新报价；原运行记录保持', 409);
     }
     imageChannel = options.imageChannel || await captureImageGenerationChannel(model, 'original', tx);
-    const api = await resolveImageGenerationChannelSnapshot(imageChannel, tx, false, model);
+    const api = await resolveImageGenerationChannelSnapshot(imageChannel, tx, options.forSubmission === true, model);
     if (!(aspectRatio === 'auto' && options.deferAuto && !explicitSize)) {
       const firstInput = inputAssetIds[0] ? await tx.asset.findFirst({ where: { id: inputAssetIds[0], owner_id: ownerId, status: 'active', type: 'image' },
         select: { width: true, height: true } }) : null;
@@ -497,6 +529,7 @@ async function buildToolFlowQuote(
   settings: Awaited<ReturnType<typeof getImageStudioSettings>>,
   now = Date.now(),
   requestedInputIds?: string[],
+  authenticatedChannels?: ReadonlyMap<string, ImageGenerationChannelSnapshot>,
 ): Promise<ToolFlowQuote> {
   const graph = validateToolFlowGraph(JSON.parse(flow.graph_json));
   const inputNode = graph.nodes.find(node => node.type === 'flow-input');
@@ -510,9 +543,12 @@ async function buildToolFlowQuote(
   for (const node of graph.nodes) {
     if (node.type !== 'flow-template') continue;
     const knownInputs = toolFlowKnownQuoteInputs(graph, node.id, inputAssetIds);
+    const imageChannel = authenticatedChannels?.get(node.id);
+    if (authenticatedChannels && !imageChannel) throw new AuthError('工具流报价缺少原节点的图片通道，请重新报价', 409);
     const config = await resolveTemplate(tx, flow.owner_id, flow.owner_id, node, knownInputs || [], settings,
       user as unknown as ImageStudioIdentity, { cloneReferenceAssets: false, allowUnknownModel: true, allowUnknownPrice: true,
-        ratioContractVersion: 3, deferAuto: knownInputs === null });
+        ratioContractVersion: 3, deferAuto: knownInputs === null,
+        ...(imageChannel ? { imageChannel, forSubmission: true } : {}) });
     const rawPrice = settings.prices[config.model as keyof typeof settings.prices];
     await assertToolFlowLegacyRoute(tx, config, rawPrice);
     let unitCredits: number | null = null;
@@ -961,8 +997,10 @@ export async function createToolFlowRun(user: SessionUser, flowId: string, input
       throw new AuthError('工具流或图片设置已变化，请重新获取报价', 409);
     }
     const graph = validateToolFlowGraph(JSON.parse(currentFlow.graph_json));
-    const currentQuote = await buildToolFlowQuote(tx, user, currentFlow, settings, Date.now(), ids);
-    assertToolFlowQuoteProof(user.id, submittedQuote, quoteProof);
+    const authenticatedChannels = authenticatedToolFlowQuoteChannels(user.id, submittedQuote, quoteProof,
+      { flowId: currentFlow.id, flowVersion: currentFlow.version, settingsRevision: settings.revision,
+        inputAssetIds: ids, nodeIds: graph.nodes.filter(node => node.type === 'flow-template').map(node => node.id) });
+    const currentQuote = await buildToolFlowQuote(tx, user, currentFlow, settings, Date.now(), ids, authenticatedChannels);
     const billingQuote = validateSubmittedToolFlowQuote(submittedQuote, currentQuote);
     const snapshot: RunSnapshot = {
       ratioContractVersion: 3,
