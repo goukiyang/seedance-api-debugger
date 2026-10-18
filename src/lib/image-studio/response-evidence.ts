@@ -298,6 +298,38 @@ export async function recordStudioResponseEvidence(task: StudioResponseEvidenceT
   } finally { if (staging) await removePrivateDirectory(staging).catch(() => {}); }
 }
 
+/** New-contract optional diagnostics only. Core request/async/billing files never enter this TTL store. */
+export async function recordStudioSafeResponseSummary(task: StudioResponseEvidenceTask, receipt: StudioReceipt,
+  diagnosticInput: StudioResponseDiagnostics) {
+  let snapshot: Record<string, unknown>;
+  try { snapshot = JSON.parse(task.snapshot_json || '{}'); } catch { throw failure('identity'); }
+  const channel = object(snapshot.imageChannel) ? snapshot.imageChannel : null;
+  if (snapshot.ratioContractVersion !== 3 || !channel || receipt.taskId !== task.id || receipt.ownerId !== task.owner_id
+    || receipt.batchId !== task.batch_id || receipt.fingerprint !== task.fingerprint || receipt.localRequestId !== snapshot.requestId
+    || receipt.channelId !== channel.channelId || receipt.configRevision !== channel.configRevision
+    || !integer(receipt.returnedAt) || !integer(receipt.status) || receipt.returnedAt + RETENTION_MS <= Date.now()) throw failure('identity');
+  const diagnostic = sanitizeStudioResponseDiagnostics(diagnosticInput);
+  if (diagnostic.observation.httpStatus !== receipt.status) throw failure('identity');
+  const root = await evidenceRoot(true), name = `.summary-${taskDirectory(task)}`;
+  const dir = path.join(root, name);
+  await fs.mkdir(dir, { mode: 0o700 }).catch(cause => { if ((cause as NodeJS.ErrnoException).code !== 'EEXIST') throw cause; });
+  await checkDirectory(dir);
+  const summary = { schema: 'studio.safe-response-summary.v1', identity: { taskId: task.id, ownerId: task.owner_id,
+    fingerprint: task.fingerprint, requestId: receipt.localRequestId, channelId: receipt.channelId, configRevision: receipt.configRevision },
+    createdAt: Date.now(), expiresAt: receipt.returnedAt + RETENTION_MS, diagnostic };
+  const bytes = JSON.stringify(summary);
+  if (Buffer.byteLength(bytes) > 32768) throw failure('invalid');
+  // A task has one original POST response. Conflicting later observations are never substituted.
+  const existing = await readFile(dir, 'manifest.json', 32768).catch(cause => { if (missing(cause)) return null; throw cause; });
+  if (existing) {
+    const prior = JSON.parse(existing.toString('utf8'));
+    if (JSON.stringify(prior.identity) !== JSON.stringify(summary.identity)
+      || prior.diagnostic?.observation?.responseSha256 !== diagnostic.observation.responseSha256) throw failure('conflict');
+    return;
+  }
+  await writeFile(dir, 'manifest.json', bytes); await syncDirectory(dir); await syncDirectory(root);
+}
+
 async function removePrivateDirectory(dir: string) {
   await checkDirectory(dir);
   const names = await fs.readdir(dir);
@@ -316,7 +348,7 @@ export async function cleanupStudioResponseEvidence(now = Date.now()) {
   if (!integer(now)) throw failure('invalid');
   let root: string;
   try { root = await evidenceRoot(); } catch (cause) { if (missing(cause)) return { scanned: 0, removed: 0 }; throw failure('invalid'); }
-  const names = (await fs.readdir(root)).filter(name => /^[a-f0-9]{64}$/.test(name) || /^\.stage-[a-f0-9]{64}-[a-f0-9-]{36}$/.test(name)).sort();
+  const names = (await fs.readdir(root)).filter(name => /^[a-f0-9]{64}$/.test(name) || /^\.summary-[a-f0-9]{64}$/.test(name) || /^\.stage-[a-f0-9]{64}-[a-f0-9-]{36}$/.test(name)).sort();
   const pivot = names.findIndex(name => name > cleanupCursor);
   const ordered = pivot < 0 ? names : [...names.slice(pivot), ...names.slice(0, pivot)];
   let scanned = 0, removed = 0;
@@ -326,7 +358,13 @@ export async function cleanupStudioResponseEvidence(now = Date.now()) {
     try {
       const stat = await checkDirectory(dir);
       let expiresAt = stat.mtimeMs + RETENTION_MS;
-      if (!name.startsWith('.stage-')) {
+      if (name.startsWith('.summary-')) {
+        try {
+          const value = JSON.parse((await readFile(dir, 'manifest.json', 32768)).toString('utf8'));
+          if (value.schema === 'studio.safe-response-summary.v1' && integer(value.createdAt) && integer(value.expiresAt)
+            && value.expiresAt >= value.createdAt && value.expiresAt <= value.createdAt + RETENTION_MS) expiresAt = value.expiresAt;
+        } catch { /* Damaged optional summaries still age out under the same private seven-day policy. */ }
+      } else if (!name.startsWith('.stage-')) {
         try {
           const manifest = await readManifest(dir);
           if (manifest.schema === 'studio.response-evidence.v1' && integer(manifest.identity?.returnedAt)

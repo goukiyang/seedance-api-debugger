@@ -97,6 +97,8 @@ import type { StudioReferencePolicy } from '@/lib/image-studio/reference-policy'
 import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, imageStudioChannelReadyForModel, imageStudioChannelUnitCredits, imageStudioUsesLegacyRoute, imageStudioEffectiveChannelId, useImageStudioChannel } from '@/lib/image-studio/channels';
 import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChannelSelect';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_NEW_REQUEST_MODELS, imageStudioModelForNewSelection, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
+import type { PublicImageOutputPlan } from '@/lib/image-generation/output-plan';
+import { ImageOutputPlanDetails, imagePlanSize } from './output-plan-view';
 
 type StudioSnapshot = { imageChannelLabel?: string | null; imageSupplierName?: string | null; referencePolicy?: StudioReferencePolicy; primaryReferenceImages?: UploadedAssetPayload[]; auxiliaryReferenceImages?: UploadedAssetPayload[]; prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; contextAvailable?: boolean; contextConfigured?: boolean; referenceImages: UploadedAssetPayload[]; fixedReferenceImages?: FixedStudioReference[]; transientReferenceImages?: UploadedAssetPayload[]; fixedReferenceCount?: number; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[] };
 type StudioTask = { id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; resultDisposition?: 'accepted' | 'dimensions_mismatch' | 'format_mismatch' | null; error?: string; unitCredits: number; billing?: ImageBillingView | null; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; finishedAt?: string | null; snapshot?: StudioSnapshot & { moduleContextVersion?: string | null; moduleContextVersionState?: string }; delivery?: { phase: string; acceptedAt?: number; waitingStatus?: 'pending' | 'retrying' | 'unconfirmed'; receivedBytes?: number; expectedBytes?: number; generationDetailSuperseded?: boolean; recoveryAvailable: boolean; checkpointRetained: boolean; requestId?: string; upstreamRequestId?: string; asyncRecovery?: StudioAsyncRecovery; validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string } }; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number; file_name?: string; mime_type?: string } | null };
@@ -105,6 +107,23 @@ type StudioRecheckFeedback = { scope: StudioRecheckScope; binding: string; reque
 function studioTaskAsyncRecovery(task: StudioTask) {
   return task.status === 'uncertain' ? task.delivery?.asyncRecovery : undefined;
 }
+type StudioProviderCheck = { state: 'waiting' | 'paused' | 'checking'; availableAt: number | null;
+  canRequestRecheck: boolean; requestId: string; binding: string; message: string };
+function studioTaskProviderCheck(task: StudioTask) {
+  return (task.delivery as (NonNullable<StudioTask['delivery']> & { providerCheck?: StudioProviderCheck }) | undefined)?.providerCheck;
+}
+function studioTaskRecheck(task: StudioTask) {
+  const recovery = studioTaskAsyncRecovery(task);
+  return recovery ? { ...recovery, requestId: task.delivery?.requestId || recovery.binding } : studioTaskProviderCheck(task);
+}
+function studioTaskOutputPlan(task: StudioTask) {
+  return (task.snapshot as (StudioSnapshot & { outputPlan?: PublicImageOutputPlan | null }) | undefined)?.outputPlan;
+}
+function studioTaskProviderWait(task: StudioTask) {
+  const value = studioTaskProviderCheck(task)?.availableAt ?? task.delivery?.asyncRecovery?.providerNotBefore
+    ?? (task.delivery as (NonNullable<StudioTask['delivery']> & { providerNotBefore?: number }) | undefined)?.providerNotBefore;
+  return Number.isSafeInteger(value) && Number(value) > Date.now() ? Number(value) : null;
+}
 function studioTaskHasViewableImage(task: StudioTask): task is StudioTask & { asset: NonNullable<StudioTask['asset']> } {
   return Boolean(task.asset?.original_url) && (task.status === 'succeeded' || studioOutputMismatchDisposition(task.resultDisposition));
 }
@@ -112,6 +131,8 @@ function studioTaskPhase(task: StudioTask) {
   if (['cancelled', 'canceled'].includes(task.status)) return '已取消';
   if (studioOutputMismatchDisposition(task.resultDisposition) && task.asset) return '图片已返回 · 规格不符';
   if (task.status === 'failed') return task.delivery?.phase === 'stopped' ? '原图交付停止' : '未能交付图片';
+  const check = studioTaskProviderCheck(task);
+  if (check) return check.state === 'checking' ? '正在核对原任务' : check.state === 'waiting' ? '等待供应商允许核对' : '自动核对已暂停';
   if (studioTaskAsyncRecovery(task)) return '结果待核对';
   const phase = task.delivery?.phase;
   return ({ queued: '等待生成', provider: '生成中', unknown: '生成结果待确认', download: '原图下载中', recover: '恢复原图中', validate: '图片校验中', save: '保存中', stopped: '原图交付停止', failed: '未能交付图片', ready: studioTaskHasViewableImage(task) ? '已完成' : task.status === 'succeeded' ? '图片已移除' : '生成结果待确认' } as Record<string, string>)[phase || '']
@@ -123,7 +144,7 @@ type QuickStudioPreset = StudioPreset & { prompt: string; context: string; perso
 type PresetSource = { draft: Record<string, unknown>; blocked: string | null; groupDeleteBlocked?: boolean; moduleDeletionBlocked?: string | null };
 type PresetSourceReader = () => PresetSource;
 type StudioFeedback = { message: string; tone: 'progress' | 'info' | 'success' | 'warning' | 'error' };
-type StudioImageQuote = { billingMode: 'fixed' | 'actual'; billingQuoteId: string | null; unitCredits: number; estimatedCredits: number; expiresAt?: string; imageChannel?: ImageGenerationChannelSnapshot };
+type StudioImageQuote = { billingMode: 'fixed' | 'actual'; billingQuoteId: string | null; unitCredits: number; estimatedCredits: number; expiresAt?: string; imageChannel?: ImageGenerationChannelSnapshot; outputPlan?: PublicImageOutputPlan | null };
 type CachedStudioImageQuote = { signature: string; requestId: string; quote: StudioImageQuote };
 type ImagePreviewState = { contentKey?: `asset:${string}`; sourceRole?: ImageComparisonSource['role']; taskId?: string; resultVersion?: string | null; src: string; thumbnailSrc?: string; alt: string; title?: string; fileName?: string; width?: number; height?: number; fileSize?: number; metadata?: ImagePreviewMetadata; comparison?: ImageComparisonSource };
 type ResultInputMain = { taskId: string; state: 'ready' | 'none' | 'unknown' | 'unavailable'; images: UploadedAssetPayload[]; snapshotToken: string };
@@ -1676,6 +1697,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const taskReadLoaded = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [billingQuote, setBillingQuote] = useState<CachedStudioImageQuote | null>(null);
+  const [outputPlanIssue, setOutputPlanIssue] = useState<{ signature: string; message: string } | null>(null);
   const [quoteVisible, setQuoteVisible] = useState(true);
   useEffect(() => { const update = () => setQuoteVisible(!document.hidden); update(); document.addEventListener('visibilitychange', update); return () => document.removeEventListener('visibilitychange', update); }, []);
   const previousEstimateSignature = useRef('');
@@ -3178,7 +3200,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   }
   const estimateSignature = effectiveGenerationSignature;
   useEffect(() => {
-    if (sessionChanged || isClientSessionBlocked() || sourceSharingBlocked || !actualQuoteRequired || !estimateSignature || hidden || !active || !quoteVisible || !draftLoaded || draftRestoring
+    if (sessionChanged || isClientSessionBlocked() || sourceSharingBlocked || !estimateSignature || hidden || !active || !quoteVisible || !draftLoaded || draftRestoring
       || submitting || pendingSubmission || batch.mode !== 'single'
       || !Number.isInteger(count) || count < 1 || count > 8) return;
     if (billingQuote?.signature === estimateSignature && billingQuote.quote.expiresAt
@@ -3195,7 +3217,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           if (!Number.isFinite(quote.estimatedCredits) || quote.estimatedCredits < 0 || !quote.expiresAt
             || Date.parse(quote.expiresAt) <= Date.now() || quote.billingMode === 'actual' && !quote.billingQuoteId) return;
           setBillingQuote({ signature: estimateSignature, requestId, quote });
-        }).catch(cause => { if (!abort.signal.aborted && sharedLive && [401, 403, 404, 409].includes(Number(cause?.status))) onSharedRefresh(); });
+          setOutputPlanIssue(null);
+        }).catch(cause => {
+          if (abort.signal.aborted || liveGenerationSignature.current !== estimateSignature) return;
+          if (Number(cause?.status) === 400) setOutputPlanIssue({ signature: estimateSignature,
+            message: cause instanceof Error ? cause.message : '当前规格无法提交，请调整参数。' });
+          if (sharedLive && [401, 403, 404, 409].includes(Number(cause?.status))) onSharedRefresh();
+        });
     }, 500);
     return () => { window.clearTimeout(timer); abort.abort(); };
   }, [sessionChanged, sourceSharingBlocked, actualQuoteRequired, estimateSignature, hidden, active, quoteVisible, draftLoaded, draftRestoring, submitting, pendingSubmission, batch.mode, count, billingQuote, onSharedRefresh]);
@@ -3269,13 +3297,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const resultTasks = likedResults.liked ? likedResults.tasks.filter(task => !deletedIds.current.has(task.id)) : tasks;
   recheckTargets.current = resultTasks;
   function taskRecheckFeedback(task: StudioTask) {
-    const recovery = studioTaskAsyncRecovery(task), feedback = recheckFeedback[task.id];
+    const recovery = studioTaskRecheck(task), feedback = recheckFeedback[task.id];
     return recovery && feedback?.scope === recheckScopeRef.current && feedback.binding === recovery.binding
-      && feedback.requestId === (task.delivery?.requestId || recovery.binding)
+      && feedback.requestId === recovery.requestId
       && (feedback.busy || feedback.error || recovery.state !== 'stopped') ? feedback : undefined;
   }
   async function recheckOriginalTask(task: StudioTask) {
-    const recovery = studioTaskAsyncRecovery(task), requestId = task.delivery?.requestId || recovery?.binding;
+    const recovery = studioTaskRecheck(task), requestId = recovery?.requestId;
     if (!recovery?.canRequestRecheck || !requestId || sessionChanged || isClientSessionBlocked()
       || sessionUser?.id !== userId || hidden || !active || recheckRequests.current.has(task.id)) return;
     const scope = recheckScopeRef.current, ownerId = task.owner?.id;
@@ -3286,8 +3314,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       if (!target) return false;
       return scope.active && recheckScopeRef.current === scope && !request.controller.signal.aborted && !isClientSessionBlocked()
         && recheckRequests.current.get(task.id) === request && target.owner?.id === ownerId
-        && studioTaskAsyncRecovery(target)?.binding === recovery.binding
-        && (target.delivery?.requestId || target.delivery?.asyncRecovery?.binding) === requestId;
+        && studioTaskRecheck(target)?.binding === recovery.binding
+        && studioTaskRecheck(target)?.requestId === requestId;
     };
     if (!current()) { recheckRequests.current.delete(task.id); return; }
     const feedback = { scope, binding: recovery.binding, requestId, busy: false };
@@ -3295,11 +3323,12 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     try {
       const response = await fetch('/api/image-studio/tasks', { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'recheck', id: task.id, requestId }), signal: AbortSignal.any([request.controller.signal, AbortSignal.timeout(15000)]) });
-      const result = await readResponse(response) as { recovery?: StudioAsyncRecovery; scheduled?: boolean };
+      const result = await readResponse(response) as { recovery?: StudioAsyncRecovery; providerCheck?: StudioProviderCheck; scheduled?: boolean };
       if (!current()) return;
-      if (result.recovery?.binding !== recovery.binding || typeof result.scheduled !== 'boolean') throw new Error('核对回执暂未确认，请稍后刷新原任务。');
+      const observed = result.providerCheck || result.recovery;
+      if (observed?.binding !== recovery.binding || typeof result.scheduled !== 'boolean') throw new Error('核对回执暂未确认，请稍后刷新原任务。');
       setRecheckFeedback(previous => ({ ...previous, [task.id]: { ...feedback, message: result.scheduled
-        ? '已安排核对原任务，不会重新生成。' : result.recovery?.state === 'checking'
+        ? '已安排核对原任务，不会重新生成。' : observed?.state === 'checking'
           ? '后台正在核对原任务，不会重新生成。' : '核对状态已更新，未重新生成。' } }));
       // Refresh only the existing task list; the PATCH never calls generation or resets its budget.
       if (likedResults.liked) likedResults.refresh(); else void loadTasks(undefined, 'silent');
@@ -3334,11 +3363,12 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const ownResults: StudioResultItem[] = resultTasks.map(task => {
     const image = studioTaskHasViewableImage(task) ? studioTaskPreviewState(task) : null;
     const asyncRecovery = studioTaskAsyncRecovery(task);
-    const pending = ['queued', 'running'].includes(task.status);
+    const providerCheck = studioTaskProviderCheck(task);
+    const pending = ['queued', 'running'].includes(task.status) && !providerCheck;
     return {
       id: task.id, task, label: `生成结果 ${task.ordinal}`, status: studioTaskPhase(task), billing: task.billing,
       pending,
-      generationWait: { taskKey: task.id, acceptedAt: task.delivery?.acceptedAt, createdAt: task.createdAt,
+      generationWait: providerCheck ? undefined : { taskKey: task.id, acceptedAt: task.delivery?.acceptedAt, createdAt: task.createdAt,
         status: task.status, phase: task.delivery?.phase, waitingStatus: task.delivery?.waitingStatus, label: studioTaskPhase(task),
         resultReady: Boolean(image), progress: Number(task.delivery?.expectedBytes) > 0 && task.delivery?.receivedBytes != null
           ? task.delivery.receivedBytes / task.delivery.expectedBytes! * 100 : undefined,
@@ -3736,6 +3766,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             </select>
           </label>
         </div>
+        {batch.mode === 'single' && <p className={styles.generationEstimate} role="status">
+          {outputPlanIssue?.signature === estimateSignature ? outputPlanIssue.message
+            : visibleQuote?.outputPlan ? `预计提交：${imagePlanSize(visibleQuote.outputPlan) || '尺寸待确认'}`
+              : '预计提交尺寸待确认'}
+        </p>}
         {!allowsUnconfirmedParameters && qualityChoices.length > 0 && !qualityChoices.some(option => option !== 'auto') && <p className={styles.muted}>当前供应商只配置了模型默认质量。</p>}
         <div className={styles.moduleQuickActions} aria-label="模板快捷设置">
           <div className={styles.quickPresetRow}>
@@ -3833,6 +3868,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
               {task.snapshot?.resolution && /^[124]K$/i.test(task.snapshot.resolution) ? task.snapshot.resolution : '自动'}
               <span id={`studio-size-${task.id}`} role="tooltip" className={styles.resolutionTooltip}>{task.asset?.width && task.asset.height ? `${task.asset.width} × ${task.asset.height} px` : '实际尺寸暂不可用'}</span>
             </span>
+            {studioTaskOutputPlan(task)?.width && <><span>·</span><span>提交 {imagePlanSize(studioTaskOutputPlan(task))}</span></>}
             <span>·</span><span className={styles.resultContextVersion} title={task.snapshot?.moduleContextVersion ? `模块上下文版本：${task.snapshot.moduleContextVersion}` : '模块上下文版本状态'}><ContextVersionLabel code={task.snapshot?.moduleContextVersion} state={task.snapshot?.moduleContextVersionState || 'missing'} onRetry={() => void loadTasks()} /></span>
             </div>
             <RelativeTime className={styles.resultTime} value={task.createdAt} />
@@ -3841,7 +3877,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             <div className={styles.resultMeta}><span className={styles.muted}>查看与点赞</span><RelativeTime className={styles.resultTime} value={sharedPin.createdAt} /></div></> : null}
           renderPrimaryActions={({task}, waitDisplay) => {
             if (!task) return null;
-            const recovery = studioTaskAsyncRecovery(task), feedback = taskRecheckFeedback(task);
+            const recovery = studioTaskRecheck(task), feedback = taskRecheckFeedback(task);
             if (recovery?.canRequestRecheck) return <button type="button" className="sd2-loading-surface" data-busy={feedback?.busy || undefined}
               disabled={Boolean(feedback?.busy) || sessionChanged || isClientSessionBlocked() || sessionUser?.id !== userId || hidden || !active || !(task.delivery?.requestId || recovery.binding)} aria-busy={feedback?.busy || undefined}
               onClick={() => void recheckOriginalTask(task)}>{feedback?.busy ? '正在申请核对' : '核对原任务'}</button>;
@@ -3864,10 +3900,16 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             }}><RotateCcw size={15} /><span id={`studio-restore-${task.id}`} role="tooltip" className={styles.resolutionTooltip}>恢复设置</span></button>}
 </> : null}
           renderSupplement={({task}) => task ? <>
+            <ImageOutputPlanDetails plan={studioTaskOutputPlan(task)} frozenSize={task.outputSize}
+              resolution={task.snapshot?.resolution} ratio={task.aspectRatio}
+              width={task.asset?.width} height={task.asset?.height} className={styles.muted} />
+            {(() => { const nextCheckAt = studioTaskProviderWait(task); return nextCheckAt
+              ? <p className={styles.muted}>可再次核对：<RelativeTime value={new Date(nextCheckAt).toISOString()} /></p> : null; })()}
+            {studioTaskProviderCheck(task) && <p className={styles.muted}>{studioTaskProviderCheck(task)!.message}</p>}
+            {taskRecheckFeedback(task)?.message && <p className={styles.muted} role="status">{taskRecheckFeedback(task)!.message}</p>}
             {copyFeedback?.id === task.id && <span className={styles.copyFeedback} role="status">{copyFeedback.text}</span>}
             {['download', 'recover'].includes(task.delivery?.phase || '') && Number(task.delivery?.expectedBytes) > 0 && task.delivery?.receivedBytes != null && <p role="status">{Math.min(100, Math.floor(task.delivery.receivedBytes / task.delivery.expectedBytes! * 100))}% 字节已接收</p>}
             {studioTaskAsyncRecovery(task) && <>
-              {taskRecheckFeedback(task)?.message && <p className={styles.muted} role="status">{taskRecheckFeedback(task)!.message}</p>}
               {task.delivery?.asyncRecovery?.state === 'stopped' && <p className={styles.muted} role="status">自动核对已结束，原请求与费用预留保留。</p>}
               <details className={styles.muted}><summary>核对详情</summary>
                 <p>不占生成名额；原请求和费用预留保留，不会重新生成。</p>

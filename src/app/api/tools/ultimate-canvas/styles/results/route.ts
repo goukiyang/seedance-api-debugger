@@ -6,6 +6,7 @@ import { imageBillingPending, imageBillingView } from '@/lib/image-studio/billin
 import { publicImageTaskStatus, cancelQueuedChannelTask, StudioError } from '@/lib/image-studio/tasks';
 import { historicalImageSupplier } from '@/lib/image-studio/channel-history';
 import { studioAssetUrl } from '@/lib/image-studio/media';
+import { publicImageOutputPlan } from '@/lib/image-generation/output-plan';
 import { getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { attachAssetToSiteReferenceImage } from '@/lib/assets/reference-import';
 import {
@@ -48,7 +49,7 @@ export async function POST(request: NextRequest) {
     const tasks = await prisma.imageStudioTask.findMany({
       where: { owner_id: user.id, module_id: unframed ? null : moduleId, batch_id: expectedBatchId, deleted_at: null },
       orderBy: { ordinal: 'asc' },
-      select: { id: true, status: true, asset_id: true, error: true, ordinal: true, owner_id: true, snapshot_json: true,
+      select: { id: true, status: true, asset_id: true, error: true, ordinal: true, owner_id: true, snapshot_json: true, output_size: true,
         billing_status: true, actual_amount_micros: true, actual_credits: true, billing_contract_json: true },
     });
     if (!tasks.length) {
@@ -157,6 +158,13 @@ export async function POST(request: NextRequest) {
       const result = task.asset_id ? outputByAsset.get(task.asset_id) : null;
       return result ? [result] : [];
     });
+    const outputPlans = tasks.map(task => {
+      let plan: unknown;
+      try { plan = JSON.parse(task.snapshot_json || '{}').outputPlan; } catch {}
+      const actual = task.asset_id ? assetById.get(task.asset_id) : undefined;
+      return { ordinal: task.ordinal, outputSize: task.output_size, outputPlan: publicImageOutputPlan(plan),
+        returnedWidth: actual?.width ?? null, returnedHeight: actual?.height ?? null };
+    });
 
     return canvasStyleJson({
       status,
@@ -164,6 +172,7 @@ export async function POST(request: NextRequest) {
       submission_unconfirmed: unconfirmedTasks.length > 0,
       assets: orderedAssets,
       snapshot: historicalImageSupplier(tasks[0].snapshot_json),
+      outputPlans,
       ...(errors ? { error: errors } : {}),
       completedCount,
       totalCount: tasks.length,

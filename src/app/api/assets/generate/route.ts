@@ -9,7 +9,7 @@ import { assertCanvasPromptCompatibility } from '@/lib/canvas-prompt-compatibili
 import { compileCanvasPromptReferences, parseCanvasPromptMentions, validateCanvasBoundReferenceImageIds, CanvasPromptReferenceError } from '@/lib/canvas-prompt-references';
 import {
   createImageGeneration,
-  imageGenerationModelOutputSize,
+  imageGenerationModelOutputPlan,
   getImageGenerationChannels,
   selectImageGenerationSettings,
   ImageGenerationApiError,
@@ -20,6 +20,7 @@ import {
   validateImageGenerationChannel,
 } from '@/lib/integrations/image-generation';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { publicImageOutputPlan, withSynchronousImageOutputPlan } from '@/lib/image-generation/output-plan';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import { defaultStudioModuleId } from '@/lib/image-studio/modules';
@@ -390,6 +391,17 @@ export async function POST(request: NextRequest) {
     }
 
     const input = normalizeInput(body.input);
+    const originalRequestId = cleanString(body.requestId || input.requestId);
+    if (body.quote !== true && /^[a-zA-Z0-9-]{16,100}$/.test(originalRequestId)) {
+      const originalBatchId = createHash('sha256').update(`${user.id}:${originalRequestId}`).digest('hex');
+      const original = await prisma.imageStudioTask.findFirst({ where: { owner_id: user.id, batch_id: originalBatchId }, select: { id: true } });
+      if (original) return NextResponse.json({ success: true, pending: true, batchId: originalBatchId, requestId: originalRequestId,
+        resultsEndpoint: '/api/tools/ultimate-canvas/styles/results', resultsInput: { projectId: project.id, cardId: videoCard.id,
+          documentId: canvasDocumentId, nodeId: canvasNodeId, moduleId: defaultStudioModuleId(user.id), requestId: originalRequestId, batchId: originalBatchId } },
+        { status: 202, headers: { 'Cache-Control': 'private, no-store' } });
+      const originalSync = await prisma.platformSetting.findUnique({ where: { key: `image_sync_request_v1:${user.id}:${originalRequestId}` }, select: { id: true } });
+      if (originalSync) throw new SynchronousImageAdmissionError('此同步图片请求已有记录，请核对原结果；没有重新生成', 409, originalRequestId);
+    }
     await assertCanvasPromptCompatibility(user, canvasDocumentId, canvasNodeId, buildGenerationPrompt(body, input, action), input.promptMentions);
     if (inputTooLarge(input)) {
       return NextResponse.json({ error: '图形生成输入过长，请减少节点、参考图或提示词内容' }, { status: 400 });
@@ -478,9 +490,10 @@ export async function POST(request: NextRequest) {
       || (IMAGE_RESOLUTION_OPTIONS.includes(cleanString(input.size) as typeof IMAGE_RESOLUTION_OPTIONS[number]) ? cleanString(input.size) : '');
     const resolution = normalizeImageResolution(settings.default_model, rawRequestedResolution || settings.default_size, settings.provider);
     const requestedSize = cleanString(input.size || input.default_size || body.size);
-    const imageSize = isValidImageDimension(requestedSize)
-      ? requestedSize
-      : imageGenerationModelOutputSize(settings, settings.default_model, resolution, ratio);
+    const explicitOutputSize = isValidImageDimension(requestedSize) ? requestedSize : undefined;
+    const outputPlan = imageGenerationModelOutputPlan(settings, settings.default_model, resolution, ratio,
+      { requestedRatio, aspectRatioSource: ratioResolution.source, explicitSize: explicitOutputSize });
+    const imageSize = outputPlan.outputSize;
     // Explicit channels use the durable queue. Never issue an untracked POST here.
     if (imageChannel) {
       if (!canUseCompanyTemplates(user)) throw new AuthError('当前账号没有此图片生成通道权限', 403);
@@ -498,14 +511,16 @@ export async function POST(request: NextRequest) {
       const canvasUse = { user, referenceImageIds };
       const referenceAssets = Object.fromEntries(referenceImages.map(image => [image.id, image.asset_id!]));
       const promptBinding = mentions ? { mentions, referenceAssets } : undefined;
-      if (body.quote === true) return NextResponse.json(await prepareImageBillingQuote(user.id, submission, undefined, canvasUse, promptBinding), { headers: { 'Cache-Control': 'private, no-store' } });
-      const batchId = await submitStudioBatch(user.id, submission, undefined, undefined, canvasUse, promptBinding);
+      if (body.quote === true) return NextResponse.json(await prepareImageBillingQuote(user.id, submission, undefined, canvasUse, promptBinding, 0,
+        { explicitOutputSize }), { headers: { 'Cache-Control': 'private, no-store' } });
+      const batchId = await submitStudioBatch(user.id, submission, undefined, undefined, canvasUse, promptBinding, undefined, { explicitOutputSize });
       return NextResponse.json({ success: true, pending: true, batchId, requestId, count,
         resultsEndpoint: '/api/tools/ultimate-canvas/styles/results',
         resultsInput: { projectId: project.id, cardId: videoCard.id, documentId: canvasDocumentId, nodeId: canvasNodeId,
           moduleId: defaultStudioModuleId(user.id), requestId, batchId, count } }, { status: 202, headers: { 'Cache-Control': 'private, no-store' } });
     }
 
+    return await withSynchronousImageOutputPlan({ quote: body.quote === true, outputPlan, model: settings.default_model, count }, async () => {
     assertImageStudioAdmissionOpen();
     const explicitWorkspaceId = cleanString(body.workspace_id || body.workspaceId);
     let workspaceId = explicitWorkspaceId;
@@ -534,6 +549,7 @@ export async function POST(request: NextRequest) {
       prompt,
       ratio,
       size: imageSize,
+      outputPlan, ratioContractVersion: 3,
       count,
       referenceImages: referenceInputs,
       quality: cleanString(input.quality || body.quality),
@@ -614,6 +630,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       synchronous_request_id: synchronousAdmission.requestId,
+      outputPlan: publicImageOutputPlan(outputPlan),
       action,
       requested_count: count,
       delivered_count: generatedAssets.length,
@@ -639,6 +656,7 @@ export async function POST(request: NextRequest) {
       reference_image_id: generatedAssets[0]?.referenceImageId || null,
       workspace_asset_id: generatedAssets[0]?.workspaceAssetId || null,
     });
+    }, preview => NextResponse.json(preview, { headers: { 'Cache-Control': 'private, no-store' } }));
   } catch (error) {
     if (error instanceof SynchronousImageAdmissionError) return NextResponse.json({ error: 'image_generation_request_already_recorded', message: error.message,
       ...(error.requestId ? { synchronous_request_id: error.requestId } : {}) }, { status: error.status });

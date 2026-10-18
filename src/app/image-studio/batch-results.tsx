@@ -9,7 +9,7 @@ import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useProductDialog } from '@/components/useProductDialog';
 import { watchGenerationCompletion } from '@/components/GenerationCompletion';
 import { handImageDownloadToBrowser } from '@/lib/media/native-download';
-import { batchStateLabel, safeBatchFileName, STUDIO_BATCH_LIMITS, type StudioBatchView } from '@/lib/image-studio/batch-contract';
+import { batchStateLabel, safeBatchFileName, STUDIO_BATCH_LIMITS, type StudioBatchView, type StudioBatchItemView } from '@/lib/image-studio/batch-contract';
 import { readBatchResponse } from '@/lib/image-studio/batch-receipt';
 import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
 import type { SharedStudioIntent } from '@/lib/image-studio/shared-types';
@@ -17,6 +17,7 @@ import { IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_QUALITY_LABELS } from '@/lib/im
 import { canSelectBatchDirectory, selectBatchDirectory, newBatchOutputDirectory, writeUniqueBatchFile, type BatchDirectoryHandle } from './batch-files';
 import styles from './batch.module.css';
 import { hasSharedDefaults } from './use-shared-studio';
+import { ImageOutputPlanDetails } from './output-plan-view';
 type Delivery = { saved: Record<number, string>; child: BatchDirectoryHandle | null; lock: boolean; directory: BatchDirectoryHandle | null };
 type SharedBatchView = StudioBatchView & { sharedLive?: SharedStudioIntent; definitionConfirmationRequired?: boolean };
 type SavedPersonalInput = Partial<{ prompt: string; model: string; quality: string; resolution: string; count: number; aspectRatio: string }>;
@@ -88,6 +89,26 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
   }, [id, userId]);
   useEffect(() => { void load(); }, [load]);
   const generationPending = !!batch && !['complete', 'cancelled'].includes(batch.state);
+  async function recheckOriginalItem(item: StudioBatchItemView) {
+    const check = item.delivery?.providerCheck;
+    if (!item.taskId || !check?.canRequestRecheck || actionLock.current) return;
+    const expected = `${userId}:${id}`;
+    actionLock.current = true; setBusy(true); setError('');
+    try {
+      const result = await readResult(await fetch('/api/image-studio/tasks', { method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'recheck', id: item.taskId, requestId: check.requestId }),
+        signal: AbortSignal.timeout(15000) }));
+      if (scope.current !== expected) return;
+      if (result.providerCheck?.binding !== check.binding || typeof result.scheduled !== 'boolean') throw new Error('核对回执暂未确认，请刷新原批次，不会重新生成。');
+      setContinuationMessage(result.scheduled ? '已安排核对原任务，不会重新生成。' : result.providerCheck.message);
+    } catch (cause) {
+      if (scope.current === expected) setError(cause instanceof Error ? cause.message : '核对申请结果待确认，请刷新原批次，不会重新生成。');
+    } finally {
+      actionLock.current = false;
+      if (scope.current === expected) { setBusy(false); void load(); }
+    }
+  }
   useEffect(() => { if (!generationPending || busy) return; const timer = setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 5000); return () => clearInterval(timer); }, [load, generationPending, busy]);
   useImageBillingRefresh((batch?.items || []).map(item => ({ id: item.taskId || String(item.ordinal), billing: item.billing })), load);
   async function continueSharedBatch(expected: string) {
@@ -289,8 +310,10 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
     || ({ pending: '等待派发', 'needs-confirmation': '模板已更新，待确认后继续', queued: '已受理，排队中', running: '生成中', succeeded: '已生成', failed: '生成失败', uncertain: '结果待确认', cancelled: '未派发，已取消' } as Record<string, string>)[state] || '状态待确认';
   const resultItems = useMemo(() => (batch?.items || []).map(item => ({
     ...item, id: String(item.ordinal), label: `${item.ordinal}. ${item.sourceName}`, generationStatus: item.status,
-    status: statusLabel(item.status, undefined, item.resultDisposition), pending: ['pending', 'queued', 'running'].includes(item.status),
-    generationWait: {
+    status: item.delivery?.providerCheck ? item.delivery.providerCheck.state === 'checking' ? '正在核对原任务'
+      : item.delivery.providerCheck.state === 'waiting' ? '等待供应商允许核对' : '自动核对已暂停'
+      : statusLabel(item.status, undefined, item.resultDisposition), pending: !item.delivery?.providerCheck && ['pending', 'queued', 'running'].includes(item.status),
+    generationWait: item.delivery?.providerCheck ? undefined : {
       taskKey: item.taskId || undefined, acceptedAt: item.delivery?.acceptedAt, status: item.status, phase: item.delivery?.phase, waitingStatus: item.delivery?.waitingStatus,
       resultReady: Boolean(item.image && item.taskId),
       label: statusLabel(item.status, item.delivery?.phase, item.resultDisposition), connectionIssue: Boolean(error), connectionDetail: error,
@@ -335,8 +358,14 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
       {!deliveryOnly && batch.failed > 0 && <div className={styles.retry}><span>选中失败项 {selected.length} 张，本次重试预计 {selected.length * batch.unitCredits} 点；每项最多重试 3 次</span><button type="button" disabled={busy || !selected.length} onClick={() => void action('retry')}><RotateCcw size={16} />重试选中失败项</button></div>}
       {!deliveryOnly && <GeneratedImageResults items={resultItems} scope={`sd2-image-studio-batch-page:${userId}:${id}`}
         visible={visible} onQuickUse={onQuickUse ? item => { if (item.taskId && item.image) onQuickUse(item.taskId); } : undefined}
-        renderPrimaryActions={(item, waitDisplay) => item.taskId && waitDisplay?.showRecovery ? <button type="button" disabled={reading} onClick={() => void load()}>刷新原任务状态</button> : null}
+        renderPrimaryActions={(item, waitDisplay) => item.delivery?.providerCheck?.canRequestRecheck
+          ? <button type="button" disabled={busy || reading} onClick={() => void recheckOriginalItem(item)}>核对原任务</button>
+          : item.taskId && waitDisplay?.showRecovery ? <button type="button" disabled={reading} onClick={() => void load()}>刷新原任务状态</button> : null}
         busy={reading} emptyLabel="暂无本批图片" renderSupplement={item => <>
+          <ImageOutputPlanDetails plan={item.outputPlan} frozenSize={item.outputSize}
+            width={item.image?.width} height={item.image?.height} />
+          {item.delivery?.providerCheck && <p>{item.delivery.providerCheck.message}</p>}
+          {item.delivery?.providerCheck?.availableAt && <p>可再次核对：<RelativeTime value={new Date(item.delivery.providerCheck.availableAt).toISOString()} /></p>}
           {saved[item.ordinal] && <p>已保存并核对大小</p>}
           {item.generationStatus === 'failed' && <label><input type="checkbox" disabled={busy} aria-label={`重试第 ${item.ordinal} 项`} checked={selected.includes(item.ordinal)} onChange={event => setSelected(previous => event.target.checked ? [...previous, item.ordinal] : previous.filter(value => value !== item.ordinal))} />重试此项</label>}
         </>} />}

@@ -4,7 +4,8 @@ import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { listStudioTasks, StudioError, publicImageTaskStatus } from '@/lib/image-studio/tasks';
 import { avatarResultRecords, listAvatarRecords, mutateAvatarRecord, readAvatar } from '@/lib/avatar-random/store';
-import { avatarDescriptionStatus, estimateAvatarDraft, parseAvatarDescription, prepareAvatarPlan, quoteAvatarPlan, submitAvatarPlan, validateAvatarReferences } from '@/lib/avatar-random/service';
+import { avatarDescriptionStatus, estimateAvatarDraft, parseAvatarDescription, prepareAvatarPlan, quoteAvatarPlan, submitAvatarPlan, validateAvatarReferences, publicAvatarPlan, currentAvatarOutputContract } from '@/lib/avatar-random/service';
+import { publicImageOutputPlan } from '@/lib/image-generation/output-plan';
 import { imageBillingView } from '@/lib/image-studio/billing-contract';
 import { imageBillingReadinessPayload } from '@/lib/image-studio/billing-readiness';
 import { AvatarDescriptionError, isLegalAvatarParserVersion, isLegalDescriptionRequestId } from '@/lib/avatar-random/description-parser';
@@ -42,7 +43,9 @@ async function sourceTask(owner:string,id?:string) {
   const task=await prisma.imageStudioTask.findFirst({where:{id,owner_id:owner,deleted_at:null}});
   const mismatch=task&&studioDimensionMismatch(task);
   const asset=task?.asset_id&&studioTaskHasViewableOutput(task)?await prisma.asset.findFirst({where:{id:task.asset_id,owner_id:owner,status:'active',type:'image'}}):null;
-  return task?{id:task.id,ordinal:1,status:publicImageTaskStatus(task.status),resultDisposition:mismatch?mismatch.code==='generated_format_mismatch'?'format_mismatch':'dimensions_mismatch':null,error:mismatch&&asset?studioDimensionMismatchNotice(mismatch.validation):task.error,snapshot:historicalImageSupplier(task.snapshot_json),billing:imageBillingView(task,owner,false),asset:asset?{id:asset.id,original_url:studioAssetUrl(asset.id),thumbnail_url:studioAssetUrl(asset.id,true),file_name:asset.file_name,mime_type:asset.mime_type}:null}:null;
+  let outputPlan: unknown;
+  try { outputPlan = JSON.parse(task?.snapshot_json || '{}').outputPlan; } catch {}
+  return task?{id:task.id,ordinal:1,status:publicImageTaskStatus(task.status),outputSize:task.output_size,outputPlan:publicImageOutputPlan(outputPlan),resultDisposition:mismatch?mismatch.code==='generated_format_mismatch'?'format_mismatch':'dimensions_mismatch':null,error:mismatch&&asset?studioDimensionMismatchNotice(mismatch.validation):task.error,snapshot:historicalImageSupplier(task.snapshot_json),billing:imageBillingView(task,owner,false),asset:asset?{id:asset.id,original_url:studioAssetUrl(asset.id),thumbnail_url:studioAssetUrl(asset.id,true),file_name:asset.file_name,mime_type:asset.mime_type,width:asset.width,height:asset.height}:null}:null;
 }
 
 export const dynamic = 'force-dynamic';
@@ -71,7 +74,7 @@ export async function GET(req: NextRequest) { return run(async owner => {
     const plan = await readAvatar<AvatarPlan>(owner, 'plan', planId);
     if (!plan) throw new StudioError('草稿不存在', 404);
     const result = await listStudioTasks(owner, undefined, undefined, false, undefined, plan.id);
-    return { plan, sourceTask: await sourceTask(owner, plan.sourceTaskId), ...result,
+    return { plan: publicAvatarPlan(plan), sourceTask: await sourceTask(owner, plan.sourceTaskId), ...result,
       resultRecords: await avatarResultRecords(owner, [...result.tasks.map(task => task.id), ...(plan.sourceTaskId ? [plan.sourceTaskId] : [])]) };
   }
   const settings = await getImageStudioSettings();
@@ -114,8 +117,10 @@ export async function POST(req: NextRequest) { return run(async owner => {
     const task=record.taskId?await prisma.imageStudioTask.findFirst({where:{id:record.taskId,owner_id:owner}}):null;
     const snapshot=task?.snapshot_json?JSON.parse(task.snapshot_json):null;
     const plan: AvatarPlan = { ...original,id: `${isAvatarSheet(original)?'sheet-':''}${randomUUID()}`, candidates: record.sheetCandidates || [record.candidate!], ...(snapshot?{model:snapshot.model,quality:snapshot.quality,resolution:snapshot.resolution,aspectRatio:snapshot.aspectRatio,settingsRevision:snapshot.settingsRevision,unitCredits:snapshot.unitCredits,referenceIds:JSON.parse(task!.reference_ids)}:{}), createdAt: new Date().toISOString(),sourceTaskId:record.taskId,restoredFrom:record.id,warnings:['已恢复当时完整设置；原模型和参考图保留，出图前需更新报价并重新校验可用性。'] };
+    // Restoring settings creates a new intent, never the old key or its fee authorization.
+    Object.assign(plan, { ratioContractVersion: 3, outputPlan: undefined, outputPlanHash: undefined });
     await prisma.platformSetting.create({ data: { key: avatarPlanKey(owner, plan), value_json: JSON.stringify(plan), updated_by: owner } });
-    return { plan,sourceTask:await sourceTask(owner,record.taskId) };
+    return { plan: publicAvatarPlan(plan),sourceTask:await sourceTask(owner,record.taskId) };
   }
   if(body.action==='quote'){
     const previous=await readAvatar<AvatarPlan>(owner,'plan',body.id);if(!previous)throw new StudioError('人物草稿不存在');
@@ -136,10 +141,11 @@ export async function POST(req: NextRequest) { return run(async owner => {
     if(imageChannel){const capability=validateImageGenerationChannel(api,{model,quality,resolution,ratio:isAvatarSheet({layout})?'1:1':previous.aspectRatio,referenceCount:previous.referenceIds.length});if(!capability.ok)throw new StudioError(capability.error);price=capability.capability.fixedPoints;}
     if(!imageChannel&&(price===undefined||price===null))throw new StudioError('原模型已失效或没有报价，历史设置仍保留');
     let plan:AvatarPlan;
-    try { plan=withAvatarLayout({...previous,sourceTaskId:undefined,model,channelId,imageChannel,quality,resolution,id:(isAvatarSheet({layout})?'sheet-':'')+createHash('sha256').update(`quote:${AVATAR_COMPILER_VERSION}:${owner}:${previous.id}:${settings.revision}:${model}:${quality}:${resolution}:${layout}:${channelId}:${imageChannel?.configRevision||'legacy'}`).digest('hex'),settingsRevision:settings.revision,unitCredits:price,imageReady:isStudioImageGenerationProvider(api.provider)&&isImageGenerationApiReady(api)&&(previous.referenceIds.length?api.supports_image_to_image:api.supports_text_to_image),candidates:previous.candidates.map(c=>adaptAvatarPrompt(c,model)),createdAt:new Date().toISOString()},layout); }
+    try { plan=withAvatarLayout({...previous,sourceTaskId:undefined,model,channelId,imageChannel,quality,resolution,id:(isAvatarSheet({layout})?'sheet-':'')+createHash('sha256').update(`quote:output-v3:${AVATAR_COMPILER_VERSION}:${owner}:${previous.id}:${settings.revision}:${model}:${quality}:${resolution}:${layout}:${channelId}:${imageChannel?.configRevision||'legacy'}`).digest('hex'),settingsRevision:settings.revision,unitCredits:price,imageReady:isStudioImageGenerationProvider(api.provider)&&isImageGenerationApiReady(api)&&(previous.referenceIds.length?api.supports_image_to_image:api.supports_text_to_image),candidates:previous.candidates.map(c=>adaptAvatarPrompt(c,model)),createdAt:new Date().toISOString()},layout);
+      Object.assign(plan, currentAvatarOutputContract(plan, api)); }
     catch(e){throw new StudioError((e as Error).message);}
     await prisma.platformSetting.upsert({where:{key:avatarPlanKey(owner,plan)},create:{key:avatarPlanKey(owner,plan),value_json:JSON.stringify(plan),updated_by:owner},update:{}});
-    return {plan:await readAvatar<AvatarPlan>(owner,'plan',plan.id)};
+    return {plan:publicAvatarPlan(await readAvatar<AvatarPlan>(owner,'plan',plan.id))};
   }
   if (body.action === 'retry') {
     const previous = await readAvatar<AvatarPlan>(owner, 'plan', body.id);
@@ -150,9 +156,11 @@ export async function POST(req: NextRequest) { return run(async owner => {
     if (!failed.length) throw new StudioError('没有可重试的明确失败项');
     const settings = await getImageStudioSettings();
     const plan = { ...previous, sourceTaskId: undefined, id: (isAvatarSheet(previous)?'sheet-':'')+createHash('sha256').update(`retry:${owner}:${previous.id}`).digest('hex'), candidates: isAvatarSheet(previous) ? previous.candidates : failed.map(t => previous.candidates[t.ordinal - 1]), settingsRevision: settings.revision, unitCredits: previous.imageChannel ? previous.unitCredits : settings.prices[previous.model as keyof typeof settings.prices], createdAt: new Date().toISOString() };
+    const api = plan.imageChannel ? await resolveImageGenerationChannelSnapshot(plan.imageChannel, undefined, true, plan.model) : await getImageGenerationSettingsForModel(plan.model);
+    Object.assign(plan, currentAvatarOutputContract(plan, api));
     if (!previous.imageChannel && plan.unitCredits === null) throw new StudioError('当前模型尚未设置报价');
     await prisma.platformSetting.upsert({where:{key:avatarPlanKey(owner,plan)},create:{key:avatarPlanKey(owner,plan),value_json:JSON.stringify(plan),updated_by:owner},update:{}});
-    return { plan:await readAvatar<AvatarPlan>(owner,'plan',plan.id) };
+    return { plan:publicAvatarPlan(await readAvatar<AvatarPlan>(owner,'plan',plan.id)) };
   }
   if (body.action === 'save' && body.record?.kind === 'config') body.record.rules = parseAvatarRules(body.record.rules);
   if (body.action === 'save' && body.record?.kind === 'character') {

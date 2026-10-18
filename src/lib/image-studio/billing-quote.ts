@@ -4,7 +4,7 @@ import { IMAGE_BILLING_VERSION, IMAGE_POINTS_PER_USD,
 import type { ImageSupplierCharge } from './billing-provider';
 
 export function imageSpecification(input: { model: string; quality: string; outputSize?: string | null;
-  aspectRatio: string; referenceCount: number; inputCharacters: number; inputDigest?: string }) {
+  aspectRatio: string; referenceCount: number; inputCharacters: number; inputDigest?: string; outputPlanHash?: string }) {
   return createHash('sha256').update(JSON.stringify(input)).digest('hex');
 }
 

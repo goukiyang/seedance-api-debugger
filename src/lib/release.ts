@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '手机添加素材窗口更紧凑，筛选和已选素材可展开查看，上传与添加操作保持可见；素材和图片结果每页按屏幕显示12至24张，减少反复翻页。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '新图片任务按所选分辨率计算提交尺寸，生成前可查看预计尺寸，结果可核对所选、提交和返回规格；改善图片服务的响应读取与原请求核对，已有原图和费用记录保留。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

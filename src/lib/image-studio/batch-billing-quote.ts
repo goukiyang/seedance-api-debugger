@@ -5,7 +5,8 @@ import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-ge
 import { imageBillingScope } from './billing-scope';
 import { resolveImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation';
 import { prepareImageBillingQuote } from './billing-quote-service';
-import { imageQuoteKey, type StoredImageQuote } from './billing-quote-store';
+import { assertImageQuoteOutputPlan, imageQuoteKey, type StoredImageQuote } from './billing-quote-store';
+import { publicImageOutputPlan, type ImageOutputPlan, type ImageRatioContractVersion } from '@/lib/image-generation/output-plan';
 import { parseStudioRequest, safeImageChannelSnapshot, parseSharedStudioIntent, sameSharedStudioIntent, resolveOwnedStudioTaskSharedUse, studioSharedGenerationSource, studioBusinessErrorStatus, StudioError } from './tasks';
 import type { SharedStudioIntent } from './shared-types';
 import { STUDIO_BATCH_LIMITS } from './batch-contract';
@@ -62,6 +63,9 @@ export function batchQuoteFingerprint(body: Record<string, unknown>, resolvedCha
 }
 
 type StoredBatchQuote = {
+  ratioContractVersion?: ImageRatioContractVersion;
+  outputPlans?: ImageOutputPlan[];
+  outputPlanHashes?: string[];
   owner: string;
   fingerprint: string;
   intentRevision: number;
@@ -73,12 +77,13 @@ type StoredBatchQuote = {
   sharedLive?: SharedStudioIntent;
 };
 
-export async function quoteStudioBatch(owner: string, body: Record<string, unknown>) {
+export async function quoteStudioBatch(owner: string, body: Record<string, unknown>, ratioContractVersion: ImageRatioContractVersion = 3) {
   const sources = body.sources;
   if (typeof body.moduleId !== 'string' || !Array.isArray(sources) || !sources.length || sources.length > STUDIO_BATCH_LIMITS.images) throw new StudioError('本批素材数量或模板无效');
   const input = parseStudioRequest({ ...body, count: 1, maxEstimatedCost: undefined });
   const batchId = createHash('sha256').update(`${owner}:${input.requestId}`).digest('hex');
   const contracts: Array<ImageBillingContract | null> = [];
+  const outputPlans: ImageOutputPlan[] = [], outputPlanHashes: string[] = [];
   const policy = input.draft?.referencePolicy;
   let total = 0, fixedUnit: number | null = null, intentRevision: number | null = null;
   const suppliedImageChannel = canonicalImageChannel({ ...body, channelId: undefined });
@@ -107,7 +112,7 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
         ...(imageChannel ? { ...(typeof body.channelId === 'string' ? { channelId: body.channelId }
           : imageChannel.channelId === 'original' ? {} : { channelId: imageChannel.channelId }), imageChannel } : {}),
         requestId: `${batchId.slice(0, 48)}-${index + 1}`, count: 1,
-        referenceIds, ...(source.assetId && input.draft && policy ? { draft: { ...input.draft, referencePolicy: { ...policy, primaryIds: [source.assetId] } } } : {}) }, undefined, undefined, undefined, 256);
+        referenceIds, ...(source.assetId && input.draft && policy ? { draft: { ...input.draft, referencePolicy: { ...policy, primaryIds: [source.assetId] } } } : {}) }, undefined, undefined, undefined, 256, { ratioContractVersion });
       if (quote.imageChannel) {
         if (imageChannel && !sameImageChannel(imageChannel, quote.imageChannel)) {
           throw new StudioError('整批准备期间图片通道修订发生变化，未报价', 409);
@@ -132,7 +137,12 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
       if (!quote.billingQuoteId) { contracts.push(null); continue; }
       const row = await prisma.platformSetting.findUniqueOrThrow({ where: { key: imageQuoteKey(owner, quote.billingQuoteId) } });
       const stored = JSON.parse(row.value_json) as StoredImageQuote & { imageChannel?: ImageGenerationChannelSnapshot };
-      if (stored.owner !== owner || !stored.contract || stored.contract.mode !== 'actual'
+      if (ratioContractVersion === 3) {
+        assertImageQuoteOutputPlan(stored, stored);
+        if (stored.outputPlans?.length !== 1 || stored.outputPlanHashes?.length !== 1) throw new StudioError('条目缺少完整图片规格，未报价', 409);
+        outputPlans.push(stored.outputPlans[0]); outputPlanHashes.push(stored.outputPlanHashes[0]);
+      }
+      if (stored.owner !== owner || !stored.contract
         || !sameSharedStudioIntent(sharedLive, parseSharedStudioIntent(stored.sharedLive))
         || imageChannel && !sameImageChannel(stored.imageChannel, imageChannel)) {
         throw new StudioError('单项报价与整批图片通道不匹配，未报价', 409);
@@ -163,11 +173,11 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
   if (contracts.some(contract => !contract)) throw new StudioError('批量准备期间计费状态发生变化，请重新报价', 409);
   const exactContracts = contracts as ImageBillingContract[];
   const first = exactContracts[0];
-  if (!first || exactContracts.some(contract => contract.scope !== first.scope || contract.model !== first.model)) {
+  if (!first || exactContracts.some(contract => contract.scope !== first.scope || contract.model !== first.model || contract.mode !== first.mode)) {
     throw new StudioError('整批条目不是同一私有账单范围和型号，未报价', 409);
   }
   const finalReadiness = await imageBillingReady(first.scope, first.model);
-  if (!finalReadiness.ready || finalReadiness.intentRevision !== intentRevision) {
+  if (first.mode === 'actual' && (!finalReadiness.ready || finalReadiness.intentRevision !== intentRevision)) {
     throw new StudioError('整批准备期间实际计费设置发生变化，未报价', 409);
   }
   if (imageChannel) {
@@ -182,20 +192,25 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
     created_at: { lt: new Date(Date.now() - 120000) } } });
   const storedQuote: StoredBatchQuote = { owner, fingerprint: batchQuoteFingerprint(body, imageChannel),
     intentRevision: intentRevision ?? 0, contracts: exactContracts, expiresAt, total,
+    ratioContractVersion, ...(ratioContractVersion === 3 ? { outputPlans, outputPlanHashes } : {}),
     unitCredits: Math.max(...exactContracts.map(contract => contract.authorizedCredits)), ...sharedResult, ...(imageChannel ? { imageChannel } : {}) };
   await prisma.platformSetting.create({ data: { key: key(owner, id), updated_by: owner,
     value_json: JSON.stringify(storedQuote) } });
-  return { ...sharedResult, billingMode: 'actual' as const, batchQuoteId: id, unitCredits: storedQuote.unitCredits,
+  return { ...sharedResult, billingMode: first.mode, batchQuoteId: id, unitCredits: storedQuote.unitCredits,
+    ratioContractVersion, outputPlans: outputPlans.map((plan, index) => ({ ordinal: index + 1, outputPlan: publicImageOutputPlan(plan) })),
     estimatedCredits: total, expiresAt, ...(publicChannel ? { imageChannel: publicChannel } : {}) };
 }
 
-export async function consumeBatchQuote(tx: Prisma.TransactionClient, owner: string, body: Record<string, unknown>) {
+export async function consumeBatchQuote(tx: Prisma.TransactionClient, owner: string, body: Record<string, unknown>, ratioContractVersion: ImageRatioContractVersion = 3) {
   if (typeof body.batchQuoteId !== 'string' || !/^[a-f0-9-]{36}$/.test(body.batchQuoteId)) throw new StudioError('整批报价编号无效');
   const row = await tx.platformSetting.findUnique({ where: { key: key(owner, body.batchQuoteId) } });
   if (!row) throw new StudioError('整批报价已过期或不可用', 409);
   let stored: StoredBatchQuote;
   try { stored = JSON.parse(row.value_json) as StoredBatchQuote; }
   catch { throw new StudioError('整批报价记录无效，未派发生成', 409); }
+  try { assertImageQuoteOutputPlan(stored, { ratioContractVersion,
+    ...(ratioContractVersion === 3 ? { outputPlans: stored.outputPlans, outputPlanHashes: stored.outputPlanHashes } : {}) }); }
+  catch { throw new StudioError('图片规格已更新，请重新获取整批实际尺寸与报价；原批次和输入保留', 409); }
   const storedChannel = stored.imageChannel ? safeImageChannelSnapshot(stored.imageChannel) || undefined : undefined;
   const input = parseStudioRequest({ ...body, count: 1, maxEstimatedCost: undefined });
   const workspace = typeof body.moduleId === 'string'
@@ -227,12 +242,13 @@ export async function consumeBatchQuote(tx: Prisma.TransactionClient, owner: str
   }
   const contracts = stored.contracts.map(contract => parseImageBillingContract(JSON.stringify(contract)));
   for (const contract of contracts) {
-    if (!contract || contract.mode !== 'actual') throw new StudioError('本批合同无效', 409);
+    if (!contract) throw new StudioError('本批合同无效', 409);
     const ready = await imageBillingReady(contract.scope, contract.model, tx);
-    if (!ready.ready || ready.intentRevision !== stored.intentRevision) throw new StudioError('实扣设置已变化，请重新报价', 409);
+    if (contract.mode === 'actual' && (!ready.ready || ready.intentRevision !== stored.intentRevision)) throw new StudioError('实扣设置已变化，请重新报价', 409);
   }
   if ((await tx.platformSetting.deleteMany({ where: { id: row.id, value_json: row.value_json } })).count !== 1) throw new StudioError('整批报价已被使用', 409);
   return { contracts: contracts as ImageBillingContract[], total: stored.total, unitCredits: stored.unitCredits,
+    ratioContractVersion, outputPlans: stored.outputPlans, outputPlanHashes: stored.outputPlanHashes,
     ...(sharedUse ? { sharedLive: sharedUse.definition.intent } : {}),
     ...(storedChannel ? { imageChannel: storedChannel } : {}) };
 }

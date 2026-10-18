@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
+import { resolveImageOutputPlan, type ImageRatioContractVersion, type ImageOutputPlan } from '@/lib/image-generation/output-plan';
 import { imageOutputSize, normalizeImageResolution, assertImageResolutionSupported, isGeminiImageModel, isValidImageDimension, supportsStudioFourToOne } from '@/lib/image-generation/resolution';
 import {
   IMAGE_STUDIO_MODELS,
@@ -401,7 +402,7 @@ export function imageGenerationSupportsStudioFourToOne(settings: ImageGeneration
 }
 
 /** Convert the existing local resolution/ratio to the explicitly chosen adapter. */
-export function imageGenerationModelOutputSize(settings: ImageGenerationApiSettings, model: string, resolution: unknown, ratio: string) {
+export function imageGenerationModelOutputSize(settings: ImageGenerationApiSettings, model: string, resolution: unknown, ratio: string, ratioContractVersion: ImageRatioContractVersion = 3) {
   const resolved = settings as ImageGenerationResolvedSettings;
   const protocol = resolved.managedChannel || resolved.explicitModelApi ? resolved.modelCapabilities[model as ImageStudioModel]?.protocol : undefined;
   if (protocol === 'gemini_native') {
@@ -410,12 +411,28 @@ export function imageGenerationModelOutputSize(settings: ImageGenerationApiSetti
     return normalized;
   }
   const size = imageOutputSize(model, resolution, ratio, protocol === 'openai_images' ? 'ai_media_vip' : settings.provider,
-    imageGenerationSupportsStudioFourToOne(settings, model));
+    imageGenerationSupportsStudioFourToOne(settings, model), ratioContractVersion);
   const pixelProtocol = protocol === 'openai_images' || !isGeminiImageModel(model) || settings.provider === 'ai_media_vip';
   if (pixelProtocol && !isValidImageDimension(size, true)) {
     throw new ImageGenerationChannelError('所选比例与分辨率无法在安全像素范围内表达，请调整分辨率；尚未向供应商提交', 400, 'image_generation_invalid_dimensions');
   }
   return size;
+}
+
+export function imageGenerationModelOutputPlan(settings: ImageGenerationApiSettings, model: string, resolution: unknown, ratio: string,
+  options: { requestedRatio?: string; aspectRatioSource?: import('@/lib/image-studio/ratios').StudioAspectRatioSource;
+    ratioContractVersion?: ImageRatioContractVersion; explicitSize?: string } = {}) {
+  const resolved = settings as ImageGenerationResolvedSettings;
+  const protocol = resolved.managedChannel || resolved.explicitModelApi ? resolved.modelCapabilities?.[model as ImageStudioModel]?.protocol : undefined;
+  const native = protocol === 'gemini_native' || protocol !== 'openai_images' && isGeminiImageModel(model) && settings.provider !== 'ai_media_vip';
+  const normalized = normalizeImageResolution(model, resolution, settings.provider);
+  assertImageResolutionSupported(model, normalized);
+  const plan = resolveImageOutputPlan({ model, resolution: normalized, ratio, ...options, native,
+    allowFourToOne: imageGenerationSupportsStudioFourToOne(settings, model) });
+  if (!native && !isValidImageDimension(plan.outputSize, true)) {
+    throw new ImageGenerationChannelError('所选比例与分辨率无法在安全像素范围内表达，请明确调整选择；尚未向供应商提交', 400, 'image_generation_invalid_dimensions');
+  }
+  return plan;
 }
 
 /** New requests resolve the model's default route explicitly; historical callers keep using original semantics. */
@@ -2812,6 +2829,8 @@ export async function createImageGeneration(params: {
   count?: number;
   referenceImages?: string[];
   quality?: string;
+  outputPlan?: ImageOutputPlan;
+  ratioContractVersion?: ImageRatioContractVersion;
 }): Promise<ImageGenerationResult> {
   if ((params.settings as ImageGenerationResolvedSettings).modelCapabilities) {
     params = { ...params, settings: resolveImageGenerationModelSettings(params.settings as ImageGenerationResolvedSettings, params.settings.default_model) };
@@ -2878,8 +2897,9 @@ export async function createImageGeneration(params: {
         images,
         ratio: params.ratio,
         size: params.size,
+        ...(params.outputPlan ? { outputPlan: params.outputPlan, ratioContractVersion: params.ratioContractVersion ?? 3 } : {}),
         allowFourToOne: imageGenerationSupportsStudioFourToOne(params.settings, params.settings.default_model, params.settings.default_model !== 'gemini-nano-banana-2.1'),
-        ...(params.settings.default_model === 'gemini-nano-banana-2.1' ? { ratioContractVersion: 2 as const } : {}),
+        ...(!params.outputPlan && params.settings.default_model === 'gemini-nano-banana-2.1' ? { ratioContractVersion: 2 as const } : {}),
         signal: controller.signal,
       };
       // Gemini generateContent produces one image per call; count is not an API parameter.

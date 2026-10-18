@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
-import { createToolFlowQuoteProof, getToolFlowQuote, toolFlowQuoteCookieName } from '@/lib/tools/toolflow-runtime';
+import { createToolFlowQuoteProof, getToolFlowQuote, toolFlowQuoteCookieName, parseToolFlowQuoteInputAssets } from '@/lib/tools/toolflow-runtime';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -11,7 +11,15 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
     assertInternalOnly(user, '外部账号无权读取工具流报价。');
-    const quote = await getToolFlowQuote(user, params.id);
+    const rawInput = _request.nextUrl.searchParams.get('inputAssetIds');
+    let inputAssetIds: string[] | undefined;
+    if (rawInput !== null) {
+      if (rawInput.length > 4000) throw new AuthError('工具流输入图片清单过长', 400);
+      let parsed: unknown;
+      try { parsed = JSON.parse(rawInput); } catch { throw new AuthError('工具流输入图片清单无效', 400); }
+      inputAssetIds = parseToolFlowQuoteInputAssets(parsed);
+    }
+    const quote = await getToolFlowQuote(user, params.id, inputAssetIds);
     const response = NextResponse.json(quote, {
       headers: { 'Cache-Control': 'no-store' },
     });

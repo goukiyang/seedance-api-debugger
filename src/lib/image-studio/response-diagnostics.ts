@@ -30,7 +30,22 @@ export type StudioResponseDiagnostics = {
   structures: Structure[];
   limits: typeof STUDIO_RESPONSE_DIAGNOSTIC_LIMITS;
   truncated: boolean;
+  safeError?: StudioSafeError;
 };
+export type StudioSafeError = { code?: string | number; class?: string; stage?: string; retryable?: boolean };
+const SAFE_ERROR_CODES = ['INVALID_ARGUMENT', 'RESOURCE_EXHAUSTED', 'UNAVAILABLE', 'INTERNAL', 'PERMISSION_DENIED',
+  'UNAUTHENTICATED', 'NOT_FOUND', 'DEADLINE_EXCEEDED', 'rate_limit_exceeded', 'invalid_request_error', 'server_error',
+  'content_policy_violation', 'insufficient_quota', 'model_not_found', 'timeout'];
+/** Deliberately excludes message, URLs and arbitrary provider fields. */
+export function sanitizeStudioSafeError(value: unknown): StudioSafeError | undefined {
+  const output: StudioSafeError = {};
+  const code = field(value, 'code'), errorClass = field(value, 'class'), stage = field(value, 'stage'), retryable = field(value, 'retryable');
+  if (typeof code === 'string' && SAFE_ERROR_CODES.includes(code) || typeof code === 'number' && Number.isSafeInteger(code) && code >= 100 && code <= 599) output.code = code;
+  if (typeof errorClass === 'string' && ['invalid_request', 'rate_limit', 'authentication', 'permission', 'provider', 'transport', 'timeout', 'unknown'].includes(errorClass)) output.class = errorClass;
+  if (typeof stage === 'string' && ['request', 'response', 'summary', 'result', 'download', 'prepare', 'normalize', 'save', 'settle'].includes(stage)) output.stage = stage;
+  if (typeof retryable === 'boolean') output.retryable = retryable;
+  return Object.keys(output).length ? output : undefined;
+}
 
 export type StudioResponseOutputCandidate = {
   kind: 'inline_data' | 'b64_json' | 'url';
@@ -153,11 +168,13 @@ function objectFieldSignals(value: unknown): Pick<Structure, 'fieldCount' | 'fie
 }
 
 /** A bounded structural projection. Arbitrary keys, strings and response bytes never enter the result. */
-export function buildStudioResponseDiagnostics(value: unknown, observation: StudioResponseObservation): StudioResponseDiagnostics {
+export function buildStudioResponseDiagnostics(value: unknown, observation: StudioResponseObservation, includeSafeError = false): StudioResponseDiagnostics {
   const result: StudioResponseDiagnostics = {
     schemaVersion: 1, observation: projectObservation(observation),
     rootType: kind(value), structures: [], limits: STUDIO_RESPONSE_DIAGNOSTIC_LIMITS, truncated: false,
   };
+  const safeError = includeSafeError ? sanitizeStudioSafeError(field(value, 'safe_error') ?? field(value, 'error')) : undefined;
+  if (safeError) result.safeError = safeError;
   const seen = new WeakSet<object>();
   let outputBytes = JSON.stringify(result).length;
   function visit(item: unknown, location: Location, wrapperPath: StudioResponseWrapper[], depth: number, ordinal: number) {
@@ -216,6 +233,8 @@ export function sanitizeStudioResponseDiagnostics(value: unknown): StudioRespons
     rootType: JSON_KINDS.includes(rawRootType as JsonKind) ? rawRootType as JsonKind : 'unsupported',
     structures: [], limits: STUDIO_RESPONSE_DIAGNOSTIC_LIMITS, truncated: field(value, 'truncated') === true,
   };
+  const safeError = sanitizeStudioSafeError(field(value, 'safeError'));
+  if (safeError) result.safeError = safeError;
   const structures = field(value, 'structures');
   if (!Array.isArray(structures)) { result.truncated = true; return result; }
   if (structures.length > STUDIO_RESPONSE_DIAGNOSTIC_LIMITS.nodes) result.truncated = true;

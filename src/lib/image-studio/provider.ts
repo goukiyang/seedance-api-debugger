@@ -8,11 +8,49 @@ import { isPrivateNetworkHost } from '@/lib/media/public-url';
 import { lookup } from 'node:dns/promises';
 import type { LookupAddress } from 'node:dns';
 import https from 'node:https';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
+import { createGunzip, createInflate, createBrotliDecompress } from 'node:zlib';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
 import { buildStudioResponseDiagnostics, collectStudioResponseOutputCandidates, type StudioResponseDiagnostics,
   type StudioResponseOutputCandidate, type StudioResponseObservation } from './response-diagnostics';
+import { parseStudioProviderWait, studioProviderWaitBlocked, type StudioProviderWait } from './provider-wait';
+import type { ImageOutputPlan } from '@/lib/image-generation/output-plan';
+export { parseStudioProviderWait, studioProviderNextCheckAt } from './provider-wait';
+
+/** Streaming decoding with independent wire/decoded budgets; no redirects, retries or credential changes. */
+export function decodeStudioProviderResponse(response: Response, signal: AbortSignal,
+  limits: { compressedBytes?: number; decodedBytes?: number; timeoutMs?: number } = {}) {
+  const encoding = (response.headers.get('content-encoding') || 'identity').trim().toLowerCase();
+  if (!response.body || encoding === 'identity' || !encoding) return response;
+  const factory = encoding === 'gzip' || encoding === 'x-gzip' ? createGunzip : encoding === 'deflate' ? createInflate
+    : encoding === 'br' ? createBrotliDecompress : null;
+  if (!factory) { void response.body.cancel().catch(() => {}); throw new StudioProviderError('response', 'response_encoding_unsupported', response.status); }
+  const maximum = 8 * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024;
+  const wireLimit = limits.compressedBytes ?? maximum, decodedLimit = limits.decodedBytes ?? maximum;
+  const length = response.headers.get('content-length');
+  if (length !== null && (!/^\d+$/.test(length) || !Number.isSafeInteger(Number(length)) || Number(length) > wireLimit)) {
+    void response.body.cancel().catch(() => {}); throw new StudioProviderError('response', 'response_compressed_size_limit', response.status);
+  }
+  const input = Readable.fromWeb(response.body as import('node:stream/web').ReadableStream<Uint8Array>);
+  const decoder = factory(); let compressed = 0, decoded = 0;
+  const wire = new Transform({ transform(chunk, _encoding, callback) {
+    compressed += chunk.length; callback(compressed > wireLimit ? new Error('response_compressed_size_limit') : null, chunk);
+  }, flush(callback) { callback(length !== null && compressed !== Number(length) ? new Error('response_compressed_length_mismatch') : undefined); } });
+  const output = new Transform({ transform(chunk, _encoding, callback) {
+    decoded += chunk.length; callback(decoded > decodedLimit ? new Error('response_decoded_size_limit') : null, chunk);
+  } });
+  const fail = (error: Error) => { input.destroy(error); wire.destroy(error); decoder.destroy(error); output.destroy(error); };
+  const abort = () => fail(new Error('response_decode_aborted'));
+  const timer = setTimeout(() => fail(new Error('response_decode_timeout')), limits.timeoutMs ?? 300000);
+  signal.addEventListener('abort', abort, { once: true });
+  for (const stream of [input, wire, decoder]) stream.once('error', fail);
+  output.once('close', () => { clearTimeout(timer); signal.removeEventListener('abort', abort); input.destroy(); decoder.destroy(); });
+  input.pipe(wire).pipe(decoder).pipe(output);
+  if (signal.aborted) abort();
+  const headers = new Headers(response.headers); headers.delete('content-encoding'); headers.delete('content-length');
+  return new Response(Readable.toWeb(output) as ReadableStream<Uint8Array>, { status: response.status, statusText: response.statusText, headers });
+}
 
 function unsafeAddress(value: string) {
   return isPrivateNetworkHost(value) || /^(0\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|1(9[28])\.0\.0\.|198\.(18|19)\.|2(2[4-9]|[3-5]\d)\.)/.test(value);
@@ -53,7 +91,9 @@ async function fetchPinnedApi(url: URL, init: RequestInit): Promise<Response> {
       }
       const status = response.statusCode || 502;
       if ([204, 205, 304].includes(status)) { response.resume(); resolve(new Response(null, { status, headers })); }
-      else resolve(new Response(Readable.toWeb(response) as ReadableStream<Uint8Array>, { status, headers }));
+      else {
+        resolve(new Response(Readable.toWeb(response) as ReadableStream<Uint8Array>, { status, headers }));
+      }
     });
     upstream.once('error', reject);
     upstream.end(bytes);
@@ -114,6 +154,7 @@ export type StudioPollDiagnostics = {
   lastAttemptPhase: Exclude<StudioPollPhase, 'waiting'> | null;
   getTransportCalls: number; lastHttpStatus: number | null; lastProviderStatus: StudioPollStatus | null;
   summaryNotFound?: true;
+  providerNotBefore?: number; providerWaitSource?: StudioProviderWait['providerWaitSource'];
   lastErrorCategory: 'http_non_success' | 'invalid_or_oversize_response' | 'empty_response'
     | 'transport_or_abort' | 'provider_terminal' | 'identity_conflict' | null;
 };
@@ -127,6 +168,8 @@ export class StudioProviderError extends Error {
   }
 }
 
+export type StudioAsyncAccepted = StudioProviderWait & { taskId: string; pollAfterMs?: number; expiresAt?: string; resultReady?: true };
+
 // Keep GPT image requests isolated from the existing Gemini/Seedream adapters.
 export async function requestStudioImages(params: {
   baseUrl: string; apiKey: string; model: string; prompt: string;
@@ -134,19 +177,28 @@ export async function requestStudioImages(params: {
   provider?: 'musk' | 'ai_media_vip';
   protocol?: ImageGenerationChannelProtocol;
   idempotencyKey?: string;
-  resumeAsync?: { taskId: string; pollAfterMs?: number; expiresAt?: string };
+  resumeAsync?: StudioAsyncAccepted;
   asyncQueryMode?: 'single';
-  onAsyncAccepted?: (receipt: { taskId: string; pollAfterMs?: number; expiresAt?: string }) => Promise<void>;
+  onAsyncAccepted?: (receipt: StudioAsyncAccepted, response?: Response) => Promise<void>;
+  onAsyncProgress?: (receipt: StudioAsyncAccepted) => Promise<void>;
   quality?: string;
   count: number; images: StudioImageInput[]; signal: AbortSignal; ratio?: string;
   downloadSignal?: AbortSignal;
   deliverRemoteImage?: (url: string, usage: unknown) => Promise<Buffer>;
   persistBase64Image?: (value: string, usage: unknown) => Promise<void>;
+  checkpointRemoteImage?: (url: string, usage: unknown) => Promise<void>;
   recordResponse?: (response: Response) => Promise<void>;
   recordResponseEvidence?: StudioResponseEvidenceRecorder;
+  recordResponseDiagnostics?: (diagnostic: StudioResponseDiagnostics) => Promise<void>;
   size?: string;
   allowFourToOne?: boolean;
-  ratioContractVersion?: 2;
+  ratioContractVersion?: 2 | 3;
+  outputPlan?: Pick<ImageOutputPlan, 'version' | 'wireMode' | 'outputSize' | 'resolvedRatio'>;
+  now?: () => number;
+  wait?: (ms: number, signal: AbortSignal) => Promise<void>;
+  automaticQueryDeadlineAt?: number;
+  manualAsyncQuery?: boolean;
+  singleTaskGet?: boolean;
 }, fetcher: typeof fetch = fetch, readImage: typeof readStudioImage = readStudioImage): Promise<{ images: string[]; usage: unknown }> {
   if (params.asyncQueryMode === 'single' && !params.resumeAsync) throw new StudioProviderError('request', 'async_original_identity_required');
   if (!IMAGE_STUDIO_MODELS.includes(params.model as typeof IMAGE_STUDIO_MODELS[number])) throw new Error('不支持的图片模型');
@@ -158,14 +210,20 @@ export async function requestStudioImages(params: {
   if (params.upstreamModel !== undefined && !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,199}$/.test(params.upstreamModel)) throw new Error('供应商型号名称无效');
   if (!Number.isInteger(params.count) || params.count < 1 || params.count > 8) throw new Error('生成张数必须为 1 到 8');
   if (params.images.length > MAX_REFERENCE_IMAGES) throw new Error(`最多使用 ${MAX_REFERENCE_IMAGES} 张参考图`);
-  const standardRatioContract = params.ratioContractVersion === 2;
+  const standardRatioContract = params.ratioContractVersion === 2 || params.ratioContractVersion === 3;
+  if (params.ratioContractVersion === 3 && (!params.outputPlan || params.outputPlan.version !== 1
+    || params.outputPlan.outputSize !== params.size || params.outputPlan.resolvedRatio !== params.ratio)) throw new StudioProviderError('request', 'frozen_output_plan_mismatch');
   const requestRatio = standardRatioContract && params.ratio ? normalizeStudioRatio(params.ratio) : params.ratio;
   const allowFourToOne = standardRatioContract || params.allowFourToOne === true && params.protocol === 'openai_images';
-  const sendRatio = Boolean(requestRatio && (standardRatioContract || allowFourToOne && requestRatio === '4:1'));
+  const sendRatio = params.ratioContractVersion === 3 && params.outputPlan?.wireMode === 'size-only' ? false
+    : Boolean(requestRatio && (standardRatioContract || allowFourToOne && requestRatio === '4:1'));
   if (params.size && params.protocol !== 'gemini_native' && (params.protocol === 'openai_images' || !isGeminiImageModel(params.model) || params.provider === 'ai_media_vip') && !isValidImageDimension(params.size, allowFourToOne)) {
     throw new Error('生成尺寸无效');
   }
   const transport: typeof fetch = params.protocol && fetcher === fetch ? fetchPinnedApi as typeof fetch : fetcher;
+  // Node's built-in fetch already decompresses; our pinned https transport and injected raw fixtures do not.
+  const decodeResponse = (response: Response, signal: AbortSignal, limits?: Parameters<typeof decodeStudioProviderResponse>[2]) =>
+    transport === fetch ? response : decodeStudioProviderResponse(response, signal, limits);
   if (params.protocol === 'gemini_native' || !params.protocol && params.provider !== 'ai_media_vip' && GEMINI_IMAGE_MODELS.has(params.model)) {
     if (params.resumeAsync) throw new StudioProviderError('request', 'gemini_async_not_supported');
     return requestGeminiStudioImages(standardRatioContract ? { ...params, ratio: requestRatio === 'auto' ? undefined : requestRatio } : params, transport, readImage);
@@ -200,20 +258,43 @@ export async function requestStudioImages(params: {
   let value: any;
   let response: Response | undefined;
   let asyncTask = params.resumeAsync;
+  const now = params.now || Date.now;
+  const wait = params.wait || ((ms: number, signal: AbortSignal) => delay(ms, undefined, { signal }));
   if (!asyncTask) {
     try { response = await transport(url, { method: 'POST', headers, body, signal: params.signal, redirect: params.protocol ? 'error' : 'follow' }); }
     catch { throw new StudioProviderError('request', params.signal.aborted ? 'timeout' : 'network'); }
-    await params.recordResponse?.(response);
-    if (!response.ok) { await response.body?.cancel().catch(() => {}); throw new StudioProviderError('request', 'http_error', response.status); }
-    value = await boundedJson(response, params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024);
+    let coreError: unknown;
+    try { await params.recordResponse?.(response); } catch (error) { coreError = error; }
+    // Even a core write failure cannot discard an otherwise readable 202 identity.
+    try { value = await boundedJson(decodeResponse(response, params.signal), params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024,
+      params.recordResponseDiagnostics ? async (body, observation) => {
+        try { await params.recordResponseDiagnostics!(buildStudioResponseDiagnostics(body, observation, params.ratioContractVersion === 3)); }
+        catch { console.error('[image-response-evidence]', JSON.stringify({ code: 'diagnostic_unavailable' })); }
+      } : undefined); }
+    catch (error) { if (coreError) throw coreError; throw error; }
+    if (!response.ok) { if (coreError) throw coreError; throw new StudioProviderError('request', 'http_error', response.status); }
     if (response.status === 202) {
       const taskId = value.task_id || value.id;
       if (typeof taskId !== 'string' || !/^[a-zA-Z0-9_-]{1,180}$/.test(taskId)) throw new StudioProviderError('response', 'async_receipt_invalid', 202);
       if (!params.onAsyncAccepted) throw new StudioProviderError('response', 'async_receipt_storage_required', 202);
-      asyncTask = { taskId, pollAfterMs: boundedPollDelay(value.poll_after_ms),
+      asyncTask = { taskId, pollAfterMs: boundedPollDelay(value.poll_after_ms), ...parseStudioProviderWait(response.headers, value, now()),
         ...(typeof value.expires_at === 'string' && Number.isFinite(Date.parse(value.expires_at)) ? { expiresAt: value.expires_at } : {}) };
       // Save the exact task identity before any query or outcome interpretation.
-      await params.onAsyncAccepted(asyncTask);
+      try { await params.onAsyncAccepted(asyncTask, response); }
+      catch (error) { if (error instanceof Error) Object.assign(error, { providerNotBefore: asyncTask.providerNotBefore }); throw error; }
+      if (params.ratioContractVersion === 3) coreError = undefined; // The combined acceptance writer repaired the same headers and identity.
+    }
+    if (coreError) {
+      // Keep a complete synchronous result locally, but do not download/publish it before core repair.
+      const usage = safeUsage(value?.usage);
+      if (Array.isArray(value?.data) && value.data.length === 1) {
+        try {
+          const item = value.data[0];
+          if (typeof item?.b64_json === 'string') await params.persistBase64Image?.(item.b64_json, usage);
+          else if (typeof item?.url === 'string') await params.checkpointRemoteImage?.(item.url, usage);
+        } catch { console.error('[image-core-receipt]', JSON.stringify({ code: 'local_output_checkpoint_pending' })); }
+      }
+      throw coreError;
     }
   }
   if (asyncTask) {
@@ -223,6 +304,7 @@ export async function requestStudioImages(params: {
     const queryDeadline = AbortSignal.timeout(single ? 10000 : 60000);
     const querySignal = AbortSignal.any([params.signal, queryDeadline]);
     let pollDelay = boundedPollDelay(asyncTask.pollAfterMs);
+    let providerNotBefore = asyncTask.providerNotBefore || 0;
     let lastObservation: 'pending' | 'interrupted' | 'unconfirmed' = 'interrupted';
     let readingQuery = false;
     // These are application polling phases, not DNS/TCP/TLS timing. Only values
@@ -230,21 +312,54 @@ export async function requestStudioImages(params: {
     const poll: StudioPollDiagnostics = { scope: 'original_task_poll_window', phaseAtStop: 'waiting', lastAttemptPhase: null,
       getTransportCalls: 0, lastHttpStatus: null, lastProviderStatus: null, lastErrorCategory: null };
     const phase = (value: StudioPollPhase) => { poll.phaseAtStop = value; if (value !== 'waiting') poll.lastAttemptPhase = value; };
+    const observeWait = async (response: Response, body?: unknown) => {
+      const observed = parseStudioProviderWait(response.headers, body, now());
+      if ((observed.providerNotBefore || 0) > providerNotBefore || observed.providerWaitSource === 'invalid-conservative') {
+        providerNotBefore = Math.max(providerNotBefore, observed.providerNotBefore || 0);
+        Object.assign(asyncTask!, { ...observed, providerNotBefore }); Object.assign(poll, { ...observed, providerNotBefore });
+        try { await params.onAsyncProgress?.({ ...asyncTask! }); }
+        catch (error) { if (error instanceof Error) Object.assign(error, { providerNotBefore }); throw error; }
+      }
+    };
+    const windowEnds = now() + (single ? 10000 : 60000);
+    const automaticDeadline = params.automaticQueryDeadlineAt || (params.ratioContractVersion === 3 ? now() + 24 * 60 * 60_000 : undefined);
     for (;;) {
       try {
         phase('waiting');
-        if (!single) await delay(pollDelay, undefined, { signal: querySignal });
+        if (!params.manualAsyncQuery && automaticDeadline !== undefined && now() >= automaticDeadline) {
+          throw new StudioProviderError('response', 'async_auto_check_paused', undefined, undefined, true, { ...poll });
+        }
+        if (asyncTask.providerWaitSource === 'invalid-conservative') throw new StudioProviderError('response', 'async_provider_wait', undefined, undefined, true, { ...poll, providerNotBefore, providerWaitSource: asyncTask.providerWaitSource });
+        const remainingWait = Math.max(single ? 0 : pollDelay, providerNotBefore - now());
+        if (remainingWait > 0) {
+          if (single || now() + remainingWait >= windowEnds) throw new StudioProviderError('response', 'async_provider_wait', undefined, undefined, true, { ...poll, providerNotBefore, providerWaitSource: asyncTask.providerWaitSource });
+          await wait(remainingWait, querySignal);
+        }
         querySignal.throwIfAborted();
+        if (!params.manualAsyncQuery && automaticDeadline !== undefined && now() >= automaticDeadline) throw new StudioProviderError('response', 'async_auto_check_paused', undefined, undefined, true, { ...poll });
         readingQuery = true;
+        if (asyncTask.resultReady) {
+          const resultUrl = new URL(pollUrl); resultUrl.search = '';
+          phase('result_request'); poll.getTransportCalls++; poll.lastErrorCategory = null;
+          const result = await transport(resultUrl, { method: 'GET', headers: { Authorization: `Bearer ${params.apiKey}` }, signal: querySignal, redirect: 'error' });
+          poll.lastHttpStatus = result.status; await observeWait(result);
+          if (!result.ok) { poll.lastErrorCategory = 'http_non_success'; await result.body?.cancel().catch(() => {}); throw new StudioProviderError('response', 'async_query_interrupted', result.status, undefined, true); }
+          phase('result_body'); value = await boundedJson(decodeResponse(result, querySignal), params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024);
+          break;
+        }
         phase('summary_request'); poll.getTransportCalls++; poll.lastErrorCategory = null;
         const polled = await transport(pollUrl, { method: 'GET', headers: { Authorization: `Bearer ${params.apiKey}` }, signal: querySignal, redirect: 'error' });
         poll.lastHttpStatus = polled.status;
+        await observeWait(polled);
         if (polled.status === 404) poll.summaryNotFound = true; else delete poll.summaryNotFound;
-        if (!polled.ok) { poll.lastErrorCategory = 'http_non_success'; lastObservation = 'interrupted'; readingQuery = false; await polled.body?.cancel().catch(() => {});
+        if (!polled.ok) { poll.lastErrorCategory = 'http_non_success'; lastObservation = 'interrupted'; readingQuery = false;
+          // Headers survive HTML/empty rate-limit bodies. A legal body wait may extend them.
+          try { await observeWait(polled, await boundedJson(decodeResponse(polled, querySignal), 1024 * 1024)); } catch (error) { if (!(error instanceof StudioProviderError)) throw error; }
           if (single) throw new StudioProviderError('response', 'async_query_interrupted', polled.status, undefined, true, { ...poll });
           pollDelay = Math.min(10000, Math.max(5000, pollDelay * 2)); continue; }
         phase('summary_body');
-        const task = await boundedJson(polled, 1024 * 1024);
+        const task = await boundedJson(decodeResponse(polled, querySignal), 1024 * 1024);
+        await observeWait(polled, task);
         poll.lastErrorCategory = null;
         poll.lastProviderStatus = typeof task?.status === 'string' && POLL_STATUSES.has(task.status as StudioPollStatus) ? task.status as StudioPollStatus : null;
         if ((task.task_id || task.id) && (task.task_id || task.id) !== asyncTask.taskId) throw new StudioProviderError('response', 'async_task_identity_conflict');
@@ -266,17 +381,29 @@ export async function requestStudioImages(params: {
           }), usage: task.usage };
         } else {
           // Only after success: the raw result is not a polling endpoint.
+          asyncTask.resultReady = true;
+          await params.onAsyncProgress?.({ ...asyncTask });
+          if (params.singleTaskGet) throw new StudioProviderError('response', 'async_result_ready', polled.status, undefined, true, { ...poll });
           const resultUrl = new URL(pollUrl); resultUrl.search = '';
+          if (studioProviderWaitBlocked(asyncTask, now())) {
+            const resultWait = providerNotBefore - now();
+            if (asyncTask.providerWaitSource === 'invalid-conservative' || now() + resultWait >= windowEnds) throw new StudioProviderError('response', 'async_provider_wait', undefined, undefined, true, { ...poll, providerNotBefore, providerWaitSource: asyncTask.providerWaitSource });
+            await wait(resultWait, querySignal);
+          }
+          if (!params.manualAsyncQuery && automaticDeadline !== undefined && now() >= automaticDeadline) throw new StudioProviderError('response', 'async_auto_check_paused', undefined, undefined, true, { ...poll });
           phase('result_request'); poll.getTransportCalls++; poll.lastErrorCategory = null;
           const result = await transport(resultUrl, { method: 'GET', headers: { Authorization: `Bearer ${params.apiKey}` }, signal: querySignal, redirect: 'error' });
           poll.lastHttpStatus = result.status;
+          await observeWait(result);
           if (!result.ok) { poll.lastErrorCategory = 'http_non_success'; await result.body?.cancel().catch(() => {}); throw new StudioProviderError('response', 'async_query_interrupted', result.status, undefined, true); }
           phase('result_body');
-          value = await boundedJson(result, params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024);
+          value = await boundedJson(decodeResponse(result, querySignal), params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024);
           poll.lastErrorCategory = null;
         }
         break;
       } catch (error) {
+        if (error instanceof Error && error.name === 'StudioCoreReceiptError') throw error;
+        if (error instanceof StudioProviderError && ['async_provider_wait', 'async_auto_check_paused', 'async_result_ready'].includes(error.code)) throw error;
         if (error instanceof StudioProviderError && ['async_failed', 'async_unconfirmed', 'async_task_identity_conflict'].includes(error.code)) {
           poll.lastErrorCategory = error.code === 'async_task_identity_conflict' ? 'identity_conflict' : 'provider_terminal';
           error.poll = { ...poll }; throw error;
@@ -312,7 +439,8 @@ export async function requestStudioImages(params: {
             || !Number.isFinite(Date.parse(item.expiresAt)) || Date.parse(item.expiresAt) <= Date.now()) throw new StudioImageDownloadError('download_unsafe_url');
           const downloaded = await transport(assetUrl, { method: 'GET', headers: { Authorization: `Bearer ${params.apiKey}` }, signal: params.downloadSignal || params.signal, redirect: 'error' });
           if (!downloaded.ok || !downloaded.body) { await downloaded.body?.cancel().catch(() => {}); throw new StudioImageDownloadError('download_http_error', downloaded.status); }
-          const chunks: Uint8Array[] = []; let length = 0; const reader = downloaded.body.getReader();
+          const decoded = decodeResponse(downloaded, params.downloadSignal || params.signal, { decodedBytes: MAX_STUDIO_GENERATED_BYTES });
+          const chunks: Uint8Array[] = []; let length = 0; const reader = decoded.body!.getReader();
           try { for (;;) { const next = await reader.read(); if (next.done) break; length += next.value.byteLength;
             if (length > MAX_STUDIO_GENERATED_BYTES) throw new StudioImageDownloadError('download_size_limit'); chunks.push(next.value); } }
           finally { await reader.cancel().catch(() => {}); }
@@ -335,10 +463,13 @@ async function requestGeminiStudioImages(params: {
   count: number; images: StudioImageInput[]; signal: AbortSignal; ratio?: string; size?: string;
   recordResponse?: (response: Response) => Promise<void>;
   recordResponseEvidence?: StudioResponseEvidenceRecorder;
+  recordResponseDiagnostics?: (diagnostic: StudioResponseDiagnostics) => Promise<void>;
   persistBase64Image?: (value: string, usage: unknown) => Promise<void>;
+  checkpointRemoteImage?: (url: string, usage: unknown) => Promise<void>;
   deliverRemoteImage?: (url: string, usage: unknown) => Promise<Buffer>;
   downloadSignal?: AbortSignal;
   protocol?: ImageGenerationChannelProtocol;
+  ratioContractVersion?: 2 | 3;
 }, fetcher: typeof fetch, readImage: typeof readStudioImage): Promise<{ images: string[]; usage: unknown }> {
   const url = new URL(params.baseUrl);
   const basePath = url.pathname.replace(/\/$/, '').replace(/\/v1$/, '').replace(/\/v1beta$/, '');
@@ -368,24 +499,26 @@ async function requestGeminiStudioImages(params: {
   } catch {
     throw new StudioProviderError('request', params.signal.aborted ? 'timeout' : 'network');
   }
-  await params.recordResponse?.(response);
+  let coreError: unknown;
+  try { await params.recordResponse?.(response); } catch (error) { coreError = error; }
   let captured: { diagnostic: StudioResponseDiagnostics; candidates: StudioResponseOutputCandidate[] } | undefined;
-  let evidenceUnavailable = false;
   const recordEvidence = async (trustedImage?: string) => {
     if (!captured || !params.recordResponseEvidence) return;
     const candidates = trustedImage ? captured.candidates.filter(candidate => candidate.value !== trustedImage) : captured.candidates;
     try { await params.recordResponseEvidence(captured.diagnostic, candidates); }
-    catch { evidenceUnavailable = true; } // The caller logs only a fixed safe code; valid delivery is not blocked.
+    catch { console.error('[image-response-evidence]', JSON.stringify({ code: 'diagnostic_unavailable' })); }
   };
   let value: any;
   try {
-    value = await boundedJson(response, params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024,
-      params.recordResponseEvidence ? async (body, observation) => {
-        captured = { diagnostic: buildStudioResponseDiagnostics(body, observation),
+    value = await boundedJson(fetcher === fetch ? response : decodeStudioProviderResponse(response, params.signal), params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024,
+      params.recordResponseEvidence || params.recordResponseDiagnostics ? async (body, observation) => {
+        captured = { diagnostic: buildStudioResponseDiagnostics(body, observation, params.ratioContractVersion === 3),
           candidates: response.ok && observation.parseOutcome === 'valid_json' ? collectStudioResponseOutputCandidates(body) : [] };
+        try { await params.recordResponseDiagnostics?.(captured.diagnostic); }
+        catch { console.error('[image-response-evidence]', JSON.stringify({ code: 'diagnostic_unavailable' })); }
       } : undefined);
-  } catch (error) { await recordEvidence(); throw error; }
-  if (!response.ok) { await recordEvidence(); throw new StudioProviderError('request', 'http_error', response.status); }
+  } catch (error) { await recordEvidence(); if (coreError) throw coreError; throw error; }
+  if (!response.ok) { await recordEvidence(); if (coreError) throw coreError; throw new StudioProviderError('request', 'http_error', response.status); }
   type NativeOutput = { kind: 'inline' | 'url'; value: string };
   let outputs: NativeOutput[];
   try {
@@ -410,13 +543,23 @@ async function requestGeminiStudioImages(params: {
       .filter((output: NativeOutput | null): output is NativeOutput => output !== null);
   } catch (error) {
     await recordEvidence();
+    if (coreError) throw coreError;
     if (error instanceof StudioProviderError) throw error;
     if (error instanceof StudioImageDownloadError) throw new StudioProviderError('download', error.code, error.status, error.diagnostics, error.retryable);
     throw new StudioProviderError('response', 'unsupported_output', response.status);
   }
-  if (!outputs.length) { await recordEvidence(); throw new StudioProviderError('response', evidenceUnavailable ? 'response_evidence_unavailable' : 'empty_output', response.status); }
-  if (outputs.length !== params.count) { await recordEvidence(); throw new StudioProviderError('response', 'unexpected_count', response.status); }
+  if (!outputs.length) { await recordEvidence(); if (coreError) throw coreError; throw new StudioProviderError('response', 'empty_output', response.status); }
+  if (outputs.length !== params.count) { await recordEvidence(); if (coreError) throw coreError; throw new StudioProviderError('response', 'unexpected_count', response.status); }
   const usage = safeUsage(value.usageMetadata || value.usage);
+  if (coreError) {
+    if (outputs.length === 1) {
+      try {
+        if (outputs[0].kind === 'inline') await params.persistBase64Image?.(outputs[0].value, usage);
+        else await params.checkpointRemoteImage?.(outputs[0].value, usage);
+      } catch { console.error('[image-core-receipt]', JSON.stringify({ code: 'local_output_checkpoint_pending' })); }
+    }
+    await recordEvidence(); throw coreError;
+  }
   const images: string[] = [];
   for (const output of outputs) {
     if (output.kind === 'inline') { images.push(output.value); continue; }
@@ -432,10 +575,11 @@ async function requestGeminiStudioImages(params: {
   // Only the instrumented native channel uses the early original checkpoint.
   // It precedes diagnostic I/O; do not duplicate its bytes in the isolated sidecar.
   let trustedImage: string | undefined;
-  if (params.recordResponseEvidence && params.persistBase64Image && outputs.length === 1 && outputs[0].kind === 'inline') {
+  if ((params.recordResponseEvidence || params.ratioContractVersion === 3) && params.persistBase64Image && outputs.length === 1 && outputs[0].kind === 'inline') {
     try { await params.persistBase64Image(images[0], usage); trustedImage = images[0]; }
     catch (error) { await recordEvidence(); throw error; }
   }
   await recordEvidence(trustedImage);
+  if (coreError) throw coreError;
   return { images, usage };
 }

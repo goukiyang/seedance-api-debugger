@@ -10,6 +10,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import packageInfo from '../package.json';
 import { IMAGE_BILLING_VERSION } from '../src/lib/image-studio/billing-contract';
 import { STUDIO_SHARED_WORKER_KEY, STUDIO_SHARED_WORKER_FILES } from '../src/lib/image-studio/tasks';
+import { assertStudioWorkerMode, runStudioWorkerCycle, publishStudioWorkerReadiness } from '../src/lib/image-studio/worker-mode';
 
 loadEnvConfig(process.cwd());
 let stopping = false;
@@ -17,11 +18,20 @@ let billingWork: Promise<void> | null = null;
 process.on('SIGTERM', () => { stopping = true; });
 process.on('SIGINT', () => { stopping = true; });
 async function main() {
+  const draining = () => fs.existsSync(path.join(process.cwd(), 'storage', 'image-studio-drain'));
+  const mode = assertStudioWorkerMode({ version: packageInfo.version, acceptedOnlyEnv: process.env.STUDIO_ACCEPTED_ONLY,
+    releaseHoldEnv: process.env.STUDIO_RELEASE_HOLD, draining: draining() });
+  const { acceptedOnly } = mode;
+  let initialHold = mode.initialHold;
   let source = path.basename(process.cwd());
   try { source = fs.readFileSync(path.join(process.cwd(), '.deployed-commit'), 'utf8').trim(); } catch {}
   const loadedModuleSha = Object.fromEntries(Array.from(new Set([
     'scripts/process-image-studio.ts',
     'src/lib/image-studio/worker.ts', 'src/lib/image-studio/provider.ts',
+    'src/lib/image-studio/provider-wait.ts', 'src/lib/image-studio/worker-mode.ts',
+    'src/lib/image-studio/delivery.ts', 'src/lib/image-studio/async-recovery.ts',
+    'src/lib/image-studio/response-diagnostics.ts', 'src/lib/image-studio/response-evidence.ts',
+    'src/lib/image-generation/output-plan.ts',
     'src/lib/image-studio/dimension-rejection.ts',
     'src/lib/integrations/image-generation.ts', 'src/lib/integrations/image-generation-defaults.ts',
     'src/lib/integrations/image-generation-channel.ts',
@@ -38,30 +48,27 @@ async function main() {
   const workerId = randomUUID();
   let readinessWork: Promise<void> | null = null;
   const renewReadiness = async () => {
-    const value = { protocol: 'shared-live-v1', workerId, source, loadedModuleSha, expiresAt: new Date(Date.now() + 90_000).toISOString() };
-    await prisma.platformSetting.upsert({ where: { key: STUDIO_SHARED_WORKER_KEY },
-      create: { key: STUDIO_SHARED_WORKER_KEY, value_json: JSON.stringify(value) }, update: { value_json: JSON.stringify(value) } });
+    await publishStudioWorkerReadiness({ acceptedOnly, workerId, source, loadedModuleSha });
   };
-  await renewReadiness();
+  if (!acceptedOnly) await renewReadiness();
   const readinessTimer = setInterval(() => {
-    if (stopping || readinessWork) return;
+    if (acceptedOnly || stopping || readinessWork) return;
     readinessWork = renewReadiness().catch(() => {
       console.error('[image-studio-shared] readiness unavailable; new shared requests must remain blocked');
     }).finally(() => { readinessWork = null; });
   }, 30_000);
   try {
     do {
-      if (fs.existsSync(path.join(process.cwd(), 'storage', 'image-studio-drain'))) break;
-      if (!billingWork) billingWork = reconcileImageBilling().catch(() => {
+      if (acceptedOnly && !draining()) throw new Error('image_accepted_only_requires_shared_drain');
+      if (initialHold && !draining()) initialHold = false;
+      if (!acceptedOnly && !initialHold && draining()) break;
+      if (!initialHold && !billingWork) billingWork = reconcileImageBilling().catch(() => {
         console.error('[image-billing] reconciliation deferred; no supplier generation repeated');
       }).finally(() => { billingWork = null; });
-      await recoverStudioTasks();
-      if (stopping || fs.existsSync(path.join(process.cwd(), 'storage', 'image-studio-drain'))) break;
-      await dispatchStudioBatches();
-      if (stopping || fs.existsSync(path.join(process.cwd(), 'storage', 'image-studio-drain'))) break;
-      await dispatchWaitingToolFlowRuns();
-      if (stopping || fs.existsSync(path.join(process.cwd(), 'storage', 'image-studio-drain'))) break;
-      await Promise.all([processStudioTask(), processStudioTask()]);
+      const continued = await runStudioWorkerCycle({ acceptedOnly, initialHold, draining, stopping: () => stopping,
+        recover: recoverStudioTasks, dispatchBatches: dispatchStudioBatches, dispatchToolflows: dispatchWaitingToolFlowRuns,
+        processQueued: () => Promise.all([processStudioTask(), processStudioTask()]) });
+      if (!continued) break;
       if (process.argv.includes('--once')) break;
       if (!stopping) await new Promise(resolve => setTimeout(resolve, 1500));
     } while (!stopping);

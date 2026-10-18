@@ -7,7 +7,7 @@ import { getImageStudioSettings, IMAGE_STUDIO_SETTING_KEY, DEFAULT_STUDIO_PRICES
 import { resolveStudioModuleGenerationConfig } from './modules';
 import { submitStudioBatch, parseStudioRequest, parseSharedStudioIntent, sameSharedStudioIntent, resolveOwnedStudioTaskSharedUse,
   assertSharedStudioWorkerReady, studioSharedGenerationSource, publicImageTaskStatus, cancelQueuedChannelTask, SharedStudioDefinitionError, StudioError } from './tasks';
-import { STUDIO_BATCH_LIMITS, type StudioBatchView } from './batch-contract';
+import { STUDIO_BATCH_LIMITS, type StudioBatchView, type StudioBatchProviderCheck } from './batch-contract';
 import { studioOutputMismatch as studioDimensionMismatch, studioDimensionMismatchNotice, studioTaskHasViewableOutput } from './dimension-mismatch';
 import { studioAssetUrl } from './media';
 import { studioDeliveryStatus } from './delivery';
@@ -23,14 +23,16 @@ import { imageBillingScope } from './billing-scope';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import { captureImageGenerationChannel, getImageGenerationSettingsForModel, isMuskImageGenerationChannel, assertImageGenerationChannelDispatchOpen, ImageGenerationChannelError,
   resolveImageGenerationChannelSnapshot, validateImageGenerationChannel, type ImageGenerationChannelSnapshot, type ImageGenerationResolvedSettings } from '@/lib/integrations/image-generation';
-import { QueueCapacityError, QueueMaintenanceError, reserveImageStudioQueueCapacity } from './queue-capacity';
+import { QueueCapacityError, QueueMaintenanceError, reserveImageStudioQueueCapacity, assertImageStudioAdmissionOpen } from './queue-capacity';
+import { imageOutputPlanHash, parseImageOutputPlan, publicImageOutputPlan, savedImageRatioContractVersion,
+  type ImageOutputPlan, type ImageRatioContractVersion } from '@/lib/image-generation/output-plan';
 
 const PREFIX = 'studio_batch_v1:';
 const ITEM_PREFIX = 'studio_batch_item_v1:';
 const CHANNEL_PREFIX = 'studio_channel_batch_v1:';
 const CHANNEL_ITEM_PREFIX = 'studio_channel_batch_item_v1:';
 type BatchItem = { ordinal: number; sourceName: string; assetId?: string; taskId: string | null; attempt: number; prepared: boolean; cancelled: boolean };
-type BatchRecord = { version: 1; id: string; ownerId: string; requestId: string; fingerprint: string; requestFingerprint?: string; moduleId: string; moduleName: string; state: string; note: string; createdAt: string; total: number; budget: number; committedCredits: number; unitCredits: number; prepared: number; input: Record<string, unknown>; items: BatchItem[]; billingMode?: 'actual'; billingContracts?: Array<ImageBillingContract | null>; definitionConfirmationRequired?: boolean };
+type BatchRecord = { version: 1; ratioContractVersion?: ImageRatioContractVersion; outputPlans?: Array<ImageOutputPlan | null>; outputPlanHashes?: Array<string | null>; id: string; ownerId: string; requestId: string; fingerprint: string; requestFingerprint?: string; moduleId: string; moduleName: string; state: string; note: string; createdAt: string; total: number; budget: number; committedCredits: number; unitCredits: number; prepared: number; input: Record<string, unknown>; items: BatchItem[]; billingMode?: 'actual'; billingContracts?: Array<ImageBillingContract | null>; definitionConfirmationRequired?: boolean };
 const key = (owner: string, id: string, channel = false) => `${channel ? CHANNEL_PREFIX : PREFIX}${owner}:${id}`;
 const itemKey = (batch: BatchRecord, ordinal: number) => `${batch.input.imageChannel && (batch.input.imageChannel as ImageGenerationChannelSnapshot).channelId !== 'original' ? CHANNEL_ITEM_PREFIX : ITEM_PREFIX}${batch.id}:${ordinal}`;
 const isChannelBatch = (batch: Pick<BatchRecord, 'input'>) => {
@@ -111,7 +113,7 @@ async function reconfirmBatchDefinition(tx: Prisma.TransactionClient, batch: Bat
   const settings = await getImageStudioSettings();
   const generationSource = studioSharedGenerationSource(sharedUse, input);
   const generation = resolveStudioModuleGenerationConfig(generationSource, settings);
-  const quote = nextBody.batchQuoteId ? await consumeBatchQuote(tx, batch.ownerId, nextBody) : null;
+  const quote = nextBody.batchQuoteId ? await consumeBatchQuote(tx, batch.ownerId, nextBody, savedImageRatioContractVersion(batch)) : null;
   const explicitChannelId = typeof nextBody.channelId === 'string' ? nextBody.channelId : undefined;
   const suppliedChannel = quote?.imageChannel || input.imageChannel;
   const effectiveChannelId = explicitChannelId === undefined && suppliedChannel
@@ -144,9 +146,13 @@ async function reconfirmBatchDefinition(tx: Prisma.TransactionClient, batch: Bat
   batch.input = { ...input, moduleId: batch.moduleId, sharedLive: sharedUse.definition.intent, ...(imageChannel ? { imageChannel } : {}) };
   batch.moduleName = sharedUse.definition.name;
   batch.budget = Number(body.budget); batch.unitCredits = unitCredits;
-  batch.billingMode = quote ? 'actual' : undefined;
+  batch.billingMode = quote?.contracts[0]?.mode === 'actual' ? 'actual' : undefined;
   batch.billingContracts = quote ? batch.items.map(() => null) : undefined;
   if (quote) pending.forEach((item, index) => { batch.billingContracts![item.ordinal - 1] = quote.contracts[index]; });
+  if (quote?.outputPlans) pending.forEach((item, index) => {
+    (batch.outputPlans ||= batch.items.map(() => null))[item.ordinal - 1] = quote.outputPlans![index];
+    (batch.outputPlanHashes ||= batch.items.map(() => null))[item.ordinal - 1] = quote.outputPlanHashes![index];
+  });
   batch.state = 'preparing'; batch.note = '已确认当前模板与预算，正在重新准备未受理条目；原任务保持不变';
   const newKey = key(batch.ownerId, batch.id, isChannelBatch(batch));
   if ((await tx.platformSetting.updateMany({ where: { id: row.id, value_json: row.value_json }, data: { key: newKey } })).count !== 1) {
@@ -159,21 +165,22 @@ export async function quoteStudioBatchContinuation(owner: string, body: Record<s
     const { batch } = await readOwned(owner, body.id, tx);
     if (batch.state === 'cancelled' || batch.state === 'preparing') throw new StudioError('本批不能重新报价，请先读取原批次', 409);
     await recoverAcceptedBatchItems(tx, batch);
-    return continuationInput(batch, body);
+    return { body: continuationInput(batch, body), ratioContractVersion: savedImageRatioContractVersion(batch) };
   });
-  return quoteStudioBatch(owner, input);
+  return quoteStudioBatch(owner, input.body, input.ratioContractVersion);
 }
 
 export async function createStudioBatch(ownerId: string, body: Record<string, unknown>) {
   if (typeof body?.requestId === 'string' && /^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) {
     const acceptedId = idFor(ownerId, body.requestId);
     const saved = await prisma.platformSetting.findFirst({ where: { key: { in: [key(ownerId, acceptedId), key(ownerId, acceptedId, true)] } } });
-    if (saved && (parse(saved.value_json).input.sharedLive !== undefined || body.sharedLive !== undefined)) {
+    if (saved) {
       if (body.moduleId !== undefined && body.moduleId !== parse(saved.value_json).moduleId) throw new StudioError('提交编号已用于其他批次，请查询原批次', 409);
       return acceptedId;
     }
   }
   const input = parseStudioRequest({ ...body, count: 1 });
+  assertImageStudioAdmissionOpen();
   if (typeof body.moduleId !== 'string' || !boundedBudget(body.budget)) throw new StudioError('请选择模板并填写最高预算');
   const sources = body.sources;
   if (!Array.isArray(sources) || sources.length < 1 || sources.length > STUDIO_BATCH_LIMITS.images) throw new StudioError(`本批最多 ${STUDIO_BATCH_LIMITS.images} 张图片`);
@@ -199,6 +206,8 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
         || savedSnapshot.configRevision !== suppliedSnapshot.configRevision)) throw new StudioError('提交编号已用于其他批次', 409);
       return;
     }
+    assertImageStudioAdmissionOpen();
+    await assertSharedStudioWorkerReady(tx);
     const active = await tx.platformSetting.count({ where: { OR: [
       { key: { startsWith: `${PREFIX}${ownerId}:` } }, { key: { startsWith: `${CHANNEL_PREFIX}${ownerId}:` } },
     ], AND: [{ OR: ['preparing', 'ready', 'paused', 'blocked', 'needs-confirmation'].map(state => ({ value_json: { contains: `"state":"${state}"` } })) }] } });
@@ -212,6 +221,7 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
     const generationSource = sharedGeneration || { ...workspace, ...(input.model ? { model: input.model } : {}) };
     const billingQuote = body.batchQuoteId ? await consumeBatchQuote(tx, ownerId, body) : null;
     const model = resolveStudioModuleGenerationConfig(generationSource, settings).model;
+    if (model.startsWith('gpt-image-') && !billingQuote) throw new StudioError('图片规格已更新，请先重新获取整批实际尺寸与报价；输入和原请求编号保留', 409);
     const explicitChannelId = typeof body.channelId === 'string' ? body.channelId : undefined;
     const effectiveChannelId = explicitChannelId === undefined && (billingQuote?.imageChannel || input.imageChannel)
       ? (billingQuote?.imageChannel || input.imageChannel)!.channelId
@@ -251,8 +261,9 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
     const fingerprint = isChannelBatch({ input: shared })
       ? createHash('sha256').update(JSON.stringify({ requestFingerprint, imageChannel: shared.imageChannel })).digest('hex')
       : requestFingerprint;
-    const batch: BatchRecord = { version: 1, id, ownerId, requestId: input.requestId, fingerprint, requestFingerprint, moduleId: body.moduleId as string, moduleName: sharedUse?.definition.name || workspace.name, state: 'preparing', note: '', createdAt: new Date().toISOString(), total: items.length, budget: Number(body.budget), committedCredits: 0, unitCredits, prepared: 0, input: shared, items,
-      ...(billingQuote ? { billingMode: 'actual' as const, billingContracts: billingQuote.contracts } : {}) };
+    const batch: BatchRecord = { version: 1, ratioContractVersion: 3, id, ownerId, requestId: input.requestId, fingerprint, requestFingerprint, moduleId: body.moduleId as string, moduleName: sharedUse?.definition.name || workspace.name, state: 'preparing', note: '', createdAt: new Date().toISOString(), total: items.length, budget: Number(body.budget), committedCredits: 0, unitCredits, prepared: 0, input: shared, items,
+      ...(billingQuote ? { ...(billingQuote.contracts[0]?.mode === 'actual' ? { billingMode: 'actual' as const } : {}), billingContracts: billingQuote.contracts,
+        outputPlans: billingQuote.outputPlans, outputPlanHashes: billingQuote.outputPlanHashes } : {}) };
     await tx.platformSetting.create({ data: { key: key(ownerId, id, isChannelBatch(batch)), value_json: JSON.stringify(batch), updated_by: ownerId } });
     created = true;
   }, { timeout: 15000 });
@@ -260,29 +271,42 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
   return id;
 }
 
+export function studioBatchItemSubmission(batch: Pick<BatchRecord, 'id' | 'input' | 'ratioContractVersion'>, item: Pick<BatchItem, 'ordinal' | 'assetId'>) {
+  const policy = (batch.input.draft as { referencePolicy?: StudioReferencePolicy } | undefined)?.referencePolicy;
+  const references = item.assetId ? [item.assetId, ...(batch.input.referenceIds as string[]).filter(ref => !policy?.primaryIds.includes(ref))] : batch.input.referenceIds;
+  const draft = batch.input.draft as Record<string, unknown> | undefined;
+  return { ratioContractVersion: savedImageRatioContractVersion(batch), body: { ...batch.input,
+    requestId: `${batch.id.slice(0, 48)}-${item.ordinal}`, referenceIds: references,
+    ...(item.assetId && draft && policy ? { draft: { ...draft, referencePolicy: { ...policy, primaryIds: [item.assetId] } } } : {}) } };
+}
+
 async function prepareBatch(owner: string, id: string) {
   const initial = (await readOwned(owner, id)).batch;
   try {
     for (const item of initial.items) {
       if (item.prepared || item.taskId || item.cancelled) continue;
-      const policy = (initial.input.draft as { referencePolicy?: StudioReferencePolicy } | undefined)?.referencePolicy;
-      const references = item.assetId ? [item.assetId, ...(initial.input.referenceIds as string[]).filter(ref => !policy?.primaryIds.includes(ref))] : initial.input.referenceIds;
-      const draft = initial.input.draft as Record<string, unknown> | undefined;
-      const itemInput = { ...initial.input, requestId: `${id.slice(0, 48)}-${item.ordinal}`, referenceIds: references,
-        ...(item.assetId && draft && policy ? { draft: { ...draft, referencePolicy: { ...policy, primaryIds: [item.assetId] } } } : {}) };
-      await submitStudioBatch(owner, itemInput, undefined, { batchItem: true, save: async (tx, task) => {
+      const itemInput = studioBatchItemSubmission(initial, item);
+      await submitStudioBatch(owner, itemInput.body, undefined, { batchItem: true, ratioContractVersion: itemInput.ratioContractVersion, save: async (tx, task) => {
         const { row, batch } = await readOwned(owner, id, tx);
         if (batch.state !== 'preparing') throw new StudioError('批次已停止准备');
         const current = batch.items[item.ordinal - 1];
         if (current.prepared) return;
         const actualContract = batch.billingContracts?.[item.ordinal - 1];
-        if (batch.billingMode === 'actual') {
+        const plan = parseImageOutputPlan(JSON.parse(String(task.snapshot_json)).outputPlan);
+        if (savedImageRatioContractVersion(batch) === 3) {
+          if (!plan || batch.outputPlanHashes?.[item.ordinal - 1] && imageOutputPlanHash(plan) !== batch.outputPlanHashes[item.ordinal - 1]) {
+            throw new StudioError('本条图片规格与已确认报价不一致，请重新报价；尚未派发', 409);
+          }
+          (batch.outputPlans ||= batch.items.map(() => null))[item.ordinal - 1] = plan;
+          (batch.outputPlanHashes ||= batch.items.map(() => null))[item.ordinal - 1] = imageOutputPlanHash(plan);
+        }
+        if (actualContract || batch.billingMode === 'actual') {
           const fixedContract = JSON.parse(String(task.billing_contract_json)) as ImageBillingContract;
           if (!actualContract || actualContract.specification !== fixedContract.specification || actualContract.scope !== fixedContract.scope)
             throw new StudioError('本批输入或通道与已确认报价不符，未派发生成');
           task.unit_credits = actualContract.authorizedCredits;
-          task.billing_mode = 'actual'; task.billing_contract_json = JSON.stringify(actualContract);
-          task.billing_deadline = new Date(actualContract.deadline!);
+          task.billing_mode = actualContract.mode; task.billing_contract_json = JSON.stringify(actualContract);
+          task.billing_deadline = actualContract.mode === 'actual' ? new Date(actualContract.deadline!) : null;
           task.snapshot_json = JSON.stringify({ ...JSON.parse(String(task.snapshot_json)), billingContract: actualContract, unitCredits: actualContract.authorizedCredits });
         } else if (task.unit_credits !== batch.unitCredits
           || batch.committedCredits + Number(task.unit_credits) * batch.items.filter(item => !item.taskId && !item.cancelled).length > batch.budget) throw new StudioError('价格变化或预算不足，请重新核对后开始新批次');
@@ -331,12 +355,18 @@ export async function studioBatchView(owner: string, id: string, includeItems = 
   const identity = await prisma.user.findUniqueOrThrow({ where: { id: owner }, select: { id: true, role: true, account_type: true, feature_profile_id: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
   const taskIds = batch.items.flatMap(item => item.taskId ? [item.taskId] : []);
   const tasks = await prisma.imageStudioTask.findMany({ where: { id: { in: taskIds }, owner_id: owner }, select: { id: true, status: true, error: true, usage_json: true, asset_id: true, deleted_at: true,
-    owner_id: true, snapshot_json: includeItems, billing_status: true, actual_amount_micros: true, actual_credits: true, billing_contract_json: true, unit_credits: true, billing_settled_at: true } });
+    owner_id: true, output_size: true, snapshot_json: includeItems, billing_status: true, actual_amount_micros: true, actual_credits: true, billing_contract_json: true, unit_credits: true, billing_settled_at: true } });
   // 仅当前活跃项读取回执；批次目录不取快照，已完成历史不读逐图文件。
   const deliveryByTask = new Map(includeItems ? await Promise.all(tasks.filter(task => ['running', 'channel_running'].includes(task.status))
-    .map(async task => { const delivery = await studioDeliveryStatus(task); return [task.id, { phase: delivery.phase, acceptedAt: delivery.acceptedAt, waitingStatus: delivery.waitingStatus,
-      generationDetailSuperseded: delivery.generationDetailSuperseded }] as const; })) : []);
-  const assets = includeItems ? await prisma.asset.findMany({ where: { id: { in: tasks.flatMap(task => !task.deleted_at && studioTaskHasViewableOutput(task) && task.asset_id ? [task.asset_id] : []) }, owner_id: owner, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity)] }, select: { id: true, file_size: true, file_name: true, mime_type: true } }) : [];
+    .map(async task => {
+      const delivery = await studioDeliveryStatus(task);
+      const check = (delivery as typeof delivery & { providerCheck?: StudioBatchProviderCheck }).providerCheck;
+      return [task.id, { phase: delivery.phase, acceptedAt: delivery.acceptedAt, waitingStatus: delivery.waitingStatus,
+        generationDetailSuperseded: delivery.generationDetailSuperseded,
+        ...(check ? { providerCheck: { state: check.state, availableAt: check.availableAt, canRequestRecheck: check.canRequestRecheck,
+          requestId: check.requestId, binding: check.binding, message: check.message } } : {}) }] as const;
+    })) : []);
+  const assets = includeItems ? await prisma.asset.findMany({ where: { id: { in: tasks.flatMap(task => !task.deleted_at && studioTaskHasViewableOutput(task) && task.asset_id ? [task.asset_id] : []) }, owner_id: owner, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity)] }, select: { id: true, file_size: true, file_name: true, mime_type: true, width: true, height: true } }) : [];
   const statuses = batch.items.map(item => item.cancelled ? 'cancelled' : item.taskId
     ? (() => { const task = tasks.find(task => task.id === item.taskId); return task && studioTaskHasViewableOutput(task) ? 'succeeded' : publicImageTaskStatus(task?.status || 'uncertain'); })() : batch.definitionConfirmationRequired ? 'needs-confirmation' : 'pending');
   const active = statuses.filter(state => ['running', 'queued'].includes(state)).length;
@@ -350,11 +380,14 @@ export async function studioBatchView(owner: string, id: string, includeItems = 
       const task = tasks.find(task => task.id === item.taskId);
       const asset = assets.find(asset => asset.id === task?.asset_id);
       const mismatch = task && studioDimensionMismatch(task);
+      let taskPlan: unknown;
+      try { taskPlan = JSON.parse(task?.snapshot_json || '{}').outputPlan; } catch {}
       return { ordinal: item.ordinal, sourceName: item.sourceName, taskId: item.taskId, status: statuses[index],
+        outputPlan: publicImageOutputPlan(taskPlan || batch.outputPlans?.[item.ordinal - 1]), outputSize: task?.output_size || batch.outputPlans?.[item.ordinal - 1]?.outputSize || null,
         error: mismatch && asset ? studioDimensionMismatchNotice(mismatch.validation) : task?.error,
         resultDisposition: mismatch ? mismatch.code === 'generated_format_mismatch' ? 'format_mismatch' as const : 'dimensions_mismatch' as const : null,
         ...(task && deliveryByTask.has(task.id) ? { delivery: deliveryByTask.get(task.id) } : {}),
-        billing: task ? imageBillingView(task, owner, false) : null, image: asset ? { id: asset.id, url: studioAssetUrl(asset.id), thumbnail: studioAssetUrl(asset.id, true), fileSize: asset.file_size || 0, fileName: asset.file_name, mimeType: asset.mime_type || 'image/png' } : null };
+        billing: task ? imageBillingView(task, owner, false) : null, image: asset ? { id: asset.id, url: studioAssetUrl(asset.id), thumbnail: studioAssetUrl(asset.id, true), fileSize: asset.file_size || 0, fileName: asset.file_name, mimeType: asset.mime_type || 'image/png', width: asset.width, height: asset.height } : null };
     }) } : {}) };
 }
 export async function listStudioBatches(owner: string, cursor?: string) {
@@ -481,7 +514,7 @@ export async function dispatchStudioBatches() {
         }
         const sharedUse = await resolveOwnedStudioTaskSharedUse(batch.ownerId, batch.moduleId,
           parseSharedStudioIntent(batch.input.sharedLive), tx);
-        if (sharedUse) await assertSharedStudioWorkerReady(tx);
+        if (sharedUse || savedImageRatioContractVersion(batch) === 3) await assertSharedStudioWorkerReady(tx);
         await reserveImageStudioQueueCapacity(tx, batch.ownerId, 1);
         const prepared = await tx.platformSetting.findUnique({ where: { key: itemKey(batch, item.ordinal) } });
         if (!prepared) throw new StudioError('素材快照不可用，未派发新任务');

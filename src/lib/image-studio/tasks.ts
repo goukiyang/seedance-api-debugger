@@ -5,7 +5,7 @@ import { compileCanvasPromptReferences, parseCanvasPromptMentions } from '@/lib/
 import { bindModuleContextVersion, MODULE_CONTEXT_VERSION_RULE, snapshotModuleContextVersion, withContextVersionRetry } from './context-version';
 import type { ImageStudioTask, Prisma } from '@prisma/client';
 import { studioDeliveryStatus } from './delivery';
-import { ACTIVE_IMAGE_TASK_STATUSES, QueueCapacityError, QueueMaintenanceError, reserveImageStudioQueueCapacity } from './queue-capacity';
+import { ACTIVE_IMAGE_TASK_STATUSES, QueueCapacityError, QueueMaintenanceError, reserveImageStudioQueueCapacity, assertImageStudioAdmissionOpen } from './queue-capacity';
 import { prisma } from '@/lib/prisma';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import { getImageStudioSettings } from './settings';
@@ -14,7 +14,7 @@ import { fixedImageBillingContract, imageSpecification } from './billing-quote';
 import { imageBillingView, parseImageBillingContract } from './billing-contract';
 import { consumeImageQuote } from './billing-quote-store';
 import { imageBillingReady } from './billing-readiness';
-import { captureImageGenerationChannel, resolveImageGenerationChannelSnapshot, validateImageGenerationChannel, imageGenerationModelOutputSize, imageGenerationSupportsStudioFourToOne,
+import { captureImageGenerationChannel, resolveImageGenerationChannelSnapshot, validateImageGenerationChannel, imageGenerationModelOutputSize, imageGenerationModelOutputPlan, imageGenerationSupportsStudioFourToOne,
   getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider, isMuskImageGenerationChannel, ImageGenerationChannelError,
   type ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
@@ -22,6 +22,7 @@ import { defaultStudioModuleId, resolveStudioModuleGenerationConfig, validStudio
 import { canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from './access';
 import { resolveStudioAspectRatio, normalizeStudioRatio } from './ratios';
 import { normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS, studioFourToOneIssue } from '@/lib/image-generation/resolution';
+import { imageOutputPlanHash, publicImageOutputPlan, type ImageRatioContractVersion, type ImageOutputPlan } from '@/lib/image-generation/output-plan';
 import { MAX_REFERENCE_IMAGES } from './limits';
 import { IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS } from './model-catalog';
 import { studioAssetUrl, studioTemplateAssetUrl } from './media';
@@ -163,6 +164,15 @@ export const STUDIO_SHARED_WORKER_FILES = [
   'src/lib/image-studio/read-snapshot.ts',
   'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/batches.ts', 'src/lib/image-studio/worker.ts',
   'src/lib/image-studio/async-recovery.ts',
+  'src/lib/image-generation/output-plan.ts', 'src/lib/image-studio/ratios.ts', 'src/lib/image-generation/resolution.ts',
+  'src/lib/image-studio/provider.ts', 'src/lib/image-studio/delivery.ts', 'src/lib/integrations/image-generation.ts',
+  'src/lib/image-studio/billing-quote.ts', 'src/lib/image-studio/billing-quote-service.ts',
+  'src/lib/image-studio/billing-quote-store.ts', 'src/lib/image-studio/batch-billing-quote.ts',
+  'src/lib/image-studio/batch-contract.ts', 'src/lib/avatar-random/service.ts',
+  'src/lib/image-studio/queue-capacity.ts',
+  'src/lib/image-studio/provider-wait.ts', 'src/lib/image-studio/response-diagnostics.ts', 'src/lib/image-studio/response-evidence.ts',
+  'src/lib/image-studio/worker-mode.ts',
+  'src/lib/tools/toolflow-runtime.ts',
 ] as const;
 let sharedWorkerModuleHashes: Record<string, string> | undefined;
 
@@ -325,7 +335,9 @@ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] 
   catch { throw new StudioError('历史固定参考图快照无效', 409); }
 }
 
-export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean }, canvasUse?: { user: SessionUser; referenceImageIds: string[] }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission) {
+export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; ratioContractVersion?: ImageRatioContractVersion; outputPlan?: ImageOutputPlan; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean; ratioContractVersion?: ImageRatioContractVersion; explicitOutputSize?: string }, canvasUse?: { user: SessionUser; referenceImageIds: string[] }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission, serverContract?: { ratioContractVersion?: ImageRatioContractVersion; explicitOutputSize?: string }) {
+  // Version authority belongs to a server-owned parent/plan, never body fields.
+  const ratioContractVersion = preparation?.ratioContractVersion ?? avatar?.ratioContractVersion ?? serverContract?.ratioContractVersion ?? 3;
   if (body.roleMediaContext !== undefined && !roleMedia) throw new StudioError('角色媒体来源只能由原画布确认入口提交', 403);
   if (roleMedia && (roleMedia.user.id !== ownerId || !canvasUse || avatar || preparation)) throw new StudioError('角色媒体必须沿原图片任务创建和扣点流程', 403);
   const roleContextFingerprint = roleMedia ? roleMediaFingerprint(roleMedia.context) : undefined;
@@ -389,6 +401,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (!matchesRequest(previous)) throw new StudioError('提交编号已用于其他请求，请重新提交', 409);
     return batchId;
   }
+  if (!preparation) assertImageStudioAdmissionOpen();
   const settings = await getImageStudioSettings();
   if (settings.revision !== input.revision) throw new StudioError('生成规则或通用上下文已更新，请重新读取设置后确认提交', 409);
   await withContextVersionRetry(() => prisma.$transaction(async tx => {
@@ -483,7 +496,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         catch { throw new StudioError('原图片通道配置已变化，请重新报价并确认', 409); }
       }
       imageApi = await getImageGenerationSettingsForModel(generation.model, tx);
-      if (sharedDefinition) {
+      if (sharedDefinition || ratioContractVersion === 3) {
         originalSharedChannel = input.imageChannel || await captureImageGenerationChannel(generation.model, 'original', tx);
         imageApi = await resolveImageGenerationChannelSnapshot(originalSharedChannel, tx, false, generation.model);
       }
@@ -714,6 +727,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       skills.length ? `补充文字skills（仅补充本次未指定部分；本次手写要求优先；多个组冲突时后组优先）：\n${skills.map((skill, index) => `${index + 1}. ${JSON.stringify(skill.prompt)}`).join('\n')}` : '']
       .filter(Boolean).join('\n\n---\n');
     if (!preparation) {
+      if (ratioContractVersion === 3) await assertSharedStudioWorkerReady(tx);
       try { await reserveImageStudioQueueCapacity(tx, ownerId, input.count); }
       catch (error) {
         if (error instanceof QueueCapacityError || error instanceof QueueMaintenanceError) throw new StudioError(error.message, error.status);
@@ -772,7 +786,13 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const ratioIssue = studioFourToOneIssue(resolvedAspectRatio, fourToOneSupported);
     if (ratioIssue) throw new StudioError(ratioIssue);
     const resolution = normalizeImageResolution(generation.model, effectiveResolution, imageApi.provider);
-    const outputSize = imageGenerationModelOutputSize(imageApi, generation.model, resolution, resolvedAspectRatio);
+    const outputPlan = ratioContractVersion === 3 ? imageGenerationModelOutputPlan(imageApi, generation.model, resolution, resolvedAspectRatio,
+      { requestedRatio: aspectRatio, aspectRatioSource, explicitSize: preparation?.explicitOutputSize || serverContract?.explicitOutputSize }) : undefined;
+    const outputPlanHash = outputPlan ? imageOutputPlanHash(outputPlan) : undefined;
+    if (avatar?.outputPlan && outputPlanHash !== imageOutputPlanHash(avatar.outputPlan)) {
+      throw new StudioError('人物图片规格与已保存计划不一致，请更新报价；人物条件保留，尚未生成', 409);
+    }
+    const outputSize = outputPlan?.outputSize || imageGenerationModelOutputSize(imageApi, generation.model, resolution, resolvedAspectRatio, 2);
     const moduleContextVersion = await bindModuleContextVersion(snapshotModuleContext, tx);
     const billingScope = imageBillingScope(imageApi);
     const actualBillingEligible = isMuskImageGenerationChannel(imageApi)
@@ -782,9 +802,12 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (!preparation && !billingQuoteId && actualBillingEligible) {
       throw new StudioError('当前模型需要确认有效报价，请重新报价后提交；尚未生成', 409);
     }
+    if (ratioContractVersion === 3 && generation.model.startsWith('gpt-image-') && !preparation && !avatar && !billingQuoteId) {
+      throw new StudioError('图片规格已更新，请先重新获取本次实际尺寸与报价；输入和原请求编号保留，尚未生成', 409);
+    }
     let billingContract = fixedImageBillingContract({ scope: billingScope, model: generation.model, credits: price,
       specification: imageSpecification({ model: generation.model, quality: generation.quality, outputSize,
-        aspectRatio: resolvedAspectRatio, referenceCount: orderedReferenceIds.length,
+        aspectRatio: resolvedAspectRatio, ...(outputPlanHash ? { outputPlanHash } : {}), referenceCount: orderedReferenceIds.length,
         inputCharacters: context.length + input.prompt.length,
         inputDigest: createHash('sha256').update(JSON.stringify({ context, prompt: input.prompt,
           avatar: avatar?.candidates, references: referenceSnapshot.map(ref => ({ id: ref.id, hash: ref.hash })),
@@ -796,11 +819,13 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       try {
         billingContract = await consumeImageQuote(tx, { owner: ownerId, id: billingQuoteId,
           count: input.count, fingerprint: billingContract.specification, specification: billingContract.specification,
-          scope: billingScope, model: generation.model, imageChannel: imageChannel || originalSharedChannel || input.imageChannel,
-          ...(sharedDefinition ? { sharedLive: sharedDefinition.intent } : {}) });
-      } catch { throw new StudioError('实扣报价已过期、被使用或参数已变化，请重新报价', 409); }
+          scope: billingScope, model: generation.model, fixedCredits: price, imageChannel: imageChannel || originalSharedChannel || input.imageChannel,
+          ...(sharedDefinition ? { sharedLive: sharedDefinition.intent } : {}), ratioContractVersion,
+          ...(outputPlan && outputPlanHash ? { outputPlans: Array.from({ length: input.count }, () => outputPlan),
+            outputPlanHashes: Array.from({ length: input.count }, () => outputPlanHash) } : {}) });
+      } catch { throw new StudioError('图片规格或报价已更新、过期或被使用，请重新获取实际尺寸与报价；尚未生成', 409); }
       price = billingContract.authorizedCredits;
-      if (input.maxEstimatedCost === undefined || price * input.count > input.maxEstimatedCost) throw new StudioError('请先确认本次预估及最高扣点授权', 409);
+      if (billingContract.mode === 'actual' && (input.maxEstimatedCost === undefined || price * input.count > input.maxEstimatedCost)) throw new StudioError('请先确认本次预估及最高扣点授权', 409);
     }
     const fingerprint = imageChannel
       ? createHash('sha256').update(`${requestFingerprint}\0${imageChannel.channelId}\0${imageChannel.configRevision}`).digest('hex')
@@ -848,7 +873,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       aspectRatio,
       resolvedAspectRatio,
       aspectRatioSource,
-      ratioContractVersion: 2,
+      ratioContractVersion,
+      ...(outputPlan ? { outputPlan, outputPlanHash } : {}),
       resolution,
       outputSize: outputSize || null,
       resolvedOutputSize: outputSize || null,
@@ -895,13 +921,18 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
 export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded' | 'failed' | 'uncertain', data: { assetId?: string; preparedAsset?: Prisma.AssetUncheckedCreateInput; retainedAsset?: Prisma.AssetUncheckedCreateInput; error?: string; usage?: unknown } = {}, transaction?: Prisma.TransactionClient) {
   const finish = async (tx: Prisma.TransactionClient) => {
     const recovering = task.status === 'uncertain';
+    let frozenOriginalV3 = false;
+    try {
+      const snapshot = JSON.parse(task.snapshot_json || '{}') as Record<string, unknown>;
+      frozenOriginalV3 = snapshot.ratioContractVersion === 3 && safeImageChannelSnapshot(snapshot.imageChannel)?.channelId === 'original';
+    } catch {}
     const retainedMismatch = Boolean(data.retainedAsset && studioDimensionMismatch({ status, usage_json: JSON.stringify(data.usage) }));
     if (data.retainedAsset && !retainedMismatch) throw new Error('Retained output requires a proven dimension mismatch');
     if (recovering && status === 'uncertain' && !retainedMismatch) return false;
     const recovery = recovering ? await import('./async-recovery') : null;
     if (recovery && !await recovery.studioAsyncRecoveryLease(tx, task)) return false;
     const activeStatus = recovering ? 'uncertain' : task.status === 'channel_running' ? 'channel_running' : 'running';
-    const channel = activeStatus === 'channel_running' || recovering;
+    const channel = activeStatus === 'channel_running' || recovering && !frozenOriginalV3;
     // Complete the same recovery CAS before changing task state; both roll back
     // with asset/ledger settlement if any later step fails.
     if (recovery && (status !== 'uncertain' || retainedMismatch)) await recovery.completeStudioAsyncRecovery(tx, task);
@@ -920,9 +951,9 @@ export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded
         || !asset.thumbnail_url || asset.width !== prepared.width || asset.height !== prepared.height) throw new Error('Output asset unavailable');
       await tx.imageStudioTask.update({ where: { id: task.id }, data: { asset_id: asset.id } });
     }
-    // A channel request with an unknown result must remain visible and retain
-    // its original reservation. It is not permission to refund or re-submit.
-    if (channel && status === 'uncertain') return true;
+    // Unknown acceptance retains the original reservation, including new
+    // frozen-original requests. The latter keep their original billing prefix.
+    if (status === 'uncertain' && (channel || frozenOriginalV3 && !retainedMismatch)) return true;
     const billing = parseImageBillingContract(task.billing_contract_json);
     if (task.billing_mode === 'actual') {
       if (!billing || billing.mode !== 'actual' || billing.scope !== task.billing_scope
@@ -1087,7 +1118,7 @@ export async function studioTaskDTOs(ownerId: string, isAdmin: boolean, items: I
       error: mismatch && studioTaskHasViewableOutput(task) ? studioDimensionMismatchNotice(mismatch.validation) : task.error, unitCredits: task.unit_credits,
       providerCostUsd: task.provider_cost_usd,
       billing: imageBillingView(task, ownerId, isAdmin),
-      aspectRatio: task.aspect_ratio, outputSize: task.output_size,
+      aspectRatio: task.aspect_ratio, outputSize: task.output_size, outputPlan: snapshot.outputPlan,
       resultDisposition: mismatch ? mismatch.code === 'generated_format_mismatch' ? 'format_mismatch' : 'dimensions_mismatch' : task.status === 'succeeded' ? 'accepted' : null,
       createdAt: task.created_at, finishedAt: task.finished_at, referenceIds: snapshot.transientReferenceImages.map(image => image.id),
       snapshot: { ...snapshot, moduleContextVersion: contextVersions.get(task.id)?.code ?? null, moduleContextVersionState: contextVersions.get(task.id)?.state ?? 'missing' },
@@ -1233,6 +1264,7 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json'
     aspectRatioSource: typeof parsed.aspectRatioSource === 'string' ? parsed.aspectRatioSource : 'model-default',
     resolution: typeof parsed.resolution === 'string' ? parsed.resolution : null,
     outputSize: typeof parsed.outputSize === 'string' ? parsed.outputSize : task.output_size,
+    outputPlan: publicImageOutputPlan(parsed.outputPlan),
     globalContext: isAdmin && typeof parsed.globalContext === 'string' ? parsed.globalContext : '',
     moduleContext: isAdmin && typeof parsed.moduleContext === 'string' ? parsed.moduleContext : '',
     unitCredits,

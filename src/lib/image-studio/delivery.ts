@@ -7,6 +7,7 @@ import { openStudioImageStream, classifyStudioDownloadError, StudioImageDownload
 import { studioGenerationDetailSuperseded } from './delivery-display';
 import { cleanupStudioResponseEvidence } from './response-evidence';
 import { studioOutputMismatch as studioDimensionMismatch, studioTaskHasViewableOutput } from './dimension-mismatch';
+import { validStudioProviderWait, type StudioProviderWait } from './provider-wait';
 
 const root = () => path.join(process.cwd(), 'storage', 'studio-delivery');
 let lastCleanup = 0;
@@ -43,11 +44,169 @@ async function save(record: StudioDelivery) { await writePrivate(record.taskId, 
 export type StudioReceipt = { taskId: string; ownerId: string; localRequestId: string; batchId: string; fingerprint: string;
   submittedAt: number; returnedAt?: number; status?: number; upstreamRequestId?: string; headerName?: string;
   gatewayRequestId?: string; billingScope?: string | null; channelId?: string; configRevision?: string;
-  dispatchState?: 'prepared' | 'held' | 'attempted' };
+  dispatchState?: 'prepared' | 'held' | 'attempted'; inputManifest?: StudioInputManifest };
 type AsyncIdentity = Identity & { snapshot_json: string | null };
-export type StudioAsyncReceipt = { schema: 'image.async-receipt.v1'; taskId: string; ownerId: string;
+export type StudioAsyncReceipt = StudioProviderWait & { schema: 'image.async-receipt.v1' | 'image.async-receipt.v2'; taskId: string; ownerId: string;
   channelId: string; configRevision: string; providerTaskId: string; pollAfterMs: number; acceptedAt: number;
+  localRequestId?: string; fingerprint?: string;
+  resultReady?: true;
   expiresAt?: string; state: 'accepted' | 'success' | 'failed'; waitingStatus?: 'pending' | 'retrying' | 'unconfirmed' };
+export type StudioInputManifest = { schema: 'image.input-manifest.v1'; entries: Array<{ id: string; ownerId: string; ordinal: number;
+  sourceSha256: string; sourceBytes: number; frozenHashMatched: boolean | null; sourceVersion?: string;
+  normalizedSha256: string; normalizedBytes: number; mimeType: 'image/png' }> };
+type CoreTask = AsyncIdentity & { batch_id: string; fingerprint: string; billing_scope?: string | null };
+export type StudioCorePending = { schema: 'image.core-pending.v1'; request: StudioReceipt; async?: StudioAsyncReceipt };
+export type StudioCoreReceiptAdapters = {
+  updateBilling?: (receipt: StudioReceipt) => Promise<void>;
+  fault?: (stage: 'pending-request' | 'pending-billing' | 'request' | 'request-billing' | 'async' | 'async-billing' | 'database') => void | Promise<void>;
+};
+export class StudioCoreReceiptError extends Error {
+  providerNotBefore?: number;
+  constructor(public readonly code: 'core_receipt_pending' | 'core_receipt_identity_conflict', public readonly durable: boolean) {
+    super(code); this.name = 'StudioCoreReceiptError';
+  }
+}
+function newContract(task: AsyncIdentity) {
+  try { return JSON.parse(task.snapshot_json || '{}').ratioContractVersion === 3; } catch { return false; }
+}
+function sameRequestIdentity(a: StudioReceipt, b: StudioReceipt) {
+  return ['taskId', 'ownerId', 'localRequestId', 'batchId', 'fingerprint', 'submittedAt', 'channelId', 'configRevision', 'billingScope']
+    .every(key => a[key as keyof StudioReceipt] === b[key as keyof StudioReceipt]);
+}
+function mergeAsyncObservations(a: StudioAsyncReceipt, b: StudioAsyncReceipt): StudioAsyncReceipt {
+  if (['schema', 'taskId', 'ownerId', 'channelId', 'configRevision', 'providerTaskId', 'acceptedAt', 'expiresAt', 'localRequestId', 'fingerprint']
+    .some(key => a[key as keyof StudioAsyncReceipt] !== b[key as keyof StudioAsyncReceipt])
+    || a.state !== 'accepted' && b.state !== 'accepted' && a.state !== b.state) throw new StudioCoreReceiptError('core_receipt_identity_conflict', true);
+  const later = (a.providerNotBefore || 0) >= (b.providerNotBefore || 0) ? a : b;
+  return { ...a, pollAfterMs: Math.max(a.pollAfterMs, b.pollAfterMs), state: a.state === 'accepted' ? b.state : a.state,
+    ...(a.resultReady || b.resultReady ? { resultReady: true } : {}),
+    ...(later.providerNotBefore ? { providerNotBefore: later.providerNotBefore,
+      providerWaitSource: a.providerWaitSource === 'invalid-conservative' || b.providerWaitSource === 'invalid-conservative'
+        ? 'invalid-conservative' : later.providerWaitSource } : {}) };
+}
+function assertCoreIdentity(task: CoreTask, pending: StudioCorePending) {
+  const receipt = pending.request, expected = asyncIdentity(task);
+  let requestId: unknown; try { requestId = JSON.parse(task.snapshot_json || '{}').requestId; } catch {}
+  if (pending.schema !== 'image.core-pending.v1' || !receipt || receipt.taskId !== task.id || receipt.ownerId !== task.owner_id
+    || receipt.batchId !== task.batch_id || receipt.fingerprint !== task.fingerprint || receipt.localRequestId !== (requestId || task.batch_id)
+    || receipt.channelId !== expected.channelId || receipt.configRevision !== expected.configRevision
+    || receipt.billingScope !== task.billing_scope || !Number.isSafeInteger(receipt.submittedAt)
+    || receipt.status !== undefined && (!Number.isSafeInteger(receipt.status) || receipt.status < 100 || receipt.status > 599)
+    || receipt.returnedAt !== undefined && (!Number.isSafeInteger(receipt.returnedAt) || receipt.returnedAt < receipt.submittedAt)
+    || pending.async && (pending.async.taskId !== task.id || pending.async.ownerId !== task.owner_id
+      || pending.async.channelId !== expected.channelId || pending.async.configRevision !== expected.configRevision
+      || pending.async.localRequestId !== receipt.localRequestId || pending.async.fingerprint !== receipt.fingerprint
+      || !/^[a-zA-Z0-9_-]{1,180}$/.test(pending.async.providerTaskId) || !validStudioProviderWait(pending.async))) {
+    throw new StudioCoreReceiptError('core_receipt_identity_conflict', true);
+  }
+}
+async function readBoundedCoreFile(task: Identity, name: string, billing: boolean) {
+  const file = path.join(directory(task.id, billing), name);
+  try { const stat = await fs.lstat(file); if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 32768) throw new Error('core_receipt_invalid');
+    return JSON.parse(await fs.readFile(file, 'utf8'));
+  } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
+}
+export async function readStudioCorePending(task: CoreTask): Promise<StudioCorePending | null> {
+  let found: StudioCorePending | null = null;
+  for (const billing of [false, true]) {
+    const value = await readBoundedCoreFile(task, 'core-pending.json', billing) as StudioCorePending | null;
+    if (!value) continue;
+    assertCoreIdentity(task, value);
+    if (found && (!sameRequestIdentity(found.request, value.request)
+      || found.request.gatewayRequestId && value.request.gatewayRequestId && found.request.gatewayRequestId !== value.request.gatewayRequestId
+      || found.async && value.async && found.async.providerTaskId !== value.async.providerTaskId)) throw new StudioCoreReceiptError('core_receipt_identity_conflict', true);
+    if (found?.async && value.async) { found = { ...found, async: mergeAsyncObservations(found.async, value.async) }; continue; }
+    // A crash between the two writes may leave one copy at headers-only.
+    found = !found || value.async && !found.async || (value.async?.providerNotBefore || 0) > (found.async?.providerNotBefore || 0)
+      || value.async?.resultReady && !found.async?.resultReady
+      || !found.request.returnedAt ? value : found;
+  }
+  return found;
+}
+async function writeCorePending(task: CoreTask, pending: StudioCorePending, adapters: StudioCoreReceiptAdapters) {
+  assertCoreIdentity(task, pending);
+  const bytes = JSON.stringify(pending);
+  if (Buffer.byteLength(bytes) > 32768) throw new Error('core_receipt_size_limit');
+  let durable = false, failure: unknown;
+  for (const billing of [false, true]) {
+    try { await adapters.fault?.(billing ? 'pending-billing' : 'pending-request'); await writePrivate(task.id, 'core-pending.json', bytes, billing); durable = true; }
+    catch (error) { failure = error; }
+  }
+  if (failure) throw new StudioCoreReceiptError('core_receipt_pending', durable);
+}
+async function applyCorePending(task: CoreTask, pending: StudioCorePending, adapters: StudioCoreReceiptAdapters) {
+  assertCoreIdentity(task, pending);
+  for (const billing of [false, true]) {
+    const request = await readBoundedCoreFile(task, 'request.json', billing) as StudioReceipt | null;
+    if (request && (!sameRequestIdentity(request, pending.request)
+      || request.gatewayRequestId && request.gatewayRequestId !== pending.request.gatewayRequestId
+      || request.upstreamRequestId && request.upstreamRequestId !== pending.request.upstreamRequestId
+      || request.status !== undefined && request.status !== pending.request.status)) throw new StudioCoreReceiptError('core_receipt_identity_conflict', true);
+    const async = await readBoundedCoreFile(task, 'async.json', billing) as StudioAsyncReceipt | null;
+    if (async && (!pending.async || async.providerTaskId !== pending.async.providerTaskId || async.ownerId !== task.owner_id
+      || async.channelId !== pending.async.channelId || async.configRevision !== pending.async.configRevision
+      || async.acceptedAt !== pending.async.acceptedAt || async.expiresAt !== pending.async.expiresAt
+      || async.localRequestId !== pending.async.localRequestId || async.fingerprint !== pending.async.fingerprint)) throw new StudioCoreReceiptError('core_receipt_identity_conflict', true);
+    if (async && pending.async) pending = { ...pending, async: mergeAsyncObservations(async, pending.async) };
+  }
+  try {
+    for (const billing of [false, true]) {
+      await adapters.fault?.(billing ? 'request-billing' : 'request');
+      await writePrivate(task.id, 'request.json', JSON.stringify(pending.request), billing);
+      if (pending.async) { await adapters.fault?.(billing ? 'async-billing' : 'async'); await writePrivate(task.id, 'async.json', JSON.stringify(pending.async), billing); }
+    }
+    await adapters.fault?.('database');
+    await (adapters.updateBilling || updateStudioCoreBilling)(pending.request);
+  } catch (error) { if (error instanceof StudioCoreReceiptError) throw error; throw new StudioCoreReceiptError('core_receipt_pending', true); }
+  // Removing either completed sidecar is safe: all core copies and DB association already exist.
+  for (const billing of [false, true]) await fs.unlink(path.join(directory(task.id, billing), 'core-pending.json')).catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; });
+  return pending.async || null;
+}
+async function updateStudioCoreBilling(receipt: StudioReceipt) {
+  if (!receipt.billingScope || receipt.status === undefined) return;
+  const current = await prisma.imageStudioTask.findUnique({ where: { id: receipt.taskId } });
+  if (!current || current.owner_id !== receipt.ownerId || current.batch_id !== receipt.batchId || current.fingerprint !== receipt.fingerprint
+    || current.billing_scope !== receipt.billingScope || current.gateway_request_id && current.gateway_request_id !== receipt.gatewayRequestId) {
+    throw new StudioCoreReceiptError('core_receipt_identity_conflict', true);
+  }
+  if (current.billing_settled_at || current.actual_credits !== null) return; // Never reopen a completed accounting decision.
+  const prefix = receipt.channelId && receipt.channelId !== 'original' ? 'channel_' : '';
+  if (current.gateway_request_id === (receipt.gatewayRequestId || null)
+    && ![`${prefix}awaiting_response`, null].includes(current.billing_status)) return;
+  const changed = await prisma.imageStudioTask.updateMany({ where: { id: receipt.taskId, owner_id: receipt.ownerId,
+    batch_id: receipt.batchId, fingerprint: receipt.fingerprint, billing_scope: receipt.billingScope, billing_settled_at: null, actual_credits: null,
+    billing_status: current.billing_status,
+    OR: [{ gateway_request_id: null }, { gateway_request_id: receipt.gatewayRequestId || null }] },
+    data: { gateway_request_id: receipt.gatewayRequestId || null,
+      billing_status: `${prefix}${receipt.gatewayRequestId ? 'pending' : 'unmatched'}`, billing_next_check_at: new Date() } });
+  if (!changed.count) throw new StudioCoreReceiptError('core_receipt_pending', true);
+}
+export async function repairStudioCoreReceipt(task: CoreTask, adapters: StudioCoreReceiptAdapters = {}) {
+  try {
+    const pending = await readStudioCorePending(task);
+    return pending ? await applyCorePending(task, pending, adapters) : null;
+  } catch (error) {
+    if (error instanceof StudioCoreReceiptError) throw error;
+    throw new StudioCoreReceiptError(error instanceof SyntaxError || error instanceof Error && error.message === 'core_receipt_invalid'
+      ? 'core_receipt_identity_conflict' : 'core_receipt_pending', false);
+  }
+}
+/** Internal recovery authority only; a prepared marker alone is never an accepted request. */
+export async function hasStudioAcceptedRecoveryIdentity(task: CoreTask, async?: StudioAsyncReceipt | null, delivery?: StudioDelivery | null) {
+  const request = await readStudioRequestReceipt(task);
+  if (!request || request.taskId !== task.id || request.ownerId !== task.owner_id || request.batchId !== task.batch_id
+    || request.fingerprint !== task.fingerprint || !request.returnedAt || !request.status || request.status < 200 || request.status >= 300
+    || request.dispatchState === 'held') return false;
+  let snapshot: Record<string, unknown>; try { snapshot = JSON.parse(task.snapshot_json || '{}'); } catch { return false; }
+  if (request.localRequestId !== (snapshot.requestId || task.batch_id)) return false;
+  if (async) {
+    const expected = asyncIdentity(task);
+    return request.channelId === expected.channelId && request.configRevision === expected.configRevision
+      && async.taskId === task.id && async.ownerId === task.owner_id && async.channelId === expected.channelId
+      && async.configRevision === expected.configRevision && /^[a-zA-Z0-9_-]{1,180}$/.test(async.providerTaskId);
+  }
+  return Boolean(delivery?.complete && delivery.taskId === task.id && delivery.ownerId === task.owner_id);
+}
 function asyncIdentity(task: AsyncIdentity) {
   let snapshot;
   try { snapshot = JSON.parse(task.snapshot_json || '{}').imageChannel; } catch {}
@@ -55,43 +214,68 @@ function asyncIdentity(task: AsyncIdentity) {
   return { channelId: snapshot.channelId, configRevision: snapshot.configRevision };
 }
 export async function readStudioRequestReceipt(task: Identity): Promise<StudioReceipt | null> {
+  let found: StudioReceipt | null = null;
   for (const billing of [false, true]) {
     try { const value = JSON.parse(await fs.readFile(path.join(directory(task.id, billing), 'request.json'), 'utf8')) as StudioReceipt;
       if (value.taskId !== task.id || value.ownerId !== task.owner_id) throw new Error('Request receipt ownership mismatch');
-      return value;
+      if (found && (!sameRequestIdentity(found, value)
+        || found.gatewayRequestId && value.gatewayRequestId && found.gatewayRequestId !== value.gatewayRequestId
+        || found.upstreamRequestId && value.upstreamRequestId && found.upstreamRequestId !== value.upstreamRequestId
+        || found.status !== undefined && value.status !== undefined && found.status !== value.status)) throw new Error('Request receipt identity conflict');
+      if (!found || value.returnedAt && !found.returnedAt) found = value;
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   }
-  return null;
+  return found;
 }
 export async function readStudioAsyncReceipt(task: AsyncIdentity): Promise<StudioAsyncReceipt | null> {
   const expected = asyncIdentity(task);
+  let found: StudioAsyncReceipt | null = null;
+  let snapshot: Record<string, unknown> = {}; try { snapshot = JSON.parse(task.snapshot_json || '{}'); } catch {}
   for (const billing of [false, true]) {
     try { const value = JSON.parse(await fs.readFile(path.join(directory(task.id, billing), 'async.json'), 'utf8')) as StudioAsyncReceipt;
-      if (value.schema !== 'image.async-receipt.v1' || value.taskId !== task.id || value.ownerId !== task.owner_id
+      if (!['image.async-receipt.v1', 'image.async-receipt.v2'].includes(value.schema) || value.taskId !== task.id || value.ownerId !== task.owner_id
         || value.channelId !== expected.channelId || value.configRevision !== expected.configRevision
         || !/^[a-zA-Z0-9_-]{1,180}$/.test(value.providerTaskId) || !Number.isFinite(value.acceptedAt)
         || !Number.isSafeInteger(value.pollAfterMs) || value.pollAfterMs < 2000 || value.pollAfterMs > 30000
         || (value.expiresAt !== undefined && (typeof value.expiresAt !== 'string' || !Number.isFinite(Date.parse(value.expiresAt))))
-        || !['accepted', 'success', 'failed'].includes(value.state)) throw new Error('Async receipt identity mismatch');
-      return value;
+        || !['accepted', 'success', 'failed'].includes(value.state)
+        || value.schema === 'image.async-receipt.v2' && !validStudioProviderWait(value)
+        || value.schema === 'image.async-receipt.v2' && (value.localRequestId !== snapshot.requestId
+          || value.fingerprint !== (task as CoreTask).fingerprint || value.resultReady !== undefined && value.resultReady !== true)
+        || value.schema === 'image.async-receipt.v1' && (value.providerNotBefore !== undefined || value.providerWaitSource !== undefined || value.resultReady !== undefined)) throw new Error('Async receipt identity mismatch');
+      if (found && (found.providerTaskId !== value.providerTaskId || found.acceptedAt !== value.acceptedAt || found.schema !== value.schema
+        || found.expiresAt !== value.expiresAt || found.localRequestId !== value.localRequestId || found.fingerprint !== value.fingerprint)) throw new Error('Async receipt identity conflict');
+      found = found ? mergeAsyncObservations(found, value) : value;
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   }
-  return null;
+  return found;
 }
-export async function createStudioAsyncReceipt(task: AsyncIdentity, accepted: { taskId: string; pollAfterMs?: number; expiresAt?: string }) {
+export async function createStudioAsyncReceipt(task: AsyncIdentity, accepted: StudioProviderWait & { taskId: string; pollAfterMs?: number; expiresAt?: string }) {
   const identity = asyncIdentity(task);
   if (!/^[a-zA-Z0-9_-]{1,180}$/.test(accepted.taskId)) throw new Error('Invalid upstream task identity');
   const previous = await readStudioAsyncReceipt(task);
   if (previous) { if (previous.providerTaskId !== accepted.taskId) throw new Error('Async task identity changed'); return previous; }
-  const receipt: StudioAsyncReceipt = { schema: 'image.async-receipt.v1', taskId: task.id, ownerId: task.owner_id, ...identity,
+  const receipt: StudioAsyncReceipt = { schema: newContract(task) ? 'image.async-receipt.v2' : 'image.async-receipt.v1', taskId: task.id, ownerId: task.owner_id, ...identity,
     providerTaskId: accepted.taskId, pollAfterMs: Math.min(30000, Math.max(2000, Math.floor(accepted.pollAfterMs || 2000))),
     ...(typeof accepted.expiresAt === 'string' && Number.isFinite(Date.parse(accepted.expiresAt)) ? { expiresAt: accepted.expiresAt } : {}),
-    acceptedAt: Date.now(), state: 'accepted', waitingStatus: 'pending' };
+    acceptedAt: Date.now(), state: 'accepted', waitingStatus: 'pending',
+    ...(newContract(task) ? { localRequestId: JSON.parse(task.snapshot_json || '{}').requestId, fingerprint: (task as CoreTask).fingerprint } : {}),
+    ...(newContract(task) && validStudioProviderWait(accepted) ? { providerNotBefore: accepted.providerNotBefore, providerWaitSource: accepted.providerWaitSource } : {}) };
   await writePrivate(task.id, 'async.json', JSON.stringify(receipt));
   await writePrivate(task.id, 'async.json', JSON.stringify(receipt), true);
   return receipt;
 }
-export async function updateStudioAsyncReceipt(receipt: StudioAsyncReceipt, changes: { state?: StudioAsyncReceipt['state']; pollAfterMs?: number; waitingStatus?: StudioAsyncReceipt['waitingStatus'] }) {
+export async function updateStudioAsyncReceipt(receipt: StudioAsyncReceipt, changes: StudioProviderWait & { state?: StudioAsyncReceipt['state']; pollAfterMs?: number; waitingStatus?: StudioAsyncReceipt['waitingStatus'] }) {
+  changes = { state: changes.state, pollAfterMs: changes.pollAfterMs, waitingStatus: changes.waitingStatus,
+    providerNotBefore: changes.providerNotBefore, providerWaitSource: changes.providerWaitSource };
+  if (!validStudioProviderWait(changes)) throw new Error('Invalid async wait observation');
+  if (receipt.schema === 'image.async-receipt.v1') { changes = { state: changes.state, pollAfterMs: changes.pollAfterMs, waitingStatus: changes.waitingStatus }; }
+  if (changes.providerNotBefore !== undefined && (receipt.providerNotBefore || 0) > changes.providerNotBefore) {
+    changes = { ...changes, providerNotBefore: receipt.providerNotBefore,
+      providerWaitSource: changes.providerWaitSource === 'invalid-conservative' ? changes.providerWaitSource : receipt.providerWaitSource };
+  }
+  // Optional values must not erase a previously durable state or wait.
+  changes = Object.fromEntries(Object.entries(changes).filter(([, value]) => value !== undefined));
   Object.assign(receipt, changes, { pollAfterMs: Math.min(30000, Math.max(2000, Math.floor(changes.pollAfterMs || receipt.pollAfterMs))) });
   await writePrivate(receipt.taskId, 'async.json', JSON.stringify(receipt));
   await writePrivate(receipt.taskId, 'async.json', JSON.stringify(receipt), true);
@@ -130,7 +314,28 @@ export async function setStudioUnsentRequestState(task: Identity, state: 'held' 
     || receipt.returnedAt !== undefined) throw new Error('Unsent request identity unavailable');
   await writePrivate(task.id, 'request.json', JSON.stringify({ ...receipt, dispatchState: state }));
 }
-export async function recordStudioResponse(task: Identity, response: Response) {
+function responseReceipt(receipt: StudioReceipt, response: Response): StudioReceipt {
+  receipt = { ...receipt };
+  receipt.returnedAt = receipt.returnedAt || Date.now(); receipt.status = response.status;
+  const gateway = response.headers.get('x-oneapi-request-id');
+  if (gateway && /^[a-zA-Z0-9_.:-]{1,200}$/.test(gateway)) receipt.gatewayRequestId = gateway;
+  for (const name of ['x-request-id', 'request-id', 'x-ms-request-id']) {
+    const id = response.headers.get(name);
+    if (id && /^[a-zA-Z0-9_.:-]{1,200}$/.test(id)) { receipt.upstreamRequestId = id; receipt.headerName = name; break; }
+  }
+  return receipt;
+}
+export async function recordStudioResponse(task: Identity, response: Response, adapters: StudioCoreReceiptAdapters = {}) {
+  if ('snapshot_json' in task && newContract(task as CoreTask)) {
+    const coreTask = task as CoreTask;
+    const prior = await readStudioCorePending(coreTask);
+    const request = prior?.request || await readStudioRequestReceipt(task);
+    if (!request) throw new StudioCoreReceiptError('core_receipt_identity_conflict', false);
+    const pending: StudioCorePending = { schema: 'image.core-pending.v1', request: responseReceipt(request, response), ...(prior?.async ? { async: prior.async } : {}) };
+    await writeCorePending(coreTask, pending, adapters);
+    await applyCorePending(coreTask, pending, adapters);
+    return;
+  }
   const file = path.join(directory(task.id), 'request.json');
   const receipt: StudioReceipt = JSON.parse(await fs.readFile(file, 'utf8'));
   if (receipt.taskId !== task.id || receipt.ownerId !== task.owner_id) throw new Error('Request identity mismatch');
@@ -152,6 +357,47 @@ export async function recordStudioResponse(task: Identity, response: Response) {
         billing_status: `${receipt.channelId ? 'channel_' : ''}${receipt.gatewayRequestId ? 'pending' : 'unmatched'}`, billing_next_check_at: new Date() } });
     if (!changed.count) throw new Error('Billing receipt identity conflict');
   }
+}
+/** The 202 body is read even if headers-only persistence failed. No GET is allowed before this completes. */
+export async function recordStudioAsyncAcceptance(task: CoreTask, response: Response,
+  accepted: StudioProviderWait & { taskId: string; pollAfterMs?: number; expiresAt?: string }, adapters: StudioCoreReceiptAdapters = {}) {
+  if (!newContract(task)) return createStudioAsyncReceipt(task, accepted);
+  const prior = await readStudioCorePending(task);
+  const request = prior?.request || await readStudioRequestReceipt(task);
+  if (!request || !/^[a-zA-Z0-9_-]{1,180}$/.test(accepted.taskId) || !validStudioProviderWait(accepted)) throw new StudioCoreReceiptError('core_receipt_identity_conflict', false);
+  const existing = await readStudioAsyncReceipt(task);
+  if (existing && existing.providerTaskId !== accepted.taskId || prior?.async && prior.async.providerTaskId !== accepted.taskId) throw new StudioCoreReceiptError('core_receipt_identity_conflict', true);
+  const receipt: StudioAsyncReceipt = prior?.async || existing || { schema: 'image.async-receipt.v2', taskId: task.id, ownerId: task.owner_id,
+    ...asyncIdentity(task), providerTaskId: accepted.taskId, pollAfterMs: Math.min(30000, Math.max(2000, Math.floor(accepted.pollAfterMs || 2000))),
+    localRequestId: request.localRequestId, fingerprint: task.fingerprint,
+    acceptedAt: Date.now(), state: 'accepted', waitingStatus: 'pending',
+    ...(typeof accepted.expiresAt === 'string' && Number.isFinite(Date.parse(accepted.expiresAt)) ? { expiresAt: accepted.expiresAt } : {}),
+    ...(accepted.providerNotBefore !== undefined ? { providerNotBefore: accepted.providerNotBefore, providerWaitSource: accepted.providerWaitSource } : {}) };
+  const pending: StudioCorePending = { schema: 'image.core-pending.v1', request: responseReceipt(request, response), async: receipt };
+  await writeCorePending(task, pending, adapters);
+  return await applyCorePending(task, pending, adapters) || receipt;
+}
+export async function recordStudioInputManifest(task: CoreTask, manifest: StudioInputManifest) {
+  if (!newContract(task)) return;
+  const receipt = await readStudioRequestReceipt(task);
+  if (!receipt || receipt.status !== undefined || receipt.dispatchState === 'attempted') throw new Error('input_manifest_request_already_attempted');
+  const pending: StudioCorePending = { schema: 'image.core-pending.v1', request: { ...receipt, inputManifest: manifest } };
+  await writeCorePending(task, pending, {});
+  await applyCorePending(task, pending, {});
+}
+/** A new provider wait is core scheduling state and follows the same repair journal. */
+export async function recordStudioAsyncProgress(task: CoreTask, receipt: StudioAsyncReceipt, changes: StudioProviderWait & { pollAfterMs?: number; resultReady?: true }) {
+  if (receipt.schema === 'image.async-receipt.v1') { await updateStudioAsyncReceipt(receipt, changes); return; }
+  const request = await readStudioRequestReceipt(task);
+  if (!request || !validStudioProviderWait(changes)) throw new StudioCoreReceiptError('core_receipt_identity_conflict', false);
+  const next = { ...receipt, pollAfterMs: Math.min(30000, Math.max(2000, Math.floor(changes.pollAfterMs || receipt.pollAfterMs))),
+    ...(changes.resultReady ? { resultReady: true as const } : {}),
+    ...((changes.providerNotBefore || 0) > (receipt.providerNotBefore || 0) || changes.providerWaitSource === 'invalid-conservative'
+      ? { providerNotBefore: Math.max(changes.providerNotBefore || 0, receipt.providerNotBefore || 0), providerWaitSource: changes.providerWaitSource } : {}) };
+  const pending: StudioCorePending = { schema: 'image.core-pending.v1', request, async: next };
+  await writeCorePending(task, pending, {});
+  const complete = await applyCorePending(task, pending, {});
+  Object.assign(receipt, complete || next);
 }
 export function decodeStudioBase64(value: string) {
   if (!value.length || value.length > MAX_STUDIO_GENERATED_BASE64 || value.length % 4 !== 0
@@ -193,12 +439,16 @@ export async function studioDeliveryStatus(task: Identity & { status: string; us
   const asyncRecovery = task.status === 'uncertain' && !studioTaskHasViewableOutput(task) && 'snapshot_json' in task
     ? await (await import('./async-recovery')).readStudioAsyncRecovery(task as import('@prisma/client').ImageStudioTask).catch(() => null)
     : null;
+  const providerCheck = running && 'snapshot_json' in task
+    ? await (await import('./async-recovery')).readStudioActiveProviderCheck(task as import('@prisma/client').ImageStudioTask).catch(() => null) : null;
   return { phase: task.status === 'queued' || task.status === 'channel_queued' ? 'queued' : task.status === 'succeeded' || studioTaskHasViewableOutput(task) ? 'ready'
     : running ? record?.phase || 'provider' : record ? 'stopped' : task.status === 'uncertain' ? 'unknown' : 'failed',
     accepted: Boolean(asyncReceipt),
     acceptedAt: asyncReceipt && Number.isFinite(asyncReceipt.acceptedAt) && asyncReceipt.acceptedAt > 0 ? asyncReceipt.acceptedAt : undefined,
     waitingStatus: asyncReceipt && ['pending', 'retrying', 'unconfirmed'].includes(asyncReceipt.waitingStatus || '') ? asyncReceipt.waitingStatus : undefined,
     ...(asyncRecovery ? { asyncRecovery } : {}),
+    ...(providerCheck ? { providerCheck } : {}),
+    ...(asyncReceipt?.providerNotBefore ? { providerNotBefore: asyncReceipt.providerNotBefore } : {}),
     generationDetailSuperseded: studioGenerationDetailSuperseded(task.status, record, asyncReceipt),
     receivedBytes: record?.receivedBytes, expectedBytes: record?.expectedBytes,
     recoveryAvailable: running && Boolean(asyncReceipt && asyncReceipt.state !== 'failed' || record && studioDeliveryCanRetry(record)),
@@ -249,6 +499,13 @@ export async function resetStudioAsyncDelivery(task: AsyncIdentity, providerTask
 }
 
 export async function preserveStudioBillingReceipt(task: Identity) {
+  // Pending core evidence is accounting state, not an expiring delivery diagnostic.
+  const pending = await readBoundedCoreFile(task, 'core-pending.json', false);
+  if (pending) {
+    if (!('snapshot_json' in task) || !('batch_id' in task) || !('fingerprint' in task)) throw new Error('Core receipt preservation identity unavailable');
+    const core = await readStudioCorePending(task as CoreTask);
+    if (core) await writePrivate(task.id, 'core-pending.json', JSON.stringify(core), true);
+  }
   let receipt: StudioReceipt;
   try { receipt = JSON.parse(await fs.readFile(path.join(directory(task.id), 'request.json'), 'utf8')); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
