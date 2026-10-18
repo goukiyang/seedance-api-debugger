@@ -377,3 +377,27 @@ B1/B2采用项目已安装Prisma5.22.0的事务客户端，预先检查整组权
 - 守门员finish已登记L3-visible-runtime；第一次英文复合intent未命中回退general/L0，已按中文实际目标纠正并记录classification-misjudgment-log，不借此降级。real-result明确skip：项目由用户手动验收；构建、Git和上线不等于功能验收。记录收尾commit仅docs，不抬应用版本或再次部署。
 
 [返回主待办](../todo.md)
+
+## MAT-M01/MAT-M02 手机素材选择与分页（2026-10-18）
+
+项目：video-api-debugger；正式根：`/Volumes/Data/Projects/video-api-debugger`；版本来源：package.json；状态：实施中，发布后用户手动验收；更新：2026-10-18 UTC / 2026-10-17 America/Los_Angeles。起点已核为实际应用80d5cf6f、v0.95.3，发布前重核运行源。UI为L2，发布执行持久数据与回退保护，不自动功能/浏览器验收。
+
+用户要求：“添加或者上传素材”的手机弹窗减轻画幅压力，并替换只按最多3行的限制，综合列数与总数，查开源并落地。“每月”按上下文理解为每页，不改月额度。
+
+| 编号 | 任务内容 | 完成标准 | 状态 |
+|---|---|---|---|
+| MAT-M01 | 手机素材弹窗重设计 | 内容、选择和上传操作适合小屏，不被大面积固定区域挤压 | 进行中 |
+| MAT-M02 | 调整单页图片数量 | 同时考虑每行张数、行数与总数，小屏不只显示3张 | 进行中 |
+| RELEASE | 发布更新 | 完成构建、提交推送与保护部署，交你手动验收 | 未开始 |
+
+实施选择：复用ResourceLibraryPicker共享入口。手机重排为紧凑标题/关闭、浏览页签/搜索、常显横向来源小页签、按需筛选、可滚动素材主体与紧凑上传/已选/添加底栏；已选缩略图按需展开可移除。来源不回隐藏下拉。短屏、键盘、安全区、嵌套预览、失败恢复、数量限制与账号/目标隔离保持。桌面原能力保持；不改上传业务、权限、原请求回执、账单、原图、生成与历史。安全展开偏好复用原隔离存储，重置入口有效。
+
+分页以12张为最低目标、24张为硬上限，兼顾完整行与宽屏3行目标：1/2/3/4列均12张，5/6/7/8列分别15/18/21/24张；不足一页显示实际数量。范围为useResultPages现有两个消费者ResourceLibraryPicker与GeneratedImageResults，非全站替换。保留游标加载、未知总数、有界恢复、筛选账号隔离及横竖屏可见对象锚点，不把渲染数当服务器总数或选取额度。此规则替代REF33的“仅按列最多三行”，其余保护继续。
+
+已读开源：Uppy Dashboard [响应式源码](https://github.com/transloadit/uppy/blob/main/packages/%40uppy/dashboard/src/style.scss)（手机独立内框、flex滚动与短屏辅助信息层级；[MIT许可](https://github.com/transloadit/uppy/blob/main/LICENSE)）；TanStack Table v8.21.3 [RowPagination源码](https://github.com/TanStack/table/blob/v8.21.3/packages/table-core/src/features/RowPagination.ts)（pageSize与pageIndex、总数独立，调整页大小保顶部条目；[MIT许可](https://github.com/TanStack/table/blob/v8.21.3/LICENSE)）。在线源码可访问；仅借思路，不安装或复制整库，不声称依赖已实测。12/24为本项目选择，不冒充开源标准。Jev只读doctor返回deferred/未启用，无外传调用。
+
+Git计划：既有清洁worktree `context-toolbar-ui-20261017/video-api-debugger`、分支`codex/context-toolbar-ui-20261017`隔离正式根旧脏改；整批实施后完整候选build及内置门、源码Review，聚焦提交推现有origin。发布仅换web，原图片/HD/作品/角色消费者不重启；候选与实际来源/BUILD核对，保原v0.95.3完整程序回退，不回DB/媒体/配置/回执。若代码触及后端、版本漂移、构建失败、发布锁冲突或数据盘异常，先停止对应发布步骤。
+
+待手验：手机竖横屏及键盘下素材主体可滚动；来源/筛选/上传/选择/移除/确认/取消/失败恢复可达；窄屏与桌面分页符合容量并保持当前图片、筛选和选择；刷新/重开偏好不串账号；既有更新提醒可用。工程构建和部署不代替真实手机体验。
+
+相关已有资料：2026-10-12来源常显截图 [codex-clipboard-6d9b008a-156e-40c2-8609-323ee99d6146.png](../../docs/materials/2026-10-12-studio-ui-clarity/codex-clipboard-6d9b008a-156e-40c2-8609-323ee99d6146.png) 用于保留来源入口；REF33的[分页原图](../../docs/materials/2026-10-08-canvas-reference-asset-pagination/codex-clipboard-5bee373b-c708-4a18-9ff0-8460b4e2211d.png)及[原工单](2026-10-07-feedback-24h.md#ref33-画布参考图与素材卡片翻页2026-10-08)是历史参考，三行上限由本节替代。本轮无新附件，不生成假手机效果图；关键历史图片本地可读性另核。
