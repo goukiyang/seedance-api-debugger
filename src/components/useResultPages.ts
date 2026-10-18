@@ -5,9 +5,16 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 type Position = { id: string | null; index: number };
 type PageRequest = Position & { restore?: boolean; last?: boolean };
 
+const MIN_PAGE_ITEMS = 12;
+const MAX_PAGE_ITEMS = 24;
+const TARGET_PAGE_ROWS = 3;
+
 export function gridPageCapacity(grid: HTMLElement) {
   const columns = getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length;
-  return Math.max(1, columns) * 3;
+  const rowSize = Math.max(1, columns);
+  const target = Math.max(MIN_PAGE_ITEMS, rowSize * TARGET_PAGE_ROWS);
+  // Prefer complete rows, while keeping even very narrow grids useful and every page bounded.
+  return Math.min(MAX_PAGE_ITEMS, Math.ceil(target / rowSize) * rowSize);
 }
 
 export function useResultPages<T extends { id: string }>({ items: inputItems, storageKey, visible, busy, error, hasMore, loadMore, currentId, total }: {
@@ -17,7 +24,7 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
 }) {
   const items = useMemo(() => Array.from(new Map(inputItems.map(item => [item.id, item])).values()), [inputItems]);
   const gridRef = useRef<HTMLDivElement>(null);
-  const [capacity, setCapacity] = useState(3);
+  const [capacity, setCapacity] = useState(MIN_PAGE_ITEMS);
   const [position, setPosition] = useState<Position>({ id: null, index: 0 });
   const [requested, setRequested] = useState<PageRequest | null>(null);
   const [navigationIssue, setNavigationIssue] = useState('');

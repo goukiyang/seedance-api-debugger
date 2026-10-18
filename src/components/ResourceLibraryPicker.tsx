@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Folder, Grid2X2, ImageIcon, Maximize, Minimize, Music, Play, RotateCcw, Search, Upload, X, ZoomIn, Menu, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Folder, Grid2X2, ImageIcon, Maximize, Minimize, Music, Play, RotateCcw, Search, SlidersHorizontal, Upload, X, ZoomIn, Trash2 } from 'lucide-react';
 import { useResultPages } from '@/components/useResultPages';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import MediaPreview from '@/components/MediaPreview';
@@ -46,8 +46,8 @@ export interface ResourceLibraryPickerProps {
   onAvatarApplied?: () => Promise<void>;
   onAvatarConfirm?: ResourceLibraryPickerProps['onConfirm'];
 }
-type Preferences = { view: 'library' | 'favorites' | 'recent'; scope: PickerScope; source: string; template: string; type: string; query: string; sort: string; album: string; project: string; scroll: number; pages: number };
-const defaults: Preferences = { view: 'library', scope: 'mine', source: 'all', template: '', type: 'all', query: '', sort: 'newest', album: '', project: '', scroll: 0, pages: 1 };
+type Preferences = { view: 'library' | 'favorites' | 'recent'; scope: PickerScope; source: string; template: string; type: string; query: string; sort: string; album: string; project: string; scroll: number; pages: number; filtersOpen: boolean; selectionOpen: boolean };
+const defaults: Preferences = { view: 'library', scope: 'mine', source: 'all', template: '', type: 'all', query: '', sort: 'newest', album: '', project: '', scroll: 0, pages: 1, filtersOpen: false, selectionOpen: false };
 const labels = { image: '图片', video: '视频', audio: '音频' };
 function pickerFilterKey(typesKey: string, prefs: Preferences) {
   return JSON.stringify([typesKey, prefs.view, prefs.scope, prefs.source, prefs.template, prefs.type, prefs.query, prefs.sort, prefs.album, prefs.project]);
@@ -73,6 +73,7 @@ function Thumbnail({ item }: { item: PickerItem }) {
 
 export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'image-studio' : 'assets', title = '添加参考素材', confirmLabel = '添加到参考区', purpose = 'reference', initialSource = 'all', maxSelection, typeLimits, acceptedTypes, currentCount, currentAssetIds, currentReferenceImageIds = [], portalContainer, onClose, onUploadFile, onConfirm, onConfirmSelection, onUploadedAssetsConfirmed, avatarTarget, onAvatarApplied, onAvatarConfirm }: ResourceLibraryPickerProps) {
   const { user } = useAppSession();
+  const pickerId = useId();
   const { confirm: askConfirm, productDialog } = useProductDialog();
   const [removedItem, setRemovedItem] = useState<Pick<PickerItem,'assetId'|'identity'|'fileName'|'canRemoveFromLibrary'> | null>(null);
   const avatarWindow = useRef<Window|null>(null), avatarTicket = useRef('');
@@ -129,8 +130,9 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const uploadReceipts = useRef(new Map<string, UploadedAssetPayload>());
   const [items, setItems] = useState<PickerItem[]>([]), [albums, setAlbums] = useState<PickerAlbum[]>([]), [selected, setSelected] = useState<PickerItem[]>([]), [preview, setPreview] = useState<PickerItem | null>(null);
   const [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [total, setTotal] = useState(0), [hasMore, setHasMore] = useState(false), [page, setPage] = useState(1);
-  const [expanded, setExpanded] = useState(false), [navigationOpen, setNavigationOpen] = useState(false), [failedFiles, setFailedFiles] = useState<File[]>([]), [progress, setProgress] = useState<UploadProgressSnapshot | null>(null), [uploadLabel, setUploadLabel] = useState(''), [container, setContainer] = useState<Element | null>(null), [epoch, setEpoch] = useState(0);
-  const dialog = useRef<HTMLDivElement>(null), backdrop = useRef<HTMLDivElement>(null), body = useRef<HTMLDivElement>(null), input = useRef<HTMLInputElement>(null);
+  const [expanded, setExpanded] = useState(false), [failedFiles, setFailedFiles] = useState<File[]>([]), [progress, setProgress] = useState<UploadProgressSnapshot | null>(null), [uploadLabel, setUploadLabel] = useState(''), [container, setContainer] = useState<Element | null>(null), [epoch, setEpoch] = useState(0);
+  const dialog = useRef<HTMLDivElement>(null), backdrop = useRef<HTMLDivElement>(null), body = useRef<HTMLDivElement>(null), browse = useRef<HTMLElement>(null), input = useRef<HTMLInputElement>(null);
+  const browseSurface = useCallback(() => window.matchMedia('(max-width: 760px)').matches ? browse.current : body.current, []);
   const sequence = useRef(0), session = useRef(0), locked = useRef(false), restoring = useRef(false), restoration = useRef(0);
   const readingMore = useRef(false);
   const filterKey = pickerFilterKey(typesKey, prefs);
@@ -152,12 +154,30 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     for (const field of ['album', 'project', 'template'] as const) if (typeof raw[field] === 'string' && /^[a-zA-Z0-9_-]{0,100}$/.test(raw[field]!)) next[field] = raw[field]!;
     if (typeof raw.scroll === 'number' && Number.isFinite(raw.scroll)) next.scroll = Math.max(0, raw.scroll);
     if (typeof raw.pages === 'number') next.pages = Math.min(5, Math.max(1, Math.floor(raw.pages) || 1));
+    for (const field of ['filtersOpen', 'selectionOpen'] as const) if (typeof raw[field] === 'boolean') next[field] = raw[field]!;
     restoration.current = next.scroll; restoring.current = true;
     setPrefs(next); setQuery(next.query); setSelected([]); setItems([]); setAlbums([]); setTemplates([]); setTotal(0); setPreview(null); setFailedFiles([]); setError(''); setNotice(''); setUploadLabel(''); setProgress(null); setSessionOwner(prefsKey);
     const modal = Array.from(document.querySelectorAll('dialog[open]')).reverse().find(d => d.matches(':modal'));
     setContainer(portalContainer || modal || document.body); setReady(true);
     return () => { sequence.current++; session.current++; };
   }, [open, prefsKey, portalContainer, types, user?.id, initialSource]);
+  useEffect(() => {
+    if (!open || !ready) return;
+    const viewport = window.visualViewport;
+    const updateViewport = () => {
+      backdrop.current?.style.setProperty('--picker-viewport-height', `${viewport?.height ?? window.innerHeight}px`);
+      backdrop.current?.style.setProperty('--picker-viewport-top', `${viewport?.offsetTop ?? 0}px`);
+    };
+    updateViewport();
+    viewport?.addEventListener('resize', updateViewport);
+    viewport?.addEventListener('scroll', updateViewport);
+    window.addEventListener('resize', updateViewport);
+    return () => {
+      viewport?.removeEventListener('resize', updateViewport);
+      viewport?.removeEventListener('scroll', updateViewport);
+      window.removeEventListener('resize', updateViewport);
+    };
+  }, [open, ready, sessionOwner]);
   useEffect(() => { if (!ready || sessionOwner !== prefsKey) return; const timer = setTimeout(() => setPrefs(p => p.query === query ? p : { ...p, query, pages: 1, scroll: 0 }), 250); return () => clearTimeout(timer); }, [query, ready, sessionOwner, prefsKey]);
   useEffect(() => { if (ready && prefsKey && sessionOwner === prefsKey) { try { localStorage.setItem(prefsKey, JSON.stringify(prefs)); } catch { /* Storage failure never prevents selection. */ } } }, [prefs, ready, prefsKey, sessionOwner]);
   const readCursor = useRef<string | null>(null);
@@ -194,7 +214,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     })();
     return () => { sequence.current++; };
   }, [open, ready, sessionOwner, prefsKey, fetchPage, epoch]);
-  useEffect(() => { if (loading || !items.length || !restoring.current) return; body.current?.scrollTo({ top: restoration.current }); restoring.current = false; }, [items, loading]);
+  useEffect(() => { if (loading || !items.length || !restoring.current) return; browseSurface()?.scrollTo({ top: restoration.current }); restoring.current = false; }, [items, loading, browseSurface]);
 
   const currentIds = new Set(currentAssetIds), currentRefs = new Set(currentReferenceImageIds);
   const existing = (item: PickerItem) => Boolean(item.assetId && currentIds.has(item.assetId) || item.referenceImageId && currentRefs.has(item.referenceImageId) || imports.current.get(item.identity)?.assetId && currentIds.has(imports.current.get(item.identity)!.assetId!));
@@ -208,7 +228,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     const next = selected.some(s => s.identity === item.identity) ? selected.filter(s => s.identity !== item.identity) : [...selected, item];
     const issue = canSelect(next); if (issue) { setError(issue); return; } setSelected(next); setError('');
   };
-  const change = (patch: Partial<Preferences>) => { restoring.current = false; body.current?.scrollTo({ top: 0 }); setPrefs(p => ({ ...p, ...patch, scroll: 0, pages: 1 })); };
+  const change = (patch: Partial<Preferences>) => { restoring.current = false; browseSurface()?.scrollTo({ top: 0 }); setPrefs(p => ({ ...p, ...patch, scroll: 0, pages: 1 })); };
   const changeSource = (source: string) => { if (prefs.source !== source) change({ source, template: '' }); };
   const removeItem = async (item: Pick<PickerItem,'assetId'|'identity'|'fileName'|'canRemoveFromLibrary'>, restore = false) => {
     if (!item.canRemoveFromLibrary || !/^(asset|reference_image|video_task):[a-zA-Z0-9_-]{1,100}$/.test(item.identity) || locked.current) return;
@@ -241,15 +261,15 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   });
   useEffect(() => {
     if (resultPages.restoring || loading) return;
-    body.current?.scrollTo({ top: 0 });
-  }, [resultPages.start, resultPages.restoring]);
+    browseSurface()?.scrollTo({ top: 0 });
+  }, [resultPages.start, resultPages.restoring, browseSurface]);
   const refreshDirectory = (next: Preferences = { ...prefs, query }) => {
     if (locked.current) return;
     // Invalidate in-flight reads before changing the complete filter snapshot.
     sequence.current++; readCursor.current = null;
     resultPages.reset();
     try { localStorage.removeItem(`${prefsKey}:page:v1:${pickerFilterKey(typesKey, next)}`); } catch { /* Optional browse position. */ }
-    setQuery(next.query); change(next); setNavigationOpen(false);
+    setQuery(next.query); change(next);
     setPage(1); setTotal(0); setHasMore(false); setLoadedFilter(''); setLoading(true);
     setEpoch(value => value + 1);
   };
@@ -375,28 +395,39 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const generatedLabel = prefs.view === 'favorites' ? '喜欢的生成' : prefs.view === 'recent' ? '最近用过的生成' : '全部生成';
   const generatedViewNotice = prefs.source === 'generated' && prefs.view !== 'library'
     ? prefs.view === 'favorites' ? '当前仅显示我喜欢的生成素材' : '当前仅显示本账号在本浏览器最近用过的生成素材' : '';
+  const filterSummary = [
+    scopes.find(([scope]) => scope === prefs.scope)?.[1],
+    prefs.album ? scopedAlbums.find(album => album.id === prefs.album)?.name || '所选图集暂不可用' : '',
+    prefs.project ? projects.find(project => project.id === prefs.project)?.name || '所选项目暂不可用' : '',
+    prefs.type !== 'all' ? labels[prefs.type as AssetType] : '',
+    prefs.source === 'template-image' && prefs.template ? templates.find(template => template.id === prefs.template)?.name || '所选模板暂不可用' : '',
+    prefs.sort === 'name' ? '按名称' : '',
+  ].filter(Boolean).join(' · ');
+  const activeFilterCount = Number(prefs.scope !== 'mine') + Number(Boolean(prefs.album || prefs.project)) + Number(prefs.type !== 'all') + Number(prefs.source === 'template-image' && Boolean(prefs.template)) + Number(prefs.sort !== 'newest');
+  const selectionDetails = `${types.map(t => `${labels[t]} ${selectedCounts[t]}${typeLimits?.[t] !== undefined ? ` · 剩余 ${Math.max(0, typeLimits[t]! - selectedCounts[t])}` : ''}`).join(' / ')}${maxSelection !== undefined ? ` · 本次剩余 ${Math.max(0, maxSelection - selected.length)}` : ''} · 当前已添加 ${currentCount}`;
+  const rememberScroll = (element: HTMLElement) => {
+    if (!restoring.current && element === browseSurface()) setPrefs(p => ({ ...p, scroll: element.scrollTop }));
+  };
   return createPortal(<div ref={backdrop} className={styles.backdrop}>
     <div ref={dialog} role="dialog" aria-modal="true" aria-label={title} className={`${styles.dialog} ${expanded ? styles.expanded : ''}`}
       onDragOver={e => { if (Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault(); }}
       onDrop={e => { e.preventDefault(); e.stopPropagation(); void upload(Array.from(e.dataTransfer.files)); }}
       onPaste={e => { const files = Array.from(e.clipboardData.items).filter(i => i.kind === 'file' && i.type.startsWith('image/')).map(i => i.getAsFile()).filter((f): f is File => !!f); if (files.length) { e.preventDefault(); e.stopPropagation(); void upload(files); } }}>
       <header className={styles.header}><h2>{title}</h2><div className={styles.commands}>
-        {avatarTarget && types.includes('image') && isNavItemVisible({label:'人物生成',href:'/tools/avatar-studio',imageStudioOnly:true},user) && <button type="button" disabled={busy||avatarTarget.capacity<1} onClick={()=>void openAvatar()}><ImageIcon size={18}/><span>生成人物</span></button>}
+        {avatarTarget && types.includes('image') && isNavItemVisible({label:'人物生成',href:'/tools/avatar-studio',imageStudioOnly:true},user) && <button type="button" aria-label="生成人物" disabled={busy||avatarTarget.capacity<1} onClick={()=>void openAvatar()}><ImageIcon size={18}/><span>生成人物</span></button>}
         {returnAvailable&&avatarTarget&&<button type="button" disabled={busy} onClick={()=>{avatarWindow.current=window.open(`/tools/avatar-studio?ticket=${encodeURIComponent(avatarTicket.current)}`,'_blank');}}>继续上次人物回填</button>}
-        <button type="button" title={expanded ? '收起窗口' : '展开窗口'} aria-label={expanded ? '收起窗口' : '展开窗口'} onClick={() => setExpanded(v => !v)}>{expanded ? <Minimize size={18} /> : <Maximize size={18} />}</button>
+        <button type="button" className={styles.expandWindow} title={expanded ? '收起窗口' : '展开窗口'} aria-label={expanded ? '收起窗口' : '展开窗口'} onClick={() => setExpanded(v => !v)}>{expanded ? <Minimize size={18} /> : <Maximize size={18} />}</button>
         <button type="button" aria-label="关闭素材库" title="关闭素材库" onClick={close}><X size={20} /></button>
       </div></header>
       <input hidden ref={input} type="file" accept={types.map(t => `${t}/*`).join(',')} multiple={maxSelection !== 1} onChange={e => { const files = Array.from(e.target.files || []); e.target.value = ''; void upload(files); }} />
-      <div className={styles.topbar}><nav className={styles.tabs} aria-label="浏览素材">{([['library', '素材库'], ['favorites', '我的喜欢'], ['recent', '最近使用']] as const).map(([view, label]) => <button key={view} type="button" aria-pressed={prefs.view === view} onClick={() => change({ view })}>{label}</button>)}</nav><label className={styles.search}><Search size={18} /><input type="search" aria-label="搜索素材名称、图集" placeholder="搜索素材名称、图集" value={query} maxLength={160} onChange={e => setQuery(e.target.value)} /></label></div>
-      <div className={styles.layout}><aside className={`${styles.sidebar} ${navigationOpen ? styles.navigationOpen : ''}`} aria-label="图集和项目">
+      <div className={styles.topbar}><nav className={styles.tabs} aria-label="浏览素材">{([['library', '素材库'], ['favorites', '我的喜欢'], ['recent', '最近使用']] as const).map(([view, label]) => <button key={view} type="button" aria-pressed={prefs.view === view} onClick={() => change({ view })}>{label}</button>)}</nav><label className={styles.search}><Search size={18} /><input type="search" aria-label="搜索素材名称、图集" placeholder="搜索素材名称、图集" value={query} maxLength={160} onChange={e => setQuery(e.target.value)} /></label><button type="button" className={styles.filterToggle} aria-expanded={prefs.filtersOpen} aria-controls={`${pickerId}-filters`} onClick={() => { if (!prefs.filtersOpen) browseSurface()?.scrollTo({ top: 0 }); setPrefs(p => ({ ...p, filtersOpen: !p.filtersOpen })); }}><SlidersHorizontal size={17} /><span>筛选{activeFilterCount ? ` ${activeFilterCount}` : ''}</span></button></div>
+      <div className={styles.layout}><aside className={styles.sidebar} aria-label="图集和项目">
         <label className={`${styles.scopeControl} ${styles.sidebarScope}`}><span>素材范围</span><select aria-label="素材范围" value={prefs.scope} onChange={e => change({ scope: e.target.value as PickerScope, album: '', project: '' })}>{availableScopes.map(([s, label]) => <option key={s} value={s}>{label}</option>)}{!availableScopes.some(([s]) => s === prefs.scope) && <option value={prefs.scope}>此范围已不可用</option>}</select></label>
-        <button type="button" className={!prefs.album && !prefs.project ? styles.active : ''} onClick={() => { change({ album: '', project: '' }); setNavigationOpen(false); }}><Grid2X2 size={18} />全部素材</button>
-        {!!scopedAlbums.length && <h3>图集</h3>}{scopedAlbums.map(a => <button key={a.id} type="button" title={a.name} className={prefs.album === a.id ? styles.active : ''} onClick={() => { change({ album: a.id, project: '' }); setNavigationOpen(false); }}><Folder size={17} /><span>{a.name}</span></button>)}
-        {!!projects.length && <h3>项目素材</h3>}{projects.map(p => <button key={p.id} type="button" className={prefs.project === p.id ? styles.active : ''} onClick={() => { change({ project: p.id, album: '' }); setNavigationOpen(false); }}><Folder size={17} /><span>{p.name}</span></button>)}
-      </aside><section className={styles.main}>
-        <div className={styles.filters}><button type="button" className={styles.mobileNavigation} aria-expanded={navigationOpen} onClick={() => setNavigationOpen(v => !v)}><Menu size={17} />图集／项目</button>
-          <label className={`${styles.scopeControl} ${styles.mobileScope}`}><span>范围</span><select aria-label="素材范围" value={prefs.scope} onChange={e => change({ scope: e.target.value as PickerScope, album: '', project: '' })}>{availableScopes.map(([s, label]) => <option key={s} value={s}>{label}</option>)}{!availableScopes.some(([s]) => s === prefs.scope) && <option value={prefs.scope}>此范围已不可用</option>}</select></label>
-          {types.length > 1 && <div className={`${styles.segments} ${styles.typeSegments}`} aria-label="素材类型">{['all', ...types].map(t => <button key={t} type="button" aria-pressed={prefs.type === t} onClick={() => change({ type: t })}>{t === 'all' ? '全部' : labels[t as AssetType]}</button>)}</div>}
+        <button type="button" className={!prefs.album && !prefs.project ? styles.active : ''} onClick={() => change({ album: '', project: '' })}><Grid2X2 size={18} />全部素材</button>
+        {!!scopedAlbums.length && <h3>图集</h3>}{scopedAlbums.map(a => <button key={a.id} type="button" title={a.name} className={prefs.album === a.id ? styles.active : ''} onClick={() => change({ album: a.id, project: '' })}><Folder size={17} /><span>{a.name}</span></button>)}
+        {!!projects.length && <h3>项目素材</h3>}{projects.map(p => <button key={p.id} type="button" className={prefs.project === p.id ? styles.active : ''} onClick={() => change({ project: p.id, album: '' })}><Folder size={17} /><span>{p.name}</span></button>)}
+      </aside><section ref={browse} className={styles.main} aria-label="素材目录" onScroll={e => { if (e.target === e.currentTarget) rememberScroll(e.currentTarget); }} onWheel={() => { restoring.current = false; }} onTouchStart={() => { restoring.current = false; }}>
+        <div className={styles.filters}>
           <div className={styles.sourceControl} role="group" aria-label="素材来源"><span>来源</span><div className={styles.sourceSegments}>
             <button type="button" aria-pressed={prefs.source === 'all'} onClick={() => changeSource('all')}>全部来源</button>
             <button type="button" aria-pressed={prefs.source === 'uploaded'} onClick={() => changeSource('uploaded')}>上传的</button>
@@ -410,10 +441,16 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
             {types.includes('video') && <button type="button" aria-pressed={prefs.source === 'video-generated'} onClick={() => changeSource('video-generated')}>视频生成</button>}
             <button type="button" aria-pressed={prefs.source === 'other'} onClick={() => changeSource('other')}>其他素材</button>
           </div></div>
+          <div id={`${pickerId}-filters`} className={`${styles.filterDetails} ${prefs.filtersOpen ? styles.filterDetailsOpen : ''}`}>
+          <label className={`${styles.scopeControl} ${styles.mobileScope}`}><span>范围</span><select aria-label="素材范围" value={prefs.scope} onChange={e => change({ scope: e.target.value as PickerScope, album: '', project: '' })}>{availableScopes.map(([s, label]) => <option key={s} value={s}>{label}</option>)}{!availableScopes.some(([s]) => s === prefs.scope) && <option value={prefs.scope}>此范围已不可用</option>}</select></label>
+          <label className={`${styles.sortControl} ${styles.mobileAlbum}`}><span>图集／项目</span><select aria-label="图集或项目" value={prefs.album ? `album:${prefs.album}` : prefs.project ? `project:${prefs.project}` : ''} onChange={e => { const [kind, id = ''] = e.target.value.split(':'); change({ album: kind === 'album' ? id : '', project: kind === 'project' ? id : '' }); }}><option value="">全部素材</option>{!!scopedAlbums.length && <optgroup label="图集">{scopedAlbums.map(album => <option key={album.id} value={`album:${album.id}`}>{album.name}</option>)}</optgroup>}{!!projects.length && <optgroup label="项目素材">{projects.map(project => <option key={project.id} value={`project:${project.id}`}>{project.name}</option>)}</optgroup>}</select></label>
+          {types.length > 1 && <div className={`${styles.segments} ${styles.typeSegments}`} aria-label="素材类型">{['all', ...types].map(t => <button key={t} type="button" aria-pressed={prefs.type === t} onClick={() => change({ type: t })}>{t === 'all' ? '全部' : labels[t as AssetType]}</button>)}</div>}
           {prefs.source === 'template-image' && <label className={styles.sortControl}><span>模板</span><select aria-label="具体模板" value={prefs.template} onChange={e => change({ template: e.target.value })}><option value="">全部模板</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>}
           <label className={styles.sortControl}><span>排序</span><select aria-label="排序" value={prefs.sort} onChange={e => change({ sort: e.target.value })}><option value="newest">最新添加</option><option value="name">名称</option></select></label>
           <button type="button" className={styles.refreshDirectory} disabled={busy || loading} onClick={() => refreshDirectory()}>刷新列表</button>
-          <button type="button" className={styles.resetFilter} title="重置筛选和浏览位置" aria-label="重置筛选和浏览位置" disabled={busy} onClick={() => refreshDirectory(defaults)}><RotateCcw size={16} /></button>
+          <button type="button" className={styles.resetFilter} title="重置筛选和浏览位置" aria-label="重置筛选和浏览位置" disabled={busy} onClick={() => refreshDirectory(defaults)}><RotateCcw size={16} /><span className={styles.mobileResetLabel}>重置</span></button>
+          </div>
+          {!prefs.filtersOpen && <p className={styles.filterSummary}>{filterSummary}</p>}
         </div>
         {generatedViewNotice && <div className={styles.generatedScope}><span>{generatedViewNotice}</span><button type="button" disabled={busy} onClick={showAllGenerated}>查看我的全部生成</button></div>}
         {uploadLabel && <UploadProgressIndicator busy label={progress?.label || '准备上传'} detail={uploadLabel} percent={progress?.percent} />}
@@ -421,7 +458,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         {removedItem && <div role="status" className={styles.notice}>已从我的素材库删除，文件和已有引用保留。<button type="button" disabled={busy} onClick={() => void removeItem(removedItem, true)}>撤销删除</button></div>}
         {(error || resultPages.navigationIssue) && <div role="alert" className={styles.error}>{error || resultPages.navigationIssue}<button type="button" disabled={busy || loading} onClick={() => { setError(''); resultPages.retry(); if (!resultPages.restoring || !hasMore) setEpoch(v => v + 1); }}>{!error && resultPages.restoring && hasMore ? '继续翻页' : '重新读取'}</button>{resultPages.restoring && error && <button type="button" disabled={busy || loading} onClick={() => { resultPages.retry(); setEpoch(v => v + 1); }}>刷新目录</button>}</div>}
         {!!failedFiles.length && <div className={styles.error}>{failedFiles.map(f => f.name).join('、')}<button type="button" disabled={busy} onClick={() => void upload(failedFiles)}>重试失败文件</button></div>}
-        <div ref={body} className={styles.body} aria-busy={loading} onScroll={e => { const scroll = e.currentTarget.scrollTop; if (!restoring.current) setPrefs(p => ({ ...p, scroll })); }} onWheel={() => { restoring.current = false; }} onTouchStart={() => { restoring.current = false; }}>
+        <div ref={body} className={styles.body} aria-busy={loading} onScroll={e => rememberScroll(e.currentTarget)} onWheel={() => { restoring.current = false; }} onTouchStart={() => { restoring.current = false; }}>
           <div ref={resultPages.gridRef} className={styles.grid}>{resultPages.pageItems.map(({ item }) => { const order = selected.findIndex(s => s.identity === item.identity), inUse = existing(item); return <article key={item.identity} className={`${styles.card} ${order >= 0 ? styles.selected : ''}`}>
             <div className={styles.cover} data-reaction-surface>
             <button type="button" className={styles.selectCard} disabled={busy || inUse || !!item.unavailableReason} aria-pressed={order >= 0} aria-label={`${order >= 0 ? '取消选择' : '选择'}${selectionName(item)}`} title={item.unavailableReason} onClick={() => toggle(item)}><Thumbnail item={item} />{order >= 0 && <span className={styles.order}>{order + 1}</span>}{inUse && <span className={styles.inUse}>已添加</span>}</button>
@@ -445,9 +482,11 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
           </nav></div>
         </div>
       </section></div>
-      <footer className={styles.footer}><button type="button" className={styles.uploadAction} disabled={busy || maxSelection === 0} onClick={() => input.current?.click()}><Upload size={18} /><span>上传素材</span></button><div className={styles.count}><strong>已选 {selected.length} 个</strong><small>{types.map(t => `${labels[t]} ${selectedCounts[t]}${typeLimits?.[t] !== undefined ? ` · 剩余 ${Math.max(0, typeLimits[t]! - selectedCounts[t])}` : ''}`).join(' / ')}{maxSelection !== undefined ? ` · 本次剩余 ${Math.max(0, maxSelection - selected.length)}` : ''} · 当前已添加 {currentCount}</small></div>
-        <div className={styles.selection}>{selected.map((item, index) => <div key={item.identity} className={styles.selectedThumb} title={item.fileName}><Thumbnail item={item} /><span>{index + 1}</span><button type="button" disabled={busy} aria-label={`移除${item.fileName}`} onClick={() => toggle(item)}><X size={13} /></button></div>)}</div>
-        <div className={styles.footerActions}><button type="button" disabled={busy} onClick={close}>取消</button><button type="button" className={styles.primary} disabled={busy || !selected.length || !!canSelect(selected)} onClick={() => void confirm()}>{busy && !uploadLabel ? '正在添加' : confirmLabel}</button></div>
+      <footer className={styles.footer}><button type="button" className={styles.uploadAction} disabled={busy || maxSelection === 0} onClick={() => input.current?.click()}><Upload size={18} /><span>上传素材</span></button><div className={styles.count}><strong>已选 {selected.length} 个</strong><small>{selectionDetails}</small></div>
+        {types.some(type => typeLimits?.[type] !== undefined) && <small className={styles.mobileLimits}>{types.filter(type => typeLimits?.[type] !== undefined).map(type => `${labels[type]} ${selectedCounts[type]}/${typeLimits![type]}`).join(' · ')}</small>}
+        <button type="button" className={styles.selectionToggle} aria-expanded={prefs.selectionOpen} aria-controls={`${pickerId}-selection`} onClick={() => setPrefs(p => ({ ...p, selectionOpen: !p.selectionOpen }))}><span>已选 {selected.length}{maxSelection !== undefined ? `/${maxSelection}` : ''}</span><ChevronDown size={16} /></button>
+        <div id={`${pickerId}-selection`} className={`${styles.selectionPanel} ${prefs.selectionOpen ? styles.selectionPanelOpen : ''}`}><small className={styles.selectionDetails}>{selectionDetails}</small><div className={styles.selection}>{selected.map((item, index) => <div key={item.identity} className={styles.selectedThumb} title={item.fileName}><Thumbnail item={item} /><span>{index + 1}</span><button type="button" disabled={busy} aria-label={`移除${item.fileName}`} onClick={() => toggle(item)}><X size={13} /></button></div>)}</div></div>
+        <div className={styles.footerActions}><button type="button" className={styles.cancelAction} disabled={busy} onClick={close}>取消</button><button type="button" className={styles.primary} disabled={busy || !selected.length || !!canSelect(selected)} onClick={() => void confirm()}>{busy && !uploadLabel ? '正在添加' : confirmLabel}</button></div>
       </footer>
     </div>
     {preview && (preview.type === 'image' ? <ZoomableImagePreview contentKey={preview.key} src={preview.previewUrl || preview.originalUrl} thumbnailSrc={preview.thumbnailUrl || undefined} alt={selectionName(preview)} fileName={preview.fileName} safeDetails={{ width: preview.width || undefined, height: preview.height || undefined, fileSize: preview.fileSize ?? undefined }} onClose={() => setPreview(null)} /> : <MediaPreview contentKey={preview.key} src={preview.previewUrl || preview.originalUrl} type={preview.type} title={preview.fileName} poster={preview.thumbnailUrl || undefined} onClose={() => setPreview(null)} />)}
