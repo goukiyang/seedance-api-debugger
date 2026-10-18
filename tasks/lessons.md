@@ -1,5 +1,11 @@
 # Lessons
 
+## 2026-10-18 - TRACE03受理回调不能按名字归为可丢日志
+
+- `recordStudioResponse`会双写HTTP/账务回执并关联gateway_request_id，不是普通观测；202原号、账务关联和可选诊断必须分级，核心部分失败先保身份、幂等补本机，不重发。v1规划在实施前已纠正，业务代码/生产未动。
+- 规格升级的“旧对象”包括父批次、prepared payload、旧报价和人物计划，不能只保护已落库任务；耐久等待要核reader钳制、恢复调度和人工入口，默认构建/发布门需要真实负证，不能只写计划。详见正式生图原单§17.6 A01–A06。
+
+
 ## 2026-10-18 - 独立消费者未重启不等于新网页仍接到同一份结果
 
 - 本次HD-ROOT证据：Web持久子目录落在release树，独立HD worker仍写固定var-lib根；24条Web queued在worker侧同key/版本均已ready。只保护原PID/Invocation、DB和顶层storage，不足以保证子目录的读写一致；后继发布复制错误软链接会延续回归。
