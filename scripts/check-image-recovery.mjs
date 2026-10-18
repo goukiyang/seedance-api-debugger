@@ -82,6 +82,7 @@ const providerContractChecks = [
   'active_wait_manual_original_check_requires_time_owner_lease_cas_and_single_consumption',
   'original_v3_202_restart_uses_same_get_identity_and_settles_once_without_repost',
   'original_v3_unknown_keeps_reservation_but_fresh_and_late_complete_mismatch_refund_once_and_keep_image',
+  'normal_provider_polling_keeps_real_wait_ui_while_long_invalid_paused_and_checking_remain_special',
 ];
 const fixtures = [
   { file: 'scripts/image-studio-recovery-fairness-engineering.ts', schema: 'image-recovery-fairness-engineering.v1',
@@ -131,7 +132,8 @@ const fixtures = [
       'src/lib/image-studio/provider-wait.ts', 'src/lib/image-studio/delivery.ts', 'src/lib/image-studio/async-recovery.ts',
       'src/lib/image-studio/worker.ts', 'src/lib/image-studio/worker-mode.ts', 'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/response-diagnostics.ts',
       'src/lib/image-studio/response-evidence.ts', 'src/lib/image-generation/output-plan.ts',
-      'src/lib/image-studio/dimension-rejection.ts', 'src/lib/image-studio/dimension-mismatch.ts', 'src/lib/image-studio/output.ts'] },
+      'src/lib/image-studio/dimension-rejection.ts', 'src/lib/image-studio/dimension-mismatch.ts', 'src/lib/image-studio/output.ts',
+      'src/app/image-studio/studio.tsx', 'src/lib/image-studio/context-version.ts'] },
 ];
 const actualVersion = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 const guardPackage = /\+trace03-guard\.\d+$/.test(actualVersion);

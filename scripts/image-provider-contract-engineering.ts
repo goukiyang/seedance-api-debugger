@@ -5,12 +5,14 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import vm from 'node:vm';
 import https, { type RequestOptions } from 'node:https';
 import type { IncomingMessage } from 'node:http';
 import { PassThrough } from 'node:stream';
 import { mock } from 'node:test';
 import { brotliCompressSync, deflateSync, gzipSync } from 'node:zlib';
 import sharp from 'sharp';
+import * as ts from 'typescript';
 import { traceFixture, sha256 } from './image-trace-engineering-fixture';
 import type { StudioAsyncAccepted } from '../src/lib/image-studio/provider';
 
@@ -18,7 +20,8 @@ const sourcePaths = ['scripts/image-trace-engineering-fixture.ts', 'scripts/proc
   'src/lib/image-studio/provider-wait.ts', 'src/lib/image-studio/delivery.ts', 'src/lib/image-studio/async-recovery.ts',
   'src/lib/image-studio/worker.ts', 'src/lib/image-studio/worker-mode.ts', 'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/response-diagnostics.ts',
   'src/lib/image-studio/response-evidence.ts', 'src/lib/image-generation/output-plan.ts',
-  'src/lib/image-studio/dimension-rejection.ts', 'src/lib/image-studio/dimension-mismatch.ts', 'src/lib/image-studio/output.ts'];
+  'src/lib/image-studio/dimension-rejection.ts', 'src/lib/image-studio/dimension-mismatch.ts', 'src/lib/image-studio/output.ts',
+  'src/app/image-studio/studio.tsx', 'src/lib/image-studio/context-version.ts'];
 const expectedChecks = [
   'gzip_deflate_brotli_decode_preserves_body_and_removes_stale_headers',
   'bad_stream_wire_decoded_limits_length_abort_and_timeout_reject',
@@ -34,7 +37,40 @@ const expectedChecks = [
   'active_wait_manual_original_check_requires_time_owner_lease_cas_and_single_consumption',
   'original_v3_202_restart_uses_same_get_identity_and_settles_once_without_repost',
   'original_v3_unknown_keeps_reservation_but_fresh_and_late_complete_mismatch_refund_once_and_keep_image',
+  'normal_provider_polling_keeps_real_wait_ui_while_long_invalid_paused_and_checking_remain_special',
 ];
+
+function actualWaitUi(root: string, mismatchDisposition: (value: string | null | undefined) => boolean) {
+  const filename = path.join(root, 'src/app/image-studio/studio.tsx');
+  const source = ts.createSourceFile(filename, readFileSync(filename, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const names = new Set(['studioTaskAsyncRecovery', 'studioTaskProviderCheck', 'studioTaskProviderWait', 'studioTaskHasViewableImage', 'studioTaskPhase']);
+  const helpers = source.statements.filter(node => ts.isFunctionDeclaration(node) && node.name && names.has(node.name.text));
+  assert.equal(helpers.length, names.size);
+  const declarations: ts.VariableDeclaration[] = [];
+  const visit = (node: ts.Node) => { if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'ownResults') declarations.push(node); ts.forEachChild(node, visit); };
+  visit(source); assert.equal(declarations.length, 1);
+  const map = declarations[0].initializer; assert.ok(map && ts.isCallExpression(map));
+  const callback = map.arguments[0]; assert.ok(callback && ts.isArrowFunction(callback) && ts.isBlock(callback.body));
+  const statements = callback.body.statements.filter(ts.isVariableStatement);
+  assert.deepEqual(statements.flatMap(statement => statement.declarationList.declarations.map(value => value.name.getText(source))),
+    ['image', 'asyncRecovery', 'providerCheck', 'pending']);
+  const returned = callback.body.statements.find(ts.isReturnStatement); assert.ok(returned?.expression);
+  let expression = returned.expression;
+  while (ts.isSatisfiesExpression(expression) || ts.isAsExpression(expression) || ts.isParenthesizedExpression(expression)) expression = expression.expression;
+  assert.ok(ts.isObjectLiteralExpression(expression));
+  const fields = expression.properties.filter(property => (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property))
+    && ['pending', 'generationWait'].includes(property.name.getText(source)));
+  assert.equal(fields.length, 2);
+  // Compile original AST-selected helpers and consumer expressions; no copied
+  // progress formula, component platform, browser or alternate threshold.
+  const input = `${helpers.map(node => node.getText(source)).join('\n')}\nfunction readWaitUi(task) {\n${statements.map(node => node.getText(source)).join('\n')}\nreturn {${fields.map(node => node.getText(source)).join(',\n')}};\n}\nglobalThis.waitUi = { read: readWaitUi, wait: studioTaskProviderWait, phase: studioTaskPhase };`;
+  const compiled = ts.transpileModule(input, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } });
+  const sandbox = vm.createContext({ Date, resultError: '', studioOutputMismatchDisposition: mismatchDisposition,
+    studioTaskPreviewState: () => { throw new Error('Polling fixture has no output image'); } });
+  vm.runInContext(compiled.outputText, sandbox, { filename: 'actual-studio-wait-consumer.js', timeout: 5000 });
+  return sandbox.waitUi as { read(task: unknown): { pending: boolean; generationWait?: { taskKey: string; acceptedAt?: number; phase?: string } };
+    wait(task: unknown): number | null; phase(task: unknown): string };
+}
 
 async function main() {
   const fixture = await traceFixture({ file: 'scripts/image-provider-contract-engineering.ts',
@@ -266,6 +302,100 @@ async function main() {
     data: { model: 'gemini-3-pro-image-preview', output_size: '2K' } });
   assert.equal(await delivery.hasStudioAcceptedRecoveryIdentity(nativeTask), false);
   fixture.check(expectedChecks[10]);
+  const { studioTaskDTOs } = await import('../src/lib/image-studio/tasks');
+  const { studioProviderWaitBlocked } = await import('../src/lib/image-studio/provider-wait');
+  const { studioOutputMismatchDisposition } = await import('../src/lib/image-studio/dimension-mismatch');
+  const waitUi = actualWaitUi(fixture.root, studioOutputMismatchDisposition);
+  const projectionCases: Array<{ name: string; wait: ReturnType<typeof parseWait>; special: boolean }> = [
+    { name: 'no-header', wait: {}, special: false },
+    { name: 'ordinary-2s', wait: parseWait(new Headers(), { poll_after_ms: 2000 }, clock), special: false },
+    { name: 'ordinary-reader-ceiling-30s', wait: parseWait(new Headers(), { poll_after_ms: 30000 }, clock), special: false },
+    { name: 'longer-than-old-reader', wait: parseWait(new Headers(), { poll_after_ms: 30001 }, clock), special: true },
+    { name: 'invalid-conservative', wait: parseWait(new Headers({ 'retry-after': 'invalid' }), null, clock), special: true },
+  ];
+  const projectionEvidence: Array<{ name: string; providerCheck: string | null; pending: boolean; generationWait: boolean }> = [];
+  const snapshotReads = async () => ({ tasks: await db.imageStudioTask.findMany({ orderBy: { id: 'asc' } }),
+    settings: await db.platformSetting.findMany({ orderBy: { key: 'asc' } }),
+    account: await db.creditAccount.findUniqueOrThrow({ where: { user_id: owner } }), ledger: await db.creditLedger.findMany({ orderBy: { id: 'asc' } }) });
+  for (const sample of projectionCases) {
+    const activeTask = await make(`projection-${sample.name}`);
+    const accepted = await delivery.recordStudioAsyncAcceptance(activeTask, response(), { taskId: `provider-${activeTask.id}`, ...sample.wait });
+    assert.ok(accepted);
+    const current = await db.imageStudioTask.findUniqueOrThrow({ where: { id: activeTask.id } });
+    const files = [false, true].flatMap(billing => ['request.json', 'async.json'].map(name => storage(current.id, billing, name)));
+    const filesBefore = await Promise.all(files.map(file => fs.readFile(file, 'utf8')));
+    const before = await snapshotReads(), callsBefore = calls.length;
+    const check = await recovery.readStudioActiveProviderCheck(current);
+    const status = await delivery.studioDeliveryStatus(current);
+    const dto = (await studioTaskDTOs(owner, false, [current]))[0]; assert.ok(dto.delivery);
+    assert.equal(status.phase, 'provider'); assert.equal(status.acceptedAt, accepted.acceptedAt);
+    assert.equal(dto.delivery.phase, 'provider'); assert.equal(dto.delivery.acceptedAt, accepted.acceptedAt);
+    const ui = waitUi.read(dto);
+    if (sample.special) {
+      assert.equal(check?.state, 'waiting'); assert.equal(dto.delivery.providerCheck?.state, 'waiting');
+      assert.equal(ui.pending, false); assert.equal(ui.generationWait, undefined);
+      assert.equal(waitUi.phase(dto), '等待供应商允许核对');
+      assert.equal(waitUi.wait(dto), sample.name === 'invalid-conservative' ? null : accepted.providerNotBefore);
+    } else {
+      assert.equal(check, null); assert.equal('providerCheck' in status, false); assert.equal('providerCheck' in dto.delivery, false);
+      assert.equal(ui.pending, true); assert.ok(ui.generationWait);
+      assert.equal(ui.generationWait.taskKey, current.id); assert.equal(ui.generationWait.acceptedAt, accepted.acceptedAt);
+      assert.equal(ui.generationWait.phase, 'provider'); assert.equal(waitUi.phase(dto), '生成中');
+      assert.equal(waitUi.wait(dto), null, 'Normal raw notBefore must not expose a manual-check time');
+      if (accepted.providerNotBefore) assert.equal(studioProviderWaitBlocked(accepted, clock), true,
+        'Display filtering must not release the real network notBefore gate');
+    }
+    if (sample.name === 'no-header') {
+      const restoreClock = clock;
+      try {
+        clock = accepted.acceptedAt + 24 * 60 * 60_000 + 1;
+        assert.equal((await recovery.readStudioActiveProviderCheck(current))?.state, 'paused');
+        const paused = (await studioTaskDTOs(owner, false, [current]))[0];
+        assert.equal(paused.delivery?.providerCheck?.state, 'paused');
+        assert.equal(waitUi.read(paused).pending, false); assert.equal(waitUi.read(paused).generationWait, undefined);
+        assert.equal(waitUi.phase(paused), '自动核对已暂停');
+      } finally { clock = restoreClock; }
+    }
+    assert.deepEqual(await snapshotReads(), before, 'Pure reads/UI projection cannot write tasks, permits, settings or money');
+    assert.deepEqual(await Promise.all(files.map(file => fs.readFile(file, 'utf8'))), filesBefore);
+    assert.equal(await delivery.readStudioCorePending(current), null);
+    assert.equal(await db.platformSetting.count({ where: { key: `studio_async_active_recheck_v1:${current.id}` } }), 0);
+    assert.equal(calls.length, callsBefore);
+    projectionEvidence.push({ name: sample.name, providerCheck: check?.state || null, pending: ui.pending, generationWait: Boolean(ui.generationWait) });
+    if (sample.name === 'invalid-conservative') {
+      assert.equal(await recovery.releaseStudioAsyncSlot(current, accepted, 'provider_unconfirmed', 'uncertain'), true);
+      const detached = await db.imageStudioTask.findUniqueOrThrow({ where: { id: current.id } });
+      const key = `studio_async_recovery_v1:${current.id}`;
+      const recoveryBefore = await db.platformSetting.findUniqueOrThrow({ where: { key } });
+      const record = JSON.parse(recoveryBefore.value_json);
+      assert.ok(record.nextCheckAt >= Number(accepted.providerNotBefore)); assert.equal(record.attempts, 0);
+      const detachedBefore = await snapshotReads(), restoreClock = clock;
+      try {
+        for (const observedAt of [clock, Number(accepted.providerNotBefore) + 1]) {
+          clock = observedAt;
+          const view = await recovery.readStudioAsyncRecovery(detached); assert.ok(view);
+          assert.equal(view.canRequestRecheck, false); assert.equal(view.nextCheckAt, null);
+          assert.equal('providerNotBefore' in view, false, 'An invalid instruction has no promised check time, even after its conservative date');
+          const dto = (await studioTaskDTOs(owner, false, [detached]))[0];
+          assert.equal(dto.delivery?.asyncRecovery?.nextCheckAt, null);
+          assert.equal(waitUi.wait(dto), null);
+          const detachedUi = waitUi.read(dto);
+          assert.equal(detachedUi.pending, false); assert.equal(waitUi.phase(dto), '结果待核对');
+          assert.equal((await recovery.requestStudioAsyncRecheck(owner, detached.id, view.binding)).scheduled, false);
+          const preserved = await delivery.readStudioAsyncReceipt(detached); assert.ok(preserved);
+          assert.equal(preserved.providerNotBefore, accepted.providerNotBefore);
+          assert.equal(preserved.providerWaitSource, 'invalid-conservative');
+          assert.equal(studioProviderWaitBlocked(preserved, clock), true);
+          assert.deepEqual(await db.platformSetting.findUniqueOrThrow({ where: { key } }), recoveryBefore);
+          assert.deepEqual(await snapshotReads(), detachedBefore);
+          assert.deepEqual(await Promise.all(files.map(file => fs.readFile(file, 'utf8'))), filesBefore);
+          assert.equal(calls.length, callsBefore);
+          projectionEvidence.push({ name: `detached-invalid-${observedAt > Number(accepted.providerNotBefore) ? 'after' : 'before'}-conservative-date`,
+            providerCheck: null, pending: detachedUi.pending, generationWait: Boolean(detachedUi.generationWait) });
+        }
+      } finally { clock = restoreClock; }
+    }
+  }
   const active = await make('active-original-check');
   const manualNotBefore = clock + 86400000 + 120000;
   await delivery.recordStudioAsyncAcceptance(active, response(), { taskId: 'provider-active-original',
@@ -296,6 +426,11 @@ async function main() {
     automaticQueryDeadlineAt: clock - 1 };
   await assert.rejects(provider.requestStudioImages(manualQuery, manualTransport)); assert.equal(manualGets, 0);
   assert.equal(await recovery.consumeStudioActiveRecheck(owned), true);
+  assert.equal((await recovery.readStudioActiveProviderCheck(owned))?.state, 'checking');
+  const checkingDto = (await studioTaskDTOs(owner, false, [owned]))[0];
+  assert.equal(checkingDto.delivery?.providerCheck?.state, 'checking');
+  assert.equal(waitUi.read(checkingDto).pending, false); assert.equal(waitUi.read(checkingDto).generationWait, undefined);
+  assert.equal(waitUi.phase(checkingDto), '正在核对原任务');
   const originalReceipt = await delivery.readStudioAsyncReceipt(owned); assert.ok(originalReceipt);
   await assert.rejects(provider.requestStudioImages({ ...manualQuery, manualAsyncQuery: true, singleTaskGet: true,
     onAsyncProgress: async progress => { await delivery.recordStudioAsyncProgress(owned, originalReceipt, progress); } }, manualTransport),
@@ -457,8 +592,9 @@ async function main() {
   assert.equal(await db.creditLedger.count({ where: { related_task_id: unknown.id, type: 'task_failed_refund' } }), 0);
   assert.equal(originalCalls.length, 3, 'Mismatch retention and late completion never submit or query a provider');
   fixture.check(expectedChecks[13]);
+  fixture.check(expectedChecks[14]);
   await fixture.finish({ negativeChecks: ['legacy_wait_schema_rejected', 'conflicting_core_accounting_copy_rejected'], calls,
-    manualOriginalGets: manualGets, initialHoldDispatchCalls: heldCalls, originalCalls, cancellationEvidence, billingModes,
+    manualOriginalGets: manualGets, initialHoldDispatchCalls: heldCalls, originalCalls, cancellationEvidence, billingModes, projectionEvidence,
     originalSettlementCount: await db.creditLedger.count({ where: { idempotency_key: `image-studio:settle:${originalId}` } }) });
 }
 

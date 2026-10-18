@@ -1,5 +1,7 @@
 # 项目资料索引
 
+TRACE03-FIX等待显示收口（2026-10-18）：[正式根e431未上传静态包记录](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/e4319941-df6d-41bf-b8fc-c697b4ebb96b/superseded.json)仅本机保存，不算真实build失败。普通WAIT05继续pending/generationWait，特殊投影仅长/非法退避、24h暂停及人工核对；raw及非法保守日期不假报手核时间，后台GET/CAS/预算/费用未改。教训合并现有tasks/lessons同条，功能仍待手验；新精确候选完整门未完成。
+
 第五轮run8d148（2026-10-18）：[正式根原始总门/子门与完整build日志](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/8d148549-970c-44d5-a17a-fc20595ef391/)已归档。0abd/Linux20主6fixture/62检查及编译通过，类型门因新增fixture缺显式非空断言拒绝，完整tsc仅该1错，guard未构建/未部署；仅补真实assert.ok，不改产品/DTO保护，待同版新SHA完整重建。私有收据SHA已核，不复制公开；功能仍用户手验。
 
 第四轮剩余组已收口：[旧run/unknown同280f独立诊断](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/38824c77-b02d-429a-8b01-2cafc1418c53/toolflow-remaining-diagnostic-receipt.json)仅正式根私有保存，Linux20实际exit 0、36源SHA/禁网，明确不是原完整spec门通过。parser/公开投影修正与畸形/重读追加配套已冻结，待新main/guard同run统一构建；旧源及失败门证据不替换。

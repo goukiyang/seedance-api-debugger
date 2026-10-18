@@ -115,6 +115,10 @@ export async function readStudioActiveProviderCheck(task: ImageStudioTask): Prom
   const waiting = studioProviderWaitBlocked(receipt, now);
   const checking = permit?.state === 'scheduled' || permit?.state === 'consumed' && task.lease_token === permit.leaseToken
     && Boolean(task.lease_until && task.lease_until.getTime() > now);
+  // Ordinary provider polling keeps the existing generation-wait presentation.
+  // This is a display boundary only; every observed notBefore still gates GET.
+  if (!checking && now < deadlineAt && receipt.providerWaitSource !== 'invalid-conservative'
+    && (receipt.providerNotBefore || 0) <= now + 30000) return null;
   const availableAt = studioProviderNextCheckAt(permit ? permit.requestedAt + COOLDOWN : now, receipt);
   return { state: checking ? 'checking' : waiting || now < deadlineAt ? 'waiting' : 'paused',
     availableAt: receipt.providerWaitSource === 'invalid-conservative' ? null : availableAt,
@@ -192,11 +196,12 @@ function matches(record: RecoveryRecord, receipt: StudioAsyncReceipt, requestId:
     && record.expiresAt === receipt.expiresAt && record.requestId === requestId;
 }
 function view(record: RecoveryRecord, task: ImageStudioTask, receipt?: StudioAsyncReceipt): StudioAsyncRecoveryView {
+  const invalidWait = receipt?.providerWaitSource === 'invalid-conservative';
   return { binding: record.binding, state: record.manualOnce && record.state === 'stopped' ? 'scheduled' : record.state,
     reason: record.reason, providerStatus: record.providerStatus,
     attempts: record.attempts, maxAttempts: MAX_ATTEMPTS, deadlineAt: record.deadlineAt,
-    nextCheckAt: ['scheduled', 'checking'].includes(record.state) ? studioProviderNextCheckAt(record.nextCheckAt, receipt) : null,
-    ...(receipt?.providerNotBefore ? { providerNotBefore: receipt.providerNotBefore } : {}),
+    nextCheckAt: !invalidWait && ['scheduled', 'checking'].includes(record.state) ? studioProviderNextCheckAt(record.nextCheckAt, receipt) : null,
+    ...(!invalidWait && receipt?.providerNotBefore ? { providerNotBefore: receipt.providerNotBefore } : {}),
     canRequestRecheck: task.status === 'uncertain' && !record.manualOnce
       && (record.state === 'scheduled' || record.state === 'stopped' && ['auto_budget', 'deadline'].includes(record.stopCode || ''))
       && record.lastRequestedAt + COOLDOWN <= Date.now() && !studioProviderWaitBlocked(receipt) };

@@ -120,8 +120,7 @@ function studioTaskOutputPlan(task: StudioTask) {
   return (task.snapshot as (StudioSnapshot & { outputPlan?: PublicImageOutputPlan | null }) | undefined)?.outputPlan;
 }
 function studioTaskProviderWait(task: StudioTask) {
-  const value = studioTaskProviderCheck(task)?.availableAt ?? task.delivery?.asyncRecovery?.providerNotBefore
-    ?? (task.delivery as (NonNullable<StudioTask['delivery']> & { providerNotBefore?: number }) | undefined)?.providerNotBefore;
+  const value = studioTaskProviderCheck(task)?.availableAt ?? task.delivery?.asyncRecovery?.providerNotBefore;
   return Number.isSafeInteger(value) && Number(value) > Date.now() ? Number(value) : null;
 }
 function studioTaskHasViewableImage(task: StudioTask): task is StudioTask & { asset: NonNullable<StudioTask['asset']> } {
