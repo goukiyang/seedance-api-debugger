@@ -2,6 +2,8 @@
 
 ## GEN12 最近12小时生成原因核查（2026-10-18）
 
+TRACE03-DESIGN（报告v1.5.0，2026-10-18）：来源为用户询问正确设计与链路，关键词：2K像素预算、16对齐、小比例误差、单一规格计划、原号恢复、脱敏诊断、压缩/Retry-After、完整图与合格分离。[同一报告设计追加](2026-10-17-image-content-incident/inc24/gen12-report-2026-10-18.md)复用上述代码/私有证据/Word附件，UTF-8可读，数学示例已本机计算；无新增媒体附件，非供应商真实出图验收。推荐方案未实施/未批准成生产合同，原历史及v1.4诊断保留；公开OpenAI SDK/Undici实际代码来源见报告，无新增依赖/外联供应商/费用。
+
 TRACE03代码层追加取证（2026-10-18）：[供应商公开合同摘录](2026-10-17-image-content-incident/inc24/trace03-public-contract.json)、[自助用量入口文档](2026-10-17-image-content-incident/inc24/trace03-public-contract-usage.json)、[公开读取脚本](2026-10-17-image-content-incident/inc24/trace03-public-contract.py)、[本人用量读取脱敏结果](2026-10-17-image-content-incident/inc24/trace03-own-usage.json)及[只读脚本](2026-10-17-image-content-incident/inc24/trace03-own-usage.py)。来源为当日公开只读HTTP/同冻结Key一次文档明确的用量GET；JSON/UTF-8可读、公开文档实际464529字节及SHA已留。关键词：image[]、multipart、Abort、原号异步、汇总用量。无图片/提示词/密钥/账号余额数值输出，当前用量接口不含三笔错误明细，不冒逐单账单；代码隔离诊断见下方完成记录。仅正式根私有归档，不新生成、不联系供应商。
 
 TRACE03代码排查交付（报告v1.4.0）：[完整12阶段/代码行号/原因排序](2026-10-17-image-content-incident/inc24/code-trace/chain-report.md)、[12文件同源清单](2026-10-17-image-content-incident/inc24/code-trace/source-audit.json)、[9项Node20合成诊断](2026-10-17-image-content-incident/inc24/code-trace/synthetic-receipt.json)、[2K及58:77精确证据](2026-10-17-image-content-incident/inc24/code-trace/ratio-specification.json)、[三原任务最终薄核](2026-10-17-image-content-incident/inc24/code-trace/final-state.json)。来源为同源运行代码、私有loopback合成实验及精确只读SQL；无用户媒体外发，JSON/UTF-8及关键脚本/日志可读、源码/原件回执SHA核对成立。用途：证明本站规格计算落差、传输/超时边界及定位缺口；不证明供应商内部路由或真实生成验收。脚本/运行日志沿代码报告入口；合成数据不冒真实图片，不含临时TLS私钥。所有私有附件只留正式根，既有Word原件及历史报告保留。
