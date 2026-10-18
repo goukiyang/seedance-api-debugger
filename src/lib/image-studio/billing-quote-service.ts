@@ -18,6 +18,9 @@ import { readImageSupplierBills } from './billing-provider';
 import { supplierHistoryEstimate } from './billing-quote';
 import { exactSpecificationEstimate, imageCostGroup } from './billing-calibration';
 import { imageQuoteKey, type StoredImageQuote } from './billing-quote-store';
+import { frozenPricingReservation } from '@/lib/pricing/charge';
+import { sumCredits } from '@/lib/credits/precision';
+import { withImagePricing } from '@/lib/pricing/image';
 
 type PreparedImageQuoteResult = {
   billingMode: 'fixed' | 'actual';
@@ -40,6 +43,7 @@ type PreparedImageQuoteResult = {
   multiplier?: number;
   creditPrecision?: number;
   authorizedMaximumCredits?: number;
+  pricingRevision?: string;
 };
 
 function isManagedChannelId(value: unknown): value is string {
@@ -121,7 +125,7 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
     || await captureImageGenerationChannel(base.model, 'original');
   const requestedChannelId = imageChannel?.channelId
     || (typeof body.channelId === 'string' && body.channelId !== 'original' ? body.channelId : undefined);
-  const settings = await resolveQuoteSettings(base.model, imageChannel, requestedChannelId);
+  const settings = (await withImagePricing(await resolveQuoteSettings(base.model, imageChannel, requestedChannelId), base.model, prisma, base)).settings;
   let scope: string;
   try { scope = imageBillingScope(settings); }
   catch { throw new StudioError('当前图片通道缺少有效的账单范围，暂不能报价', 409); }
@@ -131,6 +135,21 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
   const capability = pinnedChannel
     ? settings.modelCapabilities[base.model as keyof typeof settings.modelCapabilities]
     : undefined;
+  const fixedResult = async (): Promise<PreparedImageQuoteResult> => {
+    await confirmDefinition();
+    let billingQuoteId: string | null = null;
+    if (base.pricing) {
+      billingQuoteId = randomUUID();
+      const quote: StoredImageQuote = { owner, count: prepared.length, fingerprint: base.specification,
+        intentRevision: 0, contract: base, ...sharedResult, ...(imageChannel ? { imageChannel } : {}) };
+      await prisma.platformSetting.create({ data: { key: imageQuoteKey(owner, billingQuoteId), value_json: JSON.stringify(quote), updated_by: owner } });
+    }
+    return { ...sharedResult, billingMode: 'fixed', billingQuoteId, unitCredits: base.authorizedCredits,
+      estimatedCredits: sumCredits(prepared.map(() => base.authorizedCredits)), revision: body.revision,
+      expiresAt: base.expiresAt, actualChargeEnabled: false,
+      ...(base.pricing ? { pricingRevision: base.pricing.revision, creditPrecision: base.pricing.mode === 'legacy_fixed' ? 0.01 : 0.1 } : {}),
+      ...(imageChannel ? { imageChannel: publicImageChannel(imageChannel) } : {}) };
+  };
   if (pinnedChannel) {
     assertImageChannelPairMatches(imageChannel, requestedChannelId || imageChannel?.channelId || '');
     for (const preparedTask of prepared) {
@@ -150,17 +169,11 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
   }
 
   if (pinnedChannel && capability?.billingMode === 'fixed') {
-    if (capability.fixedPoints === null || !Number.isSafeInteger(capability.fixedPoints) || capability.fixedPoints < 0
-      || base.authorizedCredits !== capability.fixedPoints) {
+    if (capability.fixedPoints === null || !base.pricing && !Number.isSafeInteger(capability.fixedPoints) || capability.fixedPoints < 0
+      || !base.pricing && base.authorizedCredits !== capability.fixedPoints) {
       throw new StudioError('固定点数已变化，请重新获取报价', 409);
     }
-    await confirmDefinition();
-    return {
-      ...sharedResult,
-      billingMode: 'fixed', billingQuoteId: null, unitCredits: capability.fixedPoints,
-      estimatedCredits: capability.fixedPoints * prepared.length, revision: body.revision,
-      expiresAt: base.expiresAt, actualChargeEnabled: false, ...(imageChannel ? { imageChannel: publicImageChannel(imageChannel) } : {}),
-    };
+    return fixedResult();
   }
 
   const state = await imageBillingReady(base.scope, base.model);
@@ -175,11 +188,7 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
   } else if (!state.ready) {
     // The original channel keeps its previous fixed-contract behavior when
     // no exact same-scope billing intent is available.
-    await confirmDefinition();
-    return { ...sharedResult, billingMode: 'fixed', billingQuoteId: null, unitCredits: base.authorizedCredits,
-      estimatedCredits: base.authorizedCredits * prepared.length, revision: body.revision,
-      expiresAt: base.expiresAt, actualChargeEnabled: false,
-      ...(imageChannel ? { imageChannel: publicImageChannel(imageChannel) } : {}) };
+    return fixedResult();
   }
 
   const references = Array.isArray(taskSnapshot.referenceImages)
@@ -220,7 +229,8 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
 
   const now = Date.now();
   await confirmDefinition();
-  const contract: ImageBillingContract = { ...base, mode: 'actual', authorizedCredits: selectedEstimate.credits,
+  const authorizedCredits = base.pricing ? frozenPricingReservation(base.pricing, selectedEstimate.credits) : selectedEstimate.credits;
+  const contract: ImageBillingContract = { ...base, mode: 'actual', authorizedCredits,
     issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + 60000).toISOString(),
     deadline: new Date(now + 48 * 3600000).toISOString(), estimateSource: selectedEstimate.source, estimateVersion: selectedEstimate.version };
   const id = randomUUID();
@@ -231,10 +241,11 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
   await prisma.platformSetting.deleteMany({ where: { key: { startsWith: `image_billing_quote_v1:${owner}:` },
     created_at: { lt: new Date(now - 120000) } } });
   await prisma.platformSetting.create({ data: { key: imageQuoteKey(owner, id), value_json: JSON.stringify(quote), updated_by: owner } });
-  return { ...sharedResult, billingMode: 'actual', billingQuoteId: id, unitCredits: selectedEstimate.credits,
-    estimatedCredits: selectedEstimate.credits * prepared.length, expiresAt: contract.expiresAt, revision: body.revision,
+  return { ...sharedResult, billingMode: 'actual', billingQuoteId: id, unitCredits: authorizedCredits,
+    estimatedCredits: sumCredits(prepared.map(() => authorizedCredits)), expiresAt: contract.expiresAt, revision: body.revision,
     actualChargeEnabled: true, ...(imageChannel ? { imageChannel: publicImageChannel(imageChannel) } : {}),
     estimate: { source: selectedEstimate.source, confidence: selectedEstimate.confidence,
       samples: selectedEstimate.samples, calibrated: false, assumption: selectedEstimate.assumption },
-    pointsPerUsd: 35, multiplier: 1, creditPrecision: 0.01, authorizedMaximumCredits: selectedEstimate.credits * prepared.length };
+    ...(base.pricing ? { pricingRevision: base.pricing.revision } : { pointsPerUsd: 35 }),
+    multiplier: 1, creditPrecision: base.pricing && base.pricing.mode !== 'legacy_actual' ? 0.1 : 0.01, authorizedMaximumCredits: sumCredits(prepared.map(() => authorizedCredits)) };
 }

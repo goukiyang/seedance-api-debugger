@@ -90,7 +90,7 @@ export async function imageBillingReadinessPayload() {
         priceRuleAvailable = !!supplierHistoryEstimate(rows, model, { inputCharacters: 0, referencePixels: 0 });
         if (!priceRuleAvailable) {
           const sample = await prisma.imageStudioTask.findFirst({ where: { billing_scope: scope, model, status: 'succeeded',
-            billing_status: 'confirmed', finished_at: { gte: new Date(Date.now() - 7 * 86400000) } },
+            billing_status: { in: ['confirmed', 'rate_confirmed'] }, finished_at: { gte: new Date(Date.now() - 7 * 86400000) } },
             orderBy: { finished_at: 'desc' }, select: { model: true, quality: true, output_size: true, aspect_ratio: true,
               reference_ids: true, context: true, prompt: true } });
           priceRuleAvailable = !!sample && !!await exactSpecificationEstimate(scope, sample, rows);

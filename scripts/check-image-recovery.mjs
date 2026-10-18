@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { readPricingFixtureInputs } from './pricing-fixture-input.mjs';
 
 // The build and the protected release controller use the same offline gate.
 // No application database, credentials, provider or browser is accepted here.
@@ -70,7 +71,8 @@ const fixtures = [
       'src/lib/avatar-random/handoff.ts', 'src/lib/canvas-roles/media.ts', 'src/lib/canvas-roles/media-bindings.ts',
       'src/app/api/avatar-studio/route.ts', 'src/app/tools/avatar-studio/studio.tsx', 'src/app/story-studio/story-studio.tsx'] },
 ];
-const sourceFiles = ['package.json', entry, ...fixtures.flatMap(fixture => [fixture.file, ...fixture.sources])];
+const pricingGate = 'scripts/check-pricing-policy.mjs';
+const sourceFiles = ['package.json', entry, pricingGate, ...fixtures.flatMap(fixture => [fixture.file, ...fixture.sources])];
 const hash = value => createHash('sha256').update(value).digest('hex');
 const hashes = () => Object.fromEntries(sourceFiles.map(file => [file, hash(readFileSync(path.join(root, file)))]));
 const time = value => typeof value === 'number' ? value : Date.parse(value);
@@ -84,14 +86,14 @@ function assertConfig(candidate = root) {
   hashes(); // Missing fixtures or production modules must fail before npm starts.
 }
 
-function readPrivateReceipt(file) {
+function readPrivateReceipt(file, maximumBytes = 131072) {
   assert.equal(typeof file, 'string');
   const absolute = path.resolve(file);
   const scratch = path.join(root, '.role-tests');
   assert.ok(absolute.startsWith(scratch + path.sep), 'Receipt must belong to this candidate');
   assert.equal(realpathSync(absolute), absolute, 'Receipt symlinks are not accepted');
   const stat = lstatSync(absolute);
-  assert.ok(stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1 && stat.size > 0 && stat.size <= 131072);
+  assert.ok(stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1 && stat.size > 0 && stat.size <= maximumBytes);
   assert.equal(stat.mode & 0o077, 0, 'Receipt must be private');
   if (typeof process.getuid === 'function') assert.equal(stat.uid, process.getuid());
   const bytes = readFileSync(absolute);
@@ -149,6 +151,11 @@ function verify(file, since) {
   assert.ok(Date.now() - value.startedAt <= 30 * 60_000, 'Build gate receipt is stale');
   assert.deepEqual(value.sourceSha256, hashes(), 'Candidate source changed after the gate ran');
   assert.equal(value.fixtures?.length, fixtures.length);
+  assert.equal(typeof value.pricingReceipt, 'string', 'Pricing contracts were not run by this prebuild');
+  assert.equal(readPrivateReceipt(value.pricingReceipt, 8 * 1024 * 1024).value.runId, value.runId, 'Image and pricing gates belong to different runs');
+  const pricing = spawnSync(process.execPath, [pricingGate, '--verify', value.pricingReceipt, '--since', String(since)], { cwd: root, encoding: 'utf8', timeout: 30000 });
+  assert.ifError(pricing.error);
+  assert.equal(pricing.status, 0, (pricing.stderr || '') + (pricing.stdout || ''));
   for (let i = 0; i < fixtures.length; i++) {
     const recorded = value.fixtures[i];
     assert.equal(recorded.file, fixtures[i].file);
@@ -161,12 +168,12 @@ function verify(file, since) {
 function run() {
   assertConfig();
   const startedAt = Date.now();
-  const runId = randomUUID();
+  const runId = readPricingFixtureInputs(root).runId;
   const sourceSha256 = hashes();
   const scratch = path.join(root, '.role-tests');
   mkdirSync(scratch, { recursive: true, mode: 0o700 });
   const directory = mkdtempSync(path.join(scratch, 'image-recovery-gate-'));
-  const recorded = [];
+  const recorded = [], failures = [], outcomes = [];
   for (const fixture of fixtures) {
     const result = spawnSync(process.execPath, ['--import', 'tsx', path.join(root, fixture.file)], {
       cwd: root, env: { ...process.env, IMAGE_RECOVERY_GATE_RUN_ID: runId },
@@ -174,22 +181,59 @@ function run() {
     });
     // Preserve actual child evidence, including a nonzero exit, without accepting
     // an empty successful wrapper as a completed test.
-    writeFileSync(path.join(directory, `${path.basename(fixture.file)}.log`), (result.stdout || '') + (result.stderr || ''), { mode: 0o600 });
-    assert.ifError(result.error);
-    assert.equal(result.signal, null, 'Engineering process was interrupted');
-    assert.equal(result.status, 0, `Engineering process failed: ${fixture.file}`);
-    const lines = (result.stdout || '').split(/\r?\n/).filter(line => line.startsWith(fixture.marker));
-    assert.equal(lines.length, 1, 'A unique completed engineering receipt is required');
-    const receipt = lines[0].slice(fixture.marker.length);
-    const sha256 = validateFixture(fixture, receipt, runId, startedAt, Date.now(), sourceSha256);
-    recorded.push({ file: fixture.file, receipt, sha256 });
-    console.log(`Image recovery engineering complete: ${fixture.file}`);
+    const log = path.join(directory, `${path.basename(fixture.file)}.log`);
+    writeFileSync(log, (result.stdout || '') + (result.stderr || ''), { mode: 0o600, flag: 'wx' });
+    try {
+      assert.ifError(result.error);
+      assert.equal(result.signal, null, 'Engineering process was interrupted');
+      assert.equal(result.status, 0, `Engineering process failed: ${fixture.file}`);
+      const lines = (result.stdout || '').split(/\r?\n/).filter(line => line.startsWith(fixture.marker));
+      assert.equal(lines.length, 1, 'A unique completed engineering receipt is required');
+      const receipt = lines[0].slice(fixture.marker.length);
+      const sha256 = validateFixture(fixture, receipt, runId, startedAt, Date.now(), sourceSha256);
+      recorded.push({ file: fixture.file, receipt, sha256 });
+      outcomes.push({ file: fixture.file, completed: true, log });
+      console.log(`Image recovery engineering complete: ${fixture.file}`);
+    } catch (error) {
+      failures.push({ file: fixture.file, category: result.error || result.signal || result.status !== 0 ? 'execution' : 'contract',
+        message: error instanceof Error ? error.message : String(error), log, status: result.status, signal: result.signal });
+      outcomes.push({ file: fixture.file, completed: false, log });
+    }
   }
-  assert.deepEqual(hashes(), sourceSha256, 'Candidate source changed during the gate');
+  const pricing = spawnSync(process.execPath, [pricingGate], { cwd: root, env: process.env,
+    encoding: 'utf8', timeout: 660000, maxBuffer: 4 * 1024 * 1024 });
+  const pricingLog = path.join(directory, 'pricing-policy-gate.log');
+  writeFileSync(pricingLog, (pricing.stdout || '') + (pricing.stderr || ''), { mode: 0o600, flag: 'wx' });
+  let pricingReceipt;
+  try {
+    assert.ifError(pricing.error);
+    assert.equal(pricing.signal, null);
+    assert.equal(pricing.status, 0, `Pricing contract gate failed; see ${pricingLog}`);
+    const pricingLines = (pricing.stdout || '').split(/\r?\n/).filter(line => line.startsWith('PRICING_POLICY_GATE_RECEIPT='));
+    assert.equal(pricingLines.length, 1, 'Pricing gate did not return one completed receipt');
+    pricingReceipt = pricingLines[0].slice('PRICING_POLICY_GATE_RECEIPT='.length);
+    outcomes.push({ file: pricingGate, completed: true, log: pricingLog });
+  } catch (error) {
+    failures.push({ file: pricingGate, category: 'pricing', message: error instanceof Error ? error.message : String(error),
+      log: pricingLog, status: pricing.status, signal: pricing.signal });
+    outcomes.push({ file: pricingGate, completed: false, log: pricingLog });
+  }
+  try { assert.deepEqual(hashes(), sourceSha256, 'Candidate source changed during the gate'); }
+  catch (error) { failures.push({ file: entry, category: 'integrity', message: error instanceof Error ? error.message : String(error) }); }
+  if (failures.length) {
+    const failureReport = path.join(directory, 'failure-report.json');
+    writeFileSync(failureReport, JSON.stringify({ schema: 'image-recovery-build-failure.v1', completed: false,
+      runId, candidateRoot: root, startedAt, finishedAt: Date.now(), sourceSha256, outcomes, failures,
+      partialReceipts: recorded, pricingReceipt: pricingReceipt || null }, null, 2), { mode: 0o600, flag: 'wx' });
+    console.error(`Image recovery build failure report: ${failureReport}`);
+    process.exitCode = 1;
+    return;
+  }
   const receipt = path.join(directory, 'receipt.json');
   writeFileSync(receipt, JSON.stringify({ schema: 'image-recovery-build-gate.v1', runId, candidateRoot: root,
-    startedAt, finishedAt: Date.now(), sourceSha256, fixtures: recorded, completed: true }, null, 2), { mode: 0o600, flag: 'wx' });
+    startedAt, finishedAt: Date.now(), sourceSha256, fixtures: recorded, pricingReceipt, completed: true }, null, 2), { mode: 0o600, flag: 'wx' });
   verify(receipt, startedAt);
+  console.log(`PRICING_POLICY_GATE_RECEIPT=${pricingReceipt}`);
   console.log(`IMAGE_RECOVERY_GATE_RECEIPT=${receipt}`);
 }
 

@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { publicPricingTaskState, studioTaskStates } from './pricing-state';
 
 type DimensionMismatchTask = {
   status: string;
@@ -20,7 +21,7 @@ export type StudioDimensionMismatch = {
 };
 
 export function studioOutputMismatch(task: DimensionMismatchTask): StudioDimensionMismatch | null {
-  if (!['failed', 'uncertain'].includes(task.status)) return null;
+  if (!['failed', 'uncertain'].includes(publicPricingTaskState(task.status))) return null;
   try {
     const delivery = JSON.parse(task.usage_json || '{}')?.studioDelivery as Record<string, unknown> | undefined;
     const validation = delivery?.validation as Record<string, unknown> | undefined;
@@ -71,7 +72,7 @@ export function studioTaskHasViewableOutput(task: DimensionMismatchTask) {
 // above at media/action boundaries. A generic failed asset is never an output.
 export const studioOutputTaskWhere: Prisma.ImageStudioTaskWhereInput = { OR: [
   { status: 'succeeded' },
-  { status: { in: ['failed', 'uncertain'] }, asset_id: { not: null }, OR: [
+  { status: { in: studioTaskStates(['failed', 'uncertain']) }, asset_id: { not: null }, OR: [
     { usage_json: { contains: '"generated_dimensions_mismatch"' } }, { usage_json: { contains: '"generated_format_mismatch"' } },
   ] },
 ] };

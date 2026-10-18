@@ -7,6 +7,7 @@ import { Archive, Check, ChevronDown, Folder, Plus, Trash2, RefreshCw } from 'lu
 import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution, AssetCollection } from '@/types';
 import { RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
+import { notifyVideoPricingChanged, validVideoPricingAmount } from '@/lib/pricing-client';
 import type { ComposerSelectOption } from '@/components/ComposerActionBar';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
@@ -31,7 +32,7 @@ import {
   normalizeGenerationDefaults,
   type GenerationDefaults,
 } from '@/lib/preferences/generation';
-import { VOLCENGINE_IP_MODEL_OPTIONS, volcengineIpModelLabel } from '@/lib/integrations/volcengine-ip-models';
+import { VOLCENGINE_IP_MODEL_OPTIONS, volcengineIpModelLabel, volcengineIpModelResolutions } from '@/lib/integrations/volcengine-ip-models';
 import { SEEDANCE_2_5_MODEL_ID, SEEDANCE_VIDEO_MODEL_OPTIONS, isSeedanceVideoDuration, seedanceVideoMaxDuration } from '@/lib/provider/seedance-models';
 import { orderRecentTaskCards, recentTaskHasVisualPreview } from '@/lib/video/recent-task-card-order';
 import type { StudioGenerationHandoff } from '@/lib/template-studio/types';
@@ -94,6 +95,8 @@ type CreateTaskResponse = CreateResponse & {
 type WorkspaceBusyReason = 'read-error' | 'pending-attach' | 'uploading' | 'upload-failed' | 'saving' | 'picker-open' | 'loading' | null;
 
 type GenerationSubmitParams = {
+  pricingRevision?: string | null;
+  quotedEstimatedCost?: number;
   prompt: string;
   generationMode: GenerationMode;
   ratio: VideoRatio;
@@ -1046,7 +1049,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     ? h3VideoConfig?.lora_options || []
     : [];
   const activeModelOptions = useMemo<ComposerSelectOption[]>(() => {
-    if (isIpSurface) return VOLCENGINE_IP_MODEL_OPTIONS;
+    if (isIpSurface) return VOLCENGINE_IP_MODEL_OPTIONS.map(option => ({ ...option,
+      detail: `4–${seedanceVideoMaxDuration(option.id)} 秒 · ${volcengineIpModelResolutions(option.id).join(' / ')}` }));
     const options = SEEDANCE_VIDEO_MODEL_OPTIONS.map((option) => option.id === SEEDANCE_2_5_MODEL_ID
       ? {
           ...option,
@@ -1059,7 +1063,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         id: H3_INLINE_MODEL_ID,
         label: h3Ready ? 'H3 本地模型' : 'H3 待检查',
         detail: h3Ready
-          ? `本地免费 · ${selectedH3Preset?.label || h3VideoConfig?.default_preset_id || '默认预设'} · ${selectedH3Lora?.label || h3VideoConfig?.default_lora_id || '默认 LoRA'}`
+          ? `本地处理 · ${selectedH3Preset?.label || h3VideoConfig?.default_preset_id || '默认预设'} · ${selectedH3Lora?.label || h3VideoConfig?.default_lora_id || '默认 LoRA'}`
           : `${h3DisabledReason(h3VideoConfig)} · 选择后点检查状态`,
       });
     }
@@ -2301,12 +2305,22 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     setDraftUpgradeTaskId(task.id);
     setRecentTasksError('');
     try {
+      const quoteResponse = await fetch(`/api/tasks/${task.id}/draft-upgrade`, { cache: 'no-store' });
+      const quote = await readJsonResponse<{ accepted?: { id: string }; estimatedCost?: number; pricing_revision?: string | null; message?: string; error?: string }>(quoteResponse);
+      if (!quoteResponse.ok) throw new Error(quote.message || quote.error || '升级报价暂不可用，原样片保留');
+      if (quote.accepted?.id) {
+        setActivePollingTaskIds(current => [quote.accepted!.id, ...current.filter(id => id !== quote.accepted!.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
+        await loadRecentTasksPage(1, 'merge-head'); return;
+      }
+      if (!validVideoPricingAmount(quote.estimatedCost) || quote.pricing_revision !== null && typeof quote.pricing_revision !== 'string') throw new Error('升级报价暂不可用，未提交');
+      if (quote.estimatedCost > 0 && !await confirm(`生成 1080p 预计冻结 ${quote.estimatedCost} 点，原样片保留。`, { title: '生成1080p', confirmLabel: `生成 ${quote.estimatedCost} 点` })) return;
       const response = await fetch(`/api/tasks/${task.id}/draft-upgrade`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           resolution_approval_confirmed: true,
           idempotency_key: `draft-upgrade:${task.id}`,
+          ...(quote.pricing_revision ? { pricing_revision: quote.pricing_revision } : {}),
         }),
       });
       const data = await readJsonResponse<{ task_id?: string; id?: string; provider_task_id?: string | null; error?: string; message?: string }>(response);
@@ -2321,7 +2335,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     } finally {
       setDraftUpgradeTaskId(null);
     }
-  }, [draftUpgradeTaskId, isIpSurface, loadRecentTasksPage, seedanceDraftCapability.upgrade_enabled]);
+  }, [draftUpgradeTaskId, isIpSurface, loadRecentTasksPage, seedanceDraftCapability.upgrade_enabled, confirm]);
 
   useEffect(() => {
     void loadRecentTasksPage(1, 'replace');
@@ -2575,6 +2589,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
       const createEndpoint = isIpSurface ? '/api/ip/tasks/create' : '/api/tasks/create';
       const requestBody = {
+        ...(params.pricingRevision ? { pricing_revision: params.pricingRevision } : {}),
+        ...(typeof params.quotedEstimatedCost === 'number' ? { max_estimated_cost: params.quotedEstimatedCost } : {}),
         prompt: params.prompt,
         generation_mode: params.generationMode,
         ratio: params.ratio,
@@ -2700,6 +2716,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       }
 
       if (!res.ok) {
+        if (typeof data.code === 'string' && data.code.startsWith('pricing_')) notifyVideoPricingChanged();
         setErrorDebug(data._debug || null);
         if (res.status >= 500) {
           try {
@@ -3560,6 +3577,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           providerLabel={activeProviderLabel}
           providerOptions={[]}
           selectedProvider={selectedProvider}
+          pricingProvider={isIpSurface ? 'volcengine_ip' : selectedProvider}
+          pricingModelId={selectedProvider === 'h3' ? selectedH3Preset?.id || h3VideoConfig?.default_preset_id : undefined}
           h3CapabilitiesReady={h3CapabilitiesReady}
           providerStatus={h3MachineStatus}
           modelLabel={activeModelLabel}

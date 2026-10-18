@@ -20,17 +20,21 @@ import { reserveImageStudioQueueCapacity } from './queue-capacity';
 import { finishRejectedStudioDimensions, readRetainedStudioDimensionOriginal } from './dimension-rejection';
 import { recordStudioResponseEvidence } from './response-evidence';
 import { claimStudioAsyncRecovery, deferStudioAsyncRecovery, releaseStudioAsyncSlot, studioAsyncReleaseReason, observeStudioAsyncQueryUnavailable } from './async-recovery';
+import { studioTaskState, studioTaskStates, publicPricingTaskState, studioBillingState, isPricingImageTask } from './pricing-state';
+import { assertPricingImageConsumerReady } from '@/lib/pricing/runtime';
+import { withImagePricing } from '@/lib/pricing/image';
 
 export async function assertStudioPostAuthorization(task: ImageStudioTask) {
   const current = await prisma.imageStudioTask.findUnique({ where: { id: task.id } });
-  const activeStatus = task.status === 'channel_running' ? 'channel_running' : 'running';
+  const activeStatus = studioTaskState(task, publicPricingTaskState(task.status) === 'channel_running' ? 'channel_running' : 'running');
   if (!current || current.status !== activeStatus || current.lease_token !== task.lease_token
     || !current.lease_until || current.lease_until <= new Date()) throw new StudioImageDownloadError('delivery_lease_lost');
   // Only validate the accepted snapshot; never resolve today's shared source here.
   assertFrozenSharedStudioTask(current);
+  if (isPricingImageTask(current)) await assertPricingImageConsumerReady(prisma);
   if (current.billing_mode === 'actual') {
     const contract = parseImageBillingContract(current.billing_contract_json);
-    const billingStatus = activeStatus === 'channel_running' ? 'channel_awaiting_response' : 'awaiting_response';
+    const billingStatus = studioBillingState(current, publicPricingTaskState(activeStatus) === 'channel_running' ? 'channel_awaiting_response' : 'awaiting_response');
     if (!contract || contract.mode !== 'actual' || contract.scope !== current.billing_scope
       || contract.authorizedCredits !== current.unit_credits || current.billing_settled_at
       || current.billing_status !== billingStatus || current.gateway_request_id
@@ -42,7 +46,7 @@ export async function assertStudioPostAuthorization(task: ImageStudioTask) {
 export async function processStudioTask(generate: typeof requestStudioImages = requestStudioImages) {
   const task = await claimStudioTask();
   if (!task) return false;
-  if (task.status === 'channel_running') await executeChannelStudioTask(task, generate);
+  if (publicPricingTaskState(task.status) === 'channel_running') await executeChannelStudioTask(task, generate);
   else await executeStudioTask(task, generate);
   return true;
 }
@@ -56,7 +60,7 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
   const taskSignal = AbortSignal.timeout(STUDIO_EXECUTION_MS);
   const assertLease = async () => {
     taskSignal.throwIfAborted();
-    const held = await prisma.imageStudioTask.findFirst({ where: { id: task.id, status: 'running', lease_token: task.lease_token, lease_until: { gt: new Date() } }, select: { id: true } });
+    const held = await prisma.imageStudioTask.findFirst({ where: { id: task.id, status: studioTaskState(task, 'running'), lease_token: task.lease_token, lease_until: { gt: new Date() } }, select: { id: true } });
     if (!held) throw new StudioImageDownloadError('delivery_lease_lost');
   };
   const download = (record: StudioDelivery) => downloadStudioDelivery(record, taskSignal, undefined, undefined, assertLease);
@@ -80,7 +84,7 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
       const snapshot = task.snapshot_json ? JSON.parse(task.snapshot_json) : {};
       const frozenChannel = safeImageChannelSnapshot(snapshot.imageChannel);
       if (snapshot.sharedLive !== undefined) assertFrozenSharedStudioTask(task);
-      const settings = snapshot.sharedLive !== undefined && frozenChannel
+      const settings = (snapshot.sharedLive !== undefined || isPricingImageTask(task)) && frozenChannel
         ? await resolveImageGenerationChannelSnapshot(frozenChannel, prisma, false, task.model)
         : await getImageGenerationSettingsForModel(task.model);
       if (!isStudioImageGenerationProvider(settings.provider) || !isImageGenerationApiReady(settings)) throw new Error('图片专用 API 暂不可用');
@@ -148,7 +152,7 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
       download: detail?.diagnostics || downloadError?.diagnostics, elapsedMs: Date.now() - started }));
     if (code === 'delivery_lease_lost') return;
     if (code === 'dimension_retention_checkpoint_invalid') {
-      await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: 'running', lease_token: task.lease_token },
+      await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: studioTaskState(task, 'running'), lease_token: task.lease_token },
         data: { lease_until: new Date(Date.now() + 5 * 60_000), error: '本机原图恢复资料暂不可读，原请求保留；请联系管理员核对，没有重新生成。' } });
       return;
     }
@@ -158,7 +162,7 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
     }
     if (delivery && studioDeliveryCanRetry(delivery) && (taskSignal.aborted || detail?.retryable || downloadError?.retryable || ['save', 'settle'].includes(stage))) {
       await updateStudioDelivery(delivery, { phase: 'recover', code });
-      await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: 'running', lease_token: task.lease_token, lease_until: { gt: new Date() } },
+      await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: studioTaskState(task, 'running'), lease_token: task.lease_token, lease_until: { gt: new Date() } },
         data: { lease_until: new Date(Date.now() + 30_000), error: '原图下载或保存暂时中断，正在恢复同一张图片，不会再次请求生成。' } });
       return;
     }
@@ -175,7 +179,7 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
 
 async function retainChannelTask(task: ImageStudioTask, message: string, delayMs = 60_000) {
   await prisma.imageStudioTask.updateMany({
-    where: { id: task.id, status: 'channel_running', lease_token: task.lease_token, lease_until: { gt: new Date() } },
+    where: { id: task.id, status: studioTaskState(task, 'channel_running'), lease_token: task.lease_token, lease_until: { gt: new Date() } },
     data: { lease_until: new Date(Date.now() + delayMs), error: message },
   });
 }
@@ -195,13 +199,13 @@ async function retainDimensionMismatchOutput(task: ImageStudioTask, original: Bu
     await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: task.status, lease_token: task.lease_token,
       lease_until: { gt: new Date() } }, data: { lease_until: new Date(Date.now() + 30_000),
       error: '原图已收到，规格与请求不符；正在恢复本机保存，不会重新生成。' } });
-    if (task.status === 'uncertain') await deferStudioAsyncRecovery(task, 'dimension_retention_save_pending');
+    if (publicPricingTaskState(task.status) === 'uncertain') await deferStudioAsyncRecovery(task, 'dimension_retention_save_pending');
   }
 }
 
 async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof requestStudioImages,
   recovery?: StudioDelivery, resumeReceipt?: StudioAsyncReceipt, recoveryDeadlineAt?: number, manualRecovery = false, localOnly = false) {
-  const recovering = task.status === 'uncertain';
+  const recovering = publicPricingTaskState(task.status) === 'uncertain';
   let providerStarted = Boolean(recovery || resumeReceipt);
   let delivery = recovery;
   let asyncReceipt = resumeReceipt;
@@ -212,7 +216,7 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
   const taskSignal = AbortSignal.timeout(STUDIO_EXECUTION_MS);
   const assertLease = async () => {
     taskSignal.throwIfAborted();
-    const held = await prisma.imageStudioTask.findFirst({ where: { id: task.id, status: recovering ? 'uncertain' : 'channel_running',
+    const held = await prisma.imageStudioTask.findFirst({ where: { id: task.id, status: studioTaskState(task, recovering ? 'uncertain' : 'channel_running'),
       lease_token: task.lease_token, lease_until: { gt: new Date() } }, select: { id: true } });
     if (!held) throw new StudioImageDownloadError('delivery_lease_lost');
   };
@@ -287,6 +291,9 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
         // that immutable version even if an administrator later edits/deletes it.
         settings = await resolveImageGenerationChannelSnapshot(imageChannel, prisma, false, task.model);
         await assertImageGenerationChannelDispatchOpen(imageChannel);
+        const frozenContract = parseImageBillingContract(task.billing_contract_json);
+        if (!frozenContract) throw new Error('原图片收费合同不可用，未向供应商提交');
+        settings = (await withImagePricing(settings, task.model, prisma, frozenContract)).settings;
         const validation = validateImageGenerationChannel(settings, { model: task.model, quality: task.quality,
           resolution: typeof snapshot.resolution === 'string' ? snapshot.resolution : undefined,
           ratio: task.aspect_ratio || undefined, referenceCount: JSON.parse(task.reference_ids).length }, snapshot.ratioContractVersion !== 2);
@@ -409,8 +416,8 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
   } catch (error) {
     if (error instanceof ImageGenerationChannelError && error.code === 'image_channel_dispatch_paused' && !providerStarted) {
       if (preparedRequest) await setStudioUnsentRequestState(task, 'held');
-      await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: 'channel_running', lease_token: task.lease_token },
-        data: { status: 'channel_queued', lease_token: null, lease_until: null, error: error.message } });
+      await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: studioTaskState(task, 'channel_running'), lease_token: task.lease_token },
+        data: { status: studioTaskState(task, 'channel_queued'), lease_token: null, lease_until: null, error: error.message } });
       return;
     }
     if (!delivery && providerStarted) delivery = await readStudioDelivery(task).catch(() => null) || undefined;
@@ -514,12 +521,12 @@ export async function recoverStudioTasks() {
     } finally { await deferStudioAsyncRecovery(pending.task, 'recovery_interrupted'); }
   }
   await cleanupStudioDeliveries();
-  const expired = await prisma.imageStudioTask.findMany({ where: { status: { in: ['running', 'channel_running'] }, lease_until: { lt: new Date() } },
+  const expired = await prisma.imageStudioTask.findMany({ where: { status: { in: studioTaskStates(['running', 'channel_running']) }, lease_until: { lt: new Date() } },
     // A retained slow query must fall behind untouched expired leases, even if
     // it expires again while the next original task is being queried.
     orderBy: [{ lease_until: 'asc' }, { created_at: 'asc' }, { id: 'asc' }], take: 1 });
   for (const task of expired) {
-    const channel = task.status === 'channel_running';
+    const channel = publicPricingTaskState(task.status) === 'channel_running';
     const token = randomUUID();
     const claimed = await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: task.status, lease_token: task.lease_token, lease_until: { lt: new Date() } },
       data: { lease_token: token, lease_until: new Date(Date.now() + 10 * 60_000) } });

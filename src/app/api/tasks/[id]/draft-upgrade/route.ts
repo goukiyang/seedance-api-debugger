@@ -9,8 +9,36 @@ import {
   webRequestSource,
 } from '@/lib/integrations/codex';
 import { createSeedanceDraftUpgrade, DraftUpgradeError } from '@/lib/tasks/seedance-draft-upgrade';
+import { quoteVideoPricing, publicVideoPricing, videoPricingError } from '@/lib/pricing/video';
+import { prisma } from '@/lib/prisma';
+import { assertCanViewTask } from '@/lib/projects/permissions';
+import { SEEDANCE_2_5_MODEL_ID } from '@/lib/provider/seedance-models';
 
 export const dynamic = 'force-dynamic';
+
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const user = hasCodexApiAuthSignal(request) ? (await authenticateCodexVideoApi(request)).user : await getSessionUser(request);
+    const draft = await prisma.videoTask.findUnique({ where: { id: params.id } });
+    if (!draft || ['admin_hidden', 'user_deleted'].includes(draft.retention_status)) throw new DraftUpgradeError('Draft 任务不存在或不可见', 404, 'DRAFT_NOT_FOUND');
+    await assertCanViewTask(user, draft);
+    const key = new URL(request.url).searchParams.get('idempotency_key') || `draft-upgrade:${draft.id}`;
+    if (!key.trim() || key.length > 200) throw new DraftUpgradeError('原升级请求编号无效');
+    const existing = await prisma.videoTask.findFirst({ where: { user_id: user.id, source_draft_task_id: draft.id, idempotency_key: key },
+      select: { id: true, provider_task_id: true, local_status: true } });
+    if (existing) return NextResponse.json({ accepted: existing }, { headers: { 'Cache-Control': 'private, no-store' } });
+    if (!draft.is_draft || draft.provider !== 'seedance' || draft.model !== SEEDANCE_2_5_MODEL_ID || draft.local_status !== 'succeeded'
+      || !draft.provider_draft_task_id) throw new DraftUpgradeError('当前样片还不能升级，请保留原任务', 409, 'DRAFT_NOT_READY');
+    const quote = await quoteVideoPricing({ provider: 'seedance', model: draft.model, resolution: '1080p', duration: draft.duration ?? 5 });
+    return NextResponse.json(publicVideoPricing(quote), { headers: { 'Cache-Control': 'private, no-store' } });
+  } catch (error) {
+    const pricingFailure = videoPricingError(error);
+    const status = pricingFailure?.status || (error instanceof AuthError || error instanceof DraftUpgradeError || error instanceof CodexApiAuthError ? error.status : 503);
+    return NextResponse.json({ error: pricingFailure?.code || 'DRAFT_QUOTE_UNAVAILABLE', message: pricingFailure?.message
+      || (error instanceof AuthError || error instanceof DraftUpgradeError || error instanceof CodexApiAuthError ? error.message : '报价暂不可用，原样片保留') },
+    { status, headers: { 'Cache-Control': 'private, no-store' } });
+  }
+}
 
 export async function POST(
   request: NextRequest,
@@ -50,9 +78,12 @@ export async function POST(
       sourceType: source.source_type,
       sourceLabel: source.source_label,
       sourceRequestId: source.source_request_id,
+      pricingRevision: typeof body.pricing_revision === 'string' ? body.pricing_revision : null,
     });
     return NextResponse.json(result, { status: result.pending_confirmation ? 202 : 200 });
   } catch (error) {
+    const pricingFailure = videoPricingError(error);
+    if (pricingFailure) return NextResponse.json({ error: pricingFailure.code, code: pricingFailure.code, message: pricingFailure.message }, { status: pricingFailure.status });
     if (error instanceof DraftUpgradeError) {
       return NextResponse.json({ error: error.code, message: error.message }, { status: error.status });
     }

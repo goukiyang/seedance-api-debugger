@@ -17,7 +17,7 @@ export type ImageStudioSettings = {
 // Newly introduced models require an explicit site price; unknown is never a default charge.
 export const DEFAULT_STUDIO_PRICES = Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [
   model,
-  model === 'gemini-3-pro-image-preview' || model === 'gemini-nano-banana-2.1' ? null : 20,
+  (['gemini-3.1-flash-image-preview', 'gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'] as readonly string[]).includes(model) ? 20 : null,
 ])) as ImageStudioSettings['prices'];
 
 function decodeSettings(value: ImageStudioSettings): ImageStudioSettings & { templateDefaults: StudioTemplateDefaults } {
@@ -58,6 +58,10 @@ export async function saveImageStudioSettingsInTx(tx: Prisma.TransactionClient, 
     const current = row ? JSON.parse(row.value_json) as ImageStudioSettings : null;
     const currentRevision = current?.revision ?? 0;
     if (currentRevision !== input.revision) return null;
+    const oldPrices = current ? decodeSettings(current).prices : DEFAULT_STUDIO_PRICES;
+    if (IMAGE_STUDIO_MODELS.some(model => input.prices[model] !== oldPrices[model])) {
+      throw new Error('收费点数已统一到点数定价页面；此旧入口未修改价格，请刷新后台');
+    }
     if (current?.context.trim() && !input.context.trim() && options.confirmContextClear !== true) {
       throw new StudioSettingsClearConfirmationError();
     }

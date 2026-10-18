@@ -6,6 +6,7 @@ import { getImageGenerationChannelOptions, getImageGenerationChannels, ImageGene
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import { imageBillingReadinessPayload } from '@/lib/image-studio/billing-readiness';
 import { parseStudioTemplateDefaults } from '@/lib/image-studio/template-defaults';
+import { getPricingImageChannelOptions } from '@/lib/pricing/image';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +35,7 @@ export async function GET() {
     const providerReady = Object.values(modelReady).some(Boolean);
     const modelFourToOne = Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [model, byModel.get(model)
       ? imageGenerationSupportsStudioFourToOne(byModel.get(model)!, model) : false]));
-    return NextResponse.json({ ...imageStudioSettingsPayload(settings, user.role === 'admin'), providerReady, modelReady, modelFourToOne, imageChannels: await getImageGenerationChannelOptions(),
+    return NextResponse.json({ ...imageStudioSettingsPayload(settings, user.role === 'admin'), providerReady, modelReady, modelFourToOne, imageChannels: await getPricingImageChannelOptions(),
       billingReadiness: await imageBillingReadinessPayload() }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   } catch {
     return NextResponse.json({ error: '读取设置失败，请重试' }, { status: 503 });

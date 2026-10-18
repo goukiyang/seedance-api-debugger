@@ -19,7 +19,7 @@ export async function exactSpecificationEstimate(scope: string, current: Specifi
   const group = imageCostGroup(current);
   if (!group) return null;
   const tasks = await prisma.imageStudioTask.findMany({ where: { billing_scope: scope, model: current.model,
-    status: 'succeeded', billing_status: 'confirmed', actual_amount_micros: { not: null },
+    status: 'succeeded', billing_status: { in: ['confirmed', 'rate_confirmed'] }, actual_amount_micros: { not: null },
     finished_at: { gte: new Date(now - 7 * 86400000) } }, orderBy: { finished_at: 'desc' }, take: 256,
     select: { id: true, model: true, quality: true, output_size: true, aspect_ratio: true,
       reference_ids: true, context: true, prompt: true, gateway_request_id: true, billing_contract_json: true, actual_amount_micros: true } });

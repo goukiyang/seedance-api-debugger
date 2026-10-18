@@ -39,6 +39,7 @@ import { sanitizeReturnTo, taskDetailHref, taskReturnLabel } from '@/lib/navigat
 import { enhanceWorkspaceHref, taskReuseHref } from '@/lib/navigation/task-reuse';
 import { showVideoCardManagementUi } from '@/lib/navigation';
 import type { DisplayUser } from '@/lib/users/display';
+import { useVideoPricing } from '@/lib/pricing/use-video-pricing';
 
 interface VideoTask {
   id: string;
@@ -840,6 +841,10 @@ export default function TaskDetailPage() {
   const [querying, setQuerying] = useState(false);
   const [autoPoll, setAutoPoll] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const retrySupported = Boolean(task && (!task.provider || ['seedance', 'h3'].includes(task.provider))
+    && task.local_status === 'failed' && !task.error_code?.includes('UNCONFIRMED') && !(Number(task.frozen_cost ?? 0) > 0));
+  const retryPricing = useVideoPricing({ provider: task?.provider === 'h3' ? 'h3' : 'seedance',
+    model: task?.model || '', resolution: task?.resolution || '480p', duration: task?.duration || 5 }, retrySupported);
   const [movingProject, setMovingProject] = useState(false);
   const [targetProjectId, setTargetProjectId] = useState('');
   const [targetVideoCardId, setTargetVideoCardId] = useState('');
@@ -1212,16 +1217,19 @@ export default function TaskDetailPage() {
   };
 
   const handleRetry = async () => {
-    if (retrying) return;
+    if (retrying || !retryPricing.quote) return;
     setRetrying(true);
     try {
       const res = await fetch(`/api/video/retry/${taskId}`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pricing_revision: retryPricing.quote.pricing_revision, max_estimated_cost: retryPricing.quote.estimatedCost }),
       });
       const data = await res.json();
       if (res.ok) {
         router.push(taskDetailHref(data.id, returnTo));
       } else {
+        if (res.status === 409) retryPricing.refresh();
         setOpenError(`重试失败: ${data.message || data.error || '请稍后重试'}`);
       }
     } catch (error) {
@@ -2121,10 +2129,10 @@ export default function TaskDetailPage() {
                     {downloading ? '准备中...' : '准备稳定下载'}
                   </button>
                 )}
-                {task.local_status === 'failed' && (
-                  <button className="btn btn-primary" onClick={handleRetry} disabled={retrying}>
+                {retrySupported && (
+                  <button className="btn btn-primary" onClick={handleRetry} disabled={retrying || !retryPricing.quote} title={retryPricing.error || undefined}>
                     <RotateCcw size={16} aria-hidden="true" />
-                    {retrying ? '重试中...' : '重新生成'}
+                    {retrying ? '重试中...' : retryPricing.quote ? `重新生成 · ${retryPricing.quote.estimatedCost}点` : '报价待确认'}
                   </button>
                 )}
                 {downloadError && task.result_video_url && (

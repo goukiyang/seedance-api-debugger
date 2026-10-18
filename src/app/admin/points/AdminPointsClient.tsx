@@ -232,6 +232,7 @@ export default function AdminPointsClient({
         actions={(
           <>
             <Link className="btn btn-secondary" href="/admin/users">用户与点数</Link>
+            <Link className="btn btn-secondary" href="/admin/pricing">点数与费率</Link>
             <Link className="btn btn-secondary" href="/admin/costs">计费与成本</Link>
           </>
         )}

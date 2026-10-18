@@ -9,6 +9,7 @@ import { enqueueVideoDeliveryJob } from '@/lib/video/delivery-queue';
 import { isCodexInternalServiceUser } from '@/lib/integrations/codex';
 import { isVideoDeliveryFastPathTask } from '@/lib/video/delivery-policy';
 import { visibleProviderErrorMessage } from '@/lib/provider/error-message';
+import { publicVideoTaskPricing } from '@/lib/pricing/video';
 import { getVideoTaskStatusByClientRequestId } from '@/lib/provider/jimeng';
 import {
   taskThumbnailProjection,
@@ -29,7 +30,7 @@ function serializeTaskIdentity<T extends {
   local_status?: string | null;
 }>(task: T) {
   return {
-    ...task,
+    ...publicVideoTaskPricing(task),
     owner: task.owner || task.user || null,
     submitted_user: task.user || null,
     error_message: task.local_status === 'failed'

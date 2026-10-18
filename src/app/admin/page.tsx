@@ -112,6 +112,7 @@ export default async function AdminPage() {
       desc: '费用、余额、接口配置和外部 Provider 状态集中管理。',
       links: [
         { title: '计费与成本', desc: '余额快照、官方扣费和账本自检', href: '/admin/costs' },
+        { title: '点数与费率', desc: '统一标准、型号费率和变更记录', href: '/admin/pricing' },
         { title: 'API 设置', desc: 'Musk API、图形生成和外部集成', href: '/admin/integrations' },
       ],
     },

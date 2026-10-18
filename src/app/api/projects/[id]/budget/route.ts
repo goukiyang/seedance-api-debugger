@@ -4,6 +4,7 @@ import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import { assertCanManageProject, assertCanViewProject, logProjectAction } from '@/lib/projects/permissions';
 import { adjustProjectBudget, ensureProjectBudgetAccount, getProjectBudgetSummary } from '@/lib/projects/budget';
+import { subtractCredits } from '@/lib/credits/precision';
 
 export const dynamic = 'force-dynamic';
 
@@ -91,7 +92,7 @@ export async function PATCH(
 
     const budget = await prisma.$transaction(async (tx) => {
       const before = await getProjectBudgetSummary(tx, params.id);
-      const delta = targetBudget === null ? 0 : targetBudget - before.budget_credits;
+      const delta = targetBudget === null ? 0 : subtractCredits(targetBudget, before.budget_credits);
       if (delta !== 0) {
         await adjustProjectBudget(tx, {
           projectId: params.id,

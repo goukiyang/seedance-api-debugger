@@ -20,6 +20,7 @@ import {
 import { getH3ApiSettings, safeH3ConfigDto } from '@/lib/integrations/h3';
 import { getProviderConfig, isApiKeyConfigured } from '@/lib/provider/jimeng';
 import { getCreditSummary } from '@/lib/credits/policy';
+import { getPricingImageChannelOptions } from '@/lib/pricing/image';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import {
   projectDisplayName,
@@ -452,7 +453,7 @@ export async function GET(request: NextRequest) {
       },
       image: {
         enabled: imageReady,
-        imageChannels: await getImageGenerationChannelOptions(),
+        imageChannels: await getPricingImageChannelOptions(),
         label: imageLabel,
         provider: imageSettings.provider,
         model: imageSettings.default_model,

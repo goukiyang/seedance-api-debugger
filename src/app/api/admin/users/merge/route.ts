@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { sumCredits, addCredits, normalizeCredits, assertCreditWriteback } from '@/lib/credits/precision';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
 import { maintainAccountSessionBinding } from '@/lib/auth/session-account-binding';
 
@@ -104,7 +105,7 @@ function mergePermissionsJson(values: string[]) {
 }
 
 function sum(items: Array<number | null | undefined>): number {
-  return items.reduce<number>((total, item) => total + (Number(item ?? 0) || 0), 0);
+  return sumCredits(items.map(item => item ?? 0));
 }
 
 function hasFeishuIdentity(user: MergeUserIdentity) {
@@ -218,15 +219,17 @@ export async function POST(request: NextRequest) {
     const sourceTotalUsed = sum(sourceAccounts.map((account) => account.total_used));
 
     if (sourceBalance !== 0 || sourceFrozen !== 0 || sourceMonthlyUsed !== 0 || sourceTotalUsed !== 0) {
-      await tx.creditAccount.update({
+      const expected = { balance: addCredits(targetAccount.balance, sourceBalance),
+        frozen_credits: addCredits(targetAccount.frozen_credits, sourceFrozen),
+        monthly_used: addCredits(targetAccount.monthly_used, sourceMonthlyUsed),
+        total_used: addCredits(targetAccount.total_used, sourceTotalUsed) };
+      const written = await tx.creditAccount.update({
         where: { user_id: targetUserId },
         data: {
-          balance: { increment: sourceBalance },
-          frozen_credits: { increment: sourceFrozen },
-          monthly_used: { increment: sourceMonthlyUsed },
-          total_used: { increment: sourceTotalUsed },
+          ...expected,
         },
       });
+      assertCreditWriteback(written, expected);
 
       await tx.creditLedger.create({
         data: {
@@ -234,19 +237,19 @@ export async function POST(request: NextRequest) {
           type: 'account_merge_in',
           amount: sourceBalance,
           balance_before: targetAccount.balance,
-          balance_after: targetAccount.balance + sourceBalance,
+          balance_after: expected.balance,
           frozen_before: targetAccount.frozen_credits,
-          frozen_after: targetAccount.frozen_credits + sourceFrozen,
+          frozen_after: expected.frozen_credits,
           operator_id: admin.id,
           reason,
         },
       });
 
       for (const account of sourceAccounts) {
-        const accountBalance = Number(account.balance ?? 0) || 0;
-        const accountFrozen = Number(account.frozen_credits ?? 0) || 0;
-        const accountMonthlyUsed = Number(account.monthly_used ?? 0) || 0;
-        const accountTotalUsed = Number(account.total_used ?? 0) || 0;
+        const accountBalance = normalizeCredits(account.balance);
+        const accountFrozen = normalizeCredits(account.frozen_credits);
+        const accountMonthlyUsed = normalizeCredits(account.monthly_used);
+        const accountTotalUsed = normalizeCredits(account.total_used);
         if (accountBalance === 0 && accountFrozen === 0 && accountMonthlyUsed === 0 && accountTotalUsed === 0) continue;
         await tx.creditLedger.create({
           data: {

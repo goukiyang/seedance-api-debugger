@@ -38,6 +38,7 @@ export const shellRoutes = [
   '/generate/enhance',
   '/admin',
   '/admin/projects',
+  '/admin/pricing',
   '/admin/outputs',
   '/admin/image-studio',
   '/admin/costs',
@@ -121,6 +122,7 @@ export const adminNavGroups: NavGroup[] = [
     items: [
       { label: '管理中心', href: '/admin' },
       { label: '用户管理', href: '/admin/users', match: ['/admin/users', '/admin/points'] },
+      { label: '点数与费率', href: '/admin/pricing', prefixMatch: true },
       { label: '项目管理', href: '/admin/projects', prefixMatch: true },
       { label: '产出与反馈', href: '/admin/outputs', match: ['/admin/outputs', '/admin/feedback'] },
       { label: '图片任务审计', href: '/admin/image-studio', prefixMatch: true },

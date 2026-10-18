@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { IMAGE_BILLING_VERSION, IMAGE_POINTS_PER_USD,
   billedCredits, creditsToCents, type ImageBillingContract } from './billing-contract';
 import type { ImageSupplierCharge } from './billing-provider';
+import { PRICING_IMAGE_BILLING_VERSION } from './billing-contract';
+import type { FrozenPricingCharge } from '../pricing/charge';
 
 export function imageSpecification(input: { model: string; quality: string; outputSize?: string | null;
   aspectRatio: string; referenceCount: number; inputCharacters: number; inputDigest?: string }) {
@@ -32,6 +34,14 @@ export function fixedImageBillingContract(input: { scope: string; model: string;
     multiplier: 1, rounding: 'half_up_cent', authorizedCredits: input.credits, scope: input.scope,
     model: input.model, specification: input.specification, issuedAt: new Date(now).toISOString(),
     expiresAt: new Date(now + 60_000).toISOString(), deadline: null, estimateSource: 'legacy_fixed', estimateVersion: 'legacy-fixed-v1' };
+}
+
+export function withPricingImageContract(base: ImageBillingContract, pricing: FrozenPricingCharge, authorizedCredits: number): ImageBillingContract {
+  const actual = pricing.identity.billingMode === 'actual';
+  return { ...base, version: PRICING_IMAGE_BILLING_VERSION, mode: actual ? 'actual' : 'fixed',
+    rounding: pricing.mode === 'legacy_actual' ? 'half_up_cent' : 'half_up_tenth', pricing, authorizedCredits,
+    deadline: actual ? new Date(Date.parse(base.expiresAt) + 48 * 3600000).toISOString() : null,
+    estimateVersion: `pricing-policy-v1:${pricing.revision}` };
 }
 
 export function supplierHistoryEstimate(rows: ImageSupplierCharge[], model: string,

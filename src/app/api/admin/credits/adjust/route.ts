@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAdminUser, errorJson } from '@/lib/auth/api-helpers';
 import type { SessionUser } from '@/lib/auth/session';
+import { addCredits, subtractCredits, creditCents, assertCreditWriteback } from '@/lib/credits/precision';
 
 export async function POST(request: NextRequest) {
   let admin: SessionUser;
@@ -30,6 +31,7 @@ export async function POST(request: NextRequest) {
       return errorJson('点数操作需要二次确认', 400);
     }
 
+    creditCents(amount);
     const targetUser = await prisma.user.findUnique({ where: { id: user_id } });
     if (!targetUser) return errorJson('用户不存在', 404);
 
@@ -42,7 +44,7 @@ export async function POST(request: NextRequest) {
 
       // deduct 只允许扣长期可用余额；每日配额由任务消费，不做后台手工扣减。
       if (type === 'deduct') {
-        const available = account.balance - account.frozen_credits;
+        const available = subtractCredits(account.balance, account.frozen_credits);
         if (amount > available) {
           throw new Error(`可用余额不足，当前可用 ${available.toFixed(2)}`);
         }
@@ -53,16 +55,17 @@ export async function POST(request: NextRequest) {
 
       const balanceBefore = account.balance;
       const newBalance = type === 'grant'
-        ? balanceBefore + amount
+        ? addCredits(balanceBefore, amount)
         : type === 'deduct'
-          ? balanceBefore - amount
+          ? subtractCredits(balanceBefore, amount)
           : amount;
-      const ledgerAmount = newBalance - balanceBefore;
+      const ledgerAmount = subtractCredits(newBalance, balanceBefore);
 
-      await tx.creditAccount.update({
+      const written = await tx.creditAccount.update({
         where: { user_id },
         data: { balance: newBalance },
       });
+      assertCreditWriteback(written, { balance: newBalance });
 
       await tx.creditLedger.create({
         data: {

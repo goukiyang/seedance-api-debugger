@@ -1,4 +1,6 @@
 'use client';
+import { validVideoPricingAmount } from '@/lib/pricing-client';
+import { formatImageUiCredits, validImageUiQuote, imageUiQuoteFields, type ImageUiQuote } from '@/app/image-studio/use-studio-batch';
 import { studioOutputMismatchDisposition } from '@/lib/image-studio/dimension-mismatch';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -30,7 +32,6 @@ import { imageBillingPending } from '@/lib/image-studio/billing-contract';
 import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
 import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, imageStudioChannelReadyForModel, imageStudioEffectiveChannelId, imageStudioUsesLegacyRoute, normalizeImageStudioChannels, useImageStudioChannel } from '@/lib/image-studio/channels';
 import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChannelSelect';
-import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
 import { handImageDownloadToBrowser } from '@/lib/media/native-download';
 import styles from './studio.module.css';
 type Task = { id: string; ordinal: number; status: string; resultDisposition?: string | null; error?: string | null; billing?: ImageBillingView | null; snapshot?: { imageChannelLabel?: string | null; imageSupplierName?: string | null } | null; asset: { id: string; original_url: string; thumbnail_url?: string | null; file_name?: string; mime_type?: string | null } | null };
@@ -39,7 +40,7 @@ function hasReturnedImage(task: Task | null | undefined): task is Task & { asset
 }
 const taskLabel = (task: Task) => studioOutputMismatchDisposition(task.resultDisposition) && task.asset ? '图片已返回 · 规格不符' : statusLabel[task.status] || '状态待确认';
 type Payload = { total: number; records: AvatarRecord[]; recentConfigs:AvatarRecord[];recordTasks:Record<string,Task>; nextCursor?: string | null; settings: { model: string; revision: number; prices: Record<string, number | null>; imageChannels?: unknown; billingReadiness?: { models: Record<string, { ready: boolean }> } } };
-type AvatarImageQuote = { billingMode: 'fixed' | 'actual'; billingQuoteId: string | null; unitCredits: number; estimatedCredits: number; expiresAt?: string; imageChannel?: ImageGenerationChannelSnapshot };
+type AvatarImageQuote = ImageUiQuote & { billingQuoteId: string | null };
 type CachedAvatarImageQuote = { planId: string; parameters: string; quote: AvatarImageQuote };
 const statusLabel: Record<string, string> = { queued: '排队中', running: '生成中', succeeded: '图片已保存，待人工确认', failed: '生成失败', uncertain: '受理未知，请先查询' };
 const descriptionDiagnosticLabels: Record<string, string> = {
@@ -115,7 +116,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   const actualQuoteRequired=legacyImageRoute?billingReadiness?.models?.[model]?.ready===true
     :selectedChannelModel?.actualQuoteRequired===true||selectedChannelModel?.billingMode==='actual';
   useEffect(()=>{
-    if(!actualQuoteRequired||!ready||management||!quoteVisible||busy||pending||visibleBillingQuote||!quotablePlan&&visibleDraftBillingEstimate)return;
+    if(!ready||management||!quoteVisible||busy||pending||visibleBillingQuote||!quotablePlan&&visibleDraftBillingEstimate)return;
     const abort=new AbortController();
     const timer=window.setTimeout(()=>{
       void fetch('/api/avatar-studio',{method:'POST',headers:{'Content-Type':'application/json'},body:automaticQuoteInput,
@@ -123,7 +124,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
         .then(result=>{
           if(abort.signal.aborted||!Number.isFinite(result.estimatedCredits)||result.estimatedCredits<0||!result.expiresAt||Date.parse(result.expiresAt)<=Date.now())return;
           if(result.estimateOnly===true)setDraftBillingEstimate({parameters:billingParameters,estimatedCredits:result.estimatedCredits,expiresAt:result.expiresAt});
-          else if(quotablePlan&&['fixed','actual'].includes(result.billingMode)&&(result.billingMode!=='actual'||result.billingQuoteId))setBillingQuote({planId:quotablePlan.id,parameters:billingParameters,quote:result});
+          else if(quotablePlan&&validImageUiQuote(result))setBillingQuote({planId:quotablePlan.id,parameters:billingParameters,quote:result});
         }).catch(()=>{});
     },500);
     return()=>{window.clearTimeout(timer);abort.abort();};
@@ -331,11 +332,11 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     const legacy=imageStudioUsesLegacyRoute(imageChannel.channels,draft.model,draft.channelId);
     const unit=legacy?draft.prices[draft.model]:capability?.billingMode==='fixed'
       ?(capability.fixedPoints??(['shared','banana'].includes(draft.channelId)?draft.prices[draft.model]:null)):0;
-    if(legacy&&(unit==null||!Number.isInteger(unit)||unit<0))throw new Error('当前模型图片价格尚未就绪，本次未调用文字模型或提交图片。');
+    if(legacy&&!validVideoPricingAmount(unit))throw new Error('当前模型图片价格尚未就绪，本次未调用文字模型或提交图片。');
     if(!legacy){
       const issue=imageStudioChannelIssue(channel,draft.model,{quality:draft.quality,resolution:draft.resolution,ratio:'1:1',referenceCount:draft.rules.referenceIds?.length||0,legacyRoute:false});
       if(issue)throw new Error(`${issue} 本次未调用文字模型或提交图片。`);
-      if(capability?.billingMode==='fixed'&&(unit==null||!Number.isInteger(unit)||unit<0))throw new Error('当前生图通道尚未配置固定点数，本次未调用文字模型或提交图片。');
+      if(capability?.billingMode==='fixed'&&!validVideoPricingAmount(unit))throw new Error('当前生图通道尚未配置固定点数，本次未调用文字模型或提交图片。');
     }
     const selected=draft.model as typeof IMAGE_STUDIO_MODELS[number];
     if(!IMAGE_STUDIO_MODELS.includes(selected)||(legacy
@@ -399,7 +400,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     if(liveDraft.current.blocked)throw new Error('原提交尚未确认，请先查询；本次未重复出图。');
     if(next.model!==original.model||next.quality!==original.quality||next.resolution!==original.resolution||avatarLayout(next)!==avatarLayout(original.rules))throw new Error('返回的图片参数与当前选择不一致，本次未提交；请重新准备。');
     if(next.candidates.some(candidate=>candidate.members.length!==original.rules.people))throw new Error('返回的人数与当前选择不一致，本次未提交；正文和原参数保留。');
-    if((next.unitCredits===null&&!actualQuoteRequired||next.unitCredits!==null&&(!Number.isInteger(next.unitCredits)||next.unitCredits<0))||!next.imageReady){setNotice('人物草稿已准备，图片通道或报价尚未就绪；本次未提交图片。');return;}
+    if((next.unitCredits===null&&!actualQuoteRequired||next.unitCredits!==null&&!validVideoPricingAmount(next.unitCredits))||!next.imageReady){setNotice('人物草稿已准备，图片通道或报价尚未就绪；本次未提交图片。');return;}
     const count=avatarOutputCount(next),expectedCount=isAvatarSheet(original.rules)?1:original.rules.candidates;
     if((next.channelId||'original')!==imageStudioEffectiveChannelId(imageChannel.channels,next.model,original.channelId))throw new Error('人物草稿使用的生图通道与当前选择不同，请按当前通道重新准备；尚未提交图片。');
     const quoteParameters=JSON.stringify([ownerId,avatarRulesSignature(next.candidates[0].rules),next.model,next.quality,next.resolution,avatarLayout(next),original.channelId,imageStudioEffectiveChannelId(imageChannel.channels,next.model,original.channelId),original.channelId==='original'?imageChannel.channels.defaultRoutes?.revision:undefined]);
@@ -409,23 +410,14 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
       setStage('确认图片报价');
       const result=await api<AvatarImageQuote>({action:'billing-quote',planId:next.id,channelId:original.channelId,...(next.imageChannel?{imageChannel:next.imageChannel}:{})});
       assertDraft(original);
-      if(!['fixed','actual'].includes(result.billingMode)||!Number.isFinite(result.unitCredits)||result.unitCredits<0
-        ||!Number.isFinite(result.estimatedCredits)||result.estimatedCredits<0
-        ||(result.billingQuoteId!==null&&typeof result.billingQuoteId!=='string')
-        ||!result.expiresAt||!Number.isFinite(Date.parse(result.expiresAt))||Date.parse(result.expiresAt)<=Date.now()
-        ||(result.billingMode==='actual'&&!result.billingQuoteId))throw new Error('本次图片报价信息不完整，尚未提交。');
+      if(!validImageUiQuote(result))throw new Error('本次图片报价信息不完整，尚未提交。');
       if((next.channelId||'original')!=='original'&&(!next.imageChannel||result.imageChannel?.channelId!==next.imageChannel.channelId
         ||result.imageChannel.configRevision!==next.imageChannel.configRevision))throw new Error('生图通道配置已变化，当前报价未绑定到人物草稿；尚未提交图片。');
-      const previousTotal=billingQuote?.planId===next.id&&billingQuote.parameters===quoteParameters
-        &&(!billingQuote.quote.expiresAt||Date.parse(billingQuote.quote.expiresAt)>Date.now())
-        ?Math.ceil(billingQuote.quote.estimatedCredits)
-        :visibleDraftBillingEstimate?Math.ceil(visibleDraftBillingEstimate.estimatedCredits)
-          :next.unitCredits !== null ? Math.ceil(((next.channelId||'original')==='original'?(original.prices[next.model]??next.unitCredits):next.unitCredits)*count) : -1;
       quote=result;
       setBillingQuote({planId:next.id,parameters:quoteParameters,quote:result});
-      if(Math.ceil(result.estimatedCredits)>previousTotal || direct && result.billingMode==='actual' && !visibleDraftBillingEstimate){
+      if(direct){
         setPlan(next);
-        setNotice(`图片预估为 ${Math.ceil(result.estimatedCredits)} 点数，本次未提交；请核对后再次点击生成。`);
+        setNotice(`图片预估为 ${formatImageUiCredits(result.estimatedCredits)} 点数，本次未提交；请核对后再次点击生成。`);
         return;
       }
     }
@@ -434,12 +426,12 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     if(quote.expiresAt&&Date.parse(quote.expiresAt)<=Date.now()){setBillingQuote(null);setNotice('图片报价已过期，本次未提交；请再次点击获取新报价。');return;}
     if(direct&&(next.channelId||'original')==='original'&&(next.unitCredits!==original.prices[original.model]||count!==expectedCount)){
       setPrices(old=>({...old,[next.model]:next.unitCredits}));
-      setNotice(next.unitCredits === null ? '图片价格尚未确认，本次未提交图片；请先核对新报价。' : `图片报价已变化：${count}张，每张${next.unitCredits}点，共${count*next.unitCredits}点。本次未提交图片，请核对新报价后重新点击生成。`);
+      setNotice(`图片报价已变化：${count}张，共${formatImageUiCredits(quote.estimatedCredits)}点。本次未提交图片，请核对新报价后重新点击生成。`);
       return;
     }
     if(!direct){
       setStage('等待确认图片费用');
-      if (!(await confirm(`${isAvatarSheet(next)?`1张${avatarSheetLabel(next.layout)}，${next.candidates.length}位不同人物、每格1人`:`${count}张独立候选，每张${next.candidates[0].members.length}人`}，图片预估合计约${Math.ceil(quote.estimatedCredits)}点。仅本次明确的人物要求会用于生成。`, { title: '确认生成', confirmLabel: '生成图片' }))) return;
+      if (!(await confirm(`${isAvatarSheet(next)?`1张${avatarSheetLabel(next.layout)}，${next.candidates.length}位不同人物、每格1人`:`${count}张独立候选，每张${next.candidates[0].members.length}人`}，图片预估合计约${quote.estimatedCredits}点。仅本次明确的人物要求会用于生成。`, { title: '确认生成', confirmLabel: '生成图片' }))) return;
     }
     assertDraft(original);
     if(quote.expiresAt&&Date.parse(quote.expiresAt)<=Date.now()){setBillingQuote(null);setNotice('图片报价已过期，本次未提交；请再次点击获取新报价。');return false;}
@@ -453,7 +445,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     setStage('提交图片任务');
     setBillingQuote(null);
     try {
-      try { await api({ action: 'submit', id: next.id, layout:avatarLayout(next),rules:next.candidates[0].rules,model:next.model,quality:next.quality,resolution:next.resolution,channelId:original.channelId,...(quote.imageChannel?{imageChannel:quote.imageChannel}:{}),...(quote.billingQuoteId?{billingQuoteId:quote.billingQuoteId}:{}),maxEstimatedCost:Math.ceil(quote.estimatedCredits) });watchGenerationCompletion(ownerId, next.id, 'avatar', count); }
+      try { await api({ action: 'submit', id: next.id, layout:avatarLayout(next),rules:next.candidates[0].rules,model:next.model,quality:next.quality,resolution:next.resolution,channelId:original.channelId,...imageUiQuoteFields(quote) });watchGenerationCompletion(ownerId, next.id, 'avatar', count); }
       finally { if (alive.current && liveDraft.current.ownerRevision===original.ownerRevision && planRef.current===next.id) await refreshCredits({ force: true }); }
       if(!alive.current||liveDraft.current.ownerRevision!==original.ownerRevision||planRef.current!==next.id)return true;
       setPending(false);setNotice('图片任务已提交，正在查询结果；尚未代表已出图。'); await queryPlan(next.id); await load();
@@ -607,12 +599,10 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
         {canContinueOriginal&&<p className={styles.price}>原文字回复未取回，不再重复调用文字模型。</p>}
         <p className={styles.estimate}>
           {visibleBillingQuote
-            ? `合计约 ${Math.ceil(visibleBillingQuote.estimatedCredits)} 点数`
+            ? `合计约 ${formatImageUiCredits(visibleBillingQuote.estimatedCredits)} 点数`
             : visibleDraftBillingEstimate
-              ? `合计约 ${Math.ceil(visibleDraftBillingEstimate.estimatedCredits)} 点数`
-            : billingReadiness?.models?.[model]?.ready || prices[model] == null || !Number.isFinite(prices[model]) || prices[model]! < 0
-              ? '费用待估算'
-              : `合计约 ${Math.ceil(prices[model]! * (draftSheet ? 1 : rules.candidates))} 点数`}
+              ? `合计约 ${formatImageUiCredits(visibleDraftBillingEstimate.estimatedCredits)} 点数`
+              : '费用待估算'}
         </p>
         {referenceUploading&&<span role="status" className={styles.price}>参考图上传中，请等待上传完成后生成。</span>}
         {blocked&&!referenceUploading && <button type="button" className={styles.quiet} onClick={()=>void run(async()=>{const id=planRef.current;if(!id)throw new Error('原计划编号暂不可读取，请保留草稿后重新打开页面；未重复提交');await queryPlan(id);})}>查询原提交，不重复生成</button>}

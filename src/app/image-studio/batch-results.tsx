@@ -1,5 +1,8 @@
 'use client';
 import { studioOutputMismatchDisposition, studioOutputFormatForMime } from '@/lib/image-studio/dimension-mismatch';
+import { addCredits, sumCredits } from '@/lib/credits/precision';
+import { validVideoPricingAmount } from '@/lib/pricing-client';
+import { formatImageUiCredits, validImageUiQuote, parseImageUiBudget, imageUiBudgetPrecision, type ImageUiQuote } from './use-studio-batch';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, FolderOpen, Pause, Play, RefreshCw, RotateCcw, Save, X } from 'lucide-react';
 import { GeneratedImageResults, type GeneratedImageResult } from '@/components/GeneratedImageResults';
@@ -24,8 +27,8 @@ type CurrentSharedModule = { id: string; name: string; revision: number; templat
   model: string; quality: string; resolution: string; count: number; aspectRatio: string;
   sharedLive?: { intent: SharedStudioIntent; available: boolean; unavailableReason?: string; overriddenFields: Array<keyof SavedPersonalInput>;
     defaults?: import('@/lib/image-studio/shared-types').SharedStudioDefaults } };
-type ContinuationQuote = { sharedLive?: SharedStudioIntent; billingMode: 'fixed' | 'actual'; batchQuoteId: string | null;
-  estimatedCredits: number; unitCredits: number; expiresAt: string; imageChannel?: { channelId: string; configRevision: string } };
+type ContinuationQuote = { sharedLive?: SharedStudioIntent; billingMode: 'fixed' | 'actual'; batchQuoteId: string | null; pricingRevision?: string | null; creditPrecision?: number;
+  estimatedCredits: number; unitCredits: number; expiresAt: string; imageChannel?: ImageUiQuote['imageChannel'] };
 function sameDefinition(left?: SharedStudioIntent, right?: SharedStudioIntent) {
   return left?.protocol === 'shared-live-v1' && right?.protocol === 'shared-live-v1'
     && left.presetId === right.presetId && left.definitionToken === right.definitionToken;
@@ -131,15 +134,13 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
     const quote: ContinuationQuote = await readResult(await fetch('/api/image-studio/batches', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'quote', id, ...continuation }), signal: AbortSignal.timeout(120000) }));
     if (!valid()) return;
-    if (!['fixed', 'actual'].includes(quote.billingMode) || !Number.isFinite(quote.estimatedCredits) || quote.estimatedCredits < 0
-      || !Number.isFinite(quote.unitCredits) || quote.unitCredits < 0 || !Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= Date.now()
-      || quote.batchQuoteId !== null && typeof quote.batchQuoteId !== 'string'
-      || quote.billingMode === 'actual' && !quote.batchQuoteId || !sameDefinition(quote.sharedLive, continuation.sharedLive)
+    if (!validImageUiQuote(quote, Date.now(), true) || !sameDefinition(quote.sharedLive, continuation.sharedLive)
       || quote.imageChannel && (!quote.imageChannel.channelId || !quote.imageChannel.configRevision)) throw new Error('剩余项报价尚未完整确认，原批次保持不变');
-    const remainingCredits = Math.ceil(quote.estimatedCredits);
-    const minimumBudget = fresh.committedCredits + remainingCredits;
+    const remainingCredits = quote.estimatedCredits;
+    const minimumBudget = addCredits(fresh.committedCredits, remainingCredits);
+    const budgetPrecision = imageUiBudgetPrecision(quote, fresh.committedCredits);
     const suggestedBudget = Math.max(fresh.budget, minimumBudget);
-    if (!Number.isSafeInteger(suggestedBudget) || suggestedBudget < 0 || suggestedBudget > 10000000) throw new Error('整批最高点数超出可确认范围，原批次保持不变');
+    if (!validVideoPricingAmount(suggestedBudget)) throw new Error('整批最高点数超出可确认范围，原批次保持不变');
     const defaults = current.sharedLive.defaults;
     const model = personalOverrides.model ?? defaults.model ?? current.model;
     const quality = personalOverrides.quality ?? defaults.quality ?? current.quality;
@@ -148,18 +149,17 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
       `${IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model} · ${IMAGE_STUDIO_QUALITY_LABELS[quality as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || quality} · ${personalOverrides.resolution ?? defaults.resolution ?? current.resolution} · ${personalOverrides.aspectRatio ?? defaults.aspectRatio ?? current.aspectRatio}`,
       policy ? `主图要求：${policy.primaryMin} 至 ${policy.primaryMax} 张` : '',
       `剩余未受理 ${fresh.pending} 项，预计 ${remainingCredits} 点；已受理计入 ${fresh.committedCredits} 点。`,
-      '只继续原批剩余项，保留本人已保存输入和原素材；已受理、未知和成功项不重发。', '填写整批最高点数（包含已受理部分）：'].filter(Boolean).join('\n');
+      '只继续原批剩余项，保留本人已保存输入和原素材；已受理、未知和成功项不重发。', `填写整批最高点数（包含已受理部分，最小单位${budgetPrecision}点）：`].filter(Boolean).join('\n');
     let mutationSent = false;
-    await askBudget(description, String(suggestedBudget), { title: '确认继续', confirmLabel: `确认继续 · ${remainingCredits}点`, maxLength: 8, anchor: null,
+    await askBudget(description, formatImageUiCredits(suggestedBudget), { title: '确认继续', confirmLabel: `确认继续 · ${formatImageUiCredits(remainingCredits)}点`, maxLength: 11, anchor: null,
       onSubmit: async value => {
         if (!valid()) throw new Error('已离开原批次，未继续生成');
         if (mutationSent) {
           const observed = await readOriginal(); setBatch(observed);
           throw new Error('已查询原批次，不会重复发送继续请求；请关闭确认框查看最新状态');
         }
-        if (!/^\d{1,8}$/.test(value)) throw new Error('请填写整批最高点数，不能包含小数');
-        const budget = Number(value);
-        if (!Number.isSafeInteger(budget) || budget < minimumBudget || budget > 10000000) throw new Error(`整批最高点数须为 ${minimumBudget} 至 10000000 点`);
+        const budget = parseImageUiBudget(value, budgetPrecision);
+        if (budget === null || budget < minimumBudget) throw new Error(`整批最高点数须为 ${formatImageUiCredits(minimumBudget)} 至 10000000 点，最小单位${budgetPrecision}点`);
         if (Date.parse(quote.expiresAt) <= Date.now()) throw new Error('报价已过期，未继续生成；请关闭确认框重新读取报价');
         const latestBatch = await readOriginal();
         const latestDefinition = await readDefinition();
@@ -172,7 +172,7 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
         mutationSent = true;
         try {
           const result = await readResult(await fetch('/api/image-studio/batches', { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id, action: 'resume', ...continuation, budget, ...(quote.batchQuoteId ? { batchQuoteId: quote.batchQuoteId } : {}),
+            body: JSON.stringify({ id, action: 'resume', ...continuation, budget, ...(quote.pricingRevision ? { pricingRevision: quote.pricingRevision } : {}), ...(quote.batchQuoteId ? { batchQuoteId: quote.batchQuoteId } : {}),
               ...(quote.imageChannel ? { imageChannel: quote.imageChannel } : {}) }), signal: AbortSignal.timeout(120000) }), true);
           if (!valid()) return;
           if (result.batch.id !== id) throw new Error('继续回执未匹配原批次，请查询原批次，不要新建任务');
@@ -196,8 +196,10 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
   async function action(action: string) {
     if (actionLock.current || !batch) return;
     actionLock.current = true; setBusy(true); setError(''); setContinuationMessage('');
-    const expected = `${userId}:${id}`, ordinals = [...selected], retryBudget = batch.committedCredits + ordinals.length * batch.unitCredits;
+    const expected = `${userId}:${id}`, ordinals = [...selected];
     try {
+      const retryCredits = sumCredits(ordinals.map(() => batch.unitCredits));
+      const retryBudget = addCredits(batch.committedCredits, retryCredits);
       if (action === 'resume' && (batch.sharedLive || batch.definitionConfirmationRequired || batch.state === 'needs-confirmation')) {
         await continueSharedBatch(expected); return;
       }
@@ -208,7 +210,7 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
       };
       if (action === 'retry') {
         await quoteRetry();
-        if (!await confirm(`仅重试所选失败${ordinals.length}项，本次预计${ordinals.length * batch.unitCredits}点；已成功结果不再生成。`, { title: '确认重试', confirmLabel: `确认重试 · ${ordinals.length * batch.unitCredits}点`, anchor: null })) return;
+        if (!await confirm(`仅重试所选失败${ordinals.length}项，按原批报价预计${formatImageUiCredits(retryCredits)}点；已成功结果不再生成。`, { title: '确认重试', confirmLabel: `确认重试 · ${formatImageUiCredits(retryCredits)}点`, anchor: null })) return;
         await quoteRetry();
       }
       if (scope.current !== expected) return;
@@ -332,7 +334,7 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
         {zipReady && <a href={zipReady.url} download={zipReady.name}>再次下载已准备的包</a>}
         {saveError && <TaskNotice kind="recoverable">{saveError}，只补保存，不重新生成。</TaskNotice>}
       </div>}
-      {!deliveryOnly && batch.failed > 0 && <div className={styles.retry}><span>选中失败项 {selected.length} 张，本次重试预计 {selected.length * batch.unitCredits} 点；每项最多重试 3 次</span><button type="button" disabled={busy || !selected.length} onClick={() => void action('retry')}><RotateCcw size={16} />重试选中失败项</button></div>}
+      {!deliveryOnly && batch.failed > 0 && <div className={styles.retry}><span>选中失败项 {selected.length} 张，按原批报价预计 {formatImageUiCredits(sumCredits(selected.map(() => batch.unitCredits)))} 点；每项最多重试 3 次</span><button type="button" disabled={busy || !selected.length} onClick={() => void action('retry')}><RotateCcw size={16} />重试选中失败项</button></div>}
       {!deliveryOnly && <GeneratedImageResults items={resultItems} scope={`sd2-image-studio-batch-page:${userId}:${id}`}
         visible={visible} onQuickUse={onQuickUse ? item => { if (item.taskId && item.image) onQuickUse(item.taskId); } : undefined}
         renderPrimaryActions={(item, waitDisplay) => item.taskId && waitDisplay?.showRecovery ? <button type="button" disabled={reading} onClick={() => void load()}>刷新原任务状态</button> : null}

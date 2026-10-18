@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { Prisma, type User } from '@prisma/client';
 import { prisma } from '../prisma';
+import { addCredits, assertCreditWriteback } from './precision';
 import { getCreditSummary } from './policy';
 import { createInAppNotification } from '../notifications';
 import { canRequestCredits, CreditRequestError, validGrantAmount } from './request-rules';
@@ -139,15 +140,18 @@ export async function handleCreditDecision(input: {
     } });
     if (claimed.count !== 1) throw new CreditRequestError('申请已经处理，请刷新', 409);
     if (amount !== null) {
-      const account = await tx.creditAccount.update({ where: { user_id: user.id }, data: { balance: { increment: amount } } });
+      const previous = await tx.creditAccount.findUniqueOrThrow({ where: { user_id: user.id } });
+      const balance = addCredits(previous.balance, amount);
+      const account = await tx.creditAccount.update({ where: { user_id: user.id }, data: { balance } });
+      assertCreditWriteback(account, { balance });
       await tx.creditLedger.create({ data: {
-        user_id: user.id, type: 'admin_grant', amount, balance_before: account.balance - amount, balance_after: account.balance,
+        user_id: user.id, type: 'admin_grant', amount, balance_before: previous.balance, balance_after: account.balance,
         frozen_before: account.frozen_credits, frozen_after: account.frozen_credits, operator_id: approver.id,
         reason: `积分申请：${request.purpose}`, idempotency_key: `credit_request:${request.id}`,
         metadata_json: JSON.stringify({ request_id: request.id, scope: 'long_term_balance' }),
       } });
     }
-    const message = status === 'approved' ? `已到账 ${amount} 点；到账时可用 ${summary.available + amount!} 点`
+    const message = status === 'approved' ? `已到账 ${amount} 点；到账时可用 ${addCredits(summary.available, amount!)} 点`
       : status === 'rejected' ? `申请未通过：${reason}` : '申请已撤回';
     await tx.operationLog.create({ data: { operator_id: withdrawing ? user.id : approver.id,
       action: `credit_request_${status}`, target_type: 'CreditRequest', target_id: request.id,

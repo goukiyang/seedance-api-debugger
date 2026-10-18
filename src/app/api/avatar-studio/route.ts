@@ -24,6 +24,7 @@ import { QueueCapacityError, QueueMaintenanceError } from '@/lib/image-studio/qu
 import { ImageGenerationChannelError } from '@/lib/integrations/image-generation';
 import { historicalImageSupplier } from '@/lib/image-studio/channel-history';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
+import { getPricingImageChannelOptions, withImagePricing } from '@/lib/pricing/image';
 
 function validateOriginalContinuation(body: Record<string, unknown>) {
   if (body.descriptionMode === undefined && body.originalAttemptRequestId === undefined) return;
@@ -83,7 +84,7 @@ export async function GET(req: NextRequest) { return run(async owner => {
   const assets=await prisma.asset.findMany({where:{id:{in:rows.flatMap(t=>t.asset_id?[t.asset_id]:[])},owner_id:owner,status:'active',type:'image'},select:{id:true}});
   const byId=new Set(assets.map(a=>a.id));
   const recordTasks=Object.fromEntries(rows.map(t=>[t.id,{id:t.id,ordinal:t.ordinal,status:publicImageTaskStatus(t.status),error:t.error,snapshot:historicalImageSupplier(t.snapshot_json),billing:imageBillingView(t,owner,false),asset:t.asset_id&&byId.has(t.asset_id)?{id:t.asset_id,original_url:studioAssetUrl(t.asset_id),thumbnail_url:studioAssetUrl(t.asset_id,true)}:null}]));
-  return { ...records, recordTasks, settings: { model: settings.model, revision: settings.revision, prices: settings.prices, imageChannels: await getImageGenerationChannelOptions(), billingReadiness: await imageBillingReadinessPayload() } };
+  return { ...records, recordTasks, settings: { model: settings.model, revision: settings.revision, prices: settings.prices, imageChannels: await getPricingImageChannelOptions(), billingReadiness: await imageBillingReadinessPayload() } };
 }); }
 export async function POST(req: NextRequest) { return run(async owner => {
   const body = await req.json();
@@ -132,11 +133,13 @@ export async function POST(req: NextRequest) { return run(async owner => {
     const channelId=typeof body.channelId==='string'?body.channelId:previous.channelId||'original';
     const effectiveChannelId=await resolveImageGenerationRequestChannel(model,channelId)||'original';
     const imageChannel=effectiveChannelId!=='original'?await captureImageGenerationChannel(model,effectiveChannelId):undefined;
-    const api=imageChannel?await resolveImageGenerationChannelSnapshot(imageChannel,undefined,true,model):await getImageGenerationSettingsForModel(model);
+    const priced = await withImagePricing(imageChannel?await resolveImageGenerationChannelSnapshot(imageChannel,undefined,true,model):await getImageGenerationSettingsForModel(model), model);
+    const api = priced.settings;
     if(imageChannel){const capability=validateImageGenerationChannel(api,{model,quality,resolution,ratio:isAvatarSheet({layout})?'1:1':previous.aspectRatio,referenceCount:previous.referenceIds.length});if(!capability.ok)throw new StudioError(capability.error);price=capability.capability.fixedPoints;}
-    if(!imageChannel&&(price===undefined||price===null))throw new StudioError('原模型已失效或没有报价，历史设置仍保留');
+    if(priced.quote) price = priced.quote.credits;
+    if(!imageChannel&&!priced.quote&&(price===undefined||price===null))throw new StudioError('原模型已失效或没有报价，历史设置仍保留');
     let plan:AvatarPlan;
-    try { plan=withAvatarLayout({...previous,sourceTaskId:undefined,model,channelId,imageChannel,quality,resolution,id:(isAvatarSheet({layout})?'sheet-':'')+createHash('sha256').update(`quote:${AVATAR_COMPILER_VERSION}:${owner}:${previous.id}:${settings.revision}:${model}:${quality}:${resolution}:${layout}:${channelId}:${imageChannel?.configRevision||'legacy'}`).digest('hex'),settingsRevision:settings.revision,unitCredits:price,imageReady:isStudioImageGenerationProvider(api.provider)&&isImageGenerationApiReady(api)&&(previous.referenceIds.length?api.supports_image_to_image:api.supports_text_to_image),candidates:previous.candidates.map(c=>adaptAvatarPrompt(c,model)),createdAt:new Date().toISOString()},layout); }
+    try { plan=withAvatarLayout({...previous,sourceTaskId:undefined,model,channelId,imageChannel,quality,resolution,pricingRevision:priced.quote?.charge.revision,id:(isAvatarSheet({layout})?'sheet-':'')+createHash('sha256').update(`quote:${AVATAR_COMPILER_VERSION}:${owner}:${previous.id}:${settings.revision}:${model}:${quality}:${resolution}:${layout}:${channelId}:${imageChannel?.configRevision||'legacy'}:${priced.quote?.charge.revision||'legacy'}`).digest('hex'),settingsRevision:settings.revision,unitCredits:price,imageReady:isStudioImageGenerationProvider(api.provider)&&isImageGenerationApiReady(api)&&(previous.referenceIds.length?api.supports_image_to_image:api.supports_text_to_image),candidates:previous.candidates.map(c=>adaptAvatarPrompt(c,model)),createdAt:new Date().toISOString()},layout); }
     catch(e){throw new StudioError((e as Error).message);}
     await prisma.platformSetting.upsert({where:{key:avatarPlanKey(owner,plan)},create:{key:avatarPlanKey(owner,plan),value_json:JSON.stringify(plan),updated_by:owner},update:{}});
     return {plan:await readAvatar<AvatarPlan>(owner,'plan',plan.id)};
@@ -149,8 +152,13 @@ export async function POST(req: NextRequest) { return run(async owner => {
     const failed = tasks.filter(t => t.status === 'failed');
     if (!failed.length) throw new StudioError('没有可重试的明确失败项');
     const settings = await getImageStudioSettings();
-    const plan = { ...previous, sourceTaskId: undefined, id: (isAvatarSheet(previous)?'sheet-':'')+createHash('sha256').update(`retry:${owner}:${previous.id}`).digest('hex'), candidates: isAvatarSheet(previous) ? previous.candidates : failed.map(t => previous.candidates[t.ordinal - 1]), settingsRevision: settings.revision, unitCredits: previous.imageChannel ? previous.unitCredits : settings.prices[previous.model as keyof typeof settings.prices], createdAt: new Date().toISOString() };
-    if (!previous.imageChannel && plan.unitCredits === null) throw new StudioError('当前模型尚未设置报价');
+    const retryApi = previous.imageChannel ? await resolveImageGenerationChannelSnapshot(previous.imageChannel, undefined, true, previous.model) : await getImageGenerationSettingsForModel(previous.model);
+    const priced = await withImagePricing(retryApi, previous.model);
+    const plan = { ...previous, sourceTaskId: undefined, pricingRevision: priced.quote?.charge.revision,
+      id: (isAvatarSheet(previous)?'sheet-':'')+createHash('sha256').update(`retry:${owner}:${previous.id}:${priced.quote?.charge.revision||'legacy'}`).digest('hex'),
+      candidates: isAvatarSheet(previous) ? previous.candidates : failed.map(t => previous.candidates[t.ordinal - 1]), settingsRevision: settings.revision,
+      unitCredits: priced.quote ? priced.quote.credits : previous.imageChannel ? previous.unitCredits : settings.prices[previous.model as keyof typeof settings.prices], createdAt: new Date().toISOString() };
+    if (!previous.imageChannel && !priced.quote && plan.unitCredits === null) throw new StudioError('当前模型尚未设置报价');
     await prisma.platformSetting.upsert({where:{key:avatarPlanKey(owner,plan)},create:{key:avatarPlanKey(owner,plan),value_json:JSON.stringify(plan),updated_by:owner},update:{}});
     return { plan:await readAvatar<AvatarPlan>(owner,'plan',plan.id) };
   }

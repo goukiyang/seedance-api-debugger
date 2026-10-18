@@ -15,6 +15,8 @@ import { getImageStudioSettings } from './settings';
 import { resolveStudioModuleGenerationConfig } from './modules';
 import { captureImageGenerationChannel } from '@/lib/integrations/image-generation';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
+import { addCredits, creditCents, sumCredits } from '@/lib/credits/precision';
+import { assertNewPricingCharge } from '@/lib/pricing/charge';
 
 const key = (owner: string, id: string) => `image_batch_billing_quote_v1:${owner}:${id}`;
 
@@ -127,12 +129,12 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
       if (!Number.isFinite(quote.unitCredits) || quote.unitCredits < 0 || !Number.isFinite(quote.estimatedCredits) || quote.estimatedCredits < 0) {
         throw new StudioError('整批中有条目无法确认有效价格，未报价', 409);
       }
-      total += quote.unitCredits;
+      total = addCredits(total, quote.unitCredits);
       fixedUnit = quote.unitCredits;
       if (!quote.billingQuoteId) { contracts.push(null); continue; }
       const row = await prisma.platformSetting.findUniqueOrThrow({ where: { key: imageQuoteKey(owner, quote.billingQuoteId) } });
       const stored = JSON.parse(row.value_json) as StoredImageQuote & { imageChannel?: ImageGenerationChannelSnapshot };
-      if (stored.owner !== owner || !stored.contract || stored.contract.mode !== 'actual'
+      if (stored.owner !== owner || !stored.contract || stored.contract.mode !== 'actual' && !stored.contract.pricing
         || !sameSharedStudioIntent(sharedLive, parseSharedStudioIntent(stored.sharedLive))
         || imageChannel && !sameImageChannel(stored.imageChannel, imageChannel)) {
         throw new StudioError('单项报价与整批图片通道不匹配，未报价', 409);
@@ -158,18 +160,23 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
     catch { throw new StudioError('整批准备期间图片通道已停用或修订过期，请重新报价', 409); }
   }
   if (contracts.every(contract => contract === null)) return { ...sharedResult, billingMode: 'fixed' as const, batchQuoteId: null,
+    pricingRevision: null, creditPrecision: 0.01 as const,
     unitCredits: fixedUnit, estimatedCredits: total, expiresAt: new Date(Date.now() + 60000).toISOString(),
     ...(publicChannel ? { imageChannel: publicChannel } : {}) };
   if (contracts.some(contract => !contract)) throw new StudioError('批量准备期间计费状态发生变化，请重新报价', 409);
   const exactContracts = contracts as ImageBillingContract[];
   const first = exactContracts[0];
-  if (!first || exactContracts.some(contract => contract.scope !== first.scope || contract.model !== first.model)) {
+  if (!first || exactContracts.some(contract => contract.scope !== first.scope || contract.model !== first.model
+    || contract.mode !== first.mode || contract.pricing?.revision !== first.pricing?.revision)) {
     throw new StudioError('整批条目不是同一私有账单范围和型号，未报价', 409);
   }
-  const finalReadiness = await imageBillingReady(first.scope, first.model);
-  if (!finalReadiness.ready || finalReadiness.intentRevision !== intentRevision) {
-    throw new StudioError('整批准备期间实际计费设置发生变化，未报价', 409);
+  if (first.mode === 'actual') {
+    const finalReadiness = await imageBillingReady(first.scope, first.model);
+    if (!finalReadiness.ready || finalReadiness.intentRevision !== intentRevision) {
+      throw new StudioError('整批准备期间实际计费设置发生变化，未报价', 409);
+    }
   }
+  for (const contract of exactContracts) if (contract.pricing) await assertNewPricingCharge(contract.pricing, first.pricing?.revision);
   if (imageChannel) {
     try {
       const current = await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, first.model);
@@ -185,7 +192,9 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
     unitCredits: Math.max(...exactContracts.map(contract => contract.authorizedCredits)), ...sharedResult, ...(imageChannel ? { imageChannel } : {}) };
   await prisma.platformSetting.create({ data: { key: key(owner, id), updated_by: owner,
     value_json: JSON.stringify(storedQuote) } });
-  return { ...sharedResult, billingMode: 'actual' as const, batchQuoteId: id, unitCredits: storedQuote.unitCredits,
+  return { ...sharedResult, billingMode: first.mode, batchQuoteId: id, unitCredits: storedQuote.unitCredits,
+    pricingRevision: first.pricing?.revision ?? null,
+    creditPrecision: first.pricing && !['legacy_fixed', 'legacy_actual'].includes(first.pricing.mode) ? 0.1 as const : 0.01 as const,
     estimatedCredits: total, expiresAt, ...(publicChannel ? { imageChannel: publicChannel } : {}) };
 }
 
@@ -227,12 +236,18 @@ export async function consumeBatchQuote(tx: Prisma.TransactionClient, owner: str
   }
   const contracts = stored.contracts.map(contract => parseImageBillingContract(JSON.stringify(contract)));
   for (const contract of contracts) {
-    if (!contract || contract.mode !== 'actual') throw new StudioError('本批合同无效', 409);
-    const ready = await imageBillingReady(contract.scope, contract.model, tx);
-    if (!ready.ready || ready.intentRevision !== stored.intentRevision) throw new StudioError('实扣设置已变化，请重新报价', 409);
+    if (!contract || contract.mode !== 'actual' && !contract.pricing) throw new StudioError('本批合同无效', 409);
+    if (contract.mode === 'actual') {
+      const ready = await imageBillingReady(contract.scope, contract.model, tx);
+      if (!ready.ready || ready.intentRevision !== stored.intentRevision) throw new StudioError('实扣设置已变化，请重新报价', 409);
+    }
+    if (contract.pricing) await assertNewPricingCharge(contract.pricing, body.pricingRevision, tx);
   }
+  creditCents(stored.total); creditCents(stored.unitCredits);
+  if (sumCredits(contracts.map(contract => contract!.authorizedCredits)) !== stored.total
+    || contracts.some(contract => contract!.mode !== contracts[0]!.mode)) throw new StudioError('本批报价金额或收费模式不一致', 409);
   if ((await tx.platformSetting.deleteMany({ where: { id: row.id, value_json: row.value_json } })).count !== 1) throw new StudioError('整批报价已被使用', 409);
-  return { contracts: contracts as ImageBillingContract[], total: stored.total, unitCredits: stored.unitCredits,
+  return { contracts: contracts as ImageBillingContract[], mode: contracts[0]!.mode, total: stored.total, unitCredits: stored.unitCredits,
     ...(sharedUse ? { sharedLive: sharedUse.definition.intent } : {}),
     ...(storedChannel ? { imageChannel: storedChannel } : {}) };
 }

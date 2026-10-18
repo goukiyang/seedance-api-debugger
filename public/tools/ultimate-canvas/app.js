@@ -379,7 +379,7 @@
         badge.className = 'canvas-image-billing';
         badge.textContent = view?.amountMicros !== null && view?.chargedCredits !== null
             && Number.isSafeInteger(view?.amountMicros) && Number.isFinite(view?.chargedCredits)
-            ? `$${(view.amountMicros / 1000000).toFixed(6).replace(/0+$/, '').replace(/\.$/, '')} · ${view.chargedCredits.toFixed(2)}点`
+            ? `$${(view.amountMicros / 1000000).toFixed(6).replace(/0+$/, '').replace(/\.$/, '')} · ${formatCredits(view.chargedCredits)}点`
             : ['awaiting_response', 'pending', 'reconciling'].includes(view?.status) ? '费用核对中' : '费用待核对';
         region.append(badge);
     }
@@ -412,9 +412,9 @@
                 ? nodeEl?.querySelector('[data-style-price]')
                 : nodeEl?.querySelector('[data-canvas-node-price]');
             if (!line) return;
-            const total = Number(quote?.estimatedCredits);
-            line.textContent = Number.isFinite(total) && total >= 0 && Number.isSafeInteger(Math.ceil(total))
-                ? `合计约 ${Math.ceil(total).toLocaleString('zh-CN')} 点数` : '费用待估算';
+            const total = quote?.estimatedCredits;
+            line.textContent = window.UltimateCanvasNodePricing?.validCredits(total)
+                ? `合计约 ${window.UltimateCanvasNodePricing.formatCredits(total)} 点数` : '费用待估算';
         },
         clearQuote: nodeId => {
             if (engine.nodes.has(nodeId)) renderGenerationNodeControls(nodeId);
@@ -1279,9 +1279,8 @@
 
     function formatCredits(value) {
         const number = Number(value);
-        if (!Number.isFinite(number)) return '0';
-        if (Math.abs(number) >= 1000) return Math.round(number).toLocaleString('zh-CN');
-        return Number.isInteger(number) ? String(number) : number.toFixed(2).replace(/\.?0+$/, '');
+        if (!Number.isFinite(number)) return '待确认';
+        return number.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
     }
 
     function projectDisplayNameFor(project) {
@@ -4365,7 +4364,7 @@
                     cache: 'no-store',
                     signal: controller.signal
                 });
-                if (typeof data?.estimatedCost !== 'number' || !Number.isSafeInteger(data.estimatedCost) || data.estimatedCost < 0) throw new Error('estimate unavailable');
+                if (typeof data?.estimatedCost !== 'number' || !Number.isFinite(data.estimatedCost) || data.estimatedCost < 0 || data.estimatedCost > 10000000) throw new Error('estimate unavailable');
                 const current = canvasRuntime.videoEstimates.get(nodeId);
                 const currentNode = engine.nodes.get(nodeId);
                 if (current?.controller !== controller
@@ -4374,7 +4373,7 @@
                 canvasRuntime.videoEstimates.set(nodeId, {
                     signature: estimateSignature,
                     status: 'success',
-                    estimatedCost: Number(data.estimatedCost)
+                    estimatedCost: Number(data.estimatedCost), pricingRevision: data.pricing_revision
                 });
                 renderGenerationNodeControls(nodeId);
             } catch (error) {
@@ -4912,16 +4911,11 @@
                 if (select) select.hidden = false;
                 const actualQuoteRequired = window.UltimateCanvasNodePricing?.actualQuoteRequired(node.id);
                 const actualQuote = window.UltimateCanvasNodePricing?.actualQuote(node.id);
-                const actualTotal = Math.ceil(Number(actualQuote?.estimatedCredits));
-                const fixedTotal = settings.channelId ? window.UltimateCanvasNodePricing?.quote(node.id)?.estimatedCredits : style.unitCredits * style.count;
-                stylePrice.textContent = actualQuoteRequired === true && actualQuote?.billingMode === 'actual'
-                    && Number.isSafeInteger(actualTotal) && actualTotal >= 0
-                    ? `合计约 ${actualTotal.toLocaleString('zh-CN')} 点数`
-                    : actualQuoteRequired === false && Number.isSafeInteger(style.unitCredits)
-                        && style.unitCredits >= 0 && Number.isSafeInteger(style.count) && style.count > 0
-                        && Number.isSafeInteger(fixedTotal)
-                        ? `合计约 ${fixedTotal.toLocaleString('zh-CN')} 点数` : '费用待估算';
-                stylePrice.title = '按应用风格时的报价；价格变化时会停止提交';
+                const total = actualQuoteRequired === true ? actualQuote?.estimatedCredits
+                    : window.UltimateCanvasNodePricing?.quote(node.id)?.estimatedCredits;
+                stylePrice.textContent = window.UltimateCanvasNodePricing?.validCredits(total)
+                    ? `合计约 ${window.UltimateCanvasNodePricing.formatCredits(total)} 点数` : '费用待估算';
+                stylePrice.title = '按当前后台报价；价格变化时会停止提交';
                 if (submit && !submit.classList.contains('is-loading')) submit.disabled = !interactionReadiness.ready || Boolean(styleJob && styleJob.state !== 'unconfirmed') || style.appliedBy !== canvasRuntime.bootstrap?.user?.id;
             } else window.UltimateCanvasNodePricing?.refresh(nodeEl, node);
             if (spec) spec.textContent = `${style?.aspectRatio === 'auto' ? '跟随参考' : settings.ratio} · ${style?.quality || settings.resolution}${style?.quality ? ` · ${settings.resolution}` : ''} · ${settings.count}张`;
@@ -6582,6 +6576,7 @@
             if (!await requestCanvasConfirmation({ title: '生成视频', message: `本次 1 个视频，预计 ${quote.estimatedCost} 点。`, detail: '失败或受理未知时先查询原任务，不会自动重新生成。', confirmLabel: `确认 ${quote.estimatedCost} 点` })) return;
             if (JSON.stringify(currentGenerationContext(payload.nodeId)) !== quotedContext || engine.nodes.get(payload.nodeId) !== submittingNode || videoEstimateSignature(generationSettingsForNode(submittingNode)) !== videoEstimateSignature(settings)) { showCanvasNotice('画布或参数已变化，请重新确认价格。', 'warn'); return; }
             payload.settings.maxEstimatedCost = quote.estimatedCost;
+            payload.settings.pricingRevision = quote.pricing_revision;
         }
         if (payload.kind === 'video') payload.requestId ||= crypto.randomUUID();
         const capturedContext = window.UltimateCanvasGenerationInteractions.captureGenerationContext(

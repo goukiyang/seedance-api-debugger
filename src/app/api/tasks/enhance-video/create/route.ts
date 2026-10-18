@@ -9,7 +9,7 @@ import { AuthError } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { assertCanViewTask, getProjectForGeneration } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
-import { calculateEnhanceVideoEstimatedCost } from '@/lib/pricing';
+import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance, publicVideoPricing, videoPricingError, type VideoPricingQuote } from '@/lib/pricing/video';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import {
   allocateProjectTaskBudget,
@@ -334,13 +334,6 @@ export async function POST(request: NextRequest) {
     return jsonError('无法确认源视频时长，请传入 duration 后再创建超分任务', 400, 'DURATION_REQUIRED');
   }
 
-  const pricing = calculateEnhanceVideoEstimatedCost({
-    duration,
-    resolution: body.resolution,
-    toolVersion: body.toolVersion,
-    fps: body.fps,
-  });
-  const estimatedCost = pricing.estimatedCost;
   const billingScope = shouldBillProjectBudget(project) ? 'project' : 'user';
   const billingAccountId = billingScope === 'project' ? project.id : user.id;
   const idempotencyKey = body.idempotencyKey || undefined;
@@ -369,6 +362,16 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  let priceQuote: VideoPricingQuote;
+  try {
+    priceQuote = await quoteVideoPricing({ provider: 'volcengine_mediakit', model: 'enhance-video', duration,
+      resolution: body.resolution, toolVersion: body.toolVersion, fps: body.fps });
+    requireVideoPricingRevision(priceQuote, body.pricingRevision);
+  } catch (error) {
+    const failure = videoPricingError(error);
+    return jsonError(failure?.message || '报价暂不可用，原参数和视频已保留', failure?.status || 503, failure?.code || 'pricing_unavailable');
+  }
+  const pricing = priceQuote.pricing, estimatedCost = pricing.estimatedCost;
   if (sourceTask) {
     try {
       sourceVideoUrl = await resolveSourceVideoUrl(sourceTask, aiMediaKitRequestOptions);
@@ -384,6 +387,7 @@ export async function POST(request: NextRequest) {
   try {
     createdTask = await prisma.$transaction(async (tx) => {
       await assertMultiviewRequestFence(tx, user.id, idempotencyKey);
+      await assertVideoPricingAcceptance(priceQuote, body.pricingRevision, tx);
       const task = await tx.videoTask.create({
         data: {
           provider: 'volcengine_mediakit',
@@ -428,7 +432,7 @@ export async function POST(request: NextRequest) {
             resolution: body.resolution,
             fps: body.fps,
             duration,
-            pricing,
+            pricing: publicVideoPricing(priceQuote),
           }),
         },
       });
@@ -497,6 +501,8 @@ export async function POST(request: NextRequest) {
       return updatedTask;
     });
   } catch (error) {
+    const pricingFailure = videoPricingError(error);
+    if (pricingFailure) return jsonError(pricingFailure.message, pricingFailure.status, pricingFailure.code);
     if (error instanceof AuthError) return errorJson(error.message, error.status);
     if (error instanceof CreditError) {
       return NextResponse.json({ error: error.code, message: error.message }, { status: 400 });
@@ -564,7 +570,7 @@ export async function POST(request: NextRequest) {
       generation_mode: 'enhance_video',
       estimated_cost: estimatedCost,
       frozen_cost: estimatedCost,
-      pricing,
+      pricing: publicVideoPricing(priceQuote),
       project_id: project.id,
       video_card_id: videoCard.id,
       source_task_id: sourceTask?.id || null,

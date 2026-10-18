@@ -24,7 +24,7 @@ import type { ReferenceAlbumSelection } from '@/components/ReferenceAlbumPicker'
 import type { PickerItem } from '@/lib/assets/picker-types';
 import { UploadedImagePicker, type UploadedAssetSelection } from '@/components/UploadedImagePicker';
 import MediaPreview from '@/components/MediaPreview';
-import { calculateEstimatedCostClient } from '@/lib/pricing-client';
+import { useVideoPricing } from '@/lib/pricing/use-video-pricing';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { seedanceReferenceMediaCapabilities, validateSeedanceReferenceMediaPreflight } from '@/lib/provider/reference-media-policy';
 import { SEEDANCE_2_5_MODEL_ID, isSeedanceVideoDuration, seedanceVideoMaxDuration } from '@/lib/provider/seedance-models';
@@ -447,6 +447,8 @@ interface Props {
     provider: string | null;
     model: string | null;
     h3LoraId: string | null;
+    pricingRevision: string | null;
+    quotedEstimatedCost: number;
     draft: boolean;
     templateStudioRunId: string | null;
     imageResultReceiptId?: string | null;
@@ -475,6 +477,8 @@ interface Props {
   providerLabel?: string;
   providerOptions?: ComposerSelectOption[];
   selectedProvider?: string | null;
+  pricingProvider?: string;
+  pricingModelId?: string;
   onProviderChange?: (provider: string) => void;
   h3CapabilitiesReady?: boolean;
   providerStatus?: ComposerProviderStatus | null;
@@ -531,6 +535,8 @@ export function GenerationComposer({
   providerLabel = 'Seedance 视频',
   providerOptions = [],
   selectedProvider = 'seedance',
+  pricingProvider,
+  pricingModelId,
   onProviderChange,
   h3CapabilitiesReady = false,
   providerStatus = null,
@@ -1030,12 +1036,10 @@ export function GenerationComposer({
     return { message: null, tone: 'ok' as const };
   }, [isSubmitting, durationBlocker, mentionNotice, prompt, submitBlocker, submitDisabledReason, submitBlockerState]);
 
-  const canPressSubmit = !isSubmitting && !submitBlocker && !submitDisabledReason && !(need1080pApproval && !resolutionApprovalConfirmed);
-
-  const estimatedPoints = useMemo(() => {
-    if (durationBlocker) return null;
-    return calculateEstimatedCostClient(resolution, duration, selectedModel);
-  }, [resolution, duration, selectedModel, durationBlocker]);
+  const videoPricing = useVideoPricing({ provider: pricingProvider || selectedProvider || 'seedance',
+    model: pricingModelId || selectedModel, resolution, duration }, !durationBlocker && preferencesReady);
+  const canPressSubmit = !isSubmitting && !submitBlocker && !submitDisabledReason && !!videoPricing.quote && !(need1080pApproval && !resolutionApprovalConfirmed);
+  const estimatedPoints = videoPricing.quote?.estimatedCost ?? null;
 
   const activeRules = useMemo(() => {
     return selectedTemplate?.rules.filter((rule) => rule.status === 'active') || [];
@@ -1365,7 +1369,7 @@ export function GenerationComposer({
   }, [preferencesReady, onSettingsChange, studioHandoff, imageResultHandoff, isRestoringStudioSettings, selectedModel, generationMode, ratio, duration, resolution, generateAudio, returnLastFrame, watermark]);
 
   const handleSubmit = useCallback(async () => {
-    if (submitBlocker || submitDisabledReason || isSubmitting) return;
+    if (submitBlocker || submitDisabledReason || isSubmitting || !videoPricing.quote) return;
     await onSubmit({
       prompt,
       generationMode,
@@ -1397,6 +1401,8 @@ export function GenerationComposer({
       provider: selectedProvider || null,
       model: selectedModel || null,
       h3LoraId: selectedAuxiliary || null,
+      pricingRevision: videoPricing.quote.pricing_revision,
+      quotedEstimatedCost: videoPricing.quote.estimatedCost,
       draft: draftMode,
       templateStudioRunId: studioHandoff?.runId || null,
       imageResultReceiptId: imageResultHandoff?.receiptId || null,
@@ -1427,6 +1433,7 @@ export function GenerationComposer({
     submitBlocker,
     submitDisabledReason,
     isSubmitting,
+    videoPricing.quote,
     onSubmit,
     imageResultHandoff,
     prompt,
@@ -2376,7 +2383,9 @@ export function GenerationComposer({
             }}
           ><RotateCcw size={16} aria-hidden="true" /></button>
         )}
-        {!canPressSubmit && <p role="status" style={{ margin: '8px 0', color: isSubmitting || submitBlockerState?.tone === 'progress' ? '#a4f2df' : '#fbbf24', overflowWrap: 'anywhere' }}>{isSubmitting ? '正在提交，请等待结果，不要重复点击。' : submitBlocker || submitDisabledReason || '请先确认1080p审批已通过。'}</p>}
+        {!canPressSubmit && <p role="status" style={{ margin: '8px 0', color: isSubmitting || submitBlockerState?.tone === 'progress' ? '#a4f2df' : '#fbbf24', overflowWrap: 'anywhere' }}>{isSubmitting ? '正在提交，请等待结果，不要重复点击。' : submitBlocker || submitDisabledReason || (!videoPricing.quote ? videoPricing.error || '正在读取报价' : '请先确认1080p审批已通过。')}
+          {videoPricing.error && <button type="button" className="btn-icon" title="重新报价" aria-label="重新报价" onClick={videoPricing.refresh}><RotateCcw size={16} aria-hidden="true" /></button>}
+        </p>}
         <ComposerActionBar
           generationMode={generationMode}
           ratio={ratio}

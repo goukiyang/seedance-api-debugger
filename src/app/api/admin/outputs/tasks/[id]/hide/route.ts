@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminUser } from '@/lib/auth/api-helpers';
 import { prisma } from '@/lib/prisma';
 import { recordContentAuditLog } from '@/lib/content-audit';
+import { publicVideoTaskPricing } from '@/lib/pricing/video';
 import {
   normalizeTaskDeleteReason,
   TASK_RETENTION_ADMIN_HIDDEN,
@@ -55,7 +56,7 @@ export async function POST(
       return nextTask;
     });
 
-    return NextResponse.json({ success: true, task: updated });
+    return NextResponse.json({ success: true, task: publicVideoTaskPricing(updated) });
   } catch (error) {
     console.error('[AdminOutputs] Hide task error:', error);
     const status = error && typeof error === 'object' && 'status' in error

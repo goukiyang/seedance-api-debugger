@@ -163,6 +163,7 @@
                 prompt,
                 ...(input.promptMentions ? { promptMentions: input.promptMentions } : {}),
                 model: clean(settings.model),
+                ...(typeof settings.pricingRevision === 'string' ? { pricing_revision: settings.pricingRevision } : {}),
                 ...(Number.isFinite(settings.maxEstimatedCost) ? { max_estimated_cost: settings.maxEstimatedCost } : {}),
                 generation_mode: mode.generationMode,
                 ratio,

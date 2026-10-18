@@ -1,6 +1,9 @@
 import packageInfo from '../../package.json';
+import { PRICING_ADMIN_WRITES_ENABLED } from './pricing/build-mode';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '手机添加素材窗口更紧凑，筛选和已选素材可展开查看，上传与添加操作保持可见；素材和图片结果每页按屏幕显示12至24张，减少反复翻页。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: PRICING_ADMIN_WRITES_ENABLED
+  ? '新增统一点数定价，可编辑点/元、核对价格来源、统一调整、试算和恢复历史。新请求按确认后的收费规则处理，已有任务保留原合同。'
+  : '费率设置暂时维护，已保存的价格和原任务保持不变，不会自动调整价格。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

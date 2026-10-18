@@ -13,6 +13,8 @@ import { MAX_STUDIO_GENERATED_BYTES } from './limits';
 import { parseImageBillingContract } from './billing-contract';
 import { imageBillingScope } from './billing-scope';
 import { assertFrozenSharedStudioTask } from './tasks';
+import { publicPricingBillingState, publicPricingTaskState, studioTaskState } from './pricing-state';
+import { creditCents } from '@/lib/credits/precision';
 
 type Input = { taskId: string; requestId: string; actorId: string; mutationId: string; responseSha256: string };
 type RecoveryReceipt = { taskId: string; requestId: string; mutationId: string; operationId: string;
@@ -102,7 +104,7 @@ async function checkpoint(task: ImageStudioTask, input: Input, decode: boolean) 
     if (receipt.status !== 200 || receipt.dispatchState !== 'attempted' || receipt.billingScope !== task.billing_scope
       || receipt.localRequestId !== input.requestId || typeof receipt.returnedAt !== 'number'
       || receipt.returnedAt > Date.now() || (receipt.gatewayRequestId || null) !== task.gateway_request_id
-      || task.billing_status !== (receipt.gatewayRequestId ? 'channel_pending' : 'channel_unmatched')) throw fail('checkpoint');
+      || publicPricingBillingState(task.billing_status) !== (receipt.gatewayRequestId ? 'channel_pending' : 'channel_unmatched')) throw fail('checkpoint');
     const evidence = await readStudioResponseEvidence(task, receipt);
     if (!evidence || evidence.responseSha256 !== input.responseSha256 || evidence.candidates.length !== 1 || evidence.rejected.length !== 0
       || evidence.diagnostic.observation.httpStatus !== 200 || !evidence.diagnostic.observation.bodyComplete
@@ -155,14 +157,14 @@ async function checkpoint(task: ImageStudioTask, input: Input, decode: boolean) 
 async function eligibility(tx: Tx, task: ImageStudioTask, input: Input) {
   const now = Date.now();
   const model = task.model;
+  const contract = parseImageBillingContract(task.billing_contract_json);
   if (model !== 'gemini-nano-banana-2.1' && model !== 'gemini-3-pro-image-preview') throw fail('invalid');
-  if (task.status !== 'uncertain' || task.deleted_at || task.asset_id || task.lease_until && task.lease_until.getTime() > now
+  if (publicPricingTaskState(task.status) !== 'uncertain' || task.deleted_at || task.asset_id || task.lease_until && task.lease_until.getTime() > now
     || task.actual_credits !== null || task.actual_amount_micros !== null || task.billing_settled_at
-    || task.billing_mode !== 'fixed' || !['channel_pending', 'channel_unmatched'].includes(task.billing_status)
-    || task.unit_credits !== (model === 'gemini-nano-banana-2.1' ? 5 : 10)) throw fail('conflict');
+    || task.billing_mode !== 'fixed' || !['channel_pending', 'channel_unmatched'].includes(publicPricingBillingState(task.billing_status))
+    || !contract?.pricing && task.unit_credits !== (model === 'gemini-nano-banana-2.1' ? 5 : 10)) throw fail('conflict');
   const snapshot = json(task.snapshot_json || '{}');
   const channel = snapshot.imageChannel;
-  const contract = parseImageBillingContract(task.billing_contract_json);
   if (snapshot.model !== model || snapshot.requestId !== input.requestId || snapshot.batchId !== task.batch_id
     || snapshot.quality !== task.quality || snapshot.unitCredits !== task.unit_credits || !object(channel)
     || typeof channel.channelId !== 'string' || typeof channel.configRevision !== 'string'
@@ -174,13 +176,13 @@ async function eligibility(tx: Tx, task: ImageStudioTask, input: Input) {
   const capability = settings.modelCapabilities[model];
   if (!settings.enabled || !settings.api_key || settings.channelId !== channel.channelId || settings.configRevision !== channel.configRevision
     || !capability?.enabled || capability.protocol !== 'gemini_native' || capability.billingMode !== 'fixed'
-    || capability.fixedPoints !== task.unit_credits || imageBillingScope(settings) !== task.billing_scope) throw fail('billing');
+    || !contract.pricing && capability.fixedPoints !== task.unit_credits || imageBillingScope(settings) !== task.billing_scope) throw fail('billing');
   const ledgers = await tx.creditLedger.findMany({ where: { related_task_id: task.id } });
   const freeze = ledgers[0];
   if (ledgers.length !== 1 || !freeze || freeze.type !== 'task_freeze' || freeze.user_id !== task.owner_id
     || freeze.idempotency_key !== `image-studio:freeze:${task.id}` || freeze.amount !== -task.unit_credits
     || freeze.frozen_before === null || freeze.frozen_after === null
-    || Math.abs(freeze.frozen_after - freeze.frozen_before - task.unit_credits) > 0.00001) throw fail('billing');
+    || creditCents(freeze.frozen_after) - creditCents(freeze.frozen_before) !== creditCents(task.unit_credits)) throw fail('billing');
   const allocations: unknown = JSON.parse(task.freeze_snapshot || 'null');
   const ledgerMetadata = json(freeze.metadata_json || '{}');
   if (!Array.isArray(allocations) || !allocations.length || allocations.length > 128
@@ -236,13 +238,13 @@ export async function requestStudioResponseRecovery(input: Input): Promise<Recov
       const fresh = await checkpoint(current, input, false);
       if (JSON.stringify(fresh) !== JSON.stringify(verified)) throw fail('checkpoint');
       const changed = await tx.imageStudioTask.updateMany({ where: { id: task.id, owner_id: input.actorId,
-        status: 'uncertain', updated_at: task.updated_at, snapshot_json: task.snapshot_json, fingerprint: task.fingerprint,
+        status: task.status, updated_at: task.updated_at, snapshot_json: task.snapshot_json, fingerprint: task.fingerprint,
         billing_contract_json: task.billing_contract_json, freeze_snapshot: task.freeze_snapshot,
         billing_mode: task.billing_mode, billing_status: task.billing_status, billing_scope: task.billing_scope,
         unit_credits: task.unit_credits, model: task.model, asset_id: null, deleted_at: null,
         lease_token: task.lease_token, lease_until: task.lease_until, actual_credits: null,
         actual_amount_micros: null, billing_settled_at: null, finished_at: task.finished_at, error: task.error },
-      data: { status: 'channel_running', lease_token: null, lease_until: new Date(0), finished_at: null } });
+      data: { status: studioTaskState(task, 'channel_running'), lease_token: null, lease_until: new Date(0), finished_at: null } });
       if (changed.count !== 1) throw fail('conflict');
       const log = await tx.operationLog.create({ data: { id: operationId(input), operator_id: input.actorId,
         action: ACTION, target_type: 'image_studio_task', target_id: task.id, detail: JSON.stringify({

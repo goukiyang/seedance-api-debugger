@@ -7,6 +7,7 @@ import {
   getProjectForGeneration,
 } from '@/lib/projects/permissions';
 import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
+import { quoteVideoPricing, requireVideoPricingRevision, videoPricingError } from '@/lib/pricing/video';
 import { uniquePreserveOrder } from '@/lib/reference-albums/permissions';
 import {
   PAID_GENERATION_INTENT_HEADER,
@@ -64,6 +65,10 @@ export async function POST(
       select: {
         id: true,
         provider: true,
+        model: true,
+        local_status: true,
+        error_code: true,
+        frozen_cost: true,
         prompt: true,
         generation_mode: true,
         ratio: true,
@@ -106,6 +111,16 @@ export async function POST(
       throw error;
     }
 
+    const acceptedRetry = await prisma.videoTask.findUnique({ where: { user_id_idempotency_key: {
+      user_id: user.id, idempotency_key: `video-retry:${originalTask.id}` } } });
+    if (acceptedRetry) {
+      await assertCanViewTask(user, acceptedRetry);
+      return NextResponse.json({ id: acceptedRetry.id, local_status: acceptedRetry.local_status,
+        provider_task_id: acceptedRetry.provider_task_id });
+    }
+    if (originalTask.provider && !['seedance', 'h3'].includes(originalTask.provider)) {
+      return NextResponse.json({ error: 'RETRY_PROVIDER_UNSUPPORTED', message: '此任务不能转到普通生成重试，请从原生成入口重新获取报价；原任务未重发' }, { status: 409 });
+    }
     if (!originalTask.video_card_id) {
       return NextResponse.json(
         { error: 'VIDEO_CARD_REQUIRED', message: '历史任务尚未归档到视频卡，不能直接重试' },
@@ -124,6 +139,14 @@ export async function POST(
     }
 
     const paramsJson = parseJsonObject(originalTask.params_json);
+    if (originalTask.local_status !== 'failed' || originalTask.error_code?.includes('UNCONFIRMED') || originalTask.frozen_cost > 0) {
+      return NextResponse.json({ error: '原请求尚未确认失败，请查询原任务；未重新生成' }, { status: 409 });
+    }
+    const requested = await request.json().catch(() => ({})) as Record<string, unknown>;
+    const pricing = await quoteVideoPricing({ provider: originalTask.provider === 'h3' ? 'h3' : 'seedance',
+      model: originalTask.model || '', resolution: originalTask.resolution || asString(paramsJson.resolution, '480p'),
+      duration: originalTask.duration || asNumber(paramsJson.duration, 5) });
+    requireVideoPricingRevision(pricing, requested.pricing_revision);
     const referenceImageIds = uniquePreserveOrder(parseJsonArray(originalTask.reference_image_ids));
     const referenceImageUrls = parseJsonArray(originalTask.reference_image_urls).slice(0, 9);
 
@@ -162,6 +185,11 @@ export async function POST(
     }
 
     const retryBody = {
+      provider: originalTask.provider === 'h3' ? 'h3' : 'seedance',
+      model: originalTask.model,
+      idempotency_key: `video-retry:${originalTask.id}`,
+      pricing_revision: requested.pricing_revision,
+      max_estimated_cost: requested.max_estimated_cost,
       prompt: originalTask.prompt,
       generation_mode: originalTask.generation_mode,
       ratio: originalTask.ratio || asString(paramsJson.ratio, '16:9'),
@@ -211,6 +239,8 @@ export async function POST(
 
     return NextResponse.json(data, { status: createResponse.status });
   } catch (error) {
+    const pricingError = videoPricingError(error);
+    if (pricingError) return NextResponse.json({ error: pricingError.message, code: pricingError.code }, { status: pricingError.status });
     console.error('[RetryTask]', error);
     return NextResponse.json(
       { error: '内部服务异常', message: error instanceof Error ? error.message : 'Unknown error' },

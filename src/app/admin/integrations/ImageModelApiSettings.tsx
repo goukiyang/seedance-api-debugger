@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { Pencil, RotateCcw } from 'lucide-react';
 import { useProductDialog } from '@/components/useProductDialog';
 import { IMAGE_STUDIO_MODEL_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
@@ -244,7 +245,11 @@ export default function ImageModelApiSettings({ accountId, onDraftChange, onSave
     const operation: PendingSave = { mutationId: crypto.randomUUID(), group, providerId: provider.id, accountId, editor: fromEditor, draft, defaultRevision: defaults.revision };
     await runSave(operation, () => fetch('/api/admin/integrations/image-generation', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
       channel_action: 'save-api-group', mutation_id: operation.mutationId, group, channelId: provider.id,
-      apiKey: draft.apiKey, clearApiKey: draft.clearApiKey, enabled: draft.enabled, settings: draft.settings, models: draft.models,
+      apiKey: draft.apiKey, clearApiKey: draft.clearApiKey, enabled: draft.enabled, settings: draft.settings,
+      models: Object.fromEntries(Object.entries(draft.models).map(([model, patch]) => {
+        const { billingMode: _billingMode, fixedPoints: _fixedPoints, ...nonPricing } = (patch || {}) as typeof patch & { billingMode?: unknown; fixedPoints?: unknown };
+        return [model, nonPricing];
+      })),
       expectedSourceRevision: provider.sourceRevision, expectedDefaultRevision: defaults.revision,
     }) }));
   }
@@ -274,6 +279,7 @@ export default function ImageModelApiSettings({ accountId, onDraftChange, onSave
   }
   const editorForm = forms?.find(form => form.group === editor?.group), editorProvider = editorForm?.providers.find(provider => provider.id === editor?.providerId);
   return <div>
+    <p className="text-gray text-sm">型号收费在<Link href="/admin/pricing">点数与费率</Link>集中管理；这里保留供应商、Key、协议、启停与默认路由。</p>
     {readError && <div className="alert alert-error" role="alert">{readError}<button type="button" className="btn btn-secondary" disabled={Boolean(busy || pending || reading)} onClick={() => void read(Boolean(forms))}>{reading ? '正在读取' : '重新读取'}</button></div>}
     {!forms && !readError && <p role="status">正在读取图片设置</p>}
     {IMAGE_API_GROUPS.map(group => {

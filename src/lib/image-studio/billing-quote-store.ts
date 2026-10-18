@@ -3,6 +3,7 @@ import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-ge
 import { parseImageBillingContract, type ImageBillingContract } from './billing-contract';
 import { imageBillingReady } from './billing-readiness';
 import type { SharedStudioIntent } from './shared-types';
+import { assertNewPricingCharge } from '@/lib/pricing/charge';
 
 export const imageQuoteKey = (owner: string, id: string) => `image_billing_quote_v1:${owner}:${id}`;
 export type StoredImageQuote = { owner: string; count: number; fingerprint: string; intentRevision: number; contract: ImageBillingContract; imageChannel?: ImageGenerationChannelSnapshot; sharedLive?: SharedStudioIntent };
@@ -25,10 +26,12 @@ export async function consumeImageQuote(tx: Prisma.TransactionClient, input: { o
     || Boolean(quote.sharedLive && input.sharedLive && quote.sharedLive.protocol === 'shared-live-v1'
       && quote.sharedLive.protocol === input.sharedLive.protocol && quote.sharedLive.presetId === input.sharedLive.presetId
       && quote.sharedLive.definitionToken === input.sharedLive.definitionToken);
-  if (!contract || contract.mode !== 'actual' || quote.owner !== input.owner || quote.count !== input.count
+  if (!contract || contract.mode !== 'actual' && !contract.pricing || quote.owner !== input.owner || quote.count !== input.count
     || quote.fingerprint !== input.fingerprint || contract.scope !== input.scope || contract.model !== input.model
     || contract.specification !== input.specification || Date.parse(contract.expiresAt) <= Date.now()
-    || !validSavedChannel || !sameChannel || !sameDefinition || !state.ready || state.intentRevision !== quote.intentRevision) throw new Error('Image quote expired or changed');
+    || !validSavedChannel || !sameChannel || !sameDefinition
+    || contract.mode === 'actual' && (!state.ready || state.intentRevision !== quote.intentRevision)) throw new Error('Image quote expired or changed');
+  if (contract.pricing) await assertNewPricingCharge(contract.pricing, contract.pricing.revision, tx);
   const removed = await tx.platformSetting.deleteMany({ where: { id: row.id, value_json: row.value_json } });
   if (removed.count !== 1) throw new Error('Image quote already consumed');
   return contract;

@@ -83,7 +83,7 @@ import { StudioStyleSkillSelector, type StudioStyleSkillSelectorHandle } from '.
 import type { SettingsValue } from './settings-controller';
 import { parseStudioTemplateDefaults } from '@/lib/image-studio/template-defaults';
 import { normalizeStudioRatio, resolveStudioAspectRatio } from '@/lib/image-studio/ratios';
-import { useStudioBatch } from './use-studio-batch';
+import { useStudioBatch, formatImageUiCredits, validImageUiQuote, imageUiQuoteFields, imageUiQuoteAction, type ImageUiQuote } from './use-studio-batch';
 import { BatchResults } from './batch-results';
 import { watchGenerationCompletion } from '@/components/GenerationCompletion';
 import { handImageDownloadToBrowser } from '@/lib/media/native-download';
@@ -91,7 +91,6 @@ import { describedEvolutionDirection, type EvolutionCapability, type EvolutionIn
 import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
 import type { StudioAsyncRecoveryView as StudioAsyncRecovery } from '@/lib/image-studio/async-recovery';
-import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
 import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
 import type { StudioReferencePolicy } from '@/lib/image-studio/reference-policy';
 import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, imageStudioChannelReadyForModel, imageStudioChannelUnitCredits, imageStudioUsesLegacyRoute, imageStudioEffectiveChannelId, useImageStudioChannel } from '@/lib/image-studio/channels';
@@ -123,7 +122,7 @@ type QuickStudioPreset = StudioPreset & { prompt: string; context: string; perso
 type PresetSource = { draft: Record<string, unknown>; blocked: string | null; groupDeleteBlocked?: boolean; moduleDeletionBlocked?: string | null };
 type PresetSourceReader = () => PresetSource;
 type StudioFeedback = { message: string; tone: 'progress' | 'info' | 'success' | 'warning' | 'error' };
-type StudioImageQuote = { billingMode: 'fixed' | 'actual'; billingQuoteId: string | null; unitCredits: number; estimatedCredits: number; expiresAt?: string; imageChannel?: ImageGenerationChannelSnapshot };
+type StudioImageQuote = ImageUiQuote & { billingQuoteId: string | null };
 type CachedStudioImageQuote = { signature: string; requestId: string; quote: StudioImageQuote };
 type ImagePreviewState = { contentKey?: `asset:${string}`; sourceRole?: ImageComparisonSource['role']; taskId?: string; resultVersion?: string | null; src: string; thumbnailSrc?: string; alt: string; title?: string; fileName?: string; width?: number; height?: number; fileSize?: number; metadata?: ImagePreviewMetadata; comparison?: ImageComparisonSource };
 type ResultInputMain = { taskId: string; state: 'ready' | 'none' | 'unknown' | 'unavailable'; images: UploadedAssetPayload[]; snapshotToken: string };
@@ -2872,36 +2871,25 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     const requestChannelId = imageStudioEffectiveChannelId(imageChannels, currentPayload.model, imageChannelId);
     const expectedFormSignature = liveGenerationSignature.current;
     const signature = effectiveSignature(currentPayload, requestChannelId);
-    const reusableQuote = billingQuote?.signature === signature
-      && (!billingQuote.quote.expiresAt || Date.parse(billingQuote.quote.expiresAt) > Date.now()) ? billingQuote : null;
+    const reusableQuote = imageUiQuoteAction(null, signature, billingQuote?.signature, billingQuote?.quote) === 'submit' ? billingQuote : null;
     const payload = reusableQuote ? generationPayload(retryTask, reusableQuote.requestId) : currentPayload;
     submitLock.current = true; setSubmitting(true); setError('');
-    let confirmedQuote = reusableQuote?.quote || null;
+    const confirmedQuote = reusableQuote?.quote || null;
     try {
       if (!confirmedQuote) {
         const quote = await readResponse(await fetch('/api/image-studio/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(20000) })) as StudioImageQuote;
         if (liveGenerationSignature.current !== expectedFormSignature) throw new Error('本次参数已变化，报价未用于生成，请重新确认。');
-        if (!['fixed', 'actual'].includes(quote.billingMode) || !Number.isFinite(quote.unitCredits) || quote.unitCredits < 0
-          || !Number.isFinite(quote.estimatedCredits) || quote.estimatedCredits < 0
-          || (quote.billingQuoteId !== null && typeof quote.billingQuoteId !== 'string')
-          || !quote.expiresAt || !Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= Date.now()
-          || (quote.billingMode === 'actual' && !quote.billingQuoteId)) {
+        if (!validImageUiQuote(quote)) {
           throw new Error('本次报价信息不完整，尚未提交图片。');
         }
         if (!requestLegacyRoute && (quote.imageChannel?.channelId !== requestChannelId
           || typeof quote.imageChannel.configRevision !== 'string' || !quote.imageChannel.configRevision)) {
           throw new Error('生图通道配置已变化，报价未能绑定到当前通道；尚未提交图片，请重新确认。');
         }
-        const baseline = !actualQuoteRequired && moduleUnitCredits != null && Number.isFinite(moduleUnitCredits) && moduleUnitCredits >= 0
-          ? Math.ceil(moduleUnitCredits * payload.count) : null;
-        if (baseline === null || Math.ceil(quote.estimatedCredits) > baseline) {
-          setBillingQuote({ signature, requestId: payload.requestId, quote });
-          setError(`本次预估为 ${Math.ceil(quote.estimatedCredits)} 点数，尚未生成；请核对后再次点击。`);
-          submitLock.current = false; setSubmitting(false);
-          return;
-        }
-        confirmedQuote = quote;
         setBillingQuote({ signature, requestId: payload.requestId, quote });
+        setError(`本次预估为 ${formatImageUiCredits(quote.estimatedCredits)} 点数，尚未生成；请核对后再次点击。`);
+        submitLock.current = false; setSubmitting(false);
+        return;
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '报价未确认，尚未提交图片。');
@@ -2927,7 +2915,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     } catch { setError('提交编号未能保存，尚未提交生成。请允许浏览器保存数据后再试。'); submitLock.current = false; setSubmitting(false); return; }
     let ambiguous = true;
     try {
-      const submission = { ...payload, ...(confirmedQuote.imageChannel ? { imageChannel: confirmedQuote.imageChannel } : {}), ...(confirmedQuote.billingQuoteId ? { billingQuoteId: confirmedQuote.billingQuoteId } : {}), maxEstimatedCost: Math.ceil(confirmedQuote.estimatedCredits) };
+      const submission = { ...payload, ...imageUiQuoteFields(confirmedQuote) };
       setBillingQuote(null);
       const response = await fetch('/api/image-studio/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(submission), signal: AbortSignal.timeout(20000) });
       if (response.status >= 400 && response.status < 500) { ambiguous = false; setPendingSubmission(null); try { localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch {} if (response.status === 409) { onReloadSettings(); if (sharedLive) onSharedRefresh(); } await readResponse(response); }
@@ -3178,11 +3166,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   }
   const estimateSignature = effectiveGenerationSignature;
   useEffect(() => {
-    if (sessionChanged || isClientSessionBlocked() || sourceSharingBlocked || !actualQuoteRequired || !estimateSignature || hidden || !active || !quoteVisible || !draftLoaded || draftRestoring
+    if (sessionChanged || isClientSessionBlocked() || sourceSharingBlocked || !estimateSignature || hidden || !active || !quoteVisible || !draftLoaded || draftRestoring
       || submitting || pendingSubmission || batch.mode !== 'single'
       || !Number.isInteger(count) || count < 1 || count > 8) return;
-    if (billingQuote?.signature === estimateSignature && billingQuote.quote.expiresAt
-      && Date.parse(billingQuote.quote.expiresAt) > Date.now()) return;
+    if (billingQuote && validImageUiQuote(billingQuote.quote)) return;
     const abort = new AbortController();
     const timer = window.setTimeout(() => {
       if (isClientSessionBlocked()) return;
@@ -3192,8 +3179,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         body: JSON.stringify(payload), signal: AbortSignal.any([abort.signal, AbortSignal.timeout(20000)]) })
         .then(readResponse).then((quote: StudioImageQuote) => {
           if (isClientSessionBlocked() || abort.signal.aborted || liveGenerationSignature.current !== estimateSignature) return;
-          if (!Number.isFinite(quote.estimatedCredits) || quote.estimatedCredits < 0 || !quote.expiresAt
-            || Date.parse(quote.expiresAt) <= Date.now() || quote.billingMode === 'actual' && !quote.billingQuoteId) return;
+          if (!validImageUiQuote(quote)) return;
           setBillingQuote({ signature: estimateSignature, requestId, quote });
         }).catch(cause => { if (!abort.signal.aborted && sharedLive && [401, 403, 404, 409].includes(Number(cause?.status))) onSharedRefresh(); });
     }, 500);
@@ -3694,10 +3680,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           {batch.mode === 'batch' && batch.controls}
           {batch.mode === 'single' && <p className={styles.generationEstimate}>
             {visibleQuote && Number.isFinite(visibleQuote.estimatedCredits)
-              ? `合计约 ${Math.ceil(visibleQuote.estimatedCredits)} 点数`
-              : !actualQuoteRequired && moduleUnitCredits != null && Number.isFinite(moduleUnitCredits) && moduleUnitCredits >= 0
-                && Number.isInteger(count) && count >= 1 && count <= 8
-                ? `合计约 ${Math.ceil(moduleUnitCredits * count)} 点数`
+              ? `合计约 ${formatImageUiCredits(visibleQuote.estimatedCredits)} 点数`
               : !legacyImageRoute && !selectedChannelModel?.billingMode ? '费用未配置' : '费用待估算'}
           </p>}
           {generationFeedback && <p id={`generation-blocker-${module.id}`} role="status" className={styles.generationFeedback} data-tone={generationFeedback.tone}>{generationFeedback.message}</p>}

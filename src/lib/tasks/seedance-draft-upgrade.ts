@@ -1,7 +1,7 @@
 import type { SessionUser } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { assertMultiviewRequestFence } from '@/lib/video/multiview-request-receipt';
-import { calculateEstimatedCost } from '@/lib/pricing';
+import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance } from '@/lib/pricing/video';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import { getProjectForGeneration } from '@/lib/projects/permissions';
 import { consumeApprovalForTask, findUsableApproval } from '@/lib/approvals';
@@ -45,6 +45,7 @@ export type DraftUpgradeInput = {
   sourceType?: 'web' | 'codex_api';
   sourceLabel?: string | null;
   sourceRequestId?: string | null;
+  pricingRevision?: string | null;
 };
 
 type DraftTaskForUpgrade = {
@@ -315,8 +316,6 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
   if (!isSeedanceVideoDuration(duration, draft.model)) {
     throw new DraftUpgradeError('样片时长不在当前模型范围内，未提交升级。', 400, 'INVALID_DRAFT_DURATION');
   }
-  const pricing = calculateEstimatedCost('1080p', duration, draft.model);
-  const estimatedCost = pricing.estimatedCost;
   const billingScope = shouldBillProjectBudget(project) ? 'project' : 'user';
   const billingAccountId = billingScope === 'project' ? project.id : input.user.id;
   const idempotencyKey = input.idempotencyKey?.trim() || null;
@@ -339,6 +338,9 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
     if (existing) return { ...existing, deduplicated: true, pending_confirmation: existing.local_status === 'submitted' && !existing.provider_task_id };
   }
 
+  const priceQuote = await quoteVideoPricing({ provider: 'seedance', model: draft.model, resolution: '1080p', duration });
+  requireVideoPricingRevision(priceQuote, input.pricingRevision);
+  const pricing = priceQuote.pricing, estimatedCost = pricing.estimatedCost;
   const sourceMetadata = {
     source_type: input.sourceType || 'web',
     source_label: input.sourceLabel || 'Seedance Draft 升级',
@@ -359,6 +361,7 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
 
   let task = await prisma.$transaction(async (tx) => {
     await assertMultiviewRequestFence(tx, input.user.id, idempotencyKey);
+    await assertVideoPricingAcceptance(priceQuote, input.pricingRevision, tx);
     const created = await tx.videoTask.create({
       data: {
         provider: 'seedance',

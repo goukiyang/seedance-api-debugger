@@ -1,6 +1,7 @@
 import { MAX_GENERATION_PROMPT_CHARS } from '@/lib/prompt/limits';
 import { isSeedanceVideoDuration, isSeedanceVideoModelId, SEEDANCE_2_0_MODEL_ID } from '@/lib/provider/seedance-models';
 import { RATIO_OPTIONS, RESOLUTION_OPTIONS, type VideoRatio, type VideoResolution } from '@/types';
+import { validVideoPricingAmount } from '@/lib/pricing-client';
 
 export const MULTIVIEW_ROTATION_PRESET = Object.freeze({
   id: 'multiview-360', version: '1.0.0',
@@ -40,6 +41,7 @@ export type MultiviewGenerationRequest = {
   project_id: string; video_card_id?: string; reference_image_ids: [string];
   reference_video_urls: []; reference_audio_urls: []; resolution_approval_confirmed: boolean;
   resolution_approval_id?: string; idempotency_key: string; max_estimated_cost: number;
+  pricing_revision?: string;
   client_name: 'multiview'; source_metadata: { source: 'multiview'; mode: 'rotation' };
   multiview_generation: MultiviewGenerationSnapshot;
 };
@@ -112,7 +114,7 @@ export function parseMultiviewGenerationSnapshot(value: unknown): MultiviewGener
 }
 
 export function buildMultiviewGenerationRequest(draft: MultiviewGenerationDraft, options: {
-  idempotencyKey: string; maxEstimatedCost: number; preset?: MultiviewRotationPreset;
+  idempotencyKey: string; maxEstimatedCost: number; preset?: MultiviewRotationPreset; pricingRevision?: string | null;
 }): MultiviewGenerationRequest {
   if (!parseMultiviewGenerationDraft(draft)) throw new Error('生成设置无法安全读取，原输入保留');
   const composed = composeMultiviewGenerationPrompt(draft.supplement, draft.presetVersion, options.preset);
@@ -128,7 +130,8 @@ export function buildMultiviewGenerationRequest(draft: MultiviewGenerationDraft,
   if (!draft.mainImage || !identity(draft.mainImage.assetId) || !identity(draft.mainImage.referenceImageId)) throw new Error('请先准备一张有权用于生成的主图');
   if (draft.resolutionApprovalId && !identity(draft.resolutionApprovalId)) throw new Error('清晰度审批编号无效，已有选择保留');
   if (typeof options.idempotencyKey !== 'string' || !options.idempotencyKey.trim() || options.idempotencyKey !== options.idempotencyKey.trim() || options.idempotencyKey.length > 200) throw new Error('生成请求编号无效');
-  if (!Number.isFinite(options.maxEstimatedCost) || !Number.isInteger(options.maxEstimatedCost) || options.maxEstimatedCost < 0) throw new Error('当前报价尚未确认，未提交生成');
+  if (!validVideoPricingAmount(options.maxEstimatedCost)) throw new Error('当前报价尚未确认，未提交生成');
+  if (options.pricingRevision !== undefined && options.pricingRevision !== null && (typeof options.pricingRevision !== 'string' || options.pricingRevision.length > 160)) throw new Error('报价修订无效，原参数保留');
   return {
     prompt: composed.prompt, final_prompt_snapshot: composed.prompt, prompt_user_edited: draft.supplement.length > 0,
     provider: 'seedance', model: draft.model, generation_mode: 'all_in_one_reference', ratio: draft.ratio as VideoRatio,
@@ -138,6 +141,7 @@ export function buildMultiviewGenerationRequest(draft: MultiviewGenerationDraft,
     reference_video_urls: [], reference_audio_urls: [], resolution_approval_confirmed: draft.resolutionApprovalConfirmed,
     ...(draft.resolutionApprovalId ? { resolution_approval_id: draft.resolutionApprovalId } : {}),
     idempotency_key: options.idempotencyKey, max_estimated_cost: options.maxEstimatedCost,
+    ...(options.pricingRevision ? { pricing_revision: options.pricingRevision } : {}),
     client_name: 'multiview', source_metadata: { source: 'multiview', mode: 'rotation' },
     multiview_generation: { schema: 1, presetId: MULTIVIEW_ROTATION_PRESET.id, presetVersion: draft.presetVersion,
       supplement: draft.supplement, workspaceTabId: draft.workspaceTabId,

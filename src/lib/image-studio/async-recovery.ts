@@ -3,6 +3,7 @@ import type { ImageStudioTask, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { canUseCompanyTemplates } from './access';
 import { readStudioAsyncReceipt, readStudioRequestReceipt, type StudioAsyncReceipt } from './delivery';
+import { PRICING_ASYNC_PREFIX, publicPricingTaskState, studioTaskState } from './pricing-state';
 
 const PREFIX = 'studio_async_recovery_v1:';
 const OBSERVATION_PREFIX = 'studio_async_observation_v1:';
@@ -28,7 +29,7 @@ export class StudioAsyncRecoveryError extends Error {
   constructor(message: string, public readonly status = 409, public readonly code = 'image_async_recheck_unavailable') { super(message); }
 }
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-const key = (taskId: string) => `${PREFIX}${taskId}`;
+const key = (taskId: string) => `${taskId.startsWith('rate-') ? PRICING_ASYNC_PREFIX : PREFIX}${taskId}`;
 function channel(task: ImageStudioTask): { channelId: string; configRevision: string } | null {
   try {
     const value = JSON.parse(task.snapshot_json || '{}').imageChannel;
@@ -89,7 +90,7 @@ function view(record: RecoveryRecord, task: ImageStudioTask): StudioAsyncRecover
     reason: record.reason, providerStatus: record.providerStatus,
     attempts: record.attempts, maxAttempts: MAX_ATTEMPTS, deadlineAt: record.deadlineAt,
     nextCheckAt: ['scheduled', 'checking'].includes(record.state) ? record.nextCheckAt : null,
-    canRequestRecheck: task.status === 'uncertain' && !record.manualOnce
+    canRequestRecheck: publicPricingTaskState(task.status) === 'uncertain' && !record.manualOnce
       && (record.state === 'scheduled' || record.state === 'stopped' && ['auto_budget', 'deadline'].includes(record.stopCode || ''))
       && record.lastRequestedAt + COOLDOWN <= Date.now() };
 }
@@ -133,7 +134,7 @@ function observation(value: string): UnavailableObservation | null {
 export async function observeStudioAsyncQueryUnavailable(task: ImageStudioTask, receipt: StudioAsyncReceipt,
   detail?: { code: string; poll?: { summaryNotFound?: true; lastHttpStatus: number | null; lastAttemptPhase: string | null } }) {
   const now = Date.now();
-  if (task.status !== 'channel_running' || !task.lease_token || receipt.acceptedAt + 24 * 60 * 60_000 >= now
+  if (publicPricingTaskState(task.status) !== 'channel_running' || !task.lease_token || receipt.acceptedAt + 24 * 60 * 60_000 >= now
     || !detail || !['async_query_interrupted', 'async_query_unconfirmed'].includes(detail.code)
     || !detail.poll?.summaryNotFound || detail.poll.lastHttpStatus !== 404 || detail.poll.lastAttemptPhase !== 'summary_request') return false;
   const original = await evidence(task);
@@ -141,7 +142,7 @@ export async function observeStudioAsyncQueryUnavailable(task: ImageStudioTask, 
   const identity = binding(task, { ...receipt, requestId: original.requestId });
   return prisma.$transaction(async tx => {
     const current = await tx.imageStudioTask.findUnique({ where: { id: task.id } });
-    if (!current || current.status !== 'channel_running' || current.lease_token !== task.lease_token
+    if (!current || current.status !== studioTaskState(task, 'channel_running') || current.lease_token !== task.lease_token
       || !current.lease_until || current.lease_until.getTime() <= now
       || binding(current, { ...receipt, requestId: original.requestId }) !== identity) return false;
     const row = await tx.platformSetting.findUnique({ where: { key: `${OBSERVATION_PREFIX}${task.id}` } });
@@ -160,7 +161,7 @@ export async function observeStudioAsyncQueryUnavailable(task: ImageStudioTask, 
 /** Task CAS and durable recovery intent are committed together. No refund or upstream request. */
 export async function releaseStudioAsyncSlot(task: ImageStudioTask, receipt: StudioAsyncReceipt,
   reason: RecoveryRecord['reason'], providerStatus: unknown = null) {
-  if (task.status !== 'channel_running' || reason === 'provider_unconfirmed' && !UNCONFIRMED.includes(providerStatus as ProviderStatus)) return false;
+  if (publicPricingTaskState(task.status) !== 'channel_running' || reason === 'provider_unconfirmed' && !UNCONFIRMED.includes(providerStatus as ProviderStatus)) return false;
   const original = await evidence(task);
   if (original.receipt.state === 'failed' || original.receipt.providerTaskId !== receipt.providerTaskId
     || original.receipt.acceptedAt !== receipt.acceptedAt || original.receipt.expiresAt !== receipt.expiresAt) return false;
@@ -184,9 +185,9 @@ export async function releaseStudioAsyncSlot(task: ImageStudioTask, receipt: Stu
       if (!observed || observed.binding !== record.binding || observed.count !== 2 || observed.window !== digest(task.lease_token)
         || observed.lastSeen - observed.firstSeen < 30_000 || receipt.acceptedAt + 24 * 60 * 60_000 >= now) return false;
     }
-    const changed = await tx.imageStudioTask.updateMany({ where: { id: task.id, owner_id: task.owner_id, status: 'channel_running',
+    const changed = await tx.imageStudioTask.updateMany({ where: { id: task.id, owner_id: task.owner_id, status: studioTaskState(task, 'channel_running'),
       fingerprint: task.fingerprint, lease_token: task.lease_token, lease_until: { gt: new Date(now) } },
-      data: { status: 'uncertain', lease_token: null, lease_until: null, finished_at: new Date(now),
+      data: { status: studioTaskState(task, 'uncertain'), lease_token: null, lease_until: null, finished_at: new Date(now),
         error: reason === 'query_unavailable' ? '原号多次查询暂不可用，已退出执行队列；结果和费用仍待确认，将低频核对原号，未取消或重新生成。'
           : '原供应商状态待核对，已退出执行队列；原任务与费用预留保留，将低频核对同一原号。' } });
     if (!changed.count) return false;
@@ -218,14 +219,14 @@ export type StudioAsyncRecoveryClaim = { task: ImageStudioTask; receipt: StudioA
 let sweep: { cursor: string | null; ceiling: string } | null = null;
 class ClaimLost extends Error {}
 export async function claimStudioAsyncRecovery(): Promise<StudioAsyncRecoveryClaim | null> {
-  const eligible: Prisma.PlatformSettingWhereInput = { key: { startsWith: PREFIX }, OR: [
+  const eligible: Prisma.PlatformSettingWhereInput = { AND: [{ OR: [{ key: { startsWith: PREFIX } }, { key: { startsWith: PRICING_ASYNC_PREFIX } }] }, { OR: [
     { value_json: { contains: '"state":"scheduled"' } }, { value_json: { contains: '"state":"checking"' } },
     { value_json: { contains: '"manualOnce":true' } },
-  ] };
+  ] }] };
   if (!sweep) { const last = await prisma.platformSetting.findFirst({ where: eligible, orderBy: { key: 'desc' }, select: { key: true } });
     if (!last) return null; sweep = { cursor: null, ceiling: last.key }; }
   const bounds = sweep;
-  const rows = await prisma.platformSetting.findMany({ where: { ...eligible, key: { startsWith: PREFIX, lte: bounds.ceiling,
+  const rows = await prisma.platformSetting.findMany({ where: { ...eligible, key: { lte: bounds.ceiling,
     ...(bounds.cursor ? { gt: bounds.cursor } : {}) } }, orderBy: { key: 'asc' }, take: 32 });
   if (!rows.length) { sweep = null; return null; }
   for (const row of rows.slice(0, 10)) {
@@ -235,7 +236,7 @@ export async function claimStudioAsyncRecovery(): Promise<StudioAsyncRecoveryCla
       || parsed.state === 'checking' && (parsed.leaseUntil || 0) > Date.now()) continue;
     const task = await prisma.imageStudioTask.findUnique({ where: { id: parsed.taskId } });
     const record = task && parse(row.value_json, task);
-    if (!task || !record || task.status !== 'uncertain' || task.billing_settled_at || task.actual_credits !== null) continue;
+    if (!task || !record || publicPricingTaskState(task.status) !== 'uncertain' || task.billing_settled_at || task.actual_credits !== null) continue;
     let original;
     try { original = await evidence(task); } catch {
       await prisma.platformSetting.updateMany({ where: { id: row.id, value_json: row.value_json },
@@ -248,7 +249,7 @@ export async function claimStudioAsyncRecovery(): Promise<StudioAsyncRecoveryCla
     if (record.state === 'checking' && record.manualOnce) {
       await prisma.$transaction(async tx => {
         const current = await tx.imageStudioTask.findUnique({ where: { id: task.id } });
-        if (!current || !parse(row.value_json, current) || current.status !== 'uncertain'
+        if (!current || !parse(row.value_json, current) || current.status !== studioTaskState(task, 'uncertain')
           || current.lease_token !== record.leaseToken || !current.lease_until || current.lease_until.getTime() > Date.now()) return;
         const stopped = record.attempts >= MAX_ATTEMPTS || record.deadlineAt <= Date.now();
         const saved = await tx.platformSetting.updateMany({ where: { id: row.id, value_json: row.value_json }, data: { value_json: JSON.stringify({
@@ -257,7 +258,7 @@ export async function claimStudioAsyncRecovery(): Promise<StudioAsyncRecoveryCla
           ...(stopped ? { stopCode: record.attempts >= MAX_ATTEMPTS ? 'auto_budget' : 'deadline' } : {}),
         }) } });
         if (!saved.count) return;
-        const cleared = await tx.imageStudioTask.updateMany({ where: { id: current.id, status: 'uncertain', lease_token: record.leaseToken,
+        const cleared = await tx.imageStudioTask.updateMany({ where: { id: current.id, status: studioTaskState(current, 'uncertain'), lease_token: record.leaseToken,
           lease_until: current.lease_until }, data: { lease_token: null, lease_until: null } });
         if (!cleared.count) throw new ClaimLost();
       });
@@ -275,14 +276,14 @@ export async function claimStudioAsyncRecovery(): Promise<StudioAsyncRecoveryCla
     try {
       const claimed = await prisma.$transaction(async tx => {
         const current = await tx.imageStudioTask.findUnique({ where: { id: task.id } });
-        if (!current || !parse(row.value_json, current) || current.status !== 'uncertain' || current.billing_settled_at
+        if (!current || !parse(row.value_json, current) || current.status !== studioTaskState(task, 'uncertain') || current.billing_settled_at
           || current.actual_credits !== null || current.lease_until && current.lease_until.getTime() > now) throw new ClaimLost();
         const held = { ...record, state: 'checking', attempts: record.manualOnce || localOnly ? record.attempts : record.attempts + 1,
           manualChecks: record.manualChecks + (record.manualOnce ? 1 : 0), lastRequestedAt: now,
           leaseToken: token, leaseUntil, nextCheckAt: leaseUntil };
         const changed = await tx.platformSetting.updateMany({ where: { id: row.id, value_json: row.value_json }, data: { value_json: JSON.stringify(held) } });
         if (!changed.count) throw new ClaimLost();
-        const leased = await tx.imageStudioTask.updateMany({ where: { id: current.id, status: 'uncertain', lease_token: current.lease_token,
+        const leased = await tx.imageStudioTask.updateMany({ where: { id: current.id, status: studioTaskState(current, 'uncertain'), lease_token: current.lease_token,
           lease_until: current.lease_until, fingerprint: current.fingerprint }, data: { lease_token: token, lease_until: new Date(leaseUntil) } });
         if (!leased.count) throw new ClaimLost();
         return { ...current, lease_token: token, lease_until: new Date(leaseUntil) };
@@ -299,7 +300,7 @@ export async function studioAsyncRecoveryLease(tx: Prisma.TransactionClient, tas
   const row = await tx.platformSetting.findUnique({ where: { key: key(task.id) } });
   const current = await tx.imageStudioTask.findUnique({ where: { id: task.id } });
   const record = row && parse(row.value_json, task);
-  return row && record && current && parse(row.value_json, current) && current.status === 'uncertain'
+  return row && record && current && parse(row.value_json, current) && current.status === studioTaskState(task, 'uncertain')
     && current.lease_token === task.lease_token && current.lease_until && current.lease_until.getTime() > Date.now()
     && !current.billing_settled_at && current.actual_credits === null && record.state === 'checking' && record.leaseToken === task.lease_token
     && (record.leaseUntil || 0) > Date.now() && !task.billing_settled_at && task.actual_credits === null ? { row, record } : null;
@@ -321,7 +322,7 @@ export async function deferStudioAsyncRecovery(task: ImageStudioTask, code: stri
     const stopCode = stop ? code === 'query_budget' ? 'deadline' : code
       : record.attempts >= MAX_ATTEMPTS ? 'auto_budget' : 'deadline';
     const delay = [5, 15, 30, 60][Math.min(3, record.attempts)] * 60_000;
-    const changed = await tx.imageStudioTask.updateMany({ where: { id: task.id, status: 'uncertain', lease_token: task.lease_token,
+    const changed = await tx.imageStudioTask.updateMany({ where: { id: task.id, status: studioTaskState(task, 'uncertain'), lease_token: task.lease_token,
       lease_until: { gt: new Date(now) } }, data: { lease_token: null, lease_until: null,
       error: stopped ? '原请求自动核对已停止，结果和费用仍待确认；原记录及预留保留，未重新生成。'
         : '原请求仍待核对，将低频查询同一原号；费用预留保持，未重新生成。' } });

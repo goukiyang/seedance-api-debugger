@@ -16,7 +16,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
-import { calculateEstimatedCost, calculateH3EstimatedCost } from '@/lib/pricing';
+import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance, publicVideoPricing, videoPricingError, type VideoPricingQuote } from '@/lib/pricing/video';
 import { addAssetToWorkspace, getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { validatePromptReferences, renderPromptWithAssets } from '@/lib/assets/collection';
 import { createTaskSnapshot } from '@/lib/assets/snapshot';
@@ -1145,6 +1145,7 @@ export async function POST(request: NextRequest) {
     finalPromptSnapshot,
     promptUserEdited,
     priceCeiling: body.max_estimated_cost ?? null,
+    ...(typeof body.pricing_revision === 'string' ? { pricingRevision: body.pricing_revision } : {}),
     resolutionApprovalId: requestedResolutionApprovalId,
     resolutionApprovalConfirmed,
     ...(body.roleMediaContext === undefined ? {} : { roleMediaContext: roleMediaFingerprint(body.roleMediaContext) }),
@@ -1206,9 +1207,15 @@ export async function POST(request: NextRequest) {
   }
 
   // Existing accepted requests return above without recalculating today's quote.
-  const pricing = requestedProvider === H3_VIDEO_PROVIDER
-    ? calculateH3EstimatedCost(duration, selectedModel)
-    : calculateEstimatedCost(resolution, duration, selectedModel);
+  let priceQuote: VideoPricingQuote;
+  try {
+    priceQuote = await quoteVideoPricing({ provider: requestedProvider === H3_VIDEO_PROVIDER ? 'h3' : 'seedance', model: selectedModel, resolution, duration });
+    requireVideoPricingRevision(priceQuote, body.pricing_revision);
+  } catch (error) {
+    const failure = videoPricingError(error);
+    return NextResponse.json({ error: failure?.message || '报价暂不可用，原参数和素材已保留', code: failure?.code || 'pricing_unavailable' }, { status: failure?.status || 503 });
+  }
+  const pricing = priceQuote.pricing;
   const estimatedCost = pricing.estimatedCost;
   const costCeilingError = validateRequestCostCeiling(body.max_estimated_cost, estimatedCost);
   if (costCeilingError) return errorJson(costCeilingError, 400);
@@ -1936,6 +1943,7 @@ export async function POST(request: NextRequest) {
   try {
     const result = await prisma.$transaction(async (tx) => {
       await assertMultiviewRequestFence(tx, user.id, idempotencyKey, requestClaim);
+      await assertVideoPricingAcceptance(priceQuote, body.pricing_revision, tx);
       if (multiviewGeneration) await assertCurrentMultiviewRotationPreset(multiviewGeneration.presetVersion, tx);
       const task = await tx.videoTask.create({
         data: {
@@ -2214,6 +2222,8 @@ export async function POST(request: NextRequest) {
       }
     }
     if (err instanceof MultiviewPresetError) return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
+    const pricingFailure = videoPricingError(err);
+    if (pricingFailure) return NextResponse.json({ error: pricingFailure.message, code: pricingFailure.code }, { status: pricingFailure.status });
     if (err instanceof AuthError) return errorJson(err.message, err.status);
     if (err instanceof CreditError) {
       if (err.code === 'INSUFFICIENT_PROJECT_BUDGET') {
@@ -2389,7 +2399,7 @@ export async function POST(request: NextRequest) {
       status: 'submitted',
       estimated_cost: estimatedCost,
       frozen_cost: estimatedCost,
-      pricing,
+      pricing: publicVideoPricing(priceQuote),
       workspace_id: workspaceId,
       project_id: project.id,
       video_card_id: videoCardId,

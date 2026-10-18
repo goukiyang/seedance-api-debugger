@@ -10,6 +10,7 @@ import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { uploadFileToHistory, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import { uploadSession } from '@/lib/http/upload-session';
 import { readJsonResponse } from '@/lib/http/json-response';
+import { validVideoPricingAmount } from '@/lib/pricing-client';
 import type { PickerItem } from '@/lib/assets/picker-types';
 import { RATIO_OPTIONS, RESOLUTION_OPTIONS, type WorkspaceAssetItem } from '@/types';
 import { SEEDANCE_VIDEO_MODEL_OPTIONS, seedanceVideoDurationOptions } from '@/lib/provider/seedance-models';
@@ -47,7 +48,7 @@ type RequestReceipt = { schema: 1; ownerId: string; key: string; fingerprint: st
 type Association = { schema: 1; ownerId: string; requestId: string; workspaceTabId: string; assetId: string; referenceImageId?: string };
 type ApiError = { error?: string; message?: string; code?: string; task_id?: string; existing_task_id?: string };
 type TaskStatus = ApiError & { id: string; local_status: string; idempotency_key?: string | null; submission_unconfirmed?: boolean };
-type Quote = { key: string; points: number };
+type Quote = { key: string; points: number; pricingRevision: string | null };
 type RequestCheckOutcome = 'pending' | 'stop';
 type RequestResponse = ApiError & { request_receipt?: unknown; new_request_allowed?: unknown };
 const identifier = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(value);
@@ -503,11 +504,12 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     const timer = window.setTimeout(() => { void (async () => {
       try {
         const response = await fetch(`/api/tasks/estimate?${params}`, { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]) });
-        const payload = await readJsonResponse<ApiError & { estimatedCost?: number; multiviewPresetVersion?: string }>(response);
+        const payload = await readJsonResponse<ApiError & { estimatedCost?: number; multiviewPresetVersion?: string; pricing_revision?: string | null }>(response);
         if (!current(scope) || controller.signal.aborted) return;
         if (response.status === 409 && quoteRefreshVersion.current !== draft.presetVersion) { quoteRefreshVersion.current = draft.presetVersion; setPresetState(null); setPresetRefresh(value => value + 1); }
-        if (!response.ok || payload.multiviewPresetVersion !== draft.presetVersion || typeof payload.estimatedCost !== 'number' || !Number.isSafeInteger(payload.estimatedCost) || payload.estimatedCost < 0) throw new Error(payload.message || payload.error || '报价暂不可用，尚未生成。');
-        setQuote({ key: quoteKey, points: payload.estimatedCost });
+        if (!response.ok || payload.multiviewPresetVersion !== draft.presetVersion || !validVideoPricingAmount(payload.estimatedCost)
+          || payload.pricing_revision !== null && typeof payload.pricing_revision !== 'string') throw new Error(payload.message || payload.error || '报价暂不可用，尚未生成。');
+        setQuote({ key: quoteKey, points: payload.estimatedCost, pricingRevision: payload.pricing_revision });
       } catch (cause) { if (current(scope) && !controller.signal.aborted) setQuoteError(cause instanceof DOMException && cause.name === 'TimeoutError' ? '报价读取超时，请重新报价；尚未生成。' : message(cause, '报价暂不可用，请重新报价。')); }
     })(); }, 250);
     return () => { window.clearTimeout(timer); controller.abort(); };
@@ -662,7 +664,8 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     let submissionHttpStatus: number | null = null;
     try {
       const key = crypto.randomUUID();
-      const body = buildMultiviewGenerationRequest(frozen, { idempotencyKey: key, maxEstimatedCost: currentQuote.points, preset: presetState.preset });
+      const body = buildMultiviewGenerationRequest(frozen, { idempotencyKey: key, maxEstimatedCost: currentQuote.points,
+        pricingRevision: currentQuote.pricingRevision, preset: presetState.preset });
       const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(body)));
       if (!current(scope)) return;
       if (presetRef.current?.preset.version !== frozen.presetVersion) { setStatus('模板已更新，正在重新报价；当前输入未提交。'); return; }

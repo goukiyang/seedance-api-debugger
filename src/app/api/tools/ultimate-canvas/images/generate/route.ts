@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
     const quote = await getCanvasImageQuote(user, { kind: 'image', project_id: context.projectId,
       model: settings.model, channelId: requestedChannelId, count: Number(settings.count), quality: settings.quality, resolution: settings.resolution, ratio: settings.ratio });
     if (quote.status !== 'estimate' || quote.revision !== body.settingsRevision
-      || body.action !== 'quote' && quote.actualQuoteRequired && !body.billingQuoteId
+      || body.action !== 'quote' && (quote.actualQuoteRequired || quote.pricingQuoteRequired) && !body.billingQuoteId
       || body.action !== 'quote' && !body.billingQuoteId && quote.estimatedCredits !== body.maxEstimatedCost) throw new AuthError('价格或设置已变化，请重新核对；未派发新任务', 409);
     if (!Array.isArray(body.referenceImageIds) || body.referenceImageIds.length > 9) throw new AuthError('参考图数量无效', 400);
     const referenceImageIds = body.referenceImageIds as string[];
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
       resolution: settings.resolution, aspectRatio: settings.ratio, groupName: '画布图片' }, false, user.role === 'admin', undefined, user);
     const submission = { requestId: body.requestId, ...(unframed ? {} : { moduleId: body.moduleId }),
       revision: body.settingsRevision, prompt: body.prompt, count: Number(settings.count), referenceIds: uniqueReferences,
-      draft: { referencePolicy }, maxEstimatedCost: body.maxEstimatedCost, billingQuoteId: body.billingQuoteId,
+      draft: { referencePolicy }, maxEstimatedCost: body.maxEstimatedCost, billingQuoteId: body.billingQuoteId, pricingRevision: body.pricingRevision,
       model: settings.model, ...(requestedChannelId === undefined ? {} : { channelId: requestedChannelId }),
       imageChannel: body.imageChannel, quality: settings.quality, resolution: settings.resolution, aspectRatio: settings.ratio };
     const promptBinding = mentions ? { mentions, referenceAssets } : undefined;

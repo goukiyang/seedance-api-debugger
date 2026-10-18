@@ -8,11 +8,15 @@ import { getImageStudioSettings, IMAGE_STUDIO_SETTING_KEY } from '@/lib/image-st
 import { canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from '@/lib/image-studio/access';
 import { defaultImageStudioQuality, normalizeImageStudioQuality, IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
 import { normalizeStudioRatio, studioRatioSize } from '@/lib/image-studio/ratios';
-import { getImageGenerationChannelOptions, getImageGenerationSettingsForModel, getManagedImageGenerationChannels, hasLegacyImageGenerationModelOverride } from '@/lib/integrations/image-generation';
+import { captureImageGenerationChannel, getImageGenerationChannelOptions, getImageGenerationSettingsForModel, getManagedImageGenerationChannels, hasLegacyImageGenerationModelOverride, resolveImageGenerationChannelSnapshot, type ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import { imageBillingScope } from '@/lib/image-studio/billing-scope';
-import { fixedImageBillingContract, imageSpecification } from '@/lib/image-studio/billing-quote';
-import { creditsToCents } from '@/lib/image-studio/billing-contract';
+import { fixedImageBillingContract, imageSpecification, withPricingImageContract } from '@/lib/image-studio/billing-quote';
+import { creditsToCents, parseImageBillingContract, type ImageBillingContract } from '@/lib/image-studio/billing-contract';
+import { studioTaskState, studioBillingState, publicPricingTaskState, studioTaskStates } from '@/lib/image-studio/pricing-state';
+import { assertNewPricingCharge, frozenPricingCredits } from '@/lib/pricing/charge';
+import { withImagePricing } from '@/lib/pricing/image';
+import { addCredits, sumCredits, assertCreditWriteback, creditsFromCents } from '@/lib/credits/precision';
 import { reserveImageStudioQueueCapacity, QueueCapacityError, QueueMaintenanceError } from '@/lib/image-studio/queue-capacity';
 import { assertCanUseToolFlow, parseJsonObject, validateToolFlowGraph, type ToolFlowGraph, type ToolFlowNode } from './toolflow';
 
@@ -27,6 +31,8 @@ type ToolFlowQuoteStep = {
   unitCredits: number | null;
   estimatedCredits: number | null;
   status: 'fixed' | 'unknown';
+  pricingRevision: string | null;
+  contractDigest: string;
 };
 type ToolFlowQuote = {
   flowId: string;
@@ -36,6 +42,8 @@ type ToolFlowQuote = {
   expiresAt: string;
   billingMode: 'fixed';
   steps: ToolFlowQuoteStep[];
+  retryRunId?: string | null;
+  retryNodeId?: string | null;
 };
 type RunSnapshot = {
   schema: 'toolflow.v1';
@@ -48,6 +56,19 @@ type RunSnapshot = {
   input_asset_ids: string[];
   billing_mode?: 'fixed';
   billing_quote?: ToolFlowQuote;
+  contract_version?: 'toolflow-pricing-v1';
+  node_contracts?: Record<string, FrozenToolFlowNode>;
+  node_attempts?: Record<string, FrozenToolFlowNode[]>;
+};
+
+type FrozenToolFlowNode = {
+  config: TemplateConfig;
+  billingContract: ImageBillingContract;
+  imageChannel: ImageGenerationChannelSnapshot;
+  settingsRevision: number;
+  authorizedCount: number;
+  maxReferences: number;
+  quote: ToolFlowQuote;
 };
 
 type NodeResult = {
@@ -76,7 +97,7 @@ type TemplateConfig = {
   sourcePresetId: string | null;
 };
 
-async function assertToolFlowLegacyRoute(tx: Tx, config: TemplateConfig, configuredPrice: number | null | undefined) {
+async function assertToolFlowLegacyRoute(tx: Tx, config: TemplateConfig, configuredPrice: number | null | undefined, priced = false) {
   const model = config.model;
   if (!IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number])) {
     throw new AuthError(`工具流入口不支持图片型号 ${model}；请改用图片工作区选择可用型号。`, 409);
@@ -97,8 +118,8 @@ async function assertToolFlowLegacyRoute(tx: Tx, config: TemplateConfig, configu
   const capability = option?.models[model as typeof IMAGE_STUDIO_MODELS[number]];
   const fixedPoints = capability?.fixedPoints;
   const fixedPriceMatches = typeof configuredPrice === 'number' && Number.isFinite(configuredPrice)
-    && typeof fixedPoints === 'number' && Number.isSafeInteger(fixedPoints)
-    && creditsToCents(configuredPrice) === creditsToCents(fixedPoints);
+    && (priced || typeof fixedPoints === 'number' && Number.isSafeInteger(fixedPoints)
+      && creditsToCents(configuredPrice) === creditsToCents(fixedPoints));
   const parametersMatch = Boolean(capability?.qualities?.includes(config.quality)
     && capability.ratios?.includes(config.aspectRatio)
     && capability.maxReferences !== null && capability.maxReferences !== undefined
@@ -116,6 +137,26 @@ async function assertToolFlowLegacyRoute(tx: Tx, config: TemplateConfig, configu
 
 const TERMINAL_TASK_STATUSES = new Set(['succeeded', 'failed', 'uncertain', 'cancelled']);
 const TERMINAL_RUN_STATUSES = new Set(['succeeded', 'partial_success', 'failed', 'cancelled']);
+const PRIVATE_FLOW_STATES = new Set(['queued', 'pending', 'running', 'waiting_selection', 'waiting_confirmation', 'paused']);
+
+function publicToolFlowState(status: string) {
+  return status.startsWith('rate_') && PRIVATE_FLOW_STATES.has(status.slice(5)) ? status.slice(5) : status;
+}
+
+function toolFlowState(run: { id?: string; status?: string; contract_version?: string }, status: string) {
+  const adopted = run.contract_version === 'toolflow-pricing-v1' || run.id?.startsWith('rate-tf-') || run.status?.startsWith('rate_');
+  const publicStatus = publicToolFlowState(status);
+  return adopted && PRIVATE_FLOW_STATES.has(publicStatus) ? `rate_${publicStatus}` : publicStatus;
+}
+
+function currentNodeContract(snapshot: RunSnapshot, nodeId: string) {
+  const attempts = snapshot.node_attempts?.[nodeId];
+  return attempts?.length ? attempts[attempts.length - 1] : snapshot.node_contracts?.[nodeId];
+}
+
+class FrozenToolFlowContractError extends AuthError {
+  constructor(message = '原工具流缺少完整的受理合同，已保留现场；请核对原运行，不会自动补建或重新生成。') { super(message, 409); }
+}
 
 function toolFlowQuoteSecret() {
   const secret = process.env.SESSION_SECRET?.trim();
@@ -161,11 +202,12 @@ function quoteProofPayload(userId: string, value: unknown) {
   const quote = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
   const steps = Array.isArray(quote.steps) ? quote.steps.map((value) => {
     const step = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
-    return ['nodeId', 'templateId', 'moduleId', 'templateVersion', 'model', 'count', 'unitCredits', 'estimatedCredits', 'status']
+    return ['nodeId', 'templateId', 'moduleId', 'templateVersion', 'model', 'count', 'unitCredits', 'estimatedCredits', 'status', 'pricingRevision', 'contractDigest']
       .map((key) => step[key] ?? null);
   }) : [];
   return JSON.stringify([userId, quote.flowId ?? null, quote.flowVersion ?? null, quote.settingsRevision ?? null,
-    quote.estimatedCredits ?? null, quote.expiresAt ?? null, quote.billingMode ?? null, steps]);
+    quote.estimatedCredits ?? null, quote.expiresAt ?? null, quote.billingMode ?? null,
+    quote.retryRunId ?? null, quote.retryNodeId ?? null, steps]);
 }
 
 export function toolFlowQuoteCookieName(flowId: string, expiresAt: string) {
@@ -415,17 +457,31 @@ async function buildToolFlowQuote(
   flow: { id: string; owner_id: string; version: number; graph_json: string },
   settings: Awaited<ReturnType<typeof getImageStudioSettings>>,
   now = Date.now(),
-): Promise<ToolFlowQuote> {
+  retry?: { runId: string; nodeId: string; config: TemplateConfig; remaining: number },
+) {
   const graph = validateToolFlowGraph(JSON.parse(flow.graph_json));
   const steps: ToolFlowQuoteStep[] = [];
+  const prepared = new Map<string, { config: TemplateConfig; pricing: Awaited<ReturnType<typeof withImagePricing>>; scope: string }>();
   let totalCents = 0;
   let hasUnknown = false;
   for (const node of graph.nodes) {
     if (node.type !== 'flow-template') continue;
-    const config = await resolveTemplate(tx, flow.owner_id, flow.owner_id, node, [], settings,
+    if (retry && node.id !== retry.nodeId) continue;
+    const config = retry?.config || await resolveTemplate(tx, flow.owner_id, flow.owner_id, node, [], settings,
       user as unknown as ImageStudioIdentity, { cloneReferenceAssets: false, allowUnknownModel: true, allowUnknownPrice: true });
-    const rawPrice = settings.prices[config.model as keyof typeof settings.prices];
-    await assertToolFlowLegacyRoute(tx, config, rawPrice);
+    const api = await getImageGenerationSettingsForModel(config.model, tx);
+    let pricing: Awaited<ReturnType<typeof withImagePricing>>;
+    try { pricing = await withImagePricing(api, config.model, tx); }
+    catch (error) { throw new AuthError(error instanceof Error ? error.message : '收费规则暂不可用，请重新报价', 409); }
+    if (pricing.quote?.charge.identity.billingMode === 'actual'
+      || pricing.settings.modelCapabilities[config.model as keyof typeof pricing.settings.modelCapabilities]?.billingMode === 'actual') {
+      throw new AuthError('工具流仅支持原固定计费合同，当前实际费用模式不能在此提交。', 409);
+    }
+    const rawPrice = pricing.quote ? pricing.quote.credits : settings.prices[config.model as keyof typeof settings.prices];
+    await assertToolFlowLegacyRoute(tx, config, rawPrice, Boolean(pricing.quote));
+    const count = retry ? retry.remaining : config.count;
+    const scope = imageBillingScope(api);
+    const contractDigest = createHash('sha256').update(stringify({ config, scope, api, count })).digest('hex');
     let unitCredits: number | null = null;
     let estimatedCredits: number | null = null;
     let status: ToolFlowQuoteStep['status'] = 'unknown';
@@ -433,10 +489,10 @@ async function buildToolFlowQuote(
       if (!IMAGE_STUDIO_MODELS.includes(config.model as typeof IMAGE_STUDIO_MODELS[number])
         || typeof rawPrice !== 'number' || !Number.isFinite(rawPrice)) throw new Error('unknown price');
       const unitCents = creditsToCents(rawPrice);
-      const stepCents = unitCents * config.count;
+      const stepCents = unitCents * count;
       if (!Number.isSafeInteger(stepCents)) throw new Error('unsafe price');
-      unitCredits = unitCents / 100;
-      estimatedCredits = stepCents / 100;
+      unitCredits = creditsFromCents(unitCents);
+      estimatedCredits = creditsFromCents(stepCents);
       totalCents += stepCents;
       if (!Number.isSafeInteger(totalCents)) throw new Error('unsafe total');
       status = 'fixed';
@@ -444,18 +500,21 @@ async function buildToolFlowQuote(
       hasUnknown = true;
     }
     steps.push({ nodeId: node.id, templateId: config.templateId, moduleId: config.moduleId,
-      templateVersion: config.templateVersion, model: config.model, count: config.count,
-      unitCredits, estimatedCredits, status });
+      templateVersion: config.templateVersion, model: config.model, count,
+      unitCredits, estimatedCredits, status, pricingRevision: pricing.quote?.charge.revision || null, contractDigest });
+    prepared.set(node.id, { config, pricing, scope });
   }
-  return {
+  const quote: ToolFlowQuote = {
     flowId: flow.id,
     flowVersion: flow.version,
     settingsRevision: settings.revision,
-    estimatedCredits: hasUnknown ? null : totalCents / 100,
+    estimatedCredits: hasUnknown ? null : creditsFromCents(totalCents),
     expiresAt: new Date(now + 60_000).toISOString(),
     billingMode: 'fixed',
     steps,
+    ...(retry ? { retryRunId: retry.runId, retryNodeId: retry.nodeId } : {}),
   };
+  return { quote, prepared };
 }
 
 export function validateSubmittedToolFlowQuote(value: unknown, current: ToolFlowQuote): ToolFlowQuote {
@@ -467,11 +526,13 @@ export function validateSubmittedToolFlowQuote(value: unknown, current: ToolFlow
     || submitted.billingMode !== 'fixed' || current.estimatedCredits === null
     || submitted.flowId !== current.flowId || submitted.flowVersion !== current.flowVersion
     || submitted.settingsRevision !== current.settingsRevision
+    || (submitted.retryRunId ?? null) !== (current.retryRunId ?? null)
+    || (submitted.retryNodeId ?? null) !== (current.retryNodeId ?? null)
     || submitted.estimatedCredits !== current.estimatedCredits || !Array.isArray(submitted.steps)
     || submitted.steps.length !== current.steps.length) {
     throw new AuthError('工具流报价已过期或设置已变化，请重新报价', 409);
   }
-  const fields: Array<keyof ToolFlowQuoteStep> = ['nodeId', 'templateId', 'moduleId', 'templateVersion', 'model', 'count', 'unitCredits', 'estimatedCredits', 'status'];
+  const fields: Array<keyof ToolFlowQuoteStep> = ['nodeId', 'templateId', 'moduleId', 'templateVersion', 'model', 'count', 'unitCredits', 'estimatedCredits', 'status', 'pricingRevision', 'contractDigest'];
   for (let index = 0; index < current.steps.length; index += 1) {
     const received = submitted.steps[index] as Partial<ToolFlowQuoteStep> | null;
     const expected = current.steps[index];
@@ -482,7 +543,7 @@ export function validateSubmittedToolFlowQuote(value: unknown, current: ToolFlow
   return { ...current, expiresAt: submitted.expiresAt! };
 }
 
-export async function getToolFlowQuote(user: SessionUser, flowId: string) {
+export async function getToolFlowQuote(user: SessionUser, flowId: string, retry?: { runId: string; nodeId: string }) {
   if (!canUseCompanyTemplates(user)) throw new AuthError('仅限公司飞书账号使用工具流', 403);
   const flow = await assertCanUseToolFlow(user, flowId);
   const settings = await getImageStudioSettings();
@@ -492,30 +553,119 @@ export async function getToolFlowQuote(user: SessionUser, flowId: string) {
     if (currentFlow.version !== flow.version || await currentImageSettingsRevision(tx) !== settings.revision) {
       throw new AuthError('工具流或图片设置已变化，请重新获取报价', 409);
     }
-    return buildToolFlowQuote(tx, user, currentFlow, settings);
+    if (retry) {
+      const context = await retryQuoteContext(tx, user, retry.runId, retry.nodeId);
+      if (context.run.flow_id !== flowId) throw new AuthError('重试报价与原工具流不一致', 409);
+      return (await buildToolFlowQuote(tx, user, { ...currentFlow, version: context.run.flow_version,
+        graph_json: stringify(context.snapshot.graph) }, settings, Date.now(), context.retry)).quote;
+    }
+    return (await buildToolFlowQuote(tx, user, currentFlow, settings)).quote;
   });
 }
 
-async function createQueuedTask(tx: Tx, ownerId: string, creditUser: CreditPolicyUser, runId: string, run: RunSnapshot, node: ToolFlowNode, config: TemplateConfig, itemIndex: number, settings: Awaited<ReturnType<typeof getImageStudioSettings>>) {
-  const id = `tf-${run.flow_id.slice(0, 12)}-${run.version}-${randomUUID()}`;
-  const unitCredits = run.billing_quote?.steps.find((step) => step.nodeId === node.id)?.unitCredits
-    ?? Number(settings.prices[config.model as keyof typeof settings.prices]);
-  const apiSettings = await getImageGenerationSettingsForModel(config.model, tx);
-  const billingScope = imageBillingScope(apiSettings);
-  const billingContract = fixedImageBillingContract({ scope: billingScope, model: config.model, credits: unitCredits,
+async function assertFrozenTemplateAccess(tx: Tx, ownerId: string, config: TemplateConfig, identity: ImageStudioIdentity) {
+  if (config.moduleId && !await tx.imageStudioModule.findFirst({ where: { id: config.moduleId, owner_id: ownerId } })) {
+    throw new FrozenToolFlowContractError('原图片模块不存在或已无权使用，原工具流已保留。');
+  }
+  if (config.sourcePresetId) {
+    const source = await tx.imageStudioPreset.findUnique({ where: { id: config.sourcePresetId } });
+    if (!source || !canViewStudioPreset(identity, source)) throw new FrozenToolFlowContractError('原模板已停止共享或无权使用，原工具流已保留。');
+  }
+}
+
+async function freezeToolFlowNodes(tx: Tx, user: SessionUser, graph: ToolFlowGraph,
+  built: Awaited<ReturnType<typeof buildToolFlowQuote>>, acceptedQuote: ToolFlowQuote,
+  settings: Awaited<ReturnType<typeof getImageStudioSettings>>, retry = false) {
+  const contracts: Record<string, FrozenToolFlowNode> = {};
+  for (const step of acceptedQuote.steps) {
+    const prepared = built.prepared.get(step.nodeId);
+    const node = graph.nodes.find(item => item.id === step.nodeId);
+    if (!prepared || !node || step.unitCredits === null || step.status !== 'fixed') throw new AuthError('节点报价不完整，未受理工具流', 409);
+    const charge = prepared.pricing.quote?.charge;
+    if (charge) {
+      try { await assertNewPricingCharge(charge, step.pricingRevision, tx); }
+      catch (error) { throw new AuthError(error instanceof Error ? error.message : '收费规则已变化，请重新报价', 409); }
+    }
+    const config = retry ? prepared.config : await resolveTemplate(tx, user.id, user.id, node, [], settings,
+      user as unknown as ImageStudioIdentity, { allowUnknownPrice: true });
+    await assertFrozenTemplateAccess(tx, user.id, config, user as unknown as ImageStudioIdentity);
+    const imageChannel = await captureImageGenerationChannel(config.model, 'original', tx);
+    const api = await resolveImageGenerationChannelSnapshot(imageChannel, tx, true, config.model);
+    if (imageBillingScope(api) !== prepared.scope) throw new AuthError('图片调用配置已变化，请重新报价', 409);
+    let billingContract = fixedImageBillingContract({ scope: prepared.scope, model: config.model, credits: step.unitCredits,
+      specification: imageSpecification({ model: config.model, quality: config.quality, outputSize: config.outputSize,
+        aspectRatio: config.aspectRatio, referenceCount: config.referenceIds.length,
+        inputCharacters: config.context.length + config.prompt.length, inputDigest: step.contractDigest }) });
+    if (charge) billingContract = withPricingImageContract(billingContract, charge, step.unitCredits);
+    contracts[step.nodeId] = { config, billingContract, imageChannel, settingsRevision: settings.revision,
+      authorizedCount: step.count, maxReferences: api.modelCapabilities[config.model as keyof typeof api.modelCapabilities]?.maxReferences ?? 9,
+      quote: acceptedQuote };
+  }
+  return contracts;
+}
+
+async function retryQuoteContext(tx: Tx, user: SessionUser, runId: string, nodeId: string) {
+  const run = await tx.toolFlowRun.findUnique({ where: { id: runId }, include: { node_runs: true } });
+  if (!run || run.owner_id !== user.id) throw new AuthError('工具流运行不存在', 404);
+  const snapshot = parseJsonObject(run.snapshot_json) as unknown as RunSnapshot;
+  const contract = currentNodeContract(snapshot, nodeId);
+  const node = run.node_runs.find(item => item.node_id === nodeId);
+  if (!contract || !node || !['failed', 'succeeded'].includes(node.status)) throw new AuthError('该节点当前不能重新报价重试；原运行已保留。', 409);
+  const tasks = await tx.imageStudioTask.findMany({ where: { tool_flow_run_id: run.id, tool_flow_node_id: nodeId }, select: { status: true } });
+  if (tasks.some(task => !['succeeded', 'failed', 'cancelled'].includes(publicPricingTaskState(task.status)))) {
+    throw new AuthError('原节点仍有执行或结果待确认的请求，请继续核对原请求，不能重新生成。', 409);
+  }
+  await assertFrozenTemplateAccess(tx, user.id, contract.config, user as unknown as ImageStudioIdentity);
+  const successes = parseNodeResult(node.result_json).succeededAssetIds || [];
+  const remaining = Math.max(0, contract.config.count - successes.length);
+  if (!remaining) throw new AuthError('该节点已有全部结果，没有需要重试的图片', 409);
+  return { run, snapshot, node, retry: { runId, nodeId, config: contract.config, remaining } };
+}
+
+async function reopenUnstartedDescendants(tx: Tx, run: RunSnapshot, runId: string, nodeId: string) {
+  const pending = childNodes(run.graph, nodeId);
+  const seen = new Set<string>();
+  while (pending.length) {
+    const id = pending.shift()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const node = await tx.toolFlowNodeRun.findUnique({ where: { run_id_node_id: { run_id: runId, node_id: id } } });
+    if (!node || ['cancelled', 'running', 'waiting_selection', 'waiting_confirmation'].includes(publicToolFlowState(node.status))
+      || resultAssets(node).length || safeJsonArray(node.selected_asset_ids).length
+      || await tx.imageStudioTask.count({ where: { tool_flow_run_id: runId, tool_flow_node_id: id } })) continue;
+    await tx.toolFlowNodeRun.update({ where: { id: node.id }, data: {
+      status: toolFlowState(run, 'pending'), error: null, finished_at: null,
+    } });
+    pending.push(...childNodes(run.graph, id));
+  }
+}
+
+async function createQueuedTask(tx: Tx, ownerId: string, creditUser: CreditPolicyUser, runId: string, run: RunSnapshot, node: ToolFlowNode, config: TemplateConfig, itemIndex: number) {
+  const accepted = currentNodeContract(run, node.id);
+  const parentContract = parseImageBillingContract(accepted ? stringify(accepted.billingContract) : null);
+  if (!accepted || !parentContract || parentContract.mode !== 'fixed' || parentContract.model !== config.model) throw new FrozenToolFlowContractError();
+  const id = `${parentContract.pricing ? 'rate-' : ''}tf-${run.flow_id.slice(0, 12)}-${run.version}-${randomUUID()}`;
+  const unitCredits = parentContract.pricing ? frozenPricingCredits(parentContract.pricing).credits : parentContract.authorizedCredits;
+  if (creditsToCents(unitCredits) !== creditsToCents(parentContract.authorizedCredits)) throw new FrozenToolFlowContractError();
+  // Only the concrete downstream inputs are filled in here. Price and API
+  // identity were accepted by the parent; never resolve today's price again.
+  const billingScope = parentContract.scope;
+  const billingContract: ImageBillingContract = { ...parentContract,
     specification: imageSpecification({ model: config.model, quality: config.quality, outputSize: config.outputSize,
       aspectRatio: config.aspectRatio, referenceCount: config.referenceIds.length,
       inputCharacters: config.context.length + config.prompt.length,
       inputDigest: createHash('sha256').update(stringify({ flowId: run.flow_id, flowVersion: run.version,
-        settingsRevision: run.billing_quote?.settingsRevision ?? settings.revision, nodeId: node.id,
-        prompt: config.prompt, context: config.context, referenceIds: config.referenceIds })).digest('hex') }) });
+        settingsRevision: accepted.settingsRevision, nodeId: node.id,
+        parentSpecification: parentContract.specification,
+        prompt: config.prompt, context: config.context, referenceIds: config.referenceIds })).digest('hex') }) };
+  const taskState = { id, billing_contract_json: stringify(billingContract) };
   const freeze = unitCredits > 0
     ? await allocateTaskCredits(tx, creditUser, unitCredits, id)
     : null;
   await tx.imageStudioTask.create({
     data: {
       id,
-      batch_id: `toolflow:${run.flow_id}:${run.version}:${node.id}`,
+      batch_id: `${parentContract.pricing ? 'toolflow_pricing_v1' : 'toolflow'}:${run.flow_id}:${run.version}:${node.id}`,
       owner_id: ownerId,
       module_id: config.moduleId,
       source_preset_id: config.sourcePresetId,
@@ -523,11 +673,12 @@ async function createQueuedTask(tx: Tx, ownerId: string, creditUser: CreditPolic
       fingerprint: createHash('sha256').update(stringify({ run: run.flow_id, version: run.version, node: node.id, index: itemIndex, prompt: config.prompt, references: config.referenceIds })).digest('hex'),
       prompt: config.prompt,
       context: config.context,
-      revision: settings.revision,
+      revision: accepted.settingsRevision,
       model: config.model,
       quality: config.quality,
       billing_mode: 'fixed',
-      billing_status: 'awaiting_response',
+      status: studioTaskState(taskState, 'queued'),
+      billing_status: studioBillingState(taskState, 'awaiting_response'),
       billing_scope: billingScope,
       billing_contract_json: stringify(billingContract),
       snapshot_json: stringify({
@@ -544,7 +695,8 @@ async function createQueuedTask(tx: Tx, ownerId: string, creditUser: CreditPolic
         quality: config.quality,
         billingMode: 'fixed',
         billingContract,
-        quotedSettingsRevision: run.billing_quote?.settingsRevision ?? settings.revision,
+        imageChannel: accepted.imageChannel,
+        quotedSettingsRevision: accepted.settingsRevision,
         aspectRatio: config.aspectRatio,
         outputSize: config.outputSize,
         referenceIds: config.referenceIds,
@@ -581,12 +733,11 @@ async function createQueuedTask(tx: Tx, ownerId: string, creditUser: CreditPolic
 async function scheduleTemplateNode(
   tx: Tx,
   run: RunSnapshot,
-  runRow: { owner_id: string; flow_id: string; id: string; flow_version: number },
+  runRow: { owner_id: string; flow_id: string; id: string; flow_version: number; status?: string },
   creditUser: CreditPolicyUser,
   node: ToolFlowNode,
   nodeRun: { id: string; result_json: string | null },
   inputAssetIds: string[],
-  settings: Awaited<ReturnType<typeof getImageStudioSettings>>,
 ) {
   const previous = parseNodeResult(nodeRun.result_json);
   const existingSuccesses = previous.succeededAssetIds || [];
@@ -594,16 +745,24 @@ async function scheduleTemplateNode(
     ? run.billing_quote?.steps.find((step) => step.nodeId === node.id)
     : undefined;
   if (run.billing_mode === 'fixed' && (!quoteStep || quoteStep.status !== 'fixed' || quoteStep.unitCredits === null)) {
-    throw new AuthError('工具流固定报价缺少有效节点价格，未派发任务', 409);
+    throw new FrozenToolFlowContractError('工具流固定报价缺少有效节点价格，原运行已保留，未派发任务。');
   }
-  const config = await resolveTemplate(tx, runRow.owner_id, run.flow_owner_id, node, inputAssetIds, settings,
-    creditUser as unknown as ImageStudioIdentity, quoteStep ? { allowUnknownPrice: true } : undefined);
-  if (quoteStep && (config.templateId !== quoteStep.templateId || config.moduleId !== quoteStep.moduleId
-    || config.templateVersion !== quoteStep.templateVersion || config.model !== quoteStep.model || config.count !== quoteStep.count)) {
-    throw new AuthError('工具流模板已变化，请重新报价后再运行', 409);
-  }
+  const accepted = currentNodeContract(run, node.id);
+  if (!accepted || !parseImageBillingContract(stringify(accepted.billingContract))) throw new FrozenToolFlowContractError();
+  await assertFrozenTemplateAccess(tx, runRow.owner_id, accepted.config, creditUser as unknown as ImageStudioIdentity);
+  const config = { ...accepted.config, referenceIds: Array.from(new Set(accepted.config.referenceIds.concat(inputAssetIds))).slice(0, 9) };
+  if (config.referenceIds.length > accepted.maxReferences) throw new FrozenToolFlowContractError('原节点的参考图片超出受理时的上限，已保留输入，未向供应商提交。');
+  const usableAssets = await tx.asset.count({ where: { id: { in: config.referenceIds }, owner_id: runRow.owner_id, type: 'image', status: 'active' } });
+  if (usableAssets !== config.referenceIds.length) throw new FrozenToolFlowContractError('原节点参考图已不可用或无权使用，已保留工具流现场。');
   const expected = Math.max(existingSuccesses.length, config.count);
   const remaining = Math.max(0, expected - existingSuccesses.length);
+  if (remaining > accepted.authorizedCount) throw new FrozenToolFlowContractError();
+  if (accepted.billingContract.pricing) {
+    try {
+      const frozenApi = await resolveImageGenerationChannelSnapshot(accepted.imageChannel, tx, false, config.model);
+      await withImagePricing(frozenApi, config.model, tx, accepted.billingContract);
+    } catch (error) { throw new FrozenToolFlowContractError(error instanceof Error ? error.message : undefined); }
+  }
   // A node keeps its original identity and requested count while other image
   // entries occupy the shared queue. No task or credit freeze exists yet.
   try {
@@ -611,7 +770,7 @@ async function scheduleTemplateNode(
   } catch (error) {
     if (!(error instanceof QueueCapacityError) && !(error instanceof QueueMaintenanceError)) throw error;
     await tx.toolFlowNodeRun.update({ where: { id: nodeRun.id }, data: {
-      status: 'pending', input_asset_ids: stringify(inputAssetIds),
+      status: toolFlowState(run, 'pending'), input_asset_ids: stringify(inputAssetIds),
       result_json: stringify({ ...previous, expected, inputAssetIds, succeededAssetIds: existingSuccesses }),
       error: error.message,
     } });
@@ -620,9 +779,9 @@ async function scheduleTemplateNode(
   const taskIds: string[] = [];
   let frozenCredits = 0;
   for (let index = 0; index < remaining; index += 1) {
-    const created = await createQueuedTask(tx, runRow.owner_id, creditUser, runRow.id, run, node, config, existingSuccesses.length + index, settings);
+    const created = await createQueuedTask(tx, runRow.owner_id, creditUser, runRow.id, run, node, config, existingSuccesses.length + index);
     taskIds.push(created.id);
-    frozenCredits += created.unitCredits;
+    frozenCredits = addCredits(frozenCredits, created.unitCredits);
   }
   if (!taskIds.length && existingSuccesses.length) {
     await tx.toolFlowNodeRun.update({ where: { id: nodeRun.id }, data: {
@@ -635,17 +794,20 @@ async function scheduleTemplateNode(
     return { frozenCredits: 0, waiting: false };
   }
   await tx.toolFlowNodeRun.update({ where: { id: nodeRun.id }, data: {
-    status: 'running',
+    status: toolFlowState(run, 'running'),
     input_asset_ids: stringify(inputAssetIds),
     output_asset_ids: stringify(existingSuccesses),
     result_json: stringify({ ...previous, taskIds, expected, inputAssetIds, succeededAssetIds: existingSuccesses, failedTaskIds: [] }),
     started_at: new Date(),
     error: null,
   } });
-  await tx.toolFlowRun.update({ where: { id: runRow.id }, data: {
-    frozen_credits: { increment: frozenCredits },
+  const currentRun = await tx.toolFlowRun.findUniqueOrThrow({ where: { id: runRow.id }, select: { frozen_credits: true } });
+  const nextFrozen = addCredits(currentRun.frozen_credits || 0, frozenCredits);
+  const written = await tx.toolFlowRun.update({ where: { id: runRow.id }, data: {
+    frozen_credits: nextFrozen,
     current_node_id: node.id,
   } });
+  assertCreditWriteback(written, { frozen_credits: nextFrozen });
   return { frozenCredits, waiting: false };
 }
 
@@ -658,10 +820,11 @@ function finalStatus(nodeRuns: Array<{ status: string; result_json: string | nul
 }
 
 export async function advanceToolFlowRun(runId: string) {
-  const settings = await getImageStudioSettings();
   await prisma.$transaction(async (tx) => {
-    const run = await tx.toolFlowRun.findUnique({ where: { id: runId }, include: { node_runs: true } });
-    if (!run || ['cancelled', 'succeeded', 'failed'].includes(run.status)) return;
+    const stored = await tx.toolFlowRun.findUnique({ where: { id: runId }, include: { node_runs: true } });
+    if (!stored || TERMINAL_RUN_STATUSES.has(stored.status)) return;
+    const run = { ...stored, status: publicToolFlowState(stored.status),
+      node_runs: stored.node_runs.map(item => ({ ...item, status: publicToolFlowState(item.status) })) };
     if (run.status === 'paused') return;
     const snapshot = parseJsonObject(run.snapshot_json) as unknown as RunSnapshot;
     const graph = snapshot.graph;
@@ -677,6 +840,7 @@ export async function advanceToolFlowRun(runId: string) {
       ? existingWaiting.status === 'waiting_selection' ? 'selection' : 'confirmation'
       : null;
     let progressed = false;
+    let blocked = false;
 
     // Build one topological ready wave up front. Every branch in the same wave
     // is queued in this transaction, while a merge waits for all parents and
@@ -713,12 +877,22 @@ export async function advanceToolFlowRun(runId: string) {
       }
       if (node.type === 'flow-template') {
         try {
-          await scheduleTemplateNode(tx, snapshot, run, creditUser, node, nodeRun, inputAssetIds, settings);
+          await scheduleTemplateNode(tx, snapshot, run, creditUser, node, nodeRun, inputAssetIds);
           const refreshed = await tx.toolFlowNodeRun.findUniqueOrThrow({ where: { id: nodeRun.id } });
-          nodeRuns.set(node.id, refreshed);
+          nodeRuns.set(node.id, { ...refreshed, status: publicToolFlowState(refreshed.status) });
           progressed = true;
         } catch (error) {
           const message = error instanceof Error ? error.message : '图片模板调度失败';
+          if (error instanceof FrozenToolFlowContractError) {
+            await tx.toolFlowNodeRun.update({ where: { id: nodeRun.id }, data: {
+              status: toolFlowState(run, 'pending'), input_asset_ids: stringify(inputAssetIds), error: message,
+            } });
+            blocked = true;
+            continue;
+          }
+          // A later allocation failure must roll back the whole ready wave,
+          // not leave earlier child freezes behind a failed node marker.
+          if (snapshot.contract_version === 'toolflow-pricing-v1') throw error;
           await tx.toolFlowNodeRun.update({ where: { id: nodeRun.id }, data: {
             status: 'failed', input_asset_ids: stringify(inputAssetIds), output_asset_ids: '[]', error: message, finished_at: new Date(),
           } });
@@ -730,7 +904,7 @@ export async function advanceToolFlowRun(runId: string) {
       if (node.type === 'flow-select' || node.type === 'flow-confirm') {
         const kind = node.type === 'flow-select' ? 'selection' : 'confirmation';
         await tx.toolFlowNodeRun.update({ where: { id: nodeRun.id }, data: {
-          status: node.type === 'flow-select' ? 'waiting_selection' : 'waiting_confirmation',
+          status: toolFlowState(run, node.type === 'flow-select' ? 'waiting_selection' : 'waiting_confirmation'),
           input_asset_ids: stringify(inputAssetIds), output_asset_ids: '[]', selected_asset_ids: '[]',
           result_json: stringify({ candidateAssetIds: inputAssetIds, inputAssetIds }), started_at: new Date(),
         } });
@@ -753,17 +927,18 @@ export async function advanceToolFlowRun(runId: string) {
     const nextNodeRuns = Array.from(nodeRuns.values());
     const hasRunning = nextNodeRuns.some((item) => item.status === 'running');
     const hasPending = nextNodeRuns.some((item) => item.status === 'pending');
-    const status = waiting
+    const status = blocked ? 'paused' : waiting
       ? waiting === 'selection' ? 'waiting_selection' : 'waiting_confirmation'
       : hasRunning || hasPending
         ? 'running'
         : finalStatus(nextNodeRuns);
     const previousStatus = run.status;
     await tx.toolFlowRun.update({ where: { id: run.id }, data: {
-      status,
+      status: toolFlowState(run, status),
       started_at: run.started_at || new Date(),
       finished_at: TERMINAL_RUN_STATUSES.has(status) ? new Date() : undefined,
-      error: status === 'partial_success' ? '部分节点或图片失败，成功结果已保留。' : null,
+      error: blocked ? '原受理合同或执行条件需要核对，工具流现场已保留，未自动重发。'
+        : status === 'partial_success' ? '部分节点或图片失败，成功结果已保留。' : null,
     } });
     if (waiting && previousStatus !== status) {
       await logRunAction(tx, run.owner_id, `toolflow_${waiting}`, run.id, { status });
@@ -772,7 +947,12 @@ export async function advanceToolFlowRun(runId: string) {
       await logRunAction(tx, run.owner_id, 'toolflow_finished', run.id, { status });
       await notifyRunOwner(tx, run, 'toolflow_finished', status === 'succeeded' ? '工具流完成' : '工具流部分完成', status === 'succeeded' ? '工具流已完成，结果已进入资产库。' : '工具流部分完成，成功结果已保留。', { status });
     }
-  }, { timeout: 30000 });
+  }, { timeout: 30000 }).catch(async error => {
+    if (!runId.startsWith('rate-tf-')) throw error;
+    await prisma.toolFlowRun.updateMany({ where: { id: runId,
+      status: { in: ['rate_queued', 'rate_running', 'rate_waiting_selection', 'rate_waiting_confirmation'] } },
+    data: { status: 'rate_paused', error: error instanceof Error ? error.message : '节点调度暂不可用，原合同与现场已保留，未重复提交。' } });
+  });
 }
 
 type ToolFlowDispatchPosition = { at: Date; id: string };
@@ -780,7 +960,7 @@ let toolFlowDispatchSweep: { cursor: ToolFlowDispatchPosition | null; ceiling: T
 
 /** Called by the sole image coordinator when capacity becomes available. */
 export async function dispatchWaitingToolFlowRuns() {
-  const eligible: Prisma.ToolFlowRunWhereInput = { status: { in: ['queued', 'running'] }, node_runs: { some: { status: 'pending' } } };
+  const eligible: Prisma.ToolFlowRunWhereInput = { status: { in: ['queued', 'running', 'rate_queued', 'rate_running'] }, node_runs: { some: { status: { in: ['pending', 'rate_pending'] } } } };
   if (!toolFlowDispatchSweep) {
     const last = await prisma.toolFlowRun.findFirst({ where: eligible, orderBy: [{ created_at: 'desc' }, { id: 'desc' }], select: { created_at: true, id: true } });
     if (!last) return;
@@ -817,33 +997,47 @@ export async function createToolFlowRun(user: SessionUser, flowId: string, input
   const settings = await getImageStudioSettings();
   const ids = parseIds(inputAssetIds);
   if (!ids.length) throw new AuthError('工具流至少需要一个输入图片', 400);
+  assertToolFlowQuoteProof(user.id, submittedQuote, quoteProof);
+  const acceptanceId = `rate-tf-${createHash('sha256').update(`${user.id}\0${flowId}\0${quoteProof}`).digest('hex')}`;
   const ownedAssets = await prisma.asset.count({ where: { id: { in: ids }, owner_id: user.id, status: 'active', type: 'image' } });
   if (ownedAssets !== new Set(ids).size) throw new AuthError('输入图片不存在或无权使用', 403);
   const run = await prisma.$transaction(async (tx) => {
+    const prior = await tx.toolFlowRun.findUnique({ where: { id: acceptanceId }, include: { node_runs: true } });
+    if (prior) {
+      const original = parseJsonObject(prior.snapshot_json) as unknown as RunSnapshot;
+      if (prior.owner_id !== user.id || stringify(original.input_asset_ids) !== stringify(ids)) throw new AuthError('原提交的输入不同，请核对原工具流运行', 409);
+      return prior;
+    }
     const currentFlow = await tx.toolFlow.findUnique({ where: { id: flow.id } });
     if (!currentFlow || currentFlow.owner_id !== user.id || currentFlow.status === 'deleted') throw new AuthError('工具流不存在', 404);
     if (currentFlow.version !== flow.version || await currentImageSettingsRevision(tx) !== settings.revision) {
       throw new AuthError('工具流或图片设置已变化，请重新获取报价', 409);
     }
     const graph = validateToolFlowGraph(JSON.parse(currentFlow.graph_json));
-    const currentQuote = await buildToolFlowQuote(tx, user, currentFlow, settings);
+    const built = await buildToolFlowQuote(tx, user, currentFlow, settings);
     assertToolFlowQuoteProof(user.id, submittedQuote, quoteProof);
-    const billingQuote = validateSubmittedToolFlowQuote(submittedQuote, currentQuote);
+    const billingQuote = validateSubmittedToolFlowQuote(submittedQuote, built.quote);
+    const nodeContracts = await freezeToolFlowNodes(tx, user, graph, built, billingQuote, settings);
     const snapshot: RunSnapshot = {
       schema: 'toolflow.v1', flow_id: currentFlow.id, flow_owner_id: currentFlow.owner_id,
       version: currentFlow.version, name: currentFlow.name, project_id: currentFlow.project_id,
       graph, input_asset_ids: ids, billing_mode: 'fixed', billing_quote: billingQuote,
+      contract_version: 'toolflow-pricing-v1', node_contracts: nodeContracts,
     };
     const created = await tx.toolFlowRun.create({
       data: {
+        id: acceptanceId,
         flow_id: currentFlow.id,
         owner_id: user.id,
         flow_version: currentFlow.version,
-        status: 'queued',
+        status: toolFlowState(snapshot, 'queued'),
+        estimated_credits: billingQuote.estimatedCredits,
+        frozen_credits: 0,
+        actual_credits: 0,
         snapshot_json: stringify(snapshot),
         node_runs: { create: graph.nodes.map((node) => ({
           node_id: node.id,
-          status: node.type === 'flow-input' ? 'succeeded' : 'pending',
+          status: toolFlowState(snapshot, node.type === 'flow-input' ? 'succeeded' : 'pending'),
           input_asset_ids: node.type === 'flow-input' ? stringify(ids) : '[]',
           output_asset_ids: node.type === 'flow-input' ? stringify(ids) : '[]',
           result_json: node.type === 'flow-input' ? stringify({ succeededAssetIds: ids }) : null,
@@ -859,23 +1053,43 @@ export async function createToolFlowRun(user: SessionUser, flowId: string, input
   return getToolFlowRun(user, run.id);
 }
 
-export async function getToolFlowRun(user: SessionUser, runId: string) {
+async function ownedToolFlowRun(user: SessionUser, runId: string) {
   const run = await prisma.toolFlowRun.findUnique({ where: { id: runId }, include: { flow: true, node_runs: true } });
   if (!run || run.owner_id !== user.id) throw new AuthError('工具流运行不存在', 404);
   return run;
 }
 
+export function publicToolFlowRun<T extends { status: string; snapshot_json: string; node_runs: Array<{ status: string }> }>(run: T): T {
+  const snapshot = parseJsonObject(run.snapshot_json);
+  // Private pricing bindings and API-version handles never cross the DTO boundary.
+  delete snapshot.node_contracts;
+  delete snapshot.node_attempts;
+  const frozen = parseJsonObject(run.snapshot_json) as unknown as RunSnapshot;
+  snapshot.retry_receipts = Object.fromEntries(Object.entries(frozen.node_attempts || {})
+    .map(([nodeId, attempts]) => [nodeId, attempts.map(attempt => attempt.quote)]));
+  return { ...run, status: publicToolFlowState(run.status), snapshot_json: stringify(snapshot),
+    node_runs: run.node_runs.map(node => ({ ...node, status: publicToolFlowState(node.status) })) } as T;
+}
+
+export async function getToolFlowRun(user: SessionUser, runId: string) {
+  return publicToolFlowRun(await ownedToolFlowRun(user, runId));
+}
+
 export async function listToolFlowRuns(user: SessionUser, flowId?: string) {
-  return prisma.toolFlowRun.findMany({
+  const runs = await prisma.toolFlowRun.findMany({
     where: { owner_id: user.id, ...(flowId ? { flow_id: flowId } : {}) },
     orderBy: { created_at: 'desc' },
     take: 30,
     include: { node_runs: true },
   });
+  return runs.map(publicToolFlowRun);
 }
 
-async function cancelQueuedTask(tx: Tx, task: { id: string; owner_id: string; unit_credits: number; freeze_snapshot: string | null }) {
-  const changed = await tx.imageStudioTask.updateMany({ where: { id: task.id, status: 'queued' }, data: { status: 'cancelled', error: '工具流已取消，未请求上游图片服务。', finished_at: new Date() } });
+async function cancelQueuedTask(tx: Tx, task: { id: string; owner_id: string; unit_credits: number; freeze_snapshot: string | null; status: string }) {
+  const changed = await tx.imageStudioTask.updateMany({ where: { id: task.id, status: task.status }, data: {
+    status: 'cancelled', billing_status: studioBillingState(task, 'cancelled'), actual_credits: 0, billing_settled_at: new Date(),
+    error: '工具流已取消，未请求上游图片服务。', finished_at: new Date(),
+  } });
   if (!changed.count || task.unit_credits <= 0) return;
   const settlement = await settleTaskCredits(tx, { taskId: task.id, userId: task.owner_id, terminalStatus: 'cancelled', frozenAmount: task.unit_credits, freezeSnapshot: task.freeze_snapshot });
   await tx.creditLedger.create({ data: {
@@ -893,11 +1107,20 @@ async function cancelQueuedTask(tx: Tx, task: { id: string; owner_id: string; un
   } });
 }
 
-export async function updateToolFlowRun(user: SessionUser, runId: string, body: Record<string, unknown>) {
-  const run = await getToolFlowRun(user, runId);
+async function refreshToolFlowCredits(tx: Tx, runId: string) {
+  const rows = await tx.imageStudioTask.findMany({ where: { tool_flow_run_id: runId }, select: { status: true, unit_credits: true } });
+  const frozen = sumCredits(rows.filter(item => ['queued', 'running', 'channel_queued', 'channel_running', 'uncertain']
+    .includes(publicPricingTaskState(item.status))).map(item => item.unit_credits));
+  const actual = sumCredits(rows.filter(item => item.status === 'succeeded').map(item => item.unit_credits));
+  const written = await tx.toolFlowRun.update({ where: { id: runId }, data: { frozen_credits: frozen, actual_credits: actual } });
+  assertCreditWriteback(written, { frozen_credits: frozen, actual_credits: actual });
+}
+
+export async function updateToolFlowRun(user: SessionUser, runId: string, body: Record<string, unknown>, quoteProof?: string) {
+  const run = await ownedToolFlowRun(user, runId);
   const action = clean(body.action, 'status');
   if (action === 'start') {
-    await prisma.toolFlowRun.updateMany({ where: { id: run.id, status: 'queued' }, data: { status: 'running', started_at: new Date() } });
+    await prisma.toolFlowRun.updateMany({ where: { id: run.id, status: toolFlowState(run, 'queued') }, data: { status: toolFlowState(run, 'running'), started_at: new Date() } });
     await prisma.operationLog.create({ data: { operator_id: user.id, action: 'toolflow_run_started', target_type: 'ToolFlowRun', target_id: run.id } }).catch(() => undefined);
     await advanceToolFlowRun(run.id);
     return getToolFlowRun(user, run.id);
@@ -905,7 +1128,7 @@ export async function updateToolFlowRun(user: SessionUser, runId: string, body: 
   if (action === 'pause' || action === 'resume') {
     const from = action === 'pause' ? ['running', 'waiting_selection', 'waiting_confirmation'] : ['paused'];
     const to = action === 'pause' ? 'paused' : 'running';
-    await prisma.toolFlowRun.updateMany({ where: { id: run.id, status: { in: from } }, data: { status: to } });
+    await prisma.toolFlowRun.updateMany({ where: { id: run.id, status: { in: from.map(status => toolFlowState(run, status)) } }, data: { status: toolFlowState(run, to) } });
     await prisma.operationLog.create({ data: { operator_id: user.id, action: `toolflow_run_${action}`, target_type: 'ToolFlowRun', target_id: run.id } }).catch(() => undefined);
     if (action === 'resume') await advanceToolFlowRun(run.id);
     return getToolFlowRun(user, run.id);
@@ -914,9 +1137,10 @@ export async function updateToolFlowRun(user: SessionUser, runId: string, body: 
     await prisma.$transaction(async (tx) => {
       const current = await tx.toolFlowRun.findUnique({ where: { id: run.id } });
       if (!current || TERMINAL_RUN_STATUSES.has(current.status)) return;
-      const queued = await tx.imageStudioTask.findMany({ where: { tool_flow_run_id: run.id, status: 'queued' }, select: { id: true, owner_id: true, unit_credits: true, freeze_snapshot: true } });
+      const queued = await tx.imageStudioTask.findMany({ where: { tool_flow_run_id: run.id, status: { in: studioTaskStates(['queued']) } }, select: { id: true, owner_id: true, unit_credits: true, freeze_snapshot: true, status: true } });
       for (const task of queued) await cancelQueuedTask(tx, task);
       await tx.toolFlowRun.update({ where: { id: run.id }, data: { status: 'cancelled', error: '已取消', finished_at: new Date() } });
+      await refreshToolFlowCredits(tx, run.id);
       await logRunAction(tx, user.id, 'toolflow_run_cancelled', run.id, { queued_task_count: queued.length });
     }, { timeout: 30000 });
     return getToolFlowRun(user, run.id);
@@ -924,15 +1148,17 @@ export async function updateToolFlowRun(user: SessionUser, runId: string, body: 
   if (action === 'decision') {
     const nodeId = clean(body.node_id || body.nodeId);
     const node = await prisma.toolFlowNodeRun.findUnique({ where: { run_id_node_id: { run_id: run.id, node_id: nodeId } } });
-    if (!node || !['waiting_selection', 'waiting_confirmation'].includes(node.status)) throw new AuthError('该节点当前不等待人工操作', 409);
+    if (!node || !['waiting_selection', 'waiting_confirmation'].includes(publicToolFlowState(node.status))) throw new AuthError('该节点当前不等待人工操作', 409);
     const result = parseNodeResult(node.result_json);
     const candidates = result.candidateAssetIds || safeJsonArray(node.input_asset_ids);
     const selected = body.confirmed === false ? [] : parseIds(body.selected_asset_ids || body.selectedAssetIds || candidates);
-    if (node.status === 'waiting_selection' && !selected.length) throw new AuthError('至少选择一个结果后才能继续', 400);
+    if (publicToolFlowState(node.status) === 'waiting_selection' && !selected.length) throw new AuthError('至少选择一个结果后才能继续', 400);
     const validSelected = selected.filter((id) => candidates.includes(id));
-    if (node.status === 'waiting_selection' && validSelected.length !== selected.length) throw new AuthError('选择结果已失效，请刷新后重试', 409);
+    if (publicToolFlowState(node.status) === 'waiting_selection' && validSelected.length !== selected.length) throw new AuthError('选择结果已失效，请刷新后重试', 409);
     await prisma.$transaction(async (tx) => {
-      await tx.toolFlowNodeRun.update({ where: { id: node.id }, data: {
+      const current = await tx.toolFlowRun.findUniqueOrThrow({ where: { id: run.id }, select: { status: true } });
+      if (current.status === 'cancelled') throw new AuthError('原工具流已取消，未恢复或重新提交任务。', 409);
+      const changed = await tx.toolFlowNodeRun.updateMany({ where: { id: node.id, status: node.status }, data: {
         status: selected.length ? 'succeeded' : 'cancelled',
         selected_asset_ids: stringify(validSelected),
         output_asset_ids: stringify(validSelected),
@@ -940,7 +1166,8 @@ export async function updateToolFlowRun(user: SessionUser, runId: string, body: 
         finished_at: new Date(),
         error: selected.length ? null : '人工确认取消后续流程',
       } });
-      await tx.toolFlowRun.update({ where: { id: run.id }, data: { status: selected.length ? 'running' : 'cancelled', current_node_id: null, ...(selected.length ? {} : { finished_at: new Date() }) } });
+      if (!changed.count) throw new AuthError('节点状态已变化，请核对原运行，未重复处理。', 409);
+      await tx.toolFlowRun.update({ where: { id: run.id }, data: { status: toolFlowState(run, selected.length ? 'running' : 'cancelled'), current_node_id: null, ...(selected.length ? {} : { finished_at: new Date() }) } });
       await logRunAction(tx, user.id, 'toolflow_decision', run.id, { node_id: nodeId, selected_count: validSelected.length });
     });
     if (selected.length) await advanceToolFlowRun(run.id);
@@ -948,12 +1175,31 @@ export async function updateToolFlowRun(user: SessionUser, runId: string, body: 
   }
   if (action === 'retry') {
     const nodeId = clean(body.node_id || body.nodeId);
-    const node = await prisma.toolFlowNodeRun.findUnique({ where: { run_id_node_id: { run_id: run.id, node_id: nodeId } } });
-    if (!node || !['failed', 'succeeded'].includes(node.status)) throw new AuthError('该节点当前不能重试', 409);
+    const settings = await getImageStudioSettings();
     await prisma.$transaction(async (tx) => {
-      await tx.toolFlowNodeRun.update({ where: { id: node.id }, data: { status: 'pending', error: null } });
-      await tx.toolFlowRun.update({ where: { id: run.id }, data: { status: 'running', finished_at: null, error: null } });
-      await logRunAction(tx, user.id, 'toolflow_node_retry', run.id, { node_id: nodeId });
+      const submitted = body.quote;
+      assertToolFlowQuoteProof(user.id, submitted, quoteProof);
+      const fresh = await tx.toolFlowRun.findUniqueOrThrow({ where: { id: run.id } });
+      const frozen = parseJsonObject(fresh.snapshot_json) as unknown as RunSnapshot;
+      const previousAttempts = frozen.node_attempts?.[nodeId] || [];
+      if (previousAttempts.some(attempt => quoteProofPayload(user.id, attempt.quote) === quoteProofPayload(user.id, submitted))) return;
+      const context = await retryQuoteContext(tx, user, run.id, nodeId);
+      if (await currentImageSettingsRevision(tx) !== settings.revision) throw new AuthError('图片设置已变化，请重新报价', 409);
+      const built = await buildToolFlowQuote(tx, user, { id: run.flow_id, owner_id: user.id, version: run.flow_version,
+        graph_json: stringify(context.snapshot.graph) }, settings, Date.now(), context.retry);
+      const quote = validateSubmittedToolFlowQuote(submitted, built.quote);
+      const contracts = await freezeToolFlowNodes(tx, user, context.snapshot.graph, built, quote, settings, true);
+      const snapshot = { ...context.snapshot, node_attempts: { ...context.snapshot.node_attempts,
+        [nodeId]: previousAttempts.concat(contracts[nodeId]) } };
+      const estimate = addCredits(context.run.estimated_credits || 0, quote.estimatedCredits || 0);
+      const result = parseNodeResult(context.node.result_json);
+      await tx.toolFlowNodeRun.update({ where: { id: context.node.id }, data: { status: toolFlowState(run, 'pending'), error: null,
+        result_json: stringify({ ...result, retryCount: (result.retryCount || 0) + 1 }) } });
+      await reopenUnstartedDescendants(tx, snapshot, run.id, nodeId);
+      const written = await tx.toolFlowRun.update({ where: { id: run.id }, data: { status: toolFlowState(run, 'running'),
+        snapshot_json: stringify(snapshot), estimated_credits: estimate, finished_at: null, error: null } });
+      assertCreditWriteback(written, { estimated_credits: estimate });
+      await logRunAction(tx, user.id, 'toolflow_node_retry', run.id, { node_id: nodeId, estimated_credits: quote.estimatedCredits });
     });
     await advanceToolFlowRun(run.id);
     return getToolFlowRun(user, run.id);
@@ -969,7 +1215,8 @@ export async function completeToolFlowTask(taskId: string) {
   await prisma.$transaction(async (tx) => {
     const run = await tx.toolFlowRun.findUnique({ where: { id: toolFlowRunId } });
     const node = await tx.toolFlowNodeRun.findUnique({ where: { run_id_node_id: { run_id: toolFlowRunId, node_id: toolFlowNodeId } } });
-    if (!run || !node || run.status === 'cancelled') return;
+    if (!run || !node) return;
+    if (run.status === 'cancelled') { await refreshToolFlowCredits(tx, run.id); return; }
     const result = parseNodeResult(node.result_json);
     const successIds = new Set(result.succeededAssetIds || []);
     const failedTaskIds = new Set(result.failedTaskIds || []);
@@ -984,7 +1231,7 @@ export async function completeToolFlowTask(taskId: string) {
       failedTaskIds.add(task.id);
     }
     const tasks = await tx.imageStudioTask.findMany({ where: { tool_flow_run_id: toolFlowRunId, tool_flow_node_id: toolFlowNodeId }, select: { id: true, status: true } });
-    const allDone = tasks.length > 0 && tasks.every((item) => TERMINAL_TASK_STATUSES.has(item.status));
+    const allDone = tasks.length > 0 && tasks.every((item) => TERMINAL_TASK_STATUSES.has(publicPricingTaskState(item.status)));
     await tx.toolFlowNodeRun.update({ where: { id: node.id }, data: {
       output_asset_ids: stringify(Array.from(successIds)),
       result_json: stringify({ ...result, succeededAssetIds: Array.from(successIds), failedTaskIds: Array.from(failedTaskIds) }),
@@ -994,10 +1241,7 @@ export async function completeToolFlowTask(taskId: string) {
         ...(!successIds.size ? { error: '图片生成失败' } : failedTaskIds.size ? { error: '部分图片生成失败，成功结果已保留。' } : {}),
       } : {}),
     } });
-    const creditRows = await tx.imageStudioTask.findMany({ where: { tool_flow_run_id: run.id }, select: { status: true, unit_credits: true } });
-    const frozen = creditRows.filter((item) => ['queued', 'running'].includes(item.status)).reduce((sum, item) => sum + item.unit_credits, 0);
-    const actual = creditRows.filter((item) => item.status === 'succeeded').reduce((sum, item) => sum + item.unit_credits, 0);
-    await tx.toolFlowRun.update({ where: { id: run.id }, data: { frozen_credits: frozen, actual_credits: actual } });
+    await refreshToolFlowCredits(tx, run.id);
   }, { timeout: 30000 });
   await advanceToolFlowRun(toolFlowRunId);
 }

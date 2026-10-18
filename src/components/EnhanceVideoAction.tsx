@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Sparkles } from 'lucide-react';
-import { calculateEnhanceVideoEstimatedCostClient } from '@/lib/pricing-client';
+import { Sparkles, RefreshCcw } from 'lucide-react';
+import { useVideoPricing } from '@/lib/pricing/use-video-pricing';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 
 type EnhanceVideoActionTask = {
@@ -63,15 +63,9 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
     };
   }, [shouldRender]);
 
-  const estimatedCost = useMemo(() => {
-    if (!task.duration) return null;
-    return calculateEnhanceVideoEstimatedCostClient({
-      duration: task.duration,
-      resolution,
-      toolVersion,
-      fps: fps === 'none' ? null : Number(fps),
-    });
-  }, [fps, resolution, task.duration, toolVersion]);
+  const pricing = useVideoPricing({ provider: 'volcengine_mediakit', model: 'enhance-video', duration: task.duration || 0,
+    resolution, toolVersion, fps: fps === 'none' ? null : Number(fps) }, shouldRender && configured === true);
+  const estimatedCost = pricing.quote?.estimatedCost ?? null;
 
   if (!shouldRender) return null;
 
@@ -80,6 +74,7 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
     if (!configured) return 'AI MediaKit 未启用或缺少 API Key';
     if (!task.video_card_id) return '当前任务没有视频卡，不能写入成本闭环';
     if (!task.duration) return '当前任务缺少视频时长，不能估算冻结点数';
+    if (!pricing.quote) return pricing.error || '正在读取报价';
     return '';
   })();
 
@@ -94,6 +89,7 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          ...(pricing.quote?.pricing_revision ? { pricing_revision: pricing.quote.pricing_revision } : {}),
           source_task_id: task.id,
           video_card_id: task.video_card_id,
           tool_version: toolVersion,
@@ -112,6 +108,7 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
       });
       const data = await res.json();
       if (!res.ok) {
+        if (typeof data.code === 'string' && data.code.startsWith('pricing_') || typeof data.error === 'string' && data.error.startsWith('pricing_')) pricing.refresh();
         throw new Error(data.message || data.error || '创建超分任务失败');
       }
       setMessage('已创建超分任务');
@@ -169,6 +166,7 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
       {disabledReason && (
         <div className="enhance-video-action-warning">{disabledReason}</div>
       )}
+      {pricing.error && <button type="button" className="btn-icon" title="重新报价" aria-label="重新报价" onClick={pricing.refresh}><RefreshCcw size={16} aria-hidden="true" /></button>}
       {error && <div className="enhance-video-action-error">{error}</div>}
       {message && <div className="enhance-video-action-success">{message}</div>}
 

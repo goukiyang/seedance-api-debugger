@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { sumCredits } from './precision';
 import { USER_PROFILE_OPTIONS } from '@/lib/users/profiles';
 import { nextQuotaStart, quotaMatches, quotaRevision, quotaWindow, type QuotaAssignment, type QuotaBinding,
   type QuotaCatalog, type QuotaConfig, type QuotaPerson, type QuotaRule } from './periodic-types';
@@ -134,7 +135,8 @@ export async function syncPeriodicQuota(tx: Tx, user: QuotaPerson, now: Date, ca
     return { managed: true, granted: false, problem: '原额度尚未到期，新额度顺延至后续周期' };
   }
   const account = await tx.creditAccount.upsert({ where: { user_id: user.id }, update: {}, create: { user_id: user.id } });
-  const frozen = await tx.creditBucket.aggregate({ where: { user_id: user.id }, _sum: { frozen_amount: true } });
+  const frozen = await tx.creditBucket.findMany({ where: { user_id: user.id }, select: { frozen_amount: true } });
+  const totalFrozen = sumCredits([account.frozen_credits, ...frozen.map(row => row.frozen_amount)]);
   // Keep the existing source type so old task snapshots remain compatible; policy_key identifies the rule.
   const bucket = await tx.creditBucket.create({ data: { user_id: user.id, source_type: 'daily_quota',
     amount_total: period.config.amount, amount_remaining: period.config.amount, expires_at: new Date(period.end),
@@ -142,7 +144,7 @@ export async function syncPeriodicQuota(tx: Tx, user: QuotaPerson, now: Date, ca
     metadata_json: JSON.stringify({ kind: 'periodic', rule_name: period.config.name, revision: period.revision }) } });
   await tx.creditLedger.create({ data: { user_id: user.id, type: 'periodic_grant', amount: period.config.amount,
     balance_before: account.balance, balance_after: account.balance,
-    frozen_before: account.frozen_credits + (frozen._sum.frozen_amount || 0), frozen_after: account.frozen_credits + (frozen._sum.frozen_amount || 0),
+    frozen_before: totalFrozen, frozen_after: totalFrozen,
     idempotency_key: key, reason: `${period.config.name}：本期额度 ${period.config.amount} 点`,
     metadata_json: JSON.stringify({ rule_id: rule.id, policy_key: policyKey, bucket_id: bucket.id, period_start: period.start, period_end: period.end }) } });
   return { managed: true, granted: true };

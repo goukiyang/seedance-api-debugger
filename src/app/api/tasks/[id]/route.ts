@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { recordContentAuditLog } from '@/lib/content-audit';
+import { publicVideoTaskPricing } from '@/lib/pricing/video';
 import {
   normalizeTaskDeleteReason,
   TASK_RETENTION_ADMIN_HIDDEN,
@@ -73,7 +74,7 @@ export async function DELETE(
       return nextTask;
     });
 
-    return NextResponse.json({ success: true, task: updated });
+    return NextResponse.json({ success: true, task: publicVideoTaskPricing(updated) });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

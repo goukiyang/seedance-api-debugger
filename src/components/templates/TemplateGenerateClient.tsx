@@ -8,6 +8,7 @@ import { useSearchParams } from 'next/navigation';
 import { Check, ChevronDown, Folder, Plus, Trash2 } from 'lucide-react';
 import type { AssetCollection, GenerationMode, VideoDuration, VideoRatio, VideoResolution } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
+import { notifyVideoPricingChanged } from '@/lib/pricing-client';
 import type { ComposerSelectOption } from '@/components/ComposerActionBar';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import {
@@ -47,6 +48,7 @@ type CreateResponse = {
 };
 
 type CreateTaskResponse = CreateResponse & {
+  code?: string;
   error?: string;
   message?: string;
   _debug?: object | null;
@@ -307,7 +309,7 @@ export function TemplateGenerateClient() {
         id: H3_INLINE_MODEL_ID,
         label: h3Ready ? 'H3 本地模型' : 'H3 待检查',
         detail: h3Ready
-          ? `本地免费 · ${selectedH3Preset?.label || h3VideoConfig?.default_preset_id || '默认预设'} · ${selectedH3Lora?.label || h3VideoConfig?.default_lora_id || '默认 LoRA'}`
+          ? `本地处理 · ${selectedH3Preset?.label || h3VideoConfig?.default_preset_id || '默认预设'} · ${selectedH3Lora?.label || h3VideoConfig?.default_lora_id || '默认 LoRA'}`
           : `${h3DisabledReason(h3VideoConfig)} · 选择后点检查状态`,
       });
     }
@@ -840,6 +842,8 @@ export function TemplateGenerateClient() {
   }, []);
 
   const handleSubmit = useCallback(async (params: {
+    pricingRevision?: string | null;
+    quotedEstimatedCost?: number;
     prompt: string;
     generationMode: GenerationMode;
     ratio: VideoRatio;
@@ -914,6 +918,8 @@ export function TemplateGenerateClient() {
           'x-tab-id': sessionStorage.getItem('workspace_tab_id') || 'default',
         },
         body: JSON.stringify({
+          ...(params.pricingRevision ? { pricing_revision: params.pricingRevision } : {}),
+          ...(typeof params.quotedEstimatedCost === 'number' ? { max_estimated_cost: params.quotedEstimatedCost } : {}),
           prompt: params.prompt,
           generation_mode: params.generationMode,
           ratio: params.ratio,
@@ -943,6 +949,7 @@ export function TemplateGenerateClient() {
       });
       const data = await readJsonResponse<CreateTaskResponse>(response);
       if (!response.ok) {
+        if (typeof data.code === 'string' && data.code.startsWith('pricing_')) notifyVideoPricingChanged();
         setErrorDebug(data._debug || null);
         throw new Error(data.message || data.error || `创建失败 (HTTP ${response.status})`);
       }
@@ -1222,6 +1229,8 @@ export function TemplateGenerateClient() {
           providerLabel={activeProviderLabel}
           providerOptions={[]}
           selectedProvider={selectedProvider}
+          pricingProvider={selectedProvider}
+          pricingModelId={selectedProvider === 'h3' ? selectedH3Preset?.id || h3VideoConfig?.default_preset_id : undefined}
           providerStatus={h3MachineStatus}
           modelLabel={activeModelLabel}
           modelOptions={activeModelOptions}

@@ -10,8 +10,14 @@ import { prisma } from '@/lib/prisma';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import { getImageStudioSettings } from './settings';
 import { imageBillingScope } from './billing-scope';
-import { fixedImageBillingContract, imageSpecification } from './billing-quote';
-import { imageBillingView, parseImageBillingContract } from './billing-contract';
+import { fixedImageBillingContract, imageSpecification, withPricingImageContract } from './billing-quote';
+import { quotePricingCharge, assertNewPricingCharge } from '@/lib/pricing/charge';
+import { assertNoSynchronousImageAdmission, SynchronousImageAdmissionError } from './synchronous-admission';
+import { withImagePricing } from '@/lib/pricing/image';
+import { creditCents } from '@/lib/credits/precision';
+import { studioTaskState, studioTaskStates, publicPricingTaskState, studioBillingState, isPricingImageTask } from './pricing-state';
+import { assertPricingImageConsumerReady } from '@/lib/pricing/runtime';
+import { imageBillingView, parseImageBillingContract, type ImageBillingContract } from './billing-contract';
 import { consumeImageQuote } from './billing-quote-store';
 import { imageBillingReady } from './billing-readiness';
 import { captureImageGenerationChannel, resolveImageGenerationChannelSnapshot, validateImageGenerationChannel, imageGenerationModelOutputSize, imageGenerationSupportsStudioFourToOne,
@@ -184,6 +190,7 @@ export async function assertSharedStudioWorkerReady(tx: Prisma.TransactionClient
 
 export { ACTIVE_IMAGE_TASK_STATUSES };
 export function publicImageTaskStatus(status: string) {
+  status = publicPricingTaskState(status);
   if (status === 'channel_queued') return 'queued';
   if (status === 'channel_running') return 'running';
   return status;
@@ -300,7 +307,8 @@ export function parseStudioRequest(body: Record<string, unknown>) {
   }
   const maxEstimatedCost = body.maxEstimatedCost;
   if (body.billingQuoteId !== undefined && (typeof body.billingQuoteId !== 'string' || !/^[a-f0-9-]{36}$/.test(body.billingQuoteId))) throw new StudioError('图片报价编号无效');
-  if (maxEstimatedCost !== undefined && (typeof maxEstimatedCost !== 'number' || !Number.isSafeInteger(maxEstimatedCost) || maxEstimatedCost < 0)) throw new StudioError('确认价格无效');
+  if (maxEstimatedCost !== undefined && (typeof maxEstimatedCost !== 'number' || !Number.isFinite(maxEstimatedCost) || maxEstimatedCost < 0 || maxEstimatedCost > 10000000)) throw new StudioError('确认价格无效');
+  if (maxEstimatedCost !== undefined) { try { creditCents(maxEstimatedCost as number); } catch { throw new StudioError('确认价格精度无效'); } }
   if (moduleRevision !== undefined && (!Number.isInteger(moduleRevision) || moduleRevision < 0)) throw new StudioError('模块已更新，请刷新后重试', 409);
   const reproduceFromTaskId = body.reproduceFromTaskId === undefined ? undefined : body.reproduceFromTaskId;
   if (reproduceFromTaskId !== undefined && (typeof reproduceFromTaskId !== 'string' || reproduceFromTaskId.length > 120)) throw new StudioError('历史生成记录无效', 400);
@@ -325,7 +333,7 @@ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] 
   catch { throw new StudioError('历史固定参考图快照无效', 409); }
 }
 
-export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean }, canvasUse?: { user: SessionUser; referenceImageIds: string[] }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission) {
+export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean; frozenContract?: ImageBillingContract }, canvasUse?: { user: SessionUser; referenceImageIds: string[] }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission) {
   if (body.roleMediaContext !== undefined && !roleMedia) throw new StudioError('角色媒体来源只能由原画布确认入口提交', 403);
   if (roleMedia && (roleMedia.user.id !== ownerId || !canvasUse || avatar || preparation)) throw new StudioError('角色媒体必须沿原图片任务创建和扣点流程', 403);
   const roleContextFingerprint = roleMedia ? roleMediaFingerprint(roleMedia.context) : undefined;
@@ -401,6 +409,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       if (!matchesRequest(duplicate)) throw new StudioError('提交编号冲突', 409);
       return;
     }
+    try { await assertNoSynchronousImageAdmission(tx, ownerId, input.requestId); }
+    catch (error) { if (error instanceof SynchronousImageAdmissionError) throw new StudioError(error.message, error.status); throw error; }
     const user = await tx.user.findUnique({ where: { id: ownerId }, select: {
       id: true, role: true, account_type: true, status: true,
       user_profile: true, feature_profile_id: true,
@@ -475,6 +485,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     let imageChannel: ImageGenerationChannelSnapshot | undefined;
     let originalSharedChannel: ImageGenerationChannelSnapshot | undefined;
     let imageApi;
+    let pricingQuote: Awaited<ReturnType<typeof quotePricingCharge>> = null;
+    const acceptedContract = preparation?.frozenContract;
     if (effectiveRequestedChannelId === 'original') {
       // Ordinary legacy tasks keep their existing worker contract; new shared
       // tasks additionally freeze the same private original configuration below.
@@ -491,6 +503,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       imageChannel = input.imageChannel || await captureImageGenerationChannel(generation.model, effectiveRequestedChannelId, tx);
       if (imageChannel.channelId !== effectiveRequestedChannelId) throw new StudioError('图片通道与配置版本不匹配', 409);
       imageApi = await resolveImageGenerationChannelSnapshot(imageChannel, tx, true, generation.model);
+      const priced = await withImagePricing(imageApi, generation.model, tx, acceptedContract);
+      imageApi = priced.settings; pricingQuote = priced.quote;
       const channelCapability = imageApi.modelCapabilities[generation.model as keyof typeof imageApi.modelCapabilities];
       const validation = validateImageGenerationChannel(imageApi, { model: generation.model, quality: generation.quality,
         resolution: effectiveResolution, ratio: effectiveAspectRatio, referenceCount: input.referenceIds.length });
@@ -504,12 +518,21 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         throw new StudioError('同一图片通道与型号尚无有效账单证明，暂不能准备实际计费报价', 409);
       }
     }
+    if (!imageChannel) {
+      const priced = await withImagePricing(imageApi, generation.model, tx, acceptedContract);
+      imageApi = priced.settings; pricingQuote = priced.quote;
+    }
     if(avatar && (input.referenceIds.length ? !imageApi.supports_image_to_image : !imageApi.supports_text_to_image)) throw new StudioError('当前图片通道不支持本次文字或原图参考生成',409);
     if (!isStudioImageGenerationProvider(imageApi.provider) || !isImageGenerationApiReady(imageApi)) {
       throw new StudioError(generation.model.startsWith('gemini-') ? 'Banana 专用通道尚未配置，请管理员在后台 API 设置填写专用 Key' : '图片专用 API 尚未配置', 503);
     }
     const channelCapability = imageChannel ? imageApi.modelCapabilities[generation.model as keyof typeof imageApi.modelCapabilities] : undefined;
     const requestedBillingMode = channelCapability?.billingMode;
+    const billingScope = imageBillingScope(imageApi);
+    const actualBillingEligible = isMuskImageGenerationChannel(imageApi)
+      && new URL(imageApi.base_url).origin === 'https://api.muskapis.com'
+      && (!imageChannel || channelCapability?.billingMode === 'actual' && channelCapability.actualQuoteRequired === true)
+      && (await imageBillingReady(billingScope, generation.model, tx)).ready;
     if (imageChannel && requestedBillingMode === 'actual'
       && (!isMuskImageGenerationChannel(imageApi) || new URL(imageApi.base_url).origin !== 'https://api.muskapis.com')) {
       throw new StudioError('此图片通道没有已验证的实际账单来源，请选择固定点数或原图片通道', 409);
@@ -518,11 +541,15 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       ? channelCapability?.fixedPoints ?? null
       : generation.prices[generation.model];
     if (imageChannel && requestedBillingMode === 'actual') price = 0;
+    if (pricingQuote) price = pricingQuote.credits ?? 0;
+    if (acceptedContract) price = acceptedContract.authorizedCredits;
+    if (pricingQuote && !billingQuoteId && !preparation) throw new StudioError('当前收费规则需要确认有效报价，请重新报价；尚未生成', 409);
     if (imageChannel && requestedBillingMode === 'actual' && !billingQuoteId && !preparation) {
       throw new StudioError('实际计费需先获取并确认同一通道的有效报价', 409);
     }
-    if (price === null || !Number.isInteger(price) || price < 0 || price > 100000) throw new StudioError('管理员尚未设置当前模块的有效生成积分', 409);
-    if (!billingQuoteId && input.maxEstimatedCost !== undefined && price * input.count > input.maxEstimatedCost) throw new StudioError('图片价格已变化，请重新确认点数', 409);
+    if (price === null || !Number.isFinite(price) || (!pricingQuote && !acceptedContract && !Number.isInteger(price)) || price < 0 || price > 100000) throw new StudioError('管理员尚未设置当前模块的有效生成积分', 409);
+    creditCents(price);
+    if (!billingQuoteId && input.maxEstimatedCost !== undefined && sumCredits(Array.from({ length: input.count }, () => price)) > input.maxEstimatedCost) throw new StudioError('图片价格已变化，请重新确认点数', 409);
     let snapshotGlobalContext = avatar ? '' : user.role === 'admin' && input.draft?.globalContext !== undefined ? input.draft.globalContext : settings.context;
     let snapshotModuleContext = input.draft?.moduleContext !== undefined ? input.draft.moduleContext : workspace?.context || '';
     if (sharedDefinition) {
@@ -774,11 +801,6 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const resolution = normalizeImageResolution(generation.model, effectiveResolution, imageApi.provider);
     const outputSize = imageGenerationModelOutputSize(imageApi, generation.model, resolution, resolvedAspectRatio);
     const moduleContextVersion = await bindModuleContextVersion(snapshotModuleContext, tx);
-    const billingScope = imageBillingScope(imageApi);
-    const actualBillingEligible = isMuskImageGenerationChannel(imageApi)
-      && new URL(imageApi.base_url).origin === 'https://api.muskapis.com'
-      && (!imageChannel || channelCapability?.billingMode === 'actual' && channelCapability.actualQuoteRequired === true)
-      && (await imageBillingReady(billingScope, generation.model, tx)).ready;
     if (!preparation && !billingQuoteId && actualBillingEligible) {
       throw new StudioError('当前模型需要确认有效报价，请重新报价后提交；尚未生成', 409);
     }
@@ -791,6 +813,13 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
           imageChannel: imageChannel || originalSharedChannel || input.imageChannel || null,
           revision: settings.revision, moduleRevision: sharedDefinition ? undefined : workspace?.revision,
           ...(sharedDefinition ? { sharedLive: sharedDefinition.intent } : {}) })).digest('hex') }) });
+    if (pricingQuote) billingContract = withPricingImageContract(billingContract, pricingQuote.charge, price);
+    if (acceptedContract) {
+      const frozen = parseImageBillingContract(JSON.stringify(acceptedContract));
+      if (!frozen || frozen.scope !== billingScope || frozen.model !== generation.model
+        || frozen.specification !== billingContract.specification) throw new StudioError('父批次冻结合同与当前原始输入不匹配，未创建子项', 409);
+      billingContract = frozen;
+    }
     if (billingQuoteId) {
       if (preparation) throw new StudioError('批量准备不能沿用已确认的单次报价', 409);
       try {
@@ -800,7 +829,9 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
           ...(sharedDefinition ? { sharedLive: sharedDefinition.intent } : {}) });
       } catch { throw new StudioError('实扣报价已过期、被使用或参数已变化，请重新报价', 409); }
       price = billingContract.authorizedCredits;
-      if (input.maxEstimatedCost === undefined || price * input.count > input.maxEstimatedCost) throw new StudioError('请先确认本次预估及最高扣点授权', 409);
+      if (Boolean(pricingQuote) !== Boolean(billingContract.pricing)) throw new StudioError('收费合同已变化，请重新报价；未沿旧报价生成', 409);
+      if (billingContract.pricing) await assertNewPricingCharge(billingContract.pricing, body.pricingRevision, tx);
+      if (input.maxEstimatedCost === undefined || sumCredits(Array.from({ length: input.count }, () => price)) > input.maxEstimatedCost) throw new StudioError('请先确认本次预估及最高扣点授权', 409);
     }
     const fingerprint = imageChannel
       ? createHash('sha256').update(`${requestFingerprint}\0${imageChannel.channelId}\0${imageChannel.configRevision}`).digest('hex')
@@ -857,19 +888,19 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         moduleRevision: workspace?.revision ?? null,
     });
     for (let i = 0; i < input.count; i++) {
-      const id = `${batchId}-${i}`;
+      const id = `${billingContract.pricing ? 'rate-' : ''}${batchId}-${i}`;
       const candidate = sheet ? undefined : avatar?.candidates[i];
       const taskPrompt = candidate?.prompt || input.prompt;
       const freeze = !preparation && price > 0 ? await allocateTaskCredits(tx, user, price, id) : null;
       const taskData: Prisma.ImageStudioTaskUncheckedCreateInput = {
         id, batch_id: batchId, owner_id: ownerId, module_id: moduleId as string | undefined, source_preset_id: sourcePresetId, ordinal: i + 1, fingerprint,
         billing_mode: billingContract.mode, billing_scope: billingScope,
-        billing_contract_json: JSON.stringify(billingContract), billing_status: imageChannel ? 'channel_awaiting_response' : 'awaiting_response',
+        billing_contract_json: JSON.stringify(billingContract), billing_status: studioBillingState({ billing_contract_json: JSON.stringify(billingContract) }, imageChannel ? 'channel_awaiting_response' : 'awaiting_response'),
         billing_deadline: billingContract.mode === 'actual' ? new Date(billingContract.deadline!) : null,
         prompt: taskPrompt, context, revision: settings.revision, model: generation.model,
         quality: generation.quality,
         provider_cost_usd: imageChannel ? null : IMAGE_STUDIO_MODEL_COST_USD[generation.model as keyof typeof IMAGE_STUDIO_MODEL_COST_USD],
-        status: imageChannel ? 'channel_queued' : 'queued',
+        status: studioTaskState({ billing_contract_json: JSON.stringify(billingContract) }, imageChannel ? 'channel_queued' : 'queued'),
         snapshot_json: sheet ? JSON.stringify({ ...JSON.parse(snapshot), avatarLayout: avatar!.layout, avatar: { layout: avatar!.layout, cells: avatar!.candidates } }) : candidate ? JSON.stringify({ ...JSON.parse(snapshot), prompt: taskPrompt, avatar: candidate }) : snapshot,
         aspect_ratio: aspectRatio, output_size: outputSize,
         reference_ids: JSON.stringify(orderedReferenceIds), unit_credits: price, freeze_snapshot: freeze?.snapshot,
@@ -894,20 +925,20 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
 
 export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded' | 'failed' | 'uncertain', data: { assetId?: string; preparedAsset?: Prisma.AssetUncheckedCreateInput; retainedAsset?: Prisma.AssetUncheckedCreateInput; error?: string; usage?: unknown } = {}, transaction?: Prisma.TransactionClient) {
   const finish = async (tx: Prisma.TransactionClient) => {
-    const recovering = task.status === 'uncertain';
+    const recovering = publicPricingTaskState(task.status) === 'uncertain';
     const retainedMismatch = Boolean(data.retainedAsset && studioDimensionMismatch({ status, usage_json: JSON.stringify(data.usage) }));
     if (data.retainedAsset && !retainedMismatch) throw new Error('Retained output requires a proven dimension mismatch');
     if (recovering && status === 'uncertain' && !retainedMismatch) return false;
     const recovery = recovering ? await import('./async-recovery') : null;
     if (recovery && !await recovery.studioAsyncRecoveryLease(tx, task)) return false;
-    const activeStatus = recovering ? 'uncertain' : task.status === 'channel_running' ? 'channel_running' : 'running';
-    const channel = activeStatus === 'channel_running' || recovering;
+    const activeStatus = studioTaskState(task, recovering ? 'uncertain' : publicPricingTaskState(task.status) === 'channel_running' ? 'channel_running' : 'running');
+    const channel = publicPricingTaskState(activeStatus) === 'channel_running' || recovering;
     // Complete the same recovery CAS before changing task state; both roll back
     // with asset/ledger settlement if any later step fails.
     if (recovery && (status !== 'uncertain' || retainedMismatch)) await recovery.completeStudioAsyncRecovery(tx, task);
     const changed = await tx.imageStudioTask.updateMany({
       where: { id: task.id, status: activeStatus, lease_token: task.lease_token, lease_until: { gt: new Date() } },
-      data: { status, asset_id: data.assetId, error: status === 'succeeded' ? null : data.error, usage_json: data.usage ? JSON.stringify(data.usage) : undefined,
+      data: { status: studioTaskState(task, status), asset_id: data.assetId, error: status === 'succeeded' ? null : data.error, usage_json: data.usage ? JSON.stringify(data.usage) : undefined,
         lease_until: null, lease_token: null, finished_at: new Date() },
     });
     if (!changed.count) { if (recovery) throw new Error('async_recovery_finish_lease_lost'); return false; }
@@ -922,23 +953,24 @@ export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded
     }
     // A channel request with an unknown result must remain visible and retain
     // its original reservation. It is not permission to refund or re-submit.
-    if (channel && status === 'uncertain') return true;
+    if ((channel || isPricingImageTask(task)) && status === 'uncertain') return true;
     const billing = parseImageBillingContract(task.billing_contract_json);
+    if (isPricingImageTask(task) && !billing?.pricing) throw new Error('新版图片原收费合同无法确认，已停止结算');
     if (task.billing_mode === 'actual') {
       if (!billing || billing.mode !== 'actual' || billing.scope !== task.billing_scope
         || billing.authorizedCredits !== task.unit_credits) throw new Error('图片收费合同无效');
       if (status === 'succeeded') {
-        await tx.imageStudioTask.update({ where: { id: task.id }, data: { billing_status: channel ? 'channel_pending' : 'pending',
+        await tx.imageStudioTask.update({ where: { id: task.id }, data: { billing_status: studioBillingState(task, channel ? 'channel_pending' : 'pending'),
           billing_deadline: new Date(billing.deadline!), billing_next_check_at: new Date() } });
         return true;
       }
     }
     if (task.billing_mode !== 'actual' && channel) {
-      await tx.imageStudioTask.update({ where: { id: task.id }, data: { billing_status: status === 'succeeded' ? 'channel_confirmed' : 'channel_provider_loss',
+      await tx.imageStudioTask.update({ where: { id: task.id }, data: { billing_status: studioBillingState(task, status === 'succeeded' ? 'channel_confirmed' : 'channel_provider_loss'),
         billing_next_check_at: null } });
     } else if (task.billing_mode === 'actual' && channel) {
       const persisted = await tx.imageStudioTask.findUnique({ where: { id: task.id }, select: { gateway_request_id: true } });
-      await tx.imageStudioTask.update({ where: { id: task.id }, data: { billing_status: persisted?.gateway_request_id ? 'channel_pending' : 'channel_unmatched',
+      await tx.imageStudioTask.update({ where: { id: task.id }, data: { billing_status: studioBillingState(task, persisted?.gateway_request_id ? 'channel_pending' : 'channel_unmatched'),
         billing_next_check_at: new Date() } });
     }
     if (task.unit_credits === 0) {
@@ -969,16 +1001,19 @@ export async function claimStudioTask() {
   let cursor: string | undefined;
   let candidate: ImageStudioTask | undefined;
   for (;;) {
-    const candidates = await prisma.imageStudioTask.findMany({ where: { status: { in: ['queued', 'channel_queued'] } },
+    const candidates = await prisma.imageStudioTask.findMany({ where: { status: { in: studioTaskStates(['queued', 'channel_queued']) } },
       orderBy: [{ created_at: 'asc' }, { id: 'asc' }], take: 32, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
     for (const row of candidates) {
+      if (isPricingImageTask(row)) {
+        try { await assertPricingImageConsumerReady(prisma); } catch { continue; }
+      }
       try { assertFrozenSharedStudioTask(row); }
       catch {
         const message = '任务快照或共享模板协议无法确认；原任务与费用预留保留，请管理员核对，未请求生成';
         if (row.error !== message) await prisma.imageStudioTask.updateMany({ where: { id: row.id, status: row.status }, data: { error: message } });
         continue;
       }
-      if (row.status === 'channel_queued') {
+      if (publicPricingTaskState(row.status) === 'channel_queued') {
         try {
           const snapshot = safeImageChannelSnapshot(JSON.parse(row.snapshot_json || '{}').imageChannel);
           if (!snapshot) throw new Error('missing_channel');
@@ -986,7 +1021,7 @@ export async function claimStudioTask() {
           await assertImageGenerationChannelDispatchOpen(snapshot);
         } catch (error) {
           const message = error instanceof ImageGenerationChannelError ? error.message : '原图片配置暂不能读取；任务与预留保留，请管理员核对或取消未受理任务';
-          if (row.error !== message) await prisma.imageStudioTask.updateMany({ where: { id: row.id, status: 'channel_queued' }, data: { error: message } });
+          if (row.error !== message) await prisma.imageStudioTask.updateMany({ where: { id: row.id, status: row.status }, data: { error: message } });
           continue;
         }
       }
@@ -997,10 +1032,11 @@ export async function claimStudioTask() {
   }
   if (!candidate) return null;
   const leaseToken = randomUUID();
-  const channel = candidate.status === 'channel_queued';
+  const channel = publicPricingTaskState(candidate.status) === 'channel_queued';
+  const runningStatus = studioTaskState(candidate, channel ? 'channel_running' : 'running');
   const changed = await prisma.imageStudioTask.updateMany({ where: { id: candidate.id, status: candidate.status },
-    data: { status: channel ? 'channel_running' : 'running', lease_token: leaseToken, lease_until: new Date(Date.now() + 10 * 60 * 1000) } });
-  return changed.count ? { ...candidate, status: channel ? 'channel_running' : 'running', lease_token: leaseToken } : null;
+    data: { status: runningStatus, lease_token: leaseToken, lease_until: new Date(Date.now() + 10 * 60 * 1000) } });
+  return changed.count ? { ...candidate, status: runningStatus, lease_token: leaseToken } : null;
 }
 
 /** Cancel only a provably unattempted explicit-channel task; accepted receipts never mean a refund. */
@@ -1009,15 +1045,15 @@ export async function cancelQueuedChannelTask(ownerId: string, id: string, clien
     const task = await tx.imageStudioTask.findFirst({ where: { id, owner_id: ownerId } });
     if (!task) throw new StudioError('图片任务不存在或无权操作', 404);
     if (task.status === 'cancelled') return false;
-    if (task.status !== 'channel_queued') throw new StudioError('只能取消尚未向供应商请求的通道排队任务；已有受理或未知结果请核对原记录', 409);
+    if (publicPricingTaskState(task.status) !== 'channel_queued') throw new StudioError('只能取消尚未向供应商请求的通道排队任务；已有受理或未知结果请核对原记录', 409);
     const { readStudioRequestReceipt, readStudioAsyncReceipt } = await import('./delivery');
     const receipt = await readStudioRequestReceipt(task);
     if (receipt && receipt.dispatchState !== 'held' || await readStudioAsyncReceipt(task)) {
       throw new StudioError('任务已有请求或受理凭据，不能以取消释放预留；未停止供应商，也未重新生成', 409);
     }
-    const changed = await tx.imageStudioTask.updateMany({ where: { id, owner_id: ownerId, status: 'channel_queued' },
+    const changed = await tx.imageStudioTask.updateMany({ where: { id, owner_id: ownerId, status: task.status },
       data: { status: 'cancelled', error: '本人取消了未向供应商请求的排队任务；原记录保留', finished_at: new Date(),
-        lease_token: null, lease_until: null, billing_status: 'channel_cancelled', billing_next_check_at: null } });
+        lease_token: null, lease_until: null, billing_status: studioBillingState(task, 'channel_cancelled'), billing_next_check_at: null } });
     if (!changed.count) throw new StudioError('任务已开始执行，请重新读取；没有确认取消或退款', 409);
     if (task.unit_credits > 0) {
       const settlement = await settleTaskCredits(tx, { taskId: id, userId: ownerId, terminalStatus: 'failed',

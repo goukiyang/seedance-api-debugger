@@ -25,6 +25,7 @@ import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import { defaultStudioModuleId } from '@/lib/image-studio/modules';
 import { StudioError, submitStudioBatch } from '@/lib/image-studio/tasks';
 import { prepareImageBillingQuote } from '@/lib/image-studio/billing-quote-service';
+import { withImagePricing } from '@/lib/pricing/image';
 import { assertImageStudioAdmissionOpen, reserveImageStudioQueueCapacity, QueueMaintenanceError, QueueCapacityError } from '@/lib/image-studio/queue-capacity';
 import { createSynchronousImageAdmission, finishSynchronousImageAdmission, SynchronousImageAdmissionError } from '@/lib/image-studio/synchronous-admission';
 import { attachAssetToSiteReferenceImage, ReferenceImportError } from '@/lib/assets/reference-import';
@@ -409,9 +410,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '当前图片接口不支持所选模型，请重新选择' }, { status: 400 });
       }
     }
-    const imageChannel = effectiveChannelId === 'original' ? undefined : await captureImageGenerationChannel(selectedModel, effectiveChannelId);
-    const settings = imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, selectedModel)
+    let imageChannel = effectiveChannelId === 'original' ? undefined : await captureImageGenerationChannel(selectedModel, effectiveChannelId);
+    const rawSettings = imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, selectedModel)
       : selectImageGenerationSettings(channels, selectedModel);
+    const priced = IMAGE_STUDIO_MODELS.includes(selectedModel as ImageStudioModel)
+      ? await withImagePricing(rawSettings, selectedModel) : { settings: rawSettings, quote: null };
+    const settings = priced.settings;
+    if (priced.quote && !imageChannel) imageChannel = await captureImageGenerationChannel(selectedModel, 'original');
     const modelLabel = imageGenerationModelLabel(settings.provider, settings.default_model);
     const referenceLimit = settings.provider === 'seedream'
       ? SEEDREAM_REFERENCE_IMAGE_LIMIT
@@ -494,7 +499,7 @@ export async function POST(request: NextRequest) {
       const submission = { requestId, channelId, imageChannel: body.imageChannel || imageChannel,
         revision: body.settingsRevision ?? studio.revision, prompt: rawPrompt, count,
         referenceIds: referenceImages.map(image => image.asset_id!), model: selectedModel, quality,
-        resolution, aspectRatio: requestedRatio, billingQuoteId: body.billingQuoteId, maxEstimatedCost: body.maxEstimatedCost };
+        resolution, aspectRatio: requestedRatio, billingQuoteId: body.billingQuoteId, pricingRevision: body.pricingRevision, maxEstimatedCost: body.maxEstimatedCost };
       const canvasUse = { user, referenceImageIds };
       const referenceAssets = Object.fromEntries(referenceImages.map(image => [image.id, image.asset_id!]));
       const promptBinding = mentions ? { mentions, referenceAssets } : undefined;

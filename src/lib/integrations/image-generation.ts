@@ -2084,6 +2084,10 @@ export async function saveImageApiGroupForm(input: Record<string, unknown>, acto
         const patch = modelPatch[model];
         if (!isRecord(patch)) continue;
         const current = modelCapabilities[model];
+        if (patch.billingMode !== undefined && patch.billingMode !== (current?.billingMode ?? null)
+          || patch.fixedPoints !== undefined && patch.fixedPoints !== (current?.fixedPoints ?? null)) {
+          throw new ImageGenerationChannelError('收费已统一到点数定价页面；API 设置不能另写价格，请刷新后台', 409, 'pricing_legacy_writer_rejected');
+        }
         const capability = parseManagedCapabilities({ [model]: { ...current, ...patch } }, source.copyId,
           group === 'banana' ? 'gemini_native' : 'openai_images')[model];
         if (!capability) throw new ImageGenerationChannelError(`型号 ${model} 缺少合法协议，输入未保存`);
@@ -2388,7 +2392,16 @@ async function saveManagedRecord(
       : input.protocol === 'gemini_native' || input.protocol === 'openai_images'
         ? input.protocol
         : existing?.protocol || 'openai_images';
-    const modelsInput = operation === 'create' ? input.models ?? {} : input.models ?? existing?.modelCapabilities ?? {};
+    const suppliedModels = operation === 'create' ? input.models ?? {} : input.models ?? existing?.modelCapabilities ?? {};
+    const modelsInput = isRecord(suppliedModels) ? Object.fromEntries(Object.entries(suppliedModels).map(([model, value]) => {
+      if (!isRecord(value)) return [model, value];
+      const previousCapability = previous?.modelCapabilities[model as ImageStudioModel];
+      if (value.billingMode !== undefined && value.billingMode !== (previousCapability?.billingMode ?? null)
+        || value.fixedPoints !== undefined && value.fixedPoints !== (previousCapability?.fixedPoints ?? null)) {
+        throw new ImageGenerationChannelError('收费已统一到点数定价页面；API 设置不能另写价格，请刷新后台', 409, 'pricing_legacy_writer_rejected');
+      }
+      return [model, { ...value, billingMode: previousCapability?.billingMode ?? null, fixedPoints: previousCapability?.fixedPoints ?? null }];
+    })) : suppliedModels;
     const modelCapabilities = operation === 'archive' || operation === 'restore'
       ? existing!.modelCapabilities
       : parseManagedCapabilities(modelsInput, id, protocol);

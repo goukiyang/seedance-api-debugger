@@ -26,6 +26,8 @@
         quotePromise: null,
         quoteRequestKey: '',
         quoteExpiryTimer: null,
+        retryQuotes: new Map(),
+        retryBusy: new Set(),
         bound: false,
     };
 
@@ -383,7 +385,21 @@
     }
 
     function setRun(run) {
+        if (run?.id !== state.run?.id) {
+            state.retryQuotes.clear();
+            try {
+                const saved = JSON.parse(localStorage.getItem(retryStorageKey(run)) || '{}');
+                Object.entries(saved).forEach(([nodeId, value]) => {
+                    if (value?.pending && value.quote?.retryRunId === run?.id && value.quote?.retryNodeId === nodeId) state.retryQuotes.set(nodeId, value);
+                });
+            } catch { /* A missing hint never recreates or submits a request. */ }
+        }
         state.run = run || null;
+        const receipts = parseJson(run?.snapshot_json).retry_receipts || {};
+        state.retryQuotes.forEach((value, nodeId) => {
+            if ((receipts[nodeId] || []).some(quote => quote.expiresAt === value.quote?.expiresAt
+                && quote.steps?.[0]?.contractDigest === value.quote?.steps?.[0]?.contractDigest)) state.retryQuotes.delete(nodeId);
+        });
         try {
             if (run?.id) localStorage.setItem('ultimate-canvas:toolflow-run', run.id);
             else localStorage.removeItem('ultimate-canvas:toolflow-run');
@@ -538,6 +554,14 @@
     function nodeRun(run, status) { return (run?.node_runs || []).find(node => node.status === status); }
     function allActive(run) { return run && ['queued', 'running', 'waiting_selection', 'waiting_confirmation', 'paused'].includes(run.status); }
 
+    function retryStorageKey(run = state.run) { return `ultimate-canvas:toolflow-retry:${run?.owner_id || ''}:${run?.id || ''}`; }
+
+    function saveRetrySubmissions() {
+        const pending = Object.fromEntries([...state.retryQuotes].filter(([, value]) => value.pending));
+        if (Object.keys(pending).length) localStorage.setItem(retryStorageKey(), json(pending));
+        else localStorage.removeItem(retryStorageKey());
+    }
+
     function renderRun(run) {
         const approval = panel()?.querySelector('[data-toolflow-approval]');
         const nodeResults = panel()?.querySelector('[data-toolflow-node-results]');
@@ -554,9 +578,18 @@
                 const result = parseJson(node.result_json);
                 return ['failed', 'succeeded'].includes(node.status) && (node.status === 'failed' || (result.failedTaskIds || []).length);
             });
-            nodeResults.innerHTML = retryable.length
-                ? retryable.map(node => `<div class="toolflow-node-result"><span>节点 ${escapeHtml(node.node_id)} 有失败图片</span><button type="button" class="context-command" data-toolflow-retry="${escapeHtml(node.node_id)}">重试</button></div>`).join('')
-                : '';
+            const snapshot = parseJson(run.snapshot_json);
+            const acceptedRetries = Object.values(snapshot.retry_receipts || {}).flat();
+            const retryTotalCents = acceptedRetries.reduce((total, quote) => total + Math.round(Number(quote.estimatedCredits || 0) * 100), 0);
+            const costLine = snapshot.billing_quote ? `<div class="toolflow-node-result"><span>原受理约 ${escapeHtml(snapshot.billing_quote.estimatedCredits)} 点${acceptedRetries.length ? ` · 新重试另计约 ${escapeHtml(retryTotalCents / 100)} 点` : ''}</span></div>` : '';
+            nodeResults.innerHTML = costLine + retryable.map(node => {
+                const retry = state.retryQuotes.get(node.node_id);
+                const quote = retry?.quote;
+                const step = quote?.steps?.[0];
+                const ready = quote && Date.parse(quote.expiresAt) > Date.now();
+                const label = retry?.pending ? '核对原提交' : ready ? `重试 ${step.count} 张 · ${quote.estimatedCredits} 点` : '重新报价';
+                return `<div class="toolflow-node-result"><span>节点 ${escapeHtml(node.node_id)} 有失败图片${retry?.pending ? ' · 提交结果待确认' : ''}</span><button type="button" class="context-command" data-toolflow-retry="${escapeHtml(node.node_id)}" ${state.retryBusy.has(node.node_id) ? 'disabled' : ''}>${escapeHtml(label)}</button></div>`;
+            }).join('');
         }
         const waiting = run.node_runs?.find(node => node.status === 'waiting_selection' || node.status === 'waiting_confirmation');
         if (!approval || !waiting) { if (approval) approval.hidden = true; return; }
@@ -647,6 +680,54 @@
         if (!state.run?.id) return;
         try { const result = await request(`/api/tools/ultimate-canvas/flows/runs/${encodeURIComponent(state.run.id)}`, { method: 'PATCH', body: json({ action, ...extra }) }); setRun(result.run); if (allActive(result.run)) schedulePoll(); }
         catch (error) { notice(error.message, 'error'); setState(error.message, 'error'); }
+    }
+
+    async function retryNode(nodeId) {
+        const run = state.run;
+        if (!run?.id || state.retryBusy.has(nodeId)) return;
+        const previous = state.retryQuotes.get(nodeId);
+        if (previous?.pending) {
+            await refreshRun();
+            notice('正在核对原提交；不会重新发送生成请求。', 'info');
+            return;
+        }
+        state.retryBusy.add(nodeId);
+        renderRun(run);
+        let submitting = false;
+        try {
+            if (!previous?.quote || Date.parse(previous.quote.expiresAt) <= Date.now()) {
+                const query = new URLSearchParams({ retryRunId: run.id, retryNodeId: nodeId });
+                const quote = await request(`/api/tools/ultimate-canvas/flows/${encodeURIComponent(run.flow_id)}/quote?${query}`, { cache: 'no-store' });
+                if (state.run?.id !== run.id) return;
+                if (quote.retryRunId !== run.id || quote.retryNodeId !== nodeId || quote.estimatedCredits === null
+                    || quote.steps?.length !== 1 || quote.steps[0].status !== 'fixed') throw new Error('尚未取得有效重试报价，原任务不变。');
+                state.retryQuotes.set(nodeId, { quote, pending: false });
+                return;
+            }
+            const quote = previous.quote;
+            state.retryQuotes.set(nodeId, { quote, pending: true });
+            saveRetrySubmissions();
+            submitting = true;
+            const result = await request(`/api/tools/ultimate-canvas/flows/runs/${encodeURIComponent(run.id)}`, {
+                method: 'PATCH', body: json({ action: 'retry', node_id: nodeId, quote }),
+            });
+            state.retryQuotes.delete(nodeId);
+            saveRetrySubmissions();
+            setRun(result.run);
+            if (allActive(result.run)) schedulePoll();
+        } catch (error) {
+            if (!submitting || error.status === 400 || error.status === 409) {
+                state.retryQuotes.delete(nodeId);
+                try { saveRetrySubmissions(); } catch { /* No new request was authorized by this error. */ }
+                notice(error.message || '重试报价不可用，原任务不变。', 'warn');
+            } else {
+                notice('提交结果待确认，请核对原提交；不会自动重新生成。', 'warn');
+                await refreshRun();
+            }
+        } finally {
+            state.retryBusy.delete(nodeId);
+            renderRun(state.run);
+        }
     }
 
     function addFlowNodeDefaults(node) {
@@ -1043,7 +1124,7 @@
             if (event.target.closest('[data-toolflow-pause]')) updateRun('pause');
             if (event.target.closest('[data-toolflow-resume]')) updateRun('resume');
             const retry = event.target.closest('[data-toolflow-retry]');
-            if (retry) updateRun('retry', { node_id: retry.dataset.toolflowRetry });
+            if (retry) retryNode(retry.dataset.toolflowRetry);
         });
         document.addEventListener('click', event => {
             if (root.contains(event.target)) return;

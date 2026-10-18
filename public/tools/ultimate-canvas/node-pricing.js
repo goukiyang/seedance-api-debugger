@@ -6,6 +6,19 @@
     const MAX_NODES = 128;
     const MAX_CONCURRENT = 4;
     let mounted = null;
+    const validCredits = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 10000000
+        && Math.abs(value * 100 - Math.round(value * 100)) <= Math.min(0.00001, Number.EPSILON * Math.max(1, value * 100) * 4);
+    const formatCredits = value => validCredits(value) ? String(Math.round(value * 100) / 100) : '待确认';
+    const fullQuoteRequired = quote => quote?.actualQuoteRequired === true || quote?.pricingQuoteRequired === true;
+    function validFullQuote(quote, projection, now = Date.now()) {
+        return validCredits(quote?.estimatedCredits) && validCredits(quote?.unitCredits)
+            && (quote.creditPrecision !== 0.1 || Math.round(quote.unitCredits * 100) % 10 === 0 && Math.round(quote.estimatedCredits * 100) % 10 === 0)
+            && typeof quote?.billingQuoteId === 'string' && quote.billingQuoteId.length > 0
+            && Date.parse(quote.expiresAt) > now && quote.revision === projection?.revision
+            && (quote.billingMode === 'actual' && quote.actualChargeEnabled === true || quote.billingMode === 'fixed'
+                && typeof quote.pricingRevision === 'string' && quote.pricingRevision.length > 0)
+            && (!projection?.pricingRevision || projection.pricingRevision === quote.pricingRevision);
+    }
 
     function mount({ requestJson, getNodeSettings, getProjectId, getBootstrap,
         getQuoteSnapshot = () => '', onActualQuoteRequired = null, onQuoteInvalidated = null }) {
@@ -48,7 +61,7 @@
                 || quote.model !== state.payload.model || quote.count !== state.payload.count
                 || quote.status !== 'estimate' || quote.chargeEnabled !== false
                 || quote.actualQuoteRequired !== false
-                || !Number.isSafeInteger(quote.estimatedCredits) || quote.estimatedCredits < 0
+                || !validCredits(quote.estimatedCredits)
                 || !Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= Date.now()) return null;
             if (state.payload.channelId) {
                 const channel = quote.imageChannel;
@@ -75,42 +88,10 @@
                 slot.textContent = '费用待估算';
                 footer.after(slot);
             }
-            if (style) {
-                const actualExpiresAt = Date.parse(state.actualQuote?.expiresAt);
-                if (state.quote?.actualQuoteRequired === true) {
-                    const amount = state.actualQuote?.billingMode === 'actual'
-                        && state.actualQuote.actualChargeEnabled === true
-                        && Number.isFinite(actualExpiresAt) && actualExpiresAt > Date.now()
-                        && Number.isFinite(state.actualQuote.estimatedCredits) && state.actualQuote.estimatedCredits >= 0
-                        ? Math.ceil(state.actualQuote.estimatedCredits) : null;
-                    slot.textContent = Number.isSafeInteger(amount) ? `合计约 ${amount} 点数` : '费用待估算';
-                } else if (state.payload?.channelId) {
-                    const quote = currentQuote(state.id);
-                    const amount = state.quote?.actualQuoteRequired === false ? quote?.estimatedCredits : null;
-                    slot.textContent = Number.isSafeInteger(amount) && amount >= 0
-                        ? `合计约 ${amount} 点数` : '费用待估算';
-                } else {
-                    const total = style.unitCredits * style.count;
-                    slot.textContent = state.quote?.actualQuoteRequired === false && Number.isSafeInteger(style.unitCredits)
-                        && style.unitCredits >= 0 && Number.isSafeInteger(style.count) && style.count > 0
-                        && Number.isSafeInteger(total) ? `合计约 ${total} 点数` : '费用待估算';
-                }
-                return;
-            }
-            if (state.quote?.actualQuoteRequired === true) {
-                const amount = state.actualQuote?.billingMode === 'actual'
-                    && state.actualQuote.actualChargeEnabled === true
-                    && Date.parse(state.actualQuote.expiresAt) > Date.now()
-                    && Number.isFinite(state.actualQuote.estimatedCredits) && state.actualQuote.estimatedCredits >= 0
-                    ? Math.ceil(state.actualQuote.estimatedCredits) : null;
-                slot.textContent = Number.isSafeInteger(amount) ? `合计约 ${amount} 点数` : '费用待估算';
-                return;
-            }
-            const credits = state.quote?.actualQuoteRequired === false
-                && state.quote?.status === 'estimate' && state.quote.chargeEnabled === false
-                && Number.isFinite(state.quote.estimatedCredits) && state.quote.estimatedCredits >= 0
-                ? Math.ceil(state.quote.estimatedCredits) : null;
-            slot.textContent = Number.isSafeInteger(credits) ? `合计约 ${credits} 点数` : '费用待估算';
+            const credits = fullQuoteRequired(state.quote)
+                ? validFullQuote(state.actualQuote, state.quote) ? state.actualQuote.estimatedCredits : null
+                : currentQuote(state.id)?.estimatedCredits;
+            slot.textContent = validCredits(credits) ? `合计约 ${formatCredits(credits)} 点数` : '费用待估算';
         }
 
         function paint(state) {
@@ -276,13 +257,11 @@
                     state.validUntil = Math.min(Date.parse(quote.expiresAt), Date.now() + 60000);
                     if (state.validUntil <= Date.now()) throw new Error('Expired estimate response');
                     paint(state);
-                    if (quote.actualQuoteRequired && quote.status === 'estimate' && onActualQuoteRequired) {
+                    if (fullQuoteRequired(quote) && quote.status === 'estimate' && onActualQuoteRequired) {
                         const actualQuote = await onActualQuoteRequired(state.node, quote);
                         if (!usable(state) || state.version !== version || inputFor(state.node).key !== key) return;
                         const actualExpiry = Date.parse(actualQuote?.expiresAt);
-                        if (actualQuote?.billingMode === 'actual' && actualQuote.actualChargeEnabled === true
-                            && Number.isFinite(actualQuote.estimatedCredits) && actualQuote.estimatedCredits >= 0
-                            && Number.isFinite(actualExpiry) && actualExpiry > Date.now()) {
+                        if (validFullQuote(actualQuote, quote)) {
                             state.actualQuote = actualQuote;
                             state.actualQuoteTimer = setTimeout(() => {
                                 if (state.version !== version) return;
@@ -382,7 +361,7 @@
             dispose,
             actualQuoteRequired(nodeId) {
                 const quote = states.get(String(nodeId))?.quote;
-                return typeof quote?.actualQuoteRequired === 'boolean' ? quote.actualQuoteRequired : null;
+                return typeof quote?.actualQuoteRequired === 'boolean' ? fullQuoteRequired(quote) : null;
             },
             imageChannel(nodeId) {
                 const state = states.get(String(nodeId));
@@ -423,6 +402,7 @@
     }
 
     root.UltimateCanvasNodePricing = {
+        validCredits, formatCredits, fullQuoteRequired, validFullQuote,
         mount,
         refresh(nodeEl, node) { mounted?.refresh(nodeEl, node); },
         actualQuoteRequired(nodeId) { return mounted?.actualQuoteRequired(nodeId) ?? null; },

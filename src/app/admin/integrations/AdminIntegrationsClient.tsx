@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import PageBanner from '@/components/PageBanner';
+import Link from 'next/link';
 import { useProductDialog } from '@/components/useProductDialog';
 import { useSettingsPageSubmit } from '@/lib/hooks/use-settings-page-submit';
 import { RelativeTime } from '@/components/RelativeTime';
@@ -904,6 +905,7 @@ export default function AdminIntegrationsClient() {
         eyebrow="管理后台"
         title="API 设置"
         description="在这里维护火山 IP 生成、AI MediaKit 超分、Musk API、图形生成 API、Codex API 和外部工具调用配置，生成任务才能进入同一套扣费与后台留痕。"
+        actions={<Link className="btn btn-secondary" href="/admin/pricing">点数与费率</Link>}
       />
 
       <div className="stats-grid">

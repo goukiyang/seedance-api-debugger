@@ -1,4 +1,5 @@
 import type { VideoResolution, VideoDuration } from '@/types';
+import type { FrozenPricingCharge } from '@/lib/pricing/charge';
 import {
   DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
   seedanceVideoModelInternalMultiplier,
@@ -25,6 +26,8 @@ export interface PricingSnapshot {
   formula: string;
   pricingRuleId: string;
   pricingRuleVersion: number;
+  pricingPolicyRevision?: string;
+  pricingCharge?: FrozenPricingCharge;
 }
 
 export interface EnhanceVideoPricingSnapshot extends PricingSnapshot {

@@ -1,9 +1,9 @@
 import type { Prisma } from '@prisma/client';
-import fs from 'node:fs';
-import path from 'node:path';
 import { countSynchronousImageAdmissions } from './synchronous-admission';
+import { studioTaskStates } from './pricing-state';
+import { isImageStudioDraining } from '@/lib/pricing/isolation';
 
-export const ACTIVE_IMAGE_TASK_STATUSES = ['queued', 'running', 'channel_queued', 'channel_running'] as const;
+export const ACTIVE_IMAGE_TASK_STATUSES = studioTaskStates(['queued', 'running', 'channel_queued', 'channel_running']);
 
 export class QueueCapacityError extends Error {
   readonly code = 'image_queue_capacity';
@@ -27,7 +27,7 @@ export class QueueMaintenanceError extends Error {
 
 /** Shared drain marker is visible to the web process and compatible image worker. */
 export function assertImageStudioAdmissionOpen() {
-  if (fs.existsSync(path.join(process.cwd(), 'storage', 'image-studio-drain'))) throw new QueueMaintenanceError();
+  if (isImageStudioDraining()) throw new QueueMaintenanceError();
 }
 
 /** Pure shared capacity rule used by every image-task producer. */

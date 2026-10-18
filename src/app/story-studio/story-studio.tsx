@@ -2,6 +2,8 @@
 import { studioOutputMismatchDisposition } from '@/lib/image-studio/dimension-mismatch';
 
 import { MultiviewEntry } from '@/components/MultiviewEntry';
+import { validVideoPricingAmount } from '@/lib/pricing-client';
+import { sumCredits } from '@/lib/credits/precision';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -662,27 +664,41 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
       && (!IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[settings.imageModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS]?.includes(settings.quality as never)
         || !imageResolutionOptions(settings.imageModel).includes(settings.resolution as never))) throw Error('当前图片模型不支持所选质量或分辨率，请重新选择');
     if (kind === 'video' && !mediaCapabilities?.video.model_options.some(item => item.value === settings.videoModel && item.provider === settings.provider && item.ready && item.resolutions.includes(settings.videoResolution))) throw Error('视频模型未就绪或参数不受支持，请重新选择');
-    const quotes = await Promise.all(selected.map(async shot => {
+    const prepareQuote = async (shot: StoryShot) => {
       if (kind === 'image') {
         const quote = await request<{ status: string; estimatedCredits: number; revision: number; imageChannel?: ImageGenerationChannelSnapshot }>('/api/tools/ultimate-canvas/quote', { kind: 'image', project_id: documentRef.current!.project_id, model: settings.imageModel, channelId: imageChannel.channelId, count: 1, quality: settings.quality, resolution: settings.resolution, ratio: settings.ratio });
-        if (quote.status !== 'estimate' || !Number.isSafeInteger(quote.estimatedCredits) || quote.estimatedCredits < 0) throw Error('图片报价不可用，未派发');
+        if (quote.status !== 'estimate' || !validVideoPricingAmount(quote.estimatedCredits)) throw Error('图片报价不可用，未派发');
         if (!legacyImageRoute && (quote.imageChannel?.channelId !== effectiveImageChannelId || !quote.imageChannel.configRevision)) throw Error('生图通道配置已变化，未能绑定到当前报价；尚未派发');
-        return { shot, price: quote.estimatedCredits, revision: quote.revision, imageChannel: quote.imageChannel };
+        await imageDraft(shot);
+        const { referenceIds, referencePolicy } = imageReferences(shot);
+        const input = { requestId: crypto.randomUUID(), moduleId: current.current.images[shot.id].moduleId,
+          revision: quote.revision, prompt: storyGenerationPrompt(shot, 'image'), count: 1, referenceIds,
+          draft: { referencePolicy }, model: settings.imageModel, channelId: imageChannel.channelId,
+          ...(quote.imageChannel ? { imageChannel: quote.imageChannel } : {}), quality: settings.quality,
+          resolution: settings.resolution, aspectRatio: settings.ratio };
+        const billing = await request<{ billingMode: 'fixed' | 'actual'; billingQuoteId: string | null;
+          estimatedCredits: number; expiresAt: string; pricingRevision?: string; imageChannel?: ImageGenerationChannelSnapshot }>('/api/image-studio/quote', input);
+        if (!validVideoPricingAmount(billing.estimatedCredits) || !Number.isFinite(Date.parse(billing.expiresAt))
+          || Date.parse(billing.expiresAt) <= Date.now() || (billing.billingMode === 'actual' || billing.pricingRevision) && !billing.billingQuoteId) throw Error('图片报价未确认，未派发');
+        const imageInput = { ...input, ...(billing.imageChannel ? { imageChannel: billing.imageChannel } : {}),
+          billingQuoteId: billing.billingQuoteId, pricingRevision: billing.pricingRevision,
+          maxEstimatedCost: billing.estimatedCredits };
+        return { shot, price: billing.estimatedCredits, pricingRevision: billing.pricingRevision,
+          imageInput, expiresAt: billing.expiresAt, actual: billing.billingMode === 'actual' };
       }
-      const quote = await request<{ estimatedCost: number }>(`/api/tasks/estimate?${new URLSearchParams({ provider: settings.provider, model: settings.videoModel, resolution: settings.videoResolution, duration: String(shot.durationSeconds) })}`);
-      if (!Number.isSafeInteger(quote.estimatedCost) || quote.estimatedCost < 0) throw Error('视频报价不可用，未派发');
-      return { shot, price: quote.estimatedCost, revision: 0 };
-    }));
-    const total = quotes.reduce((sum, item) => sum + item.price, 0);
-    if (!Number.isSafeInteger(total) || !await confirm(`${quotes.map(item => `${item.shot.title}：${item.price} 点`).join('\n')}\n本次 ${selected.length} ${kind === 'image' ? '张图片' : '个视频'}，合计 ${total} 点。已成功或受理未知的任务不重跑。`, { title: kind === 'image' ? '生成分镜图' : '生成视频', confirmLabel: `确认 ${total} 点` })) return;
-    for (const { shot, price, revision, imageChannel: imageChannelSnapshot } of quotes) {
+      const quote = await request<{ estimatedCost: number; pricing_revision: string | null }>(`/api/tasks/estimate?${new URLSearchParams({ provider: settings.provider, model: settings.videoModel, resolution: settings.videoResolution, duration: String(shot.durationSeconds) })}`);
+      if (!validVideoPricingAmount(quote.estimatedCost) || quote.pricing_revision !== null && typeof quote.pricing_revision !== 'string') throw Error('视频报价不可用，未派发');
+      return { shot, price: quote.estimatedCost, pricingRevision: quote.pricing_revision, imageInput: undefined, expiresAt: undefined, actual: false };
+    };
+    const quotes: Awaited<ReturnType<typeof prepareQuote>>[] = [];
+    for (const shot of selected) quotes.push(await prepareQuote(shot));
+    const total = sumCredits(quotes.map(item => item.price));
+    if (!validVideoPricingAmount(total) || !await confirm(`${quotes.map(item => `${item.shot.title}：${item.actual ? '最高预留 ' : ''}${item.price} 点`).join('\n')}\n本次 ${selected.length} ${kind === 'image' ? '张图片' : '个视频'}，合计${quotes.some(item => item.actual) ? '最高授权' : ''} ${total} 点。已成功或受理未知的任务不重跑。`, { title: kind === 'image' ? '生成分镜图' : '生成视频', confirmLabel: `确认 ${total} 点` })) return;
+    for (const { shot, price, pricingRevision, imageInput, expiresAt } of quotes) {
       if (!storyGenerationPrompt(shot, kind).trim()) throw Error(`${shot.title}缺少生成要求，后续项未派发`);
       if (kind === 'image') {
-        await imageDraft(shot);
-        const moduleId = current.current.images[shot.id].moduleId;
-        const { referenceIds, referencePolicy } = imageReferences(shot);
-        const input = { requestId: crypto.randomUUID(), moduleId, revision, prompt: storyGenerationPrompt(shot, 'image'), count: 1,
-          referenceIds, draft: { referencePolicy }, model: settings.imageModel, channelId: imageChannel.channelId, ...(imageChannelSnapshot ? { imageChannel: imageChannelSnapshot } : {}), quality: settings.quality, resolution: settings.resolution, aspectRatio: settings.ratio, maxEstimatedCost: price };
+        if (!imageInput || !expiresAt || Date.parse(expiresAt) <= Date.now()) throw Error('图片报价已过期，请重新报价并确认；后续项未派发');
+        const input = imageInput;
         change({ ...current.current, imageRuns: { ...current.current.imageRuns, [shot.id]: { requestId: input.requestId, status: 'unconfirmed', input } } });
         let sent = false;
         try {
@@ -710,6 +726,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
           reference_image_ids: Array.from(new Set(references.map(item => item.referenceImageId).filter(Boolean))),
           idempotency_key: `${videoId}:${requestId}`, source_request_id: `ultimate_canvas:${videoId}:${requestId}`,
           client_name: 'ultimate_canvas', final_prompt_snapshot: storyGenerationPrompt(shot, 'video'), prompt_user_edited: true, max_estimated_cost: price,
+          ...(pricingRevision ? { pricing_revision: pricingRevision } : {}),
           source_metadata: { source: 'ultimate_canvas', provider: settings.provider, canvas_document_id: documentId, canvas_node_id: videoId, mode: references.length ? 'image-to-video' : 'text-to-video' } };
         const generationPayload = { kind: 'video', nodeId: videoId, requestId, prompt: input.prompt, settings: { model: settings.videoModel, provider: settings.provider, ratio: settings.ratio, duration: shot.durationSeconds, resolution: settings.videoResolution }, mode: references.length ? 'image-to-video' : 'text-to-video' };
         change({ ...current.current, videoRuns: { ...current.current.videoRuns, [shot.id]: { requestId, status: 'unconfirmed', provider: settings.provider } } });

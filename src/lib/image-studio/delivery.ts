@@ -7,6 +7,7 @@ import { openStudioImageStream, classifyStudioDownloadError, StudioImageDownload
 import { studioGenerationDetailSuperseded } from './delivery-display';
 import { cleanupStudioResponseEvidence } from './response-evidence';
 import { studioOutputMismatch as studioDimensionMismatch, studioTaskHasViewableOutput } from './dimension-mismatch';
+import { publicPricingTaskState, studioBillingState, studioTaskStates } from './pricing-state';
 
 const root = () => path.join(process.cwd(), 'storage', 'studio-delivery');
 let lastCleanup = 0;
@@ -149,7 +150,7 @@ export async function recordStudioResponse(task: Identity, response: Response) {
     const changed = await prisma.imageStudioTask.updateMany({ where: { id: task.id, owner_id: task.owner_id,
       billing_scope: receipt.billingScope, OR: [{ gateway_request_id: null }, { gateway_request_id: receipt.gatewayRequestId || null }] },
       data: { gateway_request_id: receipt.gatewayRequestId || null,
-        billing_status: `${receipt.channelId ? 'channel_' : ''}${receipt.gatewayRequestId ? 'pending' : 'unmatched'}`, billing_next_check_at: new Date() } });
+        billing_status: studioBillingState(task, `${receipt.channelId ? 'channel_' : ''}${receipt.gatewayRequestId ? 'pending' : 'unmatched'}`), billing_next_check_at: new Date() } });
     if (!changed.count) throw new Error('Billing receipt identity conflict');
   }
 }
@@ -178,6 +179,7 @@ export async function updateStudioDelivery(record: StudioDelivery, changes: Part
   Object.assign(record, changes); await save(record);
 }
 export async function studioDeliveryStatus(task: Identity & { status: string; usage_json?: string | null; asset_id?: string | null }) {
+  const status = publicPricingTaskState(task.status);
   const record = await readStudioDelivery(task).catch(() => null);
   let receipt: StudioReceipt | null = null;
   try { receipt = await readStudioRequestReceipt(task); } catch {}
@@ -185,21 +187,21 @@ export async function studioDeliveryStatus(task: Identity & { status: string; us
   if (task.status === 'succeeded' || studioDimensionMismatch(task)) {
     try { completed = JSON.parse(task.usage_json || '{}').studioDelivery || {}; } catch {}
   }
-  const running = task.status === 'running' || task.status === 'channel_running';
+  const running = status === 'running' || status === 'channel_running';
   let asyncReceipt: StudioAsyncReceipt | null = null;
   if ('snapshot_json' in task) asyncReceipt = await readStudioAsyncReceipt(task as AsyncIdentity).catch(() => null);
   // The recovery record is identity-bound and contains no provider URL or key.
   // A financial unknown is not an active generation and does not reopen POST.
-  const asyncRecovery = task.status === 'uncertain' && !studioTaskHasViewableOutput(task) && 'snapshot_json' in task
+  const asyncRecovery = status === 'uncertain' && !studioTaskHasViewableOutput(task) && 'snapshot_json' in task
     ? await (await import('./async-recovery')).readStudioAsyncRecovery(task as import('@prisma/client').ImageStudioTask).catch(() => null)
     : null;
-  return { phase: task.status === 'queued' || task.status === 'channel_queued' ? 'queued' : task.status === 'succeeded' || studioTaskHasViewableOutput(task) ? 'ready'
-    : running ? record?.phase || 'provider' : record ? 'stopped' : task.status === 'uncertain' ? 'unknown' : 'failed',
+  return { phase: status === 'queued' || status === 'channel_queued' ? 'queued' : status === 'succeeded' || studioTaskHasViewableOutput(task) ? 'ready'
+    : running ? record?.phase || 'provider' : record ? 'stopped' : status === 'uncertain' ? 'unknown' : 'failed',
     accepted: Boolean(asyncReceipt),
     acceptedAt: asyncReceipt && Number.isFinite(asyncReceipt.acceptedAt) && asyncReceipt.acceptedAt > 0 ? asyncReceipt.acceptedAt : undefined,
     waitingStatus: asyncReceipt && ['pending', 'retrying', 'unconfirmed'].includes(asyncReceipt.waitingStatus || '') ? asyncReceipt.waitingStatus : undefined,
     ...(asyncRecovery ? { asyncRecovery } : {}),
-    generationDetailSuperseded: studioGenerationDetailSuperseded(task.status, record, asyncReceipt),
+    generationDetailSuperseded: studioGenerationDetailSuperseded(status, record, asyncReceipt),
     receivedBytes: record?.receivedBytes, expectedBytes: record?.expectedBytes,
     recoveryAvailable: running && Boolean(asyncReceipt && asyncReceipt.state !== 'failed' || record && studioDeliveryCanRetry(record)),
     checkpointRetained: Boolean(record), validation: record?.validation || completed.validation,
@@ -407,10 +409,10 @@ export async function cleanupStudioDeliveries(now = Date.now()) {
     const stat = await fs.stat(dir);
     // Keep expired records long enough for a worker to settle; remove abandoned files within one day.
     if (now - stat.mtimeMs > STUDIO_CHECKPOINT_RETENTION_MS) {
-      const active = await prisma.imageStudioTask.findFirst({ where: { id: entry.name, status: { in: ['queued', 'running', 'channel_queued', 'channel_running'] } }, select: { id: true } });
+      const active = await prisma.imageStudioTask.findFirst({ where: { id: entry.name, status: { in: studioTaskStates(['queued', 'running', 'channel_queued', 'channel_running']) } }, select: { id: true } });
       if (!active) {
         const task = await prisma.imageStudioTask.findUnique({ where: { id: entry.name } });
-        if (task?.status === 'uncertain') {
+        if (task && publicPricingTaskState(task.status) === 'uncertain') {
           try {
             if (await (await import('./async-recovery')).retainStudioAsyncCheckpoint(task)) continue;
           } catch {

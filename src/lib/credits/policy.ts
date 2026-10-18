@@ -1,6 +1,7 @@
 import type { Prisma, User } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { syncPeriodicQuota, periodicUserState, refreshQuotaMembership } from './periodic';
+import { addCredits, subtractCredits, sumCredits, creditCents, normalizeCredits, assertCreditWriteback } from './precision';
 
 export const CREDIT_POLICY_KEY = 'credit_policy_v1';
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
@@ -191,11 +192,11 @@ async function ensureCreditAccount(tx: Tx, userId: string) {
 }
 
 async function sumBucketFrozen(tx: Tx, userId: string) {
-  const result = await tx.creditBucket.aggregate({
+  const result = await tx.creditBucket.findMany({
     where: { user_id: userId, frozen_amount: { gt: 0 } },
-    _sum: { frozen_amount: true },
+    select: { frozen_amount: true },
   });
-  return result._sum.frozen_amount || 0;
+  return sumCredits(result.map(bucket => bucket.frozen_amount));
 }
 
 export async function grantInitialCredits(
@@ -214,12 +215,13 @@ export async function grantInitialCredits(
   if (existing) return { amount: 0, skipped: true };
 
   const account = await ensureCreditAccount(tx, user.id);
-  const balanceAfter = account.balance + amount;
+  const balanceAfter = addCredits(account.balance, amount);
 
-  await tx.creditAccount.update({
+  const written = await tx.creditAccount.update({
     where: { user_id: user.id },
     data: { balance: balanceAfter },
   });
+  assertCreditWriteback(written, { balance: balanceAfter });
 
   await tx.creditLedger.create({
     data: {
@@ -269,7 +271,7 @@ export async function expireUserCreditBuckets(tx: Tx, userId: string, now = new 
 
   const account = await ensureCreditAccount(tx, userId);
   const bucketFrozen = await sumBucketFrozen(tx, userId);
-  const totalFrozen = account.frozen_credits + bucketFrozen;
+  const totalFrozen = addCredits(account.frozen_credits, bucketFrozen);
 
   for (const bucket of expiredBuckets) {
     await tx.creditBucket.update({
@@ -347,8 +349,8 @@ export async function ensureDailyQuotaBucket(tx: Tx, user: CreditPolicyUser, now
       amount,
       balance_before: account.balance,
       balance_after: account.balance,
-      frozen_before: account.frozen_credits + bucketFrozen,
-      frozen_after: account.frozen_credits + bucketFrozen,
+      frozen_before: addCredits(account.frozen_credits, bucketFrozen),
+      frozen_after: addCredits(account.frozen_credits, bucketFrozen),
       reason: `每日配额发放 ${amount} 点`,
       idempotency_key: `daily_quota_grant:${bucket.id}`,
       metadata_json: JSON.stringify({
@@ -380,25 +382,25 @@ export async function readCreditSummary(tx: Tx | typeof prisma, userId: string, 
     },
   });
   const usable = buckets.filter(bucket => bucket.status === 'active' && (!bucket.expires_at || bucket.expires_at > now));
-  const dailyRemaining = usable.reduce((total, bucket) => total + bucket.amount_remaining, 0);
-  const dailyFrozen = buckets.reduce((total, bucket) => total + bucket.frozen_amount, 0);
-  const longAvailable = Math.max(0, account.balance - account.frozen_credits);
+  const dailyRemaining = sumCredits(usable.map(bucket => bucket.amount_remaining));
+  const dailyFrozen = sumCredits(buckets.map(bucket => bucket.frozen_amount));
+  const longAvailable = Math.max(0, subtractCredits(account.balance, account.frozen_credits));
   const local = new Date(now.getTime() + SHANGHAI_OFFSET_MS);
   const monthStart = new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), 1) - SHANGHAI_OFFSET_MS);
-  const used = await tx.creditLedger.aggregate({ where: { user_id: userId, type: 'task_success_deduct', created_at: { gte: monthStart, lte: now } }, _sum: { amount: true } });
+  const used = await tx.creditLedger.findMany({ where: { user_id: userId, type: 'task_success_deduct', created_at: { gte: monthStart, lte: now } }, select: { amount: true } });
 
   return {
-    account: { ...account, monthly_used: Math.max(0, -(used._sum.amount || 0)) },
+    account: { ...account, monthly_used: Math.max(0, -sumCredits(used.map(entry => entry.amount))) },
     daily_remaining: dailyRemaining,
     daily_frozen: dailyFrozen,
-    daily_total: usable.reduce((total, bucket) => total + bucket.amount_total, 0),
+    daily_total: sumCredits(usable.map(bucket => bucket.amount_total)),
     daily_expires_at: usable
       .map((bucket) => bucket.expires_at)
       .filter((value): value is Date => Boolean(value))
       .sort((a, b) => a.getTime() - b.getTime())[0] || null,
     long_available: longAvailable,
-    available: longAvailable + dailyRemaining,
-    frozen_credits: account.frozen_credits + dailyFrozen,
+    available: addCredits(longAvailable, dailyRemaining),
+    frozen_credits: addCredits(account.frozen_credits, dailyFrozen),
     buckets: buckets.map(bucket => {
       let name = '每日额度';
       if (bucket.policy_key?.startsWith('periodic:')) {
@@ -419,6 +421,7 @@ export async function allocateTaskCredits(
   taskId: string,
 ) {
   if (!Number.isFinite(amount) || amount <= 0) throw new Error('冻结点数必须为有效正数');
+  amount = normalizeCredits(amount);
   const now = new Date();
   await ensureDailyQuotaBucket(tx, user, now);
   const account = await ensureCreditAccount(tx, user.id);
@@ -434,22 +437,23 @@ export async function allocateTaskCredits(
   });
 
   const bucketFrozenBefore = await sumBucketFrozen(tx, user.id);
-  const totalFrozenBefore = account.frozen_credits + bucketFrozenBefore;
+  const totalFrozenBefore = addCredits(account.frozen_credits, bucketFrozenBefore);
   let remaining = amount;
   const allocations: CreditFreezeAllocation[] = [];
 
   for (const bucket of activeBuckets) {
     if (remaining <= 0) break;
-    const used = Math.min(bucket.amount_remaining, remaining);
+    const used = normalizeCredits(Math.min(bucket.amount_remaining, remaining));
     if (used <= 0) continue;
 
-    await tx.creditBucket.update({
+    const written = await tx.creditBucket.update({
       where: { id: bucket.id },
       data: {
-        amount_remaining: bucket.amount_remaining - used,
-        frozen_amount: bucket.frozen_amount + used,
+        amount_remaining: subtractCredits(bucket.amount_remaining, used),
+        frozen_amount: addCredits(bucket.frozen_amount, used),
       },
     });
+    assertCreditWriteback(written, { amount_remaining: subtractCredits(bucket.amount_remaining, used), frozen_amount: addCredits(bucket.frozen_amount, used) });
 
     allocations.push({
       source_type: 'daily_quota',
@@ -459,23 +463,24 @@ export async function allocateTaskCredits(
       quota_date: bucket.quota_date,
       expires_at: bucket.expires_at?.toISOString() || null,
     });
-    remaining -= used;
+    remaining = subtractCredits(remaining, used);
   }
 
-  const longAvailable = account.balance - account.frozen_credits;
-  if (remaining > longAvailable) {
-    throw new Error(`点数不足，需要 ${amount} 点，当前可用 ${Math.floor(amount - remaining + Math.max(0, longAvailable))} 点`);
+  const longAvailable = subtractCredits(account.balance, account.frozen_credits);
+  if (creditCents(remaining) > creditCents(longAvailable)) {
+    throw new Error(`点数不足，需要 ${amount} 点，当前可用 ${addCredits(subtractCredits(amount, remaining), Math.max(0, longAvailable))} 点`);
   }
 
   if (remaining > 0) {
-    await tx.creditAccount.update({
+    const written = await tx.creditAccount.update({
       where: { user_id: user.id },
-      data: { frozen_credits: account.frozen_credits + remaining },
+      data: { frozen_credits: addCredits(account.frozen_credits, remaining) },
     });
+    assertCreditWriteback(written, { frozen_credits: addCredits(account.frozen_credits, remaining) });
     allocations.push({ source_type: 'balance', amount: remaining });
   }
 
-  const totalFrozenAfter = totalFrozenBefore + amount;
+  const totalFrozenAfter = addCredits(totalFrozenBefore, amount);
   return {
     allocations,
     balance_before: account.balance,
@@ -496,7 +501,7 @@ function parseFreezeSnapshot(value: string | null | undefined, fallbackAmount: n
       || !Number.isFinite(item.amount) || item.amount <= 0 || (item.source_type === 'daily_quota' && typeof item.bucket_id !== 'string'))) {
       throw new Error('冻结来源未知，已停止结算，请核对');
     }
-    if (Math.abs(parsed.reduce((sum, item) => sum + item.amount, 0) - fallbackAmount) > 0.00001) throw new Error('冻结金额不一致，已停止结算');
+    if (creditCents(sumCredits(parsed.map(item => item.amount))) !== creditCents(fallbackAmount)) throw new Error('冻结金额不一致，已停止结算');
     return parsed;
   }
   // Only historical tasks without a snapshot may fall back to the long-term account.
@@ -517,15 +522,14 @@ export async function settleTaskCredits(
   const account = await ensureCreditAccount(tx, input.userId);
   const allocations = parseFreezeSnapshot(input.freezeSnapshot, input.frozenAmount);
   const bucketFrozenBefore = await sumBucketFrozen(tx, input.userId);
-  const totalFrozenBefore = account.frozen_credits + bucketFrozenBefore;
+  const totalFrozenBefore = addCredits(account.frozen_credits, bucketFrozenBefore);
   const now = new Date();
   const succeeded = input.terminalStatus === 'succeeded';
   if (input.actualCost !== undefined && (!succeeded && input.actualCost !== 0 || !Number.isFinite(input.actualCost)
-    || input.actualCost < 0 || input.actualCost > input.frozenAmount
-    || Math.abs(input.actualCost * 100 - Math.round(input.actualCost * 100)) > 0.00001)) {
+    || input.actualCost < 0 || creditCents(input.actualCost) > creditCents(input.frozenAmount))) {
     throw new Error('实际扣点超过原预留或精度无效，已停止结算');
   }
-  let remainingCost = succeeded ? input.actualCost ?? input.frozenAmount : 0;
+  let remainingCost = normalizeCredits(succeeded ? input.actualCost ?? input.frozenAmount : 0);
 
   let longAmount = 0;
   let longConsumed = 0;
@@ -534,32 +538,32 @@ export async function settleTaskCredits(
   let bucketReleasedAmount = 0;
 
   for (const allocation of allocations) {
-    const consumed = Math.min(allocation.amount, remainingCost);
-    remainingCost = Math.max(0, remainingCost - consumed);
-    const unused = allocation.amount - consumed;
+    const consumed = normalizeCredits(Math.min(allocation.amount, remainingCost));
+    remainingCost = Math.max(0, subtractCredits(remainingCost, consumed));
+    const unused = subtractCredits(allocation.amount, consumed);
     if (allocation.source_type === 'balance') {
-      longAmount += allocation.amount;
-      longConsumed += consumed;
-      refundedAmount += unused;
+      longAmount = addCredits(longAmount, allocation.amount);
+      longConsumed = addCredits(longConsumed, consumed);
+      refundedAmount = addCredits(refundedAmount, unused);
       continue;
     }
 
     if (!allocation.bucket_id) throw new Error('冻结来源缺少额度编号');
     const bucket = await tx.creditBucket.findUnique({ where: { id: allocation.bucket_id } });
-    if (!bucket || bucket.user_id !== input.userId || bucket.frozen_amount + 0.00001 < allocation.amount) throw new Error('冻结额度归属或金额异常，已停止结算');
+    if (!bucket || bucket.user_id !== input.userId || creditCents(bucket.frozen_amount) < creditCents(allocation.amount)) throw new Error('冻结额度归属或金额异常，已停止结算');
 
-    const release = Math.min(bucket.frozen_amount, allocation.amount);
-    bucketReleasedAmount += release;
+    const release = normalizeCredits(Math.min(bucket.frozen_amount, allocation.amount));
+    bucketReleasedAmount = addCredits(bucketReleasedAmount, release);
     const isStillUsable = bucket.status === 'active' && (!bucket.expires_at || bucket.expires_at > now);
-    const nextFrozen = Math.max(0, bucket.frozen_amount - release);
+    const nextFrozen = Math.max(0, subtractCredits(bucket.frozen_amount, release));
     const nextRemaining = isStillUsable
-      ? bucket.amount_remaining + unused
+      ? addCredits(bucket.amount_remaining, unused)
       : bucket.amount_remaining;
 
-    if (isStillUsable) refundedAmount += unused;
-    if (!isStillUsable) expiredClosedAmount += unused;
+    if (isStillUsable) refundedAmount = addCredits(refundedAmount, unused);
+    if (!isStillUsable) expiredClosedAmount = addCredits(expiredClosedAmount, unused);
 
-    await tx.creditBucket.update({
+    const written = await tx.creditBucket.update({
       where: { id: bucket.id },
       data: {
         frozen_amount: nextFrozen,
@@ -569,28 +573,31 @@ export async function settleTaskCredits(
           : bucket.status,
       },
     });
+    assertCreditWriteback(written, { frozen_amount: nextFrozen, amount_remaining: nextRemaining });
   }
 
-  const totalAmount = allocations.reduce((total, item) => total + item.amount, 0);
-  if (input.actualCost !== undefined && (remainingCost > 0.00001 || account.frozen_credits + 0.00001 < longAmount
-    || account.balance + 0.00001 < longConsumed)) throw new Error('原预留来源不足，已停止结算');
+  const totalAmount = sumCredits(allocations.map(item => item.amount));
+  if (creditCents(remainingCost) > 0 || creditCents(account.frozen_credits) < creditCents(longAmount)
+    || creditCents(account.balance) < creditCents(longConsumed)) throw new Error('原预留来源不足，已停止结算');
   const actualCost = succeeded ? input.actualCost ?? totalAmount : 0;
-  const longFrozenAfter = Math.max(0, account.frozen_credits - longAmount);
-  const balanceAfter = account.balance - longConsumed;
-  const bucketFrozenAfter = Math.max(0, bucketFrozenBefore - bucketReleasedAmount);
-  const totalFrozenAfter = longFrozenAfter + bucketFrozenAfter;
+  const longFrozenAfter = Math.max(0, subtractCredits(account.frozen_credits, longAmount));
+  const balanceAfter = subtractCredits(account.balance, longConsumed);
+  const bucketFrozenAfter = Math.max(0, subtractCredits(bucketFrozenBefore, bucketReleasedAmount));
+  const totalFrozenAfter = addCredits(longFrozenAfter, bucketFrozenAfter);
 
-  await tx.creditAccount.update({
+  const written = await tx.creditAccount.update({
     where: { user_id: input.userId },
     data: succeeded
       ? {
           balance: balanceAfter,
           frozen_credits: longFrozenAfter,
-          monthly_used: account.monthly_used + actualCost,
-          total_used: account.total_used + actualCost,
+          monthly_used: addCredits(account.monthly_used, actualCost),
+          total_used: addCredits(account.total_used, actualCost),
         }
       : { frozen_credits: longFrozenAfter },
   });
+  assertCreditWriteback(written, { balance: balanceAfter, frozen_credits: longFrozenAfter,
+    ...(succeeded ? { monthly_used: addCredits(account.monthly_used, actualCost), total_used: addCredits(account.total_used, actualCost) } : {}) });
 
   if (expiredClosedAmount > 0) {
     await tx.creditLedger.create({

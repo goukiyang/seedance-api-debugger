@@ -7,6 +7,7 @@ import { getImageGenerationSettingsForModel, resolveImageGenerationChannelSnapsh
 import { matchImageSupplierCharge, readImageSupplierBills } from '@/lib/image-studio/billing-provider';
 import { settleImageSupplierCharge } from '@/lib/image-studio/billing';
 import { IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
+import { publicPricingBillingState } from '@/lib/image-studio/pricing-state';
 
 export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
@@ -33,7 +34,8 @@ export async function POST(request: NextRequest) {
     if (body.action !== 'record-late-provider-cost' || typeof body.taskId !== 'string' || body.taskId.length > 120)
       return NextResponse.json({ error: '请选择需要核对迟到账单的图片任务' }, { status: 400 });
     const task = await prisma.imageStudioTask.findUnique({ where: { id: body.taskId } });
-    const publicBillingStatus = task?.billing_status.startsWith('channel_') ? task.billing_status.slice('channel_'.length) : task?.billing_status;
+    const billingStatus = task ? publicPricingBillingState(task.billing_status) : undefined;
+    const publicBillingStatus = billingStatus?.startsWith('channel_') ? billingStatus.slice('channel_'.length) : billingStatus;
     if (!task?.billing_scope || !task.gateway_request_id || !publicBillingStatus || !['manual', 'conflict', 'deadline_expired', 'unmatched'].includes(publicBillingStatus))
       return NextResponse.json({ error: '该任务不属于已退出自动结算的可核对任务' }, { status: 409 });
     const snapshot = JSON.parse(task.snapshot_json || '{}');

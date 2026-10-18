@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import Link from 'next/link';
 import { X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import styles from '@/components/ProductDialog.module.css';
@@ -10,7 +11,7 @@ import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import { STUDIO_RATIOS } from '@/lib/image-studio/ratios';
 import { imageApiGroupModels, imageApiGroupModelMissingRequirements, type ImageApiGroup, type ImageApiGroupSettings, type ImageApiGroupProviderDto, type ImageApiGroupModelDto } from '@/lib/integrations/image-generation-channel';
 
-type ModelPatch = Partial<Pick<ImageApiGroupModelDto, 'enabled' | 'protocol' | 'upstreamModel' | 'baseUrl' | 'qualities' | 'resolutions' | 'ratios' | 'maxReferences' | 'billingMode' | 'fixedPoints'>> & { apiKey?: string; clearApiKey?: boolean };
+type ModelPatch = Partial<Pick<ImageApiGroupModelDto, 'enabled' | 'protocol' | 'upstreamModel' | 'baseUrl' | 'qualities' | 'resolutions' | 'ratios' | 'maxReferences'>> & { apiKey?: string; clearApiKey?: boolean };
 type EditableGroupSettings = Pick<ImageApiGroupSettings, 'label' | 'supplierName' | 'provider' | 'baseUrl'>;
 export type ImageApiGroupDraft = { apiKey: string; clearApiKey: boolean; enabled: boolean; settings: Partial<EditableGroupSettings>; models: Partial<Record<ImageStudioModel, ModelPatch>> };
 type Props = {
@@ -157,8 +158,8 @@ export default function ImageApiGroupEditor({ group, provider, draft, busy, pend
               </fieldset>;
             })}
             {field('参考图上限', <input className={styles.input} type="number" min={0} max={MAX_REFERENCE_IMAGES} step={1} value={value.maxReferences ?? ''} placeholder="未确认" onChange={event => modelChange(model, { maxReferences: event.target.value === '' ? null : Number(event.target.value) })} />)}
-            {field('计费方式', <select className={styles.input} value={value.billingMode || ''} onChange={event => modelChange(model, { billingMode: event.target.value === '' ? null : event.target.value as 'fixed' | 'actual' })}><option value="">未确认</option><option value="fixed">固定点数</option><option value="actual">实际费用（需精确账单证明）</option></select>)}
-            {value.billingMode === 'fixed' && field('固定点数', <input className={styles.input} type="number" min={0} step={1} value={value.fixedPoints ?? ''} placeholder="未确认；0 表示明确免费" onChange={event => modelChange(model, { fixedPoints: event.target.value === '' ? null : Number(event.target.value) })} />)}
+            <div className={styles.message}>收费统一在<Link href={`/admin/pricing?channelId=${encodeURIComponent(provider.channelId || provider.id)}&search=${encodeURIComponent(model)}`}>点数与费率</Link>查看和修改。此处保存不改费率。</div>
+            <details><summary>旧收费配置留存（只读）</summary><p className={styles.message}>{current?.billingMode === 'actual' ? '原实际费用合同' : current?.billingMode === 'fixed' ? `原固定点数：${current.fixedPoints ?? '未确认'}` : '原计费方式未确认'}，不代表当前策略的新任务价格。</p></details>
           </details>;
         })}
       </fieldset>

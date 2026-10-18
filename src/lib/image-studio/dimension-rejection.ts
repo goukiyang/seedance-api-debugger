@@ -10,6 +10,7 @@ import { validateGeneratedStudioImage, StudioImageDeliveryError, StudioImageDown
 import type { CreditFreezeAllocation } from '@/lib/credits/policy';
 import { prepareStudioOutput } from './output';
 import { studioDimensionMismatch, studioDimensionMismatchNotice, studioOutputFormat } from './dimension-mismatch';
+import { publicPricingTaskState } from './pricing-state';
 
 const hash = (value: Buffer | string) => createHash('sha256').update(value).digest('hex');
 export function studioTaskBeforeHash(task: ImageStudioTask) {
@@ -115,8 +116,9 @@ export async function readRetainedStudioDimensionOriginal(task: ImageStudioTask)
 // This path cannot submit, poll or reinterpret unknown failures.
 export async function finishRejectedStudioDimensions(task: ImageStudioTask, original: Buffer,
   repair?: StudioDimensionRepairExpectation) {
-  if (!['running', 'channel_running', 'uncertain'].includes(task.status) || task.asset_id
-    || task.status !== 'uncertain' && task.finished_at || repair && task.status !== 'channel_running'
+  const status = publicPricingTaskState(task.status);
+  if (!['running', 'channel_running', 'uncertain'].includes(status) || task.asset_id
+    || status !== 'uncertain' && task.finished_at || repair && status !== 'channel_running'
     || !task.output_size || !/^\d+x\d+$/.test(task.output_size)) throw Error('dimension_rejection_task_not_eligible');
   const requestedSize = task.output_size;
   const validations: Array<Parameters<NonNullable<Parameters<typeof validateGeneratedStudioImage>[2]>>[0]> = [];
@@ -133,10 +135,10 @@ export async function finishRejectedStudioDimensions(task: ImageStudioTask, orig
   if (!validation || !format) throw Error('dimension_rejection_validation_missing');
   validation.storedFormat = validation.originalFormat;
   const request = await readStudioRequestReceipt(task);
-  const asyncReceipt = task.status === 'running' ? null : await readStudioAsyncReceipt(task);
+  const asyncReceipt = status === 'running' ? null : await readStudioAsyncReceipt(task);
   const channel = safeImageChannelSnapshot(JSON.parse(task.snapshot_json || '{}').imageChannel);
   if (!request || request.fingerprint !== task.fingerprint || request.batchId !== task.batch_id
-    || task.status !== 'running' && (request.dispatchState !== 'attempted' || !channel || request.channelId !== channel.channelId
+    || status !== 'running' && (request.dispatchState !== 'attempted' || !channel || request.channelId !== channel.channelId
       || request.configRevision !== channel.configRevision)) throw Error('dimension_rejection_request_mismatch');
   const digest = hash(original);
   if (repair && (!/^[a-f0-9]{64}$/.test(repair.taskBeforeSha256) || digest !== repair.originalSha256
@@ -150,7 +152,7 @@ export async function finishRejectedStudioDimensions(task: ImageStudioTask, orig
   const assertPublicationScope = async () => {
     const current = await prisma.imageStudioTask.findUnique({ where: { id: task.id } });
     if (!current || current.asset_id || current.status !== task.status || retainedIdentity(current) !== retainedIdentity(task)
-      || current.status !== 'uncertain' && current.finished_at) throw Error('dimension_rejection_publication_scope_lost');
+      || publicPricingTaskState(current.status) !== 'uncertain' && current.finished_at) throw Error('dimension_rejection_publication_scope_lost');
     if (repair ? studioTaskBeforeHash(current) !== repair.taskBeforeSha256
       : current.lease_token !== task.lease_token
         || !current.lease_until || current.lease_until <= new Date()) throw Error('dimension_rejection_publication_scope_lost');
@@ -168,7 +170,7 @@ export async function finishRejectedStudioDimensions(task: ImageStudioTask, orig
       || current.fingerprint !== task.fingerprint || current.snapshot_json !== task.snapshot_json
       || current.billing_contract_json !== task.billing_contract_json || current.freeze_snapshot !== task.freeze_snapshot
       || current.unit_credits !== task.unit_credits || current.output_size !== task.output_size || current.asset_id
-      || current.status !== 'uncertain' && current.finished_at) {
+      || publicPricingTaskState(current.status) !== 'uncertain' && current.finished_at) {
       throw Error('dimension_rejection_current_task_changed');
     }
     if (repair) {
@@ -190,7 +192,7 @@ export async function finishRejectedStudioDimensions(task: ImageStudioTask, orig
     await requireOriginalReservation(tx, current);
     const previousUsage = current.usage_json ? JSON.parse(current.usage_json) : {};
     if (!previousUsage || typeof previousUsage !== 'object' || Array.isArray(previousUsage)) throw Error('dimension_rejection_usage_not_object');
-    const finished = await finishStudioTask(current, task.status === 'channel_running' && mismatchCode === 'generated_dimensions_mismatch' ? 'failed' : 'uncertain', {
+    const finished = await finishStudioTask(current, status === 'channel_running' && mismatchCode === 'generated_dimensions_mismatch' ? 'failed' : 'uncertain', {
       retainedAsset,
       error: studioDimensionMismatchNotice({ ...validation, requestedSize }),
       usage: { ...previousUsage, studioDelivery: { ...previousUsage.studioDelivery, ...rejection } },

@@ -20,7 +20,7 @@ import type { ContentSummary } from '@/lib/content-reactions/types';
 import { IMAGE_STUDIO_MODEL_SHORT_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { RelativeTime } from '@/components/RelativeTime';
-import { calculateEnhanceVideoEstimatedCostClient } from '@/lib/pricing-client';
+import { useVideoPricing } from '@/lib/pricing/use-video-pricing';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import { uploadSession } from '@/lib/http/upload-session';
@@ -838,6 +838,10 @@ function AssetsPageContent() {
   const [enhanceResolution, setEnhanceResolution] = useState<EnhanceResolution>('1080p');
   const [enhanceFps, setEnhanceFps] = useState<EnhanceFps>('none');
   const [enhanceSubmittingId, setEnhanceSubmittingId] = useState<AssetLibraryItemId | null>(null);
+  const enhanceQuoteItem = items.find(item => item.id === enhanceMenuItemId);
+  const enhancePricing = useVideoPricing({ provider: 'volcengine_mediakit', model: 'enhance-video',
+    duration: enhanceQuoteItem?.duration || 0, resolution: enhanceResolution, toolVersion: 'standard',
+    fps: enhanceFps === 'none' ? null : Number(enhanceFps) }, !!enhanceMenuItemId && aiMediaKitReady === true);
   const [preparingDownloadTaskId, setPreparingDownloadTaskId] = useState<string | null>(null);
   const [assetUploadFile, setAssetUploadFile] = useState<File | null>(null);
   const [assetUploading, setAssetUploading] = useState(false);
@@ -1409,13 +1413,7 @@ function AssetsPageContent() {
   };
 
   const enhanceEstimatedCost = (item: AssetLibraryItem) => {
-    if (!item.duration) return null;
-    return calculateEnhanceVideoEstimatedCostClient({
-      duration: item.duration,
-      resolution: enhanceResolution,
-      toolVersion: 'standard',
-      fps: enhanceFps === 'none' ? null : Number(enhanceFps),
-    });
+    return item.id === enhanceQuoteItem?.id ? enhancePricing.quote?.estimatedCost ?? null : null;
   };
 
   const enhanceDisabledReason = (item: AssetLibraryItem) => {
@@ -1425,6 +1423,7 @@ function AssetsPageContent() {
     if (!item.taskId) return '缺少源任务';
     if (!item.videoCardId) return '缺少视频卡';
     if (!item.duration) return '缺少时长';
+    if (item.id !== enhanceQuoteItem?.id || !enhancePricing.quote) return enhancePricing.error || '正在读取报价';
     return '';
   };
 
@@ -1443,6 +1442,7 @@ function AssetsPageContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          ...(enhancePricing.quote?.pricing_revision ? { pricing_revision: enhancePricing.quote.pricing_revision } : {}),
           source_task_id: item.taskId,
           video_card_id: item.videoCardId,
           tool_version: 'standard',
@@ -1460,6 +1460,7 @@ function AssetsPageContent() {
       });
       const data = await response.json();
       if (!response.ok) {
+        if (typeof data.code === 'string' && data.code.startsWith('pricing_') || typeof data.error === 'string' && data.error.startsWith('pricing_')) enhancePricing.refresh();
         throw new Error(data.message || data.error || '创建超分任务失败');
       }
       setMessage('已创建超分任务，正在打开对比页');
@@ -2533,6 +2534,7 @@ function AssetsPageContent() {
                                   预估冻结 {estimatedEnhanceCost === null ? '-' : `${estimatedEnhanceCost} 点`}
                                 </span>
                                 {enhanceReason && <span className="asset-card-enhance-warning">{enhanceReason}</span>}
+                                {enhancePricing.error && <button type="button" title="重新报价" aria-label="重新报价" onClick={enhancePricing.refresh}><RefreshCcw size={16} aria-hidden="true" /></button>}
                                 <button
                                   type="button"
                                   onClick={() => void createEnhanceTask(item)}

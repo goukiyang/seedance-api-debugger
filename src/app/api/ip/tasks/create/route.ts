@@ -9,7 +9,7 @@ import fs from 'fs';
 import { prisma } from '@/lib/prisma';
 import { assertMultiviewRequestFence } from '@/lib/video/multiview-request-receipt';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
-import { calculateEstimatedCost } from '@/lib/pricing';
+import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance, publicVideoPricing, videoPricingError, type VideoPricingQuote } from '@/lib/pricing/video';
 import { generationRequestFingerprint } from '@/lib/template-studio-video-fingerprint';
 import { bindRoleMediaTask, roleMediaFingerprint } from '@/lib/canvas-roles/media-bindings';
 import { addAssetToWorkspace, getOrCreateWorkspace } from '@/lib/assets/workspace';
@@ -710,8 +710,6 @@ export async function POST(request: NextRequest) {
   }
 
   // --- Pricing ---
-  const pricing = calculateEstimatedCost(resolution, duration, selectedModel);
-  const estimatedCost = pricing.estimatedCost;
   const billingScope = shouldBillProjectBudget(project) ? 'project' : 'user';
   const billingAccountId = billingScope === 'project' ? project.id : user.id;
 
@@ -825,6 +823,7 @@ export async function POST(request: NextRequest) {
     returnLastFrame: body.return_last_frame ?? false,
     watermark: body.watermark ?? false,
     priceCeiling: body.max_estimated_cost ?? null,
+    ...(typeof body.pricing_revision === 'string' ? { pricingRevision: body.pricing_revision } : {}),
     projectId: project.id,
     videoCardId: videoCard.id,
     videoBranchId: requestedVideoBranchId,
@@ -864,6 +863,15 @@ export async function POST(request: NextRequest) {
       return ipDeduplicatedTaskResponse(existing);
     }
   }
+  let priceQuote: VideoPricingQuote;
+  try {
+    priceQuote = await quoteVideoPricing({ provider: 'volcengine_ip', model: selectedModel, resolution, duration });
+    requireVideoPricingRevision(priceQuote, body.pricing_revision);
+  } catch (error) {
+    const failure = videoPricingError(error);
+    return NextResponse.json({ error: failure?.message || '报价暂不可用，原参数和素材已保留', code: failure?.code || 'pricing_unavailable' }, { status: failure?.status || 503 });
+  }
+  const pricing = priceQuote.pricing, estimatedCost = pricing.estimatedCost;
   const costCeilingError = validateRequestCostCeiling(body.max_estimated_cost, estimatedCost);
   if (costCeilingError) return errorJson(costCeilingError, 400);
 
@@ -1285,6 +1293,7 @@ export async function POST(request: NextRequest) {
   try {
     const result = await prisma.$transaction(async (tx) => {
       await assertMultiviewRequestFence(tx, user.id, idempotencyKey);
+      await assertVideoPricingAcceptance(priceQuote, body.pricing_revision, tx);
       const task = await tx.videoTask.create({
         data: {
           provider: VOLCENGINE_IP_VIDEO_PROVIDER,
@@ -1515,6 +1524,8 @@ export async function POST(request: NextRequest) {
         return ipDeduplicatedTaskResponse(existing);
       }
     }
+    const pricingFailure = videoPricingError(err);
+    if (pricingFailure) return NextResponse.json({ error: pricingFailure.message, code: pricingFailure.code }, { status: pricingFailure.status });
     if (err instanceof AuthError) return errorJson(err.message, err.status);
     if (err instanceof CreditError) {
       if (err.code === 'INSUFFICIENT_PROJECT_BUDGET') {
@@ -1642,7 +1653,7 @@ export async function POST(request: NextRequest) {
       status: 'submitted',
       estimated_cost: estimatedCost,
       frozen_cost: estimatedCost,
-      pricing,
+      pricing: publicVideoPricing(priceQuote),
       workspace_id: workspaceId,
       project_id: project.id,
       video_card_id: videoCard.id,

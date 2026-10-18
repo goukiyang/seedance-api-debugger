@@ -10,6 +10,7 @@ import { isRoleCollaborationReadOnly } from './guard';
 import { assertCurrentMaterials, assertEffectiveInputs, latestWorks, taskRequirements, workInputDigest } from './work';
 import { originalIdentity, imageTaskOriginal } from './media';
 import { studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
+import { publicPricingTaskState, publicPricingBillingState, studioTaskStates } from '@/lib/image-studio/pricing-state';
 import { COLLABORATION_CAPABILITY, digest, identifier, integer, pointCents, record, RoleError, text,
   type JsonRecord, type RoleSnapshot } from './types';
 
@@ -77,8 +78,8 @@ async function activeMediaWork(db: RoleDb, user: SessionUser, workId: string) {
   const imageIds = pendingSources.filter(item => item.source_kind === 'image_studio_task').map(item => item.source_task_id);
   const videoIds = pendingSources.filter(item => item.source_kind === 'video_task').map(item => item.source_task_id);
   const unknownImage = imageIds.length && await db.imageStudioTask.findFirst({ where: { id: { in: imageIds }, OR: [
-    { status: { in: ['uncertain', 'channel_uncertain'] } },
-    { billing_mode: 'actual', billing_settled_at: { not: null }, actual_amount_micros: null, billing_status: { not: 'channel_cancelled' } },
+    { status: { in: studioTaskStates(['uncertain', 'channel_uncertain']) } },
+    { billing_mode: 'actual', billing_settled_at: { not: null }, actual_amount_micros: null, billing_status: { notIn: ['channel_cancelled', 'rate_channel_cancelled'] } },
   ] }, select: { id: true } });
   const unknownVideo = videoIds.length && await db.videoTask.findFirst({ where: { id: { in: videoIds },
     local_status: { notIn: ['succeeded', 'failed', 'cancelled'] }, OR: [
@@ -191,18 +192,19 @@ export async function reconcileRoleMediaBindings(user: SessionUser, runId: strin
         const task = await db.imageStudioTask.findUnique({ where: { id: binding.source_task_id } });
         if (!task || task.owner_id !== user.id) { state = 'source_unavailable'; feeState = 'unknown'; }
         else {
-          receipt = { ...receipt, taskStatus: task.status, billingStatus: task.billing_status, requestId: task.gateway_request_id,
+          const status = publicPricingTaskState(task.status), billingStatus = publicPricingBillingState(task.billing_status);
+          receipt = { ...receipt, taskStatus: status, billingStatus, requestId: task.gateway_request_id,
             amountMicros: task.actual_amount_micros };
-          feeState = task.billing_status;
+          feeState = billingStatus;
           const billKnown = task.billing_mode !== 'actual' || task.actual_amount_micros != null
-            || task.billing_status === 'channel_cancelled';
+            || billingStatus === 'channel_cancelled';
           if (task.billing_settled_at && task.actual_credits != null && billKnown) settledPoints = pointCents(task.actual_credits);
           if (!billKnown && task.billing_settled_at) feeState = 'unknown';
           if (studioTaskHasViewableOutput(task)) {
             try { refs = [(await imageTaskOriginal(db, user, task.id)).snapshot]; state = 'ready'; }
             catch (error) { if (!(error instanceof RoleError)) throw error; state = 'original_unavailable'; }
-          } else if (['failed', 'cancelled'].includes(task.status)) state = 'failed';
-          else if (['uncertain', 'channel_uncertain'].includes(task.status)) state = 'unknown';
+          } else if (['failed', 'cancelled'].includes(status)) state = 'failed';
+          else if (['uncertain', 'channel_uncertain'].includes(status)) state = 'unknown';
         }
       } else if (binding.source_kind === 'video_task') {
         recovery = `/tools/ultimate-canvas?document_id=${encodeURIComponent(run.document_id)}&focus_node_id=${encodeURIComponent(binding.generation_node_id)}`;

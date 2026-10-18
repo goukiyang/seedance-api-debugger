@@ -1,5 +1,6 @@
 import type { CreateVideoInput } from '@/types';
 import { SEEDANCE_2_5_MODEL_ID } from './seedance-models';
+import { normalizeCredits } from '@/lib/credits/precision';
 
 /** Internal evidence from the existing server-side media probe, never request metadata. */
 export type SeedanceEditReference = {
@@ -29,9 +30,8 @@ export function isSeedanceEditPilotAllowed(value: unknown, projectId: string): b
 /** Optional caller budget, evaluated against existing server pricing before freeze. */
 export function validateRequestCostCeiling(ceiling: unknown, estimatedCost: number): string | null {
   if (ceiling === undefined) return null;
-  if (typeof ceiling !== 'number' || !Number.isFinite(ceiling) || !Number.isInteger(ceiling) || ceiling < 0) {
-    return 'max_estimated_cost 必须是非负整数积分上限。';
-  }
+  if (typeof ceiling !== 'number' || !Number.isFinite(ceiling) || ceiling < 0 || ceiling > 10000000) return 'max_estimated_cost 必须是范围内的非负积分上限。';
+  try { normalizeCredits(ceiling); } catch { return 'max_estimated_cost 的积分精度无效。'; }
   if (!Number.isFinite(estimatedCost) || estimatedCost < 0 || estimatedCost > ceiling) {
     return '本次估价超出您设置的积分上限，未提交生成或冻结积分。';
   }

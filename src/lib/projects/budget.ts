@@ -1,5 +1,6 @@
 import type { Prisma, Project } from '@prisma/client';
 import { notifyProjectOwner } from '@/lib/notifications';
+import { addCredits, subtractCredits, creditCents, normalizeCredits, assertCreditWriteback } from '@/lib/credits/precision';
 
 type BudgetClient = Prisma.TransactionClient;
 type ProjectBillingShape = Pick<Project, 'id' | 'type'>;
@@ -21,6 +22,7 @@ function assertPositiveAmount(amount: number, label: string) {
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new Error(`${label} 必须大于 0`);
   }
+  creditCents(amount);
 }
 
 function parseProjectBudgetSnapshot(value: string | null | undefined, fallback: ProjectBudgetSnapshot) {
@@ -31,19 +33,17 @@ function parseProjectBudgetSnapshot(value: string | null | undefined, fallback: 
       parsed?.source_type === 'project_budget'
       && typeof parsed.project_id === 'string'
       && typeof parsed.account_id === 'string'
-      && Number(parsed.amount) > 0
+      && typeof parsed.amount === 'number' && parsed.amount > 0
     ) {
       return {
         source_type: 'project_budget' as const,
         project_id: parsed.project_id,
         account_id: parsed.account_id,
-        amount: Number(parsed.amount),
+        amount: normalizeCredits(parsed.amount),
       };
     }
-  } catch {
-    // 老任务没有项目预算快照时走 fallback。
-  }
-  return fallback;
+  } catch { throw new Error('原项目预算快照或精度无法确认，已停止结算'); }
+  throw new Error('原项目预算快照无效，已停止结算');
 }
 
 function parseNotifiedThresholds(value: string | null | undefined) {
@@ -59,7 +59,7 @@ function parseNotifiedThresholds(value: string | null | undefined) {
 
 function committedRatio(account: { budget_credits: number; used_credits: number; frozen_credits: number }) {
   if (account.budget_credits <= 0) return 0;
-  return Math.min(1, (account.used_credits + account.frozen_credits) / account.budget_credits);
+  return Math.min(1, creditCents(addCredits(account.used_credits, account.frozen_credits)) / creditCents(account.budget_credits));
 }
 
 export function getProjectBudgetBlockReason(account: {
@@ -180,12 +180,12 @@ export async function getProjectBudgetSummary(tx: BudgetClient, projectId: strin
       updated_at: null,
     };
   }
-  const available = Math.max(0, account.budget_credits - account.used_credits - account.frozen_credits);
+  const available = Math.max(0, subtractCredits(subtractCredits(account.budget_credits, account.used_credits), account.frozen_credits));
   const usageRatio = account.budget_credits > 0
     ? Math.min(1, account.used_credits / account.budget_credits)
     : 0;
   const committedRatio = account.budget_credits > 0
-    ? Math.min(1, (account.used_credits + account.frozen_credits) / account.budget_credits)
+    ? Math.min(1, creditCents(addCredits(account.used_credits, account.frozen_credits)) / creditCents(account.budget_credits))
     : 0;
 
   return {
@@ -220,6 +220,7 @@ export async function adjustProjectBudget(
   if (!Number.isFinite(input.amount) || input.amount === 0) {
     throw new Error('预算调整金额不能为 0');
   }
+  creditCents(input.amount);
   if (input.idempotencyKey) {
     const existing = await tx.projectBudgetLedger.findUnique({
       where: { idempotency_key: input.idempotencyKey },
@@ -229,9 +230,9 @@ export async function adjustProjectBudget(
 
   const account = await ensureProjectBudgetAccount(tx, input.projectId, input.operatorId);
   const beforeRatio = committedRatio(account);
-  const nextBudget = account.budget_credits + input.amount;
-  const minimumBudget = account.used_credits + account.frozen_credits;
-  if (nextBudget < minimumBudget) {
+  const nextBudget = addCredits(account.budget_credits, input.amount);
+  const minimumBudget = addCredits(account.used_credits, account.frozen_credits);
+  if (creditCents(nextBudget) < creditCents(minimumBudget)) {
     throw new Error(`预算不能低于已用和冻结合计 ${minimumBudget} 点`);
   }
 
@@ -241,9 +242,10 @@ export async function adjustProjectBudget(
       budget_credits: nextBudget,
       status: ['frozen', 'cancelled'].includes(account.status)
         ? account.status
-        : nextBudget <= account.used_credits + account.frozen_credits ? 'exhausted' : 'active',
+        : creditCents(nextBudget) <= creditCents(minimumBudget) ? 'exhausted' : 'active',
     },
   });
+  assertCreditWriteback(updated, { budget_credits: nextBudget });
 
   await maybeNotifyBudgetThreshold(tx, {
     projectId: input.projectId,
@@ -308,18 +310,19 @@ export async function allocateProjectTaskBudget(
   assertProjectBudgetCanGenerate(account);
 
   const beforeRatio = committedRatio(account);
-  const available = account.budget_credits - account.used_credits - account.frozen_credits;
-  if (input.amount > available) {
+  const available = subtractCredits(subtractCredits(account.budget_credits, account.used_credits), account.frozen_credits);
+  if (creditCents(input.amount) > creditCents(available)) {
     throw new Error(`项目预算不足，需要 ${input.amount} 点，当前可用 ${Math.max(0, available)} 点`);
   }
 
   const updated = await tx.projectBudgetAccount.update({
     where: { id: account.id },
     data: {
-      frozen_credits: account.frozen_credits + input.amount,
-      status: available - input.amount <= 0 ? 'exhausted' : account.status,
+      frozen_credits: addCredits(account.frozen_credits, input.amount),
+      status: creditCents(subtractCredits(available, input.amount)) <= 0 ? 'exhausted' : account.status,
     },
   });
+  assertCreditWriteback(updated, { frozen_credits: addCredits(account.frozen_credits, input.amount) });
 
   await maybeNotifyBudgetThreshold(tx, {
     projectId: input.projectId,
@@ -404,11 +407,13 @@ export async function settleProjectTaskBudget(
   if (!account) throw new Error('项目预算账户不存在');
 
   const beforeRatio = committedRatio(account);
-  const settledAmount = Math.min(account.frozen_credits, snapshot.amount);
+  if (snapshot.project_id !== input.projectId || creditCents(snapshot.amount) !== creditCents(input.frozenAmount)
+    || creditCents(account.frozen_credits) < creditCents(snapshot.amount)) throw new Error('原项目预算预留不足或归属不一致，已停止结算');
+  const settledAmount = normalizeCredits(snapshot.amount);
   const succeeded = input.terminalStatus === 'succeeded';
-  const nextFrozen = Math.max(0, account.frozen_credits - settledAmount);
-  const nextUsed = succeeded ? account.used_credits + settledAmount : account.used_credits;
-  const nextAvailable = account.budget_credits - nextUsed - nextFrozen;
+  const nextFrozen = Math.max(0, subtractCredits(account.frozen_credits, settledAmount));
+  const nextUsed = succeeded ? addCredits(account.used_credits, settledAmount) : account.used_credits;
+  const nextAvailable = subtractCredits(subtractCredits(account.budget_credits, nextUsed), nextFrozen);
   const nextStatus = nextAvailable <= 0 ? 'exhausted' : 'active';
 
   const updated = await tx.projectBudgetAccount.update({
@@ -419,6 +424,7 @@ export async function settleProjectTaskBudget(
       status: ['cancelled', 'frozen'].includes(account.status) ? account.status : nextStatus,
     },
   });
+  assertCreditWriteback(updated, { used_credits: nextUsed, frozen_credits: nextFrozen });
 
   await maybeNotifyBudgetThreshold(tx, {
     projectId: input.projectId,

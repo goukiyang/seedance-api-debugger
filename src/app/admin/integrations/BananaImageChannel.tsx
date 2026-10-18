@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Save } from 'lucide-react';
+import Link from 'next/link';
 
 type Config = { enabled: boolean; ready: boolean; base_url: string; api_key_configured: boolean };
 const endpoint = '/api/admin/integrations/banana-image';
@@ -49,6 +50,7 @@ export default function BananaImageChannel({ onDirtyChange, onSaveStart, onSaveF
       <div><h2 className="section-title mb-0">Banana 专用通道</h2><p className="text-gray text-sm mt-2">仅用于 Banana 2 和 Banana Pro；不影响 GPT Image 与 GPT-5.5。</p></div>
       {config && <label className="toggle-switch" aria-label="启用 Banana 专用通道"><input type="checkbox" checked={config.enabled} disabled={saving} onChange={event => setConfig({ ...config, enabled: event.target.checked })} /><span className="toggle-slider" /></label>}
     </div>
+    <p className="text-gray text-sm">收费请到<Link href="/admin/pricing?kind=image">点数与费率</Link>查看和调整，通道保存不改费率。</p>
     {!config ? <div role="status">{notice ? <button type="button" className="btn btn-secondary" onClick={() => void load()}>重新读取</button> : '正在读取通道设置…'}</div> : <>
       <div className="codex-config-grid">
         <div className="form-group"><label className="form-label" htmlFor="banana-base-url">API 地址</label><input id="banana-base-url" type="url" className="input" required value={config.base_url} disabled={saving} autoComplete="off" onChange={event => setConfig({ ...config, base_url: event.target.value })} /></div>

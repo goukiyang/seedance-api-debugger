@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 
@@ -40,12 +40,22 @@ export async function countSynchronousImageAdmissions(tx: Client, ownerId: strin
 }
 
 /** Must be called in the same transaction as the shared capacity reservation. */
-export async function createSynchronousImageAdmission(tx: Client, input: {
+export async function assertNoSynchronousImageAdmission(tx: Client, ownerId: string, requestId: string) {
+  const existing = await tx.platformSetting.findUnique({ where: { key: `${PREFIX}${ownerId}:${requestId}` }, select: { value_json: true } });
+  if (!existing) return;
+  parse(existing.value_json);
+  throw new SynchronousImageAdmissionError('此编号已有同步图片请求，请核对原结果；没有重新生成', 409, requestId);
+}
+
+export async function createSynchronousImageAdmission(tx: Client & Pick<Prisma.TransactionClient, 'imageStudioTask'>, input: {
   ownerId: string; requestId?: string; fingerprint: string; count: number; model: string; scope: string;
 }) {
   const requestId = input.requestId || `sync-${randomUUID()}`;
   if (!/^[a-zA-Z0-9-]{16,100}$/.test(requestId)) throw new SynchronousImageAdmissionError('图片请求编号无效，未派发生成', 400);
   const key = `${PREFIX}${input.ownerId}:${requestId}`;
+  const queued = await tx.imageStudioTask.findFirst({ where: { owner_id: input.ownerId,
+    batch_id: createHash('sha256').update(`${input.ownerId}:${requestId}`).digest('hex') }, select: { id: true } });
+  if (queued) throw new SynchronousImageAdmissionError('此编号已有排队图片请求，请查询原任务；没有重新生成', 409, requestId);
   const existing = await tx.platformSetting.findUnique({ where: { key }, select: { value_json: true } });
   if (existing) {
     const record = parse(existing.value_json);

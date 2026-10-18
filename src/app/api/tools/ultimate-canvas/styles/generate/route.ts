@@ -10,6 +10,8 @@ import { resolveStudioModuleGenerationConfig, validStudioModuleId } from '@/lib/
 import { submitStudioBatch, safeImageChannelSnapshot, StudioError } from '@/lib/image-studio/tasks';
 import { roleMediaFingerprint } from '@/lib/canvas-roles/media-bindings';
 import { prepareImageBillingQuote } from '@/lib/image-studio/billing-quote-service';
+import { withImagePricing } from '@/lib/pricing/image';
+import { creditCents } from '@/lib/credits/precision';
 import { imageBillingReady } from '@/lib/image-studio/billing-readiness';
 import { imageBillingScope } from '@/lib/image-studio/billing-scope';
 import { getImageGenerationSettingsForModel, captureImageGenerationChannel, resolveImageGenerationChannelSnapshot, validateImageGenerationChannel, isMuskImageGenerationChannel } from '@/lib/integrations/image-generation';
@@ -119,8 +121,10 @@ export async function POST(request: NextRequest) {
     }
     const channelId = requestedChannelId || 'original';
     const imageChannel = suppliedImageChannel || (effectiveChannelId === 'original' ? undefined : await captureImageGenerationChannel(generation.model, effectiveChannelId));
-    const apiSettings = imageChannel?.channelId === 'original' ? await getImageGenerationSettingsForModel(generation.model)
+    const rawApiSettings = imageChannel?.channelId === 'original' ? await getImageGenerationSettingsForModel(generation.model)
       : imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, generation.model) : await getImageGenerationSettingsForModel(generation.model);
+    const priced = await withImagePricing(rawApiSettings, generation.model);
+    const apiSettings = priced.settings;
     let unitCredits = currentSettings.prices[generation.model];
     let channelActual = false;
     if (imageChannel) {
@@ -129,11 +133,13 @@ export async function POST(request: NextRequest) {
       unitCredits = validation.capability.fixedPoints;
       channelActual = validation.capability.billingMode === 'actual';
     }
-    if (body.action !== 'quote' && !body.billingQuoteId && (channelActual || !imageChannel && isMuskImageGenerationChannel(apiSettings) && apiSettings.api_key
+    if (priced.quote) unitCredits = priced.quote.credits;
+    if (body.action !== 'quote' && !body.billingQuoteId && (priced.quote || channelActual || !imageChannel && isMuskImageGenerationChannel(apiSettings) && apiSettings.api_key
       && (await imageBillingReady(imageBillingScope(apiSettings), generation.model)).ready)) {
       throw new StudioError('请先确认本次风格图片的新报价；尚未派发生成', 409);
     }
-    if (!channelActual && (unitCredits === null || !Number.isInteger(unitCredits) || unitCredits < 0)) {
+    if (!channelActual && (unitCredits === null || !Number.isFinite(unitCredits) || unitCredits < 0
+      || (priced.quote ? !Number.isSafeInteger(creditCents(unitCredits)) : !Number.isInteger(unitCredits)))) {
       throw new StudioError('当前风格模板尚未配置有效单价，请重新选择模板或联系管理员。', 409);
     }
 
@@ -173,7 +179,7 @@ export async function POST(request: NextRequest) {
     const submission = { requestId, moduleId, moduleRevision: Number(expectedModuleRevision),
       revision: Number(expectedSettingsRevision), prompt, count: Number(count), referenceIds: mergedReferenceIds,
       model: generation.model, ...(requestedChannelId !== undefined || !suppliedImageChannel ? { channelId } : {}), imageChannel: body.imageChannel || imageChannel, quality: generation.quality, resolution: generation.resolution, aspectRatio,
-      billingQuoteId: body.billingQuoteId, maxEstimatedCost: body.maxEstimatedCost };
+      billingQuoteId: body.billingQuoteId, pricingRevision: body.pricingRevision, maxEstimatedCost: body.maxEstimatedCost };
     const promptBinding = mentions ? { mentions, referenceAssets } : undefined;
     const canvasUse = body.roleMediaContext === undefined ? undefined : { user, referenceImageIds: requestedReferenceIds };
     if (body.action === 'quote') return canvasStyleJson(await prepareImageBillingQuote(user.id, submission, undefined, canvasUse, promptBinding));
