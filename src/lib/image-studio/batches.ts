@@ -100,11 +100,11 @@ async function recoverAcceptedBatchItems(tx: Prisma.TransactionClient, batch: Ba
   batch.prepared = batch.items.filter(item => item.prepared).length;
 }
 
-function continuationInput(batch: BatchRecord, body: Record<string, unknown>): Record<string, unknown> {
+export function continuationInput(batch: BatchRecord, body: Record<string, unknown>): Record<string, unknown> {
   const pending = batch.items.filter(item => !item.taskId && !item.cancelled);
   if (!pending.length) throw new StudioError('本批没有未受理条目，请查看原任务', 409);
   const changes = Object.fromEntries(['prompt', 'personalPrompt', 'personalOverrides', 'model', 'quality', 'resolution', 'count', 'aspectRatio',
-    'revision', 'moduleRevision', 'sharedLive', 'draft', 'referenceIds', 'imageChannel', 'channelId', 'batchQuoteId', 'budget']
+    'revision', 'moduleRevision', 'sharedLive', 'draft', 'referenceIds', 'imageChannel', 'channelId', 'batchQuoteId', 'pricingRevision', 'budget']
     .filter(field => Object.prototype.hasOwnProperty.call(body, field)).map(field => [field, body[field]]));
   const previous = { ...batch.input };
   delete previous.imageChannel;

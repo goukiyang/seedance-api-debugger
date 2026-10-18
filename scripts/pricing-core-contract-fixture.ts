@@ -51,8 +51,8 @@ async function main() {
   const isolation = fixtureRequire('@/lib/pricing/isolation') as typeof import('@/lib/pricing/isolation');
   const { IMAGE_GENERATION_API_SETTING_KEY } = fixtureRequire('@/lib/integrations/image-generation') as typeof import('@/lib/integrations/image-generation');
   const { VOLCENGINE_IP_API_SETTING_KEY } = fixtureRequire('@/lib/integrations/volcengine-ip') as typeof import('@/lib/integrations/volcengine-ip');
-  const { quoteStudioBatch } = fixtureRequire('@/lib/image-studio/batch-billing-quote') as typeof import('@/lib/image-studio/batch-billing-quote');
-  const { createStudioBatch, dispatchStudioBatches } = fixtureRequire('@/lib/image-studio/batches') as typeof import('@/lib/image-studio/batches');
+  const { quoteStudioBatch, batchQuoteFingerprint, consumeBatchQuote } = fixtureRequire('@/lib/image-studio/batch-billing-quote') as typeof import('@/lib/image-studio/batch-billing-quote');
+  const { createStudioBatch, dispatchStudioBatches, continuationInput } = fixtureRequire('@/lib/image-studio/batches') as typeof import('@/lib/image-studio/batches');
   const { studioBatchBudgetPrecision } = fixtureRequire('@/lib/image-studio/batch-contract') as typeof import('@/lib/image-studio/batch-contract');
   const { prepareImageBillingQuote } = fixtureRequire('@/lib/image-studio/billing-quote-service') as typeof import('@/lib/image-studio/billing-quote-service');
   const { imageQuoteKey } = fixtureRequire('@/lib/image-studio/billing-quote-store') as typeof import('@/lib/image-studio/billing-quote-store');
@@ -326,6 +326,65 @@ async function main() {
   group('G17', 'Actual persistent batch acceptance freezes per-child contracts; late dispatch after policy mutation uses the original unit fee.');
   const batchBody = { ...imageBody, count: 1, requestId: randomUUID(), sources: [{ name: 'one' }, { name: 'two' }], budget: 0.4 };
   const batchQuote = await quoteStudioBatch(user.id, batchBody); ok(batchQuote.batchQuoteId); equal(batchQuote.estimatedCredits, 0.4);
+  const batchChannel = batchQuote.imageChannel; assert.ok(batchChannel); active.assertions++;
+  const batchQuoteKey = `image_batch_billing_quote_v1:${user.id}:${batchQuote.batchQuoteId}`;
+  const batchQuoteRow = await db.platformSetting.findUniqueOrThrow({ where: { key: batchQuoteKey } });
+  const storedBatchQuote = JSON.parse(batchQuoteRow.value_json) as Record<string, unknown>;
+  equal(storedBatchQuote.fingerprintVersion, 2);
+  equal(storedBatchQuote.fingerprint, batchQuoteFingerprint(batchBody, batchChannel));
+  equal(batchQuoteFingerprint({ ...batchBody, imageChannel: batchChannel }, batchChannel), storedBatchQuote.fingerprint);
+  equal(batchQuoteFingerprint({ ...batchBody, channelId: 'original', imageChannel: batchChannel }, batchChannel), storedBatchQuote.fingerprint);
+  ok(batchQuoteFingerprint({ ...batchBody, sources: [...batchBody.sources].reverse() }, batchChannel) !== storedBatchQuote.fingerprint);
+  const batchSubmission = { ...batchBody, batchQuoteId: batchQuote.batchQuoteId,
+    pricingRevision: batchQuote.pricingRevision, imageChannel: batchChannel };
+  const batchTasksBefore = await db.imageStudioTask.count();
+  const batchAccountBefore = await db.creditAccount.findUniqueOrThrow({ where: { user_id: user.id } });
+  for (const changed of [{ prompt: 'changed parent prompt' }, { sources: [...batchBody.sources].reverse() },
+    { budget: 0.3 }, { pricingRevision: undefined }, { pricingRevision: 'unquoted-revision' },
+    { imageChannel: { ...batchChannel, configRevision: randomUUID() } }]) {
+    await assert.rejects(() => createStudioBatch(user.id, { ...batchSubmission, ...changed }), { status: 409 }); active.assertions++;
+    equal((await db.platformSetting.findUniqueOrThrow({ where: { key: batchQuoteKey } })).value_json, batchQuoteRow.value_json);
+  }
+  try {
+    await db.platformSetting.update({ where: { id: batchQuoteRow.id }, data: {
+      value_json: JSON.stringify({ ...storedBatchQuote, fingerprintVersion: 3 }) } });
+    await assert.rejects(() => createStudioBatch(user.id, batchSubmission), { status: 409 }); active.assertions++;
+    const legacyQuote: Record<string, unknown> = { ...storedBatchQuote,
+      fingerprint: batchQuoteFingerprint({ ...batchBody, channelId: 'original' }, batchChannel, 1) };
+    delete legacyQuote.fingerprintVersion;
+    await db.platformSetting.update({ where: { id: batchQuoteRow.id }, data: { value_json: JSON.stringify(legacyQuote) } });
+    const rollback = new Error('rollback isolated legacy quote consumption');
+    await assert.rejects(() => db.$transaction(async tx => {
+      const consumed = await consumeBatchQuote(tx, user.id, batchSubmission);
+      equal(consumed.total, 0.4); equal(consumed.contracts.map(contract => contract.authorizedCredits), [0.2, 0.2]);
+      throw rollback;
+    }), error => error === rollback); active.assertions++;
+    equal((await db.platformSetting.findUniqueOrThrow({ where: { key: batchQuoteKey } })).value_json, JSON.stringify(legacyQuote));
+  } finally {
+    await db.platformSetting.update({ where: { id: batchQuoteRow.id }, data: { value_json: batchQuoteRow.value_json } });
+  }
+  equal(await db.imageStudioTask.count(), batchTasksBefore);
+  equal(await db.creditAccount.findUniqueOrThrow({ where: { user_id: user.id } }), batchAccountBefore);
+  const continuationParent: Parameters<typeof continuationInput>[0] = { version: 2, pricing: true,
+    id: 'f'.repeat(64), ownerId: user.id, requestId: batchBody.requestId, fingerprint: 'fixture-parent',
+    moduleId, moduleName: 'Isolated pricing module', state: 'needs-confirmation', note: '', createdAt: now,
+    total: 4, budget: 0.6, committedCredits: 0.2, unitCredits: 0.2, prepared: 1,
+    input: { ...imageBody, count: 1, requestId: batchBody.requestId, imageChannel: batchChannel }, items: [
+      { ordinal: 1, sourceName: 'accepted', taskId: 'rate-original-accepted', attempt: 0, prepared: true, cancelled: false },
+      { ordinal: 2, sourceName: 'one', taskId: null, attempt: 0, prepared: false, cancelled: false },
+      { ordinal: 3, sourceName: 'two', taskId: null, attempt: 0, prepared: false, cancelled: false },
+      { ordinal: 4, sourceName: 'cancelled', taskId: null, attempt: 0, prepared: false, cancelled: true },
+    ] };
+  const originalParent = JSON.stringify(continuationParent);
+  const continuation = continuationInput(continuationParent, { batchQuoteId: batchQuote.batchQuoteId,
+    pricingRevision: batchQuote.pricingRevision, imageChannel: batchChannel, budget: 0.6 });
+  equal(continuation.pricingRevision, batchQuote.pricingRevision); equal(continuation.requestId, batchBody.requestId);
+  equal(continuation.sources, batchBody.sources); equal(continuation.budget, 0.6);
+  equal(continuationInput(continuationParent, { pricingRevision: 'stale-client-revision' }).pricingRevision, 'stale-client-revision');
+  equal(continuationInput(continuationParent, {}).pricingRevision, undefined);
+  equal(JSON.stringify(continuationParent), originalParent);
+  active.evidence.push('R07: canonical v2 parent quote accepts returned snapshots independent of field insertion order; changed inputs/budget/revision/channel and unknown formats refuse without consuming the quote or reserving credits. Versionless legacy receipts retain their exact original fingerprint rule.');
+  active.evidence.push('R07: the actual continuation input helper preserves only pending sources, original request identity and the explicit client pricing revision, never fills a missing/stale revision or mutates the accepted parent.');
   const batchId = await createStudioBatch(user.id, { ...batchBody, batchQuoteId: batchQuote.batchQuoteId, pricingRevision: batchQuote.pricingRevision, imageChannel: batchQuote.imageChannel });
   const acceptedRevision = snapshot.revision;
   snapshot = await save(snapshot, { kind: 'save', changes: { rows: [{ id: imageRow.id, mode: 'custom', customPointsPerCny: '2' }] } });

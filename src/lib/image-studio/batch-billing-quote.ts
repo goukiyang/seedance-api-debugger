@@ -17,6 +17,7 @@ import { captureImageGenerationChannel } from '@/lib/integrations/image-generati
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import { addCredits, creditCents, sumCredits } from '@/lib/credits/precision';
 import { assertNewPricingCharge } from '@/lib/pricing/charge';
+import { pricingCanonical } from '@/lib/pricing/catalog';
 
 const key = (owner: string, id: string) => `image_batch_billing_quote_v1:${owner}:${id}`;
 
@@ -52,20 +53,23 @@ function canonicalImageChannel(body: Record<string, unknown>, resolved?: ImageGe
   return channel;
 }
 
-export function batchQuoteFingerprint(body: Record<string, unknown>, resolvedChannel?: ImageGenerationChannelSnapshot) {
+export function batchQuoteFingerprint(body: Record<string, unknown>, resolvedChannel?: ImageGenerationChannelSnapshot, version: 1 | 2 = 2) {
   const input = parseStudioRequest({ ...body, count: 1, maxEstimatedCost: undefined });
   const channel = canonicalImageChannel(body, resolvedChannel);
   const normalizedInput = { ...input } as Record<string, unknown>;
   delete normalizedInput.imageChannel;
   if (channel) normalizedInput.channelId = channel.channelId;
-  return createHash('sha256').update(JSON.stringify({ input: normalizedInput,
+  const value = { input: normalizedInput,
     imageChannel: channel ? { channelId: channel.channelId, configRevision: channel.configRevision } : null,
-    moduleId: body.moduleId, sources: body.sources })).digest('hex');
+    moduleId: body.moduleId, sources: body.sources };
+  // Versionless receipts keep their original byte-level contract, without fallback matching.
+  return createHash('sha256').update(version === 1 ? JSON.stringify(value) : pricingCanonical(value)).digest('hex');
 }
 
 type StoredBatchQuote = {
   owner: string;
   fingerprint: string;
+  fingerprintVersion?: 2;
   intentRevision: number;
   contracts: ImageBillingContract[];
   expiresAt: string;
@@ -187,7 +191,7 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
   if (Date.parse(expiresAt) <= Date.now()) throw new StudioError('整批准备超过报价有效期，请重新报价', 409);
   await prisma.platformSetting.deleteMany({ where: { key: { startsWith: `image_batch_billing_quote_v1:${owner}:` },
     created_at: { lt: new Date(Date.now() - 120000) } } });
-  const storedQuote: StoredBatchQuote = { owner, fingerprint: batchQuoteFingerprint(body, imageChannel),
+  const storedQuote: StoredBatchQuote = { owner, fingerprint: batchQuoteFingerprint(body, imageChannel), fingerprintVersion: 2,
     intentRevision: intentRevision ?? 0, contracts: exactContracts, expiresAt, total,
     unitCredits: Math.max(...exactContracts.map(contract => contract.authorizedCredits)), ...sharedResult, ...(imageChannel ? { imageChannel } : {}) };
   await prisma.platformSetting.create({ data: { key: key(owner, id), updated_by: owner,
@@ -205,6 +209,9 @@ export async function consumeBatchQuote(tx: Prisma.TransactionClient, owner: str
   let stored: StoredBatchQuote;
   try { stored = JSON.parse(row.value_json) as StoredBatchQuote; }
   catch { throw new StudioError('整批报价记录无效，未派发生成', 409); }
+  if (stored.fingerprintVersion !== undefined && stored.fingerprintVersion !== 2) {
+    throw new StudioError('整批报价格式无效，未派发生成', 409);
+  }
   const storedChannel = stored.imageChannel ? safeImageChannelSnapshot(stored.imageChannel) || undefined : undefined;
   const input = parseStudioRequest({ ...body, count: 1, maxEstimatedCost: undefined });
   const workspace = typeof body.moduleId === 'string'
@@ -227,7 +234,8 @@ export async function consumeBatchQuote(tx: Prisma.TransactionClient, owner: str
   if (stored.owner !== owner || !Array.isArray(stored.contracts) || !stored.contracts.length
     || !Number.isFinite(stored.total) || stored.total < 0 || !Number.isFinite(stored.unitCredits) || stored.unitCredits < 0
     || !Number.isInteger(stored.intentRevision) || stored.intentRevision < 0
-    || !Number.isFinite(Date.parse(stored.expiresAt)) || stored.fingerprint !== batchQuoteFingerprint(body, storedChannel)
+    || !Number.isFinite(Date.parse(stored.expiresAt))
+    || stored.fingerprint !== batchQuoteFingerprint(body, storedChannel, stored.fingerprintVersion ?? 1)
     || !sameImageChannel(suppliedChannel, storedChannel)
     || Date.parse(stored.expiresAt) <= Date.now() || !Array.isArray(body.sources)
     || stored.contracts.length !== body.sources.length || stored.total > Number(body.budget)
