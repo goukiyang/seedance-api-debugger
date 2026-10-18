@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '3D多视图改为全宽工作台，选帧、排版和原视频集中在顶部；新增滑轨、跳帧与指定帧，并用轻量预览加快连续选帧。导出、作品保存和最终使用仍读取原尺寸帧。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '模板工具栏移除共享状态和保存失败文字，变更记录改到模块上下文弹窗内，保留原共享开关、错误重试和记录权限。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

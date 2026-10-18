@@ -3556,20 +3556,16 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         {sharedLive && (!sharedLive.available || module.sourcePresetShared === true) && <small className={styles.sharedOrigin}>{sharedLive.available ? '共享模板' : '历史保留'}</small>}
       </TemplateFavoriteTitle>
       <div className={styles.counts}>
-        {(module.sourcePresetCanManageSharing && module.sourcePresetId || module.canChooseSharing) && <span className={styles.moduleSharingChoice}>
-          <label className={`toggle-switch ${styles.moduleShareSwitch}`} title={unpublishedSharing ? '保存模板后共享给同事' : '共享给同事'}>
+        {(module.sourcePresetCanManageSharing && module.sourcePresetId || module.canChooseSharing) &&
+          <label className={`toggle-switch ${styles.moduleShareSwitch}`}>
             <input type="checkbox" role="switch" aria-label="共享给同事" checked={module.sourcePresetShared === true || unpublishedSharing}
               disabled={sharingPending || !draftLoaded || draftRestoring || moduleSaving || sharingPreferenceSaving || Boolean(module.sourcePresetId && sharingId === module.sourcePresetId) || uploading || bannerUploading || submitting || Boolean(pendingSubmission)} onChange={event => void changeModuleSharing(event.currentTarget)} />
             <span className="toggle-slider" />
-          </label>
-          <span>{sharingPreferenceSaving ? '保存中' : unpublishedSharing ? '默认共享，保存后生效' : module.sourcePresetShared === true ? '共享给同事' : '仅自己可见'}</span>
-        </span>}
+          </label>}
         {sharingPending && <button type="button" disabled={Boolean(sharingId)} onClick={() => void onQuerySharing()}>查询共享结果</button>}
-        {module.sourcePresetId && (module.sourcePresetOwnedByViewer || sharedLive?.mode === 'publisher') && <button type="button" onClick={event => onLifecycleHistory(event.currentTarget)}>变更记录</button>}
         <ModuleGroupPicker value={groupName} groups={groups} protectedGroups={protectedGroups} disabled={!definitionReady || !draftLoaded || draftRestoring || moduleSaving || !sharedLive && automaticDirty || moduleDeleting || submitting || uploading || Boolean(pendingSubmission)} deleting={groupDeleting}
           onChange={value => void changeGroup(value)} onDelete={onDeleteGroup} />
-        {(moduleSaving || moduleSaveError) && <span role="status" className={styles.muted}>{moduleSaving ? '保存中' : '保存失败'}</span>}
-        <span className={styles.contextEntry}><button type="button" disabled={!draftLoaded || draftRestoring} onClick={openModuleDialog}><Settings size={17} />模块上下文</button></span>
+        <span className={styles.contextEntry}><button type="button" disabled={!draftLoaded || draftRestoring} aria-label={moduleSaveError ? '模块上下文，保存失败，打开查看并重试' : undefined} onClick={openModuleDialog}><Settings size={17} />模块上下文</button></span>
         {(module.coverEditable || !module.saved && !sharedLive) && <button type="button" disabled={!draftLoaded || draftRestoring || moduleSaving || moduleDeleting || bannerUploading} onClick={() => void (async () => {
           if (!module.saved && !await saveModule(reproduceSourceTaskId, revisionRef.current, false)) return;
           setCoverEditorOpen(true);
@@ -3982,6 +3978,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     }}>
       <header className={styles.header}><h2>{repairDefinition ? '修复模板' : '模块上下文'}</h2><button type="button" aria-label="关闭模块上下文" onClick={closeModuleDialog}><X size={20} /></button></header>
       <div className={styles.contextEditorTools}><span>模块上下文版本：<ContextVersionLabel {...contextVersion} /></span>
+        {module.sourcePresetId && (module.sourcePresetOwnedByViewer || sharedLive?.mode === 'publisher') && <button type="button" onClick={event => onLifecycleHistory(event.currentTarget)}>变更记录</button>}
         <button type="button" disabled={!settings?.templateDefaults || !draftLoaded || draftRestoring || moduleSaving || moduleDeleting || presetSaving || Boolean(quickPresetApplying) || submitting || Boolean(pendingSubmission) || uploading || bannerUploading || ratioEditing}
           onClick={applyUnifiedDefaults}><RefreshCw size={16} />套用统一默认</button>
         {contextEditable && <ContextClipboardActions value={moduleContext} textareaRef={moduleContextInput} onPaste={changeModuleContext} maxLength={20000} disabled={moduleSaving} />}

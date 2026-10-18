@@ -397,7 +397,6 @@
 .page .coverCard { display: grid; grid-template-rows: auto minmax(112px, auto); gap: 0; align-items: stretch; padding: 0; overflow: hidden; text-align: left; border-color: #364248; background: #171c1f; }
 .coverVisual { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: stretch; justify-content: center; min-height: 0; aspect-ratio: 4 / 3; overflow: hidden; color: #87949a; background: #0b0e0f; }
 .moduleShareSwitch { flex: 0 0 auto; }
-.moduleSharingChoice { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; font-size: 12px; color: #bbc6cf; }
 .moduleShareSwitch:has(input:focus-visible) { outline: 2px solid #9faefa; outline-offset: 4px; border-radius: 20px; }
 .moduleShareSwitch:has(input:disabled) { opacity: .55; cursor: wait; }
 .coverVisual:has(> img:only-child) { display: block; }
