@@ -37,7 +37,7 @@ async function main() {
   const fixtureSha256 = sha(readFileSync(path.join(root, 'scripts/image-dimension-mismatch-engineering.ts')));
   const scratch = path.join(root, '.role-tests'); mkdirSync(scratch, { recursive: true, mode: 0o700 });
   const directory = mkdtempSync(path.join(scratch, 'image-dimension-mismatch-')), databasePath = path.join(directory, 'synthetic.db');
-  process.env.DATABASE_URL = `file:${databasePath}`; process.env.NODE_ENV = 'test';
+  process.env.DATABASE_URL = `file:${databasePath}`; Reflect.set(process.env, 'NODE_ENV', 'test');
   Reflect.set(globalThis, 'AsyncLocalStorage', AsyncLocalStorage);
   const require = createRequire(import.meta.url), prismaPackage = require.resolve('prisma/package.json');
   const env: NodeJS.ProcessEnv = { NODE_ENV: 'test', DATABASE_URL: process.env.DATABASE_URL, PRISMA_GENERATE_SKIP_AUTOINSTALL: '1' };
@@ -139,7 +139,7 @@ async function main() {
 
     const interrupted = await seed('publication-interrupted');
     const realRename = fs.rename.bind(fs);
-    const injected = mock.method(fs, 'rename', async (from, to) => {
+    const injected = mock.method(fs, 'rename', async (from: Parameters<typeof fs.rename>[0], to: Parameters<typeof fs.rename>[1]) => {
       if (String(to).includes(`${path.sep}public${path.sep}`)) throw Error('synthetic_publication_failure');
       return realRename(from, to);
     });
@@ -249,8 +249,12 @@ async function main() {
     await mutateStudioPin(user, { viewerId: owner, moduleId, taskId: active.id, assetId: asset.id, active: true, expectedRevision: 0, requestId: randomUUID() });
     assert.equal((await readableStudioPins(user, presetId))?.pins[0]?.asset.id, asset.id);
     await mutateStudioPin(user, { viewerId: owner, moduleId, taskId: wrongFormat.id, assetId: jpegAsset.id, active: true, expectedRevision: 1, requestId: randomUUID() });
-    await db.contentReaction.create({ data: { user_id: owner, content_key: `asset:${asset.id}`, liked: true } });
-    await db.contentReaction.create({ data: { user_id: owner, content_key: `asset:${jpegAsset.id}`, liked: true } });
+    const { setReaction } = await import('../src/lib/content-reactions/service');
+    for (const likedAsset of [asset, jpegAsset]) {
+      const reaction = await setReaction(user, { viewerId: owner, key: `asset:${likedAsset.id}`, action: 'like', active: true,
+        expectedVersion: 0, requestId: randomUUID() });
+      assert.equal(reaction.state.liked, true); assert.equal(reaction.state.available, true);
+    }
     const { listStudioResultFeed } = await import('../src/lib/image-studio/result-feed');
     assert.ok((await listStudioResultFeed(user, moduleId, undefined, true)).tasks.some(task => task.id === active.id && task.asset?.id === asset.id));
     assert.ok((await listStudioResultFeed(user, moduleId, undefined, true)).tasks.some(task => task.id === wrongFormat.id && task.asset?.id === jpegAsset.id));

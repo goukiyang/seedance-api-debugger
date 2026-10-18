@@ -118,10 +118,11 @@ export async function finishRejectedStudioDimensions(task: ImageStudioTask, orig
   if (!['running', 'channel_running', 'uncertain'].includes(task.status) || task.asset_id
     || task.status !== 'uncertain' && task.finished_at || repair && task.status !== 'channel_running'
     || !task.output_size || !/^\d+x\d+$/.test(task.output_size)) throw Error('dimension_rejection_task_not_eligible');
+  const requestedSize = task.output_size;
   const validations: Array<Parameters<NonNullable<Parameters<typeof validateGeneratedStudioImage>[2]>>[0]> = [];
   let mismatchCode: 'generated_dimensions_mismatch' | 'generated_format_mismatch';
   try {
-    await validateGeneratedStudioImage(original, { size: task.output_size, format: 'png' }, async value => { validations.push(value); });
+    await validateGeneratedStudioImage(original, { size: requestedSize, format: 'png' }, async value => { validations.push(value); });
     throw Error('dimension_rejection_not_proven');
   } catch (error) {
     if (!(error instanceof StudioImageDeliveryError) || !['generated_dimensions_mismatch', 'generated_format_mismatch'].includes(error.code)) throw error;
@@ -156,7 +157,7 @@ export async function finishRejectedStudioDimensions(task: ImageStudioTask, orig
   };
   const retainedAsset = await prepareStudioOutput(original, task, validation, assertPublicationScope, validation.originalFormat);
   retainedAsset.metadata_json = JSON.stringify({ ...JSON.parse(String(retainedAsset.metadata_json || '{}')),
-    deliveryDisposition: mismatchCode, requestedSize: task.output_size });
+    deliveryDisposition: mismatchCode, requestedSize });
   const rejection = { code: mismatchCode, originalSha256: digest, originalBytes: original.length,
     validation, requestId: request.localRequestId, upstreamRequestId: request.upstreamRequestId,
     providerTaskId: asyncReceipt?.providerTaskId, responseStatus: request.status, returnedAt: request.returnedAt,
@@ -191,7 +192,7 @@ export async function finishRejectedStudioDimensions(task: ImageStudioTask, orig
     if (!previousUsage || typeof previousUsage !== 'object' || Array.isArray(previousUsage)) throw Error('dimension_rejection_usage_not_object');
     const finished = await finishStudioTask(current, task.status === 'channel_running' && mismatchCode === 'generated_dimensions_mismatch' ? 'failed' : 'uncertain', {
       retainedAsset,
-      error: studioDimensionMismatchNotice({ ...validation, requestedSize: task.output_size }),
+      error: studioDimensionMismatchNotice({ ...validation, requestedSize }),
       usage: { ...previousUsage, studioDelivery: { ...previousUsage.studioDelivery, ...rejection } },
     }, tx);
     if (!finished) throw Error('dimension_rejection_settlement_lease_lost');
