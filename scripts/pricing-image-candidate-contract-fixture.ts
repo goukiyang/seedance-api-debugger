@@ -11,6 +11,8 @@ import { IMAGE_STUDIO_SETTING_KEY, DEFAULT_STUDIO_PRICES } from '@/lib/image-stu
 import { PRICING_POLICY_KEY } from '@/lib/pricing/admin-contract';
 import { PRICING_IMAGE_CAPABILITY_KEY, PricingRuntimeError } from '@/lib/pricing/runtime';
 
+export const pricingImageCandidateFixtureErrorClasses = Object.freeze({ PricingRuntimeError, PricingItemUnavailableError });
+
 function keyFrom(value: unknown) {
   if (!value || typeof value !== 'object' || !('where' in value)) return null;
   const where = value.where;

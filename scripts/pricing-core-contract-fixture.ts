@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import type { Prisma } from '@prisma/client';
 import type { FrozenPricingCharge } from '@/lib/pricing/charge';
 import type { PricingAdminAction, PricingAdminActor, PricingAdminSnapshot } from '@/lib/pricing/admin-contract';
@@ -21,42 +22,51 @@ async function rejects(fn: () => Promise<unknown>) { await assert.rejects(fn); a
 
 async function main() {
   const candidateRoot = fs.realpathSync(process.cwd());
+  // Keep production errors and fixture predicates in one CJS module cache on Node 20.
+  const fixtureRequire = createRequire(path.join(candidateRoot, 'scripts/pricing-core-contract-fixture.ts'));
   const databasePath = process.env.PRICING_CORE_FIXTURE_DB;
   assert.ok(databasePath && path.isAbsolute(databasePath) && path.basename(databasePath).includes('pricing-core-fixture'));
   const fixtureRoot = fs.realpathSync(process.env.PRICING_CORE_RUNTIME_ROOT || path.dirname(databasePath));
   assert.ok(fixtureRoot.startsWith(path.join(candidateRoot, '.role-tests') + path.sep));
-  const { PrismaClient } = await import('@prisma/client');
+  const { PrismaClient } = fixtureRequire('@prisma/client') as typeof import('@prisma/client');
   const pricingTransactionQueries: string[] = [];
   const db = new PrismaClient({ datasources: { db: { url: `file:${databasePath}` } }, log: [{ level: 'query', emit: 'event' }] });
   db.$on('query', event => { if (/^(BEGIN|COMMIT|ROLLBACK)\b/.test(event.query)) pricingTransactionQueries.push(event.query); });
   assert.equal(await db.user.count(), 0); assert.equal(await db.platformSetting.count(), 0);
   Reflect.set(globalThis, 'prisma', db);
-  const math = await import('@/lib/pricing/math');
-  const { selectPricingRule, assertNoRuleAmbiguity } = await import('@/lib/pricing/resolve');
-  const precision = await import('@/lib/credits/precision');
-  const { frozenPricingCredits, frozenPricingReservation, parseFrozenPricingCharge } = await import('@/lib/pricing/charge');
-  const { fixedImageBillingContract, withPricingImageContract } = await import('@/lib/image-studio/billing-quote');
-  const { parseImageBillingContract, billedImageContractCredits } = await import('@/lib/image-studio/billing-contract');
-  const { allocateTaskCredits, settleTaskCredits } = await import('@/lib/credits/policy');
-  const { allocateProjectTaskBudget, settleProjectTaskBudget, adjustProjectBudget } = await import('@/lib/projects/budget');
-  const { finishStudioTask, submitStudioBatch } = await import('@/lib/image-studio/tasks');
-  const { settleImageSupplierCharge } = await import('@/lib/image-studio/billing');
-  const { matchImageSupplierCharge } = await import('@/lib/image-studio/billing-provider');
-  const { getAdminPricingSnapshot, previewAdminPricing, saveAdminPricing } = await import('@/lib/pricing/policy');
-  const { PRICING_REVISION_PREFIX } = await import('@/lib/pricing/admin-contract');
-  const runtime = await import('@/lib/pricing/runtime');
-  const isolation = await import('@/lib/pricing/isolation');
-  const { IMAGE_GENERATION_API_SETTING_KEY } = await import('@/lib/integrations/image-generation');
-  const { VOLCENGINE_IP_API_SETTING_KEY } = await import('@/lib/integrations/volcengine-ip');
-  const { quoteStudioBatch } = await import('@/lib/image-studio/batch-billing-quote');
-  const { createStudioBatch, dispatchStudioBatches } = await import('@/lib/image-studio/batches');
-  const { studioBatchBudgetPrecision } = await import('@/lib/image-studio/batch-contract');
-  const { prepareImageBillingQuote } = await import('@/lib/image-studio/billing-quote-service');
-  const { imageQuoteKey } = await import('@/lib/image-studio/billing-quote-store');
-  const { PricingChargeError } = await import('@/lib/pricing/charge');
-  const { getCanvasImageQuote } = await import('@/lib/canvas-quote');
-  const { createSynchronousImageAdmission } = await import('@/lib/image-studio/synchronous-admission');
-  const { runPricingImageCandidateContractFixture } = await import('./pricing-image-candidate-contract-fixture');
+  const math = fixtureRequire('@/lib/pricing/math') as typeof import('@/lib/pricing/math');
+  const { selectPricingRule, assertNoRuleAmbiguity } = fixtureRequire('@/lib/pricing/resolve') as typeof import('@/lib/pricing/resolve');
+  const precision = fixtureRequire('@/lib/credits/precision') as typeof import('@/lib/credits/precision');
+  const { frozenPricingCredits, frozenPricingReservation, parseFrozenPricingCharge } = fixtureRequire('@/lib/pricing/charge') as typeof import('@/lib/pricing/charge');
+  const { fixedImageBillingContract, withPricingImageContract } = fixtureRequire('@/lib/image-studio/billing-quote') as typeof import('@/lib/image-studio/billing-quote');
+  const { parseImageBillingContract, billedImageContractCredits } = fixtureRequire('@/lib/image-studio/billing-contract') as typeof import('@/lib/image-studio/billing-contract');
+  const { allocateTaskCredits, settleTaskCredits } = fixtureRequire('@/lib/credits/policy') as typeof import('@/lib/credits/policy');
+  const { allocateProjectTaskBudget, settleProjectTaskBudget, adjustProjectBudget } = fixtureRequire('@/lib/projects/budget') as typeof import('@/lib/projects/budget');
+  const { finishStudioTask, submitStudioBatch } = fixtureRequire('@/lib/image-studio/tasks') as typeof import('@/lib/image-studio/tasks');
+  const { settleImageSupplierCharge } = fixtureRequire('@/lib/image-studio/billing') as typeof import('@/lib/image-studio/billing');
+  const { matchImageSupplierCharge } = fixtureRequire('@/lib/image-studio/billing-provider') as typeof import('@/lib/image-studio/billing-provider');
+  const { getAdminPricingSnapshot, previewAdminPricing, saveAdminPricing } = fixtureRequire('@/lib/pricing/policy') as typeof import('@/lib/pricing/policy');
+  const { PRICING_REVISION_PREFIX } = fixtureRequire('@/lib/pricing/admin-contract') as typeof import('@/lib/pricing/admin-contract');
+  const runtime = fixtureRequire('@/lib/pricing/runtime') as typeof import('@/lib/pricing/runtime');
+  const isolation = fixtureRequire('@/lib/pricing/isolation') as typeof import('@/lib/pricing/isolation');
+  const { IMAGE_GENERATION_API_SETTING_KEY } = fixtureRequire('@/lib/integrations/image-generation') as typeof import('@/lib/integrations/image-generation');
+  const { VOLCENGINE_IP_API_SETTING_KEY } = fixtureRequire('@/lib/integrations/volcengine-ip') as typeof import('@/lib/integrations/volcengine-ip');
+  const { quoteStudioBatch } = fixtureRequire('@/lib/image-studio/batch-billing-quote') as typeof import('@/lib/image-studio/batch-billing-quote');
+  const { createStudioBatch, dispatchStudioBatches } = fixtureRequire('@/lib/image-studio/batches') as typeof import('@/lib/image-studio/batches');
+  const { studioBatchBudgetPrecision } = fixtureRequire('@/lib/image-studio/batch-contract') as typeof import('@/lib/image-studio/batch-contract');
+  const { prepareImageBillingQuote } = fixtureRequire('@/lib/image-studio/billing-quote-service') as typeof import('@/lib/image-studio/billing-quote-service');
+  const { imageQuoteKey } = fixtureRequire('@/lib/image-studio/billing-quote-store') as typeof import('@/lib/image-studio/billing-quote-store');
+  const { PricingChargeError } = fixtureRequire('@/lib/pricing/charge') as typeof import('@/lib/pricing/charge');
+  const { getCanvasImageQuote } = fixtureRequire('@/lib/canvas-quote') as typeof import('@/lib/canvas-quote');
+  const { createSynchronousImageAdmission } = fixtureRequire('@/lib/image-studio/synchronous-admission') as typeof import('@/lib/image-studio/synchronous-admission');
+  const { runPricingImageCandidateContractFixture, pricingImageCandidateFixtureErrorClasses } = fixtureRequire('./pricing-image-candidate-contract-fixture') as typeof import('./pricing-image-candidate-contract-fixture');
+  const { PricingItemUnavailableError } = fixtureRequire('@/lib/pricing/item-unavailable') as typeof import('@/lib/pricing/item-unavailable');
+  const frozenCharge = fixtureRequire('@/lib/pricing/frozen-charge') as typeof import('@/lib/pricing/frozen-charge');
+  const { prisma } = fixtureRequire('@/lib/prisma') as typeof import('@/lib/prisma');
+  assert.equal(prisma, db, 'Business modules must retain the injected isolated client');
+  assert.equal(pricingImageCandidateFixtureErrorClasses.PricingRuntimeError, runtime.PricingRuntimeError, 'Runtime error constructors must share one module instance');
+  assert.equal(pricingImageCandidateFixtureErrorClasses.PricingItemUnavailableError, PricingItemUnavailableError, 'Item error constructors must share one module instance');
+  assert.equal(PricingChargeError, frozenCharge.PricingChargeError, 'Charge re-exports must retain the original error constructor');
   const now = new Date().toISOString();
   const charge = (changes: Partial<FrozenPricingCharge> = {}): FrozenPricingCharge => ({
     schema: 'pricing-charge-v1', revision: 'fixture-revision', ruleId: 'fixture-rule',
@@ -209,7 +219,7 @@ async function main() {
   equal(await finishStudioTask(fixed, 'failed'), true);
   equal(await finishStudioTask(fixed, 'failed'), false);
   equal(await db.creditLedger.count({ where: { related_task_id: fixed.id, type: 'task_failed_refund' } }), 1);
-  const mismatch = await import('@/lib/image-studio/dimension-mismatch');
+  const mismatch = fixtureRequire('@/lib/image-studio/dimension-mismatch') as typeof import('@/lib/image-studio/dimension-mismatch');
   const visibleMismatch = { status: 'rate_uncertain', asset_id: 'fixture-visible-original', usage_json: JSON.stringify({ studioDelivery: {
     code: 'generated_dimensions_mismatch', originalSha256: 'a'.repeat(64), originalBytes: 100,
     validation: { originalFormat: 'png', storedFormat: 'png', width: 64, height: 64, requestedSize: '1024x1024' },
@@ -349,7 +359,7 @@ async function main() {
     settings: { model: 'doubao-seedance-2-5-260628', ratio: '16:9', duration: 5, resolution: '480p', pricingRevision: 'fixture-revision', maxEstimatedCost: 0.5 } });
   equal(request.payload.pricing_revision, 'fixture-revision'); equal(request.payload.max_estimated_cost, 0.5);
   equal(request.payload.idempotency_key, 'fixture-node:fixture-original');
-  const { newerRelease, parseReleaseVersion } = await import('@/lib/release');
+  const { newerRelease, parseReleaseVersion } = fixtureRequire('@/lib/release') as typeof import('@/lib/release');
   equal(newerRelease('0.96.0', '0.95.4'), true);
   equal(newerRelease('0.96.0+other-build', '0.96.0'), false);
   equal(newerRelease('0.96.0+points-pricing-guard.1', '0.96.0'), false);
