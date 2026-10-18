@@ -324,7 +324,8 @@ async function main() {
     const current = await db.imageStudioTask.findUniqueOrThrow({ where: { id: activeTask.id } });
     const files = [false, true].flatMap(billing => ['request.json', 'async.json'].map(name => storage(current.id, billing, name)));
     const filesBefore = await Promise.all(files.map(file => fs.readFile(file, 'utf8')));
-    const before = await snapshotReads(), callsBefore = calls.length;
+    const before = await snapshotReads();
+    const callsBefore: number = calls.length;
     const check = await recovery.readStudioActiveProviderCheck(current);
     const status = await delivery.studioDeliveryStatus(current);
     const dto = (await studioTaskDTOs(owner, false, [current]))[0]; assert.ok(dto.delivery);

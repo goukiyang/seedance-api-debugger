@@ -1,5 +1,7 @@
 # 项目资料索引
 
+TRACE03-FIX共享窗口补充（2026-10-18）：[4b319私有类型诊断](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/4b319340-4332-42f4-926d-30692ca5556c/mac-types-receipt.json)与[共享源码只读对照](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/4b319340-4332-42f4-926d-30692ca5556c/shared-source-collision.json)仅正式根保存。现有TS5.9.3/本机Node22有界noEmit只报fixture计数变量推断循环1条，定向显式number不改产品或断言；不代Linux20双候选完整构建。4b319未上传、静态superseded；29重叠是修改文件交集而非merge conflict数，不代表对方任务完成或授予合并/切换。
+
 TRACE03-FIX等待显示收口（2026-10-18）：[正式根e431未上传静态包记录](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/e4319941-df6d-41bf-b8fc-c697b4ebb96b/superseded.json)仅本机保存，不算真实build失败。普通WAIT05继续pending/generationWait，特殊投影仅长/非法退避、24h暂停及人工核对；raw及非法保守日期不假报手核时间，后台GET/CAS/预算/费用未改。教训合并现有tasks/lessons同条，功能仍待手验；新精确候选完整门未完成。
 
 第五轮run8d148（2026-10-18）：[正式根原始总门/子门与完整build日志](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/8d148549-970c-44d5-a17a-fc20595ef391/)已归档。0abd/Linux20主6fixture/62检查及编译通过，类型门因新增fixture缺显式非空断言拒绝，完整tsc仅该1错，guard未构建/未部署；仅补真实assert.ok，不改产品/DTO保护，待同版新SHA完整重建。私有收据SHA已核，不复制公开；功能仍用户手验。
