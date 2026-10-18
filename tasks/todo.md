@@ -2,6 +2,8 @@
 
 ## 当前入口
 
+- [x] GEN12（2026-10-18）：本人近12小时生成核查完成；洛杉矶10月17日19:04:52至18日07:04:52新建29图/2视频，14图正常、12图尺寸不符但原件全部保留、3图供应商uncertain，视频均成功。12图退60点，3图冻15点；规格不符7图已入Asset，5图未入其中3条用户已移除，余2条未恢复。正式根[完整报告与逐条证据](../docs/materials/2026-10-17-image-content-incident/inc24/gen12-report-2026-10-18.md)；未重发/生成/新增上游查询或改生产，供应商内部深因未知。
+
 - [ ] HD-STATE 实页核对（2026-10-18 12:37–12:40Z）：用户明确授权打开页面区分原图/HD及提示原因。Google Chrome原生清单仅有本站login?next=/admin/integrations，Default/xiaobo已核，相关活动聊天未见他人使用本站；ClickOps auto-connect实际请求超时，CUA原生Chrome读取timeoutReached。备用BrowserSkill连接124ceaf5列出/template-studio?type=image现有用户页，但其与Google Chrome身份未完成绑定；借用576244785触发工具要求的本人确认，15秒超时并明确禁止自动重试/换工具。会话aqrl已停止。未获得目标图片DOM/像素/媒体请求，不能判定是原图还是HD；未导航/刷新/登录/生成或修改图片。需用户明确继续并完成下一次接管确认后，再核实际浏览器/profile、版本、图片类型/体积/descriptor及提示。前条源码解释仍有效但不冒实页结论。
 
 - [ ] HD-STATE（2026-10-18追加反馈）：用户试用感觉已有高清图，但仍显示“高清暂不可用”。已核上次确认线上源2339086c与当前源码：`image-preview-session.ts`把非ready描述（包括queued/running）统一切完整原图且fallback=true，HD读取不支持/不可用也可回退；`hd-display-policy.ts:25`据fallback显示该提示，不等于后台未产出高清文件。ready描述会清fallback，故不能直接断言旧文案没刷新。此反馈沿HD-PLAN的H06状态合同处理，不缩成仅改字；未指认具体图片/本次媒体响应，原图清晰与实际HD档尚不能区分。本轮公网release核对TLS超时，未确认线上是否已变化；无代码/生产变更、浏览器/功能测试或新生成。待提供具体图及底部提示截图/任务编号后作对象级核对。
