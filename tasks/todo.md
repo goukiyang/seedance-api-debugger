@@ -2,9 +2,11 @@
 
 ## 当前入口
 
-TRACE03-FIX发布续接：414e完整构建与业务Review有效，但20:10实际switch在drain/停服务前因原工程门startedAt硬30分钟过期被拒，20:11五角色/无drain鲜核原样，未维护停机。保全部旧包/批准/失败；不改业务、TTL或时段，以纯记录新SHA/三文件guard/新run06b0fd45独立目录完整重建，仍v0.95.5、0模型费用。当前TF05需完成新精确候选门，TF06未部署；既有业务Review按75源一致复用，构建→薄核→鲜窗→切换连续衔接。
+本轮新run `25847a38-66e4-46c3-8a4b-fa9e6e244555` 仅准备同版纯固定记录新源/三文件guard和独立包；未上传、未占fullbuild、未部署。06b0主门20:51:17已过，旧完整build/业务Review仍真实保留，R2发布配套20门/OS引用合同复用；等待R03实际释放与正常5分钟活动门后鲜核runtime，再连续完整构建→快速薄核→鲜窗批准→保护切换，不提前重建或混入未验RATE。
 
-- [ ] TRACE03-FIX（2026-10-18，工程已完成、未部署）：main2ede71a6/v0.95.5/BUILD WH2JWoH3sLD2DE2vlcHCd与guardddadb63c/v0.95.4+trace03-guard.1/BUILD ZA388QzyBE1VyNFIXIVlK已推送并完成同run414e21b0 Linux20完整构建；类型/lint未跳过、各87/87静态页，主6fixture/63项、guard同63+实际无preload保护2项及各7命名负证全部有据，13子receipt SHA/75源SHA匹配；私有发布控制器18项与同lead整批Review零发现。HD准备鲜核为40条而非固定39，39ready+1skipped完整同身份；切换前及排空后仍须重新全量核对。19:45已明确仅候选prepare完成并释放构建占窗，不冒上线。旧失败源/日志与e431、4b319未上传静态包保留，不混RATE未验候选；历史原图/隐藏/原key/冻结费用不动。TF06仍需鲜窗、五角色真实来源/公网与主控绑定批准，回退未演练，功能用户手验。0真实供应商任务GET/生成POST/收费测试/生产DB写/DDL/浏览器功能验收。 [正式原单当前对账](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-10-fluxport-image-api.md#1764-trace03-fix-最终统一工程结果与发布前对账2026-10-18)；[私有整批Review](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/414e21b0-83c5-4007-8777-e1dd47298074/integrated-review.json)。
+TRACE03-FIX当前发布续接（20:47Z）：06b0/main488f（BUILD HojBRX34wpCglBn9CF0wr）与guard0790（BUILD GKyASL-bxfAVdIVORlr8q）两完整Linux20构建/13子门和Review复用已过，版本仍v0.95.5。20:36获批switch在旧live drain叶不存在处、停服务前拒绝；只精确撤销本run新marker并保原副本，五角色原PID/Invocation不变。私有private-release-r2已一包补去重drain连通及真实systemd停机身份证明，20门/同lead Review与主管薄核通过；20:47鲜核R03/e57e真实full-build及正常registry占窗，未生成新switch窗口。TF01–TF05工程完成，TF06受共享窗/原30min门约束；不改TTL、不混未验RATE、不提前重建，等实际释放后鲜核源/时效再合法续接。原414e和06b0失败/完整构建证据均保留，功能待用户手验。
+
+- [ ] TRACE03-FIX（2026-10-18，业务工程完成、未部署）：06b0/main488f与guard0790两完整Linux20构建/13子门、75源、Review和HD40条动态核对通过；旧live drain叶缺失在stop前拒绝，已精确恢复本run marker、原五进程保持。private-release-r2去重drain/真实systemd停机证明及20项门已通过；原任务/费用/原件未改。06b0主发布时效已过，以上均保留历史证据，新run仅同版纯记录精确候选续接；TF06还须正常共享窗、两完整新build、同run私有门和新绑定批准，功能由用户手验。正式原单§17.6.4、固定资料索引和私有trace03-fix为证据入口；不把发布健康冒功能验收。
 
 | 编号 | 任务 | 完成标准 | 当前状态 |
 |---|---|---|---|
@@ -12,8 +14,8 @@ TRACE03-FIX发布续接：414e完整构建与业务Review有效，但20:10实际
 | TF02 | 受理身份与诊断留存 | 原件/规范化摘要和阶段可追查，202核心身份耐久保护，脱敏诊断失败不重发/泄露 | 已完成（工程）；同身份核心回执故障/修齐和旧reader有据 |
 | TF03 | 修压缩响应及查询退避 | 有界解码与耐久较长等待；原号、预算、CAS、费用与执行位保护不变 | 已完成（工程）；Linux20流/等待/恢复及人工单次许可门有据 |
 | TF04 | 用户信息与原图行为衔接 | 就近展示所选/提交/返回和真实未知；完整异常图可见可用，不额外确认或补生成 | 已完成（工程）；实际UI表达式与Canvas链有据，视觉/功能待用户手验 |
-| TF05 | 整批工程门与代码复核 | 整批统一候选检查及新旧合同、身份、费用、原件、诊断/解码/退避不变量，同lead Review | 进行中（发布候选续接）；414e完整build/Review零发现保留，纯记录新SHA/新根待重建同run门 |
-| TF06 | 保护发布与用户手验交付 | 主/guard同源完整构建、HD鲜核/发布不变量、相容回退与主控放行后切换，功能用户手验 | 受阻（原工程门时效）；drain前拒绝、线上未动，待新同版候选/鲜窗及绑定批准 |
+| TF05 | 整批工程门与代码复核 | 整批统一候选检查及新旧合同、身份、费用、原件、诊断/解码/退避不变量，同lead Review | 已完成（工程）；06b0两完整build/13子门、R2私有20门及Review零发现；发布仍须原时效门 |
+| TF06 | 保护发布与用户手验交付 | 主/guard同源完整构建、HD鲜核/发布不变量、相容回退与主控放行后切换，功能用户手验 | 受阻（共享窗口）；20:47 R03真实构建中，原5服务保持，06b0停前拒绝已恢复本run marker；待鲜窗/时效/新绑定批准 |
 
 - [x] TRACE03-AUDIT（2026-10-18）：本轮查漏/风险审查与计划修订已完成，18文件运行源与HD目录现场有证；A01–A06已合入同一原单，不冒工程门已生效或修复已完成。v1.0“响应回调”归类纠正有，已记lessons/全局误判记录，未据此改生产。
 

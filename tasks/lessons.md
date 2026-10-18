@@ -9,6 +9,8 @@
 - 特殊providerCheck不覆盖普通WAIT05：常规无header/短间隔仍走原pending与generationWait，较长/非法退避、24h暂停和合法人工checking才投影特殊状态。既有30s只区分显示，不改变notBefore/GET资格、预算、CAS、名额或费用；原始notBefore不当成人工可再次核对提示。 非法退避的内部保守日期也不当作nextCheckAt/providerNotBefore公开可用时间，日期已过仍不暗示允许查询。 detached合法notBefore只称“供应商要求等待至”，不冒人工限频/预算均已满足；按钮仍只看原canRequestRecheck。
 - 发布临门核对必须计入工程回执的真实时效：原门按最早main gate.startedAt硬30分钟，且子门必须位于同一完整build时段；共享等窗不能让旧证据仍被称可切换。失效时保原包/批准/失败，不延TTL、不改回执时间、不在原build外挂新fixture；纯记录新SHA、相容guard与新目录完整重建。同版无模型费用；构建→快速薄核→鲜窗→切换连续衔接，如实区分构建CPU已退出和发布前核对仍在进行。
 - 本批实现与同源工程结果以正式生图原单§17.6及私有trace03-fix回执为准；写入本经验不冒构建或功能通过。
+- 发布维护入口要核旧writer真实读取路径，不以候选/HD目录相同代替drain连通。先全量核旧web/image的storage物理父目录和别名，按父目录去重，白名单预检后才连通缺失叶、创建本run marker；冲突不覆盖，失败只撤本run精确新对象并留副本。20:36旧leaf真不存在导致保护拒绝，5原进程未停，未据猜测宣称维护已生效。
+- systemd停机证据须匹配真实OS引用状态：本机255的无引用probe被GC后所有执行字段清空；自有target引用及正式multi-user引用下保留原Invocation/PID/StartTimestamp。用active/deactivating原启动锁、inactive原/空ID规则、原启动起点、原proc消失及before原cgroup空成套证明，Web-only/rollback复用；不把空ControlGroup拼到根cgroup，也不强求无引用unit保留已GC字段。只读/独立非业务probe不触正式服务；修改私有控制器必须新SHA/新完整私有门/新批准绑定，旧证据不覆盖。
 
 ## 2026-10-18 - TRACE03受理回调不能按名字归为可丢日志
 
