@@ -51,6 +51,14 @@ async function main() {
   const blocked = () => { forbiddenCalls++; throw new Error('Fixture network is forbidden'); };
   mock.method(globalThis, 'fetch', blocked); mock.method(http, 'request', blocked); mock.method(http, 'get', blocked);
   mock.method(https, 'request', blocked); mock.method(https, 'get', blocked); mock.method(dns, 'lookup', blocked);
+  // Match Next's server compilation for its marker package only. This fixture
+  // executes real server modules in Node; no business import or assertion is mocked.
+  const serverOnlyMarker = path.join(path.dirname(require.resolve('next/package.json')), 'dist/compiled/server-only/empty.js');
+  assert.equal(statSync(serverOnlyMarker).size, 0);
+  const resolver = require('node:module') as { _resolveFilename: (...args: unknown[]) => string };
+  const originalResolve = resolver._resolveFilename;
+  mock.method(resolver, '_resolveFilename', (...args: unknown[]) => args[0] === 'server-only'
+    ? serverOnlyMarker : originalResolve.apply(resolver, args));
   try {
     const owner = 'dimension-fixture-owner', channelId = `fixture-${randomUUID()}`, revision = randomUUID();
     const user = await db.user.create({ data: { id: owner, name: 'Dimension fixture', username: owner, email: `${owner}@fixture.invalid`,
@@ -264,7 +272,8 @@ async function main() {
     const receipt = path.join(directory, 'receipt.json');
     writeFileSync(receipt, JSON.stringify({ schema: 'image-dimension-mismatch-engineering.v1', synthetic: true, runId, startedAt,
       finishedAt: new Date().toISOString(), completed, checks, fixtureSha256, sourceSha256, forbiddenCalls,
-      productionWrites: 0, paidRequests: 0, browserRuns: 0 }, null, 2), { mode: 0o600, flag: 'wx' });
+      productionWrites: 0, paidRequests: 0, browserRuns: 0, serverOnlyMarker,
+      serverOnlyMarkerSha256: sha(readFileSync(serverOnlyMarker)) }, null, 2), { mode: 0o600, flag: 'wx' });
     assert.equal(lstatSync(receipt).mode & 0o777, 0o600); process.umask(previousUmask);
     if (completed) console.log(`Image dimension mismatch engineering receipt: ${receipt}`);
   }
