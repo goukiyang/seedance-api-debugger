@@ -46,7 +46,7 @@ async function main() {
   let clock = Date.now(); mock.method(Date, 'now', () => clock);
   const signal = () => AbortSignal.timeout(5000);
   const plain = Buffer.from(JSON.stringify({ task_id: 'provider-synthetic', status: 'pending', text: 'x'.repeat(4096) }));
-  const encoded = (bytes: Buffer, encoding: string, length = true) => new Response(bytes, { status: 200,
+  const encoded = (bytes: Buffer, encoding: string, length = true) => new Response(Uint8Array.from(bytes).buffer, { status: 200,
     headers: { 'content-type': 'application/json', 'content-encoding': encoding, ...(length ? { 'content-length': String(bytes.length) } : {}) } });
   for (const [encoding, encode] of [['gzip', gzipSync], ['deflate', deflateSync], ['br', brotliCompressSync]] as const) {
     const response = provider.decodeStudioProviderResponse(encoded(encode(plain), encoding), signal());
@@ -59,12 +59,42 @@ async function main() {
   await assert.rejects(async () => provider.decodeStudioProviderResponse(encoded(compressed, 'gzip', false), signal(), { compressedBytes: compressed.length - 1 }).arrayBuffer());
   await assert.rejects(async () => provider.decodeStudioProviderResponse(encoded(compressed, 'gzip'), signal(), { decodedBytes: plain.length - 1 }).arrayBuffer());
   assert.throws(() => provider.decodeStudioProviderResponse(encoded(compressed, 'gzip'), signal(), { compressedBytes: compressed.length - 1 }));
-  await assert.rejects(async () => provider.decodeStudioProviderResponse(new Response(compressed, { headers: {
+  await assert.rejects(async () => provider.decodeStudioProviderResponse(new Response(Uint8Array.from(compressed).buffer, { headers: {
     'content-encoding': 'gzip', 'content-length': String(compressed.length + 1) } }), signal()).arrayBuffer());
   const aborted = new AbortController(); aborted.abort();
   await assert.rejects(async () => provider.decodeStudioProviderResponse(encoded(compressed, 'gzip'), aborted.signal).arrayBuffer());
   await assert.rejects(async () => provider.decodeStudioProviderResponse(new Response(new ReadableStream({ start() {} }), {
     headers: { 'content-encoding': 'gzip' } }), signal(), { timeoutMs: 5 }).arrayBuffer());
+  const cancellationEvidence: Array<{ mode: string; sourceCancelCount: number }> = [];
+  for (const mode of ['mid-abort', 'body-cancel']) {
+    let sourceCancelCount = 0, started = false, sawPull!: () => void;
+    const pulled = new Promise<void>(resolve => { sawPull = resolve; });
+    const source = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (started) return;
+        started = true;
+        controller.enqueue(Uint8Array.from(compressed.subarray(0, 10))); sawPull();
+        // No end-of-stream: abort/cancel must reach this actual original source.
+      },
+      cancel() { sourceCancelCount++; },
+    });
+    const abort = new AbortController();
+    const decoded = provider.decodeStudioProviderResponse(new Response(source, { headers: { 'content-encoding': 'gzip' } }), abort.signal);
+    const reader = decoded.body!.getReader();
+    if (mode === 'mid-abort') {
+      const reading = reader.read();
+      await pulled; abort.abort();
+      await assert.rejects(reading);
+    } else {
+      await pulled; await reader.cancel('synthetic consumer cancellation');
+    }
+    reader.releaseLock();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(sourceCancelCount, 1, 'The real original response stream must be cancelled exactly once');
+    cancellationEvidence.push({ mode, sourceCancelCount });
+    const afterCancel = provider.decodeStudioProviderResponse(encoded(compressed, 'gzip'), signal());
+    assert.deepEqual(Buffer.from(await afterCancel.arrayBuffer()), plain, 'A subsequent decode still completes normally');
+  }
   fixture.check(expectedChecks[1]);
   const parseWait = provider.parseStudioProviderWait;
   const wait120 = parseWait(new Headers({ 'retry-after': '120' }), { poll_after_ms: 30000 }, clock);
@@ -86,7 +116,7 @@ async function main() {
   let accepted: StudioAsyncAccepted | undefined;
   const post202: typeof fetch = async (url, init) => {
     calls.push({ method: String(init?.method), path: String(url) }); assert.equal(init?.method, 'POST');
-    return new Response(gzipSync(Buffer.from(JSON.stringify({ task_id: 'provider-synthetic', poll_after_ms: 2000 }))), { status: 202,
+    return new Response(Uint8Array.from(gzipSync(Buffer.from(JSON.stringify({ task_id: 'provider-synthetic', poll_after_ms: 2000 })))).buffer, { status: 202,
       headers: { 'content-encoding': 'gzip', 'retry-after': '120', 'x-request-id': 'upstream-synthetic' } });
   };
   await assert.rejects(provider.requestStudioImages({ ...params, recordResponse: async () => { throw new Error('synthetic-observation-write'); },
@@ -413,7 +443,7 @@ async function main() {
   assert.equal(originalCalls.length, 3, 'Mismatch retention and late completion never submit or query a provider');
   fixture.check(expectedChecks[13]);
   await fixture.finish({ negativeChecks: ['legacy_wait_schema_rejected', 'conflicting_core_accounting_copy_rejected'], calls,
-    manualOriginalGets: manualGets, initialHoldDispatchCalls: heldCalls, originalCalls,
+    manualOriginalGets: manualGets, initialHoldDispatchCalls: heldCalls, originalCalls, cancellationEvidence,
     originalSettlementCount: await db.creditLedger.count({ where: { idempotency_key: `image-studio:settle:${originalId}` } }) });
 }
 

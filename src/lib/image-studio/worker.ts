@@ -40,7 +40,8 @@ async function prepareReferenceInputs(task: ImageStudioTask, snapshot: Record<st
   if (snapshot.ratioContractVersion === 3 && frozen.length && (frozen.length !== ids.length || frozen.some((value, index) => value.id !== ids[index]))) {
     throw new Error('冻结参考图顺序不一致；未向供应商提交');
   }
-  for (const [ordinal, id] of ids.entries()) {
+  for (let ordinal = 0; ordinal < ids.length; ordinal++) {
+    const id = ids[ordinal];
     const ownerId = owners[id] || task.owner_id;
     const asset = await prisma.asset.findFirst({ where: { id, owner_id: ownerId, status: 'active', type: 'image' } });
     if (!asset) throw new Error('参考图已不可用');

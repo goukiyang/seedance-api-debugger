@@ -413,8 +413,10 @@
                 : nodeEl?.querySelector('[data-canvas-node-price]');
             if (!line) return;
             const total = Number(quote?.estimatedCredits);
+            const outputSize = /^\d+x\d+$/.test(quote?.outputPlan?.outputSize || '')
+                ? ` · ${quote.outputPlan.outputSize.replace('x', '×')}` : '';
             line.textContent = Number.isFinite(total) && total >= 0 && Number.isSafeInteger(Math.ceil(total))
-                ? `合计约 ${Math.ceil(total).toLocaleString('zh-CN')} 点数` : '费用待估算';
+                ? `合计约 ${Math.ceil(total).toLocaleString('zh-CN')} 点数${outputSize}` : '费用待估算';
         },
         clearQuote: nodeId => {
             if (engine.nodes.has(nodeId)) renderGenerationNodeControls(nodeId);
@@ -4921,6 +4923,9 @@
                         && style.unitCredits >= 0 && Number.isSafeInteger(style.count) && style.count > 0
                         && Number.isSafeInteger(fixedTotal)
                         ? `合计约 ${fixedTotal.toLocaleString('zh-CN')} 点数` : '费用待估算';
+                if (/^\d+x\d+$/.test(actualQuote?.outputPlan?.outputSize || '') && stylePrice.textContent !== '费用待估算') {
+                    stylePrice.textContent += ` · ${actualQuote.outputPlan.outputSize.replace('x', '×')}`;
+                }
                 stylePrice.title = '按应用风格时的报价；价格变化时会停止提交';
                 if (submit && !submit.classList.contains('is-loading')) submit.disabled = !interactionReadiness.ready || Boolean(styleJob && styleJob.state !== 'unconfirmed') || style.appliedBy !== canvasRuntime.bootstrap?.user?.id;
             } else window.UltimateCanvasNodePricing?.refresh(nodeEl, node);

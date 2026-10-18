@@ -49,9 +49,17 @@
         const quoteInputsMatch = (node, context, snapshot) => current(node, context)
             && context.writable === hooks.context().writable
             && typeof snapshot === 'string' && snapshot.length > 0 && quoteSnapshot(node.id) === snapshot;
-        function validActualQuote(quote, revision) {
+        const needsPreparedQuote = quote => quote?.actualQuoteRequired === true || /^gpt-image-/.test(quote?.model || '');
+        const outputSizeText = quote => /^\d+x\d+$/.test(quote?.outputPlan?.outputSize || '')
+            ? `输出 ${quote.outputPlan.outputSize.replace('x', '×')}` : '';
+        function validActualQuote(quote, revision, safeQuote) {
             const expiresAt = Date.parse(quote?.expiresAt);
-            return quote?.billingMode === 'actual' && quote.actualChargeEnabled === true
+            const modeValid = quote?.billingMode === 'actual' ? quote.actualChargeEnabled === true
+                : quote?.billingMode === 'fixed' && quote.actualChargeEnabled === false
+                    && quote.ratioContractVersion === 3 && typeof quote.outputPlan?.outputSize === 'string'
+                    && quote.outputPlan.outputSize.length > 0
+                    && (!safeQuote || quote.estimatedCredits === safeQuote.estimatedCredits);
+            return modeValid && (!safeQuote || (quote.billingMode === 'actual') === safeQuote.actualQuoteRequired)
                 && typeof quote.billingQuoteId === 'string' && quote.billingQuoteId.length > 0
                 && Number.isSafeInteger(quote.revision) && quote.revision === revision
                 && Number.isFinite(quote.estimatedCredits) && quote.estimatedCredits >= 0
@@ -164,7 +172,7 @@
             const expectedModel = style?.model || settings.model;
             const expectedCount = style?.count ?? settings.count;
             if (!node || node.type !== 'image' || !context.userId || !generationPayload || !context.writable || !context.projectId
-                || !context.documentId || !context.cardId || safeQuote?.actualQuoteRequired !== true
+                || !context.documentId || !context.cardId || !needsPreparedQuote(safeQuote)
                 || safeQuote.kind !== 'image' || safeQuote.projectId !== context.projectId
                 || safeQuote.model !== expectedModel || safeQuote.count !== expectedCount
                 || safeQuote.status !== 'estimate' || !Number.isSafeInteger(safeQuote.revision)
@@ -177,7 +185,7 @@
             const cached = actualQuotes.get(String(nodeId));
             if (cached?.snapshot === snapshot && cached.revision === safeQuote.revision) {
                 if (cached.promise) return cached.promise;
-                if (validActualQuote(cached.quote, cached.revision)) return cached;
+                if (validActualQuote(cached.quote, cached.revision, safeQuote)) return cached;
             }
             invalidateQuote(nodeId);
             const controller = new AbortController();
@@ -196,7 +204,7 @@
                     if (actualQuotes.get(String(nodeId)) !== entry || controller.signal.aborted
                         || request.input.moduleId !== currentModuleId
                         || request.input.channelId && !sameImageChannelSnapshot(quote?.imageChannel, request.input.imageChannel)
-                        || !validActualQuote(quote, entry.revision) || !quoteInputsMatch(node, context, snapshot)) {
+                        || !validActualQuote(quote, entry.revision, safeQuote) || !quoteInputsMatch(node, context, snapshot)) {
                         throw new Error('报价已过期或参数已变化；未提交生成。');
                     }
                     entry.quote = quote;
@@ -395,18 +403,9 @@
             const selectedChannelId = imageChannelFor(payload.settings);
             let job = node.data.styleJob;
             if (job && !sameContext(job.context, context)) throw new Error('此任务属于原项目或视频卡，请返回原画布查看。');
-            if (job?.input?.roleMediaContext && !job.batchId) {
-                return { ...await waitForResult(node, job), canvasStylePayload: job.payload };
-            }
-            if (job?.quoteExpiresAt && !job.batchId && Date.parse(job.quoteExpiresAt) <= Date.now()) {
-                clearQuote(node.id);
-                try {
-                    return { ...await waitForResult(node, job), canvasStylePayload: job.payload };
-                } catch (error) {
-                    if (current(node, context)) hooks.status(node.id, 'warn', '报价已过期；仅查询原请求，未重新提交生成。');
-                    throw new Error(`报价已过期；未重新提交生成。${error.message ? ` ${error.message}` : ''}`);
-                }
-            }
+            // A persisted job may already have reached the server even without a batch receipt.
+            // Re-entry only queries its original identity; it never replays a generation POST.
+            if (job) return { ...await waitForResult(node, job), canvasStylePayload: job.payload };
             if (!job) {
                 job = { requestId: payload.requestId || crypto.randomUUID(), moduleId: style.moduleId,
                     context: { userId: context.userId, projectId: context.projectId, cardId: context.cardId, documentId: context.documentId },
@@ -450,7 +449,7 @@
                     job.input.channelId = 'original';
                     job.input.imageChannel = { ...quote.imageChannel };
                 }
-                if (quote.actualQuoteRequired) {
+                if (needsPreparedQuote(quote)) {
                     let actualEntry;
                     try {
                         actualEntry = cachedActualQuote(node.id, snapshot, style.settingsRevision)
@@ -460,7 +459,7 @@
                         throw error;
                     }
                     const actualQuote = actualEntry.quote;
-                    if (actualEntry.kind !== 'style' || !validActualQuote(actualQuote, style.settingsRevision)
+                    if (actualEntry.kind !== 'style' || !validActualQuote(actualQuote, style.settingsRevision, quote)
                         || selectedChannelId && !sameImageChannelSnapshot(actualEntry.input.imageChannel, quote.imageChannel)
                         || !quoteInputsMatch(node, context, snapshot)) {
                         clearQuote(node.id);
@@ -470,12 +469,13 @@
                     job.input = actualEntry.input;
                     const maxEstimatedCost = Math.ceil(actualQuote.estimatedCredits);
                     showQuote(node.id, actualQuote);
-                    let confirmed = false;
-                    try {
+                    let confirmed = !quote.actualQuoteRequired;
+                    try { if (quote.actualQuoteRequired) {
                         confirmed = await hooks.confirm({ title: '生成图片',
                             message: `本次 ${style.count} 张图片，报价约 ${maxEstimatedCost} 点。`,
-                            detail: '确认后按实际费用核对；报价过期或参数变化时不会提交。',
+                            detail: [outputSizeText(actualQuote), '确认后按实际费用核对；报价过期或参数变化时不会提交。'].filter(Boolean).join('；'),
                             confirmLabel: `确认 ${maxEstimatedCost} 点` });
+                    }
                     } catch (error) {
                         clearQuote(node.id);
                         throw error;
@@ -484,13 +484,13 @@
                         clearQuote(node.id);
                         throw new Error('已取消，未提交风格图片生成。');
                     }
-                    if (!validActualQuote(actualQuote, style.settingsRevision)
+                    if (!validActualQuote(actualQuote, style.settingsRevision, quote)
                         || !quoteInputsMatch(node, context, snapshot)) {
                         clearQuote(node.id);
                         throw new Error('报价已过期或风格参数已变化；本次未提交，请重新获取并确认。');
                     }
                     job.input.billingQuoteId = actualQuote.billingQuoteId;
-                    job.input.maxEstimatedCost = maxEstimatedCost;
+                    if (quote.actualQuoteRequired) job.input.maxEstimatedCost = maxEstimatedCost;
                     job.quoteExpiresAt = actualQuote.expiresAt;
                 } else invalidateQuote(node.id);
                 node.data.styleJob = job;
@@ -581,7 +581,7 @@
                 || !quoteInputsMatch(node, context, snapshot)) {
                 throw new Error('当前图片报价无效或参数已变化，请重新核对；未提交生成。');
             }
-            if (quote.actualQuoteRequired) {
+            if (needsPreparedQuote(quote)) {
                 let actualEntry;
                 try {
                     actualEntry = cachedActualQuote(node.id, snapshot, quote.revision)
@@ -596,7 +596,7 @@
                     invalidateQuote(node.id);
                     throw new Error('图片报价与当前节点不匹配；未提交生成。');
                 }
-                if (!validActualQuote(actualQuote, quote.revision) || !quoteInputsMatch(node, context, snapshot)) {
+                if (!validActualQuote(actualQuote, quote.revision, quote) || !quoteInputsMatch(node, context, snapshot)) {
                     clearQuote(node.id);
                     throw new Error('完整报价已失效或参数已变化；本次未提交，请重新获取并确认。');
                 }
@@ -605,8 +605,11 @@
                 let confirmed = false;
                 try {
                     confirmed = await hooks.confirm({ title: '生成图片',
-                        message: `本次 ${settings.count} 张图片，报价约 ${maxEstimatedCost} 点。`,
-                        detail: '确认后按实际费用核对；报价过期或参数变化时不会提交。',
+                        message: quote.actualQuoteRequired ? `本次 ${settings.count} 张图片，报价约 ${maxEstimatedCost} 点。`
+                            : `本次 ${settings.count} 张图片，预计 ${maxEstimatedCost} 点。`,
+                        detail: [outputSizeText(actualQuote), quote.actualQuoteRequired
+                            ? '确认后按实际费用核对；报价过期或参数变化时不会提交。'
+                            : '报价过期或参数变化时不会提交。'].filter(Boolean).join('；'),
                         confirmLabel: `确认 ${maxEstimatedCost} 点` });
                 } catch (error) {
                     clearQuote(node.id);
@@ -616,7 +619,7 @@
                     clearQuote(node.id);
                     throw new Error('已取消，未提交图片生成。');
                 }
-                if (!validActualQuote(actualQuote, quote.revision) || !quoteInputsMatch(node, context, snapshot)) {
+                if (!validActualQuote(actualQuote, quote.revision, quote) || !quoteInputsMatch(node, context, snapshot)) {
                     clearQuote(node.id);
                     throw new Error('报价已过期或图片参数已变化；本次未提交，请重新获取并确认。');
                 }

@@ -8,7 +8,7 @@ import { isPrivateNetworkHost } from '@/lib/media/public-url';
 import { lookup } from 'node:dns/promises';
 import type { LookupAddress } from 'node:dns';
 import https from 'node:https';
-import { Readable, Transform } from 'node:stream';
+import { Readable, Transform, pipeline } from 'node:stream';
 import { createGunzip, createInflate, createBrotliDecompress } from 'node:zlib';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
@@ -40,16 +40,25 @@ export function decodeStudioProviderResponse(response: Response, signal: AbortSi
   const output = new Transform({ transform(chunk, _encoding, callback) {
     decoded += chunk.length; callback(decoded > decodedLimit ? new Error('response_decoded_size_limit') : null, chunk);
   } });
-  const fail = (error: Error) => { input.destroy(error); wire.destroy(error); decoder.destroy(error); output.destroy(error); };
+  // Install the Web adapter before any destruction, including an already-aborted signal.
+  // Node 20 treats toWeb(destroyedStream) as closed and would otherwise lose the body error.
+  const headers = new Headers(response.headers); headers.delete('content-encoding'); headers.delete('content-length');
+  const result = new Response(Readable.toWeb(output) as ReadableStream<Uint8Array>, { status: response.status, statusText: response.statusText, headers });
+  let complete = false;
+  const fail = (error: Error) => { if (!complete) input.destroy(error); };
   const abort = () => fail(new Error('response_decode_aborted'));
   const timer = setTimeout(() => fail(new Error('response_decode_timeout')), limits.timeoutMs ?? 300000);
+  const cleanup = () => { complete = true; clearTimeout(timer); signal.removeEventListener('abort', abort); };
+  output.once('close', cleanup);
+  // Own all four stream error/close paths, including cancellation through the Web body.
+  // The adapter forwards the actual stream error to the caller; there is no detached rejecting Promise.
+  pipeline(input, wire, decoder, output, error => {
+    cleanup();
+    if (error && !output.destroyed) output.destroy(error);
+  });
   signal.addEventListener('abort', abort, { once: true });
-  for (const stream of [input, wire, decoder]) stream.once('error', fail);
-  output.once('close', () => { clearTimeout(timer); signal.removeEventListener('abort', abort); input.destroy(); decoder.destroy(); });
-  input.pipe(wire).pipe(decoder).pipe(output);
   if (signal.aborted) abort();
-  const headers = new Headers(response.headers); headers.delete('content-encoding'); headers.delete('content-length');
-  return new Response(Readable.toWeb(output) as ReadableStream<Uint8Array>, { status: response.status, statusText: response.statusText, headers });
+  return result;
 }
 
 function unsafeAddress(value: string) {
@@ -387,7 +396,8 @@ export async function requestStudioImages(params: {
           const resultUrl = new URL(pollUrl); resultUrl.search = '';
           if (studioProviderWaitBlocked(asyncTask, now())) {
             const resultWait = providerNotBefore - now();
-            if (asyncTask.providerWaitSource === 'invalid-conservative' || now() + resultWait >= windowEnds) throw new StudioProviderError('response', 'async_provider_wait', undefined, undefined, true, { ...poll, providerNotBefore, providerWaitSource: asyncTask.providerWaitSource });
+            // observeWait can change this field after the earlier guard across an awaited summary.
+            if ((asyncTask as StudioProviderWait).providerWaitSource === 'invalid-conservative' || now() + resultWait >= windowEnds) throw new StudioProviderError('response', 'async_provider_wait', undefined, undefined, true, { ...poll, providerNotBefore, providerWaitSource: asyncTask.providerWaitSource });
             await wait(resultWait, querySignal);
           }
           if (!params.manualAsyncQuery && automaticDeadline !== undefined && now() >= automaticDeadline) throw new StudioProviderError('response', 'async_auto_check_paused', undefined, undefined, true, { ...poll });

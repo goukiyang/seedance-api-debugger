@@ -40,7 +40,13 @@ export async function traceFixture(input: { file: string; schema: string; marker
   assert.equal(statSync(databasePath).mode & 0o777, 0o600);
   const { PrismaClient } = await import('@prisma/client');
   const db = new PrismaClient();
+  // Configure the real isolated SQLite before business imports can start their
+  // asynchronous initializer alongside the fixture's first transaction.
+  await db.$queryRawUnsafe('PRAGMA busy_timeout = 10000');
+  await db.$queryRawUnsafe('PRAGMA journal_mode = WAL');
+  await db.$queryRawUnsafe('PRAGMA synchronous = NORMAL');
   Reflect.set(globalThis, 'prisma', db);
+  Reflect.set(globalThis, 'prismaSqlitePragmasStarted', true);
   // Runtime readiness hashes code beneath cwd; expose only immutable candidate sources.
   symlinkSync(path.join(root, 'src'), path.join(directory, 'src'), 'dir');
   process.chdir(directory);

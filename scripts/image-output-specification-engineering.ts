@@ -5,16 +5,17 @@ import path from 'node:path';
 import type { SessionUser } from '../src/lib/auth/session';
 import { traceFixture, sha256 } from './image-trace-engineering-fixture';
 
-const sourcePaths = ['scripts/image-trace-engineering-fixture.ts', 'src/lib/image-generation/output-plan.ts',
+const sourcePaths = ['scripts/image-trace-engineering-fixture.ts', 'scripts/image-canvas-quote-fixture.ts', 'src/lib/image-generation/output-plan.ts',
   'src/lib/image-generation/resolution.ts', 'src/lib/image-studio/ratios.ts', 'src/lib/integrations/image-generation.ts',
   'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/billing-quote.ts', 'src/lib/image-studio/billing-quote-service.ts',
   'src/lib/image-studio/billing-quote-store.ts', 'src/lib/image-studio/batch-billing-quote.ts',
-  'src/lib/image-studio/batches.ts', 'src/lib/image-studio/batch-contract.ts', 'src/lib/avatar-random/service.ts',
+  'src/lib/image-studio/batches.ts', 'src/lib/image-studio/batch-contract.ts', 'src/lib/image-studio/modules.ts', 'src/lib/avatar-random/service.ts',
   'src/app/api/assets/generate/route.ts', 'src/lib/image-studio/provider.ts',
   'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-types.ts', 'src/lib/image-studio/read-snapshot.ts',
   'src/lib/image-studio/worker.ts', 'src/lib/image-studio/async-recovery.ts', 'src/lib/image-studio/queue-capacity.ts',
   'src/lib/image-studio/provider-wait.ts', 'src/lib/image-studio/worker-mode.ts', 'src/lib/tools/toolflow-runtime.ts',
-  'src/lib/tools/toolflow.ts', 'src/app/api/tools/ultimate-canvas/flows/[id]/quote/route.ts', 'public/tools/ultimate-canvas/toolflow-workflow.js'];
+  'src/lib/tools/toolflow.ts', 'src/app/api/tools/ultimate-canvas/flows/[id]/quote/route.ts', 'public/tools/ultimate-canvas/toolflow-workflow.js',
+  'public/tools/ultimate-canvas/canvas-styles.js', 'public/tools/ultimate-canvas/node-pricing.js', 'public/tools/ultimate-canvas/app.js'];
 const expectedChecks = [
   'new_2k_reference_and_all_standard_ratios_keep_pixel_budget',
   'four_extreme_2k_ratios_fit_real_domain_and_4k_conflicts_reject',
@@ -31,6 +32,9 @@ const expectedChecks = [
   'toolflow_new_known_and_future_auto_freeze_actual_plans_and_reject_old_quote_or_changed_inputs',
   'toolflow_legacy_prepared_and_unprepared_runs_keep_frozen_sizes_without_migration',
   'toolflow_unknown_task_blocks_retry_and_redispatch_without_another_freeze_or_post',
+  'canvas_fixed_ordinary_and_style_keep_plan_quote_token_and_original_confirmation_count',
+  'canvas_actual_original_confirmation_and_max_authorization_are_unchanged',
+  'canvas_role_context_and_unknown_job_identity_survive_query_only_reentry_without_repost',
 ];
 
 async function main() {
@@ -116,8 +120,11 @@ async function main() {
   await verifySavedPlans(fixture, owner, model);
   assert.equal(synchronousPosts, 1); fixture.check(expectedChecks[11]);
   await verifyToolFlows(fixture, owner, model);
+  const { verifyCanvasQuoteContract } = await import('./image-canvas-quote-fixture');
+  const canvasQuoteEvidence = await verifyCanvasQuoteContract(fixture.root, plans.publicImageOutputPlan(referencePlan)!, fixture.check);
   assert.throws(() => assertPixelBudget(ratios.legacyStudioRatioSize('58:77', '2K')!, '58:77'));
-  await fixture.finish({ negativeChecks: ['legacy_gcd_rejected_by_current_pixel_budget'], wire: wire.map(body => ({ size: body.size, ratio: body.ratio })) });
+  await fixture.finish({ negativeChecks: ['legacy_gcd_rejected_by_current_pixel_budget'], canvasQuoteEvidence,
+    wire: wire.map(body => ({ size: body.size, ratio: body.ratio })) });
 }
 
 async function verifyToolFlows(fixture: Awaited<ReturnType<typeof traceFixture>>, owner: string, model: string) {
@@ -207,7 +214,9 @@ async function verifySavedPlans(fixture: Awaited<ReturnType<typeof traceFixture>
   await db.platformSetting.create({ data: { key: 'image_generation_api_v1', value_json: JSON.stringify({ enabled: true,
     provider: 'musk', base_url: 'https://spec-fixture.invalid', api_key: 'synthetic-not-a-credential', default_model: model,
     supports_text_to_image: true, supports_image_to_image: true }) } });
-  const moduleId = `${owner}-default`;
+  const { defaultStudioModuleId, validStudioModuleId } = await import('../src/lib/image-studio/modules');
+  const moduleId = defaultStudioModuleId(owner);
+  assert.equal(validStudioModuleId(moduleId, owner), true);
   await db.imageStudioModule.create({ data: { id: moduleId, owner_id: owner, name: 'Synthetic', model, resolution: '2K', aspect_ratio: 'auto' } });
   const { resolveImageOutputPlan, imageOutputPlanHash } = await import('../src/lib/image-generation/output-plan');
   const { assertImageQuoteOutputPlan } = await import('../src/lib/image-studio/billing-quote-store');

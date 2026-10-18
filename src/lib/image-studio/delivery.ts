@@ -115,7 +115,7 @@ export async function readStudioCorePending(task: CoreTask): Promise<StudioCoreP
     if (found && (!sameRequestIdentity(found.request, value.request)
       || found.request.gatewayRequestId && value.request.gatewayRequestId && found.request.gatewayRequestId !== value.request.gatewayRequestId
       || found.async && value.async && found.async.providerTaskId !== value.async.providerTaskId)) throw new StudioCoreReceiptError('core_receipt_identity_conflict', true);
-    if (found?.async && value.async) { found = { ...found, async: mergeAsyncObservations(found.async, value.async) }; continue; }
+    if (found?.async && value.async) { found = { ...(found as StudioCorePending), async: mergeAsyncObservations(found.async, value.async) }; continue; }
     // A crash between the two writes may leave one copy at headers-only.
     found = !found || value.async && !found.async || (value.async?.providerNotBefore || 0) > (found.async?.providerNotBefore || 0)
       || value.async?.resultReady && !found.async?.resultReady

@@ -520,7 +520,7 @@ export async function POST(request: NextRequest) {
           moduleId: defaultStudioModuleId(user.id), requestId, batchId, count } }, { status: 202, headers: { 'Cache-Control': 'private, no-store' } });
     }
 
-    return await withSynchronousImageOutputPlan({ quote: body.quote === true, outputPlan, model: settings.default_model, count }, async () => {
+    return await withSynchronousImageOutputPlan<NextResponse>({ quote: body.quote === true, outputPlan, model: settings.default_model, count }, async () => {
     assertImageStudioAdmissionOpen();
     const explicitWorkspaceId = cleanString(body.workspace_id || body.workspaceId);
     let workspaceId = explicitWorkspaceId;
