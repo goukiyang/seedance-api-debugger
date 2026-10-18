@@ -2,6 +2,8 @@
 
 ## 当前入口
 
+- [ ] HD-STATE 实页核对（2026-10-18 12:37–12:40Z）：用户明确授权打开页面区分原图/HD及提示原因。Google Chrome原生清单仅有本站login?next=/admin/integrations，Default/xiaobo已核，相关活动聊天未见他人使用本站；ClickOps auto-connect实际请求超时，CUA原生Chrome读取timeoutReached。备用BrowserSkill连接124ceaf5列出/template-studio?type=image现有用户页，但其与Google Chrome身份未完成绑定；借用576244785触发工具要求的本人确认，15秒超时并明确禁止自动重试/换工具。会话aqrl已停止。未获得目标图片DOM/像素/媒体请求，不能判定是原图还是HD；未导航/刷新/登录/生成或修改图片。需用户明确继续并完成下一次接管确认后，再核实际浏览器/profile、版本、图片类型/体积/descriptor及提示。前条源码解释仍有效但不冒实页结论。
+
 - [ ] HD-STATE（2026-10-18追加反馈）：用户试用感觉已有高清图，但仍显示“高清暂不可用”。已核上次确认线上源2339086c与当前源码：`image-preview-session.ts`把非ready描述（包括queued/running）统一切完整原图且fallback=true，HD读取不支持/不可用也可回退；`hd-display-policy.ts:25`据fallback显示该提示，不等于后台未产出高清文件。ready描述会清fallback，故不能直接断言旧文案没刷新。此反馈沿HD-PLAN的H06状态合同处理，不缩成仅改字；未指认具体图片/本次媒体响应，原图清晰与实际HD档尚不能区分。本轮公网release核对TLS超时，未确认线上是否已变化；无代码/生产变更、浏览器/功能测试或新生成。待提供具体图及底部提示截图/任务编号后作对象级核对。
 
 - [x] HD-PLAN（2026-10-18）：[高清全链路可靠性修复计划 v1.0.0](todo/2026-10-18-hd-chain-reliability.md)已完成；H01–H10实施未开始。覆盖固定持久根、交付后登记/补漏、调度与编码隔离、故障恢复、预览下载/权限缓存、管理与发布门、相容回退；保原图、已有结果、权限和账务。本轮只规划，无业务改动、生产写入或部署。
