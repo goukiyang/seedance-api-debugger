@@ -1,5 +1,4 @@
 'use client';
-import { studioOutputMismatchDisposition, studioOutputFormatForMime } from '@/lib/image-studio/dimension-mismatch';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, FolderOpen, Pause, Play, RefreshCw, RotateCcw, Save, X } from 'lucide-react';
 import { GeneratedImageResults, type GeneratedImageResult } from '@/components/GeneratedImageResults';
@@ -238,8 +237,8 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
         if (!response.ok) throw new Error(`第 ${item.ordinal} 张读取失败，请重试保存`);
         const blob = await response.blob();
         if (scope.current !== expected) throw new Error('已离开本批结果，后续本机保存已停止');
-        if (!studioOutputFormatForMime(blob.type) || Boolean(item.image.mimeType && blob.type !== item.image.mimeType) || !blob.size || blob.size > 96 * 1024 * 1024) throw new Error(`第 ${item.ordinal} 张图片格式或大小未确认`);
-        const fileName = await writeUniqueBatchFile(childDirectory.current, safeBatchFileName(id, item.ordinal, item.sourceName, studioOutputFormatForMime(blob.type)!.extension), blob);
+        if (!blob.type.startsWith('image/png') || !blob.size || blob.size > 96 * 1024 * 1024) throw new Error(`第 ${item.ordinal} 张图片格式或大小未确认`);
+        const fileName = await writeUniqueBatchFile(childDirectory.current, safeBatchFileName(id, item.ordinal, item.sourceName), blob);
         nextSaved[item.ordinal] = fileName; delivery.saved = { ...nextSaved }; setSaved({ ...nextSaved });
       }
       await writeUniqueBatchFile(childDirectory.current, 'results.json', JSON.stringify({ batch: id, createdAt: batch.createdAt, generated: batch.generated, total: batch.total, saved: Object.keys(nextSaved).length,
@@ -285,25 +284,23 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
   // The terminal result set determines packages; exporting never creates image tasks.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoPack, batch?.state, batch?.generated, batch?.active, batch?.pending, batch?.uncertain]);
-  const statusLabel = (state: string, phase?: string, disposition?: string | null) => studioOutputMismatchDisposition(disposition) ? '图片已返回 · 规格不符' : state === 'running' && phase && ({ download: '原图下载中', recover: '恢复原图中', validate: '图片校验中', save: '保存中' } as Record<string, string>)[phase]
+  const statusLabel = (state: string, phase?: string) => state === 'running' && phase && ({ download: '原图下载中', recover: '恢复原图中', validate: '图片校验中', save: '保存中' } as Record<string, string>)[phase]
     || ({ pending: '等待派发', 'needs-confirmation': '模板已更新，待确认后继续', queued: '已受理，排队中', running: '生成中', succeeded: '已生成', failed: '生成失败', uncertain: '结果待确认', cancelled: '未派发，已取消' } as Record<string, string>)[state] || '状态待确认';
   const resultItems = useMemo(() => (batch?.items || []).map(item => ({
     ...item, id: String(item.ordinal), label: `${item.ordinal}. ${item.sourceName}`, generationStatus: item.status,
-    status: statusLabel(item.status, undefined, item.resultDisposition), pending: ['pending', 'queued', 'running'].includes(item.status),
+    status: statusLabel(item.status), pending: ['pending', 'queued', 'running'].includes(item.status),
     generationWait: {
       taskKey: item.taskId || undefined, acceptedAt: item.delivery?.acceptedAt, status: item.status, phase: item.delivery?.phase, waitingStatus: item.delivery?.waitingStatus,
       resultReady: Boolean(item.image && item.taskId),
-      label: statusLabel(item.status, item.delivery?.phase, item.resultDisposition), connectionIssue: Boolean(error), connectionDetail: error,
-      detail: item.image && studioOutputMismatchDisposition(item.resultDisposition) ? undefined : item.error,
+      label: statusLabel(item.status, item.delivery?.phase), connectionIssue: Boolean(error), connectionDetail: error, detail: item.error,
       generationDetailSuperseded: item.delivery?.generationDetailSuperseded,
     },
-    notice: item.image && studioOutputMismatchDisposition(item.resultDisposition) ? item.error : undefined,
-    error: item.image && studioOutputMismatchDisposition(item.resultDisposition) ? undefined : item.error,
-    media: item.image ? { src: item.image.url, thumbnailSrc: item.image.thumbnail, alt: `第 ${item.ordinal} 张结果`, fileName: item.image.fileName || 'batch-image.png',
+    error: item.error,
+    media: item.image ? { src: item.image.url, thumbnailSrc: item.image.thumbnail, alt: `第 ${item.ordinal} 张结果`, fileName: 'batch-image.png',
       contentKey: `asset:${item.image.id}` as const,
       comparisonCandidates: (batch?.items || []).flatMap(other => other.image ? [{ src: other.image.url, thumbnailSrc: other.image.thumbnail, alt: `生成结果 ${other.ordinal}`, contentKey: `asset:${other.image.id}` as const }] : []),
     } : undefined,
-    download: item.image && item.taskId ? () => handImageDownloadToBrowser(`/api/image-studio/download?id=${encodeURIComponent(item.taskId!)}`, item.image?.fileName || 'batch-image.png', () => scope.current === `${userId}:${id}`) : undefined,
+    download: item.image && item.taskId ? () => handImageDownloadToBrowser(`/api/image-studio/download?id=${encodeURIComponent(item.taskId!)}`, 'batch-image.png', () => scope.current === `${userId}:${id}`) : undefined,
   } satisfies GeneratedImageResult & { generationStatus: string })), [batch?.items, error, id, userId]);
   return <div className={styles.results} aria-label="批次结果">
     <div className={styles.actions}><strong>{batch?.moduleName || '本批结果'}</strong><button type="button" title="刷新批次" aria-label="刷新批次" disabled={reading} onClick={() => void load()}><RefreshCw size={16} /></button>{deliveryOnly && <a href={`/assets?imageBatchId=${encodeURIComponent(id)}`}>本批资产</a>}</div>

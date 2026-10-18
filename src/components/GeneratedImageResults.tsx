@@ -40,7 +40,6 @@ export type GeneratedImageResult = {
   downloadMessage?: string;
   viewOnly?: boolean;
   error?: string | null;
-  notice?: string | null;
   billing?: ImageBillingView | null;
 };
 
@@ -159,7 +158,6 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
     {renderMetadata ? renderMetadata(item) : <div className={styles.heading}><strong title={item.label}>{item.label}</strong><span>{item.status}</span></div>}
     {primaryActions && <div className={styles.actions} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{primaryActions}</div>}
     {feedback?.id === item.id && <p className={styles.feedback} role="status">{feedback.message}</p>}
-    {item.notice && <TaskNotice kind="status" className={styles.notice}>{item.notice}</TaskNotice>}
     {resultError && <TaskNotice kind={waitDisplay?.pending && !waitDisplay.showRecovery ? 'status' : 'recoverable'} className={styles.notice}>{resultError}</TaskNotice>}
     {renderSupplement?.(item)}
   </article>;

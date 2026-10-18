@@ -360,7 +360,6 @@
 .resultMeta { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; column-gap: 6px; row-gap: 2px; min-width: 0; margin: 0 0 3px; color: #adb6bd; font-size: 11px; line-height: 1.2; }
 .resultConfig { display: flex; align-items: center; flex: 1 1 145px; flex-wrap: nowrap; gap: 3px; min-width: 0; overflow: hidden; white-space: nowrap; }
 .resultConfig > span[title] { max-width: 8ch; overflow: hidden; color: #d8f4ed; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
-.resultMismatch { flex: 0 0 auto; color: #adb6bd; font-weight: 600; }
 .resultTime { flex: 0 0 auto; margin-left: auto; white-space: nowrap; color: #adb6bd; }
 .resultOwner { display: inline-flex; flex-shrink: 0; min-width: 0; max-width: 36%; margin-left: auto; }
 .resultContextVersion { flex: 0 1 5.5em; min-width: 0; max-width: 5.5em; overflow: hidden; white-space: nowrap; }
