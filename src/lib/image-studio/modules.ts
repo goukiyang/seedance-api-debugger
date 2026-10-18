@@ -23,6 +23,7 @@ import { readReceipt, readOwnedReceipt, writeReceipt, sharedCommandFingerprint, 
 import { assertStudioDeletionIdle, assertStudioWorkspaceNotDeleted, listStudioDeletedSources, parseStudioDeletionReceipt,
   recordStudioWorkspaceDeletion, studioWorkspaceDeletionCapability } from './workspace-deletion';
 import type { StudioDeletionCommandStatus, StudioDeletionNotApplied, StudioDeletionReceipt } from './shared-types';
+import { studioOutputTaskWhere, studioTaskHasViewableOutput } from './dimension-mismatch';
 
 export { deleteStudioGroup };
 
@@ -110,11 +111,11 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     throw error;
   }
   const latestTask = row.id.startsWith('default-') ? null : await prisma.imageStudioTask.findFirst({
-    where: { module_id: row.id, owner_id: ownerId, status: 'succeeded', deleted_at: null, asset_id: { not: null } },
+    where: { module_id: row.id, owner_id: ownerId, AND: [studioOutputTaskWhere], deleted_at: null, asset_id: { not: null } },
     orderBy: { finished_at: 'desc' },
-    select: { asset_id: true, snapshot_json: true },
+    select: { asset_id: true, snapshot_json: true, status: true, usage_json: true },
   });
-  const latestResult = latestTask?.asset_id
+  const latestResult = latestTask?.asset_id && studioTaskHasViewableOutput(latestTask)
     ? await prisma.asset.findFirst({ where: { id: latestTask.asset_id, owner_id: ownerId, status: 'active', type: 'image' }, select: { id: true } })
     : null;
   let representativeReference: string | null = null;
@@ -195,8 +196,8 @@ async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: 
   const resolution = normalizeImageResolution(model, overrides.resolution ?? defaults?.resolution);
   const personalPolicy = await getStudioModuleReferencePolicy(ownerId, row.id, ids, defaults?.referenceLimit ?? row.reference_limit);
   const referencePolicy = defaults ? { ...defaults.referencePolicy, primaryIds: personalPolicy.primaryIds } : personalPolicy;
-  const latestTask = await prisma.imageStudioTask.findFirst({ where: { module_id: row.id, owner_id: ownerId, status: 'succeeded', deleted_at: null, asset_id: { not: null } }, orderBy: { finished_at: 'desc' }, select: { asset_id: true } });
-  const latestResult = latestTask?.asset_id ? await prisma.asset.findFirst({ where: { id: latestTask.asset_id, owner_id: ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(actor)] }, select: { id: true } }) : null;
+  const latestTask = await prisma.imageStudioTask.findFirst({ where: { module_id: row.id, owner_id: ownerId, AND: [studioOutputTaskWhere], deleted_at: null, asset_id: { not: null } }, orderBy: { finished_at: 'desc' }, select: { asset_id: true, status: true, usage_json: true } });
+  const latestResult = latestTask?.asset_id && studioTaskHasViewableOutput(latestTask) ? await prisma.asset.findFirst({ where: { id: latestTask.asset_id, owner_id: ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(actor)] }, select: { id: true } }) : null;
   const intent = resolved?.definition.intent || unavailableIntent || { protocol: 'shared-live-v1' as const, presetId: binding.presetId, definitionToken: '' };
   const state = sharedRead.state ?? projectSharedStudioCapabilities({ objectKind: binding.mode, lifecycle: dto || repairDefinition ? 'active' : 'missing',
     sharing: dto ? dto.isShared ? 'shared' : 'private' : 'unknown', dependency: resolved ? 'ready' : canRepair ? 'invalid' : 'unknown',

@@ -14,6 +14,7 @@ import { prisma } from '@/lib/prisma';
 import { randomUUID } from 'node:crypto';
 import { avatarPlanKey } from '@/lib/avatar-random/store';
 import { studioAssetUrl } from '@/lib/image-studio/media';
+import { studioOutputMismatch as studioDimensionMismatch, studioDimensionMismatchNotice, studioTaskHasViewableOutput, studioOutputMismatchDisposition } from '@/lib/image-studio/dimension-mismatch';
 import { createHash } from 'node:crypto';
 import { getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider, getImageGenerationChannelOptions, captureImageGenerationChannel, resolveImageGenerationChannelSnapshot, validateImageGenerationChannel } from '@/lib/integrations/image-generation';
 import { IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
@@ -38,9 +39,10 @@ function validateOriginalContinuation(body: Record<string, unknown>) {
 
 async function sourceTask(owner:string,id?:string) {
   if(!id)return null;
-  const task=await prisma.imageStudioTask.findFirst({where:{id,owner_id:owner}});
-  const asset=task?.asset_id?await prisma.asset.findFirst({where:{id:task.asset_id,owner_id:owner,status:'active',type:'image'}}):null;
-  return task?{id:task.id,ordinal:1,status:publicImageTaskStatus(task.status),error:task.error,snapshot:historicalImageSupplier(task.snapshot_json),billing:imageBillingView(task,owner,false),asset:asset?{id:asset.id,original_url:studioAssetUrl(asset.id),thumbnail_url:studioAssetUrl(asset.id,true)}:null}:null;
+  const task=await prisma.imageStudioTask.findFirst({where:{id,owner_id:owner,deleted_at:null}});
+  const mismatch=task&&studioDimensionMismatch(task);
+  const asset=task?.asset_id&&studioTaskHasViewableOutput(task)?await prisma.asset.findFirst({where:{id:task.asset_id,owner_id:owner,status:'active',type:'image'}}):null;
+  return task?{id:task.id,ordinal:1,status:publicImageTaskStatus(task.status),resultDisposition:mismatch?mismatch.code==='generated_format_mismatch'?'format_mismatch':'dimensions_mismatch':null,error:mismatch&&asset?studioDimensionMismatchNotice(mismatch.validation):task.error,snapshot:historicalImageSupplier(task.snapshot_json),billing:imageBillingView(task,owner,false),asset:asset?{id:asset.id,original_url:studioAssetUrl(asset.id),thumbnail_url:studioAssetUrl(asset.id,true),file_name:asset.file_name,mime_type:asset.mime_type}:null}:null;
 }
 
 export const dynamic = 'force-dynamic';
@@ -158,8 +160,8 @@ export async function POST(req: NextRequest) { return run(async owner => {
     if (plan && isAvatarSheet(plan)) throw new StudioError('整张宫格不能保存为某一个人的身份基准。请切换独立头像并重新报价出图。');
     const candidate = plan?.candidates[Number(body.index)];
     if (!candidate) throw new StudioError('人物草稿不存在');
-    const result = (await listStudioTasks(owner, undefined, undefined, false, undefined, plan!.id)).tasks.find(task => task.ordinal === Number(body.index) + 1 && task.status === 'succeeded') || (Number(body.index)===0 ? await sourceTask(owner,plan!.sourceTaskId):null);
-    if (!result?.asset || result.status !== 'succeeded') throw new StudioError('保存人物需要已完成的基准原图');
+    const result = (await listStudioTasks(owner, undefined, undefined, false, undefined, plan!.id)).tasks.find(task => task.ordinal === Number(body.index) + 1 && task.asset && (task.status === 'succeeded' || studioOutputMismatchDisposition(task.resultDisposition))) || (Number(body.index)===0 ? await sourceTask(owner,plan!.sourceTaskId):null);
+    if (!result?.asset || result.status !== 'succeeded' && !studioOutputMismatchDisposition(result.resultDisposition)) throw new StudioError('保存人物需要已返回的基准原图');
     body.record = { kind: 'character', rules:candidate.rules,candidate: { ...candidate, baselineAssetId: candidate.baselineAssetId || result.asset.id }, assetId: result.asset.id,planId:plan!.id,taskId:result.id };
   } else if (body.action === 'save' && body.record && body.record.kind !== 'config') throw new StudioError('不能新建或改写历史结果');
   return { record: await mutateAvatarRecord(owner, body) };

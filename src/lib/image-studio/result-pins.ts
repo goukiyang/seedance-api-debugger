@@ -8,6 +8,7 @@ import { studioPresetArchived } from './preset-lifecycle';
 import { studioSharedBinding, type SharedStudioClient } from './shared-contract';
 import { studioHiddenAssetUrls } from './protected-assets';
 import type { StudioPinMutation, StudioPinState } from './result-pin-types';
+import { studioOutputTaskWhere, studioTaskHasViewableOutput } from './dimension-mismatch';
 
 export class StudioPinError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -54,8 +55,8 @@ export async function readableStudioPins(user: SessionUser, presetId: string, db
   if (!preset || !preset.is_shared || !canViewStudioPreset(user, preset) || await studioPresetArchived(presetId, db)) return null;
   const { document } = await readStudioPinDocument(presetId, db);
   const tasks = await db.imageStudioTask.findMany({ where: { id: { in: document.pins.map(p => p.taskId) },
-    status: 'succeeded', deleted_at: null }, select: { id: true, asset_id: true, owner_id: true, module_id: true,
-      source_preset_id: true, created_at: true } });
+    AND: [studioOutputTaskWhere], deleted_at: null }, select: { id: true, asset_id: true, owner_id: true, module_id: true,
+      source_preset_id: true, created_at: true, status: true, usage_json: true } });
   const assets = await db.asset.findMany({ where: { id: { in: document.pins.map(p => p.assetId) },
     type: 'image', status: 'active' }, select: { id: true, owner_id: true, original_url: true, thumbnail_url: true,
       width: true, height: true, mime_type: true } });
@@ -64,7 +65,7 @@ export async function readableStudioPins(user: SessionUser, presetId: string, db
   const byAsset = new Map(assets.map(a => [a.id, a]));
   const pins = document.pins.flatMap(pin => {
     const task = byTask.get(pin.taskId), asset = byAsset.get(pin.assetId);
-    if (!task || !asset || task.asset_id !== pin.assetId || task.owner_id !== pin.ownerId || asset.owner_id !== pin.ownerId
+    if (!task || !studioTaskHasViewableOutput(task) || !asset || task.asset_id !== pin.assetId || task.owner_id !== pin.ownerId || asset.owner_id !== pin.ownerId
       || task.module_id !== pin.moduleId || task.source_preset_id && task.source_preset_id !== presetId
       || hidden.has(asset.original_url) || asset.thumbnail_url && hidden.has(asset.thumbnail_url)) return [];
     return [{ ...pin, task, asset }];
@@ -105,11 +106,11 @@ export async function mutateStudioPin(user: SessionUser, input: StudioPinMutatio
     if (!input.active && (!existing || existing.ownerId !== user.id || existing.taskId !== input.taskId)) throw new StudioPinError('只能取消本人结果的置顶', 403);
     if (input.active) {
       const task = await tx.imageStudioTask.findFirst({ where: { id: input.taskId, owner_id: user.id,
-        module_id: input.moduleId, asset_id: input.assetId, status: 'succeeded', deleted_at: null } });
+        module_id: input.moduleId, asset_id: input.assetId, AND: [studioOutputTaskWhere], deleted_at: null } });
       const asset = await tx.asset.findFirst({ where: { id: input.assetId, owner_id: user.id, type: 'image', status: 'active' } });
       // Publication must not inherit an administrator's private reference access.
       const protectedUrls = new Set(await studioHiddenAssetUrls(null, tx));
-      if (!task || !asset || task.source_preset_id && task.source_preset_id !== scope.presetId
+      if (!task || !studioTaskHasViewableOutput(task) || !asset || task.source_preset_id && task.source_preset_id !== scope.presetId
         || !task.source_preset_id && scope.binding?.mode !== 'publisher'
         || protectedUrls.has(asset.original_url) || asset.thumbnail_url && protectedUrls.has(asset.thumbnail_url)) throw new StudioPinError('只能置顶本人在这个模板下可分享的结果图', 403);
       if (existing && (existing.ownerId !== user.id || existing.taskId !== input.taskId)) throw new StudioPinError('结果归属不匹配', 409);

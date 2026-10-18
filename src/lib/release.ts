@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '模板工具栏移除共享状态和保存失败文字，变更记录改到模块上下文弹窗内，保留原共享开关、错误重试和记录权限。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '完整返回的图片即使尺寸或格式与请求不同，也会保留并显示，可照常查看、下载和继续使用；差异单独说明，原文件和已有费用记录不变。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { defaultStudioModuleId, validStudioModuleId } from './modules';
 import { studioResultVersion, type StudioAttentionSnapshot } from './result-attention';
 import { studioTemplateTaskWhere } from './task-visibility';
+import { studioOutputTaskWhere, studioTaskHasViewableOutput } from './dimension-mismatch';
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const directory = (viewerId: string) => path.join(process.cwd(), 'storage', 'studio-viewer-receipts', hash(viewerId));
@@ -29,8 +30,8 @@ async function visibleResults(viewerId: string, moduleId?: string) {
   if (moduleId && !allowed.has(moduleId)) throw new Error('模板不存在或不可访问');
   const tasks = await prisma.imageStudioTask.findMany({
     where: { AND: [moduleId ? studioTemplateTaskWhere(viewerId, moduleId) : { OR: Array.from(allowed, id => studioTemplateTaskWhere(viewerId, id)) },
-      { status: 'succeeded', asset_id: { not: null }, finished_at: { not: null } }] },
-    select: { id: true, module_id: true, asset_id: true, finished_at: true },
+      { AND: [studioOutputTaskWhere], asset_id: { not: null }, finished_at: { not: null } }] },
+    select: { id: true, module_id: true, asset_id: true, finished_at: true, status: true, usage_json: true },
   });
   const assetIds = Array.from(new Set(tasks.filter(task => !task.module_id || allowed.has(task.module_id)).flatMap(task => task.asset_id ? [task.asset_id] : [])));
   const available = new Set<string>();
@@ -39,7 +40,7 @@ async function visibleResults(viewerId: string, moduleId?: string) {
     assets.forEach(asset => available.add(asset.id));
   }
   return { allowed, results: tasks.flatMap(task => {
-    if (!task.asset_id || !available.has(task.asset_id) || task.module_id && !allowed.has(task.module_id)) return [];
+    if (!studioTaskHasViewableOutput(task) || !task.asset_id || !available.has(task.asset_id) || task.module_id && !allowed.has(task.module_id)) return [];
     const version = studioResultVersion({ id: task.id, status: 'succeeded', finishedAt: task.finished_at, asset: { id: task.asset_id } });
     return version ? [{ moduleId: task.module_id || defaultStudioModuleId(viewerId), version, completedAt: task.finished_at!.getTime() }] : [];
   }) };

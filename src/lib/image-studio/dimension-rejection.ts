@@ -1,12 +1,15 @@
 import fs from 'node:fs/promises';
+import { constants } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { ImageStudioTask, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { finishStudioTask, safeImageChannelSnapshot } from './tasks';
 import { readStudioRequestReceipt, readStudioAsyncReceipt } from './delivery';
-import { validateGeneratedStudioImage, StudioImageDeliveryError } from './media';
+import { validateGeneratedStudioImage, StudioImageDeliveryError, StudioImageDownloadError } from './media';
 import type { CreditFreezeAllocation } from '@/lib/credits/policy';
+import { prepareStudioOutput } from './output';
+import { studioDimensionMismatch, studioDimensionMismatchNotice, studioOutputFormat } from './dimension-mismatch';
 
 const hash = (value: Buffer | string) => createHash('sha256').update(value).digest('hex');
 export function studioTaskBeforeHash(task: ImageStudioTask) {
@@ -58,14 +61,14 @@ async function requireOriginalReservation(tx: Prisma.TransactionClient, task: Im
   }
 }
 
-async function preserveOriginal(task: ImageStudioTask, original: Buffer, digest: string) {
+async function preserveOriginal(task: ImageStudioTask, original: Buffer, digest: string, extension = 'png') {
   if (!/^[a-zA-Z0-9-]{1,120}$/.test(task.id)) throw Error('invalid_rejection_task_identity');
   const root = path.join(process.cwd(), 'storage', 'studio-billing');
   const directory = path.join(root, task.id);
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   await fs.chmod(root, 0o700);
   await fs.chmod(directory, 0o700);
-  const file = path.join(directory, `rejected-dimensions-${digest}.png`);
+  const file = path.join(directory, `rejected-dimensions-${digest}.${extension}`);
   const temporary = path.join(directory, `${randomUUID()}.tmp`);
   try {
     const handle = await fs.open(temporary, 'wx', 0o600);
@@ -79,27 +82,61 @@ async function preserveOriginal(task: ImageStudioTask, original: Buffer, digest:
   } finally { await fs.unlink(temporary).catch(() => {}); }
 }
 
+const retainedIdentity = (task: ImageStudioTask) => hash(JSON.stringify([task.id, task.owner_id, task.batch_id,
+  task.fingerprint, task.snapshot_json, task.output_size, task.reference_ids, task.billing_contract_json, task.freeze_snapshot]));
+async function preserveLocalResume(task: ImageStudioTask, digest: string, bytes: number, extension = 'png') {
+  const file = path.join(process.cwd(), 'storage', 'studio-billing', task.id, 'dimension-retention.json');
+  const content = JSON.stringify({ schema: 1, identity: retainedIdentity(task), digest, bytes, extension });
+  try { await fs.writeFile(file, content, { flag: 'wx', mode: 0o600 }); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || await fs.readFile(file, 'utf8') !== content) throw error;
+  }
+  const handle = await fs.open(file, 'r');
+  try { await handle.sync(); } finally { await handle.close(); }
+}
+
+// Written only after full decoding and original-request identity validation.
+// Publication failures resume locally, never at the provider.
+export async function readRetainedStudioDimensionOriginal(task: ImageStudioTask) {
+  if (!/^[a-zA-Z0-9-]{1,120}$/.test(task.id)) throw new StudioImageDownloadError('dimension_retention_checkpoint_invalid');
+  const file = path.join(process.cwd(), 'storage', 'studio-billing', task.id, 'dimension-retention.json');
+  let marker;
+  try {
+    marker = JSON.parse(await fs.readFile(file, 'utf8'));
+    if (marker?.schema !== 1 || marker.identity !== retainedIdentity(task)) throw Error('dimension_retention_identity_changed');
+    return await readPreservedOriginal(task.id, marker.digest, marker.bytes, marker.extension || 'png');
+  } catch (error) {
+    if (!marker && (error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw new StudioImageDownloadError('dimension_retention_checkpoint_invalid');
+  }
+}
+
 // Only a fully decoded original with a proven size mismatch reaches settlement.
-// This path cannot submit, poll, create an asset, or reinterpret unknown failures.
+// This path cannot submit, poll or reinterpret unknown failures.
 export async function finishRejectedStudioDimensions(task: ImageStudioTask, original: Buffer,
   repair?: StudioDimensionRepairExpectation) {
-  if (task.status !== 'channel_running' || task.asset_id || task.finished_at
+  if (!['running', 'channel_running', 'uncertain'].includes(task.status) || task.asset_id
+    || task.status !== 'uncertain' && task.finished_at || repair && task.status !== 'channel_running'
     || !task.output_size || !/^\d+x\d+$/.test(task.output_size)) throw Error('dimension_rejection_task_not_eligible');
   const validations: Array<Parameters<NonNullable<Parameters<typeof validateGeneratedStudioImage>[2]>>[0]> = [];
+  let mismatchCode: 'generated_dimensions_mismatch' | 'generated_format_mismatch';
   try {
     await validateGeneratedStudioImage(original, { size: task.output_size, format: 'png' }, async value => { validations.push(value); });
     throw Error('dimension_rejection_not_proven');
   } catch (error) {
-    if (!(error instanceof StudioImageDeliveryError) || error.code !== 'generated_dimensions_mismatch') throw error;
+    if (!(error instanceof StudioImageDeliveryError) || !['generated_dimensions_mismatch', 'generated_format_mismatch'].includes(error.code)) throw error;
+    mismatchCode = error.code as typeof mismatchCode;
   }
   const validation = validations.at(-1);
-  if (!validation || validation.originalFormat !== 'png') throw Error('dimension_rejection_validation_missing');
+  const format = validation && studioOutputFormat(validation.originalFormat);
+  if (!validation || !format) throw Error('dimension_rejection_validation_missing');
+  validation.storedFormat = validation.originalFormat;
   const request = await readStudioRequestReceipt(task);
-  const asyncReceipt = await readStudioAsyncReceipt(task);
+  const asyncReceipt = task.status === 'running' ? null : await readStudioAsyncReceipt(task);
   const channel = safeImageChannelSnapshot(JSON.parse(task.snapshot_json || '{}').imageChannel);
   if (!request || request.fingerprint !== task.fingerprint || request.batchId !== task.batch_id
-    || request.dispatchState !== 'attempted' || !channel || request.channelId !== channel.channelId
-    || request.configRevision !== channel.configRevision) throw Error('dimension_rejection_request_mismatch');
+    || task.status !== 'running' && (request.dispatchState !== 'attempted' || !channel || request.channelId !== channel.channelId
+      || request.configRevision !== channel.configRevision)) throw Error('dimension_rejection_request_mismatch');
   const digest = hash(original);
   if (repair && (!/^[a-f0-9]{64}$/.test(repair.taskBeforeSha256) || digest !== repair.originalSha256
     || task.owner_id !== repair.ownerId || task.fingerprint !== repair.fingerprint
@@ -107,17 +144,30 @@ export async function finishRejectedStudioDimensions(task: ImageStudioTask, orig
     throw Error('dimension_rejection_repair_identity_mismatch');
   }
   // A private, immutable copy survives ordinary checkpoint cleanup. No source is deleted.
-  await preserveOriginal(task, original, digest);
-  const rejection = { code: 'generated_dimensions_mismatch', originalSha256: digest, originalBytes: original.length,
+  await preserveOriginal(task, original, digest, format.extension);
+  await preserveLocalResume(task, digest, original.length, format.extension);
+  const assertPublicationScope = async () => {
+    const current = await prisma.imageStudioTask.findUnique({ where: { id: task.id } });
+    if (!current || current.asset_id || current.status !== task.status || retainedIdentity(current) !== retainedIdentity(task)
+      || current.status !== 'uncertain' && current.finished_at) throw Error('dimension_rejection_publication_scope_lost');
+    if (repair ? studioTaskBeforeHash(current) !== repair.taskBeforeSha256
+      : current.lease_token !== task.lease_token
+        || !current.lease_until || current.lease_until <= new Date()) throw Error('dimension_rejection_publication_scope_lost');
+  };
+  const retainedAsset = await prepareStudioOutput(original, task, validation, assertPublicationScope, validation.originalFormat);
+  retainedAsset.metadata_json = JSON.stringify({ ...JSON.parse(String(retainedAsset.metadata_json || '{}')),
+    deliveryDisposition: mismatchCode, requestedSize: task.output_size });
+  const rejection = { code: mismatchCode, originalSha256: digest, originalBytes: original.length,
     validation, requestId: request.localRequestId, upstreamRequestId: request.upstreamRequestId,
     providerTaskId: asyncReceipt?.providerTaskId, responseStatus: request.status, returnedAt: request.returnedAt,
     ...(repair ? { repairExpectedBefore: repair.taskBeforeSha256 } : {}) };
   return prisma.$transaction(async tx => {
     let current = await tx.imageStudioTask.findUnique({ where: { id: task.id } });
-    if (!current || current.status !== 'channel_running' || current.owner_id !== task.owner_id
+    if (!current || current.status !== task.status || current.owner_id !== task.owner_id
       || current.fingerprint !== task.fingerprint || current.snapshot_json !== task.snapshot_json
       || current.billing_contract_json !== task.billing_contract_json || current.freeze_snapshot !== task.freeze_snapshot
-      || current.unit_credits !== task.unit_credits || current.output_size !== task.output_size || current.asset_id || current.finished_at) {
+      || current.unit_credits !== task.unit_credits || current.output_size !== task.output_size || current.asset_id
+      || current.status !== 'uncertain' && current.finished_at) {
       throw Error('dimension_rejection_current_task_changed');
     }
     if (repair) {
@@ -139,11 +189,103 @@ export async function finishRejectedStudioDimensions(task: ImageStudioTask, orig
     await requireOriginalReservation(tx, current);
     const previousUsage = current.usage_json ? JSON.parse(current.usage_json) : {};
     if (!previousUsage || typeof previousUsage !== 'object' || Array.isArray(previousUsage)) throw Error('dimension_rejection_usage_not_object');
-    const finished = await finishStudioTask(current, 'failed', {
-      error: '原图尺寸与请求不符，未交付资产；本站冻结积分已释放。原图与请求记录已保留，不会自动重新生成；供应商实际费用仍待核对。',
+    const finished = await finishStudioTask(current, task.status === 'channel_running' && mismatchCode === 'generated_dimensions_mismatch' ? 'failed' : 'uncertain', {
+      retainedAsset,
+      error: studioDimensionMismatchNotice({ ...validation, requestedSize: task.output_size }),
       usage: { ...previousUsage, studioDelivery: { ...previousUsage.studioDelivery, ...rejection } },
     }, tx);
     if (!finished) throw Error('dimension_rejection_settlement_lease_lost');
     return true;
+  }, { timeout: 15000 });
+}
+
+async function readPreservedOriginal(taskId: string, digest: string, expectedBytes: number, extension = 'png') {
+  if (!/^[a-zA-Z0-9-]{1,120}$/.test(taskId) || !/^[a-f0-9]{64}$/.test(digest)
+    || !['png', 'jpg', 'webp', 'avif', 'tiff'].includes(extension)
+    || !Number.isSafeInteger(expectedBytes) || expectedBytes <= 0) throw Error('dimension_retention_identity_invalid');
+  const root = await fs.realpath(path.join(process.cwd(), 'storage', 'studio-billing'));
+  const file = path.join(root, taskId, `rejected-dimensions-${digest}.${extension}`);
+  const before = await fs.lstat(file);
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || (before.mode & 0o7777) !== 0o600
+    || before.size !== expectedBytes || await fs.realpath(file) !== file) throw Error('dimension_retention_checkpoint_invalid');
+  const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const bytes = await handle.readFile();
+    const after = await handle.stat();
+    if (bytes.length !== expectedBytes || hash(bytes) !== digest || after.size !== before.size
+      || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) throw Error('dimension_retention_checkpoint_changed');
+    return bytes;
+  } finally { await handle.close(); }
+}
+
+// Explicit maintenance only: expose one already-refunded mismatch without
+// changing its task status, billing, request identity, or original checkpoint.
+export async function retainSettledStudioDimensionMismatch(taskId: string, expectedSha256: string,
+  options: { restoreExpectedDeletedAtMs?: number } = {}) {
+  const task = await prisma.imageStudioTask.findUnique({ where: { id: taskId } });
+  const mismatch = task && studioDimensionMismatch(task);
+  if (!task || !mismatch || !task.finished_at || !task.billing_settled_at
+    || task.actual_credits !== 0 || mismatch.originalSha256 !== expectedSha256
+    || task.output_size !== mismatch.validation.requestedSize) throw Error('dimension_retention_task_not_eligible');
+  const restore = options.restoreExpectedDeletedAtMs !== undefined;
+  if (restore && (!Number.isSafeInteger(options.restoreExpectedDeletedAtMs)
+    || !task.deleted_at || task.deleted_at.getTime() !== options.restoreExpectedDeletedAtMs)) throw Error('dimension_retention_deleted_at_changed');
+  const ledgers = await prisma.creditLedger.findMany({ where: { related_task_id: task.id }, orderBy: { created_at: 'asc' } });
+  if (ledgers.length !== 2 || ledgers[0].type !== 'task_freeze' || ledgers[1].type !== 'task_failed_refund'
+    || ledgers[0].user_id !== task.owner_id || ledgers[1].user_id !== task.owner_id
+    || ledgers[0].idempotency_key !== `image-studio:freeze:${task.id}`
+    || ledgers[1].idempotency_key !== `image-studio:settle:${task.id}`) throw Error('dimension_retention_settlement_invalid');
+  const beforeSha256 = studioTaskBeforeHash(task);
+  const original = await readPreservedOriginal(task.id, mismatch.originalSha256, mismatch.originalBytes);
+  const result = (assetId: string, replayed = false) => ({ taskId: task.id, assetId, sha256: mismatch.originalSha256,
+    bytes: mismatch.originalBytes, width: mismatch.validation.width, height: mismatch.validation.height,
+    requestedSize: task.output_size, replayed });
+  if (task.asset_id) {
+    const existing = await prisma.asset.findUnique({ where: { id: task.asset_id } });
+    if (!existing || existing.owner_id !== task.owner_id || existing.status !== 'active' || existing.type !== 'image'
+      || existing.hash !== expectedSha256 || existing.mime_type !== 'image/png'
+      || existing.original_url !== `/uploads/assets/${expectedSha256}.png` || !existing.thumbnail_url
+      || existing.file_size !== mismatch.originalBytes || existing.width !== mismatch.validation.width
+      || existing.height !== mismatch.validation.height) throw Error('dimension_retention_asset_invalid');
+    if (!original.equals(await fs.readFile(path.join(process.cwd(), 'public', existing.original_url)))) throw Error('dimension_retention_published_file_changed');
+    await fs.access(path.join(process.cwd(), 'public', existing.thumbnail_url));
+    if (restore) {
+      const changed = await prisma.imageStudioTask.updateMany({ where: { id: task.id, asset_id: existing.id,
+        deleted_at: task.deleted_at, updated_at: task.updated_at }, data: { deleted_at: null } });
+      if (changed.count !== 1) throw Error('dimension_retention_visibility_changed');
+    }
+    return result(existing.id, true);
+  }
+  const validations: Array<Parameters<NonNullable<Parameters<typeof validateGeneratedStudioImage>[2]>>[0]> = [];
+  try {
+    await validateGeneratedStudioImage(original, { size: task.output_size!, format: 'png' }, async value => { validations.push(value); });
+    throw Error('dimension_retention_not_mismatched');
+  } catch (error) {
+    if (!(error instanceof StudioImageDeliveryError) || error.code !== 'generated_dimensions_mismatch') throw error;
+  }
+  const validation = validations.at(-1);
+  if (!validation || validation.width !== mismatch.validation.width || validation.height !== mismatch.validation.height
+    || validation.requestedSize !== mismatch.validation.requestedSize) throw Error('dimension_retention_validation_changed');
+  const assertUnchanged = async () => {
+    const current = await prisma.imageStudioTask.findUnique({ where: { id: task.id } });
+    if (!current || current.asset_id || studioTaskBeforeHash(current) !== beforeSha256) throw Error('dimension_retention_task_changed');
+  };
+  const prepared = await prepareStudioOutput(original, task, validation, assertUnchanged);
+  prepared.metadata_json = JSON.stringify({ ...JSON.parse(String(prepared.metadata_json || '{}')),
+    deliveryDisposition: 'generated_dimensions_mismatch', requestedSize: task.output_size });
+  return prisma.$transaction(async tx => {
+    const current = await tx.imageStudioTask.findUnique({ where: { id: task.id } });
+    if (!current || current.asset_id || studioTaskBeforeHash(current) !== beforeSha256
+      || !studioDimensionMismatch(current)) throw Error('dimension_retention_task_changed');
+    const asset = await tx.asset.upsert({ where: { owner_id_hash: { owner_id: task.owner_id, hash: prepared.hash! } },
+      create: prepared, update: { thumbnail_url: prepared.thumbnail_url, width: prepared.width, height: prepared.height } });
+    if (asset.owner_id !== task.owner_id || asset.status !== 'active' || asset.mime_type !== 'image/png'
+      || asset.original_url !== prepared.original_url || !asset.thumbnail_url
+      || asset.width !== validation.width || asset.height !== validation.height) throw Error('dimension_retention_asset_invalid');
+    const linked = await tx.imageStudioTask.updateMany({ where: { id: task.id, asset_id: null, status: task.status,
+      updated_at: task.updated_at, deleted_at: task.deleted_at },
+      data: { asset_id: asset.id, ...(restore ? { deleted_at: null } : {}) } });
+    if (linked.count !== 1) throw Error('dimension_retention_link_lost');
+    return result(asset.id);
   }, { timeout: 15000 });
 }

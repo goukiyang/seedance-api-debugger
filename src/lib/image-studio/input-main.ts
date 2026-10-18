@@ -7,6 +7,7 @@ import { MAX_REFERENCE_IMAGES } from './limits';
 import { studioTemplateAssetUrl } from './media';
 import { readableStudioCoverIds } from './protected-assets';
 import { studioTemplateTaskWhere } from './task-visibility';
+import { studioTaskHasViewableOutput } from './dimension-mismatch';
 
 export type StudioInputMainState = 'ready' | 'none' | 'unknown' | 'unavailable';
 export type StudioInputMainResponse = {
@@ -62,10 +63,10 @@ export async function getStudioTaskInputMain(user: ImageStudioIdentity, taskId: 
   if (!canUseCompanyTemplates(user)) throw new StudioInputMainError('无权读取本次输入主图', 403);
   if (!/^[a-zA-Z0-9-]{1,120}$/.test(taskId)) throw new StudioInputMainError('任务编号无效', 400);
   const task = await prisma.imageStudioTask.findFirst({
-    where: { ...studioTemplateTaskWhere(user.id, undefined, true), id: taskId, status: 'succeeded' },
-    select: { id: true, owner_id: true, snapshot_json: true, reference_ids: true },
+    where: { ...studioTemplateTaskWhere(user.id, undefined, true), id: taskId },
+    select: { id: true, owner_id: true, snapshot_json: true, reference_ids: true, status: true, usage_json: true, asset_id: true },
   });
-  if (!task) throw new StudioInputMainError('任务不存在或无权读取', 404);
+  if (!task || !studioTaskHasViewableOutput(task)) throw new StudioInputMainError('任务不存在或无权读取', 404);
   // Hash the frozen input identity, not current output/asset metadata. No private snapshot is returned.
   const snapshotToken = createHash('sha256').update(JSON.stringify([
     'studio-direct-input-main-v1', task.id, task.owner_id, task.snapshot_json, task.reference_ids,

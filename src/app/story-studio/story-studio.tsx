@@ -1,4 +1,5 @@
 'use client';
+import { studioOutputMismatchDisposition } from '@/lib/image-studio/dimension-mismatch';
 
 import { MultiviewEntry } from '@/components/MultiviewEntry';
 
@@ -464,19 +465,21 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     if (!handoff || !imageAllowed) throw Error('此镜头还没有可用的生图工作区');
     const query = new URLSearchParams({ moduleId: handoff.moduleId });
     if (more && cursor) query.set('cursor', cursor);
-    const data = await request<{ tasks: Array<{ id: string; status: string; error?: string; asset?: {
+    const data = await request<{ tasks: Array<{ id: string; status: string; resultDisposition?: string | null; error?: string; asset?: {
       id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number;
     } | null }>; nextCursor?: string | null; total: number }>(`/api/image-studio/tasks?${query}`);
     if (!alive.current || resultScope.current !== scope || sequence !== resultReadSequence.current) return;
     const assets: Record<string, PickerItem> = {};
     const items: GeneratedImageResult[] = data.tasks.map(task => {
-      const asset = task.status === 'succeeded' ? task.asset : null;
+      const asset = task.status === 'succeeded' || studioOutputMismatchDisposition(task.resultDisposition) ? task.asset : null;
       if (asset?.id) assets[task.id] = { key: `asset:${asset.id}`, identity: `asset:${asset.id}`, id: asset.id,
         assetId: asset.id, type: 'image', fileName: '分镜生成原图',
         originalUrl: `/api/image-studio/assets/${asset.id}`, previewUrl: `/api/image-studio/assets/${asset.id}`, thumbnailUrl: asset.thumbnail_url || null,
         width: asset.width || null, height: asset.height || null, fileSize: asset.file_size || null,
         duration: null, createdAt: '', source: 'generated' };
-      return { id: task.id, label: '分镜画面', status: task.status, pending: ['queued', 'running'].includes(task.status), error: task.error,
+      return { id: task.id, label: '分镜画面', status: studioOutputMismatchDisposition(task.resultDisposition) && asset ? '图片已返回 · 规格不符' : task.status,
+        pending: ['queued', 'running'].includes(task.status), notice: studioOutputMismatchDisposition(task.resultDisposition) && asset ? task.error : undefined,
+        error: studioOutputMismatchDisposition(task.resultDisposition) && asset ? undefined : task.error,
         ...(asset?.id ? { media: { src: `/api/image-studio/assets/${asset.id}`, thumbnailSrc: asset.thumbnail_url,
           alt: '分镜画面', contentKey: `asset:${asset.id}` as ContentKey } } : {}) };
     });

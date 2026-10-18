@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma';
 import { openStudioImageStream, classifyStudioDownloadError, StudioImageDownloadError, type StudioDownloadDiagnostics } from './media';
 import { studioGenerationDetailSuperseded } from './delivery-display';
 import { cleanupStudioResponseEvidence } from './response-evidence';
+import { studioOutputMismatch as studioDimensionMismatch, studioTaskHasViewableOutput } from './dimension-mismatch';
 
 const root = () => path.join(process.cwd(), 'storage', 'studio-delivery');
 let lastCleanup = 0;
@@ -176,12 +177,12 @@ export async function createStudioBase64Delivery(task: Identity, value: string, 
 export async function updateStudioDelivery(record: StudioDelivery, changes: Partial<StudioDelivery>) {
   Object.assign(record, changes); await save(record);
 }
-export async function studioDeliveryStatus(task: Identity & { status: string; usage_json?: string | null }) {
+export async function studioDeliveryStatus(task: Identity & { status: string; usage_json?: string | null; asset_id?: string | null }) {
   const record = await readStudioDelivery(task).catch(() => null);
   let receipt: StudioReceipt | null = null;
   try { receipt = await readStudioRequestReceipt(task); } catch {}
   let completed: { requestId?: string; upstreamRequestId?: string; validation?: StudioDelivery['validation']; responseStatus?: number; returnedAt?: number } = {};
-  if (task.status === 'succeeded') {
+  if (task.status === 'succeeded' || studioDimensionMismatch(task)) {
     try { completed = JSON.parse(task.usage_json || '{}').studioDelivery || {}; } catch {}
   }
   const running = task.status === 'running' || task.status === 'channel_running';
@@ -189,10 +190,10 @@ export async function studioDeliveryStatus(task: Identity & { status: string; us
   if ('snapshot_json' in task) asyncReceipt = await readStudioAsyncReceipt(task as AsyncIdentity).catch(() => null);
   // The recovery record is identity-bound and contains no provider URL or key.
   // A financial unknown is not an active generation and does not reopen POST.
-  const asyncRecovery = task.status === 'uncertain' && 'snapshot_json' in task
+  const asyncRecovery = task.status === 'uncertain' && !studioTaskHasViewableOutput(task) && 'snapshot_json' in task
     ? await (await import('./async-recovery')).readStudioAsyncRecovery(task as import('@prisma/client').ImageStudioTask).catch(() => null)
     : null;
-  return { phase: task.status === 'queued' || task.status === 'channel_queued' ? 'queued' : task.status === 'succeeded' ? 'ready'
+  return { phase: task.status === 'queued' || task.status === 'channel_queued' ? 'queued' : task.status === 'succeeded' || studioTaskHasViewableOutput(task) ? 'ready'
     : running ? record?.phase || 'provider' : record ? 'stopped' : task.status === 'uncertain' ? 'unknown' : 'failed',
     accepted: Boolean(asyncReceipt),
     acceptedAt: asyncReceipt && Number.isFinite(asyncReceipt.acceptedAt) && asyncReceipt.acceptedAt > 0 ? asyncReceipt.acceptedAt : undefined,

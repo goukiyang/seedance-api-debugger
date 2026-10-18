@@ -8,6 +8,7 @@ import { privateImageHeaders } from '@/lib/media/authorized-image-response';
 import { studioVisibleAssetWhere } from '@/lib/image-studio/protected-assets';
 import { STUDIO_BATCH_LIMITS, safeBatchFileName } from '@/lib/image-studio/batch-contract';
 import { studioBatchView } from '@/lib/image-studio/batches';
+import { studioTaskHasViewableOutput, studioOutputFormatForMime } from '@/lib/image-studio/dimension-mismatch';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,24 +17,27 @@ export async function GET(request: NextRequest) {
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers: privateImageHeaders });
   const ids = Array.from(new Set(request.nextUrl.searchParams.getAll('id')));
   if (!ids.length || ids.length > 8) return NextResponse.json({ error: '每次请选择 1 至 8 张图片' }, { status: 400, headers: privateImageHeaders });
-  const tasks = await prisma.imageStudioTask.findMany({ where: { id: { in: ids }, owner_id: user.id, status: 'succeeded', deleted_at: null } });
-  if (tasks.length !== ids.length) return NextResponse.json({ error: '部分图片不可下载或无权访问' }, { status: 403, headers: privateImageHeaders });
+  const tasks = await prisma.imageStudioTask.findMany({ where: { id: { in: ids }, owner_id: user.id, deleted_at: null } });
+  if (tasks.length !== ids.length || tasks.some(task => !studioTaskHasViewableOutput(task))) {
+    return NextResponse.json({ error: '部分图片不可下载或无权访问' }, { status: 403, headers: privateImageHeaders });
+  }
   try {
     const visible = await studioVisibleAssetWhere(user);
     const batchId = request.nextUrl.searchParams.get('batchId');
     const batch = batchId ? await studioBatchView(user.id, batchId) : null;
-    const files: Array<{ name: string; url: string; size: number; taskId: string }> = [];
+    const files: Array<{ name: string; url: string; size: number; taskId: string; mimeType: string }> = [];
     for (const id of ids) {
       const task = tasks.find(item => item.id === id)!;
       const asset = await prisma.asset.findFirst({ where: { id: task.asset_id!, owner_id: user.id, status: 'active', AND: [visible] } });
-      if (!asset || asset.mime_type !== 'image/png' || !asset.file_size || asset.file_size > 96 * 1024 * 1024) throw new Error('图片文件不可用');
+      const format = asset && studioOutputFormatForMime(asset.mime_type);
+      if (!asset || !format || !asset.file_size || asset.file_size > 96 * 1024 * 1024) throw new Error('图片文件不可用');
       const item = batch?.items?.find(item => item.taskId === task.id);
       if (batch && !item) throw new Error('图片不属于本批');
-      files.push({ name: item ? safeBatchFileName(batch!.id, item.ordinal, item.sourceName) : `image-${task.id.slice(0, 10)}-${task.ordinal}.png`, url: asset.original_url, size: asset.file_size, taskId: task.id });
+      files.push({ name: item ? safeBatchFileName(batch!.id, item.ordinal, item.sourceName, format.extension) : `image-${task.id.slice(0, 10)}-${task.ordinal}.${format.extension}`, url: asset.original_url, size: asset.file_size, taskId: task.id, mimeType: format.mimeType });
     }
     if (files.reduce((sum, file) => sum + file.size, 0) > STUDIO_BATCH_LIMITS.zipBytes) return NextResponse.json({ error: '本包超过 128MB，请减少图片数量后保存' }, { status: 400, headers: privateImageHeaders });
     if (files.length === 1 && !batch) {
-      const response = await mediaPreviewResponse(request, files[0].url, 'image/png');
+      const response = await mediaPreviewResponse(request, files[0].url, files[0].mimeType);
       response.headers.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(files[0].name).replace(/'/g, '%27')}`);
       return response;
     }
@@ -45,7 +49,7 @@ export async function GET(request: NextRequest) {
     const prefix = batch ? `batch-${batch.id.slice(0, 12)}/` : '';
     // Each authorized original streams lazily; no full image or package is buffered here.
     for (const file of files) zip.addReadStreamLazy(`${prefix}${file.name}`, { compress: false, size: file.size }, callback => {
-      void mediaPreviewResponse(mediaRequest, file.url, 'image/png').then(response => {
+      void mediaPreviewResponse(mediaRequest, file.url, file.mimeType).then(response => {
         if (!response.ok || !response.body || Number(response.headers.get('content-length')) !== file.size) { void response.body?.cancel(); throw new Error('图片大小或读取状态发生变化'); }
         callback(null, Readable.fromWeb(response.body as import('node:stream/web').ReadableStream));
       }).catch(error => callback(error, undefined as never));

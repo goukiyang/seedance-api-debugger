@@ -1,4 +1,5 @@
 'use client';
+import { studioOutputMismatchDisposition } from '@/lib/image-studio/dimension-mismatch';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Copy, Dice5, Download, Lock, Unlock, Save, Trash2, RotateCcw, UserRound, ImagePlus } from 'lucide-react';
@@ -32,7 +33,11 @@ import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChanne
 import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
 import { handImageDownloadToBrowser } from '@/lib/media/native-download';
 import styles from './studio.module.css';
-type Task = { id: string; ordinal: number; status: string; error?: string | null; billing?: ImageBillingView | null; snapshot?: { imageChannelLabel?: string | null; imageSupplierName?: string | null } | null; asset: { id: string; original_url: string; thumbnail_url?: string | null } | null };
+type Task = { id: string; ordinal: number; status: string; resultDisposition?: string | null; error?: string | null; billing?: ImageBillingView | null; snapshot?: { imageChannelLabel?: string | null; imageSupplierName?: string | null } | null; asset: { id: string; original_url: string; thumbnail_url?: string | null; file_name?: string; mime_type?: string | null } | null };
+function hasReturnedImage(task: Task | null | undefined): task is Task & { asset: NonNullable<Task['asset']> } {
+  return Boolean(task?.asset) && (task!.status === 'succeeded' || studioOutputMismatchDisposition(task!.resultDisposition));
+}
+const taskLabel = (task: Task) => studioOutputMismatchDisposition(task.resultDisposition) && task.asset ? '图片已返回 · 规格不符' : statusLabel[task.status] || '状态待确认';
 type Payload = { total: number; records: AvatarRecord[]; recentConfigs:AvatarRecord[];recordTasks:Record<string,Task>; nextCursor?: string | null; settings: { model: string; revision: number; prices: Record<string, number | null>; imageChannels?: unknown; billingReadiness?: { models: Record<string, { ready: boolean }> } } };
 type AvatarImageQuote = { billingMode: 'fixed' | 'actual'; billingQuoteId: string | null; unitCredits: number; estimatedCredits: number; expiresAt?: string; imageChannel?: ImageGenerationChannelSnapshot };
 type CachedAvatarImageQuote = { planId: string; parameters: string; quote: AvatarImageQuote };
@@ -299,15 +304,17 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   const sharedResults = candidateResults.filter(value => !value.output || !resultRecords[value.output.id]?.deletedAt).map(({ candidateIndex, output, draftId }) => ({
     id: output?.id || draftId, candidateIndex, output,
     label: candidateIndex < 0 ? '保留的上一张人物图片' : sheet ? avatarSheetLabel(plan?.layout) : `候选 ${candidateIndex + 1}`,
-    status: output ? statusLabel[output.status] || '状态待确认' : '人物草稿，尚未出图',
+    status: output ? taskLabel(output) : '人物草稿，尚未出图',
     billing: output?.billing,
-    pending: Boolean(output && ['queued', 'running'].includes(output.status)), error: output?.error,
-    media: output?.status === 'succeeded' && output.asset ? {
+    pending: Boolean(output && ['queued', 'running'].includes(output.status)),
+    notice: hasReturnedImage(output) && studioOutputMismatchDisposition(output.resultDisposition) ? output.error : undefined,
+    error: studioOutputMismatchDisposition(output?.resultDisposition) && output.asset ? undefined : output?.error,
+    media: hasReturnedImage(output) ? {
       src: output.asset.original_url, thumbnailSrc: output.asset.thumbnail_url || undefined, alt: '人物整图',
-      fileName: 'avatar.png', contentKey: `asset:${output.asset.id}` as const, imageSharing: false,
-      comparisonCandidates: [...tasks, ...(sourceTask ? [sourceTask] : []), ...Object.values(recordTasks)].flatMap(value => value.status === 'succeeded' && value.asset ? [{ src: value.asset.original_url, thumbnailSrc: value.asset.thumbnail_url || undefined, alt: '人物整图', contentKey: `asset:${value.asset.id}` as const }] : []),
+      fileName: output.asset.file_name || 'avatar.png', contentKey: `asset:${output.asset.id}` as const, imageSharing: false,
+      comparisonCandidates: [...tasks, ...(sourceTask ? [sourceTask] : []), ...Object.values(recordTasks)].flatMap(value => hasReturnedImage(value) ? [{ src: value.asset.original_url, thumbnailSrc: value.asset.thumbnail_url || undefined, alt: '人物整图', contentKey: `asset:${value.asset.id}` as const }] : []),
     } : undefined,
-    download: output?.status === 'succeeded' && output.asset ? () => handImageDownloadToBrowser(`/api/image-studio/download?id=${encodeURIComponent(output.id)}`, 'avatar.png') : undefined,
+    download: hasReturnedImage(output) ? () => handImageDownloadToBrowser(`/api/image-studio/download?id=${encodeURIComponent(output.id)}`, output.asset.file_name || 'avatar.png') : undefined,
   } satisfies GeneratedImageResult & { candidateIndex: number; output: Task | null | undefined }));
   const blocked = referenceUploading || pending || tasks.some(t => t.status === 'uncertain');
   function assertDraft(draft: DraftSnapshot) {
@@ -526,14 +533,15 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     const assetId = output?.asset?.id || record.assetId;
     return {
       id: record.id, record, output, label: record.name,
-      status: output ? statusLabel[output.status] || '状态待确认' : '状态未读取',
+      status: output ? taskLabel(output) : '状态未读取',
+      notice: hasReturnedImage(output) && studioOutputMismatchDisposition(output.resultDisposition) ? output.error : undefined,
       billing: output?.billing,
       pending: Boolean(output && ['queued', 'running'].includes(output.status)),
       media: assetId ? { src: output?.asset?.original_url || `/api/image-studio/assets/${assetId}`,
         thumbnailSrc: output?.asset?.thumbnail_url || `/api/image-studio/assets/${assetId}?thumbnail=1`,
         alt: record.name, fileName: 'avatar.png', imageSharing: false,
         contentKey: record.deletedAt ? undefined : `asset:${assetId}` as const } : undefined,
-      download: output?.status === 'succeeded' && output.asset ? () => handImageDownloadToBrowser(`/api/image-studio/download?id=${encodeURIComponent(output.id)}`, 'avatar.png') : undefined,
+      download: hasReturnedImage(output) ? () => handImageDownloadToBrowser(`/api/image-studio/download?id=${encodeURIComponent(output.id)}`, output.asset.file_name || 'avatar.png') : undefined,
     } satisfies GeneratedImageResult & { record: AvatarRecord; output: Task | null | undefined };
   });
   const selectedOptionalConditions = Object.entries(rules.choices)
@@ -578,7 +586,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
         {tasks.some(t=>t.status==='failed')&&!tasks.some(t=>['queued','running','uncertain'].includes(t.status))&&<button type="button" className={styles.quiet} disabled={busy||conditionsChanged||needsAnalysis||(plan?.channelId||'original')!==effectiveImageChannelId} onClick={()=>void run(async()=>{const draft=liveDraft.current;if((plan?.channelId||'original')!==imageStudioEffectiveChannelId(imageChannel.channels,draft.model,draft.channelId))throw new Error('失败任务使用的生图通道与当前选择不同，请切回原通道后重试；没有新建任务。');const data=await api<{plan:AvatarPlan}>({action:'retry',id:plan!.id,channelId:draft.channelId,...(plan?.imageChannel?{imageChannel:plan.imageChannel}:{})});assertDraft(draft);await submit(data.plan,draft);})}>只重试失败项</button>}
         {previousImageTask?.asset&&imageTask===previousImageTask&&<p className={styles.price}>保留的上一张图片；当前人物或任务还没有新图片。</p>}
         {sheet&&<p className={styles.price}>整图不是单人的身份基准；可裁出所选格下载，保存人物仍需独立原图。</p>}
-        {task?.error&&<p className={styles.error}>{task.error}</p>}{tasks.length>0&&<p className={styles.price}>已完成 {tasks.filter(t=>t.status==='succeeded').length}/{plan?avatarOutputCount(plan):0} 张。图片已保存不代表人物要求已符合。</p>}
+        {task?.error&&!studioOutputMismatchDisposition(task.resultDisposition)&&<p className={styles.error}>{task.error}</p>}{tasks.length>0&&<p className={styles.price}>已返回 {tasks.filter(hasReturnedImage).length}/{plan?avatarOutputCount(plan):0} 张。图片已保存不代表人物要求已符合。</p>}
       </section>
       <section className={styles.input} aria-label="人物描述与生成" data-avatar-composer onPaste={event=>{
         const files=Array.from(event.clipboardData.items).filter(item=>item.kind==='file'&&item.type.startsWith('image/')).map(item=>item.getAsFile()).filter((file):file is File=>!!file);
@@ -678,7 +686,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
       currentCount={referenceIds.length} currentAssetIds={referenceIds} onClose={()=>setPickerOpen(false)} onUploadFile={uploadReference}
       onConfirm={async ids=>{addReferences(ids);return true;}}/>
     {imagePreview&&<ZoomableImagePreview src={imagePreview.src} alt={imagePreview.alt} fileName="avatar.png" imageSharing={false}
-      comparisonCandidates={[...tasks, ...(sourceTask ? [sourceTask] : []), ...Object.values(recordTasks)].flatMap(task => task.status === 'succeeded' && task.asset ? [{ src: task.asset.original_url, thumbnailSrc: task.asset.thumbnail_url || undefined, alt: '人物整图', contentKey: `asset:${task.asset.id}` as const }] : [])}
+      comparisonCandidates={[...tasks, ...(sourceTask ? [sourceTask] : []), ...Object.values(recordTasks)].flatMap(task => hasReturnedImage(task) ? [{ src: task.asset.original_url, thumbnailSrc: task.asset.thumbnail_url || undefined, alt: '人物整图', contentKey: `asset:${task.asset.id}` as const }] : [])}
       onClose={()=>setImagePreview(null)}/>} {productDialog}
   </main>;
 }

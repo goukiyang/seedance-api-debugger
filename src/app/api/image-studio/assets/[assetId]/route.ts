@@ -5,6 +5,7 @@ import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
 import { authorizedImageResponse, privateImageHeaders } from '@/lib/media/authorized-image-response';
 import { performance } from 'node:perf_hooks';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,10 +17,12 @@ export async function GET(_request: NextRequest, { params }: { params: { assetId
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '图片不存在或无权访问' }, { status: 404, headers: privateImageHeaders });
   const assetId = params.assetId;
   const task = await prisma.imageStudioTask.findFirst({
-    where: { owner_id: user.id, asset_id: assetId, status: 'succeeded', deleted_at: null },
-    select: { asset_id: true },
+    where: { owner_id: user.id, asset_id: assetId, deleted_at: null, AND: [studioOutputTaskWhere] },
+    select: { asset_id: true, status: true, usage_json: true },
   });
-  if (!task) return NextResponse.json({ error: '图片不存在或无权访问' }, { status: 404, headers: privateImageHeaders });
+  if (!task || !studioTaskHasViewableOutput(task)) {
+    return NextResponse.json({ error: '图片不存在或无权访问' }, { status: 404, headers: privateImageHeaders });
+  }
   const asset = await prisma.asset.findFirst({ where: { id: assetId, owner_id: user.id, status: 'active', type: 'image' }, select: { original_url: true, mime_type: true, file_name: true } });
   if (asset && !await canReadStudioAsset(user, asset)) return new Response('Not found', { status: 404, headers: privateImageHeaders });
   if (!asset) return NextResponse.json({ error: '图片不存在或无权访问' }, { status: 404, headers: privateImageHeaders });

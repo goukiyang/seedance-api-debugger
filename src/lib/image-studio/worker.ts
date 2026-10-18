@@ -17,7 +17,7 @@ import { imageBillingScope } from './billing-scope';
 import { parseImageBillingContract } from './billing-contract';
 import { imageBillingReady } from './billing-readiness';
 import { reserveImageStudioQueueCapacity } from './queue-capacity';
-import { finishRejectedStudioDimensions } from './dimension-rejection';
+import { finishRejectedStudioDimensions, readRetainedStudioDimensionOriginal } from './dimension-rejection';
 import { recordStudioResponseEvidence } from './response-evidence';
 import { claimStudioAsyncRecovery, deferStudioAsyncRecovery, releaseStudioAsyncSlot, studioAsyncReleaseReason, observeStudioAsyncQueryUnavailable } from './async-recovery';
 
@@ -50,6 +50,7 @@ export async function processStudioTask(generate: typeof requestStudioImages = r
 async function executeStudioTask(task: ImageStudioTask, generate: typeof requestStudioImages, recovery?: StudioDelivery) {
   let providerStarted = Boolean(recovery);
   let delivery = recovery;
+  let original: Buffer | undefined;
   let stage = 'prepare';
   const started = Date.now();
   const taskSignal = AbortSignal.timeout(STUDIO_EXECUTION_MS);
@@ -63,8 +64,9 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
     const owner = await prisma.user.findUnique({ where: { id: task.owner_id }, select: { status: true } });
     if (owner?.status !== 'active') throw new Error('当前账号无法生成');
     let usage: unknown;
-    let original: Buffer;
-    if (recovery) {
+    const retainedOriginal = await readRetainedStudioDimensionOriginal(task);
+    if (retainedOriginal) { original = retainedOriginal; providerStarted = true; }
+    else if (recovery) {
       stage = 'download';
       if (!studioDeliveryCanRetry(recovery)) throw new StudioImageDownloadError('download_recovery_limit');
       await assertLease();
@@ -116,6 +118,7 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
       if (!delivery) { await assertLease(); delivery = await createStudioBase64Delivery(task, result.images[0], result.usage); }
       original = await download(delivery); usage = result.usage;
     }
+    if (!original) throw new Error('原图片尚未获取，未交付资产');
     stage = 'normalize'; await assertLease();
     if (delivery) await updateStudioDelivery(delivery, { phase: 'validate' });
     const exactSize = task.output_size && /^\d+x\d+$/.test(task.output_size) ? task.output_size : undefined;
@@ -144,6 +147,15 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
       model: task.model, outputSize: task.output_size, httpStatus: detail?.status || downloadError?.status,
       download: detail?.diagnostics || downloadError?.diagnostics, elapsedMs: Date.now() - started }));
     if (code === 'delivery_lease_lost') return;
+    if (code === 'dimension_retention_checkpoint_invalid') {
+      await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: 'running', lease_token: task.lease_token },
+        data: { lease_until: new Date(Date.now() + 5 * 60_000), error: '本机原图恢复资料暂不可读，原请求保留；请联系管理员核对，没有重新生成。' } });
+      return;
+    }
+    if (mediaError && ['generated_dimensions_mismatch', 'generated_format_mismatch'].includes(mediaError.code) && original) {
+      await retainDimensionMismatchOutput(task, original, delivery);
+      return;
+    }
     if (delivery && studioDeliveryCanRetry(delivery) && (taskSignal.aborted || detail?.retryable || downloadError?.retryable || ['save', 'settle'].includes(stage))) {
       await updateStudioDelivery(delivery, { phase: 'recover', code });
       await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: 'running', lease_token: task.lease_token, lease_until: { gt: new Date() } },
@@ -168,6 +180,25 @@ async function retainChannelTask(task: ImageStudioTask, message: string, delayMs
   });
 }
 
+async function retainDimensionMismatchOutput(task: ImageStudioTask, original: Buffer, delivery?: StudioDelivery) {
+  try {
+    if (await finishRejectedStudioDimensions(task, original)) {
+      if (delivery) await updateStudioDelivery(delivery, { phase: 'stopped', code: 'generated_dimensions_mismatch' });
+      await completeToolFlowTask(task.id);
+    }
+  } catch (error) {
+    // The validated original has a private durable copy. Do not replace its
+    // checkpoint, query the provider again or change the original fee decision.
+    console.error('[image-dimension-retention]', JSON.stringify({ taskId: task.id, code: 'local_publication_pending',
+      detail: error instanceof Error ? error.message.slice(0, 160) : 'unknown' }));
+    if (delivery) await updateStudioDelivery(delivery, { phase: 'recover', code: 'dimension_retention_save_pending' });
+    await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: task.status, lease_token: task.lease_token,
+      lease_until: { gt: new Date() } }, data: { lease_until: new Date(Date.now() + 30_000),
+      error: '原图已收到，规格与请求不符；正在恢复本机保存，不会重新生成。' } });
+    if (task.status === 'uncertain') await deferStudioAsyncRecovery(task, 'dimension_retention_save_pending');
+  }
+}
+
 async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof requestStudioImages,
   recovery?: StudioDelivery, resumeReceipt?: StudioAsyncReceipt, recoveryDeadlineAt?: number, manualRecovery = false, localOnly = false) {
   const recovering = task.status === 'uncertain';
@@ -189,6 +220,11 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
   try {
     const owner = await prisma.user.findUnique({ where: { id: task.owner_id }, select: { status: true } });
     if (owner?.status !== 'active') throw new Error('当前账号无法生成');
+    const retainedOriginal = await readRetainedStudioDimensionOriginal(task);
+    if (retainedOriginal) {
+      await retainDimensionMismatchOutput(task, retainedOriginal, delivery);
+      return;
+    }
     if (recovering && !asyncReceipt) throw new Error('原异步请求身份不可用，未重新生成');
     if (asyncReceipt?.state === 'failed') throw new StudioProviderError('response', 'async_failed');
     if (recovering && localOnly && !delivery?.complete) {
@@ -387,19 +423,20 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
       httpStatus: detail?.status || downloadError?.status, download: detail?.diagnostics || downloadError?.diagnostics,
       elapsedMs: Date.now() - started }));
     if (code === 'delivery_lease_lost') return;
+    if (code === 'dimension_retention_checkpoint_invalid') {
+      if (recovering) await deferStudioAsyncRecovery(task, code, true);
+      else await retainChannelTask(task, '本机原图恢复资料暂不可读，原请求保留；请联系管理员核对，没有重新生成。', 5 * 60_000);
+      return;
+    }
+    if (mediaError && ['generated_dimensions_mismatch', 'generated_format_mismatch'].includes(mediaError.code) && original) {
+      await retainDimensionMismatchOutput(task, original, delivery);
+      return;
+    }
     if (recovering && mediaError) {
       // The original dimension-rejection/refund helper only authorizes active
       // execution. A late invalid output stays unknown with its reservation intact.
       if (delivery) await updateStudioDelivery(delivery, { phase: 'stopped', code });
       await deferStudioAsyncRecovery(task, code, true);
-      return;
-    }
-    if (mediaError?.code === 'generated_dimensions_mismatch' && original) {
-      const finished = await finishRejectedStudioDimensions(task, original);
-      if (finished) {
-        if (delivery) await updateStudioDelivery(delivery, { phase: 'stopped', code });
-        await completeToolFlowTask(task.id);
-      }
       return;
     }
     if (code === 'async_failed' && asyncReceipt) {

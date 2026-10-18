@@ -8,6 +8,7 @@ import { studioTemplateTaskWhere } from './task-visibility';
 import { studioTaskDTOs } from './tasks';
 import { readableStudioPins, studioPinScope, studioPinState, StudioPinError } from './result-pins';
 import { STUDIO_RESULT_FEED, type SharedStudioPinnedImage } from './result-pin-types';
+import { studioOutputTaskWhere, studioTaskHasViewableOutput } from './dimension-mismatch';
 
 type Cursor = { v: 1; user: string; module: string; liked: boolean; epoch: string; pin: number; task: string | null };
 const fingerprint = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -39,8 +40,8 @@ export async function listStudioResultFeed(user: SessionUser, moduleId: string, 
   if (state.pin > pins.length || state.task && state.pin < pins.length) throw new StudioPinError('结果目录已变化，请刷新目录', 409);
   const ownPinIds = pins.filter(p => p.ownerId === user.id).map(p => p.taskId);
   const where: Prisma.ImageStudioTaskWhereInput = {
-    ...studioTemplateTaskWhere(user.id, moduleId), id: { notIn: ownPinIds },
-    ...(liked ? { asset_id: { in: Array.from(likedIds) }, status: 'succeeded' } : {}),
+    AND: [studioTemplateTaskWhere(user.id, moduleId), ...(liked ? [studioOutputTaskWhere] : [])], id: { notIn: ownPinIds },
+    ...(liked ? { asset_id: { in: Array.from(likedIds) } } : {}),
   };
   if (state.task && !await prisma.imageStudioTask.findFirst({ where: { ...where, id: state.task }, select: { id: true } })) {
     throw new StudioPinError('结果目录已变化，请刷新目录', 409);
@@ -53,8 +54,8 @@ export async function listStudioResultFeed(user: SessionUser, moduleId: string, 
     ...(state.task ? { cursor: { id: state.task }, skip: 1 } : {}) }) : [];
   const pageTasks = ordinary.slice(0, capacity);
   const ownPinnedTasks = await prisma.imageStudioTask.findMany({ where: { id: { in: pagePins.filter(p => p.ownerId === user.id).map(p => p.taskId) },
-    owner_id: user.id, deleted_at: null, status: 'succeeded' } });
-  const tasks = await studioTaskDTOs(user.id, user.role === 'admin', [...ownPinnedTasks, ...pageTasks]);
+    owner_id: user.id, deleted_at: null, AND: [studioOutputTaskWhere] } });
+  const tasks = await studioTaskDTOs(user.id, user.role === 'admin', [...ownPinnedTasks.filter(studioTaskHasViewableOutput), ...pageTasks]);
   const shared = pagePins.filter(p => p.ownerId !== user.id);
   const owners = await prisma.user.findMany({ where: { id: { in: shared.map(p => p.ownerId) } }, select: { id: true, name: true, avatar_url: true } });
   const byOwner = new Map(owners.map(o => [o.id, { name: o.name || '模板使用者', avatar_url: o.avatar_url }]));

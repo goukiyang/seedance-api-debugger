@@ -12,6 +12,7 @@ import { videoDeliveryStageForTask, type VideoDeliveryStage } from '@/lib/video/
 import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
 import { assetGenerationOrigin, generationOrigins, type GenerationOrigin } from '@/lib/assets/generation-origin';
 import { imageBillingView, type ImageBillingView } from '@/lib/image-studio/billing-contract';
+import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
 import { studioHiddenAssetUrls, studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
 import { removedLibraryResources } from '@/lib/assets/library-removal';
 import { estimateNormalVideoCharge, loadNormalVideoChargeRates, type NormalVideoChargeEstimate } from '@/lib/costs/normal-video-charge';
@@ -774,11 +775,11 @@ async function loadAssetItems(options: {
   const origins = await generationOrigins(options.user, assets.filter(asset => asset.type === 'image'));
   const billingRows = await prisma.imageStudioTask.findMany({ where: { asset_id: { in: assets.filter(asset => asset.type === 'image'
     && (options.user.role === 'admin' || asset.owner_id === options.user.id)).map(asset => asset.id) },
-    ...(options.user.role === 'admin' ? {} : { owner_id: options.user.id }), status: 'succeeded' },
+    ...(options.user.role === 'admin' ? {} : { owner_id: options.user.id }), AND: [studioOutputTaskWhere] },
     select: { asset_id: true, owner_id: true, billing_status: true, actual_amount_micros: true,
-      actual_credits: true, billing_contract_json: true }, take: 1001 });
+      actual_credits: true, billing_contract_json: true, status: true, usage_json: true }, take: 1001 });
   const billsByAsset = new Map<string, typeof billingRows>();
-  if (billingRows.length < 1001) for (const row of billingRows) { const rows = billsByAsset.get(row.asset_id!) || []; rows.push(row); billsByAsset.set(row.asset_id!, rows); }
+  if (billingRows.length < 1001) for (const row of billingRows.filter(studioTaskHasViewableOutput)) { const rows = billsByAsset.get(row.asset_id!) || []; rows.push(row); billsByAsset.set(row.asset_id!, rows); }
 
   return {
     items: assets.map((asset) => ({ ...serializeAsset({

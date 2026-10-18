@@ -10,6 +10,7 @@ import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
 import type { PickerAlbum, PickerItem, PickerScope } from '@/lib/assets/picker-types';
 import { removedLibraryResources } from '@/lib/assets/library-removal';
 import { generationOrigins } from '@/lib/assets/generation-origin';
+import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
 
 export const dynamic = 'force-dynamic';
 const scopes: PickerScope[] = ['mine', 'project', 'shared', 'public'];
@@ -93,7 +94,7 @@ export async function GET(request: NextRequest) {
     const [assets, references, generatedTasks, favorites, videoTasks] = await Promise.all([
       scope === 'mine' && !albumId && !projectId ? prisma.asset.findMany({ where: assetWhere, select: { id: true, owner_id: true, type: true, file_name: true, metadata_json: true, created_at: true } }) : Promise.resolve([]),
       prisma.referenceImage.findMany({ where: refWhere, select: { id: true, album_id: true, owner_user_id: true, source_type: true, created_at: true, asset: { select: { id: true, type: true, file_name: true, metadata_json: true, owner_id: true } } } }),
-      prisma.imageStudioTask.findMany({ where: { owner_id: user.id, status: 'succeeded', asset_id: { not: null } }, select: { asset_id: true } }),
+      prisma.imageStudioTask.findMany({ where: { owner_id: user.id, AND: [studioOutputTaskWhere], asset_id: { not: null } }, select: { asset_id: true, status: true, usage_json: true } }),
       p.get('view') === 'favorites' ? prisma.contentReaction.findMany({ where: { user_id: user.id, OR: [{ liked: true }, { favorited: true }] }, select: { content_key: true } }) : Promise.resolve([]),
       !imageStudio && types.includes('video') && scope === 'mine' && !albumId && !projectId ? prisma.videoTask.findMany({ where: {
         local_status: 'succeeded', retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] },
@@ -101,7 +102,7 @@ export async function GET(request: NextRequest) {
         ...(q ? { AND: [{ OR: [{ id: { contains: q } }, { prompt: { contains: q } }] }] } : {}),
       }, select: { id: true, owner_user_id: true, user_id: true, project_id: true, retention_status: true, local_video_path: true, public_video_url: true, duration: true, created_at: true } }) : Promise.resolve([]),
     ]);
-    const generatedIds = new Set(generatedTasks.map(t => t.asset_id));
+    const generatedIds = new Set(generatedTasks.filter(studioTaskHasViewableOutput).map(t => t.asset_id));
     const origins = await generationOrigins(user, [...assets, ...references.flatMap(ref => ref.asset ? [ref.asset] : [])]);
     const assetSource = (asset: { id: string; metadata_json: string | null }): PickerItem['source'] => {
       if (origins.has(asset.id) || generatedIds.has(asset.id)) return 'generated';

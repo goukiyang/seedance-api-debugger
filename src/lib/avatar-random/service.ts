@@ -22,6 +22,7 @@ import { imageBillingReady } from '@/lib/image-studio/billing-readiness';
 import { readImageSupplierBills } from '@/lib/image-studio/billing-provider';
 import { supplierHistoryEstimate } from '@/lib/image-studio/billing-quote';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
+import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
 
 export async function validateAvatarReferences(owner: string, ids: string[]) {
   try { validateStudioReferenceCounts(defaultStudioReferencePolicy(ids), ids, 0, 0); }
@@ -118,8 +119,8 @@ export async function prepareAvatarPlan(owner: string, body: Record<string, unkn
   const keepIdentity=action==='styling'||action==='tweak'&&typeof body.field==='string'&&!identityFields.includes(body.field);
   if (keepIdentity) {
     const baselineId = current!.baselineAssetId || (typeof body.baselineAssetId === 'string' ? body.baselineAssetId : '');
-    const source = await prisma.imageStudioTask.findFirst({ where: { owner_id: owner, asset_id: baselineId, status: 'succeeded', snapshot_json: { contains: `"characterId":"${current!.characterId}"` } } });
-    const singleSource = source && !isAvatarSheet({ layout: JSON.parse(source.snapshot_json || '{}').avatarLayout });
+    const source = await prisma.imageStudioTask.findFirst({ where: { owner_id: owner, asset_id: baselineId, AND: [studioOutputTaskWhere], snapshot_json: { contains: `"characterId":"${current!.characterId}"` } } });
+    const singleSource = source && studioTaskHasViewableOutput(source) && !isAvatarSheet({ layout: JSON.parse(source.snapshot_json || '{}').avatarLayout });
     if (!singleSource && action==='styling') throw new StudioError('保持此人需要其已完成的独立原图参考；宫格整图不能用作单人的身份基准');
     const asset = await prisma.asset.findFirst({ where: { id: baselineId, owner_id: owner, status: 'active', type: 'image' } });
     if (!asset && action==='styling') throw new StudioError('人物原图已不可用，请重新选择');

@@ -3,6 +3,7 @@ import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { canUseCompanyTemplates, canViewStudioPreset, isExplicitPresetAsset } from '@/lib/image-studio/access';
 import { studioHiddenAssetUrls } from '@/lib/image-studio/protected-assets';
+import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -32,10 +33,10 @@ export async function GET(request: NextRequest) {
   if (user.role === 'admin' || assets.some(asset => asset.owner_id === user.id)) return new NextResponse(null, { status: 204 });
 
   const generatedTasks = await prisma.imageStudioTask.findMany({
-    where: { asset_id: { in: assets.map(asset => asset.id) }, owner_id: user.id, status: 'succeeded', deleted_at: null },
-    select: { owner_id: true, deleted_at: true },
+    where: { asset_id: { in: assets.map(asset => asset.id) }, owner_id: user.id, AND: [studioOutputTaskWhere], deleted_at: null },
+    select: { owner_id: true, deleted_at: true, asset_id: true, status: true, usage_json: true },
   });
-  if (generatedTasks.length) {
+  if (generatedTasks.some(studioTaskHasViewableOutput)) {
     return new NextResponse(null, { status: 204 });
   }
 

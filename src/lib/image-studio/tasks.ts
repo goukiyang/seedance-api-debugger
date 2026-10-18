@@ -41,6 +41,7 @@ import { resolveCanvasStudioReferenceUse } from '@/lib/canvas-studio-reference-u
 import { bindRoleMediaTask, roleMediaFingerprint, type RoleMediaSubmission } from '@/lib/canvas-roles/media-bindings';
 import { resolveSharedStudioModule, parseSharedStudioPersonalOverrides } from './shared-contract';
 import type { SharedStudioIntent } from './shared-types';
+import { studioOutputMismatch as studioDimensionMismatch, studioDimensionMismatchNotice, studioTaskHasViewableOutput, studioOutputTaskWhere } from './dimension-mismatch';
 
 export class StudioError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -891,29 +892,31 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   return batchId;
 }
 
-export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded' | 'failed' | 'uncertain', data: { assetId?: string; preparedAsset?: Prisma.AssetUncheckedCreateInput; error?: string; usage?: unknown } = {}, transaction?: Prisma.TransactionClient) {
+export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded' | 'failed' | 'uncertain', data: { assetId?: string; preparedAsset?: Prisma.AssetUncheckedCreateInput; retainedAsset?: Prisma.AssetUncheckedCreateInput; error?: string; usage?: unknown } = {}, transaction?: Prisma.TransactionClient) {
   const finish = async (tx: Prisma.TransactionClient) => {
     const recovering = task.status === 'uncertain';
-    if (recovering && status === 'uncertain') return false;
+    const retainedMismatch = Boolean(data.retainedAsset && studioDimensionMismatch({ status, usage_json: JSON.stringify(data.usage) }));
+    if (data.retainedAsset && !retainedMismatch) throw new Error('Retained output requires a proven dimension mismatch');
+    if (recovering && status === 'uncertain' && !retainedMismatch) return false;
     const recovery = recovering ? await import('./async-recovery') : null;
     if (recovery && !await recovery.studioAsyncRecoveryLease(tx, task)) return false;
     const activeStatus = recovering ? 'uncertain' : task.status === 'channel_running' ? 'channel_running' : 'running';
     const channel = activeStatus === 'channel_running' || recovering;
     // Complete the same recovery CAS before changing task state; both roll back
     // with asset/ledger settlement if any later step fails.
-    if (recovery && status !== 'uncertain') await recovery.completeStudioAsyncRecovery(tx, task);
+    if (recovery && (status !== 'uncertain' || retainedMismatch)) await recovery.completeStudioAsyncRecovery(tx, task);
     const changed = await tx.imageStudioTask.updateMany({
       where: { id: task.id, status: activeStatus, lease_token: task.lease_token, lease_until: { gt: new Date() } },
       data: { status, asset_id: data.assetId, error: status === 'succeeded' ? null : data.error, usage_json: data.usage ? JSON.stringify(data.usage) : undefined,
         lease_until: null, lease_token: null, finished_at: new Date() },
     });
     if (!changed.count) { if (recovery) throw new Error('async_recovery_finish_lease_lost'); return false; }
-    if (status === 'succeeded' && data.preparedAsset) {
-      const prepared = data.preparedAsset;
+    const prepared = status === 'succeeded' ? data.preparedAsset : data.retainedAsset;
+    if (prepared) {
       if (prepared.owner_id !== task.owner_id || !prepared.hash || prepared.type !== 'image') throw new Error('Output ownership mismatch');
       const asset = await tx.asset.upsert({ where: { owner_id_hash: { owner_id: task.owner_id, hash: prepared.hash } },
         create: prepared, update: { thumbnail_url: prepared.thumbnail_url, width: prepared.width, height: prepared.height } });
-      if (asset.status !== 'active' || asset.mime_type !== 'image/png' || asset.original_url !== prepared.original_url
+      if (asset.status !== 'active' || asset.mime_type !== prepared.mime_type || asset.original_url !== prepared.original_url
         || !asset.thumbnail_url || asset.width !== prepared.width || asset.height !== prepared.height) throw new Error('Output asset unavailable');
       await tx.imageStudioTask.update({ where: { id: task.id }, data: { asset_id: asset.id } });
     }
@@ -952,7 +955,7 @@ export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded
       balance_before: settlement.balanceBefore, balance_after: settlement.balanceAfter,
       frozen_before: settlement.frozenBefore, frozen_after: settlement.frozenAfter,
       related_task_id: task.id, idempotency_key: `image-studio:settle:${task.id}`,
-      reason: status === 'succeeded' ? '图片已保存，结算积分' : '图片未交付，释放冻结积分',
+      reason: status === 'succeeded' ? '图片已保存，结算积分' : data.retainedAsset ? '图片规格不符，保留原图并释放冻结积分' : '图片未交付，释放冻结积分',
       metadata_json: JSON.stringify({ allocations: settlement.allocations, expired_closed: settlement.expiredClosedAmount }),
     } });
     await tx.imageStudioTask.update({ where: { id: task.id }, data: { actual_credits: settlement.actualCost,
@@ -1043,7 +1046,7 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
     const marks = await prisma.contentReaction.findMany({ where: { user_id: ownerId, content_key: { startsWith: 'asset:' }, OR: [{ liked: true }, { favorited: true }] }, select: { content_key: true } });
     const assets = await prisma.asset.findMany({ where: { id: { in: marks.map(mark => mark.content_key.slice(6)) }, owner_id: ownerId, status: 'active' }, select: { id: true } });
     where.asset_id = { in: assets.map(asset => asset.id) };
-    where.status = 'succeeded';
+    where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), studioOutputTaskWhere];
   }
   if (cursor && !(await prisma.imageStudioTask.findFirst({ where: { ...where, id: cursor }, select: { id: true } }))) {
     throw new StudioError('结果目录已变化，请重新读取', 409);
@@ -1067,7 +1070,7 @@ export async function studioTaskDTOs(ownerId: string, isAdmin: boolean, items: I
     try { return JSON.parse(item.reference_ids) as string[]; } catch { return []; }
   })));
   const assets = await prisma.asset.findMany({ where: { id: { in: [...outputAssetIds, ...referenceIds] }, ...(isAdmin ? {} : { owner_id: ownerId }), status: 'active' },
-    select: { id: true, original_url: true, thumbnail_url: true, width: true, height: true, file_size: true } });
+    select: { id: true, original_url: true, thumbnail_url: true, width: true, height: true, file_size: true, file_name: true, mime_type: true } });
   const assetById = new Map(assets.map(asset => [asset.id, asset]));
   const owner = items.length ? await prisma.user.findUnique({ where: { id: ownerId },
     select: { id: true, name: true, username: true, avatar_url: true } }) : null;
@@ -1076,16 +1079,19 @@ export async function studioTaskDTOs(ownerId: string, isAdmin: boolean, items: I
   const contextVersions = new Map(await Promise.all(items.map(async task => [task.id, await snapshotModuleContextVersion(task.snapshot_json)] as const)));
   return items.map(task => {
     const snapshot = publicStudioSnapshot(task, assetById, isAdmin, ownerId);
+    const mismatch = studioDimensionMismatch(task);
     return { id: task.id, batchId: task.batch_id, ordinal: task.ordinal,
       owner: publicOwner,
       delivery: deliveries.get(task.id),
-      prompt: snapshot.prompt, model: task.model, quality: task.quality, status: publicImageTaskStatus(task.status), error: task.error, unitCredits: task.unit_credits,
+      prompt: snapshot.prompt, model: task.model, quality: task.quality, status: publicImageTaskStatus(task.status),
+      error: mismatch && studioTaskHasViewableOutput(task) ? studioDimensionMismatchNotice(mismatch.validation) : task.error, unitCredits: task.unit_credits,
       providerCostUsd: task.provider_cost_usd,
       billing: imageBillingView(task, ownerId, isAdmin),
       aspectRatio: task.aspect_ratio, outputSize: task.output_size,
+      resultDisposition: mismatch ? mismatch.code === 'generated_format_mismatch' ? 'format_mismatch' : 'dimensions_mismatch' : task.status === 'succeeded' ? 'accepted' : null,
       createdAt: task.created_at, finishedAt: task.finished_at, referenceIds: snapshot.transientReferenceImages.map(image => image.id),
       snapshot: { ...snapshot, moduleContextVersion: contextVersions.get(task.id)?.code ?? null, moduleContextVersionState: contextVersions.get(task.id)?.state ?? 'missing' },
-      asset: assetById.get(task.asset_id || '') ? { ...assetById.get(task.asset_id || '')!, original_url: studioAssetUrl(task.asset_id!), thumbnail_url: studioAssetUrl(task.asset_id!, true) } : null,
+      asset: studioTaskHasViewableOutput(task) && assetById.get(task.asset_id || '') ? { ...assetById.get(task.asset_id || '')!, original_url: studioAssetUrl(task.asset_id!), thumbnail_url: studioAssetUrl(task.asset_id!, true) } : null,
     };
   });
 }

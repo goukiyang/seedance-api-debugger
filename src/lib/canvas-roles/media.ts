@@ -4,6 +4,7 @@ import { assertCanUseReferenceImage, canUseDirectAsset } from '@/lib/reference-a
 import { assertCanViewTask } from '@/lib/projects/permissions';
 import { videoPlayableAvailableForTask } from '@/lib/video/delivery-status';
 import { prisma } from '@/lib/prisma';
+import { studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
 import { ownedRun, type RoleDb } from './permissions';
 import { digest, identifier, integer, record, RoleError, text, type JsonRecord } from './types';
 
@@ -55,7 +56,7 @@ export async function originalIdentity(db: RoleDb, user: SessionUser, ref: JsonR
 
 export async function imageTaskOriginal(db: RoleDb, user: SessionUser, taskId: string) {
   const task = await db.imageStudioTask.findUnique({ where: { id: identifier(taskId) } });
-  if (!task || task.owner_id !== user.id || task.deleted_at || task.status !== 'succeeded' || !task.asset_id) {
+  if (!task || task.owner_id !== user.id || task.deleted_at || !studioTaskHasViewableOutput(task) || !task.asset_id) {
     throw new RoleError('图片原任务尚无可用原件', 409, 'material_unavailable');
   }
   const source = await originalIdentity(db, user, { assetId: task.asset_id });

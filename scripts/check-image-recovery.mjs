@@ -34,6 +34,16 @@ const asyncRecoveryChecks = [
   'manual_once_after_auto_budget_keeps_limits',
   'legacy_identity_and_partial_checkpoint_fail_closed',
 ];
+const dimensionMismatchChecks = [
+  'fresh_mismatch_retains_viewable_asset_refunds_once',
+  'native_mismatch_preserves_original_uncertain_refund_policy',
+  'late_mismatch_retains_image_without_billing_decision_or_repeat_query',
+  'publication_failure_resumes_private_original_without_provider',
+  'decoded_format_mismatch_keeps_original_mime_bytes_and_original_billing_policy',
+  'settled_backfill_idempotent_hidden_by_default_exact_visibility_cas',
+  'normal_actions_follow_owner_source_permissions_not_size_status',
+  'plain_failure_corrupt_or_unproven_output_stays_unavailable',
+];
 const fixtures = [
   { file: 'scripts/image-studio-recovery-fairness-engineering.ts', schema: 'image-recovery-fairness-engineering.v1',
     marker: 'Image recovery fairness engineering receipt: ', checks: recoveryChecks,
@@ -46,6 +56,19 @@ const fixtures = [
     sources: ['src/lib/image-studio/worker.ts', 'src/lib/image-studio/provider.ts', 'src/lib/image-studio/tasks.ts',
       'src/lib/image-studio/async-recovery.ts', 'src/lib/image-studio/delivery.ts', 'src/lib/image-studio/queue-capacity.ts',
       'src/lib/image-studio/synchronous-admission.ts', 'src/app/api/image-studio/tasks/route.ts'] },
+  { file: 'scripts/image-dimension-mismatch-engineering.ts', schema: 'image-dimension-mismatch-engineering.v1',
+    marker: 'Image dimension mismatch engineering receipt: ', checks: dimensionMismatchChecks,
+    sources: ['src/lib/image-studio/dimension-rejection.ts', 'src/lib/image-studio/dimension-mismatch.ts',
+      'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/output.ts', 'src/lib/image-studio/delivery.ts',
+      'src/app/api/image-studio/assets/[assetId]/route.ts', 'src/app/api/image-studio/download/route.ts',
+      'src/app/image-studio/studio.tsx', 'src/components/GeneratedImageResults.tsx', 'src/lib/image-studio/worker.ts',
+      'src/app/api/image-studio/upload-access/route.ts', 'src/lib/image-studio/input-main.ts', 'src/lib/image-studio/result-pins.ts',
+      'src/lib/image-studio/result-feed.ts', 'src/lib/image-studio/result-attention.ts', 'src/lib/image-studio/viewer-receipts.ts',
+      'src/lib/image-result-next/server.ts', 'src/lib/assets/generation-origin.ts', 'src/lib/image-studio/modules.ts',
+      'src/lib/image-studio/batches.ts', 'src/lib/image-studio/batch-contract.ts', 'src/app/image-studio/batch-results.tsx',
+      'src/app/api/assets/picker/route.ts', 'src/app/api/assets/library/route.ts', 'src/lib/avatar-random/service.ts',
+      'src/lib/avatar-random/handoff.ts', 'src/lib/canvas-roles/media.ts', 'src/lib/canvas-roles/media-bindings.ts',
+      'src/app/api/avatar-studio/route.ts', 'src/app/tools/avatar-studio/studio.tsx', 'src/app/story-studio/story-studio.tsx'] },
 ];
 const sourceFiles = ['package.json', entry, ...fixtures.flatMap(fixture => [fixture.file, ...fixture.sources])];
 const hash = value => createHash('sha256').update(value).digest('hex');

@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { canViewStudioPreset } from '@/lib/image-studio/access';
 import { archivedPresetKey } from '@/lib/image-studio/preset-lifecycle';
 import type { SessionUser } from '@/lib/auth/session';
+import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
 export type GenerationOrigin = { kind: 'template-image' | 'random-person' | 'other-generated' | 'video-generated' | 'unknown';
   label: string; templateId?: string; templateName?: string };
 export function assetGenerationOrigin(asset: { id: string; metadata_json: string | null }, origins: Map<string, GenerationOrigin>) {
@@ -16,9 +17,9 @@ export async function generationOrigins(user: SessionUser, assets: Array<{ id: s
   for (const asset of assets) {
     try { const meta = JSON.parse(asset.metadata_json || '{}'); if (typeof meta.studioTaskId === 'string') metadataTasks.set(asset.id, meta.studioTaskId); } catch { /* Invalid metadata stays unknown. */ }
   }
-  const tasks = await prisma.imageStudioTask.findMany({ where: { status: 'succeeded', deleted_at: null, OR: [
+  const tasks = (await prisma.imageStudioTask.findMany({ where: { AND: [studioOutputTaskWhere], deleted_at: null, OR: [
     { asset_id: { in: assets.map(a => a.id) } }, { id: { in: Array.from(metadataTasks.values()) } },
-  ] }, select: { id: true, asset_id: true, owner_id: true, source_preset_id: true, module_id: true, snapshot_json: true } });
+  ] }, select: { id: true, asset_id: true, owner_id: true, source_preset_id: true, module_id: true, snapshot_json: true, status: true, usage_json: true } })).filter(studioTaskHasViewableOutput);
   const taskById = new Map(tasks.map(task => [task.id, task]));
   const tasksByAsset = new Map<string, typeof tasks>();
   const snapshots = new Map<string, Record<string, unknown>>();

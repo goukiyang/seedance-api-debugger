@@ -9,6 +9,7 @@ import { currentRoleGrant } from './advancement';
 import { isRoleCollaborationReadOnly } from './guard';
 import { assertCurrentMaterials, assertEffectiveInputs, latestWorks, taskRequirements, workInputDigest } from './work';
 import { originalIdentity, imageTaskOriginal } from './media';
+import { studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
 import { COLLABORATION_CAPABILITY, digest, identifier, integer, pointCents, record, RoleError, text,
   type JsonRecord, type RoleSnapshot } from './types';
 
@@ -197,7 +198,7 @@ export async function reconcileRoleMediaBindings(user: SessionUser, runId: strin
             || task.billing_status === 'channel_cancelled';
           if (task.billing_settled_at && task.actual_credits != null && billKnown) settledPoints = pointCents(task.actual_credits);
           if (!billKnown && task.billing_settled_at) feeState = 'unknown';
-          if (task.status === 'succeeded') {
+          if (studioTaskHasViewableOutput(task)) {
             try { refs = [(await imageTaskOriginal(db, user, task.id)).snapshot]; state = 'ready'; }
             catch (error) { if (!(error instanceof RoleError)) throw error; state = 'original_unavailable'; }
           } else if (['failed', 'cancelled'].includes(task.status)) state = 'failed';

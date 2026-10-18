@@ -8,6 +8,7 @@ import { originalImageInputUrl } from '@/lib/assets/original-image-input';
 import { attachAssetToSiteReferenceImage } from '@/lib/assets/reference-import';
 import { authorizedImageResponse } from '@/lib/media/authorized-image-response';
 import { readStudioImage } from '@/lib/image-studio/media';
+import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
 import { proxyCutout, cutoutBusinessCredential } from '@/lib/cutout/proxy';
 import { isCutoutJob, isRecord } from '@/lib/cutout/receipt';
 import { normalizeCutoutSettings } from '@/lib/cutout/settings';
@@ -43,10 +44,10 @@ async function authorizedSource(user: SessionUser, sourceKey: ContentKey) {
   const id = validImageResultSource(sourceKey).slice(6);
   const [asset, successfulTask, resolved] = await Promise.all([
     prisma.asset.findUnique({ where: { id } }),
-    prisma.imageStudioTask.findFirst({ where: { asset_id: id, status: 'succeeded', deleted_at: null }, select: { id: true } }),
+    prisma.imageStudioTask.findFirst({ where: { asset_id: id, AND: [studioOutputTaskWhere], deleted_at: null }, select: { id: true, status: true, usage_json: true, asset_id: true } }),
     resolveContent(user, sourceKey),
   ]);
-  if (!asset || asset.type !== 'image' || asset.status !== 'active' || !successfulTask || !resolved?.source || !resolved.summary.downloadUrl || resolved.source.canPreviewOriginal === false || !resolved.summary.reuse) {
+  if (!asset || asset.type !== 'image' || asset.status !== 'active' || !successfulTask || !studioTaskHasViewableOutput(successfulTask) || !resolved?.source || !resolved.summary.downloadUrl || resolved.source.canPreviewOriginal === false || !resolved.summary.reuse) {
     throw new ImageResultNextError('这张生成图已失效或只有预览权限，不能带入原件；原现场保留', 403);
   }
   const original = await originalImageInputUrl(user, `/api/image-studio/assets/${id}`);

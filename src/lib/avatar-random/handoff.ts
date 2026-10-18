@@ -6,6 +6,7 @@ import { StudioError } from '@/lib/image-studio/tasks';
 import { attachAssetToSiteReferenceImage } from '@/lib/assets/reference-import';
 import { normalizeAssets, normalizeRecipe } from '@/lib/template-studio/validation';
 import { avatarKey, readAvatar } from './store';
+import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
 export type AvatarReturnTarget = { kind: 'workspace' | 'video-draft' | 'image-module'; id: string; revision?: number; slotKey?: string | null; capacity: number; currentAssetIds: string[]; sourceSignature: string; imageLimit?: number; role?: 'first_frame' | 'last_frame' | 'reference_image' };
 type Ticket = { id: string; target: AvatarReturnTarget; fingerprint: string; expiresAt: string; assetId?: string; applied?: boolean; claimToken?: string };
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -62,8 +63,8 @@ export async function avatarTicketAction(user:SessionUser,id:string,action:strin
     if (action==='choose') {
       if(ticket.claimToken)throw new StudioError('已有正在确认的回填，不能更换这次图片',409);
       const asset = await tx.asset.findFirst({where:{id:assetId,owner_id:user.id,status:'active',type:'image'}});
-      const generated = await tx.imageStudioTask.findFirst({where:{owner_id:user.id,asset_id:asset?.id||'',status:'succeeded',snapshot_json:{contains:'"avatar":'}}});
-      if (!asset || !generated) throw new StudioError('这张图片不存在或不属于本账号人物结果',403);
+      const generated = await tx.imageStudioTask.findFirst({where:{owner_id:user.id,asset_id:asset?.id||'',AND:[studioOutputTaskWhere],snapshot_json:{contains:'"avatar":'}}});
+      if (!asset || !generated || !studioTaskHasViewableOutput(generated)) throw new StudioError('这张图片不存在或不属于本账号人物结果',403);
       ticket.assetId=asset.id;
     } else if (action==='apply') {
       if (!signature || hash(signature)!==ticket.target.sourceSignature) throw new StudioError('原页面设置或目标槽位已变化，没有回填；请在素材库重新选择',409);

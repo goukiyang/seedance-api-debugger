@@ -8,6 +8,7 @@ import { resolveStudioModuleGenerationConfig } from './modules';
 import { submitStudioBatch, parseStudioRequest, parseSharedStudioIntent, sameSharedStudioIntent, resolveOwnedStudioTaskSharedUse,
   assertSharedStudioWorkerReady, studioSharedGenerationSource, publicImageTaskStatus, cancelQueuedChannelTask, SharedStudioDefinitionError, StudioError } from './tasks';
 import { STUDIO_BATCH_LIMITS, type StudioBatchView } from './batch-contract';
+import { studioOutputMismatch as studioDimensionMismatch, studioDimensionMismatchNotice, studioTaskHasViewableOutput } from './dimension-mismatch';
 import { studioAssetUrl } from './media';
 import { studioDeliveryStatus } from './delivery';
 import { studioVisibleAssetWhere } from './protected-assets';
@@ -329,15 +330,15 @@ export async function studioBatchView(owner: string, id: string, includeItems = 
   if (batch.billingMode === 'actual') batch.committedCredits = await batchBillingCommitted(prisma, batch);
   const identity = await prisma.user.findUniqueOrThrow({ where: { id: owner }, select: { id: true, role: true, account_type: true, feature_profile_id: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
   const taskIds = batch.items.flatMap(item => item.taskId ? [item.taskId] : []);
-  const tasks = await prisma.imageStudioTask.findMany({ where: { id: { in: taskIds }, owner_id: owner }, select: { id: true, status: true, error: true, asset_id: true, deleted_at: true,
+  const tasks = await prisma.imageStudioTask.findMany({ where: { id: { in: taskIds }, owner_id: owner }, select: { id: true, status: true, error: true, usage_json: true, asset_id: true, deleted_at: true,
     owner_id: true, snapshot_json: includeItems, billing_status: true, actual_amount_micros: true, actual_credits: true, billing_contract_json: true, unit_credits: true, billing_settled_at: true } });
   // 仅当前活跃项读取回执；批次目录不取快照，已完成历史不读逐图文件。
   const deliveryByTask = new Map(includeItems ? await Promise.all(tasks.filter(task => ['running', 'channel_running'].includes(task.status))
     .map(async task => { const delivery = await studioDeliveryStatus(task); return [task.id, { phase: delivery.phase, acceptedAt: delivery.acceptedAt, waitingStatus: delivery.waitingStatus,
       generationDetailSuperseded: delivery.generationDetailSuperseded }] as const; })) : []);
-  const assets = includeItems ? await prisma.asset.findMany({ where: { id: { in: tasks.flatMap(task => !task.deleted_at && task.asset_id ? [task.asset_id] : []) }, owner_id: owner, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity)] }, select: { id: true, file_size: true } }) : [];
+  const assets = includeItems ? await prisma.asset.findMany({ where: { id: { in: tasks.flatMap(task => !task.deleted_at && studioTaskHasViewableOutput(task) && task.asset_id ? [task.asset_id] : []) }, owner_id: owner, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity)] }, select: { id: true, file_size: true, file_name: true, mime_type: true } }) : [];
   const statuses = batch.items.map(item => item.cancelled ? 'cancelled' : item.taskId
-    ? publicImageTaskStatus(tasks.find(task => task.id === item.taskId)?.status || 'uncertain') : batch.definitionConfirmationRequired ? 'needs-confirmation' : 'pending');
+    ? (() => { const task = tasks.find(task => task.id === item.taskId); return task && studioTaskHasViewableOutput(task) ? 'succeeded' : publicImageTaskStatus(task?.status || 'uncertain'); })() : batch.definitionConfirmationRequired ? 'needs-confirmation' : 'pending');
   const active = statuses.filter(state => ['running', 'queued'].includes(state)).length;
   const pending = statuses.filter(state => state === 'pending' || state === 'needs-confirmation').length;
   const uncertain = statuses.filter(state => state === 'uncertain').length;
@@ -348,9 +349,12 @@ export async function studioBatchView(owner: string, id: string, includeItems = 
     ...(includeItems ? { items: batch.items.map((item, index) => {
       const task = tasks.find(task => task.id === item.taskId);
       const asset = assets.find(asset => asset.id === task?.asset_id);
-      return { ordinal: item.ordinal, sourceName: item.sourceName, taskId: item.taskId, status: statuses[index], error: task?.error,
+      const mismatch = task && studioDimensionMismatch(task);
+      return { ordinal: item.ordinal, sourceName: item.sourceName, taskId: item.taskId, status: statuses[index],
+        error: mismatch && asset ? studioDimensionMismatchNotice(mismatch.validation) : task?.error,
+        resultDisposition: mismatch ? mismatch.code === 'generated_format_mismatch' ? 'format_mismatch' as const : 'dimensions_mismatch' as const : null,
         ...(task && deliveryByTask.has(task.id) ? { delivery: deliveryByTask.get(task.id) } : {}),
-        billing: task ? imageBillingView(task, owner, false) : null, image: asset ? { id: asset.id, url: studioAssetUrl(asset.id), thumbnail: studioAssetUrl(asset.id, true), fileSize: asset.file_size || 0 } : null };
+        billing: task ? imageBillingView(task, owner, false) : null, image: asset ? { id: asset.id, url: studioAssetUrl(asset.id), thumbnail: studioAssetUrl(asset.id, true), fileSize: asset.file_size || 0, fileName: asset.file_name, mimeType: asset.mime_type || 'image/png' } : null };
     }) } : {}) };
 }
 export async function listStudioBatches(owner: string, cursor?: string) {
