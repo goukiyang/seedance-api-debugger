@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 
-export const release = { version: packageInfo.version, channel: 'production', summary: '新图片任务按所选分辨率计算提交尺寸，生成前可查看预计尺寸，结果可核对所选、提交和返回规格；改善图片服务的响应读取与原请求核对，已有原图和费用记录保留。' };
+export const release = { version: packageInfo.version, channel: 'production', summary: '相容恢复版本：暂停新图片生成，原图与已有结果可正常查看，已受理的原请求保留安全接续和核对能力；费用预留与历史记录保持。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
