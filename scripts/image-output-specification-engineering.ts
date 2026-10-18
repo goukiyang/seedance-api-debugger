@@ -228,6 +228,7 @@ async function verifyToolFlows(fixture: Awaited<ReturnType<typeof traceFixture>>
     const projected = JSON.parse(node.result_json!).outputPlans;
     assert.deepEqual(projected, [{ ordinal: 1, taskId: task.id, outputPlan: publicImageOutputPlan(snapshot.outputPlan) }]);
     assert.equal('outputPlanHash' in projected[0], false);
+    assert.ok(projected[0].outputPlan, 'A prepared task must expose its safe public output plan');
     for (const privateField of ['version', 'algorithmRevision', 'wireMode']) assert.equal(privateField in projected[0].outputPlan, false);
   }
   for (const node of publicRun.node_runs) if (JSON.parse(node.result_json || '{}').outputPlans) {

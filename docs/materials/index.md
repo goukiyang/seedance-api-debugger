@@ -1,5 +1,7 @@
 # 项目资料索引
 
+第五轮run8d148（2026-10-18）：[正式根原始总门/子门与完整build日志](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/8d148549-970c-44d5-a17a-fc20595ef391/)已归档。0abd/Linux20主6fixture/62检查及编译通过，类型门因新增fixture缺显式非空断言拒绝，完整tsc仅该1错，guard未构建/未部署；仅补真实assert.ok，不改产品/DTO保护，待同版新SHA完整重建。私有收据SHA已核，不复制公开；功能仍用户手验。
+
 第四轮剩余组已收口：[旧run/unknown同280f独立诊断](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/38824c77-b02d-429a-8b01-2cafc1418c53/toolflow-remaining-diagnostic-receipt.json)仅正式根私有保存，Linux20实际exit 0、36源SHA/禁网，明确不是原完整spec门通过。parser/公开投影修正与畸形/重读追加配套已冻结，待新main/guard同run统一构建；旧源及失败门证据不替换。
 
 TRACE03-FIX第四轮run38824补注（2026-10-18）：[正式原单当前记录](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-10-fluxport-image-api.md#1763-trace03-fix-首次统一工程检查与同批纠正2026-10-18)、[私有第四轮原日志与分层收据](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/38824c77-b02d-429a-8b01-2cafc1418c53/)为正式根入口。280f/Linux20原HMAC快照复用、创建及10拒绝已过，新到NodeResult漏读outputPlans的公开投影断言未过，定向纠正并补剩余诊断；provider14/types/controller分层exit 0不代完整build，guard未构建、未部署。私有原包/日志保留，不复制或公开；无新用户媒体/收费/生产写，功能待手验。
