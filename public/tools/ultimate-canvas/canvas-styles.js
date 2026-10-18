@@ -359,9 +359,7 @@
                     if (result.status === 'not_found') {
                         job.state = 'unconfirmed';
                         hooks.save('canvas_style_submission_unknown');
-                        throw new Error(job.kind === 'ordinary' || job.input?.roleMediaContext
-                            ? '提交尚未确认，请查看生成状态；不会重新发送或扣点。'
-                            : '提交尚未确认。点击生成可安全重试原请求，不会重复扣费。');
+                        throw new Error('提交尚未确认，请查看生成状态；只核对原请求，不会重新发送或扣点。');
                     }
                     if (result.submission_unconfirmed || result.status === 'unconfirmed') {
                         job.state = 'unconfirmed';

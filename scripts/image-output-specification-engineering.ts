@@ -8,7 +8,7 @@ import { traceFixture, sha256 } from './image-trace-engineering-fixture';
 const sourcePaths = ['scripts/image-trace-engineering-fixture.ts', 'scripts/image-canvas-quote-fixture.ts', 'src/lib/image-generation/output-plan.ts',
   'src/lib/image-generation/resolution.ts', 'src/lib/image-studio/ratios.ts', 'src/lib/integrations/image-generation.ts',
   'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/billing-quote.ts', 'src/lib/image-studio/billing-quote-service.ts',
-  'src/lib/image-studio/billing-quote-store.ts', 'src/lib/image-studio/batch-billing-quote.ts',
+  'src/lib/image-studio/billing-quote-store.ts', 'src/lib/image-studio/batch-billing-quote.ts', 'src/lib/template-studio/validation.ts',
   'src/lib/image-studio/batches.ts', 'src/lib/image-studio/batch-contract.ts', 'src/lib/image-studio/modules.ts', 'src/lib/avatar-random/service.ts',
   'src/app/api/assets/generate/route.ts', 'src/lib/image-studio/provider.ts',
   'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-types.ts', 'src/lib/image-studio/read-snapshot.ts',
@@ -35,6 +35,7 @@ const expectedChecks = [
   'canvas_fixed_ordinary_and_style_keep_plan_quote_token_and_original_confirmation_count',
   'canvas_actual_original_confirmation_and_max_authorization_are_unchanged',
   'canvas_role_context_and_unknown_job_identity_survive_query_only_reentry_without_repost',
+  'versioned_batch_quote_canonical_keys_preserve_array_order_and_reject_changed_authorization',
 ];
 
 async function main() {
@@ -117,13 +118,15 @@ async function main() {
   fixture.check(expectedChecks[5]);
 
   // The remaining checks enter the real quote, batch preparation and avatar paths.
-  await verifySavedPlans(fixture, owner, model);
+  const batchFingerprintEvidence = await verifySavedPlans(fixture, owner, model);
   assert.equal(synchronousPosts, 1); fixture.check(expectedChecks[11]);
   await verifyToolFlows(fixture, owner, model);
   const { verifyCanvasQuoteContract } = await import('./image-canvas-quote-fixture');
   const canvasQuoteEvidence = await verifyCanvasQuoteContract(fixture.root, plans.publicImageOutputPlan(referencePlan)!, fixture.check);
+  fixture.check(expectedChecks[18]);
   assert.throws(() => assertPixelBudget(ratios.legacyStudioRatioSize('58:77', '2K')!, '58:77'));
-  await fixture.finish({ negativeChecks: ['legacy_gcd_rejected_by_current_pixel_budget'], canvasQuoteEvidence,
+  await fixture.finish({ negativeChecks: ['legacy_gcd_rejected_by_current_pixel_budget', 'legacy_batch_object_key_order_rejects_equivalent_submission'],
+    canvasQuoteEvidence, batchFingerprintEvidence,
     wire: wire.map(body => ({ size: body.size, ratio: body.ratio })) });
 }
 
@@ -259,15 +262,15 @@ async function verifySavedPlans(fixture: Awaited<ReturnType<typeof traceFixture>
       file_name: `synthetic-${index}.png`, mime_type: 'image/png', width, height, file_size: 100 } });
     sources.push({ name: asset.file_name, assetId: asset.id });
   }
-  const newBody = { ...baseInput, requestId: randomUUID(), aspectRatio: 'auto', sources, budget: 10 };
+  const newBody = { ...baseInput, requestId: randomUUID(), aspectRatio: 'auto', referenceIds: sources.map(source => source.assetId), sources, budget: 10 };
   const { quoteStudioBatch } = await import('../src/lib/image-studio/batch-billing-quote');
   const newQuote = await quoteStudioBatch(owner, newBody);
   const { STUDIO_SHARED_WORKER_KEY, STUDIO_SHARED_WORKER_FILES, assertSharedStudioWorkerReady } = await import('../src/lib/image-studio/tasks');
   const heartbeat = { protocol: 'shared-live-v1', expiresAt: new Date(Date.now() + 600000).toISOString(),
     loadedModuleSha: Object.fromEntries(STUDIO_SHARED_WORKER_FILES.map(file => [file, sha256(readFileSync(path.join(fixture.root, file)))])) };
   await db.platformSetting.create({ data: { key: STUDIO_SHARED_WORKER_KEY, value_json: JSON.stringify(heartbeat) } });
-  const newId = await createStudioBatch(owner, { ...newBody, batchQuoteId: newQuote.batchQuoteId,
-    ...('imageChannel' in newQuote ? { imageChannel: newQuote.imageChannel } : {}) });
+  const fingerprint = await verifyBatchQuoteFingerprint(fixture, owner, newBody, newQuote);
+  const newId = await createStudioBatch(owner, fingerprint.creationBody);
   const newItems = await Promise.all([1, 2].map(ordinal => db.platformSetting.findUniqueOrThrow({ where: { key: `studio_batch_item_v1:${newId}:${ordinal}` } })));
   const newPlans = newItems.map(row => JSON.parse(JSON.parse(row.value_json).snapshot_json).outputPlan);
   assert.equal(newPlans[0].resolvedRatio, '58:77'); assert.equal(newPlans[1].resolvedRatio, '16:9');
@@ -287,7 +290,7 @@ async function verifySavedPlans(fixture: Awaited<ReturnType<typeof traceFixture>
   assert.equal(await db.creditLedger.count(), 0); assert.equal((await db.creditAccount.findUniqueOrThrow({ where: { user_id: owner } })).frozen_credits, 0);
   assert.equal(typeof prepareImageBillingQuote, 'function');
   fixture.check(expectedChecks[9]);
-  for (const changed of ['src/lib/image-studio/worker.ts', 'src/lib/image-generation/output-plan.ts']) {
+  for (const changed of ['src/lib/image-studio/worker.ts', 'src/lib/image-generation/output-plan.ts', 'src/lib/template-studio/validation.ts']) {
     await db.platformSetting.update({ where: { key: STUDIO_SHARED_WORKER_KEY }, data: { value_json: JSON.stringify({ ...heartbeat,
       loadedModuleSha: { ...heartbeat.loadedModuleSha, [changed]: '0'.repeat(64) } }) } });
     await assert.rejects(db.$transaction(tx => assertSharedStudioWorkerReady(tx)));
@@ -295,6 +298,67 @@ async function verifySavedPlans(fixture: Awaited<ReturnType<typeof traceFixture>
   await db.platformSetting.update({ where: { key: STUDIO_SHARED_WORKER_KEY }, data: { value_json: JSON.stringify(heartbeat) } });
   await db.$transaction(tx => assertSharedStudioWorkerReady(tx));
   fixture.check(expectedChecks[10]);
+  return fingerprint.evidence;
+}
+
+async function verifyBatchQuoteFingerprint(fixture: Awaited<ReturnType<typeof traceFixture>>, owner: string,
+  body: Record<string, unknown> & { sources: Array<{ name: string; assetId: string }>; referenceIds: string[] },
+  quote: { batchQuoteId?: string | null; imageChannel?: { channelId: string; configRevision: string } }) {
+  const { batchQuoteFingerprint, consumeBatchQuote } = await import('../src/lib/image-studio/batch-billing-quote');
+  const { db } = fixture;
+  assert.equal('channelId' in body, false); assert.equal('imageChannel' in body, false);
+  assert.ok(quote.batchQuoteId); assert.ok(quote.imageChannel);
+  const channel = quote.imageChannel;
+  const creationBody = Object.fromEntries(Object.entries({ ...body, batchQuoteId: quote.batchQuoteId,
+    imageChannel: { configRevision: channel.configRevision, channelId: channel.channelId }, fingerprintVersion: 1 })
+    .reverse().map(([key, value]) => [key, key === 'sources' ? body.sources.map(source => ({ assetId: source.assetId, name: source.name })) : value]));
+  assert.equal('channelId' in creationBody, false, 'Do not hide the real quote/create channel insertion path');
+  assert.equal(batchQuoteFingerprint(body, channel), batchQuoteFingerprint(creationBody, channel));
+  assert.notEqual(batchQuoteFingerprint(body, channel, 1), batchQuoteFingerprint(creationBody, channel, 1));
+  const key = `image_batch_billing_quote_v1:${owner}:${quote.batchQuoteId}`;
+  const saved = await db.platformSetting.findUniqueOrThrow({ where: { key } });
+  const stored = JSON.parse(saved.value_json) as Record<string, unknown>;
+  assert.equal(stored.fingerprintVersion, 2); assert.equal(stored.ratioContractVersion, 3);
+  assert.equal(stored.fingerprint, batchQuoteFingerprint(body, channel, 2));
+  const tasksBefore = await db.imageStudioTask.count(), ledgerBefore = await db.creditLedger.count();
+  const rejected: string[] = [];
+  const reject = async (name: string, input: Record<string, unknown>, actor = owner, savedValue?: string) => {
+    if (savedValue !== undefined) await db.platformSetting.update({ where: { id: saved.id }, data: { value_json: savedValue } });
+    await assert.rejects(db.$transaction(tx => consumeBatchQuote(tx, actor, input)), name);
+    assert.equal((await db.platformSetting.findUniqueOrThrow({ where: { id: saved.id } })).value_json, savedValue ?? saved.value_json,
+      'A refused consumer must preserve its exact quote');
+    assert.equal(await db.imageStudioTask.count(), tasksBefore); assert.equal(await db.creditLedger.count(), ledgerBefore);
+    if (savedValue !== undefined) await db.platformSetting.update({ where: { id: saved.id }, data: { value_json: saved.value_json } });
+    rejected.push(name);
+  };
+  await reject('source_array_order', { ...creationBody, sources: [...body.sources].reverse() });
+  await reject('reference_array_order', { ...creationBody, referenceIds: [...body.referenceIds].reverse() });
+  await reject('channel_identity', { ...creationBody, imageChannel: { ...channel, channelId: 'banana' } });
+  await reject('channel_config_revision', { ...creationBody, imageChannel: { ...channel, configRevision: randomUUID() } });
+  await reject('insufficient_budget', { ...creationBody, budget: 9 });
+  await reject('other_owner', creationBody, 'trace-spec-other-owner');
+  await reject('quality_intent', { ...creationBody, quality: 'high' });
+  await reject('resolution_intent', { ...creationBody, resolution: '1K' });
+  await reject('stored_owner', creationBody, owner, JSON.stringify({ ...stored, owner: 'trace-spec-other-owner' }));
+  await reject('unknown_saved_fingerprint_version', creationBody, owner, JSON.stringify({ ...stored, fingerprintVersion: 99 }));
+  const changedPlan = JSON.parse(saved.value_json) as { outputPlans: Array<Record<string, unknown>> };
+  changedPlan.outputPlans[0].outputSize = '928x1232';
+  await reject('changed_plan_without_matching_hash', creationBody, owner, JSON.stringify(changedPlan));
+  const legacyRatio: Record<string, unknown> = { ...stored, ratioContractVersion: 2 }; delete legacyRatio.outputPlans; delete legacyRatio.outputPlanHashes;
+  await reject('new_create_refuses_legacy_ratio_quote', creationBody, owner, JSON.stringify(legacyRatio));
+
+  // A real persisted quote without a fingerprint version retains its exact v1 reader.
+  const legacyId = randomUUID(), legacyKey = `image_batch_billing_quote_v1:${owner}:${legacyId}`;
+  const legacyStored: Record<string, unknown> = { ...stored, fingerprint: batchQuoteFingerprint(body, channel, 1) }; delete legacyStored.fingerprintVersion;
+  await db.platformSetting.create({ data: { key: legacyKey, value_json: JSON.stringify(legacyStored) } });
+  await assert.rejects(db.$transaction(tx => consumeBatchQuote(tx, owner, { ...creationBody, batchQuoteId: legacyId })));
+  assert.ok(await db.platformSetting.findUnique({ where: { key: legacyKey } }));
+  const exactLegacyBody = { ...body, batchQuoteId: legacyId };
+  const legacyConsumed = await db.$transaction(tx => consumeBatchQuote(tx, owner, exactLegacyBody));
+  assert.equal(legacyConsumed.total, 10); assert.equal(await db.platformSetting.findUnique({ where: { key: legacyKey } }), null);
+  assert.equal((await db.platformSetting.findUniqueOrThrow({ where: { id: saved.id } })).value_json, saved.value_json);
+  return { creationBody, evidence: { fingerprintVersion: 2, equivalentObjectKeysAccepted: true, clientFingerprintVersionIgnored: true,
+    quoteChannelOmitted: true, createOnlySameImageChannel: true, legacyMissingVersionReader: 1, rejected } };
 }
 
 main().catch(error => { console.error(error); process.exit(1); });

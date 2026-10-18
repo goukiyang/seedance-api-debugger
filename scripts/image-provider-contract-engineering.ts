@@ -298,10 +298,15 @@ async function main() {
   assert.equal(await recovery.consumeStudioActiveRecheck(owned), true);
   const originalReceipt = await delivery.readStudioAsyncReceipt(owned); assert.ok(originalReceipt);
   await assert.rejects(provider.requestStudioImages({ ...manualQuery, manualAsyncQuery: true, singleTaskGet: true,
-    onAsyncProgress: async progress => { await delivery.updateStudioAsyncReceipt(originalReceipt, progress); } }, manualTransport),
+    onAsyncProgress: async progress => { await delivery.recordStudioAsyncProgress(owned, originalReceipt, progress); } }, manualTransport),
   (error: unknown) => error instanceof provider.StudioProviderError && error.code === 'async_result_ready');
   assert.equal(manualGets, 1); assert.equal(await recovery.consumeStudioActiveRecheck(owned), false);
   assert.equal((await delivery.readStudioAsyncReceipt(owned))?.resultReady, true);
+  for (const billing of [false, true]) {
+    const persisted = JSON.parse(await fs.readFile(storage(owned.id, billing, 'async.json'), 'utf8'));
+    assert.equal(persisted.resultReady, true);
+  }
+  assert.equal(await delivery.readStudioCorePending(owned), null);
   assert.equal(await recovery.readStudioActiveRecheck(owned), false); // A crash after consumption cannot issue a second GET.
   await recovery.completeStudioActiveRecheck(owned);
   await db.imageStudioTask.update({ where: { id: active.id }, data: { lease_token: null, lease_until: null } });

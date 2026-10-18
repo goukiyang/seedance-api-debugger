@@ -63,6 +63,7 @@ const outputSpecificationChecks = [
   'canvas_fixed_ordinary_and_style_keep_plan_quote_token_and_original_confirmation_count',
   'canvas_actual_original_confirmation_and_max_authorization_are_unchanged',
   'canvas_role_context_and_unknown_job_identity_survive_query_only_reentry_without_repost',
+  'versioned_batch_quote_canonical_keys_preserve_array_order_and_reject_changed_authorization',
 ];
 const providerContractChecks = [
   'gzip_deflate_brotli_decode_preserves_body_and_removes_stale_headers',
@@ -107,11 +108,11 @@ const fixtures = [
       'src/app/api/avatar-studio/route.ts', 'src/app/tools/avatar-studio/studio.tsx', 'src/app/story-studio/story-studio.tsx'] },
   { file: 'scripts/image-output-specification-engineering.ts', schema: 'image-output-specification-engineering.v1',
     marker: 'Image output specification engineering receipt: ', checks: outputSpecificationChecks,
-    negativeChecks: ['legacy_gcd_rejected_by_current_pixel_budget'],
+    negativeChecks: ['legacy_gcd_rejected_by_current_pixel_budget', 'legacy_batch_object_key_order_rejects_equivalent_submission'],
     sources: ['scripts/image-trace-engineering-fixture.ts', 'scripts/image-canvas-quote-fixture.ts', 'src/lib/image-generation/output-plan.ts',
       'src/lib/image-generation/resolution.ts', 'src/lib/image-studio/ratios.ts', 'src/lib/integrations/image-generation.ts',
       'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/billing-quote.ts', 'src/lib/image-studio/billing-quote-service.ts',
-      'src/lib/image-studio/billing-quote-store.ts', 'src/lib/image-studio/batch-billing-quote.ts',
+      'src/lib/image-studio/billing-quote-store.ts', 'src/lib/image-studio/batch-billing-quote.ts', 'src/lib/template-studio/validation.ts',
       'src/lib/image-studio/batches.ts', 'src/lib/image-studio/batch-contract.ts', 'src/lib/image-studio/modules.ts', 'src/lib/avatar-random/service.ts',
       'src/app/api/assets/generate/route.ts', 'src/lib/image-studio/provider.ts',
       'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-types.ts', 'src/lib/image-studio/read-snapshot.ts',

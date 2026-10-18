@@ -16,8 +16,10 @@ import { getImageStudioSettings } from './settings';
 import { resolveStudioModuleGenerationConfig } from './modules';
 import { captureImageGenerationChannel } from '@/lib/integrations/image-generation';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
+import { stableJson } from '@/lib/template-studio/validation';
 
 const key = (owner: string, id: string) => `image_batch_billing_quote_v1:${owner}:${id}`;
+export type BatchQuoteFingerprintVersion = 1 | 2;
 
 function sameImageChannel(left: ImageGenerationChannelSnapshot | undefined, right: ImageGenerationChannelSnapshot | undefined) {
   return left?.channelId === right?.channelId && left?.configRevision === right?.configRevision;
@@ -51,18 +53,26 @@ function canonicalImageChannel(body: Record<string, unknown>, resolved?: ImageGe
   return channel;
 }
 
-export function batchQuoteFingerprint(body: Record<string, unknown>, resolvedChannel?: ImageGenerationChannelSnapshot) {
+export function batchQuoteFingerprint(body: Record<string, unknown>, resolvedChannel?: ImageGenerationChannelSnapshot,
+  version: BatchQuoteFingerprintVersion = 2) {
+  if (version !== 1 && version !== 2) throw new StudioError('整批报价签名版本无法识别，请重新报价', 409);
   const input = parseStudioRequest({ ...body, count: 1, maxEstimatedCost: undefined });
   const channel = canonicalImageChannel(body, resolvedChannel);
   const normalizedInput = { ...input } as Record<string, unknown>;
   delete normalizedInput.imageChannel;
   if (channel) normalizedInput.channelId = channel.channelId;
-  return createHash('sha256').update(JSON.stringify({ input: normalizedInput,
+  const preimage = { input: normalizedInput,
     imageChannel: channel ? { channelId: channel.channelId, configRevision: channel.configRevision } : null,
-    moduleId: body.moduleId, sources: body.sources })).digest('hex');
+    moduleId: body.moduleId, sources: body.sources };
+  // Existing quotes retain their exact JSON key order. New quotes compare JSON
+  // values, not insertion order; arrays (including source/reference order) stay
+  // ordered. Normalize optional undefined fields before the shared serializer.
+  const serialized = JSON.stringify(preimage);
+  return createHash('sha256').update(version === 1 ? serialized : stableJson(JSON.parse(serialized))).digest('hex');
 }
 
 type StoredBatchQuote = {
+  fingerprintVersion?: BatchQuoteFingerprintVersion;
   ratioContractVersion?: ImageRatioContractVersion;
   outputPlans?: ImageOutputPlan[];
   outputPlanHashes?: string[];
@@ -190,7 +200,7 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
   if (Date.parse(expiresAt) <= Date.now()) throw new StudioError('整批准备超过报价有效期，请重新报价', 409);
   await prisma.platformSetting.deleteMany({ where: { key: { startsWith: `image_batch_billing_quote_v1:${owner}:` },
     created_at: { lt: new Date(Date.now() - 120000) } } });
-  const storedQuote: StoredBatchQuote = { owner, fingerprint: batchQuoteFingerprint(body, imageChannel),
+  const storedQuote: StoredBatchQuote = { owner, fingerprintVersion: 2, fingerprint: batchQuoteFingerprint(body, imageChannel, 2),
     intentRevision: intentRevision ?? 0, contracts: exactContracts, expiresAt, total,
     ratioContractVersion, ...(ratioContractVersion === 3 ? { outputPlans, outputPlanHashes } : {}),
     unitCredits: Math.max(...exactContracts.map(contract => contract.authorizedCredits)), ...sharedResult, ...(imageChannel ? { imageChannel } : {}) };
@@ -208,6 +218,10 @@ export async function consumeBatchQuote(tx: Prisma.TransactionClient, owner: str
   let stored: StoredBatchQuote;
   try { stored = JSON.parse(row.value_json) as StoredBatchQuote; }
   catch { throw new StudioError('整批报价记录无效，未派发生成', 409); }
+  // Only the server-stored quote chooses the signature reader. Client fields
+  // cannot downgrade a new quote; pre-upgrade quotes keep their original reader.
+  const fingerprintVersion = stored.fingerprintVersion === undefined ? 1 : stored.fingerprintVersion;
+  if (fingerprintVersion !== 1 && fingerprintVersion !== 2) throw new StudioError('整批报价签名版本无法识别，请重新报价', 409);
   try { assertImageQuoteOutputPlan(stored, { ratioContractVersion,
     ...(ratioContractVersion === 3 ? { outputPlans: stored.outputPlans, outputPlanHashes: stored.outputPlanHashes } : {}) }); }
   catch { throw new StudioError('图片规格已更新，请重新获取整批实际尺寸与报价；原批次和输入保留', 409); }
@@ -233,7 +247,7 @@ export async function consumeBatchQuote(tx: Prisma.TransactionClient, owner: str
   if (stored.owner !== owner || !Array.isArray(stored.contracts) || !stored.contracts.length
     || !Number.isFinite(stored.total) || stored.total < 0 || !Number.isFinite(stored.unitCredits) || stored.unitCredits < 0
     || !Number.isInteger(stored.intentRevision) || stored.intentRevision < 0
-    || !Number.isFinite(Date.parse(stored.expiresAt)) || stored.fingerprint !== batchQuoteFingerprint(body, storedChannel)
+    || !Number.isFinite(Date.parse(stored.expiresAt)) || stored.fingerprint !== batchQuoteFingerprint(body, storedChannel, fingerprintVersion)
     || !sameImageChannel(suppliedChannel, storedChannel)
     || Date.parse(stored.expiresAt) <= Date.now() || !Array.isArray(body.sources)
     || stored.contracts.length !== body.sources.length || stored.total > Number(body.budget)

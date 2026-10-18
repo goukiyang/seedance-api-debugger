@@ -168,6 +168,7 @@ export const STUDIO_SHARED_WORKER_FILES = [
   'src/lib/image-studio/provider.ts', 'src/lib/image-studio/delivery.ts', 'src/lib/integrations/image-generation.ts',
   'src/lib/image-studio/billing-quote.ts', 'src/lib/image-studio/billing-quote-service.ts',
   'src/lib/image-studio/billing-quote-store.ts', 'src/lib/image-studio/batch-billing-quote.ts',
+  'src/lib/template-studio/validation.ts',
   'src/lib/image-studio/batch-contract.ts', 'src/lib/avatar-random/service.ts',
   'src/lib/image-studio/queue-capacity.ts',
   'src/lib/image-studio/provider-wait.ts', 'src/lib/image-studio/response-diagnostics.ts', 'src/lib/image-studio/response-evidence.ts',
