@@ -130,8 +130,9 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   },[actualQuoteRequired,ready,management,quoteVisible,busy,pending,visibleBillingQuote,visibleDraftBillingEstimate,automaticQuoteInput,billingParameters,quotablePlan]);
   useEffect(()=>{if(!draftBillingEstimate)return;const timer=window.setTimeout(()=>setDraftBillingEstimate(current=>current===draftBillingEstimate?null:current),Math.max(0,Date.parse(draftBillingEstimate.expiresAt)-Date.now()));return()=>window.clearTimeout(timer);},[draftBillingEstimate]);
   const inputSignature=JSON.stringify([ownerId,rules,model,quality,resolution,imageChannel.channelId,effectiveImageChannelId,imageChannel.channelId==='original'?imageChannel.channels.defaultRoutes?.revision:undefined,plan?.id,index,ready]);
-  const liveDraft=useRef({ownerId,rules,model,quality,resolution,channelId:imageChannel.channelId,analysisBinding,inputSignature,revision:0,ownerRevision:0,prices,blocked:referenceUploading||pending||tasks.some(t=>t.status==='uncertain'),ready});
-  liveDraft.current={ownerId,rules,model,quality,resolution,channelId:imageChannel.channelId,analysisBinding,inputSignature,revision:liveDraft.current.revision+(liveDraft.current.inputSignature===inputSignature?0:1),ownerRevision:liveDraft.current.ownerRevision+(liveDraft.current.ownerId===ownerId?0:1),prices,blocked:referenceUploading||pending||tasks.some(t=>t.status==='uncertain'),ready};
+  const draftEditBlocked = referenceUploading || pending || tasks.some(task => task.status === 'uncertain' && !hasReturnedImage(task));
+  const liveDraft=useRef({ownerId,rules,model,quality,resolution,channelId:imageChannel.channelId,analysisBinding,inputSignature,revision:0,ownerRevision:0,prices,blocked:referenceUploading||pending||tasks.some(t=>t.status==='uncertain'),draftEditBlocked,ready});
+  liveDraft.current={ownerId,rules,model,quality,resolution,channelId:imageChannel.channelId,analysisBinding,inputSignature,revision:liveDraft.current.revision+(liveDraft.current.inputSignature===inputSignature?0:1),ownerRevision:liveDraft.current.ownerRevision+(liveDraft.current.ownerId===ownerId?0:1),prices,blocked:referenceUploading||pending||tasks.some(t=>t.status==='uncertain'),draftEditBlocked,ready};
   type DraftSnapshot = typeof liveDraft.current;
   const activeParse=parseBinding===analysisBinding?parseStatus:null;
   const canContinueOriginal=activeParse?.state==='unknown'&&activeParse.canContinueOriginal===true&&!activeParse.canRecheck;
@@ -153,7 +154,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   const editableSignature=JSON.stringify({rules,model,quality,resolution,channelId:imageChannel.channelId});
   usePageExitRisk({ unsaved: ready && initializedOwner.current===ownerId && initialDraft.current?.owner===ownerId
     && editableSignature!==initialDraft.current.signature && storedEditableSignature!==`${ownerId}:${editableSignature}` ? ['人物工作现场尚未保存'] : [],
-    busy: busy || referenceUploading || pending || tasks.some(task=>task.status==='uncertain') ? ['人物操作、参考图上传或原请求尚未确认'] : [], revision: draftSignature });
+    busy: busy || draftEditBlocked ? ['人物操作、参考图上传或原请求尚未确认'] : [], revision: draftSignature });
   const load = useCallback(async (append = false, nextCursor?: string | null) => {
     const owner = liveDraft.current.ownerId, filter = { ...filterRef.current }, sequence = ++historySequence.current;
     const scope = `${owner}:${filter.tab}:${filter.deleted}`;
@@ -251,14 +252,14 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   }, [ownerId, ready, referenceIds]);
   const references = referenceIds.map(id => referenceMetadata.owner === ownerId ? referenceMetadata.assets.find(asset => asset.id === id) || {id} : {id});
   function addReferences(ids: string[]) {
-    if (!ready || ownerId !== liveDraft.current.ownerId || busy || referenceUploading || liveDraft.current.blocked) throw new Error('当前账号或草稿暂不能修改参考图');
+    if (!ready || ownerId !== liveDraft.current.ownerId || busy || referenceUploading || liveDraft.current.draftEditBlocked) throw new Error('当前账号或草稿暂不能修改参考图');
     const next = Array.from(new Set([...referenceIds, ...ids]));
     if (next.length > MAX_REFERENCE_IMAGES) throw new Error(`最多选择${MAX_REFERENCE_IMAGES}张参考图；保持同人时还需为身份基准留一张位置`);
     setRules(old => ({ ...old, referenceIds: next }));
   }
   async function uploadReference(file: File, onProgress?: UploadProgressHandler) {
     const ownerRevision = liveDraft.current.ownerRevision;
-    if (busy || pending || tasks.some(task => task.status === 'uncertain')) throw new Error('请先等待当前操作完成');
+    if (busy || liveDraft.current.draftEditBlocked) throw new Error('请先等待当前操作完成');
     setReferenceUploading(true);
     try {
       const asset = await uploadFileAsAsset(file, { onProgress });
@@ -267,7 +268,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     } finally { if (ownerRevision === liveDraft.current.ownerRevision) setReferenceUploading(false); }
   }
   async function uploadPastedReferences(files: File[]) {
-    if (!files.length || !ready || busy || liveDraft.current.blocked || pasteLock.current) return;
+    if (!files.length || !ready || busy || liveDraft.current.draftEditBlocked || pasteLock.current) return;
     if (files.some(file => !file.type.startsWith('image/')) || referenceIds.length + files.length > MAX_REFERENCE_IMAGES) { setError(`请选择图片，参考图合计最多${MAX_REFERENCE_IMAGES}张`); return; }
     const ownerRevision = liveDraft.current.ownerRevision;
     pasteLock.current = true; setReferenceUploading(true); setFailedReferences([]); setError('');
@@ -520,7 +521,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     if (alive.current && owner === liveDraft.current.ownerId) setNotice('这张图片已移到最近删除，可撤销；任务、账单和原件保留。');
   }
   async function restore(record: AvatarRecord) { await run(async () => {
-    if(blocked)throw new Error('原提交尚未确认，请先查询原任务');
+    if(liveDraft.current.draftEditBlocked)throw new Error('原提交尚未确认，请先查询原任务');
     rememberResult();
     if (record.kind === 'config') { if(imageTask?.asset)setPreviousImageTask(imageTask);setRules({...record.rules!,layout:avatarLayout(record.rules!),configId:record.id,configRevision:record.revision,choiceSources:Object.fromEntries(Object.keys(record.rules!.choices).map(key=>[key,'config']))}); editing.current = record;planRef.current=null;setPlan(null);setTasks([]);setSourceTask(null); setNotice('已载入配置；修改后选择保存或另存为。'); return; }
     const result = await api<{plan:AvatarPlan;sourceTask?:Task|null}>({ action: 'restore', id: record.id }); setRules({...result.plan.candidates[0].rules,layout:avatarLayout(result.plan)});planRef.current=result.plan.id; setPlan(result.plan);setModel(result.plan.model);setQuality(result.plan.quality);setResolution(result.plan.resolution);setSourceTask(result.sourceTask||null); setIndex(0); setTasks([]); setPending(false); setNotice('已恢复完整人物、条件、锁和历史生成参数；没有新建任务或扣除点数。出图前需更新报价。');
@@ -552,7 +553,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     : [];
   if (!ready || initializedOwner.current !== ownerId) return <main className={styles.page}><h1>{management ? '人物配置管理' : '人物生成'}</h1><p role="status">正在读取工作现场</p></main>;
   return <main className={styles.page}>
-    <header className={styles.heading}><h1>{management ? '人物配置管理' : '人物生成'}</h1><div className={styles.controls}><Link href={management ? '/tools/avatar-studio' : '/tools/avatar-studio/configs'}>{management ? '返回人物生成' : '管理配置'}</Link>{ticketId && <button type="button" onClick={() => window.opener?.focus()}><ArrowLeft size={15}/>返回原任务</button>}<button type="button" disabled={busy||blocked} onClick={resetDraft} title="重置人物草稿"><RotateCcw size={15}/></button></div></header>
+    <header className={styles.heading}><h1>{management ? '人物配置管理' : '人物生成'}</h1><div className={styles.controls}><Link href={management ? '/tools/avatar-studio' : '/tools/avatar-studio/configs'}>{management ? '返回人物生成' : '管理配置'}</Link>{ticketId && <button type="button" onClick={() => window.opener?.focus()}><ArrowLeft size={15}/>返回原任务</button>}<button type="button" disabled={busy||draftEditBlocked} onClick={resetDraft} title="重置人物草稿"><RotateCcw size={15}/></button></div></header>
     {plan?.warnings?.map((warning,i)=><div role="status" className={styles.notice} key={i}>{warning}</div>)}
     {error && <div role="alert" className={`${styles.notice} ${styles.error}`}>{error}</div>}{notice && <div role="status" className={styles.notice}>{notice}</div>}
     {busy&&stage&&<div role="status" className={styles.notice}>{stage}；当前草稿保留。</div>}
@@ -568,7 +569,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
             ? <AvatarSheetPreview overlay src={item.media.thumbnailSrc || item.media.src} layout={avatarLayout(plan)} index={index} onSelect={setIndex} onPreview={controls.openPreview} /> : null}
           renderSupplement={item => sheet && item.candidateIndex >= 0 && !item.media && plan ? <div className={styles.controls} aria-label="人物草稿分格">{plan.candidates.map((candidate, cell) => <button type="button" key={candidate.characterId} aria-pressed={index === cell} onClick={() => setIndex(cell)}>{avatarCellLabel(plan.layout, cell)}格人物</button>)}</div> : null}
           renderActions={item => item.media && item.output?.asset ? <>
-            <button type="button" disabled={busy||blocked||referenceIds.includes(item.output.asset.id)} onClick={()=>{try{addReferences([item.output!.asset!.id]);setNotice('已添加整图参考；没有上传、生成或扣费。');}catch(e){setError((e as Error).message);}}}><ImagePlus size={15}/>整图参考</button>
+            <button type="button" disabled={busy||draftEditBlocked||referenceIds.includes(item.output.asset.id)} onClick={()=>{try{addReferences([item.output!.asset!.id]);setNotice('已添加整图参考；没有上传、生成或扣费。');}catch(e){setError((e as Error).message);}}}><ImagePlus size={15}/>整图参考</button>
             {sheet && item.candidateIndex >= 0 && plan && <button type="button" disabled={busy} onClick={()=>void run(async()=>{await downloadAvatarCell(item.media!.src,avatarLayout(plan),index);setNotice('已在本机裁出所选格并交给浏览器下载；没有生成、上传或收费。');})}><Download size={15}/>裁出此格</button>}
           </> : null}
           renderPrimaryActions={item => item.output?.status === 'queued' && item.output.snapshot?.imageChannelLabel ? <button type="button" disabled={busy} onClick={() => void run(async () => {
@@ -593,14 +594,14 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
         if(files.length){event.preventDefault();void uploadPastedReferences(files);}
       }}>
         <div className={styles.referenceHeading}><strong>参考图（可选）</strong><span className={styles.price}>{referenceIds.length}/{MAX_REFERENCE_IMAGES}</span></div>
-        <StudioReferenceGrid items={references} labels="auxiliary" compact standalone disabled={busy||blocked}
+        <StudioReferenceGrid items={references} labels="auxiliary" compact standalone disabled={busy||draftEditBlocked}
           onChange={items=>setRules(old=>({...old,referenceIds:items.flatMap(item=>item.id?[item.id]:[])}))}
           onPreview={item=>{if(item.originalUrl)openImage(item.originalUrl,'人物参考图');}}>
-          <button type="button" className={styles.addReference} disabled={busy||blocked||referenceIds.length>=MAX_REFERENCE_IMAGES} onClick={()=>setPickerOpen(true)}><ImagePlus size={24}/><span>添加参考图</span></button>
+          <button type="button" className={styles.addReference} disabled={busy||draftEditBlocked||referenceIds.length>=MAX_REFERENCE_IMAGES} onClick={()=>setPickerOpen(true)}><ImagePlus size={24}/><span>添加参考图</span></button>
         </StudioReferenceGrid>
         {referenceError&&<p role="status" className={styles.error}>{referenceError}</p>}
         {pasteProgress&&<UploadProgressIndicator label={pasteProgress.label} percent={pasteProgress.percent} busy/>}
-        {!!failedReferences.length&&<div className={styles.controls}><span className={styles.error}>{failedReferences.length}张未上传，正文和已有参考保留</span><button type="button" disabled={busy||blocked} onClick={()=>void uploadPastedReferences(failedReferences)}>重试未上传图片</button><button type="button" disabled={busy||blocked} onClick={()=>setFailedReferences([])}>移除未上传图片</button></div>}
+        {!!failedReferences.length&&<div className={styles.controls}><span className={styles.error}>{failedReferences.length}张未上传，正文和已有参考保留</span><button type="button" disabled={busy||draftEditBlocked} onClick={()=>void uploadPastedReferences(failedReferences)}>重试未上传图片</button><button type="button" disabled={busy||draftEditBlocked} onClick={()=>setFailedReferences([])}>移除未上传图片</button></div>}
         <button type="button" className={styles.primary} disabled={!ready||busy||blocked||management||Boolean(channelIssue)} onClick={()=>void prepare()}>{busy?stage||'处理中':canContinueOriginal?'按原描述生成':draftSheet?`生成${avatarSheetLabel(rules.layout)}`:'生成独立头像'}</button>
         {channelIssue&&<p role="status" className={styles.price}>{channelIssue}</p>}{imageChannel.message&&<p role="status" className={styles.price}>{imageChannel.message}</p>}
         {canContinueOriginal&&<p className={styles.price}>原文字回复未取回，不再重复调用文字模型。</p>}
