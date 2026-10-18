@@ -806,13 +806,19 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (!preparation && !billingQuoteId && actualBillingEligible) {
       throw new StudioError('当前模型需要确认有效报价，请重新报价后提交；尚未生成', 409);
     }
+    // Freeze the channel before hashing the quote; its returned snapshot must
+    // describe the same input when the user later accepts that quote.
+    const contractImageChannel = imageChannel || originalSharedChannel || input.imageChannel
+      || (preparation && !acceptedContract && (pricingQuote || actualBillingEligible) && effectiveRequestedChannelId === 'original'
+        ? await captureImageGenerationChannel(generation.model, 'original', tx)
+        : undefined);
     let billingContract = fixedImageBillingContract({ scope: billingScope, model: generation.model, credits: price,
       specification: imageSpecification({ model: generation.model, quality: generation.quality, outputSize,
         aspectRatio: resolvedAspectRatio, referenceCount: orderedReferenceIds.length,
         inputCharacters: context.length + input.prompt.length,
         inputDigest: createHash('sha256').update(JSON.stringify({ context, prompt: input.prompt,
           avatar: avatar?.candidates, references: referenceSnapshot.map(ref => ({ id: ref.id, hash: ref.hash })),
-          imageChannel: imageChannel || originalSharedChannel || input.imageChannel || null,
+          imageChannel: contractImageChannel || null,
           revision: settings.revision, moduleRevision: sharedDefinition ? undefined : workspace?.revision,
           ...(sharedDefinition ? { sharedLive: sharedDefinition.intent } : {}) })).digest('hex') }) });
     if (pricingQuote) billingContract = withPricingImageContract(billingContract, pricingQuote.charge, price);
@@ -827,7 +833,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       try {
         billingContract = await consumeImageQuote(tx, { owner: ownerId, id: billingQuoteId,
           count: input.count, fingerprint: billingContract.specification, specification: billingContract.specification,
-          scope: billingScope, model: generation.model, imageChannel: imageChannel || originalSharedChannel || input.imageChannel,
+          scope: billingScope, model: generation.model, imageChannel: contractImageChannel,
           ...(sharedDefinition ? { sharedLive: sharedDefinition.intent } : {}) });
       } catch { throw new StudioError('实扣报价已过期、被使用或参数已变化，请重新报价', 409); }
       price = billingContract.authorizedCredits;
@@ -839,7 +845,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const fingerprint = imageChannel
       ? createHash('sha256').update(`${requestFingerprint}\0${imageChannel.channelId}\0${imageChannel.configRevision}`).digest('hex')
       : requestFingerprint;
-    const quoteImageChannel = imageChannel || originalSharedChannel || input.imageChannel
+    const quoteImageChannel = contractImageChannel
       || (preparation && effectiveRequestedChannelId === 'original'
         ? await captureImageGenerationChannel(generation.model, 'original', tx)
         : undefined);

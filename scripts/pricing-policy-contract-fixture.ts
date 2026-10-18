@@ -46,7 +46,7 @@ function complete(id: string, assertions: number, evidence: string[]) {
   entry.assertions += assertions; entry.evidence.push(...evidence); checks.set(id, entry);
 }
 const transcripts: Array<{ kind: string; log: string; sha256: string }> = [];
-type Failure = { kind: string; category: 'execution' | 'contract' | 'dependency' | 'integrity'; message: string; log?: string;
+type Failure = { kind: string; category: 'execution' | 'contract' | 'dependency' | 'integrity' | 'environment'; message: string; log?: string;
   status?: number | null; signal?: string | null };
 const failures: Failure[] = [], outcomes: Array<{ kind: string; completed: boolean; log?: string }> = [];
 function run(kind: string, consume: (result: ReturnType<typeof JSON.parse>) => void) {
@@ -54,12 +54,14 @@ function run(kind: string, consume: (result: ReturnType<typeof JSON.parse>) => v
   let log: string | undefined, status: number | null | undefined, signal: string | null | undefined;
   let category: Failure['category'] = 'execution';
   try {
-    const unit: string = ['core', 'toolflow', 'legacy'].includes(kind) ? prepared.roots[kind] : fs.mkdtempSync(path.join(directory, `pricing-${kind}-fixture-`));
+    const unit: string = kind === 'parent' ? prepared.roots.legacy
+      : ['core', 'toolflow', 'legacy'].includes(kind) ? prepared.roots[kind] : fs.mkdtempSync(path.join(directory, `pricing-${kind}-fixture-`));
     const databasePath = path.join(unit, `pricing-${kind}-fixture.db`);
     fs.copyFileSync(schemaPath, databasePath, fs.constants.COPYFILE_EXCL); fs.chmodSync(databasePath, 0o600);
     const env = { ...clean, DATABASE_URL: `file:${databasePath}`, PRICING_ADMIN_FIXTURE_DB: databasePath,
       PRICING_VIDEO_FIXTURE_DB: databasePath, PRICING_CORE_FIXTURE_DB: databasePath,
       PRICING_CORE_RUNTIME_ROOT: prepared.roots.core, PRICING_TOOLFLOW_RUNTIME_ROOT: prepared.roots.toolflow,
+      PRICING_PARENT_RUNTIME_ROOT: prepared.roots.legacy,
       PRICING_SOURCE_SHA: prepared.source, RATE_G19_FIXTURE_SOURCE_SHA: prepared.source };
     const result = spawnSync(process.execPath, ['--import', 'tsx', path.join(root, 'scripts/pricing-fixture-runner.ts'), kind], {
       cwd: root, env, encoding: 'utf8', timeout: 180000, maxBuffer: 4 * 1024 * 1024,
@@ -67,6 +69,11 @@ function run(kind: string, consume: (result: ReturnType<typeof JSON.parse>) => v
     status = result.status; signal = result.signal;
     const bytes = (result.stdout || '') + (result.stderr || ''); log = path.join(unit, `execution-${kind}.log`);
     fs.writeFileSync(log, bytes, { mode: 0o600, flag: 'wx' }); transcripts.push({ kind, log, sha256: sha(bytes) });
+    const childFailure = (result.stderr || '').split(/\r?\n/).flatMap(line => {
+      try { const value = JSON.parse(line); return value?.schema === 'pricing-fixture-execution-failure.v1' ? [value] : []; }
+      catch { return []; }
+    }).at(-1);
+    if (childFailure?.category === 'environment') category = 'environment';
     assert.ifError(result.error); assert.equal(result.signal, null, `${kind} fixture interrupted`);
     assert.equal(result.status, 0, `${kind} pricing fixture failed; see ${log}`);
     category = 'contract';
@@ -143,6 +150,28 @@ for (const entry of legacy.checks) complete(entry.id, entry.assertions, entry.ev
 legacyEvidence = { schema: legacy.schema, sources: legacy.sources, entrypoints: legacy.entrypoints, rootInputs: legacy.rootInputs,
   processIdentity: legacy.processIdentity, database: legacy.database };
 });
+let parentEvidence: ReturnType<typeof JSON.parse>;
+if (continuationSafe()) run('parent', parent => {
+assert.equal(parent.fixture, 'pricing-parent-identity-contract'); assert.equal(parent.completed, true);
+assert.ok(Array.isArray(parent.checks) && parent.checks.length);
+const identity = parent.processEvidence;
+assert.ok(identity?.worker?.pid > 1 && identity.worker.uid === process.getuid!());
+assert.equal(identity.worker.parentPid, 1); assert.match(identity.worker.start, /^\d+$/);
+assert.equal(identity.parent.pid, 1); assert.equal(identity.parent.uid, 0);
+assert.match(identity.parent.start, /^\d+$/); assert.equal(identity.parentSignalZero, 'EPERM');
+assert.equal(identity.capability.instance.pid, identity.worker.pid);
+assert.equal(identity.capability.instance.start, identity.worker.start);
+assert.equal(identity.capability.instance.cwd, prepared.roots.legacy);
+assert.equal(identity.capability.instance.parentPid, 1);
+assert.deepEqual(identity.capability.parent, { pid: 1, start: identity.parent.start });
+assert.equal(identity.capability.source, prepared.source);
+assert.equal(identity.reader.workerId, identity.capability.workerId);
+assert.equal(identity.reader.source, prepared.source);
+assert.ok(identity.controller?.pid > 1 && identity.controller.uid === identity.worker.uid);
+for (const entry of parent.checks) { assert.equal(entry.id, 'G19'); complete(entry.id, entry.assertions, entry.evidence); }
+parentEvidence = parent;
+});
+else outcomes.push({ kind: 'parent', completed: false });
 if (continuationSafe()) run('core', core => {
 assert.equal(core.schema, 'pricing-core-contract.v1'); assert.equal(core.completed, true);
 for (const entry of core.checks) complete(entry.id, entry.assertions, entry.evidence);
@@ -174,7 +203,7 @@ fs.writeFileSync(receipt, JSON.stringify({ schema: 'pricing-policy-contract-fixt
   sourceSha256, checks: expected.map(id => checks.get(id)), transcripts,
   rootInputManifest: { path: prepared.manifest, sha256: sha(fs.readFileSync(prepared.manifest)), source: prepared.source,
     sourceTreeSha256: prepared.sourceTreeSha256, runId: prepared.runId },
-  legacy: legacyEvidence,
+  legacy: legacyEvidence, parent: parentEvidence,
   forbiddenCalls: 0, productionWrites: 0, paidRequests: 0, browserRuns: 0 }), { mode: 0o600, flag: 'wx' });
 process.umask(previousUmask);
 console.log(`Pricing policy contract fixture receipt: ${receipt}`);

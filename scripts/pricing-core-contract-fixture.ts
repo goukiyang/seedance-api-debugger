@@ -50,6 +50,8 @@ async function main() {
   const { createStudioBatch, dispatchStudioBatches } = await import('@/lib/image-studio/batches');
   const { studioBatchBudgetPrecision } = await import('@/lib/image-studio/batch-contract');
   const { prepareImageBillingQuote } = await import('@/lib/image-studio/billing-quote-service');
+  const { imageQuoteKey } = await import('@/lib/image-studio/billing-quote-store');
+  const { PricingChargeError } = await import('@/lib/pricing/charge');
   const { getCanvasImageQuote } = await import('@/lib/canvas-quote');
   const { createSynchronousImageAdmission } = await import('@/lib/image-studio/synchronous-admission');
   const now = new Date().toISOString();
@@ -264,13 +266,34 @@ async function main() {
   const quoted = await prepareImageBillingQuote(user.id, imageBody);
   equal(quoted.unitCredits, 0.2); equal(quoted.pricingRevision, snapshot.revision); ok(quoted.billingQuoteId);
   equal(quoted.estimatedCredits, 0.6);
-  await rejects(() => submitStudioBatch(user.id, { ...imageBody, billingQuoteId: quoted.billingQuoteId, imageChannel: quoted.imageChannel, maxEstimatedCost: quoted.estimatedCredits }));
+  ok(quoted.imageChannel); equal(quoted.imageChannel?.channelId, 'original');
+  const quoteKey = imageQuoteKey(user.id, quoted.billingQuoteId!);
+  const storedQuote = await db.platformSetting.findUniqueOrThrow({ where: { key: quoteKey } });
+  const beforeAcceptance = await db.creditAccount.findUniqueOrThrow({ where: { user_id: user.id } });
+  const beforeTasks = await db.imageStudioTask.count({ where: { owner_id: user.id } });
+  await assert.rejects(() => submitStudioBatch(user.id, { ...imageBody, prompt: 'different unquoted input',
+    billingQuoteId: quoted.billingQuoteId, pricingRevision: quoted.pricingRevision,
+    imageChannel: quoted.imageChannel, maxEstimatedCost: quoted.estimatedCredits }), { status: 409,
+    message: '实扣报价已过期、被使用或参数已变化，请重新报价' });
+  active.assertions++;
+  await assert.rejects(() => submitStudioBatch(user.id, { ...imageBody, billingQuoteId: quoted.billingQuoteId,
+    imageChannel: quoted.imageChannel, maxEstimatedCost: quoted.estimatedCredits }), PricingChargeError);
+  active.assertions++;
+  equal((await db.platformSetting.findUniqueOrThrow({ where: { key: quoteKey } })).value_json, storedQuote.value_json);
+  equal(await db.imageStudioTask.count({ where: { owner_id: user.id } }), beforeTasks);
+  equal(await db.creditAccount.findUniqueOrThrow({ where: { user_id: user.id } }), beforeAcceptance);
   const accepted = await submitStudioBatch(user.id, { ...imageBody, billingQuoteId: quoted.billingQuoteId, pricingRevision: quoted.pricingRevision, imageChannel: quoted.imageChannel, maxEstimatedCost: quoted.estimatedCredits });
+  equal(await db.platformSetting.count({ where: { key: quoteKey } }), 0);
   const acceptedImages = await db.imageStudioTask.findMany({ where: { batch_id: accepted, owner_id: user.id } });
   equal(acceptedImages.length, 3); equal(precision.sumCredits(acceptedImages.map(task => task.unit_credits)), 0.6);
   const acceptedImage = await db.imageStudioTask.findFirstOrThrow({ where: { batch_id: accepted, owner_id: user.id } });
   equal(acceptedImage.status, 'rate_queued'); equal(acceptedImage.unit_credits, 0.2);
   equal(parseImageBillingContract(acceptedImage.billing_contract_json)?.pricing?.revision, snapshot.revision);
+  equal(parseImageBillingContract(acceptedImage.billing_contract_json)?.specification,
+    parseImageBillingContract(JSON.stringify(JSON.parse(storedQuote.value_json).contract))?.specification);
+  equal(await submitStudioBatch(user.id, { ...imageBody, billingQuoteId: quoted.billingQuoteId,
+    pricingRevision: quoted.pricingRevision, imageChannel: quoted.imageChannel, maxEstimatedCost: quoted.estimatedCredits }), accepted);
+  equal(await db.imageStudioTask.count({ where: { batch_id: accepted, owner_id: user.id } }), 3);
   await rejects(() => db.$transaction(tx => createSynchronousImageAdmission(tx, { ownerId: user.id,
     requestId: imageBody.requestId, fingerprint: 'fixture-reverse-original', count: 1, model: imageBody.model, scope: 'fixture-scope' })));
   const originalSyncId = randomUUID();

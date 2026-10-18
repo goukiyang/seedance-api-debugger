@@ -21,7 +21,8 @@ function assertConfig(candidate = root) {
   for (const file of [fixture, 'src/lib/pricing/admin-contract.ts', 'src/lib/pricing/math.ts',
     'src/lib/pricing/resolve.ts', 'src/lib/pricing/runtime.ts', 'src/lib/pricing/isolation.ts',
     'src/lib/credits/precision.ts', 'scripts/pricing-fixture-input.mjs', 'scripts/pricing-fixture-runner.ts',
-    'scripts/pricing-image-ui-contract-fixture.ts', 'scripts/pricing-legacy-consumer-fixture.ts', 'scripts/pricing-legacy-v0954/provenance.ts',
+    'scripts/pricing-image-ui-contract-fixture.ts', 'scripts/pricing-parent-identity-fixture.ts',
+    'scripts/pricing-legacy-consumer-fixture.ts', 'scripts/pricing-legacy-v0954/provenance.ts',
     'scripts/pricing-legacy-v0954/bootstrap-root.sh']) assert.ok(readFileSync(path.join(root, file)).length > 0, file);
   const sources = hashes();
   assert.equal(Object.keys(sources).filter(file => file.startsWith('scripts/pricing-legacy-v0954/') && file.endsWith('.source')).length, 100);
@@ -56,12 +57,26 @@ function verifyFixture(file, runId, startedAt, finishedAt, sourceSha256) {
   for (const key of ['forbiddenCalls', 'productionWrites', 'paidRequests', 'browserRuns']) assert.equal(value[key], 0, key);
   assert.equal(value.fixtureSha256, sourceSha256[fixture]);
   assert.deepEqual(value.sourceSha256, sourceSha256, 'Fixture source coverage differs from this candidate');
-  assert.deepEqual(value.transcripts?.map(item => item.kind), ['admin', 'ui', 'image-ui', 'video', 'legacy', 'core', 'toolflow']);
+  assert.deepEqual(value.transcripts?.map(item => item.kind), ['admin', 'ui', 'image-ui', 'video', 'legacy', 'parent', 'core', 'toolflow']);
   for (const transcript of value.transcripts) assert.equal(receiptLogHash(transcript.log), transcript.sha256, 'Fixture execution log changed');
   assert.equal(value.rootInputManifest?.runId, runId);
   assert.match(value.rootInputManifest?.source, /^[a-f0-9]{40}$/);
   assert.equal(receiptLogHash(value.rootInputManifest?.path, false), value.rootInputManifest?.sha256, 'Root bootstrap receipt changed');
   assert.equal(value.legacy?.schema, 'pricing-legacy-consumer.v2'); assert.equal(value.legacy?.database?.rolledBack, true);
+  assert.equal(value.parent?.fixture, 'pricing-parent-identity-contract'); assert.equal(value.parent?.completed, true);
+  const identity = value.parent.processEvidence;
+  assert.ok(identity?.worker?.pid > 1 && identity.worker.uid === process.getuid());
+  assert.equal(identity.worker.parentPid, 1); assert.match(identity.worker.start, /^\d+$/);
+  assert.equal(identity.parent?.pid, 1); assert.equal(identity.parent.uid, 0);
+  assert.match(identity.parent.start, /^\d+$/); assert.equal(identity.parentSignalZero, 'EPERM');
+  assert.equal(identity.capability?.source, value.rootInputManifest.source);
+  assert.equal(identity.capability.instance.pid, identity.worker.pid);
+  assert.equal(identity.capability.instance.start, identity.worker.start);
+  assert.equal(identity.capability.instance.parentPid, 1);
+  assert.deepEqual(identity.capability.parent, { pid: 1, start: identity.parent.start });
+  assert.equal(identity.reader?.workerId, identity.capability.workerId);
+  assert.equal(identity.reader.source, value.rootInputManifest.source);
+  assert.ok(identity.controller?.pid > 1 && identity.controller.uid === identity.worker.uid);
   return result.sha256;
 }
 function receiptLogHash(file, privateFile = true) {

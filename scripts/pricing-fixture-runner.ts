@@ -33,8 +33,9 @@ async function main() {
     const result = await runPricingLegacyConsumerFixture({ candidateRoot: root, fixtureRoot: path.dirname(databasePath), databasePath });
     assert.equal(forbiddenCalls, 0); console.log(JSON.stringify({ fixture: 'pricing-legacy-consumer-contract', completed: true, ...result })); return;
   }
-  assert.equal(kind, 'toolflow');
-  const runtimeRoot = fs.realpathSync(process.env.PRICING_TOOLFLOW_RUNTIME_ROOT || '');
+  assert.ok(kind === 'toolflow' || kind === 'parent');
+  const runtimeRoot = fs.realpathSync((kind === 'parent'
+    ? process.env.PRICING_PARENT_RUNTIME_ROOT : process.env.PRICING_TOOLFLOW_RUNTIME_ROOT) || '');
   assert.equal(process.platform, 'linux');
   assert.ok(runtimeRoot.startsWith(path.join(root, '.role-tests') + path.sep));
   const { pricingRuntimeSourceFiles } = await import('../src/lib/pricing/runtime');
@@ -45,10 +46,23 @@ async function main() {
   }
   const source = process.env.PRICING_SOURCE_SHA;
   assert.ok(source && /^[a-f0-9]{40}$/.test(source));
+  if (kind === 'parent') {
+    const { runPricingParentIdentityContractFixture } = await import('./pricing-parent-identity-fixture');
+    const result = await runPricingParentIdentityContractFixture({ databasePath, runtimeRoot, source });
+    assert.equal(forbiddenCalls, 0);
+    console.log(JSON.stringify({ fixture: 'pricing-parent-identity-contract', ...result }));
+    return;
+  }
   const { runPricingToolflowContractFixture } = await import('./pricing-toolflow-contract-fixture');
   const result = await runPricingToolflowContractFixture({ databasePath, runtimeRoot, source });
   assert.equal(forbiddenCalls, 0);
   console.log(JSON.stringify({ completed: true, ...result,
     permissionEvidence: 'Actual Linux root/immutable isolated inputs and actual live process checks; production installation is separately required.' }));
 }
-main().catch(error => { console.error(error); process.exitCode = 1; });
+main().catch(error => {
+  console.error(error);
+  console.error(JSON.stringify({ schema: 'pricing-fixture-execution-failure.v1', kind: process.argv[2], completed: false,
+    category: error instanceof Error && 'code' in error && error.code === 'pricing_fixture_environment' ? 'environment' : 'execution',
+    message: error instanceof Error ? error.message : String(error) }));
+  process.exitCode = 1;
+});

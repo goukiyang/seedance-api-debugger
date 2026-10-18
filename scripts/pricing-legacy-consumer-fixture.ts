@@ -123,11 +123,68 @@ export async function runPricingLegacyConsumerFixture(input: PricingLegacyConsum
   const database = new PrismaClient({ datasources: { db: { url: `file:${databasePath}` } } });
   const rollback = new Error('pricing-legacy-consumer-fixture-rollback');
   let completed = false;
+  let candidateSnapshot: Map<string, Buffer> | undefined;
+  let runtimeSourceFiles: typeof RuntimeModule.pricingRuntimeSourceFiles | undefined;
+  let primaryFailure: Error | undefined;
 
   async function atRoot<T>(root: string, action: () => T | Promise<T>): Promise<T> {
     const previous = process.cwd();
     process.chdir(root);
-    try { return await action(); } finally { process.chdir(previous); }
+    let failed = false, originalFailure: unknown;
+    try { return await action(); }
+    catch (error) { failed = true; originalFailure = error; throw error; }
+    finally {
+      try { process.chdir(previous); }
+      catch (error) { throw new AggregateError(failed ? [originalFailure, error] : [error],
+        'Fixture cwd restoration failed', { cause: failed ? originalFailure : error }); }
+    }
+  }
+  function assertCandidateSnapshot(context: string) {
+    assert.ok(candidateSnapshot && runtimeSourceFiles, 'Complete candidate snapshot must exist before source switching');
+    const files = Array.from(candidateSnapshot.keys());
+    for (const root of [candidateRoot, fixtureRoot]) {
+      assert.deepEqual(Array.from(runtimeSourceFiles(root)), files, `${context}: runtime source file set changed in ${root}`);
+      candidateSnapshot.forEach((bytes, file) => {
+        assert.deepEqual(fs.readFileSync(path.join(root, file)), bytes, `${context}: runtime source bytes changed: ${root}/${file}`);
+      });
+    }
+  }
+  async function withLegacySourceIdentity<T>(root: string, variant: Variant, action: () => T | Promise<T>): Promise<T> {
+    assertCandidateSnapshot('Before legacy source identity');
+    return atRoot(root, async () => {
+      const file = path.join(root, '.deployed-commit');
+      if (fs.existsSync(file)) {
+        const stat = fs.lstatSync(file);
+        check(stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1, 'Legacy identity must be a separate regular fixture file');
+      }
+      const original = fs.existsSync(file) ? fs.readFileSync(file) : null;
+      const legacy = Buffer.from(PRICING_LEGACY_SOURCES[variant].commit);
+      let failed = false, originalFailure: unknown;
+      try {
+        fs.writeFileSync(file, legacy, { mode: 0o600 });
+        equal(fs.readFileSync(file), legacy, 'Scoped old entry must see the exact legacy source identity');
+        return await action();
+      } catch (error) {
+        failed = true; originalFailure = error; throw error;
+      } finally {
+        const recoveryErrors: unknown[] = [];
+        try { assert.deepEqual(fs.readFileSync(file), legacy, 'Unexpected identity change inside legacy scope must reject'); }
+        catch (error) { recoveryErrors.push(error); }
+        try {
+          if (original === null) {
+            fs.unlinkSync(file);
+            assert.equal(fs.existsSync(file), false, 'Previously absent fixture identity must remain absent');
+          } else {
+            fs.writeFileSync(file, original);
+            assert.deepEqual(fs.readFileSync(file), original, 'Restore exact original identity bytes, including trailing newlines');
+          }
+        } catch (error) { recoveryErrors.push(error); }
+        try { assertCandidateSnapshot('After legacy source identity restoration'); }
+        catch (error) { recoveryErrors.push(error); }
+        if (recoveryErrors.length) throw new AggregateError(failed ? [originalFailure, ...recoveryErrors] : recoveryErrors,
+          'Legacy source identity restoration or candidate integrity failed', { cause: failed ? originalFailure : recoveryErrors[0] });
+      }
+    });
   }
   function entered(variant: Variant, file: string, entry: string) {
     entrypoints.push({ variant, source: PRICING_LEGACY_SOURCES[variant].commit, file, entry, phase });
@@ -231,9 +288,9 @@ export async function runPricingLegacyConsumerFixture(input: PricingLegacyConsum
       const bundled = variant === 'candidate' ? path.join(candidateRoot, file) : path.join(archiveRoot, variant, `${file}.source`);
       if (!inside(bundled, variant === 'candidate' ? candidateRoot : archiveRoot)) return deny('module:path-escape');
       if (!fs.existsSync(bundled)) return unknownModule(file) as T;
-      const module = { exports: {} as ModuleExports }; cache.set(file, module);
+      const loadedModule = { exports: {} as ModuleExports }; cache.set(file, loadedModule);
       let source = fs.readFileSync(bundled, 'utf8');
-      if (file.endsWith('.json')) { module.exports = JSON.parse(source); return module.exports as T; }
+      if (file.endsWith('.json')) { loadedModule.exports = JSON.parse(source); return loadedModule.exports as T; }
       if (variant === 'candidate' && file === 'src/lib/tools/toolflow-runtime.ts') {
         source += '\nexport { toolFlowState as __fixtureToolFlowState, currentNodeContract as __fixtureCurrentNodeContract };\n';
       }
@@ -278,8 +335,8 @@ export async function runPricingLegacyConsumerFixture(input: PricingLegacyConsum
         fetch: () => deny('network:fetch'), WebSocket: function () { return deny('network:websocket'); } };
       const wrapper = vm.runInNewContext(`(function(exports,require,module,__filename,__dirname){${output.outputText}\n})`, context,
         { filename: bundled, timeout: 10000 }) as (...args: unknown[]) => void;
-      wrapper(module.exports, requireFixture, module, bundled, path.dirname(bundled));
-      return module.exports as T;
+      wrapper(loadedModule.exports, requireFixture, loadedModule, bundled, path.dirname(bundled));
+      return loadedModule.exports as T;
     }
     return { load, processState, stageCalls };
   }
@@ -298,12 +355,16 @@ export async function runPricingLegacyConsumerFixture(input: PricingLegacyConsum
         const states = current.load<typeof StateModule>('src/lib/image-studio/pricing-state.ts');
         const isolation = current.load<typeof IsolationModule>('src/lib/pricing/isolation.ts');
         const runtime = current.load<typeof RuntimeModule>('src/lib/pricing/runtime.ts');
-        for (const file of runtime.pricingRuntimeSourceFiles(candidateRoot)) {
+        runtimeSourceFiles = runtime.pricingRuntimeSourceFiles;
+        const snapshot = new Map(runtimeSourceFiles(candidateRoot).map(file => [file, fs.readFileSync(path.join(candidateRoot, file))]));
+        snapshot.forEach((bytes, file) => {
           const destination = path.join(fixtureRoot, file);
           check(inside(destination, fixtureRoot), 'Runtime source destination must stay inside the isolated fixture');
           fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
-          fs.copyFileSync(path.join(candidateRoot, file), destination, fs.constants.COPYFILE_EXCL);
-        }
+          fs.writeFileSync(destination, bytes, { flag: 'wx', mode: 0o600 });
+        });
+        candidateSnapshot = snapshot;
+        assertCandidateSnapshot('Initial complete candidate copy');
         equal(runtime.pricingRuntimeModuleHashes(fixtureRoot), runtime.pricingRuntimeModuleHashes(candidateRoot), 'Real process cwd contains the exact candidate runtime source bytes');
         check(isolation.readPricingWriterIsolation(), 'Root-prepared strict marker must be accepted before exercising capacity');
         const capacity = current.load<typeof CapacityModule>('src/lib/image-studio/queue-capacity.ts');
@@ -449,14 +510,21 @@ export async function runPricingLegacyConsumerFixture(input: PricingLegacyConsum
             'Old queued/running flow scanner must not touch private parents or their rate_pending nodes');
           for (const kind of ['ordinary', 'strict'] as const) {
             phase = `${variant}:old-main-${kind}-drain`;
-            await atRoot(markerRoots[kind], async () => {
-              fs.writeFileSync(path.join(process.cwd(), '.deployed-commit'), PRICING_LEGACY_SOURCES[variant].commit, { mode: 0o600 });
+            await withLegacySourceIdentity(markerRoots[kind], variant, async () => {
               const entry = makeLoader(tx, variant);
               entered(variant, 'scripts/process-image-studio.ts', 'main');
               await entry.load<{ __fixtureMain(): Promise<void> }>('scripts/process-image-studio.ts').__fixtureMain();
               equal(entry.stageCalls, [], 'Actual old main must break before recovery, billing, batch, flow or generation when marker exists');
               equal(entry.processState.exitCode, 0, 'Old drain must be an orderly stop, not a swallowed execution error');
             });
+            for (const controlled of [new Error('G19 controlled legacy scope exception'),
+              new assert.AssertionError({ message: 'G19 controlled legacy scope assertion failure' })]) {
+              phase = `${variant}:restore-${kind}-${controlled.name}`;
+              await assert.rejects(() => withLegacySourceIdentity(markerRoots[kind], variant, () => { throw controlled; }),
+                error => error === controlled, 'Restoration must preserve the exact original exception or assertion failure');
+              assertions += 1;
+              assertCandidateSnapshot('After controlled legacy failure');
+            }
           }
           equal(JSON.stringify(await tx.imageStudioTask.findMany({ where: { id: { in: privateIds } }, orderBy: { id: 'asc' } })), beforePrivate,
             'No old consumer may change private claims, lease, charge or result fields');
@@ -465,6 +533,7 @@ export async function runPricingLegacyConsumerFixture(input: PricingLegacyConsum
           evidence.push(`${variant}: original claim/process/billing/batch/toolflow/main executed on real isolated Prisma; private records unchanged; ordinary old controls reached their original branches`);
         }
         phase = 'candidate:capacity';
+        assertCandidateSnapshot('Before candidate capacity positive control');
         await tx.imageStudioTask.updateMany({ where: { id: { in: privateIds.slice(0, 4) } }, data: { status: 'succeeded' } });
         for (let i = 0; i < 7; i += 1) await tx.imageStudioTask.create({ data: { ...base, id: `rate-capacity-${i}`, status: states.pricingTaskState('queued', true) } });
         const syncKey = `image_sync_request_v1:${actor.id}:fixture-sync`;
@@ -484,6 +553,7 @@ export async function runPricingLegacyConsumerFixture(input: PricingLegacyConsum
           });
         }
         phase = 'candidate:live-capability';
+        assertCandidateSnapshot('Before candidate live capability positive control');
         check(isolation.readPricingWriterIsolation(), 'Real root-owned immutable strict marker must reach the positive branch');
         equal(isolation.isImageStudioDraining(), false, 'Only exact strict isolation may allow new-code work');
         const captured = runtime.capturePricingWorkerCapability(source!);
@@ -512,6 +582,7 @@ export async function runPricingLegacyConsumerFixture(input: PricingLegacyConsum
         evidence.push('Real Linux lstat/lsattr and /proc were used without metadata overrides. Build-user execution accepts only the root-owned immutable strict engineering marker; ordinary/unprotected/wrong-schema/extra-field inputs reject. Live fixture capability passes, then expired/wrong-instance/wrong-parent/wrong-module-hash/revoked receipts reject. This is not a production worker or ExecStartPre proof.');
         evidence.push('Toolflow seeds use current actual toolFlowState/currentNodeContract helpers: rate-tf parent IDs, rate_queued/rate_running, rate_pending nodes, toolflow.v1 + toolflow-pricing-v1 and complete frozen node_contracts. Image contracts are built and parsed by the current real billing factories.');
         evidence.push('Old Web is not claimed to understand the new pricing policy. Preventing its restart still requires the deployment ExecStartPre source/BUILD allowlist, verified separately by operations.');
+        evidence.push('Complete candidate runtime source bytes were snapshotted using pricingRuntimeSourceFiles(candidateRoot). Scoped legacy identity switches restored original bytes or original absence after normal returns, controlled exceptions and assertion failures; original failures propagated by identity. Full source file sets and bytes are checked before candidate positive controls and on exit; unexpected changes reject rather than being repaired away.');
         evidence.push(...PRICING_LEGACY_ADAPTATIONS);
         completed = true; throw rollback;
       }, { maxWait: 10000, timeout: 120000 });
@@ -523,18 +594,30 @@ export async function runPricingLegacyConsumerFixture(input: PricingLegacyConsum
     equal(await database.imageStudioTask.count(), 0, 'Fixture task writes rolled back');
     equal(await database.toolFlowRun.count(), 0, 'Fixture flow writes rolled back');
     equal(markerEvidence(), rootInputs, 'Root-prepared inputs remain byte- and metadata-identical; fixture never rewrites or removes a marker');
+    assertCandidateSnapshot('Before successful fixture exit');
     check(capturedIdentity, 'Real process identity must be captured before completion');
     return { schema: 'pricing-legacy-consumer.v2', source: source!, checks: [{ id: 'G19', assertions, evidence }], forbiddenCalls,
       sources: PRICING_LEGACY_SOURCES, entrypoints, rootInputs, processIdentity: capturedIdentity!, observations,
       database: { path: databasePath, rolledBack: true }, adaptations: PRICING_LEGACY_ADAPTATIONS };
   } catch (error) {
     const failure = new Error(`RATE-G19 failed during ${phase}; isolated inputs retained, no success receipt produced`, { cause: error });
+    primaryFailure = failure;
     Object.assign(failure, { fixtureFailure: { schema: 'pricing-legacy-consumer-failure.v1', completed: false, phase,
       source, sources: PRICING_LEGACY_SOURCES, databasePath, fixtureRoot, forbiddenCalls: [...forbiddenCalls],
       lastObservations: observations.slice(-20), entrypoints: [...entrypoints], rootInputs,
       recovery: 'Use a fresh root-prepared engineering directory for any retry. Never reuse this database, rewrite root markers, or fall back to production.' } });
     throw failure;
   } finally {
-    try { process.chdir(originalCwd); } finally { await database.$disconnect(); }
+    const cleanupErrors: unknown[] = [];
+    try { if (candidateSnapshot) assertCandidateSnapshot('Final fixture exit'); }
+    catch (error) { cleanupErrors.push(error); }
+    try { process.chdir(originalCwd); } catch (error) { cleanupErrors.push(error); }
+    try { await database.$disconnect(); } catch (error) { cleanupErrors.push(error); }
+    if (cleanupErrors.length) {
+      const failure = new AggregateError(primaryFailure ? [primaryFailure, ...cleanupErrors] : cleanupErrors,
+        'RATE-G19 exit integrity or cleanup failed; no success receipt produced', { cause: primaryFailure || cleanupErrors[0] });
+      if (primaryFailure && 'fixtureFailure' in primaryFailure) Object.assign(failure, { fixtureFailure: primaryFailure.fixtureFailure });
+      throw failure;
+    }
   }
 }

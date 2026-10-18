@@ -173,7 +173,15 @@ export async function runPricingToolflowContractFixture(options: PricingToolflow
     const retryFlow = await makeFlow(3);
     const retryRun = (await submit(retryFlow.id)).run;
     for (let index = 0; index < 3; index += 1) await complete(retryRun.id, 'failed');
-    await save({ kind: 'save', changes: { rows: [{ id: imageRow.id, mode: 'custom', customPointsPerCny: '0.7' }] } });
+    const retryPrice: PricingAdminAction = { kind: 'save', changes: { rows: [{ id: imageRow.id, mode: 'custom', customPointsPerCny: '0.7' }] } };
+    const stalePolicy = policy;
+    await assert.rejects(() => save(retryPrice), (error: unknown) => error instanceof Error
+      && 'code' in error && error.code === 'pricing_conflict' && 'status' in error && error.status === 409);
+    policy = await getAdminPricingSnapshot(actor, prisma);
+    assert.equal(policy.revision, stalePolicy.revision);
+    assert.notEqual(policy.catalogFingerprint, stalePolicy.catalogFingerprint);
+    await save(retryPrice);
+    evidence.push('G07/G17: changing the global context invalidates the old catalog snapshot without changing the accepted policy; stale save rejects 409, then an explicit fresh snapshot permits the new retry price');
     await assert.rejects(() => runtime.updateToolFlowRun(user, retryRun.id, { action: 'retry', node_id: 'first' }));
     for (let round = 0; round < 8; round += 1) {
       await renew();
