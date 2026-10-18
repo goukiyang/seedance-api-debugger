@@ -3903,7 +3903,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
               resolution={task.snapshot?.resolution} ratio={task.aspectRatio}
               width={task.asset?.width} height={task.asset?.height} className={styles.muted} />
             {(() => { const nextCheckAt = studioTaskProviderWait(task); return nextCheckAt
-              ? <p className={styles.muted}>可再次核对：<RelativeTime value={new Date(nextCheckAt).toISOString()} /></p> : null; })()}
+              ? <p className={styles.muted}>{studioTaskProviderCheck(task) ? '可再次核对' : '供应商要求等待至'}：<RelativeTime value={new Date(nextCheckAt).toISOString()} /></p> : null; })()}
             {studioTaskProviderCheck(task) && <p className={styles.muted}>{studioTaskProviderCheck(task)!.message}</p>}
             {taskRecheckFeedback(task)?.message && <p className={styles.muted} role="status">{taskRecheckFeedback(task)!.message}</p>}
             {copyFeedback?.id === task.id && <span className={styles.copyFeedback} role="status">{copyFeedback.text}</span>}
