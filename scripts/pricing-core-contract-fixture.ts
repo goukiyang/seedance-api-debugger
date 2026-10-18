@@ -26,7 +26,9 @@ async function main() {
   const fixtureRoot = fs.realpathSync(process.env.PRICING_CORE_RUNTIME_ROOT || path.dirname(databasePath));
   assert.ok(fixtureRoot.startsWith(path.join(candidateRoot, '.role-tests') + path.sep));
   const { PrismaClient } = await import('@prisma/client');
-  const db = new PrismaClient({ datasources: { db: { url: `file:${databasePath}` } } });
+  const pricingTransactionQueries: string[] = [];
+  const db = new PrismaClient({ datasources: { db: { url: `file:${databasePath}` } }, log: [{ level: 'query', emit: 'event' }] });
+  db.$on('query', event => { if (/^(BEGIN|COMMIT|ROLLBACK)\b/.test(event.query)) pricingTransactionQueries.push(event.query); });
   assert.equal(await db.user.count(), 0); assert.equal(await db.platformSetting.count(), 0);
   Reflect.set(globalThis, 'prisma', db);
   const math = await import('@/lib/pricing/math');
@@ -306,9 +308,10 @@ async function main() {
   await db.platformSetting.delete({ where: { key: `image_sync_request_v1:${user.id}:${originalSyncId}` } });
   const canvas = await getCanvasImageQuote(user as never, { kind: 'image', project_id: project.id, model: 'gpt-image-2', count: 3, quality: 'auto', resolution: '1K', ratio: '1:1' });
   equal(canvas.estimatedCredits, 0.6); equal(canvas.pricingRevision, snapshot.revision); equal(canvas.pricingQuoteRequired, true);
-  const candidateEvidence = await runPricingImageCandidateContractFixture(db, user as never, project.id);
+  const candidateEvidence = await runPricingImageCandidateContractFixture(db, user as never, project.id, pricingTransactionQueries);
   active.assertions += candidateEvidence.assertions;
   active.evidence.push('R04: selected-model strict quote, typed identity-scoped candidate failures, default routes, null/free separation, real database/runtime failures, snapshot isolation and exact fixture restoration.');
+  active.evidence.push('R05: three concurrent complete canvas quotes and three concurrent channel menus use one real transaction per projection; selected price/revision, unavailable null amounts and private snapshots remain intact.');
 
   group('G17', 'Actual persistent batch acceptance freezes per-child contracts; late dispatch after policy mutation uses the original unit fee.');
   const batchBody = { ...imageBody, count: 1, requestId: randomUUID(), sources: [{ name: 'one' }, { name: 'two' }], budget: 0.4 };

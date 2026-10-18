@@ -10,6 +10,8 @@ import { assertPricingImageAvailability } from '@/lib/pricing/image-availability
 import { isPricingItemUnavailable, PricingItemUnavailableError } from '@/lib/pricing/item-unavailable';
 import type { CanvasImageModelOption } from '@/lib/pricing/image-option-contract';
 import { creditCents, sumCredits } from '@/lib/credits/precision';
+import type { Prisma } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 
 export type CanvasQuoteInput = {
   kind: 'image';
@@ -54,18 +56,23 @@ export async function getCanvasImageQuote(user: SessionUser, input: CanvasQuoteI
   assertInternalOnly(user, '外部账号无权使用无限画布。');
   await assertCanGenerateInProject(user, input.project_id);
   if (!IMAGE_STUDIO_MODELS.includes(input.model as ImageStudioModel)) throw new AuthError('所选图片型号不在允许列表中', 400);
-  const channels = await getImageGenerationChannels(undefined, true);
-  const effectiveChannelId = await resolveImageGenerationRequestChannel(input.model, input.channelId) || 'original';
-  const imageChannel = effectiveChannelId !== 'original' ? await captureImageGenerationChannel(input.model, effectiveChannelId) : undefined;
-  const studio = await getImageStudioSettings();
-  const selected = await resolvePricingImageCandidate(channels, input.model as ImageStudioModel, input.channelId);
+  return prisma.$transaction(tx => buildCanvasImageQuote(input, tx), { maxWait: 10000, timeout: 30000 });
+}
+
+// One transaction pins every candidate to the same settings and pricing view.
+async function buildCanvasImageQuote(input: CanvasQuoteInput, tx: Prisma.TransactionClient) {
+  const channels = await getImageGenerationChannels(tx, true);
+  const effectiveChannelId = await resolveImageGenerationRequestChannel(input.model, input.channelId, tx) || 'original';
+  const imageChannel = effectiveChannelId !== 'original' ? await captureImageGenerationChannel(input.model, effectiveChannelId, tx) : undefined;
+  const studio = await getImageStudioSettings(tx);
+  const selected = await resolvePricingImageCandidate(channels, input.model as ImageStudioModel, input.channelId, tx);
   if (selected.unavailable) throw selected.unavailable;
   // The selected model alone retains its bound snapshot. Other options never capture or borrow it.
-  const selectedSettings = imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, input.model) : selected.settings!;
+  const selectedSettings = imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, tx, true, input.model) : selected.settings!;
   const provider = selectedSettings.provider;
   const quoteModel = async (model: ImageStudioModel, selectedModel = false): Promise<CanvasImageModelOption> => {
-    const candidate = selectedModel ? { settings: selectedSettings, identity: await pricingImageIdentity(selectedSettings, model), unavailable: null }
-      : await resolvePricingImageCandidate(channels, model, input.channelId);
+    const candidate = selectedModel ? { settings: selectedSettings, identity: await pricingImageIdentity(selectedSettings, model, tx), unavailable: null }
+      : await resolvePricingImageCandidate(channels, model, input.channelId, tx);
     const actual = candidate.identity.billingMode === 'actual';
     const base: CanvasImageModelOption = { model, label: IMAGE_STUDIO_MODEL_LABELS[model], status: 'estimate', reason: null, reasonText: null,
       unitCredits: null, estimatedCredits: null, count: input.count, chargeEnabled: false, billingMode: actual ? 'actual' : 'fixed',
@@ -73,7 +80,7 @@ export async function getCanvasImageQuote(user: SessionUser, input: CanvasQuoteI
       creditPrecision: 0.01, pricingQuoteRequired: false };
     try {
       if (candidate.unavailable) throw candidate.unavailable;
-      const priced = await withImagePricing(candidate.settings!, model);
+      const priced = await withImagePricing(candidate.settings!, model, tx);
       const api = priced.settings;
       const capability = assertPricingImageAvailability(api, candidate.identity, input);
       // Full-quote submissions enqueue independent single-image tasks, not one upstream POST with n=count.

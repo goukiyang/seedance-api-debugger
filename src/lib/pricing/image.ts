@@ -52,7 +52,8 @@ export async function resolvePricingImageCandidate(channels: ImageGenerationChan
 }
 
 /** Menu projections consume only typed, identity-matched unavailability, never general failures. */
-export async function getPricingImageChannelOptions(client: Client = prisma) {
+export async function getPricingImageChannelOptions(client: Client = prisma): Promise<Awaited<ReturnType<typeof getImageGenerationChannelOptions>>> {
+  if (client === prisma) return prisma.$transaction(tx => getPricingImageChannelOptions(tx), { maxWait: 10000, timeout: 30000 });
   const options = await getImageGenerationChannelOptions(client, true);
   const channels = await getImageGenerationChannels(client, true);
   for (const item of options.items.filter(channel => channel.id !== 'original')) for (const model of Object.keys(item.models) as ImageStudioModel[]) {

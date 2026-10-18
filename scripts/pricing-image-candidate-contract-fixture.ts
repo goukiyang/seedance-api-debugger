@@ -33,10 +33,18 @@ function failingRead(db: PrismaClient, match: (key: string) => boolean, error: E
   } });
 }
 
-export async function runPricingImageCandidateContractFixture(db: PrismaClient, user: SessionUser, projectId: string) {
+export async function runPricingImageCandidateContractFixture(db: PrismaClient, user: SessionUser, projectId: string,
+  transactionQueries: readonly string[]) {
   let assertions = 0;
   const equal = (actual: unknown, expected: unknown) => { assert.deepEqual(actual, expected); assertions++; };
   const ok = (value: unknown) => { assert.ok(value); assertions++; };
+  const transactions = (offset: number, expected: number) => {
+    const observed = transactionQueries.slice(offset);
+    equal(observed.filter(query => query === 'BEGIN IMMEDIATE').length, expected);
+    equal(observed.filter(query => query === 'COMMIT').length, expected);
+    equal(observed.filter(query => query === 'ROLLBACK').length, 0);
+    equal(observed.length, expected * 2);
+  };
   const reject = async (run: () => Promise<unknown>, predicate?: (error: unknown) => boolean) => {
     await assert.rejects(run, error => !predicate || predicate(error)); assertions++;
   };
@@ -55,11 +63,25 @@ export async function runPricingImageCandidateContractFixture(db: PrismaClient, 
     if (row) await putRaw(key, row.value_json); else await db.platformSetting.deleteMany({ where: { key } });
   };
   try {
-    const before = await snapshots(), initial = await quote();
+    const before = await snapshots(), initialOffset = transactionQueries.length, initial = await quote();
+    transactions(initialOffset, 1);
     equal(initial.unitCredits, 0.2); equal(initial.estimatedCredits, 0.6); equal(await snapshots(), before);
     const absent = initial.modelOptions.find(item => item.model === 'gemini-3-pro-image-preview')!;
     equal(absent.status, 'unavailable'); equal(absent.unitCredits, null); equal(absent.estimatedCredits, null); ok(absent.reasonText);
+    const concurrentOffset = transactionQueries.length;
+    const concurrent = await Promise.all([quote(), quote(), quote()]);
+    transactions(concurrentOffset, 3);
+    for (const result of concurrent) {
+      equal(result.unitCredits, 0.2); equal(result.estimatedCredits, 0.6);
+      equal(result.pricingRevision, initial.pricingRevision); equal(result.modelOptions, initial.modelOptions);
+    }
+    equal(await snapshots(), before);
+    const menuOffset = transactionQueries.length;
+    const menus = await Promise.all([getPricingImageChannelOptions(), getPricingImageChannelOptions(), getPricingImageChannelOptions()]);
+    transactions(menuOffset, 3);
+    equal(menus[1], menus[0]); equal(menus[2], menus[0]);
     const options = await getPricingImageChannelOptions(db);
+    equal(options, menus[0]);
     equal(options.items.find(item => item.id === 'original')!.models['gpt-image-2']!.fixedPoints, 0.2);
     const missing = options.items.find(item => item.id === 'banana')!.models['gemini-3.1-flash-image-preview']!;
     equal(missing.ready, false); equal(missing.fixedPoints, null); // Its old configured price was non-null.
