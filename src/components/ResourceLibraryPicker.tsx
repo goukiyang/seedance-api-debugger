@@ -131,7 +131,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const [items, setItems] = useState<PickerItem[]>([]), [albums, setAlbums] = useState<PickerAlbum[]>([]), [selected, setSelected] = useState<PickerItem[]>([]), [preview, setPreview] = useState<PickerItem | null>(null);
   const [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [total, setTotal] = useState(0), [hasMore, setHasMore] = useState(false), [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState(false), [failedFiles, setFailedFiles] = useState<File[]>([]), [progress, setProgress] = useState<UploadProgressSnapshot | null>(null), [uploadLabel, setUploadLabel] = useState(''), [container, setContainer] = useState<Element | null>(null), [epoch, setEpoch] = useState(0);
-  const dialog = useRef<HTMLDivElement>(null), backdrop = useRef<HTMLDivElement>(null), body = useRef<HTMLDivElement>(null), browse = useRef<HTMLElement>(null), input = useRef<HTMLInputElement>(null);
+  const dialog = useRef<HTMLDivElement>(null), backdrop = useRef<HTMLDivElement>(null), body = useRef<HTMLDivElement>(null), browse = useRef<HTMLElement>(null), sourceBar = useRef<HTMLDivElement>(null), input = useRef<HTMLInputElement>(null);
   const browseSurface = useCallback(() => window.matchMedia('(max-width: 760px)').matches ? browse.current : body.current, []);
   const sequence = useRef(0), session = useRef(0), locked = useRef(false), restoring = useRef(false), restoration = useRef(0);
   const readingMore = useRef(false);
@@ -165,8 +165,12 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     if (!open || !ready) return;
     const viewport = window.visualViewport;
     const updateViewport = () => {
+      const width = viewport?.width ?? window.innerWidth;
       backdrop.current?.style.setProperty('--picker-viewport-height', `${viewport?.height ?? window.innerHeight}px`);
       backdrop.current?.style.setProperty('--picker-viewport-top', `${viewport?.offsetTop ?? 0}px`);
+      backdrop.current?.style.setProperty('--picker-viewport-width', `${width}px`);
+      backdrop.current?.style.setProperty('--picker-viewport-left', `${viewport?.offsetLeft ?? 0}px`);
+      backdrop.current?.style.setProperty('--picker-columns', width <= 340 ? '1' : '2');
     };
     updateViewport();
     viewport?.addEventListener('resize', updateViewport);
@@ -178,6 +182,22 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
       window.removeEventListener('resize', updateViewport);
     };
   }, [open, ready, sessionOwner]);
+  useEffect(() => {
+    const bar = sourceBar.current;
+    if (!open || !ready || !bar) return;
+    const revealSource = () => {
+      const selectedSource = bar.querySelector<HTMLButtonElement>('button[aria-pressed="true"]');
+      if (!selectedSource || !bar.clientWidth) return;
+      const bounds = bar.getBoundingClientRect(), selectedBounds = selectedSource.getBoundingClientRect();
+      // Only move this horizontal strip; do not scroll the gallery or the page.
+      if (selectedBounds.left < bounds.left) bar.scrollLeft += selectedBounds.left - bounds.left;
+      else if (selectedBounds.right > bounds.right) bar.scrollLeft += selectedBounds.right - bounds.right;
+    };
+    revealSource();
+    const observer = new ResizeObserver(revealSource);
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, [open, ready, sessionOwner, prefs.source, prefs.view, typesKey]);
   useEffect(() => { if (!ready || sessionOwner !== prefsKey) return; const timer = setTimeout(() => setPrefs(p => p.query === query ? p : { ...p, query, pages: 1, scroll: 0 }), 250); return () => clearTimeout(timer); }, [query, ready, sessionOwner, prefsKey]);
   useEffect(() => { if (ready && prefsKey && sessionOwner === prefsKey) { try { localStorage.setItem(prefsKey, JSON.stringify(prefs)); } catch { /* Storage failure never prevents selection. */ } } }, [prefs, ready, prefsKey, sessionOwner]);
   const readCursor = useRef<string | null>(null);
@@ -273,7 +293,8 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     setPage(1); setTotal(0); setHasMore(false); setLoadedFilter(''); setLoading(true);
     setEpoch(value => value + 1);
   };
-  const showAllGenerated = () => refreshDirectory({ ...defaults, source: 'generated' });
+  const resetFilterPreferences = () => ({ ...defaults, filtersOpen: prefs.filtersOpen, selectionOpen: prefs.selectionOpen });
+  const showAllGenerated = () => refreshDirectory({ ...resetFilterPreferences(), source: 'generated' });
   const upload = async (files: File[]) => {
     if (locked.current || !files.length) return;
     if (files.some(file => !types.includes(file.type.split('/')[0] as AssetType))) { setError(`请选择${types.map(t => labels[t]).join('、')}文件`); return; }
@@ -428,7 +449,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         {!!projects.length && <h3>项目素材</h3>}{projects.map(p => <button key={p.id} type="button" className={prefs.project === p.id ? styles.active : ''} onClick={() => change({ project: p.id, album: '' })}><Folder size={17} /><span>{p.name}</span></button>)}
       </aside><section ref={browse} className={styles.main} aria-label="素材目录" onScroll={e => { if (e.target === e.currentTarget) rememberScroll(e.currentTarget); }} onWheel={() => { restoring.current = false; }} onTouchStart={() => { restoring.current = false; }}>
         <div className={styles.filters}>
-          <div className={styles.sourceControl} role="group" aria-label="素材来源"><span>来源</span><div className={styles.sourceSegments}>
+          <div className={styles.sourceControl} role="group" aria-label="素材来源"><span>来源</span><div ref={sourceBar} className={styles.sourceSegments}>
             <button type="button" aria-pressed={prefs.source === 'all'} onClick={() => changeSource('all')}>全部来源</button>
             <button type="button" aria-pressed={prefs.source === 'uploaded'} onClick={() => changeSource('uploaded')}>上传的</button>
             <button type="button" aria-pressed={prefs.source === 'generated'} onClick={() => changeSource('generated')}>{generatedLabel}</button>
@@ -443,12 +464,18 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
           </div></div>
           <div id={`${pickerId}-filters`} className={`${styles.filterDetails} ${prefs.filtersOpen ? styles.filterDetailsOpen : ''}`}>
           <label className={`${styles.scopeControl} ${styles.mobileScope}`}><span>范围</span><select aria-label="素材范围" value={prefs.scope} onChange={e => change({ scope: e.target.value as PickerScope, album: '', project: '' })}>{availableScopes.map(([s, label]) => <option key={s} value={s}>{label}</option>)}{!availableScopes.some(([s]) => s === prefs.scope) && <option value={prefs.scope}>此范围已不可用</option>}</select></label>
-          <label className={`${styles.sortControl} ${styles.mobileAlbum}`}><span>图集／项目</span><select aria-label="图集或项目" value={prefs.album ? `album:${prefs.album}` : prefs.project ? `project:${prefs.project}` : ''} onChange={e => { const [kind, id = ''] = e.target.value.split(':'); change({ album: kind === 'album' ? id : '', project: kind === 'project' ? id : '' }); }}><option value="">全部素材</option>{!!scopedAlbums.length && <optgroup label="图集">{scopedAlbums.map(album => <option key={album.id} value={`album:${album.id}`}>{album.name}</option>)}</optgroup>}{!!projects.length && <optgroup label="项目素材">{projects.map(project => <option key={project.id} value={`project:${project.id}`}>{project.name}</option>)}</optgroup>}</select></label>
+          <label className={`${styles.sortControl} ${styles.mobileAlbum}`}><span>图集／项目</span><select aria-label="图集或项目" value={prefs.album ? `album:${prefs.album}` : prefs.project ? `project:${prefs.project}` : ''} onChange={e => { const [kind, id = ''] = e.target.value.split(':'); change({ album: kind === 'album' ? id : '', project: kind === 'project' ? id : '' }); }}>
+            <option value="">全部素材</option>
+            {prefs.album && !scopedAlbums.some(album => album.id === prefs.album) && <option value={`album:${prefs.album}`} disabled>所选图集暂不可用</option>}
+            {prefs.project && !projects.some(project => project.id === prefs.project) && <option value={`project:${prefs.project}`} disabled>所选项目暂不可用</option>}
+            {!!scopedAlbums.length && <optgroup label="图集">{scopedAlbums.map(album => <option key={album.id} value={`album:${album.id}`}>{album.name}</option>)}</optgroup>}
+            {!!projects.length && <optgroup label="项目素材">{projects.map(project => <option key={project.id} value={`project:${project.id}`}>{project.name}</option>)}</optgroup>}
+          </select></label>
           {types.length > 1 && <div className={`${styles.segments} ${styles.typeSegments}`} aria-label="素材类型">{['all', ...types].map(t => <button key={t} type="button" aria-pressed={prefs.type === t} onClick={() => change({ type: t })}>{t === 'all' ? '全部' : labels[t as AssetType]}</button>)}</div>}
           {prefs.source === 'template-image' && <label className={styles.sortControl}><span>模板</span><select aria-label="具体模板" value={prefs.template} onChange={e => change({ template: e.target.value })}><option value="">全部模板</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>}
           <label className={styles.sortControl}><span>排序</span><select aria-label="排序" value={prefs.sort} onChange={e => change({ sort: e.target.value })}><option value="newest">最新添加</option><option value="name">名称</option></select></label>
           <button type="button" className={styles.refreshDirectory} disabled={busy || loading} onClick={() => refreshDirectory()}>刷新列表</button>
-          <button type="button" className={styles.resetFilter} title="重置筛选和浏览位置" aria-label="重置筛选和浏览位置" disabled={busy} onClick={() => refreshDirectory(defaults)}><RotateCcw size={16} /><span className={styles.mobileResetLabel}>重置</span></button>
+          <button type="button" className={styles.resetFilter} title="重置筛选和浏览位置" aria-label="重置筛选和浏览位置" disabled={busy} onClick={() => refreshDirectory(resetFilterPreferences())}><RotateCcw size={16} /><span className={styles.mobileResetLabel}>重置</span></button>
           </div>
           {!prefs.filtersOpen && <p className={styles.filterSummary}>{filterSummary}</p>}
         </div>

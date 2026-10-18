@@ -14,7 +14,9 @@ export function gridPageCapacity(grid: HTMLElement) {
   const rowSize = Math.max(1, columns);
   const target = Math.max(MIN_PAGE_ITEMS, rowSize * TARGET_PAGE_ROWS);
   // Prefer complete rows, while keeping even very narrow grids useful and every page bounded.
-  return Math.min(MAX_PAGE_ITEMS, Math.ceil(target / rowSize) * rowSize);
+  if (rowSize > MAX_PAGE_ITEMS) return MAX_PAGE_ITEMS;
+  const rows = Math.min(Math.ceil(target / rowSize), Math.floor(MAX_PAGE_ITEMS / rowSize));
+  return rows * rowSize;
 }
 
 export function useResultPages<T extends { id: string }>({ items: inputItems, storageKey, visible, busy, error, hasMore, loadMore, currentId, total }: {
