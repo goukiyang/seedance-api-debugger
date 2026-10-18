@@ -13,9 +13,11 @@ import { IMAGE_STUDIO_SETTING_KEY, getImageStudioSettings } from '@/lib/image-st
 import { imageBillingScope } from '@/lib/image-studio/billing-scope';
 import { imageBillingIntent } from '@/lib/image-studio/billing-readiness';
 import { getImageGenerationChannels, getImageGenerationChannelOptions, selectImageGenerationSettings,
-  resolveImageGenerationModelSettings, validateImageGenerationChannel, IMAGE_GENERATION_API_SETTING_KEY, BANANA_IMAGE_API_SETTING_KEY,
+  resolveImageGenerationModelSettings, selectPricingImageGenerationSettings, validateImageGenerationChannel, IMAGE_GENERATION_API_SETTING_KEY, BANANA_IMAGE_API_SETTING_KEY,
   IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY, IMAGE_GENERATION_LEGACY_MODEL_API_SETTING_PREFIX } from '@/lib/integrations/image-generation';
 import type { PricingAdminIdentity, PricingAdminRow } from './admin-contract';
+import { PricingItemUnavailableError } from './item-unavailable';
+import { assertPricingImageAvailability } from './image-availability';
 
 export type PricingClient = Prisma.TransactionClient | typeof prisma;
 export type PricingCatalogBinding = {
@@ -36,18 +38,27 @@ export function pricingFingerprint(value: unknown) { return createHash('sha256')
 export function pricingCatalogRowId(identity: PricingAdminIdentity) { return `rate-${pricingFingerprint(identity).slice(0, 32)}`; }
 
 export async function assertPricingCatalogIdentity(identity: PricingAdminIdentity, client: PricingClient = prisma) {
-  const reject = () => { throw new Error('收费作用域或规格不在当前合法能力范围，未回退旧价'); };
+  const reject = (): never => { throw new Error('收费作用域或规格不在当前合法能力范围，未回退旧价'); };
   if (!identity || !plain(identity.specifications) || Object.values(identity.specifications).some(value => typeof value !== 'string')) reject();
   const specifications = identity.specifications;
   if (identity.kind === 'image') {
     if (identity.unit !== 'image' || !IMAGE_STUDIO_MODELS.includes(identity.modelId as typeof IMAGE_STUDIO_MODELS[number])
       || Object.keys(specifications).some(key => !['quality', 'resolution', 'ratio'].includes(key))) reject();
     await validateSources(client, 'image');
-    const channels = await getImageGenerationChannels(client), settings = selectImageGenerationSettings(channels, identity.modelId, identity.channelId);
-    const validation = validateImageGenerationChannel(settings, { model: identity.modelId, ...specifications });
-    if (!validation.ok) reject();
-    const options = await getImageGenerationChannelOptions(client), capability = options.items.find(channel => channel.id === identity.channelId)?.models[identity.modelId as typeof IMAGE_STUDIO_MODELS[number]];
-    if (!capability?.ready || capability.billingMode !== identity.billingMode) reject();
+    const channels = await getImageGenerationChannels(client, true);
+    const options = await getImageGenerationChannelOptions(client, true);
+    const channel = options.items.find(item => item.id === identity.channelId);
+    if (!channel) {
+      if (!/^image-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(identity.channelId)) reject();
+      throw new PricingItemUnavailableError(identity, 'configuration_missing', '该型号的供应商已归档或不存在，未切换供应商');
+    }
+    const settings = await selectPricingImageGenerationSettings(channels, identity.modelId, identity.channelId, client);
+    const capability = channel.models[identity.modelId as typeof IMAGE_STUDIO_MODELS[number]];
+    assertPricingImageAvailability(settings, identity, specifications);
+    if (!capability || capability.billingMode !== identity.billingMode) return reject();
+    if (!capability.ready) {
+      throw new PricingItemUnavailableError(identity, 'evidence_unconfirmed', capability.disabledReason || '该型号的计价依据尚未就绪');
+    }
     return;
   }
   if (identity.unit !== 'second' || identity.billingMode !== 'fixed') reject();
@@ -179,8 +190,8 @@ export async function getPricingCatalog(client: PricingClient = prisma): Promise
   for (const preset of H3_PRESET_OPTIONS) add(row({ kind: 'h3', channelId: 'h3', modelId: preset.id,
     billingMode: 'fixed', unit: 'second', specifications: {} }, preset.label, 'H3 本地工作站', h3.enabled, isH3Operational(h3), 0,
   'H3 服务未就绪', ['沿原本地免费合同'], preset.id === h3.default_preset_id), h3Binding);
-  const channels = await getImageGenerationChannels(client);
-  const options = await getImageGenerationChannelOptions(client);
+  const channels = await getImageGenerationChannels(client, true);
+  const options = await getImageGenerationChannelOptions(client, true);
   for (const channel of options.items) {
     if (channel.id === 'original') continue;
     for (const model of IMAGE_STUDIO_MODELS) {
@@ -188,8 +199,8 @@ export async function getPricingCatalog(client: PricingClient = prisma): Promise
       if (!capability) continue;
       const settings = resolveImageGenerationModelSettings(selectImageGenerationSettings(channels, model, channel.id), model);
       const actual = capability.billingMode === 'actual';
-      let scope: string | undefined;
-      try { scope = imageBillingScope(settings); } catch { /* Missing scope cannot establish actual-price evidence. */ }
+      const address = new URL(settings.base_url);
+      const scope = settings.api_key && address.protocol === 'https:' && !address.username && !address.password ? imageBillingScope(settings) : undefined;
       const source = binding(channel.id, { provider: settings.provider, baseUrl: settings.base_url,
         upstreamModel: settings.modelCapabilities[model]?.upstreamModel || model, protocol: capability,
         credentials: pricingFingerprint(settings.api_key), billingIntent: actual ? await imageBillingIntent(client) : null },

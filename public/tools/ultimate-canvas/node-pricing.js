@@ -10,6 +10,72 @@
         && Math.abs(value * 100 - Math.round(value * 100)) <= Math.min(0.00001, Number.EPSILON * Math.max(1, value * 100) * 4);
     const formatCredits = value => validCredits(value) ? String(Math.round(value * 100) / 100) : '待确认';
     const fullQuoteRequired = quote => quote?.actualQuoteRequired === true || quote?.pricingQuoteRequired === true;
+    const MODEL_OPTION_KEYS = ['model', 'label', 'status', 'reason', 'reasonText', 'unitCredits', 'estimatedCredits', 'count',
+        'chargeEnabled', 'billingMode', 'actualQuoteRequired', 'estimateSource', 'creditPrecision', 'pricingRevision', 'pricingQuoteRequired'];
+    const safeText = (value, maximum) => typeof value === 'string' && value.trim().length > 0
+        && value.length <= maximum && !/[\u0000-\u001f\u007f]/.test(value);
+    function validModelOption(option) {
+        if (!option || typeof option !== 'object' || Array.isArray(option)
+            || Object.keys(option).some(key => !MODEL_OPTION_KEYS.includes(key))
+            || !safeText(option.model, 128) || !safeText(option.label, 256)
+            || !['estimate', 'unavailable'].includes(option.status) || option.chargeEnabled !== false
+            || !Number.isInteger(option.count) || option.count < 1 || option.count > 8
+            || !['fixed', 'actual'].includes(option.billingMode) || typeof option.actualQuoteRequired !== 'boolean'
+            || option.actualQuoteRequired !== (option.billingMode === 'actual')
+            || typeof option.pricingQuoteRequired !== 'boolean'
+            || !['channel_contract', 'legacy_fixed'].includes(option.estimateSource)
+            || ![0.01, 0.1].includes(option.creditPrecision)
+            || option.pricingRevision !== undefined && !safeText(option.pricingRevision, 256)
+            || option.pricingQuoteRequired && !safeText(option.pricingRevision, 256)) return false;
+        if (option.status === 'unavailable') return safeText(option.reason, 128) && safeText(option.reasonText, 1000)
+            && option.unitCredits === null && option.estimatedCredits === null;
+        if (option.reason !== null || option.reasonText !== null) return false;
+        if (option.actualQuoteRequired) return option.unitCredits === null && option.estimatedCredits === null;
+        return validCredits(option.unitCredits) && validCredits(option.estimatedCredits)
+            && (option.creditPrecision !== 0.1 || Math.round(option.unitCredits * 100) % 10 === 0
+                && Math.round(option.estimatedCredits * 100) % 10 === 0)
+            && Math.round(option.unitCredits * 100) * option.count === Math.round(option.estimatedCredits * 100);
+    }
+    function modelMenuState(options, modelOptions, selectedModel, count) {
+        const byModel = Object.create(null);
+        const valid = Array.isArray(modelOptions) && modelOptions.length > 0 && modelOptions.length <= 256
+            && modelOptions.every(option => {
+                if (!validModelOption(option) || option.count !== count || Object.hasOwn(byModel, option.model)) return false;
+                byModel[option.model] = option;
+                return true;
+            });
+        return { valid, selectedModel, rows: options.map(option => {
+            const candidate = valid ? byModel[option.value] : null;
+            const unavailable = candidate?.status === 'unavailable';
+            return { model: option.value, label: option.label, selected: option.value === selectedModel,
+                disabled: Boolean(option.disabled || !option.value || !candidate || unavailable),
+                status: candidate?.status || 'missing',
+                detail: !candidate ? '费用待确认' : unavailable ? candidate.reasonText
+                    : candidate.actualQuoteRequired ? '按实际费用计费' : `${formatCredits(candidate.unitCredits)} 点/张` };
+        }) };
+    }
+    function modelOptionFields(quote) {
+        const option = {};
+        for (const key of MODEL_OPTION_KEYS) if (Object.hasOwn(quote, key)) option[key] = quote[key];
+        return option;
+    }
+    function validImageProjection(quote, payload, expectedChannelId, now = Date.now()) {
+        if (!quote || quote.kind !== 'image' || quote.projectId !== payload.project_id
+            || quote.model !== payload.model || quote.count !== payload.count
+            || !validModelOption(modelOptionFields(quote)) || !Number.isSafeInteger(quote.revision)
+            || quote.channelId !== (payload.channelId || 'original')
+            || !Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= now
+            || !modelMenuState([], quote.modelOptions, payload.model, payload.count).valid) return false;
+        const selected = quote.modelOptions.find(option => option.model === payload.model);
+        if (!selected || MODEL_OPTION_KEYS.some(key => selected[key] !== quote[key])) return false;
+        const channel = quote.imageChannel;
+        if (channel != null && (!safeText(channel.channelId, 128)
+            || typeof channel.configRevision !== 'string' || !/^[0-9a-f-]{36}$/i.test(channel.configRevision))) return false;
+        const requested = payload.channelId;
+        const concrete = requested && requested !== 'original' ? expectedChannelId || requested
+            : expectedChannelId && expectedChannelId !== 'original' ? expectedChannelId : null;
+        return !concrete || channel?.channelId === concrete;
+    }
     function validFullQuote(quote, projection, now = Date.now()) {
         return validCredits(quote?.estimatedCredits) && validCredits(quote?.unitCredits)
             && (quote.creditPrecision !== 0.1 || Math.round(quote.unitCredits * 100) % 10 === 0 && Math.round(quote.estimatedCredits * 100) % 10 === 0)
@@ -57,17 +123,8 @@
             if (!state || !usable(state) || state.validUntil <= Date.now() || !state.quote
                 || !state.key || inputFor(state.node).key !== state.key) return null;
             const quote = state.quote;
-            if (quote.kind !== 'image' || quote.projectId !== state.payload.project_id
-                || quote.model !== state.payload.model || quote.count !== state.payload.count
-                || quote.status !== 'estimate' || quote.chargeEnabled !== false
-                || quote.actualQuoteRequired !== false
-                || !validCredits(quote.estimatedCredits)
-                || !Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= Date.now()) return null;
-            if (state.payload.channelId) {
-                const channel = quote.imageChannel;
-                if (channel?.channelId !== inputFor(state.node).expectedChannelId
-                    || typeof channel.configRevision !== 'string' || !/^[0-9a-f-]{36}$/i.test(channel.configRevision)) return null;
-            }
+            if (!validImageProjection(quote, state.payload, inputFor(state.node).expectedChannelId)
+                || quote.status !== 'estimate' || quote.actualQuoteRequired !== false) return null;
             return quote;
         }
 
@@ -140,7 +197,7 @@
                     const box = menu.getBoundingClientRect();
                     menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - box.width - 8))}px`;
                     menu.style.top = `${Math.max(8, Math.min(rect.top - box.height - 6, window.innerHeight - box.height - 8))}px`;
-                    menu.querySelector('[aria-checked="true"]')?.focus();
+                    (menu.querySelector('[aria-checked="true"]:not(:disabled)') || menu.querySelector('button:not(:disabled)'))?.focus();
                 });
                 menu.addEventListener('toggle', () => trigger.setAttribute('aria-expanded', String(menu.matches(':popover-open'))));
                 menu.addEventListener('keydown', event => {
@@ -168,9 +225,12 @@
                     row.type = 'button';
                     row.setAttribute('role', 'menuitemradio');
                     row.dataset.model = option.value;
-                    row.append(document.createElement('span'));
+                    row.append(document.createElement('span'), document.createElement('small'));
                     row.addEventListener('click', event => {
                         event.stopPropagation();
+                        if (!usable(state) || state.select !== select || select.disabled) return;
+                        const current = menuFor(state, select).rows.find(item => item.model === row.dataset.model);
+                        if (!current || current.disabled) return;
                         select.value = row.dataset.model;
                         state.menu.hidePopover();
                         select.dispatchEvent(new Event('change', { bubbles: true }));
@@ -179,14 +239,26 @@
                     state.menu.appendChild(row);
                 }
             }
-            options.forEach((option, index) => {
+            const modelMenu = menuFor(state, select);
+            // A failed/absent quote cannot authorize a menu row or trap the user in the failed model.
+            select.hidden = modelMenu.valid;
+            state.trigger.hidden = !modelMenu.valid;
+            if (!modelMenu.valid) state.menu.hidePopover();
+            modelMenu.rows.forEach((option, index) => {
                 const row = state.menu.children[index];
-                row.firstChild.textContent = option.textContent;
-                row.disabled = option.disabled || !option.value;
+                row.firstChild.textContent = option.label;
+                row.lastChild.textContent = option.detail;
+                row.disabled = select.disabled || option.disabled;
+                row.setAttribute('aria-disabled', String(row.disabled));
                 row.setAttribute('aria-checked', String(option.selected));
             });
         }
-
+        function menuFor(state, select) {
+            const fresh = state.validUntil > Date.now() && state.key === inputFor(state.node).key;
+            return modelMenuState(Array.from(select.options, option => ({ value: option.value,
+                label: option.textContent, disabled: option.disabled })), fresh ? state.quote?.modelOptions : null,
+                select.value, state.payload.count);
+        }
 
         function cancel(state) {
             clearTimeout(state.timer);
@@ -240,17 +312,7 @@
                 })).then(async quote => {
                     if (!usable(state) || state.version !== version || controller.signal.aborted
                         || inputFor(state.node).key !== key) return;
-                    if (quote?.kind !== 'image' || quote.projectId !== state.payload.project_id
-                        || quote.model !== state.payload.model || quote.count !== state.payload.count
-                        || (state.payload.channelId && (quote.imageChannel?.channelId !== inputFor(state.node).expectedChannelId
-                            || typeof quote.imageChannel?.configRevision !== 'string' || !quote.imageChannel.configRevision))
-                        || quote.chargeEnabled !== false || !['estimate', 'unavailable'].includes(quote.status)
-                        || typeof quote.actualQuoteRequired !== 'boolean'
-                        || (quote.actualQuoteRequired && (quote.unitCredits !== null || quote.estimatedCredits !== null))
-                        || !Number.isSafeInteger(quote.revision) || !Array.isArray(quote.modelOptions)
-                        || quote.modelOptions.some(item => typeof item?.actualQuoteRequired !== 'boolean'
-                            || (item.actualQuoteRequired && (item.unitCredits !== null || item.estimatedCredits !== null)))
-                        || !Number.isFinite(Date.parse(quote.expiresAt))) {
+                    if (!validImageProjection(quote, state.payload, inputFor(state.node).expectedChannelId)) {
                         throw new Error('Invalid estimate response');
                     }
                     state.quote = quote;
@@ -286,6 +348,9 @@
                 }).catch(() => {
                     if (!usable(state) || state.version !== version || inputFor(state.node).key !== key) return;
                     state.quote = null;
+                    state.actualQuote = null;
+                    clearTimeout(state.actualQuoteTimer);
+                    onQuoteInvalidated?.(state.node.id);
                     state.message = '报价暂不可用';
                     state.validUntil = Date.now() + 10000;
                     paint(state);
@@ -365,10 +430,10 @@
             },
             imageChannel(nodeId) {
                 const state = states.get(String(nodeId));
-                if (!state || state.validUntil <= Date.now() || !state.payload.channelId
-                    || state.quote?.imageChannel?.channelId !== inputFor(state.node).expectedChannelId
-                    || typeof state.quote?.imageChannel?.configRevision !== 'string') return null;
-                return state.quote.imageChannel;
+                if (!state || !usable(state) || state.validUntil <= Date.now() || inputFor(state.node).key !== state.key
+                    || !validImageProjection(state.quote, state.payload, inputFor(state.node).expectedChannelId)
+                    || state.quote.status !== 'estimate') return null;
+                return state.quote.imageChannel || null;
             },
             actualQuote(nodeId) {
                 const quote = states.get(String(nodeId))?.actualQuote;
@@ -402,7 +467,7 @@
     }
 
     root.UltimateCanvasNodePricing = {
-        validCredits, formatCredits, fullQuoteRequired, validFullQuote,
+        validCredits, formatCredits, fullQuoteRequired, validFullQuote, validModelOption, modelMenuState, validImageProjection,
         mount,
         refresh(nodeEl, node) { mounted?.refresh(nodeEl, node); },
         actualQuoteRequired(nodeId) { return mounted?.actualQuoteRequired(nodeId) ?? null; },

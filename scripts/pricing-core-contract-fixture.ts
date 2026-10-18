@@ -54,6 +54,7 @@ async function main() {
   const { PricingChargeError } = await import('@/lib/pricing/charge');
   const { getCanvasImageQuote } = await import('@/lib/canvas-quote');
   const { createSynchronousImageAdmission } = await import('@/lib/image-studio/synchronous-admission');
+  const { runPricingImageCandidateContractFixture } = await import('./pricing-image-candidate-contract-fixture');
   const now = new Date().toISOString();
   const charge = (changes: Partial<FrozenPricingCharge> = {}): FrozenPricingCharge => ({
     schema: 'pricing-charge-v1', revision: 'fixture-revision', ruleId: 'fixture-rule',
@@ -305,6 +306,9 @@ async function main() {
   await db.platformSetting.delete({ where: { key: `image_sync_request_v1:${user.id}:${originalSyncId}` } });
   const canvas = await getCanvasImageQuote(user as never, { kind: 'image', project_id: project.id, model: 'gpt-image-2', count: 3, quality: 'auto', resolution: '1K', ratio: '1:1' });
   equal(canvas.estimatedCredits, 0.6); equal(canvas.pricingRevision, snapshot.revision); equal(canvas.pricingQuoteRequired, true);
+  const candidateEvidence = await runPricingImageCandidateContractFixture(db, user as never, project.id);
+  active.assertions += candidateEvidence.assertions;
+  active.evidence.push('R04: selected-model strict quote, typed identity-scoped candidate failures, default routes, null/free separation, real database/runtime failures, snapshot isolation and exact fixture restoration.');
 
   group('G17', 'Actual persistent batch acceptance freezes per-child contracts; late dispatch after policy mutation uses the original unit fee.');
   const batchBody = { ...imageBody, count: 1, requestId: randomUUID(), sources: [{ name: 'one' }, { name: 'two' }], budget: 0.4 };

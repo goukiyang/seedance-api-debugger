@@ -1,6 +1,7 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
+import { PricingItemUnavailableError } from './item-unavailable';
 import { isSeedanceVideoDuration } from '@/lib/provider/seedance-models';
 import { assertPricingImageConsumerReady, pricingImageConsumerState } from './runtime';
 import { normalizeDecimal, multiplyDecimal, subtractDecimal, roundDecimal, compareDecimal, divideDecimal, PricingNumberError } from './math';
@@ -618,15 +619,21 @@ export async function resolvePricingCharge(identity: PricingAdminIdentity, clien
     && rule.identity.modelId === identity.modelId && rule.identity.unit === identity.unit)) {
     throw new PricingAdminServiceError('该收费作用域已采用新策略，但当前规格没有唯一规则，未回退旧价', 409, 'pricing_scope_unmatched');
   }
-  try { await assertPricingCatalogIdentity(identity, client); }
-  catch { throw new PricingAdminServiceError('当前收费作用域或规格未就绪，未回退旧价', 409, 'pricing_scope_unmatched'); }
+  await assertPricingCatalogIdentity(identity, client);
   if (!adopted) return null;
   const state = await readState(client);
   const catalogRow = selectPricingRule(state.catalog.rows, identity);
   if (!catalogRow) throw new PricingAdminServiceError('当前规格没有唯一且已确认的收费目录项，未回退旧价', 409, 'pricing_scope_unmatched');
   const row = state.rows.find(item => item.id === catalogRow.id)!;
-  if (row.availability !== 'ready' || row.mode === 'unset' || row.confirmation === 'needs_review') throw new PricingAdminServiceError(row.unavailableReason || '收费依据未就绪，未回退旧价', 409, 'pricing_charge_unavailable');
-  if (['follow', 'custom'].includes(row.mode) && (!row.canAdopt || !row.currentPointsPerCny)) throw new PricingAdminServiceError('已采用新策略的收费项缺少有效依据，不能使用旧价', 409, 'pricing_evidence_unavailable');
+  if (row.availability !== 'ready' || row.mode === 'unset' || row.confirmation === 'needs_review') {
+    const message = row.unavailableReason || '收费依据未就绪，未回退旧价';
+    if (identity.kind === 'image') throw new PricingItemUnavailableError(identity, row.mode === 'unset' ? 'price_unconfigured' : 'evidence_unconfirmed', message);
+    throw new PricingAdminServiceError(message, 409, 'pricing_charge_unavailable');
+  }
+  if (['follow', 'custom'].includes(row.mode) && (!row.canAdopt || !row.currentPointsPerCny)) {
+    if (identity.kind === 'image') throw new PricingItemUnavailableError(identity, 'evidence_unconfirmed', '已采用新策略的收费项缺少有效依据，不能使用旧价');
+    throw new PricingAdminServiceError('已采用新策略的收费项缺少有效依据，不能使用旧价', 409, 'pricing_evidence_unavailable');
+  }
   if (identity.kind === 'image') await assertPricingImageConsumerReady(client);
   return { revision: state.policy.revision, ruleId: adopted.id, row, binding: state.catalog.bindings[catalogRow.id] };
 }

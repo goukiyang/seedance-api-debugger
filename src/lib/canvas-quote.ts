@@ -2,13 +2,13 @@ import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertCanGenerateInProject } from '@/lib/projects/permissions';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
-import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
-import { getImageGenerationChannels, selectImageGenerationSettings, isImageGenerationApiReady, captureImageGenerationChannel, resolveImageGenerationChannelSnapshot, validateImageGenerationChannel, isMuskImageGenerationChannel, getImageGenerationChannelOptions } from '@/lib/integrations/image-generation';
-import { isGeminiImageModel, imageResolutionOptions } from '@/lib/image-generation/resolution';
-import { imageBillingReady } from '@/lib/image-studio/billing-readiness';
-import { imageBillingScope } from '@/lib/image-studio/billing-scope';
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
+import { getImageGenerationChannels, captureImageGenerationChannel, resolveImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
-import { withImagePricing } from '@/lib/pricing/image';
+import { pricingImageIdentity, resolvePricingImageCandidate, withImagePricing } from '@/lib/pricing/image';
+import { assertPricingImageAvailability } from '@/lib/pricing/image-availability';
+import { isPricingItemUnavailable, PricingItemUnavailableError } from '@/lib/pricing/item-unavailable';
+import type { CanvasImageModelOption } from '@/lib/pricing/image-option-contract';
 import { creditCents, sumCredits } from '@/lib/credits/precision';
 
 export type CanvasQuoteInput = {
@@ -53,69 +53,50 @@ export function parseCanvasQuoteInput(value: unknown): CanvasQuoteInput {
 export async function getCanvasImageQuote(user: SessionUser, input: CanvasQuoteInput) {
   assertInternalOnly(user, '外部账号无权使用无限画布。');
   await assertCanGenerateInProject(user, input.project_id);
-  const channels = await getImageGenerationChannels();
-  const effectiveChannelId = IMAGE_STUDIO_MODELS.includes(input.model as ImageStudioModel)
-    ? await resolveImageGenerationRequestChannel(input.model as ImageStudioModel, input.channelId) || 'original'
-    : input.channelId && input.channelId !== 'original' ? input.channelId : 'original';
+  if (!IMAGE_STUDIO_MODELS.includes(input.model as ImageStudioModel)) throw new AuthError('所选图片型号不在允许列表中', 400);
+  const channels = await getImageGenerationChannels(undefined, true);
+  const effectiveChannelId = await resolveImageGenerationRequestChannel(input.model, input.channelId) || 'original';
   const imageChannel = effectiveChannelId !== 'original' ? await captureImageGenerationChannel(input.model, effectiveChannelId) : undefined;
-  const priced = await withImagePricing(imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, input.model) : selectImageGenerationSettings(channels, input.model), input.model);
-  const providerSettings = priced.settings;
-  if (imageChannel) {
-    const capability = validateImageGenerationChannel(providerSettings, { model: input.model, quality: input.quality, resolution: input.resolution, ratio: input.ratio });
-    if (!capability.ok) throw new AuthError(capability.error, 400);
-  }
   const studio = await getImageStudioSettings();
-  const provider = providerSettings.provider;
-  if (input.quality !== undefined && IMAGE_STUDIO_MODELS.includes(input.model as ImageStudioModel)
-    && !(IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[input.model as ImageStudioModel] as readonly string[]).includes(input.quality)) throw new AuthError('所选模型不支持此图片质量，请重新选择', 400);
-  if (input.resolution !== undefined && !imageResolutionOptions(input.model, provider).includes(input.resolution as never)) throw new AuthError('所选模型不支持此分辨率，请重新选择', 400);
-  const channelOptions = imageChannel ? await getImageGenerationChannelOptions() : null;
-  const models = imageChannel ? Object.keys(channelOptions?.items.find(item => item.id === imageChannel.channelId)?.models || {}) : channels.shared.provider === 'seedream'
-    ? [channels.shared.default_model, ...IMAGE_STUDIO_MODELS.filter(isGeminiImageModel)]
-    : Array.from(new Set([...IMAGE_STUDIO_MODELS, channels.shared.default_model]));
-  // Explicit channels enqueue single-image tasks; eight is our submission/queue
-  // limit, not a claim that this supplier supports n=8 in one upstream POST.
-  const maximumCount = imageChannel ? 8 : provider === 'seedream' ? 1 : providerSettings.max_outputs_per_request;
-  const quoteModel = async (model: string) => {
-    const pricedModel = model === input.model ? priced : await withImagePricing(imageChannel
-      ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, model) : selectImageGenerationSettings(channels, model), model);
-    const api = pricedModel.settings;
-    const providerReady = isImageGenerationApiReady(api);
-    const modelMaximumCount = imageChannel ? 8 : api.provider === 'seedream' ? 1 : api.max_outputs_per_request;
-    const studioModel = IMAGE_STUDIO_MODELS.includes(model as ImageStudioModel);
-    const allowedModel = api.provider === 'seedream' ? model === channels.shared.default_model : studioModel;
-    const capability = imageChannel ? validateImageGenerationChannel(api, { model, quality: input.quality, resolution: input.resolution, ratio: input.ratio }) : null;
-    const configuredCapability = capability?.ok ? capability.capability : null;
-    const price = pricedModel.quote ? pricedModel.quote.credits : imageChannel ? configuredCapability?.fixedPoints ?? null : api.provider !== 'seedream' && studioModel ? studio.prices[model as ImageStudioModel] : null;
-    const actualQuoteRequired = imageChannel ? configuredCapability?.billingMode === 'actual' : isMuskImageGenerationChannel(api) && Boolean(api.api_key)
-      && (await imageBillingReady(imageBillingScope(api), model)).ready;
-    const estimated = typeof price === 'number' ? sumCredits(Array.from({ length: input.count }, () => price)) : null;
-    const reason = !allowedModel ? 'model_unavailable'
-      : !providerReady ? 'provider_unavailable'
-        : capability && !capability.ok ? capability.code
-        : input.count > modelMaximumCount ? 'count_exceeds_limit'
-          : !actualQuoteRequired && (typeof price !== 'number' || price < 0
-            || estimated === null || !Number.isSafeInteger(creditCents(estimated))) ? 'price_unconfigured' : null;
-    return {
-      model,
-      label: studioModel ? IMAGE_STUDIO_MODEL_LABELS[model as ImageStudioModel] : (api.provider === 'seedream' ? 'Seedream 5.0 Pro' : model),
-      status: reason ? 'unavailable' as const : 'estimate' as const,
-      reason,
-      unitCredits: reason || actualQuoteRequired ? null : price,
-      estimatedCredits: reason || actualQuoteRequired ? null : estimated,
-      count: input.count,
-      chargeEnabled: false as const,
-      billingMode: actualQuoteRequired ? 'actual' as const : 'fixed' as const,
-      actualQuoteRequired,
-      estimateSource: imageChannel ? 'channel_contract' as const : 'legacy_fixed' as const,
-      creditPrecision: pricedModel.quote ? 0.1 : 0.01,
-      pricingRevision: pricedModel.quote?.charge.revision,
-      pricingQuoteRequired: Boolean(pricedModel.quote),
-    };
+  const selected = await resolvePricingImageCandidate(channels, input.model as ImageStudioModel, input.channelId);
+  if (selected.unavailable) throw selected.unavailable;
+  // The selected model alone retains its bound snapshot. Other options never capture or borrow it.
+  const selectedSettings = imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, input.model) : selected.settings!;
+  const provider = selectedSettings.provider;
+  const quoteModel = async (model: ImageStudioModel, selectedModel = false): Promise<CanvasImageModelOption> => {
+    const candidate = selectedModel ? { settings: selectedSettings, identity: await pricingImageIdentity(selectedSettings, model), unavailable: null }
+      : await resolvePricingImageCandidate(channels, model, input.channelId);
+    const actual = candidate.identity.billingMode === 'actual';
+    const base: CanvasImageModelOption = { model, label: IMAGE_STUDIO_MODEL_LABELS[model], status: 'estimate', reason: null, reasonText: null,
+      unitCredits: null, estimatedCredits: null, count: input.count, chargeEnabled: false, billingMode: actual ? 'actual' : 'fixed',
+      actualQuoteRequired: actual, estimateSource: candidate.settings?.channelId === 'original' ? 'legacy_fixed' : 'channel_contract',
+      creditPrecision: 0.01, pricingQuoteRequired: false };
+    try {
+      if (candidate.unavailable) throw candidate.unavailable;
+      const priced = await withImagePricing(candidate.settings!, model);
+      const api = priced.settings;
+      const capability = assertPricingImageAvailability(api, candidate.identity, input);
+      // Full-quote submissions enqueue independent single-image tasks, not one upstream POST with n=count.
+      const modelMaximumCount = priced.quote || actual || api.channelId !== 'original' ? 8 : api.provider === 'seedream' ? 1 : api.max_outputs_per_request;
+      if (input.count > modelMaximumCount) throw new PricingItemUnavailableError(candidate.identity, 'count_exceeds_limit', '该型号不支持当前生成张数，当前选择未被替换');
+      const price = priced.quote ? priced.quote.credits : api.channelId !== 'original' ? capability.fixedPoints : studio.prices[model];
+      const estimated = typeof price === 'number' ? sumCredits(Array.from({ length: input.count }, () => price)) : null;
+      if (!actual && (typeof price !== 'number' || !Number.isFinite(price) || price < 0 || estimated === null || !Number.isSafeInteger(creditCents(estimated)))) {
+        throw new PricingItemUnavailableError(candidate.identity, 'price_unconfigured', '该型号的固定点数尚未确认');
+      }
+      return { ...base, unitCredits: actual ? null : price, estimatedCredits: actual ? null : estimated,
+        creditPrecision: priced.quote ? 0.1 : 0.01, pricingRevision: priced.quote?.charge.revision, pricingQuoteRequired: Boolean(priced.quote) };
+    } catch (error) {
+      if (selectedModel || !isPricingItemUnavailable(error, candidate.identity)) throw error;
+      return { ...base, status: 'unavailable', reason: error.reason, reasonText: error.message };
+    }
   };
+  const selectedQuote = await quoteModel(input.model as ImageStudioModel, true);
+  const maximumCount = imageChannel || selectedQuote.pricingQuoteRequired || selectedQuote.actualQuoteRequired ? 8
+    : provider === 'seedream' ? 1 : selectedSettings.max_outputs_per_request;
   const now = Date.now();
   return {
-    ...await quoteModel(input.model),
+    ...selectedQuote,
     kind: 'image' as const,
     scope: 'ordinary_image' as const,
     projectId: input.project_id,
@@ -130,6 +111,6 @@ export async function getCanvasImageQuote(user: SessionUser, input: CanvasQuoteI
     specifications: { resolution: input.resolution || null, ratio: input.ratio || null, size: input.size || null, quality: input.quality || null },
     issuedAt: new Date(now).toISOString(),
     expiresAt: new Date(now + 60_000).toISOString(),
-    modelOptions: await Promise.all(models.map(quoteModel)),
+    modelOptions: await Promise.all(IMAGE_STUDIO_MODELS.map(model => model === input.model ? selectedQuote : quoteModel(model))),
   };
 }
