@@ -2,6 +2,8 @@
 
 ## GEN12 最近12小时生成原因核查（2026-10-18）
 
+TRACE03-FIX规划v1.0.0（2026-10-18）：用户授权按设计修复部署、保护历史任务/原图/冻结费用，随后要求先规划。[正式生图原单§17.6](../../tasks/todo/2026-10-10-fluxport-image-api.md#176-trace03-fix-已确认问题修复任务规划2026-10-18)为当前实施计划入口，来源为用户要求、已核同源代码和GEN12/TRACE03原证，关键词：版本化新规格、原号受理、脱敏诊断、响应解码、Retry-After、旧合同、工程门、程序回退。无新增附件，既有JSON/脚本/Word/原图/恢复回执从计划可访问；本轮UTF-8/链接存在复核，未变关键原件复用既有摘要/可读性证据。仅规划未改源码/费用/线上，未生成/功能验收/部署；v1计划不替代历史诊断。
+
 TRACE03-DESIGN（报告v1.5.0，2026-10-18）：来源为用户询问正确设计与链路，关键词：2K像素预算、16对齐、小比例误差、单一规格计划、原号恢复、脱敏诊断、压缩/Retry-After、完整图与合格分离。[同一报告设计追加](2026-10-17-image-content-incident/inc24/gen12-report-2026-10-18.md)复用上述代码/私有证据/Word附件，UTF-8可读，数学示例已本机计算；无新增媒体附件，非供应商真实出图验收。推荐方案未实施/未批准成生产合同，原历史及v1.4诊断保留；公开OpenAI SDK/Undici实际代码来源见报告，无新增依赖/外联供应商/费用。
 
 TRACE03代码层追加取证（2026-10-18）：[供应商公开合同摘录](2026-10-17-image-content-incident/inc24/trace03-public-contract.json)、[自助用量入口文档](2026-10-17-image-content-incident/inc24/trace03-public-contract-usage.json)、[公开读取脚本](2026-10-17-image-content-incident/inc24/trace03-public-contract.py)、[本人用量读取脱敏结果](2026-10-17-image-content-incident/inc24/trace03-own-usage.json)及[只读脚本](2026-10-17-image-content-incident/inc24/trace03-own-usage.py)。来源为当日公开只读HTTP/同冻结Key一次文档明确的用量GET；JSON/UTF-8可读、公开文档实际464529字节及SHA已留。关键词：image[]、multipart、Abort、原号异步、汇总用量。无图片/提示词/密钥/账号余额数值输出，当前用量接口不含三笔错误明细，不冒逐单账单；代码隔离诊断见下方完成记录。仅正式根私有归档，不新生成、不联系供应商。
