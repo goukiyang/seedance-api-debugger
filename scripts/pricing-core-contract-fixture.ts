@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import type { FrozenPricingCharge } from '@/lib/pricing/charge';
-import type { PricingAdminAction, PricingAdminSnapshot } from '@/lib/pricing/admin-contract';
+import type { PricingAdminAction, PricingAdminActor, PricingAdminSnapshot } from '@/lib/pricing/admin-contract';
 
 type Check = { id: string; assertions: number; evidence: string[] };
 const checks = new Map<string, Check>();
@@ -62,7 +62,8 @@ async function main() {
   });
   const actual = charge({ identity: { ...charge().identity, billingMode: 'actual' }, basisKind: 'supplier_cost_cny', baseCny: null,
     exchangeRate: { sourceCurrency: 'USD', targetCurrency: 'CNY', direction: 'CNY_per_source_unit', rate: '7', revision: 'fx-one',
-      effectiveFrom: now, confirmedAt: now, confirmedBy: { id: 'fixture-admin' }, source: { type: 'admin_defined', reference: 'fixture FX 7 CNY / USD' } } });
+      effectiveFrom: now, confirmedAt: now, confirmedBy: { id: 'fixture-admin', displayName: 'Pricing fixture admin', avatarUrl: null },
+      source: { type: 'admin_defined', reference: 'fixture FX 7 CNY / USD', note: 'Synthetic exchange rate for isolated contract checks; not a supplier statement.' } } });
   const baseContract = (price: number) => fixedImageBillingContract({ scope: 'a'.repeat(64), model: 'gpt-image-2', credits: price, specification: 'b'.repeat(64) });
 
   group('G01', 'Production decimal engine and frozen charge distinguish missing basis, explicit free and a rounded nonzero price.');
@@ -240,7 +241,7 @@ async function main() {
       base_url: 'https://api.muskapis.com/v1', default_model: 'gpt-image-2', supports_text_to_image: true, supports_image_to_image: true }) } });
   await db.platformSetting.create({ data: { key: VOLCENGINE_IP_API_SETTING_KEY,
     value_json: JSON.stringify({ enabled: true, api_key: 'synthetic-ip-key', base_url: 'https://fixture.invalid/api/v3', default_model: 'doubao-seedance-2-5-260628' }) } });
-  const actor = { id: user.id };
+  const actor: PricingAdminActor = { id: user.id, displayName: user.name, avatarUrl: user.avatar_url };
   async function save(snapshot: PricingAdminSnapshot, action: PricingAdminAction) {
     const input = { expectedRevision: snapshot.revision, catalogFingerprint: snapshot.catalogFingerprint, action };
     const preview = await previewAdminPricing(actor, input);
@@ -252,7 +253,8 @@ async function main() {
   const imageRow = snapshot.rows.find(row => row.identity.kind === 'image' && row.identity.channelId === 'shared' && row.identity.modelId === 'gpt-image-2')!;
   ok(imageRow);
   snapshot = await save(snapshot, { kind: 'save', changes: { standards: { site_base_cny: '1' }, rows: [
-    { id: imageRow.id, mode: 'follow', base: { amount: '0.15', currency: 'CNY', unit: 'image', source: { type: 'admin_defined', reference: 'isolated source base' } } },
+    { id: imageRow.id, mode: 'follow', base: { amount: '0.15', currency: 'CNY', unit: 'image', source: { type: 'admin_defined',
+      reference: 'isolated source base', note: 'Synthetic image basis for isolated contract checks; not a supplier statement.' } } },
   ] } });
   captured = runtime.capturePricingWorkerCapability(source); await runtime.renewPricingWorkerCapability(db, captured);
   const moduleId = randomUUID();
@@ -299,12 +301,13 @@ async function main() {
 
   group('G07', 'Two real SQLite admin saves race from the same revision; only one immutable policy revision commits.');
   const second = await db.user.create({ data: { name: 'Second fixture admin', username: randomUUID(), email: `${randomUUID()}@fixture.invalid`, password_hash: 'fixture-not-a-login', role: 'admin' } });
+  const secondActor: PricingAdminActor = { id: second.id, displayName: second.name, avatarUrl: second.avatar_url };
   const beforeCount = await db.platformSetting.count({ where: { key: { startsWith: PRICING_REVISION_PREFIX } } });
   const changeInput = { expectedRevision: snapshot.revision, catalogFingerprint: snapshot.catalogFingerprint,
     action: { kind: 'save' as const, changes: { rows: [], standards: { site_base_cny: '1.2' } } } };
-  const previewA = await previewAdminPricing(actor, changeInput), previewB = await previewAdminPricing({ id: second.id }, changeInput);
+  const previewA = await previewAdminPricing(actor, changeInput), previewB = await previewAdminPricing(secondActor, changeInput);
   const results = await Promise.allSettled([saveAdminPricing(actor, { ...changeInput, operationId: randomUUID(), previewToken: previewA.previewToken }),
-    saveAdminPricing({ id: second.id }, { ...changeInput, operationId: randomUUID(), previewToken: previewB.previewToken })]);
+    saveAdminPricing(secondActor, { ...changeInput, operationId: randomUUID(), previewToken: previewB.previewToken })]);
   equal(results.filter(result => result.status === 'fulfilled' && result.value.state === 'succeeded').length, 1);
   equal(await db.platformSetting.count({ where: { key: { startsWith: PRICING_REVISION_PREFIX } } }), beforeCount + 1);
 

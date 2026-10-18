@@ -76,7 +76,7 @@ function run(kind: string, consume: (result: ReturnType<typeof JSON.parse>) => v
     assert.ok(rows.length, `${kind} returned no completed execution evidence`);
     consume(rows[rows.length - 1]); outcomes.push({ kind, completed: true, log });
   } catch (error) {
-    checks.clear(); for (const [id, check] of previous) checks.set(id, check);
+    checks.clear(); previous.forEach((check, id) => checks.set(id, check));
     failures.push({ kind, category, message: error instanceof Error ? error.message : String(error), log, status, signal });
     outcomes.push({ kind, completed: false, log });
   }

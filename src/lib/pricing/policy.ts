@@ -395,7 +395,7 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
   }
   assertNoRuleAmbiguity(next.rules);
   const rows = state.catalog.rows.map(row => effectiveRow(row, next, state.catalog.bindings[row.id]));
-  for (const id of requested) {
+  for (const id of Array.from(requested)) {
     const value = rows.find(row => row.id === id)!;
     if (['follow', 'custom'].includes(value.mode) && (!value.canAdopt || !value.currentPointsPerCny)) fail(`${value.label}：${value.adoptionReason || '请设置有效费率或标准'}`);
     if (value.currentUnitCredits && compareDecimal(value.currentUnitCredits, value.identity.kind === 'image' ? PRICING_ADMIN_LIMITS.maxImageCredits : PRICING_ADMIN_LIMITS.maxTaskCredits) > 0) fail(`${value.label}：超过原业务金额上限`);

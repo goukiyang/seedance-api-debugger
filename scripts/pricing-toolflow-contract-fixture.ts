@@ -61,8 +61,10 @@ export async function runPricingToolflowContractFixture(options: PricingToolflow
       email: `${randomUUID()}@fixture.invalid`, password_hash: 'not-a-login-credential', role: 'admin', account_type: 'internal', status: 'active',
       credit_account: { create: { balance: 100.15 } } } });
     const user = actor as SessionUser;
+    // Synthetic metadata only: these records exercise allocation, not media delivery.
     const input = await prisma.asset.create({ data: { owner_id: user.id, type: 'image', status: 'active',
-      original_url: 'https://fixture.invalid/input.png', mime_type: 'image/png', width: 64, height: 64 } });
+      original_url: 'https://fixture.invalid/input.png', file_name: 'input.png', file_size: 1024,
+      mime_type: 'image/png', width: 64, height: 64 } });
     await prisma.platformSetting.create({ data: { key: IMAGE_STUDIO_SETTING_KEY, value_json: JSON.stringify({
       context: 'Accepted parent context', model, revision: 1, prices: { ...DEFAULT_STUDIO_PRICES, [model]: 20 },
     }) } });
@@ -114,7 +116,8 @@ export async function runPricingToolflowContractFixture(options: PricingToolflow
       const claimed = await claimStudioTask();
       assert.ok(claimed); assert.equal(claimed.tool_flow_run_id, expectedRun);
       const output = outcome === 'succeeded' ? await prisma.asset.create({ data: { owner_id: claimed.owner_id,
-        type: 'image', status: 'active', original_url: `https://fixture.invalid/${claimed.id}.png`, mime_type: 'image/png', width: 64, height: 64 } }) : null;
+        type: 'image', status: 'active', original_url: `https://fixture.invalid/${claimed.id}.png`,
+        file_name: `${claimed.id}.png`, file_size: 1024, mime_type: 'image/png', width: 64, height: 64 } }) : null;
       // Synthetic delivery exercises the actual lease/CAS/settlement path, not a provider or media acceptance.
       assert.equal(await finishStudioTask(claimed, outcome, output ? { assetId: output.id } : { error: 'isolated fixture failure' }), true);
       assert.equal(await finishStudioTask(claimed, outcome, output ? { assetId: output.id } : {}), false, 'the real finish CAS settles at most once');
@@ -246,7 +249,9 @@ export async function runPricingToolflowContractFixture(options: PricingToolflow
       email: `${randomUUID()}@fixture.invalid`, password_hash: 'not-a-login-credential', role: 'admin', account_type: 'internal', status: 'active',
       credit_account: { create: { balance: 0.15 } } } });
     const smallUser = smallActor as SessionUser;
-    const smallInput = await prisma.asset.create({ data: { owner_id: smallUser.id, type: 'image', status: 'active', original_url: 'https://fixture.invalid/small.png' } });
+    const smallInput = await prisma.asset.create({ data: { owner_id: smallUser.id, type: 'image', status: 'active',
+      original_url: 'https://fixture.invalid/small.png', file_name: 'small.png', file_size: 1024,
+      mime_type: 'image/png', width: 64, height: 64 } });
     const smallFlow = await makeFlow(1, false, smallUser);
     const smallQuote = await runtime.getToolFlowQuote(smallUser, smallFlow.id);
     const smallRun = await runtime.createToolFlowRun(smallUser, smallFlow.id, [smallInput.id], smallQuote, runtime.createToolFlowQuoteProof(smallUser.id, smallQuote));

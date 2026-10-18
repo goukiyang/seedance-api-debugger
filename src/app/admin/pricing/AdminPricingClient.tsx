@@ -361,9 +361,10 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
       <div className={styles.tableHeader} aria-hidden="true"><span /><span>型号 / 规格</span><span>人民币基价</span><span>当前点/元</span><span>跟随方式</span><span>相对标准</span><span>单次点数</span><span /></div>
       {visible.map(row => {
         const change = draft.changes.rows.find(item => item.id === row.id), after = displayChanges.find(item => item.id === row.id)?.after;
-        const rate = change?.mode === 'custom' ? change.customPointsPerCny ?? '' : (change?.mode || row.mode) === 'follow' ? draft.changes.standards?.[change?.basisKind || row.basisKind] ?? snapshot.standards[change?.basisKind || row.basisKind] ?? '' : row.currentPointsPerCny ?? '';
+        const basisKind = change?.basisKind || row.basisKind;
+        const rate = change?.mode === 'custom' ? change.customPointsPerCny ?? '' : (change?.mode || row.mode) === 'follow' ? draft.changes.standards?.[basisKind] ?? snapshot.standards[basisKind] ?? '' : row.currentPointsPerCny ?? '';
         const mode = change?.mode || row.mode, expanded = view.expanded.includes(row.id);
-        const changed = Boolean(change || after || draft.changes.standards?.[change?.basisKind || row.basisKind] !== undefined);
+        const changed = Boolean(change || after || draft.changes.standards?.[basisKind] !== undefined);
         return <div key={row.id} className={`${styles.rowBlock} ${selected.includes(row.id) ? styles.selected : ''}`} data-pricing-row={row.id}>
           <div className={styles.row}>
             <input type="checkbox" aria-label={`选择 ${row.label} ${row.providerLabel}`} checked={selected.includes(row.id)} onChange={event => { setRestore(null); setAllMatched(false); setSelected(current => event.target.checked ? [...current, row.id] : current.filter(id => id !== row.id)); }} />

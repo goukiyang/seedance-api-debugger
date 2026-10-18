@@ -77,7 +77,7 @@ export async function runPricingLegacyConsumerFixture(input: PricingLegacyConsum
   let phase = 'setup', assertions = 0;
   const check = (condition: unknown, message: string) => { assert.ok(condition, message); assertions += 1; };
   const equal = (actual: unknown, expected: unknown, message: string) => { assert.deepEqual(actual, expected, message); assertions += 1; };
-  const reject = async (action: () => unknown | Promise<unknown>, message: string) => { await assert.rejects(async () => action(), undefined, message); assertions += 1; };
+  const reject = async (action: () => unknown | Promise<unknown>, message: string) => { await assert.rejects(async () => action(), message); assertions += 1; };
   const deny = (name: string): never => { forbiddenCalls.push(`${phase}:${name}`); throw new Error(`Forbidden fixture call: ${name}`); };
   const manifestPath = path.join(fixtureRoot, 'g19-bootstrap.json'), manifestStat = fs.lstatSync(manifestPath);
   check(manifestStat.isFile() && !manifestStat.isSymbolicLink() && manifestStat.uid === 0 && manifestStat.nlink === 1
@@ -198,7 +198,13 @@ export async function runPricingLegacyConsumerFixture(input: PricingLegacyConsum
       realpathSync: (file: string) => fs.realpathSync(mappedFile(file)),
       lstatSync: (file: string) => fs.lstatSync(mappedFile(file)),
     };
-    const guardedFs = new Proxy(safeFs, { get(target, property) { return Reflect.get(target, property) || (() => deny(`filesystem:${String(property)}`)); } });
+    const guardedFs = new Proxy(safeFs, {
+      get(target, property): unknown {
+        if (property === '__esModule') return true;
+        if (property === 'default') return guardedFs;
+        return Reflect.get(target, property) || (() => deny(`filesystem:${String(property)}`));
+      },
+    });
     const processFixture = { cwd: () => process.cwd(), platform: process.platform, pid: process.pid, ppid: process.ppid,
       env: { NODE_ENV: 'test', SESSION_SECRET: 'pricing-legacy-fixture-only' }, argv: ['node', 'fixture', '--once'],
       kill: (pid: number, signal: number) => { if (![process.pid, process.ppid].includes(pid) || signal !== 0) return deny('process:signal'); return process.kill(pid, 0); },

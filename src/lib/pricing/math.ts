@@ -10,7 +10,9 @@ export class PricingNumberError extends Error {
 
 function power(scale: number) {
   if (!Number.isSafeInteger(scale) || scale < 0 || scale > 256) throw new PricingNumberError('计算精度超过安全范围');
-  return TEN ** BigInt(scale);
+  let result = ONE;
+  for (let index = 0; index < scale; index++) result *= TEN;
+  return result;
 }
 
 function parse(value: unknown, maxLength = 512): Decimal {

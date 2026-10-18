@@ -139,7 +139,7 @@ export async function POST(
     }
 
     const paramsJson = parseJsonObject(originalTask.params_json);
-    if (originalTask.local_status !== 'failed' || originalTask.error_code?.includes('UNCONFIRMED') || originalTask.frozen_cost > 0) {
+    if (originalTask.local_status !== 'failed' || originalTask.error_code?.includes('UNCONFIRMED') || originalTask.frozen_cost !== 0) {
       return NextResponse.json({ error: '原请求尚未确认失败，请查询原任务；未重新生成' }, { status: 409 });
     }
     const requested = await request.json().catch(() => ({})) as Record<string, unknown>;

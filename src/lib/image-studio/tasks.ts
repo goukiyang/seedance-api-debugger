@@ -14,7 +14,7 @@ import { fixedImageBillingContract, imageSpecification, withPricingImageContract
 import { quotePricingCharge, assertNewPricingCharge } from '@/lib/pricing/charge';
 import { assertNoSynchronousImageAdmission, SynchronousImageAdmissionError } from './synchronous-admission';
 import { withImagePricing } from '@/lib/pricing/image';
-import { creditCents } from '@/lib/credits/precision';
+import { creditCents, sumCredits } from '@/lib/credits/precision';
 import { studioTaskState, studioTaskStates, publicPricingTaskState, studioBillingState, isPricingImageTask } from './pricing-state';
 import { assertPricingImageConsumerReady } from '@/lib/pricing/runtime';
 import { imageBillingView, parseImageBillingContract, type ImageBillingContract } from './billing-contract';
@@ -541,7 +541,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       ? channelCapability?.fixedPoints ?? null
       : generation.prices[generation.model];
     if (imageChannel && requestedBillingMode === 'actual') price = 0;
-    if (pricingQuote) price = pricingQuote.credits ?? 0;
+    // Actual preparation has no charge yet; acceptance requires the stored authorization below.
+    if (pricingQuote) price = pricingQuote.charge.identity.billingMode === 'actual' ? 0 : pricingQuote.credits;
     if (acceptedContract) price = acceptedContract.authorizedCredits;
     if (pricingQuote && !billingQuoteId && !preparation) throw new StudioError('当前收费规则需要确认有效报价，请重新报价；尚未生成', 409);
     if (imageChannel && requestedBillingMode === 'actual' && !billingQuoteId && !preparation) {
@@ -549,7 +550,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     }
     if (price === null || !Number.isFinite(price) || (!pricingQuote && !acceptedContract && !Number.isInteger(price)) || price < 0 || price > 100000) throw new StudioError('管理员尚未设置当前模块的有效生成积分', 409);
     creditCents(price);
-    if (!billingQuoteId && input.maxEstimatedCost !== undefined && sumCredits(Array.from({ length: input.count }, () => price)) > input.maxEstimatedCost) throw new StudioError('图片价格已变化，请重新确认点数', 409);
+    const quotedUnitCredits = price;
+    if (!billingQuoteId && input.maxEstimatedCost !== undefined && sumCredits(Array.from({ length: input.count }, () => quotedUnitCredits)) > input.maxEstimatedCost) throw new StudioError('图片价格已变化，请重新确认点数', 409);
     let snapshotGlobalContext = avatar ? '' : user.role === 'admin' && input.draft?.globalContext !== undefined ? input.draft.globalContext : settings.context;
     let snapshotModuleContext = input.draft?.moduleContext !== undefined ? input.draft.moduleContext : workspace?.context || '';
     if (sharedDefinition) {
@@ -831,7 +833,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       price = billingContract.authorizedCredits;
       if (Boolean(pricingQuote) !== Boolean(billingContract.pricing)) throw new StudioError('收费合同已变化，请重新报价；未沿旧报价生成', 409);
       if (billingContract.pricing) await assertNewPricingCharge(billingContract.pricing, body.pricingRevision, tx);
-      if (input.maxEstimatedCost === undefined || sumCredits(Array.from({ length: input.count }, () => price)) > input.maxEstimatedCost) throw new StudioError('请先确认本次预估及最高扣点授权', 409);
+      const authorizedUnitCredits = price;
+      if (input.maxEstimatedCost === undefined || sumCredits(Array.from({ length: input.count }, () => authorizedUnitCredits)) > input.maxEstimatedCost) throw new StudioError('请先确认本次预估及最高扣点授权', 409);
     }
     const fingerprint = imageChannel
       ? createHash('sha256').update(`${requestFingerprint}\0${imageChannel.channelId}\0${imageChannel.configRevision}`).digest('hex')

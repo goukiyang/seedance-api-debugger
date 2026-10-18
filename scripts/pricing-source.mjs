@@ -15,7 +15,7 @@ export function pricingSourceHashes(root) {
     }
   }
   for (const directory of ['src', 'scripts', 'prisma', 'public']) walk(directory);
-  files.push('package.json', 'package-lock.json', 'tsconfig.json', 'next.config.js');
+  files.push('package.json', 'package-lock.json', 'tsconfig.json', 'next.config.js', 'ops/feishu-credit-gateway.mjs');
   return Object.fromEntries(Array.from(new Set(files)).sort().map(file => [file,
     createHash('sha256').update(readFileSync(path.join(root, file))).digest('hex')]));
 }

@@ -48,7 +48,7 @@ async function main() {
   const { runPricingToolflowContractFixture } = await import('./pricing-toolflow-contract-fixture');
   const result = await runPricingToolflowContractFixture({ databasePath, runtimeRoot, source });
   assert.equal(forbiddenCalls, 0);
-  console.log(JSON.stringify({ fixture: 'pricing-toolflow-contract', completed: true, ...result,
+  console.log(JSON.stringify({ completed: true, ...result,
     permissionEvidence: 'Actual Linux root/immutable isolated inputs and actual live process checks; production installation is separately required.' }));
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

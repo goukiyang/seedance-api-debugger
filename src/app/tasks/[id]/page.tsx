@@ -83,6 +83,7 @@ interface VideoTask {
   public_video_cached_at?: string | null;
   raw_create_response: string | null;
   raw_status_response: string | null;
+  error_code: string | null;
   error_message: string | null;
   project_id: string | null;
   project?: { id: string; name: string; type: string } | null;
@@ -842,7 +843,8 @@ export default function TaskDetailPage() {
   const [autoPoll, setAutoPoll] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const retrySupported = Boolean(task && (!task.provider || ['seedance', 'h3'].includes(task.provider))
-    && task.local_status === 'failed' && !task.error_code?.includes('UNCONFIRMED') && !(Number(task.frozen_cost ?? 0) > 0));
+    && task.local_status === 'failed' && task.error_code !== undefined
+    && !task.error_code?.includes('UNCONFIRMED') && task.frozen_cost === 0);
   const retryPricing = useVideoPricing({ provider: task?.provider === 'h3' ? 'h3' : 'seedance',
     model: task?.model || '', resolution: task?.resolution || '480p', duration: task?.duration || 5 }, retrySupported);
   const [movingProject, setMovingProject] = useState(false);
@@ -1217,7 +1219,7 @@ export default function TaskDetailPage() {
   };
 
   const handleRetry = async () => {
-    if (retrying || !retryPricing.quote) return;
+    if (!retrySupported || retrying || !retryPricing.quote) return;
     setRetrying(true);
     try {
       const res = await fetch(`/api/video/retry/${taskId}`, {

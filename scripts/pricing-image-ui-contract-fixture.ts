@@ -28,10 +28,21 @@ function loadUiHelpers(): ImageUiHelpers {
 }
 
 function loadCanvasPricing() {
-  const window: Record<string, any> = {};
+  const window: {
+    UltimateCanvasNodePricing?: {
+      formatCredits(value: number): string;
+      fullQuoteRequired(projection: object): boolean;
+      validFullQuote(quote: ImageUiQuote & { revision: number }, projection: object, now: number): boolean;
+    };
+    UltimateCanvasStyles?: {
+      billingQuoteFields(quote: ImageUiQuote): { billingQuoteId: string; maxEstimatedCost: number; pricingRevision?: string };
+    };
+  } = {};
   for (const filename of ['public/tools/ultimate-canvas/node-pricing.js', 'public/tools/ultimate-canvas/canvas-styles.js']) {
     vm.runInNewContext(readFileSync(resolve(filename), 'utf8'), { window, Date, console }, { filename, timeout: 1000 });
   }
+  assert.ok(window.UltimateCanvasNodePricing);
+  assert.ok(window.UltimateCanvasStyles);
   return { pricing: window.UltimateCanvasNodePricing, styles: window.UltimateCanvasStyles };
 }
 
@@ -73,15 +84,21 @@ export function runPricingImageUiContractFixture() {
   assert.equal(ui.parseImageUiBudget('100.75', ui.imageUiBudgetPrecision(fixed, 100.15)), 100.75);
 
   const fields = ui.imageUiQuoteFields(fixed);
+  assert.ok('billingQuoteId' in fields && 'maxEstimatedCost' in fields);
   assert.equal(fields.billingQuoteId, fixed.billingQuoteId);
   assert.equal(fields.pricingRevision, fixed.pricingRevision);
   assert.equal(fields.maxEstimatedCost, 0.6, 'Uses server total without integer ceil');
   assert.deepEqual(fields.imageChannel, fixed.imageChannel);
-  assert.equal(ui.imageUiQuoteFields(actual).maxEstimatedCost, 3.03);
-  assert.equal(ui.imageUiQuoteFields(legacy).maxEstimatedCost, 0.45);
+  const actualFields = ui.imageUiQuoteFields(actual), legacyFields = ui.imageUiQuoteFields(legacy);
+  assert.ok('maxEstimatedCost' in actualFields);
+  assert.ok('maxEstimatedCost' in legacyFields);
+  assert.equal(actualFields.maxEstimatedCost, 3.03);
+  assert.equal(legacyFields.maxEstimatedCost, 0.45);
   const batch: ImageUiQuote = { ...fixed, billingQuoteId: undefined, batchQuoteId: 'batch-quote' };
-  assert.equal(ui.imageUiQuoteFields(batch, true).batchQuoteId, 'batch-quote');
-  assert.equal(ui.imageUiQuoteFields(batch, true).budget, 0.6);
+  const batchFields = ui.imageUiQuoteFields(batch, true);
+  assert.ok('batchQuoteId' in batchFields && 'budget' in batchFields);
+  assert.equal(batchFields.batchQuoteId, 'batch-quote');
+  assert.equal(batchFields.budget, 0.6);
   assert.equal(ui.validImageUiQuote({ ...batch, batchQuoteId: null }, now, true), false);
   assert.throws(() => ui.imageUiQuoteFields({ ...fixed, expiresAt: new Date(now - 1).toISOString() }));
 

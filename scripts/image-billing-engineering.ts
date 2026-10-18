@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -154,14 +154,21 @@ async function main() {
     await prisma.imageStudioTask.update({ where: { id: awaiting.id }, data: { billing_settled_at: null, billing_deadline: new Date(Date.now() - 1000) } });
     await assert.rejects(assertStudioPostAuthorization(authorized));
     results.push('final_post_gate_stops_released_or_expired_authorization');
-    const flowQuote = { flowId: 'isolated-flow-a', flowVersion: 1, settingsRevision: 1, estimatedCredits: 5,
-      expiresAt: new Date(Date.now() + 60000).toISOString(), billingMode: 'fixed' as const,
+    const flowContract = contract(5, 'fixed');
+    const flowQuote: Parameters<typeof createToolFlowQuoteProof>[1] = { flowId: 'isolated-flow-a', flowVersion: 1, settingsRevision: 1, estimatedCredits: 5,
+      expiresAt: flowContract.expiresAt, billingMode: 'fixed',
       steps: [{ nodeId: 'template-a', templateId: null, moduleId: 'module-a', templateVersion: null,
-        model, count: 1, unitCredits: 5, estimatedCredits: 5, status: 'fixed' as const }] };
+        model, count: 1, unitCredits: 5, estimatedCredits: 5, status: 'fixed',
+        pricingRevision: flowContract.pricing?.revision ?? null,
+        contractDigest: createHash('sha256').update(JSON.stringify(flowContract)).digest('hex') }] };
     const proof = createToolFlowQuoteProof(successful.owner_id, flowQuote);
     assertToolFlowQuoteProof(successful.owner_id, flowQuote, proof);
     assert.throws(() => assertToolFlowQuoteProof(fixed.owner_id, flowQuote, proof));
     assert.throws(() => assertToolFlowQuoteProof(successful.owner_id, { ...flowQuote, expiresAt: new Date(Date.now() + 120000).toISOString() }, proof));
+    assert.throws(() => assertToolFlowQuoteProof(successful.owner_id, { ...flowQuote,
+      steps: [{ ...flowQuote.steps[0], pricingRevision: 'changed-revision' }] }, proof));
+    assert.throws(() => assertToolFlowQuoteProof(successful.owner_id, { ...flowQuote,
+      steps: [{ ...flowQuote.steps[0], contractDigest: createHash('sha256').update('changed-contract').digest('hex') }] }, proof));
     assert.notEqual(toolFlowQuoteCookieName(flowQuote.flowId, flowQuote.expiresAt), toolFlowQuoteCookieName('isolated-flow-b', flowQuote.expiresAt));
     assert.equal(validateSubmittedToolFlowQuote(flowQuote, flowQuote).billingMode, 'fixed');
     assert.throws(() => validateSubmittedToolFlowQuote({ ...flowQuote, flowVersion: 2 }, flowQuote));
