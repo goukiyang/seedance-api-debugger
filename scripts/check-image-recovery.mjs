@@ -65,6 +65,7 @@ const outputSpecificationChecks = [
   'canvas_role_context_and_unknown_job_identity_survive_query_only_reentry_without_repost',
   'versioned_batch_quote_canonical_keys_preserve_array_order_and_reject_changed_authorization',
   'toolflow_authenticated_frozen_channels_create_only_with_fresh_configuration_and_unchanged_quote_identity',
+  'toolflow_internal_result_plans_survive_continuation_and_public_projection_without_persisted_mutation',
 ];
 const providerContractChecks = [
   'gzip_deflate_brotli_decode_preserves_body_and_removes_stale_headers',
@@ -110,7 +111,8 @@ const fixtures = [
   { file: 'scripts/image-output-specification-engineering.ts', schema: 'image-output-specification-engineering.v1',
     marker: 'Image output specification engineering receipt: ', checks: outputSpecificationChecks,
     negativeChecks: ['legacy_gcd_rejected_by_current_pixel_budget', 'legacy_batch_object_key_order_rejects_equivalent_submission',
-      'toolflow_quote_hmac_and_fresh_context_reject_changed_intent'],
+      'toolflow_quote_hmac_and_fresh_context_reject_changed_intent', 'toolflow_public_projection_does_not_expose_internal_output_plan_fields',
+      'toolflow_malformed_output_plans_cannot_bypass_public_sanitization'],
     sources: ['scripts/image-trace-engineering-fixture.ts', 'scripts/image-canvas-quote-fixture.ts', 'src/lib/image-generation/output-plan.ts',
       'src/lib/image-generation/resolution.ts', 'src/lib/image-studio/ratios.ts', 'src/lib/integrations/image-generation.ts',
       'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/billing-quote.ts', 'src/lib/image-studio/billing-quote-service.ts',

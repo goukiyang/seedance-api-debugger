@@ -1,5 +1,9 @@
 # 项目资料索引
 
+第四轮剩余组已收口：[旧run/unknown同280f独立诊断](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/38824c77-b02d-429a-8b01-2cafc1418c53/toolflow-remaining-diagnostic-receipt.json)仅正式根私有保存，Linux20实际exit 0、36源SHA/禁网，明确不是原完整spec门通过。parser/公开投影修正与畸形/重读追加配套已冻结，待新main/guard同run统一构建；旧源及失败门证据不替换。
+
+TRACE03-FIX第四轮run38824补注（2026-10-18）：[正式原单当前记录](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-10-fluxport-image-api.md#1763-trace03-fix-首次统一工程检查与同批纠正2026-10-18)、[私有第四轮原日志与分层收据](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/38824c77-b02d-429a-8b01-2cafc1418c53/)为正式根入口。280f/Linux20原HMAC快照复用、创建及10拒绝已过，新到NodeResult漏读outputPlans的公开投影断言未过，定向纠正并补剩余诊断；provider14/types/controller分层exit 0不代完整build，guard未构建、未部署。私有原包/日志保留，不复制或公开；无新用户媒体/收费/生产写，功能待手验。
+
 ## GEN12 最近12小时生成原因核查（2026-10-18）
 
 TRACE03-FIX实施与统一工程检查（2026-10-18当前记录）：项目video-api-debugger，来源为用户“开始落地”与本轮候选工程执行；TF01–TF04业务/配套已实现，TF05统一门及Review未闭环，TF06未部署，取代本索引早期仅规划口径。正式[原单与完整TF01–TF06](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-10-fluxport-image-api.md#1763-trace03-fix-首次统一工程检查与同批纠正2026-10-18)、[私有收据目录](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/)、[第二轮分层诊断](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/9968c96e-90b9-41aa-b7fd-a362e28c3142/diagnostics-receipt.json)及[真实指纹对照](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/9968c96e-90b9-41aa-b7fd-a362e28c3142/batch-fingerprint-evidence.json)仅保正式根，不复制或推送私有内容。关键词：2K单一计划、旧合同隔离、核心受理回执、长退避、确定序列化、相容guard；用途为当前实施追踪/恢复，不替代旧GEN12原证、真实供应商样本或用户功能手验。原日志/失败source保留，文本JSON已可读；本轮无新增用户媒体附件，未部署。 第三轮6356/run daf7前12规格检查已过，provider完整14项与类型exit 0；真实工具流报价每次重捕通道UUID导致创建拒绝已定位，按原HMAC认证快照复用并鲜核配置收口，待新main/guard同run完整门。私有第三轮日志及只读对照均登记正式根，未冒完整build通过。

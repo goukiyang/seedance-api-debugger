@@ -11,7 +11,7 @@ import { normalizeStudioRatio, resolveStudioAspectRatio, legacyStudioRatioSize a
 import { getImageGenerationChannelOptions, getImageGenerationSettingsForModel, getManagedImageGenerationChannels, hasLegacyImageGenerationModelOverride,
   captureImageGenerationChannel, resolveImageGenerationChannelSnapshot, imageGenerationModelOutputPlan, type ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation';
 import { normalizeImageResolution, isValidImageDimension, IMAGE_RESOLUTION_OPTIONS } from '@/lib/image-generation/resolution';
-import { imageOutputPlanHash, publicImageOutputPlan, savedImageRatioContractVersion, type ImageOutputPlan, type ImageRatioContractVersion, type PublicImageOutputPlan } from '@/lib/image-generation/output-plan';
+import { imageOutputPlanHash, parseImageOutputPlan, publicImageOutputPlan, savedImageRatioContractVersion, type ImageOutputPlan, type ImageRatioContractVersion, type PublicImageOutputPlan } from '@/lib/image-generation/output-plan';
 import { assertSharedStudioWorkerReady, safeImageChannelSnapshot } from '@/lib/image-studio/tasks';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import { imageBillingScope } from '@/lib/image-studio/billing-scope';
@@ -156,7 +156,25 @@ function parseIds(value: unknown, limit = 30) {
 
 function parseNodeResult(value: string | null | undefined): NodeResult {
   const parsed = parseJsonObject(value);
+  let outputPlans: NodeResult['outputPlans'];
+  if (Object.prototype.hasOwnProperty.call(parsed, 'outputPlans')) {
+    // Keep absence distinct for old records. A present malformed field becomes
+    // an empty allowlist, never a raw-public fallback or an invented plan.
+    outputPlans = [];
+    for (const value of Array.isArray(parsed.outputPlans) ? parsed.outputPlans : []) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+      const item = value as Record<string, unknown>;
+      if (typeof item.ordinal !== 'number' || !Number.isSafeInteger(item.ordinal) || item.ordinal < 1
+        || typeof item.taskId !== 'string' || !item.taskId || item.taskId.length > 160
+        || item.taskId.trim() !== item.taskId || /[\x00-\x1f\x7f]/.test(item.taskId)
+        || typeof item.outputPlanHash !== 'string' || !/^[a-f0-9]{64}$/.test(item.outputPlanHash)) continue;
+      const outputPlan = parseImageOutputPlan(item.outputPlan);
+      if (!outputPlan || imageOutputPlanHash(outputPlan) !== item.outputPlanHash) continue;
+      outputPlans.push({ ordinal: item.ordinal, taskId: item.taskId, outputPlan, outputPlanHash: item.outputPlanHash });
+    }
+  }
   return {
+    ...(outputPlans === undefined ? {} : { outputPlans }),
     taskIds: parseIds(parsed.taskIds),
     expected: Number.isInteger(Number(parsed.expected)) ? Number(parsed.expected) : undefined,
     succeededAssetIds: parseIds(parsed.succeededAssetIds),
@@ -1051,9 +1069,9 @@ export async function listToolFlowRuns(user: SessionUser, flowId?: string) {
 
 export function publicToolFlowRun<T extends { node_runs: Array<{ result_json: string | null }> }>(run: T): T {
   return { ...run, node_runs: run.node_runs.map(node => {
+    if (!Object.prototype.hasOwnProperty.call(parseJsonObject(node.result_json), 'outputPlans')) return node;
     const result = parseNodeResult(node.result_json);
-    if (!Array.isArray(result.outputPlans)) return node;
-    return { ...node, result_json: stringify({ ...result, outputPlans: result.outputPlans.map(item => ({
+    return { ...node, result_json: stringify({ ...result, outputPlans: (result.outputPlans || []).map(item => ({
       ordinal: item.ordinal, taskId: item.taskId, outputPlan: publicImageOutputPlan(item.outputPlan),
     })) }) };
   }) } as T;

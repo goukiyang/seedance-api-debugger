@@ -37,6 +37,7 @@ const expectedChecks = [
   'canvas_role_context_and_unknown_job_identity_survive_query_only_reentry_without_repost',
   'versioned_batch_quote_canonical_keys_preserve_array_order_and_reject_changed_authorization',
   'toolflow_authenticated_frozen_channels_create_only_with_fresh_configuration_and_unchanged_quote_identity',
+  'toolflow_internal_result_plans_survive_continuation_and_public_projection_without_persisted_mutation',
 ];
 
 async function main() {
@@ -126,9 +127,12 @@ async function main() {
   const canvasQuoteEvidence = await verifyCanvasQuoteContract(fixture.root, plans.publicImageOutputPlan(referencePlan)!, fixture.check);
   fixture.check(expectedChecks[18]);
   fixture.check(expectedChecks[19]);
+  fixture.check(expectedChecks[20]);
   assert.throws(() => assertPixelBudget(ratios.legacyStudioRatioSize('58:77', '2K')!, '58:77'));
   await fixture.finish({ negativeChecks: ['legacy_gcd_rejected_by_current_pixel_budget', 'legacy_batch_object_key_order_rejects_equivalent_submission',
-    'toolflow_quote_hmac_and_fresh_context_reject_changed_intent'], canvasQuoteEvidence, batchFingerprintEvidence, toolFlowQuoteEvidence,
+    'toolflow_quote_hmac_and_fresh_context_reject_changed_intent', 'toolflow_public_projection_does_not_expose_internal_output_plan_fields',
+    'toolflow_malformed_output_plans_cannot_bypass_public_sanitization'],
+    canvasQuoteEvidence, batchFingerprintEvidence, toolFlowQuoteEvidence,
     wire: wire.map(body => ({ size: body.size, ratio: body.ratio })) });
 }
 
@@ -200,6 +204,9 @@ async function verifyToolFlows(fixture: Awaited<ReturnType<typeof traceFixture>>
   assert.equal(first.unit_credits, 5); assert.equal(firstSnapshot.outputPlan.resolvedRatio, '58:77');
   assert.deepEqual(firstSnapshot.imageChannel, quote.steps[0].imageChannel);
   assert.equal(firstSnapshot.outputPlan.outputSize, first.output_size); assert.match(firstSnapshot.outputPlanHash, /^[a-f0-9]{64}$/);
+  const firstNode = await db.toolFlowNodeRun.findUniqueOrThrow({ where: { run_id_node_id: { run_id: run.id, node_id: 'image' } } });
+  const firstStoredPlans = JSON.parse(firstNode.result_json!).outputPlans;
+  assert.deepEqual(firstStoredPlans, [{ ordinal: 1, taskId: first.id, outputPlan: firstSnapshot.outputPlan, outputPlanHash: firstSnapshot.outputPlanHash }]);
   assert.equal(await db.imageStudioTask.count({ where: { tool_flow_run_id: run.id, tool_flow_node_id: 'future' } }), 0);
   // The next node receives a real result's dimensions, never the quote-time input's assumed shape.
   await db.imageStudioTask.update({ where: { id: first.id }, data: { status: 'succeeded', asset_id: assets[1].id } });
@@ -207,11 +214,28 @@ async function verifyToolFlows(fixture: Awaited<ReturnType<typeof traceFixture>>
   const future = await db.imageStudioTask.findFirstOrThrow({ where: { tool_flow_run_id: run.id, tool_flow_node_id: 'future' } });
   assert.equal(JSON.parse(future.snapshot_json!).outputPlan.resolvedRatio, '16:9'); assert.equal(future.unit_credits, 5);
   assert.deepEqual(JSON.parse(future.snapshot_json!).imageChannel, quote.steps[1].imageChannel);
+  assert.deepEqual(JSON.parse((await db.toolFlowNodeRun.findUniqueOrThrow({ where: { id: firstNode.id } })).result_json!).outputPlans,
+    firstStoredPlans, 'Real completion and downstream dispatch preserve the first node\'s original internal plan');
+  const storedNodes = await db.toolFlowNodeRun.findMany({ where: { run_id: run.id }, orderBy: { node_id: 'asc' } });
+  const futureNode = storedNodes.find(node => node.node_id === 'future'); assert.ok(futureNode);
+  const futureStoredPlans = JSON.parse(futureNode.result_json!).outputPlans;
+  const futureSnapshot = JSON.parse(future.snapshot_json!);
+  assert.deepEqual(futureStoredPlans, [{ ordinal: 1, taskId: future.id, outputPlan: futureSnapshot.outputPlan, outputPlanHash: futureSnapshot.outputPlanHash }]);
   const publicRun = await flows.getToolFlowRun(user, run.id);
+  const { publicImageOutputPlan } = await import('../src/lib/image-generation/output-plan');
+  for (const [nodeId, task, snapshot] of [['image', first, firstSnapshot], ['future', future, futureSnapshot]] as const) {
+    const node = publicRun.node_runs.find(node => node.node_id === nodeId); assert.ok(node);
+    const projected = JSON.parse(node.result_json!).outputPlans;
+    assert.deepEqual(projected, [{ ordinal: 1, taskId: task.id, outputPlan: publicImageOutputPlan(snapshot.outputPlan) }]);
+    assert.equal('outputPlanHash' in projected[0], false);
+    for (const privateField of ['version', 'algorithmRevision', 'wireMode']) assert.equal(privateField in projected[0].outputPlan, false);
+  }
   for (const node of publicRun.node_runs) if (JSON.parse(node.result_json || '{}').outputPlans) {
     const publicPlans = JSON.stringify(JSON.parse(node.result_json!).outputPlans);
     assert.equal(publicPlans.includes('outputPlanHash'), false); assert.equal(publicPlans.includes('algorithmRevision'), false);
   }
+  assert.deepEqual(await db.toolFlowNodeRun.findMany({ where: { run_id: run.id }, orderBy: { node_id: 'asc' } }), storedNodes,
+    'Public reads must not rewrite internal plans, hashes, timestamps or any other persisted result field');
   fixture.check(expectedChecks[12]);
 
   const legacyGraph = { version: 1, nodes: [graph.nodes[0], { ...graph.nodes[1], data: { source: 'system', prompt: 'Legacy synthetic', model, ratio: '58:77', size: '928x1232' } }, graph.nodes[3]],
@@ -236,6 +260,7 @@ async function verifyToolFlows(fixture: Awaited<ReturnType<typeof traceFixture>>
   await flows.completeToolFlowTask(future.id);
   const node = await db.toolFlowNodeRun.findUniqueOrThrow({ where: { run_id_node_id: { run_id: run.id, node_id: 'future' } } });
   assert.equal(node.status, 'running'); assert.equal(JSON.parse(node.result_json!).failedTaskIds.includes(future.id), false);
+  assert.deepEqual(JSON.parse(node.result_json!).outputPlans, futureStoredPlans, 'Unknown completion keeps its prepared result plan');
   const money = await db.creditAccount.findUniqueOrThrow({ where: { user_id: owner } });
   const ledgers = await db.creditLedger.findMany({ orderBy: { id: 'asc' } }), taskCount = await db.imageStudioTask.count();
   await assert.rejects(flows.updateToolFlowRun(user, run.id, { action: 'retry', nodeId: 'future' }));
@@ -249,8 +274,71 @@ async function verifyToolFlows(fixture: Awaited<ReturnType<typeof traceFixture>>
   assert.deepEqual(await db.creditLedger.findMany({ orderBy: { id: 'asc' } }), ledgers);
   assert.deepEqual(await db.creditAccount.findUniqueOrThrow({ where: { user_id: owner } }), money);
   assert.equal((await db.toolFlowRun.findUniqueOrThrow({ where: { id: run.id } })).frozen_credits, 5);
+  assert.deepEqual(JSON.parse((await db.toolFlowNodeRun.findUniqueOrThrow({ where: { id: node.id } })).result_json!).outputPlans, futureStoredPlans);
   fixture.check(expectedChecks[14]);
-  return { authenticatedFrozenChannelsPreserved: true, futureAutoQuotedPlan: null, rejected, rejectedNewRuns: 0, rejectedNewTasks: 0, rejectedNewLedgerEntries: 0 };
+  const internalNode = await db.toolFlowNodeRun.findUniqueOrThrow({ where: { id: node.id } });
+  const originalResult = JSON.parse(internalNode.result_json!);
+  const sentinel = 'projection-private-sentinel';
+  const malformed = { ordinal: 1, taskId: future.id, outputPlanHash: sentinel, outputPlan: { outputSize: 'invalid', algorithmRevision: sentinel } };
+  const publicFuturePlan = { ordinal: 1, taskId: future.id, outputPlan: publicImageOutputPlan(futureSnapshot.outputPlan) };
+  const malformedCases = [
+    { value: null, expected: [] },
+    { value: { outputPlanHash: sentinel, algorithmRevision: sentinel }, expected: [] },
+    { value: [malformed], expected: [] },
+    { value: [{ ...futureStoredPlans[0], privateExtra: sentinel }, malformed], expected: [publicFuturePlan] },
+  ];
+  const tasksBeforeProjection = await db.imageStudioTask.findMany({ orderBy: { id: 'asc' } });
+  for (const item of malformedCases) {
+    const raw = JSON.stringify({ ...originalResult, outputPlans: item.value });
+    await db.toolFlowNodeRun.update({ where: { id: node.id }, data: { result_json: raw } });
+    const beforeRead = await db.toolFlowNodeRun.findUniqueOrThrow({ where: { id: node.id } });
+    const projectedRun = await flows.getToolFlowRun(user, run.id);
+    const projectedNode = projectedRun.node_runs.find(row => row.id === node.id); assert.ok(projectedNode);
+    assert.deepEqual(JSON.parse(projectedNode.result_json!).outputPlans, item.expected);
+    assert.equal(projectedNode.result_json!.includes(sentinel), false, 'Malformed plan fields cannot take the old raw-result bypass');
+    assert.deepEqual(await db.toolFlowNodeRun.findUniqueOrThrow({ where: { id: node.id } }), beforeRead);
+  }
+  await db.toolFlowNodeRun.update({ where: { id: node.id }, data: { result_json: internalNode.result_json } });
+  assert.deepEqual(await db.imageStudioTask.findMany({ orderBy: { id: 'asc' } }), tasksBeforeProjection);
+  assert.deepEqual(await db.creditLedger.findMany({ orderBy: { id: 'asc' } }), ledgers);
+  assert.deepEqual(await db.creditAccount.findUniqueOrThrow({ where: { user_id: owner } }), money);
+  const legacyResult = JSON.stringify({ taskIds: [], legacyNote: 'unchanged legacy result' });
+  assert.equal(flows.publicToolFlowRun({ node_runs: [{ result_json: legacyResult }] }).node_runs[0].result_json, legacyResult);
+
+  // A real failed node is explicitly retried: parse the saved result again and
+  // append exactly one new prepared plan without losing the old task's plan.
+  const appendGraph = { ...graph, nodes: [graph.nodes[0], graph.nodes[1], graph.nodes[3]],
+    connections: [{ from: 'input', to: 'image' }, { from: 'image', to: 'output' }] };
+  const appendFlow = await db.toolFlow.create({ data: { owner_id: owner, name: 'Synthetic result-plan continuation', status: 'active', graph_json: JSON.stringify(appendGraph) } });
+  const appendQuote = await flows.getToolFlowQuote(user, appendFlow.id, ids);
+  const appendRun = await flows.createToolFlowRun(user, appendFlow.id, ids, appendQuote, flows.createToolFlowQuoteProof(owner, appendQuote));
+  const oldPreparedTask = await db.imageStudioTask.findFirstOrThrow({ where: { tool_flow_run_id: appendRun.id } });
+  const oldPreparedNode = await db.toolFlowNodeRun.findUniqueOrThrow({ where: { run_id_node_id: { run_id: appendRun.id, node_id: 'image' } } });
+  const oldPlans = JSON.parse(oldPreparedNode.result_json!).outputPlans;
+  assert.equal(oldPlans.length, 1);
+  const running = await db.imageStudioTask.update({ where: { id: oldPreparedTask.id }, data: { status: 'running',
+    lease_token: 'synthetic-plan-continuation-lease', lease_until: new Date(Date.now() + 60000) } });
+  const { finishStudioTask } = await import('../src/lib/image-studio/tasks');
+  assert.equal(await finishStudioTask(running, 'failed', { error: 'Synthetic definite failure before an explicit retry' }), true);
+  await flows.completeToolFlowTask(running.id);
+  const oldTaskBeforeRetry = await db.imageStudioTask.findUniqueOrThrow({ where: { id: running.id } });
+  const oldLedgerBeforeRetry = await db.creditLedger.findMany({ where: { related_task_id: running.id }, orderBy: { id: 'asc' } });
+  assert.deepEqual(JSON.parse((await db.toolFlowNodeRun.findUniqueOrThrow({ where: { id: oldPreparedNode.id } })).result_json!).outputPlans, oldPlans);
+  const beforeRetryTasks = await db.imageStudioTask.count(), beforeRetryLedger = await db.creditLedger.count();
+  await flows.updateToolFlowRun(user, appendRun.id, { action: 'retry', nodeId: 'image' });
+  const appended = JSON.parse((await db.toolFlowNodeRun.findUniqueOrThrow({ where: { id: oldPreparedNode.id } })).result_json!).outputPlans;
+  assert.equal(appended.length, 2); assert.deepEqual(appended[0], oldPlans[0]); assert.notEqual(appended[1].taskId, running.id);
+  const appendedTask = await db.imageStudioTask.findUniqueOrThrow({ where: { id: appended[1].taskId } });
+  const appendedSnapshot = JSON.parse(appendedTask.snapshot_json!);
+  assert.deepEqual(appended[1].outputPlan, appendedSnapshot.outputPlan); assert.equal(appended[1].outputPlanHash, appendedSnapshot.outputPlanHash);
+  assert.deepEqual(await db.imageStudioTask.findUniqueOrThrow({ where: { id: running.id } }), oldTaskBeforeRetry);
+  assert.deepEqual(await db.creditLedger.findMany({ where: { related_task_id: running.id }, orderBy: { id: 'asc' } }), oldLedgerBeforeRetry);
+  assert.equal(await db.imageStudioTask.count(), beforeRetryTasks + 1); assert.equal(await db.creditLedger.count(), beforeRetryLedger + 1);
+  await flows.advanceToolFlowRun(appendRun.id);
+  assert.equal(await db.imageStudioTask.count(), beforeRetryTasks + 1); assert.equal(await db.creditLedger.count(), beforeRetryLedger + 1);
+  return { authenticatedFrozenChannelsPreserved: true, futureAutoQuotedPlan: null, internalPlansSurvivedContinuation: true,
+    publicProjectionExcludedInternalFields: true, publicReadPersistedWrites: 0, malformedProjectionCases: malformedCases.length,
+    rereadAppendsExactlyOnePlanKeepingOriginal: true, rejected, rejectedNewRuns: 0, rejectedNewTasks: 0, rejectedNewLedgerEntries: 0 };
 }
 
 async function verifySavedPlans(fixture: Awaited<ReturnType<typeof traceFixture>>, owner: string, model: string) {
