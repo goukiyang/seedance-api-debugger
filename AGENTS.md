@@ -91,6 +91,8 @@
 
 ## sd2 服务器生产托管规则
 
+- IMG-VIS 已保护部署（2026-10-18）：实际源`80d5cf6f1ec489ea93257d42e8dd5c7e4e782560`、v0.95.3、BUILD`rTIGsl4F2099Dbb_cnZSp`，web/image同源，完整返图的尺寸/格式差异不再自动藏图或额外禁用普通操作；既有费用政策与原请求保持。用户指定原图已同字节恢复原任务和本人结果列表，原参数/退款账本不变，未重生成。主/相容guard完整构建及各27组内置检查、30公网资源同字节与未登录保护通过；HD/作品/角色进程、DB身份和配置保持。相容程序回退`b4f489ffe4b147cd023b0296315da4eca91c18da`／v0.95.2+image-visibility-guard.1／BUILD`pKypLEXNdpwJ2TuU8Qjtt`保新reader，旧UI可能不显示异常图；不回DB/媒体/账务/回执，不直接退旧e92，未演练。08:52:42Z同run收口；已部署待用户手验，未做浏览器或收费回归。正式根生图原单§17.5、固定todo及私有inc24/deploy为入口；文档HEAD不冒运行源。
+
 - PAGE03已保护部署（2026-10-17当地，UTC次日02:00后收尾）：实际Web源`ad6f6bdf916de1e3a5e642a16ef6e5d8c977a153`、v0.94.5、BUILD`sphjfz9ljJjkXayv0bRJv`；新生成确认受理后回最新结果页，顶部/底部共用翻页，图片卡“已对账”徽标移除，账务数据/管理端状态不改。服务器完整候选构建含原图片恢复门通过，公网release/config/login及两实际静态资源有证；第一次切换因错误要求公开release摘要而自动恢复v0.94.4，纠正为真实接口合同后再切成功。仅Web重启，图片worker保持`e92fea7479c248376a98dc43ad1c315fb1720f98`原PID/Invocation/运行目录，未重发、未收费生成、未改DB/配置/媒体/权限；功能待用户手验。回退标签`rollback/2026-10-17-before-result-latest-pagination`指完整v0.94.4，服务器原release/BUILD及切换前drop-in保留，回退未演练；后继须鲜核运行源/BUILD/配置与在途状态，不回DB/账本/媒体或重发。
 
 - CAP08/API01保护发布事实（2026-10-17）：实际源`e92fea7479c248376a98dc43ad1c315fb1720f98`、v0.94.4、BUILD`E2621a3FEs0ft0-zjqsEU`，16:31:31Z同run闭环，主管16:32Z运行／公网薄核一致；主／相容guard完整构建各19断言与10负证、内置类型lint及同lead Review有证。回退仅完整`c8fd8418cd56f3566fc823a2d54ac1c2d0a66c88`／v0.94.3+image-async-lifecycle-guard.1／BUILD`QhmWt854-hROySwA0jm_9`，保新恢复reader；其旧UI缺完整人工核对入口，需恢复主client，未演练，不直接回旧8ba writer或回DB／配置／媒体／回执／control。原8自然脱槽5、40原预留与身份／隐藏保持，HD649与works原进程未动。主管新增授权在“转写实（推荐）”仅测1张，正常受理且无8拒绝，但供应商JSON uncertain，首轮原号自动核对仍无Asset，5点仅冻结、0结算退款；系统占位修复已部署，目标出图未测通、API内部原因与最终供应商账单未知，不冒整单功能通过。原单§17.3.4／固定todo／私有inc04为入口，文档HEAD不冒运行源。
