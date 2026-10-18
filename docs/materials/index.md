@@ -2,6 +2,8 @@
 
 ## GEN12 最近12小时生成原因核查（2026-10-18）
 
+本地补查增量（报告v1.3.0，2026-10-18）：来源为用户要求优先自行定位，关键词：同输入对照、原号running/uncertain、60秒查询预算、参考交付、诊断日志缺口。[对照证据](2026-10-17-image-content-incident/inc24/trace03-local-compare.json)与[脚本](2026-10-17-image-content-incident/inc24/trace03-local-compare.py)JSON/UTF-8可读，三源文件SHA与实际运行一致；29条同窗口中一条uncertain和另次完整出图冻结输入相同，余相邻返图仅输入图不同。本站可见环节已补查，未证明供应商内部具体根因；原报告/回复时点保留，不联系供应商、不新增GET或生成。仅正式根私有留存，不公开上传。
+
 后续RESTORE02／TRACE03（用户明确授权，报告v1.2.0）：两张未移除原图已恢复到原列表，保原件/退款及三条已移除记录；[恢复回执](2026-10-17-image-content-incident/inc24/restore02/restoration.json)、[恢复前证据](2026-10-17-image-content-incident/inc24/restore02/preflight.json)、[备份清单](2026-10-17-image-content-incident/inc24/restore02/backups.json)、[执行脚本](2026-10-17-image-content-incident/inc24/restore02/restore02.mjs)均JSON/UTF-8可读，原件与前后不变量已核、回执SHA复核一致，原图未重编码。新增[TRACE03查询脱敏JSON](2026-10-17-image-content-incident/inc24/trace03-original-summary.json)及[脚本](2026-10-17-image-content-incident/inc24/trace03-original-summary.py)，来源为2026-10-18T14:39:37–40Z三个冻结配置原请求各一次GET，均HTTP200/service_uncertain/生成阶段/assets0，三条任务与账本前后不变；精确三条及不变量静态核对通过。供应商底层具体异常及最终账单未核清；全部私有原证仅正式根保存，0新生成/重复扣费，无页面自动验收。
 
 用户新增参考原件：[图片任务核查回复-20261018.docx](2026-10-17-image-content-incident/inc24/supplier-reply/图片任务核查回复-20261018.docx)，同原文件名，来源为用户2026-10-18提供的Downloads/Current本机文件及其供应商；项目video-api-debugger，关键词：Sunburst、备用渠道、尺寸映射、uncertain、不扣费、8小时保留、参考图上传确认。v1原件无替代；42,260字节，SHA256 `641bbb2c0d4dbd707e1dc6087ab6f0502c7add531621630ae995ca14dcb23e46`，复制字节一致、ZIP完整性与全文可读。关键章节为“前六笔的具体情况”“第七笔为什么尺寸变了”“原任务查不到和仍待确认的内容”；用于旧七笔答复及新三笔有界参考，不直接证明新三笔同因/账单，不授权更改原请求、费用或外发。原GEN12快照与旧供应商证据保留，解释更新在同一报告v1.2.0。Word仅正式根私有保存，不推公开仓库。
