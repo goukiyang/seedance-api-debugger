@@ -2,6 +2,8 @@
 
 ## 当前入口
 
+- [x] 2026-10-19 PRE01：图片上传/粘贴与前述生成问题前置工单已完成（仅前置，未实施）。当前2a共享上传目录软链接被安全门必然拒绝，另有picker刷新清空错误；UP01/UP02优先且与暂停TRACE候选分开。原writing只查不重发；既有2K/诊断/压缩退避问题复用原证及未发布f5d/ae729，不从头重做。正文、附件与边界见 `tasks/todo/2026-10-19-image-upload-preflight.md`，资料索引见 `docs/materials/index.md`。本轮不部署、不改业务或生产数据；实施仍待用户后续明确要求。
+
 TRACE03-FIX 当前结论（2026-10-19 08:43Z）：经用户确认暂缓，未部署；仅在用户明确要求后续做时恢复，不再修补、重建、重开窗口或重试。线上保留 RATE01 `2a1c641d0864850b5ca63f9d6201891341aa79bb`／v0.96.0，五服务原PID／Invocation／配置和永久屏障不变。b441 的 main `f5d97bfe8f28cfa9a4ce303182e53b6e6c29e588`／BUILD `qBAqHLHkEz3aUtVlXrQIP`、guard `ae72969c6aebebcbed15ef71171112115a726f87`／BUILD `mrfTwKAuEbekUnN2wqvlg` 两完整Linux20构建真实exit0、私有33组及整批Review零开放发现均保留为未部署候选证据。最后一次switch在第一项approval文件读取即exit1：lead外层独占发布误用硬链接，令nlink=2，被原nlink=1保护正确拒绝；0维护／停服务／切换／换pair／封网／生产业务写，安全收口与失败原件保留，不清链接后重试。
 
 正式当前对账见原单§17.6.5；失败与安全收口材料在正式根私有 b441449d-0f6d-47bf-b4d2-d50904216622 目录。下列此前节点均为历史，不代表继续发布许可。
