@@ -49,7 +49,8 @@ async function main() {
   const { createSession, SESSION_COOKIE } = await import('../src/lib/auth/session');
   const { pricingAdminRoute } = await import('../src/lib/pricing/admin-api');
   const { getAdminPricingSnapshot, getAdminPricingOperation } = await import('../src/lib/pricing/policy');
-  const { PRICING_POLICY_KEY, PRICING_OPERATION_PREFIX } = await import('../src/lib/pricing/admin-contract');
+  const { PRICING_POLICY_KEY, PRICING_OPERATION_PREFIX, PRICING_REVISION_PREFIX, PRICING_UNCONFIGURED_REVISION } = await import('../src/lib/pricing/admin-contract');
+  const { getPricingCatalog } = await import('../src/lib/pricing/catalog');
   const admin = await fixture.db.user.create({ data: { id: 'guard-admin-' + randomUUID(), name: 'Synthetic guard admin',
     username: randomUUID(), email: randomUUID() + '@fixture.invalid', password_hash: 'isolated-not-a-login',
     role: 'admin', account_type: 'internal', status: 'active' } });
@@ -57,9 +58,19 @@ async function main() {
   const savedRevision = randomUUID(), savedAt = new Date().toISOString();
   // These are pre-existing synthetic records in the fresh test DB, not saves
   // through the guarded mutation route or modifications to any real prices.
-  const savedPolicy = JSON.stringify({ schemaVersion: 1, revision: savedRevision,
-    standards: { site_base_cny: '2', supplier_cost_cny: null }, rules: [], updatedAt: savedAt, updatedBy: actor });
+  const policy = { schemaVersion: 1, revision: savedRevision,
+    standards: { site_base_cny: '2', supplier_cost_cny: null }, rules: [], updatedAt: savedAt, updatedBy: actor };
+  const savedPolicy = JSON.stringify(policy);
   await fixture.db.platformSetting.create({ data: { key: PRICING_POLICY_KEY, value_json: savedPolicy, updated_by: admin.id } });
+  await assert.rejects(() => getAdminPricingSnapshot(actor), { status: 503, code: 'pricing_policy_invalid' },
+    'An orphan policy pointer is invalid even in the compatible guard');
+  const catalog = await getPricingCatalog(fixture.db);
+  const revisionKey = PRICING_REVISION_PREFIX + savedRevision;
+  const savedRevisionRecord = JSON.stringify({ schemaVersion: 1, policy,
+    history: { revisionId: savedRevision, previousRevision: PRICING_UNCONFIGURED_REVISION, createdAt: savedAt,
+      actor, action: 'save', changes: [], standardsBefore: { site_base_cny: null, supplier_cost_cny: null },
+      standardsAfter: policy.standards }, rows: catalog.rows, bindings: catalog.bindings });
+  await fixture.db.platformSetting.create({ data: { key: revisionKey, value_json: savedRevisionRecord, updated_by: admin.id } });
   const savedSnapshot = await getAdminPricingSnapshot(actor);
   assert.equal(savedSnapshot.revision, savedRevision);
   const operationId = randomUUID();
@@ -99,6 +110,7 @@ async function main() {
   assert.equal(operation.status, 200); assert.deepEqual(await operation.json(), savedOperation); assert.equal(reads, 2);
   assert.deepEqual(await fixture.db.platformSetting.findMany({ orderBy: { key: 'asc' } }), beforeAdminReads);
   assert.equal((await fixture.db.platformSetting.findUniqueOrThrow({ where: { key: PRICING_POLICY_KEY } })).value_json, savedPolicy);
+  assert.equal((await fixture.db.platformSetting.findUniqueOrThrow({ where: { key: revisionKey } })).value_json, savedRevisionRecord);
   assert.equal((await fixture.db.platformSetting.findUniqueOrThrow({ where: { key: operationKey } })).value_json, savedReceipt);
   assert.equal(await fixture.db.imageStudioTask.count(), 0); assert.equal(await fixture.db.creditLedger.count(), 0);
   fixture.check(checks[0]);
@@ -165,7 +177,7 @@ async function main() {
   fixture.check(checks[1]);
   await fixture.finish({ actualGuardVersion: actualVersion, packageView: 'actual-guard-without-preload', billingModes,
     adminRoute: { realSession: true, nextRequestStore: true, mutationStatus: refused.status, mutationActions: mutations,
-      readActions: reads, savedPolicyAndReceiptUnchanged: true },
+      readActions: reads, incompleteRevisionRejected: true, savedPolicyRevisionAndReceiptUnchanged: true },
     pricingReaders: { persistedAcceptedContract: true, frozenCredits: 0.2, runtimeReady: consumerState.ready,
       fabricatedReadiness: false, acceptedTaskUnchanged: true, completeFinancialCoverage: 'existing-pricing-G01-G24' } });
 }

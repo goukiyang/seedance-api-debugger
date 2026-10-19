@@ -1,5 +1,9 @@
 # 项目资料索引
 
+当前 TRACE03-FIX 15564962：[集中guard诊断](2026-10-17-image-content-incident/inc24/trace03-fix/15564962-d2b2-4592-840d-420808801a08/concentrated-guard-diagnostics.json)、[三工程文件修正patch](2026-10-17-image-content-incident/inc24/trace03-fix/15564962-d2b2-4592-840d-420808801a08/guard-fixture-correction.patch)、main-build.json/log、guard-build-failed.json/log及guard-evidence-originals的29原件均归正式根私有且SHA核同。来源真实161d/4145、Linux20同run；主完整exit0／BUILD l4L6u0bXgqMdi3XbrOGu2，guard默认门exit1未Next，两处夹具种子／ordinary配置根因与实际保护拒绝分开。私有33真实FS门通过，产品/15私有/TTL不变；仅3工程文件统一修正后新run14ccf815重新完整双build，不复制旧receipt、不复用旧main冒新证。生产2a不动；原Word／PNG沿原入口，不外发，功能用户手验。
+
+以下为历史节点。
+
 当前发布接线收口：正式根 `trace03-fix/2ae78729-5e7a-46f1-ba65-2cc8f020d1f0/main-build.json`／main-build.log是d7主完整Linux20成功原件（BUILD JkJHSFeFSZhQf7EjMbmKA），prepare-failed-1792394962622.json为随后路径ENOENT原失败；成功／失败分层，guard未建。`trace03-fix/rate-compat-private-r2/path-consumer-audit.json`／build-evidence-paths.patch含全21命名空间／仅2私有文件差量及15SHA，统一成功build m.stage写读并补真实临时FS门；原32组保留，新门未运行，无resume／旧回执复制／产品或TTL变化。新run15564962按固定记录新源统一双完整构建，生产2a/.96.0不变；原Word／PNG和私有材料沿正式根，不推公开。
 
 ## TRACE03-FIX 新来源兼容接续（2026-10-19）

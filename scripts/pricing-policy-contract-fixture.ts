@@ -12,6 +12,11 @@ const root = fs.realpathSync(process.cwd());
 const prepared = readPricingFixtureInputs(root);
 const expected = Array.from({ length: 24 }, (_, index) => `G${String(index + 1).padStart(2, '0')}`);
 const sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
+const candidatePackagePath = path.join(root, 'package.json');
+const candidatePackageBytes = fs.readFileSync(candidatePackagePath);
+const actualVersion: string = JSON.parse(candidatePackageBytes.toString('utf8')).version;
+const guardPackage = /\+trace03-guard\.\d+$/.test(actualVersion);
+const packageViewMarker = 'Pricing fixture package view: ';
 const startedAt = Date.now();
 const runId = process.env.PRICING_GATE_RUN_ID;
 assert.ok(runId && /^[a-f0-9-]{36}$/.test(runId), 'A real pricing gate run UUID is required');
@@ -45,7 +50,45 @@ function complete(id: string, assertions: number, evidence: string[]) {
   const entry = checks.get(id) || { id, assertions: 0, evidence: [], completed: true as const };
   entry.assertions += assertions; entry.evidence.push(...evidence); checks.set(id, entry);
 }
-const transcripts: Array<{ kind: string; log: string; sha256: string }> = [];
+type PackageView = { actualVersion: string; fixtureVersion: string; kind: 'in-memory-ordinary' | 'actual';
+  productionFilesChanged: false; actualSource: string; candidatePackage: { path: string; sha256: string };
+  runtimePackage: { path: string; sha256: string; version: string }; admissionModulePath: string };
+const transcripts: Array<{ kind: string; log: string; sha256: string; packageView?: PackageView }> = [];
+function ordinaryPackageView(kind: string): PackageView | undefined {
+  if (kind !== 'core' && kind !== 'toolflow') return undefined;
+  const runtimePackage = path.join(prepared.roots[kind], 'package.json'), bytes = fs.readFileSync(runtimePackage);
+  assert.deepEqual(bytes, candidatePackageBytes, 'Identity/runtime package must retain the actual candidate bytes');
+  return { actualVersion, fixtureVersion: guardPackage ? actualVersion.replace(/\+trace03-guard\.\d+$/, '') : actualVersion,
+    kind: guardPackage ? 'in-memory-ordinary' : 'actual', productionFilesChanged: false, actualSource: prepared.source,
+    candidatePackage: { path: candidatePackagePath, sha256: sha(candidatePackageBytes) },
+    runtimePackage: { path: runtimePackage, sha256: sha(bytes), version: actualVersion },
+    admissionModulePath: path.join(root, 'src/lib/image-studio/queue-capacity.ts') };
+}
+function packageViewImport(expected: PackageView) {
+  // Runs in this isolated child before the runner can import business modules.
+  // Only package require-cache data changes; disk source and readiness hashes
+  // continue to describe the exact guard, including the copied runtime package.
+  return 'data:text/javascript,' + encodeURIComponent(`
+    import assert from 'node:assert/strict'; import fs from 'node:fs';
+    import { createHash } from 'node:crypto'; import { createRequire } from 'node:module';
+    const expected=${JSON.stringify(expected)}, require=createRequire(expected.candidatePackage.path);
+    const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
+    assert.equal(process.env.NODE_ENV,'test'); assert.equal(Object.hasOwn(process.env,'HD_DERIVATIVES_ROOT'),false);
+    assert.equal(process.cwd(),${JSON.stringify(root)});
+    const view=globalThis[Symbol.for('image-engineering-package-view')];
+    if(expected.kind==='in-memory-ordinary') assert.deepEqual(view,{actualVersion:expected.actualVersion,fixtureVersion:expected.fixtureVersion,kind:expected.kind,productionFilesChanged:false});
+    else assert.equal(view,undefined);
+    assert.equal(require.resolve(expected.candidatePackage.path),expected.candidatePackage.path);
+    assert.equal(require(expected.candidatePackage.path).version,expected.fixtureVersion);
+    assert.equal(require.resolve(expected.admissionModulePath),expected.admissionModulePath);
+    for(const value of [expected.candidatePackage,expected.runtimePackage]){
+      assert.equal(fs.realpathSync(value.path),value.path);
+      const bytes=fs.readFileSync(value.path); assert.equal(hash(bytes),value.sha256);
+      assert.equal(JSON.parse(bytes.toString('utf8')).version,expected.actualVersion);
+    }
+    console.log(${JSON.stringify(packageViewMarker)}+JSON.stringify(expected));
+  `);
+}
 type Failure = { kind: string; category: 'execution' | 'contract' | 'dependency' | 'integrity' | 'environment'; message: string; log?: string;
   status?: number | null; signal?: string | null };
 const failures: Failure[] = [], outcomes: Array<{ kind: string; completed: boolean; log?: string }> = [];
@@ -63,12 +106,16 @@ function run(kind: string, consume: (result: ReturnType<typeof JSON.parse>) => v
       PRICING_CORE_RUNTIME_ROOT: prepared.roots.core, PRICING_TOOLFLOW_RUNTIME_ROOT: prepared.roots.toolflow,
       PRICING_PARENT_RUNTIME_ROOT: prepared.roots.legacy,
       PRICING_SOURCE_SHA: prepared.source, RATE_G19_FIXTURE_SOURCE_SHA: prepared.source };
-    const result = spawnSync(process.execPath, ['--import', 'tsx', path.join(root, 'scripts/pricing-fixture-runner.ts'), kind], {
-      cwd: root, env, encoding: 'utf8', timeout: 180000, maxBuffer: 4 * 1024 * 1024,
+    const packageView = ordinaryPackageView(kind);
+    const preload = guardPackage && packageView ? ['--require', path.join(root, 'scripts/image-engineering-package-view.cjs')] : [];
+    const packageAudit = packageView ? ['--import', packageViewImport(packageView)] : [];
+    const result = spawnSync(process.execPath, [...preload, ...packageAudit, '--import', 'tsx', path.join(root, 'scripts/pricing-fixture-runner.ts'), kind], {
+      cwd: root, env: guardPackage && packageView ? { ...env, IMAGE_RECOVERY_GATE_RUN_ID: runId } : env,
+      encoding: 'utf8', timeout: 180000, maxBuffer: 4 * 1024 * 1024,
     });
     status = result.status; signal = result.signal;
     const bytes = (result.stdout || '') + (result.stderr || ''); log = path.join(unit, `execution-${kind}.log`);
-    fs.writeFileSync(log, bytes, { mode: 0o600, flag: 'wx' }); transcripts.push({ kind, log, sha256: sha(bytes) });
+    fs.writeFileSync(log, bytes, { mode: 0o600, flag: 'wx' }); transcripts.push({ kind, log, sha256: sha(bytes), ...(packageView ? { packageView } : {}) });
     const childFailure = (result.stderr || '').split(/\r?\n/).flatMap(line => {
       try { const value = JSON.parse(line); return value?.schema === 'pricing-fixture-execution-failure.v1' ? [value] : []; }
       catch { return []; }
@@ -76,6 +123,9 @@ function run(kind: string, consume: (result: ReturnType<typeof JSON.parse>) => v
     if (childFailure?.category === 'environment') category = 'environment';
     assert.ifError(result.error); assert.equal(result.signal, null, `${kind} fixture interrupted`);
     assert.equal(result.status, 0, `${kind} pricing fixture failed; see ${log}`);
+    const packageLines = (result.stdout || '').split(/\r?\n/).filter(line => line.startsWith(packageViewMarker));
+    assert.equal(packageLines.length, packageView ? 1 : 0, 'Only the two ordinary contract children may load the package view');
+    if (packageView) assert.deepEqual(JSON.parse(packageLines[0].slice(packageViewMarker.length)), packageView);
     category = 'contract';
     const rows = (result.stdout || '').split(/\r?\n/).filter(line => line.trim().startsWith('{')).map(line => {
       try { return JSON.parse(line); } catch { return null; }

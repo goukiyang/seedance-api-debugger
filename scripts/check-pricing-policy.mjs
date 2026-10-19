@@ -11,6 +11,7 @@ const fixture = 'scripts/pricing-policy-contract-fixture.ts';
 const marker = 'Pricing policy contract fixture receipt: ';
 const checks = Array.from({ length: 24 }, (_, index) => `G${String(index + 1).padStart(2, '0')}`);
 const hash = value => createHash('sha256').update(value).digest('hex');
+const packageViewMarker = 'Pricing fixture package view: ';
 const fixtureEnvironment = { NODE_ENV: 'test', HD_DERIVATIVES_ROOT: 'absent', verifiedBeforeBusinessImports: true };
 const fixtureEnvironmentMarker = 'Fixture environment isolated before imports: test/no-HD-root';
 const fixtureEnvironmentImport = 'data:text/javascript,' + encodeURIComponent(
@@ -69,6 +70,22 @@ function verifyFixture(file, runId, startedAt, finishedAt, sourceSha256) {
     assert.equal(receiptLogHash(transcript.log), transcript.sha256, 'Fixture execution log changed');
     assert.equal(readFileSync(transcript.log, 'utf8').split(/\r?\n/).filter(line => line === fixtureEnvironmentMarker).length, 1,
       'Every pricing subgroup must verify its actual environment before business imports: ' + transcript.kind);
+    const packageLines = readFileSync(transcript.log, 'utf8').split(/\r?\n/).filter(line => line.startsWith(packageViewMarker));
+    const ordinaryContract = ['core', 'toolflow'].includes(transcript.kind);
+    assert.equal(packageLines.length, ordinaryContract ? 1 : 0, 'Package view must be explicit and limited to ordinary contract children');
+    if (ordinaryContract) {
+      const actualVersion = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+      const guard = /\+trace03-guard\.\d+$/.test(actualVersion);
+      const runtimePackage = path.join(root, '.role-tests', 'pricing-prepared-' + runId, 'pricing-legacy-fixture-runtime/package.json');
+      const expected = { actualVersion, fixtureVersion: guard ? actualVersion.replace(/\+trace03-guard\.\d+$/, '') : actualVersion,
+        kind: guard ? 'in-memory-ordinary' : 'actual', productionFilesChanged: false, actualSource: value.rootInputManifest.source,
+        candidatePackage: { path: path.join(root, 'package.json'), sha256: sourceSha256['package.json'] },
+        runtimePackage: { path: runtimePackage, sha256: sourceSha256['package.json'], version: actualVersion },
+        admissionModulePath: path.join(root, 'src/lib/image-studio/queue-capacity.ts') };
+      assert.deepEqual(transcript.packageView, expected);
+      assert.deepEqual(JSON.parse(packageLines[0].slice(packageViewMarker.length)), expected);
+      assert.equal(hash(readFileSync(runtimePackage)), sourceSha256['package.json'], 'Runtime source package bytes changed after the child');
+    } else assert.equal(transcript.packageView, undefined);
   }
   assert.equal(value.rootInputManifest?.runId, runId);
   assert.match(value.rootInputManifest?.source, /^[a-f0-9]{40}$/);

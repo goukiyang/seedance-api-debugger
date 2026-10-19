@@ -2,6 +2,10 @@
 
 ## 当前入口
 
+TRACE03-FIX 15564962 本轮分层结果：私有33组（含11真实FS写读case）及主完整Linux20构建均exit0，主BUILD `l4L6u0bXgqMdi3XbrOGu2`，TRACE67／RATE G01–G24 1046断言、types lint及87页完成。guard默认prebuild退出1、未进入Next：六普通TRACE67通过，实际guard测试缺配套revision记录，RATE core/toolflow未注隔离ordinary配置而被真实guard正确拒新建；其余六RATE子组成功，缺G10/G14/G16/G24不冒通过。29原件同SHA归档，产品／15私有／版本／TTL未变，仅3工程文件集中修种子与显式子配置及来源核验，不单项重跑、不嫁接旧main。下一run `14ccf815-7ec2-42fc-859d-a69380236072`以新精确主／guard统一双完整build；仍v0.96.1。生产2a/.96.0原Web/image PID与Invocation保持，0维护／stop／switch／换pair／费用媒体写，功能用户手验。
+
+以下为历史节点，不代表当前候选可发布。
+
 TRACE03-FIX 2ae787主完整Linux20构建已真实exit0，BUILD `JkJHSFeFSZhQf7EjMbmKA`，TRACE67与RATE G01–G24 1046断言／types lint／页面构建均完成；随后私有prepare因成功build回执写子目录、reader读上级ENOENT退出，guard未建，不能称两候选或发布通过。所有旧源／15SHA／main原成功与prepare原失败不搬不覆盖；全路径21命名空间已核，仅此一个错位。新私有r2仅两文件统一manifest.stage的真实writer/reader，并在32旧组外补一组11个真实临时FS正反证，静态就绪尚未运行；产品／TTL不变，不新增resume或跨run承接。新run `15564962-d2b2-4592-840d-420808801a08`以本次固定记录提交形成精确主／guard再统一双完整build；仍v0.96.1，生产2a/.96.0及全部屏障／五服务／费用媒体未动，无维护／stop／switch。
 
 - [ ] TRACE03-FIX 07:12Z当前：新20fe6b/cd4f66、run5d7e9私有32组及TRACE六组67项／RATE G01–G24 1046断言均通过，真实源与收据SHA已核；主完整build编译后于types退出1，guard未开始。106.75s有界types正常exit2收尽3个测试错误：原33行seal仍传旧HeadersAdapter，两个新增Set迭代不合当前TS默认目标。主控逐项核原错误与Next源码后核可仅三处测试适配，现统一修正为原生Headers和Array.from保序去重，不改配置/依赖/产品/15私有/版本/TTL。下一run `2ae78729-5e7a-46f1-ba65-2cc8f020d1f0`将新精确main/guard完整统一检查；5d7e9失败原证保留，不冒完整构建通过。生产仍2a/.96.0，0维护/stop/switch/真实供应商或费用写；以下节点为历史。
