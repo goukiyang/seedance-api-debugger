@@ -22,6 +22,7 @@ import { MultiviewSourcePicker } from './MultiviewSourcePicker';
 import { MultiviewWorks } from './MultiviewWorks';
 import { MultiviewFrameSettingsPanel } from './MultiviewFrameSettingsPanel';
 import { encodeMultiviewPreviewFrame } from './multiview-preview-image';
+import { MultiviewFrameImage } from './MultiviewFrameImage';
 import { appliedWorkRecipe, useMultiviewWork } from './useMultiviewWork';
 import { multiviewWorkRecipesEqual, type MultiviewWorkDto, type MultiviewWorkRecipe } from '@/lib/video/multiview-work-contract';
 import { parseMultiviewSettingsBinding, type MultiviewSettingsBinding } from '@/lib/video/multiview-settings-contract';
@@ -825,13 +826,16 @@ function MultiviewPageContent() {
   const frameVisual = (frame: number, alt: string, className?: string) => frames[frame]?.previewUrl || frames[frame]?.url
     ? <img src={frames[frame].previewUrl || frames[frame].url} alt={alt} draggable={false} />
     : previewManifest && atlasUrl(frame) ? <AtlasFrame manifest={previewManifest} url={atlasUrl(frame)!} frame={frame} alt={alt} className={className} /> : null;
+  const displayScope = JSON.stringify([authority, taskId, info?.sourceVersion, context.current]);
+  const stableFrameVisual = (frame: number, alt: string, fallback: ReactNode) => <MultiviewFrameImage key={displayScope}
+    src={frames[frame]?.previewUrl || frames[frame]?.url} alt={alt}>{fallback}</MultiviewFrameImage>;
   const stage = visible ? validSlots.length === draft?.slots.length ? 4 : 3 : ['submitting', 'submitted', 'unknown', 'video_ready'].includes(generation.phase) ? 2 : 1;
   const existingSource = visible && generation.taskId !== taskId;
   const playerEpoch = context.current;
   const mediaCurrent = () => playerEpoch === context.current && authorityRef.current === authority && !isClientSessionBlocked();
   const player = info && <div className={styles.videoArea} style={{ '--mv-video-ratio': info.width / info.height } as CSSProperties}>
     <div className={editing && editorMode === 'frame' ? styles.editorStage : styles.originalStage}>
-    {editing && editorMode === 'frame' && <button type="button" className={styles.candidate} disabled={!currentFrame?.url && !currentFrame?.previewUrl && !atlasUrl(editorFrame)} onClick={() => { const frame = editorFrame; const epoch = context.current; void loadFrame(frame, true).then(ready => { if (ready && epoch === context.current) setPreview(frame); }); }} aria-label="放大待选帧">{frameVisual(editorFrame, '待选帧，尚未应用') || <span>{previewState.loading ? '正在准备快速预览…' : currentFrame?.previewError || currentFrame?.error || previewState.error || '正在读取预览…'}</span>}</button>}
+    {editing && editorMode === 'frame' && <button type="button" className={styles.candidate} disabled={!currentFrame?.url && !currentFrame?.previewUrl && !atlasUrl(editorFrame)} onClick={() => { const frame = editorFrame; const epoch = context.current; void loadFrame(frame, true).then(ready => { if (ready && epoch === context.current) setPreview(frame); }); }} aria-label="放大待选帧">{stableFrameVisual(editorFrame, '待选帧，尚未应用', <span>{previewState.loading ? '正在准备快速预览…' : currentFrame?.previewError || currentFrame?.error || previewState.error || '正在读取预览…'}</span>)}</button>}
     {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
     <video ref={video} src={source} hidden={Boolean(editing && editorMode !== 'video')} controls playsInline preload="metadata" loop={loop.enabled}
       onLoadedMetadata={event => { if (!mediaCurrent()) return; event.currentTarget.pause(); event.currentTarget.currentTime = Math.min(info.duration, editing ? info.timestamps[editorFrame] : viewRef.current.time); }}
@@ -869,7 +873,7 @@ function MultiviewPageContent() {
             listeners?.onKeyDown?.(event);
           }}
           onClick={() => { if (suppressSlotClick.current === item.id) { suppressSlotClick.current = ''; return; } selectSlot(item); }}>
-          {frameVisual(displayFrame, item.name || `第 ${index + 1} 张时间候选`) || <span>{frames[displayFrame]?.error || frames[displayFrame]?.previewError ? '这一帧预览未就绪' : '正在读取预览…'}</span>}
+          {stableFrameVisual(displayFrame, item.name || `第 ${index + 1} 张时间候选`, <span>{frames[displayFrame]?.error || frames[displayFrame]?.previewError ? '这一帧预览未就绪' : '正在读取预览…'}</span>)}
         </button>
         <figcaption className={styles.frameFooter}>
           <input aria-label={`第 ${index + 1} 张方向名称`} maxLength={40} value={item.name} placeholder={`第 ${index + 1} 张名称`} disabled={exporting}

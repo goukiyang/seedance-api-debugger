@@ -32,6 +32,7 @@ export const MULTIVIEW_SETTINGS_FIXTURE_SOURCES = [
   "src/app/multiview/useMultiviewWork.ts",
   "src/app/multiview/multiview-work-client.ts",
   "src/app/multiview/multiview-preview-image.ts",
+  "src/app/multiview/MultiviewFrameImage.tsx",
   "src/app/multiview/page.tsx",
   "src/app/multiview/multiview.module.css",
   "src/app/multiview/multiview-generation.module.css"
