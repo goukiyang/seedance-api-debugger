@@ -2,7 +2,6 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { fork, ChildProcess } from 'node:child_process';
-import { createRequire } from 'node:module';
 import type { HdIntegrity, HdEncoderParameters } from './hd-encoder';
 
 export const HD_IMAGE_PROTOCOL = 'hd-image-process-v1';
@@ -116,9 +115,10 @@ export async function runHdImageProcessor(request: HdImageRequest, options: {
   if (active.size) throw new HdProcessorError('hd_processor_busy', false);
   const limits = options.limits || HD_IMAGE_LIMITS;
   const applicationRoot = options.applicationRoot || process.cwd();
-  const loader = createRequire(path.join(applicationRoot, 'package.json')).resolve('tsx');
+  // Node resolves --import from the child cwd, outside Webpack's dependency
+  // graph. Source/output paths stay absolute and TMPDIR stays run-private.
   const child = fork(options.script || path.join(applicationRoot, 'scripts/process-hd-image.ts'), [], {
-    execArgv: ['--import', loader], detached: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+    execArgv: ['--import', 'tsx'], cwd: applicationRoot, detached: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
     env: { NODE_ENV: 'production', PATH: process.env.PATH || '', TMPDIR: request.workDirectory },
     serialization: 'json',
   });
