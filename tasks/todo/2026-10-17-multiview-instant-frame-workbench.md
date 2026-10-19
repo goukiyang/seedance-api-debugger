@@ -249,7 +249,9 @@
 | MVAUD03 | 权限与恢复闭环 | 失权、换号、换源、迟到结果、刷新和回退均有明确保护 | 已完成规划审查；功能待用户手验 |
 | MVAUD04 | 验收与发布闭环 | 工程门槛、真实运行证据、手验边界和停止条件可独立判定 | 已完成规划审查；未构建、未部署 |
 
-## 15. MV13–MV16 保存设置与即时调帧（2026-10-19，实施中）
+## 15. MV13–MV16 保存设置与即时调帧（2026-10-19，已部署待手验）
+
+当前结论：本节五项MV13–MV17已完成工程及保护部署v0.98.0，待用户手动验收，实际source/BUILD及原证见§15.6。下列候选阻断保留为历史，不是当前发布失败。
 
 2026-10-19 14:44Z第二候选8e9：主npm完整prebuild/Next/types/lint/静态页exit0，controller收尾保护exit1、未写成功build回执，guard未build。只读对比663旧合同，仅一条deleted_at由null变为14:42:07.321Z；内存仅还原该字段即复现原hash，其余全保护通过；同秒原鉴权删除端点HTTP200（access无body/账号，不冒精确请求体）。已授权最小私有保护修正：19费用/输入字段hash不变，deleted_at独立投影，旧非空不许复活/改时/丢行，新隐藏须真实快照区间合法毫秒；42纯actual assertProtection正反例exit0。原before、日志和包保留，未重造main-build.json，未改业务/DB/费用。原证在8e9目录，私有release-r02/common及工程原件为本轮唯一发布保护差量；新精确main/三文件guard/run双完整重建，不抬0.98.0版本。
 
@@ -261,10 +263,10 @@
 
 | 编号 | 任务内容 | 完成标准 | 当前状态 |
 | --- | --- | --- | --- |
-| MV13 | 生成设置保存/另存及共享 | 独立360基准提示词版本、型号/时长/清晰度/补充/高级设置实际保存，默认授权同事可用，不共享媒体或项目权限 | 实现已落，统一Verify中 |
-| MV14 | 原视频高度与循环归位 | 实际视频260px至少加倍至520px，窄屏自适应；首用循环开、旧显式false保留，按钮贴原工具区 | 实现已落，统一Verify中 |
-| MV15 | 每格选帧方案保存/另存共享 | 实际帧index/数量/顺序/名称，跨fps/过短不静默换算；当前排版/原画质保持 | 实现已落，统一Verify中 |
-| MV16 | 左右移帧流畅化 | 同一实际atlas帧与标签、最后目标胜出，不逐次等PNG；放大/导出/作品仍原尺寸 | 实现已落，同媒体等价诊断随统一Verify收集 |
+| MV13 | 生成设置保存/另存及共享 | 独立360基准提示词版本、型号/时长/清晰度/补充/高级设置实际保存，默认授权同事可用，不共享媒体或项目权限 | 已完成工程与保护部署，待用户手动验收 |
+| MV14 | 原视频高度与循环归位 | 实际视频260px至少加倍至520px，窄屏自适应；首用循环开、旧显式false保留，按钮贴原工具区 | 已完成工程与保护部署，待用户手动验收 |
+| MV15 | 每格选帧方案保存/另存共享 | 实际帧index/数量/顺序/名称，跨fps/过短不静默换算；当前排版/原画质保持 | 已完成工程与保护部署，待用户手动验收 |
+| MV16 | 左右移帧流畅化 | 同一实际atlas帧与标签、最后目标胜出，不逐次等PNG；放大/导出/作品仍原尺寸 | 已完成工程/等价性能/部署；用户Chrome整页性能待手验 |
 
 保存沿既有PlatformSetting单对象CAS＋OperationLog原mutation回执，无DDL/新平台；非admin仅复用当前默认或当前有权读取的共享设置具体revision所引用prompt。quote/create同绑定鲜核、旧受理/未知先回原记录。默认共享只针对显式保存设置，不发布草稿、媒体、作品、项目/卡或审批；应用沿原撤销/现场，未知保存只GET原号。
 
@@ -276,13 +278,13 @@
 
 | 编号 | 任务内容 | 完成标准 | 当前状态 |
 | --- | --- | --- | --- |
-| MV17 | 同作品最后修改默认保存 | 同workId的普通编辑/自动或普通保存更新原作品；仅显式另存新建workId；既存重复不删/不合并，账号、原mutation、CAS与原画质保持 | 已授权，追查身份/回执/恢复链中 |
+| MV17 | 同作品最后修改默认保存 | 同workId的普通编辑/自动或普通保存更新原作品；仅显式另存新建workId；既存重复不删/不合并，账号、原mutation、CAS与原画质保持 | 已完成工程与保护部署，待用户手动验收 |
 
-原话：“如果是同一份3d多视图作品没有手动另存为就不要新建一份。默认保存最后的修改就好了。追加”。本次作品库截图仅聊天inline可见、尚无可访问本地文件，不能冒已归档或用旧图代替。同名/图像相似不作为身份；先复用已有base作品/branch及useMultiviewWork能力，不新建去重系统。发布冻结暂停，前四项未变工程证据保留，只对新增影响统一增补Verify/Review，完成五项后一次保护发布；不是恢复TRACE/GEN。
+原话：“如果是同一份3d多视图作品没有手动另存为就不要新建一份。默认保存最后的修改就好了。追加”。本次作品库截图仅聊天inline可见、尚无可访问本地文件，不能冒已归档或用旧图代替。同名/图像相似不作为身份；复用已有base作品/branch及useMultiviewWork能力，不新建去重系统。追加时暂停发布冻结，保留前四项未变证据并统一增补Verify/Review；五项现已按§15.6一次保护部署，未恢复TRACE/GEN。
 
 ### 15.5 复用与来源（本批核对）
 
-当前整批节点：MV13–MV17代码与工程fixture均已集成，R03新MV17真实隔离SQLite/session/API 5组及最终完整tsc均exit0；MV13设置9组、MV15选帧8组、R02图集预览与同原片显示耗时原证按未变范围复用。默认prebuild保原4生图组、上传组及RATE原门，再加入多视图四子组，后续精确Linux20 main/guard完整构建中统一实跑。TypeScript AST逐函数对比确认works服务除list只读偏好外的24函数同原e6bb字节，create/branch/原mutation/CAS/lease/publish及render/decoder/worker和Prisma schema均未改，原作品消费者不需重启。私有发布保护新增4类旧设置/回执/作品身份subset保留，实际assertProtection 13正反例、11私有脚本语法exit0；未运行生产/供应商/浏览器验收。候选计划v0.98.0，尚未上传/完整构建/部署；正式根原证在 `mv13-16/local-verify-r03/`。
+14:16Z历史实现节点（现已由§15.6发布收口替代）：MV13–MV17代码与工程fixture均已集成，R03新MV17真实隔离SQLite/session/API 5组及最终完整tsc均exit0；MV13设置9组、MV15选帧8组、R02图集预览与同原片显示耗时原证按未变范围复用。默认prebuild保原4生图组、上传组及RATE原门，再加入多视图四子组，后续精确Linux20 main/guard完整构建中统一实跑。TypeScript AST逐函数对比确认works服务除list只读偏好外的24函数同原e6bb字节，create/branch/原mutation/CAS/lease/publish及render/decoder/worker和Prisma schema均未改，原作品消费者不需重启。私有发布保护新增4类旧设置/回执/作品身份subset保留，实际assertProtection 13正反例、11私有脚本语法exit0；未运行生产/供应商/浏览器验收。当时为v0.98.0待发布候选，尚未上传/完整构建/部署；正式根原证在 `mv13-16/local-verify-r03/`。
 
 - 生图模板真实保存/另存入口 `src/app/image-studio/studio.tsx:2328/3736` 已查，用户已明确指它；复用默认同事共享、本人保存、另存及原操作恢复习惯。其Module表强依赖图片素材，不为纯参数伪造媒体原件；沿本站PlatformSetting＋OperationLog原事务/CAS保存，无新系统或DDL。
 - [FFmpeg实际tile滤镜源码](https://github.com/FFmpeg/FFmpeg/blob/master/libavfilter/vf_tile.c)的get_tile_pos/filter_frame及尾块处理已读；复用本站已部署6×4图集，未引入新解码依赖。旧MVF §3 的WebCodecs/Mediabunny/mp4box比较仍有效，不重做选型。
@@ -290,4 +292,13 @@
 - [Prisma官方事务/OCC代码例](https://www.prisma.io/docs/orm/v6/prisma-client/queries/transactions#optimistic-concurrency-control)已核版本条件＋updateMany返回count的冲突拒绝方式；继续使用项目现有版本/原事务，不升级依赖。保存revision不匹配就拒绝，不用最后写入覆盖其它端；MV17真实用户选择仍沿fresh原作品＋CAS。
 
 
-MV13–MV16阶段对账（UTC2026-10-19）：四包已集成。隔离设置9组、选帧8组及图集预览工程通过；完整类型检查exit0。R01两处fixture导入/浏览器闭包错误已保原日志并一次集中修正，R02预览/同原片等价性能exit0。相同0–15帧序列、解码+双rAF实际显示终点，旧/新冷p95=466.2/49.6ms，暖150.5/35.4ms，连点最终49/49且缓存24张/2块；不代表线上用户Chrome或完整React页p95，图集准备另计。版本0.98.0为待发布候选；新main/guard完整构建与部署尚未开始，功能仍用户手验。
+MV13–MV16历史阶段对账（UTC2026-10-19）：四包已集成。隔离设置9组、选帧8组及图集预览工程通过；完整类型检查exit0。R01两处fixture导入/浏览器闭包错误已保原日志并一次集中修正，R02预览/同原片等价性能exit0。相同0–15帧序列、解码+双rAF实际显示终点，旧/新冷p95=466.2/49.6ms，暖150.5/35.4ms，连点最终49/49且缓存24张/2块；不代表线上用户Chrome或完整React页p95，图集准备另计。当时0.98.0为待发布候选，现已按§15.6完成双构建与部署，功能仍用户手验。
+
+### 15.6 MV13–MV17 保护部署收口（2026-10-19）
+
+- 已部署，待用户手动验收。实际Web/image同源`058cc070f42b6d6ab148243a71c9df23ea9065c1`，v0.98.0，BUILD`9jE1upB8dBEzxH2oF2C8i`；15:13:19.407Z完成保护切换。相容guard`76be911e44635e680ee6a538cfdaa0080d03535c`／v0.98.0+points-pricing-guard.1／BUILD`ex6j5PZToeWrHS0SXK5JD`，保新reader，只回程序不回DB/媒体/账本/回执，未演练；永久root+i屏障保持，仅按真实双构建换允许pair，旧writer实际被拒绝。
+- Linux Node20.20.2主/guard完整`npm run build`均exit0，每包6组image/upload/multiview与RATE G01–G30、类型/lint、87静态页和最终产物均真实完成；各1538源码文件、96/1407门来源哈希及时段核对一致。同lead Review0open，私有单向隐藏42正反例通过，所有工程生产写/生成/收费/浏览器计数0。
+- 发布证据分层：原9资源证明基础/定价资源；另从实际app-build-manifest及client-reference取得多视图页面JS＋7个相关CSS，共8资源公网200/长度/SHA与新产物及允许清单一致，含生成设置、选帧方案、保存到原作品、work-binding和520px标记。公网release为0.98.0，匿名summary空是原安全合同。静态字节不冒渲染布局/操作验收。
+- 原667输入/费用合同、旧隐藏、9保护任务/账本/原图、30旧未知上传/66回执、10作品/45原mutation和19storage绑定保持；用户14:42:07Z正常隐藏保留。DB身份64784:171442216，HD/works/role/template四后台原PID/Invocation不变。0生产DDL/数据迁移/原请求重发，未恢复暂停TRACE/GEN。
+- 正式根私有原证：`docs/materials/2026-10-17-multiview-instant-frame-workbench/mv13-16/9e54cb26-6124-4e86-a692-6de347201c08/`：两build原件、`integrated-review.json`、`unified-verification.json`、`deployment-closure.json`、`release-evidence-final/`与独立`multiview-target-public-proof.json`。主源码与guard已推现remote，后续docs HEAD不冒实际运行源。c24e/8e9原失败包、日志、before和归档抓早失败原件保留，未补造成功回执。
+- MV13/MV14/MV15/MV17功能及真实页面MV16流畅度、手机布局/交互由用户手验；R02同原片等价控制器证据按未变范围复用，不冒真实用户Chrome/fullReact/生产p95，图集准备另计。用户已明确参考“生图模板”；本轮4张及MV17 inline截图尚无本地附件路径，不冒归档，不用旧图替代。
