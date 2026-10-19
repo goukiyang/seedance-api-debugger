@@ -1,5 +1,9 @@
 # 项目资料索引
 
+TRACE03-FIX b441 当前归档（2026-10-19）：[最终切换前拒绝原证](2026-10-17-image-content-incident/inc24/trace03-fix/b441449d-0f6d-47bf-b4d2-d50904216622/switch-launch-failed.json)、[原站安全收口](2026-10-17-image-content-incident/inc24/trace03-fix/b441449d-0f6d-47bf-b4d2-d50904216622/stopped-attempt-restoration.json)、[统一工程汇总](2026-10-17-image-content-incident/inc24/trace03-fix/b441449d-0f6d-47bf-b4d2-d50904216622/unified-verification.json)、[整批Review](2026-10-17-image-content-incident/inc24/trace03-fix/b441449d-0f6d-47bf-b4d2-d50904216622/integrated-review.json)、同目录main/guard-build.json及原log均可读，真实同run/source与SHA已核。两个完整Linux20构建exit0，版本v0.96.1／guard后缀只是候选，未部署；最后外层批准硬链接nlink2被首项rootFile拒绝，0生产动作。合法并发MV设置保存由concurrent-settings-delta.json和proof-readonly-concurrent-settings.json独立只读对账，不覆盖原prepare失败。状态经用户确认暂缓，只在明确后续要求时恢复；历史原图／Word与失败材料不删除、不外发。私有材料只在正式根，不推公开。
+
+以下此前节点保留为历史。
+
 当前 TRACE03-FIX 15564962：[集中guard诊断](2026-10-17-image-content-incident/inc24/trace03-fix/15564962-d2b2-4592-840d-420808801a08/concentrated-guard-diagnostics.json)、[三工程文件修正patch](2026-10-17-image-content-incident/inc24/trace03-fix/15564962-d2b2-4592-840d-420808801a08/guard-fixture-correction.patch)、main-build.json/log、guard-build-failed.json/log及guard-evidence-originals的29原件均归正式根私有且SHA核同。来源真实161d/4145、Linux20同run；主完整exit0／BUILD l4L6u0bXgqMdi3XbrOGu2，guard默认门exit1未Next，两处夹具种子／ordinary配置根因与实际保护拒绝分开。私有33真实FS门通过，产品/15私有/TTL不变；仅3工程文件统一修正后新run14ccf815重新完整双build，不复制旧receipt、不复用旧main冒新证。生产2a不动；原Word／PNG沿原入口，不外发，功能用户手验。
 
 以下为历史节点。

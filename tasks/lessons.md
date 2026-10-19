@@ -2,6 +2,8 @@
 
 ## 2026-10-18 - TRACE03-FIX新旧合同以服务器保存对象为边界
 
+- 批准文件“独占发布”不能用保留第二入口的硬链接：b441的外层fs.linkSync造成nlink2，而真实rootFile要求nlink1，在第一项approval读取即正确拒绝。校验必须针对最终将被reader打开的对象及其全部元数据，不能只核临时上传对象后再改变链接数。此为执行失误，非业务／供应商／构建失败；用户已限定再失败即停止时，保原站与原件，不以清链接后重跑当“只是传输修正”。本批经用户确认暂缓，0维护停机／生产写。
+
 - guard工程矩阵必须区分实际包保护与普通合同流程：actual guard无shim，读取预存收费快照须带完整policy+同revision历史记录，缺revision仍拒绝；不能把坏种子误判reader不兼容。需要创建的隔离RATE core/toolflow子进程才显式注ordinary package缓存视图和真实同run ID，首业务import前核候选package缓存／实际admission模块路径及复制runtime package原字节；heartbeat/readiness继续真实source/PID/cwd/fs SHA。日志／receipt逐级明示，不能改raw package、放宽生产保护或把ordinary测试当guard允许生成。15564962主完整成功、guard prebuild失败和未Next分层保留，3工程文件一包修正再新源双build。
 
 - 发布器迁到私有子目录时，回执写入位置与后续reader必须共用同一精确resolver；2ae主完整build真实成功后，save(operationStage)与读m.stage的错位导致prepare拒绝，32组原门没有覆盖真实写读位置。补实际临时文件经同writer／严格reader的IO门及生产调用接线，不能只查源码字符串，也不搬旧receipt冒原路径或新增跨run许可来省构建；旧成功和失败分层保留，纯固定记录新源重建不改产品／TTL。
