@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import type { PrismaClient } from '@prisma/client';
 import type { SessionUser } from '../src/lib/auth/session';
 import type { StudioAssetInput, StudioRunSnapshot, StudioTemplateRecipe } from '../src/lib/template-studio/types';
@@ -179,13 +180,22 @@ export async function runPricingVideoContextContractFixture(): Promise<FixtureRe
     for (const [index, url] of Array.from(videoUrls.entries())) {
       fs.writeFileSync(path.join(runtime, 'public', url.slice(1)), Buffer.from(`Readable fixture bytes ${index}; not a decoded video.`), { flag: 'wx', mode: 0o600 });
     }
-    // Dynamic imports bind cwd-derived media access to scratch, never candidate public/uploads.
-    client = (await import('../src/lib/prisma')).prisma;
+    // Load after the cwd guard, using one graph for runtime functions and Error classes.
+    const loadRuntime = createRequire(path.join(candidateRoot, 'package.json'));
+    const databaseRuntime: typeof import('../src/lib/prisma') = loadRuntime(path.join(candidateRoot, 'src/lib/prisma.ts'));
+    client = databaseRuntime.prisma;
     await assertDatabase(client, filename);
     ok(Object.values(await tableCounts(client)).every(count => count === 0), 'Every business table must be empty before any committed seed');
-    const { resolveVideoPricingContext, savedVideoPricingContextInput, issueVideoPricingCredential, verifyVideoPricingCredential, assertVideoPricingFinalReferences, VideoPricingContextError } = await import('../src/lib/pricing/video-context');
-    const { PricingChargeError } = await import('../src/lib/pricing/frozen-charge');
-    const { isExternalUser } = await import('../src/lib/access/external-role');
+    const contextRuntime: typeof import('../src/lib/pricing/video-context') = loadRuntime(path.join(candidateRoot, 'src/lib/pricing/video-context.ts'));
+    const chargeRuntime: typeof import('../src/lib/pricing/frozen-charge') = loadRuntime(path.join(candidateRoot, 'src/lib/pricing/frozen-charge.ts'));
+    const accessRuntime: typeof import('../src/lib/access/external-role') = loadRuntime(path.join(candidateRoot, 'src/lib/access/external-role.ts'));
+    const { resolveVideoPricingContext, savedVideoPricingContextInput, issueVideoPricingCredential, verifyVideoPricingCredential, assertVideoPricingFinalReferences, VideoPricingContextError } = contextRuntime;
+    const { PricingChargeError } = chargeRuntime;
+    const { isExternalUser } = accessRuntime;
+    const directError = new PricingChargeError('fixture class identity');
+    ok(directError instanceof PricingChargeError, 'Direct errors retain the real runtime class');
+    equal(directError.constructor, PricingChargeError, 'Direct constructor identity is stable');
+    equal(Object.getPrototypeOf(directError), PricingChargeError.prototype, 'Direct prototype identity is stable');
     const db = client;
     const seed = await db.$transaction(async tx => {
       for (const actor of actors) await tx.user.create({ data: { id: actor.id, name: actor.name, username: actor.username,
@@ -279,7 +289,16 @@ export async function runPricingVideoContextContractFixture(): Promise<FixtureRe
         && expected.test(error.message) && (status === undefined || error.status === status));
       assertions++;
     };
-    const rejectsCredential = (action: () => unknown, label: string) => { assert.throws(action, PricingChargeError, label); assertions++; };
+    const rejectsCredential = (action: () => unknown, label: string) => {
+      let actual: unknown;
+      assert.throws(() => { try { action(); } catch (error) { actual = error; throw error; } }, PricingChargeError, label); assertions++;
+      assert.ok(actual instanceof PricingChargeError); assertions++;
+      equal(actual.constructor, PricingChargeError, `${label}: real constructor identity`);
+      equal(Object.getPrototypeOf(actual), PricingChargeError.prototype, `${label}: real prototype identity`);
+      equal(actual.status, 409, `${label}: refused with the real status`);
+      equal(actual.code, 'pricing_quote_changed', `${label}: real pricing refusal code`);
+      equal(actual.message, '报价范围或有效期已变化，请保留输入重新报价；尚未生成', `${label}: real refusal message`);
+    };
     const plain = { project_id: ids.projects[0], video_card_id: ids.cards[0], provider: 'seedance', model: 'dreamina-seedance-2-0-260128',
       resolution: '480p', ratio: '16:9', duration: 5, draft: false, reference_video_urls: [] };
     const templateBody = { ...plain, template_studio_run_id: ids.run, template_studio_assets: inputs };
