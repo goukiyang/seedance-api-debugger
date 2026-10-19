@@ -4,10 +4,10 @@ project: video-api-debugger
 document_version: 1.0.1
 target_root: /Volumes/Data/Projects/video-api-debugger
 version_source: package.json → src/lib/release.ts → /api/release
-runtime_observed: 2026-10-19T17:39Z v0.99.0 / 32ba8e5f67112de63721c11e3cdc131aca1dab1a / BtIRbD_WoayJbAlayZo-0
-source_reviewed: codex/hd-chain-reliability-20261019 / 6e01d0f8加本批未提交实现（不是运行源）
+runtime_observed: 2026-10-19T20:29Z v0.99.1 / 53eb8b54228fa844960b8c9c8015227af0f99bc8 / 5lgzI7p_lkCtSb0WZ6BSk
+source_reviewed: codex/hd-chain-reliability-20261019 / 5f1901b8af8f72ab81c571376cc2e3f31bc71121（不是运行源）
 relock_at_execution: true
-status: 2026-10-19用户已授权H01–H10完整实施及保护部署；整批实现中，尚未构建或切换
+status: H01–H10业务已齐；483c双完整构建成功，但最终私有观测拒绝；R05单一观测修正及真实三unit只读检查通过，按原合同新精确源/run重建，尚未维护或切换
 planning_depth: G5（跨前台、后台、持久文件、权限、生产切换与回退）
 risk: L4（原件/私有媒体/历史结果/发布及恢复保护）
 updated_at: 2026-10-19 America/Los_Angeles
@@ -113,7 +113,7 @@ updated_at: 2026-10-19 America/Los_Angeles
 | H07 | 权限、缓存和下载守住原合同：`image-read-session.ts`、`native-download.ts`、`image-comparison.ts`、`use-hd-image-source.ts`与原媒体授权路由 | 无跨账号/跨版本/跨变体复用；拒绝清族；HEAD/preload不创建任务；原图/复制/下载不降档或越权 | H06同一前端包 | 代码齐，统一检查中；未部署 |
 | H08 | 后台状态及最小诊断：`HdDerivativeManagement.tsx`、`src/app/api/admin/hd-derivatives/route.ts`、hdStatus及执行阶段记录 | 状态/实际进展/重试时机对应；admin/Origin/CAS保持；原异常脱敏可定位，不出现假健康/假完成 | H05状态合同；UI可独立 | 代码齐，统一检查中；未部署 |
 | H09 | 把防复发检查接入真实构建/发布：扩展`test-hd-stability.ts`、`test-hd-display.ts`及必要私有夹具，接现有`check-image-recovery.mjs`完整回执门；新增统一HD存储运行检查供本次发布控制器调用 | 隔离负例真实失败；既有门不丢；缺脚本/空跑/旧回执/目录分叉拒绝发布；不是只写未调用测试 | H01–H08整批完成后统一运行 | 已接默认prebuild，统一检查中 |
-| H10 | 同批版本、保护部署、相容回退与手验交付：`package.json`、`src/lib/release.ts`、`ReleaseNotice.tsx`及实际服务器发布控制器 | 完整构建/Git/真实运行/持久保护有证；保可运行相容回退；已部署待用户手验，不冒功能已通过 | H09通过，发布窗口鲜核 | 私有配套齐，工程检查中；未认领/上传/构建/切换 |
+| H10 | 同批版本、保护部署、相容回退与手验交付：`package.json`、`src/lib/release.ts`、`ReleaseNotice.tsx`及实际服务器发布控制器 | 完整构建/Git/真实运行/持久保护有证；保可运行相容回退；已部署待用户手验，不冒功能已通过 | H09通过，发布窗口鲜核 | 483c双完整build通过但最终只读观测拒绝；R05单点修正后按原合同新run重建，未维护或切换 |
 
 ### 3.1 共享修改边界和执行顺序
 
@@ -262,3 +262,5 @@ R03私有发布组合已统一检查：语法、原机制接线99、实际adapte
 ca4a9490两prepare通过，Linux20主完整build的默认8组与RATE门完成；HD五组25/13/23/4/5全部通过、禁止调用/生产写/收费/浏览器均0。随后Next14 webpack因父程序`createRequire(...).resolve('tsx')`追踪ESM依赖，于19:40:05.218Z真实exit1（signal=null），尚未完整类型/静态页，guard未完整build。原失败、70断言收据和日志留正式根同run，不冒完整构建通过。仅`hd-image-processor.ts`窄修：移除父程序解析，child用Node20原生`--import tsx`并显式cwd锁原applicationRoot；原绝对脚本/IPC/请求/结果/超时及退出保护不变，不加全局externals/ignore、不改依赖/版本。按新精确源/guard/run统一完整构建；0生产维护/网络/服务动作，53eb原站保持。
 
 0ef4e9a5应用npm完整构建实际exit0，编译/类型lint/87页与产物输出齐；随后私有candidate的MV源清单漏已发布53eb既有`MultiviewFrameImage.tsx`，发布reader真实exit1，尚未写main-build.json、guard未完整build。原stage、完整日志、207份原工程JSON/log及失败原文保留；不事后冒原build回执。仅内存补该唯一项后，原完整verifyGates只读诊断exit0（含8组及RATE G01–G30），明确OS时段仅诊断非发布凭证。主管确认沿既有合同重建而不新增收养/续签许可；新private-r04只改candidate一行，21私有源不变，MV36/上传17/default8三组集合完全相同及缺项/多项/旧35清单共10项正反证通过。此提交只记录该事实以取得新immutable候选根，全部业务字节、v0.99.2、TTL与保护不变；新的双完整build仍须真实原门。当前0维护/网络/服务动作。
+
+483cdbf0主/guard真实完整build均exit0并有原回执，BUILD分别BJWW1Q1--lI8Ltr9kAS5T与24oKmy2oygH8eDzLjfdFh；最终只读proof另因systemd255省略旧HD空ExecStartPre而退出1，未进入维护。原manifest、R04私有源、两完整build与46+46原工程文件保持。`show --all`仍省略该exec数组，原生D-Bus精确返回`a(sasbttttuii) 0`；R05仅固定HD且仅该缺字段走类型/空长度核实后规范为空，Web/image原root启动保护及其它字段仍严格。10正反例和真实三unit新函数只读检查exit0，六原PID/Invocation、原保护/HD1250与分叉121全量无冲突；0维护/网络/服务/业务DB写。未引入补充授权、跨run承接或延长TTL，采用纯记录新精确source/guard/run依原合同完整重建，业务/v0.99.2不变；已成功旧build作为历史证据保留，不冒新发布凭证。
