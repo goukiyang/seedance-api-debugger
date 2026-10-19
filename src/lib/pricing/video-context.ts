@@ -14,6 +14,7 @@ import { pricingFingerprint, type PricingClient } from './catalog';
 import { PRICING_POLICY_KEY } from './admin-contract';
 import { PricingChargeError } from './frozen-charge';
 import type { PricingVideoPurpose, PricingReferenceVideo } from './pricing-authoring-contract';
+import { parseMultiviewSettingsBinding } from '@/lib/video/multiview-generation-contract';
 
 export type VideoPricingContext = {
   fingerprint: string;
@@ -104,9 +105,18 @@ async function resolveContext(user: SessionUser, body: Record<string, unknown>,
   }
   const { referenceVideo, referenceVideoCount, referenceVideoFingerprint } = normalizedVideoPricingReferenceScope(body.reference_video_urls, templateVideoUrls);
   const purpose = operation === 'draft_upgrade' ? 'draft_upgrade' : body.draft === true ? 'draft' : 'standard';
+  const snapshot = body.multiview_generation && typeof body.multiview_generation === 'object' && !Array.isArray(body.multiview_generation)
+    ? body.multiview_generation as Record<string, unknown> : null;
+  const rawSettings = snapshot?.settingsBinding ?? body.multiview_settings;
+  const multiviewSettings = rawSettings === undefined ? null : parseMultiviewSettingsBinding(rawSettings);
+  if (rawSettings !== undefined && !multiviewSettings || body.multiview_settings !== undefined && snapshot?.settingsBinding !== undefined
+    && JSON.stringify(parseMultiviewSettingsBinding(body.multiview_settings)) !== JSON.stringify(multiviewSettings)) {
+    throw new PricingChargeError('已保存设置与报价绑定不一致，未提交生成');
+  }
   const fingerprint = pricingFingerprint({ v: 1, actorId: user.id, projectId, videoCardId, payer,
     provider: body.provider || 'seedance', model: body.model, resolution: body.resolution, duration: body.duration,
-    ratio: body.ratio || null, sourceDraftTaskId: body.source_draft_task_id || null, purpose, referenceVideo, referenceVideoFingerprint, templateBinding });
+    ratio: body.ratio || null, sourceDraftTaskId: body.source_draft_task_id || null, purpose, referenceVideo, referenceVideoFingerprint, templateBinding,
+    ...(multiviewSettings ? { multiviewSettings } : {}) });
   return { fingerprint, actorId: user.id, projectId, videoCardId, payer, referenceVideo, purpose, referenceVideoCount, referenceVideoFingerprint, templateRunId };
 }
 export async function resolveVideoPricingContext(user: SessionUser, body: Record<string, unknown>, operation: 'create' | 'draft_upgrade' = 'create') {

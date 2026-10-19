@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { readPricingFixtureInputs } from './pricing-fixture-input.mjs';
+import { MULTIVIEW_SETTINGS_FIXTURE_SOURCES } from './multiview-settings-fixture-inputs.mjs';
 
 // The build and the protected release controller use the same offline gate.
 // No application database, credentials, provider or browser is accepted here.
@@ -82,6 +83,10 @@ const fixtures = [
       'src/app/api/assets/upload-complete/route.ts', 'src/app/api/assets/multipart/complete/route.ts',
     ] },
 ];
+fixtures.push({ file: 'scripts/multiview-settings-batch-engineering.mjs', schema: 'multiview-settings-batch-engineering.v1',
+  marker: 'Multiview settings engineering receipt: ', checks: ['saved_settings_permissions_snapshots_and_timing',
+    'frame_settings_keep_media_and_layout_private', 'preview_atlas_loop_exact_output_contract',
+    'same_work_identity_baseline_and_explicit_original_save'], sources: MULTIVIEW_SETTINGS_FIXTURE_SOURCES });
 const pricingGate = 'scripts/check-pricing-policy.mjs';
 const sourceFiles = ['package.json', entry, pricingGate, ...fixtures.flatMap(fixture => [fixture.file, ...fixture.sources])];
 const hash = value => createHash('sha256').update(value).digest('hex');

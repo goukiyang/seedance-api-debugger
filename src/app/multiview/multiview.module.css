@@ -34,7 +34,8 @@
 .displaySize { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-secondary); }
 .displaySize select { min-height: 34px; padding-block: 4px; }
 .originalPanel { margin: 0 0 14px; padding: 12px; border: 1px solid var(--border-color); border-radius: 9px; background: var(--bg-panel); }
-.originalPanel .videoArea { max-width: 960px; }
+.originalPanel .videoArea { max-width: 100%; }
+.frameSettingsRow { margin-bottom: 12px; }
 .workbench { display: flex; flex-direction: column; align-items: stretch; gap: 16px; }
 .resultMain { min-width: 0; }
 .previewToolbar { min-height: 36px; justify-content: space-between; font-size: 12px; margin-bottom: 8px; color: var(--text-secondary, #627080); }
@@ -86,12 +87,15 @@
 .page .candidate { width: 100%; height: 100%; min-height: 0; padding: 0; overflow: hidden; background: var(--bg-tertiary, #e9edf1); }
 .candidate img { width: 100%; height: 100%; object-fit: contain; }
 .candidate span { padding: 12px; font-size: 13px; }
-.videoArea { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.videoArea { display: flex; width: 100%; flex-direction: column; align-items: flex-start; gap: 6px; }
+.videoToolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; width: 100%; }
+.page .videoToolbar button { min-height: 32px; font-size: 12px; padding: 4px 8px; }
 .videoArea video { display: block; width: 100%; max-height: 260px; background: #111; border-radius: 6px; }
 .editorStage { width: 100%; height: clamp(120px, 22dvh, 210px); background: var(--bg-tertiary); border-radius: 6px; overflow: hidden; }
 .editorStage video { height: 100%; max-height: none; object-fit: contain; }
 .videoArea video[hidden] { display: none; }
 .originalStage { width: 100%; }
+.originalStage video { width: min(100%, calc(520px * var(--mv-video-ratio, 1))); height: auto; max-height: none; object-fit: contain; }
 .previewModes { display: flex; width: 100%; gap: 4px; }
 .page .previewModes button { min-height: 30px; padding: 4px 8px; font-size: 12px; }
 .previewModes button[aria-pressed=true] { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
@@ -141,7 +145,7 @@
   .page { padding: 14px; } .stages { gap: 7px; justify-content: space-between; font-size: 11px; } .stages li { gap: 4px; } .stages li > span { width: 20px; height: 20px; }
   .workbench { gap: 18px; } .resultMain, .tools { width: 100%; }
   .collageViewport { padding: 8px; max-height: 65vh; } .exportBar { gap: 8px; } .exportActions { width: 100%; } .exportActions button { flex: 1 1 auto; min-height: 40px; padding-inline: 8px; }
-  .toolBody { padding: 12px; } .editorStage { height: clamp(120px, 27dvh, 230px); } .originalStage video { max-height: 320px; }
+  .toolBody { padding: 12px; } .editorStage { height: clamp(120px, 27dvh, 230px); }
   .slotStrip button { flex-basis: 65px; } .slotStrip img { width: 52px; height: 52px; }
   .slotStrip .atlasFrame { width: 52px; height: 52px; flex-basis: 52px; }
   .commandSpacer { min-width: 0; } .frameStepper { grid-template-columns: repeat(4, minmax(0, 1fr)); } .frameStepper label { grid-column: 1 / -1; grid-row: 1; }

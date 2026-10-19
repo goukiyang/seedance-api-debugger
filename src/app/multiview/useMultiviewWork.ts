@@ -4,8 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { readJsonResponse } from '@/lib/http/json-response';
 import type { MultiviewDraft, MultiviewInfo } from '@/lib/video/multiview-contract';
-import { isMultiviewWorkId, parseMultiviewWorkRecipe, multiviewWorkRecipesEqual, type MultiviewWorkDto,
+import { isMultiviewWorkId, parseMultiviewWorkRecipe, multiviewWorkRecipesEqual, multiviewWorkContentSignature, type MultiviewWorkDto,
   type MultiviewWorkRecipe, type MultiviewWorkReceipt } from '@/lib/video/multiview-work-contract';
+import { readMultiviewWorkBinding, retainMultiviewWorkBinding, hasMultiviewWorkBaseline, retainMultiviewWorkBaseline, prepareMultiviewCurrentWorkSave } from './multiview-work-client';
 
 type Options = { owner: string; authority: string; enabled: boolean; workId: string; taskId: string; explicitTaskId: string;
   info: MultiviewInfo | null; draft: MultiviewDraft | null; localPresent: boolean; allowCreate: boolean; editRevision: number;
@@ -13,7 +14,7 @@ type Options = { owner: string; authority: string; enabled: boolean; workId: str
 type Pending = { schema: 1; owner: string; taskId: string; sourceVersion: string; mutationId: string;
   action: 'create' | 'save' | 'branch'; workId: string | null; hash: string; result?: 'committed' | 'rejected' };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const signature = (recipe: MultiviewWorkRecipe | null, title: string) => JSON.stringify([recipe, title]);
+const signature = multiviewWorkContentSignature;
 export function appliedWorkRecipe(draft: MultiviewDraft | null, info: MultiviewInfo | null) {
   return draft && info ? parseMultiviewWorkRecipe({ ...draft, restoreOrder: draft.restoreOrder || [] }, info) : null;
 }
@@ -94,6 +95,7 @@ export function useMultiviewWork(options: Options) {
   const [message, setMessage] = useState('');
   const [stopped, setStopped] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const [baselineReady, setBaselineReady] = useState(false);
   const [retry, setRetry] = useState(0);
   const [storageFailed, setStorageFailed] = useState(false);
   const [loadedIdentity, setLoadedIdentity] = useState('');
@@ -114,7 +116,7 @@ export function useMultiviewWork(options: Options) {
     && value.identity === `${live.current.owner}:${live.current.authority}:${live.current.workId}:${live.current.taskId}`
     && live.current.enabled && !isClientSessionBlocked();
   const headers = () => ({ 'x-app-session-user': options.owner });
-  const titleKey = options.owner && options.taskId ? `sd2:multiview-work-title:v1:${options.owner}:${options.workId || options.taskId}` : '';
+  const titleKey = options.owner && options.taskId ? `sd2:multiview-work-title:v1:${options.owner}:${options.workId || work?.id || options.taskId}` : '';
   async function readWork(id: string, value: ReturnType<typeof scope>): Promise<MultiviewWorkDto> {
     const response = await fetch(`/api/video/multiview/works/${encodeURIComponent(id)}`, { cache: 'no-store', headers: headers(), signal: AbortSignal.timeout(30000) });
     const payload = await readJsonResponse<{ work?: unknown; error?: string }>(response);
@@ -132,12 +134,22 @@ export function useMultiviewWork(options: Options) {
       let next: MultiviewWorkDto | null = null;
       if (options.workId) next = await readWork(options.workId, value);
       else {
-        const params = new URLSearchParams({ taskId: options.taskId });
-        const response = await fetch(`/api/video/multiview/works?${params}`, { cache: 'no-store', headers: headers(), signal: AbortSignal.timeout(30000) });
-        const payload = await readJsonResponse<{ works?: unknown[]; error?: string }>(response);
-        if (!current(value)) return;
-        if (!response.ok || !Array.isArray(payload.works)) throw new Error(payload.error || '作品暂无法核对，此设备修改仍保留。');
-        next = payload.works.map(workFrom).find(item => item && item.sourceTaskId === options.taskId && item.parentWorkId === null) || null;
+        const originalWorkId = pendingRef.current?.workId;
+        const binding = originalWorkId ? null : readMultiviewWorkBinding(localStorage, options.owner, options.taskId);
+        const selectedId = originalWorkId || binding?.workId;
+        if (selectedId) {
+          next = await readWork(selectedId, value);
+          if (binding && next.sourceVersion !== binding.sourceVersion) throw new Error('原作品视频版本已变化，当前修改保留，请从原作品核对。');
+        } else {
+          const params = new URLSearchParams({ taskId: options.taskId });
+          const response = await fetch(`/api/video/multiview/works?${params}`, { cache: 'no-store', headers: headers(), signal: AbortSignal.timeout(30000) });
+          const payload = await readJsonResponse<{ works?: unknown[]; preferredWorkId?: string | null; error?: string }>(response);
+          if (!current(value)) return;
+          if (!response.ok || !Array.isArray(payload.works) || payload.preferredWorkId !== null && !isMultiviewWorkId(payload.preferredWorkId)) {
+            throw new Error(payload.error || '原作品身份暂无法核对，请重新读取；不会新建另一件作品。');
+          }
+          if (payload.preferredWorkId) next = await readWork(payload.preferredWorkId, value);
+        }
       }
       if (!current(value)) return;
       if (next && initialized.current && workRef.current && next.revision !== workRef.current.revision
@@ -145,9 +157,19 @@ export function useMultiviewWork(options: Options) {
         setConflict(true); setMessage('服务器作品已有不同内容，此设备修改保留，请选择继续方式。');
       }
       setWork(next); workRef.current = next; setHydrated(true); setLoadedIdentity(identity);
-      if (next && !editedTitle.current) setTitle(next.title);
+      if (next && !options.workId) {
+        const key = `sd2:multiview-work-title:v1:${options.owner}:${next.id}`;
+        const savedTitle = localStorage.getItem(key);
+        if (savedTitle !== null) {
+          if (savedTitle.length > 120) throw new Error('作品名称记录无效，原记录保留。');
+          setTitle(savedTitle); titleRef.current = savedTitle; editedTitle.current = true;
+        }
+        titleKnown.current = key;
+      }
+      if (next && !editedTitle.current) { setTitle(next.title); titleRef.current = next.title; }
+      if (next && next.sourceState === 'current' && !next.removed) retainMultiviewWorkBinding(localStorage, options.owner, next);
       if (next) { if (options.workId && options.taskId !== next.sourceTaskId) live.current.onSource(next); }
-      if (next?.recipe && next.sourceVersion && !options.workId) live.current.onBound(next);
+      if (next?.recipe && next.sourceVersion && !options.workId && !pendingRef.current) live.current.onBound(next);
     } catch (cause) { if (current(value)) { setStopped(true); setMessage(cause instanceof Error ? cause.message : '作品暂不可读取，当前修改保留。'); } }
     finally { if (current(value)) setLoading(false); }
     // Authority/target changes invalidate every response; draft edits do not restart this read.
@@ -155,12 +177,13 @@ export function useMultiviewWork(options: Options) {
   }, [identity, options.enabled, retry]);
   useEffect(() => {
     epoch.current++; lock.current = null; setWork(null); workRef.current = null; setPending(null); pendingRef.current = null;
-    setLoading(false); setBusy(false); setConflict(false); setStopped(false); setHydrated(false); setLoadedIdentity(''); setStorageFailed(false); setMessage('');
+    setLoading(false); setBusy(false); setConflict(false); setStopped(false); setHydrated(false); setBaselineReady(false); setLoadedIdentity(''); setStorageFailed(false); setMessage('');
     initialized.current = ''; acknowledged.current = ''; editedTitle.current = false; initialEditRevision.current = options.editRevision; titleKnown.current = ''; setTitle('');
     if (options.enabled && options.owner && options.taskId) {
       try {
         const original = readPending(options.owner, options.taskId); pendingRef.current = original; setPending(original);
-        const savedTitle = titleKey ? localStorage.getItem(titleKey) : null;
+        // A task-wide legacy title must not rename a different branch of that task.
+        const savedTitle = options.workId && titleKey ? localStorage.getItem(titleKey) : null;
         if (savedTitle !== null) { if (savedTitle.length > 120) throw new Error('作品名称记录无效。'); setTitle(savedTitle); editedTitle.current = true; }
         titleKnown.current = titleKey;
       } catch (cause) { setStorageFailed(true); setStopped(true); setMessage(cause instanceof Error ? cause.message : '原保存记录无法确认，未新建保存。'); }
@@ -176,18 +199,35 @@ export function useMultiviewWork(options: Options) {
     const key = `${identity}:${work.id}:${options.info.sourceVersion}`;
     if (initialized.current === key) return;
     if (!work.recipe || !work.sourceVersion) { setMessage('作品正在准备原视频和初始选帧，当前修改先保留在此设备。'); return; }
-    initialized.current = key;
+    initialized.current = key; setBaselineReady(false);
     if (work.sourceVersion !== options.info.sourceVersion || work.sourceState !== 'current' || work.removed) {
       setStopped(true); setMessage(work.removed ? '这件作品已移出作品库，请从已移出列表恢复后继续保存。' : '作品原视频版本暂不可确认，当前修改仅保留在此设备。'); return;
     }
-    const nextTitle = editedTitle.current ? titleRef.current : work.title;
-    setTitle(nextTitle);
-    acknowledged.current = signature(work.recipe, work.title);
-    setMessage('');
-    const localChanged = options.localPresent || options.editRevision !== initialEditRevision.current;
-    if (localChanged && !multiviewWorkRecipesEqual(recipe, work.recipe) || editedTitle.current && nextTitle !== work.title) {
-      setConflict(true); setMessage('此设备修改与作品中的内容不同，尚未覆盖。可打开服务器版本，或将此设备修改另存一版。');
-    } else if (!localChanged || JSON.stringify(recipe) !== JSON.stringify(work.recipe)) live.current.onRestore(work.recipe);
+    const value = scope();
+    void (async () => {
+      try {
+        const knownBaseline = await hasMultiviewWorkBaseline(localStorage, options.owner, work);
+        if (!current(value) || initialized.current !== key) return;
+        const currentRecipe = appliedWorkRecipe(live.current.draft, live.current.info);
+        if (!currentRecipe) return;
+        const nextTitle = editedTitle.current ? titleRef.current : work.title;
+        const localChanged = live.current.localPresent || live.current.editRevision !== initialEditRevision.current;
+        const differs = localChanged && !multiviewWorkRecipesEqual(currentRecipe, work.recipe!) || editedTitle.current && nextTitle !== work.title;
+        acknowledged.current = signature(work.recipe, work.title); setTitle(nextTitle);
+        if (workRef.current?.revision !== work.revision || differs && !knownBaseline) {
+          setConflict(true); setMessage('此设备修改尚未保存到原作品。可保存到原作品，或打开服务器版本。');
+          setBaselineReady(true); return;
+        }
+        if (!localChanged || JSON.stringify(currentRecipe) !== JSON.stringify(work.recipe) && !differs) live.current.onRestore(work.recipe!);
+        await retainMultiviewWorkBaseline(localStorage, options.owner, work, () => current(value) && workRef.current?.revision === work.revision);
+        if (current(value)) {
+          const drifted = workRef.current?.revision !== work.revision;
+          setConflict(drifted); setMessage(drifted ? '服务器作品已有更新，此设备修改保留，可保存到原作品或打开服务器版本。' : ''); setBaselineReady(true);
+        }
+      } catch {
+        if (current(value)) { setStorageFailed(true); setStopped(true); setMessage('原作品保存基线暂不可确认，当前修改保留；请重新读取。'); }
+      }
+    })();
   }, [hydrated, loadedIdentity, work, options.info, recipe, identity, options.localPresent, options.editRevision]);
   useEffect(() => {
     if (!options.enabled || !hydrated || loadedIdentity !== identity || isClientSessionBlocked() || !titleKey || titleKnown.current !== titleKey || !editedTitle.current) return;
@@ -200,15 +240,25 @@ export function useMultiviewWork(options: Options) {
     const next = suppliedWork && suppliedWork.id === receipt.workId ? suppliedWork : await readWork(receipt.workId, value);
     if (!current(value) || pendingRef.current?.mutationId !== original.mutationId) return;
     if (next.sourceTaskId !== original.taskId || next.sourceVersion !== original.sourceVersion || !next.recipe) throw new Error('原保存来源尚未确认，原编号保留，请继续查询。');
-    settlePending(original, 'committed'); pendingRef.current = null; setPending(null);
     if (live.current.info && live.current.info.sourceVersion !== original.sourceVersion
       || live.current.workId && live.current.workId !== original.workId && live.current.workId !== next.id) {
+      settlePending(original, 'committed'); pendingRef.current = null; setPending(null);
       setMessage('原保存已确认，当前作品未被替换；原成果可在我的作品中找到。'); return;
     }
+    let retained = false;
+    if (next.revision === receipt.revision) {
+      try {
+        await retainMultiviewWorkBaseline(localStorage, value.owner, next, () => current(value) && pendingRef.current?.mutationId === original.mutationId);
+        retained = true;
+      } catch { retained = false; }
+    }
+    if (!current(value) || pendingRef.current?.mutationId !== original.mutationId) return;
+    settlePending(original, 'committed'); pendingRef.current = null; setPending(null);
     setWork(next); workRef.current = next; acknowledged.current = signature(next.recipe, next.title);
-    setStopped(false); setConflict(next.revision !== receipt.revision); setStorageFailed(false);
+    setStopped(!retained && next.revision === receipt.revision); setConflict(next.revision !== receipt.revision); setStorageFailed(!retained && next.revision === receipt.revision); setBaselineReady(true);
     if (original.action !== 'save') { setTitle(next.title); editedTitle.current = false; live.current.onBound(next); }
-    setMessage(next.revision !== receipt.revision ? '原保存已确认，服务器另有更新；此设备修改保留，请选择继续方式。' : '');
+    setMessage(next.revision !== receipt.revision ? '原保存已确认，服务器另有更新；可保存到原作品或打开服务器版本。'
+      : retained ? '' : '原作品已保存，本机恢复记录未能完整保存，请保留页面重新核对。');
   }
   async function queryOriginal() {
     const original = pendingRef.current;
@@ -224,19 +274,30 @@ export function useMultiviewWork(options: Options) {
     } catch (cause) { if (current(value)) setMessage(cause instanceof Error ? cause.message : '原保存结果待确认，请继续查询原编号。'); }
     finally { if (lock.current === token) { lock.current = null; setBusy(false); } }
   }
-  async function send(action: 'create' | 'save' | 'branch') {
-    const info = live.current.info; const applied = appliedWorkRecipe(live.current.draft, info); const existing = workRef.current;
-    if (!options.enabled || !info || !applied || lock.current || pendingRef.current || storageFailed || !title.trim() && action !== 'create'
+  async function send(action: 'create' | 'save' | 'branch', saveCurrent = false) {
+    const info = live.current.info; const applied = appliedWorkRecipe(live.current.draft, info); let existing = workRef.current;
+    const submittedTitle = titleRef.current;
+    if (action === 'create' && existing) action = 'save';
+    if (!options.enabled || !info || !applied || lock.current || pendingRef.current || storageFailed || !submittedTitle.trim() && action !== 'create'
       || action !== 'create' && (!existing || existing.removed || existing.sourceVersion !== info.sourceVersion)) return;
     const value = scope(); if (!current(value)) return;
     const token = Symbol(); lock.current = token; setBusy(true); setMessage('');
     let original: Pending | null = null; let sent = false;
+    let submittedRecipe = applied;
     try {
       const unresolved = readPending(options.owner, options.taskId);
       if (unresolved) { pendingRef.current = unresolved; setPending(unresolved); setMessage('仍有原保存待确认，请先查询原保存。'); return; }
+      if (saveCurrent) {
+        const fresh = await prepareMultiviewCurrentWorkSave({ workId: existing!.id, taskId: options.taskId, info, recipe: applied,
+          title: submittedTitle, readFresh: id => readWork(id, value), isCurrent: () => current(value) });
+        if (!current(value)) return;
+        // This explicit user action chooses the current local snapshot. The
+        // fresh revision is still compared by the existing server-side CAS.
+        existing = fresh.work; submittedRecipe = fresh.recipe;
+      }
       const mutationId = crypto.randomUUID();
-      const body = action === 'create' ? { mutationId, taskId: options.taskId, sourceVersion: info.sourceVersion, recipe: applied, ...(title.trim() ? { title } : {}) }
-        : { mutationId, baseRevision: existing!.revision, action, recipe: applied, title,
+      const body = action === 'create' ? { mutationId, taskId: options.taskId, sourceVersion: info.sourceVersion, recipe: submittedRecipe, ...(submittedTitle.trim() ? { title: submittedTitle } : {}) }
+        : { mutationId, baseRevision: existing!.revision, action, recipe: submittedRecipe, title: submittedTitle,
           ...(action === 'branch' ? { branchKey: crypto.randomUUID() } : {}) };
       const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(body)));
       if (!current(value)) return;
@@ -259,7 +320,7 @@ export function useMultiviewWork(options: Options) {
           setWork(next); workRef.current = next; initialized.current = `${identity}:${next.id}:${info.sourceVersion}`;
           if (!editedTitle.current) setTitle(next.title);
           acknowledged.current = signature(next.recipe, next.title); setConflict(true);
-          setMessage('服务器已有不同内容，此设备修改已保留。可打开服务器版本，或将本机修改另存一版。');
+          setMessage('服务器已有不同内容，此设备修改保留。可保存到原作品，或打开服务器版本。');
         } else setMessage(payload.error || '本次保存未受理，当前修改保留，可调整后重试。');
         return;
       }
@@ -271,11 +332,11 @@ export function useMultiviewWork(options: Options) {
   const sendRef = useRef(send); sendRef.current = send;
   const recipeRef = useRef(recipe); recipeRef.current = recipe;
   useEffect(() => {
-    if (!options.enabled || !hydrated || loadedIdentity !== identity || loading || !recipeRef.current || pending || busy || conflict || stopped || storageFailed || !work && !options.allowCreate
+    if (!options.enabled || !hydrated || loadedIdentity !== identity || loading || !recipeRef.current || pending || busy || conflict || stopped || storageFailed || work && !baselineReady || !work && !options.allowCreate
       || work && (!work.recipe || initialized.current !== `${identity}:${work.id}:${options.info?.sourceVersion}`) || localSignature === acknowledged.current) return;
     const timer = window.setTimeout(() => void sendRef.current(work ? 'save' : 'create'), 750);
     return () => window.clearTimeout(timer);
-  }, [options.enabled, options.allowCreate, options.info?.sourceVersion, hydrated, loadedIdentity, loading, localSignature, pending, busy, conflict, stopped, storageFailed, work, identity]);
+  }, [options.enabled, options.allowCreate, options.info?.sourceVersion, hydrated, loadedIdentity, baselineReady, loading, localSignature, pending, busy, conflict, stopped, storageFailed, work, identity]);
   useEffect(() => {
     if (!work || !options.enabled || !['waiting_source', 'queued', 'rendering'].includes(work.status)) return;
     const value = scope(); let cancelled = false; let timer: ReturnType<typeof setTimeout>;
@@ -299,6 +360,11 @@ export function useMultiviewWork(options: Options) {
     try { if (titleKey) localStorage.setItem(titleKey, work.title); }
     catch { setStorageFailed(true); }
     acknowledged.current = signature(work.recipe, work.title); setConflict(false); setStopped(false); setMessage('已打开服务器版本。');
+    setBaselineReady(false);
+    const value = scope();
+    void retainMultiviewWorkBaseline(localStorage, options.owner, work, () => current(value) && workRef.current?.revision === work.revision)
+      .then(() => { if (current(value)) setBaselineReady(true); })
+      .catch(() => { if (current(value)) { setStorageFailed(true); setStopped(true); setMessage('服务器版本已打开，本机保存基线暂不可记录，请保留页面。'); } });
   }
   const changed = Boolean(recipe && work && localSignature !== acknowledged.current);
   const phase = busy ? 'saving' : pending ? 'unknown' : conflict ? 'conflict' : !work ? 'local'
@@ -306,6 +372,9 @@ export function useMultiviewWork(options: Options) {
   return { work, title, phase, loading, busy, pending: Boolean(pending), conflict, message, storageFailed, changed,
     unsaved: storageFailed && (editedTitle.current || Boolean(pending)),
     canBranch: Boolean(work?.recipe && options.info && work.sourceVersion === options.info.sourceVersion && work.sourceState === 'current' && !work.removed && title.trim() && !pending && !busy),
+    canSaveCurrent: Boolean(hydrated && work?.recipe && options.info && recipe && work.sourceVersion === options.info.sourceVersion
+      && work.sourceState === 'current' && !work.removed && title.trim() && !pending && !busy && !storageFailed),
+    saveCurrent: () => send('save', true),
     canRetrySave: Boolean((stopped || work?.status === 'failed') && hydrated && work?.recipe && work.sourceState === 'current'
       && !work.removed && !conflict && !pending && !busy && !storageFailed),
     setTitle: (value: string) => { editedTitle.current = true; setTitle(value); }, openServer,

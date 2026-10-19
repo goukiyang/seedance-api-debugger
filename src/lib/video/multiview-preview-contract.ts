@@ -41,6 +41,13 @@ export function multiviewPreviewChunkIndex(frame: number) {
   return Math.floor(frame / MULTIVIEW_PREVIEW_CHUNK_SIZE);
 }
 
+export function multiviewPreviewFrameRect(manifest: MultiviewPreviewManifest, frame: number) {
+  if (!Number.isInteger(frame) || frame < 0 || frame >= manifest.totalFrames) return null;
+  const local = frame % manifest.chunkSize;
+  return { x: local % manifest.columns * manifest.cellWidth, y: Math.floor(local / manifest.columns) * manifest.cellHeight,
+    width: manifest.cellWidth, height: manifest.cellHeight };
+}
+
 export function multiviewPreviewRetainedChunks(target: number, available: number[], limit = 2) {
   return Array.from(new Set(available)).sort((a, b) => Math.abs(a - target) - Math.abs(b - target) || a - b).slice(0, limit);
 }

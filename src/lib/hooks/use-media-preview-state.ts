@@ -3,17 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import type { ContentKey } from '@/lib/content-reactions/types';
-
-export type MediaPreviewZoomMode = 'fit' | 'width' | 'actual' | 'custom';
-
-export interface MediaPreviewStoredState {
-  scale: number;
-  offsetX: number;
-  offsetY: number;
-  zoomMode: MediaPreviewZoomMode;
-  currentTime: number;
-  loop: boolean;
-}
+import { MAX_STORED_SCALE, DEFAULT_STATE, ZOOM_MODES, clampNumber, parseMediaPreviewStoredState,
+  type MediaPreviewStoredState, type MediaPreviewZoomMode } from '@/lib/media/media-preview-state-contract';
+export { parseMediaPreviewStoredState, type MediaPreviewStoredState, type MediaPreviewZoomMode } from '@/lib/media/media-preview-state-contract';
 
 interface StoredEntry {
   key: string | null;
@@ -22,21 +14,6 @@ interface StoredEntry {
 }
 
 const STORAGE_PREFIX = 'sd2:media-preview:v1';
-const MAX_STORED_SCALE = 1_000_000;
-const DEFAULT_STATE: MediaPreviewStoredState = {
-  scale: 1,
-  offsetX: 0,
-  offsetY: 0,
-  zoomMode: 'fit',
-  currentTime: 0,
-  loop: false,
-};
-const ZOOM_MODES = new Set<MediaPreviewZoomMode>(['fit', 'width', 'actual', 'custom']);
-
-function clampNumber(value: unknown, minimum: number, maximum: number, fallback: number) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
-  return Math.min(maximum, Math.max(minimum, value));
-}
 
 export function isSafeIdentifier(value: unknown, allowContentKey = false): value is string {
   if (typeof value !== 'string') return false;
@@ -86,33 +63,11 @@ function storageKeyFor(userId: string | null, previewKey?: string, contentKey?: 
   return `${STORAGE_PREFIX}:${encodeURIComponent(userId)}:${encodeURIComponent(resourceKey)}${fingerprint ? `:${fingerprint}` : ''}`;
 }
 
-function parseStoredState(input: string | null): MediaPreviewStoredState {
-  if (!input) return DEFAULT_STATE;
-  try {
-    const parsed = JSON.parse(input) as Record<string, unknown>;
-    if (parsed.version !== 1 || !parsed.state || typeof parsed.state !== 'object') return DEFAULT_STATE;
-    const state = parsed.state as Record<string, unknown>;
-    const zoomMode = ZOOM_MODES.has(state.zoomMode as MediaPreviewZoomMode)
-      ? state.zoomMode as MediaPreviewZoomMode
-      : DEFAULT_STATE.zoomMode;
-    return {
-      scale: clampNumber(state.scale, 0.5, MAX_STORED_SCALE, DEFAULT_STATE.scale),
-      offsetX: clampNumber(state.offsetX, -50_000, 50_000, DEFAULT_STATE.offsetX),
-      offsetY: clampNumber(state.offsetY, -50_000, 50_000, DEFAULT_STATE.offsetY),
-      zoomMode,
-      currentTime: clampNumber(state.currentTime, 0, 604_800, DEFAULT_STATE.currentTime),
-      loop: state.loop === true,
-    };
-  } catch {
-    return DEFAULT_STATE;
-  }
-}
-
 const STATE_EVENT = 'sd2:media-preview-state';
 
-function writeStoredState(key: string, patch: Partial<MediaPreviewStoredState>) {
+function writeStoredState(key: string, patch: Partial<MediaPreviewStoredState>, defaultLoop: boolean) {
   try {
-    const value = { ...parseStoredState(window.localStorage.getItem(key)), ...patch };
+    const value = { ...parseMediaPreviewStoredState(window.localStorage.getItem(key), defaultLoop), ...patch };
     window.localStorage.setItem(key, JSON.stringify({ version: 1, state: value }));
     window.dispatchEvent(new CustomEvent(STATE_EVENT, { detail: { key, patch } }));
     return true;
@@ -122,7 +77,7 @@ function writeStoredState(key: string, patch: Partial<MediaPreviewStoredState>) 
   }
 }
 
-export function useMediaPreviewState(previewKey?: string, contentKey?: ContentKey, source?: string) {
+export function useMediaPreviewState(previewKey?: string, contentKey?: ContentKey, source?: string, defaultLoop = false) {
   const { user, hasLoadedUser } = useAppSession();
   const key = storageKeyFor(user?.id || null, previewKey, contentKey, source);
   const [entry, setEntry] = useState<StoredEntry>(() => ({ key: null, ready: false, value: DEFAULT_STATE }));
@@ -134,28 +89,28 @@ export function useMediaPreviewState(previewKey?: string, contentKey?: ContentKe
   useEffect(() => {
     if (!key) {
       pendingRef.current = {};
-      setEntry({ key: null, ready: hasLoadedUser, value: DEFAULT_STATE });
+      setEntry({ key: null, ready: hasLoadedUser, value: parseMediaPreviewStoredState(null, defaultLoop) });
       return;
     }
-    let value = DEFAULT_STATE;
+    let value = parseMediaPreviewStoredState(null, defaultLoop);
     pendingRef.current = {};
     setStorageUnavailable(false);
     try {
-      value = parseStoredState(window.localStorage.getItem(key));
+      value = parseMediaPreviewStoredState(window.localStorage.getItem(key), defaultLoop);
     } catch {
       // Storage can be unavailable in private or restricted browser contexts.
       setStorageUnavailable(true);
     }
     setEntry({ key, ready: true, value });
-  }, [hasLoadedUser, key]);
+  }, [defaultLoop, hasLoadedUser, key]);
 
   const flush = useCallback(() => {
     if (entryRef.current.key !== key || !Object.keys(pendingRef.current).length) return;
     if (!key) { pendingRef.current = {}; setStorageUnavailable(true); return; }
     const patch = pendingRef.current;
     pendingRef.current = {};
-    setStorageUnavailable(!writeStoredState(key, patch));
-  }, [key]);
+    setStorageUnavailable(!writeStoredState(key, patch, defaultLoop));
+  }, [defaultLoop, key]);
 
   const update = useCallback((patch: Partial<MediaPreviewStoredState>) => {
       const current = entryRef.current;
@@ -224,18 +179,18 @@ export function useMediaPreviewState(previewKey?: string, contentKey?: ContentKe
       if (detail?.key === key) merge(detail.patch);
     };
     const storage = (event: StorageEvent) => {
-      if (event.key === key) merge(parseStoredState(event.newValue));
+      if (event.key === key) merge(parseMediaPreviewStoredState(event.newValue, defaultLoop));
     };
     window.addEventListener(STATE_EVENT, local);
     window.addEventListener('storage', storage);
     return () => { window.removeEventListener(STATE_EVENT, local); window.removeEventListener('storage', storage); };
-  }, [key]);
+  }, [defaultLoop, key]);
 
   const ready = entry.ready && entry.key === key;
   return {
     key,
     ready,
-    value: ready ? entry.value : DEFAULT_STATE,
+    value: ready ? entry.value : parseMediaPreviewStoredState(null, defaultLoop),
     update,
     reset,
     storageUnavailable,
@@ -243,7 +198,7 @@ export function useMediaPreviewState(previewKey?: string, contentKey?: ContentKe
 }
 
 /** Task outputs are immutable versions. Signed delivery URLs are not their identity. */
-export function useVideoLoopState(source?: string, contentKey?: ContentKey, previewKey?: string) {
+export function useVideoLoopState(source?: string, contentKey?: ContentKey, previewKey?: string, defaultEnabled = false) {
   let taskKey = contentKey?.startsWith('video_task:') ? contentKey : undefined;
   if (!taskKey && source) {
     try {
@@ -255,7 +210,7 @@ export function useVideoLoopState(source?: string, contentKey?: ContentKey, prev
     || (isSafeIdentifier(previewKey) ? previewKey : undefined)
     || `video-source:${sourceFingerprint(source) || 'unavailable'}`;
   const versionSource = taskKey ? `/api/video/play/${taskKey.slice('video_task:'.length)}` : source;
-  const state = useMediaPreviewState(identity, taskKey, versionSource);
+  const state = useMediaPreviewState(identity, taskKey, versionSource, defaultEnabled);
   return {
     enabled: state.value.loop,
     ready: state.ready,

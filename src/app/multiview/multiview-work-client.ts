@@ -1,6 +1,67 @@
 'use client';
 
-import type { MultiviewWorkDto, MultiviewWorkFileRole } from '@/lib/video/multiview-work-contract';
+import { isMultiviewWorkId, multiviewWorkContentSignature, type MultiviewWorkDto, type MultiviewWorkFileRole } from '@/lib/video/multiview-work-contract';
+import { parseMultiviewWorkRecipe, type MultiviewWorkRecipe } from '@/lib/video/multiview-work-contract';
+import type { MultiviewInfo } from '@/lib/video/multiview-contract';
+
+type Binding = { schema: 1; owner: string; taskId: string; sourceVersion: string; workId: string };
+type Baseline = Binding & { revision: number; signatureHash: string };
+type SafeStorage = Pick<Storage, 'getItem' | 'setItem'>;
+const bindingKey = (owner: string, taskId: string) => `sd2:multiview-work-binding:v1:${owner}:${taskId}`;
+const baselineKey = (owner: string, workId: string, sourceVersion: string) => `sd2:multiview-work-baseline:v1:${owner}:${workId}:${sourceVersion}`;
+function parseBinding(raw: string | null, owner: string, taskId: string): Binding | null {
+  if (raw === null) return null;
+  if (raw.length > 2048) throw new Error('原作品绑定记录无法确认，当前内容保留。');
+  const value = JSON.parse(raw) as Binding;
+  if (!value || value.schema !== 1 || value.owner !== owner || value.taskId !== taskId || !isMultiviewWorkId(value.workId)
+    || !/^[a-f0-9]{64}$/.test(value.sourceVersion)) throw new Error('原作品绑定记录无法确认，当前内容保留。');
+  return value;
+}
+export function readMultiviewWorkBinding(storage: SafeStorage, owner: string, taskId: string) {
+  return parseBinding(storage.getItem(bindingKey(owner, taskId)), owner, taskId);
+}
+export function retainMultiviewWorkBinding(storage: SafeStorage, owner: string, work: MultiviewWorkDto) {
+  if (!work.sourceVersion || work.sourceState !== 'current' || work.removed) return;
+  const value: Binding = { schema: 1, owner, taskId: work.sourceTaskId, sourceVersion: work.sourceVersion, workId: work.id };
+  const key = bindingKey(owner, work.sourceTaskId), raw = JSON.stringify(value);
+  storage.setItem(key, raw);
+  if (storage.getItem(key) !== raw) throw new Error('当前作品身份无法保存在此设备，请保留页面。');
+}
+async function signatureHash(work: MultiviewWorkDto) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(multiviewWorkContentSignature(work.recipe, work.title)));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+export async function hasMultiviewWorkBaseline(storage: SafeStorage, owner: string, work: MultiviewWorkDto) {
+  if (!work.sourceVersion || !work.recipe) return false;
+  const raw = storage.getItem(baselineKey(owner, work.id, work.sourceVersion));
+  const value = parseBinding(raw, owner, work.sourceTaskId) as Baseline | null;
+  return Boolean(value && value.workId === work.id && value.sourceVersion === work.sourceVersion
+    && Number.isSafeInteger(value.revision) && value.revision === work.revision && /^[a-f0-9]{64}$/.test(value.signatureHash)
+    && value.signatureHash === await signatureHash(work));
+}
+export async function retainMultiviewWorkBaseline(storage: SafeStorage, owner: string, work: MultiviewWorkDto, isCurrent: () => boolean) {
+  if (!work.sourceVersion || !work.recipe || work.sourceState !== 'current' || work.removed) return;
+  const hash = await signatureHash(work);
+  if (!isCurrent()) return;
+  const value: Baseline = { schema: 1, owner, taskId: work.sourceTaskId, sourceVersion: work.sourceVersion, workId: work.id,
+    revision: work.revision, signatureHash: hash };
+  const key = baselineKey(owner, work.id, work.sourceVersion), raw = JSON.stringify(value);
+  storage.setItem(key, raw);
+  if (storage.getItem(key) !== raw) throw new Error('作品保存基线无法保存在此设备，当前修改保留。');
+  retainMultiviewWorkBinding(storage, owner, work);
+}
+/** Freeze the explicitly selected local content before the fresh original-work read. */
+export async function prepareMultiviewCurrentWorkSave(input: { workId: string; taskId: string; info: MultiviewInfo;
+  recipe: MultiviewWorkRecipe; title: string; readFresh: (id: string) => Promise<MultiviewWorkDto>; isCurrent: () => boolean }) {
+  const recipe = parseMultiviewWorkRecipe(input.recipe, input.info), title = input.title;
+  if (!recipe || !title.trim() || title.length > 120 || !input.isCurrent()) throw new Error('当前内容尚未确认，本次未保存。');
+  const work = await input.readFresh(input.workId);
+  if (!input.isCurrent() || work.id !== input.workId || work.sourceTaskId !== input.taskId || work.sourceVersion !== input.info.sourceVersion
+    || work.sourceState !== 'current' || work.removed || !work.recipe || !Number.isSafeInteger(work.revision) || work.revision < 1) {
+    throw new Error('原作品或视频已变化，当前修改保留；本次没有保存。');
+  }
+  return { work, recipe, title };
+}
 
 type WorkFile = NonNullable<MultiviewWorkDto['ready']>['files'][number];
 type CachedFile = { blob: Blob; bytes: number; etag: string };

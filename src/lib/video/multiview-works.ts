@@ -165,7 +165,19 @@ export async function listMultiviewWorks(user: SessionUser, input: { projectId?:
   const page = selected.slice(0, 24), last = page[page.length - 1];
   const works = [];
   for (const row of page) works.push(await getMultiviewWork(user, row.id));
+  let preferredWorkId: string | null | undefined;
+  if (input.taskId) {
+    await assertMultiviewWorkSource(user, input.taskId);
+    const target = { owner_id: user.id, source_task_id: input.taskId, removed_at: null };
+    // Render completion updates updated_at too. Prefer the last real accepted
+    // user save/branch receipt, independent of list pagination or background IO.
+    const lastEdit = await prisma.multiviewWorkMutation.findFirst({ where: { actor_id: user.id,
+      action: { in: ['create', 'save', 'branch'] }, work: target }, orderBy: [{ created_at: 'desc' }, { id: 'desc' }], select: { work_id: true } });
+    preferredWorkId = lastEdit?.work_id ?? (await prisma.multiviewWork.findFirst({ where: target,
+      orderBy: [{ created_at: 'desc' }, { id: 'desc' }], select: { id: true } }))?.id ?? null;
+  }
   return { works, total, projects: Array.from(projects, ([id, projectTitle]) => ({ id, title: projectTitle })),
+    ...(preferredWorkId !== undefined ? { preferredWorkId } : {}),
     nextCursor: selected.length > 24 && last ? Buffer.from(JSON.stringify({ scope, at: last.updated_at.toISOString(), id: last.id })).toString('base64url') : null };
 }
 

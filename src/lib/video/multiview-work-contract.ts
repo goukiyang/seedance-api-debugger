@@ -27,7 +27,7 @@ export type MultiviewWorkReceipt = {
   workId: string; revision: number; draftRevision: number;
 };
 export type MultiviewWorkMutationResult = { receipt: MultiviewWorkReceipt; work: MultiviewWorkDto };
-export type MultiviewWorkList = { works: MultiviewWorkDto[]; total: number; nextCursor: string | null; projects: Array<{ id: string; title: string }> };
+export type MultiviewWorkList = { works: MultiviewWorkDto[]; total: number; nextCursor: string | null; projects: Array<{ id: string; title: string }>; preferredWorkId?: string | null };
 export const isMultiviewWorkId = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(value);
 export const isMultiviewWorkFileRole = (value: unknown): value is MultiviewWorkFileRole => typeof value === 'string'
   && (/^(?:thumbnail|collage|zip)$/.test(value) || /^frame-[a-zA-Z0-9-]{1,80}$/.test(value));
@@ -59,13 +59,16 @@ export function defaultMultiviewWorkRecipe(info: MultiviewInfo): MultiviewWorkRe
 
 /** Slot IDs identify controls/files, not different authored content. */
 export function multiviewWorkRecipesEqual(left: MultiviewWorkRecipe, right: MultiviewWorkRecipe) {
+  return multiviewWorkContentSignature(left) === multiviewWorkContentSignature(right);
+}
+export function multiviewWorkContentSignature(recipe: MultiviewWorkRecipe | null, title = '') {
   const content = (recipe: MultiviewWorkRecipe) => {
     const all = [...recipe.slots, ...recipe.reserve];
     return { sourceVersion: recipe.sourceVersion, slots: recipe.slots.map(({ frame, name, manual }) => ({ frame, name, manual })),
       reserve: recipe.reserve.map(({ frame, name, manual }) => ({ frame, name, manual })),
       restoreOrder: recipe.restoreOrder.map(id => all.findIndex(slot => slot.id === id)), layout: recipe.layout };
   };
-  return JSON.stringify(content(left)) === JSON.stringify(content(right));
+  return JSON.stringify([recipe ? content(recipe) : null, title]);
 }
 
 export function parseMultiviewWorkManifest(value: unknown, recipe: MultiviewWorkRecipe, revision: number, recipeHash: string): MultiviewWorkManifest | null {

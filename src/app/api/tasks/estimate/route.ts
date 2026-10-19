@@ -8,7 +8,9 @@ import { authenticateCodexVideoApi, hasCodexApiAuthSignal, CodexApiAuthError } f
 import type { VideoResolution } from '@/types';
 import { getVolcengineIpApiSettings, isVolcengineIpApiReady } from '@/lib/integrations/volcengine-ip';
 import { isVolcengineIpModelId, volcengineIpModelResolutions } from '@/lib/integrations/volcengine-ip-models';
-import { assertCurrentMultiviewRotationPreset, MultiviewPresetError } from '@/lib/video/multiview-preset.server';
+import { MultiviewPresetError } from '@/lib/video/multiview-preset.server';
+import { parseMultiviewSettingsBinding, type MultiviewSettingsBinding } from '@/lib/video/multiview-generation-contract';
+import { resolveMultiviewGenerationSettings, MultiviewSettingsError } from '@/lib/video/multiview-settings.server';
 import { getH3ApiSettings, H3_PRESET_OPTIONS, isH3Operational } from '@/lib/integrations/h3';
 import { getAiMediaKitApiSettings, isAiMediaKitApiReady } from '@/lib/integrations/aimediakit';
 import { resolveVideoPricingContext, issueVideoPricingCredential, savedVideoPricingContextInput } from '@/lib/pricing/video-context';
@@ -90,15 +92,21 @@ async function estimate(request: NextRequest, body?: Record<string, unknown>) {
   if (provider === 'volcengine_mediakit' && !isAiMediaKitApiReady(await getAiMediaKitApiSettings())) return errorJson('增强视频接口未就绪', 409);
   const multiviewPresetVersion = searchParams.get('multiview_preset_version');
   let multiviewPresetRevision: number | undefined;
+  let multiviewSettings: MultiviewSettingsBinding | undefined;
+  if (body?.multiview_settings !== undefined) {
+    const parsed = parseMultiviewSettingsBinding(body.multiview_settings);
+    if (!parsed || multiviewPresetVersion === null) return errorJson('已保存设置的报价绑定无效，原输入保留。', 400);
+    multiviewSettings = parsed;
+  }
   if (multiviewPresetVersion !== null) {
     try {
       assertInternalOnly(user, '外部账号无权使用3D多视图生成。');
       if (user.status !== 'active') throw new AuthError('账号已被禁用', 403);
       if (provider !== 'seedance') return errorJson('3D多视图当前只支持普通视频生成通道。', 400);
-      multiviewPresetRevision = (await assertCurrentMultiviewRotationPreset(multiviewPresetVersion)).revision;
+      multiviewPresetRevision = (await resolveMultiviewGenerationSettings(user, multiviewPresetVersion, multiviewSettings)).revision;
     } catch (error) {
-      if (error instanceof AuthError || error instanceof MultiviewPresetError) return NextResponse.json({ error: error.message,
-        ...(error instanceof MultiviewPresetError ? { code: error.code } : {}) }, {
+      if (error instanceof AuthError || error instanceof MultiviewPresetError || error instanceof MultiviewSettingsError) return NextResponse.json({ error: error.message,
+        ...(error instanceof MultiviewPresetError || error instanceof MultiviewSettingsError ? { code: error.code } : {}) }, {
         status: error.status, headers: { 'Cache-Control': 'private, no-store' },
       });
       return NextResponse.json({ error: '模板提示词暂时无法确认，请重新读取后再报价。' }, {
@@ -121,11 +129,15 @@ async function estimate(request: NextRequest, body?: Record<string, unknown>) {
     }) : undefined;
     const quote = await quoteVideoPricing({ provider: provider as VideoPricingInput['provider'], model: parsedModel.model,
       resolution, duration, toolVersion, fps, context });
+    if (multiviewSettings && multiviewPresetVersion !== null) await resolveMultiviewGenerationSettings(user, multiviewPresetVersion, multiviewSettings);
     return NextResponse.json({ ...publicVideoPricing(quote), provider, modelId: parsedModel.model,
     ...(context ? { pricing_quote_token: issueVideoPricingCredential(context, quote.revision, quote.pricing.estimatedCost) } : {}),
     ...(multiviewPresetVersion === null ? {} : { multiviewPresetVersion, multiviewPresetRevision }),
+    ...(multiviewSettings ? { multiviewSettings } : {}),
     }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
+    if (error instanceof MultiviewSettingsError || error instanceof MultiviewPresetError) return NextResponse.json({ error: error.message, code: error.code },
+      { status: error.status, headers: { 'Cache-Control': 'private, no-store' } });
     if (error instanceof AuthError) return errorJson(error.message, error.status);
     const failure = videoPricingError(error);
     return NextResponse.json({ error: failure?.message || '报价暂时无法确认，请重试；原参数未改变', code: failure?.code || 'pricing_unavailable' },

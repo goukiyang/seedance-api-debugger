@@ -13,6 +13,13 @@ export const MULTIVIEW_ROTATION_PRESET = Object.freeze({
 export type MultiviewRotationPreset = { id: typeof MULTIVIEW_ROTATION_PRESET.id; version: string; prompt: string };
 export type MultiviewRotationPresetState = { preset: MultiviewRotationPreset; revision: number };
 export type MultiviewRotationPresetSaveReceipt = MultiviewRotationPresetState & { state: 'saved'; mutationId: string };
+export type MultiviewSettingsBinding = { id: string; revision: number };
+export function parseMultiviewSettingsBinding(value: unknown): MultiviewSettingsBinding | null {
+  if (!record(value) || Object.keys(value).some(key => !['id', 'revision'].includes(key))
+    || typeof value.id !== 'string' || !/^mvs_[a-f0-9-]{36}$/.test(value.id)
+    || !Number.isSafeInteger(value.revision) || Number(value.revision) < 1) return null;
+  return { id: value.id, revision: Number(value.revision) };
+}
 
 export function isMultiviewPresetVersion(value: unknown): value is string {
   return typeof value === 'string' && /^1\.0\.(?:0|[1-9]\d{0,15})$/.test(value)
@@ -25,6 +32,7 @@ const SUPPLEMENT_SEPARATOR = '\n\n补充要求（仅补充细节，保持固定�
 
 export type MultiviewGenerationDraft = {
   schema: 1; presetVersion: string; workspaceTabId: string; projectId: string; videoCardId: string;
+  settingsBinding?: MultiviewSettingsBinding;
   mainImage: { assetId: string; referenceImageId: string } | null;
   provider: string; generationMode: string; model: string; ratio: string; duration: number; resolution: string;
   supplement: string; seed: number; generateAudio: boolean; returnLastFrame: boolean; watermark: boolean;
@@ -32,6 +40,7 @@ export type MultiviewGenerationDraft = {
 };
 export type MultiviewGenerationSnapshot = {
   schema: 1; presetId: typeof MULTIVIEW_ROTATION_PRESET.id; presetVersion: string;
+  settingsBinding?: MultiviewSettingsBinding;
   supplement: string; workspaceTabId: string; mainAssetId: string; mainReferenceImageId: string;
 };
 export type MultiviewGenerationRequest = {
@@ -72,6 +81,8 @@ export function parseMultiviewGenerationDraft(value: unknown): MultiviewGenerati
     try { value = JSON.parse(value); } catch { return null; }
   }
   if (!record(value) || value.schema !== 1) return null;
+  const settingsBinding = value.settingsBinding === undefined ? undefined : parseMultiviewSettingsBinding(value.settingsBinding);
+  if (settingsBinding === null) return null;
   for (const key of ['presetVersion', 'workspaceTabId', 'projectId', 'videoCardId', 'provider', 'generationMode', 'model', 'ratio', 'resolution', 'resolutionApprovalId'] as const) {
     if (!boundedString(value[key], 200)) return null;
   }
@@ -82,6 +93,7 @@ export function parseMultiviewGenerationDraft(value: unknown): MultiviewGenerati
   if (image !== null && (!record(image) || !boundedString(image.assetId, 200) || !boundedString(image.referenceImageId, 200))) return null;
   return {
     schema: 1, presetVersion: value.presetVersion as string, workspaceTabId: value.workspaceTabId as string,
+    ...(settingsBinding ? { settingsBinding } : {}),
     projectId: value.projectId as string, videoCardId: value.videoCardId as string,
     mainImage: image === null ? null : { assetId: (image as Record<string, unknown>).assetId as string, referenceImageId: (image as Record<string, unknown>).referenceImageId as string },
     provider: value.provider as string, generationMode: value.generationMode as string, model: value.model as string,
@@ -111,7 +123,10 @@ export function composeMultiviewGenerationPrompt(supplement: string, presetVersi
 export function parseMultiviewGenerationSnapshot(value: unknown): MultiviewGenerationSnapshot | null {
   if (!record(value) || value.schema !== 1 || value.presetId !== MULTIVIEW_ROTATION_PRESET.id || !isMultiviewPresetVersion(value.presetVersion)
     || !boundedString(value.supplement, 40000) || !isMultiviewWorkspaceTabId(value.workspaceTabId) || !identity(value.mainAssetId) || !identity(value.mainReferenceImageId)) return null;
+  const settingsBinding = value.settingsBinding === undefined ? undefined : parseMultiviewSettingsBinding(value.settingsBinding);
+  if (settingsBinding === null) return null;
   return { schema: 1, presetId: MULTIVIEW_ROTATION_PRESET.id, presetVersion: value.presetVersion,
+    ...(settingsBinding ? { settingsBinding } : {}),
     supplement: value.supplement, workspaceTabId: value.workspaceTabId, mainAssetId: value.mainAssetId, mainReferenceImageId: value.mainReferenceImageId };
 }
 
@@ -147,6 +162,7 @@ export function buildMultiviewGenerationRequest(draft: MultiviewGenerationDraft,
     ...(options.pricingQuoteToken ? { pricing_quote_token: options.pricingQuoteToken, pricing_fingerprint_version: 2 as const } : {}),
     client_name: 'multiview', source_metadata: { source: 'multiview', mode: 'rotation' },
     multiview_generation: { schema: 1, presetId: MULTIVIEW_ROTATION_PRESET.id, presetVersion: draft.presetVersion,
+      ...(draft.settingsBinding ? { settingsBinding: draft.settingsBinding } : {}),
       supplement: draft.supplement, workspaceTabId: draft.workspaceTabId,
       mainAssetId: draft.mainImage.assetId, mainReferenceImageId: draft.mainImage.referenceImageId },
   };

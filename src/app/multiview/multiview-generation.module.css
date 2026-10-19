@@ -23,6 +23,22 @@
 .settings { display: flex; flex-direction: column; gap: 16px; }
 .preset { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
 .preset strong { font-size: 15px; }
+.settingsPicker { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.settingsPicker :is(button, select) { font: inherit; box-sizing: border-box; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-input); color: var(--text-primary); }
+.settingsPicker select { width: 100%; min-height: 38px; padding: 7px 10px; }
+.settingsPicker button { min-height: 36px; padding: 6px 9px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.settingsPicker button:disabled { opacity: .5; cursor: not-allowed; }
+.settingsPicker button:not(:disabled):hover { background: var(--bg-hover); border-color: var(--primary, #2463eb); }
+.settingsPicker :is(button, select):focus-visible { outline: 2px solid var(--primary, #2463eb); outline-offset: 3px; }
+.settingsPickerRow { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 8px; }
+.settingsPicker .settingsPickerSelect { display: flex; flex-direction: column; flex: 1 1 180px; min-width: 0; gap: 6px; font-size: 13px; }
+.settingsPickerActions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.settingsPickerActions button { min-height: 36px; padding: 6px 9px; font-size: 12px; }
+.settingsPicker .quiet { border: 0; background: transparent; color: var(--primary, #2463eb); padding: 4px 6px; }
+.settingsPickerNotice { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--text-secondary, #536373); line-height: 1.6; }
+.settingsPickerNotice button { flex-shrink: 0; }
+.settingsPickerMeta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--text-secondary, #536373); }
+.settingsPickerMeta label { flex-direction: row !important; align-items: center; gap: 6px !important; }
 .preset details { max-width: 100%; font-size: 12px; color: var(--text-secondary, #536373); }
 .panel summary { cursor: pointer; padding: 4px 0; }
 .preset details[open] { flex-basis: 100%; }
@@ -77,6 +93,9 @@
   .panel button, .panel select, .panel input:not([type=checkbox]) { min-height: 44px; }
   .summaryActions button { flex: 1; font-size: 12px; padding-inline: 8px; }
   .parameters { gap: 10px; }
+  .settingsPicker .settingsPickerSelect { flex-basis: 100%; }
+  .settingsPickerActions { width: 100%; }
+  .settingsPicker :is(button, select) { min-height: 44px; }
   .generateRow .primary { flex: 1; }
   .footer { padding: 12px 14px 16px; }
 }

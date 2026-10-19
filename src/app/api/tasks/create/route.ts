@@ -7,7 +7,8 @@ import { multiviewRequestIntent, claimMultiviewRequest, assertMultiviewRequestFe
   rejectMultiviewRequest, type MultiviewRequestClaim } from '@/lib/video/multiview-request-receipt';
 import { composeMultiviewGenerationPrompt, MULTIVIEW_REFERENCE_PROMPT_PREFIX, isMultiviewGenerationSeed, parseMultiviewGenerationSnapshot,
   type MultiviewGenerationSnapshot } from '@/lib/video/multiview-generation-contract';
-import { assertCurrentMultiviewRotationPreset, readMultiviewRotationPresetVersion, MultiviewPresetError } from '@/lib/video/multiview-preset.server';
+import { readMultiviewRotationPresetVersion, MultiviewPresetError } from '@/lib/video/multiview-preset.server';
+import { assertMultiviewGenerationSettings, MultiviewSettingsError } from '@/lib/video/multiview-settings.server';
 import { registerMultiviewWorkIntent } from '@/lib/video/multiview-works';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import path from 'path';
@@ -1216,9 +1217,9 @@ export async function POST(request: NextRequest) {
   }
 
   if (multiviewGeneration) {
-    try { await assertCurrentMultiviewRotationPreset(multiviewGeneration.presetVersion); }
+    try { await assertMultiviewGenerationSettings(user, multiviewGeneration); }
     catch (error) {
-      if (error instanceof MultiviewPresetError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+      if (error instanceof MultiviewPresetError || error instanceof MultiviewSettingsError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
       throw error;
     }
   }
@@ -1232,7 +1233,7 @@ export async function POST(request: NextRequest) {
       provider: requestedProvider === H3_VIDEO_PROVIDER ? 'h3' : 'seedance', model: selectedModel, resolution, duration, draft: draftRequested });
     priceQuote = await quoteVideoPricing({ provider: requestedProvider === H3_VIDEO_PROVIDER ? 'h3' : 'seedance', model: selectedModel, resolution, duration, context: pricingContext });
     requireVideoPricingRevision(priceQuote, body.pricing_revision);
-    requireScopeCredential = Boolean(body.pricing_quote_token) || await videoPricingRequiresContext(selectedModel, priceQuote.identity.channelId);
+    requireScopeCredential = Boolean(multiviewGeneration?.settingsBinding) || Boolean(body.pricing_quote_token) || await videoPricingRequiresContext(selectedModel, priceQuote.identity.channelId);
     if (requireScopeCredential) verifyVideoPricingCredential(body.pricing_quote_token, pricingContext, priceQuote.revision, priceQuote.pricing.estimatedCost);
   } catch (error) {
     const failure = videoPricingError(error);
@@ -1267,6 +1268,7 @@ export async function POST(request: NextRequest) {
     ...(isUltimateCanvasRequest ? { source: 'ultimate_canvas' } : {}),
     ...(multiviewGeneration ? { source: 'multiview', multiview_generation: {
       presetId: multiviewGeneration.presetId, presetVersion: multiviewGeneration.presetVersion,
+      ...(multiviewGeneration.settingsBinding ? { settingsBinding: multiviewGeneration.settingsBinding } : {}),
       mainAssetId: multiviewGeneration.mainAssetId, mainReferenceImageId: multiviewGeneration.mainReferenceImageId,
     } } : {}),
     tab_id: tabId,
@@ -1977,7 +1979,7 @@ export async function POST(request: NextRequest) {
           provider: requestedProvider === H3_VIDEO_PROVIDER ? 'h3' : 'seedance', model: selectedModel, resolution, duration, draft: draftRequested });
         verifyVideoPricingCredential(body.pricing_quote_token, freshPricingContext, priceQuote.revision, priceQuote.pricing.estimatedCost);
       }
-      if (multiviewGeneration) await assertCurrentMultiviewRotationPreset(multiviewGeneration.presetVersion, tx);
+      if (multiviewGeneration) await assertMultiviewGenerationSettings(user, multiviewGeneration, tx);
       const task = await tx.videoTask.create({
         data: {
           provider: requestedProvider,
@@ -2254,7 +2256,7 @@ export async function POST(request: NextRequest) {
         });
       }
     }
-    if (err instanceof MultiviewPresetError) return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
+    if (err instanceof MultiviewPresetError || err instanceof MultiviewSettingsError) return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
     const pricingFailure = videoPricingError(err);
     if (pricingFailure) return NextResponse.json({ error: pricingFailure.message, code: pricingFailure.code }, { status: pricingFailure.status });
     if (err instanceof AuthError) return errorJson(err.message, err.status);

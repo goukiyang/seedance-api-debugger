@@ -20,6 +20,9 @@ import {
   type MultiviewRotationPresetState,
 } from '@/lib/video/multiview-generation-contract';
 import { MultiviewPromptDialog, parsePresetState } from './MultiviewPromptDialog';
+import { MultiviewSettingsPicker, generationSettingsValue, type MultiviewSettingsPickerApplyResult,
+  type MultiviewSettingsPickerRecord } from './MultiviewSettingsPicker';
+import { parseMultiviewSettingsDto } from '@/lib/video/multiview-settings-contract';
 import styles from './multiview-generation.module.css';
 
 export type MultiviewGenerationPhase = 'empty' | 'ready' | 'submitting' | 'submitted' | 'unknown' | 'failed' | 'closed' | 'video_ready';
@@ -238,6 +241,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const [presetRefresh, setPresetRefresh] = useState(0);
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptRisk, setPromptRisk] = useState({ unsaved: false, busy: false });
+  const [settingsRisk, setSettingsRisk] = useState({ unsaved: false, busy: false });
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
   const [saved, setSaved] = useState(true);
@@ -282,7 +286,8 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const approvalBlocked = needsApproval && (!currentCard || !draft?.resolutionApprovalConfirmed);
   const presetReady = Boolean(presetState && draft?.presetVersion === presetState.preset.version);
   const prompt = useMemo(() => composeMultiviewGenerationPrompt(draft?.supplement || '', draft?.presetVersion, presetState?.preset), [draft?.supplement, draft?.presetVersion, presetState]);
-  const quoteKey = draft ? JSON.stringify([owner, authorityKey, draft.provider, draft.model, draft.duration, draft.resolution, draft.presetVersion, draft.projectId, draft.videoCardId, draft.ratio]) : '';
+  const quoteKey = draft ? JSON.stringify([owner, authorityKey, draft.provider, draft.model, draft.duration, draft.resolution, draft.presetVersion,
+    draft.settingsBinding?.id, draft.settingsBinding?.revision, draft.projectId, draft.videoCardId, draft.ratio]) : '';
   const currentQuote = quote?.key === quoteKey ? quote : null;
   const accountRequestBlocked = requestScan.invalid || requestScan.incomplete || requestScan.records.some(pendingActive);
   const seedValid = !draft || isMultiviewGenerationSeed(draft.seed);
@@ -298,6 +303,67 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     const next = { ...previous, ...patch };
     if (JSON.stringify(next) === JSON.stringify(previous)) return;
     draftRef.current = next; setDraft(next); setError(''); setSaved(false); setDraftEdited(true);
+  }
+  async function applyGenerationSettings(result: MultiviewSettingsPickerApplyResult) {
+    const scope = capture(); const previous = draftRef.current;
+    if (!previous || !ready || !allowed || !current(scope) || submitLock.current || uploadLock.current || createLock.current || closeLock.current
+      || pendingActive(receiptRef.current) || recoveryBlocked) throw new Error('当前原请求仍需核对，设置尚未选用；输入保留。');
+    const item = result.settings;
+    const sourceKey = propsRef.current.currentSourceKey;
+    const nextPreset = parsePresetState({ revision: item.revision, preset: result.preset });
+    if (item.kind !== 'generation' || !nextPreset || item.value.presetVersion !== nextPreset.preset.version) throw new Error('这份设置的模板版本暂不可确认，输入保留。');
+    const previousKey = JSON.stringify(previous);
+    const projectResponse = await fetch('/api/projects?lite=true', { headers: { 'x-app-session-user': scope.owner }, cache: 'no-store', signal: AbortSignal.timeout(30000) });
+    const projectPayload = await readJsonResponse<ApiError & { projects?: Project[] }>(projectResponse);
+    if (!current(scope)) throw new Error('账号或权限已变化，设置尚未选用。');
+    if (!projectResponse.ok || !Array.isArray(projectPayload.projects)) throw new Error('项目权限暂未确认，设置尚未选用；输入保留。');
+    const freshProjects = projectPayload.projects.filter(project => project.can_generate === true && project.status === 'active');
+    setProjects(freshProjects);
+    if (previous.projectId && !freshProjects.some(project => project.id === previous.projectId)) throw new Error('原项目已不可用于生成，请先重新选择项目；当前图片和设置保留。');
+    let freshCards: VideoCard[] | null = null;
+    if (previous.projectId && previous.videoCardId) {
+      const cardResponse = await fetch(`/api/projects/${encodeURIComponent(previous.projectId)}/video-cards`, {
+        headers: { 'x-app-session-user': scope.owner }, cache: 'no-store', signal: AbortSignal.timeout(30000) });
+      const cardPayload = await readJsonResponse<ApiError & { video_cards?: VideoCard[] }>(cardResponse);
+      if (!current(scope)) throw new Error('账号或权限已变化，设置尚未选用。');
+      if (!cardResponse.ok || !Array.isArray(cardPayload.video_cards)) throw new Error('原视频卡权限暂未确认，设置尚未选用；输入保留。');
+      freshCards = cardPayload.video_cards;
+      if (!freshCards.some(card => card.id === previous.videoCardId && card.project_id === previous.projectId && canGenerateInCard(card))) {
+        setCards(freshCards); throw new Error('原视频卡已不可用于生成，请重新选择或取消关联；当前图片和设置保留。');
+      }
+    }
+    if (!current(scope) || previousKey !== JSON.stringify(draftRef.current) || sourceKey !== propsRef.current.currentSourceKey
+      || submitLock.current || pendingActive(receiptRef.current)) throw new Error('当前输入或原请求已变化，请重新选用设置。');
+    if (freshCards) setCards(freshCards);
+    const value = item.value;
+    const next = parseMultiviewGenerationDraft({ ...previous, ...value, settingsBinding: { id: item.id, revision: item.revision },
+      resolutionApprovalConfirmed: false, resolutionApprovalId: '' });
+    if (!next) throw new Error('这份设置暂不能安全读取，原输入保留。');
+    // Persist the existing account/Document draft before replacing any visible input.
+    persistDraft(scope.owner, tabRef.current, next);
+    draftRef.current = next; setDraft(next); setPresetState(nextPreset); setQuote(null); setPresetError(''); setError('');
+    setSaved(true); setRetainedDraft(JSON.stringify(next)); setDraftEdited(true);
+  }
+  async function useCurrentRotationPreset() {
+    const scope = capture(); const previous = draftRef.current;
+    if (!previous || !current(scope) || submitLock.current || pendingActive(receiptRef.current)) throw new Error('请先核对原请求，当前设置保留。');
+    const previousKey = JSON.stringify(previous);
+    const response = await fetch('/api/multiview/preset', { headers: { 'x-app-session-user': scope.owner }, cache: 'no-store', signal: AbortSignal.timeout(30000) });
+    const payload = await readJsonResponse<unknown>(response);
+    if (!current(scope)) throw new Error('账号或权限已变化，当前设置保留。');
+    const nextPreset = parsePresetState(payload);
+    if (!response.ok || !nextPreset) throw new Error('当前旋转模板暂不可读取，原设置保留。');
+    if (previousKey !== JSON.stringify(draftRef.current) || submitLock.current || pendingActive(receiptRef.current)) throw new Error('当前输入或原请求已变化，请重新选择。');
+    const next = { ...previous, presetVersion: nextPreset.preset.version, settingsBinding: undefined };
+    persistDraft(scope.owner, tabRef.current, next);
+    draftRef.current = next; setDraft(next); setPresetState(nextPreset); setQuote(null); setPresetError(''); setError('');
+    setSaved(true); setRetainedDraft(JSON.stringify(next)); setDraftEdited(true);
+  }
+  function adoptSavedGenerationSettings(item: MultiviewSettingsPickerRecord) {
+    const previous = draftRef.current;
+    if (!previous || item.kind !== 'generation' || !current(capture()) || pendingActive(receiptRef.current) || submitLock.current
+      || JSON.stringify(generationSettingsValue(previous)) !== JSON.stringify(item.value)) return;
+    change({ settingsBinding: { id: item.id, revision: item.revision } });
   }
   function saveReceipt(value: RequestReceipt, beforeSubmission = false) {
     const store = () => {
@@ -396,30 +462,37 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     setImageReady(false); setPickerOpen(false); setProgress(null); setQuote(null); setProjects([]); setCards([]);
     setWorking(false); setSubmitting(false); setChecking(false); setClosing(false); setCloseRetryKey(''); setCreating(null); setProjectLoading(false); setCardLoading(false);
     setLoadedAuthority(sessionReady ? authorityKey : '');
-    setPresetState(null); setPresetError(''); setPromptOpen(false); setPromptRisk({ unsaved: false, busy: false });
+    setPresetState(null); setPresetError(''); setPromptOpen(false); setPromptRisk({ unsaved: false, busy: false }); setSettingsRisk({ unsaved: false, busy: false });
     // Draft and original request/association receipts deliberately remain untouched.
   }, [authorityKey, sessionReady]);
   useEffect(() => {
     if (!ready || !allowed || active || accountRequestBlocked || recoveryBlocked || submitting) return;
     const scope = capture(); const controller = new AbortController();
+    const binding = draftRef.current?.settingsBinding;
     setPresetState(null); setQuote(null); setPresetError('');
     void (async () => {
       try {
-        const response = await fetch('/api/multiview/preset', { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]) });
+        const response = await fetch(binding ? `/api/multiview/settings/${encodeURIComponent(binding.id)}/apply` : '/api/multiview/preset', {
+          ...(binding ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-app-session-user': scope.owner }, body: JSON.stringify({ expectedRevision: binding.revision }) } : {}),
+          cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]) });
         const payload = await readJsonResponse<unknown>(response);
         if (!current(scope) || controller.signal.aborted) return;
-        const value = parsePresetState(payload);
+        const bound = binding && payload && typeof payload === 'object' ? payload as Record<string, unknown> : null;
+        const boundSettings = bound ? parseMultiviewSettingsDto(bound.settings) : null;
+        const value = binding ? boundSettings?.id === binding.id && boundSettings.revision === binding.revision && boundSettings.kind === 'generation'
+          && boundSettings.value.presetVersion === draftRef.current?.presetVersion
+          ? parsePresetState({ revision: binding.revision, preset: bound?.preset }) : null : parsePresetState(payload);
         if (!response.ok || !value) throw new Error('模板暂不可读取，请重试；当前图片和补充要求已保留。');
         const scanned = refreshRequests();
         if (pendingActive(receiptRef.current) || submitLock.current || scanned.invalid || scanned.incomplete || scanned.records.some(pendingActive)) return;
         setPresetState(value);
-        setDraft(previous => previous && previous.presetVersion !== value.preset.version ? { ...previous, presetVersion: value.preset.version } : previous);
+        if (!binding) setDraft(previous => previous && !previous.settingsBinding && previous.presetVersion !== value.preset.version ? { ...previous, presetVersion: value.preset.version } : previous);
       } catch { if (current(scope) && !controller.signal.aborted) setPresetError('模板暂不可读取，请重试；当前图片和补充要求已保留。'); }
     })();
     return () => controller.abort();
     // Only a future, unsubmitted selection adopts the current preset; original receipts stay immutable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, allowed, active, accountRequestBlocked, recoveryBlocked, submitting, presetRefresh, owner]);
+  }, [ready, allowed, active, accountRequestBlocked, recoveryBlocked, submitting, presetRefresh, owner, draft?.settingsBinding?.id, draft?.settingsBinding?.revision]);
   useEffect(() => {
     const refresh = () => { if (document.visibilityState === 'visible') setPresetRefresh(value => value + 1); };
     window.addEventListener('focus', refresh); document.addEventListener('visibilitychange', refresh);
@@ -504,7 +577,8 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
       try {
         const response = await fetch('/api/tasks/estimate', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-app-session-user': owner },
           body: JSON.stringify({ provider: draft.provider, model: draft.model, resolution: draft.resolution, duration: draft.duration,
-            project_id: draft.projectId, video_card_id: draft.videoCardId || null, ratio: draft.ratio, draft: false, reference_video_urls: [], multiview_preset_version: draft.presetVersion }),
+            project_id: draft.projectId, video_card_id: draft.videoCardId || null, ratio: draft.ratio, draft: false, reference_video_urls: [], multiview_preset_version: draft.presetVersion,
+            ...(draft.settingsBinding ? { multiview_settings: draft.settingsBinding } : {}) }),
           cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]) });
         const payload = await readJsonResponse<ApiError & { estimatedCost?: number; multiviewPresetVersion?: string; pricing_revision?: string | null; pricing_quote_token?: string }>(response);
         if (!current(scope) || controller.signal.aborted) return;
@@ -648,14 +722,14 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
       phase: ready ? phase : 'empty',
       busy: ready && (working || submitting || closing || active),
       ...(ready && receipt?.taskId ? { taskId: receipt.taskId } : {}),
-      unsaved: ready && draftEdited && !saved && JSON.stringify(draft) !== retainedDraft || requestStorageFailed || promptRisk.unsaved,
-      leavingBusy: working || submitting || closing || Boolean(creating) || promptRisk.busy,
+      unsaved: ready && draftEdited && !saved && JSON.stringify(draft) !== retainedDraft || requestStorageFailed || promptRisk.unsaved || settingsRisk.unsaved,
+      leavingBusy: working || submitting || closing || Boolean(creating) || promptRisk.busy || settingsRisk.busy,
     });
-  }, [ready, phase, working, submitting, closing, active, receipt?.taskId, saved, draftEdited, draft, retainedDraft, requestStorageFailed, creating, promptRisk]);
+  }, [ready, phase, working, submitting, closing, active, receipt?.taskId, saved, draftEdited, draft, retainedDraft, requestStorageFailed, creating, promptRisk, settingsRisk]);
 
   async function generate() {
     if (!draft || !ready || !allowed || !imageReady || !currentProject || cardSelectionInvalid || approvalBlocked || !currentQuote || !presetReady || !presetState || !prompt.valid
-      || !seedValid || !current(capture()) || working || uploadLock.current || createLock.current || closeLock.current || association || submitLock.current || pendingActive(receiptRef.current) || recoveryBlocked) return;
+      || !seedValid || !current(capture()) || working || settingsRisk.busy || uploadLock.current || createLock.current || closeLock.current || association || submitLock.current || pendingActive(receiptRef.current) || recoveryBlocked) return;
     const scanned = refreshRequests();
     if (scanned.invalid || scanned.incomplete || scanned.records.some(pendingActive)) { setStatus('本账号仍有未确认的原请求，或本机记录尚未查全。请先查询下面的原请求，不会新建编号。'); return; }
     const scope = capture(); const token = {}; submitLock.current = token; setSubmitting(true); setError(''); setStatus('');
@@ -797,7 +871,8 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   if (!ready || !draft) return <section className={styles.panel} role="status">正在恢复本账号的设置…</section>;
   const selectedModel = SEEDANCE_VIDEO_MODEL_OPTIONS.find(item => item.id === draft.model);
   const durationOptions = seedanceVideoDurationOptions(draft.model);
-  const formDisabled = submitting || closing || working || Boolean(creating);
+  const settingsDisabled = submitting || closing || working || Boolean(creating) || active || accountRequestBlocked || recoveryBlocked;
+  const formDisabled = submitting || closing || working || Boolean(creating) || settingsRisk.busy;
   const blocked = formDisabled || active || accountRequestBlocked || recoveryBlocked || Boolean(association) || !imageReady || !currentProject
     || cardSelectionInvalid || approvalBlocked || !currentQuote || !presetReady || !prompt.valid || !seedValid;
   const sameReady = Boolean(receipt?.phase === 'ready' && receipt.taskId && receipt.taskId === props.currentTaskId);
@@ -841,7 +916,11 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         }}>重试原加入</button></div>}
       </div>
       <div className={styles.settings}>
-        <div className={styles.preset}><strong>360°旋转模板</strong>{user.role === 'admin' && <button type="button" className={styles.quiet} onClick={() => setPromptOpen(true)}>模板提示词</button>}</div>
+        <MultiviewSettingsPicker kind="generation" ownerId={owner} authorityKey={authorityKey} disabled={settingsDisabled}
+          value={presetReady ? generationSettingsValue(draft) : null} binding={draft.settingsBinding}
+          onApply={applyGenerationSettings} onReset={useCurrentRotationPreset} onSaved={adoptSavedGenerationSettings} onStateChange={setSettingsRisk} />
+        <div className={styles.preset}><strong>360°旋转模板</strong>{user.role === 'admin' && <button type="button" className={styles.quiet} disabled={formDisabled} onClick={() => setPromptOpen(true)}>{draft.settingsBinding ? '默认模板提示词' : '模板提示词'}</button>}</div>
+        {draft.settingsBinding && <small>使用这份设置保存时的模板提示词。</small>}
         {presetError && !active && <p className={styles.feedback} role="status">{presetError}<button type="button" className={styles.quiet} onClick={() => setPresetRefresh(value => value + 1)}>重新读取</button></p>}
         <div className={styles.parameters}>
           <label>模型<select value={draft.model} disabled={formDisabled} onChange={event => change({ model: event.target.value })}>{!selectedModel && <option value={draft.model}>{draft.model || '未选择'}</option>}{SEEDANCE_VIDEO_MODEL_OPTIONS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
@@ -855,7 +934,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
           <div className={styles.parameters}><label>画面比例<select value={draft.ratio} disabled={formDisabled} onChange={event => change({ ratio: event.target.value })}>{!RATIO_OPTIONS.some(value => value === draft.ratio) && <option value={draft.ratio}>{draft.ratio}</option>}{RATIO_OPTIONS.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
             <label>随机种子<input type="number" value={draft.seed} disabled={formDisabled} onChange={event => change({ seed: Number(event.target.value) })} /></label></div>
           <div className={styles.checks}>{(['generateAudio', 'returnLastFrame', 'watermark'] as const).map((key, index) => <label key={key}><input type="checkbox" checked={draft[key]} disabled={formDisabled} onChange={event => change({ [key]: event.target.checked })} />{['生成声音', '返回末帧', '水印'][index]}</label>)}</div>
-          {user.role === 'admin' && presetReady && <details><summary>本次完整文案</summary><p className={styles.fullPrompt}>{prompt.prompt}</p></details>}
+          {(user.role === 'admin' || Boolean(draft.settingsBinding)) && presetReady && <details><summary>本次完整文案</summary><p className={styles.fullPrompt}>{prompt.prompt}</p></details>}
           {presetReady && <small>完整文案 {prompt.characters} 字，可再补充 {Math.max(0, prompt.remainingCharacters)} 字。</small>}
           <button type="button" disabled={formDisabled} onClick={() => { const defaults = defaultMultiviewGenerationDraft(draft.workspaceTabId); change({ ...defaults, presetVersion: draft.presetVersion, mainImage: draft.mainImage, projectId: draft.projectId, videoCardId: draft.videoCardId, supplement: draft.supplement }); }}>恢复模板参数</button>
         </details>
