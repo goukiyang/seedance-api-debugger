@@ -2,7 +2,7 @@
 
 ## FIX01 共享上传修复（2026-10-19）
 
-来源：本轮用户“修改”，项目video-api-debugger；主题：固定私有目录、原号安全、逐文件错误。正式根工单`tasks/todo/2026-10-19-image-upload-preflight.md`与同根`docs/materials/2026-10-19-image-upload-preflight/`沿用ROOT01原PNG/只读原证；新增私有发布准备在`fix01-release/`，不公开Git。当前从实际a176/v0.97.0实施，未构建或部署，TRACE/GEN继续暂停。旧资料适用性、可读性及关键SHA沿ROOT01原记录，不把修复实现或工程门冒真实上传验收。
+来源：用户“修改”；项目video-api-debugger；主题：共享上传、安全目录、原号恢复、逐文件原因。FIX01已于2026-10-19 12:05:13Z保护部署v0.97.1，待用户手验；实际Web/image e6bbdb0a、BUILD IpkPjAZqZMQr2xbzi7C7w，相容guard4c73dd1e／BUILD Ll_iNiQzOyFD-ypx3xGv7。正式根原工单§8与同根`docs/materials/2026-10-19-image-upload-preflight/d983e8ce-e095-4b9b-846e-2e0fc1649652/`保存两完整build/原log、统一Verify/Review、switch/public/原未知与目录保护对账及deployment-closure原件；私有材料不推公开。原ROOT01 PNG与原函数证据沿用，旧失败保留，TRACE/GEN仍暂停；上线不冒真实上传验收。 旧资料可读性/关键SHA沿ROOT01；本次关键回执已核SHA，重复辅助文件不额外校验。
 
 ## MAT-M01/MAT-M02 手机素材选择与分页（2026-10-18）
 

@@ -2,7 +2,7 @@
 
 ## 当前入口
 
-- [ ] FIX01（2026-10-19）：用户已授权仅修UP01/UP02共享上传与逐文件错误。从实际线上a176/v0.97.0隔离，不混入暂停TRACE/GEN；保原storage、收费启动保护和历史unknown原号。目录兼容、前置nonce/CAS拒绝、结构化安全日志与失败原因保留已进入整批收口，统一工程检查/受保护部署尚未完成，功能由用户手验。完整原单与私有材料在正式项目根`tasks/todo/2026-10-19-image-upload-preflight.md`及`docs/materials/2026-10-19-image-upload-preflight/`；不推用户原图、DB或私有诊断。
+- [x] FIX01（2026-10-19）：UP01/UP02已保护部署v0.97.1，待用户手验。实际Web/image同源e6bbdb0a／BUILD IpkPjAZqZMQr2xbzi7C7w；Linux20主/相容guard完整构建及既有RATE/image与上传工程门、同lead Review、公网9资源同字节通过。固定canonical安全兼容、原nonce前置拒绝、逐文件原因及真实恢复动作已交付；30旧未知上传/60回执/DB/费用/19leaf与四后台保持，旧writing未解锁重发，TRACE/GEN仍暂停。正式原单§8及私有d983e8ce run在项目主目录，不推原图/DB/私有诊断。
 
 - [ ] MAT-M01／MAT-M02／RELEASE（2026-10-18）：手机添加/上传素材弹窗专用紧凑布局及12–24张自适应分页正在实施。保留常显来源、全部筛选、上传/选择/权限与恢复，取代只按三行限制；完整构建与保护部署后用户手验。[正式计划](todo/2026-10-02-unified-resource-library.md#mat-m01mat-m02-手机素材选择与分页2026-10-18)。
 
