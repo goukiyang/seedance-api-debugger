@@ -9,8 +9,15 @@ import { readPricingFixtureInputs } from './pricing-fixture-input.mjs';
 const root = realpathSync(process.cwd());
 const fixture = 'scripts/pricing-policy-contract-fixture.ts';
 const marker = 'Pricing policy contract fixture receipt: ';
-const checks = Array.from({ length: 24 }, (_, index) => `G${String(index + 1).padStart(2, '0')}`);
+const checks = Array.from({ length: 30 }, (_, index) => `G${String(index + 1).padStart(2, '0')}`);
 const hash = value => createHash('sha256').update(value).digest('hex');
+const fixtureEnvironment = { NODE_ENV: 'test', HD_DERIVATIVES_ROOT: 'absent', verifiedBeforeBusinessImports: true };
+const fixtureEnvironmentMarker = 'Fixture environment isolated before imports: test/no-HD-root';
+const fixtureEnvironmentImport = 'data:text/javascript,' + encodeURIComponent(
+  `import assert from 'node:assert/strict'; assert.equal(process.env.NODE_ENV,'test'); assert.equal(Object.hasOwn(process.env,'HD_DERIVATIVES_ROOT'),false); console.log(${JSON.stringify(fixtureEnvironmentMarker)});`);
+function isolatedFixtureEnv(extra = {}) {
+  const env = { ...process.env, ...extra, NODE_ENV: 'test' }; delete env.HD_DERIVATIVES_ROOT; return env;
+}
 
 function hashes() { return pricingSourceHashes(root); }
 function assertConfig(candidate = root) {
@@ -22,6 +29,10 @@ function assertConfig(candidate = root) {
     'src/lib/pricing/resolve.ts', 'src/lib/pricing/runtime.ts', 'src/lib/pricing/isolation.ts',
     'src/lib/credits/precision.ts', 'scripts/pricing-fixture-input.mjs', 'scripts/pricing-fixture-runner.ts',
     'scripts/pricing-image-ui-contract-fixture.ts', 'scripts/pricing-parent-identity-fixture.ts',
+    'scripts/pricing-authoring-contract-fixture.ts', 'scripts/pricing-authoring-ui-contract-fixture.ts',
+    'scripts/pricing-image-spec-contract-fixture.ts', 'scripts/pricing-video-scope-client-fixture.ts',
+    'scripts/pricing-video-context-contract-fixture.ts',
+    'scripts/pricing-request-status-contract-fixture.ts',
     'scripts/pricing-legacy-consumer-fixture.ts', 'scripts/pricing-legacy-v0954/provenance.ts',
     'scripts/pricing-legacy-v0954/bootstrap-root.sh']) assert.ok(readFileSync(path.join(root, file)).length > 0, file);
   const sources = hashes();
@@ -48,7 +59,7 @@ function verifyFixture(file, runId, startedAt, finishedAt, sourceSha256) {
   assert.equal(value.completed, true);
   assert.equal(value.candidateRoot, root);
   assert.ok(value.startedAt >= startedAt && value.finishedAt >= value.startedAt && value.finishedAt <= finishedAt + 1000);
-  assert.deepEqual(value.checks?.map(check => check.id), checks, 'Every G01-G24 contract must actually complete');
+  assert.deepEqual(value.checks?.map(check => check.id), checks, 'Every G01-G30 contract must actually complete');
   for (const check of value.checks) {
     assert.equal(check.completed, true, check.id);
     assert.ok(Number.isSafeInteger(check.assertions) && check.assertions > 0, `${check.id} has no assertions`);
@@ -57,8 +68,13 @@ function verifyFixture(file, runId, startedAt, finishedAt, sourceSha256) {
   for (const key of ['forbiddenCalls', 'productionWrites', 'paidRequests', 'browserRuns']) assert.equal(value[key], 0, key);
   assert.equal(value.fixtureSha256, sourceSha256[fixture]);
   assert.deepEqual(value.sourceSha256, sourceSha256, 'Fixture source coverage differs from this candidate');
-  assert.deepEqual(value.transcripts?.map(item => item.kind), ['admin', 'ui', 'image-ui', 'video', 'legacy', 'parent', 'core', 'toolflow']);
-  for (const transcript of value.transcripts) assert.equal(receiptLogHash(transcript.log), transcript.sha256, 'Fixture execution log changed');
+  assert.deepEqual(value.transcripts?.map(item => item.kind), ['admin', 'ui', 'image-ui', 'video', 'legacy', 'parent', 'core', 'toolflow',
+    'authoring', 'authoring-ui', 'image-spec', 'video-scope-client', 'video-context', 'request-status']);
+  for (const transcript of value.transcripts) {
+    assert.equal(receiptLogHash(transcript.log), transcript.sha256, 'Fixture execution log changed');
+    assert.equal(readFileSync(transcript.log, 'utf8').split(/\r?\n/).filter(line => line === fixtureEnvironmentMarker).length, 1,
+      'Every pricing subgroup must verify its actual environment before business imports: ' + transcript.kind);
+  }
   assert.equal(value.rootInputManifest?.runId, runId);
   assert.match(value.rootInputManifest?.source, /^[a-f0-9]{40}$/);
   assert.equal(receiptLogHash(value.rootInputManifest?.path, false), value.rootInputManifest?.sha256, 'Root bootstrap receipt changed');
@@ -96,6 +112,7 @@ function verify(file, since) {
   assert.equal(value.schema, 'pricing-policy-build-gate.v1');
   assert.match(value.runId, /^[a-f0-9-]{36}$/);
   assert.equal(value.completed, true);
+  assert.deepEqual(value.fixtureEnvironment, fixtureEnvironment);
   assert.equal(value.candidateRoot, root);
   assert.ok(value.startedAt >= since && value.finishedAt >= value.startedAt && value.finishedAt <= Date.now() + 1000);
   assert.ok(Date.now() - value.startedAt <= 30 * 60_000, 'Pricing gate receipt is stale');
@@ -112,8 +129,8 @@ function run() {
   const directory = mkdtempSync(path.join(scratch, 'pricing-policy-gate-'));
   const sourceManifest = path.join(directory, 'source-manifest.json');
   writeFileSync(sourceManifest, JSON.stringify(sourceSha256), { mode: 0o600, flag: 'wx' });
-  const result = spawnSync(process.execPath, ['--import', 'tsx', path.join(root, fixture)], {
-    cwd: root, env: { ...process.env, PRICING_GATE_RUN_ID: runId, PRICING_GATE_SOURCE_MANIFEST: sourceManifest },
+  const result = spawnSync(process.execPath, ['--import', fixtureEnvironmentImport, '--import', 'tsx', path.join(root, fixture)], {
+    cwd: root, env: isolatedFixtureEnv({ PRICING_GATE_RUN_ID: runId, PRICING_GATE_SOURCE_MANIFEST: sourceManifest }),
     encoding: 'utf8', timeout: 600000, maxBuffer: 4 * 1024 * 1024,
   });
   writeFileSync(path.join(directory, 'fixture.log'), (result.stdout || '') + (result.stderr || ''), { mode: 0o600, flag: 'wx' });
@@ -121,7 +138,7 @@ function run() {
     const failureReport = path.join(directory, 'failure-report.json');
     const childReport = (result.stderr || '').split(/\r?\n/).find(line => line.startsWith('Pricing policy contract failure report: '));
     writeFileSync(failureReport, JSON.stringify({ schema: 'pricing-policy-build-failure.v1', completed: false,
-      runId, candidateRoot: root, startedAt, finishedAt: Date.now(), sourceSha256, fixtureLog: path.join(directory, 'fixture.log'),
+      runId, candidateRoot: root, startedAt, finishedAt: Date.now(), sourceSha256, fixtureEnvironment, fixtureLog: path.join(directory, 'fixture.log'),
       fixtureFailureReport: childReport?.slice('Pricing policy contract failure report: '.length) || null,
       status: result.status, signal: result.signal, error: result.error?.message || null }), { mode: 0o600, flag: 'wx' });
     console.error(`Pricing policy build failure report: ${failureReport}`);
@@ -129,6 +146,8 @@ function run() {
     return;
   }
   const lines = (result.stdout || '').split(/\r?\n/).filter(line => line.startsWith(marker));
+  assert.equal((result.stdout || '').split(/\r?\n/).filter(line => line === fixtureEnvironmentMarker).length, 1,
+    'The actual pricing child must verify its isolated environment before importing business modules');
   assert.equal(lines.length, 1, 'A unique completed pricing fixture receipt is required');
   const fixtureReceipt = lines[0].slice(marker.length);
   const finishedAt = Date.now();
@@ -136,7 +155,7 @@ function run() {
   assert.deepEqual(hashes(), sourceSha256, 'Candidate changed during pricing verification');
   const file = path.join(directory, 'receipt.json');
   writeFileSync(file, JSON.stringify({ schema: 'pricing-policy-build-gate.v1', runId, candidateRoot: root,
-    startedAt, finishedAt, sourceSha256, fixtureReceipt, fixtureReceiptSha256, completed: true }), { mode: 0o600, flag: 'wx' });
+    startedAt, finishedAt, sourceSha256, fixtureEnvironment, fixtureReceipt, fixtureReceiptSha256, completed: true }), { mode: 0o600, flag: 'wx' });
   verify(file, startedAt);
   console.log(`PRICING_POLICY_GATE_RECEIPT=${file}`);
 }

@@ -20,7 +20,7 @@ import { exactSpecificationEstimate, imageCostGroup } from './billing-calibratio
 import { imageQuoteKey, type StoredImageQuote } from './billing-quote-store';
 import { frozenPricingReservation } from '@/lib/pricing/charge';
 import { sumCredits } from '@/lib/credits/precision';
-import { withImagePricing } from '@/lib/pricing/image';
+import { samePricingImageCharge, withImagePricing } from '@/lib/pricing/image';
 
 type PreparedImageQuoteResult = {
   billingMode: 'fixed' | 'actual';
@@ -126,6 +126,16 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
   const requestedChannelId = imageChannel?.channelId
     || (typeof body.channelId === 'string' && body.channelId !== 'original' ? body.channelId : undefined);
   const settings = (await withImagePricing(await resolveQuoteSettings(base.model, imageChannel, requestedChannelId), base.model, prisma, base)).settings;
+  const quoteSpecifications = { quality: String(task.quality),
+    resolution: typeof taskSnapshot.resolution === 'string' ? taskSnapshot.resolution : undefined,
+    ratio: typeof taskSnapshot.aspectRatio === 'string' ? taskSnapshot.aspectRatio : undefined };
+  const confirmPricing = async () => {
+    const fresh = await withImagePricing(await resolveQuoteSettings(base.model, imageChannel, requestedChannelId),
+      base.model, prisma, undefined, quoteSpecifications);
+    if (!samePricingImageCharge(fresh.quote?.charge, base.pricing)) {
+      throw new StudioError('图片规格或收费规则在准备期间已变化，请重新报价；尚未生成', 409);
+    }
+  };
   let scope: string;
   try { scope = imageBillingScope(settings); }
   catch { throw new StudioError('当前图片通道缺少有效的账单范围，暂不能报价', 409); }
@@ -137,6 +147,7 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
     : undefined;
   const fixedResult = async (): Promise<PreparedImageQuoteResult> => {
     await confirmDefinition();
+    await confirmPricing();
     let billingQuoteId: string | null = null;
     if (base.pricing) {
       billingQuoteId = randomUUID();
@@ -159,7 +170,8 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
         throw new StudioError('同一报价中的任务未固定到相同图片通道修订，未报价', 409);
       }
       const preparedContract = parseImageBillingContract(String(preparedTask.billing_contract_json));
-      if (!preparedContract || preparedContract.scope !== base.scope || preparedContract.model !== base.model) {
+      if (!preparedContract || preparedContract.scope !== base.scope || preparedContract.model !== base.model
+        || !samePricingImageCharge(preparedContract.pricing, base.pricing)) {
         throw new StudioError('同一报价中的任务账单范围不一致，未报价', 409);
       }
     }
@@ -229,6 +241,7 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
 
   const now = Date.now();
   await confirmDefinition();
+  await confirmPricing();
   const authorizedCredits = base.pricing ? frozenPricingReservation(base.pricing, selectedEstimate.credits) : selectedEstimate.credits;
   const contract: ImageBillingContract = { ...base, mode: 'actual', authorizedCredits,
     issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + 60000).toISOString(),

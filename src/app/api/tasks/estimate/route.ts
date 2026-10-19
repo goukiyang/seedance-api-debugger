@@ -11,8 +11,41 @@ import { isVolcengineIpModelId, volcengineIpModelResolutions } from '@/lib/integ
 import { assertCurrentMultiviewRotationPreset, MultiviewPresetError } from '@/lib/video/multiview-preset.server';
 import { getH3ApiSettings, H3_PRESET_OPTIONS, isH3Operational } from '@/lib/integrations/h3';
 import { getAiMediaKitApiSettings, isAiMediaKitApiReady } from '@/lib/integrations/aimediakit';
+import { resolveVideoPricingContext, issueVideoPricingCredential, savedVideoPricingContextInput } from '@/lib/pricing/video-context';
+import { prisma } from '@/lib/prisma';
+import { assertCanViewTask } from '@/lib/projects/permissions';
 
 export async function GET(request: NextRequest) {
+  return estimate(request);
+}
+export async function POST(request: NextRequest) {
+  try {
+    const reader = request.body?.getReader();
+    if (!reader) return errorJson('报价输入为空', 400);
+    const chunks: Uint8Array[] = []; let bytes = 0;
+    try {
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        bytes += chunk.value.length;
+        if (bytes > 262144) return errorJson('报价输入过大', 400);
+        chunks.push(chunk.value);
+      }
+    } finally { await reader.cancel().catch(() => undefined); }
+    const raw = Buffer.concat(chunks).toString('utf8');
+    const body = JSON.parse(raw);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return errorJson('报价输入无效', 400);
+    const url = new URL(request.url);
+    for (const field of ['provider', 'model', 'resolution', 'duration', 'tool_version', 'fps', 'multiview_preset_version']) {
+      if (body[field] !== undefined) url.searchParams.set(field, String(body[field]));
+    }
+    return estimate(new NextRequest(url, { headers: request.headers }), body);
+  } catch (error) {
+    if (error instanceof AuthError) return errorJson(error.message, error.status);
+    return errorJson('报价输入无法读取，原参数未改变', 400);
+  }
+}
+async function estimate(request: NextRequest, body?: Record<string, unknown>) {
   const { searchParams } = new URL(request.url);
   const provider = searchParams.get('provider') || 'seedance';
   if (!['seedance', 'volcengine_ip', 'h3', 'volcengine_mediakit'].includes(provider)) return errorJson('视频接口无效', 400);
@@ -31,6 +64,8 @@ export async function GET(request: NextRequest) {
     if (error instanceof CodexApiAuthError) return errorJson(error.message, error.status);
     return errorJson('未登录', 401);
   }
+  const expectedActor = request.headers.get('x-app-session-user');
+  if (expectedActor && expectedActor !== user.id) return NextResponse.json({ error: '账号已变化，请重新确认当前账号后报价；原输入保留', code: 'pricing_actor_changed' }, { status: 409, headers: { 'Cache-Control': 'private, no-store' } });
 
   const resolution = (searchParams.get('resolution') || '720p') as VideoResolution;
   const duration = Number(searchParams.get('duration') ?? '5');
@@ -73,12 +108,25 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    if (body?.retry_task_id) {
+      if (typeof body.retry_task_id !== 'string') throw new AuthError('原任务编号无效', 400);
+      const task = await prisma.videoTask.findUnique({ where: { id: body.retry_task_id } });
+      if (!task) throw new AuthError('原任务不存在', 404);
+      await assertCanViewTask(user, task);
+      if (task.model !== parsedModel.model || task.duration !== duration || task.resolution !== resolution) throw new AuthError('重试报价与原任务不同', 409);
+      body = savedVideoPricingContextInput(task);
+    }
+    const context = body && (body.project_id || body.video_card_id) ? await resolveVideoPricingContext(user, {
+      ...body, provider, model: parsedModel.model, resolution, duration,
+    }) : undefined;
     const quote = await quoteVideoPricing({ provider: provider as VideoPricingInput['provider'], model: parsedModel.model,
-      resolution, duration, toolVersion, fps });
+      resolution, duration, toolVersion, fps, context });
     return NextResponse.json({ ...publicVideoPricing(quote), provider, modelId: parsedModel.model,
+    ...(context ? { pricing_quote_token: issueVideoPricingCredential(context, quote.revision, quote.pricing.estimatedCost) } : {}),
     ...(multiviewPresetVersion === null ? {} : { multiviewPresetVersion, multiviewPresetRevision }),
     }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
+    if (error instanceof AuthError) return errorJson(error.message, error.status);
     const failure = videoPricingError(error);
     return NextResponse.json({ error: failure?.message || '报价暂时无法确认，请重试；原参数未改变', code: failure?.code || 'pricing_unavailable' },
       { status: failure?.status || 503, headers: { 'Cache-Control': 'private, no-store' } });

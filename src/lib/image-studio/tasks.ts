@@ -13,7 +13,7 @@ import { imageBillingScope } from './billing-scope';
 import { fixedImageBillingContract, imageSpecification, withPricingImageContract } from './billing-quote';
 import { quotePricingCharge, assertNewPricingCharge } from '@/lib/pricing/charge';
 import { assertNoSynchronousImageAdmission, SynchronousImageAdmissionError } from './synchronous-admission';
-import { withImagePricing } from '@/lib/pricing/image';
+import { samePricingImageCharge, withImagePricing } from '@/lib/pricing/image';
 import { creditCents, sumCredits } from '@/lib/credits/precision';
 import { studioTaskState, studioTaskStates, publicPricingTaskState, studioBillingState, isPricingImageTask } from './pricing-state';
 import { assertPricingImageConsumerReady } from '@/lib/pricing/runtime';
@@ -503,7 +503,9 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       imageChannel = input.imageChannel || await captureImageGenerationChannel(generation.model, effectiveRequestedChannelId, tx);
       if (imageChannel.channelId !== effectiveRequestedChannelId) throw new StudioError('图片通道与配置版本不匹配', 409);
       imageApi = await resolveImageGenerationChannelSnapshot(imageChannel, tx, true, generation.model);
-      const priced = await withImagePricing(imageApi, generation.model, tx, acceptedContract);
+      const priced = await withImagePricing(imageApi, generation.model, tx, acceptedContract,
+        acceptedContract ? {} : { quality: generation.quality,
+          resolution: normalizeImageResolution(generation.model, effectiveResolution, imageApi.provider), ratio: effectiveAspectRatio });
       imageApi = priced.settings; pricingQuote = priced.quote;
       const channelCapability = imageApi.modelCapabilities[generation.model as keyof typeof imageApi.modelCapabilities];
       const validation = validateImageGenerationChannel(imageApi, { model: generation.model, quality: generation.quality,
@@ -519,7 +521,9 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       }
     }
     if (!imageChannel) {
-      const priced = await withImagePricing(imageApi, generation.model, tx, acceptedContract);
+      const priced = await withImagePricing(imageApi, generation.model, tx, acceptedContract,
+        acceptedContract ? {} : { quality: generation.quality,
+          resolution: normalizeImageResolution(generation.model, effectiveResolution, imageApi.provider), ratio: effectiveAspectRatio });
       imageApi = priced.settings; pricingQuote = priced.quote;
     }
     if(avatar && (input.referenceIds.length ? !imageApi.supports_image_to_image : !imageApi.supports_text_to_image)) throw new StudioError('当前图片通道不支持本次文字或原图参考生成',409);
@@ -837,7 +841,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
           ...(sharedDefinition ? { sharedLive: sharedDefinition.intent } : {}) });
       } catch { throw new StudioError('实扣报价已过期、被使用或参数已变化，请重新报价', 409); }
       price = billingContract.authorizedCredits;
-      if (Boolean(pricingQuote) !== Boolean(billingContract.pricing)) throw new StudioError('收费合同已变化，请重新报价；未沿旧报价生成', 409);
+      if (!samePricingImageCharge(pricingQuote?.charge, billingContract.pricing)) throw new StudioError('收费合同或图片规格已变化，请重新报价；未沿旧报价生成', 409);
       if (billingContract.pricing) await assertNewPricingCharge(billingContract.pricing, body.pricingRevision, tx);
       const authorizedUnitCredits = price;
       if (input.maxEstimatedCost === undefined || sumCredits(Array.from({ length: input.count }, () => authorizedUnitCredits)) > input.maxEstimatedCost) throw new StudioError('请先确认本次预估及最高扣点授权', 409);

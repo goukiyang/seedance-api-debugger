@@ -144,7 +144,7 @@ export async function prepareAvatarPlan(owner: string, body: Record<string, unkn
   const channelId = requestedChannelId || 'original';
   const effectiveChannelId = await resolveImageGenerationRequestChannel(model, requestedChannelId) || 'original';
   const imageChannel = effectiveChannelId !== 'original' ? await captureImageGenerationChannel(model, effectiveChannelId) : undefined;
-  const priced = await withImagePricing(imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, model) : await getImageGenerationSettingsForModel(model), model);
+  const priced = await withImagePricing(imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, model) : await getImageGenerationSettingsForModel(model), model, prisma, undefined, { quality, resolution, ratio: isAvatarSheet(rules) ? '1:1' : rules.people > 1 ? '3:2' : '1:1' });
   const api = priced.settings;
   if (priced.quote) unitCredits = priced.quote.credits;
   if (priced.quote) channelActual = priced.quote.charge.identity.billingMode === 'actual';
@@ -187,7 +187,7 @@ export async function submitAvatarPlan(owner: string, id: string, expectedLayout
   if (!alreadyQueued && (settings.revision !== plan.settingsRevision || (!plan.pricingRevision && !plan.imageChannel && (plan.unitCredits===null || settings.prices[plan.model as keyof typeof settings.prices] !== plan.unitCredits)))) throw new StudioError('报价已变化，请更新报价后确认费用；人物草稿不需要重新随机', 409);
   if ((draft?.channelId || 'original') !== (plan.channelId || 'original')) throw new StudioError('图片供应商已变化，请重新报价；人物草稿保留', 409);
   const rawApi = plan.imageChannel ? await resolveImageGenerationChannelSnapshot(plan.imageChannel, undefined, !alreadyQueued, plan.model) : await getImageGenerationSettingsForModel(plan.model);
-  const api = alreadyQueued ? rawApi : (await withImagePricing(rawApi, plan.model)).settings;
+  const api = alreadyQueued ? rawApi : (await withImagePricing(rawApi, plan.model, prisma, undefined, { quality: plan.quality, resolution: plan.resolution, ratio: plan.aspectRatio })).settings;
   if (!alreadyQueued && plan.imageChannel) {
     const validation = validateImageGenerationChannel(api, { model: plan.model, quality: plan.quality, resolution: plan.resolution, ratio: plan.aspectRatio, referenceCount: plan.referenceIds.length });
     if (!validation.ok) throw new StudioError(validation.error, 409);
@@ -230,13 +230,16 @@ export async function estimateAvatarDraft(owner: string, body: Record<string, un
   const channelId = requestedChannelId || 'original';
   const effectiveChannelId = await resolveImageGenerationRequestChannel(model, requestedChannelId) || 'original';
   const imageChannel = effectiveChannelId === 'original' ? undefined : await captureImageGenerationChannel(model, effectiveChannelId);
-  const priced = await withImagePricing(imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, model) : await getImageGenerationSettingsForModel(model), model);
+  const quality = normalizeImageStudioQuality(model, body.quality);
+  const resolution = normalizeImageResolution(model, typeof body.resolution === 'string' ? body.resolution : '1K');
+  const ratio = isAvatarSheet(rules) ? '1:1' : rules.people > 1 ? '3:2' : '1:1';
+  const priced = await withImagePricing(imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, model) : await getImageGenerationSettingsForModel(model), model, prisma, undefined, { quality, resolution, ratio });
   const api = priced.settings;
   const count = isAvatarSheet(rules) ? 1 : rules.candidates;
   let fixed = priced.quote ? priced.quote.credits : settings.prices[model as keyof typeof settings.prices];
   let requestedMode: 'fixed' | 'actual' | undefined = priced.quote?.charge.identity.billingMode;
   if (imageChannel) {
-    const validation = validateImageGenerationChannel(api, { model, quality: typeof body.quality === 'string' ? body.quality : undefined, resolution: typeof body.resolution === 'string' ? body.resolution : undefined, ratio: isAvatarSheet(rules) ? '1:1' : rules.people > 1 ? '3:2' : '1:1', referenceCount: referenceIds.length });
+    const validation = validateImageGenerationChannel(api, { model, quality, resolution, ratio, referenceCount: referenceIds.length });
     if (!validation.ok) throw new StudioError(validation.error, 409);
     fixed = validation.capability.fixedPoints;
     requestedMode = validation.capability.billingMode ?? undefined;

@@ -412,9 +412,7 @@
                 ? nodeEl?.querySelector('[data-style-price]')
                 : nodeEl?.querySelector('[data-canvas-node-price]');
             if (!line) return;
-            const total = quote?.estimatedCredits;
-            line.textContent = window.UltimateCanvasNodePricing?.validCredits(total)
-                ? `合计约 ${window.UltimateCanvasNodePricing.formatCredits(total)} 点数` : '费用待估算';
+            line.textContent = canvasImageQuotePriceText(quote);
         },
         clearQuote: nodeId => {
             if (engine.nodes.has(nodeId)) renderGenerationNodeControls(nodeId);
@@ -1176,27 +1174,21 @@
                     const context = currentGenerationContext(payload.nodeId);
                     const node = engine.nodes.get(payload.nodeId);
                     const prior = node?.data?.videoSubmission;
-                    const unsent = prior?.requestId === payload.requestId && canvasRuntime.unsentVideoRequests.get(payload.nodeId) === prior;
+                    const unsent = prior?.requestId === payload.requestId && canvasRuntime.unsentVideoRequests.get(payload.nodeId) === prior
+                        && prior.userId === canvasRuntime.bootstrap?.user?.id && prior.documentId === canvasRuntime.documentId;
                     if (!node || (prior?.state === 'unconfirmed' && !unsent)) throw Error('提交结果待确认，请查询已有请求；不会重复提交。');
-                    const descriptor = window.UltimateCanvasGenerationNodes.videoRequest({
-                        projectId: canvasRuntime.selectedProjectId,
-                        cardId: canvasRuntime.selectedVideoCardId,
-                        branchId: payload.videoBranchId || canvasRuntime.selectedVideoBranchId,
-                        documentId: canvasRuntime.documentId,
-                        nodeId: payload.nodeId,
-                        workspaceKey: canvasWorkspaceKey(),
-                        requestId: payload.requestId,
-                        mode: payload.mode,
-                        prompt: promptWithConnectedText(payload),
-                        promptUserEdited: true,
-                        ...(payload.promptMentions ? { promptMentions: payload.promptMentions } : {}),
-                        referenceImageIds: payload.referenceImageIds || collectReferenceImageIds(payload),
-                        settings: payload.settings || {}
-                    });
+                    const descriptor = window.UltimateCanvasGenerationNodes.videoRequest(videoGenerationRequestInput(payload));
                     descriptor.url = backendEndpoint(descriptor.url, '', 'video');
                     const roleMediaContext = roleMediaContextForNode(payload.nodeId, 'video');
                     if (roleMediaContext) descriptor.payload.roleMediaContext = structuredClone(roleMediaContext);
-                    if (unsent) descriptor.payload = structuredClone(prior.input);
+                    if (unsent) {
+                        // Only this live unsent map proves no POST has started. Keep the original business input and ceiling.
+                        descriptor.payload = { ...structuredClone(prior.input), pricing_revision: payload.settings.pricingRevision,
+                            ...(payload.settings.provider !== 'volcengine_ip' && payload.settings.pricingQuoteToken
+                                ? { pricing_quote_token: payload.settings.pricingQuoteToken, pricing_fingerprint_version: 2 } : {}) };
+                        prior.input = structuredClone(descriptor.payload);
+                        prior.generationPayload = structuredClone(payload);
+                    }
                     const submission = unsent ? prior : { requestId: payload.requestId, state: 'unconfirmed',
                         userId: canvasRuntime.bootstrap?.user?.id, documentId: canvasRuntime.documentId,
                         projectId: canvasRuntime.selectedProjectId, cardId: canvasRuntime.selectedVideoCardId,
@@ -1213,12 +1205,13 @@
                         throw Error('请求未发送：完整输入尚未安全保存，请保留草稿并重试保存。');
                     }
                     if (!window.UltimateCanvasGenerationInteractions.generationContextMatches(context, currentGenerationContext(payload.nodeId))
+                        || context.documentId !== canvasRuntime.documentId || submission.userId !== canvasRuntime.bootstrap?.user?.id
                         || node.data.videoSubmission !== submission) throw Error('画布已切换，请在原画布查询此请求；不会提交。');
                     canvasRuntime.unsentVideoRequests.delete(payload.nodeId);
                     const data = await requestJson(descriptor.url, {
                         method: descriptor.method,
                         payload: descriptor.payload,
-                        policy: 'video'
+                        policy: 'video', headers: { 'x-app-session-user': submission.userId }
                     });
                     notifyRoleMediaChanged(node);
                     const normalized = window.UltimateCanvasGenerationNodes.normalizeVideoCreate(data);
@@ -4224,7 +4217,7 @@
         if (!Number.isSafeInteger(settings.count) || settings.count < 1 || settings.count > 8) return '一次可提交 1–8 张；原数量已保留，请手动调整后再生成。';
         const model = channel.models?.[settings.model];
         if (!model?.ready) return model?.disabledReason || '当前生图通道不支持所选模型；请手动选择其他模型或通道，参数未更改。';
-        if (model.billingMode === 'fixed' && model.fixedPoints == null && !['shared', 'banana'].includes(channel.id)) return '当前通道固定点数尚未配置，暂不能生成。';
+        if (model.billingMode === 'fixed' && model.fixedPoints == null && !model.pricingBySpecification && !['shared', 'banana'].includes(channel.id)) return '当前通道固定点数尚未配置，暂不能生成。';
         if (!model.billingMode) return '当前生图通道计费方式尚未确认，暂不能生成。';
         if (!model.qualities || !model.resolutions || !model.ratios || model.maxReferences == null) return '当前通道的图片参数支持范围尚未确认，暂不能生成。';
         if (model.qualities && !model.qualities.includes(settings.quality)) return '当前通道不支持所选图片质量，请手动调整后再生成。';
@@ -4232,6 +4225,13 @@
         if (model.ratios && !model.ratios.includes(settings.requestedRatio)) return '当前通道不支持所选比例，请手动调整后再生成。';
         if (Number.isSafeInteger(model.maxReferences) && generationReferenceImageIds(node.id).length > model.maxReferences) return `当前通道最多使用 ${model.maxReferences} 张参考图，请减少后再生成。`;
         return '';
+    }
+
+    function canvasImageQuotePriceText(quote) {
+        const pricing = window.UltimateCanvasNodePricing;
+        if (!pricing?.validCredits(quote?.estimatedCredits) || !['fixed', 'actual'].includes(quote?.billingMode)) return '费用待估算';
+        const amount = pricing.formatCredits(quote.estimatedCredits);
+        return quote.billingMode === 'actual' ? `最多预留 ${amount} 点，按账单结算` : `本次扣 ${amount} 点`;
     }
 
     function generationSettingsForNode(node) {
@@ -4335,51 +4335,69 @@
             resolutions: option?.resolutions || capability?.interaction?.resolutions } };
     }
 
-    function videoEstimateSignature(settings) {
-        return `${settings.provider || 'seedance'}:${settings.model || ''}:${settings.resolution}:${settings.duration}`;
+    function videoGenerationRequestInput(payload) {
+        const data = engine.nodes.get(payload.nodeId)?.data || {};
+        return { projectId: canvasRuntime.selectedProjectId, cardId: canvasRuntime.selectedVideoCardId,
+            branchId: payload.videoBranchId || canvasRuntime.selectedVideoBranchId, documentId: canvasRuntime.documentId,
+            nodeId: payload.nodeId, workspaceKey: canvasWorkspaceKey(), requestId: payload.requestId,
+            mode: payload.mode, prompt: promptWithConnectedText(payload), promptUserEdited: true,
+            ...(payload.promptMentions ? { promptMentions: payload.promptMentions } : {}),
+            referenceImageIds: payload.referenceImageIds || collectReferenceImageIds(payload),
+            referenceVideoUrls: payload.referenceVideoUrls || data.referenceVideoUrls || data.reference_video_urls || [],
+            settings: payload.settings || {} };
+    }
+
+    function videoEstimateSignature(settings, nodeId) {
+        const payload = window.UltimateCanvasGenerationNodes.videoPricingRequest(videoGenerationRequestInput({ nodeId, settings })).payload;
+        return JSON.stringify([canvasRuntime.bootstrap?.user?.id, canvasRuntime.contextEpoch, canvasRuntime.documentId, nodeId, payload]);
     }
 
     function scheduleVideoEstimate(nodeId) {
         const node = engine.nodes.get(nodeId);
         if (!node || node.type !== 'video') return;
         const settings = generationSettingsForNode(node);
-        const estimateSignature = videoEstimateSignature(settings);
         const previous = canvasRuntime.videoEstimates.get(nodeId);
+        if (node.data?.videoSubmissionLegacy || node.data?.videoSubmission?.state === 'unconfirmed') {
+            if (previous?.timer) window.clearTimeout(previous.timer);
+            previous?.controller?.abort(); canvasRuntime.videoEstimates.delete(nodeId); return;
+        }
+        let descriptor, estimateSignature;
+        try {
+            descriptor = window.UltimateCanvasGenerationNodes.videoPricingRequest(videoGenerationRequestInput({ nodeId, settings }));
+            estimateSignature = videoEstimateSignature(settings, nodeId);
+        } catch { return; }
         if (previous?.signature === estimateSignature && ['pending', 'success', 'failure'].includes(previous.status)) return;
         if (previous?.timer) window.clearTimeout(previous.timer);
         previous?.controller?.abort();
 
+        const actorId = canvasRuntime.bootstrap?.user?.id;
         const controller = new AbortController();
         const entry = { signature: estimateSignature, status: 'pending', controller, timer: null };
         entry.timer = window.setTimeout(async () => {
-            const endpoint = '/api/tasks/estimate';
-            const url = new URL(endpoint, window.location.origin);
-            url.searchParams.set('resolution', settings.resolution);
-            url.searchParams.set('duration', String(settings.duration));
-            url.searchParams.set('provider', settings.provider || 'seedance');
-            const model = settings.model;
-            if (model) url.searchParams.set('model', model);
             try {
-                const data = await requestJson(url.toString(), {
-                    cache: 'no-store',
+                const data = await requestJson(descriptor.url, {
+                    method: descriptor.method, payload: descriptor.payload, cache: 'no-store',
+                    headers: { 'x-app-session-user': actorId },
                     signal: controller.signal
                 });
-                if (typeof data?.estimatedCost !== 'number' || !Number.isFinite(data.estimatedCost) || data.estimatedCost < 0 || data.estimatedCost > 10000000) throw new Error('estimate unavailable');
+                window.UltimateCanvasGenerationNodes.withVideoPricingQuote(settings, data);
                 const current = canvasRuntime.videoEstimates.get(nodeId);
                 const currentNode = engine.nodes.get(nodeId);
                 if (current?.controller !== controller
                     || current?.signature !== estimateSignature
-                    || videoEstimateSignature(generationSettingsForNode(currentNode)) !== estimateSignature) return;
+                    || !currentNode || videoEstimateSignature(generationSettingsForNode(currentNode), nodeId) !== estimateSignature) return;
                 canvasRuntime.videoEstimates.set(nodeId, {
                     signature: estimateSignature,
                     status: 'success',
-                    estimatedCost: Number(data.estimatedCost), pricingRevision: data.pricing_revision
+                    estimatedCost: Number(data.estimatedCost), pricingRevision: data.pricing_revision, pricingQuoteToken: data.pricing_quote_token
                 });
                 renderGenerationNodeControls(nodeId);
             } catch (error) {
                 if (error?.name === 'AbortError') return;
                 const current = canvasRuntime.videoEstimates.get(nodeId);
-                if (current?.controller !== controller || current?.signature !== estimateSignature) return;
+                const currentNode = engine.nodes.get(nodeId);
+                if (current?.controller !== controller || current?.signature !== estimateSignature
+                    || !currentNode || videoEstimateSignature(generationSettingsForNode(currentNode), nodeId) !== estimateSignature) return;
                 canvasRuntime.videoEstimates.set(nodeId, { signature: estimateSignature, status: 'failure' });
                 renderGenerationNodeControls(nodeId);
             }
@@ -4911,10 +4929,8 @@
                 if (select) select.hidden = false;
                 const actualQuoteRequired = window.UltimateCanvasNodePricing?.actualQuoteRequired(node.id);
                 const actualQuote = window.UltimateCanvasNodePricing?.actualQuote(node.id);
-                const total = actualQuoteRequired === true ? actualQuote?.estimatedCredits
-                    : window.UltimateCanvasNodePricing?.quote(node.id)?.estimatedCredits;
-                stylePrice.textContent = window.UltimateCanvasNodePricing?.validCredits(total)
-                    ? `合计约 ${window.UltimateCanvasNodePricing.formatCredits(total)} 点数` : '费用待估算';
+                const priceQuote = actualQuoteRequired === true ? actualQuote : window.UltimateCanvasNodePricing?.quote(node.id);
+                stylePrice.textContent = canvasImageQuotePriceText(priceQuote);
                 stylePrice.title = '按当前后台报价；价格变化时会停止提交';
                 if (submit && !submit.classList.contains('is-loading')) submit.disabled = !interactionReadiness.ready || Boolean(styleJob && styleJob.state !== 'unconfirmed') || style.appliedBy !== canvasRuntime.bootstrap?.user?.id;
             } else window.UltimateCanvasNodePricing?.refresh(nodeEl, node);
@@ -4951,7 +4967,8 @@
             }
             const cost = nodeEl.querySelector('[data-generation-cost]');
             const estimate = canvasRuntime.videoEstimates.get(nodeId);
-            const estimateSignature = videoEstimateSignature(settings);
+            let estimateSignature = '';
+            try { estimateSignature = videoEstimateSignature(settings, nodeId); } catch { /* Invalid input stays visibly unquoted. */ }
             if (cost) {
                 if (priceStack && cost.parentElement !== priceStack) priceStack.appendChild(cost);
                 cost.classList.add('canvas-node-credits');
@@ -6560,6 +6577,13 @@
             if (payload.settings?.channelId) payload.imageChannel = window.UltimateCanvasNodePricing?.imageChannel(payload.nodeId) || undefined;
         }
 
+        const originalNode = engine.nodes.get(payload.nodeId), originalSubmission = originalNode?.data?.videoSubmission;
+        const originalUnsent = originalSubmission?.requestId === payload.requestId
+            && canvasRuntime.unsentVideoRequests.get(payload.nodeId) === originalSubmission
+            && originalSubmission.userId === canvasRuntime.bootstrap?.user?.id && originalSubmission.documentId === canvasRuntime.documentId;
+        if (payload.kind === 'video' && originalSubmission?.state === 'unconfirmed' && !originalUnsent) {
+            await recoverVideoSubmission(payload.nodeId); return;
+        }
         const readiness = generationReadiness(payload);
         if (!readiness.ready) {
             showCanvasNotice(readiness.message, 'warn');
@@ -6568,15 +6592,26 @@
 
         const submittingNode = engine.nodes.get(payload.nodeId);
         if (hasCurrentGenerationSubmission(payload.nodeId)) return;
-        const quotedContext = JSON.stringify(currentGenerationContext(payload.nodeId));
+        const quotedContext = window.UltimateCanvasGenerationInteractions.captureGenerationContext(currentGenerationContext(payload.nodeId));
         if (payload.kind === 'video') {
-            const settings = payload.settings || {};
-            const quote = await requestJson(`/api/tasks/estimate?${new URLSearchParams({ provider: settings.provider || 'seedance', model: settings.model, resolution: settings.resolution, duration: String(settings.duration) })}`, { cache: 'no-store' }).catch(error => { showCanvasNotice(error.message || '报价失败，请重试；未提交。', 'warn'); return null; });
-            if (!quote || typeof quote.estimatedCost !== 'number' || !Number.isFinite(quote.estimatedCost)) return;
-            if (!await requestCanvasConfirmation({ title: '生成视频', message: `本次 1 个视频，预计 ${quote.estimatedCost} 点。`, detail: '失败或受理未知时先查询原任务，不会自动重新生成。', confirmLabel: `确认 ${quote.estimatedCost} 点` })) return;
-            if (JSON.stringify(currentGenerationContext(payload.nodeId)) !== quotedContext || engine.nodes.get(payload.nodeId) !== submittingNode || videoEstimateSignature(generationSettingsForNode(submittingNode)) !== videoEstimateSignature(settings)) { showCanvasNotice('画布或参数已变化，请重新确认价格。', 'warn'); return; }
-            payload.settings.maxEstimatedCost = quote.estimatedCost;
-            payload.settings.pricingRevision = quote.pricing_revision;
+            if (submittingNode._videoQuoteBusy) return;
+            submittingNode._videoQuoteBusy = true;
+            try {
+                const settings = payload.settings || {}, actorId = canvasRuntime.bootstrap?.user?.id;
+                const signature = videoEstimateSignature(settings, payload.nodeId);
+                const descriptor = window.UltimateCanvasGenerationNodes.videoPricingRequest(videoGenerationRequestInput(payload), originalUnsent ? originalSubmission.input : undefined);
+                const quote = await requestJson(descriptor.url, { method: descriptor.method, payload: descriptor.payload, cache: 'no-store', headers: { 'x-app-session-user': actorId } });
+                const pricedSettings = window.UltimateCanvasGenerationNodes.withVideoPricingQuote(settings, quote,
+                    originalUnsent ? originalSubmission.input.max_estimated_cost : settings.maxEstimatedCost);
+                if (!originalUnsent && !await requestCanvasConfirmation({ title: '生成视频', message: `本次 1 个视频，预计 ${quote.estimatedCost} 点。`, detail: '失败或受理未知时先查询原任务，不会自动重新生成。', confirmLabel: `确认 ${quote.estimatedCost} 点` })) return;
+                if (canvasRuntime.bootstrap?.user?.id !== actorId
+                    || !window.UltimateCanvasGenerationInteractions.generationContextMatches(quotedContext, currentGenerationContext(payload.nodeId))
+                    || videoEstimateSignature(generationSettingsForNode(submittingNode), payload.nodeId) !== signature) {
+                    showCanvasNotice('画布或参数已变化，请重新确认价格。', 'warn'); return;
+                }
+                payload.settings = pricedSettings;
+            } catch (error) { showCanvasNotice(error.message || '报价失败，请重试；未提交。', 'warn'); return; }
+            finally { submittingNode._videoQuoteBusy = false; }
         }
         if (payload.kind === 'video') payload.requestId ||= crypto.randomUUID();
         const capturedContext = window.UltimateCanvasGenerationInteractions.captureGenerationContext(

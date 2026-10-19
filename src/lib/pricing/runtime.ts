@@ -6,6 +6,7 @@ import type { Prisma } from '@prisma/client';
 import { assertPricingWriterIsolation } from './isolation';
 
 export const PRICING_RUNTIME_PROTOCOL = 'pricing-policy-v1';
+export const PRICING_AUTHORING_RUNTIME_CAPABILITY = 'pricing-authoring-v1:video-scope-v1:image-spec-v1';
 export const PRICING_IMAGE_CAPABILITY_KEY = 'pricing_worker_capability_v1:image';
 const TTL_MS = 90_000;
 type Client = Pick<Prisma.TransactionClient, 'platformSetting'>;
@@ -13,6 +14,7 @@ type ProcessFailure = 'missing' | 'permission_denied' | 'invalid_content' | 'ina
 
 type ProcessIdentity = { pid: number; start: string; cwd: string; parentPid: number };
 export type PricingWorkerCapability = {
+  authoringCapability: typeof PRICING_AUTHORING_RUNTIME_CAPABILITY;
   protocol: typeof PRICING_RUNTIME_PROTOCOL;
   consumer: 'image';
   workerId: string;
@@ -107,7 +109,7 @@ export function capturePricingWorkerCapability(source: string): PricingWorkerCap
   const confirmed = processIdentity(process.pid);
   if (confirmed.start !== instance.start || confirmed.cwd !== instance.cwd
     || confirmed.parentPid !== parent.pid) throw new PricingRuntimeError();
-  return { protocol: PRICING_RUNTIME_PROTOCOL, consumer: 'image', workerId: randomUUID(), source,
+  return { protocol: PRICING_RUNTIME_PROTOCOL, authoringCapability: PRICING_AUTHORING_RUNTIME_CAPABILITY, consumer: 'image', workerId: randomUUID(), source,
     instance, parent,
     loadedModuleSha: pricingRuntimeModuleHashes(), issuedAt: new Date(now).toISOString(),
     expiresAt: new Date(now + TTL_MS).toISOString() };
@@ -142,7 +144,7 @@ export async function assertPricingImageConsumerReady(client: Client) {
   try {
     const value = JSON.parse(row?.value_json || 'null') as PricingWorkerCapability;
     const now = Date.now();
-    if (!value || value.protocol !== PRICING_RUNTIME_PROTOCOL || value.consumer !== 'image'
+    if (!value || value.protocol !== PRICING_RUNTIME_PROTOCOL || value.authoringCapability !== PRICING_AUTHORING_RUNTIME_CAPABILITY || value.consumer !== 'image'
       || !/^[a-f0-9-]{36}$/.test(value.workerId) || !/^[a-f0-9]{40}$/.test(value.source)
       || !Number.isFinite(Date.parse(value.issuedAt)) || Date.parse(value.issuedAt) > now
       || !Number.isFinite(Date.parse(value.expiresAt)) || Date.parse(value.expiresAt) <= now

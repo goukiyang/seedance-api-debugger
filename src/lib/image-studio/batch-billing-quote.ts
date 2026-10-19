@@ -18,6 +18,7 @@ import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-g
 import { addCredits, creditCents, sumCredits } from '@/lib/credits/precision';
 import { assertNewPricingCharge } from '@/lib/pricing/charge';
 import { pricingCanonical } from '@/lib/pricing/catalog';
+import { samePricingImageCharge } from '@/lib/pricing/image';
 
 const key = (owner: string, id: string) => `image_batch_billing_quote_v1:${owner}:${id}`;
 
@@ -171,7 +172,7 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
   const exactContracts = contracts as ImageBillingContract[];
   const first = exactContracts[0];
   if (!first || exactContracts.some(contract => contract.scope !== first.scope || contract.model !== first.model
-    || contract.mode !== first.mode || contract.pricing?.revision !== first.pricing?.revision)) {
+    || contract.mode !== first.mode || !samePricingImageCharge(contract.pricing, first.pricing))) {
     throw new StudioError('整批条目不是同一私有账单范围和型号，未报价', 409);
   }
   if (first.mode === 'actual') {

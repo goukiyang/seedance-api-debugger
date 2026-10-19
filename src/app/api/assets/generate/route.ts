@@ -35,7 +35,7 @@ import { prisma } from '@/lib/prisma';
 import { getProjectAccess, getProjectForGeneration } from '@/lib/projects/permissions';
 import { assertCanUseReferenceImage, uniquePreserveOrder } from '@/lib/reference-albums/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
-import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, normalizeImageStudioQuality, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { resolveStudioAspectRatio, normalizeStudioRatio } from '@/lib/image-studio/ratios';
 import { isGeminiImageModel, isValidImageDimension, normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS } from '@/lib/image-generation/resolution';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
@@ -413,10 +413,7 @@ export async function POST(request: NextRequest) {
     let imageChannel = effectiveChannelId === 'original' ? undefined : await captureImageGenerationChannel(selectedModel, effectiveChannelId);
     const rawSettings = imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, selectedModel)
       : selectImageGenerationSettings(channels, selectedModel);
-    const priced = IMAGE_STUDIO_MODELS.includes(selectedModel as ImageStudioModel)
-      ? await withImagePricing(rawSettings, selectedModel) : { settings: rawSettings, quote: null };
-    const settings = priced.settings;
-    if (priced.quote && !imageChannel) imageChannel = await captureImageGenerationChannel(selectedModel, 'original');
+    let settings = rawSettings;
     const modelLabel = imageGenerationModelLabel(settings.provider, settings.default_model);
     const referenceLimit = settings.provider === 'seedream'
       ? SEEDREAM_REFERENCE_IMAGE_LIMIT
@@ -482,6 +479,13 @@ export async function POST(request: NextRequest) {
     const rawRequestedResolution = cleanString(input.resolution || body.resolution)
       || (IMAGE_RESOLUTION_OPTIONS.includes(cleanString(input.size) as typeof IMAGE_RESOLUTION_OPTIONS[number]) ? cleanString(input.size) : '');
     const resolution = normalizeImageResolution(settings.default_model, rawRequestedResolution || settings.default_size, settings.provider);
+    const quality = cleanString(input.quality || body.quality);
+    const priced = IMAGE_STUDIO_MODELS.includes(selectedModel as ImageStudioModel)
+      ? await withImagePricing(rawSettings, selectedModel, prisma, undefined, {
+        quality: quality || normalizeImageStudioQuality(selectedModel, 'auto'), resolution, ratio: requestedRatio })
+      : { settings: rawSettings, quote: null };
+    settings = priced.settings;
+    if (priced.quote && !imageChannel) imageChannel = await captureImageGenerationChannel(selectedModel, 'original');
     const requestedSize = cleanString(input.size || input.default_size || body.size);
     const imageSize = isValidImageDimension(requestedSize)
       ? requestedSize
@@ -491,7 +495,6 @@ export async function POST(request: NextRequest) {
       if (!canUseCompanyTemplates(user)) throw new AuthError('当前账号没有此图片生成通道权限', 403);
       const requestId = cleanString(body.requestId || input.requestId);
       if (!/^[a-zA-Z0-9-]{16,80}$/.test(requestId)) throw new AuthError('请提供稳定的图片请求编号，查询或重试不能更换编号', 400);
-      const quality = cleanString(input.quality || body.quality);
       const capability = validateImageGenerationChannel(settings, { model: selectedModel, quality, resolution, ratio: requestedRatio, referenceCount: referenceImageIds.length });
       if (!capability.ok) throw new AuthError(capability.error, 400);
       if (referenceImages.some(image => !image.asset_id || !image.asset || image.asset.status !== 'active')) throw new AuthError('此通道需要持久原件参考图，请重新选择；未生成', 409);

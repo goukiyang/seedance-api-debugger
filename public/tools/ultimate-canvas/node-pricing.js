@@ -9,9 +9,9 @@
     const validCredits = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 10000000
         && Math.abs(value * 100 - Math.round(value * 100)) <= Math.min(0.00001, Number.EPSILON * Math.max(1, value * 100) * 4);
     const formatCredits = value => validCredits(value) ? String(Math.round(value * 100) / 100) : '待确认';
-    const fullQuoteRequired = quote => quote?.actualQuoteRequired === true || quote?.pricingQuoteRequired === true;
+    const fullQuoteRequired = quote => quote?.actualQuoteRequired === true || quote?.pricingQuoteRequired === true || quote?.pricingBySpecification === true;
     const MODEL_OPTION_KEYS = ['model', 'label', 'status', 'reason', 'reasonText', 'unitCredits', 'estimatedCredits', 'count',
-        'chargeEnabled', 'billingMode', 'actualQuoteRequired', 'estimateSource', 'creditPrecision', 'pricingRevision', 'pricingQuoteRequired'];
+        'chargeEnabled', 'billingMode', 'actualQuoteRequired', 'estimateSource', 'creditPrecision', 'pricingRevision', 'pricingQuoteRequired', 'pricingBySpecification'];
     const safeText = (value, maximum) => typeof value === 'string' && value.trim().length > 0
         && value.length <= maximum && !/[\u0000-\u001f\u007f]/.test(value);
     function validModelOption(option) {
@@ -23,13 +23,16 @@
             || !['fixed', 'actual'].includes(option.billingMode) || typeof option.actualQuoteRequired !== 'boolean'
             || option.actualQuoteRequired !== (option.billingMode === 'actual')
             || typeof option.pricingQuoteRequired !== 'boolean'
+            || option.pricingBySpecification !== undefined && typeof option.pricingBySpecification !== 'boolean'
             || !['channel_contract', 'legacy_fixed'].includes(option.estimateSource)
             || ![0.01, 0.1].includes(option.creditPrecision)
             || option.pricingRevision !== undefined && !safeText(option.pricingRevision, 256)
-            || option.pricingQuoteRequired && !safeText(option.pricingRevision, 256)) return false;
+            || option.pricingQuoteRequired && !option.pricingBySpecification && !safeText(option.pricingRevision, 256)) return false;
         if (option.status === 'unavailable') return safeText(option.reason, 128) && safeText(option.reasonText, 1000)
             && option.unitCredits === null && option.estimatedCredits === null;
         if (option.reason !== null || option.reasonText !== null) return false;
+        if (option.pricingBySpecification) return option.pricingQuoteRequired
+            && option.unitCredits === null && option.estimatedCredits === null;
         if (option.actualQuoteRequired) return option.unitCredits === null && option.estimatedCredits === null;
         return validCredits(option.unitCredits) && validCredits(option.estimatedCredits)
             && (option.creditPrecision !== 0.1 || Math.round(option.unitCredits * 100) % 10 === 0
@@ -51,7 +54,8 @@
                 disabled: Boolean(option.disabled || !option.value || !candidate || unavailable),
                 status: candidate?.status || 'missing',
                 detail: !candidate ? '费用待确认' : unavailable ? candidate.reasonText
-                    : candidate.actualQuoteRequired ? '按实际费用计费' : `${formatCredits(candidate.unitCredits)} 点/张` };
+                    : candidate.actualQuoteRequired ? '按实际费用计费'
+                        : candidate.pricingBySpecification ? '按规格计费' : `${formatCredits(candidate.unitCredits)} 点/张` };
         }) };
     }
     function modelOptionFields(quote) {
@@ -124,7 +128,7 @@
                 || !state.key || inputFor(state.node).key !== state.key) return null;
             const quote = state.quote;
             if (!validImageProjection(quote, state.payload, inputFor(state.node).expectedChannelId)
-                || quote.status !== 'estimate' || quote.actualQuoteRequired !== false) return null;
+                || quote.status !== 'estimate' || quote.actualQuoteRequired !== false || quote.pricingBySpecification === true) return null;
             return quote;
         }
 
@@ -148,7 +152,9 @@
             const credits = fullQuoteRequired(state.quote)
                 ? validFullQuote(state.actualQuote, state.quote) ? state.actualQuote.estimatedCredits : null
                 : currentQuote(state.id)?.estimatedCredits;
-            slot.textContent = validCredits(credits) ? `合计约 ${formatCredits(credits)} 点数` : '费用待估算';
+            slot.textContent = validCredits(credits)
+                ? state.actualQuote?.billingMode === 'actual' ? `最多预留 ${formatCredits(credits)} 点，按账单结算` : `本次扣 ${formatCredits(credits)} 点`
+                : state.quote?.pricingBySpecification ? '按规格计费，费用待报价' : '费用待估算';
         }
 
         function paint(state) {

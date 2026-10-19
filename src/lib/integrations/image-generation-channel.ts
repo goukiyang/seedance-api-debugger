@@ -102,6 +102,8 @@ export type ImageGenerationModelCapabilityDto = {
   fixedPoints: number | null;
   billingSource: string | null;
   actualQuoteRequired: boolean;
+  /** Menu-only projection; a concrete specification still requires a server quote. */
+  pricingBySpecification?: boolean;
   qualities: string[] | null;
   resolutions: string[] | null;
   ratios: string[] | null;

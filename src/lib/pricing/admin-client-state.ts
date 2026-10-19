@@ -1,20 +1,23 @@
 import type {
   PricingAdminAction, PricingAdminBasis, PricingAdminChanges, PricingAdminFilter,
-  PricingAdminPreviewInput, PricingAdminRow, PricingAdminRowChange, PricingAdminSaveInput,
+  PricingAdminPreview, PricingAdminPreviewInput, PricingAdminRow, PricingAdminRowChange, PricingAdminSaveInput, PricingAdminSimulation,
 } from './admin-contract';
+import type { PricingEnhanceGroup } from './pricing-authoring-contract';
+import { compareDecimal, divideDecimal, multiplyDecimal, normalizeDecimal } from './math';
 
-export type PricingAdminDraft = { revision: string; changes: PricingAdminChanges };
+export type PricingAdminDraft = { revision: string; authoringRevision?: string; catalogFingerprint?: string; changes: PricingAdminChanges };
 export type PricingAdminView = {
   filter: PricingAdminFilter; page: number; pageSize: number; expanded: string[];
   sort: 'catalog' | 'name' | 'difference'; basis: PricingAdminBasis;
   referenceId: string; simulationRowId: string; quantity: string; exampleAmount: string;
   anchorId: string; anchorOffset: number;
+  filtersOpen?: boolean; changesOpen?: boolean; enhanceDetailsOpen?: boolean;
 };
 export type PricingAdminPending = { actorId: string; submittedAt: string; inputFingerprint: string; payload: PricingAdminSaveInput; submittedDraft: PricingAdminChanges };
 export const defaultPricingAdminView: PricingAdminView = {
-  filter: { kind: 'all', difference: 'all' }, page: 1, pageSize: 24, expanded: [],
+  filter: { kind: 'image', difference: 'all', defaultsOnly: true }, page: 1, pageSize: 24, expanded: [],
   sort: 'catalog', basis: 'site_base_cny', referenceId: '', simulationRowId: '',
-  quantity: '1', exampleAmount: '', anchorId: '', anchorOffset: 0,
+  quantity: '5', exampleAmount: '', anchorId: '', anchorOffset: 0,
 };
 
 export function pricingAdminStorageKey(actorId: string, kind: 'workspace' | 'operation') {
@@ -30,7 +33,7 @@ export function filterPricingAdminRows(rows: PricingAdminRow[], filter: PricingA
     && (!filter.basisKind || row.basisKind === filter.basisKind)
     && (filter.difference !== 'different' || row.hasDifference)
     && (filter.difference !== 'unconfirmed' || row.confirmation === 'unconfirmed' || row.confirmation === 'needs_review')
-    && (filter.difference !== 'custom' || row.mode === 'custom')
+    && (filter.difference !== 'custom' || row.authoringRateMode === 'custom' || !row.authoringRateMode && row.mode === 'custom')
     && (!search || [row.label, row.providerLabel, row.identity.modelId, ...Object.values(row.identity.specifications), ...row.appliesTo].join(' ').toLocaleLowerCase().includes(search))
   ));
   if (sort === 'name') result.sort((a, b) => a.label.localeCompare(b.label, 'zh-CN') || a.id.localeCompare(b.id));
@@ -41,11 +44,86 @@ export function filterPricingAdminRows(rows: PricingAdminRow[], filter: PricingA
 export function patchPricingAdminRow(changes: PricingAdminChanges, id: string, patch: Omit<PricingAdminRowChange, 'id'>): PricingAdminChanges {
   const existing = changes.rows.find(row => row.id === id);
   const next = { ...existing, id, ...patch };
+  if (patch.baseRelation && patch.base === undefined) delete next.base;
+  if (patch.base && patch.baseRelation === undefined) next.baseRelation = null;
+  if (patch.authoringRateMode === 'follow_global') { delete next.customPointsPerCny; delete next.mode; }
+  if (patch.customPointsPerCny !== undefined) { next.authoringRateMode = 'custom'; next.mode = 'custom'; }
   if (patch.mode && patch.mode !== 'custom') delete next.customPointsPerCny;
   return { ...changes, rows: [...changes.rows.filter(row => row.id !== id), next] };
 }
 
+export function pricingAdminScenarioDifference(scenario: Pick<PricingAdminSimulation, 'deltaCredits' | 'differencePercent'>) {
+  if (scenario.deltaCredits === undefined || scenario.deltaCredits === null) return null;
+  if (Number(scenario.deltaCredits) === 0) return '点价不变';
+  const delta = `${Number(scenario.deltaCredits) > 0 ? '+' : ''}${scenario.deltaCredits}`;
+  const percent = scenario.differencePercent === undefined || scenario.differencePercent === null ? ''
+    : `（${Number(scenario.differencePercent) > 0 ? '+' : ''}${scenario.differencePercent}%）`;
+  return `差额 ${delta} 点${percent}`;
+}
+
+export function pricingAdminPreviewForSource(preview: Pick<PricingAdminPreview, 'changes' | 'scenarios' | 'simulation'> | null | undefined, sourceRowId: string, materializedRowId?: string) {
+  const change = preview?.changes.find(item => item.sourceRowId === sourceRowId && (materializedRowId === undefined || item.id === materializedRowId));
+  const actualId = materializedRowId ?? change?.id;
+  const matches = (item: PricingAdminSimulation) => item.sourceRowId === sourceRowId && (actualId === undefined || item.rowId === actualId);
+  const scenario = preview?.scenarios?.find(matches) || (preview?.simulation && matches(preview.simulation) ? preview.simulation : undefined);
+  return { change, scenario };
+}
+
+export function stagePricingAdminMemberExit(changes: PricingAdminChanges, id: string): PricingAdminChanges {
+  return { ...changes, rows: [...changes.rows.filter(row => row.id !== id), { id, authoringRateMode: 'custom' }] };
+}
+
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+export function hasPricingAdminChanges(changes: PricingAdminChanges) {
+  return Boolean(changes.rows.length || Object.keys(changes.standards || {}).length || Object.keys(changes.authoring || {}).length);
+}
+
+export function stagePricingAdminUnify(changes: PricingAdminChanges, rows: PricingAdminRow[]) {
+  let next = changes;
+  const skipped: Array<{ id: string; reason: string }> = [];
+  for (const row of rows) {
+    const change = changes.rows.find(item => item.id === row.id);
+    if (!row.enabled || row.availability !== 'ready' || !row.canAdopt || row.mode === 'free' || change?.mode === 'free') {
+      skipped.push({ id: row.id, reason: row.mode === 'free' || change?.mode === 'free' ? '明确免费' : row.adoptionReason || row.unavailableReason || '依据尚未就绪' });
+      continue;
+    }
+    next = patchPricingAdminRow(next, row.id, { authoringRateMode: 'follow_global' });
+  }
+  return { changes: next, skipped };
+}
+
+export function pricingAdminEnhanceGroup(rows: PricingAdminRow[]): PricingEnhanceGroup | null {
+  const entries = rows.filter(row => row.identity.kind === 'enhance');
+  if (entries.length !== 20 || entries.some(row => row.mode !== 'legacy_fixed' || !row.enabled || row.availability !== 'ready' || row.currentUnitCredits === null)) return null;
+  try {
+    const resolutions = ['480p', '720p', '1080p', '2k', '4k'] as const;
+    const find = (resolution: string, toolVersion: string, fpsTier: string) => {
+      const matches = entries.filter(row => row.identity.specifications.resolution === resolution && row.identity.specifications.toolVersion === toolVersion && row.identity.specifications.fpsTier === fpsTier);
+      if (matches.length !== 1) throw new Error('增强规格不完整');
+      return matches[0].currentUnitCredits!;
+    };
+    const basePointsPerSecond = Object.fromEntries(resolutions.map(resolution => [resolution, find(resolution, 'standard', 'lte30')])) as PricingEnhanceGroup['basePointsPerSecond'];
+    const professionalMultiplier = divideDecimal(find('480p', 'professional', 'lte30'), basePointsPerSecond['480p']);
+    const highFpsMultiplier = divideDecimal(find('480p', 'standard', 'gt30'), basePointsPerSecond['480p']);
+    for (const row of entries) {
+      const specs = row.identity.specifications;
+      const expected = multiplyDecimal([basePointsPerSecond[specs.resolution as keyof typeof basePointsPerSecond], specs.toolVersion === 'professional' ? professionalMultiplier : '1', specs.fpsTier === 'gt30' ? highFpsMultiplier : '1']);
+      if (compareDecimal(expected, row.currentUnitCredits!) !== 0) return null;
+    }
+    return { basePointsPerSecond, professionalMultiplier, highFpsMultiplier };
+  } catch { return null; }
+}
+
+export function validPricingEnhanceGroup(value: unknown): value is PricingEnhanceGroup {
+  if (!value || typeof value !== 'object') return false;
+  const group = value as PricingEnhanceGroup;
+  try {
+    if (!group.basePointsPerSecond || Object.keys(group.basePointsPerSecond).sort().join(',') !== '1080p,2k,480p,4k,720p') return false;
+    for (const item of [...Object.values(group.basePointsPerSecond), group.professionalMultiplier, group.highFpsMultiplier]) normalizeDecimal(item, { maxScale: 8, allowZero: false, max: '10000000' });
+    return true;
+  } catch { return false; }
+}
 
 // A late receipt may only consume fields that still equal the submitted draft.
 export function consumePricingAdminDraft(current: PricingAdminChanges, submitted: PricingAdminChanges): PricingAdminChanges {
@@ -63,7 +141,11 @@ export function consumePricingAdminDraft(current: PricingAdminChanges, submitted
     if (next.customPointsPerCny !== undefined && row.mode === 'custom') next.mode = 'custom';
     return Object.keys(next).length > 1 ? [next] : [];
   });
-  return { ...(Object.keys(standards).length ? { standards } : {}), rows };
+  const authoring = { ...current.authoring };
+  for (const field of ['globalPointsPerCny', 'enhanceGroup'] as const) {
+    if (submitted.authoring?.[field] !== undefined && same(authoring[field], submitted.authoring[field])) delete authoring[field];
+  }
+  return { ...(Object.keys(standards).length ? { standards } : {}), ...(Object.keys(authoring).length ? { authoring } : {}), rows };
 }
 
 export function submittedPricingAdminDraft(changes: PricingAdminChanges, action: PricingAdminAction): PricingAdminChanges {
@@ -94,6 +176,23 @@ export function parsePricingAdminWorkspace(raw: string | null, actorId: string):
     for (const row of value.draft.changes.rows) {
       if (!row || !text(row.id, 500)) return null;
       const clean: PricingAdminRowChange = { id: row.id };
+      if (row.authoringRateMode !== undefined) {
+        if (!['follow_global', 'custom'].includes(row.authoringRateMode)) return null;
+        clean.authoringRateMode = row.authoringRateMode;
+      }
+      if (row.specifications !== undefined) {
+        if (!row.specifications || typeof row.specifications !== 'object' || Array.isArray(row.specifications)
+          || Object.keys(row.specifications).length > 5 || Object.values(row.specifications).some(item => !text(item, 64))) return null;
+        clean.specifications = row.specifications;
+      }
+      if (row.baseRelation !== undefined) {
+        if (row.baseRelation !== null && (!text(row.baseRelation.parentId, 160) || row.baseRelation.factor !== '1.5')) return null;
+        clean.baseRelation = row.baseRelation;
+      }
+      if (row.evidence !== undefined) {
+        if (!row.evidence || typeof row.evidence !== 'object' || JSON.stringify(row.evidence).length > 8192) return null;
+        clean.evidence = row.evidence;
+      }
       if (row.mode !== undefined) {
         if (!['follow', 'custom', 'free', 'legacy_fixed'].includes(row.mode)) return null;
         clean.mode = row.mode;
@@ -117,6 +216,20 @@ export function parsePricingAdminWorkspace(raw: string | null, actorId: string):
       const rate = value.draft.changes.standards?.[basis];
       if (rate !== undefined) { if (!text(rate, 32)) return null; changes.standards = { ...changes.standards, [basis]: rate }; }
     }
+    if (value.draft.changes.authoring !== undefined) {
+      const authoring = value.draft.changes.authoring;
+      changes.authoring = {};
+      if (authoring.globalPointsPerCny !== undefined) {
+        if (!text(authoring.globalPointsPerCny, 32)) return null;
+        changes.authoring.globalPointsPerCny = authoring.globalPointsPerCny;
+      }
+      if (authoring.enhanceGroup !== undefined) {
+        const group = authoring.enhanceGroup;
+        if (!group || typeof group !== 'object' || !group.basePointsPerSecond || Object.keys(group.basePointsPerSecond).sort().join(',') !== '1080p,2k,480p,4k,720p'
+          || [...Object.values(group.basePointsPerSecond), group.professionalMultiplier, group.highFpsMultiplier].some(item => !text(item, 32))) return null;
+        changes.authoring.enhanceGroup = group;
+      }
+    }
     const stored = value.view || {}, filter = stored.filter || {};
     const view: PricingAdminView = { ...defaultPricingAdminView, filter: {} };
     if (['all', 'video', 'image', 'enhance', 'h3'].includes(filter.kind)) view.filter.kind = filter.kind;
@@ -134,7 +247,9 @@ export function parsePricingAdminWorkspace(raw: string | null, actorId: string):
       if (text(stored[field], field === 'quantity' || field === 'exampleAmount' ? 32 : 500)) view[field] = stored[field];
     }
     if (Number.isFinite(stored.anchorOffset) && Math.abs(stored.anchorOffset) <= 10000) view.anchorOffset = stored.anchorOffset;
-    return { draft: { revision: value.draft.revision, changes }, view };
+    for (const field of ['filtersOpen', 'changesOpen', 'enhanceDetailsOpen'] as const) if (typeof stored[field] === 'boolean') view[field] = stored[field];
+    return { draft: { revision: value.draft.revision, ...(text(value.draft.authoringRevision, 160) ? { authoringRevision: value.draft.authoringRevision } : {}),
+      ...(text(value.draft.catalogFingerprint, 64) ? { catalogFingerprint: value.draft.catalogFingerprint } : {}), changes }, view };
   } catch { return null; }
 }
 

@@ -163,7 +163,10 @@
                 prompt,
                 ...(input.promptMentions ? { promptMentions: input.promptMentions } : {}),
                 model: clean(settings.model),
+                ...(settings.provider === 'volcengine_ip' ? {} : { provider: settings.provider || 'seedance' }),
                 ...(typeof settings.pricingRevision === 'string' ? { pricing_revision: settings.pricingRevision } : {}),
+                ...(settings.provider !== 'volcengine_ip' && clean(settings.pricingQuoteToken)
+                    ? { pricing_quote_token: settings.pricingQuoteToken, pricing_fingerprint_version: 2 } : {}),
                 ...(Number.isFinite(settings.maxEstimatedCost) ? { max_estimated_cost: settings.maxEstimatedCost } : {}),
                 generation_mode: mode.generationMode,
                 ratio,
@@ -173,10 +176,12 @@
                 generate_audio: settings.generateAudio === true,
                 return_last_frame: settings.returnLastFrame === true,
                 watermark: settings.watermark === true,
+                draft: (settings.provider || 'seedance') === 'seedance' && settings.draft === true,
                 project_id: clean(input.projectId),
                 video_card_id: clean(input.cardId),
                 video_branch_id: clean(input.branchId),
                 reference_image_ids: requestReferenceIds(input, mode.maximumReferences),
+                reference_video_urls: videoReferenceUrls(input.referenceVideoUrls),
                 idempotency_key: `${nodeId}:${requestId}`,
                 final_prompt_snapshot: prompt,
                 prompt_user_edited: input.promptUserEdited !== false,
@@ -193,6 +198,36 @@
                 }
             }
         };
+    }
+
+    function videoReferenceUrls(value = []) {
+        if (!Array.isArray(value) || value.length > 3 || value.some(item => typeof item !== 'string' || !item.trim() || item.length > 4096)) {
+            throw new Error('参考视频清单无效，请保留原输入重新选择。');
+        }
+        return [...new Set(value.map(item => item.trim()))];
+    }
+
+    function videoPricingRequest(input = {}, originalUnsentInput) {
+        const body = originalUnsentInput || videoRequest(input).payload;
+        return { url: '/api/tasks/estimate', method: 'POST', payload: {
+            provider: body.provider || input.settings?.provider || 'seedance', model: body.model,
+            resolution: body.resolution, duration: body.duration, ratio: body.ratio,
+            project_id: body.project_id, video_card_id: body.video_card_id,
+            draft: body.draft === true, reference_video_urls: videoReferenceUrls(body.reference_video_urls),
+        } };
+    }
+
+    function withVideoPricingQuote(settings, quote, authorizedMaximum = settings.maxEstimatedCost) {
+        const validAmount = value => typeof value === 'number' && Number.isFinite(value) && value >= 0
+            && value <= 10000000 && Math.abs(Math.round(value * 100) - value * 100) < 0.000001;
+        if (!quote || !validAmount(quote.estimatedCost)
+            || quote.pricing_revision !== null && typeof quote.pricing_revision !== 'string'
+            || settings.provider !== 'volcengine_ip' && (typeof quote.pricing_quote_token !== 'string'
+                || !quote.pricing_quote_token || quote.pricing_quote_token.length > 4096)) throw new Error('报价暂不可用，请重新报价；尚未生成。');
+        const maximum = authorizedMaximum === undefined ? quote.estimatedCost : authorizedMaximum;
+        if (!validAmount(maximum) || quote.estimatedCost > maximum) throw new Error('新报价超出原授权上限，请重新确认点数；原请求未发送。');
+        return { ...settings, maxEstimatedCost: maximum, pricingRevision: quote.pricing_revision,
+            pricingQuoteToken: settings.provider === 'volcengine_ip' ? undefined : quote.pricing_quote_token };
     }
 
     function normalizeImageResult(result = {}) {
@@ -374,6 +409,8 @@
         validateVideo,
         imageRequest,
         videoRequest,
+        videoPricingRequest,
+        withVideoPricingQuote,
         normalizeImageResult,
         normalizeVideoCreate,
         normalizeVideoStatus,

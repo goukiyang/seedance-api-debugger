@@ -2,7 +2,7 @@ import packageInfo from '../../package.json';
 import { PRICING_ADMIN_WRITES_ENABLED } from './pricing/build-mode';
 
 export const release = { version: packageInfo.version, channel: 'production', summary: PRICING_ADMIN_WRITES_ENABLED
-  ? '新增统一点数定价，可编辑点/元、核对价格来源、统一调整、试算和恢复历史。新请求按确认后的收费规则处理，已有任务保留原合同。'
+  ? '费率设置更精简，可统一换算或单独调整，并查看实际扣点变化。图片和视频按本次规格报价，已有任务保持原合同。'
   : '费率设置暂时维护，已保存的价格和原任务保持不变，不会自动调整价格。' };
 
 function numericOrder(a: string, b: string) {

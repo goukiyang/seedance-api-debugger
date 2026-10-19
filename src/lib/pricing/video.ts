@@ -6,10 +6,13 @@ import { normalizeDecimal, multiplyDecimal } from './math';
 import { normalizeCredits } from '@/lib/credits/precision';
 import { isSeedanceVideoDuration } from '@/lib/provider/seedance-models';
 import type { PricingAdminIdentity } from './admin-contract';
+import { videoPricingRequiresContext, VideoPricingContextError, type VideoPricingContext } from './video-context';
+import type { PricingReferenceVideo, PricingVideoPurpose } from './pricing-authoring-contract';
 
 type Client = Prisma.TransactionClient | typeof prisma;
 export type VideoPricingInput = { provider: 'seedance' | 'volcengine_ip' | 'volcengine_ark' | 'h3' | 'volcengine_mediakit';
-  model: string; resolution: string; duration: number; toolVersion?: string; fps?: number | null };
+  model: string; resolution: string; duration: number; toolVersion?: string; fps?: number | null;
+  referenceVideo?: PricingReferenceVideo; pricingPurpose?: PricingVideoPurpose; context?: VideoPricingContext };
 export type VideoPricingQuote = { identity: PricingAdminIdentity; quantity: string; pricing: PricingSnapshot;
   revision: string | null; charge: FrozenPricingCharge | null };
 
@@ -19,7 +22,8 @@ export function videoPricingIdentity(input: VideoPricingInput): PricingAdminIden
       toolVersion: input.toolVersion || 'standard', fpsTier: input.fps && input.fps > 30 ? 'gt30' : 'lte30' } };
   if (input.provider === 'h3') return { kind: 'h3', channelId: 'h3', modelId: input.model, billingMode: 'fixed', unit: 'second', specifications: {} };
   return { kind: 'video', channelId: input.provider === 'volcengine_ip' ? 'volcengine_ark' : input.provider,
-    modelId: input.model, billingMode: 'fixed', unit: 'second', specifications: { resolution: input.resolution } };
+    modelId: input.model, billingMode: 'fixed', unit: 'second', specifications: { resolution: input.resolution,
+      referenceVideo: input.context?.referenceVideo || input.referenceVideo || 'unknown', pricingPurpose: input.context?.purpose || input.pricingPurpose || 'unknown' } };
 }
 
 export async function quoteVideoPricing(input: VideoPricingInput, client: Client = prisma): Promise<VideoPricingQuote> {
@@ -30,6 +34,8 @@ export async function quoteVideoPricing(input: VideoPricingInput, client: Client
     : input.provider === 'h3' ? calculateH3EstimatedCost(input.duration, input.model)
       : calculateEstimatedCost(input.resolution, input.duration, input.model);
   const identity = videoPricingIdentity(input);
+  if (identity.kind === 'video' && (identity.specifications.referenceVideo === 'unknown' || identity.specifications.pricingPurpose === 'unknown')
+    && await videoPricingRequiresContext(input.model, identity.channelId, client)) throw new VideoPricingContextError('需要新版完整报价，请保留素材更新报价', 409, 'pricing_context_required');
   const quantity = normalizeDecimal(String(identity.kind === 'enhance' || identity.kind === 'h3' ? Math.max(1, Math.ceil(input.duration)) : input.duration),
     { maxScale: 8, min: '0', max: '3600', allowZero: false });
   const current = await quotePricingCharge(identity, quantity, client);

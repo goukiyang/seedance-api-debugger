@@ -37,7 +37,7 @@ export function pricingCanonical(value: unknown): string {
 export function pricingFingerprint(value: unknown) { return createHash('sha256').update(pricingCanonical(value)).digest('hex'); }
 export function pricingCatalogRowId(identity: PricingAdminIdentity) { return `rate-${pricingFingerprint(identity).slice(0, 32)}`; }
 
-export async function assertPricingCatalogIdentity(identity: PricingAdminIdentity, client: PricingClient = prisma) {
+export async function assertPricingCatalogIdentity(identity: PricingAdminIdentity, client: PricingClient = prisma, fixedPriceConfirmed = false) {
   const reject = (): never => { throw new Error('收费作用域或规格不在当前合法能力范围，未回退旧价'); };
   if (!identity || !plain(identity.specifications) || Object.values(identity.specifications).some(value => typeof value !== 'string')) reject();
   const specifications = identity.specifications;
@@ -54,16 +54,22 @@ export async function assertPricingCatalogIdentity(identity: PricingAdminIdentit
     }
     const settings = await selectPricingImageGenerationSettings(channels, identity.modelId, identity.channelId, client);
     const capability = channel.models[identity.modelId as typeof IMAGE_STUDIO_MODELS[number]];
-    assertPricingImageAvailability(settings, identity, specifications);
+    const adoptingFixed = fixedPriceConfirmed && identity.billingMode === 'fixed' && settings.modelCapabilities[identity.modelId as typeof IMAGE_STUDIO_MODELS[number]]?.billingMode === 'fixed';
+    const validationSettings = adoptingFixed ? { ...settings, modelCapabilities: { ...settings.modelCapabilities,
+      [identity.modelId]: { ...settings.modelCapabilities[identity.modelId as typeof IMAGE_STUDIO_MODELS[number]]!, fixedPoints: 0 } } } : settings;
+    assertPricingImageAvailability(validationSettings, identity, specifications);
     if (!capability || capability.billingMode !== identity.billingMode) return reject();
-    if (!capability.ready) {
+    if (!capability.ready && !adoptingFixed) {
       throw new PricingItemUnavailableError(identity, 'evidence_unconfirmed', capability.disabledReason || '该型号的计价依据尚未就绪');
     }
     return;
   }
   if (identity.unit !== 'second' || identity.billingMode !== 'fixed') reject();
   if (identity.kind === 'video') {
-    if (Object.keys(specifications).some(key => key !== 'resolution') || (specifications.resolution && !['480p', '720p', '1080p'].includes(specifications.resolution))) reject();
+    if (Object.keys(specifications).some(key => !['resolution', 'referenceVideo', 'pricingPurpose'].includes(key))
+      || specifications.resolution && !['480p', '720p', '1080p'].includes(specifications.resolution)
+      || specifications.referenceVideo && !['none', 'present', 'unknown'].includes(specifications.referenceVideo)
+      || specifications.pricingPurpose && !['standard', 'draft', 'draft_upgrade', 'unknown'].includes(specifications.pricingPurpose)) reject();
     if (identity.channelId === 'seedance') {
       if (!SEEDANCE_VIDEO_MODEL_OPTIONS.some(model => model.id === identity.modelId) || !isApiKeyConfigured()) reject();
       return;
@@ -167,6 +173,9 @@ export async function getPricingCatalog(client: PricingClient = prisma): Promise
     const price = calculateEstimatedCost('1080p', 1, model.id).finalCostPerSecond;
     add(row({ kind: 'video', channelId: 'seedance', modelId: model.id, billingMode: 'fixed', unit: 'second', specifications: {} },
       model.label, '视频接口', true, isApiKeyConfigured(), price, '尚未配置视频接口', ['普通视频', 'Draft 升级', '全部合法分辨率'], model.id === seedance.model), seedanceBinding);
+    for (const resolution of ['480p', '720p', '1080p']) add(row({ kind: 'video', channelId: 'seedance', modelId: model.id,
+      billingMode: 'fixed', unit: 'second', specifications: { resolution, referenceVideo: 'none', pricingPurpose: 'standard' } },
+    `${model.label} ${resolution}`, '视频接口', true, isApiKeyConfigured(), price, '尚未配置视频接口', ['普通生成', '无参考视频', resolution], model.id === seedance.model), seedanceBinding);
   }
   const ip = await getVolcengineIpApiSettings(client);
   const ipModels = [...VOLCENGINE_IP_MODEL_OPTIONS];
@@ -224,4 +233,18 @@ export async function getPricingCatalog(client: PricingClient = prisma): Promise
   rows.sort((a, b) => a.identity.kind.localeCompare(b.identity.kind) || a.identity.channelId.localeCompare(b.identity.channelId) || a.id.localeCompare(b.id));
   if (new Set(rows.map(value => value.id)).size !== rows.length) throw new Error('收费目录存在重复作用域，已停止使用');
   return { rows, bindings, fingerprint: pricingFingerprint({ rows, bindings, sources: Array.from(sources.entries()).sort() }) };
+}
+
+export async function appendPricingCatalogScopes(catalog: PricingCatalog, identities: PricingAdminIdentity[], client: PricingClient, validate = true) {
+  for (const identity of identities) {
+    const id = pricingCatalogRowId(identity);
+    if (catalog.rows.some(row => row.id === id)) continue;
+    const original = catalog.rows.find(row => row.identity.kind === identity.kind && row.identity.channelId === identity.channelId
+      && row.identity.modelId === identity.modelId && row.identity.billingMode === identity.billingMode
+      && row.identity.unit === identity.unit && !Object.keys(row.identity.specifications).length);
+    if (!original) throw new Error('精确收费项缺少真实供应商范围');
+    if (validate) await assertPricingCatalogIdentity(identity, client, true);
+    catalog.rows.push({ ...original, id, identity, appliesTo: Object.entries(identity.specifications).map(([key, value]) => `${key}: ${value}`) });
+    catalog.bindings[id] = catalog.bindings[original.id];
+  }
 }

@@ -6,7 +6,7 @@ import { isSeedanceVideoDuration } from '@/lib/provider/seedance-models';
 import { assertPricingImageConsumerReady, pricingImageConsumerState } from './runtime';
 import { normalizeDecimal, multiplyDecimal, subtractDecimal, roundDecimal, compareDecimal, divideDecimal, PricingNumberError } from './math';
 import { selectPricingRule, assertNoRuleAmbiguity, PricingRuleConflict } from './resolve';
-import { getPricingCatalog, assertPricingCatalogIdentity, pricingCanonical, pricingFingerprint, type PricingCatalog,
+import { getPricingCatalog, appendPricingCatalogScopes, pricingCatalogRowId, assertPricingCatalogIdentity, pricingCanonical, pricingFingerprint, type PricingCatalog,
   type PricingCatalogBinding, type PricingClient } from './catalog';
 import { PRICING_ADMIN_SCHEMA, PRICING_POLICY_KEY, PRICING_REVISION_PREFIX, PRICING_OPERATION_PREFIX,
   PRICING_UNCONFIGURED_REVISION, PRICING_ADMIN_LIMITS,
@@ -16,6 +16,9 @@ import { PRICING_ADMIN_SCHEMA, PRICING_POLICY_KEY, PRICING_REVISION_PREFIX, PRIC
   type PricingAdminFilter, type PricingAdminPriceView, type PricingAdminRowChange,
   type PricingAdminSourceInput, type PricingAdminSource, type PricingAdminExchangeInput,
   type PricingAdminSimulation, type PricingAdminExchange } from './admin-contract';
+import { PRICING_AUTHORING_KEY, type PricingAuthoring, type PricingEnhanceGroup } from './pricing-authoring-contract';
+import { emptyPricingAuthoring, parsePricingAuthoring, pricingAuthoringContent, projectPricingAuthoring,
+  newPricingAuthoringEntry, derivedPricingBase, assertPricingBaseRelation } from './pricing-authoring';
 
 type Actor = Pick<PricingAdminActor, 'id'>;
 type Standards = Record<PricingAdminBasis, string | null>;
@@ -28,13 +31,13 @@ type StoredRule = {
 };
 type Policy = { schemaVersion: 1; revision: string; standards: Standards; rules: StoredRule[];
   updatedAt: string | null; updatedBy: PricingAdminActor | null };
-type Revision = { schemaVersion: 1; policy: Policy; history: PricingAdminHistoryEntry;
+type Revision = { schemaVersion: 1; policy: Policy; authoring?: PricingAuthoring; history: PricingAdminHistoryEntry;
   rows: PricingAdminRow[]; bindings: Record<string, PricingCatalogBinding> };
 type Receipt = { schemaVersion: 1; actorId: string; requestFingerprint: string; result: PricingAdminOperation };
-type State = { policy: Policy; raw: string | null; catalog: PricingCatalog; rows: PricingAdminRow[] };
+type State = { policy: Policy; raw: string | null; catalog: PricingCatalog; rows: PricingAdminRow[]; authoring: PricingAuthoring; authoringRaw: string | null };
 type Prepared = { input: PricingAdminPreviewInput; next: Policy; rows: PricingAdminRow[];
   affected: string[]; changes: PricingAdminPreview['changes']; skipped: PricingAdminPreview['skipped'];
-  simulation: PricingAdminSimulation | null; inputFingerprint: string; confirmationTime: string };
+  simulation: PricingAdminSimulation | null; scenarios: PricingAdminSimulation[]; authoring: PricingAuthoring; authoringChanged: boolean; inputFingerprint: string; confirmationTime: string };
 
 export class PricingAdminServiceError extends Error {
   constructor(message: string, public readonly status = 400, public readonly code = 'pricing_invalid',
@@ -82,8 +85,31 @@ function exchangeInput(value: unknown): PricingAdminExchangeInput {
     rate: normalized, effectiveFrom: new Date(time).toISOString(), source: sourceInput(value.source) };
 }
 function rowChange(value: unknown): PricingAdminRowChange {
-  keys(value, ['id', 'mode', 'customPointsPerCny', 'basisKind', 'base', 'exchangeRate']);
+  keys(value, ['id', 'mode', 'customPointsPerCny', 'basisKind', 'base', 'exchangeRate', 'specifications', 'authoringRateMode', 'baseRelation', 'evidence']);
   const result: PricingAdminRowChange = { id: textValue(value.id, 160) };
+  if (value.specifications !== undefined) {
+    keys(value.specifications, ['quality', 'resolution', 'ratio', 'referenceVideo', 'pricingPurpose']);
+    result.specifications = Object.fromEntries(Object.entries(value.specifications).map(([key, item]) => [key, textValue(item, 64)]));
+  }
+  if (value.authoringRateMode !== undefined) {
+    if (!['follow_global', 'custom'].includes(String(value.authoringRateMode))) fail('统一跟随方式无效');
+    result.authoringRateMode = value.authoringRateMode as 'follow_global' | 'custom';
+  }
+  if (value.baseRelation !== undefined) {
+    if (value.baseRelation === null) result.baseRelation = null;
+    else { keys(value.baseRelation, ['parentId', 'factor']);
+      if (value.baseRelation.factor !== '1.5') fail('基价系数只支持已确认的1.5');
+      result.baseRelation = { parentId: textValue(value.baseRelation.parentId, 160), factor: '1.5' };
+    }
+  }
+  if (value.base !== undefined && value.baseRelation !== undefined && value.baseRelation !== null) fail('不能同时手填子基价与恢复父价跟随，请保留其中一种');
+  if (value.evidence !== undefined) {
+    keys(value.evidence, ['kind', 'amount', 'currency', 'unit', 'specifications', 'sampledAt', 'exchangeAssumption', 'reference', 'version']);
+    const candidate = { ...newPricingAuthoringEntry(), evidence: value.evidence };
+    try { parsePricingAuthoring(JSON.stringify({ ...emptyPricingAuthoring('test'), entries: { test: candidate } }), 'test'); }
+    catch { fail('价格参考证据无效'); }
+    result.evidence = value.evidence as unknown as NonNullable<PricingAdminRowChange['evidence']>;
+  }
   if (value.mode !== undefined) {
     if (!['follow', 'custom', 'free', 'legacy_fixed'].includes(String(value.mode))) fail('跟随方式无效');
     result.mode = value.mode as PricingAdminRowChange['mode'];
@@ -100,13 +126,13 @@ function rowChange(value: unknown): PricingAdminRowChange {
   return result;
 }
 function parsePreview(value: unknown, saving = false): PricingAdminPreviewInput {
-  keys(value, ['expectedRevision', 'catalogFingerprint', 'action', 'simulation', ...(saving ? ['operationId', 'previewToken'] : [])]);
+  keys(value, ['expectedRevision', 'expectedAuthoringRevision', 'catalogFingerprint', 'action', 'simulation', 'scenarios', ...(saving ? ['operationId', 'previewToken'] : [])]);
   const expectedRevision = textValue(value.expectedRevision, 160), catalogFingerprint = textValue(value.catalogFingerprint, 64);
   if (!/^[a-f0-9]{64}$/.test(catalogFingerprint)) fail('目录凭证无效，请重新读取');
   if (!record(value.action)) fail('请选择保存、统一或恢复操作');
   let action: PricingAdminAction;
   if (value.action.kind === 'save') {
-    keys(value.action, ['kind', 'changes']); keys(value.action.changes, ['standards', 'rows']);
+    keys(value.action, ['kind', 'changes']); keys(value.action.changes, ['standards', 'rows', 'authoring']);
     if (!Array.isArray(value.action.changes.rows) || value.action.changes.rows.length > PRICING_ADMIN_LIMITS.maxChanges) fail('单次最多修改 2000 项');
     const rows = value.action.changes.rows.map(rowChange);
     uniqueIds(rows.map(item => item.id), true);
@@ -115,7 +141,15 @@ function parsePreview(value: unknown, saving = false): PricingAdminPreviewInput 
       keys(value.action.changes.standards, ['site_base_cny', 'supplier_cost_cny']); standards = {};
       for (const [name, amount] of Object.entries(value.action.changes.standards)) standards[basis(name)] = rate(amount);
     }
-    action = { kind: 'save', changes: { rows, ...(standards ? { standards } : {}) } };
+    let authoring;
+    if (value.action.changes.authoring !== undefined) {
+      keys(value.action.changes.authoring, ['globalPointsPerCny', 'enhanceGroup']);
+      authoring = { ...(value.action.changes.authoring.globalPointsPerCny === undefined ? {} : { globalPointsPerCny: rate(value.action.changes.authoring.globalPointsPerCny) }),
+        ...(value.action.changes.authoring.enhanceGroup === undefined ? {} : { enhanceGroup: value.action.changes.authoring.enhanceGroup as PricingEnhanceGroup }) };
+      try { parsePricingAuthoring(JSON.stringify({ ...emptyPricingAuthoring('test'), ...authoring }), 'test'); }
+      catch { fail('增强分组或统一标准无效'); }
+    }
+    action = { kind: 'save', changes: { rows, ...(standards ? { standards } : {}), ...(authoring ? { authoring } : {}) } };
   } else if (value.action.kind === 'unify') {
     keys(value.action, ['kind', 'basisKind', 'ruleIds']);
     action = { kind: 'unify', basisKind: basis(value.action.basisKind), ruleIds: uniqueIds(value.action.ruleIds) };
@@ -133,7 +167,17 @@ function parsePreview(value: unknown, saving = false): PricingAdminPreviewInput 
       { maxScale: 8, allowZero: false, max: '10000000' }),
       ...(value.simulation.exampleAmount !== undefined ? { exampleAmount: decimal(value.simulation.exampleAmount, { maxScale: 6, max: '2000', allowZero: true }) } : {}) };
   }
-  return { expectedRevision, catalogFingerprint, action, ...(simulation ? { simulation } : {}) };
+  const scenarios: NonNullable<PricingAdminPreviewInput['scenarios']> = [];
+  if (value.scenarios !== undefined) {
+    if (!Array.isArray(value.scenarios) || value.scenarios.length > 2000) fail('场景试算最多2000项，未截断');
+    for (const item of value.scenarios) {
+      keys(item, ['rowId', 'quantity', 'exampleAmount']);
+      scenarios.push({ rowId: textValue(item.rowId, 160), quantity: decimal(item.quantity, { maxScale: 8, allowZero: false, max: '10000000' }),
+        ...(item.exampleAmount === undefined ? {} : { exampleAmount: decimal(item.exampleAmount, { maxScale: 6, max: '2000' }) }) });
+    }
+  }
+  return { expectedRevision, catalogFingerprint, action, ...(value.expectedAuthoringRevision === undefined ? {} : { expectedAuthoringRevision: textValue(value.expectedAuthoringRevision, 160) }),
+    ...(simulation ? { simulation } : {}), ...(value.scenarios === undefined ? {} : { scenarios }) };
 }
 async function freshActor(actor: Actor, client: PricingClient): Promise<PricingAdminActor> {
   if (!actor || typeof actor.id !== 'string') throw new AuthError('请先登录', 401);
@@ -253,18 +297,46 @@ function signedDifferenceFromHundred(value: string): string {
 async function readState(client: PricingClient): Promise<State> {
   const stored = await client.platformSetting.findUnique({ where: { key: PRICING_POLICY_KEY } });
   const policy = stored ? parsePolicy(stored.value_json) : emptyPolicy();
+  let revisionAuthoring: PricingAuthoring | undefined;
   if (stored) {
     const revision = await client.platformSetting.findUnique({ where: { key: `${PRICING_REVISION_PREFIX}${policy.revision}` } });
     if (!revision) corrupt();
-    try { const value = JSON.parse(revision.value_json); if (pricingCanonical(value.policy) !== pricingCanonical(policy)) corrupt(); } catch { corrupt(); }
+    try { const value = JSON.parse(revision.value_json); if (pricingCanonical(value.policy) !== pricingCanonical(policy)) corrupt();
+      revisionAuthoring = value.authoring;
+      if (value.authoring && pricingCanonical(value.history?.authoringAfter) !== pricingCanonical(value.authoring)) corrupt();
+    } catch { corrupt(); }
   }
   const catalog = await getPricingCatalog(client);
-  return { policy, raw: stored?.value_json || null, catalog,
-    rows: catalog.rows.map(value => effectiveRow(value, policy, catalog.bindings[value.id])) };
+  await appendPricingCatalogScopes(catalog, policy.rules.map(rule => rule.identity), client, false);
+  const authoringStored = await client.platformSetting.findUnique({ where: { key: PRICING_AUTHORING_KEY } });
+  let authoring = emptyPricingAuthoring(policy.revision);
+  try {
+    if (authoringStored) {
+      authoring = parsePricingAuthoring(authoringStored.value_json, policy.revision);
+      if (!revisionAuthoring || pricingCanonical(revisionAuthoring) !== pricingCanonical(authoring)) throw new Error('编排历史与当前值不一致');
+    } else if (revisionAuthoring) throw new Error('编排记录缺失');
+  }
+  catch { throw new PricingAdminServiceError('设置关系与实际费率不一致，未覆盖配置；请保留草稿', 409, 'pricing_authoring_conflict'); }
+  for (const id of authoring.members) {
+    const rule = policy.rules.find(item => item.id === id);
+    if (!rule || rule.mode !== 'custom' || rule.customPointsPerCny !== authoring.globalPointsPerCny) throw new PricingAdminServiceError('统一成员与实际收费不一致，未重建默认值', 409, 'pricing_authoring_conflict');
+  }
+  for (const [id, entry] of Object.entries(authoring.entries)) {
+    if (!entry.baseRelation) continue;
+    const child = policy.rules.find(rule => rule.id === id), parent = policy.rules.find(rule => rule.id === entry.baseRelation!.parentId);
+    if (!parent?.baseCny || !child?.baseCny) throw new PricingAdminServiceError('基价关系缺少实际收费行', 409, 'pricing_authoring_conflict');
+    assertPricingBaseRelation(parent.identity, child.identity);
+    if (derivedPricingBase(parent.baseCny, entry.baseRelation.factor).adopted !== child.baseCny
+      || authoring.entries[parent.id]?.adoptedRevision && entry.baseRelation.parentRevision !== authoring.entries[parent.id].adoptedRevision) {
+      throw new PricingAdminServiceError('父子基价与实际收费不一致', 409, 'pricing_authoring_conflict');
+    }
+  }
+  return { policy, raw: stored?.value_json || null, catalog, authoring, authoringRaw: authoringStored?.value_json || null,
+    rows: catalog.rows.map(value => projectPricingAuthoring(effectiveRow(value, policy, catalog.bindings[value.id]), authoring)) };
 }
 async function snapshot(actor: PricingAdminActor, state: State, client: PricingClient): Promise<PricingAdminSnapshot> {
   const runtime = await pricingImageConsumerState(client);
-  return { schemaVersion: PRICING_ADMIN_SCHEMA, actor, revision: state.policy.revision,
+  return { schemaVersion: PRICING_ADMIN_SCHEMA, actor, revision: state.policy.revision, authoring: state.authoring,
     catalogFingerprint: state.catalog.fingerprint, standards: state.policy.standards, rows: state.rows,
     limits: PRICING_ADMIN_LIMITS, runtime: { imageReady: runtime.ready, reason: 'reason' in runtime ? runtime.reason || null : null },
     updatedAt: state.policy.updatedAt, updatedBy: state.policy.updatedBy };
@@ -275,9 +347,9 @@ export async function getAdminPricingSnapshot(actor: Actor, client: PricingClien
 }
 function view(value: PricingAdminRow): PricingAdminPriceView {
   const { mode, baseCny, basisKind, currentPointsPerCny, currentUnitCredits, relativeMultiplier, differencePercent,
-    confirmation, hasDifference, exchangeRate } = value;
+    confirmation, hasDifference, exchangeRate, authoringRateMode, authoringEntry } = value;
   return { mode, baseCny, basisKind, currentPointsPerCny, currentUnitCredits, relativeMultiplier,
-    differencePercent, confirmation, hasDifference, exchangeRate };
+    differencePercent, confirmation, hasDifference, exchangeRate, authoringRateMode, authoringEntry };
 }
 function toRule(row: PricingAdminRow, binding: PricingCatalogBinding, now: string): StoredRule {
   return { id: row.id, identity: row.identity, mode: row.mode, basisKind: row.basisKind, baseCny: row.baseCny,
@@ -294,6 +366,7 @@ async function readRevision(id: string, client: PricingClient): Promise<Revision
   try {
     const value = JSON.parse(row.value_json) as Revision;
     parsePolicy(JSON.stringify(value.policy));
+    if (value.authoring) parsePricingAuthoring(JSON.stringify(value.authoring), value.policy.revision);
     if (value.schemaVersion !== 1 || value.policy.revision !== id || value.history.revisionId !== id
       || !Array.isArray(value.rows) || !record(value.bindings)) corrupt();
     return value;
@@ -306,7 +379,10 @@ function simulationPrice(row: PricingAdminRow, quantity: string, example?: strin
     if (example === undefined) return null;
     const exact = row.mode === 'legacy_actual' ? multiplyDecimal([example, row.legacyPointsPerUsd || '35'])
       : row.exchangeRate && row.currentPointsPerCny ? multiplyDecimal([example, row.exchangeRate.rate, row.currentPointsPerCny]) : null;
-    return exact === null ? null : { exact, credits: roundDecimal(exact, row.mode === 'legacy_actual' ? 2 : 1, 'half_up') };
+    if (exact === null) return null;
+    const perTask = roundDecimal(exact, row.mode === 'legacy_actual' ? 2 : 1, 'half_up');
+    if (compareDecimal(perTask, PRICING_ADMIN_LIMITS.maxImageCredits) > 0) fail('单个账单示例超过图片原授权边界');
+    return { exact: multiplyDecimal([exact, quantity]), credits: multiplyDecimal([perTask, quantity]) };
   }
   const measured = row.identity.kind === 'enhance' || row.identity.kind === 'h3' ? roundDecimal(quantity, 0, 'ceil') : quantity;
   const exact = row.mode === 'legacy_fixed' && row.currentUnitCredits !== null ? multiplyDecimal([row.currentUnitCredits, measured])
@@ -319,15 +395,21 @@ function simulationPrice(row: PricingAdminRow, quantity: string, example?: strin
   if (compareDecimal(credits, row.identity.kind === 'image' ? PRICING_ADMIN_LIMITS.maxImageCredits : PRICING_ADMIN_LIMITS.maxTaskCredits) > 0) fail('试算超过原业务金额上限');
   return { exact, credits };
 }
-function simulate(input: PricingAdminPreviewInput['simulation'], before: PricingAdminRow[], after: PricingAdminRow[]): PricingAdminSimulation | null {
+function simulate(input: PricingAdminPreviewInput['simulation'], before: PricingAdminRow[], after: PricingAdminRow[], scopeIds = new Map<string, string>()): PricingAdminSimulation | null {
   if (!input) return null;
-  const a = before.find(row => row.id === input.rowId), b = after.find(row => row.id === input.rowId);
+  const rowId = scopeIds.get(input.rowId) || input.rowId;
+  const a = before.find(row => row.id === rowId), b = after.find(row => row.id === rowId);
   if (!a || !b) fail('试算项不在当前合法目录');
   if (a.identity.kind === 'video' && !isSeedanceVideoDuration(Number(input.quantity), a.identity.modelId)) fail('视频试算时长须符合当前型号原有的整数时长范围');
   if (a.identity.kind === 'image' && (input.quantity.includes('.') && compareDecimal(input.quantity, roundDecimal(input.quantity, 0, 'ceil')) !== 0
     || compareDecimal(input.quantity, '100') > 0)) fail('图片试算数量须为 1 至 100 整数，不扩大实际单次生成上限');
   const old = simulationPrice(a, input.quantity, input.exampleAmount), next = simulationPrice(b, input.quantity, input.exampleAmount);
-  return { rowId: a.id, quantity: input.quantity, unit: a.identity.unit, currentCredits: old?.credits || null,
+  const delta = old && next ? compareDecimal(next.credits, old.credits) < 0
+    ? `-${subtractDecimal(old.credits, next.credits)}` : subtractDecimal(next.credits, old.credits) : null;
+  const percent = old && next && compareDecimal(old.credits, '0') > 0
+    ? signedDifferenceFromHundred(divideDecimal(multiplyDecimal([next.credits, '100']), old.credits, 8)) : null;
+  return { rowId: a.id, sourceRowId: input.rowId, specifications: { ...b.identity.specifications }, quantity: input.quantity, unit: a.identity.unit, currentCredits: old?.credits || null,
+    deltaCredits: delta, differencePercent: percent, rounding: b.mode === 'legacy_fixed' || b.mode === 'legacy_actual' ? b.legacyRounding || 'legacy' : 'half_up_tenth',
     adjustedCredits: next?.credits || null, authorizedMaximumCredits: null, isExample: a.identity.billingMode === 'actual',
     roundedToZero: !!next && compareDecimal(next.exact, '0') > 0 && compareDecimal(next.credits, '0') === 0,
     exactCredits: next?.exact || null, reason: next ? a.identity.billingMode === 'actual' ? '仅为示例，实际费用须匹配真实账单；本试算不建立授权上限' : null : '依据、价格或实际示例金额尚未就绪' };
@@ -335,15 +417,49 @@ function simulate(input: PricingAdminPreviewInput['simulation'], before: Pricing
 async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput, state: State, client: PricingClient,
   confirmedAt = new Date().toISOString()): Promise<Prepared> {
   if (input.expectedRevision !== state.policy.revision || input.catalogFingerprint !== state.catalog.fingerprint) conflict(state.policy.revision);
+  if (state.authoringRaw && input.expectedAuthoringRevision === undefined) throw new PricingAdminServiceError('请更新费率设置页后再保存，旧写入不能覆盖统一关系', 409, 'pricing_authoring_client_required');
+  if (input.expectedAuthoringRevision !== undefined && input.expectedAuthoringRevision !== state.authoring.revision) conflict(state.policy.revision);
   const now = confirmedAt, next: Policy = structuredClone(state.policy), skipped: PricingAdminPreview['skipped'] = [];
+  const authoring = structuredClone(state.authoring), authoringEnabled = input.expectedAuthoringRevision !== undefined;
+  const scopeIds = new Map<string, string>();
+  if (input.action.kind === 'save') for (const change of input.action.changes.rows) {
+    if (!change.specifications) continue;
+    if (!authoringEnabled) fail('精确规格需要新版设置合同');
+    const original = state.catalog.rows.find(row => row.id === change.id);
+    if (!original) fail('精确规格的原收费项不存在');
+    const identity = { ...original.identity, specifications: { ...original.identity.specifications, ...change.specifications } };
+    if (identity.kind === 'video' && (identity.specifications.referenceVideo === 'unknown' || identity.specifications.pricingPurpose === 'unknown')) fail('未知视频输入或用途不能建立确定新收费范围');
+    await appendPricingCatalogScopes(state.catalog, [identity], client);
+    const id = pricingCatalogRowId(identity); scopeIds.set(change.id, id);
+    if (!state.rows.some(row => row.id === id)) state.rows.push(projectPricingAuthoring(effectiveRow(state.catalog.rows.find(row => row.id === id)!, state.policy, state.catalog.bindings[id]), state.authoring));
+    // Preserve the original fallback contract for every other, unselected specification.
+    if (!next.rules.some(rule => rule.id === original.id) && original.mode !== 'unset') next.rules.push(toRule(state.rows.find(row => row.id === original.id)!, state.catalog.bindings[original.id], now));
+  }
   const requested = new Set<string>();
+  const metadataOnly = new Set<string>();
   const find = (id: string) => { const value = state.rows.find(row => row.id === id); if (!value) fail('所选收费项已删除或不属于当前目录'); return value; };
   const put = (rule: StoredRule) => { const index = next.rules.findIndex(item => item.id === rule.id);
     if (index < 0) next.rules.push(rule); else next.rules[index] = rule; requested.add(rule.id); };
   if (input.action.kind === 'save') {
     Object.assign(next.standards, input.action.changes.standards || {});
-    for (const change of input.action.changes.rows) {
+    if (input.action.changes.authoring) {
+      if (!authoringEnabled) fail('统一设置需要同时核对编排修订');
+      if (input.action.changes.authoring.globalPointsPerCny !== undefined) authoring.globalPointsPerCny = input.action.changes.authoring.globalPointsPerCny;
+    }
+    for (const originalChange of input.action.changes.rows) {
+      const change = { ...originalChange, id: scopeIds.get(originalChange.id) || originalChange.id };
       const current = find(change.id), original = state.catalog.rows.find(row => row.id === change.id)!;
+      const removeMemberOnly = authoringEnabled && authoring.members.includes(change.id)
+        && change.authoringRateMode === 'custom' && Object.keys(change).every(key => ['id', 'authoringRateMode'].includes(key));
+      if (removeMemberOnly) {
+        authoring.members = authoring.members.filter(id => id !== change.id);
+        requested.add(change.id); metadataOnly.add(change.id); continue;
+      }
+      if (Object.keys(current.identity.specifications).length && !next.rules.some(rule => rule.id === current.id)) {
+        const fallback = state.rows.find(row => row.identity.kind === current.identity.kind && row.identity.channelId === current.identity.channelId
+          && row.identity.modelId === current.identity.modelId && row.identity.billingMode === current.identity.billingMode && !Object.keys(row.identity.specifications).length);
+        if (fallback && fallback.mode !== 'unset' && !next.rules.some(rule => rule.id === fallback.id)) next.rules.push(toRule(fallback, state.catalog.bindings[fallback.id], now));
+      }
       if (!current.enabled || original.availability !== 'ready') fail(`${current.label}：当前通道不可用，不能修改收费依据`);
       if (change.mode === 'legacy_fixed') fail('旧固定价只能从所选历史修订恢复，不能伪造旧价');
       const rule = next.rules.find(item => item.id === current.id) || toRule(current, state.catalog.bindings[current.id], now);
@@ -369,9 +485,31 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
         candidate.mode = 'custom'; candidate.customPointsPerCny = change.customPointsPerCny;
       }
       if (candidate.mode === 'custom' && !candidate.customPointsPerCny) fail('请填写当前点/元');
+      if (authoringEnabled) {
+        const entry = structuredClone(authoring.entries[change.id] || newPricingAuthoringEntry());
+        if (change.evidence) entry.evidence = change.evidence;
+        if (change.base || change.specifications || change.evidence) {
+          const evidenceMatches = entry.evidence?.currency === 'CNY' && entry.evidence.unit === current.identity.unit
+            && candidate.baseCny !== null && compareDecimal(entry.evidence.amount, candidate.baseCny) === 0 && pricingCanonical(entry.evidence.specifications) === pricingCanonical(current.identity.specifications);
+          entry.sourceKind = evidenceMatches ? entry.evidence!.kind : 'admin_defined';
+          if (entry.sourceKind === 'admin_defined' && change.base) candidate.source = confirmSource({ type: 'admin_defined', reference: change.base.source.reference, note: change.base.source.note }, actor, now);
+          entry.baseRelation = null;
+          entry.adoptedRevision = pricingFingerprint({ base: candidate.baseCny, scope: current.identity, source: entry.sourceKind, evidence: entry.evidence });
+        }
+        if (change.baseRelation !== undefined) entry.baseRelation = change.baseRelation === null ? null : { ...change.baseRelation, parentRevision: '', exactProduct: '' };
+        if (!entry.adoptedRevision || entry.adoptedRevision === 'pending') entry.adoptedRevision = pricingFingerprint({ base: candidate.baseCny, exchange: candidate.exchangeRate, identity: current.identity, source: candidate.source });
+        authoring.entries[change.id] = entry;
+        if (change.authoringRateMode === 'follow_global') {
+          if (change.customPointsPerCny !== undefined || change.mode && change.mode !== 'custom') fail('统一跟随与单独费率不能同时指定');
+          if (!authoring.members.includes(change.id)) authoring.members.push(change.id);
+        } else if (change.authoringRateMode === 'custom' || change.customPointsPerCny !== undefined || change.mode !== undefined) {
+          authoring.members = authoring.members.filter(id => id !== change.id);
+        }
+      } else if (change.authoringRateMode || change.baseRelation !== undefined || change.evidence) fail('来源与关系需要新版设置合同');
       put(candidate);
     }
   } else if (input.action.kind === 'unify') {
+    if (authoringEnabled) fail('请选择统一所选加入草稿，再一次保存全部修改');
     const standard = next.standards[input.action.basisKind];
     if (!standard) fail('请先设置当前依据的统一标准');
     for (const id of input.action.ruleIds) {
@@ -391,12 +529,99 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
       }
       const oldRule = historic.policy.rules.find(rule => rule.id === id);
       const restored = oldRule ? structuredClone(oldRule) : toRule(previous, historic.bindings[id], now);
+      if (restored.mode === 'follow' && restored.customPointsPerCny === null) {
+        const historicalRate = previous.currentPointsPerCny;
+        if (!historicalRate) { skipped.push({ id, reason: '历史有效费率无法核实，未恢复' }); continue; }
+        if (next.standards[restored.basisKind] !== historicalRate) { restored.mode = 'custom'; restored.customPointsPerCny = historicalRate; }
+      }
+      if (authoringEnabled) {
+        authoring.members = authoring.members.filter(member => member !== id);
+        const entry = structuredClone(historic.authoring?.entries[id] || newPricingAuthoringEntry());
+        const relation = entry.baseRelation;
+        if (relation && (!input.action.ruleIds.includes(relation.parentId)
+          || !historic.rows.some(row => row.id === relation.parentId && row.baseCny
+            && derivedPricingBase(row.baseCny, relation.factor).adopted === restored.baseCny))) {
+          entry.baseRelation = null; entry.sourceKind = 'admin_defined';
+          skipped.push({ id, reason: '恢复历史价，改为单独设置；未选择的父价保持不变' });
+        }
+        if (!entry.adoptedRevision || entry.adoptedRevision === 'pending') entry.adoptedRevision = pricingFingerprint({
+          base: restored.baseCny, exchange: restored.exchangeRate, identity: current.identity, source: restored.source,
+        });
+        authoring.entries[id] = entry;
+        if (historic.authoring?.members.includes(id) && previous.currentPointsPerCny === authoring.globalPointsPerCny) authoring.members.push(id);
+      }
       restored.updatedAt = now; put(restored);
     }
+    if (authoringEnabled) for (const [id, entry] of Object.entries(authoring.entries)) {
+      if (entry.baseRelation && input.action.ruleIds.includes(entry.baseRelation.parentId) && !input.action.ruleIds.includes(id)) {
+        entry.baseRelation = null; entry.sourceKind = 'admin_defined';
+        skipped.push({ id, reason: '未选子项保持现价，已解除与本次历史父价的联动' });
+      }
+    }
+  }
+  if (authoringEnabled) {
+    const changedParents = new Set(Array.from(requested).filter(id => !metadataOnly.has(id)
+      && ((next.rules.find(rule => rule.id === id)?.baseCny ?? null) !== find(id).baseCny
+        || authoring.entries[id]?.adoptedRevision !== state.authoring.entries[id]?.adoptedRevision)));
+    for (const [id, entry] of Object.entries(authoring.entries)) {
+      if (!entry.baseRelation || !changedParents.has(entry.baseRelation.parentId)
+        && pricingCanonical(entry.baseRelation) === pricingCanonical(state.authoring.entries[id]?.baseRelation || null)) continue;
+      const child = find(id), parent = find(entry.baseRelation.parentId);
+      try { assertPricingBaseRelation(parent.identity, child.identity); }
+      catch (error) { fail(error instanceof Error ? error.message : '基价跟随关系不合法'); }
+      if (!sameBinding(state.catalog.bindings[id], state.catalog.bindings[parent.id])) fail('父子价格来源主体不相容');
+      const parentRule = next.rules.find(rule => rule.id === parent.id), parentBase = parentRule?.baseCny || parent.baseCny;
+      if (!parentBase) fail('父项没有独立人民币基价');
+      let derived: ReturnType<typeof derivedPricingBase>;
+      try { derived = derivedPricingBase(parentBase, entry.baseRelation.factor); }
+      catch (error) { fail(error instanceof Error ? error.message : '派生基价无法安全保存'); }
+      const candidate = structuredClone(next.rules.find(rule => rule.id === id) || toRule(child, state.catalog.bindings[id], now));
+      candidate.baseCny = derived.adopted;
+      candidate.updatedAt = now;
+      candidate.source = confirmSource({ type: 'admin_defined', reference: '同范围2.0基价×1.5', note: `精确乘积${derived.exact}，采用8位基价${derived.adopted}` }, actor, now);
+      entry.baseRelation = { ...entry.baseRelation, parentRevision: authoring.entries[parent.id]?.adoptedRevision || pricingFingerprint({ base: parentBase, revision: state.policy.revision }), exactProduct: derived.exact };
+      entry.sourceKind = 'derived'; entry.adoptedRevision = pricingFingerprint({ parent: entry.baseRelation, base: derived.adopted });
+      put(candidate);
+    }
+    for (const id of authoring.members) {
+      const current = find(id), projected = effectiveRow(state.catalog.rows.find(row => row.id === id)!, next, state.catalog.bindings[id]);
+      if (!authoring.globalPointsPerCny || !current.enabled || projected.availability !== 'ready' || !projected.canAdopt || projected.mode === 'free') fail(`${current.label}：统一成员不可用或依据待确认，请先明确移出该项，整组未保存`);
+      const rule = structuredClone(next.rules.find(item => item.id === id) || toRule(current, state.catalog.bindings[id], now));
+      if (rule.mode !== 'custom' || rule.customPointsPerCny !== authoring.globalPointsPerCny) rule.updatedAt = now;
+      rule.mode = 'custom'; rule.customPointsPerCny = authoring.globalPointsPerCny; put(rule);
+    }
+    authoring.members.sort();
+    const requestedGroup = input.action.kind === 'save' ? input.action.changes.authoring?.enhanceGroup : undefined;
+    if (requestedGroup) {
+      const groupRows = state.rows.filter(row => row.identity.kind === 'enhance');
+      if (groupRows.length !== 20 || groupRows.some(row => row.mode !== 'legacy_fixed' || !row.enabled || row.availability !== 'ready')) fail('增强目录存在单独规则或不可用项，不能合并覆盖；请逐项编辑');
+      const oldUnit = (resolution: string, toolVersion: string, fpsTier: string) => {
+        const matches = groupRows.filter(row => row.identity.specifications.resolution === resolution && row.identity.specifications.toolVersion === toolVersion && row.identity.specifications.fpsTier === fpsTier);
+        if (matches.length !== 1 || !matches[0].currentUnitCredits) fail('增强目录不是完整20种组合');
+        return matches[0].currentUnitCredits!;
+      };
+      const professional = divideDecimal(oldUnit('480p', 'professional', 'lte30'), oldUnit('480p', 'standard', 'lte30'), 8);
+      const highFps = divideDecimal(oldUnit('480p', 'standard', 'gt30'), oldUnit('480p', 'standard', 'lte30'), 8);
+      for (const resolution of ['480p', '720p', '1080p', '2k', '4k']) for (const toolVersion of ['standard', 'professional']) for (const fpsTier of ['lte30', 'gt30']) {
+        const expected = multiplyDecimal([oldUnit(resolution, 'standard', 'lte30'), toolVersion === 'professional' ? professional : '1', fpsTier === 'gt30' ? highFps : '1']);
+        if (compareDecimal(expected, oldUnit(resolution, toolVersion, fpsTier)) !== 0) fail('现有增强价格含独立组合，不能用分组覆盖；请逐项编辑');
+      }
+      for (const current of groupRows) {
+        const specs = current.identity.specifications;
+        const base = requestedGroup.basePointsPerSecond[specs.resolution as keyof typeof requestedGroup.basePointsPerSecond];
+        if (!base) fail('增强分组分辨率无效');
+        const unit = multiplyDecimal([base, specs.toolVersion === 'professional' ? requestedGroup.professionalMultiplier : '1', specs.fpsTier === 'gt30' ? requestedGroup.highFpsMultiplier : '1']);
+        const rule = toRule(current, state.catalog.bindings[current.id], now);
+        rule.legacyUnitCredits = decimal(unit, { maxScale: 8, max: PRICING_ADMIN_LIMITS.maxTaskCredits, allowZero: false });
+        put(rule);
+      }
+      authoring.enhanceGroup = structuredClone(requestedGroup);
+    } else if (Array.from(requested).some(id => state.rows.find(row => row.id === id)?.identity.kind === 'enhance')) delete authoring.enhanceGroup;
   }
   assertNoRuleAmbiguity(next.rules);
-  const rows = state.catalog.rows.map(row => effectiveRow(row, next, state.catalog.bindings[row.id]));
+  const rows = state.catalog.rows.map(row => projectPricingAuthoring(effectiveRow(row, next, state.catalog.bindings[row.id]), authoring));
   for (const id of Array.from(requested)) {
+    if (metadataOnly.has(id)) continue;
     const value = rows.find(row => row.id === id)!;
     if (['follow', 'custom'].includes(value.mode) && (!value.canAdopt || !value.currentPointsPerCny)) fail(`${value.label}：${value.adoptionReason || '请设置有效费率或标准'}`);
     if (value.currentUnitCredits && compareDecimal(value.currentUnitCredits, value.identity.kind === 'image' ? PRICING_ADMIN_LIMITS.maxImageCredits : PRICING_ADMIN_LIMITS.maxTaskCredits) > 0) fail(`${value.label}：超过原业务金额上限`);
@@ -406,18 +631,25 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
   for (const row of rows.filter(value => value.mode === 'follow' && changedStandards.includes(value.basisKind))) {
     if (!row.canAdopt || !row.currentPointsPerCny) fail(`${row.label}：跟随项尚未就绪，不能只保存一部分统一标准`);
   }
-  const affected = rows.filter((row, index) => pricingCanonical(view(row)) !== pricingCanonical(view(state.rows[index]))
+  const affected = rows.filter((row, index) => pricingCanonical({ price: view(row), entry: row.authoringEntry, rateMode: row.authoringRateMode }) !== pricingCanonical({ price: view(state.rows[index]), entry: state.rows[index].authoringEntry, rateMode: state.rows[index].authoringRateMode })
     || requested.has(row.id) && pricingCanonical({ source: row.source, base: row.baseCny, mode: row.mode, exchange: row.exchangeRate })
       !== pricingCanonical({ source: state.rows[index].source, base: state.rows[index].baseCny, mode: state.rows[index].mode, exchange: state.rows[index].exchangeRate })).map(row => row.id);
   if (affected.length > PRICING_ADMIN_LIMITS.maxChanges) fail('完整影响范围超过 2000 项，未截断或部分保存');
-  const requiresImage = rows.some(row => row.identity.kind === 'image' && affected.includes(row.id));
+  const chargeView = (row: PricingAdminRow) => {
+    const { relativeMultiplier: _relative, differencePercent: _difference, hasDifference: _hasDifference, ...value } = view(row);
+    return value;
+  };
+  const requiresImage = rows.some((row, index) => row.identity.kind === 'image' && affected.includes(row.id) && !metadataOnly.has(row.id)
+    && pricingCanonical(chargeView(row)) !== pricingCanonical(chargeView(state.rows[index])));
   if (requiresImage) {
     try { await assertPricingImageConsumerReady(client); }
     catch (error) { throw new PricingAdminServiceError(error instanceof Error ? error.message : '图片收费服务尚未就绪', 503, 'pricing_consumer_unavailable'); }
   }
-  return { input, next, rows, affected, changes: affected.map(id => ({ id, label: find(id).label,
+  const sourceRowId = (id: string) => Array.from(scopeIds).find(([, target]) => target === id)?.[0] || id;
+  return { input, next, rows, affected, changes: affected.map(id => ({ id, sourceRowId: sourceRowId(id), specifications: { ...find(id).identity.specifications }, label: find(id).label,
     before: view(find(id)), after: view(rows.find(row => row.id === id)!) })), skipped,
-    simulation: simulate(input.simulation, state.rows, rows), inputFingerprint: pricingFingerprint(input), confirmationTime: now };
+    simulation: simulate(input.simulation, state.rows, rows, scopeIds), scenarios: (input.scenarios || []).map(item => simulate(item, state.rows, rows, scopeIds)!),
+    authoring, authoringChanged: pricingAuthoringContent(authoring) !== pricingAuthoringContent(state.authoring), inputFingerprint: pricingFingerprint(input), confirmationTime: now };
 }
 function signingSecret() {
   const secret = process.env.SESSION_SECRET;
@@ -430,7 +662,7 @@ function signedPreview(actor: PricingAdminActor, prepared: Prepared, state: Stat
   const expiresAt = new Date(Date.parse(confirmedAt) + PRICING_ADMIN_LIMITS.previewTtlMs).toISOString();
   const body = Buffer.from(JSON.stringify({ v: 1, actor: actor.id, input: prepared.inputFingerprint,
     revision: state.policy.revision, catalog: state.catalog.fingerprint, affected: prepared.affected,
-    output: pricingFingerprint({ changes: prepared.changes, standards: prepared.next.standards }), confirmedAt, expiresAt })).toString('base64url');
+    output: pricingFingerprint({ changes: prepared.changes, standards: prepared.next.standards, authoring: prepared.authoring, scenarios: prepared.scenarios }), confirmedAt, expiresAt })).toString('base64url');
   return { previewToken: `${body}.${signature(body)}`, expiresAt };
 }
 function previewPayload(token: string) {
@@ -454,7 +686,7 @@ function verifyPreview(token: string, actor: PricingAdminActor, prepared: Prepar
       || value.catalog !== state.catalog.fingerprint || !Number.isFinite(Date.parse(value.expiresAt)) || Date.parse(value.expiresAt) <= Date.now()
       || Date.parse(value.expiresAt) > Date.now() + PRICING_ADMIN_LIMITS.previewTtlMs
       || pricingCanonical(value.affected) !== pricingCanonical(prepared.affected)
-      || value.output !== pricingFingerprint({ changes: prepared.changes, standards: prepared.next.standards })) conflict(state.policy.revision);
+      || value.output !== pricingFingerprint({ changes: prepared.changes, standards: prepared.next.standards, authoring: prepared.authoring, scenarios: prepared.scenarios })) conflict(state.policy.revision);
   } catch { conflict(state.policy.revision); }
 }
 export async function previewAdminPricing(actor: Actor, input: PricingAdminPreviewInput, client: PricingClient = prisma): Promise<PricingAdminPreview> {
@@ -463,7 +695,8 @@ export async function previewAdminPricing(actor: Actor, input: PricingAdminPrevi
   const prepared = await prepare(admin, parsed, state, client);
   return { ...signedPreview(admin, prepared, state), expectedRevision: state.policy.revision,
     catalogFingerprint: state.catalog.fingerprint, inputFingerprint: prepared.inputFingerprint,
-    affectedRuleIds: prepared.affected, changes: prepared.changes, skipped: prepared.skipped, simulation: prepared.simulation };
+    affectedRuleIds: prepared.affected, changes: prepared.changes, skipped: prepared.skipped, simulation: prepared.simulation,
+    authoringRevision: state.authoring.revision, authoringChanged: prepared.authoringChanged, scenarios: prepared.scenarios };
 }
 function operationId(value: unknown) { const id = textValue(value, 128); if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{7,127}$/.test(id)) fail('保存操作编号无效'); return id; }
 function receiptKey(actor: Actor, id: string) { return `${PRICING_OPERATION_PREFIX}${actor.id}:${id}`; }
@@ -510,7 +743,7 @@ export async function saveAdminPricing(actor: Actor, input: PricingAdminSaveInpu
     }
     const current = state!;
     const changedStandards = pricingCanonical(prepared.next.standards) !== pricingCanonical(current.policy.standards);
-    if (!prepared.affected.length && !changedStandards) {
+    if (!prepared.affected.length && !changedStandards && !prepared.authoringChanged) {
       const result: PricingAdminOperation = { operationId: id, state: 'succeeded', inputFingerprint: prepared.inputFingerprint,
         revision: current.policy.revision, affectedRuleIds: [], error: null, snapshot: await snapshot(admin, current, tx) };
       await tx.platformSetting.create({ data: { key: receiptKey(admin, id), value_json: JSON.stringify({ schemaVersion: 1, actorId: admin.id, requestFingerprint, result } satisfies Receipt), updated_by: admin.id } });
@@ -518,6 +751,15 @@ export async function saveAdminPricing(actor: Actor, input: PricingAdminSaveInpu
     }
     const now = new Date().toISOString(), revisionId = randomUUID();
     prepared.next.revision = revisionId; prepared.next.updatedAt = now; prepared.next.updatedBy = admin;
+    const persistAuthoring = current.authoringRaw !== null || prepared.authoringChanged;
+    if (persistAuthoring) {
+      prepared.authoring.revision = randomUUID(); prepared.authoring.policyRevision = revisionId;
+      const authoringJson = JSON.stringify(prepared.authoring);
+      if (current.authoringRaw !== null) {
+        const swapped = await tx.platformSetting.updateMany({ where: { key: PRICING_AUTHORING_KEY, value_json: current.authoringRaw }, data: { value_json: authoringJson, updated_by: admin.id } });
+        if (swapped.count !== 1) conflict(current.policy.revision);
+      } else await tx.platformSetting.create({ data: { key: PRICING_AUTHORING_KEY, value_json: authoringJson, updated_by: admin.id } });
+    }
     const valueJson = JSON.stringify(prepared.next);
     // Compare the entire previous JSON, not only a client-supplied revision number.
     if (current.raw !== null) {
@@ -526,11 +768,12 @@ export async function saveAdminPricing(actor: Actor, input: PricingAdminSaveInpu
     } else await tx.platformSetting.create({ data: { key: PRICING_POLICY_KEY, value_json: valueJson, updated_by: admin.id } });
     const history: PricingAdminHistoryEntry = { revisionId, previousRevision: current.policy.revision, createdAt: now,
       actor: admin, action: prepared.input.action.kind, changes: prepared.changes,
-      standardsBefore: current.policy.standards, standardsAfter: prepared.next.standards };
-    const revision: Revision = { schemaVersion: 1, policy: prepared.next, history, rows: prepared.rows, bindings: current.catalog.bindings };
+      standardsBefore: current.policy.standards, standardsAfter: prepared.next.standards,
+      ...(persistAuthoring ? { authoringBefore: current.authoring, authoringAfter: prepared.authoring } : {}) };
+    const revision: Revision = { schemaVersion: 1, policy: prepared.next, ...(persistAuthoring ? { authoring: prepared.authoring } : {}), history, rows: prepared.rows, bindings: current.catalog.bindings };
     await tx.platformSetting.create({ data: { key: `${PRICING_REVISION_PREFIX}${revisionId}`, value_json: JSON.stringify(revision), updated_by: admin.id } });
     const result: PricingAdminOperation = { operationId: id, state: 'succeeded', inputFingerprint: prepared.inputFingerprint, revision: revisionId,
-      affectedRuleIds: prepared.affected, error: null, snapshot: await snapshot(admin, { ...current, policy: prepared.next, raw: valueJson, rows: prepared.rows }, tx) };
+      affectedRuleIds: prepared.affected, error: null, ...(persistAuthoring ? { authoringRevision: prepared.authoring.revision } : {}), snapshot: await snapshot(admin, await readState(tx), tx) };
     await tx.platformSetting.create({ data: { key: receiptKey(admin, id), value_json: JSON.stringify({ schemaVersion: 1, actorId: admin.id, requestFingerprint, result } satisfies Receipt), updated_by: admin.id } });
     return result;
   };
@@ -598,14 +841,16 @@ export async function exportAdminPricingCsv(actor: Actor, input: PricingAdminFil
   const header = ['revision', 'exportedAt', 'timezone', 'ruleId', 'kind', 'channelId', 'modelId', 'specifications', 'label', 'provider',
     'unit', 'mode', 'basis', 'baseCny', 'pointsPerCny', 'unitCredits', 'confirmation', 'sourceType', 'sourceReference', 'confirmedAt', 'confirmedBy',
     'legacyRounding', 'legacyPointsPerUsd', 'exchangeSourceCurrency', 'exchangeDirection', 'exchangeRate', 'exchangeEffectiveFrom', 'exchangeRevision',
-    'exchangeSourceType', 'exchangeSourceReference', 'exchangeConfirmedAt', 'exchangeConfirmedBy'];
+    'exchangeSourceType', 'exchangeSourceReference', 'exchangeConfirmedAt', 'exchangeConfirmedBy', 'authoringRevision', 'globalPointsPerCny', 'authoringRateMode', 'sourceKind', 'evidence', 'baseRelation'];
   return '\uFEFF' + [header, ...rows.map(row => [data.revision, exportedAt, 'UTC', row.id, row.identity.kind, row.identity.channelId,
     row.identity.modelId, pricingCanonical(row.identity.specifications), row.label, row.providerLabel, row.identity.unit, row.mode,
     row.basisKind, row.baseCny, row.currentPointsPerCny, row.currentUnitCredits, row.confirmation, row.source?.type, row.source?.reference,
     row.source?.confirmedAt, row.source?.confirmedBy.id, row.legacyRounding, row.legacyPointsPerUsd,
     row.exchangeRate?.sourceCurrency, row.exchangeRate?.direction, row.exchangeRate?.rate,
     row.exchangeRate?.effectiveFrom, row.exchangeRate?.revision, row.exchangeRate?.source.type,
-    row.exchangeRate?.source.reference, row.exchangeRate?.confirmedAt, row.exchangeRate?.confirmedBy.id])].map(values => values.map(csvCell).join(',')).join('\r\n');
+    row.exchangeRate?.source.reference, row.exchangeRate?.confirmedAt, row.exchangeRate?.confirmedBy.id,
+    data.authoring?.revision, data.authoring?.globalPointsPerCny, row.authoringRateMode, row.authoringEntry?.sourceKind,
+    row.authoringEntry?.evidence ? pricingCanonical(row.authoringEntry.evidence) : '', row.authoringEntry?.baseRelation ? pricingCanonical(row.authoringEntry.baseRelation) : ''])].map(values => values.map(csvCell).join(',')).join('\r\n');
 }
 
 export async function resolvePricingCharge(identity: PricingAdminIdentity, client: PricingClient = prisma): Promise<{
@@ -619,7 +864,7 @@ export async function resolvePricingCharge(identity: PricingAdminIdentity, clien
     && rule.identity.modelId === identity.modelId && rule.identity.unit === identity.unit)) {
     throw new PricingAdminServiceError('该收费作用域已采用新策略，但当前规格没有唯一规则，未回退旧价', 409, 'pricing_scope_unmatched');
   }
-  await assertPricingCatalogIdentity(identity, client);
+  await assertPricingCatalogIdentity(identity, client, Boolean(adopted && ['follow', 'custom'].includes(adopted.mode) && adopted.baseCny && adopted.source));
   if (!adopted) return null;
   const state = await readState(client);
   const catalogRow = selectPricingRule(state.catalog.rows, identity);

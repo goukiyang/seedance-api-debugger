@@ -471,7 +471,7 @@ async function buildToolFlowQuote(
       user as unknown as ImageStudioIdentity, { cloneReferenceAssets: false, allowUnknownModel: true, allowUnknownPrice: true });
     const api = await getImageGenerationSettingsForModel(config.model, tx);
     let pricing: Awaited<ReturnType<typeof withImagePricing>>;
-    try { pricing = await withImagePricing(api, config.model, tx); }
+    try { pricing = await withImagePricing(api, config.model, tx, undefined, { quality: config.quality, ratio: config.aspectRatio }); }
     catch (error) { throw new AuthError(error instanceof Error ? error.message : '收费规则暂不可用，请重新报价', 409); }
     if (pricing.quote?.charge.identity.billingMode === 'actual'
       || pricing.settings.modelCapabilities[config.model as keyof typeof pricing.settings.modelCapabilities]?.billingMode === 'actual') {

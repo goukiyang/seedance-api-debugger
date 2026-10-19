@@ -8,6 +8,7 @@ import {
 } from '@/lib/projects/permissions';
 import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
 import { quoteVideoPricing, requireVideoPricingRevision, videoPricingError } from '@/lib/pricing/video';
+import { resolveVideoPricingContext, savedVideoPricingContextInput } from '@/lib/pricing/video-context';
 import { uniquePreserveOrder } from '@/lib/reference-albums/permissions';
 import {
   PAID_GENERATION_INTENT_HEADER,
@@ -143,9 +144,10 @@ export async function POST(
       return NextResponse.json({ error: '原请求尚未确认失败，请查询原任务；未重新生成' }, { status: 409 });
     }
     const requested = await request.json().catch(() => ({})) as Record<string, unknown>;
+    const pricingContext = await resolveVideoPricingContext(user, savedVideoPricingContextInput(originalTask));
     const pricing = await quoteVideoPricing({ provider: originalTask.provider === 'h3' ? 'h3' : 'seedance',
       model: originalTask.model || '', resolution: originalTask.resolution || asString(paramsJson.resolution, '480p'),
-      duration: originalTask.duration || asNumber(paramsJson.duration, 5) });
+      duration: originalTask.duration || asNumber(paramsJson.duration, 5), context: pricingContext });
     requireVideoPricingRevision(pricing, requested.pricing_revision);
     const referenceImageIds = uniquePreserveOrder(parseJsonArray(originalTask.reference_image_ids));
     const referenceImageUrls = parseJsonArray(originalTask.reference_image_urls).slice(0, 9);
@@ -189,6 +191,8 @@ export async function POST(
       model: originalTask.model,
       idempotency_key: `video-retry:${originalTask.id}`,
       pricing_revision: requested.pricing_revision,
+      pricing_quote_token: requested.pricing_quote_token,
+      ...(requested.pricing_quote_token ? { pricing_fingerprint_version: 2 } : {}),
       max_estimated_cost: requested.max_estimated_cost,
       prompt: originalTask.prompt,
       generation_mode: originalTask.generation_mode,

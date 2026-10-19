@@ -6,29 +6,50 @@ import { getImageGenerationChannelOptions, getImageGenerationChannels, selectPri
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import type { ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import type { ImageBillingContract } from '@/lib/image-studio/billing-contract';
-import { quotePricingCharge } from './charge';
+import { quotePricingCharge, type FrozenPricingCharge } from './charge';
 import { assertPricingImageConsumerReady } from './runtime';
 import type { PricingAdminIdentity } from './admin-contract';
 import { isPricingItemUnavailable, PricingItemUnavailableError } from './item-unavailable';
 import { assertPricingImageAvailability } from './image-availability';
+import { normalizePricingImageSpecifications, type PricingImageSpecifications } from './pricing-authoring-contract';
+import { PRICING_POLICY_KEY } from './admin-contract';
+import { PricingAdminServiceError } from './policy';
+import type { PricingImageChannelOptions } from './image-option-contract';
+import { pricingCanonical } from './catalog';
 
 type Client = Prisma.TransactionClient | typeof prisma;
 
-export async function pricingImageIdentity(settings: ImageGenerationResolvedSettings, model: string, client: Client = prisma): Promise<PricingAdminIdentity> {
+/** A refreshed quote may change its issue time, never its accepted pricing inputs. */
+export function samePricingImageCharge(left: FrozenPricingCharge | undefined, right: FrozenPricingCharge | undefined) {
+  return left && right ? pricingCanonical({ ...left, issuedAt: null }) === pricingCanonical({ ...right, issuedAt: null }) : left === right;
+}
+
+export async function pricingImageIdentity(settings: ImageGenerationResolvedSettings, model: string, client: Client = prisma,
+  specifications: PricingImageSpecifications = {}): Promise<PricingAdminIdentity> {
   const capability = settings.modelCapabilities[model as ImageStudioModel];
   const channelId = settings.channelId === 'original' ? model.startsWith('gemini-') ? 'banana' : 'shared' : settings.channelId;
   const actual = capability?.billingMode === 'actual' || settings.channelId === 'original'
     && settings.provider === 'musk' && Boolean(settings.api_key && settings.base_url)
     && await readPricingImageActualReadiness(settings, model, client);
-  return { kind: 'image', channelId, modelId: model, billingMode: actual ? 'actual' : 'fixed', unit: 'image', specifications: {} };
+  return { kind: 'image', channelId, modelId: model, billingMode: actual ? 'actual' : 'fixed', unit: 'image', specifications: normalizePricingImageSpecifications(specifications) };
 }
 
 /** Overlay only the charge fields. Transport, enablement and explicit capability limits stay authoritative. */
 export async function withImagePricing(settings: ImageGenerationResolvedSettings, model: string,
-  client: Client = prisma, accepted?: ImageBillingContract) {
+  client: Client = prisma, accepted?: ImageBillingContract, specifications: PricingImageSpecifications = {}) {
   const capability = settings.modelCapabilities[model as ImageStudioModel];
   const channelId = settings.channelId === 'original' ? model.startsWith('gemini-') ? 'banana' : 'shared' : settings.channelId;
-  const quote = accepted ? null : await quotePricingCharge(await pricingImageIdentity(settings, model, client), '1', client);
+  let quote: Awaited<ReturnType<typeof quotePricingCharge>> = null;
+  if (!accepted) {
+    const identity = await pricingImageIdentity(settings, model, client, specifications);
+    try { quote = await quotePricingCharge(identity, '1', client); }
+    catch (error) {
+      if (error instanceof PricingAdminServiceError && error.code === 'pricing_scope_unmatched') {
+        throw new PricingItemUnavailableError(identity, 'price_unconfigured', '当前图片规格尚未设置价格，请调整规格或联系管理员；未使用其他规格的价格');
+      }
+      throw error;
+    }
+  }
   const charge = accepted?.pricing || quote?.charge;
   if (!charge) return { settings, quote };
   if (charge.identity.channelId !== channelId || charge.identity.modelId !== model) throw new Error('Frozen image pricing identity mismatch');
@@ -39,29 +60,62 @@ export async function withImagePricing(settings: ImageGenerationResolvedSettings
 }
 
 export async function resolvePricingImageCandidate(channels: ImageGenerationChannels, model: ImageStudioModel,
-  requestedChannelId: string | undefined, client: Client = prisma) {
+  requestedChannelId: string | undefined, client: Client = prisma, specifications: PricingImageSpecifications = {}) {
   const channelId = await resolveImageGenerationRequestChannel(model, requestedChannelId, client) || 'original';
   if (!['original', 'shared', 'banana', 'fluxport'].includes(channelId)
     && !/^image-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(channelId)) throw new Error('图片通道身份无效');
   if (channelId.startsWith('image-') && !channels.managed.some(item => item.channelId === channelId && !item.deleted)) {
-    const identity: PricingAdminIdentity = { kind: 'image', channelId, modelId: model, billingMode: 'fixed', unit: 'image', specifications: {} };
+    const identity: PricingAdminIdentity = { kind: 'image', channelId, modelId: model, billingMode: 'fixed', unit: 'image', specifications: normalizePricingImageSpecifications(specifications) };
     return { identity, settings: null, unavailable: new PricingItemUnavailableError(identity, 'configuration_missing', '该型号的供应商已归档或不存在，未切换供应商') };
   }
   const settings = await selectPricingImageGenerationSettings(channels, model, channelId, client);
-  return { settings, identity: await pricingImageIdentity(settings, model, client), unavailable: null };
+  return { settings, identity: await pricingImageIdentity(settings, model, client, specifications), unavailable: null };
+}
+
+export async function readPricingImageScopes(client: Client = prisma): Promise<PricingAdminIdentity[]> {
+  const policyRecord = await client.platformSetting.findUnique({ where: { key: PRICING_POLICY_KEY } });
+  if (!policyRecord) return [];
+  const policy = JSON.parse(policyRecord.value_json) as { rules: Array<{ identity: PricingAdminIdentity }> };
+  return policy.rules.filter(rule => rule.identity.kind === 'image').map(rule => ({ ...rule.identity,
+    specifications: normalizePricingImageSpecifications(rule.identity.specifications) }));
 }
 
 /** Menu projections consume only typed, identity-matched unavailability, never general failures. */
-export async function getPricingImageChannelOptions(client: Client = prisma): Promise<Awaited<ReturnType<typeof getImageGenerationChannelOptions>>> {
+export async function getPricingImageChannelOptions(client: Client = prisma): Promise<PricingImageChannelOptions> {
   if (client === prisma) return prisma.$transaction(tx => getPricingImageChannelOptions(tx), { maxWait: 10000, timeout: 30000 });
-  const options = await getImageGenerationChannelOptions(client, true);
+  const options: PricingImageChannelOptions = await getImageGenerationChannelOptions(client, true);
   const channels = await getImageGenerationChannels(client, true);
+  const scopes = await readPricingImageScopes(client);
   for (const item of options.items.filter(channel => channel.id !== 'original')) for (const model of Object.keys(item.models) as ImageStudioModel[]) {
     const original = item.models[model];
     if (!original) continue;
     const candidate = await resolvePricingImageCandidate(channels, model, item.id, client);
     try {
       if (candidate.unavailable) throw candidate.unavailable;
+      const modelScopes = scopes.filter(identity => identity.channelId === candidate.identity.channelId && identity.modelId === model
+        && identity.billingMode === candidate.identity.billingMode && identity.unit === candidate.identity.unit);
+      if (modelScopes.some(identity => Object.keys(identity.specifications).length > 0)) {
+        let available = false;
+        let unavailable: PricingItemUnavailableError | undefined;
+        // Probe real adopted scopes only. No invented default or zero-price capability is used.
+        for (const identity of modelScopes) {
+          try {
+            const priced = await withImagePricing(candidate.settings!, model, client, undefined, identity.specifications);
+            assertPricingImageAvailability(priced.settings, identity);
+            available = true;
+            break;
+          } catch (error) {
+            if (!isPricingItemUnavailable(error, identity)) throw error;
+            unavailable = error;
+          }
+        }
+        if (!available) throw new PricingItemUnavailableError(candidate.identity, unavailable?.reason || 'price_unconfigured',
+          unavailable?.message || '该型号尚无可用的规格价格');
+        const actual = candidate.identity.billingMode === 'actual';
+        item.models[model] = { ...original, billingMode: candidate.identity.billingMode, ready: true,
+          fixedPoints: null, disabledReason: null, actualQuoteRequired: actual, pricingBySpecification: true };
+        continue;
+      }
       const priced = await withImagePricing(candidate.settings!, model, client);
       const capability = assertPricingImageAvailability(priced.settings, candidate.identity);
       const actual = candidate.identity.billingMode === 'actual';
@@ -72,7 +126,8 @@ export async function getPricingImageChannelOptions(client: Client = prisma): Pr
         actualQuoteRequired: actual };
     } catch (error) {
       if (!isPricingItemUnavailable(error, candidate.identity)) throw error;
-      item.models[model] = { ...original, ready: false, fixedPoints: null, actualQuoteRequired: false, disabledReason: error.message };
+      item.models[model] = { ...original, ready: false, fixedPoints: null, actualQuoteRequired: false,
+        pricingBySpecification: false, disabledReason: error.message };
     }
   }
   const original = options.items.find(item => item.id === 'original')!;

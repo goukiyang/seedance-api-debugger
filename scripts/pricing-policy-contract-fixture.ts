@@ -10,7 +10,7 @@ import { pricingRuntimeSourceFiles } from '../src/lib/pricing/runtime';
 type Check = { id: string; assertions: number; evidence: string[]; completed: true };
 const root = fs.realpathSync(process.cwd());
 const prepared = readPricingFixtureInputs(root);
-const expected = Array.from({ length: 24 }, (_, index) => `G${String(index + 1).padStart(2, '0')}`);
+const expected = Array.from({ length: 30 }, (_, index) => `G${String(index + 1).padStart(2, '0')}`);
 const sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 const startedAt = Date.now();
 const runId = process.env.PRICING_GATE_RUN_ID;
@@ -59,6 +59,10 @@ function run(kind: string, consume: (result: ReturnType<typeof JSON.parse>) => v
     const databasePath = path.join(unit, `pricing-${kind}-fixture.db`);
     fs.copyFileSync(schemaPath, databasePath, fs.constants.COPYFILE_EXCL); fs.chmodSync(databasePath, 0o600);
     const env = { ...clean, DATABASE_URL: `file:${databasePath}`, PRICING_ADMIN_FIXTURE_DB: databasePath,
+      PRICING_AUTHORING_FIXTURE_DB: databasePath,
+      PRICING_AUTHORING_RUNTIME_ROOT: prepared.roots.core,
+      PRICING_VIDEO_CONTEXT_FIXTURE_DB: databasePath,
+      PRICING_REQUEST_STATUS_FIXTURE_DB: databasePath,
       PRICING_VIDEO_FIXTURE_DB: databasePath, PRICING_CORE_FIXTURE_DB: databasePath,
       PRICING_CORE_RUNTIME_ROOT: prepared.roots.core, PRICING_TOOLFLOW_RUNTIME_ROOT: prepared.roots.toolflow,
       PRICING_PARENT_RUNTIME_ROOT: prepared.roots.legacy,
@@ -183,6 +187,20 @@ assert.equal(toolflow.providerCalls, 0); assert.ok(toolflow.evidence?.length);
 for (const id of ['G11', 'G17', 'G21']) complete(id, 1, [`Real toolflow runtime executed: ${transcripts.at(-1)!.log}`, ...toolflow.evidence, toolflow.permissionEvidence]);
 });
 else outcomes.push({ kind: 'toolflow', completed: false });
+for (const [kind, fixture, id] of [
+  ['authoring', 'pricing-authoring-contract', 'G25'],
+  ['authoring-ui', 'pricing-authoring-ui-contract', 'G26'],
+  ['image-spec', 'pricing-image-spec-contract', 'G27'],
+  ['video-scope-client', 'pricing-video-scope-client', 'G28'],
+  ['video-context', 'pricing-video-context-contract', 'G29'],
+  ['request-status', 'pricing-request-status-contract', 'G30'],
+] as const) run(kind, result => {
+  assert.equal(result.fixture, fixture);
+  assert.equal(result.completed, true);
+  assert.ok(Array.isArray(result.evidence) && result.evidence.length);
+  complete(id, Number.isSafeInteger(result.assertions) && result.assertions > 0 ? result.assertions : 1,
+    [`Actual isolated ${kind} fixture completed: ${transcripts.at(-1)!.log}`, ...result.evidence]);
+});
 try {
   assertPricingFixtureInputsUnchanged(prepared);
   for (const [file, checksum] of Object.entries(sourceSha256)) assert.equal(sha(fs.readFileSync(path.join(root, file))), checksum, `Candidate changed during pricing fixture: ${file}`);

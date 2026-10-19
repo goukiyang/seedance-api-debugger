@@ -49,6 +49,8 @@ export default function PricingHistory({ snapshot, onClose, onRestore, onUnautho
       {history.entries.map(entry => <section key={entry.revisionId}>
         <h3>{entry.actor.displayName} · <RelativeTime value={entry.createdAt} /></h3>
         <p className={styles.muted}>{entry.action === 'unify' ? '统一费率' : entry.action === 'restore' ? '恢复所选费率' : '保存调整'} · {entry.revisionId}</p>
+        {entry.authoringBefore?.globalPointsPerCny !== entry.authoringAfter?.globalPointsPerCny && <p>统一换算：{entry.authoringBefore?.globalPointsPerCny ?? '未设置'} → {entry.authoringAfter?.globalPointsPerCny ?? '未设置'} 点/元</p>}
+        {entry.authoringBefore && entry.authoringAfter && JSON.stringify(entry.authoringBefore.enhanceGroup) !== JSON.stringify(entry.authoringAfter.enhanceGroup) && <p>视频增强基础点价或系数已调整</p>}
         {(['site_base_cny', 'supplier_cost_cny'] as const).filter(basis => entry.standardsBefore[basis] !== entry.standardsAfter[basis]).map(basis => <label key={basis} className={styles.check}>
           <input type="checkbox" checked={selected.revision === entry.revisionId && selected.standards.includes(basis)} onChange={() => toggle(entry, basis, true)} />
           {basis === 'site_base_cny' ? '站内基价标准' : '供应商成本标准'}：{entry.standardsBefore[basis] || '未设置'} → {entry.standardsAfter[basis] || '未设置'} 点/元
@@ -58,7 +60,10 @@ export default function PricingHistory({ snapshot, onClose, onRestore, onUnautho
           return <label key={change.id} className={styles.historyRow}>
             <input type="checkbox" disabled={!exists} checked={selected.revision === entry.revisionId && selected.rows.includes(change.id)} onChange={() => toggle(entry, change.id)} />
             <span>{change.label}<small>{change.before.currentPointsPerCny || '未设置'} → {change.after.currentPointsPerCny || '未设置'} 点/元 · {change.before.currentUnitCredits ?? '待核'} → {change.after.currentUnitCredits ?? '待核'} 点{!exists ? ' · 当前对象不存在，无法恢复' : ''}</small>
+              {change.specifications && <small>适用规格：{Object.values(change.specifications).join(' / ') || '通用规格'}</small>}
               {change.before.baseCny !== change.after.baseCny && <small>基价 ¥{change.before.baseCny ?? '待核'} → ¥{change.after.baseCny ?? '待核'}</small>}
+              {change.before.authoringRateMode !== change.after.authoringRateMode && <small>点元关系：{change.before.authoringRateMode === 'follow_global' ? '跟随统一' : change.before.authoringRateMode === 'legacy_follow' ? '旧标准' : '单独设置'} → {change.after.authoringRateMode === 'follow_global' ? '跟随统一' : change.after.authoringRateMode === 'legacy_follow' ? '旧标准' : '单独设置'}</small>}
+              {JSON.stringify(change.before.authoringEntry) !== JSON.stringify(change.after.authoringEntry) && <small>基价关系或来源依据已调整，恢复预览会重核适用关系。</small>}
             </span>
           </label>;
         })}

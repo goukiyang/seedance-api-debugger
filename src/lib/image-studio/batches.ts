@@ -26,8 +26,8 @@ import { captureImageGenerationChannel, getImageGenerationSettingsForModel, isMu
 import { QueueCapacityError, QueueMaintenanceError, reserveImageStudioQueueCapacity } from './queue-capacity';
 import { PRICING_BATCH_PREFIX, PRICING_BATCH_ITEM_PREFIX, publicPricingTaskState, studioTaskState, studioTaskStates } from './pricing-state';
 import { assertPricingImageConsumerReady } from '@/lib/pricing/runtime';
-import { quotePricingCharge } from '@/lib/pricing/charge';
-import { withImagePricing } from '@/lib/pricing/image';
+import { samePricingImageCharge, withImagePricing } from '@/lib/pricing/image';
+import { normalizeImageResolution } from '@/lib/image-generation/resolution';
 import { addCredits, creditCents, sumCredits } from '@/lib/credits/precision';
 
 const PREFIX = 'studio_batch_v1:';
@@ -56,6 +56,17 @@ function assertBudgetVersion(value: unknown, contracts?: Array<ImageBillingContr
   const step = studioBatchBudgetPrecision(pricing?.revision, precision, committedCredits);
   if (!boundedBudget(value) || creditCents(Number(value)) % Math.round(step * 100) !== 0) {
     throw new StudioError(step === 1 ? '旧合同批次预算请填写整数点数' : step === 0.1 ? '本次新合同预算最多保留 1 位小数' : '含旧合同的本批预算最多保留 2 位小数', 409);
+  }
+}
+// Recheck only an unaccepted quote; accepted parents and later children keep their frozen contract.
+async function assertUnacceptedBatchPricing(tx: Prisma.TransactionClient, api: ImageGenerationResolvedSettings,
+  model: string, contracts: ImageBillingContract[], expectedRevision: unknown, specifications: { quality?: string; resolution?: string; ratio?: string }) {
+  const fresh = await withImagePricing(api, model, tx, undefined, specifications);
+  for (const contract of contracts) {
+    if (!samePricingImageCharge(fresh.quote?.charge, contract.pricing)
+      || contract.pricing && expectedRevision !== contract.pricing.revision) {
+      throw new StudioError('收费合同已变化，请重新获取整批报价；尚未受理新批次', 409);
+    }
   }
 }
 const validId = (id: unknown): id is string => typeof id === 'string' && /^[a-f0-9]{64}$/.test(id);
@@ -138,7 +149,10 @@ async function reconfirmBatchDefinition(tx: Prisma.TransactionClient, batch: Bat
     : await captureImageGenerationChannel(generation.model, effectiveChannelId, tx));
   const rawApi = imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, tx, true, generation.model)
     : await getImageGenerationSettingsForModel(generation.model, tx);
-  const priced = await withImagePricing(rawApi, generation.model, tx, quote?.contracts[0]);
+  const specifications = { quality: generation.quality,
+    resolution: normalizeImageResolution(generation.model, generation.resolution, rawApi.provider), ratio: generationSource.aspectRatio };
+  if (quote) await assertUnacceptedBatchPricing(tx, rawApi, generation.model, quote.contracts, nextBody.pricingRevision, specifications);
+  const priced = await withImagePricing(rawApi, generation.model, tx, quote?.contracts[0], specifications);
   if (priced.quote && !quote) throw new StudioError('请先确认未受理条目的当前整批报价', 409);
   const api = priced.settings;
   const capability = imageChannel && imageChannel.channelId !== 'original'
@@ -226,15 +240,18 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
       { key: { startsWith: `${PRICING_BATCH_PREFIX}${ownerId}:` } },
     ], AND: [{ OR: ['preparing', 'ready', 'paused', 'blocked', 'needs-confirmation'].map(state => ({ value_json: { contains: `"state":"${state}"` } })) }] } });
     if (active >= STUDIO_BATCH_LIMITS.activeBatches) throw new StudioError('最多保留 5 个未结束批次，请先处理原批次', 429);
-    const workspace = await tx.imageStudioModule.findFirst({ where: { id: body.moduleId as string, owner_id: ownerId }, select: { name: true, model: true } });
+    const workspace = await tx.imageStudioModule.findFirst({ where: { id: body.moduleId as string, owner_id: ownerId },
+      select: { name: true, model: true, quality: true, resolution: true, prices_json: true } });
     if (!workspace) throw new StudioError('模板不存在或无权使用', 404);
     const settings = await getImageStudioSettings();
     const sharedUse = await resolveOwnedStudioTaskSharedUse(ownerId, body.moduleId as string, input.sharedLive, tx);
     if (sharedUse) { await assertSharedStudioWorkerReady(tx); shared.sharedLive = sharedUse.definition.intent; }
     const sharedGeneration = sharedUse ? studioSharedGenerationSource(sharedUse, input) : null;
-    const generationSource = sharedGeneration || { ...workspace, ...(input.model ? { model: input.model } : {}) };
+    const generationSource = sharedGeneration || { ...workspace, ...(input.model ? { model: input.model } : {}),
+      ...(input.quality !== undefined ? { quality: input.quality } : {}) };
     const billingQuote = body.batchQuoteId ? await consumeBatchQuote(tx, ownerId, body) : null;
-    const model = resolveStudioModuleGenerationConfig(generationSource, settings).model;
+    const generation = resolveStudioModuleGenerationConfig(generationSource, settings);
+    const model = generation.model;
     const explicitChannelId = typeof body.channelId === 'string' ? body.channelId : undefined;
     const effectiveChannelId = explicitChannelId === undefined && (billingQuote?.imageChannel || input.imageChannel)
       ? (billingQuote?.imageChannel || input.imageChannel)!.channelId
@@ -243,19 +260,24 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
       && effectiveChannelId !== input.imageChannel.channelId) {
       throw new StudioError('当前型号默认图片通道已变化，请重新报价', 409);
     }
+    const imageChannel = billingQuote?.imageChannel || input.imageChannel || (effectiveChannelId === 'original' ? undefined
+      : await captureImageGenerationChannel(model, effectiveChannelId, tx));
+    if (imageChannel && imageChannel.channelId !== effectiveChannelId) throw new StudioError('本批报价与图片通道不匹配', 409);
+    const currentApi = imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, tx, true, model)
+      : await getImageGenerationSettingsForModel(model, tx);
+    const specifications = { quality: generation.quality,
+      resolution: normalizeImageResolution(model, sharedGeneration?.resolution || input.resolution || generation.resolution, currentApi.provider),
+      ratio: sharedGeneration?.aspectRatio || input.aspectRatio || 'auto' };
+    if (billingQuote) await assertUnacceptedBatchPricing(tx, currentApi, model, billingQuote.contracts, body.pricingRevision, specifications);
+    const priced = await withImagePricing(currentApi, model, tx, billingQuote?.contracts[0], specifications);
+    if (priced.quote && !billingQuote) throw new StudioError('当前收费规则需要有效整批报价；尚未创建批次', 409);
     if (!billingQuote && effectiveChannelId === 'original') {
-      const api = await getImageGenerationSettingsForModel(model, tx);
-      if ((await imageBillingReady(imageBillingScope(api), model, tx)).ready) throw new StudioError('当前模型需要确认有效整批报价，尚未创建或派发生成', 409);
+      if ((await imageBillingReady(imageBillingScope(priced.settings), model, tx)).ready) throw new StudioError('当前模型需要确认有效整批报价，尚未创建或派发生成', 409);
     }
-    let unitCredits = billingQuote?.unitCredits ?? settings.prices[model];
+    let unitCredits = billingQuote?.unitCredits ?? generation.prices[model];
     if (effectiveChannelId !== 'original') {
-      const imageChannel = billingQuote?.imageChannel || input.imageChannel
-        || await captureImageGenerationChannel(model, effectiveChannelId, tx);
-      if (imageChannel.channelId !== effectiveChannelId) throw new StudioError('本批报价与图片通道不匹配', 409);
-      const api = (await withImagePricing(await resolveImageGenerationChannelSnapshot(imageChannel, tx, true, model), model, tx, billingQuote?.contracts[0])).settings;
-      const validation = validateImageGenerationChannel(api, { model, quality: sharedGeneration ? resolveStudioModuleGenerationConfig(generationSource, settings).quality : input.quality || resolveStudioModuleGenerationConfig(generationSource, settings).quality,
-        resolution: sharedGeneration ? resolveStudioModuleGenerationConfig(generationSource, settings).resolution : input.resolution || resolveStudioModuleGenerationConfig(generationSource, settings).resolution,
-        ratio: sharedGeneration?.aspectRatio || input.aspectRatio || 'auto', referenceCount: input.referenceIds.length });
+      const api = priced.settings;
+      const validation = validateImageGenerationChannel(api, { model, ...specifications, referenceCount: input.referenceIds.length });
       const capability = api.modelCapabilities[model as keyof typeof api.modelCapabilities];
       if (!validation.ok) throw new StudioError(validation.error, 409);
       if (capability?.billingMode === 'actual') {
@@ -267,8 +289,6 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
       shared.imageChannel = imageChannel;
     }
     if (billingQuote?.imageChannel && effectiveChannelId === 'original') shared.imageChannel = billingQuote.imageChannel;
-    if (!billingQuote && await quotePricingCharge({ kind: 'image', channelId: effectiveChannelId === 'original' ? model.startsWith('gemini-') ? 'banana' : 'shared' : effectiveChannelId,
-      modelId: model, billingMode: 'fixed', unit: 'image', specifications: {} }, '1', tx)) throw new StudioError('当前收费规则需要有效整批报价；尚未创建批次', 409);
     assertBudgetVersion(body.budget, billingQuote?.contracts);
     if (unitCredits == null || (billingQuote?.total ?? sumCredits(items.map(() => unitCredits!))) > Number(body.budget)) throw new StudioError('最高预算不足以覆盖本批预计点数');
     const assetIds = Array.from(new Set(items.flatMap(item => item.assetId ? [item.assetId] : [])));

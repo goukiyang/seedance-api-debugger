@@ -652,6 +652,12 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
       return { referenceIds, referencePolicy: canvasImageReferencePolicy(referenceIds, primary ? [primary] : []) };
     };
     const settings = { ...mediaSettings };
+    const quotedProjectId = documentRef.current!.project_id;
+    const quotedVideoCardId = snapshot.current!.context?.video_card_id;
+    const assertQuoteContext = () => {
+      assertCurrentContext();
+      if (documentRef.current?.project_id !== quotedProjectId || snapshot.current?.context?.video_card_id !== quotedVideoCardId) throw Error('保存位置已变化，请重新报价；后续项未派发');
+    };
     if (kind === 'image') {
       if (channelIssue) throw Error(channelIssue);
       selected.forEach(shot => {
@@ -683,18 +689,24 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
         const imageInput = { ...input, ...(billing.imageChannel ? { imageChannel: billing.imageChannel } : {}),
           billingQuoteId: billing.billingQuoteId, pricingRevision: billing.pricingRevision,
           maxEstimatedCost: billing.estimatedCredits };
-        return { shot, price: billing.estimatedCredits, pricingRevision: billing.pricingRevision,
+        return { shot, price: billing.estimatedCredits, pricingRevision: billing.pricingRevision, pricingQuoteToken: undefined,
           imageInput, expiresAt: billing.expiresAt, actual: billing.billingMode === 'actual' };
       }
-      const quote = await request<{ estimatedCost: number; pricing_revision: string | null }>(`/api/tasks/estimate?${new URLSearchParams({ provider: settings.provider, model: settings.videoModel, resolution: settings.videoResolution, duration: String(shot.durationSeconds) })}`);
+      const quote = await request<{ estimatedCost: number; pricing_revision: string | null; pricing_quote_token?: string }>(settings.provider === 'volcengine_ip'
+        ? `/api/tasks/estimate?${new URLSearchParams({ provider: settings.provider, model: settings.videoModel, resolution: settings.videoResolution, duration: String(shot.durationSeconds) })}` : '/api/tasks/estimate', settings.provider === 'volcengine_ip' ? undefined : {
+        provider: settings.provider, model: settings.videoModel, resolution: settings.videoResolution, duration: shot.durationSeconds,
+        project_id: quotedProjectId, video_card_id: quotedVideoCardId, ratio: settings.ratio, draft: false, reference_video_urls: [],
+      });
+      assertQuoteContext();
       if (!validVideoPricingAmount(quote.estimatedCost) || quote.pricing_revision !== null && typeof quote.pricing_revision !== 'string') throw Error('视频报价不可用，未派发');
-      return { shot, price: quote.estimatedCost, pricingRevision: quote.pricing_revision, imageInput: undefined, expiresAt: undefined, actual: false };
+      return { shot, price: quote.estimatedCost, pricingRevision: quote.pricing_revision, pricingQuoteToken: quote.pricing_quote_token, imageInput: undefined, expiresAt: undefined, actual: false };
     };
     const quotes: Awaited<ReturnType<typeof prepareQuote>>[] = [];
     for (const shot of selected) quotes.push(await prepareQuote(shot));
     const total = sumCredits(quotes.map(item => item.price));
     if (!validVideoPricingAmount(total) || !await confirm(`${quotes.map(item => `${item.shot.title}：${item.actual ? '最高预留 ' : ''}${item.price} 点`).join('\n')}\n本次 ${selected.length} ${kind === 'image' ? '张图片' : '个视频'}，合计${quotes.some(item => item.actual) ? '最高授权' : ''} ${total} 点。已成功或受理未知的任务不重跑。`, { title: kind === 'image' ? '生成分镜图' : '生成视频', confirmLabel: `确认 ${total} 点` })) return;
-    for (const { shot, price, pricingRevision, imageInput, expiresAt } of quotes) {
+    for (const { shot, price, pricingRevision, imageInput, expiresAt, pricingQuoteToken } of quotes) {
+      assertQuoteContext();
       if (!storyGenerationPrompt(shot, kind).trim()) throw Error(`${shot.title}缺少生成要求，后续项未派发`);
       if (kind === 'image') {
         if (!imageInput || !expiresAt || Date.parse(expiresAt) <= Date.now()) throw Error('图片报价已过期，请重新报价并确认；后续项未派发');
@@ -719,14 +731,16 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
         await mediaNode(shot);
         const videoId = current.current.mediaNodes[shot.id], requestId = crypto.randomUUID();
         const references = [current.current.references[shot.id], ...boundReferences(shot)].filter((item): item is PickerItem => Boolean(item));
-        const input = { prompt: storyGenerationPrompt(shot, 'video'), model: settings.videoModel, generation_mode: 'all_in_one_reference',
+        const input = { prompt: storyGenerationPrompt(shot, 'video'), model: settings.videoModel,
+          ...(settings.provider === 'volcengine_ip' ? {} : { provider: settings.provider }), draft: false, reference_video_urls: [], generation_mode: 'all_in_one_reference',
           ratio: settings.ratio, resolution: settings.videoResolution, duration: shot.durationSeconds, seed: -1,
           generate_audio: false, return_last_frame: false, watermark: false,
-          project_id: documentRef.current!.project_id, video_card_id: snapshot.current!.context?.video_card_id,
+          project_id: quotedProjectId, video_card_id: quotedVideoCardId,
           reference_image_ids: Array.from(new Set(references.map(item => item.referenceImageId).filter(Boolean))),
           idempotency_key: `${videoId}:${requestId}`, source_request_id: `ultimate_canvas:${videoId}:${requestId}`,
           client_name: 'ultimate_canvas', final_prompt_snapshot: storyGenerationPrompt(shot, 'video'), prompt_user_edited: true, max_estimated_cost: price,
           ...(pricingRevision ? { pricing_revision: pricingRevision } : {}),
+          ...(pricingQuoteToken ? { pricing_quote_token: pricingQuoteToken, pricing_fingerprint_version: 2 } : {}),
           source_metadata: { source: 'ultimate_canvas', provider: settings.provider, canvas_document_id: documentId, canvas_node_id: videoId, mode: references.length ? 'image-to-video' : 'text-to-video' } };
         const generationPayload = { kind: 'video', nodeId: videoId, requestId, prompt: input.prompt, settings: { model: settings.videoModel, provider: settings.provider, ratio: settings.ratio, duration: shot.durationSeconds, resolution: settings.videoResolution }, mode: references.length ? 'image-to-video' : 'text-to-video' };
         change({ ...current.current, videoRuns: { ...current.current.videoRuns, [shot.id]: { requestId, status: 'unconfirmed', provider: settings.provider } } });
@@ -738,7 +752,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
             node.data.videoSubmission = { requestId, state: 'unconfirmed', userId, documentId, projectId: documentRef.current!.project_id, cardId: graph.context?.video_card_id, input, generationPayload };
             node.data.generationStatus = 'unconfirmed';
           });
-          assertCurrentContext();
+          assertQuoteContext();
           sent = true;
           const data = await request<{ id?: string; task_id?: string; provider_task_id?: string | null; local_status?: string; status?: string; submission_unconfirmed?: boolean; error_code?: string | null }>(settings.provider === 'volcengine_ip' ? '/api/ip/tasks/create' : '/api/tasks/create', input);
           const taskId = data.task_id || data.id;

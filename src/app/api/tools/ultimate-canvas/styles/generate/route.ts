@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
     const imageChannel = suppliedImageChannel || (effectiveChannelId === 'original' ? undefined : await captureImageGenerationChannel(generation.model, effectiveChannelId));
     const rawApiSettings = imageChannel?.channelId === 'original' ? await getImageGenerationSettingsForModel(generation.model)
       : imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, generation.model) : await getImageGenerationSettingsForModel(generation.model);
-    const priced = await withImagePricing(rawApiSettings, generation.model);
+    const priced = await withImagePricing(rawApiSettings, generation.model, prisma, undefined, { quality, resolution, ratio: aspectRatio });
     const apiSettings = priced.settings;
     let unitCredits = currentSettings.prices[generation.model];
     let channelActual = false;

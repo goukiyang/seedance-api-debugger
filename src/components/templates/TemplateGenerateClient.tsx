@@ -8,7 +8,8 @@ import { useSearchParams } from 'next/navigation';
 import { Check, ChevronDown, Folder, Plus, Trash2 } from 'lucide-react';
 import type { AssetCollection, GenerationMode, VideoDuration, VideoRatio, VideoResolution } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
-import { notifyVideoPricingChanged } from '@/lib/pricing-client';
+import { notifyVideoPricingChanged, requestVideoPricing, requireVideoPricingWithinCeiling, validVideoPricingAmount, videoPricingBusinessInput } from '@/lib/pricing-client';
+import { stableGenerationPayloadJson } from '@/lib/template-studio-video-handoff';
 import type { ComposerSelectOption } from '@/components/ComposerActionBar';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import {
@@ -26,7 +27,7 @@ import { formatProviderUsdCharge } from '@/lib/costs/currency';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { showVideoCardManagementUi } from '@/lib/navigation';
 import { taskDetailHref } from '@/lib/navigation/return-to';
-import { SEEDANCE_VIDEO_MODEL_OPTIONS } from '@/lib/provider/seedance-models';
+import { SEEDANCE_2_5_MODEL_ID, SEEDANCE_VIDEO_MODEL_OPTIONS } from '@/lib/provider/seedance-models';
 import { orderRecentTaskCards, recentTaskHasVisualPreview } from '@/lib/video/recent-task-card-order';
 
 type TemplateGenerateUser = AccountMenuUser & { id: string };
@@ -266,6 +267,22 @@ export function TemplateGenerateClient() {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<CreateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pendingRequestKey, setPendingRequestKey] = useState<string | null>(null);
+  const submitLock = useRef(false);
+  const submissionScope = useRef('');
+  submissionScope.current = JSON.stringify([currentUser?.id, selectedProjectId]);
+  const submissionCard = useRef(selectedVideoCardId); submissionCard.current = selectedVideoCardId;
+  const requestStorageKey = currentUser ? `sd2-template-generation-request-v2:${currentUser.id}` : null;
+  useEffect(() => {
+    if (!requestStorageKey) { setPendingRequestKey(null); return; }
+    try {
+      const raw = sessionStorage.getItem(requestStorageKey);
+      if (!raw) { setPendingRequestKey(null); return; }
+      const pending = JSON.parse(raw) as { key?: unknown };
+      if (typeof pending.key !== 'string' || !pending.key) throw new Error();
+      setPendingRequestKey(pending.key);
+    } catch { setPendingRequestKey('unreadable'); setError('原请求记录无法读取，请先核对原任务；不会新建请求'); }
+  }, [requestStorageKey]);
   const [errorDebug, setErrorDebug] = useState<object | null>(null);
   const [polledResult, setPolledResult] = useState<{
     id: string;
@@ -813,7 +830,7 @@ export function TemplateGenerateClient() {
       rememberVideoCard(selectedProjectId, createdCard.id);
       setVideoCardTitle('');
       setVideoCardObjective('');
-      setVideoCardMessage({ type: 'success', text: '已自动创建视频卡并保存本次生成' });
+      setVideoCardMessage({ type: 'success', text: '视频卡已创建，尚未提交生成' });
       return createdCard;
     } finally {
       setVideoCardBusy(false);
@@ -841,8 +858,30 @@ export function TemplateGenerateClient() {
     setCollections((current) => [data.collection, ...current]);
   }, []);
 
+  const checkPendingRequest = useCallback(async () => {
+    if (!requestStorageKey) throw new Error('请先登录后核对原请求');
+    const scope = submissionScope.current;
+    const raw = sessionStorage.getItem(requestStorageKey);
+    if (!raw) return false;
+    const pending = JSON.parse(raw) as { key?: unknown };
+    if (typeof pending.key !== 'string' || !pending.key) throw new Error('原请求记录无法读取，请先核对原任务');
+    setPendingRequestKey(pending.key);
+    const response = await fetch(`/api/tasks/request-status?${new URLSearchParams({ idempotency_key: pending.key })}`, { cache: 'no-store', headers: { 'x-app-session-user': currentUser!.id } });
+    const data = await readJsonResponse<{ task?: { id: string } | null; error?: string; message?: string }>(response);
+    if (scope !== submissionScope.current) throw new Error('账号或保存位置已变化，请回到原账号核对原请求');
+    if (!response.ok) throw new Error(data.message || data.error || '原请求暂时无法确认，请继续查询原号');
+    if (!data.task?.id) throw new Error('提交结果待确认，请继续查询原请求；不会重新生成');
+    sessionStorage.removeItem(requestStorageKey);
+    setPendingRequestKey(null);
+    setActivePollingTaskIds(current => [data.task!.id, ...current.filter(id => id !== data.task!.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
+    void loadRecentTasksPage(1, 'replace');
+    setError('原请求已受理，已恢复原任务；本次没有再次生成');
+    return true;
+  }, [currentUser, requestStorageKey, loadRecentTasksPage]);
+
   const handleSubmit = useCallback(async (params: {
     pricingRevision?: string | null;
+    pricingQuoteToken?: string;
     quotedEstimatedCost?: number;
     prompt: string;
     generationMode: GenerationMode;
@@ -866,26 +905,37 @@ export function TemplateGenerateClient() {
     provider?: string | null;
     model?: string | null;
     h3LoraId?: string | null;
+    draft?: boolean;
   }) => {
+    if (submitLock.current) return;
+    submitLock.current = true;
     setSubmitting(true);
     setError(null);
     setResult(null);
+    const scope = submissionScope.current;
     let selectedCard: VideoCardOption | null = null;
     try {
+      if (!requestStorageKey) throw new Error('请先登录后生成');
+      if (await checkPendingRequest()) { setSubmitting(false); submitLock.current = false; return; }
+      if (!validVideoPricingAmount(params.quotedEstimatedCost)) throw new Error('请重新获取报价；尚未生成');
       selectedCard = await ensureVideoCardForSubmit();
+      if (scope !== submissionScope.current) throw new Error('账号或保存位置已变化，请重新报价；尚未生成');
     } catch (ensureError) {
       setError(ensureError instanceof Error ? ensureError.message : '请先选择项目和视频卡');
       setSubmitting(false);
+      submitLock.current = false;
       return;
     }
     if (!selectedCard) {
       setError('请先选择项目和视频卡');
       setSubmitting(false);
+      submitLock.current = false;
       return;
     }
     if (selectedCard.status === 'sealed' || selectedCard.status === 'archived') {
       setError('当前视频卡已封板或归档，不能继续生成');
       setSubmitting(false);
+      submitLock.current = false;
       return;
     }
     const selectedH3Model = params.model === H3_INLINE_MODEL_ID;
@@ -902,24 +952,29 @@ export function TemplateGenerateClient() {
     if (selectedH3Model && (!h3Ready || !requestedModel)) {
       setError(`${h3DisabledReason(h3VideoConfig)}，请先点击「检查状态」刷新机器状态。`);
       setSubmitting(false);
+      submitLock.current = false;
       return;
     }
     if (selectedH3Model && !requestedH3LoraId) {
       setError('H3 LoRA 配置缺失，请刷新页面后重试。');
       setSubmitting(false);
+      submitLock.current = false;
       return;
     }
 
     try {
-      const response = await fetch('/api/tasks/create', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tab-id': sessionStorage.getItem('workspace_tab_id') || 'default',
-        },
-        body: JSON.stringify({
-          ...(params.pricingRevision ? { pricing_revision: params.pricingRevision } : {}),
-          ...(typeof params.quotedEstimatedCost === 'number' ? { max_estimated_cost: params.quotedEstimatedCost } : {}),
+      const draft = requestedProvider === 'seedance' && requestedModel === SEEDANCE_2_5_MODEL_ID && params.draft === true;
+      const quote = requireVideoPricingWithinCeiling(await requestVideoPricing({ provider: requestedProvider,
+        model: requestedModel, resolution: params.resolution, duration: params.duration,
+        context: { project_id: selectedProjectId, video_card_id: selectedCard.id, ratio: params.ratio, draft,
+          reference_video_urls: params.referenceVideoUrls || [] } }, undefined, currentUser!.id), params.quotedEstimatedCost);
+      if (scope !== submissionScope.current || (selectedVideoCardId
+        ? submissionCard.current !== selectedCard.id
+        : submissionCard.current && submissionCard.current !== selectedCard.id)) throw new Error('账号或保存位置已变化，请重新报价；尚未生成');
+      const requestBody = {
+          pricing_revision: quote.pricing_revision,
+          ...(quote.pricing_quote_token ? { pricing_quote_token: quote.pricing_quote_token, pricing_fingerprint_version: 2 } : {}),
+          max_estimated_cost: params.quotedEstimatedCost,
           prompt: params.prompt,
           generation_mode: params.generationMode,
           ratio: params.ratio,
@@ -930,7 +985,7 @@ export function TemplateGenerateClient() {
           return_last_frame: params.returnLastFrame,
           watermark: params.watermark,
           resolution_approval_confirmed: params.resolutionApprovalConfirmed,
-          idempotency_key: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+          idempotency_key: crypto.randomUUID(),
           project_id: selectedProjectId,
           video_card_id: selectedCard.id,
           reference_image_ids: params.referenceImageIds || [],
@@ -944,15 +999,30 @@ export function TemplateGenerateClient() {
           prompt_user_edited: params.promptUserEdited === true,
           provider: requestedProvider,
           model: requestedModel || undefined,
+          draft,
           lora_id: selectedH3Model ? requestedH3LoraId : undefined,
-        }),
+      };
+      sessionStorage.setItem(requestStorageKey!, JSON.stringify({ key: requestBody.idempotency_key,
+        fingerprint: stableGenerationPayloadJson(videoPricingBusinessInput(requestBody)) }));
+      setPendingRequestKey(requestBody.idempotency_key);
+      const response = await fetch('/api/tasks/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-app-session-user': currentUser!.id,
+          'x-tab-id': sessionStorage.getItem('workspace_tab_id') || 'default' },
+        body: JSON.stringify(requestBody),
       });
       const data = await readJsonResponse<CreateTaskResponse>(response);
+      if (scope !== submissionScope.current) return;
       if (!response.ok) {
         if (typeof data.code === 'string' && data.code.startsWith('pricing_')) notifyVideoPricingChanged();
         setErrorDebug(data._debug || null);
+        if (response.status < 500 && !(response.status === 409 && data.code?.startsWith('IDEMPOTENCY_'))) {
+          sessionStorage.removeItem(requestStorageKey!); setPendingRequestKey(null);
+        }
         throw new Error(data.message || data.error || `创建失败 (HTTP ${response.status})`);
       }
+      if (!data.id) throw new Error('受理结果待确认，请查询原请求；不会重新生成');
+      sessionStorage.removeItem(requestStorageKey!); setPendingRequestKey(null);
       setResult(data);
       setErrorDebug(null);
       setPolledResult(null);
@@ -1008,6 +1078,7 @@ export function TemplateGenerateClient() {
       if (error instanceof Error) setError(error.message);
     } finally {
       setSubmitting(false);
+      submitLock.current = false;
     }
   }, [
     ensureVideoCardForSubmit,
@@ -1016,6 +1087,10 @@ export function TemplateGenerateClient() {
     selectedH3Lora?.id,
     selectedH3Preset?.id,
     selectedProjectId,
+    selectedVideoCardId,
+    currentUser,
+    requestStorageKey,
+    checkPendingRequest,
   ]);
 
   const showRecentTaskSurface = recentTasksLoadingInitial || recentTasks.length > 0 || Boolean(recentTasksError);
@@ -1025,6 +1100,12 @@ export function TemplateGenerateClient() {
     <div className="composer-page template-generate-page">
       <ComposerTopbar user={currentUser} loadingUser={loadingUser} credits={credits} />
       <main className="composer-main template-generate-main">
+        {pendingRequestKey && <div className="composer-prefill-notice" role="status">
+          提交结果待确认，当前输入已保留。
+          <button type="button" disabled={submitting} onClick={() => {
+            setSubmitting(true); void checkPendingRequest().catch(cause => setError(cause instanceof Error ? cause.message : '原请求暂时无法确认')).finally(() => setSubmitting(false));
+          }}>查询原请求</button>
+        </div>}
         <section className="template-generate-hero" aria-label="模板生成工作台">
           <div>
             <span className="template-generate-kicker">模板生成</span>
@@ -1211,6 +1292,7 @@ export function TemplateGenerateClient() {
         <GenerationComposer
           collections={collections}
           selectedVideoCardId={selectedVideoCardId}
+          pricingProjectId={selectedProjectId}
           canManageTemplates={currentUser?.role === 'admin'}
           templateMode="workbench"
           initialTemplateId={initialTemplateId}

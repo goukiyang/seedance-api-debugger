@@ -6,6 +6,9 @@ import https from 'node:https';
 import { mock } from 'node:test';
 
 async function main() {
+  assert.equal(process.env.NODE_ENV, 'test', 'Pricing fixtures must not import production HD configuration');
+  assert.equal(Object.hasOwn(process.env, 'HD_DERIVATIVES_ROOT'), false, 'Fixture HD output must remain in its isolated scratch root');
+  console.log('Fixture environment isolated before imports: test/no-HD-root');
   const root = fs.realpathSync(process.cwd());
   const kind = process.argv[2];
   const databasePath = process.env.DATABASE_URL?.replace(/^file:/, '');
@@ -18,6 +21,37 @@ async function main() {
   process.on('beforeExit', () => { if (forbiddenCalls) { console.error('Forbidden fixture calls:', forbiddenCalls); process.exitCode = 1; } });
   if (kind === 'admin') { await import('./pricing-admin-contract-fixture'); return; }
   if (kind === 'video') { await import('./pricing-video-contract-fixture'); return; }
+  if (kind === 'video-scope-client') {
+    const { runPricingVideoScopeClientFixture } = await import('./pricing-video-scope-client-fixture');
+    const result = await runPricingVideoScopeClientFixture();
+    assert.equal(forbiddenCalls, 0); console.log(JSON.stringify(result)); return;
+  }
+  if (kind === 'authoring') {
+    const { runPricingAuthoringContractFixture } = await import('./pricing-authoring-contract-fixture');
+    const result = await runPricingAuthoringContractFixture();
+    assert.equal(forbiddenCalls, 0); console.log(JSON.stringify(result)); return;
+  }
+  if (kind === 'video-context') {
+    const { runPricingVideoContextContractFixture } = await import('./pricing-video-context-contract-fixture');
+    const result = await runPricingVideoContextContractFixture();
+    assert.equal(forbiddenCalls, 0); console.log(JSON.stringify(result)); return;
+  }
+  if (kind === 'request-status') {
+    const { runPricingRequestStatusContractFixture } = await import('./pricing-request-status-contract-fixture');
+    const result = await runPricingRequestStatusContractFixture();
+    assert.equal(forbiddenCalls, 0); console.log(JSON.stringify(result)); return;
+  }
+  if (kind === 'authoring-ui') {
+    const { runPricingAuthoringUiContractFixture } = await import('./pricing-authoring-ui-contract-fixture');
+    const result = runPricingAuthoringUiContractFixture();
+    assert.equal(forbiddenCalls, 0); console.log(JSON.stringify({ fixture: 'pricing-authoring-ui-contract', completed: true,
+      evidence: [result.assertions], result })); return;
+  }
+  if (kind === 'image-spec') {
+    const { runPricingImageSpecContractFixture } = await import('./pricing-image-spec-contract-fixture');
+    const result = await runPricingImageSpecContractFixture();
+    assert.equal(forbiddenCalls, 0); console.log(JSON.stringify({ fixture: 'pricing-image-spec-contract', ...result })); return;
+  }
   if (kind === 'core') { await import('./pricing-core-contract-fixture'); return; }
   if (kind === 'ui') {
     const { runPricingAdminUiContractFixture } = await import('./pricing-admin-ui-contract-fixture');

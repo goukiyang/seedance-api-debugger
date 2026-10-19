@@ -55,9 +55,11 @@ export function normalizeImageStudioChannels(value: unknown): ImageStudioChannel
             ready: capability.ready === true,
             disabledReason: typeof capability.disabledReason === 'string' && capability.disabledReason.length <= 240 ? capability.disabledReason : null,
             billingMode: capability.billingMode === 'fixed' || capability.billingMode === 'actual' ? capability.billingMode : null,
-            fixedPoints: Number.isFinite(capability.fixedPoints) && Number(capability.fixedPoints) >= 0 ? Number(capability.fixedPoints) : null,
+            fixedPoints: capability.pricingBySpecification === true ? null
+              : Number.isFinite(capability.fixedPoints) && Number(capability.fixedPoints) >= 0 ? Number(capability.fixedPoints) : null,
             billingSource: typeof capability.billingSource === 'string' && capability.billingSource.length <= 160 ? capability.billingSource : null,
             actualQuoteRequired: capability.actualQuoteRequired === true,
+            ...(capability.pricingBySpecification === true ? { pricingBySpecification: true } : {}),
             ...((model === 'gemini-3-pro-image-preview' || model === 'gemini-nano-banana-2.1') && capability.allowsUnconfirmedParameters === true
               ? { allowsUnconfirmedParameters: true } : {}),
             qualities: stringList(capability.qualities) ?? null,
@@ -123,6 +125,7 @@ export function imageStudioChannelUnitCredits(
   effectiveChannelId: string,
   legacyPrice: number | null | undefined,
 ) {
+  if (capability?.pricingBySpecification) return null;
   const price = legacyRoute ? legacyPrice : capability?.billingMode === 'fixed'
     ? capability.fixedPoints ?? (['shared', 'banana'].includes(effectiveChannelId) ? legacyPrice : null)
     : null;
@@ -190,10 +193,10 @@ export function imageStudioChannelIssue(channel: ImageStudioChannel | undefined,
   if (!channel || !channel.configured || !channel.enabled) {
     return channel?.disabledReason || `${channel?.label || '所选生图通道'}未配置或已停用，请联系管理员。`;
   }
-  if (channel.id === ORIGINAL_IMAGE_CHANNEL_ID && values.legacyRoute !== false) {
+  const capability = imageStudioChannelModel(channel, model);
+  if (channel.id === ORIGINAL_IMAGE_CHANNEL_ID && values.legacyRoute !== false && !capability?.pricingBySpecification) {
     return values.legacyReady === false ? '当前模型的原接口尚未就绪，请联系管理员检查接口。' : null;
   }
-  const capability = imageStudioChannelModel(channel, model);
   const allowsUnconfirmedParameters = (model === 'gemini-3-pro-image-preview' || model === 'gemini-nano-banana-2.1') && capability?.allowsUnconfirmedParameters === true;
   if (channel.id === ORIGINAL_IMAGE_CHANNEL_ID && !capability && values.legacyRoute !== false) {
     return values.legacyReady === false ? '当前模型的原接口尚未就绪，请联系管理员检查接口。' : null;
@@ -204,7 +207,7 @@ export function imageStudioChannelIssue(channel: ImageStudioChannel | undefined,
       !allowsUnconfirmedParameters && !capability.resolutions?.length ? '分辨率' : null,
       !allowsUnconfirmedParameters && capability.maxReferences == null ? '参考图上限' : null,
       !capability.billingMode ? '计费方式' : null,
-      capability.billingMode === 'fixed' && capability.fixedPoints == null
+      capability.billingMode === 'fixed' && !capability.pricingBySpecification && capability.fixedPoints == null
         && !['shared', 'banana'].includes(channel.id) ? '固定点数' : null,
     ].filter(Boolean);
     if (missing.length) return `${model} 的当前供应商尚未确认${missing.join('、')}。当前选择和素材已保留，请管理员补齐该型号配置。`;
@@ -212,7 +215,7 @@ export function imageStudioChannelIssue(channel: ImageStudioChannel | undefined,
   if (!channel.ready) return channel.disabledReason || `${channel.label}暂未就绪，请联系管理员。`;
   if (!capability || !capability.ready) return capability?.disabledReason || '当前供应商的所选型号尚未就绪；当前选择和素材已保留，请联系管理员检查配置。';
   if (!capability.billingMode) return '当前生图通道的计费方式尚未确认，暂不能生成；请联系管理员检查配置。';
-  if (capability.billingMode === 'fixed' && capability.fixedPoints == null
+  if (capability.billingMode === 'fixed' && !capability.pricingBySpecification && capability.fixedPoints == null
     && channel.id !== 'shared' && channel.id !== 'banana') {
     return '当前生图通道的固定点数尚未配置，暂不能生成；请联系管理员检查配置。';
   }
@@ -244,7 +247,7 @@ export function imageStudioChannelReadyForModel(channel: ImageStudioChannel | un
   if (!channel.ready) return false;
   const capability = imageStudioChannelModel(channel, model);
   return Boolean(capability?.ready && capability.billingMode && (capability.billingMode !== 'fixed'
-    || capability.fixedPoints != null || ['shared', 'banana'].includes(channel.id)));
+    || capability.pricingBySpecification || capability.fixedPoints != null || ['shared', 'banana'].includes(channel.id)));
 }
 
 export function useImageStudioChannel(userId: string, feature: string, rawChannels: unknown, sourceReady: boolean) {

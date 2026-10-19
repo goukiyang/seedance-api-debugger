@@ -846,7 +846,15 @@ export default function TaskDetailPage() {
     && task.local_status === 'failed' && task.error_code !== undefined
     && !task.error_code?.includes('UNCONFIRMED') && task.frozen_cost === 0);
   const retryPricing = useVideoPricing({ provider: task?.provider === 'h3' ? 'h3' : 'seedance',
-    model: task?.model || '', resolution: task?.resolution || '480p', duration: task?.duration || 5 }, retrySupported);
+    model: task?.model || '', resolution: task?.resolution || '480p', duration: task?.duration || 5, context: { retry_task_id: task?.id } }, retrySupported);
+  const retryStorageKey = retryPricing.actorId ? `sd2-video-retry-request-v1:${retryPricing.actorId}:${taskId}` : null;
+  const retryScope = JSON.stringify([retryPricing.actorId, taskId]);
+  const retryScopeRef = useRef(retryScope); retryScopeRef.current = retryScope;
+  const [retryUnconfirmed, setRetryUnconfirmed] = useState(false);
+  useEffect(() => {
+    try { setRetryUnconfirmed(Boolean(retryStorageKey && sessionStorage.getItem(retryStorageKey))); }
+    catch { setRetryUnconfirmed(true); }
+  }, [retryStorageKey]);
   const [movingProject, setMovingProject] = useState(false);
   const [targetProjectId, setTargetProjectId] = useState('');
   const [targetVideoCardId, setTargetVideoCardId] = useState('');
@@ -1219,18 +1227,33 @@ export default function TaskDetailPage() {
   };
 
   const handleRetry = async () => {
-    if (!retrySupported || retrying || !retryPricing.quote) return;
+    if (!retrySupported || retrying || !retryStorageKey) return;
     setRetrying(true);
     try {
+      const lookup = await fetch(`/api/tasks/request-status?${new URLSearchParams({ idempotency_key: `video-retry:${taskId}` })}`, { cache: 'no-store',
+        headers: { 'x-app-session-user': retryPricing.actorId! } });
+      const prior = await lookup.json();
+      if (retryScopeRef.current !== retryScope) return;
+      if (!lookup.ok) throw new Error(prior.message || prior.error || '原重试请求暂时无法确认');
+      if (prior.task?.id) { sessionStorage.removeItem(retryStorageKey); setRetryUnconfirmed(false); router.push(taskDetailHref(prior.task.id, returnTo)); return; }
+      if (sessionStorage.getItem(retryStorageKey)) throw new Error('重试提交结果待确认，请继续查询原请求；不会再次生成');
+      if (!retryPricing.quote) throw new Error('请先重新获取报价；尚未生成');
+      sessionStorage.setItem(retryStorageKey, 'pending'); setRetryUnconfirmed(true);
       const res = await fetch(`/api/video/retry/${taskId}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pricing_revision: retryPricing.quote.pricing_revision, max_estimated_cost: retryPricing.quote.estimatedCost }),
+        headers: { 'Content-Type': 'application/json', 'x-app-session-user': retryPricing.actorId! },
+        body: JSON.stringify({ pricing_revision: retryPricing.quote.pricing_revision, pricing_quote_token: retryPricing.quote.pricing_quote_token, max_estimated_cost: retryPricing.quote.estimatedCost }),
       });
       const data = await res.json();
+      if (retryScopeRef.current !== retryScope) return;
       if (res.ok) {
+        if (typeof data.id !== 'string' || !data.id) throw new Error('受理结果待确认，请查询原请求');
+        sessionStorage.removeItem(retryStorageKey); setRetryUnconfirmed(false);
         router.push(taskDetailHref(data.id, returnTo));
       } else {
+        if (res.status < 500 && !(res.status === 409 && String(data.code || '').startsWith('IDEMPOTENCY_'))) {
+          sessionStorage.removeItem(retryStorageKey); setRetryUnconfirmed(false);
+        }
         if (res.status === 409) retryPricing.refresh();
         setOpenError(`重试失败: ${data.message || data.error || '请稍后重试'}`);
       }
@@ -2132,9 +2155,9 @@ export default function TaskDetailPage() {
                   </button>
                 )}
                 {retrySupported && (
-                  <button className="btn btn-primary" onClick={handleRetry} disabled={retrying || !retryPricing.quote} title={retryPricing.error || undefined}>
+                  <button className="btn btn-primary" onClick={handleRetry} disabled={retrying || !retryPricing.quote && !retryUnconfirmed} title={retryPricing.error || undefined}>
                     <RotateCcw size={16} aria-hidden="true" />
-                    {retrying ? '重试中...' : retryPricing.quote ? `重新生成 · ${retryPricing.quote.estimatedCost}点` : '报价待确认'}
+                    {retrying ? '正在核对...' : retryUnconfirmed ? '查询原请求' : retryPricing.quote ? `重新生成 · ${retryPricing.quote.estimatedCost}点` : '报价待确认'}
                   </button>
                 )}
                 {downloadError && task.result_video_url && (

@@ -6,7 +6,7 @@ import { PricingItemUnavailableError, type PricingItemUnavailableReason } from '
 
 /** Called only after the pricing readers have successfully validated current configuration. */
 export function assertPricingImageAvailability(settings: ImageGenerationResolvedSettings, identity: PricingAdminIdentity,
-  specifications: { quality?: string; resolution?: string; ratio?: string } = {}) {
+  specifications: { quality?: string; resolution?: string; ratio?: string } = identity.specifications) {
   const model = identity.modelId as ImageStudioModel;
   if (!IMAGE_STUDIO_MODELS.includes(model)) throw new Error('图片收费型号身份无效');
   const fail = (reason: PricingItemUnavailableReason, message: string): never => { throw new PricingItemUnavailableError(identity, reason, message); };

@@ -7,7 +7,7 @@ import { Archive, Check, ChevronDown, Folder, Plus, Trash2, RefreshCw } from 'lu
 import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution, AssetCollection } from '@/types';
 import { RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
-import { notifyVideoPricingChanged, validVideoPricingAmount } from '@/lib/pricing-client';
+import { notifyVideoPricingChanged, validVideoPricingAmount, videoPricingBusinessInput } from '@/lib/pricing-client';
 import type { ComposerSelectOption } from '@/components/ComposerActionBar';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
@@ -96,6 +96,7 @@ type WorkspaceBusyReason = 'read-error' | 'pending-attach' | 'uploading' | 'uplo
 
 type GenerationSubmitParams = {
   pricingRevision?: string | null;
+  pricingQuoteToken?: string;
   quotedEstimatedCost?: number;
   prompt: string;
   generationMode: GenerationMode;
@@ -613,8 +614,13 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [imageResultPendingReceipt, setImageResultPendingReceipt] = useState('');
   const [unconfirmedGenerationRequest, setUnconfirmedGenerationRequest] = useState(false);
   const studioHandoffRequestRef = useRef<string | null>(null);
-  const forceNewGenerationRef = useRef(false);
   const unconfirmedGenerationParamsRef = useRef<GenerationSubmitParams | null>(null);
+  const activeGenerationRequestStorageKey = `sd2-generation-request-v1:${currentUser?.id || 'session'}:${surface}:${imageResultHandoff?.receiptId || studioRunId || 'standard'}`;
+  useEffect(() => {
+    if (!currentUser?.id) { setUnconfirmedGenerationRequest(false); return; }
+    try { setUnconfirmedGenerationRequest(Boolean(sessionStorage.getItem(activeGenerationRequestStorageKey))); }
+    catch { setUnconfirmedGenerationRequest(true); }
+  }, [currentUser?.id, activeGenerationRequestStorageKey]);
 
   useEffect(() => {
     if (loadingUser) return;
@@ -2305,37 +2311,49 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     setDraftUpgradeTaskId(task.id);
     setRecentTasksError('');
     try {
+      if (!currentUser?.id) throw new Error('请先确认登录账号');
+      const requestStorageKey = `sd2-draft-upgrade-request-v1:${currentUser.id}:${task.id}`;
       const quoteResponse = await fetch(`/api/tasks/${task.id}/draft-upgrade`, { cache: 'no-store' });
-      const quote = await readJsonResponse<{ accepted?: { id: string }; estimatedCost?: number; pricing_revision?: string | null; message?: string; error?: string }>(quoteResponse);
+      const quote = await readJsonResponse<{ accepted?: { id: string }; estimatedCost?: number; pricing_revision?: string | null; pricing_quote_token?: string; message?: string; error?: string }>(quoteResponse);
       if (!quoteResponse.ok) throw new Error(quote.message || quote.error || '升级报价暂不可用，原样片保留');
       if (quote.accepted?.id) {
+        sessionStorage.removeItem(requestStorageKey);
         setActivePollingTaskIds(current => [quote.accepted!.id, ...current.filter(id => id !== quote.accepted!.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
         await loadRecentTasksPage(1, 'merge-head'); return;
       }
+      if (sessionStorage.getItem(requestStorageKey)) throw new Error('原升级提交结果待确认，请继续查询原请求；不会再次提交');
       if (!validVideoPricingAmount(quote.estimatedCost) || quote.pricing_revision !== null && typeof quote.pricing_revision !== 'string') throw new Error('升级报价暂不可用，未提交');
       if (quote.estimatedCost > 0 && !await confirm(`生成 1080p 预计冻结 ${quote.estimatedCost} 点，原样片保留。`, { title: '生成1080p', confirmLabel: `生成 ${quote.estimatedCost} 点` })) return;
+      if (activeAccountIdRef.current !== currentUser.id) throw new Error('账号已变化，请回到原账号核对');
+      sessionStorage.setItem(requestStorageKey, 'pending');
       const response = await fetch(`/api/tasks/${task.id}/draft-upgrade`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-app-session-user': currentUser.id },
         body: JSON.stringify({
           resolution_approval_confirmed: true,
           idempotency_key: `draft-upgrade:${task.id}`,
           ...(quote.pricing_revision ? { pricing_revision: quote.pricing_revision } : {}),
+          ...(quote.pricing_quote_token ? { pricing_quote_token: quote.pricing_quote_token } : {}),
+          max_estimated_cost: quote.estimatedCost,
         }),
       });
       const data = await readJsonResponse<{ task_id?: string; id?: string; provider_task_id?: string | null; error?: string; message?: string }>(response);
-      if (!response.ok) throw new Error(data.message || data.error || 'Draft 升级失败');
+      if (!response.ok) {
+        if (response.status < 500) sessionStorage.removeItem(requestStorageKey);
+        throw new Error(data.message || data.error || 'Draft 升级失败');
+      }
       const formalTaskId = data.task_id || data.id;
       if (formalTaskId) {
+        sessionStorage.removeItem(requestStorageKey);
         setActivePollingTaskIds((current) => [formalTaskId, ...current.filter((id) => id !== formalTaskId)].slice(0, MAX_ACTIVE_POLLING_TASKS));
-      }
+      } else throw new Error('升级受理结果待确认，请查询原请求');
       await loadRecentTasksPage(1, 'merge-head');
     } catch (error) {
       setRecentTasksError(error instanceof Error ? error.message : 'Draft 升级失败');
     } finally {
       setDraftUpgradeTaskId(null);
     }
-  }, [draftUpgradeTaskId, isIpSurface, loadRecentTasksPage, seedanceDraftCapability.upgrade_enabled, confirm]);
+  }, [draftUpgradeTaskId, isIpSurface, loadRecentTasksPage, seedanceDraftCapability.upgrade_enabled, confirm, currentUser?.id]);
 
   useEffect(() => {
     void loadRecentTasksPage(1, 'replace');
@@ -2502,14 +2520,79 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     });
   }, [currentUser?.id, selectedProjectId, isIpSurface]);
 
+  const checkOriginalGenerationRequest = useCallback(async () => {
+    if (!currentUser?.id || submitting) return;
+    setSubmitting(true); setError(null);
+    try {
+      const raw = sessionStorage.getItem(activeGenerationRequestStorageKey);
+      if (!raw) { setUnconfirmedGenerationRequest(false); return; }
+      const pending = JSON.parse(raw) as { key?: unknown };
+      if (typeof pending.key !== 'string' || !pending.key) throw new Error('原请求记录无法读取，请先核对原任务');
+      const query = new URLSearchParams({ idempotency_key: pending.key });
+      if (studioRunId) query.set('template_studio_run_id', studioRunId);
+      const endpoint = isIpSurface ? '/api/ip/tasks/request-status' : studioRunId ? '/api/template-studio-video-handoff' : '/api/tasks/request-status';
+      const response = await fetch(`${endpoint}?${query}`, { cache: 'no-store', headers: { 'x-app-session-user': currentUser.id } });
+      const data = await readJsonResponse<{ task?: CreateTaskResponse | null; error?: string; message?: string }>(response);
+      if (activeAccountIdRef.current !== currentUser.id) return;
+      if (!response.ok) throw new Error(data.message || data.error || '原请求暂时无法确认');
+      if (!data.task?.id) throw new Error('提交结果待确认，请继续查询原请求；不会重新生成');
+      const unconfirmed = data.task.submission_unconfirmed === true || data.task.error_code === 'IP_SUBMISSION_UNCONFIRMED';
+      if (!unconfirmed) sessionStorage.removeItem(activeGenerationRequestStorageKey);
+      setUnconfirmedGenerationRequest(unconfirmed); setResult(unconfirmed ? null : data.task);
+      setActivePollingTaskIds(current => [data.task!.id, ...current.filter(id => id !== data.task!.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
+      void loadRecentTasksPage(0, 'replace');
+      setError(unconfirmed ? '上游受理结果待确认，请继续查询原任务' : '已恢复原任务，本次没有再次生成。当前输入保留。');
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '原请求暂时无法确认'); }
+    finally { setSubmitting(false); }
+  }, [currentUser?.id, submitting, activeGenerationRequestStorageKey, studioRunId, isIpSurface, loadRecentTasksPage]);
+
   const handleSubmit = useCallback(async (params: GenerationSubmitParams) => {
-    const explicitlyStartingNew = forceNewGenerationRef.current;
-    forceNewGenerationRef.current = false;
     unconfirmedGenerationParamsRef.current = params;
     setSubmitting(true);
     setError(null);
     setErrorDebug(null);
     setResult(null);
+
+    const requestStorageKey = `sd2-generation-request-v1:${currentUser?.id || 'session'}:${surface}:${params.imageResultReceiptId || params.templateStudioRunId || 'standard'}`;
+    const recoverAcceptedRequest = async (key: string) => {
+      const query = new URLSearchParams({ idempotency_key: key });
+      if (params.templateStudioRunId) query.set('template_studio_run_id', params.templateStudioRunId);
+      const endpoint = isIpSurface ? '/api/ip/tasks/request-status'
+        : params.templateStudioRunId ? '/api/template-studio-video-handoff' : '/api/tasks/request-status';
+      const response = await fetch(`${endpoint}?${query}`, { cache: 'no-store',
+        headers: currentUser?.id ? { 'x-app-session-user': currentUser.id } : {} });
+      const payload = await readJsonResponse<{ task?: CreateTaskResponse | null; error?: string; message?: string }>(response);
+      if (activeAccountIdRef.current !== currentUser?.id) throw new Error('账号已变化，请回到原账号查询原请求');
+      if (!response.ok) throw new Error(payload.message || payload.error || '无法确认上次请求是否已受理');
+      return payload.task || null;
+    };
+    const acceptRecoveredTask = (task: CreateTaskResponse) => {
+      const unconfirmed = task.error_code === 'IP_SUBMISSION_UNCONFIRMED' || task.submission_unconfirmed === true;
+      if (!unconfirmed) sessionStorage.removeItem(requestStorageKey);
+      setUnconfirmedGenerationRequest(unconfirmed);
+      unconfirmedGenerationParamsRef.current = unconfirmed ? params : null;
+      setResult(unconfirmed ? null : task);
+      setError(unconfirmed ? task.message || '上游受理结果待确认，请继续查询原任务'
+        : '已恢复原请求的任务，本次没有再次生成。当前输入保留。');
+      setPolledResult(null);
+      setActivePollingTaskIds(current => [task.id, ...current.filter(id => id !== task.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
+      void loadRecentTasksPage(0, 'replace');
+    };
+    try {
+      const raw = sessionStorage.getItem(requestStorageKey);
+      if (raw) {
+        const pending = JSON.parse(raw) as { key?: unknown };
+        if (typeof pending.key !== 'string' || !pending.key) throw new Error('原请求记录无法读取，请先核对原任务');
+        const accepted = await recoverAcceptedRequest(pending.key);
+        if (!accepted) throw new Error('提交结果待确认，请继续查询原请求；不会重新生成');
+        acceptRecoveredTask(accepted);
+        setSubmitting(false); return;
+      }
+    } catch (cause) {
+      setUnconfirmedGenerationRequest(true);
+      setError(cause instanceof Error ? cause.message : '原请求暂时无法确认，请继续查询原号');
+      setSubmitting(false); return;
+    }
 
     let selectedVideoCard = videoCards.find((card) => card.id === selectedVideoCardId) || null;
     if (!selectedProjectId) {
@@ -2590,6 +2673,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       const createEndpoint = isIpSurface ? '/api/ip/tasks/create' : '/api/tasks/create';
       const requestBody = {
         ...(params.pricingRevision ? { pricing_revision: params.pricingRevision } : {}),
+        ...(params.pricingQuoteToken ? { pricing_quote_token: params.pricingQuoteToken, pricing_fingerprint_version: 2 } : {}),
         ...(typeof params.quotedEstimatedCost === 'number' ? { max_estimated_cost: params.quotedEstimatedCost } : {}),
         prompt: params.prompt,
         generation_mode: params.generationMode,
@@ -2623,66 +2707,12 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         first_frame_asset_id: params.templateStudioAssets.find((asset) => asset.role === 'first')?.assetId,
         last_frame_asset_id: params.templateStudioAssets.find((asset) => asset.role === 'last')?.assetId,
       };
-      const requestFingerprint = stableGenerationPayloadJson(requestBody);
-      const requestStorageKey = `sd2-generation-request-v1:${currentUser?.id || 'session'}:${surface}:${params.imageResultReceiptId || params.templateStudioRunId || 'standard'}`;
-      const readPendingRequest = () => {
-        try {
-          const raw = sessionStorage.getItem(requestStorageKey);
-          if (!raw) return null;
-          const parsed = JSON.parse(raw) as { key?: unknown; fingerprint?: unknown };
-          return typeof parsed.key === 'string' && typeof parsed.fingerprint === 'string'
-            ? { key: parsed.key, fingerprint: parsed.fingerprint }
-            : null;
-        } catch {
-          return null;
-        }
-      };
-      const recoverAcceptedRequest = async (key: string) => {
-        if (!params.templateStudioRunId && !isIpSurface) return null;
-        const query = new URLSearchParams({ idempotency_key: key });
-        if (params.templateStudioRunId) query.set('template_studio_run_id', params.templateStudioRunId);
-        const endpoint = isIpSurface ? '/api/ip/tasks/request-status' : '/api/template-studio-video-handoff';
-        const response = await fetch(`${endpoint}?${query.toString()}`, { cache: 'no-store' });
-        const payload = await readJsonResponse<{ task?: CreateTaskResponse | null; error?: string; message?: string }>(response);
-        if (!response.ok) throw new Error(payload.message || payload.error || '无法确认上次请求是否已受理');
-        return payload.task || null;
-      };
-      const acceptRecoveredTask = (task: CreateTaskResponse, currentPayloadChanged = false) => {
-        const unconfirmed = task.error_code === 'IP_SUBMISSION_UNCONFIRMED' || task.submission_unconfirmed === true;
-        if (!unconfirmed) sessionStorage.removeItem(requestStorageKey);
-        setUnconfirmedGenerationRequest(currentPayloadChanged || unconfirmed);
-        unconfirmedGenerationParamsRef.current = currentPayloadChanged || unconfirmed ? params : null;
-        setResult(unconfirmed ? null : task);
-        setError(unconfirmed ? (task.message || '上游受理结果待确认，请勿重复生成，联系管理员核对。') : currentPayloadChanged
-          ? `上次请求已受理为任务 ${task.id}，但当前内容与原请求不同。请先核对该任务；如仍要生成当前内容，再明确新建任务。`
-          : null);
-        setPolledResult(null);
-        setActivePollingTaskIds((current) => [task.id, ...current.filter((id) => id !== task.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
-        void loadRecentTasksPage(0, 'replace');
-      };
-
-      let pendingRequest = readPendingRequest();
-      if (pendingRequest && explicitlyStartingNew) {
-        sessionStorage.removeItem(requestStorageKey);
-        pendingRequest = null;
-      }
-      if (pendingRequest) {
-        const currentPayloadChanged = pendingRequest.fingerprint !== requestFingerprint;
-        const accepted = await recoverAcceptedRequest(pendingRequest.key);
-        if (accepted) {
-          acceptRecoveredTask(accepted, currentPayloadChanged);
-          return;
-        }
-        if (currentPayloadChanged) {
-          setUnconfirmedGenerationRequest(true);
-          throw new Error('上次请求尚未确认，当前内容已变化。先查询任务状态；如要按当前内容另建任务，请使用“按当前内容新建任务”。');
-        }
-      }
-      const idempotencyKey = pendingRequest?.key || window.crypto.randomUUID();
-      if (!pendingRequest) {
-        pendingRequest = { key: idempotencyKey, fingerprint: requestFingerprint };
-        sessionStorage.setItem(requestStorageKey, JSON.stringify(pendingRequest));
-      }
+      const requestFingerprint = stableGenerationPayloadJson(videoPricingBusinessInput(requestBody));
+      if (activeAccountIdRef.current !== currentUser?.id || selectedProjectIdRef.current !== selectedProjectId
+        || (selectedVideoCardId ? selectedVideoCardIdRef.current !== readyVideoCard.id
+          : selectedVideoCardIdRef.current && selectedVideoCardIdRef.current !== readyVideoCard.id)) throw new Error('账号或保存位置已变化，请重新报价；尚未生成');
+      const idempotencyKey = window.crypto.randomUUID();
+      sessionStorage.setItem(requestStorageKey, JSON.stringify({ key: idempotencyKey, fingerprint: requestFingerprint, fingerprintVersion: 2 }));
 
       let res: Response;
       try {
@@ -2690,6 +2720,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            ...(currentUser?.id ? { 'x-app-session-user': currentUser.id } : {}),
             'x-tab-id': sessionStorage.getItem('workspace_tab_id') || 'default',
           },
           body: JSON.stringify({ ...requestBody, idempotency_key: idempotencyKey }),
@@ -2705,10 +2736,11 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           // Keep the same request key when its acceptance state cannot be read.
         }
         setUnconfirmedGenerationRequest(true);
-        throw new Error('网络中断，尚不能确认任务是否已受理。请求号已保留；再次提交会先查询原任务。');
+        throw new Error('网络中断，提交结果待确认。请求号已保留，请查询原任务；不会重新生成。');
       }
 
       const data = await readJsonResponse<CreateTaskResponse>(res);
+      if (activeAccountIdRef.current !== currentUser?.id) return;
 
       if (res.ok && (data.error_code === 'IP_SUBMISSION_UNCONFIRMED' || data.submission_unconfirmed === true)) {
         acceptRecoveredTask(data);
@@ -2735,7 +2767,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           setUnconfirmedGenerationRequest(true);
           unconfirmedGenerationParamsRef.current = params;
           const taskHint = typeof data.existing_task_id === 'string' ? `（任务 ${data.existing_task_id}）` : '';
-          throw new Error(`${data.error || data.message || '请求号已关联已有任务'}${taskHint}。请先核对原任务；系统保留当前请求号，只有确认需要另行生成时再明确新建。`);
+          throw new Error(`${data.error || data.message || '请求号已关联已有任务'}${taskHint}。请核对原任务；系统保留当前请求号，不会重新生成。`);
         }
         sessionStorage.removeItem(requestStorageKey);
         setUnconfirmedGenerationRequest(false);
@@ -2744,6 +2776,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         throw new Error(data.error && data.message ? `[${data.error}] ${message}` : message);
       }
 
+      if (!data.id) { setUnconfirmedGenerationRequest(true); throw new Error('受理结果待确认，请查询原请求；不会重新生成'); }
       sessionStorage.removeItem(requestStorageKey);
       setUnconfirmedGenerationRequest(false);
       unconfirmedGenerationParamsRef.current = null;
@@ -2811,6 +2844,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         .then((d) => { if (d) setCredits(d); })
         .catch(() => {});
     } catch (err) {
+      try { if (sessionStorage.getItem(requestStorageKey)) setUnconfirmedGenerationRequest(true); }
+      catch { setUnconfirmedGenerationRequest(true); }
       if (err instanceof Error) setError(err.message);
     } finally {
       setSubmitting(false);
@@ -3492,18 +3527,14 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           </div>
         )}
 
-        {unconfirmedGenerationRequest && unconfirmedGenerationParamsRef.current && (
+        {unconfirmedGenerationRequest && (
           <button
             type="button"
             className="composer-prefill-notice"
-            onClick={() => {
-              const params = unconfirmedGenerationParamsRef.current;
-              if (!params) return;
-              forceNewGenerationRef.current = true;
-              void handleSubmit(params);
-            }}
+            disabled={submitting}
+            onClick={() => { void checkOriginalGenerationRequest(); }}
           >
-            按当前内容新建任务
+            查询原请求
           </button>
         )}
 
@@ -3548,6 +3579,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           studioHandoff={studioHandoff}
           imageResultHandoff={imageResultHandoff}
           selectedVideoCardId={selectedVideoCardId}
+          pricingProjectId={selectedProjectId}
           canManageTemplates={currentUser?.role === 'admin'}
           require1080pApproval={Boolean(selectedProject && selectedProject.type !== 'personal')}
           onCollectionLoad={handleCollectionLoad}

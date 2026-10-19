@@ -129,13 +129,14 @@ export async function POST(req: NextRequest) { return run(async owner => {
     const model=typeof body.model==='string'?body.model:previous.model;
     if(!IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number]))throw new StudioError('原模型已不可用，请明确选择可用模型；人物草稿保留');
     const quality=typeof body.quality==='string'?body.quality:previous.quality,resolution=typeof body.resolution==='string'?body.resolution:previous.resolution;
+    const aspectRatio=isAvatarSheet({layout})?'1:1':previous.candidates[0].members.length>1?'3:2':'1:1';
     let price=settings.prices[model as keyof typeof settings.prices];
     const channelId=typeof body.channelId==='string'?body.channelId:previous.channelId||'original';
     const effectiveChannelId=await resolveImageGenerationRequestChannel(model,channelId)||'original';
     const imageChannel=effectiveChannelId!=='original'?await captureImageGenerationChannel(model,effectiveChannelId):undefined;
-    const priced = await withImagePricing(imageChannel?await resolveImageGenerationChannelSnapshot(imageChannel,undefined,true,model):await getImageGenerationSettingsForModel(model), model);
+    const priced = await withImagePricing(imageChannel?await resolveImageGenerationChannelSnapshot(imageChannel,undefined,true,model):await getImageGenerationSettingsForModel(model), model, prisma, undefined, { quality, resolution, ratio: aspectRatio });
     const api = priced.settings;
-    if(imageChannel){const capability=validateImageGenerationChannel(api,{model,quality,resolution,ratio:isAvatarSheet({layout})?'1:1':previous.aspectRatio,referenceCount:previous.referenceIds.length});if(!capability.ok)throw new StudioError(capability.error);price=capability.capability.fixedPoints;}
+    if(imageChannel){const capability=validateImageGenerationChannel(api,{model,quality,resolution,ratio:aspectRatio,referenceCount:previous.referenceIds.length});if(!capability.ok)throw new StudioError(capability.error);price=capability.capability.fixedPoints;}
     if(priced.quote) price = priced.quote.credits;
     if(!imageChannel&&!priced.quote&&(price===undefined||price===null))throw new StudioError('原模型已失效或没有报价，历史设置仍保留');
     let plan:AvatarPlan;
@@ -153,7 +154,7 @@ export async function POST(req: NextRequest) { return run(async owner => {
     if (!failed.length) throw new StudioError('没有可重试的明确失败项');
     const settings = await getImageStudioSettings();
     const retryApi = previous.imageChannel ? await resolveImageGenerationChannelSnapshot(previous.imageChannel, undefined, true, previous.model) : await getImageGenerationSettingsForModel(previous.model);
-    const priced = await withImagePricing(retryApi, previous.model);
+    const priced = await withImagePricing(retryApi, previous.model, prisma, undefined, { quality: previous.quality, resolution: previous.resolution, ratio: previous.aspectRatio });
     const plan = { ...previous, sourceTaskId: undefined, pricingRevision: priced.quote?.charge.revision,
       id: (isAvatarSheet(previous)?'sheet-':'')+createHash('sha256').update(`retry:${owner}:${previous.id}:${priced.quote?.charge.revision||'legacy'}`).digest('hex'),
       candidates: isAvatarSheet(previous) ? previous.candidates : failed.map(t => previous.candidates[t.ordinal - 1]), settingsRevision: settings.revision,

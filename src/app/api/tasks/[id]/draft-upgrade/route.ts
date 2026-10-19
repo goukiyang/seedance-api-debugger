@@ -13,6 +13,7 @@ import { quoteVideoPricing, publicVideoPricing, videoPricingError } from '@/lib/
 import { prisma } from '@/lib/prisma';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 import { SEEDANCE_2_5_MODEL_ID } from '@/lib/provider/seedance-models';
+import { resolveVideoPricingContext, savedVideoPricingContextInput, issueVideoPricingCredential } from '@/lib/pricing/video-context';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,8 +30,9 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     if (existing) return NextResponse.json({ accepted: existing }, { headers: { 'Cache-Control': 'private, no-store' } });
     if (!draft.is_draft || draft.provider !== 'seedance' || draft.model !== SEEDANCE_2_5_MODEL_ID || draft.local_status !== 'succeeded'
       || !draft.provider_draft_task_id) throw new DraftUpgradeError('当前样片还不能升级，请保留原任务', 409, 'DRAFT_NOT_READY');
-    const quote = await quoteVideoPricing({ provider: 'seedance', model: draft.model, resolution: '1080p', duration: draft.duration ?? 5 });
-    return NextResponse.json(publicVideoPricing(quote), { headers: { 'Cache-Control': 'private, no-store' } });
+    const context = await resolveVideoPricingContext(user, savedVideoPricingContextInput(draft, true), 'draft_upgrade');
+    const quote = await quoteVideoPricing({ provider: 'seedance', model: draft.model, resolution: '1080p', duration: draft.duration ?? 5, context });
+    return NextResponse.json({ ...publicVideoPricing(quote), pricing_quote_token: issueVideoPricingCredential(context, quote.revision, quote.pricing.estimatedCost) }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     const pricingFailure = videoPricingError(error);
     const status = pricingFailure?.status || (error instanceof AuthError || error instanceof DraftUpgradeError || error instanceof CodexApiAuthError ? error.status : 503);
@@ -79,6 +81,8 @@ export async function POST(
       sourceLabel: source.source_label,
       sourceRequestId: source.source_request_id,
       pricingRevision: typeof body.pricing_revision === 'string' ? body.pricing_revision : null,
+      pricingQuoteToken: typeof body.pricing_quote_token === 'string' ? body.pricing_quote_token : null,
+      maxEstimatedCost: body.max_estimated_cost,
     });
     return NextResponse.json(result, { status: result.pending_confirmation ? 202 : 200 });
   } catch (error) {

@@ -448,6 +448,7 @@ interface Props {
     model: string | null;
     h3LoraId: string | null;
     pricingRevision: string | null;
+    pricingQuoteToken?: string;
     quotedEstimatedCost: number;
     draft: boolean;
     templateStudioRunId: string | null;
@@ -479,6 +480,7 @@ interface Props {
   selectedProvider?: string | null;
   pricingProvider?: string;
   pricingModelId?: string;
+  pricingProjectId?: string | null;
   onProviderChange?: (provider: string) => void;
   h3CapabilitiesReady?: boolean;
   providerStatus?: ComposerProviderStatus | null;
@@ -537,6 +539,7 @@ export function GenerationComposer({
   selectedProvider = 'seedance',
   pricingProvider,
   pricingModelId,
+  pricingProjectId,
   onProviderChange,
   h3CapabilitiesReady = false,
   providerStatus = null,
@@ -1037,7 +1040,16 @@ export function GenerationComposer({
   }, [isSubmitting, durationBlocker, mentionNotice, prompt, submitBlocker, submitDisabledReason, submitBlockerState]);
 
   const videoPricing = useVideoPricing({ provider: pricingProvider || selectedProvider || 'seedance',
-    model: pricingModelId || selectedModel, resolution, duration }, !durationBlocker && preferencesReady);
+    model: pricingModelId || selectedModel, resolution, duration, context: (pricingProvider || selectedProvider) === 'volcengine_ip' ? undefined : {
+      project_id: pricingProjectId, video_card_id: selectedVideoCardId, ratio,
+      draft: selectedProvider === 'seedance' && selectedModel === SEEDANCE_2_5_MODEL_ID && draftMode,
+      reference_video_urls: workspace.assets.filter(asset => asset.type === 'video' && Boolean(asset.originalUrl)
+        && (!studioHandoff || studioRoleForAsset(asset.assetId, asset.role, studioHandoff) === 'reference')).map(asset => asset.originalUrl),
+      template_studio_run_id: studioHandoff?.runId,
+      ...(studioHandoff ? { template_studio_assets: workspace.assets.map(asset => ({ assetId: asset.assetId,
+        role: studioRoleForAsset(asset.assetId, asset.role, studioHandoff), type: asset.type,
+        ...(studioHandoff.assets.find(source => source.assetId === asset.assetId)?.slotKey ? { slotKey: studioHandoff.assets.find(source => source.assetId === asset.assetId)?.slotKey } : {}) })) } : {}),
+    } }, !durationBlocker && preferencesReady);
   const canPressSubmit = !isSubmitting && !submitBlocker && !submitDisabledReason && !!videoPricing.quote && !(need1080pApproval && !resolutionApprovalConfirmed);
   const estimatedPoints = videoPricing.quote?.estimatedCost ?? null;
 
@@ -1402,6 +1414,7 @@ export function GenerationComposer({
       model: selectedModel || null,
       h3LoraId: selectedAuxiliary || null,
       pricingRevision: videoPricing.quote.pricing_revision,
+      pricingQuoteToken: videoPricing.quote.pricing_quote_token,
       quotedEstimatedCost: videoPricing.quote.estimatedCost,
       draft: draftMode,
       templateStudioRunId: studioHandoff?.runId || null,

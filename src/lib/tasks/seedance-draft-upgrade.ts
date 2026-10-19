@@ -2,8 +2,10 @@ import type { SessionUser } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { assertMultiviewRequestFence } from '@/lib/video/multiview-request-receipt';
 import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance } from '@/lib/pricing/video';
+import { resolveVideoPricingContext, savedVideoPricingContextInput, verifyVideoPricingCredential, videoPricingRequiresContext } from '@/lib/pricing/video-context';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
-import { getProjectForGeneration } from '@/lib/projects/permissions';
+import { getProjectForGeneration, assertCanViewTask } from '@/lib/projects/permissions';
+import { validateRequestCostCeiling } from '@/lib/provider/seedance-video-edit';
 import { consumeApprovalForTask, findUsableApproval } from '@/lib/approvals';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import { allocateProjectTaskBudget, settleProjectTaskBudget, shouldBillProjectBudget } from '@/lib/projects/budget';
@@ -46,6 +48,8 @@ export type DraftUpgradeInput = {
   sourceLabel?: string | null;
   sourceRequestId?: string | null;
   pricingRevision?: string | null;
+  pricingQuoteToken?: string | null;
+  maxEstimatedCost?: unknown;
 };
 
 type DraftTaskForUpgrade = {
@@ -234,14 +238,8 @@ async function settleDraftUpgradeFailure(input: {
 }
 
 export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
-  if (!isSeedanceDraftUpgradeEnabled()) {
-    throw new DraftUpgradeError('供应商 Draft 升级接口尚未完成核验，暂不能生成 1080p', 503, 'DRAFT_UPGRADE_DISABLED');
-  }
   if (!input.draftTaskId || input.draftTaskId.includes('/') || input.draftTaskId.length > 120) {
     throw new DraftUpgradeError('只允许传入本地 Draft 任务 ID', 400, 'LOCAL_DRAFT_ID_REQUIRED');
-  }
-  if (!input.resolutionApprovalConfirmed) {
-    throw new DraftUpgradeError('1080p 生成需要先确认审批通过', 403, 'RESOLUTION_APPROVAL_REQUIRED');
   }
 
   const draft = await prisma.videoTask.findUnique({
@@ -280,6 +278,16 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
   if (draft.retention_status === 'admin_hidden' || draft.retention_status === 'user_deleted') {
     throw new DraftUpgradeError('Draft 任务已被隐藏或移除，不能继续升级', 404, 'DRAFT_NOT_VISIBLE');
   }
+  await assertCanViewTask(input.user, draft);
+  const idempotencyKey = input.idempotencyKey?.trim() || `draft-upgrade:${draft.id}`;
+  if (idempotencyKey.length > 200) throw new DraftUpgradeError('原升级请求编号无效');
+  const existing = await prisma.videoTask.findFirst({
+    where: { user_id: input.user.id, idempotency_key: idempotencyKey, source_draft_task_id: draft.id },
+    select: { id: true, provider_task_id: true, local_status: true, estimated_cost: true, source_draft_task_id: true },
+  });
+  if (existing) return { ...existing, deduplicated: true, pending_confirmation: existing.local_status === 'submitted' && !existing.provider_task_id };
+  if (!isSeedanceDraftUpgradeEnabled()) throw new DraftUpgradeError('供应商 Draft 升级接口尚未完成核验，暂不能生成 1080p', 503, 'DRAFT_UPGRADE_DISABLED');
+  if (!input.resolutionApprovalConfirmed) throw new DraftUpgradeError('1080p 生成需要先确认审批通过', 403, 'RESOLUTION_APPROVAL_REQUIRED');
   if (draft.provider !== 'seedance' || draft.model !== SEEDANCE_2_5_MODEL_ID || !draft.is_draft) {
     throw new DraftUpgradeError('只有 Seedance 2.5 样片 Draft 才能升级到 1080p', 400, 'DRAFT_MODEL_INVALID');
   }
@@ -318,29 +326,15 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
   }
   const billingScope = shouldBillProjectBudget(project) ? 'project' : 'user';
   const billingAccountId = billingScope === 'project' ? project.id : input.user.id;
-  const idempotencyKey = input.idempotencyKey?.trim() || null;
 
-  if (idempotencyKey) {
-    const existing = await prisma.videoTask.findFirst({
-      where: {
-        user_id: input.user.id,
-        idempotency_key: idempotencyKey,
-        source_draft_task_id: draft.id,
-      },
-      select: {
-        id: true,
-        provider_task_id: true,
-        local_status: true,
-        estimated_cost: true,
-        source_draft_task_id: true,
-      },
-    });
-    if (existing) return { ...existing, deduplicated: true, pending_confirmation: existing.local_status === 'submitted' && !existing.provider_task_id };
-  }
-
-  const priceQuote = await quoteVideoPricing({ provider: 'seedance', model: draft.model, resolution: '1080p', duration });
+  const pricingContext = await resolveVideoPricingContext(input.user, savedVideoPricingContextInput(draft, true), 'draft_upgrade');
+  const priceQuote = await quoteVideoPricing({ provider: 'seedance', model: draft.model, resolution: '1080p', duration, context: pricingContext });
   requireVideoPricingRevision(priceQuote, input.pricingRevision);
+  const needsPricingCredential = Boolean(input.pricingQuoteToken) || await videoPricingRequiresContext(draft.model, 'seedance');
+  if (needsPricingCredential) verifyVideoPricingCredential(input.pricingQuoteToken, pricingContext, priceQuote.revision, priceQuote.pricing.estimatedCost);
   const pricing = priceQuote.pricing, estimatedCost = pricing.estimatedCost;
+  const ceilingError = validateRequestCostCeiling(input.maxEstimatedCost, estimatedCost);
+  if (ceilingError) throw new DraftUpgradeError(ceilingError, 409, 'pricing_quote_changed');
   const sourceMetadata = {
     source_type: input.sourceType || 'web',
     source_label: input.sourceLabel || 'Seedance Draft 升级',
@@ -362,6 +356,12 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
   let task = await prisma.$transaction(async (tx) => {
     await assertMultiviewRequestFence(tx, input.user.id, idempotencyKey);
     await assertVideoPricingAcceptance(priceQuote, input.pricingRevision, tx);
+    if (needsPricingCredential) {
+      const freshDraft = await tx.videoTask.findUnique({ where: { id: draft.id } });
+      if (!freshDraft || ['admin_hidden', 'user_deleted'].includes(freshDraft.retention_status)) throw new DraftUpgradeError('原样片暂不可用，未提交升级', 409, 'pricing_quote_changed');
+      const freshContext = await resolveVideoPricingContext(input.user, savedVideoPricingContextInput(freshDraft, true), 'draft_upgrade');
+      verifyVideoPricingCredential(input.pricingQuoteToken, freshContext, priceQuote.revision, priceQuote.pricing.estimatedCost);
+    }
     const created = await tx.videoTask.create({
       data: {
         provider: 'seedance',

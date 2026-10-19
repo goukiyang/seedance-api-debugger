@@ -17,6 +17,7 @@ import { promisify } from 'util';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance, publicVideoPricing, videoPricingError, type VideoPricingQuote } from '@/lib/pricing/video';
+import { resolveVideoPricingContext, verifyVideoPricingCredential, videoPricingRequiresContext, videoPricingBusinessFingerprint, assertVideoPricingFinalReferences, type VideoPricingContext } from '@/lib/pricing/video-context';
 import { addAssetToWorkspace, getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { validatePromptReferences, renderPromptWithAssets } from '@/lib/assets/collection';
 import { createTaskSnapshot } from '@/lib/assets/snapshot';
@@ -77,7 +78,7 @@ import {
 import { providerCreateFailureUserMessage } from '@/lib/provider/error-message';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertFeatureAllowed } from '@/lib/access/feature-guard';
-import { getProjectForGeneration } from '@/lib/projects/permissions';
+import { getProjectForGeneration, assertCanViewTask } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import {
   authenticateCodexVideoApi,
@@ -655,6 +656,8 @@ export async function POST(request: NextRequest) {
   if (user.status !== 'active') {
     return errorJson('账号已被禁用，无法生成', 403);
   }
+  const expectedActor = request.headers.get('x-app-session-user');
+  if (expectedActor && expectedActor !== user.id) return NextResponse.json({ error: '账号已变化，请重新确认当前账号；原输入保留，尚未生成', code: 'pricing_actor_changed' }, { status: 409 });
   try {
     // Codex API 绑定用户由后台管理员显式配置，允许内部普通服务账号
     // 复用普通生成链路；普通邮箱网页登录仍继续走外部账号收口规则。
@@ -669,6 +672,20 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
+  const stablePricingFingerprint = body.pricing_fingerprint_version === 2 ? videoPricingBusinessFingerprint(body) : null;
+  if (stablePricingFingerprint && typeof body.idempotency_key === 'string') {
+    const existing = await prisma.videoTask.findUnique({ where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: body.idempotency_key } } });
+    if (existing?.request_fingerprint?.startsWith('pricing-v2:')) {
+      try { await assertCanViewTask(user, existing); }
+      catch (error) { if (error instanceof AuthError) return errorJson(error.message, error.status); throw error; }
+      if (existing.request_fingerprint !== stablePricingFingerprint) return NextResponse.json({ error: '原请求内容不同，请查询原任务；未重新生成', code: 'IDEMPOTENCY_PAYLOAD_MISMATCH', existing_task_id: existing.id }, { status: 409 });
+      return NextResponse.json({ id: existing.id, provider: existing.provider, provider_task_id: existing.provider_task_id,
+        status: existing.local_status, model: existing.model, estimated_cost: existing.estimated_cost, frozen_cost: existing.frozen_cost,
+        created_at: existing.created_at, project_id: existing.project_id, video_card_id: existing.video_card_id,
+        template_studio_run_id: existing.template_studio_run_id, billing_scope: existing.billing_scope, billing_account_id: existing.billing_account_id,
+        deduplicated: true, fingerprint_verified: true });
+    }
+  }
   let requestClaim: MultiviewRequestClaim | null = null;
   let committedTaskId: string | null = null;
   const receiptIntentKey = multiviewRequestIntent(body, request.headers.get('x-tab-id'));
@@ -1151,7 +1168,7 @@ export async function POST(request: NextRequest) {
     ...(body.roleMediaContext === undefined ? {} : { roleMediaContext: roleMediaFingerprint(body.roleMediaContext) }),
     ...(multiviewGeneration ? { multiviewGeneration } : {}),
   };
-  const requestFingerprint = generationRequestFingerprint(fingerprintPayload);
+  const requestFingerprint = stablePricingFingerprint || generationRequestFingerprint(fingerprintPayload);
   if (idempotencyKey) {
     const existing = await prisma.videoTask.findUnique({
       where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: idempotencyKey } },
@@ -1208,9 +1225,15 @@ export async function POST(request: NextRequest) {
 
   // Existing accepted requests return above without recalculating today's quote.
   let priceQuote: VideoPricingQuote;
+  let pricingContext: VideoPricingContext;
+  let requireScopeCredential = false;
   try {
-    priceQuote = await quoteVideoPricing({ provider: requestedProvider === H3_VIDEO_PROVIDER ? 'h3' : 'seedance', model: selectedModel, resolution, duration });
+    pricingContext = await resolveVideoPricingContext(user, { ...body, project_id: project.id, video_card_id: videoCardId,
+      provider: requestedProvider === H3_VIDEO_PROVIDER ? 'h3' : 'seedance', model: selectedModel, resolution, duration, draft: draftRequested });
+    priceQuote = await quoteVideoPricing({ provider: requestedProvider === H3_VIDEO_PROVIDER ? 'h3' : 'seedance', model: selectedModel, resolution, duration, context: pricingContext });
     requireVideoPricingRevision(priceQuote, body.pricing_revision);
+    requireScopeCredential = Boolean(body.pricing_quote_token) || await videoPricingRequiresContext(selectedModel, priceQuote.identity.channelId);
+    if (requireScopeCredential) verifyVideoPricingCredential(body.pricing_quote_token, pricingContext, priceQuote.revision, priceQuote.pricing.estimatedCost);
   } catch (error) {
     const failure = videoPricingError(error);
     return NextResponse.json({ error: failure?.message || '报价暂不可用，原参数和素材已保留', code: failure?.code || 'pricing_unavailable' }, { status: failure?.status || 503 });
@@ -1221,6 +1244,9 @@ export async function POST(request: NextRequest) {
   if (costCeilingError) return errorJson(costCeilingError, 400);
   const billingScope = shouldBillProjectBudget(project) ? 'project' : 'user';
   const billingAccountId = billingScope === 'project' ? project.id : user.id;
+  if (pricingContext.payer.kind !== billingScope || pricingContext.payer.id !== billingAccountId) return NextResponse.json({
+    error: '付费归属已变化，请保留输入重新报价；尚未生成', code: 'pricing_context_changed',
+  }, { status: 409 });
 
   // --- Workspace + Reference Image Preparation ---
   const tabId = studioHandoff ? `template-studio-${studioHandoff.runId}` : request.headers.get('x-tab-id') || 'default';
@@ -1604,6 +1630,8 @@ export async function POST(request: NextRequest) {
   }
   const referenceVideoUrls = allReferenceVideoUrls.slice(0, 3);
   const referenceAudioUrls = allReferenceAudioUrls.slice(0, 3);
+  try { assertVideoPricingFinalReferences(pricingContext, referenceVideoUrls); }
+  catch (error) { const failure = videoPricingError(error); return NextResponse.json({ error: failure?.message || '最终素材与报价不同，请重新报价；尚未生成', code: failure?.code || 'pricing_context_changed' }, { status: failure?.status || 409 }); }
   if (videoEditRequested && referenceVideoUrls.length !== 1) {
     return errorJson('本次视频编辑必须绑定一个且仅一个待编辑视频。', 400);
   }
@@ -1944,6 +1972,11 @@ export async function POST(request: NextRequest) {
     const result = await prisma.$transaction(async (tx) => {
       await assertMultiviewRequestFence(tx, user.id, idempotencyKey, requestClaim);
       await assertVideoPricingAcceptance(priceQuote, body.pricing_revision, tx);
+      if (requireScopeCredential) {
+        const freshPricingContext = await resolveVideoPricingContext(user, { ...body, project_id: project.id, video_card_id: videoCardId,
+          provider: requestedProvider === H3_VIDEO_PROVIDER ? 'h3' : 'seedance', model: selectedModel, resolution, duration, draft: draftRequested });
+        verifyVideoPricingCredential(body.pricing_quote_token, freshPricingContext, priceQuote.revision, priceQuote.pricing.estimatedCost);
+      }
       if (multiviewGeneration) await assertCurrentMultiviewRotationPreset(multiviewGeneration.presetVersion, tx);
       const task = await tx.videoTask.create({
         data: {

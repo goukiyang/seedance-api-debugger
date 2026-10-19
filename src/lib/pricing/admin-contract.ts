@@ -1,3 +1,4 @@
+import type { PricingAuthoring, PricingAuthoringChange, PricingAuthoringEntry, PricingAuthoringRateMode, PricingEvidence } from './pricing-authoring-contract';
 // Browser-safe boundary. Credentials and private configuration fingerprints never belong here.
 export const PRICING_ADMIN_SCHEMA = 1 as const;
 export const PRICING_POLICY_KEY = 'pricing_policy_v1';
@@ -49,6 +50,8 @@ export type PricingAdminExchange = PricingAdminExchangeInput & {
 };
 
 export type PricingAdminRow = {
+  authoringRateMode?: PricingAuthoringRateMode;
+  authoringEntry?: PricingAuthoringEntry | null;
   id: string;
   identity: PricingAdminIdentity;
   label: string;
@@ -86,6 +89,7 @@ export const PRICING_ADMIN_LIMITS = {
 } as const;
 
 export type PricingAdminSnapshot = {
+  authoring?: PricingAuthoring;
   schemaVersion: typeof PRICING_ADMIN_SCHEMA;
   actor: PricingAdminActor;
   revision: string;
@@ -99,6 +103,10 @@ export type PricingAdminSnapshot = {
 };
 
 export type PricingAdminRowChange = {
+  specifications?: Record<string, string>;
+  authoringRateMode?: 'follow_global' | 'custom';
+  baseRelation?: { parentId: string; factor: '1.5' } | null;
+  evidence?: PricingEvidence;
   id: string;
   mode?: 'follow' | 'custom' | 'free' | 'legacy_fixed';
   customPointsPerCny?: string;
@@ -107,6 +115,7 @@ export type PricingAdminRowChange = {
   exchangeRate?: PricingAdminExchangeInput;
 };
 export type PricingAdminChanges = {
+  authoring?: PricingAuthoringChange;
   standards?: Partial<Record<PricingAdminBasis, string>>;
   rows: PricingAdminRowChange[];
 };
@@ -121,15 +130,22 @@ export type PricingAdminSimulationInput = {
   exampleAmount?: string;
 };
 export type PricingAdminPreviewInput = {
+  expectedAuthoringRevision?: string;
   expectedRevision: string;
   catalogFingerprint: string;
   action: PricingAdminAction;
   simulation?: PricingAdminSimulationInput;
+  scenarios?: PricingAdminSimulationInput[];
 };
 export type PricingAdminPriceView = Pick<PricingAdminRow, 'mode' | 'baseCny' | 'basisKind'
   | 'currentPointsPerCny' | 'currentUnitCredits' | 'relativeMultiplier' | 'differencePercent'
-  | 'confirmation' | 'hasDifference' | 'exchangeRate'>;
+  | 'confirmation' | 'hasDifference' | 'exchangeRate' | 'authoringRateMode' | 'authoringEntry'>;
 export type PricingAdminSimulation = {
+  sourceRowId: string;
+  specifications: Record<string, string>;
+  deltaCredits?: string | null;
+  differencePercent?: string | null;
+  rounding?: string;
   rowId: string;
   quantity: string;
   unit: PricingAdminUnit;
@@ -142,13 +158,16 @@ export type PricingAdminSimulation = {
   reason: string | null;
 };
 export type PricingAdminPreview = {
+  authoringRevision?: string;
+  authoringChanged?: boolean;
+  scenarios?: PricingAdminSimulation[];
   previewToken: string;
   expiresAt: string;
   expectedRevision: string;
   catalogFingerprint: string;
   inputFingerprint: string;
   affectedRuleIds: string[];
-  changes: Array<{ id: string; label: string; before: PricingAdminPriceView; after: PricingAdminPriceView }>;
+  changes: Array<{ id: string; sourceRowId: string; specifications: Record<string, string>; label: string; before: PricingAdminPriceView; after: PricingAdminPriceView }>;
   skipped: Array<{ id: string; reason: string }>;
   simulation: PricingAdminSimulation | null;
 };
@@ -157,6 +176,7 @@ export type PricingAdminSaveInput = PricingAdminPreviewInput & {
   previewToken: string;
 };
 export type PricingAdminOperation = {
+  authoringRevision?: string;
   operationId: string;
   state: 'succeeded' | 'rejected' | 'unknown';
   inputFingerprint: string | null;
@@ -166,6 +186,8 @@ export type PricingAdminOperation = {
   snapshot: PricingAdminSnapshot | null;
 };
 export type PricingAdminHistoryEntry = {
+  authoringBefore?: PricingAuthoring;
+  authoringAfter?: PricingAuthoring;
   revisionId: string;
   previousRevision: string;
   createdAt: string;

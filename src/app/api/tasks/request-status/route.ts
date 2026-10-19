@@ -6,17 +6,21 @@ import { assertCanViewTask } from '@/lib/projects/permissions';
 import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
 import { readMultiviewRequestReceipt, closeUnacceptedMultiviewRequest } from '@/lib/video/multiview-request-receipt';
 import { resolveSitePublicBaseUrl } from '@/lib/assets/site-url';
+import { authenticateCodexVideoApi, hasCodexApiAuthSignal, CodexApiAuthError } from '@/lib/integrations/codex';
 
 export const dynamic = 'force-dynamic';
-const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
+const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie, Authorization' };
 const taskSelect = { id: true, user_id: true, owner_user_id: true, local_status: true, project_id: true,
   video_card_id: true, retention_status: true, provider: true } as const;
 
 export async function GET(request: NextRequest) {
   try {
-    const user = await getSession();
+    const codex = hasCodexApiAuthSignal(request) ? await authenticateCodexVideoApi(request) : null;
+    const user = codex?.user || await getSession();
     if (!user || user.status !== 'active') return NextResponse.json({ error: '请先登录', safeToResubmit: false }, { status: 401, headers });
-    assertFeatureAllowed(user, 'standard_generate', '外部账号请使用原 IP 任务查询入口');
+    const expectedActor = request.headers.get('x-app-session-user');
+    if (expectedActor && expectedActor !== user.id) return NextResponse.json({ error: '账号已变化，请切回原账号查询原请求', code: 'pricing_actor_changed', safeToResubmit: false }, { status: 409, headers });
+    if (!(codex && user.account_type === 'internal')) assertFeatureAllowed(user, 'standard_generate', '外部账号请使用原 IP 任务查询入口');
     const key = request.nextUrl.searchParams.get('idempotency_key')?.trim();
     if (!key || key.length > 200) return NextResponse.json({ error: '请求号无效', safeToResubmit: false }, { status: 400, headers });
     const task = await prisma.videoTask.findUnique({
@@ -31,6 +35,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ task: null, lookup: stored?.receipt?.state || (stored ? 'pending' : 'not_found'), safeToResubmit: false,
       ...(stored?.receipt ? { request_receipt: stored.receipt, new_request_allowed: true } : {}) }, { headers });
   } catch (error) {
+    if (error instanceof CodexApiAuthError) return NextResponse.json({ error: error.message, safeToResubmit: false }, { status: error.status, headers });
     if (error instanceof AuthError) return NextResponse.json({ error: error.message, safeToResubmit: false }, { status: error.status, headers });
     return NextResponse.json({ error: '原请求暂时无法确认，请稍后查询同一请求号', safeToResubmit: false }, { status: 503, headers });
   }

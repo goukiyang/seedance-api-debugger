@@ -83,7 +83,7 @@ import { StudioStyleSkillSelector, type StudioStyleSkillSelectorHandle } from '.
 import type { SettingsValue } from './settings-controller';
 import { parseStudioTemplateDefaults } from '@/lib/image-studio/template-defaults';
 import { normalizeStudioRatio, resolveStudioAspectRatio } from '@/lib/image-studio/ratios';
-import { useStudioBatch, formatImageUiCredits, validImageUiQuote, imageUiQuoteFields, imageUiQuoteAction, type ImageUiQuote } from './use-studio-batch';
+import { useStudioBatch, imageUiQuotePriceText, validImageUiQuote, imageUiQuoteFields, imageUiQuoteAction, type ImageUiQuote } from './use-studio-batch';
 import { BatchResults } from './batch-results';
 import { watchGenerationCompletion } from '@/components/GenerationCompletion';
 import { handImageDownloadToBrowser } from '@/lib/media/native-download';
@@ -1793,12 +1793,14 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   });
   function effectiveSignature(payload: ReturnType<typeof generationPayload>, channelId: string) {
     return JSON.stringify([userId, Object.fromEntries(Object.entries(payload).filter(([key]) => key !== 'requestId')),
-      channelId, imageChannelId === 'original' ? imageChannels.defaultRoutes?.revision : undefined, generationDefinitionSignature]);
+      channelId, imageChannelId === 'original' ? imageChannels.defaultRoutes?.revision : undefined, generationDefinitionSignature,
+      imageStudioChannelModel(selectedChannel, payload.model)?.pricingBySpecification === true]);
   }
   const effectiveGenerationSignature = settings ? effectiveSignature(generationPayload(undefined, ''), effectiveImageChannelId) : '';
   liveGenerationSignature.current = effectiveGenerationSignature;
   const actualQuoteRequired = legacyImageRoute ? settings?.billingReadiness?.models?.[moduleModel]?.ready === true
     : selectedChannelModel?.actualQuoteRequired === true || selectedChannelModel?.billingMode === 'actual';
+  const pricingBySpecification = selectedChannelModel?.pricingBySpecification === true;
   const moduleUnitCredits = imageStudioChannelUnitCredits(selectedChannelModel, legacyImageRoute, effectiveImageChannelId,
     settings ? settings.prices?.[moduleModel] : module.prices[moduleModel]);
   const definitionChanges = sharedLive?.mode === 'publisher' ? [
@@ -1811,7 +1813,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     JSON.stringify(moduleDraft.skillIds) !== JSON.stringify(baseline.skillIds) ? '提示词组' : '',
   ].filter(Boolean) : [];
   const authorDefinitionDirty = definitionChanges.length > 0;
-  const batch = useStudioBatch({ userId, moduleId: module.id, actualQuoteRequired, sharedLive: sharedLive?.intent, sourceAvailable: sharedReady, onSourceChanged: onSharedRefresh, quotePayload: settings ? generationPayload(undefined, '') : null, unitCredits: moduleUnitCredits, effectiveChannelId: effectiveImageChannelId,
+  const batch = useStudioBatch({ userId, moduleId: module.id, actualQuoteRequired, pricingBySpecification, sharedLive: sharedLive?.intent, sourceAvailable: sharedReady, onSourceChanged: onSharedRefresh, quotePayload: settings ? generationPayload(undefined, '') : null, unitCredits: moduleUnitCredits, effectiveChannelId: effectiveImageChannelId,
     draftSignature: effectiveGenerationSignature });
   const contextVersion = useModuleContextVersion({ moduleId: module.id, raw: effectiveGenerationDefinition.context || '', taskId: reproduceSourceTaskId,
     editable: contextEditable, enabled: !hidden && draftLoaded && !draftRestoring, composing: contextComposing });
@@ -2887,7 +2889,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           throw new Error('生图通道配置已变化，报价未能绑定到当前通道；尚未提交图片，请重新确认。');
         }
         setBillingQuote({ signature, requestId: payload.requestId, quote });
-        setError(`本次预估为 ${formatImageUiCredits(quote.estimatedCredits)} 点数，尚未生成；请核对后再次点击。`);
+        setError(`${imageUiQuotePriceText(quote)}，尚未生成；请核对后再次点击。`);
         submitLock.current = false; setSubmitting(false);
         return;
       }
@@ -3184,7 +3186,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         }).catch(cause => { if (!abort.signal.aborted && sharedLive && [401, 403, 404, 409].includes(Number(cause?.status))) onSharedRefresh(); });
     }, 500);
     return () => { window.clearTimeout(timer); abort.abort(); };
-  }, [sessionChanged, sourceSharingBlocked, actualQuoteRequired, estimateSignature, hidden, active, quoteVisible, draftLoaded, draftRestoring, submitting, pendingSubmission, batch.mode, count, billingQuote, onSharedRefresh]);
+  }, [sessionChanged, sourceSharingBlocked, actualQuoteRequired, pricingBySpecification, estimateSignature, hidden, active, quoteVisible, draftLoaded, draftRestoring, submitting, pendingSubmission, batch.mode, count, billingQuote, onSharedRefresh]);
   const visibleQuote = billingQuote?.signature === estimateSignature
     && (!billingQuote.quote.expiresAt || Date.parse(billingQuote.quote.expiresAt) > Date.now()) ? billingQuote.quote : null;
   useEffect(() => {
@@ -3208,7 +3210,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const hasContext = reproduceSourceTaskId ? reproductionContextConfigured : Boolean((isAdmin ? effectiveGlobalContext?.trim() : settings?.contextConfigured)
     || effectiveGenerationDefinition.contextConfigured || effectiveGenerationDefinition.context?.trim()
     || effectiveGenerationDefinition.templatePrompt?.trim() || generationSkills.length);
-  const ready = Boolean(selectedProviderReady && (actualQuoteRequired || moduleUnitCredits !== null) && settings && !settingsError);
+  const ready = Boolean(selectedProviderReady && (actualQuoteRequired || pricingBySpecification || moduleUnitCredits !== null) && settings && !settingsError);
   const generationFeedback: StudioFeedback | null = batch.mode === 'batch' && batch.pending ? batch.busy ? { message: '正在核对原批次，不会重新提交生成', tone: 'progress' } : null
     : evolutionConflict ? { message: evolutionConflict, tone: 'warning' }
     : batch.mode === 'batch' && batch.blocker ? { message: batch.blocker, tone: 'info' }
@@ -3226,7 +3228,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     : !settings ? { message: '正在读取生成设置，请稍候；长时间无变化请刷新页面。', tone: 'progress' }
     : channelIssue ? { message: channelIssue, tone: imageChannelMessage ? 'info' : 'warning' }
     : !selectedProviderReady ? { message: '当前模型的图片服务尚未就绪，请换一个模型或联系管理员检查接口。', tone: 'warning' }
-    : !actualQuoteRequired && moduleUnitCredits === null ? { message: '当前模型尚未设置点数，请换一个模型或联系管理员配置。', tone: 'warning' }
+    : !actualQuoteRequired && !pricingBySpecification && moduleUnitCredits === null ? { message: '当前模型尚未设置点数，请换一个模型或联系管理员配置。', tone: 'warning' }
     : generationFixedReferences.some(item => item.available === false) ? { message: '已保存模板的固定参考图不可用，请在设置中处理。', tone: 'info' }
     : generationStyles.some(group => group.unavailable) ? { message: '已保存模板的风格组不可用，请在设置中处理。', tone: 'info' }
     : generationSkills.some(group => group.unavailable) ? { message: '已保存模板的提示词组不可用，请在设置中处理。', tone: 'info' }
@@ -3680,8 +3682,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           {batch.mode === 'batch' && batch.controls}
           {batch.mode === 'single' && <p className={styles.generationEstimate}>
             {visibleQuote && Number.isFinite(visibleQuote.estimatedCredits)
-              ? `合计约 ${formatImageUiCredits(visibleQuote.estimatedCredits)} 点数`
-              : !legacyImageRoute && !selectedChannelModel?.billingMode ? '费用未配置' : '费用待估算'}
+              ? imageUiQuotePriceText(visibleQuote)
+              : !legacyImageRoute && !selectedChannelModel?.billingMode ? '费用未配置'
+                : pricingBySpecification ? '按规格计费，费用待报价' : '费用待估算'}
           </p>}
           {generationFeedback && <p id={`generation-blocker-${module.id}`} role="status" className={styles.generationFeedback} data-tone={generationFeedback.tone}>{generationFeedback.message}</p>}
           {settingsError && <button type="button" onClick={() => onReloadSettings(true)}><RefreshCw size={16} />重新读取设置</button>}

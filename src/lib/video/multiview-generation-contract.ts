@@ -42,6 +42,8 @@ export type MultiviewGenerationRequest = {
   reference_video_urls: []; reference_audio_urls: []; resolution_approval_confirmed: boolean;
   resolution_approval_id?: string; idempotency_key: string; max_estimated_cost: number;
   pricing_revision?: string;
+  pricing_quote_token?: string;
+  pricing_fingerprint_version?: 2;
   client_name: 'multiview'; source_metadata: { source: 'multiview'; mode: 'rotation' };
   multiview_generation: MultiviewGenerationSnapshot;
 };
@@ -114,7 +116,7 @@ export function parseMultiviewGenerationSnapshot(value: unknown): MultiviewGener
 }
 
 export function buildMultiviewGenerationRequest(draft: MultiviewGenerationDraft, options: {
-  idempotencyKey: string; maxEstimatedCost: number; preset?: MultiviewRotationPreset; pricingRevision?: string | null;
+  idempotencyKey: string; maxEstimatedCost: number; preset?: MultiviewRotationPreset; pricingRevision?: string | null; pricingQuoteToken?: string;
 }): MultiviewGenerationRequest {
   if (!parseMultiviewGenerationDraft(draft)) throw new Error('生成设置无法安全读取，原输入保留');
   const composed = composeMultiviewGenerationPrompt(draft.supplement, draft.presetVersion, options.preset);
@@ -142,6 +144,7 @@ export function buildMultiviewGenerationRequest(draft: MultiviewGenerationDraft,
     ...(draft.resolutionApprovalId ? { resolution_approval_id: draft.resolutionApprovalId } : {}),
     idempotency_key: options.idempotencyKey, max_estimated_cost: options.maxEstimatedCost,
     ...(options.pricingRevision ? { pricing_revision: options.pricingRevision } : {}),
+    ...(options.pricingQuoteToken ? { pricing_quote_token: options.pricingQuoteToken, pricing_fingerprint_version: 2 as const } : {}),
     client_name: 'multiview', source_metadata: { source: 'multiview', mode: 'rotation' },
     multiview_generation: { schema: 1, presetId: MULTIVIEW_ROTATION_PRESET.id, presetVersion: draft.presetVersion,
       supplement: draft.supplement, workspaceTabId: draft.workspaceTabId,
