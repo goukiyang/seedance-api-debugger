@@ -26,20 +26,22 @@ async function main() {
   const require = createRequire(import.meta.url);
   const { requestAsyncStorage } = require('next/dist/client/components/request-async-storage.external') as typeof import('next/dist/client/components/request-async-storage.external');
   const { RequestCookies } = require('next/dist/compiled/@edge-runtime/cookies') as typeof import('next/dist/compiled/@edge-runtime/cookies');
-  const { NextRequest } = await import('next/server');
-  const { prisma } = await import('../src/lib/prisma');
-  const { createSession, getSession } = await import('../src/lib/auth/session');
-  const contract = await import('../src/lib/video/multiview-settings-contract');
-  const generation = await import('../src/lib/video/multiview-generation-contract');
-  const service = await import('../src/lib/video/multiview-settings.server');
-  const presets = await import('../src/lib/video/multiview-preset.server');
-  const pricing = await import('../src/lib/pricing/video-context');
-  const collection = await import('../src/app/api/multiview/settings/route');
-  const item = await import('../src/app/api/multiview/settings/[id]/route');
-  const apply = await import('../src/app/api/multiview/settings/[id]/apply/route');
-  const mutation = await import('../src/app/api/multiview/settings/mutations/[mutationId]/route');
-  const estimateRoute = await import('../src/app/api/tasks/estimate/route');
-  const createRoute = await import('../src/app/api/tasks/create/route');
+  // One module graph keeps real error class identity under Node20/tsx. Mixing
+  // dynamic ESM imports with alias-loaded CJS creates duplicate constructors.
+  const { NextRequest } = require('next/server') as typeof import('next/server');
+  const { prisma } = require('../src/lib/prisma') as typeof import('../src/lib/prisma');
+  const { createSession, getSession } = require('../src/lib/auth/session') as typeof import('../src/lib/auth/session');
+  const contract = require('../src/lib/video/multiview-settings-contract') as typeof import('../src/lib/video/multiview-settings-contract');
+  const generation = require('../src/lib/video/multiview-generation-contract') as typeof import('../src/lib/video/multiview-generation-contract');
+  const service = require('../src/lib/video/multiview-settings.server') as typeof import('../src/lib/video/multiview-settings.server');
+  const presets = require('../src/lib/video/multiview-preset.server') as typeof import('../src/lib/video/multiview-preset.server');
+  const pricing = require('../src/lib/pricing/video-context') as typeof import('../src/lib/pricing/video-context');
+  const collection = require('../src/app/api/multiview/settings/route') as typeof import('../src/app/api/multiview/settings/route');
+  const item = require('../src/app/api/multiview/settings/[id]/route') as typeof import('../src/app/api/multiview/settings/[id]/route');
+  const apply = require('../src/app/api/multiview/settings/[id]/apply/route') as typeof import('../src/app/api/multiview/settings/[id]/apply/route');
+  const mutation = require('../src/app/api/multiview/settings/mutations/[mutationId]/route') as typeof import('../src/app/api/multiview/settings/mutations/[mutationId]/route');
+  const estimateRoute = require('../src/app/api/tasks/estimate/route') as typeof import('../src/app/api/tasks/estimate/route');
+  const createRoute = require('../src/app/api/tasks/create/route') as typeof import('../src/app/api/tasks/create/route');
   const checks: string[] = [];
   const evidencePath = path.join(directory, 'receipt.json');
   let completed = false;
