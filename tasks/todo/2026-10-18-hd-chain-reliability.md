@@ -4,10 +4,10 @@ project: video-api-debugger
 document_version: 1.0.1
 target_root: /Volumes/Data/Projects/video-api-debugger
 version_source: package.json → src/lib/release.ts → /api/release
-runtime_observed: 2026-10-19T21:44:00.349Z v0.99.1 / 53eb8b54228fa844960b8c9c8015227af0f99bc8 / 5lgzI7p_lkCtSb0WZ6BSk（失败维护后原站已恢复）
-source_reviewed: codex/hd-chain-reliability-20261019 / 9baf40d0c01adcd3896ce02ca4f944bd164f0638（不是运行源）
+runtime_observed: 2026-10-19T22:41:02.841Z v0.99.2 / 6512e723804b1e2d1274309498c3e5bb514ee3ae / laGD9U4RLJWwcK60Qxkxa（Web/image/HD同源保护部署完成）
+source_reviewed: codex/hd-chain-reliability-20261019 / 6512e723804b1e2d1274309498c3e5bb514ee3ae（实际应用源；后续纯记录提交不冒运行源）
 relock_at_execution: true
-status: H01–H09工程已通过，5c2d双完整构建成功；H10切换失败、未部署，原站21:44Z已恢复。R07路线A私有接线/隔离批次及同lead Review已完成，尚无新完整构建或切换，待主管核新run/构建方案
+status: H01–H10整批工程与保护部署完成，v0.99.2已上线；两完整Linux20构建/原门、Review0open、实际原生切换与最终保护/公网产物有证，待用户手动验收。旧失败/恢复原件全部保留
 planning_depth: G5（跨前台、后台、持久文件、权限、生产切换与回退）
 risk: L4（原件/私有媒体/历史结果/发布及恢复保护）
 updated_at: 2026-10-19 America/Los_Angeles
@@ -104,16 +104,16 @@ updated_at: 2026-10-19 America/Los_Angeles
 
 | 编号 | 任务内容与主要落点 | 完成标准 | 依赖 | 状态 |
 |---|---|---|---|---|
-| H01 | 统一HD持久根和保护性接回：`src/lib/media/hd-derivatives.ts`的hdDirectory/容量/访问检查、`authorized-image-response.ts`；统一存储解析模块及发布收敛脚本按需新增 | Web/登记/后台/admin根相同；原件根与key不变；原24条ready直接可读不重编码；两侧现场不丢 | 执行时鲜核版本和writer | 代码及Linux20统一工程门通过；未部署、未手验 |
-| H02 | 生成后立即登记并可靠补漏：`src/lib/image-studio/worker.ts`两个完成点、`dimension-rejection.ts`外层事务完成后、`hd-discovery.ts`、扫描调用处；复用`dimension-mismatch.ts`产物谓词 | 成功/保留交付均覆盖；登记失败不改任务/费用；崩溃漏登记由有界扫描补回；旧一次性修复不重跑 | H01合同 | 代码及Linux20统一工程门通过；未部署、未手验 |
-| H03 | 真正的查看优先与独立发现：`scripts/process-hd-derivatives.ts`、`hd-derivatives.ts` selectHdJob/requestHd、`hd-discovery.ts`、`authorized-image-response.ts` | 当前查看优先于后台新图，所有队列有公平机会；编码进行中仍可发现/复核；无重复领取 | H01，H04接口 | 代码及Linux20统一工程门通过；未部署、未手验 |
-| H04 | 单张编码进程隔离：从`processHdJob`提取现有编码/验证，新增`scripts/process-hd-image.ts`及共享执行器 | 子进程不碰业务/终态；有界超时、退出确认和旧代次拒绝；默认并发仍1；原尺寸/质量验证保持 | H01 | 代码及Linux20统一工程门通过；未部署、未手验 |
-| H05 | 故障分类与原任务接续：`withHdLease/processHdJob/retryHdKey`、worker顶层catch、`hd-resource-state.ts`、原publish回执路径 | 正常争用/单图已知异常不全停；3次有限重试；中断前后只接同key；真硬故障不误解锁 | H03/H04同一后端包 | 代码及Linux20统一工程门通过；未部署、未手验 |
-| H06 | 查看器渐进显示和真实状态：`image-preview-session.ts`、`hd-display-policy.ts`、`hd-source-session.ts`、`ZoomableImagePreview.tsx`、`ResultImageCover.tsx` | queued/running不报不可用、不自动读完整原图；ready平滑替换；主动原图不被抢回；双击/缩放/对比/小屏保持 | descriptor合同先锁定；可与后台并行 | 代码及Linux20统一工程门通过；未部署、未手验 |
-| H07 | 权限、缓存和下载守住原合同：`image-read-session.ts`、`native-download.ts`、`image-comparison.ts`、`use-hd-image-source.ts`与原媒体授权路由 | 无跨账号/跨版本/跨变体复用；拒绝清族；HEAD/preload不创建任务；原图/复制/下载不降档或越权 | H06同一前端包 | 代码及Linux20统一工程门通过；未部署、未手验 |
-| H08 | 后台状态及最小诊断：`HdDerivativeManagement.tsx`、`src/app/api/admin/hd-derivatives/route.ts`、hdStatus及执行阶段记录 | 状态/实际进展/重试时机对应；admin/Origin/CAS保持；原异常脱敏可定位，不出现假健康/假完成 | H05状态合同；UI可独立 | 代码及Linux20统一工程门通过；未部署、未手验 |
-| H09 | 把防复发检查接入真实构建/发布：扩展`test-hd-stability.ts`、`test-hd-display.ts`及必要私有夹具，接现有`check-image-recovery.mjs`完整回执门；新增统一HD存储运行检查供本次发布控制器调用 | 隔离负例真实失败；既有门不丢；缺脚本/空跑/旧回执/目录分叉拒绝发布；不是只写未调用测试 | H01–H08整批完成后统一运行 | 真实默认prebuild及双完整构建通过；未部署 |
-| H10 | 同批版本、保护部署、相容回退与手验交付：`package.json`、`src/lib/release.ts`、`ReleaseNotice.tsx`及实际服务器发布控制器 | 完整构建/Git/真实运行/持久保护有证；保可运行相容回退；已部署待用户手验，不冒功能已通过 | H09通过，发布窗口鲜核 | 受阻、未部署：5c2d双完整build成功，维护并自然停image/HD后native helper目录身份拒绝；无fence/新pair/新writer。21:44Z原站及两后台安全恢复；仅只读复盘，不再切换/新build |
+| H01 | 统一HD持久根和保护性接回：`src/lib/media/hd-derivatives.ts`的hdDirectory/容量/访问检查、`authorized-image-response.ts`；统一存储解析模块及发布收敛脚本按需新增 | Web/登记/后台/admin根相同；原件根与key不变；原24条ready直接可读不重编码；两侧现场不丢 | 执行时鲜核版本和writer | 已部署待手验；固定根/同锁/既有ready原字节读取有证 |
+| H02 | 生成后立即登记并可靠补漏：`src/lib/image-studio/worker.ts`两个完成点、`dimension-rejection.ts`外层事务完成后、`hd-discovery.ts`、扫描调用处；复用`dimension-mismatch.ts`产物谓词 | 成功/保留交付均覆盖；登记失败不改任务/费用；崩溃漏登记由有界扫描补回；旧一次性修复不重跑 | H01合同 | 已部署待用户手验；整批Linux20默认工程门通过 |
+| H03 | 真正的查看优先与独立发现：`scripts/process-hd-derivatives.ts`、`hd-derivatives.ts` selectHdJob/requestHd、`hd-discovery.ts`、`authorized-image-response.ts` | 当前查看优先于后台新图，所有队列有公平机会；编码进行中仍可发现/复核；无重复领取 | H01，H04接口 | 已部署待用户手验；整批Linux20默认工程门通过 |
+| H04 | 单张编码进程隔离：从`processHdJob`提取现有编码/验证，新增`scripts/process-hd-image.ts`及共享执行器 | 子进程不碰业务/终态；有界超时、退出确认和旧代次拒绝；默认并发仍1；原尺寸/质量验证保持 | H01 | 已部署待用户手验；整批Linux20默认工程门通过 |
+| H05 | 故障分类与原任务接续：`withHdLease/processHdJob/retryHdKey`、worker顶层catch、`hd-resource-state.ts`、原publish回执路径 | 正常争用/单图已知异常不全停；3次有限重试；中断前后只接同key；真硬故障不误解锁 | H03/H04同一后端包 | 已部署待用户手验；整批Linux20默认工程门通过 |
+| H06 | 查看器渐进显示和真实状态：`image-preview-session.ts`、`hd-display-policy.ts`、`hd-source-session.ts`、`ZoomableImagePreview.tsx`、`ResultImageCover.tsx` | queued/running不报不可用、不自动读完整原图；ready平滑替换；主动原图不被抢回；双击/缩放/对比/小屏保持 | descriptor合同先锁定；可与后台并行 | 已部署待用户手验；整批Linux20默认工程门通过 |
+| H07 | 权限、缓存和下载守住原合同：`image-read-session.ts`、`native-download.ts`、`image-comparison.ts`、`use-hd-image-source.ts`与原媒体授权路由 | 无跨账号/跨版本/跨变体复用；拒绝清族；HEAD/preload不创建任务；原图/复制/下载不降档或越权 | H06同一前端包 | 已部署待用户手验；整批Linux20默认工程门通过 |
+| H08 | 后台状态及最小诊断：`HdDerivativeManagement.tsx`、`src/app/api/admin/hd-derivatives/route.ts`、hdStatus及执行阶段记录 | 状态/实际进展/重试时机对应；admin/Origin/CAS保持；原异常脱敏可定位，不出现假健康/假完成 | H05状态合同；UI可独立 | 已部署待用户手验；整批Linux20默认工程门通过 |
+| H09 | 把防复发检查接入真实构建/发布：扩展`test-hd-stability.ts`、`test-hd-display.ts`及必要私有夹具，接现有`check-image-recovery.mjs`完整回执门；新增统一HD存储运行检查供本次发布控制器调用 | 隔离负例真实失败；既有门不丢；缺脚本/空跑/旧回执/目录分叉拒绝发布；不是只写未调用测试 | H01–H08整批完成后统一运行 | 真实默认prebuild/双完整构建/生产resolver及40公网资源核对通过 |
+| H10 | 同批版本、保护部署、相容回退与手验交付：`package.json`、`src/lib/release.ts`、`ReleaseNotice.tsx`及实际服务器发布控制器 | 完整构建/Git/真实运行/持久保护有证；保可运行相容回退；已部署待用户手验，不冒功能已通过 | H09通过，发布窗口鲜核 | 已保护部署v0.99.2，实际原生切换/最终策略与持久保护通过；相容guard完整构建保留、回退未演练，待用户手验 |
 
 ### 3.1 共享修改边界和执行顺序
 
@@ -279,7 +279,7 @@ R03接续：新main `3c60ab19832299bbaad11dd0be6b07863895c0cf` / guard `a3a6d9a1
 
 [R06集中私有修正及同lead Review](../../docs/materials/2026-10-18-hd-chain-reliability/implementation/hd-release-safety-r06/)仅3源：导出现成稳定FD配置snapshot，三配置落点改按原/维护后精确身份、SHA及swap核对；其余19私有源、rootFile、系统proc/log reader、业务/质量/收费/TTL不变。正式`beforeMaintenance`仍先原checkpoint；共用纯只读主体另有不返回切换能力的工程入口。21:13:14Z Linux20[真实FS17、适配26、完整native只读主体](../../docs/materials/2026-10-18-hd-chain-reliability/implementation/16d3121a-e7e1-46f6-836d-92c2e334b68e/readonly-before-maintenance-r06/summary.json)全部exit0，实际配置→sync0→进程/cgroup→pricing屏障→nginx日志通过，非mock；所有临时文件仅隔离证据目录，0维护/stop/fence/DB/供应商写。工程明确不授发布权、不复用过期时段；下一轮只以固定记录新精确main/guard、新run及真实双完整build接续，不恢复TRACE业务或新增通用授权机制。
 
-### 9.1 5c2d双构建成功、切换失败及原站恢复（21:44Z当前）
+### 9.1 5c2d双构建成功、切换失败及原站恢复（21:44Z历史）
 
 本轮main `9baf40d0c01adcd3896ce02ca4f944bd164f0638` / guard `9ee7b237f32243babd2d6ba25e2deb9532f1b654`已原子push，业务字节与前轮不变。run `5c2d103a-4bb2-4c5d-ae62-b7f08e4b0965`两真实Linux20完整构建均exit0/verified=true：主21:20:38–21:27:35Z、BUILD `35pKoRZ3rZyqG5f0NHEvg`，guard21:28:39–21:35:19Z、BUILD `lAS104DozwrE3tApK3177`。默认8/RATE/HD70及类型lint/87静态页完成，43份引用工程原件分别完整拉回；[统一验证/原Review](../../docs/materials/2026-10-18-hd-chain-reliability/implementation/5c2d103a-4bb2-4c5d-ae62-b7f08e4b0965/)保留，不能据此前Review0open否认随后发现的发布接线缺陷。H01–H09工程通过但未上线、功能未手验；H10未完成。
 
@@ -299,7 +299,7 @@ R03接续：新main `3c60ab19832299bbaad11dd0be6b07863895c0cf` / guard `a3a6d9a1
 
 已实际阅读官方[Node20.20.2模块语义](https://nodejs.org/download/release/v20.20.2/docs/api/esm.html#importmetaurl)、[initialize_import_meta.js:49–64](https://raw.githubusercontent.com/nodejs/node/v20.20.2/lib/internal/modules/esm/initialize_import_meta.js)与[同版测试](https://raw.githubusercontent.com/nodejs/node/v20.20.2/test/es-module/test-esm-import-meta.mjs)，证实URL来自模块而非cwd；[systemd255实际BPF测试](https://raw.githubusercontent.com/systemd/systemd/v255/src/test/test-bpf-firewall.c)使用隔离runtime/cgroup并核内核与真实执行，不把属性文本冒执行有效。只借鉴边界和证据方法，未复制C代码、安装依赖或新增平台。此复查按三次失败后的路径复查执行，不清零原失败计数；正式源9baf工作树仍clean、未新提交应用或重建。
 
-### 9.3 R07路线A实施、隔离统一验证与Review（当前）
+### 9.3 R07路线A实施、隔离统一验证与Review
 
 主管随后明确授权路线A。仅4既有私有源变化：[R07冻结22源](../../docs/materials/2026-10-18-hd-chain-reliability/implementation/hd-release-safety-r07/frozen-private-source.json)，map SHA `fadea18e4601f20a9c61bce88b1f421f9f8c1e910ad7fa642dc284a92a5b8b56`。loader按原SHA将唯一helper独占复制为root/0600/单链接、验证整个canonical目录链后从operationStage真实URL加载；adapter的prepare/inspect/install/read/restore一致使用该namespace/native IO；release等待异步加载。真实prepareProbe已移入原checkpoint/只读核对后的beforeMaintenance，先于任何503/no-force/stop，安装前仍鲜核。原helper `d9482933…adda28`、empty-lock `b33fc87c…57807b`及其余18源逐字节不变，没有通用目录/目标/数据库覆写、依赖或权限扩大。
 
@@ -309,4 +309,24 @@ Linux20隔离工程原件在[operation-stage-engineering-eca93aa8](../../docs/ma
 
 [同lead Review](../../docs/materials/2026-10-18-hd-chain-reliability/implementation/hd-release-safety-r07/integrated-review.json) SHA `03ea9a4aa0f2d819da63db5d84526a25fda9aaf1ac513bea7fee947014665670`，0open，明确旧失败/恢复、隔离布局更正与真实覆盖边界。正常switch原来已有nginx真实200的30秒条件等待，此次未改nginx；先前单次原站恢复回调过早503不能泛成新产品故障。
 
-唯一后继run仅方案 `9b720778-c28a-47dd-8c00-9782387fde87`，尚未创建其远端候选或启动完整build。先以固定记录聚焦commit形成新immutable main、对应三文件guard子提交和新R07 manifest；业务字节不改，原9baf/9ee7及所有旧包原件保留。正常鲜核共享发布/当前六角色、同源HD动态结果、全账号sync0、数据盘/配置/原pair后再认领和上传；tar后须在capture前核stage实际root0700。当前未发布的.99.2只在届时实际SemVer仍适用时沿用，不预占别人交付。两新Linux20完整构建与真实时效后交主管鲜绑定批准，当前不生产切换。H10未完成、功能仍用户手验，TRACE/GEN暂停不变。
+唯一后继run方案 `9b720778-c28a-47dd-8c00-9782387fde87`随后获主管继续授权。以下§9.4记录真实接续，不覆盖本节R07原件；原9baf/9ee7及所有旧包证据保留。H10未完成、功能仍用户手验，TRACE/GEN暂停不变。
+
+### 9.4 9b720恢复后精确源与候选准备
+
+新main `6512e723804b1e2d1274309498c3e5bb514ee3ae`仅改本固定工单记录，guard `4e0403a6304752335dcfee78f21d1d88e8f3d675`仅其三版本/收费写入开关文件，两分支均已正常push；业务字节及未交付v0.99.2不变。22:12:04Z同次只读[六角色及HD锁原证](../../docs/materials/2026-10-18-hd-chain-reliability/implementation/hd-release-safety-r08/restored-six-role-input.json)核全部PID/Invocation/ExecMainStart单调时间；原HD flock父3068179/子3068180、唯一内核锁owner和五入口dev64784/ino171450476一致。[R08](../../docs/materials/2026-10-18-hd-chain-reliability/implementation/hd-release-safety-r08/frozen-private-source.json)仅release的六角色观测断言更新，其余21源/原helper/权限合同不变，map `a06d32f1838817c86bfeef59ab3e5738e597b0f572b4a27f51f36209fbad00e3`；原R07隔离193项及同run双prepare证据按未变源码复用，不冒新全生产演练。
+
+22:13:55Z通过正常recent/sole-owner/official confirm登记本run，explicit-entry tar不带`.`目录元信息；Linux20真实数据盘stage0700与29个root专属输入的owner/mode/nlink/SHA检查通过。新capture实际exit0，六启动身份全部严格匹配，manifest SHA `476a9fc9e1f892cde03ba710ea0dfc50eda650f29963b1bc648da282429484ce`；[本run原件](../../docs/materials/2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/)保留。两prepare及两完整Linux20 build均真实exit0/verified：main22:16:04.824–22:22:45.257Z、BUILD `laGD9U4RLJWwcK60Qxkxa`，guard22:24:13.497–22:30:44.861Z、BUILD `oAi35q9S2WJaIg3uq38Pc`。各8默认组/RATE与HD70、类型lint/87页齐，各43份工程原件已完整拉回；144默认/1424 RATE源码逐项同本run1556冻结清单。两构建期间按真实阶段续同run记录，结束后明确“构建退出、发布前核对进行中”，不假称仍占构建CPU或已释放整个发布路径。
+
+22:31:44.396Z [最终只读核对](../../docs/materials/2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/fresh-release-ready.json)确认六启动PID/Invocation/ExecMainStart全等、原数据/配置/账务/原件保护不变，全账号同步schema有效且running0；动态HD1250canonical/121fork/121重叠safe，60旧ready严格核对、7旧版本ready只保留不冒当前可复用。[统一验证](../../docs/materials/2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/unified-verification.json)与[同lead Review](../../docs/materials/2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/integrated-review.json)0open；该时点尚未维护，正式切换及终态见下节，原记录不冒事后已部署。主构建硬截止22:46:04.824Z，未延时效。
+
+### 9.5 H01–H10已保护部署、待用户手验（当前）
+
+v0.99.2已于22:37:38.553Z完成本run保护部署：Web/image/HD同源`6512e723804b1e2d1274309498c3e5bb514ee3ae`、BUILD `laGD9U4RLJWwcK60Qxkxa`，PID3136361/3136078/3136003健康。[实际switch-complete](../../docs/materials/2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/switch-complete.json)在批准窗口22:40:27.149Z及主构建硬截止22:46:04.824Z前完成。两新完整Linux20 build/default8/RATE/HD70/类型lint/87页及Review0open有证（§9.4），没有修改TTL或重写旧失败。
+
+用户已确认无人操作、无相关在途并允许短暂维护。原image/HD/Web全部自然结束，精确旧Web网络保护实际安装并按批准时点恢复、新pair/真实prestart均通过，两入口恢复原配置和200。22:41:02[最终保护/服务策略](../../docs/materials/2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/post-release-proof.json)确认原DB/账务/冻结任务/原件/隐藏/配置/未知上传/作品/+i保护不变、其它三服务原启动保持、fence=restored。最终Restart/Timeout分别Web always/90秒、image on-failure/11分钟、HD on-failure/3分钟，SendSIGKILL yes/yes/no，与原合同一致；临时run drop-in已撤，正式cwd/HD env/no-fork保持。中间runtime probe的Restart=no/infinity不是最终状态。
+
+[新source实际resolver读取](../../docs/materials/2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/release-receipts/hd-runtime-probe-main.json)证明真实gouki1004 helper使用canonical `/data/video-api-debugger/var-lib/storage/hd-derivatives`（64784:171598992），原锁64784:171450476仅新HD持有/no-fork。原key`00293950…d5b1`同version/218150字节/inode直接读取，0 SQL/网络/写；原件根、两侧成果/control、1250/121动态集合及历史版本保留，不迁移、覆盖或重编码。
+
+[39目标公网资源](../../docs/materials/2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/main-public-proof.json)与线上产物HTTP200/长度/SHA全同，覆盖HD查看器/后台真实chunk；四管理API匿名401。[升级layout](../../docs/materials/2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/release-notice-public-proof.json)另核HTTP200/SHA与原ReleaseNotice入口；本轮HD摘要在release.ts，匿名/非internal摘要空是原权限投影，internal才提供。真实旧客户端弹窗和页面功能未自动手验。[73发布/原生原件索引](../../docs/materials/2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/release-receipt-index.json)及两包各43工程原件已拉回逐SHA核同，私有不推公开。
+
+相容guard `4e0403a6304752335dcfee78f21d1d88e8f3d675` / v0.99.2+points-pricing-guard.1 / BUILD `oAi35q9S2WJaIg3uq38Pc`保留本批reader/子进程/固定根；仅三服务成套回程序，不回DB/媒体/账务/回执，不直接退53eb或旧649，回退未演练、执行仍须鲜核现行安全门。守门员finish已完成、无blocking warning（启发式L3但按实际L4保护），旧分级/归因误判与更正沿原条目保留。H01–H10工程及部署闭环，待用户手动验收；0AI生成/收费/重发/数据迁移，TRACE/GEN暂停不变。

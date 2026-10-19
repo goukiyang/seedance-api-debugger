@@ -1,5 +1,26 @@
 # Lessons
 
+## 2026-10-19 - HD历史保留与当前复用分开
+
+- H01–H10最终9b720已在真实新主/guard两完整Linux20构建后保护部署v0.99.2；先前私有接线失败不能泛成产品/编码质量缺陷，修正后也不抹失败或复用过期构建。恢复后六角色PID/Invocation/ExecMainStart须一起fresh capture，HD父子/flock也核真实集合，不能只改image一行又沿用旧启动。
+- 同run维护前prepare与安装前prepare须真实复用同一已核module/native IO和同字节探针；模块反复import不能冒双prepare验证。中间runtime probe含Restart=no/infinity等临时策略，不能当最终状态；完成后核精确run drop-in确已撤及原Restart/Timeout/SendSIGKILL恢复，而非只看进程active。原HD env/cwd/no-fork正式配置不随临时文件一起拆。
+- 公网匿名release摘要空先核原权限投影和真实internal摘要来源，再判断是否丢失；补实际layout产物同字节只能证明提醒代码已发布，不能冒旧客户端弹窗或整页功能手验通过。已部署、工程门、用户手验、相容回退演练分层记录。
+
+- R07采用保helper原字节的精确copy/import而非删目录断言：私有代码目录与operation数据目录职责不同，同一已核namespace贯穿prepare/install/read/restore，真实prepare应先于维护。原生21另补同run/同IO两次prepare核原inode/SHA/owner/0444/单链接不变，不能把模块两次加载冒两次准备已证。隔离tar的`.`也会把已建0700父恢复0755；本次原门正确拒绝，仅修自有测试父目录并补失败FS组，其余原件按同源SHA复用。该配套错误与产品、原生网络机制分开计，不延时效或抹旧失败。
+
+- native只读beforeMaintenance通过不等于后续probe/install接线可用：5c2d的helper由fix01-release静态导入，却硬要求import.meta.url所在目录等于hd-release-safety-r03，维护并停原image/HD后才首次触达prepareProbe而拒绝。无fence/新pair/新writer，原服务与入口已21:44Z精确恢复；须先复盘probe/install/restore/empty-lock全部真实模块路径，再选最小修正及独立unit/临时DB全链验证，不拿mock或只读主体冒native切换全链。恢复入口也需等待nginx真实reload生效后的200，不能用reload命令exit0代替；首次过早503/重挂与最终恢复原件分别保留，不扩大成业务故障或修改质量规则。
+
+- 发布输入先按真实责任分类，不能将root专属材料reader套到既有应用配置：16d两完整build成功后，维护前`.env` uid1004/0600被误拒，同类还有Nginx uid501/0644及维护后保原owner的config/swap。不以chown/chmod或放宽全部rootFile兜；原配置按稳定FD、精确原/本run维护身份及SHA保护，root材料/内核proc/可追加日志各保原合同。只跑外层proof或mock不足以覆盖adapter；本次集中17真实FS/26适配及完整native只读主体均实际通过，工程不授发布权，旧批准/build过期不续签。
+
+- systemd观测缺字段不能一律判配置缺失或默认为空：483c双完整build通过，最终只读proof因旧HD空ExecStartPre仍被`show --all`省略而拒绝。仅固定HD/该一字段可用原生D-Bus严格类型及空数组证明规范，Web/image实际root启动保护与其它字段不放松；先在真实三unit只读证明再开新build。保原build/manifest/失败，沿新精确源/run，不因读证修正引入补充授权或跨run续签。
+
+- 高清发布保护不能把所有旧manifest都当成当前源版本：4条已标source_changed与7条旧v2 ready在f140主prepare被误拦。字段重算证实旧key对应原version、当前原件是另一身份；只冻结明确旧清单和成果，保留不等于允许当前复用。新请求继续按当前身份算新key，未知/再变/坏完整性拒绝，不补历史字段或重压。
+- 缺integrity的旧ready只沿明确60条原盘点完整SHA/身份集合处理，不能把所有缺字段对象当旧版；真实候选路径与实际Sharp头/尺寸核对不能由合成FS通过代替。Mac超时、候选prepare拒绝、完整构建与功能手验分别记，不抬时限或伪造成功回执。
+- 旧Web同步图片admission仅覆盖该调用的完整Promise，不覆盖所有视频/H3预上传/分块建票据/邮件/登录及脱离HTTP的工作。连接0或inactive不能冒全业务已排空；已确认无统一封口时暂停生产切换，向用户说明维护条件，不借本批扩全站改造或擅自封网。
+- env-i不会清umask：外层日志077会让原0444票据变0400而被正常prepare拒绝。先对齐完整调用的环境/umask/父目录/owner/nlink和写读命名空间，沿原022与私有0700日志父，不放宽权限门或修改旧失败产物。服务启动保护读的是systemd当前WorkingDirectory，不是子进程cwd；真实main→guard→main四门应保原回执，不用改cwd伪造重复检查。
+- 先读实际exit/signal/子回执再归因：2e5 Linux HD整批32.468秒自然退出，24/25与12/13各一断言失败，不是此前Mac180秒超时。首次未读原件即联想超时已纠正并录原全局同主题误判条目；超时、断言、执行环境与产品硬保护分别定位，不因透明用例失败就放松完整性或全局硬停。
+- 接入已发布增量后，应用源码合入不等于私有发布reader的重复源清单也已同步。0ef4应用npm/类型lint/87页构建成功，但私有MV清单漏53eb既有FrameImage而拒绝，不能称产品构建失败或事后冒原成功回执；一次核完整producer/reader实际集合并保缺项/多项反证，沿原不可变根/真实时段重建，不增加收养或续签规则。仅清单一项变化，其余21私有源及业务字节保持。
+
 ## 2026-10-19 - MV16 先核真实会话再采性能
 
 - 原证打包等命令实际退出再算哈希：首次index抓到final-proof空hash被逐项核验拒绝；保旧包/错误，仅原proof完成后重打final证据包，不重跑部署/改原receipt。窗口外层输出有界，截断后只读核原登记，不二次append或平移时刻。
