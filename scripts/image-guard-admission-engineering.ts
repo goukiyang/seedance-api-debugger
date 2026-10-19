@@ -30,7 +30,7 @@ async function main() {
   const { RequestCookies, ResponseCookies } = await import('next/dist/server/web/spec-extension/cookies');
   const { DraftModeProvider } = await import('next/dist/server/async-storage/draft-mode-provider');
   function inRequest<T>(request: NextRequest, action: () => T): T {
-    const headers = HeadersAdapter.seal(new HeadersAdapter(Object.fromEntries(request.headers.entries())));
+    const headers = HeadersAdapter.seal(new Headers(Object.fromEntries(request.headers.entries())));
     const cookies = RequestCookiesAdapter.seal(new RequestCookies(new Headers(Object.fromEntries(request.headers.entries()))));
     const mutableCookies = new ResponseCookies(new Headers());
     const store: RequestStore = { headers, cookies, mutableCookies,

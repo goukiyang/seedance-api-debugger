@@ -2,6 +2,8 @@
 
 ## 当前入口
 
+- [ ] TRACE03-FIX 07:12Z当前：新20fe6b/cd4f66、run5d7e9私有32组及TRACE六组67项／RATE G01–G24 1046断言均通过，真实源与收据SHA已核；主完整build编译后于types退出1，guard未开始。106.75s有界types正常exit2收尽3个测试错误：原33行seal仍传旧HeadersAdapter，两个新增Set迭代不合当前TS默认目标。主控逐项核原错误与Next源码后核可仅三处测试适配，现统一修正为原生Headers和Array.from保序去重，不改配置/依赖/产品/15私有/版本/TTL。下一run `2ae78729-5e7a-46f1-ba65-2cc8f020d1f0`将新精确main/guard完整统一检查；5d7e9失败原证保留，不冒完整构建通过。生产仍2a/.96.0，0维护/stop/switch/真实供应商或费用写；以下节点为历史。
+
 - [ ] TRACE03-FIX（2026-10-19接续，当前）：实际 Web/image 仍为 RATE01 `2a1c641d0864850b5ca63f9d6201891341aa79bb`／v0.96.0。新bb6cf039主包/dc3178e8相容guard及v0.96.1已冻结推送；068490真实Linux20私有32组（42原状态/24整链恢复/10批准负证/5锁协议）和私有范围Review通过，1517源/15私有SHA同。随后完整npm在默认prebuild汇总退出1：原4image和5个RATE子通过，其余测试缺合法旧冻结合同、64hex种子、精确依赖/复制闭包，另有两条测试类型错；Next/guard未开始。已集中收尽并获主管核可，仅6测试文件统一纠正，新SHA/guard/run再完整构建，不改产品/收费门/100历史source/私有保护/TTL、不重复升号。前序17a/797c失败保留，旧be141/54c4失效。沿whole-storage、服务器HD目录helper和永久+i；0生产维护/stop/switch、供应商请求/收费测试/业务写/DDL/浏览器功能验收。功能仍用户手验。
 
 | 编号 | 任务 | 完成标准 | 当前状态 |

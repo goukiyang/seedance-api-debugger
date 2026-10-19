@@ -44,7 +44,7 @@ async function main() {
   const { pricingRuntimeSourceFiles } = await import('../src/lib/pricing/runtime');
   const sharedWorkerFiles = kind === 'toolflow'
     ? (await import('../src/lib/image-studio/tasks')).STUDIO_SHARED_WORKER_FILES : [];
-  for (const file of new Set([...pricingRuntimeSourceFiles(root), ...sharedWorkerFiles])) {
+  for (const file of Array.from(new Set([...pricingRuntimeSourceFiles(root), ...sharedWorkerFiles]))) {
     const destination = path.join(runtimeRoot, file), bytes = fs.readFileSync(path.join(root, file));
     if (fs.existsSync(destination)) assert.deepEqual(fs.readFileSync(destination), bytes, `Prepared runtime source changed: ${file}`);
     else { fs.mkdirSync(path.dirname(destination), { recursive: true }); fs.writeFileSync(destination, bytes, { flag: 'wx', mode: 0o600 }); }
