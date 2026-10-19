@@ -251,4 +251,8 @@ H01–H10业务代码/工程夹具已齐，原main9bc/guard5d5已推送并含真
 
 新run f1409252-e55f-4fef-9859-631fe5dc59d4主prepare真实exit1：HD身份检查拦11条已存在历史版本（4旧skipped/source_changed、7旧v2 ready），不是本轮新损坏。11原key按原version重算均吻合，当前原件stat已是另一版本；7旧成果长度及v2完整性保持。完整npm/guard未开始，旧包/manifest/失败原件保留，不在旧目录补造成功回执。新私有reader只允许冻结清单原样保留，不给当前版本复用旧成果，不写回、删改或重压；60无integrity旧ready另沿精确允许集合，不泛化缺字段容错。
 
-当前生产仍53eb/v0.99.1，Web/image与原HD PID/Invocation不变。生产切换暂停在旧Web全业务排空证明缺口，主管等待用户明确维护条件；不迁入/执行网络fence、不stop原服务、不改永久+i屏障。继续本轮产品完整构建与Review不代表切换获准，30分钟门自然过期即失效。正式根同一工单§9、私有H资料implementation/verification-r02、historical-version-inventory-20261019.json及f140 run为原证入口；功能仍用户手验，TRACE/GEN暂停不变。
+最后鲜核生产仍53eb/v0.99.1，Web/image与原HD PID/Invocation不变。用户随后明确确认无人操作、无上传/视频/邮件/登录等在途并允许短暂维护；这是人工确认，不冒技术全业务排空证明。仅在R03组合保护、真实双完整build和鲜核/窗口齐后执行维护，当前0生产维护/网络/服务动作，不改永久+i屏障。30分钟门自然过期即失效。正式根同一工单§9、私有H资料implementation/verification-r02、historical-version-inventory-20261019.json及f140 run为原证入口；功能仍用户手验，TRACE/GEN暂停不变。
+
+8b32第二run主prepare真实exit1：外层umask077使原0444输入票据变0400。旧800f候选目录、失败日志/回执不改，仍0fullbuild/guard prepare；新调用统一沿原022、日志父0700、root单链接与原SHA合同，未放宽门。因9bc/800f immutable候选根已创建，本次仅固定记录提交产生新精确根，业务/版本v0.99.2/TTL不变。
+
+R03私有发布组合已统一检查：语法、原机制接线99、实际adapter组合20、审批29及原保护断言78均exit0；只用纯逻辑/显式内存IO，不冒本轮native或Linux完整构建。复用已有原生精确Web cgroup/空锁证据；只增加两入口503→旧image/HD完整退出→同短锁sync0和精确旧Web网络校验→旧Web自然退出→新pair/四服务启动前检查→仅恢复本run网络→新源启动的接线，未知保503/保护、不回旧writer或业务数据。同leadReview0open，私有22源码冻结及原件在正式根同资料implementation/hd-release-safety-r03/，尚待新run Linux20完整双构建及最终鲜核发布，不把本项工程通过当H01–H10已上线或用户功能验收通过。
