@@ -2,6 +2,8 @@
 
 ## MV13–MV16 3D多视图设置与流畅调帧（2026-10-19）
 
+当前发布收口：五项MV13–MV17已部署v0.98.0／058cc070／BUILD9jE1upB8dBEzxH2oF2C8i，待用户手验。正式根同主题`mv13-16/9e54cb26-6124-4e86-a692-6de347201c08/`中的deployment-closure、integrated-review、unified-verification、两build原件、release-evidence-final及独立multiview-target-public-proof为当前证据。基础/定价9资源与多视图8资源分层核同，私有不推公开；原失败及inline附件缺口保留。[原单§15.6](../../tasks/todo/2026-10-17-multiview-instant-frame-workbench.md#156-mv13mv17-保护部署收口2026-10-19)。
+
 第二候选8e9原完整main log、controller保护拒绝和只读单字段/其余全保护对账见正式根同主题 `mv13-16/8e9fc0a0-45e9-4f04-bdb0-c2df487e561a/`；仅用户正常隐藏时间变化，未动生产。私有 `release-r02/common.mjs` 为单向隐藏投影差量，`release-protection-engineering-r02.mjs/.json` 实际42case原件（4允许/38拒绝，exit0），旧源/失败原件保留，不跨run拼成功回执。私有证据可读，不推公开。
 
 Linux20首候选c24e主prebuild失败原件与只读模块身份诊断已保存于正式根同主题 `mv13-16/c24e8f77-df0e-4ff7-9afa-c85b5ebe4668/`：5原组及RATE通过、4新子组中3通过，settings原函数409因测试双实例被API当未知503；只修fixture加载链，非产品保存/权限根因。原log/JSON可读，未切生产，私有不推公开。
@@ -9,7 +11,7 @@ Linux20首候选c24e主prebuild失败原件与只读模块身份诊断已保存�
 MV17已追加同一批：同作品普通编辑/保存更新原workId，仅显式另存新建；旧重复不删合并。用户已明确“三图模板”指生图模板。MV17作品库新截图仅聊天inline、文件路径未取得，未冒归档；正式原单§15.4与同编号todo为入口。
 MV16本轮新增同目标既存原片与隔离R02原证已归正式项目根同主题 `mv13-16/`，原字节SHA与真实显示终点对照已核；不推私有视频/回执。冷/暖与最后目标证据不冒用户Chrome整页性能，详细入口见正式根原单§15。
 
-来源：本轮用户四项文字/原聊天四图，项目video-api-debugger；关键词：生成设置、360提示词版本、共享、选帧方案、循环、atlas性能。新增实施计划及明确权限/帧号/保存合同见[原MVF工单§15](../../tasks/todo/2026-10-17-multiview-instant-frame-workbench.md#15-mv13mv16-保存设置与即时调帧2026-10-19实施中)；四张截图尚无可访问本地路径，未归档，不用旧图代替。既有图集方案、4秒97帧对照样例及原设计图沿该单§3/§10复用；新功能实施中，未有本轮完整构建/部署或用户功能验收。
+来源：本轮用户四项文字/原聊天四图，项目video-api-debugger；关键词：生成设置、360提示词版本、共享、选帧方案、循环、atlas性能。新增实施计划及明确权限/帧号/保存合同见[原MVF工单§15](../../tasks/todo/2026-10-17-multiview-instant-frame-workbench.md#15-mv13mv16-保存设置与即时调帧2026-10-19已部署待手验)；四张截图尚无可访问本地路径，未归档，不用旧图代替。既有图集方案、4秒97帧对照样例及原设计图沿该单§3/§10复用；本轮完整构建与保护部署已完成，用户功能验收未做。
 
 ## FIX01 共享上传修复（2026-10-19）
 
