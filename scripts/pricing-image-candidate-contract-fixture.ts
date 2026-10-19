@@ -6,7 +6,7 @@ import { getPricingImageChannelOptions, resolvePricingImageCandidate } from '@/l
 import { PricingItemUnavailableError, isPricingItemUnavailable } from '@/lib/pricing/item-unavailable';
 import { getImageGenerationApiSettings, getImageGenerationChannels, readPricingImageActualReadiness,
   resolveImageGenerationChannelSnapshot, IMAGE_GENERATION_API_SETTING_KEY, BANANA_IMAGE_API_SETTING_KEY } from '@/lib/integrations/image-generation';
-import { IMAGE_GENERATION_MODEL_DEFAULTS_SETTING_KEY } from '@/lib/integrations/image-generation-defaults';
+import { IMAGE_GENERATION_MODEL_DEFAULTS_SETTING_KEY, ImageGenerationQualityRouteError } from '@/lib/integrations/image-generation-defaults';
 import { IMAGE_STUDIO_SETTING_KEY, DEFAULT_STUDIO_PRICES } from '@/lib/image-studio/settings';
 import { PRICING_POLICY_KEY } from '@/lib/pricing/admin-contract';
 import { PRICING_IMAGE_CAPABILITY_KEY, PricingRuntimeError } from '@/lib/pricing/runtime';
@@ -146,7 +146,22 @@ export async function runPricingImageCandidateContractFixture(db: PrismaClient, 
     equal(routed.imageChannel?.channelId, 'banana'); equal(routed.unitCredits, 2); equal(routed.estimatedCredits, 6);
     equal(await snapshots(), beforeRouted + 1);
     equal(routed.modelOptions.find(item => item.model === 'gemini-3-pro-image-preview')!.unitCredits, 7);
-    equal(routed.modelOptions.find(item => item.model === 'gpt-image-2.5-sunburst')!.unitCredits, 0);
+    const oldQuality = routed.modelOptions.find(item => item.model === 'gpt-image-2.5-sunburst')!;
+    equal(oldQuality.status, 'unavailable'); equal(oldQuality.reason, 'specification_unsupported');
+    equal(oldQuality.unitCredits, null); equal(oldQuality.estimatedCredits, null); equal(oldQuality.chargeEnabled, false);
+    // Explicit zero remains a real price on a configured, supported quality; auto is not an alias for it.
+    await put(IMAGE_GENERATION_MODEL_DEFAULTS_SETTING_KEY, { version: 2, revision: 2,
+      models: { 'gpt-image-2.5-flare': 'banana', 'gemini-3-pro-image-preview': 'shared' },
+      qualityRoutes: { 'gpt-image-2.5-sunburst': { medium: 'shared', max: 'banana' } } });
+    const freeQuality = (await quote({ model: 'gpt-image-2.5-flare', quality: 'medium' }))
+      .modelOptions.find(item => item.model === 'gpt-image-2.5-sunburst')!;
+    equal(freeQuality.status, 'estimate'); equal(freeQuality.reason, null);
+    equal(freeQuality.unitCredits, 0); equal(freeQuality.estimatedCredits, 0); equal(freeQuality.chargeEnabled, false);
+    const unsupportedAuto = (await quote({ model: 'gpt-image-2.5-flare', quality: 'auto' }))
+      .modelOptions.find(item => item.model === 'gpt-image-2.5-sunburst')!;
+    equal(unsupportedAuto.status, 'unavailable'); equal(unsupportedAuto.reason, 'specification_unsupported');
+    equal(unsupportedAuto.unitCredits, null); equal(unsupportedAuto.estimatedCredits, null); equal(unsupportedAuto.chargeEnabled, false);
+    await reject(() => quote({ model: 'gpt-image-2.5-sunburst', quality: 'auto' }), error => error instanceof ImageGenerationQualityRouteError);
     const unopened = routed.modelOptions.find(item => item.model === 'gemini-nano-banana-2.1')!;
     equal(unopened.status, 'unavailable'); equal(unopened.unitCredits, null); equal(unopened.estimatedCredits, null);
     await reject(() => quote({ model: 'gemini-nano-banana-2.1' }));
