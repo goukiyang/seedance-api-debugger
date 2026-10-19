@@ -2,7 +2,7 @@ import packageInfo from '../../package.json';
 import { PRICING_ADMIN_WRITES_ENABLED } from './pricing/build-mode';
 
 export const release = { version: packageInfo.version, channel: 'production', summary: PRICING_ADMIN_WRITES_ENABLED
-  ? '3D多视图切帧时画面不再随按钮禁用而变暗，新帧准备好后再替换，保留原图、选帧及已有作品。'
+  ? '修复3D多视图因参考图链接需要登录而生成失败的问题，按原有权限直接传送原图；原图、作品和历史任务保持不变。'
   : '图片质量路由与已有任务已保留。API质量设置和费率暂时只读，已保存配置与原任务继续使用，不会自动改价。' };
 
 function numericOrder(a: string, b: string) {

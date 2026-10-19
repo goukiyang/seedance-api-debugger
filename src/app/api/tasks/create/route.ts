@@ -1782,7 +1782,8 @@ export async function POST(request: NextRequest) {
 
   let h3ReferenceTransfer: Awaited<ReturnType<typeof uploadH3ReferenceImagesForTask>> | null = null;
   let seedanceReferenceTransport: Partial<CreateVideoInput> = {};
-  if (requestedProvider === 'seedance' && (body.canvas_document_id
+  // Both callers have authorized their reference records above; keep private URLs out of upstream fetches.
+  if (requestedProvider === 'seedance' && (multiviewGeneration || body.canvas_document_id
     || cleanSourceMetadata(body.source_metadata).canvas_document_id || requestSource.source_metadata?.canvas_document_id)) {
     try { seedanceReferenceTransport = await seedanceLocalReferenceTransport({ ...providerInput, callback_url: requestCallbackUrl || undefined }, generationReferenceImages); }
     catch (error) { return errorJson(error instanceof Error ? error.message : '参考原图直传准备失败，尚未提交视频生成', 400); }

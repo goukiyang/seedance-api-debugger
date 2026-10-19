@@ -96,7 +96,7 @@ const fixtures = [
 fixtures.push({ file: 'scripts/multiview-settings-batch-engineering.mjs', schema: 'multiview-settings-batch-engineering.v1',
   marker: 'Multiview settings engineering receipt: ', checks: ['saved_settings_permissions_snapshots_and_timing',
     'frame_settings_keep_media_and_layout_private', 'preview_atlas_loop_exact_output_contract',
-    'same_work_identity_baseline_and_explicit_original_save'], sources: MULTIVIEW_SETTINGS_FIXTURE_SOURCES });
+    'same_work_identity_baseline_and_explicit_original_save', 'authorized_multiview_original_transport'], sources: MULTIVIEW_SETTINGS_FIXTURE_SOURCES });
 const pricingGate = 'scripts/check-pricing-policy.mjs';
 const sourceFiles = ['package.json', entry, pricingGate, ...fixtures.flatMap(fixture => [fixture.file, ...fixture.sources])];
 const hash = value => createHash('sha256').update(value).digest('hex');
