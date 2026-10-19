@@ -251,6 +251,8 @@
 
 ## 15. MV13–MV16 保存设置与即时调帧（2026-10-19，实施中）
 
+2026-10-19 14:44Z第二候选8e9：主npm完整prebuild/Next/types/lint/静态页exit0，controller收尾保护exit1、未写成功build回执，guard未build。只读对比663旧合同，仅一条deleted_at由null变为14:42:07.321Z；内存仅还原该字段即复现原hash，其余全保护通过；同秒原鉴权删除端点HTTP200（access无body/账号，不冒精确请求体）。已授权最小私有保护修正：19费用/输入字段hash不变，deleted_at独立投影，旧非空不许复活/改时/丢行，新隐藏须真实快照区间合法毫秒；42纯actual assertProtection正反例exit0。原before、日志和包保留，未重造main-build.json，未改业务/DB/费用。原证在8e9目录，私有release-r02/common及工程原件为本轮唯一发布保护差量；新精确main/三文件guard/run双完整重建，不抬0.98.0版本。
+
 2026-10-19 14:27Z候选节点：c24e主prebuild退出1，原5组及RATE门通过，新多视图4子组中3通过；settings第122行期望409而实得503。原隔离DB mode=ro和真实函数/原API对照确认Node20/tsx混合ESM/CJS令错误类构造器双实例，业务函数实际正确抛409；只将fixture改为单一createRequire加载图，不改产品catch/权限/原断言。Next、guard及任何生产切换未开始；原包/日志及 `original-loader-diagnostic.json` 保存在正式根同主题c24e目录。同一交付仍v0.98.0，以新精确main/guard/run重建，不复跑未变同媒体性能。
 
 本批同时追加MV17，同原作品普通保存更新、只有显式另存新建，详见§15.4；成熟实现/官方参考及为何复用本站合同见§15.5。
