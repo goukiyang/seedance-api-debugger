@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import type { Prisma } from '@prisma/client';
 import type { FrozenPricingCharge } from '@/lib/pricing/charge';
@@ -42,7 +42,7 @@ async function main() {
   const { parseImageBillingContract, billedImageContractCredits } = fixtureRequire('@/lib/image-studio/billing-contract') as typeof import('@/lib/image-studio/billing-contract');
   const { allocateTaskCredits, settleTaskCredits } = fixtureRequire('@/lib/credits/policy') as typeof import('@/lib/credits/policy');
   const { allocateProjectTaskBudget, settleProjectTaskBudget, adjustProjectBudget } = fixtureRequire('@/lib/projects/budget') as typeof import('@/lib/projects/budget');
-  const { finishStudioTask, submitStudioBatch } = fixtureRequire('@/lib/image-studio/tasks') as typeof import('@/lib/image-studio/tasks');
+  const { finishStudioTask, submitStudioBatch, STUDIO_SHARED_WORKER_FILES } = fixtureRequire('@/lib/image-studio/tasks') as typeof import('@/lib/image-studio/tasks');
   const { settleImageSupplierCharge } = fixtureRequire('@/lib/image-studio/billing') as typeof import('@/lib/image-studio/billing');
   const { matchImageSupplierCharge } = fixtureRequire('@/lib/image-studio/billing-provider') as typeof import('@/lib/image-studio/billing-provider');
   const { getAdminPricingSnapshot, previewAdminPricing, saveAdminPricing } = fixtureRequire('@/lib/pricing/policy') as typeof import('@/lib/pricing/policy');
@@ -52,7 +52,7 @@ async function main() {
   const { IMAGE_GENERATION_API_SETTING_KEY } = fixtureRequire('@/lib/integrations/image-generation') as typeof import('@/lib/integrations/image-generation');
   const { VOLCENGINE_IP_API_SETTING_KEY } = fixtureRequire('@/lib/integrations/volcengine-ip') as typeof import('@/lib/integrations/volcengine-ip');
   const { quoteStudioBatch, batchQuoteFingerprint, consumeBatchQuote } = fixtureRequire('@/lib/image-studio/batch-billing-quote') as typeof import('@/lib/image-studio/batch-billing-quote');
-  const { createStudioBatch, dispatchStudioBatches, continuationInput } = fixtureRequire('@/lib/image-studio/batches') as typeof import('@/lib/image-studio/batches');
+  const { createStudioBatch, dispatchStudioBatches, continuationInput, updateStudioBatch } = fixtureRequire('@/lib/image-studio/batches') as typeof import('@/lib/image-studio/batches');
   const { studioBatchBudgetPrecision } = fixtureRequire('@/lib/image-studio/batch-contract') as typeof import('@/lib/image-studio/batch-contract');
   const { prepareImageBillingQuote } = fixtureRequire('@/lib/image-studio/billing-quote-service') as typeof import('@/lib/image-studio/billing-quote-service');
   const { imageQuoteKey } = fixtureRequire('@/lib/image-studio/billing-quote-store') as typeof import('@/lib/image-studio/billing-quote-store');
@@ -239,6 +239,14 @@ async function main() {
   assert.ok(source && /^[a-f0-9]{40}$/.test(source));
   let captured = runtime.capturePricingWorkerCapability(source);
   await runtime.renewPricingWorkerCapability(db, captured);
+  const { publishStudioWorkerReadiness } = fixtureRequire('@/lib/image-studio/worker-mode') as typeof import('@/lib/image-studio/worker-mode');
+  const renewBatchReadiness = async () => {
+    await runtime.renewPricingWorkerCapability(db, captured);
+    await publishStudioWorkerReadiness({ acceptedOnly: false, workerId: captured.workerId, source,
+      loadedModuleSha: Object.fromEntries(STUDIO_SHARED_WORKER_FILES.map(file => [file,
+        createHash('sha256').update(fs.readFileSync(path.join(fixtureRoot, file))).digest('hex')])) }, db);
+  };
+  await renewBatchReadiness();
   group('G19', 'Production readiness uses actual Linux PID/start/cwd/module hashes and an actual root-owned immutable isolated marker.');
   ok(await runtime.assertPricingImageConsumerReady(db));
   const capabilityRow = await db.platformSetting.findUniqueOrThrow({ where: { key: runtime.PRICING_IMAGE_CAPABILITY_KEY } });
@@ -267,15 +275,52 @@ async function main() {
   let snapshot = await getAdminPricingSnapshot(actor);
   const imageRow = snapshot.rows.find(row => row.identity.kind === 'image' && row.identity.channelId === 'shared' && row.identity.modelId === 'gpt-image-2')!;
   ok(imageRow);
-  snapshot = await save(snapshot, { kind: 'save', changes: { standards: { site_base_cny: '1' }, rows: [
-    { id: imageRow.id, mode: 'follow', base: { amount: '0.15', currency: 'CNY', unit: 'image', source: { type: 'admin_defined',
-      reference: 'isolated source base', note: 'Synthetic image basis for isolated contract checks; not a supplier statement.' } } },
-  ] } });
-  captured = runtime.capturePricingWorkerCapability(source); await runtime.renewPricingWorkerCapability(db, captured);
   const moduleId = randomUUID();
   await db.imageStudioModule.create({ data: { id: moduleId, owner_id: user.id, name: 'Isolated pricing module', model: 'gpt-image-2', quality: 'auto', resolution: '1K' } });
   const imageBody = { moduleId, prompt: 'isolated fixture prompt', model: 'gpt-image-2', count: 3, quality: 'auto', resolution: '1K', aspectRatio: '1:1',
     referenceIds: [], revision: 0, requestId: randomUUID() };
+  group('G17', 'Real v3 legacy-fixed quote acceptance is allowed only before RATE adoption; an old unconsumed quote cannot become a new frozen parent after adoption.');
+  const legacyBatchBody = { ...imageBody, count: 1, requestId: randomUUID(), sources: [{ name: 'legacy-one' }], budget: 100 };
+  const legacyBatchQuote = await quoteStudioBatch(user.id, legacyBatchBody);
+  ok(legacyBatchQuote.batchQuoteId); equal(legacyBatchQuote.pricingRevision, null);
+  const legacyParentId = await createStudioBatch(user.id, { ...legacyBatchBody, batchQuoteId: legacyBatchQuote.batchQuoteId,
+    imageChannel: legacyBatchQuote.imageChannel });
+  equal(await db.platformSetting.count({ where: { key: `image_batch_billing_quote_v1:${user.id}:${legacyBatchQuote.batchQuoteId}` } }), 0);
+  const legacyParentKey = `studio_batch_v1:${user.id}:${legacyParentId}`;
+  const legacyReady = JSON.parse((await db.platformSetting.findUniqueOrThrow({ where: { key: legacyParentKey } })).value_json);
+  equal(legacyReady.state, 'ready'); equal(legacyReady.prepared, 1);
+  await updateStudioBatch(user.id, { id: legacyParentId, action: 'pause' });
+  const legacyParent = await db.platformSetting.findUniqueOrThrow({ where: { key: legacyParentKey } });
+  const legacyContracts = JSON.parse(legacyParent.value_json).billingContracts;
+  equal(legacyContracts.length, 1); equal(legacyContracts[0].mode, 'fixed'); equal(legacyContracts[0].pricing, undefined);
+  equal(legacyContracts[0].estimateSource, 'legacy_fixed'); equal(legacyContracts[0].estimateVersion, 'legacy-fixed-v1');
+  const unconsumedLegacyBody = { ...legacyBatchBody, requestId: randomUUID() };
+  const unconsumedLegacy = await quoteStudioBatch(user.id, unconsumedLegacyBody);
+  ok(unconsumedLegacy.batchQuoteId); equal(unconsumedLegacy.pricingRevision, null);
+  const unconsumedLegacyKey = `image_batch_billing_quote_v1:${user.id}:${unconsumedLegacy.batchQuoteId}`;
+  const unconsumedLegacyRow = await db.platformSetting.findUniqueOrThrow({ where: { key: unconsumedLegacyKey } });
+  group('G11', 'Actual image quote, acceptance, canvas estimate and frozen task use the same adopted policy revision.');
+  snapshot = await save(snapshot, { kind: 'save', changes: { standards: { site_base_cny: '1' }, rows: [
+    { id: imageRow.id, mode: 'follow', base: { amount: '0.15', currency: 'CNY', unit: 'image', source: { type: 'admin_defined',
+      reference: 'isolated source base', note: 'Synthetic image basis for isolated contract checks; not a supplier statement.' } } },
+  ] } });
+  captured = runtime.capturePricingWorkerCapability(source); await renewBatchReadiness();
+  const adoptionAccount = await db.creditAccount.findUniqueOrThrow({ where: { user_id: user.id } });
+  const adoptionTasks = await db.imageStudioTask.count(), adoptionLedger = await db.creditLedger.count();
+  const adoptionParents = await db.platformSetting.count({ where: { key: { startsWith: 'studio_', contains: '_batch_v1:' } } });
+  group('G17', 'Legacy quote -> real admin RATE adoption -> new parent rejection keeps the exact quote, account, ledger and task counts; accepted request IDs return their original parent before current pricing checks.');
+  await assert.rejects(() => createStudioBatch(user.id, { ...unconsumedLegacyBody, batchQuoteId: unconsumedLegacy.batchQuoteId,
+    imageChannel: unconsumedLegacy.imageChannel }), { status: 409 }); active.assertions++;
+  equal((await db.platformSetting.findUniqueOrThrow({ where: { key: unconsumedLegacyKey } })).value_json, unconsumedLegacyRow.value_json);
+  equal(await db.creditAccount.findUniqueOrThrow({ where: { user_id: user.id } }), adoptionAccount);
+  equal(await db.imageStudioTask.count(), adoptionTasks); equal(await db.creditLedger.count(), adoptionLedger);
+  equal(await db.platformSetting.count({ where: { key: { startsWith: 'studio_', contains: '_batch_v1:' } } }), adoptionParents);
+  equal(await createStudioBatch(user.id, { ...legacyBatchBody, batchQuoteId: legacyBatchQuote.batchQuoteId,
+    imageChannel: legacyBatchQuote.imageChannel, pricingRevision: 'deliberately-stale-existing-parent' }), legacyParentId);
+  equal((await db.platformSetting.findUniqueOrThrow({ where: { key: legacyParentKey } })).value_json, legacyParent.value_json);
+  equal(await db.creditAccount.findUniqueOrThrow({ where: { user_id: user.id } }), adoptionAccount);
+  equal(await db.imageStudioTask.count(), adoptionTasks); equal(await db.creditLedger.count(), adoptionLedger);
+  group('G11', 'Single-image quote acceptance retains the same fresh-pricing presence gate and exact authorization.');
   const quoted = await prepareImageBillingQuote(user.id, imageBody);
   equal(quoted.unitCredits, 0.2); equal(quoted.pricingRevision, snapshot.revision); ok(quoted.billingQuoteId);
   equal(quoted.estimatedCredits, 0.6);
@@ -287,7 +332,7 @@ async function main() {
   await assert.rejects(() => submitStudioBatch(user.id, { ...imageBody, prompt: 'different unquoted input',
     billingQuoteId: quoted.billingQuoteId, pricingRevision: quoted.pricingRevision,
     imageChannel: quoted.imageChannel, maxEstimatedCost: quoted.estimatedCredits }), { status: 409,
-    message: '实扣报价已过期、被使用或参数已变化，请重新报价' });
+    message: '图片规格或报价已更新、过期或被使用，请重新获取实际尺寸与报价；尚未生成' });
   active.assertions++;
   await assert.rejects(() => submitStudioBatch(user.id, { ...imageBody, billingQuoteId: quoted.billingQuoteId,
     imageChannel: quoted.imageChannel, maxEstimatedCost: quoted.estimatedCredits }), PricingChargeError);
@@ -324,13 +369,14 @@ async function main() {
   active.evidence.push('R05: three concurrent complete canvas quotes and three concurrent channel menus use one real transaction per projection; selected price/revision, unavailable null amounts and private snapshots remain intact.');
 
   group('G17', 'Actual persistent batch acceptance freezes per-child contracts; late dispatch after policy mutation uses the original unit fee.');
+  await renewBatchReadiness();
   const batchBody = { ...imageBody, count: 1, requestId: randomUUID(), sources: [{ name: 'one' }, { name: 'two' }], budget: 0.4 };
   const batchQuote = await quoteStudioBatch(user.id, batchBody); ok(batchQuote.batchQuoteId); equal(batchQuote.estimatedCredits, 0.4);
   const batchChannel = batchQuote.imageChannel; assert.ok(batchChannel); active.assertions++;
   const batchQuoteKey = `image_batch_billing_quote_v1:${user.id}:${batchQuote.batchQuoteId}`;
   const batchQuoteRow = await db.platformSetting.findUniqueOrThrow({ where: { key: batchQuoteKey } });
   const storedBatchQuote = JSON.parse(batchQuoteRow.value_json) as Record<string, unknown>;
-  equal(storedBatchQuote.fingerprintVersion, 2);
+  equal(storedBatchQuote.fingerprintVersion, 3);
   equal(storedBatchQuote.fingerprint, batchQuoteFingerprint(batchBody, batchChannel));
   equal(batchQuoteFingerprint({ ...batchBody, imageChannel: batchChannel }, batchChannel), storedBatchQuote.fingerprint);
   equal(batchQuoteFingerprint({ ...batchBody, channelId: 'original', imageChannel: batchChannel }, batchChannel), storedBatchQuote.fingerprint);
@@ -347,7 +393,7 @@ async function main() {
   }
   try {
     await db.platformSetting.update({ where: { id: batchQuoteRow.id }, data: {
-      value_json: JSON.stringify({ ...storedBatchQuote, fingerprintVersion: 3 }) } });
+      value_json: JSON.stringify({ ...storedBatchQuote, fingerprintVersion: 99 }) } });
     await assert.rejects(() => createStudioBatch(user.id, batchSubmission), { status: 409 }); active.assertions++;
     const legacyQuote: Record<string, unknown> = { ...storedBatchQuote,
       fingerprint: batchQuoteFingerprint({ ...batchBody, channelId: 'original' }, batchChannel, 1) };
@@ -383,13 +429,31 @@ async function main() {
   equal(continuationInput(continuationParent, { pricingRevision: 'stale-client-revision' }).pricingRevision, 'stale-client-revision');
   equal(continuationInput(continuationParent, {}).pricingRevision, undefined);
   equal(JSON.stringify(continuationParent), originalParent);
-  active.evidence.push('R07: canonical v2 parent quote accepts returned snapshots independent of field insertion order; changed inputs/budget/revision/channel and unknown formats refuse without consuming the quote or reserving credits. Versionless legacy receipts retain their exact original fingerprint rule.');
+  active.evidence.push('R07: server v3 parent quote accepts returned snapshots independent of field insertion order; changed inputs/budget/revision/channel and unknown formats refuse without consuming the quote or reserving credits. Versionless legacy receipts retain their exact original fingerprint rule.');
   active.evidence.push('R07: the actual continuation input helper preserves only pending sources, original request identity and the explicit client pricing revision, never fills a missing/stale revision or mutates the accepted parent.');
   const batchId = await createStudioBatch(user.id, { ...batchBody, batchQuoteId: batchQuote.batchQuoteId, pricingRevision: batchQuote.pricingRevision, imageChannel: batchQuote.imageChannel });
   const acceptedRevision = snapshot.revision;
+  const acceptedParentKey = `studio_pricing_batch_v1:${user.id}:${batchId}`;
+  const acceptedParent = await db.platformSetting.findUniqueOrThrow({ where: { key: acceptedParentKey } });
+  equal(JSON.parse(acceptedParent.value_json).billingContracts.map((contract: { pricing?: { revision: string } }) => contract.pricing?.revision), [acceptedRevision, acceptedRevision]);
+  const staleBatchBody = { ...batchBody, requestId: randomUUID() };
+  const staleBatchQuote = await quoteStudioBatch(user.id, staleBatchBody);
+  const staleBatchKey = `image_batch_billing_quote_v1:${user.id}:${staleBatchQuote.batchQuoteId}`;
+  const staleBatchRow = await db.platformSetting.findUniqueOrThrow({ where: { key: staleBatchKey } });
   snapshot = await save(snapshot, { kind: 'save', changes: { rows: [{ id: imageRow.id, mode: 'custom', customPointsPerCny: '2' }] } });
   ok(snapshot.revision !== acceptedRevision);
-  await runtime.renewPricingWorkerCapability(db, captured);
+  await renewBatchReadiness();
+  const staleAccount = await db.creditAccount.findUniqueOrThrow({ where: { user_id: user.id } });
+  const staleTasks = await db.imageStudioTask.count(), staleLedger = await db.creditLedger.count();
+  await assert.rejects(() => createStudioBatch(user.id, { ...staleBatchBody, batchQuoteId: staleBatchQuote.batchQuoteId,
+    pricingRevision: staleBatchQuote.pricingRevision, imageChannel: staleBatchQuote.imageChannel }), { status: 409 }); active.assertions++;
+  equal((await db.platformSetting.findUniqueOrThrow({ where: { key: staleBatchKey } })).value_json, staleBatchRow.value_json);
+  equal(await createStudioBatch(user.id, { ...batchBody, batchQuoteId: batchQuote.batchQuoteId,
+    pricingRevision: batchQuote.pricingRevision, imageChannel: batchQuote.imageChannel }), batchId);
+  equal((await db.platformSetting.findUniqueOrThrow({ where: { key: acceptedParentKey } })).value_json, acceptedParent.value_json);
+  equal(await db.creditAccount.findUniqueOrThrow({ where: { user_id: user.id } }), staleAccount);
+  equal(await db.imageStudioTask.count(), staleTasks); equal(await db.creditLedger.count(), staleLedger);
+  active.evidence.push('R08: real legacy and RATE quotes accept unchanged; real admin adoption invalidates unconsumed legacy quotes, and revision changes invalidate unconsumed RATE quotes inside new-parent acceptance. Rejections preserve quotes/accounts/tasks/ledger. Existing request IDs return unchanged parents before fresh checks; late children keep the original RATE charge.');
   await dispatchStudioBatches(); await dispatchStudioBatches();
   const lateChildren = await db.imageStudioTask.findMany({ where: { owner_id: user.id, batch_id: batchId }, orderBy: { ordinal: 'asc' } });
   equal(lateChildren.length, 2); equal(lateChildren.map(item => item.unit_credits), [0.2, 0.2]);

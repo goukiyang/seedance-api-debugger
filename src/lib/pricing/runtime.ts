@@ -90,6 +90,7 @@ export function pricingRuntimeSourceFiles(root = process.cwd()) {
     .filter(file => file.endsWith('.ts')).map(file => `${directory}/${file}`));
   return [...files, 'scripts/process-image-studio.ts', 'src/lib/credits/policy.ts',
     'src/lib/credits/precision.ts', 'src/lib/projects/budget.ts', 'src/lib/tools/toolflow-runtime.ts',
+    'src/lib/image-generation/output-plan.ts', 'src/lib/image-generation/resolution.ts', 'src/lib/media/hd-directory.ts',
     'src/lib/integrations/image-generation.ts', 'src/lib/integrations/image-generation-channel.ts',
     'src/lib/integrations/image-generation-defaults.ts', 'package.json', '.deployed-commit'].sort();
 }

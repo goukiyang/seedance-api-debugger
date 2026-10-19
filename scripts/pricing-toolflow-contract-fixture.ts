@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { SessionUser } from '@/lib/auth/session';
 import type { PricingAdminAction, PricingAdminPreviewInput } from '@/lib/pricing/admin-contract';
 import type { ToolFlowGraph } from '@/lib/tools/toolflow';
@@ -47,7 +47,15 @@ export async function runPricingToolflowContractFixture(options: PricingToolflow
     assertPricingWriterIsolation();
     const { capturePricingWorkerCapability, renewPricingWorkerCapability, revokePricingWorkerCapability } = await import('@/lib/pricing/runtime');
     const capability = capturePricingWorkerCapability(options.source);
-    const renew = () => renewPricingWorkerCapability(prisma, capability);
+    const renew = async () => {
+      await renewPricingWorkerCapability(prisma, capability);
+      const { publishStudioWorkerReadiness } = await import('@/lib/image-studio/worker-mode');
+      const { STUDIO_SHARED_WORKER_FILES } = await import('@/lib/image-studio/tasks');
+      const loadedModuleSha = Object.fromEntries(STUDIO_SHARED_WORKER_FILES.map(file => [file,
+        createHash('sha256').update(fs.readFileSync(path.join(runtimeRoot, file))).digest('hex')]));
+      await publishStudioWorkerReadiness({ acceptedOnly: false, workerId: capability.workerId,
+        source: options.source, loadedModuleSha }, prisma);
+    };
     release = () => revokePricingWorkerCapability(prisma, capability);
     await renew();
     const runtime = await import('@/lib/tools/toolflow-runtime');
@@ -103,7 +111,7 @@ export async function runPricingToolflowContractFixture(options: PricingToolflow
     } });
     const submit = async (flowId: string, owner = user) => {
       await renew();
-      const quote = await runtime.getToolFlowQuote(owner, flowId);
+      const quote = await runtime.getToolFlowQuote(owner, flowId, { inputAssetIds: [input.id] });
       return { quote, run: await runtime.createToolFlowRun(owner, flowId, [input.id], quote, runtime.createToolFlowQuoteProof(owner.id, quote)) };
     };
     const account = async (owner = user) => prisma.creditAccount.findUniqueOrThrow({ where: { user_id: owner.id } });
@@ -143,10 +151,10 @@ export async function runPricingToolflowContractFixture(options: PricingToolflow
     await assert.rejects(() => runtime.createToolFlowRun(user, flow.id, [input.id], { ...accepted.quote, estimatedCredits: 0 }, runtime.createToolFlowQuoteProof(user.id, accepted.quote)));
     evidence.push('G11: actual quote/create use the shared policy, sum three separately rounded 0.2-point images to 0.6, freeze private states and exclude binding from run/list DTOs; duplicate acceptance creates no extra children');
 
-    const stale = await runtime.getToolFlowQuote(user, flow.id);
+    const stale = await runtime.getToolFlowQuote(user, flow.id, { inputAssetIds: [input.id] });
     await save({ kind: 'save', changes: { rows: [{ id: imageRow.id, mode: 'custom', customPointsPerCny: '2.0' }] } });
     await assert.rejects(() => runtime.createToolFlowRun(user, flow.id, [input.id], stale, runtime.createToolFlowQuoteProof(user.id, stale)));
-    assert.equal((await runtime.getToolFlowQuote(user, flow.id)).steps[0].unitCredits, 0.3);
+    assert.equal((await runtime.getToolFlowQuote(user, flow.id, { inputAssetIds: [input.id] })).steps[0].unitCredits, 0.3);
     const settings = await getImageStudioSettings();
     await prisma.$transaction(tx => saveImageStudioSettingsInTx(tx, { ...settings, context: 'New context must not replace accepted context' }, user.id));
     const selected: string[] = [];
@@ -185,7 +193,7 @@ export async function runPricingToolflowContractFixture(options: PricingToolflow
     await assert.rejects(() => runtime.updateToolFlowRun(user, retryRun.id, { action: 'retry', node_id: 'first' }));
     for (let round = 0; round < 8; round += 1) {
       await renew();
-      const quote = await runtime.getToolFlowQuote(user, retryFlow.id, { runId: retryRun.id, nodeId: 'first' });
+      const quote = await runtime.getToolFlowQuote(user, retryFlow.id, { retry: { runId: retryRun.id, nodeId: 'first' } });
       assert.equal(quote.estimatedCredits, 0.3); assert.equal(quote.steps[0].unitCredits, 0.1);
       const proof = runtime.createToolFlowQuoteProof(user.id, quote);
       await runtime.updateToolFlowRun(user, retryRun.id, { action: 'retry', node_id: 'first', quote }, proof);
@@ -203,7 +211,7 @@ export async function runPricingToolflowContractFixture(options: PricingToolflow
     assert.equal(JSON.stringify(retryPublic).includes('binding'), false);
     assert.equal(creditCents((await rawRun(retryRun.id)).estimated_credits!), 330);
     evidence.push('G17/G21: explicit retry separately quotes/accepts current prices, preserves the original parent contract, exposes separate amounts and deduplicates the same retry; eight real three-child freeze/refund cycles conserve cents and parent estimates');
-    const successfulRetryQuote = await runtime.getToolFlowQuote(user, retryFlow.id, { runId: retryRun.id, nodeId: 'first' });
+    const successfulRetryQuote = await runtime.getToolFlowQuote(user, retryFlow.id, { retry: { runId: retryRun.id, nodeId: 'first' } });
     await runtime.updateToolFlowRun(user, retryRun.id, { action: 'retry', node_id: 'first', quote: successfulRetryQuote }, runtime.createToolFlowQuoteProof(user.id, successfulRetryQuote));
     for (let index = 0; index < 3; index += 1) await complete(retryRun.id, 'succeeded');
     assert.equal((await runtime.getToolFlowRun(user, retryRun.id)).status, 'succeeded');
@@ -233,7 +241,7 @@ export async function runPricingToolflowContractFixture(options: PricingToolflow
     await prisma.imageStudioTask.update({ where: { id: unknownTask.id }, data: { status: 'rate_uncertain' } });
     await prisma.toolFlowNodeRun.update({ where: { run_id_node_id: { run_id: unknown.id, node_id: 'first' } }, data: { status: 'failed' } });
     const beforeUnknown = await account();
-    await assert.rejects(() => runtime.getToolFlowQuote(user, unknownFlow.id, { runId: unknown.id, nodeId: 'first' }));
+    await assert.rejects(() => runtime.getToolFlowQuote(user, unknownFlow.id, { retry: { runId: unknown.id, nodeId: 'first' } }));
     assert.equal((await tasks(unknown.id)).length, 1);
     assert.equal(creditCents((await account()).frozen_credits), creditCents(beforeUnknown.frozen_credits));
     await runtime.updateToolFlowRun(user, unknown.id, { action: 'cancel' });
@@ -261,7 +269,7 @@ export async function runPricingToolflowContractFixture(options: PricingToolflow
       original_url: 'https://fixture.invalid/small.png', file_name: 'small.png', file_size: 1024,
       mime_type: 'image/png', width: 64, height: 64 } });
     const smallFlow = await makeFlow(1, false, smallUser);
-    const smallQuote = await runtime.getToolFlowQuote(smallUser, smallFlow.id);
+    const smallQuote = await runtime.getToolFlowQuote(smallUser, smallFlow.id, { inputAssetIds: [smallInput.id] });
     const smallRun = await runtime.createToolFlowRun(smallUser, smallFlow.id, [smallInput.id], smallQuote, runtime.createToolFlowQuoteProof(smallUser.id, smallQuote));
     await complete(smallRun.id, 'succeeded');
     assert.equal(creditCents((await account(smallUser)).balance), 5);

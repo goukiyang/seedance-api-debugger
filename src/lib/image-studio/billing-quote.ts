@@ -6,7 +6,7 @@ import { PRICING_IMAGE_BILLING_VERSION } from './billing-contract';
 import type { FrozenPricingCharge } from '../pricing/charge';
 
 export function imageSpecification(input: { model: string; quality: string; outputSize?: string | null;
-  aspectRatio: string; referenceCount: number; inputCharacters: number; inputDigest?: string }) {
+  aspectRatio: string; referenceCount: number; inputCharacters: number; inputDigest?: string; outputPlanHash?: string }) {
   return createHash('sha256').update(JSON.stringify(input)).digest('hex');
 }
 

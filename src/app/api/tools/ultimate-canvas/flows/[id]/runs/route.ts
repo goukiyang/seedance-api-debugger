@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
-import { assertCanUseToolFlow, parseIdList } from '@/lib/tools/toolflow';
-import { createToolFlowRun, listToolFlowRuns, toolFlowQuoteCookieName } from '@/lib/tools/toolflow-runtime';
+import { assertCanUseToolFlow } from '@/lib/tools/toolflow';
+import { createToolFlowRun, listToolFlowRuns, toolFlowQuoteCookieName, parseToolFlowQuoteInputAssets } from '@/lib/tools/toolflow-runtime';
+import { QueueCapacityError, QueueMaintenanceError } from '@/lib/image-studio/queue-capacity';
+import { StudioError } from '@/lib/image-studio/tasks';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -27,7 +29,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
     assertInternalOnly(user, '外部账号无权运行工具流。');
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
-    const inputAssetIds = parseIdList(body.input_asset_ids || body.inputAssetIds);
+    const inputAssetIds = parseToolFlowQuoteInputAssets(body.input_asset_ids || body.inputAssetIds);
     const quote = body.quote && typeof body.quote === 'object' && !Array.isArray(body.quote)
       ? body.quote as Record<string, unknown>
       : null;
@@ -39,6 +41,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     return NextResponse.json({ success: true, run }, { status: 202 });
   } catch (error) {
     if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
+    if (error instanceof QueueCapacityError || error instanceof QueueMaintenanceError || error instanceof StudioError) {
+      return NextResponse.json({ error: error.message, submitted: false }, { status: error.status });
+    }
     console.error('[ToolFlow] Run create failed:', error);
     return NextResponse.json({ error: '工具流运行创建失败' }, { status: 500 });
   }

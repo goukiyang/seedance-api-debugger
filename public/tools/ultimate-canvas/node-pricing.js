@@ -9,7 +9,10 @@
     const validCredits = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 10000000
         && Math.abs(value * 100 - Math.round(value * 100)) <= Math.min(0.00001, Number.EPSILON * Math.max(1, value * 100) * 4);
     const formatCredits = value => validCredits(value) ? String(Math.round(value * 100) / 100) : '待确认';
-    const fullQuoteRequired = quote => quote?.actualQuoteRequired === true || quote?.pricingQuoteRequired === true;
+    const fullQuoteRequired = quote => quote?.actualQuoteRequired === true || quote?.pricingQuoteRequired === true
+        || /^gpt-image-/.test(quote?.model || '');
+    const hasPreparedOutputPlan = quote => quote?.ratioContractVersion === 3
+        && /^\d+x\d+$/.test(quote?.outputPlan?.outputSize || '');
     const MODEL_OPTION_KEYS = ['model', 'label', 'status', 'reason', 'reasonText', 'unitCredits', 'estimatedCredits', 'count',
         'chargeEnabled', 'billingMode', 'actualQuoteRequired', 'estimateSource', 'creditPrecision', 'pricingRevision', 'pricingQuoteRequired'];
     const safeText = (value, maximum) => typeof value === 'string' && value.trim().length > 0
@@ -82,7 +85,11 @@
             && typeof quote?.billingQuoteId === 'string' && quote.billingQuoteId.length > 0
             && Date.parse(quote.expiresAt) > now && quote.revision === projection?.revision
             && (quote.billingMode === 'actual' && quote.actualChargeEnabled === true || quote.billingMode === 'fixed'
-                && typeof quote.pricingRevision === 'string' && quote.pricingRevision.length > 0)
+                && quote.actualChargeEnabled !== true
+                && (typeof quote.pricingRevision === 'string' && quote.pricingRevision.length > 0 || hasPreparedOutputPlan(quote)))
+            && (typeof projection?.actualQuoteRequired !== 'boolean' || (quote.billingMode === 'actual') === projection.actualQuoteRequired)
+            && (!/^gpt-image-/.test(projection?.model || '') || hasPreparedOutputPlan(quote))
+            && (quote.billingMode !== 'fixed' || projection?.estimatedCredits == null || quote.estimatedCredits === projection.estimatedCredits)
             && (!projection?.pricingRevision || projection.pricingRevision === quote.pricingRevision);
     }
 
@@ -118,6 +125,12 @@
                 && state.node.type === 'image' && state.el.querySelector('[data-generation-image-model]');
         }
 
+        function priceText(amount, quote) {
+            const size = /^\d+x\d+$/.test(quote?.outputPlan?.outputSize || '')
+                ? ` · ${quote.outputPlan.outputSize.replace('x', '×')}` : '';
+            return `合计约 ${formatCredits(amount)} 点数${size}`;
+        }
+
         function currentQuote(nodeId) {
             const state = states.get(String(nodeId));
             if (!state || !usable(state) || state.validUntil <= Date.now() || !state.quote
@@ -148,7 +161,7 @@
             const credits = fullQuoteRequired(state.quote)
                 ? validFullQuote(state.actualQuote, state.quote) ? state.actualQuote.estimatedCredits : null
                 : currentQuote(state.id)?.estimatedCredits;
-            slot.textContent = validCredits(credits) ? `合计约 ${formatCredits(credits)} 点数` : '费用待估算';
+            slot.textContent = validCredits(credits) ? priceText(credits, state.actualQuote) : '费用待估算';
         }
 
         function paint(state) {

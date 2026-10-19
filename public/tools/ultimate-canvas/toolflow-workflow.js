@@ -77,7 +77,14 @@
 
     function inputAssetIds(node = flowInputNode()) { return parseIds(node?.data?.assetIds || node?.data?.asset_ids); }
 
-    function flowQuoteKey(flow = currentFlow()) { return flow ? `${flow.id}:${flow.version}` : ''; }
+    function effectiveInputAssetIds() {
+        const nodeInputIds = inputAssetIds();
+        return nodeInputIds.length ? nodeInputIds : state.mode === 'guided'
+            ? [...state.selectedInputAssetIds]
+            : parseIds(panel()?.querySelector('[data-toolflow-input-assets]')?.value);
+    }
+
+    function flowQuoteKey(flow = currentFlow()) { return flow ? `${flow.id}:${flow.version}:${JSON.stringify(effectiveInputAssetIds())}` : ''; }
 
     function quoteLines() {
         return [...(panel()?.querySelectorAll('[data-toolflow-run]') || [])]
@@ -175,7 +182,8 @@
         clearQuoteExpiryTimer();
         renderQuoteLines();
 
-        const promise = request(`/api/tools/ultimate-canvas/flows/${encodeURIComponent(flow.id)}/quote`, { cache: 'no-store' })
+        const inputIds = effectiveInputAssetIds();
+        const promise = request(`/api/tools/ultimate-canvas/flows/${encodeURIComponent(flow.id)}/quote?inputAssetIds=${encodeURIComponent(JSON.stringify(inputIds))}`, { cache: 'no-store' })
             .then(quote => {
                 const expiresAt = Date.parse(quote?.expiresAt);
                 const hasUnknown = Array.isArray(quote?.steps) && quote.steps.some(step => step?.status === 'unknown');
@@ -657,10 +665,7 @@
         }
         try {
             ensureGuidedGraph();
-            const nodeInputIds = inputAssetIds();
-            const inputIds = state.mode === 'guided'
-                ? (nodeInputIds.length ? nodeInputIds : [...state.selectedInputAssetIds])
-                : (nodeInputIds.length ? nodeInputIds : parseIds(panel()?.querySelector('[data-toolflow-input-assets]')?.value));
+            const inputIds = effectiveInputAssetIds();
             if (!inputIds.length) { notice('请先选择至少一张输入图片。', 'warn'); return; }
             const result = await request(`/api/tools/ultimate-canvas/flows/${encodeURIComponent(flow.id)}/runs`, { method: 'POST', body: json({ input_asset_ids: inputIds, quote }) });
             setRun(result.run);

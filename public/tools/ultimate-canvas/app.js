@@ -413,8 +413,10 @@
                 : nodeEl?.querySelector('[data-canvas-node-price]');
             if (!line) return;
             const total = quote?.estimatedCredits;
+            const outputSize = /^\d+x\d+$/.test(quote?.outputPlan?.outputSize || '')
+                ? ` · ${quote.outputPlan.outputSize.replace('x', '×')}` : '';
             line.textContent = window.UltimateCanvasNodePricing?.validCredits(total)
-                ? `合计约 ${window.UltimateCanvasNodePricing.formatCredits(total)} 点数` : '费用待估算';
+                ? `合计约 ${window.UltimateCanvasNodePricing.formatCredits(total)} 点数${outputSize}` : '费用待估算';
         },
         clearQuote: nodeId => {
             if (engine.nodes.has(nodeId)) renderGenerationNodeControls(nodeId);
@@ -4915,6 +4917,9 @@
                     : window.UltimateCanvasNodePricing?.quote(node.id)?.estimatedCredits;
                 stylePrice.textContent = window.UltimateCanvasNodePricing?.validCredits(total)
                     ? `合计约 ${window.UltimateCanvasNodePricing.formatCredits(total)} 点数` : '费用待估算';
+                if (/^\d+x\d+$/.test(actualQuote?.outputPlan?.outputSize || '') && stylePrice.textContent !== '费用待估算') {
+                    stylePrice.textContent += ` · ${actualQuote.outputPlan.outputSize.replace('x', '×')}`;
+                }
                 stylePrice.title = '按当前后台报价；价格变化时会停止提交';
                 if (submit && !submit.classList.contains('is-loading')) submit.disabled = !interactionReadiness.ready || Boolean(styleJob && styleJob.state !== 'unconfirmed') || style.appliedBy !== canvasRuntime.bootstrap?.user?.id;
             } else window.UltimateCanvasNodePricing?.refresh(nodeEl, node);

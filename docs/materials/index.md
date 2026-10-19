@@ -1,5 +1,9 @@
 # 项目资料索引
 
+## TRACE03-FIX 新来源兼容接续（2026-10-19）
+
+当前实际来源为 RATE01 `2a1c641d0864850b5ca63f9d6201891341aa79bb`／v0.96.0；TRACE旧候选be141/54c4与R3仅历史，不再可发布。来源为正式工单与实际运行只读核对；主题：新旧规格/受理身份/压缩退避/费率兼容/永久屏障。正式原文在项目主目录 `tasks/todo/2026-10-10-fluxport-image-api.md` §17.6.5、费率原单§15.3；原Word/PNG及全部私有收据沿主目录 `docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/`，不复制公开。新业务/fixture已齐，仅静态；未消费legacy批次报价期间采纳RATE的竞态已补同事务门，待统一完整检查。新发布器保持whole-storage与原+i，不建镜像/副本；HD仅server目录resolver。`rate-compat-private/native-fence-observations/summary-f9dd06f4-6cba-4fb0-8007-82c5830cce5e.json` 为独立原生探针机制证据，32命令/3源SHA及双栈迟到事务有证，正式服务/DB/供应商影响0；不冒生产封网或已部署。组合门及新主/guard双build未运行，功能仍用户手验。
+
 ## MAT-M01/MAT-M02 手机素材选择与分页（2026-10-18）
 
 来源：2026-10-18用户当前文字要求（America/Los_Angeles当地2026-10-17）；项目video-api-debugger；主题：手机素材弹窗、上传、筛选折叠、12–24张自适应分页。无新附件/原文件名不适用。[正式原文及设计/开源源码记录](../../tasks/todo/2026-10-02-unified-resource-library.md#mat-m01mat-m02-手机素材选择与分页2026-10-18)；v1实施中，取代REF33仅按三行限制，不替代常显来源/权限/原请求合同。沿用[2026-10-12来源页签截图](2026-10-12-studio-ui-clarity/codex-clipboard-6d9b008a-156e-40c2-8609-323ee99d6146.png)与[REF33分页原图](2026-10-08-canvas-reference-asset-pagination/codex-clipboard-5bee373b-c708-4a18-9ff0-8460b4e2211d.png)作历史参考，不冒充新手机效果。开源Uppy/TanStack源码和MIT许可已在线读取；未安装依赖、未作功能验收。正式根保存原始参考附件；辅助说明不逐项哈希。

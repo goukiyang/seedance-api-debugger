@@ -7,8 +7,11 @@ import { createInAppNotification } from '@/lib/notifications';
 import { getImageStudioSettings, IMAGE_STUDIO_SETTING_KEY } from '@/lib/image-studio/settings';
 import { canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from '@/lib/image-studio/access';
 import { defaultImageStudioQuality, normalizeImageStudioQuality, IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
-import { normalizeStudioRatio, studioRatioSize } from '@/lib/image-studio/ratios';
-import { captureImageGenerationChannel, getImageGenerationChannelOptions, getImageGenerationSettingsForModel, getManagedImageGenerationChannels, hasLegacyImageGenerationModelOverride, resolveImageGenerationChannelSnapshot, type ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation';
+import { normalizeStudioRatio, resolveStudioAspectRatio, legacyStudioRatioSize as studioRatioSize } from '@/lib/image-studio/ratios';
+import { captureImageGenerationChannel, getImageGenerationChannelOptions, getImageGenerationSettingsForModel, getManagedImageGenerationChannels, hasLegacyImageGenerationModelOverride, resolveImageGenerationChannelSnapshot, imageGenerationModelOutputPlan, type ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation';
+import { normalizeImageResolution, isValidImageDimension, IMAGE_RESOLUTION_OPTIONS } from '@/lib/image-generation/resolution';
+import { imageOutputPlanHash, parseImageOutputPlan, publicImageOutputPlan, savedImageRatioContractVersion, type ImageOutputPlan, type ImageRatioContractVersion, type PublicImageOutputPlan } from '@/lib/image-generation/output-plan';
+import { assertSharedStudioWorkerReady, safeImageChannelSnapshot } from '@/lib/image-studio/tasks';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import { imageBillingScope } from '@/lib/image-studio/billing-scope';
 import { fixedImageBillingContract, imageSpecification, withPricingImageContract } from '@/lib/image-studio/billing-quote';
@@ -17,11 +20,15 @@ import { studioTaskState, studioBillingState, publicPricingTaskState, studioTask
 import { assertNewPricingCharge, frozenPricingCredits } from '@/lib/pricing/charge';
 import { withImagePricing } from '@/lib/pricing/image';
 import { addCredits, sumCredits, assertCreditWriteback, creditsFromCents } from '@/lib/credits/precision';
-import { reserveImageStudioQueueCapacity, QueueCapacityError, QueueMaintenanceError } from '@/lib/image-studio/queue-capacity';
+import { reserveImageStudioQueueCapacity, assertImageStudioAdmissionOpen, QueueCapacityError, QueueMaintenanceError } from '@/lib/image-studio/queue-capacity';
 import { assertCanUseToolFlow, parseJsonObject, validateToolFlowGraph, type ToolFlowGraph, type ToolFlowNode } from './toolflow';
 
 type Tx = Prisma.TransactionClient;
+type ToolFlowOutputIntent = { resolution: string; requestedRatio: string; explicitSize?: string };
 type ToolFlowQuoteStep = {
+  outputIntent?: ToolFlowOutputIntent;
+  outputPlan?: PublicImageOutputPlan | null;
+  imageChannel?: ImageGenerationChannelSnapshot;
   nodeId: string;
   templateId: string | null;
   moduleId: string | null;
@@ -35,6 +42,8 @@ type ToolFlowQuoteStep = {
   contractDigest: string;
 };
 type ToolFlowQuote = {
+  ratioContractVersion?: ImageRatioContractVersion;
+  inputAssetIds?: string[];
   flowId: string;
   flowVersion: number;
   settingsRevision: number;
@@ -46,6 +55,7 @@ type ToolFlowQuote = {
   retryNodeId?: string | null;
 };
 type RunSnapshot = {
+  ratioContractVersion?: ImageRatioContractVersion;
   schema: 'toolflow.v1';
   flow_id: string;
   flow_owner_id: string;
@@ -72,6 +82,7 @@ type FrozenToolFlowNode = {
 };
 
 type NodeResult = {
+  outputPlans?: Array<{ ordinal: number; taskId: string; outputPlan: ImageOutputPlan; outputPlanHash: string }>;
   taskIds?: string[];
   expected?: number;
   succeededAssetIds?: string[];
@@ -83,6 +94,9 @@ type NodeResult = {
 };
 
 type TemplateConfig = {
+  outputIntent?: ToolFlowOutputIntent;
+  outputPlan?: ImageOutputPlan;
+  imageChannel?: ImageGenerationChannelSnapshot;
   prompt: string;
   context: string;
   model: string;
@@ -182,7 +196,25 @@ function parseIds(value: unknown, limit = 30) {
 
 function parseNodeResult(value: string | null | undefined): NodeResult {
   const parsed = parseJsonObject(value);
+  let outputPlans: NodeResult['outputPlans'];
+  if (Object.prototype.hasOwnProperty.call(parsed, 'outputPlans')) {
+    // Keep absence distinct for old records. A present malformed field becomes
+    // an empty allowlist, never a raw-public fallback or an invented plan.
+    outputPlans = [];
+    for (const value of Array.isArray(parsed.outputPlans) ? parsed.outputPlans : []) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+      const item = value as Record<string, unknown>;
+      if (typeof item.ordinal !== 'number' || !Number.isSafeInteger(item.ordinal) || item.ordinal < 1
+        || typeof item.taskId !== 'string' || !item.taskId || item.taskId.length > 160
+        || item.taskId.trim() !== item.taskId || /[\x00-\x1f\x7f]/.test(item.taskId)
+        || typeof item.outputPlanHash !== 'string' || !/^[a-f0-9]{64}$/.test(item.outputPlanHash)) continue;
+      const outputPlan = parseImageOutputPlan(item.outputPlan);
+      if (!outputPlan || imageOutputPlanHash(outputPlan) !== item.outputPlanHash) continue;
+      outputPlans.push({ ordinal: item.ordinal, taskId: item.taskId, outputPlan, outputPlanHash: item.outputPlanHash });
+    }
+  }
   return {
+    ...(outputPlans === undefined ? {} : { outputPlans }),
     taskIds: parseIds(parsed.taskIds),
     expected: Number.isInteger(Number(parsed.expected)) ? Number(parsed.expected) : undefined,
     succeededAssetIds: parseIds(parsed.succeededAssetIds),
@@ -202,12 +234,37 @@ function quoteProofPayload(userId: string, value: unknown) {
   const quote = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
   const steps = Array.isArray(quote.steps) ? quote.steps.map((value) => {
     const step = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
-    return ['nodeId', 'templateId', 'moduleId', 'templateVersion', 'model', 'count', 'unitCredits', 'estimatedCredits', 'status', 'pricingRevision', 'contractDigest']
+    return ['nodeId', 'templateId', 'moduleId', 'templateVersion', 'model', 'count', 'unitCredits', 'estimatedCredits', 'status', 'pricingRevision', 'contractDigest',
+      ...(quote.ratioContractVersion === 3 ? ['outputIntent', 'outputPlan', 'imageChannel'] : [])]
       .map((key) => step[key] ?? null);
   }) : [];
   return JSON.stringify([userId, quote.flowId ?? null, quote.flowVersion ?? null, quote.settingsRevision ?? null,
     quote.estimatedCredits ?? null, quote.expiresAt ?? null, quote.billingMode ?? null,
-    quote.retryRunId ?? null, quote.retryNodeId ?? null, steps]);
+    quote.retryRunId ?? null, quote.retryNodeId ?? null, steps,
+    ...(quote.ratioContractVersion === 3 ? [3, quote.inputAssetIds] : [])]);
+}
+
+export function parseToolFlowQuoteInputAssets(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > 30 || value.some(id => typeof id !== 'string'
+    || !id || id.length > 100 || id.trim() !== id)) throw new AuthError('工具流输入图片清单无效，尚未报价或派发', 400);
+  return parseIds(value);
+}
+
+/** null means a future generation/selection has not produced its actual input yet. */
+export function toolFlowKnownQuoteInputs(graph: ToolFlowGraph, nodeId: string, inputAssetIds: string[]): string[] | null {
+  const byId = nodeMap(graph);
+  const visit = (id: string, seen: Set<string>): string[] | null => {
+    if (seen.has(id)) throw new AuthError('工具流连接存在循环，尚未报价', 400);
+    const node = byId.get(id);
+    if (!node) throw new AuthError('工具流上游节点已失效，尚未报价', 400);
+    if (node.type === 'flow-input') return inputAssetIds;
+    if (['flow-template', 'flow-select', 'flow-confirm'].includes(node.type)) return null;
+    const next = new Set(seen).add(id);
+    const values = parents(graph, id).map(parent => visit(parent, next));
+    return values.some(value => value === null) ? null : Array.from(new Set(values.flatMap(value => value || [])));
+  };
+  const values = parents(graph, nodeId).map(parent => visit(parent, new Set([nodeId])));
+  return values.some(value => value === null) ? null : Array.from(new Set(values.flatMap(value => value || [])));
 }
 
 export function toolFlowQuoteCookieName(flowId: string, expiresAt: string) {
@@ -226,6 +283,40 @@ export function assertToolFlowQuoteProof(userId: string, quote: unknown, proof: 
   if (received.length !== expected.length || !timingSafeEqual(received, expected)) {
     throw new AuthError('工具流报价凭据无效或已过期，请重新报价', 409);
   }
+}
+
+// A new run may reuse only the channels authenticated by the existing quote
+// proof. This private map is never accepted from a client or used for old runs.
+function authenticatedToolFlowQuoteChannels(userId: string, value: unknown, proof: string | undefined,
+  current: { flowId: string; flowVersion: number; settingsRevision: number; inputAssetIds: string[]; nodeIds: string[]; retryRunId?: string; retryNodeId?: string }) {
+  assertToolFlowQuoteProof(userId, value, proof);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AuthError('工具流报价无效，请重新报价', 409);
+  const quote = value as Partial<ToolFlowQuote>;
+  const now = Date.now(), expiresAt = typeof quote.expiresAt === 'string' ? Date.parse(quote.expiresAt) : NaN;
+  if (!Number.isFinite(expiresAt) || expiresAt <= now || expiresAt > now + 60_000
+    || quote.ratioContractVersion !== 3 || quote.billingMode !== 'fixed'
+    || quote.flowId !== current.flowId || quote.flowVersion !== current.flowVersion
+    || quote.settingsRevision !== current.settingsRevision
+    || (quote.retryRunId ?? null) !== (current.retryRunId ?? null)
+    || (quote.retryNodeId ?? null) !== (current.retryNodeId ?? null)
+    || typeof quote.estimatedCredits !== 'number' || !Number.isFinite(quote.estimatedCredits) || quote.estimatedCredits < 0
+    || JSON.stringify(quote.inputAssetIds) !== JSON.stringify(current.inputAssetIds)
+    || !Array.isArray(quote.steps) || quote.steps.length !== current.nodeIds.length) {
+    throw new AuthError('工具流报价已过期或设置已变化，请重新报价', 409);
+  }
+  const channels = new Map<string, ImageGenerationChannelSnapshot>();
+  for (let index = 0; index < current.nodeIds.length; index++) {
+    const step = quote.steps[index];
+    const channel = step && safeImageChannelSnapshot(step.imageChannel);
+    if (!step || typeof step !== 'object' || Array.isArray(step)
+      || step.nodeId !== current.nodeIds[index] || channels.has(step.nodeId)
+      || !step.outputIntent || typeof step.outputIntent !== 'object' || Array.isArray(step.outputIntent)
+      || !channel || channel.channelId !== 'original' || !/^[0-9a-f-]{36}$/i.test(channel.configRevision)) {
+      throw new AuthError('工具流图片规格报价节点不完整或已变化，请重新报价', 409);
+    }
+    channels.set(step.nodeId, channel);
+  }
+  return channels;
 }
 
 async function currentImageSettingsRevision(tx: Tx) {
@@ -353,7 +444,9 @@ async function resolveTemplate(
   inputAssetIds: string[],
   settings: Awaited<ReturnType<typeof getImageStudioSettings>>,
   identity: ImageStudioIdentity,
-  options: { cloneReferenceAssets?: boolean; allowUnknownModel?: boolean; allowUnknownPrice?: boolean } = {},
+  options: { cloneReferenceAssets?: boolean; allowUnknownModel?: boolean; allowUnknownPrice?: boolean;
+    ratioContractVersion?: ImageRatioContractVersion; deferAuto?: boolean; outputIntent?: ToolFlowOutputIntent;
+    imageChannel?: ImageGenerationChannelSnapshot; forSubmission?: boolean } = {},
 ): Promise<TemplateConfig> {
   const data = node.data || {};
   const templateId = clean(data.template_id || data.templateId) || null;
@@ -371,6 +464,7 @@ async function resolveTemplate(
   let count = numberInRange(data.count, 1, 1, 8);
   let aspectRatio = clean(data.ratio || data.aspect_ratio, 'auto');
   let outputSize: string | null = clean(data.size || data.output_size) || null;
+  let templateResolution = '1K';
   let templateReferenceIds: string[] = [];
   let sourcePresetId: string | null = null;
   const requestedTemplateVersion = data.template_version ?? data.templateVersion;
@@ -388,6 +482,7 @@ async function resolveTemplate(
     prompt = [preset.prompt, promptSupplement].filter(Boolean).join('\n\n');
     templateContext = preset.context || '';
     model = preset.model || settings.model;
+    templateResolution = (preset as { resolution?: string | null }).resolution || templateResolution;
     quality = normalizeImageStudioQuality(model, data.quality || preset.quality);
     count = numberInRange(data.count, numberInRange(preset.count, 1, 1, 8), 1, 8);
     aspectRatio = clean(data.ratio || data.aspect_ratio, preset.aspect_ratio || 'auto');
@@ -408,6 +503,7 @@ async function resolveTemplate(
     prompt = [studioModule.prompt, promptSupplement].filter(Boolean).join('\n\n');
     templateContext = studioModule.context || '';
     model = studioModule.model || settings.model;
+    templateResolution = studioModule.resolution || templateResolution;
     quality = normalizeImageStudioQuality(model, data.quality || studioModule.quality);
     count = numberInRange(data.count, numberInRange(studioModule.count, 1, 1, 8), 1, 8);
     aspectRatio = clean(data.ratio || data.aspect_ratio, studioModule.aspect_ratio || 'auto');
@@ -433,8 +529,43 @@ async function resolveTemplate(
   if (options.allowUnknownPrice !== true && !settings.prices[model as keyof typeof settings.prices] && settings.prices[model as keyof typeof settings.prices] !== 0) {
     throw new AuthError('当前图片模型尚未配置工具流生成积分', 409);
   }
-  try { aspectRatio = normalizeStudioRatio(aspectRatio); } catch { aspectRatio = 'auto'; }
-  const referenceIds = Array.from(new Set(templateReferenceIds.concat(inputAssetIds))).slice(0, 9);
+  try { aspectRatio = normalizeStudioRatio(aspectRatio); }
+  catch (error) { if (options.ratioContractVersion === 3) throw error; aspectRatio = 'auto'; }
+  const allReferenceIds = Array.from(new Set(templateReferenceIds.concat(inputAssetIds)));
+  if (options.ratioContractVersion === 3 && allReferenceIds.length > 9) {
+    throw new AuthError('当前工具流最多使用9张参考图；输入未被删减，尚未派发生成', 409);
+  }
+  const referenceIds = allReferenceIds.slice(0, 9);
+  let outputIntent: ToolFlowOutputIntent | undefined, outputPlan: ImageOutputPlan | undefined;
+  let imageChannel: ImageGenerationChannelSnapshot | undefined;
+  if (options.ratioContractVersion === 3 && IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number])) {
+    const rawSize = clean(data.size || data.output_size);
+    const explicitSize = isValidImageDimension(rawSize, true) ? rawSize : undefined;
+    if (rawSize && !explicitSize && !IMAGE_RESOLUTION_OPTIONS.includes(rawSize as typeof IMAGE_RESOLUTION_OPTIONS[number]) && rawSize !== 'auto') {
+      throw new AuthError('工具流指定尺寸无效，未替换尺寸或派发生成', 409);
+    }
+    const resolution = normalizeImageResolution(model, clean(data.resolution)
+      || (IMAGE_RESOLUTION_OPTIONS.includes(rawSize as typeof IMAGE_RESOLUTION_OPTIONS[number]) ? rawSize : templateResolution));
+    outputIntent = { resolution, requestedRatio: aspectRatio, ...(explicitSize ? { explicitSize } : {}) };
+    if (options.outputIntent && JSON.stringify(outputIntent) !== JSON.stringify(options.outputIntent)) {
+      throw new AuthError('工具流图片规格已变化，请重新报价；原运行记录保持', 409);
+    }
+    imageChannel = options.imageChannel || await captureImageGenerationChannel(model, 'original', tx);
+    const api = await resolveImageGenerationChannelSnapshot(imageChannel, tx, options.forSubmission === true, model);
+    if (!(aspectRatio === 'auto' && options.deferAuto && !explicitSize)) {
+      const firstInput = inputAssetIds[0] ? await tx.asset.findFirst({ where: { id: inputAssetIds[0], owner_id: ownerId, status: 'active', type: 'image' },
+        select: { width: true, height: true } }) : null;
+      if (aspectRatio === 'auto' && !explicitSize && (!inputAssetIds.length || !firstInput?.width || !firstInput?.height)) {
+        throw new AuthError('工具流主图尺寸尚未确定，请选择可用输入后重新报价；未改为1:1', 409);
+      }
+      const resolved = aspectRatio === 'auto' && explicitSize
+        ? { requested: 'auto', resolved: normalizeStudioRatio(explicitSize.replace('x', ':')), source: 'explicit' as const }
+        : resolveStudioAspectRatio(aspectRatio, firstInput, true, true);
+      outputPlan = imageGenerationModelOutputPlan(api, model, resolution, resolved.resolved,
+        { requestedRatio: resolved.requested, aspectRatioSource: resolved.source, explicitSize });
+    }
+    outputSize = outputPlan?.outputSize || null;
+  }
   return {
     prompt: prompt.slice(0, 20000),
     context: context.slice(0, 20000),
@@ -442,7 +573,8 @@ async function resolveTemplate(
     quality,
     count,
     aspectRatio,
-    outputSize: outputSize || studioRatioSize(aspectRatio) || null,
+    outputSize: options.ratioContractVersion === 3 ? outputSize : outputSize || studioRatioSize(aspectRatio) || null,
+    ...(outputIntent ? { outputIntent, outputPlan, imageChannel } : {}),
     referenceIds,
     moduleId,
     templateId,
@@ -451,25 +583,73 @@ async function resolveTemplate(
   };
 }
 
+async function resolveFrozenToolFlowOutput(tx: Tx, ownerId: string, config: TemplateConfig,
+  imageChannel: ImageGenerationChannelSnapshot, inputAssetIds: string[], forSubmission = false): Promise<TemplateConfig> {
+  const intent = config.outputIntent;
+  if (!intent) throw new FrozenToolFlowContractError('原节点缺少图片规格意图，已保留现场，未派发任务。');
+  const api = await resolveImageGenerationChannelSnapshot(imageChannel, tx, forSubmission, config.model);
+  const firstInput = inputAssetIds[0] ? await tx.asset.findFirst({ where: { id: inputAssetIds[0], owner_id: ownerId, status: 'active', type: 'image' },
+    select: { width: true, height: true } }) : null;
+  if (intent.requestedRatio === 'auto' && !intent.explicitSize && (!inputAssetIds.length || !firstInput?.width || !firstInput?.height)) {
+    throw new FrozenToolFlowContractError('工具流实际主图尺寸尚未确定，已保留输入，未改为1:1或派发任务。');
+  }
+  const resolved = intent.requestedRatio === 'auto' && intent.explicitSize
+    ? { requested: 'auto', resolved: normalizeStudioRatio(intent.explicitSize.replace('x', ':')), source: 'explicit' as const }
+    : resolveStudioAspectRatio(intent.requestedRatio, firstInput, true, true);
+  const outputPlan = imageGenerationModelOutputPlan(api, config.model, intent.resolution, resolved.resolved,
+    { requestedRatio: resolved.requested, aspectRatioSource: resolved.source, explicitSize: intent.explicitSize });
+  return { ...config, imageChannel, outputPlan, outputSize: outputPlan.outputSize };
+}
+
+type ToolFlowRetryQuote = { runId: string; nodeId: string; config: TemplateConfig; remaining: number;
+  inputAssetIds: string[]; ratioContractVersion: ImageRatioContractVersion };
+
 async function buildToolFlowQuote(
   tx: Tx,
   user: SessionUser,
   flow: { id: string; owner_id: string; version: number; graph_json: string },
   settings: Awaited<ReturnType<typeof getImageStudioSettings>>,
   now = Date.now(),
-  retry?: { runId: string; nodeId: string; config: TemplateConfig; remaining: number },
+  retry?: ToolFlowRetryQuote,
+  options: { inputAssetIds?: string[]; authenticatedChannels?: ReadonlyMap<string, ImageGenerationChannelSnapshot> } = {},
 ) {
   const graph = validateToolFlowGraph(JSON.parse(flow.graph_json));
+  const ratioContractVersion = retry?.ratioContractVersion ?? 3;
+  const inputNode = graph.nodes.find(node => node.type === 'flow-input');
+  const inputAssetIds = parseToolFlowQuoteInputAssets(retry?.inputAssetIds ?? options.inputAssetIds
+    ?? inputNode?.data.assetIds ?? inputNode?.data.asset_ids ?? []);
+  const assets = await tx.asset.count({ where: { id: { in: inputAssetIds }, owner_id: user.id, status: 'active', type: 'image' } });
+  if (assets !== inputAssetIds.length) throw new AuthError('工具流输入图片不存在或无权使用，尚未报价', 403);
   const steps: ToolFlowQuoteStep[] = [];
-  const prepared = new Map<string, { config: TemplateConfig; pricing: Awaited<ReturnType<typeof withImagePricing>>; scope: string }>();
+  const prepared = new Map<string, { config: TemplateConfig; pricing: Awaited<ReturnType<typeof withImagePricing>>; scope: string;
+    knownInputs: string[] | null }>();
   let totalCents = 0;
   let hasUnknown = false;
   for (const node of graph.nodes) {
     if (node.type !== 'flow-template') continue;
     if (retry && node.id !== retry.nodeId) continue;
-    const config = retry?.config || await resolveTemplate(tx, flow.owner_id, flow.owner_id, node, [], settings,
-      user as unknown as ImageStudioIdentity, { cloneReferenceAssets: false, allowUnknownModel: true, allowUnknownPrice: true });
-    const api = await getImageGenerationSettingsForModel(config.model, tx);
+    const knownInputs = retry ? retry.inputAssetIds : toolFlowKnownQuoteInputs(graph, node.id, inputAssetIds);
+    const authenticatedChannel = options.authenticatedChannels?.get(node.id);
+    if (options.authenticatedChannels && !authenticatedChannel) throw new AuthError('工具流报价缺少原节点的图片通道，请重新报价', 409);
+    let config: TemplateConfig;
+    if (retry) {
+      config = { ...retry.config };
+      if (ratioContractVersion === 3) {
+        const referenceIds = Array.from(new Set(config.referenceIds.concat(knownInputs || [])));
+        if (referenceIds.length > 9) throw new FrozenToolFlowContractError('重试参考图超出原上限，已保留输入，未删减或派发任务。');
+        config = { ...config, referenceIds };
+        const channel = authenticatedChannel || await captureImageGenerationChannel(config.model, 'original', tx);
+        config = await resolveFrozenToolFlowOutput(tx, user.id, config, channel, knownInputs || [], Boolean(authenticatedChannel));
+      }
+    } else {
+      config = await resolveTemplate(tx, flow.owner_id, flow.owner_id, node, knownInputs || [], settings,
+        user as unknown as ImageStudioIdentity, { cloneReferenceAssets: false, allowUnknownModel: true, allowUnknownPrice: true,
+          ratioContractVersion, deferAuto: knownInputs === null,
+          ...(authenticatedChannel ? { imageChannel: authenticatedChannel, forSubmission: true } : {}) });
+    }
+    const api = ratioContractVersion === 3 && config.imageChannel
+      ? await resolveImageGenerationChannelSnapshot(config.imageChannel, tx, Boolean(authenticatedChannel), config.model)
+      : await getImageGenerationSettingsForModel(config.model, tx);
     let pricing: Awaited<ReturnType<typeof withImagePricing>>;
     try { pricing = await withImagePricing(api, config.model, tx); }
     catch (error) { throw new AuthError(error instanceof Error ? error.message : '收费规则暂不可用，请重新报价', 409); }
@@ -501,10 +681,13 @@ async function buildToolFlowQuote(
     }
     steps.push({ nodeId: node.id, templateId: config.templateId, moduleId: config.moduleId,
       templateVersion: config.templateVersion, model: config.model, count,
-      unitCredits, estimatedCredits, status, pricingRevision: pricing.quote?.charge.revision || null, contractDigest });
-    prepared.set(node.id, { config, pricing, scope });
+      unitCredits, estimatedCredits, status, pricingRevision: pricing.quote?.charge.revision || null, contractDigest,
+      ...(ratioContractVersion === 3 ? { outputIntent: config.outputIntent, outputPlan: publicImageOutputPlan(config.outputPlan),
+        imageChannel: config.imageChannel } : {}) });
+    prepared.set(node.id, { config, pricing, scope, knownInputs });
   }
   const quote: ToolFlowQuote = {
+    ...(ratioContractVersion === 3 ? { ratioContractVersion, inputAssetIds } : {}),
     flowId: flow.id,
     flowVersion: flow.version,
     settingsRevision: settings.revision,
@@ -529,7 +712,9 @@ export function validateSubmittedToolFlowQuote(value: unknown, current: ToolFlow
     || (submitted.retryRunId ?? null) !== (current.retryRunId ?? null)
     || (submitted.retryNodeId ?? null) !== (current.retryNodeId ?? null)
     || submitted.estimatedCredits !== current.estimatedCredits || !Array.isArray(submitted.steps)
-    || submitted.steps.length !== current.steps.length) {
+    || submitted.steps.length !== current.steps.length
+    || savedImageRatioContractVersion(submitted) !== savedImageRatioContractVersion(current)
+    || current.ratioContractVersion === 3 && stringify(submitted.inputAssetIds) !== stringify(current.inputAssetIds)) {
     throw new AuthError('工具流报价已过期或设置已变化，请重新报价', 409);
   }
   const fields: Array<keyof ToolFlowQuoteStep> = ['nodeId', 'templateId', 'moduleId', 'templateVersion', 'model', 'count', 'unitCredits', 'estimatedCredits', 'status', 'pricingRevision', 'contractDigest'];
@@ -539,11 +724,16 @@ export function validateSubmittedToolFlowQuote(value: unknown, current: ToolFlow
     if (!received || typeof received !== 'object' || fields.some((field) => received[field] !== expected[field])) {
       throw new AuthError('工具流模板或报价已变化，请重新报价', 409);
     }
+    if (current.ratioContractVersion === 3 && ['outputIntent', 'outputPlan', 'imageChannel'].some(field =>
+      stringify(received[field as keyof ToolFlowQuoteStep]) !== stringify(expected[field as keyof ToolFlowQuoteStep]))) {
+      throw new AuthError('工具流图片规格已更新，请重新获取实际尺寸与报价；输入保留，尚未派发', 409);
+    }
   }
   return { ...current, expiresAt: submitted.expiresAt! };
 }
 
-export async function getToolFlowQuote(user: SessionUser, flowId: string, retry?: { runId: string; nodeId: string }) {
+export async function getToolFlowQuote(user: SessionUser, flowId: string,
+  options: { retry?: { runId: string; nodeId: string }; inputAssetIds?: string[] } = {}) {
   if (!canUseCompanyTemplates(user)) throw new AuthError('仅限公司飞书账号使用工具流', 403);
   const flow = await assertCanUseToolFlow(user, flowId);
   const settings = await getImageStudioSettings();
@@ -553,13 +743,14 @@ export async function getToolFlowQuote(user: SessionUser, flowId: string, retry?
     if (currentFlow.version !== flow.version || await currentImageSettingsRevision(tx) !== settings.revision) {
       throw new AuthError('工具流或图片设置已变化，请重新获取报价', 409);
     }
-    if (retry) {
-      const context = await retryQuoteContext(tx, user, retry.runId, retry.nodeId);
+    if (options.retry) {
+      const context = await retryQuoteContext(tx, user, options.retry.runId, options.retry.nodeId);
       if (context.run.flow_id !== flowId) throw new AuthError('重试报价与原工具流不一致', 409);
       return (await buildToolFlowQuote(tx, user, { ...currentFlow, version: context.run.flow_version,
         graph_json: stringify(context.snapshot.graph) }, settings, Date.now(), context.retry)).quote;
     }
-    return (await buildToolFlowQuote(tx, user, currentFlow, settings)).quote;
+    return (await buildToolFlowQuote(tx, user, currentFlow, settings, Date.now(), undefined,
+      { inputAssetIds: options.inputAssetIds })).quote;
   });
 }
 
@@ -577,6 +768,7 @@ async function freezeToolFlowNodes(tx: Tx, user: SessionUser, graph: ToolFlowGra
   built: Awaited<ReturnType<typeof buildToolFlowQuote>>, acceptedQuote: ToolFlowQuote,
   settings: Awaited<ReturnType<typeof getImageStudioSettings>>, retry = false) {
   const contracts: Record<string, FrozenToolFlowNode> = {};
+  const ratioContractVersion = savedImageRatioContractVersion(acceptedQuote);
   for (const step of acceptedQuote.steps) {
     const prepared = built.prepared.get(step.nodeId);
     const node = graph.nodes.find(item => item.id === step.nodeId);
@@ -586,15 +778,29 @@ async function freezeToolFlowNodes(tx: Tx, user: SessionUser, graph: ToolFlowGra
       try { await assertNewPricingCharge(charge, step.pricingRevision, tx); }
       catch (error) { throw new AuthError(error instanceof Error ? error.message : '收费规则已变化，请重新报价', 409); }
     }
-    const config = retry ? prepared.config : await resolveTemplate(tx, user.id, user.id, node, [], settings,
-      user as unknown as ImageStudioIdentity, { allowUnknownPrice: true });
+    // Reuse the authenticated quote channel and its concrete inputs. Only template
+    // references are cloned through the existing source-owner authorization.
+    const config = retry ? prepared.config : await resolveTemplate(tx, user.id, user.id, node,
+      prepared.knownInputs || [], settings, user as unknown as ImageStudioIdentity,
+      { allowUnknownPrice: true, ratioContractVersion, deferAuto: prepared.knownInputs === null,
+        ...(ratioContractVersion === 3 ? { imageChannel: prepared.config.imageChannel, forSubmission: true,
+          outputIntent: prepared.config.outputIntent } : {}) });
     await assertFrozenTemplateAccess(tx, user.id, config, user as unknown as ImageStudioIdentity);
-    const imageChannel = await captureImageGenerationChannel(config.model, 'original', tx);
+    const imageChannel = ratioContractVersion === 3 ? prepared.config.imageChannel
+      : await captureImageGenerationChannel(config.model, 'original', tx);
+    if (!imageChannel) throw new AuthError('图片规格报价缺少原通道，尚未受理工具流', 409);
     const api = await resolveImageGenerationChannelSnapshot(imageChannel, tx, true, config.model);
     if (imageBillingScope(api) !== prepared.scope) throw new AuthError('图片调用配置已变化，请重新报价', 409);
+    if (ratioContractVersion === 3 && (stringify(publicImageOutputPlan(config.outputPlan)) !== stringify(step.outputPlan)
+      || stringify(config.outputIntent) !== stringify(step.outputIntent)
+      || stringify(imageChannel) !== stringify(step.imageChannel))) {
+      throw new AuthError('图片规格或通道已变化，请重新报价；尚未受理工具流', 409);
+    }
+    const outputPlanHash = config.outputPlan ? imageOutputPlanHash(config.outputPlan) : undefined;
     let billingContract = fixedImageBillingContract({ scope: prepared.scope, model: config.model, credits: step.unitCredits,
       specification: imageSpecification({ model: config.model, quality: config.quality, outputSize: config.outputSize,
-        aspectRatio: config.aspectRatio, referenceCount: config.referenceIds.length,
+        aspectRatio: config.outputPlan?.resolvedRatio || config.aspectRatio, ...(outputPlanHash ? { outputPlanHash } : {}),
+        referenceCount: config.referenceIds.length,
         inputCharacters: config.context.length + config.prompt.length, inputDigest: step.contractDigest }) });
     if (charge) billingContract = withPricingImageContract(billingContract, charge, step.unitCredits);
     contracts[step.nodeId] = { config, billingContract, imageChannel, settingsRevision: settings.revision,
@@ -619,7 +825,8 @@ async function retryQuoteContext(tx: Tx, user: SessionUser, runId: string, nodeI
   const successes = parseNodeResult(node.result_json).succeededAssetIds || [];
   const remaining = Math.max(0, contract.config.count - successes.length);
   if (!remaining) throw new AuthError('该节点已有全部结果，没有需要重试的图片', 409);
-  return { run, snapshot, node, retry: { runId, nodeId, config: contract.config, remaining } };
+  return { run, snapshot, node, retry: { runId, nodeId, config: contract.config, remaining,
+    inputAssetIds: safeJsonArray(node.input_asset_ids), ratioContractVersion: savedImageRatioContractVersion(snapshot) } };
 }
 
 async function reopenUnstartedDescendants(tx: Tx, run: RunSnapshot, runId: string, nodeId: string) {
@@ -644,6 +851,9 @@ async function createQueuedTask(tx: Tx, ownerId: string, creditUser: CreditPolic
   const accepted = currentNodeContract(run, node.id);
   const parentContract = parseImageBillingContract(accepted ? stringify(accepted.billingContract) : null);
   if (!accepted || !parentContract || parentContract.mode !== 'fixed' || parentContract.model !== config.model) throw new FrozenToolFlowContractError();
+  const ratioContractVersion = savedImageRatioContractVersion(run);
+  if (ratioContractVersion === 3 && (!config.outputPlan || !config.outputIntent)) throw new FrozenToolFlowContractError('工具流实际图片规格尚未确定，未创建图片任务。');
+  const outputPlanHash = config.outputPlan ? imageOutputPlanHash(config.outputPlan) : undefined;
   const id = `${parentContract.pricing ? 'rate-' : ''}tf-${run.flow_id.slice(0, 12)}-${run.version}-${randomUUID()}`;
   const unitCredits = parentContract.pricing ? frozenPricingCredits(parentContract.pricing).credits : parentContract.authorizedCredits;
   if (creditsToCents(unitCredits) !== creditsToCents(parentContract.authorizedCredits)) throw new FrozenToolFlowContractError();
@@ -652,12 +862,17 @@ async function createQueuedTask(tx: Tx, ownerId: string, creditUser: CreditPolic
   const billingScope = parentContract.scope;
   const billingContract: ImageBillingContract = { ...parentContract,
     specification: imageSpecification({ model: config.model, quality: config.quality, outputSize: config.outputSize,
-      aspectRatio: config.aspectRatio, referenceCount: config.referenceIds.length,
+      aspectRatio: config.outputPlan?.resolvedRatio || config.aspectRatio, ...(outputPlanHash ? { outputPlanHash } : {}), referenceCount: config.referenceIds.length,
       inputCharacters: config.context.length + config.prompt.length,
       inputDigest: createHash('sha256').update(stringify({ flowId: run.flow_id, flowVersion: run.version,
         settingsRevision: accepted.settingsRevision, nodeId: node.id,
         parentSpecification: parentContract.specification,
         prompt: config.prompt, context: config.context, referenceIds: config.referenceIds })).digest('hex') }) };
+  const referenceImages = ratioContractVersion === 3 ? await tx.asset.findMany({ where: {
+    id: { in: config.referenceIds }, owner_id: ownerId, status: 'active', type: 'image' },
+    select: { id: true, owner_id: true, hash: true, width: true, height: true, file_size: true, mime_type: true } }) : [];
+  const referenceById = new Map(referenceImages.map(reference => [reference.id, reference]));
+  if (ratioContractVersion === 3 && referenceById.size !== config.referenceIds.length) throw new FrozenToolFlowContractError('工具流原件已不可用，未创建图片任务。');
   const taskState = { id, billing_contract_json: stringify(billingContract) };
   const freeze = unitCredits > 0
     ? await allocateTaskCredits(tx, creditUser, unitCredits, id)
@@ -699,6 +914,12 @@ async function createQueuedTask(tx: Tx, ownerId: string, creditUser: CreditPolic
         quotedSettingsRevision: accepted.settingsRevision,
         aspectRatio: config.aspectRatio,
         outputSize: config.outputSize,
+        ...(ratioContractVersion === 3 ? { ratioContractVersion, outputPlan: config.outputPlan, outputPlanHash,
+          resolution: config.outputIntent!.resolution, resolvedAspectRatio: config.outputPlan!.resolvedRatio,
+          aspectRatioSource: config.outputPlan!.aspectRatioSource,
+          referenceImages: config.referenceIds.map(id => { const reference = referenceById.get(id)!; return { id, hash: reference.hash,
+            width: reference.width, height: reference.height, fileSize: reference.file_size, mimeType: reference.mime_type }; }),
+          authorizedReferenceOwners: Object.fromEntries(referenceImages.map(reference => [reference.id, reference.owner_id])) } : {}),
         referenceIds: config.referenceIds,
       }),
       aspect_ratio: config.aspectRatio,
@@ -727,7 +948,7 @@ async function createQueuedTask(tx: Tx, ownerId: string, creditUser: CreditPolic
       metadata_json: JSON.stringify({ allocations: freeze.allocations }),
     } });
   }
-  return { id, unitCredits };
+  return { id, unitCredits, outputPlan: config.outputPlan, outputPlanHash };
 }
 
 async function scheduleTemplateNode(
@@ -750,7 +971,24 @@ async function scheduleTemplateNode(
   const accepted = currentNodeContract(run, node.id);
   if (!accepted || !parseImageBillingContract(stringify(accepted.billingContract))) throw new FrozenToolFlowContractError();
   await assertFrozenTemplateAccess(tx, runRow.owner_id, accepted.config, creditUser as unknown as ImageStudioIdentity);
-  const config = { ...accepted.config, referenceIds: Array.from(new Set(accepted.config.referenceIds.concat(inputAssetIds))).slice(0, 9) };
+  const ratioContractVersion = savedImageRatioContractVersion(run);
+  if (ratioContractVersion === 3 && await tx.imageStudioTask.findFirst({ where: {
+    owner_id: runRow.owner_id, tool_flow_run_id: runRow.id, tool_flow_node_id: node.id,
+    status: { in: studioTaskStates(['queued', 'running', 'channel_queued', 'channel_running', 'uncertain']) },
+  }, select: { id: true } })) {
+    await tx.toolFlowNodeRun.update({ where: { id: nodeRun.id }, data: {
+      status: toolFlowState(run, 'running'), error: '原图片请求仍在途或结果待核对；没有重新生成' } });
+    return { frozenCredits: 0, waiting: true };
+  }
+  const allReferenceIds = Array.from(new Set(accepted.config.referenceIds.concat(inputAssetIds)));
+  if (ratioContractVersion === 3 && allReferenceIds.length > 9) throw new FrozenToolFlowContractError('参考图超出原上限，已保留输入，未删减或派发任务。');
+  let config = { ...accepted.config, referenceIds: allReferenceIds.slice(0, 9) };
+  if (ratioContractVersion === 3) {
+    config = await resolveFrozenToolFlowOutput(tx, runRow.owner_id, config, accepted.imageChannel, inputAssetIds);
+    if (accepted.config.outputPlan && stringify(publicImageOutputPlan(config.outputPlan)) !== stringify(publicImageOutputPlan(accepted.config.outputPlan))) {
+      throw new FrozenToolFlowContractError('实际主图规格与已确认报价不符，原运行已保留，未派发任务。');
+    }
+  }
   if (config.referenceIds.length > accepted.maxReferences) throw new FrozenToolFlowContractError('原节点的参考图片超出受理时的上限，已保留输入，未向供应商提交。');
   const usableAssets = await tx.asset.count({ where: { id: { in: config.referenceIds }, owner_id: runRow.owner_id, type: 'image', status: 'active' } });
   if (usableAssets !== config.referenceIds.length) throw new FrozenToolFlowContractError('原节点参考图已不可用或无权使用，已保留工具流现场。');
@@ -766,6 +1004,7 @@ async function scheduleTemplateNode(
   // A node keeps its original identity and requested count while other image
   // entries occupy the shared queue. No task or credit freeze exists yet.
   try {
+    if (ratioContractVersion === 3) await assertSharedStudioWorkerReady(tx);
     await reserveImageStudioQueueCapacity(tx, runRow.owner_id, remaining);
   } catch (error) {
     if (!(error instanceof QueueCapacityError) && !(error instanceof QueueMaintenanceError)) throw error;
@@ -777,10 +1016,13 @@ async function scheduleTemplateNode(
     return { frozenCredits: 0, waiting: true };
   }
   const taskIds: string[] = [];
+  const outputPlans = [...(previous.outputPlans || [])];
   let frozenCredits = 0;
   for (let index = 0; index < remaining; index += 1) {
     const created = await createQueuedTask(tx, runRow.owner_id, creditUser, runRow.id, run, node, config, existingSuccesses.length + index);
     taskIds.push(created.id);
+    if (created.outputPlan && created.outputPlanHash) outputPlans.push({ ordinal: existingSuccesses.length + index + 1,
+      taskId: created.id, outputPlan: created.outputPlan, outputPlanHash: created.outputPlanHash });
     frozenCredits = addCredits(frozenCredits, created.unitCredits);
   }
   if (!taskIds.length && existingSuccesses.length) {
@@ -797,7 +1039,8 @@ async function scheduleTemplateNode(
     status: toolFlowState(run, 'running'),
     input_asset_ids: stringify(inputAssetIds),
     output_asset_ids: stringify(existingSuccesses),
-    result_json: stringify({ ...previous, taskIds, expected, inputAssetIds, succeededAssetIds: existingSuccesses, failedTaskIds: [] }),
+    result_json: stringify({ ...previous, taskIds, expected, inputAssetIds, succeededAssetIds: existingSuccesses, failedTaskIds: [],
+      ...(ratioContractVersion === 3 ? { outputPlans } : {}) }),
     started_at: new Date(),
     error: null,
   } });
@@ -992,13 +1235,24 @@ export async function dispatchWaitingToolFlowRuns() {
 
 export async function createToolFlowRun(user: SessionUser, flowId: string, inputAssetIds: string[], submittedQuote: unknown, quoteProof?: string) {
   if (!canUseCompanyTemplates(user)) throw new AuthError('仅限公司飞书账号使用工具流', 403);
+  assertToolFlowQuoteProof(user.id, submittedQuote, quoteProof);
+  const acceptanceId = `rate-tf-${createHash('sha256').update(`${user.id}\0${flowId}\0${quoteProof}`).digest('hex')}`;
+  const originalIds = parseIds(inputAssetIds);
+  const accepted = await prisma.toolFlowRun.findUnique({ where: { id: acceptanceId }, include: { node_runs: true } });
+  if (accepted) {
+    const original = parseJsonObject(accepted.snapshot_json) as unknown as RunSnapshot;
+    if (accepted.owner_id !== user.id || stringify(original.input_asset_ids) !== stringify(originalIds)) throw new AuthError('原提交的输入不同，请核对原工具流运行', 409);
+    return getToolFlowRun(user, accepted.id);
+  }
+  if (!submittedQuote || typeof submittedQuote !== 'object' || Array.isArray(submittedQuote)
+    || (submittedQuote as Record<string, unknown>).ratioContractVersion !== 3) {
+    throw new AuthError('工具流图片规格已更新，请重新获取实际尺寸与报价；输入保留，尚未派发', 409);
+  }
   const flow = await assertCanUseToolFlow(user, flowId);
   validateToolFlowGraph(JSON.parse(flow.graph_json));
   const settings = await getImageStudioSettings();
-  const ids = parseIds(inputAssetIds);
+  const ids = parseToolFlowQuoteInputAssets(inputAssetIds);
   if (!ids.length) throw new AuthError('工具流至少需要一个输入图片', 400);
-  assertToolFlowQuoteProof(user.id, submittedQuote, quoteProof);
-  const acceptanceId = `rate-tf-${createHash('sha256').update(`${user.id}\0${flowId}\0${quoteProof}`).digest('hex')}`;
   const ownedAssets = await prisma.asset.count({ where: { id: { in: ids }, owner_id: user.id, status: 'active', type: 'image' } });
   if (ownedAssets !== new Set(ids).size) throw new AuthError('输入图片不存在或无权使用', 403);
   const run = await prisma.$transaction(async (tx) => {
@@ -1008,17 +1262,22 @@ export async function createToolFlowRun(user: SessionUser, flowId: string, input
       if (prior.owner_id !== user.id || stringify(original.input_asset_ids) !== stringify(ids)) throw new AuthError('原提交的输入不同，请核对原工具流运行', 409);
       return prior;
     }
+    assertImageStudioAdmissionOpen();
+    await assertSharedStudioWorkerReady(tx);
     const currentFlow = await tx.toolFlow.findUnique({ where: { id: flow.id } });
     if (!currentFlow || currentFlow.owner_id !== user.id || currentFlow.status === 'deleted') throw new AuthError('工具流不存在', 404);
     if (currentFlow.version !== flow.version || await currentImageSettingsRevision(tx) !== settings.revision) {
       throw new AuthError('工具流或图片设置已变化，请重新获取报价', 409);
     }
     const graph = validateToolFlowGraph(JSON.parse(currentFlow.graph_json));
-    const built = await buildToolFlowQuote(tx, user, currentFlow, settings);
-    assertToolFlowQuoteProof(user.id, submittedQuote, quoteProof);
+    const authenticatedChannels = authenticatedToolFlowQuoteChannels(user.id, submittedQuote, quoteProof,
+      { flowId: currentFlow.id, flowVersion: currentFlow.version, settingsRevision: settings.revision,
+        inputAssetIds: ids, nodeIds: graph.nodes.filter(node => node.type === 'flow-template').map(node => node.id) });
+    const built = await buildToolFlowQuote(tx, user, currentFlow, settings, Date.now(), undefined, { inputAssetIds: ids, authenticatedChannels });
     const billingQuote = validateSubmittedToolFlowQuote(submittedQuote, built.quote);
     const nodeContracts = await freezeToolFlowNodes(tx, user, graph, built, billingQuote, settings);
     const snapshot: RunSnapshot = {
+      ratioContractVersion: 3,
       schema: 'toolflow.v1', flow_id: currentFlow.id, flow_owner_id: currentFlow.owner_id,
       version: currentFlow.version, name: currentFlow.name, project_id: currentFlow.project_id,
       graph, input_asset_ids: ids, billing_mode: 'fixed', billing_quote: billingQuote,
@@ -1059,7 +1318,7 @@ async function ownedToolFlowRun(user: SessionUser, runId: string) {
   return run;
 }
 
-export function publicToolFlowRun<T extends { status: string; snapshot_json: string; node_runs: Array<{ status: string }> }>(run: T): T {
+export function publicToolFlowRun<T extends { status: string; snapshot_json: string; node_runs: Array<{ status: string; result_json?: string | null }> }>(run: T): T {
   const snapshot = parseJsonObject(run.snapshot_json);
   // Private pricing bindings and API-version handles never cross the DTO boundary.
   delete snapshot.node_contracts;
@@ -1068,7 +1327,13 @@ export function publicToolFlowRun<T extends { status: string; snapshot_json: str
   snapshot.retry_receipts = Object.fromEntries(Object.entries(frozen.node_attempts || {})
     .map(([nodeId, attempts]) => [nodeId, attempts.map(attempt => attempt.quote)]));
   return { ...run, status: publicToolFlowState(run.status), snapshot_json: stringify(snapshot),
-    node_runs: run.node_runs.map(node => ({ ...node, status: publicToolFlowState(node.status) })) } as T;
+    node_runs: run.node_runs.map(node => {
+      if (!Object.prototype.hasOwnProperty.call(parseJsonObject(node.result_json), 'outputPlans')) return { ...node, status: publicToolFlowState(node.status) };
+      const result = parseNodeResult(node.result_json);
+      return { ...node, status: publicToolFlowState(node.status), result_json: stringify({ ...result,
+        outputPlans: (result.outputPlans || []).map(item => ({ ordinal: item.ordinal, taskId: item.taskId,
+          outputPlan: publicImageOutputPlan(item.outputPlan) })) }) };
+    }) } as T;
 }
 
 export async function getToolFlowRun(user: SessionUser, runId: string) {
@@ -1185,8 +1450,12 @@ export async function updateToolFlowRun(user: SessionUser, runId: string, body: 
       if (previousAttempts.some(attempt => quoteProofPayload(user.id, attempt.quote) === quoteProofPayload(user.id, submitted))) return;
       const context = await retryQuoteContext(tx, user, run.id, nodeId);
       if (await currentImageSettingsRevision(tx) !== settings.revision) throw new AuthError('图片设置已变化，请重新报价', 409);
+      const ratioContractVersion = savedImageRatioContractVersion(context.snapshot);
+      const authenticatedChannels = ratioContractVersion === 3 ? authenticatedToolFlowQuoteChannels(user.id, submitted, quoteProof,
+        { flowId: run.flow_id, flowVersion: run.flow_version, settingsRevision: settings.revision,
+          inputAssetIds: context.retry.inputAssetIds, nodeIds: [nodeId], retryRunId: run.id, retryNodeId: nodeId }) : undefined;
       const built = await buildToolFlowQuote(tx, user, { id: run.flow_id, owner_id: user.id, version: run.flow_version,
-        graph_json: stringify(context.snapshot.graph) }, settings, Date.now(), context.retry);
+        graph_json: stringify(context.snapshot.graph) }, settings, Date.now(), context.retry, { authenticatedChannels });
       const quote = validateSubmittedToolFlowQuote(submitted, built.quote);
       const contracts = await freezeToolFlowNodes(tx, user, context.snapshot.graph, built, quote, settings, true);
       const snapshot = { ...context.snapshot, node_attempts: { ...context.snapshot.node_attempts,
@@ -1218,27 +1487,33 @@ export async function completeToolFlowTask(taskId: string) {
     if (!run || !node) return;
     if (run.status === 'cancelled') { await refreshToolFlowCredits(tx, run.id); return; }
     const result = parseNodeResult(node.result_json);
+    const snapshot = parseJsonObject(run.snapshot_json) as unknown as RunSnapshot;
+    const version3 = savedImageRatioContractVersion(snapshot) === 3;
+    const taskStatus = publicPricingTaskState(task.status);
     const successIds = new Set(result.succeededAssetIds || []);
     const failedTaskIds = new Set(result.failedTaskIds || []);
-    if (task.status === 'succeeded' && task.asset_id) {
+    if (taskStatus === 'succeeded' && task.asset_id) {
       successIds.add(task.asset_id);
       const asset = await tx.asset.findFirst({ where: { id: task.asset_id, owner_id: task.owner_id } });
       if (asset) {
         const metadata = parseJsonObject(asset.metadata_json);
         await tx.asset.update({ where: { id: asset.id }, data: { metadata_json: stringify({ ...metadata, toolflow: { flowId: run.flow_id, version: run.flow_version, runId: run.id, nodeId: task.tool_flow_node_id } }) } });
       }
-    } else {
+    } else if (!version3 || taskStatus !== 'uncertain') {
       failedTaskIds.add(task.id);
     }
     const tasks = await tx.imageStudioTask.findMany({ where: { tool_flow_run_id: toolFlowRunId, tool_flow_node_id: toolFlowNodeId }, select: { id: true, status: true } });
-    const allDone = tasks.length > 0 && tasks.every((item) => TERMINAL_TASK_STATUSES.has(publicPricingTaskState(item.status)));
+    const allDone = tasks.length > 0 && tasks.every((item) => TERMINAL_TASK_STATUSES.has(publicPricingTaskState(item.status))
+      && (!version3 || publicPricingTaskState(item.status) !== 'uncertain'));
     await tx.toolFlowNodeRun.update({ where: { id: node.id }, data: {
       output_asset_ids: stringify(Array.from(successIds)),
       result_json: stringify({ ...result, succeededAssetIds: Array.from(successIds), failedTaskIds: Array.from(failedTaskIds) }),
+      ...(version3 && taskStatus === 'uncertain' ? { status: toolFlowState(run, 'running'),
+        error: '原图片请求结果待核对，费用预留保留；未重新生成' } : {}),
       ...(allDone ? {
         status: successIds.size ? 'succeeded' : 'failed',
         finished_at: new Date(),
-        ...(!successIds.size ? { error: '图片生成失败' } : failedTaskIds.size ? { error: '部分图片生成失败，成功结果已保留。' } : {}),
+        ...(!successIds.size ? { error: '图片生成失败' } : failedTaskIds.size ? { error: '部分图片生成失败，成功结果已保留。' } : version3 ? { error: null } : {}),
       } : {}),
     } });
     await refreshToolFlowCredits(tx, run.id);

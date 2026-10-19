@@ -2,8 +2,8 @@ import packageInfo from '../../package.json';
 import { PRICING_ADMIN_WRITES_ENABLED } from './pricing/build-mode';
 
 export const release = { version: packageInfo.version, channel: 'production', summary: PRICING_ADMIN_WRITES_ENABLED
-  ? '新增统一点数定价，可编辑点/元、核对价格来源、统一调整、试算和恢复历史。新请求按确认后的收费规则处理，已有任务保留原合同。'
-  : '费率设置暂时维护，已保存的价格和原任务保持不变，不会自动调整价格。' };
+  ? '修正图片输出尺寸，保留原请求并显示实际规格与等待时间。费率设置和已有任务收费合同保持。'
+  : '暂时暂停新生成与费率修改，原图和已有结果可继续查看；已受理请求仅安全接续。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

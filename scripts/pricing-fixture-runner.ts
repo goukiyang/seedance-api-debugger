@@ -6,6 +6,9 @@ import https from 'node:https';
 import { mock } from 'node:test';
 
 async function main() {
+  assert.equal(process.env.NODE_ENV, 'test', 'Pricing fixtures must not import production HD configuration');
+  assert.equal(Object.hasOwn(process.env, 'HD_DERIVATIVES_ROOT'), false, 'Fixture HD output must remain in its isolated scratch root');
+  console.log('Fixture environment isolated before imports: test/no-HD-root');
   const root = fs.realpathSync(process.cwd());
   const kind = process.argv[2];
   const databasePath = process.env.DATABASE_URL?.replace(/^file:/, '');

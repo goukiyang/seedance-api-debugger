@@ -5,6 +5,14 @@ import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFil
 import path from 'node:path';
 import { readPricingFixtureInputs } from './pricing-fixture-input.mjs';
 
+const fixtureEnvironment = { NODE_ENV: 'test', HD_DERIVATIVES_ROOT: 'absent', verifiedBeforeBusinessImports: true };
+const fixtureEnvironmentMarker = 'Fixture environment isolated before imports: test/no-HD-root';
+const fixtureEnvironmentImport = 'data:text/javascript,' + encodeURIComponent(
+  `import assert from 'node:assert/strict'; assert.equal(process.env.NODE_ENV,'test'); assert.equal(Object.hasOwn(process.env,'HD_DERIVATIVES_ROOT'),false); console.log(${JSON.stringify(fixtureEnvironmentMarker)});`);
+function isolatedFixtureEnv(extra = {}) {
+  const env = { ...process.env, ...extra, NODE_ENV: 'test' }; delete env.HD_DERIVATIVES_ROOT; return env;
+}
+
 // The build and the protected release controller use the same offline gate.
 // No application database, credentials, provider or browser is accepted here.
 const root = realpathSync(process.cwd());
@@ -45,6 +53,50 @@ const dimensionMismatchChecks = [
   'normal_actions_follow_owner_source_permissions_not_size_status',
   'plain_failure_corrupt_or_unproven_output_stays_unavailable',
 ];
+const outputSpecificationChecks = [
+  'new_2k_reference_and_all_standard_ratios_keep_pixel_budget',
+  'four_extreme_2k_ratios_fit_real_domain_and_4k_conflicts_reject',
+  'explicit_native_halfk_and_legacy_sizes_are_preserved',
+  'saved_version_and_public_plan_are_strict_and_private',
+  'new_and_legacy_wire_serialization_use_the_frozen_plan',
+  'old_request_key_returns_original_without_repricing_or_writing',
+  'fixed_and_actual_quote_plan_hashes_reject_legacy_or_changed_authorization',
+  'old_parent_prepared_and_unprepared_items_keep_legacy_after_restart',
+  'new_batch_auto_is_resolved_independently_for_each_source',
+  'saved_avatar_plan_keeps_legacy_quote_without_new_reservation',
+  'new_writer_requires_current_worker_and_helper_only_changes_reject',
+  'legacy_synchronous_quote_uses_real_preparation_branch_without_post_or_writes',
+  'toolflow_new_known_and_future_auto_freeze_actual_plans_and_reject_old_quote_or_changed_inputs',
+  'toolflow_legacy_prepared_and_unprepared_runs_keep_frozen_sizes_without_migration',
+  'toolflow_unknown_task_blocks_retry_and_redispatch_without_another_freeze_or_post',
+  'canvas_fixed_ordinary_and_style_keep_plan_quote_token_and_original_confirmation_count',
+  'canvas_actual_original_confirmation_and_max_authorization_are_unchanged',
+  'canvas_role_context_and_unknown_job_identity_survive_query_only_reentry_without_repost',
+  'versioned_batch_quote_canonical_keys_preserve_array_order_and_reject_changed_authorization',
+  'toolflow_authenticated_frozen_channels_create_only_with_fresh_configuration_and_unchanged_quote_identity',
+  'toolflow_internal_result_plans_survive_continuation_and_public_projection_without_persisted_mutation',
+];
+const providerContractChecks = [
+  'gzip_deflate_brotli_decode_preserves_body_and_removes_stale_headers',
+  'bad_stream_wire_decoded_limits_length_abort_and_timeout_reject',
+  'retry_after_seconds_date_body_and_invalid_values_use_receive_clock',
+  'long_202_wait_survives_observation_failure_without_early_get',
+  'non_json_429_503_persist_header_wait_and_original_get_only',
+  'core_partial_request_async_and_database_writes_repair_both_copies_after_restart',
+  'core_owner_original_id_and_billing_identity_conflicts_fail_closed',
+  'durable_wait_survives_restart_manual_check_and_local_backoff',
+  'wait_beyond_auto_deadline_stops_without_spending_attempts_or_money',
+  'old_v1_receipt_stays_readable_and_optional_diagnostics_are_private',
+  'guard_accepted_only_requires_shared_drain_and_never_dispatches_new_work_or_global_billing',
+  'active_wait_manual_original_check_requires_time_owner_lease_cas_and_single_consumption',
+  'original_v3_202_restart_uses_same_get_identity_and_settles_once_without_repost',
+  'original_v3_unknown_keeps_reservation_but_fresh_and_late_complete_mismatch_refund_once_and_keep_image',
+  'normal_provider_polling_keeps_real_wait_ui_while_long_invalid_paused_and_checking_remain_special',
+  'rate_v3_core_repair_active_single_get_and_dual_namespace_claim_keep_frozen_accounting',
+  'invalid_provider_ui_dates_never_reach_single_or_batch_date_rendering',
+  'actual_worker_startup_hold_keeps_heartbeat_only_and_accepted_only_publishes_no_pricing_readiness',
+  'hd_directory_resolver_uses_only_frozen_server_config_and_rejects_invalid_explicit_paths',
+];
 const fixtures = [
   { file: 'scripts/image-studio-recovery-fairness-engineering.ts', schema: 'image-recovery-fairness-engineering.v1',
     marker: 'Image recovery fairness engineering receipt: ', checks: recoveryChecks,
@@ -70,9 +122,50 @@ const fixtures = [
       'src/app/api/assets/picker/route.ts', 'src/app/api/assets/library/route.ts', 'src/lib/avatar-random/service.ts',
       'src/lib/avatar-random/handoff.ts', 'src/lib/canvas-roles/media.ts', 'src/lib/canvas-roles/media-bindings.ts',
       'src/app/api/avatar-studio/route.ts', 'src/app/tools/avatar-studio/studio.tsx', 'src/app/story-studio/story-studio.tsx'] },
+  { file: 'scripts/image-output-specification-engineering.ts', schema: 'image-output-specification-engineering.v1',
+    marker: 'Image output specification engineering receipt: ', checks: outputSpecificationChecks,
+    negativeChecks: ['legacy_gcd_rejected_by_current_pixel_budget', 'legacy_batch_object_key_order_rejects_equivalent_submission',
+      'toolflow_quote_hmac_and_fresh_context_reject_changed_intent', 'toolflow_public_projection_does_not_expose_internal_output_plan_fields',
+      'toolflow_malformed_output_plans_cannot_bypass_public_sanitization'],
+    sources: ['scripts/image-trace-engineering-fixture.ts', 'scripts/image-canvas-quote-fixture.ts', 'src/lib/image-generation/output-plan.ts',
+      'src/lib/image-generation/resolution.ts', 'src/lib/image-studio/ratios.ts', 'src/lib/integrations/image-generation.ts',
+      'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/billing-quote.ts', 'src/lib/image-studio/billing-quote-service.ts',
+      'src/lib/image-studio/billing-quote-store.ts', 'src/lib/image-studio/batch-billing-quote.ts', 'src/lib/template-studio/validation.ts',
+      'src/lib/image-studio/batches.ts', 'src/lib/image-studio/batch-contract.ts', 'src/lib/image-studio/modules.ts', 'src/lib/avatar-random/service.ts',
+      'src/app/api/assets/generate/route.ts', 'src/lib/image-studio/provider.ts',
+      'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-types.ts', 'src/lib/image-studio/read-snapshot.ts',
+      'src/lib/image-studio/worker.ts', 'src/lib/image-studio/async-recovery.ts', 'src/lib/image-studio/queue-capacity.ts',
+      'src/lib/image-studio/provider-wait.ts', 'src/lib/image-studio/worker-mode.ts', 'src/lib/tools/toolflow-runtime.ts',
+      'src/lib/tools/toolflow.ts', 'src/app/api/tools/ultimate-canvas/flows/[id]/quote/route.ts', 'public/tools/ultimate-canvas/toolflow-workflow.js',
+      'public/tools/ultimate-canvas/canvas-styles.js', 'public/tools/ultimate-canvas/node-pricing.js', 'public/tools/ultimate-canvas/app.js'] },
+  { file: 'scripts/image-provider-contract-engineering.ts', schema: 'image-provider-contract-engineering.v1',
+    marker: 'Image provider contract engineering receipt: ', checks: providerContractChecks,
+    negativeChecks: ['legacy_wait_schema_rejected', 'conflicting_core_accounting_copy_rejected'],
+    sources: ['scripts/image-trace-engineering-fixture.ts', 'scripts/process-image-studio.ts', 'src/lib/image-studio/provider.ts',
+      'src/lib/image-studio/provider-wait.ts', 'src/lib/image-studio/delivery.ts', 'src/lib/image-studio/async-recovery.ts',
+      'src/lib/image-studio/worker.ts', 'src/lib/image-studio/worker-mode.ts', 'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/response-diagnostics.ts',
+      'src/lib/image-studio/response-evidence.ts', 'src/lib/image-generation/output-plan.ts',
+      'src/lib/image-studio/dimension-rejection.ts', 'src/lib/image-studio/dimension-mismatch.ts', 'src/lib/image-studio/output.ts',
+      'src/app/image-studio/studio.tsx', 'src/app/image-studio/output-plan-view.tsx',
+      'src/app/image-studio/batch-results.tsx', 'src/lib/image-studio/context-version.ts',
+      'src/lib/media/hd-directory.ts', 'src/lib/media/hd-derivatives.ts'] },
 ];
+const actualVersion = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+const guardPackage = /\+trace03-guard\.\d+$/.test(actualVersion);
+const packageView = { actualVersion, fixtureVersion: guardPackage ? actualVersion.replace(/\+trace03-guard\.\d+$/, '') : actualVersion,
+  kind: guardPackage ? 'in-memory-ordinary' : 'actual', productionFilesChanged: false };
+if (guardPackage) fixtures.push({ file: 'scripts/image-guard-admission-engineering.ts', schema: 'image-guard-admission-engineering.v1',
+  marker: 'Image guard admission engineering receipt: ', checks: ['actual_guard_package_rejects_new_queue_admission',
+    'guard_requires_env_and_shared_drain_and_only_recovers_accepted_without_global_billing'], actualGuard: true,
+  sources: ['scripts/image-trace-engineering-fixture.ts', 'scripts/process-image-studio.ts', 'src/lib/image-studio/queue-capacity.ts',
+    'src/lib/image-studio/worker-mode.ts', 'src/lib/pricing/build-mode.ts', 'src/lib/pricing/admin-api.ts', 'src/lib/pricing/admin-contract.ts',
+    'src/lib/pricing/policy.ts', 'src/lib/pricing/catalog.ts', 'src/lib/pricing/runtime.ts', 'src/lib/pricing/isolation.ts',
+    'src/lib/pricing/frozen-charge.ts', 'src/lib/pricing/math.ts', 'src/lib/pricing/resolve.ts', 'src/lib/auth/api-helpers.ts',
+    'src/lib/auth/session.ts', 'src/lib/auth/session-account-binding.ts', 'src/lib/auth/password.ts',
+    'src/lib/image-studio/billing-contract.ts', 'src/lib/image-studio/billing-quote.ts', 'src/lib/image-studio/pricing-state.ts',
+    'src/lib/credits/precision.ts', 'src/lib/costs/currency.ts'] });
 const pricingGate = 'scripts/check-pricing-policy.mjs';
-const sourceFiles = ['package.json', entry, pricingGate, ...fixtures.flatMap(fixture => [fixture.file, ...fixture.sources])];
+const sourceFiles = ['package.json', 'prisma/schema.prisma', entry, pricingGate, 'scripts/image-engineering-package-view.cjs', 'scripts/image-guard-admission-engineering.ts', ...fixtures.flatMap(fixture => [fixture.file, ...fixture.sources])];
 const hash = value => createHash('sha256').update(value).digest('hex');
 const hashes = () => Object.fromEntries(sourceFiles.map(file => [file, hash(readFileSync(path.join(root, file)))]));
 const time = value => typeof value === 'number' ? value : Date.parse(value);
@@ -113,6 +206,15 @@ function validateFixture(fixture, file, runId, startedAt, finishedAt, sourceSha2
   assert.equal(value.fixtureSha256, sourceSha256[fixture.file]);
   assert.ok(Array.isArray(value.checks) && value.checks.length > 0 && new Set(value.checks).size === value.checks.length);
   if (fixture.checks) assert.deepEqual(value.checks, fixture.checks);
+  if (fixture.negativeChecks) assert.deepEqual(value.negativeChecks, fixture.negativeChecks,
+    'Engineering receipt did not complete its regression counterexamples');
+  if (fixture.actualGuard) {
+    assert.equal(value.actualGuardVersion, actualVersion);
+    assert.equal(value.packageView, 'actual-guard-without-preload');
+    assert.equal(value.engineeringPackageView, undefined);
+  } else if (guardPackage && ['scripts/image-output-specification-engineering.ts', 'scripts/image-provider-contract-engineering.ts'].includes(fixture.file)) {
+    assert.deepEqual(value.engineeringPackageView, packageView);
+  }
   for (const source of fixture.sources) {
     const recorded = value.sourceSha256?.[source] ?? (source === 'src/lib/image-studio/worker.ts' ? value.workerSha256
       : source === 'src/lib/image-studio/provider.ts' ? value.providerSha256 : undefined);
@@ -146,6 +248,8 @@ function verify(file, since) {
   assert.equal(value.schema, 'image-recovery-build-gate.v1');
   assert.match(value.runId, /^[0-9a-f-]{36}$/);
   assert.equal(value.completed, true);
+  assert.deepEqual(value.fixtureEnvironment, fixtureEnvironment);
+  assert.deepEqual(value.packageView, packageView, 'Engineering package view does not describe this candidate');
   assert.equal(value.candidateRoot, root);
   assert.ok(value.startedAt >= since && value.finishedAt >= value.startedAt && value.finishedAt <= Date.now() + 1000);
   assert.ok(Date.now() - value.startedAt <= 30 * 60_000, 'Build gate receipt is stale');
@@ -153,12 +257,15 @@ function verify(file, since) {
   assert.equal(value.fixtures?.length, fixtures.length);
   assert.equal(typeof value.pricingReceipt, 'string', 'Pricing contracts were not run by this prebuild');
   assert.equal(readPrivateReceipt(value.pricingReceipt, 8 * 1024 * 1024).value.runId, value.runId, 'Image and pricing gates belong to different runs');
-  const pricing = spawnSync(process.execPath, [pricingGate, '--verify', value.pricingReceipt, '--since', String(since)], { cwd: root, encoding: 'utf8', timeout: 30000 });
+  const pricing = spawnSync(process.execPath, [pricingGate, '--verify', value.pricingReceipt, '--since', String(since)], { cwd: root, env: isolatedFixtureEnv(), encoding: 'utf8', timeout: 30000 });
   assert.ifError(pricing.error);
   assert.equal(pricing.status, 0, (pricing.stderr || '') + (pricing.stdout || ''));
   for (let i = 0; i < fixtures.length; i++) {
     const recorded = value.fixtures[i];
     assert.equal(recorded.file, fixtures[i].file);
+    assert.deepEqual(recorded.fixtureEnvironment, fixtureEnvironment);
+    assert.deepEqual(recorded.packageView, fixtures[i].actualGuard
+      ? { actualVersion, fixtureVersion: actualVersion, kind: 'actual-guard-without-preload', productionFilesChanged: false } : packageView);
     assert.equal(validateFixture(fixtures[i], recorded.receipt, value.runId, value.startedAt, value.finishedAt,
       value.sourceSha256), recorded.sha256);
   }
@@ -175,8 +282,9 @@ function run() {
   const directory = mkdtempSync(path.join(scratch, 'image-recovery-gate-'));
   const recorded = [], failures = [], outcomes = [];
   for (const fixture of fixtures) {
-    const result = spawnSync(process.execPath, ['--import', 'tsx', path.join(root, fixture.file)], {
-      cwd: root, env: { ...process.env, IMAGE_RECOVERY_GATE_RUN_ID: runId },
+    const preload = guardPackage && !fixture.actualGuard ? ['--require', path.join(root, 'scripts/image-engineering-package-view.cjs')] : [];
+    const result = spawnSync(process.execPath, [...preload, '--import', fixtureEnvironmentImport, '--import', 'tsx', path.join(root, fixture.file)], {
+      cwd: root, env: isolatedFixtureEnv({ IMAGE_RECOVERY_GATE_RUN_ID: runId }),
       encoding: 'utf8', timeout: 180_000, maxBuffer: 2 * 1024 * 1024,
     });
     // Preserve actual child evidence, including a nonzero exit, without accepting
@@ -187,11 +295,14 @@ function run() {
       assert.ifError(result.error);
       assert.equal(result.signal, null, 'Engineering process was interrupted');
       assert.equal(result.status, 0, `Engineering process failed: ${fixture.file}`);
+      assert.equal((result.stdout || '').split(/\r?\n/).filter(line => line === fixtureEnvironmentMarker).length, 1,
+        'The actual child must verify its isolated environment before importing business modules');
       const lines = (result.stdout || '').split(/\r?\n/).filter(line => line.startsWith(fixture.marker));
       assert.equal(lines.length, 1, 'A unique completed engineering receipt is required');
       const receipt = lines[0].slice(fixture.marker.length);
       const sha256 = validateFixture(fixture, receipt, runId, startedAt, Date.now(), sourceSha256);
-      recorded.push({ file: fixture.file, receipt, sha256 });
+      recorded.push({ file: fixture.file, receipt, sha256, fixtureEnvironment, packageView: fixture.actualGuard
+        ? { actualVersion, fixtureVersion: actualVersion, kind: 'actual-guard-without-preload', productionFilesChanged: false } : packageView });
       outcomes.push({ file: fixture.file, completed: true, log });
       console.log(`Image recovery engineering complete: ${fixture.file}`);
     } catch (error) {
@@ -200,7 +311,7 @@ function run() {
       outcomes.push({ file: fixture.file, completed: false, log });
     }
   }
-  const pricing = spawnSync(process.execPath, [pricingGate], { cwd: root, env: process.env,
+  const pricing = spawnSync(process.execPath, [pricingGate], { cwd: root, env: isolatedFixtureEnv(),
     encoding: 'utf8', timeout: 660000, maxBuffer: 4 * 1024 * 1024 });
   const pricingLog = path.join(directory, 'pricing-policy-gate.log');
   writeFileSync(pricingLog, (pricing.stdout || '') + (pricing.stderr || ''), { mode: 0o600, flag: 'wx' });
@@ -223,7 +334,7 @@ function run() {
   if (failures.length) {
     const failureReport = path.join(directory, 'failure-report.json');
     writeFileSync(failureReport, JSON.stringify({ schema: 'image-recovery-build-failure.v1', completed: false,
-      runId, candidateRoot: root, startedAt, finishedAt: Date.now(), sourceSha256, outcomes, failures,
+      runId, candidateRoot: root, startedAt, finishedAt: Date.now(), sourceSha256, fixtureEnvironment, outcomes, failures,
       partialReceipts: recorded, pricingReceipt: pricingReceipt || null }, null, 2), { mode: 0o600, flag: 'wx' });
     console.error(`Image recovery build failure report: ${failureReport}`);
     process.exitCode = 1;
@@ -231,7 +342,7 @@ function run() {
   }
   const receipt = path.join(directory, 'receipt.json');
   writeFileSync(receipt, JSON.stringify({ schema: 'image-recovery-build-gate.v1', runId, candidateRoot: root,
-    startedAt, finishedAt: Date.now(), sourceSha256, fixtures: recorded, pricingReceipt, completed: true }, null, 2), { mode: 0o600, flag: 'wx' });
+    startedAt, finishedAt: Date.now(), sourceSha256, fixtureEnvironment, packageView, fixtures: recorded, pricingReceipt, completed: true }, null, 2), { mode: 0o600, flag: 'wx' });
   verify(receipt, startedAt);
   console.log(`PRICING_POLICY_GATE_RECEIPT=${pricingReceipt}`);
   console.log(`IMAGE_RECOVERY_GATE_RECEIPT=${receipt}`);

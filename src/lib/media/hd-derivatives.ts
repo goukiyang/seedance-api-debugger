@@ -34,7 +34,7 @@ export type HdJob = {
   retryHistory?: Array<{ at: string; previousAttempts: number; reason?: string; manifest: string }>;
   retryAt?: string; isolatedReason?: 'source_missing' | 'source_unreadable';
 };
-export const hdDirectory = () => path.join(process.cwd(), 'storage', 'hd-derivatives');
+import { hdDirectory } from './hd-directory'; export { hdDirectory };
 const jobPath = (key: string) => path.join(hdDirectory(), `${key}.json`);
 const now = () => new Date().toISOString();
 export const HD_UPLOAD_DIRECTORY_ACCESS = constants.R_OK | constants.X_OK;

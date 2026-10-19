@@ -371,7 +371,8 @@ async function main() {
       await patch(retentionTask.id, { state: 'stopped', stopCode: 'auto_budget', attempts: 12, lastRequestedAt: clock - 301000 });
       const retentionView = await recovery.readStudioAsyncRecovery(retentionTask); assert.ok(retentionView?.canRequestRecheck);
       const manualRetention = await recovery.requestStudioAsyncRecheck(owner, retentionTask.id, retentionView.binding);
-      assert.equal(manualRetention.scheduled, true); assert.equal(manualRetention.recovery.state, 'scheduled');
+      assert.equal(manualRetention.scheduled, true); assert.ok('recovery' in manualRetention);
+      assert.equal(manualRetention.recovery.state, 'scheduled');
       assert.equal((await record(retentionTask.id)).state, 'stopped');
       assert.equal(await recovery.retainStudioAsyncCheckpoint(retentionTask), true);
       await delivery.cleanupStudioDeliveries(cleanupAt + 300001);

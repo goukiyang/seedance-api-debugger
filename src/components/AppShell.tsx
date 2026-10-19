@@ -9,6 +9,8 @@ import templateStudioStyles from './template-studio/template-studio.module.css';
 import { shouldUseNavigationShell, shouldUseTopbarOnlyShell } from '@/lib/navigation';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { rememberSettingsOrigin } from '@/lib/navigation/settings-return';
+import { release } from '@/lib/release';
+import { TaskNotice } from './TaskNotice';
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -33,6 +35,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const shellContentClass = templateStudioShell
     ? templateStudioStyles.shellContent
     : `shell-content${topbarOnlyShell ? ' shell-content-topbar-only' : ''}`;
+  const recoveryRelease = /\+trace03-guard\.\d+$/.test(release.version);
+  const maintenanceNotice = recoveryRelease ? <TaskNotice kind="status">
+    图片生成维护中，暂不新建任务。原图和已有结果可继续查看、下载；已受理任务只接续原请求。
+  </TaskNotice> : null;
 
   useEffect(() => {
     if (!showShell || hasLoadedUser || loadingUser) return;
@@ -47,6 +53,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   if (!showShell) {
     return (
       <>
+        {maintenanceNotice}
         {children}
         <FeedbackWidget />
       </>
@@ -64,6 +71,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <div className={shellBodyClass}>
         {!topbarOnlyShell && !imageStudioShell && !templateStudioShell && <SideNav isAdmin={user?.role === 'admin'} user={user} />}
         <main className={shellContentClass}>
+          {maintenanceNotice}
           {children}
         </main>
       </div>

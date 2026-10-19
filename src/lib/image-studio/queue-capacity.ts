@@ -1,7 +1,8 @@
 import type { Prisma } from '@prisma/client';
 import { countSynchronousImageAdmissions } from './synchronous-admission';
 import { studioTaskStates } from './pricing-state';
-import { isImageStudioDraining } from '@/lib/pricing/isolation';
+import { isStudioReleaseBlocked } from './release-maintenance';
+import packageInfo from '../../../package.json';
 
 export const ACTIVE_IMAGE_TASK_STATUSES = studioTaskStates(['queued', 'running', 'channel_queued', 'channel_running']);
 
@@ -20,14 +21,19 @@ export class QueueMaintenanceError extends Error {
   readonly code = 'image_queue_maintenance';
   readonly status = 503;
   constructor() {
-    super('图片生成正在切换维护，任务已保留待继续');
+    super('图片生成正在维护，尚未新建任务；已有任务和结果保留。');
     this.name = 'QueueMaintenanceError';
   }
 }
 
 /** Shared drain marker is visible to the web process and compatible image worker. */
 export function assertImageStudioAdmissionOpen() {
-  if (isImageStudioDraining()) throw new QueueMaintenanceError();
+  if (imageStudioAcceptedOnlyMode() || isStudioReleaseBlocked()) throw new QueueMaintenanceError();
+}
+
+/** Only server process configuration or the actual guard package may select this mode. */
+export function imageStudioAcceptedOnlyMode() {
+  return process.env.STUDIO_ACCEPTED_ONLY === '1' || /\+trace03-guard\.\d+$/.test(packageInfo.version);
 }
 
 /** Pure shared capacity rule used by every image-task producer. */

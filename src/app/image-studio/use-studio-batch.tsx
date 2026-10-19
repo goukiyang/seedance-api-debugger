@@ -17,8 +17,10 @@ import { imageStudioEffectiveChannelId, normalizeImageStudioChannels } from '@/l
 import type { SharedStudioIntent } from '@/lib/image-studio/shared-types';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
+import type { PublicImageOutputPlan } from '@/lib/image-generation/output-plan';
+import { ImageOutputPlansSummary, imagePlanSize } from './output-plan-view';
 
-export type ImageUiQuote = { billingMode: 'fixed' | 'actual'; billingQuoteId?: string | null; batchQuoteId?: string | null; pricingRevision?: string | null; creditPrecision?: number; estimatedCredits: number; unitCredits: number; expiresAt?: string; imageChannel?: ImageGenerationChannelSnapshot };
+export type ImageUiQuote = { billingMode: 'fixed' | 'actual'; billingQuoteId?: string | null; batchQuoteId?: string | null; pricingRevision?: string | null; creditPrecision?: number; estimatedCredits: number; unitCredits: number; expiresAt?: string; imageChannel?: ImageGenerationChannelSnapshot; outputPlan?: PublicImageOutputPlan | null; outputPlans?: Array<{ ordinal: number; outputPlan: PublicImageOutputPlan | null }> };
 export function formatImageUiCredits(value: number): string {
   return validVideoPricingAmount(value) ? String(normalizeCredits(value)) : '待确认';
 }
@@ -285,7 +287,9 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
       if (quoteTotal > 0 && (!Number.isFinite(currentBalance.available) || currentBalance.available < quoteTotal)) throw new Error('可用点数不足，素材已上传但尚未生成');
       const model = IMAGE_STUDIO_MODEL_LABELS[String(snapshot.model) as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || String(snapshot.model);
       const quality = IMAGE_STUDIO_QUALITY_LABELS[String(snapshot.quality) as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || String(snapshot.quality || '默认');
-      if (!await confirm(`${source === 'folder' ? localFiles.length + '张已上传素材' : '当前正文'} · 生成${total}张\n${model} · ${quality} · ${String(snapshot.resolution || '默认')} · ${String(snapshot.aspectRatio || '自动')}\n本批预计合计 ${quoteTotal} 点`, { title: '确认生成', confirmLabel: `确认生成 · ${quoteTotal}点`, anchor: null })) return false;
+      const sizes = Array.from(new Set((quote.outputPlans || []).map(item => imagePlanSize(item.outputPlan)).filter(Boolean)));
+      const sizeDescription = sizes.length === 1 ? `提交尺寸：${sizes[0]}` : sizes.length ? `按各张主图提交 ${sizes.length} 种尺寸，可在批量区查看逐张尺寸` : '提交尺寸待确认';
+      if (!await confirm(`${source === 'folder' ? localFiles.length + '张已上传素材' : '当前正文'} · 生成${total}张\n${model} · ${quality} · ${String(snapshot.resolution || '默认')} · ${String(snapshot.aspectRatio || '自动')}\n${sizeDescription}\n本批预计合计 ${quoteTotal} 点`, { title: '确认生成', confirmLabel: `确认生成 · ${quoteTotal}点`, anchor: null })) return false;
       if (!valid()) throw new Error('当前设置已变化，尚未生成，请重新确认');
       await checkSettings();
       if (!valid()) return false;
@@ -324,6 +328,7 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
   const blocker = mode !== 'batch' ? '' : previewing ? '正在本机读取图片' : busy ? '正在处理本批' : pending ? '' : !sourceAvailable ? '模板已不可用，原批次和素材保留' : !loaded ? '正在恢复批次设置' : !Number.isInteger(total) || total < 1 || total > STUDIO_BATCH_LIMITS.images ? '请先选择有效素材，本批最多100张' : '';
   const controls = <div className={styles.controls}>
     <p>{displayEstimate != null ? `合计约 ${formatImageUiCredits(displayEstimate)} 点数` : '费用待估算'}</p>
+    <ImageOutputPlansSummary plans={visibleQuote?.outputPlans} />
     <div className={styles.actions}>
       {source === 'folder' && <button type="button" disabled={busy || previewing || Boolean(pending)} onClick={() => void chooseSources()}><FolderOpen size={16} />{canSelectBatchDirectory() ? '选择素材文件夹' : '选择素材'}</button>}
       <label><input type="checkbox" checked={pack} disabled={busy} onChange={event => setPack(event.target.checked)} />完成后打包</label>
