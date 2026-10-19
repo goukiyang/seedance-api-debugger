@@ -256,6 +256,12 @@ export async function runPricingAuthoringContractFixture(): Promise<{
       const pair = normalizedVideoPricingReferenceScope(['https://fixture.invalid/a', 'https://fixture.invalid/b']);
       assertVideoPricingFinalReferences({ ...referenceContext, ...pair }, [...pair.urls].reverse()); assertions++;
       equal(normalizedVideoPricingReferenceScope([' https://fixture.invalid/a ', 'https://fixture.invalid/a']).referenceVideoCount, 1);
+      const localReference = normalizedVideoPricingReferenceScope(['/uploads/fixture-reference.mp4']);
+      equal(normalizedVideoPricingReferenceScope(['https://sd2.youdooart.com/uploads/fixture-reference.mp4']).referenceVideoFingerprint,
+        localReference.referenceVideoFingerprint);
+      equal(normalizedVideoPricingReferenceScope(['/uploads/fixture-reference.mp4', 'https://sd2.youdooart.com/uploads/fixture-reference.mp4']).referenceVideoCount, 1);
+      ok(normalizedVideoPricingReferenceScope(['https://foreign.invalid/uploads/fixture-reference.mp4']).referenceVideoFingerprint !== localReference.referenceVideoFingerprint,
+        'An unrelated origin cannot impersonate a local upload');
       throws(() => normalizedVideoPricingReferenceScope(['a', 'b', 'c', 'd']));
       evidence.push('C06: production identity selection separates none/present/unknown and standard/draft/upgrade; contextless scoped quotes reject. The shared normalizer lets explicit template references override an empty body and final-reference verification rejects equal-count substitutions. This is pure scope evidence, not a real template-authorization exercise.');
 

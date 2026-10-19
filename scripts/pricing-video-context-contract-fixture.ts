@@ -110,7 +110,7 @@ export async function runPricingVideoContextContractFixture(): Promise<FixtureRe
   const nonce = randomUUID();
   const id = (name: string) => `pvc-${nonce}-${name}`;
   const ids = {
-    users: ['actor-a', 'actor-b', 'outsider'].map(id),
+    users: ['actor-a', 'actor-b', 'outsider', 'external', 'legacy-email'].map(id),
     projects: ['personal', 'team', 'public', 'foreign'].map(id),
     cards: ['personal-card-a', 'personal-card-b', 'team-card', 'public-card', 'foreign-card', 'archived-card'].map(id),
     assets: ['video-a', 'video-b'].map(id), template: id('template'), version: id('template-version'),
@@ -119,10 +119,17 @@ export async function runPricingVideoContextContractFixture(): Promise<FixtureRe
   };
   const equal = (actual: unknown, expected: unknown, label: string) => { assert.deepEqual(actual, expected, label); assertions++; };
   const ok = (condition: unknown, label: string) => { assert.ok(condition, label); assertions++; };
-  const session = (index: number): SessionUser => ({ id: ids.users[index], name: `Fixture actor ${index}`, username: id(`user-${index}`),
-    email: `${id(`user-${index}`)}@fixture.invalid`, role: 'user', account_type: 'internal', user_profile: 'other', feature_profile_id: null,
-    status: 'active', expires_at: null });
+  const session = (index: number, accountType: SessionUser['account_type'] = 'internal', withFeishu = true): SessionUser => ({
+    id: ids.users[index], name: `Fixture actor ${index}`, username: id(`user-${index}`),
+    email: `${id(`user-${index}`)}@fixture.invalid`, role: 'user', account_type: accountType, user_profile: 'other', feature_profile_id: null,
+    status: 'active', expires_at: null,
+    ...(withFeishu ? { feishu: { user_id: id(`feishu-user-${index}`), open_id: id(`feishu-open-${index}`),
+      union_id: id(`feishu-union-${index}`), tenant_key: id('feishu-tenant'), employee_no: id(`employee-${index}`),
+      department_ids: [id('department')], last_sync_at: null } } : {}),
+  });
   const actorA = session(0), actorB = session(1), outsider = session(2);
+  const external = session(3, 'external'), legacyEmail = session(4, 'internal', false);
+  const actors = [actorA, actorB, outsider, external, legacyEmail];
   const videoUrls = ids.assets.map(assetId => `/uploads/pricing-video-context-fixture/${assetId}.mp4`);
   const recipe: StudioTemplateRecipe = { instruction: 'Private production direction for isolated scope verification.', fields: [],
     assetSlots: [{ key: 'referenceVideo', label: 'Reference video', role: 'reference', types: ['video'], required: true, maxItems: 1 }],
@@ -178,15 +185,24 @@ export async function runPricingVideoContextContractFixture(): Promise<FixtureRe
     ok(Object.values(await tableCounts(client)).every(count => count === 0), 'Every business table must be empty before any committed seed');
     const { resolveVideoPricingContext, savedVideoPricingContextInput, issueVideoPricingCredential, verifyVideoPricingCredential, assertVideoPricingFinalReferences, VideoPricingContextError } = await import('../src/lib/pricing/video-context');
     const { PricingChargeError } = await import('../src/lib/pricing/frozen-charge');
+    const { isExternalUser } = await import('../src/lib/access/external-role');
     const db = client;
     const seed = await db.$transaction(async tx => {
-      for (const actor of [actorA, actorB, outsider]) await tx.user.create({ data: { id: actor.id, name: actor.name, username: actor.username,
-        email: actor.email, password_hash: 'fixture-only-no-login', role: actor.role, account_type: actor.account_type, status: actor.status } });
+      for (const actor of actors) await tx.user.create({ data: { id: actor.id, name: actor.name, username: actor.username,
+        email: actor.email, password_hash: 'fixture-only-no-login', role: actor.role, account_type: actor.account_type,
+        user_profile: actor.user_profile, feature_profile_id: actor.feature_profile_id, status: actor.status, expires_at: actor.expires_at,
+        feishu_user_id: actor.feishu?.user_id ?? null, feishu_open_id: actor.feishu?.open_id ?? null,
+        feishu_union_id: actor.feishu?.union_id ?? null, feishu_tenant_key: actor.feishu?.tenant_key ?? null,
+        feishu_employee_no: actor.feishu?.employee_no ?? null,
+        feishu_department_ids: actor.feishu ? JSON.stringify(actor.feishu.department_ids) : null,
+        last_feishu_sync_at: actor.feishu?.last_sync_at ?? null } });
       for (const [index, projectId] of Array.from(ids.projects.entries())) await tx.project.create({ data: { id: projectId, name: id(`project-${index}`),
         type: ['personal', 'team', 'public', 'personal'][index], visibility: 'private', status: 'active',
         owner_user_id: index === 3 ? actorB.id : actorA.id, created_by: index === 3 ? actorB.id : actorA.id } });
       const member = await tx.projectMember.create({ data: { project_id: ids.projects[1], user_id: actorB.id, role: 'editor', status: 'active', joined_by: actorA.id } });
       await tx.projectMember.create({ data: { project_id: ids.projects[1], user_id: outsider.id, role: 'viewer', status: 'active', joined_by: actorA.id } });
+      for (const actor of [external, legacyEmail]) await tx.projectMember.create({ data: {
+        project_id: ids.projects[1], user_id: actor.id, role: 'editor', status: 'active', joined_by: actorA.id } });
       const cardProjects = [0, 0, 1, 2, 3, 0];
       for (const [index, cardId] of Array.from(ids.cards.entries())) await tx.videoCard.create({ data: { id: cardId, project_id: ids.projects[cardProjects[index]],
         title: id(`card-${index}`), created_by: index === 4 ? actorB.id : actorA.id, owner_user_id: index === 4 ? actorB.id : actorA.id,
@@ -230,6 +246,19 @@ export async function runPricingVideoContextContractFixture(): Promise<FixtureRe
     }, { maxWait: 10000, timeout: 30000 });
     seeded = true;
     const baseline = await protectedProjection(db), mediaBaseline = fileProjection(runtime);
+    for (const actor of actors) {
+      const persisted = baseline.users.find(user => user.id === actor.id);
+      ok(persisted, 'Every session actor has a committed fixture user');
+      equal({ role: persisted!.role, accountType: persisted!.account_type, profile: persisted!.feature_profile_id,
+        feishuUser: persisted!.feishu_user_id, feishuOpen: persisted!.feishu_open_id, feishuUnion: persisted!.feishu_union_id },
+      { role: actor.role, accountType: actor.account_type, profile: actor.feature_profile_id,
+        feishuUser: actor.feishu?.user_id ?? null, feishuOpen: actor.feishu?.open_id ?? null, feishuUnion: actor.feishu?.union_id ?? null },
+      'Session account authorization fields match the persisted seed without administrator privileges');
+      equal(actor.role, 'user', 'Positive and negative cases remain ordinary users');
+    }
+    for (const actor of [actorA, actorB, outsider]) equal(isExternalUser(actor), false, 'Internal fixture users carry the real persisted Feishu identity');
+    equal(isExternalUser(external), true, 'Explicit external account stays external even with Feishu identity');
+    equal(isExternalUser(legacyEmail), true, 'The historical internal label alone does not authorize an email account');
     equal(baseline.runs[0].status, 'succeeded', 'Resolver reads a genuinely persisted successful studio run');
     equal(JSON.parse(baseline.runs[0].snapshot_json).assets, inputs, 'Persisted snapshot contains the video reference');
     equal(baseline.wallets[0].balance, 20.15, 'Non-integer existing wallet value participates in the no-write comparison');
@@ -328,6 +357,17 @@ export async function runPricingVideoContextContractFixture(): Promise<FixtureRe
       await rejected(() => resolveVideoPricingContext(actorA, { ...plain, project_id: ids.projects[1] }), /视频卡不属于当前项目/, 400);
       await rejected(() => resolveVideoPricingContext(actorA, { ...plain, video_card_id: ids.cards[5] }), /封板或归档/, 403);
     });
+    await readOnly('External and legacy email template-studio refusals', async () => {
+      const allowedProject = { ...plain, project_id: ids.projects[1], video_card_id: ids.cards[2] };
+      for (const actor of [external, legacyEmail]) {
+        const context = await resolveVideoPricingContext(actor, allowedProject);
+        equal(context.projectId, ids.projects[1], 'External negative cases first pass their real editor project/card permissions');
+        equal(context.referenceVideo, 'none', 'A permitted non-template project scope remains distinct from internal studio access');
+        await rejected(() => resolveVideoPricingContext(actor, { ...allowedProject,
+          template_studio_run_id: ids.run, template_studio_assets: inputs }), /外部账号无权访问视频模板工作台/, 403);
+      }
+    });
+    evidence.push('Ordinary internal actors use committed Feishu/session account fields; explicit external and legacy email-only internal labels pass their own project/card scope but are refused by the real template-studio internal-account gate without writes.');
 
     await db.projectMember.update({ where: { id: seed.member.id }, data: { status: 'removed' } });
     try {

@@ -93,7 +93,7 @@ export function pricingRuntimeSourceFiles(root = process.cwd()) {
   return [...files, 'scripts/process-image-studio.ts', 'src/lib/credits/policy.ts',
     'src/lib/credits/precision.ts', 'src/lib/projects/budget.ts', 'src/lib/tools/toolflow-runtime.ts',
     'src/lib/integrations/image-generation.ts', 'src/lib/integrations/image-generation-channel.ts',
-    'src/lib/integrations/image-generation-defaults.ts', 'package.json', '.deployed-commit'].sort();
+    'src/lib/integrations/image-generation-defaults.ts', 'src/lib/assets/site-url.ts', 'package.json', '.deployed-commit'].sort();
 }
 
 export function pricingRuntimeModuleHashes(root = process.cwd()) {

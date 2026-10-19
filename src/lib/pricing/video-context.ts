@@ -9,6 +9,7 @@ import { authorizeStudioAssets } from '@/lib/template-studio/assets';
 import { StudioError } from '@/lib/template-studio/errors';
 import { getMissingRequiredStudioAssetSlot } from '@/lib/template-studio-video-handoff';
 import type { StudioAssetInput } from '@/lib/template-studio/types';
+import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { pricingFingerprint, type PricingClient } from './catalog';
 import { PRICING_POLICY_KEY } from './admin-contract';
 import { PricingChargeError } from './frozen-charge';
@@ -35,10 +36,16 @@ function list(value: unknown, max: number): string[] {
   return value.map(item => (item as string).trim());
 }
 export function normalizedVideoPricingReferenceScope(input: unknown, templateReferences?: readonly string[]) {
-  const urls = list(templateReferences === undefined ? input : [...templateReferences], 3);
+  const seen = new Set<string>();
+  const urls = list(templateReferences === undefined ? input : [...templateReferences], 3).filter(url => {
+    const key = videoReferenceScopeUrl(url);
+    if (seen.has(key)) return false;
+    seen.add(key); return true;
+  });
   return { urls, referenceVideo: urls.length ? 'present' as const : 'none' as const,
-    referenceVideoCount: urls.length, referenceVideoFingerprint: pricingFingerprint([...urls].sort()) };
+    referenceVideoCount: urls.length, referenceVideoFingerprint: pricingFingerprint(urls.map(videoReferenceScopeUrl).sort()) };
 }
+function videoReferenceScopeUrl(url: string) { return siteUploadPathFromUrl(url) || url; }
 export function assertVideoPricingFinalReferences(context: VideoPricingContext, urls: readonly string[]) {
   const actual = normalizedVideoPricingReferenceScope([...urls]);
   if (actual.referenceVideoCount !== context.referenceVideoCount || context.referenceVideoFingerprint
@@ -92,13 +99,14 @@ async function resolveContext(user: SessionUser, body: Record<string, unknown>,
     if (rows.length !== ids.length) throw new AuthError('模板参考视频已失效', 403);
     templateVideoUrls = rows.map(row => row.original_url);
     templateBinding = { runId: templateRunId, template: handoff.snapshot.templateVersion, assets: submitted,
-      videoVersions: rows.map(row => ({ id: row.id, version: pricingFingerprint([row.original_url, row.created_at, row.hash, row.file_size]) })) };
+      videoVersions: rows.map(row => ({ id: row.id, version: pricingFingerprint([videoReferenceScopeUrl(row.original_url), row.created_at, row.hash, row.file_size]) }))
+        .sort((left, right) => left.id.localeCompare(right.id)) };
   }
-  const { urls: videoUrls, referenceVideo, referenceVideoCount, referenceVideoFingerprint } = normalizedVideoPricingReferenceScope(body.reference_video_urls, templateVideoUrls);
+  const { referenceVideo, referenceVideoCount, referenceVideoFingerprint } = normalizedVideoPricingReferenceScope(body.reference_video_urls, templateVideoUrls);
   const purpose = operation === 'draft_upgrade' ? 'draft_upgrade' : body.draft === true ? 'draft' : 'standard';
   const fingerprint = pricingFingerprint({ v: 1, actorId: user.id, projectId, videoCardId, payer,
     provider: body.provider || 'seedance', model: body.model, resolution: body.resolution, duration: body.duration,
-    ratio: body.ratio || null, sourceDraftTaskId: body.source_draft_task_id || null, purpose, referenceVideo, videoUrls: [...videoUrls].sort(), templateBinding });
+    ratio: body.ratio || null, sourceDraftTaskId: body.source_draft_task_id || null, purpose, referenceVideo, referenceVideoFingerprint, templateBinding });
   return { fingerprint, actorId: user.id, projectId, videoCardId, payer, referenceVideo, purpose, referenceVideoCount, referenceVideoFingerprint, templateRunId };
 }
 export async function resolveVideoPricingContext(user: SessionUser, body: Record<string, unknown>, operation: 'create' | 'draft_upgrade' = 'create') {

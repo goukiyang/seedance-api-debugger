@@ -39,6 +39,7 @@ async function run() {
           health: { api: 'ok', worker: 'ok', comfyui: 'ok', checked_at: new Date().toISOString() } }],
       ] as const) await tx.platformSetting.create({ data: { key, value_json: JSON.stringify(value) } });
       const normal = { provider: 'seedance' as const, model: 'dreamina-seedance-2-0-260128', resolution: '720p', duration: 5 };
+      const scopedNormal = { ...normal, referenceVideo: 'none' as const, pricingPurpose: 'standard' as const };
       const ip = { provider: 'volcengine_ip' as const, model: 'doubao-seedance-2-5-260628', resolution: '1080p', duration: 5 };
       const h3 = { provider: 'h3' as const, model: 'lightx2v_4step_turbo', resolution: '480p', duration: 5 };
       const enhance = { provider: 'volcengine_mediakit' as const, model: 'enhance-video', resolution: '540p', duration: 2.2, toolVersion: 'professional', fps: 60 };
@@ -72,7 +73,10 @@ async function run() {
       }));
       changes.push({ id: h3Row.id, mode: 'custom', customPointsPerCny: '0.1', base: { currency: 'CNY', amount: '0.5', unit: 'second', source } });
       await save({ kind: 'save', changes: { standards: { site_base_cny: '1.0' }, rows: changes } });
-      const current = await quoteVideoPricing(normal, tx);
+      await assert.rejects(() => quoteVideoPricing(normal, tx), { status: 409, code: 'pricing_context_required' },
+        'a precise policy rejects missing video context instead of falling back to the old quote');
+      const current = await quoteVideoPricing(scopedNormal, tx);
+      assert.deepEqual(current.identity.specifications, { resolution: normal.resolution, referenceVideo: 'none', pricingPurpose: 'standard' });
       assert.equal(current.pricing.estimatedCost, 0.8); assert.equal(current.revision, snapshot.revision);
       assert.equal((await quoteVideoPricing(ip, tx)).pricing.estimatedCost, 0.8);
       assert.equal((await quoteVideoPricing(h3, tx)).pricing.estimatedCost, 0.3);
@@ -85,7 +89,7 @@ async function run() {
       assert.equal(validateRequestCostCeiling(0.01, 0.01), null, 'old cent-level ceilings remain supported');
       assert.notEqual(validateRequestCostCeiling(0.001, 0.001), null);
       assert.notEqual(validateRequestCostCeiling(0.7, 0.8), null);
-      evidence.push('G11/G13/G21: real policy adoption reaches all video charge types, tenth-point amounts and creation-boundary freshness');
+      evidence.push('G11/G13/G21: real policy adoption reaches all video charge types, tenth-point amounts and creation-boundary freshness; precise video policy rejects missing context while known no-reference standard scope remains quotable');
       const exposed = publicVideoPricing(current);
       assert.equal('pricingCharge' in exposed, false);
       assert.equal(JSON.stringify(exposed).includes('configFingerprint'), false);
@@ -107,7 +111,7 @@ async function run() {
       await save({ kind: 'save', changes: { rows: [{ id: normalRow.id, mode: 'custom', customPointsPerCny: '2.0' }] } });
       await assert.rejects(() => assertVideoPricingAcceptance(current, current.revision, tx));
       assert.equal(frozenPricingCredits(JSON.parse(frozen)).credits, 0.8, 'accepted snapshot keeps its original price');
-      assert.equal((await quoteVideoPricing(normal, tx)).pricing.estimatedCost, 1.5);
+      assert.equal((await quoteVideoPricing(scopedNormal, tx)).pricing.estimatedCost, 1.5);
       assert.deepEqual(calculateEstimatedCost('720p', 5, normal.model), legacy.pricing, 'synchronous legacy function remains unchanged');
       evidence.push('G13/G21: changed current revision rejects stale creation while the accepted frozen contract remains unchanged');
       completed = true; throw rolledBack;

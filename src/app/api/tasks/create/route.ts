@@ -17,7 +17,7 @@ import { promisify } from 'util';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance, publicVideoPricing, videoPricingError, type VideoPricingQuote } from '@/lib/pricing/video';
-import { resolveVideoPricingContext, verifyVideoPricingCredential, videoPricingRequiresContext, videoPricingBusinessFingerprint, assertVideoPricingFinalReferences, type VideoPricingContext } from '@/lib/pricing/video-context';
+import { resolveVideoPricingContext, verifyVideoPricingCredential, videoPricingRequiresContext, videoPricingBusinessFingerprint, assertVideoPricingFinalReferences, normalizedVideoPricingReferenceScope, type VideoPricingContext } from '@/lib/pricing/video-context';
 import { addAssetToWorkspace, getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { validatePromptReferences, renderPromptWithAssets } from '@/lib/assets/collection';
 import { createTaskSnapshot } from '@/lib/assets/snapshot';
@@ -1628,7 +1628,7 @@ export async function POST(request: NextRequest) {
   if (allReferenceAudioUrls.length > 3) {
     return errorJson(`${requestedProvider === H3_VIDEO_PROVIDER ? 'H3' : 'Seedance 2.0'} 单次生成最多选择 3 个参考音频。`, 400);
   }
-  const referenceVideoUrls = allReferenceVideoUrls.slice(0, 3);
+  const referenceVideoUrls = normalizedVideoPricingReferenceScope(allReferenceVideoUrls).urls;
   const referenceAudioUrls = allReferenceAudioUrls.slice(0, 3);
   try { assertVideoPricingFinalReferences(pricingContext, referenceVideoUrls); }
   catch (error) { const failure = videoPricingError(error); return NextResponse.json({ error: failure?.message || '最终素材与报价不同，请重新报价；尚未生成', code: failure?.code || 'pricing_context_changed' }, { status: failure?.status || 409 }); }
