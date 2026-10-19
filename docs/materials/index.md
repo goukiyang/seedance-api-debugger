@@ -1,5 +1,7 @@
 # 项目资料索引
 
+当前发布接线收口：正式根 `trace03-fix/2ae78729-5e7a-46f1-ba65-2cc8f020d1f0/main-build.json`／main-build.log是d7主完整Linux20成功原件（BUILD JkJHSFeFSZhQf7EjMbmKA），prepare-failed-1792394962622.json为随后路径ENOENT原失败；成功／失败分层，guard未建。`trace03-fix/rate-compat-private-r2/path-consumer-audit.json`／build-evidence-paths.patch含全21命名空间／仅2私有文件差量及15SHA，统一成功build m.stage写读并补真实临时FS门；原32组保留，新门未运行，无resume／旧回执复制／产品或TTL变化。新run15564962按固定记录新源统一双完整构建，生产2a/.96.0不变；原Word／PNG和私有材料沿正式根，不推公开。
+
 ## TRACE03-FIX 新来源兼容接续（2026-10-19）
 
 当前正式证据归项目主目录 `trace03-fix/5d7e9af9-4937-41e2-970f-1ef97c7f8522/`：私有32门／主TRACE六组67项及RATE G01–G24 1046断言成功收据与原8日志、1517／79／1386源SHA均核；`main-build-failed.json/log`明确完整npm类型退出1，`types-diagnostic.json/log`106.75s正常exit2仅3测试错。Next14原生Headers适配与当前TS低目标下Set迭代一次三处纠正，不改产品/依赖/配置/收费权限或15私有源；新run2ae78729将新精确候选统一完整构建。生产2a/.96.0未改，guard未开始／未部署／功能手验。下列068490为前一失败节点，保原件，不以运行门成功冒完整编译通过。

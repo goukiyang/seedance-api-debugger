@@ -2,6 +2,8 @@
 
 ## 2026-10-18 - TRACE03-FIX新旧合同以服务器保存对象为边界
 
+- 发布器迁到私有子目录时，回执写入位置与后续reader必须共用同一精确resolver；2ae主完整build真实成功后，save(operationStage)与读m.stage的错位导致prepare拒绝，32组原门没有覆盖真实写读位置。补实际临时文件经同writer／严格reader的IO门及生产调用接线，不能只查源码字符串，也不搬旧receipt冒原路径或新增跨run许可来省构建；旧成功和失败分层保留，纯固定记录新源重建不改产品／TTL。
+
 - 类型诊断必须逐条核原文件/行列与真实声明后再改，不能以相邻包装代替原报错调用。5d7e9运行门全过后完整build仍在seal(adapter)失败；Next14的seal接受原生Headers，旧adapter的迭代返回不合新DOM类型。新测试去重循环亦须沿项目原TS目标，用Array.from保序，不为测试改target/downlevel或强转；一次收尽3错再同批修，原失败和重复同类计数不随run清零。
 
 - 后继任务已上线时，旧候选构建和Review仅证明历史产物，先按真实安全来源最小切片接入，保现存费用/权限/历史reader。两支同名fingerprint v2语义不同则保宿主旧算法，新语义明确v3；ratio合同另算，不多算法猜匹配。
