@@ -512,10 +512,12 @@ async function main() {
   const settings = await integration.resolveImageGenerationChannelSnapshot(imageChannel, db, false, model);
   const { imageBillingScope } = await import('../src/lib/image-studio/billing-scope');
   const { fixedImageBillingContract } = await import('../src/lib/image-studio/billing-quote');
+  const { parseImageBillingContract } = await import('../src/lib/image-studio/billing-contract');
   const { imageOutputPlanHash } = await import('../src/lib/image-generation/output-plan');
   const originalPlan = resolveImageOutputPlan({ model, resolution: '1K', ratio: '1:1' });
   const originalId = 'original-v3-async', scope = imageBillingScope(settings);
-  const billingContract = fixedImageBillingContract({ scope, model, credits: 5, specification: 'synthetic-original-specification' });
+  const billingContract = fixedImageBillingContract({ scope, model, credits: 5, specification: sha256('synthetic-original-specification') });
+  assert.ok(parseImageBillingContract(JSON.stringify(billingContract)), 'Synthetic original billing seed must satisfy the real frozen-contract reader');
   const original = await db.imageStudioTask.create({ data: { id: originalId, owner_id: owner, batch_id: originalId, ordinal: 0,
     fingerprint: 'frozen-original-v3', model, prompt: 'Synthetic original', context: 'Original frozen context', revision: 0,
     reference_ids: '[]', output_size: originalPlan.outputSize, aspect_ratio: '1:1', unit_credits: 5,
@@ -707,7 +709,7 @@ async function main() {
     assert.equal(hdDirectory(), frozenHdDirectory, 'The real zero-argument wrapper captures server configuration once');
   } finally {
     if (savedHdEnv === undefined) delete process.env.HD_DERIVATIVES_ROOT; else process.env.HD_DERIVATIVES_ROOT = savedHdEnv;
-    if (savedMode === undefined) delete process.env.NODE_ENV; else Object.assign(process.env, { NODE_ENV: savedMode });
+    if (savedMode === undefined) Reflect.deleteProperty(process.env, 'NODE_ENV'); else Object.assign(process.env, { NODE_ENV: savedMode });
   }
   fixture.check(expectedChecks[18]);
   await fixture.finish({ negativeChecks: ['legacy_wait_schema_rejected', 'conflicting_core_accounting_copy_rejected'], calls,

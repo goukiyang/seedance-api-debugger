@@ -7,6 +7,8 @@
 - 持久字段写入、parser、重读后追加/恢复和公开投影须成套；畸形outputPlans安全空白名单，不原raw回退、补造计划或重派。
 - 特殊providerCheck不覆盖普通WAIT05；非法等待不投影假可核对时间，detached供应商最早时间不冒人工限频/预算均满足。
 - 永久root+i收费屏障不作普通发布维护。沿完整原storage实体及严格leaf检查，不建镜像/独立storage/屏障副本；临时维护另名，旧writer须实际admission隔离。Next server.close不证明断开后的异步Promise完成；隔离原生已证短锁释放/锁主死亡后迟到事务仍被精确cgroup双栈封网挡住，不冒生产已封网。普通unit须核实际DropInPaths；旧writer确定结束后还原本run网络策略再启同unit新HOLD，避免健康检查自锁。
+- 保护门须验证真实整链过渡：恢复网络前已经写新HOLD/guard，expected policy只能替换已批准原live.dropin这一精确source/mode/metadata/body/hash快照，原网络/parents/filter及其它dropin仍全等，最终equal也沿同一预期；prestop abort不允许候选过渡。068490真实内存IO整链24case与32组合门只证明私有范围，不冒全应用或生产native通过。
+- 合成旧任务必须带宿主本来要求的合法冻结合同；缺node_contracts的run应保留并暂停，不能为了测试旧尺寸而绕费用门。规格摘要也须满足真实64hex reader。集成后隔离loader仅增精确真实依赖，readiness复制复用实际共享常量，不填false stub、不递归泛放；整批失败先收尽再统一修，类型诊断和完整build分开记。
 - 新规格v3不是免收费授权：未消费报价不是已受理父；新父接受同事务鲜核当前收费存在性/revision，已受理父/迟到子仍冻结。生产HD显式目录不传合成fixture，首业务import前清除并切test；HD编码公式只准精确目录入口差量，其余字节全同。
 - 工程门按最早main startedAt原30分钟且必须在真实完整build时段；失效保原证、不延TTL、不外挂fixture。纯记录新SHA/guard/run须完整重建，同轮不重复升号。旧维护/OS/R3失败原证沿正式根，不因换来源清零。
 - 实施与门结果以正式根生图原单§17.6/私有trace03-fix为准；记录经验不冒构建、发布或功能通过。

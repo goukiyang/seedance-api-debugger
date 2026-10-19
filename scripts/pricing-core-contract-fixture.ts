@@ -227,7 +227,7 @@ async function main() {
   ok(mismatch.studioTaskHasViewableOutput(visibleMismatch));
   equal(mismatch.studioTaskHasViewableOutput({ ...visibleMismatch, usage_json: '{}' }), false);
 
-  for (const file of runtime.pricingRuntimeSourceFiles(candidateRoot)) {
+  for (const file of new Set([...runtime.pricingRuntimeSourceFiles(candidateRoot), ...STUDIO_SHARED_WORKER_FILES])) {
     const destination = path.join(fixtureRoot, file); fs.mkdirSync(path.dirname(destination), { recursive: true });
     fs.copyFileSync(path.join(candidateRoot, file), destination);
   }

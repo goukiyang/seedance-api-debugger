@@ -249,13 +249,113 @@ async function verifyToolFlows(fixture: Awaited<ReturnType<typeof traceFixture>>
       status: node.id === 'input' ? 'succeeded' : 'pending', output_asset_ids: node.id === 'input' ? JSON.stringify(ids) : '[]',
       result_json: node.id === 'input' ? JSON.stringify({ succeededAssetIds: ids }) : null })) } } });
   const oldSnapshot = legacy.snapshot_json;
+  const beforeMissingContractAccount = await db.creditAccount.findUniqueOrThrow({ where: { user_id: owner } });
+  const beforeMissingContractLedger = await db.creditLedger.count();
   await flows.advanceToolFlowRun(legacy.id);
-  const prepared = await db.imageStudioTask.findFirstOrThrow({ where: { tool_flow_run_id: legacy.id } });
-  assert.equal(prepared.output_size, '928x1232'); assert.equal(JSON.parse(prepared.snapshot_json!).ratioContractVersion, undefined);
+  const blockedLegacy = await db.toolFlowRun.findUniqueOrThrow({ where: { id: legacy.id }, include: { node_runs: true } });
+  assert.equal(blockedLegacy.status, 'paused'); assert.equal(blockedLegacy.snapshot_json, oldSnapshot);
+  const blockedLegacyNode = blockedLegacy.node_runs.find(node => node.node_id === 'image'); assert.ok(blockedLegacyNode);
+  assert.equal(blockedLegacyNode.status, 'pending'); assert.match(blockedLegacyNode.error || '', /缺少完整的受理合同/);
   await flows.advanceToolFlowRun(legacy.id);
-  assert.deepEqual(await db.imageStudioTask.findUniqueOrThrow({ where: { id: prepared.id } }), prepared);
+  assert.equal(await db.imageStudioTask.count({ where: { tool_flow_run_id: legacy.id } }), 0);
   assert.equal((await db.toolFlowRun.findUniqueOrThrow({ where: { id: legacy.id } })).snapshot_json, oldSnapshot);
-  assert.equal(await db.imageStudioTask.count({ where: { tool_flow_run_id: legacy.id } }), 1);
+  assert.deepEqual(await db.creditAccount.findUniqueOrThrow({ where: { user_id: owner } }), beforeMissingContractAccount);
+  assert.equal(await db.creditLedger.count(), beforeMissingContractLedger);
+
+  // A separate, complete historical seed follows the actual RATE host
+  // 2a1c641d0864850b5ca63f9d6201891341aa79bb resolveTemplate ->
+  // buildToolFlowQuote -> freezeToolFlowNodes persisted shape. It is NOT a new
+  // run admitted with an old quote, nor a v3 run with its version stripped.
+  // RATE froze system-template references without the future runtime inputs;
+  // the existing real upstream asset IDs are added only by scheduleTemplateNode.
+  const { getImageStudioSettings } = await import('../src/lib/image-studio/settings');
+  const { defaultImageStudioQuality, normalizeImageStudioQuality } = await import('../src/lib/image-studio/model-catalog');
+  const { captureImageGenerationChannel, getImageGenerationSettingsForModel,
+    resolveImageGenerationChannelSnapshot } = await import('../src/lib/integrations/image-generation');
+  const { imageBillingScope } = await import('../src/lib/image-studio/billing-scope');
+  const { fixedImageBillingContract, imageSpecification } = await import('../src/lib/image-studio/billing-quote');
+  const { parseImageBillingContract } = await import('../src/lib/image-studio/billing-contract');
+  const { withImagePricing } = await import('../src/lib/pricing/image');
+  const { creditCents } = await import('../src/lib/credits/precision');
+  const { savedImageRatioContractVersion } = await import('../src/lib/image-generation/output-plan');
+  const legacySettings = await getImageStudioSettings();
+  const legacyApi = await getImageGenerationSettingsForModel(model);
+  const legacyPricing = await withImagePricing(legacyApi, model, db);
+  assert.equal(legacyPricing.quote, null, 'This historical seed must use the fixture\'s genuine non-adopted fixed tariff');
+  const legacyUnitCredits = Object.entries(legacySettings.prices).find(([id]) => id === model)?.[1];
+  assert.ok(typeof legacyUnitCredits === 'number' && Number.isFinite(legacyUnitCredits) && legacyUnitCredits > 0);
+  const legacyConfig = { prompt: 'Legacy synthetic', context: legacySettings.context.trim().slice(0, 20000), model,
+    quality: normalizeImageStudioQuality(model, defaultImageStudioQuality(model)), count: 1, aspectRatio: '58:77',
+    outputSize: '928x1232', referenceIds: [], moduleId: null, templateId: null, templateVersion: null, sourcePresetId: null };
+  const legacyScope = imageBillingScope(legacyApi);
+  const legacyContractDigest = sha256(JSON.stringify({ config: legacyConfig, scope: legacyScope, api: legacyApi, count: 1 }));
+  const legacyQuote: Parameters<typeof flows.createToolFlowQuoteProof>[1] = {
+    flowId: legacyFlow.id, flowVersion: legacyFlow.version, settingsRevision: legacySettings.revision,
+    estimatedCredits: legacyUnitCredits, expiresAt: new Date(Date.now() + 60000).toISOString(), billingMode: 'fixed',
+    steps: [{ nodeId: 'image', templateId: null, moduleId: null, templateVersion: null, model, count: 1,
+      unitCredits: legacyUnitCredits, estimatedCredits: legacyUnitCredits, status: 'fixed', pricingRevision: null,
+      contractDigest: legacyContractDigest }] };
+  const legacyProof = flows.createToolFlowQuoteProof(owner, legacyQuote);
+  flows.assertToolFlowQuoteProof(owner, legacyQuote, legacyProof);
+  const runsBeforeOldSubmission = await db.toolFlowRun.count();
+  await assert.rejects(flows.createToolFlowRun(user, legacyFlow.id, ids, legacyQuote, legacyProof),
+    error => error instanceof Error && /图片规格已更新/.test(error.message));
+  assert.equal(await db.toolFlowRun.count(), runsBeforeOldSubmission);
+  assert.deepEqual(await db.creditAccount.findUniqueOrThrow({ where: { user_id: owner } }), beforeMissingContractAccount);
+  assert.equal(await db.creditLedger.count(), beforeMissingContractLedger);
+  const legacyChannel = await captureImageGenerationChannel(model, 'original', db);
+  const legacyFrozenApi = await resolveImageGenerationChannelSnapshot(legacyChannel, db, true, model);
+  assert.equal(imageBillingScope(legacyFrozenApi), legacyScope);
+  const legacyContract = fixedImageBillingContract({ scope: legacyScope, model, credits: legacyUnitCredits,
+    specification: imageSpecification({ model, quality: legacyConfig.quality, outputSize: legacyConfig.outputSize,
+      aspectRatio: legacyConfig.aspectRatio, referenceCount: legacyConfig.referenceIds.length,
+      inputCharacters: legacyConfig.context.length + legacyConfig.prompt.length, inputDigest: legacyContractDigest }) });
+  assert.deepEqual(parseImageBillingContract(JSON.stringify(legacyContract)), legacyContract);
+  const legacyAcceptedNode = { config: legacyConfig, billingContract: legacyContract, imageChannel: legacyChannel,
+    settingsRevision: legacySettings.revision, authorizedCount: 1,
+    maxReferences: Object.entries(legacyFrozenApi.modelCapabilities).find(([id]) => id === model)?.[1]?.maxReferences ?? 9,
+    quote: legacyQuote };
+  const completeLegacySnapshot = { schema: 'toolflow.v1', flow_id: legacyFlow.id, flow_owner_id: owner,
+    version: legacyFlow.version, name: legacyFlow.name, project_id: legacyFlow.project_id, graph: legacyGraph,
+    input_asset_ids: ids, billing_mode: 'fixed', billing_quote: legacyQuote,
+    contract_version: 'toolflow-pricing-v1', node_contracts: { image: legacyAcceptedNode } };
+  for (const value of [completeLegacySnapshot, legacyQuote, legacyConfig]) {
+    for (const field of ['ratioContractVersion', 'outputPlan', 'outputPlanHash', 'outputIntent']) assert.equal(field in value, false);
+  }
+  assert.equal(await db.asset.count({ where: { id: { in: ids }, owner_id: owner, type: 'image', status: 'active' } }), ids.length);
+  const acceptedLegacy = await db.toolFlowRun.create({ data: {
+    id: 'rate-tf-' + sha256(`${owner}\0${legacyFlow.id}\0${legacyProof}`), flow_id: legacyFlow.id, owner_id: owner,
+    flow_version: legacyFlow.version, status: 'rate_queued', estimated_credits: legacyUnitCredits, frozen_credits: 0, actual_credits: 0,
+    snapshot_json: JSON.stringify(completeLegacySnapshot), node_runs: { create: legacyGraph.nodes.map(node => ({ node_id: node.id,
+      status: node.id === 'input' ? 'succeeded' : 'rate_pending', input_asset_ids: node.id === 'input' ? JSON.stringify(ids) : '[]',
+      output_asset_ids: node.id === 'input' ? JSON.stringify(ids) : '[]',
+      result_json: node.id === 'input' ? JSON.stringify({ succeededAssetIds: ids }) : null,
+      finished_at: node.id === 'input' ? new Date() : null })) } } });
+  const acceptedLegacySnapshot = acceptedLegacy.snapshot_json;
+  assert.equal(savedImageRatioContractVersion(JSON.parse(acceptedLegacySnapshot)), 2);
+  const beforeLegacyAccount = await db.creditAccount.findUniqueOrThrow({ where: { user_id: owner } });
+  assert.equal(await db.imageStudioTask.count({ where: { tool_flow_run_id: acceptedLegacy.id } }), 0);
+  await flows.advanceToolFlowRun(acceptedLegacy.id);
+  const prepared = await db.imageStudioTask.findFirstOrThrow({ where: { tool_flow_run_id: acceptedLegacy.id } });
+  const preparedLegacySnapshot = JSON.parse(prepared.snapshot_json!);
+  assert.equal(prepared.output_size, '928x1232'); assert.equal(preparedLegacySnapshot.ratioContractVersion, undefined);
+  assert.equal(savedImageRatioContractVersion(preparedLegacySnapshot), 2);
+  for (const field of ['outputPlan', 'outputPlanHash', 'outputIntent']) assert.equal(field in preparedLegacySnapshot, false);
+  assert.equal(prepared.unit_credits, legacyUnitCredits);
+  assert.deepEqual(JSON.parse(prepared.reference_ids), ids);
+  assert.deepEqual(preparedLegacySnapshot.imageChannel, legacyChannel);
+  const legacyFreezes = await db.creditLedger.findMany({ where: { related_task_id: prepared.id, type: 'task_freeze' } });
+  assert.equal(legacyFreezes.length, 1); assert.equal(legacyFreezes[0].amount, -legacyUnitCredits);
+  const afterLegacyAccount = await db.creditAccount.findUniqueOrThrow({ where: { user_id: owner } });
+  assert.equal(creditCents(afterLegacyAccount.frozen_credits) - creditCents(beforeLegacyAccount.frozen_credits), creditCents(legacyUnitCredits));
+  const preparedLegacyRun = await db.toolFlowRun.findUniqueOrThrow({ where: { id: acceptedLegacy.id } });
+  assert.equal(preparedLegacyRun.status, 'rate_running'); assert.equal(preparedLegacyRun.frozen_credits, legacyUnitCredits);
+  await flows.advanceToolFlowRun(acceptedLegacy.id);
+  assert.deepEqual(await db.imageStudioTask.findUniqueOrThrow({ where: { id: prepared.id } }), prepared);
+  assert.equal((await db.toolFlowRun.findUniqueOrThrow({ where: { id: acceptedLegacy.id } })).snapshot_json, acceptedLegacySnapshot);
+  assert.equal(await db.imageStudioTask.count({ where: { tool_flow_run_id: acceptedLegacy.id } }), 1);
+  assert.deepEqual(await db.creditLedger.findMany({ where: { related_task_id: prepared.id, type: 'task_freeze' } }), legacyFreezes);
+  assert.deepEqual(await db.creditAccount.findUniqueOrThrow({ where: { user_id: owner } }), afterLegacyAccount);
   fixture.check(expectedChecks[13]);
 
   await db.imageStudioTask.update({ where: { id: future.id }, data: { status: studioTaskState(future, 'uncertain') } });

@@ -2,6 +2,8 @@
 
 ## TRACE03-FIX 新来源兼容接续（2026-10-19）
 
+最新证据均在正式根同主题 `trace03-fix/06849032-a21c-4899-954d-8b777174821c/`：`private-engineering-complete.json`／`controller-engineering-receipt.json`／`private-release-review.json`为Linux20私有32组成功与零开放发现，明确非完整应用验收；`main-build-failed.json`／`main-build.log`／`prebuild-diagnostics.tar.gz`及解包24日志/报告、`types-diagnostic.json/log`为同bb6主候选完整npm默认门失败/Next与guard未开始、75秒有界类型exit2。`concentrated-diagnostics.json`记录六测试文件集中纠正边界；保旧失败、不动产品门/100历史.source/私有15文件或TTL，修后新SHA/guard/run再统一完整构建。实际仍2a/.96.0，0生产维护/停服务/切换/业务写，原图/Word/私有DB不复制公开。
+
 当前实际来源为 RATE01 `2a1c641d0864850b5ca63f9d6201891341aa79bb`／v0.96.0；TRACE旧候选be141/54c4与R3仅历史，不再可发布。来源为正式工单与实际运行只读核对；主题：新旧规格/受理身份/压缩退避/费率兼容/永久屏障。正式原文在项目主目录 `tasks/todo/2026-10-10-fluxport-image-api.md` §17.6.5、费率原单§15.3；原Word/PNG及全部私有收据沿主目录 `docs/materials/2026-10-17-image-content-incident/inc24/trace03-fix/`，不复制公开。新业务/fixture已齐，仅静态；未消费legacy批次报价期间采纳RATE的竞态已补同事务门，待统一完整检查。新发布器保持whole-storage与原+i，不建镜像/副本；HD仅server目录resolver。`rate-compat-private/native-fence-observations/summary-f9dd06f4-6cba-4fb0-8007-82c5830cce5e.json` 为独立原生探针机制证据，32命令/3源SHA及双栈迟到事务有证，正式服务/DB/供应商影响0；不冒生产封网或已部署。组合门及新主/guard双build未运行，功能仍用户手验。
 
 ## MAT-M01/MAT-M02 手机素材选择与分页（2026-10-18）

@@ -42,7 +42,9 @@ async function main() {
   assert.equal(process.platform, 'linux');
   assert.ok(runtimeRoot.startsWith(path.join(root, '.role-tests') + path.sep));
   const { pricingRuntimeSourceFiles } = await import('../src/lib/pricing/runtime');
-  for (const file of pricingRuntimeSourceFiles(root)) {
+  const sharedWorkerFiles = kind === 'toolflow'
+    ? (await import('../src/lib/image-studio/tasks')).STUDIO_SHARED_WORKER_FILES : [];
+  for (const file of new Set([...pricingRuntimeSourceFiles(root), ...sharedWorkerFiles])) {
     const destination = path.join(runtimeRoot, file), bytes = fs.readFileSync(path.join(root, file));
     if (fs.existsSync(destination)) assert.deepEqual(fs.readFileSync(destination), bytes, `Prepared runtime source changed: ${file}`);
     else { fs.mkdirSync(path.dirname(destination), { recursive: true }); fs.writeFileSync(destination, bytes, { flag: 'wx', mode: 0o600 }); }
