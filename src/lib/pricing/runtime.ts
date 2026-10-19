@@ -6,7 +6,7 @@ import type { Prisma } from '@prisma/client';
 import { assertPricingWriterIsolation } from './isolation';
 
 export const PRICING_RUNTIME_PROTOCOL = 'pricing-policy-v1';
-export const PRICING_AUTHORING_RUNTIME_CAPABILITY = 'pricing-authoring-v1:video-scope-v1:image-spec-v1';
+export const PRICING_AUTHORING_RUNTIME_CAPABILITY = 'pricing-authoring-v1:video-scope-v1:image-spec-v1:image-quality-route-v1';
 export const PRICING_IMAGE_CAPABILITY_KEY = 'pricing_worker_capability_v1:image';
 const TTL_MS = 90_000;
 type Client = Pick<Prisma.TransactionClient, 'platformSetting'>;
@@ -93,7 +93,8 @@ export function pricingRuntimeSourceFiles(root = process.cwd()) {
   return [...files, 'scripts/process-image-studio.ts', 'src/lib/credits/policy.ts',
     'src/lib/credits/precision.ts', 'src/lib/projects/budget.ts', 'src/lib/tools/toolflow-runtime.ts',
     'src/lib/integrations/image-generation.ts', 'src/lib/integrations/image-generation-channel.ts',
-    'src/lib/integrations/image-generation-defaults.ts', 'src/lib/assets/site-url.ts', 'package.json', '.deployed-commit'].sort();
+    'src/lib/integrations/image-generation-defaults.ts', 'src/lib/integrations/image-quality-routing.ts',
+    'src/lib/assets/site-url.ts', 'package.json', '.deployed-commit'].sort();
 }
 
 export function pricingRuntimeModuleHashes(root = process.cwd()) {

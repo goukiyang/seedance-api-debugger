@@ -84,3 +84,12 @@ export function normalizeImageStudioQuality(model: string, value: unknown): Imag
   }
   return options.includes(value as ImageStudioQuality) ? value as ImageStudioQuality : defaultImageStudioQuality(model);
 }
+
+export function imageStudioNewQualityOptions(model: string): ImageStudioQuality[] {
+  return model === 'gpt-image-2.5-sunburst' ? ['medium', 'max'] : IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model as ImageStudioModel] || ['auto'];
+}
+
+export function imageStudioQualityLabel(model: string, quality: string): string {
+  return model === 'gpt-image-2.5-sunburst' && quality === 'medium' ? '中等'
+    : IMAGE_STUDIO_QUALITY_LABELS[quality as ImageStudioQuality] || quality;
+}

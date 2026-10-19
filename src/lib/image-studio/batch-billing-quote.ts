@@ -15,6 +15,8 @@ import { getImageStudioSettings } from './settings';
 import { resolveStudioModuleGenerationConfig } from './modules';
 import { captureImageGenerationChannel } from '@/lib/integrations/image-generation';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
+import { resolveImageGenerationRequestRoute } from '@/lib/integrations/image-generation-defaults';
+import { IMAGE_25_QUALITY_MODEL } from './quality-routing';
 import { addCredits, creditCents, sumCredits } from '@/lib/credits/precision';
 import { assertNewPricingCharge } from '@/lib/pricing/charge';
 import { pricingCanonical } from '@/lib/pricing/catalog';
@@ -23,7 +25,8 @@ import { samePricingImageCharge } from '@/lib/pricing/image';
 const key = (owner: string, id: string) => `image_batch_billing_quote_v1:${owner}:${id}`;
 
 function sameImageChannel(left: ImageGenerationChannelSnapshot | undefined, right: ImageGenerationChannelSnapshot | undefined) {
-  return left?.channelId === right?.channelId && left?.configRevision === right?.configRevision;
+  return left?.channelId === right?.channelId && left?.configRevision === right?.configRevision
+    && JSON.stringify(left?.qualityRoute) === JSON.stringify(right?.qualityRoute);
 }
 
 function isPinnedChannelId(value: unknown): value is string {
@@ -61,7 +64,7 @@ export function batchQuoteFingerprint(body: Record<string, unknown>, resolvedCha
   delete normalizedInput.imageChannel;
   if (channel) normalizedInput.channelId = channel.channelId;
   const value = { input: normalizedInput,
-    imageChannel: channel ? { channelId: channel.channelId, configRevision: channel.configRevision } : null,
+    imageChannel: channel ? { ...channel } : null,
     moduleId: body.moduleId, sources: body.sources };
   // Versionless receipts keep their original byte-level contract, without fallback matching.
   return createHash('sha256').update(version === 1 ? JSON.stringify(value) : pricingCanonical(value)).digest('hex');
@@ -94,16 +97,19 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
   const settings = await getImageStudioSettings();
   const sharedUse = await prisma.$transaction(tx => resolveOwnedStudioTaskSharedUse(owner, body.moduleId as string, input.sharedLive, tx));
   const sharedLive = sharedUse?.definition.intent;
-  const generationSource = sharedUse ? studioSharedGenerationSource(sharedUse, input) : { ...workspace, ...(input.model ? { model: input.model } : {}) };
-  const model = resolveStudioModuleGenerationConfig(generationSource, settings).model;
+  const generationSource = sharedUse ? studioSharedGenerationSource(sharedUse, input) : { ...workspace, ...(input.model ? { model: input.model } : {}), ...((input.model || workspace.model) === IMAGE_25_QUALITY_MODEL && input.quality !== undefined ? { quality: input.quality } : {}) };
+  const generation = resolveStudioModuleGenerationConfig(generationSource, settings);
+  const model = generation.model;
   const requestedChannelId = typeof body.channelId === 'string' ? body.channelId : undefined;
-  const effectiveChannelId = requestedChannelId === undefined && suppliedImageChannel
+  const qualityRoute = model === IMAGE_25_QUALITY_MODEL ? await resolveImageGenerationRequestRoute(model, generation.quality, requestedChannelId) : undefined;
+  const effectiveChannelId = qualityRoute?.channelId || (requestedChannelId === undefined && suppliedImageChannel
     ? suppliedImageChannel.channelId
-    : (await resolveImageGenerationRequestChannel(model, requestedChannelId) || 'original');
+    : (await resolveImageGenerationRequestChannel(model, requestedChannelId) || 'original'));
   if (suppliedImageChannel && suppliedImageChannel.channelId !== effectiveChannelId) {
     throw new StudioError('整批报价对应的图片通道与型号默认供应商不匹配，请重新报价', 409);
   }
-  let imageChannel = suppliedImageChannel || (effectiveChannelId === 'original' ? undefined : await captureImageGenerationChannel(model, effectiveChannelId));
+  if (qualityRoute && suppliedImageChannel && JSON.stringify(suppliedImageChannel.qualityRoute) !== JSON.stringify(qualityRoute.qualityRoute)) throw new StudioError('图片质量路由已变化，请重新报价', 409);
+  let imageChannel = suppliedImageChannel || (effectiveChannelId === 'original' ? undefined : await captureImageGenerationChannel(model, effectiveChannelId, undefined, qualityRoute?.qualityRoute));
   try {
     for (let index = 0; index < sources.length; index++) {
       const source = sources[index] as { name?: unknown; assetId?: unknown };
@@ -157,7 +163,7 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
     throw new StudioError('整批报价未确认，未派发生成', 503);
   }
 
-  const publicChannel = imageChannel ? { channelId: imageChannel.channelId, configRevision: imageChannel.configRevision } : undefined;
+  const publicChannel = imageChannel ? { ...imageChannel } : undefined;
   await prisma.$transaction(tx => resolveOwnedStudioTaskSharedUse(owner, body.moduleId as string, sharedLive, tx));
   const sharedResult = sharedLive ? { sharedLive } : {};
   if (imageChannel) {
@@ -224,10 +230,16 @@ export async function consumeBatchQuote(tx: Prisma.TransactionClient, owner: str
   if (!sameSharedStudioIntent(parseSharedStudioIntent(stored.sharedLive), sharedUse?.definition.intent)) {
     throw new StudioError('模板已更新，请确认本次生成', 409);
   }
-  const generationSource = sharedUse ? studioSharedGenerationSource(sharedUse, input) : { ...workspace, ...(input.model ? { model: input.model } : {}) };
-  const model = resolveStudioModuleGenerationConfig(generationSource, settings).model;
+  const generationSource = sharedUse ? studioSharedGenerationSource(sharedUse, input) : { ...workspace, ...(input.model ? { model: input.model } : {}), ...((input.model || workspace.model) === IMAGE_25_QUALITY_MODEL && input.quality !== undefined ? { quality: input.quality } : {}) };
+  const generation = resolveStudioModuleGenerationConfig(generationSource, settings);
+  const model = generation.model;
   const requestedChannelId = typeof body.channelId === 'string' ? body.channelId : undefined;
-  if (requestedChannelId === 'original' && storedChannel) {
+  if (model === IMAGE_25_QUALITY_MODEL) {
+    const route = await resolveImageGenerationRequestRoute(model, generation.quality, requestedChannelId, tx);
+    if (!storedChannel || storedChannel.channelId !== route.channelId
+      || JSON.stringify(storedChannel.qualityRoute) !== JSON.stringify(route.qualityRoute)) throw new StudioError('图片质量路由已变化，请重新报价', 409);
+  }
+  if (model !== IMAGE_25_QUALITY_MODEL && requestedChannelId === 'original' && storedChannel) {
     const currentDefault = await resolveImageGenerationRequestChannel(model, 'original', tx) || 'original';
     if (currentDefault !== storedChannel.channelId) throw new StudioError('型号默认图片通道已变化，请重新报价', 409);
   }

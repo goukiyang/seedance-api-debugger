@@ -47,6 +47,16 @@ const dimensionMismatchChecks = [
   'plain_failure_corrupt_or_unproven_output_stays_unavailable',
 ];
 const fixtures = [
+  { file: 'scripts/image-quality-routing-engineering.ts', schema: 'image-quality-routing-engineering.v1',
+    marker: 'Image quality routing engineering receipt: ', checks: ['strict_versioned_reader', 'two_quality_routes_reject_channel_override',
+      'quote_route_revision_frozen', 'legacy_parent_source_contract_preserved', 'actual_total_reference_count_seven',
+      'medium_half_point_not_ceil', 'atomic_activation_source_cas_and_original_receipt', 'guard_reader_and_runtime_capability'],
+    sources: ['src/lib/image-studio/quality-routing.ts', 'src/lib/integrations/image-generation-defaults.ts',
+      'src/lib/integrations/image-generation-channel.ts', 'src/lib/integrations/image-generation.ts',
+      'src/lib/integrations/image-quality-routing.ts', 'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/batches.ts',
+      'src/lib/image-studio/batch-billing-quote.ts', 'src/lib/image-studio/billing-quote-store.ts',
+      'src/lib/pricing/runtime.ts', 'src/lib/pricing/build-mode.ts', 'src/lib/pricing/frozen-charge.ts',
+      'src/app/api/admin/integrations/image-generation/route.ts', 'scripts/activate-image25-quality-routing.ts'] },
   { file: 'scripts/image-studio-recovery-fairness-engineering.ts', schema: 'image-recovery-fairness-engineering.v1',
     marker: 'Image recovery fairness engineering receipt: ', checks: recoveryChecks,
     sources: ['src/lib/image-studio/worker.ts', 'src/lib/image-studio/provider.ts'] },

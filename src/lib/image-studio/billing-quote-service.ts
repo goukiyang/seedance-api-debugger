@@ -66,7 +66,7 @@ function imageChannelFromPreparedTask(task: Prisma.ImageStudioTaskUncheckedCreat
 }
 
 function publicImageChannel(channel: ImageGenerationChannelSnapshot | undefined) {
-  return channel ? { channelId: channel.channelId, configRevision: channel.configRevision } : undefined;
+  return channel ? { ...channel } : undefined;
 }
 
 function assertImageChannelPairMatches(

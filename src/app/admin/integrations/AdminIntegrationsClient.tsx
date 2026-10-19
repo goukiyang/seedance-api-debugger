@@ -9,6 +9,7 @@ import { useSettingsPageSubmit } from '@/lib/hooks/use-settings-page-submit';
 import { RelativeTime } from '@/components/RelativeTime';
 import { LoadingSkeleton } from '@/components/LoadingState';
 import ImageModelApiSettings from './ImageModelApiSettings';
+import ImageQualityRoutingSettings from './ImageQualityRoutingSettings';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import dialogStyles from '@/components/ProductDialog.module.css';
 import { Settings, X } from 'lucide-react';
@@ -1584,6 +1585,7 @@ export default function AdminIntegrationsClient() {
 
       <ImageModelApiSettings accountId={currentUser?.id || null} onDraftChange={onImageDraftChange}
         onSaveStart={settingsSubmit.start} onSaveFinish={(group, saved) => settingsSubmit.finish(`imageGroup:${group}`, saved)} />
+      <ImageQualityRoutingSettings accountId={currentUser?.id || null} />
 
       <form className="card codex-config-form" onSubmit={saveConfig}>
         <div className="codex-config-head">

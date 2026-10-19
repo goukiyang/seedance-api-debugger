@@ -38,7 +38,9 @@ import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, normalizeImageStudioQuality, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { resolveStudioAspectRatio, normalizeStudioRatio } from '@/lib/image-studio/ratios';
 import { isGeminiImageModel, isValidImageDimension, normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS } from '@/lib/image-generation/resolution';
-import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
+import { resolveImageGenerationRequestChannel, ImageGenerationQualityRouteError } from '@/lib/integrations/image-generation-defaults';
+import { captureImageGenerationRequestChannel } from '@/lib/integrations/image-generation';
+import { assertImageQualityReferenceCount } from '@/lib/image-studio/quality-routing';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -401,7 +403,7 @@ export async function POST(request: NextRequest) {
     const selectedModel = requestedModel || channels.shared.default_model;
     const channelId = typeof input.channelId === 'string' ? input.channelId : typeof body.channelId === 'string' ? body.channelId : 'original';
     const routedChannelId = IMAGE_STUDIO_MODELS.includes(selectedModel as ImageStudioModel)
-      ? await resolveImageGenerationRequestChannel(selectedModel as ImageStudioModel, channelId)
+      ? await resolveImageGenerationRequestChannel(selectedModel as ImageStudioModel, channelId, undefined, cleanString(input.quality || body.quality))
       : channelId === 'original' ? null : channelId;
     const effectiveChannelId = routedChannelId || 'original';
     if (effectiveChannelId === 'original' && channelId === 'original' && requestedModel && requestedModel !== channels.shared.default_model) {
@@ -410,7 +412,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '当前图片接口不支持所选模型，请重新选择' }, { status: 400 });
       }
     }
-    let imageChannel = effectiveChannelId === 'original' ? undefined : await captureImageGenerationChannel(selectedModel, effectiveChannelId);
+    let imageChannel = effectiveChannelId === 'original' ? undefined : await captureImageGenerationRequestChannel(selectedModel, cleanString(input.quality || body.quality), channelId);
     const rawSettings = imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, selectedModel)
       : selectImageGenerationSettings(channels, selectedModel);
     let settings = rawSettings;
@@ -431,6 +433,8 @@ export async function POST(request: NextRequest) {
       referenceImages.push(await assertCanUseReferenceImage(user, referenceImageId));
     }
     const referenceInputs = resolveImageGenerationReferenceInputs(referenceImages);
+    try { assertImageQualityReferenceCount(imageChannel?.qualityRoute, referenceInputs.length); }
+    catch (error) { throw new AuthError((error as Error).message, 400); }
 
     if (!isImageGenerationApiReady(settings)) {
       await writeGenerationAttemptLog({
@@ -651,6 +655,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof SynchronousImageAdmissionError) return NextResponse.json({ error: 'image_generation_request_already_recorded', message: error.message,
       ...(error.requestId ? { synchronous_request_id: error.requestId } : {}) }, { status: error.status });
     if (error instanceof ImageGenerationChannelError) return NextResponse.json({ error: error.code, message: error.message, submitted: false }, { status: error.status });
+    if (error instanceof ImageGenerationQualityRouteError) return NextResponse.json({ error: error.message, code: error.code, submitted: false }, { status: error.status });
     if (error instanceof QueueMaintenanceError || error instanceof QueueCapacityError) return NextResponse.json({ error: error.code, message: error.message }, { status: error.status });
     if (error instanceof CanvasPromptReferenceError) return NextResponse.json({ error: error.code, message: error.message }, { status: 400 });
     if (error instanceof AuthError) {

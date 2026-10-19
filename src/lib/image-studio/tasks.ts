@@ -23,7 +23,8 @@ import { imageBillingReady } from './billing-readiness';
 import { captureImageGenerationChannel, resolveImageGenerationChannelSnapshot, validateImageGenerationChannel, imageGenerationModelOutputSize, imageGenerationSupportsStudioFourToOne,
   getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider, isMuskImageGenerationChannel, ImageGenerationChannelError,
   type ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation';
-import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
+import { resolveImageGenerationRequestChannel, resolveImageGenerationRequestRoute } from '@/lib/integrations/image-generation-defaults';
+import { IMAGE_25_QUALITY_MODEL, parseImageQualityRouteSnapshot, assertImageQualityReferenceCount } from './quality-routing';
 import { defaultStudioModuleId, resolveStudioModuleGenerationConfig, validStudioModuleId } from './modules';
 import { canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from './access';
 import { resolveStudioAspectRatio, normalizeStudioRatio } from './ratios';
@@ -201,7 +202,9 @@ export function safeImageChannelSnapshot(value: unknown): ImageGenerationChannel
   const record = value as Record<string, unknown>;
   if (typeof record.channelId !== 'string' || !record.channelId || record.channelId.length > 80
     || typeof record.configRevision !== 'string' || !record.configRevision || record.configRevision.length > 128) return null;
-  return { channelId: record.channelId, configRevision: record.configRevision };
+  const qualityRoute = record.qualityRoute === undefined ? undefined : parseImageQualityRouteSnapshot(record.qualityRoute);
+  if (record.qualityRoute !== undefined && !qualityRoute) return null;
+  return { channelId: record.channelId, configRevision: record.configRevision, ...(qualityRoute ? { qualityRoute } : {}) };
 }
 
 type StudioTaskDraft = {
@@ -457,11 +460,23 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (requestedQuality !== undefined && requestedQuality !== null
       && !(IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[requestedModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] as readonly string[] | undefined)?.includes(requestedQuality)) throw new StudioError('当前模型不支持所选图片质量');
     const generation = resolveStudioModuleGenerationConfig(generationSource, settings);
+    const acceptedContract = preparation?.frozenContract;
     const sharedGeneration = sharedUse ? studioSharedGenerationSource(sharedUse, input) : null;
     const effectiveResolution = sharedGeneration?.resolution || input.resolution || generation.resolution;
     const effectiveAspectRatio = sharedGeneration?.aspectRatio || input.aspectRatio || 'auto';
     let effectiveRequestedChannelId = requestedChannelId;
-    if (explicitChannelId === undefined && input.imageChannel) {
+    const qualityRoute = generation.model === IMAGE_25_QUALITY_MODEL && !acceptedContract
+      ? await resolveImageGenerationRequestRoute(generation.model, generation.quality, explicitChannelId, tx) : undefined;
+    if (acceptedContract && input.imageChannel) {
+      effectiveRequestedChannelId = input.imageChannel.channelId;
+    } else if (qualityRoute) {
+      effectiveRequestedChannelId = qualityRoute.channelId || 'original';
+      if (input.imageChannel && (input.imageChannel.channelId !== effectiveRequestedChannelId
+        || !input.imageChannel.qualityRoute
+        || JSON.stringify(input.imageChannel.qualityRoute) !== JSON.stringify(qualityRoute.qualityRoute))) {
+        throw new StudioError('图片质量路由已变化或原报价缺少档位信息，请重新报价；未生成', 409);
+      }
+    } else if (explicitChannelId === undefined && input.imageChannel) {
       // A snapshot without a channel choice is the older explicit-snapshot
       // contract; keep it pinned instead of consulting today's model default.
       effectiveRequestedChannelId = input.imageChannel.channelId;
@@ -486,7 +501,6 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     let originalSharedChannel: ImageGenerationChannelSnapshot | undefined;
     let imageApi;
     let pricingQuote: Awaited<ReturnType<typeof quotePricingCharge>> = null;
-    const acceptedContract = preparation?.frozenContract;
     if (effectiveRequestedChannelId === 'original') {
       // Ordinary legacy tasks keep their existing worker contract; new shared
       // tasks additionally freeze the same private original configuration below.
@@ -500,9 +514,9 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         imageApi = await resolveImageGenerationChannelSnapshot(originalSharedChannel, tx, false, generation.model);
       }
     } else {
-      imageChannel = input.imageChannel || await captureImageGenerationChannel(generation.model, effectiveRequestedChannelId, tx);
+      imageChannel = input.imageChannel || await captureImageGenerationChannel(generation.model, effectiveRequestedChannelId, tx, qualityRoute?.qualityRoute);
       if (imageChannel.channelId !== effectiveRequestedChannelId) throw new StudioError('图片通道与配置版本不匹配', 409);
-      imageApi = await resolveImageGenerationChannelSnapshot(imageChannel, tx, true, generation.model);
+      imageApi = await resolveImageGenerationChannelSnapshot(imageChannel, tx, !acceptedContract, generation.model);
       const priced = await withImagePricing(imageApi, generation.model, tx, acceptedContract,
         acceptedContract ? {} : { quality: generation.quality,
           resolution: normalizeImageResolution(generation.model, effectiveResolution, imageApi.provider), ratio: effectiveAspectRatio });
@@ -757,6 +771,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const visibleTransient = await tx.asset.count({ where: { id: { in: ownedTransientIds }, owner_id: ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity, tx)] } });
     if (visibleTransient !== ownedTransientIds.length) throw new StudioError('本次参考图已不可用或无权查看', 403);
     const actualReferenceIds = Array.from(new Set(orderedReferenceIds));
+    try { assertImageQualityReferenceCount(qualityRoute?.qualityRoute, orderedReferenceIds.length); }
+    catch (error) { throw new StudioError((error as Error).message, 400); }
     if (imageChannel) {
       const validation = validateImageGenerationChannel(imageApi, { model: generation.model, quality: generation.quality,
         resolution: effectiveResolution, ratio: effectiveAspectRatio, referenceCount: orderedReferenceIds.length });

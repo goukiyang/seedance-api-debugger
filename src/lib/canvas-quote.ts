@@ -5,6 +5,7 @@ import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { getImageGenerationChannels, captureImageGenerationChannel, resolveImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
+import { captureImageGenerationRequestChannel } from '@/lib/integrations/image-generation';
 import { getPricingImageChannelOptions, pricingImageIdentity, readPricingImageScopes, resolvePricingImageCandidate, withImagePricing } from '@/lib/pricing/image';
 import { assertPricingImageAvailability } from '@/lib/pricing/image-availability';
 import { isPricingItemUnavailable, PricingItemUnavailableError } from '@/lib/pricing/item-unavailable';
@@ -64,8 +65,8 @@ export async function getCanvasImageQuote(user: SessionUser, input: CanvasQuoteI
 async function buildCanvasImageQuote(input: CanvasQuoteInput, tx: Prisma.TransactionClient) {
   const specifications = normalizePricingImageSpecifications(input);
   const channels = await getImageGenerationChannels(tx, true);
-  const effectiveChannelId = await resolveImageGenerationRequestChannel(input.model, input.channelId, tx) || 'original';
-  const imageChannel = effectiveChannelId !== 'original' ? await captureImageGenerationChannel(input.model, effectiveChannelId, tx) : undefined;
+  const effectiveChannelId = await resolveImageGenerationRequestChannel(input.model, input.channelId, tx, input.quality) || 'original';
+  const imageChannel = effectiveChannelId !== 'original' ? await captureImageGenerationRequestChannel(input.model, input.quality, input.channelId, tx) : undefined;
   const studio = await getImageStudioSettings(tx);
   const selected = await resolvePricingImageCandidate(channels, input.model as ImageStudioModel, input.channelId, tx, specifications);
   if (selected.unavailable) throw selected.unavailable;

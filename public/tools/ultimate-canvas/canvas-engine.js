@@ -1269,7 +1269,7 @@ class CanvasEngine {
             'gemini-3-pro-image-preview': ['auto'],
             'gpt-image-2': ['auto', 'low', 'medium', 'high'],
             'gpt-image-2.5-flare': ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
-            'gpt-image-2.5-sunburst': ['auto', 'low', 'medium', 'high', 'xhigh', 'max']
+            'gpt-image-2.5-sunburst': ['medium', 'max']
         };
         return options[model] || ['auto'];
     }

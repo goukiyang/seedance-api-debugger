@@ -18,7 +18,10 @@ import {
   getImageGenerationDefaultRoutes,
   IMAGE_GENERATION_MODEL_DEFAULTS_SETTING_KEY,
   parseImageGenerationDefaultRoutes,
+  serializeImageGenerationDefaultRoutes,
+  resolveImageGenerationRequestRoute,
 } from '@/lib/integrations/image-generation-defaults';
+import { IMAGE_25_QUALITY_MODEL, type ImageQualityRouteSnapshot } from '@/lib/image-studio/quality-routing';
 import {
   IMAGE_API_GROUPS, imageApiGroupModels, imageApiGroupModelMissingRequirements, allowsUnconfirmedGeminiProParameters,
   type ImageApiGroup, type ImageApiGroupFormDto, type ImageApiGroupSettings,
@@ -1384,10 +1387,17 @@ function emptyManagedSettings(record: ManagedChannelRegistryRecord): ImageGenera
   } as ImageGenerationResolvedSettings;
 }
 
+export async function captureImageGenerationRequestChannel(model: string, quality: unknown,
+  requestedChannelId?: string | null, tx: Prisma.TransactionClient | typeof prisma = prisma) {
+  const route = await resolveImageGenerationRequestRoute(model, quality, requestedChannelId, tx);
+  return route.channelId ? captureImageGenerationChannel(model, route.channelId, tx, route.qualityRoute) : undefined;
+}
+
 export async function captureImageGenerationChannel(
   model: string,
   channelId: ImageGenerationChannelId = 'original',
   tx: Prisma.TransactionClient | typeof prisma = prisma,
+  qualityRoute?: ImageQualityRouteSnapshot,
 ): Promise<ImageGenerationChannelSnapshot> {
   assertImageGenerationChannelId(channelId);
   if (!IMAGE_STUDIO_MODELS.includes(model as ImageStudioModel)) {
@@ -1395,7 +1405,11 @@ export async function captureImageGenerationChannel(
   }
   if (channelId !== 'original' && channelId !== 'shared' && channelId !== 'banana') {
     const channels = await getImageGenerationChannels(tx);
-    const current = selectImageGenerationSettings(channels, model, channelId);
+    let current = selectImageGenerationSettings(channels, model, channelId);
+    if (qualityRoute) {
+      const { withImagePricing } = await import('@/lib/pricing/image');
+      current = (await withImagePricing(current, model, tx, undefined, { quality: qualityRoute.quality })).settings;
+    }
     if (!current.configRevision || current.configRevision === 'unconfigured' || current.deleted || !current.enabled || !current.api_key) {
       throw new ImageGenerationChannelError('该图片供应商尚未配置或已停用，不能提交新任务', 409, 'image_channel_not_available');
     }
@@ -1403,7 +1417,7 @@ export async function captureImageGenerationChannel(
     if (!validation.ok && validation.code !== 'image_channel_actual_billing_requires_async_quote') {
       throw new ImageGenerationChannelError(validation.error, 409, validation.code);
     }
-    return { channelId, configRevision: current.configRevision };
+    return { channelId, configRevision: current.configRevision, ...(qualityRoute ? { qualityRoute } : {}) };
   }
 
   const sourceChannelId = channelId === 'original' ? (isGeminiImageModel(model) ? 'banana' : 'shared') : channelId;
@@ -1490,6 +1504,13 @@ export async function resolveImageGenerationChannelSnapshot(
   const version = await readPrivateChannelVersion(tx, snapshot.channelId, snapshot.configRevision);
   const settings = managedSettingsFromVersion(version);
   if (forSubmission) {
+    if (snapshot.qualityRoute) {
+      const route = await resolveImageGenerationRequestRoute(model || snapshot.qualityRoute.model,
+        snapshot.qualityRoute.quality, snapshot.channelId, tx);
+      if (route.qualityRoute?.revision !== snapshot.qualityRoute.revision) {
+        throw new ImageGenerationChannelError('图片质量路由已变化，请重新报价；未使用旧路由提交', 409, 'image_quality_route_stale');
+      }
+    }
     if (snapshot.channelId === 'original' || snapshot.channelId === 'shared' || snapshot.channelId === 'banana') {
       if (!version.sourceChannelId || !version.sourceFingerprint) {
         throw new ImageGenerationChannelError('原接口快照缺少报价版本信息', 409, 'image_channel_quote_snapshot_invalid');
@@ -1829,8 +1850,8 @@ export async function setImageGenerationModelDefaultRoute(
     const models = { ...current.models };
     if (channelId === null) delete models[model];
     else models[model] = channelId;
-    const next = { version: 1 as const, revision: current.revision + 1, models };
-    const valueJson = JSON.stringify(next);
+    const next = { ...current, revision: current.revision + 1, models };
+    const valueJson = serializeImageGenerationDefaultRoutes(next);
     try {
       if (row) {
         const swapped = await tx.platformSetting.updateMany({
@@ -1862,7 +1883,7 @@ export async function setImageGenerationModelDefaultRoute(
         detail: JSON.stringify({ model, channelId, revision: next.revision }),
       },
     });
-    return { revision: next.revision, models: next.models };
+    return next;
   });
 }
 
@@ -2191,10 +2212,10 @@ export async function saveImageApiGroupForm(input: Record<string, unknown>, acto
       if (index < 0) registry.channels.push(record); else registry.channels[index] = record;
       await writePrivateChannelVersion(tx, version, actorId);
       await swapSimpleModelSetting(tx, IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY, registryRow?.value_json, JSON.stringify(registry), actorId);
-      const defaultRoutes = { revision: defaults.revision + 1,
+      const defaultRoutes = { ...defaults, revision: defaults.revision + 1,
         models: { ...defaults.models, ...Object.fromEntries(models.map(model => [model, source.copyId])) } };
       await swapSimpleModelSetting(tx, IMAGE_GENERATION_MODEL_DEFAULTS_SETTING_KEY, defaultRow?.value_json,
-        JSON.stringify({ version: 1, ...defaultRoutes }), actorId);
+        serializeImageGenerationDefaultRoutes(defaultRoutes), actorId);
       const savedSettings = await hydrateActualBilling(managedSettingsFromVersion(version), tx);
       const receipt: ImageApiGroupSaveReceipt = { mutationId, group, providerId: id, channelId: source.copyId,
         enabled, apiKeyConfigured: Boolean(apiKey), defaultRoutes, savedAt: new Date().toISOString(),
@@ -2355,9 +2376,9 @@ export async function saveImageModelApiForm(input: Record<string, unknown>, acto
         savedSettings = managedSettingsFromVersion(version);
       }
       savedSettings = await hydrateActualBilling(savedSettings, tx);
-      const defaultRoutes = { revision: defaults.revision + 1, models: { ...defaults.models, [model]: id } };
+      const defaultRoutes = { ...defaults, revision: defaults.revision + 1, models: { ...defaults.models, [model]: id } };
       await swapSimpleModelSetting(tx, IMAGE_GENERATION_MODEL_DEFAULTS_SETTING_KEY, defaultRow?.value_json,
-        JSON.stringify({ version: 1, ...defaultRoutes }), actorId);
+        serializeImageGenerationDefaultRoutes(defaultRoutes), actorId);
       const receipt: ImageModelApiSaveReceipt = { mutationId, model, channelId: id,
         apiKeyConfigured: Boolean(resolveImageGenerationModelSettings(savedSettings, model).api_key), enabled: savedSettings.enabled,
         defaultRoutes, savedAt: new Date().toISOString() };
@@ -2604,6 +2625,53 @@ export async function archiveManagedImageGenerationChannel(input: ManagedImageGe
 
 export async function restoreManagedImageGenerationChannel(input: ManagedImageGenerationChannelInput, updatedBy: string) {
   return saveManagedRecord(input, updatedBy, 'restore');
+}
+
+/** Private staged values never enter an HTTP DTO or script output. */
+export async function prepareImageQualityChannelUpdate(tx: Prisma.TransactionClient | typeof prisma, id: string,
+  configRevision: string, patch: { baseUrl?: string; apiKey?: string; maxReferences?: number; resolutions?: string[]; mediumActivation?: boolean }) {
+  const row = await tx.platformSetting.findUniqueOrThrow({ where: { key: IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY } });
+  const registry = await readManagedChannelRegistry(tx);
+  const index = registry.channels.findIndex(item => item.id === id);
+  const existing = registry.channels[index];
+  if (!existing || existing.deleted || !existing.configRevision) throw new ImageGenerationChannelError('质量档位的 API 不存在或已归档', 409);
+  const previous = await readPrivateChannelVersion(tx, id, existing.configRevision);
+  const originalVersionRow = await tx.platformSetting.findUniqueOrThrow({ where: { key: privateVersionKey(id, existing.configRevision) } });
+  const originalVersion = JSON.parse(originalVersionRow.value_json) as PrivateImageGenerationChannelVersion;
+  const model = IMAGE_25_QUALITY_MODEL;
+  const capability = previous.modelCapabilities[model];
+  if (!capability) throw new ImageGenerationChannelError('该 API 没有 Sunburst 型号配置', 409);
+  const medium = patch.mediumActivation === true;
+  const nextCapability: ImageGenerationModelCapability = { ...capability,
+    ...(medium ? { enabled: true, protocol: 'openai_images' as const, qualities: ['medium'],
+      resolutions: ['1K', '2K', '4K'], ratios: ['auto', ...STUDIO_RATIOS], maxReferences: 7,
+      billingMode: 'fixed' as const, fixedPoints: null, billingSource: 'user_confirmed' } : {}),
+    ...(patch.baseUrl ? { baseUrl: patch.baseUrl } : {}),
+    ...(patch.maxReferences !== undefined ? { maxReferences: patch.maxReferences } : {}),
+    ...(patch.resolutions ? { resolutions: patch.resolutions } : {}) };
+  const modelCapabilities = { ...originalVersion.modelCapabilities, [model]: nextCapability };
+  const modelApiKeys = { ...originalVersion.modelApiKeys, ...(patch.apiKey ? { [model]: patch.apiKey } : {}) };
+  const version: PrivateImageGenerationChannelVersion = { ...originalVersion, configRevision, modelCapabilities, modelApiKeys,
+    settings: { ...originalVersion.settings, ...(medium ? { base_url: 'https://api.uselg.top', supports_image_to_image: true } : {}) } };
+  if (!existing.enabled || !previous.settings.api_key && !modelApiKeys[model]) throw new ImageGenerationChannelError('该质量 API 尚未启用或缺少 Key，未保存', 409);
+  // Readers normalize old records. Only replace the selected raw row when writing,
+  // so this operation cannot normalize or discard another provider's saved fields.
+  const rawRegistry = JSON.parse(row.value_json) as { channels: Array<Record<string, unknown>> };
+  const rawIndex = rawRegistry.channels.findIndex(item => item.id === id);
+  if (rawIndex < 0) throw new ImageGenerationChannelError('API 原始配置不存在，未保存', 409);
+  const rawRecord = rawRegistry.channels[rawIndex];
+  rawRegistry.channels[rawIndex] = { ...rawRecord, configRevision,
+    modelCapabilities: { ...(isRecord(rawRecord.modelCapabilities) ? rawRecord.modelCapabilities : {}), [model]: nextCapability },
+    ...(medium ? { baseUrl: 'https://api.uselg.top' } : {}) };
+  return { before: row.value_json, registryJson: JSON.stringify(rawRegistry),
+    versionKey: privateVersionKey(id, configRevision), versionJson: JSON.stringify(version), configRevision,
+    previousRevision: existing.configRevision };
+}
+
+export async function persistImageQualityChannelUpdate(tx: Prisma.TransactionClient,
+  staged: Awaited<ReturnType<typeof prepareImageQualityChannelUpdate>>, actorId: string) {
+  await tx.platformSetting.create({ data: { key: staged.versionKey, value_json: staged.versionJson, updated_by: actorId } });
+  await swapSimpleModelSetting(tx, IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY, staged.before, staged.registryJson, actorId);
 }
 
 export function isImageGenerationApiReady(settings: ImageGenerationApiSettings) {

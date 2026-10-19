@@ -21,6 +21,8 @@ import { consumeBatchQuote, quoteStudioBatch } from './batch-billing-quote';
 import { imageBillingReady } from './billing-readiness';
 import { imageBillingScope } from './billing-scope';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
+import { resolveImageGenerationRequestRoute } from '@/lib/integrations/image-generation-defaults';
+import { IMAGE_25_QUALITY_MODEL } from './quality-routing';
 import { captureImageGenerationChannel, getImageGenerationSettingsForModel, isMuskImageGenerationChannel, assertImageGenerationChannelDispatchOpen, ImageGenerationChannelError,
   resolveImageGenerationChannelSnapshot, validateImageGenerationChannel, type ImageGenerationChannelSnapshot, type ImageGenerationResolvedSettings } from '@/lib/integrations/image-generation';
 import { QueueCapacityError, QueueMaintenanceError, reserveImageStudioQueueCapacity } from './queue-capacity';
@@ -142,11 +144,13 @@ async function reconfirmBatchDefinition(tx: Prisma.TransactionClient, batch: Bat
   const quote = nextBody.batchQuoteId ? await consumeBatchQuote(tx, batch.ownerId, nextBody) : null;
   const explicitChannelId = typeof nextBody.channelId === 'string' ? nextBody.channelId : undefined;
   const suppliedChannel = quote?.imageChannel || input.imageChannel;
-  const effectiveChannelId = explicitChannelId === undefined && suppliedChannel
-    ? suppliedChannel.channelId : await resolveImageGenerationRequestChannel(generation.model, explicitChannelId, tx) || 'original';
+  const qualityRoute = generation.model === IMAGE_25_QUALITY_MODEL ? await resolveImageGenerationRequestRoute(generation.model, generation.quality, explicitChannelId, tx) : undefined;
+  const effectiveChannelId = qualityRoute?.channelId || (explicitChannelId === undefined && suppliedChannel
+    ? suppliedChannel.channelId : await resolveImageGenerationRequestChannel(generation.model, explicitChannelId, tx) || 'original');
   if (suppliedChannel && suppliedChannel.channelId !== effectiveChannelId) throw new StudioError('型号默认供应商已变化，请重新报价', 409);
   const imageChannel = suppliedChannel || (effectiveChannelId === 'original' ? undefined
-    : await captureImageGenerationChannel(generation.model, effectiveChannelId, tx));
+    : await captureImageGenerationChannel(generation.model, effectiveChannelId, tx, qualityRoute?.qualityRoute));
+  if (qualityRoute && JSON.stringify(imageChannel?.qualityRoute) !== JSON.stringify(qualityRoute.qualityRoute)) throw new StudioError('图片质量路由已变化，请重新报价', 409);
   const rawApi = imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, tx, true, generation.model)
     : await getImageGenerationSettingsForModel(generation.model, tx);
   const specifications = { quality: generation.quality,
@@ -253,15 +257,17 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
     const generation = resolveStudioModuleGenerationConfig(generationSource, settings);
     const model = generation.model;
     const explicitChannelId = typeof body.channelId === 'string' ? body.channelId : undefined;
-    const effectiveChannelId = explicitChannelId === undefined && (billingQuote?.imageChannel || input.imageChannel)
+    const qualityRoute = model === IMAGE_25_QUALITY_MODEL ? await resolveImageGenerationRequestRoute(model, generation.quality, explicitChannelId, tx) : undefined;
+    const effectiveChannelId = qualityRoute?.channelId || (explicitChannelId === undefined && (billingQuote?.imageChannel || input.imageChannel)
       ? (billingQuote?.imageChannel || input.imageChannel)!.channelId
-      : (await resolveImageGenerationRequestChannel(model, explicitChannelId, tx) || 'original');
+      : (await resolveImageGenerationRequestChannel(model, explicitChannelId, tx) || 'original'));
     if (explicitChannelId === 'original' && input.imageChannel
       && effectiveChannelId !== input.imageChannel.channelId) {
       throw new StudioError('当前型号默认图片通道已变化，请重新报价', 409);
     }
     const imageChannel = billingQuote?.imageChannel || input.imageChannel || (effectiveChannelId === 'original' ? undefined
-      : await captureImageGenerationChannel(model, effectiveChannelId, tx));
+      : await captureImageGenerationChannel(model, effectiveChannelId, tx, qualityRoute?.qualityRoute));
+    if (qualityRoute && JSON.stringify(imageChannel?.qualityRoute) !== JSON.stringify(qualityRoute.qualityRoute)) throw new StudioError('图片质量路由已变化，请重新报价', 409);
     if (imageChannel && imageChannel.channelId !== effectiveChannelId) throw new StudioError('本批报价与图片通道不匹配', 409);
     const currentApi = imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, tx, true, model)
       : await getImageGenerationSettingsForModel(model, tx);

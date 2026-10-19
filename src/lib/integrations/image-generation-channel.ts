@@ -1,5 +1,6 @@
 import type { ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
+import type { ImageQualityRouteSnapshot, ImageQualityRoutes } from '@/lib/image-studio/quality-routing';
 
 export const IMAGE_API_GROUPS = ['image', 'banana'] as const;
 export type ImageApiGroup = typeof IMAGE_API_GROUPS[number];
@@ -93,6 +94,7 @@ export function allowsUnconfirmedGeminiProParameters(model: string, capability: 
 export type ImageGenerationChannelSnapshot = {
   channelId: ImageGenerationChannelId;
   configRevision: string;
+  qualityRoute?: ImageQualityRouteSnapshot;
 };
 
 export type ImageGenerationModelCapabilityDto = {
@@ -129,6 +131,7 @@ export type ImageGenerationChannelsDto = {
   defaultRoutes?: {
     revision: number;
     models: Partial<Record<ImageStudioModel, string>>;
+    qualityRoutes?: ImageQualityRoutes;
   };
 };
 

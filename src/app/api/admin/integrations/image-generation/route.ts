@@ -7,6 +7,7 @@ import { imageBillingIntent } from '@/lib/image-studio/billing-readiness';
 import { IMAGE_STUDIO_MODELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import type { ImageGenerationChannelId } from '@/lib/integrations/image-generation-channel';
 import { ImageGenerationDefaultRoutesError, getImageGenerationDefaultRoutes } from '@/lib/integrations/image-generation-defaults';
+import { readImageQualitySettings, saveImageQualityRoute, readImageQualityOperation } from '@/lib/integrations/image-quality-routing';
 import {
   IMAGE_GENERATION_API_SETTING_KEY,
   buildImageGenerationApiSettingsPatch,
@@ -79,6 +80,8 @@ async function updateImageGenerationConfig(request: NextRequest) {
     const admin = await getAdminUser(request);
     const body = await request.json() as Record<string, unknown>;
     const channelAction = body.channel_action ?? body.channelAction;
+    if (channelAction === 'save-quality-route') return NextResponse.json({ ok: true,
+      receipt: await saveImageQualityRoute(admin.id, body) }, { headers: privateHeaders });
     if (channelAction === 'save-api-group') {
       const result = await saveImageApiGroupForm(body, admin.id);
       return NextResponse.json({ ok: true, ...result }, { headers: privateHeaders });
@@ -193,6 +196,13 @@ async function updateImageGenerationConfig(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const admin = await getAdminUser(request);
+    const qualityOperation = request.nextUrl.searchParams.get('quality_operation_id');
+    if (qualityOperation !== null) {
+      const result = await readImageQualityOperation(admin.id, qualityOperation);
+      return NextResponse.json({ ok: true, found: Boolean(result), receipt: result?.receipt || null }, { headers: privateHeaders });
+    }
+    if (request.nextUrl.searchParams.get('view') === 'quality-routes') return NextResponse.json({ ok: true,
+      ...await readImageQualitySettings(admin.id) }, { headers: privateHeaders });
     const groupMutationId = request.nextUrl.searchParams.get('group_mutation_id');
     if (groupMutationId !== null) {
       const result = await readImageApiGroupSaveReceipt(admin.id, groupMutationId);

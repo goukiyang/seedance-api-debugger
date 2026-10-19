@@ -42,7 +42,8 @@ export function imageUiQuoteChanged(previous: ImageUiQuote | null, next: ImageUi
   return !previous || previous.billingMode !== next.billingMode || previous.pricingRevision !== next.pricingRevision
     || previous.unitCredits !== next.unitCredits || previous.estimatedCredits !== next.estimatedCredits
     || previous.imageChannel?.channelId !== next.imageChannel?.channelId
-    || previous.imageChannel?.configRevision !== next.imageChannel?.configRevision;
+    || previous.imageChannel?.configRevision !== next.imageChannel?.configRevision
+    || JSON.stringify(previous.imageChannel?.qualityRoute) !== JSON.stringify(next.imageChannel?.qualityRoute);
 }
 export function imageUiQuoteAction(pendingRequestId: string | null, signature: string, cachedSignature: string | undefined,
   quote: ImageUiQuote | null | undefined, now = Date.now(), batch = false): 'query' | 'quote' | 'submit' {
@@ -225,7 +226,7 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
         if (!valid() || current.revision !== snapshot.revision) throw new Error('素材、模型或报价已变化，请重新读取设置后确认；尚未生成');
         const channelId = typeof snapshot.channelId === 'string' ? snapshot.channelId : 'original';
         const freshChannels = normalizeImageStudioChannels(current.imageChannels);
-        const freshEffectiveId = imageStudioEffectiveChannelId(freshChannels, String(snapshot.model), channelId);
+        const freshEffectiveId = imageStudioEffectiveChannelId(freshChannels, String(snapshot.model), channelId, String(snapshot.quality));
         if (freshEffectiveId !== (effectiveChannelId || channelId)) throw new Error('后台默认供应商已变化，请重新读取设置并确认；素材保留，尚未生成');
         const channel = freshChannels.items.find(item => item.id === freshEffectiveId);
         const model = String(snapshot.model) as ImageStudioModel;

@@ -19,6 +19,7 @@ import { parseCanvasPromptMentions } from '@/lib/canvas-prompt-references';
 import { assertCanvasPromptCompatibility } from '@/lib/canvas-prompt-compatibility';
 import { normalizeStudioRatio } from '@/lib/image-studio/ratios';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
+import { captureImageGenerationRequestChannel } from '@/lib/integrations/image-generation';
 import {
   assertCanvasStyleContext, canvasStyleFailure, canvasStyleJson, parseCanvasStyleContext,
   readCanvasStyleJson, requireCanvasStyleUser,
@@ -113,14 +114,16 @@ export async function POST(request: NextRequest) {
     const requestedChannelId = typeof settingsInput.channelId === 'string' ? settingsInput.channelId : undefined;
     const suppliedImageChannel = body.imageChannel === undefined ? undefined : safeImageChannelSnapshot(body.imageChannel) || undefined;
     if (body.imageChannel !== undefined && !suppliedImageChannel) throw new StudioError('图片通道报价版本无效，请重新报价', 409);
-    const effectiveChannelId = requestedChannelId === undefined && suppliedImageChannel
+    const effectiveChannelId = generation.model !== 'gpt-image-2.5-sunburst' && requestedChannelId === undefined && suppliedImageChannel
       ? suppliedImageChannel.channelId
-      : await resolveImageGenerationRequestChannel(generation.model, requestedChannelId) || 'original';
+      : await resolveImageGenerationRequestChannel(generation.model, requestedChannelId, undefined, quality) || 'original';
     if (suppliedImageChannel && suppliedImageChannel.channelId !== effectiveChannelId) {
       throw new StudioError('当前型号默认图片通道已变化，请重新报价', 409);
     }
     const channelId = requestedChannelId || 'original';
-    const imageChannel = suppliedImageChannel || (effectiveChannelId === 'original' ? undefined : await captureImageGenerationChannel(generation.model, effectiveChannelId));
+    const freshImageChannel = generation.model === 'gpt-image-2.5-sunburst' ? await captureImageGenerationRequestChannel(generation.model, quality, requestedChannelId) : undefined;
+    if (freshImageChannel && suppliedImageChannel && JSON.stringify(freshImageChannel) !== JSON.stringify(suppliedImageChannel)) throw new StudioError('图片质量路由已变化，请重新报价', 409);
+    const imageChannel = freshImageChannel || suppliedImageChannel || (effectiveChannelId === 'original' ? undefined : await captureImageGenerationChannel(generation.model, effectiveChannelId));
     const rawApiSettings = imageChannel?.channelId === 'original' ? await getImageGenerationSettingsForModel(generation.model)
       : imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, generation.model) : await getImageGenerationSettingsForModel(generation.model);
     const priced = await withImagePricing(rawApiSettings, generation.model, prisma, undefined, { quality, resolution, ratio: aspectRatio });

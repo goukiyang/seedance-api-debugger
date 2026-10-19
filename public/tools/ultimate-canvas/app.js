@@ -4142,10 +4142,13 @@
     }
 
     function usesLegacyImageRoute(model, selection = selectedImageChannel()) {
+        if (model === 'gpt-image-2.5-sunburst') return false;
         return selection.id === 'original' && !canvasRuntime.bootstrap?.capabilities?.image?.imageChannels?.defaultRoutes?.models?.[model];
     }
 
-    function effectiveImageChannelId(model, selection = selectedImageChannel()) {
+    function effectiveImageChannelId(model, selection = selectedImageChannel(), quality) {
+        if (model === 'gpt-image-2.5-sunburst') return ['medium', 'max'].includes(quality)
+            ? canvasRuntime.bootstrap?.capabilities?.image?.imageChannels?.defaultRoutes?.qualityRoutes?.[model]?.[quality] || 'quality-unconfigured' : 'quality-unselected';
         return selection.id === 'original' && !usesLegacyImageRoute(model, selection)
             ? originalImageChannelRouteForModel(model) : selection.id;
     }
@@ -4201,12 +4204,14 @@
     function imageChannelIssueForNode(node) {
         if (!node || node.type !== 'image') return '';
         const selection = selectedImageChannel();
-        const channel = selection.channel;
-        if (selection.fallbackReason) return selection.fallbackReason;
+        const settings = generationSettingsForNode(node);
+        const qualityRouted = settings.model === 'gpt-image-2.5-sunburst';
+        const channel = qualityRouted ? canvasImageChannels().find(item => item.id === settings.effectiveChannelId) : selection.channel;
+        if (qualityRouted && !['medium', 'max'].includes(settings.quality)) return '原质量待选择，请选择中等或最高；原素材已保留。';
+        if (!qualityRouted && selection.fallbackReason) return selection.fallbackReason;
         if (!channel || channel.id !== 'original' && (channel.enabled !== true || channel.configured !== true || channel.ready !== true)) {
             return channel?.disabledReason || `${channel?.label || '所选生图通道'}未配置或暂未就绪，请联系管理员。`;
         }
-        const settings = generationSettingsForNode(node);
         if (usesLegacyImageRoute(settings.model, selection)) {
             const capability = canvasRuntime.bootstrap?.capabilities?.image || {};
             const model = generationSettingsForNode(node).model || capability.model;
@@ -4243,9 +4248,9 @@
                 const ratio = window.UltimateCanvasGenerationInteractions.resolveImageRatio(style.aspectRatio || 'auto', first, '1:1');
                 const selection = selectedImageChannel();
                 const legacy = usesLegacyImageRoute(style.model, selection);
-                const actual = canvasImageChannels().find(item => item.id === (legacy ? originalImageChannelRouteForModel(style.model) : effectiveImageChannelId(style.model, selection)));
+                const actual = canvasImageChannels().find(item => item.id === (legacy ? originalImageChannelRouteForModel(style.model) : effectiveImageChannelId(style.model, selection, style.quality)));
                 return { model: style.model, quality: style.quality, ratio: ratio.resolved, requestedRatio: style.aspectRatio,
-                    ...(!legacy ? { channelId: selection.id, effectiveChannelId: effectiveImageChannelId(style.model, selection) } : {}),
+                    ...(!legacy ? { channelId: style.model === 'gpt-image-2.5-sunburst' ? 'original' : selection.id, effectiveChannelId: effectiveImageChannelId(style.model, selection, style.quality) } : {}),
                     imageChannelLabel: actual?.label || '', imageSupplierName: actual?.supplierName || '',
                     ratioSource: ratio.source, resolution: style.resolution,
                     size: window.UltimateCanvasGenerationInteractions.imageSizeForRatio(ratio.resolved, style.resolution),
@@ -4256,13 +4261,15 @@
             const channel = selection.channel;
             const current = node.data?.imageSettings || {};
             const model = current.model || capability.model;
+            const qualityRouted = model === 'gpt-image-2.5-sunburst';
+            const routedQuality = current.quality || (qualityRouted ? 'max' : 'auto');
             const legacy = usesLegacyImageRoute(model, selection);
-            const actual = canvasImageChannels().find(item => item.id === (legacy ? originalImageChannelRouteForModel(model) : effectiveImageChannelId(model, selection)));
-            const channelModel = !legacy ? channel?.models?.[model] : null;
+            const actual = canvasImageChannels().find(item => item.id === (legacy ? originalImageChannelRouteForModel(model) : effectiveImageChannelId(model, selection, routedQuality)));
+            const channelModel = !legacy ? (qualityRouted ? actual : channel)?.models?.[model] : null;
             const legacyLimits = capability.model_options?.find(item => item.value === model)?.capabilities || capability.capabilities || {};
             const limits = !legacy ? {
-                quality_options: channelModel?.qualities || [], size_options: channelModel?.resolutions || [],
-                ratio_options: channelModel?.ratios || [], default_quality: current.quality || 'auto',
+                quality_options: qualityRouted ? ['medium', 'max'] : channelModel?.qualities || [], size_options: channelModel?.resolutions || [],
+                ratio_options: channelModel?.ratios || [], default_quality: routedQuality,
                 default_resolution: current.resolution || '1K'
             } : legacyLimits;
             const maximum = !legacy ? 8 : Math.max(1, Number(limits.max_outputs_per_request) || 1);
@@ -4279,7 +4286,7 @@
             const customSize = typeof current.size === 'string' && /^\d+x\d+$/.test(current.size) ? current.size : '';
             return {
                 model,
-                ...(!legacy ? { channelId: selection.id, effectiveChannelId: effectiveImageChannelId(model, selection) } : {}),
+                ...(!legacy ? { channelId: qualityRouted ? 'original' : selection.id, effectiveChannelId: effectiveImageChannelId(model, selection, routedQuality) } : {}),
                 imageChannelLabel: actual?.label || '', imageSupplierName: actual?.supplierName || '',
                 quality: current.quality || limits.default_quality || 'auto',
                 qualityOptions: limits.quality_options || [],
@@ -5172,7 +5179,7 @@
                 ${generationChoiceGroup('ratio', '比例', ratioChoices, ratioValue, value => String(value), ratioUnavailable ? [ratioValue] : [])}
                 <p class="generation-spec-hint">当前生效：${escapeHtml(settings.ratio)} · ${escapeHtml(settings.ratioSource === 'reference' ? '首张有效参考图' : '模型默认或手动选择')} · ${escapeHtml(settings.size)}</p>
                 ${sizeControl}
-                ${qualityChoices.length ? generationChoiceGroup('quality', '质量', qualityChoices, settings.quality, value => ({ auto: '自动', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高' })[value] || value, qualityUnavailable ? [settings.quality] : []) : ''}
+                ${qualityChoices.length ? generationChoiceGroup('quality', '质量', qualityChoices, settings.quality, value => settings.model === 'gpt-image-2.5-sunburst' && value === 'medium' ? '中等' : settings.model === 'gpt-image-2.5-sunburst' && qualityUnavailable && value === settings.quality ? '原质量待选择' : ({ auto: '自动', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高' })[value] || value, qualityUnavailable ? [settings.quality] : []) : ''}
                 <p class="generation-spec-hint">背景写入画面描述；当前接口没有独立透明背景参数。</p>
                 ${generationChoiceGroup('count', '生成数量', counts, settings.count, value => `${value}张`, countUnavailable ? [settings.count] : [])}
             </div>`;
@@ -5210,8 +5217,9 @@
             if (name !== 'count') {
                 const settings = generationSettingsForNode(node);
                 const selection = selectedImageChannel();
-                const model = !usesLegacyImageRoute(settings.model, selection) ? selection.channel?.models?.[settings.model] : null;
-                const allowedValues = name === 'quality' ? model?.qualities : name === 'resolution' ? model?.resolutions : model?.ratios;
+                const channel = settings.model === 'gpt-image-2.5-sunburst' ? canvasImageChannels().find(item => item.id === settings.effectiveChannelId) : selection.channel;
+                const model = !usesLegacyImageRoute(settings.model, selection) ? channel?.models?.[settings.model] : null;
+                const allowedValues = name === 'quality' ? settings.model === 'gpt-image-2.5-sunburst' ? ['medium', 'max'] : model?.qualities : name === 'resolution' ? model?.resolutions : model?.ratios;
                 if (Array.isArray(allowedValues) && !allowedValues.includes(rawValue)) return false;
             }
             node.data = {

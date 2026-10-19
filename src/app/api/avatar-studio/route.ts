@@ -23,7 +23,8 @@ import { avatarRulesSignature } from '@/lib/avatar-random/intent';
 import { QueueCapacityError, QueueMaintenanceError } from '@/lib/image-studio/queue-capacity';
 import { ImageGenerationChannelError } from '@/lib/integrations/image-generation';
 import { historicalImageSupplier } from '@/lib/image-studio/channel-history';
-import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
+import { resolveImageGenerationRequestChannel, ImageGenerationQualityRouteError } from '@/lib/integrations/image-generation-defaults';
+import { captureImageGenerationRequestChannel } from '@/lib/integrations/image-generation';
 import { getPricingImageChannelOptions, withImagePricing } from '@/lib/pricing/image';
 
 function validateOriginalContinuation(body: Record<string, unknown>) {
@@ -53,7 +54,7 @@ async function run(action: (owner: string) => Promise<unknown>) {
   if (user.status !== 'active' || !canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限有图片生成权限的公司账号使用' }, { status: 403 });
   try { return NextResponse.json(await action(user.id), { headers: { 'Cache-Control': 'no-store' } }); }
   catch (e) {
-    if (e instanceof ImageGenerationChannelError) return NextResponse.json({ error: e.message, code: e.code, submitted: false }, { status: e.status });
+    if (e instanceof ImageGenerationChannelError || e instanceof ImageGenerationQualityRouteError) return NextResponse.json({ error: e.message, code: e.code, submitted: false }, { status: e.status });
     if (e instanceof QueueCapacityError || e instanceof QueueMaintenanceError) return NextResponse.json({ error: e.message, code: e.code, submitted: false }, { status: e.status });
     if (e instanceof AvatarDescriptionError) {
       console.warn('[AvatarDescription]', JSON.stringify({ requestId: e.parse.requestId, state: e.parse.state, ...e.parse.failure, diagnostics: e.parse.diagnostics }));
@@ -132,8 +133,8 @@ export async function POST(req: NextRequest) { return run(async owner => {
     const aspectRatio=isAvatarSheet({layout})?'1:1':previous.candidates[0].members.length>1?'3:2':'1:1';
     let price=settings.prices[model as keyof typeof settings.prices];
     const channelId=typeof body.channelId==='string'?body.channelId:previous.channelId||'original';
-    const effectiveChannelId=await resolveImageGenerationRequestChannel(model,channelId)||'original';
-    const imageChannel=effectiveChannelId!=='original'?await captureImageGenerationChannel(model,effectiveChannelId):undefined;
+    const effectiveChannelId=await resolveImageGenerationRequestChannel(model,channelId,undefined,quality)||'original';
+    const imageChannel=effectiveChannelId!=='original'?await captureImageGenerationRequestChannel(model,quality,channelId):undefined;
     const priced = await withImagePricing(imageChannel?await resolveImageGenerationChannelSnapshot(imageChannel,undefined,true,model):await getImageGenerationSettingsForModel(model), model, prisma, undefined, { quality, resolution, ratio: aspectRatio });
     const api = priced.settings;
     if(imageChannel){const capability=validateImageGenerationChannel(api,{model,quality,resolution,ratio:aspectRatio,referenceCount:previous.referenceIds.length});if(!capability.ok)throw new StudioError(capability.error);price=capability.capability.fixedPoints;}

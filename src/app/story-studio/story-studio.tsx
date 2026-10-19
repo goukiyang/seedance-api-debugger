@@ -10,7 +10,7 @@ import Link from 'next/link';
 import { ArrowLeft, ArrowDown, ArrowUp, Clapperboard, ImagePlus, Plus, RefreshCw, Save, Trash2, WandSparkles } from 'lucide-react';
 import { buildStoryPrompt, parseStoryShots, validateStoryDraft, parseStoryMaterials, composeStoryShot, separateStoryPrompt, storyGenerationPrompt, type StoryMaterial, type StoryDraft, type StoryShot } from '@/lib/story-workflow';
 import { canvasImageReferencePolicy } from '@/lib/canvas-image-references';
-import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, imageStudioModelForNewSelection, IMAGE_STUDIO_QUALITY_LABELS, imageResolutionOptions } from '@/lib/image-studio/model-catalog';
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, imageStudioModelForNewSelection, IMAGE_STUDIO_QUALITY_LABELS, imageResolutionOptions, imageStudioNewQualityOptions, imageStudioQualityLabel } from '@/lib/image-studio/model-catalog';
 import { STUDIO_RATIOS } from '@/lib/image-studio/ratios';
 import { useProductDialog } from '@/components/useProductDialog';
 import { usePageExitRisk } from '@/lib/hooks/page-exit-guard';
@@ -112,7 +112,8 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
   const [resultAssets, setResultAssets] = useState<Record<string, PickerItem>>({});
   const [focusVideoId, setFocusVideoId] = useState<string | null>(null);
   const [mediaCapabilities, setMediaCapabilities] = useState<{ image: { model: string; imageChannels?: unknown }; video: { model: string; model_options: Array<{ value: string; label: string; provider: string; ready: boolean; resolutions: string[] }> } } | null>(null);
-  const imageChannel = useImageStudioChannel(userId, 'story-studio', mediaCapabilities?.image.imageChannels, Boolean(mediaCapabilities));
+  const imageChannel = useImageStudioChannel(userId, 'story-studio', mediaCapabilities?.image.imageChannels, Boolean(mediaCapabilities),
+    { model: work.mediaSettings?.imageModel || mediaCapabilities?.image.model || '', quality: work.mediaSettings?.quality || 'auto' });
   const current = useRef(work); current.current = work;
   const documentRef = useRef(document); documentRef.current = document;
   const snapshot = useRef<Snapshot | null>(null);
@@ -150,10 +151,10 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     videoModel: mediaCapabilities?.video.model || '', provider: 'seedance', videoResolution: '720p' };
   const selectedImageChannelModel = imageStudioChannelModel(imageChannel.channel, mediaSettings.imageModel);
   const legacyImageRoute = imageStudioUsesLegacyRoute(imageChannel.channels, mediaSettings.imageModel, imageChannel.channelId);
-  const effectiveImageChannelId = imageStudioEffectiveChannelId(imageChannel.channels, mediaSettings.imageModel, imageChannel.channelId);
+  const effectiveImageChannelId = imageStudioEffectiveChannelId(imageChannel.channels, mediaSettings.imageModel, imageChannel.channelId, mediaSettings.quality);
   const channelImageModels = imageStudioChannelModels(imageChannel.channels, IMAGE_STUDIO_MODELS);
   const imageModelChoices = channelImageModels.includes(mediaSettings.imageModel) ? channelImageModels : [mediaSettings.imageModel, ...channelImageModels];
-  const qualityOptions: readonly string[] = selectedImageChannelModel?.qualities ?? (legacyImageRoute
+  const qualityOptions: readonly string[] = mediaSettings.imageModel === 'gpt-image-2.5-sunburst' ? imageStudioNewQualityOptions(mediaSettings.imageModel) : selectedImageChannelModel?.qualities ?? (legacyImageRoute
     ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[mediaSettings.imageModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [] : []);
   const imageResolutions: readonly string[] = selectedImageChannelModel?.resolutions ?? (legacyImageRoute
     ? imageResolutionOptions(mediaSettings.imageModel) : []);
@@ -845,8 +846,8 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
       </div>
       <details><summary>生成设置</summary><div className={styles.shotFields}>
         <label>图片模型<select disabled={blocked} value={mediaSettings.imageModel} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, imageModel: event.target.value } })}>{imageModelChoices.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS]||model}</option>)}</select></label>
-        <label>供应商<ImageGenerationChannelSelect channels={imageChannel.channels} value={imageChannel.channelId} disabled={blocked} onChange={imageChannel.select} model={mediaSettings.imageModel}/></label>
-        <label>图片质量<select disabled={blocked} value={mediaSettings.quality} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, quality: event.target.value } })}>{!qualityOptions.includes(mediaSettings.quality) && <option disabled value={mediaSettings.quality}>{mediaSettings.quality}（需重新选择）</option>}{qualityOptions.map(value => <option key={value} value={value}>{IMAGE_STUDIO_QUALITY_LABELS[value as keyof typeof IMAGE_STUDIO_QUALITY_LABELS]}</option>)}</select></label>
+        {mediaSettings.imageModel !== 'gpt-image-2.5-sunburst' && <label>供应商<ImageGenerationChannelSelect channels={imageChannel.channels} value={imageChannel.channelId} disabled={blocked} onChange={imageChannel.select} model={mediaSettings.imageModel}/></label>}
+        <label>图片质量<select disabled={blocked} value={mediaSettings.quality} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, quality: event.target.value } })}>{!qualityOptions.includes(mediaSettings.quality) && <option disabled value={mediaSettings.quality}>{mediaSettings.imageModel === 'gpt-image-2.5-sunburst' ? '原质量待选择' : `${mediaSettings.quality}（需重新选择）`}</option>}{qualityOptions.map(value => <option key={value} value={value}>{imageStudioQualityLabel(mediaSettings.imageModel,value)}</option>)}</select></label>
         <label>图片分辨率<select disabled={blocked} value={mediaSettings.resolution} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, resolution: event.target.value } })}>{!imageResolutions.includes(mediaSettings.resolution) && <option disabled value={mediaSettings.resolution}>{mediaSettings.resolution}（需重新选择）</option>}{imageResolutions.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
         <label>比例<select disabled={blocked} value={mediaSettings.ratio} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, ratio: event.target.value } })}>{!ratioOptions.includes(mediaSettings.ratio)&&<option value={mediaSettings.ratio} disabled>{mediaSettings.ratio}（当前通道不支持）</option>}{ratioOptions.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
         <label>视频模型<select disabled={blocked} value={mediaSettings.videoModel} onChange={event => { const option = mediaCapabilities?.video.model_options.find(item => item.value === event.target.value); if (option) change({ ...current.current, mediaSettings: { ...mediaSettings, videoModel: option.value, provider: option.provider } }); }}>

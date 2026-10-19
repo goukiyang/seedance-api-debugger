@@ -2,8 +2,8 @@ import packageInfo from '../../package.json';
 import { PRICING_ADMIN_WRITES_ENABLED } from './pricing/build-mode';
 
 export const release = { version: packageInfo.version, channel: 'production', summary: PRICING_ADMIN_WRITES_ENABLED
-  ? '3D多视图可保存生成设置和选帧方案，默认共享同事；原视频更大、调帧更轻快。普通修改更新原作品，另存才新建，导出仍为原尺寸。'
-  : '3D多视图设置与轻量调帧已保留。费率设置暂时维护，已保存的价格和原任务保持不变，不会自动调整价格。' };
+  ? 'Image 2.5 Sunburst 可按中等、最高分别使用独立 API；中等参考图暂限7张，费用随所选档位报价。已有任务和历史结果保持。'
+  : '图片质量路由与已有任务已保留。API质量设置和费率暂时只读，已保存配置与原任务继续使用，不会自动改价。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

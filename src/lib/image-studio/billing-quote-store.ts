@@ -22,6 +22,7 @@ export async function consumeImageQuote(tx: Prisma.TransactionClient, input: { o
     || Boolean(savedChannel && input.imageChannel && validSavedChannel
       && savedChannel.channelId === input.imageChannel.channelId
       && savedChannel.configRevision === input.imageChannel.configRevision);
+  const sameQualityRoute = JSON.stringify(savedChannel?.qualityRoute) === JSON.stringify(input.imageChannel?.qualityRoute);
   const sameDefinition = quote.sharedLive === undefined && input.sharedLive === undefined
     || Boolean(quote.sharedLive && input.sharedLive && quote.sharedLive.protocol === 'shared-live-v1'
       && quote.sharedLive.protocol === input.sharedLive.protocol && quote.sharedLive.presetId === input.sharedLive.presetId
@@ -29,7 +30,7 @@ export async function consumeImageQuote(tx: Prisma.TransactionClient, input: { o
   if (!contract || contract.mode !== 'actual' && !contract.pricing || quote.owner !== input.owner || quote.count !== input.count
     || quote.fingerprint !== input.fingerprint || contract.scope !== input.scope || contract.model !== input.model
     || contract.specification !== input.specification || Date.parse(contract.expiresAt) <= Date.now()
-    || !validSavedChannel || !sameChannel || !sameDefinition
+    || !validSavedChannel || !sameChannel || !sameQualityRoute || !sameDefinition
     || contract.mode === 'actual' && (!state.ready || state.intentRevision !== quote.intentRevision)) throw new Error('Image quote expired or changed');
   if (contract.pricing) await assertNewPricingCharge(contract.pricing, contract.pricing.revision, tx);
   const removed = await tx.platformSetting.deleteMany({ where: { id: row.id, value_json: row.value_json } });

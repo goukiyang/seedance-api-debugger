@@ -9,7 +9,7 @@ import { RefreshCw, Save, X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_NEW_REQUEST_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS,
   IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality,
-  type ImageStudioModel } from '@/lib/image-studio/model-catalog';
+  imageStudioNewQualityOptions, imageStudioQualityLabel, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import type { StudioTemplateDefaults } from '@/lib/image-studio/template-defaults';
 import { RatioPicker } from './ratio-picker';
@@ -117,7 +117,8 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
           <label className={styles.compactField}><strong>图片质量</strong>
             <select value={defaults.quality} disabled={!canEdit || editor.loading}
               onChange={event => editor.controller.editTemplateDefaults({ quality: event.target.value as typeof defaults.quality })}>
-              {IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[defaults.model].map(option => <option key={option} value={option}>{IMAGE_STUDIO_QUALITY_LABELS[option]}</option>)}
+              {!imageStudioNewQualityOptions(defaults.model).includes(defaults.quality) && <option value={defaults.quality} disabled>原质量待选择</option>}
+              {imageStudioNewQualityOptions(defaults.model).map(option => <option key={option} value={option}>{imageStudioQualityLabel(defaults.model, option)}</option>)}
             </select>
           </label>
           <label className={styles.compactField}><strong>分辨率</strong>

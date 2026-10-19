@@ -44,7 +44,7 @@ import { AUDIO_CAPABILITY } from '@/lib/provider/audio-contract';
 import { USD_TO_CNY_RATE, usdToCnyRateText } from '@/lib/costs/currency';
 import { getVolcengineIpApiSettings, isVolcengineIpApiReady } from '@/lib/integrations/volcengine-ip';
 import { volcengineIpCapabilities } from '@/lib/integrations/volcengine-ip-models';
-import { IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, defaultImageStudioQuality } from '@/lib/image-studio/model-catalog';
+import { IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, defaultImageStudioQuality, imageStudioNewQualityOptions } from '@/lib/image-studio/model-catalog';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 
 export const dynamic = 'force-dynamic';
@@ -129,7 +129,8 @@ function imageModelCapabilities(provider: string, model: string, unavailable = f
     output_formats: ['png'],
     supports_stream: false,
     supports_sequential_generation: false,
-    quality_options: IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [],
+    quality_options: model === 'gpt-image-2.5-sunburst' ? imageStudioNewQualityOptions(model)
+      : IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [],
     default_quality: defaultImageStudioQuality(model),
     notes: model === 'gemini-nano-banana-2.1' ? ['本站最多使用 10 张参考图；供应商上限尚未确认', '质量与分辨率为本站可选项，供应商支持情况尚未确认'] : ['通用草图', '兼容现有图片生成流程'],
   };

@@ -102,7 +102,7 @@ async function assertToolFlowLegacyRoute(tx: Tx, config: TemplateConfig, configu
   if (!IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number])) {
     throw new AuthError(`工具流入口不支持图片型号 ${model}；请改用图片工作区选择可用型号。`, 409);
   }
-  const mapped = await resolveImageGenerationRequestChannel(model as typeof IMAGE_STUDIO_MODELS[number], undefined, tx);
+  const mapped = await resolveImageGenerationRequestChannel(model as typeof IMAGE_STUDIO_MODELS[number], undefined, tx, config.quality);
   if (!mapped) return;
   const legacy = model.startsWith('gemini-') ? 'banana' : 'shared';
   if (mapped === legacy && await hasLegacyImageGenerationModelOverride(model as typeof IMAGE_STUDIO_MODELS[number], legacy, tx)) {

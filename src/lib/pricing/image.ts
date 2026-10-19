@@ -3,7 +3,8 @@ import { prisma } from '@/lib/prisma';
 import type { ImageGenerationResolvedSettings } from '@/lib/integrations/image-generation';
 import { getImageGenerationChannelOptions, getImageGenerationChannels, selectPricingImageGenerationSettings,
   readPricingImageActualReadiness, type ImageGenerationChannels } from '@/lib/integrations/image-generation';
-import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
+import { resolveImageGenerationRequestChannel, getImageGenerationDefaultRoutes, ImageGenerationDefaultRoutesError } from '@/lib/integrations/image-generation-defaults';
+import { IMAGE_25_QUALITY_MODEL, isImage25Quality } from '@/lib/image-studio/quality-routing';
 import type { ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import type { ImageBillingContract } from '@/lib/image-studio/billing-contract';
 import { quotePricingCharge, type FrozenPricingCharge } from './charge';
@@ -61,7 +62,16 @@ export async function withImagePricing(settings: ImageGenerationResolvedSettings
 
 export async function resolvePricingImageCandidate(channels: ImageGenerationChannels, model: ImageStudioModel,
   requestedChannelId: string | undefined, client: Client = prisma, specifications: PricingImageSpecifications = {}) {
-  const channelId = await resolveImageGenerationRequestChannel(model, requestedChannelId, client) || 'original';
+  let channelId: string;
+  try { channelId = await resolveImageGenerationRequestChannel(model, requestedChannelId, client, specifications.quality) || 'original'; }
+  catch (error) {
+    if (model !== IMAGE_25_QUALITY_MODEL || !(error instanceof ImageGenerationDefaultRoutesError)) throw error;
+    const routes = await getImageGenerationDefaultRoutes(client);
+    const id = isImage25Quality(specifications.quality) ? routes.qualityRoutes?.[IMAGE_25_QUALITY_MODEL]?.[specifications.quality] : undefined;
+    const identity: PricingAdminIdentity = { kind: 'image', channelId: id || routes.models[IMAGE_25_QUALITY_MODEL] || 'shared',
+      modelId: model, billingMode: 'fixed', unit: 'image', specifications: normalizePricingImageSpecifications(specifications) };
+    return { identity, settings: null, unavailable: new PricingItemUnavailableError(identity, 'specification_unsupported', error.message) };
+  }
   if (!['original', 'shared', 'banana', 'fluxport'].includes(channelId)
     && !/^image-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(channelId)) throw new Error('图片通道身份无效');
   if (channelId.startsWith('image-') && !channels.managed.some(item => item.channelId === channelId && !item.deleted)) {

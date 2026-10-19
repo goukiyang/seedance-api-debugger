@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { isGeminiImageModel } from '@/lib/image-generation/resolution';
 import { IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
+import { IMAGE_25_QUALITY_MODEL, isImage25Quality, type ImageQualityRoutes } from './quality-routing';
 import { isStandardStudioRatio, normalizeStudioRatio } from './ratios';
 import type { ImageGenerationChannelDto, ImageGenerationChannelsDto, ImageGenerationModelCapabilityDto } from '@/lib/integrations/image-generation-channel';
 
@@ -83,7 +84,7 @@ export function normalizeImageStudioChannels(value: unknown): ImageStudioChannel
   }
   if (!items.some(item => item.id === ORIGINAL_IMAGE_CHANNEL_ID)) items.unshift(ORIGINAL_FALLBACK);
   const defaults = value && typeof value === 'object' ? (value as { defaultRoutes?: unknown }).defaultRoutes : null;
-  const routes = defaults && typeof defaults === 'object' ? defaults as { revision?: unknown; models?: unknown } : null;
+  const routes = defaults && typeof defaults === 'object' ? defaults as { revision?: unknown; models?: unknown; qualityRoutes?: unknown } : null;
   const models: Partial<Record<(typeof IMAGE_STUDIO_MODELS)[number], string>> = {};
   if (routes?.models && typeof routes.models === 'object' && !Array.isArray(routes.models)) {
     for (const model of IMAGE_STUDIO_MODELS) {
@@ -91,9 +92,16 @@ export function normalizeImageStudioChannels(value: unknown): ImageStudioChannel
       if (channelId(id) && id !== ORIGINAL_IMAGE_CHANNEL_ID) models[model] = id;
     }
   }
+  const qualityRoutes: ImageQualityRoutes = {};
+  const rawQualities = routes?.qualityRoutes && typeof routes.qualityRoutes === 'object'
+    ? (routes.qualityRoutes as Record<string, unknown>)[IMAGE_25_QUALITY_MODEL] : null;
+  if (rawQualities && typeof rawQualities === 'object' && !Array.isArray(rawQualities)) {
+    qualityRoutes[IMAGE_25_QUALITY_MODEL] = {};
+    for (const [quality, id] of Object.entries(rawQualities)) if (isImage25Quality(quality) && channelId(id) && id !== 'original') qualityRoutes[IMAGE_25_QUALITY_MODEL]![quality] = id;
+  }
   return { items: items.filter((item, index) => items.findIndex(candidate => candidate.id === item.id) === index),
     ...(routes && Number.isSafeInteger(routes.revision) && Number(routes.revision) >= 0
-      ? { defaultRoutes: { revision: Number(routes.revision), models } } : {}) };
+      ? { defaultRoutes: { revision: Number(routes.revision), models, qualityRoutes } } : {}) };
 }
 
 export function imageStudioDefaultChannelId(channels: ImageStudioChannels, model: string) {
@@ -102,11 +110,14 @@ export function imageStudioDefaultChannelId(channels: ImageStudioChannels, model
 }
 
 export function imageStudioUsesLegacyRoute(channels: ImageStudioChannels, model: string, selectedId: string) {
+  if (model === IMAGE_25_QUALITY_MODEL) return false;
   return selectedId === ORIGINAL_IMAGE_CHANNEL_ID
     && !channels.defaultRoutes?.models[model as (typeof IMAGE_STUDIO_MODELS)[number]];
 }
 
-export function imageStudioEffectiveChannelId(channels: ImageStudioChannels, model: string, selectedId: string) {
+export function imageStudioEffectiveChannelId(channels: ImageStudioChannels, model: string, selectedId: string, quality?: string) {
+  if (model === IMAGE_25_QUALITY_MODEL) return isImage25Quality(quality)
+    ? channels.defaultRoutes?.qualityRoutes?.[IMAGE_25_QUALITY_MODEL]?.[quality] || 'quality-unconfigured' : 'quality-unselected';
   return selectedId === ORIGINAL_IMAGE_CHANNEL_ID && !imageStudioUsesLegacyRoute(channels, model, selectedId)
     ? imageStudioDefaultChannelId(channels, model) : selectedId;
 }
@@ -190,6 +201,7 @@ export function imageStudioChannelIssue(channel: ImageStudioChannel | undefined,
   referenceCount?: number;
   legacyRoute?: boolean;
 }) {
+  if (model === IMAGE_25_QUALITY_MODEL && !isImage25Quality(values.quality)) return '原质量待选择，请选择中等或最高；素材和描述已保留。';
   if (!channel || !channel.configured || !channel.enabled) {
     return channel?.disabledReason || `${channel?.label || '所选生图通道'}未配置或已停用，请联系管理员。`;
   }
@@ -250,7 +262,8 @@ export function imageStudioChannelReadyForModel(channel: ImageStudioChannel | un
     || capability.pricingBySpecification || capability.fixedPoints != null || ['shared', 'banana'].includes(channel.id)));
 }
 
-export function useImageStudioChannel(userId: string, feature: string, rawChannels: unknown, sourceReady: boolean) {
+export function useImageStudioChannel(userId: string, feature: string, rawChannels: unknown, sourceReady: boolean,
+  qualitySelection?: { model: string; quality: string }) {
   const scope = `sd2:image-channel:v1:${feature}:${encodeURIComponent(userId)}`;
   const channels = useMemo(() => normalizeImageStudioChannels(rawChannels), [rawChannels]);
   const [selection, setSelection] = useState<{ scope: string; id: string; ready: boolean; message: string }>(
@@ -283,7 +296,9 @@ export function useImageStudioChannel(userId: string, feature: string, rawChanne
     return () => window.removeEventListener('storage', onStorage);
   }, [scope, channels, sourceReady]);
   const id = selection.scope === scope ? selection.id : ORIGINAL_IMAGE_CHANNEL_ID;
-  const channel = channels.items.find(item => item.id === id);
+  const routed = qualitySelection?.model === IMAGE_25_QUALITY_MODEL;
+  const channel = channels.items.find(item => item.id === (routed
+    ? imageStudioEffectiveChannelId(channels, qualitySelection.model, id, qualitySelection.quality) : id));
   const select = useCallback((nextId: string) => {
     const next = channels.items.find(item => item.id === nextId);
     if (!sourceReady || !imageStudioChannelCanBeSelected(next)) return;
@@ -294,6 +309,6 @@ export function useImageStudioChannel(userId: string, feature: string, rawChanne
       setSelection({ scope, id: nextId, ready: true, message: '浏览器未允许保存通道偏好；当前选择仅在本次页面打开期间保留。' });
     }
   }, [channels, scope, sourceReady]);
-  return { channels, channel, channelId: id, ready: sourceReady && selection.scope === scope && selection.ready,
-    message: selection.scope === scope ? selection.message : '', select };
+  return { channels, channel, channelId: routed ? 'original' : id, ready: sourceReady && selection.scope === scope && selection.ready,
+    message: !routed && selection.scope === scope ? selection.message : '', select };
 }

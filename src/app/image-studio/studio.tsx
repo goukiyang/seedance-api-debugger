@@ -95,7 +95,7 @@ import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
 import type { StudioReferencePolicy } from '@/lib/image-studio/reference-policy';
 import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, imageStudioChannelReadyForModel, imageStudioChannelUnitCredits, imageStudioUsesLegacyRoute, imageStudioEffectiveChannelId, useImageStudioChannel } from '@/lib/image-studio/channels';
 import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChannelSelect';
-import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_NEW_REQUEST_MODELS, imageStudioModelForNewSelection, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_NEW_REQUEST_MODELS, imageStudioModelForNewSelection, imageStudioNewQualityOptions, imageStudioQualityLabel, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
 
 type StudioSnapshot = { imageChannelLabel?: string | null; imageSupplierName?: string | null; referencePolicy?: StudioReferencePolicy; primaryReferenceImages?: UploadedAssetPayload[]; auxiliaryReferenceImages?: UploadedAssetPayload[]; prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; contextAvailable?: boolean; contextConfigured?: boolean; referenceImages: UploadedAssetPayload[]; fixedReferenceImages?: FixedStudioReference[]; transientReferenceImages?: UploadedAssetPayload[]; fixedReferenceCount?: number; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[] };
 type StudioTask = { id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; resultDisposition?: 'accepted' | 'dimensions_mismatch' | 'format_mismatch' | null; error?: string; unitCredits: number; billing?: ImageBillingView | null; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; finishedAt?: string | null; snapshot?: StudioSnapshot & { moduleContextVersion?: string | null; moduleContextVersionState?: string }; delivery?: { phase: string; acceptedAt?: number; waitingStatus?: 'pending' | 'retrying' | 'unconfirmed'; receivedBytes?: number; expectedBytes?: number; generationDetailSuperseded?: boolean; recoveryAvailable: boolean; checkpointRetained: boolean; requestId?: string; upstreamRequestId?: string; asyncRecovery?: StudioAsyncRecovery; validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string } }; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number; file_name?: string; mime_type?: string } | null };
@@ -1733,13 +1733,14 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const moduleSaveSnapshot = { ...moduleDraft };
   const moduleDirty = JSON.stringify(moduleSaveSnapshot) !== moduleSaved;
   const baseline = moduleSaved ? JSON.parse(moduleSaved) as typeof moduleDraft : moduleDraft;
-  const selectedChannel = imageChannels.items.find(item => item.id === imageChannelId);
+  const qualityRouted = moduleModel === 'gpt-image-2.5-sunburst';
+  const effectiveImageChannelId = imageStudioEffectiveChannelId(imageChannels, moduleModel, imageChannelId, quality);
+  const selectedChannel = imageChannels.items.find(item => item.id === (qualityRouted ? effectiveImageChannelId : imageChannelId));
   const selectedChannelModel = imageStudioChannelModel(selectedChannel, moduleModel);
   const allowsUnconfirmedParameters = (moduleModel === 'gemini-3-pro-image-preview' || moduleModel === 'gemini-nano-banana-2.1') && selectedChannelModel?.allowsUnconfirmedParameters === true;
   const qualitySupportUnconfirmed = allowsUnconfirmedParameters && selectedChannelModel?.qualities == null;
   const resolutionSupportUnconfirmed = allowsUnconfirmedParameters && selectedChannelModel?.resolutions == null;
   const legacyImageRoute = imageStudioUsesLegacyRoute(imageChannels, moduleModel, imageChannelId);
-  const effectiveImageChannelId = imageStudioEffectiveChannelId(imageChannels, moduleModel, imageChannelId);
   const channelModels = imageStudioChannelModels(imageChannels, IMAGE_STUDIO_NEW_REQUEST_MODELS);
   const modelChoices = channelModels.includes(moduleModel) ? channelModels : [moduleModel, ...channelModels];
   function selectModuleModel(value: string, resetParameters = false) {
@@ -1751,7 +1752,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       setQuality(defaultImageStudioQuality(next)); setResolution(defaultImageResolution(next));
     }
   }
-  const qualityChoices = selectedChannelModel?.qualities ?? (legacyImageRoute || qualitySupportUnconfirmed
+  const qualityChoices = qualityRouted ? imageStudioNewQualityOptions(moduleModel) : selectedChannelModel?.qualities ?? (legacyImageRoute || qualitySupportUnconfirmed
     ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [] : []);
   const resolutionChoices = selectedChannelModel?.resolutions ?? (legacyImageRoute || resolutionSupportUnconfirmed
     ? IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] || [] : []);
@@ -2839,7 +2840,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   function generationPayload(retryTask?: StudioTask, requestId = crypto.randomUUID()) {
     const historicalEvolution = (retryTask?.snapshot as (StudioSnapshot & { evolution?: EvolutionInput }) | undefined)?.evolution;
     return { requestId, ...(sharedLive ? { sharedLive: sharedLive.intent, personalOverrides: personalOverridesRef.current } : {}), prompt: retryTask?.prompt ?? prompt,
-      moduleId: module.id, model: retryTask?.model || moduleModel, quality: retryTask?.quality || quality, reproduceFromTaskId: !sharedLive ? reproduceSourceTaskId || undefined : undefined, count: retryTask ? 1 : count, aspectRatio: retryTask?.aspectRatio || aspectRatio, resolution: retryTask?.snapshot?.resolution || resolution, revision: settings!.revision, channelId: imageChannelId,
+      moduleId: module.id, model: retryTask?.model || moduleModel, quality: retryTask?.quality || quality, reproduceFromTaskId: !sharedLive ? reproduceSourceTaskId || undefined : undefined, count: retryTask ? 1 : count, aspectRatio: retryTask?.aspectRatio || aspectRatio, resolution: retryTask?.snapshot?.resolution || resolution, revision: settings!.revision, channelId: (retryTask?.model || moduleModel) === 'gpt-image-2.5-sunburst' ? 'original' : imageChannelId,
       referenceIds: retryTask?.referenceIds || generationReferenceIds,
       ...(historicalEvolution || evolution ? { evolution: historicalEvolution || evolutionInput } : {}),
       draft: { moduleContext: !sharedLive && !reproduceSourceTaskId && contextEditable ? effectiveGenerationDefinition.context || '' : undefined,
@@ -2870,7 +2871,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     }
     const currentPayload = generationPayload(retryTask);
     const requestLegacyRoute = imageStudioUsesLegacyRoute(imageChannels, currentPayload.model, imageChannelId);
-    const requestChannelId = imageStudioEffectiveChannelId(imageChannels, currentPayload.model, imageChannelId);
+    const requestChannelId = imageStudioEffectiveChannelId(imageChannels, currentPayload.model, imageChannelId, currentPayload.quality);
     const expectedFormSignature = liveGenerationSignature.current;
     const signature = effectiveSignature(currentPayload, requestChannelId);
     const reusableQuote = imageUiQuoteAction(null, signature, billingQuote?.signature, billingQuote?.quote) === 'submit' ? billingQuote : null;
@@ -3706,13 +3707,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
               {modelChoices.map(model => <option key={model} value={model} disabled={model === 'gemini-3.1-flash-image-preview'}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model}{imageChannelReady && !imageStudioChannelReadyForModel(selectedChannel, model, settings?.modelReady?.[model] ?? settings?.providerReady) ? '（未就绪）' : ''}</option>)}
             </select>
           </label>
-          {!templateWorkbench && <label className={styles.compactField} htmlFor={`studio-channel-${module.id}`}><strong>供应商</strong>
+          {!templateWorkbench && !qualityRouted && <label className={styles.compactField} htmlFor={`studio-channel-${module.id}`}><strong>供应商</strong>
             <ImageGenerationChannelSelect id={`studio-channel-${module.id}`} channels={imageChannels} value={imageChannelId} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onChange={onImageChannelChange} model={moduleModel} legacyReady={settings?.modelReady?.[moduleModel] ?? settings?.providerReady} />
           </label>}
           <label className={styles.compactField} htmlFor={`studio-quality-${module.id}`}><strong>图片质量</strong>
             <select id={`studio-quality-${module.id}`} title={templateWorkbench ? `${IMAGE_STUDIO_QUALITY_LABELS[quality as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || quality}${!qualitySupportUnconfirmed && !qualityChoices.includes(quality) ? qualityChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）' : ''}` : undefined} disabled={submitting || Boolean(pendingSubmission)} value={quality} onChange={event => setQuality(event.target.value)}>
-              {!qualityChoices.includes(quality) && <option value={quality} disabled={!qualitySupportUnconfirmed}>{IMAGE_STUDIO_QUALITY_LABELS[quality as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || quality}{!qualitySupportUnconfirmed ? qualityChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）' : ''}</option>}
-              {qualityChoices.map(option => <option key={option} value={option}>{IMAGE_STUDIO_QUALITY_LABELS[option as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || option}</option>)}
+              {!qualityChoices.includes(quality) && <option value={quality} disabled={!qualitySupportUnconfirmed}>{qualityRouted ? '原质量待选择' : `${IMAGE_STUDIO_QUALITY_LABELS[quality as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || quality}${!qualitySupportUnconfirmed ? qualityChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）' : ''}`}</option>}
+              {qualityChoices.map(option => <option key={option} value={option}>{imageStudioQualityLabel(moduleModel, option)}</option>)}
             </select>
           </label>
           <label className={styles.compactField} htmlFor={`studio-resolution-${module.id}`}><strong>分辨率</strong>
@@ -4046,7 +4047,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         <label className={styles.compactField} htmlFor={`studio-module-quality-${module.id}`}><strong>图片质量</strong>
           <select id={`studio-module-quality-${module.id}`} value={moduleDraft.quality} onChange={event => setQuality(event.target.value)}>
             {preserveSelectedBananaParameters && !((IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || []) as readonly string[]).includes(quality) && <option value={quality} disabled>{IMAGE_STUDIO_QUALITY_LABELS[quality as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || quality}（当前模型不支持）</option>}
-            {(IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || ['auto']).map(option => <option key={option} value={option}>{IMAGE_STUDIO_QUALITY_LABELS[option]}</option>)}
+            {qualityRouted && !qualityChoices.includes(quality) && <option value={quality} disabled>原质量待选择</option>}
+            {imageStudioNewQualityOptions(moduleModel).map(option => <option key={option} value={option}>{imageStudioQualityLabel(moduleModel, option)}</option>)}
           </select>
         </label>
       </div>

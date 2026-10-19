@@ -14,6 +14,7 @@ import { getProjectForGeneration } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import { prisma } from '@/lib/prisma';
 import { ImageGenerationChannelError } from '@/lib/integrations/image-generation';
+import { ImageGenerationQualityRouteError } from '@/lib/integrations/image-generation-defaults';
 
 const RESPONSE_HEADERS = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
 const MAX_JSON_BYTES = 128 * 1024;
@@ -134,7 +135,7 @@ export function canvasStyleBatchId(ownerId: string, requestId: string) {
 }
 
 export function canvasStyleFailure(error: unknown, fallback: string) {
-  if (error instanceof ImageGenerationChannelError) return canvasStyleJson({ error: error.code, message: error.message, submitted: false }, error.status);
+  if (error instanceof ImageGenerationChannelError || error instanceof ImageGenerationQualityRouteError) return canvasStyleJson({ error: error.code, message: error.message, submitted: false }, error.status);
   if (error instanceof Error && ('code' in error) && ('status' in error)
     && (error.code === 'image_queue_capacity' || error.code === 'image_queue_maintenance')) {
     return canvasStyleJson({ error: error.code, message: error.message, submitted: false }, Number(error.status));
