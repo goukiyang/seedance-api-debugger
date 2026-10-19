@@ -1,6 +1,6 @@
 {
   "name": "video-api-debugger",
-  "version": "0.96.1",
+  "version": "0.96.1+trace03-guard.1",
   "private": true,
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",
