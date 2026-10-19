@@ -151,7 +151,7 @@ async function main() {
         let control = await hdControl();
         if (control.state === 'active') {
           const clock = Date.now();
-          for (const [key, until] of contentionUntil) if (until <= clock) contentionUntil.delete(key);
+          for (const [key, until] of Array.from(contentionUntil)) if (until <= clock) contentionUntil.delete(key);
           const job = selectHdJob((await listHdJobs()).filter(job => !contentionUntil.has(job.key)), fairness, batch, clock);
           if (job) {
             // Empty queues never enter resource_wait. Only actual due work

@@ -256,3 +256,5 @@ H01–H10业务代码/工程夹具已齐，原main9bc/guard5d5已推送并含真
 8b32第二run主prepare真实exit1：外层umask077使原0444输入票据变0400。旧800f候选目录、失败日志/回执不改，仍0fullbuild/guard prepare；新调用统一沿原022、日志父0700、root单链接与原SHA合同，未放宽门。因9bc/800f immutable候选根已创建，本次仅固定记录提交产生新精确根，业务/版本v0.99.2/TTL不变。
 
 R03私有发布组合已统一检查：语法、原机制接线99、实际adapter组合20、审批29及原保护断言78均exit0；只用纯逻辑/显式内存IO，不冒本轮native或Linux完整构建。复用已有原生精确Web cgroup/空锁证据；只增加两入口503→旧image/HD完整退出→同短锁sync0和精确旧Web网络校验→旧Web自然退出→新pair/四服务启动前检查→仅恢复本run网络→新源启动的接线，未知保503/保护、不回旧writer或业务数据。同leadReview0open，私有22源码冻结及原件在正式根同资料implementation/hd-release-safety-r03/，尚待新run Linux20完整双构建及最终鲜核发布，不把本项工程通过当H01–H10已上线或用户功能验收通过。
+
+2e5caaad主/guard prepare均exit0，Linux20.20.2主完整prebuild真实exit1：HD五子组32.468秒自然退出，24/25与12/13各一断言失败，另23/4/5及原7组/RATE通过；不是180秒超时。原control证实透明/不透明成品均ready，异常源/timeout错误在两fixture混用core和runner动态加载后不再属于同一HdProcessorError；同源纯构造器比较实际false/false/true证实双模块身份，0HDcase/DB/provider调用。类型有界诊断61.191秒自然exit2，全4错收齐。集中仅5文件最小修：fixture静态runner同图、Map转Array.from、协议结果satisfies原类型、names:string[]及缺fresh显式拒绝；所有原断言/实际子进程/错误类/硬保护、TS配置/依赖/版本/22私有源不变。旧包/manifest/原日志保留，新精确main/guard/run整批完整验证；当前0维护/网络/服务变更。首次未读原exit联想超时的误归因已纠正并录既有项目/全局条目，不重置此前失败事实。

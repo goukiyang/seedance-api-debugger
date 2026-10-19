@@ -44,7 +44,7 @@ async function run(value: HdImageRequest) {
   const metadata: HdImageMetadata = { width: meta.width || 0, height: meta.height || 0, originalFormat: meta.format || 'unknown',
     hasAlpha: Boolean(meta.hasAlpha), orientation: meta.orientation || 1, bytes: before.size };
   const common = { protocol: HD_IMAGE_PROTOCOL, type: 'result' as const, key: value.key, executionId: value.executionId,
-    sourceVersion: value.sourceVersion, inputFile: value.inputFile, workDirectory: value.workDirectory, metadata, libraries: { ...sharp.versions } };
+    sourceVersion: value.sourceVersion, inputFile: value.inputFile, workDirectory: value.workDirectory, metadata, libraries: { ...sharp.versions } } satisfies HdImageResult;
   const reason = hdEligibility(meta);
   if (reason && (value.operation || 'encode') === 'encode') { await send({ ...common, skipped: reason }); finish(); return; }
   await send({ type: 'prepared', metadata });

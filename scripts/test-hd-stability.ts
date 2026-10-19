@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import sharp from 'sharp';
+import * as runner from '../src/lib/media/hd-image-processor';
 import type { HdControl, HdResourceSample } from '../src/lib/media/hd-resource-state';
 import { HD_CONTROL_PROTOCOL, HD_RESOURCE_POLICY, classifyHdResources, hdResourceTransition } from '../src/lib/media/hd-resource-state';
 
@@ -17,7 +18,6 @@ await fs.chmod(evidenceRoot, 0o700);
 // Set before importing the readonly client. The suite does not execute any SQL.
 process.env.DATABASE_URL = `file:${path.join(evidenceRoot, 'unused-private.db')}`;
 const moduleCore = await import('../src/lib/media/hd-derivatives');
-const runner = await import('../src/lib/media/hd-image-processor');
 const core = { ...moduleCore, processHdJob: (...args: Parameters<typeof moduleCore.processHdJob>) => moduleCore.processHdJob(args[0], args[1], {
   ...args[2], processor: (request, options) => runner.runHdImageProcessor(request, { ...options, applicationRoot }),
 }) };

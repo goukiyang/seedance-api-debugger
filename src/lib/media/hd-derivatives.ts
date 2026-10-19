@@ -230,7 +230,7 @@ export async function requestHd(source: string, priority = 1, preserveText?: boo
 }
 export async function listHdJobs() {
   if (process.env.NODE_ENV === 'production') await assertHdStorageRoot();
-  const names = await fs.readdir(hdDirectory()).catch(error => {
+  const names: string[] = await fs.readdir(hdDirectory()).catch(error => {
     if (error.code === 'ENOENT') return []; throw error;
   });
   const jobs: HdJob[] = [];
@@ -689,7 +689,7 @@ export async function processHdJob(key: string, pausedSourceVersion?: string, de
         if (pausedSourceVersion !== undefined && freshControl.token !== control.token) throw new Error('hd_targeted_control_changed');
         if (hdImageProcessorStopping() || pausedSourceVersion === undefined && freshControl.state === 'hard_pause') throw new Error('hd_publish_control_hold');
         const fresh = await readHdJob(key);
-        if (fresh?.executionId !== job.executionId || fresh.version !== job.version) throw new Error('hd_execution_changed');
+        if (!fresh || fresh.executionId !== job.executionId || fresh.version !== job.version) throw new Error('hd_execution_changed');
         if ((await hdSource(job.source))?.version !== job.version) throw new Error('source_changed');
         if (job.format !== 'original') {
           if (hdFileVersion(await fs.lstat(temporary)) !== result.outputVersion) throw new Error('output_integrity');

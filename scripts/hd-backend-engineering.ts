@@ -9,6 +9,7 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
+import * as runner from '../src/lib/media/hd-image-processor';
 
 async function main() {
   const applicationRoot = process.cwd();
@@ -19,7 +20,6 @@ async function main() {
   process.env.DATABASE_URL = 'file:' + path.join(evidenceRoot, 'unused-private.db');
   const core = await import('../src/lib/media/hd-derivatives');
   const storage = await import('../src/lib/media/hd-storage-root');
-  const runner = await import('../src/lib/media/hd-image-processor');
   const results: Array<{ name: string; passed: boolean; error?: string }> = [];
   const safeCapacity = async () => ({ rootFree: 10 * 1024 ** 3, dataFree: 20 * 1024 ** 3,
     rootReserve: 512000 * 1024, dataReserve: 2 * 1024 ** 3, separateDataMount: true, safe: true });
