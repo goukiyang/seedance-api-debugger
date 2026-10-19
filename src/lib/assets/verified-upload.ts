@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
+import { constants as fsConstants, createReadStream } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import sharp from 'sharp';
@@ -42,17 +42,269 @@ export async function uploadIdentity(ownerId: string) {
   if (!user || user.status !== 'active') throw new VerifiedUploadError('UPLOAD_OWNER_UNAVAILABLE', '当前账号不可上传', 403);
   return user;
 }
-export async function privateUploadDirectory() {
-  const storage = await fs.realpath(path.join(process.cwd(), 'storage'));
-  if (process.platform === 'linux' && (!storage.startsWith('/data/video-api-debugger/')
-    || (await fs.stat(storage)).dev === (await fs.stat('/')).dev)) throw new VerifiedUploadError('UPLOAD_DATA_MOUNT_REQUIRED', '上传数据盘暂不可用', 503);
-  const capacity = await fs.statfs(storage);
-  if (capacity.bavail * capacity.bsize < 2 * 1024 ** 3) throw new VerifiedUploadError('UPLOAD_CAPACITY_GUARD', '上传空间不足，请稍后重试', 503);
+const PRIVATE_UPLOAD_MINIMUM_FREE_BYTES = 2 * 1024 ** 3;
+const PRIVATE_UPLOAD_PROJECT_ROOT = '/data/video-api-debugger';
+const PRIVATE_UPLOAD_CANONICAL_DIRECTORY = '/data/video-api-debugger/var-lib/storage/verified-uploads';
+const PRIVATE_UPLOAD_PYTHON = '/usr/bin/python3';
+const PRIVATE_UPLOAD_PYTHON_REAL = '/usr/bin/python3.12';
+const PRIVATE_UPLOAD_GROUP_PROBE_SCHEMA = 'video-api-debugger.upload-private-parent.v1';
+const PRIVATE_UPLOAD_GROUP_PROBE_SOURCE = String.raw`import errno
+import grp
+import json
+import os
+import pwd
+
+DIRECTORY = "/data/video-api-debugger/var-lib/storage"
+NSSWITCH = "/etc/nsswitch.conf"
+
+def nss_sources(database):
+    with open(NSSWITCH, "r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.split("#", 1)[0].strip()
+            if not line or ":" not in line:
+                continue
+            name, value = line.split(":", 1)
+            if name.strip() == database:
+                return value.split()
+    raise RuntimeError("missing nss database")
+
+def acl_absent(name):
+    try:
+        os.getxattr(DIRECTORY, name, follow_symlinks=False)
+    except OSError as error:
+        return error.errno == errno.ENODATA
+    return False
+
+runtime_uid = os.getuid()
+runtime_gid = os.getgid()
+primary_group_uids = sorted({entry.pw_uid for entry in pwd.getpwall() if entry.pw_gid == runtime_gid})
+group = grp.getgrgid(runtime_gid)
+explicit_member_uids = sorted({pwd.getpwnam(name).pw_uid for name in group.gr_mem})
+print(json.dumps({
+    "schema": "video-api-debugger.upload-private-parent.v1",
+    "directory": DIRECTORY,
+    "runtimeUid": runtime_uid,
+    "runtimeGid": runtime_gid,
+    "primaryGroupUids": primary_group_uids,
+    "explicitMemberUids": explicit_member_uids,
+    "passwdSources": nss_sources("passwd"),
+    "groupSources": nss_sources("group"),
+    "accessAclAbsent": acl_absent("system.posix_acl_access"),
+    "defaultAclAbsent": acl_absent("system.posix_acl_default"),
+}, separators=(",", ":"), sort_keys=True))`;
+type PrivateUploadFilesystem = Pick<typeof fs, 'access' | 'lstat' | 'mkdir' | 'readlink' | 'realpath' | 'stat' | 'statfs'>;
+export type PrivateUploadGroupProbeRequest = { directory: string; runtimeUid: number; runtimeGid: number };
+export type PrivateUploadDirectoryRuntime = {
+  filesystem: PrivateUploadFilesystem;
+  platform: NodeJS.Platform;
+  cwd: string;
+  runtimeUid: number | undefined;
+  runtimeGid: number | undefined;
+  systemRoot: string;
+  trustedProjectRoot: string;
+  trustedCanonicalDirectory: string;
+  probeTrustedGroupWritableParent: (request: PrivateUploadGroupProbeRequest) => Promise<string>;
+};
+function privateUploadDirectoryInvalid(): never {
+  throw new VerifiedUploadError('UPLOAD_PRIVATE_DIRECTORY_INVALID', '上传服务暂不可用，请稍后核对或重试原上传', 503);
+}
+function sameFilesystemEntry(left: Awaited<ReturnType<typeof fs.lstat>>, right: Awaited<ReturnType<typeof fs.lstat>>) {
+  return left.dev === right.dev && left.ino === right.ino && left.mode === right.mode && left.uid === right.uid;
+}
+async function requiredPrivateUploadEntry(filesystem: PrivateUploadFilesystem, entry: string) {
+  try { return await filesystem.lstat(entry); }
+  catch (error) {
+    if (['EACCES', 'ELOOP', 'ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code || '')) privateUploadDirectoryInvalid();
+    throw error;
+  }
+}
+async function requiredPrivateUploadStat(filesystem: PrivateUploadFilesystem, entry: string) {
+  try { return await filesystem.stat(entry); }
+  catch (error) {
+    if (['EACCES', 'ELOOP', 'ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code || '')) privateUploadDirectoryInvalid();
+    throw error;
+  }
+}
+async function requiredPrivateUploadRealpath(filesystem: PrivateUploadFilesystem, entry: string) {
+  try { return await filesystem.realpath(entry); }
+  catch (error) {
+    if (['EACCES', 'ELOOP', 'ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code || '')) privateUploadDirectoryInvalid();
+    throw error;
+  }
+}
+async function requiredPrivateUploadLink(filesystem: PrivateUploadFilesystem, entry: string) {
+  try { return await filesystem.readlink(entry); }
+  catch (error) {
+    if (['EACCES', 'EINVAL', 'ELOOP', 'ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code || '')) privateUploadDirectoryInvalid();
+    throw error;
+  }
+}
+async function assertPrivateUploadCapacity(filesystem: PrivateUploadFilesystem, directory: string) {
+  let capacity: Awaited<ReturnType<typeof fs.statfs>>;
+  try { capacity = await filesystem.statfs(directory); }
+  catch (error) {
+    if (['EACCES', 'ELOOP', 'ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code || '')) privateUploadDirectoryInvalid();
+    throw error;
+  }
+  if (capacity.bavail * capacity.bsize < PRIVATE_UPLOAD_MINIMUM_FREE_BYTES) {
+    throw new VerifiedUploadError('UPLOAD_CAPACITY_GUARD', '上传空间不足，请稍后重试', 503);
+  }
+}
+function trustedPrivateUploadParents(projectRoot: string, canonical: string) {
+  if (canonical !== path.join(projectRoot, 'var-lib', 'storage', 'verified-uploads')) privateUploadDirectoryInvalid();
+  return [path.dirname(projectRoot), projectRoot, path.join(projectRoot, 'var-lib'), path.join(projectRoot, 'var-lib', 'storage')];
+}
+type PrivateUploadGroupProbeResult = {
+  schema: string;
+  directory: string;
+  runtimeUid: number;
+  runtimeGid: number;
+  primaryGroupUids: number[];
+  explicitMemberUids: number[];
+  passwdSources: string[];
+  groupSources: string[];
+  accessAclAbsent: boolean;
+  defaultAclAbsent: boolean;
+};
+function exactStringArray(value: unknown, expected: string[]): value is string[] {
+  return Array.isArray(value) && value.length === expected.length && value.every((entry, index) => entry === expected[index]);
+}
+function exactIntegerArray(value: unknown): value is number[] {
+  return Array.isArray(value) && value.every(entry => Number.isSafeInteger(entry) && entry >= 0);
+}
+function parsePrivateUploadGroupProbe(output: string, request: PrivateUploadGroupProbeRequest) {
+  let value: unknown;
+  try { value = JSON.parse(output); } catch { privateUploadDirectoryInvalid(); }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) privateUploadDirectoryInvalid();
+  const result = value as Partial<PrivateUploadGroupProbeResult>;
+  const expectedKeys = ['accessAclAbsent', 'defaultAclAbsent', 'directory', 'explicitMemberUids', 'groupSources',
+    'passwdSources', 'primaryGroupUids', 'runtimeGid', 'runtimeUid', 'schema'];
+  if (!exactStringArray(Object.keys(result).sort(), expectedKeys)
+    || result.schema !== PRIVATE_UPLOAD_GROUP_PROBE_SCHEMA || result.directory !== request.directory
+    || result.runtimeUid !== request.runtimeUid || result.runtimeGid !== request.runtimeGid
+    || !exactIntegerArray(result.primaryGroupUids) || result.primaryGroupUids.length !== 1
+    || result.primaryGroupUids[0] !== request.runtimeUid
+    || !exactIntegerArray(result.explicitMemberUids)
+    || result.explicitMemberUids.some(uid => uid !== request.runtimeUid) || result.explicitMemberUids.length > 1
+    || !exactStringArray(result.passwdSources, ['files', 'systemd'])
+    || !exactStringArray(result.groupSources, ['files', 'systemd'])
+    || result.accessAclAbsent !== true || result.defaultAclAbsent !== true) privateUploadDirectoryInvalid();
+}
+async function assertTrustedPrivateUploadParent(runtime: PrivateUploadDirectoryRuntime, directory: string,
+  dataDevice: number | bigint) {
+  const { filesystem, runtimeUid, runtimeGid } = runtime;
+  if (runtimeUid === undefined) privateUploadDirectoryInvalid();
+  const stat = await requiredPrivateUploadEntry(filesystem, directory);
+  if (!stat.isDirectory() || stat.isSymbolicLink() || stat.dev !== dataDevice || ![0, runtimeUid].includes(stat.uid)
+    || (stat.mode & 0o002) !== 0 || await requiredPrivateUploadRealpath(filesystem, directory) !== directory) privateUploadDirectoryInvalid();
+  if ((stat.mode & 0o020) === 0) return;
+  const trustedWritableParent = path.dirname(runtime.trustedCanonicalDirectory);
+  if (directory !== trustedWritableParent || (stat.mode & 0o7777) !== 0o775
+    || runtimeGid === undefined || !Number.isSafeInteger(runtimeGid) || runtimeGid < 0
+    || stat.uid !== runtimeUid || stat.gid !== runtimeGid) privateUploadDirectoryInvalid();
+  const request = { directory, runtimeUid, runtimeGid };
+  let output: string;
+  try { output = await runtime.probeTrustedGroupWritableParent(request); }
+  catch { privateUploadDirectoryInvalid(); }
+  if (typeof output !== 'string') privateUploadDirectoryInvalid();
+  parsePrivateUploadGroupProbe(output, request);
+}
+export async function resolvePrivateUploadDirectory(runtime: PrivateUploadDirectoryRuntime) {
+  const { filesystem, platform } = runtime;
+  const storage = await requiredPrivateUploadRealpath(filesystem, path.join(runtime.cwd, 'storage'));
+  const storageStat = await requiredPrivateUploadStat(filesystem, storage);
+  const systemStat = await filesystem.stat(runtime.systemRoot);
+  if (platform === 'linux' && (!storage.startsWith(`${runtime.trustedProjectRoot}${path.sep}`)
+    || !storageStat.isDirectory() || storageStat.dev === systemStat.dev)) {
+    throw new VerifiedUploadError('UPLOAD_DATA_MOUNT_REQUIRED', '上传数据盘暂不可用', 503);
+  }
+  await assertPrivateUploadCapacity(filesystem, storage);
   const directory = path.join(storage, 'verified-uploads');
-  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  if (platform !== 'linux') {
+    await filesystem.mkdir(directory, { recursive: true, mode: 0o700 });
+  }
+  const entry = await requiredPrivateUploadEntry(filesystem, directory);
+  if (!entry.isSymbolicLink()) {
+    if (!entry.isDirectory() || (entry.mode & 0o077) !== 0 || await requiredPrivateUploadRealpath(filesystem, directory) !== directory) privateUploadDirectoryInvalid();
+    return directory;
+  }
+  if (platform !== 'linux' || runtime.runtimeUid === undefined || !Number.isSafeInteger(runtime.runtimeUid)
+    || runtime.runtimeUid < 0 || await requiredPrivateUploadLink(filesystem, directory) !== runtime.trustedCanonicalDirectory) privateUploadDirectoryInvalid();
+
+  const canonical = runtime.trustedCanonicalDirectory;
+  const canonicalStat = await requiredPrivateUploadEntry(filesystem, canonical);
+  if (!storageStat.isDirectory() || ![0, runtime.runtimeUid].includes(storageStat.uid) || (storageStat.mode & 0o022) !== 0
+    || !canonicalStat.isDirectory() || canonicalStat.isSymbolicLink() || (canonicalStat.mode & 0o7777) !== 0o700
+    || canonicalStat.uid !== runtime.runtimeUid
+    || await requiredPrivateUploadRealpath(filesystem, canonical) !== canonical
+    || await requiredPrivateUploadRealpath(filesystem, directory) !== canonical) privateUploadDirectoryInvalid();
+  if (canonicalStat.dev !== storageStat.dev) {
+    throw new VerifiedUploadError('UPLOAD_DATA_MOUNT_REQUIRED', '上传数据盘暂不可用', 503);
+  }
+  for (const parent of trustedPrivateUploadParents(runtime.trustedProjectRoot, canonical)) {
+    await assertTrustedPrivateUploadParent(runtime, parent, storageStat.dev);
+  }
+  try { await filesystem.access(canonical, fsConstants.R_OK | fsConstants.W_OK | fsConstants.X_OK); }
+  catch { privateUploadDirectoryInvalid(); }
+  await assertPrivateUploadCapacity(filesystem, canonical);
+
+  const finalEntry = await requiredPrivateUploadEntry(filesystem, directory);
+  const finalCanonical = await requiredPrivateUploadEntry(filesystem, canonical);
+  if (!sameFilesystemEntry(entry, finalEntry) || !sameFilesystemEntry(canonicalStat, finalCanonical)
+    || await requiredPrivateUploadLink(filesystem, directory) !== canonical || await requiredPrivateUploadRealpath(filesystem, directory) !== canonical
+    || await requiredPrivateUploadRealpath(filesystem, canonical) !== canonical) privateUploadDirectoryInvalid();
+  return canonical;
+}
+async function assertPrivateUploadProbeDirectory(directory: string, mode: number) {
   const stat = await fs.lstat(directory);
-  if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0 || await fs.realpath(directory) !== directory) throw new VerifiedUploadError('UPLOAD_PRIVATE_DIRECTORY_INVALID', '上传私有目录不可用', 503);
-  return directory;
+  if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== 0 || (stat.mode & 0o7777) !== mode
+    || await fs.realpath(directory) !== directory) privateUploadDirectoryInvalid();
+}
+async function assertPrivateUploadProbeFile(file: string, mode: number) {
+  const stat = await fs.lstat(file);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.uid !== 0 || (stat.mode & 0o7777) !== mode
+    || await fs.realpath(file) !== file) privateUploadDirectoryInvalid();
+}
+async function trustedGroupWritablePrivateUploadProbe(request: PrivateUploadGroupProbeRequest) {
+  const runtimeUid = process.getuid?.(), runtimeGid = process.getgid?.();
+  if (request.directory !== path.dirname(PRIVATE_UPLOAD_CANONICAL_DIRECTORY)
+    || request.runtimeUid !== runtimeUid || request.runtimeGid !== runtimeGid) privateUploadDirectoryInvalid();
+  await assertPrivateUploadProbeDirectory('/usr', 0o755);
+  await assertPrivateUploadProbeDirectory('/usr/bin', 0o755);
+  await assertPrivateUploadProbeDirectory('/etc', 0o755);
+  await assertPrivateUploadProbeFile('/etc/passwd', 0o644);
+  await assertPrivateUploadProbeFile('/etc/group', 0o644);
+  await assertPrivateUploadProbeFile('/etc/nsswitch.conf', 0o644);
+  const interpreter = await fs.lstat(PRIVATE_UPLOAD_PYTHON);
+  if (!interpreter.isSymbolicLink() || interpreter.uid !== 0
+    || await fs.readlink(PRIVATE_UPLOAD_PYTHON) !== path.basename(PRIVATE_UPLOAD_PYTHON_REAL)) privateUploadDirectoryInvalid();
+  const realInterpreter = await fs.realpath(PRIVATE_UPLOAD_PYTHON);
+  if (realInterpreter !== PRIVATE_UPLOAD_PYTHON_REAL) privateUploadDirectoryInvalid();
+  const realInterpreterStat = await fs.lstat(realInterpreter);
+  if (!realInterpreterStat.isFile() || realInterpreterStat.isSymbolicLink() || realInterpreterStat.uid !== 0
+    || (realInterpreterStat.mode & 0o7777) !== 0o755) privateUploadDirectoryInvalid();
+  const { stdout, stderr } = await execFileAsync(PRIVATE_UPLOAD_PYTHON, ['-I', '-c', PRIVATE_UPLOAD_GROUP_PROBE_SOURCE], {
+    timeout: 2000,
+    maxBuffer: 4096,
+    encoding: 'utf8',
+    env: { PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C', NODE_ENV: 'production' },
+    windowsHide: true,
+  });
+  if (stderr !== '' || !stdout.endsWith('\n') || stdout.slice(0, -1).includes('\n')) privateUploadDirectoryInvalid();
+  return stdout.slice(0, -1);
+}
+export async function privateUploadDirectory() {
+  return resolvePrivateUploadDirectory({
+    filesystem: fs,
+    platform: process.platform,
+    cwd: process.cwd(),
+    runtimeUid: process.getuid?.(),
+    runtimeGid: process.getgid?.(),
+    systemRoot: '/',
+    trustedProjectRoot: PRIVATE_UPLOAD_PROJECT_ROOT,
+    trustedCanonicalDirectory: PRIVATE_UPLOAD_CANONICAL_DIRECTORY,
+    probeTrustedGroupWritableParent: trustedGroupWritablePrivateUploadProbe,
+  });
 }
 export async function uploadFileVersion(file: string) {
   const stat = await fs.stat(file);

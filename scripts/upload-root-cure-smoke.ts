@@ -133,7 +133,9 @@ assertIncludes(siteUrl, 'sameOriginPublicUrlForSiteUpload', '站内上传资源�
 
 const localStorage = read('src/lib/assets/storage.ts');
 assertIncludes(localStorage, 'localUploadUrlFromAssetUrl', '底层素材去重必须识别本站公网 /uploads URL，不能只识别相对路径。');
-assertIncludes(localStorage, 'restoreMissingLocalUploadFile', '重复素材如果本地文件缺失，raw 上传必须用本次文件内容恢复文件。');
+assertNotIncludes(localStorage, 'restoreMissingLocalUploadFile', '缺原件或隐藏记录不能靠新上传静默恢复历史文件。');
+assertIncludes(localStorage, 'findVerifiedOwnUpload', '重复素材必须沿当前本人原件验证，不凭相同名字复用。');
+assertIncludes(localStorage, 'registerVerifiedUpload', '上传登记必须沿当前验证与原请求回执事务。');
 assertIncludes(localStorage, 'siteUploadPathFromUrl', '历史已经写入本站公网 URL，底层恢复逻辑必须兼容新旧站内上传域名。');
 
 const tasksCreate = read('src/app/api/tasks/create/route.ts');
@@ -149,8 +151,13 @@ const referenceImageSafety = read('src/lib/provider/reference-image-safety.ts');
 assertNotIncludes(referenceImageSafety, "import { uploadPublicAsset }", '自动压缩参考图不能直接依赖 R2/TOS 上传。');
 assertIncludes(referenceImageSafety, 'uploadSiteAsset', '自动压缩参考图必须先走本站上传链路生成 local-public URL。');
 const referenceImageContentRoute = read('src/app/api/reference-images/[id]/content/route.ts');
-assertIncludes(referenceImageContentRoute, 'siteUploadPathFromUrl', '参考图内容代理必须识别历史旧域名 /uploads 资源并从本站本地文件读取。');
-assertIncludes(referenceImageContentRoute, 'path.resolve(publicRoot', '参考图内容代理读取本地文件时必须做路径边界校验。');
+assertIncludes(referenceImageContentRoute, 'authorizedImageResponse', '参考图图片读取必须走现有受权图片响应。');
+assertIncludes(referenceImageContentRoute, 'mediaPreviewResponse', '参考图其它媒体读取必须走现有媒体响应。');
+assertIncludes(referenceImageContentRoute, 'canDownloadOriginal', '共享读取不得绕过原件下载权限。');
+const mediaPreviewResponse = read('src/lib/media/preview-response.ts');
+assertIncludes(mediaPreviewResponse, 'siteUploadPathFromUrl', '实际媒体读取helper须识别历史站内上传域名。');
+assertIncludes(mediaPreviewResponse, 'path.resolve(publicRoot', '实际媒体读取helper必须保留本地路径边界校验。');
+assertIncludes(mediaPreviewResponse, 'file.startsWith', '媒体读取还须在realpath后核准实际允许根。');
 
 const localUploadBackfill = read('scripts/backfill-local-upload-asset-urls.ts');
 assertIncludes(localUploadBackfill, 'dry-run', '历史 /uploads 资产回填脚本默认必须是 dry-run。');
@@ -232,19 +239,15 @@ assertMatches(
 );
 
 const uploadedPicker = read('src/components/UploadedImagePicker.tsx');
-assertIncludes(uploadedPicker, 'PendingPickerAttach', '上传历史弹窗必须保存上传成功但加入参考区失败的 assetId。');
-assertIncludes(uploadedPicker, 'retryPendingAttach', '上传历史弹窗失败后必须允许不重传文件直接重试加入参考区。');
-assertIncludes(uploadedPicker, '素材已上传成功，但加入参考区失败', '上传历史弹窗必须区分文件上传成功和加入参考区失败。');
-assertMatches(
-  uploadedPicker,
-  /retryPendingAttach[\s\S]+attachUploadedAssets\(pendingAttach\)/,
-  '上传历史弹窗重试必须只调用业务挂载逻辑，不能重新上传文件。',
-);
-assertMatches(
-  uploadedPicker,
-  /attachUploadedAssets[\s\S]+await onConfirm\(assetIds,\s*assets\)/,
-  '上传历史弹窗待挂载恢复必须复用已上传 assetId 调 onConfirm。',
-);
+assertIncludes(uploadedPicker, '<ResourceLibraryPicker {...props}', '兼容弹窗须将原回调完整交给当前共享素材选择器。');
+const sharedPicker = read('src/components/ResourceLibraryPicker.tsx');
+assertIncludes(sharedPicker, 'uploadReceipts.current.set(id, result)', '共享选择器须保留已上传素材的原回执。');
+assertIncludes(sharedPicker, 'Keep uploaded IDs even when metadata retrieval fails', '素材信息读取失败不得重传已成功文件。');
+assertIncludes(sharedPicker, 'imports.current.get(item.identity)', '导入后重试添加必须复用已有素材编号。');
+assertIncludes(sharedPicker, '素材已导入，信息暂不可用；请重试添加，不必重传', '已导入与业务添加失败必须明确分开。');
+assertIncludes(sharedPicker, 'await onConfirmSelection(uniqueItems)', '按对象添加必须传已核权的原素材。');
+assertIncludes(sharedPicker, 'await onConfirm(uniqueItems.map(i => i.id), uniqueItems)', '旧按ID添加也须复用原素材，不重传文件。');
+assertIncludes(sharedPicker, 'confirmationSession !== session.current', '添加回调须保留账号与目标现场隔离。');
 
 const templatePicker = read('src/components/templates/TemplateBoundImagePicker.tsx');
 assertIncludes(templatePicker, 'pendingUploadedImage', '模板绑定图上传后必须保留待绑定的 assetId。');

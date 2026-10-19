@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { randomUUID } from 'node:crypto';
-import { assertUploadOwner, uploadDigest, uploadIdentity, uploadRequestId, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
+import { assertUploadOwner, privateUploadDirectory, uploadDigest, uploadIdentity, uploadRequestId, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
 import { claimLegacyRawUpload, rawUploadIdentity, rawUploadProof, readRawUploadResult, readRawUploadState, transitionRawUpload, type RawUploadIdentity } from '@/lib/assets/raw-upload-state';
 import {
   getSiteUploadKind,
@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
     const state = await readRawUploadState(identity);
     return NextResponse.json({ rawUpload: state ? rawUploadProof(state) : { ...identity, phase: 'absent' } }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
-    if (error instanceof VerifiedUploadError) return NextResponse.json(verifiedUploadFailure(error), { status: error.status });
+    if (error instanceof VerifiedUploadError) return NextResponse.json({ ...verifiedUploadFailure(error), errorStage: 'recovery' }, { status: error.status });
     return NextResponse.json({ error: '原上传结果暂时无法核对，请稍后查询；未重新发送文件' }, { status: 503 });
   }
 }
@@ -175,6 +175,8 @@ export async function POST(request: NextRequest) {
   let mimeType: string | null = request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() || null;
   let fileSize: number | null = parseContentLength(request.headers.get('x-file-size') || request.headers.get('content-length'));
   let receiving: { identity: RawUploadIdentity; nonce: string } | null = null;
+  let originalRequestId: string | null = null;
+  let errorStage = 'validation';
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -182,6 +184,7 @@ export async function POST(request: NextRequest) {
     assertUploadOwner(request.headers.get('x-upload-owner-id'), user.id);
     await uploadIdentity(user.id);
     const requestId = uploadRequestId(request.headers.get('x-upload-request-id'));
+    originalRequestId = requestId || null;
     const suppliedNonce = request.headers.get('x-raw-upload-nonce');
     const preparedRequest = suppliedNonce !== null || request.headers.get('x-raw-upload-version') !== null;
     if (preparedRequest) {
@@ -193,6 +196,7 @@ export async function POST(request: NextRequest) {
       receiving = { identity, nonce: suppliedNonce };
     }
 
+    errorStage = 'receiving';
     const upload = await readUploadPayload(request);
     if (upload.response) {
       if (receiving) {
@@ -206,6 +210,7 @@ export async function POST(request: NextRequest) {
     ({ fileName, mimeType, fileSize } = upload.payload);
     const { buffer } = upload.payload;
     const identity = rawUploadIdentity(user.id, { requestId: requestId || randomUUID(), hash: uploadDigest(buffer), fileSize, mimeType });
+    originalRequestId = identity.requestId;
     if (receiving) {
       if (identity.hash !== receiving.identity.hash || identity.fileSize !== receiving.identity.fileSize || identity.mimeType !== receiving.identity.mimeType) {
         throw new VerifiedUploadError('UPLOAD_HASH_MISMATCH', '实际上传内容与原准备信息不一致，尚未保存', 400);
@@ -216,6 +221,24 @@ export async function POST(request: NextRequest) {
       const claim = await claimLegacyRawUpload(identity);
       receiving = { identity, nonce: claim.nonce };
     }
+    // Only this still-receiving nonce can prove that no persistent upload work
+    // has started. Storage/staging/publishing re-check the directory afterward;
+    // a later failure must remain writing/unknown, never be unlocked here.
+    errorStage = 'private-directory';
+    try { await privateUploadDirectory(); }
+    catch (error) {
+      if (!(error instanceof VerifiedUploadError)
+        || !['UPLOAD_PRIVATE_DIRECTORY_INVALID', 'UPLOAD_DATA_MOUNT_REQUIRED', 'UPLOAD_CAPACITY_GUARD'].includes(error.code)) throw error;
+      let state: Awaited<ReturnType<typeof transitionRawUpload>>;
+      try { state = await transitionRawUpload(identity, receiving.nonce, 'receiving', 'notAccepted'); }
+      catch { throw new VerifiedUploadError('UPLOAD_RESULT_UNKNOWN', '原上传状态已变化，结果尚未确认；未重新发送文件', 409); }
+      await recordAssetUploadLog({ operatorId: user.id, stage: 'raw', status: 'failed', fileName, mimeType, fileSize,
+        durationMs: Date.now() - startedAt, errorCode: error.code, errorMessage: error.message,
+        errorStage, requestId: identity.requestId, uploadMode: 'raw', fallbackPath: 'raw', skippedProxy: true });
+      return NextResponse.json({ ...verifiedUploadFailure(error), code: 'RAW_UPLOAD_NOT_ACCEPTED', causeCode: error.code,
+        errorStage, notAccepted: true, rawUpload: rawUploadProof(state) }, { status: error.status });
+    }
+    errorStage = 'writing';
     await transitionRawUpload(identity, receiving.nonce, 'receiving', 'writing');
     // Once writing has been acquired, no failure may declare notAccepted.
     const writing = receiving;
@@ -267,10 +290,19 @@ export async function POST(request: NextRequest) {
       && ['UPLOAD_BODY_MISSING', 'UPLOAD_SIZE_MISMATCH', 'UPLOAD_HASH_MISMATCH', 'UPLOAD_BODY_INTERRUPTED'].includes(error.code)) {
       try {
         const state = await transitionRawUpload(receiving.identity, receiving.nonce, 'receiving', 'notAccepted');
-        return NextResponse.json({ ...verifiedUploadFailure(error), code: 'RAW_UPLOAD_NOT_ACCEPTED', notAccepted: true, rawUpload: rawUploadProof(state) }, { status: error.status });
-      } catch { return NextResponse.json({ error: '原上传状态已变化，结果尚未确认', code: 'UPLOAD_RESULT_UNKNOWN' }, { status: 409 }); }
+        if (userId) await recordAssetUploadLog({ operatorId: userId, stage: 'raw', status: 'failed', fileName, mimeType, fileSize,
+          durationMs: Date.now() - startedAt, errorCode: error.code, errorMessage: error.message,
+          errorStage, requestId: originalRequestId, uploadMode: 'raw', fallbackPath: 'raw', skippedProxy: true });
+        return NextResponse.json({ ...verifiedUploadFailure(error), code: 'RAW_UPLOAD_NOT_ACCEPTED', causeCode: error.code,
+          errorStage, notAccepted: true, rawUpload: rawUploadProof(state) }, { status: error.status });
+      } catch { return NextResponse.json({ error: '原上传状态已变化，结果尚未确认', code: 'UPLOAD_RESULT_UNKNOWN', errorStage }, { status: 409 }); }
     }
-    if (error instanceof VerifiedUploadError) return NextResponse.json(verifiedUploadFailure(error), { status: error.status });
+    if (error instanceof VerifiedUploadError) {
+      if (userId) await recordAssetUploadLog({ operatorId: userId, stage: 'raw', status: 'failed', fileName, mimeType, fileSize,
+        durationMs: Date.now() - startedAt, errorCode: error.code, errorMessage: error.message,
+        errorStage, requestId: originalRequestId, uploadMode: 'raw', fallbackPath: 'raw', skippedProxy: true });
+      return NextResponse.json({ ...verifiedUploadFailure(error), errorStage }, { status: error.status });
+    }
     console.error('[Upload] Error:', error);
     if (userId) {
       await recordAssetUploadLog({
@@ -283,6 +315,8 @@ export async function POST(request: NextRequest) {
         durationMs: Date.now() - startedAt,
         errorCode: 'raw_failed',
         errorMessage: error instanceof Error ? error.message : 'Upload failed',
+        errorStage,
+        requestId: originalRequestId,
         uploadMode: 'raw',
         fallbackPath: 'raw',
         skippedProxy: true,
@@ -290,7 +324,7 @@ export async function POST(request: NextRequest) {
       });
     }
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Upload failed' },
+      { error: '上传服务暂不可用，原上传结果待确认；请核对原上传，不要重新发送文件', code: 'UPLOAD_RESULT_UNKNOWN', errorStage },
       { status: 500 }
     );
   }

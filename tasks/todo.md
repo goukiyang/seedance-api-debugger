@@ -2,6 +2,8 @@
 
 ## 当前入口
 
+- [ ] FIX01（2026-10-19）：用户已授权仅修UP01/UP02共享上传与逐文件错误。从实际线上a176/v0.97.0隔离，不混入暂停TRACE/GEN；保原storage、收费启动保护和历史unknown原号。目录兼容、前置nonce/CAS拒绝、结构化安全日志与失败原因保留已进入整批收口，统一工程检查/受保护部署尚未完成，功能由用户手验。完整原单与私有材料在正式项目根`tasks/todo/2026-10-19-image-upload-preflight.md`及`docs/materials/2026-10-19-image-upload-preflight/`；不推用户原图、DB或私有诊断。
+
 - [ ] MAT-M01／MAT-M02／RELEASE（2026-10-18）：手机添加/上传素材弹窗专用紧凑布局及12–24张自适应分页正在实施。保留常显来源、全部筛选、上传/选择/权限与恢复，取代只按三行限制；完整构建与保护部署后用户手验。[正式计划](todo/2026-10-02-unified-resource-library.md#mat-m01mat-m02-手机素材选择与分页2026-10-18)。
 
 - [ ] IMG-VIS01／IMG-VIS02／RELEASE（2026-10-18）：已部署 v0.95.3，待用户手动验收。完整返图尺寸/格式不符仍显示并保留普通操作；用户指定原图已同字节恢复原任务/本人结果列表，原参数与退款账本不变。实际80d5cf6f／BUILD rTIGsl4F2099Dbb_cnZSp，主/相容guard完整构建及各27组内置检查、30公网资源与访问保护通过；web/image同源，HD/作品/角色/DB/配置保持，无生成/重发/DDL。相容b4f489ff回退保新reader，不能直接退旧e92，未演练。正式工单为项目主目录 `tasks/todo/2026-10-10-fluxport-image-api.md` §17.5，私有原图及恢复/发布证据在同根 `docs/materials/2026-10-17-image-content-incident/inc24/`，不推公开Git。

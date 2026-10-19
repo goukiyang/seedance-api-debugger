@@ -71,6 +71,13 @@
 .empty { min-height: 130px; display: grid; place-items: center; color: var(--text-secondary, #b4bec4); font-size: 14px; }
 .error { margin: 0 20px 12px; padding: 10px; background: var(--bg-input, #252e2e); color: var(--text-secondary, #bdc8c5); font-size: 13px; overflow-wrap: anywhere; }
 .error button { margin-left: 10px; text-decoration: underline; }
+.uploadFailures { display: grid; gap: 6px; margin: 0 20px 12px; }
+.uploadFailure { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 10px; background: var(--bg-input, #252e2e); color: var(--text-secondary, #bdc8c5); font-size: 13px; overflow-wrap: anywhere; }
+.uploadFailure > span:first-child { display: grid; gap: 2px; min-width: 0; }
+.uploadFailure strong { color: var(--text-primary, #eef1f2); font-size: 13px; font-weight: 600; }
+.uploadFailure small { color: var(--text-secondary, #bdc8c5); font-size: 12px; line-height: 1.45; }
+.uploadFailureActions { display: flex; align-items: center; gap: 4px; flex: none; }
+.uploadFailureActions button { min-height: 36px; padding: 6px 8px; text-decoration: underline; text-underline-offset: 3px; }
 .notice { margin: 0 20px 12px; font-size: 13px; color: var(--text-secondary, #b4bec4); line-height: 1.5; }
 .meta .compatibility { flex-basis: 100%; min-width: 0; margin-top: 2px; color: #ffd7a3; overflow-wrap: anywhere; }
 .more { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 12px; min-width: 0; color: var(--text-secondary, #b4bec4); margin-top: 12px; font-size: 12px; }
@@ -129,7 +136,10 @@
   .filterDetails > button { min-height: 44px; justify-content: center; }
   .mobileResetLabel { display: inline; }
   .filterSummary { display: block; margin: 2px 0 0; color: var(--text-secondary, #b4bec4); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
-  .generatedScope, .notice, .error { margin: 0 10px 10px; }
+  .generatedScope, .notice, .error, .uploadFailures { margin: 0 10px 10px; }
+  .uploadFailure { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .uploadFailureActions { width: 100%; justify-content: flex-end; }
+  .uploadFailureActions button { min-height: 44px; }
   .body { overflow: visible; padding: 0 10px 12px; }
   .grid { grid-template-columns: repeat(var(--picker-columns, 2), minmax(0, 1fr)); gap: 8px; }
   .meta { padding: 5px 7px; gap: 1px 6px; }

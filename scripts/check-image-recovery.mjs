@@ -70,6 +70,17 @@ const fixtures = [
       'src/app/api/assets/picker/route.ts', 'src/app/api/assets/library/route.ts', 'src/lib/avatar-random/service.ts',
       'src/lib/avatar-random/handoff.ts', 'src/lib/canvas-roles/media.ts', 'src/lib/canvas-roles/media-bindings.ts',
       'src/app/api/avatar-studio/route.ts', 'src/app/tools/avatar-studio/studio.tsx', 'src/app/story-studio/story-studio.tsx'] },
+  { file: 'scripts/upload-recovery-engineering.mjs', schema: 'upload-recovery-engineering.v1',
+    marker: 'Upload recovery engineering receipt: ', checks: ['private_directory_secure_alias', 'raw_nonce_preflight_history',
+      'client_per_file_recovery', 'upload_entry_contracts_preserved'], sources: [
+      'scripts/upload-private-directory-engineering.ts', 'scripts/upload-client-recovery-engineering.ts',
+      'scripts/upload-raw-recovery-engineering.mjs', 'scripts/upload-root-cure-smoke.ts',
+      'src/lib/assets/verified-upload.ts', 'src/lib/assets/raw-upload-state.ts', 'src/lib/assets/upload-log.ts',
+      'src/lib/assets/storage.ts', 'src/lib/assets/site-upload.ts', 'src/lib/http/file-upload.ts',
+      'src/lib/http/upload-session.ts', 'src/components/ResourceLibraryPicker.tsx',
+      'src/components/ResourceLibraryPicker.module.css', 'src/app/api/assets/upload/route.ts',
+      'src/app/api/assets/upload-complete/route.ts', 'src/app/api/assets/multipart/complete/route.ts',
+    ] },
 ];
 const pricingGate = 'scripts/check-pricing-policy.mjs';
 const sourceFiles = ['package.json', entry, pricingGate, ...fixtures.flatMap(fixture => [fixture.file, ...fixture.sources])];

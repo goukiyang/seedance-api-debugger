@@ -1,4 +1,5 @@
 import path from 'path';
+import { createHash } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 
 type UploadStage =
@@ -26,6 +27,8 @@ type RecordAssetUploadLogParams = {
   durationMs?: number | null;
   errorCode?: string | null;
   errorMessage?: string | null;
+  errorStage?: string | null;
+  requestId?: string | null;
   reused?: boolean | null;
   storageProvider?: string | null;
   uploadMode?: 'single' | 'multipart' | 'proxy' | 'raw' | null;
@@ -74,6 +77,8 @@ export async function recordAssetUploadLog(params: RecordAssetUploadLogParams) {
       totalParts: normalizeNumber(params.totalParts),
       errorCode: cleanText(params.errorCode, 80),
       errorMessage: cleanText(params.errorMessage),
+      errorStage: cleanText(params.errorStage, 40),
+      requestDigest: params.requestId ? createHash('sha256').update(params.requestId).digest('hex').slice(0, 16) : null,
     };
 
     await prisma.operationLog.create({

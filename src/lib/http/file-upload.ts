@@ -9,8 +9,51 @@ import {
 } from './upload-progress';
 
 export type { UploadProgressHandler, UploadProgressSnapshot };
-export class UploadNotAcceptedError extends Error {
-  constructor(message: string) { super(message); this.name = 'UploadNotAcceptedError'; }
+export type UploadRecoveryAction = 'query' | 'resume' | 'retry' | 'none';
+export type UploadFileErrorOptions = {
+  code?: string;
+  causeCode?: string;
+  stage?: string;
+  recovery?: UploadRecoveryAction;
+  cause?: unknown;
+};
+export type UploadFileFailure = {
+  message: string;
+  code?: string;
+  causeCode?: string;
+  stage?: string;
+  recovery: UploadRecoveryAction;
+};
+
+export class UploadFileError extends Error {
+  readonly code?: string;
+  readonly causeCode?: string;
+  readonly stage?: string;
+  readonly recovery: UploadRecoveryAction;
+
+  constructor(message: string, options: UploadFileErrorOptions = {}) {
+    super(message);
+    this.name = 'UploadFileError';
+    this.code = options.code;
+    this.causeCode = options.causeCode;
+    this.stage = options.stage;
+    this.recovery = options.recovery || 'none';
+    if (options.cause !== undefined) (this as Error & { cause?: unknown }).cause = options.cause;
+  }
+}
+
+export class UploadNotAcceptedError extends UploadFileError {
+  constructor(message: string, options: Omit<UploadFileErrorOptions, 'recovery'> = {}) {
+    super(message, { ...options, recovery: 'retry' });
+    this.name = 'UploadNotAcceptedError';
+  }
+}
+
+export function describeUploadFileError(error: unknown): UploadFileFailure {
+  if (error instanceof UploadFileError) {
+    return { message: error.message, code: error.code, causeCode: error.causeCode, stage: error.stage, recovery: error.recovery };
+  }
+  return { message: error instanceof Error ? error.message : '上传失败', recovery: 'none' };
 }
 
 const DEFAULT_UPLOAD_INVALID_JSON_MESSAGE = '素材上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
@@ -110,7 +153,11 @@ function requireRawProof(value: RawUploadProof | undefined, identity: RawUploadI
 }
 function finishRawAsset(file: File, context: Partial<UploadContext>, identity: RawUploadIdentity, asset: UploadedAssetPayload, onProgress?: UploadProgressHandler) {
   if (!asset.id || asset.hash !== identity.hash || asset.fileSize !== identity.fileSize || asset.mimeType !== identity.mimeType
-    || asset.upload?.verified !== true || asset.upload.requestId !== identity.requestId) throw new Error('原上传结果身份无法确认，未重新发送文件。');
+    || asset.upload?.verified !== true || asset.upload.requestId !== identity.requestId) {
+    throw new UploadFileError('原上传结果身份无法确认，原上传记录已保留；请核对原上传。', {
+      code: 'RAW_UPLOAD_RESULT_UNKNOWN', stage: 'raw-verify', recovery: 'query',
+    });
+  }
   clearRawMarker(file, context);
   notifyUploadProgress(onProgress, { phase: 'done', label: asset.reused ? '已复用相同素材' : '上传完成', loadedBytes: file.size, totalBytes: file.size });
   return asset;
@@ -122,11 +169,15 @@ async function recoverRawUpload(file: File, context: Partial<UploadContext>, inv
   const query = new URLSearchParams({ requestId: marker.requestId, hash: marker.hash, fileSize: String(marker.fileSize), mimeType: marker.mimeType });
   let response: Response;
   try { response = await fetch(`/api/assets/upload?${query}`, { headers: { 'X-Upload-Owner-Id': marker.ownerId }, cache: 'no-store', signal: AbortSignal.timeout(calculateUploadTimeoutMs(file.size)) }); }
-  catch { throw new Error('原上传结果待确认；再次点击上传只查询原结果，不会重传文件。'); }
-  const result = await readUploadJsonResponse<UploadAssetResponse>(response, '原上传查询', invalidJsonMessage);
-  if (!response.ok) throw new Error(result.message || result.error || '原上传结果尚未确认，未重传文件。');
+  catch (cause) { throw new UploadFileError('原上传结果待确认；再次点击上传只查询原结果，不会重传文件。', { stage: 'raw-query', recovery: 'query', cause }); }
+  let result: UploadAssetResponse;
+  try { result = await readUploadJsonResponse<UploadAssetResponse>(response, '原上传查询', invalidJsonMessage); }
+  catch (cause) { throw new UploadFileError(cause instanceof Error ? cause.message : '原上传查询返回内容无效。', { stage: 'raw-query', recovery: 'query', cause }); }
+  if (!response.ok) throw responseUploadError(result, '原上传结果尚未确认，未重传文件。', 'query', 'raw-query');
   if (result.asset?.id) return finishRawAsset(file, context, marker, result.asset, onProgress);
-  const proof = requireRawProof(result.rawUpload, marker);
+  let proof: RawUploadProof;
+  try { proof = requireRawProof(result.rawUpload, marker); }
+  catch (cause) { throw new UploadFileError(cause instanceof Error ? cause.message : '原上传状态尚未确认，未重新发送文件。', { stage: 'raw-query', recovery: 'query', cause }); }
   if (proof.phase === 'absent' && marker.version === 2 && marker.phase === 'preparing') {
     return performRawUpload(file, context, marker, invalidJsonMessage, onProgress);
   }
@@ -141,9 +192,13 @@ async function recoverRawUpload(file: File, context: Partial<UploadContext>, inv
     }
     saveRawMarker(file, context, { ownerId: marker.ownerId, requestId: marker.requestId, hash: marker.hash,
       fileSize: marker.fileSize, mimeType: marker.mimeType, version: 2, phase: 'retryable', nonce: proof.nonce });
-    throw new UploadNotAcceptedError('原上传确认尚未写入文件。请再次主动点击上传，系统会先核对并更新原准备信息。');
+    throw new UploadNotAcceptedError('原上传确认尚未写入文件。请再次主动点击上传，系统会先核对并更新原准备信息。', {
+      code: 'RAW_UPLOAD_NOT_ACCEPTED', stage: 'raw-query',
+    });
   }
-  throw new Error('原上传仍在处理或结果未知，未重新发送文件。请稍后查询。');
+  throw new UploadFileError('原上传仍在处理或结果未知，未重新发送文件。请稍后查询。', {
+    code: 'RAW_UPLOAD_RESULT_UNKNOWN', stage: `raw-${proof.phase}`, recovery: 'query',
+  });
 }
 
 /** Collapse reference selection, not generation items, by full client bytes. Server verification remains authoritative. */
@@ -162,9 +217,29 @@ type UploadAssetResponse = {
   error?: string;
   message?: string;
   code?: string;
+  causeCode?: string;
+  errorStage?: string;
   notAccepted?: boolean;
   rawUpload?: RawUploadProof;
 };
+
+function safeUploadDiagnostic(value: unknown) {
+  return typeof value === 'string' && /^[a-zA-Z0-9_.:-]{1,80}$/.test(value) ? value : undefined;
+}
+
+function responseUploadError(
+  response: Pick<UploadAssetResponse, 'message' | 'error' | 'code' | 'causeCode' | 'errorStage'>,
+  fallback: string,
+  recovery: UploadRecoveryAction,
+  stage: string,
+) {
+  return new UploadFileError(response.message || response.error || fallback, {
+    code: safeUploadDiagnostic(response.code),
+    causeCode: safeUploadDiagnostic(response.causeCode),
+    stage: safeUploadDiagnostic(response.errorStage) || stage,
+    recovery,
+  });
+}
 
 type DirectUploadTicketResponse = {
   directUploadAvailable?: boolean;
@@ -309,18 +384,28 @@ async function performRawUpload(file: File, context: Partial<UploadContext>, ori
         body: JSON.stringify({ mode: 'raw', ownerId: marker.ownerId, requestId: marker.requestId, hash: marker.hash,
           fileSize: marker.fileSize, mimeType: marker.mimeType, ...(marker.phase === 'retryable' ? { previousNonce: marker.nonce } : {}) }),
         signal: AbortSignal.timeout(30000) });
-    } catch { throw new Error('普通上传准备结果待确认，尚未发送文件。请再次点击核对原准备信息。'); }
-    const result = await readUploadJsonResponse<UploadAssetResponse>(response, '普通上传准备', invalidJsonMessage);
-    if (!response.ok) throw new Error(result.message || result.error || '普通上传准备未完成，尚未发送文件。');
+    } catch (cause) { throw new UploadFileError('普通上传准备结果待确认，尚未发送文件。请再次点击核对原准备信息。', { stage: 'raw-prepare', recovery: 'query', cause }); }
+    let result: UploadAssetResponse;
+    try { result = await readUploadJsonResponse<UploadAssetResponse>(response, '普通上传准备', invalidJsonMessage); }
+    catch (cause) { throw new UploadFileError(cause instanceof Error ? cause.message : '普通上传准备返回内容无效。', { stage: 'raw-prepare', recovery: 'query', cause }); }
+    if (!response.ok) throw responseUploadError(result, '普通上传准备未完成，尚未发送文件。', 'query', 'raw-prepare');
     if (result.asset?.id) return finishRawAsset(file, context, marker, result.asset, onProgress);
-    const proof = requireRawProof(result.rawUpload, marker);
+    let proof: RawUploadProof;
+    try { proof = requireRawProof(result.rawUpload, marker); }
+    catch (cause) { throw new UploadFileError(cause instanceof Error ? cause.message : '原上传执行权尚未确认，未发送文件。', { stage: 'raw-prepare', recovery: 'query', cause }); }
     if (proof.phase !== 'prepared' || marker.phase === 'retryable' && proof.nonce === marker.nonce) {
-      throw new Error('原上传执行权尚未确认，未发送文件。');
+      throw new UploadFileError('原上传执行权尚未确认，原上传记录已保留；请核对原上传。', {
+        code: 'RAW_UPLOAD_RESULT_UNKNOWN', stage: 'raw-prepare', recovery: 'query',
+      });
     }
     marker = { ...marker, phase: 'prepared', nonce: proof.nonce };
     saveRawMarker(file, context, marker);
   }
-  if (marker.phase !== 'prepared' || !/^[a-f0-9]{48}$/.test(marker.nonce || '')) throw new Error('原上传尚未准备完成，未发送文件。');
+  if (marker.phase !== 'prepared' || !/^[a-f0-9]{48}$/.test(marker.nonce || '')) {
+    throw new UploadFileError('原上传尚未准备完成，原上传记录已保留；请核对原上传。', {
+      code: 'RAW_UPLOAD_RESULT_UNKNOWN', stage: 'raw-prepare', recovery: 'query',
+    });
+  }
   // Persist sending before the request can emit bytes. A crash at this point
   // must recover by server state and nonce rotation, never by marker absence.
   marker = { ...marker, phase: 'sending' };
@@ -344,17 +429,25 @@ async function performRawUpload(file: File, context: Partial<UploadContext>, ori
       },
       onProgress,
     });
-  } catch { throw new Error('普通上传结果待确认；再次点击上传只核对原结果，不会立即重传文件。'); }
+  } catch (cause) { throw new UploadFileError('普通上传结果待确认；再次点击上传只核对原结果，不会立即重传文件。', { stage: 'raw-upload', recovery: 'query', cause }); }
   const data = result.data;
   if (!result.ok) {
     if (data.notAccepted === true && data.code === 'RAW_UPLOAD_NOT_ACCEPTED') {
-      const proof = requireRawProof(data.rawUpload, marker);
-      if (proof.phase !== 'notAccepted' || proof.nonce !== marker.nonce) throw new Error('原上传结果尚未确认，未重传文件。');
+      let proof: RawUploadProof;
+      try { proof = requireRawProof(data.rawUpload, marker); }
+      catch (cause) { throw new UploadFileError(cause instanceof Error ? cause.message : '原上传结果尚未确认，未重传文件。', { stage: 'raw-upload', recovery: 'query', cause }); }
+      if (proof.phase !== 'notAccepted' || proof.nonce !== marker.nonce) {
+        throw new UploadFileError('原上传结果尚未确认，未重传文件。', { stage: 'raw-upload', recovery: 'query' });
+      }
       saveRawMarker(file, context, { ...marker, phase: 'retryable' });
+      throw new UploadNotAcceptedError(data.message || data.error || '服务器确认原文件未被接收，可以安全重试上传。', {
+        code: 'RAW_UPLOAD_NOT_ACCEPTED', causeCode: safeUploadDiagnostic(data.causeCode),
+        stage: safeUploadDiagnostic(data.errorStage) || 'raw-upload',
+      });
     }
-    throw new Error(data.message || data.error || '原上传结果尚未确认，请核对原上传。');
+    throw responseUploadError(data, '原上传结果尚未确认，请核对原上传。', 'query', 'raw-upload');
   }
-  if (!data.asset?.id) throw new Error('普通上传结果尚未确认，请查询原上传。');
+  if (!data.asset?.id) throw new UploadFileError('普通上传结果尚未确认，请查询原上传。', { stage: 'raw-upload', recovery: 'query' });
   return finishRawAsset(file, context, marker, data.asset, onProgress);
 }
 
@@ -490,6 +583,37 @@ function writeMultipartResumeState(file: File, state: MultipartResumeState, owne
 function clearMultipartResumeState(file: File, hash: string, ownerId?: string) {
   if (typeof window === 'undefined' || !ownerId) return;
   sessionStorage.removeItem(multipartResumeKey(file, hash, ownerId));
+}
+
+function durableMultipartResumeState(
+  file: File,
+  context: UploadContext,
+  expected: MultipartResumeState,
+  phase?: MultipartResumeState['phase'],
+) {
+  try {
+    const saved = readMultipartResumeState(file, context.hash, context.ownerId);
+    return saved && saved.uploadToken === expected.uploadToken && saved.uploadId === expected.uploadId
+      && saved.hash === expected.hash && saved.fileSize === expected.fileSize && saved.mimeType === expected.mimeType
+      && (!phase || saved.phase === phase) ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasDurableMultipartResumeState(file: File, context: UploadContext, expected: MultipartResumeState) {
+  return !!durableMultipartResumeState(file, context, expected);
+}
+
+function hasCompleteMultipartParts(file: File, state: MultipartResumeState) {
+  const partCount = Math.ceil(file.size / state.partSize);
+  const parts = new Map<number, string>();
+  for (const part of state.parts) parts.set(part.partNumber, part.eTag);
+  return parts.size === partCount && Array.from({ length: partCount }, (_, index) => index + 1).every(partNumber => {
+    const eTag = parts.get(partNumber);
+    const normalized = typeof eTag === 'string' ? normalizePartEtag(eTag) : '';
+    return normalized.length > 0 && normalized.length <= 256;
+  });
 }
 
 function normalizePartEtag(value: string | null) {
@@ -668,6 +792,17 @@ async function uploadWithMultipart(
   const completedParts = new Map<number, string>();
   for (const part of state.parts) completedParts.set(part.partNumber, part.eTag);
   const partCount = Math.ceil(file.size / state.partSize);
+  const hasEveryPart = () => completedParts.size === partCount
+    && Array.from({ length: partCount }, (_, index) => index + 1).every(partNumber => {
+      const eTag = completedParts.get(partNumber);
+      const normalized = typeof eTag === 'string' ? normalizePartEtag(eTag) : '';
+      return normalized.length > 0 && normalized.length <= 256;
+    });
+  if (state.phase === 'completing' && !hasEveryPart()) {
+    throw new UploadFileError('原分块上传登记待确认，但本机状态不完整；已保留原记录，请在原素材结果中核对。', {
+      code: 'MULTIPART_UPLOAD_STATE_INCOMPLETE', stage: 'multipart-complete', recovery: 'none',
+    });
+  }
   const loadedPartBytes = () => {
     let loaded = 0;
     for (const partNumber of Array.from(completedParts.keys())) {
@@ -703,14 +838,21 @@ async function uploadWithMultipart(
     }
   };
 
-  try {
-    await Promise.all(Array.from({ length: Math.min(MULTIPART_UPLOAD_CONCURRENCY, partCount) }, uploadNextPart));
-  } catch (error) {
-    if (state && !preserveUnknown && !shouldKeepMultipartResumeState(error)) {
-      await abortMultipartUpload(state.uploadToken, invalidJsonMessage);
-      clearMultipartResumeState(file, context.hash, context.ownerId);
+  if (state.phase !== 'completing') {
+    try {
+      await Promise.all(Array.from({ length: Math.min(MULTIPART_UPLOAD_CONCURRENCY, partCount) }, uploadNextPart));
+    } catch (error) {
+      if (preserveUnknown && hasDurableMultipartResumeState(file, context, state)) {
+        throw new UploadFileError(error instanceof Error ? error.message : '原分块上传尚未完成。', {
+          code: 'MULTIPART_UPLOAD_RESUMABLE', stage: 'multipart-upload', recovery: 'resume', cause: error,
+        });
+      }
+      if (state && !preserveUnknown && !shouldKeepMultipartResumeState(error)) {
+        await abortMultipartUpload(state.uploadToken, invalidJsonMessage);
+        clearMultipartResumeState(file, context.hash, context.ownerId);
+      }
+      throw error;
     }
-    throw error;
   }
 
   notifyUploadProgress(onProgress, {
@@ -721,13 +863,16 @@ async function uploadWithMultipart(
   });
   state.phase = 'completing';
   writeMultipartResumeState(file, state, context.ownerId);
+  const savedCompletion = durableMultipartResumeState(file, context, state, 'completing');
+  const completionIsDurable = !!savedCompletion && hasCompleteMultipartParts(file, savedCompletion);
 
   let completeRes: Response;
   try {
     completeRes = await fetch('/api/assets/multipart/complete', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(context.ownerId ? { 'X-Upload-Owner-Id': context.ownerId } : {}) },
       body: JSON.stringify({
+        ownerId: context.ownerId,
         uploadToken: state.uploadToken,
         hash: context.hash,
         width: context.width,
@@ -737,21 +882,53 @@ async function uploadWithMultipart(
       }),
     });
   } catch (error) {
-    throw new Error(uploadStageConnectionMessage('分块上传完成登记', error));
+    const message = uploadStageConnectionMessage('分块上传完成登记', error);
+    if (preserveUnknown && completionIsDurable) throw new UploadFileError(message, {
+      code: 'MULTIPART_UPLOAD_RESULT_UNKNOWN', stage: 'multipart-complete', recovery: 'query', cause: error,
+    });
+    throw new Error(message);
   }
-  const complete = await readUploadJsonResponse<UploadAssetResponse>(
-    completeRes,
-    '分块上传完成登记接口',
-    invalidJsonMessage,
-  );
+  let complete: UploadAssetResponse;
+  try {
+    complete = await readUploadJsonResponse<UploadAssetResponse>(
+      completeRes,
+      '分块上传完成登记接口',
+      invalidJsonMessage,
+    );
+  } catch (error) {
+    if (preserveUnknown && completionIsDurable) throw new UploadFileError(
+      error instanceof Error ? error.message : '分块上传完成登记返回内容无效。',
+      { code: 'MULTIPART_UPLOAD_RESULT_UNKNOWN', stage: 'multipart-complete', recovery: 'query', cause: error },
+    );
+    throw error;
+  }
   if (!completeRes.ok) {
-    if (preserveUnknown) throw new Error(complete.error || complete.message || '分块上传结果待确认，请查询原上传');
+    if (preserveUnknown) {
+      if (completionIsDurable) throw new UploadFileError(
+        complete.message || complete.error || '分块上传结果待确认，请核对原上传。',
+        {
+          code: safeUploadDiagnostic(complete.code) || 'MULTIPART_UPLOAD_RESULT_UNKNOWN',
+          causeCode: safeUploadDiagnostic(complete.causeCode),
+          stage: safeUploadDiagnostic(complete.errorStage) || 'multipart-complete',
+          recovery: 'query',
+        },
+      );
+      throw new Error(complete.error || complete.message || '分块上传结果待确认，请核对原上传。');
+    }
     await abortMultipartUpload(state.uploadToken, invalidJsonMessage);
     clearMultipartResumeState(file, context.hash, context.ownerId);
     throw new Error(complete.error || complete.message || '分块上传完成登记失败');
   }
   if (!complete.asset?.id) {
-    if (preserveUnknown) throw new Error('分块上传结果未知，请查询原上传');
+    if (preserveUnknown) {
+      if (completionIsDurable) throw new UploadFileError('分块上传结果未知，请核对原上传。', {
+        code: safeUploadDiagnostic(complete.code) || 'MULTIPART_UPLOAD_RESULT_UNKNOWN',
+        causeCode: safeUploadDiagnostic(complete.causeCode),
+        stage: safeUploadDiagnostic(complete.errorStage) || 'multipart-complete',
+        recovery: 'query',
+      });
+      throw new Error('分块上传结果未知，请核对原上传。');
+    }
     await abortMultipartUpload(state.uploadToken, invalidJsonMessage);
     clearMultipartResumeState(file, context.hash, context.ownerId);
     throw new Error('分块上传完成但没有返回素材 ID');
@@ -927,13 +1104,18 @@ async function uploadFileToHistoryInternal(
     let response: Response;
     try { response = await fetch('/api/assets/upload-complete', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ uploadToken: ticket.uploadToken, hash, width, height, durationSeconds }), signal: AbortSignal.timeout(calculateUploadTimeoutMs(file.size)) }); }
-    catch { throw new Error('原上传登记结果待确认；再次点击上传只核对原凭据，不会重传文件。'); }
-    const result = await readUploadJsonResponse<UploadAssetResponse>(response, '原上传登记', invalidJsonMessage);
+    catch (cause) { throw new UploadFileError('原上传登记结果待确认；再次点击上传只核对原凭据，不会重传文件。', { stage: 'direct-complete', recovery: 'query', cause }); }
+    let result: UploadAssetResponse;
+    try { result = await readUploadJsonResponse<UploadAssetResponse>(response, '原上传登记', invalidJsonMessage); }
+    catch (cause) { throw new UploadFileError(cause instanceof Error ? cause.message : '原上传登记返回内容无效。', { stage: 'direct-complete', recovery: 'query', cause }); }
     if (!response.ok && result.notAccepted === true && result.code === 'UPLOAD_NOT_ACCEPTED') {
       directReceipts.delete(file); if (receiptKey) sessionStorage.removeItem(receiptKey);
-      throw new UploadNotAcceptedError(result.error || '服务器确认原文件未被接收，可以安全重试上传。');
+      throw new UploadNotAcceptedError(result.error || '服务器确认原文件未被接收，可以安全重试上传。', {
+        code: 'UPLOAD_NOT_ACCEPTED', causeCode: safeUploadDiagnostic(result.causeCode),
+        stage: safeUploadDiagnostic(result.errorStage) || 'direct-complete',
+      });
     }
-    if (!response.ok || !result.asset?.id) throw new Error(result.error || result.message || '原上传结果尚未确认，未重传文件。');
+    if (!response.ok || !result.asset?.id) throw responseUploadError(result, '原上传结果尚未确认，未重传文件。', 'query', 'direct-complete');
     directReceipts.delete(file);
     if (receiptKey) sessionStorage.removeItem(receiptKey);
     notifyUploadProgress(onProgress, { phase: 'done', label: result.asset.reused ? '已复用相同素材' : '上传完成', loadedBytes: file.size, totalBytes: file.size });
@@ -1022,7 +1204,9 @@ async function uploadFileToHistoryInternal(
     await putFileToStorage(ticket.uploadUrl, ticket.headers || {}, file, onProgress);
   } catch (error) {
     const message = error instanceof Error ? error.message : '上传到对象存储失败';
-    throw new Error(`${message}；原上传结果待确认，未切换链路重传。再次上传将核对原凭据。`);
+    throw new UploadFileError(`${message}；原上传结果待确认，未切换链路重传。再次上传将核对原凭据。`, {
+      stage: 'direct-upload', recovery: 'query', cause: error,
+    });
   }
   return finishTicket(ticket);
 }

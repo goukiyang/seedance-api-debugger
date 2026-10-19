@@ -13,7 +13,7 @@ import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { useProductDialog } from '@/components/useProductDialog';
 import { readJsonResponse } from '@/lib/http/json-response';
-import { uniqueUploadFiles, type UploadProgressHandler, type UploadProgressSnapshot, type UploadedAssetPayload } from '@/lib/http/file-upload';
+import { describeUploadFileError, uniqueUploadFiles, type UploadFileFailure, type UploadProgressHandler, type UploadProgressSnapshot, type UploadedAssetPayload } from '@/lib/http/file-upload';
 import type { AssetType } from '@/types';
 import type { PickerAlbum, PickerItem, PickerResponse, PickerScope } from '@/lib/assets/picker-types';
 import type { UploadedAssetSelection, UploadedImagePickerConfirmResult } from '@/components/UploadedImagePicker';
@@ -47,6 +47,13 @@ export interface ResourceLibraryPickerProps {
   onAvatarConfirm?: ResourceLibraryPickerProps['onConfirm'];
 }
 type Preferences = { view: 'library' | 'favorites' | 'recent'; scope: PickerScope; source: string; template: string; type: string; query: string; sort: string; album: string; project: string; scroll: number; pages: number; filtersOpen: boolean; selectionOpen: boolean };
+export type FailedUploadItem = UploadFileFailure & { id: string; file: File };
+export function reconcileUploadFailures(current: FailedUploadItem[], attempted: File[], next: FailedUploadItem[]) {
+  return [...current.filter(item => !attempted.includes(item.file)), ...next];
+}
+export function removeUploadFailure(current: FailedUploadItem[], id: string) {
+  return current.filter(item => item.id !== id);
+}
 const defaults: Preferences = { view: 'library', scope: 'mine', source: 'all', template: '', type: 'all', query: '', sort: 'newest', album: '', project: '', scroll: 0, pages: 1, filtersOpen: false, selectionOpen: false };
 const labels = { image: '图片', video: '视频', audio: '音频' };
 function pickerFilterKey(typesKey: string, prefs: Preferences) {
@@ -125,15 +132,16 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const [prefs, setPrefs] = useState<Preferences>(defaults), [ready, setReady] = useState(false), [query, setQuery] = useState('');
   const [templates, setTemplates] = useState<Array<{ id: string; name: string }>>([]);
   const [sessionOwner, setSessionOwner] = useState('');
-  const [notice, setNotice] = useState('');
+  const [notice, setNotice] = useState(''), [directoryNotice, setDirectoryNotice] = useState('');
   const imports = useRef(new Map<string, PickerItem>()), importOwner = useRef('');
   const uploadReceipts = useRef(new Map<string, UploadedAssetPayload>());
   const [items, setItems] = useState<PickerItem[]>([]), [albums, setAlbums] = useState<PickerAlbum[]>([]), [selected, setSelected] = useState<PickerItem[]>([]), [preview, setPreview] = useState<PickerItem | null>(null);
-  const [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [total, setTotal] = useState(0), [hasMore, setHasMore] = useState(false), [page, setPage] = useState(1);
-  const [expanded, setExpanded] = useState(false), [failedFiles, setFailedFiles] = useState<File[]>([]), [progress, setProgress] = useState<UploadProgressSnapshot | null>(null), [uploadLabel, setUploadLabel] = useState(''), [container, setContainer] = useState<Element | null>(null), [epoch, setEpoch] = useState(0);
+  const [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [directoryError, setDirectoryError] = useState(''), [total, setTotal] = useState(0), [hasMore, setHasMore] = useState(false), [page, setPage] = useState(1);
+  const [expanded, setExpanded] = useState(false), [failedUploads, setFailedUploads] = useState<FailedUploadItem[]>([]), [progress, setProgress] = useState<UploadProgressSnapshot | null>(null), [uploadLabel, setUploadLabel] = useState(''), [container, setContainer] = useState<Element | null>(null), [epoch, setEpoch] = useState(0);
   const dialog = useRef<HTMLDivElement>(null), backdrop = useRef<HTMLDivElement>(null), body = useRef<HTMLDivElement>(null), browse = useRef<HTMLElement>(null), sourceBar = useRef<HTMLDivElement>(null), input = useRef<HTMLInputElement>(null);
   const browseSurface = useCallback(() => window.matchMedia('(max-width: 760px)').matches ? browse.current : body.current, []);
   const sequence = useRef(0), session = useRef(0), locked = useRef(false), restoring = useRef(false), restoration = useRef(0);
+  const failedUploadIds = useRef(new WeakMap<File, string>());
   const readingMore = useRef(false);
   const filterKey = pickerFilterKey(typesKey, prefs);
   const [loadedFilter, setLoadedFilter] = useState('');
@@ -156,7 +164,8 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     if (typeof raw.pages === 'number') next.pages = Math.min(5, Math.max(1, Math.floor(raw.pages) || 1));
     for (const field of ['filtersOpen', 'selectionOpen'] as const) if (typeof raw[field] === 'boolean') next[field] = raw[field]!;
     restoration.current = next.scroll; restoring.current = true;
-    setPrefs(next); setQuery(next.query); setSelected([]); setItems([]); setAlbums([]); setTemplates([]); setTotal(0); setPreview(null); setFailedFiles([]); setError(''); setNotice(''); setUploadLabel(''); setProgress(null); setSessionOwner(prefsKey);
+    locked.current = false; setBusy(false);
+    setPrefs(next); setQuery(next.query); setSelected([]); setItems([]); setAlbums([]); setTemplates([]); setTotal(0); setPreview(null); setFailedUploads([]); setError(''); setDirectoryError(''); setNotice(''); setDirectoryNotice(''); setUploadLabel(''); setProgress(null); setSessionOwner(prefsKey);
     const modal = Array.from(document.querySelectorAll('dialog[open]')).reverse().find(d => d.matches(':modal'));
     setContainer(portalContainer || modal || document.body); setReady(true);
     return () => { sequence.current++; session.current++; };
@@ -213,7 +222,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   }, [prefs.scope, prefs.source, prefs.template, prefs.type, prefs.query, prefs.view, prefs.sort, prefs.album, prefs.project, typesKey, target, recentKey]);
   useEffect(() => {
     if (!open || !ready || sessionOwner !== prefsKey) return;
-    const token = ++sequence.current; setLoading(true); setError(''); setItems([]); setLoadedFilter(''); setHasMore(false);
+    const token = ++sequence.current; setLoading(true); setDirectoryError(''); setItems([]); setLoadedFilter(''); setHasMore(false);
     void (async () => {
       try {
         let batch: PickerItem[] = []; const count = restoring.current ? prefs.pages : 1;
@@ -221,7 +230,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         for (let nextPage = 1; nextPage <= count; nextPage++) {
           const data = await fetchPage(nextPage, after); if (token !== sequence.current) return;
           after = data.nextCursor || null; readCursor.current = after;
-          batch = Array.from(new Map([...batch, ...data.items].map(item => [item.identity, item])).values()); setAlbums(data.albums); setTemplates(data.templates || []); setTotal(data.total); setPage(data.page); setHasMore(data.hasMore); setNotice(data.notice || '');
+          batch = Array.from(new Map([...batch, ...data.items].map(item => [item.identity, item])).values()); setAlbums(data.albums); setTemplates(data.templates || []); setTotal(data.total); setPage(data.page); setHasMore(data.hasMore); setDirectoryNotice(data.notice || '');
           if (prefs.template && !(data.templates || []).some(t => t.id === prefs.template)) { setPrefs(p => ({ ...p, template: '', pages: 1, scroll: 0 })); return; }
           if (prefs.album && !data.albums.some(a => a.id === prefs.album && a.scope === prefs.scope) || prefs.project && !data.albums.some(a => a.project?.id === prefs.project && a.scope === prefs.scope)) {
             restoring.current = false; setPrefs(p => ({ ...p, album: '', project: '', pages: 1, scroll: 0 })); return;
@@ -229,7 +238,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
           if (!data.hasMore) break;
         }
         setItems(batch); setLoadedFilter(filterKey);
-      } catch (e) { if (token === sequence.current) setError(e instanceof Error ? e.message : '素材库读取失败'); }
+      } catch (e) { if (token === sequence.current) setDirectoryError(e instanceof Error ? e.message : '素材库读取失败'); }
       finally { if (token === sequence.current) setLoading(false); }
     })();
     return () => { sequence.current++; };
@@ -267,15 +276,15 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     finally { locked.current = false; setBusy(false); }
   };
   const loadMore = async () => {
-    if (loading || readingMore.current || loadedFilter !== filterKey || !hasMore) return; const token = sequence.current; readingMore.current = true; setLoading(true); setError('');
+    if (loading || readingMore.current || loadedFilter !== filterKey || !hasMore) return; const token = sequence.current; readingMore.current = true; setLoading(true); setDirectoryError('');
     try { const data = await fetchPage(page + 1, readCursor.current); if (token !== sequence.current) return; readCursor.current = data.nextCursor || null; setItems(old => Array.from(new Map([...old, ...data.items].map(item => [item.identity, item])).values())); setPage(data.page); setHasMore(data.hasMore); setTotal(data.total); setPrefs(p => ({ ...p, pages: data.page })); }
-    catch (e) { if (token === sequence.current) { setError(e instanceof Error ? e.message : '读取失败'); throw e; } }
+    catch (e) { if (token === sequence.current) { setDirectoryError(e instanceof Error ? e.message : '读取失败'); throw e; } }
     finally { readingMore.current = false; if (token === sequence.current) setLoading(false); }
   };
   const resultPages = useResultPages({
     items: loadedFilter === filterKey && sessionOwner === prefsKey ? items.map(item => ({ id: item.identity, item })) : [],
     storageKey: `${prefsKey}:page:v1:${filterKey}`, visible: open && ready && sessionOwner === prefsKey,
-    busy: loading || loadedFilter !== filterKey, error: Boolean(error), hasMore: loadedFilter === filterKey && hasMore,
+    busy: loading || loadedFilter !== filterKey, error: Boolean(directoryError), hasMore: loadedFilter === filterKey && hasMore,
     total: loadedFilter === filterKey ? total : null,
     loadMore, currentId: null,
   });
@@ -298,17 +307,18 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const upload = async (files: File[]) => {
     if (locked.current || !files.length) return;
     if (files.some(file => !types.includes(file.type.split('/')[0] as AssetType))) { setError(`请选择${types.map(t => labels[t]).join('、')}文件`); return; }
-    locked.current = true; setBusy(true); setError(''); setFailedFiles([]); const token = session.current;
+    locked.current = true; setBusy(true); setError(''); setNotice(''); const token = session.current;
     let duplicates = 0;
     try {
       const unique = await uniqueUploadFiles(files); files = unique.files; duplicates = unique.duplicates;
-      if (token !== session.current || !active.current) { locked.current = false; return; }
+      if (token !== session.current || !active.current) { if (token === session.current) locked.current = false; return; }
       const issue = canSelect([...selected, ...files.map((file, index) => ({ type: file.type.split('/')[0] as AssetType, identity: `upload:${index}` } as PickerItem))]);
       if (issue) throw new Error(issue);
-    } catch (cause) { if (token === session.current) { setError(cause instanceof Error ? cause.message : '文件核对失败'); setBusy(false); } locked.current = false; return; }
+    } catch (cause) { if (token === session.current) { setError(cause instanceof Error ? cause.message : '文件核对失败'); setBusy(false); locked.current = false; } return; }
     const kinds = files.map(file => file.type.split('/')[0] as AssetType);
-    const uploaded: PickerItem[] = [], failed: File[] = []; let detail = '';
+    const uploaded: PickerItem[] = [], failed: FailedUploadItem[] = []; let uploadWarning = '';
     for (let index = 0; index < files.length; index++) {
+      if (token !== session.current || !active.current) break;
       const file = files[index]; setUploadLabel(`${index + 1}/${files.length} ${file.name}`); setProgress(null);
       let uploadedId: string | undefined;
       try {
@@ -323,17 +333,24 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         const response = await fetch(`/api/assets/picker?target=${target}&keys=${encodeURIComponent(`asset:${id}`)}&types=${typesKey}`, { cache: 'no-store' });
         const data = await readJsonResponse<PickerResponse>(response, { invalidJsonMessage: '文件已上传，素材信息读取失败；请重新读取，不必重传' });
         const item = response.ok ? data.items.find(i => i.assetId === id) : undefined;
-        if (item) uploaded[uploaded.length - 1] = item; else detail = '文件已上传，素材信息暂时不可用；添加时会重新核对';
-      } catch (e) { if (!uploadedId) failed.push(file); detail = e instanceof Error ? e.message : '上传失败'; }
+        if (item) uploaded[uploaded.length - 1] = item; else uploadWarning = '文件已上传，素材信息暂时不可用；添加时会重新核对';
+      } catch (cause) {
+        if (token !== session.current || !active.current) break;
+        if (uploadedId) uploadWarning = cause instanceof Error ? cause.message : '文件已上传，素材信息暂时不可用；添加时会重新核对';
+        else {
+          let id = failedUploadIds.current.get(file);
+          if (!id) { id = crypto.randomUUID(); failedUploadIds.current.set(file, id); }
+          failed.push({ id, file, ...describeUploadFileError(cause) });
+        }
+      }
     }
     if (token === session.current) {
       setSelected(old => [...old, ...uploaded.filter(i => !existing(i) && !old.some(o => o.identity === i.identity))]);
       change({ view: 'library', scope: 'mine', source: 'all', type: 'all', album: '', project: '', query: '' }); setQuery(''); setEpoch(e => e + 1);
-      setFailedFiles(failed); setError(detail); setProgress(null); setUploadLabel(''); setBusy(false);
-      setNotice(`已上传或复用 ${uploaded.length} 个素材${duplicates ? `，本批 ${duplicates} 个相同文件已合并选择` : ''}；点击“${confirmLabel}”后才会加入。`);
+      setFailedUploads(old => reconcileUploadFailures(old, files, failed)); setError(uploadWarning); setProgress(null); setUploadLabel(''); setBusy(false);
+      setNotice(uploaded.length ? `已上传或复用 ${uploaded.length} 个素材${duplicates ? `，本批 ${duplicates} 个相同文件已合并选择` : ''}；点击“${confirmLabel}”后才会加入。` : '');
+      locked.current = false;
     }
-    if (token !== session.current) setBusy(false);
-    locked.current = false;
   };
   const confirm = async () => {
     if (locked.current || !selected.length) return;
@@ -481,10 +498,15 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         </div>
         {generatedViewNotice && <div className={styles.generatedScope}><span>{generatedViewNotice}</span><button type="button" disabled={busy} onClick={showAllGenerated}>查看我的全部生成</button></div>}
         {uploadLabel && <UploadProgressIndicator busy label={progress?.label || '准备上传'} detail={uploadLabel} percent={progress?.percent} />}
+        {directoryNotice && <div role="status" className={styles.notice}>{directoryNotice}</div>}
         {notice && <div role="status" className={styles.notice}>{notice}</div>}
         {removedItem && <div role="status" className={styles.notice}>已从我的素材库删除，文件和已有引用保留。<button type="button" disabled={busy} onClick={() => void removeItem(removedItem, true)}>撤销删除</button></div>}
-        {(error || resultPages.navigationIssue) && <div role="alert" className={styles.error}>{error || resultPages.navigationIssue}<button type="button" disabled={busy || loading} onClick={() => { setError(''); resultPages.retry(); if (!resultPages.restoring || !hasMore) setEpoch(v => v + 1); }}>{!error && resultPages.restoring && hasMore ? '继续翻页' : '重新读取'}</button>{resultPages.restoring && error && <button type="button" disabled={busy || loading} onClick={() => { resultPages.retry(); setEpoch(v => v + 1); }}>刷新目录</button>}</div>}
-        {!!failedFiles.length && <div className={styles.error}>{failedFiles.map(f => f.name).join('、')}<button type="button" disabled={busy} onClick={() => void upload(failedFiles)}>重试失败文件</button></div>}
+        {error && <div role="alert" className={styles.error}>{error}</div>}
+        {(directoryError || resultPages.navigationIssue) && <div role="alert" className={styles.error}>{directoryError || resultPages.navigationIssue}<button type="button" disabled={busy || loading} onClick={() => { setDirectoryError(''); resultPages.retry(); if (!resultPages.restoring || !hasMore) setEpoch(v => v + 1); }}>{!directoryError && resultPages.restoring && hasMore ? '继续翻页' : '重新读取'}</button>{resultPages.restoring && directoryError && <button type="button" disabled={busy || loading} onClick={() => { resultPages.retry(); setEpoch(v => v + 1); }}>刷新目录</button>}</div>}
+        {!!failedUploads.length && <div role="alert" className={styles.uploadFailures}>{failedUploads.map(failure => <div key={failure.id} className={styles.uploadFailure}>
+          <span><strong>{failure.file.name}</strong><small>{failure.message}</small></span>
+          <span className={styles.uploadFailureActions}>{failure.recovery !== 'none' && <button type="button" disabled={busy} aria-label={`${failure.recovery === 'query' ? '核对原上传' : failure.recovery === 'resume' ? '继续上传' : '重试上传'}：${failure.file.name}`} onClick={() => void upload([failure.file])}>{failure.recovery === 'query' ? '核对原上传' : failure.recovery === 'resume' ? '继续上传' : '重试上传'}</button>}<button type="button" disabled={busy} aria-label={`移除失败文件：${failure.file.name}`} onClick={() => setFailedUploads(old => removeUploadFailure(old, failure.id))}>移除</button></span>
+        </div>)}</div>}
         <div ref={body} className={styles.body} aria-busy={loading} onScroll={e => rememberScroll(e.currentTarget)} onWheel={() => { restoring.current = false; }} onTouchStart={() => { restoring.current = false; }}>
           <div ref={resultPages.gridRef} className={styles.grid}>{resultPages.pageItems.map(({ item }) => { const order = selected.findIndex(s => s.identity === item.identity), inUse = existing(item); return <article key={item.identity} className={`${styles.card} ${order >= 0 ? styles.selected : ''}`}>
             <div className={styles.cover} data-reaction-surface>
@@ -499,11 +521,11 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
               <details className={styles.cardDetails}><summary>详情</summary><small className={styles.originalName}>{item.fileName}</small><small>{item.source === 'generated' ? '生成' : item.source === 'uploaded' ? '上传' : '图集'}{item.width && item.height ? ` · ${item.width} × ${item.height}` : ''} · <RelativeTime value={item.createdAt} /></small></details>
             </div>
           </article>; })}</div>
-          {loading && <div className={styles.empty} role="status">正在读取素材</div>}{!loading && !error && !resultPages.navigationIssue && loadedFilter === filterKey && !items.length && <div className={styles.empty}>{prefs.view === 'recent' ? '本机还没有符合筛选的最近选用素材' : '没有符合筛选的可用素材'}</div>}
+          {loading && <div className={styles.empty} role="status">正在读取素材</div>}{!loading && !directoryError && !resultPages.navigationIssue && loadedFilter === filterKey && !items.length && <div className={styles.empty}>{prefs.view === 'recent' ? '本机还没有符合筛选的最近选用素材' : '没有符合筛选的可用素材'}</div>}
           <div className={styles.more}><span>{loadedFilter === filterKey ? `${total} 个素材` : loading ? '正在读取目录' : '目录尚未读取成功'}</span><nav className={styles.pagination} aria-label="素材分页">
             <button type="button" title="回到第一页" aria-label="回到第一页素材" disabled={loading || busy || (!resultPages.start && !resultPages.restoring)} onClick={resultPages.reset}><ChevronFirst size={17} /></button>
-            <button type="button" title="上一页" aria-label="上一页素材" disabled={!resultPages.start || loading || busy || (resultPages.restoring && !error && !resultPages.navigationIssue)} onClick={resultPages.previous}><ChevronLeft size={17} /></button>
-            <span role="status">第 {resultPages.page}{resultPages.pages === null ? ' 页，仍有更多' : ` / ${resultPages.pages} 页`}{resultPages.restoring && !resultPages.navigationIssue && !error ? '，正在读取目标页' : ''}</span>
+            <button type="button" title="上一页" aria-label="上一页素材" disabled={!resultPages.start || loading || busy || (resultPages.restoring && !directoryError && !resultPages.navigationIssue)} onClick={resultPages.previous}><ChevronLeft size={17} /></button>
+            <span role="status">第 {resultPages.page}{resultPages.pages === null ? ' 页，仍有更多' : ` / ${resultPages.pages} 页`}{resultPages.restoring && !resultPages.navigationIssue && !directoryError ? '，正在读取目标页' : ''}</span>
             <button type="button" title="下一页" aria-label="下一页素材" disabled={!resultPages.canNext || loading || busy || resultPages.restoring} onClick={resultPages.next}><ChevronRight size={17} /></button>
             <button type="button" title="最后一页" aria-label="最后一页素材" disabled={!resultPages.canLast || loading || busy || resultPages.restoring} onClick={resultPages.last}><ChevronLast size={17} /></button>
           </nav></div>

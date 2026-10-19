@@ -2,8 +2,8 @@ import packageInfo from '../../package.json';
 import { PRICING_ADMIN_WRITES_ENABLED } from './pricing/build-mode';
 
 export const release = { version: packageInfo.version, channel: 'production', summary: PRICING_ADMIN_WRITES_ENABLED
-  ? '费率设置更精简，可统一换算或单独调整，并查看实际扣点变化。图片和视频按本次规格报价，已有任务保持原合同。'
-  : '费率设置暂时维护，已保存的价格和原任务保持不变，不会自动调整价格。' };
+  ? '修复图片上传不可用的问题，失败原因会保留在对应文件旁；原上传结果不确定时只核对原请求。已有素材和任务保持不变。'
+  : '图片上传修复已保留。费率设置暂时维护，已保存的价格和原任务保持不变，不会自动调整价格。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
