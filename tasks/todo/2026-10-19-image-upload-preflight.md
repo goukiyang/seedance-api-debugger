@@ -1,10 +1,11 @@
 # 图片上传与生成问题前置工单
 
-文档 v1.0.0；2026-10-19；项目 `video-api-debugger`，正式根 `/Volumes/Data/Projects/video-api-debugger`。本单仅调查、设计和归档，不授权实施或恢复暂停的发布。用户最新要求包括此前撤回的粘贴反馈及“现在好像上传图片都会出错”。
+文档 v1.0.1；2026-10-19；项目 `video-api-debugger`，正式根 `/Volumes/Data/Projects/video-api-debugger`。本单仅调查、设计和归档，不授权实施或恢复暂停的发布。用户最新要求包括此前撤回的粘贴反馈及“现在好像上传图片都会出错”，并继续查清代码层根因。
 
 | 编号 | 任务 | 完成标准 | 状态 |
 | --- | --- | --- | --- |
 | PRE01 | 汇总前述问题（含粘贴报错）并完成前置调查 | 原反馈、根因证据、修改位置、方案和验收条件齐全，存入项目固定工单及索引 | 已完成，仅前置工单，未实施 |
+| ROOT01 | 上传故障代码级根因核查 | 明确触发条件、首个失败点、状态残留及受影响入口，有原代码和最小诊断证据 | 已完成；代码链与隔离诊断有证，未实施 |
 
 ## 1. 结论与范围
 
@@ -63,6 +64,25 @@
 
 ## 3. 已选最小方案与具体实施落点
 
+### ROOT01 代码级追加核查（2026-10-19）
+
+本节补强§2，不替代历史原证。10:11–10:14 UTC（当地03:11–03:14）生产只读取证及隔离诊断完成，运行源仍2a。确定不是粘贴专属，也不是凭报错文字猜原因；以下行号均为线上2a源码，不用本地候选行号冒充。
+
+1. **引入点**：80d5的 `img-vis-release.mjs:103–109` 将各storage子项接成软链接，包括verified-uploads；§2.1的prepare收据及链接ctime互相吻合。当前2a复用该布局，费率业务不是引入点。此前构建/进程健康不覆盖真实上传目录合同；未来只在现有候选准备检查中补这项，不扩大为发布平台重建。
+2. **首个失败点**：`src/lib/assets/verified-upload.ts:45–55` 的 `privateUploadDirectory` 通过数据盘/容量检查后，对leaf使用lstat，软链接不是允许的真目录，抛 `UPLOAD_PRIVATE_DIRECTORY_INVALID`/503。线上Node20原函数体读取真实FS也得到同一错误；唯一替代是把mkdir换成确认既有目录存在，避免生产写入，其他真实路径/权限/容量读取保持。不是原图解码、上传字节或供应商出图阶段失败。
+3. **残留原因**：`src/app/api/assets/upload/route.ts:219,222–223` 先receiving→writing，再清空局部receiving，再调用 `site-upload.ts:321`→`storage.ts:188–191`→该helper，失败发生在stageVerifiedUpload之前。catch266–271既不适用503，也已无receiving；`raw-upload-state.ts:90–94`没有writing→notAccepted转移。catch273直接返回VerifiedUploadError，绕过274–290的普通失败日志。因此旧writing残留不能用超时或缺Asset证明安全解锁。
+4. **重试只查询及错误码丢失**：`src/lib/http/file-upload.ts:324–327` 在POST前保存sending；`upload-progress.ts:114–127`将非2xx正文交回；`file-upload.ts:349–355`只特殊处理RAW_UPLOAD_NOT_ACCEPTED，其他错误变为普通Error，仅保message、丢code。下次 `recoverRawUpload:118–146` 查原key，writing得到“原上传仍在处理或结果未知，未重新发送文件。请稍后查询。”。UP02须保留结构化安全code/阶段，不能靠中文字符串分类；未知仍只查原号。
+5. **原因消失**：`ResourceLibraryPicker.tsx:327,331–332`保存最后一次失败文字并增加目录epoch；effect216因epoch改变清空同一个error；失败行487只留文件名/按钮。独立执行原上传回调再执行原目录effect，观测error从“上传私有目录不可用”变空，failedFiles仍1。说明真实服务错误被共享状态覆盖，不是用途notice代表上传错误。
+
+新增证据与可重复条件：
+
+- [线上原函数只读诊断](../../docs/materials/2026-10-19-image-upload-preflight/root01-live-directory.json)及[脚本](../../docs/materials/2026-10-19-image-upload-preflight/root01-live-directory.mjs)：10:11:07Z，Node20.20.2，原helper SHA `60ed2387674eb2789f220264716cf029d0438bf36095d64e76def94d75da509e`，实际503。生产写、HTTP及DB操作均0。
+- [历史访问日志脱敏投影](../../docs/materials/2026-10-19-image-upload-preflight/root01-access-log.json)及[只读脚本](../../docs/materials/2026-10-19-image-upload-preflight/root01-access-log.py)：08:23:49Z两次upload-ticket返回200，真正POST `/api/assets/upload` 返回503、正文121字节。只投影窄时间窗、路径、状态和长度，无IP/查询参数/身份；与§2.2原请求仅按时间吻合，不能宣称日志本身带账号或精确绑定截图。原响应正文仍缺失。
+- [原代码隔离全链诊断](../../docs/materials/2026-10-19-image-upload-preflight/root01-original-chain.json)及[脚本](../../docs/materials/2026-10-19-image-upload-preflight/root01-original-chain.mjs)：使用Git2a原helper、raw状态模块、storage/site-upload、raw路由、客户端上传/恢复和picker回调；临时真实FS对照中，0700真目录通过，软链接目录503。内存Prisma/CAS、合成身份/File/sessionStorage与直接路由替代网络；数据库prepared→receiving→writing，返回503/121字节，0文件stage/0失败日志；客户端code为null、浏览器sending；再次恢复1GET，合计仅1POST，没有重发。picker回调错误被目录effect清空。7个原源SHA见JSON，storage/site-upload/file-upload又在真实2a服务器sha256sum核同。原函数未改写逻辑，但不是生产完整上传、真实鉴权/图片解码或浏览器DOM验收；本机Node22/macOS、线上Node20/Linux差异由独立线上目录诊断覆盖关键拒绝点，不泛化全部链已在生产执行。
+- 初始诊断夹具曾因macOS `/var`到`/private/var`真实路径差异失败，原错误保留 `root01-diagnostic-initial-failure.txt`；仅修夹具根路径规范化，未改业务函数。成功证据另存，不覆盖失败、不把夹具失败写成产品故障。
+
+结论：共享新文件落地故障及后续writing/错误丢失链已定位到代码，正式修复落点仍UP01/UP02，旧请求保护UP03不变。新增历史503证据不补造原HTTP正文，也不证明三笔生成任务的供应商内部原因。保持本轮0生产写、0真实上传、0重发、0生成/付费、0部署；业务问题尚未修复。
+
 优先UP01/UP02修复上传；GEN01/GEN02可以另批，复用已完成TRACE候选，不与上传故障绑定，不以“等费率”要求重做。RATE01目前确已发布，但当前请求仍只有前置工单。
 
 | 工作包 | 修改点（项目根下真实路径） | 选定处理与不变项 |
@@ -110,7 +130,7 @@ GEN01/GEN02若获后续实施授权，应比较实际新源与f5d/ae729，只合
 | 文件落点、依赖、工程/手验及回退 | §3–4 | 已完成 |
 | 真实上传/生成/收费/新发布 | 当前只是前置阶段；不作为本轮完成证据 | 不适用，未执行 |
 | 原截图HTTP原响应/供应商内部日志 | 已穷尽原页及现有只读路线；缺失明确记录，不影响已证共享路径和既有本站修复设计，不据此声称历史逐笔归因 | 已知证据限制，不伪造补齐 |
-| 附件/固定todo/资料索引 | 本单§6已归正式根，正文12个本地链接均存在、两JSON可解析、原图复制SHA一致；私有资料不推公开，正文/固定入口聚焦文档提交 | 已完成 |
+| 附件/固定todo/资料索引 | 本单§6已归正式根，ROOT01追加后正文18个本地链接均存在、5个JSON可解析、原图复制SHA一致；私有资料不推公开，正文/固定入口聚焦文档提交 | 已完成 |
 
 守门员等价纠正：这是“前置调查＋工单归档”，而非general闲聊或继续实施；本轮文档L0、生产只读证据按敏感信息最小化；未来UP01涉及共享文件/身份保护须按其实际风险单独执行。当前不调用部署/验收动作。Graphify没有已有可复用图，精确Git对象/rg足以定位，不新建全库图；Jev当前不可调用，未启用或外发文字。未因技能扩阶段。没有把目录问题升级成重建架构。
 
@@ -139,6 +159,6 @@ GEN01/GEN02若获后续实施授权，应比较实际新源与f5d/ae729，只合
 整批完成后统一内置工程检查与候选构建；功能由用户手验。真实上传/收费/浏览器测试另循实际授权。
 GEN01/GEN02复用既有未发布f5d/ae729设计及实现，不重写，允许继续暂停，不与上传批次捆绑。
 启动前仅复核证据后的真实源/布局变化；不得拿旧分支覆盖当前站，不迁移shared storage、不移除root+i/RATE屏障，不复用过期批准或回旧writer。若这些边界不成立即停止相关发布，保护原运行站。
-附件：正式根docs/materials/2026-10-19-image-upload-preflight/内原PNG、live-upload-evidence.json、只读采集脚本、原函数诊断脚本/JSON；历史docs/materials/2026-10-17-image-content-incident/inc24/内GEN12报告、supplier-reply原Word、code-trace原证和b441暂停候选原件。不得只引用聊天临时图。
+附件：正式根docs/materials/2026-10-19-image-upload-preflight/内原PNG、live-upload-evidence.json、只读采集脚本、原函数诊断脚本/JSON，及ROOT01的root01-live-directory.mjs/json、root01-access-log.py/json、root01-original-chain.mjs/json和初始夹具失败原文；历史docs/materials/2026-10-17-image-content-incident/inc24/内GEN12报告、supplier-reply原Word、code-trace原证和b441暂停候选原件。不得只引用聊天临时图。
 回执：实际修改/构建与部署分层，写已部署待用户手验或明确未部署；旧未知与三笔供应商内部原因仍未知，不冒已恢复/已查明。
 ```
