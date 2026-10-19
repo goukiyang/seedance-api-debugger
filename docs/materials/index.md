@@ -1,5 +1,9 @@
 # 项目资料索引
 
+## 高清全链路可靠性实施（2026-10-19）
+
+用户已授权同一[H01–H10完整原单 v1.0.1](../../tasks/todo/2026-10-18-hd-chain-reliability.md)，不缩为目录修补。正式根私有`2026-10-18-hd-chain-reliability/implementation/`保存本轮鲜运行、真实两根、隔离工程及发布材料；`execution-fresh.json`为17:39–17:43Z摘要，`legacy-ready-inventory-20261019.json`为18:23:59Z明确60条旧ready原清单/来源身份只读盘点，`verification-r01/`保首轮原源与失败回执。显示23/登记4/admin5与FS8离线检查通过；Mac旧25/new13及类型有界超时均未冒通过，Linux20完整门尚待运行。生产后来已升级53eb/v0.99.1，保其MV-FLASH增量；原图不上传、不重编码，TRACE/GEN暂停，无本批生产写/收费调用或新增用户媒体附件。
+
 ## MV13–MV16 3D多视图设置与流畅调帧（2026-10-19）
 
 当前发布收口：五项MV13–MV17已部署v0.98.0／058cc070／BUILD9jE1upB8dBEzxH2oF2C8i，待用户手验。正式根同主题`mv13-16/9e54cb26-6124-4e86-a692-6de347201c08/`中的deployment-closure、integrated-review、unified-verification、两build原件、release-evidence-final及独立multiview-target-public-proof为当前证据。基础/定价9资源与多视图8资源分层核同，私有不推公开；原失败及inline附件缺口保留。[原单§15.6](../../tasks/todo/2026-10-17-multiview-instant-frame-workbench.md#156-mv13mv17-保护部署收口2026-10-19)。

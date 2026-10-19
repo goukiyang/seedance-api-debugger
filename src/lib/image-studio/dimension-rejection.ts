@@ -11,6 +11,7 @@ import type { CreditFreezeAllocation } from '@/lib/credits/policy';
 import { prepareStudioOutput } from './output';
 import { studioDimensionMismatch, studioDimensionMismatchNotice, studioOutputFormat } from './dimension-mismatch';
 import { publicPricingTaskState } from './pricing-state';
+import { registerCommittedStudioHd } from '@/lib/media/hd-registration';
 
 const hash = (value: Buffer | string) => createHash('sha256').update(value).digest('hex');
 export function studioTaskBeforeHash(task: ImageStudioTask) {
@@ -164,7 +165,7 @@ export async function finishRejectedStudioDimensions(task: ImageStudioTask, orig
     validation, requestId: request.localRequestId, upstreamRequestId: request.upstreamRequestId,
     providerTaskId: asyncReceipt?.providerTaskId, responseStatus: request.status, returnedAt: request.returnedAt,
     ...(repair ? { repairExpectedBefore: repair.taskBeforeSha256 } : {}) };
-  return prisma.$transaction(async tx => {
+  const finished = await prisma.$transaction(async tx => {
     let current = await tx.imageStudioTask.findUnique({ where: { id: task.id } });
     if (!current || current.status !== task.status || current.owner_id !== task.owner_id
       || current.fingerprint !== task.fingerprint || current.snapshot_json !== task.snapshot_json
@@ -200,6 +201,10 @@ export async function finishRejectedStudioDimensions(task: ImageStudioTask, orig
     if (!finished) throw Error('dimension_rejection_settlement_lease_lost');
     return true;
   }, { timeout: 15000 });
+  // finishStudioTask above participates in this outer transaction. Await its
+  // commit before querying the retained failed/uncertain output for HD.
+  if (finished) await registerCommittedStudioHd(task.id);
+  return finished;
 }
 
 async function readPreservedOriginal(taskId: string, digest: string, expectedBytes: number, extension = 'png') {

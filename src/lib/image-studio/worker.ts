@@ -23,6 +23,7 @@ import { claimStudioAsyncRecovery, deferStudioAsyncRecovery, releaseStudioAsyncS
 import { studioTaskState, studioTaskStates, publicPricingTaskState, studioBillingState, isPricingImageTask } from './pricing-state';
 import { assertPricingImageConsumerReady } from '@/lib/pricing/runtime';
 import { withImagePricing } from '@/lib/pricing/image';
+import { registerCommittedStudioHd } from '@/lib/media/hd-registration';
 
 export async function assertStudioPostAuthorization(task: ImageStudioTask) {
   const current = await prisma.imageStudioTask.findUnique({ where: { id: task.id } });
@@ -138,6 +139,7 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
         requestId: deliveryStatus.requestId, upstreamRequestId: deliveryStatus.upstreamRequestId, validation,
         responseStatus: deliveryStatus.responseStatus, returnedAt: deliveryStatus.returnedAt } } });
     if (finished) {
+      await registerCommittedStudioHd(task.id);
       await discardStudioDelivery(task);
       await completeToolFlowTask(task.id);
     }
@@ -410,6 +412,7 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
         requestId: deliveryStatus.requestId, upstreamRequestId: deliveryStatus.upstreamRequestId, validation,
         responseStatus: deliveryStatus.responseStatus, returnedAt: deliveryStatus.returnedAt } } });
     if (finished) {
+      await registerCommittedStudioHd(task.id);
       await discardStudioDelivery(task);
       await completeToolFlowTask(task.id);
     }

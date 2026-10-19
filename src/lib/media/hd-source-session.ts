@@ -1,6 +1,6 @@
 'use client';
 
-export type HdDescription = { status: 'queued' | 'running' | 'ready' | 'failed' | 'skipped'; sourceVersion: string | null; policy: string; reason?: string; format?: string; mime?: string; bytes?: number; width?: number; height?: number; original?: boolean };
+export type HdDescription = { status: 'queued' | 'running' | 'ready' | 'failed' | 'skipped'; sourceVersion: string | null; policy: string; reason?: string; format?: string; mime?: string; bytes?: number; width?: number; height?: number; original?: boolean; stage?: string; retryAt?: string; errorKind?: string };
 export type HdSourceState = { description?: HdDescription; denied?: boolean; error?: boolean; httpStatus?: number };
 type Listener = (state: HdSourceState) => void;
 type Descriptor = { key: string; account: string; source: string; state: HdSourceState; at: number; retryAfter: number; unchangedPolls: number; generation: number; listeners: Set<Listener>; prefetches: number; controller?: AbortController; pending?: Promise<HdSourceState>; refreshing?: Promise<HdSourceState>; timer?: ReturnType<typeof setTimeout> };
@@ -91,7 +91,7 @@ async function read(entry: Descriptor, readonly: boolean): Promise<HdSourceState
     }
     if (state.error) {
       const notPrepared = status === 409;
-      entry.state = !notPrepared && previous.description?.status === 'ready'
+      entry.state = !notPrepared && previous.description
         ? { ...previous, error: true, httpStatus: state.httpStatus } : { error: true, httpStatus: state.httpStatus };
       if (notPrepared) { entry.at = Date.now(); entry.retryAfter = Date.now() + READY_TTL; }
       else entry.retryAfter = Date.now() + READY_TTL;

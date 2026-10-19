@@ -1,8 +1,8 @@
 'use client';
 
-import { acquireImageRead, beginImageForegroundPreparation, captureImageReadSessionScope, resetImageReadForRetry, setImageReadSessionOwner, type ImageReadResult } from './image-read-session';
+import { acquireImageRead, beginImageForegroundPreparation, captureImageReadSessionScope, hasCachedImagePreview, invalidateImageReadSource, resetImageReadForRetry, setImageReadSessionOwner, type ImageReadResult } from './image-read-session';
 import { acquireHdImageSource, hdImageHint, refreshHdImageSource, type HdDescription, type HdSourceState } from './hd-source-session';
-import { hdDescriptionUsesOriginal, type HdDisplayKind } from './hd-display-policy';
+import { hdDescriptionUsesOriginal, hdDisplayPolicy, type HdDisplayKind } from './hd-display-policy';
 import { imageDisplaySource } from './image-comparison';
 import { versionedHdSource } from '@/lib/hooks/use-hd-image-source';
 
@@ -62,22 +62,22 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
   const unconfirmed = () => {
     if (!active()) return;
     stoppedAutomatic = true;
-    dropRetained();
-    releaseRead?.(); releaseRead = undefined; readSequence++; readKey = '';
-    state = { ...state, readSource: '', descriptorPending: false, error: true,
-      result: { imageSrc: null, unconfirmed: true, progress: { phase: 'unavailable', loadedBytes: 0, message: '图片版本暂时无法确认，请重试或主动查看原图' } } };
-    notify();
+    load('preview', state.description, true, true);
   };
   const load = (kind: HdDisplayKind, description?: HdDescription, fallback = false, descriptorError = false) => {
     if (!active() || kind === 'pending') return;
+    const preview = imageDisplaySource(source, 'preview');
     const readSource = kind === 'hd' ? versionedHdSource(source, 'hd', description?.sourceVersion)
-      : imageDisplaySource(source, kind === 'preview' ? 'preview' : 'original');
-    const version = kind === 'hd' ? description?.sourceVersion || '' : sourceVersion;
+      : kind === 'preview' ? previewOnly || hasCachedImagePreview(account, preview) ? preview : imageDisplaySource(source, 'thumbnail')
+        : imageDisplaySource(source, 'original');
+    // Preview validators belong to their own representation. They must never
+    // be compared with the original/HD descriptor version.
+    const version = kind === 'hd' ? description?.sourceVersion || '' : kind === 'preview' ? '' : sourceVersion;
     const key = JSON.stringify([kind, readSource, version]);
     const previous = state, previousKey = readKey, previousSequence = readSequence;
     state = { ...state, readSource, version, displayKind: kind, fullSize: kind !== 'preview', description,
-      descriptorPending: ['queued', 'running'].includes(description?.status || ''), error: descriptorError, fallback };
-    if (retainedRead && (kind !== 'hd' || !description?.sourceVersion || description.sourceVersion !== retainedRead.descriptorVersion || descriptorError)) dropRetained();
+      descriptorPending: !descriptorError && ['queued', 'running'].includes(description?.status || ''), error: descriptorError, fallback };
+    if (retainedRead && (!description?.sourceVersion || description.sourceVersion !== retainedRead.descriptorVersion)) dropRetained();
     if (key === readKey) { notify(); return; }
     // A later authorized version/representation change becomes foreground
     // again before releasing the old body or allowing any neighbor bytes.
@@ -108,7 +108,7 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
         return;
       }
       if (result.denied) { deny(result.progress.message); return; }
-      if (result.refreshSource || result.unconfirmed) dropRetained();
+      if (result.refreshSource) dropRetained();
       state = { ...state, result }; notify();
       if (result.refreshSource && kind === 'hd') {
         if (recovered409 || recovering) { if (!recovering) unconfirmed(); return; }
@@ -119,8 +119,10 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
           if (fresh.denied) { deny(); return; }
           // A readonly descriptor 409 specifically means no ready derivative;
           // it is not permission to serve cached or unrelated original bytes.
-          if (fresh.httpStatus === 409 || fresh.description && fresh.description.status !== 'ready') {
-            load('original', fresh.description, true, Boolean(fresh.error)); return;
+          if (fresh.httpStatus === 409) { unconfirmed(); return; }
+          if (fresh.description && fresh.description.status !== 'ready') {
+            const display = hdDisplayPolicy({ original: false, previewOnly: false, supported: true, description: fresh.description, error: fresh.error });
+            load(display.kind, fresh.description, !display.pending, Boolean(fresh.error)); return;
           }
           if (!fresh.description) { unconfirmed(); return; }
           const nextKind = hdDescriptionUsesOriginal(fresh.description) ? 'original' : 'hd';
@@ -130,8 +132,10 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
         return;
       }
       if (kind === 'hd' && (result.unconfirmed || result.progress.phase === 'unsupported' || result.progress.phase === 'unavailable')) {
-        load('original', description, true, descriptorError); return;
+        stoppedAutomatic = true;
+        load('preview', description, true, true); endPriority(); return;
       }
+      if (kind === 'preview' && (result.unconfirmed || result.progress.phase === 'unsupported' || result.progress.phase === 'unavailable')) endPriority();
     });
     // Cached callbacks can synchronously select another representation. Do not
     // replace that newer consumer's release with this older subscription.
@@ -143,11 +147,13 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
     if (value.denied) { deny(); return; }
     if (stoppedAutomatic) return;
     const description = value.description;
-    if (description?.status === 'ready') load(hdDescriptionUsesOriginal(description) ? 'original' : 'hd', description, false, Boolean(value.error));
-    else if (description) load('original', description, true, Boolean(value.error));
+    if (description) {
+      const display = hdDisplayPolicy({ original: false, previewOnly: false, supported: true, description, error: value.error });
+      load(display.kind, description, !display.pending && description.status !== 'ready', Boolean(value.error));
+    }
     else if (value.error) {
       if (value.httpStatus === 409) unconfirmed();
-      else load('original', undefined, true, true);
+      else load('preview', undefined, true, true);
     }
   };
   const handle: ImagePreviewPreparation = {
@@ -169,6 +175,9 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
     release: () => { if (!initialLease) return; initialLease = false; if (!listeners.size) dispose(); },
   };
   if (!account || !source) { deny('请先确认登录状态后重新打开图片'); return handle; }
+  // A source downgraded to view-only must evict any former full-image body,
+  // including bodies held by another viewer. The preview then authorizes anew.
+  if (previewOnly) invalidateImageReadSource(source, account);
   releasePriority = beginImageForegroundPreparation(account);
   const descriptionSource = imageDisplaySource(source, 'hd-description');
   const supported = !previewOnly && !original && descriptionSource !== source && !/^(blob:|data:)/i.test(source);

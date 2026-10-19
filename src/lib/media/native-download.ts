@@ -10,6 +10,7 @@ export async function handImageDownloadToBrowser(url: string, fileName: string, 
   const response = await fetch(target, { method: 'HEAD', cache: 'no-store', credentials: 'same-origin', signal: AbortSignal.timeout(15000) });
   if (!isCurrent()) throw new DOMException('已离开当前结果，下载准备已取消', 'AbortError');
   if (!response.ok) {
+    if ([401, 403, 404].includes(response.status)) invalidateImageReadSource(url);
     const value = await response.json().catch(() => null);
     throw Error(value?.error || '下载权限或文件暂时无法确认，请重试');
   }

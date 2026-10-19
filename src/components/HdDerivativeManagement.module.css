@@ -5,6 +5,8 @@
 .state strong { font-size: 1.0625rem; }
 .state span, .times { color: var(--text-secondary); font-size: .875rem; }
 .times { display: grid; gap: 4px; }
+.processing { font-weight: 500; }
+.note { color: var(--text-secondary); }
 .section details { border-top: 1px solid var(--border-color); padding-top: 10px; }
 .section summary { cursor: pointer; width: fit-content; padding: 4px 0; }
 .section summary:focus-visible { outline: 2px solid var(--accent-color, currentColor); outline-offset: 3px; }

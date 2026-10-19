@@ -1,0 +1,245 @@
+// Offline HD backend gates. All data/process fixtures use new private roots;
+// no SQL, provider requests, application service or production path is opened.
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+import { randomUUID } from 'node:crypto';
+import sharp from 'sharp';
+
+async function main() {
+  const applicationRoot = process.cwd();
+  Object.assign(process.env, { NODE_ENV: 'test' });
+  delete process.env.HD_DERIVATIVES_ROOT;
+  const evidenceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'sd2-hd-backend-'));
+  await fs.chmod(evidenceRoot, 0o700);
+  process.env.DATABASE_URL = 'file:' + path.join(evidenceRoot, 'unused-private.db');
+  const core = await import('../src/lib/media/hd-derivatives');
+  const storage = await import('../src/lib/media/hd-storage-root');
+  const runner = await import('../src/lib/media/hd-image-processor');
+  const results: Array<{ name: string; passed: boolean; error?: string }> = [];
+  const safeCapacity = async () => ({ rootFree: 10 * 1024 ** 3, dataFree: 20 * 1024 ** 3,
+    rootReserve: 512000 * 1024, dataReserve: 2 * 1024 ** 3, separateDataMount: true, safe: true });
+  const processJob = (key: string, options: Parameters<typeof core.processHdJob>[2] = {}) => core.processHdJob(key, undefined, {
+    capacity: safeCapacity, processor: (request, processorOptions) => runner.runHdImageProcessor(request, { ...processorOptions, applicationRoot }), ...options,
+  });
+  const check = async (name: string, action: () => Promise<void> | void) => {
+    try { await action(); results.push({ name, passed: true }); }
+    catch (error) { results.push({ name, passed: false, error: error instanceof Error ? error.message : String(error) }); }
+    finally { process.chdir(applicationRoot); delete process.env.HD_DERIVATIVES_ROOT; }
+  };
+  const fixture = async () => {
+    const directory = await fs.mkdtemp(path.join(evidenceRoot, 'case-'));
+    await fs.chmod(directory, 0o700);
+    await fs.mkdir(path.join(directory, 'public/uploads'), { recursive: true });
+    await fs.mkdir(path.join(directory, 'storage/hd-derivatives'), { recursive: true, mode: 0o700 });
+    await fs.mkdir(path.join(directory, 'src/lib/media'), { recursive: true });
+    await fs.copyFile(path.join(applicationRoot, 'src/lib/media/hd-encoder.ts'), path.join(directory, 'src/lib/media/hd-encoder.ts'));
+    process.chdir(directory); return directory;
+  };
+  const image = async (name: string) => {
+    const file = path.join(process.cwd(), 'public/uploads', name + '.png');
+    await sharp({ create: { width: 128, height: 96, channels: 4, background: { r: 45, g: 84, b: 152, alpha: 0.5 } } }).png().toFile(file);
+    return { file, source: '/uploads/' + name + '.png' };
+  };
+  const waitFor = async (condition: () => Promise<boolean>, timeoutMs = 10_000) => {
+    const until = Date.now() + timeoutMs;
+    while (Date.now() < until) { if (await condition()) return; await new Promise(resolve => setTimeout(resolve, 20)); }
+    throw new Error('fixture_condition_timeout');
+  };
+  const exists = (file: string) => fs.stat(file).then(() => true).catch(error => { if (error.code === 'ENOENT') return false; throw error; });
+
+  await check('E01 production resolver requires exact explicit canonical root', () => {
+    const root = storage.HD_CANONICAL_ROOT;
+    for (const value of [undefined, '', '/tmp/hd', root + '/', root + '/..']) {
+      assert.throws(() => storage.resolveHdDirectory({ env: { NODE_ENV: 'production', ...(value === undefined ? {} : { HD_DERIVATIVES_ROOT: value }) } }), /hd_storage_configuration/);
+    }
+    for (const cwd of ['/release/one', '/release/two']) assert.equal(storage.resolveHdDirectory({ cwd, env: { NODE_ENV: 'production', HD_DERIVATIVES_ROOT: root } }), root);
+    assert.equal(storage.hdDataMountRecorded('12 1 8:1 / /data rw - ext4 /dev/data rw'), true);
+    assert.equal(storage.hdDataMountRecorded('12 1 8:1 / /data-pretend rw - ext4 /dev/data rw'), false);
+  });
+  await check('E01 two real release cwd roots reuse the exact ready key and bytes', async () => {
+    const first = await fixture(); const original = await image('same');
+    const fixedRoot = path.join(first, 'storage/hd-derivatives'); process.env.HD_DERIVATIVES_ROOT = fixedRoot;
+    const identity = (await core.hdRequestIdentity(original.source, false))!;
+    const job = (await core.requestHd(original.source, core.HD_PRIORITY.new, false))!;
+    await processJob(job.key);
+    const ready = (await core.readHdJob(job.key))!; assert.equal(ready.status, 'ready');
+    const bytes = await fs.readFile(path.join(fixedRoot, ready.file!));
+    const second = await fs.mkdtemp(path.join(evidenceRoot, 'release-'));
+    await fs.mkdir(path.join(second, 'public'), { recursive: true });
+    await fs.symlink(path.join(first, 'public/uploads'), path.join(second, 'public/uploads'));
+    process.chdir(second);
+    const secondIdentity = (await core.hdRequestIdentity(original.source, false))!;
+    assert.equal(secondIdentity.key, identity.key); assert.equal(secondIdentity.current.file, identity.current.file);
+    assert.equal(core.hdDirectory(), fixedRoot); assert.equal(core.hdWorkerLockPath(), path.join(first, 'storage/hd-worker.lock'));
+    const reused = (await core.requestHd(original.source, core.HD_PRIORITY.viewer, false))!;
+    assert.equal(reused.status, 'ready'); assert.equal(reused.attempts, ready.attempts);
+    assert.deepEqual(await fs.readFile(path.join(fixedRoot, reused.file!)), bytes);
+    await fs.chmod(fixedRoot, 0o777);
+    await assert.rejects(storage.assertHdStorageRoot(), /hd_storage_owner/);
+    await fs.chmod(fixedRoot, 0o700);
+  });
+  await check('E04 viewer upgrades legacy new priority without changing key or numeric semantics', async () => {
+    await fixture(); const original = await image('priority');
+    const initial = (await core.requestHd(original.source, 0, false))!;
+    const viewer = (await core.requestHd(original.source, 1, false))!;
+    assert.equal(viewer.key, initial.key); assert.equal(viewer.priority, 0); assert.equal(viewer.queueRole, 'viewer');
+    assert.equal((await core.requestHd(original.source, 0, false))!.queueRole, 'viewer');
+    const legacy = { ...viewer, queueRole: undefined, priority: 0 };
+    assert.equal(core.hdQueueRole(legacy), 'new');
+    assert.equal(core.hdQueueRole({ ...legacy, priority: 1 }), 'viewer');
+    assert.equal(core.hdQueueRole({ ...legacy, priority: 2 }), 'historical');
+    assert.equal(core.hdQueueRole({ ...legacy, priority: 3 }), 'historical');
+  });
+  await check('E02 unexplained final file is preserved and blocks a second publication', async () => {
+    await fixture(); const original = await image('conflict'), job = (await core.requestHd(original.source, 0, false))!;
+    const file = path.join(core.hdDirectory(), job.key + '.webp'), preserved = Buffer.from('unexplained existing output');
+    await fs.writeFile(file, preserved, { mode: 0o600 });
+    await assert.rejects(processJob(job.key), /hd_publish_unknown/);
+    assert.deepEqual(await fs.readFile(file), preserved); assert.equal((await core.readHdJob(job.key))!.attempts, 0);
+    assert.equal((await core.hdControl()).state, 'hard_pause');
+  });
+  await check('E04 continuous viewer/new/history arrivals all receive bounded opportunities', () => {
+    const base = { source: '/uploads/fixture.png', version: 'v', policy: core.HD_POLICY, status: 'queued' as const,
+      attempts: 0, preserveText: false, updatedAt: new Date().toISOString() };
+    const jobs = [{ ...base, key: 'a'.repeat(64), priority: 1 }, { ...base, key: 'b'.repeat(64), priority: 0 },
+      { ...base, key: 'c'.repeat(64), priority: 3, batch: 'old' }];
+    let fairness = { consecutiveViewer: 0, consecutiveForeground: 0 };
+    const last: Record<string, number> = { viewer: 0, new: 0, historical: 0 };
+    const counts: Record<string, number> = { viewer: 0, new: 0, historical: 0 };
+    for (let opportunity = 1; opportunity <= 60; opportunity++) {
+      const job = core.selectHdJob(jobs, fairness, 'old')!;
+      const role = core.hdQueueRole(job); counts[role]++; last[role] = opportunity;
+      fairness = core.nextHdFairness(fairness, job);
+      for (const role of Object.keys(last)) assert.ok(opportunity - last[role] <= 5, role + ' starved');
+    }
+    assert.ok(counts.viewer > counts.new); assert.ok(counts.new > 0); assert.ok(counts.historical >= 10);
+  });
+  await check('E05 actual live manifest lease returns contention without attempt or global pause', async () => {
+    await fixture(); const original = await image('lease'); const job = (await core.requestHd(original.source, 0, false))!;
+    let entered!: () => void, release!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const lease = core.withHdLease(job.key, async () => { entered(); await gate; });
+    await started;
+    assert.equal(await processJob(job.key), null); assert.equal((await core.readHdJob(job.key))!.attempts, 0);
+    assert.equal((await core.hdControl()).paused, false);
+    release(); await lease; await processJob(job.key); assert.equal((await core.readHdJob(job.key))!.status, 'ready');
+  });
+  const hangingScript = path.join(evidenceRoot, 'hang-with-descendant.cjs');
+  await fs.writeFile(hangingScript, `const {spawn}=require('node:child_process');process.on('disconnect',()=>process.exit(0));process.once('message',r=>{spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});process.send({protocol:r.protocol,type:'stage',key:r.key,executionId:r.executionId,sourceVersion:r.sourceVersion,stage:'reading'});setInterval(()=>{},1000);});`, { mode: 0o600 });
+  const shortLimits = { ...runner.HD_IMAGE_LIMITS, readingMs: 750, wallMs: 5_000, terminateMs: 1_000 };
+  await check('E06 timeout proves child/group exit; three bounded attempts do not stop next image', async () => {
+    await fixture(); const original = await image('timeout'), good = await image('after-timeout');
+    const job = (await core.requestHd(original.source, 0, false))!;
+    let clock = Date.now(); const executions: Array<Parameters<typeof runner.assertHdExecutionExited>[0]> = [];
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await processJob(job.key, { clock: () => clock, processor: (request, options) => runner.runHdImageProcessor(request, {
+        ...options, applicationRoot, script: hangingScript, limits: shortLimits,
+        onSpawn: async identity => { executions.push(identity); await options?.onSpawn?.(identity); },
+      }) });
+      const result = (await core.readHdJob(job.key))!;
+      assert.equal(result.attempts, attempt); assert.equal(result.errorKind, 'encode_timeout'); assert.ok(result.executionExitedAt);
+      assert.equal(result.status, attempt < 3 ? 'queued' : 'failed'); assert.equal((await core.hdControl()).paused, false);
+      if (attempt < 3) { assert.ok(result.retryAt); clock = Date.parse(result.retryAt!) + 1; }
+    }
+    assert.equal(new Set(executions.map(value => value.pid)).size, 3);
+    for (const execution of executions) await runner.assertHdExecutionExited(execution);
+    const failed = (await core.readHdJob(job.key))!; assert.equal(core.isHdRetryableFailure(failed), true);
+    await processJob(job.key); assert.equal((await core.readHdJob(job.key))!.attempts, 3);
+    const next = (await core.requestHd(good.source, 0, false))!;
+    await processJob(next.key); assert.equal((await core.readHdJob(next.key))!.status, 'ready');
+  });
+  await check('E06 mismatched execution response is killed and hard protected', async () => {
+    await fixture(); const original = await image('wrong-generation'), job = (await core.requestHd(original.source, 0, false))!;
+    const script = path.join(evidenceRoot, 'wrong-generation.cjs');
+    await fs.writeFile(script, `process.once('message',r=>{process.send({protocol:r.protocol,type:'stage',key:r.key,executionId:'00000000-0000-0000-0000-000000000000',sourceVersion:r.sourceVersion,stage:'reading'});setInterval(()=>{},1000)});`, { mode: 0o600 });
+    await processJob(job.key, { processor: (request, options) => runner.runHdImageProcessor(request, { ...options, applicationRoot, script, limits: shortLimits }) });
+    assert.equal((await core.readHdJob(job.key))!.status, 'failed'); assert.equal((await core.hdControl()).state, 'hard_pause');
+    await assert.rejects(core.retryHdKey(job.key, job.version), /hd_hard_pause_requires_review/);
+  });
+  await check('E06 supervisor crash disconnects actual child; PID/group exit is confirmed', async () => {
+    const directory = await fixture(); const original = await image('orphan');
+    const identity = (await core.hdRequestIdentity(original.source, false))!;
+    const workDirectory = path.join(directory, 'private-child'); await fs.mkdir(workDirectory, { mode: 0o700 });
+    const identityFile = path.join(directory, 'child-identity.json'), prepared = path.join(directory, 'prepared');
+    const holder = path.join(evidenceRoot, 'holder.mts');
+    const request = { protocol: runner.HD_IMAGE_PROTOCOL, key: identity.key, executionId: randomUUID(), sourceVersion: identity.current.version,
+      inputFile: identity.current.file, workDirectory, preserveText: false };
+    await fs.writeFile(holder, `import fs from 'node:fs/promises';import {runHdImageProcessor} from ${JSON.stringify(pathToFileURL(path.join(applicationRoot, 'src/lib/media/hd-image-processor.ts')).href)};await runHdImageProcessor(${JSON.stringify(request)},{applicationRoot:${JSON.stringify(applicationRoot)},onSpawn:async i=>{await fs.writeFile(${JSON.stringify(identityFile)},JSON.stringify(i))},onPrepared:async()=>{await fs.writeFile(${JSON.stringify(prepared)},'prepared');return new Promise(()=>{})}});`, { mode: 0o600 });
+    const loader = createRequire(path.join(applicationRoot, 'package.json')).resolve('tsx');
+    const parent = spawn(process.execPath, ['--import', loader, holder], { stdio: 'ignore' });
+    const exited = new Promise<void>((resolve, reject) => { parent.once('error', reject); parent.once('exit', () => resolve()); });
+    try {
+      await waitFor(() => exists(prepared));
+      const child = JSON.parse(await fs.readFile(identityFile, 'utf8'));
+      parent.kill('SIGKILL'); await exited;
+      // Passive exit proof first: assertHdExecutionExited may terminate a known
+      // old Linux group, so it alone would not prove the disconnect handler.
+      await waitFor(async () => {
+        try {
+          process.kill(child.pid, 0);
+          if (process.platform !== 'linux') return false;
+          const stat = await fs.readFile('/proc/' + child.pid + '/stat', 'utf8');
+          return ['Z', 'X'].includes(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0]);
+        } catch (error) { return ['ESRCH', 'ENOENT'].includes((error as NodeJS.ErrnoException).code || ''); }
+      });
+      await runner.assertHdExecutionExited(child);
+      assert.equal(await exists(path.join(workDirectory, 'output.avif')), false);
+      assert.equal(await exists(path.join(workDirectory, 'output.webp')), false);
+    } finally { if (parent.exitCode === null && parent.signalCode === null) parent.kill('SIGKILL'); await exited; }
+  });
+  await check('E07 fresh source change before publication rejects old output without rewriting source', async () => {
+    await fixture(); const original = await image('changed'); const job = (await core.requestHd(original.source, 0, false))!;
+    const bytes = await fs.readFile(original.file);
+    await processJob(job.key, { beforePublish: async () => { await new Promise(resolve => setTimeout(resolve, 5)); await fs.writeFile(original.file, bytes); } });
+    const after = (await core.readHdJob(job.key))!; assert.equal(after.status, 'skipped'); assert.equal(after.reason, 'source_changed');
+    assert.equal(await exists(path.join(core.hdDirectory(), job.key + '.webp')), false);
+    assert.deepEqual(await fs.readFile(original.file), bytes); assert.equal((await core.hdControl()).paused, false);
+  });
+  await check('E07 ready-before-receipt-clear recovers once and persists verification process identity', async () => {
+    await fixture(); const original = await image('ready-receipt'), job = (await core.requestHd(original.source, 0, false))!;
+    await processJob(job.key);
+    const ready = (await core.readHdJob(job.key))!; assert.equal(ready.status, 'ready');
+    const file = path.join(core.hdDirectory(), ready.file!), bytes = await fs.readFile(file);
+    const receipt = path.join(core.hdDirectory(), job.key + '.publish.json');
+    await core.atomicHdJson(receipt, { protocol: 'hd-publish-v2', executionId: ready.executionId, sourceVersion: ready.version, job: ready, temporary: '' });
+    const selected = core.selectHdJob(await core.listHdJobs(), 0, 'old')!;
+    assert.equal(selected.key, ready.key); assert.equal(selected.publicationPending, true);
+    let observedVerification = false;
+    await processJob(job.key, { capacity: async () => { throw new Error('must-not-reencode'); }, processor: (request, options) => runner.runHdImageProcessor(request, {
+      ...options, applicationRoot, onSpawn: async identity => {
+        await options?.onSpawn?.(identity);
+        const durable = (await core.readHdJob(job.key))!;
+        assert.equal(durable.processor?.pid, identity.pid); assert.equal(durable.processor?.startTicks, identity.startTicks);
+        assert.equal(durable.processor?.executionId, request.executionId); assert.equal(durable.executionId, ready.executionId);
+        assert.notEqual(durable.processor?.executionId, durable.executionId); observedVerification = true;
+      },
+    }) });
+    assert.equal(observedVerification, true); assert.equal((await core.readHdJob(job.key))!.attempts, ready.attempts);
+    assert.equal(await exists(receipt), false); assert.deepEqual(await fs.readFile(file), bytes);
+  });
+  await check('E08 unknown process identity never authorizes kill or another encoder', async () => {
+    await assert.rejects(runner.assertHdExecutionExited({ pid: process.pid, groupId: process.pid, host: os.hostname(), startTicks: '0', executionId: randomUUID() }), /hd_child_exit_unknown/);
+    assert.equal(process.kill(process.pid, 0), true);
+  });
+  await check('E08 source boundary is global protection and never publishes a derivative', async () => {
+    const directory = await fixture(); const original = await image('outside'); const job = (await core.requestHd(original.source, 0, false))!;
+    const outside = path.join(directory, 'outside.png'); await fs.copyFile(original.file, outside);
+    await fs.unlink(original.file); await fs.symlink(outside, original.file);
+    await processJob(job.key);
+    assert.equal((await core.readHdJob(job.key))!.status, 'failed'); assert.equal((await core.hdControl()).state, 'hard_pause');
+    assert.equal(await exists(path.join(core.hdDirectory(), job.key + '.publish.json')), false);
+  });
+  process.chdir(applicationRoot);
+  await (await import('../src/lib/media/hd-readonly-db')).hdReadonlyDb.$disconnect();
+  const summary = { completed: true, checks: results.map(value => value.name), results, total: results.length,
+    passed: results.filter(value => value.passed).length, evidenceRoot, productionWrites: 0, providerRequests: 0, dbQueries: 0 };
+  await fs.writeFile(path.join(evidenceRoot, 'results.json'), JSON.stringify(summary, null, 2), { mode: 0o600 });
+  console.log(JSON.stringify(summary)); process.exitCode = summary.passed === summary.total ? 0 : 1;
+}
+main().catch(error => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });

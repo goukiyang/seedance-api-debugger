@@ -5,6 +5,7 @@ import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFil
 import path from 'node:path';
 import { readPricingFixtureInputs } from './pricing-fixture-input.mjs';
 import { MULTIVIEW_SETTINGS_FIXTURE_SOURCES } from './multiview-settings-fixture-inputs.mjs';
+import { HD_CHAIN_CHECKS, HD_CHAIN_CHILDREN, HD_CHAIN_FIXTURE_SOURCES } from './hd-chain-fixture-inputs.mjs';
 
 // The build and the protected release controller use the same offline gate.
 // No application database, credentials, provider or browser is accepted here.
@@ -97,6 +98,8 @@ fixtures.push({ file: 'scripts/multiview-settings-batch-engineering.mjs', schema
   marker: 'Multiview settings engineering receipt: ', checks: ['saved_settings_permissions_snapshots_and_timing',
     'frame_settings_keep_media_and_layout_private', 'preview_atlas_loop_exact_output_contract',
     'same_work_identity_baseline_and_explicit_original_save'], sources: MULTIVIEW_SETTINGS_FIXTURE_SOURCES });
+fixtures.push({ file: 'scripts/hd-chain-engineering.mjs', schema: 'hd-chain-engineering.v1',
+  marker: 'HD chain engineering receipt: ', checks: HD_CHAIN_CHECKS, sources: HD_CHAIN_FIXTURE_SOURCES });
 const pricingGate = 'scripts/check-pricing-policy.mjs';
 const sourceFiles = ['package.json', entry, pricingGate, ...fixtures.flatMap(fixture => [fixture.file, ...fixture.sources])];
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -161,6 +164,26 @@ function validateFixture(fixture, file, runId, startedAt, finishedAt, sourceSha2
     }
   } else if (fixture.schema === 'image-async-recovery-engineering.v1') {
     assert.equal(value.mode, 'verify', 'An old-source counterexample is not a completed candidate check');
+  } else if (fixture.schema === 'hd-chain-engineering.v1') {
+    assert.equal(value.candidateRoot, root);
+    assert.equal(value.productionHdRootPassedToFixtures, false);
+    assert.deepEqual(value.outcomes?.map(item => item.file), HD_CHAIN_CHILDREN);
+    for (let index = 0; index < value.outcomes.length; index++) {
+      const item = value.outcomes[index];
+      assert.equal(item.check, HD_CHAIN_CHECKS[index]); assert.equal(item.completed, true);
+      assert.equal(item.exitCode, 0); assert.equal(item.signal, null); assert.equal(item.failure, null);
+      const file = path.resolve(item.log), stat = lstatSync(file);
+      assert.ok(file.startsWith(path.join(root, '.role-tests') + path.sep));
+      assert.equal(realpathSync(file), file);
+      assert.ok(stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1 && stat.size > 0 && stat.size <= 4 * 1024 * 1024);
+      assert.equal(stat.mode & 0o077, 0);
+      if (typeof process.getuid === 'function') assert.equal(stat.uid, process.getuid());
+      assert.equal(hash(readFileSync(file)), item.logSha256);
+      const safety = readPrivateReceipt(item.safetyReceipt);
+      assert.equal(safety.sha256, item.safetySha256);
+      for (const key of ['forbiddenCalls', 'refusedWrites', 'productionWrites', 'paidRequests', 'browserRuns']) assert.equal(safety.value[key], 0);
+      assert.equal(safety.value.hdRootAtImport, null);
+    }
   }
   return receipt.sha256;
 }
@@ -200,9 +223,14 @@ function run() {
   mkdirSync(scratch, { recursive: true, mode: 0o700 });
   const directory = mkdtempSync(path.join(scratch, 'image-recovery-gate-'));
   const recorded = [], failures = [], outcomes = [];
+  const fixtureEnvironment = { ...process.env, IMAGE_RECOVERY_GATE_RUN_ID: runId };
+  // No isolated child may inherit the runtime canonical HD root. Existing
+  // image/fee fixtures now also execute the post-commit registration hook.
+  delete fixtureEnvironment.HD_DERIVATIVES_ROOT;
+  delete fixtureEnvironment.HD_DERIVATIVES_DIR;
   for (const fixture of fixtures) {
     const result = spawnSync(process.execPath, ['--import', 'tsx', path.join(root, fixture.file)], {
-      cwd: root, env: { ...process.env, IMAGE_RECOVERY_GATE_RUN_ID: runId },
+      cwd: root, env: fixtureEnvironment,
       encoding: 'utf8', timeout: 180_000, maxBuffer: 2 * 1024 * 1024,
     });
     // Preserve actual child evidence, including a nonzero exit, without accepting
@@ -226,7 +254,7 @@ function run() {
       outcomes.push({ file: fixture.file, completed: false, log });
     }
   }
-  const pricing = spawnSync(process.execPath, [pricingGate], { cwd: root, env: process.env,
+  const pricing = spawnSync(process.execPath, [pricingGate], { cwd: root, env: fixtureEnvironment,
     encoding: 'utf8', timeout: 660000, maxBuffer: 4 * 1024 * 1024 });
   const pricingLog = path.join(directory, 'pricing-policy-gate.log');
   writeFileSync(pricingLog, (pricing.stdout || '') + (pricing.stderr || ''), { mode: 0o600, flag: 'wx' });

@@ -10,11 +10,17 @@ import { HD_CONTROL_PROTOCOL, HD_RESOURCE_POLICY, classifyHdResources, hdResourc
 
 async function main() {
 const applicationRoot = process.cwd();
+Object.assign(process.env, { NODE_ENV: 'test' });
+delete process.env.HD_DERIVATIVES_ROOT;
 const evidenceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'sd2-hd-stability-'));
 await fs.chmod(evidenceRoot, 0o700);
 // Set before importing the readonly client. The suite does not execute any SQL.
 process.env.DATABASE_URL = `file:${path.join(evidenceRoot, 'unused-private.db')}`;
-const core = await import('../src/lib/media/hd-derivatives');
+const moduleCore = await import('../src/lib/media/hd-derivatives');
+const runner = await import('../src/lib/media/hd-image-processor');
+const core = { ...moduleCore, processHdJob: (...args: Parameters<typeof moduleCore.processHdJob>) => moduleCore.processHdJob(args[0], args[1], {
+  ...args[2], processor: (request, options) => runner.runHdImageProcessor(request, { ...options, applicationRoot }),
+}) };
 const discovery = await import('../src/lib/media/hd-discovery');
 const results: Array<{ name: string; passed: boolean; error?: string; directory?: string }> = [];
 let clock = Date.now();
@@ -39,6 +45,7 @@ async function inPrivateRoot(name: string, run: () => Promise<void>) {
   await fs.mkdir(path.join(directory, 'storage/hd-derivatives'), { recursive: true, mode: 0o700 });
   await fs.mkdir(path.join(directory, 'src/lib/media'), { recursive: true });
   await fs.copyFile(path.join(applicationRoot, 'src/lib/media/hd-derivatives.ts'), path.join(directory, 'src/lib/media/hd-derivatives.ts'));
+  await fs.copyFile(path.join(applicationRoot, 'src/lib/media/hd-encoder.ts'), path.join(directory, 'src/lib/media/hd-encoder.ts'));
   process.chdir(directory); clock = Date.now();
   await check(name, run);
   results[results.length - 1].directory = directory;
@@ -333,10 +340,10 @@ await inPrivateRoot('legacy discovery boundary replays safely; malformed checkpo
 });
 process.chdir(applicationRoot);
 await (await import('../src/lib/media/hd-readonly-db')).hdReadonlyDb.$disconnect();
-const summary = { results, evidenceRoot, total: results.length, passed: results.filter(result => result.passed).length,
+const summary = { completed: true, checks: results.map(result => result.name), results, evidenceRoot, total: results.length, passed: results.filter(result => result.passed).length,
   productionWrites: 0, providerRequests: 0, dbQueries: 0 };
 await fs.writeFile(path.join(evidenceRoot, 'results.json'), JSON.stringify(summary, null, 2), { mode: 0o600 });
-console.log(JSON.stringify(summary, null, 2));
+console.log(JSON.stringify(summary));
 process.exitCode = results.every(result => result.passed) ? 0 : 1;
 }
 main().catch(error => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });

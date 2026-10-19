@@ -228,9 +228,9 @@ function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, v
     {/* eslint-disable-next-line @next/next/no-img-element */}
     {imageSrc && !blocked && !failed && <img ref={image} key={`preview:${imageIdentity}`} src={imageSrc} alt={alt} className={className} style={{ ...style, opacity: loaded ? 1 : 0 }} draggable={false} data-image-preview-image
       onLoad={event => { const target = event.currentTarget; void (readResult?.decoded ? Promise.resolve() : target.decode()).then(() => { if (currentKeyRef.current === imageIdentity && current?.handle.isCurrent()) setLoadedKey(imageIdentity); }).catch(() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); }); }} onError={() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); }} />}
-    {(!loaded || displayKind === 'original' || state?.fallback || state?.error) && <div className={styles.imageStatus} role="status">
-      <span>{blocked ? readProgress.message || '图片权限或来源不可用' : failed ? (unsupported ? progressLabel : retainedSrc ? '图片未能加载，当前图片保留，请重试' : thumbnailLoaded === thumbnail ? '图片未能加载，缩略图仍可查看，请重试' : '图片未能加载，请重试') : retainedSrc ? `正在读取${displayKind === 'hd' ? '高清' : '图片'}，当前图片保留` : loaded ? `当前为${hdDisplayLabel(displayKind, state?.description, state?.fallback)}` : `${alt} · ${hdDisplayLabel(displayKind, state?.description, state?.fallback)} · ${progressLabel}`}</span>
-      {state?.descriptorPending && !blocked && <span>{retainedSrc ? '正在确认高清版本，当前图片保留' : displayKind === 'pending' ? '正在确认图片版本，先显示小图' : '高清压缩尚未完成，当前读取完整原图'}</span>}
+    {(!loaded || displayKind === 'original' || state?.descriptorPending || state?.fallback || state?.error) && <div className={styles.imageStatus} role="status">
+      <span>{blocked ? readProgress.message || '图片权限或来源不可用' : failed ? (unsupported ? progressLabel : retainedSrc ? '图片未能加载，当前图片保留，请重试' : thumbnailLoaded === thumbnail ? '图片未能加载，缩略图仍可查看，请重试' : '图片未能加载，请重试') : displayKind === 'pending' ? '正在确认高清，先显示预览' : state?.descriptorPending ? '高清准备中，先显示预览' : retainedSrc ? `正在读取${displayKind === 'hd' ? '高清' : '图片'}，当前图片保留` : loaded ? `当前为${hdDisplayLabel(displayKind, state?.description, state?.fallback)}` : `${alt} · ${hdDisplayLabel(displayKind, state?.description, state?.fallback)} · ${progressLabel}`}</span>
+      {state?.fallback && state.description && !state.error && !blocked && <span>{hdAvailabilityLabel(state.description)}</span>}
       {state?.error && !blocked && <span>高清状态暂无法确认，可重试或主动查看原图</span>}
       {failed && !unsupported && readProgress.phase === 'unavailable' && <span>{readProgress.message || '当前来源无法提供读取进度'}</span>}
       {!loaded && !failed && readProgress.phase === 'reading' && readProgress.percent != null && <>
@@ -239,7 +239,7 @@ function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, v
       </>}
       {!loaded && !failed && displaySrc && readProgress.phase === 'reading' && readProgress.percent == null && <span>已读取 {formatImageBytes(readProgress.loadedBytes)}</span>}
       {!loaded && !failed && readProgress.phase === 'decoding' && <span>已读取 {formatImageBytes(readProgress.loadedBytes)}</span>}
-      {(failed || state?.fallback || state?.error) && <button type="button" title="重新加载" aria-label="重新加载图片" onPointerDown={event => event.stopPropagation()} onClick={event => {
+      {(failed || state?.fallback || state?.error) && !blocked && <button type="button" title="重新读取" aria-label="重新读取图片" onPointerDown={event => event.stopPropagation()} onClick={event => {
         event.stopPropagation();
         if (displaySrc) resetImageReadForRetry(displaySrc, account);
         setAttempt(value => value + 1);
@@ -486,12 +486,34 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   }, [portalRoot, comparisonMode, axis]);
 
   function baseSize(side: Side, image = sourcesRef.current[side]): IntrinsicSize {
-    const frame = frames[side], size = image && (thumbnailFrames[imageSourceIdentity(image)] || sizes[imageSourceIdentity(image)] || (image.width && image.height ? { width: image.width, height: image.height } : undefined));
+    const frame = frames[side], size = image && (originalSizes[imageSourceIdentity(image)] || (image.width && image.height ? { width: image.width, height: image.height } : undefined) || thumbnailFrames[imageSourceIdentity(image)] || sizes[imageSourceIdentity(image)]);
     if (!size) return { width: Math.max(1, frame.width - 24), height: Math.max(1, frame.height - 24) };
     const fit = Math.min((frame.width - 24) / size.width, (frame.height - 24) / size.height, 1);
     return { width: Math.max(1, size.width * fit), height: Math.max(1, size.height * fit) };
   }
   const geometryRef = useRef({ frames, baseSize }); geometryRef.current = { frames, baseSize };
+  useEffect(() => {
+    // Representation upgrades retain normalized centres. Pixel/width modes
+    // follow original dimensions and the current viewport, never preview pixels.
+    setViews(value => {
+      let next = value;
+      for (const side of sides) {
+        const image = sourcesRef.current[side]; if (!image) continue;
+        const id = viewIdentity(side, image), view = value[id];
+        if (!view || view.mode !== 'actual' && view.mode !== 'width') continue;
+        const size = originalSizes[imageSourceIdentity(image)] || (image.width && image.height ? { width: image.width, height: image.height } : undefined);
+        if (view.mode === 'actual' && !size) continue;
+        const base = geometryRef.current.baseSize(side);
+        const scale = Math.max(MIN_SCALE, view.mode === 'width' ? (frames[side].width - 24) / base.width : size!.width / base.width);
+        if (Math.abs(view.scale - scale) > 0.000001) {
+          if (next === value) next = { ...value };
+          const ratio = scale / view.scale;
+          next[id] = { ...view, scale, x: view.x * ratio, y: view.y * ratio };
+        }
+      }
+      viewsRef.current = next; return next;
+    });
+  }, [frames, originalSizes, thumbnailFrames, sizes, currentImage, comparisonImage, views]);
   useEffect(() => {
     if (initializedOwner !== owner || !owner) return;
     setViews(value => {
@@ -675,6 +697,12 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
     setDecodedImages(value => ({ ...value, [viewIdentity(side, image)]: decoded }));
     if (side === 'current') setDisplayedCurrent(currentDisplayKey);
     if (decoded.fullSize) setOriginalSizes(value => value[id]?.width === size.width && value[id]?.height === size.height ? value : { ...value, [id]: size });
+    else {
+      const width = decoded.hd?.width, height = decoded.hd?.height;
+      if (Number.isSafeInteger(width) && Number.isSafeInteger(height) && width! > 0 && height! > 0) {
+        setOriginalSizes(value => value[id]?.width === width && value[id]?.height === height ? value : { ...value, [id]: { width: width!, height: height! } });
+      } else thumbnailReady(side, image, size);
+    }
     onImageLoaded?.(image.src);
   }
   function thumbnailReady(side: Side, image: ImageComparisonSource, size: IntrinsicSize) {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { hdAvailabilityLabel, hdDescriptionUsesOriginal, hdDisplayLabel, hdDisplayPolicy } from '../src/lib/media/hd-display-policy';
 import { acquireHdImageSource, hdImageHint, invalidateHdImageSource, prefetchHdImageSource, registerImageReadFamilyInvalidator, setHdImageSessionOwner, type HdDescription, type HdSourceState } from '../src/lib/media/hd-source-session';
+import { runHdDisplayEngineering } from './hd-display-engineering';
 
 // In-memory engineering matrix only. No browser, server, files, or production requests.
 async function main() {
@@ -10,13 +11,20 @@ assert.deepEqual(hdDisplayPolicy(option), { kind: 'pending', pending: true, full
 assert.equal(hdDisplayPolicy({ ...option, description: ready }).kind, 'hd');
 for (const status of ['queued', 'running', 'failed', 'skipped'] as const) {
   const result = hdDisplayPolicy({ ...option, description: { policy: 'hd-f-v1', status, sourceVersion: 'source-v1' } });
-  assert.equal(result.kind, 'original');
-  assert.equal(result.fullSize, true);
+  assert.equal(result.kind, 'preview');
+  assert.equal(result.fullSize, false);
   assert.equal(result.pending, status === 'queued' || status === 'running');
 }
 assert.equal(hdDisplayPolicy({ ...option, original: true, description: ready }).kind, 'original');
 assert.deepEqual(hdDisplayPolicy({ ...option, original: true, previewOnly: true, description: ready }), { kind: 'preview', pending: false, fullSize: false });
 assert.equal(hdDisplayPolicy({ ...option, error: true }).pending, false);
+assert.equal(hdDisplayPolicy({ ...option, error: true }).kind, 'preview');
+assert.equal(hdDisplayPolicy({ ...option, description: { ...ready, status: 'skipped', reason: 'existing_webp' } }).kind, 'original');
+assert.equal(hdDisplayPolicy({ ...option, description: { ...ready, status: 'skipped', reason: 'source_changed' } }).kind, 'preview');
+for (const status of ['queued', 'running'] as const) {
+  assert.equal(hdAvailabilityLabel({ ...ready, status }), '高清准备中');
+  assert.doesNotMatch(hdAvailabilityLabel({ ...ready, status }), /不可用|失败/);
+}
 for (const description of [{ ...ready, original: true }, { ...ready, format: 'original' }]) {
   assert.equal(hdDescriptionUsesOriginal(description), true);
   assert.equal(hdDisplayPolicy({ ...option, description }).kind, 'original');
@@ -63,6 +71,7 @@ try {
   assert.equal(states.at(-1)?.description?.status, 'queued');
   await advance();
   assert.equal(states.at(-1)?.error, true);
+  assert.equal(states.at(-1)?.description?.status, 'queued', 'temporary errors retain the known source identity');
   const retryDelay = Array.from(timers.values())[0].at - now;
   assert.equal(retryDelay, 60_000, 'transient errors retry at a bounded quiet interval');
   await advance();
@@ -114,7 +123,10 @@ try {
   invalidateHdImageSource(source, 'owner-b', { propagateToImageReads: false });
   assert.equal(hdImageHint('owner-b', source), undefined);
   assert.equal(replies.length, 0);
-  console.log(JSON.stringify({ passed: true, groups: 8, scope: 'HD display selection, transient status recovery, ready recheck, visibility, version change, revocation, account boundary, read-only prefetch', browser: false, network: 'mocked-only' }));
+  const checks = ['display_selection', 'transient_status_recovery', 'ready_readonly_recheck', 'visibility', 'source_version_change',
+    'revocation_clears_family', 'account_boundary', 'readonly_prefetch', 'pending_is_preview_not_original', 'known_incompatibility_only_original',
+    ...await runHdDisplayEngineering()];
+  console.log(JSON.stringify({ completed: true, passed: checks.length, groups: checks.length, total: checks.length, checks, browser: false, network: 'mocked-only' }));
 } finally {
   release?.(); setHdImageSessionOwner('');
   globalThis.fetch = originals.fetch; globalThis.setTimeout = originals.setTimeout; globalThis.clearTimeout = originals.clearTimeout; Date.now = originals.now;

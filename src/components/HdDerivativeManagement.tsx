@@ -12,10 +12,15 @@ type Status = { total: number; counts: Counts; reasons: Counts; control: HdContr
   newCounts: Counts; lastSuccessAt?: string | null; lastProgressAt?: string | null; stalled?: boolean;
   resource?: HdResourceSample | null; waitSince?: string | null; isolation?: { total: number; retrying: number; held: number };
   discovery?: { checkedAt: string; current: boolean | null };
+  processing?: { stage?: string; startedAt?: string; lastProgressAt?: string; attempt: number; attemptLimit: number } | null;
+  retry?: { waiting: number; due: number; exhausted: number; nextRetryAt: string | null };
   canResume: boolean; retryableCount: number; retrySummary?: { queued: number; held: number } };
 const reasonLabel: Record<string, string> = { admin_pause: '管理员暂停', operator_pause: '操作员暂停', capacity_guard: '剩余空间不足', load_guard: '服务器忙碌', multi_frame: '多帧原件', pixel_limit: '像素数量超限', high_bit_depth: '高位深原件', wide_gamut: '色彩范围不适用', unverified_color_profile: '色彩配置未确认', existing_webp: '已有WebP，保留原件', original_smaller: '原件更小，使用原件', source_changed: '原件版本已变化', decode_or_source_failed: '读取或解码失败', temporary_io: '临时读取失败', output_integrity: '新文件校验异常', published_integrity: '已准备文件异常', discovery_source_failure: '新原件读取异常', retry_limit: '自动重试已用尽', worker_integrity_failure: '后台文件或读取状态异常' };
-const countText = (value: Counts) => `可用 ${value.ready} · 等待 ${value.queued} · 处理中 ${value.running} · 失败 ${value.failed} · 不适配 ${value.skipped}`;
+const countText = (value: Counts) => `可用 ${value.ready} · 排队 ${value.queued} · 处理中 ${value.running} · 失败 ${value.failed} · 不适配 ${value.skipped}`;
 Object.assign(reasonLabel, { load_guard: '上次资源检查触发暂停', resource_wait: '等待服务器空闲', resource_sample_unknown: '暂时无法确认服务器资源', storage_check_unknown: '无法确认存储安全', source_missing: '原件暂时找不到', source_unreadable: '这张原件暂时无法读取', source_incompatible: '原件格式不适配', hd_publish_control_hold: '新文件等待安全核对', worker_interrupted: '上次处理中断' });
+Object.assign(reasonLabel, { encode_timeout: '单张处理超时', unknown_failure: '未分类异常，需维护人员核对',
+  source_boundary: '原件读取范围需要核对', unknown_publication: '成品发布状态待核对', lock_identity_unknown: '后台锁身份待核对', storage_boundary: '存储位置需要核对' });
+const stageLabel: Record<string, string> = { queued: '等待处理', reading: '读取原件', encoding: '压缩图片', validating: '校验新文件', publishing: '保存高清文件' };
 type Expanded = { batches: boolean; reasons: boolean };
 const collapsed: Expanded = { batches: false, reasons: false };
 export function HdDerivativeManagement() {
@@ -25,6 +30,7 @@ export function HdDerivativeManagement() {
   const data = account && snapshotOwner === account ? snapshot : null;
   const [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const [statusClock, setStatusClock] = useState(0);
+  const [readAt, setReadAt] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Expanded>(collapsed), [preferenceOwner, setPreferenceOwner] = useState('');
   const lock = useRef(false), owner = useRef(account), valueRef = useRef(data);
   const sequence = useRef(0), activeRequest = useRef<AbortController | null>(null);
@@ -46,7 +52,7 @@ export function HdDerivativeManagement() {
         const latest = await current.json();
         if (!currentSession()) return;
         if (!current.ok) throw new Error(latest.error || '暂时无法确认状态');
-        token = latest.control.token; setData(latest); setSnapshotOwner(expectedOwner);
+        token = latest.control.token; setData(latest); setSnapshotOwner(expectedOwner); setReadAt(new Date().toISOString());
       }
       // This synchronous check also closes the GET-to-POST gap before the
       // provider has re-rendered after a cross-tab logout/switch.
@@ -54,12 +60,12 @@ export function HdDerivativeManagement() {
       const response = await fetch('/api/admin/hd-derivatives', action ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, token }), signal: controller.signal } : { cache: 'no-store', signal: controller.signal });
       const value = await response.json();
       if (!currentSession()) return;
-      if (!response.ok) throw new Error(value.error || '读取失败'); setData(value); setSnapshotOwner(expectedOwner);
+      if (!response.ok) throw new Error(value.error || '读取失败'); setData(value); setSnapshotOwner(expectedOwner); setReadAt(new Date().toISOString());
     } catch (cause) { if (currentSession()) setError(cause instanceof Error ? cause.message : '暂时无法确认，请刷新状态后再操作'); }
     finally { if (requestId === sequence.current) { lock.current = false; activeRequest.current = null; if (owner.current === expectedOwner) setBusy(false); } }
   }, [account]);
   useEffect(() => {
-    setData(null); setSnapshotOwner(''); setError(''); setBusy(false); setExpanded(collapsed); setPreferenceOwner('');
+    setData(null); setSnapshotOwner(''); setReadAt(null); setError(''); setBusy(false); setExpanded(collapsed); setPreferenceOwner('');
     if (!preferenceKey) return;
     try { const saved = JSON.parse(localStorage.getItem(preferenceKey) || '{}'); setExpanded({ batches: saved.batches === true, reasons: saved.reasons === true }); } catch { /* Invalid preference falls back safely. */ }
     setPreferenceOwner(preferenceKey);
@@ -78,7 +84,7 @@ export function HdDerivativeManagement() {
   const pending = Boolean(data && data.counts.queued + data.counts.running > 0);
   const discoveryAge = data?.discovery ? Math.max(statusClock, Date.now()) - Date.parse(data.discovery.checkedAt) : NaN;
   const discoveryCurrent = discoveryAge >= 0 && discoveryAge <= 90_000 ? data?.discovery?.current : null;
-  const label = state === 'manual_pause' ? '管理员已暂停' : state === 'hard_pause' ? '需要处理异常'
+  const label = error ? '当前状态暂时无法确认' : state === 'manual_pause' ? '管理员已暂停' : state === 'hard_pause' ? '需要处理异常'
     : data && !pending ? discoveryCurrent === true ? '当前没有待准备项'
       : discoveryCurrent === false ? '新图片等待登记' : '新图片登记状态待确认'
     : state === 'resource_wait' ? '等待服务器空闲，将自动继续' : data?.counts.running ? '正在准备' : '正在等待下一项准备';
@@ -88,25 +94,35 @@ export function HdDerivativeManagement() {
   return <section className={styles.section} aria-labelledby="hd-management-title" aria-busy={busy}><h2 id="hd-management-title">高清图准备</h2>
     {!data && !error && <p role="status">{sessionChanged || isClientSessionBlocked() ? '账号已退出，请刷新页面重新确认账号。' : '正在读取准备状态…'}</p>}{data && <>
     <p className={styles.state}><strong>{label}</strong><span>{data.total} 个作业</span></p>
+    {error && <p className={styles.note}>以下保留上次成功读取的记录，请先刷新状态。</p>}
     <p>{countText(data.counts)}</p>
-    <div className={styles.times}><p>最新检查：{sampleLabel}{data.resource && <> · <RelativeTime value={data.resource.checkedAt} /></>}</p>
+    {data.counts.running > 0 && <p className={styles.processing}>{error ? '上次记录步骤' : '当前步骤'}：{data.processing?.stage ? stageLabel[data.processing.stage] || '处理阶段待同步' : '处理阶段待同步'}
+      {data.processing && <> · 第 {data.processing.attempt} 次处理，上限 {data.processing.attemptLimit} 次</>}</p>}
+    {data.retry && <p>等待自动重试 {data.retry.waiting} · 已到重试时间 {data.retry.due} · 重试已用尽 {data.retry.exhausted}</p>}
+    <div className={styles.times}>
+      {readAt && <p>上次读取状态：<RelativeTime value={readAt} /></p>}
+      <p>资源检查：{sampleLabel}{data.resource && <> · <RelativeTime value={data.resource.checkedAt} /></>}</p>
       {data.waitSince && <p>开始等待：<RelativeTime value={data.waitSince} /></p>}
-      <p>最后成功：{data.lastSuccessAt ? <RelativeTime value={data.lastSuccessAt} /> : '尚无成功记录'} · 最后处理进展：{data.lastProgressAt ? <RelativeTime value={data.lastProgressAt} /> : '尚无处理记录'}</p></div>
+      <p>最后实际进展：{data.lastProgressAt ? <RelativeTime value={data.lastProgressAt} /> : '尚无处理记录'} · 最后成功：{data.lastSuccessAt ? <RelativeTime value={data.lastSuccessAt} /> : '尚无成功记录'}</p>
+      {(state === 'resource_wait' || data.control.reason === 'load_guard') && data.control.wait?.nextCheckAt && <p>下次资源检查：<RelativeTime value={data.control.wait.nextCheckAt} />
+        {Date.parse(data.control.wait.nextCheckAt) <= Math.max(statusClock, Date.now()) && '，等待后台更新'}</p>}
+      {data.retry?.nextRetryAt && <p>下次单图重试：<RelativeTime value={data.retry.nextRetryAt} /></p>}
+    </div>
     {state === 'resource_wait' && pending && <p role="status">后台会自动复核。资源持续稳定后继续准备，原图仍可查看和下载。</p>}
     {state === 'manual_pause' && <p>重新检查后会按当前资源决定继续或等待；不会重发图片生成。</p>}
     {data.control.reason === 'load_guard' && <p role="status">上次资源检查留下了暂停。重新检查会先确认当前资源和安全状态，再进入自动等待。</p>}
     {hardStop && <p role="status">{reasonLabel[data.control.reason || ''] || '暂停原因待核对'}。请由维护人员处理异常后核对恢复。原图仍可查看和下载。</p>}
     {data.stalled && <p role="status">仍有待处理图片，超过10分钟没有处理进展。请核对最新检查和暂停原因，或重新检查；服务在线不代表正在处理。</p>}
     {!!data.isolation?.total && <p>单张原件待处理 {data.isolation.total} 项，其中自动复核 {data.isolation.retrying} 项、需人工核对 {data.isolation.held} 项。其余正常图片继续按队列准备。</p>}
-    <details open={preferenceOwner === preferenceKey && expanded.batches} onToggle={event => toggle('batches', event.currentTarget.open)}><summary>旧库与新增任务</summary>{data.batches.map(batch => <p key={batch.id}>旧库 · 已盘点 {batch.knownLocalOriginals} 个本地原件 · {countText(batch.counts)} · 未入队 {batch.notQueued} · 远程版本未知 {batch.remoteVersionUnknown} · 无法读取 {batch.unavailable}</p>)}<p>旧库清单以外 · {countText(data.newCounts)}</p><p>新图和当前查看优先；每处理4个此类任务，给旧库1次机会。不适配和未知来源不计作完成。</p></details>
+    <details open={preferenceOwner === preferenceKey && expanded.batches} onToggle={event => toggle('batches', event.currentTarget.open)}><summary>旧库与新增任务</summary>{data.batches.map(batch => <p key={batch.id}>旧库 · 已盘点 {batch.knownLocalOriginals} 个本地原件 · {countText(batch.counts)} · 未入队 {batch.notQueued} · 远程版本未知 {batch.remoteVersionUnknown} · 无法读取 {batch.unavailable}</p>)}<p>旧库清单以外 · {countText(data.newCounts)}</p><p>当前查看优先，其次准备新图；旧库保留定期处理机会。不适配和未知来源不计作完成。</p></details>
     <details open={preferenceOwner === preferenceKey && expanded.reasons} onToggle={event => toggle('reasons', event.currentTarget.open)}><summary>处理原因</summary>{Object.entries(data.reasons).map(([reason, count]) => <p key={reason}>{reasonLabel[reason] || '原因待确认'} · {count}</p>)}<button type="button" className="btn btn-secondary" onClick={() => setExpanded(collapsed)}>收起详情</button></details>
     {data.retrySummary && <p role="status">已重新排队 {data.retrySummary.queued} 项；仍需核对 {data.retrySummary.held} 项。未解除安全暂停。</p>}
   </>}
     {error && <p role="alert">{error}</p>}<div className={styles.actions}>
-      <button type="button" className={data?.canResume ? 'btn btn-primary' : 'btn btn-secondary'} disabled={busy || !data || hardStop} onClick={() => void load('recheck')}><Play size={16} />{busy ? '正在核对…' : '重新检查并继续'}</button>
-      <button type="button" className="btn btn-secondary" disabled={busy || !data || state === 'manual_pause' || hardStop} onClick={() => void load('pause')}><Pause size={16} />暂停准备</button>
+      <button type="button" className={data?.canResume ? 'btn btn-primary' : 'btn btn-secondary'} disabled={busy || !data || !!error || hardStop} onClick={() => void load('recheck')}><Play size={16} />{busy ? '正在核对…' : '重新检查并继续'}</button>
+      <button type="button" className="btn btn-secondary" disabled={busy || !data || !!error || state === 'manual_pause' || hardStop} onClick={() => void load('pause')}><Pause size={16} />暂停准备</button>
       <button type="button" className="btn btn-secondary" title="刷新" aria-label="刷新高清状态" disabled={busy || !account || isClientSessionBlocked()} onClick={() => void load()}><RefreshCw size={16} />刷新状态</button>
-      <button type="button" className="btn btn-secondary" disabled={busy || !data?.retryableCount} onClick={() => void load('retry')}><RotateCcw size={16} />重试临时失败{data?.retryableCount ? `（${data.retryableCount}）` : ''}</button>
+      <button type="button" className="btn btn-secondary" disabled={busy || !!error || hardStop || !data?.retryableCount} onClick={() => void load('retry')}><RotateCcw size={16} />重试临时失败{data?.retryableCount ? `（${data.retryableCount}）` : ''}</button>
     </div>
   </section>;
 }

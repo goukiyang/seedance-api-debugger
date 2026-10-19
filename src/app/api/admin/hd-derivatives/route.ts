@@ -1,16 +1,49 @@
 import { getSession } from '@/lib/auth/session';
-import { hdControl, hdStatus, listHdJobs, recheckHdResources, retryHdKey, setHdControl } from '@/lib/media/hd-derivatives';
+import { hdControl, hdStatus, isHdRetryableFailure, listHdJobs, recheckHdResources, retryHdKey, setHdControl } from '@/lib/media/hd-derivatives';
+import type { HdControl, HdResourceSample } from '@/lib/media/hd-resource-state';
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
+const reasonCodes = new Set(['admin_pause', 'operator_pause', 'capacity_guard', 'load_guard', 'resource_wait', 'resource_busy',
+  'resource_sample_unknown', 'storage_check_unknown', 'source_missing', 'source_unreadable', 'source_incompatible',
+  'multi_frame', 'pixel_limit', 'high_bit_depth', 'wide_gamut', 'unverified_color_profile', 'existing_webp', 'original_smaller',
+  'source_changed', 'decode_or_source_failed', 'temporary_io', 'encode_timeout', 'output_integrity', 'published_integrity',
+  'discovery_source_failure', 'retry_limit', 'worker_integrity_failure', 'hd_publish_control_hold', 'worker_interrupted',
+  'unknown_failure', 'source_boundary', 'unknown_publication', 'lock_identity_unknown', 'storage_boundary']);
+const publicReason = (reason?: string) => reason === undefined ? undefined : reasonCodes.has(reason) ? reason : 'unknown_failure';
+const publicResource = (sample?: HdResourceSample) => sample ? { checkedAt: sample.checkedAt, load1: sample.load1,
+  cpuCount: sample.cpuCount, availableMemory: sample.availableMemory, capacitySafe: sample.capacitySafe,
+  result: sample.result, reason: publicReason(sample.reason) } : undefined;
+function publicControl(control: HdControl) {
+  return { paused: control.paused, state: control.state, reason: publicReason(control.reason), updatedAt: control.updatedAt,
+    protocol: control.protocol, revision: control.revision, token: control.token,
+    wait: control.wait ? { since: control.wait.since, stableSince: control.wait.stableSince, stableSamples: control.wait.stableSamples,
+      checks: control.wait.checks, nextCheckAt: control.wait.nextCheckAt } : undefined,
+    resource: publicResource(control.resource), history: control.history?.map(item => ({ at: item.at, state: item.state,
+      reason: publicReason(item.reason), revision: item.revision, resource: publicResource(item.resource) })) };
+}
 async function status() {
   const value = await hdStatus();
-  return { ...value, canResume: value.control.state === 'manual_pause' || value.control.state === 'resource_wait' || value.control.reason === 'load_guard',
-    retryableCount: (await listHdJobs()).filter(job => job.status === 'failed' && job.reason === 'temporary_io').length };
+  const { processing, ...snapshot } = value;
+  const reasons: Record<string, number> = {};
+  for (const [reason, count] of Object.entries(value.reasons)) {
+    const code = publicReason(reason)!;
+    reasons[code] = (reasons[code] || 0) + count;
+  }
+  return { ...snapshot, control: publicControl(value.control), reasons, resource: publicResource(value.resource || undefined) || null,
+    // Queue identities and execution tokens stay in the private manifest. The
+    // administrator needs the current phase and actual progress, not file paths.
+    processing: processing ? { stage: processing.stage, startedAt: processing.startedAt,
+      lastProgressAt: processing.lastProgressAt, attempt: processing.attempt, attemptLimit: processing.attemptLimit } : null,
+    canResume: value.control.state === 'manual_pause' || value.control.state === 'resource_wait' || value.control.reason === 'load_guard',
+    retryableCount: (await listHdJobs()).filter(isHdRetryableFailure).length };
 }
 export async function GET() {
   const user = await getSession();
   if (!user || user.role !== 'admin') return Response.json({ error: '无权访问' }, { status: 403, headers });
-  return Response.json(await status(), { headers });
+  try { return Response.json(await status(), { headers }); }
+  catch {
+    return Response.json({ error: '暂时无法读取高清状态，请刷新后再操作。原有任务与原图保持不变。' }, { status: 503, headers });
+  }
 }
 export async function POST(request: Request) {
   const user = await getSession();
@@ -30,7 +63,7 @@ export async function POST(request: Request) {
     if (result.conflict) throw new Error('hd_control_conflict');
   } else {
     retrySummary = { queued: 0, held: 0 };
-    for (const job of await listHdJobs()) if (job.status === 'failed' && job.reason === 'temporary_io') {
+    for (const job of await listHdJobs()) if (isHdRetryableFailure(job)) {
       try { if (await retryHdKey(job.key, job.version)) retrySummary.queued++; else retrySummary.held++; }
       catch { retrySummary.held++; }
     }

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 
 export const HD_CONTROL_PROTOCOL = 'hd-control-v2';
+export const HD_RETRY_POLICY = Object.freeze({ attempts: 3, delaysMs: [60_000, 5 * 60_000, 30 * 60_000] as readonly number[] });
 export type HdRunState = 'active' | 'resource_wait' | 'manual_pause' | 'hard_pause';
 export type HdResourceSample = {
   checkedAt: string; load1: number | null; cpuCount: number | null; availableMemory: number | null;
@@ -11,6 +12,7 @@ export type HdResourceWait = { since: string; stableSince?: string; stableSample
 export type HdControl = {
   paused: boolean; reason?: string; updatedAt?: string; protocol?: string; revision: number; token: string;
   state: HdRunState; wait?: HdResourceWait; resource?: HdResourceSample;
+  diagnostic?: { at: string; phase: string; code: string; message: string };
   history?: Array<{ at: string; state: HdRunState; reason?: string; revision: number; resource?: HdResourceSample }>;
 };
 // Keep admission thresholds, hysteresis, freshness and bounded polling together.

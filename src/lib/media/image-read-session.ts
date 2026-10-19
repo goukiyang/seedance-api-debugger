@@ -391,6 +391,18 @@ export function cancelImagePrefetches(exceptSource?: string) {
 export function canPrefetchImages(expectedBytes = 0) {
   return backgroundAllowed() && Number.isFinite(expectedBytes) && expectedBytes >= 0 && prune(expectedBytes);
 }
+// Only select a previously authorized decoded preview. This does not fetch or
+// compare its representation ETag with the unrelated HD source-version key.
+// The normal acquisition still owns revocation and revalidation of the body.
+export function hasCachedImagePreview(account: string, source: string) {
+  if (!account || account !== owner) return false;
+  const canonical = canonicalImageReadSource(source);
+  const url = new URL(canonical, location.href);
+  if (!(url.searchParams.get('preview') === '1' || url.searchParams.get('variant') === 'preview')) return false;
+  const entry = entries.get(JSON.stringify(['protected-image-cache-v2', epoch, account, canonical]));
+  return Boolean(entry?.blob && entry.decoded && entry.complete && entry.reusable && entry.actualVersion
+    && !entry.blocked && !entry.stale && !entry.controller.signal.aborted && Date.now() - entry.checkedAt < REVALIDATE_AFTER);
+}
 // source is the exact protected HD display URL used by acquireImageRead. The
 // caller must first authorize the matching hd-download route with a fresh HEAD.
 // This API never fetches and never exposes another representation or a family.

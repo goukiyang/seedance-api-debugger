@@ -23,7 +23,7 @@ export function useImageNeighbors(candidates: ImageReadCandidate[], enabled: boo
   const current = sourceFamily(currentSource);
   const movement = useRef<1 | -1 | 0>(0);
   const history = useRef<{ current: string; neighbors: string[] }>({ current: '', neighbors: [] });
-  const available = candidates.slice(0, 2);
+  const available = candidates.filter(candidate => sourceFamily(candidate.source) !== current).slice(0, 2);
   const neighborKeys = available.map(candidate => sourceFamily(candidate.source));
   if (enabled && current && current !== history.current.current) {
     const movedTo = history.current.neighbors.indexOf(current);
@@ -43,7 +43,8 @@ export function useImageNeighbors(candidates: ImageReadCandidate[], enabled: boo
       // An explicit original belongs to the foreground user action, not a
       // speculative neighbor. Never spend its full PNG bytes in the background.
       if (candidate.variant === 'original') continue;
-      if (candidate.variant === 'preview') { start(imageDisplaySource(candidate.source, 'preview'), candidate.sourceVersion || ''); continue; }
+      // Neighbors only spend bytes on a ready compressed HD representation.
+      // A preview candidate is still checked through the read-only descriptor.
       const description = imageDisplaySource(candidate.source, 'hd-description');
       if (description === candidate.source) continue;
       const request = prefetchHdImageSource(account, description, candidate.sourceVersion || '');

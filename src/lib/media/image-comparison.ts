@@ -23,11 +23,14 @@ export function imageDisplaySource(src: string, mode: 'preview' | 'thumbnail' | 
     if (url.origin !== 'https://sd2.youdooart.com') return src;
     if (/^\/api\/image-studio\/(?:(?:assets|template-assets)\/|style-groups\/[^/]+\/assets\/)/.test(url.pathname)) {
       for (const variant of ['thumbnail', 'preview', 'detail', 'download', 'hd', 'hd-description', 'hd-download']) url.searchParams.delete(variant);
+      url.searchParams.delete('variant');
       url.searchParams.delete('hd-version');
       if (mode !== 'original') url.searchParams.set(mode, '1');
     } else if (/^\/api\/reference-images\/[^/]+\/content$/.test(url.pathname)) {
+      for (const variant of ['thumbnail', 'preview', 'detail', 'download', 'hd', 'hd-description', 'hd-download', 'hd-version']) url.searchParams.delete(variant);
       url.searchParams.set('variant', mode);
     } else if (url.pathname === '/api/content-reactions/media') {
+      for (const variant of ['thumbnail', 'preview', 'detail', 'download', 'hd', 'hd-description', 'hd-download', 'hd-version']) url.searchParams.delete(variant);
       url.searchParams.set('variant', mode);
     } else return src;
     return url.pathname + url.search;

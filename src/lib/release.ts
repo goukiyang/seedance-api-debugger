@@ -2,8 +2,8 @@ import packageInfo from '../../package.json';
 import { PRICING_ADMIN_WRITES_ENABLED } from './pricing/build-mode';
 
 export const release = { version: packageInfo.version, channel: 'production', summary: PRICING_ADMIN_WRITES_ENABLED
-  ? 'Image 2.5 Sunburst 可按中等、最高分别使用独立 API；中等参考图暂限7张，费用随所选档位报价。已有任务和历史结果保持。'
-  : '图片质量路由与已有任务已保留。API质量设置和费率暂时只读，已保存配置与原任务继续使用，不会自动改价。' };
+  ? '高清加载与后台接续修复：已有高清直接复用，准备中先看预览；单图临时故障有限重试，原图、已有结果和权限保持。'
+  : '高清加载与原任务接续保留。API质量设置和费率暂时只读，已保存配置、原图和已有结果保持，不会自动改价。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
