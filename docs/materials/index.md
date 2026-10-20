@@ -1,5 +1,14 @@
 # 项目资料索引
 
+## MV-STATUS 进度与更新专项（2026-10-20）
+
+项目video-api-debugger；来源为本轮用户反馈及随后“只查链路、不付费测试”的范围确认，原文件名不适用。关键词：轮询碰撞、停止续查、新结果未打开、更新提醒撤回、无费用确定性验证。正式[原工单§11](../../tasks/todo/2026-10-19-multiview-integrated-ux-preflight.md#11-mv-status进度与更新专项2026-10-20)保留已证缺陷、未证实现场和最小方案。
+
+- [原源诊断脚本](2026-10-19-upload-unknown-recovery/mv-status-diagnosis.mjs)及[原v0.100.0四项复现](2026-10-19-upload-unknown-recovery/mv-status-diagnosis-v01000.json)：固定aa5e1681源码、记录文件SHA；假时钟和假响应，无网络/供应商/生产写入，不冒用户现场。
+- [v0.100.1定向检查](2026-10-19-upload-unknown-recovery/mv-status-verification-v01001.json)：15项通过；源码1f7eb77b另含原选帧检查通过。结果来自本轮实际运行，JSON可读；无新增图片附件，不替代两张R01原图或真实页面证据。
+- 12:03Z已保护部署v0.100.1／源`1f7eb77b`／BUILD`2uG8W5tTgBXwS4OpksWRJ`，两完整构建、8组控制前置及43公网资源同字节，12份关键回执本地/服务器SHA核同。正式[本run证据](2026-10-19-upload-unknown-recovery/fb8da230-a764-411c-99c0-ad6f54c2a35a/)、[发布收口](../../tasks/todo/2026-10-19-multiview-integrated-ux-preflight.md#113-v01001发布收口)；功能仍用户手验。
+- 固定guard证书适配补齐：[源码](2026-10-19-upload-unknown-recovery/recovery-certificate-r01/)、[封存/21项Linux隔离/真实只读回执](2026-10-19-upload-unknown-recovery/fb8da230-a764-411c-99c0-ad6f54c2a35a/recovery-certificate-r01/)。来源为用户要求核清恢复保护及本次实际执行，关键词：保留证书、早期中止、固定guard、恢复阶段、下一次发布硬前置。两处旧判断均受影响，已另封存补丁；原发布包/成功证据/guard/业务数据不改，无线上回退。入口与边界见[原单§11.4](../../tasks/todo/2026-10-19-multiview-integrated-ux-preflight.md#114-本批固定guard证书保护补齐)，下一批必须合入验证，不直接用旧r08分支。
+
 ## 高清全链路可靠性实施（2026-10-19）
 
 当前22:41Z收口：[H01–H10原单§9.5](../../tasks/todo/2026-10-18-hd-chain-reliability.md#95-h01h10已保护部署待用户手验当前)记录v0.99.2实际保护部署完成，功能待用户手验。run9b720的[统一工程/Review](2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/unified-verification.json)、[实际switch-complete](2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/switch-complete.json)、[最终保护/策略](2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/post-release-proof.json)、[39目标公网资源](2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/main-public-proof.json)、[升级layout](2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/release-notice-public-proof.json)与[73原件逐SHA索引](2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/release-receipt-index.json)均可读。Web/image/HD同main6512e723/BUILD laGD…；guard4e0403a6/BUILD oAi35…完整构建保留，回退未演练。真实新helper读取同一218150字节既有ready、canonical64784:171598992/原锁171450476/no-fork有证；正常重启策略及网络恢复，DB/账务/媒体/配置/+i/其它三原服务保持。两完整构建各144默认/1424RATE源码与1556包映射相符、HD70通过；两包各43工程原件/所有失败历史保留。匿名summary空为原权限投影，internal才有本轮HD摘要；真实旧客户端弹窗未手验。无新用户附件、无AI生成/收费/重发/数据迁移，私有原证不公开；以下均为各历史阶段。
