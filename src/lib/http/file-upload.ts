@@ -175,6 +175,21 @@ async function recoverRawUpload(file: File, context: Partial<UploadContext>, inv
   catch (cause) { throw new UploadFileError(cause instanceof Error ? cause.message : '原上传查询返回内容无效。', { stage: 'raw-query', recovery: 'query', cause }); }
   if (!response.ok) throw responseUploadError(result, '原上传结果尚未确认，未重传文件。', 'query', 'raw-query');
   if (result.asset?.id) return finishRawAsset(file, context, marker, result.asset, onProgress);
+  if (typeof result.recoveryToken === 'string' && /^[a-f0-9]{64}$/.test(result.recoveryToken)) {
+    let recovered: UploadAssetResponse;
+    try {
+      const response = await fetch('/api/assets/upload/recover', { method: 'POST', cache: 'no-store',
+        headers: { 'Content-Type': 'application/json', 'X-Upload-Owner-Id': marker.ownerId },
+        body: JSON.stringify({ ...marker, recoveryToken: result.recoveryToken }), signal: AbortSignal.timeout(30000) });
+      recovered = await readUploadJsonResponse<UploadAssetResponse>(response, '恢复原上传', invalidJsonMessage);
+      if (!response.ok) throw responseUploadError(recovered, '原上传尚不能安全恢复，未重传文件。', 'query', 'raw-recover');
+    } catch (cause) { throw new UploadFileError('原上传恢复结果待确认，请再次核对原上传；未重新发送文件。', { stage: 'raw-recover', recovery: 'query', cause }); }
+    if (recovered.asset?.id) return finishRawAsset(file, context, marker, recovered.asset, onProgress);
+    const proof = requireRawProof(recovered.rawUpload, marker);
+    if (proof.phase !== 'notAccepted') throw new UploadFileError('原上传尚不能安全恢复，未重传文件。', { stage: 'raw-recover', recovery: 'query' });
+    saveRawMarker(file, context, { ...marker, version: 2, phase: 'retryable', nonce: proof.nonce });
+    throw new UploadNotAcceptedError('原上传已安全结束，未登记素材。点击继续上传会沿用原请求和原文件。', { code: 'RAW_UPLOAD_NOT_ACCEPTED', stage: 'raw-recover' });
+  }
   let proof: RawUploadProof;
   try { proof = requireRawProof(result.rawUpload, marker); }
   catch (cause) { throw new UploadFileError(cause instanceof Error ? cause.message : '原上传状态尚未确认，未重新发送文件。', { stage: 'raw-query', recovery: 'query', cause }); }
@@ -221,6 +236,7 @@ type UploadAssetResponse = {
   errorStage?: string;
   notAccepted?: boolean;
   rawUpload?: RawUploadProof;
+  recoveryToken?: string | null;
 };
 
 function safeUploadDiagnostic(value: unknown) {

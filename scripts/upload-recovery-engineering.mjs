@@ -17,6 +17,7 @@ const sources = [
   'src/lib/http/file-upload.ts', 'src/lib/http/upload-session.ts', 'src/components/ResourceLibraryPicker.tsx',
   'src/components/ResourceLibraryPicker.module.css', 'src/app/api/assets/upload/route.ts',
   'src/app/api/assets/upload-complete/route.ts', 'src/app/api/assets/multipart/complete/route.ts',
+  'src/lib/assets/raw-upload-recovery-proof.ts', 'src/app/api/assets/upload/recover/route.ts',
 ];
 const hash = value => createHash('sha256').update(value).digest('hex');
 const hashes = () => Object.fromEntries(sources.map(file => [file, hash(fs.readFileSync(path.join(root, file)))]));

@@ -59,6 +59,21 @@ async function main() {
     assert(!lazy.eager && lazy.chunks.length === 26 && lazy.chunks.at(-1)?.count === 1, 'long-video lazy boundary is incorrect');
     const route = await readFile(path.join(process.cwd(), 'src/app/api/video/multiview/[id]/previews/route.ts'), 'utf8');
     assert(route.includes('getSession()') && route.includes('multiviewPreviewAtlas') && route.includes("'Cache-Control': 'private, no-store'"), 'preview route lost authorization or private cache boundary');
+    const { createMultiviewOriginalQueue } = await import('../src/app/multiview/multiview-original-queue');
+    const queue = createMultiviewOriginalQueue();
+    let release!: (value: boolean) => void;
+    const calls: number[] = [];
+    const first = queue.request(1, () => { calls.push(1); return new Promise(done => { release = done; }); }, true);
+    queue.background([2], true);
+    const obsolete = queue.request(2, async () => { calls.push(2); return true; }, false);
+    queue.background([3], true);
+    const last = queue.request(3, async () => { calls.push(3); return true; }, false);
+    const explicit = queue.request(4, async () => { calls.push(4); return true; }, true);
+    assert(await obsolete === false && calls.join(',') === '1', 'obsolete target was not dropped while original work was active');
+    release(true); await first; await explicit;
+    queue.background([3]); await last;
+    assert(calls.join(',') === '1,4,3', 'original queue lost explicit priority or serialized background order');
+    queue.clear();
     console.log('multiview preview engineering checks passed');
   } finally { await rm(root, { recursive: true, force: true }); }
 }

@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { randomUUID } from 'node:crypto';
 import { assertUploadOwner, privateUploadDirectory, uploadDigest, uploadIdentity, uploadRequestId, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
-import { claimLegacyRawUpload, rawUploadIdentity, rawUploadProof, readRawUploadResult, readRawUploadState, transitionRawUpload, type RawUploadIdentity } from '@/lib/assets/raw-upload-state';
+import { claimLegacyRawUpload, rawUploadIdentity, rawUploadProof, rawUploadRecoveryToken, readRawUploadResult, readRawUploadState, transitionRawUpload, type RawUploadIdentity } from '@/lib/assets/raw-upload-state';
 import {
   getSiteUploadKind,
   uploadSiteAsset,
@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
     const asset = await readRawUploadResult(identity);
     if (asset) return NextResponse.json({ success: true, asset }, { headers: { 'Cache-Control': 'private, no-store' } });
     const state = await readRawUploadState(identity);
-    return NextResponse.json({ rawUpload: state ? rawUploadProof(state) : { ...identity, phase: 'absent' } }, { headers: { 'Cache-Control': 'private, no-store' } });
+    return NextResponse.json({ rawUpload: state ? rawUploadProof(state) : { ...identity, phase: 'absent' }, recoveryToken: await rawUploadRecoveryToken(identity) }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     if (error instanceof VerifiedUploadError) return NextResponse.json({ ...verifiedUploadFailure(error), errorStage: 'recovery' }, { status: error.status });
     return NextResponse.json({ error: '原上传结果暂时无法核对，请稍后查询；未重新发送文件' }, { status: 503 });

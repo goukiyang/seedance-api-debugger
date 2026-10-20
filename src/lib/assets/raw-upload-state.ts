@@ -1,9 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
-import { uploadDigest, uploadRequestId, readVerifiedUploadReceipt, releaseVerifiedUpload, VerifiedUploadError } from './verified-upload';
+import { uploadDigest, uploadRequestId, readVerifiedUploadReceipt, releaseVerifiedUpload, findVerifiedOwnUpload, registerVerifiedUpload, VerifiedUploadError } from './verified-upload';
 import { validateSiteUploadMetadata, sameOriginPublicUrlForLocalUpload, isLocalPublicUploadUrl } from './site-upload';
 import { isPubliclyReachableUrl } from './public-storage';
 import { uploadSimilarityStatus } from './upload-similarity';
+import { readRawUploadRecoveryProof } from './raw-upload-recovery-proof';
 
 export type RawUploadIdentity = { ownerId: string; requestId: string; hash: string; fileSize: number; mimeType: string };
 export type RawUploadPhase = 'prepared' | 'receiving' | 'writing' | 'notAccepted' | 'completed';
@@ -36,6 +37,42 @@ async function stateRow(identity: RawUploadIdentity) {
 }
 export async function readRawUploadState(identity: RawUploadIdentity) {
   return (await stateRow(identity))?.state || null;
+}
+export async function rawUploadRecoveryToken(identity: RawUploadIdentity) {
+  const current = await stateRow(identity);
+  return current && ['writing', 'receiving'].includes(current.state.phase)
+    ? readRawUploadRecoveryProof(stateKey(identity), current.row.value_json) : null;
+}
+export async function recoverRetiredRawUpload(identity: RawUploadIdentity, token: unknown) {
+  const current = await stateRow(identity);
+  if (typeof token !== 'string' || !current || !['writing', 'receiving'].includes(current.state.phase)
+    || await readRawUploadRecoveryProof(stateKey(identity), current.row.value_json) !== token) throw unknown();
+  // A fresh original receipt always wins. Hidden/inactive same-byte assets are never revived.
+  const asset = await readRawUploadResult(identity);
+  if (asset) return { asset };
+  const existing = await findVerifiedOwnUpload(identity.ownerId, identity.hash, identity.mimeType, identity.fileSize);
+  if (existing) {
+    try {
+      await registerVerifiedUpload({ ownerId: identity.ownerId, proof: existing.proof, fileName: existing.asset.file_name,
+        originalUrl: existing.asset.original_url, thumbnailUrl: existing.asset.thumbnail_url, requestId: identity.requestId,
+        fingerprint: fingerprint(identity) });
+      const recovered = await readRawUploadResult(identity);
+      if (!recovered) throw unknown();
+      return { asset: recovered };
+    } finally { await releaseVerifiedUpload(existing.proof); }
+  }
+  const state = await prisma.$transaction(async db => {
+    const user = await db.user.findUnique({ where: { id: identity.ownerId } });
+    if (!user || user.status !== 'active') throw new VerifiedUploadError('UPLOAD_OWNER_UNAVAILABLE', '当前账号不可恢复上传', 403);
+    if (await db.asset.findUnique({ where: { owner_id_hash: { owner_id: identity.ownerId, hash: identity.hash } } })
+      || await db.platformSetting.findUnique({ where: { key: `upload_receipt_v2:${uploadDigest(identity.ownerId)}:${uploadDigest(identity.requestId)}` } })) throw unknown();
+    const next: RawUploadState = { ...current.state, nonce: newNonce(), phase: 'notAccepted' };
+    const changed = await db.platformSetting.updateMany({ where: { key: stateKey(identity), value_json: current.row.value_json },
+      data: { value_json: JSON.stringify(next), updated_by: identity.ownerId } });
+    if (changed.count !== 1) throw unknown();
+    return next;
+  });
+  return { rawUpload: rawUploadProof(state) };
 }
 export async function readRawUploadResult(identity: RawUploadIdentity) {
   const found = await readVerifiedUploadReceipt(identity.ownerId, identity.requestId, fingerprint(identity));

@@ -34,7 +34,7 @@ const checks = [];
 const check = async (name, run) => { await run(); checks.push(name); };
 const fixtureBytes = Buffer.from('synthetic-preflight-no-decoding');
 
-function environment({ rejectDirectory = false, failAfterWriting = false, refuseRejectionCas = false } = {}) {
+function environment({ rejectDirectory = false, failAfterWriting = false, refuseRejectionCas = false, retiredProof = false } = {}) {
   const rows = new Map(), receipts = new Map(), phases = [], logs = [];
   let writes = 0, directoryChecks = 0;
   const owner = 'isolated-upload-owner';
@@ -49,9 +49,11 @@ function environment({ rejectDirectory = false, failAfterWriting = false, refuse
       if (!row || row.value_json !== where.value_json || refuseRejectionCas && next.phase === 'notAccepted') return { count: 0 };
       rows.set(where.key, { ...row, ...data }); phases.push(next.phase); return { count: 1 };
     },
-  } };
+  }, asset: { findUnique: async () => null }, user: { findUnique: async () => ({ id: owner, status: 'active' }) },
+  $transaction: async run => run(prisma) };
   const verified = { ...base, uploadIdentity: async () => ({ id: owner }),
     releaseVerifiedUpload: async () => {}, readVerifiedUploadReceipt: async (_owner, id) => receipts.get(id) || null,
+    findVerifiedOwnUpload: async () => null,
     privateUploadDirectory: async () => {
       directoryChecks++;
       if (rejectDirectory) throw new base.VerifiedUploadError('UPLOAD_PRIVATE_DIRECTORY_INVALID', '上传服务暂不可用', 503);
@@ -63,6 +65,7 @@ function environment({ rejectDirectory = false, failAfterWriting = false, refuse
     'node:crypto': crypto, '@/lib/prisma': { prisma }, './verified-upload': verified, './site-upload': metadata,
     './public-storage': { isPubliclyReachableUrl: () => true },
     './upload-similarity': { uploadSimilarityStatus: async () => ({ state: 'disabled' }) },
+    './raw-upload-recovery-proof': { readRawUploadRecoveryProof: async (_key, value) => retiredProof ? base.uploadDigest(value) : null },
   });
   const route = evaluate(read('src/app/api/assets/upload/route.ts'), {
     'next/server': { NextResponse: { json: (data, init) => Response.json(data, init) } },
@@ -133,6 +136,28 @@ await check('completed_original_receipt_returns_without_directory_or_new_dispatc
   const response = await env.post('a'.repeat(48)), data = await response.json();
   assert.equal(response.status, 200); assert.equal(data.asset.id, 'original-asset');
   assert.equal(env.counters().writes, 0); assert.equal(env.counters().directoryChecks, 0);
+});
+await check('retired_writer_exact_proof_rotates_nonce_without_upload_and_stale_writer_is_rejected', async () => {
+  const env = environment({ failAfterWriting: true, retiredProof: true });
+  const prepared = await env.state.prepareRawUpload(env.identity);
+  await env.post(prepared.rawUpload.nonce);
+  const token = await env.state.rawUploadRecoveryToken(env.identity);
+  assert.match(token, /^[a-f0-9]{64}$/);
+  const before = env.counters().writes;
+  const result = await env.state.recoverRetiredRawUpload(env.identity, token);
+  assert.equal(result.rawUpload.phase, 'notAccepted');
+  assert.notEqual(result.rawUpload.nonce, prepared.rawUpload.nonce);
+  assert.equal(env.counters().writes, before);
+  const stale = await env.post(prepared.rawUpload.nonce);
+  assert.equal(stale.status, 409); assert.equal(env.counters().writes, before);
+  await assert.rejects(() => env.state.recoverRetiredRawUpload(env.identity, token));
+});
+await check('unknown_without_retired_writer_proof_stays_unknown_even_with_no_asset', async () => {
+  const env = environment({ failAfterWriting: true });
+  const prepared = await env.state.prepareRawUpload(env.identity); await env.post(prepared.rawUpload.nonce);
+  assert.equal(await env.state.rawUploadRecoveryToken(env.identity), null);
+  await assert.rejects(() => env.state.recoverRetiredRawUpload(env.identity, 'a'.repeat(64)));
+  assert.equal((await env.state.readRawUploadState(env.identity)).phase, 'writing');
 });
 await check('existing_safe_log_records_only_request_digest_and_sanitized_fields', async () => {
   let saved;

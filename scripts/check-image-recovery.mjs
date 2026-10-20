@@ -92,6 +92,7 @@ const fixtures = [
       'src/lib/http/upload-session.ts', 'src/components/ResourceLibraryPicker.tsx',
       'src/components/ResourceLibraryPicker.module.css', 'src/app/api/assets/upload/route.ts',
       'src/app/api/assets/upload-complete/route.ts', 'src/app/api/assets/multipart/complete/route.ts',
+      'src/lib/assets/raw-upload-recovery-proof.ts', 'src/app/api/assets/upload/recover/route.ts',
     ] },
 ];
 fixtures.push({ file: 'scripts/multiview-settings-batch-engineering.mjs', schema: 'multiview-settings-batch-engineering.v1',
