@@ -53,7 +53,7 @@ type Association = { schema: 1; ownerId: string; requestId: string; workspaceTab
 type ApiError = { error?: string; message?: string; code?: string; task_id?: string; existing_task_id?: string };
 type TaskStatus = ApiError & MultiviewTaskProgressInput;
 type Quote = { key: string; points: number; pricingRevision: string | null; pricingQuoteToken?: string };
-type RequestCheckOutcome = 'pending' | 'deferred' | 'stop';
+type RequestCheckOutcome = 'pending' | 'stop';
 type RequestResponse = ApiError & { request_receipt?: unknown; new_request_allowed?: unknown };
 const identifier = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(value);
 const responseCode = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(value);
@@ -666,9 +666,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
 
   const checkRequest = useCallback(async (): Promise<RequestCheckOutcome> => {
     const previous = receiptRef.current;
-    if (!previous || !owner || loadedOwner !== owner || !liveSessionReady.current || isClientSessionBlocked() || closeLock.current || submitting) return 'stop';
-    // An overlapping lookup owns this request, but must not retire the next polling cycle.
-    if (checkLock.current) return 'deferred';
+    if (!previous || !owner || loadedOwner !== owner || !liveSessionReady.current || isClientSessionBlocked() || checkLock.current || closeLock.current || submitting) return 'stop';
     const token = {}; checkLock.current = token; const scope = capture(); const controller = new AbortController(); checkAbort.current = controller; setChecking(true);
     const requestCurrent = () => current(scope) && !controller.signal.aborted && !closeLock.current && receiptRef.current?.key === previous.key;
     try {
@@ -732,8 +730,8 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     let cancelled = false; let timer: ReturnType<typeof setTimeout> | undefined; let pendingChecks = 0;
     const poll = async () => {
       const outcome = await checkRequest();
-      if (cancelled || outcome === 'stop' || !pendingActive(receiptRef.current)) return;
-      if (outcome === 'pending' && !receiptRef.current?.taskId && ++pendingChecks >= 12) {
+      if (cancelled || outcome !== 'pending' || !pendingActive(receiptRef.current)) return;
+      if (!receiptRef.current?.taskId && ++pendingChecks >= 12) {
         setStatus('本次自动核对已暂停，原请求仍待确认。可继续查询原请求，不会重新提交。'); return;
       }
       timer = setTimeout(() => void poll(), 5000);

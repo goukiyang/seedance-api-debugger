@@ -10,21 +10,21 @@ export function MultiviewGenerationProgress({ state, taskId, previewReady, prepa
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!state?.createdAt || previewReady || state.videoReady || state.failed) return;
+    if (!state?.createdAt || previewReady || state.failed) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [state?.createdAt, state?.failed, state?.videoReady, previewReady]);
+  }, [state?.createdAt, state?.failed, previewReady]);
   if (!state) return null;
   const step = previewReady && !state.failed ? 4 : preparing && !state.failed ? 3 : state.step;
   const label = step === 4 ? '可以选帧' : preparing ? '正在准备选帧' : state.label;
   const elapsed = state.createdAt ? Math.max(0, Math.floor((now - Date.parse(state.createdAt)) / 1000)) : null;
-  if (step === 4 || state.videoReady && !preparing && !state.failed) return <section className={styles.progressComplete} aria-label="本次生成">
-    <Check size={14} /><span>{step === 4 ? '视频已就绪，可以选帧' : '视频已就绪'}</span>
+  if (step === 4) return <section className={styles.progressComplete} aria-label="本次生成">
+    <Check size={14} /><span>视频已就绪，可以选帧</span>
     {taskId && <a href={`/tasks/${encodeURIComponent(taskId)}`} target="_blank" rel="noreferrer">详情</a>}
   </section>;
   return <section className={styles.progress} aria-label="本次生成">
     <div className={styles.progressHeading}><strong>{label}</strong>
-      {elapsed !== null && !state.videoReady && step !== 4 && !state.failed && <small>提交后已用时 {Math.floor(elapsed / 60)}分{elapsed % 60}秒</small>}
+      {elapsed !== null && step !== 4 && !state.failed && <small>提交后已用时 {Math.floor(elapsed / 60)}分{elapsed % 60}秒</small>}
       {state.uncertain && step !== 4 && <small>上次确认的阶段保留，继续查询原请求</small>}
     </div>
     <ol className={styles.progressSteps}>{['提交', '等待生成', '生成视频', '准备选帧', '可以选帧'].map((text, index) =>

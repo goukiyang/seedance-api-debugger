@@ -2,7 +2,7 @@ import packageInfo from '../../package.json';
 import { PRICING_ADMIN_WRITES_ENABLED } from './pricing/build-mode';
 
 export const release = { version: packageInfo.version, channel: 'production', summary: PRICING_ADMIN_WRITES_ENABLED
-  ? '修复3D多视图进度查询偶尔停止更新；新视频就绪与选帧准备分开显示。已撤回的版本不再保留更新提醒。'
+  ? '相容回退版本：恢复本轮进度修复前的界面，保留快捷设置、高清原帧、上传恢复和原费用权限保护。'
   : '旧上传安全恢复、原图直传和已有高清结果保留。API质量设置和费率暂时只读，已保存配置不会自动改价。' };
 
 function numericOrder(a: string, b: string) {
