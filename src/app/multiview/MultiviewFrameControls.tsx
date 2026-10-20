@@ -23,7 +23,9 @@ export function MultiviewFrameControls(props: {
   const raf = useRef<number>();
   const idle = useRef<ReturnType<typeof setTimeout>>();
   const pointer = useRef<number | null>(null);
+  const cancelledPointer = useRef<number | null>(null);
   const keyboard = useRef(false);
+  const cancelledKeyboard = useRef(false);
   const alive = useRef(true);
   function clearTimers() { if (raf.current !== undefined) cancelAnimationFrame(raf.current); clearTimeout(idle.current); raf.current = undefined; }
   function start() {
@@ -34,12 +36,15 @@ export function MultiviewFrameControls(props: {
     gesture.current = createMultiviewFrameScrub(session,
       (frame, url) => { if (alive.current) setShown({ frame, url }); },
       message => {
+        if (pointer.current !== null) cancelledPointer.current = pointer.current;
+        if (keyboard.current) cancelledKeyboard.current = true;
         gesture.current = null; clearTimers(); pointer.current = null; keyboard.current = false;
         if (alive.current) { setActive(false); setShown(null); setTarget(live.current.frame); setError(message || ''); }
       });
     return true;
   }
   function change(frame: number) {
+    if (cancelledPointer.current !== null || cancelledKeyboard.current) return;
     if (!start()) return;
     targetRef.current = frame; setTarget(frame);
     if (raf.current === undefined) raf.current = requestAnimationFrame(() => { raf.current = undefined; gesture.current?.target(targetRef.current); });
@@ -48,7 +53,11 @@ export function MultiviewFrameControls(props: {
     }
   }
   function finish() { clearTimers(); gesture.current?.finish(targetRef.current); }
-  function cancel() { clearTimers(); gesture.current?.cancel(); pointer.current = null; keyboard.current = false; }
+  function cancel() {
+    if (pointer.current !== null) cancelledPointer.current = pointer.current;
+    if (keyboard.current) cancelledKeyboard.current = true;
+    clearTimers(); gesture.current?.cancel(); pointer.current = null; keyboard.current = false;
+  }
   useEffect(() => {
     alive.current = true;
     return () => { alive.current = false; clearTimers(); gesture.current?.cancel(); gesture.current = null; };
@@ -75,19 +84,26 @@ export function MultiviewFrameControls(props: {
         aria-valuetext={`第 ${target + 1} 帧，${props.timestamps[target]?.toFixed(3)} 秒`}
         title={props.timestamps.length < 2 ? '视频只有一帧' : '快速选帧'}
         onPointerDown={event => {
+          cancelledPointer.current = null;
           if (!start()) return;
           pointer.current = event.pointerId; targetRef.current = Number(event.currentTarget.value);
           event.currentTarget.setPointerCapture(event.pointerId);
         }}
         onPointerUp={event => {
+          if (cancelledPointer.current === event.pointerId) { cancelledPointer.current = null; return; }
           if (pointer.current !== event.pointerId) return;
           targetRef.current = Number(event.currentTarget.value); pointer.current = null; finish();
         }}
-        onPointerCancel={cancel}
-        onLostPointerCapture={event => { if (pointer.current === event.pointerId) cancel(); }}
+        onPointerCancel={() => { cancel(); cancelledPointer.current = null; }}
+        onLostPointerCapture={event => {
+          if (pointer.current === event.pointerId) cancel();
+          if (cancelledPointer.current === event.pointerId) cancelledPointer.current = null;
+        }}
         onChange={event => change(Number(event.target.value))}
         onKeyDown={event => {
           if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) {
+            if (!event.repeat) cancelledKeyboard.current = false;
+            if (cancelledKeyboard.current) { event.preventDefault(); return; }
             keyboard.current = true;
             if (event.key === 'PageUp' || event.key === 'PageDown') {
               event.preventDefault();
@@ -96,6 +112,9 @@ export function MultiviewFrameControls(props: {
           }
         }}
         onKeyUp={event => {
+          if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key) && cancelledKeyboard.current) {
+            cancelledKeyboard.current = false; return;
+          }
           if (keyboard.current && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) {
             keyboard.current = false; finish();
           }
