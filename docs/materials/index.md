@@ -1,5 +1,13 @@
 # 项目资料索引
 
+## MV-UX-PRE01 整合优化与两张设计原图（2026-10-19）
+
+项目video-api-debugger；来源本对话imagegen及用户认可/追加悬停滑条要求。[正式前置工单](../../tasks/todo/2026-10-19-multiview-integrated-ux-preflight.md) v1.0.0已完成必要前置，未实施业务/部署。关键词：原图设置、生成阶段、大拼图、悬停滑条、轻预览/原清晰度、同作品更新；用途U01–U06及A01–A15。
+
+- 图A原名[exec-21fe6e1b-8a59-4a0d-958d-ad42b4213639.png](2026-10-19-multiview-integrated-ux/exec-21fe6e1b-8a59-4a0d-958d-ad42b4213639.png)：主图与生成设置，R01。
+- 图B原名[exec-466c73bf-d8d2-435e-8edb-3d0d510722ff.png](2026-10-19-multiview-integrated-ux/exec-466c73bf-d8d2-435e-8edb-3d0d510722ff.png)：大拼图及情境工具，R01；尚无本次新增滑条，最终以工单§3.4补充。图中示例文字不作真实数据。
+- 原来源`/Users/gouki-youdoo/.codex/generated_images/01a01e28-6c5d-7723-a9d9-9f0abfc0cefc/`，两图1536×1024、sips及人工查看可读、cmp与原件同字节；保原名、本地归档，不公开Git。两图替代早期转圈示意的设计方向，不覆盖历史原件，不冒实际页面/性能证据。图A红星与500字示意不落地；图B选中格常显工具按最新hover/focus/手势固定规则替代。
+
 ## MV-PROGRESS-D01 生成进度设计（2026-10-19）
 
 项目video-api-debugger；来源：本轮用户文字“做3D生成进度展示的进度展示设计”，无新附件。关键词：本次生成、受理、原片准备、选帧、旧作品、未知恢复；[设计原文§17.5](../../tasks/todo/2026-10-17-multiview-instant-frame-workbench.md#175-mv-progress-d01-进度展示设计2026-10-19设计完成未实施)基于§17调查及76ef0f42源码复核，补充而不替代原调查/历史发布。包含布局示意、状态/操作表、恢复与落点；设计完成，未实施/部署/功能验收。UTF-8与入口可读，文字设计未作非必要哈希；既有页面图片沿原单，示意不是实页截图。
