@@ -743,10 +743,11 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     : receipt?.phase === 'accepted' ? 'submitted' : receipt?.phase === 'ready' ? 'video_ready'
       : receipt?.phase === 'closed' ? 'closed' : receipt?.phase === 'failed' || receipt?.phase === 'rejected' ? 'failed' : imageReady ? 'ready' : 'empty';
   useEffect(() => {
+    const confirmedProgress = taskProgress && receipt && taskProgress.key === receipt.key ? taskProgress.value : null;
     propsRef.current.onStateChange?.({
       phase: ready ? phase : 'empty',
-      progress: ready ? phase === 'submitted' && taskProgress?.key === receipt?.key ? taskProgress.value
-        : multiviewGenerationProgress(phase, null, taskProgress?.key === receipt?.key ? taskProgress.value : null) : null,
+      progress: ready ? phase === 'submitted' && confirmedProgress ? confirmedProgress
+        : multiviewGenerationProgress(phase, null, confirmedProgress) : null,
       busy: ready && (working || submitting || closing || active),
       ...(ready && receipt?.taskId ? { taskId: receipt.taskId } : {}),
       unsaved: ready && draftEdited && !saved && JSON.stringify(draft) !== retainedDraft || requestStorageFailed || promptRisk.unsaved || settingsRisk.unsaved,

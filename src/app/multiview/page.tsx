@@ -640,7 +640,7 @@ function MultiviewPageContent() {
   }, [draft?.editing, editorFrame, loadPreviewFrame, previewState.manifest, view.tab, visible]);
   useEffect(() => {
     if (!draft) return;
-    const keep = new Set([...draft.slots.map(item => item.frame), ...scrubFrames.current, ...Object.values(quickPreview), ...(draft.editing ? [-2, -1, 0, 1, 2].map(delta => editorFrame + delta) : []), ...(preview !== null ? [preview] : [])]);
+    const keep = new Set([...draft.slots.map(item => item.frame), ...Array.from(scrubFrames.current), ...Object.values(quickPreview), ...(draft.editing ? [-2, -1, 0, 1, 2].map(delta => editorFrame + delta) : []), ...(preview !== null ? [preview] : [])]);
     let bytes = Object.values(frames).reduce((total, item) => total + (item.originalBytes || 0), 0);
     const removable: number[] = [];
     for (const frame of Object.keys(frames).map(Number)) {
