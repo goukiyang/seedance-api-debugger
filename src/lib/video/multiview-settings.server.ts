@@ -136,13 +136,50 @@ async function readReceipt(user: SessionUser, mutationId: string, db: Db) {
     || typeof value.requestHash !== 'string' || !/^[a-f0-9]{64}$/.test(value.requestHash) || !record(value.receipt)) throw unavailable();
   const receipt = value.receipt;
   const settings = parseMultiviewSettingsDto(receipt.settings);
-  if (receipt.state !== 'committed' || receipt.mutationId !== mutationId || !['create', 'save'].includes(String(receipt.action))
+  if (receipt.state !== 'committed' || receipt.mutationId !== mutationId || !['create', 'save', 'rename', 'delete'].includes(String(receipt.action))
     || !settings || !settings.ownedByViewer || row.target_id !== settings.id || digest(stable(settings.value)) !== settings.contentHash) throw unavailable();
   return { requestHash: value.requestHash, receipt: { state: 'committed', mutationId, action: receipt.action, settings } as MultiviewSettingsReceipt };
 }
 export async function readMultiviewSettingsMutation(user: SessionUser, mutationId: string) {
   await assertMultiviewSettingsActor(user);
   return (await readReceipt(user, mutationId, prisma))?.receipt ?? { state: 'not_found' as const, mutationId };
+}
+export async function manageMultiviewSettings(user: SessionUser, id: string, input: unknown, action: 'rename' | 'delete'): Promise<MultiviewSettingsReceipt> {
+  await assertMultiviewSettingsActor(user);
+  if (!isMultiviewSettingsId(id) || !record(input) || Object.keys(input).some(key => !['mutationId', 'expectedRevision', ...(action === 'rename' ? ['action', 'name'] : [])].includes(key))
+    || !isMultiviewSettingsMutationId(input.mutationId) || !Number.isSafeInteger(input.expectedRevision) || Number(input.expectedRevision) < 1
+    || action === 'rename' && (input.action !== 'rename' || typeof input.name !== 'string' || !input.name.trim() || input.name.length > 80)) throw invalid();
+  const mutationId = input.mutationId;
+  const requestHash = digest(stable({ id, action, ...input }));
+  const replay = async (db: Db) => {
+    const found = await readReceipt(user, mutationId, db);
+    if (found && found.requestHash !== requestHash) throw new MultiviewSettingsError('原操作编号对应其他内容，请先核对原操作。', 409, 'MULTIVIEW_SETTINGS_MUTATION_CONFLICT', false);
+    return found?.receipt || null;
+  };
+  const prior = await replay(prisma); if (prior) return prior;
+  try {
+    return await prisma.$transaction(async db => {
+      await assertMultiviewSettingsActor(user, db);
+      const prior = await replay(db); if (prior) return prior;
+      const current = await readRow(user, id, db);
+      if (current.value.ownerId !== user.id) throw new MultiviewSettingsError('只能管理本人保存的设置。', 403, 'MULTIVIEW_SETTINGS_NOT_OWNER');
+      if (current.value.revision !== input.expectedRevision) throw changed();
+      const next = action === 'rename' ? { ...current.value, name: (input.name as string).trim(), revision: current.value.revision + 1, updatedAt: new Date().toISOString() } : current.value;
+      if (!Number.isSafeInteger(next.revision)) throw invalid();
+      const where = { key: current.row.key, value_json: current.row.value_json, updated_by: user.id };
+      const changedRow = action === 'delete' ? await db.platformSetting.deleteMany({ where })
+        : await db.platformSetting.updateMany({ where, data: { value_json: JSON.stringify(next), updated_by: user.id } });
+      if (changedRow.count !== 1) throw changed();
+      const receipt: MultiviewSettingsReceipt = { state: 'committed', mutationId, action, settings: dto(next, user.id) };
+      await db.operationLog.create({ data: { id: receiptId(user.id, mutationId), operator_id: user.id, action: ACTION,
+        target_type: 'MultiviewSettings', target_id: id, detail: JSON.stringify({ requestHash, receipt }) } });
+      return receipt;
+    });
+  } catch (error) {
+    if (error instanceof MultiviewSettingsError || error instanceof AuthError) throw error;
+    const prior = await replay(prisma).catch(() => null); if (prior) return prior;
+    throw new MultiviewSettingsError('操作结果待确认，请查询原操作，不要重复提交。', 503, 'MULTIVIEW_SETTINGS_SAVE_UNKNOWN', false);
+  }
 }
 async function generationSavePreset(user: SessionUser, presetVersion: string, rawBinding: unknown, db: Db = prisma) {
   const actor = await assertMultiviewSettingsActor(user, db);

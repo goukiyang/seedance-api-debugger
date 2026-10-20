@@ -61,7 +61,7 @@ async function main() {
       const store = { headers, cookies: new RequestCookies(headers) } as unknown as Parameters<typeof requestAsyncStorage.run>[0];
       return requestAsyncStorage.run(store, async () => { const user = await getSession(); assert.ok(user); return callback(user); });
     };
-    const invoke = async (actor: string | null, method: 'GET' | 'POST' | 'PATCH', url: string, body?: unknown, sameOrigin = true) => {
+    const invoke = async (actor: string | null, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, body?: unknown, sameOrigin = true) => {
       const headers = new Headers({ ...(actor ? { Cookie: `session=${tokens[actor]}`, 'x-app-session-user': actor } : {}),
         ...(body === undefined ? {} : { 'Content-Type': 'application/json', Origin: sameOrigin ? 'http://mv-settings-isolated.invalid' : 'http://other.invalid' }),
         Host: 'mv-settings-isolated.invalid' });
@@ -73,7 +73,8 @@ async function main() {
         const pathOnly = url.split('?')[0];
         if (pathOnly.startsWith('/mutations/')) return mutation.GET(request, { params: { mutationId: pathOnly.slice('/mutations/'.length) } });
         if (pathOnly.endsWith('/apply')) return apply.POST(request, { params: { id: pathOnly.split('/')[1] } });
-        if (pathOnly.length > 1) return method === 'GET' ? item.GET(request, { params: { id: pathOnly.slice(1) } }) : item.PATCH(request, { params: { id: pathOnly.slice(1) } });
+        if (pathOnly.length > 1) return method === 'GET' ? item.GET(request, { params: { id: pathOnly.slice(1) } })
+          : method === 'DELETE' ? item.DELETE(request, { params: { id: pathOnly.slice(1) } }) : item.PATCH(request, { params: { id: pathOnly.slice(1) } });
         return method === 'GET' ? collection.GET(request) : collection.POST(request);
       });
       assert.match(response.headers.get('cache-control') || '', /private.*no-store/);
@@ -205,6 +206,32 @@ async function main() {
     assert.equal(contract.parseMultiviewFrameSettingsInput({ schema: 1, slots, layout: {} }), null);
     assert.ok(!JSON.stringify(frameValue).includes('taskId'));
     checks.push('exact_frame_order_names_full_timeline_cfr_longer_compatible_shorter_different_fps_vfr_rejected_without_media');
+
+    const copied = copy.body.settings as import('../src/lib/video/multiview-settings-contract').MultiviewSettingsDto;
+    const rename = { mutationId: randomUUID(), expectedRevision: 1, action: 'rename', name: '重命名但不改参数' };
+    assert.equal((await invoke('settings-owner', 'PATCH', `/${copied.id}`, rename)).status, 403);
+    assert.equal((await invoke('settings-admin', 'DELETE', `/${copied.id}`, { mutationId: randomUUID(), expectedRevision: 1 })).status, 403);
+    assert.equal((await invoke('settings-peer', 'DELETE', `/${copied.id}`, { mutationId: randomUUID(), expectedRevision: 1 }, false)).status, 403);
+    const renamed = await invoke('settings-peer', 'PATCH', `/${copied.id}`, rename);
+    assert.equal(renamed.status, 200); assert.equal(renamed.body.action, 'rename');
+    assert.equal(renamed.body.settings.revision, 2);
+    assert.deepEqual(renamed.body.settings.value, copied.value);
+    assert.equal(renamed.body.settings.contentHash, copied.contentHash);
+    assert.equal(renamed.body.settings.isShared, copied.isShared);
+    assert.deepEqual((await invoke('settings-peer', 'PATCH', `/${copied.id}`, rename)).body, renamed.body);
+    const deletion = { mutationId: randomUUID(), expectedRevision: 2 };
+    assert.equal((await invoke('settings-peer', 'DELETE', `/${copied.id}`, { ...deletion, expectedRevision: 1 })).status, 409);
+    const deleted = await invoke('settings-peer', 'DELETE', `/${copied.id}`, deletion);
+    assert.equal(deleted.status, 200); assert.equal(deleted.body.action, 'delete');
+    assert.equal((await invoke('settings-peer', 'GET', `/${copied.id}`)).status, 404);
+    assert.deepEqual((await invoke('settings-peer', 'DELETE', `/${copied.id}`, deletion)).body, deleted.body);
+    assert.deepEqual((await invoke('settings-peer', 'GET', `/mutations/${deletion.mutationId}`)).body, deleted.body);
+    assert.deepEqual((await invoke('settings-peer', 'GET', `/mutations/${rename.mutationId}`)).body, renamed.body);
+    assert.notEqual((await invoke('settings-peer', 'PATCH', `/${copied.id}`, { ...rename, mutationId: randomUUID(), expectedRevision: 2 })).status, 200);
+    assert.equal((await invoke('settings-peer', 'DELETE', `/${saved.id}`, deletion)).status, 409);
+    assert.equal(JSON.stringify(body), frozen);
+    assert.equal(await prisma.videoTask.count(), 1);
+    checks.push('metadata_owner_only_cas_name_preserves_parameters_delete_receipt_replay_and_no_resurrection_or_frozen_rewrite');
 
     await prisma.user.update({ where: { id: 'settings-peer' }, data: { status: 'disabled' } });
     assert.equal((await invoke('settings-peer', 'GET', '?kind=generation')).status, 401);

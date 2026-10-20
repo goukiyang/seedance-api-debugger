@@ -23,10 +23,11 @@ import { MultiviewPromptDialog, parsePresetState } from './MultiviewPromptDialog
 import { MultiviewSettingsPicker, generationSettingsValue, type MultiviewSettingsPickerApplyResult,
   type MultiviewSettingsPickerRecord } from './MultiviewSettingsPicker';
 import { parseMultiviewSettingsDto } from '@/lib/video/multiview-settings-contract';
+import { multiviewGenerationProgress, type MultiviewGenerationProgressState, type MultiviewTaskProgressInput } from './multiview-generation-progress';
 import styles from './multiview-generation.module.css';
 
 export type MultiviewGenerationPhase = 'empty' | 'ready' | 'submitting' | 'submitted' | 'unknown' | 'failed' | 'closed' | 'video_ready';
-export type MultiviewGenerationPanelState = { phase: MultiviewGenerationPhase; busy: boolean; taskId?: string; unsaved?: boolean; leavingBusy?: boolean };
+export type MultiviewGenerationPanelState = { phase: MultiviewGenerationPhase; busy: boolean; taskId?: string; unsaved?: boolean; leavingBusy?: boolean; progress?: MultiviewGenerationProgressState | null };
 export type MultiviewGenerationReady = { taskId: string; requestKey: string; ownerId: string;
   startedFromSourceKey: string | null; explicitOpen: boolean };
 export type MultiviewGenerationPanelProps = {
@@ -50,7 +51,7 @@ type RequestReceipt = { schema: 1; ownerId: string; key: string; fingerprint: st
   closeAttempted?: boolean; newRequestAllowed?: boolean };
 type Association = { schema: 1; ownerId: string; requestId: string; workspaceTabId: string; assetId: string; referenceImageId?: string };
 type ApiError = { error?: string; message?: string; code?: string; task_id?: string; existing_task_id?: string };
-type TaskStatus = ApiError & { id: string; local_status: string; idempotency_key?: string | null; submission_unconfirmed?: boolean };
+type TaskStatus = ApiError & MultiviewTaskProgressInput;
 type Quote = { key: string; points: number; pricingRevision: string | null; pricingQuoteToken?: string };
 type RequestCheckOutcome = 'pending' | 'stop';
 type RequestResponse = ApiError & { request_receipt?: unknown; new_request_allowed?: unknown };
@@ -223,6 +224,25 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const [sessionTab, setSessionTab] = useState('');
   const [draft, setDraft] = useState<MultiviewGenerationDraft | null>(null);
   const [receipt, setReceipt] = useState<RequestReceipt | null>(null);
+  const [taskProgress, setTaskProgress] = useState<{ key: string; value: MultiviewGenerationProgressState } | null>(null);
+  const [sections, setSections] = useState({ owner: '', advanced: false, prompt: false, card: false, create: false });
+  useEffect(() => {
+    const next = { owner, advanced: false, prompt: false, card: false, create: false };
+    try {
+      const stored = JSON.parse(localStorage.getItem(`sd2:multiview:generation-sections:v1:${owner}`) || 'null');
+      if (stored && typeof stored === 'object') for (const key of ['advanced', 'prompt', 'card', 'create'] as const)
+        if (typeof stored[key] === 'boolean') next[key] = stored[key];
+    } catch { /* Display preferences never block restoring the actual draft. */ }
+    setSections(next);
+  }, [owner]);
+  useEffect(() => {
+    if (!sessionReady || sections.owner !== owner) return;
+    try { localStorage.setItem(`sd2:multiview:generation-sections:v1:${owner}`, JSON.stringify(sections)); } catch {}
+  }, [owner, sections, sessionReady]);
+  function toggleSection(key: 'advanced' | 'prompt' | 'card' | 'create', open: boolean) {
+    if (!sessionReady || sections.owner !== owner) return;
+    setSections(current => current[key] === open ? current : { ...current, [key]: open });
+  }
   const [association, setAssociation] = useState<Association | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [cards, setCards] = useState<VideoCard[]>([]);
@@ -677,8 +697,10 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
       const task = await readJsonResponse<TaskStatus>(response);
       if (!requestCurrent()) return 'stop';
       if (!response.ok || task.id !== next.taskId || task.idempotency_key !== next.key) { if ([401, 403, 404].includes(response.status)) invalidateMedia(); throw new Error(task.message || task.error || '原任务状态或请求编号暂不可确认，已保留原记录。'); }
+      setTaskProgress(previous => ({ key: next.key, value: multiviewGenerationProgress('submitted', task, previous?.key === next.key ? previous.value : null)! }));
       if (['failed', 'cancelled'].includes(task.local_status)) { saveReceipt({ ...next, phase: 'failed' }); setStatus(task.message || '原视频任务未完成，输入已保留。不会自动重新生成。'); void refreshCredits(); return 'stop'; }
-      if (task.local_status !== 'succeeded' || task.submission_unconfirmed) { setStatus(task.submission_unconfirmed ? '原任务受理结果待确认，请勿重复生成。' : task.local_status === 'running' ? '视频正在生成，可继续编辑下一次的设置。' : '原视频任务已受理，正在等待处理。'); return 'pending'; }
+      if (task.local_status !== 'succeeded' || task.submission_unconfirmed) { setStatus(multiviewGenerationProgress('submitted', task)!.label); return 'pending'; }
+      setStatus('正在准备视频与选帧');
       const media = await fetch(`/api/video/multiview/${encodeURIComponent(next.taskId!)}`, { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]) });
       const result = await readJsonResponse<ApiError & { info?: { taskId: string; sourceVersion: string } }>(media);
       if (!requestCurrent()) return 'stop';
@@ -693,7 +715,10 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
       }
       return 'stop';
     } catch (cause) {
-      if (requestCurrent() && !controller.signal.aborted) setStatus(message(cause, '原请求暂未确认，请重新查询。'));
+      if (requestCurrent() && !controller.signal.aborted) {
+        setStatus(message(cause, '原请求暂未确认，请重新查询。'));
+        setTaskProgress(value => value?.key === previous.key ? { ...value, value: { ...value.value, uncertain: true, label: '状态暂未确认' } } : value);
+      }
       return !controller.signal.aborted && previous.taskId && pendingActive(previous) ? 'pending' : 'stop';
     }
     finally { if (checkLock.current === token) { checkLock.current = null; setChecking(false); } if (checkAbort.current === controller) checkAbort.current = null; }
@@ -720,12 +745,14 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   useEffect(() => {
     propsRef.current.onStateChange?.({
       phase: ready ? phase : 'empty',
+      progress: ready ? phase === 'submitted' && taskProgress?.key === receipt?.key ? taskProgress.value
+        : multiviewGenerationProgress(phase, null, taskProgress?.key === receipt?.key ? taskProgress.value : null) : null,
       busy: ready && (working || submitting || closing || active),
       ...(ready && receipt?.taskId ? { taskId: receipt.taskId } : {}),
       unsaved: ready && draftEdited && !saved && JSON.stringify(draft) !== retainedDraft || requestStorageFailed || promptRisk.unsaved || settingsRisk.unsaved,
       leavingBusy: working || submitting || closing || Boolean(creating) || promptRisk.busy || settingsRisk.busy,
     });
-  }, [ready, phase, working, submitting, closing, active, receipt?.taskId, saved, draftEdited, draft, retainedDraft, requestStorageFailed, creating, promptRisk, settingsRisk]);
+  }, [ready, phase, working, submitting, closing, active, receipt?.taskId, receipt?.key, taskProgress, saved, draftEdited, draft, retainedDraft, requestStorageFailed, creating, promptRisk, settingsRisk]);
 
   async function generate() {
     if (!draft || !ready || !allowed || !imageReady || !currentProject || cardSelectionInvalid || approvalBlocked || !currentQuote || !presetReady || !presetState || !prompt.valid
@@ -918,7 +945,11 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
       <div className={styles.settings}>
         <MultiviewSettingsPicker kind="generation" ownerId={owner} authorityKey={authorityKey} disabled={settingsDisabled}
           value={presetReady ? generationSettingsValue(draft) : null} binding={draft.settingsBinding}
-          onApply={applyGenerationSettings} onReset={useCurrentRotationPreset} onSaved={adoptSavedGenerationSettings} onStateChange={setSettingsRisk} />
+          onApply={applyGenerationSettings} onReset={useCurrentRotationPreset} onSaved={adoptSavedGenerationSettings} onStateChange={setSettingsRisk}
+          onRenamed={(item, previousRevision) => {
+            const binding = draftRef.current?.settingsBinding;
+            if (binding?.id === item.id && binding.revision === previousRevision) change({ settingsBinding: { id: item.id, revision: item.revision } });
+          }} />
         <div className={styles.preset}><strong>360°旋转模板</strong>{user.role === 'admin' && <button type="button" className={styles.quiet} disabled={formDisabled} onClick={() => setPromptOpen(true)}>{draft.settingsBinding ? '默认模板提示词' : '模板提示词'}</button>}</div>
         {draft.settingsBinding && <small>使用这份设置保存时的模板提示词。</small>}
         {presetError && !active && <p className={styles.feedback} role="status">{presetError}<button type="button" className={styles.quiet} onClick={() => setPresetRefresh(value => value + 1)}>重新读取</button></p>}
@@ -930,23 +961,23 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         <label className={styles.supplement}>补充要求（可选）<textarea rows={3} value={draft.supplement} disabled={submitting} placeholder="如：保持帽子和背包完整，背景使用浅灰色" onChange={event => change({ supplement: event.target.value })} /><small>会加入本次视频文案，不修改固定模板</small></label>
         {presetReady && !prompt.valid && <p className={styles.feedback} role="status">{prompt.error} 当前完整文案 {prompt.characters} 字，内容未截断。</p>}
         {!seedValid && <p className={styles.feedback} role="status">随机种子须为 -1 或0至2147483647的整数，原值已保留，请在高级设置中调整。</p>}
-        <details className={styles.advanced}><summary>高级设置</summary>
+        <details className={styles.advanced} open={sections.owner === owner && sections.advanced} onToggle={event => toggleSection('advanced', event.currentTarget.open)}><summary>高级设置</summary>
           <div className={styles.parameters}><label>画面比例<select value={draft.ratio} disabled={formDisabled} onChange={event => change({ ratio: event.target.value })}>{!RATIO_OPTIONS.some(value => value === draft.ratio) && <option value={draft.ratio}>{draft.ratio}</option>}{RATIO_OPTIONS.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
             <label>随机种子<input type="number" value={draft.seed} disabled={formDisabled} onChange={event => change({ seed: Number(event.target.value) })} /></label></div>
           <div className={styles.checks}>{(['generateAudio', 'returnLastFrame', 'watermark'] as const).map((key, index) => <label key={key}><input type="checkbox" checked={draft[key]} disabled={formDisabled} onChange={event => change({ [key]: event.target.checked })} />{['生成声音', '返回末帧', '水印'][index]}</label>)}</div>
-          {(user.role === 'admin' || Boolean(draft.settingsBinding)) && presetReady && <details><summary>本次完整文案</summary><p className={styles.fullPrompt}>{prompt.prompt}</p></details>}
+          {(user.role === 'admin' || Boolean(draft.settingsBinding)) && presetReady && <details open={sections.owner === owner && sections.prompt} onToggle={event => toggleSection('prompt', event.currentTarget.open)}><summary>本次完整文案</summary><p className={styles.fullPrompt}>{prompt.prompt}</p></details>}
           {presetReady && <small>完整文案 {prompt.characters} 字，可再补充 {Math.max(0, prompt.remainingCharacters)} 字。</small>}
           <button type="button" disabled={formDisabled} onClick={() => { const defaults = defaultMultiviewGenerationDraft(draft.workspaceTabId); change({ ...defaults, presetVersion: draft.presetVersion, mainImage: draft.mainImage, projectId: draft.projectId, videoCardId: draft.videoCardId, supplement: draft.supplement }); }}>恢复模板参数</button>
         </details>
         <div className={styles.destination}>
           <label>保存到项目<select value={draft.projectId} disabled={formDisabled || projectLoading} onChange={event => change({ projectId: event.target.value, videoCardId: '', resolutionApprovalConfirmed: false, resolutionApprovalId: '' })}><option value="">{projectLoading ? '正在读取项目…' : '选择项目'}</option>{draft.projectId && !currentProject && <option value={draft.projectId}>原项目暂不可用，请重新选择</option>}{projects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-          <details open={cardSelectionInvalid || needsApproval && !currentCard}>
+          <details open={cardSelectionInvalid || needsApproval && !currentCard || sections.owner === owner && sections.card} onToggle={event => toggleSection('card', event.currentTarget.open)}>
             <summary>关联视频卡（可选）{currentCard ? `：${currentCard.title}` : ''}</summary>
             <label>视频卡（可选）<select value={draft.videoCardId} disabled={formDisabled || cardLoading || !currentProject} onChange={event => change({ videoCardId: event.target.value, resolutionApprovalConfirmed: false, resolutionApprovalId: '' })}><option value="">{cardLoading ? '正在读取视频卡…' : '不关联视频卡'}</option>{draft.videoCardId && !currentCard && <option value={draft.videoCardId}>原视频卡暂不可用，请重新选择或取消关联</option>}{cards.map(item => <option key={item.id} value={item.id} disabled={!canGenerateInCard(item)}>{item.title}{!canGenerateInCard(item) ? '（不可生成）' : ''}</option>)}</select></label>
             {cardSelectionInvalid && !cardLoading && <p className={styles.feedback} role="status">原视频卡暂不可用于生成，请重新选择或明确取消关联，其他输入已保留。</p>}
           </details>
           <button type="button" className={styles.quiet} disabled={formDisabled} onClick={() => setRevision(value => value + 1)}><RefreshCw size={13} />刷新列表</button>
-          <details><summary>新建项目或视频卡</summary><div className={styles.createRow}><input aria-label="新项目名称" value={projectName} maxLength={80} placeholder="新项目名称" disabled={formDisabled} onChange={event => setProjectName(event.target.value)} /><button type="button" disabled={formDisabled || !projectName.trim()} onClick={() => void createDestination('project')}>新建项目</button></div>
+          <details open={sections.owner === owner && sections.create} onToggle={event => toggleSection('create', event.currentTarget.open)}><summary>新建项目或视频卡</summary><div className={styles.createRow}><input aria-label="新项目名称" value={projectName} maxLength={80} placeholder="新项目名称" disabled={formDisabled} onChange={event => setProjectName(event.target.value)} /><button type="button" disabled={formDisabled || !projectName.trim()} onClick={() => void createDestination('project')}>新建项目</button></div>
             <div className={styles.createRow}><input aria-label="新视频卡标题" value={cardTitle} maxLength={100} placeholder="新视频卡标题" disabled={formDisabled} onChange={event => setCardTitle(event.target.value)} /><button type="button" disabled={formDisabled || !currentProject || !cardTitle.trim()} onClick={() => void createDestination('card')}>新建视频卡</button></div></details>
         </div>
         {needsApproval && <p className={styles.feedback}>当前项目的1080p生成需要关联已有候选、当前最佳或最终版的视频卡，并通过该卡审批。</p>}

@@ -39,6 +39,12 @@ export const MULTIVIEW_SETTINGS_FIXTURE_SOURCES = [
   "src/app/multiview/multiview-preview-image.ts",
   "src/app/multiview/MultiviewFrameImage.tsx",
   "src/app/multiview/multiview-original-queue.ts",
+  "src/app/multiview/multiview-frame-scrub.ts",
+  "src/app/multiview/multiview-generation-progress.ts",
+  "src/app/multiview/MultiviewFrameControls.tsx",
+  "src/app/multiview/MultiviewGenerationProgress.tsx",
+  "src/components/ProductActionMenu.tsx",
+  "src/components/ProductActionMenu.module.css",
   "src/app/multiview/page.tsx",
   "src/app/multiview/multiview.module.css",
   "src/app/multiview/multiview-generation.module.css"

@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { CopyPlus, RefreshCw, Save } from 'lucide-react';
+import { CopyPlus, Pencil, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { useProductDialog } from '@/components/useProductDialog';
+import { ProductActionMenu } from '@/components/ProductActionMenu';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { uploadSession } from '@/lib/http/upload-session';
@@ -23,6 +24,7 @@ type Props = { kind: MultiviewSettingsKind; ownerId: string; authorityKey: strin
   value: MultiviewSettingsPickerValue | null; binding?: MultiviewSettingsBinding; source?: MultiviewSettingsSource; target?: MultiviewSettingsSource;
   onApply: (result: MultiviewSettingsPickerApplyResult) => void | Promise<void>; onReset?: () => void | Promise<void>;
   onSaved?: (record: MultiviewSettingsPickerRecord) => void | Promise<void>;
+  onRenamed?: (record: MultiviewSettingsPickerRecord, previousRevision: number) => void;
   onStateChange?: (state: { busy: boolean; unsaved: boolean }) => void };
 type Mutation = { mutationId: string; kind: MultiviewSettingsKind };
 const base = '/api/multiview/settings';
@@ -51,7 +53,7 @@ export function MultiviewSettingsPicker(props: Props) {
 }
 
 function MultiviewSettingsPickerContent(props: Props) {
-  const { prompt, productDialog } = useProductDialog();
+  const { prompt, confirm, productDialog } = useProductDialog();
   const label = props.kind === 'generation' ? '生成设置' : '选帧方案';
   const inputId = useId();
   const [items, setItems] = useState<Summary[]>([]);
@@ -158,11 +160,17 @@ function MultiviewSettingsPickerContent(props: Props) {
     pendingRef.current = next; setPending(next);
   }
   function adoptReceipt(payload: unknown, mutationId: string) {
-    if (!object(payload) || payload.state !== 'committed' || payload.mutationId !== mutationId || !['create', 'save'].includes(String(payload.action))) return false;
+    if (!object(payload) || payload.state !== 'committed' || payload.mutationId !== mutationId || !['create', 'save', 'rename', 'delete'].includes(String(payload.action))) return false;
     const saved = record(payload.settings, props.kind); if (!saved) return false;
     clearPending(mutationId);
+    if (payload.action === 'delete') {
+      setItems(previous => previous.filter(item => item.id !== saved.id));
+      setSelectedRecord(previous => previous?.id === saved.id ? null : previous);
+      setNotice('设置已删除，当前输入和已有任务保留；请选用有效设置或默认模板后继续。');
+      return saved;
+    }
     setItems(previous => [saved, ...previous.filter(item => item.id !== saved.id)]);
-    setNotice(`${label}已保存${saved.isShared ? '，同事可选用' : '，仅自己可见'}。`);
+    setNotice(payload.action === 'rename' ? '设置已重命名。' : `${label}已保存${saved.isShared ? '，同事可选用' : '，仅自己可见'}。`);
     return saved;
   }
   async function queryOriginal() {
@@ -173,9 +181,50 @@ function MultiviewSettingsPickerContent(props: Props) {
       const response = await fetch(`${base}/mutations/${encodeURIComponent(original.mutationId)}`, { headers: headers(scope.owner), cache: 'no-store', signal: AbortSignal.timeout(30000) });
       const payload = await readJsonResponse<unknown>(response);
       if (!current(scope)) return;
-      if (!response.ok || !adoptReceipt(payload, original.mutationId)) setNotice('保存结果仍待确认，请继续查询原保存；不会重复另存。');
-    } catch { if (current(scope)) setNotice('保存结果暂未确认，请继续查询原保存；当前设置保留。'); }
+      const restored = response.ok ? adoptReceipt(payload, original.mutationId) : null;
+      if (!restored) setNotice('操作结果仍待确认，请继续查询原操作；不会重复提交。');
+      else if (object(payload) && payload.action === 'rename') live.current.onRenamed?.(restored, restored.revision - 1);
+    } catch { if (current(scope)) setNotice('操作结果暂未确认，请继续查询原操作；当前设置保留。'); }
     finally { if (current(scope)) { lock.current = false; setBusy(false); } }
+  }
+  async function manage(action: 'rename' | 'delete', anchor: HTMLElement) {
+    if (!displaySelection?.ownedByViewer || lock.current || pendingRef.current || storageBlocked || live.current.disabled) return;
+    const item = displaySelection; const scope = capture(); if (!current(scope)) return;
+    const submit = async (name?: string) => {
+      if (!current(scope) || lock.current || pendingRef.current || live.current.disabled) throw new Error('操作状态已变化，请重新打开设置管理。');
+      let other: Mutation | null;
+      try { other = readOriginal(); } catch { setStorageBlocked(true); throw new Error('原操作记录暂不可读取，尚未提交。'); }
+      if (other) { pendingRef.current = other; setPending(other); throw new Error('已有操作待确认，请先查询原操作。'); }
+      const mutationId = crypto.randomUUID(); const original = { mutationId, kind: props.kind };
+      try {
+        const bytes = JSON.stringify(original); localStorage.setItem(`${storageKey}:${mutationId}`, bytes);
+        if (localStorage.getItem(`${storageKey}:${mutationId}`) !== bytes) throw new Error('not_retained');
+      } catch { setStorageBlocked(true); throw new Error('原操作编号未能保留，尚未提交。'); }
+      pendingRef.current = original; setPending(original); lock.current = true; setBusy(true);
+      try {
+        const response = await fetch(`${base}/${encodeURIComponent(item.id)}`, { method: action === 'delete' ? 'DELETE' : 'PATCH',
+          headers: headers(scope.owner), body: JSON.stringify({ mutationId, expectedRevision: item.revision, ...(action === 'rename' ? { action, name } : {}) }),
+          signal: AbortSignal.timeout(30000) });
+        const payload = await readJsonResponse<unknown>(response);
+        if (!current(scope)) return;
+        const changed = response.ok && object(payload) && payload.action === action ? adoptReceipt(payload, mutationId) : null;
+        if (!changed) {
+          if (object(payload) && payload.notCommitted === true) { clearPending(mutationId); void load(); throw new Error('本次未修改，设置可能已变化。请重新读取后再操作。'); }
+          throw new Error('操作结果待确认，请查询原操作，不会重复提交。');
+        }
+        if (action === 'rename') {
+          setSelectedRecord(changed);
+          live.current.onRenamed?.(changed, item.revision);
+        }
+      } finally { if (current(scope)) { lock.current = false; setBusy(false); } }
+    };
+    if (action === 'rename') {
+      await prompt('设置名称', item.name, { title: '重命名设置', anchor, maxLength: 80, onSubmit: name => submit(name) });
+    } else {
+      await confirm(`删除“${item.name}”？${item.isShared ? '同事将无法再选用。' : ''}现有图片、视频和任务保留。`, {
+        title: '删除设置', confirmLabel: '删除', danger: true, anchor, onSubmit: () => submit(),
+      });
+    }
   }
   async function save(copy: boolean, anchor: HTMLElement) {
     if (lock.current || pendingRef.current || storageBlocked || live.current.disabled || !valueRef.current) return;
@@ -234,7 +283,7 @@ function MultiviewSettingsPickerContent(props: Props) {
     await prompt(`保存${label}，不包含图片、视频、作品或项目归属。`, name, { title: copy ? '另存为设置' : '保存设置', confirmLabel: '保存设置', maxLength: 80, anchor,
       checkbox: { label: '共享给同事', checked: true }, onDraftChange: setDialogDirty, onSubmit: submit });
   }
-  async function apply(id: string) {
+  async function apply(id: string, editing = false) {
     if (lock.current || props.disabled) return;
     const scope = capture(); if (!current(scope)) return;
     const targetKey = JSON.stringify(props.target || null); const valueKey = JSON.stringify(valueRef.current);
@@ -249,6 +298,7 @@ function MultiviewSettingsPickerContent(props: Props) {
       const detail = await readJsonResponse<unknown>(response); if (!current(scope)) return;
       const fresh = object(detail) ? record(detail.settings, props.kind) : null;
       if (!response.ok || !fresh) throw new Error('这份设置暂不可用，当前输入保留；请刷新列表。');
+      if (editing && !fresh.ownedByViewer) throw new Error('共享设置只能由创建者编辑，可另存为自己的设置。');
       const checked = await fetch(`${base}/${encodeURIComponent(id)}/apply`, { method: 'POST', headers: headers(scope.owner),
         body: JSON.stringify({ expectedRevision: fresh.revision, ...(props.kind === 'frame' ? { target: props.target } : {}) }), signal: AbortSignal.timeout(30000) });
       const payload = await readJsonResponse<unknown>(checked); if (!current(scope)) return;
@@ -269,7 +319,7 @@ function MultiviewSettingsPickerContent(props: Props) {
       await live.current.onApply(result);
       if (!current(scope)) return;
       setSelected(id); setSelectedRecord(applied); setItems(previous => previous.map(item => item.id === id ? applied : item));
-      setNotice(`已选用${label}。`);
+      setNotice(editing ? '已载入原设置，调整后点击保存设置覆盖。' : '');
     } catch (cause) { if (current(scope)) setNotice(cause instanceof Error ? cause.message : '设置未应用，原输入保留。'); }
     finally { if (current(scope)) { lock.current = false; setBusy(false); } }
   }
@@ -277,18 +327,25 @@ function MultiviewSettingsPickerContent(props: Props) {
     <div className={styles.settingsPickerRow}>
       <label className={styles.settingsPickerSelect} htmlFor={inputId}>{label}<select id={inputId} value={selected} disabled={props.disabled || busy || loading} onChange={event => void apply(event.target.value)}>
         <option value="">{props.kind === 'generation' ? '当前360°旋转模板' : '当前选帧'}</option>
-        {selected && !items.some(item => item.id === selected) && <option value={selected}>{selectedRecord?.name || '已选设置（刷新后可核对）'}</option>}
+        {selected && !items.some(item => item.id === selected) && <option value={selected}>{selectedRecord?.name || '原设置待核对（输入保留）'}</option>}
         {items.map(item => <option value={item.id} key={item.id}>{item.name} · {item.ownedByViewer ? '我的' : '同事共享'}{item.ownedByViewer ? item.isShared ? ' · 已共享' : ' · 私有' : ''}</option>)}
       </select></label>
       <div className={styles.settingsPickerActions}>
         <button type="button" disabled={props.disabled || busy || Boolean(pending) || storageBlocked || !props.value || Boolean(selected && !owned)} title={selected && !owned ? '共享设置由创建者维护，可另存为自己的设置' : undefined} onClick={event => void save(false, event.currentTarget)}><Save size={14} />保存设置</button>
-        <button type="button" disabled={props.disabled || busy || Boolean(pending) || storageBlocked || !props.value} onClick={event => void save(true, event.currentTarget)}><CopyPlus size={14} />另存为设置</button>
-        <button type="button" className={styles.quiet} disabled={busy || loading} onClick={() => void load()} aria-label={`刷新${label}列表`} title={`刷新${label}列表`}><RefreshCw size={14} /></button>
+        <ProductActionMenu label={`管理${label}`} disabled={busy} actions={[
+          { id: 'edit', label: '编辑所选设置', icon: <Pencil size={14} />, disabled: props.disabled || !owned || Boolean(pending), onSelect: () => void apply(selected, true) },
+          { id: 'overwrite', label: '用当前设置覆盖', icon: <Save size={14} />, disabled: props.disabled || !owned || Boolean(pending) || storageBlocked || !props.value, onSelect: anchor => void save(false, anchor) },
+          { id: 'copy', label: '另存为设置', icon: <CopyPlus size={14} />, disabled: props.disabled || Boolean(pending) || storageBlocked || !props.value, onSelect: anchor => void save(true, anchor) },
+          { id: 'rename', label: '重命名', icon: <Pencil size={14} />, disabled: props.disabled || !owned || Boolean(pending) || storageBlocked, onSelect: anchor => void manage('rename', anchor) },
+          { id: 'delete', label: '删除设置', icon: <Trash2 size={14} />, danger: true, disabled: props.disabled || !owned || Boolean(pending) || storageBlocked, onSelect: anchor => void manage('delete', anchor) },
+          { id: 'reset', label: props.kind === 'generation' ? '使用当前默认模板' : '解除方案绑定', disabled: props.disabled || !props.onReset || Boolean(pending), onSelect: () => void apply('') },
+          { id: 'refresh', label: '刷新设置列表', icon: <RefreshCw size={14} />, disabled: loading, onSelect: () => void load() },
+        ]} />
       </div>
     </div>
     {(pending || notice || loading || nextCursor) && <div className={styles.settingsPickerNotice} role="status">
-      <span>{busy ? '正在处理设置…' : loading ? '正在读取设置…' : pending ? notice || '上次保存结果待确认，请查询原保存。' : notice}</span>
-      {pending && <button type="button" className={styles.quiet} disabled={busy} onClick={() => void queryOriginal()}>查询原保存</button>}
+      <span>{busy ? '正在处理设置…' : loading ? '正在读取设置…' : pending ? notice || '上次操作结果待确认，请查询原操作。' : notice}</span>
+      {pending && <button type="button" className={styles.quiet} disabled={busy} onClick={() => void queryOriginal()}>查询原操作</button>}
       {nextCursor && <button type="button" className={styles.quiet} disabled={busy || loading} onClick={() => void load(nextCursor)}>加载更多设置</button>}
     </div>}
     {productDialog}

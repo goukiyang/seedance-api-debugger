@@ -23,7 +23,7 @@ export type MultiviewSettingsDto = MultiviewSettingsSummary & { contentHash: str
   { kind: 'generation'; value: MultiviewGenerationSettingsValue } | { kind: 'frame'; value: MultiviewFrameSettingsValue }
 );
 export type MultiviewSettingsSource = { taskId: string; sourceVersion: string };
-export type MultiviewSettingsReceipt = { state: 'committed'; mutationId: string; action: 'create' | 'save'; settings: MultiviewSettingsDto };
+export type MultiviewSettingsReceipt = { state: 'committed'; mutationId: string; action: 'create' | 'save' | 'rename' | 'delete'; settings: MultiviewSettingsDto };
 export type MultiviewSettingsApplyResult = { settings: MultiviewSettingsDto; preset?: MultiviewRotationPreset; slots?: MultiviewFrameSettingsSlot[] };
 
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));

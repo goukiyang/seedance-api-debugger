@@ -8,6 +8,8 @@ import { buildAllMultiviewPreviews, readMultiviewPreviewManifest } from '../src/
 import { createMultiviewLatestTargetGate, createMultiviewPreviewManifest, multiviewPreviewChunkIndex,
   multiviewPreviewRetainedChunks, multiviewPreviewFrameRect, MULTIVIEW_PREVIEW_MAX_BYTES } from '../src/lib/video/multiview-preview-contract';
 import { parseMediaPreviewStoredState } from '../src/lib/media/media-preview-state-contract';
+import { createMultiviewFrameScrub } from '../src/app/multiview/multiview-frame-scrub';
+import { multiviewGenerationProgress } from '../src/app/multiview/multiview-generation-progress';
 
 const exec = promisify(execFile);
 const assert = (condition: unknown, message: string) => { if (!condition) throw new Error(message); };
@@ -74,6 +76,42 @@ async function main() {
     queue.background([3]); await last;
     assert(calls.join(',') === '1,4,3', 'original queue lost explicit priority or serialized background order');
     queue.clear();
+    const task = { id: 'local-task', local_status: 'running', provider_task_id: 'upstream-task', provider_status: 'queued', created_at: '2026-10-20T00:00:00.000Z' };
+    const queued = multiviewGenerationProgress('submitted', task);
+    assert(queued?.step === 1 && !queued.uncertain, 'explicit accepted queue must establish waiting stage');
+    const running = multiviewGenerationProgress('submitted', { ...task, provider_status: 'processing' }, queued);
+    assert(running?.step === 2, 'explicit provider processing must establish generation stage');
+    assert(multiviewGenerationProgress('submitted', { ...task, provider_task_id: task.id })?.step === null, 'local task id cannot establish upstream acceptance');
+    assert(multiviewGenerationProgress('submitted', { ...task, provider_status: 'unrecognized' }, running)?.step === 2, 'unknown provider status must retain last confirmed stage');
+    assert(multiviewGenerationProgress('unknown', task, running)?.uncertain, 'unknown submit must not appear accepted');
+    assert(multiviewGenerationProgress('submitted', { ...task, local_status: 'failed' }, running)?.failed, 'failure must remain failure');
+    assert(multiviewGenerationProgress('video_ready', task, running)?.step === 3, 'ready video cannot claim preview frames already ready');
+
+    const requests: number[] = [], shown: number[] = [], commits: number[] = [];
+    const deferred = new Map<number, (url: string | null) => void>();
+    let cancelled = 0, settled = 0;
+    const scrub = createMultiviewFrameScrub({
+      preview: frame => { requests.push(frame); return new Promise(resolve => deferred.set(frame, resolve)); },
+      commit: frame => { commits.push(frame); return true; }, cancel: () => { cancelled++; },
+    }, frame => shown.push(frame), () => { settled++; });
+    scrub.target(1); scrub.target(2); scrub.target(3); scrub.finish(4);
+    assert(requests.join(',') === '1' && commits.length === 0, 'scrub started concurrent previews or committed intermediate frame');
+    deferred.get(1)!('one'); await Promise.resolve(); await Promise.resolve();
+    assert(requests.join(',') === '1,4' && shown.length === 0, 'scrub failed to discard obsolete intermediate targets');
+    deferred.get(4)!('four'); await Promise.resolve(); await Promise.resolve();
+    assert(shown.join(',') === '4' && commits.join(',') === '4' && cancelled === 1 && settled === 1, 'scrub final readable target must commit exactly once');
+    scrub.finish(4); scrub.cancel();
+    assert(commits.length === 1 && settled === 1, 'finished scrub was repeated or undone by lost capture');
+    let late!: (url: string | null) => void;
+    const abandoned = createMultiviewFrameScrub({ preview: () => new Promise(resolve => { late = resolve; }),
+      commit: () => { throw new Error('cancelled gesture committed'); }, cancel: () => {} }, () => { throw new Error('cancelled gesture displayed late response'); }, () => {});
+    abandoned.target(5); abandoned.cancel(); late('late');
+    await Promise.resolve(); await Promise.resolve();
+    let failure = '';
+    const failed = createMultiviewFrameScrub({ preview: async () => null,
+      commit: () => { throw new Error('unreadable target committed'); }, cancel: () => {} }, () => {}, message => { failure = message || ''; });
+    failed.finish(6); await Promise.resolve(); await Promise.resolve();
+    assert(Boolean(failure), 'unreadable final preview must preserve original selection and report retry');
     console.log('multiview preview engineering checks passed');
   } finally { await rm(root, { recursive: true, force: true }); }
 }

@@ -20,6 +20,7 @@ export function MultiviewFrameSettingsPanel(props: Props) {
   return <MultiviewSettingsPicker kind="frame" ownerId={props.ownerId} authorityKey={props.authorityKey}
     disabled={props.disabled || !value} value={value} source={target} target={target} binding={props.binding} onReset={props.onReset}
     onSaved={record => props.onSavedBinding({ id: record.id, revision: record.revision })}
+    onRenamed={(record, previousRevision) => { if (props.binding?.id === record.id && props.binding.revision === previousRevision) props.onSavedBinding({ id: record.id, revision: record.revision }); }}
     onApply={result => {
       if (result.settings.kind !== 'frame' || !result.slots) throw new Error('选帧方案暂不可确认，当前选帧保留。');
       const next = applyMultiviewFrameSettings(props.draft, props.info, { schema: 1, slots: result.slots });

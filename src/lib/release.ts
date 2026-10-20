@@ -2,7 +2,7 @@ import packageInfo from '../../package.json';
 import { PRICING_ADMIN_WRITES_ENABLED } from './pricing/build-mode';
 
 export const release = { version: packageInfo.version, channel: 'production', summary: PRICING_ADMIN_WRITES_ENABLED
-  ? '3D多视图选帧后自动补清晰画面；旧上传经原请求安全核对后可继续，原文件、已生成结果和历史记录保留。'
+  ? '3D多视图支持滑动快速选帧、清晰原帧显示和紧凑拼图工具；快捷设置可覆盖、改名和删除。生成阶段更清楚，旧上传可核对恢复。'
   : '旧上传安全恢复、原图直传和已有高清结果保留。API质量设置和费率暂时只读，已保存配置不会自动改价。' };
 
 function numericOrder(a: string, b: string) {
