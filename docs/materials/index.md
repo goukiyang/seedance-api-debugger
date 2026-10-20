@@ -1,5 +1,9 @@
 # 项目资料索引
 
+## MV-PROGRESS-D01 生成进度设计（2026-10-19）
+
+项目video-api-debugger；来源：本轮用户文字“做3D生成进度展示的进度展示设计”，无新附件。关键词：本次生成、受理、原片准备、选帧、旧作品、未知恢复；[设计原文§17.5](../../tasks/todo/2026-10-17-multiview-instant-frame-workbench.md#175-mv-progress-d01-进度展示设计2026-10-19设计完成未实施)基于§17调查及76ef0f42源码复核，补充而不替代原调查/历史发布。包含布局示意、状态/操作表、恢复与落点；设计完成，未实施/部署/功能验收。UTF-8与入口可读，文字设计未作非必要哈希；既有页面图片沿原单，示意不是实页截图。
+
 ## 高清全链路可靠性实施（2026-10-19）
 
 当前22:41Z收口：[H01–H10原单§9.5](../../tasks/todo/2026-10-18-hd-chain-reliability.md#95-h01h10已保护部署待用户手验当前)记录v0.99.2实际保护部署完成，功能待用户手验。run9b720的[统一工程/Review](2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/unified-verification.json)、[实际switch-complete](2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/switch-complete.json)、[最终保护/策略](2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/post-release-proof.json)、[39目标公网资源](2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/main-public-proof.json)、[升级layout](2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/release-notice-public-proof.json)与[73原件逐SHA索引](2026-10-18-hd-chain-reliability/implementation/9b720778-c28a-47dd-8c00-9782387fde87/release-receipt-index.json)均可读。Web/image/HD同main6512e723/BUILD laGD…；guard4e0403a6/BUILD oAi35…完整构建保留，回退未演练。真实新helper读取同一218150字节既有ready、canonical64784:171598992/原锁171450476/no-fork有证；正常重启策略及网络恢复，DB/账务/媒体/配置/+i/其它三原服务保持。两完整构建各144默认/1424RATE源码与1556包映射相符、HD70通过；两包各43工程原件/所有失败历史保留。匿名summary空为原权限投影，internal才有本轮HD摘要；真实旧客户端弹窗未手验。无新用户附件、无AI生成/收费/重发/数据迁移，私有原证不公开；以下均为各历史阶段。
