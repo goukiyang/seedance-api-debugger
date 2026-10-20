@@ -37,10 +37,13 @@ export default function ReleaseNotice() {
       if (newerRelease(data.version, release.version)) {
         if (manual || !dismissed) setTarget(data);
         setMessage(`可更新至 v${data.version}`);
-      } else if (data.version === release.version) {
-        setMessage('当前已是最新版本');
-        try { localStorage.removeItem(laterKey);localStorage.removeItem('sd2:release:later'); } catch { /* Optional persistence. */ }
-      } else setMessage('暂无法确认更新，请稍后重试');
+      } else {
+        setTarget(null); setRisk(null); setRefreshError('');
+        if (!newerRelease(release.version, data.version)) {
+          setMessage('当前已是最新版本');
+          try { localStorage.removeItem(laterKey);localStorage.removeItem('sd2:release:later'); } catch { /* Optional persistence. */ }
+        } else setMessage('暂无法确认更新，请稍后重试');
+      }
     } catch { setMessage('检查失败，请重试'); }
     finally { inFlight.current = false; setChecking(false); }
   }, [laterKey]);

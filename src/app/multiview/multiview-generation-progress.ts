@@ -14,6 +14,7 @@ export type MultiviewGenerationProgressState = {
   label: string;
   uncertain: boolean;
   failed: boolean;
+  videoReady?: boolean;
   createdAt?: string;
 };
 
@@ -29,7 +30,8 @@ export function multiviewGenerationProgress(
   if (phase === 'submitting') return result(0, '正在提交');
   if (phase === 'failed' || phase === 'closed' || ['failed', 'cancelled'].includes(task?.local_status || '')) return result(previous?.step ?? null, '本次生成未完成', false, true);
   if (phase === 'unknown' || task?.submission_unconfirmed) return result(null, '提交结果待确认', true);
-  if (phase === 'video_ready' || task?.local_status === 'succeeded') return result(3, '正在准备选帧');
+  if (phase === 'video_ready') return { ...result(3, '视频已就绪'), videoReady: true };
+  if (task?.local_status === 'succeeded') return result(3, '正在准备视频');
   const accepted = Boolean(task?.provider_task_id && task.provider_task_id !== task.id
     && task.provider_task_id !== task.provider_client_request_id && task.provider_task_id !== task.idempotency_key);
   const upstream = task?.provider_status?.toLowerCase();
