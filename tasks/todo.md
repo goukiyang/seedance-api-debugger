@@ -2,6 +2,18 @@
 
 ## 当前入口
 
+### MV-HD / UP-RECOVER / RELEASE（2026-10-19）
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| MV-HD | 选帧后补原清晰度 | 轻图交互、停下补原帧，原尺寸操作不退化 | 实现完成；完整构建通过，功能待用户手验 |
+| UP-RECOVER | 修复上传未知的恢复链路 | 有证据才转状态，保留原文件与请求、不重复上传 | 实现完成；完整构建通过，逐笔证明在排尽旧 writer 后签发 |
+| RELEASE | 合并上线 | 聚焦提交推送、保护部署、公网健康；待用户手验 | 双包构建通过；保护切换未进入维护，发布检查正补齐当前源已结束的精确缓存识别 |
+
+- 正式工单及原附件仍以正式根 `tasks/todo/2026-10-17-multiview-instant-frame-workbench.md` §20/21、`tasks/todo/2026-10-19-image-upload-preflight.md` §9 和 `docs/materials/2026-10-19-upload-unknown-recovery/` 为准；不覆盖其它协作的 MV-PROGRESS-D01。
+- 上传截图仅证明一项文件与总数48，不推定同因。该单文件原请求仍 writing、无本人 Asset/回执，服务器未找到原件；浏览器是否仍有原 File 未核。缺原文件时须用户重选同一原文件，沿原请求恢复，不冒称已找回。
+- 本批仅 MV-HD 与 UP-RECOVER，按既有常规发布授权在系统拦新及实测自然排空下发布；不借旧维护窗口、不自动重发、不清未知项，不启动 TRACE03、GEN01–02、RATE-ENG3 或进度方案实施。
+
 - [x] H01–H10（2026-10-19，工程与保护部署完成，待用户手验）：v0.99.2已上线，Web/image/HD同main6512e723、BUILD laGD9U4RLJWwcK60Qxkxa。固定HD根/原锁、提交后登记、独立公平发现、隔离单图/有限重试、渐进预览、原权限下载及后台状态整批交付，不是只修目录。两完整Linux20构建/默认8组/RATE/HD70与类型lint通过、Review0open；39目标资源及升级layout公网同字节。原图/已有高清/费用/隐藏/未知请求保持，TRACE/GEN暂停。[原单§9.5](todo/2026-10-18-hd-chain-reliability.md#95-h01h10已保护部署待用户手验当前)。
 
   9b720于22:37:38Z在有效批准/构建时效内切换完成：旧三服务自然结束，精确旧Web保护实际安装/恢复、新pair/prestart及两入口200通过；22:41终核原数据/其它三服务保持，正常Restart/Timeout策略已恢复，临时run drop-in已撤，HD canonical/原锁/no-fork及同一既有ready直接读取有证。主6512/guard4e040已push，guard完整BUILD oAi35q9S2WJaIg3uq38Pc保留，仅三服务相容程序回退、未演练。73发布/原生原件及两包各43工程原件归正式根；之前Mac未通过、全部Linux失败/恢复历史仍保留，不抹失败或重编码。守门员finish无blocking warning，真实功能和旧客户端升级弹窗仍用户手验。
