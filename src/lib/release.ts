@@ -2,8 +2,8 @@ import packageInfo from '../../package.json';
 import { PRICING_ADMIN_WRITES_ENABLED } from './pricing/build-mode';
 
 export const release = { version: packageInfo.version, channel: 'production', summary: PRICING_ADMIN_WRITES_ENABLED
-  ? '高清加载与后台接续修复：已有高清直接复用，准备中先看预览；单图临时故障有限重试，原图、已有结果和权限保持。'
-  : '高清加载与原任务接续保留。API质量设置和费率暂时只读，已保存配置、原图和已有结果保持，不会自动改价。' };
+  ? '3D多视图按原有权限直接传送原图，修复参考图链接需要登录导致的生成失败；高清修复、原图、作品和历史任务保持。'
+  : '3D多视图原图直传、高清加载和原任务接续保留。API质量设置和费率暂时只读，已保存配置与已有结果保持，不会自动改价。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

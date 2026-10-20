@@ -19,6 +19,7 @@ const cases = [
   ['frame_settings_keep_media_and_layout_private', 'scripts/multiview-frame-settings-client-engineering.ts', 'frames'],
   ['preview_atlas_loop_exact_output_contract', 'scripts/multiview-preview-engineering.ts', 'preview'],
   ['same_work_identity_baseline_and_explicit_original_save', 'scripts/multiview-work-identity-engineering.ts', 'identity'],
+  ['authorized_multiview_original_transport', 'scripts/multiview-reference-transport-engineering.ts', 'transport'],
 ];
 const childEnv = { ...process.env, NODE_ENV: 'test', TMPDIR: folder };
 // Production storage overrides must not reach a synthetic directory/decoder fixture.
