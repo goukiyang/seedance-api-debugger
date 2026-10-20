@@ -155,6 +155,7 @@ function MultiviewPageContent() {
   const requests = useRef(new Map<number, Promise<boolean>>());
   const originalQueue = useRef(createMultiviewOriginalQueue());
   const originalTargets = useRef(new Set<number>());
+  const preferredOriginalSlot = useRef('');
   const usedUrls = useRef(new Map<string, number>());
   const interactionUntil = useRef(0);
   const previewRequests = useRef(new Map<number, Promise<boolean>>());
@@ -296,7 +297,7 @@ function MultiviewPageContent() {
   const clearUrls = useCallback(() => {
     clearArtifacts();
     quickFrameGate.current.cancel();
-    originalQueue.current.clear(); originalTargets.current.clear(); usedUrls.current.clear();
+    originalQueue.current.clear(); originalTargets.current.clear(); preferredOriginalSlot.current = ''; usedUrls.current.clear();
     quickFrameLock.current = null; setQuickFrame(null); slotDrag.current = null; suppressSlotClick.current = '';
     for (const url of Array.from(objectUrls.current)) URL.revokeObjectURL(url);
     objectUrls.current.clear(); requests.current.clear(); previewRequests.current.clear(); previewFrameRequests.current.clear();
@@ -584,13 +585,15 @@ function MultiviewPageContent() {
     resultArea.current.querySelectorAll('[data-mv-slot]').forEach(element => observer.observe(element));
     return () => observer.disconnect();
   }, [slotIds, visible, view.tab, pageView]);
-  const originalSignature = JSON.stringify([frameSignature, draft?.editing, editorFrame, view.selected, onscreenSlots, quickPreview]);
+  const originalSignature = JSON.stringify([frameSignature, draft?.editing, editorFrame, view.selected, onscreenSlots, quickPreview, preferredOriginalSlot.current]);
   useEffect(() => {
     if (!visible || !info || !draft || pageView !== 'editor') { originalTargets.current.clear(); originalQueue.current.background([], true); return; }
     originalQueue.current.background([], true);
+    const preferred = draft.slots.find(item => item.id === preferredOriginalSlot.current) || draft.slots.find(item => item.id === view.selected);
     const targets = Array.from(new Set([
       ...(draft.editing ? [editorFrame] : []),
-      ...draft.slots.filter(item => item.id === view.selected || onscreenSlots.includes(item.id)).map(item => item.frame),
+      ...(preferred ? [preferred.frame] : []),
+      ...draft.slots.filter(item => onscreenSlots.includes(item.id)).map(item => item.frame),
     ]));
     // Reserve decoded pixels plus encoded bytes, rather than an unbounded count of large images.
     const capacity = Math.max(1, Math.floor(ORIGINAL_MEMORY_LIMIT / (info.width * info.height * 8)));
@@ -633,7 +636,7 @@ function MultiviewPageContent() {
     let bytes = Object.values(frames).reduce((total, item) => total + (item.originalBytes || 0), 0);
     const removable: number[] = [];
     for (const frame of Object.keys(frames).map(Number)) {
-      if (requests.current.has(frame) || previewFrameRequests.current.has(frame) || [frames[frame]?.url, frames[frame]?.previewUrl].some(url => url && usedUrls.current.has(url))) continue;
+      if (frame === preview || requests.current.has(frame) || previewFrameRequests.current.has(frame) || [frames[frame]?.url, frames[frame]?.previewUrl].some(url => url && usedUrls.current.has(url))) continue;
       if (!keep.has(frame) && (Object.keys(frames).length > 24 || bytes > ORIGINAL_MEMORY_LIMIT) || frames[frame]?.url && !originalTargets.current.has(frame) && bytes > ORIGINAL_MEMORY_LIMIT) { removable.push(frame); bytes -= frames[frame].originalBytes || 0; }
     }
     if (!removable.length) return;
@@ -682,12 +685,13 @@ function MultiviewPageContent() {
     update({ ...draft, slots, restoreOrder: undefined }, true);
   }
   function stepSlot(id: string, delta: -1 | 1) {
-    interactionUntil.current = Date.now() + 200; originalQueue.current.background([], true);
     const before = draftRef.current;
     const item = before?.slots.find(value => value.id === id);
     if (!before || !item || !info || !visible || operation.current || quickFrameLock.current && quickPreviewRef.current[id] === undefined || isClientSessionBlocked()) return;
     const frame = (quickPreviewRef.current[id] ?? item.frame) + delta;
     if (frame < 0 || frame >= info.timestamps.length) return;
+    preferredOriginalSlot.current = id;
+    interactionUntil.current = Date.now() + 200; originalQueue.current.background([], true);
     const token = Symbol(); const target = quickFrameGate.current.issue(frame);
     quickFrameLock.current = token; setQuickFrame(id);
     quickPreviewRef.current = { ...quickPreviewRef.current, [id]: frame }; setQuickPreview(quickPreviewRef.current);
@@ -729,13 +733,14 @@ function MultiviewPageContent() {
     update({ ...draft, editing: item.id, editorFrame: item.frame });
   }
   function selectSlot(item: MultiviewSlot) {
+    preferredOriginalSlot.current = item.id;
     setView(value => ({ ...value, selected: item.id, tab: 'frames' })); setActivity(value => value + 1);
     if (draft?.editing && draft.editing !== item.id) openEditor(item);
   }
   function seek(frame: number) {
     if (!info) return;
-    interactionUntil.current = Date.now() + 200; originalQueue.current.background([], true);
     const value = Math.min(info.timestamps.length - 1, Math.max(0, frame));
+    if (value !== editorFrame) { interactionUntil.current = Date.now() + 200; originalQueue.current.background([], true); }
     setEditorMode('frame'); setEditorFrame(value); setFrameInput(String(value + 1)); setFrameInputError(''); setSaved(false); setActivity(count => count + 1);
     setDraft(current => current ? { ...current, editorFrame: value } : current);
     if (video.current) { video.current.pause(); video.current.currentTime = info.timestamps[value]; }
