@@ -347,3 +347,10 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 唯一正式入口：[完整工单](../../tasks/todo/2026-10-04-template-context-version-code.md)，路径/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-04-template-context-version-code.md；主todo已登记。v0.40.0已部署，最终应用116ee2a82c1c3541c10c751674433d4958ffb54f，BUILD irfPSW4cqY4pqCko6De9P；14源码/15公网静态/3公开入口及4服务通过，待用户手动功能验收。曾切换73b3b2f后发现worker SQLite超时并回退9c8a9ac，再收敛标签写争用；未人工重启worker，但发生自动重启，完整因果未业务复现证明，详见工单第11节与证据，不能写成全程PID不变。
 
 私有正式根[统一diff](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/implementation-v0.40.0.diff)、[最终发布检查](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/deployment-v0.40.0.json)、[构建日志](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/build-v0.40.0.log)、[首次切换/回退](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/deployment-v0.40.0-first-switch.json)均可访问、对应各自真实产物，不上传Git或源码包。回退tag rollback/2026-10-04-before-template-context-v0.40.0已推送，目标9c8a9ac。无新媒体附件；复用[既有模板设置区截图](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/codex-clipboard-26d3afd9-1a27-4df3-b50c-56913ad90d58.png)，原名/来源/既有可读及完整性校验见上方Q1/Q2登记，只是布局参考。保留V1原图/样板，不替换封面；未运行浏览器、业务API或付费生成验收。
+
+
+## 我的项目页面体验复查登记（2026-10-20，UX01）
+
+- 项目video-api-debugger；来源用户本轮要求及获准的实页观察；主题：项目查找、记录浏览、手机布局、下游上下文。
+- 正式原规划 `tasks/todo/2026-10-10-my-projects-redesign.md` v1.4.0第10节；证据清单 `docs/materials/2026-10-20-projects-ux-review/manifest-v1.0.0-R01.json`。原文、九张实页图及具体记录仅在正式项目根私有保存，未公开复制。
+- 原文件名/版本/用途/可访问路径及检查状态详见私有清单；不替代历史材料，不代表方案实施或功能验收完成。
