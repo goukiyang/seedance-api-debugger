@@ -2,6 +2,8 @@
 
 ## RESTORE-R01/R02/R03/R04 模板复用与保存冲突（2026-10-21）
 
+r08最终发布资料（2026-10-21，来源本轮实际发布，关键词：v0.101.1、设置复用、版本冲突、相容回退、待手验）：[双完整构建及日志](2026-10-21-template-restore-fix/implementation/complete-builds-r08/)、[同lead Review](2026-10-21-template-restore-fix/implementation/release-review-r08.json)、[发布收口与主/guard完整身份](2026-10-21-template-restore-fix/implementation/deployment-closure-r08.json)、[五项服务器原始回执](2026-10-21-template-restore-fix/implementation/published-r08/)、[回执SHA核对](2026-10-21-template-restore-fix/implementation/published-evidence-collection-r08.json)、[正常关闭命令原证](2026-10-21-template-restore-fix/implementation/complete-r08-command.json)。正文JSON可读、关键证据SHA与实际输出核对一致；私有原证均在正式项目根，不上传Git或公开发布。主源e00a886e、BUILD Ar9Q9hw41mb2S2RVp9rFN，guard ade68a74/9IipBjfn19FFJLaRQu_PT；19:28Z切换、19:30Z关闭窗口，四服务同源，价格/保护记录未改，公网6页43资源/4匿名边界。已部署不冒功能验收，R01/R02实效和父线程R04仍待验；旧阶段资料不覆盖。父线程已确认匿名release摘要为空为权限设计，本轮不另查或改线上。非关键可再生成辅助文件未逐项复验；无新增用户媒体附件。
+
 r08唯一Array.from修正及[完整1545文件类型复查](2026-10-21-template-restore-fix/implementation/complete-types-r08.stdout)、[命令原证](2026-10-21-template-restore-fix/implementation/complete-types-r08-command.json)：0诊断，原失败候选文件未改，目标配置未改，非发布准入。main e00a886e/guard ade68a74已推送，正常两完整构建另行执行；没有功能或收费验收。
 
 r07原证：[构建失败日志](2026-10-21-template-restore-fix/implementation/main-build-failure-r07/)、[全部类型诊断](2026-10-21-template-restore-fix/implementation/full-types-r07.json)、[未切换状态](2026-10-21-template-restore-fix/implementation/native-refusal-state-r07.json)、[正常关闭](2026-10-21-template-restore-fix/implementation/failed-r07-command.json)。原生15及npm17通过，完整类型诊断仅新增fixture的MapIterator展开TS2802；将改Array.from保持原target，不改业务或关闭检查。正式失败累计7，仍未发布或功能验收。
