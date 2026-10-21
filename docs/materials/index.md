@@ -2,6 +2,8 @@
 
 ## RESTORE-R01/R02/R03/R04 模板复用与保存冲突（2026-10-21）
 
+r06正式15组、完整main17项失败报告及无切换证据见[构建原证](2026-10-21-template-restore-fix/implementation/main-build-failure-r06/)、[只读现场](2026-10-21-template-restore-fix/implementation/native-refusal-state-r06.json)、[正常关闭](2026-10-21-template-restore-fix/implementation/failed-r06-command.json)。main081f0d36/guarde0ab74f5同批仅补真实禁止调用计数，均已推送；r07重新完整构建，仍未部署，不冒功能通过。
+
 r06[隔离身份](2026-10-21-template-restore-fix/implementation/isolation-request-r06.json)与[完整结果](2026-10-21-template-restore-fix/implementation/template-restore-r06-68d896ea-4228-4b61-b76c-fe42370579a4/diagnostic-result.json)：15/15、生命周期25、四缓存引用184项通过，实际HD只读准入稳定无冲突，原六服务/价格/allowed未变，全部日志SHA验证。49语法/25准备器见local-control-verification-r06.json；诊断不具正式发布准入效力，未构建/部署/功能验收。
 
 r05正式[15日志与batch](2026-10-21-template-restore-fix/implementation/native-control-r05-exact-logs/)、[拒绝现场](2026-10-21-template-restore-fix/implementation/native-refusal-state-r05.json)、[关占用回执](2026-10-21-template-restore-fix/implementation/failed-r05-command.json)。15/15和生命周期25通过，HD实际5个9c39已完成缓存未在旧精确表；[逐目录只读诊断](2026-10-21-template-restore-fix/implementation/hd-cache-detail-r05.stdout)、[15文件路径等价及五来源SHA原证](2026-10-21-template-restore-fix/implementation/hd-cache-equivalence-r05.stdout)已核。60提示不冒60故障，无运行/业务更改。r06限精确三指纹与原安全门扩展用例，原包/失败/时间保留；正式拒绝累计5，诊断路径拒绝1。原递归日志拷贝只温和停止本机匹配scp，服务器原证和部分本地副本保留，后单取15日志和batch逐SHA核对完成，见native-control-r05-collection.json。
