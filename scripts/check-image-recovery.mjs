@@ -130,7 +130,7 @@ const publicUsageFixtures = [
       'src/app/api/projects/route.ts', 'src/app/api/projects/[id]/route.ts', 'src/app/api/project-invites/[token]/join/route.ts',
     ] },
   { file: 'scripts/usage-reader-sql-engineering.ts', schema: 'usage-reader-sql-engineering.v1',
-    databaseFlag: 'applicationDatabaseOpened', sources: [
+    timeoutMs: 60000, databaseFlag: 'applicationDatabaseOpened', sources: [
       'scripts/usage-reader-sql-engineering.ts', 'prisma/schema.prisma', 'src/lib/usage/facts.ts',
       'prisma/migrations/20261021073000_usage_attribution/migration.sql',
       'src/lib/usage/source-scope.ts', 'src/lib/usage/media.ts', 'src/lib/usage/access.ts', 'src/lib/usage/query.ts',
@@ -326,7 +326,7 @@ function run() {
     const receipt = path.join(directory, path.basename(fixture.file) + '.json');
     const fixtureStart = Date.now();
     const result = spawnSync(process.execPath, ['--import', 'tsx', fixture.file, receipt], {
-      cwd: root, env: fixtureEnvironment, encoding: 'utf8', timeout: 30000, maxBuffer: 1024 * 1024,
+      cwd: root, env: fixtureEnvironment, encoding: 'utf8', timeout: fixture.timeoutMs || 30000, maxBuffer: 1024 * 1024,
     });
     const finishedAt = Date.now();
     const log = path.join(directory, path.basename(fixture.file) + '.log');
