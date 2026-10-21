@@ -18,7 +18,6 @@ import { getImageGenerationChannels, getImageGenerationChannelOptions, selectIma
 import type { PricingAdminIdentity, PricingAdminRow } from './admin-contract';
 import { PricingItemUnavailableError } from './item-unavailable';
 import { assertPricingImageAvailability } from './image-availability';
-import { projectPricingDisplay } from './admin-display';
 
 export type PricingClient = Prisma.TransactionClient | typeof prisma;
 export type PricingCatalogBinding = {
@@ -233,10 +232,7 @@ export async function getPricingCatalog(client: PricingClient = prisma): Promise
   }
   rows.sort((a, b) => a.identity.kind.localeCompare(b.identity.kind) || a.identity.channelId.localeCompare(b.identity.channelId) || a.id.localeCompare(b.id));
   if (new Set(rows.map(value => value.id)).size !== rows.length) throw new Error('收费目录存在重复作用域，已停止使用');
-  // Display routing is not a pricing scope or source binding. Keep existing drafts and evidence valid.
-  const fingerprint = pricingFingerprint({ rows, bindings, sources: Array.from(sources.entries()).sort() });
-  const displayedRows = rows.map(value => projectPricingDisplay(value, options.defaultRoutes?.qualityRoutes));
-  return { rows: displayedRows, bindings, fingerprint };
+  return { rows, bindings, fingerprint: pricingFingerprint({ rows, bindings, sources: Array.from(sources.entries()).sort() }) };
 }
 
 export async function appendPricingCatalogScopes(catalog: PricingCatalog, identities: PricingAdminIdentity[], client: PricingClient, validate = true) {
@@ -248,10 +244,7 @@ export async function appendPricingCatalogScopes(catalog: PricingCatalog, identi
       && row.identity.unit === identity.unit && !Object.keys(row.identity.specifications).length);
     if (!original) throw new Error('精确收费项缺少真实供应商范围');
     if (validate) await assertPricingCatalogIdentity(identity, client, true);
-    const defaultQualities = original.defaultQualities?.filter(quality => !identity.specifications.quality || quality === identity.specifications.quality);
-    catalog.rows.push({ ...original, id, identity, ...(defaultQualities ? { defaultQualities,
-      isDefault: identity.specifications.quality && original.defaultQualities?.length ? defaultQualities.length > 0 : original.isDefault } : {}),
-    appliesTo: Object.entries(identity.specifications).map(([key, value]) => `${key}: ${value}`) });
+    catalog.rows.push({ ...original, id, identity, appliesTo: Object.entries(identity.specifications).map(([key, value]) => `${key}: ${value}`) });
     catalog.bindings[id] = catalog.bindings[original.id];
   }
 }

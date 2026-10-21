@@ -57,7 +57,6 @@ export type PricingAdminRow = {
   label: string;
   providerLabel: string;
   isDefault: boolean;
-  defaultQualities?: string[];
   appliesTo: string[];
   enabled: boolean;
   availability: 'ready' | 'disabled' | 'unconfigured' | 'needs_review';
