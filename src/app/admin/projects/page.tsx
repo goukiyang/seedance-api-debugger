@@ -7,5 +7,5 @@ export default async function AdminProjectsPage() {
   if (!user) redirect('/login');
   if (user.role !== 'admin') redirect('/generate');
 
-  return <AdminProjectsClient viewerId={user.id} />;
+  return <AdminProjectsClient />;
 }

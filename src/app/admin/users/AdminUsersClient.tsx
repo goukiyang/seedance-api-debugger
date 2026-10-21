@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import PageBanner from '@/components/PageBanner';
-import AdminUsageClient from '@/components/admin-usage/AdminUsageClient';
 import { useProductDialog } from '@/components/useProductDialog';
 import { RelativeTime } from '@/components/RelativeTime';
 import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
@@ -173,10 +172,10 @@ const inputStyle: React.CSSProperties = {
   width: '100%',
   boxSizing: 'border-box',
   padding: '10px 12px',
-  border: '1px solid var(--border-color)',
-  borderRadius: 5,
-  background: 'var(--bg-input)',
-  color: 'var(--text-primary)',
+  border: '1px solid rgba(255,255,255,0.12)',
+  borderRadius: 8,
+  background: 'rgba(255,255,255,0.06)',
+  color: '#fff',
   fontSize: 14,
 };
 
@@ -350,10 +349,6 @@ function buildEditUserForm(user: AdminUser): EditUserForm {
 }
 
 export default function AdminUsersClient({ currentUser }: { currentUser: SessionUser }) {
-  return <AdminUsageClient key={currentUser.id} viewerId={currentUser.id} view="members" management={selectedId => <AccountManagement currentUser={currentUser} selectedMemberId={selectedId === 'unassigned' ? null : selectedId} />} />;
-}
-
-function AccountManagement({ currentUser, selectedMemberId }: { currentUser: SessionUser; selectedMemberId: string | null }) {
   const { confirm: requestConfirm, productDialog } = useProductDialog();
   const actionLock = useRef(false);
   const [actionBusy, setActionBusy] = useState(false);
@@ -431,7 +426,6 @@ function AccountManagement({ currentUser, selectedMemberId }: { currentUser: Ses
   const filteredUsers = useMemo(() => {
     const keyword = filters.search.trim().toLowerCase();
     return users.filter((user) => {
-      if (user.id === selectedMemberId) return true;
       if (!matchesQuickView(user, quickView)) return false;
       if (filters.account_type !== 'all' && user.account_type !== filters.account_type) return false;
       if (filters.user_profile !== 'all' && (user.user_profile || 'other') !== filters.user_profile) return false;
@@ -440,7 +434,7 @@ function AccountManagement({ currentUser, selectedMemberId }: { currentUser: Ses
       if (!keyword) return true;
       return [user.name, user.username, user.email].some((value) => value.toLowerCase().includes(keyword));
     });
-  }, [filters, quickView, users, selectedMemberId]);
+  }, [filters, quickView, users]);
   const userTotalPages = Math.max(1, Math.ceil(filteredUsers.length / USERS_PAGE_SIZE));
   const currentUserPage = Math.min(userPage, userTotalPages);
   const pagedUsers = filteredUsers.slice(
@@ -582,18 +576,6 @@ function AccountManagement({ currentUser, selectedMemberId }: { currentUser: Ses
   useEffect(() => {
     setUserPage(1);
   }, [filters, quickView]);
-
-  const appliedMember = useRef<string | null>(null);
-  useEffect(() => {
-    if (!selectedMemberId) { appliedMember.current = null; return; }
-    if (appliedMember.current === selectedMemberId) return;
-    const user = users.find(item => item.id === selectedMemberId);
-    if (!user) return;
-    appliedMember.current = selectedMemberId;
-    setFocusedUserId(user.id);
-    const index = filteredUsers.findIndex(item => item.id === user.id);
-    if (index >= 0) setUserPage(Math.floor(index / USERS_PAGE_SIZE) + 1);
-  }, [selectedMemberId, users, filteredUsers]);
 
   const updateInitialPolicy = (patch: Partial<CreditPolicy['initial_grant']>) => {
     setCreditPolicy((current) => ({
@@ -1065,18 +1047,19 @@ function AccountManagement({ currentUser, selectedMemberId }: { currentUser: Ses
   };
 
   return (
-    <div className="admin-users-page admin-users-workbench-page au-account-management" data-usage-layout-pending={loading ? 'true' : undefined}>
+    <main className="admin-users-page admin-users-workbench-page">
       {productDialog}
       <PageBanner
-        eyebrow="账号与额度"
-        title="账号管理"
+        tone="dark"
+        eyebrow="管理员后台"
+        title="用户与点数工作台"
+        description="/admin/points 已归并到本页；先定位用户和钱包状态，再进入创建、策略、批量、合并等低频操作。"
         actions={(
           <div className="admin-users-operator">
             <UserIdentityBadge user={currentUser} size="sm" showEmail />
           </div>
         )}
       />
-      {selectedMemberId && !loading && !users.some(user => user.id === selectedMemberId) && <p className="au-management-context" role="status">该成员的历史使用记录仍保留；当前账号已不可管理或未能读取，可继续使用下方其他账号管理功能。</p>}
 
       {(message || error) && (
         <div className={`admin-users-alert ${error ? 'admin-users-alert-error' : 'admin-users-alert-success'}`}>
@@ -1857,6 +1840,6 @@ function AccountManagement({ currentUser, selectedMemberId }: { currentUser: Ses
           </div>
         </div>
       </section>
-    </div>
+    </main>
   );
 }
