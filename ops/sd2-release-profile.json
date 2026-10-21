@@ -7,13 +7,13 @@
   "controllerSetSha256": "84d3bac3d6846f47eb998573b9130b1b6cc95af696a3468a72ff02a25476bb09",
   "wrapperSha256": "0c86b553e41c42cb2a539a4a07a3f46669d71f7c1c4d0b2e5b12abb3a02d3907",
   "promotion": {
-    "template": "release-template-restore-r01",
-    "wrapper": "run-template-restore-r01.mjs",
-    "controllerCount": 45,
-    "controllerSetSha256": "224245f738b29f758815c033155bf64fdbe10ab34ffdd80c765dfd3c330b488f",
-    "wrapperSha256": "39d9585af08b354eaeb38a6ac539a30c14fe0e990f547ee1d3cbb5279394a9f0",
-    "changed": ["candidate-reuse-engineering.mjs", "candidate-reuse.mjs", "common.mjs", "control-preflight.mjs", "cutover-driver.mjs", "cutover-safety.mjs", "guard-recovery.mjs", "hd-closed-cache-engineering.mjs", "hd-storage-preflight.mjs", "release-contract.mjs", "release-protection-engineering.mjs", "release.mjs", "retired-hd-cache-engineering.mjs", "switch.mjs"],
-    "added": ["candidate-lifecycle-engineering.mjs", "deployed-usage-schema-engineering.mjs", "deployed-usage-schema.mjs", "normal-continuation-engineering.mjs", "normal-continuation.mjs", "preflight-resume-engineering.mjs", "usage-role-control.mjs", "usage-role-engineering.mjs", "usage-role-start.mjs"]
+    "template": "release-template-restore-r02",
+    "wrapper": "run-template-restore-r02.mjs",
+    "controllerCount": 46,
+    "controllerSetSha256": "2b8c3b8537f9a6d8836cea7ced8006b10930b8915d31c0e5ec415c24c0028ee4",
+    "wrapperSha256": "c148d3ba3cd72d8c4130c432836e7dab8ec55a63269a22802202ccac513748c8",
+    "changed": ["candidate-reuse-engineering.mjs", "candidate-reuse.mjs", "common.mjs", "control-preflight.mjs", "cutover-driver.mjs", "cutover-safety.mjs", "guard-recovery.mjs", "hd-closed-cache-engineering.mjs", "hd-storage-preflight.mjs", "legacy-maintenance.mjs", "release-contract.mjs", "release-protection-engineering.mjs", "release.mjs", "retired-hd-cache-engineering.mjs", "switch.mjs"],
+    "added": ["candidate-lifecycle-engineering.mjs", "deployed-usage-schema-engineering.mjs", "deployed-usage-schema.mjs", "normal-continuation-engineering.mjs", "normal-continuation.mjs", "preflight-resume-engineering.mjs", "runtime-source-engineering.mjs", "usage-role-control.mjs", "usage-role-engineering.mjs", "usage-role-start.mjs"]
   },
   "evidence": {
     "control-freeze.json": "8da4ab03ce189a29d139ddc25ab7cd9daa1026765a900f0456eee84ff46b21f5",

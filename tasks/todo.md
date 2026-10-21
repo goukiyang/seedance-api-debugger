@@ -10,19 +10,28 @@
 |---|---|---|---|
 | R01 | 修复设置复用与生成后保留 | 风格组、补充描述实际用于本次生成，生成后及刷新可恢复 | 进行中：前后端已集成，历史来源/改选版本/描述含空值及统一报价创建已接线，新增离线检查已入构建门；未构建或功能验收 |
 | R02 | 修复版本冲突 | 查明触发原因，正确处理版本变化且不覆盖草稿 | 进行中：工作区版本与内容版本分离、差异合并和未知原保存查询已写；统一检查待全批齐备 |
-| R03 | 保护发布 | 必要构建及部署检查完成，提交推送并上线，交用户手验 | 进行中：16:24:42Z只读确认仍v0.101.0；准备v0.101.1及相容guard，新发布控制并行补只读已部署表核验，未停站/发布 |
+| R03 | 保护发布 | 必要构建及部署检查完成，提交推送并上线，交用户手验 | 进行中：25项准备检查通过；main356b5b07/相容guard554fcee5已推送打包；首次stage被旧源码校验表拦住，已证停站前无切换并关闭发布占用，原worker返修，完整构建尚未开始 |
+| R04 | 收费实测复用闭环 | 新版实际生成1张，核对风格/补充描述真正用于生成且完成后/刷新保留，记录真实费用与结果 | 待新版部署：用户最新明确同意付费测试；仅父线程独占执行，lead及workers不发收费请求 |
+
+2026-10-21追加收费实测授权：R01–R03保留，由当前lead继续实现和保护发布。R04由父线程在新版保护部署成功后，通过正常Chrome/当前账号及现有模型，先核实真实报价，只生成1张；未知结果仅核对同一原请求，不换号重发。父线程可先准备浏览器会话与只读测试对象，不在旧版生成或操作共享保存。当前lead与workers均不发收费请求，不扩大业务、费用或权限边界。发布交付须提供精确URL、source、BUILD及可验状态；R04保持待执行/进行中直至实际证据齐全，不以旧用户手验说明终结新增实测。
+
+R04准备现状（父线程回报）：xiaobo Chrome只读识别原模板tab576245085、module8b530765-c95a-421e-aa85-0e131d714a08，页面当前需登录；CUA连接超时，BrowserSkill可列同一页签但借用要求本人确认，超时工具明确禁止自动重复/换工具。会话已stop，无登录或付费；父线程已询问部署后是否重新发起该工具确认。该浏览器证据缺口不影响R01–R03，lead仍不执行浏览器或收费动作，不绕过工具/鉴权边界。
 
 实施合同：仅明确恢复结果设置时启用原任务来源标记，主图及恢复后继续编辑的个人描述优先，风格历史版本保留；普通未保存定义仍沿已保存模板，不能自动发布。报价、单张、批量和新冻结快照统一使用同一来源，原任务/未知请求不重发。R02已定位保留作者草稿分支提前返回而漏更新工作区revision，以及本机草稿旧revision回写；未将此直接冒充用户当时409或消失的唯一触发。保存区分工作区更新与模板内容变化，实际变化采用编辑前/当前/最新三方比较；旧草稿缺原基线时不伪造可自动合并。未知保存继续核对原回执，不用空查询解锁。
 
-本批原生并行已确认server Bohr、release Galileo（均complex_implementer6.1-sol/xhigh）；lead独占前端/冲突并统一Verify与同lead Review，不派独立审核。server确认draft.styleGroupVersions；release采用deployedUsageSchema且与normalContinuation互斥、reuseBuilds必须null。用户本轮补充：新guard必须保留restoredSettings相容reader/报价/服务端校验和旧任务消费者/原回执，不能静默忽略新marker；role-control只在鲜核前次成功发布所拥有的控制且自然排尽后更换。尚未构建、提交或上线，不冒成功证据。
+本批原生并行已确认server Bohr、release Galileo（均complex_implementer6.1-sol/xhigh）；lead独占前端/冲突并统一Verify与同lead Review，不派独立审核。server确认draft.styleGroupVersions；release采用deployedUsageSchema且与normalContinuation互斥、reuseBuilds必须null。用户本轮补充：新guard必须保留restoredSettings相容reader/报价/服务端校验和旧任务消费者/原回执，不能静默忽略新marker；role-control只在鲜核前次成功发布所拥有的控制且自然排尽后更换。应用main/guard已提交推送，完整构建和上线尚未开始。
 
 实现参考已读[React Hook Form createFormControl.ts的keepDirtyValues](https://github.com/react-hook-form/react-hook-form/blob/master/src/logic/createFormControl.ts)：采用保留已编辑字段及更新保存依据的成熟思路，项目内小型纯函数合并，无新增依赖/框架。Jev本机doctor返回deferred，未配置授权/密钥，0调用，继续本流程。私有工程与发布原证将归[RESTORE实施目录](../docs/materials/2026-10-21-template-restore-fix/implementation/)；旧诊断如下保历史。
 
 整合进度：server已完成六文件交回；lead已逐段核对请求解析、原任务恢复优先顺序、来源关系、历史风格/上下文、单批报价及公开投影，并把studio-restored-settings-engineering纳入现有check-image-recovery。新增检查仅合成数据，尚未执行，不冒通过。release已改用原先真实保留的proof stdout及command receipt，复制原字节到新run，不伪造历史final-proof.json、不改旧时间。等待发布包最终交回后统一Verify；无浏览器、收费请求或生产业务写入。
 
+首轮发布记录：run bd17d86d-ba16-4303-9c2c-1043998a9d04在captureLegacySourceContract被旧十文件哈希表拦住，其中五文件已随合法9c39发布变化；十文件当前Git字节均与原成功发布proof相符。fresh只读核对六个原PID/Invocation/起点、价格revision及启动allowed哈希均不变，stage仅上传输入，无manifest、candidate根或maintenance入口；原占用以failed正常收口。原run/错误/时间不改，Galileo同worker实际恢复，须在新不可变r02整批修正capture到finalize的同类假设后统一检查；无降门、DDL、业务回写或新生成。私有stage-refusal-state-r01、baseline-source-comparison-r01和failed-r01-command为证；本地漏参及输出目录错误均在准备入口被拦后修正，非生产切换。发布控制后续沿单独codex/template-restore-release-control-20261021，不移动已锁定应用main/guard。
+
 | 编号 | 任务内容 | 完成标准 | 当前状态 |
 |---|---|---|---|
 | D01 | 排查模板设置复用失效 | 找到触发条件和代码依据，区分已确认原因与待核实项 | 已完成限定源码与只读数据调查；具体点击来源和消失时序待核实，未实施修复 |
+
+本批当前17:20:28Z：r02返修完成；统一49文件语法和25项准备入口检查通过，同lead源码Review未见阻塞项。原失败及时间保留；Linux15组/18生命周期、两份完整构建与保护切换尚未执行，不以本地检查冒真实准入。原证为私有implementation/local-control-verification-r02.json及preparer-check-r02.stdout。以下D01内容保留原调查时点，不覆盖上方当前实施状态。
 
 范围：用户反馈“转写实（推进）”恢复风格组但补充输入未恢复，生成后设置消失，并出现旧记录描述与其他页面保存提示。数据库当前相近模板名为“转写实（推荐）”，未找到同名“推进”；以下实例为该相近对象，不冒充已锁定用户点击的具体结果。真实Web运行源9c39aeb7de06c3c9e676477febf214c089cb9727/v0.101.0；沿部署源码读取，无业务代码、生产数据或配置修改，无生成、扣费、浏览器和自动回归。
 
