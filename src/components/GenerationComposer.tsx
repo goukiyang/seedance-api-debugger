@@ -419,6 +419,7 @@ interface Props {
   onInputRecoveryReady?: (capture: (() => boolean) | null) => void;
   onCaptureInputRecoveryTarget?: () => (() => void);
   onReuseStateChange?: (state: ComposerReuseState) => void;
+  onPrepareReuseReady?: (prepare: (() => void) | null) => void;
   onReuseDraftApplied?: (taskId: string, reuseKey: number) => void;
   onCollectionLoad: (collectionId: string) => Promise<void>;
   onCollectionSave: (name: string) => Promise<void>;
@@ -525,6 +526,7 @@ export function GenerationComposer({
   onInputRecoveryReady,
   onCaptureInputRecoveryTarget,
   onReuseStateChange,
+  onPrepareReuseReady,
   onReuseDraftApplied,
   require1080pApproval,
   selectedVideoCardId,
@@ -559,6 +561,9 @@ export function GenerationComposer({
   const workspace = useWorkspace();
   const generationComposerRef = React.useRef<HTMLDivElement | null>(null);
   const workspaceOperationCountRef = React.useRef(0);
+  const workspaceReadCountRef = React.useRef(0);
+  const reuseMountedRef = React.useRef(true);
+  useEffect(() => { reuseMountedRef.current = true; return () => { reuseMountedRef.current = false; }; }, []);
   const templateEnabled = templateMode === 'workbench';
   const appliedReuseDraftRef = React.useRef<string | null>(null);
   const appliedInitialSettingsRef = React.useRef(false);
@@ -649,19 +654,28 @@ export function GenerationComposer({
               ? 'saving'
               : showAlbumPicker || showUploadedImagePicker || templateDrawerOpen
                 ? 'picker-open'
-                : workspace.loading || templateLoading || agentBusy || moduleBuilderBusy || muskConfigLoading || Boolean(studioHandoff && !studioSettingsReady)
+                : workspace.loading || workspaceReadCountRef.current > 0 || templateLoading || agentBusy || moduleBuilderBusy || muskConfigLoading || Boolean(studioHandoff && !studioSettingsReady)
                   ? 'loading'
                   : null;
     onWorkspaceBusyChange?.(reason !== null, reason);
     // Preserve the older busy contract for every existing caller. This page's
     // optional bridge can additionally distinguish reads from user operations.
-    const conflict = reason !== null && (reason !== 'loading' || agentBusy || moduleBuilderBusy);
     onReuseStateChange?.({
-      initializing: reason === 'loading' && !conflict,
-      conflict,
+      initializing: reason === 'loading' && !agentBusy && !moduleBuilderBusy,
+      reason: inputRecoveryBusy || inputRecoveryPair ? 'recovery-pending'
+        : agentBusy || moduleBuilderBusy ? 'agent-running' : reason,
       editRevision: reuseEditRevisionRef.current,
     });
-  }, [agentBusy, moduleBuilderBusy, muskConfigLoading, onWorkspaceBusyChange, onReuseStateChange, showAlbumPicker, showUploadedImagePicker, studioHandoff, studioSettingsReady, templateDrawerOpen, templateLoading, templateSaveBusy, workspace.error, workspace.loading, workspace.pendingWorkspaceAttach, workspace.uploadStatuses]);
+  }, [agentBusy, moduleBuilderBusy, inputRecoveryBusy, inputRecoveryPair, muskConfigLoading, onWorkspaceBusyChange, onReuseStateChange, showAlbumPicker, showUploadedImagePicker, studioHandoff, studioSettingsReady, templateDrawerOpen, templateLoading, templateSaveBusy, workspace.error, workspace.loading, workspace.pendingWorkspaceAttach, workspace.uploadStatuses]);
+
+  const prepareReuse = useCallback(() => {
+    // These selectors only stage a choice. Template editing remains open to protect its unique draft.
+    setShowAlbumPicker(false);
+    setShowUploadedImagePicker(false);
+    pendingMentionRequestRef.current?.resolve(null);
+    pendingMentionRequestRef.current = null;
+  }, []);
+  useEffect(() => { onPrepareReuseReady?.(prepareReuse); return () => onPrepareReuseReady?.(null); }, [onPrepareReuseReady, prepareReuse]);
 
   const markReuseInputChanged = useCallback(() => {
     if (!onReuseStateChange || interactionLocked) return;
@@ -670,20 +684,21 @@ export function GenerationComposer({
     reportWorkspaceBusy();
   }, [interactionLocked, onReuseStateChange, reportWorkspaceBusy]);
 
-  const runWorkspaceOperation = useCallback(async <T,>(operation: () => Promise<T>, userChange = true): Promise<T> => {
+  const runWorkspaceOperation = useCallback(async <T,>(operation: () => Promise<T>, userChange = true, readOnly = false): Promise<T> => {
     if (userChange) markReuseInputChanged();
-    workspaceOperationCountRef.current += 1;
+    const counter = readOnly ? workspaceReadCountRef : workspaceOperationCountRef;
+    counter.current += 1;
     reportWorkspaceBusy();
     try {
       return await operation();
     } finally {
-      workspaceOperationCountRef.current = Math.max(0, workspaceOperationCountRef.current - 1);
+      counter.current = Math.max(0, counter.current - 1);
       reportWorkspaceBusy();
     }
   }, [markReuseInputChanged, reportWorkspaceBusy]);
 
   const refreshWorkspaceForParent = useCallback(
-    () => runWorkspaceOperation(() => workspace.refresh(), false),
+    () => runWorkspaceOperation(() => workspace.refresh(), false, true),
     [runWorkspaceOperation, workspace.refresh],
   );
   const makeInputRecovery = useCallback(() => {
@@ -1267,7 +1282,9 @@ export function GenerationComposer({
       require1080pApproval && reuseDraft.resolution === '1080p' ? Boolean(reuseDraft.resolutionApprovalConfirmed) : false,
     );
     setReuseReadCompleteKey(null);
-    void runWorkspaceOperation(() => workspace.refresh(), false).then(() => setReuseReadCompleteKey(reuseKey));
+    void runWorkspaceOperation(() => workspace.refresh(), false, true).then(() => {
+      if (reuseMountedRef.current && appliedReuseDraftRef.current === reuseKey) setReuseReadCompleteKey(reuseKey);
+    });
   }, [reuseDraft, studioHandoff, require1080pApproval, workspace, modelOptions, onModelChange, runWorkspaceOperation]);
 
   useEffect(() => {
@@ -2260,7 +2277,7 @@ export function GenerationComposer({
             <span>
               素材已上传成功，但加入参考区失败。系统已保留素材 ID，可直接重试，不需要重新上传。
             </span>
-            <button type="button" onClick={() => { void runWorkspaceOperation(() => workspace.retryPendingAttach()); }} disabled={workspace.loading || interactionLocked}>
+            <button type="button" onClick={() => { void runWorkspaceOperation(() => workspace.retryPendingAttach(), false); }} disabled={workspace.loading || interactionLocked}>
               {workspace.loading ? '正在重试...' : `重试加入参考区（${workspace.pendingWorkspaceAttach.assetIds.length} 个）`}
             </button>
           </div>

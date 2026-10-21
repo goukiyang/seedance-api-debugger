@@ -21,6 +21,7 @@ import styles from './ResourceLibraryPicker.module.css';
 import type { AvatarReturnTarget } from '@/lib/avatar-random/handoff';
 import { isNavItemVisible } from '@/lib/navigation';
 import { imageDisplaySource } from '@/lib/media/image-comparison';
+import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 
 export interface ResourceLibraryPickerProps {
   open: boolean;
@@ -79,7 +80,7 @@ function Thumbnail({ item }: { item: PickerItem }) {
 }
 
 export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'image-studio' : 'assets', title = '添加参考素材', confirmLabel = '添加到参考区', purpose = 'reference', initialSource = 'all', maxSelection, typeLimits, acceptedTypes, currentCount, currentAssetIds, currentReferenceImageIds = [], portalContainer, onClose, onUploadFile, onConfirm, onConfirmSelection, onUploadedAssetsConfirmed, avatarTarget, onAvatarApplied, onAvatarConfirm }: ResourceLibraryPickerProps) {
-  const { user } = useAppSession();
+  const { user, loadingUser, hasLoadedUser, userLoadError, sessionChanged, refreshUser } = useAppSession();
   const pickerId = useId();
   const { confirm: askConfirm, productDialog } = useProductDialog();
   const [removedItem, setRemovedItem] = useState<Pick<PickerItem,'assetId'|'identity'|'fileName'|'canRemoveFromLibrary'> | null>(null);
@@ -127,6 +128,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   };
   const typesKey = (imageOnly ? ['image'] : acceptedTypes || ['image', 'video', 'audio']).join(',');
   const types = useMemo(() => typesKey.split(',') as AssetType[], [typesKey]);
+  const sessionReady = Boolean(hasLoadedUser && !loadingUser && !userLoadError && !sessionChanged && !isClientSessionBlocked() && user);
   const prefsKey = user ? `sd2:resource-picker:v1:${user.id}:${target}:${purpose}` : '';
   const recentKey = user ? `sd2:resource-recent:v1:${user.id}:${target}` : '';
   const [prefs, setPrefs] = useState<Preferences>(defaults), [ready, setReady] = useState(false), [query, setQuery] = useState('');
@@ -140,17 +142,48 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const [expanded, setExpanded] = useState(false), [failedUploads, setFailedUploads] = useState<FailedUploadItem[]>([]), [progress, setProgress] = useState<UploadProgressSnapshot | null>(null), [uploadLabel, setUploadLabel] = useState(''), [container, setContainer] = useState<Element | null>(null), [epoch, setEpoch] = useState(0);
   const dialog = useRef<HTMLDivElement>(null), backdrop = useRef<HTMLDivElement>(null), body = useRef<HTMLDivElement>(null), browse = useRef<HTMLElement>(null), sourceBar = useRef<HTMLDivElement>(null), input = useRef<HTMLInputElement>(null);
   const browseSurface = useCallback(() => window.matchMedia('(max-width: 760px)').matches ? browse.current : body.current, []);
-  const sequence = useRef(0), session = useRef(0), locked = useRef(false), restoring = useRef(false), restoration = useRef(0);
+  const sequence = useRef(0), session = useRef(0), locked = useRef(false), restoring = useRef(false), restoration = useRef(0), initializedKey = useRef('');
   const failedUploadIds = useRef(new WeakMap<File, string>());
   const readingMore = useRef(false);
   const filterKey = pickerFilterKey(typesKey, prefs);
   const [loadedFilter, setLoadedFilter] = useState('');
-  const active = useRef(open); active.current = open;
+  const active = useRef(open && sessionReady); active.current = open && sessionReady;
   const close = () => { if (locked.current) { setError('上传或添加尚未结束，请等待完成'); return; } onClose(); };
-  useDialogDismiss({ open: open && ready && sessionOwner === prefsKey, dialogRef: dialog, dismissSurfaceRef: backdrop, onDismiss: () => preview ? setPreview(null) : close() });
+  useDialogDismiss({ open: open && Boolean(container), dialogRef: dialog, dismissSurfaceRef: backdrop, onDismiss: () => preview ? setPreview(null) : close() });
 
   useEffect(() => {
-    if (!open || !user || !prefsKey) { setReady(false); sequence.current++; session.current++; return; }
+    if (!open) return;
+    const modal = Array.from(document.querySelectorAll('dialog[open]')).reverse().find(d => d.matches(':modal'));
+    setContainer(portalContainer || modal || document.body);
+  }, [open, portalContainer]);
+
+  useEffect(() => {
+    if (!open || hasLoadedUser || loadingUser || sessionChanged || isClientSessionBlocked()) return;
+    void refreshUser();
+  }, [hasLoadedUser, loadingUser, open, refreshUser, sessionChanged]);
+
+  useEffect(() => {
+    if (open) return;
+    initializedKey.current = '';
+    setReady(false);
+    sequence.current++;
+    session.current++;
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || sessionReady) return;
+    sequence.current++;
+    session.current++;
+    locked.current = false;
+    setBusy(false);
+    setLoading(false);
+    setPreview(null);
+  }, [open, sessionReady]);
+
+  useEffect(() => {
+    if (!open || !sessionReady || !user || !prefsKey) return;
+    const ownerKey = `${prefsKey}:${typesKey}:${initialSource}`;
+    if (initializedKey.current === ownerKey && ready && sessionOwner === prefsKey) return;
     if (importOwner.current !== recentKey) { imports.current.clear(); uploadReceipts.current.clear(); importOwner.current = recentKey; }
     const raw = stored<Partial<Preferences>>(prefsKey, {}), next = { ...defaults, source: initialSource as string };
     if (['library', 'favorites', 'recent'].includes(raw.view || '')) next.view = raw.view!;
@@ -166,10 +199,10 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     restoration.current = next.scroll; restoring.current = true;
     locked.current = false; setBusy(false);
     setPrefs(next); setQuery(next.query); setSelected([]); setItems([]); setAlbums([]); setTemplates([]); setTotal(0); setPreview(null); setFailedUploads([]); setError(''); setDirectoryError(''); setNotice(''); setDirectoryNotice(''); setUploadLabel(''); setProgress(null); setSessionOwner(prefsKey);
-    const modal = Array.from(document.querySelectorAll('dialog[open]')).reverse().find(d => d.matches(':modal'));
-    setContainer(portalContainer || modal || document.body); setReady(true);
+    initializedKey.current = ownerKey;
+    setReady(true);
     return () => { sequence.current++; session.current++; };
-  }, [open, prefsKey, portalContainer, types, user?.id, initialSource]);
+  }, [open, prefsKey, ready, recentKey, sessionOwner, sessionReady, types, typesKey, user?.id, initialSource]);
   useEffect(() => {
     if (!open || !ready) return;
     const viewport = window.visualViewport;
@@ -207,8 +240,8 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     observer.observe(bar);
     return () => observer.disconnect();
   }, [open, ready, sessionOwner, prefs.source, prefs.view, typesKey]);
-  useEffect(() => { if (!ready || sessionOwner !== prefsKey) return; const timer = setTimeout(() => setPrefs(p => p.query === query ? p : { ...p, query, pages: 1, scroll: 0 }), 250); return () => clearTimeout(timer); }, [query, ready, sessionOwner, prefsKey]);
-  useEffect(() => { if (ready && prefsKey && sessionOwner === prefsKey) { try { localStorage.setItem(prefsKey, JSON.stringify(prefs)); } catch { /* Storage failure never prevents selection. */ } } }, [prefs, ready, prefsKey, sessionOwner]);
+  useEffect(() => { if (!sessionReady || !ready || sessionOwner !== prefsKey) return; const timer = setTimeout(() => setPrefs(p => p.query === query ? p : { ...p, query, pages: 1, scroll: 0 }), 250); return () => clearTimeout(timer); }, [query, ready, sessionOwner, prefsKey, sessionReady]);
+  useEffect(() => { if (sessionReady && ready && prefsKey && sessionOwner === prefsKey) { try { localStorage.setItem(prefsKey, JSON.stringify(prefs)); } catch { /* Storage failure never prevents selection. */ } } }, [prefs, ready, prefsKey, sessionOwner, sessionReady]);
   const readCursor = useRef<string | null>(null);
   const fetchPage = useCallback(async (nextPage: number, after?: string | null): Promise<PickerResponse> => {
     const params = new URLSearchParams({ scope: prefs.scope, source: prefs.source, types: prefs.type === 'all' ? typesKey : prefs.type, q: prefs.query, view: prefs.view, sort: prefs.sort, target, page: String(nextPage) });
@@ -221,7 +254,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     if (!response.ok) throw new Error(data.error || '素材库读取失败'); return data;
   }, [prefs.scope, prefs.source, prefs.template, prefs.type, prefs.query, prefs.view, prefs.sort, prefs.album, prefs.project, typesKey, target, recentKey]);
   useEffect(() => {
-    if (!open || !ready || sessionOwner !== prefsKey) return;
+    if (!open || !sessionReady || !ready || sessionOwner !== prefsKey) return;
     const token = ++sequence.current; setLoading(true); setDirectoryError(''); setItems([]); setLoadedFilter(''); setHasMore(false);
     void (async () => {
       try {
@@ -242,7 +275,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
       finally { if (token === sequence.current) setLoading(false); }
     })();
     return () => { sequence.current++; };
-  }, [open, ready, sessionOwner, prefsKey, fetchPage, epoch]);
+  }, [open, sessionReady, ready, sessionOwner, prefsKey, fetchPage, epoch]);
   useEffect(() => { if (loading || !items.length || !restoring.current) return; browseSurface()?.scrollTo({ top: restoration.current }); restoring.current = false; }, [items, loading, browseSurface]);
 
   const currentIds = new Set(currentAssetIds), currentRefs = new Set(currentReferenceImageIds);
@@ -305,7 +338,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const resetFilterPreferences = () => ({ ...defaults, filtersOpen: prefs.filtersOpen, selectionOpen: prefs.selectionOpen });
   const showAllGenerated = () => refreshDirectory({ ...resetFilterPreferences(), source: 'generated' });
   const upload = async (files: File[]) => {
-    if (locked.current || !files.length) return;
+    if (!sessionReady || locked.current || !files.length) return;
     if (files.some(file => !types.includes(file.type.split('/')[0] as AssetType))) { setError(`请选择${types.map(t => labels[t]).join('、')}文件`); return; }
     locked.current = true; setBusy(true); setError(''); setNotice(''); const token = session.current;
     let duplicates = 0;
@@ -353,7 +386,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     }
   };
   const confirm = async () => {
-    if (locked.current || !selected.length) return;
+    if (!sessionReady || locked.current || !selected.length) return;
     const issue = canSelect(selected); if (issue) { setError(issue); return; }
     locked.current = true; setBusy(true); setError('');
     const confirmationSession = session.current;
@@ -423,10 +456,27 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
       if (recentKey) { try { localStorage.setItem(recentKey, JSON.stringify([...readyItems.map(i => i.key), ...validKeys(stored(recentKey, []))].filter((k, i, all) => all.indexOf(k) === i).slice(0, 60))); } catch { /* Local recent history is not cloud sync. */ } }
       if (active.current && confirmationSession === session.current) onClose();
     } catch (e) { if (confirmationSession === session.current) setError(e instanceof Error ? e.message : '添加失败，请重试'); }
-    finally { locked.current = false; setBusy(false); setUploadLabel(''); setProgress(null); }
+    finally {
+      if (confirmationSession === session.current) { locked.current = false; setBusy(false); setUploadLabel(''); setProgress(null); }
+    }
   };
 
-  if (!open || !ready || !container || sessionOwner !== prefsKey) return null;
+  if (!open || !container) return null;
+  if (!sessionReady || !ready || sessionOwner !== prefsKey) {
+    const loginHref = `/login?next=${encodeURIComponent(typeof window === 'undefined' ? '/' : `${window.location.pathname}${window.location.search}${window.location.hash}`)}`;
+    const blockedSession = sessionChanged || isClientSessionBlocked();
+    return createPortal(<div ref={backdrop} className={styles.backdrop}>
+      <div ref={dialog} role="dialog" aria-modal="true" aria-label={title} className={styles.dialog}>
+        <header className={styles.header}><h2>{title}</h2><div className={styles.commands}><button type="button" aria-label="关闭素材库" title="关闭素材库" onClick={close}><X size={20} /></button></div></header>
+        <div className={styles.empty} role={userLoadError ? 'alert' : 'status'}>
+          <div>{blockedSession ? '登录状态已变化，当前选择仍保留，请重新登录后继续。' : userLoadError ? userLoadError : hasLoadedUser && !user ? '登录后才能读取素材，当前页面内容不会清除。' : sessionReady ? '正在准备素材库' : '正在确认登录状态'}</div>
+          {userLoadError && !blockedSession && <button type="button" disabled={loadingUser} onClick={() => void refreshUser({ force: true })}>重新确认</button>}
+          {(blockedSession || hasLoadedUser && !user) && <button type="button" onClick={() => window.location.assign(loginHref)}>前往登录</button>}
+        </div>
+      </div>
+      {productDialog}
+    </div>, container);
+  }
   const scopedAlbums = albums.filter(a => a.scope === prefs.scope), projects = Array.from(new Map(scopedAlbums.flatMap(a => a.project ? [[a.project.id, a.project] as const] : [])).values());
   const selectedCounts = { image: selected.filter(i => i.type === 'image').length, video: selected.filter(i => i.type === 'video').length, audio: selected.filter(i => i.type === 'audio').length };
   const availableScopes = scopes.filter(([s]) => s === 'mine' || albums.some(a => a.scope === s));

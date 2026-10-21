@@ -1,5 +1,6 @@
 import type { GenerationMode } from '@/types';
 import { sanitizeOptionalReturnTo } from './return-to';
+import { issueTaskReuseNavigationIntent } from './task-reuse-intent';
 
 const GENERATION_MODES = new Set<GenerationMode>([
   'all_in_one_reference',
@@ -56,7 +57,7 @@ export function taskReuseHref(task: TaskReuseSource, returnTo: string | null | u
     return null;
   }
 
-  const safeReturnTo = sanitizeOptionalReturnTo(returnTo);
+  const safeReturnTo = taskReuseReturnTo(returnTo);
   return queryHref(path, [
     ['reuse_task_id', id],
     ['project_id', optionalId(task.project_id, task.projectId)],
@@ -66,9 +67,27 @@ export function taskReuseHref(task: TaskReuseSource, returnTo: string | null | u
   ]);
 }
 
+export function taskReuseReturnTo(returnTo: string | null | undefined): string | null {
+  const safe = sanitizeOptionalReturnTo(returnTo);
+  if (!safe) return null;
+  const url = new URL(safe, 'https://internal.invalid');
+  if (url.pathname === '/assets') url.searchParams.delete('content');
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
 export function enhanceWorkspaceHref(returnTo: string | null | undefined, sourceTaskId?: string | null): string {
   return queryHref('/generate/enhance', [
     ['return_to', sanitizeOptionalReturnTo(returnTo)],
     ['source_task_id', optionalId(sourceTaskId)],
   ]);
+}
+
+// Call only from an explicit current-tab click, not render/prefetch.
+export function authorizeTaskReuseHref(href: string, accountId: string): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const url = new URL(href, window.location.origin);
+    if (url.origin !== window.location.origin || !issueTaskReuseNavigationIntent(url, accountId)) return null;
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch { return null; }
 }

@@ -11,7 +11,7 @@ import { useAppSession } from '@/lib/context/AppSessionContext';
 import { LoadingSkeleton } from '@/components/LoadingState';
 import { RelativeTime } from '@/components/RelativeTime';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, type MouseEvent } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -37,7 +37,7 @@ import {
   formatCurrencyAmountWithFixedCny,
 } from '@/lib/costs/currency';
 import { sanitizeReturnTo, taskDetailHref, taskReturnLabel } from '@/lib/navigation/return-to';
-import { enhanceWorkspaceHref, taskReuseHref } from '@/lib/navigation/task-reuse';
+import { authorizeTaskReuseHref, enhanceWorkspaceHref, taskReuseHref } from '@/lib/navigation/task-reuse';
 import { showVideoCardManagementUi } from '@/lib/navigation';
 import type { DisplayUser } from '@/lib/users/display';
 import { useVideoPricing } from '@/lib/pricing/use-video-pricing';
@@ -887,6 +887,8 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
   const [videoError, setVideoError] = useState(false);
   const [copied, setCopied] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
+  const [taskIdCopyStatus, setTaskIdCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const taskIdCopyResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [openingVideo, setOpeningVideo] = useState(false);
   const [copyingLink, setCopyingLink] = useState(false);
   const [browserDownloading, setBrowserDownloading] = useState(false);
@@ -1509,6 +1511,23 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
     setTimeout(() => setPromptCopied(false), 2000);
   };
 
+  const handleCopyTaskId = async () => {
+    if (!task) return;
+    if (taskIdCopyResetTimer.current) clearTimeout(taskIdCopyResetTimer.current);
+    setTaskIdCopyStatus('idle');
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+      await navigator.clipboard.writeText(task.id);
+      if (!activePageRef.current) return;
+      setTaskIdCopyStatus('copied');
+      taskIdCopyResetTimer.current = setTimeout(() => {
+        if (activePageRef.current) setTaskIdCopyStatus('idle');
+      }, 2000);
+    } catch {
+      if (activePageRef.current) setTaskIdCopyStatus('failed');
+    }
+  };
+
   // 获取视频播放源
   const getVideoSrc = () => {
     return taskVideoSource(task);
@@ -1818,6 +1837,21 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
   const taskActionLabel = isEnhanceTask
     ? (enhanceSourceTaskId ? '查找原来源视频' : '选择源视频')
     : '复用输入';
+  const handleTaskReuseClick = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (isEnhanceTask) return;
+    event.preventDefault();
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      setOpenError('复用输入需在当前标签页打开。');
+      return;
+    }
+    const authorizedHref = taskActionHref ? authorizeTaskReuseHref(taskActionHref, ownerId) : null;
+    if (!authorizedHref) {
+      setOpenError('复用入口准备失败，浏览器未能保存本次操作。当前页面未改变，请重试。');
+      return;
+    }
+    setOpenError(null);
+    router.push(authorizedHref);
+  };
   const taskCreditText = task.actual_cost !== null && task.actual_cost !== undefined
     ? formatCreditPoints(task.actual_cost)
     : task.frozen_cost !== null && task.frozen_cost !== undefined
@@ -2106,7 +2140,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                   </div>
                 </details>}
                 {!isSubmissionUnknown && (
-                  taskActionHref ? <Link href={taskActionHref} className="btn btn-secondary">
+                  taskActionHref ? <Link href={taskActionHref} className="btn btn-secondary" onClick={isEnhanceTask ? undefined : handleTaskReuseClick}>
                     <RotateCcw size={16} aria-hidden="true" />
                     {taskActionLabel}
                   </Link> : <button type="button" className="btn btn-secondary" disabled title="此类型任务暂不支持直接复用输入">
@@ -2184,6 +2218,24 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                 </small>
               </div>
               <div className="task-decision-list">
+                <div>
+                  <span>任务编号</span>
+                  <strong className={resultStyles.taskIdValue}>
+                    <code className={resultStyles.taskIdText}>{task.id}</code>
+                    <button
+                      type="button"
+                      className={`btn btn-secondary ${resultStyles.taskIdCopy}`}
+                      aria-label="复制任务编号"
+                      onClick={() => void handleCopyTaskId()}
+                    >
+                      <Copy size={14} aria-hidden="true" />
+                      {taskIdCopyStatus === 'copied' ? '已复制' : '复制'}
+                    </button>
+                  </strong>
+                  {taskIdCopyStatus === 'failed' && (
+                    <small className={resultStyles.taskIdCopyError} role="status">复制失败，可选中编号复制</small>
+                  )}
+                </div>
                 <div><span>模型</span><strong>{task.model || task.provider}</strong></div>
                 <div><span>视频规格</span><strong>{[task.duration ? `${task.duration}秒` : null, task.ratio, task.resolution].filter(Boolean).join(' · ') || '待同步'}</strong></div>
                 <div><span>点数扣除</span><strong>{taskCreditText}</strong></div>
@@ -2243,7 +2295,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                     {promptCopied ? '已复制' : '复制提示词'}
                   </button>
                 )}
-                {taskActionHref ? <Link href={taskActionHref} className="btn btn-secondary">
+                {taskActionHref ? <Link href={taskActionHref} className="btn btn-secondary" onClick={isEnhanceTask ? undefined : handleTaskReuseClick}>
                   <RotateCcw size={16} aria-hidden="true" />
                   {taskActionLabel}
                 </Link> : <button type="button" className="btn btn-secondary" disabled title="此类型任务暂不支持直接复用输入">

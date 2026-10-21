@@ -364,13 +364,18 @@
 
         <!-- Floating Canvas Bottom Toolbar -->
         <div id="canvas-floating-toolbar" class="canvas-floating-toolbar">
+            <button type="button" class="toolbar-pill-btn active" data-canvas-mode="select" data-graph-icon="MousePointer2" title="选择 (V)" aria-label="选择" aria-pressed="true"></button>
+            <button type="button" class="toolbar-pill-btn" data-canvas-mode="hand" data-graph-icon="Hand" title="抓手 (H)" aria-label="抓手" aria-pressed="false"></button>
+            <button type="button" class="toolbar-pill-btn" id="btn-search-nodes" data-graph-icon="Search" title="查找节点" aria-label="查找节点"></button>
             <button type="button" class="toolbar-pill-btn" id="btn-undo" data-graph-icon="Undo2" title="撤销编辑" aria-label="撤销编辑" disabled></button>
             <button type="button" class="toolbar-pill-btn" id="btn-redo" data-graph-icon="Redo2" title="重做编辑" aria-label="重做编辑" disabled></button>
             <button type="button" class="toolbar-pill-btn" id="btn-copy-nodes" data-graph-icon="Copy" title="复制选中节点" aria-label="复制选中节点" disabled></button>
             <button type="button" class="toolbar-pill-btn" id="btn-group" data-graph-icon="Group" title="组合选中节点" aria-label="组合选中节点" disabled></button>
             <button type="button" class="toolbar-pill-btn" id="btn-ungroup" data-graph-icon="Ungroup" title="取消组合" aria-label="取消组合" disabled></button>
             <span class="toolbar-pill-divider"></span>
-            <button class="toolbar-pill-btn" id="btn-fit" title="整理画布">
+            <button type="button" class="toolbar-pill-btn" id="btn-fit" data-graph-icon="Maximize" title="适应视口" aria-label="适应视口"></button>
+            <button type="button" class="toolbar-pill-btn" id="btn-zoom-reset" data-graph-icon="Scan" title="100%" aria-label="恢复100%缩放"></button>
+            <button class="toolbar-pill-btn" id="btn-arrange" title="整理画布" aria-label="整理画布">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
                     <rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>
@@ -410,6 +415,7 @@
     <script src="generation-api.js?v=20260713-sd2-same-origin"></script>
     <script src="generation-node-interactions.js?v=0.35.0"></script>
     <script src="generation-node-workflow.js?v=can37-0.61.0"></script>
+    <script src="video-batches.js?v=libtv-20261021"></script>
     <script src="video-card-workflow.js?v=20260711-video-card-complete"></script>
     <script src="generation-task-coordinator.js?v=0.35.0-history-closure"></script>
     <script src="canvas-save-coordinator.js?v=20260712-final-hardening"></script>

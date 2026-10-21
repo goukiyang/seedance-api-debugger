@@ -134,9 +134,14 @@ class CanvasEngine {
                 this.connectionResizeFrame = requestAnimationFrame(() => {
                     this.connectionResizeFrame = null;
                     this._updateConnections();
+                    this.refreshGroupFrames();
                 });
             })
             : null;
+        this.nodeGeometryObserver = typeof MutationObserver === 'function' ? new MutationObserver(records => {
+            if (records.some(record => record.target?.closest?.('.canvas-node'))) this.scheduleGroupFrames();
+        }) : null;
+        this.nodeGeometryObserver?.observe(this.canvas, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'hidden'] });
 
         this.isSnapEnabled = true; // Snap to grid by default
         this.isSpacePressed = false;
@@ -157,7 +162,7 @@ class CanvasEngine {
             if (e.target !== this.container && e.target !== this.canvas && !e.target.closest('.canvas-node')) return;
             if (this._canvasInputBlocked()) { e.preventDefault(); e.stopImmediatePropagation(); return; }
             if (e.button === 0) this.container.focus({ preventScroll: true });
-            if (e.button === 0 && this.isSpacePressed) {
+            if (e.button === 0 && (this.isSpacePressed || this.interactionMode === 'hand')) {
                 this.spacePanClickPending = true;
                 this._onMouseDown(e);
                 e.stopImmediatePropagation();
@@ -193,10 +198,12 @@ class CanvasEngine {
                 this._hideContextMenu();
                 this._hideAddMenu();
             }
-            if ((e.key === 'Delete' || e.key === 'Backspace') && this.selectedNodeId
+            if ((e.key === 'Delete' || e.key === 'Backspace') && this.selectedNodeId && !e.isComposing
+                && this.container.contains(document.activeElement)
                 && !this._isInteractiveTarget(e.target)
                 && !this._isInteractiveTarget(document.activeElement)) {
-                this.deleteNode(this.selectedNodeId);
+                e.preventDefault();
+                this.requestDeleteNodes(this.getSelectedNodeIds());
             }
         });
 
@@ -212,11 +219,22 @@ class CanvasEngine {
         window.addEventListener('keyup', (e) => {
             if (e.key === ' ') {
                 this.isSpacePressed = false;
-                this.container.style.cursor = this.isPanning ? 'grabbing' : 'default';
+                this.container.style.cursor = this.isPanning ? 'grabbing' : this.interactionMode === 'hand' ? 'grab' : 'default';
             }
         }, true);
         window.addEventListener('blur', () => this._cancelInputGesture());
         window.addEventListener('pagehide', () => this._cancelInputGesture());
+        window.addEventListener('pagehide', () => {
+            this.nodeGeometryObserver?.disconnect(); this.nodeResizeObserver?.disconnect();
+            if (this.groupFrameRequest != null) cancelAnimationFrame(this.groupFrameRequest);
+            this.groupFrameRequest = null;
+        });
+        window.addEventListener('pageshow', event => {
+            if (!event.persisted) return;
+            this.nodeGeometryObserver?.observe(this.canvas, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'hidden'] });
+            this.canvas.querySelectorAll('.canvas-node').forEach(element => this.nodeResizeObserver?.observe(element));
+            this.scheduleGroupFrames();
+        });
         window.addEventListener('pointercancel', () => this._cancelInputGesture(), true);
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) this._cancelInputGesture();
@@ -265,22 +283,26 @@ class CanvasEngine {
         this.isDraggingNode = false;
         this.dragNode = null;
         this.dragNodeStarts = null;
+        this.pendingDuplicateDrag = false;
         this.hasPannedDuringRightClick = false;
         this.spacePanClickPending = false;
-        this.container.style.cursor = 'default';
+        this.container.style.cursor = this.interactionMode === 'hand' ? 'grab' : 'default';
         document.getElementById('selection-marquee')?.classList.add('hidden');
         this._cancelConnection();
         const pointer = this.nodeDragPointer;
         this.nodeDragPointer = null;
         if (pointer?.target.hasPointerCapture(pointer.id)) pointer.target.releasePointerCapture(pointer.id);
-        if (wasDragging) this._updateConnections();
+        if (wasDragging) {
+            this._updateConnections();
+            this.onEditGestureCancel?.();
+        }
     }
 
     // --- Mouse Handlers ---
     _onMouseDown(e) {
         if (e.defaultPrevented || this._canvasInputBlocked()) return;
         if (e.button === 0 && this._isInteractiveTarget(e.target)) return;
-        const isSpace = this.isSpacePressed;
+        const isSpace = this.isSpacePressed || this.interactionMode === 'hand';
         // Panning: Middle click (1), Right click (2), or Space + Left click (0)
         if (e.button === 1 || e.button === 2 || (e.button === 0 && isSpace)) {
             this.isPanning = true;
@@ -358,6 +380,20 @@ class CanvasEngine {
             }
         }
         if (this.isDraggingNode && this.dragNode) {
+            if (this.pendingDuplicateDrag) {
+                if (Math.hypot(e.clientX - this.dragStartX, e.clientY - this.dragStartY) < 5) return;
+                this.pendingDuplicateDrag = false;
+                const sourceId = this.dragNode.dataset.nodeId;
+                const copiedId = this.onDuplicateDrag?.(sourceId);
+                const copied = copiedId && this.nodes.get(copiedId);
+                const element = copied && this.canvas.querySelector(`[data-node-id="${CSS.escape(copiedId)}"]`);
+                if (!element) { this._cancelInputGesture(); return; }
+                this.dragNode.classList.remove('dragging');
+                this.dragNode = element;
+                element.classList.add('dragging');
+                this.nodeStartX = copied.x; this.nodeStartY = copied.y;
+                this._selectDragNodes(copiedId, null, false);
+            }
             const dx = (e.clientX - this.dragStartX) / this.scale;
             const dy = (e.clientY - this.dragStartY) / this.scale;
             let newX = this.nodeStartX + dx;
@@ -386,6 +422,7 @@ class CanvasEngine {
                 element.style.left = member.x + 'px'; element.style.top = member.y + 'px';
             });
             this._updateConnections();
+            this.scheduleGroupFrames();
         }
         if (this.isDrawingConnection && this.tempConnectionLine) {
             const cr = this.container.getBoundingClientRect();
@@ -399,7 +436,7 @@ class CanvasEngine {
     _onMouseUp(e) {
         if (this.isPanning) {
             this.isPanning = false;
-            this.container.style.cursor = this.isSpacePressed ? 'grab' : 'default';
+            this.container.style.cursor = this.isSpacePressed || this.interactionMode === 'hand' ? 'grab' : 'default';
         }
         if (this.isSelecting) {
             this.isSelecting = false;
@@ -409,6 +446,7 @@ class CanvasEngine {
         }
         if (this.isDraggingNode) {
             this.isDraggingNode = false;
+            this.pendingDuplicateDrag = false;
             const nodeId = this.dragNode?.dataset.nodeId;
             const node = nodeId ? this.nodes.get(nodeId) : null;
             const moved = Boolean(node && (node.x !== this.nodeStartX || node.y !== this.nodeStartY));
@@ -416,6 +454,7 @@ class CanvasEngine {
             this.dragNode = null;
             this.dragNodeStarts = null;
             if (moved) this._notifyCanvasGeometryChanged('node-move', { nodeIds: [nodeId] });
+            this.onEditGestureEnd?.();
         }
         if (this.isDrawingConnection) {
             const target = document.elementFromPoint(e.clientX, e.clientY);
@@ -423,7 +462,7 @@ class CanvasEngine {
             const startConnector = this.connectionStartConnector;
             if (conn && conn !== startConnector) {
                 const pair = this._connectionPair(startConnector, conn);
-                if (pair && pair.fromId !== pair.toId) this._createConnection(pair.fromId, pair.toId);
+                if (pair && pair.fromId !== pair.toId) this.performUserEdit('连接节点', () => this._createConnection(pair.fromId, pair.toId));
             } else if (conn === startConnector || !target?.closest('.canvas-node')) {
                 const startId = startConnector?.closest('.canvas-node')?.dataset.nodeId;
                 if (startId) {
@@ -866,7 +905,7 @@ class CanvasEngine {
             this.nodeStartX = parseFloat(wrap.style.left);
             this.nodeStartY = parseFloat(wrap.style.top);
             wrap.classList.add('dragging');
-            this._selectDragNodes(id);
+            this._selectDragNodes(id, e);
         });
         if (type === 'role' || type === 'role-requirement') {
             lbl.addEventListener('pointerdown', event => {
@@ -876,7 +915,7 @@ class CanvasEngine {
                 this.nodeDragPointer = { id: event.pointerId, target: lbl };
                 lbl.setPointerCapture(event.pointerId);
                 this.isDraggingNode = true; this.dragNode = wrap; this.dragStartX = event.clientX; this.dragStartY = event.clientY;
-                this.nodeStartX = nd.x; this.nodeStartY = nd.y; this._selectDragNodes(id); wrap.classList.add('dragging');
+                this.nodeStartX = nd.x; this.nodeStartY = nd.y; this._selectDragNodes(id, event); wrap.classList.add('dragging');
             });
             lbl.addEventListener('pointermove', event => { if (event.pointerId === this.nodeDragPointer?.id) this._onMouseMove(event); });
             lbl.addEventListener('pointerup', event => {
@@ -906,7 +945,7 @@ class CanvasEngine {
             this.nodeStartX = parseFloat(wrap.style.left);
             this.nodeStartY = parseFloat(wrap.style.top);
             wrap.classList.add('dragging');
-            this._selectDragNodes(id);
+            this._selectDragNodes(id, e);
         });
 
         // Select
@@ -1476,15 +1515,30 @@ class CanvasEngine {
         return [...this.selectedNodeIds].filter(id => this.nodes.has(id));
     }
 
-    _selectDragNodes(id) {
-        const selected = this.selectedNodeIds.has(id) ? this.getSelectedNodeIds() : [id];
-        const groups = new Set(selected.map(key => this.nodes.get(key)?.data?.canvasGroup?.id).filter(Boolean));
-        const ids = [...new Set([...selected, ...[...this.nodes.values()].filter(node => groups.has(node.data?.canvasGroup?.id)).map(node => node.id)])];
+    _selectDragNodes(id, event, begin = true) {
+        const ids = this.selectedNodeIds.has(id) ? this.getSelectedNodeIds() : [id];
         this.selectNodes(ids, id);
         this.dragNodeStarts = new Map(ids.map(key => {
             const node = this.nodes.get(key);
             return [key, { x: node.x, y: node.y, previewX: node.x, previewY: node.y, node }];
         }));
+        if (begin) {
+            this.pendingDuplicateDrag = Boolean(event?.altKey && !event.ctrlKey && !event.metaKey);
+            this.onEditGestureStart?.(this.pendingDuplicateDrag);
+        }
+    }
+
+    performUserEdit(label, operation, options = {}) {
+        return this.onUserEdit ? this.onUserEdit(label, operation, options) : operation();
+    }
+
+    requestDeleteNodes(nodeIds) {
+        const ids = [...new Set(nodeIds)].filter(id => this.nodes.has(id));
+        if (!ids.length) return false;
+        return this.onDeleteNodes ? this.onDeleteNodes(ids) : this.performUserEdit('删除节点', () => {
+            ids.forEach(id => this.deleteNode(id));
+            return true;
+        });
     }
 
     _toggleSelectionGesture(id, event) {
@@ -1668,12 +1722,12 @@ class CanvasEngine {
         group.addEventListener('click', event => {
             event.preventDefault();
             event.stopPropagation();
-            this.disconnectNodes(connection.from, connection.to);
+            this.performUserEdit('删除连线', () => this.disconnectNodes(connection.from, connection.to));
         });
         group.addEventListener('keydown', event => {
             if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
-                this.disconnectNodes(connection.from, connection.to);
+                this.performUserEdit('删除连线', () => this.disconnectNodes(connection.from, connection.to));
             }
         });
         document.getElementById(connection.lineId)?.addEventListener('mouseenter', () => setVisible(true));
@@ -1774,13 +1828,12 @@ class CanvasEngine {
             const rect = this.container.getBoundingClientRect();
             const cx = (x - rect.left - this.offsetX)/this.scale;
             const cy = (y - rect.top - this.offsetY)/this.scale;
-            if (a==='del') this.deleteNode(nid);
+            if (a==='del') this.requestDeleteNodes(this.selectedNodeIds.has(nid) ? this.getSelectedNodeIds() : [nid]);
             else if (a==='split-plans') this.onPlanSplit?.(nid);
             else if (a==='dup') this.onDuplicateNode?.(nid);
-            else if (a==='add-text') this.addNode('text',cx,cy);
-            else if (a==='add-image') this.addNode('image',cx,cy);
-            else if (a==='add-video') this.addNode('video',cx,cy);
-            else if (a==='add-audio') this.addNode('audio',cx,cy);
+            else if (['add-text', 'add-image', 'add-video', 'add-audio'].includes(a)) {
+                this.performUserEdit('新增节点', () => this.addNode(a.slice(4), cx, cy));
+            }
             this._hideContextMenu();
         });
     }
@@ -1788,14 +1841,95 @@ class CanvasEngine {
 
     fitView() {
         if (!this.nodes.size) { this.scale=1; this.offsetX=0; this.offsetY=0; this._applyTransform(); this._updateZoom(); this._updateConnections(); return; }
-        let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
-        this.nodes.forEach(n => { minX=Math.min(minX,n.x); minY=Math.min(minY,n.y); maxX=Math.max(maxX,n.x+640); maxY=Math.max(maxY,n.y+500); });
-        const r = this.container.getBoundingClientRect(), p = 80;
-        const w = maxX-minX+p*2, h = maxY-minY+p*2;
-        this.scale = Math.min(r.width/w, r.height/h, 1.5);
-        this.offsetX = (r.width - w*this.scale)/2 - minX*this.scale + p*this.scale;
-        this.offsetY = (r.height - h*this.scale)/2 - minY*this.scale + p*this.scale;
+        const boxes = [...this.nodes.values()].map(node => this.measureNodeBounds(node));
+        this.refreshGroupFrames();
+        boxes.push(...(this.groupBounds || []));
+        const minX = Math.min(...boxes.map(box => box.x)), minY = Math.min(...boxes.map(box => box.y));
+        const maxX = Math.max(...boxes.map(box => box.x + box.width)), maxY = Math.max(...boxes.map(box => box.y + box.height));
+        const r = this.container.getBoundingClientRect(), p = Math.min(64, r.width / 8, r.height / 8);
+        const w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
+        this.scale = Math.min((r.width - p * 2) / w, (r.height - p * 2) / h, 1.5);
+        this.offsetX = (r.width - w * this.scale) / 2 - minX * this.scale;
+        this.offsetY = (r.height - h * this.scale) / 2 - minY * this.scale;
         this._applyTransform(); this._updateZoom(); this._updateConnections();
+    }
+
+    measureNodeBounds(node) {
+        const element = this.canvas.querySelector(`[data-node-id="${CSS.escape(node.id)}"]`);
+        if (!element) return { x: node.x, y: node.y, width: 624, height: 440 };
+        const origin = this.canvas.getBoundingClientRect();
+        const parts = [element, ...element.querySelectorAll(':scope > .node-label, :scope > [class*="props"], :scope > .text-creation-toolbar')];
+        const rects = parts.filter(part => part.getClientRects().length).map(part => part.getBoundingClientRect());
+        if (!rects.length) return { x: node.x, y: node.y, width: element.offsetWidth || 624, height: element.offsetHeight || 440 };
+        const left = Math.min(...rects.map(rect => rect.left)), top = Math.min(...rects.map(rect => rect.top));
+        return { x: (left - origin.left) / this.scale, y: (top - origin.top) / this.scale,
+            width: (Math.max(...rects.map(rect => rect.right)) - left) / this.scale,
+            height: (Math.max(...rects.map(rect => rect.bottom)) - top) / this.scale };
+    }
+
+    scheduleGroupFrames() {
+        if (this.groupFrameRequest != null) return;
+        this.groupFrameRequest = requestAnimationFrame(() => {
+            this.groupFrameRequest = null;
+            this.refreshGroupFrames();
+        });
+    }
+
+    refreshGroupFrames() {
+        if (!window.UltimateCanvasGroups || !this.canvas) return;
+        const groups = window.UltimateCanvasGroups.listGroups(this);
+        const live = new Set(groups.map(group => group.id));
+        this.canvas.querySelectorAll('.canvas-group-frame').forEach(frame => {
+            if (!live.has(frame.dataset.groupId)) frame.remove();
+        });
+        this.groupBounds = [];
+        for (const group of groups) {
+            const boxes = group.nodeIds.map(id => this.measureNodeBounds(this.nodes.get(id)));
+            const left = Math.min(...boxes.map(box => box.x)) - 24;
+            const top = Math.min(...boxes.map(box => box.y)) - 50;
+            const right = Math.max(...boxes.map(box => box.x + box.width)) + 24;
+            const bottom = Math.max(...boxes.map(box => box.y + box.height)) + 24;
+            this.groupBounds.push({ x: left, y: top, width: right - left, height: bottom - top });
+            let frame = this.canvas.querySelector(`.canvas-group-frame[data-group-id="${CSS.escape(group.id)}"]`);
+            if (!frame) {
+                frame = document.createElement('div');
+                frame.className = 'canvas-group-frame'; frame.dataset.groupId = group.id;
+                const title = document.createElement('button');
+                title.type = 'button'; title.className = 'canvas-group-title'; frame.append(title);
+                for (const side of ['top', 'right', 'bottom', 'left']) {
+                    const edge = document.createElement('div'); edge.className = `canvas-group-edge ${side}`; frame.append(edge);
+                }
+                title.addEventListener('click', event => {
+                    if (event.detail) return;
+                    const current = window.UltimateCanvasGroups.listGroups(this).find(item => item.id === frame.dataset.groupId);
+                    if (current) { this.selectNodes(current.nodeIds); this.container.focus({ preventScroll: true }); }
+                });
+                frame.addEventListener('mousedown', event => {
+                    if (event.button !== 0 || this._canvasInputBlocked()) return;
+                    event.preventDefault(); event.stopPropagation();
+                    this.container.focus({ preventScroll: true });
+                    if (this.isSpacePressed || this.interactionMode === 'hand') {
+                        this.isPanning = true;
+                        this.panStartX = event.clientX - this.offsetX; this.panStartY = event.clientY - this.offsetY;
+                        this.container.style.cursor = 'grabbing'; return;
+                    }
+                    const current = window.UltimateCanvasGroups.listGroups(this).find(item => item.id === frame.dataset.groupId);
+                    if (!current?.nodeIds.length) return;
+                    this.selectNodes(current.nodeIds);
+                    const id = current.nodeIds[0], node = this.nodes.get(id);
+                    this.dragNode = this.canvas.querySelector(`[data-node-id="${CSS.escape(id)}"]`);
+                    this.isDraggingNode = true; this.dragStartX = event.clientX; this.dragStartY = event.clientY;
+                    this.nodeStartX = node.x; this.nodeStartY = node.y;
+                    this._selectDragNodes(id, event);
+                });
+                this.canvas.prepend(frame);
+            }
+            frame.querySelector('button').textContent = group.name || '组合';
+            frame.querySelector('button').setAttribute('aria-label', `选择组合：${group.name || '组合'}`);
+            frame.style.left = `${left}px`; frame.style.top = `${top}px`;
+            frame.style.width = `${right - left}px`; frame.style.height = `${bottom - top}px`;
+            frame.classList.toggle('is-selected', group.nodeIds.every(id => this.selectedNodeIds.has(id)));
+        }
     }
 
     arrangeToolflowNodes() {
@@ -1858,6 +1992,7 @@ class CanvasEngine {
     }
 
     _notifyCanvasGeometryChanged(kind, details = {}) {
+        this.scheduleGroupFrames();
         this.onCanvasGeometryChanged?.({ kind, ...details });
     }
 }

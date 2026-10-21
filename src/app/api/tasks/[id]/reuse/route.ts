@@ -652,9 +652,9 @@ export async function POST(
       video_branch_id: task.video_branch_id,
       video_card: task.video_card,
     };
-    if (hasSourceMaterials && preparedItems.length === 0) {
+    if (hasSourceMaterials && (preparedItems.length === 0 || skippedReferences > 0)) {
       return NextResponse.json({
-        error: '原任务素材均无法安全恢复，当前工作区未更改。',
+        error: '原任务部分或全部素材无法安全恢复，当前工作区未更改。',
         code: 'REUSE_ASSETS_UNAVAILABLE',
         restored_references: 0,
         skipped_references: skippedReferences,

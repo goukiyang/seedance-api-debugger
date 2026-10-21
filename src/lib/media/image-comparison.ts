@@ -12,6 +12,13 @@ export type ImageComparisonSource = {
 };
 export type ImageView = { scale: number; x: number; y: number; mode: MediaPreviewZoomMode };
 export type ComparisonPreferences = { linked: boolean; axis: 'horizontal' | 'vertical' };
+export type ComparisonResolveFailureKind = 'permission' | 'deleted' | 'identity-version-change' | 'transient' | 'cancelled';
+export class ComparisonResolveError extends Error {
+  constructor(readonly kind: ComparisonResolveFailureKind, message: string) {
+    super(message);
+    this.name = 'ComparisonResolveError';
+  }
+}
 export const fittedImageView: ImageView = { scale: 1, x: 0, y: 0, mode: 'fit' };
 export const comparisonScopes: PickerScope[] = ['mine', 'project', 'shared', 'public'];
 const prefix = 'sd2:media-preview:comparison:v1';
@@ -57,17 +64,36 @@ export function pickerImageSource(item: PickerItem): ImageComparisonSource {
     contentKey: item.referenceImageId ? `reference_image:${item.referenceImageId}` : item.key,
     pickerKey: item.referenceImageId ? `reference_image:${item.referenceImageId}` : item.key };
 }
+function responseFailure(status: number) {
+  if (status === 401) return new ComparisonResolveError('transient', '登录状态暂时无法确认，请重新登录后重试');
+  if (status === 403) return new ComparisonResolveError('permission', '没有权限读取这张对比图，请重新选择');
+  if (status === 404 || status === 410) return new ComparisonResolveError('deleted', '这张对比图已删除或不再可用，请重新选择');
+  if (status === 409) return new ComparisonResolveError('identity-version-change', '这张对比图已更新，不能自动替换，请重新选择');
+  return new ComparisonResolveError('transient', '暂时无法读取对比图，请重试');
+}
+
+export function comparisonResolveFailure(error: unknown) {
+  if (error instanceof ComparisonResolveError) return error;
+  if (error && typeof error === 'object' && 'name' in error && error.name === 'AbortError') return new ComparisonResolveError('cancelled', '已取消读取对比图');
+  return new ComparisonResolveError('transient', '暂时无法读取对比图，请重试');
+}
+
 export async function resolveComparisonImage(key: string, signal?: AbortSignal): Promise<ImageComparisonSource> {
-  if (!validPickerKey(key)) throw new Error('图片标识无效，请重新选择');
-  for (const scope of comparisonScopes) {
-    const params = new URLSearchParams({ target: 'workspace', scope, types: 'image', keys: key });
-    const response = await fetch(`/api/assets/picker?${params}`, { signal, cache: 'no-store' });
-    const data = await readJsonResponse<PickerResponse>(response);
-    if (!response.ok) throw new Error('图片权限暂时无法确认，请重试');
-    const item = data.items.find(value => value.type === 'image' && (value.key === key || `reference_image:${value.referenceImageId}` === key));
-    if (item?.previewUrl || item?.originalUrl) return pickerImageSource(item);
+  if (!validPickerKey(key)) throw new ComparisonResolveError('identity-version-change', '对比图记录已变更，请重新选择');
+  try {
+    for (const scope of comparisonScopes) {
+      const params = new URLSearchParams({ target: 'workspace', scope, types: 'image', keys: key });
+      const response = await fetch(`/api/assets/picker?${params}`, { signal, cache: 'no-store' });
+      if (!response.ok) throw responseFailure(response.status);
+      const data = await readJsonResponse<PickerResponse>(response);
+      const item = data.items.find(value => value.type === 'image' && (value.key === key || `reference_image:${value.referenceImageId}` === key));
+      if (item?.previewUrl || item?.originalUrl) return pickerImageSource(item);
+    }
+    throw new ComparisonResolveError('deleted', '这张对比图已删除或不再可用，请重新选择');
+  } catch (error) {
+    if (signal?.aborted) throw new ComparisonResolveError('cancelled', '已取消读取对比图');
+    throw comparisonResolveFailure(error);
   }
-  throw new Error('图片已失效或无权查看，请重新选择');
 }
 function read(key: string): Record<string, unknown> {
   try { const value = JSON.parse(localStorage.getItem(key) || '{}'); return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; } catch { return {}; }
@@ -97,10 +123,13 @@ export function saveImageView(user: string, identity: string, pair: string, axis
   const entries = Object.entries(value).slice(-78);
   write(`${prefix}:${encodeURIComponent(user)}:views`, { ...Object.fromEntries(entries), [identity]: view, [`${pair}:${axis}:${identity}`]: view });
 }
-type SelectionRecord = { enabled: boolean; comparison?: { key: string; identity: string } };
+export type ComparisonSelectionRecord = { enabled: boolean; comparison?: { key: string; identity: string }; storageSnapshot?: string; invalid?: boolean };
 function selectionKey(user: string, anchor: string) { return `${prefix}:${encodeURIComponent(user)}:selection:${encodeURIComponent(anchor)}`; }
-export function readComparisonSelection(user: string, anchor: string, openedIdentity: string): SelectionRecord {
-  const value = read(selectionKey(user, anchor));
+export function readComparisonSelection(user: string, anchor: string, openedIdentity: string): ComparisonSelectionRecord {
+  const key = selectionKey(user, anchor);
+  let storageSnapshot: string | undefined;
+  try { storageSnapshot = localStorage.getItem(key) || undefined; } catch { /* Restricted storage has no restorable selection. */ }
+  const value = read(key);
   const source = (v: unknown) => {
     if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
     const data = v as Record<string, unknown>;
@@ -109,7 +138,10 @@ export function readComparisonSelection(user: string, anchor: string, openedIden
   };
   // Legacy selections may have been swapped. Restore only records with a known left/right assignment.
   const anchored = value.sidePolicy === 'anchored-current' || source(value.current)?.identity === openedIdentity;
-  return anchored ? { enabled: value.enabled === true, comparison: source(value.comparison) } : { enabled: false };
+  const comparison = source(value.comparison);
+  if (!anchored) return { enabled: false, storageSnapshot, invalid: Boolean(storageSnapshot) };
+  return { enabled: value.enabled === true, comparison, storageSnapshot,
+    invalid: (value.enabled === true && !comparison) || (value.comparison != null && !comparison) };
 }
 export function saveComparisonSelection(user: string, anchor: string, current: ImageComparisonSource, comparison: ImageComparisonSource | null, enabled: boolean) {
   const record = (image: ImageComparisonSource | null) => {
@@ -117,4 +149,16 @@ export function saveComparisonSelection(user: string, anchor: string, current: I
     return key && image ? { key, identity: imageSourceIdentity(image) } : undefined;
   };
   write(selectionKey(user, anchor), { sidePolicy: 'anchored-current', enabled: enabled && Boolean(record(comparison)), current: record(current), comparison: record(comparison) });
+}
+
+export function clearComparisonSelectionIfUnchanged(user: string, anchor: string, expected: ComparisonSelectionRecord) {
+  if (!expected.storageSnapshot) return false;
+  const key = selectionKey(user, anchor);
+  try {
+    if (localStorage.getItem(key) !== expected.storageSnapshot) return false;
+    localStorage.removeItem(key);
+    return localStorage.getItem(key) === null;
+  } catch {
+    return false;
+  }
 }

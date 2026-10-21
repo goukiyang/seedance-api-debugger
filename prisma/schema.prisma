@@ -976,6 +976,62 @@ model CanvasDocument {
   @@index([owner_user_id, project_id, status, updated_at, id])
 }
 
+// Durable batch/fee identities survive canvas deletion and snapshot retention.
+// Amounts are integer credit cents, not floating-point display totals.
+model CanvasVideoBatch {
+  id                    String   @id
+  owner_user_id         String
+  document_id           String
+  node_id               String
+  project_id            String
+  video_card_id         String?
+  video_branch_id       String?
+  client_request_id     String
+  request_hash          String
+  count                 Int
+  contract_version      Int      @default(1)
+  frozen_input_json     String
+  authorized_total      Int
+  admitted_total        Int      @default(0)
+  active_node_key       String?  @unique
+  state                 String   @default("prepared")
+  revision              Int      @default(1)
+  operations_json       String   @default("{}")
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+  children              CanvasVideoBatchChild[]
+
+  @@unique([owner_user_id, client_request_id])
+  @@index([owner_user_id, document_id, node_id, created_at, id])
+  @@index([document_id])
+}
+
+model CanvasVideoBatchChild {
+  id                    String   @id
+  batch_id              String
+  ordinal               Int
+  request_id            String   @unique
+  idempotency_key       String   @unique
+  business_fingerprint  String
+  route_fingerprint     String
+  frozen_input_json     String
+  authorized_maximum    Int
+  quote_revision        String?
+  quote_token           String?
+  quote_expires_at      DateTime
+  state                 String   @default("prepared")
+  task_id               String?  @unique
+  admitted_amount       Int      @default(0)
+  rejection_receipt     String?
+  revision              Int      @default(1)
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+  batch CanvasVideoBatch @relation(fields: [batch_id], references: [id], onDelete: Restrict)
+
+  @@unique([batch_id, ordinal])
+  @@index([batch_id, state])
+}
+
 model CanvasDocumentRevision {
   id                        String   @id @default(cuid())
   document_id               String

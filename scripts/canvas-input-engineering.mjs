@@ -151,6 +151,7 @@ function fixture() {
   engine.deleteNode = id => effects.deletes.push(id);
   engine._createConnection = () => { effects.connections++; };
   engine._updateConnections = () => {};
+  engine.scheduleGroupFrames = () => {};
   engine.onCanvasGeometryChanged = value => effects.geometry.push(value);
   engine.onNodeSelected = () => { effects.selected++; };
   // Match app.js's existing mouseup save wrapper, without invoking any persistence.
@@ -451,7 +452,7 @@ const result = {
   suite: 'canvas-input-engineering',
   source: { file: sourceFile, sha256: createHash('sha256').update(source).digest('hex') },
   checks,
-  limits: ['synthetic-DOM-only', 'no-browser-acceptance', 'no-menu-delete-root-cause-claim'],
+  limits: ['synthetic-DOM-only', 'no-browser-acceptance'],
 };
 if (process.argv[2]) {
   const destination = path.resolve(process.argv[2]);

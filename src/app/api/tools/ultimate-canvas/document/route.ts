@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
+import { prisma } from '@/lib/prisma';
+import { CanvasVideoBatchError, requireCanvasVideoBatchDocumentCapability } from '@/lib/canvas-video-batches-guards';
 import {
   CanvasDocumentError, MAX_CANVAS_BYTES, canvasDetail, canvasHistory,
   latestCanvasDocument, listCanvasDocuments, mutateCanvasDocument, readCanvasDocument,
@@ -14,6 +16,7 @@ function json(value: unknown, status = 200) {
 }
 
 function failure(error: unknown) {
+  if (error instanceof CanvasVideoBatchError) return json({ error: error.message, code: error.code, ...error.details }, error.status);
   if (error instanceof CanvasDocumentError) return json({ error: error.message, code: error.code, ...error.details }, error.status);
   if (error instanceof AuthError) return json({ error: error.message }, error.status);
   if (error instanceof SyntaxError) return json({ error: '画布内容不是有效 JSON', code: 'invalid_document' }, 400);
@@ -44,7 +47,9 @@ export async function GET(request: NextRequest) {
       : await latestCanvasDocument(user, params.get('project_id')?.trim() || null);
     const requestedProject = params.get('project_id')?.trim();
     if (document && requestedProject && document.project_id !== requestedProject) throw new AuthError('画布不属于当前项目', 400);
-    return json({ document: document ? canvasDetail(document, (request.headers.get('x-canvas-capabilities') || '').split(',')) : null });
+    const capabilities = (request.headers.get('x-canvas-capabilities') || '').split(',').map(item => item.trim());
+    if (document) await requireCanvasVideoBatchDocumentCapability(prisma, document.id, capabilities);
+    return json({ document: document ? canvasDetail(document, capabilities) : null });
   } catch (error) { return failure(error); }
 }
 
@@ -74,7 +79,8 @@ async function mutate(request: NextRequest, method: 'POST' | 'PATCH') {
     } finally { reader.releaseLock(); }
     const body: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new AuthError('请求内容必须是对象', 400);
-    return json(await mutateCanvasDocument(user, body as Record<string, unknown>, method));
+    const capabilities = (request.headers.get('x-canvas-capabilities') || '').split(',').map(item => item.trim());
+    return json(await mutateCanvasDocument(user, body as Record<string, unknown>, method, capabilities));
   } catch (error) { return failure(error); }
 }
 

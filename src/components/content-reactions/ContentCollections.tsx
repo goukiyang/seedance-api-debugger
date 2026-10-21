@@ -105,17 +105,17 @@ function AccountContentLookup({ contentKey }: { contentKey: string }) {
   return <>{error && <p role="alert">{error}</p>}{content && <ContentPreview content={content} close={() => setContent(null)} />}</>;
 }
 
-export default function ContentCollections({ action, mediaClassName, preferPreviewImageThumbnails = false }: { action: ReactionAction; mediaClassName?: string; preferPreviewImageThumbnails?: boolean }) {
+export default function ContentCollections({ action, mediaClassName, preferPreviewImageThumbnails = false, restorePreviewOnMount = true }: { action: ReactionAction; mediaClassName?: string; preferPreviewImageThumbnails?: boolean; restorePreviewOnMount?: boolean }) {
   const { user } = useAppSession();
   const params = useSearchParams();
   const category = params.get('category');
   const query = params.get('q');
   const content = params.get('content');
   if (!user) return null;
-  return <AccountCollections key={JSON.stringify([user.id, action, category, query, content])} userId={user.id} action={action} urlCategory={category} urlQuery={query} hasContent={content !== null} mediaClassName={mediaClassName} preferPreviewImageThumbnails={preferPreviewImageThumbnails} />;
+  return <AccountCollections key={JSON.stringify([user.id, action, category, query, content])} userId={user.id} action={action} urlCategory={category} urlQuery={query} hasContent={content !== null} mediaClassName={mediaClassName} preferPreviewImageThumbnails={preferPreviewImageThumbnails} restorePreviewOnMount={restorePreviewOnMount} />;
 }
 
-function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent, mediaClassName, preferPreviewImageThumbnails }: { action: ReactionAction; userId: string; urlCategory: string | null; urlQuery: string | null; hasContent: boolean; mediaClassName?: string; preferPreviewImageThumbnails: boolean }) {
+function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent, mediaClassName, preferPreviewImageThumbnails, restorePreviewOnMount }: { action: ReactionAction; userId: string; urlCategory: string | null; urlQuery: string | null; hasContent: boolean; mediaClassName?: string; preferPreviewImageThumbnails: boolean; restorePreviewOnMount: boolean }) {
   const router = useRouter();
   const [category, setCategory] = useState<ContentCategory | 'all'>('all');
   const [query, setQuery] = useState('');
@@ -223,6 +223,7 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
     return () => { lifetime.current++; sequence.current++; lock.current = false; };
   }, [identity, load, resetRevision]);
   useEffect(() => {
+    if (!restorePreviewOnMount) { previewNavigationSequence.current++; return; }
     if (!preferencesReady || previewRestoreAttempted.current) return;
     previewRestoreAttempted.current = true;
     if (explicitPosition.current || hasContent) return;
@@ -232,7 +233,7 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
     if (!savedKey || savedKey.length > 512) return;
     const request = ++previewNavigationSequence.current;
     void readContent(savedKey as ContentKey).then(data => {
-      if (request !== previewNavigationSequence.current || currentIdentity.current !== identity || interacted.current || previewRef.current) return;
+      if (!mounted.current || request !== previewNavigationSequence.current || currentIdentity.current !== identity || interacted.current || previewRef.current) return;
       if (isPreviewableContent(data.content)) {
         setPreview(data.content);
       } else {
@@ -247,7 +248,8 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
         setError('上次打开的媒体暂时无法核验，列表仍可正常使用。');
       }
     });
-  }, [hasContent, identity, preferencesReady, scope]);
+    return () => { previewNavigationSequence.current++; };
+  }, [hasContent, identity, preferencesReady, scope, restorePreviewOnMount]);
   useEffect(() => {
     if (!loaded || loadedIdentity !== identity || loading || error) return;
     if (cursor && items.length < targetCount.current && restorePagesLeft.current > 0) { restorePagesLeft.current--; void load(cursor); return; }

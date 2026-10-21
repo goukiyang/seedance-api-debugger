@@ -39,6 +39,12 @@ r08承接r07的首次运行别名准备，并完整核对首次复用生命周�
 
 首次真实发布已完成：2026-10-21T14:58:50.364Z，联合ADMIN-USAGE＋PROJECTS-USAGE＋C01由r08正常run `a6deeb1c-1a4a-40da-bfa2-2c611b494b27`切换并收口，未借故障恢复。实际Web/image/HD/role同源`9c39aeb7de06c3c9e676477febf214c089cb9727`、v0.101.0、BUILD`wbv8uoX8-xBv0cpbUkY1I`；role保持TasksMax128，原四类writer自然退出、整组排空，两只读辅助服务未重启。相容guard为`0adc2bcfb164d8d189cfaed17b4eb2ab176e6840`、v0.101.0+admin-usage-guard.1、BUILD`K00Q-koXcFAuheX6emKtc`，保本批新事务、scope/token、CAS/active与role writer合同；仅回程序、不回数据/归属/配置/媒体/账本/回执/屏障。原整对完整构建与封存时间不改，本run仅ADOPT原13:19成功迁移，无重复DDL/回填。13组Linux控制、16项隔离完整生命周期、22项固定入口检查和同lead Review完成后才正常fresh准入；原价格全字段/原业务行/DB身份、18页61编译资源及8匿名边界均有真实发布证据。正式根ADMIN-USAGE工单§13.18及资料索引保存私有原件；旧run/失败/备份/时间保留，不公开原图、提示词或私有控制资料。已部署，待用户手动验收：两单U01–U13、实际旧客户端更新弹窗和C01操作未自动执行；合成回退用例不是生产回退演练。当前应用运行源不随文档HEAD变化，文档收口不另构建、升版本或重启。
 
+### 视频批次增量表（LibTV）
+
+首次启用视频2/4批次使用profile锁定的`release-libtv-template-r01`，保留原r16/r06及历史run。`contract.canvasVideoBatchSchema`分别绑定原Prisma、新Prisma、增量SQL、迁移脚本和schema合同SHA；只允许精确插入两个模型及两个表/九个索引，原声明与UsageAttribution原证保持。不允许复用旧业务pair，main/guard各完整构建，guard编译时关闭新批次创建，保读、停止、原号回执与旧writer能力门。
+
+新迁移必须在原Web/image/HD/role自然排尽、固定整对许可已发布后、任何新writer启动前执行。`ops/sd2-canvas-video-batches-migrate.py`核真实/data、空间、同点一致备份与完整性、原schema/业务行，再仅加表索引；新启动及固定guard恢复均核同run回执和备份证明，不回业务数据。缺失/半成品不能造回执补过门。本入口只实现首次增量及同run恢复；后续发布须显式继承已成功批次迁移的绑定证据，不能仍把新表当不存在，也不能移除schema保护来通过。当前该配套正在工程检查，未凭文档宣称已迁移或上线。
+
 ### 使用归属增量表（ADMIN-USAGE）
 
 `0.101.0`新增`UsageAttribution`只读统计归属能力，首次启用新writer前必须单独完成以下增量准备，不运行`db:push`或自动回填，不改旧业务行、配置、账本或回执。它不是降级正常发布门的故障恢复通道。

@@ -2389,6 +2389,7 @@ body.prompt-modal-open {
     overflow: hidden;
 }
 .prompt-modal-header {
+    flex-shrink: 0;
     height: 58px;
     padding: 0 18px;
     border-bottom: 1px solid var(--border-node);
@@ -2425,6 +2426,7 @@ body.prompt-modal-open {
     color: var(--text-primary);
 }
 .prompt-modal-tabs {
+    flex-shrink: 0;
     display: flex;
     gap: 6px;
     padding: 12px 18px 8px;
@@ -2471,7 +2473,8 @@ body.prompt-modal-open {
 }
 .prompt-modal-editor textarea {
     flex: 1;
-    min-height: 260px;
+    min-height: 120px;
+    box-sizing: border-box;
     width: 100%;
     border: none;
     resize: none;
@@ -2512,16 +2515,22 @@ body.prompt-modal-open {
 }
 .prompt-modal-side {
     min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: 10px;
 }
 .prompt-side-card {
-    border: 1px solid var(--border-node);
-    border-radius: var(--radius-md);
-    background: rgba(255,255,255,0.03);
-    padding: 11px 12px;
+    border-top: 1px solid var(--border-node);
+    padding: 11px 0;
 }
+[data-prompt-settings] fieldset { min-width: 0; margin: 0; border: 0; padding: 0; }
+.prompt-model-field { display: grid; gap: 7px; color: var(--text-secondary); font-size: 12px; }
+.prompt-model-field select { width: 100%; min-width: 0; padding: 8px; color: var(--text-primary); background: var(--bg-input); border: 1px solid var(--border-default); border-radius: 4px; }
+.prompt-modal-status { flex-shrink: 0; margin: 0; padding: 0 18px 8px; color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.prompt-modal-status:empty { padding: 0; }
+.prompt-parameter-note { font-size: 12px; line-height: 1.5; color: var(--text-secondary); }
 .prompt-side-card span {
     display: block;
     color: var(--text-tertiary);
@@ -2558,6 +2567,7 @@ body.prompt-modal-open {
     background: #111;
 }
 .prompt-modal-footer {
+    flex-shrink: 0;
     height: 58px;
     border-top: 1px solid var(--border-node);
     padding: 0 18px;
@@ -2604,9 +2614,12 @@ body.prompt-modal-open {
     }
     .prompt-modal-body {
         grid-template-columns: 1fr;
+        overflow-y: auto;
+        align-content: start;
     }
+    .prompt-modal-editor { min-height: 260px; }
     .prompt-modal-side {
-        display: none;
+        overflow: visible;
     }
 }
 
@@ -4851,8 +4864,34 @@ body.canvas-document-busy #logo { pointer-events: none; }
 #canvas-minimap[hidden] { display: none; }
 .canvas-node-grouped { outline: 1px dashed #8ead9f; outline-offset: 8px; }
 .toolbar-pill-btn:disabled { opacity: .35; cursor: not-allowed; }
+.canvas-group-frame { position: absolute; box-sizing: border-box; border: 1px solid #727779; border-radius: 6px; pointer-events: none; }
+.canvas-group-frame.is-selected { border-color: #4cd6ba; }
+.canvas-group-title { pointer-events: auto; position: absolute; left: 12px; top: 6px; max-width: calc(100% - 24px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; background: var(--bg-node); color: var(--text-primary); padding: 4px 8px; font: inherit; font-size: 13px; cursor: grab; }
+.canvas-group-edge { position: absolute; pointer-events: auto; cursor: grab; }
+.canvas-group-edge.top, .canvas-group-edge.bottom { left: 0; width: 100%; height: 10px; }
+.canvas-group-edge.top { top: -5px; } .canvas-group-edge.bottom { bottom: -5px; }
+.canvas-group-edge.left, .canvas-group-edge.right { top: 0; height: 100%; width: 10px; }
+.canvas-group-edge.left { left: -5px; } .canvas-group-edge.right { right: -5px; }
+.canvas-node-search { position: absolute; z-index: 110; top: 16px; left: 50%; transform: translateX(-50%); width: min(380px, calc(100% - 32px)); padding: 10px; background: var(--bg-node); border: 1px solid var(--border-default); border-radius: 6px; box-shadow: 0 8px 28px #0006; }
+.canvas-node-search input { width: 100%; box-sizing: border-box; padding: 9px; color: var(--text-primary); background: var(--bg-input); border: 1px solid var(--border-default); border-radius: 4px; font: inherit; }
+.canvas-search-results { max-height: min(360px, 50vh); overflow-y: auto; margin-top: 6px; }
+.canvas-search-results button { display: block; width: 100%; border: 0; padding: 9px; color: var(--text-primary); background: transparent; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.canvas-search-results button:hover, .canvas-search-results button:focus-visible { background: var(--bg-input); }
+.canvas-search-results p { color: var(--text-secondary); padding: 8px; }
 .canvas-floating-toolbar { max-width: calc(100vw - 90px); overflow-x: auto; }
 .canvas-floating-toolbar .toolbar-pill-btn { flex: 0 0 32px; }
+.canvas-video-batches { margin-top: 10px; border-top: 1px solid var(--border-node); padding-top: 10px; color: var(--text-secondary); font-size: 12px; }
+.canvas-video-batches > p { margin: 5px 0; overflow-wrap: anywhere; }
+.canvas-video-batches > button, .canvas-batch-actions button { padding: 5px 8px; border: 1px solid var(--border-default); border-radius: 4px; background: var(--bg-input); color: var(--text-primary); font: inherit; cursor: pointer; }
+.canvas-video-batches button:disabled { opacity: .55; cursor: default; }
+.canvas-video-batch { padding: 10px 0; border-bottom: 1px solid var(--border-node); }
+.canvas-video-batch > strong { display: block; font-size: 12px; color: var(--text-primary); }
+.canvas-batch-results { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 8px 0; }
+.canvas-batch-result { min-width: 0; border: 1px solid var(--border-default); border-radius: 4px; padding: 3px; color: var(--text-secondary); background: var(--bg-input); font: inherit; cursor: pointer; }
+.canvas-batch-result.is-selected { border-color: var(--accent-teal); color: var(--text-primary); }
+.canvas-batch-result img, .canvas-batch-placeholder { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: var(--bg-node); }
+.canvas-batch-result > span:last-child { display: block; padding: 4px 0; font-size: 11px; overflow-wrap: anywhere; }
+.canvas-batch-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .canvas-story-entry:disabled { opacity: .5; cursor: not-allowed; }
 .canvas-story-entry:focus-visible { outline: 2px solid #39b99e; outline-offset: 2px; }
 #canvas-context-controls { flex-wrap: wrap; }

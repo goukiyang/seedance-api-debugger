@@ -1,5 +1,11 @@
 # 项目资料索引
 
+## LIB01/LIB02 整单实施（2026-10-21）
+
+来源：用户明确要求正式LibTV细节工单落地；完整私有正文在正式根[原工单§14](../../tasks/todo/2026-10-21-libtv-detail-fixes-preflight.md)，当前v1.3.0/R04、W1–W12、A01–A22。关键词：画布事务/快捷、图片大编辑、故事镜头表、视频1/2/4、完整任务号、资产返回与复用、全屏对比、横幅左右贴边。沿用下方R01–R04资料及原件，无新媒体附件；实施记录追加原单，不覆盖历史证据。起点68a35a53干净APP，原e00/v0.101.1成功发布证据沿RESTORE目录复用。五个隔离包已交付，正在统一工程检查与修正；候选0.102.0尚未构建/发布，功能用户手验；不含旧模板R04收费任务。
+
+实施资料（正式根私有）：[W5服务合同](2026-10-21-libtv-detail-fixes/implementation/w5-backend-contract.md)、[W9复用合同](2026-10-21-libtv-detail-fixes/implementation/w9-reuse-contract.md)、[第三轮工程检查原日志](2026-10-21-libtv-detail-fixes/implementation/engineering-round3.log)。来源为本批实际代码和离线执行；记录首轮及修正轮次，不代替最终完整构建或功能验收。关键文本可读，日志由实际运行生成；无新媒体原件。
+
 ## RESTORE-R01/R02/R03/R04 模板复用与保存冲突（2026-10-21）
 
 r08最终发布资料（2026-10-21，来源本轮实际发布，关键词：v0.101.1、设置复用、版本冲突、相容回退、待手验）：[双完整构建及日志](2026-10-21-template-restore-fix/implementation/complete-builds-r08/)、[同lead Review](2026-10-21-template-restore-fix/implementation/release-review-r08.json)、[发布收口与主/guard完整身份](2026-10-21-template-restore-fix/implementation/deployment-closure-r08.json)、[五项服务器原始回执](2026-10-21-template-restore-fix/implementation/published-r08/)、[回执SHA核对](2026-10-21-template-restore-fix/implementation/published-evidence-collection-r08.json)、[正常关闭命令原证](2026-10-21-template-restore-fix/implementation/complete-r08-command.json)。正文JSON可读、关键证据SHA与实际输出核对一致；私有原证均在正式项目根，不上传Git或公开发布。主源e00a886e、BUILD Ar9Q9hw41mb2S2RVp9rFN，guard ade68a74/9IipBjfn19FFJLaRQu_PT；19:28Z切换、19:30Z关闭窗口，四服务同源，价格/保护记录未改，公网6页43资源/4匿名边界。已部署不冒功能验收，R01/R02实效和父线程R04仍待验；旧阶段资料不覆盖。父线程已确认匿名release摘要为空为权限设计，本轮不另查或改线上。非关键可再生成辅助文件未逐项复验；无新增用户媒体附件。

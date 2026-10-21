@@ -31,6 +31,7 @@
         'batchids', 'stylejob', 'requestid', 'mutationid', 'idempotencykey', 'submissionid', 'documentid',
         'canvasdocumentid', 'activegenerationnodeid', 'generationresult', 'generationerror', 'generationprogress',
         'generationstatus', 'videosubmission', 'videosubmissionlegacy', 'videohistory', 'selectedvideoresult',
+        'videobatch', 'videobatchref', 'videobatchrequest', 'videobatchid', 'videobatchchildren', 'childid', 'childids',
         'generationpayload', 'previewvideotaskid', 'taskstatus', 'runstatus', 'batchstatus', 'statusendpoint',
         'pollingurl', 'pollurl', 'frozencost', 'quotedcost', 'pointquote', 'quote', 'reservation', 'settlement',
         'ledgerentry', 'chargedpoints', 'costfreeze', 'providerresponse',
@@ -315,6 +316,7 @@
         let redoStack = [];
         let usedBytes = 0;
         let sequence = 0;
+        let performDepth = 0;
         let present = captureState(engine);
 
         function state() {
@@ -448,16 +450,18 @@
 
         function perform(label, operation, performOptions = {}) {
             if (typeof operation !== 'function') throw new TypeError('perform requires a synchronous operation');
+            if (performDepth) return operation();
             const token = begin(label, performOptions);
+            performDepth++;
             try {
                 const result = operation();
                 if (result === false || result?.ok === false) return result;
-                commit(token);
+                if (performOptions.record !== false) commit(token);
                 return result;
             } catch (error) {
                 restore(token.before, 'rollback', label);
                 throw error;
-            }
+            } finally { performDepth--; }
         }
 
         function undo() {
@@ -550,7 +554,7 @@
                 }
                 engine.selectNodes?.(createdIds, createdIds[createdIds.length - 1]);
                 return { ok: true, createdIds, idMap: Object.fromEntries(idMap) };
-            });
+            }, { record: duplicateOptions.record });
         }
 
         return {

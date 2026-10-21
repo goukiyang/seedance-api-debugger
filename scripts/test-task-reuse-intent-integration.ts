@@ -64,6 +64,12 @@ function compileFunction(text: string, scope: Scope): (...args: any[]) => any {
 }
 const clone = (value: any) => JSON.parse(JSON.stringify(value));
 const flush = async () => { for (let step = 0; step < 8; step += 1) await Promise.resolve(); };
+function withStorage<T>(storage: Storage, read: () => T): T {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
+  Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: storage });
+  try { return read(); }
+  finally { if (previous) Object.defineProperty(globalThis, 'sessionStorage', previous); else Reflect.deleteProperty(globalThis, 'sessionStorage'); }
+}
 const draft = {
   task_id: 'fixture-task', provider: 'seedance', prompt: '<script>ordinary task text</script>',
   generation_mode: 'all_in_one_reference', model: 'seedance-2.0', duration: 15, resolution: '480p', ratio: '16:9',
@@ -77,10 +83,12 @@ function pageHarness(storage = new Map<string, string>()) {
   const context: TaskReuseContext = {
     accountId: 'fixture-owner', workspaceBridgeKey: 'fixture-owner:standard', tabId: 'fixture-tab',
     projectId: 'fixture-project', videoCardId: 'fixture-card', videoBranchId: 'fixture-branch',
-    editEpoch: 0, initializing: false, conflict: null, busy: false,
+    editEpoch: 0, initializing: false, conflict: null, reason: null, busy: false,
   };
   const scope: Scope = {
-    ...intentContract, URL, URLSearchParams, Promise, currentUser: { id: 'fixture-owner' }, loadingUser: false, isIpSurface: false,
+    ...intentContract, URL, URLSearchParams, Promise, currentUser: { id: 'fixture-owner', role: 'admin' }, loadingUser: false, isIpSurface: false,
+    isExternalUser: (user: any) => user?.role !== 'admin', projectCreate: { busy: false, pending: null },
+    reusePrepareRef: { current: null }, reuseMountedRef: { current: true }, workspaceRefreshRef: { current: null },
     activeAccountIdRef: { current: 'fixture-owner' }, workspaceBridgeKeyRef: { current: context.workspaceBridgeKey },
     reuseRequestIdRef: { current: 0 }, reuseInFlightRef: { current: false }, reuseIntentRef: { current: null },
     reuseEditEpochRef: { current: 0 }, reuseApplicationKeyRef: { current: 0 }, pendingReuseApplicationRef: { current: null },
@@ -91,7 +99,7 @@ function pageHarness(storage = new Map<string, string>()) {
     videoCardsLoadedProjectId: context.projectId, videoBranchesLoadedCardId: context.videoCardId,
     selectedProjectId: context.projectId, selectedVideoCardId: context.videoCardId,
     reuseLoading: false, reusePreflightPending: false, reuseOutcomeUnknown: false, reuseRefreshRequested: false, workspaceBusy: false,
-    sessionStorage: { getItem: (key: string) => {
+    sessionStorage: { get length() { return storage.size; }, key: (index: number) => Array.from(storage.keys())[index] || null, getItem: (key: string) => {
       if (state.failStorageRead) throw new Error('offline storage read denied');
       return key === 'workspace_tab_id' ? context.tabId : storage.get(key) || null;
     },
@@ -117,20 +125,27 @@ function pageHarness(storage = new Map<string, string>()) {
     requestAnimationFrame: (fn: () => void) => fn(),
   };
   scope.window = {
-    location: { href: 'https://fixture.invalid/generate?reuse_task_id=fixture-task&project_id=fixture-project&return_to=%2Ftasks' },
+    location: { href: 'https://fixture.invalid/generate?reuse_task_id=fixture-task&reuse_intent=fixture-token&project_id=fixture-project&return_to=%2Ftasks' },
     requestAnimationFrame: (fn: () => void) => { if (state.onFrame) state.onFrame(); fn(); },
     history: { replaceState: (_data: unknown, _title: string, url: string) => {
       scope.window.location.href = new URL(url, scope.window.location.href).href;
     } },
   };
+  storage.set('sd2:task-reuse-explicit:v1', JSON.stringify({ token: 'fixture-token', taskId: 'fixture-task', accountId: context.accountId,
+    tabId: context.tabId, target: intentContract.taskReuseNavigationTarget(new URL(scope.window.location.href)), expiresAt: Date.now() + 60_000 }));
+  scope.claimTaskReuseNavigationIntent = (...args: Parameters<typeof intentContract.claimTaskReuseNavigationIntent>) => withStorage(scope.sessionStorage, () => intentContract.claimTaskReuseNavigationIntent(...args));
+  scope.unresolvedTaskReuseSource = (...args: Parameters<typeof intentContract.unresolvedTaskReuseSource>) => withStorage(scope.sessionStorage, () => intentContract.unresolvedTaskReuseSource(...args));
+  scope.requestWorkspaceReadAfterBusyError = async () => { state.refreshes += 1; };
   Object.defineProperty(scope.window.location, 'search', { get: () => new URL(scope.window.location.href).search });
   const setterNames = ['ReuseLoading', 'ReusingTaskId', 'ReusePreflightPending', 'ReuseRefreshRequested', 'ReuseParameterOnlyAvailable',
-    'Result', 'Error', 'ErrorDebug', 'PolledResult', 'SelectedProjectId', 'SelectedVideoCardId', 'SelectedVideoBranchId'];
+    'Result', 'Error', 'ErrorDebug', 'PolledResult', 'SelectedProjectId', 'SelectedVideoCardId', 'SelectedVideoBranchId',
+    'InputRecoveryTarget', 'ProjectPickerOpen', 'ProjectCreateOpen', 'VideoCardPanelOpen'];
   setterNames.forEach(name => { scope[`set${name}`] = (value: any) => { state[name] = value; scope[name[0].toLowerCase() + name.slice(1)] = value; }; });
   scope.setReuseMessage = (value: string) => { state.message = value; };
   scope.setReuseOutcomeUnknown = (value: boolean) => { state.unknown = value; scope.reuseOutcomeUnknown = value; };
   scope.setReuseDraft = (value: any) => { state.draft = value; scope.reuseDraft = value; };
   scope.setReuseApplicationTick = () => {};
+  scope.inputRecoveryRef = { current: { key: context.workspaceBridgeKey, capture: () => true } };
   scope.transitionReuseSourceUrl = compileFunction(callback(pageSource, 'transitionReuseSourceUrl'), scope);
   const load = compileFunction(callback(pageSource, 'loadReusableTask'), scope);
   scope.loadReusableTask = (...args: any[]) => { state.pending = load(...args); return state.pending; };
@@ -143,8 +158,8 @@ function pageHarness(storage = new Map<string, string>()) {
       reuseContextRef: { current: { ...context } }, workspaceBridgeKey: context.workspaceBridgeKey,
       selectedVideoBranchId: context.videoBranchId, parentReuseInitializing: false, parentReuseConflict: null,
       reuseContextBusy: false,
-      composerReuseState: { key: context.workspaceBridgeKey, initializing: false, conflict: false, editRevision: 0 },
-      composerReuseStateRef: { current: { key: context.workspaceBridgeKey, initializing: false, conflict: false, editRevision: 0 } },
+      composerReuseState: { key: context.workspaceBridgeKey, initializing: false, reason: null, editRevision: 0 },
+      composerReuseStateRef: { current: { key: context.workspaceBridgeKey, initializing: false, reason: null, editRevision: 0 } },
     });
     const renderBridge = compileFunction(`() => (${assignedValue(pageSource, 'reuseContextRef.current')})`, scope);
     scope.readReuseContext = compileFunction(callback(pageSource, 'readReuseContext'), scope);
@@ -176,23 +191,73 @@ function pageHarness(storage = new Map<string, string>()) {
   return { state, context, scope, auto, load: scope.loadReusableTask, applyComposer, cancel, useActualPageBridge,
     storage, hasSource: () => {
       const source = new URL(scope.window.location.href).searchParams;
-      return source.has('reuse_task_id') || source.has('reuse_unconfirmed_task_id');
+      return source.has('reuse_task_id') || source.has('reuse_unconfirmed_task_id') || source.has('reuse_source_task_id');
     } };
 }
 
 async function checkPage() {
+  const historical = pageHarness();
+  historical.scope.window.location.href = historical.scope.window.location.href.replace('&reuse_intent=fixture-token', '');
+  historical.auto(); historical.auto();
+  assert.equal(historical.state.requests.length, 0, 'a historical URL is not a write authorization');
+  assert.equal(historical.scope.reuseIntent.phase, 'blocked');
+  assert.equal(new URL(historical.scope.window.location.href).searchParams.has('reuse_task_id'), false);
+
   const slow = pageHarness(); slow.context.initializing = true; slow.context.busy = true;
   slow.auto(); slow.auto(); assert.equal(slow.state.requests.length, 0); assert.ok(slow.hasSource());
   slow.context.initializing = false; slow.context.busy = false;
   slow.auto(); await slow.state.pending;
-  assert.equal(slow.state.confirms, 1); assert.equal(slow.state.requests.length, 1); assert.ok(slow.hasSource(), 'URL retained until the composer actually applies');
+  assert.equal(slow.state.confirms, 0); assert.equal(slow.state.requests.length, 1); assert.ok(slow.hasSource(), 'read-only source retained until the composer actually applies');
   await slow.applyComposer(); assert.equal(slow.hasSource(), false); assert.equal(slow.scope.reuseIntent.phase, 'done');
   slow.auto(); assert.equal(slow.state.requests.length, 1, 'no automatic second POST after success');
+
+  for (const reason of ['uploading', 'pending-attach', 'saving', 'upload-failed', 'agent-running'] as const) {
+    const pending = pageHarness(); pending.context.reason = reason; pending.context.busy = true;
+    pending.auto(); pending.auto(); assert.equal(pending.state.requests.length, 0, reason);
+    assert.equal(pending.scope.reuseIntent.phase, 'waiting');
+    pending.context.reason = null; pending.context.busy = false;
+    pending.auto(); await pending.state.pending;
+    assert.equal(pending.state.requests.length, 1, `${reason} completes once without another click`);
+    assert.equal(pending.state.confirms, 0);
+  }
+  const readFailed = pageHarness(); readFailed.context.reason = 'read-error'; readFailed.context.busy = true;
+  readFailed.scope.workspaceRefreshRef.current = { key: readFailed.context.workspaceBridgeKey };
+  readFailed.auto(); readFailed.auto(); readFailed.auto();
+  assert.equal(readFailed.state.refreshes, 1, 'read error gets one automatic read, never a POST loop');
+  assert.equal(readFailed.state.requests.length, 0);
+  readFailed.context.reason = null; readFailed.context.busy = false;
+  readFailed.auto(); await readFailed.state.pending; assert.equal(readFailed.state.requests.length, 1);
+
+  const cancelled = pageHarness(); cancelled.context.initializing = true; cancelled.context.busy = true;
+  cancelled.auto(); cancelled.cancel(); cancelled.context.initializing = false; cancelled.context.busy = false; cancelled.auto();
+  assert.equal(cancelled.state.requests.length, 0, 'cancelled preparation cannot resume');
+  const editedWhileWaiting = pageHarness(); editedWhileWaiting.context.initializing = true; editedWhileWaiting.context.busy = true;
+  editedWhileWaiting.auto(); editedWhileWaiting.context.editEpoch += 1; editedWhileWaiting.auto();
+  editedWhileWaiting.context.initializing = false; editedWhileWaiting.context.busy = false; editedWhileWaiting.auto();
+  assert.equal(editedWhileWaiting.state.requests.length, 0, 'new input cancels the old auto-continuation');
+
+  const cannotRecover = pageHarness(); cannotRecover.scope.inputRecoveryRef.current.capture = () => false;
+  await cannotRecover.load('fixture-task');
+  assert.equal(cannotRecover.state.requests.length, 0, 'unrecoverable current input is never overwritten');
+  assert.equal(cannotRecover.scope.reuseIntent.phase, 'failed');
+  const unmounted = pageHarness(); unmounted.state.onFrame = () => { unmounted.scope.reuseMountedRef.current = false; };
+  await unmounted.load('fixture-task'); assert.equal(unmounted.state.requests.length, 0);
+  const lateUnmount = pageHarness(); lateUnmount.state.onResponse = () => { lateUnmount.scope.reuseMountedRef.current = false; };
+  await lateUnmount.load('fixture-task');
+  assert.equal(lateUnmount.state.draft, null); assert.equal(lateUnmount.state.requests.length, 1);
+  assert.ok(lateUnmount.storage.has(intentContract.taskReuseReceiptKey('fixture-owner', 'fixture-tab', 'fixture-task')));
+
+  const oldReceipt = pageHarness();
+  oldReceipt.storage.set(intentContract.taskReuseReceiptKey('fixture-owner', 'fixture-tab', 'older-task'), 'unconfirmed');
+  oldReceipt.auto(); oldReceipt.auto();
+  assert.equal(oldReceipt.scope.reuseIntent.taskId, 'older-task');
+  assert.equal(oldReceipt.scope.reuseIntent.phase, 'unknown');
+  assert.equal(oldReceipt.state.requests.length, 0, 'a new explicit intent cannot overwrite another unresolved reuse in this workspace');
 
   const blocked = pageHarness(); blocked.context.conflict = '正在上传'; blocked.context.busy = true;
   blocked.auto(); blocked.auto(); assert.equal(blocked.scope.reuseIntent.phase, 'blocked'); assert.equal(blocked.state.requests.length, 0);
   blocked.context.conflict = null; blocked.context.busy = false; blocked.auto(); assert.equal(blocked.state.requests.length, 0);
-  await blocked.load('fixture-task', { clearUrl: true }); assert.equal(blocked.state.confirms, 1); await blocked.applyComposer();
+  await blocked.load('fixture-task', { clearUrl: true }); assert.equal(blocked.state.confirms, 0); await blocked.applyComposer();
 
   const initializingLate = pageHarness();
   initializingLate.state.onFrame = () => { initializingLate.context.initializing = true; initializingLate.context.busy = true; };
@@ -201,10 +266,10 @@ async function checkPage() {
   initializingLate.state.onFrame = null; initializingLate.context.initializing = false; initializingLate.context.busy = false;
   initializingLate.auto(); await initializingLate.state.pending; assert.equal(initializingLate.state.requests.length, 1);
 
-  const edited = pageHarness(); edited.state.onConfirm = () => { edited.context.editEpoch += 1; };
+  const edited = pageHarness(); edited.state.onFrame = () => { edited.context.editEpoch += 1; };
   await edited.load('fixture-task', { clearUrl: true });
   assert.equal(edited.state.requests.length, 0); assert.equal(edited.scope.reuseIntent.phase, 'blocked'); assert.ok(edited.hasSource());
-  edited.state.onConfirm = null; await edited.load('fixture-task', { clearUrl: true }); assert.equal(edited.state.confirms, 2);
+  edited.state.onFrame = null; await edited.load('fixture-task', { clearUrl: true }); assert.equal(edited.state.confirms, 0);
   assert.equal(edited.state.requests.length, 1);
 
   for (const change of ['account', 'project', 'tab', 'branch'] as const) {
@@ -225,7 +290,7 @@ async function checkPage() {
   const accountScope = switched.scope;
   Object.assign(accountScope, {
     previousAccountIdRef: { current: 'fixture-owner' }, workspaceBridgeKey: 'fixture-other:standard',
-    composerReuseStateRef: { current: { key: 'fixture-owner:standard', initializing: false, conflict: false, editRevision: 0 } },
+    composerReuseStateRef: { current: { key: 'fixture-owner:standard', initializing: false, reason: null, editRevision: 0 } },
     workspaceRefreshRef: { current: null },
   });
   ['projectsRequestIdRef', 'videoCardsRequestIdRef', 'videoBranchesRequestIdRef', 'collectionsRequestIdRef', 'creditsRequestIdRef']
@@ -271,7 +336,8 @@ async function checkPage() {
   const recentReopened = pageHarness(); recentReopened.scope.window.location.href = recentUnknown.scope.window.location.href; recentReopened.auto();
   assert.equal(recentReopened.scope.reuseIntent.phase, 'unknown'); assert.equal(recentReopened.state.requests.length, 0);
   unknown.scope.reuseRefreshRequested = true; unknown.cancel();
-  assert.equal(unknown.state.requests.length, 1); assert.equal(unknown.hasSource(), false); assert.equal(unknown.storage.size, 0);
+  assert.equal(unknown.state.requests.length, 1); assert.equal(unknown.hasSource(), true);
+  assert.ok(unknown.storage.has(intentContract.taskReuseReceiptKey('fixture-owner', 'fixture-tab', 'fixture-task')), 'a read/acknowledgment never clears an unknown receipt');
   const cannotStore = pageHarness(); cannotStore.state.failStorageWrite = true;
   await cannotStore.load('fixture-task', { clearUrl: true });
   assert.equal(cannotStore.state.requests.length, 0); assert.equal(cannotStore.scope.reuseIntent.phase, 'failed');
@@ -324,12 +390,16 @@ async function checkPage() {
   await partial.load('fixture-task', { clearUrl: true });
   assert.equal(partial.state.draft, null); assert.ok(partial.hasSource()); assert.match(partial.state.message, /仅参数可恢复，当前素材保留/);
   await partial.scope.parameterOnlyReuseRef.current();
-  assert.equal(partial.state.confirms, 2, 'partial parameter recovery asks explicit confirmation');
+  assert.equal(partial.state.confirms, 0, 'parameter-only scope choice does not add another confirmation');
   assert.equal(partial.state.requests.length, 1, 'parameter-only recovery never replays the POST');
   await partial.applyComposer(); assert.equal(partial.hasSource(), false); assert.match(partial.state.message, /当前素材保留/);
 
   const mismatched = pageHarness(); mismatched.state.response = { ok: true, status: 200, body: { draft: { ...draft, video_card: { id: draft.video_card_id, project_id: 'fixture-other-project' } } } };
   await mismatched.load('fixture-task', { clearUrl: true }); assert.equal(mismatched.state.draft, null); assert.equal(mismatched.state.unknown, true);
+  const incomplete = pageHarness(); incomplete.state.response = { ok: true, status: 200, body: { draft: { ...draft, duration: undefined }, skipped_references: 0 } };
+  await incomplete.load('fixture-task');
+  assert.equal(incomplete.state.draft, null, 'missing parameters do not silently become defaults');
+  assert.equal(incomplete.state.unknown, true);
   assert.ok(pageSource.includes('onReuseDraftApplied={completeReuseDraftApplication}'));
   assert.ok(pageSource.includes('onReuseStateChange={reportComposerReuseState}'));
   assert.ok(composerSource.includes('onChangeCapture={markReuseInputChanged}'));
@@ -337,7 +407,7 @@ async function checkPage() {
 
 async function checkRoute() {
   class FixtureAuthError extends Error { status = 403; }
-  const state: Scope = { missing: false, denied: false, session: true, transactions: 0, workspaceCreates: 0, deletes: 0, adds: 0 };
+  const state: Scope = { missing: false, denied: false, external: false, session: true, transactions: 0, workspaceCreates: 0, deletes: 0, adds: 0, assets: [] };
   const task: Scope = { id: draft.task_id, provider: draft.provider, prompt: draft.prompt, generation_mode: draft.generation_mode,
     model: draft.model, ratio: draft.ratio, duration: draft.duration, resolution: draft.resolution, seed: draft.seed,
     generate_audio: draft.generate_audio, return_last_frame: false, watermark: false,
@@ -349,7 +419,7 @@ async function checkRoute() {
     videoTask: { findUnique: async () => state.missing ? null : task },
     generationTaskSnapshot: { findUnique: async () => null, findFirst: async () => null },
     workspaceAsset: { findMany: async () => [] },
-    asset: { findMany: async () => [] }, referenceImage: { findMany: async () => [] },
+    asset: { findMany: async () => state.assets }, referenceImage: { findMany: async () => [] },
     $transaction: async (fn: (tx: any) => Promise<void>) => {
       state.transactions += 1; await fn({ workspaceAsset: {
         deleteMany: async () => { state.deletes += 1; }, createMany: async () => { state.adds += 1; },
@@ -359,11 +429,11 @@ async function checkRoute() {
   const modules: Scope = {
     'next/server': { NextResponse: { json: (body: any, options: any = {}) => ({ body, status: options.status || 200 }) } },
     '@/lib/prisma': { prisma }, '@/lib/auth/session': { AuthError: FixtureAuthError, getSession: async () => state.session ? { id: 'fixture-owner' } : null },
-    '@/lib/access/feature-guard': { assertInternalOnly: () => {} },
+    '@/lib/access/feature-guard': { assertInternalOnly: () => { if (state.external) throw new FixtureAuthError('external denied'); } },
     '@/lib/assets/workspace': { getOrCreateWorkspace: async () => { state.workspaceCreates += 1; return { id: 'fixture-workspace' }; } },
     '@/lib/projects/permissions': { assertCanViewTask: async () => { if (state.denied) throw new FixtureAuthError('无权读取'); } },
     '@/lib/reference-albums/permissions': { assertCanUseReferenceImage: async () => { throw new FixtureAuthError('无权读取'); },
-      canUseDirectAsset: async () => false, uniquePreserveOrder: (values: string[]) => Array.from(new Set(values)) },
+      canUseDirectAsset: async (_user: unknown, id: string) => state.assets.some((asset: any) => asset.id === id), uniquePreserveOrder: (values: string[]) => Array.from(new Set(values)) },
     '@/lib/provider/volcengine-ip': { VOLCENGINE_IP_VIDEO_PROVIDER: 'volcengine_ark' },
     '@/lib/provider/reference-media-policy': { seedanceReferenceMediaCapabilities: () => ({ imageLimit: 9, videoLimit: 3, audioLimit: 3 }) },
   };
@@ -379,6 +449,16 @@ async function checkRoute() {
   assert.equal(state.transactions, 0); assert.equal(state.workspaceCreates, 0); assert.equal(state.deletes, 0); assert.equal(state.adds, 0);
   assert.equal(JSON.stringify(result.body).includes('private-unavailable-image'), false, 'no inaccessible media URL leaks in partial response');
 
+  state.assets = [{ id: 'fixture-asset', type: 'image', original_url: 'https://fixture.invalid/allowed-image', status: 'active', reference_images: [] }];
+  task.reference_image_urls = JSON.stringify(['https://fixture.invalid/allowed-image', 'https://fixture.invalid/private-unavailable-image']);
+  result = await run();
+  assert.equal(result.status, 409, 'even partially missing input requires an explicit parameter-only scope choice');
+  assert.equal(result.body.code, 'REUSE_ASSETS_UNAVAILABLE');
+  assert.equal(state.transactions, 0); assert.equal(state.deletes, 0); assert.equal(state.adds, 0);
+
+  state.external = true; result = await run(); assert.equal(result.status, 403); assert.equal(result.body.draft, undefined);
+  state.external = false;
+
   state.denied = true; result = await run(); assert.equal(result.status, 403); assert.equal(result.body.draft, undefined);
   state.denied = false; state.missing = true; result = await run(); assert.equal(result.status, 404); assert.equal(result.body.draft, undefined);
   state.missing = false; state.session = false; result = await run(); assert.equal(result.status, 401); assert.equal(result.body.draft, undefined);
@@ -393,8 +473,24 @@ async function checkRoute() {
   // ledger or provider call would be an unavailable dependency and fail here.
 }
 
+function checkAssetPreviewContract() {
+  const source = readFileSync(resolve(root, 'src/app/assets/page.tsx'), 'utf8');
+  const collections = readFileSync(resolve(root, 'src/components/content-reactions/ContentCollections.tsx'), 'utf8');
+  const css = readFileSync(resolve(root, 'src/app/assets/assets.module.css'), 'utf8');
+  assert.ok(!source.includes('setRestoredPreview(content)'), 'remembered IDs cannot reopen a temporary media layer');
+  assert.ok(source.includes('restorePreviewOnMount={false}'));
+  assert.ok(collections.includes('restorePreviewOnMount = true'), 'other collections pages retain their restore policy');
+  assert.ok(source.includes('<ContentLookup'), 'explicit deep links remain available');
+  assert.ok(source.includes('onClick={openMediaPreview}'), 'explicit media preview is not removed');
+  assert.ok(source.includes('taskDetailHref(activeItem.taskId, currentAssetReturnTo())'));
+  assert.ok(source.includes('id: activeItem.taskId'), 'reuse routes use the real task ID');
+  assert.ok(source.includes('previewNavigationGeneration.current += 1; setMediaPreviewOpen(false)'));
+  assert.ok(css.includes('grid-template-rows: auto minmax(0, 1fr) auto'));
+  assert.ok(css.includes('overflow-y: auto'));
+}
+
 async function run() {
-  await checkPage(); await checkRoute();
+  await checkPage(); await checkRoute(); checkAssetPreviewContract();
   console.log('Task reuse actual callback/composer/API offline contracts passed. No browser acceptance claimed.');
 }
 void run().catch(error => { console.error(error); process.exitCode = 1; });

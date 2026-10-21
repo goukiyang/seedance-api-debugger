@@ -7,7 +7,7 @@ import { sumCredits } from '@/lib/credits/precision';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, ArrowDown, ArrowUp, Clapperboard, ImagePlus, Plus, RefreshCw, Save, Trash2, WandSparkles } from 'lucide-react';
+import { ArrowLeft, ArrowDown, ArrowUp, Clapperboard, Eye, ImagePlus, Plus, RefreshCw, Save, Trash2, WandSparkles } from 'lucide-react';
 import { buildStoryPrompt, parseStoryShots, validateStoryDraft, parseStoryMaterials, composeStoryShot, separateStoryPrompt, storyGenerationPrompt, type StoryMaterial, type StoryDraft, type StoryShot } from '@/lib/story-workflow';
 import { canvasImageReferencePolicy } from '@/lib/canvas-image-references';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, imageStudioModelForNewSelection, IMAGE_STUDIO_QUALITY_LABELS, imageResolutionOptions, imageStudioNewQualityOptions, imageStudioQualityLabel } from '@/lib/image-studio/model-catalog';
@@ -16,6 +16,7 @@ import { useProductDialog } from '@/components/useProductDialog';
 import { usePageExitRisk } from '@/lib/hooks/page-exit-guard';
 import { ResourceLibraryPicker } from '@/components/ResourceLibraryPicker';
 import { GeneratedImageResults, type GeneratedImageResult } from '@/components/GeneratedImageResults';
+import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import { uploadFileAsAsset } from '@/lib/http/file-upload';
 import { RelativeTime } from '@/components/RelativeTime';
 import { LoopVideo } from '@/components/LoopVideo';
@@ -29,6 +30,8 @@ import { STORY_TEXT_CLIENT_WAIT_MS } from '@/lib/story-text-contract';
 import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, imageStudioUsesLegacyRoute, imageStudioEffectiveChannelId, useImageStudioChannel } from '@/lib/image-studio/channels';
 import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChannelSelect';
 import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
+import { useAppSession } from '@/lib/context/AppSessionContext';
+import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 
 type Document = { id: string; owner_user_id: string; project_id: string; title: string; revision: number;
   status: string; updated_at: string; document_json: string };
@@ -69,12 +72,16 @@ type StoryVersion = Omit<Work, 'request' | 'versions'> & { id: string; createdAt
 type SaveRequest = Record<string, unknown> & { mutation_id: string; document_json: string; base_revision: number };
 const DOC_API = '/api/tools/ultimate-canvas/document';
 const blank = (): StoryDraft => ({ version: 1, story: '', script: '', shots: [], sourceRevision: 0 });
+const imageRunLabel: Record<string, string> = { not_sent: '未派发', unconfirmed: '受理未确认', queued: '排队中', running: '生成中', succeeded: '已完成', failed: '失败', rejected: '未受理', cancelled: '已取消' };
+const videoRunLabel: Record<string, string> = { not_sent: '未派发', unconfirmed: '受理未确认', submitted: '已提交', queued: '排队中', running: '生成中', processing: '生成中', succeeded: '已完成', failed: '失败', rejected: '未受理', cancelled: '已取消' };
 async function request<T>(url: string, body?: unknown, method = 'POST', timeoutMs?: number): Promise<T> {
   const controller = timeoutMs ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
     const response = await fetch(url, { method: body ? method : 'GET', credentials: 'same-origin', cache: 'no-store', signal: controller?.signal,
-      ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) });
+      headers: { ...(body ? { 'Content-Type': 'application/json' } : {}),
+        ...(url.split('?')[0] === DOC_API ? { 'x-canvas-capabilities': 'canvas_video_batch_v1' } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}) });
     let data;
     try { data = await response.json(); } catch { throw new Error('服务返回未能确认，请保留当前草稿'); }
     if (!response.ok) throw Object.assign(new Error(data.error || data.message || '操作未完成'), { status: response.status, response: data });
@@ -92,6 +99,7 @@ function preparation(value: unknown): Partial<Work> {
 }
 
 export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, defaultTextModel }: { userId: string; documentId: string; nodeId: string; imageAllowed: boolean; defaultTextModel: string }) {
+  const { user: sessionUser, loadingUser: sessionLoading, hasLoadedUser, userLoadError, sessionChanged, refreshUser } = useAppSession();
   const [document, setDocument] = useState<Document | null>(null);
   const [work, setWork] = useState<Work>({ draft: blank(), images: {}, references: {}, mediaNodes: {}, lineage: {}, versions: [] });
   const [busy, setBusy] = useState('');
@@ -111,6 +119,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
   const [resultShot, setResultShot] = useState<string | null>(null);
   const [resultAssets, setResultAssets] = useState<Record<string, PickerItem>>({});
   const [focusVideoId, setFocusVideoId] = useState<string | null>(null);
+  const [referencePreview, setReferencePreview] = useState<{ item: PickerItem; label: string } | null>(null);
   const [mediaCapabilities, setMediaCapabilities] = useState<{ image: { model: string; imageChannels?: unknown }; video: { model: string; model_options: Array<{ value: string; label: string; provider: string; ready: boolean; resolutions: string[] }> } } | null>(null);
   const imageChannel = useImageStudioChannel(userId, 'story-studio', mediaCapabilities?.image.imageChannels, Boolean(mediaCapabilities),
     { model: work.mediaSettings?.imageModel || mediaCapabilities?.image.model || '', quality: work.mediaSettings?.quality || 'auto' });
@@ -122,13 +131,22 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
   const failedSave = useRef<SaveRequest | null>(null);
   const reviewRequired = useRef(false);
   const alive = useRef(true);
+  const sessionScope = useRef({ ready: false, owner: '' });
   const { confirm, productDialog } = useProductDialog();
   const key = `sd2:story:v1:${userId}:${documentId}:${nodeId}`;
+  const scrollKey = `${key}:view`;
+  const pendingScroll = useRef<number | null>(null);
+  const scrollTouched = useRef(false);
+  const scrollRestoring = useRef(false);
+  const sessionReady = Boolean(hasLoadedUser && !sessionLoading && !userLoadError && !sessionChanged
+    && !isClientSessionBlocked() && sessionUser?.id === userId);
+  sessionScope.current = { ready: sessionReady, owner: sessionUser?.id || '' };
   const resultScope = useRef(key); resultScope.current = key;
   useEffect(() => { resultReadSequence.current++; setResults([]); setCursor(null); setResultShot(null); setResultTotal(null); setResultAssets({}); }, [key]);
   const loadedContext = useRef(key);
   function assertCurrentContext() {
     if (!alive.current || loadedContext.current !== key || documentRef.current?.id !== documentId) throw Error('故事页面已切换，请回到原故事查询；不会继续派发');
+    if (!sessionScope.current.ready || sessionScope.current.owner !== userId || isClientSessionBlocked()) throw Error('登录账号已变化或暂时无法确认，当前草稿保留；不会继续保存或派发');
   }
   usePageExitRisk({ unsaved: dirty && cachedWork !== JSON.stringify(work) ? ['故事与分镜草稿'] : [],
     busy: busy ? [busy] : failedSave.current || localChoice?.pending ? ['故事保存结果尚未确认']
@@ -176,14 +194,28 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
   }
 
   useEffect(() => {
+    if (!hasLoadedUser && !sessionLoading && !sessionChanged && !isClientSessionBlocked()) void refreshUser();
+  }, [hasLoadedUser, refreshUser, sessionChanged, sessionLoading]);
+
+  useEffect(() => {
+    if (!sessionReady) setReferencePreview(null);
+  }, [sessionReady]);
+
+  useEffect(() => {
+    if (!sessionReady) return;
     alive.current = true;
     loadedContext.current = key;
+    let cancelled = false;
+    const isCurrentLoad = () => !cancelled && alive.current && loadedContext.current === key
+      && sessionScope.current.ready && sessionScope.current.owner === userId;
+    setLoading(true);
     setLocalChoice(null); setCachedWork(''); setDirty(false); setConflict(false); failedSave.current = null; reviewRequired.current = false;
+    scrollTouched.current = false;
     async function load() {
       try {
         if (!documentId || !nodeId) return;
         const data = await request<{ document: Document }>(`${DOC_API}?document_id=${encodeURIComponent(documentId)}`);
-        if (!alive.current) return;
+        if (!isCurrentLoad()) return;
         const doc = data.document;
         if (!doc || doc.owner_user_id !== userId || doc.status !== 'active') throw Error('画布不可编辑，请回到画布查看');
         const graph = JSON.parse(doc.document_json) as Snapshot;
@@ -221,16 +253,66 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
             }
           }
         } catch { /* Invalid local data never replaces the authorized document. */ }
-        if (!alive.current) return;
+        try {
+          const viewState = JSON.parse(localStorage.getItem(scrollKey) || 'null');
+          pendingScroll.current = viewState?.userId === userId && viewState.documentId === documentId && viewState.nodeId === nodeId
+            && typeof viewState.scrollY === 'number' && Number.isFinite(viewState.scrollY) ? Math.max(0, viewState.scrollY) : null;
+        } catch { pendingScroll.current = null; }
+        if (!isCurrentLoad()) return;
         current.current = restored; setWork(restored);
         const bootstrap = await request<{ capabilities: NonNullable<typeof mediaCapabilities> }>(`/api/tools/ultimate-canvas/bootstrap?project_id=${encodeURIComponent(doc.project_id)}`);
-        if (alive.current) setMediaCapabilities(bootstrap.capabilities);
-      } catch (cause) { if (alive.current) setError(message(cause)); }
-      finally { if (alive.current) setLoading(false); }
+        if (isCurrentLoad()) setMediaCapabilities(bootstrap.capabilities);
+      } catch (cause) { if (isCurrentLoad()) setError(message(cause)); }
+      finally { if (isCurrentLoad()) setLoading(false); }
     }
     void load();
-    return () => { alive.current = false; };
-  }, [documentId, nodeId, userId, key, confirm, defaultTextModel]);
+    return () => { cancelled = true; alive.current = false; };
+  }, [documentId, nodeId, userId, key, scrollKey, confirm, defaultTextModel, sessionReady]);
+
+  useEffect(() => {
+    if (!sessionReady || loading || !document || pendingScroll.current === null || window.location.hash || scrollTouched.current) return;
+    const scrollY = pendingScroll.current;
+    let secondFrame = 0;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => {
+        if (scrollTouched.current || pendingScroll.current !== scrollY) return;
+        scrollRestoring.current = true;
+        window.scrollTo({ top: scrollY });
+        pendingScroll.current = null;
+        requestAnimationFrame(() => { scrollRestoring.current = false; });
+      });
+    });
+    return () => { cancelAnimationFrame(firstFrame); if (secondFrame) cancelAnimationFrame(secondFrame); };
+  }, [document, loading, sessionReady, work.view]);
+
+  useEffect(() => {
+    if (!sessionReady || !document) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const savePosition = () => {
+      timer = null;
+      try { localStorage.setItem(scrollKey, JSON.stringify({ userId, documentId, nodeId, scrollY: Math.max(0, window.scrollY) })); } catch { /* Scroll restoration is optional. */ }
+    };
+    const onScroll = () => {
+      if (scrollRestoring.current) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(savePosition, 120);
+    };
+    const markTouched = () => { scrollTouched.current = true; };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('wheel', markTouched, { passive: true });
+    window.addEventListener('touchstart', markTouched, { passive: true });
+    window.addEventListener('pointerdown', markTouched, { passive: true });
+    window.addEventListener('pagehide', savePosition);
+    return () => {
+      if (timer) clearTimeout(timer);
+      savePosition();
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('wheel', markTouched);
+      window.removeEventListener('touchstart', markTouched);
+      window.removeEventListener('pointerdown', markTouched);
+      window.removeEventListener('pagehide', savePosition);
+    };
+  }, [document, documentId, nodeId, scrollKey, sessionReady, userId]);
 
   async function save(value = current.current, transform?: (graph: Snapshot) => void) {
     assertCurrentContext();
@@ -251,6 +333,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
         }
         throw cause;
       }
+      assertCurrentContext();
       const next = { ...doc, ...result.document, document_json: body.document_json };
       documentRef.current = next; setDocument(next); snapshot.current = JSON.parse(body.document_json);
       failedSave.current = null;
@@ -279,15 +362,17 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     else cache(current.current, null);
     return documentRef.current!;
   }
-  async function operate(label: string, action: () => Promise<void>) {
-    if (lock.current) return;
+  async function operate(label: string, action: () => Promise<void>): Promise<string | null> {
+    if (lock.current) return '已有操作正在进行，请等待完成';
     lock.current = true; setBusy(label); setError('');
     try {
-      if (failedSave.current && label !== '保存草稿' && label !== '读取最新画布') throw Error('上次保存结果未确认，请先点击保存草稿重试原保存；未继续生成或准备媒体');
+      assertCurrentContext();
+      if (failedSave.current && label !== '保存草稿' && label !== '保存镜头图片' && label !== '读取最新画布') throw Error('上次保存结果未确认，请先点击保存草稿重试原保存；未继续生成或准备媒体');
       await action();
     }
-    catch (cause) { setAutosavePaused(true); setError(message(cause)); cache(current.current); }
+    catch (cause) { const problem = message(cause); setAutosavePaused(true); setError(problem); cache(current.current); return problem; }
     finally { lock.current = false; if (alive.current) setBusy(''); }
+    return null;
   }
   useEffect(() => {
     if (!dirty || loading || busy || failedSave.current || localChoice || conflict || autosavePaused || !document) return;
@@ -446,9 +531,13 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     setNotice('视频节点已保存，尚未提交生成；在画布核对模型与点数后手动生成');
   }
   async function selectReference(shotId: string, item: PickerItem) {
+    assertCurrentContext();
     const materialId = shotId.startsWith('material:') ? shotId.slice(9) : '';
     if (!(materialId ? current.current.materials?.some(item => item.id === materialId) : current.current.draft.shots.some(shot => shot.id === shotId)) || item.unavailableReason || item.type !== 'image') throw Error('所选镜头或原图不可用');
-    let referenceImageId = item.referenceImageId;
+    const existing = materialId ? current.current.materialReferences?.[materialId] : current.current.references[shotId];
+    const sameSelection = existing && (existing.identity === item.identity || Boolean(existing.assetId && existing.assetId === item.assetId));
+    if (failedSave.current && !sameSelection) throw Error('原图片保存结果尚未确认，请保持当前选择并重试；不会用另一张图片覆盖原请求');
+    let referenceImageId = item.referenceImageId || (sameSelection ? existing.referenceImageId : undefined);
     if (!referenceImageId) {
       if (!item.assetId) throw Error('图片没有可用的原件编号');
       const response = await fetch('/api/workspace/assets', { method: 'POST', credentials: 'same-origin',
@@ -458,11 +547,13 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
       if (!response.ok || !data.success || typeof data.referenceImageId !== 'string') throw Error(data.error || data.message || '原图未能关联为参考图，请重新选择');
       referenceImageId = data.referenceImageId;
     }
+    assertCurrentContext();
     change(materialId ? { ...current.current, materialReferences: { ...current.current.materialReferences, [materialId]: { ...item, referenceImageId } } }
       : { ...current.current, references: { ...current.current.references, [shotId]: { ...item, referenceImageId } } });
     await save(); setNotice('已选用原图，未提交视频生成');
   }
   async function readResults(shotId: string, more = false) {
+    assertCurrentContext();
     const scope = key, sequence = ++resultReadSequence.current;
     const handoff = current.current.images[shotId];
     if (!handoff || !imageAllowed) throw Error('此镜头还没有可用的生图工作区');
@@ -471,6 +562,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     const data = await request<{ tasks: Array<{ id: string; status: string; resultDisposition?: string | null; error?: string; asset?: {
       id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number;
     } | null }>; nextCursor?: string | null; total: number }>(`/api/image-studio/tasks?${query}`);
+    assertCurrentContext();
     if (!alive.current || resultScope.current !== scope || sequence !== resultReadSequence.current) return;
     const assets: Record<string, PickerItem> = {};
     const items: GeneratedImageResult[] = data.tasks.map(task => {
@@ -785,14 +877,48 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     }
     setNotice('本次手动派发已完成，请查询原任务；这不代表媒体生成成功');
   }
-  const ready = Boolean(document && !loading);
-  const blocked = busy !== '' || !ready || conflict || Boolean(localChoice);
+  const ready = Boolean(sessionReady && document && !loading);
+  const blocked = busy !== '' || !ready || conflict || Boolean(localChoice) || !sessionReady;
   const awaiting = work.request && ['pending', 'unconfirmed'].includes(work.request.state);
+  const loginHref = `/login?next=${encodeURIComponent(typeof window === 'undefined' ? '/' : `${window.location.pathname}${window.location.search}${window.location.hash}`)}`;
+  const accountMismatch = Boolean(hasLoadedUser && sessionUser && sessionUser.id !== userId);
+  const sessionStatus = sessionChanged || isClientSessionBlocked()
+    ? '登录状态已变化，当前草稿仍保留，请重新登录后继续。'
+    : userLoadError || (accountMismatch ? '当前登录账号无权继续这个故事，页面草稿仍保留。' : hasLoadedUser && !sessionUser ? '登录后才能读取故事，当前草稿不会清除。' : !sessionReady ? '正在确认登录状态' : '');
+  function referenceButton(item: PickerItem, label: string, compact = false) {
+    return <button type="button" className={`${styles.referencePreview} ${compact ? styles.referencePreviewCompact : ''}`} onClick={() => setReferencePreview({ item, label })}>
+      <img src={item.thumbnailUrl || item.originalUrl} alt="" /><span>{label}</span><Eye size={16} />
+    </button>;
+  }
+  function generatedResults(targetId: string, label: string) {
+    if (resultShot !== targetId) return null;
+    return <div className={styles.resultPanel}><h4>{label}</h4><GeneratedImageResults items={results} scope={`story:${userId}:${documentId}:${nodeId}:${targetId}`} hasMore={Boolean(cursor)} total={resultTotal}
+      loadMore={() => operate('读取更多生成结果', () => readResults(targetId, true))} emptyLabel="暂无生成结果"
+      renderPrimaryActions={item => resultAssets[item.id] ? <button disabled={blocked} onClick={() => { void operate('选用原图', () => selectReference(targetId, resultAssets[item.id])); }}>选用此原图</button> : null} /></div>;
+  }
+  function videoResult(shot: StoryShot) {
+    const run = work.videoRuns?.[shot.id];
+    if (!run?.taskId) return null;
+    return <div className={styles.videoResult}>
+      {run.status === 'succeeded' && run.previewAvailable && <><LoopVideo key={run.taskId} className={styles.media} controls playsInline preload="metadata" contentKey={`video_task:${run.taskId}`} src={`/api/video/play/${encodeURIComponent(run.taskId)}`} /><MultiviewEntry contentKey={`video_task:${run.taskId}`} /></>}
+      {run.stableDownloadReady && <a className={styles.link} href={`/api/video/download/${encodeURIComponent(run.taskId)}`}>下载此镜视频</a>}
+    </div>;
+  }
+  function removeShot(shot: StoryShot) {
+    return operate('删除镜头', async () => {
+      if (await confirm('只删除此分镜草稿，已创建的图视频工作区和结果保留。', { title: '删除镜头', confirmLabel: '删除', danger: true })) {
+        updateDraft({ shots: current.current.draft.shots.filter(item => item.id !== shot.id) });
+        await save();
+      }
+    });
+  }
   return <main className={styles.studio}>
     <header className={styles.header}><div><h1>故事与分镜</h1>{document && <small>{document.title} · <RelativeTime value={document.updated_at} /></small>}</div>
       <div className={styles.actions}><Link className={styles.link} href={`/tools/ultimate-canvas${documentId ? `?document_id=${encodeURIComponent(documentId)}${focusVideoId ? `&focus_node=${encodeURIComponent(focusVideoId)}` : ''}` : ''}`}><ArrowLeft size={16} />画布</Link>
         <button disabled={Boolean(busy) || !ready || Boolean(localChoice) || (conflict && !failedSave.current)} onClick={() => void operate('保存草稿', async () => { await save(); setNotice('故事与分镜已保存'); })}><Save size={16} />{dirty || failedSave.current ? '保存草稿' : '已保存'}</button></div></header>
-    <p role={error ? 'alert' : 'status'} className={`${styles.status} ${error ? styles.error : ''}`}>{error || busy || notice || (loading ? '正在读取故事' : !ready ? '请从画布选择故事节点打开' : '文字生成不扣本站点数；图视频生成在原工作区另行确认点数。')}</p>
+    <p role={error || sessionStatus ? 'alert' : 'status'} className={`${styles.status} ${error ? styles.error : ''}`}>{sessionStatus || error || busy || notice || (loading ? '正在读取故事' : !ready ? '请从画布选择故事节点打开' : '文字生成不扣本站点数；图视频生成在原工作区另行确认点数。')}</p>
+    {userLoadError && !sessionChanged && !isClientSessionBlocked() && <button disabled={sessionLoading} onClick={() => void refreshUser({ force: true })}><RefreshCw size={16} />重新确认登录</button>}
+    {(sessionChanged || isClientSessionBlocked() || accountMismatch || hasLoadedUser && !sessionUser) && <a className={styles.link} href={loginHref}>前往登录</a>}
     {conflict && <button disabled={Boolean(busy)} onClick={() => void operate('读取最新画布', reconcile)}><RefreshCw size={16} />读取最新画布并保留故事草稿</button>}
     {localChoice && <section className={styles.status}><p>画布已有更新。当前显示画布稿，本机草稿仍保留，选择后才继续编辑；不会自动覆盖或生成。</p>
       <button disabled={Boolean(busy)} onClick={() => {
@@ -808,19 +934,20 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
       }}>使用画布稿并保留本机旧稿</button></section>}
     {work.request && <section className={styles.status}><strong>{work.request.state === 'review' ? '返回内容待核对' : work.request.state === 'rejected' ? '文字请求被拒绝' : work.request.state === 'not_sent' ? '文字请求未发出' : '文字结果未确认'}</strong><p>{work.request.message || '不会自动重发文字请求'}</p>
       {work.request.raw && <pre className={styles.raw}>{work.request.raw}</pre>}<button disabled={blocked} onClick={() => void operate('处理文字请求', dismissRequest)}>保留原稿并结束等待</button></section>}
-    {ready && <><div className={styles.grid}><section className={styles.section}><h2>故事</h2>
+    {ready && <><nav className={styles.workspaceNav} aria-label="故事工作区"><a href="#story-source">故事</a><a href="#story-script">剧本</a><a href="#story-materials">素材</a><a href="#story-generation">生成设置</a><a href="#story-shots">分镜</a></nav>
+    <div className={styles.grid}><section id="story-source" className={styles.section}><h2>故事</h2>
       <label>文字模型<select disabled={blocked || Boolean(awaiting)} value={work.textModel || ''} onChange={event => change({ ...current.current, textModel: event.target.value || undefined })}>
         <option value="">后台默认模型</option>
         {STUDIO_TEXT_MODELS.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
       </select></label>
       <label>故事内容<textarea className={styles.storyText} disabled={Boolean(busy) || Boolean(localChoice)} value={work.draft.story} onChange={event => updateDraft({ story: event.target.value })} /></label>
       <button className={styles.primary} disabled={blocked || Boolean(awaiting) || !work.draft.story.trim()} onClick={() => void operate('生成完整剧本', () => generate('script'))}><WandSparkles size={16} />生成完整剧本</button>
-    </section><section className={styles.section}><h2>完整剧本</h2>
+    </section><section id="story-script" className={styles.section}><h2>完整剧本</h2>
       {work.lineage.scriptStory !== undefined && work.lineage.scriptStory !== work.draft.story && <p className={styles.status}>故事已修改，当前剧本仍是原故事版本，请核对。</p>}
       <label>剧本内容<textarea className={styles.scriptText} disabled={Boolean(busy) || Boolean(localChoice)} value={work.draft.script} onChange={event => updateDraft({ script: event.target.value })} /></label>
       <button className={styles.primary} disabled={blocked || Boolean(awaiting) || !work.draft.script.trim()} onClick={() => void operate('生成分镜', () => generate('storyboard'))}><Clapperboard size={16} />生成分镜</button>
     </section></div>
-    <section className={styles.shots}><div className={styles.toolbar}><h2>本故事素材 · {work.materials?.length || 0}</h2><div className={styles.actions}>
+    <section id="story-materials" className={styles.shots}><div className={styles.toolbar}><h2>本故事素材 · {work.materials?.length || 0}</h2><div className={styles.actions}>
       <button disabled={blocked || Boolean(awaiting) || !work.draft.script.trim()} onClick={() => void operate('提取素材清单', extractMaterials)}><WandSparkles size={16} />提取素材清单</button>
       <button disabled={blocked || (work.materials?.length || 0) >= 60} onClick={() => change({ ...current.current, materials: [...(current.current.materials || []), { id: `material-${crypto.randomUUID()}`, kind: 'character', name: '新素材', description: '', shotIds: [] }] })}><Plus size={16} />添加素材</button>
       <button className={styles.primary} disabled={blocked || !work.draft.shots.length} onClick={() => void operate('确认素材与要求', confirmMaterials)}>确认素材并合成要求</button></div></div>
@@ -829,7 +956,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
         <div className={styles.shotFields}><label>类型<select disabled={blocked} value={item.kind} onChange={event => updateMaterial(item.id, { kind: event.target.value as StoryMaterial['kind'] })}><option value="character">角色</option><option value="scene">场景</option><option value="prop">道具</option></select></label>
           <label>名称<input disabled={blocked} value={item.name} onChange={event => updateMaterial(item.id, { name: event.target.value })} /></label></div>
         <label>外形与准备要求<textarea disabled={blocked} value={item.description} onChange={event => updateMaterial(item.id, { description: event.target.value })} /></label>
-        {work.materialReferences?.[item.id] && <img className={styles.media} src={work.materialReferences[item.id].thumbnailUrl || work.materialReferences[item.id].originalUrl} alt={item.name} />}
+        {work.materialReferences?.[item.id] && referenceButton(work.materialReferences[item.id], `预览${item.name || '素材'}原图`)}
         <div className={styles.actions}><button disabled={blocked || !imageAllowed} onClick={() => void operate('准备素材草稿', () => prepareMaterial(item))}><ImagePlus size={16} />准备素材草稿</button>
           <button className={styles.primary} disabled={blocked || !imageAllowed || Boolean(channelIssue) || !item.name.trim()} onClick={() => void operate('确认素材生图', () => dispatchShots('image', [`material:${item.id}`]))}><ImagePlus size={16} />生成素材图片</button>
           <button disabled={blocked} onClick={() => setPicker(`material:${item.id}`)}><ImagePlus size={16} />{work.materialReferences?.[item.id] ? '更换原图' : '选用原图'}</button>
@@ -837,14 +964,15 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
           <button title="移除本故事素材" aria-label="移除本故事素材" disabled={blocked} onClick={() => change({ ...current.current, materials: current.current.materials?.filter(value => value.id !== item.id),
             draft: { ...current.current.draft, shots: current.current.draft.shots.map(shot => shot.materialIds?.includes(item.id)
               ? { ...shot, materialIds: shot.materialIds.filter(id => id !== item.id), materialPrompt: '' } : shot) } })}><Trash2 size={16} /></button></div>
+        {generatedResults(`material:${item.id}`, `${item.name || '素材'}生成结果`)}
       </section>)}</div>
     </section>
-    <section className={styles.shots}><div className={styles.toolbar}><h2>分镜 · {work.draft.shots.length}</h2>
+    <section id="story-shots" className={styles.shots}><div className={styles.toolbar}><h2>分镜 · {work.draft.shots.length}</h2>
       <div className={styles.actions}><div role="group" aria-label="分镜视图"><button aria-pressed={work.view !== 'board'} disabled={blocked} onClick={() => change({ ...current.current, view: 'editor' })}>编辑</button><button aria-pressed={work.view === 'board'} disabled={blocked} onClick={() => change({ ...current.current, view: 'board' })}>故事板</button></div>
       <button disabled={blocked || !work.draft.shots.length} onClick={() => void operate('保存分镜组', createGroup)}><Plus size={16} />创建分镜组</button>
       <button disabled={blocked || work.draft.shots.length >= 30} onClick={() => updateDraft({ shots: [...work.draft.shots, { id: `shot-${crypto.randomUUID()}`, title: `镜头 ${work.draft.shots.length + 1}`, description: '', dialogue: '', imagePrompt: '', videoPrompt: '', durationSeconds: 5 }] })}><Plus size={16} />添加镜头</button></div>
       </div>
-      <details><summary>生成设置</summary><div className={styles.shotFields}>
+      <details id="story-generation"><summary>生成设置</summary><div className={styles.shotFields}>
         <label>图片模型<select disabled={blocked} value={mediaSettings.imageModel} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, imageModel: event.target.value } })}>{imageModelChoices.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS]||model}</option>)}</select></label>
         {mediaSettings.imageModel !== 'gpt-image-2.5-sunburst' && <label>供应商<ImageGenerationChannelSelect channels={imageChannel.channels} value={imageChannel.channelId} disabled={blocked} onChange={imageChannel.select} model={mediaSettings.imageModel}/></label>}
         <label>图片质量<select disabled={blocked} value={mediaSettings.quality} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, quality: event.target.value } })}>{!qualityOptions.includes(mediaSettings.quality) && <option disabled value={mediaSettings.quality}>{mediaSettings.imageModel === 'gpt-image-2.5-sunburst' ? '原质量待选择' : `${mediaSettings.quality}（需重新选择）`}</option>}{qualityOptions.map(value => <option key={value} value={value}>{imageStudioQualityLabel(mediaSettings.imageModel,value)}</option>)}</select></label>
@@ -867,49 +995,65 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
           change({ ...version, versions: [...previous.versions.filter(item => item.id !== version.id), archived(previous)].slice(-10), request: previous.request });
           await save();
         })}>恢复此稿</button></section>)}</details>}
-      <div className={work.view === 'board' ? styles.board : undefined}>{work.draft.shots.map((shot, index) => <section className={styles.shot} key={shot.id}><header className={styles.shotHeader}><h3>{index + 1}. {shot.title || '未命名镜头'}</h3><div className={styles.actions}>
-        <button title="上移镜头" aria-label="上移镜头" disabled={blocked || index === 0} onClick={() => moveShot(index, -1)}><ArrowUp size={16} /></button>
-        <button title="下移镜头" aria-label="下移镜头" disabled={blocked || index === work.draft.shots.length - 1} onClick={() => moveShot(index, 1)}><ArrowDown size={16} /></button>
-        <button title="删除镜头" aria-label="删除镜头" disabled={blocked} onClick={() => void operate('删除镜头', async () => {
-          if (await confirm('只删除此分镜草稿，已创建的图视频工作区和结果保留。', { title: '删除镜头', confirmLabel: '删除', danger: true })) { updateDraft({ shots: current.current.draft.shots.filter(item => item.id !== shot.id) }); await save(); }
-        })}><Trash2 size={16} /></button></div></header>
-        <div className={styles.shotFields}><label>镜头名称<input disabled={Boolean(busy) || Boolean(localChoice)} value={shot.title} onChange={event => editShot(shot.id, { title: event.target.value })} /></label>
-          <label className={styles.duration}>时长（秒）<input type="number" min={1} max={15} disabled={Boolean(busy) || Boolean(localChoice)} value={shot.durationSeconds} onChange={event => {
-            const value = Number(event.target.value);
-            if (Number.isInteger(value) && value >= 1 && value <= 15) editShot(shot.id, { durationSeconds: value });
-          }} /></label>
-          {(['description', 'dialogue', 'imagePrompt', 'videoPrompt'] as const).map(field => <label key={field}>{({ description: '画面与动作', dialogue: '台词', imagePrompt: '生图要求', videoPrompt: '视频要求' })[field]}<textarea disabled={Boolean(busy) || Boolean(localChoice)} value={shot[field]} onChange={event => editShot(shot.id, { [field]: event.target.value })} /></label>)}</div>
-        <details><summary>可选镜头设置与素材</summary><div className={styles.shotFields}>{(['framing', 'lighting', 'camera'] as const).map(field => <label key={field}>{({ framing: '景别', lighting: '光线', camera: '运镜' })[field]}<select disabled={blocked} value={shot[field] || ''} onChange={event => editShot(shot.id, { [field]: event.target.value })}><option value="">由描述决定</option>{({ framing: ['全景', '中景', '近景', '特写'], lighting: ['自然光', '柔光', '逆光', '夜景'], camera: ['固定镜头', '推进', '拉远', '跟随', '环绕'] })[field].map(value => <option key={value} value={value}>{value}</option>)}</select></label>)}</div>
-          <div className={styles.bindings}>{(work.materials || []).map(item => <label key={item.id}><input type="checkbox" disabled={blocked} checked={shot.materialIds?.includes(item.id) || false} onChange={event => editShot(shot.id, { materialIds: event.target.checked ? [...(shot.materialIds || []), item.id] : shot.materialIds?.filter(id => id !== item.id) })} />{item.name}</label>)}</div></details>
-        {work.references[shot.id] && <img className={styles.media} src={work.references[shot.id].thumbnailUrl || work.references[shot.id].originalUrl} alt={shot.title} />}
-        {work.videoRuns?.[shot.id]?.status === 'succeeded' && work.videoRuns[shot.id].previewAvailable && work.videoRuns[shot.id].taskId && <><LoopVideo key={work.videoRuns[shot.id].taskId} className={styles.media} controls playsInline preload="metadata" contentKey={`video_task:${work.videoRuns[shot.id].taskId}`} src={`/api/video/play/${encodeURIComponent(work.videoRuns[shot.id].taskId!)}`} /><MultiviewEntry contentKey={`video_task:${work.videoRuns[shot.id].taskId}`} /></>}
-        {work.videoRuns?.[shot.id]?.stableDownloadReady && work.videoRuns[shot.id].taskId && <a className={styles.link} href={`/api/video/download/${encodeURIComponent(work.videoRuns[shot.id].taskId!)}`}>下载此镜视频</a>}
-        <div className={styles.actions}><button className={styles.primary} disabled={blocked || !imageAllowed || Boolean(channelIssue) || !(shot.imagePrompt || shot.description).trim()} onClick={() => void operate('确认单镜生图', () => dispatchShots('image', [shot.id]))}><ImagePlus size={16} />生成此镜图片</button>
-          <button disabled={blocked || !(shot.videoPrompt || shot.description).trim()} onClick={() => void operate('确认单镜视频', () => dispatchShots('video', [shot.id]))}><Clapperboard size={16} />生成此镜视频</button>
-          {(work.imageRuns?.[shot.id] || work.videoRuns?.[shot.id]) && <button disabled={blocked} onClick={() => void operate('查询原任务', queryRuns)}><RefreshCw size={16} />查询原任务</button>}</div>
-        {(work.imageRuns?.[shot.id] || work.videoRuns?.[shot.id]) && <p className={styles.status}>图片：{({ unconfirmed: '受理未确认', queued: '排队中', running: '生成中', succeeded: '已完成', failed: '失败', rejected: '未受理' } as Record<string, string>)[work.imageRuns?.[shot.id]?.status || ''] || '未派发'} · 视频：{({ unconfirmed: '受理未确认', submitted: '已提交', queued: '排队中', running: '生成中', succeeded: '已完成', failed: '失败' } as Record<string, string>)[work.videoRuns?.[shot.id]?.status || ''] || '未派发'}</p>}
-        <div className={styles.actions}><button disabled={blocked || !imageAllowed || !(shot.imagePrompt || shot.description).trim()} title={!imageAllowed ? '当前账号无权使用生图工作区' : undefined} onClick={() => void operate('准备生图草稿', () => imageDraft(shot))}><ImagePlus size={16} />{work.images[shot.id]?.state === 'unconfirmed' ? '查询生图草稿' : work.images[shot.id] ? '核对生图草稿' : '准备生图草稿'}</button>
-          {work.images[shot.id]?.state === 'ready' && <><Link className={styles.link} href={`/template-studio?type=image&moduleId=${encodeURIComponent(work.images[shot.id].moduleId)}`}>打开生图工作区</Link>
-            <button disabled={blocked} onClick={() => void operate('读取生成结果', () => readResults(shot.id))}><RefreshCw size={16} />读取生图结果</button></>}
-          <button disabled={blocked} onClick={() => setPicker(shot.id)}><ImagePlus size={16} />{work.references[shot.id] ? '更换镜头图片' : '选择镜头图片'}</button>
-          <button disabled={blocked || !(shot.videoPrompt || shot.description).trim()} onClick={() => void operate('送回画布', () => mediaNode(shot))}><Clapperboard size={16} />{work.mediaNodes[shot.id] ? '核对画布节点' : '送回画布'}</button></div>
-        {work.references[shot.id] && <p className={styles.status}>已选原图：{work.references[shot.id].fileName}</p>}
-        {work.images[shot.id] && work.images[shot.id].prompt !== shot.imagePrompt && <p className={styles.status}>生图草稿仍保留创建时的要求；后续改动请在该工作区核对，不会自动覆盖。</p>}
-        {work.mediaNodes[shot.id] && <p className={styles.status}><Link className={styles.link} href={`/tools/ultimate-canvas?document_id=${encodeURIComponent(documentId)}&focus_node=${encodeURIComponent(work.mediaNodes[shot.id])}`}><Clapperboard size={16} />打开此镜头视频</Link></p>}
-      </section>)}</div>
-      {resultShot && <GeneratedImageResults items={results} scope={`story:${userId}:${documentId}:${nodeId}:${resultShot}`} hasMore={Boolean(cursor)} total={resultTotal} loadMore={() => readResults(resultShot, true)} emptyLabel="此镜头暂无生成结果"
-        renderPrimaryActions={item => resultAssets[item.id] ? <button disabled={blocked} onClick={() => void operate('选用原图', async () => {
-          await selectReference(resultShot, resultAssets[item.id]);
-        })}>选用此原图</button> : null} />}
+      <div className={work.view === 'board' ? styles.storyboardTable : undefined} role={work.view === 'board' ? 'table' : undefined} aria-label={work.view === 'board' ? '故事板分镜' : undefined}>
+        {work.view === 'board' && <div className={styles.storyboardHeader} role="row"><span>镜头</span><span>画面</span><span>原图</span><span>状态</span><span>操作</span></div>}
+        {work.draft.shots.map((shot, index) => {
+          const imageStatus = imageRunLabel[work.imageRuns?.[shot.id]?.status || 'not_sent'] || work.imageRuns?.[shot.id]?.status || '未派发';
+          const videoStatus = videoRunLabel[work.videoRuns?.[shot.id]?.status || 'not_sent'] || work.videoRuns?.[shot.id]?.status || '未派发';
+          const titleAndDuration = <><label className={styles.inlineTitle}><span className={work.view === 'board' ? styles.visuallyHidden : undefined}>镜头名称</span><input disabled={Boolean(busy) || Boolean(localChoice)} value={shot.title} onChange={event => editShot(shot.id, { title: event.target.value })} /></label>
+            <label className={styles.inlineDuration}><span>时长</span><input type="number" min={1} max={15} disabled={Boolean(busy) || Boolean(localChoice)} value={shot.durationSeconds} onChange={event => { const value = Number(event.target.value); if (Number.isInteger(value) && value >= 1 && value <= 15) editShot(shot.id, { durationSeconds: value }); }} /><span>秒</span></label></>;
+          const rowActions = <div className={`${styles.actions} ${styles.rowActions}`}>
+            <button className={styles.primary} disabled={blocked || !imageAllowed || Boolean(channelIssue) || !(shot.imagePrompt || shot.description).trim()} onClick={() => void operate('确认单镜生图', () => dispatchShots('image', [shot.id]))}><ImagePlus size={16} />生成图片</button>
+            <button disabled={blocked || !(shot.videoPrompt || shot.description).trim()} onClick={() => void operate('确认单镜视频', () => dispatchShots('video', [shot.id]))}><Clapperboard size={16} />生成视频</button>
+            {(work.imageRuns?.[shot.id] || work.videoRuns?.[shot.id]) && <button disabled={blocked} onClick={() => void operate('查询原任务', queryRuns)}><RefreshCw size={16} />查询</button>}
+            {work.images[shot.id]?.state === 'ready' && <button disabled={blocked} onClick={() => void operate('读取生成结果', () => readResults(shot.id))}><RefreshCw size={16} />读取结果</button>}
+            <button disabled={blocked} onClick={() => setPicker(shot.id)}><ImagePlus size={16} />{work.references[shot.id] ? '更换原图' : '选择原图'}</button>
+          </div>;
+          return <section className={`${styles.shot} ${work.view === 'board' ? styles.storyboardRow : ''}`} role={work.view === 'board' ? 'row' : undefined} key={shot.id}>
+            {work.view === 'board' ? <>
+              <div className={styles.storyboardIdentity} role="cell"><strong>{index + 1}</strong>{titleAndDuration}</div>
+              <div className={styles.storyboardSummary} role="cell">{shot.description || '尚未填写画面与动作'}</div>
+              <div className={styles.storyboardReference} role="cell">{work.references[shot.id] ? referenceButton(work.references[shot.id], '预览原图', true) : <span className={styles.status}>未选原图</span>}</div>
+              <div className={styles.storyboardStatus} role="cell"><span>图片：{imageStatus}</span><span>视频：{videoStatus}</span></div>
+              <div className={styles.storyboardActions} role="cell">{rowActions}</div>
+            </> : <><header className={styles.shotHeader}><h3>{index + 1}. {shot.title || '未命名镜头'}</h3><div className={styles.actions}>
+              <button title="上移镜头" aria-label="上移镜头" disabled={blocked || index === 0} onClick={() => moveShot(index, -1)}><ArrowUp size={16} /></button>
+              <button title="下移镜头" aria-label="下移镜头" disabled={blocked || index === work.draft.shots.length - 1} onClick={() => moveShot(index, 1)}><ArrowDown size={16} /></button>
+              <button title="删除镜头" aria-label="删除镜头" disabled={blocked} onClick={() => void removeShot(shot)}><Trash2 size={16} /></button></div></header>
+              <div className={styles.shotFields}>{titleAndDuration}{(['description', 'dialogue', 'imagePrompt', 'videoPrompt'] as const).map(field => <label key={field}>{({ description: '画面与动作', dialogue: '台词', imagePrompt: '生图要求', videoPrompt: '视频要求' })[field]}<textarea disabled={Boolean(busy) || Boolean(localChoice)} value={shot[field]} onChange={event => editShot(shot.id, { [field]: event.target.value })} /></label>)}</div>
+            </>}
+            <details className={styles.shotDetails}><summary>{work.view === 'board' ? '展开完整镜头' : '可选镜头设置与素材'}</summary>
+              {work.view === 'board' && <div className={styles.shotFields}>{(['description', 'dialogue', 'imagePrompt', 'videoPrompt'] as const).map(field => <label key={field}>{({ description: '画面与动作', dialogue: '台词', imagePrompt: '生图要求', videoPrompt: '视频要求' })[field]}<textarea disabled={Boolean(busy) || Boolean(localChoice)} value={shot[field]} onChange={event => editShot(shot.id, { [field]: event.target.value })} /></label>)}</div>}
+              <div className={styles.shotFields}>{(['framing', 'lighting', 'camera'] as const).map(field => <label key={field}>{({ framing: '景别', lighting: '光线', camera: '运镜' })[field]}<select disabled={blocked} value={shot[field] || ''} onChange={event => editShot(shot.id, { [field]: event.target.value })}><option value="">由描述决定</option>{({ framing: ['全景', '中景', '近景', '特写'], lighting: ['自然光', '柔光', '逆光', '夜景'], camera: ['固定镜头', '推进', '拉远', '跟随', '环绕'] })[field].map(value => <option key={value} value={value}>{value}</option>)}</select></label>)}</div>
+              <div className={styles.bindings}>{(work.materials || []).map(item => <label key={item.id}><input type="checkbox" disabled={blocked} checked={shot.materialIds?.includes(item.id) || false} onChange={event => editShot(shot.id, { materialIds: event.target.checked ? [...(shot.materialIds || []), item.id] : shot.materialIds?.filter(id => id !== item.id) })} />{item.name}</label>)}</div>
+              {work.view === 'board' && <div className={styles.actions}><button title="上移镜头" aria-label="上移镜头" disabled={blocked || index === 0} onClick={() => moveShot(index, -1)}><ArrowUp size={16} /></button><button title="下移镜头" aria-label="下移镜头" disabled={blocked || index === work.draft.shots.length - 1} onClick={() => moveShot(index, 1)}><ArrowDown size={16} /></button><button title="删除镜头" aria-label="删除镜头" disabled={blocked} onClick={() => void removeShot(shot)}><Trash2 size={16} /></button></div>}
+              <div className={styles.actions}><button disabled={blocked || !imageAllowed || !(shot.imagePrompt || shot.description).trim()} title={!imageAllowed ? '当前账号无权使用生图工作区' : undefined} onClick={() => void operate('准备生图草稿', () => imageDraft(shot))}><ImagePlus size={16} />{work.images[shot.id]?.state === 'unconfirmed' ? '查询生图草稿' : work.images[shot.id] ? '核对生图草稿' : '准备生图草稿'}</button>
+                {work.images[shot.id]?.state === 'ready' && <Link className={styles.link} href={`/template-studio?type=image&moduleId=${encodeURIComponent(work.images[shot.id].moduleId)}`}>打开生图工作区</Link>}
+                <button disabled={blocked || !(shot.videoPrompt || shot.description).trim()} onClick={() => void operate('送回画布', () => mediaNode(shot))}><Clapperboard size={16} />{work.mediaNodes[shot.id] ? '核对画布节点' : '送回画布'}</button>
+                {work.mediaNodes[shot.id] && <Link className={styles.link} href={`/tools/ultimate-canvas?document_id=${encodeURIComponent(documentId)}&focus_node=${encodeURIComponent(work.mediaNodes[shot.id])}`}><Clapperboard size={16} />打开此镜头视频</Link>}
+              </div>
+              {work.references[shot.id] && work.view !== 'board' && referenceButton(work.references[shot.id], `预览${shot.title || '镜头'}原图`)}
+              {videoResult(shot)}
+            </details>
+            {work.view !== 'board' && rowActions}
+            <p className={styles.status}>图片：{imageStatus} · 视频：{videoStatus}</p>
+            {work.references[shot.id] && <p className={styles.status}>已选原图：{work.references[shot.id].fileName}</p>}
+            {work.images[shot.id] && work.images[shot.id].prompt !== shot.imagePrompt && <p className={styles.status}>生图草稿仍保留创建时的要求；后续改动请在该工作区核对，不会自动覆盖。</p>}
+            {generatedResults(shot.id, `${shot.title || `镜头 ${index + 1}`}生成结果`)}
+          </section>;
+        })}
+      </div>
     </section></>}
     <ResourceLibraryPicker open={Boolean(picker)} imageOnly target="workspace" title="选择镜头原图" maxSelection={1} currentCount={0} currentAssetIds={[]} onClose={() => setPicker(null)}
       onUploadFile={(file, onProgress) => uploadFileAsAsset(file, { onProgress })} onConfirm={async () => false} onConfirmSelection={async items => {
-        if (!picker || items.length !== 1 || busy || lock.current) return false;
-        const item = items[0]; if (!item.assetId && !item.referenceImageId) return false;
-        let success = false;
-        await operate('保存镜头图片', async () => { await selectReference(picker, item); success = true; });
-        if (success) setPicker(null); return success;
+        if (!picker || items.length !== 1 || busy || lock.current) return { success: false, message: '当前操作尚未结束，请稍后重试' };
+        const item = items[0]; if (!item.assetId && !item.referenceImageId) return { success: false, message: '图片没有可用的原件编号' };
+        const problem = await operate('保存镜头图片', () => selectReference(picker, item));
+        return problem ? { success: false, message: problem } : true;
       }} />
+    {referencePreview && <ZoomableImagePreview contentKey={referencePreview.item.key} src={referencePreview.item.previewUrl || referencePreview.item.originalUrl}
+      thumbnailSrc={referencePreview.item.thumbnailUrl || undefined} alt={referencePreview.label} title={referencePreview.label} fileName={referencePreview.item.fileName}
+      safeDetails={{ width: referencePreview.item.width || undefined, height: referencePreview.item.height || undefined, fileSize: referencePreview.item.fileSize ?? undefined }} onClose={() => setReferencePreview(null)} />}
     {productDialog}
   </main>;
 }

@@ -84,6 +84,7 @@
         const settings = input.settings || {};
         const errors = contextErrors(input);
         if (!clean(input.prompt)) errors.push('请先填写视频提示词。');
+        if (![1, 2, 4].includes(settings.count == null ? 1 : Number(settings.count))) errors.push('视频数量只能为1、2或4。');
         if (references.length < mode.minimumReferences) {
             errors.push(mode.generationMode === 'first_last_frame'
                 ? '首尾帧模式至少需要一张已入库图片作为首帧。'

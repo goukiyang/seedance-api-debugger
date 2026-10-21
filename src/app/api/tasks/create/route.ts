@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { compileCanvasVideoPrompt } from '@/lib/canvas-video-prompt';
+import { restoreCanvasVideoBatchCreate, assertCanvasVideoAdmission, bindCanvasVideoBatchTask,
+  assertCanvasVideoBatchDedupe, recordCanvasVideoBatchRejection, canvasVideoBatchTaskResponse,
+  CanvasVideoBatchError, type CanvasVideoAdmission } from '@/lib/canvas-video-batches-guards';
 import { assertCanvasPromptCompatibility } from '@/lib/canvas-prompt-compatibility';
 import { parseCanvasPromptMentions, compileCanvasPromptReferences, CanvasPromptReferenceError } from '@/lib/canvas-prompt-references';
 import { resolveImageInputUrls } from '@/lib/assets/original-image-input';
@@ -673,11 +676,34 @@ export async function POST(request: NextRequest) {
     throw error;
   }
 
-  const body = await request.json();
+  const receivedBody = await request.json();
+  let restoredBatch: Awaited<ReturnType<typeof restoreCanvasVideoBatchCreate>>;
+  try { restoredBatch = await restoreCanvasVideoBatchCreate(user, receivedBody, 'ordinary'); }
+  catch (error) {
+    if (error instanceof CanvasVideoBatchError) return NextResponse.json({ error: error.message, code: error.code, ...error.details }, { status: error.status });
+    throw error;
+  }
+  if (restoredBatch.existingTask) return NextResponse.json(canvasVideoBatchTaskResponse(restoredBatch.existingTask));
+  // Existing validators deliberately normalize this local input after server restoration.
+  const body = restoredBatch.body as typeof receivedBody;
+  const canvasAdmission: CanvasVideoAdmission | null = restoredBatch.admission;
+  let response: NextResponse;
+  try { response = await runCanvasAdmission(); }
+  catch (error) {
+    if (!(error instanceof CanvasVideoBatchError)) throw error;
+    response = NextResponse.json({ error: error.message, code: error.code, ...error.details }, { status: error.status });
+  }
+  if (canvasAdmission && response.status >= 400) {
+    await recordCanvasVideoBatchRejection(user, canvasAdmission, response.status, await response.clone().json().catch(() => null));
+  }
+  return response;
+
+  async function runCanvasAdmission() {
   const stablePricingFingerprint = body.pricing_fingerprint_version === 2 ? videoPricingBusinessFingerprint(body) : null;
   if (stablePricingFingerprint && typeof body.idempotency_key === 'string') {
     const existing = await prisma.videoTask.findUnique({ where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: body.idempotency_key } } });
     if (existing?.request_fingerprint?.startsWith('pricing-v2:')) {
+      await assertCanvasVideoBatchDedupe(user, canvasAdmission, existing);
       try { await assertCanViewTask(user, existing); }
       catch (error) { if (error instanceof AuthError) return errorJson(error.message, error.status); throw error; }
       if (existing.request_fingerprint !== stablePricingFingerprint) return NextResponse.json({ error: '原请求内容不同，请查询原任务；未重新生成', code: 'IDEMPOTENCY_PAYLOAD_MISMATCH', existing_task_id: existing.id }, { status: 409 });
@@ -1175,6 +1201,7 @@ export async function POST(request: NextRequest) {
     const existing = await prisma.videoTask.findUnique({
       where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: idempotencyKey } },
     });
+    if (existing) await assertCanvasVideoBatchDedupe(user, canvasAdmission, existing);
     if (existing) {
       const decision = decideGenerationIdempotency(existing, {
         requestFingerprint,
@@ -1976,6 +2003,8 @@ export async function POST(request: NextRequest) {
     const result = await prisma.$transaction(async (tx) => {
       await assertMultiviewRequestFence(tx, user.id, idempotencyKey, requestClaim);
       await assertProjectActiveInTransaction(tx, user, project.id);
+      await assertCanvasVideoAdmission(tx, user, body, canvasAdmission, { projectId: project.id,
+        videoCardId, branchId: videoBranch?.id || null, amount: estimatedCost });
       await assertVideoPricingAcceptance(priceQuote, body.pricing_revision, tx);
       if (requireScopeCredential) {
         const freshPricingContext = await resolveVideoPricingContext(user, { ...body, project_id: project.id, video_card_id: videoCardId,
@@ -2220,6 +2249,7 @@ export async function POST(request: NextRequest) {
       }
 
       await acceptMultiviewRequest(tx, requestClaim, task.id);
+      await bindCanvasVideoBatchTask(tx, canvasAdmission, task.id, estimatedCost);
       if (multiviewGeneration) await registerMultiviewWorkIntent(tx, { ownerId: user.id, taskId: task.id,
         projectId: project.id, videoCardId });
       return task;
@@ -2229,11 +2259,19 @@ export async function POST(request: NextRequest) {
     committedTaskId = taskId;
     createdTask = result;
   } catch (err) {
+    if (err instanceof CanvasVideoBatchError) {
+      if (canvasAdmission && err.code === 'canvas_video_batch_child_accepted') {
+        const original = await restoreCanvasVideoBatchCreate(user, receivedBody, 'ordinary');
+        if (original.existingTask) return NextResponse.json(canvasVideoBatchTaskResponse(original.existingTask));
+      }
+      return NextResponse.json({ error: err.message, code: err.code, ...err.details }, { status: err.status });
+    }
     if (idempotencyKey && err && typeof err === 'object' && 'code' in err && (err as { code?: unknown }).code === 'P2002') {
       const racedTask = await prisma.videoTask.findUnique({
         where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: idempotencyKey } },
       });
       if (racedTask) {
+        await assertCanvasVideoBatchDedupe(user, canvasAdmission, racedTask);
         const decision = decideGenerationIdempotency(racedTask, {
           requestFingerprint,
           videoCardId,
@@ -2572,6 +2610,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
+  }
 // --- Failure handler: release frozen credits in a single transaction ---
 async function handleProviderFailure(
   taskId: string,

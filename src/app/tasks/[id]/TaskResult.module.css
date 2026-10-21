@@ -13,6 +13,10 @@
 .disclosure { border-radius: 0; border-inline: 0; background: transparent; box-shadow: none; }
 .disclosure > summary { cursor: pointer; font-size: 15px; font-weight: 600; padding-block: 6px; }
 .disclosure > p { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); }
+.page :global(.task-decision-list) .taskIdValue { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.taskIdText { flex: 1 1 auto; min-width: 0; color: var(--text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; word-break: break-all; white-space: normal; user-select: text; cursor: text; }
+.page .taskIdCopy { flex: 0 0 auto; min-height: 30px; padding: 5px 8px; gap: 5px; font-size: 12px; white-space: nowrap; }
+.taskIdCopyError { color: var(--text-secondary); font-size: 12px; line-height: 1.4; user-select: text; }
 .page :global(.task-download-error) { color: var(--text-secondary); }
 @media (max-width: 850px) {
   .page :global(.task-result-workspace) { grid-template-columns: minmax(0, 1fr); }

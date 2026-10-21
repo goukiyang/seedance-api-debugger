@@ -232,8 +232,9 @@ function realPointerSelectionAndAuthoredCopySmoke() {
   }
   engine.canvas = { querySelectorAll: () => Array.from(wraps.values()).filter(wrap => wrap.classList.contains('selected')),
     querySelector: (selector: string) => wraps.get(/data-node-id="([^"]+)"/.exec(selector)?.[1] || '') };
-  for (const method of ['selectNodes', '_selectNode', '_deselectAll', '_toggleSelectionGesture', '_selectDragNodes', '_escapeHtml']) engine[method] = CanvasEngine.prototype[method];
+  for (const method of ['selectNodes', '_selectNode', '_deselectAll', '_toggleSelectionGesture', '_selectDragNodes', '_isInteractiveTarget', '_escapeHtml']) engine[method] = CanvasEngine.prototype[method];
   engine._icon = () => ''; engine._label = () => '文本'; engine._body = () => ''; engine._propsPanel = () => '';
+  engine._canvasInputBlocked = () => false;
   const oldDocument = globalThis.document, oldCss = globalThis.CSS, oldWindow = globalThis.window;
   Object.assign(globalThis, { document: { createElement: element, querySelector: engine.canvas.querySelector },
     CSS: { escape: (id: string) => id }, window: { UltimateCanvasIcons: () => '' } });
@@ -309,14 +310,55 @@ function integrationContractSmoke() {
   assert.ok(engineSource.includes('TOOLFLOW_CONNECTIONS'));
 }
 
+function atomicEditBoundariesSmoke() {
+  const engine: any = new FakeCanvasEngine();
+  for (const id of ['a', 'b', 'c']) engine.nodes.set(id, { id, type: 'text', x: 0, y: 0, data: { prompt: id } });
+  engine.connections = [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }];
+  const commands = createCanvasCommands(engine);
+  engine.onUserEdit = (label: string, operation: () => unknown) => commands.perform(label, operation);
+  engine.performUserEdit = CanvasEngine.prototype.performUserEdit;
+  engine.deleteNode = (id: string) => {
+    engine.nodes.delete(id);
+    engine.connections = engine.connections.filter((edge: any) => edge.from !== id && edge.to !== id);
+  };
+  commands.perform('group', () => { engine.nodes.get('a').data.canvasGroup = { id: 'group-1' }; });
+  CanvasEngine.prototype.requestDeleteNodes.call(engine, ['a', 'b', 'b']);
+  assert.deepEqual([...engine.nodes.keys()], ['c']);
+  assert.equal(commands.getState().undoCount, 2, 'deletion commits once after all mutations');
+  commands.undo();
+  assert.deepEqual([...engine.nodes.keys()], ['a', 'b', 'c']);
+  assert.equal(engine.nodes.get('a').data.canvasGroup.id, 'group-1', 'undo deletion does not undo preceding group');
+  assert.equal(engine.connections.length, 2);
+  commands.redo(); assert.deepEqual([...engine.nodes.keys()], ['c']);
+  commands.undo();
+  const count = commands.getState().undoCount;
+  commands.perform('rejected edit', () => false);
+  assert.equal(commands.getState().undoCount, count);
+  commands.perform('nested edit', () => commands.perform('inner', () => { engine.nodes.get('a').data.prompt = 'changed'; }));
+  assert.equal(commands.getState().undoCount, count + 1, 'nested sync mutations are one history entry');
+  commands.undo(); assert.equal(engine.nodes.get('a').data.prompt, 'a');
+  engine.nodes.get('b').data.videoSettings = { count: 4 };
+  engine.nodes.get('b').data.videoBatchId = 'never-copy';
+  engine.nodes.get('b').data.videoBatchChildren = [{ child_id: 'never-copy' }];
+  engine.selectNodes(['b'], 'b');
+  const copied = commands.duplicateSelection();
+  const data = engine.nodes.get(copied.createdIds[0]).data;
+  assert.equal(data.videoSettings.count, 4);
+  assert.equal(data.videoBatchId, undefined);
+  assert.equal(data.videoBatchChildren, undefined);
+}
+
 function main() {
   const moving: any = new FakeCanvasEngine();
   moving.nodes.set('a', { id: 'a', type: 'text', x: 100, y: 20, data: { canvasGroup: { id: 'g' } } });
   moving.nodes.set('b', { id: 'b', type: 'image', x: 200, y: 70, data: { canvasGroup: { id: 'g' } } });
   CanvasEngine.prototype._selectDragNodes.call(moving, 'a');
-  assert.deepEqual(moving.getSelectedNodeIds(), ['a', 'b']);
+  assert.deepEqual(moving.getSelectedNodeIds(), ['a'], 'group members remain individually editable');
+  moving.selectNodes(['a', 'b'], 'a');
+  CanvasEngine.prototype._selectDragNodes.call(moving, 'a');
+  assert.deepEqual(moving.getSelectedNodeIds(), ['a', 'b'], 'group-frame selection moves all members');
   Object.assign(moving, { scale: 1, isDraggingNode: true, dragNode: { dataset: { nodeId: 'a' }, style: {} },
-    dragStartX: 0, dragStartY: 0, nodeStartX: 100, nodeStartY: 20, _updateConnections() {} });
+    dragStartX: 0, dragStartY: 0, nodeStartX: 100, nodeStartY: 20, _updateConnections() {}, scheduleGroupFrames() {}, _canvasInputBlocked: () => false });
   const oldDocument = globalThis.document, oldCss = globalThis.CSS;
   Object.assign(globalThis, { document: { querySelector: () => ({ style: {} }) }, CSS: { escape: (id: string) => id } });
   try { CanvasEngine.prototype._onMouseMove.call(moving, { clientX: 40, clientY: 15 }); }
@@ -330,6 +372,7 @@ function main() {
   groupAndBoundedHistorySmoke();
   typedEdgesAndMinimapSmoke();
   integrationContractSmoke();
+  atomicEditBoundariesSmoke();
   console.log('ultimate canvas graph commands smoke passed');
 }
 

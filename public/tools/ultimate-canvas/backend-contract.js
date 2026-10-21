@@ -15,6 +15,7 @@
     });
     const CANVAS_PATHS = [
         /^\/api\/tools\/ultimate-canvas\/(?:bootstrap|document|upload|quote|text-settings|video-submission)$/,
+        /^\/api\/tools\/ultimate-canvas\/video-batches(?:\/[A-Za-z0-9_-]+)?$/,
         /^\/api\/tools\/ultimate-canvas\/styles(?:\/(?:apply|generate|results))?$/,
         /^\/api\/tools\/ultimate-canvas\/images\/generate$/,
         /^\/api\/tools\/ultimate-canvas\/(?:roles(?:\/[A-Za-z0-9_-]+)?|role-workflows|role-join|role-runs(?:\/[A-Za-z0-9_-]+)?|role-work(?:\/[A-Za-z0-9_-]+(?:\/execute)?)?|role-receipts\/[A-Za-z0-9_-]+|role-attempts\/[A-Za-z0-9_-]+)$/,

@@ -18,7 +18,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 12px;
+  padding: max(6px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left));
   border-bottom: 1px solid oklch(0.92 0 0 / 0.18);
   background: oklch(0.18 0 0 / 0.96);
 }
@@ -97,36 +97,45 @@
 .stageDragging { cursor: grabbing; }
 .stage[data-zoomed="true"]:not(.stageDragging) { cursor: grab; }
 
-.notice { position: absolute; z-index: 3; top: 8px; left: 8px; right: 8px; width: fit-content; max-width: calc(100% - 16px); max-height: 22dvh; overflow: auto; padding: 6px 10px; background: #151a1de6; border-radius: 6px; font-size: 13px; overflow-wrap: anywhere; user-select: text; touch-action: auto; }
+.noticeStack { position: absolute; z-index: 3; top: max(8px, env(safe-area-inset-top)); left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right)); display: grid; justify-items: start; gap: 6px; max-height: 28dvh; overflow: auto; pointer-events: none; }
+.notice, .comparisonNotice { box-sizing: border-box; width: fit-content; max-width: 100%; padding: 6px 10px; background: #151a1de6; border-radius: 6px; font-size: 13px; overflow-wrap: anywhere; user-select: text; touch-action: auto; pointer-events: auto; }
+.comparisonNotice { display: flex; align-items: center; gap: 10px; }
+.comparisonNotice > span { min-width: 0; }
+.noticeActions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.noticeActions button { min-width: 32px; min-height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 4px 8px; border: 1px solid #647078; border-radius: 5px; background: #20272b; color: inherit; font: inherit; cursor: pointer; }
+.noticeActions button:focus-visible { outline: 2px solid #70cfbd; outline-offset: 2px; }
 
-.imageStatus { position: absolute; bottom: 12px; left: 12px; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: calc(100% - 24px); padding: 6px 10px; border-radius: 6px; background: #151a1de6; color: #eef0f2; font-size: 12px; pointer-events: none; }
+.imageStatus { position: absolute; bottom: max(12px, env(safe-area-inset-bottom)); left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right)); z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: fit-content; max-width: calc(100% - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)); padding: 6px 10px; border-radius: 6px; background: #151a1de6; color: #eef0f2; font-size: 12px; pointer-events: none; }
 .imageStatus > span { min-width: 0; overflow-wrap: anywhere; }
 .imageProgress { flex: 1 1 100%; width: min(180px, 48vw); height: 6px; accent-color: #70cfbd; }
 .imageStatus button { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid #647078; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; pointer-events: auto; }
 
-.compareFrame { position: absolute; inset: 12px; display: grid; gap: 8px; overflow: hidden; background: transparent; }
+.compareFrame { position: absolute; inset: 0; display: grid; gap: 0; overflow: hidden; background: transparent; }
+.compareFrame::after { content: ''; position: absolute; z-index: 2; pointer-events: none; background: oklch(0.9 0 0 / 0.38); }
+.compareHorizontal::after { top: 0; bottom: 0; left: calc(50% - .5px); width: 1px; }
+.compareVertical::after { left: 0; right: 0; top: calc(50% - .5px); height: 1px; }
+.singleFrame::after { display: none; }
 .compareHorizontal { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .compareVertical { grid-template-rows: repeat(2, minmax(0, 1fr)); }
 .singleFrame { grid-template-columns: minmax(0, 1fr); }
-.comparePane { position: relative; min-width: 0; min-height: 0; overflow: hidden; border: 1px solid oklch(0.9 0 0 / 0.12); background: transparent; cursor: grab; touch-action: none; }
+.comparePane { position: relative; min-width: 0; min-height: 0; overflow: hidden; border: 0; background: transparent; cursor: grab; touch-action: none; }
 .comparePane:active { cursor: grabbing; }
-.comparePane[data-active="true"] { border-color: oklch(0.9 0 0 / 0.4); box-shadow: none; }
+.comparePane[data-active="true"] { box-shadow: none; }
 .comparePane:focus-visible { outline: 2px solid oklch(0.9 0 0); outline-offset: -3px; }
-.compareLabel { position: absolute; top: 10px; left: 10px; z-index: 2; padding: 4px 7px; border-radius: 5px; background: oklch(0.08 0 0 / 0.7); color: oklch(0.96 0 0); font-size: 12px; font-weight: 750; pointer-events: none; }
-.paneLink { position: absolute; top: 10px; right: 10px; z-index: 3; display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; padding: 0; border: 1px solid oklch(0.88 0 0 / 0.28); border-radius: 6px; background: oklch(0.28 0 0 / 0.86); color: inherit; cursor: pointer; }
+.compareLabel { position: absolute; top: 10px; left: max(10px, env(safe-area-inset-left)); z-index: 2; padding: 4px 7px; border-radius: 5px; background: oklch(0.08 0 0 / 0.7); color: oklch(0.96 0 0); font-size: 12px; font-weight: 750; pointer-events: none; }
+.paneLink { position: absolute; top: 10px; right: max(10px, env(safe-area-inset-right)); z-index: 3; display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; padding: 0; border: 1px solid oklch(0.88 0 0 / 0.28); border-radius: 6px; background: oklch(0.28 0 0 / 0.86); color: inherit; cursor: pointer; }
 .paneLink:hover { border-color: #70cfbd; background: #253e37; }
 .paneLink[aria-pressed="true"] { background: #214a42; border-color: #70cfbd; }
 .paneLink:focus-visible { outline: 2px solid #70cfbd; outline-offset: 2px; }
-.compareImage { position: absolute; top: 50%; left: 50%; max-width: calc(100% - 24px); max-height: calc(100% - 24px); object-fit: contain; transform-origin: center; will-change: transform; }
+.compareImage { position: absolute; top: 50%; left: 50%; max-width: 100%; max-height: 100%; object-fit: contain; transform-origin: center; will-change: transform; }
 .stageDragging .compareImage { transition: none; }
 
 @media (max-width: 640px) {
-  .toolbar { padding-inline: 8px; gap: 4px; }
+  .toolbar { padding-right: max(8px, env(safe-area-inset-right)); padding-left: max(8px, env(safe-area-inset-left)); gap: 4px; }
   .toolbar .downloadAction { width: 38px; padding: 0; }
   .downloadAction > span { display: none; }
   .desktopNavigation { display: none; }
   .mobileNavigation { display: grid; gap: 8px; }
-  .compareFrame { inset: 8px; gap: 6px; }
 }
 @media (max-width: 560px) {
   .toolbar { grid-template-columns: minmax(0, 1fr) auto; }

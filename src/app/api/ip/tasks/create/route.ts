@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { compileCanvasVideoPrompt } from '@/lib/canvas-video-prompt';
+import { restoreCanvasVideoBatchCreate, assertCanvasVideoAdmission, bindCanvasVideoBatchTask,
+  assertCanvasVideoBatchDedupe, recordCanvasVideoBatchRejection, canvasVideoBatchTaskResponse,
+  CanvasVideoBatchError, type CanvasVideoAdmission } from '@/lib/canvas-video-batches-guards';
 import { assertCanvasPromptCompatibility } from '@/lib/canvas-prompt-compatibility';
 import { parseCanvasPromptMentions, compileCanvasPromptReferences, CanvasPromptReferenceError } from '@/lib/canvas-prompt-references';
 import { resolveImageInputUrls } from '@/lib/assets/original-image-input';
@@ -56,7 +59,7 @@ import {
   getVolcengineIpApiSettings,
   isVolcengineIpApiReady,
 } from '@/lib/integrations/volcengine-ip';
-import { AuthError } from '@/lib/auth/session';
+import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { getProjectForGeneration } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import { assertProjectActiveInTransaction } from '@/lib/projects/permissions';
@@ -417,7 +420,7 @@ function volcengineProviderHttpStatus(error: unknown) {
 }
 
 export async function POST(request: NextRequest) {
-  let user;
+  let user: SessionUser;
   let requestSource: GenerationRequestSource = webRequestSource(request);
 
   if (hasCodexApiAuthSignal(request)) {
@@ -448,7 +451,28 @@ export async function POST(request: NextRequest) {
     return errorJson('请先在 API 整合页配置并启用火山 IP 生成 API', 500);
   }
 
-  const body = await request.json();
+  const receivedBody = await request.json();
+  let restoredBatch: Awaited<ReturnType<typeof restoreCanvasVideoBatchCreate>>;
+  try { restoredBatch = await restoreCanvasVideoBatchCreate(user, receivedBody, 'ip'); }
+  catch (error) {
+    if (error instanceof CanvasVideoBatchError) return NextResponse.json({ error: error.message, code: error.code, ...error.details }, { status: error.status });
+    throw error;
+  }
+  if (restoredBatch.existingTask) return NextResponse.json(canvasVideoBatchTaskResponse(restoredBatch.existingTask));
+  const body = restoredBatch.body as typeof receivedBody;
+  const canvasAdmission: CanvasVideoAdmission | null = restoredBatch.admission;
+  let response: NextResponse;
+  try { response = await runCanvasAdmission(); }
+  catch (error) {
+    if (!(error instanceof CanvasVideoBatchError)) throw error;
+    response = NextResponse.json({ error: error.message, code: error.code, ...error.details }, { status: error.status });
+  }
+  if (canvasAdmission && response.status >= 400) {
+    await recordCanvasVideoBatchRejection(user, canvasAdmission, response.status, await response.clone().json().catch(() => null));
+  }
+  return response;
+
+  async function runCanvasAdmission() {
   try { await resolveImageInputUrls(user, body); }
   catch (error) { if (error instanceof AuthError) return errorJson(error.message, error.status); throw error; }
   if (body.model !== undefined && body.model !== null && typeof body.model !== 'string') {
@@ -859,6 +883,7 @@ export async function POST(request: NextRequest) {
     const existing = await prisma.videoTask.findUnique({
       where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: idempotencyKey } },
     });
+    if (existing) await assertCanvasVideoBatchDedupe(user, canvasAdmission, existing);
     if (existing) {
       const decision = ipIdempotencyDecision(existing, requestFingerprint, videoCard.id);
       if (decision !== 'deduplicated') return ipIdempotencyConflict(existing, decision);
@@ -1296,6 +1321,8 @@ export async function POST(request: NextRequest) {
     const result = await prisma.$transaction(async (tx) => {
       await assertMultiviewRequestFence(tx, user.id, idempotencyKey);
       await assertProjectActiveInTransaction(tx, user, project.id);
+      await assertCanvasVideoAdmission(tx, user, body, canvasAdmission, { projectId: project.id,
+        videoCardId: videoCard.id, branchId: videoBranch?.id || null, amount: estimatedCost });
       await assertVideoPricingAcceptance(priceQuote, body.pricing_revision, tx);
       const task = await tx.videoTask.create({
         data: {
@@ -1519,17 +1546,26 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      await bindCanvasVideoBatchTask(tx, canvasAdmission, task.id, estimatedCost);
       return task;
     });
 
     taskId = result.id;
     createdTask = result;
   } catch (err) {
+    if (err instanceof CanvasVideoBatchError) {
+      if (canvasAdmission && err.code === 'canvas_video_batch_child_accepted') {
+        const original = await restoreCanvasVideoBatchCreate(user, receivedBody, 'ip');
+        if (original.existingTask) return NextResponse.json(canvasVideoBatchTaskResponse(original.existingTask));
+      }
+      return NextResponse.json({ error: err.message, code: err.code, ...err.details }, { status: err.status });
+    }
     if (idempotencyKey && isPrismaUniqueConstraintError(err)) {
       const existing = await prisma.videoTask.findUnique({
         where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: idempotencyKey } },
       });
       if (existing) {
+        await assertCanvasVideoBatchDedupe(user, canvasAdmission, existing);
         const decision = ipIdempotencyDecision(existing, requestFingerprint, videoCard.id);
         if (decision !== 'deduplicated') return ipIdempotencyConflict(existing, decision);
         return ipDeduplicatedTaskResponse(existing);
@@ -1839,6 +1875,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
+  }
 // --- Failure handler: release frozen credits in a single transaction ---
 async function handleProviderFailure(
   taskId: string,

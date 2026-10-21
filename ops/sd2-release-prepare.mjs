@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { assertCanvasBatchSchemaInput, assertCanvasBatchPrismaExtension, CANVAS_BATCH_SQL, CANVAS_BATCH_MIGRATOR, CANVAS_BATCH_MODE } from './canvas-video-batch-schema-extension.mjs';
 
 const require = createRequire(import.meta.url);
 const ts = require('typescript');
@@ -114,6 +115,11 @@ export function validatePlan(plan, original, now = Date.now()) {
   assert.ok(Number.isSafeInteger(observed) && observed <= now && now - observed <= 300000, 'Capture must be fresh; historical evidence is not current runtime');
   assert.equal(c.sourceReady, true); assert.equal(c.baselineReconciled, true);
   assert.ok(!(c.normalContinuation && c.deployedUsageSchema), 'Schema adoption modes are mutually exclusive');
+  if (c.canvasVideoBatchSchema) {
+    assertCanvasBatchSchemaInput(c.canvasVideoBatchSchema);
+    assert.ok(c.deployedUsageSchema, 'Additive canvas migration retains the deployed usage schema proof');
+    assert.equal(plan.reuseBuilds, null, 'A new schema pair requires two complete fresh builds');
+  }
   if (c.deployedUsageSchema !== null && c.deployedUsageSchema !== undefined) {
     const value = c.deployedUsageSchema;
     keys(value, DEPLOYED_FIELDS); assert.equal(value.schema, DEPLOYED_SCHEMA);
@@ -190,9 +196,23 @@ export function checkSources(repo, c) {
   assert.equal(git(repo, ['rev-parse', c.guardReference]), c.recoveryGuardSource, 'Guard branch moved');
   if (c.deployedUsageSchema) for (const file of ['prisma/migrations/20261021073000_usage_attribution/migration.sql',
     'ops/sd2-usage-attribution-migrate.py', 'prisma/schema.prisma', 'ops/sd2-usage-role-start.mjs']) {
+    if (file === 'prisma/schema.prisma' && c.canvasVideoBatchSchema) {
+      const previous = Buffer.from(execFileSync('git', ['-C', repo, 'show', c.baselineSource + ':' + file]));
+      for (const source of [c.mainSource, c.recoveryGuardSource]) {
+        const next = Buffer.from(execFileSync('git', ['-C', repo, 'show', source + ':' + file]));
+        assertCanvasBatchPrismaExtension(previous, next, c.canvasVideoBatchSchema);
+      }
+      continue;
+    }
     const expected = git(repo, ['rev-parse', c.baselineSource + ':' + file]);
     for (const source of [c.mainSource, c.recoveryGuardSource])
       assert.equal(git(repo, ['rev-parse', source + ':' + file]), expected, 'New pair changed deployed usage schema/start input: ' + file);
+  }
+  if (c.canvasVideoBatchSchema) for (const [kind, source] of [['main', c.mainSource], ['guard', c.recoveryGuardSource]]) {
+    for (const [file, expected] of [[CANVAS_BATCH_SQL, c.canvasVideoBatchSchema.sqlSha256], [CANVAS_BATCH_MIGRATOR, c.canvasVideoBatchSchema.migrationModuleSha256]])
+      assert.equal(digest(execFileSync('git', ['-C', repo, 'show', source + ':' + file])), expected);
+    assert.equal(git(repo, ['show', source + ':' + CANVAS_BATCH_MODE]),
+      `export const CANVAS_VIDEO_BATCH_WRITES_ENABLED: boolean = ${kind === 'main' ? 'true' : 'false'};`);
   }
 }
 

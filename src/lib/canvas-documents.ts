@@ -8,6 +8,7 @@ import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { assertCanViewTask, getAccessibleProjectIds, getProjectAccess, assertProjectActiveInTransaction } from '@/lib/projects/permissions';
 import { assertCanUseReferenceImage } from '@/lib/reference-albums/permissions';
+import { requireCanvasVideoBatchDocumentCapability, sealCanvasVideoPreparedChildren } from '@/lib/canvas-video-batches-guards';
 
 export const MAX_CANVAS_BYTES = 2 * 1024 * 1024;
 const HISTORY_LIMIT = 20;
@@ -526,6 +527,9 @@ function withoutLiveTasks(snapshot: Snapshot): Snapshot {
     'documentid', 'canvasdocumentid', 'activegenerationnodeid',
     'generationresult', 'generationerror', 'generationprogress',
     'videosubmission', 'videosubmissionlegacy', 'videohistory', 'selectedvideoresult', 'generationpayload', 'previewvideotaskid',
+    'videobatch', 'videobatchid', 'videobatchhistory', 'canvasvideobatch', 'canvasvideobatchid',
+    'batchid', 'childid', 'childrequestid', 'batchrequestid', 'batchsubmission', 'batchchildren',
+    'videobatchref', 'videobatchreference', 'pricingquotetoken', 'pricingrevision', 'pricingfingerprintversion', 'maxestimatedcost',
     'taskstatus', 'runstatus', 'batchstatus', 'statusendpoint', 'pollingurl', 'pollurl',
     'roletaskrunid', 'roleworkid', 'roleattemptid', 'roledeliveryid', 'roleconfirmation', 'rolehandoff', 'rolefees',
     'rolemediaorigin', 'rolemediacontext',
@@ -632,7 +636,7 @@ function conflict(document: CanvasDocument): never {
   });
 }
 
-export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue, method: 'POST' | 'PATCH') {
+export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue, method: 'POST' | 'PATCH', clientCapabilities: string[] = []) {
   assertInternalOnly(user, '外部账号无权使用无限画布。');
   checkJson(body);
   const documentId = string(body.document_id ?? body.documentId);
@@ -649,6 +653,8 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
     invalid('保存需要 mutation_id 和非负整数 base_revision');
   }
   const action = method === 'POST' ? 'save' : string(body.action);
+  // Client compatibility is transport metadata, not a change to an original saved mutation body.
+  const batchCapabilities = [...(Array.isArray(body.required_capabilities) ? body.required_capabilities : []), ...clientCapabilities];
   if (!['save', 'rename', 'archive', 'restore', 'duplicate', 'restore_revision'].includes(action)) invalid('不支持此画布操作');
   if (method === 'PATCH' && !documentId) invalid('缺少 document_id');
   const hashBody = { ...body };
@@ -676,9 +682,11 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
     }
     const document = await db.canvasDocument.findUnique({ where: { id: receipt.document_id }, select: canvasMetadataSelect });
     await assertDocument(user, document, false, db);
+    await requireCanvasVideoBatchDocumentCapability(db, receipt.document_id, batchCapabilities);
     requireCanvasRoleCapability(document!.schema_version, body.required_capabilities);
     if (documentId && documentId !== receipt.document_id) {
       await assertDocument(user, await db.canvasDocument.findUnique({ where: { id: documentId }, select: canvasMetadataSelect }), false, db);
+      await requireCanvasVideoBatchDocumentCapability(db, documentId, batchCapabilities);
     }
     return { ...JSON.parse(receipt.response_json), replayed: true };
   }
@@ -690,6 +698,7 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
       if (repeated) return repeated;
       const existing = documentId ? await db.canvasDocument.findUnique({ where: { id: documentId } }) : null;
       if (documentId) await assertDocument(user, existing, true, db);
+      if (existing) await requireCanvasVideoBatchDocumentCapability(db, existing.id, batchCapabilities);
       if (existing && ['save', 'duplicate', 'restore_revision'].includes(action)) requireCanvasRoleCapability(existing.schema_version, body.required_capabilities);
       if (existing && existing.schema_version >= 5 && isRoleCollaborationReadOnly()) {
         throw new CanvasDocumentError('新版角色协作处于保护模式，原画布可查看，暂不保存修改', 503, 'collaboration_guard');
@@ -764,6 +773,17 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
       }
 
       const newDocument = !existing || action === 'duplicate';
+      if (existing && !newDocument) {
+        if (action === 'archive' || action === 'restore_revision') {
+          await sealCanvasVideoPreparedChildren(db, { ownerId: user.id, documentId: existing.id, reason: action });
+        } else if (snapshot) {
+          const current = JSON.parse(existing.document_json) as Snapshot;
+          const kept = new Set(snapshot.canvas.nodes.map(node => node.id));
+          const removed = current.canvas.nodes.filter(node => !kept.has(node.id)).map(node => node.id);
+          if (removed.length) await sealCanvasVideoPreparedChildren(db, { ownerId: user.id, documentId: existing.id,
+            removedNodeIds: removed, reason: 'node_removed' });
+        }
+      }
       const data = {
         title, active_generation_node_id: activeNode,
         ...(snapshot ? { document_json: JSON.stringify(snapshot) } : {}),

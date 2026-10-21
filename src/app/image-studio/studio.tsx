@@ -3785,7 +3785,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     </header>
     <div className={`${styles.moduleBanner} ${banner?.originalUrl ? styles.moduleBannerHasImage : ''}`}>
       {banner?.originalUrl ? <>
-        {/* 固定 banner 高度并完整等比显示图片，不裁切。 */}
+        {/* 横幅按框宽等比显示，固定高度内居中裁切上下溢出。 */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img decoding="async" className={styles.moduleBannerImage} src={banner.thumbnailUrl || undefined} alt={templateWorkbench ? '模块横幅' : '模块横幅'} />
         <span className={styles.bannerLabel}>{templateWorkbench ? '模块横幅' : '模块横幅'}</span>

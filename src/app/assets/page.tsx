@@ -22,6 +22,8 @@ import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useVideoPricing } from '@/lib/pricing/use-video-pricing';
 import { taskDetailHref } from '@/lib/navigation/return-to';
+import { authorizeTaskReuseHref, taskReuseHref, taskReuseReturnTo } from '@/lib/navigation/task-reuse';
+import { isExternalUser } from '@/lib/access/external-role';
 import { uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import { uploadSession } from '@/lib/http/upload-session';
 import { UploadSimilarityReview } from '@/components/UploadSimilarityReview';
@@ -446,13 +448,6 @@ function assetPreviewStorageKey(userId: string) {
   return `sd2-asset-preview:${encodeURIComponent(userId)}`;
 }
 
-async function readRememberedPreview(contentKey: string): Promise<ContentSummary> {
-  const response = await fetch(`/api/content-reactions/content?key=${encodeURIComponent(contentKey)}`, { cache: 'no-store' });
-  const data = await response.json();
-  if (!response.ok) throw Object.assign(new Error(data.error || '内容暂不可用'), { status: response.status });
-  return data.content as ContentSummary;
-}
-
 function formatDuration(seconds: number | null) {
   if (!seconds || seconds <= 0) return '';
   const mins = Math.floor(seconds / 60);
@@ -798,6 +793,7 @@ function AssetsPageContent() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [anchorId, setAnchorId] = useState<AssetLibraryItemId | null>(null);
   const [activeItem, setActiveItem] = useState<AssetLibraryItem | null>(null);
+  const [reuseEntryError, setReuseEntryError] = useState('');
   const [mediaPreviewOpen, setMediaPreviewOpen] = useState(false);
   const [restoredPreview, setRestoredPreview] = useState<ContentSummary | null>(null);
   const [previewNextPage, setPreviewNextPage] = useState<number | null>(null);
@@ -864,6 +860,7 @@ function AssetsPageContent() {
   const touchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const assetUploadInputRef = useRef<HTMLInputElement | null>(null);
   const previewRestoreGeneration = useRef(0);
+  const selectionRestoreOwner = useRef<string | null>(null);
   const previewNavigationGeneration = useRef(0);
   const previewPages = useRef(new Map<number, AssetPreviewPage>());
   const previewSequence = useRef<AssetLibraryItem[]>([]);
@@ -921,9 +918,12 @@ function AssetsPageContent() {
 
   const activateAssetPreviewItem = useCallback((item: AssetLibraryItem) => {
     previewRestoreGeneration.current += 1;
+    previewNavigationGeneration.current += 1;
+    selectionRestoreOwner.current = user?.id || null;
     setPreviewNavigationMessage('');
     setPreviewNavigationRetryable(false);
     setRestoredPreview(null);
+    setReuseEntryError('');
     setActiveItem(item);
     if (user?.id) {
       try { localStorage.setItem(assetPreviewStorageKey(user.id), item.id); } catch {}
@@ -952,6 +952,10 @@ function AssetsPageContent() {
   useEffect(() => {
     playback.setModalBlocked(mediaPreviewOpen || Boolean(restoredPreview));
   }, [playback, mediaPreviewOpen, restoredPreview]);
+  useEffect(() => () => {
+    previewRestoreGeneration.current += 1;
+    previewNavigationGeneration.current += 1;
+  }, []);
 
   const clearPreviewSequence = useCallback(() => {
     previewNavigationGeneration.current += 1;
@@ -982,6 +986,7 @@ function AssetsPageContent() {
     playback.stopAll('drawer-close');
     playback.setModalBlocked(false);
     previewRestoreGeneration.current += 1;
+    selectionRestoreOwner.current = user?.id || null;
     clearPreviewSequence();
     setActiveItem(null);
     setMediaPreviewOpen(false);
@@ -1049,6 +1054,7 @@ function AssetsPageContent() {
     playback.stopAll('account');
     playback.setModalBlocked(false);
     previewRestoreGeneration.current += 1;
+    selectionRestoreOwner.current = null;
     clearPreviewSequence();
     setActiveItem(null);
     setMediaPreviewOpen(false);
@@ -1264,33 +1270,17 @@ function AssetsPageContent() {
   }, [user, assetView, scope, requestType, enhanceFilter, showUploadedAssets, status, sort, groupBy, projectId, ownerUserId, keyword, page, pageCapacity, pageScope, restoredPageScope, restoredFiltersOwner, reloadToken]);
 
   useEffect(() => {
-    if (!user?.id || hasExplicitContent || isReactionView) return;
-    let cancelled = false;
-    const generation = previewRestoreGeneration.current;
+    if (!user?.id || hasExplicitContent || isReactionView || loading || showingCachedAssets || activeItem
+      || selectionRestoreOwner.current === user.id) return;
     const key = assetPreviewStorageKey(user.id);
     let savedId: string | null = null;
     try { savedId = localStorage.getItem(key); } catch {}
+    selectionRestoreOwner.current = user.id;
     if (!savedId || savedId.length > 512) return;
-    void readRememberedPreview(savedId).then((content) => {
-      if (cancelled || generation !== previewRestoreGeneration.current || activeItem || !content.previewUrl
-        || !['image', 'video', 'audio'].includes(content.category)) {
-        if (!cancelled && generation === previewRestoreGeneration.current && (!content.previewUrl || !['image', 'video', 'audio'].includes(content.category))) {
-          try { if (localStorage.getItem(key) === savedId) localStorage.removeItem(key); } catch {}
-        }
-        return;
-      }
-      setRestoredPreview(content);
-    }).catch((error) => {
-      if (cancelled || generation !== previewRestoreGeneration.current) return;
-      const status = (error as { status?: number }).status;
-      if ([401, 403, 404].includes(status || 0)) {
-        try { if (localStorage.getItem(key) === savedId) localStorage.removeItem(key); } catch {}
-      } else {
-        setError('上次打开的媒体暂时无法核验，列表仍可正常使用。');
-      }
-    });
-    return () => { cancelled = true; };
-  }, [activeItem, hasExplicitContent, isReactionView, user?.id]);
+    // Old preview IDs are selection hints only. Never fetch/open a temporary media layer on return.
+    const selected = items.find(item => item.id === savedId);
+    if (selected) { setActiveItem(selected); setMediaPreviewOpen(false); }
+  }, [activeItem, hasExplicitContent, isReactionView, user?.id, items, loading, showingCachedAssets]);
 
   useEffect(() => {
     marqueeStateRef.current = marquee;
@@ -1409,8 +1399,13 @@ function AssetsPageContent() {
 
   const currentAssetReturnTo = () => {
     if (typeof window === 'undefined') return '/assets?type=video';
-    return `${window.location.pathname}${window.location.search || ''}`;
+    return taskReuseReturnTo(`${window.location.pathname}${window.location.search || ''}`) || '/assets';
   };
+
+  const activeReuseHref = activeItem?.taskId && !isExternalUser(user) ? taskReuseHref({
+    id: activeItem.taskId, provider: activeItem.provider, generationMode: activeItem.generationMode,
+    projectId: activeItem.project?.id, videoCardId: activeItem.videoCardId,
+  }, currentAssetReturnTo()) : null;
 
   const enhanceEstimatedCost = (item: AssetLibraryItem) => {
     return item.id === enhanceQuoteItem?.id ? enhancePricing.quote?.estimatedCost ?? null : null;
@@ -1903,7 +1898,7 @@ function AssetsPageContent() {
     </dl>
     <div className="asset-detail-actions">
       {withReaction && (activeItem.status === 'succeeded' || activeItem.source !== 'video_task') && <ContentReactions contentKey={activeItem.id} />}
-      {activeItem.taskId && <Link href={`/tasks/${activeItem.taskId}`}>打开任务详情</Link>}
+      {activeItem.taskId && <Link href={taskDetailHref(activeItem.taskId, currentAssetReturnTo())}>打开任务详情</Link>}
       {activeItem.taskId && activeItem.kind === 'video' && isFastPathAssetVideo(activeItem) && !activeItem.stableDownloadReady && activeItem.previewAvailable && (
         <button type="button" onClick={() => void prepareStableDownload(activeItem.taskId as string)} disabled={preparingDownloadTaskId === activeItem.taskId}>
           {preparingDownloadTaskId === activeItem.taskId ? '提交中...' : activeItem.deliveryStage?.key === 'failed' ? '重试稳定下载' : '准备稳定下载'}
@@ -2052,7 +2047,7 @@ function AssetsPageContent() {
       </section>
 
       <ContentLookup />
-      {isReactionView && <ContentCollections key={assetView} action={explicitView === 'likes' ? 'like' : 'favorite'} mediaClassName={assetStyles.collectionMedia} preferPreviewImageThumbnails />}
+      {isReactionView && <ContentCollections key={assetView} action={explicitView === 'likes' ? 'like' : 'favorite'} mediaClassName={assetStyles.collectionMedia} preferPreviewImageThumbnails restorePreviewOnMount={false} />}
       {!isReactionView && <>
       <section className="asset-library-filter-bar">
         {user && canUseCompanyTemplates({ ...user, account_type: user.account_type || '' }) && <StudioBatchHistory key={user.id} userId={user.id} initialId={params.get('imageBatchId') || undefined} />}
@@ -2608,7 +2603,7 @@ function AssetsPageContent() {
       )}
 
       {activeItem && !previewAccountChanged && !mediaPreviewOpen && (
-        <aside ref={detailDrawerRef} className="asset-detail-drawer" aria-label="资产详情">
+        <aside ref={detailDrawerRef} className={`asset-detail-drawer ${assetStyles.detailDrawer}`} aria-label="资产详情">
           <div className="asset-detail-header">
             <div>
               <span>{activeItem.isEnhanceTask ? '超分视频资产' : activeItem.kind === 'video' ? '视频资产' : activeItem.kind === 'audio' ? '音频资产' : '图片资产'}</span>
@@ -2618,6 +2613,7 @@ function AssetsPageContent() {
               <X size={18} />
             </button>
           </div>
+          <div className={assetStyles.detailBody}>
           <div
             className={`asset-detail-preview ${assetStyles.detailPreview}`}
             style={{ aspectRatio: activePreviewAspectRatio }}
@@ -2680,6 +2676,19 @@ function AssetsPageContent() {
           </div>
           {activeItemPrompt}
           {activeItemDetails()}
+          </div>
+          <div className={assetStyles.detailFooter}>
+            {reuseEntryError && <span role="status">{reuseEntryError}</span>}
+            {activeReuseHref ? <button type="button" className="btn btn-primary" onClick={() => {
+              if (!user?.id) return;
+              const href = authorizeTaskReuseHref(activeReuseHref, user.id);
+              if (!href) { setReuseEntryError('复用入口暂时无法准备，当前资产和输入未改动，请重试。'); return; }
+              previewRestoreGeneration.current += 1;
+              previewNavigationGeneration.current += 1;
+              window.location.href = href;
+            }}><RefreshCcw size={16} aria-hidden="true" />复用输入</button> : <span>{isExternalUser(user)
+              ? '当前账号不支持复用生成输入' : '此资产没有可复用的生成输入'}</span>}
+          </div>
         </aside>
       )}
       {activeItem && !previewAccountChanged && mediaPreviewOpen && activePreviewSrc && <MediaPreview
@@ -2697,7 +2706,7 @@ function AssetsPageContent() {
         imageNeighbors={imageNeighbors}
         onPrevious={canMovePreviewPrevious ? () => moveActiveItem(-1) : undefined}
         onNext={canMovePreviewNext ? () => moveActiveItem(1) : undefined}
-        onClose={() => { setMediaPreviewOpen(false); playback.setModalBlocked(Boolean(restoredPreview)); }}
+        onClose={() => { previewRestoreGeneration.current += 1; previewNavigationGeneration.current += 1; setMediaPreviewOpen(false); playback.setModalBlocked(Boolean(restoredPreview)); }}
       />}
       {!activeItem && !previewAccountChanged && restoredPreview && <MediaPreview
         src={restoredPreview.previewUrl as string}
