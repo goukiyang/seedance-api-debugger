@@ -25,6 +25,8 @@ node ops/sd2-release-prepare.mjs prepare /Volumes/Data/Projects/video-api-debugg
 
 本次ADMIN-USAGE联合批已证的四类准入适配须沿用，不重新试停站：价格修订只取上面的policy key；退役HD恢复VM须提供实际`restoreOriginalUsageRole`绑定，不能仅加允许清单；本机prepare完成退出0且preparation/manifest均已存在后才顺序package/window/stage，不并发消费未生成目录；e01的闭合缓存例外只认已核源码、tsx/esbuild/Node及实际编译字节，原inode/owner/mode/时序、锁与进程组排尽检查均保留，不清缓存或用哈希相同代生命周期结束。四类失败及范围变更后的旧成功main证据保留，不能靠新run号清零；用户扩范围后需新main/相容guard整对完整构建，不复用旧业务产物。
 
+维护前瞬时连接等只读准入拒绝，不能重开号来重置或手补成功回执。新控制把完整原生用例的原退出状态/日志SHA/manifest与控制源码锁存为同run `native-control-preflight/batch.json`；只有完整且未变的成功批可复用，缺失/部分/失败或任何漂移继续拒绝。每次后续仅在新的受限只读子目录重新捕获全部真实配置、进程、连接为0、同步请求为0、原证书/上传与HD准入，失败另留原时点记录，成功才首次写最终receipt。原用例时间/日志和已完成receipt不改，不把只读工程续查当维护批准；真正切换仍要另取五分钟fresh准入并自然排尽旧writer。
+
 统一离线工程检查：`node ops/sd2-release-prepare.test.mjs /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-19-upload-unknown-recovery`。仅检查工具、原证与生成接线，不运行任何服务器动作或功能验收。新入口首次真实发布效果须在下一次获授权发布时记录；不能把本轮离线检查说成又一次上线成功。
 
 ### 使用归属增量表（ADMIN-USAGE）
