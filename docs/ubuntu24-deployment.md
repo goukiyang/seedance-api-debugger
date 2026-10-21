@@ -8,13 +8,14 @@
 
 ```bash
 node ops/sd2-release-prepare.mjs check-template /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-19-upload-unknown-recovery
+ssh -o BatchMode=yes root@42.193.221.253 'node --input-type=module' < ops/sd2-release-live-capture.mjs > /ABSOLUTE/PRIVATE/live.json 2> /ABSOLUTE/PRIVATE/live-proof.json
 node ops/sd2-release-prepare.mjs prepare /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-19-upload-unknown-recovery /ABSOLUTE/PRIVATE/plan.json
 ```
 
 本机准备只读Git与原证，并独占创建私有新目录；不连服务器、不登记窗口、不上传、不停站。输入为 `sd2-release-plan.v1`，字段仅 `schema/repoRoot/outputRoot/liveCapture/contract/reuseBuilds`：
 
 - `contract` 使用原控制 `MV_DIRECT` 的完整字段，按本次已审源码填写，不能自动套用旧批准范围。`sourceBase`只管Git祖先；`baselineSource/version/build/starts`只管当前运行；原证书身份留在未改动的历史校验模块。main/guard必须不同且均以真实完整SHA、精确变更集合、真实版本及固定ref锁定。
-- `liveCapture` 为五分钟内只读实际捕获的 `observedAt/source/version/build/starts/pricingRevision/allowedSha256`，六角色启动身份必须齐全并与contract相等。本机格式校验不证明服务器仍未变化，stage及切换前原控制必须重新核对。合法guard来源不能误填退役清单，但它的旧PID和整个进程组仍须自然排尽。
+- `liveCapture` 为五分钟内只读实际捕获的 `observedAt/source/version/build/starts/pricingRevision/allowedSha256`，六角色启动身份必须齐全并与contract相等。`pricingRevision`明确取`pricing_policy_v1.revision`，不是`pricing_authoring_v1.revision`；薄只读入口`sd2-release-live-capture.mjs`沿该字段及真实units读取，并拒绝角色同源的未受管进程，不读Environment/env正文。本机格式校验不证明服务器仍未变化，stage及切换前原控制必须重新核对。合法guard来源不能误填退役清单，但它的旧PID和整个进程组仍须自然排尽。
 - `reuseBuilds: null` 表示新源码完整构建；只有同main/guard整对已成功时才传 `{sourceRun,directory}` 指向两份原 `*-immutable-success.json`。入口生成完整reuse schema和两份原证SHA。服务器仍必须核源、依赖、环境、Node、工程输入、compiled/check字节及metadata不变，另出fresh准入；不改原构建时间、不混新旧pair，不因复用失败自动重编译掩盖漂移。
 - `outputRoot` 必须是私有资料目录下不存在的新目录；失败保留原run，不能新建run来清零累计失败。输出 `run.mjs`、`control/` 和 `preparation.json`。其 `localPreparationOnly` 不是发布许可或功能验收。
 

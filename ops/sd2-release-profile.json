@@ -7,12 +7,12 @@
   "controllerSetSha256": "84d3bac3d6846f47eb998573b9130b1b6cc95af696a3468a72ff02a25476bb09",
   "wrapperSha256": "0c86b553e41c42cb2a539a4a07a3f46669d71f7c1c4d0b2e5b12abb3a02d3907",
   "promotion": {
-    "template": "release-admin-usage-r01",
-    "wrapper": "run-admin-usage-r01.mjs",
+    "template": "release-admin-usage-r02",
+    "wrapper": "run-admin-usage-r02.mjs",
     "controllerCount": 39,
-    "controllerSetSha256": "8d88bb0fb0298181690b88d3d2c60e138a6c38ebd81c737d6a7de7f9e481f9fb",
-    "wrapperSha256": "6212fe72f5126687f961472d60a05b2f2c460d354072ffae6ceef0cfdbd3ac64",
-    "changed": ["common.mjs", "control-preflight.mjs", "switch.mjs"],
+    "controllerSetSha256": "3b2a64db45aaca1b5378d0fe9c3342d737c323166d12a0dcd46e76ff0f159547",
+    "wrapperSha256": "5c878b9d2dd5753149bb81057fa1725fbbf4b9f91565c412fabe7a57fc638fad",
+    "changed": ["common.mjs", "control-preflight.mjs", "retired-hd-cache-engineering.mjs", "switch.mjs"],
     "added": ["usage-role-control.mjs", "usage-role-engineering.mjs", "usage-role-start.mjs"]
   },
   "evidence": {
