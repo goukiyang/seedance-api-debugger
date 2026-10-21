@@ -2,6 +2,8 @@
 
 ## RESTORE-R01/R02/R03/R04 模板复用与保存冲突（2026-10-21）
 
+r07原证：[构建失败日志](2026-10-21-template-restore-fix/implementation/main-build-failure-r07/)、[全部类型诊断](2026-10-21-template-restore-fix/implementation/full-types-r07.json)、[未切换状态](2026-10-21-template-restore-fix/implementation/native-refusal-state-r07.json)、[正常关闭](2026-10-21-template-restore-fix/implementation/failed-r07-command.json)。原生15及npm17通过，完整类型诊断仅新增fixture的MapIterator展开TS2802；将改Array.from保持原target，不改业务或关闭检查。正式失败累计7，仍未发布或功能验收。
+
 r06正式15组、完整main17项失败报告及无切换证据见[构建原证](2026-10-21-template-restore-fix/implementation/main-build-failure-r06/)、[只读现场](2026-10-21-template-restore-fix/implementation/native-refusal-state-r06.json)、[正常关闭](2026-10-21-template-restore-fix/implementation/failed-r06-command.json)。main081f0d36/guarde0ab74f5同批仅补真实禁止调用计数，均已推送；r07重新完整构建，仍未部署，不冒功能通过。
 
 r06[隔离身份](2026-10-21-template-restore-fix/implementation/isolation-request-r06.json)与[完整结果](2026-10-21-template-restore-fix/implementation/template-restore-r06-68d896ea-4228-4b61-b76c-fe42370579a4/diagnostic-result.json)：15/15、生命周期25、四缓存引用184项通过，实际HD只读准入稳定无冲突，原六服务/价格/allowed未变，全部日志SHA验证。49语法/25准备器见local-control-verification-r06.json；诊断不具正式发布准入效力，未构建/部署/功能验收。

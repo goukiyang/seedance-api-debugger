@@ -4,6 +4,8 @@
 
 ## RESTORE-D01 模板复用失效调查（2026-10-21）
 
+r07构建复盘（19:01Z）：正式15组、25生命周期、184缓存及全部17项npm检查通过，Next进入类型检查后因新增fixture的MapIterator展开不符合既有target拒绝。没有成功构建或切换，原六服务/价格/allowed已核保持，failed-r07已关闭占用；原日志与回执保留main-build-failure-r07。累计正式失败7，窗口拒绝1、隔离目录拒绝1及本机编译器平台不符另记，不清零。先在同一失败候选用原tsconfig收齐全部类型诊断，整批修正后统一复查，不改target或跳过类型检查；新stage暂不开始。
+
 r07准备（2026-10-21）：r06完整构建17项收齐，仅复用检查报告缺forbiddenCalls被总门拒绝；本体20项通过。原六服务、价格、allowed保持，无维护/切换，原占用已关闭。仅补真实禁止调用计数，main081f0d36147c288832f189a136338e03934edaae、guarde0ab74f5c3fc3f5328b8f1cdecbbb9396e8b3eac均已推送；同v0.101.1，两完整构建重做。保留6次正式失败、1次窗口间隔拒绝和1次诊断目录拒绝，不抹历史、不降低门。
 
 r06整批证据（18:33Z）：49语法＋25准备器通过，隔离15/15通过，生命周期25保持通过，四个真实缓存参考共184拒绝/接受项通过；同包现网只读HD核对canEnterControlledDrain=true、unstable=false、issues空，原六服务/价格/allowed未变。只补三指纹并重核五文件来源，不删旧缓存或改生产记录。正式根isolation-request-r06.json指向完整原证，仍admissibleForRelease=false；继续第六正式run的鲜准入/两完整构建/保护切换，旧5正式拒绝＋1诊断拒绝保留。
