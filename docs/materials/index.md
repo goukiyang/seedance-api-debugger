@@ -2,6 +2,12 @@
 
 ## RESTORE-R01/R02/R03/R04 模板复用与保存冲突（2026-10-21）
 
+r05b[隔离身份与目录](2026-10-21-template-restore-fix/implementation/isolation-request-r05b.json)及[整批结果](2026-10-21-template-restore-fix/implementation/template-restore-r05b-5c14a06b-df5c-4320-a1ef-fc84aa3b98bf/diagnostic-result.json)：15/15实际通过、生命周期25，通过collection-verification逐项日志SHA；原六服务/价格/allowed及失败历史未变。此为不具发布准入效力的诊断，正式fresh准备/控制/两完整构建另行执行。
+
+r05最终整批[交接矩阵](2026-10-21-template-restore-fix/implementation/fresh-pair-contract-handoff-r05.txt)、[49语法/25准备器原证](2026-10-21-template-restore-fix/implementation/local-control-verification-r05.json)、[首隔离身份与目录](2026-10-21-template-restore-fix/implementation/isolation-request-r05.json)、[目录修正说明](2026-10-21-template-restore-fix/implementation/diagnostic-path-correction-r05b.json)。生命周期25实际通过，首隔离14/15，唯一固定目录前缀不符；15日志SHA已核、原六服务/价格/allowed不变，45生产控制未改。r05b仅移到独立release-staging/diagnostics/UUID并整批重跑，不创建正式窗口/manifest/预约，不把隔离PASS当准入。正式失败4＋诊断失败1保留；结果与产品效果分开，R04仍父线程部署后独占。
+
+第四轮r04 c3e4da1d：[全15日志/批次](2026-10-21-template-restore-fix/implementation/native-control-r04-logs/)、[拒绝后状态](2026-10-21-template-restore-fix/implementation/native-refusal-state-r04.json)、[原关占用回执](2026-10-21-template-restore-fix/implementation/failed-r04-command.json)，日志SHA逐项核对、原六服务/价格/allowed未变，未构建切换。后继[整链限定实施包](2026-10-21-template-restore-fix/implementation/fresh-pair-contract-r05.prompt)来源为主管执行纠偏，非用户新增产品/收费要求；实际已转交同Galileo。[隔离15组收集器](2026-10-21-template-restore-fix/implementation/run-isolated-native-r05.mjs)仅编写未运行，结果不具正式准入效力；prepare/adopt/build/verify/arm/switch/proof字段、文件与权限矩阵在固定todo。旧资料与失败保留，累计4，待全批交回统一检查。
+
 第三轮run ce9341bc原证：[15组日志/批次](2026-10-21-template-restore-fix/implementation/native-control-r03-logs/)、[只读拒绝状态](2026-10-21-template-restore-fix/implementation/native-refusal-state-r03.json)、[failed收口](2026-10-21-template-restore-fix/implementation/failed-r03-command.json)。14过，生命周期正反场景串用导致失败；全部日志SHA核对，原六启动/价格/allowed不变，无candidate或维护切换。第四次修改前的整链、开源实际实现及A/B/C比较写入固定todo，选独立负例fixture；新不可变r04只改模拟场景，45生产模块相同，待统一验证，不冒发布通过。历史失败完整保留，收费R04父线程独占、仍待部署。
 
 来源为本轮用户明确修复授权与既有RESTORE-D01调查；关键词：恢复设置、风格组历史版本、补充描述、生成后保留、草稿、保存版本冲突、相容回退。正式范围及持续状态见[固定todo RESTORE](../../tasks/todo.md#restore-d01-模板复用失效调查2026-10-21)；[私有工程及发布原证目录](2026-10-21-template-restore-fix/implementation/)仅正式根归档，尚在实施，非验收/发布完成证明。本轮未收到新媒体附件；既有诊断数据只留脱敏字段存在/长度/计数，不保存提示词正文、媒体或凭据。本地新材料不替代旧发布原证，未逐项校验可再生成辅助文件；关键运行/回退证据将在生成后核对。

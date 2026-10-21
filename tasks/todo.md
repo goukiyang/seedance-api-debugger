@@ -4,6 +4,26 @@
 
 ## RESTORE-D01 模板复用失效调查（2026-10-21）
 
+r05b隔离重跑完成（18:21Z）：15/15实际通过，生命周期25完整通过，全部日志SHA及原六服务/价格/allowed未变已核。原诊断失败和四次正式失败保留，无第五正式stage、构建或切换。将沿固定prepare及原控制器重新做正式鲜准入和完整main/guard构建；隔离结果admissibleForRelease=false，不代替任何正式门。业务main356b5b07/guard554fcee5仍冻结，R01/R02实效未验、R04仍父线程部署后1张。
+
+r05整批交付与隔离首轮（18:19Z）：真实producer/consumer矩阵已核，45生产模块字节不变；49文件语法及25项准备器检查通过。生命周期原20＋5共25场景在Linux全部通过，含真正第二fresh proof。隔离整15组14过，唯一cutover-safety因lead诊断目录不符合原release-staging前缀拒绝；该原脚本后续nginx捕获还要求UUID目录名，已一次核清。不是生命周期再次失败，不删除原证。新r05b只改诊断目录为release-staging/diagnostics/UUID，无manifest/window/预约或正式stage调用，生产控制及参数不改，整15组重跑中。正式失败累计4，诊断失败另记1；原六服务/价格/allowed未变，无构建/维护/业务写入。资料与原SHA见implementation/fresh-pair-contract-handoff-r05.txt、local-control-verification-r05.json、isolation-request-r05.json、diagnostic-path-correction-r05b.json。所有诊断均不具发布准入效力；正式fresh stage及完整两构建仍待完成。
+
+第四次拒绝与主管执行纠偏：r04 c3e4da1d整15组14过；重复switch污染已排除，第二fresh-pair到真实candidateEntry时因手写build回执缺gateReceipt被拒绝。全部日志SHA已核，原六启动/价格/allowed不变，无候选准备/构建/adopt/维护/切换；failed-r04正常关占用，累计4不清零。停止新增stage。主管要求一次核对整个后半链，不是用户新增产品需求或费用授权；用户R01/R02/R04目标不变。
+
+已实际恢复同Galileo，完整[限定返修包](../docs/materials/2026-10-21-template-restore-fix/implementation/fresh-pair-contract-r05.prompt)只写新r05 fixture/wrapper/profile，45生产模块保持。lead逐项读实际candidate.mjs、switch、pricing-start-pair、guard-recovery、deployed-usage及role控制，确认当前fresh prepare/build回执过简、verify仅读JSON、second proof未调用三处同因缺口；要求复用真实输出构造及消费者、文件权限和摘要绑定，不再补一字段即试。范围映射如下，最终实际修正与验证以交回矩阵/原证为准，不把源码核对冒运行通过：
+
+| 后半链 | 一次核对的合同与落点 |
+|---|---|
+| prepare | source schema/完整files+fileDetails/伴随文件、真实size/mode/hash；prepared schema/label/来源/manifest与source SHA、运行软链、隔离输入和探针；stage根权属与普通文件 |
+| adopt | 实际deployed只读沿用非空归属、迁移004/发布002独立原证与时间、候选迁移程序/SQL同字节、uid1004/mode644/nlink1、数据库身份不回退 |
+| buildReceipt | 复用candidate实际生产输出表达式或构造器，不手抄子集；gateReceipt、source/prepared/compiled/log摘要、两探针与真实时间合同；模拟编译不冒真实构建 |
+| verify | 接实际verifyCandidate及适用纯消费者；gate文件本人目录下无软链/单链接/uid1004/0600/非空JSON；日志路径/hash、compiled/build、source复核与30分钟门；原生观察单独明示 |
+| arm | 实际verifyBoth/candidateInput/buildPair/armGuardRecovery；全源与编译树、运行软链、原guard及immutable、manifest/approval/receipt全绑定，5分钟准入不改 |
+| switch | 实际停止/隔离/发布/启动顺序与role旧拥有者控制；旧PID全退才替换、复用首pair与fresh后pair准备身份分开；模拟服务不可回落到真实命令 |
+| proof | 实际second proof输出再核run/manifest/pair/source/build、三writer和role、startIntent、DB/价格/只读与历史原字节；不手造final success |
+
+路线仍为fixture局部修正，无新发布引擎/生产门修改。lead另写非准入隔离收集器：复制r04冻结控制，45生产文件按原SHA相等，只换新fixture；从原control-preflight的AST取同15脚本与参数，独立/data诊断目录及TMPDIR，前后鲜核原六服务/价格/allowed，保原stage/batch未变。全部编写完成后才统一执行；结果明确admissibleForRelease=false，不能替代正式新run的鲜准入。目前只编写，未运行隔离15或第五stage。
+
 三次失败后的整链复查（2026-10-21，第四次修改前完成）：r01旧静态源码表拒绝合法9c39；r02混同历史迁移与原build；r03正常首发布后先执行重复switch反例，真实catch保留switch-failure，随后作为正例导入next，history135行正确拒绝。三次run/时间/日志保留；r03整15组14过、19场景未完成。native-refusal-state-r03核原六启动/价格revision/allowed不变，无candidate/adopt/build/maintenance/switch，failed正常收口。前条“新旧构建类型衔接”的初判已纠正。
 
 已读完整fixture及相关producer/consumer，复核build001/migration004/publication002/next003身份、实际switch/proof、非空schema只读沿用、role归属/自然排尽、fresh/reuse证据、正常guard回退与两个故障恢复。选项A把反例挪到末尾仍留顺序耦合，不选；B独立负例fixture且导出成功proof前检查无失败痕迹，选用；C换框架或真实systemd沙箱成本/范围更大，当前无必要。禁止删除失败文件或降history门。
@@ -18,7 +38,7 @@
 |---|---|---|---|
 | R01 | 修复设置复用与生成后保留 | 风格组、补充描述实际用于本次生成，生成后及刷新可恢复 | 进行中：前后端已集成，历史来源/改选版本/描述含空值及统一报价创建已接线，新增离线检查已入构建门；未构建或功能验收 |
 | R02 | 修复版本冲突 | 查明触发原因，正确处理版本变化且不覆盖草稿 | 进行中：工作区版本与内容版本分离、差异合并和未知原保存查询已写；统一检查待全批齐备 |
-| R03 | 保护发布 | 必要构建及部署检查完成，提交推送并上线，交用户手验 | 进行中：三次原失败保留，整链/开源复查后r04独立负例已写，45生产模块不变，49语法/25准备项通过；服务器第四次待执行，未构建部署 |
+| R03 | 保护发布 | 必要构建及部署检查完成，提交推送并上线，交用户手验 | 进行中：累计4次发布检查拒绝均保原证；停止新stage，r05一次补齐fresh后半链合同，随后独立15组整批查；未构建部署 |
 | R04 | 收费实测复用闭环 | 新版实际生成1张，核对风格/补充描述真正用于生成且完成后/刷新保留，记录真实费用与结果 | 待新版部署：用户最新明确同意付费测试；仅父线程独占执行，lead及workers不发收费请求 |
 
 2026-10-21追加收费实测授权：R01–R03保留，由当前lead继续实现和保护发布。R04由父线程在新版保护部署成功后，通过正常Chrome/当前账号及现有模型，先核实真实报价，只生成1张；未知结果仅核对同一原请求，不换号重发。父线程可先准备浏览器会话与只读测试对象，不在旧版生成或操作共享保存。当前lead与workers均不发收费请求，不扩大业务、费用或权限边界。发布交付须提供精确URL、source、BUILD及可验状态；R04保持待执行/进行中直至实际证据齐全，不以旧用户手验说明终结新增实测。
