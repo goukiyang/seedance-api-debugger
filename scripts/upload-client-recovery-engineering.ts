@@ -324,13 +324,13 @@ visit(pickerAst);
 assert.ok(uploadArrow && directoryEffect, 'Actual picker upload and directory effect must be extractable');
 const pickerHelpers = evaluate(declarations(pickerSource, ['reconcileUploadFailures', 'removeUploadFailure']), {}, {}, 'picker-helpers.engineering.ts');
 
-function pickerHarness(onUploadFile: (file: File) => Promise<string | { id?: string }>) {
+function pickerHarness(onUploadFile: (file: File) => Promise<string | { id?: string }>, sessionReady = true) {
   const state = { selected: [] as Array<{ identity: string }>, failed: [] as any[], error: '', directoryError: 'old directory error', notice: '', directoryNotice: '', busy: false, epoch: 0, label: '' };
   const locked = { current: false }, session = { current: 1 }, active = { current: true };
   const apply = <T>(current: T, value: T | ((previous: T) => T)) => typeof value === 'function' ? (value as (previous: T) => T)(current) : value;
   const uploadCalls = new Map<string, number>();
   const module = evaluate(`export const upload = ${uploadArrow!.getText(pickerAst)};\nexport const effect = ${directoryEffect!.getText(pickerAst)};`, {
-    locked, session, active,
+    locked, session, active, sessionReady,
     types: ['image'], labels: { image: '图片' }, selected: [], target: 'workspace', typesKey: 'image', confirmLabel: '添加到参考区',
     uniqueUploadFiles: async (files: File[]) => ({ files, duplicates: 0 }), canSelect: () => '', existing: () => false,
     failedUploadIds: { current: new WeakMap<File, string>() }, crypto: { randomUUID: crypto.randomUUID },
@@ -354,6 +354,10 @@ function pickerHarness(onUploadFile: (file: File) => Promise<string | { id?: str
 
 const okFile = new File([Buffer.from('ok')], 'ok.png', { type: 'image/png' });
 const pendingFile = new File([Buffer.from('pending')], 'pending.png', { type: 'image/png' });
+const coldPicker = pickerHarness(async () => { throw Error('Unconfirmed session cannot upload'); }, false);
+await coldPicker.module.upload([okFile]); coldPicker.module.effect();
+assert.equal(coldPicker.uploadCalls.size, 0);
+assert.equal(coldPicker.state.directoryError, 'old directory error');
 const picker = pickerHarness(async (file) => {
   if (file === okFile) return { id: 'asset-ok' };
   throw new unknown.module.UploadFileError('原上传结果待确认', { code: 'RAW_UPLOAD_RESULT_UNKNOWN', causeCode: 'UPLOAD_PRIVATE_DIRECTORY_INVALID', stage: 'raw-writing', recovery: 'query' });

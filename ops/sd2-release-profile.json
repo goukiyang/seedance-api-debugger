@@ -7,12 +7,12 @@
   "controllerSetSha256": "84d3bac3d6846f47eb998573b9130b1b6cc95af696a3468a72ff02a25476bb09",
   "wrapperSha256": "0c86b553e41c42cb2a539a4a07a3f46669d71f7c1c4d0b2e5b12abb3a02d3907",
   "promotion": {
-    "template": "release-libtv-template-r04",
-    "wrapper": "run-libtv-template-r04.mjs",
+    "template": "release-libtv-template-r05",
+    "wrapper": "run-libtv-template-r05.mjs",
     "controllerCount": 49,
-    "controllerSetSha256": "f4bffeca3427a8e34fbd0c4a30ff3fbbbb56ac978a510b4ff636db9d77537e3a",
-    "wrapperSha256": "6bf6a9172785471f1dfea37ef13ab421723f1ab68853730d97d2522106f5efa6",
-    "changed": ["candidate-reuse-engineering.mjs", "candidate-reuse.mjs", "common.mjs", "control-preflight.mjs", "cutover-driver.mjs", "cutover-safety.mjs", "guard-recovery.mjs", "hd-closed-cache-engineering.mjs", "hd-storage-preflight.mjs", "legacy-maintenance.mjs", "release-contract.mjs", "release-protection-engineering.mjs", "release.mjs", "retired-hd-cache-engineering.mjs", "switch.mjs"],
+    "controllerSetSha256": "44e4899de4e016b2f4d02a22733b476f2a3a69b4964ef9b682d69bdd0cd686d1",
+    "wrapperSha256": "c4e957c06e4565d059494fc90807d7276f4c03d53d05682e33e8af2cd6290aca",
+    "changed": ["candidate-inputs.mjs", "candidate-reuse-engineering.mjs", "candidate-reuse.mjs", "common.mjs", "control-preflight.mjs", "cutover-driver.mjs", "cutover-safety.mjs", "guard-recovery.mjs", "hd-closed-cache-engineering.mjs", "hd-storage-preflight.mjs", "legacy-maintenance.mjs", "release-contract.mjs", "release-protection-engineering.mjs", "release.mjs", "retired-hd-cache-engineering.mjs", "switch.mjs"],
     "added": ["candidate-lifecycle-engineering.mjs", "canvas-batch-schema-contract.mjs", "canvas-batch-schema-engineering.mjs", "canvas-batch-schema.mjs", "deployed-usage-schema-engineering.mjs", "deployed-usage-schema.mjs", "normal-continuation-engineering.mjs", "normal-continuation.mjs", "preflight-resume-engineering.mjs", "runtime-source-engineering.mjs", "usage-role-control.mjs", "usage-role-engineering.mjs", "usage-role-start.mjs"]
   },
   "evidence": {

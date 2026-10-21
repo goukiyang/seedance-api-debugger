@@ -41,7 +41,7 @@ r08承接r07的首次运行别名准备，并完整核对首次复用生命周�
 
 ### 视频批次增量表（LibTV）
 
-首次启用视频2/4批次使用profile锁定的`release-libtv-template-r04`，保留原r16/r06、LibTV r01–r03及历史run。`contract.canvasVideoBatchSchema`分别绑定原Prisma、新Prisma、增量SQL、迁移脚本和schema合同SHA；只允许精确插入两个模型及两个表/九个索引，原声明与UsageAttribution原证保持。不允许复用旧业务pair，main/guard各完整构建，guard编译时关闭新批次创建，保读、停止、原号回执与旧writer能力门。
+首次启用视频2/4批次使用profile锁定的`release-libtv-template-r05`，保留原r16/r06、LibTV r01–r04及历史run。`contract.canvasVideoBatchSchema`分别绑定原Prisma、新Prisma、增量SQL、迁移脚本和schema合同SHA；只允许精确插入两个模型及两个表/九个索引，原声明与UsageAttribution原证保持。不允许复用旧业务pair，main/guard各完整构建，guard编译时关闭新批次创建，保读、停止、原号回执与旧writer能力门。
 
 新迁移必须在原Web/image/HD/role自然排尽、固定整对许可已发布后、任何新writer启动前执行。`ops/sd2-canvas-video-batches-migrate.py`核真实/data、空间、同点一致备份与完整性、原schema/业务行，再仅加表索引；新启动及固定guard恢复均核同run回执和备份证明，不回业务数据。缺失/半成品不能造回执补过门。本入口只实现首次增量及同run恢复；后续发布须显式继承已成功批次迁移的绑定证据，不能仍把新表当不存在，也不能移除schema保护来通过。当前该配套正在工程检查，未凭文档宣称已迁移或上线。
 
@@ -50,6 +50,8 @@ r08承接r07的首次运行别名准备，并完整核对首次复用生命周�
 隔离VM装载模块统一沿现有TypeScript语法解析器识别真实import/export节点，不用行首正则剥离；模块可能包含嵌入Python的`import`文字，错误剥离会破坏真实探针。r03只修此隔离装载，不改迁移函数、生产控制或任何原始回执。
 
 r04另登记现网e00已完成高清任务实际观察的三份缓存精确字节；源码、编译器及配置SHA与已核验e01相同，仅路径归一后字节相同，原只读证明见LibTV资料`hd-cache-equivalence-r03b.stdout`。保留旧白名单且逐次重核来源、终态、原进程组消失、原时间/权限与读取稳定性；不删除缓存、不修改原任务或放宽未知缓存。新增该原件的隔离正反例检查，原r03b十六组通过不冒充正式准入。
+
+r05在候选隔离空库的既有`db push`阶段生成当前Prisma客户端，不再沿用现网node_modules中的旧模型。仍只对候选私有空库执行，不是生产迁移；用同一Prisma格式器格式化私有源码副本，再逐字核对生成schema，避免把格式化差异冒源码差异。原源码不改，正式DDL仍只在自然排空后由绑定迁移执行。r03的三个prebuild失败完整保留：两个前端隔离消费者的登录/数量/新批次只读接线未同步，另一个实际新表delegate缺失由候选生成时序造成；不删除断言或放宽业务门。
 
 ### 使用归属增量表（ADMIN-USAGE）
 

@@ -22,7 +22,7 @@ function fixtureChecks() {
 }
 
 type CanvasSettings = {
-  provider: string; model: string; duration: number; resolution: string; ratio: string; draft?: boolean;
+  provider: string; model: string; duration: number; resolution: string; ratio: string; draft?: boolean; count?: number;
   maxEstimatedCost?: number; pricingRevision?: string | null; pricingQuoteToken?: string;
 };
 type CanvasPayload = { kind: string; nodeId: string; requestId: string; mode: string; prompt: string; settings: CanvasSettings };
@@ -52,7 +52,7 @@ type CanvasConsumers = {
 
 function loadUmd<T>(file: string): T {
   const filename = resolve(file), module = { exports: {} };
-  vm.runInNewContext(readFileSync(filename, 'utf8'), { module, URL }, { filename, timeout: 1000 });
+  vm.runInNewContext(readFileSync(filename, 'utf8'), { module, URL, URLSearchParams }, { filename, timeout: 1000 });
   return module.exports as T;
 }
 
@@ -60,7 +60,8 @@ function loadCanvasConsumers(dependencies: Record<string, unknown>, assert: Retu
   const filename = resolve('public/tools/ultimate-canvas/app.js');
   const source = ts.createSourceFile(filename, readFileSync(filename, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   const names = ['installGenerationAdapter', 'videoGenerationRequestInput', 'videoEstimateSignature', 'scheduleVideoEstimate',
-    'currentGenerationContext', 'hasCurrentGenerationSubmission', 'submitNodeGeneration', 'imageChannelIssueForNode', 'canvasImageQuotePriceText'];
+    'currentGenerationContext', 'hasCurrentGenerationSubmission', 'submitNodeGeneration', 'imageChannelIssueForNode', 'canvasImageQuotePriceText',
+    'canvasVideoBatchScope', 'canvasVideoBatchCurrent', 'canvasVideoBatchInputSignature', 'readCanvasVideoBatches'];
   const functions: ts.FunctionDeclaration[] = [];
   const visit = (node: ts.Node) => {
     if (ts.isFunctionDeclaration(node) && node.name && names.includes(node.name.text)) functions.push(node);
@@ -79,7 +80,7 @@ async function canvasConsumerAssertions(assert: ReturnType<typeof fixtureChecks>
   const workflow = loadUmd<CanvasWorkflow>('public/tools/ultimate-canvas/generation-node-workflow.js');
   const interactions = loadUmd<{ createGenerationSubmissionTracker(): unknown }>('public/tools/ultimate-canvas/generation-node-interactions.js');
   const settings: CanvasSettings = { provider: 'seedance', model: 'dreamina-seedance-2-5-260628', duration: 5,
-    resolution: '720p', ratio: '16:9', draft: true };
+    resolution: '720p', ratio: '16:9', draft: true, count: 1 };
   const quote = { estimatedCost: 0.5, pricing_revision: 'canvas-revision', pricing_quote_token: 'canvas-token' };
   const input: CanvasInput = { projectId: 'project-a', cardId: 'card-a', documentId: 'document-a', nodeId: 'video-a',
     requestId: 'original-request', mode: 'text-to-video', prompt: 'Original prompt',
@@ -105,6 +106,7 @@ async function canvasConsumerAssertions(assert: ReturnType<typeof fixtureChecks>
   const node: CanvasNode = { id: input.nodeId, type: 'video', data: { videoSettings: { ...settings }, referenceVideoUrls: input.referenceVideoUrls.slice() } };
   const runtime = { bootstrap: { user: { id: 'actor-a' }, capabilities: {} }, contextEpoch: 1,
     selectedProjectId: input.projectId, selectedVideoCardId: input.cardId, selectedVideoBranchId: '', documentId: input.documentId,
+    documentLoaded: true, documentRestoring: false,
     videoEstimates: new Map<string, VideoEstimate>(), unsentVideoRequests: new Map<string, CanvasSubmission>(),
     pendingGenerationSubmissions: interactions.createGenerationSubmissionTracker() };
   const timers = new Map<number, () => Promise<void>>(); let nextTimer = 0, adapter: CanvasAdapter | undefined;
@@ -113,6 +115,21 @@ async function canvasConsumerAssertions(assert: ReturnType<typeof fixtureChecks>
   let confirm: () => Promise<boolean> = async () => { confirmations++; return true; };
   let flush: () => Promise<boolean> = async () => true;
   const notices: string[] = [], events: string[] = [];
+  const batchStorage = new Map<string, string>(); let batchReads = 0;
+  type BatchScope = { userId: string; documentId: string; nodeId: string; epoch: number };
+  const batches = loadUmd<{ create(options: Record<string, unknown>): unknown }>('public/tools/ultimate-canvas/video-batches.js');
+  const videoBatchController = batches.create({
+    storage: { getItem: (key: string) => batchStorage.get(key) ?? null, setItem: (key: string, value: string) => batchStorage.set(key, value) },
+    isCurrent: (scope: BatchScope) => scope.userId === runtime.bootstrap.user.id && scope.documentId === runtime.documentId && scope.epoch === runtime.contextEpoch,
+    request: async (url: string, options: { method?: string }) => {
+      assert.equal(options.method, undefined, 'Single-video precheck only queries existing batches');
+      const target = new URL(url, 'https://fixture.invalid');
+      assert.equal(target.pathname, '/api/tools/ultimate-canvas/video-batches');
+      assert.equal(target.searchParams.get('document_id'), runtime.documentId);
+      assert.equal(target.searchParams.get('node_id'), node.id); batchReads++;
+      return { batches: [], next_cursor: null };
+    },
+  });
   const imageSettings = { model: 'gpt-image-2', quality: 'auto', resolution: '2K', requestedRatio: '1:1', count: 1 };
   const model = { ready: true, billingMode: 'fixed', fixedPoints: null, pricingBySpecification: true,
     qualities: ['auto'], resolutions: ['2K'], ratios: ['1:1'], maxReferences: 9 };
@@ -126,6 +143,8 @@ async function canvasConsumerAssertions(assert: ReturnType<typeof fixtureChecks>
   };
   const dependencies = {
     window, canvasRuntime: runtime, engine: { nodes: new Map([[node.id, node]]) }, AbortController, structuredClone,
+    videoBatchController, videoBatchReads: new Map(),
+    collectGenerationPayload: () => ({ kind: 'video', ...input, settings: { ...node.data.videoSettings } }),
     requestJson: (url: string, options: { payload?: Record<string, unknown>; headers?: Record<string, string> }) => request(url, options),
     requestCanvasConfirmation: () => confirm(), flushCanvasSave: () => flush(),
     canvasWorkspaceKey: () => 'fixture-workspace', promptWithConnectedText: (payload: CanvasPayload) => payload.prompt || '',
@@ -211,6 +230,7 @@ async function canvasConsumerAssertions(assert: ReturnType<typeof fixtureChecks>
   confirm = async () => { confirmations++; runtime.bootstrap.user.id = 'actor-b'; return true; };
   await consumers.submitNodeGeneration({}, {}, { ...payload, requestId: 'new-request', settings: { ...settings } });
   assert.equal(confirmations, 1); assert.equal(creates, 1, 'A changed actor after confirmation cannot send the quote');
+  assert.ok(batchReads >= 3, 'Fresh single-video submissions query actual batch controller state before pricing');
   runtime.bootstrap.user.id = 'actor-a';
 
   const image = { id: 'image-a', type: 'image' };
