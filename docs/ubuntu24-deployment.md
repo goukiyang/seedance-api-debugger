@@ -29,6 +29,8 @@ node ops/sd2-release-prepare.mjs prepare /Volumes/Data/Projects/video-api-debugg
 
 整对成功构建重新取鲜准入时，包装控制若已经采用`sourceBase`且字节完全未变，属于原已审输入，不必再次套用旧`BASELINE_SOURCE`到`sourceBase`的升级差异。r05仅补完全相等的幂等检查；不相等仍只允许原来精确的一处祖先判断替换，运行来源、完整变更集合、配置及其他控制漂移继续拒绝。原构建与封存时间不改，新run沿同一失败链记录，不把客户端SSH清理退出255冒为构建失败。
 
+r06正常续接仅用于维护前零副作用拒绝：新run的`contract.normalContinuation`锁定前次manifest/before/批准/原错误/lineage及原迁移回执、备份证明SHA，重新鲜核原六角色、配置/原价格和全部数据保护；任何503、fence、stop或writer等副作用不接受普通续接。`release.mjs adopt`只读验证同一DB文件身份、原空表/索引/SQL、原备份完整性与SHA，独占写`operation: ADOPT`的新证，原run/时间/回执及备份不改，不执行DDL。角色启动沿统一candidateEvidenceFile读取fresh候选与原迁移的有效证据。HD完整判断先落盘后判门，后续正常run另做完整鲜检查和新批准，原错误不倒填；已发生副作用继续原恢复，不把该路线当故障通道。
+
 统一离线工程检查：`node ops/sd2-release-prepare.test.mjs /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-19-upload-unknown-recovery`。仅检查工具、原证与生成接线，不运行任何服务器动作或功能验收。新入口首次真实发布效果须在下一次获授权发布时记录；不能把本轮离线检查说成又一次上线成功。
 
 ### 使用归属增量表（ADMIN-USAGE）

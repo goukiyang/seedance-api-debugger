@@ -68,6 +68,7 @@ function patchNodes(source, patches) {
   return source;
 }
 function literalObject(node) {
+  if (node.kind === ts.SyntaxKind.NullKeyword) return null;
   if (ts.isStringLiteral(node)) return node.text;
   if (ts.isNumericLiteral(node)) return Number(node.text);
   if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
@@ -107,6 +108,16 @@ export function validatePlan(plan, original, now = Date.now()) {
   const observed = Date.parse(live.observedAt);
   assert.ok(Number.isSafeInteger(observed) && observed <= now && now - observed <= 300000, 'Capture must be fresh; historical evidence is not current runtime');
   assert.equal(c.sourceReady, true); assert.equal(c.baselineReconciled, true);
+  if (c.normalContinuation) {
+    const value = c.normalContinuation;
+    keys(value, ['schema', 'chainId', 'attempt', 'sourceRun', 'sourceManifestSha256', 'beforeSha256', 'approvalSha256',
+      'refusalSha256', 'lineageSha256', 'migrationRun', 'migrationManifestSha256', 'migrationReceiptSha256', 'backupProofSha256']);
+    assert.equal(value.schema, 'sd2-normal-continuation-input.v1');
+    for (const key of ['chainId', 'sourceRun', 'migrationRun']) assert.match(value[key], uuid);
+    for (const key of Object.keys(value).filter(key => key.endsWith('Sha256'))) assert.match(value[key], sha256);
+    assert.ok(Number.isSafeInteger(value.attempt) && value.attempt > 1);
+    assert.notEqual(value.sourceRun, c.recoveryRunId);
+  }
   assert.match(c.recoveryRunId, uuid); assert.notEqual(c.recoveryRunId, profile.successfulRun);
   for (const key of ['mainSource', 'recoveryGuardSource', 'baselineSource', 'sourceBase', 'guardDisplaySource']) assert.match(c[key], sha);
   assert.notEqual(c.mainSource, c.recoveryGuardSource);

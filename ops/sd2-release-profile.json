@@ -7,13 +7,13 @@
   "controllerSetSha256": "84d3bac3d6846f47eb998573b9130b1b6cc95af696a3468a72ff02a25476bb09",
   "wrapperSha256": "0c86b553e41c42cb2a539a4a07a3f46669d71f7c1c4d0b2e5b12abb3a02d3907",
   "promotion": {
-    "template": "release-admin-usage-r05",
-    "wrapper": "run-admin-usage-r05.mjs",
-    "controllerCount": 40,
-    "controllerSetSha256": "10c8545bacd05454ca7dc9974a517c7c41cd2670631edd1dc612608859a7dc2e",
-    "wrapperSha256": "a00c9d8ec3cce1ebeff1e496cf7049e7248ad3d16d51c5e6cc600f02588307f1",
-    "changed": ["candidate-reuse-engineering.mjs", "candidate-reuse.mjs", "common.mjs", "control-preflight.mjs", "cutover-safety.mjs", "hd-closed-cache-engineering.mjs", "hd-storage-preflight.mjs", "retired-hd-cache-engineering.mjs", "switch.mjs"],
-    "added": ["preflight-resume-engineering.mjs", "usage-role-control.mjs", "usage-role-engineering.mjs", "usage-role-start.mjs"]
+    "template": "release-admin-usage-r06",
+    "wrapper": "run-admin-usage-r06.mjs",
+    "controllerCount": 42,
+    "controllerSetSha256": "77f02d43178d5e7a4318058d1039fbb055c12c1eda5014e63769b6731390ed03",
+    "wrapperSha256": "1b53f09143d4e426ba42873fd3571969ca09fc25af8e6777decbdb376d8ad5ca",
+    "changed": ["candidate-reuse-engineering.mjs", "candidate-reuse.mjs", "common.mjs", "control-preflight.mjs", "cutover-safety.mjs", "hd-closed-cache-engineering.mjs", "hd-storage-preflight.mjs", "release-contract.mjs", "release.mjs", "retired-hd-cache-engineering.mjs", "switch.mjs"],
+    "added": ["normal-continuation-engineering.mjs", "normal-continuation.mjs", "preflight-resume-engineering.mjs", "usage-role-control.mjs", "usage-role-engineering.mjs", "usage-role-start.mjs"]
   },
   "evidence": {
     "control-freeze.json": "8da4ab03ce189a29d139ddc25ab7cd9daa1026765a900f0456eee84ff46b21f5",

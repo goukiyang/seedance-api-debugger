@@ -12,7 +12,7 @@ assert.ok(materials && path.isAbsolute(materials), 'Pass the original private re
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const template = verifyTemplate(materials, { originalOnly: true });
 const activeTemplate = verifyTemplate(materials);
-const original = contractData(template.files['release-contract.mjs'].toString()).value;
+const original = contractData(activeTemplate.files['release-contract.mjs'].toString()).value;
 const now = Date.now();
 const c = structuredClone(original);
 c.recoveryRunId = randomUUID();
