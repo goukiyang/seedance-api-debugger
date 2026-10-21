@@ -1,5 +1,11 @@
 # Lessons
 
+## 2026-10-21 - 小改发布复用成功控制，不混身份和重新制造输入
+
+- RATE-FIX反复卡在控制身份/观测/fixture接线，非应用反复编译失败：历史证书原身份、当前六角色启动身份、Git sourceBase与候选pair须分开。当前guard不一定是main祖先；合法guard源码仍须排尽旧PID。全站无host日志不能归本站，运行目录别名不能套root控制文件reader。
+- 原成功构建不动，按完整输入重验整对后另发fresh准入；schema和candidateEvidenceKind由固定准备入口提供，不能手写漏字段。控制变更单独核，未改app不重复编译，源码变化则完整新构建；不混pair，不刷新原成功时间或降低价格、数据、回退门。
+- 固定入口及锁定profile见 `ops/sd2-release-prepare.mjs` / `docs/ubuntu24-deployment.md`。所有可提前发现的静态/配置/恢复问题在维护前集中检查，实际连接/在途条件切换时重核。失败保留原run与累计分类，不靠另开run或补一个测一个重置问题；新控制须整批验证和Review后晋升，不编辑历史成功包。完整根因/附件见正式根费率工单§24.5。
+
 ## 2026-10-19 - HD历史保留与当前复用分开
 
 - H01–H10最终9b720已在真实新主/guard两完整Linux20构建后保护部署v0.99.2；先前私有接线失败不能泛成产品/编码质量缺陷，修正后也不抹失败或复用过期构建。恢复后六角色PID/Invocation/ExecMainStart须一起fresh capture，HD父子/flock也核真实集合，不能只改image一行又沿用旧启动。

@@ -1,5 +1,29 @@
 # Ubuntu 24 部署文档
 
+## sd2 现网发布入口（2026-10-21）
+
+`sd2.youdooart.com` 已有生产数据与持久启动屏障，**只走本节保护流程**。下方从零安装示例不是现网更新、迁移、回退或删目录命令，不得直接执行。所有候选、日志与发布材料沿真实挂载的 `/data`；只回程序，不回业务数据库、价格、媒体、账本、回执或历史证书。
+
+固定准备入口为 `ops/sd2-release-prepare.mjs`，控制来源由同目录 `sd2-release-profile.json` 锁定。它复用正式根私有 `docs/materials/2026-10-19-upload-unknown-recovery/release-r16/` 的36个成功控制模块，不另建发布引擎、不上传私有材料到Git。r16及其原run只读，禁止复制旧run/PID/价格修订冒新鲜现场。根因及原附件见正式根费率工单§24.5。
+
+```bash
+node ops/sd2-release-prepare.mjs check-template /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-19-upload-unknown-recovery
+node ops/sd2-release-prepare.mjs prepare /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-19-upload-unknown-recovery /ABSOLUTE/PRIVATE/plan.json
+```
+
+本机准备只读Git与原证，并独占创建私有新目录；不连服务器、不登记窗口、不上传、不停站。输入为 `sd2-release-plan.v1`，字段仅 `schema/repoRoot/outputRoot/liveCapture/contract/reuseBuilds`：
+
+- `contract` 使用原控制 `MV_DIRECT` 的完整字段，按本次已审源码填写，不能自动套用旧批准范围。`sourceBase`只管Git祖先；`baselineSource/version/build/starts`只管当前运行；原证书身份留在未改动的历史校验模块。main/guard必须不同且均以真实完整SHA、精确变更集合、真实版本及固定ref锁定。
+- `liveCapture` 为五分钟内只读实际捕获的 `observedAt/source/version/build/starts/pricingRevision/allowedSha256`，六角色启动身份必须齐全并与contract相等。本机格式校验不证明服务器仍未变化，stage及切换前原控制必须重新核对。合法guard来源不能误填退役清单，但它的旧PID和整个进程组仍须自然排尽。
+- `reuseBuilds: null` 表示新源码完整构建；只有同main/guard整对已成功时才传 `{sourceRun,directory}` 指向两份原 `*-immutable-success.json`。入口生成完整reuse schema和两份原证SHA。服务器仍必须核源、依赖、环境、Node、工程输入、compiled/check字节及metadata不变，另出fresh准入；不改原构建时间、不混新旧pair，不因复用失败自动重编译掩盖漂移。
+- `outputRoot` 必须是私有资料目录下不存在的新目录；失败保留原run，不能新建run来清零累计失败。输出 `run.mjs`、`control/` 和 `preparation.json`。其 `localPreparationOnly` 不是发布许可或功能验收。
+
+正常后续只用新目录 `run.mjs package/window/stage` 接原控制的 `control-preflight`、prepare/build/verify、Review和保护switch。先整批跑原九组控制检查及维护前真实配置/证书/回退/HD准入，再决定是否构建；可变连接/在途/权限条件在切换时仍重核。维护批准依旧五分钟有效，并绑定原manifest、窗口、控制和候选回执SHA；复用时 `candidateEvidenceKind` 必须取 `preparation.json` 的 `sd2-candidate-build-reuse.v1`，不能漏字段或拿旧批准续签。本机生成器不代签维护批准。
+
+本站独立无缓冲日志、精确nginx配置指纹、合法运行目录别名与root控制文件分读、fixture真实helper绑定、HD闭合缓存精确表、保留证书两条恢复路径均来自锁定控制。发现新现场不在精确表或控制变更时，先只读集中复盘，必要修正另封新包、统一原生验证和Review后更新profile；不得放宽门、删证书、改历史文件或一边停站一边补检查。价格全字段前后相等、原进程自然排空、启动屏障、相容guard和公网产物核对不减少。
+
+统一离线工程检查：`node ops/sd2-release-prepare.test.mjs /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-19-upload-unknown-recovery`。仅检查工具、原证与生成接线，不运行任何服务器动作或功能验收。新入口首次真实发布效果须在下一次获授权发布时记录；不能把本轮离线检查说成又一次上线成功。
+
 本文档用于将 `video-api-debugger` 部署到 Ubuntu 24.04 LTS 单机环境。当前项目使用 Next.js 14、Prisma、SQLite，并存在运行时上传文件，因此推荐先使用带持久磁盘的 VPS / 云服务器部署；不要直接把当前形态部署到无持久文件系统的 Serverless 平台。
 
 ## 1. 部署结论
