@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo } from 'react';
 import { usePathname } from 'next/navigation';
-import ComposerTopbar from './ComposerTopbar';
+import ComposerTopbar, { ComposerTopbarProvided } from './ComposerTopbar';
 import SideNav from './SideNav';
 import FeedbackWidget from './FeedbackWidget';
 import templateStudioStyles from './template-studio/template-studio.module.css';
@@ -64,7 +64,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <div className={shellBodyClass}>
         {!topbarOnlyShell && !imageStudioShell && !templateStudioShell && <SideNav isAdmin={user?.role === 'admin'} user={user} />}
         <main className={shellContentClass}>
-          {children}
+          <ComposerTopbarProvided.Provider value>{children}</ComposerTopbarProvided.Provider>
         </main>
       </div>
       <FeedbackWidget />

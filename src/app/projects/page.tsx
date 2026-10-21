@@ -15,6 +15,11 @@ import { useAppSession } from '@/lib/context/AppSessionContext';
 import { externalFallbackPath, isExternalUser } from '@/lib/access/external-role';
 import { BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT, downloadBulkVideoZip } from '@/lib/video/download-client';
 import { sanitizeOptionalReturnTo } from '@/lib/navigation/return-to';
+import { projectStatusExpectation, useProjectCreateOperation, type ProjectCreateResult } from '@/lib/projects/client-operations';
+import ProjectCreateOperationNotice from '@/components/ProjectCreateOperationNotice';
+import { CompactUsageSummary } from '@/components/usage/UsageWorkspace';
+import type { UsageReportDTO } from '@/lib/usage/dto';
+import styles from './Projects.module.css';
 
 interface ProjectItem {
   id: string;
@@ -30,6 +35,11 @@ interface ProjectItem {
   active_task_count?: number;
   downloadable_task_count?: number;
   legacy_can_delete?: boolean;
+  can_manage_project?: boolean;
+  can_archive?: boolean;
+  can_restore?: boolean;
+  can_delete?: boolean;
+  status_version?: { status: string; updated_at: string };
   owner?: { id?: string; name: string | null; username: string | null; avatar_url?: string | null; account_type?: string | null };
   _count?: { members: number; tasks: number; reference_albums?: number };
 }
@@ -38,6 +48,9 @@ interface ProjectListResponse {
   projects: ProjectItem[];
   personal_project: ProjectItem | null;
   pagination: { page: number; page_size: number; total: number; total_pages: number };
+  capabilities?: { can_create_team_project: boolean; create_operation_version: number };
+  usage_summary?: Pick<UsageReportDTO, 'query' | 'summary' | 'restricted'> | null;
+  usage_summary_error?: string | null;
 }
 
 interface ReviewBudgetSuggestion {
@@ -90,7 +103,6 @@ const DEFAULT_PREFERENCES: ListPreferences = {
 };
 const PROJECT_PREFERENCES_VERSION = 1;
 const PROJECT_PREFERENCES_PREFIX = 'sd2:projects:list:v1';
-const PROJECT_ROWS_PER_COLUMN = 3;
 
 function projectPreferenceKey(userId: string) {
   return `${PROJECT_PREFERENCES_PREFIX}:${encodeURIComponent(userId)}`;
@@ -199,7 +211,7 @@ function updateListUrl(preferences: ListPreferences) {
 }
 
 function canManageProject(project: ProjectItem): boolean {
-  return project.my_role === 'admin' || project.my_role === 'project_owner';
+  return project.can_manage_project === true;
 }
 
 function canShowDeleteProjectAction(project: ProjectItem): boolean {
@@ -311,6 +323,10 @@ function ProjectsPageContent() {
   const [listError, setListError] = useState('');
   const [pagination, setPagination] = useState({ page: 1, page_size: 12, total: 0, total_pages: 1 });
   const [reloadVersion, setReloadVersion] = useState(0);
+  const [canCreate, setCanCreate] = useState(false);
+  const [usageSummary, setUsageSummary] = useState<ProjectListResponse['usage_summary']>(null);
+  const [usageError, setUsageError] = useState('');
+  const createOperation = useProjectCreateOperation(currentUserId, 'projects-list');
 
   const [search, setSearch] = useState(DEFAULT_PREFERENCES.search);
   const [appliedSearch, setAppliedSearch] = useState(DEFAULT_PREFERENCES.search);
@@ -318,7 +334,7 @@ function ProjectsPageContent() {
   const [sort, setSort] = useState<ProjectSort>(DEFAULT_PREFERENCES.sort);
   const [scope, setScope] = useState<ProjectScope>(DEFAULT_PREFERENCES.scope);
   const [page, setPage] = useState(DEFAULT_PREFERENCES.page);
-  const [pageSize, setPageSize] = useState(12);
+  const pageSize = 12;
   const [preferencesReadyFor, setPreferencesReadyFor] = useState('');
   const [storageUnavailable, setStorageUnavailable] = useState(false);
   const [locationRevision, setLocationRevision] = useState(0);
@@ -331,11 +347,12 @@ function ProjectsPageContent() {
   const [name, setName] = useState('');
   const createNameRef = useRef<HTMLInputElement>(null);
   const [description, setDescription] = useState('');
+  const [draftReadyFor, setDraftReadyFor] = useState('');
   const [billingMode, setBillingMode] = useState<'default' | 'budget'>('default');
   const [initialBudgetCredits, setInitialBudgetCredits] = useState('');
   const [reviewBudgetSuggestion, setReviewBudgetSuggestion] = useState<ReviewBudgetSuggestion | null>(null);
   const [createError, setCreateError] = useState('');
-  const [createUnknown, setCreateUnknown] = useState(false);
+  const createUnknown = Boolean(createOperation.pending);
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const createBusyRef = useRef(false);
   const createBackdropRef = useRef<HTMLDivElement>(null);
@@ -351,7 +368,6 @@ function ProjectsPageContent() {
   const downloadAbortRef = useRef<AbortController | null>(null);
   const ownLocationWriteRef = useRef('');
   const pageRef = useRef(page);
-  const pageSizeRef = useRef(pageSize);
   const currentPreferencesRef = useRef(currentPreferences);
   pageRef.current = page;
   currentPreferencesRef.current = currentPreferences;
@@ -440,7 +456,9 @@ function ProjectsPageContent() {
     setNotice('');
     setActionError('');
     setCreateError('');
-    setCreateUnknown(false);
+    setCanCreate(false);
+    setUsageSummary(null);
+    setUsageError('');
     setCreateSubmitting(false);
     createBusyRef.current = false;
     if (previousIdentity && previousIdentity !== identity) {
@@ -459,6 +477,15 @@ function ProjectsPageContent() {
     }
 
     const restored = readListPreferences(currentUserId);
+    try {
+      const raw = currentUserId ? localStorage.getItem(`sd2:project-create-draft:v1:${currentUserId}`) : null;
+      const draft = raw ? JSON.parse(raw) : null;
+      setName(typeof draft?.name === 'string' ? draft.name : '');
+      setDescription(typeof draft?.description === 'string' ? draft.description : '');
+      setBillingMode(draft?.billingMode === 'budget' ? 'budget' : 'default');
+      setInitialBudgetCredits(typeof draft?.initialBudgetCredits === 'string' ? draft.initialBudgetCredits : '');
+    } catch { setStorageUnavailable(true); }
+    setDraftReadyFor(identity);
     setStorageUnavailable(restored.storageUnavailable);
     setSearch(restored.preferences.search);
     setAppliedSearch(restored.preferences.search);
@@ -469,6 +496,12 @@ function ProjectsPageContent() {
     pageRef.current = restored.preferences.page;
     setPreferencesReadyFor(identity);
   }, [accountKey, currentUserId, hasLoadedUser]);
+
+  useEffect(() => {
+    if (!currentUserId || draftReadyFor !== accountKey) return;
+    try { localStorage.setItem(`sd2:project-create-draft:v1:${currentUserId}`, JSON.stringify({ name, description, billingMode, initialBudgetCredits })); }
+    catch { setStorageUnavailable(true); }
+  }, [accountKey, billingMode, currentUserId, description, draftReadyFor, initialBudgetCredits, name]);
 
   useEffect(() => {
     if (!hasLoadedUser || preferencesReadyFor !== accountKey) return;
@@ -536,6 +569,7 @@ function ProjectsPageContent() {
       scope,
       page: String(page),
       page_size: String(pageSize),
+      time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
     });
     if (appliedSearch.trim()) params.set('search', appliedSearch.trim().slice(0, 120));
 
@@ -576,6 +610,9 @@ function ProjectsPageContent() {
         if (controller.signal.aborted || !isCurrentListRequest()) return;
         setProjects(data.projects);
         setPersonalProject(data.personal_project || null);
+        setCanCreate(data.capabilities?.can_create_team_project === true && data.capabilities.create_operation_version === 1);
+        setUsageSummary(data.usage_summary || null);
+        setUsageError(data.usage_summary_error || '');
         setPagination(data.pagination);
         setProjectsAccountKey(accountKey);
         setLoadedQueryKey(queryKey);
@@ -604,36 +641,6 @@ function ProjectsPageContent() {
     if (!saveListPreferences(currentUserId, currentPreferences)) setStorageUnavailable(true);
     else setStorageUnavailable(false);
   }, [accountKey, activeTab, currentUserId, hasLoadedUser, page, preferencesReadyFor, scope, search, sort]);
-
-  useEffect(() => {
-    const grid = gridRef.current;
-    if (!grid) return;
-    const updatePageSize = () => {
-      const columns = Math.max(1, grid.style.display === 'none'
-        ? 1
-        : getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).filter(Boolean).length);
-      const next = Math.min(24, Math.max(3, columns * PROJECT_ROWS_PER_COLUMN));
-      const previous = pageSizeRef.current;
-      if (previous === next) return;
-      pageSizeRef.current = next;
-      setPageSize(next);
-      const currentPage = pageRef.current;
-      const nextPage = Math.floor(((currentPage - 1) * previous) / next) + 1;
-      if (nextPage !== currentPage) {
-        pageRef.current = nextPage;
-        setPage(nextPage);
-        writeListUrl({ ...currentPreferencesRef.current, page: nextPage });
-      }
-    };
-    updatePageSize();
-    const observer = new ResizeObserver(updatePageSize);
-    observer.observe(grid);
-    window.addEventListener('resize', updatePageSize);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', updatePageSize);
-    };
-  }, []);
 
   useEffect(() => {
     if (billingMode !== 'budget' || !createOpen) return;
@@ -716,7 +723,7 @@ function ProjectsPageContent() {
 
   async function createProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (createBusyRef.current || createUnknown) return;
+    if (createBusyRef.current || createUnknown || !canCreate || !createOperation.ready) return;
     setCreateError('');
     const trimmedName = name.trim();
     const trimmedDescription = description.trim();
@@ -743,49 +750,11 @@ function ProjectsPageContent() {
     createBusyRef.current = true;
     setCreateSubmitting(true);
     try {
-      const res = await fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: trimmedName, description: trimmedDescription, type: 'team' }),
-      });
+      const result = await createOperation.create({ name: trimmedName, description: trimmedDescription });
       if (!isCurrentAccountOperation(operation)) return;
-      if (res.status === 401) {
-        window.location.href = '/login';
-        return;
-      }
-      const data = await res.json().catch(() => null) as { project?: { id?: string }; error?: string; message?: string } | null;
-      if (!isCurrentAccountOperation(operation)) return;
-      if (res.status >= 500) {
-        setCreateUnknown(true);
-        return;
-      }
-      if (!res.ok) {
-        setCreateError(data?.error || data?.message || '项目没有创建成功，请检查信息后重试。');
-        return;
-      }
-      if (!data?.project?.id) {
-        setCreateUnknown(true);
-        return;
-      }
-
-      setHighlightProjectId(data.project.id);
-      setCreateUnknown(false);
-      setCreateOpen(false);
-      if (window.location.hash === '#create-project') {
-        window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}`);
-      }
-      setName('');
-      setDescription('');
-      setBillingMode('default');
-      setInitialBudgetCredits('');
-      setReviewBudgetSuggestion(null);
-      applyPreferences({ search: '', status: 'active', sort: 'updated', scope: 'all', page: 1 });
-      setAppliedSearch('');
-      setNotice('项目已创建，生成消耗默认扣发起人的个人积分。');
-      setActionError('');
-      setReloadVersion((version) => version + 1);
-    } catch {
-      if (isCurrentAccountOperation(operation)) setCreateUnknown(true);
+      resolveCreatedProject(result);
+    } catch (cause) {
+      if (isCurrentAccountOperation(operation)) setCreateError(cause instanceof Error ? cause.message : '创建结果待确认，请查询原创建。');
     } finally {
       if (isCurrentAccountOperation(operation)) {
         createBusyRef.current = false;
@@ -794,10 +763,20 @@ function ProjectsPageContent() {
     }
   }
 
-  function handleCreateOutcomeUnknown() {
+  function resolveCreatedProject(result: ProjectCreateResult) {
+    if (result.operation.state !== 'accepted') return;
     setCreateOpen(false);
+    if (window.location.hash === '#create-project') window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}`);
+    if (!result.project) {
+      setNotice('原创建已受理，但该项目当前不可访问；没有重新创建。');
+      return;
+    }
+    setHighlightProjectId(result.project.id);
+    setName(''); setDescription(''); setBillingMode('default'); setInitialBudgetCredits('');
+    setReviewBudgetSuggestion(null); setCreateError('');
+    applyPreferences({ search: '', status: 'active', sort: 'updated', scope: 'all', page: 1 });
+    setAppliedSearch(''); setNotice('项目已创建。'); setActionError('');
     setReloadVersion((version) => version + 1);
-    setNotice('已重新读取项目列表，但仍无法确认刚才的请求是否受理。为避免重复项目，请先核对列表或联系管理员确认。');
   }
 
   function requestProjectAction(project: ProjectItem, action: ProjectAction) {
@@ -814,11 +793,11 @@ function ProjectsPageContent() {
     setProjectActionBusy(true);
     try {
       const res = await fetch(`/api/projects/${project.id}`, action === 'delete'
-        ? { method: 'DELETE' }
+        ? { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(projectStatusExpectation(project)) }
         : {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action }),
+            body: JSON.stringify({ action, ...projectStatusExpectation(project) }),
           });
       if (!isCurrentAccountOperation(operation)) return;
       if (res.status === 401) {
@@ -827,7 +806,7 @@ function ProjectsPageContent() {
       }
       const data = await res.json().catch(() => null) as { error?: string; message?: string } | null;
       if (!isCurrentAccountOperation(operation)) return;
-      if (!res.ok) throw new Error(data?.error || data?.message || `${label}项目失败`);
+      if (!res.ok) { if (res.status === 409) setReloadVersion((v) => v + 1); throw new Error(data?.error || data?.message || `${label}项目失败`); }
       setPendingProjectAction(null);
       setNotice(action === 'delete' ? '项目已删除' : `项目已${label}`);
       setReloadVersion((version) => version + 1);
@@ -852,7 +831,7 @@ function ProjectsPageContent() {
         const res = await fetch(`/api/projects/${project.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: nextName }),
+          body: JSON.stringify({ name: nextName, ...projectStatusExpectation(project) }),
         });
         if (!isCurrentAccountOperation(operation)) throw new Error('账号已切换，本次重命名结果未应用。');
         if (res.status === 401) {
@@ -861,7 +840,7 @@ function ProjectsPageContent() {
         }
         const data = await res.json().catch(() => null) as { project?: { id?: string; name?: string }; error?: string; message?: string } | null;
         if (!isCurrentAccountOperation(operation)) throw new Error('账号已切换，本次重命名结果未应用。');
-        if (!res.ok) throw new Error(data?.error || data?.message || '项目名称保存失败，请重试。');
+        if (!res.ok) { if (res.status === 409) setReloadVersion((v) => v + 1); throw new Error(data?.error || data?.message || '项目名称保存失败，请重试。'); }
         if (data?.project?.id !== project.id || data.project.name !== nextName.trim()) {
           throw new Error('服务器没有返回已保存的项目名称，暂未确认保存成功。请核对项目后再重试。');
         }
@@ -915,17 +894,21 @@ function ProjectsPageContent() {
   const downloadLimit = BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT;
 
   return (
-    <div>
+    <div className={styles.page}>
       <PageBanner
         eyebrow="项目"
         title="我的项目"
-        description="找到项目后继续生成、查看结果或下载视频。"
         actions={(
-          <button id="create-project" className="btn btn-primary" type="button" onClick={openCreateDialog}>
-            <Plus size={16} aria-hidden="true" />新建项目
-          </button>
+          <div className={styles.actions}>
+            <Link className="link" href="/usage">我的用量</Link>
+            {canCreate && <button id="create-project" className="btn btn-primary" type="button" onClick={openCreateDialog}>
+              <Plus size={16} aria-hidden="true" />新建项目
+            </button>}
+          </div>
         )}
       />
+      {projectsAccountKey === accountKey && <CompactUsageSummary report={usageSummary || null} error={usageError} />}
+      {!createOpen && <ProjectCreateOperationNotice operation={createOperation} onResolved={resolveCreatedProject} />}
 
       {(notice || actionError) && (
         <div className="card" role={actionError ? 'alert' : 'status'} style={{ borderColor: actionError ? 'var(--border-color)' : 'var(--tone-success-border, var(--border-color))' }}>
@@ -933,7 +916,7 @@ function ProjectsPageContent() {
         </div>
       )}
 
-      <section className="card" aria-label="项目筛选" style={{ display: 'grid', gap: 14, marginBottom: 18 }}>
+      <section className={styles.filters} aria-label="项目筛选" style={{ display: 'grid', gap: 14, marginBottom: 18 }}>
         <div style={{ alignItems: 'center', display: 'flex', flexWrap: 'wrap', gap: 10 }}>
           <label style={{ flex: '1 1 260px', minWidth: 220, position: 'relative' }}>
             <Search size={16} aria-hidden="true" style={{ color: 'var(--text-secondary)', left: 12, position: 'absolute', top: '50%', transform: 'translateY(-50%)' }} />
@@ -972,8 +955,7 @@ function ProjectsPageContent() {
           </button>
         </div>
         <div style={{ alignItems: 'center', color: 'var(--text-secondary)', display: 'flex', flexWrap: 'wrap', fontSize: 13, gap: 10, justifyContent: 'space-between' }}>
-          <span>{hasCurrentList ? `共 ${pagination.total} 个项目` : '项目状态、搜索和排序会在全部可见项目中应用'}</span>
-          <span>每页按当前屏幕宽度显示约三行项目</span>
+          <span>{hasCurrentList ? `共 ${pagination.total} 个项目` : '正在读取项目'}</span>
         </div>
         {storageUnavailable && <p role="status" className="text-gray" style={{ margin: 0 }}>浏览器未能保存列表偏好，本次仍可正常使用。</p>}
       </section>
@@ -1025,22 +1007,22 @@ function ProjectsPageContent() {
           <p className="text-gray">{search.trim() ? '试试缩短关键词，或重置筛选后再找。' : activeTab === 'active' ? '创建协作项目后，可以在这里继续生成和查看结果。' : '归档的项目会保留在这里，方便之后恢复查看。'}</p>
           {search.trim() ? (
             <button className="btn btn-secondary" type="button" onClick={resetPreferences}>重置筛选</button>
-          ) : activeTab === 'active' && (
+          ) : activeTab === 'active' && canCreate && (
             <button className="btn btn-primary" type="button" onClick={openCreateDialog}><Plus size={16} aria-hidden="true" />新建项目</button>
           )}
         </div>
       )}
 
-      <div ref={gridRef} style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 250px), 1fr))' }} aria-busy={loading}>
+      <div ref={gridRef} className={styles.grid} aria-busy={loading}>
         {visibleProjects.map((project) => {
           const displayName = projectDisplayName(project);
           const downloadableCount = project.downloadable_task_count || 0;
           const downloadTooLarge = downloadableCount > downloadLimit;
           const isManager = canManageProject(project);
           const isMutable = project.status !== 'locked';
-          const canArchive = isManager && isMutable && project.status === 'active' && project.type === 'team';
-          const canRestore = isManager && isMutable && project.status === 'archived';
-          const deleteAllowed = project.legacy_can_delete === true;
+          const canArchive = project.can_archive === true;
+          const canRestore = project.can_restore === true;
+          const deleteAllowed = project.can_delete === true;
           const highlighted = project.id === highlightProjectId;
           return (
             <article
@@ -1050,7 +1032,7 @@ function ProjectsPageContent() {
               style={{
                 background: 'var(--bg-panel)',
                 border: `1px solid ${highlighted ? 'var(--tone-info-border)' : 'var(--border-color)'}`,
-                borderRadius: 9,
+                borderRadius: 8,
                 boxShadow: highlighted ? '0 0 0 2px var(--tone-info-bg)' : undefined,
                 color: 'var(--text-primary)',
                 display: 'flex',
@@ -1146,7 +1128,7 @@ function ProjectsPageContent() {
                           style={{ justifyContent: 'flex-start' }}
                           onClick={(event) => { closeProjectMenu(event); requestProjectAction(project, 'delete'); }}
                           disabled={!deleteAllowed}
-                          title={deleteAllowed ? '删除没有任务和图集的空项目' : '只有没有任务和图集的协作项目可删除'}
+                          title={deleteAllowed ? '删除已核对为空的协作项目' : '存在内容、账务或历史记录，请使用归档'}
                         >删除空项目</button>
                       )}
                     </div>
@@ -1186,13 +1168,13 @@ function ProjectsPageContent() {
             <form onSubmit={(event) => void createProject(event)} style={{ display: 'grid', gap: 14 }}>
               <label style={{ display: 'grid', gap: 6 }}>
                 <span>项目名称 <span aria-hidden="true" style={{ color: 'var(--text-secondary)' }}>*</span></span>
-                <input ref={createNameRef} className="input" value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：夏季广告短片" required disabled={createSubmitting} />
+                <input ref={createNameRef} className="input" value={createOperation.pending?.input.name ?? name} onChange={(event) => setName(event.target.value)} placeholder="例如：夏季广告短片" required disabled={createSubmitting || createUnknown} />
               </label>
               <label style={{ display: 'grid', gap: 6 }}>
                 <span>项目说明 <span style={{ color: 'var(--text-secondary)' }}>（可选）</span></span>
-                <textarea className="input" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="写下项目用途，方便成员辨认" rows={2} disabled={createSubmitting} />
+                <textarea className="input" value={createOperation.pending ? createOperation.pending.input.description || '' : description} onChange={(event) => setDescription(event.target.value)} placeholder="写下项目用途，方便成员辨认" rows={2} disabled={createSubmitting || createUnknown} />
               </label>
-              <fieldset disabled={createSubmitting} style={{ border: 0, display: 'grid', gap: 8, margin: 0, padding: 0 }}>
+              <fieldset disabled={createSubmitting || createUnknown} style={{ border: 0, display: 'grid', gap: 8, margin: 0, padding: 0 }}>
                 <legend style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>项目记账方式</legend>
                 <label className={`project-billing-choice ${billingMode === 'default' ? 'is-selected' : ''}`}>
                   <input type="radio" name="projectBillingMode" value="default" checked={billingMode === 'default'} onChange={() => setBillingMode('default')} />
@@ -1221,16 +1203,11 @@ function ProjectsPageContent() {
                 </>
               )}
               {createError && <p role="alert" className="text-gray" style={{ margin: 0 }}>{createError}</p>}
-              {createUnknown && (
-                <div role="status" className="card" style={{ margin: 0 }}>
-                  <strong>创建结果待确认</strong>
-                  <p style={{ color: 'var(--text-secondary)', margin: '5px 0 10px' }}>已发送创建请求，但还没有收到明确结果。为避免重复项目，暂不允许再次提交；请先查看项目列表，列表也不能证明请求已受理。</p>
-                  <button className="btn btn-secondary" type="button" onClick={handleCreateOutcomeUnknown}>关闭并刷新项目列表</button>
-                </div>
-              )}
+              <ProjectCreateOperationNotice operation={createOperation} onResolved={resolveCreatedProject} />
+              {!canCreate && <p className="text-gray">当前账号没有新建协作项目权限，原创建仍可核对。</p>}
               <div className="modal-actions">
                 <button className="btn btn-secondary" type="button" onClick={closeCreateDialog} disabled={createSubmitting}>取消</button>
-                <button className="btn btn-primary" type="submit" disabled={createSubmitting || !name.trim() || createUnknown}>
+                <button className="btn btn-primary" type="submit" disabled={createSubmitting || !name.trim() || createUnknown || !createOperation.ready || !canCreate}>
                   {createSubmitting ? '正在提交…' : billingMode === 'budget' ? '去申请预算' : '创建项目'}
                 </button>
               </div>

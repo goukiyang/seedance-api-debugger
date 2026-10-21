@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { AuthError } from '@/lib/auth/session';
 import type { UsageSourceKind } from './usage-types';
+import { assertProjectActiveInTransaction } from '@/lib/projects/permissions';
 
 export interface UsageAttributionInput {
   sourceKind: UsageSourceKind;
@@ -50,14 +51,5 @@ export function parseUsageProjectId(value: unknown): string | null | undefined {
 }
 
 export async function assertUsageProject(db: Prisma.TransactionClient, user: { id: string; role: string }, projectId: string | null) {
-  if (!projectId) return;
-  const project = await db.project.findUnique({ where: { id: projectId }, select: {
-    id: true, owner_user_id: true, type: true, status: true,
-    members: { where: { user_id: user.id, status: 'active' }, select: { role: true }, take: 1 },
-  } });
-  const member = ['team', 'public'].includes(project?.type || '') ? project?.members[0] : null;
-  if (!project || project.status !== 'active' || project.type === 'system'
-    || user.role !== 'admin' && project.owner_user_id !== user.id && (!member || member.role === 'viewer')) {
-    throw new AuthError('所选项目已不可用或无权生成，请重新选择；当前输入已保留', 403);
-  }
+  await assertProjectActiveInTransaction(db, user, projectId);
 }

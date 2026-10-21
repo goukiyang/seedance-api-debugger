@@ -10,13 +10,16 @@ import MediaPreview from '@/components/MediaPreview';
 import ShareAlbumDialog, { type ShareAlbumDialogAlbum } from '@/components/ShareAlbumDialog';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import { useAppSession } from '@/lib/context/AppSessionContext';
 import { uploadFileAsAsset, type UploadProgressSnapshot } from '@/lib/http/file-upload';
+import styles from '../ReferenceAlbumsClient.module.css';
 
 interface AlbumDetail {
   id: string;
   name: string;
   description: string | null;
   album_type: string;
+  project_id: string | null;
   visibility: string;
   cover_image_id: string | null;
   cover_image_url: string | null;
@@ -74,6 +77,64 @@ type PendingAlbumAttach = {
 };
 
 const GENERATION_ALBUM_SELECTION_LIMIT = 9;
+const RETURN_SCOPES = new Set(['mine', 'project', 'other_project', 'shared', 'public', 'all']);
+
+function isReturnId(value: string | null): value is string {
+  return Boolean(value && /^[a-zA-Z0-9_-]{1,128}$/.test(value));
+}
+
+function localReturnUrl(value: string | null | undefined) {
+  if (!value || value.length > 8192 || !value.startsWith('/') || value.startsWith('//')
+    || value.includes('\\') || /[\u0000-\u001f\u007f]/.test(value)) return null;
+  try {
+    const url = new URL(value, 'https://collections.invalid');
+    return url.origin === 'https://collections.invalid' ? url : null;
+  } catch { return null; }
+}
+
+function safeProjectReturn(value: string | null, expectedProjectId?: string | null) {
+  const url = localReturnUrl(value);
+  if (!url) return null;
+  if (url.pathname === '/projects' && !expectedProjectId) return `${url.pathname}${url.search}${url.hash}`;
+  const match = /^\/projects\/([a-zA-Z0-9_-]{1,128})$/.exec(url.pathname);
+  if (!match || (expectedProjectId && match[1] !== expectedProjectId)) return null;
+  const nested = url.searchParams.get('return_to');
+  if (nested) {
+    const parent = localReturnUrl(nested);
+    if (!parent || parent.pathname !== '/projects') url.searchParams.delete('return_to');
+  }
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+function albumReturnContext(value: string | null | undefined) {
+  const fallback = { href: '/collections', label: '返回参考图集', projectHref: null as string | null };
+  const url = localReturnUrl(value);
+  if (!url) return fallback;
+  if (url.pathname !== '/collections') {
+    const projectHref = safeProjectReturn(value || null);
+    return projectHref && /^\/projects\//.test(projectHref)
+      ? { href: projectHref, label: '返回原项目', projectHref: null } : fallback;
+  }
+  const params = new URLSearchParams();
+  const scope = url.searchParams.get('scope');
+  if (scope && !RETURN_SCOPES.has(scope)) return fallback;
+  if (scope) params.set('scope', scope);
+  const projectId = url.searchParams.get('project_id');
+  if (projectId && projectId !== 'all') {
+    if (!isReturnId(projectId) || (scope !== 'project' && scope !== 'other_project')) return fallback;
+    params.set('project_id', projectId);
+  }
+  const folderId = url.searchParams.get('public_folder_id');
+  if (folderId && (folderId === 'all' || isReturnId(folderId))) params.set('public_folder_id', folderId);
+  const page = url.searchParams.get('page');
+  if (page && /^\d+$/.test(page) && Number.isSafeInteger(Number(page)) && Number(page) >= 1 && Number(page) <= 100_000) params.set('page', page);
+  const anchor = url.searchParams.get('anchor');
+  if (isReturnId(anchor)) params.set('anchor', anchor);
+  const projectHref = safeProjectReturn(url.searchParams.get('return_to'), isReturnId(projectId) ? projectId : undefined);
+  if (projectHref) params.set('return_to', projectHref);
+  const query = params.toString();
+  return { href: `/collections${query ? `?${query}` : ''}`, label: '返回原图集列表', projectHref };
+}
 
 function mediaTypeLabel(type: string | null | undefined) {
   if (type === 'video') return '视频';
@@ -99,9 +160,18 @@ function formatUploadProgressDetail(files: File[], file: File, index: number, pr
   return `${itemText}，${progress.label}`;
 }
 
-export default function ReferenceAlbumDetailClient({ albumId }: { albumId: string }) {
+export default function ReferenceAlbumDetailClient({ albumId, returnTo }: { albumId: string; returnTo?: string | null }) {
   const { confirm, prompt, productDialog } = useProductDialog();
+  const { user, hasLoadedUser, userLoadError, sessionChanged, refreshUser } = useAppSession();
+  const accountId = !userLoadError && !sessionChanged ? user?.id || '' : '';
+  const contextKey = `${accountId}:${albumId}`;
+  const contextRef = useRef({ key: contextKey, epoch: 0 });
+  if (contextRef.current.key !== contextKey) contextRef.current = { key: contextKey, epoch: contextRef.current.epoch + 1 };
+  const isCurrent = useCallback((epoch: number) => contextRef.current.epoch === epoch, []);
+  const aliveRef = useRef(true);
+  const returnContext = albumReturnContext(returnTo);
   const [album, setAlbum] = useState<AlbumDetail | null>(null);
+  const [loadedContextKey, setLoadedContextKey] = useState('');
   const [images, setImages] = useState<ReferenceImageItem[]>([]);
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
   const [previewImage, setPreviewImage] = useState<ReferenceImageItem | null>(null);
@@ -114,29 +184,69 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
   const [sharingImageId, setSharingImageId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    if (!hasLoadedUser) void refreshUser();
+  }, [hasLoadedUser, refreshUser]);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => { aliveRef.current = false; contextRef.current.epoch += 1; };
+  }, []);
+
+  useEffect(() => {
+    setAlbum(null);
+    setImages([]);
+    setLoadedContextKey('');
+    setSelectedImageIds([]);
+    setPreviewImage(null);
+    setPendingAlbumAttach(null);
+    setShareDialogAlbum(null);
+    setSharingImageId(null);
+    setUploadFeedback(null);
+    setUploadProgress(null);
+    setError(null);
+    setLoading(false);
+  }, [contextKey]);
+
   const loadAlbum = useCallback(async () => {
+    if (!accountId || contextRef.current.key !== contextKey || !aliveRef.current) return null;
+    const epoch = contextRef.current.epoch;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/reference-albums/${albumId}`);
+      const res = await fetch(`/api/reference-albums/${encodeURIComponent(albumId)}`, { cache: 'no-store' });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || data.message || '图集读取失败');
+      if (!aliveRef.current || !isCurrent(epoch)) return null;
+      if (!res.ok) {
+        if ([401, 403, 404].includes(res.status)) {
+          setAlbum(null);
+          setImages([]);
+          setSelectedImageIds([]);
+          setPreviewImage(null);
+          setShareDialogAlbum(null);
+          setLoadedContextKey('');
+        }
+        throw new Error(data.error || data.message || '图集读取失败');
+      }
+      if (data.album?.id !== albumId) throw new Error('图集读取未能确认，请重试。');
       setAlbum(data.album);
+      setLoadedContextKey(contextKey);
       setImages(data.images || []);
       return data;
     } catch (err) {
-      setError(err instanceof Error ? err.message : '图集读取失败');
+      if (aliveRef.current && isCurrent(epoch)) setError(err instanceof Error ? err.message : '图集读取失败');
       throw err;
     } finally {
-      setLoading(false);
+      if (aliveRef.current && isCurrent(epoch)) setLoading(false);
     }
-  }, [albumId]);
+  }, [accountId, albumId, contextKey, isCurrent]);
 
   useEffect(() => {
     void loadAlbum().catch(() => {});
   }, [loadAlbum]);
 
   const attachAssetsToAlbum = useCallback(async (assetIds: string[], fileNames: string[]) => {
+    if (!accountId || contextRef.current.key !== contextKey || !aliveRef.current) throw new Error('图集或账号已切换，未向新目标加入素材。');
     const res = await fetch(`/api/reference-albums/${albumId}/images`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -152,29 +262,35 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
     const data = await res.json().catch(() => ({})) as AlbumUploadResponse;
     if (!res.ok) throw new Error(data.error || data.message || '保存到图集失败');
     return data;
-  }, [albumId]);
+  }, [accountId, albumId, contextKey]);
 
   const finishAlbumAttach = useCallback(async (assetIds: string[], fileNames: string[], expectedCount: number) => {
+    if (contextRef.current.key !== contextKey || !aliveRef.current) return;
+    const epoch = contextRef.current.epoch;
     setUploadProgress({ label: '正在加入图集', detail: `${assetIds.length} 个素材` });
     let addData: AlbumUploadResponse;
     try {
       addData = await attachAssetsToAlbum(assetIds, fileNames);
     } catch (err) {
+      if (!aliveRef.current || !isCurrent(epoch)) return;
       setPendingAlbumAttach({ assetIds, fileNames });
       const reason = err instanceof Error ? err.message : '保存到图集失败';
       throw new Error(`素材已上传成功，但加入图集失败：${reason}`);
     }
+    if (!aliveRef.current || !isCurrent(epoch)) return;
     const uploadedCount = Array.isArray(addData.images) ? addData.images.length : expectedCount;
     setUploadProgress(null);
     setUploadFeedback({ type: 'info', message: '上传成功，正在刷新图集列表...' });
     await loadAlbum();
+    if (!aliveRef.current || !isCurrent(epoch)) return;
     setPendingAlbumAttach(null);
     setUploadFeedback({ type: 'success', message: `已上传 ${uploadedCount} 个素材到图集。` });
-  }, [attachAssetsToAlbum, loadAlbum]);
+  }, [attachAssetsToAlbum, contextKey, isCurrent, loadAlbum]);
 
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
     if (files.length === 0) return;
+    const epoch = contextRef.current.epoch;
     setLoading(true);
     setError(null);
     setUploadProgress(null);
@@ -187,10 +303,12 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
       const assetIds: string[] = [];
       const fileNames = files.map((file) => file.name || 'upload.bin');
       for (let index = 0; index < files.length; index += 1) {
+        if (!aliveRef.current || !isCurrent(epoch)) return;
         const file = files[index];
         const asset = await uploadFileAsAsset(file, {
           invalidJsonMessage: '图集上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。',
           onProgress: (progress) => {
+            if (!aliveRef.current || !isCurrent(epoch)) return;
             setUploadProgress({
               label: progress.label,
               detail: formatUploadProgressDetail(files, file, index, progress),
@@ -198,22 +316,28 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
             });
           },
         });
+        if (!aliveRef.current || !isCurrent(epoch)) return;
         if (!asset.id) throw new Error(`素材上传成功但没有返回 ID：${file.name}`);
         assetIds.push(asset.id);
       }
       await finishAlbumAttach(assetIds, fileNames, files.length);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '上传失败');
-      setUploadFeedback(null);
+      if (aliveRef.current && isCurrent(epoch)) {
+        setError(err instanceof Error ? err.message : '上传失败');
+        setUploadFeedback(null);
+      }
     } finally {
-      setUploadProgress(null);
-      setLoading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (aliveRef.current && isCurrent(epoch)) {
+        setUploadProgress(null);
+        setLoading(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
     }
   };
 
   const handleRetryAlbumAttach = async () => {
     if (!pendingAlbumAttach) return;
+    const epoch = contextRef.current.epoch;
     setLoading(true);
     setError(null);
     setUploadFeedback({ type: 'info', message: '正在把已上传素材重新加入图集...' });
@@ -224,16 +348,18 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
         pendingAlbumAttach.assetIds.length,
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加入图集失败');
-      setUploadFeedback(null);
+      if (aliveRef.current && isCurrent(epoch)) {
+        setError(err instanceof Error ? err.message : '加入图集失败');
+        setUploadFeedback(null);
+      }
     } finally {
-      setUploadProgress(null);
-      setLoading(false);
+      if (aliveRef.current && isCurrent(epoch)) { setUploadProgress(null); setLoading(false); }
     }
   };
 
   const handleUseForGeneration = async () => {
     if (selectedImageIds.length === 0) return;
+    const epoch = contextRef.current.epoch;
     setLoading(true);
     setError(null);
     try {
@@ -246,12 +372,13 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
         body: JSON.stringify({ referenceImageIds: selectedImageIds }),
       });
       const data = await res.json();
+      if (!aliveRef.current || !isCurrent(epoch)) return;
       if (!res.ok) throw new Error(data.error || data.message || '加入生成工作台失败');
       window.location.href = '/generate';
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加入生成工作台失败');
+      if (aliveRef.current && isCurrent(epoch)) setError(err instanceof Error ? err.message : '加入生成工作台失败');
     } finally {
-      setLoading(false);
+      if (aliveRef.current && isCurrent(epoch)) setLoading(false);
     }
   };
 
@@ -270,8 +397,11 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
   };
 
   const handleDeleteImage = async (imageId: string) => {
+    const epoch = contextRef.current.epoch;
     if (!await confirm('删除后历史任务仍会保留引用，新生成不能再使用。确定删除？', { title: '删除参考图', confirmLabel: '删除', danger: true })) return;
+    if (!aliveRef.current || !isCurrent(epoch)) return;
     const res = await fetch(`/api/reference-images/${imageId}`, { method: 'DELETE' });
+    if (!aliveRef.current || !isCurrent(epoch)) return;
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       setError(data.error || data.message || '删除失败');
@@ -282,6 +412,7 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
   };
 
   const handleShareSingleImage = async (image: ReferenceImageItem) => {
+    const epoch = contextRef.current.epoch;
     setSharingImageId(image.id);
     setError(null);
     try {
@@ -293,19 +424,21 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
         }),
       });
       const data = await res.json().catch(() => ({}));
+      if (!aliveRef.current || !isCurrent(epoch)) return;
       if (!res.ok) throw new Error(data.error || data.message || '单素材共享创建失败');
       setShareDialogAlbum(data.album);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '单素材共享创建失败');
+      if (aliveRef.current && isCurrent(epoch)) setError(err instanceof Error ? err.message : '单素材共享创建失败');
     } finally {
-      setSharingImageId(null);
+      if (aliveRef.current && isCurrent(epoch)) setSharingImageId(null);
     }
   };
 
   const handleRenameAlbum = async () => {
     if (!album) return;
+    const epoch = contextRef.current.epoch;
     const nextName = (await prompt('输入新的图集名称', album.name, { title: '图集名称', maxLength: null }))?.trim();
-    if (!nextName || nextName === album.name) return;
+    if (!aliveRef.current || !isCurrent(epoch) || !nextName || nextName === album.name) return;
 
     setLoading(true);
     setError(null);
@@ -316,47 +449,63 @@ export default function ReferenceAlbumDetailClient({ albumId }: { albumId: strin
         body: JSON.stringify({ name: nextName }),
       });
       const data = await res.json();
+      if (!aliveRef.current || !isCurrent(epoch)) return;
       if (!res.ok) throw new Error(data.error || data.message || '重命名失败');
       setAlbum((current) => current ? { ...current, name: data.album?.name || nextName } : current);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '重命名失败');
+      if (aliveRef.current && isCurrent(epoch)) setError(err instanceof Error ? err.message : '重命名失败');
     } finally {
-      setLoading(false);
+      if (aliveRef.current && isCurrent(epoch)) setLoading(false);
     }
   };
 
   const handleDeleteAlbum = async () => {
     if (!album) return;
+    const epoch = contextRef.current.epoch;
+    const backHref = returnContext.href;
     const confirmed = await confirm(`删除图集「${album.name}」？图集会从列表隐藏，历史任务引用的参考图仍会保留。`, { title: '删除图集', confirmLabel: '删除图集', danger: true });
-    if (!confirmed) return;
+    if (!aliveRef.current || !isCurrent(epoch) || !confirmed) return;
 
     setLoading(true);
     setError(null);
     try {
       const res = await fetch(`/api/reference-albums/${album.id}`, { method: 'DELETE' });
       const data = await res.json().catch(() => ({}));
+      if (!aliveRef.current || !isCurrent(epoch)) return;
       if (!res.ok) throw new Error(data.error || data.message || '删除图集失败');
-      window.location.href = '/collections';
+      window.location.assign(backHref);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '删除图集失败');
-      setLoading(false);
+      if (aliveRef.current && isCurrent(epoch)) {
+        setError(err instanceof Error ? err.message : '删除图集失败');
+        setLoading(false);
+      }
     }
   };
 
-  if (!album && loading) return <div className="card">读取中...</div>;
+  if (!accountId) return <div className={styles.notice} role="status">
+    {userLoadError || (sessionChanged ? '登录账号已变化，请重新确认后查看图集。' : hasLoadedUser ? '请先登录后查看图集。' : '正在确认登录状态...')}
+    {userLoadError && <button type="button" onClick={() => void refreshUser({ force: true })}>重新读取</button>}
+  </div>;
+
+  if (album && loadedContextKey !== contextKey) return <div className={styles.notice} role="status">正在读取当前图集...</div>;
+  const albumProjectId = album?.project_id || null;
+  const projectHref = returnContext.projectHref || (!returnTo && isReturnId(albumProjectId)
+    ? `/projects/${encodeURIComponent(albumProjectId)}?view=albums` : null);
 
   return (
     <div>
       {productDialog}
       <PageBanner
-        backHref="/collections"
-        backLabel="返回参考图集"
+        backHref={returnContext.href}
+        backLabel={returnContext.label}
         eyebrow="图集详情"
         title={album?.name || '参考图集'}
         description={album?.description || '图集素材会继承图集权限；取消共享后，被授权用户不能继续访问或使用。'}
+        actions={projectHref && projectHref !== returnContext.href ? <Link className="btn btn-secondary" href={projectHref}>返回原项目</Link> : undefined}
       />
 
-      {error && <div className="album-error">{error}</div>}
+      {loading && !album && <div className={styles.notice} role="status">读取中...</div>}
+      {error && <div className={styles.notice} role="status">{error}</div>}
       {uploadFeedback && !error && (
         <div className={`album-error ${uploadFeedback.type}`}>{uploadFeedback.message}</div>
       )}

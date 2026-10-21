@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
-import { assertCanManageProject, assertCanManageProjectMembers, assertCanViewProject, logProjectAction } from '@/lib/projects/permissions';
+import { assertCanManageProject, assertCanViewProject, compareAndSetProject, getProjectDeletionBlockers, logProjectActionInTransaction, projectStatusVersion, ProjectVersionConflictError } from '@/lib/projects/permissions';
 import { getProjectBudgetSummary } from '@/lib/projects/budget';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { getVideoCardSummaryMap, serializeVideoCardSummary } from '@/lib/video-cards/summary';
@@ -16,6 +16,32 @@ const OFFICIAL_PROJECT_COST_EVENTS = ['official_charge', 'adjustment', 'reversal
 
 const PROJECT_DETAIL_PAGE_SIZE = 20;
 const PROJECT_TASK_FILTERS = new Set(['all', 'running', 'playable', 'failed']);
+
+class ProjectMutationError extends AuthError {
+  constructor(message: string, status: number, public readonly details: Record<string, unknown>) { super(message, status); }
+}
+
+function expectedProjectVersion(body: Record<string, unknown>) {
+  if (typeof body.expected_status !== 'string' || typeof body.expected_updated_at !== 'string'
+    || !Number.isFinite(Date.parse(body.expected_updated_at))) {
+    throw new ProjectMutationError('请刷新项目资料后再保存，当前输入已保留', 400, { code: 'PROJECT_VERSION_REQUIRED' });
+  }
+  return { status: body.expected_status, updated_at: new Date(body.expected_updated_at) };
+}
+
+async function projectCapabilities(access: Awaited<ReturnType<typeof assertCanViewProject>>) {
+  const project = access.project!;
+  const mutableType = !['personal', 'system'].includes(project.type);
+  const blockers = access.canManageProject && mutableType
+    ? await prisma.$transaction((tx) => getProjectDeletionBlockers(tx, project.id)) : [];
+  return {
+    role: access.role, can_manage_project: access.canManageProject, can_manage_members: access.canManageMembers,
+    can_manage_assets: access.canManageAssets, can_generate: access.canGenerate,
+    can_archive: access.canManageProject && mutableType && ['active', 'locked'].includes(project.status),
+    can_restore: access.canManageProject && mutableType && project.status === 'archived',
+    can_delete: access.canManageProject && mutableType && blockers.length === 0,
+  };
+}
 
 function boundedPage(value: string | null) {
   const parsed = Number(value);
@@ -101,19 +127,15 @@ async function getProjectSection(
   const common = {
     project: {
       ...project,
+      status_version: projectStatusVersion(access.project!),
       members: membersSection ? project.members : [],
       invites: canReturnInvites ? project.invites : [],
       _count: project._count,
     },
     viewer_id: user.id,
     budget,
-    permissions: {
-      role: access.role,
-      can_manage_project: access.canManageProject,
-      can_manage_members: access.canManageMembers,
-      can_manage_assets: access.canManageAssets,
-      can_generate: access.canGenerate,
-    },
+    permissions: await projectCapabilities(access),
+    status_version: projectStatusVersion(access.project!),
   };
 
   if (section === 'tasks') {
@@ -431,11 +453,11 @@ export async function GET(
             user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, role: true, status: true, account_type: true } },
           },
         },
-        invites: {
+        invites: access.canManageMembers ? {
           where: { status: 'active' },
           orderBy: { created_at: 'desc' },
           take: 5,
-        },
+        } : false,
         _count: {
           select: {
             members: true,
@@ -766,7 +788,7 @@ export async function GET(
     };
 
     return NextResponse.json({
-      project,
+      project: project ? { ...project, status_version: projectStatusVersion(project) } : null,
       reference_albums: referenceAlbums.map((album) => ({
         ...album,
         image_count: album._count.images,
@@ -803,13 +825,8 @@ export async function GET(
       budget: budgetSummary,
       archive_anomalies: archiveAnomalies,
       review_summary: reviewSummary,
-      permissions: {
-        role: access.role,
-        can_manage_project: access.canManageProject,
-        can_manage_members: access.canManageMembers,
-        can_manage_assets: access.canManageAssets,
-        can_generate: access.canGenerate,
-      },
+      permissions: await projectCapabilities(access),
+      status_version: projectStatusVersion(access.project!),
     });
   } catch (error) {
     if (error instanceof AuthError) {
@@ -831,11 +848,8 @@ export async function PATCH(
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
-    const access = await assertCanManageProject(user, params.id);
-    const project = access.project;
-    if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
-
     const body = await request.json();
+    const expected = expectedProjectVersion(body);
     const data: {
       name?: string;
       description?: string | null;
@@ -854,13 +868,8 @@ export async function PATCH(
     }
 
     const action = typeof body.action === 'string' ? body.action : '';
-    if (project.status === 'archived' && action !== 'restore') {
-      return NextResponse.json({ error: '归档项目为只读，请先恢复后再修改' }, { status: 400 });
-    }
+    if (action && !['archive', 'restore'].includes(action)) return NextResponse.json({ error: '无效的项目操作' }, { status: 400 });
     if (action === 'archive') {
-      if (project.type === 'personal' || project.type === 'system') {
-        return NextResponse.json({ error: '默认项目不能归档' }, { status: 400 });
-      }
       data.status = 'archived';
       data.archived_at = new Date();
     } else if (action === 'restore') {
@@ -872,19 +881,22 @@ export async function PATCH(
       return NextResponse.json({ error: '没有可更新的字段' }, { status: 400 });
     }
 
-    const updated = await prisma.project.update({
-      where: { id: params.id },
-      data,
+    const updated = await prisma.$transaction(async (tx) => {
+      const { project } = await assertCanManageProject(user, params.id, tx);
+      if (!project) throw new AuthError('项目不存在', 404);
+      if (project.status !== expected.status || project.updated_at.getTime() !== expected.updated_at.getTime()) throw new ProjectVersionConflictError(project);
+      if (action && ['personal', 'system'].includes(project.type)) throw new AuthError('默认项目不能归档或恢复', 400);
+      if (action === 'restore' && project.status !== 'archived'
+        || action === 'archive' && !['active', 'locked'].includes(project.status)
+        || !action && project.status !== 'active') throw new AuthError('项目当前只读，请先核对项目状态', 400);
+      await compareAndSetProject(tx, project, expected, data);
+      await logProjectActionInTransaction(tx, user.id, action ? `project_${action}` : 'project_update', 'project', params.id, { fields: Object.keys(data) });
+      return tx.project.findUniqueOrThrow({ where: { id: project.id } });
     });
-
-    await logProjectAction(user.id, action ? `project_${action}` : 'project_update', 'project', params.id, {
-      fields: Object.keys(data),
-    });
-
-    return NextResponse.json({ project: updated });
+    return NextResponse.json({ project: { ...updated, status_version: projectStatusVersion(updated) }, status_version: projectStatusVersion(updated) });
   } catch (error) {
     if (error instanceof AuthError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return NextResponse.json({ error: error.message, ...(error instanceof ProjectMutationError || error instanceof ProjectVersionConflictError ? error.details : {}) }, { status: error.status });
     }
     console.error('[Projects] Update error:', error);
     return NextResponse.json(
@@ -902,35 +914,26 @@ export async function DELETE(
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
-    const access = await assertCanManageProject(user, params.id);
-    const project = access.project;
-    if (!project) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
-
-    if (project.type === 'personal' || project.type === 'system') {
-      return NextResponse.json({ error: '默认项目不能删除' }, { status: 400 });
-    }
-
-    const [taskCount, albumCount] = await Promise.all([
-      prisma.videoTask.count({ where: { project_id: params.id } }),
-      prisma.referenceAlbum.count({ where: { project_id: params.id, status: { not: 'deleted' } } }),
-    ]);
-    if (taskCount > 0 || albumCount > 0) {
-      return NextResponse.json({ error: '项目已有任务或图集，请先归档，不能删除' }, { status: 400 });
-    }
-
-    const updated = await prisma.project.update({
-      where: { id: params.id },
-      data: { status: 'deleted', archived_at: new Date() },
+    const body = await request.json().catch(() => ({}));
+    const expected = expectedProjectVersion(body);
+    const updated = await prisma.$transaction(async (tx) => {
+      const { project } = await assertCanManageProject(user, params.id, tx);
+      if (!project) throw new AuthError('项目不存在', 404);
+      if (project.status !== expected.status || project.updated_at.getTime() !== expected.updated_at.getTime()) throw new ProjectVersionConflictError(project);
+      if (['personal', 'system'].includes(project.type)) throw new AuthError('默认项目不能删除', 400);
+      const blockers = await getProjectDeletionBlockers(tx, project.id);
+      if (blockers.length) throw new ProjectMutationError('项目已有内容或历史记录，请使用归档', 409,
+        { code: 'PROJECT_NOT_EMPTY', blockers, can_archive: ['active', 'locked'].includes(project.status) });
+      await compareAndSetProject(tx, project, expected, { status: 'deleted', archived_at: new Date() });
+      await tx.projectMember.updateMany({ where: { project_id: project.id, status: 'active' }, data: { status: 'removed' } });
+      await tx.projectInvite.updateMany({ where: { project_id: project.id, status: 'active' }, data: { status: 'disabled' } });
+      await logProjectActionInTransaction(tx, user.id, 'project_delete', 'project', params.id, { soft_delete: true });
+      return tx.project.findUniqueOrThrow({ where: { id: project.id } });
     });
-
-    await logProjectAction(user.id, 'project_delete', 'project', params.id, {
-      soft_delete: true,
-    });
-
-    return NextResponse.json({ project: updated });
+    return NextResponse.json({ project: { ...updated, status_version: projectStatusVersion(updated) }, status_version: projectStatusVersion(updated) });
   } catch (error) {
     if (error instanceof AuthError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return NextResponse.json({ error: error.message, ...(error instanceof ProjectMutationError || error instanceof ProjectVersionConflictError ? error.details : {}) }, { status: error.status });
     }
     console.error('[Projects] Delete error:', error);
     return NextResponse.json(

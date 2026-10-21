@@ -4,8 +4,10 @@ import { MultiviewEntry } from '@/components/MultiviewEntry';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import MediaPreview from '@/components/MediaPreview';
 import { VideoLoopButton } from '@/components/VideoLoopButton';
-import { useVideoLoopState } from '@/lib/hooks/use-media-preview-state';
+import { useMediaPreviewState, useVideoLoopState } from '@/lib/hooks/use-media-preview-state';
 import loopStyles from './video-loop.module.css';
+import resultStyles from './TaskResult.module.css';
+import { useAppSession } from '@/lib/context/AppSessionContext';
 import { LoadingSkeleton } from '@/components/LoadingState';
 import { RelativeTime } from '@/components/RelativeTime';
 
@@ -33,7 +35,6 @@ import {
   formatAmountMicrosWithFixedCny,
   formatAmountMinorWithFixedCny,
   formatCurrencyAmountWithFixedCny,
-  formatProviderUsdCharge,
 } from '@/lib/costs/currency';
 import { sanitizeReturnTo, taskDetailHref, taskReturnLabel } from '@/lib/navigation/return-to';
 import { enhanceWorkspaceHref, taskReuseHref } from '@/lib/navigation/task-reuse';
@@ -140,10 +141,6 @@ interface ProjectOption {
   status: string;
   my_role?: string | null;
   can_manage_project?: boolean;
-}
-
-interface AuthMeResponse {
-  user?: { role?: string } | null;
 }
 
 interface VideoCardOption {
@@ -827,7 +824,7 @@ function promptPreview(value: string | null | undefined) {
   return shortLines.length > 360 ? `${shortLines.slice(0, 360)}...` : shortLines;
 }
 
-export default function TaskDetailPage() {
+function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boolean }) {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -836,7 +833,8 @@ export default function TaskDetailPage() {
   const returnLabel = taskReturnLabel(returnTo);
 
   const [task, setTask] = useState<VideoTask | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const activePageRef = useRef(true);
+  useEffect(() => { activePageRef.current = true; return () => { activePageRef.current = false; }; }, []);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [querying, setQuerying] = useState(false);
@@ -900,6 +898,25 @@ export default function TaskDetailPage() {
   const sourceCompareVideoRef = useRef<HTMLVideoElement | null>(null);
   const enhancedCompareVideoRef = useRef<HTMLVideoElement | null>(null);
   const singleResultVideoRef = useRef<HTMLVideoElement | null>(null);
+  const playbackPosition = useMediaPreviewState(undefined, `video_task:${taskId}`, `/api/video/play/${taskId}`);
+  const restoredVideos = useRef(new WeakSet<HTMLVideoElement>());
+  const restorePlaybackPosition = (video: HTMLVideoElement | null) => {
+    if (!video || !playbackPosition.ready || restoredVideos.current.has(video) || !Number.isFinite(video.duration)) return;
+    restoredVideos.current.add(video);
+    if (!video.paused) return;
+    video.currentTime = Math.min(Math.max(0, playbackPosition.value.currentTime), Math.max(0, video.duration - 0.05));
+    video.pause();
+  };
+  const savePlaybackPosition = (video: HTMLVideoElement) => {
+    if (restoredVideos.current.has(video) && playbackPosition.ready) playbackPosition.update({ currentTime: video.currentTime });
+  };
+  useEffect(() => {
+    restorePlaybackPosition(singleResultVideoRef.current);
+    restorePlaybackPosition(sourceCompareVideoRef.current);
+    restorePlaybackPosition(enhancedCompareVideoRef.current);
+  // Saved time changes should not seek a player that is already in use.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playbackPosition.ready, playbackPosition.key, task?.id, task?.local_status]);
   const compareStageRef = useRef<HTMLDivElement | null>(null);
   const compareSyncingRef = useRef(false);
   const [isCompareFullscreen, setIsCompareFullscreen] = useState(false);
@@ -935,13 +952,16 @@ export default function TaskDetailPage() {
     enhanceSourceTask?.public_video_url, enhanceSourceTask?.local_video_path, enhanceSourceTask?.result_video_url]);
 
   const fetchTask = useCallback(async (forceProviderRefresh = false): Promise<VideoTask | null> => {
+    if (!activePageRef.current) return null;
     try {
       const refreshQuery = forceProviderRefresh ? '?refresh=true' : '';
       let res = await fetch(`/api/video/status/${taskId}${refreshQuery}`, {
         cache: 'no-store',
         credentials: 'same-origin',
+        headers: { 'x-app-session-user': ownerId },
       });
       let data = await res.json().catch(() => ({}));
+      if (!activePageRef.current) return null;
 
       const ordinaryStatusRejectedIpTask = res.status === 400
         && `${data?.error || ''} ${data?.message || ''}`.includes('IP');
@@ -949,8 +969,10 @@ export default function TaskDetailPage() {
         res = await fetch(`/api/ip/video/status/${taskId}${refreshQuery}`, {
           cache: 'no-store',
           credentials: 'same-origin',
+          headers: { 'x-app-session-user': ownerId },
         });
         data = await res.json().catch(() => ({}));
+        if (!activePageRef.current) return null;
       }
 
       if (res.ok) {
@@ -971,6 +993,7 @@ export default function TaskDetailPage() {
         ? data.message
         : (typeof data?.error === 'string' ? data.error : `HTTP ${res.status}`);
       setTaskLoadError(message);
+      if ([401, 403, 404].includes(res.status)) { setTask(null); setOfficialCharges([]); }
     } catch (error) {
       console.error('Failed to fetch task:', error);
       setTaskLoadError(error instanceof Error ? error.message : '任务加载失败');
@@ -978,13 +1001,14 @@ export default function TaskDetailPage() {
       setLoading(false);
     }
     return null;
-  }, [taskId]);
+  }, [ownerId, taskId]);
 
   const fetchProjects = useCallback(async () => {
+    if (!isAdmin || !activePageRef.current) return;
     try {
       const res = await fetch('/api/projects?include_archived=true&include_all=true', { cache: 'no-store' });
       const data = await res.json();
-      if (res.ok) {
+      if (res.ok && activePageRef.current) {
         setProjects((data.projects || []).filter((project: ProjectOption) => (
           project.status === 'active' && project.type !== 'system'
         )));
@@ -992,9 +1016,10 @@ export default function TaskDetailPage() {
     } catch (error) {
       console.error('Failed to fetch projects:', error);
     }
-  }, []);
+  }, [isAdmin]);
 
   const fetchOfficialCharges = useCallback(async () => {
+    if (!isAdmin || !activePageRef.current) { setOfficialChargeStatus('unavailable'); return; }
     setOfficialChargeStatus('loading');
     try {
       const res = await fetch('/api/admin/costs/export', { cache: 'no-store' });
@@ -1003,6 +1028,7 @@ export default function TaskDetailPage() {
         return;
       }
       const csv = await res.text();
+      if (!activePageRef.current) return;
       const ledgers = parseCostLedgerCsv(csv, taskId);
       setOfficialCharges((current) => mergeLedgers(current, ledgers));
       setOfficialChargeStatus('ready');
@@ -1010,28 +1036,11 @@ export default function TaskDetailPage() {
       console.error('Failed to fetch official charge ledgers:', error);
       setOfficialChargeStatus((current) => current === 'ready' ? current : 'error');
     }
-  }, [taskId]);
+  }, [isAdmin, taskId]);
 
   useEffect(() => {
     fetchTask();
   }, [fetchTask]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    fetch('/api/auth/me', { cache: 'no-store' })
-      .then((response) => response.json())
-      .then((data: AuthMeResponse) => {
-        if (!cancelled) setIsAdmin(data.user?.role === 'admin');
-      })
-      .catch(() => {
-        if (!cancelled) setIsAdmin(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     fetchProjects();
@@ -1233,7 +1242,7 @@ export default function TaskDetailPage() {
       const lookup = await fetch(`/api/tasks/request-status?${new URLSearchParams({ idempotency_key: `video-retry:${taskId}` })}`, { cache: 'no-store',
         headers: { 'x-app-session-user': retryPricing.actorId! } });
       const prior = await lookup.json();
-      if (retryScopeRef.current !== retryScope) return;
+      if (!activePageRef.current || retryScopeRef.current !== retryScope) return;
       if (!lookup.ok) throw new Error(prior.message || prior.error || '原重试请求暂时无法确认');
       if (prior.task?.id) { sessionStorage.removeItem(retryStorageKey); setRetryUnconfirmed(false); router.push(taskDetailHref(prior.task.id, returnTo)); return; }
       if (sessionStorage.getItem(retryStorageKey)) throw new Error('重试提交结果待确认，请继续查询原请求；不会再次生成');
@@ -1245,7 +1254,7 @@ export default function TaskDetailPage() {
         body: JSON.stringify({ pricing_revision: retryPricing.quote.pricing_revision, pricing_quote_token: retryPricing.quote.pricing_quote_token, max_estimated_cost: retryPricing.quote.estimatedCost }),
       });
       const data = await res.json();
-      if (retryScopeRef.current !== retryScope) return;
+      if (!activePageRef.current || retryScopeRef.current !== retryScope) return;
       if (res.ok) {
         if (typeof data.id !== 'string' || !data.id) throw new Error('受理结果待确认，请查询原请求');
         sessionStorage.removeItem(retryStorageKey); setRetryUnconfirmed(false);
@@ -1326,8 +1335,10 @@ export default function TaskDetailPage() {
     try {
       const res = await fetch(`/api/video/download/${taskId}`, {
         method: 'POST',
+        headers: { 'x-app-session-user': ownerId },
       });
       const data = await res.json();
+      if (!activePageRef.current) return null;
       
       if (res.status === 202) {
         setDownloadProgress(data.message || '视频已生成，正在准备稳定下载文件，请稍后重试。');
@@ -1420,6 +1431,7 @@ export default function TaskDetailPage() {
         return;
       }
 
+      if (!activePageRef.current) return;
       await navigator.clipboard.writeText(taskPlaybackUrl(task));
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -1443,6 +1455,7 @@ export default function TaskDetailPage() {
       if (task.local_status === 'succeeded') {
         setOpenError('外链可能已过期，正在刷新任务状态...');
         const refreshedTask = await fetchTask(true);
+        if (!activePageRef.current) return;
         if (refreshedTask) {
           if (refreshedTask.public_video_url || refreshedTask.local_video_path || refreshedTask.result_video_url) {
             window.location.assign(taskPlaybackUrl(refreshedTask));
@@ -1476,6 +1489,7 @@ export default function TaskDetailPage() {
           : taskPlaybackUrl({ ...task, local_video_path: preparedVideoPath });
       }
 
+      if (!activePageRef.current) return;
       const anchor = document.createElement('a');
       anchor.href = downloadHref;
       anchor.download = `seedance-${task.id}.mp4`;
@@ -1710,10 +1724,11 @@ export default function TaskDetailPage() {
       : (enhanceSourceLoadError || '源视频不可用，暂时只显示超分结果。')
     : '';
   const canUseVideoActions = hasPlayableVideo && !isPublicVideoPreparing;
-  const isProcessing = ['submitted', 'running'].includes(task.local_status);
+  const isSubmissionUnknown = Boolean(task.error_code?.includes('SUBMISSION_UNCONFIRMED') || task.error_code?.includes('SUBMIT_UNCONFIRMED') || task.local_status === 'unknown');
+  const isProcessing = !isSubmissionUnknown && ['submitted', 'running'].includes(task.local_status);
   const modeLabel = TASK_GENERATION_MODE_LABELS[task.generation_mode] || task.generation_mode;
   const resolvedModeLabel = resolvedMode && resolvedMode !== task.generation_mode ? resolvedMode : null;
-  const resultStateTitle = task.local_status === 'failed'
+  const resultStateTitle = isSubmissionUnknown ? '提交结果待确认' : task.local_status === 'failed'
     ? (isEnhanceTask ? '超分失败' : '生成失败')
     : isProcessing
       ? (isEnhanceTask ? '超分处理中' : '生成中')
@@ -1722,14 +1737,14 @@ export default function TaskDetailPage() {
         : hasResultVideo
           ? (isEnhanceTask ? '超分结果' : '生成结果')
           : '暂无结果';
-  const resultDecisionBody = task.local_status === 'failed'
+  const resultDecisionBody = isSubmissionUnknown ? '尚未确认原请求是否受理，请查询原请求。不会自动重新生成。' : task.local_status === 'failed'
     ? (isEnhanceTask ? '这次没有产出可用增强视频，可以回到源任务重新发起。' : '这次没有产出可用视频，可以复用输入重新生成。')
     : isProcessing
       ? (isEnhanceTask ? '超分任务还在处理中，可以刷新状态或开启自动轮询。' : '任务还在生成中，可以刷新状态或开启自动轮询。')
       : isPublicVideoPreparing
         ? '生成已完成，正在准备可流畅播放的视频链接。'
         : hasResultVideo
-          ? '先看结果，再决定下载、复制链接或复用输入继续调整。'
+          ? ''
           : '暂时没有可播放链接，可以重新查询结果。';
   const resultStorageText = hasPublicVideo
     ? '对象存储已就绪'
@@ -1742,7 +1757,7 @@ export default function TaskDetailPage() {
           : task.result_video_url
           ? '远程备用链接'
           : '没有视频链接';
-  const shouldShowRefresh = isProcessing
+  const shouldShowRefresh = isSubmissionUnknown || isProcessing
     || !task.result_video_url
     || isPublicVideoPreparing
     || task.local_status === 'failed';
@@ -1790,14 +1805,13 @@ export default function TaskDetailPage() {
       ? formatAmountMinor(officialCostMinor, task.provider_cost_currency)
       : formatProviderAmount(providerBilling.actualCost, providerBilling.currency);
   const officialBillingTime = providerBilling.billingTime || task.provider_cost_confirmed_at;
-  const resultChargeBadgeText = formatProviderUsdCharge({
-    ...task,
-    provider_actual_cost: providerBilling.actualCost,
-    provider_actual_cost_currency: providerBilling.currency,
-  });
+  const confirmedCurrency = (task.provider_cost_currency || providerBilling.currency || '').toUpperCase();
+  const hasConfirmedCash = ['official_confirmed', 'reconciled'].includes(task.provider_cost_status)
+    && ['CNY', 'RMB', 'USD'].includes(confirmedCurrency)
+    && (officialCostMicros != null || officialCostMinor != null || providerBilling.actualCost != null);
+  const resultChargeBadgeText = hasConfirmedCash ? officialCostText : null;
   const taskCompletedTime = formatTaskTime(task.completed_at || task.updated_at);
   const taskCompletedTimePrefix = task.completed_at ? '生成于' : '更新于';
-  const taskCompletedExactLabel = task.completed_at ? '精确时间' : '更新时间';
   const taskActionHref = isEnhanceTask
     ? enhanceWorkspaceHref(returnTo, enhanceSourceTaskId)
     : taskReuseHref(task, returnTo);
@@ -1809,15 +1823,6 @@ export default function TaskDetailPage() {
     : task.frozen_cost !== null && task.frozen_cost !== undefined
       ? `冻结 ${formatCreditPoints(task.frozen_cost)}`
       : '待结算';
-  const resultPrimaryAction = task.local_status === 'failed'
-    ? 'reuse'
-    : isProcessing || isPublicVideoPreparing
-      ? 'refresh'
-      : hasPlayableVideo
-        ? 'open'
-        : shouldShowRefresh
-          ? 'refresh'
-          : 'reuse';
   const inputChips = isEnhanceTask
     ? [
         modeLabel,
@@ -1853,10 +1858,10 @@ export default function TaskDetailPage() {
     : task.template_id
       ? shortId(task.template_id, 16)
       : null;
-  const agentRunHref = task.agent_run_id ? `/admin/agent-runs/${task.agent_run_id}` : null;
+  const agentRunHref = isAdmin && task.agent_run_id ? `/admin/agent-runs/${task.agent_run_id}` : null;
 
   return (
-    <div className="task-detail-page">
+    <div className={`task-detail-page ${resultStyles.page}`}>
       {taskLoadError && <div className="alert alert-warning" role="alert">最新状态读取失败：{taskLoadError}。可以重新刷新状态，现有结果仍保留。</div>}
       {openError && <div className="alert alert-warning" role="alert">{openError}</div>}
       <div className="task-result-topbar">
@@ -1866,7 +1871,7 @@ export default function TaskDetailPage() {
         </Link>
         <div className="task-result-topbar-actions">
           <span className={`status-badge ${getStatusClass(task.local_status)}`}>
-            {getStatusText(task.local_status)}
+            {isSubmissionUnknown ? '提交结果待确认' : getStatusText(task.local_status)}
           </span>
           {task.retention_status && task.retention_status !== 'active' && (
             <span className={`status-badge ${getRetentionClass(task.retention_status)}`}>
@@ -1889,39 +1894,11 @@ export default function TaskDetailPage() {
       <div className="task-detail-layout">
         <main className="task-detail-main">
           <div className="task-result-workspace">
-            <section className="task-detail-card task-result-panel">
+            <section className={`task-detail-card task-result-panel ${resultStyles.resultPanel}`}>
               <div className="task-card-head task-result-head">
                 <div className="task-result-copy">
                   <h1 className="task-result-title">{resultStateTitle}</h1>
-                  <p>{resultDecisionBody}</p>
-                  {resultChargeBadgeText && (
-                    <div className="task-result-cost-pill" title={`实际扣费 ${resultChargeBadgeText}`}>
-                      <span>实际扣费</span>
-                      <strong>{resultChargeBadgeText}</strong>
-                    </div>
-                  )}
-                </div>
-                <div className="task-action-row task-primary-action">
-                  {resultPrimaryAction === 'reuse' && (
-                    taskActionHref ? <Link href={taskActionHref} className="btn btn-primary">
-                      <RotateCcw size={16} aria-hidden="true" />
-                      {taskActionLabel}
-                    </Link> : <button type="button" className="btn btn-primary" disabled title="此类型任务暂不支持直接复用输入">
-                      暂不能复用
-                    </button>
-                  )}
-                  {resultPrimaryAction === 'refresh' && (
-                    <button className="btn btn-primary" onClick={queryStatus} disabled={querying}>
-                      <RefreshCcw size={16} aria-hidden="true" />
-                      {querying ? '查询中...' : '刷新结果'}
-                    </button>
-                  )}
-                  {resultPrimaryAction === 'open' && (
-                    <button className="btn btn-primary" onClick={handleOpenVideo} disabled={openingVideo || downloading}>
-                      <ExternalLink size={16} aria-hidden="true" />
-                      {openingVideo ? '打开中...' : '打开视频'}
-                    </button>
-                  )}
+                  {resultDecisionBody && <p>{resultDecisionBody}</p>}
                 </div>
               </div>
               {isEnhanceTask && (
@@ -1932,24 +1909,6 @@ export default function TaskDetailPage() {
                   {' '}不会自动创建任务。
                 </p>
               )}
-
-              <div className="task-result-identity-bar">
-                <UserIdentityBadge user={taskOwner} subtitle="生成者" />
-                <div className="task-result-origin-meta">
-                  <span>项目：{task.project?.name || '未归属项目'}</span>
-                  {showVideoCardManagementUi && (
-                    <span>
-                      视频卡：{task.video_card ? (
-                        <Link className="link" href={`/projects/${task.video_card.project_id}/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
-                      ) : '历史未归档'}
-                    </span>
-                  )}
-                  {templateLabel && <span>模板：{templateLabel}</span>}
-                  {task.selected_agent_plan_key && <span>方案：{task.selected_agent_plan_key}</span>}
-                  <span>来源：{taskSourceText}</span>
-                  {task.source_request_id && <span>请求：{shortId(task.source_request_id, 14)}</span>}
-                </div>
-              </div>
 
               <div
                 ref={compareStageRef}
@@ -1985,6 +1944,8 @@ export default function TaskDetailPage() {
                           muted
                           preload="metadata"
                           src={enhanceSourceVideoSrc}
+                          onLoadedMetadata={(event) => restorePlaybackPosition(event.currentTarget)}
+                          onTimeUpdate={(event) => savePlaybackPosition(event.currentTarget)}
                           onError={() => { setVideoError(true); sourceCompareVideoRef.current?.pause(); enhancedCompareVideoRef.current?.pause(); }}
                           onPlay={() => handleComparePlay('source')}
                           onPause={() => handleComparePause('source')}
@@ -2006,6 +1967,8 @@ export default function TaskDetailPage() {
                           playsInline
                           preload="metadata"
                           src={videoSrc}
+                          onLoadedMetadata={(event) => restorePlaybackPosition(event.currentTarget)}
+                          onTimeUpdate={(event) => savePlaybackPosition(event.currentTarget)}
                           onError={() => { setVideoError(true); sourceCompareVideoRef.current?.pause(); enhancedCompareVideoRef.current?.pause(); }}
                           onCanPlay={() => setVideoError(false)}
                           onPlay={() => handleComparePlay('enhanced')}
@@ -2026,6 +1989,8 @@ export default function TaskDetailPage() {
                       playsInline
                       preload="metadata"
                       src={videoSrc}
+                      onLoadedMetadata={(event) => restorePlaybackPosition(event.currentTarget)}
+                      onTimeUpdate={(event) => savePlaybackPosition(event.currentTarget)}
                       onError={() => setVideoError(true)}
                       onCanPlay={() => setVideoError(false)}
                     >
@@ -2036,8 +2001,8 @@ export default function TaskDetailPage() {
                   <div className={`task-result-empty task-result-empty-${task.local_status}`}>
                     <strong>{resultStateTitle}</strong>
                     <span>
-                      {task.local_status === 'failed'
-                        ? (task.error_message || '生成失败，可以复用输入重新生成。')
+                      {isSubmissionUnknown ? resultDecisionBody : task.local_status === 'failed'
+                        ? '生成未完成，可展开下方原因，或复用输入后主动重新生成。'
                         : isProcessing
                           ? '生成中，可刷新结果或开启自动轮询。'
                           : resultDecisionBody}
@@ -2111,13 +2076,22 @@ export default function TaskDetailPage() {
 
               <div className="task-result-actions">
                 {hasResultVideo && <MultiviewEntry contentKey={`video_task:${task.id}`} />}
-                {shouldShowRefresh && resultPrimaryAction !== 'refresh' && (
+                {shouldShowRefresh && (
                   <button className="btn btn-secondary" onClick={queryStatus} disabled={querying}>
                     <RefreshCcw size={16} aria-hidden="true" />
-                    {querying ? '查询中...' : '刷新结果'}
+                    {querying ? '查询中...' : isSubmissionUnknown ? '查询原请求' : '刷新结果'}
                   </button>
                 )}
-                {canUseVideoActions && resultPrimaryAction !== 'open' && (
+                {canUseVideoActions && <details className={resultStyles.more}>
+                  <summary>更多操作</summary>
+                  <div>
+                    <button className="btn btn-secondary" type="button" onClick={() => {
+                      for (const video of [singleResultVideoRef.current, sourceCompareVideoRef.current, enhancedCompareVideoRef.current]) {
+                        if (video) { video.pause(); video.currentTime = 0; }
+                      }
+                      playbackPosition.reset();
+                    }}><RotateCcw size={16} aria-hidden="true" />回到开头</button>
+                {canUseVideoActions && (
                   <button className="btn btn-secondary" onClick={handleOpenVideo} disabled={openingVideo || downloading}>
                     <ExternalLink size={16} aria-hidden="true" />
                     {openingVideo ? '打开中...' : '打开视频'}
@@ -2129,7 +2103,9 @@ export default function TaskDetailPage() {
                     {copyingLink ? '复制中...' : copied ? '已复制' : hasPublicVideo ? '复制播放链接' : '复制备用链接'}
                   </button>
                 )}
-                {resultPrimaryAction !== 'reuse' && (
+                  </div>
+                </details>}
+                {!isSubmissionUnknown && (
                   taskActionHref ? <Link href={taskActionHref} className="btn btn-secondary">
                     <RotateCcw size={16} aria-hidden="true" />
                     {taskActionLabel}
@@ -2139,7 +2115,7 @@ export default function TaskDetailPage() {
                 )}
                 {canUseVideoActions && (
                   <button
-                    className="btn btn-secondary"
+                    className={`btn btn-primary ${resultStyles.download}`}
                     onClick={handleBrowserDownloadVideo}
                     disabled={browserDownloading || downloading}
                     title={hasPublicVideo ? '从对象存储下载视频' : '下载备用视频文件'}
@@ -2197,17 +2173,19 @@ export default function TaskDetailPage() {
 
             <aside className="task-detail-card task-decision-panel">
               <div className="task-decision-head">
-                <span>本次任务</span>
-                <strong title={task.id}>{shortId(task.id, 16)}</strong>
+                <UserIdentityBadge user={taskOwner} subtitle="生成者" />
               </div>
               <div className="task-decision-price">
-                <span>实际扣费</span>
-                <strong>{resultChargeBadgeText || '待官方确认'}</strong>
+                <span>已确认实际消耗</span>
+                <strong>{resultChargeBadgeText || '实际费用待核'}</strong>
+                {resultChargeBadgeText && confirmedCurrency === 'USD' && <small>人民币折算 · 1 USD = 7 CNY</small>}
                 <small title={taskCompletedTime.absolute}>
                   {taskCompletedTimePrefix} <RelativeTime value={task.completed_at || task.updated_at} />
                 </small>
               </div>
               <div className="task-decision-list">
+                <div><span>模型</span><strong>{task.model || task.provider}</strong></div>
+                <div><span>视频规格</span><strong>{[task.duration ? `${task.duration}秒` : null, task.ratio, task.resolution].filter(Boolean).join(' · ') || '待同步'}</strong></div>
                 <div><span>点数扣除</span><strong>{taskCreditText}</strong></div>
                 <div><span>视频保存</span><strong>{resultStorageText}</strong></div>
                 <div><span>项目</span><strong>{task.project?.name || '未归属'}</strong></div>
@@ -2221,26 +2199,15 @@ export default function TaskDetailPage() {
                     </strong>
                   </div>
                 )}
-                {templateLabel && <div><span>模板</span><strong>{templateLabel}</strong></div>}
-                {task.selected_agent_plan_key && <div><span>Agent 方案</span><strong>{task.selected_agent_plan_key}</strong></div>}
-                {typeof task.prompt_user_edited === 'boolean' && (
-                  <div><span>Prompt 编辑</span><strong>{task.prompt_user_edited ? '用户改过' : '沿用方案'}</strong></div>
-                )}
-                <div><span>输入</span><strong>{inputChips.join(' · ') || '无参数记录'}</strong></div>
                 {isEnhanceTask && (
                   <div>
                     <span>源任务</span>
                     <strong>{enhanceSourceTaskId ? shortId(enhanceSourceTaskId, 16) : '外部视频 URL'}</strong>
                   </div>
                 )}
-                <div>
-                  <span>{taskCompletedExactLabel}</span>
-                  <strong><RelativeTime value={task.completed_at || task.updated_at} /></strong>
-                </div>
-                <div><span>Provider 状态</span><strong>{task.provider_status || '-'}</strong></div>
               </div>
               <div className="task-decision-note">
-                {task.local_status === 'failed'
+                {isSubmissionUnknown ? '原提交还未确认，只查询原请求。' : task.local_status === 'failed'
                   ? '这次任务未产出可用视频，优先复用输入调整。'
                   : hasPublicVideo
                     ? '对象存储链接已就绪，可以直接播放和下载。'
@@ -2255,19 +2222,17 @@ export default function TaskDetailPage() {
             </aside>
           </div>
 
-          {task.local_status === 'failed' && task.error_message && (
-            <section className="task-detail-card task-error-card">
-              <div className="task-card-head">
-                <h2>失败原因</h2>
-              </div>
+          {task.error_message && (
+            <details className={`task-detail-card ${resultStyles.disclosure}`}>
+              <summary>{isSubmissionUnknown ? '原请求说明' : '查看详细原因'}</summary>
               <p>{task.error_message}</p>
-            </section>
+            </details>
           )}
 
-          <section className="task-detail-card task-input-review">
+          <details className={`task-detail-card task-input-review ${resultStyles.disclosure}`}>
+            <summary>输入与提示词</summary>
             <div className="task-card-head">
               <div>
-                <h2>输入复盘</h2>
                 <p>{inputChips.join(' · ') || '无参数记录'}{referenceSummaryItems.length > 0 ? ` · ${referenceSummaryItems.join(' · ')}` : ''}</p>
               </div>
               <div className="task-action-row">
@@ -2431,7 +2396,7 @@ export default function TaskDetailPage() {
               </div>
               </div>
             )}
-          </section>
+          </details>
 
           <details className="task-detail-card task-ops-panel">
             <summary>账务与排障</summary>
@@ -2443,6 +2408,9 @@ export default function TaskDetailPage() {
             </div>
 
             <div className="task-ops-summary">
+              <div><span>来源</span><strong>{taskSourceText}</strong></div>
+              {task.source_request_id && <div><span>原请求</span><strong>{shortId(task.source_request_id, 18)}</strong></div>}
+              {typeof task.prompt_user_edited === 'boolean' && <div><span>提示词</span><strong>{task.prompt_user_edited ? '用户修改过' : '沿用原方案'}</strong></div>}
               <div><span>任务 ID</span><strong title={task.id}>{shortId(task.id, 16)}</strong></div>
               <div><span>Provider ID</span><strong title={task.provider_task_id || ''}>{shortId(task.provider_task_id, 16)}</strong></div>
               <div><span>Provider 状态</span><strong>{task.provider_status || '-'}</strong></div>
@@ -2696,4 +2664,13 @@ export default function TaskDetailPage() {
       </div>
     </div>
   );
+}
+
+export default function TaskDetailPage() {
+  const { user, hasLoadedUser, loadingUser, refreshUser } = useAppSession();
+  const params = useParams();
+  useEffect(() => { if (!hasLoadedUser && !loadingUser) void refreshUser(); }, [hasLoadedUser, loadingUser, refreshUser]);
+  if (!hasLoadedUser || loadingUser) return <LoadingSkeleton label="正在确认账号" />;
+  if (!user) return <p>登录后查看任务。<Link className="link" href={`/login?return_to=${encodeURIComponent(`/tasks/${String(params.id)}`)}`}>前往登录</Link></p>;
+  return <TaskDetailContent key={`${user.id}:${user.role}:${String(params.id)}`} ownerId={user.id} isAdmin={user.role === 'admin'} />;
 }

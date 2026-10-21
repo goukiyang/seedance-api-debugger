@@ -6,6 +6,8 @@ import { adminNavGroups, isNavItemActive, isNavItemVisible, userNavGroups, type 
 
 interface SideNavProps {
   isAdmin: boolean;
+  mobile?: boolean;
+  onNavigate?: () => void;
   user?: {
     role?: string | null;
     account_type?: string | null;
@@ -17,8 +19,10 @@ interface SideNavProps {
 function SideNavGroup({
   group,
   user,
+  onNavigate,
 }: {
   group: NavGroup;
+  onNavigate?: () => void;
   user?: {
     role?: string | null;
     account_type?: string | null;
@@ -43,6 +47,7 @@ function SideNavGroup({
               href={item.href}
               className={`shell-nav-link${active ? ' active' : ''}`}
               aria-current={active ? 'page' : undefined}
+              onClick={onNavigate}
             >
               {item.label}
             </Link>
@@ -53,17 +58,17 @@ function SideNavGroup({
   );
 }
 
-export default function SideNav({ isAdmin, user }: SideNavProps) {
+export default function SideNav({ isAdmin, user, mobile = false, onNavigate }: SideNavProps) {
   const pathname = usePathname();
   const inAdmin = isAdmin && (pathname === '/admin' || pathname.startsWith('/admin/'));
   return (
-    <aside className="shell-sidebar">
-      {!inAdmin && userNavGroups.map((group) => (
-        <SideNavGroup group={group} user={user} key={group.title} />
+    <aside className={mobile ? 'shell-sidebar shell-sidebar-mobile' : 'shell-sidebar'} aria-label="页面导航">
+      {(!inAdmin || mobile) && userNavGroups.map((group) => (
+        <SideNavGroup group={group} user={user} onNavigate={onNavigate} key={group.title} />
       ))}
 
       {isAdmin && adminNavGroups.map((group) => (
-        <SideNavGroup group={group} user={user} key={group.title} />
+        <SideNavGroup group={group} user={user} onNavigate={onNavigate} key={group.title} />
       ))}
     </aside>
   );

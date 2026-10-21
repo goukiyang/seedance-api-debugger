@@ -3,7 +3,12 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
-import { ensureDefaultProjectForUser, getTaskWhereForUser, logProjectAction } from '@/lib/projects/permissions';
+import { ensureDefaultProjectForUser, getTaskWhereForUser, getProjectDeletionBlockers, projectListOperationProjection } from '@/lib/projects/permissions';
+import { createTeamProject, ProjectOperationError } from '@/lib/projects/operations';
+import { isFeatureAllowed } from '@/lib/access/feature-guard';
+import { createSelfUsageScope } from '@/lib/usage/access';
+import { getUsageReport } from '@/lib/usage/personal';
+import { parseUsageQuery } from '@/lib/usage/query';
 import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { countDownloadableProjectTasks } from '@/lib/video/bulk-download';
@@ -15,10 +20,22 @@ function boundedInteger(value: string | null, fallback: number, min: number, max
   return Math.min(max, Math.max(min, Number(value)));
 }
 
+async function getProjectListOperationFields(
+  project: { id: string; type: string; status: string; updated_at: Date },
+  canManageProject: boolean,
+) {
+  const blockers = canManageProject && !['personal', 'system'].includes(project.type)
+    ? await prisma.$transaction(tx => getProjectDeletionBlockers(tx, project.id))
+    : null;
+  return projectListOperationProjection(project, canManageProject, blockers);
+}
+
 export async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    const managementAllowed = isFeatureAllowed(user, 'team_project_manage');
+    const capabilities = { can_create_team_project: managementAllowed, create_operation_version: 1 };
 
     const home = request.nextUrl.searchParams.get('summary') === 'home';
     const lite = request.nextUrl.searchParams.get('lite') === 'true';
@@ -52,7 +69,7 @@ export async function GET(request: NextRequest) {
             local_video_path: true, result_video_url: true, result_last_frame_url: true, delivery_status: true } });
         items.push({ ...project, thumbnailUrl: task ? taskThumbnailProjection(task).thumbnail_url : null });
       }
-      return NextResponse.json({ projects: items }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
+      return NextResponse.json({ projects: items, capabilities }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
     }
 
     if (lite) {
@@ -91,6 +108,7 @@ export async function GET(request: NextRequest) {
           })) as LiteProject[];
 
       return NextResponse.json({
+        capabilities,
         projects: projects.map((project) => {
           const memberRole = project.members?.[0]?.role || null;
           const myRole = includeAll
@@ -105,8 +123,8 @@ export async function GET(request: NextRequest) {
             owner_user_id: project.owner_user_id,
             my_role: myRole,
             can_generate: isActiveNonSystem && myRole !== null && myRole !== 'viewer',
-            can_manage_project: myRole === 'admin' || myRole === 'project_owner',
-            can_manage_assets: isActiveNonSystem && ['admin', 'project_owner', 'editor'].includes(myRole || ''),
+            can_manage_project: managementAllowed && (myRole === 'admin' || myRole === 'project_owner'),
+            can_manage_assets: isActiveNonSystem && (project.type === 'personal' || managementAllowed) && ['admin', 'project_owner', 'editor'].includes(myRole || ''),
           };
         }),
       });
@@ -202,21 +220,6 @@ export async function GET(request: NextRequest) {
       const activeTaskCountByProject = new Map(
         activeTaskRows.flatMap((row) => row.project_id ? [[row.project_id, row._count._all] as const] : []),
       );
-      const deleteCandidateProjectIds = projects
-        .filter((project) => project.type === 'team' && (includeAll
-          || project.owner_user_id === user.id
-          || ['admin', 'project_owner'].includes(project.members[0]?.role || '')))
-        .map((project) => project.id);
-      const fullTaskCountRows = deleteCandidateProjectIds.length > 0
-        ? await prisma.videoTask.groupBy({
-            by: ['project_id'],
-            where: { project_id: { in: deleteCandidateProjectIds } },
-            _count: { _all: true },
-          })
-        : [];
-      const fullTaskCountByProject = new Map(
-        fullTaskCountRows.flatMap((row) => row.project_id ? [[row.project_id, row._count._all] as const] : []),
-      );
       const projectItems = await Promise.all(projects.map(async (project) => {
         const taskWhere = await getTaskWhereForUser(user, project.id);
         const task = await prisma.videoTask.findFirst({
@@ -235,21 +238,21 @@ export async function GET(request: NextRequest) {
         const myRole = includeAll
           ? 'admin'
           : (project.owner_user_id === user.id ? 'project_owner' : project.members[0]?.role || null);
-        const canManageProject = myRole === 'admin' || myRole === 'project_owner';
+        const canManageProject = managementAllowed && (myRole === 'admin' || myRole === 'project_owner');
+        const operationFields = await getProjectListOperationFields(project, canManageProject);
         const isActiveNonSystem = project.status === 'active' && project.type !== 'system';
         return {
           ...project,
+          ...operationFields,
           my_role: myRole,
           can_generate: isActiveNonSystem && myRole !== null && myRole !== 'viewer',
-          can_manage_project: myRole === 'admin' || myRole === 'project_owner',
+          can_manage_project: canManageProject,
           ...(canManageProject ? {
-            legacy_can_delete: project.type === 'team'
-              && (fullTaskCountByProject.get(project.id) ?? 0) === 0
-              && project._count.reference_albums === 0,
+            legacy_can_delete: operationFields.can_delete,
           } : {}),
-          can_manage_members: (myRole === 'admin' || myRole === 'project_owner')
+          can_manage_members: canManageProject
             && ['team', 'public'].includes(project.type),
-          can_manage_assets: isActiveNonSystem && ['admin', 'project_owner', 'editor'].includes(myRole || ''),
+          can_manage_assets: isActiveNonSystem && (project.type === 'personal' || managementAllowed) && ['admin', 'project_owner', 'editor'].includes(myRole || ''),
           active_task_count: activeTaskCountByProject.get(project.id) || 0,
           downloadable_task_count: downloadableCountByProject.get(project.id) || 0,
           thumbnail_url: task ? taskThumbnailProjection(task).thumbnail_url : null,
@@ -265,11 +268,27 @@ export async function GET(request: NextRequest) {
         };
       }
 
+      let usageSummary = null;
+      let usageSummaryError: string | null = null;
+      try {
+        const self = createSelfUsageScope(user);
+        const usageParams = new URLSearchParams();
+        const timeZone = params.get('time_zone');
+        if (timeZone) usageParams.set('time_zone', timeZone);
+        const report = await getUsageReport(self, parseUsageQuery(usageParams, self));
+        usageSummary = { scope: report.scope, query: report.query, asOf: report.asOf, fingerprint: report.fingerprint,
+          range: report.range, summary: report.summary, coverage: report.coverage, restricted: report.restricted };
+      } catch {
+        usageSummaryError = '本月本人用量暂时无法读取，请稍后重试';
+      }
       return NextResponse.json({
+        capabilities,
         projects: projectItems,
         personal_project: personalItem,
         pagination: { page, page_size: pageSize, total, total_pages: totalPages },
         filters: { search, status: selectedStatus, sort, scope },
+        usage_summary: usageSummary,
+        usage_summary_error: usageSummaryError,
       }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
     }
 
@@ -296,22 +315,26 @@ export async function GET(request: NextRequest) {
     const downloadableCountByProject = await countDownloadableProjectTasks(projects.map((project) => project.id));
 
     return NextResponse.json({
-      projects: projects.map((project) => {
+      capabilities,
+      projects: await Promise.all(projects.map(async (project) => {
         const myRole = includeAll
           ? 'admin'
           : (project.owner_user_id === user.id ? 'project_owner' : project.members[0]?.role || null);
+        const canManageProject = managementAllowed && (myRole === 'admin' || myRole === 'project_owner');
+        const operationFields = await getProjectListOperationFields(project, canManageProject);
         const isActiveNonSystem = project.status === 'active' && project.type !== 'system';
         return {
           ...project,
+          ...operationFields,
           my_role: myRole,
           can_generate: isActiveNonSystem && myRole !== null && myRole !== 'viewer',
-          can_manage_project: myRole === 'admin' || myRole === 'project_owner',
-          can_manage_members: (myRole === 'admin' || myRole === 'project_owner')
+          can_manage_project: canManageProject,
+          can_manage_members: canManageProject
             && ['team', 'public'].includes(project.type),
-          can_manage_assets: isActiveNonSystem && ['admin', 'project_owner', 'editor'].includes(myRole || ''),
+          can_manage_assets: isActiveNonSystem && (project.type === 'personal' || managementAllowed) && ['admin', 'project_owner', 'editor'].includes(myRole || ''),
           downloadable_task_count: downloadableCountByProject.get(project.id) || 0,
         };
-      }),
+      })),
     });
   } catch (error) {
     console.error('[Projects] List error:', error);
@@ -328,60 +351,17 @@ export async function POST(request: NextRequest) {
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
     const body = await request.json();
-    const name = typeof body.name === 'string' ? body.name.trim() : '';
-    if (!name) return NextResponse.json({ error: '项目名称不能为空' }, { status: 400 });
-
-    const type = body.type === 'personal' ? 'personal' : 'team';
-    if (type === 'personal') {
+    if (body.type === 'personal' && body.requestId === undefined && body.operationVersion === undefined) {
+      if (typeof body.name !== 'string' || !body.name.trim()) return NextResponse.json({ error: '项目名称不能为空' }, { status: 400 });
       const existing = await ensureDefaultProjectForUser(user.id);
       return NextResponse.json({ project: existing, deduplicated: true });
     }
 
-    const project = await prisma.$transaction(async (tx) => {
-      const created = await tx.project.create({
-        data: {
-          name,
-          description: typeof body.description === 'string' ? body.description.trim() || null : null,
-          type: 'team',
-          visibility: 'private',
-          owner_user_id: user.id,
-          created_by: user.id,
-          status: 'active',
-        },
-      });
-
-      await tx.projectMember.create({
-        data: {
-          project_id: created.id,
-          user_id: user.id,
-          role: 'project_owner',
-          joined_by: user.id,
-        },
-      });
-
-      await tx.operationLog.create({
-        data: {
-          operator_id: user.id,
-          action: 'project_create',
-          target_type: 'project',
-          target_id: created.id,
-          detail: JSON.stringify({ name, type: 'team' }),
-        },
-      });
-
-      return created;
-    });
-
-    await logProjectAction(user.id, 'project_member_join', 'project', project.id, {
-      user_id: user.id,
-      role: 'project_owner',
-      source: 'create_project',
-    });
-
-    return NextResponse.json({ project });
+    const result = await createTeamProject(user, body);
+    return NextResponse.json(result.body, { status: result.status, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   } catch (error) {
     if (error instanceof AuthError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return NextResponse.json({ error: error.message, ...(error instanceof ProjectOperationError ? { code: error.code } : {}) }, { status: error.status });
     }
     console.error('[Projects] Create error:', error);
     return NextResponse.json(

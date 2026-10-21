@@ -17,6 +17,9 @@ import { showVideoCardManagementUi } from '@/lib/navigation';
 import { sanitizeOptionalReturnTo, taskDetailHref } from '@/lib/navigation/return-to';
 import { enhanceWorkspaceHref, taskReuseHref } from '@/lib/navigation/task-reuse';
 import { useAppSession } from '@/lib/context/AppSessionContext';
+import UsageWorkspace from '@/components/usage/UsageWorkspace';
+import { projectStatusExpectation } from '@/lib/projects/client-operations';
+import styles from '../Projects.module.css';
 
 type ProjectSection = 'tasks' | 'albums' | 'finance' | 'members';
 type ProjectViewState = {
@@ -102,6 +105,8 @@ interface ProjectDetail {
   visibility: string;
   status: string;
   owner_user_id: string;
+  updated_at?: string;
+  status_version?: { status: string; updated_at: string };
   owner?: { id?: string; name: string | null; username: string | null; email?: string | null; avatar_url?: string | null; account_type?: string | null };
   members: Array<{
     id: string;
@@ -233,6 +238,9 @@ interface SimilarVideoCardItem {
 }
 
 interface ProjectPermissions {
+  can_archive?: boolean;
+  can_restore?: boolean;
+  can_delete?: boolean;
   can_manage_project: boolean;
   can_manage_members: boolean;
   can_manage_assets: boolean;
@@ -401,10 +409,6 @@ function videoCardStatusLabel(status: string): string {
   if (status === 'archived') return '已归档';
   if (status === 'discarded') return '已废弃';
   return status || '-';
-}
-
-function canDeleteProject(project: ProjectDetail): boolean {
-  return project.type === 'team' && (project._count?.tasks ?? 0) === 0 && (project._count?.reference_albums ?? 0) === 0;
 }
 
 function canShowDeleteProjectAction(project: ProjectDetail): boolean {
@@ -654,6 +658,13 @@ export default function ProjectDetailPage() {
   const [joinUrl, setJoinUrl] = useState('');
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [savingProject, setSavingProject] = useState(false);
+  const [addingMember, setAddingMember] = useState(false);
+  const [creatingInvite, setCreatingInvite] = useState(false);
+  const savingProjectRef = useRef(false);
+  const addingMemberRef = useRef(false);
+  const creatingInviteRef = useRef(false);
   const [videoCardTitle, setVideoCardTitle] = useState('');
   const [videoCardObjective, setVideoCardObjective] = useState('');
   const [creatingVideoCard, setCreatingVideoCard] = useState(false);
@@ -711,6 +722,8 @@ export default function ProjectDetailPage() {
     setJoinUrl('');
     setEditName('');
     setEditDescription('');
+    setSettingsOpen(false); setSavingProject(false); setAddingMember(false); setCreatingInvite(false);
+    savingProjectRef.current = false; addingMemberRef.current = false; creatingInviteRef.current = false;
     setVideoCardTitle('');
     setVideoCardObjective('');
     setCreatingVideoCard(false);
@@ -844,8 +857,10 @@ export default function ProjectDetailPage() {
       });
       const draftIdentity = `${nextViewerId}:${data.project?.id || projectId}`;
       if (initializedDraftsFor.current !== draftIdentity) {
-        setEditName(data.project?.name || '');
-        setEditDescription(data.project?.description || '');
+        let draft: { name?: string; description?: string } | null = null;
+        try { const raw = localStorage.getItem(`sd2:project-info-draft:v1:${draftIdentity}`); if (raw) draft = JSON.parse(raw); } catch { /* Keep server values when local drafts cannot be read. */ }
+        setEditName(typeof draft?.name === 'string' ? draft.name : data.project?.name || '');
+        setEditDescription(typeof draft?.description === 'string' ? draft.description : data.project?.description || '');
         initializedDraftsFor.current = draftIdentity;
       }
       if (section === 'tasks') {
@@ -937,18 +952,24 @@ export default function ProjectDetailPage() {
     try {
       window.localStorage.setItem(projectViewStorageKey(projectId, viewerId), JSON.stringify(workspace));
     } catch { /* Local preferences are best-effort and never block project work. */ }
-    const query = new URLSearchParams({
-      view: workspace.section,
-      task_page: String(workspace.taskPage),
-      task_status: workspace.taskStatus,
-      task_sort: workspace.taskSort,
-      album_page: String(workspace.albumPage),
-      finance_page: String(workspace.financePage),
-    });
+    const query = new URLSearchParams(window.location.search);
+    query.set('view', workspace.section);
+    query.set('task_page', String(workspace.taskPage));
+    query.set('task_status', workspace.taskStatus);
+    query.set('task_sort', workspace.taskSort);
+    query.set('album_page', String(workspace.albumPage));
+    query.set('finance_page', String(workspace.financePage));
     if (workspace.taskSearch) query.set('task_q', workspace.taskSearch);
+    else query.delete('task_q');
     query.set('return_to', projectListReturnTo);
     window.history.replaceState(window.history.state, '', `/projects/${encodeURIComponent(projectId)}?${query.toString()}${window.location.hash}`);
   }, [workspace, viewerId, projectId, identityKey, loadedDataIdentity, projectListReturnTo]);
+
+  useEffect(() => {
+    if (!viewerId || loadedDataIdentity !== identityKey || initializedDraftsFor.current !== `${viewerId}:${projectId}`) return;
+    try { localStorage.setItem(`sd2:project-info-draft:v1:${viewerId}:${projectId}`, JSON.stringify({ name: editName, description: editDescription })); }
+    catch { /* A failed save keeps the current form visible; it never submits automatically. */ }
+  }, [editDescription, editName, identityKey, loadedDataIdentity, projectId, viewerId]);
 
   useEffect(() => {
     if (workspace.section !== 'tasks' || !tasks.length || !window.location.hash.startsWith('#task-')) return;
@@ -958,6 +979,8 @@ export default function ProjectDetailPage() {
 
   const addMember = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (addingMemberRef.current || !permissions.can_manage_members) return;
+    addingMemberRef.current = true; setAddingMember(true);
     const operation = beginOperation('member');
     if (!isCurrentOperation(operation)) return;
     setError('');
@@ -981,10 +1004,14 @@ export default function ProjectDetailPage() {
       await loadProject();
     } catch (err) {
       if (isCurrentOperation(operation)) setError(err instanceof Error ? err.message : '添加成员失败');
+    } finally {
+      if (isCurrentOperation(operation)) { addingMemberRef.current = false; setAddingMember(false); }
     }
   };
 
   const createInvite = async () => {
+    if (creatingInviteRef.current || !permissions.can_manage_members) return;
+    creatingInviteRef.current = true; setCreatingInvite(true);
     const operation = beginOperation('invite');
     if (!isCurrentOperation(operation)) return;
     setError('');
@@ -1009,11 +1036,14 @@ export default function ProjectDetailPage() {
       await loadProject();
     } catch (err) {
       if (isCurrentOperation(operation)) setError(err instanceof Error ? err.message : '创建邀请失败');
+    } finally {
+      if (isCurrentOperation(operation)) { creatingInviteRef.current = false; setCreatingInvite(false); }
     }
   };
 
   const updateProjectInfo = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (!project || savingProjectRef.current) return;
     const operation = beginOperation('rename');
     if (!isCurrentOperation(operation)) return;
     setError('');
@@ -1021,23 +1051,29 @@ export default function ProjectDetailPage() {
     setMessage('');
     const submittedName = editName;
     const submittedDescription = editDescription;
+    savingProjectRef.current = true; setSavingProject(true);
     try {
       const res = await fetch(`/api/projects/${projectId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: submittedName, description: submittedDescription }),
+        body: JSON.stringify({ name: submittedName, description: submittedDescription, ...projectStatusExpectation(project) }),
       });
       if (!isCurrentOperation(operation)) return;
       const data = await res.json();
       if (!isCurrentOperation(operation)) return;
       if (!res.ok) {
+        if (res.status === 409 && data.current) setProject((previous) => previous ? { ...previous, status_version: data.current } : previous);
         reportApiFailure(res, data, '更新项目失败');
         return;
       }
       setMessage('项目信息已更新');
+      setSettingsOpen(false);
+      try { localStorage.removeItem(`sd2:project-info-draft:v1:${currentUserId}:${projectId}`); } catch { /* Current saved values remain available. */ }
       await loadProject();
     } catch (err) {
       if (isCurrentOperation(operation)) setError(err instanceof Error ? err.message : '更新项目失败');
+    } finally {
+      if (isCurrentOperation(operation)) { savingProjectRef.current = false; setSavingProject(false); }
     }
   };
 
@@ -1050,7 +1086,7 @@ export default function ProjectDetailPage() {
   };
 
   const confirmProjectAction = async () => {
-    if (!project || !pendingProjectAction) return;
+    if (!project || !pendingProjectAction || projectActionBusy) return;
     const operation = beginOperation('projectAction');
     if (!isCurrentOperation(operation)) return;
     const action = pendingProjectAction;
@@ -1059,22 +1095,24 @@ export default function ProjectDetailPage() {
     setProjectActionBusy(true);
     try {
       const res = await fetch(`/api/projects/${projectId}`, action === 'delete'
-        ? { method: 'DELETE' }
+        ? { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(projectStatusExpectation(project)) }
         : {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action }),
+            body: JSON.stringify({ action, ...projectStatusExpectation(project) }),
           });
       if (!isCurrentOperation(operation)) return;
       const data = await res.json();
       if (!isCurrentOperation(operation)) return;
       if (!res.ok) {
+        setPendingProjectAction(null);
+        if (res.status === 409 && data.current) setProject((previous) => previous ? { ...previous, status_version: data.current } : previous);
         reportApiFailure(res, data, `${label}项目失败`);
         return;
       }
       setPendingProjectAction(null);
       if (action === 'delete') {
-        window.location.href = '/projects';
+        window.location.href = projectListReturnTo;
         return;
       }
       setMessage(`项目已${label}`);
@@ -1297,39 +1335,26 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      <nav className="card" aria-label="项目分区" style={{ display: 'grid', gap: 12 }}>
-        <div className="flex items-center" style={{ gap: 8, flexWrap: 'wrap' }}>
-          <span className="text-gray text-sm">主要内容</span>
+      <nav className={styles.sections} aria-label="项目分区">
           {([
             ['tasks', '生成记录'], ['albums', '参考图集'],
+            ['finance', '用量与费用'], ['members', '成员与设置'],
           ] as Array<[ProjectSection, string]>).map(([section, label]) => (
             <button key={section} type="button" aria-pressed={workspace.section === section}
-              className={`btn ${workspace.section === section ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setWorkspace((current) => ({ ...current, section, taskPage: section === 'tasks' ? current.taskPage : 1 }))}>
-              {label}
-            </button>
-          ))}
-          <span className="text-gray text-sm" style={{ marginLeft: 8 }}>管理</span>
-          {([
-            ['finance', '费用'], ['members', '成员与设置'],
-          ] as Array<[ProjectSection, string]>).map(([section, label]) => (
-            <button key={section} type="button" aria-pressed={workspace.section === section}
-              className="link"
-              style={workspace.section === section ? { fontWeight: 700, textDecoration: 'underline' } : undefined}
               onClick={() => setWorkspace((current) => ({ ...current, section }))}>
               {label}
             </button>
           ))}
-          <button type="button" className="link" style={{ marginLeft: 'auto' }}
-            onClick={() => setWorkspace(DEFAULT_PROJECT_VIEW)}>
-            重置查看设置
-          </button>
-        </div>
-        {sectionLoading && <p className="text-gray text-sm" aria-live="polite">正在更新当前分区…</p>}
       </nav>
+      {sectionLoading && <p className="text-gray text-sm" aria-live="polite">正在更新当前分区…</p>}
+      {workspace.section === 'finance' && <section className={styles.section} id="project-usage">
+        <h2 className="section-title">项目用量与费用</h2>
+        <UsageWorkspace key={identityKey} ownerId={currentUserId} projectId={projectId} />
+      </section>}
 
       {workspace.section === 'finance' && project.type === 'public' && budget && (
-        <div className="card">
+        <details className={styles.disclosure}>
+          <summary>项目预算与充值</summary>
           <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
             <div>
               <h2 className="section-title mb-0">项目预算</h2>
@@ -1386,7 +1411,7 @@ export default function ProjectDetailPage() {
           ) : (
             <p className="text-gray text-sm mt-4">追加预算需要管理员处理。</p>
           )}
-        </div>
+        </details>
       )}
 
       {showVideoCardManagementUi && (
@@ -1516,16 +1541,15 @@ export default function ProjectDetailPage() {
       </div>
       )}
 
-      {workspace.section === 'finance' && <>
+      {workspace.section === 'finance' && <details className={styles.legacy}>
+      <summary>历史账务与项目复盘（原账务范围）</summary>
       <div className="card">
         <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
           <div>
             <h2 className="section-title mb-0">项目复盘</h2>
             <p className="text-gray text-sm mt-2">这里看项目怎么被使用：点数、任务、失败和官方成本确认状态。</p>
           </div>
-          <Link className="btn btn-secondary" href={`/api/projects/${project.id}/costs/export`}>
-            导出明细
-          </Link>
+          <a className="link" href="#project-usage">按月份查看与导出</a>
         </div>
 
         <div className="stats-grid">
@@ -1718,11 +1742,11 @@ export default function ProjectDetailPage() {
           onPageChange={(page) => setWorkspace((current) => ({ ...current, financePage: page }))} label="条成本明细" />}
       </div>
 
-      </>}
+      </details>}
 
-      {workspace.section === 'tasks' && <div className="card">
+      {workspace.section === 'tasks' && <section className={styles.section}>
         <div className="flex items-start justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
-          <div><h2 className="section-title mb-0">生成记录</h2><p className="text-gray text-sm mt-2">按当前权限查看全部匹配记录；已完成但暂不可播放的视频会保留在历史中。</p></div>
+          <h2 className="section-title mb-0">生成记录</h2>
           <span className="text-gray text-sm">{sectionPaginationIsCurrent && sectionPagination ? `${sectionPagination.total} 条记录` : '记录数读取中'}</span>
         </div>
         <div className="flex items-center mb-4" style={{ gap: 10, flexWrap: 'wrap' }}>
@@ -1741,7 +1765,7 @@ export default function ProjectDetailPage() {
         {tasks.length === 0 ? (
           <p className="text-gray">{workspace.taskSearch || workspace.taskStatus !== 'all' ? '没有符合条件的生成记录。' : '暂无生成记录。'}</p>
         ) : (
-          <div style={{ display: 'grid', gap: 12 }}>
+          <div className={styles.taskGrid}>
             {tasks.map((task) => {
               const returnTo = projectTaskReturnTo(task.id);
               const detailHref = taskDetailHref(task.id, returnTo);
@@ -1750,7 +1774,7 @@ export default function ProjectDetailPage() {
                 && Boolean(task.video_card_id && task.duration && task.duration > 0)
                 ? enhanceWorkspaceHref(returnTo, task.id) : null;
               return (
-                <article id={`task-${task.id}`} key={task.id} className="card" style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 180px) minmax(0, 1fr)', gap: 16, alignItems: 'center', margin: 0 }}>
+                <article id={`task-${task.id}`} key={task.id} className={styles.taskCard}>
                   <TaskVideoThumbnail taskId={task.id} thumbnailUrl={task.thumbnail_url} status={task.local_status}
                     deliveryStage={task.delivery_stage} previewAvailable={task.preview_available} stableDownloadReady={task.stable_download_ready}
                     retryAfterMs={task.retry_after_ms} provider={task.provider} generationMode={task.generation_mode} size="medium" href={detailHref} />
@@ -1760,7 +1784,7 @@ export default function ProjectDetailPage() {
                       <UserIdentityBadge user={taskOwnerUser(task)} size="sm" />
                       <RelativeTime value={task.created_at} />
                     </div>
-                    <Link className="link" href={detailHref}><strong>{task.prompt || task.id}</strong></Link>
+                    <Link className={`link ${styles.taskPrompt}`} href={detailHref} title={task.prompt || task.id}><strong>{task.prompt || task.id}</strong></Link>
                     <p className="text-gray text-sm mt-2">{[task.model || task.provider, task.ratio, task.duration ? `${task.duration} 秒` : null, task.resolution].filter(Boolean).join(' · ') || '生成参数待同步'}</p>
                     <div className="flex items-center mt-2" style={{ gap: 14, flexWrap: 'wrap' }}>
                       {task.playable_available && <button type="button" className="link" onClick={() => setActivePreviewTask(task)}><Eye size={15} aria-hidden="true" /> 播放</button>}
@@ -1779,39 +1803,44 @@ export default function ProjectDetailPage() {
         {sectionPaginationIsCurrent && sectionPagination && <PaginationControls page={sectionPagination.page} totalPages={sectionPagination.total_pages}
           total={sectionPagination.total} pageSize={sectionPagination.page_size} busy={sectionLoading}
           onPageChange={(page) => setWorkspace((current) => ({ ...current, taskPage: page }))} label="条生成记录" />}
-      </div>}
+      </section>}
 
-      {workspace.section === 'albums' && <div className="card">
+      {workspace.section === 'albums' && <section className={styles.section}>
         <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
           <div><h2 className="section-title mb-0">参考图集</h2><p className="text-gray text-sm mt-2">保存和复用项目参考素材。</p></div>
-          <Link className="btn btn-secondary" href={`/collections?scope=project&project_id=${project.id}`}>查看图集</Link>
+          <Link className="btn btn-secondary" href={`/collections?scope=project&project_id=${encodeURIComponent(project.id)}&return_to=${encodeURIComponent(projectReturnTo)}`}>{permissions.can_manage_assets && project.status === 'active' ? '新建项目图集 / 查看图集' : '查看图集'}</Link>
         </div>
         {referenceAlbums.length === 0 ? <p className="text-gray">暂无项目图集</p> : (
-          <div className="shell-link-grid">
-            {referenceAlbums.map((album) => <Link key={album.id} className="shell-link-card" href={`/collections/${album.id}`}>
-              <strong>{album.name}</strong><span>{album.description || '项目参考图集'}</span>
-              <span>{album.image_count} 张 · {statusLabel(album.status)}</span><span>更新 <RelativeTime value={album.updated_at} /></span>
-            </Link>)}
+          <div className={styles.albumGrid}>
+            {referenceAlbums.map((album) => <article key={album.id} className={styles.album}>
+              <Link href={`/collections/${encodeURIComponent(album.id)}?return_to=${encodeURIComponent(projectReturnTo)}`}>
+                <strong>{album.name}</strong><span>{album.description || '项目参考图集'}</span>
+                <span>{album.image_count} 张 · {statusLabel(album.status)}</span>
+              </Link>
+              <span className="text-gray text-sm">更新 <RelativeTime value={album.updated_at} /></span>
+            </article>)}
           </div>
         )}
         {!permissions.can_manage_assets && <p className="text-gray text-sm mt-4">当前角色可查看或使用项目素材，但不能修改项目图集。</p>}
         {sectionPaginationIsCurrent && sectionPagination && <PaginationControls page={sectionPagination.page} totalPages={sectionPagination.total_pages}
           total={sectionPagination.total} pageSize={sectionPagination.page_size} busy={sectionLoading}
           onPageChange={(page) => setWorkspace((current) => ({ ...current, albumPage: page }))} label="个图集" />}
-      </div>}
+      </section>}
 
       {workspace.section === 'members' && <>
-      <div className="card">
+      <section className={styles.section}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="section-title mb-0">项目成员</h2>
-          <span className="text-gray text-sm">{project.members.length} 人</span>
+          <div className={styles.actions}>
+            <span className="text-gray text-sm">{project.members.length} 人</span>
+            {permissions.can_manage_members && <button className="btn btn-primary" type="button" onClick={createInvite} disabled={creatingInvite}>{creatingInvite ? '正在创建…' : '生成邀请链接'}</button>}
+          </div>
         </div>
+        <div className={styles.tableWrap}>
         <table className="table">
           <thead>
             <tr>
               <th>成员</th>
-              <th>账号类型</th>
-              <th>平台角色</th>
               <th>项目权限</th>
               <th>加入时间</th>
               {permissions.can_manage_members && <th>操作</th>}
@@ -1824,11 +1853,14 @@ export default function ProjectDetailPage() {
                   <UserIdentityBadge
                     user={member.user}
                     size="sm"
-                    subtitle={member.user.email || `ID ${member.user.id.slice(0, 8)}`}
                   />
+                  <details className={styles.memberMeta}>
+                    <summary>账号信息</summary>
+                    <p>{member.user.email || '未登记邮箱'}</p>
+                    <p>ID：{member.user.id}</p>
+                    <p>{member.user.account_type} · {member.user.role}</p>
+                  </details>
                 </td>
-                <td>{member.user.account_type}</td>
-                <td>{member.user.role}</td>
                 <td>{roleLabel(member.role)}</td>
                 <td><RelativeTime value={member.joined_at} /></td>
                 {permissions.can_manage_members && (
@@ -1847,36 +1879,35 @@ export default function ProjectDetailPage() {
             ))}
           </tbody>
         </table>
-      </div>
+        </div>
+      </section>
 
       {permissions.can_manage_members && (
-        <div className="card">
-          <h2 className="section-title">成员管理</h2>
-          <form onSubmit={addMember} style={{ display: 'grid', gridTemplateColumns: 'minmax(240px, 1fr) 180px auto', gap: 12, alignItems: 'center' }}>
-            <input className="input" value={memberUserId} onChange={(event) => setMemberUserId(event.target.value)} placeholder="用户 ID" />
-            <select className="input" value={memberRole} onChange={(event) => setMemberRole(event.target.value)}>
+        <details className={styles.disclosure}>
+          <summary>通过用户 ID 添加成员</summary>
+          <form onSubmit={addMember} className={styles.memberForm}>
+            <input className="input" value={memberUserId} onChange={(event) => setMemberUserId(event.target.value)} placeholder="用户 ID" aria-label="要添加的用户 ID" disabled={addingMember} />
+            <select className="input" value={memberRole} onChange={(event) => setMemberRole(event.target.value)} aria-label="项目权限" disabled={addingMember}>
               <option value="editor">可编辑</option>
               <option value="member">可生成</option>
               <option value="viewer">仅查看</option>
             </select>
-            <button className="btn btn-primary" type="submit" disabled={!memberUserId.trim()}>添加成员</button>
+            <button className="btn btn-primary" type="submit" disabled={!memberUserId.trim() || addingMember}>{addingMember ? '正在添加…' : '添加成员'}</button>
           </form>
-          <button className="btn btn-secondary mt-4" type="button" onClick={createInvite}>
-            生成 7 天邀请链接
-          </button>
-        </div>
+        </details>
       )}
 
       {permissions.can_manage_project && (
-        <div className="card">
-          <h2 className="section-title">项目设置</h2>
+        <details className={styles.disclosure} open={settingsOpen} onToggle={(event) => setSettingsOpen(event.currentTarget.open)}>
+          <summary>项目设置</summary>
           <form onSubmit={updateProjectInfo} style={{ display: 'grid', gap: 12, maxWidth: 680 }}>
             <input
               className="input"
               value={editName}
               onChange={(event) => setEditName(event.target.value)}
               placeholder="项目名称"
-              disabled={project.type === 'personal'}
+              disabled={project.type === 'personal' || savingProject}
+              aria-label="项目名称"
             />
             <textarea
               className="input"
@@ -1884,19 +1915,21 @@ export default function ProjectDetailPage() {
               onChange={(event) => setEditDescription(event.target.value)}
               placeholder="项目说明"
               rows={3}
+              disabled={savingProject}
+              aria-label="项目说明"
             />
-            <button className="btn btn-primary" type="submit" disabled={!editName.trim()}>
-              保存信息
+            <button className="btn btn-primary" type="submit" disabled={!editName.trim() || savingProject}>
+              {savingProject ? '正在保存…' : '保存信息'}
             </button>
           </form>
-        </div>
+        </details>
       )}
 
       {permissions.can_manage_project && (
-        <div className="card">
-          <h2 className="section-title">危险操作</h2>
+        <details className={styles.disclosure}>
+          <summary>归档与删除</summary>
           <div className="flex items-center" style={{ gap: 10, flexWrap: 'wrap' }}>
-            {project.status === 'archived' ? (
+            {permissions.can_restore ? (
               <button className="btn btn-secondary" type="button" onClick={() => requestProjectAction('restore')}>
                 恢复项目
               </button>
@@ -1905,7 +1938,7 @@ export default function ProjectDetailPage() {
                 className="btn btn-secondary"
                 type="button"
                 onClick={() => requestProjectAction('archive')}
-                disabled={project.type !== 'team'}
+                disabled={!permissions.can_archive}
               >
                 归档为只读
               </button>
@@ -1915,8 +1948,8 @@ export default function ProjectDetailPage() {
                 className="btn btn-danger"
                 type="button"
                 onClick={() => requestProjectAction('delete')}
-                disabled={!canDeleteProject(project)}
-                title={canDeleteProject(project) ? '删除空协作项目' : '仅没有任务和图集的协作项目可删除'}
+                disabled={!permissions.can_delete}
+                title={permissions.can_delete ? '删除已核对为空的协作项目' : '存在内容、账务或历史记录，请使用归档'}
               >
                 删除空项目
               </button>
@@ -1924,11 +1957,12 @@ export default function ProjectDetailPage() {
           </div>
           <p className="text-gray text-sm mt-4">
             {project.type === 'team'
-              ? '归档会保留历史任务和图集；删除只允许没有任务和图集的协作项目。'
+              ? '归档保留历史任务、图集与账务；只有没有业务内容、费用和历史记录的空项目可删除。'
               : '个人空间是系统保留项目，不提供删除操作。'}
           </p>
-        </div>
+        </details>
       )}
+      <button className="link" type="button" onClick={() => setWorkspace(DEFAULT_PROJECT_VIEW)}>重置查看设置</button>
       </>}
 
       {activePreviewTask && <MediaPreview

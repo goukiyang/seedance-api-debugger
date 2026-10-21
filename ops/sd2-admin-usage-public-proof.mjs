@@ -61,7 +61,8 @@ const buildManifestBytes = fs.readFileSync(path.join(buildRoot, 'app-build-manif
 const buildManifest = JSON.parse(buildManifestBytes);
 const pages = ['/admin/page', '/admin/users/page', '/admin/projects/page', '/admin/outputs/page', '/admin/image-studio/page',
   '/admin/feedback/page', '/admin/costs/page', '/admin/integrations/page', '/admin/usage-costs/page',
-  '/admin/usage-records/[sourceKind]/[sourceId]/page', '/image-studio/page', '/tools/avatar-studio/page'];
+  '/admin/usage-records/[sourceKind]/[sourceId]/page', '/image-studio/page', '/tools/avatar-studio/page',
+  '/usage/page', '/projects/page', '/projects/[id]/page', '/tasks/[id]/page', '/collections/page', '/collections/[id]/page'];
 for (const page of pages) assert.ok(buildManifest.pages?.[page]?.length, 'Missing compiled batch page: ' + page);
 const assets = [];
 for (const file of [...new Set(pages.flatMap(page => buildManifest.pages[page]))]) {
@@ -73,15 +74,31 @@ for (const file of [...new Set(pages.flatMap(page => buildManifest.pages[page]))
   assets.push({ file, bytes: bytes.length, sha256: hash(bytes) });
 }
 const anonymous = [];
-for (const route of ['/api/admin/usage-analytics?range=all', '/api/admin/usage-analytics/records?range=all', '/api/admin/usage-analytics/export?range=all']) {
+for (const route of ['/api/admin/usage-analytics?range=all', '/api/admin/usage-analytics/records?range=all', '/api/admin/usage-analytics/export?range=all',
+  '/api/usage', '/api/usage/export', '/api/projects/release-auth-boundary/usage', '/api/projects/release-auth-boundary/usage/export',
+  '/api/projects/operations/10000000-0000-4000-8000-000000000000']) {
   const value = await read(route, 32768); assert.equal(value.response.status, 401);
   anonymous.push({ route, status: value.response.status, bytes: value.bytes.length, sha256: hash(value.bytes) });
+}
+const protectedTools = [];
+for (const file of ['tools/ultimate-canvas/index.html', 'tools/ultimate-canvas/canvas-engine.js']) {
+  const local = path.join(m.main.root, 'public', file);
+  assert.equal(fs.realpathSync(local), local);
+  const bytes = fs.readFileSync(local), route = '/' + file;
+  if (file.endsWith('index.html')) assert.ok(bytes.includes(Buffer.from('canvas-engine.js?v=input-focus-20261021')));
+  const value = await read(route, 32768);
+  assert.equal(value.response.status, 307);
+  const destination = new URL(value.response.headers.get('location'), m.publicOrigin);
+  assert.equal(destination.origin, m.publicOrigin); assert.equal(destination.pathname, '/login');
+  assert.equal(destination.searchParams.get('next'), route);
+  protectedTools.push({ route, status: value.response.status, liveFileBytes: bytes.length, liveFileSha256: hash(bytes),
+    authenticatedBytesVerified: false });
 }
 assert.deepEqual(runtime(), observed);
 assert.equal(hash(fs.readFileSync(path.join(buildRoot, 'app-build-manifest.json'))), hash(buildManifestBytes));
 const receipt = { schema: 'admin-usage-public-artifacts.v1', completed: true, runId: m.runId,
   source: m.mainSource, version: m.main.version, build: original.build, manifestSha256: hash(manifestBytes),
-  startedAt, finishedAt: new Date().toISOString(), pages, assets, anonymous, observed,
+  startedAt, finishedAt: new Date().toISOString(), pages, assets, anonymous, protectedTools, observed,
   authenticatedBusinessReads: 0, generationCalls: 0, billingChanges: 0, browserRuns: 0,
   scope: 'release static-byte and anonymous authentication boundaries only; user functional acceptance pending' };
 fs.writeFileSync(flags['--out'], JSON.stringify(receipt, null, 2) + '\n', { flag: 'wx', mode: 0o600 });

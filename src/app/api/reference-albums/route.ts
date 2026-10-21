@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
-import { assertCanManageProjectAssets, getAccessibleProjectIds } from '@/lib/projects/permissions';
+import { assertCanManageProjectAssets, getAccessibleProjectIds, assertProjectActiveInTransaction } from '@/lib/projects/permissions';
 import { getAlbumAccess } from '@/lib/reference-albums/permissions';
 import { studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
 
@@ -157,7 +157,12 @@ export async function POST(request: NextRequest) {
       finalPublicFolderId = publicFolderId;
     }
 
-    const existing = await prisma.referenceAlbum.findFirst({
+    const result = await prisma.$transaction(async (tx) => {
+    await assertProjectActiveInTransaction(tx, user, finalProjectId, 'assets');
+    if (finalPublicFolderId && !await tx.referenceAlbumFolder.findFirst({ where: { id: finalPublicFolderId, scope: 'public', status: 'active' } })) {
+      throw new AuthError('公共文件夹不存在或已删除', 404);
+    }
+    const existing = await tx.referenceAlbum.findFirst({
       where: {
         owner_user_id: user.id,
         project_id: finalProjectId,
@@ -169,10 +174,10 @@ export async function POST(request: NextRequest) {
       orderBy: { updated_at: 'desc' },
     });
     if (existing) {
-      return NextResponse.json({ album: existing, deduplicated: true });
+      return { album: existing, deduplicated: true };
     }
 
-    const album = await prisma.referenceAlbum.create({
+    const album = await tx.referenceAlbum.create({
       data: {
         owner_user_id: user.id,
         project_id: finalProjectId,
@@ -185,7 +190,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    await prisma.operationLog.create({
+    await tx.operationLog.create({
       data: {
         operator_id: user.id,
         action: 'reference_album_create',
@@ -195,7 +200,9 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return NextResponse.json({ album }, { status: 201 });
+    return { album, deduplicated: false };
+    });
+    return NextResponse.json(result, { status: result.deduplicated ? 200 : 201 });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

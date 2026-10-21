@@ -1,4 +1,7 @@
 import type { Prisma } from '@prisma/client';
+import { AuthError } from '@/lib/auth/session';
+import { isFeatureAllowed } from '@/lib/access/feature-guard';
+import { assertProjectActiveInTransaction, getProjectAccess, getProjectActorInTransaction } from '@/lib/projects/permissions';
 
 type FeishuRequirementClient = Prisma.TransactionClient;
 
@@ -46,6 +49,8 @@ export async function syncFeishuRequirementDraft(
   if (existing?.created_project_id) {
     return { requirement: existing, deduplicated: true };
   }
+  const actor = await getProjectActorInTransaction(tx, input.actorUserId);
+  if (!isFeatureAllowed(actor, 'team_project_manage')) throw new AuthError('当前账号无权创建团队项目需求', 403);
 
   const projectName = stringField(input.fields, ['project_name', 'projectName', 'name', '需求名称', '项目名称'], '飞书需求草稿');
   const projectDescription = stringField(input.fields, ['description', 'project_description', '需求描述', '使用场景'], '');
@@ -95,6 +100,9 @@ export async function syncFeishuRequirementDraft(
       }];
 
   const cards = [];
+  // This project was allocated above in this same tx, so no concurrent archive/delete can precede its initial draft children.
+  const draftAccess = await getProjectAccess(actor, project.id, tx);
+  if (!draftAccess.canManageProject || draftAccess.project?.status !== 'draft') throw new AuthError('项目草稿已不可写入', 409);
   for (const item of cardInputs) {
     const card = await tx.videoCard.create({
       data: {
@@ -182,11 +190,16 @@ export async function confirmFeishuRequirementDraft(
 ) {
   const requirement = await tx.feishuRequirement.findUnique({ where: { id: input.requirementId } });
   if (!requirement?.created_project_id) throw new Error('飞书需求草稿不存在');
-
-  await tx.project.update({
-    where: { id: requirement.created_project_id },
+  if (requirement.sync_status === 'confirmed') return requirement;
+  const actor = await getProjectActorInTransaction(tx, input.actorUserId);
+  const access = await getProjectAccess(actor, requirement.created_project_id, tx);
+  if (!access.canManageProject || access.project?.status !== 'draft') throw new AuthError('项目不是可确认的原草稿，请重新核对', 409);
+  const changed = await tx.project.updateMany({
+    where: { id: requirement.created_project_id, status: 'draft', updated_at: access.project.updated_at },
     data: { status: 'active' },
   });
+  if (changed.count !== 1) throw new AuthError('项目状态已变化，未确认需求', 409);
+  await assertProjectActiveInTransaction(tx, actor, requirement.created_project_id, 'manage');
   await tx.videoCard.updateMany({
     where: { project_id: requirement.created_project_id, status: 'draft' },
     data: { status: 'active' },

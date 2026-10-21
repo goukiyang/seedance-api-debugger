@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { assertToolFlowProjectAccess, validateToolFlowGraph } from '@/lib/tools/toolflow';
+import { assertProjectActiveInTransaction } from '@/lib/projects/permissions';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -49,16 +50,22 @@ export async function POST(request: NextRequest) {
     const name = clean(body.name, '未命名工具流').slice(0, 120);
     const visibility = 'private';
     const flowId = clean(body.id);
-    const existing = flowId ? await prisma.toolFlow.findUnique({ where: { id: flowId } }) : null;
+    const saved = await prisma.$transaction(async (tx) => {
+    const existing = flowId ? await tx.toolFlow.findUnique({ where: { id: flowId } }) : null;
     if (existing && existing.owner_id !== user.id) throw new AuthError('无权编辑此工具流', 403);
-    const saved = existing
-      ? await prisma.toolFlow.update({
+    if (existing?.status === 'deleted') throw new AuthError('工具流已删除，不能恢复写入', 409);
+    if (existing?.project_id) await assertProjectActiveInTransaction(tx, user, existing.project_id);
+    const finalProjectId = projectId || existing?.project_id || null;
+    await assertProjectActiveInTransaction(tx, user, finalProjectId);
+    return existing
+      ? await tx.toolFlow.update({
           where: { id: existing.id },
           data: { name, project_id: projectId || existing.project_id, visibility, graph_json: JSON.stringify(graph), version: { increment: 1 }, status: 'active' },
         })
-      : await prisma.toolFlow.create({
+      : await tx.toolFlow.create({
           data: { owner_id: user.id, project_id: projectId, name, visibility, status: 'active', graph_json: JSON.stringify(graph) },
         });
+    });
     return NextResponse.json({ success: true, flow: saved });
   } catch (error) {
     if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });

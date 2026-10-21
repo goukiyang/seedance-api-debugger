@@ -31,6 +31,7 @@ export const shellRoutes = [
   '/templates',
   '/template-generate',
   '/projects',
+  '/usage',
   '/collections',
   '/cutout',
   '/multiview',
@@ -42,9 +43,12 @@ export const shellRoutes = [
   '/admin/outputs',
   '/admin/image-studio',
   '/admin/costs',
+  '/admin/usage-costs',
+  '/admin/points',
   '/admin/integrations',
   '/admin/templates',
   '/admin/agent-runs',
+  '/admin/usage-records',
   '/admin/feedback',
 ] as const;
 
@@ -66,6 +70,7 @@ const shellRoutePrefixes = [
   '/admin/integrations',
   '/admin/templates',
   '/admin/agent-runs',
+  '/admin/usage-records',
 ] as const;
 
 export const topbarQuickItems: NavItem[] = [
@@ -84,7 +89,7 @@ export const userNavGroups: NavGroup[] = [
     title: '创作',
     items: [
       { label: '创作首页', href: '/', match: ['/'] },
-      { label: '生成视频', href: '/generate', match: ['/generate'], externalHidden: true },
+      { label: '生成视频', href: '/generate', match: ['/generate', '/generate/canvas'], externalHidden: true },
       { label: '模板工作台', href: '/template-studio', match: ['/template-studio'], prefixMatch: true, externalHidden: true },
       { label: '视频超分', href: '/generate/enhance', match: ['/generate/enhance'], prefixMatch: true, adminOnly: true },
       { label: '模板生成', href: '/template-generate', prefixMatch: true, externalHidden: true },
@@ -99,7 +104,8 @@ export const userNavGroups: NavGroup[] = [
     title: '项目',
     items: [
       { label: '我的项目', href: '/projects', prefixMatch: true, externalHidden: true },
-      { label: 'IP生成', href: '/generate/ip', externalHidden: true },
+      { label: '我的用量', href: '/usage', prefixMatch: true },
+      { label: 'IP生成', href: '/generate/ip' },
       { label: '我的任务', href: '/tasks', prefixMatch: true },
       { label: '资产管理', href: '/assets', prefixMatch: true },
       { label: '参考图集', href: '/collections', prefixMatch: true },
@@ -128,7 +134,7 @@ export const adminNavGroups: NavGroup[] = [
   {
     title: '生成与结果',
     items: [
-      { label: '产出留存', href: '/admin/outputs', prefixMatch: true },
+      { label: '产出留存', href: '/admin/outputs', match: ['/admin/outputs', '/admin/usage-records'], prefixMatch: true },
       { label: '图片任务审计', href: '/admin/image-studio', prefixMatch: true },
       { label: '模板工作台', href: '/admin/templates', prefixMatch: true },
       { label: '执行链路与提示词', href: '/admin/agent-runs', prefixMatch: true },
@@ -137,7 +143,7 @@ export const adminNavGroups: NavGroup[] = [
   {
     title: '费用与点数',
     items: [
-      { label: '成本与账务', href: '/admin/costs', prefixMatch: true },
+      { label: '成本与账务', href: '/admin/costs', match: ['/admin/costs', '/admin/usage-costs'], prefixMatch: true },
       { label: '点数流水', href: '/admin/points', prefixMatch: true },
       { label: '点数与费率', href: '/admin/pricing', prefixMatch: true },
     ],

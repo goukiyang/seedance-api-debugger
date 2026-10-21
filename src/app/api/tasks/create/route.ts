@@ -80,7 +80,7 @@ import {
 import { providerCreateFailureUserMessage } from '@/lib/provider/error-message';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertFeatureAllowed } from '@/lib/access/feature-guard';
-import { getProjectForGeneration, assertCanViewTask } from '@/lib/projects/permissions';
+import { getProjectForGeneration, assertCanViewTask, assertProjectActiveInTransaction } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import {
   authenticateCodexVideoApi,
@@ -1975,6 +1975,7 @@ export async function POST(request: NextRequest) {
   try {
     const result = await prisma.$transaction(async (tx) => {
       await assertMultiviewRequestFence(tx, user.id, idempotencyKey, requestClaim);
+      await assertProjectActiveInTransaction(tx, user, project.id);
       await assertVideoPricingAcceptance(priceQuote, body.pricing_revision, tx);
       if (requireScopeCredential) {
         const freshPricingContext = await resolveVideoPricingContext(user, { ...body, project_id: project.id, video_card_id: videoCardId,

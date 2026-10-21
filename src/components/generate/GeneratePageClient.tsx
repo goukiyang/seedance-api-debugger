@@ -25,6 +25,8 @@ import {
 } from '@/components/H3MachineStatus';
 import { formatProviderUsdCharge } from '@/lib/costs/currency';
 import { readJsonResponse } from '@/lib/http/json-response';
+import ProjectCreateOperationNotice from '@/components/ProjectCreateOperationNotice';
+import { projectStatusExpectation, useProjectCreateOperation, type ProjectCreateResult } from '@/lib/projects/client-operations';
 import { externalFallbackPath, isExternalUser } from '@/lib/access/external-role';
 import { isNavItemVisible, showVideoCardManagementUi } from '@/lib/navigation';
 import { sanitizeOptionalReturnTo, taskDetailHref, taskReturnLabel } from '@/lib/navigation/return-to';
@@ -250,10 +252,15 @@ interface ProjectOption {
   name: string;
   type: string;
   status?: string;
+  updated_at?: string;
+  status_version?: { status: string; updated_at: string };
   owner_user_id: string;
   my_role: string | null;
   can_generate?: boolean;
   can_manage_project?: boolean;
+  can_archive?: boolean;
+  can_restore?: boolean;
+  can_delete?: boolean;
   owner?: { id?: string; name: string | null; username: string | null; email?: string | null; avatar_url?: string | null; account_type?: string | null };
   _count?: { tasks: number; reference_albums?: number };
 }
@@ -470,10 +477,6 @@ function projectMetaLabel(project: ProjectOption): string {
   return `${kind} · ${taskCount} 任务 · ${albumCount} 图集`;
 }
 
-function projectHasContent(project: ProjectOption): boolean {
-  return (project._count?.tasks || 0) > 0 || (project._count?.reference_albums || 0) > 0;
-}
-
 function projectCanRemove(project: ProjectOption): boolean {
   return Boolean(
     project.can_manage_project
@@ -483,18 +486,18 @@ function projectCanRemove(project: ProjectOption): boolean {
 }
 
 function projectRemovalAction(project: ProjectOption): ProjectRemovalAction {
-  return projectHasContent(project) ? 'archive' : 'delete';
+  return project.can_delete === true ? 'delete' : 'archive';
 }
 
 function projectRemovalLabel(project: ProjectOption): string {
-  return projectHasContent(project) ? '归档' : '删除';
+  return projectRemovalAction(project) === 'archive' ? '归档' : '删除';
 }
 
 function projectRemovalTitle(project: ProjectOption): string {
   if (project.type === 'personal') return '默认项目不能删除';
   if (project.type === 'system') return '系统项目不能删除';
   if (!project.can_manage_project) return '你没有权限管理这个项目';
-  return projectHasContent(project) ? '项目已有历史内容，只能归档' : '删除空项目';
+  return projectRemovalAction(project) === 'archive' ? '保留项目历史并归档' : '删除空项目';
 }
 
 function asVideoRatio(value?: string | null): VideoRatio | null {
@@ -714,6 +717,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [projectName, setProjectName] = useState('');
+  const projectCreate = useProjectCreateOperation(currentUser?.id, `generate-${surface}`);
+  useEffect(() => { if (projectCreate.pending) setProjectName(projectCreate.pending.input.name); }, [projectCreate.pending]);
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectMessage, setProjectMessage] = useState<{ type: 'info' | 'error' | 'success'; text: string } | null>(null);
   const [pendingProjectRemoval, setPendingProjectRemoval] = useState<PendingProjectRemoval | null>(null);
@@ -1600,26 +1605,29 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     setProjectBusy(true);
     setProjectMessage(null);
     try {
-      const res = await fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, type: 'team' }),
-      });
-      const data = await readJsonResponse<{ project: ProjectOption; error?: string; message?: string }>(res);
-      if (!res.ok) throw new Error(data.message || data.error || '新建项目失败');
+      const data = await projectCreate.create({ name });
+      if (data.operation.state !== 'accepted') return;
 
       userChangedProjectRef.current = true;
       setProjectName('');
       setProjectCreateOpen(false);
       setProjectPickerOpen(false);
-      setProjectMessage({ type: 'success', text: `已新建项目「${data.project.name}」` });
-      await loadProjects({ preferredProjectId: data.project.id, keepSelected: false });
+      setProjectMessage({ type: 'success', text: data.project ? `已新建项目「${data.project.name}」` : '原创建已受理，当前项目已不可访问，没有重新创建。' });
+      if (data.project) await loadProjects({ preferredProjectId: data.project.id, keepSelected: false });
     } catch (err) {
-      setProjectMessage({ type: 'error', text: err instanceof Error ? err.message : '新建项目失败' });
+      setProjectMessage({ type: 'info', text: err instanceof Error ? err.message : '新建项目失败，输入已保留' });
     } finally {
       setProjectBusy(false);
     }
-  }, [loadProjects, projectName]);
+  }, [loadProjects, projectName, projectCreate.create]);
+
+  const recoverCreatedProject = async (result: ProjectCreateResult) => {
+    if (result.operation.state !== 'accepted') return;
+    userChangedProjectRef.current = true;
+    setProjectName(''); setProjectCreateOpen(false); setProjectPickerOpen(false);
+    setProjectMessage({ type: 'info', text: result.project ? '已找到原创建项目' : '原创建已受理，当前项目已不可访问，没有重新创建。' });
+    if (result.project) await loadProjects({ preferredProjectId: result.project.id, keepSelected: false });
+  };
 
   const handleCreateVideoCard = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1691,8 +1699,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     try {
       const res = await fetch(`/api/projects/${project.id}`, {
         method: action === 'archive' ? 'PATCH' : 'DELETE',
-        headers: action === 'archive' ? { 'Content-Type': 'application/json' } : undefined,
-        body: action === 'archive' ? JSON.stringify({ action: 'archive' }) : undefined,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...(action === 'archive' ? { action: 'archive' } : {}), ...projectStatusExpectation(project) }),
       });
       const data = await readJsonResponse<{ error?: string; message?: string }>(res);
       if (!res.ok) {
@@ -3181,12 +3189,13 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                         <input
                           className="composer-project-input"
                           value={projectName}
+                          disabled={projectCreate.busy || Boolean(projectCreate.pending)}
                           onChange={(event) => setProjectName(event.target.value)}
                           placeholder="输入项目名称"
                           maxLength={40}
                           autoFocus
                         />
-                        <button type="submit" className="composer-project-btn composer-project-btn-primary" disabled={projectBusy || reuseUiLocked}>
+                        <button type="submit" className="composer-project-btn composer-project-btn-primary" disabled={projectBusy || reuseUiLocked || projectCreate.busy || !projectCreate.ready || Boolean(projectCreate.pending)}>
                           {projectBusy ? '创建中...' : '创建'}
                         </button>
                         <button
@@ -3301,6 +3310,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
             </div>
           </div>
 
+        <ProjectCreateOperationNotice operation={projectCreate} onResolved={recoverCreatedProject} />
         {projectMessage && (
           <div className={`composer-project-message ${projectMessage.type}`}>
             {projectMessage.text}

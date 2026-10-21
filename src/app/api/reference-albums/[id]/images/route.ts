@@ -11,6 +11,11 @@ import {
 } from '@/lib/reference-albums/permissions';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 import { studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
+import type { Prisma } from '@prisma/client';
+import type { SessionUser } from '@/lib/auth/session';
+import { assertProjectActiveInTransaction, getProjectAccess } from '@/lib/projects/permissions';
+import { assertFeatureAllowed } from '@/lib/access/feature-guard';
+import { parseAlbumPermissions } from '@/lib/reference-albums/permissions';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -91,12 +96,7 @@ export async function POST(
       return NextResponse.json({ error: 'asset_id required' }, { status: 400 });
     }
 
-    const currentMax = await prisma.referenceImage.aggregate({
-      where: { album_id: album.id },
-      _max: { sort_order: true },
-    });
-    let sortOrder = currentMax._max.sort_order ?? -1;
-    const created = [];
+    const pending: Prisma.ReferenceImageUncheckedCreateInput[] = [];
 
     for (const sourceReferenceImageId of sourceReferenceImageIds) {
       const sourceImage = await getReferenceImageByIdForAccess(sourceReferenceImageId);
@@ -113,9 +113,7 @@ export async function POST(
         return NextResponse.json({ error: `参考素材缺少资产记录: ${sourceReferenceImageId}` }, { status: 400 });
       }
 
-      sortOrder += 1;
-      const image = await prisma.referenceImage.create({
-        data: {
+      pending.push({
           album_id: album.id,
           workspace_id: album.workspace_id,
           project_id: album.project_id,
@@ -126,12 +124,9 @@ export async function POST(
           source_type: 'copied',
           source_content_id: sourceImage.source_content_id,
           source_image_id: sourceImage.id,
-          sort_order: sortOrder,
           metadata_json: JSON.stringify({ copied_from_album_id: sourceImage.album_id }),
           status: 'active',
-        },
       });
-      created.push(image);
     }
 
     for (const assetId of assetIds) {
@@ -147,9 +142,7 @@ export async function POST(
         return NextResponse.json({ error: `素材不存在或类型不支持: ${assetId}` }, { status: 400 });
       }
 
-      sortOrder += 1;
-      const image = await prisma.referenceImage.create({
-        data: {
+      pending.push({
           album_id: album.id,
           workspace_id: album.workspace_id,
           project_id: album.project_id,
@@ -160,31 +153,37 @@ export async function POST(
           source_type: body.source_type === 'copied' ? 'copied' : 'upload',
           source_content_id: typeof body.source_content_id === 'string' ? body.source_content_id : null,
           source_image_id: typeof body.source_image_id === 'string' ? body.source_image_id : null,
-          sort_order: sortOrder,
           metadata_json: body.metadata_json ? JSON.stringify(body.metadata_json) : null,
           status: 'active',
-        },
       });
-      created.push(image);
     }
 
-    if (!album.cover_image_id && created[0]) {
-      await prisma.referenceAlbum.update({
+    const created = await prisma.$transaction(async (tx) => {
+    const freshAlbum = await albumForWrite(tx, user, album.id);
+    if (freshAlbum.project_id !== album.project_id || freshAlbum.workspace_id !== album.workspace_id) throw new AuthError('图集归属已变化，请重新核对后添加', 409);
+    const currentMax = await tx.referenceImage.aggregate({ where: { album_id: album.id }, _max: { sort_order: true } });
+    let sortOrder = currentMax._max.sort_order ?? -1;
+    const images = [];
+    for (const data of pending) images.push(await tx.referenceImage.create({ data: { ...data, sort_order: ++sortOrder } }));
+    if (!freshAlbum.cover_image_id && images[0]) {
+      await tx.referenceAlbum.update({
         where: { id: album.id },
-        data: { cover_image_id: created[0].id },
+        data: { cover_image_id: images[0].id },
       });
     } else {
-      await prisma.referenceAlbum.update({ where: { id: album.id }, data: { updated_at: new Date() } });
+      await tx.referenceAlbum.update({ where: { id: album.id }, data: { updated_at: new Date() } });
     }
 
-    await prisma.operationLog.create({
+    await tx.operationLog.create({
       data: {
         operator_id: user.id,
         action: 'reference_album_add_assets',
         target_type: 'ReferenceAlbum',
         target_id: album.id,
-        detail: JSON.stringify({ image_ids: created.map((image) => image.id), asset_ids: assetIds }),
+        detail: JSON.stringify({ image_ids: images.map((image) => image.id), asset_ids: assetIds }),
       },
+    });
+    return images;
     });
 
     await recordAssetUploadLog({
@@ -237,6 +236,29 @@ export async function POST(
       { status: 500 },
     );
   }
+}
+
+async function albumForWrite(tx: Prisma.TransactionClient, user: SessionUser, albumId: string) {
+  const album = await tx.referenceAlbum.findFirst({ where: { id: albumId, status: { not: 'deleted' } }, include: {
+    shares: { where: { status: 'active', OR: [{ expires_at: null }, { expires_at: { gt: new Date() } }] } },
+  } });
+  if (!album || user.status !== 'active') throw new AuthError('图集不存在或不可编辑', 403);
+  const scoped = Boolean(album.project_id && (album.album_type === 'project' || album.visibility === 'project'));
+  let canEdit = !scoped && (user.role === 'admin' || album.owner_user_id === user.id);
+  const direct = album.shares.find((share) => share.grantee_type === 'user' && share.grantee_id === user.id);
+  if (direct) canEdit ||= parseAlbumPermissions(direct.permissions_json).edit;
+  for (const share of album.shares.filter((item) => item.grantee_type === 'project')) {
+    const access = await getProjectAccess(user, share.grantee_id, tx);
+    if (access.canView) canEdit ||= parseAlbumPermissions(share.permissions_json).edit;
+  }
+  if (album.project_id) {
+    const projectAccess = await getProjectAccess(user, album.project_id, tx);
+    if (projectAccess.project?.type !== 'personal') assertFeatureAllowed(user, 'team_project_manage');
+    await assertProjectActiveInTransaction(tx, user, album.project_id, 'active');
+    if (scoped) canEdit ||= projectAccess.canManageAssets;
+  }
+  if (!canEdit) throw new AuthError('无权编辑此图集', 403);
+  return album;
 }
 
 function normalizeIds(input: unknown): string[] {

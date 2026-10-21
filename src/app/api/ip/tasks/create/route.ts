@@ -59,6 +59,7 @@ import {
 import { AuthError } from '@/lib/auth/session';
 import { getProjectForGeneration } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
+import { assertProjectActiveInTransaction } from '@/lib/projects/permissions';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import {
   authenticateCodexVideoApi,
@@ -1294,6 +1295,7 @@ export async function POST(request: NextRequest) {
   try {
     const result = await prisma.$transaction(async (tx) => {
       await assertMultiviewRequestFence(tx, user.id, idempotencyKey);
+      await assertProjectActiveInTransaction(tx, user, project.id);
       await assertVideoPricingAcceptance(priceQuote, body.pricing_revision, tx);
       const task = await tx.videoTask.create({
         data: {

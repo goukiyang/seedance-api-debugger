@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { getProjectAccess } from '@/lib/projects/permissions';
+import type { Prisma } from '@prisma/client';
 
 export const TOOLFLOW_NODE_TYPES = new Set([
   'flow-input',
@@ -181,9 +182,9 @@ export function validateToolFlowGraph(value: unknown) {
   return graph;
 }
 
-export async function assertToolFlowProjectAccess(user: SessionUser, projectId: string | null) {
+export async function assertToolFlowProjectAccess(user: SessionUser, projectId: string | null, db: Prisma.TransactionClient = prisma) {
   if (!projectId) return null;
-  const access = await getProjectAccess(user, projectId);
+  const access = await getProjectAccess(user, projectId, db);
   if (!access.project) throw new AuthError('项目不存在', 404);
   if (!access.canGenerate) throw new AuthError('无权在此项目中运行工具流', 403);
   return access.project;

@@ -5,7 +5,7 @@ import { assertMultiviewRequestFence } from '@/lib/video/multiview-request-recei
 import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance } from '@/lib/pricing/video';
 import { resolveVideoPricingContext, savedVideoPricingContextInput, verifyVideoPricingCredential, videoPricingRequiresContext } from '@/lib/pricing/video-context';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
-import { getProjectForGeneration, assertCanViewTask } from '@/lib/projects/permissions';
+import { getProjectForGeneration, assertCanViewTask, assertProjectActiveInTransaction } from '@/lib/projects/permissions';
 import { validateRequestCostCeiling } from '@/lib/provider/seedance-video-edit';
 import { consumeApprovalForTask, findUsableApproval } from '@/lib/approvals';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
@@ -356,6 +356,7 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
 
   let task = await prisma.$transaction(async (tx) => {
     await assertMultiviewRequestFence(tx, input.user.id, idempotencyKey);
+    await assertProjectActiveInTransaction(tx, input.user, project.id);
     await assertVideoPricingAcceptance(priceQuote, input.pricingRevision, tx);
     if (needsPricingCredential) {
       const freshDraft = await tx.videoTask.findUnique({ where: { id: draft.id } });

@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { AuthError, getSession } from '@/lib/auth/session';
+import { getSession } from '@/lib/auth/session';
 import { getUsageAnalyticsSnapshot } from '@/lib/admin/usage-analytics';
-import { parseUsageQuery, usageQuerySearchParams } from '@/lib/admin/usage-query';
+import { parseUsageQuery, usageQuerySearchParams, UsageQueryError } from '@/lib/admin/usage-query';
 import { RelativeTime } from '@/components/RelativeTime';
 import { originalMoney } from '@/components/admin-usage/format';
 import { actualRangeLabel } from '@/components/admin-usage/query';
@@ -21,7 +21,7 @@ export default async function UnlinkedUsageCostsPage({ searchParams }: { searchP
   }
   let query;
   try { query = parseUsageQuery(params); } catch (error) {
-    if (!(error instanceof AuthError)) throw error;
+    if (!(error instanceof UsageQueryError)) throw error;
     return <main className="admin-usage-page"><h1>未关联费用</h1><p role="status">{error.message}</p><Link className="au-link" href="/admin">返回使用分析</Link></main>;
   }
   const snapshot = await getUsageAnalyticsSnapshot(query);

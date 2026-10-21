@@ -23,6 +23,8 @@ node ops/sd2-release-prepare.mjs prepare /Volumes/Data/Projects/video-api-debugg
 
 本站独立无缓冲日志、精确nginx配置指纹、合法运行目录别名与root控制文件分读、fixture真实helper绑定、HD闭合缓存精确表、保留证书两条恢复路径均来自锁定控制。发现新现场不在精确表或控制变更时，先只读集中复盘，必要修正另封新包、统一原生验证和Review后更新profile；不得放宽门、删证书、改历史文件或一边停站一边补检查。价格全字段前后相等、原进程自然排空、启动屏障、相容guard和公网产物核对不减少。
 
+本次ADMIN-USAGE联合批已证的四类准入适配须沿用，不重新试停站：价格修订只取上面的policy key；退役HD恢复VM须提供实际`restoreOriginalUsageRole`绑定，不能仅加允许清单；本机prepare完成退出0且preparation/manifest均已存在后才顺序package/window/stage，不并发消费未生成目录；e01的闭合缓存例外只认已核源码、tsx/esbuild/Node及实际编译字节，原inode/owner/mode/时序、锁与进程组排尽检查均保留，不清缓存或用哈希相同代生命周期结束。四类失败及范围变更后的旧成功main证据保留，不能靠新run号清零；用户扩范围后需新main/相容guard整对完整构建，不复用旧业务产物。
+
 统一离线工程检查：`node ops/sd2-release-prepare.test.mjs /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-19-upload-unknown-recovery`。仅检查工具、原证与生成接线，不运行任何服务器动作或功能验收。新入口首次真实发布效果须在下一次获授权发布时记录；不能把本轮离线检查说成又一次上线成功。
 
 ### 使用归属增量表（ADMIN-USAGE）

@@ -2,7 +2,7 @@ import packageInfo from '../../package.json';
 import { PRICING_ADMIN_WRITES_ENABLED } from './pricing/build-mode';
 
 export const release = { version: packageInfo.version, channel: 'production', summary: PRICING_ADMIN_WRITES_ENABLED
-  ? '管理总览可按成员、项目和周期查看各类使用记录并完整导出；新图片可选择归属项目，管理入口和API设置更集中。'
+  ? '管理总览可按成员、项目和周期查看并导出使用记录；新增我的月度用量，视频和图片费用分开查看，优化项目与手机导航，并修复画布焦点和空格拖动的已知问题。'
   : '旧上传安全恢复、原图直传和已有高清结果保留。API质量设置和费率暂时只读，已保存配置不会自动改价。' };
 
 function numericOrder(a: string, b: string) {

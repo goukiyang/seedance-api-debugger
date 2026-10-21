@@ -5,7 +5,8 @@ import { AuthError } from '@/lib/auth/session';
 import {
   assertCanGenerateInProject,
   assertCanViewProject,
-  logProjectAction,
+  assertProjectActiveInTransaction,
+  logProjectActionInTransaction,
 } from '@/lib/projects/permissions';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { normalizeVideoCardStatus } from '@/lib/video-cards/permissions';
@@ -16,6 +17,7 @@ import {
   getVideoCardArchiveAnomalies,
 } from '@/lib/video-cards/suggestions';
 import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
+import { assertFeatureAllowed } from '@/lib/access/feature-guard';
 
 export const dynamic = 'force-dynamic';
 
@@ -212,7 +214,10 @@ export async function POST(
         { status: 409 },
       );
     }
-    const card = await prisma.videoCard.create({
+    const card = await prisma.$transaction(async (tx) => {
+    const projectAccess = await assertProjectActiveInTransaction(tx, user, params.id);
+    if (projectAccess?.project?.type !== 'personal') assertFeatureAllowed(user, 'team_project_manage');
+    const created = await tx.videoCard.create({
       data: {
         project_id: params.id,
         title,
@@ -247,9 +252,11 @@ export async function POST(
       },
     });
 
-    await logProjectAction(user.id, 'video_card_create', 'video_card', card.id, {
+    await logProjectActionInTransaction(tx, user.id, 'video_card_create', 'video_card', created.id, {
       project_id: params.id,
-      title: card.title,
+      title: created.title,
+    });
+    return created;
     });
 
     const summaryMap = await getVideoCardSummaryMap([card.id]);

@@ -6,7 +6,7 @@ import { Prisma, type CanvasDocument } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
-import { assertCanViewTask, getAccessibleProjectIds, getProjectAccess } from '@/lib/projects/permissions';
+import { assertCanViewTask, getAccessibleProjectIds, getProjectAccess, assertProjectActiveInTransaction } from '@/lib/projects/permissions';
 import { assertCanUseReferenceImage } from '@/lib/reference-albums/permissions';
 
 export const MAX_CANVAS_BYTES = 2 * 1024 * 1024;
@@ -216,18 +216,19 @@ export function canvasDetail(document: CanvasDocument, capabilities: unknown = [
   return { ...canvasMetadata(document), document_json: document.document_json };
 }
 
-async function assertProject(user: SessionUser, projectId: string | null, write: boolean) {
+async function assertProject(user: SessionUser, projectId: string | null, write: boolean, db: Db = prisma) {
   if (!projectId) return;
-  const access = await getProjectAccess(user, projectId);
+  if (write) { await assertProjectActiveInTransaction(db, user, projectId); return; }
+  const access = await getProjectAccess(user, projectId, db);
   if (!access.project) throw new AuthError('项目不存在', 404);
   if (!(write ? access.canGenerate : access.canView)) throw new AuthError('无权访问此项目画布', 403);
 }
 
-async function assertDocument(user: SessionUser, document: Metadata | null, write: boolean): Promise<void> {
+async function assertDocument(user: SessionUser, document: Metadata | null, write: boolean, db: Db = prisma): Promise<void> {
   if (!document || document.status === 'deleted') throw new AuthError('画布不存在', 404);
   // Personal canvases are owner-only, including historical links and admin accounts.
   if (document.owner_user_id !== user.id) throw new AuthError('无权访问此画布', 403);
-  await assertProject(user, document.project_id, write);
+  await assertProject(user, document.project_id, write, db);
 }
 
 export async function readCanvasDocument(user: SessionUser, documentId: string) {
@@ -674,10 +675,10 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
       throw new CanvasDocumentError('此请求编号已用于不同内容，请使用新的 mutation_id', 409, 'mutation_conflict');
     }
     const document = await db.canvasDocument.findUnique({ where: { id: receipt.document_id }, select: canvasMetadataSelect });
-    await assertDocument(user, document, true);
+    await assertDocument(user, document, false, db);
     requireCanvasRoleCapability(document!.schema_version, body.required_capabilities);
     if (documentId && documentId !== receipt.document_id) {
-      await assertDocument(user, await db.canvasDocument.findUnique({ where: { id: documentId }, select: canvasMetadataSelect }), true);
+      await assertDocument(user, await db.canvasDocument.findUnique({ where: { id: documentId }, select: canvasMetadataSelect }), false, db);
     }
     return { ...JSON.parse(receipt.response_json), replayed: true };
   }
@@ -688,7 +689,7 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
       const repeated = await replay(db);
       if (repeated) return repeated;
       const existing = documentId ? await db.canvasDocument.findUnique({ where: { id: documentId } }) : null;
-      if (documentId) await assertDocument(user, existing, true);
+      if (documentId) await assertDocument(user, existing, true, db);
       if (existing && ['save', 'duplicate', 'restore_revision'].includes(action)) requireCanvasRoleCapability(existing.schema_version, body.required_capabilities);
       if (existing && existing.schema_version >= 5 && isRoleCollaborationReadOnly()) {
         throw new CanvasDocumentError('新版角色协作处于保护模式，原画布可查看，暂不保存修改', 503, 'collaboration_guard');
@@ -699,7 +700,7 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
       const projectId = existing ? existing.project_id : requestedProject;
       if (existing && projectSpecified && requestedProject !== existing.project_id) invalid('不能移动画布到其他项目');
       if (!existing && !projectId) invalid('新建画布必须选择项目');
-      await assertProject(user, projectId, true);
+      await assertProject(user, projectId, true, db);
       if (v2 && baseRevision !== (existing?.revision ?? 0)) {
         if (existing) conflict(existing);
         invalid('新建画布 base_revision 必须为 0');
@@ -777,7 +778,7 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
         const newId = `canvas-${createHash('sha256').update(`${user.id}\0${mutationId}`).digest('hex')}`;
         const prior = await db.canvasDocument.findUnique({ where: { id: newId }, select: canvasMetadataSelect });
         if (prior) {
-          await assertDocument(user, prior, true);
+          await assertDocument(user, prior, false, db);
           throw new CanvasDocumentError('此创建请求的回执已过期，请打开已创建的画布', 409, 'mutation_expired', {
             document: canvasMetadata(prior),
           });

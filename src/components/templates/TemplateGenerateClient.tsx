@@ -22,6 +22,8 @@ import {
 } from '@/components/H3MachineStatus';
 import type { AccountMenuUser } from '@/components/AccountMenu';
 import ComposerTopbar from '@/components/ComposerTopbar';
+import ProjectCreateOperationNotice from '@/components/ProjectCreateOperationNotice';
+import { useProjectCreateOperation, type ProjectCreateResult } from '@/lib/projects/client-operations';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { formatProviderUsdCharge } from '@/lib/costs/currency';
 import { readJsonResponse } from '@/lib/http/json-response';
@@ -239,6 +241,7 @@ export function TemplateGenerateClient() {
   const lastH3AutoCheckAtRef = useRef(0);
 
   const [currentUser, setCurrentUser] = useState<TemplateGenerateUser | null>(null);
+  const projectCreate = useProjectCreateOperation(currentUser?.id, 'template-generate');
   const [loadingUser, setLoadingUser] = useState(true);
   const [credits, setCredits] = useState<CreditSummary | null>(null);
   const [h3VideoConfig, setH3VideoConfig] = useState<H3VideoConfig | null>(null);
@@ -253,6 +256,7 @@ export function TemplateGenerateClient() {
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   const [projectName, setProjectName] = useState('');
+  useEffect(() => { if (projectCreate.pending) setProjectName(projectCreate.pending.input.name); }, [projectCreate.pending]);
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectMessage, setProjectMessage] = useState<{ type: 'info' | 'error' | 'success'; text: string } | null>(null);
 
@@ -761,24 +765,27 @@ export function TemplateGenerateClient() {
     setProjectBusy(true);
     setProjectMessage(null);
     try {
-      const response = await fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: projectName.trim() }),
-      });
-      const data = await readJsonResponse<{ project?: ProjectOption; error?: string; message?: string }>(response);
-      if (!response.ok) throw new Error(data.message || data.error || '项目创建失败');
+      const data = await projectCreate.create({ name: projectName });
+      if (data.operation.state !== 'accepted') return;
       setProjectName('');
       setProjectCreateOpen(false);
       setProjectPickerOpen(false);
-      setProjectMessage({ type: 'success', text: '项目已创建' });
-      await loadProjects(data.project?.id || null);
+      setProjectMessage({ type: 'success', text: data.project ? '项目已创建' : '原创建已受理，当前项目已不可访问，没有重新创建。' });
+      if (data.project) await loadProjects(data.project.id);
     } catch (error) {
-      setProjectMessage({ type: 'error', text: error instanceof Error ? error.message : '项目创建失败' });
+      setProjectMessage({ type: 'info', text: error instanceof Error ? error.message : '项目创建失败，输入已保留' });
     } finally {
       setProjectBusy(false);
     }
-  }, [loadProjects, projectName]);
+  }, [loadProjects, projectName, projectCreate.create]);
+
+  const recoverCreatedProject = async (result: ProjectCreateResult) => {
+    if (result.operation.state !== 'accepted') return;
+    setProjectCreateOpen(false); setProjectPickerOpen(false);
+    setProjectName('');
+    setProjectMessage({ type: 'info', text: result.project ? '已找到原创建项目' : '原创建已受理，当前项目已不可访问，没有重新创建。' });
+    if (result.project) await loadProjects(result.project.id);
+  };
 
   const handleCreateVideoCard = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1173,12 +1180,13 @@ export function TemplateGenerateClient() {
                     <input
                       className="composer-project-input"
                       value={projectName}
+                      disabled={projectCreate.busy || Boolean(projectCreate.pending)}
                       onChange={(event) => setProjectName(event.currentTarget.value)}
                       placeholder="输入项目名称"
                       maxLength={40}
                       autoFocus
                     />
-                    <button type="submit" className="composer-project-btn composer-project-btn-primary" disabled={projectBusy}>
+                    <button type="submit" className="composer-project-btn composer-project-btn-primary" disabled={projectBusy || projectCreate.busy || !projectCreate.ready || Boolean(projectCreate.pending)}>
                       {projectBusy ? '创建中...' : '创建'}
                     </button>
                   </form>
@@ -1282,6 +1290,7 @@ export function TemplateGenerateClient() {
           </div>
           </section>
 
+        <ProjectCreateOperationNotice operation={projectCreate} onResolved={recoverCreatedProject} />
         {(projectMessage || videoCardMessage) && (
           <div className={`composer-project-message ${(projectMessage || videoCardMessage)?.type || 'info'}`}>
             {(projectMessage || videoCardMessage)?.text}

@@ -8,7 +8,7 @@ import { assertMultiviewRequestFence } from '@/lib/video/multiview-request-recei
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
-import { assertCanViewTask, getProjectForGeneration } from '@/lib/projects/permissions';
+import { assertCanViewTask, getProjectForGeneration, assertProjectActiveInTransaction } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance, publicVideoPricing, videoPricingError, type VideoPricingQuote } from '@/lib/pricing/video';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
@@ -388,6 +388,7 @@ export async function POST(request: NextRequest) {
   try {
     createdTask = await prisma.$transaction(async (tx) => {
       await assertMultiviewRequestFence(tx, user.id, idempotencyKey);
+      await assertProjectActiveInTransaction(tx, user, project.id);
       await assertVideoPricingAcceptance(priceQuote, body.pricingRevision, tx);
       const task = await tx.videoTask.create({
         data: {

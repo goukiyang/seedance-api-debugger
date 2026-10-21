@@ -1,9 +1,16 @@
 import type { Prisma } from '@prisma/client';
+import { assertProjectActiveForActorInTransaction } from '@/lib/projects/permissions';
 
 type BranchClient = Prisma.TransactionClient;
 
 const ACTIVE_BRANCH_STATUSES = ['exploring', 'candidate', 'primary'];
 const MAX_ACTIVE_BRANCHES = 5;
+
+async function assertBranchProjectWrite(tx: BranchClient, actorUserId: string, videoCardId: string) {
+  const card = await tx.videoCard.findUnique({ where: { id: videoCardId }, select: { project_id: true } });
+  if (!card) throw new Error('视频卡不存在');
+  await assertProjectActiveForActorInTransaction(tx, actorUserId, card.project_id);
+}
 
 export function isActiveBranchStatus(status: string) {
   return ACTIVE_BRANCH_STATUSES.includes(status);
@@ -53,6 +60,7 @@ export async function createVideoBranch(
     confirmOverLimit?: boolean;
   },
 ) {
+  await assertBranchProjectWrite(tx, input.createdBy, input.videoCardId);
   const activeCount = await tx.videoBranch.count({
     where: {
       video_card_id: input.videoCardId,
@@ -91,6 +99,7 @@ export async function setPrimaryBranch(
     actorUserId: string;
   },
 ) {
+  await assertBranchProjectWrite(tx, input.actorUserId, input.videoCardId);
   const branch = await tx.videoBranch.findFirst({
     where: { id: input.branchId, video_card_id: input.videoCardId },
   });
@@ -126,6 +135,7 @@ export async function closeBranch(
     reason?: string | null;
   },
 ) {
+  await assertBranchProjectWrite(tx, input.actorUserId, input.videoCardId);
   const branch = await tx.videoBranch.findFirst({
     where: { id: input.branchId, video_card_id: input.videoCardId },
   });
@@ -158,6 +168,7 @@ export async function mergeBranch(
     reason?: string | null;
   },
 ) {
+  await assertBranchProjectWrite(tx, input.actorUserId, input.videoCardId);
   if (input.sourceBranchId === input.targetBranchId) throw new Error('不能把方向合并到自身');
   const [source, target] = await Promise.all([
     tx.videoBranch.findFirst({ where: { id: input.sourceBranchId, video_card_id: input.videoCardId } }),
@@ -210,6 +221,7 @@ export async function promoteBranchToVideoCard(
     tx.videoBranch.findFirst({ where: { id: input.branchId, video_card_id: input.videoCardId } }),
   ]);
   if (!sourceCard || !branch) throw new Error('方向分支不存在');
+  await assertProjectActiveForActorInTransaction(tx, input.actorUserId, sourceCard.project_id);
   if (branch.status === 'promoted') throw new Error('方向已升格为独立视频卡');
 
   const promotedCard = await tx.videoCard.create({

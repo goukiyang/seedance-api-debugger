@@ -10,6 +10,8 @@ import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { uploadFileToHistory, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import { uploadSession } from '@/lib/http/upload-session';
 import { readJsonResponse } from '@/lib/http/json-response';
+import ProjectCreateOperationNotice from '@/components/ProjectCreateOperationNotice';
+import { useProjectCreateOperation, type ProjectCreateResult } from '@/lib/projects/client-operations';
 import { validVideoPricingAmount, videoPricingBusinessInput } from '@/lib/pricing-client';
 import type { PickerItem } from '@/lib/assets/picker-types';
 import { RATIO_OPTIONS, RESOLUTION_OPTIONS, type WorkspaceAssetItem } from '@/types';
@@ -215,6 +217,7 @@ function message(cause: unknown, fallback: string) { return cause instanceof Err
 export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const { user, hasLoadedUser, sessionChanged, userLoadError, refreshUser, refreshCredits } = useAppSession();
   const owner = user?.id || '';
+  const projectCreate = useProjectCreateOperation(owner, 'multiview');
   const authorityKey = JSON.stringify([owner, user?.role, user?.account_type, user?.feature_profile_id,
     user?.feishu?.user_id, user?.feishu?.open_id, user?.feishu?.union_id]);
   const sessionReady = Boolean(owner && hasLoadedUser && !sessionChanged && !userLoadError && !isClientSessionBlocked() && uploadSession().ownerId === owner);
@@ -273,6 +276,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [progress, setProgress] = useState<UploadProgressSnapshot | null>(null);
   const [projectName, setProjectName] = useState('');
+  useEffect(() => { if (projectCreate.pending) setProjectName(projectCreate.pending.input.name); }, [projectCreate.pending]);
   const [cardTitle, setCardTitle] = useState('');
   const [creating, setCreating] = useState<'project' | 'card' | null>(null);
   const [revision, setRevision] = useState(0);
@@ -882,16 +886,30 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     const scope = capture(); if (!current(scope)) return;
     const token = {}; createLock.current = token; const projectId = draft.projectId; setCreating(kind); setError('');
     try {
-      const response = await fetch(kind === 'project' ? '/api/projects' : `/api/projects/${encodeURIComponent(projectId)}/video-cards`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(kind === 'project' ? { name, type: 'team' } : { title: name, objective: null }), signal: AbortSignal.timeout(30000) });
+      if (kind === 'project') {
+        const result = await projectCreate.create({ name });
+        if (!current(scope)) return;
+        if (result.operation.state === 'accepted') applyCreatedProject(result);
+        return;
+      }
+      const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/video-cards`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: name, objective: null }), signal: AbortSignal.timeout(30000) });
       const payload = await readJsonResponse<ApiError & { project?: Project; video_card?: VideoCard }>(response);
       if (!current(scope)) return;
       if (!response.ok) throw new Error(payload.message || payload.error || '保存位置创建未确认，请先刷新列表核对，不要重复创建。');
-      if (kind === 'project' && payload.project) { setProjects(value => [payload.project!, ...value.filter(item => item.id !== payload.project!.id)]); change({ projectId: payload.project.id, videoCardId: '' }); setProjectName(''); }
-      else if (kind === 'card' && payload.video_card && draftRef.current?.projectId === projectId) { setCards(value => [payload.video_card!, ...value]); change({ videoCardId: payload.video_card.id }); setCardTitle(''); }
+      if (payload.video_card && draftRef.current?.projectId === projectId) { setCards(value => [payload.video_card!, ...value]); change({ videoCardId: payload.video_card.id }); setCardTitle(''); }
       else throw new Error('创建结果尚未确认，请刷新列表核对。');
     } catch (cause) { if (current(scope)) setError(message(cause, '创建结果待确认，请先刷新列表。')); }
     finally { if (createLock.current === token) { createLock.current = null; setCreating(null); } }
+  }
+
+  function applyCreatedProject(result: ProjectCreateResult) {
+    if (result.operation.state !== 'accepted') return;
+    const project = result.project;
+    if (project) {
+      setProjects(value => [project, ...value.filter(item => item.id !== project.id)]);
+      change({ projectId: project.id, videoCardId: '' }); setProjectName('');
+    } else setError('原创建已受理，当前项目已不可访问，没有重新创建。');
   }
 
   if (!hasLoadedUser) return <section className={styles.panel} role="status">正在读取生成设置…</section>;
@@ -980,7 +998,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
             {cardSelectionInvalid && !cardLoading && <p className={styles.feedback} role="status">原视频卡暂不可用于生成，请重新选择或明确取消关联，其他输入已保留。</p>}
           </details>
           <button type="button" className={styles.quiet} disabled={formDisabled} onClick={() => setRevision(value => value + 1)}><RefreshCw size={13} />刷新列表</button>
-          <details open={sections.owner === owner && sections.create} onToggle={event => toggleSection('create', event.currentTarget.open)}><summary>新建项目或视频卡</summary><div className={styles.createRow}><input aria-label="新项目名称" value={projectName} maxLength={80} placeholder="新项目名称" disabled={formDisabled} onChange={event => setProjectName(event.target.value)} /><button type="button" disabled={formDisabled || !projectName.trim()} onClick={() => void createDestination('project')}>新建项目</button></div>
+          <details open={sections.owner === owner && sections.create} onToggle={event => toggleSection('create', event.currentTarget.open)}><summary>新建项目或视频卡</summary><div className={styles.createRow}><input aria-label="新项目名称" value={projectName} maxLength={80} placeholder="新项目名称" disabled={formDisabled || Boolean(projectCreate.pending)} onChange={event => setProjectName(event.target.value)} /><button type="button" disabled={formDisabled || !projectName.trim() || projectCreate.busy || !projectCreate.ready || Boolean(projectCreate.pending)} onClick={() => void createDestination('project')}>新建项目</button></div>
             <div className={styles.createRow}><input aria-label="新视频卡标题" value={cardTitle} maxLength={100} placeholder="新视频卡标题" disabled={formDisabled} onChange={event => setCardTitle(event.target.value)} /><button type="button" disabled={formDisabled || !currentProject || !cardTitle.trim()} onClick={() => void createDestination('card')}>新建视频卡</button></div></details>
         </div>
         {needsApproval && <p className={styles.feedback}>当前项目的1080p生成需要关联已有候选、当前最佳或最终版的视频卡，并通过该卡审批。</p>}
@@ -989,6 +1007,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         {quoteError && <p className={styles.feedback} role="status">{quoteError}<button type="button" className={styles.quiet} onClick={() => setRevision(value => value + 1)}>重新报价</button></p>}
       </div>
     </div>}
+    <ProjectCreateOperationNotice operation={projectCreate} onResolved={applyCreatedProject} />
     {!quietReady && (error || status || !saved || requestStorageFailed || accountRequestBlocked || requestScan.records.length > 0 || recoveryBlocked || active || receipt?.phase === 'ready') && <footer className={styles.footer}>
       {requestSummary && <p role="status">{requestSummary}</p>}
       {error && <p role="status">{error}</p>}{status && !sameReady && <p role="status">{status}</p>}

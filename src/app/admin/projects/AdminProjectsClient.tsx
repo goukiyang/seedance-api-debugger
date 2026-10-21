@@ -10,6 +10,8 @@ import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { displayUserName } from '@/lib/users/display';
+import ProjectCreateOperationNotice from '@/components/ProjectCreateOperationNotice';
+import { projectStatusExpectation, useProjectCreateOperation, type ProjectCreateResult } from '@/lib/projects/client-operations';
 
 interface ProjectItem {
   id: string;
@@ -21,6 +23,10 @@ interface ProjectItem {
   owner?: { id?: string; name: string | null; username: string | null; email?: string | null; avatar_url?: string | null; account_type?: string | null };
   _count?: { members: number; tasks: number; reference_albums?: number };
   updated_at: string;
+  status_version?: { status: string; updated_at: string };
+  can_archive?: boolean;
+  can_restore?: boolean;
+  can_delete?: boolean;
 }
 
 type ProjectFilter = 'all' | 'active' | 'archived' | 'empty' | 'smoke';
@@ -66,11 +72,11 @@ function ownerLabel(project: ProjectItem): string {
 }
 
 function canArchive(project: ProjectItem): boolean {
-  return project.type === 'team' && project.status !== 'archived';
+  return project.can_archive === true;
 }
 
 function canDelete(project: ProjectItem): boolean {
-  return project.type === 'team' && (project._count?.tasks ?? 0) === 0 && (project._count?.reference_albums ?? 0) === 0;
+  return project.can_delete === true;
 }
 
 function canShowDeleteProjectAction(project: ProjectItem): boolean {
@@ -109,10 +115,11 @@ const ADMIN_PROJECTS_PAGE_SIZE = 20;
 const SMOKE_ARCHIVE_PROJECT_NAME = 'Smoke Project Archive';
 
 export default function AdminProjectsClient({ viewerId }: { viewerId: string }) {
-  return <AdminUsageClient key={viewerId} viewerId={viewerId} view="projects" management={selectedId => <ProjectManagement selectedProjectId={selectedId === 'unassigned' ? null : selectedId} />} />;
+  return <AdminUsageClient key={viewerId} viewerId={viewerId} view="projects" management={selectedId => <ProjectManagement viewerId={viewerId} selectedProjectId={selectedId === 'unassigned' ? null : selectedId} />} />;
 }
 
-function ProjectManagement({ selectedProjectId }: { selectedProjectId: string | null }) {
+function ProjectManagement({ selectedProjectId, viewerId }: { selectedProjectId: string | null; viewerId: string }) {
+  const projectCreate = useProjectCreateOperation(viewerId, 'admin-projects-archive');
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -262,13 +269,11 @@ function ProjectManagement({ selectedProjectId }: { selectedProjectId: string | 
 
     setProjectActionBusy(true);
     try {
-      const res = await fetch(`/api/projects/${project.id}`, action === 'delete'
-        ? { method: 'DELETE' }
-        : {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action }),
-          });
+      const res = await fetch(`/api/projects/${project.id}`, {
+        method: action === 'delete' ? 'DELETE' : 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...(action === 'delete' ? {} : { action }), ...projectStatusExpectation(project) }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || data.message || `${label}项目失败`);
 
@@ -294,17 +299,8 @@ function ProjectManagement({ selectedProjectId }: { selectedProjectId: string | 
     setMergeError('');
     setMergeLoading(true);
     try {
-      const res = await fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: SMOKE_ARCHIVE_PROJECT_NAME,
-          type: 'team',
-          description: 'closure smoke reusable project',
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.message || '创建归档项目失败');
+      const data = await projectCreate.create({ name: SMOKE_ARCHIVE_PROJECT_NAME, description: 'closure smoke reusable project' });
+      if (data.operation.state !== 'accepted') return;
       await loadProjects();
       setTargetProjectId(data.project?.id || '');
       setMessage('已创建 Smoke Project Archive');
@@ -313,6 +309,12 @@ function ProjectManagement({ selectedProjectId }: { selectedProjectId: string | 
     } finally {
       setMergeLoading(false);
     }
+  };
+
+  const recoverArchiveProject = async (result: ProjectCreateResult) => {
+    if (result.operation.state !== 'accepted') return;
+    await loadProjects(); setTargetProjectId(result.project?.id || '');
+    setMessage(result.project ? '已找到原创建的归档项目' : '原创建已受理，当前项目已不可访问，没有重新创建。');
   };
 
   const loadMergePreview = async () => {
@@ -506,7 +508,7 @@ function ProjectManagement({ selectedProjectId }: { selectedProjectId: string | 
                           type="button"
                           onClick={() => requestProjectAction(project, 'delete')}
                           disabled={!canDelete(project)}
-                          title={canDelete(project) ? '删除空协作项目' : '仅没有任务和图集的空协作项目可删除'}
+                          title={canDelete(project) ? '删除空协作项目' : '项目有业务或历史记录时请归档'}
                         >
                           删除
                         </button>
@@ -540,6 +542,7 @@ function ProjectManagement({ selectedProjectId }: { selectedProjectId: string | 
               <button className="btn btn-secondary" type="button" onClick={() => setMergeOpen(false)} disabled={mergeLoading}>关闭</button>
             </header>
 
+            <ProjectCreateOperationNotice operation={projectCreate} onResolved={recoverArchiveProject} />
             {mergeError && <p className="text-gray">{mergeError}</p>}
 
             <section>
@@ -568,7 +571,7 @@ function ProjectManagement({ selectedProjectId }: { selectedProjectId: string | 
                 ))}
               </select>
               {!targetCandidates.some((project) => project.name === SMOKE_ARCHIVE_PROJECT_NAME) && (
-                <button className="btn btn-secondary" type="button" onClick={createArchiveProject} disabled={mergeLoading}>
+                <button className="btn btn-secondary" type="button" onClick={createArchiveProject} disabled={mergeLoading || projectCreate.busy || !projectCreate.ready || Boolean(projectCreate.pending)}>
                   创建 Smoke Project Archive
                 </button>
               )}

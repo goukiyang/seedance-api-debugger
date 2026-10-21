@@ -108,7 +108,57 @@ const usageSources = [usageGate, 'scripts/admin-usage-migration-engineering.py',
   'prisma/schema.prisma', 'prisma/schema-base.prisma', 'prisma/migrations/20261021073000_usage_attribution/migration.sql',
   'ops/sd2-usage-attribution-migrate.py', 'ops/sd2-admin-usage-public-proof.mjs',
   'ops/sd2-usage-role-start.mjs', 'scripts/canvas-role-coordinator.ts'];
-const sourceFiles = ['package.json', entry, pricingGate, ...usageSources, ...fixtures.flatMap(fixture => [fixture.file, ...fixture.sources])];
+const publicUsageFixtures = [
+  { file: 'scripts/canvas-input-engineering.mjs', schema: 'canvas-input-engineering.v1',
+    databaseFlag: 'applicationDatabaseOpened', sources: [
+      'public/tools/ultimate-canvas/canvas-engine.js', 'scripts/canvas-input-engineering.mjs',
+      'public/tools/ultimate-canvas/app.js', 'public/tools/ultimate-canvas/index.html',
+    ] },
+  { file: 'scripts/project-create-client-engineering.ts', schema: 'project-create-client-engineering.v1',
+    databaseFlag: 'applicationDatabaseOpened', sources: [
+      'scripts/project-create-client-engineering.ts', 'src/lib/projects/client-operations.ts',
+    ] },
+  { file: 'scripts/personal-usage-engineering.ts', schema: 'personal-usage-engineering.v1',
+    databaseFlag: 'applicationDatabaseOpened', sources: [
+      'src/lib/usage/dto.ts', 'src/lib/usage/access.ts', 'src/lib/usage/source-scope.ts', 'src/lib/usage/query.ts',
+      'src/lib/usage/aggregate.ts', 'src/lib/usage/personal.ts', 'src/lib/usage/media.ts', 'src/lib/usage/csv.ts', 'src/lib/usage/http.ts',
+      'src/lib/usage/facts.ts', 'src/lib/admin/usage-facts.ts', 'scripts/personal-usage-engineering.ts',
+    ] },
+  { file: 'scripts/project-operations-engineering.ts', schema: 'project-operations-engineering.v1',
+    databaseFlag: 'databaseOpened', sources: [
+      'scripts/project-operations-engineering.ts', 'src/lib/projects/operations.ts', 'src/lib/projects/permissions.ts',
+      'src/app/api/projects/route.ts', 'src/app/api/projects/[id]/route.ts', 'src/app/api/project-invites/[token]/join/route.ts',
+    ] },
+  { file: 'scripts/usage-reader-sql-engineering.ts', schema: 'usage-reader-sql-engineering.v1',
+    databaseFlag: 'applicationDatabaseOpened', sources: [
+      'scripts/usage-reader-sql-engineering.ts', 'prisma/schema.prisma', 'src/lib/usage/facts.ts',
+      'prisma/migrations/20261021073000_usage_attribution/migration.sql',
+      'src/lib/usage/source-scope.ts', 'src/lib/usage/media.ts', 'src/lib/usage/access.ts', 'src/lib/usage/query.ts',
+    ] },
+  { file: 'scripts/usage-video-media-engineering.ts', schema: 'usage-video-media-engineering.v1',
+    databaseFlag: 'applicationDatabaseOpened', sources: [
+      'src/lib/usage/media.ts', 'src/lib/usage/dto.ts', 'src/lib/usage/personal.ts',
+      'src/components/usage/UsageWorkspace.tsx', 'src/components/usage/UsageWorkspace.module.css',
+      'src/lib/projects/permissions.ts', 'src/lib/tasks/retention.ts', 'src/lib/video/task-thumbnail-projection.ts',
+      'src/lib/video/delivery-status.ts', 'src/lib/video/thumbnail-availability.ts', 'src/lib/video/thumbnail.ts',
+      'src/components/MediaPreview.tsx', 'src/lib/hooks/use-media-preview-state.ts', 'scripts/usage-video-media-engineering.ts',
+    ] },
+];
+const projectContractSources = [
+  'src/lib/projects/client-operations.ts', 'src/components/ProjectCreateOperationNotice.tsx',
+  'src/components/generate/GeneratePageClient.tsx', 'src/components/templates/TemplateGenerateClient.tsx',
+  'src/app/multiview/MultiviewGenerationPanel.tsx', 'src/app/admin/projects/AdminProjectsClient.tsx',
+  'src/app/api/projects/operations/[requestId]/route.ts', 'src/app/api/projects/operations/[requestId]/close/route.ts',
+  'src/app/api/tasks/create/route.ts', 'src/app/api/ip/tasks/create/route.ts', 'src/app/api/tasks/enhance-video/create/route.ts',
+  'src/lib/tasks/seedance-draft-upgrade.ts', 'src/lib/canvas-documents.ts', 'src/app/api/tools/ultimate-canvas/flows/route.ts',
+  'src/lib/tools/toolflow.ts', 'src/lib/video-cards/workflow.ts', 'src/lib/video-branches/index.ts', 'src/lib/feishu/requirements.ts',
+  'src/app/api/reference-albums/route.ts', 'src/app/api/reference-albums/[id]/images/route.ts',
+  'src/app/api/usage/route.ts', 'src/app/api/usage/records/route.ts', 'src/app/api/usage/export/route.ts',
+  'src/app/api/projects/[id]/usage/route.ts', 'src/app/api/projects/[id]/usage/records/route.ts',
+  'src/app/api/projects/[id]/usage/export/route.ts', 'src/app/api/projects/[id]/costs/export/route.ts',
+];
+const sourceFiles = [...new Set(['package.json', entry, pricingGate, ...usageSources, ...projectContractSources,
+  ...publicUsageFixtures.flatMap(fixture => [fixture.file, ...fixture.sources]), ...fixtures.flatMap(fixture => [fixture.file, ...fixture.sources])])];
 const hash = value => createHash('sha256').update(value).digest('hex');
 const hashes = () => Object.fromEntries(sourceFiles.map(file => [file, hash(readFileSync(path.join(root, file)))]));
 const time = value => typeof value === 'number' ? value : Date.parse(value);
@@ -195,6 +245,23 @@ function validateFixture(fixture, file, runId, startedAt, finishedAt, sourceSha2
   return receipt.sha256;
 }
 
+function validatePublicUsageFixture(fixture, recorded, runId, batchStart, batchEnd, sourceSha256) {
+  assert.equal(recorded.file, fixture.file);
+  assert.ok(recorded.startedAt >= batchStart && recorded.finishedAt >= recorded.startedAt && recorded.finishedAt <= batchEnd);
+  const receipt = readPrivateReceipt(recorded.receipt);
+  assert.equal(receipt.sha256, recorded.sha256);
+  const value = receipt.value;
+  assert.equal(value.schema, fixture.schema); assert.equal(value.completed, true); assert.equal(value.synthetic, true);
+  if (value.runId !== undefined) assert.equal(value.runId, runId);
+  if (value.candidateRoot !== undefined) assert.equal(value.candidateRoot, root);
+  assert.equal(value[fixture.databaseFlag], false);
+  for (const key of ['forbiddenCalls', 'paidRequests', 'browserRuns']) assert.equal(value[key], 0);
+  if (value.productionWrites !== undefined) assert.equal(value.productionWrites, 0);
+  assert.ok(Array.isArray(value.checks) && value.checks.length > 0 && new Set(value.checks).size === value.checks.length);
+  for (const file of fixture.sources) assert.equal(value.sourceSha256?.[file], sourceSha256[file]);
+  for (const [file, digest] of Object.entries(value.sourceSha256 || {})) assert.equal(sourceSha256[file], digest);
+}
+
 function verify(file, since) {
   assertConfig();
   assert.ok(Number.isFinite(since) && since > 0, 'A real npm start time is required');
@@ -207,6 +274,9 @@ function verify(file, since) {
   assert.ok(Date.now() - value.startedAt <= 30 * 60_000, 'Build gate receipt is stale');
   assert.deepEqual(value.sourceSha256, hashes(), 'Candidate source changed after the gate ran');
   assert.equal(value.fixtures?.length, fixtures.length);
+  assert.equal(value.publicUsageFixtures?.length, publicUsageFixtures.length);
+  publicUsageFixtures.forEach((fixture, index) => validatePublicUsageFixture(fixture, value.publicUsageFixtures[index], value.runId,
+    value.startedAt, value.finishedAt, value.sourceSha256));
   const usage = readPrivateReceipt(value.usageEngineeringReceipt);
   assert.equal(usage.value.schema, 'admin-usage-engineering.v1'); assert.equal(usage.value.completed, true);
   assert.equal(usage.value.runId, value.runId); assert.equal(usage.value.candidateRoot, root);
@@ -241,7 +311,7 @@ function run() {
   const scratch = path.join(root, '.role-tests');
   mkdirSync(scratch, { recursive: true, mode: 0o700 });
   const directory = mkdtempSync(path.join(scratch, 'image-recovery-gate-'));
-  const recorded = [], failures = [], outcomes = [];
+  const recorded = [], publicUsageRecorded = [], failures = [], outcomes = [];
   const fixtureEnvironment = { ...process.env, IMAGE_RECOVERY_GATE_RUN_ID: runId };
   const usageEngineeringReceipt = path.join(directory, 'admin-usage-pure.json');
   const usageResult = spawnSync(process.execPath, ['--import', 'tsx', usageGate, usageEngineeringReceipt], {
@@ -251,6 +321,26 @@ function run() {
   writeFileSync(usageLog, (usageResult.stdout || '') + (usageResult.stderr || ''), { mode: 0o600, flag: 'wx' });
   if (usageResult.error || usageResult.signal || usageResult.status !== 0) {
     failures.push({ file: usageGate, category: 'pure-engineering', message: 'Calendar/query/integer check failed', log: usageLog, status: usageResult.status, signal: usageResult.signal });
+  }
+  for (const fixture of publicUsageFixtures) {
+    const receipt = path.join(directory, path.basename(fixture.file) + '.json');
+    const fixtureStart = Date.now();
+    const result = spawnSync(process.execPath, ['--import', 'tsx', fixture.file, receipt], {
+      cwd: root, env: fixtureEnvironment, encoding: 'utf8', timeout: 30000, maxBuffer: 1024 * 1024,
+    });
+    const finishedAt = Date.now();
+    const log = path.join(directory, path.basename(fixture.file) + '.log');
+    writeFileSync(log, (result.stdout || '') + (result.stderr || ''), { mode: 0o600, flag: 'wx' });
+    try {
+      assert.ifError(result.error); assert.equal(result.signal, null); assert.equal(result.status, 0);
+      const item = { file: fixture.file, receipt, sha256: readPrivateReceipt(receipt).sha256, startedAt: fixtureStart, finishedAt };
+      validatePublicUsageFixture(fixture, item, runId, startedAt, Date.now(), sourceSha256);
+      publicUsageRecorded.push(item); outcomes.push({ file: fixture.file, completed: true, log });
+    } catch (error) {
+      failures.push({ file: fixture.file, category: 'public-usage-contract',
+        message: error instanceof Error ? error.message : String(error), log, status: result.status, signal: result.signal });
+      outcomes.push({ file: fixture.file, completed: false, log });
+    }
   }
   // No isolated child may inherit the runtime canonical HD root. Existing
   // image/fee fixtures now also execute the post-commit registration hook.
@@ -306,14 +396,15 @@ function run() {
     const failureReport = path.join(directory, 'failure-report.json');
     writeFileSync(failureReport, JSON.stringify({ schema: 'image-recovery-build-failure.v1', completed: false,
       runId, candidateRoot: root, startedAt, finishedAt: Date.now(), sourceSha256, outcomes, failures,
-      partialReceipts: recorded, pricingReceipt: pricingReceipt || null }, null, 2), { mode: 0o600, flag: 'wx' });
+      partialReceipts: recorded, publicUsageFixtures: publicUsageRecorded, pricingReceipt: pricingReceipt || null }, null, 2), { mode: 0o600, flag: 'wx' });
     console.error(`Image recovery build failure report: ${failureReport}`);
     process.exitCode = 1;
     return;
   }
   const receipt = path.join(directory, 'receipt.json');
   writeFileSync(receipt, JSON.stringify({ schema: 'image-recovery-build-gate.v1', runId, candidateRoot: root,
-    startedAt, finishedAt: Date.now(), sourceSha256, fixtures: recorded, pricingReceipt, usageEngineeringReceipt, completed: true }, null, 2), { mode: 0o600, flag: 'wx' });
+    startedAt, finishedAt: Date.now(), sourceSha256, fixtures: recorded, publicUsageFixtures: publicUsageRecorded,
+    pricingReceipt, usageEngineeringReceipt, completed: true }, null, 2), { mode: 0o600, flag: 'wx' });
   verify(receipt, startedAt);
   console.log(`PRICING_POLICY_GATE_RECEIPT=${pricingReceipt}`);
   console.log(`IMAGE_RECOVERY_GATE_RECEIPT=${receipt}`);

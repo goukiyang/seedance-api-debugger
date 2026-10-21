@@ -149,8 +149,31 @@ class CanvasEngine {
     }
 
     _initEvents() {
+        if (!this.container.hasAttribute('tabindex')) this.container.tabIndex = -1;
+        // Capture before node handlers can select, pick a reference, or start a drag.
+        this.container.addEventListener('mousedown', (e) => {
+            this.spacePanClickPending = false;
+            if (e.defaultPrevented || this._isInteractiveTarget(e.target)) return;
+            if (e.target !== this.container && e.target !== this.canvas && !e.target.closest('.canvas-node')) return;
+            if (this._canvasInputBlocked()) { e.preventDefault(); e.stopImmediatePropagation(); return; }
+            if (e.button === 0) this.container.focus({ preventScroll: true });
+            if (e.button === 0 && this.isSpacePressed) {
+                this.spacePanClickPending = true;
+                this._onMouseDown(e);
+                e.stopImmediatePropagation();
+            }
+        }, true);
+        this.container.addEventListener('click', (e) => {
+            if (!this.spacePanClickPending || e.detail === 0) return;
+            this.spacePanClickPending = false;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+        }, true);
         this.container.addEventListener('mousedown', (e) => this._onMouseDown(e));
         window.addEventListener('mousemove', (e) => this._onMouseMove(e));
+        window.addEventListener('mouseup', () => {
+            if (this._canvasInputBlocked()) this._cancelInputGesture();
+        }, true);
         window.addEventListener('mouseup', (e) => this._onMouseUp(e));
         this.container.addEventListener('wheel', (e) => this._onWheel(e), { passive: false });
         this.container.addEventListener('dblclick', (e) => this._onDoubleClick(e));
@@ -164,39 +187,99 @@ class CanvasEngine {
         });
 
         document.addEventListener('keydown', (e) => {
-            if (e.defaultPrevented || document.querySelector('[aria-modal="true"]')) return;
+            if (e.defaultPrevented || this._canvasInputBlocked()) return;
             if (e.key === 'Escape') {
+                this._cancelInputGesture();
                 this._hideContextMenu();
                 this._hideAddMenu();
-                if (this.isDrawingConnection) this._cancelConnection();
             }
             if ((e.key === 'Delete' || e.key === 'Backspace') && this.selectedNodeId
-                && !['TEXTAREA','INPUT'].includes(document.activeElement.tagName)
-                && !document.activeElement.isContentEditable) {
+                && !this._isInteractiveTarget(e.target)
+                && !this._isInteractiveTarget(document.activeElement)) {
                 this.deleteNode(this.selectedNodeId);
             }
         });
 
         window.addEventListener('keydown', (e) => {
-            if (e.defaultPrevented || document.querySelector('[aria-modal="true"]')) return;
-            if (e.key === ' ' && !['TEXTAREA', 'INPUT'].includes(document.activeElement.tagName) && !document.activeElement.isContentEditable) {
+            if (e.defaultPrevented || e.isComposing || this._canvasInputBlocked()) return;
+            if (e.key === ' ' && !this._isInteractiveTarget(e.target)
+                && !this._isInteractiveTarget(document.activeElement)) {
                 this.isSpacePressed = true;
                 this.container.style.cursor = 'grab';
-                if (document.activeElement === document.body) {
-                    e.preventDefault();
-                }
+                e.preventDefault();
             }
         });
         window.addEventListener('keyup', (e) => {
             if (e.key === ' ') {
                 this.isSpacePressed = false;
-                this.container.style.cursor = 'default';
+                this.container.style.cursor = this.isPanning ? 'grabbing' : 'default';
             }
+        }, true);
+        window.addEventListener('blur', () => this._cancelInputGesture());
+        window.addEventListener('pagehide', () => this._cancelInputGesture());
+        window.addEventListener('pointercancel', () => this._cancelInputGesture(), true);
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) this._cancelInputGesture();
         });
+    }
+
+    _isInteractiveTarget(target) {
+        return Boolean(target?.isContentEditable || target?.closest?.(
+            'input, textarea, select, button, a, label, details, summary, video, audio, iframe, '
+            + '[contenteditable], [role="button"], [role="link"], '
+            + '[role="dialog"], [role="menu"], [role="listbox"], .side-panel, .add-node-menu, '
+            + '.context-menu, .generation-popover, .node-action-row, .video-props-tab, '
+            + '.video-tool-btn, .image-props-tools, .model-selector, .director-actor, .director-shot-chip, '
+            + '[data-canvas-inline-video], [data-canvas-media-preview], [data-video-loop], '
+            + '[data-video-play], [data-video-read-retry]'
+        ));
+    }
+
+    _canvasInputBlocked() {
+        if (document.body.classList.contains('canvas-document-busy')
+            || document.body.classList.contains('canvas-document-readonly')
+            || this.container.closest('[inert]')) return true;
+        return [...document.querySelectorAll('dialog[open], [aria-modal="true"]')].some(layer =>
+            !layer.closest('[hidden], .hidden, [aria-hidden="true"]')
+            && layer.getClientRects().length > 0
+            && window.getComputedStyle(layer).visibility !== 'hidden'
+        );
+    }
+
+    _cancelInputGesture() {
+        // A cancelled preview is not mouseup: do not notify, save, connect, or clear selection.
+        const wasDragging = this.isDraggingNode;
+        if (wasDragging) {
+            this.dragNodeStarts?.forEach((start, id) => {
+                const node = this.nodes.get(id);
+                const element = this.canvas.querySelector(`[data-node-id="${CSS.escape(id)}"]`);
+                if (!node || node !== start.node || node.x !== start.previewX || node.y !== start.previewY) return;
+                node.x = start.x; node.y = start.y;
+                if (element) { element.style.left = start.x + 'px'; element.style.top = start.y + 'px'; }
+            });
+        }
+        this.dragNode?.classList.remove('dragging');
+        this.isSpacePressed = false;
+        this.isPanning = false;
+        this.isSelecting = false;
+        this.isDraggingNode = false;
+        this.dragNode = null;
+        this.dragNodeStarts = null;
+        this.hasPannedDuringRightClick = false;
+        this.spacePanClickPending = false;
+        this.container.style.cursor = 'default';
+        document.getElementById('selection-marquee')?.classList.add('hidden');
+        this._cancelConnection();
+        const pointer = this.nodeDragPointer;
+        this.nodeDragPointer = null;
+        if (pointer?.target.hasPointerCapture(pointer.id)) pointer.target.releasePointerCapture(pointer.id);
+        if (wasDragging) this._updateConnections();
     }
 
     // --- Mouse Handlers ---
     _onMouseDown(e) {
+        if (e.defaultPrevented || this._canvasInputBlocked()) return;
+        if (e.button === 0 && this._isInteractiveTarget(e.target)) return;
         const isSpace = this.isSpacePressed;
         // Panning: Middle click (1), Right click (2), or Space + Left click (0)
         if (e.button === 1 || e.button === 2 || (e.button === 0 && isSpace)) {
@@ -219,6 +302,8 @@ class CanvasEngine {
     }
 
     _onMouseMove(e) {
+        if (!this.isPanning && !this.isSelecting && !this.isDraggingNode && !this.isDrawingConnection) return;
+        if (this._canvasInputBlocked()) { this._cancelInputGesture(); return; }
         if (this.isPanning) {
             // Track if we actually moved the mouse during right-click panning
             this.hasPannedDuringRightClick = true;
@@ -288,6 +373,8 @@ class CanvasEngine {
             this.dragNode.style.top = newY + 'px';
             const nd = this.nodes.get(this.dragNode.dataset.nodeId);
             if (nd) { nd.x = newX; nd.y = newY; }
+            const dragStart = this.dragNodeStarts?.get(this.dragNode.dataset.nodeId);
+            if (dragStart) { dragStart.previewX = newX; dragStart.previewY = newY; }
             this.dragNodeStarts?.forEach((start, id) => {
                 if (id === this.dragNode.dataset.nodeId) return;
                 const member = this.nodes.get(id);
@@ -295,6 +382,7 @@ class CanvasEngine {
                 if (!member || !element) return;
                 member.x = start.x + newX - this.nodeStartX;
                 member.y = start.y + newY - this.nodeStartY;
+                start.previewX = member.x; start.previewY = member.y;
                 element.style.left = member.x + 'px'; element.style.top = member.y + 'px';
             });
             this._updateConnections();
@@ -781,28 +869,32 @@ class CanvasEngine {
             this._selectDragNodes(id);
         });
         if (type === 'role' || type === 'role-requirement') {
-            let touchPointer = null;
             lbl.addEventListener('pointerdown', event => {
                 if (event.pointerType === 'mouse' || this.roleCollaboration?.hasPending()) return;
-                event.preventDefault(); event.stopPropagation(); touchPointer = event.pointerId; lbl.setPointerCapture(event.pointerId);
+                if (event.defaultPrevented || this._canvasInputBlocked()) return;
+                event.preventDefault(); event.stopPropagation();
+                this.nodeDragPointer = { id: event.pointerId, target: lbl };
+                lbl.setPointerCapture(event.pointerId);
                 this.isDraggingNode = true; this.dragNode = wrap; this.dragStartX = event.clientX; this.dragStartY = event.clientY;
                 this.nodeStartX = nd.x; this.nodeStartY = nd.y; this._selectDragNodes(id); wrap.classList.add('dragging');
             });
-            lbl.addEventListener('pointermove', event => { if (event.pointerId === touchPointer) this._onMouseMove(event); });
-            const finish = event => { if (event.pointerId === touchPointer) { this._onMouseUp(event); touchPointer = null; } };
-            lbl.addEventListener('pointerup', finish); lbl.addEventListener('pointercancel', finish);
+            lbl.addEventListener('pointermove', event => { if (event.pointerId === this.nodeDragPointer?.id) this._onMouseMove(event); });
+            lbl.addEventListener('pointerup', event => {
+                if (event.pointerId !== this.nodeDragPointer?.id) return;
+                if (this._canvasInputBlocked()) { this._cancelInputGesture(); return; }
+                this.nodeDragPointer = null;
+                this._onMouseUp(event);
+            });
+            lbl.addEventListener('lostpointercapture', event => {
+                if (event.pointerId === this.nodeDragPointer?.id) this._cancelInputGesture();
+            });
         }
 
         // Also drag via card header area (but not inputs/buttons inside)
         wrap.querySelector('.node-card').addEventListener('mousedown', (e) => {
             if (e.button !== 0) return;
             if (type === 'role' || type === 'role-requirement') return;
-            if (e.target.closest('.node-connector')
-                || e.target.closest('textarea, input, select, button, a, details, summary, video, audio, [contenteditable]')
-                || e.target.closest('.node-action-row') || e.target.closest('.video-props-tab')
-                || e.target.closest('.video-tool-btn') || e.target.closest('.image-props-tools')
-                || e.target.closest('.model-selector') || e.target.closest('.director-actor')
-                || e.target.closest('.director-shot-chip')) return;
+            if (e.target.closest('.node-connector') || this._isInteractiveTarget(e.target)) return;
             e.preventDefault();
             e.stopPropagation();
             if (this.onReferenceNodePick?.(id, e)) return;
@@ -820,9 +912,8 @@ class CanvasEngine {
         // Select
         wrap.addEventListener('mousedown', (e) => {
             if (e.button !== 0 || e.target.closest('.node-connector,video,audio') || this.isDraggingNode) return;
-            if (!e.target.closest('textarea,input,select,button,a,[contenteditable]') && this.onReferenceNodePick?.(id, e)) { e.preventDefault(); e.stopPropagation(); return; }
-            if (!e.target.closest('textarea, input, select, button, a, [contenteditable]')
-                && this._toggleSelectionGesture(id, e)) return;
+            if (!this._isInteractiveTarget(e.target) && this.onReferenceNodePick?.(id, e)) { e.preventDefault(); e.stopPropagation(); return; }
+            if (!this._isInteractiveTarget(e.target) && this._toggleSelectionGesture(id, e)) return;
             if (!this.selectedNodeIds.has(id)) this._selectNode(id);
         });
 
@@ -1390,7 +1481,10 @@ class CanvasEngine {
         const groups = new Set(selected.map(key => this.nodes.get(key)?.data?.canvasGroup?.id).filter(Boolean));
         const ids = [...new Set([...selected, ...[...this.nodes.values()].filter(node => groups.has(node.data?.canvasGroup?.id)).map(node => node.id)])];
         this.selectNodes(ids, id);
-        this.dragNodeStarts = new Map(ids.map(key => [key, { x: this.nodes.get(key).x, y: this.nodes.get(key).y }]));
+        this.dragNodeStarts = new Map(ids.map(key => {
+            const node = this.nodes.get(key);
+            return [key, { x: node.x, y: node.y, previewX: node.x, previewY: node.y, node }];
+        }));
     }
 
     _toggleSelectionGesture(id, event) {

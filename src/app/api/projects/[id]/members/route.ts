@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
-import { assertCanManageProjectMembers, normalizeProjectRole, logProjectAction } from '@/lib/projects/permissions';
+import { assertProjectActiveInTransaction, normalizeProjectRole, logProjectActionInTransaction } from '@/lib/projects/permissions';
 
 export async function POST(
   request: NextRequest,
@@ -12,24 +12,22 @@ export async function POST(
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
-    const access = await assertCanManageProjectMembers(user, params.id);
-    if (access.project?.status === 'archived') {
-      return NextResponse.json({ error: '归档项目为只读，请先恢复后再修改成员' }, { status: 400 });
-    }
-
     const body = await request.json();
     const targetUserId = typeof body.user_id === 'string' ? body.user_id : '';
     if (!targetUserId) return NextResponse.json({ error: 'user_id 为必填' }, { status: 400 });
 
-    const targetUser = await prisma.user.findUnique({
+    const member = await prisma.$transaction(async (tx) => {
+    const access = await assertProjectActiveInTransaction(tx, user, params.id, 'members');
+    const targetUser = await tx.user.findUnique({
       where: { id: targetUserId },
       select: { id: true, status: true },
     });
-    if (!targetUser) return NextResponse.json({ error: '用户不存在' }, { status: 404 });
-    if (targetUser.status !== 'active') return NextResponse.json({ error: '禁用或非 active 用户不能加入项目' }, { status: 403 });
+    if (!targetUser) throw new AuthError('用户不存在', 404);
+    if (targetUser.status !== 'active') throw new AuthError('禁用或非 active 用户不能加入项目', 403);
 
     const role = normalizeProjectRole(body.role);
-    const member = await prisma.projectMember.upsert({
+    if (access?.project?.owner_user_id === targetUserId && role !== 'project_owner') throw new AuthError('不能修改项目负责人的角色', 400);
+    const updated = await tx.projectMember.upsert({
       where: { project_id_user_id: { project_id: params.id, user_id: targetUserId } },
       update: { role, status: 'active', joined_by: user.id, joined_at: new Date() },
       create: {
@@ -40,9 +38,11 @@ export async function POST(
       },
     });
 
-    await logProjectAction(user.id, 'project_member_add', 'project', params.id, {
+    await logProjectActionInTransaction(tx, user.id, 'project_member_add', 'project', params.id, {
       user_id: targetUserId,
       role,
+    });
+    return updated;
     });
 
     return NextResponse.json({ member });
