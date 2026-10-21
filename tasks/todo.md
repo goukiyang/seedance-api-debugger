@@ -2,6 +2,8 @@
 
 ## 当前入口
 
+- [x] PRE01（2026-10-20）：完成管理页优化前置工单；已核数据费用口径、页面接口落点、依赖、验收回退，采用A管理首页＋B成员详情。正式正文 tasks/todo/2026-10-20-admin-usage-analytics-preflight.md 与A/B附件仅本机项目根归档，远端仅脱敏登记；未实施或部署，功能仍用户手验。
+
 - [人物描述优先与自由表达 AV1](todo/2026-10-05-avatar-intent-generation-flow.md#11-av1描述优先与自由表达2026-10-05)：2026-10-06，已部署v0.44.1/f0a142f/BUILD Nc2Ap5uhxsUEQCkxpRocE，待用户手动验收；简短描述不再因预设分类缺项阻止生成，完整原文进入四宫格与独立头像提示词，其他条件可选。11文件候选内置类型/lint、Git/回退/790源匹配/公网及4静态检查完成；保留费用、未知请求、真实互斥及旧草稿重新报价保护，worker不重启；[交付报告](../docs/materials/2026-10-05-avatar-description-first/delivery.json)与[统一diff](../docs/materials/2026-10-05-avatar-description-first/source.diff)正式归档，0模型/图片/人工DB写，无全站或浏览器功能验收。
 
 - [模板标题与收藏闭环 FAV1](todo/2026-10-02-feedback-primary-navigation.md#fav1模板标题与收藏闭环2026-10-05)：2026-10-05，v0.44.0/17c55b2/BUILD 2eaaF0OY1UB1XncX97oQJ已部署；图片/视频模板标题仅名称右侧收藏，顶部我的收藏直达模板，复用搜索/使用/取消/撤销。候选内置检查、公网新CSS与3份JS、服务/回退/远端均完成，实际效果待用户手动验收。仅12个前端及版本文件，无DB/权限/模型/依赖变化，费用0；[完整源diff](../docs/materials/2026-10-05-template-title-favorites/source.diff)与[公网证明](../docs/materials/2026-10-05-template-title-favorites/public.json)在正式资料根，旧无关资产计划和其他脏改保留。

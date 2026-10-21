@@ -1,5 +1,9 @@
 # 项目资料索引
 
+## 管理使用分析 PRE01（2026-10-20）
+
+项目video-api-debugger；用户已选A管理首页、B成员详情。前置工单v1.0.0已完成，覆盖全站/个人/项目、月/季度/半年、同筛选导出及导航/异常/API/现场恢复。正式正文 tasks/todo/2026-10-20-admin-usage-analytics-preflight.md；A/B概念图v1.0.0/R01、原prompt与校验在 docs/materials/2026-10-20-admin-usage-preview/，前置证据在 docs/materials/2026-10-20-admin-usage-preflight/。全部私有正文/原件仅正式根本机可访问，本远端仅登记；未实施、部署或功能验收。
+
 ## 人物描述优先与自由表达（2026-10-05）
 
 - 项目video-api-debugger；接收2026-10-05，来源用户本对话文字与人物页截图；资料版本原始反馈v1，补充并纠正旧C1/D3分类硬拦截，不替代原件。
