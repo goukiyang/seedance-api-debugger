@@ -69,7 +69,7 @@ async function main() {
     'historical-template-reference', 'current-template-reference'].map(id => [id, { id, owner_id: owner,
     original_url: `/synthetic/${id}`, thumbnail_url: null, file_name: id, mime_type: 'image/png', width: 1024, height: 1024,
     file_size: 100, hash: `hash-${id}`, status: 'active', type: 'image' }]));
-  const assetRows = (where: { id?: { in: string[] }; owner_id?: string }) => [...assets.values()].filter(asset =>
+  const assetRows = (where: { id?: { in: string[] }; owner_id?: string }) => Array.from(assets.values()).filter(asset =>
     (!where.id || where.id.in.includes(asset.id)) && (!where.owner_id || where.owner_id === asset.owner_id));
   const tx = {
     imageStudioTask: {
