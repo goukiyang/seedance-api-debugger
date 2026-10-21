@@ -2,9 +2,9 @@
 
 ## LIB01/LIB02 整单实施（2026-10-21）
 
-来源：用户明确要求正式LibTV细节工单落地；完整私有正文在正式根[原工单§14](../../tasks/todo/2026-10-21-libtv-detail-fixes-preflight.md)，当前v1.3.0/R04、W1–W12、A01–A22。关键词：画布事务/快捷、图片大编辑、故事镜头表、视频1/2/4、完整任务号、资产返回与复用、全屏对比、横幅左右贴边。沿用下方R01–R04资料及原件，无新媒体附件；实施记录追加原单，不覆盖历史证据。起点68a35a53干净APP，原e00/v0.101.1成功发布证据沿RESTORE目录复用。五个隔离包已交付，正在统一工程检查与修正；候选0.102.0尚未构建/发布，功能用户手验；不含旧模板R04收费任务。
+来源：用户明确要求正式LibTV细节工单落地；完整私有正文在正式根[原工单§14](../../tasks/todo/2026-10-21-libtv-detail-fixes-preflight.md)，有效v1.3.0/R04、W1–W12、A01–A22。关键词：画布事务/快捷、图片大编辑、故事镜头表、视频1/2/4、完整任务号、资产返回与复用、全屏对比、横幅左右贴边。2026-10-21 21:46:52Z正常run `05d24c02-b3f3-4041-88e3-464b98ecac22`发布v0.102.0、源86dc32f2、BUILD `144JweHixHdObEov_wdAS`，21:47Z收口；原单§14.1逐项登记12项实施状态。已部署，A01–A22及真实旧客户端更新提醒待用户手验；无浏览器或收费生成，不含旧模板R04收费任务。原参考媒体与失败证据保留。
 
-实施资料（正式根私有）：[W5服务合同](2026-10-21-libtv-detail-fixes/implementation/w5-backend-contract.md)、[W9复用合同](2026-10-21-libtv-detail-fixes/implementation/w9-reuse-contract.md)、[第三轮工程检查原日志](2026-10-21-libtv-detail-fixes/implementation/engineering-round3.log)。来源为本批实际代码和离线执行；记录首轮及修正轮次，不代替最终完整构建或功能验收。关键文本可读，日志由实际运行生成；无新媒体原件。
+实施资料（正式根私有）：[W5服务合同](2026-10-21-libtv-detail-fixes/implementation/w5-backend-contract.md)、[W9复用合同](2026-10-21-libtv-detail-fixes/implementation/w9-reuse-contract.md)、[第三轮原日志](2026-10-21-libtv-detail-fixes/implementation/engineering-round3.log)。原日志已核存在/可读，保留错误启动器的backend退出1及后续client/graph/input/syntax/typecheck结果，不冒整份全绿；实际12组后端续接记录见原单。新增[最终收口与28份证据SHA](2026-10-21-libtv-detail-fixes/implementation/deployment-closure-r04.json)、[双完整构建/原日志/16组控制](2026-10-21-libtv-detail-fixes/implementation/complete-builds-r04/)、[同lead Review](2026-10-21-libtv-detail-fixes/implementation/release-review-r04.json)、[实际加表回执](2026-10-21-libtv-detail-fixes/implementation/complete-builds-r04/receipt.json)、[一致备份证明](2026-10-21-libtv-detail-fixes/implementation/complete-builds-r04/backup-proof.json)、[8页53资源与登录边界原证](2026-10-21-libtv-detail-fixes/implementation/public-libtv-r04.stdout)、[正常收口](2026-10-21-libtv-detail-fixes/implementation/completed-r04.stdout)。JSON已解析并核关键哈希，原备份在服务器同run数据盘，回退guard c25663b5/BUILD `LmZt_MmqI-TLpm8cz7t35`已完整构建；仅回程序不回数据，非真实回退演练。原文、媒体、回执不上传公开Git，非关键可再生辅助文件不逐项复验。
 
 ## RESTORE-R01/R02/R03/R04 模板复用与保存冲突（2026-10-21）
 
