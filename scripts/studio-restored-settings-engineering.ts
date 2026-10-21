@@ -98,6 +98,7 @@ async function main() {
       fixedReferences: [], styleGroupIds: [], styleGroups: [], templateReferenceIds: ['current-template-reference'], referencePolicy: policy } };
   const channel = { channelId: 'original', configRevision: '55555555-5555-4555-8555-555555555555' };
   const api = { provider: 'openai', modelCapabilities: {}, supports_text_to_image: true, supports_image_to_image: true };
+  let forbiddenCalls = 0;
   const sandbox: Record<string, any> = { exports: {}, createHash, randomUUID, ...restoredContract,
     MAX_REFERENCE_IMAGES: 10, DEFAULT_STUDIO_PRIMARY_MAX: 1, MAX_STYLE_GROUP_NOTE_LENGTH: 8000,
     IMAGE_STUDIO_MODELS: ['gpt-image-1'], IMAGE_STUDIO_MODEL_QUALITY_OPTIONS: { 'gpt-image-1': ['medium'] },
@@ -137,7 +138,8 @@ async function main() {
     reserveImageStudioQueueCapacity: async () => {}, recordUsageAttribution: async () => {},
     STUDIO_BATCH_LIMITS: { images: 30 }, pricingCanonical: (value: unknown) => JSON.stringify(value),
     // Any unexpected network/module access is a fixture failure, not a fallback.
-    fetch: () => { throw new Error('Network prohibited'); }, require: () => { throw new Error('Application import prohibited'); },
+    fetch: () => { forbiddenCalls++; throw new Error('Network prohibited'); },
+    require: () => { forbiddenCalls++; throw new Error('Application import prohibited'); },
   };
   const code = [declarations('src/lib/image-studio/style-groups.ts', ['StudioStyleError', 'parseStudioStyleIds']),
     declarations('src/lib/image-studio/fixed-references.ts', ['StudioFixedReferenceError', 'parseStudioFixedReferences']),
@@ -271,9 +273,10 @@ async function main() {
   assert.equal(created.length, 1); assert.equal(created[0].prompt, '');
   checks.push('ordinary_shared_unsaved_definition_still_rejected', 'accepted_recovery_precedes_new_source_and_config_checks', 'creation_uses_same_empty_personal_input');
 
+  assert.equal(forbiddenCalls, 0);
   writeFileSync(destination, JSON.stringify({ schema: 'studio-restored-settings-engineering.v1', synthetic: true, completed: true,
     checks, sourceSha256: Object.fromEntries(files.map(file => [file, createHash('sha256').update(sources.get(file)!).digest('hex')])),
-    applicationDatabaseOpened: false, networkCalls: 0, paidRequests: 0, browserRuns: 0,
+    applicationDatabaseOpened: false, forbiddenCalls, networkCalls: 0, paidRequests: 0, browserRuns: 0,
     scope: 'Selected production request/restore/projection/quote declarations with synthetic external dependencies; not functional acceptance or full worker dispatch' }),
   { mode: 0o600, flag: 'wx' });
   console.log('STUDIO_RESTORED_SETTINGS_ENGINEERING_RECEIPT=' + destination);
