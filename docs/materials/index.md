@@ -1,5 +1,9 @@
 # 项目资料索引
 
+## LIB-FIX01 R04 横幅左右贴边（2026-10-21）
+
+项目video-api-debugger；来源用户本轮文字，无新附件。关键词：添加模块横幅、左右贴框、不是上下、默认高度、等比裁切。正式根tasks/todo/2026-10-21-libtv-detail-fixes-preflight.md v1.3.0/R04§13记W12/A22及实际studio.tsx/CSS落点；此要求替代2026-10-14 BAN01资料中的contain整图显示，历史原证保留。e01有图容器180px/contain已核，不冒当前页面手验；仅文档，未改业务/原图/版本或部署。
+
 ## LIB-FIX01 R03 大图与对比（2026-10-21）
 
 项目video-api-debugger；来源用户本轮文字，无新附件。关键词：上次对比图已失效、提示常驻、全屏、无边框、中央分隔线。正式根tasks/todo/2026-10-21-libtv-detail-fixes-preflight.md v1.2.0/R03§12登记W10/W11及A19–A21；已核e01共享ZoomableImagePreview恢复/notice与CSS，9c39该组件无差量。原R01/R02资料保留，R02复用报错图不冒本问题截图；历史具体对象/版本未知，当前只方案未修复/验收，无新媒体或收费。完整私有正文继续留正式根。
