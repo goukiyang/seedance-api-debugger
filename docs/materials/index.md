@@ -1,5 +1,9 @@
 # 项目资料索引
 
+## LIB-FIX01 R02追加（2026-10-21）
+
+项目video-api-debugger；来源用户本轮文字/截图；关键词任务号复制、资产返回、抽屉复用、重复确认。正式主目录tasks/todo/2026-10-21-libtv-detail-fixes-preflight.md v1.1.0/R02§11及docs/materials/2026-10-21-libtv-detail-fixes/保留原名附件和设计依据；原图可读/cmp一致，原R01证据保留。完整私有材料不公开Git，未改业务/收费生成/部署，用户手验边界不变。
+
 ## LIB-FIX01 统一修复前置（2026-10-21）
 
 项目video-api-debugger；来源本轮用户前置要求及视频1/2/4确认；工单v1.0.0/R01。正式主目录 tasks/todo/2026-10-21-libtv-detail-fixes-preflight.md及docs/materials/2026-10-21-libtv-detail-audit/含根因、编辑快捷、故事承接、批次费用恢复和旧客户端/回退设计。F05/F08补证取代先前待核判断；3新增JSON可解析、9关键PNG及25本地链接可读，原件/原名保留。私有完整正文与媒体/诊断不公开Git；无业务改动/迁移/收费生成/部署，不冒功能验收。
