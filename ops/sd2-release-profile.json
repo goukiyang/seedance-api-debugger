@@ -7,11 +7,11 @@
   "controllerSetSha256": "84d3bac3d6846f47eb998573b9130b1b6cc95af696a3468a72ff02a25476bb09",
   "wrapperSha256": "0c86b553e41c42cb2a539a4a07a3f46669d71f7c1c4d0b2e5b12abb3a02d3907",
   "promotion": {
-    "template": "release-template-restore-r02",
-    "wrapper": "run-template-restore-r02.mjs",
+    "template": "release-template-restore-r03",
+    "wrapper": "run-template-restore-r03.mjs",
     "controllerCount": 46,
-    "controllerSetSha256": "2b8c3b8537f9a6d8836cea7ced8006b10930b8915d31c0e5ec415c24c0028ee4",
-    "wrapperSha256": "c148d3ba3cd72d8c4130c432836e7dab8ec55a63269a22802202ccac513748c8",
+    "controllerSetSha256": "0aee1a4ae4476518b81b86cf2926894b7c40f8fa6900adf1ad689f1b084c580b",
+    "wrapperSha256": "650423e999616e363b781d72915db3e6c1239e1d4e61fc9b7aee5530ca8975d7",
     "changed": ["candidate-reuse-engineering.mjs", "candidate-reuse.mjs", "common.mjs", "control-preflight.mjs", "cutover-driver.mjs", "cutover-safety.mjs", "guard-recovery.mjs", "hd-closed-cache-engineering.mjs", "hd-storage-preflight.mjs", "legacy-maintenance.mjs", "release-contract.mjs", "release-protection-engineering.mjs", "release.mjs", "retired-hd-cache-engineering.mjs", "switch.mjs"],
     "added": ["candidate-lifecycle-engineering.mjs", "deployed-usage-schema-engineering.mjs", "deployed-usage-schema.mjs", "normal-continuation-engineering.mjs", "normal-continuation.mjs", "preflight-resume-engineering.mjs", "runtime-source-engineering.mjs", "usage-role-control.mjs", "usage-role-engineering.mjs", "usage-role-start.mjs"]
   },
