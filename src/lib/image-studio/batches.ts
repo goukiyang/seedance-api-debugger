@@ -14,7 +14,8 @@ import { studioAssetUrl } from './media';
 import { studioDeliveryStatus } from './delivery';
 import { studioVisibleAssetWhere } from './protected-assets';
 import { resolveStudioStyleReferences } from './style-groups';
-import { historicalSkills } from './skills';
+import { historicalSkills, resolveSkills } from './skills';
+import { assertRestoredStudioStyleVersions } from './restored-settings';
 import type { StudioReferencePolicy } from './reference-policy';
 import { imageBillingView, parseImageBillingContract } from './billing-contract';
 import type { ImageBillingContract } from './billing-contract';
@@ -121,7 +122,7 @@ export function continuationInput(batch: BatchRecord, body: Record<string, unkno
   const pending = batch.items.filter(item => !item.taskId && !item.cancelled);
   if (!pending.length) throw new StudioError('本批没有未受理条目，请查看原任务', 409);
   const changes = Object.fromEntries(['prompt', 'personalPrompt', 'personalOverrides', 'model', 'quality', 'resolution', 'count', 'aspectRatio',
-    'revision', 'moduleRevision', 'sharedLive', 'draft', 'referenceIds', 'imageChannel', 'channelId', 'batchQuoteId', 'pricingRevision', 'budget']
+    'revision', 'moduleRevision', 'sharedLive', 'restoredSettings', 'draft', 'referenceIds', 'imageChannel', 'channelId', 'batchQuoteId', 'pricingRevision', 'budget']
     .filter(field => Object.prototype.hasOwnProperty.call(body, field)).map(field => [field, body[field]]));
   const previous = { ...batch.input };
   delete previous.imageChannel;
@@ -139,7 +140,7 @@ async function reconfirmBatchDefinition(tx: Prisma.TransactionClient, batch: Bat
   if (!boundedBudget(body.budget)) throw new StudioError('请确认未受理条目的当前报价及整批最高预算', 409);
   const nextBody = continuationInput(batch, body);
   const input = parseStudioRequest(nextBody);
-  const sharedUse = await resolveOwnedStudioTaskSharedUse(batch.ownerId, batch.moduleId, input.sharedLive, tx);
+  const sharedUse = await resolveOwnedStudioTaskSharedUse(batch.ownerId, batch.moduleId, input.sharedLive, tx, input);
   if (!sharedUse) throw new SharedStudioDefinitionError('共享模板绑定不可用，请重新打开模板');
   await assertSharedStudioWorkerReady(tx);
   const settings = await getImageStudioSettings();
@@ -212,7 +213,8 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
   if (typeof body?.requestId === 'string' && /^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) {
     const acceptedId = idFor(ownerId, body.requestId);
     const saved = await prisma.platformSetting.findFirst({ where: { key: { in: batchKeys(ownerId, acceptedId) } } });
-    if (saved && (parse(saved.value_json).input.sharedLive !== undefined || body.sharedLive !== undefined)) {
+    if (saved && (parse(saved.value_json).input.sharedLive !== undefined || body.sharedLive !== undefined
+      || parse(saved.value_json).input.restoredSettings !== undefined || body.restoredSettings !== undefined)) {
       if (body.moduleId !== undefined && body.moduleId !== parse(saved.value_json).moduleId) throw new StudioError('提交编号已用于其他批次，请查询原批次', 409);
       return acceptedId;
     }
@@ -237,7 +239,7 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
       const saved = parse(existing.value_json);
       const savedSnapshot = saved.input.imageChannel as ImageGenerationChannelSnapshot | undefined;
       const suppliedSnapshot = input.imageChannel;
-      if (saved.input.sharedLive !== undefined || input.sharedLive) return;
+      if (saved.input.sharedLive !== undefined || input.sharedLive || saved.input.restoredSettings !== undefined || input.restoredSettings) return;
       const sameIntent = saved.requestFingerprint === requestFingerprint || saved.fingerprint === requestFingerprint;
       if (!sameIntent || suppliedSnapshot && (savedSnapshot?.channelId !== suppliedSnapshot.channelId
         || savedSnapshot.configRevision !== suppliedSnapshot.configRevision)) throw new StudioError('提交编号已用于其他批次', 409);
@@ -255,7 +257,7 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
       select: { name: true, model: true, quality: true, resolution: true, prices_json: true } });
     if (!workspace) throw new StudioError('模板不存在或无权使用', 404);
     const settings = await getImageStudioSettings();
-    const sharedUse = await resolveOwnedStudioTaskSharedUse(ownerId, body.moduleId as string, input.sharedLive, tx);
+    const sharedUse = await resolveOwnedStudioTaskSharedUse(ownerId, body.moduleId as string, input.sharedLive, tx, input);
     if (sharedUse) { await assertSharedStudioWorkerReady(tx); shared.sharedLive = sharedUse.definition.intent; }
     const sharedGeneration = sharedUse ? studioSharedGenerationSource(sharedUse, input) : null;
     const generationSource = sharedGeneration || { ...workspace, ...(input.model ? { model: input.model } : {}),
@@ -354,6 +356,7 @@ async function prepareBatch(owner: string, id: string) {
           const now = JSON.parse(task.snapshot_json as string);
           const skillInput = (snapshot: Record<string, unknown>) => Array.isArray(snapshot.skills) ? snapshot.skills.map(skill => ({ id: skill.id, prompt: skill.prompt, promptVersion: skill.promptVersion, ownerId: skill.ownerId })) : [];
           const definitionFields = ['globalContext', 'moduleContext', 'settingsRevision', 'sharedLive', 'styleGroups', 'fixedReferenceImages',
+            ...(now.restoredSettings ? ['restoredSettings', 'templatePrompt', 'personalPrompt', 'templateReferenceImages'] : []),
             ...(now.sharedLive ? [] : ['moduleRevision'])];
           if (definitionFields.some(field => JSON.stringify(before[field]) !== JSON.stringify(now[field]))
             || JSON.stringify(skillInput(before)) !== JSON.stringify(skillInput(now))) throw new StudioError('准备期间模板或价格发生变化，未开始生成，请重新核对');
@@ -369,7 +372,8 @@ async function prepareBatch(owner: string, id: string) {
     await prisma.$transaction(async tx => {
       const { row, batch } = await readOwned(owner, id, tx);
       if (batch.state === 'preparing' && batch.items.every(item => item.prepared || item.taskId || item.cancelled)) {
-        await resolveOwnedStudioTaskSharedUse(owner, batch.moduleId, parseSharedStudioIntent(batch.input.sharedLive), tx);
+        await resolveOwnedStudioTaskSharedUse(owner, batch.moduleId, parseSharedStudioIntent(batch.input.sharedLive), tx,
+          batch.input.restoredSettings !== undefined ? parseStudioRequest(batch.input) : undefined);
         batch.state = 'ready'; batch.note = ''; batch.definitionConfirmationRequired = false; await writeBatch(tx, row, batch);
       }
     });
@@ -442,7 +446,8 @@ export async function updateStudioBatch(owner: string, body: Record<string, unkn
       await recoverAcceptedBatchItems(tx, batch);
       try {
         await resolveOwnedStudioTaskSharedUse(owner, batch.moduleId,
-          parseSharedStudioIntent(body.sharedLive ?? batch.input.sharedLive), tx);
+          parseSharedStudioIntent(body.sharedLive ?? batch.input.sharedLive), tx,
+          batch.input.restoredSettings !== undefined ? parseStudioRequest(batch.input) : undefined);
       } catch (error) {
         if (error instanceof SharedStudioDefinitionError || batch.input.sharedLive && sharedDefinitionError(error)) {
           await invalidateUnacceptedDefinition(tx, batch, error instanceof Error ? error.message : '模板已更新，请确认本次生成');
@@ -547,7 +552,8 @@ export async function dispatchStudioBatches() {
           return;
         }
         const sharedUse = await resolveOwnedStudioTaskSharedUse(batch.ownerId, batch.moduleId,
-          parseSharedStudioIntent(batch.input.sharedLive), tx);
+          parseSharedStudioIntent(batch.input.sharedLive), tx,
+          batch.input.restoredSettings !== undefined ? parseStudioRequest(batch.input) : undefined);
         if (sharedUse) await assertSharedStudioWorkerReady(tx);
         await reserveImageStudioQueueCapacity(tx, batch.ownerId, 1);
         const prepared = await tx.platformSetting.findUnique({ where: { key: itemKey(batch, item.ordinal) } });
@@ -569,11 +575,36 @@ export async function dispatchStudioBatches() {
         const transientIds = (snapshot.transientReferenceImages || []).map((reference: { id: string }) => reference.id);
         const visibleReferences = await tx.asset.count({ where: { id: { in: transientIds }, owner_id: batch.ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(user, tx)] } });
         if (visibleReferences !== new Set(transientIds).size) throw new StudioError('本批参考图已不可用，未派发新任务');
+        if (snapshot.restoredSettings && snapshot.templateReferenceImages?.length) {
+          const templateIds = snapshot.templateReferenceImages.map((reference: { id: string }) => reference.id);
+          const readable = await tx.asset.count({ where: { id: { in: templateIds }, status: 'active', type: 'image',
+            AND: [await studioVisibleAssetWhere(user, tx)] } });
+          if (readable !== new Set(templateIds).size) throw new StudioError('原记录的模板参考图已不可用，未派发新任务', 403);
+        }
         const allIds = Array.from(new Set<string>((snapshot.referenceImages || []).map((reference: { id: string }) => reference.id)));
         const assets = await tx.asset.findMany({ where: { id: { in: allIds }, status: 'active', type: 'image' }, select: { id: true, owner_id: true, hash: true } });
         if (assets.length !== allIds.length || assets.some(asset => asset.owner_id !== snapshot.authorizedReferenceOwners?.[asset.id] || snapshot.referenceImages.find((reference: { id: string }) => reference.id === asset.id)?.hash !== asset.hash)) throw new StudioError('本批素材归属或内容已变化，未派发新任务');
-        if (!sharedUse && snapshot.styleGroupIds?.length) await resolveStudioStyleReferences(user, snapshot.styleGroupIds, tx);
+        if ((!sharedUse || snapshot.restoredSettings) && snapshot.styleGroupIds?.length) {
+          const selected = await resolveStudioStyleReferences(user, snapshot.styleGroupIds, tx);
+          if (snapshot.restoredSettings) {
+            const draft = batch.input.draft as { styleGroupVersions?: Record<string, number> } | undefined;
+            if (draft?.styleGroupVersions) assertRestoredStudioStyleVersions(selected.groups, draft.styleGroupVersions);
+            else if (snapshot.styleGroups?.some((group: { id: string; ownerId?: string }) => group.ownerId !== undefined
+              && selected.groups.find(current => current.id === group.id)?.ownerId !== group.ownerId)) {
+              throw new StudioError('历史风格归属已变化，未派发新任务', 403);
+            }
+          }
+        }
         await historicalSkills(user, snapshot.skills, tx);
+        if (snapshot.restoredSettings) {
+          const draft = batch.input.draft as { skillIds?: string[]; skillVersions?: Record<string, string> } | undefined;
+          if (draft?.skillIds) {
+            const current = await resolveSkills(user, draft.skillIds, tx);
+            if (current.some(skill => draft.skillVersions?.[skill.id] !== skill.promptVersion)) {
+              throw new StudioError('本次改选的提示词组已更新，未派发新任务', 409);
+            }
+          }
+        }
         const settingsRow = await tx.platformSetting.findUnique({ where: { key: IMAGE_STUDIO_SETTING_KEY } });
         let channelApi: ImageGenerationResolvedSettings | null = null;
         if (isChannelBatch(batch)) {

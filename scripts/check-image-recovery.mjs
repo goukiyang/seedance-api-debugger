@@ -109,6 +109,16 @@ const usageSources = [usageGate, 'scripts/admin-usage-migration-engineering.py',
   'ops/sd2-usage-attribution-migrate.py', 'ops/sd2-admin-usage-public-proof.mjs',
   'ops/sd2-usage-role-start.mjs', 'scripts/canvas-role-coordinator.ts'];
 const publicUsageFixtures = [
+  { file: 'scripts/studio-restored-settings-engineering.ts', schema: 'studio-restored-settings-engineering.v1',
+    databaseFlag: 'applicationDatabaseOpened', sources: [
+      'src/lib/image-studio/restored-settings.ts', 'src/lib/image-studio/tasks.ts',
+      'src/lib/image-studio/billing-quote-service.ts', 'src/lib/image-studio/batch-billing-quote.ts',
+      'src/lib/image-studio/batches.ts', 'scripts/studio-restored-settings-engineering.ts',
+    ] },
+  { file: 'scripts/studio-definition-rebase-engineering.ts', schema: 'studio-definition-rebase-engineering.v1',
+    databaseFlag: 'applicationDatabaseOpened', sources: [
+      'scripts/studio-definition-rebase-engineering.ts', 'src/lib/image-studio/definition-rebase.ts',
+    ] },
   { file: 'scripts/canvas-input-engineering.mjs', schema: 'canvas-input-engineering.v1',
     databaseFlag: 'applicationDatabaseOpened', sources: [
       'public/tools/ultimate-canvas/canvas-engine.js', 'scripts/canvas-input-engineering.mjs',

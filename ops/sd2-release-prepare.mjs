@@ -14,6 +14,10 @@ const digest = value => createHash('sha256').update(value).digest('hex');
 const sha = /^[a-f0-9]{40}$/, sha256 = /^[a-f0-9]{64}$/;
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 export const REUSE_SCHEMA = 'sd2-candidate-build-reuse.v1';
+export const DEPLOYED_SCHEMA = 'sd2-deployed-usage-schema-input.v1';
+export const DEPLOYED_FIELDS = ['schema', 'publicationRun', 'publicationManifestSha256', 'switchCompleteSha256',
+  'finalProofSha256', 'finalProofCommandSha256', 'migrationRun', 'migrationManifestSha256', 'migrationBeforeSha256',
+  'migrationReceiptSha256', 'backupProofSha256', 'backupSha256'];
 const read = file => {
   const stat = fs.lstatSync(file);
   assert.ok(stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1, 'Expected an ordinary single-link file: ' + file);
@@ -99,7 +103,8 @@ export function contractData(source) {
 }
 
 export function validatePlan(plan, original, now = Date.now()) {
-  keys(plan, ['schema', 'repoRoot', 'outputRoot', 'liveCapture', 'contract', 'reuseBuilds']);
+  keys(plan, ['schema', 'repoRoot', 'outputRoot', 'liveCapture', 'contract', 'reuseBuilds',
+    ...(Object.hasOwn(plan, 'deployedUsageProof') ? ['deployedUsageProof'] : [])]);
   assert.equal(plan.schema, 'sd2-release-plan.v1');
   for (const field of ['repoRoot', 'outputRoot']) assert.ok(path.isAbsolute(plan[field]));
   const c = plan.contract, live = plan.liveCapture;
@@ -108,6 +113,18 @@ export function validatePlan(plan, original, now = Date.now()) {
   const observed = Date.parse(live.observedAt);
   assert.ok(Number.isSafeInteger(observed) && observed <= now && now - observed <= 300000, 'Capture must be fresh; historical evidence is not current runtime');
   assert.equal(c.sourceReady, true); assert.equal(c.baselineReconciled, true);
+  assert.ok(!(c.normalContinuation && c.deployedUsageSchema), 'Schema adoption modes are mutually exclusive');
+  if (c.deployedUsageSchema !== null && c.deployedUsageSchema !== undefined) {
+    const value = c.deployedUsageSchema;
+    keys(value, DEPLOYED_FIELDS); assert.equal(value.schema, DEPLOYED_SCHEMA);
+    for (const key of ['publicationRun', 'migrationRun']) { assert.match(value[key], uuid); assert.notEqual(value[key], c.recoveryRunId); }
+    for (const key of DEPLOYED_FIELDS.filter(key => key.endsWith('Sha256'))) assert.match(value[key], sha256);
+    assert.equal(plan.reuseBuilds, null, 'A new deployed-schema pair requires complete fresh main and guard builds');
+    keys(plan.deployedUsageProof, ['stdoutFile', 'commandReceiptFile']);
+    for (const file of Object.values(plan.deployedUsageProof)) assert.ok(typeof file === 'string' && path.isAbsolute(file));
+  } else {
+    assert.equal(plan.deployedUsageProof || null, null, 'Historical proof payload is only valid in deployed-schema mode');
+  }
   if (c.normalContinuation) {
     const value = c.normalContinuation;
     keys(value, ['schema', 'chainId', 'attempt', 'sourceRun', 'sourceManifestSha256', 'beforeSha256', 'approvalSha256',
@@ -171,6 +188,12 @@ export function checkSources(repo, c) {
     assert.equal(JSON.parse(git(repo, ['show', source + ':package.json'])).version, c.versions[kind]);
   assert.equal(git(repo, ['rev-parse', c.mainBranch]), c.mainSource, 'Main branch moved');
   assert.equal(git(repo, ['rev-parse', c.guardReference]), c.recoveryGuardSource, 'Guard branch moved');
+  if (c.deployedUsageSchema) for (const file of ['prisma/migrations/20261021073000_usage_attribution/migration.sql',
+    'ops/sd2-usage-attribution-migrate.py', 'prisma/schema.prisma', 'ops/sd2-usage-role-start.mjs']) {
+    const expected = git(repo, ['rev-parse', c.baselineSource + ':' + file]);
+    for (const source of [c.mainSource, c.recoveryGuardSource])
+      assert.equal(git(repo, ['rev-parse', source + ':' + file]), expected, 'New pair changed deployed usage schema/start input: ' + file);
+  }
 }
 
 export function reuseInput(plan) {
@@ -189,6 +212,26 @@ export function reuseInput(plan) {
     result[kind] = { file: '/data/video-api-debugger/release-staging/' + sourceRun + '/' + file, sha256: digest(bytes) };
   }
   return result;
+}
+
+export function deployedProofInput(plan) {
+  if (!plan.contract.deployedUsageSchema) return null;
+  const c = plan.contract.deployedUsageSchema, input = plan.deployedUsageProof;
+  const stdout = read(input.stdoutFile), command = read(input.commandReceiptFile);
+  assert.equal(digest(stdout), c.finalProofSha256, 'Original retained proof stdout changed');
+  assert.equal(digest(command), c.finalProofCommandSha256, 'Original retained proof command receipt changed');
+  const proof = JSON.parse(stdout), receipt = JSON.parse(command);
+  assert.equal(proof.schema, 'rate-impl2-switch-proof.v1'); assert.equal(proof.readOnly, true);
+  assert.equal(proof.runId, c.publicationRun); assert.equal(proof.manifestSha256, c.publicationManifestSha256);
+  assert.equal(receipt.status, 0); assert.equal(receipt.signal, null); assert.equal(receipt.error, null);
+  const start = Date.parse(receipt.start), finish = Date.parse(receipt.finish), at = Date.parse(proof.at);
+  assert.ok(Number.isFinite(start) && Number.isFinite(finish) && Number.isFinite(at)
+    && start <= at && at <= finish && finish <= Date.now(), 'Retained proof must belong to the original completed command');
+  return { stdout, command, provenance: { kind: 'original-retained-command-stdout', publicationRun: c.publicationRun,
+    stdout: { sourceFile: input.stdoutFile, stagedFile: 'deployed-usage-prior-proof.stdout', sha256: digest(stdout) },
+    command: { sourceFile: input.commandReceiptFile, stagedFile: 'deployed-usage-prior-proof-command.json', sha256: digest(command) },
+    originalProofAt: proof.at, originalCommandStart: receipt.start, originalCommandFinish: receipt.finish,
+    originalBytesAndTimesChanged: false, historicalRunWritten: false } };
 }
 
 export function renderWrapper(source, repoRoot, reuse, templateName = profile.promotion?.template || profile.template) {
@@ -224,6 +267,7 @@ export async function prepare(plan, materialsRoot) {
   assert.equal(common(plan.repoRoot), common('/Volumes/Data/Projects/video-api-debugger'), 'Different project repository');
   checkSources(plan.repoRoot, c);
   const reuse = reuseInput(plan);
+  const historicalProof = deployedProofInput(plan);
   const output = path.join(fs.realpathSync(path.dirname(plan.outputRoot)), path.basename(plan.outputRoot));
   assert.ok(output.startsWith(template.base + path.sep) && output !== template.base, 'Output must stay in the private release materials directory');
   assert.ok(!fs.existsSync(path.join(template.base, c.recoveryRunId)), 'Run already exists; do not reset its failure history');
@@ -236,11 +280,15 @@ export async function prepare(plan, materialsRoot) {
   const write = (file, bytes) => fs.writeFileSync(path.join(output, file), bytes, { flag: 'wx', mode: 0o600 });
   for (const [file, bytes] of Object.entries(template.files)) write('control/' + file, file === 'release-contract.mjs' ? generatedContract : bytes);
   write('run.mjs', generatedWrapper);
+  if (historicalProof) {
+    write('deployed-usage-prior-proof.stdout', historicalProof.stdout);
+    write('deployed-usage-prior-proof-command.json', historicalProof.command);
+  }
   const receipt = { schema: 'sd2-release-preparation.v1', runId: c.recoveryRunId, createdAt: new Date().toISOString(),
     profileSha256: digest(read(path.join(here, 'sd2-release-profile.json'))), planSha256: digest(JSON.stringify(plan)),
     privateSha256: hashes(moduleFiles(path.join(output, 'control'))), wrapperSha256: digest(generatedWrapper),
     candidateEvidenceKind: reuse ? REUSE_SCHEMA : 'rate-impl2-candidate-build.v1',
-    reuseInput: reuse, localPreparationOnly: true, serverAdmissionVerified: false,
+    reuseInput: reuse, deployedUsageProof: historicalProof?.provenance || null, localPreparationOnly: true, serverAdmissionVerified: false,
     servicesChanged: false, productionWrites: 0, functionalAcceptance: false };
   write('preparation.json', JSON.stringify(receipt, null, 2) + '\n');
   return { output, receipt };

@@ -79,6 +79,7 @@ async function save(request: NextRequest, createOnly: boolean) {
   catch (error) {
     if (error instanceof SyntaxError) return NextResponse.json({ error: '模块内容无效' }, { status: 400, headers: privateHeaders });
     if (businessError(error)) return NextResponse.json({ error: (error as StudioModuleError).message, reasonCode: errorReason(error),
+      ...((error instanceof StudioSharingError || error instanceof StudioModuleError) && error.conflictScope ? { conflictScope: error.conflictScope } : {}),
       ...retiredOpenProjection(error),
       ...openNotAppliedProjection(error),
       ...(error instanceof StudioModuleError && error.commandOutcome ? { commandOutcome: error.commandOutcome } : {}) },

@@ -4,6 +4,22 @@
 
 ## RESTORE-D01 模板复用失效调查（2026-10-21）
 
+用户已明确授权本次修复；新分支`codex/template-restore-fix-20261021`沿干净3c1c4c6c，预计PATCH0.101.1，发布前鲜核。旧ADMIN/PROJECT/CAN已完成，不恢复旧修改。完整当前进度及私有证据归正式根同一固定todo，保其LibTV等并行记录。
+
+| 编号 | 任务内容 | 完成标准 | 当前状态 |
+|---|---|---|---|
+| R01 | 修复设置复用与生成后保留 | 风格组、补充描述实际用于本次生成，生成后及刷新可恢复 | 进行中：前后端已集成，历史来源/改选版本/描述含空值及统一报价创建已接线，新增离线检查已入构建门；未构建或功能验收 |
+| R02 | 修复版本冲突 | 查明触发原因，正确处理版本变化且不覆盖草稿 | 进行中：工作区版本与内容版本分离、差异合并和未知原保存查询已写；统一检查待全批齐备 |
+| R03 | 保护发布 | 必要构建及部署检查完成，提交推送并上线，交用户手验 | 进行中：16:24:42Z只读确认仍v0.101.0；准备v0.101.1及相容guard，新发布控制并行补只读已部署表核验，未停站/发布 |
+
+实施合同：仅明确恢复结果设置时启用原任务来源标记，主图及恢复后继续编辑的个人描述优先，风格历史版本保留；普通未保存定义仍沿已保存模板，不能自动发布。报价、单张、批量和新冻结快照统一使用同一来源，原任务/未知请求不重发。R02已定位保留作者草稿分支提前返回而漏更新工作区revision，以及本机草稿旧revision回写；未将此直接冒充用户当时409或消失的唯一触发。保存区分工作区更新与模板内容变化，实际变化采用编辑前/当前/最新三方比较；旧草稿缺原基线时不伪造可自动合并。未知保存继续核对原回执，不用空查询解锁。
+
+本批原生并行已确认server Bohr、release Galileo（均complex_implementer6.1-sol/xhigh）；lead独占前端/冲突并统一Verify与同lead Review，不派独立审核。server确认draft.styleGroupVersions；release采用deployedUsageSchema且与normalContinuation互斥、reuseBuilds必须null。用户本轮补充：新guard必须保留restoredSettings相容reader/报价/服务端校验和旧任务消费者/原回执，不能静默忽略新marker；role-control只在鲜核前次成功发布所拥有的控制且自然排尽后更换。尚未构建、提交或上线，不冒成功证据。
+
+实现参考已读[React Hook Form createFormControl.ts的keepDirtyValues](https://github.com/react-hook-form/react-hook-form/blob/master/src/logic/createFormControl.ts)：采用保留已编辑字段及更新保存依据的成熟思路，项目内小型纯函数合并，无新增依赖/框架。Jev本机doctor返回deferred，未配置授权/密钥，0调用，继续本流程。私有工程与发布原证将归[RESTORE实施目录](../docs/materials/2026-10-21-template-restore-fix/implementation/)；旧诊断如下保历史。
+
+整合进度：server已完成六文件交回；lead已逐段核对请求解析、原任务恢复优先顺序、来源关系、历史风格/上下文、单批报价及公开投影，并把studio-restored-settings-engineering纳入现有check-image-recovery。新增检查仅合成数据，尚未执行，不冒通过。release已改用原先真实保留的proof stdout及command receipt，复制原字节到新run，不伪造历史final-proof.json、不改旧时间。等待发布包最终交回后统一Verify；无浏览器、收费请求或生产业务写入。
+
 | 编号 | 任务内容 | 完成标准 | 当前状态 |
 |---|---|---|---|
 | D01 | 排查模板设置复用失效 | 找到触发条件和代码依据，区分已确认原因与待核实项 | 已完成限定源码与只读数据调查；具体点击来源和消失时序待核实，未实施修复 |

@@ -9,7 +9,7 @@ import {
   type ImageGenerationResolvedSettings,
 } from '@/lib/integrations/image-generation';
 import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
-import { submitStudioBatch, safeImageChannelSnapshot, parseSharedStudioIntent, sameSharedStudioIntent, resolveOwnedStudioTaskSharedUse, StudioError } from './tasks';
+import { submitStudioBatch, safeImageChannelSnapshot, parseStudioRequest, parseSharedStudioIntent, sameSharedStudioIntent, resolveOwnedStudioTaskSharedUse, StudioError } from './tasks';
 import type { SharedStudioIntent } from './shared-types';
 import { parseImageBillingContract, type ImageBillingContract } from './billing-contract';
 import { imageBillingReady } from './billing-readiness';
@@ -118,8 +118,9 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
   }
   const sharedResult = sharedLive ? { sharedLive } : {};
   const confirmDefinition = async () => {
-    if (sharedLive) await prisma.$transaction(tx => resolveOwnedStudioTaskSharedUse(owner,
-      typeof body.moduleId === 'string' ? body.moduleId : undefined, sharedLive, tx));
+    if (sharedLive || taskSnapshot.restoredSettings !== undefined) await prisma.$transaction(tx => resolveOwnedStudioTaskSharedUse(owner,
+      typeof body.moduleId === 'string' ? body.moduleId : undefined, sharedLive, tx,
+      taskSnapshot.restoredSettings !== undefined ? parseStudioRequest(body) : undefined));
   };
   const imageChannel = imageChannelFromPreparedTask(task)
     || await captureImageGenerationChannel(base.model, 'original');

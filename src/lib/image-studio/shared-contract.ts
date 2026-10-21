@@ -659,7 +659,7 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
     }
     const workspace = await tx.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: actor.id } });
     if (!workspace) throw new StudioSharingError('只能保存自己的模板', 403);
-    if (!Number.isInteger(input.expectedRevision) || workspace.revision !== input.expectedRevision) throw new StudioSharingError('模板已在其他页面保存，当前草稿仍保留', 409);
+    if (!Number.isInteger(input.expectedRevision) || workspace.revision !== input.expectedRevision) throw new StudioSharingError('工作区版本已更新，本次未保存；当前草稿保留，请刷新版本后重试', 409, 'state-conflict', 'workspace');
     const binding = await studioSharedBinding(actor.id, moduleId, tx);
     if (binding && binding.mode !== 'publisher') throw new StudioSharingError('只能由创建者修改共享原模板', 403);
     if (!binding && has(input, 'sharingPreferenceRevision')) {
@@ -682,7 +682,7 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
     if (source && await studioPresetArchived(presetId, tx)) throw new StudioSharingError('模板已删除，当前草稿仍保留', 409);
     if (source) {
       const expectedToken = input.expectedDefinitionToken ?? (input.sharedLive as Partial<SharedStudioIntent> | undefined)?.definitionToken;
-      if (expectedToken !== await sharedDefinitionToken(source, tx)) throw new StudioSharingError('模板已更新，请重新打开设置核对；当前草稿仍保留', 409);
+      if (expectedToken !== await sharedDefinitionToken(source, tx)) throw new StudioSharingError('共享模板内容已更新，本次未保存；请核对差异，当前草稿保留', 409, 'state-conflict', 'definition');
     }
     if (has(input, 'skillIds')) {
       if (!Array.isArray(input.skillIds) || input.skillIds.length) throw new StudioSharingError('skills仅自己可见，请移除后再共享模板', 409);
@@ -760,7 +760,7 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
     if (source) {
       const changed = await tx.imageStudioPreset.updateMany({ where: { id: presetId, owner_id: actor.id, updated_at: source.updated_at },
         data: { ...data, updated_at: new Date(Math.max(Date.now(), source.updated_at.getTime() + 1)) } });
-      if (changed.count !== 1) throw new StudioSharingError('模板已在其他页面保存，当前草稿仍保留', 409);
+      if (changed.count !== 1) throw new StudioSharingError('共享模板内容在保存时发生变化，本次未保存；当前草稿保留', 409, 'state-conflict', 'definition');
     } else {
       if (has(input, 'scope') && !['admin', 'creator'].includes(String(input.scope))) throw new StudioSharingError('模板类型无效', 400);
       const scope = input.scope === 'creator' ? 'creator' : actor.role === 'admin' ? 'admin' : 'creator';
@@ -780,7 +780,7 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
     }, tx);
     const changed = await tx.imageStudioModule.updateMany({ where: { id: moduleId, owner_id: actor.id, revision: workspace.revision },
       data: { ...personalChanges, source_preset_id: presetId, revision: workspace.revision + 1 } });
-    if (changed.count !== 1) throw new StudioSharingError('模板已在其他页面保存，当前草稿仍保留', 409);
+    if (changed.count !== 1) throw new StudioSharingError('工作区版本在保存时发生变化，本次未保存；当前草稿保留', 409, 'state-conflict', 'workspace');
     await bindStudioModule(tx, moduleId, { protocol: SHARED_STUDIO_PROTOCOL, ownerId: actor.id, presetId, mode: 'publisher' });
     await restoreStudioDefaultGroup(actor.id, groupName, tx);
     const { definition } = await resolveSharedStudioDefinition(actor, presetId, tx);

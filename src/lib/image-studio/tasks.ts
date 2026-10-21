@@ -48,7 +48,11 @@ import type { SessionUser } from '@/lib/auth/session';
 import { resolveCanvasStudioReferenceUse } from '@/lib/canvas-studio-reference-use';
 import { bindRoleMediaTask, roleMediaFingerprint, type RoleMediaSubmission } from '@/lib/canvas-roles/media-bindings';
 import { resolveSharedStudioModule, parseSharedStudioPersonalOverrides } from './shared-contract';
+import { studioPresetArchived } from './preset-lifecycle';
 import type { SharedStudioIntent } from './shared-types';
+import { assertRestoredStudioDraft, assertRestoredStudioSourceRelation, assertRestoredStudioStyleVersions,
+  hasSharedStudioPrompt, historicalStudioTemplateReferences, parseRestoredStudioSettings, restoredStudioTemplatePrompt, studioPersonalPromptProjection,
+  RestoredStudioSettingsError } from './restored-settings';
 import { studioOutputMismatch as studioDimensionMismatch, studioDimensionMismatchNotice, studioTaskHasViewableOutput, studioOutputTaskWhere } from './dimension-mismatch';
 
 export class StudioError extends Error {
@@ -111,13 +115,48 @@ export async function resolveStudioTaskSharedUse(user: ImageStudioIdentity, modu
 }
 
 export async function resolveOwnedStudioTaskSharedUse(ownerId: string, moduleId: string | undefined,
-  intent: SharedStudioIntent | undefined, tx: Prisma.TransactionClient) {
+  intent: SharedStudioIntent | undefined, tx: Prisma.TransactionClient, restoredInput?: ReturnType<typeof parseStudioRequest>) {
   const user = await tx.user.findUnique({ where: { id: ownerId }, select: {
     id: true, role: true, account_type: true, status: true, user_profile: true, feature_profile_id: true,
     feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true,
   } });
   if (!user || user.status !== 'active' || !canUseCompanyTemplates(user)) throw new StudioError('当前账号无法生成', 403);
-  return resolveStudioTaskSharedUse(user, moduleId, intent, tx);
+  const shared = await resolveStudioTaskSharedUse(user, moduleId, intent, tx);
+  if (restoredInput?.restoredSettings) await resolveStudioTaskRestoredSettings(user, moduleId, restoredInput, shared, tx);
+  return shared;
+}
+
+export async function resolveStudioTaskRestoredSettings(actor: ImageStudioIdentity, moduleId: string | undefined,
+  input: ReturnType<typeof parseStudioRequest>, shared: Awaited<ReturnType<typeof resolveStudioTaskSharedUse>>, tx: Prisma.TransactionClient) {
+  if (!input.restoredSettings) return null;
+  assertRestoredStudioDraft(input);
+  if (!moduleId) throw new StudioError('请在原模板中恢复生成设置', 409);
+  const workspace = await tx.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: actor.id }, select: { source_preset_id: true } });
+  if (!workspace && moduleId !== defaultStudioModuleId(actor.id)) throw new StudioError('当前模板不存在或无权使用', 403);
+  const source = await tx.imageStudioTask.findFirst({ where: { id: input.restoredSettings.sourceTaskId, owner_id: actor.id, deleted_at: null },
+    select: { id: true, module_id: true, source_preset_id: true, snapshot_json: true } });
+  if (!source?.snapshot_json) throw new StudioError('原记录不存在、已删除或无权使用，请重新选择记录', 403);
+  let snapshot: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(source.snapshot_json);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
+    snapshot = parsed as Record<string, unknown>;
+  } catch { throw new StudioError('原记录没有完整恢复设置，请使用当前模板', 409); }
+  const sourcePresetId = source.source_preset_id || (typeof snapshot.sourcePresetId === 'string' ? snapshot.sourcePresetId : null);
+  let historicalPresetOwnerId: string | undefined;
+  if (sourcePresetId) {
+    const preset = await tx.imageStudioPreset.findUnique({ where: { id: sourcePresetId }, select: { owner_id: true, scope: true, is_shared: true } });
+    if (!preset || !canViewStudioPreset(actor, preset) || await studioPresetArchived(sourcePresetId, tx)) throw new StudioError('原模板已不可用或无权使用，请重新选择模板', 403);
+    historicalPresetOwnerId = preset.owner_id;
+  }
+  assertRestoredStudioSourceRelation(source, snapshot, { moduleId, presetId: shared?.definition.intent.presetId ?? workspace?.source_preset_id ?? null,
+    allowOrdinaryModulePromotion: !hasSharedStudioPrompt(snapshot) && source.module_id === moduleId && historicalPresetOwnerId === actor.id
+      && shared?.binding.mode === 'publisher' && shared.binding.ownerId === actor.id && shared.definition.sourceOwnerId === actor.id
+      && shared.definition.intent.presetId === `module-source:${moduleId}` });
+  if (typeof snapshot.globalContext !== 'string' || typeof snapshot.moduleContext !== 'string') {
+    throw new StudioError('这条旧记录没有保存完整上下文，请使用当前模板并重新选择设置', 409);
+  }
+  return { source, snapshot, templatePrompt: restoredStudioTemplatePrompt(snapshot) };
 }
 
 export function studioSharedGenerationSource(shared: NonNullable<Awaited<ReturnType<typeof resolveStudioTaskSharedUse>>>,
@@ -131,6 +170,7 @@ export function studioSharedGenerationSource(shared: NonNullable<Awaited<ReturnT
 
 function normalizeSharedAuthorDraftForUse(actor: ImageStudioIdentity,
   shared: NonNullable<Awaited<ReturnType<typeof resolveStudioTaskSharedUse>>>, input: ReturnType<typeof parseStudioRequest>) {
+  if (input.restoredSettings) { assertRestoredStudioDraft(input); return; }
   const draft = input.draft;
   const hasDefinition = input.reproduceFromTaskId !== undefined || draft?.moduleContext !== undefined
     || draft?.fixedReferences !== undefined || draft?.styleGroupIds !== undefined
@@ -170,6 +210,7 @@ export const STUDIO_SHARED_WORKER_FILES = [
   'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-types.ts',
   'src/lib/image-studio/read-snapshot.ts',
   'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/batches.ts', 'src/lib/image-studio/worker.ts',
+  'src/lib/image-studio/restored-settings.ts',
   'src/lib/image-studio/async-recovery.ts',
 ] as const;
 let sharedWorkerModuleHashes: Record<string, string> | undefined;
@@ -213,6 +254,7 @@ type StudioTaskDraft = {
   globalContext?: string;
   fixedReferences?: StudioFixedReference[];
   styleGroupIds?: string[];
+  styleGroupVersions?: Record<string, number>;
   skillIds?: string[];
   skillVersions?: Record<string, string>;
   referencePolicy?: StudioReferencePolicy;
@@ -240,7 +282,7 @@ function parseStudioTaskDraft(value: unknown, referenceIds: string[]): StudioTas
   if (value === undefined) return undefined;
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new StudioError('当前生成草稿无效');
   const record = value as Record<string, unknown>;
-  const allowed = ['moduleContext', 'globalContext', 'fixedReferences', 'styleGroupIds', 'skillIds', 'skillVersions', 'referencePolicy'];
+  const allowed = ['moduleContext', 'globalContext', 'fixedReferences', 'styleGroupIds', 'styleGroupVersions', 'skillIds', 'skillVersions', 'referencePolicy'];
   if (Object.keys(record).some(key => !allowed.includes(key))) throw new StudioError('当前生成草稿包含不支持的字段');
   if (record.moduleContext !== undefined && (typeof record.moduleContext !== 'string' || record.moduleContext.length > 20000)) throw new StudioError('模块上下文最多 20000 字');
   if (record.globalContext !== undefined && (typeof record.globalContext !== 'string' || record.globalContext.length > 20000)) throw new StudioError('通用上下文最多 20000 字');
@@ -263,6 +305,12 @@ function parseStudioTaskDraft(value: unknown, referenceIds: string[]): StudioTas
       if (error instanceof StudioStyleError) throw new StudioError(error.message, error.status);
       throw error;
     }
+  }
+  if (record.styleGroupVersions !== undefined) {
+    if (!record.styleGroupVersions || typeof record.styleGroupVersions !== 'object' || Array.isArray(record.styleGroupVersions)
+      || Object.entries(record.styleGroupVersions).some(([id, version]) => !draft.styleGroupIds?.includes(id)
+        || !Number.isSafeInteger(version) || Number(version) < 0)) throw new StudioError('风格版本无效');
+    draft.styleGroupVersions = record.styleGroupVersions as Record<string, number>;
   }
   if (record.referencePolicy !== undefined) {
     try { draft.referencePolicy = parseStudioReferencePolicy(record.referencePolicy, referenceIds); }
@@ -316,12 +364,15 @@ export function parseStudioRequest(body: Record<string, unknown>) {
   if (moduleRevision !== undefined && (!Number.isInteger(moduleRevision) || moduleRevision < 0)) throw new StudioError('模块已更新，请刷新后重试', 409);
   const reproduceFromTaskId = body.reproduceFromTaskId === undefined ? undefined : body.reproduceFromTaskId;
   if (reproduceFromTaskId !== undefined && (typeof reproduceFromTaskId !== 'string' || reproduceFromTaskId.length > 120)) throw new StudioError('历史生成记录无效', 400);
+  const restoredSettings = parseRestoredStudioSettings(body.restoredSettings);
+  assertRestoredStudioDraft({ restoredSettings, reproduceFromTaskId, draft });
   const projectId = parseUsageProjectId(body.projectId);
   return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), moduleRevision, reproduceFromTaskId, referenceIds,
     ...(projectId !== undefined ? { projectId } : {}),
     ...(sharedLive ? { sharedLive } : {}),
     ...(personalOverrides ? { personalOverrides } : {}),
     ...(typeof body.personalPrompt === 'string' ? { personalPrompt: body.personalPrompt.trim() } : {}),
+    ...(restoredSettings ? { restoredSettings } : {}),
     ...(channelId !== undefined ? { channelId: channelId as string } : imageChannel ? { channelId: imageChannel.channelId } : {}),
     ...(imageChannel ? { imageChannel } : {}),
     ...(maxEstimatedCost !== undefined ? { maxEstimatedCost: maxEstimatedCost as number } : {}), ...(evolution ? { evolution } : {}), ...(draft !== undefined ? { draft } : {}), ...(aspectRatio !== undefined ? { aspectRatio } : {}), ...(resolution !== undefined ? { resolution } : {}), ...(model !== undefined ? { model: model as typeof IMAGE_STUDIO_MODELS[number] } : {}), ...(quality !== undefined ? { quality: quality as string } : {}) };
@@ -352,7 +403,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       let snapshot: Record<string, unknown> = {};
       try { snapshot = JSON.parse(accepted.snapshot_json || '{}'); } catch {}
       legacyAcceptedProjectContext = canvasUse?.projectId !== undefined && snapshot.usageAttribution === undefined;
-      if (snapshot.sharedLive !== undefined || body.sharedLive !== undefined) {
+      if (snapshot.sharedLive !== undefined || body.sharedLive !== undefined || snapshot.restoredSettings !== undefined || body.restoredSettings !== undefined) {
         if (body.moduleId !== undefined && body.moduleId !== accepted.module_id) throw new StudioError('提交编号已用于其他请求，请查询原记录', 409);
         return acceptedBatchId;
       }
@@ -374,7 +425,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   const rawCanvasPrompt = input.prompt;
   const moduleId = body.moduleId;
   const sheet = Boolean(avatar && isAvatarSheet(avatar));
-  if (avatar && (moduleId !== undefined || input.sharedLive || input.draft !== undefined || input.reproduceFromTaskId || (sheet ? input.count !== 1 || input.aspectRatio !== '1:1' : avatar.candidates.length !== input.count))) throw new StudioError('人物任务排版无效或继承了模板设置');
+  if (avatar && (moduleId !== undefined || input.sharedLive || input.restoredSettings || input.draft !== undefined || input.reproduceFromTaskId || (sheet ? input.count !== 1 || input.aspectRatio !== '1:1' : avatar.candidates.length !== input.count))) throw new StudioError('人物任务排版无效或继承了模板设置');
+  if (input.restoredSettings && (canvasUse || canvasPrompt || roleMedia)) throw new StudioError('恢复模板设置不能混入其他生成入口', 403);
   if (sheet) { try { validateSheetCandidates(avatar!.candidates, input.referenceIds, avatar!.layout); } catch (e) { throw new StudioError((e as Error).message); } }
   if (moduleId !== undefined && !validStudioModuleId(moduleId, ownerId)) throw new StudioError('模块编号无效');
   const batchId = createHash('sha256').update(`${ownerId}:${input.requestId}`).digest('hex');
@@ -420,7 +472,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   await withContextVersionRetry(() => prisma.$transaction(async tx => {
     const duplicate = await tx.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
     if (duplicate) {
-      if (input.sharedLive) {
+      if (input.sharedLive || input.restoredSettings) {
         if (moduleId !== undefined && moduleId !== duplicate.module_id) throw new StudioError('提交编号已用于其他请求，请查询原记录', 409);
         return;
       }
@@ -448,18 +500,20 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       normalizeSharedAuthorDraftForUse(identity, sharedUse, input);
     }
     const sharedDefinition = sharedUse?.definition;
+    const restored = await resolveStudioTaskRestoredSettings(identity, typeof moduleId === 'string' ? moduleId : undefined, input, sharedUse, tx);
     if (sharedUse && input.personalOverrides !== undefined && !preparation?.batchItem
       && input.count !== (input.personalOverrides.count ?? sharedUse.definition.generationDefaults.count)) {
       throw new SharedStudioDefinitionError();
     }
-    if (sharedDefinition) input.prompt = [sharedDefinition.templatePrompt, personalPrompt].filter(Boolean).join('\n\n本次个人要求：\n');
-    const reproduceFromTaskId = sharedUse ? undefined : input.reproduceFromTaskId || (!input.draft ? workspace?.reproduce_task_id : undefined);
+    const effectiveTemplatePrompt = restored ? restored.templatePrompt : sharedDefinition?.templatePrompt;
+    if (sharedDefinition || restored) input.prompt = [effectiveTemplatePrompt, personalPrompt].filter(Boolean).join('\n\n本次个人要求：\n');
+    const reproduceFromTaskId = restored?.source.id || (sharedUse ? undefined : input.reproduceFromTaskId || (!input.draft ? workspace?.reproduce_task_id : undefined));
     let sourcePresetId = sharedUse?.definition.intent.presetId || workspace?.source_preset_id || null;
-    if (reproduceFromTaskId) sourcePresetId = null;
+    if (reproduceFromTaskId && !restored) sourcePresetId = null;
     let sourcePresetOwnerId: string | null = null;
     if (workspace?.source_preset_id) {
       const source = await tx.imageStudioPreset.findUnique({ where: { id: workspace.source_preset_id }, select: { owner_id: true, scope: true, is_shared: true } });
-      if (!reproduceFromTaskId && (!source || !canViewStudioPreset(identity, source))) throw new StudioError('该模板已停止共享，不能新建任务', 403);
+      if ((!reproduceFromTaskId || restored) && (!source || !canViewStudioPreset(identity, source))) throw new StudioError('该模板已停止共享，不能新建任务', 403);
       sourcePresetOwnerId = source?.owner_id || null;
     }
     const moduleContextEditable = user.role === 'admin' || !workspace?.source_preset_id || sourcePresetOwnerId === ownerId;
@@ -599,23 +653,29 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     let historicalReferenceOwners: Record<string, string> = {};
     const freshlySelectedStyleIds = new Set<string>();
     let historicalSnapshot: Record<string, unknown> | null = null;
+    let historicalTemplateReferences: Record<string, unknown>[] = [];
     let skills: SkillSnapshot[] = [];
     const referenceIds = input.referenceIds;
     if (reproduceFromTaskId) {
-      const source = await tx.imageStudioTask.findFirst({ where: { id: reproduceFromTaskId, owner_id: ownerId }, select: { source_preset_id: true, snapshot_json: true } });
+      const source = restored?.source ?? await tx.imageStudioTask.findFirst({ where: { id: reproduceFromTaskId, owner_id: ownerId }, select: { source_preset_id: true, snapshot_json: true } });
       if (!source?.snapshot_json) throw new StudioError('历史记录缺少可恢复上下文，请按当前模块重新生成', 409);
       try {
         const sourceSnapshot = JSON.parse(source.snapshot_json) as Record<string, unknown>;
         historicalSnapshot = sourceSnapshot;
+        if (restored) historicalTemplateReferences = historicalStudioTemplateReferences(sourceSnapshot);
         const historicalSourcePresetId = source.source_preset_id || (typeof sourceSnapshot.sourcePresetId === 'string' ? sourceSnapshot.sourcePresetId : null);
         if (historicalSourcePresetId) {
           const historicalSource = await tx.imageStudioPreset.findUnique({ where: { id: historicalSourcePresetId }, select: { owner_id: true, scope: true, is_shared: true } });
           if (!historicalSource || !canViewStudioPreset(identity, historicalSource)) throw new StudioError('该模板已停止共享，不能新建任务', 403);
-          sourcePresetId = historicalSourcePresetId;
+          if (!restored || !sharedDefinition) sourcePresetId = historicalSourcePresetId;
         }
         const configuredFixed = Array.isArray(sourceSnapshot.fixedReferenceImages)
             ? parseHistoricalFixedReferences(sourceSnapshot.fixedReferenceImages)
           : [];
+        if (restored && sourceSnapshot.templateFixedCount !== undefined && (!Number.isInteger(sourceSnapshot.templateFixedCount)
+          || Number(sourceSnapshot.templateFixedCount) < 0 || Number(sourceSnapshot.templateFixedCount) > configuredFixed.length)) {
+          throw new StudioError('原记录的固定参考图数量无法确认，请使用当前模板', 409);
+        }
         const configuredTemplateFixedCount = Math.max(0, Math.min(configuredFixed.length,
           Number.isInteger(sourceSnapshot.templateFixedCount) ? Number(sourceSnapshot.templateFixedCount) : configuredFixed.length));
         templateFixedReferences = configuredFixed.slice(0, configuredTemplateFixedCount);
@@ -623,7 +683,12 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         styleGroupIds = sourceSnapshot.styleGroupIds === undefined ? [] : parseStudioStyleIds(sourceSnapshot.styleGroupIds);
         if (Array.isArray(sourceSnapshot.styleGroups)) {
           styleGroupSnapshot = parseHistoricalStyleGroups(sourceSnapshot.styleGroups);
+          if (restored && input.draft?.styleGroupIds === undefined && sourceSnapshot.styleGroups.some(group => !group
+            || typeof group !== 'object' || !Number.isSafeInteger(group.revision) || group.revision < 0)) {
+            throw new StudioError('这条旧记录没有保存风格版本，请重新选择本次风格', 409);
+          }
         } else {
+          if (restored && styleGroupIds.length && input.draft?.styleGroupIds === undefined) throw new StudioError('这条旧记录没有保存风格版本，请重新选择本次风格', 409);
           const styles = await resolveStudioStyleReferences(identity, styleGroupIds, tx);
           styleGroupSnapshot = styles.groups.map(group => {
             const note = (group as { note?: unknown }).note;
@@ -644,13 +709,19 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         if (input.draft?.styleGroupIds !== undefined) {
           styleGroupIds = input.draft.styleGroupIds;
           const selected = await resolveStudioStyleReferences(identity, styleGroupIds, tx);
+          if (restored) assertRestoredStudioStyleVersions(selected.groups, input.draft.styleGroupVersions!);
           styleGroupSnapshot = selected.groups.map(group => ({ id: group.id, name: group.name, revision: group.revision,
             referenceCount: group.references.length, ownerId: group.ownerId, ...(group.note ? { note: group.note } : {}) }));
           styleReferenceGroups = selected.groups.map((group, index) => ({ ...styleGroupSnapshot[index], references: group.references }));
           for (const group of selected.groups) for (const reference of group.references) freshlySelectedStyleIds.add(reference.assetId);
         } else {
           // Keep historical notes and images, but recheck that their groups are still usable.
-          await resolveStudioStyleReferences(identity, styleGroupIds, tx);
+          const current = await resolveStudioStyleReferences(identity, styleGroupIds, tx);
+          if (restored && (styleGroupSnapshot.length !== styleGroupIds.length
+            || styleGroupSnapshot.some((group, index) => group.id !== styleGroupIds[index]
+              || group.ownerId !== undefined && group.ownerId !== current.groups[index]?.ownerId)
+            || styleReferenceGroups.some(group => group.references.length !== group.referenceCount)
+            || styleOffset !== historicalStyleReferences.length)) throw new StudioError('原记录的风格来源不完整或归属已变化，请重新选择本次风格', 409);
         }
         if (sourceSnapshot.authorizedReferenceOwners && typeof sourceSnapshot.authorizedReferenceOwners === 'object') {
           historicalReferenceOwners = Object.fromEntries(Object.entries(sourceSnapshot.authorizedReferenceOwners as Record<string, unknown>)
@@ -664,6 +735,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         snapshotModuleContext = sourceSnapshot.moduleContext;
       } catch (error) {
         if (error instanceof StudioError) throw error;
+        if (error instanceof RestoredStudioSettingsError) throw new StudioError(error.message, error.status);
         if (error instanceof StudioStyleError) throw new StudioError(error.message, error.status);
         throw new StudioError('历史记录缺少可恢复上下文，请按当前模块重新生成', 409);
       }
@@ -707,16 +779,22 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       }
     }
     let referencePolicy: StudioReferencePolicy;
-    if (!avatar && !sharedDefinition) skills = reproduceFromTaskId && input.draft?.skillIds === undefined
+    if (!avatar && (!sharedDefinition || restored)) skills = reproduceFromTaskId && input.draft?.skillIds === undefined
       ? await historicalSkills(identity, historicalSnapshot?.skills, tx)
       : await resolveSkills(identity, input.draft?.skillIds ?? (workspace ? await getSkillSelection(ownerId, workspace.id, tx) : []), tx);
+    if (restored && input.draft?.skillIds === undefined && historicalSnapshot?.skillIds !== undefined) {
+      const historicalSkillIds = parseSkillIds(historicalSnapshot.skillIds);
+      if (historicalSkillIds.length !== skills.length || historicalSkillIds.some((id, index) => skills[index]?.id !== id)) {
+        throw new StudioError('原记录的提示词组不完整，请重新选择本次提示词组', 409);
+      }
+    }
     if (input.draft?.skillVersions && skills.some(skill => input.draft!.skillVersions![skill.id] !== skill.promptVersion)) throw new StudioError('skills文字已更新，请重新选择后生成', 409);
     if (avatar) referencePolicy = { ...defaultStudioReferencePolicy(referenceIds), primaryIds: avatar.candidates[0]?.baselineAssetId ? [avatar.candidates[0].baselineAssetId] : [], useFixedReferences: false };
-    else if (sharedDefinition) {
+    else if (sharedDefinition && !restored) {
       const primaryIds = input.draft?.referencePolicy?.primaryIds ?? input.referenceIds;
       referencePolicy = { ...sharedDefinition.referencePolicy, primaryIds: referenceIds.filter(id => primaryIds.includes(id)) };
     }
-    else if (input.draft?.referencePolicy) referencePolicy = input.draft.referencePolicy;
+    else if (input.draft?.referencePolicy && !restored) referencePolicy = input.draft.referencePolicy;
     else if (reproduceFromTaskId && historicalSnapshot?.referencePolicy !== undefined) {
       try { referencePolicy = mapStudioReferencePolicy(historicalSnapshot.referencePolicy, referenceIds); }
       catch { throw new StudioError('历史参考图角色设置无效，请按当前模块重新选择参考图', 409); }
@@ -730,13 +808,17 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         throw error;
       }
     }
+    if (restored) {
+      const primaryIds = input.draft?.referencePolicy?.primaryIds ?? input.referenceIds;
+      referencePolicy = { ...referencePolicy, primaryIds: referenceIds.filter(id => primaryIds.includes(id)) };
+    }
     const uniqueTransientIds = Array.from(new Set(referenceIds));
     const primaryIdSet = new Set(referencePolicy.primaryIds);
     const primaryReferenceIds = uniqueTransientIds.filter(id => primaryIdSet.has(id));
     const auxiliaryTransientIds = uniqueTransientIds.filter(id => !primaryIdSet.has(id));
     const includeTemplateFixed = referencePolicy.useFixedReferences;
     const actualTemplateFixedReferences = includeTemplateFixed ? templateFixedReferences : [];
-    const sourceTemplateReferenceIds = sharedDefinition?.templateReferenceIds || [];
+    const sourceTemplateReferenceIds = restored ? historicalTemplateReferences.map(reference => String(reference.id)) : sharedDefinition?.templateReferenceIds || [];
     const actualStyleReferenceGroups = styleReferenceGroups;
     const actualFixedReferences = [...actualTemplateFixedReferences, ...actualStyleReferenceGroups.flatMap(group => group.references)];
     const auxiliaryCount = auxiliaryTransientIds.length + sourceTemplateReferenceIds.length + actualFixedReferences.length;
@@ -747,7 +829,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const referenceDescriptors: Array<{ id: string; role: 'primary' | 'transient-auxiliary' | 'template-reference' | 'template-fixed' | 'style-fixed'; label: string; note?: string; styleGroupId?: string }> = [];
     primaryReferenceIds.forEach((id, index) => referenceDescriptors.push({ id, role: 'primary', label: `主图 ${index + 1}（主图${'一二三四五六七八九十'[index]}，主要内容）` }));
     auxiliaryTransientIds.forEach((id, index) => referenceDescriptors.push({ id, role: 'transient-auxiliary', label: `辅助参考图 ${index + 1}` }));
-    sourceTemplateReferenceIds.forEach((id, index) => referenceDescriptors.push({ id, role: 'template-reference', label: `模板参考图 ${index + 1}（辅助参考）` }));
+    sourceTemplateReferenceIds.forEach((id, index) => referenceDescriptors.push({ id, role: 'template-reference', label: `模板参考图 ${index + 1}（辅助参考）`,
+      ...(restored && typeof historicalTemplateReferences[index]?.note === 'string' ? { note: historicalTemplateReferences[index].note as string } : {}) }));
     actualTemplateFixedReferences.forEach((reference, index) => referenceDescriptors.push({ id: reference.assetId, role: 'template-fixed', label: `模板${String.fromCharCode(65 + index)}（辅助参考）`, note: reference.note }));
     for (const group of actualStyleReferenceGroups) {
       group.references.forEach((reference, index) => referenceDescriptors.push({ id: reference.assetId, role: 'style-fixed', label: `风格组「${group.name}」图片 ${index + 1}（辅助参考）`, note: reference.note, styleGroupId: group.id }));
@@ -786,6 +869,11 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const ownedTransientIds = uniqueTransientIds.filter(id => !canvasReferenceOwners.has(id));
     const visibleTransient = await tx.asset.count({ where: { id: { in: ownedTransientIds }, owner_id: ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity, tx)] } });
     if (visibleTransient !== ownedTransientIds.length) throw new StudioError('本次参考图已不可用或无权查看', 403);
+    if (restored && sourceTemplateReferenceIds.length) {
+      const visibleTemplateReferences = await tx.asset.count({ where: { id: { in: sourceTemplateReferenceIds }, status: 'active', type: 'image',
+        AND: [await studioVisibleAssetWhere(identity, tx)] } });
+      if (visibleTemplateReferences !== new Set(sourceTemplateReferenceIds).size) throw new StudioError('原记录的模板参考图已不可用或无权使用，请使用当前模板', 403);
+    }
     const actualReferenceIds = Array.from(new Set(orderedReferenceIds));
     try { assertImageQualityReferenceCount(qualityRoute?.qualityRoute, orderedReferenceIds.length); }
     catch (error) { throw new StudioError((error as Error).message, 400); }
@@ -808,6 +896,14 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       input.prompt = compiled.prompt; canvasPromptFingerprint = compiled.fingerprint;
     }
     if (reproduceFromTaskId && references.some(ref => actualFixedIds.includes(ref.id) && !freshlySelectedStyleIds.has(ref.id) && ref.owner_id !== (historicalReferenceOwners[ref.id] || ownerId))) throw new StudioError('历史参考图归属已变化，请重新选择风格组或模板', 403);
+    if (restored && Array.isArray(historicalSnapshot?.referenceImages)) {
+      const historicalHashes = new Map(historicalSnapshot.referenceImages.flatMap(record => record && typeof record === 'object'
+        && typeof record.id === 'string' && typeof record.hash === 'string' ? [[record.id, record.hash] as const] : []));
+      if (references.some(ref => actualFixedIds.includes(ref.id) && !freshlySelectedStyleIds.has(ref.id)
+        && historicalHashes.has(ref.id) && historicalHashes.get(ref.id) !== ref.hash)) {
+        throw new StudioError('原记录的参考图内容已变化，请重新选择本次风格或模板', 409);
+      }
+    }
     const referenceSnapshot = referenceDescriptors.map(referenceDescriptor => {
       const id = referenceDescriptor.id;
       const reference = referencesById.get(id);
@@ -857,7 +953,9 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
           avatar: avatar?.candidates, references: referenceSnapshot.map(ref => ({ id: ref.id, hash: ref.hash })),
           imageChannel: contractImageChannel || null,
           revision: settings.revision, moduleRevision: sharedDefinition ? undefined : workspace?.revision,
-          ...(sharedDefinition ? { sharedLive: sharedDefinition.intent } : {}) })).digest('hex') }) });
+          ...(sharedDefinition ? { sharedLive: sharedDefinition.intent } : {}),
+          ...(input.restoredSettings ? { restoredSettings: input.restoredSettings, personalPrompt,
+            styleGroupIds, styleGroups: styleGroupSnapshot, skills: skills.map(skill => ({ id: skill.id, promptVersion: skill.promptVersion })) } : {}) })).digest('hex') }) });
     if (pricingQuote) billingContract = withPricingImageContract(billingContract, pricingQuote.charge, price);
     if (acceptedContract) {
       const frozen = parseImageBillingContract(JSON.stringify(acceptedContract));
@@ -895,7 +993,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         imageSupplierName: imageApi.supplierName } : {}),
       ...(canvasPrompt ? { canvasPromptMentions: parseCanvasPromptMentions(canvasPrompt.mentions), canvasPromptFingerprint } : {}),
       referenceImages: referenceSnapshot,
-      ...(sharedDefinition ? { templateReferenceImages: referenceSnapshot.filter(reference => reference.referenceRole === 'template-reference') } : {}),
+      ...(sharedDefinition || restored ? { templateReferenceImages: referenceSnapshot.filter(reference => reference.referenceRole === 'template-reference') } : {}),
       fixedReferenceImages: fixedReferenceSnapshot,
       templateFixedCount: actualTemplateFixedReferences.length,
       primaryReferenceImages: primaryReferenceSnapshot,
@@ -911,8 +1009,15 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       moduleContextVersion, moduleContextVersionRule: MODULE_CONTEXT_VERSION_RULE,
       moduleId: workspace?.id || moduleId || null,
       sourcePresetId,
-      ...(sharedDefinition ? { sharedLive: sharedDefinition.intent, templatePrompt: sharedDefinition.templatePrompt, personalPrompt,
+      ...(sharedDefinition ? { sharedLive: sharedDefinition.intent, templatePrompt: effectiveTemplatePrompt, personalPrompt,
         sharedSourceRevision: sharedDefinition.sourceRevision, sharedSourceOwnerId: sharedDefinition.sourceOwnerId } : {}),
+      ...(restored ? { restoredSettings: input.restoredSettings, templatePrompt: effectiveTemplatePrompt, personalPrompt,
+        restoredSource: { taskId: restored.source.id, moduleId: restored.source.module_id,
+          sourcePresetId: restored.source.source_preset_id || (typeof restored.snapshot.sourcePresetId === 'string' ? restored.snapshot.sourcePresetId : null),
+          ...(typeof restored.snapshot.sharedSourceRevision === 'string' ? { sharedSourceRevision: restored.snapshot.sharedSourceRevision } : {}),
+          ...(typeof restored.snapshot.sharedSourceOwnerId === 'string' ? { sharedSourceOwnerId: restored.snapshot.sharedSourceOwnerId } : {}),
+          ...(Number.isInteger(restored.snapshot.settingsRevision) ? { settingsRevision: restored.snapshot.settingsRevision } : {}),
+          ...(Number.isInteger(restored.snapshot.moduleRevision) ? { moduleRevision: restored.snapshot.moduleRevision } : {}) } } : {}),
       reproducedFromTaskId: reproduceFromTaskId || null,
       moduleName: sharedDefinition?.name || workspace?.name || null,
       prompt: input.prompt,
@@ -1241,6 +1346,8 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json'
   })();
   const snapshotReferences = Array.isArray(parsed.referenceImages) && parsed.referenceImages.length ? parsed.referenceImages : fallbackReferences;
   const snapshotFixedReferences = Array.isArray(parsed.fixedReferenceImages) ? parsed.fixedReferenceImages : [];
+  let snapshotTemplateReferences: Record<string, unknown>[] = [];
+  try { snapshotTemplateReferences = historicalStudioTemplateReferences(parsed); } catch {}
   const snapshotTransientReferences = Array.isArray(parsed.transientReferenceImages)
     ? parsed.transientReferenceImages
     : snapshotFixedReferences.length ? [] : snapshotReferences;
@@ -1291,6 +1398,7 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json'
     };
   const referenceImages = (isAdmin ? snapshotReferences : snapshotTransientReferences).map(mapReference).filter((item): item is NonNullable<typeof item> => item !== null);
   const fixedReferenceImages = (isAdmin ? snapshotFixedReferences : []).map(mapReference).filter((item): item is NonNullable<typeof item> => item !== null);
+  const templateReferenceImages = (isAdmin ? snapshotTemplateReferences : []).map(mapReference).filter((item): item is NonNullable<typeof item> => item !== null);
   const transientReferenceImages = snapshotTransientReferences.map(mapReference).filter((item): item is NonNullable<typeof item> => item !== null);
   const primaryReferenceImages = snapshotPrimaryReferences.map(mapReference).filter((item): item is NonNullable<typeof item> => item !== null);
   const auxiliaryReferenceImages = (isAdmin ? snapshotAuxiliaryReferences : snapshotTransientAuxiliaryReferences).map(mapReference).filter((item): item is NonNullable<typeof item> => item !== null);
@@ -1304,9 +1412,13 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json'
   const imageSupplierName = typeof parsed.imageSupplierName === 'string' && parsed.imageSupplierName.length <= 120 ? parsed.imageSupplierName : null;
   let sharedLive: SharedStudioIntent | undefined;
   try { sharedLive = parseSharedStudioIntent(parsed.sharedLive); } catch {}
+  let restoredSettings;
+  try { restoredSettings = parseRestoredStudioSettings(parsed.restoredSettings); } catch {}
+  const personalPromptProjection = studioPersonalPromptProjection(parsed);
   return {
     ...(sharedLive ? { sharedLive } : {}),
-    ...(sharedLive && typeof parsed.personalPrompt === 'string' ? { personalPrompt: parsed.personalPrompt } : {}),
+    ...personalPromptProjection,
+    ...(restoredSettings ? { restoredSettings } : {}),
     ...(sharedLive && typeof parsed.templatePrompt === 'string' ? { templatePrompt: parsed.templatePrompt } : {}),
     ...(imageChannel ? { imageChannel } : {}),
     ...(imageChannel && imageChannelLabel ? { imageChannelLabel } : {}),
@@ -1333,6 +1445,8 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json'
     contextConfigured: Boolean((typeof parsed.globalContext === 'string' && parsed.globalContext.trim()) || (typeof parsed.moduleContext === 'string' && parsed.moduleContext.trim())),
     referenceImages,
     fixedReferenceImages,
+    templateReferenceImages,
+    templateReferenceCount: Array.isArray(parsed.templateReferenceImages) ? parsed.templateReferenceImages.length : snapshotTemplateReferences.length,
     primaryReferenceImages,
     auxiliaryReferenceImages,
     referencePolicy,
@@ -1343,6 +1457,7 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json'
       if (!value || typeof value !== 'object' || typeof value.id !== 'string' || typeof value.name !== 'string') return [];
       const canViewNote = isAdmin || (typeof viewerOwnerId === 'string' && value.ownerId === viewerOwnerId);
       return [{ id: value.id, name: value.name, referenceCount: typeof value.referenceCount === 'number' ? value.referenceCount : 0,
+        ...(Number.isSafeInteger(value.revision) && value.revision >= 0 ? { revision: value.revision as number } : {}),
         ...(canViewNote && typeof value.note === 'string' ? { note: value.note } : {}),
         coverUrl: `/api/image-studio/style-groups/${value.id}/cover`, canManage: false as const }];
     }) : [],

@@ -95,7 +95,7 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
   const workspace = await prisma.imageStudioModule.findFirst({ where: { id: body.moduleId, owner_id: owner }, select: { model: true, quality: true, resolution: true } });
   if (!workspace) throw new StudioError('模板不存在或无权使用', 404);
   const settings = await getImageStudioSettings();
-  const sharedUse = await prisma.$transaction(tx => resolveOwnedStudioTaskSharedUse(owner, body.moduleId as string, input.sharedLive, tx));
+  const sharedUse = await prisma.$transaction(tx => resolveOwnedStudioTaskSharedUse(owner, body.moduleId as string, input.sharedLive, tx, input));
   const sharedLive = sharedUse?.definition.intent;
   const generationSource = sharedUse ? studioSharedGenerationSource(sharedUse, input) : { ...workspace, ...(input.model ? { model: input.model } : {}), ...((input.model || workspace.model) === IMAGE_25_QUALITY_MODEL && input.quality !== undefined ? { quality: input.quality } : {}) };
   const generation = resolveStudioModuleGenerationConfig(generationSource, settings);
@@ -164,7 +164,7 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
   }
 
   const publicChannel = imageChannel ? { ...imageChannel } : undefined;
-  await prisma.$transaction(tx => resolveOwnedStudioTaskSharedUse(owner, body.moduleId as string, sharedLive, tx));
+  await prisma.$transaction(tx => resolveOwnedStudioTaskSharedUse(owner, body.moduleId as string, sharedLive, tx, input));
   const sharedResult = sharedLive ? { sharedLive } : {};
   if (imageChannel) {
     try { await resolveImageGenerationChannelSnapshot(imageChannel, undefined, true, model); }
@@ -226,7 +226,7 @@ export async function consumeBatchQuote(tx: Prisma.TransactionClient, owner: str
     : null;
   if (!workspace) throw new StudioError('模板不存在或无权使用', 404);
   const settings = await getImageStudioSettings();
-  const sharedUse = await resolveOwnedStudioTaskSharedUse(owner, body.moduleId as string, input.sharedLive, tx);
+  const sharedUse = await resolveOwnedStudioTaskSharedUse(owner, body.moduleId as string, input.sharedLive, tx, input);
   if (!sameSharedStudioIntent(parseSharedStudioIntent(stored.sharedLive), sharedUse?.definition.intent)) {
     throw new StudioError('模板已更新，请确认本次生成', 409);
   }

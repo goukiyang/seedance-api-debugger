@@ -5,7 +5,8 @@ import type { SharedStudioIntent, SharedStudioReasonCode, SharedStudioSharingRec
 type Client = Pick<Prisma.TransactionClient, 'platformSetting'>;
 export class StudioSharingError extends Error {
   intent?: SharedStudioIntent;
-  constructor(message: string, public status = 409, public reasonCode: SharedStudioReasonCode = 'state-conflict') { super(message); }
+  constructor(message: string, public status = 409, public reasonCode: SharedStudioReasonCode = 'state-conflict',
+    public conflictScope?: 'workspace' | 'definition') { super(message); }
 }
 function canonical(value: unknown): unknown {
   if (value instanceof Date) return value.toISOString();

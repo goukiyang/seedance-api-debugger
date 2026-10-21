@@ -29,6 +29,7 @@ export { deleteStudioGroup };
 
 export const defaultStudioModuleId = (ownerId: string) => `default-${ownerId}`;
 export class StudioModuleError extends Error {
+  conflictScope?: 'workspace' | 'definition';
   commandOutcome?: { status: 'not-applied'; actorId: string; moduleId: string; requestId: string } | StudioDeletionNotApplied;
   constructor(message: string, public status = 400) { super(message); }
 }
@@ -427,7 +428,8 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       const businessRejected = error instanceof StudioSharingError || error instanceof StudioFixedReferenceError
         || error instanceof StudioReferencePolicyError || error instanceof StudioStyleError;
       let noOriginalReceipt = false;
-      if (businessRejected && Object.prototype.hasOwnProperty.call(body, 'fixedReferenceRepairs')
+      if (businessRejected && (Object.prototype.hasOwnProperty.call(body, 'fixedReferenceRepairs')
+        || error instanceof StudioSharingError && Boolean(error.conflictScope))
         && typeof body.requestId === 'string' && /^[A-Za-z0-9:_-]{1,160}$/.test(body.requestId)) {
         try {
           const fresh = await assertStudioActor(ownerId);
@@ -436,6 +438,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       }
       if (businessRejected && noOriginalReceipt) {
         const rejected = new StudioModuleError(error.message, error.status);
+        if (error instanceof StudioSharingError) rejected.conflictScope = error.conflictScope;
         rejected.commandOutcome = { status: 'not-applied', actorId: ownerId, moduleId: id, requestId: body.requestId as string };
         throw rejected;
       }

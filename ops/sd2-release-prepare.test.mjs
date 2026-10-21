@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { verifyTemplate, contractData, validatePlan, checkSources, reuseInput, renderWrapper, prepare, REUSE_SCHEMA } from './sd2-release-prepare.mjs';
+import { verifyTemplate, contractData, validatePlan, checkSources, reuseInput, renderWrapper, prepare, REUSE_SCHEMA,
+  DEPLOYED_SCHEMA, DEPLOYED_FIELDS, deployedProofInput } from './sd2-release-prepare.mjs';
 
 const materials = process.argv[2];
 assert.ok(materials && path.isAbsolute(materials), 'Pass the original private release materials directory');
@@ -54,6 +55,49 @@ await test('Mixed main and guard cannot reuse old pair', () => {
   assert.throws(() => reuseInput(mixed));
 });
 await test('Fresh builds never claim reused evidence', () => assert.equal(reuseInput({ ...plan, reuseBuilds: null }), null));
+const deployedPlan = () => {
+  const value = structuredClone(plan); value.reuseBuilds = null;
+  value.contract.normalContinuation = null;
+  value.contract.deployedUsageSchema = Object.fromEntries(DEPLOYED_FIELDS.map(key => [key,
+    key === 'schema' ? DEPLOYED_SCHEMA : key.endsWith('Sha256') ? 'a'.repeat(64) : randomUUID()]));
+  value.deployedUsageProof = { stdoutFile: '/tmp/retained-proof.stdout', commandReceiptFile: '/tmp/retained-proof-command.json' };
+  return value;
+};
+await test('Deployed schema is explicit nullable and requires fresh full pair', async () => {
+  assert.equal(original.deployedUsageSchema, null);
+  const value = deployedPlan(); validatePlan(value, original, now);
+  const privateSchema = await import(pathToFileURL(path.join(materials, activeTemplate.templateName, 'deployed-usage-schema.mjs')));
+  assert.equal(privateSchema.DEPLOYED_SCHEMA, DEPLOYED_SCHEMA); assert.deepEqual(privateSchema.DEPLOYED_FIELDS, DEPLOYED_FIELDS);
+  privateSchema.assertDeployedSchemaInput(value.contract.deployedUsageSchema);
+});
+await test('Deployed schema rejects missing changed unknown or same-run inputs', () => {
+  for (const key of DEPLOYED_FIELDS) {
+    const value = deployedPlan(); delete value.contract.deployedUsageSchema[key];
+    assert.throws(() => validatePlan(value, original, now));
+  }
+  for (const change of [v => { v.reuseBuilds = plan.reuseBuilds; },
+    v => { v.contract.normalContinuation = {}; }, v => { v.contract.deployedUsageSchema.allowWrites = true; },
+    v => { v.contract.deployedUsageSchema.publicationRun = v.contract.recoveryRunId; },
+    v => { v.contract.deployedUsageSchema.migrationRun = v.contract.recoveryRunId; },
+    v => { delete v.deployedUsageProof; },
+    v => { v.contract.deployedUsageSchema.backupSha256 = 'unknown'; }]) {
+    const value = deployedPlan(); change(value); assert.throws(() => validatePlan(value, original, now));
+  }
+});
+await test('Original retained stdout and original command receipt are copied without invented history', () => {
+  const value = deployedPlan(), directory = path.resolve(materials, '../2026-10-21-projects-usage-ux-preflight/implementation');
+  value.deployedUsageProof = { stdoutFile: path.join(directory, 'proof-joint-r07.stdout'),
+    commandReceiptFile: path.join(directory, 'proof-joint-r07-command.json') };
+  const stdout = fs.readFileSync(value.deployedUsageProof.stdoutFile), command = fs.readFileSync(value.deployedUsageProof.commandReceiptFile),
+    proof = JSON.parse(stdout), hash = bytes => createHash('sha256').update(bytes).digest('hex');
+  Object.assign(value.contract.deployedUsageSchema, { publicationRun: proof.runId, publicationManifestSha256: proof.manifestSha256,
+    finalProofSha256: hash(stdout), finalProofCommandSha256: hash(command) });
+  const output = deployedProofInput(value);
+  assert.deepEqual(output.stdout, stdout); assert.deepEqual(output.command, command);
+  assert.equal(output.provenance.originalBytesAndTimesChanged, false); assert.equal(output.provenance.historicalRunWritten, false);
+  value.contract.deployedUsageSchema.finalProofCommandSha256 = '0'.repeat(64);
+  assert.throws(() => deployedProofInput(value));
+});
 await test('Actual controller agrees with evidence schema', async () => {
   const evidence = await import(pathToFileURL(path.join(materials, 'release-r16/candidate-evidence.mjs')));
   assert.equal(REUSE_SCHEMA, evidence.REUSE_SCHEMA);
