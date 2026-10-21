@@ -2,6 +2,8 @@
 
 ## RESTORE-R01/R02/R03/R04 模板复用与保存冲突（2026-10-21）
 
+第三轮run ce9341bc原证：[15组日志/批次](2026-10-21-template-restore-fix/implementation/native-control-r03-logs/)、[只读拒绝状态](2026-10-21-template-restore-fix/implementation/native-refusal-state-r03.json)、[failed收口](2026-10-21-template-restore-fix/implementation/failed-r03-command.json)。14过，生命周期正反场景串用导致失败；全部日志SHA核对，原六启动/价格/allowed不变，无candidate或维护切换。第四次修改前的整链、开源实际实现及A/B/C比较写入固定todo，选独立负例fixture；新不可变r04只改模拟场景，45生产模块相同，待统一验证，不冒发布通过。历史失败完整保留，收费R04父线程独占、仍待部署。
+
 来源为本轮用户明确修复授权与既有RESTORE-D01调查；关键词：恢复设置、风格组历史版本、补充描述、生成后保留、草稿、保存版本冲突、相容回退。正式范围及持续状态见[固定todo RESTORE](../../tasks/todo.md#restore-d01-模板复用失效调查2026-10-21)；[私有工程及发布原证目录](2026-10-21-template-restore-fix/implementation/)仅正式根归档，尚在实施，非验收/发布完成证明。本轮未收到新媒体附件；既有诊断数据只留脱敏字段存在/长度/计数，不保存提示词正文、媒体或凭据。本地新材料不替代旧发布原证，未逐项校验可再生成辅助文件；关键运行/回退证据将在生成后核对。
 
 R04来源为用户2026-10-21最新“同意付费测试”，由父线程在新版保护部署后独占正常Chrome/当前账号/现有模型的1张实测，先真实报价，未知只查原请求；lead和workers不收费生成。费用、实际结果及完成后/刷新保留证据待发生后登记，不以发布完成或旧手验说明结束新增R04。正式根私有实施目录已保留main/guard源码合同、25项准备入口检查、首轮stage拒绝及无切换/原占用结束证据；后继r02仍待整批修正与统一检查。

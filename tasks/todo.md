@@ -4,13 +4,21 @@
 
 ## RESTORE-D01 模板复用失效调查（2026-10-21）
 
+三次失败后的整链复查（2026-10-21，第四次修改前完成）：r01旧静态源码表拒绝合法9c39；r02混同历史迁移与原build；r03正常首发布后先执行重复switch反例，真实catch保留switch-failure，随后作为正例导入next，history135行正确拒绝。三次run/时间/日志保留；r03整15组14过、19场景未完成。native-refusal-state-r03核原六启动/价格revision/allowed不变，无candidate/adopt/build/maintenance/switch，failed正常收口。前条“新旧构建类型衔接”的初判已纠正。
+
+已读完整fixture及相关producer/consumer，复核build001/migration004/publication002/next003身份、实际switch/proof、非空schema只读沿用、role归属/自然排尽、fresh/reuse证据、正常guard回退与两个故障恢复。选项A把反例挪到末尾仍留顺序耦合，不选；B独立负例fixture且导出成功proof前检查无失败痕迹，选用；C换框架或真实systemd沙箱成本/范围更大，当前无必要。禁止删除失败文件或降history门。
+
+已读[Node20.20.2 TestContext及postRun reset代码](https://github.com/nodejs/node/blob/v20.20.2/lib/internal/test_runner/test.js#L249)与[独立实例测试](https://github.com/nodejs/node/blob/v20.20.2/test/parallel/test-runner-mocking.js#L299)、[Capistrano发布/回退独立Scenario](https://github.com/capistrano/capistrano/blob/master/features/deploy.feature)、DockerGateway及MIT许可证。只借隔离思想，无代码复制/新增依赖/改生产发布系统；远端master仅当时参考，不作已验证安装版本。
+
+由lead直接修新不可变r04检查包，45生产模块字节保持。重复switch独立fixture并核失败痕迹存在，干净正例留原链；原19项保留并增独立反例。整批完成后统一语法/准备、Linux15组/完整场景、两完整构建/Review/保护发布。此前未试第四次；收费R04仍父线程独占。原证私有implementation/native-control-r03-logs、native-refusal-state-r03.json、failed-r03-command.json。
+
 用户已明确授权本次修复；新分支`codex/template-restore-fix-20261021`沿干净3c1c4c6c，预计PATCH0.101.1，发布前鲜核。旧ADMIN/PROJECT/CAN已完成，不恢复旧修改。完整当前进度及私有证据归正式根同一固定todo，保其LibTV等并行记录。
 
 | 编号 | 任务内容 | 完成标准 | 当前状态 |
 |---|---|---|---|
 | R01 | 修复设置复用与生成后保留 | 风格组、补充描述实际用于本次生成，生成后及刷新可恢复 | 进行中：前后端已集成，历史来源/改选版本/描述含空值及统一报价创建已接线，新增离线检查已入构建门；未构建或功能验收 |
 | R02 | 修复版本冲突 | 查明触发原因，正确处理版本变化且不覆盖草稿 | 进行中：工作区版本与内容版本分离、差异合并和未知原保存查询已写；统一检查待全批齐备 |
-| R03 | 保护发布 | 必要构建及部署检查完成，提交推送并上线，交用户手验 | 进行中：main356b5b07/guard554fcee5已推送；r03仅修生命周期模拟，45份生产控制字节不变，49语法/25准备检查通过；15组/19场景及两完整构建待执行，前两次失败保留 |
+| R03 | 保护发布 | 必要构建及部署检查完成，提交推送并上线，交用户手验 | 进行中：三次原失败保留，整链/开源复查后r04独立负例已写，45生产模块不变，49语法/25准备项通过；服务器第四次待执行，未构建部署 |
 | R04 | 收费实测复用闭环 | 新版实际生成1张，核对风格/补充描述真正用于生成且完成后/刷新保留，记录真实费用与结果 | 待新版部署：用户最新明确同意付费测试；仅父线程独占执行，lead及workers不发收费请求 |
 
 2026-10-21追加收费实测授权：R01–R03保留，由当前lead继续实现和保护发布。R04由父线程在新版保护部署成功后，通过正常Chrome/当前账号及现有模型，先核实真实报价，只生成1张；未知结果仅核对同一原请求，不换号重发。父线程可先准备浏览器会话与只读测试对象，不在旧版生成或操作共享保存。当前lead与workers均不发收费请求，不扩大业务、费用或权限边界。发布交付须提供精确URL、source、BUILD及可验状态；R04保持待执行/进行中直至实际证据齐全，不以旧用户手验说明终结新增实测。
