@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Pencil, RotateCcw } from 'lucide-react';
-import { useProductDialog } from '@/components/useProductDialog';
-import { IMAGE_STUDIO_MODEL_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { IMAGE_API_GROUPS, imageApiGroupModels, type ImageApiGroup, type ImageApiGroupFormDto, type ImageApiGroupProviderDto, type ImageApiGroupSaveReceipt } from '@/lib/integrations/image-generation-channel';
 import type { ImageGenerationDefaultRoutesDto } from '@/lib/integrations/image-generation-defaults';
 import ImageApiGroupEditor, { ImageApiGroupModelStatuses, type ImageApiGroupDraft } from './ImageApiGroupEditor';
+import ImageModelObjectSettings from './ImageModelObjectSettings';
 
 type Props = {
   accountId: string | null; onDraftChange: (drafts: Record<string, boolean>, ready: boolean) => void;
@@ -62,7 +62,9 @@ export default function ImageModelApiSettings({ accountId, onDraftChange, onSave
   const [message, setMessage] = useState<Record<string, string>>({});
   const [readError, setReadError] = useState('');
   const [needsRead, setNeedsRead] = useState(false);
-  const { confirm, productDialog } = useProductDialog();
+  const [selectedObject, setSelectedObject] = useState<string>(IMAGE_STUDIO_MODELS[0]);
+  const [objectReady, setObjectReady] = useState(false);
+  const [modelState, setModelState] = useState({ dirty: false, pending: false });
   const generation = useRef(0), readSequence = useRef(0), lock = useRef(false);
   const activeSave = useRef<string | null>(null), finish = useRef(onSaveFinish); finish.current = onSaveFinish;
   const account = useRef(accountId); account.current = accountId;
@@ -75,9 +77,23 @@ export default function ImageModelApiSettings({ accountId, onDraftChange, onSave
       return !provider || JSON.stringify(draft) !== JSON.stringify(baseDraft(form, provider));
     });
   }
-  const dirty = Object.fromEntries(IMAGE_API_GROUPS.map(group => [group, Boolean(forms && (
-    choices[group] !== (forms.find(form => form.group === group)?.defaultProviderId || '') || groupHasDraft(group) || pending?.group === group))]));
+  const dirty: Record<string, boolean> = { ...Object.fromEntries(IMAGE_API_GROUPS.map(group => [group, Boolean(forms && (
+    choices[group] !== (forms.find(form => form.group === group)?.defaultProviderId || '') || groupHasDraft(group) || pending?.group === group))])), model: modelState.dirty };
   useEffect(() => { onDraftChange(dirty, Boolean(forms && defaults)); }, [JSON.stringify(dirty), Boolean(forms && defaults), onDraftChange]);
+  useEffect(() => {
+    setObjectReady(false);
+    let value = IMAGE_STUDIO_MODELS[0] as string;
+    if (accountId) {
+      try { value = localStorage.getItem(`sd2-admin-image-object-v1:${accountId}`) || value; } catch { /* Safe object identity only. */ }
+    }
+    if (!IMAGE_STUDIO_MODELS.includes(value as ImageStudioModel) && !IMAGE_API_GROUPS.some(group => value === `group:${group}`)) value = IMAGE_STUDIO_MODELS[0];
+    setSelectedObject(value); setObjectReady(true);
+  }, [accountId]);
+  useEffect(() => {
+    if (accountId && objectReady) {
+      try { localStorage.setItem(`sd2-admin-image-object-v1:${accountId}`, selectedObject); } catch { /* No credentials or drafts are persisted. */ }
+    }
+  }, [accountId, objectReady, selectedObject]);
 
   async function read(preserve = false) {
     const epoch = generation.current, sequence = ++readSequence.current, user = account.current;
@@ -164,13 +180,6 @@ export default function ImageModelApiSettings({ accountId, onDraftChange, onSave
   }
   async function dismissEditor() {
     if (!editor || lock.current) return;
-    const epoch = generation.current, target = editor, id = draftKey(target.group, target.providerId);
-    const changed = JSON.stringify(drafts[id] || target.initial) !== JSON.stringify(target.initial);
-    if (!pending && changed) {
-      const discard = await confirm('放弃本次设置层内的修改？打开前的输入会保留。', { title: '关闭设置', confirmLabel: '关闭', anchor: null });
-      if (!discard || epoch !== generation.current || lock.current) return;
-    }
-    if (!pending) setDrafts(current => ({ ...current, [id]: target.initial }));
     setEditor(null);
   }
   function applyReceipt(receipt: ImageApiGroupSaveReceipt, operation: PendingSave) {
@@ -240,7 +249,7 @@ export default function ImageModelApiSettings({ accountId, onDraftChange, onSave
   }
   async function save(group: ImageApiGroup, fromEditor = false) {
     const form = forms?.find(item => item.group === group), provider = form?.providers.find(item => item.id === choices[group]);
-    if (!accountId || !defaults || !form || !provider || provider.deleted || pending || needsRead || reading || lock.current || !onSaveStart()) return;
+    if (!accountId || !defaults || !form || !provider || provider.deleted || pending || modelState.pending || needsRead || reading || lock.current || !onSaveStart()) return;
     const draft = drafts[draftKey(group, provider.id)] || baseDraft(form, provider);
     const operation: PendingSave = { mutationId: crypto.randomUUID(), group, providerId: provider.id, accountId, editor: fromEditor, draft, defaultRevision: defaults.revision };
     await runSave(operation, () => fetch('/api/admin/integrations/image-generation', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
@@ -279,15 +288,30 @@ export default function ImageModelApiSettings({ accountId, onDraftChange, onSave
   }
   const editorForm = forms?.find(form => form.group === editor?.group), editorProvider = editorForm?.providers.find(provider => provider.id === editor?.providerId);
   return <div>
+    <label className="form-group" style={{ display: 'block', maxWidth: 640 }}><span className="form-label">图片模型或整组设置</span>
+      <select className="input" value={selectedObject} onChange={event => setSelectedObject(event.target.value)}>
+        <optgroup label="图片模型">{IMAGE_STUDIO_MODELS.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model]}</option>)}</optgroup>
+        <optgroup label="整组供应商管理">{IMAGE_API_GROUPS.map(group => <option key={group} value={`group:${group}`}>{group === 'banana' ? 'Banana' : 'Image'} 整组</option>)}</optgroup>
+      </select>
+    </label>
+    <div hidden={selectedObject.startsWith('group:')}>
+      <ImageModelObjectSettings accountId={accountId} model={IMAGE_STUDIO_MODELS.includes(selectedObject as ImageStudioModel) ? selectedObject as ImageStudioModel : IMAGE_STUDIO_MODELS[0]}
+        blocked={Boolean(busy || pending)} revision={defaults?.revision} onStateChange={(dirtyModel, pendingModel) => setModelState(current => current.dirty === dirtyModel && current.pending === pendingModel ? current : { dirty: dirtyModel, pending: pendingModel })}
+        onSaveStart={onSaveStart} onSaveFinish={saved => {
+          if (saved) { setModelState({ dirty: false, pending: false }); onDraftChange({ ...dirty, model: false }, Boolean(forms && defaults)); }
+          onSaveFinish('model', saved);
+        }} onSaved={() => void read(true)}
+        onOpenGroup={model => setSelectedObject(`group:${model.startsWith('gemini-') ? 'banana' : 'image'}`)} />
+    </div>
     <p className="text-gray text-sm">型号收费在<Link href="/admin/pricing">点数与费率</Link>集中管理；这里保留供应商、Key、协议、启停与默认路由。</p>
-    {readError && <div className="alert alert-error" role="alert">{readError}<button type="button" className="btn btn-secondary" disabled={Boolean(busy || pending || reading)} onClick={() => void read(Boolean(forms))}>{reading ? '正在读取' : '重新读取'}</button></div>}
+    {readError && <div className="outputs-message" role="status">{readError}<button type="button" className="btn btn-secondary" disabled={Boolean(busy || pending || reading)} onClick={() => void read(Boolean(forms))}>{reading ? '正在读取' : '重新读取'}</button></div>}
     {!forms && !readError && <p role="status">正在读取图片设置</p>}
     {IMAGE_API_GROUPS.map(group => {
       const form = forms?.find(item => item.group === group), provider = form?.providers.find(item => item.id === choices[group]);
       const draft = provider && form ? drafts[draftKey(group, provider.id)] || baseDraft(form, provider) : null;
-      const locked = Boolean(busy || pending || reading || needsRead || !form);
+      const locked = Boolean(busy || pending || modelState.pending || reading || needsRead || !form);
       const overrides = provider ? imageApiGroupModels(group).filter(model => provider.models[model]?.baseUrl || provider.models[model]?.apiKeyOverrideConfigured).length : 0;
-      return <section key={group} aria-label={`${group === 'banana' ? 'Banana' : 'Image'}图片生成`} style={{ padding: '24px 0', borderTop: '1px solid var(--border-color)', minWidth: 0 }}>
+      return <section hidden={selectedObject !== `group:${group}`} key={group} aria-label={`${group === 'banana' ? 'Banana' : 'Image'}图片生成`} style={{ padding: '24px 0', borderTop: '1px solid var(--border-color)', minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}><h2 className="section-title">{group === 'banana' ? 'Banana' : 'Image'}</h2>
           {group === 'image' && <button type="button" className="btn btn-secondary" title="重置页面位置" aria-label="重置页面位置" onClick={() => {
             if (accountId) { try { localStorage.removeItem(`sd2-admin-image-api-position-v1:${accountId}`); } catch { /* Safe preference only. */ } }
@@ -302,9 +326,9 @@ export default function ImageModelApiSettings({ accountId, onDraftChange, onSave
               </select><button type="button" className="btn btn-secondary" title="编辑当前供应商" aria-label="编辑当前供应商" disabled={!provider || provider.deleted} onClick={() => {
                 if (provider && draft) setEditor({ group, providerId: provider.id, initial: draft });
               }}><Pencil size={16} /></button></div></div>
-            <div className="form-group"><label className="form-label" htmlFor={`image-key-${group}`}>共用 API Key</label><input id={`image-key-${group}`} type="password" className="input" autoComplete="new-password" maxLength={500}
+            <details><summary>共用 API Key</summary><div className="form-group"><label className="form-label" htmlFor={`image-key-${group}`}>共用 API Key</label><input id={`image-key-${group}`} type="password" className="input" autoComplete="new-password" maxLength={500}
               value={draft?.apiKey || ''} placeholder={provider?.apiKeyConfigured ? '已设置，留空保留' : '输入该供应商的 API Key'} disabled={!provider || provider.deleted || draft?.clearApiKey} onChange={event => { if (provider && draft) changeDraft(group, provider.id, { ...draft, apiKey: event.target.value }); }} /></div>
-            {draft?.clearApiKey && <p className="text-sm">保存会清除本组共用 Key；型号独立 Key 不变，可在编辑中取消清除。</p>}
+            {draft?.clearApiKey && <p className="text-sm">保存会清除本组共用 Key；型号独立 Key 不变，可在编辑中取消清除。</p>}</details>
             <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 12 }}><input type="checkbox" checked={draft?.enabled === true} disabled={!provider || provider.deleted} onChange={event => { if (provider && draft) changeDraft(group, provider.id, { ...draft, enabled: event.target.checked }); }} /><span>启用本组，保存后生效；不改变型号开关</span></label>
             {provider && <p className="text-gray text-sm">{provider.groupConfigured || form?.defaultProviderId === provider.id ? provider.enabled ? '已保存状态：启用' : '已保存状态：停用，可编辑并保存' : '尚未保存本组配置；启用须明确勾选'}。{overrides > 0 ? `${overrides} 个型号的独立地址或 Key 会保留。` : '各型号保留自己的协议、规格及点数。'}</p>}
             {provider && draft && form && <>
@@ -322,6 +346,5 @@ export default function ImageModelApiSettings({ accountId, onDraftChange, onSave
     {editor && editorForm && editorProvider && <ImageApiGroupEditor group={editor.group} provider={editorProvider} draft={drafts[draftKey(editor.group, editor.providerId)] || baseDraft(editorForm, editorProvider)}
       busy={Boolean(busy || reading)} pending={Boolean(pending)} needsRead={needsRead} message={message[editor.group] || readError}
       onChange={draft => changeDraft(editor.group, editor.providerId, draft)} onDismiss={() => void dismissEditor()} onSave={() => void save(editor.group, true)} onQuery={() => void queryReceipt()} onRead={() => void read(true)} />}
-    {productDialog}
   </div>;
 }

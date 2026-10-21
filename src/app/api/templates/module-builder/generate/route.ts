@@ -8,6 +8,7 @@ import {
 } from '@/lib/templates/module-builder';
 import { getModuleBuilderRules } from '@/lib/templates/module-builder-rules';
 import { serializeGenerationTemplate, TEMPLATE_INCLUDE } from '@/lib/templates/workbench';
+import { recordUsageAttribution } from '@/lib/admin/usage-attribution';
 
 export const dynamic = 'force-dynamic';
 
@@ -85,6 +86,7 @@ export async function POST(request: NextRequest) {
     }
 
     const input = { template, moduleType, intent, contextText, sessionRules, contextAssetIds };
+    const usageStartedAt = new Date();
     const result = await generateModuleBuilderDraftWithLlm({ settings, input });
     const status = result.needsClarification
       ? 'draft'
@@ -177,6 +179,15 @@ export async function POST(request: NextRequest) {
         },
         include: { steps: { orderBy: { sort_order: 'asc' } } },
       });
+
+      for (const step of run.steps.filter((item) => item.step_key === 'llm_generate')) {
+        await recordUsageAttribution(tx, {
+          sourceKind: 'agent_text_step', sourceId: step.id,
+          actorUserId: user!.id, ownerUserId: run.user_id, projectId: null,
+          occurredAt: usageStartedAt, parentSourceId: run.id,
+          contextOrigin: 'agent-module-builder',
+        });
+      }
 
       await tx.templateMemory.create({
         data: {

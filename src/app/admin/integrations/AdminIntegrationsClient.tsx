@@ -19,8 +19,13 @@ import { displayUserSubtitle } from '@/lib/users/display';
 import { VOLCENGINE_IP_MODEL_OPTIONS } from '@/lib/integrations/volcengine-ip-models';
 import { IMAGE_API_GROUPS } from '@/lib/integrations/image-generation-channel';
 import { useAppSession } from '@/lib/context/AppSessionContext';
+import workbenchStyles from './workbench.module.css';
 
 type UserSelectorType = 'id' | 'email' | 'username';
+const INTEGRATION_OBJECTS = [
+  ['image', '图片模型'], ['h3-video', '视频服务 · H3'], ['volcengine-ip', '视频服务 · 火山 IP'],
+  ['aimediakit-enhance-video', '视频超分 · AI MediaKit'], ['text', '文字服务 · Musk'], ['codex', '外部接入 · Codex 视频'],
+] as const;
 
 type CodexConfig = {
   enabled: boolean;
@@ -428,12 +433,14 @@ export default function AdminIntegrationsClient() {
   const [h3QueueReason, setH3QueueReason] = useState('');
   const [h3QueueMessage, setH3QueueMessage] = useState<SubmitState>(null);
   const [imageDrafts, setImageDrafts] = useState<Record<string, boolean>>({});
+  const [selectedObject, setSelectedObject] = useState('image');
+  const [objectReady, setObjectReady] = useState(false);
   const [rolePolicyOpen, setRolePolicyOpen] = useState(false);
   const [rolePolicyDirty, setRolePolicyDirty] = useState(false);
   const [rolePolicySaving, setRolePolicySaving] = useState(false);
   const rolePolicyAccount = useRef(currentUser?.id);
   const onImageDraftChange = useCallback((drafts: Record<string, boolean>) => setImageDrafts(drafts), []);
-  const imageDraftSnapshot = Object.fromEntries(IMAGE_API_GROUPS.map(group => [`imageGroup:${group}`, Boolean(imageDrafts[group])]));
+  const imageDraftSnapshot = Object.fromEntries([...IMAGE_API_GROUPS, 'model'].map(group => [`imageGroup:${group}`, Boolean(imageDrafts[group])]));
   const settingsSubmit = useSettingsPageSubmit({
     codex: { config, entered: Boolean(token), clearToken },
     musk: { config: muskConfig, entered: Boolean(muskApiKey), clearMuskApiKey },
@@ -449,6 +456,29 @@ export default function AdminIntegrationsClient() {
     rolePolicyAccount.current = currentUser?.id;
     setRolePolicyOpen(false); setRolePolicyDirty(false); setRolePolicySaving(false); setImageDrafts({});
   }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const restore = () => {
+      const url = new URL(window.location.href);
+      let value = url.searchParams.get('object') || url.hash.slice(1);
+      if (!value && url.pathname === '/admin/integrations/aimediakit') value = 'aimediakit-enhance-video';
+      if (!value) {
+        try { value = localStorage.getItem(`sd2-admin-integration-object-v1:${currentUser.id}`) || 'image'; } catch { value = 'image'; }
+      }
+      setSelectedObject(INTEGRATION_OBJECTS.some(([id]) => id === value) ? value : 'image'); setObjectReady(true);
+    };
+    restore(); window.addEventListener('popstate', restore); window.addEventListener('hashchange', restore);
+    return () => { window.removeEventListener('popstate', restore); window.removeEventListener('hashchange', restore); };
+  }, [currentUser?.id]);
+  function selectObject(value: string) {
+    setSelectedObject(value);
+    const url = new URL(window.location.href); url.searchParams.set('object', value); url.hash = '';
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}`);
+    if (currentUser?.id && objectReady) {
+      try { localStorage.setItem(`sd2-admin-integration-object-v1:${currentUser.id}`, value); } catch { /* Only the selected object is persisted. */ }
+    }
+  }
 
   useEffect(() => {
     if (!hasLoadedUser) void refreshUser();
@@ -899,69 +929,33 @@ export default function AdminIntegrationsClient() {
   }
 
   return (
-    <fieldset disabled={settingsSubmit.busy} className="admin-integrations-page" style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+    <fieldset disabled={settingsSubmit.busy} className={`admin-integrations-page ${workbenchStyles.surface}`} style={{ border: 0, margin: 0, minWidth: 0 }}>
       {productDialog}
       {settingsSubmit.notice && <p role="status">{settingsSubmit.notice}</p>}
       <PageBanner
         eyebrow="管理后台"
         title="API 设置"
-        description="在这里维护火山 IP 生成、AI MediaKit 超分、Musk API、图形生成 API、Codex API 和外部工具调用配置，生成任务才能进入同一套扣费与后台留痕。"
+        description="按模型或服务维护供应商与调用配置。"
         actions={<Link className="btn btn-secondary" href="/admin/pricing">点数与费率</Link>}
       />
 
-      <div className="stats-grid">
-        <div className="stat-card">
-          <span className="stat-label">Codex 接口</span>
-          <strong className="stat-value">{statusText}</strong>
-          <span className="stat-sub">{config.ready ? '鉴权、用户和 token 均已就绪' : '保存配置后再走接口自测'}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">来源标识</span>
-          <strong className="stat-value">{config.source_label || '-'}</strong>
-          <span className="stat-sub">会写入任务、成本导出和产出留存。</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">扣费用户</span>
-          <strong className="stat-value">
-            {config.linked_user ? (
-              <UserIdentityBadge user={config.linked_user} size="sm" subtitle={linkedUserSubtitle(config)} />
-            ) : '-'}
-          </strong>
-          <span className="stat-sub">{config.linked_user ? '生成任务会归属并扣费到该用户' : linkedUserSubtitle(config)}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">Musk API</span>
-          <strong className="stat-value">{muskStatusText}</strong>
-          <span className="stat-sub">{muskConfig.default_model || 'gpt-5.5'} · {muskConfig.base_url || '未配置地址'}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">火山 IP 生成</span>
-          <strong className="stat-value">{volcengineStatusText}</strong>
-          <span className="stat-sub">
-            {volcengineConfig.default_model || '未设置 Model ID'} · {volcengineConfig.api_key_configured ? 'API Key 已设置' : 'API Key 未设置'}
-          </span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">AI MediaKit 超分</span>
-          <strong className="stat-value">{aiMediaKitStatusText}</strong>
-          <span className="stat-sub">{aiMediaKitConfig.base_url || '未设置 API 地址'} · {aiMediaKitConfig.api_key_configured ? 'API Key 已设置' : 'API Key 未设置'}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">H3 本地生成服务</span>
-          <strong className="stat-value">{h3StatusText}</strong>
-          <span className="stat-sub">
-            {h3Config.default_preset_id} · {h3Config.default_lora_id} · {h3Config.api_token_configured ? '用户 token 已设置' : '用户 token 未设置'}
-          </span>
-        </div>
-      </div>
+      <label className="form-group" style={{ display: 'block', maxWidth: 640 }}><span className="form-label">模型或服务</span>
+        <select className="input" value={selectedObject} onChange={event => selectObject(event.target.value)}>
+          {INTEGRATION_OBJECTS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        </select>
+      </label>
+      <p className="text-gray text-sm">保存只影响所选对象未来的新请求；已报价、已受理或结果未知的请求继续使用原配置。切换对象不会提交或丢弃当前输入。</p>
 
       {submitState && (
-        <div className={`alert ${submitState.type === 'success' ? 'alert-success' : 'alert-error'} mt-4`}>
+        <div className="outputs-message mt-4" role="status">
           {submitState.message}
         </div>
       )}
 
-      <form id="h3-video" className="card codex-config-form" onSubmit={saveH3Config}>
+      <section hidden={selectedObject !== 'h3-video'}>
+      <p>H3 · {h3StatusText} · {h3Config.api_token_configured ? '用户 token 已设置' : '用户 token 未设置'}</p>
+      <details><summary>具体配置与队列管理</summary>
+      <form id="h3-video" className="codex-config-form" onSubmit={saveH3Config}>
         <div className="codex-config-head">
           <div>
             <h2 className="section-title mb-0">H3 本地生成服务</h2>
@@ -1126,7 +1120,7 @@ export default function AdminIntegrationsClient() {
             </div>
 
             {h3QueueMessage && (
-              <div className={`codex-config-test-result ${h3QueueMessage.type === 'success' ? 'is-success' : 'is-error'}`}>
+              <div className={`codex-config-test-result ${h3QueueMessage.type === 'success' ? 'is-success' : ''}`}>
                 <strong>{h3QueueMessage.message}</strong>
               </div>
             )}
@@ -1232,7 +1226,7 @@ export default function AdminIntegrationsClient() {
         </div>
 
         {h3TestState && (
-          <div className={`codex-config-test-result ${h3TestState.type === 'success' ? 'is-success' : 'is-error'}`}>
+          <div className={`codex-config-test-result ${h3TestState.type === 'success' ? 'is-success' : ''}`}>
             <strong>{h3TestState.message}</strong>
             {h3TestState.type === 'success' && (
               <span>
@@ -1245,7 +1239,11 @@ export default function AdminIntegrationsClient() {
         )}
       </form>
 
-      <form id="aimediakit-enhance-video" className="card codex-config-form" onSubmit={saveAiMediaKitConfig}>
+      </details></section>
+      <section hidden={selectedObject !== 'aimediakit-enhance-video'}>
+      <p>AI MediaKit · {aiMediaKitStatusText} · {aiMediaKitConfig.api_key_configured ? 'Key 已设置' : 'Key 未设置'}</p>
+      <details><summary>具体配置</summary>
+      <form id="aimediakit-enhance-video" className="codex-config-form" onSubmit={saveAiMediaKitConfig}>
         <div className="codex-config-head">
           <div>
             <h2 className="section-title mb-0">AI MediaKit 视频超分 API</h2>
@@ -1333,7 +1331,11 @@ export default function AdminIntegrationsClient() {
         </div>
       </form>
 
-      <form id="volcengine-ip" className="card codex-config-form" onSubmit={saveVolcengineConfig}>
+      </details></section>
+      <section hidden={selectedObject !== 'volcengine-ip'}>
+      <p>火山 IP · {volcengineStatusText} · {volcengineConfig.default_model || '未设置型号'}</p>
+      <details><summary>具体配置</summary>
+      <form id="volcengine-ip" className="codex-config-form" onSubmit={saveVolcengineConfig}>
         <div className="codex-config-head">
           <div>
             <h2 className="section-title mb-0">火山 IP 生成 API</h2>
@@ -1460,7 +1462,11 @@ export default function AdminIntegrationsClient() {
         </div>
       </form>
 
-      <form className="card codex-config-form" onSubmit={saveMuskConfig}>
+      </details></section>
+      <section hidden={selectedObject !== 'text'}>
+      <p>Musk · {muskStatusText} · {muskConfig.default_model || '未设置型号'}</p>
+      <details><summary>具体配置与角色文字设置</summary>
+      <form className="codex-config-form" onSubmit={saveMuskConfig}>
         <div className="codex-config-head">
           <div>
             <h2 className="section-title mb-0">Musk API</h2>
@@ -1569,7 +1575,7 @@ export default function AdminIntegrationsClient() {
         </div>
 
         {muskTestState && (
-          <div className={`codex-config-test-result ${muskTestState.type === 'success' ? 'is-success' : 'is-error'}`}>
+          <div className={`codex-config-test-result ${muskTestState.type === 'success' ? 'is-success' : ''}`}>
             <strong>{muskTestState.message}</strong>
             {muskTestState.type === 'success' && (
               <span>
@@ -1583,11 +1589,17 @@ export default function AdminIntegrationsClient() {
         )}
       </form>
 
+      </details></section>
+      <section hidden={selectedObject !== 'image'}>
       <ImageModelApiSettings accountId={currentUser?.id || null} onDraftChange={onImageDraftChange}
         onSaveStart={settingsSubmit.start} onSaveFinish={(group, saved) => settingsSubmit.finish(`imageGroup:${group}`, saved)} />
-      <ImageQualityRoutingSettings accountId={currentUser?.id || null} />
+      <details><summary>Image 2.5 质量分档路由</summary><ImageQualityRoutingSettings accountId={currentUser?.id || null} /></details>
+      </section>
 
-      <form className="card codex-config-form" onSubmit={saveConfig}>
+      <section hidden={selectedObject !== 'codex'}>
+      <p>Codex 视频接口 · {statusText} · {config.source_label}</p>
+      <details><summary>具体配置与扣费用户</summary>
+      <form className="codex-config-form" onSubmit={saveConfig}>
         <div className="codex-config-head">
           <div>
             <h2 className="section-title mb-0">Codex 视频接口</h2>
@@ -1699,6 +1711,7 @@ export default function AdminIntegrationsClient() {
         </div>
 
       </form>
+      </details></section>
       {rolePolicyOpen && currentUser?.id && <RoleTextPolicySettings key={currentUser.id} accountId={currentUser.id}
         onClose={() => setRolePolicyOpen(false)} onDirtyChange={setRolePolicyDirty} onSavingChange={setRolePolicySaving} confirm={confirm} />}
     </fieldset>

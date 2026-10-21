@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { assertUsageProject, parseUsageProjectId, recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import type { SessionUser } from '@/lib/auth/session';
 import { fileExists, thumbnailFilePath } from '@/lib/video/thumbnail';
 import { canRequestTaskThumbnail, shouldExposeTaskThumbnailUrl } from '@/lib/video/thumbnail-availability';
@@ -253,6 +254,8 @@ export async function createStudioRun(user: SessionUser, input: CreateStudioRunR
         const accepted = await tx.videoStudioRun.count({ where: { owner_user_id: user.id, mode: 'llm', created_at: { gte: new Date(Date.now() - TEMPLATE_STUDIO_LIMITS.llmRequestWindowMs) } } });
         if (accepted >= TEMPLATE_STUDIO_LIMITS.llmRequestsPerUserWindow) throw new StudioError('AI 整理提交较频繁，请稍后再试', 429, 'RATE_LIMITED');
       }
+      const projectId = parseUsageProjectId(snapshot.parameters.project_id) ?? null;
+      await assertUsageProject(tx, user, projectId);
       const result = await tx.videoStudioRun.create({
         data: {
           owner_user_id: user.id,
@@ -270,6 +273,9 @@ export async function createStudioRun(user: SessionUser, input: CreateStudioRunR
           completed_at: input.mode === 'direct' ? new Date() : null,
         },
       });
+      await recordUsageAttribution(tx, { sourceKind: 'video_studio_run', sourceId: result.id,
+        actorUserId: user.id, ownerUserId: result.owner_user_id, billingSubjectType: 'user', billingSubjectId: user.id,
+        projectId, occurredAt: result.created_at, contextOrigin: projectId ? 'studio-explicit-project' : 'studio-unassigned' });
       return result;
     });
     return { run: dto(run), status: responseStatus(run) };

@@ -4,7 +4,7 @@
 
 `sd2.youdooart.com` 已有生产数据与持久启动屏障，**只走本节保护流程**。下方从零安装示例不是现网更新、迁移、回退或删目录命令，不得直接执行。所有候选、日志与发布材料沿真实挂载的 `/data`；只回程序，不回业务数据库、价格、媒体、账本、回执或历史证书。
 
-固定准备入口为 `ops/sd2-release-prepare.mjs`，控制来源由同目录 `sd2-release-profile.json` 锁定。它复用正式根私有 `docs/materials/2026-10-19-upload-unknown-recovery/release-r16/` 的36个成功控制模块，不另建发布引擎、不上传私有材料到Git。r16及其原run只读，禁止复制旧run/PID/价格修订冒新鲜现场。根因及原附件见正式根费率工单§24.5。
+固定准备入口为 `ops/sd2-release-prepare.mjs`，控制来源由同目录 `sd2-release-profile.json` 锁定。它先逐字核实正式根私有 `docs/materials/2026-10-19-upload-unknown-recovery/release-r16/` 的36个成功控制模块及原成功证据；ADMIN-USAGE另封新控制包，经profile的promotion精确锁定新增及允许变动文件，其余原模块逐字保留，不另建发布引擎、不上传私有材料到Git。r16及其原run只读，禁止复制旧run/PID/价格修订冒新鲜现场。根因及原附件见正式根费率工单§24.5。
 
 ```bash
 node ops/sd2-release-prepare.mjs check-template /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-19-upload-unknown-recovery
@@ -18,11 +18,23 @@ node ops/sd2-release-prepare.mjs prepare /Volumes/Data/Projects/video-api-debugg
 - `reuseBuilds: null` 表示新源码完整构建；只有同main/guard整对已成功时才传 `{sourceRun,directory}` 指向两份原 `*-immutable-success.json`。入口生成完整reuse schema和两份原证SHA。服务器仍必须核源、依赖、环境、Node、工程输入、compiled/check字节及metadata不变，另出fresh准入；不改原构建时间、不混新旧pair，不因复用失败自动重编译掩盖漂移。
 - `outputRoot` 必须是私有资料目录下不存在的新目录；失败保留原run，不能新建run来清零累计失败。输出 `run.mjs`、`control/` 和 `preparation.json`。其 `localPreparationOnly` 不是发布许可或功能验收。
 
-正常后续只用新目录 `run.mjs package/window/stage` 接原控制的 `control-preflight`、prepare/build/verify、Review和保护switch。先整批跑原九组控制检查及维护前真实配置/证书/回退/HD准入，再决定是否构建；可变连接/在途/权限条件在切换时仍重核。维护批准依旧五分钟有效，并绑定原manifest、窗口、控制和候选回执SHA；复用时 `candidateEvidenceKind` 必须取 `preparation.json` 的 `sd2-candidate-build-reuse.v1`，不能漏字段或拿旧批准续签。本机生成器不代签维护批准。
+正常后续只用新目录 `run.mjs package/window/stage` 接原控制的 `control-preflight`、prepare/build/verify、Review和保护switch。先整批跑原九组控制及新增role控制工程检查、维护前真实配置/证书/回退/HD准入，再决定是否构建；可变连接/在途/权限条件在切换时仍重核。维护批准依旧五分钟有效，并绑定原manifest、窗口、控制和候选回执SHA；复用时 `candidateEvidenceKind` 必须取 `preparation.json` 的 `sd2-candidate-build-reuse.v1`，不能漏字段或拿旧批准续签。本机生成器不代签维护批准。
 
 本站独立无缓冲日志、精确nginx配置指纹、合法运行目录别名与root控制文件分读、fixture真实helper绑定、HD闭合缓存精确表、保留证书两条恢复路径均来自锁定控制。发现新现场不在精确表或控制变更时，先只读集中复盘，必要修正另封新包、统一原生验证和Review后更新profile；不得放宽门、删证书、改历史文件或一边停站一边补检查。价格全字段前后相等、原进程自然排空、启动屏障、相容guard和公网产物核对不减少。
 
 统一离线工程检查：`node ops/sd2-release-prepare.test.mjs /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-19-upload-unknown-recovery`。仅检查工具、原证与生成接线，不运行任何服务器动作或功能验收。新入口首次真实发布效果须在下一次获授权发布时记录；不能把本轮离线检查说成又一次上线成功。
+
+### 使用归属增量表（ADMIN-USAGE）
+
+`0.101.0`新增`UsageAttribution`只读统计归属能力，首次启用新writer前必须单独完成以下增量准备，不运行`db:push`或自动回填，不改旧业务行、配置、账本或回执。它不是降级正常发布门的故障恢复通道。
+
+1. 新main及相容guard必须各完成真实完整构建与内置工程门，再由同一lead完成源码Review。新reader允许归属表或旧行缺失；guard须保留新后台合同，不混用旧成功pair。原程序无需该表，新增空表不改变其查询。
+2. 从本次冻结main候选内运行`ops/sd2-usage-attribution-migrate.py`，传本次私有manifest及已核manifest/SQL SHA256；脚本默认仅预检，显式`--apply`才写。它核真实`/data`挂载与空间，生成同一时点的SQLite备份并做完整性/原schema及数量核对，留独占恢复点后仅执行一张表及三个索引。
+3. 迁移回执须证明原schema/原业务行未改变、新表为空、无历史回填，且绑定同run/main/guard/manifest/SQL；同run重复检查还须核新表/索引定义与原备份SHA。缺回执、半成品、结构变化或空间/挂载异常都停止，保留备份及失败证据，不覆盖重试或改用系统盘。
+4. 旧程序仍运行时确认增量表兼容及迁移回执，再沿原控制重新取得正常fresh准入，排尽原进程并保护切换。迁移不替代原九组控制、价格全字段、HD/上传、数据/权限和公网健康检查。后续相容程序回退保留此表及已写归属，不恢复备份、不删除新表或重写业务数据。
+5. 独立角色coordinator也首建文字Attempt，必须与Web/image/HD同批纳入：真实unit与TasksMax128保持、原配置只做不输出正文的指纹保护，临时禁止强杀且SIGTERM等待完整进程组退出；正常切换及相容guard恢复都实际启动同批角色writer。新持久启动门核确切pair源码/BUILD/归属helper和新表定义，runtime核实际PID与已加载源码。作品渲染和模板提示词后台不首建本批事实，保留原进程，不能用“都重启过”代覆盖证据。
+
+迁移schema、备份/恢复与旧reader兼容在同一候选的内置隔离工程门记录；它不访问应用数据库，也不是U01–U13功能验收。首次真实迁移/切换证据登记正式根ADMIN-USAGE工单§13，未取得真实回执前不得称已迁移或已部署。
 
 本文档用于将 `video-api-debugger` 部署到 Ubuntu 24.04 LTS 单机环境。当前项目使用 Next.js 14、Prisma、SQLite，并存在运行时上传文件，因此推荐先使用带持久磁盘的 VPS / 云服务器部署；不要直接把当前形态部署到无持久文件系统的 Serverless 平台。
 

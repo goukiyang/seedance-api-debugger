@@ -179,12 +179,12 @@ export async function POST(request: NextRequest) {
 
     const prompt = body.prompt.trim();
 
-    const submission = { requestId, moduleId, moduleRevision: Number(expectedModuleRevision),
+    const submission = { requestId, projectId: context.projectId, moduleId, moduleRevision: Number(expectedModuleRevision),
       revision: Number(expectedSettingsRevision), prompt, count: Number(count), referenceIds: mergedReferenceIds,
       model: generation.model, ...(requestedChannelId !== undefined || !suppliedImageChannel ? { channelId } : {}), imageChannel: body.imageChannel || imageChannel, quality: generation.quality, resolution: generation.resolution, aspectRatio,
       billingQuoteId: body.billingQuoteId, pricingRevision: body.pricingRevision, maxEstimatedCost: body.maxEstimatedCost };
     const promptBinding = mentions ? { mentions, referenceAssets } : undefined;
-    const canvasUse = body.roleMediaContext === undefined ? undefined : { user, referenceImageIds: requestedReferenceIds };
+    const canvasUse = body.roleMediaContext === undefined ? undefined : { user, referenceImageIds: requestedReferenceIds, projectId: context.projectId };
     if (body.action === 'quote') return canvasStyleJson(await prepareImageBillingQuote(user.id, submission, undefined, canvasUse, promptBinding));
 
     let batchId: string;

@@ -45,6 +45,7 @@ async function publishRuntime(state: 'active' | 'stopping' | 'stopped') {
 async function recordStartup() {
   const sourceRoot = await realpath(process.cwd());
   const files = ['scripts/canvas-role-coordinator.ts', 'prisma/schema.prisma', 'src/lib/canvas-documents.ts',
+    'src/lib/admin/usage-attribution.ts',
     ...(await readdir(path.join(sourceRoot, 'src/lib/canvas-roles'))).filter(name => name.endsWith('.ts'))
       .sort().map(name => `src/lib/canvas-roles/${name}`)];
   const loadedModuleSha: Record<string, string> = {};
@@ -52,8 +53,8 @@ async function recordStartup() {
   const packageInfo = JSON.parse(await readFile(path.join(sourceRoot, 'package.json'), 'utf8'));
   const tables = await prisma.$queryRaw<Array<{ name: string }>>`SELECT name FROM sqlite_master WHERE type = 'table'
     AND name IN ('CanvasRoleRunControl','CanvasRoleAuthorization','CanvasRoleDispatch','CanvasRoleQuestion',
-    'CanvasRoleMediaBinding','CanvasRoleWorkflowTemplate','CanvasRoleWorkflowTemplateVersion')`;
-  if (tables.length !== 7) throw new Error('role_schema_unavailable');
+    'CanvasRoleMediaBinding','CanvasRoleWorkflowTemplate','CanvasRoleWorkflowTemplateVersion','UsageAttribution')`;
+  if (tables.length !== 8) throw new Error('role_schema_unavailable');
   startup = { pid: process.pid, sourceRoot, startedAt: new Date().toISOString(), version: packageInfo.version, loadedModuleSha };
   await mkdir(path.dirname(runtimePath), { recursive: true, mode: 0o700 });
   await publishRuntime('active');

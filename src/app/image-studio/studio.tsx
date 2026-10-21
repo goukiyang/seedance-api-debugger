@@ -84,6 +84,7 @@ import type { SettingsValue } from './settings-controller';
 import { parseStudioTemplateDefaults } from '@/lib/image-studio/template-defaults';
 import { normalizeStudioRatio, resolveStudioAspectRatio } from '@/lib/image-studio/ratios';
 import { useStudioBatch, imageUiQuotePriceText, validImageUiQuote, imageUiQuoteFields, imageUiQuoteAction, type ImageUiQuote } from './use-studio-batch';
+import { ImageUsageProjectSelect, useImageUsageProject } from '@/components/ImageUsageProjectSelect';
 import { BatchResults } from './batch-results';
 import { watchGenerationCompletion } from '@/components/GenerationCompletion';
 import { handImageDownloadToBrowser } from '@/lib/media/native-download';
@@ -1499,6 +1500,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const [recoverableDraft, setRecoverableDraft] = useState<Record<string, any> | null>(null);
   const [savedAsSignature, setSavedAsSignature] = useState('');
   const [prompt, setPromptValue] = useState(module.personalPrompt ?? (sharedLive ? personalOverrides.prompt || '' : module.prompt));
+  const usageProject = useImageUsageProject(userId, module.id);
   function setPrompt(value: string) { setPromptValue(value); markPersonalOverride('prompt', value); }
   const evolution = (module as StudioModule & { evolution?: EvolutionCapability | null }).evolution || null;
   const [evolutionInput, setEvolutionInput] = useState<EvolutionInput>({ direction: evolution?.defaultDirection || 'increase', manual: false });
@@ -2839,7 +2841,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
 
   function generationPayload(retryTask?: StudioTask, requestId = crypto.randomUUID()) {
     const historicalEvolution = (retryTask?.snapshot as (StudioSnapshot & { evolution?: EvolutionInput }) | undefined)?.evolution;
+    const historicalUsage = (retryTask?.snapshot as (StudioSnapshot & { usageAttribution?: { projectId?: string | null } }) | undefined)?.usageAttribution;
     return { requestId, ...(sharedLive ? { sharedLive: sharedLive.intent, personalOverrides: personalOverridesRef.current } : {}), prompt: retryTask?.prompt ?? prompt,
+      projectId: retryTask ? historicalUsage?.projectId ?? null : usageProject.projectId,
       moduleId: module.id, model: retryTask?.model || moduleModel, quality: retryTask?.quality || quality, reproduceFromTaskId: !sharedLive ? reproduceSourceTaskId || undefined : undefined, count: retryTask ? 1 : count, aspectRatio: retryTask?.aspectRatio || aspectRatio, resolution: retryTask?.snapshot?.resolution || resolution, revision: settings!.revision, channelId: (retryTask?.model || moduleModel) === 'gpt-image-2.5-sunburst' ? 'original' : imageChannelId,
       referenceIds: retryTask?.referenceIds || generationReferenceIds,
       ...(historicalEvolution || evolution ? { evolution: historicalEvolution || evolutionInput } : {}),
@@ -3211,7 +3215,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const hasContext = reproduceSourceTaskId ? reproductionContextConfigured : Boolean((isAdmin ? effectiveGlobalContext?.trim() : settings?.contextConfigured)
     || effectiveGenerationDefinition.contextConfigured || effectiveGenerationDefinition.context?.trim()
     || effectiveGenerationDefinition.templatePrompt?.trim() || generationSkills.length);
-  const ready = Boolean(selectedProviderReady && (actualQuoteRequired || pricingBySpecification || moduleUnitCredits !== null) && settings && !settingsError);
+  const ready = Boolean(usageProject.ready && selectedProviderReady && (actualQuoteRequired || pricingBySpecification || moduleUnitCredits !== null) && settings && !settingsError);
   const generationFeedback: StudioFeedback | null = batch.mode === 'batch' && batch.pending ? batch.busy ? { message: '正在核对原批次，不会重新提交生成', tone: 'progress' } : null
     : evolutionConflict ? { message: evolutionConflict, tone: 'warning' }
     : batch.mode === 'batch' && batch.blocker ? { message: batch.blocker, tone: 'info' }
@@ -3723,6 +3727,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             </select>
           </label>
         </div>
+        <ImageUsageProjectSelect ownerId={userId} value={usageProject.projectId} onChange={usageProject.setProjectId}
+          storageIssue={usageProject.storageIssue} disabled={!usageProject.ready || submitting || Boolean(pendingSubmission) || Boolean(batch.pending) || !batch.recoveryKnown} />
         {!allowsUnconfirmedParameters && qualityChoices.length > 0 && !qualityChoices.some(option => option !== 'auto') && <p className={styles.muted}>当前供应商只配置了模型默认质量。</p>}
         <div className={styles.moduleQuickActions} aria-label="模板快捷设置">
           <div className={styles.quickPresetRow}>

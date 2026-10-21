@@ -503,11 +503,11 @@ export async function POST(request: NextRequest) {
       if (!capability.ok) throw new AuthError(capability.error, 400);
       if (referenceImages.some(image => !image.asset_id || !image.asset || image.asset.status !== 'active')) throw new AuthError('此通道需要持久原件参考图，请重新选择；未生成', 409);
       const studio = await getImageStudioSettings();
-      const submission = { requestId, channelId, imageChannel: body.imageChannel || imageChannel,
+      const submission = { requestId, channelId, projectId: project.id, imageChannel: body.imageChannel || imageChannel,
         revision: body.settingsRevision ?? studio.revision, prompt: rawPrompt, count,
         referenceIds: referenceImages.map(image => image.asset_id!), model: selectedModel, quality,
         resolution, aspectRatio: requestedRatio, billingQuoteId: body.billingQuoteId, pricingRevision: body.pricingRevision, maxEstimatedCost: body.maxEstimatedCost };
-      const canvasUse = { user, referenceImageIds };
+      const canvasUse = { user, referenceImageIds, projectId: project.id };
       const referenceAssets = Object.fromEntries(referenceImages.map(image => [image.id, image.asset_id!]));
       const promptBinding = mentions ? { mentions, referenceAssets } : undefined;
       if (body.quote === true) return NextResponse.json(await prepareImageBillingQuote(user.id, submission, undefined, canvasUse, promptBinding), { headers: { 'Cache-Control': 'private, no-store' } });

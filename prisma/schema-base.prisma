@@ -9,6 +9,26 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model UsageAttribution {
+  source_kind          String
+  source_id            String
+  actor_user_id        String?
+  owner_user_id        String?
+  billing_subject_type String?
+  billing_subject_id   String?
+  project_id           String?
+  occurred_at          DateTime
+  context_version      Int @default(1)
+  parent_source_kind   String?
+  parent_source_id     String?
+  context_origin       String
+
+  @@id([source_kind, source_id])
+  @@index([owner_user_id, occurred_at])
+  @@index([project_id, occurred_at])
+  @@index([occurred_at])
+}
+
 model VideoTask {
   id                       String    @id @default(cuid())
   provider                 String

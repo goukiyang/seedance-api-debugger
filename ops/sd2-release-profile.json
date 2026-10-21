@@ -6,6 +6,15 @@
   "controllerCount": 36,
   "controllerSetSha256": "84d3bac3d6846f47eb998573b9130b1b6cc95af696a3468a72ff02a25476bb09",
   "wrapperSha256": "0c86b553e41c42cb2a539a4a07a3f46669d71f7c1c4d0b2e5b12abb3a02d3907",
+  "promotion": {
+    "template": "release-admin-usage-r01",
+    "wrapper": "run-admin-usage-r01.mjs",
+    "controllerCount": 39,
+    "controllerSetSha256": "8d88bb0fb0298181690b88d3d2c60e138a6c38ebd81c737d6a7de7f9e481f9fb",
+    "wrapperSha256": "6212fe72f5126687f961472d60a05b2f2c460d354072ffae6ceef0cfdbd3ac64",
+    "changed": ["common.mjs", "control-preflight.mjs", "switch.mjs"],
+    "added": ["usage-role-control.mjs", "usage-role-engineering.mjs", "usage-role-start.mjs"]
+  },
   "evidence": {
     "control-freeze.json": "8da4ab03ce189a29d139ddc25ab7cd9daa1026765a900f0456eee84ff46b21f5",
     "switch-complete.json": "9ab06baaa65892f3ba9162974b5ca3db5cdf38e251f14b796d305e12de524d78",

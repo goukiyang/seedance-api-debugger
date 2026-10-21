@@ -102,7 +102,13 @@ fixtures.push({ file: 'scripts/multiview-settings-batch-engineering.mjs', schema
 fixtures.push({ file: 'scripts/hd-chain-engineering.mjs', schema: 'hd-chain-engineering.v1',
   marker: 'HD chain engineering receipt: ', checks: HD_CHAIN_CHECKS, sources: HD_CHAIN_FIXTURE_SOURCES });
 const pricingGate = 'scripts/check-pricing-policy.mjs';
-const sourceFiles = ['package.json', entry, pricingGate, ...fixtures.flatMap(fixture => [fixture.file, ...fixture.sources])];
+const usageGate = 'scripts/admin-usage-engineering.ts';
+const usageSources = [usageGate, 'scripts/admin-usage-migration-engineering.py', 'src/lib/admin/usage-query.ts', 'src/lib/admin/usage-money.ts', 'src/lib/admin/usage-types.ts',
+  'src/lib/admin/usage-facts.ts', 'src/lib/admin/usage-analytics.ts', 'src/lib/admin/usage-attribution.ts',
+  'prisma/schema.prisma', 'prisma/schema-base.prisma', 'prisma/migrations/20261021073000_usage_attribution/migration.sql',
+  'ops/sd2-usage-attribution-migrate.py', 'ops/sd2-admin-usage-public-proof.mjs',
+  'ops/sd2-usage-role-start.mjs', 'scripts/canvas-role-coordinator.ts'];
+const sourceFiles = ['package.json', entry, pricingGate, ...usageSources, ...fixtures.flatMap(fixture => [fixture.file, ...fixture.sources])];
 const hash = value => createHash('sha256').update(value).digest('hex');
 const hashes = () => Object.fromEntries(sourceFiles.map(file => [file, hash(readFileSync(path.join(root, file)))]));
 const time = value => typeof value === 'number' ? value : Date.parse(value);
@@ -201,6 +207,18 @@ function verify(file, since) {
   assert.ok(Date.now() - value.startedAt <= 30 * 60_000, 'Build gate receipt is stale');
   assert.deepEqual(value.sourceSha256, hashes(), 'Candidate source changed after the gate ran');
   assert.equal(value.fixtures?.length, fixtures.length);
+  const usage = readPrivateReceipt(value.usageEngineeringReceipt);
+  assert.equal(usage.value.schema, 'admin-usage-engineering.v1'); assert.equal(usage.value.completed, true);
+  assert.equal(usage.value.runId, value.runId); assert.equal(usage.value.candidateRoot, root);
+  assert.equal(usage.value.databaseOpened, false);
+  for (const key of ['forbiddenCalls', 'productionWrites', 'paidRequests', 'browserRuns']) assert.equal(usage.value[key], 0);
+  for (const [file, digest] of Object.entries(usage.value.sourceSha256)) assert.equal(value.sourceSha256[file], digest);
+  const migration = readPrivateReceipt(usage.value.migrationReceipt);
+  assert.equal(migration.sha256, usage.value.migrationReceiptSha256);
+  assert.equal(migration.value.schema, 'admin-usage-migration-engineering.v1'); assert.equal(migration.value.completed, true);
+  assert.equal(migration.value.applicationDatabaseOpened, false);
+  for (const key of ['productionWrites', 'paidRequests', 'browserRuns']) assert.equal(migration.value[key], 0);
+  for (const [file, digest] of Object.entries(migration.value.sourceSha256)) assert.equal(value.sourceSha256[file], digest);
   assert.equal(typeof value.pricingReceipt, 'string', 'Pricing contracts were not run by this prebuild');
   assert.equal(readPrivateReceipt(value.pricingReceipt, 8 * 1024 * 1024).value.runId, value.runId, 'Image and pricing gates belong to different runs');
   const pricing = spawnSync(process.execPath, [pricingGate, '--verify', value.pricingReceipt, '--since', String(since)], { cwd: root, encoding: 'utf8', timeout: 30000 });
@@ -225,6 +243,15 @@ function run() {
   const directory = mkdtempSync(path.join(scratch, 'image-recovery-gate-'));
   const recorded = [], failures = [], outcomes = [];
   const fixtureEnvironment = { ...process.env, IMAGE_RECOVERY_GATE_RUN_ID: runId };
+  const usageEngineeringReceipt = path.join(directory, 'admin-usage-pure.json');
+  const usageResult = spawnSync(process.execPath, ['--import', 'tsx', usageGate, usageEngineeringReceipt], {
+    cwd: root, env: fixtureEnvironment, encoding: 'utf8', timeout: 30000, maxBuffer: 1024 * 1024,
+  });
+  const usageLog = path.join(directory, 'admin-usage-pure.log');
+  writeFileSync(usageLog, (usageResult.stdout || '') + (usageResult.stderr || ''), { mode: 0o600, flag: 'wx' });
+  if (usageResult.error || usageResult.signal || usageResult.status !== 0) {
+    failures.push({ file: usageGate, category: 'pure-engineering', message: 'Calendar/query/integer check failed', log: usageLog, status: usageResult.status, signal: usageResult.signal });
+  }
   // No isolated child may inherit the runtime canonical HD root. Existing
   // image/fee fixtures now also execute the post-commit registration hook.
   delete fixtureEnvironment.HD_DERIVATIVES_ROOT;
@@ -286,7 +313,7 @@ function run() {
   }
   const receipt = path.join(directory, 'receipt.json');
   writeFileSync(receipt, JSON.stringify({ schema: 'image-recovery-build-gate.v1', runId, candidateRoot: root,
-    startedAt, finishedAt: Date.now(), sourceSha256, fixtures: recorded, pricingReceipt, completed: true }, null, 2), { mode: 0o600, flag: 'wx' });
+    startedAt, finishedAt: Date.now(), sourceSha256, fixtures: recorded, pricingReceipt, usageEngineeringReceipt, completed: true }, null, 2), { mode: 0o600, flag: 'wx' });
   verify(receipt, startedAt);
   console.log(`PRICING_POLICY_GATE_RECEIPT=${pricingReceipt}`);
   console.log(`IMAGE_RECOVERY_GATE_RECEIPT=${receipt}`);

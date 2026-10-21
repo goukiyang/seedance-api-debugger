@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import styles from '@/components/ProductDialog.module.css';
+import workbenchStyles from './workbench.module.css';
 import { IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import { STUDIO_RATIOS } from '@/lib/image-studio/ratios';
@@ -104,7 +105,7 @@ export default function ImageApiGroupEditor({ group, provider, draft, busy, pend
   const modelChange = (model: ImageStudioModel, patch: ModelPatch) => onChange({ ...draft, models: { ...draft.models, [model]: { ...draft.models[model], ...patch } } });
   const field = (label: string, content: ReactNode) => <label className="form-group" style={{ display: 'block', minWidth: 0 }}><span className="form-label">{label}</span>{content}</label>;
   const retained = (label: string, value: string | number | boolean) => <div style={{ minWidth: 0 }}><dt className="form-label">{label}</dt><dd style={{ margin: 0, overflowWrap: 'anywhere' }}>{typeof value === 'boolean' ? value ? '是' : '否' : String(value)}</dd></div>;
-  return createPortal(<dialog ref={dialog} className={styles.dialog} style={{ width: 'min(760px, calc(100vw - 32px))' }} aria-modal="true" aria-labelledby={titleId} aria-describedby={scopeId}>
+  return createPortal(<dialog ref={dialog} className={`${styles.dialog} ${workbenchStyles.surface}`} style={{ width: 'min(760px, calc(100vw - 32px))' }} aria-modal="true" aria-labelledby={titleId} aria-describedby={scopeId}>
     <form onSubmit={event => { event.preventDefault(); onSave(); }} aria-busy={busy}>
       <header className={styles.header}><h2 id={titleId}>{group === 'banana' ? 'Banana' : 'Image'} 设置</h2>
         <button type="button" className={styles.close} aria-label="关闭设置" title="关闭设置" disabled={busy} onClick={onDismiss}><X size={18} /></button></header>
@@ -167,7 +168,7 @@ export default function ImageApiGroupEditor({ group, provider, draft, busy, pend
       <footer className={styles.actions}>
         {needsRead && !pending && <button type="button" className={styles.secondary} disabled={busy} onClick={onRead}>重新读取</button>}
         {pending && <button type="button" className={styles.primary} disabled={busy} onClick={onQuery}>查询原保存回执</button>}
-        <button type="button" className={styles.secondary} disabled={busy} onClick={onDismiss}>取消</button>
+        <button type="button" className={styles.secondary} disabled={busy} onClick={onDismiss}>关闭，保留输入</button>
         <button type="submit" className={styles.primary} disabled={locked}>{busy ? '正在保存' : '保存'}</button>
       </footer>
     </form>

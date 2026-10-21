@@ -22,7 +22,7 @@ function parseDate(value: string | null, endOfDay = false) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
   if (endOfDay && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    date.setHours(23, 59, 59, 999);
+    date.setUTCHours(23, 59, 59, 999);
   }
   return date;
 }
@@ -46,6 +46,25 @@ function buildWhere(searchParams: URLSearchParams): Prisma.VideoTaskWhereInput {
   const dateFrom = parseDate(searchParams.get('date_from'));
   const dateTo = parseDate(searchParams.get('date_to'), true);
   const includeDeleted = searchParams.get('include_deleted') !== 'false';
+  const costStatus = searchParams.get('cost_status');
+  const resultStatus = searchParams.get('result_status');
+
+  for (const [name, allowed] of [
+    ['status', VALID_TASK_STATUSES], ['retention_status', VALID_RETENTION_STATUSES],
+    ['resolution', VALID_RESOLUTIONS], ['cost_status', new Set(['pending', 'conflict', 'confirmed'])],
+    ['result_status', new Set(['not_ready', 'ready'])],
+  ] as const) {
+    const value = name === 'resolution' ? searchParams.get(name)?.trim().toLowerCase() : searchParams.get(name);
+    if (value && !allowed.has(value)) throw Object.assign(new Error(`不支持的筛选条件：${name}`), { status: 400 });
+  }
+  if ([ownerUserId, projectId].some(value => value && value.length > 120) || keyword.length > 200) {
+    throw Object.assign(new Error('筛选内容过长'), { status: 400 });
+  }
+  if ((searchParams.get('date_from') && !dateFrom) || (searchParams.get('date_to') && !dateTo)
+    || dateFrom && dateTo && dateFrom > dateTo) throw Object.assign(new Error('日期范围无效'), { status: 400 });
+  if (searchParams.get('attribution')) {
+    throw Object.assign(new Error('冻结归属请在使用明细查看；产出留存按视频当前项目筛选。'), { status: 400 });
+  }
 
   if (localStatus && VALID_TASK_STATUSES.has(localStatus)) {
     where.local_status = localStatus;
@@ -61,11 +80,26 @@ function buildWhere(searchParams: URLSearchParams): Prisma.VideoTaskWhereInput {
     andFilters.push({
       OR: [
         { owner_user_id: ownerUserId },
-        { user_id: ownerUserId },
+        { owner_user_id: null, user_id: ownerUserId },
       ],
     });
   }
   if (projectId) where.project_id = projectId === 'unassigned' ? null : projectId;
+  if (costStatus === 'conflict') where.provider_cost_status = 'disputed';
+  if (costStatus === 'confirmed') where.provider_cost_status = { in: ['official_confirmed', 'reconciled', 'failed_no_charge'] };
+  if (costStatus === 'pending') andFilters.push({
+    OR: [
+      { provider_cost_status: 'unknown' },
+      { local_status: { in: ['succeeded', 'failed', 'cancelled'] }, provider_cost_status: { notIn: ['official_confirmed', 'reconciled', 'failed_no_charge', 'disputed'] } },
+    ],
+  });
+  if (resultStatus) {
+    where.local_status = 'succeeded';
+    andFilters.push(resultStatus === 'not_ready'
+      ? { OR: [{ public_video_url: null }, { public_video_url: '' }] }
+      : { public_video_url: { not: null }, NOT: { public_video_url: '' } });
+    if (localStatus && localStatus !== 'succeeded') throw Object.assign(new Error('结果就绪筛选仅适用于已生成任务'), { status: 400 });
+  }
   if (resolution && VALID_RESOLUTIONS.has(resolution)) {
     if (resolution === 'unknown') {
       andFilters.push({
@@ -129,16 +163,28 @@ export async function GET(request: NextRequest) {
     await getAdminUser(request);
 
     const searchParams = request.nextUrl.searchParams;
+    if (searchParams.has('page') && (!/^\d+$/.test(searchParams.get('page') || '') || Number(searchParams.get('page')) < 1 || Number(searchParams.get('page')) > 10000)
+      || searchParams.has('page_size') && !['20', '30', '50', '100'].includes(searchParams.get('page_size') || '')
+      || searchParams.has('include_deleted') && !['true', 'false'].includes(searchParams.get('include_deleted') || '')) {
+      return NextResponse.json({ error: '分页或留存筛选条件无效' }, { status: 400 });
+    }
     const page = parsePositiveInt(searchParams.get('page'), 1, 10_000);
-    const limit = parsePositiveInt(searchParams.get('limit'), 30, 100);
+    const limit = parsePositiveInt(searchParams.get('page_size') || searchParams.get('limit'), 30, 100);
     const where = buildWhere(searchParams);
     const skip = (page - 1) * limit;
+    // Infer each lazy group query before the transaction contextual type widens it.
+    const retentionQuery = prisma.videoTask.groupBy({
+      where, by: ['retention_status'], orderBy: { retention_status: 'asc' }, _count: { _all: true },
+    });
+    const statusQuery = prisma.videoTask.groupBy({
+      where, by: ['local_status'], orderBy: { local_status: 'asc' }, _count: { _all: true },
+    });
 
-    const [total, tasks, retentionGroups, statusGroups] = await Promise.all([
+    const [total, tasks, retentionGroups, statusGroups] = await prisma.$transaction([
       prisma.videoTask.count({ where }),
       prisma.videoTask.findMany({
         where,
-        orderBy: [{ created_at: 'desc' }],
+        orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
         skip,
         take: limit,
         select: {
@@ -192,14 +238,8 @@ export async function GET(request: NextRequest) {
           project: { select: { id: true, name: true, type: true, status: true } },
         },
       }),
-      prisma.videoTask.groupBy({
-        by: ['retention_status'],
-        _count: { _all: true },
-      }),
-      prisma.videoTask.groupBy({
-        by: ['local_status'],
-        _count: { _all: true },
-      }),
+      retentionQuery,
+      statusQuery,
     ]);
 
     const actorIds = Array.from(new Set(tasks.flatMap((task) => [
@@ -237,7 +277,7 @@ export async function GET(request: NextRequest) {
         total,
         total_pages: Math.ceil(total / limit),
       },
-    });
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     console.error('[AdminOutputs] List error:', error);
     const status = error && typeof error === 'object' && 'status' in error

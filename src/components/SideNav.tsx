@@ -54,9 +54,11 @@ function SideNavGroup({
 }
 
 export default function SideNav({ isAdmin, user }: SideNavProps) {
+  const pathname = usePathname();
+  const inAdmin = isAdmin && (pathname === '/admin' || pathname.startsWith('/admin/'));
   return (
     <aside className="shell-sidebar">
-      {userNavGroups.map((group) => (
+      {!inAdmin && userNavGroups.map((group) => (
         <SideNavGroup group={group} user={user} key={group.title} />
       ))}
 

@@ -7,6 +7,7 @@ import {
   generateTemplateConfigDraftWithLlm,
 } from '@/lib/templates/template-config-builder';
 import { serializeGenerationTemplate, TEMPLATE_INCLUDE } from '@/lib/templates/workbench';
+import { recordUsageAttribution } from '@/lib/admin/usage-attribution';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,6 +60,7 @@ export async function POST(request: NextRequest) {
     }
 
     const input = { template, intent, sessionRules, contextAssetIds };
+    const usageStartedAt = new Date();
     const result = await generateTemplateConfigDraftWithLlm({ settings, input });
     const status = result.needsClarification
       ? 'draft'
@@ -149,6 +151,19 @@ export async function POST(request: NextRequest) {
             },
           },
         });
+
+        const textSteps = await tx.agentRunStep.findMany({
+          where: { agent_run_id: run.id, step_key: 'llm_generate' },
+          select: { id: true },
+        });
+        for (const step of textSteps) {
+          await recordUsageAttribution(tx, {
+            sourceKind: 'agent_text_step', sourceId: step.id,
+            actorUserId: user!.id, ownerUserId: run.user_id, projectId: null,
+            occurredAt: usageStartedAt, parentSourceId: run.id,
+            contextOrigin: 'agent-template-config-builder',
+          });
+        }
 
         await tx.templateMemory.create({
           data: {

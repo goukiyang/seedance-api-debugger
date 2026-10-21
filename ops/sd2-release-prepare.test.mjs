@@ -10,7 +10,8 @@ import { verifyTemplate, contractData, validatePlan, checkSources, reuseInput, r
 const materials = process.argv[2];
 assert.ok(materials && path.isAbsolute(materials), 'Pass the original private release materials directory');
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const template = verifyTemplate(materials);
+const template = verifyTemplate(materials, { originalOnly: true });
+const activeTemplate = verifyTemplate(materials);
 const original = contractData(template.files['release-contract.mjs'].toString()).value;
 const now = Date.now();
 const c = structuredClone(original);
@@ -58,8 +59,8 @@ await test('Actual controller agrees with evidence schema', async () => {
   assert.equal(REUSE_SCHEMA, evidence.REUSE_SCHEMA);
 });
 await test('Wrapper transformations require exact known syntax', () => {
-  assert.throws(() => renderWrapper(template.wrapper.replace("path.join(base, 'release-r16')", "path.join(base, 'other')"), repo, null));
-  assert.throws(() => renderWrapper(template.wrapper.replace('reuseBuilds:', 'unexpected:'), repo, null));
+  assert.throws(() => renderWrapper(template.wrapper.replace("path.join(base, 'release-r16')", "path.join(base, 'other')"), repo, null, 'release-r16'));
+  assert.throws(() => renderWrapper(template.wrapper.replace('reuseBuilds:', 'unexpected:'), repo, null, 'release-r16'));
 });
 await test('Changed original receipt rejects reuse', () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'sd2-reuse-test-'));
@@ -76,7 +77,7 @@ await test('Preparation preserves all safety modules byte for byte', async () =>
     const result = await prepare(plan, materials); created = true;
     assert.equal(result.receipt.serverAdmissionVerified, false);
     assert.equal(result.receipt.candidateEvidenceKind, REUSE_SCHEMA);
-    for (const [file, bytes] of Object.entries(template.files)) {
+    for (const [file, bytes] of Object.entries(activeTemplate.files)) {
       const output = fs.readFileSync(path.join(result.output, 'control', file));
       if (file !== 'release-contract.mjs') assert.deepEqual(output, bytes);
       else assert.deepEqual(contractData(output.toString()).value, c);
@@ -86,7 +87,8 @@ await test('Preparation preserves all safety modules byte for byte', async () =>
     assert.equal(fs.statSync(result.output).mode & 0o777, 0o700);
     assert.equal(fs.statSync(path.join(result.output, 'run.mjs')).mode & 0o777, 0o600);
     await assert.rejects(prepare(plan, materials), /Output must be new/);
-    assert.deepEqual(verifyTemplate(materials).files, template.files);
+    assert.deepEqual(verifyTemplate(materials, { originalOnly: true }).files, template.files);
+    assert.deepEqual(verifyTemplate(materials).files, activeTemplate.files);
   } finally { if (created) fs.rmSync(plan.outputRoot, { recursive: true }); }
 });
 console.log(JSON.stringify({ schema: 'sd2-release-preparer-check.v1', fixtureOnly: true, outcomes,

@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import type { CanvasRoleTaskRun, CanvasRoleWork } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { inheritUsageAttribution } from '@/lib/admin/usage-attribution';
 import type { SessionUser } from '@/lib/auth/session';
 import { getMuskApiSettings, isMuskApiReady } from '@/lib/integrations/musk';
 import { compileCanvasTextRules, getCanvasTextSettings } from '@/lib/canvas-text-settings';
@@ -214,12 +215,15 @@ export async function executeWork(user: SessionUser, workId: string, body: JsonR
     await db.creditLedger.create({ data: { user_id: user.id, type: 'task_freeze', amount: 0,
       balance_before: freeze.balance_before, balance_after: freeze.balance_after, frozen_before: freeze.frozen_before, frozen_after: freeze.frozen_after,
       related_task_id: `role-attempt:${id}`, idempotency_key: `role-freeze:${id}`, reason: '本次角色文字请求预留', metadata_json: JSON.stringify({ roleTaskRunId: run.id, allocations: freeze.allocations }) } });
-    await db.canvasRoleAttempt.create({ data: { id, work_id: work.id, round: work.round, purpose,
+    const createdAttempt = await db.canvasRoleAttempt.create({ data: { id, work_id: work.id, round: work.round, purpose,
       attempt: (await db.canvasRoleAttempt.count({ where: { work_id: work.id, round: work.round, purpose } })) + 1,
       request_id: identifier(body.mutation_id), state: 'reserved', fee_state: 'pending',
       input_snapshot_json: JSON.stringify(input), quote_json: JSON.stringify({ contract: q.contract, freezeSnapshot: freeze.snapshot,
         quoteId: q.quoteId, workRevision: work.revision, requirementsRevision: run.requirements_revision, executorIdentity: q.executorIdentity }),
       reserved_points: q.contract.reservePointCents, reserved_usd_micros: q.contract.reserveUsdMicros, provider_scope: q.contract.scope } });
+    await inheritUsageAttribution(db, { sourceKind: 'role_attempt', sourceId: id,
+      actorUserId: user.id, ownerUserId: run.owner_user_id, billingSubjectType: 'user', billingSubjectId: user.id,
+      occurredAt: createdAttempt.started_at, parentSourceKind: 'role_run', parentSourceId: run.id });
     await db.canvasRoleTaskRun.update({ where: { id: run.id }, data: { call_count: { increment: 1 }, reserved_points: { increment: q.contract.reservePointCents },
       reserved_usd_micros: { increment: q.contract.reserveUsdMicros }, revision: { increment: 1 } } });
     return { objectId: work.id, result: { attemptId: id, workId: work.id, state: 'reserved' } };
@@ -429,7 +433,7 @@ export async function executeReservedDispatch(user: SessionUser, dispatchId: str
         balance_before: freeze.balance_before, balance_after: freeze.balance_after, frozen_before: freeze.frozen_before,
         frozen_after: freeze.frozen_after, related_task_id: `role-attempt:${id}`, idempotency_key: `role-freeze:${id}`,
         reason: '角色文字授权预留，不是报价', metadata_json: JSON.stringify({ roleTaskRunId: c.run.id, allocations: freeze.allocations }) } });
-      await db.canvasRoleAttempt.create({ data: { id, work_id: c.work.id, round: c.work.round, purpose: c.purpose,
+      const createdAttempt = await db.canvasRoleAttempt.create({ data: { id, work_id: c.work.id, round: c.work.round, purpose: c.purpose,
         attempt: (await db.canvasRoleAttempt.count({ where: { work_id: c.work.id, round: c.work.round, purpose: c.purpose } })) + 1,
         request_id: c.dispatch.id, state: 'reserved', fee_state: 'pending', provider_scope: c.contract.scope,
         reserved_points: c.contract.reservePointCents, reserved_usd_micros: c.contract.reserveUsdMicros,
@@ -437,6 +441,9 @@ export async function executeReservedDispatch(user: SessionUser, dispatchId: str
           workRevision: c.work.revision, executorRevision: c.executor.revision, executorIdentity: executorIdentity(c.executor),
           requirementsRevision: c.run.requirements_revision, inputDigest: c.payload.inputDigest, dispatchId,
           grantDigest: c.authorization.snapshot_digest, payload: c.payload, billingQuery: { count: 0, nextAt: Date.now() + 10000 } }) } });
+      await inheritUsageAttribution(db, { sourceKind: 'role_attempt', sourceId: id,
+        actorUserId: user.id, ownerUserId: c.run.owner_user_id, billingSubjectType: 'user', billingSubjectId: user.id,
+        occurredAt: createdAttempt.started_at, parentSourceKind: 'role_run', parentSourceId: c.run.id });
       await db.canvasRoleDispatch.update({ where: { id: dispatchId }, data: { attempt_id: id } });
       await db.canvasRoleTaskRun.update({ where: { id: c.run.id }, data: { call_count: { increment: 1 },
         reserved_points: { increment: c.contract.reservePointCents }, reserved_usd_micros: { increment: c.contract.reserveUsdMicros }, revision: { increment: 1 } } });

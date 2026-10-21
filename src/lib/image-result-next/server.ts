@@ -1,6 +1,7 @@
 import 'server-only';
 import { createHash } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
+import { recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import type { SessionUser } from '@/lib/auth/session';
 import { resolveContent } from '@/lib/content-reactions/content';
 import type { ContentKey } from '@/lib/content-reactions/types';
@@ -20,7 +21,7 @@ const PRICE_MESSAGE = '当前抠图服务没有提供可核实费用。图片可
 const sha = (value: string) => createHash('sha256').update(value).digest('hex');
 type Stored = {
   version: 1; receiptId: string; ownerId: string; sourceKey: ContentKey; sourceVersion: string;
-  intent: ImageResultNextIntent; returnPath: string; createdAt: number; phaseAt: number;
+  intent: ImageResultNextIntent; returnPath: string; createdAt: number; phaseAt: number; submittedAt?: number;
   stage: CutoutImageHandoff['stage']; asset: CutoutAsset | null; job: CutoutJob | null;
   settings?: CutoutSettings; message: string; workspaceTabId?: string;
 };
@@ -201,8 +202,17 @@ export async function startCutoutImageHandoff(request: Request, user: SessionUse
   const caps = await capsResponse.json().catch(() => null) as CutoutCapabilities | null;
   if (!capsResponse.ok || !caps?.integration?.ready) throw new ImageResultNextError(caps?.integration?.message || '抠图服务暂不可用，尚未提交', 503);
   if (settings.model_preference !== 'auto' && !caps.models?.some(model => model.id === settings.model_preference && model.available)) throw new ImageResultNextError('所选普通抠图模型暂不可用，请选择可用模型后确认；没有换用其他模型', 409);
-  const submitting: Stored = { ...record, settings, stage: 'submitting', phaseAt: Date.now(), message: '正在确认这次普通抠图提交。' };
-  if (!await replace(key, raw, submitting)) return getCutoutImageHandoff(request, user, id);
+  const submitting: Stored = { ...record, settings, submittedAt: record.submittedAt ?? Date.now(), stage: 'submitting', phaseAt: Date.now(), message: '正在确认这次普通抠图提交。' };
+  const claimed = await prisma.$transaction(async db => {
+    const changed = await db.platformSetting.updateMany({ where: { key, value_json: raw }, data: { value_json: JSON.stringify(submitting), updated_by: user.id } });
+    if (changed.count !== 1) return false;
+    const prior = await db.$queryRaw<Array<{ source_id: string }>>`SELECT "source_id" FROM "UsageAttribution" WHERE "source_kind" = 'cutout_receipt' AND "source_id" = ${id}`;
+    if (!prior.length) await recordUsageAttribution(db, { sourceKind: 'cutout_receipt', sourceId: id,
+      actorUserId: user.id, ownerUserId: user.id, projectId: null,
+      occurredAt: new Date(submitting.submittedAt!), contextOrigin: 'cutout-local-submission' });
+    return true;
+  });
+  if (!claimed) return getCutoutImageHandoff(request, user, id);
   try {
     const response = await cutoutCall(request, user, ['v1', 'jobs'], 'POST', JSON.stringify({ asset_id: record.asset.asset_id, kind: 'cutout', parameters: { settings } }),
       { 'Content-Type': 'application/json', 'Idempotency-Key': `image-next-${id}` });

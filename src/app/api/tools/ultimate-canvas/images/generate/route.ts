@@ -83,14 +83,14 @@ export async function POST(request: NextRequest) {
     if (!unframed && !existing) await saveStudioModule(user.id, { id: body.moduleId, revision: 0, name: '画布图片',
       prompt: '', count: Number(settings.count), referenceIds: [], model: settings.model, quality: settings.quality,
       resolution: settings.resolution, aspectRatio: settings.ratio, groupName: '画布图片' }, false, user.role === 'admin', undefined, user);
-    const submission = { requestId: body.requestId, ...(unframed ? {} : { moduleId: body.moduleId }),
+    const submission = { requestId: body.requestId, projectId: context.projectId, ...(unframed ? {} : { moduleId: body.moduleId }),
       revision: body.settingsRevision, prompt: body.prompt, count: Number(settings.count), referenceIds: uniqueReferences,
       draft: { referencePolicy }, maxEstimatedCost: body.maxEstimatedCost, billingQuoteId: body.billingQuoteId, pricingRevision: body.pricingRevision,
       model: settings.model, ...(requestedChannelId === undefined ? {} : { channelId: requestedChannelId }),
       imageChannel: body.imageChannel, quality: settings.quality, resolution: settings.resolution, aspectRatio: settings.ratio };
     const promptBinding = mentions ? { mentions, referenceAssets } : undefined;
-    if (body.action === 'quote') return canvasStyleJson(await prepareImageBillingQuote(user.id, submission, undefined, { user, referenceImageIds }, promptBinding));
-    const batchId = await submitStudioBatch(user.id, submission, undefined, undefined, { user, referenceImageIds }, promptBinding,
+    if (body.action === 'quote') return canvasStyleJson(await prepareImageBillingQuote(user.id, submission, undefined, { user, referenceImageIds, projectId: context.projectId }, promptBinding));
+    const batchId = await submitStudioBatch(user.id, submission, undefined, undefined, { user, referenceImageIds, projectId: context.projectId }, promptBinding,
       body.roleMediaContext === undefined ? undefined : { user, context: body.roleMediaContext, generationNodeId: context.nodeId });
     return canvasStyleJson({ batchId, moduleId: body.moduleId, count: Number(settings.count) }, 202);
   } catch (error) { return canvasStyleFailure(error, '提交结果未确认，请查询原图片请求，不要重新生成'); }

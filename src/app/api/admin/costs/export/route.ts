@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
 import { getAdminUser } from '@/lib/auth/api-helpers';
 import { costAmountToCnyEstimate, usdToCnyRateText } from '@/lib/costs/currency';
+import { costLedgerListWhere, parseCostListFilters } from '@/app/admin/costs/list-filters';
 
 export const dynamic = 'force-dynamic';
 
 function csvCell(value: unknown) {
-  const text = value === null || value === undefined ? '' : String(value);
+  let text = value === null || value === undefined ? '' : String(value);
+  if (typeof value === 'string' && /^[\s]*[=+\-@\t\r]/.test(value)) text = `'${text}`;
   return `"${text.replace(/"/g, '""')}"`;
 }
 
@@ -41,9 +44,12 @@ export async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
 
-    const ledgers = await prisma.costLedger.findMany({
-      orderBy: [{ occurred_at: 'desc' }, { created_at: 'desc' }],
-      select: {
+    let filters;
+    try { filters = parseCostListFilters(request.nextUrl.searchParams); }
+    catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : '筛选条件无效' }, { status: 400 }); }
+    const where = costLedgerListWhere(filters);
+    let dataAsOf = '';
+    const select = {
         id: true,
         source_type: true,
         source_id: true,
@@ -70,7 +76,6 @@ export async function GET(request: NextRequest) {
         created_at: true,
         task: {
           select: {
-            prompt: true,
             source_type: true,
             source_label: true,
             source_request_id: true,
@@ -80,7 +85,6 @@ export async function GET(request: NextRequest) {
             duration: true,
           },
         },
-        user: { select: { name: true, username: true, email: true } },
         project: { select: { name: true } },
         provider_request: {
           select: {
@@ -101,8 +105,7 @@ export async function GET(request: NextRequest) {
             usage_unit: true,
           },
         },
-      },
-    });
+      } satisfies Prisma.CostLedgerSelect;
 
     const headers = [
       'ledger_id',
@@ -132,8 +135,6 @@ export async function GET(request: NextRequest) {
       'project_id',
       'project_name',
       'user_id',
-      'user_name',
-      'user_email',
       'amount_minor',
       'amount_micros',
       'currency',
@@ -146,10 +147,10 @@ export async function GET(request: NextRequest) {
       'idempotency_key',
       'allocation_summary',
       'reason',
-      'prompt',
+      'data_as_of',
     ];
 
-    const rows = ledgers.map((ledger) => [
+    const row = (ledger: Prisma.CostLedgerGetPayload<{ select: typeof select }>) => [
       ledger.id,
       ledger.occurred_at.toISOString(),
       ledger.created_at.toISOString(),
@@ -177,8 +178,6 @@ export async function GET(request: NextRequest) {
       ledger.project_id,
       ledger.project?.name,
       ledger.user_id,
-      ledger.user?.name || ledger.user?.username,
-      ledger.user?.email,
       ledger.amount_minor,
       ledger.amount_micros,
       ledger.currency,
@@ -191,19 +190,57 @@ export async function GET(request: NextRequest) {
       ledger.idempotency_key,
       formatAllocationSummary(ledger.allocations),
       ledger.reason,
-      ledger.task?.prompt,
-    ]);
-
-    const csv = [
-      headers.map(csvCell).join(','),
-      ...rows.map((row) => row.map(csvCell).join(',')),
-    ].join('\n');
-
+      dataAsOf,
+    ];
+    const encoder = new TextEncoder();
+    let cancelled = false;
+    let resume: (() => void) | null = null;
+    let resolveSnapshot!: (value: { dataAsOf: string; total: number }) => void;
+    let rejectSnapshot!: (error: unknown) => void;
+    const snapshot = new Promise<{ dataAsOf: string; total: number }>((resolve, reject) => { resolveSnapshot = resolve; rejectSnapshot = reject; });
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        void prisma.$transaction(async tx => {
+          const total = await tx.costLedger.count({ where });
+          dataAsOf = new Date().toISOString();
+          resolveSnapshot({ dataAsOf, total });
+          const write = async (text: string) => {
+            while (!cancelled && controller.desiredSize !== null && controller.desiredSize <= 0) {
+              await new Promise<void>(resolve => { resume = resolve; });
+            }
+            if (cancelled || request.signal.aborted) throw new Error('Cost ledger export interrupted');
+            controller.enqueue(encoder.encode(text));
+          };
+          await write(`\uFEFF${headers.map(csvCell).join(',')}\n`);
+          let cursor: string | undefined;
+          for (;;) {
+            if (cancelled || request.signal.aborted) throw new Error('Cost ledger export interrupted');
+            const ledgers = await tx.costLedger.findMany({ where, select,
+              orderBy: [{ occurred_at: 'desc' }, { id: 'desc' }], take: 500,
+              ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
+            if (!ledgers.length) break;
+            await write(ledgers.map(ledger => row(ledger).map(csvCell).join(',')).join('\n') + '\n');
+            cursor = ledgers[ledgers.length - 1].id;
+            if (ledgers.length < 500) break;
+          }
+        }, { timeout: 120000 }).then(() => { if (!cancelled) controller.close(); }).catch(error => {
+          rejectSnapshot(error);
+          const wasCancelled = cancelled; cancelled = true; const next = resume; resume = null; next?.();
+          if (!wasCancelled) controller.error(error);
+        });
+      },
+      pull() { const next = resume; resume = null; next?.(); },
+      cancel() { cancelled = true; const next = resume; resume = null; next?.(); },
+    });
+    const exported = await snapshot;
     const today = new Date().toISOString().slice(0, 10);
-    return new NextResponse(csv, {
+    return new NextResponse(stream, {
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
         'Content-Disposition': `attachment; filename="cost-ledger-${today}.csv"`,
+        'Cache-Control': 'private, no-store',
+        'X-Data-As-Of': exported.dataAsOf,
+        'X-Export-Total': String(exported.total),
       },
     });
   } catch (error) {

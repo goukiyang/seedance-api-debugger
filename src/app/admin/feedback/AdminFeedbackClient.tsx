@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import PageBanner from '@/components/PageBanner';
 import { useProductDialog } from '@/components/useProductDialog';
 import { RelativeTime } from '@/components/RelativeTime';
@@ -11,6 +12,7 @@ import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { RotateCcw, X } from 'lucide-react';
 import { usePageExitRisk } from '@/lib/hooks/page-exit-guard';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
+import workbenchStyles from '../integrations/workbench.module.css';
 
 type FeedbackUser = {
   id: string;
@@ -43,7 +45,7 @@ type FeedbackPagination = {
   totalPages: number;
 };
 
-const FEEDBACK_PAGE_SIZE = 50;
+const FEEDBACK_PAGE_SIZE = 30;
 
 function parseImages(value: string | null) {
   if (!value) return [];
@@ -76,6 +78,7 @@ function feedbackExportFilename(date = new Date()) {
 }
 
 export default function AdminFeedbackClient({ currentUser, feedbackId }: { currentUser: FeedbackUser; feedbackId?: string }) {
+  const searchParams = useSearchParams();
   const { confirm, productDialog } = useProductDialog();
   const actionLock = useRef(false);
   const readSequence = useRef(0);
@@ -98,11 +101,16 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
   const [hasImage, setHasImage] = useState('');
   const [keyword, setKeyword] = useState('');
   const [pagePath, setPagePath] = useState('');
+  const [ownerUserId, setOwnerUserId] = useState('');
+  const [taskId, setTaskId] = useState('');
+  const [dateFrom, setDateFrom] = useState(''), [dateTo, setDateTo] = useState('');
+  const ownLocation = useRef<string | null>(null), skipLocationWrite = useRef(false);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(FEEDBACK_PAGE_SIZE);
   const [pagination, setPagination] = useState<FeedbackPagination | null>(null);
   const [restored, setRestored] = useState(false);
   const [preview, setPreview] = useState<{ url: string; index: number; feedbackId: string } | null>(null);
@@ -134,26 +142,60 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
   useDialogDismiss({ open: Boolean(active) && !preview, dialogRef: detailRef, dismissSurfaceRef: backdropRef, onDismiss: () => { void closeDetail(); } });
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (ownLocation.current === params.toString()) return;
+    skipLocationWrite.current = restored;
+    const explicit = ['status', 'hasImage', 'keyword', 'pagePath', 'pathname', 'owner_user_id', 'task_id', 'date_from', 'date_to', 'page', 'page_size', 'pageSize'].some(key => params.has(key));
     try {
       const saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
-      if (saved?.version === 1) {
+      if (!explicit && saved?.version === 1) {
         setStatus(['', 'new', 'reviewed', 'archived'].includes(saved.status) ? saved.status : '');
         setHasImage(['', 'true', 'false'].includes(saved.hasImage) ? saved.hasImage : '');
-        setKeyword(typeof saved.keyword === 'string' ? saved.keyword.slice(0, 200) : '');
+        setKeyword('');
         setPagePath(typeof saved.pagePath === 'string' ? saved.pagePath.slice(0, 200) : '');
+        setOwnerUserId(typeof saved.ownerUserId === 'string' ? saved.ownerUserId.slice(0, 120) : '');
+        setTaskId(typeof saved.taskId === 'string' ? saved.taskId.slice(0, 120) : '');
+        setDateFrom(typeof saved.dateFrom === 'string' ? saved.dateFrom.slice(0, 40) : '');
+        setDateTo(typeof saved.dateTo === 'string' ? saved.dateTo.slice(0, 40) : '');
         setPage(Number.isInteger(saved.page) && saved.page > 0 && saved.page <= 10000 ? saved.page : 1);
+        setPageSize([20, 30, 50, 100].includes(saved.pageSize) ? saved.pageSize : FEEDBACK_PAGE_SIZE);
         setTechnicalOpen(saved.technicalOpen === true);
         restoreDetail.current = typeof saved.activeId === 'string' ? saved.activeId : null;
       }
     } catch { /* Storage is optional; retain usable defaults. */ }
+    if (explicit) {
+      setStatus(params.get('status') || ''); setHasImage(params.get('hasImage') || '');
+      setKeyword(params.get('keyword') || ''); setPagePath(params.get('pagePath') || params.get('pathname') || '');
+      setOwnerUserId(params.get('owner_user_id') || ''); setTaskId(params.get('task_id') || '');
+      setDateFrom(params.get('date_from') || ''); setDateTo(params.get('date_to') || '');
+      const next = Number(params.get('page') || 1); setPage(next);
+      const size = Number(params.get('page_size') || params.get('pageSize') || FEEDBACK_PAGE_SIZE); setPageSize(size);
+      restoreDetail.current = null;
+    }
     setRestored(true);
-  }, [storageKey]);
+  }, [storageKey, searchParams]);
 
   useEffect(() => {
     if (!restored) return;
-    try { localStorage.setItem(storageKey, JSON.stringify({ version: 1, status, hasImage, keyword, pagePath, page, activeId: active?.id || null, technicalOpen })); }
+    if (!['', 'new', 'reviewed', 'archived'].includes(status) || !['', 'true', 'false'].includes(hasImage)
+      || !Number.isSafeInteger(page) || page < 1 || page > 10000 || ![20, 30, 50, 100].includes(pageSize)
+      || [ownerUserId, taskId].some(value => value.length > 120)
+      || [dateFrom, dateTo].some(value => value && !Number.isFinite(Date.parse(value)))) return;
+    try { localStorage.setItem(storageKey, JSON.stringify({ version: 1, status, hasImage, pagePath, ownerUserId, taskId, dateFrom, dateTo, page, pageSize, activeId: active?.id || null, technicalOpen })); }
     catch { /* Browsing still works when persistence is unavailable. */ }
-  }, [restored, storageKey, status, hasImage, keyword, pagePath, page, active?.id, technicalOpen]);
+  }, [restored, storageKey, status, hasImage, pagePath, ownerUserId, taskId, dateFrom, dateTo, page, pageSize, active?.id, technicalOpen]);
+
+  useEffect(() => {
+    if (!restored) return;
+    if (skipLocationWrite.current) { skipLocationWrite.current = false; return; }
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries({ status, hasImage, keyword, pagePath, owner_user_id: ownerUserId, task_id: taskId, date_from: dateFrom, date_to: dateTo })) if (value) params.set(key, value);
+    params.set('page', String(page));
+    params.set('page_size', String(pageSize));
+    const id = new URLSearchParams(window.location.search).get('feedbackId'); if (id) params.set('feedbackId', id);
+    ownLocation.current = params.toString();
+    if (window.location.search.slice(1) !== ownLocation.current) window.history.replaceState(window.history.state, '', `/admin/feedback?${params}`);
+  }, [restored, status, hasImage, keyword, pagePath, ownerUserId, taskId, dateFrom, dateTo, page, pageSize, searchParams]);
 
   useEffect(() => {
     if (!restored) return;
@@ -186,8 +228,12 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
     if (hasImage) params.set('hasImage', hasImage);
     if (keyword) params.set('keyword', keyword);
     if (pagePath) params.set('pagePath', pagePath);
+    if (ownerUserId) params.set('owner_user_id', ownerUserId);
+    if (taskId) params.set('task_id', taskId);
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
     params.set('page', String(pageNumber));
-    params.set('pageSize', String(FEEDBACK_PAGE_SIZE));
+    params.set('page_size', String(pageSize));
 
     try {
       const response = await fetch(`/api/admin/feedback?${params.toString()}`, { cache: 'no-store' });
@@ -215,7 +261,7 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
     if (!restored) return;
     void load(page);
     return () => { readSequence.current += 1; };
-  }, [status, hasImage, restored]);
+  }, [status, hasImage, keyword, pagePath, ownerUserId, taskId, dateFrom, dateTo, page, pageSize, restored]);
 
   const toggleAll = () => {
     if (selectedIds.length === items.length) {
@@ -298,11 +344,10 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
   };
 
   return (
-    <main className="admin-users-page" style={{ minHeight: '100vh', background: '#101116', color: '#fff', padding: 24 }}>
+    <main className={`admin-users-page ${workbenchStyles.surface}`} style={{ color: 'var(--text-primary)', minWidth: 0 }}>
       {productDialog}
       {actionBusy && <LoadingStatus>正在保存反馈操作</LoadingStatus>}
       <PageBanner
-        tone="dark"
         eyebrow="管理员后台"
         title="反馈管理"
         description="查看、归档、备注和导出用户提交的反馈材料。"
@@ -314,9 +359,9 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
           marginBottom: 14,
           padding: '10px 12px',
           borderRadius: 8,
-          color: error ? 'var(--text-secondary)' : '#86efac',
-          background: error ? 'var(--bg-input)' : 'rgba(80,255,140,0.10)',
-          border: error ? '1px solid var(--border-color)' : '1px solid rgba(80,255,140,0.25)',
+          color: 'var(--text-secondary)',
+          background: error ? 'var(--bg-input)' : 'var(--tone-success-bg)',
+          border: '1px solid var(--border-color)',
         }}>
           {error || message}
         </div>
@@ -336,6 +381,13 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
         </select>
         <input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索内容、用户、任务" style={controlStyle} />
         <input value={pagePath} onChange={(event) => setPagePath(event.target.value)} placeholder="页面路径" style={controlStyle} />
+        <select style={controlStyle} aria-label="每页反馈数量" value={pageSize} onChange={event => { setPageSize(Number(event.target.value)); setPage(1); }}>{[20, 30, 50, 100].map(size => <option key={size} value={size}>每页 {size} 条</option>)}</select>
+        <details style={{ gridColumn: '1 / -1' }}><summary>用户、任务与日期</summary><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))', gap: 10 }}>
+        <input value={ownerUserId} onChange={event => { setOwnerUserId(event.target.value); setPage(1); }} placeholder="用户 ID" aria-label="反馈用户编号" style={controlStyle} />
+        <input value={taskId} onChange={event => { setTaskId(event.target.value); setPage(1); }} placeholder="关联任务 ID" aria-label="关联任务编号" style={controlStyle} />
+        <input type="date" value={dateFrom} onChange={event => { setDateFrom(event.target.value); setPage(1); }} aria-label="反馈开始日期" style={controlStyle} />
+        <input type="date" value={dateTo} onChange={event => { setDateTo(event.target.value); setPage(1); }} aria-label="反馈结束日期" style={controlStyle} />
+        </div></details>
         <button
           type="button"
           onClick={() => {
@@ -348,7 +400,7 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
         </button>
         <button type="button" title="重置筛选与上次位置" aria-label="重置筛选与上次位置" style={miniButtonStyle} onClick={() => {
           if (active || actionLock.current) return;
-          setStatus(''); setHasImage(''); setKeyword(''); setPagePath(''); setPage(1);
+          setStatus(''); setHasImage(''); setKeyword(''); setPagePath(''); setOwnerUserId(''); setTaskId(''); setDateFrom(''); setDateTo(''); setPage(1); setPageSize(FEEDBACK_PAGE_SIZE);
           try { localStorage.removeItem(storageKey); } catch { /* Optional storage. */ }
           window.location.assign('/admin/feedback');
         }}><RotateCcw size={16} /></button>
@@ -369,13 +421,13 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
         >
           导出 PDF
         </button>
-        <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13 }}>已选择 {selectedIds.length} 条</span>
+        <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>已选择 {selectedIds.length} 条</span>
       </section>
 
-      <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, overflow: 'hidden' }}>
+      <div style={{ border: '1px solid var(--border-color)', borderRadius: 8, overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.58)' }}>
+            <thead style={{ background: 'var(--bg-input)', color: 'var(--text-secondary)' }}>
               <tr>
                 <th style={thStyle}><input type="checkbox" checked={items.length > 0 && selectedIds.length === items.length} onChange={toggleAll} /></th>
                 <th style={thStyle}>状态</th>
@@ -392,7 +444,7 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
               {items.map((item) => {
                 const images = parseImages(item.image_urls_json);
                 return (
-                  <tr key={item.id} style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
+                  <tr key={item.id} style={{ borderTop: '1px solid var(--border-color)' }}>
                     <td style={tdStyle}>
                       <input
                         type="checkbox"
@@ -424,7 +476,7 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
                 );
               })}
               {!loading && !error && items.length === 0 && (
-                <tr><td colSpan={9} style={{ ...tdStyle, textAlign: 'center', color: 'rgba(255,255,255,0.55)' }}>暂无反馈</td></tr>
+                <tr><td colSpan={9} style={{ ...tdStyle, textAlign: 'center', color: 'var(--text-secondary)' }}>暂无反馈</td></tr>
               )}
               {loading && (
                 <tr><td colSpan={9} style={tdStyle}>{items.length ? <LoadingStatus>正在更新反馈</LoadingStatus> : <LoadingSkeleton label="正在读取反馈" />}</td></tr>
@@ -451,14 +503,14 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
 
       {active && (
         <div ref={backdropRef} style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, visibility: preview ? 'hidden' : 'visible' }}>
-          <section ref={detailRef} role="dialog" aria-modal="true" aria-labelledby="feedback-detail-title" style={{ width: 760, maxWidth: '100%', maxHeight: '88vh', overflowY: 'auto', borderRadius: 8, background: '#151821', border: '1px solid rgba(255,255,255,0.1)', padding: 20 }}>
+          <section ref={detailRef} role="dialog" aria-modal="true" aria-labelledby="feedback-detail-title" style={{ width: 760, maxWidth: '100%', maxHeight: '88vh', overflowY: 'auto', borderRadius: 8, background: 'var(--bg-panel)', border: '1px solid var(--border-color)', padding: 20 }}>
             <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
               <h2 id="feedback-detail-title" style={{ margin: 0, fontSize: 20 }}>反馈详情</h2>
               <button type="button" disabled={actionBusy} onClick={() => void closeDetail()} aria-label="关闭" title="关闭" style={miniButtonStyle}><X size={16} /></button>
             </header>
             {error && <p role="alert" style={{ color: 'var(--text-secondary)', margin: '0 0 14px', overflowWrap: 'anywhere' }}>{error}</p>}
             <p style={{ margin: '0 0 16px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: 15, lineHeight: 1.65 }}>{active.content}</p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', alignItems: 'center', color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', alignItems: 'center', color: 'var(--text-secondary)', fontSize: 13 }}>
               <UserIdentityBadge user={active.user} size="sm" />
               <span style={{ overflowWrap: 'anywhere' }}>{active.pathname || '未提供页面'}</span>
               <RelativeTime value={active.created_at} />
@@ -468,26 +520,26 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
                 {parseImages(active.image_urls_json).map((url, index) => (
                   <button key={`${url}-${index}`} type="button" title={`查看截图 ${index + 1}`} aria-label={`查看截图 ${index + 1}`}
                     onClick={() => setPreview({ url, index, feedbackId: active.id })}
-                    style={{ border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: 0, overflow: 'hidden', cursor: 'zoom-in', background: '#111318' }}>
+                    style={{ border: '1px solid var(--border-color)', borderRadius: 8, padding: 0, overflow: 'hidden', cursor: 'zoom-in', background: 'var(--bg-input)' }}>
                     <img src={url} alt={`反馈截图 ${index + 1}`} style={{ display: 'block', width: '100%', aspectRatio: '4 / 3', objectFit: 'contain' }} />
                   </button>
                 ))}
               </div>
             )}
-            <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', marginTop: 20, paddingTop: 16 }}>
-              <label style={{ display: 'block', marginBottom: 8, color: 'rgba(255,255,255,0.65)', fontSize: 13 }}>状态
+            <div style={{ borderTop: '1px solid var(--border-color)', marginTop: 20, paddingTop: 16 }}>
+              <label style={{ display: 'block', marginBottom: 8, color: 'var(--text-secondary)', fontSize: 13 }}>状态
                 <select disabled={actionBusy} value={active.status} onChange={(event) => setActive({ ...active, status: event.target.value })} style={controlStyle}>
                   <option value="new">新反馈</option>
                   <option value="reviewed">已查看</option>
                   <option value="archived">已归档</option>
                 </select>
               </label>
-              <label style={{ display: 'block', marginTop: 12, color: 'rgba(255,255,255,0.65)', fontSize: 13 }}>内部备注
+              <label style={{ display: 'block', marginTop: 12, color: 'var(--text-secondary)', fontSize: 13 }}>内部备注
                 <textarea disabled={actionBusy} value={note} onChange={(event) => setNote(event.target.value)} rows={4} style={{ ...controlStyle, resize: 'vertical' }} />
               </label>
             </div>
             <details open={technicalOpen} onToggle={event => setTechnicalOpen(event.currentTarget.open)} style={{ marginTop: 16, fontSize: 13 }}>
-              <summary style={{ cursor: 'pointer', color: 'rgba(255,255,255,0.65)', padding: '8px 0' }}>技术信息 / 导出</summary>
+              <summary style={{ cursor: 'pointer', color: 'var(--text-secondary)', padding: '8px 0' }}>技术信息 / 导出</summary>
               <dl style={{ margin: '8px 0', display: 'grid', gridTemplateColumns: '80px minmax(0, 1fr)', gap: '10px 12px', fontSize: 12 }}>
                 <dt style={dtStyle}>反馈编号</dt><dd style={ddStyle}>{active.id}</dd>
                 <dt style={dtStyle}>提交人</dt><dd style={ddStyle}><UserIdentityBadge user={active.user} size="sm" showEmail /></dd>
@@ -497,7 +549,7 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
               </dl>
               <button type="button" onClick={() => exportSingle(active.id)} style={secondaryButtonStyle}>下载 PDF</button>
             </details>
-            <footer style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8, marginTop: 18, position: 'sticky', bottom: -20, padding: '12px 0', background: '#151821' }}>
+            <footer style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8, marginTop: 18, position: 'sticky', bottom: -20, padding: '12px 0', background: 'var(--bg-panel)' }}>
               <button type="button" disabled={actionBusy} onClick={() => void runFeedbackAction(() => archive([active.id]))} style={secondaryButtonStyle}>归档</button>
               <button type="button" disabled={actionBusy} className="sd2-loading-surface" data-busy={actionBusy} onClick={() => void runFeedbackAction(saveDetail)} style={primaryButtonStyle}>保存</button>
             </footer>
@@ -514,10 +566,10 @@ const controlStyle: React.CSSProperties = {
   width: '100%',
   boxSizing: 'border-box',
   padding: '10px 12px',
-  border: '1px solid rgba(255,255,255,0.12)',
+  border: '1px solid var(--border-color)',
   borderRadius: 8,
-  background: '#181b22',
-  color: '#fff',
+  background: 'var(--bg-input)',
+  color: 'var(--text-primary)',
   fontSize: 13,
 };
 
@@ -525,32 +577,32 @@ const primaryButtonStyle: React.CSSProperties = {
   border: 'none',
   borderRadius: 8,
   padding: '10px 14px',
-  background: '#4f46e5',
-  color: '#fff',
+  background: '#2563eb',
+  color: 'white',
   fontWeight: 700,
   cursor: 'pointer',
 };
 
 const secondaryButtonStyle: React.CSSProperties = {
-  border: '1px solid rgba(255,255,255,0.14)',
+  border: '1px solid var(--border-color)',
   borderRadius: 8,
   padding: '10px 14px',
-  background: 'rgba(255,255,255,0.06)',
-  color: '#fff',
+  background: 'var(--bg-input)',
+  color: 'var(--text-primary)',
   cursor: 'pointer',
 };
 
 const miniButtonStyle: React.CSSProperties = {
-  border: '1px solid rgba(255,255,255,0.14)',
+  border: '1px solid var(--border-color)',
   borderRadius: 8,
   padding: '6px 9px',
-  background: 'rgba(255,255,255,0.06)',
-  color: '#fff',
+  background: 'var(--bg-input)',
+  color: 'var(--text-primary)',
   cursor: 'pointer',
   whiteSpace: 'nowrap',
 };
 
 const thStyle: React.CSSProperties = { textAlign: 'left', padding: 12, whiteSpace: 'nowrap' };
-const tdStyle: React.CSSProperties = { padding: 12, verticalAlign: 'top', color: 'rgba(255,255,255,0.82)' };
-const dtStyle: React.CSSProperties = { color: 'rgba(255,255,255,0.52)' };
-const ddStyle: React.CSSProperties = { margin: 0, color: 'rgba(255,255,255,0.88)', wordBreak: 'break-word' };
+const tdStyle: React.CSSProperties = { padding: 12, verticalAlign: 'top', color: 'var(--text-primary)' };
+const dtStyle: React.CSSProperties = { color: 'var(--text-secondary)' };
+const ddStyle: React.CSSProperties = { margin: 0, color: 'var(--text-primary)', wordBreak: 'break-word' };

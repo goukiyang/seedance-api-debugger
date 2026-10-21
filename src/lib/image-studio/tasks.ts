@@ -7,6 +7,7 @@ import type { ImageStudioTask, Prisma } from '@prisma/client';
 import { studioDeliveryStatus } from './delivery';
 import { ACTIVE_IMAGE_TASK_STATUSES, QueueCapacityError, QueueMaintenanceError, reserveImageStudioQueueCapacity } from './queue-capacity';
 import { prisma } from '@/lib/prisma';
+import { assertUsageProject, inheritUsageAttribution, parseUsageProjectId, recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import { getImageStudioSettings } from './settings';
 import { imageBillingScope } from './billing-scope';
@@ -315,7 +316,9 @@ export function parseStudioRequest(body: Record<string, unknown>) {
   if (moduleRevision !== undefined && (!Number.isInteger(moduleRevision) || moduleRevision < 0)) throw new StudioError('模块已更新，请刷新后重试', 409);
   const reproduceFromTaskId = body.reproduceFromTaskId === undefined ? undefined : body.reproduceFromTaskId;
   if (reproduceFromTaskId !== undefined && (typeof reproduceFromTaskId !== 'string' || reproduceFromTaskId.length > 120)) throw new StudioError('历史生成记录无效', 400);
+  const projectId = parseUsageProjectId(body.projectId);
   return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), moduleRevision, reproduceFromTaskId, referenceIds,
+    ...(projectId !== undefined ? { projectId } : {}),
     ...(sharedLive ? { sharedLive } : {}),
     ...(personalOverrides ? { personalOverrides } : {}),
     ...(typeof body.personalPrompt === 'string' ? { personalPrompt: body.personalPrompt.trim() } : {}),
@@ -336,10 +339,11 @@ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] 
   catch { throw new StudioError('历史固定参考图快照无效', 409); }
 }
 
-export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean; frozenContract?: ImageBillingContract }, canvasUse?: { user: SessionUser; referenceImageIds: string[] }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission) {
+export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean; frozenContract?: ImageBillingContract }, canvasUse?: { user: SessionUser; referenceImageIds: string[]; projectId?: string | null }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission) {
   if (body.roleMediaContext !== undefined && !roleMedia) throw new StudioError('角色媒体来源只能由原画布确认入口提交', 403);
   if (roleMedia && (roleMedia.user.id !== ownerId || !canvasUse || avatar || preparation)) throw new StudioError('角色媒体必须沿原图片任务创建和扣点流程', 403);
   const roleContextFingerprint = roleMedia ? roleMediaFingerprint(roleMedia.context) : undefined;
+  let legacyAcceptedProjectContext = false;
   // An accepted request is recovered before any current definition/configuration checks.
   if (!roleMedia && typeof body?.requestId === 'string' && /^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) {
     const acceptedBatchId = createHash('sha256').update(`${ownerId}:${body.requestId}`).digest('hex');
@@ -347,13 +351,24 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (accepted) {
       let snapshot: Record<string, unknown> = {};
       try { snapshot = JSON.parse(accepted.snapshot_json || '{}'); } catch {}
+      legacyAcceptedProjectContext = canvasUse?.projectId !== undefined && snapshot.usageAttribution === undefined;
       if (snapshot.sharedLive !== undefined || body.sharedLive !== undefined) {
         if (body.moduleId !== undefined && body.moduleId !== accepted.module_id) throw new StudioError('提交编号已用于其他请求，请查询原记录', 409);
         return acceptedBatchId;
       }
     }
   }
-  const input = parseStudioRequest(body);
+  if (roleMedia && canvasUse?.projectId !== undefined && typeof body.requestId === 'string') {
+    const acceptedId = createHash('sha256').update(`${ownerId}:${body.requestId}`).digest('hex');
+    const accepted = await prisma.imageStudioTask.findFirst({ where: { batch_id: acceptedId, owner_id: ownerId }, select: { snapshot_json: true } });
+    if (accepted) {
+      try { legacyAcceptedProjectContext = JSON.parse(accepted.snapshot_json || '{}').usageAttribution === undefined; } catch { /* Original fingerprint validation still fails closed. */ }
+    }
+  }
+  // A new server-derived field must not change an already accepted legacy request.
+  const input = parseStudioRequest(legacyAcceptedProjectContext ? { ...body, projectId: undefined } : body);
+  const usageProjectId = canvasUse?.projectId !== undefined ? canvasUse.projectId : input.projectId ?? null;
+  if (canvasUse?.projectId !== undefined && input.projectId !== undefined && input.projectId !== canvasUse.projectId) throw new StudioError('图片项目与画布上下文不一致', 409);
   const personalPrompt = input.personalPrompt ?? input.prompt;
   const billingQuoteId = typeof body.billingQuoteId === 'string' ? body.billingQuoteId : undefined;
   const rawCanvasPrompt = input.prompt;
@@ -420,6 +435,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true,
     } });
     if (!user || user.status !== 'active') throw new StudioError('当前账号无法生成', 403);
+    await assertUsageProject(tx, user, usageProjectId);
     const identity: ImageStudioIdentity = user;
     if (!canUseCompanyTemplates(identity)) throw new StudioError('仅限公司飞书账号生成图片', 403);
     const canvasReferenceOwners = canvasUse ? await resolveCanvasStudioReferenceUse(canvasUse.user, canvasUse.referenceImageIds) : new Map<string, string>();
@@ -837,6 +853,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         aspectRatio: resolvedAspectRatio, referenceCount: orderedReferenceIds.length,
         inputCharacters: context.length + input.prompt.length,
         inputDigest: createHash('sha256').update(JSON.stringify({ context, prompt: input.prompt,
+          ...(input.projectId !== undefined || canvasUse?.projectId !== undefined ? { usageProjectId } : {}),
           avatar: avatar?.candidates, references: referenceSnapshot.map(ref => ({ id: ref.id, hash: ref.hash })),
           imageChannel: contractImageChannel || null,
           revision: settings.revision, moduleRevision: sharedDefinition ? undefined : workspace?.revision,
@@ -871,6 +888,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         : undefined);
     const snapshot = JSON.stringify({
       version: 1,
+      usageAttribution: { version: 1, projectId: usageProjectId },
       requestId: input.requestId, batchId, inputFingerprint: requestFingerprint,
       ...(quoteImageChannel
         ? { imageChannel: quoteImageChannel, imageChannelLabel: imageApi.label || imageApi.channelId,
@@ -935,7 +953,16 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         reference_ids: JSON.stringify(orderedReferenceIds), unit_credits: price, freeze_snapshot: freeze?.snapshot,
       };
       if (preparation) await preparation.save(tx, taskData);
-      else await tx.imageStudioTask.create({ data: taskData });
+      else {
+        const created = await tx.imageStudioTask.create({ data: taskData });
+        if (roleMedia && roleMedia.context && typeof roleMedia.context === 'object' && 'runId' in roleMedia.context) {
+          await inheritUsageAttribution(tx, { sourceKind: 'image_task', sourceId: created.id,
+            actorUserId: ownerId, ownerUserId: ownerId, billingSubjectType: 'user', billingSubjectId: ownerId,
+            occurredAt: created.created_at, parentSourceKind: 'role_run', parentSourceId: String(roleMedia.context.runId) });
+        } else await recordUsageAttribution(tx, { sourceKind: 'image_task', sourceId: created.id,
+          actorUserId: ownerId, ownerUserId: ownerId, billingSubjectType: 'user', billingSubjectId: ownerId,
+          projectId: usageProjectId, occurredAt: created.created_at, contextOrigin: canvasUse ? 'canvas-context' : 'image-explicit-project' });
+      }
       if (roleMedia) await bindRoleMediaTask(tx, roleMedia, { kind: 'image', taskId: id,
         requestId: input.requestId, ordinal: i + 1, model: generation.model,
         providerId: quoteImageChannel?.channelId || imageApi.channelId || 'original', reservedPoints: price });

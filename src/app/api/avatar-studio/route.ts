@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession } from '@/lib/auth/session';
+import { AuthError, getSession } from '@/lib/auth/session';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { listStudioTasks, StudioError, publicImageTaskStatus } from '@/lib/image-studio/tasks';
@@ -11,6 +11,7 @@ import { AvatarDescriptionError, isLegalAvatarParserVersion, isLegalDescriptionR
 import { adaptAvatarPrompt, parseAvatarRules } from '@/lib/avatar-random/engine';
 import { AVATAR_COMPILER_VERSION, type AvatarPlan, type AvatarRecord } from '@/lib/avatar-random/types';
 import { prisma } from '@/lib/prisma';
+import { assertUsageProject, parseUsageProjectId } from '@/lib/admin/usage-attribution';
 import { randomUUID } from 'node:crypto';
 import { avatarPlanKey } from '@/lib/avatar-random/store';
 import { studioAssetUrl } from '@/lib/image-studio/media';
@@ -54,6 +55,7 @@ async function run(action: (owner: string) => Promise<unknown>) {
   if (user.status !== 'active' || !canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限有图片生成权限的公司账号使用' }, { status: 403 });
   try { return NextResponse.json(await action(user.id), { headers: { 'Cache-Control': 'no-store' } }); }
   catch (e) {
+    if (e instanceof AuthError) return NextResponse.json({ error: e.message, submitted: false }, { status: e.status });
     if (e instanceof ImageGenerationChannelError || e instanceof ImageGenerationQualityRouteError) return NextResponse.json({ error: e.message, code: e.code, submitted: false }, { status: e.status });
     if (e instanceof QueueCapacityError || e instanceof QueueMaintenanceError) return NextResponse.json({ error: e.message, code: e.code, submitted: false }, { status: e.status });
     if (e instanceof AvatarDescriptionError) {
@@ -121,6 +123,12 @@ export async function POST(req: NextRequest) { return run(async owner => {
   }
   if(body.action==='quote'){
     const previous=await readAvatar<AvatarPlan>(owner,'plan',body.id);if(!previous)throw new StudioError('人物草稿不存在');
+    const projectId = parseUsageProjectId(body.projectId) ?? (body.projectId === undefined ? previous.projectId ?? null : null);
+    await prisma.$transaction(async tx => {
+      const user = await tx.user.findUnique({ where: { id: owner }, select: { id: true, role: true, status: true } });
+      if (!user || user.status !== 'active') throw new StudioError('当前账号不可用', 403);
+      await assertUsageProject(tx, user, projectId);
+    });
     await validateAvatarReferences(owner, previous.referenceIds);
     if (!body.rules || avatarRulesSignature(parseAvatarRules(body.rules), false) !== avatarRulesSignature(previous.candidates[0].rules, false)) throw new StudioError('人物条件已变化，不能沿用旧人物报价；请按当前条件准备人物', 409);
     if ((body.layout || avatarLayout(previous)) === avatarLayout(previous) && avatarRulesSignature(parseAvatarRules(body.rules)) !== avatarRulesSignature(previous.candidates[0].rules)) throw new StudioError('人数或候选数量已变化，请按当前条件准备人物', 409);
@@ -143,6 +151,8 @@ export async function POST(req: NextRequest) { return run(async owner => {
     let plan:AvatarPlan;
     try { plan=withAvatarLayout({...previous,sourceTaskId:undefined,model,channelId,imageChannel,quality,resolution,pricingRevision:priced.quote?.charge.revision,id:(isAvatarSheet({layout})?'sheet-':'')+createHash('sha256').update(`quote:${AVATAR_COMPILER_VERSION}:${owner}:${previous.id}:${settings.revision}:${model}:${quality}:${resolution}:${layout}:${channelId}:${imageChannel?.configRevision||'legacy'}:${priced.quote?.charge.revision||'legacy'}`).digest('hex'),settingsRevision:settings.revision,unitCredits:price,imageReady:isStudioImageGenerationProvider(api.provider)&&isImageGenerationApiReady(api)&&(previous.referenceIds.length?api.supports_image_to_image:api.supports_text_to_image),candidates:previous.candidates.map(c=>adaptAvatarPrompt(c,model)),createdAt:new Date().toISOString()},layout); }
     catch(e){throw new StudioError((e as Error).message);}
+    if (body.projectId !== undefined) plan.id += '-p' + createHash('sha256').update(projectId ?? 'unassigned').digest('hex').slice(0, 12);
+    plan.projectId = projectId;
     await prisma.platformSetting.upsert({where:{key:avatarPlanKey(owner,plan)},create:{key:avatarPlanKey(owner,plan),value_json:JSON.stringify(plan),updated_by:owner},update:{}});
     return {plan:await readAvatar<AvatarPlan>(owner,'plan',plan.id)};
   }

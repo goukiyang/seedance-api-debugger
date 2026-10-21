@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { assertUsageProject, parseUsageProjectId, recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import { allocateTaskCredits } from '@/lib/credits/policy';
 import { canUseCompanyTemplates, canViewStudioPreset } from './access';
 import { getImageStudioSettings, IMAGE_STUDIO_SETTING_KEY, DEFAULT_STUDIO_PRICES } from './settings';
@@ -37,7 +38,7 @@ const ITEM_PREFIX = 'studio_batch_item_v1:';
 const CHANNEL_PREFIX = 'studio_channel_batch_v1:';
 const CHANNEL_ITEM_PREFIX = 'studio_channel_batch_item_v1:';
 type BatchItem = { ordinal: number; sourceName: string; assetId?: string; taskId: string | null; attempt: number; prepared: boolean; cancelled: boolean };
-type BatchRecord = { version: 1 | 2; pricing?: true; id: string; ownerId: string; requestId: string; fingerprint: string; requestFingerprint?: string; moduleId: string; moduleName: string; state: string; note: string; createdAt: string; total: number; budget: number; committedCredits: number; unitCredits: number; prepared: number; input: Record<string, unknown>; items: BatchItem[]; billingMode?: 'actual' | 'fixed'; billingContracts?: Array<ImageBillingContract | null>; definitionConfirmationRequired?: boolean };
+type BatchRecord = { version: 1 | 2; usageContext?: { version: 1; projectId: string | null }; pricing?: true; id: string; ownerId: string; requestId: string; fingerprint: string; requestFingerprint?: string; moduleId: string; moduleName: string; state: string; note: string; createdAt: string; total: number; budget: number; committedCredits: number; unitCredits: number; prepared: number; input: Record<string, unknown>; items: BatchItem[]; billingMode?: 'actual' | 'fixed'; billingContracts?: Array<ImageBillingContract | null>; definitionConfirmationRequired?: boolean };
 const key = (owner: string, id: string, channel = false, pricing = false) => `${pricing ? PRICING_BATCH_PREFIX : channel ? CHANNEL_PREFIX : PREFIX}${owner}:${id}`;
 const batchKeys = (owner: string, id: string) => [key(owner, id), key(owner, id, true), key(owner, id, false, true)];
 const itemKey = (batch: BatchRecord, ordinal: number) => `${batch.pricing ? PRICING_BATCH_ITEM_PREFIX : batch.input.imageChannel && (batch.input.imageChannel as ImageGenerationChannelSnapshot).channelId !== 'original' ? CHANNEL_ITEM_PREFIX : ITEM_PREFIX}${batch.id}:${ordinal}`;
@@ -114,6 +115,9 @@ async function recoverAcceptedBatchItems(tx: Prisma.TransactionClient, batch: Ba
 }
 
 export function continuationInput(batch: BatchRecord, body: Record<string, unknown>): Record<string, unknown> {
+  if (body.projectId !== undefined && parseUsageProjectId(body.projectId) !== (batch.usageContext?.projectId ?? null)) {
+    throw new StudioError('本批项目归属已固定，不能用当前界面改写；请沿原批次继续或主动新建批次', 409);
+  }
   const pending = batch.items.filter(item => !item.taskId && !item.cancelled);
   if (!pending.length) throw new StudioError('本批没有未受理条目，请查看原任务', 409);
   const changes = Object.fromEntries(['prompt', 'personalPrompt', 'personalOverrides', 'model', 'quality', 'resolution', 'count', 'aspectRatio',
@@ -244,6 +248,9 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
       { key: { startsWith: `${PRICING_BATCH_PREFIX}${ownerId}:` } },
     ], AND: [{ OR: ['preparing', 'ready', 'paused', 'blocked', 'needs-confirmation'].map(state => ({ value_json: { contains: `"state":"${state}"` } })) }] } });
     if (active >= STUDIO_BATCH_LIMITS.activeBatches) throw new StudioError('最多保留 5 个未结束批次，请先处理原批次', 429);
+    const usageUser = await tx.user.findUnique({ where: { id: ownerId }, select: { id: true, role: true, status: true } });
+    if (!usageUser || usageUser.status !== 'active') throw new StudioError('当前账号不可用', 403);
+    await assertUsageProject(tx, usageUser, input.projectId ?? null);
     const workspace = await tx.imageStudioModule.findFirst({ where: { id: body.moduleId as string, owner_id: ownerId },
       select: { name: true, model: true, quality: true, resolution: true, prices_json: true } });
     if (!workspace) throw new StudioError('模板不存在或无权使用', 404);
@@ -304,6 +311,7 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
       ? createHash('sha256').update(JSON.stringify({ requestFingerprint, imageChannel: shared.imageChannel })).digest('hex')
       : requestFingerprint;
     const batch: BatchRecord = { version: 1, id, ownerId, requestId: input.requestId, fingerprint, requestFingerprint, moduleId: body.moduleId as string, moduleName: sharedUse?.definition.name || workspace.name, state: 'preparing', note: '', createdAt: new Date().toISOString(), total: items.length, budget: Number(body.budget), committedCredits: 0, unitCredits, prepared: 0, input: shared, items,
+      usageContext: { version: 1, projectId: input.projectId ?? null },
       ...(billingQuote ? { billingMode: billingQuote.mode, billingContracts: billingQuote.contracts } : {}) };
     if (billingQuote?.contracts.some(contract => contract.pricing)) { batch.pricing = true; batch.version = 2; }
     await tx.platformSetting.create({ data: { key: key(ownerId, id, isChannelBatch(batch), batch.pricing), value_json: JSON.stringify(batch), updated_by: ownerId } });
@@ -595,7 +603,12 @@ export async function dispatchStudioBatches() {
           && batch.billingMode !== 'actual' && !batch.pricing)) throw new StudioError('本通道固定点数已变化，停止新派发；请重新核对预算');
         const channelStatus = studioTaskState({ billing_contract_json: String(data.billing_contract_json) }, isChannelBatch(batch) ? 'channel_queued' : 'queued');
         const freeze = Number(data.unit_credits) > 0 ? await allocateTaskCredits(tx, user, Number(data.unit_credits), taskId) : null;
-        await tx.imageStudioTask.create({ data: { ...data, id: taskId, status: channelStatus, freeze_snapshot: freeze?.snapshot } });
+        await assertUsageProject(tx, user, batch.usageContext?.projectId ?? null);
+        const created = await tx.imageStudioTask.create({ data: { ...data, id: taskId, status: channelStatus, freeze_snapshot: freeze?.snapshot } });
+        await recordUsageAttribution(tx, { sourceKind: 'image_task', sourceId: taskId,
+          actorUserId: batch.ownerId, ownerUserId: batch.ownerId, billingSubjectType: 'user', billingSubjectId: batch.ownerId,
+          projectId: batch.usageContext?.projectId ?? null, occurredAt: created.created_at,
+          contextOrigin: batch.usageContext ? 'image-parent-batch' : 'legacy-parent-unassigned' });
         if (freeze) await tx.creditLedger.create({ data: { user_id: batch.ownerId, type: 'task_freeze', amount: -Number(data.unit_credits), balance_before: freeze.balance_before, balance_after: freeze.balance_after, frozen_before: freeze.frozen_before, frozen_after: freeze.frozen_after, related_task_id: taskId, idempotency_key: `image-studio:freeze:${taskId}`, reason: '图片生成冻结积分', metadata_json: JSON.stringify({ allocations: freeze.allocations }) } });
         item.taskId = taskId; batch.committedCredits = addCredits(batch.committedCredits, Number(data.unit_credits));
         await writeBatch(tx, row, batch);

@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import PageBanner from '@/components/PageBanner';
+import AdminUsageClient from '@/components/admin-usage/AdminUsageClient';
+import { RelativeTime } from '@/components/RelativeTime';
 import PaginationControls from '@/components/PaginationControls';
 import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
@@ -93,10 +95,6 @@ function isSmokeProject(project: ProjectItem) {
   return /\bSmoke Project\b/i.test(project.name) || /closure smoke/i.test(project.description || '');
 }
 
-function formatDate(value: string) {
-  return new Date(value).toLocaleString('zh-CN');
-}
-
 function countText(counts: MergeCounts) {
   return [
     `任务 ${counts.tasks}`,
@@ -110,7 +108,11 @@ function countText(counts: MergeCounts) {
 const ADMIN_PROJECTS_PAGE_SIZE = 20;
 const SMOKE_ARCHIVE_PROJECT_NAME = 'Smoke Project Archive';
 
-export default function AdminProjectsClient() {
+export default function AdminProjectsClient({ viewerId }: { viewerId: string }) {
+  return <AdminUsageClient key={viewerId} viewerId={viewerId} view="projects" management={selectedId => <ProjectManagement selectedProjectId={selectedId === 'unassigned' ? null : selectedId} />} />;
+}
+
+function ProjectManagement({ selectedProjectId }: { selectedProjectId: string | null }) {
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -169,6 +171,7 @@ export default function AdminProjectsClient() {
   const filteredProjects = useMemo(() => {
     const normalizedKeyword = keyword.trim().toLowerCase();
     return projects.filter((project) => {
+      if (project.id === selectedProjectId) return true;
       const matchesKeyword = !normalizedKeyword
         || project.name.toLowerCase().includes(normalizedKeyword)
         || project.id.toLowerCase().includes(normalizedKeyword)
@@ -181,7 +184,7 @@ export default function AdminProjectsClient() {
       if (filter === 'smoke') return isSmokeProject(project);
       return true;
     });
-  }, [filter, keyword, projects]);
+  }, [filter, keyword, projects, selectedProjectId]);
 
   const targetCandidates = useMemo(
     () => projects.filter((project) => project.status !== 'deleted' && !selectedIds.has(project.id)),
@@ -198,6 +201,16 @@ export default function AdminProjectsClient() {
   useEffect(() => {
     setPage(1);
   }, [filter, keyword]);
+
+  const appliedProject = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedProjectId) { appliedProject.current = null; return; }
+    if (appliedProject.current === selectedProjectId) return;
+    const index = filteredProjects.findIndex(project => project.id === selectedProjectId);
+    if (index < 0) return;
+    appliedProject.current = selectedProjectId;
+    setPage(Math.floor(index / ADMIN_PROJECTS_PAGE_SIZE) + 1);
+  }, [selectedProjectId, filteredProjects]);
 
   const toggleProject = (projectId: string) => {
     setSelectedIds((current) => {
@@ -372,12 +385,12 @@ export default function AdminProjectsClient() {
   };
 
   return (
-    <div>
+    <div className="au-project-management" data-usage-layout-pending={loading ? 'true' : undefined}>
       <PageBanner
         eyebrow="管理员后台"
         title="项目管理"
-        description="查看全部项目，归档协作项目，删除空项目，或把历史测试项目合并到固定项目。"
       />
+      {selectedProjectId && !loading && !projects.some(project => project.id === selectedProjectId) && <p className="au-management-context" role="status">该项目的历史使用记录仍保留；当前项目已不可管理或未能读取，可继续使用下方其他项目管理功能。</p>}
 
       <div className="card admin-projects-shell">
         {message && <p className="text-green">{message}</p>}
@@ -449,7 +462,7 @@ export default function AdminProjectsClient() {
             </thead>
             <tbody>
               {pagedProjects.map((project) => (
-                <tr key={project.id} className={selectedIds.has(project.id) ? 'is-selected' : ''}>
+                <tr key={project.id} className={`${selectedIds.has(project.id) ? 'is-selected' : ''}${project.id === selectedProjectId ? ' is-focused' : ''}`}>
                   <td>
                     <input
                       type="checkbox"
@@ -469,7 +482,7 @@ export default function AdminProjectsClient() {
                   <td>{project._count?.members ?? 0}</td>
                   <td>任务 {project._count?.tasks ?? 0} / 图集 {project._count?.reference_albums ?? 0}</td>
                   <td>{project.status}</td>
-                  <td>{formatDate(project.updated_at)}</td>
+                  <td><RelativeTime value={project.updated_at} /></td>
                   <td>
                     <div className="flex items-center" style={{ gap: 8, flexWrap: 'wrap' }}>
                       <Link className="link" href={`/projects/${project.id}`}>管理</Link>

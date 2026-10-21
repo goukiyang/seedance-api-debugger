@@ -10,5 +10,5 @@ export default async function AdminImageStudioPage() {
   const user = await getSession();
   if (!user) redirect('/login');
   if (user.role !== 'admin') redirect('/generate');
-  return <><AdminImageStudioClient /><ImageBillingSettings /><HdDerivativeManagement /></>;
+  return <><AdminImageStudioClient key={user.id} accountId={user.id} /><ImageBillingSettings /><HdDerivativeManagement /></>;
 }

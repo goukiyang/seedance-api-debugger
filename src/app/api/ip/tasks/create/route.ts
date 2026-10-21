@@ -7,6 +7,7 @@ import { Prisma } from '@prisma/client';
 import path from 'path';
 import fs from 'fs';
 import { prisma } from '@/lib/prisma';
+import { inheritUsageAttribution, recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import { assertMultiviewRequestFence } from '@/lib/video/multiview-request-receipt';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance, publicVideoPricing, videoPricingError, type VideoPricingQuote } from '@/lib/pricing/video';
@@ -1344,6 +1345,14 @@ export async function POST(request: NextRequest) {
           params_json: JSON.stringify(taskParams),
         },
       });
+
+      const usageAttribution = { sourceKind: 'video_task' as const, sourceId: task.id,
+        actorUserId: user.id, ownerUserId: task.owner_user_id || task.user_id,
+        billingSubjectType: task.billing_scope, billingSubjectId: task.billing_account_id,
+        projectId: task.project_id, occurredAt: task.created_at, contextOrigin: 'ip-video-create' };
+      if (body.roleMediaContext && typeof body.roleMediaContext === 'object' && 'runId' in body.roleMediaContext) {
+        await inheritUsageAttribution(tx, { ...usageAttribution, parentSourceKind: 'role_run', parentSourceId: String(body.roleMediaContext.runId) });
+      } else await recordUsageAttribution(tx, usageAttribution);
 
       if (project.type !== 'personal' && resolution === '1080p') {
         const approval = requestedResolutionApprovalId

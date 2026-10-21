@@ -3,6 +3,7 @@ import path from 'path';
 import { readFile, stat } from 'fs/promises';
 import type { VideoTask } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import { assertMultiviewRequestFence } from '@/lib/video/multiview-request-receipt';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
@@ -437,6 +438,11 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      await recordUsageAttribution(tx, { sourceKind: 'video_task', sourceId: task.id,
+        actorUserId: user.id, ownerUserId: task.owner_user_id || task.user_id,
+        billingSubjectType: task.billing_scope, billingSubjectId: task.billing_account_id,
+        projectId: task.project_id, occurredAt: task.created_at, contextOrigin: 'enhance-video-create',
+        parentSourceKind: sourceTask ? 'video_task' : null, parentSourceId: sourceTask?.id || null });
       let freezeSnapshot: string;
       try {
         if (billingScope === 'project') {

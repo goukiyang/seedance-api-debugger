@@ -1,5 +1,6 @@
 import type { SessionUser } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
+import { recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import { assertMultiviewRequestFence } from '@/lib/video/multiview-request-receipt';
 import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance } from '@/lib/pricing/video';
 import { resolveVideoPricingContext, savedVideoPricingContextInput, verifyVideoPricingCredential, videoPricingRequiresContext } from '@/lib/pricing/video-context';
@@ -413,6 +414,12 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
         }),
       },
     });
+
+    await recordUsageAttribution(tx, { sourceKind: 'video_task', sourceId: created.id,
+      actorUserId: input.user.id, ownerUserId: created.owner_user_id || created.user_id,
+      billingSubjectType: created.billing_scope, billingSubjectId: created.billing_account_id,
+      projectId: created.project_id, occurredAt: created.created_at, contextOrigin: 'draft-upgrade',
+      parentSourceKind: 'video_task', parentSourceId: draft.id });
 
     if (approval) {
       const freshApproval = await tx.approvalRecord.findFirst({

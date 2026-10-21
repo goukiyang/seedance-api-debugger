@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
+import { assertUsageProject, parseUsageProjectId } from '@/lib/admin/usage-attribution';
 import { createMuskChatCompletion, getMuskApiSettings, isMuskApiReady, MuskApiError } from '@/lib/integrations/musk';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { StudioError, submitStudioBatch } from '@/lib/image-studio/tasks';
@@ -76,6 +77,12 @@ export async function parseAvatarDescription(owner: string, description: string,
   });
 }
 export async function prepareAvatarPlan(owner: string, body: Record<string, unknown>) {
+  const projectId = parseUsageProjectId(body.projectId) ?? null;
+  await prisma.$transaction(async tx => {
+    const user = await tx.user.findUnique({ where: { id: owner }, select: { id: true, role: true, status: true } });
+    if (!user || user.status !== 'active') throw new StudioError('当前账号不可用', 403);
+    await assertUsageProject(tx, user, projectId);
+  });
   const rules = parseAvatarRules(body.rules);
   await validateAvatarReferences(owner, rules.referenceIds || []);
   if (body.actionType !== undefined && !['new', 'styling', 'tweak'].includes(String(body.actionType))) throw new StudioError('人物操作无效');
@@ -158,6 +165,7 @@ export async function prepareAvatarPlan(owner: string, body: Record<string, unkn
   if(referenceIds.length&&!api.supports_image_to_image)throw new StudioError('当前模型通道不支持参考图，请更换模型或移除可选参考；同人基准不能自动移除');
   const imageReady=(channelActual||unitCredits!==null&&Number.isSafeInteger(creditCents(unitCredits))&&unitCredits>=0)&&isStudioImageGenerationProvider(api.provider)&&isImageGenerationApiReady(api)&&(referenceIds.length?api.supports_image_to_image:api.supports_text_to_image);
   const plan: AvatarPlan = withAvatarLayout({ id: randomUUID(), candidates, model, channelId, imageChannel, quality, resolution, aspectRatio: rules.people > 1 ? '3:2' : '1:1', settingsRevision: settings.revision, unitCredits, referenceIds, createdAt: new Date().toISOString(), imageReady, imageSeedSupport:'unsupported',warnings:candidates.flatMap(c=>c.members.flatMap(d=>d.warnings||[])), ...(interpretation ? { descriptionInterpretation: interpretation } : {}) }, avatarLayout(rules));
+  plan.projectId = projectId;
   if (priced.quote) plan.pricingRevision = priced.quote.charge.revision;
   if(isAvatarSheet(plan))plan.id=`sheet-${plan.id}`;
   await prisma.$transaction(async tx => {
@@ -197,7 +205,8 @@ export async function submitAvatarPlan(owner: string, id: string, expectedLayout
   }
   if (!alreadyQueued && (!isStudioImageGenerationProvider(api.provider) || !isImageGenerationApiReady(api))) throw new StudioError('当前模型生成通道尚未就绪', 503);
   if (!alreadyQueued) await validateAvatarReferences(owner, plan.referenceIds);
-  return submitStudioBatch(owner, { requestId: plan.id, prompt: isAvatarSheet({layout}) ? plan.sheetPrompt : plan.candidates[0].prompt, count, revision: plan.settingsRevision, referenceIds: plan.referenceIds, model: plan.model, channelId: plan.channelId, imageChannel: plan.imageChannel, quality: plan.quality, resolution: plan.resolution, aspectRatio: plan.aspectRatio, billingQuoteId: draft?.billingQuoteId, pricingRevision: draft?.pricingRevision, maxEstimatedCost: draft?.maxEstimatedCost }, { candidates: plan.candidates, layout, onQueued: async (tx, batchId) => {
+  if (!alreadyQueued && draft?.projectId !== undefined && parseUsageProjectId(draft.projectId) !== (plan.projectId ?? null)) throw new StudioError('项目选择已变化，请重新报价；原人物和请求保留', 409);
+  return submitStudioBatch(owner, { requestId: plan.id, ...(plan.projectId !== undefined ? { projectId: plan.projectId } : {}), prompt: isAvatarSheet({layout}) ? plan.sheetPrompt : plan.candidates[0].prompt, count, revision: plan.settingsRevision, referenceIds: plan.referenceIds, model: plan.model, channelId: plan.channelId, imageChannel: plan.imageChannel, quality: plan.quality, resolution: plan.resolution, aspectRatio: plan.aspectRatio, billingQuoteId: draft?.billingQuoteId, pricingRevision: draft?.pricingRevision, maxEstimatedCost: draft?.maxEstimatedCost }, { candidates: plan.candidates, layout, onQueued: async (tx, batchId) => {
     for (let i = 0; i < count; i++) {
       const candidate = plan.candidates[i];
       const taskId = (await tx.imageStudioTask.findFirstOrThrow({ where: { owner_id: owner, batch_id: batchId, ordinal: i + 1 }, select: { id: true } })).id;
@@ -212,6 +221,7 @@ export async function quoteAvatarPlan(owner: string, id: string) {
   const plan = await readAvatar<AvatarPlan>(owner, 'plan', id);
   if (!plan) throw new StudioError('人物草稿不存在', 404);
   return prepareImageBillingQuote(owner, { requestId: plan.id,
+    ...(plan.projectId !== undefined ? { projectId: plan.projectId } : {}),
     prompt: isAvatarSheet(plan) ? plan.sheetPrompt : plan.candidates[0].prompt,
     count: avatarOutputCount(plan), revision: plan.settingsRevision, referenceIds: plan.referenceIds,
     model: plan.model, channelId: plan.channelId, imageChannel: plan.imageChannel, quality: plan.quality, resolution: plan.resolution, aspectRatio: plan.aspectRatio },

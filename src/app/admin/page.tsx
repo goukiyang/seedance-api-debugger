@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import PageBanner from '@/components/PageBanner';
+import AdminUsageClient from '@/components/admin-usage/AdminUsageClient';
 import AdminGenerationDashboardClient from './AdminGenerationDashboardClient';
 import { getSession } from '@/lib/auth/session';
 import { formatCurrencyAmountWithFixedCny } from '@/lib/costs/currency';
 import { getGenerationDashboardData } from '@/lib/admin/generation-dashboard';
 import { prisma } from '@/lib/prisma';
+import { adminExceptionLinks, adminNavGroups } from '@/lib/navigation';
 
 export const dynamic = 'force-dynamic';
 
@@ -88,65 +89,27 @@ export default async function AdminPage() {
 
   const balanceState = balanceHealth(latestProviderBalance);
   const providerBalanceSyncEnabled = Boolean(process.env.SEEDANCE_BALANCE_ENDPOINT?.trim());
-  const quickLinks = [
-    {
-      title: '用户与项目',
-      desc: '成员、权限、项目归属和点数流水集中处理。',
-      links: [
-        { title: '用户管理', desc: '账号、长期点数和每日配额', href: '/admin/users' },
-        { title: '项目管理', desc: '项目归属、成员和邀请边界', href: '/admin/projects' },
-        { title: '点数流水', desc: '按用户、任务和类型追溯账本', href: '/admin/points' },
-      ],
-    },
-    {
-      title: '产出与反馈',
-      desc: '生成结果、留存、隐藏恢复和用户反馈放在一处。',
-      links: [
-        { title: '产出留存', desc: '检查预览、隐藏恢复和任务追溯', href: '/admin/outputs' },
-        { title: '图片任务审计', desc: '按用户查看图片任务、结果和下载记录', href: '/admin/image-studio' },
-        { title: '反馈管理', desc: '查看、归档和导出用户反馈', href: '/admin/feedback' },
-      ],
-    },
-    {
-      title: '成本与接口',
-      desc: '费用、余额、接口配置和外部 Provider 状态集中管理。',
-      links: [
-        { title: '计费与成本', desc: '余额快照、官方扣费和账本自检', href: '/admin/costs' },
-        { title: '点数与费率', desc: '统一标准、型号费率和变更记录', href: '/admin/pricing' },
-        { title: 'API 设置', desc: 'Musk API、图形生成和外部集成', href: '/admin/integrations' },
-      ],
-    },
-    {
-      title: '模板工作台',
-      desc: '模板上下文卡片、LLM 新建模板和执行链路集中查看。',
-      links: [
-        { title: '模板工作台', desc: '卡片编排、绑定图片、试生成和发布检查', href: '/admin/templates' },
-        { title: '执行链路', desc: '查看模板 LLM 调用和生成 Agent 日志', href: '/admin/agent-runs' },
-      ],
-    },
+  const quickLinks = adminNavGroups.map(group => ({ title: group.title, desc: '',
+    links: group.items.map(item => ({ title: item.label, desc: '', href: item.href })),
+  }));
+  const supportLinks = [
+    { label: '视频生成失败', href: adminExceptionLinks.videoFailed },
+    { label: '图片生成失败', href: adminExceptionLinks.imageFailed },
+    { label: '视频费用待核', href: adminExceptionLinks.videoCostPending },
+    { label: '视频费用冲突', href: adminExceptionLinks.videoCostConflict },
+    { label: '图片费用待核', href: adminExceptionLinks.imageCostPending },
+    { label: '图片费用冲突', href: adminExceptionLinks.imageCostConflict },
+    { label: '账本费用待核', href: adminExceptionLinks.ledgerCostPending },
+    { label: '账本费用冲突', href: adminExceptionLinks.ledgerCostConflict },
+    { label: '视频文件未就绪', href: adminExceptionLinks.videoResultNotReady },
+    { label: '图片文件未就绪', href: adminExceptionLinks.imageResultNotReady },
+    { label: '视频当前无项目', href: adminExceptionLinks.videoUnassigned },
   ];
 
   return (
-    <div className="admin-overview-page">
-      <PageBanner
-        eyebrow="管理中心"
-        title="管理中心"
-        description="先看生成量、成本和异常，再按用户项目、产出反馈、成本接口、模板链路进入二级管理。"
-        actions={(
-          <>
-            <Link className="btn btn-secondary" href="/admin/users">
-              用户管理
-            </Link>
-            <Link className="btn btn-secondary" href="/admin/projects">
-              项目管理
-            </Link>
-            <Link className="btn btn-primary" href="/admin/costs">
-              成本与接口
-            </Link>
-          </>
-        )}
-      />
-
+    <AdminUsageClient key={user.id} viewerId={user.id} view="overview" support={(
+      <>
+      <div className="au-legacy-scope"><h2>按来源查看专项记录</h2><nav aria-label="专项异常入口">{supportLinks.map(item => <Link className="au-link" key={item.href} href={item.href}>{item.label}</Link>)}</nav></div>
       <AdminGenerationDashboardClient
         initialDashboard={dashboard}
         providerBalance={{
@@ -159,6 +122,7 @@ export default async function AdminPage() {
         }}
         quickLinks={quickLinks}
       />
-    </div>
+      </>
+    )} />
   );
 }

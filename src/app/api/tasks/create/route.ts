@@ -16,6 +16,7 @@ import fs from 'fs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { prisma } from '@/lib/prisma';
+import { inheritUsageAttribution, recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance, publicVideoPricing, videoPricingError, type VideoPricingQuote } from '@/lib/pricing/video';
 import { resolveVideoPricingContext, verifyVideoPricingCredential, videoPricingRequiresContext, videoPricingBusinessFingerprint, assertVideoPricingFinalReferences, normalizedVideoPricingReferenceScope, type VideoPricingContext } from '@/lib/pricing/video-context';
@@ -2037,6 +2038,15 @@ export async function POST(request: NextRequest) {
           params_json: JSON.stringify(taskParams),
         },
       });
+
+      const usageAttribution = { sourceKind: 'video_task' as const, sourceId: task.id,
+        actorUserId: user.id, ownerUserId: task.owner_user_id || task.user_id,
+        billingSubjectType: task.billing_scope, billingSubjectId: task.billing_account_id,
+        projectId: task.project_id, occurredAt: task.created_at, contextOrigin: 'video-create',
+        parentSourceKind: studioHandoff ? 'video_studio_run' as const : null, parentSourceId: studioHandoff?.runId || null };
+      if (body.roleMediaContext && typeof body.roleMediaContext === 'object' && 'runId' in body.roleMediaContext) {
+        await inheritUsageAttribution(tx, { ...usageAttribution, parentSourceKind: 'role_run', parentSourceId: String(body.roleMediaContext.runId) });
+      } else await recordUsageAttribution(tx, usageAttribution);
 
       if (project.type !== 'personal' && resolution === '1080p') {
         if (!videoCard) throw new Error('非个人项目的 1080p 生成必须选择视频卡');

@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { assertUsageProject, inheritUsageAttribution, recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { allocateTaskCredits, settleTaskCredits, type CreditPolicyUser } from '@/lib/credits/policy';
 import { createInAppNotification } from '@/lib/notifications';
@@ -662,7 +663,7 @@ async function createQueuedTask(tx: Tx, ownerId: string, creditUser: CreditPolic
   const freeze = unitCredits > 0
     ? await allocateTaskCredits(tx, creditUser, unitCredits, id)
     : null;
-  await tx.imageStudioTask.create({
+  const createdTask = await tx.imageStudioTask.create({
     data: {
       id,
       batch_id: `${parentContract.pricing ? 'toolflow_pricing_v1' : 'toolflow'}:${run.flow_id}:${run.version}:${node.id}`,
@@ -712,6 +713,9 @@ async function createQueuedTask(tx: Tx, ownerId: string, creditUser: CreditPolic
       tool_flow_item_index: itemIndex,
     },
   });
+  await inheritUsageAttribution(tx, { sourceKind: 'image_task', sourceId: id,
+    actorUserId: ownerId, ownerUserId: ownerId, billingSubjectType: 'user', billingSubjectId: ownerId,
+    occurredAt: createdTask.created_at, parentSourceKind: 'toolflow_run', parentSourceId: runId });
   if (freeze) {
     await tx.creditLedger.create({ data: {
       user_id: ownerId,
@@ -1024,6 +1028,7 @@ export async function createToolFlowRun(user: SessionUser, flowId: string, input
       graph, input_asset_ids: ids, billing_mode: 'fixed', billing_quote: billingQuote,
       contract_version: 'toolflow-pricing-v1', node_contracts: nodeContracts,
     };
+    await assertUsageProject(tx, user, currentFlow.project_id);
     const created = await tx.toolFlowRun.create({
       data: {
         id: acceptanceId,
@@ -1046,6 +1051,9 @@ export async function createToolFlowRun(user: SessionUser, flowId: string, input
       },
       include: { node_runs: true },
     });
+    await recordUsageAttribution(tx, { sourceKind: 'toolflow_run', sourceId: created.id,
+      actorUserId: user.id, ownerUserId: created.owner_id, billingSubjectType: 'user', billingSubjectId: user.id,
+      projectId: snapshot.project_id, occurredAt: created.created_at, contextOrigin: 'toolflow-snapshot' });
     await logRunAction(tx, user.id, 'toolflow_run_created', created.id, { flow_id: currentFlow.id, version: currentFlow.version, input_asset_count: ids.length, billing_mode: 'fixed', estimated_credits: billingQuote.estimatedCredits });
     return created;
   });

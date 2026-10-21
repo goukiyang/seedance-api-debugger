@@ -30,7 +30,7 @@ const moduleFiles = directory => Object.fromEntries(fs.readdirSync(directory).fi
   .map(file => [file, read(path.join(directory, file))]));
 const hashes = files => Object.fromEntries(Object.entries(files).map(([file, bytes]) => [file, digest(bytes)]));
 
-export function verifyTemplate(materialsRoot) {
+export function verifyTemplate(materialsRoot, { originalOnly = false } = {}) {
   assert.equal(profile.schema, 'sd2-release-profile.v1');
   const base = fs.realpathSync(materialsRoot);
   const files = moduleFiles(path.join(base, profile.template));
@@ -41,7 +41,19 @@ export function verifyTemplate(materialsRoot) {
   for (const [file, expected] of Object.entries(profile.evidence))
     assert.equal(digest(read(path.join(base, profile.successfulRun, file))), expected, 'Original success evidence changed: ' + file);
   assert.deepEqual(json(path.join(base, profile.successfulRun, 'control-freeze.json')).privateSha256, hashes(files));
-  return { base, files, wrapper: wrapper.toString('utf8') };
+  if (!profile.promotion || originalOnly) return { base, files, wrapper: wrapper.toString('utf8'), templateName: profile.template };
+  const promoted = profile.promotion;
+  keys(promoted, ['template', 'wrapper', 'controllerCount', 'controllerSetSha256', 'wrapperSha256', 'changed', 'added']);
+  for (const value of [promoted.template, promoted.wrapper]) assert.ok(path.basename(value) === value && !value.includes('..'));
+  const promotedFiles = moduleFiles(path.join(base, promoted.template));
+  assert.equal(Object.keys(promotedFiles).length, promoted.controllerCount);
+  assert.equal(digest(JSON.stringify(hashes(promotedFiles))), promoted.controllerSetSha256, 'Promoted controller differs from review');
+  assert.deepEqual(Object.keys(promotedFiles).filter(file => !Object.hasOwn(files, file)).sort(), [...promoted.added].sort());
+  assert.deepEqual(Object.keys(files).filter(file => !promotedFiles[file]?.equals(files[file])).sort(), [...promoted.changed].sort());
+  const promotedWrapper = read(path.join(base, promoted.wrapper));
+  assert.equal(digest(promotedWrapper), promoted.wrapperSha256);
+  return { base, files: promotedFiles, wrapper: promotedWrapper.toString('utf8'), templateName: promoted.template,
+    originalFiles: files, originalSuccessPreserved: true };
 }
 
 function parse(source) {
@@ -168,15 +180,15 @@ export function reuseInput(plan) {
   return result;
 }
 
-export function renderWrapper(source, repoRoot, reuse) {
+export function renderWrapper(source, repoRoot, reuse, templateName = profile.promotion?.template || profile.template) {
   const patches = [], counts = { imports: 0, control: 0, repo: 0, reuse: 0, review: 0 };
   const add = (node, value) => patches.push({ start: node.getStart(), end: node.end, value });
   function visit(node) {
-    if (ts.isImportDeclaration(node) && node.moduleSpecifier.text.startsWith('./release-r16/')) {
+    if (ts.isImportDeclaration(node) && node.moduleSpecifier.text.startsWith('./' + templateName + '/')) {
       add(node.moduleSpecifier, JSON.stringify('./control/' + path.posix.basename(node.moduleSpecifier.text))); counts.imports++;
     }
     if (ts.isVariableDeclaration(node) && node.name.getText() === 'control') {
-      assert.equal(node.initializer.getText(), "path.join(base, 'release-r16')");
+      assert.equal(node.initializer.getText(), "path.join(base, '" + templateName + "')");
       add(node.initializer, "path.join(base, 'control')"); counts.control++;
     }
     if (ts.isPropertyAssignment(node)) {
@@ -206,7 +218,7 @@ export async function prepare(plan, materialsRoot) {
   assert.ok(!fs.existsSync(path.join(template.base, c.recoveryRunId)), 'Run already exists; do not reset its failure history');
   assert.ok(!fs.existsSync(output), 'Output must be new; frozen runs are never overwritten');
   const generatedContract = patchNodes(contractSource, [{ start: original.object.getStart(), end: original.object.end, value: JSON.stringify(c, null, 2) }]);
-  const generatedWrapper = renderWrapper(template.wrapper, plan.repoRoot, reuse);
+  const generatedWrapper = renderWrapper(template.wrapper, plan.repoRoot, reuse, template.templateName);
   // All static checks finish before creating an exclusive private output directory.
   fs.mkdirSync(output, { mode: 0o700 });
   fs.mkdirSync(path.join(output, 'control'), { mode: 0o700 });

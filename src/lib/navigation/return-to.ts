@@ -38,6 +38,8 @@ export function taskReturnLabel(returnTo: string | null | undefined) {
   const safeReturnTo = sanitizeReturnTo(returnTo);
   if (safeReturnTo.startsWith('/admin/outputs')) return '返回产出留存';
   if (safeReturnTo.startsWith('/admin/costs')) return '返回成本后台';
+  if (withoutQueryOrHash(safeReturnTo) === '/admin/users') return '返回成员使用';
+  if (safeReturnTo.startsWith('/admin/projects')) return '返回项目使用';
   if (safeReturnTo.startsWith('/admin')) return '返回后台';
   if (safeReturnTo.startsWith('/generate')) return '返回生成页';
   if (/^\/projects\/[^/]+\/video-cards(\/|$)/.test(safeReturnTo)) return '返回视频卡';

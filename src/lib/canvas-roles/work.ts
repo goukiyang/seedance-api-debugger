@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
 import { assertCanUseReferenceImage } from '@/lib/reference-albums/permissions';
 import { assertCanViewTask } from '@/lib/projects/permissions';
+import { recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import { canvasMetadata, parseCanvasSnapshot, saveCanvasHistory } from '@/lib/canvas-documents';
 import { executionView } from './execution';
 import { assertDeliveryOriginals, authoredCanvasText, originalIdentity, submissionAttachments } from './media';
@@ -132,6 +133,9 @@ export async function createTaskRun(user: SessionUser, body: JsonRecord) {
       budget_points_limit: body.budget_points_limit == null ? null : pointCents(body.budget_points_limit),
       budget_usd_micros_limit: body.budget_usd_micros_limit == null ? null : integer(body.budget_usd_micros_limit, 0, 1_000_000_000),
       max_calls: body.max_calls == null ? null : integer(body.max_calls, 1, 1000) } });
+    await recordUsageAttribution(db, { sourceKind: 'role_run', sourceId: run.id,
+      actorUserId: user.id, ownerUserId: run.owner_user_id, billingSubjectType: 'user', billingSubjectId: user.id,
+      projectId: document.project_id, occurredAt: run.created_at, contextOrigin: 'role-document-start' });
     await db.canvasRoleTaskRevision.create({ data: { id: randomUUID(), role_task_run_id: run.id,
       requirements_revision: 1, snapshot_json: JSON.stringify(req), created_by: user.id } });
     const works = [];
