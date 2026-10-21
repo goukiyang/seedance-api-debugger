@@ -134,15 +134,6 @@
 .moduleSettingsActions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; margin: 22px 0 26px; padding-top: 16px; border-top: 1px solid #2d383d; }
 .moduleSettingsActions > p { min-width: 0; margin: 0; color: #adb6bd; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .moduleSettingsActions > button { min-width: 150px; margin-left: auto; white-space: nowrap; }
-.definitionReview { min-width: 0; margin: 16px 0; }
-.definitionReview h3 { font-size: 16px; margin: 0 0 12px; }
-.definitionReview details { padding: 10px 0; border-bottom: 1px solid #2d383d; overflow-wrap: anywhere; }
-.definitionReview summary { cursor: pointer; font-size: 14px; }
-.definitionCompare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
-.definitionCompare label { display: grid; min-width: 0; gap: 6px; font-size: 13px; color: #adb6bd; }
-.definitionCompare textarea { width: 100%; min-height: 80px; box-sizing: border-box; }
-.definitionReview .moduleSettingsActions > button { min-width: 0; margin-left: 0; white-space: normal; }
-@media (max-width: 600px) { .definitionCompare { grid-template-columns: minmax(0, 1fr); } }
 .referenceToggle { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; margin: 8px 0; }
 .page .referenceToggle input { width: 16px; height: 16px; margin: 0; accent-color: #8ce5d2; }
 .imageSectionHeading .referenceLimitControl { flex-wrap: wrap; }

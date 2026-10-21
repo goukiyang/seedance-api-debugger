@@ -2,7 +2,7 @@ import packageInfo from '../../package.json';
 import { PRICING_ADMIN_WRITES_ENABLED } from './pricing/build-mode';
 
 export const release = { version: packageInfo.version, channel: 'production', summary: PRICING_ADMIN_WRITES_ENABLED
-  ? '修复恢复结果设置后风格组和补充描述未用于本次生成的问题，保留生成后及刷新的设置；保存时区分工作区更新与模板内容冲突，可核对差异并保留当前编辑。'
+  ? '模板界面暂时回退；原任务、恢复设置的服务端校验和已保存数据继续保留，不会自动重新生成。'
   : '旧上传安全恢复、原图直传和已有高清结果保留。API质量设置和费率暂时只读，已保存配置不会自动改价。' };
 
 function numericOrder(a: string, b: string) {
