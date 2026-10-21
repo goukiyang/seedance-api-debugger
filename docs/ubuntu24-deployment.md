@@ -27,6 +27,8 @@ node ops/sd2-release-prepare.mjs prepare /Volumes/Data/Projects/video-api-debugg
 
 维护前瞬时连接等只读准入拒绝，不能重开号来重置或手补成功回执。新控制把完整原生用例的原退出状态/日志SHA/manifest与控制源码锁存为同run `native-control-preflight/batch.json`；只有完整且未变的成功批可复用，缺失/部分/失败或任何漂移继续拒绝。每次后续仅在新的受限只读子目录重新捕获全部真实配置、进程、连接为0、同步请求为0、原证书/上传与HD准入，失败另留原时点记录，成功才首次写最终receipt。原用例时间/日志和已完成receipt不改，不把只读工程续查当维护批准；真正切换仍要另取五分钟fresh准入并自然排尽旧writer。
 
+整对成功构建重新取鲜准入时，包装控制若已经采用`sourceBase`且字节完全未变，属于原已审输入，不必再次套用旧`BASELINE_SOURCE`到`sourceBase`的升级差异。r05仅补完全相等的幂等检查；不相等仍只允许原来精确的一处祖先判断替换，运行来源、完整变更集合、配置及其他控制漂移继续拒绝。原构建与封存时间不改，新run沿同一失败链记录，不把客户端SSH清理退出255冒为构建失败。
+
 统一离线工程检查：`node ops/sd2-release-prepare.test.mjs /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-19-upload-unknown-recovery`。仅检查工具、原证与生成接线，不运行任何服务器动作或功能验收。新入口首次真实发布效果须在下一次获授权发布时记录；不能把本轮离线检查说成又一次上线成功。
 
 ### 使用归属增量表（ADMIN-USAGE）

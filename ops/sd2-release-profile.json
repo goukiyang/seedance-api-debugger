@@ -7,12 +7,12 @@
   "controllerSetSha256": "84d3bac3d6846f47eb998573b9130b1b6cc95af696a3468a72ff02a25476bb09",
   "wrapperSha256": "0c86b553e41c42cb2a539a4a07a3f46669d71f7c1c4d0b2e5b12abb3a02d3907",
   "promotion": {
-    "template": "release-admin-usage-r04",
-    "wrapper": "run-admin-usage-r04.mjs",
+    "template": "release-admin-usage-r05",
+    "wrapper": "run-admin-usage-r05.mjs",
     "controllerCount": 40,
-    "controllerSetSha256": "e54e342612413ce9006732ea489546cbeaf013c1cc598d77497c28ea487994e4",
-    "wrapperSha256": "4dbecb489d685d20022fd2e3ea5ed92de82e4bebfed1c46b29769774e19be38f",
-    "changed": ["common.mjs", "control-preflight.mjs", "cutover-safety.mjs", "hd-closed-cache-engineering.mjs", "hd-storage-preflight.mjs", "retired-hd-cache-engineering.mjs", "switch.mjs"],
+    "controllerSetSha256": "10c8545bacd05454ca7dc9974a517c7c41cd2670631edd1dc612608859a7dc2e",
+    "wrapperSha256": "a00c9d8ec3cce1ebeff1e496cf7049e7248ad3d16d51c5e6cc600f02588307f1",
+    "changed": ["candidate-reuse-engineering.mjs", "candidate-reuse.mjs", "common.mjs", "control-preflight.mjs", "cutover-safety.mjs", "hd-closed-cache-engineering.mjs", "hd-storage-preflight.mjs", "retired-hd-cache-engineering.mjs", "switch.mjs"],
     "added": ["preflight-resume-engineering.mjs", "usage-role-control.mjs", "usage-role-engineering.mjs", "usage-role-start.mjs"]
   },
   "evidence": {
