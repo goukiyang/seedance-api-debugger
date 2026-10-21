@@ -1,14 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, History, RefreshCw, RotateCcw, Search, SlidersHorizontal, ChevronDown, ChevronUp, Save } from 'lucide-react';
+import { Download, History, RefreshCw, RotateCcw, Search, SlidersHorizontal, ChevronDown, ChevronUp, Save, X } from 'lucide-react';
 import PaginationControls from '@/components/PaginationControls';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useProductDialog } from '@/components/useProductDialog';
 import { useUnsavedNavigation } from '@/lib/hooks/use-unsaved-navigation';
 import type { PricingAdminAction, PricingAdminBasis, PricingAdminChanges, PricingAdminError, PricingAdminFilter, PricingAdminOperation, PricingAdminPreview, PricingAdminPreviewInput, PricingAdminRow, PricingAdminRowChange, PricingAdminSnapshot } from '@/lib/pricing/admin-contract';
 import { consumePricingAdminDraft, defaultPricingAdminView, filterPricingAdminRows, hasPricingAdminChanges, parsePricingAdminPending, parsePricingAdminWorkspace, patchPricingAdminRow, pricingAdminEnhanceGroup, pricingAdminPreviewForSource, pricingAdminPreviewKey, pricingAdminScenarioDifference, pricingAdminStorageKey, stagePricingAdminMemberExit, stagePricingAdminUnify, submittedPricingAdminDraft, validPricingAdminRate, validPricingEnhanceGroup, type PricingAdminDraft, type PricingAdminPending, type PricingAdminView } from '@/lib/pricing/admin-client-state';
-import { RECOMMENDED_POINTS_PER_CNY, stageGptImageReference, stageVideoPricingReferences } from '@/lib/pricing/presets';
+import { RECOMMENDED_POINTS_PER_CNY, stageGptImageReference, stageVideoPricingReferences, videoPricingReferenceStatus } from '@/lib/pricing/presets';
+import { allPricingFilters, pricingActiveFilters, pricingDisplayName, pricingDisplayRounding, pricingDisplayScope } from '@/lib/pricing/admin-display';
 import { isSeedanceVideoDuration } from '@/lib/provider/seedance-models';
 import type { PricingEnhanceGroup } from '@/lib/pricing/pricing-authoring-contract';
 import { multiplyDecimal, roundDecimal } from '@/lib/pricing/math';
@@ -339,10 +340,14 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
   const selectedRows = snapshot.rows.filter(row => selected.includes(row.id));
   const displayChanges = preview?.changes || [];
   const skipped = preview?.skipped || [];
+  const activeFilters = pricingActiveFilters(view.filter, snapshot.rows);
+  const members = snapshot.rows.filter(row => snapshot.authoring?.members.includes(row.id));
+  const gptRows = snapshot.rows.filter(row => row.identity.kind === 'image' && row.identity.modelId === 'gpt-image-2');
+  const gptEnabled = gptRows.filter(row => row.enabled).length;
   const enhanceGroup = draft.changes.authoring?.enhanceGroup || pricingAdminEnhanceGroup(snapshot.rows);
   const enhanceCompatible = pricingAdminEnhanceGroup(snapshot.rows) !== null;
   const groups = new Map<string, string[]>();
-  for (const row of snapshot.rows) if (row.currentPointsPerCny !== null) groups.set(row.currentPointsPerCny, [...(groups.get(row.currentPointsPerCny) || []), `${row.label} · ${row.providerLabel} · ${specsLabel(row.identity.specifications) || '通用'}`]);
+  for (const row of snapshot.rows) if (row.currentPointsPerCny !== null) groups.set(row.currentPointsPerCny, [...(groups.get(row.currentPointsPerCny) || []), `${pricingDisplayName(row)} · ${row.providerLabel} · ${pricingDisplayScope(row)}`]);
   const amountChanges = displayChanges.filter(change => change.before.currentUnitCredits !== change.after.currentUnitCredits || change.before.currentPointsPerCny !== change.after.currentPointsPerCny || change.before.baseCny !== change.after.baseCny).length;
   const sceneChanges = displayChanges.flatMap(change => {
     const scenario = pricingAdminPreviewForSource(preview, change.sourceRowId, change.id).scenario;
@@ -375,6 +380,8 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
           {(['site_base_cny', 'supplier_cost_cny'] as const).map(basis => <label key={basis}>{basisLabel(basis)}旧标准<input aria-label={`${basisLabel(basis)}旧标准`} type="number" step="0.1" min="0.1" max="10000" value={draft.changes.standards?.[basis] ?? snapshot.standards[basis] ?? ''} placeholder="未设置" onChange={event => { const value = event.target.value; updateChanges(changes => ({ ...changes, standards: { ...changes.standards, [basis]: value } })); }} /></label>)}
         </div></details>
       </div>
+      <p className={styles.ruleSummary}>已保存的统一换算范围：{members.length ? members.map(pricingDisplayName).join('；') : '尚无收费项加入'}。其他项目保留各自价格。</p>
+      <p className={styles.ruleSummary}>新费率每个任务最终四舍五入到 0.1 点，多个独立任务分别计算后相加。未采用新费率的项目沿用原规则，已受理任务不重算。</p>
     </section>
     {(readError || message || storageFailed || conflict || pending || operationStorageFailed) && <div className={styles.notice} role="status" aria-live="polite">
       {readError && <p>{readError} <button type="button" disabled={reading} onClick={() => void load()}>重新读取</button></p>}
@@ -386,20 +393,21 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
     </div>}
     <div className={styles.filters}><div className={styles.tabs} role="tablist" aria-label="费率类型">{(['image', 'video', 'enhance'] as const).map(kind => <button key={kind} type="button" role="tab" aria-selected={view.filter.kind === kind} onClick={() => changeFilter({ kind, ...(kind === 'video' ? { defaultsOnly: false } : {}) })}>{({ video: '视频', image: '图片', enhance: '视频增强' })[kind]}</button>)}</div>
       <label className={styles.search}><Search size={16} /><input aria-label="搜索型号或规格" placeholder="搜索型号 / 规格" maxLength={200} value={view.filter.search || ''} onChange={event => changeFilter({ search: event.target.value })} /></label>
-      <button type="button" className={styles.link} onClick={() => changeFilter({ kind: 'all', defaultsOnly: false })}>全部收费项（{snapshot.rows.length}）</button>
+      <button type="button" className={styles.link} onClick={() => changeFilter(allPricingFilters)}>全部收费项（{snapshot.rows.length}）</button>
       <details className={styles.filterDetails} open={view.filtersOpen === true} onToggle={event => { const open = event.currentTarget.open; setView(current => current.filtersOpen === open ? current : { ...current, filtersOpen: open }); }}><summary><SlidersHorizontal size={15} />筛选</summary><div className={styles.filterFields}>
       <select aria-label="供应商" value={view.filter.channelId || ''} onChange={event => changeFilter({ channelId: event.target.value })}><option value="">全部供应商</option>{Array.from(new Map(snapshot.rows.map(row => [row.identity.channelId, row.providerLabel])).entries()).map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select>
       <select aria-label="差异筛选" value={view.filter.difference || 'all'} onChange={event => changeFilter({ difference: event.target.value as PricingAdminFilter['difference'] })}><option value="all">全部差异</option><option value="different">有差异</option><option value="unconfirmed">待核实</option><option value="custom">单独设置</option></select>
-      <label className={styles.check}><input type="checkbox" checked={view.filter.defaultsOnly === true} onChange={event => changeFilter({ defaultsOnly: event.target.checked })} />仅默认</label>
+      <label className={styles.check}><input type="checkbox" checked={view.filter.defaultsOnly === true} onChange={event => changeFilter({ defaultsOnly: event.target.checked })} />仅默认（含画质默认）</label>
       <select aria-label="排序" value={view.sort} onChange={event => { scrollAnchor.current = null; setView(current => ({ ...current, sort: event.target.value as PricingAdminView['sort'], page: 1 })); setSelected([]); setAllMatched(false); setRestore(null); }}><option value="catalog">目录顺序</option><option value="name">型号名称</option><option value="difference">差异优先</option></select>
       <button type="button" onClick={() => changeFilter({ kind: 'h3', defaultsOnly: false })}>H3 免费项</button></div></details></div>
+    {activeFilters.length > 0 && <div className={styles.activeFilters} aria-label="已应用筛选"><span>当前筛选</span>{activeFilters.map(filter => <span className={styles.activeFilter} key={filter.key}><span>{filter.label}</span><button type="button" aria-label={`清除${filter.label}筛选`} title={`清除${filter.label}筛选`} onClick={() => changeFilter(filter.clear)}><X size={14} /></button></span>)}<button type="button" className={styles.link} onClick={() => changeFilter(allPricingFilters)}>清除全部筛选</button></div>}
     {['video', 'enhance'].includes(view.filter.kind || '') && <div className={styles.duration}><label>参考时长<input aria-label="视频参考时长秒" type="number" min="1" step="1" maxLength={32} value={view.quantity} onChange={event => { const quantity = event.target.value; setView(current => ({ ...current, quantity })); }} />秒</label>{['5', '10', '15'].map(value => <button type="button" key={value} aria-pressed={view.quantity === value} onClick={() => setView(current => ({ ...current, quantity: value }))}>{value} 秒</button>)}</div>}
-    {view.filter.kind === 'video' && <details className={styles.references}><summary>历史参考建议 · 尚未采用</summary><p>普通生成、无参考视频，固定折算 7 CNY/USD；不是供应商实时价格。</p><div className={styles.referencePrices}><span>2.0：480p ¥0.48229127/秒</span><span>720p ¥1.06270945/秒</span><span>1080p ¥2.63337604/秒（仅9单旧样本）</span><span>2.5：同档 2.0 基价 ×1.5，属于推算</span></div><button type="button" className={styles.link} onClick={() => {
+    {view.filter.kind === 'video' && <details className={styles.references}><summary>历史参考 · {videoPricingReferenceStatus(snapshot.rows, draft.changes)}</summary><p>普通生成、无参考视频，固定折算 7 CNY/USD；不是供应商实时价格。</p><div className={styles.referencePrices}><span>2.0：480p ¥0.48229127/秒</span><span>720p ¥1.06270945/秒</span><span>1080p ¥2.63337604/秒（仅9单旧样本）</span><span>2.5：同档 2.0 基价 ×1.5，属于推算</span></div><button type="button" className={styles.link} onClick={() => {
       const next = stageVideoPricingReferences(draft.changes, snapshot.rows, snapshot.authoring?.globalPointsPerCny);
       if (next === draft.changes) { setMessage('没有可加入的已绑定参考项；已有基价、人工草稿与不可用项保持不变。'); return; }
       updateChanges(() => next); setMessage('已将可采用的视频参考加入草稿，已有基价和人工草稿未覆盖。请查看实际价格变化后保存。'); setView(current => ({ ...current, changesOpen: true }));
     }}>采用视频参考定价</button></details>}
-    {view.filter.kind === 'image' && <details className={styles.references}><summary>GPT Image 2 · 0.10 元/张建议</summary><p>在对应固定计费型号的来源详情绑定实际规格后采用。未启用、实际成本通道与未知型号不参与。</p></details>}
+    {view.filter.kind === 'image' && <details className={styles.references}><summary>GPT Image 2 · {gptEnabled ? `${gptEnabled} 个通道已启用，价格按对应行` : gptRows.length ? '当前均已停用' : '暂无配置'}</summary><p>历史 0.10 元/张建议不等于当前生效价格，也不会自动启用型号。实际价格和已采用范围以对应收费项为准。</p></details>}
     {view.filter.kind === 'enhance' && enhanceGroup && enhanceCompatible && <section className={styles.enhance} aria-label="视频增强基础点价">
       <div className={styles.enhanceFields}>{(['480p', '720p', '1080p', '2k', '4k'] as const).map(resolution => <label key={resolution}>{resolution.toUpperCase()}（点/秒）<input type="text" inputMode="decimal" maxLength={32} value={enhanceGroup.basePointsPerSecond[resolution]} onChange={event => editEnhance({ ...enhanceGroup, basePointsPerSecond: { ...enhanceGroup.basePointsPerSecond, [resolution]: event.target.value } })} /></label>)}
       <label>专业版系数<input type="text" inputMode="decimal" maxLength={32} value={enhanceGroup.professionalMultiplier} onChange={event => editEnhance({ ...enhanceGroup, professionalMultiplier: event.target.value })} /></label><label>高帧率系数<input type="text" inputMode="decimal" maxLength={32} value={enhanceGroup.highFpsMultiplier} onChange={event => editEnhance({ ...enhanceGroup, highFpsMultiplier: event.target.value })} /></label></div>
@@ -415,7 +423,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
           setSelected([]); setAllMatched(false);
         }}>统一所选</button><button type="button" onClick={() => { setSelected([]); setAllMatched(false); }}>取消选择</button>{!allMatched && filtered.length > visible.length && <button type="button" onClick={() => { setSelected(filtered.map(row => row.id)); setAllMatched(true); }}>选择全部符合条件 {filtered.length} 项</button>}{!validPricingAdminRate(standardsValue) && <span className={styles.muted}>先填写统一换算</span>}</>}
       </div>
-      <div className={styles.tableHeader} aria-hidden="true"><span /><span>型号 / 规格</span><span>实际点价</span><span>当前点/元</span><span>跟随方式</span><span /></div>
+      <div className={styles.tableHeader} aria-hidden="true"><span /><span>型号 / 画质 / 适用范围</span><span>当前价格</span><span>点/元设置</span><span>跟随方式</span><span /></div>
       <div className={view.filter.kind === 'video' ? styles.videoRows : undefined}>{visible.map(row => {
         const change = draft.changes.rows.find(item => item.id === row.id);
         const mapped = pricingAdminPreviewForSource(preview, row.id), after = mapped.change?.after, scenario = mapped.scenario;
@@ -428,11 +436,12 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
         const invalidRowDuration = row.identity.kind === 'video' && !isSeedanceVideoDuration(Number(view.quantity), row.identity.modelId);
         const unavailableMember = row.authoringRateMode === 'follow_global' && (!row.enabled || row.availability !== 'ready' || !row.canAdopt);
         const pendingMemberExit = change?.authoringRateMode === 'custom' && Object.keys(change).length === 2;
+        const currentCredits = !newScope && scenario?.currentCredits !== null && scenario?.currentCredits !== undefined ? scenario.currentCredits : null;
         return <div key={row.id} className={`${styles.rowBlock} ${selected.includes(row.id) ? styles.selected : ''}`} data-pricing-row={row.id}>
           <div className={styles.row}>
             <input type="checkbox" aria-label={`选择 ${row.label} ${row.providerLabel}`} checked={selected.includes(row.id)} onChange={event => { setRestore(null); setAllMatched(false); setSelected(current => event.target.checked ? [...current, row.id] : current.filter(id => id !== row.id)); }} />
-            <div className={styles.model}><strong>{row.label}</strong><small>{row.providerLabel}{row.isDefault ? ' · 默认' : ''}{!row.enabled ? ' · 已停用' : ''}</small><small>{specsLabel(scenario?.specifications || mapped.change?.specifications || change?.specifications || row.identity.specifications) || '通用规格'}</small></div>
-            <div className={styles.credits} data-label="实际点价">{row.identity.billingMode === 'actual' ? <><strong>按账单结算</strong><small>{scenario?.authorizedMaximumCredits ? `最多预留 ${scenario.authorizedMaximumCredits} 点` : '预留上限待实际请求报价'}</small></> : <><strong>{newScope && !scenario ? '新规格待报价' : invalidRowDuration ? '此时长不可试算' : scenario?.adjustedCredits !== null && scenario?.adjustedCredits !== undefined ? `${scenario.adjustedCredits} 点` : '待报价'}</strong><small>{row.identity.unit === 'image' ? '每张' : `${view.quantity || '待填'} 秒`}{changed ? ' · 待保存' : ''}</small>{changed && scenario?.currentCredits !== null && scenario?.currentCredits !== undefined && <small>当前 {scenario.currentCredits} 点{pricingAdminScenarioDifference(scenario) ? ` · ${pricingAdminScenarioDifference(scenario)}` : ''}</small>}{scenario?.roundedToZero && <small>取整为 0 点，不是明确免费</small>}{scenario?.reason && <small>{scenario.reason}</small>}</>}</div>
+            <div className={styles.model}><strong>{pricingDisplayName(row)}</strong><small>{row.providerLabel}{row.isDefault ? ' · 默认' : ''}{!row.enabled ? ' · 已停用' : ''}</small><span className={styles.scope}>{pricingDisplayScope(row)}</span>{row.availability !== 'ready' && <small>{row.unavailableReason || (row.enabled ? '当前不可调用' : '已停用，不可调用')}</small>}</div>
+            <div className={styles.credits} data-label="当前价格">{row.identity.billingMode === 'actual' ? <><strong>按账单结算</strong><small>{scenario?.authorizedMaximumCredits ? `最多预留 ${scenario.authorizedMaximumCredits} 点${changed ? '（草稿预览）' : ''}` : '预留上限待实际请求报价'}</small></> : <><strong>{currentCredits !== null ? `${currentCredits} 点` : row.currentUnitCredits !== null ? `${row.currentUnitCredits} 点` : '当前价格待核实'}</strong><small>{currentCredits !== null ? row.identity.unit === 'image' ? '每张' : `${view.quantity} 秒` : row.identity.unit === 'image' ? '每张' : '每秒单价，整任务另行取整'}</small>{invalidRowDuration && <small>此时长不可试算</small>}{changed && <small>待保存：{scenario?.adjustedCredits !== null && scenario?.adjustedCredits !== undefined ? `${scenario.adjustedCredits} 点 / ${row.identity.unit === 'image' ? '张' : `${view.quantity} 秒`}` : '等待预览'}{pricingAdminScenarioDifference(scenario || { deltaCredits: null, differencePercent: null }) ? ` · ${pricingAdminScenarioDifference(scenario!)}` : ''}</small>}{newScope && <small>待保存范围：{pricingDisplayScope(row, change!.specifications)}</small>}{scenario?.roundedToZero && <small>预览取整为 0 点，不是明确免费</small>}{scenario?.reason && <small>{scenario.reason}</small>}</>}<small>{pricingDisplayRounding(row)}</small>{row.baseCny !== null && <small>基价 ¥{row.baseCny}/{row.identity.unit === 'image' ? '张' : '秒'}{row.currentPointsPerCny !== null ? ` × ${row.currentPointsPerCny} 点/元` : ''}</small>}</div>
             <div className={styles.rate} data-label="当前点/元"><input type="number" min={snapshot.limits.rateMin} max={snapshot.limits.rateMax} step="0.1" maxLength={32} aria-label={`${row.label} ${row.providerLabel} 当前点每元`} value={rate} placeholder={row.mode === 'free' ? '免费' : '未设置'} onChange={event => editRow(row.id, { mode: 'custom', customPointsPerCny: event.target.value })} />
               {changed && <small>生效 {row.currentPointsPerCny ?? '待核'}，{action.kind === 'save' ? '待保存' : '目标见预览'}</small>}</div>
             <div className={styles.mode} data-label="点元跟随"><span>{follows ? '跟随统一' : rateModeLabel({ ...row, mode, authoringRateMode: change?.authoringRateMode || row.authoringRateMode })}</span>
@@ -444,6 +453,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
                 } else editRow(row.id, rate ? { authoringRateMode: 'custom', customPointsPerCny: rate } : { authoringRateMode: 'custom' });
               }}>{unavailableMember ? '移出统一，保留原价' : '改为单独'}</button>}
               {(after || row).hasDifference && (after || row).differencePercent !== null && <small>比统一{Number((after || row).differencePercent) >= 0 ? '高' : '低'} {Math.abs(Number((after || row).differencePercent))}%</small>}
+              {row.authoringEntry?.baseRelation && <small>基价：{snapshot.rows.find(item => item.id === row.authoringEntry?.baseRelation?.parentId)?.label || '原关联项'} × {row.authoringEntry.baseRelation.factor}</small>}
               {row.baseCny === null && row.identity.billingMode === 'fixed' && !change?.base && <small>待补依据，沿用原价</small>}</div>
             <button type="button" className={styles.icon} title={expanded ? '收起来源与规格' : '展开来源与规格'} aria-label={`${expanded ? '收起' : '展开'} ${row.label} 来源与规格`} aria-expanded={expanded} onClick={() => setView(current => ({ ...current, expanded: expanded ? current.expanded.filter(id => id !== row.id) : [...current.expanded, row.id] }))}>{expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
           </div>

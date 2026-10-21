@@ -17,6 +17,8 @@ import { PRICING_ADMIN_SCHEMA, PRICING_POLICY_KEY, PRICING_REVISION_PREFIX, PRIC
   type PricingAdminSourceInput, type PricingAdminSource, type PricingAdminExchangeInput,
   type PricingAdminSimulation, type PricingAdminExchange } from './admin-contract';
 import { PRICING_AUTHORING_KEY, type PricingAuthoring, type PricingEnhanceGroup } from './pricing-authoring-contract';
+import { filterPricingAdminRows } from './admin-client-state';
+import { pricingDisplayName } from './admin-display';
 import { emptyPricingAuthoring, parsePricingAuthoring, pricingAuthoringContent, projectPricingAuthoring,
   newPricingAuthoringEntry, derivedPricingBase, assertPricingBaseRelation } from './pricing-authoring';
 
@@ -831,19 +833,13 @@ function csvCell(value: unknown) {
 export async function exportAdminPricingCsv(actor: Actor, input: PricingAdminFilter = {}, client: PricingClient = prisma): Promise<string> {
   if (client === prisma) return prisma.$transaction(tx => exportAdminPricingCsv(actor, input, tx), { maxWait: 10000, timeout: 30000 });
   const filter = parseFilter(input), data = await getAdminPricingSnapshot(actor, client), exportedAt = new Date().toISOString();
-  const rows = data.rows.filter(row => (!filter.kind || filter.kind === 'all' || row.identity.kind === filter.kind)
-    && (!filter.channelId || row.identity.channelId === filter.channelId) && (!filter.defaultsOnly || row.isDefault)
-    && (!filter.basisKind || row.basisKind === filter.basisKind)
-    && (!filter.search?.trim() || [row.label, row.identity.modelId, row.providerLabel, ...Object.values(row.identity.specifications), ...row.appliesTo]
-      .join(' ').toLocaleLowerCase().includes(filter.search.trim().toLocaleLowerCase()))
-    && (!filter.difference || filter.difference === 'all' || (filter.difference === 'different' ? row.hasDifference
-      : filter.difference === 'custom' ? row.mode === 'custom' : row.confirmation === 'unconfirmed' || row.confirmation === 'needs_review')));
+  const rows = filterPricingAdminRows(data.rows, filter);
   const header = ['revision', 'exportedAt', 'timezone', 'ruleId', 'kind', 'channelId', 'modelId', 'specifications', 'label', 'provider',
     'unit', 'mode', 'basis', 'baseCny', 'pointsPerCny', 'unitCredits', 'confirmation', 'sourceType', 'sourceReference', 'confirmedAt', 'confirmedBy',
     'legacyRounding', 'legacyPointsPerUsd', 'exchangeSourceCurrency', 'exchangeDirection', 'exchangeRate', 'exchangeEffectiveFrom', 'exchangeRevision',
     'exchangeSourceType', 'exchangeSourceReference', 'exchangeConfirmedAt', 'exchangeConfirmedBy', 'authoringRevision', 'globalPointsPerCny', 'authoringRateMode', 'sourceKind', 'evidence', 'baseRelation'];
   return '\uFEFF' + [header, ...rows.map(row => [data.revision, exportedAt, 'UTC', row.id, row.identity.kind, row.identity.channelId,
-    row.identity.modelId, pricingCanonical(row.identity.specifications), row.label, row.providerLabel, row.identity.unit, row.mode,
+    row.identity.modelId, pricingCanonical(row.identity.specifications), pricingDisplayName(row), row.providerLabel, row.identity.unit, row.mode,
     row.basisKind, row.baseCny, row.currentPointsPerCny, row.currentUnitCredits, row.confirmation, row.source?.type, row.source?.reference,
     row.source?.confirmedAt, row.source?.confirmedBy.id, row.legacyRounding, row.legacyPointsPerUsd,
     row.exchangeRate?.sourceCurrency, row.exchangeRate?.direction, row.exchangeRate?.rate,

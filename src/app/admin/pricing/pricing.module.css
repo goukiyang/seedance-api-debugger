@@ -90,6 +90,12 @@
 .filterDetails > summary { display: flex; align-items: center; gap: 6px; width: fit-content; }
 .filterFields, .duration, .referencePrices, .enhanceFields { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .filterFields { padding-block: 4px 12px; }
+.ruleSummary { font-size: 13px; line-height: 1.6; color: var(--text-secondary); overflow-wrap: anywhere; }
+.scope { display: block; margin-top: 4px; line-height: 1.5; }
+.activeFilters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 14px; font-size: 13px; }
+.activeFilter { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; background: var(--bg-secondary); padding-left: 8px; border-radius: 4px; }
+.activeFilter > span { min-width: 0; overflow-wrap: anywhere; }
+.activeFilter > button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 36px; width: 36px; }
 .duration { margin-block: 12px; }
 .duration label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .duration input { width: 85px; }

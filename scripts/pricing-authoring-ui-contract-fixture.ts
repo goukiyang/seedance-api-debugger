@@ -3,7 +3,8 @@ import type { PricingAdminChanges, PricingAdminPreview, PricingAdminRow, Pricing
 import type { PricingEnhanceGroup } from '../src/lib/pricing/pricing-authoring-contract';
 import { consumePricingAdminDraft, defaultPricingAdminView, filterPricingAdminRows, hasPricingAdminChanges, parsePricingAdminWorkspace,
   patchPricingAdminRow, pricingAdminEnhanceGroup, pricingAdminPreviewForSource, pricingAdminPreviewKey, pricingAdminScenarioDifference, pricingAdminStorageKey, stagePricingAdminMemberExit, stagePricingAdminUnify, validPricingEnhanceGroup } from '../src/lib/pricing/admin-client-state';
-import { stageGptImageReference, stageVideoPricingReferences } from '../src/lib/pricing/presets';
+import { stageGptImageReference, stageVideoPricingReferences, videoPricingReferenceStatus } from '../src/lib/pricing/presets';
+import { allPricingFilters, pricingActiveFilters, pricingDisplayName, pricingDisplayRounding, pricingDisplayScope, projectPricingDisplay } from '../src/lib/pricing/admin-display';
 import { multiplyDecimal } from '../src/lib/pricing/math';
 
 function row(id: string, patch: Partial<PricingAdminRow> = {}): PricingAdminRow {
@@ -102,6 +103,31 @@ export function runPricingAuthoringUiContractFixture() {
   assert.deepEqual(stageVideoPricingReferences(manual, videos, '6.0'), manual, 'Existing manual parent does not silently adopt child references');
   assert.equal(stageVideoPricingReferences(empty, [row('configured', { ...videos[0], id: 'configured', baseCny: '0.20' })]), empty);
   assert.equal(stageVideoPricingReferences(empty, [{ ...videos[0], enabled: false }, videos[1]]), empty, 'Unavailable parent cannot create a dangling derived suggestion');
+
+  const medium = row('medium', { isDefault: false, identity: { kind: 'image', channelId: 'medium-channel', modelId: 'gpt-image-2.5-sunburst', billingMode: 'fixed', unit: 'image', specifications: {} }, baseCny: '0.05', currentUnitCredits: '0.5' });
+  const original = JSON.stringify(medium);
+  const displayed = projectPricingDisplay(medium, { 'gpt-image-2.5-sunburst': { medium: 'medium-channel', max: 'max-channel' } });
+  assert.equal(displayed.isDefault, true);
+  assert.equal(displayed.identity, medium.identity, 'Display projection cannot change identity or specifications');
+  assert.equal(displayed.baseCny, medium.baseCny);
+  assert.equal(displayed.currentUnitCredits, medium.currentUnitCredits);
+  assert.equal(JSON.stringify(medium), original, 'Source pricing row remains untouched');
+  assert.equal(pricingDisplayName(displayed), 'medium · 中等');
+  assert.equal(filterPricingAdminRows([displayed], { defaultsOnly: true, search: '中等' }).length, 1);
+  assert.match(pricingDisplayScope(displayed), /全部合法规格/);
+  assert.match(pricingDisplayRounding(displayed), /0.1/);
+  assert.match(pricingDisplayRounding({ ...displayed, mode: 'legacy_fixed', legacyRounding: 'ceil_task' }), /向上取整/);
+  assert.equal(pricingDisplayName(projectPricingDisplay(medium)), 'medium');
+  const allFilters = { kind: 'image' as const, search: 'missing', channelId: 'other', defaultsOnly: true, difference: 'custom' as const, basisKind: 'supplier_cost_cny' as const };
+  assert.equal(pricingActiveFilters(allFilters, [displayed]).length, 6, 'Every persisted hidden filter remains visible and clearable');
+  assert.deepEqual(pricingActiveFilters({ ...allFilters, ...allPricingFilters }, [displayed]), []);
+  assert.equal(filterPricingAdminRows([displayed], { ...allFilters, ...allPricingFilters }).length, 1);
+  assert.match(videoPricingReferenceStatus(videos, empty), /未采用/);
+  const adoptedParent = { ...videos[0], baseCny: '0.48229127', authoringEntry: { adoptedRevision: 'fixture-adopted', sourceKind: 'historical_statement' as const, evidence: staged.rows[0].evidence!, baseRelation: null } };
+  const adoptedChild = { ...videos[1], baseCny: '0.72343691', authoringEntry: { adoptedRevision: 'fixture-child', sourceKind: 'derived' as const, evidence: null, baseRelation: { parentId: 'v20', factor: '1.5', parentRevision: 'fixture-adopted', exactProduct: '0.723436905' } } };
+  assert.equal(videoPricingReferenceStatus([adoptedParent, adoptedChild], empty), '已采用 2 项');
+  assert.match(videoPricingReferenceStatus([adoptedParent, videos[1]], staged), /已采用 1\/2 项.*2 项草稿待保存/);
+  assert.match(videoPricingReferenceStatus([{ ...adoptedParent, confirmation: 'needs_review' }], empty), /待核实/);
 
   const gpt = row('gpt', { identity: { kind: 'image', channelId: 'fixture-gpt', modelId: 'gpt-image-2', billingMode: 'fixed', unit: 'image', specifications: {} } });
   assert.equal(stageGptImageReference(empty, gpt, {}, '6.0'), empty, 'Unknown scope cannot adopt');

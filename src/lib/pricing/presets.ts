@@ -1,8 +1,33 @@
 import type { PricingAdminChanges, PricingAdminRow, PricingAdminRowChange } from './admin-contract';
 import { patchPricingAdminRow } from './admin-client-state';
+import { compareDecimal, multiplyDecimal, roundDecimal } from './math';
 
 export const RECOMMENDED_POINTS_PER_CNY = '10.0';
 const videoBases: Record<string, string> = { '480p': '0.48229127', '720p': '1.06270945', '1080p': '2.63337604' };
+
+export function videoPricingReferenceStatus(rows: PricingAdminRow[], changes: PricingAdminChanges) {
+  const candidates = rows.filter(row => row.identity.kind === 'video' && row.identity.channelId === 'seedance'
+    && ['dreamina-seedance-2-0-260128', 'dreamina-seedance-2-5-260628'].includes(row.identity.modelId)
+    && row.identity.specifications.referenceVideo === 'none' && row.identity.specifications.pricingPurpose === 'standard'
+    && videoBases[row.identity.specifications.resolution]);
+  const matches = (row: PricingAdminRow): boolean => {
+    if (!row.baseCny || row.confirmation !== 'confirmed') return false;
+    const base = videoBases[row.identity.specifications.resolution];
+    const entry = row.authoringEntry;
+    if (row.identity.modelId === 'dreamina-seedance-2-0-260128') return entry?.sourceKind === 'historical_statement'
+      && entry.evidence?.reference === '2026-10-18 采样，video-cost-summary-20261018'
+      && compareDecimal(row.baseCny, base) === 0;
+    const parent = candidates.find(item => item.id === entry?.baseRelation?.parentId);
+    return !!parent && entry?.sourceKind === 'derived' && entry.baseRelation?.factor === '1.5' && matches(parent)
+      && compareDecimal(row.baseCny, roundDecimal(multiplyDecimal([base, '1.5']), 8, 'half_up')) === 0;
+  };
+  const adopted = candidates.filter(matches).length;
+  const drafted = candidates.filter(row => changes.rows.some(change => change.id === row.id)).length;
+  const other = candidates.filter(row => row.baseCny !== null && !matches(row)).length;
+  const saved = !candidates.length ? '暂无对应收费项' : adopted === candidates.length ? `已采用 ${adopted} 项`
+    : adopted ? `已采用 ${adopted}/${candidates.length} 项` : '未采用历史参考';
+  return `${saved}${other ? ` · ${other} 项其他依据或待核实` : ''}${drafted ? ` · ${drafted} 项草稿待保存` : ''}`;
+}
 
 // Explicit adoption only. Existing settings and manual draft fields always win.
 export function stageVideoPricingReferences(changes: PricingAdminChanges, rows: PricingAdminRow[], existingGlobal: string | null = null) {

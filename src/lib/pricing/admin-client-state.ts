@@ -4,6 +4,7 @@ import type {
 } from './admin-contract';
 import type { PricingEnhanceGroup } from './pricing-authoring-contract';
 import { compareDecimal, divideDecimal, multiplyDecimal, normalizeDecimal } from './math';
+import { pricingDisplayName } from './admin-display';
 
 export type PricingAdminDraft = { revision: string; authoringRevision?: string; catalogFingerprint?: string; changes: PricingAdminChanges };
 export type PricingAdminView = {
@@ -34,7 +35,7 @@ export function filterPricingAdminRows(rows: PricingAdminRow[], filter: PricingA
     && (filter.difference !== 'different' || row.hasDifference)
     && (filter.difference !== 'unconfirmed' || row.confirmation === 'unconfirmed' || row.confirmation === 'needs_review')
     && (filter.difference !== 'custom' || row.authoringRateMode === 'custom' || !row.authoringRateMode && row.mode === 'custom')
-    && (!search || [row.label, row.providerLabel, row.identity.modelId, ...Object.values(row.identity.specifications), ...row.appliesTo].join(' ').toLocaleLowerCase().includes(search))
+    && (!search || [pricingDisplayName(row), row.providerLabel, row.identity.modelId, ...Object.values(row.identity.specifications), ...row.appliesTo].join(' ').toLocaleLowerCase().includes(search))
   ));
   if (sort === 'name') result.sort((a, b) => a.label.localeCompare(b.label, 'zh-CN') || a.id.localeCompare(b.id));
   if (sort === 'difference') result.sort((a, b) => Number(b.hasDifference) - Number(a.hasDifference) || a.label.localeCompare(b.label, 'zh-CN'));
