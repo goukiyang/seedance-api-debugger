@@ -4,6 +4,12 @@
 
 ## RESTORE-D01 模板复用失效调查（2026-10-21）
 
+r06整批证据（18:33Z）：49语法＋25准备器通过，隔离15/15通过，生命周期25保持通过，四个真实缓存参考共184拒绝/接受项通过；同包现网只读HD核对canEnterControlledDrain=true、unstable=false、issues空，原六服务/价格/allowed未变。只补三指纹并重核五文件来源，不删旧缓存或改生产记录。正式根isolation-request-r06.json指向完整原证，仍admissibleForRelease=false；继续第六正式run的鲜准入/两完整构建/保护切换，旧5正式拒绝＋1诊断拒绝保留。
+
+r05正式鲜检查与准确新根因（18:28Z）：新run5887d116的正式15组和生命周期25均通过，随后HD准入unstable拒绝。初看“状态仍变化”只是待核解释，实际63个非退役缓存中58过、5个已于15:14–15:27Z结束且ready的9c39缓存因Unknown tsx cache bytes拒绝；inventory的60个目录提示是同次transient连带，不是60独立故障。全部5×3文件只替换9c39源码根路径即逐字节匹配e01已允许产物，三源文件＋compiler＋tsconfig SHA完全相同。复用费率原单§24.4既有1f7等价路径，不增加发布引擎/依赖或忽略未知缓存。原六服务/价格/allowed、候选根不存在、无构建/adopt/维护/切换已证，failed-r05正常关占用；累计正式拒绝5，诊断目录拒绝1，原证明细保留。一次只读探针字符串换行语法错误未执行远端逻辑，修正后取证成功，原错误也保留。
+
+lead就绪单包r06：冻结r05不动，新控制包只改hd-storage-preflight三个已证明精确缓存条目＋同一五文件来源证明，以及hd-closed-cache-engineering加入9c39引用和五项篡改拒绝，另44模块完全同r05。没有删除/清理缓存、锁或生产记录，原PID/进程组/时间/owner/mode/nlink/软链/未知文件门全保；main356/guard554与v0.101.1不变。先整批隔离15＋现网只读HD准入观察，再正常fresh正式发布，不复用拒绝为许可。当前未构建部署，R01/R02目标与父线程R04不缩减。
+
 r05b隔离重跑完成（18:21Z）：15/15实际通过，生命周期25完整通过，全部日志SHA及原六服务/价格/allowed未变已核。原诊断失败和四次正式失败保留，无第五正式stage、构建或切换。将沿固定prepare及原控制器重新做正式鲜准入和完整main/guard构建；隔离结果admissibleForRelease=false，不代替任何正式门。业务main356b5b07/guard554fcee5仍冻结，R01/R02实效未验、R04仍父线程部署后1张。
 
 r05整批交付与隔离首轮（18:19Z）：真实producer/consumer矩阵已核，45生产模块字节不变；49文件语法及25项准备器检查通过。生命周期原20＋5共25场景在Linux全部通过，含真正第二fresh proof。隔离整15组14过，唯一cutover-safety因lead诊断目录不符合原release-staging前缀拒绝；该原脚本后续nginx捕获还要求UUID目录名，已一次核清。不是生命周期再次失败，不删除原证。新r05b只改诊断目录为release-staging/diagnostics/UUID，无manifest/window/预约或正式stage调用，生产控制及参数不改，整15组重跑中。正式失败累计4，诊断失败另记1；原六服务/价格/allowed未变，无构建/维护/业务写入。资料与原SHA见implementation/fresh-pair-contract-handoff-r05.txt、local-control-verification-r05.json、isolation-request-r05.json、diagnostic-path-correction-r05b.json。所有诊断均不具发布准入效力；正式fresh stage及完整两构建仍待完成。
