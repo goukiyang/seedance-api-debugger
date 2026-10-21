@@ -31,6 +31,10 @@ node ops/sd2-release-prepare.mjs prepare /Volumes/Data/Projects/video-api-debugg
 
 r06正常续接仅用于维护前零副作用拒绝：新run的`contract.normalContinuation`锁定前次manifest/before/批准/原错误/lineage及原迁移回执、备份证明SHA，重新鲜核原六角色、配置/原价格和全部数据保护；任何503、fence、stop或writer等副作用不接受普通续接。`release.mjs adopt`只读验证同一DB文件身份、原空表/索引/SQL、原备份完整性与SHA，独占写`operation: ADOPT`的新证，原run/时间/回执及备份不改，不执行DDL。角色启动沿统一candidateEvidenceFile读取fresh候选与原迁移的有效证据。HD完整判断先落盘后判门，后续正常run另做完整鲜检查和新批准，原错误不倒填；已发生副作用继续原恢复，不把该路线当故障通道。
 
+r08承接r07的首次运行别名准备，并完整核对首次复用生命周期：原完整构建run须没有任何switch-before/发布/排空/启动记录，当前候选无活跃进程且不在运行角色中，全部原封存与输入已验证，才可首次新建`.next-prod`到原固定编译目录并另留原构建时间不变的记录。已有正确别名也必须核上述来源/未运行条件；fresh回执固定其dev/inode/owner/metadata，后续verify、切换和固定guard恢复均核同一对象，准备后换为同目标也拒绝。错误、损坏、普通文件或先前已发布后缺失均拒绝，不覆盖修复。维护批准的数字毫秒/严格UTC时间由同一解析器供正常入口与固定guard准备使用，五分钟/来源/窗口/控制SHA门不变。临时停机策略、部分nginx安装或已撤回安装的记录也算已发生副作用，只走原恢复，不能普通重试。
+
+完整原生控制批须含`candidate-lifecycle-engineering.mjs`：隔离合成现场串联实际原成功输入核对、跨run复用、首次别名、维护批准、guard准备、自然退出、整对许可发布、启动/角色合同、首次上线/收口、普通相容回退与故障恢复；前序真实生成的回执由后序直接读取，不能在测试里预造缺失后置回执。系统服务/网络/DB观察由显式隔离适配器提供，不是生产回退演练或功能验收。全部关联修正与完整批次统一Verify、同lead Review后才可生产鲜准入，不靠逐次现场试切发现下一处旧假设。业务/编译字节、旧运行目录和原immutable证据不改。
+
 统一离线工程检查：`node ops/sd2-release-prepare.test.mjs /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-19-upload-unknown-recovery`。仅检查工具、原证与生成接线，不运行任何服务器动作或功能验收。新入口首次真实发布效果须在下一次获授权发布时记录；不能把本轮离线检查说成又一次上线成功。
 
 ### 使用归属增量表（ADMIN-USAGE）
