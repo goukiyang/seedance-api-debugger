@@ -8,11 +8,11 @@
   "wrapperSha256": "0c86b553e41c42cb2a539a4a07a3f46669d71f7c1c4d0b2e5b12abb3a02d3907",
   "promotion": {
     "root": "/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-21-project-list-timeout/implementation",
-    "template": "release-project-list-r07",
-    "wrapper": "run-project-list-r07.mjs",
+    "template": "release-project-list-r08",
+    "wrapper": "run-project-list-r08.mjs",
     "controllerCount": 49,
-    "controllerSetSha256": "cf8282ea1b12b08990c10d3dcd5c350b1aadea0c97dc07d6919d2dfb494b6ffb",
-    "wrapperSha256": "c5540e5935f1caa32bdb4e79cac7d08faf12861fe8d10819a78e1d97bb5f6e31",
+    "controllerSetSha256": "3c4256f9a54596a10d3dd1228f0a3837fe97cca60b26a628a260df0b7dbce6bd",
+    "wrapperSha256": "f64c70646e6bad772668ef707a78b8eb4d5affdc5b2a0125fd3791aaa3512e13",
     "changed": [
       "candidate-inputs.mjs",
       "candidate-reuse-engineering.mjs",
