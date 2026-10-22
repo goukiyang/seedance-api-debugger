@@ -1,5 +1,7 @@
 # V1.2 剩余模块落地 Todo
 
+- [ ] C03（2026-10-22）：共享图片生成模板封面前置调查见正式根私有`tasks/todo/2026-10-12-module-permanent-cover.md`§11。旧模板选图规则及精确修复范围待确认，非可执行交接；C02实施按用户“先做前置工单”暂缓。未改业务、生产数据或部署。
+
 ## 当前入口
 
 - [人物描述优先与自由表达 AV1](todo/2026-10-05-avatar-intent-generation-flow.md#11-av1描述优先与自由表达2026-10-05)：2026-10-06，已部署v0.44.1/f0a142f/BUILD Nc2Ap5uhxsUEQCkxpRocE，待用户手动验收；简短描述不再因预设分类缺项阻止生成，完整原文进入四宫格与独立头像提示词，其他条件可选。11文件候选内置类型/lint、Git/回退/790源匹配/公网及4静态检查完成；保留费用、未知请求、真实互斥及旧草稿重新报价保护，worker不重启；[交付报告](../docs/materials/2026-10-05-avatar-description-first/delivery.json)与[统一diff](../docs/materials/2026-10-05-avatar-description-first/source.diff)正式归档，0模型/图片/人工DB写，无全站或浏览器功能验收。
