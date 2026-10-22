@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Isolated backup/recovery fixtures. Run only during the lead's unified Verify.
 
-Requires Linux renameat2, matching the production backup publisher. No environment,
-network, provider, real account, production path, or live database is used.
+Requires Linux renameat2, matching the production backup publisher. Linux reads only
+MULTIVIEW_PRIVATE_FIXTURE_ROOT to locate a precreated private data-disk scratch root.
+Linux ignores inherited TMPDIR. No network, provider, real account, production path, or live database is used.
 """
 
 import contextlib
@@ -45,9 +46,46 @@ def write(path, data, mode=0o600):
     path.chmod(mode)
 
 
+def temporary_fixture_directory():
+    prepared = os.environ.get('MULTIVIEW_PRIVATE_FIXTURE_ROOT')
+    parent_fd = None
+    if prepared is not None:
+        parent = backup.absolute_path(prepared)
+        if sys.platform == 'linux':
+            engineering = Path('/data/video-api-debugger-engineering')
+            backup.require(engineering in parent.parents and len(parent.relative_to(engineering).parts) == 2
+                           and all(backup.BACKUP_NAME.fullmatch(part) for part in parent.relative_to(engineering).parts),
+                           'fixture_root_must_use_dedicated_engineering_path')
+        parent_fd = backup.open_isolated_directory(parent)
+    else:
+        backup.require(sys.platform != 'linux', 'MULTIVIEW_PRIVATE_FIXTURE_ROOT_required_on_linux')
+        # Keep the existing local synthetic route, but reject a production TMPDIR
+        # before tempfile can create anything there. Linux never selects this route.
+        parent = Path(tempfile.gettempdir()).resolve(strict=True)
+        backup.require(parent != backup.PRODUCTION_BASE and backup.PRODUCTION_BASE not in parent.parents,
+                       'fixture_temporary_parent_must_be_isolated')
+        parent_fd = backup.open_directory(parent)
+    temporary = None
+    try:
+        before = os.fstat(parent_fd)
+        temporary = tempfile.TemporaryDirectory(prefix='sd2-private-backup-fixture-', dir=str(parent))
+        named = os.stat(parent, follow_symlinks=False)
+        backup.require(before.st_dev == named.st_dev and before.st_ino == named.st_ino
+                       and parent.resolve(strict=True) == parent, 'fixture_parent_identity_changed')
+        child_fd = backup.open_isolated_directory(Path(temporary.name))
+        os.close(child_fd)
+        return temporary
+    except BaseException:
+        if temporary is not None:
+            temporary.cleanup()
+        raise
+    finally:
+        os.close(parent_fd)
+
+
 class Fixture:
     def __init__(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix='sd2-private-backup-fixture-')
+        self.temporary = temporary_fixture_directory()
         self.root = Path(self.temporary.name).resolve()
         self.root.chmod(0o700)
         self.database = self.root / 'source.sqlite3'

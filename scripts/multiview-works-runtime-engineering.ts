@@ -3,8 +3,52 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, chmod, lchown, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, symlink, unlink, writeFile } from 'node:fs/promises';
+import { access, chmod, lchown, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+
+const FIXTURE_ROOT_BASE = '/data/video-api-debugger-engineering';
+const MANAGED_RELEASE_BASE = '/data/video-api-debugger/managed-releases';
+
+function safeFailure(error: unknown) {
+  const value = error && typeof error === 'object' ? error as { name?: unknown; code?: unknown; stack?: unknown } : null;
+  const name = typeof value?.name === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(value.name)
+    ? value.name : 'Error';
+  const code = typeof value?.code === 'string' && /^[A-Z0-9_]{1,64}$/.test(value.code)
+    ? value.code : 'ISOLATED_RUNTIME_FIXTURE_FAILED';
+  const location = typeof value?.stack === 'string'
+    ? value.stack.match(/(?:scripts\/multiview-works-runtime-engineering\.ts|src\/lib\/video\/multiview-works-runtime\.ts):\d+:\d+/)?.[0] || null
+    : null;
+  return { name, code, location };
+}
+
+async function isolatedFixtureRoot(sourceRoot: string) {
+  const source = path.basename(sourceRoot);
+  assert.match(source, /^[a-f0-9]{40}$/);
+  assert.equal(sourceRoot, path.join(MANAGED_RELEASE_BASE, source));
+  const configured = process.env.MULTIVIEW_PRIVATE_FIXTURE_ROOT;
+  assert.ok(configured && path.isAbsolute(configured) && path.normalize(configured) === configured);
+  const relative = path.relative(FIXTURE_ROOT_BASE, configured);
+  const parts = relative.split(path.sep);
+  assert.equal(parts.length, 2);
+  const runId = process.env.IMAGE_RECOVERY_GATE_RUN_ID;
+  assert.ok(runId && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(runId));
+  assert.equal(parts[0], runId);
+  assert.equal(parts[1], source);
+  const runRoot = path.join(FIXTURE_ROOT_BASE, parts[0]);
+  for (const directory of ['/data', FIXTURE_ROOT_BASE, runRoot, configured]) {
+    const info = await lstat(directory);
+    assert.ok(info.isDirectory() && !info.isSymbolicLink());
+    assert.equal(await realpath(directory), directory);
+  }
+  const uid = typeof process.geteuid === 'function' ? process.geteuid() : null;
+  assert.ok(uid !== null);
+  const [dataInfo, systemInfo, fixtureInfo] = await Promise.all([stat('/data'), stat('/'), stat(configured)]);
+  assert.notEqual(dataInfo.dev, systemInfo.dev);
+  assert.equal(fixtureInfo.dev, dataInfo.dev);
+  assert.equal(fixtureInfo.uid, uid);
+  assert.equal(fixtureInfo.mode & 0o777, 0o700);
+  return configured;
+}
 
 /** This separate mode uses real root-owned links; it never relaxes production ownership checks. */
 async function checkBuildAliases() {
@@ -87,7 +131,9 @@ async function main() {
   if (childIndex >= 0) {
     const directory = process.argv[childIndex + 1], scenario = process.argv[childIndex + 2];
     assert.ok(directory && path.isAbsolute(directory));
-    assert.ok((await realpath(directory)).startsWith(path.join(await realpath(process.cwd()), '.role-tests') + path.sep));
+    const sourceRoot = await realpath(process.cwd());
+    const fixtureRoot = await isolatedFixtureRoot(sourceRoot);
+    assert.ok((await realpath(directory)).startsWith(fixtureRoot + path.sep));
     assert.ok(path.basename(path.dirname(directory)).startsWith('multiview-works-runtime-'));
     process.env.DATABASE_URL = `file:${path.join(directory, 'unused-synthetic.db')}`;
     const runtime = await import('../src/lib/video/multiview-works-runtime');
@@ -138,10 +184,13 @@ async function main() {
 
   const sourceRoot = await realpath(process.cwd()), scratch = path.join(sourceRoot, '.role-tests');
   await mkdir(scratch, { recursive: true, mode: 0o700 });
-  const directory = await mkdtemp(path.join(scratch, 'multiview-works-runtime-'));
+  await chmod(scratch, 0o700);
+  const fixtureRoot = await isolatedFixtureRoot(sourceRoot);
+  const directory = await mkdtemp(path.join(fixtureRoot, 'multiview-works-runtime-'));
+  const evidenceDirectory = await mkdtemp(path.join(scratch, 'multiview-works-runtime-evidence-'));
   const checks: string[] = [];
-  const evidencePath = path.join(directory, 'receipt.json');
-  let completed = false;
+  const evidencePath = path.join(evidenceDirectory, 'receipt.json');
+  let completed = false, failure: ReturnType<typeof safeFailure> | null = null;
   try {
     for (const scenario of ['once', 'heartbeat', 'heartbeat-failure', 'unlocked', 'symlink', 'permissions']) {
       const scenarioRoot = path.join(directory, scenario), outputRoot = path.join(scenarioRoot, 'runtime');
@@ -171,11 +220,17 @@ async function main() {
       } finally { await lock.close(); }
     }
     completed = true;
+  } catch (error) {
+    failure = safeFailure(error);
+    throw error;
   } finally {
     // Keep the private isolated evidence for the batch receipt; no production cleanup.
     await writeFile(evidencePath, JSON.stringify({ schema: 'isolated-multiview-works-runtime.v1', completed, checks,
-      production: false, workConsumed: 0, providerCalls: 0, evidencePath }, null, 2), { mode: 0o600 });
+      production: false, workConsumed: 0, providerCalls: 0, evidencePath, ...(failure ? { failure } : {}) }, null, 2), { mode: 0o600 });
   }
   console.log(JSON.stringify({ schema: 'isolated-multiview-works-runtime.v1', completed, checks, evidencePath }));
 }
-void main().catch(() => { console.error('isolated_multiview_works_runtime_fixture_failed'); process.exitCode = 1; });
+void main().catch(error => {
+  console.error(JSON.stringify({ schema: 'isolated-multiview-works-runtime.v1', completed: false, failure: safeFailure(error) }));
+  process.exitCode = 1;
+});
