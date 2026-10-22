@@ -51,6 +51,17 @@ export const DEPLOYED_FIELDS = ['schema', 'publicationRun', 'publicationManifest
   'migrationReceiptSha256', 'backupProofSha256', 'backupSha256'];
 export const DEPLOYED_CANVAS_FIELDS = ['schema', 'migrationRun', 'migrationManifestSha256',
   'migrationReceiptSha256', 'backupProofSha256', 'backupSha256'];
+export const R08_RECOVERED_GUARD = Object.freeze({
+  schema: 'sd2-multiview-r08-recovered-guard.v1', runId: '7370f24f-6cba-42ae-9602-d49124f3abae',
+  manifestSha256: 'a98ce0bada88446b8ebbb2f4c0e21fdc94880acf6e608d78dc61cc44f77a9a57',
+  fixedGuardSha256: 'a86481fc85a827788e564cb1339184b64ed4e812cb53043365f04f69491b7fc2',
+  guardBuildReceiptSha256: 'edc34f32fa176ec487b665525d4ef17597a5a83c433b551aafcd929ac153c517',
+  guardImmutableSuccessSha256: '44e33faaa301dc00eb8c77e5459f6adbf9e3d35d1a54c8cccd2189437ca187ee',
+  recoveryCompleteSha256: '54b300fbb7c1bccff8d0e8648da64bcfbea566c15d002663ef8654d488634145',
+  switchCommandSha256: '487eb85cb861aa0d8ce2def3f5c421f4188141cc0d7133fd425bc9f592b9eec7',
+  proofSha256: '6918a2124c9943c6dc7076d9d9bda3d0821b25076a4bde48e8e4cf42c60e1edb',
+  proofCommandSha256: 'c49d8b0f5aa8d2f88f2cc8020fbc1950f4804d15114366cdb5e1f9b38c5afe91',
+});
 export function assertDeployedCanvasInput(value) {
   keys(value, DEPLOYED_CANVAS_FIELDS);
   assert.equal(value.schema, 'sd2-deployed-canvas-video-batch-schema-input.v1');
@@ -195,6 +206,18 @@ export function validatePlan(plan, original, now = Date.now()) {
   } else {
     assert.equal(plan.deployedUsageProof || null, null, 'Historical proof payload is only valid in deployed-schema mode');
   }
+  if (c.recoveredGuardBaseline) {
+    assert.deepEqual(c.recoveredGuardBaseline, R08_RECOVERED_GUARD, 'Only the exact retained R08/c9 recovery may supply the live baseline');
+    assert.ok(c.deployedUsageSchema && c.deployedCanvasBatchSchema && c.privateMultiviewInstall);
+    assert.equal(c.normalContinuation, null); assert.equal(plan.reuseBuilds, null);
+    assert.notEqual(c.recoveryRunId, R08_RECOVERED_GUARD.runId);
+    assert.equal(c.baselineSource, 'c9f0a60d753b286db470626ad33c1987ff1c72bf');
+    assert.equal(c.sourceBase, c.baselineSource);
+    assert.equal(c.baselineVersion, '0.103.0+multiview-private-guard.1');
+    assert.equal(c.baselineBuild, 'B7Ef-SggrUGg4-T5FAA_0');
+    for (const source of [c.mainSource, c.recoveryGuardSource])
+      assert.ok(!['4e1fe5b888c1fdb20a9cbccdd6517b84452fa604', c.baselineSource].includes(source), 'R08 builds cannot become a fresh pair');
+  }
   assert.match(c.recoveryRunId, uuid); assert.notEqual(c.recoveryRunId, profile.successfulRun);
   for (const key of ['mainSource', 'recoveryGuardSource', 'baselineSource', 'sourceBase', 'guardDisplaySource']) assert.match(c[key], sha);
   assert.notEqual(c.mainSource, c.recoveryGuardSource);
@@ -248,6 +271,15 @@ export function checkSources(repo, c) {
     assert.equal(JSON.parse(git(repo, ['show', source + ':package.json'])).version, c.versions[kind]);
   assert.equal(git(repo, ['rev-parse', c.mainBranch]), c.mainSource, 'Main branch moved');
   assert.equal(git(repo, ['rev-parse', c.guardReference]), c.recoveryGuardSource, 'Guard branch moved');
+  if (c.recoveredGuardBaseline) {
+    assert.deepEqual(c.recoveredGuardBaseline, R08_RECOVERED_GUARD);
+    const create = 'src/app/api/tasks/create/route.ts';
+    assert.equal(git(repo, ['show', c.mainSource + ':' + create]), git(repo, ['show', '4e1fe5b888c1fdb20a9cbccdd6517b84452fa604:' + create]));
+    assert.equal(git(repo, ['show', c.recoveryGuardSource + ':' + create]), git(repo, ['show', 'c9f0a60d753b286db470626ad33c1987ff1c72bf:' + create]));
+    for (const [kind, source] of [['main', c.mainSource], ['guard', c.recoveryGuardSource]])
+      assert.equal(git(repo, ['show', source + ':src/lib/pricing/build-mode.ts']),
+        `export const PRICING_ADMIN_WRITES_ENABLED: boolean = ${kind === 'main' ? 'true' : 'false'};`);
+  }
   if (c.deployedUsageSchema) for (const file of ['prisma/migrations/20261021073000_usage_attribution/migration.sql',
     'ops/sd2-usage-attribution-migrate.py', 'prisma/schema.prisma', 'ops/sd2-usage-role-start.mjs']) {
     if (file === 'prisma/schema.prisma' && c.canvasVideoBatchSchema) {

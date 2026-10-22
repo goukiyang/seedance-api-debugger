@@ -10,8 +10,8 @@
     "root": "/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-22-multiview-default/implementation",
     "template": "release-multiview-private-r01",
     "wrapper": "run-multiview-private-r01.mjs",
-    "controllerCount": 53,
-    "controllerSetSha256": "d809bc276e622966781ed0e9a94df759e1cc2a2ae3bae08422c7cece35c01133",
+    "controllerCount": 54,
+    "controllerSetSha256": "2eae10e7754dcf72ac24482b0ea9aae83a1a5b3dda5d37eb604436088e0f2a69",
     "wrapperSha256": "8b4f085d8181d026d8daab84f61e0428b24ab16eb20f5eae52924a94f7df2830",
     "changed": [
       "candidate-inputs.mjs",
@@ -48,6 +48,7 @@
       "normal-continuation-engineering.mjs",
       "normal-continuation.mjs",
       "preflight-resume-engineering.mjs",
+      "recovered-guard-baseline.mjs",
       "runtime-source-engineering.mjs",
       "usage-role-control.mjs",
       "usage-role-engineering.mjs",

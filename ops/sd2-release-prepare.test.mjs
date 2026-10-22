@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { verifyTemplate, contractData, validatePlan, checkSources, reuseInput, renderWrapper, prepare, REUSE_SCHEMA,
   DEPLOYED_SCHEMA, DEPLOYED_FIELDS, DEPLOYED_CANVAS_FIELDS, deployedProofInput,
-  CONTINUATION_V2, CONTINUATION_COMMON_FIELDS, assertContinuationInput, UNPUBLISHED_PAIR, profile } from './sd2-release-prepare.mjs';
+  CONTINUATION_V2, CONTINUATION_COMMON_FIELDS, assertContinuationInput, UNPUBLISHED_PAIR, profile, R08_RECOVERED_GUARD } from './sd2-release-prepare.mjs';
 
 const materials = process.argv[2];
 assert.ok(materials && path.isAbsolute(materials), 'Pass the original private release materials directory');
@@ -65,6 +65,7 @@ await test('Exact unpublished pair retains original sealed bytes and rejects cha
   try {
     const value = structuredClone(originalPlan); value.contract.recoveryRunId = randomUUID();
     value.contract.privateMultiviewInstall = false;
+    value.contract.recoveredGuardBaseline = null;
     value.liveCapture.observedAt = new Date(now).toISOString();
     value.reuseBuilds = { sourceRun: pin.run, directory };
     fs.copyFileSync(path.join(originalPlan.outputRoot, pin.run, 'manifest.json'), path.join(directory, 'manifest.json'));
@@ -106,6 +107,30 @@ const continuationPlan = () => {
     key === 'schema' ? 'sd2-deployed-canvas-video-batch-schema-input.v1' : key.endsWith('Sha256') ? 'a'.repeat(64) : randomUUID()]));
   return value;
 };
+await test('Recovered guard producer only admits the pinned R08/c9 source and two new full builds', async () => {
+  const consumer = await import(pathToFileURL(path.join(activeTemplate.base, activeTemplate.templateName, 'recovered-guard-baseline.mjs')));
+  assert.deepEqual(consumer.R08_RECOVERED_GUARD, R08_RECOVERED_GUARD);
+  const make = () => {
+    const value = continuationPlan(); value.reuseBuilds = null; value.contract.normalContinuation = null;
+    const c = value.contract; c.recoveredGuardBaseline = structuredClone(R08_RECOVERED_GUARD); c.privateMultiviewInstall = true;
+    c.baselineSource = c.sourceBase = 'c9f0a60d753b286db470626ad33c1987ff1c72bf';
+    c.baselineVersion = '0.103.0+multiview-private-guard.1'; c.baselineBuild = 'B7Ef-SggrUGg4-T5FAA_0';
+    c.mainSource = 'a'.repeat(40); c.recoveryGuardSource = 'b'.repeat(40);
+    Object.assign(value.liveCapture, { source: c.baselineSource, version: c.baselineVersion, build: c.baselineBuild });
+    return value;
+  };
+  validatePlan(make(), original, now);
+  for (const key of Object.keys(R08_RECOVERED_GUARD)) {
+    const bad = make(); delete bad.contract.recoveredGuardBaseline[key]; assert.throws(() => validatePlan(bad, original, now));
+    const changed = make(); changed.contract.recoveredGuardBaseline[key] = 'wrong'; assert.throws(() => validatePlan(changed, original, now));
+  }
+  for (const change of [v => { v.reuseBuilds = plan.reuseBuilds; }, v => { v.contract.privateMultiviewInstall = false; },
+    v => { v.contract.recoveredGuardBaseline.allowOldBuild = true; }, v => { v.contract.sourceBase = 'a'.repeat(40); },
+    v => { v.contract.deployedCanvasBatchSchema = null; }, v => { v.contract.mainSource = v.contract.baselineSource; },
+    v => { v.contract.recoveryRunId = R08_RECOVERED_GUARD.runId; }, v => { v.contract.baselineBuild += '-other'; }]) {
+    const bad = make(); change(bad); assert.throws(() => validatePlan(bad, original, now));
+  }
+});
 await test('Only exact v2 permits both deployed schemas and same original pair reuse', async () => {
   const value = continuationPlan(); validatePlan(value, original, now);
   const consumer = await import(pathToFileURL(path.join(activeTemplate.base, activeTemplate.templateName, 'normal-continuation.mjs')));
