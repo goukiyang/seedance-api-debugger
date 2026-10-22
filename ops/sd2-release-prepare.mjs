@@ -19,6 +19,15 @@ export const DEPLOYED_SCHEMA = 'sd2-deployed-usage-schema-input.v1';
 export const DEPLOYED_FIELDS = ['schema', 'publicationRun', 'publicationManifestSha256', 'switchCompleteSha256',
   'finalProofSha256', 'finalProofCommandSha256', 'migrationRun', 'migrationManifestSha256', 'migrationBeforeSha256',
   'migrationReceiptSha256', 'backupProofSha256', 'backupSha256'];
+export const DEPLOYED_CANVAS_FIELDS = ['schema', 'migrationRun', 'migrationManifestSha256',
+  'migrationReceiptSha256', 'backupProofSha256', 'backupSha256'];
+export function assertDeployedCanvasInput(value) {
+  keys(value, DEPLOYED_CANVAS_FIELDS);
+  assert.equal(value.schema, 'sd2-deployed-canvas-video-batch-schema-input.v1');
+  assert.match(value.migrationRun, uuid);
+  for (const key of DEPLOYED_CANVAS_FIELDS.filter(key => key.endsWith('Sha256'))) assert.match(value[key], sha256);
+  return value;
+}
 const read = file => {
   const stat = fs.lstatSync(file);
   assert.ok(stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1, 'Expected an ordinary single-link file: ' + file);
@@ -48,16 +57,24 @@ export function verifyTemplate(materialsRoot, { originalOnly = false } = {}) {
   assert.deepEqual(json(path.join(base, profile.successfulRun, 'control-freeze.json')).privateSha256, hashes(files));
   if (!profile.promotion || originalOnly) return { base, files, wrapper: wrapper.toString('utf8'), templateName: profile.template };
   const promoted = profile.promotion;
-  keys(promoted, ['template', 'wrapper', 'controllerCount', 'controllerSetSha256', 'wrapperSha256', 'changed', 'added']);
+  keys(promoted, ['template', 'wrapper', 'controllerCount', 'controllerSetSha256', 'wrapperSha256', 'changed', 'added',
+    ...(Object.hasOwn(promoted, 'root') ? ['root'] : [])]);
   for (const value of [promoted.template, promoted.wrapper]) assert.ok(path.basename(value) === value && !value.includes('..'));
-  const promotedFiles = moduleFiles(path.join(base, promoted.template));
+  let promotedBase = base;
+  if (Object.hasOwn(promoted, 'root')) {
+    assert.ok(typeof promoted.root === 'string' && promoted.root.length > 0);
+    assert.ok(path.isAbsolute(promoted.root));
+    promotedBase = fs.realpathSync(promoted.root);
+    assert.ok(promotedBase.startsWith(fs.realpathSync('/Volumes/Data/Projects/video-api-debugger/docs/materials') + path.sep));
+  }
+  const promotedFiles = moduleFiles(path.join(promotedBase, promoted.template));
   assert.equal(Object.keys(promotedFiles).length, promoted.controllerCount);
   assert.equal(digest(JSON.stringify(hashes(promotedFiles))), promoted.controllerSetSha256, 'Promoted controller differs from review');
   assert.deepEqual(Object.keys(promotedFiles).filter(file => !Object.hasOwn(files, file)).sort(), [...promoted.added].sort());
   assert.deepEqual(Object.keys(files).filter(file => !promotedFiles[file]?.equals(files[file])).sort(), [...promoted.changed].sort());
-  const promotedWrapper = read(path.join(base, promoted.wrapper));
+  const promotedWrapper = read(path.join(promotedBase, promoted.wrapper));
   assert.equal(digest(promotedWrapper), promoted.wrapperSha256);
-  return { base, files: promotedFiles, wrapper: promotedWrapper.toString('utf8'), templateName: promoted.template,
+  return { base: promotedBase, files: promotedFiles, wrapper: promotedWrapper.toString('utf8'), templateName: promoted.template,
     originalFiles: files, originalSuccessPreserved: true };
 }
 
@@ -119,6 +136,13 @@ export function validatePlan(plan, original, now = Date.now()) {
     assertCanvasBatchSchemaInput(c.canvasVideoBatchSchema);
     assert.ok(c.deployedUsageSchema, 'Additive canvas migration retains the deployed usage schema proof');
     assert.equal(plan.reuseBuilds, null, 'A new schema pair requires two complete fresh builds');
+  }
+  if (c.deployedCanvasBatchSchema) {
+    assertDeployedCanvasInput(c.deployedCanvasBatchSchema);
+    assert.ok(c.canvasVideoBatchSchema && c.deployedUsageSchema);
+    assert.equal(c.normalContinuation, null);
+    assert.notEqual(c.deployedCanvasBatchSchema.migrationRun, c.recoveryRunId);
+    assert.equal(plan.reuseBuilds, null, 'Deployed canvas adoption requires complete fresh main and guard builds');
   }
   if (c.deployedUsageSchema !== null && c.deployedUsageSchema !== undefined) {
     const value = c.deployedUsageSchema;
@@ -200,7 +224,10 @@ export function checkSources(repo, c) {
       const previous = Buffer.from(execFileSync('git', ['-C', repo, 'show', c.baselineSource + ':' + file]));
       for (const source of [c.mainSource, c.recoveryGuardSource]) {
         const next = Buffer.from(execFileSync('git', ['-C', repo, 'show', source + ':' + file]));
-        assertCanvasBatchPrismaExtension(previous, next, c.canvasVideoBatchSchema);
+        if (c.deployedCanvasBatchSchema) {
+          assert.equal(digest(previous), c.canvasVideoBatchSchema.newPrismaSha256, 'Published canvas schema changed');
+          assert.equal(digest(next), c.canvasVideoBatchSchema.newPrismaSha256, 'Adopted canvas schema changed');
+        } else assertCanvasBatchPrismaExtension(previous, next, c.canvasVideoBatchSchema);
       }
       continue;
     }

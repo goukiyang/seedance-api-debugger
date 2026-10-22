@@ -2,7 +2,7 @@ import packageInfo from '../../package.json';
 import { PRICING_ADMIN_WRITES_ENABLED } from './pricing/build-mode';
 
 export const release = { version: packageInfo.version, channel: 'production', summary: PRICING_ADMIN_WRITES_ENABLED
-  ? '完善画布删除撤销、分组与快捷操作，支持一次生成2或4个视频；整理分镜、素材和输入复用，修复图片对比恢复，并调整全屏预览与模块横幅。'
+  ? '修复“我的项目”和项目管理列表读取失败，减少列表打开时的等待；项目删除保护保持不变。'
   : '原任务、上传和高清结果保留。视频批次可查看和停止未开始项，暂不开始新批次；API质量设置和费率暂时只读，已保存配置不会自动改价。' };
 
 function numericOrder(a: string, b: string) {

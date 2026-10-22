@@ -20,7 +20,7 @@ async function main() {
   let countRows = new Map<string, number>();
   let budgetAccount: Row | null = null, invite: Row | null = null;
   let usage = false, priorFlow = false, failCas = false, failAudit = false;
-  let casCalls = 0, inviteUses = 0;
+  let casCalls = 0, inviteUses = 0, transactionCalls = 0, countCalls = 0;
   const tx: Row = {
     project: {
       create: async ({ data }: Row) => {
@@ -71,8 +71,9 @@ async function main() {
   };
   const countTables = ['videoCard', 'videoTask', 'canvasDocument', 'referenceAlbum', 'referenceImage', 'providerApiRequest',
     'costLedger', 'costAllocation', 'projectBudgetLedger', 'approvalRecord', 'contentAuditLog', 'feishuRequirement', 'reviewCard', 'notification', 'toolFlow'];
-  for (const table of countTables) tx[table] = { count: async () => countRows.get(table) || 0 };
+  for (const table of countTables) tx[table] = { count: async () => { countCalls++; return countRows.get(table) || 0; } };
   const mock = new Proxy({ $transaction: async (fn: (db: Prisma.TransactionClient) => Promise<unknown>) => {
+    transactionCalls++;
     const before = structuredClone({ projects, members, logs, settings });
     try { return await fn(tx as unknown as Prisma.TransactionClient); }
     catch (error) { ({ projects, members, logs, settings } = before); throw error; }
@@ -81,7 +82,8 @@ async function main() {
   Reflect.set(globalThis, 'prismaSqlitePragmasStarted', true);
   globalThis.fetch = forbidden;
   const { createTeamProject, getProjectCreateOperation, closeProjectCreateOperation, joinProjectInvite } = await import('../src/lib/projects/operations');
-  const { assertProjectActiveInTransaction, getProjectDeletionBlockers, compareAndSetProject, projectListOperationProjection } = await import('../src/lib/projects/permissions');
+  const { assertProjectActiveInTransaction, getProjectDeletionBlockers, compareAndSetProject, projectListOperationProjection,
+    readProjectOperationProjection } = await import('../src/lib/projects/permissions');
   const user: SessionUser = { id: 'owner', name: 'Fixture', username: 'fixture', email: '', role: 'user', account_type: 'internal',
     user_profile: 'other', feature_profile_id: null, status: 'active', expires_at: null,
     feishu: { user_id: 'fixture', open_id: null, union_id: null, tenant_key: null, employee_no: null, department_ids: [], last_sync_at: null } };
@@ -146,6 +148,44 @@ async function main() {
   assert.ok((await getProjectDeletionBlockers(db, firstId)).includes('协作或管理历史')); logs.pop();
   checks.push('all_project_relationships_history_unknown_and_nonzero_budget_block_delete');
   const listProject = { id: firstId, type: 'team', status: 'active', updated_at: projects[0].updated_at as Date };
+  const transactionsBeforePreview = transactionCalls;
+  for (const table of [...countTables, 'projectInvite', 'projectMember']) {
+    countRows.set(table, 1);
+    assert.equal((await readProjectOperationProjection(db, listProject, true)).can_delete, false, table);
+    countRows.clear();
+  }
+  usage = true;
+  assert.equal((await readProjectOperationProjection(db, listProject, true)).can_delete, false);
+  usage = false; priorFlow = true;
+  assert.equal((await readProjectOperationProjection(db, listProject, true)).can_delete, false);
+  priorFlow = false;
+  budgetAccount = { id: 'account', frozen_credits: 1 };
+  assert.equal((await readProjectOperationProjection(db, listProject, true)).can_delete, false);
+  budgetAccount = null;
+  logs.push({ action: 'unknown_project_history', target_type: 'project', target_id: firstId, detail: null });
+  assert.equal((await readProjectOperationProjection(db, listProject, true)).can_delete, false);
+  logs.pop();
+  const noReads = new Proxy({}, { get: forbidden }) as Prisma.TransactionClient;
+  assert.equal((await readProjectOperationProjection(noReads, listProject, false)).can_delete, false);
+  for (const type of ['personal', 'system']) {
+    assert.equal((await readProjectOperationProjection(noReads, { ...listProject, type }, true)).can_delete, false);
+  }
+  countRows.set('videoCard', 1);
+  const beforeEarlyExit = countCalls;
+  const concurrentPreviews = await Promise.all(Array.from({ length: 48 }, () => readProjectOperationProjection(db, listProject, true)));
+  assert.ok(concurrentPreviews.every(result => result.can_delete === false));
+  assert.equal(countCalls - beforeEarlyExit, 48);
+  countRows.set('videoTask', 1);
+  const fullBlockers = await getProjectDeletionBlockers(db, firstId);
+  assert.ok(fullBlockers.includes('视频卡') && fullBlockers.includes('生成任务'));
+  countRows.clear();
+  assert.equal((await readProjectOperationProjection(db, listProject, true)).can_delete, true);
+  assert.equal(transactionCalls, transactionsBeforePreview);
+  const failedRead = { ...tx, videoCard: { count: async () => { throw new Error('fixture read unavailable'); } } };
+  await assert.rejects(readProjectOperationProjection(failedRead as unknown as Prisma.TransactionClient, listProject, true), /fixture read unavailable/);
+  checks.push('48_read_previews_never_open_transactions_and_stop_at_first_proven_blocker');
+  checks.push('read_previews_preserve_all_blockers_skip_unauthorized_reads_and_propagate_read_failure');
+  checks.push('actual_delete_full_scan_still_collects_every_blocker');
   const emptyBlockers = await getProjectDeletionBlockers(db, firstId);
   const emptyProjection = projectListOperationProjection(listProject, true, emptyBlockers);
   assert.deepEqual(emptyProjection, {
@@ -179,13 +219,22 @@ async function main() {
   const postStart = listRouteSource.indexOf('export async function POST');
   assert.ok(viewListStart >= 0 && legacyListStart > viewListStart && postStart > legacyListStart);
   for (const source of [listRouteSource.slice(viewListStart, legacyListStart), listRouteSource.slice(legacyListStart, postStart)]) {
-    assert.match(source, /const operationFields = await getProjectListOperationFields\(project, canManageProject\)/);
+    assert.match(source, /const operationFields = await readProjectOperationProjection\(prisma, project, canManageProject\)/);
     assert.match(source, /\.\.\.operationFields/);
   }
-  const listHelperSource = listRouteSource.slice(listRouteSource.indexOf('async function getProjectListOperationFields'), listRouteSource.indexOf('export async function GET'));
-  assert.match(listHelperSource, /canManageProject && !\['personal', 'system'\]\.includes\(project\.type\)\s*\? await prisma\.\$transaction\(tx => getProjectDeletionBlockers\(tx, project\.id\)\)\s*: null/);
-  assert.equal((listHelperSource.match(/getProjectDeletionBlockers\(/g) || []).length, 1);
-  assert.match(listHelperSource, /return projectListOperationProjection\(project, canManageProject, blockers\)/);
+  const getSource = listRouteSource.slice(listRouteSource.indexOf('export async function GET'), postStart);
+  assert.doesNotMatch(getSource, /\$transaction|getProjectDeletionBlockers\(/);
+  assert.doesNotMatch(getSource, /Internal server error/);
+  assert.match(getSource, /PROJECT_LIST_BUSY/);
+  assert.match(getSource, /status: busy \? 503 : 500/);
+  const detailSource = readFileSync(path.join(root, 'src/app/api/projects/[id]/route.ts'), 'utf8');
+  const detailCapabilities = detailSource.slice(detailSource.indexOf('async function projectCapabilities'), detailSource.indexOf('function boundedPage'));
+  assert.match(detailCapabilities, /readProjectOperationProjection\(prisma, project, access\.canManageProject\)/);
+  assert.doesNotMatch(detailCapabilities, /\$transaction/);
+  const deleteSource = detailSource.slice(detailSource.indexOf('export async function DELETE'));
+  assert.match(deleteSource, /prisma\.\$transaction\(async \(tx\) =>/);
+  assert.match(deleteSource, /getProjectDeletionBlockers\(tx, project\.id\)/);
+  assert.doesNotMatch(deleteSource, /stopAfterFirst/);
   checks.push('legacy_and_paginated_list_share_version_and_capability_projection_with_manager_scoped_single_empty_check');
   checks.push('list_capabilities_distinguish_empty_history_nonmanager_unchecked_and_immutable_projects');
   const project = projects[0];

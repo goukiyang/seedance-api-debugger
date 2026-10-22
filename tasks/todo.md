@@ -2,6 +2,29 @@
 
 ## 当前入口
 
+## PROJ-ERR01/02 我的项目列表读取失败（2026-10-21）
+
+用户原文：“我的项目页面出错你自己看下，项目列表读取失败Internal server error，没有把读取失败当成空列表。”本轮限定项目列表/详情的同因读取及必要发布，不删除项目、不更改账本/模型、不重发生成请求；此前RESTORE-R04已单张受理但供应商失败、5点全退，成功出图闭环仍缺证，不混入本轮。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| PROJ-ERR01 | 排查项目列表读取失败 | 找到实际报错和原因，确认影响与修复落点 | 已完成：实际P1008/P2028堆栈命中逐项目删除检查事务 |
+| PROJ-ERR02 | 修复并保护发布 | 列表不再开启逐项目写事务，删除保护保留，构建及上线检查通过 | 进行中：业务及接续修正已完成，本地统一检查通过；待Linux保护检查、整对构建及发布 |
+
+证据：实际服务仍86dc32f2/v0.102.0。/var/log/video-api-debugger/sd2-gray.log出现[Projects] List error，Prisma5.22.0 P1008/P2028及transaction expired（5秒限额，实际20–25秒）；堆栈同时落入分页与兼容列表Promise.all，最大已见index46。当前只读Project表仍有36个active团队项目、20个archived团队项目，数据库WAL；这证明不是空目录，不泛称逐项数据完整性已验。日志还出现workspace/credits/preferences等超时，同期影响成立，不据此断定全部仅有一个原因。
+
+根因：cff99a27新增GET逐项目getProjectListOperationFields→prisma.$transaction→getProjectDeletionBlockers，每个项目执行约20项关联查询。已核对匹配引擎605197351a3c8bdd595af2d2a9bc3025bca48ea2的[Prisma SQLite源码](https://raw.githubusercontent.com/prisma/prisma-engines/605197351a3c8bdd595af2d2a9bc3025bca48ea2/quaint/src/connector/sqlite/native/mod.rs)169–175：事务使用BEGIN IMMEDIATE，即使这里只读也提前争用写锁；[官方事务说明](https://www.prisma.io/docs/orm/v6/prisma-client/queries/transactions)建议缩短事务。无需新增依赖、换数据库或放宽超时。修复复用当前权限helper，GET直接只读预览并遇首个阻碍即停；真实DELETE保事务内全部检查/CAS/权限/审计。普通与管理列表、详情使用同入口，查询失败继续真实报错，不回空列表。服务端忙返回中文503，未知错误中文500，内部堆栈只留日志。保个人/系统及无管理权限不可删除，保隐藏/历史/预算阻碍。
+
+执行：父线程直接修7文件，独立复杂执行者仅并行准备发布控制输入（不写业务、不测试/SSH/部署、不提交）。安全APP分支codex/project-list-timeout-20261021由a600fc84开始，已核实际线上源为祖先；正式根脏改保留。拟补丁0.102.1，既有更新检测沿用、摘要已改，尚未发布。整批结束后统一检查现有项目工程fixture/类型/完整Linux构建，再保护发布；不跑收费任务或全站功能回归。本次用户明确报错排查范围内可核项目读取，最终仍区分工程证据和手验。回退仅程序，不回业务数据，现有usage/canvasBatch/计费/HD/上传/原请求合同必须保留且无重复DDL。
+
+守门员start已运行：debug/ui、L3-visible-runtime，无block warning；实际发布保护按L4处理，项目明确不自动独立审核，父线程统一Review。当前没有分级/归类误判。关键日志/完成证据归正式根docs/materials/2026-10-21-project-list-timeout/implementation；后续更新本条，不另建平行工单。
+
+阶段记录：原APP的tsx依赖为其它平台，未运行用例；改用本机已安装且匹配的tsx运行同一脚本，12组隔离内存用例通过（含48并发只读预览不启事务、全部删除阻碍及读失败透传），无真实DB/业务调用。这不冒充SQLite并发或页面验收。随后类型检查仅发现新增测试替身一处强转声明，已按unknown中转修正，待整批统一复核。源码Review确认前端原有失败非空列表、重试与旧成功结果保留逻辑适配中文错误，无需另改前端。
+
+发布前置：原LibTV r05仅支持首次批次表迁移，后续正常发布需明确采用已成功迁移的原证与备份，旧prepare亦把已部署新schema误按首次插入判断。发布执行者在新独立控制包补只读接续及正反用例，保留旧包/原证/首次路径，不重跑DDL、不去掉保护、不停站试门。现网仍v0.102.0；本轮新main及相容guard将整对完整构建，guard关闭新批次/后台费率写且保同一查询修复，不混旧成功pair。
+
+2026-10-22 01:43Z统一本地复核：项目操作fixture R02全12组、prepare25项、新接续源校验fixture、tsc --noEmit --incremental false及diff检查全部退出0；同lead源码复核完成，尚未Linux原生16组/完整构建，不冒上线许可。r06新增采用原批次迁移证据和只读schema检查，只写本次发布证明、不重跑DDL；旧r05原包不改。关键原证/新包及哈希在正式根本轮implementation。Chrome xiaobo现有后台页签属其它浏览器会话，未接管；本聊天原站内页签连接超时后，独立BrowserSkill连接成功但借用确认60秒超时，已stop fscx，不自动重复请求或换工具绕过。当前没有新页面读证，功能仍未验，服务器代码及发布工作继续。
+
 - [x] LIB01/LIB02（2026-10-21，已部署待用户手验）：[LibTV细节统一工单v1.3.0/R04](todo/2026-10-21-libtv-detail-fixes-preflight.md)§14全部W1–W12完成实现与配套工程检查，正常run `05d24c02-b3f3-4041-88e3-464b98ecac22`于21:46:52Z发布v0.102.0，运行源`86dc32f2`、BUILD `144JweHixHdObEov_wdAS`；相容guard `c25663b5`已完整构建保留。16组Linux控制、main/guard完整构建、同lead Review与公网8页53资源/9工具登录边界/2批次API边界通过。原writer自然排尽后一致备份，仅加2表9索引，原业务行/价格/历史保护保持；不回业务数据。原失败及构建时间保留，详情见原单及资料索引。无浏览器、收费生成或独立reviewer；A01–A22与真实旧客户端更新提醒仍用户手验。原模板收费R04另存，不纳此批。
 
 | 编号 | 任务内容 | 完成标准 | 当前状态 |

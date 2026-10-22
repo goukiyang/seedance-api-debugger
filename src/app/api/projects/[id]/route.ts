@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
-import { assertCanManageProject, assertCanViewProject, compareAndSetProject, getProjectDeletionBlockers, logProjectActionInTransaction, projectStatusVersion, ProjectVersionConflictError } from '@/lib/projects/permissions';
+import { assertCanManageProject, assertCanViewProject, compareAndSetProject, getProjectDeletionBlockers, logProjectActionInTransaction, projectStatusVersion, ProjectVersionConflictError, readProjectOperationProjection } from '@/lib/projects/permissions';
 import { getProjectBudgetSummary } from '@/lib/projects/budget';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { getVideoCardSummaryMap, serializeVideoCardSummary } from '@/lib/video-cards/summary';
@@ -31,15 +31,13 @@ function expectedProjectVersion(body: Record<string, unknown>) {
 
 async function projectCapabilities(access: Awaited<ReturnType<typeof assertCanViewProject>>) {
   const project = access.project!;
-  const mutableType = !['personal', 'system'].includes(project.type);
-  const blockers = access.canManageProject && mutableType
-    ? await prisma.$transaction((tx) => getProjectDeletionBlockers(tx, project.id)) : [];
+  const operations = await readProjectOperationProjection(prisma, project, access.canManageProject);
   return {
     role: access.role, can_manage_project: access.canManageProject, can_manage_members: access.canManageMembers,
     can_manage_assets: access.canManageAssets, can_generate: access.canGenerate,
-    can_archive: access.canManageProject && mutableType && ['active', 'locked'].includes(project.status),
-    can_restore: access.canManageProject && mutableType && project.status === 'archived',
-    can_delete: access.canManageProject && mutableType && blockers.length === 0,
+    can_archive: operations.can_archive,
+    can_restore: operations.can_restore,
+    can_delete: operations.can_delete,
   };
 }
 

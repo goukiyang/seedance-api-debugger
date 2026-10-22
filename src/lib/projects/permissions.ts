@@ -303,6 +303,19 @@ export function projectListOperationProjection(
   };
 }
 
+export async function readProjectOperationProjection(
+  db: Prisma.TransactionClient,
+  project: { id: string; type: string; status: string; updated_at: Date },
+  canManageProject: boolean,
+) {
+  // This is a UI preview. The DELETE transaction rechecks the complete contract.
+  // An interactive SQLite transaction here would acquire a writer lock for a read.
+  const blockers = canManageProject && !['personal', 'system'].includes(project.type)
+    ? await getProjectDeletionBlockers(db, project.id, { stopAfterFirst: true })
+    : null;
+  return projectListOperationProjection(project, canManageProject, blockers);
+}
+
 export class ProjectVersionConflictError extends AuthError {
   readonly details: { code: string; current: ReturnType<typeof projectStatusVersion> };
   constructor(project: { status: string; updated_at: Date }) {
@@ -323,11 +336,16 @@ export async function compareAndSetProject(
   if (changed.count !== 1) throw new ProjectVersionConflictError(project);
 }
 
-export async function getProjectDeletionBlockers(tx: Prisma.TransactionClient, projectId: string) {
+export async function getProjectDeletionBlockers(
+  tx: Prisma.TransactionClient,
+  projectId: string,
+  options: { stopAfterFirst?: boolean } = {},
+) {
   const blockers: string[] = [];
   const project = await tx.project.findUnique({ where: { id: projectId }, select: { type: true, status: true } });
   if (!project || !['team', 'public'].includes(project.type)) blockers.push('项目类型待核对');
   if (!project || !['active', 'locked', 'archived'].includes(project.status)) blockers.push('项目状态待核对');
+  if (options.stopAfterFirst && blockers.length) return blockers;
   const checks = [
     ['视频卡', () => tx.videoCard.count({ where: { project_id: projectId } })],
     ['生成任务', () => tx.videoTask.count({ where: { project_id: projectId } })],
@@ -348,17 +366,25 @@ export async function getProjectDeletionBlockers(tx: Prisma.TransactionClient, p
     ['成员退出或未知角色历史', () => tx.projectMember.count({ where: { project_id: projectId,
       OR: [{ status: { not: 'active' } }, { role: { notIn: ['project_owner', 'editor', 'member', 'viewer'] } }] } })],
   ] as const;
-  for (const [label, count] of checks) if (await count() > 0) blockers.push(label);
+  for (const [label, count] of checks) {
+    if (await count() > 0) {
+      blockers.push(label);
+      if (options.stopAfterFirst) return blockers;
+    }
+  }
   const usage = await tx.$queryRaw<Array<{ found: number }>>`SELECT 1 AS found FROM "UsageAttribution" WHERE "project_id" = ${projectId} LIMIT 1`;
   if (usage.length) blockers.push('使用历史');
+  if (options.stopAfterFirst && blockers.length) return blockers;
   const priorFlowRuns = await tx.$queryRaw<Array<{ found: number }>>`SELECT 1 AS found FROM "ToolFlowRun"
     WHERE CASE WHEN json_valid("snapshot_json") THEN json_extract("snapshot_json", '$.project_id') ELSE NULL END = ${projectId} LIMIT 1`;
   if (priorFlowRuns.length) blockers.push('工具流运行历史');
+  if (options.stopAfterFirst && blockers.length) return blockers;
   const account = await tx.projectBudgetAccount.findUnique({ where: { project_id: projectId } });
   if (account && (account.budget_credits !== 0 || account.used_credits !== 0 || account.frozen_credits !== 0
     || account.status !== 'active' || account.currency !== 'credits' || account.reconciliation_status !== 'normal' || account.freeze_reason
     || account.threshold_notified_json && account.threshold_notified_json !== '[]'
     || await tx.projectBudgetLedger.count({ where: { account_id: account.id } }) > 0)) blockers.push('预算或冻结账户');
+  if (options.stopAfterFirst && blockers.length) return blockers;
   const logs = await tx.operationLog.findMany({ where: { target_type: 'project', target_id: projectId }, select: { action: true, detail: true } });
   for (const log of logs) {
     if (['project_create', 'project_create_default', 'project_invite_create', 'project_update', 'project_archive', 'project_restore'].includes(log.action)) continue;

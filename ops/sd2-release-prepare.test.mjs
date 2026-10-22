@@ -20,7 +20,7 @@ c.recoveryRunId = randomUUID();
 // Fixture only: use immutable refs. These historical PIDs are never treated as live evidence.
 c.mainBranch = c.mainSource;
 c.guardReference = c.recoveryGuardSource;
-const plan = { schema: 'sd2-release-plan.v1', repoRoot: repo, outputRoot: path.join(materials, 'offline-fixture-' + randomUUID()),
+const plan = { schema: 'sd2-release-plan.v1', repoRoot: repo, outputRoot: path.join(activeTemplate.base, 'offline-fixture-' + randomUUID()),
   liveCapture: { observedAt: new Date(now).toISOString(), source: c.baselineSource, version: c.baselineVersion,
     build: c.baselineBuild, starts: c.starts, pricingRevision: c.pricingRevision, allowedSha256: c.expectedAllowedSha256 },
   contract: c, reuseBuilds: { sourceRun: 'b9c1ea7c-34a4-4834-8d33-83381ff68da0',
@@ -66,7 +66,7 @@ const deployedPlan = () => {
 await test('Deployed schema is explicit nullable and requires fresh full pair', async () => {
   assert.equal(original.deployedUsageSchema, null);
   const value = deployedPlan(); validatePlan(value, original, now);
-  const privateSchema = await import(pathToFileURL(path.join(materials, activeTemplate.templateName, 'deployed-usage-schema.mjs')));
+  const privateSchema = await import(pathToFileURL(path.join(activeTemplate.base, activeTemplate.templateName, 'deployed-usage-schema.mjs')));
   assert.equal(privateSchema.DEPLOYED_SCHEMA, DEPLOYED_SCHEMA); assert.deepEqual(privateSchema.DEPLOYED_FIELDS, DEPLOYED_FIELDS);
   privateSchema.assertDeployedSchemaInput(value.contract.deployedUsageSchema);
 });

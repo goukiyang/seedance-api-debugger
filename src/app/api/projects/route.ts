@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
-import { ensureDefaultProjectForUser, getTaskWhereForUser, getProjectDeletionBlockers, projectListOperationProjection } from '@/lib/projects/permissions';
+import { ensureDefaultProjectForUser, getTaskWhereForUser, readProjectOperationProjection } from '@/lib/projects/permissions';
 import { createTeamProject, ProjectOperationError } from '@/lib/projects/operations';
 import { isFeatureAllowed } from '@/lib/access/feature-guard';
 import { createSelfUsageScope } from '@/lib/usage/access';
@@ -18,16 +18,6 @@ export const dynamic = 'force-dynamic';
 function boundedInteger(value: string | null, fallback: number, min: number, max: number) {
   if (!value || !/^\d+$/.test(value)) return fallback;
   return Math.min(max, Math.max(min, Number(value)));
-}
-
-async function getProjectListOperationFields(
-  project: { id: string; type: string; status: string; updated_at: Date },
-  canManageProject: boolean,
-) {
-  const blockers = canManageProject && !['personal', 'system'].includes(project.type)
-    ? await prisma.$transaction(tx => getProjectDeletionBlockers(tx, project.id))
-    : null;
-  return projectListOperationProjection(project, canManageProject, blockers);
 }
 
 export async function GET(request: NextRequest) {
@@ -239,7 +229,7 @@ export async function GET(request: NextRequest) {
           ? 'admin'
           : (project.owner_user_id === user.id ? 'project_owner' : project.members[0]?.role || null);
         const canManageProject = managementAllowed && (myRole === 'admin' || myRole === 'project_owner');
-        const operationFields = await getProjectListOperationFields(project, canManageProject);
+        const operationFields = await readProjectOperationProjection(prisma, project, canManageProject);
         const isActiveNonSystem = project.status === 'active' && project.type !== 'system';
         return {
           ...project,
@@ -321,7 +311,7 @@ export async function GET(request: NextRequest) {
           ? 'admin'
           : (project.owner_user_id === user.id ? 'project_owner' : project.members[0]?.role || null);
         const canManageProject = managementAllowed && (myRole === 'admin' || myRole === 'project_owner');
-        const operationFields = await getProjectListOperationFields(project, canManageProject);
+        const operationFields = await readProjectOperationProjection(prisma, project, canManageProject);
         const isActiveNonSystem = project.status === 'active' && project.type !== 'system';
         return {
           ...project,
@@ -338,9 +328,11 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error('[Projects] List error:', error);
+    const busy = error instanceof Prisma.PrismaClientKnownRequestError && ['P1008', 'P2028'].includes(error.code);
     return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
+      { error: busy ? '项目列表暂时繁忙，请稍后重试' : '项目列表暂时无法读取，请稍后重试',
+        code: busy ? 'PROJECT_LIST_BUSY' : 'PROJECT_LIST_UNAVAILABLE' },
+      { status: busy ? 503 : 500, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } },
     );
   }
 }
