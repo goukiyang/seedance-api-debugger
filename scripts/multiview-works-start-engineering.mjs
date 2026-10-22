@@ -167,17 +167,21 @@ try {
     assert.throws(() => observeMultiviewWorksStart(contract, adapter(main.root)));
   });
   const baseAdapter = adapter(main.root);
+  const retainedAlias = local(main.root + '/.next-prod.retained-original');
   let replaced = false;
   const racingAdapter = { ...baseAdapter, readlink: virtual => {
     const value = baseAdapter.readlink(virtual);
     if (!replaced && virtual === main.root + '/.next-prod') {
       replaced = true;
-      fs.unlinkSync(local(virtual));
+      const before = baseAdapter.lstat(virtual);
+      fs.renameSync(local(virtual), retainedAlias);
       fs.symlinkSync('.next-prod-candidate', local(virtual));
+      assert.equal(shape(fs.lstatSync(retainedAlias), virtual).ino, before.ino, 'Fixture must retain the original link identity');
+      assert.notEqual(baseAdapter.lstat(virtual).ino, before.ino, 'Fixture must manufacture a different link identity');
     }
     return value;
   } };
-  assert.throws(() => observeMultiviewWorksStart(contract, racingAdapter));
+  assert.throws(() => observeMultiviewWorksStart(contract, racingAdapter), /Build alias identity changed during verification/);
   fs.unlinkSync(local(main.root + '/.next-prod'));
   fs.symlinkSync('.next-prod-candidate', local(main.root + '/.next-prod'));
   checks.push('fixed_build_alias_allows_real_shape_and_rejects_wrong_cross_root_or_replaced_link');
