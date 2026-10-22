@@ -1349,7 +1349,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (multiviewGeneration) {
+  if (Boolean(multiviewGeneration)) {
     // This confidentiality-compatible recovery build retains original-key
     // lookups above, but cannot start a new protected generation or retry.
     return NextResponse.json({ error: 'MULTIVIEW_CREATE_TEMPORARILY_UNAVAILABLE',
