@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { verifyTemplate, contractData, validatePlan, checkSources, reuseInput, renderWrapper, prepare, REUSE_SCHEMA,
   DEPLOYED_SCHEMA, DEPLOYED_FIELDS, DEPLOYED_CANVAS_FIELDS, deployedProofInput,
-  CONTINUATION_V2, CONTINUATION_COMMON_FIELDS, assertContinuationInput, UNPUBLISHED_PAIR, profile, R08_RECOVERED_GUARD, R10_RECOVERED_GUARD } from './sd2-release-prepare.mjs';
+  CONTINUATION_V2, CONTINUATION_COMMON_FIELDS, assertContinuationInput, UNPUBLISHED_PAIR, profile, R08_RECOVERED_GUARD, R10_RECOVERED_GUARD, R14_RECOVERED_GUARD } from './sd2-release-prepare.mjs';
 
 const materials = process.argv[2];
 assert.ok(materials && path.isAbsolute(materials), 'Pass the original private release materials directory');
@@ -177,6 +177,57 @@ await test('R10 producer admits only the complete exact 2c recovery as the sourc
     v => { v.contract.deployedCanvasBatchSchema = null; }, v => { v.contract.canvasVideoBatchSchema = null; },
     v => { v.reuseBuilds = plan.reuseBuilds; },
     v => { v.contract.normalContinuation = continuationPlan().contract.normalContinuation; }]) {
+    const bad = make(); change(bad); assert.throws(() => validatePlan(bad, original, now));
+  }
+});
+await test('R14 producer and active template have the same complete twelve original recovery fields', async () => {
+  const consumer = await import(pathToFileURL(path.join(activeTemplate.base, activeTemplate.templateName, 'recovered-guard-baseline.mjs')));
+  assert.equal(Object.keys(R14_RECOVERED_GUARD).length, 12);
+  assert.deepEqual(Object.keys(consumer.R14_RECOVERED_GUARD).sort(), Object.keys(R14_RECOVERED_GUARD).sort());
+  for (const [key, value] of Object.entries(R14_RECOVERED_GUARD)) assert.equal(consumer.R14_RECOVERED_GUARD[key], value, key);
+  assert.deepEqual(consumer.R14_RECOVERED_GUARD, R14_RECOVERED_GUARD);
+});
+await test('R14 producer admits only exact e06 recovery with two fresh sources and original normal schema history', () => {
+  const make = () => {
+    const value = continuationPlan(); value.reuseBuilds = null; value.contract.normalContinuation = null;
+    const c = value.contract; c.recoveredGuardBaseline = structuredClone(R14_RECOVERED_GUARD); c.privateMultiviewInstall = true;
+    c.baselineSource = c.sourceBase = 'e06d23538ea110a8c7800729bd8b84eaee697091';
+    c.baselineVersion = '0.103.0+multiview-private-guard.1'; c.baselineBuild = 'UgLJVYXAPzAtIB-K4PnB3';
+    c.mainSource = 'a'.repeat(40); c.recoveryGuardSource = 'b'.repeat(40);
+    c.deployedUsageSchema.publicationRun = '6a041bed-c909-4370-972f-2299321d7f1f';
+    Object.assign(value.liveCapture, { source: c.baselineSource, version: c.baselineVersion, build: c.baselineBuild });
+    return value;
+  };
+  validatePlan(make(), original, now);
+  for (const key of Object.keys(R14_RECOVERED_GUARD)) {
+    const missing = make(); delete missing.contract.recoveredGuardBaseline[key]; assert.throws(() => validatePlan(missing, original, now));
+    const changed = make(); changed.contract.recoveredGuardBaseline[key] = 'wrong'; assert.throws(() => validatePlan(changed, original, now));
+  }
+  for (const field of ['mainSource', 'recoveryGuardSource']) for (const source of [
+    '08b5ce920384edb4f03199a058ca805561ac8fe5', 'e06d23538ea110a8c7800729bd8b84eaee697091']) {
+    const bad = make(); bad.contract[field] = source; assert.throws(() => validatePlan(bad, original, now));
+  }
+  for (const change of [v => { v.contract.recoveredGuardBaseline.allowOldBuild = true; },
+    v => { v.contract.recoveredGuardBaseline.schema = 'sd2-multiview-r15-recovered-guard.v1'; },
+    v => { v.contract.recoveredGuardBaseline = structuredClone(R10_RECOVERED_GUARD); },
+    v => { v.contract.recoveredGuardBaseline = structuredClone(R08_RECOVERED_GUARD); },
+    v => { v.contract.baselineSource = v.contract.sourceBase = v.liveCapture.source = '2c1eafbd875fceeca63ddfe0da0e08c15bb9cbb7'; },
+    v => { v.contract.sourceBase = 'a'.repeat(40); },
+    v => { v.contract.baselineBuild = v.liveCapture.build = 'j2d9GY6_bj4uOIMROXnsi'; },
+    v => { v.contract.baselineVersion = v.liveCapture.version = '0.103.0'; },
+    v => { v.contract.recoveryGuardSource = v.contract.mainSource; },
+    v => { v.contract.recoveryRunId = R14_RECOVERED_GUARD.runId; },
+    v => { v.contract.deployedUsageSchema.publicationRun = R14_RECOVERED_GUARD.runId; },
+    v => { v.contract.deployedUsageSchema.publicationRun = randomUUID(); },
+    v => { v.contract.deployedUsageSchema.migrationRun = R14_RECOVERED_GUARD.runId; },
+    v => { v.contract.deployedCanvasBatchSchema.migrationRun = R14_RECOVERED_GUARD.runId; },
+    v => { v.contract.deployedUsageSchema.publicationRun = v.contract.recoveryRunId; },
+    v => { v.contract.deployedUsageSchema.migrationRun = v.contract.recoveryRunId; },
+    v => { v.contract.privateMultiviewInstall = false; }, v => { v.contract.privateMultiviewInstall = 1; },
+    v => { v.contract.deployedUsageSchema = null; }, v => { v.contract.deployedCanvasBatchSchema = null; },
+    v => { v.contract.canvasVideoBatchSchema = null; }, v => { v.reuseBuilds = plan.reuseBuilds; },
+    v => { v.contract.normalContinuation = continuationPlan().contract.normalContinuation; },
+    v => { const continued = continuationPlan(); v.contract.normalContinuation = continued.contract.normalContinuation; v.reuseBuilds = continued.reuseBuilds; }]) {
     const bad = make(); change(bad); assert.throws(() => validatePlan(bad, original, now));
   }
 });
