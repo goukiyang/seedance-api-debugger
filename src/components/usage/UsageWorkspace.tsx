@@ -10,6 +10,8 @@ import PaginationControls from '@/components/PaginationControls';
 import { useUsageWorkspace, usageQueryParams } from './useUsageWorkspace';
 import { useUsageViewState } from './useUsageViewState';
 import styles from './UsageWorkspace.module.css';
+import { Bar, BarChart, CartesianGrid, Legend, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { seedanceVideoModelLabel } from '@/lib/provider/seedance-models';
 
 export function formatUsageMoney(value: string | null, prefix = '¥') {
   if (value === null || !/^-?\d+$/.test(value)) return '待核';
@@ -55,6 +57,26 @@ function CashDetails({ cash, points }: { cash: UsageCashDTO; points: UsagePoints
   </details>;
 }
 
+function recordTarget(record: UsageRecordDTO) {
+  const href = safeHref(record.originalHref, record.type === 'image');
+  if (!href) return null;
+  const url = new URL(href, 'https://local.invalid');
+  if (typeof window !== 'undefined') url.searchParams.set('return_to', `${window.location.pathname}${window.location.search}#usage-${encodeURIComponent(record.id)}`);
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+function ProjectUsageRow({ record, onNavigate }: { record: UsageRecordDTO; onNavigate: (id: string) => void }) {
+  const href = recordTarget(record);
+  return <tr id={`usage-${record.id}`}>
+    <td data-label="时间"><RelativeTime value={record.occurredAt} /></td>
+    <td data-label="类型 / 模型">{labels[record.type]}<br /><span className={styles.muted}>{record.model ? seedanceVideoModelLabel(record.model) : '型号待确认'}</span></td>
+    <td data-label="生成状态">{statusText(record.status)}</td>
+    <td data-label="确认人民币"><strong>{formatUsageMoney(record.cash.netCnyMicros)}</strong><br /><span className={styles.muted}>{cashState(record.cash)}</span></td>
+    <td data-label="净扣点数">{point(record.points.net)}</td>
+    <td data-label="原记录">{href ? <Link className="link" href={href} onClick={() => onNavigate(record.id)}>查看原记录</Link> : <span className={styles.muted}>暂无可用入口</span>}<CashDetails cash={record.cash} points={record.points} /></td>
+  </tr>;
+}
+
 function Category({ type, value }: { type: 'video' | 'image'; value: UsageCategorySummary }) {
   return <section className={styles.category} aria-label={`${labels[type]}用量`}>
     <h2>{type === 'video' ? <Film size={18} /> : <ImageIcon size={18} />}{labels[type]}</h2>
@@ -84,17 +106,12 @@ export function CompactUsageSummary({ report, error }: { report: Pick<UsageRepor
 
 function UsageRecord({ record, onPreview, onNavigate }: { record: UsageRecordDTO; onPreview: (record: UsageRecordDTO) => void; onNavigate: (id: string) => void }) {
   const image = record.type === 'image';
-  const href = safeHref(record.originalHref, image);
   const download = safeHref(record.media?.downloadUrl);
   const preview = image ? safeHref(record.media?.imageUrl, true) : record.type === 'video' ? safeHref(record.media?.videoUrl) : null;
   const thumbnail = safeHref(record.media?.thumbnailUrl, image);
   const [broken, setBroken] = useState(false);
   useEffect(() => setBroken(false), [thumbnail]);
-  const target = href ? (() => {
-    const url = new URL(href, 'https://local.invalid');
-    if (typeof window !== 'undefined') url.searchParams.set('return_to', `${window.location.pathname}${window.location.search}#usage-${encodeURIComponent(record.id)}`);
-    return `${url.pathname}${url.search}${url.hash}`;
-  })() : null;
+  const target = recordTarget(record);
   const poster = thumbnail && !broken ? <img src={thumbnail} alt={`${record.model || labels[record.type]}结果`} loading="lazy" onError={() => setBroken(true)} />
     : <span className={styles.muted}>{image ? '暂无可读图片' : '暂无可读缩略图'}</span>;
   return <article id={`usage-${record.id}`} className={image ? styles.imageRecord : styles.record}>
@@ -102,7 +119,7 @@ function UsageRecord({ record, onPreview, onNavigate }: { record: UsageRecordDTO
       {poster}{!image && <Play size={22} className={styles.playIcon} aria-hidden="true" />}
     </button> : <div className={styles.poster}>{poster}</div>}
     <div>
-      <h3>{record.model || labels[record.type]} · {statusText(record.status)}</h3>
+      <h3>{record.model ? seedanceVideoModelLabel(record.model) : labels[record.type]} · {statusText(record.status)}</h3>
       <div className={styles.scopeLine}>{record.project.label} · <RelativeTime value={record.occurredAt} /></div>
       <p><strong>{record.cash.netCnyMicros === null ? '实际费用待核' : `已确认 ${formatUsageMoney(record.cash.netCnyMicros)}`}</strong> <span className={styles.muted}>{cashState(record.cash)}</span></p>
       <p className={styles.muted}>{image ? `原请求 ${count(record.requestCount)} 次 · 产出 ${count(record.outputCount)} 张 · 可用 ${count(record.availableCount)} 张` : `任务 ${count(record.taskCount)} · 可用 ${count(record.availableCount)}`} · 净扣 {point(record.points.net)}</p>
@@ -122,20 +139,32 @@ function Trend({ report, view }: { report: UsageReportDTO; view: ReturnType<type
   const { metric } = view.value;
   if (!report.trend) return null;
   const amount = (value: UsageCategorySummary) => metric === 'cash' ? value.cash.netCnyMicros === null ? null : Number(value.cash.netCnyMicros) / 1e6 : value.points.net === null ? null : Number(value.points.net);
-  const maximum = Math.max(0, ...report.trend.items.flatMap((v) => [amount(v.video), amount(v.image)]).filter((v): v is number => v !== null && Number.isFinite(v)));
+  const data = report.trend.items.map((item) => ({ month: item.month,
+    video: Number.isFinite(amount(item.video)) ? amount(item.video) : null,
+    image: Number.isFinite(amount(item.image)) ? amount(item.image) : null,
+  }));
   return <details className={styles.trend} open={view.value.trendOpen} onToggle={(event) => { if (view.ready && view.value.trendOpen !== event.currentTarget.open) view.update({ trendOpen: event.currentTarget.open }); }}>
     <summary>{report.trend.range.label}</summary>
     <div className={styles.actions} aria-label="趋势单位">
       <button className="btn btn-secondary" type="button" aria-pressed={metric === 'cash'} onClick={() => view.update({ metric: 'cash' })}>人民币</button>
       <button className="btn btn-secondary" type="button" aria-pressed={metric === 'points'} onClick={() => view.update({ metric: 'points' })}>点数</button>
     </div>
-    <div className={styles.trendGrid}>{report.trend.items.map((item) => <div key={item.month} className={styles.trendMonth}>
-      <strong>{item.month}</strong>
-      {(['video', 'image'] as const).map((type) => <div key={type}>
-        <span>{labels[type]} {metric === 'cash' ? formatUsageMoney(item[type].cash.netCnyMicros) : point(item[type].points.net)}</span>
-        <div className={styles.track} data-type={type} aria-hidden="true"><span style={{ width: `${maximum > 0 ? Math.max(0, (amount(item[type]) || 0) / maximum) * 100 : 0}%` }} /></div>
-      </div>)}
-    </div>)}</div>
+    <div className={styles.trendChart} aria-label={`近六个月${metric === 'cash' ? '人民币' : '点数'}用量`}>
+      <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+        <BarChart data={data} accessibilityLayer margin={{ top: 20, right: 12, bottom: 0, left: 10 }}>
+          <CartesianGrid vertical={false} stroke="var(--border-color)" />
+          <XAxis dataKey="month" tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} />
+          <YAxis domain={['auto', 'auto']} tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} width={60} />
+          <Tooltip contentStyle={{ background: 'var(--bg-panel)', borderColor: 'var(--border-color)', color: 'var(--text-primary)' }} />
+          <Legend /><ReferenceLine y={0} stroke="var(--text-secondary)" />
+          <Bar dataKey="video" name={metric === 'cash' ? '视频（元）' : '视频（点）'} fill="#57a9da" minPointSize={value => value === 0 ? 2 : 0} isAnimationActive={false} />
+          <Bar dataKey="image" name={metric === 'cash' ? '图片（元）' : '图片（点）'} fill="#62b49b" minPointSize={value => value === 0 ? 2 : 0} isAnimationActive={false} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+    <details className={styles.trendValues}><summary>查看每月数值</summary><table className="table"><thead><tr><th>月份</th><th>视频</th><th>图片</th></tr></thead><tbody>
+      {report.trend.items.map((item) => <tr key={item.month}><th scope="row">{item.month}</th>{(['video', 'image'] as const).map((type) => <td key={type}>{metric === 'cash' ? formatUsageMoney(item[type].cash.netCnyMicros) : point(item[type].points.net)}</td>)}</tr>)}
+    </tbody></table></details>
   </details>;
 }
 
@@ -261,10 +290,11 @@ export default function UsageWorkspace({ ownerId, projectId }: { ownerId: string
       {report.records.updated && <p role="status" className={styles.muted}>记录已更新，已显示有效页。</p>}
       {report.query.type === 'other' && <p>{report.summary.other.cash.netCnyMicros === null ? '其他业务实际费用待核' : `其他业务已确认 ${formatUsageMoney(report.summary.other.cash.netCnyMicros)}`} · 运行 {count(report.summary.other.taskCount)} 次</p>}
       {report.records.items.length === 0 ? <p className={styles.muted}>当前范围没有可读记录。{report.restricted ? '部分来源受限。' : ''}</p>
+        : projectId ? <div className={styles.projectTable}><table className="table"><thead><tr><th>时间</th><th>类型 / 模型</th><th>生成状态</th><th>确认人民币</th><th>净扣点数</th><th>原记录与明细</th></tr></thead><tbody>{report.records.items.map((record) => <ProjectUsageRow key={record.id} record={record} onNavigate={onNavigate} />)}</tbody></table></div>
         : report.query.type === 'image' ? <div className={styles.records}>{Array.from(groups, ([id, records]) => <details className={styles.group} key={id} open={view.value.groups[id] ?? records.length === 1} onToggle={(event) => { const open = event.currentTarget.open; if (view.ready && open !== (view.value.groups[id] ?? records.length === 1)) view.update({ groups: { ...view.value.groups, [id]: open } }); }}>
           <summary>{records[0].groupId ? '原批次' : '原请求'} · 当前页 {records.length} 条图片记录 · <span className={styles.muted}>费用保留原请求口径</span></summary>
           <div className={styles.imageGrid}>{records.map((record) => <UsageRecord key={record.id} record={record} onPreview={setPreview} onNavigate={onNavigate} />)}</div>
-        </details>)}</div> : <div className={styles.records}>{report.records.items.map((record) => <UsageRecord key={record.id} record={record} onPreview={setPreview} onNavigate={onNavigate} />)}</div>}
+        </details>)}</div> : <div className={report.query.type === 'video' ? styles.videoGrid : styles.records}>{report.records.items.map((record) => <UsageRecord key={record.id} record={record} onPreview={setPreview} onNavigate={onNavigate} />)}</div>}
       <PaginationControls page={report.records.page} totalPages={Math.max(1, Math.ceil(report.records.total / report.records.pageSize))} total={report.records.total} pageSize={report.records.pageSize} label="用量记录" busy={busy || !current} onPageChange={(page) => update({ page })} />
     </>}
     {preview?.type === 'image' && safeHref(preview.media?.imageUrl, true) && <MediaPreview src={safeHref(preview.media?.imageUrl, true)!} type="image" title={preview.model || '原图片结果'} previewKey={`usage-image:${preview.imageTaskId || preview.id}`} onClose={() => setPreview(null)} />}

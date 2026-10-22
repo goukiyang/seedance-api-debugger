@@ -27,6 +27,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const topbarOnlyShell = useMemo(() => pathname === '/' || shouldUseTopbarOnlyShell(pathname), [pathname]);
   const imageStudioShell = pathname === '/image-studio';
   const templateStudioShell = pathname === '/template-studio';
+  const projectsWorkspace = /^\/(?:projects(?:\/|$)|usage(?:\/|$)|tasks\/[^/]+$|collections(?:\/|$))/.test(pathname);
   const shellBodyClass = templateStudioShell
     ? templateStudioStyles.shellBody
     : `shell-body${topbarOnlyShell ? ' shell-body-topbar-only' : ''}${imageStudioShell ? ' shell-body-image-studio' : ''}`;
@@ -54,7 +55,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="shell-root">
+    <div className={`shell-root${projectsWorkspace ? ' shell-projects-workspace' : ''}`}>
       <ComposerTopbar
         user={user}
         loadingUser={loadingUser}

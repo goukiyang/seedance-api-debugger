@@ -4,7 +4,7 @@ import { forwardRef, Suspense, useEffect, useId, useImperativeHandle, useRef, us
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Download, FolderKanban, MoreHorizontal, Plus, RotateCcw, Search } from 'lucide-react';
-import PageBanner from '@/components/PageBanner';
+import ProjectFilters from '@/components/projects/ProjectFilters';
 import PaginationControls from '@/components/PaginationControls';
 import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
@@ -895,18 +895,16 @@ function ProjectsPageContent() {
 
   return (
     <div className={styles.page}>
-      <PageBanner
-        eyebrow="项目"
-        title="我的项目"
-        actions={(
+      <header className={styles.header}>
+        <h1>我的项目</h1>
           <div className={styles.actions}>
+            {visiblePersonalProject && <Link id={`project-card-${visiblePersonalProject.id}`} className="link" href={projectDetailHref(visiblePersonalProject.id, currentPreferences)}>个人空间{visiblePersonalProject.status === 'locked' ? '（只读）' : ''} →</Link>}
             <Link className="link" href="/usage">我的用量</Link>
-            {canCreate && <button id="create-project" className="btn btn-primary" type="button" onClick={openCreateDialog}>
+            {canCreate && <button id="create-project" className="btn btn-primary" type="button" title="新建项目" aria-label="新建项目" onClick={openCreateDialog}>
               <Plus size={16} aria-hidden="true" />新建项目
             </button>}
           </div>
-        )}
-      />
+      </header>
       {projectsAccountKey === accountKey && <CompactUsageSummary report={usageSummary || null} error={usageError} />}
       {!createOpen && <ProjectCreateOperationNotice operation={createOperation} onResolved={resolveCreatedProject} />}
 
@@ -935,6 +933,7 @@ function ProjectsPageContent() {
             <button className={`btn ${activeTab === 'active' ? 'btn-primary' : 'btn-secondary'}`} type="button" aria-pressed={activeTab === 'active'} onClick={() => applyPreferences({ status: 'active', page: 1 })}>使用中</button>
             <button className={`btn ${activeTab === 'archived' ? 'btn-primary' : 'btn-secondary'}`} type="button" aria-pressed={activeTab === 'archived'} onClick={() => applyPreferences({ status: 'archived', page: 1 })}>已归档</button>
           </div>
+          <ProjectFilters active={sort !== 'updated' || scope !== 'all'}>
           <label style={{ display: 'grid', flex: '0 1 180px', gap: 4, minWidth: 150 }}>
             <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>排序</span>
             <select className="input" value={sort} onChange={(event) => applyPreferences({ sort: event.target.value === 'name' ? 'name' : 'updated', page: 1 })} aria-label="项目排序">
@@ -953,35 +952,13 @@ function ProjectsPageContent() {
           <button className="btn btn-secondary" type="button" onClick={resetPreferences} title="清除搜索、排序、范围和上次页码">
             <RotateCcw size={15} aria-hidden="true" />重置筛选
           </button>
+          </ProjectFilters>
         </div>
         <div style={{ alignItems: 'center', color: 'var(--text-secondary)', display: 'flex', flexWrap: 'wrap', fontSize: 13, gap: 10, justifyContent: 'space-between' }}>
           <span>{hasCurrentList ? `共 ${pagination.total} 个项目` : '正在读取项目'}</span>
         </div>
         {storageUnavailable && <p role="status" className="text-gray" style={{ margin: 0 }}>浏览器未能保存列表偏好，本次仍可正常使用。</p>}
       </section>
-
-      {visiblePersonalProject && (
-        <Link id={`project-card-${visiblePersonalProject.id}`} href={projectDetailHref(visiblePersonalProject.id, currentPreferences)} style={{
-          alignItems: 'center',
-          background: 'var(--bg-panel)',
-          border: '1px solid var(--border-color)',
-          borderRadius: 8,
-          color: 'var(--text-primary)',
-          display: 'flex',
-          gap: 12,
-          marginBottom: 18,
-          minHeight: 62,
-          padding: '12px 16px',
-          textDecoration: 'none',
-        }}>
-          <FolderKanban size={19} aria-hidden="true" />
-          <span style={{ display: 'grid', gap: 2 }}>
-            <strong>个人空间</strong>
-            <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>进入个人项目与生成记录</span>
-          </span>
-          {visiblePersonalProject.status === 'locked' && <span style={{ color: 'var(--text-secondary)', fontSize: 13, marginLeft: 'auto' }}>已锁定 · 只读</span>}
-        </Link>
-      )}
 
       {showListError && (
         <div className="card" role="alert" style={{ alignItems: 'center', display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'space-between' }}>
@@ -1029,6 +1006,7 @@ function ProjectsPageContent() {
               id={`project-card-${project.id}`}
               key={project.id}
               data-project-id={project.id}
+              className={styles.projectCard}
               style={{
                 background: 'var(--bg-panel)',
                 border: `1px solid ${highlighted ? 'var(--tone-info-border)' : 'var(--border-color)'}`,
@@ -1063,20 +1041,15 @@ function ProjectsPageContent() {
                 </span>
               </Link>
 
-              <div style={{ borderTop: '1px solid var(--border-color)', display: 'grid', gap: 8, paddingTop: 10 }}>
-                <div style={{ alignItems: 'center', display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>负责人</span>
+              <div className={styles.cardMeta}>
+                <span>{project._count?.tasks ?? 0} 个记录</span>
+                {(project.active_task_count ?? 0) > 0 && <span>{project.active_task_count} 个生成中</span>}
+                <RelativeTime value={project.updated_at} />
+                <details><summary title="项目信息">信息</summary><div>
                   <UserIdentityBadge user={projectOwnerUser(project)} size="sm" />
-                </div>
-                <div style={{ alignItems: 'baseline', color: 'var(--text-secondary)', display: 'flex', flexWrap: 'wrap', fontSize: 12, gap: '4px 10px' }}>
-                  <span>我的权限：{projectRoleLabel(project.my_role)}</span>
-                  <span>项目更新 <RelativeTime value={project.updated_at} /></span>
-                </div>
-                <div style={{ alignItems: 'center', display: 'flex', flexWrap: 'wrap', fontSize: 13, gap: 8 }}>
-                  <span>可见生成记录 {project._count?.tasks ?? 0}</span>
-                  <span aria-hidden="true" style={{ color: 'var(--text-secondary)' }}>·</span>
-                  <span>生成中 {project.active_task_count ?? 0}</span>
-                </div>
+                  <p>我的权限：{projectRoleLabel(project.my_role)}</p>
+                  <p>可下载视频 {downloadableCount}</p>
+                </div></details>
               </div>
 
               <div style={{ alignItems: 'center', display: 'flex', gap: 8, justifyContent: 'space-between', marginTop: 'auto', paddingTop: 2 }}>
@@ -1135,9 +1108,6 @@ function ProjectsPageContent() {
                   </details>
                 )}
               </div>
-              <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: 0 }}>
-                {downloadableCount > 0 ? `可下载视频 ${downloadableCount}` : '此项目暂无可下载视频'}
-              </p>
             </article>
           );
         })}

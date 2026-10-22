@@ -3,7 +3,7 @@
 .page :global(.task-result-head) { padding-bottom: 12px; }
 .page :global(.task-result-workspace) { grid-template-columns: minmax(0, 1fr) minmax(240px, 300px); align-items: start; }
 .resultPanel { min-width: 0; padding: 0; background: transparent; border: 0; box-shadow: none; }
-.page :global(.task-result-stage.is-single-media) { min-height: 0; aspect-ratio: 16 / 10; max-height: min(72dvh, 850px); }
+.page :global(.task-result-stage.is-single-media:not(:fullscreen)) { width: 100%; max-width: 100%; height: auto; min-width: 0; min-height: 0; aspect-ratio: 16 / 10; max-height: min(var(--task-result-available-height, 60dvh), calc(100dvh - 290px)); }
 .page :global(.task-result-stage.is-single-media video) { object-fit: contain; max-width: 100%; max-height: 100%; }
 .page :global(.task-result-actions) { display: flex; flex-wrap: wrap; gap: 10px; }
 .download { order: -1; }
@@ -18,8 +18,10 @@
 .page .taskIdCopy { flex: 0 0 auto; min-height: 30px; padding: 5px 8px; gap: 5px; font-size: 12px; white-space: nowrap; }
 .taskIdCopyError { color: var(--text-secondary); font-size: 12px; line-height: 1.4; user-select: text; }
 .page :global(.task-download-error) { color: var(--text-secondary); }
-@media (max-width: 850px) {
+@media (max-width: 1200px) {
   .page :global(.task-result-workspace) { grid-template-columns: minmax(0, 1fr); }
   .page :global(.task-decision-panel) { position: static; }
-  .page :global(.task-result-stage.is-single-media) { aspect-ratio: 1; max-height: 65dvh; }
+}
+@media (max-width: 640px) {
+  .page :global(.task-result-stage.is-single-media:not(:fullscreen)) { aspect-ratio: 1; max-height: 65dvh; }
 }

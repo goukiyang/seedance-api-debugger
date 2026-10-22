@@ -142,17 +142,18 @@ function projectReturnTo(projectId: string, value: string | null) {
   }
 }
 
-export default function ReferenceAlbumsClient() {
+export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: { embeddedProjectId?: string; onCreated?: () => void } = {}) {
+  const embedded = Boolean(embeddedProjectId);
   const { confirm, prompt, productDialog } = useProductDialog();
   const { user: currentUser, hasLoadedUser, userLoadError, sessionChanged, refreshUser } = useAppSession();
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryString = searchParams.toString();
-  const requestedScope = searchParams.get('scope');
+  const requestedScope = embedded ? 'project' : searchParams.get('scope');
   const isAdmin = currentUser?.role === 'admin';
   const parsedScope = TABS.find((tab) => tab.value === requestedScope)?.value || 'mine';
   const scope: Scope = parsedScope === 'other_project' && currentUser && !isAdmin ? 'project' : parsedScope;
-  const rawProjectId = searchParams.get('project_id') || '';
+  const rawProjectId = embeddedProjectId || searchParams.get('project_id') || '';
   const projectFilterId = (scope === 'project' || scope === 'other_project') && rawProjectId && rawProjectId !== 'all'
     ? rawProjectId : 'all';
   const projectContextId = scope === 'project' && projectFilterId !== 'all' ? projectFilterId : '';
@@ -248,6 +249,7 @@ export default function ReferenceAlbumsClient() {
     : sanitizeOptionalReturnTo(searchParams.get('return_to'));
 
   const updateLocation = useCallback((changes: Record<string, string | null>) => {
+    if (embedded) return;
     const params = new URLSearchParams(queryString);
     Object.entries(changes).forEach(([key, value]) => {
       if (value === null) params.delete(key);
@@ -255,7 +257,7 @@ export default function ReferenceAlbumsClient() {
     });
     const query = params.toString();
     router.replace(`/collections${query ? `?${query}` : ''}`, { scroll: false });
-  }, [queryString, router]);
+  }, [embedded, queryString, router]);
   const setScope = (next: Scope) => {
     if (next !== scope) updateLocation({ scope: next, project_id: null, page: '1', anchor: '' });
   };
@@ -380,16 +382,16 @@ export default function ReferenceAlbumsClient() {
   }, [albumType, boundaryKey, creating, description, name, pendingCreate, positionReady, projectContextId, projectId]);
 
   useEffect(() => {
-    if (!positionReady) return;
+    if (!positionReady || embedded) return;
     try {
       window.localStorage.setItem(`${PREFERENCES_PREFIX}:${boundaryKey}`, JSON.stringify({
         schema: 1, page, folderId: selectedFolderId, anchorId,
       }));
     } catch { /* The explicit list URL still preserves its position. */ }
-  }, [anchorId, boundaryKey, page, positionReady, selectedFolderId]);
+  }, [anchorId, boundaryKey, embedded, page, positionReady, selectedFolderId]);
 
   useEffect(() => {
-    if (!accountId) return;
+    if (!accountId || embedded) return;
     const epoch = boundaryRef.current.epoch;
     const controller = new AbortController();
     setProjectDirectoryError('');
@@ -403,7 +405,7 @@ export default function ReferenceAlbumsClient() {
         if (!controller.signal.aborted && isCurrent(epoch)) setProjectDirectoryError('项目列表读取失败，可刷新重试；当前项目不会改成个人图集。');
       });
     return () => controller.abort();
-  }, [accountId, boundaryKey, isCurrent, reloadVersion]);
+  }, [accountId, boundaryKey, embedded, isCurrent, reloadVersion]);
 
   useEffect(() => {
     if (!accountId || !projectToVerify) return;
@@ -513,17 +515,17 @@ export default function ReferenceAlbumsClient() {
   }, [accountId, boundaryKey, isAdmin, isCurrent]);
 
   useEffect(() => {
-    loadFolders();
-  }, [loadFolders]);
+    if (!embedded) loadFolders();
+  }, [embedded, loadFolders]);
 
   useEffect(() => {
-    void loadAlbums();
+    if (!embedded) void loadAlbums();
     return () => albumRequestRef.current?.abort();
-  }, [loadAlbums, reloadVersion]);
+  }, [embedded, loadAlbums, reloadVersion]);
 
   useEffect(() => {
-    loadPendingSubmissions();
-  }, [loadPendingSubmissions]);
+    if (!embedded) loadPendingSubmissions();
+  }, [embedded, loadPendingSubmissions]);
 
   const restoredAnchorRef = useRef('');
   useEffect(() => {
@@ -557,6 +559,7 @@ export default function ReferenceAlbumsClient() {
       page: '1', anchor: albumId,
     });
     setReloadVersion((value) => value + 1);
+    onCreated?.();
   };
 
   const handleCheckCreate = async () => {
@@ -885,8 +888,9 @@ export default function ReferenceAlbumsClient() {
   if (!positionReady) return <div className={styles.notice} role="status">正在恢复图集位置...</div>;
 
   return (
-    <div className={styles.root}>
+    <div className={embedded ? styles.embedded : styles.root}>
       {productDialog}
+      {!embedded && <>
       <PageBanner
         backHref={safeReturnTo && (!projectContextId || currentProject) ? safeReturnTo : projectContextId ? '/projects' : undefined}
         backLabel={projectContextId && currentProject ? '返回原项目' : '返回我的项目'}
@@ -1028,17 +1032,18 @@ export default function ReferenceAlbumsClient() {
         </section>
       )}
 
+      </>}
       <div className={styles.toolbar}>
         <div>
           {projectContextId && currentProject && !projectCanCreate && <span>当前项目只可查看，不能新建图集。</span>}
           {pendingCreates.length > 0 && <span>有图集创建结果待确认</span>}
         </div>
         <div className={styles.toolbarActions}>
-          <button type="button" className={styles.quietButton} title="清除上次位置" aria-label="清除上次位置" onClick={() => {
+          {!embedded && <button type="button" className={styles.quietButton} title="清除上次位置" aria-label="清除上次位置" onClick={() => {
             try { window.localStorage.removeItem(`${PREFERENCES_PREFIX}:${boundaryKey}`); } catch { /* Explicit URL remains usable. */ }
             setPosition({ key: boundaryKey, page: 1, folderId: 'all', anchorId: '' });
             updateLocation({ page: '1', public_folder_id: 'all', anchor: '' });
-          }}><RotateCcw size={17} aria-hidden="true" /></button>
+          }}><RotateCcw size={17} aria-hidden="true" /></button>}
           <button type="button" className={styles.primaryButton}
             disabled={!pendingCreate && Boolean(projectContextId && (!projectCanCreate || projectContextBlocked))}
             onClick={() => setCreateOpen(true)}>
@@ -1056,8 +1061,8 @@ export default function ReferenceAlbumsClient() {
       </div>}
 
       {createOpen && createPortal(
-        <div className={styles.backdrop} ref={createSurfaceRef}>
-          <div ref={createDialogRef} className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="collection-create-title">
+        <div className={`${styles.backdrop} ${styles.createBackdrop}`} ref={createSurfaceRef}>
+          <div ref={createDialogRef} className={`${styles.dialog} ${styles.createDrawer}`} role="dialog" aria-modal="true" aria-labelledby="collection-create-title">
             <header className={styles.dialogHeader}>
               <h2 id="collection-create-title">{projectContextId ? '新建项目图集' : '新建图集'}</h2>
               <button type="button" className={styles.quietButton} title="关闭" aria-label="关闭新建图集" onClick={closeCreate} disabled={creating}><X size={19} aria-hidden="true" /></button>
@@ -1112,6 +1117,7 @@ export default function ReferenceAlbumsClient() {
         </div>, document.body,
       )}
 
+      {!embedded && <>
       {submitAlbum && (
         <section className="album-public-submit-panel">
           <div>
@@ -1266,6 +1272,7 @@ export default function ReferenceAlbumsClient() {
         label="图集"
         onPageChange={setPage}
       />}
+      </>}
     </div>
   );
 }

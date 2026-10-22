@@ -140,6 +140,13 @@
   box-shadow: 0 16px 48px oklch(0.1 0.006 160 / 0.3);
 }
 
+.createBackdrop { place-items: stretch end; padding: 0; z-index: 1000; }
+.createDrawer { width: min(100%, 420px); height: 100dvh; max-height: 100dvh; border-radius: 0; padding: 24px; }
+.embedded { min-width: 0; }
+.embedded .toolbar { margin: 0; }
+.createDrawer .createForm { min-height: calc(100% - 60px); }
+.createDrawer .dialogActions { margin-top: auto; }
+
 .dialogHeader {
   justify-content: space-between;
   margin-bottom: 20px;

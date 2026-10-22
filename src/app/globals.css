@@ -5399,6 +5399,12 @@ body.compare-fullscreen-open {
   gap: 0;
 }
 
+.shell-projects-workspace .shell-sidebar { background: var(--bg-panel); border-color: var(--border-color); }
+.shell-projects-workspace .shell-nav-title { color: var(--text-secondary); }
+.shell-projects-workspace .shell-nav-link { color: var(--text-secondary); }
+.shell-projects-workspace .shell-nav-link:hover { background: var(--bg-input); border-color: var(--border-color); color: var(--text-primary); }
+.shell-projects-workspace .shell-nav-link.active { background: color-mix(in srgb, #51b5bc 12%, var(--bg-panel)); border-color: color-mix(in srgb, #51b5bc 35%, var(--border-color)); color: #8fd3d5; }
+
 .shell-sidebar {
   min-height: calc(100vh - 73px);
   padding: 18px 14px;

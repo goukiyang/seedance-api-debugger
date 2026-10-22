@@ -1,10 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { Eye } from 'lucide-react';
-import PageBanner from '@/components/PageBanner';
+import { Download, Eye, MoreHorizontal, Play, Repeat2 } from 'lucide-react';
+import ProjectFilters from '@/components/projects/ProjectFilters';
+import ReferenceAlbumsClient from '@/app/collections/ReferenceAlbumsClient';
+import { seedanceVideoModelLabel } from '@/lib/provider/seedance-models';
 import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
 import MediaPreview from '@/components/MediaPreview';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
@@ -119,6 +121,27 @@ interface ProjectDetail {
   _count?: { members: number; tasks: number; reference_albums?: number };
 }
 
+function TaskActionsMenu({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDetailsElement>(null);
+  const close = useCallback(() => { if (ref.current) ref.current.open = false; setOpen(false); }, []);
+  useDialogDismiss({ open, dialogRef: ref, onDismiss: close, modal: false });
+  return <details ref={ref} onToggle={(event) => setOpen(event.currentTarget.open)} onClick={(event) => {
+    if ((event.target as HTMLElement).closest('a')) close();
+  }}><summary aria-label="更多记录操作" title="更多操作"><MoreHorizontal size={18} /></summary><div>{children}</div></details>;
+}
+
+function ProjectAlbumCover({ urls }: { urls: string[] }) {
+  const [failed, setFailed] = useState<string[]>([]);
+  const key = urls.join('|');
+  useEffect(() => setFailed([]), [key]);
+  const visible = urls.filter((url) => !failed.includes(url)).slice(0, 4);
+  return <span className={styles.albumCover} data-count={visible.length}>
+    {visible.length ? visible.map((url) => <img key={url} src={url} alt="图集封面" loading="lazy" onError={() => setFailed((old) => [...old, url])} />)
+      : <span className="text-gray text-sm">{urls.length ? '封面暂不可读取' : '暂无可读图片'}</span>}
+  </span>;
+}
+
 interface ReferenceAlbumItem {
   id: string;
   name: string;
@@ -126,6 +149,7 @@ interface ReferenceAlbumItem {
   status: string;
   updated_at: string;
   image_count: number;
+  thumbnail_urls?: string[];
 }
 
 interface TaskItem {
@@ -1290,12 +1314,12 @@ export default function ProjectDetailPage() {
   const generatorHref = `/generate?${generatorQuery.toString()}`;
 
   return (
-    <div>
-      <PageBanner
-        eyebrow="项目详情"
-        title={projectDisplayName(project)}
-        description={`${project.description || '项目中的生成任务、参考图集和成员协作。'} · ${statusLabel(project.status)} · ${roleLabel(permissions.role)}`}
-        actions={permissions.can_generate && project.status === 'active' && !budget?.block_reason ? (
+    <div className={styles.page}>
+      <header className={styles.header}>
+        <div><Link className="link" href={projectListReturnTo}>返回项目</Link><h1>{projectDisplayName(project)}</h1>
+          <p className="text-gray text-sm">{project.description || '项目生成与协作'} · {statusLabel(project.status)} · {roleLabel(permissions.role)}</p>
+        </div>
+        <div>{permissions.can_generate && project.status === 'active' && !budget?.block_reason ? (
           <a href={generatorHref} className="btn btn-primary">生成视频</a>
         ) : permissions.can_generate && project.status === 'active' && budget?.block_reason ? (
           <div className="flex items-center" style={{ gap: 10, flexWrap: 'wrap' }}>
@@ -1312,10 +1336,8 @@ export default function ProjectDetailPage() {
             <span className="text-gray text-sm">当前角色没有生成权限。</span>
             <button type="button" className="btn btn-secondary" onClick={() => setWorkspace((current) => ({ ...current, section: 'members' }))}>查看成员与设置</button>
           </div>
-        )}
-        backHref={projectListReturnTo}
-        backLabel="返回项目"
-      />
+        )}</div>
+      </header>
 
       {(message || error) && (
         <div className="card" style={{ borderColor: error ? 'var(--border-color)' : 'rgba(74,222,128,0.35)' }}>
@@ -1753,6 +1775,7 @@ export default function ProjectDetailPage() {
           <input className="input" style={{ flex: '1 1 220px', maxWidth: 420 }} value={workspace.taskSearch}
             onChange={(event) => setWorkspace((current) => ({ ...current, taskSearch: event.target.value.slice(0, 120), taskPage: 1 }))}
             placeholder="搜索提示词、模型或任务编号" aria-label="搜索生成记录" />
+          <ProjectFilters active={workspace.taskStatus !== 'all' || workspace.taskSort !== 'newest'}>
           <select className="input" style={{ width: 170 }} value={workspace.taskStatus}
             onChange={(event) => setWorkspace((current) => ({ ...current, taskStatus: event.target.value as ProjectViewState['taskStatus'], taskPage: 1 }))} aria-label="筛选生成状态">
             <option value="all">全部记录</option><option value="running">进行中</option><option value="playable">可播放</option><option value="failed">失败或已取消</option>
@@ -1761,6 +1784,7 @@ export default function ProjectDetailPage() {
             onChange={(event) => setWorkspace((current) => ({ ...current, taskSort: event.target.value as ProjectViewState['taskSort'], taskPage: 1 }))} aria-label="排序生成记录">
             <option value="newest">最近生成</option><option value="oldest">最早生成</option>
           </select>
+          </ProjectFilters>
         </div>
         {tasks.length === 0 ? (
           <p className="text-gray">{workspace.taskSearch || workspace.taskStatus !== 'all' ? '没有符合条件的生成记录。' : '暂无生成记录。'}</p>
@@ -1775,24 +1799,25 @@ export default function ProjectDetailPage() {
                 ? enhanceWorkspaceHref(returnTo, task.id) : null;
               return (
                 <article id={`task-${task.id}`} key={task.id} className={styles.taskCard}>
+                  <div className={styles.taskMedia}>
                   <TaskVideoThumbnail taskId={task.id} thumbnailUrl={task.thumbnail_url} status={task.local_status}
                     deliveryStage={task.delivery_stage} previewAvailable={task.preview_available} stableDownloadReady={task.stable_download_ready}
-                    retryAfterMs={task.retry_after_ms} provider={task.provider} generationMode={task.generation_mode} size="medium" href={detailHref} />
+                    retryAfterMs={task.retry_after_ms} provider={task.provider} generationMode={task.generation_mode} size="card" href={task.playable_available ? null : detailHref} />
+                  {task.playable_available && <button className={styles.playMedia} type="button" title="播放视频" aria-label="播放视频" onClick={() => setActivePreviewTask(task)}><Play size={28} /></button>}
+                  <span className={styles.taskStatus}>{projectTaskStatusLabel(task)}</span>
+                  </div>
                   <div style={{ minWidth: 0 }}>
-                    <div className="flex items-center" style={{ gap: 10, flexWrap: 'wrap' }}>
-                      <span className="video-card-status">{projectTaskStatusLabel(task)}</span>
-                      <UserIdentityBadge user={taskOwnerUser(task)} size="sm" />
-                      <RelativeTime value={task.created_at} />
-                    </div>
                     <Link className={`link ${styles.taskPrompt}`} href={detailHref} title={task.prompt || task.id}><strong>{task.prompt || task.id}</strong></Link>
-                    <p className="text-gray text-sm mt-2">{[task.model || task.provider, task.ratio, task.duration ? `${task.duration} 秒` : null, task.resolution].filter(Boolean).join(' · ') || '生成参数待同步'}</p>
-                    <div className="flex items-center mt-2" style={{ gap: 14, flexWrap: 'wrap' }}>
-                      {task.playable_available && <button type="button" className="link" onClick={() => setActivePreviewTask(task)}><Eye size={15} aria-hidden="true" /> 播放</button>}
-                      {task.stable_download_ready && task.download_url && <a className="link" href={task.download_url}>下载</a>}
-                      {reuseHref && <Link className="link" href={reuseHref}>复用参数</Link>}
+                    <p className={`text-gray text-sm mt-2 ${styles.taskSpecs}`} title={task.model || task.provider}>{[seedanceVideoModelLabel(task.model || task.provider), task.ratio, task.duration ? `${task.duration} 秒` : null, task.resolution].filter(Boolean).join(' · ') || '生成参数待同步'}</p>
+                    <div className={styles.cardMeta}><UserIdentityBadge user={taskOwnerUser(task)} size="sm" /><RelativeTime value={task.created_at} /></div>
+                    <div className={styles.taskActions}>
+                      {task.stable_download_ready && task.download_url && <a className="link" href={task.download_url}><Download size={15} /> 下载</a>}
+                      {reuseHref && <Link className="link" href={reuseHref}><Repeat2 size={15} /> 复用</Link>}
+                      <TaskActionsMenu>
                       {enhanceHref && <Link className="link" href={enhanceHref}>视频增强</Link>}
                       {isEnhanceTask(task) && <Link className="link" href={enhanceWorkspaceHref(returnTo)}>重新选择源视频</Link>}
                       <Link className="link" href={detailHref}>查看详情</Link>
+                      </TaskActionsMenu>
                     </div>
                   </div>
                 </article>
@@ -1808,12 +1833,15 @@ export default function ProjectDetailPage() {
       {workspace.section === 'albums' && <section className={styles.section}>
         <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
           <div><h2 className="section-title mb-0">参考图集</h2><p className="text-gray text-sm mt-2">保存和复用项目参考素材。</p></div>
-          <Link className="btn btn-secondary" href={`/collections?scope=project&project_id=${encodeURIComponent(project.id)}&return_to=${encodeURIComponent(projectReturnTo)}`}>{permissions.can_manage_assets && project.status === 'active' ? '新建项目图集 / 查看图集' : '查看图集'}</Link>
+          {permissions.can_manage_assets && project.status === 'active'
+            ? <ReferenceAlbumsClient key={identityKey} embeddedProjectId={project.id} onCreated={() => void loadProject()} />
+            : <Link className="link" href={`/collections?scope=project&project_id=${encodeURIComponent(project.id)}&return_to=${encodeURIComponent(projectReturnTo)}`}>查看图集</Link>}
         </div>
         {referenceAlbums.length === 0 ? <p className="text-gray">暂无项目图集</p> : (
           <div className={styles.albumGrid}>
             {referenceAlbums.map((album) => <article key={album.id} className={styles.album}>
               <Link href={`/collections/${encodeURIComponent(album.id)}?return_to=${encodeURIComponent(projectReturnTo)}`}>
+                <ProjectAlbumCover urls={album.thumbnail_urls || []} />
                 <strong>{album.name}</strong><span>{album.description || '项目参考图集'}</span>
                 <span>{album.image_count} 张 · {statusLabel(album.status)}</span>
               </Link>
@@ -1827,7 +1855,8 @@ export default function ProjectDetailPage() {
           onPageChange={(page) => setWorkspace((current) => ({ ...current, albumPage: page }))} label="个图集" />}
       </section>}
 
-      {workspace.section === 'members' && <>
+      {workspace.section === 'members' && <div className={styles.memberLayout}>
+      <div className={styles.memberMain}>
       <section className={styles.section}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="section-title mb-0">项目成员</h2>
@@ -1897,6 +1926,9 @@ export default function ProjectDetailPage() {
         </details>
       )}
 
+      </div><aside className={styles.memberAside}>
+      <h2 className="section-title">项目信息</h2>
+      <p>{projectDisplayName(project)}</p><p className="text-gray text-sm">{project.description || '暂无项目说明'}</p>
       {permissions.can_manage_project && (
         <details className={styles.disclosure} open={settingsOpen} onToggle={(event) => setSettingsOpen(event.currentTarget.open)}>
           <summary>项目设置</summary>
@@ -1963,7 +1995,7 @@ export default function ProjectDetailPage() {
         </details>
       )}
       <button className="link" type="button" onClick={() => setWorkspace(DEFAULT_PROJECT_VIEW)}>重置查看设置</button>
-      </>}
+      </aside></div>}
 
       {activePreviewTask && <MediaPreview
         src={activePreviewTask.play_url || `/api/video/play/${encodeURIComponent(activePreviewTask.id)}`}

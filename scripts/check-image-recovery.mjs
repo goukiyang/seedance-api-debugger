@@ -109,6 +109,17 @@ const usageSources = [usageGate, 'scripts/admin-usage-migration-engineering.py',
   'ops/sd2-usage-attribution-migrate.py', 'ops/sd2-admin-usage-public-proof.mjs',
   'ops/sd2-usage-role-start.mjs', 'scripts/canvas-role-coordinator.ts'];
 const publicUsageFixtures = [
+  { file: 'scripts/projects-design-alignment-engineering.mjs', schema: 'projects-design-alignment-engineering.v1',
+    databaseFlag: 'applicationDatabaseOpened', sources: [
+      'scripts/projects-design-alignment-engineering.mjs', 'src/lib/projects/album-projection.ts',
+      'src/lib/reference-albums/permissions.ts', 'src/app/api/projects/[id]/route.ts',
+      'src/app/collections/ReferenceAlbumsClient.tsx', 'src/app/collections/ReferenceAlbumsClient.module.css',
+      'src/app/projects/page.tsx', 'src/app/projects/[id]/page.tsx', 'src/app/projects/Projects.module.css',
+      'src/components/projects/ProjectFilters.tsx', 'src/components/usage/UsageWorkspace.tsx',
+      'src/components/usage/UsageWorkspace.module.css', 'src/app/tasks/[id]/TaskResult.module.css',
+      'src/app/tasks/[id]/page.tsx', 'src/components/AppShell.tsx', 'src/app/globals.css',
+      'src/lib/release.ts', 'src/components/ReleaseNotice.tsx',
+    ] },
   { file: 'scripts/studio-restored-settings-engineering.ts', schema: 'studio-restored-settings-engineering.v1',
     databaseFlag: 'applicationDatabaseOpened', sources: [
       'src/lib/image-studio/restored-settings.ts', 'src/lib/image-studio/tasks.ts',

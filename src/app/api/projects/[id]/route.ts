@@ -9,6 +9,7 @@ import { getVideoCardSummaryMap, serializeVideoCardSummary } from '@/lib/video-c
 import { getVideoCardArchiveAnomalies } from '@/lib/video-cards/suggestions';
 import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 import { visibleProviderErrorMessage } from '@/lib/provider/error-message';
+import { readProjectAlbumPage } from '@/lib/projects/album-projection';
 
 export const dynamic = 'force-dynamic';
 
@@ -229,13 +230,9 @@ async function getProjectSection(
     const total = await prisma.referenceAlbum.count({ where });
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     const page = Math.min(requestedPage, totalPages);
-    const pagedAlbums = await prisma.referenceAlbum.findMany({
-      where, orderBy: [{ updated_at: 'desc' }, { id: 'desc' }], skip: (page - 1) * pageSize, take: pageSize,
-      select: { id: true, name: true, description: true, album_type: true, visibility: true, status: true, updated_at: true,
-        _count: { select: { images: { where: { status: 'active' } } } } },
-    });
+    const pagedAlbums = await readProjectAlbumPage(user, projectId, (page - 1) * pageSize);
     return NextResponse.json({ ...common,
-      reference_albums: pagedAlbums.map((album) => ({ ...album, image_count: album._count.images })),
+      reference_albums: pagedAlbums,
       pagination: { page, page_size: pageSize, total, total_pages: totalPages },
     });
   }
@@ -466,21 +463,7 @@ export async function GET(
       },
     });
 
-    const referenceAlbums = await prisma.referenceAlbum.findMany({
-      where: { project_id: params.id, status: { not: 'deleted' } },
-      orderBy: { updated_at: 'desc' },
-      take: 20,
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        album_type: true,
-        visibility: true,
-        status: true,
-        updated_at: true,
-        _count: { select: { images: { where: { status: 'active' } } } },
-      },
-    });
+    const referenceAlbums = await readProjectAlbumPage(user, params.id);
     const taskVisibilityWhere = user.role === 'admin'
       ? { project_id: params.id }
       : { project_id: params.id, retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] } };
@@ -787,10 +770,7 @@ export async function GET(
 
     return NextResponse.json({
       project: project ? { ...project, status_version: projectStatusVersion(project) } : null,
-      reference_albums: referenceAlbums.map((album) => ({
-        ...album,
-        image_count: album._count.images,
-      })),
+      reference_albums: referenceAlbums,
       video_cards: videoCards.map((card) => {
         const summary = videoCardSummaryMap.get(card.id);
         return {

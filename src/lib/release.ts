@@ -2,7 +2,7 @@ import packageInfo from '../../package.json';
 import { PRICING_ADMIN_WRITES_ENABLED } from './pricing/build-mode';
 
 export const release = { version: packageInfo.version, channel: 'production', summary: PRICING_ADMIN_WRITES_ENABLED
-  ? '修复“我的项目”和项目管理列表读取失败，减少列表打开时的等待；项目删除保护保持不变。'
+  ? '项目与生成记录改为大封面，图集支持就地创建；费用表、本人用量趋势和手机布局更清楚，任务视频完整显示。'
   : '原任务、上传和高清结果保留。视频批次可查看和停止未开始项，暂不开始新批次；API质量设置和费率暂时只读，已保存配置不会自动改价。' };
 
 function numericOrder(a: string, b: string) {

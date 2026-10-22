@@ -2258,19 +2258,9 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                   </div>
                 )}
               </div>
-              <div className="task-decision-note">
-                {isSubmissionUnknown ? '原提交还未确认，只查询原请求。' : task.local_status === 'failed'
-                  ? '这次任务未产出可用视频，优先复用输入调整。'
-                  : hasPublicVideo
-                    ? '对象存储链接已就绪，可以直接播放和下载。'
-                    : isPublicVideoPreparing
-                      ? '生成已完成，系统正在准备可流畅播放的视频链接。'
-                      : isSlowFallbackVideo
-                        ? '对象存储未配置或不可用，当前使用慢速备用播放。'
-                        : hasFallbackVideo
-                          ? '当前只有备用视频链接，建议刷新结果等待转存。'
-                          : '还没有可保存的视频链接，先刷新结果。'}
-              </div>
+              {(isSubmissionUnknown || task.local_status === 'failed') && <div className="task-decision-note">
+                {isSubmissionUnknown ? '原提交还未确认，只查询原请求。' : '这次任务未产出可用视频，优先复用输入调整。'}
+              </div>}
             </aside>
           </div>
 
