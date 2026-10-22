@@ -1349,15 +1349,12 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (multiviewGeneration) {
-    try {
-      if (trustedMultiviewRetry) await readMultiviewRotationPresetVersion(multiviewGeneration.presetVersion);
-      else await assertMultiviewGenerationSettings(user, multiviewGeneration);
-    }
-    catch (error) {
-      if (error instanceof MultiviewPresetError || error instanceof MultiviewSettingsError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
-      throw error;
-    }
+  if (Boolean(multiviewGeneration)) {
+    // This confidentiality-compatible recovery build retains original-key
+    // lookups above, but cannot start a new protected generation or retry.
+    return NextResponse.json({ error: 'MULTIVIEW_CREATE_TEMPORARILY_UNAVAILABLE',
+      message: '3D多视图暂不开始新生成，原任务和作品仍保留；请稍后重试。',
+    }, { status: 503, headers: privateNoStore() });
   }
 
   // Existing accepted requests return above without recalculating today's quote.
