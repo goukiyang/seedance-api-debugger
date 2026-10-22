@@ -11,7 +11,7 @@
     "template": "release-multiview-private-r01",
     "wrapper": "run-multiview-private-r01.mjs",
     "controllerCount": 54,
-    "controllerSetSha256": "4515d1e063fc29d74bdd51c6b3b8bf1ed54a90a393c94869a32093dd2f848f03",
+    "controllerSetSha256": "5b13e12b78828deaf4b2b738cce15b57e5f0908f6faac59e681b5a54a88309d9",
     "wrapperSha256": "8b4f085d8181d026d8daab84f61e0428b24ab16eb20f5eae52924a94f7df2830",
     "changed": [
       "candidate-inputs.mjs",
@@ -23,6 +23,7 @@
       "cutover-driver.mjs",
       "cutover-safety-engineering.mjs",
       "cutover-safety.mjs",
+      "guard-recovery-engineering.mjs",
       "guard-recovery.mjs",
       "hd-closed-cache-engineering.mjs",
       "hd-storage-preflight.mjs",
